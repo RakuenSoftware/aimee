@@ -18,6 +18,62 @@ static int g_get_seen = 0;
 static int g_route_case = 0;
 static int g_search_expect_all = 0;
 static char g_push_root[512];
+static int64_t g_dependency_now_ms = 100000;
+static int g_mtls_enabled;
+static int g_mtls_status;
+static const char *g_mtls_response;
+static const char *g_mtls_expected_content_type;
+static int g_mtls_calls;
+
+int agent_http_post_content_type(const char *url, const char *auth_header, const char *content_type,
+                                 const char *body, char **response_buf, int timeout_ms,
+                                 const char *extra_headers)
+{
+   (void)url;
+   (void)auth_header;
+   (void)content_type;
+   (void)body;
+   (void)response_buf;
+   (void)timeout_ms;
+   (void)extra_headers;
+   assert(!"mTLS raw POST must not fall through to HTTP");
+   return -1;
+}
+
+int kb_client_mtls_configured(void)
+{
+   return g_mtls_enabled;
+}
+
+char *kb_client_mtls_request_timeout_with_type(const char *method, const char *path,
+                                               const char *body, const char *content_type,
+                                               int timeout_ms, int *status_out)
+{
+   assert(g_mtls_enabled);
+   assert(method && path && timeout_ms > 0);
+   if (strcmp(method, "GET") == 0)
+      assert(body == NULL);
+   if (g_mtls_expected_content_type)
+      assert(content_type && strcmp(content_type, g_mtls_expected_content_type) == 0);
+   else
+      assert(content_type == NULL);
+   g_mtls_calls++;
+   if (status_out)
+      *status_out = g_mtls_status;
+   return g_mtls_response ? strdup(g_mtls_response) : NULL;
+}
+
+char *kb_client_mtls_request_timeout(const char *method, const char *path, const char *body,
+                                     int timeout_ms, int *status_out)
+{
+   return kb_client_mtls_request_timeout_with_type(method, path, body, NULL, timeout_ms,
+                                                   status_out);
+}
+
+static int64_t dependency_test_clock(void)
+{
+   return g_dependency_now_ms;
+}
 
 static int health_get_handler(const char *url, const char *extra_headers, char **response_buf,
                               int timeout_ms)
@@ -124,6 +180,59 @@ static int rejecting_post_handler(const char *url, const char *auth_header, cons
    g_post_seen++;
    if (response_buf)
       *response_buf = strdup("{\"error\":\"unauthorized\"}");
+   return 401;
+}
+
+static int outage_post_handler(const char *url, const char *auth_header, const char *body,
+                               char **response_buf, int timeout_ms, const char *extra_headers)
+{
+   (void)url;
+   (void)auth_header;
+   (void)body;
+   (void)response_buf;
+   (void)timeout_ms;
+   (void)extra_headers;
+   g_post_seen++;
+   return -1;
+}
+
+static int typed_result_get_handler(const char *url, const char *extra_headers, char **response_buf,
+                                    int timeout_ms)
+{
+   (void)extra_headers;
+   (void)timeout_ms;
+   assert(url);
+   assert(strcmp(url, "http://127.0.0.1:4010/v1/typed-result") == 0);
+   g_get_seen++;
+   if (g_route_case == 40)
+   {
+      *response_buf = strdup("{\"status\":\"ok\",\"facts\":[{\"id\":1}]}");
+      return 200;
+   }
+   if (g_route_case == 41)
+   {
+      *response_buf = strdup("{\"status\":\"ok\",\"facts\":[]}");
+      return 200;
+   }
+   if (g_route_case == 42)
+   {
+      *response_buf = strdup("{\"status\":\"ok\",\"no_answer\":true,\"citation_ids\":[]}");
+      return 200;
+   }
+   if (g_route_case == 43)
+   {
+      *response_buf =
+          strdup("{\"status\":\"stale\",\"observed_generation\":6,\"current_generation\":7,"
+                 "\"observed_dimension\":2560,\"current_dimension\":1024}");
+      return 409;
+   }
+   if (g_route_case == 44)
+   {
+      *response_buf = strdup("{\"status\":\"unavailable\",\"dependency\":\"embedder\"}");
+      return 503;
+   }
+   assert(g_route_case == 45);
+   *response_buf = strdup("{\"status\":\"unauthorized\"}");
    return 401;
 }
 
@@ -295,6 +404,12 @@ static int index_get_handler(const char *url, const char *extra_headers, char **
                                 "\"root\":\"/repo/aimee\",\"scanned_at\":\"2026-05-26 00:00:00\"}],"
                                 "\"next_cursor\":null}");
    }
+   else if (g_route_case == 40)
+   {
+      assert(strcmp(url, "http://127.0.0.1:4010/v1/code/projects?max_results=2") == 0);
+      if (response_buf)
+         *response_buf = strdup("{\"status\":\"ok\"}");
+   }
    else if (g_route_case == 13 || g_route_case == 14 || g_route_case == 38)
    {
       assert(strstr(url, "http://127.0.0.1:4010/v1/code/blast-radius?project=aimee&file_path=") ==
@@ -377,6 +492,15 @@ static int index_get_handler(const char *url, const char *extra_headers, char **
                          "max_results=2&scope=all&project=aimee%20core%2Fkb%3F") == 0);
       if (response_buf)
          *response_buf = strdup("{\"hits\":[]}");
+   }
+   else if (g_route_case == 39)
+   {
+      assert(strcmp(url, "http://127.0.0.1:4010/v1/code/context?query=split%20kb%2Findex%3F&"
+                         "max_results=4&project=aimee%20core%2Fkb%3F&symbol=target%2Ffn%3F") == 0);
+      if (response_buf)
+         *response_buf = strdup("{\"status\":\"ok\",\"project\":\"aimee core/kb?\","
+                                "\"generation\":7,\"freshness\":\"current\","
+                                "\"resolved\":true,\"results\":[]}");
    }
    else
    {
@@ -559,13 +683,122 @@ static void test_search_v1_reports_http_status(void)
 
    char *resp = kb_client_search_json_ex("aimee", "split kb", NULL, 7, "json", NULL);
    assert(resp);
-   assert(strstr(resp, "\"status\":\"error\"") != NULL);
+   assert(strstr(resp, "\"status\":\"unauthorized\"") != NULL);
+   assert(strstr(resp, "\"retryable\":false") != NULL);
    assert(strstr(resp, "HTTP 401") != NULL);
+   assert(kb_client_last_result_status() == KB_CLIENT_RESULT_UNAUTHORIZED);
    free(resp);
 
    assert(g_post_seen == 1);
    unsetenv("AIMEE_KB_API_URL");
    mock_agent_http_reset();
+}
+
+static void test_outage_is_typed_bounded_and_recovers(void)
+{
+   g_post_seen = 0;
+   g_dependency_now_ms = 100000;
+   kb_client_dependency_reset_for_tests();
+   kb_client_dependency_set_clock_for_tests(dependency_test_clock);
+   mock_agent_http_reset();
+   mock_agent_http_set_post_handler(outage_post_handler);
+   assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010", 1) == 0);
+   assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", "test-token") == 0);
+
+   for (int i = 0; i < 4; i++)
+   {
+      char *resp = kb_client_search_json_ex("aimee", "split kb", "embed --json", 7, "json", "rrf");
+      assert(resp && strstr(resp, "\"status\":\"unavailable\"") != NULL);
+      assert(strstr(resp, "\"retryable\":true") != NULL);
+      cJSON *typed = cJSON_Parse(resp);
+      cJSON *retry_after = typed ? cJSON_GetObjectItemCaseSensitive(typed, "retry_after_ms") : NULL;
+      assert(cJSON_IsNumber(retry_after));
+      assert(retry_after->valuedouble >= 1000 && retry_after->valuedouble <= 30000);
+      cJSON_Delete(typed);
+      free(resp);
+   }
+   /* The fourth client call is breaker-suppressed; only three reached HTTP. */
+   assert(g_post_seen == 3);
+   assert(kb_client_last_result_status() == KB_CLIENT_RESULT_UNAVAILABLE);
+   kb_client_dependency_health_t health;
+   kb_client_dependency_health(&health);
+   assert(strcmp(health.state, "open") == 0);
+   assert(health.retry_after_ms >= 1000 && health.retry_after_ms <= 1250);
+   assert(health.suppressed_calls == 1);
+
+   g_dependency_now_ms += health.retry_after_ms;
+   mock_agent_http_set_post_handler(search_post_handler);
+   char *recovered =
+       kb_client_search_json_ex("aimee", "split kb", "embed --json", 7, "json", "rrf");
+   assert(recovered && strstr(recovered, "\"status\":\"ok\"") != NULL);
+   free(recovered);
+   assert(g_post_seen == 4);
+   assert(kb_client_last_result_status() == KB_CLIENT_RESULT_OK);
+   kb_client_dependency_health(&health);
+   assert(strcmp(health.state, "closed") == 0);
+
+   kb_client_dependency_set_clock_for_tests(NULL);
+   kb_client_dependency_reset_for_tests();
+   unsetenv("AIMEE_KB_API_URL");
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
+   mock_agent_http_reset();
+}
+
+static void test_exact_result_statuses(void)
+{
+   g_get_seen = 0;
+   kb_client_dependency_reset_for_tests();
+   mock_agent_http_reset();
+   mock_agent_http_set_get_handler(typed_result_get_handler);
+   assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010", 1) == 0);
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
+
+   const kb_client_result_status_t expected[] = {
+       KB_CLIENT_RESULT_OK,    KB_CLIENT_RESULT_EMPTY,       KB_CLIENT_RESULT_ABSTAINED,
+       KB_CLIENT_RESULT_STALE, KB_CLIENT_RESULT_UNAVAILABLE, KB_CLIENT_RESULT_UNAUTHORIZED,
+   };
+   for (int i = 0; i < 6; i++)
+   {
+      g_route_case = 40 + i;
+      int http_status = 0;
+      char *json = kb_client_v1_get_json("/v1/typed-result", 100, &http_status);
+      if (i < 3)
+         assert(json != NULL && http_status == 200);
+      else
+         assert(json == NULL);
+      free(json);
+      assert(kb_client_last_result_status() == expected[i]);
+      assert(strcmp(kb_client_result_status_name(expected[i]),
+                    (const char *[]){"ok", "empty", "abstained", "stale", "unavailable",
+                                     "unauthorized"}[i]) == 0);
+      if (i == 3 || i == 4)
+      {
+         char *typed = kb_client_last_result_json("typed result");
+         assert(typed);
+         if (i == 3)
+         {
+            assert(strstr(typed, "\"observed_generation\":6") != NULL);
+            assert(strstr(typed, "\"current_generation\":7") != NULL);
+            assert(strstr(typed, "\"observed_dimension\":2560") != NULL);
+            assert(strstr(typed, "\"current_dimension\":1024") != NULL);
+         }
+         else
+            assert(strstr(typed, "\"dependency\":\"embedder\"") != NULL);
+         free(typed);
+      }
+   }
+   assert(g_get_seen == 6);
+
+   /* An embedder 503 is a typed internal dependency outage, not evidence that
+    * the reachable KB transport itself should open. */
+   kb_client_dependency_health_t health;
+   kb_client_dependency_health(&health);
+   assert(strcmp(health.state, "closed") == 0 && health.failure_streak == 0);
+
+   unsetenv("AIMEE_KB_API_URL");
+   mock_agent_http_reset();
+   kb_client_dependency_reset_for_tests();
+   g_route_case = 0;
 }
 
 static void test_health_uses_v1_api_when_configured(void)
@@ -860,6 +1093,9 @@ static void test_index_reads_use_v1_api_when_configured(void)
    assert(strcmp(projects[0].root, "/repo/aimee") == 0);
    assert(strcmp(projects[0].scanned_at, "2026-05-26 00:00:00") == 0);
 
+   g_route_case = 40;
+   assert(kb_client_index_list(projects, 2) == -1);
+
    g_route_case = 13;
    blast_radius_t br;
    assert(kb_client_index_blast_radius("aimee", "src/main.c", &br) == 0);
@@ -930,10 +1166,76 @@ static void test_index_reads_use_v1_api_when_configured(void)
    assert(kb_client_index_find_callers_scoped("aimee core/kb?", 1, "target/fn?", caller_hits, 2) ==
           0);
 
-   assert(g_get_seen == 15);
+   g_route_case = 39;
+   int context_status = 0;
+   char *context =
+       kb_client_code_context("split kb/index?", "target/fn?", "aimee core/kb?", &context_status);
+   assert(context && context_status == 200);
+   assert(strstr(context, "\"project\":\"aimee core/kb?\"") != NULL);
+   free(context);
+
+   assert(g_get_seen == 17);
    unsetenv("AIMEE_KB_API_URL");
    mock_agent_http_reset();
    g_route_case = 0;
+}
+
+static void test_mtls_non_2xx_is_not_returned_as_valid_json(void)
+{
+   unsetenv("AIMEE_KB_API_URL");
+   kb_client_dependency_reset_for_tests();
+   g_mtls_enabled = 1;
+   g_mtls_status = 503;
+   g_mtls_response = "{\"status\":\"unavailable\",\"dependency\":\"kb\",\"retryable\":true}";
+
+   project_info_t projects[2];
+   assert(kb_client_index_list(projects, 2) == -1);
+   assert(kb_client_last_result_status() == KB_CLIENT_RESULT_UNAVAILABLE);
+
+   g_mtls_status = 403;
+   g_mtls_response = "{\"status\":\"unauthorized\",\"retryable\":false}";
+   cJSON *request = cJSON_CreateObject();
+   assert(request != NULL);
+   int status = 0;
+   assert(kb_client_v1_post_json("/v1/search", request, 5000, &status) == NULL);
+   cJSON_Delete(request);
+   assert(status == 403);
+   assert(kb_client_last_result_status() == KB_CLIENT_RESULT_UNAUTHORIZED);
+
+   g_mtls_response = NULL;
+   g_mtls_status = 0;
+   g_mtls_enabled = 0;
+   kb_client_dependency_reset_for_tests();
+}
+
+static void test_mtls_raw_post_preserves_content_type_and_status(void)
+{
+   unsetenv("AIMEE_KB_API_URL");
+   kb_client_dependency_reset_for_tests();
+   g_mtls_enabled = 1;
+   g_mtls_calls = 0;
+   g_mtls_expected_content_type = "Content-Type: multipart/form-data; boundary=unit";
+   g_mtls_status = 200;
+   g_mtls_response = "{\"status\":\"ok\"}";
+
+   int status = 0;
+   char *response = kb_client_v1_post_body_with_type("/v1/docs", "--unit--",
+                                                     g_mtls_expected_content_type, 5000, &status);
+   assert(response && status == 200 && g_mtls_calls == 1);
+   free(response);
+
+   g_mtls_status = 503;
+   g_mtls_response = "{\"status\":\"unavailable\",\"dependency\":\"kb\",\"retryable\":true}";
+   response = kb_client_v1_post_body_with_type("/v1/docs", "--unit--", g_mtls_expected_content_type,
+                                               5000, &status);
+   assert(response == NULL && status == 503 && g_mtls_calls == 2);
+   assert(kb_client_last_result_status() == KB_CLIENT_RESULT_UNAVAILABLE);
+
+   g_mtls_expected_content_type = NULL;
+   g_mtls_response = NULL;
+   g_mtls_status = 0;
+   g_mtls_enabled = 0;
+   kb_client_dependency_reset_for_tests();
 }
 
 static void test_index_scan_uses_v1_api_when_configured(void)
@@ -964,6 +1266,8 @@ int main(void)
    test_status_uses_v1_api_when_configured();
    test_search_uses_v1_api_when_configured();
    test_search_v1_reports_http_status();
+   test_outage_is_typed_bounded_and_recovers();
+   test_exact_result_statuses();
    test_maintenance_uses_v1_api_when_configured();
    test_build_update_ingest_use_v1_api_when_configured();
    test_queue_status_uses_v1_api_when_configured();
@@ -973,6 +1277,8 @@ int main(void)
    test_intelligence_readiness_uses_v1_api_when_configured();
    test_action_wrappers_use_v1_api_when_configured();
    test_index_reads_use_v1_api_when_configured();
+   test_mtls_non_2xx_is_not_returned_as_valid_json();
+   test_mtls_raw_post_preserves_content_type_and_status();
    test_index_scan_uses_v1_api_when_configured();
    printf("test_kb_client_search: ok\n");
    return 0;

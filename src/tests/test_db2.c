@@ -121,11 +121,10 @@ int db2_embedding_model_record_or_check(void *pg_conn, const char *model_id, con
    return 0;
 }
 
-int db2_reranker_model_record(void *pg_conn, const char *model_id, const char *contract,
-                              char *errbuf, size_t errlen)
+int db2_embedder_serving_record_or_check(void *pg_conn, const char *serving_id, char *errbuf,
+                                         size_t errlen)
 {
-   (void)model_id;
-   (void)contract;
+   (void)serving_id;
    (void)errbuf;
    (void)errlen;
    assert(pg_conn == &g_fake_conn);

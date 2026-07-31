@@ -38,17 +38,17 @@
 #include "vault_service.h"          /* VAULT_SERVER_PRINCIPAL (rotation target) */
 #include "vault_env_bootstrap.h"    /* first-boot credential env -> Vault */
 #include "vault_config_bootstrap.h" /* legacy config credential -> Vault */
-#include "runtime_secret.h"         /* wipe Vault-sourced runtime cache at exit */
-#include "vault_audit_bridge.h"     /* route vault credential-access events onto the audit bus */
-#include "sandbox_audit_bridge.h"   /* route sandbox degraded-isolation events onto the audit bus */
-#include "memory_audit_bridge.h"    /* route server-side memory mutations onto the audit bus */
+#include "vault_bootstrap_privilege.h"
+#include "runtime_secret.h"       /* wipe Vault-sourced runtime cache at exit */
+#include "vault_audit_bridge.h"   /* route vault credential-access events onto the audit bus */
+#include "sandbox_audit_bridge.h" /* route sandbox degraded-isolation events onto the audit bus */
+#include "memory_audit_bridge.h"  /* route server-side memory mutations onto the audit bus */
 #include "tool_completion_audit_bridge.h" /* route tool-dispatch outcomes onto the audit bus */
 #include <aimee/audit/audit_replay.h> /* --audit-replay: inspect a governed-action capture file */
 #include <signal.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/stat.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -430,9 +430,37 @@ int main(int argc, char **argv)
     * first-boot credential inputs before launching any long-lived process. */
    if (argc >= 2 && strcmp(argv[1], "--bootstrap-vault-env") == 0)
    {
+      const char *drop_user = NULL;
+      if (vault_bootstrap_parse_args(argc, argv, &drop_user) != 0)
+      {
+         fprintf(stderr, "aimee-server: invalid Vault bootstrap arguments\n");
+         return 1;
+      }
+      if (vault_bootstrap_run_as(drop_user) != 0)
+      {
+         fprintf(stderr, "aimee-server: Vault bootstrap privilege drop failed\n");
+         return 1;
+      }
       if (vault_env_bootstrap_init() < 0 || server_vault_bootstrap_prepare() < 0 ||
           vault_config_bootstrap_init() < 0)
          return 1;
+      runtime_secret_clear();
+      return 0;
+   }
+
+   /* Docker Compose bootstrap helper: credentials arrive on a pipe as
+    * NUL-delimited environment records, so no value is retained in container
+    * Config.Env. This process is one-shot and exits immediately after sealing. */
+   if (argc == 2 && strcmp(argv[1], "--bootstrap-vault-stdin") == 0)
+   {
+      if (vault_env_bootstrap_init() < 0 || server_vault_bootstrap_prepare() < 0 ||
+          vault_env_import_stream(stdin) < 0 || vault_env_bootstrap_init() < 0 ||
+          server_vault_bootstrap_prepare() < 0 || vault_config_bootstrap_init() < 0 ||
+          vault_env_has_credential_environment() != 0)
+      {
+         runtime_secret_clear();
+         return 1;
+      }
       runtime_secret_clear();
       return 0;
    }

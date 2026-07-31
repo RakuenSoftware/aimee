@@ -740,34 +740,63 @@ int db2_embedding_model_record_or_check(void *conn, const char *model_id, const 
    return -1;
 }
 
-/* unified-llm-container §2: record the RERANKER identity + scoring contract. The
- * reranker writes no corpus vectors and there is no persisted score cache, so a
- * swap is safe — this is record-only (drift observability), never a refusal. On a
- * change it refreshes the recorded value (a future score cache would key its
- * invalidation off this). model_id NULL/empty -> no-op. Returns 0 / -1 (DB err). */
-int db2_reranker_model_record(void *conn, const char *model_id, const char *contract, char *errbuf,
-                              size_t errlen)
+/* Record/check the embedder's VECTOR-SPACE identity (the gateway's /health
+ * serving_id: model + pooling + prefix pair, digested).
+ *
+ * The dim guard and the model-id guard both miss the two failures that actually
+ * happened here. Flipping pooling from `last` to `mean`, and adopting the card's
+ * query/document prefixes, each change every vector while the dim and the model name
+ * stay put: no error, right width, right name, different space, collapsed recall. This
+ * is the guard for that class.
+ *
+ *   - serving_id NULL/empty -> no-op (0): an endpoint that reports no identity (a
+ *     legacy embedder, or a gateway predating the field) must keep working.
+ *   - nothing recorded -> record and accept. A corpus embedded before this guard
+ *     existed cannot be distinguished from a fresh one, so it adopts the current id;
+ *     the drift it could not have detected is the operator's to resolve (the cutover
+ *     runbook says re-embed).
+ *   - recorded == serving_id -> match.
+ *   - recorded != serving_id -> REFUSE. There is no compat list: unlike a model swap,
+ *     where cosine agreement can be measured and admitted, a pooling or prefix change
+ *     is definitionally a different space.
+ */
+int db2_embedder_serving_record_or_check(void *conn, const char *serving_id, char *errbuf,
+                                         size_t errlen)
 {
    if (!conn)
       return -1;
-   if (!model_id || !*model_id)
-      return 0;
-   const char *want_contract = contract ? contract : "";
-   /* Skip the writes when the recorded identity already matches, so a steady-state
-    * restart incurs no redundant kb_meta writes (mirrors the embedder short-circuit). */
-   char rec_id[160] = "", rec_contract[96] = "";
-   if (kb_meta_get(conn, "schema_reranker_model_id", rec_id, sizeof(rec_id)) == 0 &&
-       kb_meta_get(conn, "schema_reranker_contract", rec_contract, sizeof(rec_contract)) == 0 &&
-       strcmp(rec_id, model_id) == 0 && strcmp(rec_contract, want_contract) == 0)
-      return 0;
-   if (kb_meta_set(conn, "schema_reranker_model_id", model_id) != 0 ||
-       kb_meta_set(conn, "schema_reranker_contract", want_contract) != 0)
+   if (!serving_id || !*serving_id)
+      return 0; /* identity unknown -> no-op (back-compat) */
+
+   char recorded[160] = "";
+   if (kb_meta_get(conn, "schema_embedder_serving_id", recorded, sizeof(recorded)) != 0)
    {
       if (errbuf && errlen)
-         snprintf(errbuf, errlen, "kb_meta write failed for reranker identity");
+         snprintf(errbuf, errlen, "kb_meta read failed for schema_embedder_serving_id");
       return -1;
    }
-   return 0;
+   if (!recorded[0] || strcmp(recorded, serving_id) == 0)
+   {
+      if (!recorded[0] && kb_meta_set(conn, "schema_embedder_serving_id", serving_id) != 0)
+      {
+         if (errbuf && errlen)
+            snprintf(errbuf, errlen, "kb_meta write failed for schema_embedder_serving_id");
+         return -1;
+      }
+      return 0;
+   }
+
+   /* Deliberately does not claim WHICH of model, pooling, prefixes or width changed: the
+    * identity is a digest, so the only honest statement is that the spaces differ. Saying
+    * "even at the same dim" was wrong the first time a width change hit it. */
+   if (errbuf && errlen)
+      snprintf(errbuf, errlen,
+               "embedder serving identity changed: corpus '%s' vs serving '%s'. The model, "
+               "its pooling, its query/document prefixes or its width differ, so the stored "
+               "vectors and new queries are not in the same space. Re-embed: aimee kb "
+               "reembed (docs/retrieval-stack.md).",
+               recorded, serving_id);
+   return -1;
 }
 
 int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t errlen)
@@ -776,12 +805,24 @@ int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t 
       return -1;
 
    /* The DB2 schema declares its halfvec embedding columns with the
-    * __EMBED_DIM__ placeholder so a deployment can run either embedder
-    * (0.6b=1024 or 4b=2560). Substitute the configured dimension here — the one
-    * place the schema is applied to Postgres. An out-of-range value falls back
-    * to the default 0.6b dimension rather than emitting invalid DDL. */
+    * __EMBED_DIM__ placeholder so a deployment can run an embedder of any
+    * supported width. Substitute the configured dimension here — the one place
+    * the schema is applied to Postgres.
+    *
+    * An unusable width is an ERROR, not something to paper over: this layer holds
+    * no default (the width is declared once, in config, and reaches db2 via
+    * db2_set_embedding_dim_default). Silently substituting one here is how a
+    * corpus gets columns sized for an embedder that is not the one running. */
    if (embed_dim <= 0 || embed_dim > EMBED_MAX_DIM)
-      embed_dim = 1024;
+   {
+      if (errbuf && errlen)
+         snprintf(errbuf, errlen,
+                  "embedding dimension %d is unusable (expected 1..%d); the deployment's "
+                  "width was never supplied to the DB2 layer — check that startup calls "
+                  "db2_set_embedding_dim_default(config_embedding_dim_default())",
+                  embed_dim, EMBED_MAX_DIM);
+      return -1;
+   }
    char dimbuf[16];
    snprintf(dimbuf, sizeof(dimbuf), "%d", embed_dim);
 
@@ -797,7 +838,7 @@ int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t 
    if (rc != 0)
       return rc;
    /* §2: record the dim on first apply / refuse a mismatch (kb_meta now exists).
-    * The unified-llm-container §2 model-identity guards (embedder + reranker) run
+    * The unified-llm-container §2 model-identity guard (the embedder) runs
     * in db2_init right after this, where the configured identity globals live —
     * keeping this lower schema layer free of an upward dependency on them. */
    /* schema_version + schema_embedding_dim are recorded by schema.sql itself (so any

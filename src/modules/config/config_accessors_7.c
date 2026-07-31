@@ -18,52 +18,6 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
-int config_set_delegate_sandbox_package_access(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->delegate_sandbox_package_access, sizeof(cfg->delegate_sandbox_package_access),
-               "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_kb_pdf_tier(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->kb_pdf_tier, sizeof(cfg->kb_pdf_tier), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_tsr_command(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->tsr_command, sizeof(cfg->tsr_command), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
 int config_set_kb_pdf_blob_dir(const char *value)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));
@@ -135,22 +89,6 @@ int config_set_memory_rewrite_command(const char *value)
    if (rc == 0)
    {
       snprintf(cfg->memory_rewrite_command, sizeof(cfg->memory_rewrite_command), "%s",
-               value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_rerank_command(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->memory_rerank_command, sizeof(cfg->memory_rerank_command), "%s",
                value ? value : "");
       rc = config_save(cfg);
    }
@@ -614,127 +552,6 @@ int config_set_llm_embed_backend(const char *value)
    if (rc == 0)
    {
       snprintf(cfg->llm_embed_backend, sizeof(cfg->llm_embed_backend), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_llm_embed_host(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->llm_embed_host, sizeof(cfg->llm_embed_host), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_llm_embed_gpu(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->llm_embed_gpu, sizeof(cfg->llm_embed_gpu), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_llm_embed_tier(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->llm_embed_tier, sizeof(cfg->llm_embed_tier), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_llm_rerank_backend(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->llm_rerank_backend, sizeof(cfg->llm_rerank_backend), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_llm_rerank_host(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->llm_rerank_host, sizeof(cfg->llm_rerank_host), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_llm_rerank_gpu(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->llm_rerank_gpu, sizeof(cfg->llm_rerank_gpu), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_llm_rerank_tier(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->llm_rerank_tier, sizeof(cfg->llm_rerank_tier), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_llm_rerank_endpoint(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->llm_rerank_endpoint, sizeof(cfg->llm_rerank_endpoint), "%s",
-               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);

@@ -91,10 +91,8 @@ typedef struct
    double salience;
    double surprise;
    double pagerank;
-   double cross_encoder;  /* raw cross-encoder rerank score (0.0 when disabled/unavailable) */
-   double hybrid_total;   /* hybrid score BEFORE cross-encoder blend, for explain surface */
-   double blended_total;  /* final score AFTER cross-encoder blend (== total when rerank ran) */
-   double rerank_mix;     /* blend weight used (0.0 when rerank did not run) */
+   double hybrid_total;   /* lexical+dense hybrid score, for the explain surface */
+   double blended_total;  /* final score after the post-hybrid passes */
    double graph_score;    /* utility-weighted graph boost contribution */
    double code_proximity; /* code-projection edge proximity score */
    double utility;        /* decayed utility signal from feedback */
@@ -957,7 +955,29 @@ int memory_graph_prune(void);
 int memory_graph_normalize(void);
 
 int memory_embed(int64_t memory_id, const char *command);
-int memory_embed_text(const char *text, const char *command, float *out, int max_dim);
+/* `input_type` declares which side of the embedder this text is (see
+ * embed_input_type_t). It is required rather than defaulted so the compiler forces
+ * every call site to state it — a query silently embedded as a document costs
+ * retrieval quality and raises no error. */
+int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
+                      float *out, int max_dim);
+
+typedef struct
+{
+   char state[16]; /* closed | open | half_open */
+   int available;
+   unsigned failure_streak;
+   unsigned recovery_attempt;
+   int64_t retry_after_ms;
+   int64_t last_success_ms;
+   int64_t last_failure_ms;
+   uint64_t suppressed_calls;
+} memory_embedder_health_t;
+
+void memory_embedder_health(memory_embedder_health_t *out);
+int memory_embedder_last_result_unauthorized(void);
+void memory_embedder_dependency_reset_for_tests(void);
+void memory_embedder_dependency_set_clock_for_tests(int64_t (*now_ms)(void));
 double cosine_similarity(const float *a, const float *b, int dim);
 
 /* Test hooks for the per-recall query-embedding memo (memory_core_helpers.inc).

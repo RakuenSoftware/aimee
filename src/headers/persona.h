@@ -136,6 +136,14 @@ extern "C"
     * reviewer/architect). */
    int persona_is_builtin(const char *name);
 
+   /* 1 if `name` resolves to a real persona: a built-in, or a project/user file.
+    * persona_load() deliberately falls back to the engineer built-in for an
+    * unknown name so callers always hold a usable persona — which means it cannot
+    * tell a caller that the persona it asked for does not exist. Dispatch must
+    * check first, or a typo'd `--persona` silently runs as engineer.
+    * `project_root` may be NULL to skip the project-level lookup. */
+   int persona_exists(const char *project_root, const char *name);
+
 #ifdef __cplusplus
 }
 #endif

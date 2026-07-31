@@ -119,14 +119,6 @@ CFG_KEY_DESC = {
     "wfe_proposals_autoscan_enabled": "Automatically scan watched proposal directories; off requires explicit trigger.fire.",
 
     "llm_embed_backend": "Deploy-time embedding backend: local or external.",
-    "llm_embed_gpu": "Deploy-time GPU selector for the local embedding backend.",
-    "llm_embed_host": "Deploy-time host selector for the local embedding backend.",
-    "llm_embed_tier": "Deploy-time local embedding tier: cpu, small, mid, or large.",
-    "llm_rerank_backend": "Deploy-time reranking backend: local, external, or off.",
-    "llm_rerank_endpoint": "External reranking endpoint used when the rerank backend is external.",
-    "llm_rerank_gpu": "Deploy-time GPU selector for the local reranking backend.",
-    "llm_rerank_host": "Deploy-time host selector for the local reranking backend.",
-    "llm_rerank_tier": "Deploy-time local reranking tier.",
     "llm_synth_backend": "Deploy-time synthesis backend: local, external, or off.",
     "llm_synth_endpoint": "External synthesis endpoint used when the synth backend is external.",
     "llm_synth_gpu": "Deploy-time GPU selector for the local synthesis backend.",
@@ -256,6 +248,9 @@ CFG_KEY_DESC = {
     "ingress_preinject_assembly_budget": "Token budget for ingress context pre-injection.",
     "ingress_preinject_enabled": "Enable `<aimee-context>` pre-injection on ingress "
     "(memory/code preview envelope on primary ingress turns; default on).",
+    "code_context_mode": "Task-conditioned code packet rollout mode: `off` disables packet "
+    "retrieval, `observe` retrieves and validates without changing model-visible bytes, and `on` "
+    "injects a bounded current-project packet on first/new-task turns (default `on`).",
     "ingress_preinject_anthropic_enabled": "Inject the `<aimee-context>` envelope on the "
     "Anthropic-native /v1/messages passthrough too (default off).",
     "ingress_compress_enabled": "Enable ingress envelope compression: span-enrich code hits and "
@@ -275,6 +270,10 @@ CFG_KEY_DESC = {
     "kb_api_http_port": "HTTP port the aimee-kb API listens on.",
     "kb_evidence_emit_enabled": "Emit evidence records from KB ingest.",
     "kb_fusion_mode": "KB retrieval fusion mode: rrf (default), static_alpha, or dynamic_alpha.",
+    "session_worktree_base": "What a new primary session's branch+worktree is cut from. Order: configured -> "
+                              "remote default -> main -> master. Values: remote_default (default), "
+                              "local_default, current (opt-in only, never a fallback), or an explicit "
+                              "ref. Env: AIMEE_SESSION_WORKTREE_BASE.",
     "kb_fusion_static_alpha": "Lexical/dense blend weight (0-1) for the static_alpha fusion mode.",
     "kb_pdf_ingest_enabled": "Route PDF uploads through the structured geometry extractor "
     "(kb_doc_pdf) instead of plain pdftotext (default off).",
@@ -334,10 +333,7 @@ CFG_KEY_DESC = {
     "memory_profile_cards_stale_secs": "Profile-card staleness (seconds).",
     "memory_query_expansion_k": "Number of expanded queries for recall.",
     "memory_query_expansion_mode": "Query-expansion mode.",
-    "memory_rerank_command": "External reranker command.",
-    "memory_rerank_enabled": "Enable cross-encoder reranking of recall.",
     "memory_rerank_mode": "Reranker mode.",
-    "memory_rerank_top_k": "Top-K candidates to rerank.",
     "memory_rewrite_command": "External query-rewrite command.",
     "memory_rewrite_decompose": "Decompose queries during rewrite.",
     "memory_rewrite_enabled": "Enable query rewriting for recall.",
@@ -393,12 +389,11 @@ SECTION_DESC = {
     "lsp_servers": "LSP server definitions (array of objects).",
     "mcp": "MCP integration (e.g. OSV).",
     "mcp_clients": "MCP client connections (array of objects).",
-    "memory": "Memory subsystem; most children (recall, rerank, lifecycle, …) are nested objects with their own keys.",
+    "memory": "Memory subsystem; most children (recall, lifecycle, …) are nested objects with their own keys.",
     "memory_maintenance": "Memory maintenance scheduling.",
     "memory_negation": "Negation handling in memory.",
     "memory_query_expansion": "Recall query expansion.",
     "memory_recall_lanes": "Per-lane recall floors / caps.",
-    "memory_rerank": "Recall reranking.",
     "memory_rewrite": "Recall query rewriting.",
     "memory_window": "Memory-window neighbour expansion.",
     "model_meta": "Model metadata + capability routing.",
@@ -550,7 +545,7 @@ def render_config(fields, sections, flat):
 
     for title, blurb, group in (
         ("Deploy-time keys", "Consumed once by `config_emit_deploy_env` to stand up the "
-         "aimee-llm container (`aimee config deploy-env`); not read at runtime. Set at "
+         "managed sibling services (`aimee config deploy-env`); not read at runtime. Set at "
          "deploy, not tuned day-to-day.", deploy),
         ("Advanced tuning keys", "Expert scalars with sensible defaults; settable in the "
          "config file but off the everyday surface.", advanced),
@@ -610,6 +605,7 @@ ENV_RE = re.compile(r'(?:getenv|copy_env)\(\s*"(AIMEE_[A-Z0-9_]+)"')
 ENV_DYNAMIC = {
     "AIMEE_FORGE_APP_PRIVATE_KEY",
     "AIMEE_FORGE_TOKEN",
+    "AIMEE_KB_CONN",
     "AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE",
     "AIMEE_SERVER_TLS_PRIVATE_KEY",
     "AIMEE_SERVER_MGMT_TLS_PRIVATE_KEY",
@@ -684,7 +680,7 @@ ENV_DESC = {
     "AIMEE_GITHUB_OAUTH_CLIENT_ID": ("Server runtime", "Client ID of a GitHub OAuth App for the webchat \"Sign in with GitHub\" button; populates the github.com git credential. Public. Overrides the built-in default baked in via oauth_defaults.h."),
     "AIMEE_GITHUB_OAUTH_CLIENT_SECRET": ("Server runtime", "First-boot transport for the GitHub OAuth App client secret. The entrypoint synchronously seals it into Vault and scrubs the environment before aimee-server starts; startup fails closed if custody cannot be established. Enables browser redirect sign-in; without it the button falls back to the device-code flow."),
     "AIMEE_GITLAB_OAUTH_CLIENT_ID": ("Server runtime", "Client ID of a GitLab OAuth application (device flow enabled) for the webchat \"Sign in with GitLab\" button on gitlab.com. Public. Overrides the built-in default baked in via oauth_defaults.h."),
-    "AIMEE_DEPLOY_ENABLED": ("Server runtime", "Set to 1 to enable the server-orchestrated deploy: the setup wizard runs `docker compose up -d` for the managed sibling services (aimee-kb + aimee-llm) via a mounted Docker socket. Off unless the deploy compose sets it."),
+    "AIMEE_DEPLOY_ENABLED": ("Server runtime", "Set to 1 to enable the server-orchestrated deploy: the setup wizard runs `docker compose up -d` for the managed sibling service (aimee-kb) via a mounted Docker socket. Off unless the deploy compose sets it."),
     "AIMEE_DEPLOY_COMPOSE_FILE": ("Server runtime", "Path to the managed compose file the server-orchestrated deploy runs (default /opt/aimee/deploy/aimee-managed.compose.yaml)."),
     "AIMEE_INGRESS_PROXY_SECRET": ("Server runtime", "First-boot transport for the shared secret authenticating trusted ingress identity headers. It is sealed into Vault and removed from the environment before the long-lived server starts."),
     "AIMEE_PARALLEL_MAX": ("Server runtime", "Maximum parallel agent fan-out."),
@@ -695,9 +691,9 @@ ENV_DESC = {
     "AIMEE_WORKTREE_GC_DAYS": ("Server runtime", "Age threshold (days) for worktree GC."),
     "AIMEE_SOCK": ("Server runtime", "Sandbox helper socket path."),
     # Knowledge base
-    "AIMEE_LLM_URL": ("Knowledge base (aimee-kb)", "One knob: base URL of the aimee-llm container the kb calls for embedding (/embed), reranking (/rerank) AND synthesis (curator Tier-A + Tier-B at {url}/v1). The kb runs no model itself. AIMEE_EMBEDDER_URL/AIMEE_RERANKER_URL override per service. See docs/KB_LLM_BACKENDS.md."),
-    "AIMEE_LLM_AUTH_TOKEN": ("Managed KB and inference", "First-boot transport for the bearer service identity shared by aimee-kb and its aimee-llm gateway. aimee-kb synchronously seals it into Vault, scrubs the environment, and cleanly re-execs before serving; wizard-managed deploys generate the 256-bit value in Vault. This is separate from user/server bearers."),
-    "AIMEE_LLM_AUTH_REQUIRED": ("Managed KB and inference", "Set to 1 on wizard-managed KBs so embed, rerank, and synthesis clients refuse to contact the unified LLM when its bearer service identity is missing."),
+    "AIMEE_LLM_URL": ("Knowledge base (aimee-kb)", "Synthesis endpoint (curator Tier-A + Tier-B at {url}/v1). No longer selects an embedder: the kb embeds in-container, and AIMEE_EMBEDDER_URL points at an external embedder. See docs/KB_LLM_BACKENDS.md."),
+    "AIMEE_LLM_AUTH_TOKEN": ("Managed KB and inference", "First-boot transport for the bearer aimee-kb presents to the external synthesis endpoint. aimee-kb synchronously seals it into Vault, scrubs the environment, and cleanly re-execs before serving; wizard-managed deploys generate the 256-bit value in Vault. This is separate from user/server bearers."),
+    "AIMEE_LLM_AUTH_REQUIRED": ("Managed KB and inference", "Set to 1 on wizard-managed KBs so synthesis clients refuse to contact the LLM when its bearer service identity is missing."),
     "AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE": ("Managed KB and inference", "Explicit first-boot migration/adoption transport for an existing wizard-managed LLM credential. aimee-server seals it into Vault and scrubs the environment before normal startup. Ordinary inherited AIMEE_LLM_AUTH_TOKEN is ignored by managed credential creation so stale child-service state cannot win. Must be a 32..512 character RFC 6750 b64token."),
     "AIMEE_OFFLINE_ALLOW_NO_SWAP_MLOCK_FALLBACK": (
         "Managed KB and inference",
@@ -709,7 +705,10 @@ ENV_DESC = {
     "AIMEE_KB_API_BEARER_TOKEN": ("Knowledge base (aimee-kb)", "First-boot transport for the aimee-kb API bearer token. Server and KB bootstrap paths seal it into Vault and remove it from the environment before long-lived service startup."),
     "AIMEE_KB_API_CA_BUNDLE": ("Knowledge base (aimee-kb)", "CA bundle path for verifying the aimee-kb TLS certificate."),
     "AIMEE_KB_CACHE_TTL_S": ("Knowledge base (aimee-kb)", "KB client cache TTL (seconds)."),
-    "AIMEE_KB_CONN": ("Knowledge base (aimee-kb)", "KB connection string (mTLS transport)."),
+    "AIMEE_KB_CONN": (
+        "Knowledge base (aimee-kb)",
+        "First-boot KB connection string; sealed into the server Vault before long-lived startup.",
+    ),
     "AIMEE_TRANSPORT_KB_POOL_ENABLED": ("Knowledge base (aimee-kb)", "Override server-to-KB mTLS connection pooling. The config default is on; set to 0 for one-shot connections."),
     "AIMEE_SERVER_ID": ("Knowledge base (aimee-kb)", "Registry identity used by the server mTLS heartbeat."),
     "AIMEE_SERVER_TEAM_ID": (
@@ -770,6 +769,18 @@ ENV_DESC = {
         "out-of-range falls back to the default and never to unlimited, so no typo can "
         "silently remove the bound.",
     ),
+    "AIMEE_DB2_IDLE_IN_TRANSACTION_TIMEOUT_MS": (
+        "Database & vectors",
+        "Per-connection `idle_in_transaction_session_timeout` in ms, defaulting to the "
+        "same pool stuck-lease ceiling (`DB2_POOL_HOLD_CEILING_MS`, 300000). "
+        "`statement_timeout` bounds a STATEMENT, so a unit of work that opens a "
+        "transaction and then stalls before its next statement is invisible to it and "
+        "holds its pool member indefinitely — measured at ~4.5 hours against a "
+        "five-minute ceiling. Postgres ends such a backend itself, so the stalled thread "
+        "unwinds and the lease is returned without a restart. Same value grammar as "
+        "`AIMEE_DB2_STATEMENT_TIMEOUT_MS`; exactly `0` opts out, independently of the "
+        "statement bound.",
+    ),
     "AIMEE_EMBEDDING_DIM": ("Database & vectors", "Embedding dimension (drives halfvec column sizing)."),
     "AIMEE_PGVEC_SLOW_QUERY_MS": ("Database & vectors", "Slow-query log threshold (ms) for the pgvector transport."),
     # Memory
@@ -780,8 +791,8 @@ ENV_DESC = {
     "AIMEE_MEMORY_MAINTENANCE_TRIGGER_INSERTS": ("Memory", "Inserts before a maintenance cycle triggers."),
     "AIMEE_MEMORY_MAINTENANCE_TRIGGER_SECS": ("Memory", "Seconds before a maintenance cycle triggers."),
     "AIMEE_MEMORY_PAGERANK_RELATIONS": ("Memory", "Relation types included in memory PageRank."),
-    "AIMEE_MEMORY_RERANK_FORCE_OFF": ("Memory", "Force the cross-encoder reranker off."),
     "AIMEE_MEMORY_RERANK_MODE": ("Memory", "Reranker mode."),
+    "AIMEE_EMBEDDERS_FILE": ("Knowledge base (aimee-kb)", "Path to the embedder registry the server reads for GET /v1/embedders (the setup wizard's embedder picker). Defaults to /opt/aimee/embedders.json, then scripts/embedders.json in a source checkout. The same file the in-container embedder reads, so one declaration drives the picker, the loading and the serving flags."),
     "AIMEE_MEMORY_WEIGHT_PROFILE": ("Memory", "Recall scoring weight profile."),
     "AIMEE_NO_CACHE": ("Memory", "Disable the memory-assembly cache."),
     "AIMEE_CONTEXT_NO_KB": ("Memory", "Skip KB lookups during context assembly."),
@@ -839,7 +850,7 @@ ENV_DESC = {
     ),
     "AIMEE_EXEC_PIPE_TIMEOUT_MS": (
         "Agents & delegates",
-        "How long a sidecar subprocess (embed, rerank, cognify, rewrite, css render, "
+        "How long a sidecar subprocess (embed, cognify, rewrite, css render, "
         "oauth token, guardrails) may run before it is killed, in ms. Default 120000. "
         "Bounds the pathological case, not normal latency: an unbounded wait here parks "
         "the calling request thread permanently when a sidecar hangs instead of exiting, "

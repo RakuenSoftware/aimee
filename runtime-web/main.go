@@ -5,9 +5,20 @@ import (
 	"fmt"
 	"log"
 	"os"
+
+	"github.com/RakuenSoftware/smoothgui/auth"
 )
 
 func main() {
+	// PAMAuthenticate runs the credential check in a subprocess so a PAM abort or
+	// hang cannot take down the long-lived HTTP server — and that subprocess is
+	// THIS binary re-executed with __pam_auth. Without this dispatch the helper
+	// falls through to the flag parser and every login fails, so the check has to
+	// come before anything else touches os.Args.
+	if len(os.Args) > 1 && os.Args[1] == "__pam_auth" {
+		os.Exit(auth.RunPAMHelper(os.Args[2:]))
+	}
+
 	port := flag.Int("port", 8443, "HTTPS listen port (use 8080 for plain HTTP)")
 	certFile := flag.String("cert", "", "TLS certificate file (PEM); auto-generated if empty")
 	keyFile := flag.String("key", "", "TLS key file (PEM); auto-generated if empty")

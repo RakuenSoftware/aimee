@@ -442,7 +442,8 @@ static void memory_embed_http_url(const char *base, const char *path, char *out,
 
 /* POST body to {base}{path}; on success returns 0 with the response body in
  * *resp (caller frees). Any transport error or non-2xx leaves *resp NULL. */
-int memory_embed_http_post(const char *base, const char *path, const char *body, char **resp)
+int memory_embed_http_post_status(const char *base, const char *path, const char *body, char **resp,
+                                  int *status_out)
 {
    char url[1024];
    char auth[640] = "";
@@ -450,8 +451,14 @@ int memory_embed_http_post(const char *base, const char *path, const char *body,
    const char *auth_header = NULL;
    int have_token = runtime_secret_get("AIMEE_LLM_AUTH_TOKEN", token, sizeof(token));
    const char *auth_required = getenv("AIMEE_LLM_AUTH_REQUIRED");
+   if (status_out)
+      *status_out = -1;
    if (auth_required && strcmp(auth_required, "1") == 0 && !have_token)
+   {
+      if (status_out)
+         *status_out = 401;
       return -1;
+   }
    if (have_token)
    {
       /* Managed tokens are capped at 512 bytes; this also rejects any longer
@@ -461,6 +468,8 @@ int memory_embed_http_post(const char *base, const char *path, const char *body,
       {
          runtime_secret_wipe(token, sizeof(token));
          runtime_secret_wipe(auth, sizeof(auth));
+         if (status_out)
+            *status_out = 401;
          return -1;
       }
       auth_header = auth;
@@ -468,6 +477,8 @@ int memory_embed_http_post(const char *base, const char *path, const char *body,
    memory_embed_http_url(base, path, url, sizeof(url));
    *resp = NULL;
    int status = agent_http_post(url, auth_header, body, resp, MEMORY_EMBED_HTTP_TIMEOUT_MS, NULL);
+   if (status_out)
+      *status_out = status;
    runtime_secret_wipe(token, sizeof(token));
    runtime_secret_wipe(auth, sizeof(auth));
    if (status < 200 || status >= 300 || !*resp)
@@ -476,6 +487,109 @@ int memory_embed_http_post(const char *base, const char *path, const char *body,
       *resp = NULL;
       return -1;
    }
+   return 0;
+}
+
+int memory_embed_http_post(const char *base, const char *path, const char *body, char **resp)
+{
+   return memory_embed_http_post_status(base, path, body, resp, NULL);
+}
+
+/* Read the embedder's vector-space identity from its /health `serving_id`.
+ *
+ * The dim guard cannot see a pooling or prefix change — same width, same model name,
+ * different vector space — so the gateway folds all three into one opaque id and the
+ * kb records it against the corpus. This is the kb's side of that: ask the serving
+ * endpoint what space it is serving, rather than inferring it from local config, so
+ * the answer reflects what will actually be applied to the text.
+ *
+ * Returns 0 with a NUL-terminated id in `out`. An empty `out` is SUCCESS and means
+ * "this endpoint reports no identity" (a legacy embedder, or a gateway predating the
+ * field): the guard treats that as a no-op rather than a mismatch. Non-zero means the
+ * endpoint could not be reached at all, which the caller retries.
+ */
+int memory_embed_serving_id(const char *command, char *out, size_t out_len)
+{
+   if (!out || out_len == 0)
+      return -1;
+   out[0] = '\0';
+   if (!command || !command[0])
+      return 0;
+   if (strcmp(command, "builtin") == 0)
+   {
+      /* The builtin lexical embedder DOES have a vector space, and it needs an identity
+       * for the same reason the model-backed ones do. Reporting none left the one
+       * transition nothing could catch: a corpus embedded lexically and then queried with
+       * the bundled model shares its 384 width, so the dim guard is silent, and with no
+       * recorded identity the serving_id guard recorded the model's fresh and mixed the
+       * two spaces without a word.
+       *
+       * It is a deterministic feature hash over tokens and bigrams, so the space is fixed
+       * by the code rather than by any file: hence a constant, and hence the VERSION.
+       * BUMP IT whenever memory_embed_text_builtin's hashing, weighting or width changes —
+       * that is a different space, and an unbumped identity would claim otherwise. */
+      snprintf(out, out_len, "builtin/lexical-v1");
+      return 0;
+   }
+   if (!memory_embed_command_is_http(command))
+   {
+      /* A SIDECAR command (the shipped container's embed-remote.py) owns endpoint
+       * resolution — AIMEE_EMBEDDER_URL over AIMEE_LLM_URL, plus the bearer — so ask it
+       * rather than re-deriving that precedence here and getting it subtly different.
+       * This is the default deployment shape: without it the guard would be inactive in
+       * exactly the configuration everything ships with. Mirrors the `--dim` probe. */
+      char cmd[1200];
+      snprintf(cmd, sizeof(cmd), "%s --serving-id", command);
+      FILE *pipe = popen(cmd, "r");
+      if (!pipe)
+         return -1;
+      char buf[192] = "";
+      size_t n = fread(buf, 1, sizeof(buf) - 1, pipe);
+      buf[n] = '\0';
+      if (pclose(pipe) != 0)
+         return -1; /* unreachable / not ready -> caller retries */
+      /* Trim the trailing newline; an empty line means "reports no identity". */
+      size_t len = strlen(buf);
+      while (len > 0 && (buf[len - 1] == '\n' || buf[len - 1] == '\r' || buf[len - 1] == ' '))
+         buf[--len] = '\0';
+      snprintf(out, out_len, "%s", buf);
+      return 0;
+   }
+
+   char url[1024];
+   memory_embed_http_url(command, "/health", url, sizeof(url));
+   char auth[640];
+   const char *auth_header = NULL;
+   const char *token = getenv("AIMEE_LLM_AUTH_TOKEN");
+   const char *auth_required = getenv("AIMEE_LLM_AUTH_REQUIRED");
+   if (auth_required && strcmp(auth_required, "1") == 0 && (!token || !token[0]))
+      return -1;
+   if (token && token[0])
+   {
+      int n = snprintf(auth, sizeof(auth), "Authorization: Bearer %s", token);
+      if (n < 0 || (size_t)n >= sizeof(auth))
+         return -1;
+      auth_header = auth;
+   }
+
+   char *body = NULL;
+   int status = agent_http_get(url, auth_header, &body, MEMORY_EMBED_HTTP_TIMEOUT_MS);
+   /* 503 is expected while the embedder warms up and still carries the payload —
+    * serving_id is registry data, not a measurement, so it is readable before the
+    * child can embed. Anything else with no body is a transport failure. */
+   if (!body || (status != 200 && status != 503))
+   {
+      free(body);
+      return -1;
+   }
+   cJSON *root = cJSON_Parse(body);
+   free(body);
+   if (!root)
+      return -1;
+   cJSON *sid = cJSON_GetObjectItemCaseSensitive(root, "serving_id");
+   if (cJSON_IsString(sid) && sid->valuestring && sid->valuestring[0])
+      snprintf(out, out_len, "%s", sid->valuestring);
+   cJSON_Delete(root);
    return 0;
 }
 
@@ -498,9 +612,6 @@ static __thread int s_qembed_misses = 0;
  * time spent in actual embed spawns (cache misses) and how many ran. */
 __thread long long s_qembed_ms = 0;
 __thread int s_qembed_spawns = 0;
-/* Cross-encoder rerank spawn time + count, same per-recall probe. */
-__thread long long s_rerank_ms = 0;
-__thread int s_rerank_calls = 0;
 
 /* Begin a fresh per-recall memo window. Call at every top-level recall entry
  * point before any lane embeds the query. */
@@ -536,12 +647,12 @@ int memory_embed_text_runtime(const char *text, const char *command, float *out,
 
    s_qembed_misses++;
    long long _emb_t0 = util_now_ms();
-   int dim = memory_embed_text(text, effective_cmd, out, max_dim);
+   int dim = memory_embed_text(text, effective_cmd, EMBED_INPUT_QUERY, out, max_dim);
    if (dim <= 0 && strcmp(effective_cmd, "builtin") != 0)
    {
       aimee_log(LOG_WARN, "memory",
                 "query embedding failed for configured command; retrying with builtin embeddings");
-      dim = memory_embed_text(text, "builtin", out, max_dim);
+      dim = memory_embed_text(text, "builtin", EMBED_INPUT_QUERY, out, max_dim);
    }
    s_qembed_ms += util_now_ms() - _emb_t0;
    s_qembed_spawns++;
@@ -739,7 +850,7 @@ static void memory_embed_unit_row(int64_t unit_id, const char *unit_type, const 
 
    float vec[EMBED_MAX_DIM];
    const char *model = (command && command[0]) ? command : "builtin";
-   int dim = memory_embed_text(text, model, vec, EMBED_MAX_DIM);
+   int dim = memory_embed_text(text, model, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
    if (dim <= 0)
       return;
 

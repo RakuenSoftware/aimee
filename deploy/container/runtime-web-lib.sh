@@ -4,15 +4,23 @@
 WEBCHAT_PORT="${AIMEE_WEBCHAT_PORT:-8443}"
 WEBCHAT_HOME="${AIMEE_HOME:-/var/lib/aimee}"
 WEBCHAT_SPA="${AIMEE_WEBCHAT_SPA:-/usr/local/share/aimee-runtime-web/index.html}"
-WEBCHAT_LOGIN_STORE="${WEBCHAT_HOME}/webchat/logins"
 WEBCHAT_BOOTSTRAP_REPLACED="${WEBCHAT_HOME}/webchat/bootstrap-replaced"
 WEBCHAT_BOOTSTRAP_USER="${WEBCHAT_HOME}/webchat/bootstrap-user"
 WEBCHAT_BOOTSTRAP_CREDENTIALS="${WEBCHAT_HOME}/webchat/bootstrap-credentials"
 WEBCHAT_LEGACY_TLS_KEY="${WEBCHAT_HOME}/webchat.key"
+# Dashboard logins are local PAM accounts, scoped to this group so runtime-web
+# can only see and manage the logins it provisioned — never the container's own
+# system users. Must match webchatLoginGroup in runtime-web.
+WEBCHAT_LOGIN_GROUP="${AIMEE_WEBCHAT_LOGIN_GROUP:-aimee-webchat}"
 webchat_pid=""
 WEBCHAT_PREPARED=0
 
-webchat_log() { printf '[webchat] %s\n' "$*"; }
+# Diagnostics go to stderr, never stdout. The entrypoint execs an arbitrary
+# command override (`docker run ... sh -c ...`), and anything this library prints
+# to stdout is prepended to that command's own output — corrupting it for any
+# caller capturing it. Container runtimes collect both streams as logs, so this
+# costs nothing operationally.
+webchat_log() { printf '[webchat] %s\n' "$*" >&2; }
 
 webchat_is_enabled() {
     case "$(printf '%s' "${AIMEE_RUNTIME_WEB_ENABLED:-1}" | tr 'A-Z' 'a-z')" in
@@ -55,57 +63,31 @@ webchat_seal_record() {
     runuser -u aimee -- aimee-server --webchat-vault-seal "$_sr_name"
 }
 
-webchat_clear_legacy_shadow_hashes() {
-    _ch_users=""
-    if [ -f "$WEBCHAT_LOGIN_STORE" ]; then
-        _ch_users="$(cut -d: -f1 "$WEBCHAT_LOGIN_STORE" 2>/dev/null || true)"
-    fi
-    if [ -n "${wc_generated_user:-}" ]; then
-        _ch_users="$_ch_users
-$wc_generated_user"
-    fi
-    _ch_members="$(getent group aimee 2>/dev/null | cut -d: -f4 | tr ',' '\n' || true)"
-    _ch_users="$_ch_users
-$_ch_members
-aimee"
-    printf '%s\n' "$_ch_users" | while IFS= read -r _ch_user; do
-        [ -n "$_ch_user" ] || continue
-        id "$_ch_user" >/dev/null 2>&1 || continue
-        # Replace, do not merely prefix, the old verifier. '!' cannot
-        # authenticate and contains no recoverable credential material.
-        usermod --password '!' "$_ch_user" 2>/dev/null || {
-            webchat_log "ERROR: could not erase legacy PAM verifier for '$_ch_user'"
-            return 1
-        }
-    done
-}
-
+# Retire legacy credential FILES. Logins themselves are not migrated anywhere:
+# a PAM verifier lives in shadow, and shadow is the source of truth.
+#
+# This used to seal the bootstrap login and the PAM verifier registry into the
+# Vault and then erase the shadow entries behind them. The Vault holds aimee's
+# own secrets — the session HMAC, the TLS key, provider credentials — and a host
+# password is not one of those. Sealing it built a second identity system, and
+# erasing shadow afterwards deleted the credential the browser actually
+# authenticates with, which is how an upgrade could lock an operator out of
+# their own appliance.
+#
+# What is still removed is the PLAINTEXT bootstrap file, and only after the
+# account has been provisioned from it, so the password never outlives its use.
+# The TLS key IS aimee's own secret, so it still goes to the Vault.
 webchat_migrate_legacy_credentials() {
-    if [ -f "$WEBCHAT_BOOTSTRAP_CREDENTIALS" ]; then
-        if ! webchat_read_generated_credentials; then
-            webchat_log "ERROR: legacy bootstrap credential file is invalid; refusing to delete unknown authentication state"
-            return 1
-        fi
-        if ! printf '%s:%s' "$wc_generated_user" "$wc_generated_pass" | webchat_seal_record legacy_primary; then
-            webchat_log "ERROR: could not seal the legacy bootstrap login into Vault"
-            return 1
-        fi
+    if [ -f "$WEBCHAT_BOOTSTRAP_CREDENTIALS" ] && ! webchat_read_generated_credentials; then
+        webchat_log "ERROR: legacy bootstrap credential file is invalid; refusing to delete unknown authentication state"
+        return 1
     fi
-    if [ -s "$WEBCHAT_LOGIN_STORE" ]; then
-        if ! webchat_seal_record legacy_hashes < "$WEBCHAT_LOGIN_STORE"; then
-            webchat_log "ERROR: could not seal the legacy PAM verifier registry into Vault"
-            return 1
-        fi
-    fi
-    # Eliminate every old live verifier before removing its migration source.
-    webchat_clear_legacy_shadow_hashes || return 1
+    # Provision BEFORE deleting the plaintext source: the generated password is
+    # the only copy, so losing it before the account exists is unrecoverable.
+    webchat_provision_bootstrap_account || return 1
     if [ -f "$WEBCHAT_BOOTSTRAP_CREDENTIALS" ]; then
         webchat_remove_legacy_file "$WEBCHAT_BOOTSTRAP_CREDENTIALS" || return 1
-        webchat_log "sealed and removed the legacy plaintext bootstrap login"
-    fi
-    if [ -f "$WEBCHAT_LOGIN_STORE" ]; then
-        webchat_remove_legacy_file "$WEBCHAT_LOGIN_STORE" || return 1
-        webchat_log "sealed and removed the legacy PAM verifier registry"
+        webchat_log "removed the legacy plaintext bootstrap login"
     fi
     if [ -f "$WEBCHAT_LEGACY_TLS_KEY" ]; then
         if ! webchat_seal_record tls_key < "$WEBCHAT_LEGACY_TLS_KEY"; then
@@ -115,7 +97,165 @@ webchat_migrate_legacy_credentials() {
         webchat_remove_legacy_file "$WEBCHAT_LEGACY_TLS_KEY" || return 1
         webchat_log "sealed and removed the legacy TLS private key"
     fi
-    wc_generated_user="" wc_generated_pass="" _ch_users="" _ch_members=""
+    wc_generated_user="" wc_generated_pass=""
+}
+
+# Provision the first-boot dashboard login as a REAL system account.
+#
+# This is the wizard's way in: on first boot there is no identity yet, so PAM has
+# nobody to authenticate. The appliance used to solve that by sealing a
+# credential into the Vault, which worked but created a second identity system
+# that never handed back to PAM — an appliance stayed on bootstrap-shaped
+# credentials permanently. Creating a real account keeps the bootstrap idea and
+# drops the parallel store: PAM has something to authenticate from the first
+# login onward, and replacing it later is an ordinary account change.
+#
+# Idempotent: an existing account keeps its password, so a restart never resets a
+# credential the operator has already changed.
+webchat_provision_login() {
+    _bs_user="$1"
+    _bs_pass="$2"
+    [ -n "$_bs_user" ] && [ -n "$_bs_pass" ] || return 0
+
+    getent group "$WEBCHAT_LOGIN_GROUP" >/dev/null 2>&1 || \
+        groupadd --system "$WEBCHAT_LOGIN_GROUP" || {
+            webchat_log "ERROR: could not create the managed login group"
+            return 1
+        }
+    if id "$_bs_user" >/dev/null 2>&1; then
+        usermod -aG "$WEBCHAT_LOGIN_GROUP" "$_bs_user" 2>/dev/null || true
+        # An account can exist WITHOUT being able to log in: the image ships
+        # `aimee` as the service account with a locked verifier ('!' or '*'), and
+        # the documented compose names that same user as the dashboard login. Set
+        # the password only in that case — a real verifier means the operator (or
+        # an earlier boot) already owns it, and resetting it every boot would undo
+        # their own change.
+        _bs_hash="$(getent shadow "$_bs_user" 2>/dev/null | cut -d: -f2)"
+        case "$_bs_hash" in
+            '' | '!'* | '*'*)
+                if ! printf '%s:%s' "$_bs_user" "$_bs_pass" | chpasswd; then
+                    webchat_log "ERROR: could not set the first-boot dashboard password"
+                    _bs_user="" _bs_pass="" _bs_hash=""
+                    return 1
+                fi
+                webchat_log "enabled the first-boot dashboard login '$_bs_user' (local PAM)"
+                ;;
+        esac
+        _bs_user="" _bs_pass="" _bs_hash=""
+        return 0
+    fi
+    if ! useradd --system --no-create-home --shell /usr/sbin/nologin \
+                 --gid "$WEBCHAT_LOGIN_GROUP" "$_bs_user" 2>/dev/null; then
+        webchat_log "ERROR: could not create the first-boot dashboard login"
+        _bs_user="" _bs_pass=""
+        return 1
+    fi
+    # ALSO a supplementary member, not just primary. `getent group` lists only
+    # supplementary members, so a primary-only account is invisible to
+    # UserManager.List() — the dashboard's user list came back empty while login
+    # worked, because IsManagedUser reads the USER's groups and List reads the
+    # GROUP's members. The two must agree.
+    usermod -aG "$WEBCHAT_LOGIN_GROUP" "$_bs_user" 2>/dev/null || true
+    if ! printf '%s:%s' "$_bs_user" "$_bs_pass" | chpasswd; then
+        webchat_log "ERROR: could not set the first-boot dashboard password"
+        _bs_user="" _bs_pass=""
+        return 1
+    fi
+    webchat_log "provisioned the first-boot dashboard login '$_bs_user' (local PAM)"
+    _bs_user="" _bs_pass=""
+}
+
+# Provision EVERY first-boot login the appliance carries, not just the preferred
+# one. An explicit AIMEE_WEBCHAT_USER pair and a generated bootstrap-credentials
+# file can both exist, and the generated account may be the one the operator is
+# currently signed in with — provisioning only the explicit pair and then
+# deleting the generated file would destroy a working login. Both become PAM
+# accounts; the wizard retires the generated one when it is replaced.
+# Never fatal, for the reason spelled out in webchat_generate_bootstrap_login:
+# the entrypoint calls this unguarded under `set -eu`, so a failure here would
+# take the container down instead of leaving it up without a browser login.
+webchat_provision_bootstrap_account() {
+    webchat_provision_login "${AIMEE_WEBCHAT_USER:-}" "${AIMEE_WEBCHAT_PASSWORD:-}" || true
+    if webchat_read_generated_credentials; then
+        webchat_provision_login "$wc_generated_user" "$wc_generated_pass" || true
+    fi
+    webchat_generate_bootstrap_login || true
+    return 0
+}
+
+# 1 when this appliance still has no way for a human to sign in.
+#
+# An explicit pair wins and needs nothing generated. Otherwise: a marker from an
+# earlier boot, a completed wizard replacement, or any live member of the managed
+# group all mean a login already exists — regenerating then would change the
+# password out from under the operator on every restart and spam the log with
+# credentials that are not the working one.
+webchat_bootstrap_login_needed() {
+    [ -n "${AIMEE_WEBCHAT_USER:-}" ] && [ -n "${AIMEE_WEBCHAT_PASSWORD:-}" ] && return 1
+    [ -f "$WEBCHAT_BOOTSTRAP_USER" ] && return 1
+    [ -f "$WEBCHAT_BOOTSTRAP_REPLACED" ] && return 1
+    [ -n "$(getent group "$WEBCHAT_LOGIN_GROUP" 2>/dev/null | cut -d: -f4)" ] && return 1
+    return 0
+}
+
+# Generate the first-boot dashboard login when the deployment supplied none, and
+# PRINT IT to the container log.
+#
+# Without this an appliance deployed from a credential-free manifest has no way
+# into its own wizard: the compose files deliberately carry no password (they are
+# container metadata, readable by anyone who can inspect the service), and
+# nothing else creates one. Measured on a clean install of this branch — server
+# healthy, PAM service shipped, and no account a human could use.
+#
+# The log IS the delivery channel, which is the deliberate trade: a first-boot
+# secret has to reach the operator somehow, and `docker logs` is the one place
+# they can already read without an account. It is printed once, on the boot that
+# creates it, and never persisted in plaintext — the marker written afterwards
+# records only the NAME, so the wizard knows this login is a temporary one to
+# replace, without keeping the secret at rest.
+webchat_generate_bootstrap_login() {
+    webchat_bootstrap_login_needed || return 0
+
+    # aimee-<12 hex> / 64 hex: the shape readGeneratedBootstrapUsername and
+    # pendingBootstrapUsername already recognise as a retirable generated login.
+    _gen_user="aimee-$(od -An -N6 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')"
+    _gen_pass="$(od -An -N32 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')"
+    if [ "${#_gen_user}" -ne 18 ] || [ "${#_gen_pass}" -ne 64 ]; then
+        webchat_log "ERROR: could not draw a first-boot dashboard credential"
+        _gen_user="" _gen_pass=""
+        return 0
+    fi
+    if ! webchat_provision_login "$_gen_user" "$_gen_pass"; then
+        # NOT fatal. The entrypoint runs under `set -eu` and does not guard this
+        # call, so returning non-zero here aborts the whole container — a host
+        # without useradd/groupadd would stop booting rather than merely lacking
+        # a dashboard login. Say so loudly and carry on degraded.
+        webchat_log "ERROR: could not provision a first-boot dashboard login; the"
+        webchat_log "browser UI will have no account until one is supplied via"
+        webchat_log "AIMEE_WEBCHAT_USER/AIMEE_WEBCHAT_PASSWORD."
+        _gen_user="" _gen_pass=""
+        return 0
+    fi
+    mkdir -p "$(dirname "$WEBCHAT_BOOTSTRAP_USER")" 2>/dev/null || true
+    printf 'generated:%s\n' "$_gen_user" > "$WEBCHAT_BOOTSTRAP_USER" 2>/dev/null || {
+        webchat_log "ERROR: could not record the generated first-boot login"
+        _gen_user="" _gen_pass=""
+        return 0
+    }
+    # 0644, not 0600: the C server runs as `aimee` and resolves the appliance
+    # administrator from this marker. Unreadable, its gate falls back to "admin"
+    # and refuses the very operator this file names. The content is a username.
+    chmod 644 "$WEBCHAT_BOOTSTRAP_USER" 2>/dev/null || true
+
+    webchat_log "======================================================================"
+    webchat_log "FIRST-BOOT DASHBOARD LOGIN (shown once — copy it now)"
+    webchat_log "    username: $_gen_user"
+    webchat_log "    password: $_gen_pass"
+    webchat_log "Sign in at https://<host>:$WEBCHAT_PORT and replace this account in"
+    webchat_log "the wizard. Supply AIMEE_WEBCHAT_USER/AIMEE_WEBCHAT_PASSWORD at"
+    webchat_log "deploy time to choose your own instead."
+    webchat_log "======================================================================"
+    _gen_user="" _gen_pass=""
 }
 
 webchat_prepare() {
@@ -132,10 +272,9 @@ webchat_prepare() {
         WEBCHAT_PREPARED=1
         return 0
     fi
-    if ! runuser -u aimee -- aimee-server --webchat-vault-check; then
-        webchat_log "ERROR: browser UI requires a complete first-boot login sealed in Vault"
-        return 1
-    fi
+    # The first-boot account is provisioned by webchat_migrate_legacy_credentials
+    # above, before the plaintext source is removed. Nothing to gate here: logins
+    # are PAM accounts, so there is no Vault record to require.
     # server.token was a persistent shared bearer. UDS peer credentials replaced
     # it; erase any legacy copy before starting services.
     webchat_remove_legacy_file "$WEBCHAT_HOME/server.token" || return 1

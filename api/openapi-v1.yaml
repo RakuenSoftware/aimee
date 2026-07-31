@@ -532,6 +532,105 @@ components:
           type: string
           nullable: true
 
+    CodeContextSpan:
+      type: object
+      required: [kind, line_start, line_end]
+      properties:
+        kind:
+          type: string
+          enum: [line, file]
+        line_start:
+          type: integer
+          minimum: 0
+        line_end:
+          type: integer
+          minimum: 0
+        symbol:
+          type: string
+
+    CodeContextAnchor:
+      type: object
+      required: [project, file_path, generation, freshness]
+      properties:
+        project: { type: string }
+        file_path: { type: string }
+        generation: { type: integer, format: int64, minimum: 1 }
+        freshness: { type: string, enum: [current] }
+
+    CodeContextResult:
+      type: object
+      required: [project, file_path, generation, freshness, confidence, accepted, provenance, span]
+      properties:
+        project: { type: string }
+        file_path: { type: string }
+        generation: { type: integer, format: int64, minimum: 1 }
+        freshness: { type: string, enum: [current] }
+        confidence: { type: number, format: double, minimum: 0, maximum: 1 }
+        accepted: { type: boolean, enum: [true] }
+        provenance:
+          type: array
+          minItems: 1
+          items: { type: string, enum: [code, graph, vector, memory] }
+        span:
+          $ref: "#/components/schemas/CodeContextSpan"
+        snippet: { type: string }
+        content_hash: { type: string }
+        vector_score: { type: number, format: double }
+
+    CodeContextMemory:
+      type: object
+      required: [memory_id, kind, content, scope, provenance, confidence, anchor]
+      properties:
+        memory_id: { type: integer, format: int64 }
+        kind: { type: string }
+        headline: { type: string }
+        content: { type: string }
+        scope: { type: string, enum: [project] }
+        scope_rank: { type: integer, minimum: 1 }
+        provenance: { type: string, enum: [memory] }
+        confidence: { type: number, format: double }
+        anchor:
+          $ref: "#/components/schemas/CodeContextAnchor"
+
+    CodeContextAnswerability:
+      type: object
+      required: [decision, reason, candidate_count, accepted_code_count, top_confidence, vector_floor]
+      properties:
+        decision: { type: string, enum: [answerable, no_answer] }
+        reason: { type: string }
+        candidate_count: { type: integer, minimum: 0 }
+        accepted_code_count: { type: integer, minimum: 0, maximum: 4 }
+        top_confidence: { type: number, format: double, minimum: 0, maximum: 1 }
+        vector_floor: { type: number, format: double, minimum: 0, maximum: 1 }
+
+    CodeContextResponse:
+      type: object
+      required: [status, project, generation, freshness, resolved, max_results, max_tokens,
+                 item_count, answerability, results, why]
+      properties:
+        status: { type: string, enum: [ok, no_answer] }
+        query: { type: string }
+        symbol: { type: string }
+        project: { type: string }
+        generation: { type: integer, format: int64, minimum: 1 }
+        freshness: { type: string, enum: [current] }
+        resolved: { type: boolean, enum: [true] }
+        max_results: { type: integer, enum: [4] }
+        max_tokens: { type: integer, enum: [1200] }
+        item_count: { type: integer, minimum: 0, maximum: 4 }
+        answerability:
+          $ref: "#/components/schemas/CodeContextAnswerability"
+        results:
+          type: array
+          maxItems: 4
+          items:
+            $ref: "#/components/schemas/CodeContextResult"
+        why:
+          type: array
+          maxItems: 4
+          items:
+            $ref: "#/components/schemas/CodeContextMemory"
+
     CodeCallerHit:
       type: object
       properties:
@@ -1628,7 +1727,7 @@ paths:
       operationId: getConsoleSettings
       summary: KB-owned configuration (console)
       description: |
-        Every config option aimee-kb owns — the embedder, the reranker, the synth
+        Every config option aimee-kb owns — the embedder, the synth
         tier, and the knowledge base itself — with its current value, section, and
         whether it needs a kb restart. The split from aimee-server's own settings
         is by which binary reads the option (KB_SETTINGS in
@@ -3004,6 +3103,55 @@ paths:
           description: Scoped credentials cannot request all projects
         "404":
           description: Project is unknown or detached
+        "409":
+          description: Active project is required or the observed generation is stale
+        "503":
+          description: Canonical index unavailable
+
+  /code/context:
+    get:
+      operationId: getCodeContext
+      summary: Bounded task-conditioned context for the active project
+      description: >-
+        Reuses hybrid RRF retrieval but returns only current-generation evidence for one active
+        project. Exact lexical and structural evidence leads; vector-only evidence must clear the
+        quality floor. Memory is additive, locally ordered, and anchored to accepted code. A weak
+        query returns HTTP 200 with status `no_answer`, empty results, and empty why rather than
+        broadening to global memory.
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema: { type: string }
+        - name: symbol
+          in: query
+          schema: { type: string }
+        - name: project
+          in: query
+          required: true
+          description: Stable identity of the authenticated active project; cross-project scope is forbidden.
+          schema: { type: string }
+        - name: generation
+          in: query
+          description: Optional observed current generation; stale observations fail closed.
+          schema: { type: integer, format: int64, minimum: 1 }
+        - name: max_results
+          in: query
+          description: Accepted for client compatibility and clamped to the fixed packet maximum of four.
+          schema: { type: integer, default: 4, maximum: 4 }
+      responses:
+        "200":
+          description: Answerable bounded packet or explicit no_answer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CodeContextResponse"
+        "400":
+          description: Missing or invalid query
+        "401":
+          description: Unauthorized
+        "404":
+          description: Project is unknown, detached, or has no current generation
         "409":
           description: Active project is required or the observed generation is stale
         "503":

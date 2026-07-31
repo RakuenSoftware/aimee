@@ -23,6 +23,9 @@ aimee-forwarder
 /aimee-negation-eval
 /aimee-blast-radius-eval
 /aimee-runtime-web
+# `go build ./...` inside runtime-web/ drops the binary next to its source; it was
+# tracked for a while and rode along in unrelated commits.
+runtime-web/runtime-web
 /aimee-gateway
 src/build/
 src/*.a

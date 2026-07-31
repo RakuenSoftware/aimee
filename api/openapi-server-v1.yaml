@@ -565,6 +565,38 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ModelsList' }
+  /embedders:
+    get:
+      summary: List the embedders this deployment can offer
+      description: >
+        Read from the embedder registry (scripts/embedders.json), not from a running
+        service: the setup wizard needs this list before anything is deployed. `local`
+        says whether the knowledge base can serve the model itself — one is bundled —
+        and an entry that cannot is selectable only against an external endpoint.
+        Every other field changes the vectors, so the picker shows them: a different
+        `dim` rebuilds the pgvector columns as well as re-embedding the corpus, and
+        `prefixed` marks a model whose card defines query/document prefixes.
+      responses:
+        "200":
+          description: The registry as a choosable list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  embedders:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        dim: { type: integer }
+                        context: { type: integer }
+                        pooling: { type: string }
+                        local: { type: boolean }
+                        prefixed: { type: boolean }
+
   /hosts:
     get:
       summary: Enumerate hosts and their live GPU inventory

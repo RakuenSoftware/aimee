@@ -107,7 +107,10 @@ type NativeRunner struct {
 
 func (r *NativeRunner) SetRoundtableStore(store *roundtablecfg.Store) { r.roundtables = store }
 
-const roundtableDelegateRole = "review"
+const (
+	roundtableDelegateRole        = "review"
+	roundtableDelegateMaxTurnsCap = 24
+)
 
 func (r *NativeRunner) delegate(ctx context.Context, step StepRequest, request DelegateRequest) (DelegateResult, error) {
 	request.WorkItemID = step.WorkItem.ID
@@ -522,6 +525,32 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 				Detail: "conflict merging aimee/feat/" + req.WorkItem.ParentID + " into slice"}, nil
 		}
 	}
+	// A documentation gate can be resumed after a human repair commit. The
+	// reviewed hash then remains on both the work item and feedback artifact,
+	// while the clean exact frozen diff has changed. Send that new diff back through
+	// freeze + roundtable rather than demanding that a delegate invent another
+	// edit solely to satisfy its "owned files changed" contract. This does not
+	// bypass review, and feedback left by an earlier gate cannot trigger it.
+	if docs && req.Feedback != nil && req.WorkItem.ContentHash != "" &&
+		req.WorkItem.ContentHash == req.Feedback.ArtifactHash {
+		diff, diffErr := frozenWorktreeDiff(ctx, req.WorkItem, workdir)
+		if diffErr != nil {
+			return StepResult{}, diffErr
+		}
+		status, statusErr := gitText(ctx, workdir, "status", "--porcelain")
+		if statusErr != nil {
+			return StepResult{}, statusErr
+		}
+		if status == "" && strings.TrimSpace(diff) != "" &&
+			wfe.Hash([]byte(diff)) != req.Feedback.ArtifactHash {
+			head, headErr := gitText(ctx, workdir, "rev-parse", "HEAD")
+			if headErr != nil {
+				return StepResult{}, headErr
+			}
+			return StepResult{Status: StepAdvanced, ArtifactType: "branch", Artifact: branch,
+				ContentHash: head, Detail: "reviewed worktree advanced; re-freezing exact repair"}, nil
+		}
+	}
 	prompt := "Implement the complete approved task in this worktree, run the repository verification, fix failures, and leave the accepted changes in the worktree."
 	if docs {
 		prompt = "Document the complete implemented change in this worktree. Update the appropriate user and developer documentation and inline comments; leave the accepted changes in the worktree."
@@ -852,25 +881,7 @@ func (r *NativeRunner) freeze(ctx context.Context, req StepRequest) (StepResult,
 	if err != nil {
 		return StepResult{}, err
 	}
-	base := ""
-	if item.ParentID != "" {
-		// Slice PRs merge through the forge, which advances the remote feature
-		// branch while the local aimee/feat/<parent> ref stays at the run's
-		// starting point.  Freeze against the same fetched feature tip used by
-		// slice creation/integration; otherwise every later slice's review
-		// artifact incorrectly includes all previously merged sibling work.
-		base = featureBaseRef(ctx, workdir, item.ParentID)
-		if base == "" {
-			return StepResult{}, errors.New("parent feature branch is unavailable")
-		}
-	} else {
-		trunk, e := repoDefaultBranch(ctx, workdir)
-		if e != nil {
-			return StepResult{}, e
-		}
-		base = "origin/" + trunk
-	}
-	diff, err := gitText(ctx, workdir, "--no-pager", "diff", base+"...HEAD")
+	diff, err := frozenWorktreeDiff(ctx, item, workdir)
 	if err != nil {
 		return StepResult{}, err
 	}
@@ -883,6 +894,32 @@ func (r *NativeRunner) freeze(ctx context.Context, req StepRequest) (StepResult,
 		return StepResult{Status: StepAccepted, Detail: "no-op: empty diff vs base"}, nil
 	}
 	return StepResult{Status: StepAdvanced, ArtifactType: "frozen_diff", Artifact: diff, ContentHash: wfe.Hash([]byte(diff))}, nil
+}
+
+func frozenWorktreeDiff(ctx context.Context, item db1.WorkItem, workdir string) (string, error) {
+	base := ""
+	if item.ParentID != "" {
+		// Slice PRs merge through the forge, which advances the remote feature
+		// branch while the local aimee/feat/<parent> ref stays at the run's
+		// starting point.  Freeze against the same fetched feature tip used by
+		// slice creation/integration; otherwise every later slice's review
+		// artifact incorrectly includes all previously merged sibling work.
+		base = featureBaseRef(ctx, workdir, item.ParentID)
+		if base == "" {
+			return "", errors.New("parent feature branch is unavailable")
+		}
+	} else {
+		trunk, e := repoDefaultBranch(ctx, workdir)
+		if e != nil {
+			return "", e
+		}
+		base = "origin/" + trunk
+	}
+	diff, err := gitText(ctx, workdir, "--no-pager", "diff", base+"...HEAD")
+	if err != nil {
+		return "", err
+	}
+	return diff, nil
 }
 
 type panelFinding struct {
@@ -1159,7 +1196,7 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 		// Repeated persona/agent specifications must not collide and reuse one
 		// remote result, so each capacity seat carries a distinct durable slot.
 		// Empty Delegate is deliberate: generic delegation resolves eligibility.
-		requests[i] = DelegateRequest{Role: roundtableDelegateRole, Persona: seat.persona, Delegate: seat.selector, Prompt: prompt, Workdir: req.WorkItem.Worktree, Tools: true, DurableSlot: panelSeatDurableSlot(req, panelRound, seat.ordinal), ArtifactStage: artifactStage, ArtifactHash: artifactHash, ProvidedTarget: true}
+		requests[i] = DelegateRequest{Role: roundtableDelegateRole, Persona: seat.persona, Delegate: seat.selector, Prompt: prompt, Workdir: req.WorkItem.Worktree, Tools: true, MaxTurnsCap: roundtableDelegateMaxTurnsCap, DurableSlot: panelSeatDurableSlot(req, panelRound, seat.ordinal), ArtifactStage: artifactStage, ArtifactHash: artifactHash, ProvidedTarget: true}
 	}
 	delegated := r.delegateGroup(ctx, req, requests)
 	outcomes := make([]outcome, len(seats))
@@ -1202,6 +1239,7 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 				// CLI-backed agents do not have an HTTP request URL; tools:false would
 				// incorrectly send their continuation through the simple HTTP path.
 				Tools:          true,
+				MaxTurnsCap:    roundtableDelegateMaxTurnsCap,
 				DurableSlot:    panelSeatDurableSlot(req, panelRound, seat.ordinal) + ":repair:1",
 				ArtifactStage:  artifactStage,
 				ArtifactHash:   artifactHash,

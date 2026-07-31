@@ -3,7 +3,8 @@
 # aimee-server-docker-smoke.sh — prove the full aimee-server + aimee-kb Docker
 # stack spins up and that the server actually talks to the kb container.
 #
-# Brings up compose.server.yaml (aimee-llm + self-contained aimee-kb + aimee-server),
+# Brings up compose.server.yaml (self-contained aimee-kb + aimee-server; the kb
+# embeds in-container, so there is no separate inference service),
 # waits for aimee-server to report healthy, then exercises the server /v1 API —
 # including the two endpoints that PROXY THROUGH to the kb over HTTP
 # (AIMEE_KB_API_URL), which is the cross-container wiring under test:
@@ -43,13 +44,12 @@ BEARER="${BEARER:-}"
 COMPOSE_FILE="${COMPOSE_FILE:-compose.server.yaml}"
 WAIT_SECONDS="${WAIT_SECONDS:-300}"
 
-# Smoke tests validate the retrieval pipeline, not a specific model. Default to
-# the light tier (0.6b embedder/1024-dim + 400m reranker) so `up --build` is fast
-# and fits CI runners; the shipped default is the 4b + 1b reranker. Override any.
-: "${EMBEDDER_MODEL:=perplexity-ai/pplx-embed-v1-0.6b}"
-: "${RERANKER_MODEL:=cross-encoder/ettin-reranker-400m-v1}"
-: "${AIMEE_EMBEDDING_DIM:=1024}"
-export EMBEDDER_MODEL RERANKER_MODEL AIMEE_EMBEDDING_DIM
+# The kb embeds in-container from weights baked into the image: no tier to pick and
+# nothing to download. Select the bundled model (the image pre-selects nothing) and
+# let AIMEE_EMBEDDING_DIM default from config, so the schema width and the model's
+# output width come from one source rather than being pinned apart here.
+: "${EMBEDDER_MODEL:=bekko-a25m}"
+export EMBEDDER_MODEL
 DO_UP=0
 DO_DOWN=0
 
@@ -127,8 +127,13 @@ cleanup() {
 trap cleanup EXIT
 
 if [[ "$DO_UP" == 1 ]]; then
-  bold "==> Building + starting the full stack ($COMPOSE_FILE)"
-  "${DC[@]}" up -d --build
+  bold "==> Building + Vault-bootstrapping + starting the full stack ($COMPOSE_FILE)"
+  "${DC[@]}" build
+  # Port-remap overrides do not affect the persistent Vault volumes. Bootstrap
+  # both owners against the base file before creating either long-lived service.
+  bootstrap_compose="${COMPOSE_FILE%% *}"
+  scripts/aimee-compose-vault-bootstrap.sh -f "$bootstrap_compose" all
+  "${DC[@]}" up -d --no-build
 
   bold "==> Waiting up to ${WAIT_SECONDS}s for aimee-server to report healthy"
   deadline=$((SECONDS + WAIT_SECONDS))

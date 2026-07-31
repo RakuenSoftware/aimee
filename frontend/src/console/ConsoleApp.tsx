@@ -15,7 +15,7 @@ import TypedFacts from './pages/TypedFacts';
 // shell and the session/login flow; the pages are filled in S1 (dashboard), S3
 // (accounts), and S5 (governance). Pipeline and Settings live here rather than in
 // the aimee webchat GUI because the kb owns what they configure — the curator, the
-// typed-fact layer, and the embedder/reranker/synth tiers.
+// typed-fact layer, and the embedder/synth tiers.
 export default function ConsoleApp() {
   const [session, setSession] = useState<SessionInfo | null | undefined>(undefined);
   const [fleetMutationBlocked, setFleetMutationBlocked] = useState(false);

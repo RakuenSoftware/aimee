@@ -15,11 +15,21 @@ extern "C"
    int db2_init(const char *libpq_url);
 
    /* Set the embedding dimension used to create the DB2 halfvec embedding
-    * columns (one embedder per deployment: 1024 for pplx-0.6b, 2560 for
-    * pplx-4b). Call from startup — with the loaded config's embedding_dim —
-    * BEFORE db2_init() applies the schema, so this layer stays config-free.
-    * Unset/<=0 means the 1024 default. */
+    * columns (one embedder per deployment). Call from startup — with
+    * config_resolve_embedding_dim() — BEFORE db2_init() applies the schema, so
+    * this layer stays config-free. Unset/<=0 means "nothing pinned", which lets
+    * db2_init's §2a precedence fall through to the injected default. */
    void db2_set_embedding_dim(int dim);
+
+   /* Inject the DEFAULT width, from config_embedding_dim_default(). This layer
+    * holds no width literal of its own — the number is declared once, in config —
+    * so call this beside db2_set_embedding_dim before db2_init. Without it
+    * db2_embedding_dim() reports 0 and schema sizing fails loudly rather than
+    * guessing a width the running embedder may not produce. */
+   void db2_set_embedding_dim_default(int dim);
+
+   /* The effective width: the pinned dim when set, else the injected default.
+    * 0 means neither was supplied — treat as an error, never as a default. */
    int db2_embedding_dim(void);
 
    /* embedder-runtime-fetch-autodim §2a: mark whether the operator pinned the dim
@@ -109,15 +119,31 @@ extern "C"
     * before db2_init, beside db2_set_embedding_dim, so this layer stays
     * config-free. ALL default empty -> the guard is a no-op (a deployment whose
     * embedder reports no identity, e.g. the legacy torch embedder, is
-    * unaffected). The embedder model_id is repo@sha; the reranker carries its
-    * scoring contract (e.g. "/v1/rerank,fa=on"); compat_csv is a comma-separated
-    * list of admitted "old_id->new_id" transitions (see
+    * unaffected). The embedder model_id is repo@sha; compat_csv is a
+    * comma-separated list of admitted "old_id->new_id" transitions (see
     * db2_embedding_model_record_or_check). Reset by db2_shutdown. */
    void db2_set_embedder_model_id(const char *model_id);
    const char *db2_embedder_model_id(void);
-   void db2_set_reranker_identity(const char *model_id, const char *contract);
-   const char *db2_reranker_model_id(void);
-   const char *db2_reranker_contract(void);
+   /* The serving endpoint's vector-space identity, PROBED from its /health rather than
+    * read from config: pooling and prefixes are properties of what the embedder applies,
+    * not of what the kb was told. Empty -> the guard is a no-op. */
+   void db2_set_embedder_serving_id(const char *serving_id);
+   const char *db2_embedder_serving_id(void);
+
+   /* Fetch the identity AT THE POINT OF USE instead of before db2_init.
+    *
+    * The in-container embedder is a sibling process the entrypoint launches next to the
+    * kb, so it is reliably NOT serving yet when the kb starts. Publishing the identity up
+    * front therefore failed on every cold boot and left the guard inactive — the exact
+    * hole it exists to close. db2_init calls this just before the guard, by which point
+    * the dim probe has already waited for the embedder to be ready.
+    *
+    * Returns 0 on success, writing the identity (possibly EMPTY, meaning "this endpoint
+    * reports none" — a legacy embedder, which must leave the guard inactive rather than
+    * refuse). Non-zero means unreachable. */
+   typedef int (*db2_embedder_serving_probe_fn)(char *out, size_t out_len, char *err,
+                                                size_t errlen);
+   void db2_set_embedder_serving_probe(db2_embedder_serving_probe_fn fn);
    void db2_set_embedding_compat(const char *compat_csv);
    const char *db2_embedding_compat(void);
 
@@ -128,7 +154,13 @@ extern "C"
     * the pool between units (instead of held for the thread's life). Re-entrant
     * (refcounted). db2_conn() lazily leases one if none is held; an unbracketed
     * lazy lease is returned when the thread exits. */
-   void db2_lease_begin(void);
+   /* See db2.h: the db2_lease_begin macro records the caller's file:line. */
+   void db2_lease_begin_at(const char *site);
+#ifndef db2_lease_begin
+#define DB2_LEASE_STRINGIFY_(x) #x
+#define DB2_LEASE_SITE_(f, l)   f ":" DB2_LEASE_STRINGIFY_(l)
+#define db2_lease_begin()       db2_lease_begin_at(DB2_LEASE_SITE_(__FILE__, __LINE__))
+#endif
    void db2_lease_end(void);
 
    int db2_fork_conn_url(char *out, size_t cap);

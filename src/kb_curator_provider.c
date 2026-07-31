@@ -1,10 +1,11 @@
 /* kb_curator_provider.c: stage -> configured curator LLM provider. See header. */
 
 #include "kb_curator_provider.h"
+#include "config_database.h" /* config_synth_chat_endpoint — the one synth-address resolver */
 #include "runtime_secret.h"
 
 #include <pthread.h>
-#include <stdio.h>  /* snprintf — AIMEE_LLM_URL -> {base}/v1 */
+#include <stdio.h>
 #include <stdlib.h> /* getenv */
 #include <string.h>
 #include <time.h>
@@ -138,11 +139,16 @@ int kb_curator_provider_for_stage(const config_t *cfg, kb_curator_stage_t stage,
 
    /* Env fallback when a tier has no config provider, in precedence order:
     *
-    *  1. AIMEE_LLM_URL — the single "point me at the unified aimee-llm container"
-    *     knob. It is the operator explicitly designating one CAPABLE container
-    *     for the whole LLM surface, so it drives BOTH tiers via that container's
-    *     OpenAI chat endpoint ({AIMEE_LLM_URL}/v1). This is the only env fallback
-    *     Tier-B accepts — see (2).
+    *  1. The configured SYNTHESIS endpoint, resolved by config — one field
+    *     (llm_synth_endpoint) with the AIMEE_LLM_URL override applied inside
+    *     config_synth_chat_endpoint(), never here. It no longer names a co-deployed
+    *     container: aimee-llm is retired and the kb embeds in-container, so this is
+    *     synthesis-only and external-only, and it drives BOTH tiers via that
+    *     endpoint's OpenAI chat API. It is the only fallback Tier-B accepts — see (2).
+    *
+    *     The URL is normalized (trailing slashes, /v1 suffix) in that one resolver,
+    *     so this file cannot disagree with any other caller about what an operator's
+    *     value means.
     *  2. LLM_ENDPOINT — TIER-A ONLY. It is the small-model interface (the
     *     zero-config CPU sibling points Tier-A here); letting a small model serve
     *     the reasoning stages is the weak-model-poisons-the-graph case the tier
@@ -155,16 +161,8 @@ int kb_curator_provider_for_stage(const config_t *cfg, kb_curator_stage_t stage,
    runtime_secret_wipe(runtime_key, sizeof(runtime_key));
    if (!base_url[0])
    {
-      const char *llm_url = getenv("AIMEE_LLM_URL");
-      if (llm_url && llm_url[0])
+      if (config_synth_chat_endpoint(cfg, synth_url, sizeof(synth_url)))
       {
-         /* AIMEE_LLM_URL is the container base (no /v1); derive the chat endpoint
-          * unless the operator already included it. */
-         size_t n = strlen(llm_url);
-         while (n > 0 && llm_url[n - 1] == '/')
-            n--;
-         int has_v1 = (n >= 3 && strncmp(llm_url + n - 3, "/v1", 3) == 0);
-         snprintf(synth_url, sizeof(synth_url), "%.*s%s", (int)n, llm_url, has_v1 ? "" : "/v1");
          const char *env_model = getenv("AIMEE_LLM_MODEL");
          base_url = synth_url;
          model = (env_model && env_model[0]) ? env_model : AIMEE_LLM_DEFAULT_MODEL;

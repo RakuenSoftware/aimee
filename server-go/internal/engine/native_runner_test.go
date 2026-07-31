@@ -1016,6 +1016,9 @@ func TestPanelCapacitySeatsHaveDistinctDurableJobKeys(t *testing.T) {
 		if !request.ProvidedTarget {
 			t.Fatalf("roundtable request did not declare its inline artifact: %+v", request)
 		}
+		if request.MaxTurnsCap != roundtableDelegateMaxTurnsCap {
+			t.Fatalf("roundtable request is not turn-bounded: %+v", request)
+		}
 		key := delegateJobKey(request)
 		if seen[key] {
 			t.Fatalf("capacity seats collapsed onto durable key %q: %+v", key, agents.requests)
@@ -1042,7 +1045,7 @@ func TestPanelRepairsMalformedJSONOnSameParticipantOnce(t *testing.T) {
 	if repair.Participant != "opaque-seat-token" || repair.Delegate != "" {
 		t.Fatalf("repair did not preserve opaque participant without rerouting: %+v", repair)
 	}
-	if !repair.Tools || !repair.ProvidedTarget || repair.ArtifactStage != "plan" || !strings.HasSuffix(repair.DurableSlot, ":repair:1") {
+	if !repair.Tools || !repair.ProvidedTarget || repair.MaxTurnsCap != roundtableDelegateMaxTurnsCap || repair.ArtifactStage != "plan" || !strings.HasSuffix(repair.DurableSlot, ":repair:1") {
 		t.Fatalf("repair request did not preserve tool-capable transport as a bounded continuation: %+v", repair)
 	}
 	if !strings.Contains(repair.Prompt, "Preserve its analysis and findings") || !strings.Contains(repair.Prompt, "exactly one JSON object") {

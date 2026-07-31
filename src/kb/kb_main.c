@@ -1,4 +1,5 @@
 #include "aimee.h"
+#include "aimee_home.h"
 #include "agent_exec.h"
 #include "config.h"
 #include "config_database.h"
@@ -774,7 +775,8 @@ static int kb_cmd_tenancy_init_db2(void)
       fprintf(stderr, "aimee-kb: db2_url not configured (set AIMEE_DB2_URL or run `aimee init`)\n");
       return -1;
    }
-   db2_set_embedding_dim(cfg.embedding_dim > 0 ? cfg.embedding_dim : 1024);
+   db2_set_embedding_dim_default(config_embedding_dim_default());
+   db2_set_embedding_dim(config_embedding_dim_effective(&cfg));
    if (db2_init(cfg.db2_url) != 0)
    {
       fprintf(stderr, "aimee-kb: DB2 not reachable at %s\n", cfg.db2_url);
@@ -1558,7 +1560,8 @@ int main(int argc, char **argv)
     * in /proc/<pid>/environ, so a credential-bearing process may seal into
     * Vault but may not become the long-lived KB. The bootstrap helper itself is
     * already short-lived and therefore does not need to re-exec. */
-   if (!(argc > 1 && strcmp(argv[1], "--bootstrap-vault-env") == 0))
+   if (!(argc > 1 && (strcmp(argv[1], "--bootstrap-vault-env") == 0 ||
+                      strcmp(argv[1], "--bootstrap-vault-stdin") == 0)))
    {
       int credential_env = vault_env_has_credential_environment();
       if (credential_env < 0)
@@ -1589,6 +1592,14 @@ int main(int argc, char **argv)
       fputs("aimee-kb: credential Vault bootstrap failed\n", stderr);
       return 1;
    }
+   if (argc == 2 && strcmp(argv[1], "--bootstrap-vault-stdin") == 0 &&
+       (vault_env_import_stream(stdin) < 0 || vault_env_bootstrap_init_all() < 0 ||
+        vault_env_has_credential_environment() != 0))
+   {
+      runtime_secret_clear();
+      fputs("aimee-kb: streamed credential Vault bootstrap failed\n", stderr);
+      return 1;
+   }
    if (vault_config_bootstrap_init() < 0)
    {
       fputs("aimee-kb: credential config Vault migration failed\n", stderr);
@@ -1607,8 +1618,57 @@ int main(int argc, char **argv)
    }
    (void)atexit(runtime_secret_clear);
 
-   if (argc > 1 && strcmp(argv[1], "--bootstrap-vault-env") == 0)
+   if (argc > 1 && (strcmp(argv[1], "--bootstrap-vault-env") == 0 ||
+                    strcmp(argv[1], "--bootstrap-vault-stdin") == 0))
       return 0;
+
+   /* Entrypoint decision probe: presence only, never the DB credential. A KB
+    * restarted without first-boot environment metadata must still select the
+    * external database whose URL is held exclusively in Vault. */
+   if (argc == 2 && strcmp(argv[1], "--vault-db2-external") == 0)
+   {
+      char db2_url[4096];
+      int present = runtime_secret_get("AIMEE_DB2_URL", db2_url, sizeof(db2_url));
+      char embedded[4096];
+      const char *home = aimee_home();
+      int n = home ? snprintf(embedded, sizeof(embedded), "postgresql:///aimee_shared?host=%s/run",
+                              home)
+                   : -1;
+      /* Prefix match to a parameter boundary, not string equality: the entrypoint
+       * seals the embedded DSN with an explicit &user=<cluster owner> so that
+       * containers sharing the socket connect as the right role. That trailing
+       * parameter does not make the topology external, and treating it as such
+       * would stop the KB provisioning its own cluster. */
+      size_t embedded_len = n > 0 ? (size_t)n : 0;
+      int matches_embedded = embedded_len > 0 && embedded_len < sizeof(embedded) &&
+                             strncmp(db2_url, embedded, embedded_len) == 0 &&
+                             (db2_url[embedded_len] == '\0' || db2_url[embedded_len] == '&');
+      int external = present && !matches_embedded;
+      runtime_secret_wipe(db2_url, sizeof(db2_url));
+      runtime_secret_wipe(embedded, sizeof(embedded));
+      return external ? 0 : 1;
+   }
+   /* The entrypoint's selection query. It used to parse aimee.yaml with a sed regex —
+    * a second reader of a setting, hardcoding the file paths and assuming the key sits
+    * at the top level. It worked only because config_save happens to write it there,
+    * and its failure was silent: an unparsed key reads as "no embedder selected", the
+    * builtin serves forever, and nothing says so. Ask config instead, which is the
+    * only thing that knows where the value lives and how it is spelled. */
+   if (argc == 2 && strcmp(argv[1], "--print-embedding-model") == 0)
+   {
+      const char *model = config_embedding_model();
+      if (!model || !model[0])
+         return 1; /* nothing selected — the caller starts no embedder */
+      printf("%s\n", model);
+      return 0;
+   }
+   if (argc == 2 && strcmp(argv[1], "--vault-llm-auth-configured") == 0)
+   {
+      char token[513];
+      int present = runtime_secret_get("AIMEE_LLM_AUTH_TOKEN", token, sizeof(token));
+      runtime_secret_wipe(token, sizeof(token));
+      return present ? 0 : 1;
+   }
 
    /* Subcommands (must precede the daemon flag loop). */
    if (argc > 1 && strcmp(argv[1], "enroll") == 0)
@@ -1745,6 +1805,7 @@ int main(int argc, char **argv)
     * halfvec embedding columns are created at the right size. AIMEE_EMBEDDING_DIM
     * overrides the configured value (containerized deploys without a writable
     * aimee.yaml). */
+   db2_set_embedding_dim_default(config_embedding_dim_default());
    db2_set_embedding_dim(config_resolve_embedding_dim(&kb_cfg));
    db2_set_embedding_dim_pinned(config_embedding_dim_is_pinned(&kb_cfg));
    /* unified-llm-container §2: activate the model-identity drift guard (the kb applies

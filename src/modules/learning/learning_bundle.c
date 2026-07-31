@@ -92,7 +92,7 @@ int learning_bundle_build(const char *query, const char *embed_cmd, int k, learn
 
    const char *model = config_embedding_command(NULL, embed_cmd);
    float qvec[BUNDLE_EMBED_DIM];
-   int qdim = memory_embed_text(query, model, qvec, BUNDLE_EMBED_DIM);
+   int qdim = memory_embed_text(query, model, EMBED_INPUT_QUERY, qvec, BUNDLE_EMBED_DIM);
    if (qdim <= 0)
       return -1;
 

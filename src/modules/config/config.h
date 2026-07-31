@@ -452,6 +452,11 @@ typedef struct config
     * system prompt so the external agent stops re-exploring the repo. Default
     * off; a per-request `x-aimee-preinject: 0` header also disables it. */
    int ingress_preinject_enabled;
+   /* Task-conditioned code packet rollout: off preserves the legacy preview,
+    * observe retrieves/audits without changing model-visible bytes, and on
+    * replaces the legacy preview with the bounded answerable packet. E4 ships
+    * observe; E6 owns any promotion to on. */
+   char code_context_mode[16];
    /* ingress-compression P5 (§2.3), default off: inject the <aimee-context>
     * envelope on the Anthropic-native /v1/messages passthrough (otherwise
     * parity-skipped to preserve the client's cached prefix). Separate from the
@@ -489,6 +494,27 @@ typedef struct config
     * worktree (.aimee/worktrees/...), forcing every mutating session into an
     * isolated worktree+branch off the default branch. Default 0 (off). */
    int require_session_worktree;
+   /* session_worktree_base: what a NEW primary session's branch+worktree is cut from.
+    * Resolution order: CONFIGURED -> remote DEFAULT -> main -> master.
+    *   "remote_default" (DEFAULT) — the remote's advertised default (origin/HEAD),
+    *                     fetched fresh; then main, then master.
+    *   "local_default"  — the local copy of the default branch; then main, then master.
+    *   "current"        — whatever the source checkout has checked out. Reachable ONLY
+    *                     by explicit opt-in, never as a fallback.
+    *   "<ref>"          — an explicit ref (e.g. "origin/main", a tag, a SHA); verified
+    *                     to exist, and an error if it does not.
+    * Each fallback prefers origin/<name> and accepts the local branch only when no
+    * remote-tracking ref exists, so a repo WITH a remote never starts from a stale local.
+    *
+    * The current branch is deliberately NOT in the chain. It used to be the last resort,
+    * which meant a new session was cut from whatever the shared checkout happened to be
+    * sitting on -- silently inheriting another session's unmerged work. main and master
+    * are dumb fallbacks, but they are stable.
+    *
+    * Env override: AIMEE_SESSION_WORKTREE_BASE. The attention guard independently
+    * refuses a worktree whose recorded base is neither the default branch nor a
+    * registered parent, so loosening this does not disable that check. */
+   char session_worktree_base[64];
    /* External-memory guard (default on): the PreToolUse attention-guard blocks
     * agent writes to external file-based agent-memory stores
     * (~/.claude/projects/<slug>/memory/...), redirecting durable memories into
@@ -774,18 +800,8 @@ typedef struct config
     *   negation lexical matching for negative facts. */
    int memory_negation_enabled;
 
-   /* Cross-encoder reranker: second-pass (query, candidate) scoring.
-    * memory_rerank_enabled: 0 = disabled (default), 1 = enabled.
-    * memory_rerank_command: external command for cross-encoder scores (stdin: JSON pairs,
-    *   stdout: JSON float array). Empty = disabled.
-    * memory_rerank_top_k: candidate pool size fed to cross-encoder (default 50).
-    * memory_rerank_mix: blend weight for cross-encoder vs hybrid (0.0–1.0, default 0.7).
-    * memory_query_expansion_mode: "lexical" (default) or "semantic" (embedding-based).
+   /* memory_query_expansion_mode: "lexical" (default) or "semantic" (embedding-based).
     * memory_query_expansion_k: number of near-neighbour terms to inject (default 5). */
-   int memory_rerank_enabled;
-   char memory_rerank_command[512];
-   int memory_rerank_top_k;
-   double memory_rerank_mix;
    char memory_query_expansion_mode[16];
    int memory_query_expansion_k;
 
@@ -1468,23 +1484,18 @@ typedef struct config
     *              NOTHING is deployed locally (no kb, no llm).
     *   "local"  — run a local aimee-kb and deploy the per-role LLM backends below.
     *
-    * Each LLM role is external (forward to llm_<role>_endpoint), local (a baked
-    * llama-server at llm_<role>_tier on llm_<role>_host / _gpu — mapped to the
-    * plugin's AIMEE_LLM_<ROLE>_MODE/TIER env), or off (rerank/synth only). The
-    * embedder's external endpoint/model/dim reuse embedding_endpoint/model/dim;
-    * an unset embedding_dim (0) is derived from the embedder /health probe. */
+    * The EMBEDDER is served by the kb itself; llm_embed_backend only chooses between
+    * in-container ("local") and an operator endpoint ("external",
+    * embedding_endpoint). An unset embedding_dim (0) is derived from the selected
+    * model. SYNTH is external (llm_synth_endpoint), local at llm_synth_tier on
+    * llm_synth_host / _gpu, or off. */
    char kb_mode[16]; /* "" | "local" | "remote" */
 
-   char llm_embed_backend[16]; /* "" | "external" | "local" */
-   char llm_embed_host[128];
-   char llm_embed_gpu[64];
-   char llm_embed_tier[16]; /* cpu | small | mid | large */
+   /* "" | "local" (in-container, the default) | "external" (embedding_endpoint).
+    * There is no host/gpu/tier here any more: those placed the retired aimee-llm
+    * container, and the kb now serves the selected embedder itself. */
+   char llm_embed_backend[16];
 
-   char llm_rerank_backend[16]; /* "" | "external" | "local" | "off" */
-   char llm_rerank_host[128];
-   char llm_rerank_gpu[64];
-   char llm_rerank_tier[16];
-   char llm_rerank_endpoint[512];
 
    char llm_synth_backend[16]; /* "" | "external" | "local" | "off" */
    char llm_synth_host[128];
@@ -1639,6 +1650,13 @@ typedef struct config
     *                          (0 → default 8) — the thin-log overfit guardrail.
     * kb_ranker_fit_benchmark: path to the recall-track fixture used as the
     *                          promotion gate (empty → benchmarks/rank/kb_hybrid/queries.json).
+    *                          THE DEFAULT IS A PLUMBING SMOKE FIXTURE, NOT A GATE: it
+    *                          holds 5 queries of 2-4 candidates, which is below the
+    *                          fitter's minimum (RANK_FIT_MIN_BENCH_QUERIES) and so
+    *                          refuses every promotion with reason
+    *                          "benchmark_underpowered". That refusal is deliberate —
+    *                          set this to a real held-out fixture before expecting
+    *                          any model to promote.
     * kb_ranker_fit_bench_k:   NDCG cutoff for the gate (0 → default 5).
     * kb_ranker_fit_objective: "pointwise" (default) or "pairwise" — the fitter
     *                          objective. Pairwise learns within-query ordering

@@ -39,8 +39,9 @@ The `aimee` CLI is a thin client. Linux, macOS, and Windows builds talk to the s
 - **Any model, any provider.** OpenAI Chat Completions, OpenAI Responses, Anthropic Messages,
   Gemini, Mistral, local OpenAI-compatible servers, and AWS Bedrock all pass through one internal
   request format. Switch the primary model without switching tools.
-- **Local inference.** One `aimee-llm` container serves embeddings, reranking, and synthesis on CPU
-  or GPU. The KB runs no model itself. See [Inference](docs/KB_LLM_BACKENDS.md).
+- **In-container embedding.** The KB embeds from weights baked into its own image — no inference
+  container, no first-boot model download. Point it at an external endpoint for a wider model, or
+  for synthesis. See [Inference](docs/KB_LLM_BACKENDS.md).
 - **Document ingestion.** Push source trees, Markdown, text, and PDFs. Structured PDF mode keeps
   coordinates, tables, page crops, OCR text, and citations. See [Structured PDF](docs/STRUCTURED_PDF.md).
 - **A browser workspace.** Chat, projects, agents, workflows, the code graph, logs, settings, and
@@ -66,14 +67,11 @@ docker compose -f compose.server-managed.yaml logs aimee-server
 Unless both browser credential env vars were supplied, the logs print a random temporary username
 and password under `[webchat]`. Open <https://localhost:8443> and sign in with that pair. The wizard
 first replaces it with your persistent operator username and password, then creates the initial
-agent and picks the inference tier, git hosts, and workspaces. Its last step starts:
+agent and picks the embedder, git hosts, and workspaces. Its last step starts `aimee-kb`, with
+private PostgreSQL 18, pgvector, and pgvectorscale inside the container.
 
-- `aimee-kb`, with private PostgreSQL 18, pgvector, and pgvectorscale inside the container;
-- `aimee-llm`, on CPU or GPU.
-
-The managed deploy creates and starts KB before LLM. It does not wait for first-boot model downloads:
-KB database initialization and CPU indexing begin immediately while LLM readiness continues in the
-background. A failed LLM download remains visible in that container's status and logs.
+There is no inference container to wait for. The KB's embedder is baked into its image, so database
+initialization and indexing begin as soon as the container is up.
 
 It also displays the one client-enrollment command for the signed-in first user.
 For a local inference tier, setup separately provisions an authenticated KB-to-LLM service identity;
@@ -135,8 +133,8 @@ The current tree is a large step past the last public release. The short version
   a time behind their own contracts and tests;
 - the workflow control plane moved to Go and now schedules parallel slices, live forge work,
   triggers, retries, review loops, and human gates;
-- the combined appliance image is gone; managed and split deployments use separate server, KB,
-  and inference containers;
+- the combined appliance image is gone; managed and split deployments use separate server and KB
+  containers, and the retired `aimee-llm` container's embedding role moved into the KB;
 - the KB container now owns its PostgreSQL database and can export it to an external server;
 - delegates gained role/persona routing, stronger admission, isolated worktrees, networkless
   containers, package mediation, custom images, and learned toolchains;

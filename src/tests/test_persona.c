@@ -34,6 +34,23 @@ int main(void)
    assert(platform_mkdtemp(home) != NULL);
    platform_setenv("AIMEE_HOME", home);
 
+   /* --- existence vs. load's engineer fallback --- */
+   {
+      /* persona_load() returns 0 for an unknown name and hands back the engineer
+       * built-in, so it can never report a typo. Dispatch needs a predicate that
+       * can, or `--persona nosuchpersona` silently runs as engineer. */
+      persona_t p;
+      assert(persona_load(NULL, "nosuchpersona", &p) == 0);
+      assert(strcmp(p.name, "engineer") == 0);
+      persona_free(&p);
+
+      assert(persona_exists(NULL, "engineer") == 1);
+      assert(persona_exists(NULL, "qa") == 1);
+      assert(persona_exists(NULL, "nosuchpersona") == 0);
+      assert(persona_exists(NULL, "") == 0);
+      assert(persona_exists(NULL, NULL) == 0);
+   }
+
    /* --- built-in metadata --- */
    {
       persona_t p;

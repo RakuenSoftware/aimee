@@ -1,0 +1,62 @@
+[
+  {
+    "model": "bge-v2-m3",
+    "params_M": 568,
+    "config": "20x512",
+    "candidates": 20,
+    "max_tokens": 512,
+    "ndcg_at_10": 0.622698491391798,
+    "cases": 3000,
+    "gpu_s_per_query": 0.0907910543490046
+  },
+  {
+    "model": "bge-v2-m3",
+    "params_M": 568,
+    "config": "20x256",
+    "candidates": 20,
+    "max_tokens": 256,
+    "ndcg_at_10": 0.5913740688745781,
+    "cases": 3000,
+    "gpu_s_per_query": 0.04888976090366486
+  },
+  {
+    "model": "bge-v2-m3",
+    "params_M": 568,
+    "config": "20x128",
+    "candidates": 20,
+    "max_tokens": 128,
+    "ndcg_at_10": 0.5944291716574265,
+    "cases": 3000,
+    "gpu_s_per_query": 0.033065849048318344
+  },
+  {
+    "model": "bge-v2-m3",
+    "params_M": 568,
+    "config": "10x256",
+    "candidates": 10,
+    "max_tokens": 256,
+    "ndcg_at_10": 0.35406233542310467,
+    "cases": 3000,
+    "gpu_s_per_query": 0.02685990920065281
+  },
+  {
+    "model": "bge-v2-m3",
+    "params_M": 568,
+    "config": "10x128",
+    "candidates": 10,
+    "max_tokens": 128,
+    "ndcg_at_10": 0.35375438370706236,
+    "cases": 3000,
+    "gpu_s_per_query": 0.02182091676168299
+  },
+  {
+    "model": "bge-v2-m3",
+    "params_M": 568,
+    "config": "5x256",
+    "candidates": 5,
+    "max_tokens": 256,
+    "ndcg_at_10": 0.2080644991938343,
+    "cases": 3000,
+    "gpu_s_per_query": 0.017664524167659693
+  }
+]

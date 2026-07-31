@@ -18,33 +18,6 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
-const char *config_vault_custody(void)
-{
-   static _Thread_local char buf[16];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, vault_custody), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_vault_tpm2_blob_path(void)
-{
-   static _Thread_local char buf[512];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, vault_tpm2_blob_path), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_vault_tpm2_tcti(void)
-{
-   static _Thread_local char buf[128];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, vault_tpm2_tcti), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
 const char *config_vault_tpm2_nv_index(void)
 {
    static _Thread_local char buf[32];
@@ -77,6 +50,24 @@ const char *config_memory_cognify_command(void)
    static _Thread_local char buf[512];
    buf[0] = 0;
    config_field_read(offsetof(config_t, memory_cognify_command), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_code_context_mode(void)
+{
+   static _Thread_local char buf[16];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, code_context_mode), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_session_worktree_base(void)
+{
+   static _Thread_local char buf[64];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, session_worktree_base), sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
 }
@@ -158,15 +149,6 @@ const char *config_memory_rewrite_command(void)
    static _Thread_local char buf[512];
    buf[0] = 0;
    config_field_read(offsetof(config_t, memory_rewrite_command), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_memory_rerank_command(void)
-{
-   static _Thread_local char buf[512];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, memory_rerank_command), sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
 }
@@ -473,78 +455,6 @@ const char *config_llm_embed_backend(void)
    static _Thread_local char buf[16];
    buf[0] = 0;
    config_field_read(offsetof(config_t, llm_embed_backend), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_llm_embed_host(void)
-{
-   static _Thread_local char buf[128];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, llm_embed_host), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_llm_embed_gpu(void)
-{
-   static _Thread_local char buf[64];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, llm_embed_gpu), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_llm_embed_tier(void)
-{
-   static _Thread_local char buf[16];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, llm_embed_tier), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_llm_rerank_backend(void)
-{
-   static _Thread_local char buf[16];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, llm_rerank_backend), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_llm_rerank_host(void)
-{
-   static _Thread_local char buf[128];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, llm_rerank_host), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_llm_rerank_gpu(void)
-{
-   static _Thread_local char buf[64];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, llm_rerank_gpu), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_llm_rerank_tier(void)
-{
-   static _Thread_local char buf[16];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, llm_rerank_tier), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_llm_rerank_endpoint(void)
-{
-   static _Thread_local char buf[512];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, llm_rerank_endpoint), sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
 }
@@ -1266,6 +1176,36 @@ int config_set_memory_maintenance_interval_seconds(int value)
    if (rc == 0)
    {
       cfg->memory_maintenance_interval_seconds = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_memory_maintenance_summarize_enabled(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->memory_maintenance_summarize_enabled = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_code_cochange_git_enabled(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->code_cochange_git_enabled = value;
       rc = config_save(cfg);
    }
    free(cfg);

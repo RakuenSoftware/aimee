@@ -2,7 +2,7 @@
 
 > Auto-generated from `api/openapi-v1.yaml` by `scripts/gen-api-docs.py`. Do not edit by hand; run `make docs-gen` to regenerate.
 
-Total endpoints: 91
+Total endpoints: 92
 
 ## Endpoints
 
@@ -163,6 +163,29 @@ Responses:
 - `401` — Unauthorized
 - `403` — Scoped credentials cannot request all projects
 - `404` — Project is unknown or detached
+- `409` — Active project is required or the observed generation is stale
+- `503` — Canonical index unavailable
+
+### `GET /v1/code/context`
+
+Bounded task-conditioned context for the active project
+
+Reuses hybrid RRF retrieval but returns only current-generation evidence for one active project. Exact lexical and structural evidence leads; vector-only evidence must clear the quality floor. Memory is additive, locally ordered, and anchored to accepted code. A weak query returns HTTP 200 with status `no_answer`, empty results, and empty why rather than broadening to global memory.
+
+| Name | In | Required | Type | Description |
+|------|----|----------|------|-------------|
+| `query` | query | yes | string |  |
+| `symbol` | query | no | string |  |
+| `project` | query | yes | string | Stable identity of the authenticated active project; cross-project scope is forbidden. |
+| `generation` | query | no | integer | Optional observed current generation; stale observations fail closed. |
+| `max_results` | query | no | integer | Accepted for client compatibility and clamped to the fixed packet maximum of four. |
+
+Responses:
+
+- `200` — Answerable bounded packet or explicit no_answer
+- `400` — Missing or invalid query
+- `401` — Unauthorized
+- `404` — Project is unknown, detached, or has no current generation
 - `409` — Active project is required or the observed generation is stale
 - `503` — Canonical index unavailable
 
@@ -452,7 +475,7 @@ Responses:
 
 KB-owned configuration (console)
 
-Every config option aimee-kb owns — the embedder, the reranker, the synth
+Every config option aimee-kb owns — the embedder, the synth
 tier, and the knowledge base itself — with its current value, section, and
 whether it needs a kb restart. The split from aimee-server's own settings
 is by which binary reads the option (KB_SETTINGS in

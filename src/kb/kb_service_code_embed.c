@@ -521,7 +521,7 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
        * (embed_command runs the 0.6B embedder; "builtin" falls back to a stable
        * deterministic vector when no embedder is configured, e.g. in tests). */
       float vec[CE_EMBED_MAX_DIM];
-      int dim = memory_embed_text(text, embed_command, vec, embed_dim);
+      int dim = memory_embed_text(text, embed_command, EMBED_INPUT_DOCUMENT, vec, embed_dim);
       if (dim != embed_dim)
       {
          db2_code_index_op_record(point_id, project, node_key, rows[i].path, 0,

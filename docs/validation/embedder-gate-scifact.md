@@ -1,8 +1,25 @@
 # Embedder choice — baseline-gated validation (text BEIR + code)
 
-**Decision: drop nomic; use Qwen3-Embedding — 0.6B (CPU default, 1024-d), 4B (GPU
-default, 2560-d), 8B (operator opt-in, 4000-d trunc).** This supersedes the LoCoMo
-screen ([embedder-gate-locomo](embedder-gate-locomo.md)) **and** the earlier
+> **⚠️ SUPERSEDED / NO LONGER THE EMBEDDER DECISION (2026-07-29).** The standing
+> decision is **nomic-embed-text-v2-moe at a uniform 768-d on every tier** — see
+> [embedder-selection-frozen-ab-v1](embedder-selection-frozen-ab-v1.md), decided
+> on a 10,000-case / 26,473-document suite built from aimee's own corpus.
+>
+> **This is not a reversal of the finding below, because it is a different
+> model.** The model dropped here was `nomic-embed-text-v1.5` — text-only, no
+> code training — and that finding stands: it lost to Qwen3 on code by a wide
+> margin. `nomic-embed-text-v2-moe` is a different, later, retrieval-trained
+> multilingual MoE model, and it beats the Qwen3 ladder on aimee's own code
+> (`code_unit_body` 0.8086) as well as on prose.
+>
+> Retained as evidence: the baseline-gating methodology here — trusting a score
+> only after it reproduces the model's published result on the same harness — is
+> what caught the withdrawn capped-corpus numbers, and remains the standard.
+
+**Superseded decision (2026-06-24): drop nomic; use Qwen3-Embedding — 0.6B (CPU
+default, 1024-d), 4B (GPU default, 2560-d), 8B (operator opt-in, 4000-d trunc).**
+This superseded the LoCoMo screen
+([embedder-gate-locomo](embedder-gate-locomo.md)) **and** the earlier
 capped-corpus SciFact numbers that once lived in this file (the "0.883 / 0.820 /
 0.799" table — withdrawn; it was a capped-corpus artifact, see below).
 

@@ -369,14 +369,6 @@ static const config_schema_entry_t config_schema[] = {
     {"db2_pool_size", SCHEMA_INT, 0},
     {"kb_mode", SCHEMA_STRING, 0},
     {"llm_embed_backend", SCHEMA_STRING, 0},
-    {"llm_embed_host", SCHEMA_STRING, 0},
-    {"llm_embed_gpu", SCHEMA_STRING, 0},
-    {"llm_embed_tier", SCHEMA_STRING, 0},
-    {"llm_rerank_backend", SCHEMA_STRING, 0},
-    {"llm_rerank_host", SCHEMA_STRING, 0},
-    {"llm_rerank_gpu", SCHEMA_STRING, 0},
-    {"llm_rerank_tier", SCHEMA_STRING, 0},
-    {"llm_rerank_endpoint", SCHEMA_STRING, 0},
     {"llm_synth_backend", SCHEMA_STRING, 0},
     {"llm_synth_host", SCHEMA_STRING, 0},
     {"llm_synth_gpu", SCHEMA_STRING, 0},
@@ -399,7 +391,6 @@ static const config_schema_entry_t config_schema[] = {
     {"model_reasoning_effort", SCHEMA_STRING, 0},
     {"embedding_dim", SCHEMA_INT, 0},
     {"memory_weight_profile", SCHEMA_STRING, 0},
-    {"memory_rerank", SCHEMA_OBJECT, 0},
     {"memory_query_expansion", SCHEMA_OBJECT, 0},
     {"memory_recall_lanes", SCHEMA_OBJECT, 0},
     {"memory_maintenance", SCHEMA_OBJECT, 0},
@@ -748,16 +739,6 @@ static void config_set_defaults(config_t *cfg)
     * is authoritative and refuses a mismatch. (Was defaulted to 1024, which made
     * every deployment look "pinned" and silently disabled §2a/§2b.) */
    cfg->embedding_dim = 0;
-   /* The cross-encoder rerank stage (Ettin reranker sized to the embedder tier:
-    * 1b with the 4b embedder, 400m with the 0.6b; served by the
-    * embedder service /rerank, client scripts/rerank-remote.py) is the third
-    * pipeline stage after the embedder, and is default-ON: every retrieval
-    * runs a top-K cross-encoder pass over the dense/lexical candidates. It
-    * degrades safely to plain hybrid ordering if the reranker service is absent
-    * or errors, so default-on is safe even without the embedder container. */
-   cfg->memory_rerank_enabled = 1;
-   snprintf(cfg->memory_rerank_command, sizeof(cfg->memory_rerank_command), "%s",
-            "python3 /opt/aimee/scripts/rerank-remote.py");
    cfg->memory_routing_enabled = 1;
    /* Negation-aware retrieval defaults ON: for negatively-polarised queries it
     * promotes memories carrying the same negated concept (overlapping "not_<token>"
@@ -822,6 +803,7 @@ static void config_set_defaults(config_t *cfg)
    cfg->learning_implicit_repeat_question = 0;
    cfg->learning_implicit_repeated_correction = 0;
    cfg->learning_implicit_workflow_repetition = 0;
+   snprintf(cfg->session_worktree_base, sizeof(cfg->session_worktree_base), "remote_default");
    cfg->integrity_enabled = 0;
    cfg->integrity_dry_run = 1;
    /* Ingress envelope DEFAULT-ON (operator decision 2026-06-28): inject the
@@ -1462,22 +1444,6 @@ int config_load_file(config_t *cfg)
           {"kb_mode", offsetof(config_t, kb_mode), sizeof(((config_t *)0)->kb_mode)},
           {"llm_embed_backend", offsetof(config_t, llm_embed_backend),
            sizeof(((config_t *)0)->llm_embed_backend)},
-          {"llm_embed_host", offsetof(config_t, llm_embed_host),
-           sizeof(((config_t *)0)->llm_embed_host)},
-          {"llm_embed_gpu", offsetof(config_t, llm_embed_gpu),
-           sizeof(((config_t *)0)->llm_embed_gpu)},
-          {"llm_embed_tier", offsetof(config_t, llm_embed_tier),
-           sizeof(((config_t *)0)->llm_embed_tier)},
-          {"llm_rerank_backend", offsetof(config_t, llm_rerank_backend),
-           sizeof(((config_t *)0)->llm_rerank_backend)},
-          {"llm_rerank_host", offsetof(config_t, llm_rerank_host),
-           sizeof(((config_t *)0)->llm_rerank_host)},
-          {"llm_rerank_gpu", offsetof(config_t, llm_rerank_gpu),
-           sizeof(((config_t *)0)->llm_rerank_gpu)},
-          {"llm_rerank_tier", offsetof(config_t, llm_rerank_tier),
-           sizeof(((config_t *)0)->llm_rerank_tier)},
-          {"llm_rerank_endpoint", offsetof(config_t, llm_rerank_endpoint),
-           sizeof(((config_t *)0)->llm_rerank_endpoint)},
           {"llm_synth_backend", offsetof(config_t, llm_synth_backend),
            sizeof(((config_t *)0)->llm_synth_backend)},
           {"llm_synth_host", offsetof(config_t, llm_synth_host),
@@ -1509,8 +1475,6 @@ int config_load_file(config_t *cfg)
    config_apply_inference_backend_defaults(cfg, root);
 
    config_parse_memory_negation_section(cfg, root);
-
-   config_parse_memory_rerank_section(cfg, root);
 
    config_parse_memory_query_expansion_section(cfg, root);
 
@@ -2159,6 +2123,19 @@ int config_reload(void)
       pthread_mutex_unlock(&g_snap_wlock);
       return -1; /* parse failure -> keep the running snapshot */
    }
+   /* The published snapshot must equal what config_load() returns, and config_load
+    * is config_load_file + this. Without it a reload publishes a snapshot with every
+    * Vault-only secret blanked, because config_load_file may serve the process cache
+    * and skip the parse that rehydrates them.
+    *
+    * That is not hypothetical: the server mints the API primary bearer AFTER its
+    * first config_load, so the cache still holds the pre-mint config. The 1s
+    * config_reload_if_changed tick then republished that stale copy over the good
+    * snapshot seeded by config_snapshot_init, leaving server_api_bearer_token empty
+    * and failing first-user bootstrap on every clean install (the wizard's Deploy
+    * step returned 500). Applied before the token so an unchanged reload stays a
+    * no-op rather than churning the snapshot. */
+   config_apply_runtime_secrets(&fresh);
    uint64_t tok = config_snapshot_token(&fresh);
    if (atomic_load_explicit(&g_snap_inited, memory_order_acquire) && tok == g_snap_token)
    {

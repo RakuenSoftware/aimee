@@ -14,8 +14,9 @@
 #include "kb/kb_surprising_judge.h" /* §4 judge stub seam (kb_surprising_verdict_t) */
 #include "db2/lifecycle.h"          /* §2c: db2_reembed_* / db2_dim_change_reset stub types */
 #include "db2/code_project_lifecycle.h"
-#include "rel_types.h"     /* REL_TYPE_NAME_MAX for the db2_ontology_* stubs below */
-#include "config_fields.h" /* config_field_t for the pipeline-console stubs below */
+#include "rel_types.h"        /* REL_TYPE_NAME_MAX for the db2_ontology_* stubs below */
+#include "config_fields.h"    /* config_field_t for the pipeline-console stubs below */
+#include "embed_input_type.h" /* the memory_embed_text stub's polarity argument */
 #include "kb_service.h"
 #include "kb/kb_service_code_embed.h"
 #include "kb_bandit.h"
@@ -26,6 +27,7 @@
 #include "kb_pki.h"
 #include "kb_tls.h"
 #include "kb_client_mtls.h"
+#include "runtime_secret.h"
 
 extern int g_test_registry_heartbeat_allow;
 extern char g_test_registry_server_id[128], g_test_registry_issuer[601],
@@ -46,7 +48,9 @@ void *db2_conn(void)
 {
    return NULL;
 }
-void db2_lease_begin(void)
+/* The real symbol is db2_lease_begin_at; db2_lease_begin is a macro in db2.h
+ * that records the caller's file:line for stuck-lease attribution. */
+void db2_lease_begin_at(const char *site)
 {
 }
 void db2_lease_end(void)
@@ -54,6 +58,27 @@ void db2_lease_end(void)
 }
 void db2_lease_release_idle(void)
 {
+}
+/* /v1/health reports pool starvation, so the route layer now reads the pool.
+ * A route test wants no real DB2: report an idle pool so health stays "ok" and
+ * the route assertions are about routing, not pool state. */
+void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants, long *lease_timeouts,
+                    long *stuck, long *poisoned)
+{
+   if (size)
+      *size = 0;
+   if (in_use)
+      *in_use = 0;
+   if (waiters)
+      *waiters = 0;
+   if (lease_grants)
+      *lease_grants = 0;
+   if (lease_timeouts)
+      *lease_timeouts = 0;
+   if (stuck)
+      *stuck = 0;
+   if (poisoned)
+      *poisoned = 0;
 }
 
 static int code_project_manifest_stub(const char *project, code_project_manifest_t *out)
@@ -717,6 +742,8 @@ typedef struct
 static char g_code_find_project[128];
 static int g_code_local_first_fixture;
 static int g_code_hybrid_path_collision_fixture;
+static int g_code_context_memory_scope_rank = 3;
+static int g_code_context_memory_anchored = 1;
 
 int canonical_index_find(const char *identifier, void *out, int max)
 {
@@ -879,12 +906,12 @@ typedef struct
    char snippet[512];
    double rank;
    char content_hash[80];
+   int line;
 } test_code_search_hit_t;
 
 int canonical_index_code_search(const char *query, const char *project, void *out, int max,
                                 int enrich)
 {
-   (void)enrich;
    assert(query);
    assert(out);
    if (strcmp(query, "needle") != 0)
@@ -917,6 +944,7 @@ int canonical_index_code_search(const char *query, const char *project, void *ou
    snprintf(hits[0].snippet, sizeof(hits[0].snippet), "int needle(void) { return 1; }");
    hits[0].rank = 0.75;
    snprintf(hits[0].content_hash, sizeof(hits[0].content_hash), "deadbeefcafe");
+   hits[0].line = enrich ? 17 : 0;
    return 1;
 }
 
@@ -2372,7 +2400,7 @@ static void test_console_settings(void)
    assert(status == 200);
    assert(strstr(buf, "\"fields\"") != NULL);
    assert(strstr(buf, "\"embedding_model\"") != NULL);
-   assert(strstr(buf, "\"llm_rerank_backend\"") != NULL);
+   assert(strstr(buf, "\"llm_synth_backend\"") != NULL);
    assert(strstr(buf, "\"Embedder\"") != NULL);
    /* Owned by the Typed Facts page, so it must not appear on this surface. */
    assert(strstr(buf, "\"typed_facts_enabled\"") == NULL);
@@ -3240,7 +3268,7 @@ static void test_mtls_listener(void)
                (long)getpid());
       unlink(identity_file);
       kb_client_mtls_set_identity_path_for_test(identity_file);
-      setenv("AIMEE_KB_CONN", conn2, 1);
+      assert(runtime_secret_store("AIMEE_KB_CONN", conn2) == 0);
       setenv("AIMEE_TRANSPORT_KB_POOL_ENABLED", "0", 1);
       assert(kb_client_mtls_configured() == 1);
       int st2 = -1;
@@ -3330,7 +3358,7 @@ static void test_mtls_listener(void)
                                 &pool_exhausted);
       assert(pool_total == 0 && pool_idle == 0);
       unsetenv("AIMEE_TRANSPORT_KB_POOL_ENABLED");
-      unsetenv("AIMEE_KB_CONN");
+      runtime_secret_remove("AIMEE_KB_CONN");
 
       /* A wizard-managed v2 identity owns its endpoint and stable registry
        * binding, so it remains configured with no one-time connection string
@@ -3501,8 +3529,29 @@ int db2_memory_find_facts_like(const char *query, int limit, void *out, int max)
    m[0].id = 7;
    snprintf(m[0].kind, sizeof(m[0].kind), "decision");
    snprintf(m[0].headline, sizeof(m[0].headline), "why needle exists");
-   snprintf(m[0].content, sizeof(m[0].content), "chose needle over haystack for O(1) lookup");
+   snprintf(m[0].content, sizeof(m[0].content), "%schose needle over haystack for O(1) lookup",
+            g_code_context_memory_anchored ? "src/search.c: " : "");
    return 1;
+}
+
+int memory_find_facts_visible_ex(const char *query, const char *workspace, const char *project,
+                                 int include_all, int limit, void *out, int max)
+{
+   (void)workspace;
+   assert(project == NULL || strcmp(project, "proj-alpha") == 0);
+   assert(include_all == 0 || include_all == 1);
+   int n = db2_memory_find_facts_like(query, limit, out, max);
+   if (n > 0)
+      ((test_full_memory_t *)out)[0].confidence = 0.91;
+   return n;
+}
+
+int memory_scope_visibility_rank(int64_t memory_id, const char *workspace, const char *project)
+{
+   (void)workspace;
+   return memory_id == 7 && project && strcmp(project, "proj-alpha") == 0
+              ? g_code_context_memory_scope_rank
+              : 0;
 }
 
 /* canonical_index_find_callers stub (used by the callers + hybrid route tests
@@ -3637,10 +3686,14 @@ int db2_cross_repo_recompute_blocked_symbols(int k, int m, int len_min)
  * (g_vec_enabled=0 -> memory_embed_text returns 0 -> the leg is skipped), so the
  * existing hybrid tests are unaffected; test_code_hybrid_vector_ok flips it on. */
 static int g_vec_enabled = 0;
-int memory_embed_text(const char *text, const char *command, float *out, int max_dim)
+static int g_vec_search_unavailable = 0;
+static int g_vec_unauthorized = 0;
+int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
+                      float *out, int max_dim)
 {
    (void)text;
    (void)command;
+   (void)input_type;
    if (!g_vec_enabled || !out || max_dim <= 0)
       return 0;
    int d = 2560; /* the stub embedder's FIXED output dim (independent of the corpus
@@ -3651,6 +3704,10 @@ int memory_embed_text(const char *text, const char *command, float *out, int max
       out[i] = 0.01f * (float)(i % 7);
    return d;
 }
+int memory_embedder_last_result_unauthorized(void)
+{
+   return g_vec_unauthorized;
+}
 int pgvec_code_search_paths(const char *project, const float *vec, int dim, int limit, char *paths,
                             int path_cap, double *scores, int max)
 {
@@ -3658,6 +3715,8 @@ int pgvec_code_search_paths(const char *project, const float *vec, int dim, int 
    (void)vec;
    (void)dim;
    (void)limit;
+   if (g_vec_search_unavailable)
+      return -1;
    if (!g_vec_enabled || !paths || path_cap <= 0 || !scores || max < 2)
       return 0;
    /* Two hits: src/search.c OVERLAPS the lexical leg (-> 2-signal consensus) and
@@ -4047,6 +4106,7 @@ static void test_code_hybrid_vector_ok(void)
    g_vec_enabled = 0;
    g_test_embedding_dim = 1024;
    assert(s == 200);
+   assert(strstr(buf, "\"vector_status\":\"ok\"") != NULL);
    /* The vector-only file appears, labeled and carrying its vector score. */
    assert(strstr(buf, "\"file_path\":\"src/semantic.c\"") != NULL);
    assert(strstr(buf, "\"vector\"") != NULL);
@@ -4066,8 +4126,153 @@ static void test_code_hybrid_vector_dim_mismatch_skips(void)
                             NULL, 0, buf, sizeof(buf));
    g_vec_enabled = 0;
    assert(s == 200);
+   assert(strstr(buf, "\"vector_status\":\"stale\"") != NULL);
    assert(strstr(buf, "\"file_path\":\"src/search.c\"") != NULL);   /* lexical still works */
    assert(strstr(buf, "\"file_path\":\"src/semantic.c\"") == NULL); /* vector leg skipped */
+}
+
+static void test_code_context_vector_store_outage_is_not_empty(void)
+{
+   g_test_embedding_dim = 2560;
+   g_vec_enabled = 1;
+   g_vec_search_unavailable = 1;
+   char buf[4096];
+   int s =
+       kb_http_route_ex("GET", "/v1/code/context", "query=definitely-unrelated&project=proj-alpha",
+                        NULL, NULL, NULL, 0, buf, sizeof(buf));
+   g_vec_search_unavailable = 0;
+   g_vec_enabled = 0;
+   g_test_embedding_dim = 1024;
+   assert(s == 503);
+   assert(strstr(buf, "\"status\":\"unavailable\"") != NULL);
+   assert(strstr(buf, "\"dependency\":\"vector_store\"") != NULL);
+   assert(strstr(buf, "\"retry_after_ms\":1000") != NULL);
+   assert(strstr(buf, "no_answer") == NULL);
+}
+
+static void test_code_context_dimension_mismatch_is_stale(void)
+{
+   g_test_embedding_dim = 1024;
+   g_vec_enabled = 1;
+   char buf[4096];
+   int s =
+       kb_http_route_ex("GET", "/v1/code/context", "query=definitely-unrelated&project=proj-alpha",
+                        NULL, NULL, NULL, 0, buf, sizeof(buf));
+   g_vec_enabled = 0;
+   assert(s == 409);
+   assert(strstr(buf, "\"status\":\"stale\"") != NULL);
+   assert(strstr(buf, "\"dependency\":\"embedder\"") != NULL);
+   assert(strstr(buf, "\"observed_dimension\":2560") != NULL);
+   assert(strstr(buf, "\"current_dimension\":1024") != NULL);
+   assert(strstr(buf, "\"retryable\":false") != NULL);
+}
+
+static void test_code_context_bounded_current_project(void)
+{
+   char buf[8192];
+   int s = kb_http_route_ex("GET", "/v1/code/context",
+                            "query=needle&symbol=target_fn&project=proj-alpha&max_results=99", NULL,
+                            NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"status\":\"ok\"") != NULL);
+   assert(strstr(buf, "\"project\":\"proj-alpha\"") != NULL);
+   assert(strstr(buf, "\"generation\":2") != NULL);
+   assert(strstr(buf, "\"freshness\":\"current\"") != NULL);
+   assert(strstr(buf, "\"max_results\":4") != NULL);
+   assert(strstr(buf, "\"max_tokens\":1200") != NULL);
+   assert(strstr(buf, "\"accepted\":true") != NULL);
+   assert(strstr(buf, "\"provenance\":[\"code\"]") != NULL);
+   assert(strstr(buf, "\"line_start\":17") != NULL);
+   assert(strstr(buf, "\"scope\":\"project\"") != NULL);
+   assert(strstr(buf, "\"anchor\":{\"project\":\"proj-alpha\",\"file_path\":\"src/search.c\"") !=
+          NULL);
+   assert(strstr(buf, "\"file_path\":\"src/design_notes.c\"") == NULL);
+   assert(strstr(buf, "other/high.c") == NULL);
+
+   s = kb_http_route_ex("GET", "/v1/code/context", "query=needle&project=proj-alpha&generation=1",
+                        NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 409);
+   assert(strstr(buf, "stale_generation") != NULL);
+   assert(strstr(buf, "\"current_generation\":2") != NULL);
+
+   s = kb_http_route_ex("GET", "/v1/code/context", "query=needle&project=proj-alpha&generation=2",
+                        NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 200);
+}
+
+static void test_code_context_no_answer_is_explicit(void)
+{
+   char buf[2048];
+   int s =
+       kb_http_route_ex("GET", "/v1/code/context", "query=definitely-unrelated&project=proj-alpha",
+                        NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"status\":\"abstained\"") != NULL);
+   assert(strstr(buf, "\"decision\":\"no_answer\"") != NULL);
+   assert(strstr(buf, "\"results\":[]") != NULL);
+   assert(strstr(buf, "\"why\":[]") != NULL);
+}
+
+static void test_code_context_embedder_outage_is_not_no_answer(void)
+{
+   char buf[2048];
+   assert(setenv("AIMEE_EMBEDDER_URL", "http://embedder-down", 1) == 0);
+   g_vec_enabled = 0;
+   int s =
+       kb_http_route_ex("GET", "/v1/code/context", "query=definitely-unrelated&project=proj-alpha",
+                        NULL, NULL, NULL, 0, buf, sizeof(buf));
+   unsetenv("AIMEE_EMBEDDER_URL");
+   assert(s == 503);
+   assert(strstr(buf, "\"status\":\"unavailable\"") != NULL);
+   assert(strstr(buf, "\"dependency\":\"embedder\"") != NULL);
+   assert(strstr(buf, "\"retryable\":true") != NULL);
+   assert(strstr(buf, "\"retry_after_ms\":1000") != NULL);
+   assert(strstr(buf, "no_answer") == NULL);
+}
+
+static void test_code_context_embedder_auth_is_unauthorized(void)
+{
+   char buf[2048];
+   assert(setenv("AIMEE_EMBEDDER_URL", "http://embedder-auth", 1) == 0);
+   g_vec_enabled = 0;
+   g_vec_unauthorized = 1;
+   int s =
+       kb_http_route_ex("GET", "/v1/code/context", "query=definitely-unrelated&project=proj-alpha",
+                        NULL, NULL, NULL, 0, buf, sizeof(buf));
+   g_vec_unauthorized = 0;
+   unsetenv("AIMEE_EMBEDDER_URL");
+   assert(s == 401);
+   assert(strstr(buf, "\"status\":\"unauthorized\"") != NULL);
+   assert(strstr(buf, "\"dependency\":\"embedder\"") != NULL);
+   assert(strstr(buf, "\"retryable\":false") != NULL);
+   assert(strstr(buf, "retry_after_ms") == NULL);
+   assert(strstr(buf, "no_answer") == NULL);
+}
+
+static void test_code_context_does_not_substitute_global_memory(void)
+{
+   char buf[8192];
+   g_code_context_memory_scope_rank = 1;
+   int s = kb_http_route_ex("GET", "/v1/code/context", "query=needle&project=proj-alpha", NULL,
+                            NULL, NULL, 0, buf, sizeof(buf));
+   g_code_context_memory_scope_rank = 3;
+   assert(s == 200);
+   assert(strstr(buf, "\"status\":\"ok\"") != NULL); /* code still answers */
+   assert(strstr(buf, "why needle exists") == NULL);
+   assert(strstr(buf, "\"why\":[]") != NULL);
+}
+
+static void test_code_context_requires_verified_memory_anchor(void)
+{
+   char buf[8192];
+   g_code_context_memory_anchored = 0;
+   int s = kb_http_route_ex("GET", "/v1/code/context", "query=needle&project=proj-alpha", NULL,
+                            NULL, NULL, 0, buf, sizeof(buf));
+   g_code_context_memory_anchored = 1;
+   assert(s == 200);
+   assert(strstr(buf, "\"status\":\"ok\"") != NULL);
+   assert(strstr(buf, "why needle exists") == NULL);
+   assert(strstr(buf, "\"why\":[]") != NULL);
 }
 
 static void test_code_project_stats_missing_project(void)
@@ -6038,6 +6243,14 @@ int main(void)
    test_code_hybrid_no_symbol();
    test_code_hybrid_vector_ok();
    test_code_hybrid_vector_dim_mismatch_skips();
+   test_code_context_vector_store_outage_is_not_empty();
+   test_code_context_dimension_mismatch_is_stale();
+   test_code_context_bounded_current_project();
+   test_code_context_no_answer_is_explicit();
+   test_code_context_embedder_outage_is_not_no_answer();
+   test_code_context_embedder_auth_is_unauthorized();
+   test_code_context_does_not_substitute_global_memory();
+   test_code_context_requires_verified_memory_anchor();
    test_code_graph_hubs_ok();
    test_code_graph_hubs_missing_project();
    test_code_lessons_empty();

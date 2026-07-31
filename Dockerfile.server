@@ -236,6 +236,11 @@ RUN set -eux; \
 # AIMEE_DEPLOY_COMPOSE_FILE). Inert until AIMEE_DEPLOY_ENABLED=1 + a mounted socket.
 COPY deploy/container/aimee-managed.compose.yaml /opt/aimee/deploy/aimee-managed.compose.yaml
 
+# The embedder registry backs GET /v1/embedders — the setup wizard's page-2 picker.
+# The wizard runs BEFORE anything is deployed, so the list cannot come from a running
+# gateway; the server reads the same file the gateway and supervisor read.
+COPY scripts/embedders.json /opt/aimee/embedders.json
+
 ENV AIMEE_HOME=/var/lib/aimee
 # On-demand-installed OAuth CLI agents (claude-code / codex) global-install here,
 # on the persistent home volume, so the non-secret CLI binaries survive container
@@ -318,6 +323,10 @@ RUN if [ -f /tmp/runtime-web-stage/aimee-runtime-web ]; then \
 # /usr/bin/code-server; the webchat supervisor launches a per-user instance.
 COPY --from=code-server-stage /opt/codeserver/usr/ /usr/
 RUN if command -v code-server >/dev/null 2>&1; then echo "aimee: code-server bundled ($(code-server --version 2>/dev/null | head -1))"; else echo "aimee: code-server not bundled (built with WITH_VSCODE=0)"; fi
+# PAM service for dashboard logins. runtime-web authenticates through
+# smoothgui/auth against /etc/pam.d/<service>; with no file every login fails as
+# "authentication unavailable".
+COPY deploy/container/pam.d-aimee /etc/pam.d/aimee
 COPY deploy/container/runtime-web-lib.sh /usr/local/bin/runtime-web-lib.sh
 COPY deploy/container/plane-supervisor.sh /usr/local/bin/plane-supervisor.sh
 COPY deploy/container/core-storage.sh /usr/local/bin/core-storage.sh

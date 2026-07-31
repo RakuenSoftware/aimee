@@ -18,10 +18,11 @@
 #include "../kb_curator_serve.h"
 
 /* ── stubs: embedding + vector sinks (return "unavailable"/no-op) ─────────── */
-int memory_embed_text(const char *t, const char *c, float *o, int d)
+int memory_embed_text(const char *t, const char *c, embed_input_type_t it, float *o, int d)
 {
    (void)t;
    (void)c;
+   (void)it;
    (void)o;
    (void)d;
    return 0;

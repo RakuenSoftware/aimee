@@ -427,18 +427,15 @@ void memory_query_rewrite(const char *query, const config_t *cfg, memory_query_r
 
 int memory_find_facts(const char *query, int limit, memory_t *out, int max)
 {
-   /* Stage timing: separate the embed-spawn and rerank-spawn costs (the suspected
-    * dominant terms in live find_facts latency) from the rest, one line per call.
-    * Counters live in memory_core_helpers.inc (same TU). */
+   /* Stage timing: separate the embed-spawn cost (the suspected dominant term in
+    * live find_facts latency) from the rest, one line per call. Counters live in
+    * memory_core_helpers.inc (same TU). */
    long long _ff_t0 = util_now_ms();
    s_qembed_ms = 0;
    s_qembed_spawns = 0;
-   s_rerank_ms = 0;
-   s_rerank_calls = 0;
    int n = memory_find_facts_scoped(query, NULL, NULL, limit, out, max);
-   aimee_log(LOG_INFO, "memory.find_facts.timing",
-             "total=%lldms embed=%lldms/%d rerank=%lldms/%d results=%d", util_now_ms() - _ff_t0,
-             s_qembed_ms, s_qembed_spawns, s_rerank_ms, s_rerank_calls, n);
+   aimee_log(LOG_INFO, "memory.find_facts.timing", "total=%lldms embed=%lldms/%d results=%d",
+             util_now_ms() - _ff_t0, s_qembed_ms, s_qembed_spawns, n);
    /* Dogfood record at the non-scoped entry point so MCP/agent callers land
     * here; scoped callers (CLI cmd_memory_find_facts) log themselves. */
    if (n > 0 && out)
@@ -1131,10 +1128,18 @@ int memory_diagnose_scoped(const char *query, const char *scope_type, const char
    if (!norm_query[0])
       snprintf(norm_query, sizeof(norm_query), "%s", query);
 
+   db2_memory_scope_context_t request_scope;
+   db2_memory_scope_context_get(&request_scope);
+   int explicit_scope = scope_type && scope_type[0];
+   /* A promoted shortcut is a bounded global cache.  It cannot prove the hard
+    * visibility/order contract for an ambient or explicit scope, so only the
+    * legacy unscoped diagnostic route may use it. */
+   int allow_shortcut = !request_scope.active && !explicit_scope;
    int64_t shortcut_ids[8];
    int shortcut_promoted = 0;
-   int shortcut_n =
-       db2_retrieval_shortcut_lookup(norm_query, shortcut_ids, 8, &shortcut_promoted, NULL);
+   int shortcut_n = allow_shortcut ? db2_retrieval_shortcut_lookup(norm_query, shortcut_ids, 8,
+                                                                   &shortcut_promoted, NULL)
+                                   : 0;
    memory_t shortcut_matches[8];
    int shortcut_match_n = 0;
    if (shortcut_n > 0)
@@ -1145,8 +1150,12 @@ int memory_diagnose_scoped(const char *query, const char *scope_type, const char
    memory_t *matches = (memory_t *)calloc(64, sizeof(*matches));
    if (!matches)
       return -1;
-   int count = memory_find_facts_scoped(query, scope_type, scope_value, limit > 0 ? limit : 10,
-                                        matches, 64);
+   int count = request_scope.active && !explicit_scope
+                   ? memory_find_facts_visible_ex(query, request_scope.workspace,
+                                                  request_scope.project, request_scope.include_all,
+                                                  limit > 0 ? limit : 10, matches, 64)
+                   : memory_find_facts_scoped(query, scope_type, scope_value,
+                                              limit > 0 ? limit : 10, matches, 64);
    if (count < 0)
    {
       free(matches);

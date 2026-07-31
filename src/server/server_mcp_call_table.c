@@ -54,6 +54,14 @@
 /* Per-call bundle passed to every handler: the request context plus the
  * out-param for tools that emit an MCP `structured` payload alongside text. */
 
+static cJSON *mcph_kb_last_result(const char *message)
+{
+   char *json = kb_client_last_result_json(message);
+   cJSON *content = text_content(json ? json : "{\"status\":\"unavailable\"}");
+   free(json);
+   return content;
+}
+
 /* ── thin wrappers: uniform signature over the existing tool_* helpers ─────── */
 
 static cJSON *mcph_get_help(struct mcp_call *c)
@@ -258,7 +266,8 @@ static cJSON *mcph_memory_alerts(struct mcp_call *c)
       cJSON_Delete(detached);
    }
    cJSON_Delete(resp);
-   cJSON *content = rendered ? text_content(rendered) : text_content("error: memory_alerts failed");
+   cJSON *content =
+       rendered ? text_content(rendered) : mcph_kb_last_result("memory alerts returned no result");
    free(rendered);
    return content;
 }
@@ -298,7 +307,7 @@ static cJSON *mcph_memory_recall(struct mcp_call *c)
    cJSON_Delete(resp);
    cJSON *content;
    if (!rendered)
-      content = text_content("error: memory_recall failed");
+      content = mcph_kb_last_result("memory recall returned no result");
    else
    {
       content = text_content(rendered);
@@ -338,7 +347,8 @@ static cJSON *mcph_list_epistemic_directives(struct mcp_call *c)
       cJSON_Delete(detached);
    }
    cJSON_Delete(resp);
-   cJSON *content = rendered ? text_content(rendered) : text_content("[]");
+   cJSON *content = rendered ? text_content(rendered)
+                             : mcph_kb_last_result("epistemic directive list returned no result");
    free(rendered);
    return content;
 }
@@ -730,9 +740,10 @@ static cJSON *mcph_index_find_callers(struct mcp_call *c)
    if (n < 0)
    {
       free(hits);
-      return text_content("error: index_find_callers failed");
+      return mcph_kb_last_result("index_find_callers failed");
    }
    cJSON *result = cJSON_CreateObject();
+   cJSON_AddStringToObject(result, "status", n > 0 ? "ok" : "empty");
    cJSON *arr = cJSON_AddArrayToObject(result, "callers");
    for (int i = 0; i < n; i++)
    {
@@ -769,9 +780,10 @@ static cJSON *mcph_index_structure(struct mcp_call *c)
    if (n < 0)
    {
       free(defs);
-      return text_content("error: index_structure failed");
+      return mcph_kb_last_result("index_structure failed");
    }
    cJSON *result = cJSON_CreateObject();
+   cJSON_AddStringToObject(result, "status", n > 0 ? "ok" : "empty");
    cJSON *arr = cJSON_AddArrayToObject(result, "definitions");
    for (int i = 0; i < n; i++)
    {
@@ -797,8 +809,9 @@ static cJSON *mcph_memory_explain_match(struct mcp_call *c)
    memory_diagnostic_t diag;
    memset(&diag, 0, sizeof(diag));
    if (kb_client_memory_explain_match(jq->valuestring, (int64_t)jid->valuedouble, &diag) != 0)
-      return text_content("error: memory_explain_match failed");
+      return mcph_kb_last_result("memory match explanation returned no result");
    cJSON *result = cJSON_CreateObject();
+   cJSON_AddStringToObject(result, "status", "ok");
    cJSON *m = cJSON_AddObjectToObject(result, "memory");
    cJSON_AddNumberToObject(m, "id", (double)diag.memory.id);
    cJSON_AddStringToObject(m, "tier", diag.memory.tier);
@@ -813,7 +826,6 @@ static cJSON *mcph_memory_explain_match(struct mcp_call *c)
    cJSON_AddNumberToObject(p, "evidence", diag.parts.evidence);
    cJSON_AddNumberToObject(p, "confidence", diag.parts.confidence);
    cJSON_AddNumberToObject(p, "salience", diag.parts.salience);
-   cJSON_AddNumberToObject(p, "cross_encoder", diag.parts.cross_encoder);
    cJSON_AddNumberToObject(p, "graph_score", diag.parts.graph_score);
    cJSON_AddNumberToObject(p, "hybrid_total", diag.parts.hybrid_total);
    cJSON_AddNumberToObject(p, "blended_total", diag.parts.blended_total);
@@ -841,9 +853,10 @@ static cJSON *mcph_index_blast_radius(struct mcp_call *c)
    if (kb_client_index_blast_radius(project, jf->valuestring, br) < 0)
    {
       free(br);
-      return text_content("error: index_blast_radius failed");
+      return mcph_kb_last_result("index_blast_radius failed");
    }
    cJSON *result = cJSON_CreateObject();
+   cJSON_AddStringToObject(result, "status", "ok");
    cJSON_AddStringToObject(result, "file", br->file);
    cJSON *deps = cJSON_AddArrayToObject(result, "dependents");
    for (int i = 0; i < br->dependent_count && i < 64; i++)
@@ -870,9 +883,10 @@ static cJSON *mcph_memory_provenance(struct mcp_call *c)
    if (n < 0)
    {
       free(ents);
-      return text_content("error: memory_provenance failed");
+      return mcph_kb_last_result("memory provenance returned no result");
    }
    cJSON *result = cJSON_CreateObject();
+   cJSON_AddStringToObject(result, "status", n > 0 ? "ok" : "empty");
    cJSON *arr = cJSON_AddArrayToObject(result, "provenance");
    for (int i = 0; i < n; i++)
    {
@@ -904,9 +918,10 @@ static cJSON *mcph_memory_fact_history(struct mcp_call *c)
    if (n < 0)
    {
       free(mems);
-      return text_content("error: memory_fact_history failed");
+      return mcph_kb_last_result("memory fact history returned no result");
    }
    cJSON *result = cJSON_CreateObject();
+   cJSON_AddStringToObject(result, "status", n > 0 ? "ok" : "empty");
    cJSON *arr = cJSON_AddArrayToObject(result, "history");
    for (int i = 0; i < n; i++)
    {

@@ -66,6 +66,19 @@ static int empty_ok_post_handler(const char *url, const char *auth_header, const
    return 200;
 }
 
+static int single_miss_post_handler(const char *url, const char *auth_header, const char *body,
+                                    char **response_buf, int timeout_ms, const char *extra_headers)
+{
+   (void)url;
+   (void)auth_header;
+   (void)body;
+   (void)timeout_ms;
+   (void)extra_headers;
+   if (response_buf)
+      *response_buf = strdup("{\"status\":\"error\",\"message\":\"record not found\"}");
+   return 200;
+}
+
 static int scoped_request_count;
 
 static int scoped_ok_post_handler(const char *url, const char *auth_header, const char *body,
@@ -115,6 +128,7 @@ static void test_readers_distinguish_unreachable_from_empty(void)
    char *clusters[] = {"hello"};
 
    /* --- kb unreachable: every count-returning reader reports < 0 --- */
+   kb_client_dependency_reset_for_tests();
    mock_agent_http_set_post_handler(unreachable_post_handler);
    assert(kb_client_memory_list(NULL, NULL, 8, mems, 8) < 0);
    assert(kb_client_memory_find_facts("q", 8, mems, 8) < 0);
@@ -124,6 +138,11 @@ static void test_readers_distinguish_unreachable_from_empty(void)
    assert(kb_client_memory_list_conflicts(conflicts, 8) < 0);
 
    /* --- healthy but empty: same readers report exactly 0 (not < 0) --- */
+   /* Model dependency recovery between the two independent fixtures. Without
+    * this reset the intentionally opened process breaker correctly suppresses
+    * the healthy handler, which would test cooldown rather than empty-result
+    * classification. Breaker recovery itself is covered by kb-client-search. */
+   kb_client_dependency_reset_for_tests();
    mock_agent_http_set_post_handler(empty_ok_post_handler);
    assert(kb_client_memory_list(NULL, NULL, 8, mems, 8) == 0);
    assert(kb_client_memory_find_facts("q", 8, mems, 8) == 0);
@@ -139,6 +158,7 @@ static void test_readers_distinguish_unreachable_from_empty(void)
 static void test_ordered_readers_propagate_active_project_context(void)
 {
    memory_t mems[8];
+   memory_diagnostic_t diagnostics[2];
    memory_relation_t relations[8];
    memory_entity_profile_t profile;
    memory_answer_result_t answer;
@@ -169,14 +189,41 @@ static void test_ordered_readers_propagate_active_project_context(void)
    (void)kb_client_memory_ask("q", NULL, NULL, 8, &answer);
    json = kb_client_memory_context_block("q", "general", 8);
    free(json);
+   (void)kb_client_memory_diagnose("q", 2, diagnostics, 2);
+   json = kb_client_memory_facts("q");
+   free(json);
    (void)kb_client_memory_top_l2_facts(mems, 8);
    (void)kb_client_memory_list_session_scope_priority(mems, 8);
    (void)kb_client_memory_list_session_scope_priority_like("%q%", mems, 8);
 
    kb_client_memory_scope_context_clear();
-   assert(scoped_request_count == 18);
+   assert(scoped_request_count == 20);
    mock_agent_http_reset();
    printf("  PASS: test_ordered_readers_propagate_active_project_context\n");
+}
+
+static void test_single_record_miss_is_not_dependency_failure(void)
+{
+   memory_t memory;
+   memory_entity_profile_t profile;
+   memory_episode_t episode;
+
+   kb_client_dependency_reset_for_tests();
+   mock_agent_http_set_post_handler(single_miss_post_handler);
+   assert(kb_client_memory_get(42, &memory) == 1);
+   assert(kb_client_last_result_status() == KB_CLIENT_RESULT_EMPTY);
+   assert(kb_client_memory_get_entity_profile("missing", &profile) == 1);
+   assert(kb_client_last_result_status() == KB_CLIENT_RESULT_EMPTY);
+   assert(kb_client_memory_get_episode("missing", &episode) == 1);
+   assert(kb_client_last_result_status() == KB_CLIENT_RESULT_EMPTY);
+
+   kb_client_dependency_reset_for_tests();
+   mock_agent_http_set_post_handler(unreachable_post_handler);
+   assert(kb_client_memory_get(42, &memory) < 0);
+   assert(kb_client_last_result_status() == KB_CLIENT_RESULT_UNAVAILABLE);
+
+   mock_agent_http_reset();
+   printf("  PASS: test_single_record_miss_is_not_dependency_failure\n");
 }
 
 static void test_explicit_scope_overrides_ambient_context(void)
@@ -199,6 +246,7 @@ int main(void)
    assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", "test-token") == 0);
 
    test_readers_distinguish_unreachable_from_empty();
+   test_single_record_miss_is_not_dependency_failure();
    test_ordered_readers_propagate_active_project_context();
    test_explicit_scope_overrides_ambient_context();
 

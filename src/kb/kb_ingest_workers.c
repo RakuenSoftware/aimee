@@ -23,6 +23,7 @@
 #include "kb_service.h"
 #include "log.h"
 #include "workspace.h"
+#include "workspace_scope.h"
 
 #include "db2/db2.h" /* db2_lease_release_idle */
 #include "db2/canonical_index.h"
@@ -35,7 +36,9 @@
 #include "kb_doc_hash.h"
 #include "memory.h"
 
+#include <dirent.h>
 #include <pthread.h>
+#include <sys/stat.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -69,6 +72,70 @@ void kb_worker_notify(kb_service_ctx_t *ctx)
 /* Periodic enqueue-all (DB2-direct)                                   */
 /* ------------------------------------------------------------------ */
 
+/* Enqueue every project discovered under `root`, attributing them to `ws_root`
+ * for the durable project identity. Returns the number enqueued. */
+static int kbiw_enqueue_under(const char *root, const char *ws_root, char (*projects)[MAX_PATH_LEN])
+{
+   int n = workspace_discover_projects(root, 3, projects, MAX_DISCOVERED_PROJECTS);
+   int total = 0;
+   for (int i = 0; i < n; i++)
+   {
+      char pname[256];
+      char pws[256];
+      if (workspace_repo_index_keys(projects[i], ws_root, pname, sizeof(pname), pws, sizeof(pws)) !=
+          0)
+      {
+         aimee_log(LOG_ERROR, "kb.ingest.identity",
+                   "skipping root='%s': no durable project identity", projects[i]);
+         continue;
+      }
+      db2_kb_ingest_queue_enqueue(pname, projects[i], pws, 0, DB2_KB_INGEST_PRIO_BULK);
+      total++;
+   }
+   return total;
+}
+
+/* Webchat clones do NOT live under a configured workspace. The GUI clone route
+ * drops them in <webusers_base>/<user>/<org>/<repo> and pushes one best-effort
+ * /v1/code/scan; if this service was unreachable at that moment nothing ever
+ * retried, so the repo stayed on disk and out of the index permanently. That is
+ * exactly what happened on a deployment where every repo an operator cloned was
+ * invisible to search while the wizard reported success.
+ *
+ * Reconciling the tree here makes ingestion self-healing: the clone is durable
+ * on disk, so a scan we lost is one we can always recompute. Each per-user root
+ * is scanned separately because discovery is depth-limited and <user> sits one
+ * level below the base -- scanning the base itself would bottom out at the org
+ * directory and find nothing. */
+static int kbiw_enqueue_webusers(char (*projects)[MAX_PATH_LEN])
+{
+   char base[MAX_PATH_LEN];
+   if (ws_scope_webusers_base(base, sizeof(base)) != 0)
+      return 0;
+
+   DIR *d = opendir(base);
+   if (!d)
+      return 0; /* no webchat users on this deployment */
+
+   int total = 0;
+   struct dirent *ent;
+   while ((ent = readdir(d)) != NULL)
+   {
+      if (ent->d_name[0] == '.') /* skips . .. and the .registry/.locks siblings */
+         continue;
+      char user_root[MAX_PATH_LEN];
+      if (snprintf(user_root, sizeof(user_root), "%s/%s", base, ent->d_name) >=
+          (int)sizeof(user_root))
+         continue;
+      struct stat st;
+      if (stat(user_root, &st) != 0 || !S_ISDIR(st.st_mode))
+         continue;
+      total += kbiw_enqueue_under(user_root, user_root, projects);
+   }
+   closedir(d);
+   return total;
+}
+
 static void kbiw_enqueue_all(kb_service_ctx_t *ctx)
 {
    config_t cfg;
@@ -82,23 +149,9 @@ static void kbiw_enqueue_all(kb_service_ctx_t *ctx)
 
    int total = 0;
    for (int w = 0; w < cfg.workspace_count; w++)
-   {
-      int n = workspace_discover_projects(cfg.workspaces[w], 3, projects, MAX_DISCOVERED_PROJECTS);
-      for (int i = 0; i < n; i++)
-      {
-         char pname[256];
-         char pws[256];
-         if (workspace_repo_index_keys(projects[i], cfg.workspaces[w], pname, sizeof(pname), pws,
-                                       sizeof(pws)) != 0)
-         {
-            aimee_log(LOG_ERROR, "kb.ingest.identity",
-                      "skipping root='%s': no durable project identity", projects[i]);
-            continue;
-         }
-         db2_kb_ingest_queue_enqueue(pname, projects[i], pws, 0, DB2_KB_INGEST_PRIO_BULK);
-         total++;
-      }
-   }
+      total += kbiw_enqueue_under(cfg.workspaces[w], cfg.workspaces[w], projects);
+
+   total += kbiw_enqueue_webusers(projects);
    free(projects);
 
    if (total > 0)
@@ -625,7 +678,8 @@ int kb_ingest_doc_content(const char *project, const char *source_path, const ch
        * re-acquire lazily. See kb_curator_extract_code / kb_service_code_embed. */
       db2_lease_release_idle();
       float vec[EMBED_MAX_DIM];
-      int dim = memory_embed_text(embed_text, effective_cmd, vec, EMBED_MAX_DIM);
+      int dim =
+          memory_embed_text(embed_text, effective_cmd, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
       if (dim > 0)
       {
          accept_generated_embedding(doc_id, vec, dim);
@@ -789,7 +843,8 @@ int kb_doc_embed_backfill(const char *project, const char *embedding_cmd, int ma
        * so holding the lease across it trips the stuck-lease ceiling. */
       db2_lease_release_idle();
       float vec[EMBED_MAX_DIM];
-      int dim = memory_embed_text(embed_text, effective_cmd, vec, EMBED_MAX_DIM);
+      int dim =
+          memory_embed_text(embed_text, effective_cmd, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
       if (dim > 0 && sync_vector_embedding(rows[i].id, vec, dim) == 0)
          embedded++;
       free(rows[i].content);

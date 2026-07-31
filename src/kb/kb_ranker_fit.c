@@ -25,8 +25,38 @@
 #define RANK_FIT_DEFAULT_MIN_GROUPS 8
 #define RANK_FIT_DEFAULT_BENCHMARK  "benchmarks/rank/kb_hybrid/queries.json"
 #define RANK_FIT_DEFAULT_BENCH_K    5
-/* A fitted model must beat the incumbent by more than noise to promote. */
-#define RANK_FIT_LIFT_EPSILON 1e-6
+/* A fitted model must beat the incumbent by more than noise to promote.
+ *
+ * This was 1e-6, which is not "more than noise" — it is "not exactly equal". On a
+ * small fixture NDCG@k is quantised to a handful of discrete values, so a single
+ * query's reordering cleared it. 1e-3 is below any lift worth shipping (the
+ * retrieval campaign's real effects were 1e-2 and up) while being far above the
+ * floating-point noise the old value was actually measuring. */
+#define RANK_FIT_LIFT_EPSILON 1e-3
+
+/* Minimum gate queries for a promotion decision to carry information.
+ *
+ * The default fixture (benchmarks/rank/kb_hybrid/queries.json) holds 5 queries of
+ * 2-4 candidates each; the gate tests use 1. At that size the gate cannot detect a
+ * regression, and it silently promoted anything with a non-zero mean lift. Below
+ * this floor the gate now REFUSES rather than promotes: an underpowered gate must
+ * fail closed, because a promotion is a change to what production serves.
+ *
+ * 30 is not a magic number — it is the point where the paired win/loss majority
+ * below stops being decidable by one or two queries. A real gate fixture should be
+ * far larger; set kb_ranker_fit_benchmark to point at one. */
+#define RANK_FIT_MIN_BENCH_QUERIES 30
+
+/* Paired candidate-vs-incumbent evaluation over the gate fixture. */
+typedef struct
+{
+   double mean_candidate;
+   double mean_incumbent;
+   int n_queries; /* queries that scored under BOTH weight vectors */
+   int wins;      /* candidate strictly better on this query */
+   int losses;    /* incumbent strictly better */
+   int ties;
+} rank_gate_eval_t;
 
 /* The v1 feature set, in the order the ranker and the sidecar agree on. These
  * keys are the contract with kb_ranker_model_load and scripts/rank-fit.py. */
@@ -357,105 +387,135 @@ static double score_features(const cJSON *features, const double *weights)
    return s;
 }
 
-/* Mean NDCG@k over the fixture's queries under a weight vector. Graded gains
- * (linear relevance), standard log2 discount. Returns -1.0 if the fixture can't
- * be read/parsed (fail-safe: the caller treats this as gate-unavailable). */
-static double benchmark_ndcg(const char *fixture_path, int k, const double *weights)
+/* NDCG@k for ONE query's candidate array under a weight vector. Graded gains
+ * (linear relevance), standard log2 discount. Returns -1.0 if the query carries
+ * no usable candidates, so the caller can skip it without counting it. */
+static double query_ndcg(const cJSON *cands, int k, const double *weights)
 {
+   if (!cJSON_IsArray(cands))
+      return -1.0;
+   int n = cJSON_GetArraySize(cands);
+   if (n <= 0)
+      return -1.0;
+
+   double *score = malloc((size_t)n * sizeof(double));
+   double *rel = malloc((size_t)n * sizeof(double));
+   int *idx = malloc((size_t)n * sizeof(int));
+   if (!score || !rel || !idx)
+   {
+      free(score);
+      free(rel);
+      free(idx);
+      return -1.0;
+   }
+   for (int i = 0; i < n; i++)
+   {
+      cJSON *c = cJSON_GetArrayItem((cJSON *)cands, i);
+      cJSON *feats = cJSON_GetObjectItemCaseSensitive(c, "features");
+      cJSON *r = cJSON_GetObjectItemCaseSensitive(c, "relevance");
+      score[i] = score_features(feats, weights);
+      rel[i] = cJSON_IsNumber(r) ? r->valuedouble : 0.0;
+      idx[i] = i;
+   }
+
+   /* Rank by model score (desc) — insertion sort, n is tiny. */
+   for (int a = 1; a < n; a++)
+   {
+      int t = idx[a];
+      int b = a - 1;
+      while (b >= 0 && score[idx[b]] < score[t])
+      {
+         idx[b + 1] = idx[b];
+         b--;
+      }
+      idx[b + 1] = t;
+   }
+
+   int kk = (k < n) ? k : n;
+   double dcg = 0.0;
+   for (int p = 0; p < kk; p++)
+      dcg += rel[idx[p]] / (log(p + 2.0) / log(2.0));
+
+   /* Ideal DCG: relevances sorted desc. */
+   double *rel_sorted = malloc((size_t)n * sizeof(double));
+   double idcg = 0.0;
+   if (rel_sorted)
+   {
+      for (int i = 0; i < n; i++)
+         rel_sorted[i] = rel[i];
+      for (int a = 1; a < n; a++)
+      {
+         double t = rel_sorted[a];
+         int b = a - 1;
+         while (b >= 0 && rel_sorted[b] < t)
+         {
+            rel_sorted[b + 1] = rel_sorted[b];
+            b--;
+         }
+         rel_sorted[b + 1] = t;
+      }
+      for (int p = 0; p < kk; p++)
+         idcg += rel_sorted[p] / (log(p + 2.0) / log(2.0));
+      free(rel_sorted);
+   }
+
+   double ndcg = (idcg > 0.0) ? dcg / idcg : 0.0;
+   free(score);
+   free(rel);
+   free(idx);
+   return ndcg;
+}
+
+/* PAIRED comparison of candidate against incumbent over the gate fixture.
+ *
+ * Both weight vectors score the SAME query before moving on, which is what makes
+ * the per-query win/loss record meaningful: a mean lift alone cannot distinguish
+ * "better on most queries" from "much better on one and worse on the rest", and
+ * the latter is what overfitting a small fixture looks like.
+ *
+ * Returns 0 on success, -1 if the fixture cannot be read or parsed. */
+static int benchmark_compare(const char *fixture_path, int k, const double *cand_w,
+                             const double *incumbent_w, rank_gate_eval_t *out)
+{
+   memset(out, 0, sizeof(*out));
    char *raw = read_file(fixture_path);
    if (!raw)
-      return -1.0;
+      return -1;
    cJSON *queries = cJSON_Parse(raw);
    free(raw);
    if (!cJSON_IsArray(queries))
    {
       cJSON_Delete(queries);
-      return -1.0;
+      return -1;
    }
 
-   double ndcg_sum = 0.0;
-   int n_q = 0;
+   double cand_sum = 0.0, incumbent_sum = 0.0;
    cJSON *q;
    cJSON_ArrayForEach(q, queries)
    {
       cJSON *cands = cJSON_GetObjectItemCaseSensitive(q, "candidates");
-      if (!cJSON_IsArray(cands))
-         continue;
-      int n = cJSON_GetArraySize(cands);
-      if (n <= 0)
-         continue;
+      double nc = query_ndcg(cands, k, cand_w);
+      double ni = query_ndcg(cands, k, incumbent_w);
+      if (nc < 0.0 || ni < 0.0)
+         continue; /* unusable query — not counted toward gate power */
 
-      double *score = malloc((size_t)n * sizeof(double));
-      double *rel = malloc((size_t)n * sizeof(double));
-      int *idx = malloc((size_t)n * sizeof(int));
-      if (!score || !rel || !idx)
-      {
-         free(score);
-         free(rel);
-         free(idx);
-         continue;
-      }
-      for (int i = 0; i < n; i++)
-      {
-         cJSON *c = cJSON_GetArrayItem(cands, i);
-         cJSON *feats = cJSON_GetObjectItemCaseSensitive(c, "features");
-         cJSON *r = cJSON_GetObjectItemCaseSensitive(c, "relevance");
-         score[i] = score_features(feats, weights);
-         rel[i] = cJSON_IsNumber(r) ? r->valuedouble : 0.0;
-         idx[i] = i;
-      }
-
-      /* Rank by model score (desc) — insertion sort, n is tiny. */
-      for (int a = 1; a < n; a++)
-      {
-         int t = idx[a];
-         int b = a - 1;
-         while (b >= 0 && score[idx[b]] < score[t])
-         {
-            idx[b + 1] = idx[b];
-            b--;
-         }
-         idx[b + 1] = t;
-      }
-
-      int kk = (k < n) ? k : n;
-      double dcg = 0.0;
-      for (int p = 0; p < kk; p++)
-         dcg += rel[idx[p]] / (log(p + 2.0) / log(2.0));
-
-      /* Ideal DCG: relevances sorted desc. */
-      double *rel_sorted = malloc((size_t)n * sizeof(double));
-      double idcg = 0.0;
-      if (rel_sorted)
-      {
-         for (int i = 0; i < n; i++)
-            rel_sorted[i] = rel[i];
-         for (int a = 1; a < n; a++)
-         {
-            double t = rel_sorted[a];
-            int b = a - 1;
-            while (b >= 0 && rel_sorted[b] < t)
-            {
-               rel_sorted[b + 1] = rel_sorted[b];
-               b--;
-            }
-            rel_sorted[b + 1] = t;
-         }
-         for (int p = 0; p < kk; p++)
-            idcg += rel_sorted[p] / (log(p + 2.0) / log(2.0));
-         free(rel_sorted);
-      }
-
-      double ndcg = (idcg > 0.0) ? dcg / idcg : 0.0;
-      ndcg_sum += ndcg;
-      n_q++;
-
-      free(score);
-      free(rel);
-      free(idx);
+      cand_sum += nc;
+      incumbent_sum += ni;
+      out->n_queries++;
+      if (nc > ni)
+         out->wins++;
+      else if (nc < ni)
+         out->losses++;
+      else
+         out->ties++;
    }
    cJSON_Delete(queries);
-   return (n_q > 0) ? ndcg_sum / n_q : -1.0;
+
+   if (out->n_queries <= 0)
+      return -1;
+   out->mean_candidate = cand_sum / out->n_queries;
+   out->mean_incumbent = incumbent_sum / out->n_queries;
+   return 0;
 }
 
 /* Read the weights of the most recently committed kb_hybrid ranker_model into
@@ -510,18 +570,29 @@ static void weights_obj_to_vec(const cJSON *weights, double *out)
    }
 }
 
-/* Record the gate decision as a benchmark_trace artifact — the evidence trail. */
-static void write_benchmark_trace(const char *model_id, double ndcg_cand, double ndcg_incumbent,
-                                  int k, const char *decision)
+/* Record the gate decision as a benchmark_trace artifact — the evidence trail.
+ *
+ * Records the gate's POWER (n_queries, win/loss/tie split) alongside the metric,
+ * not just the two means. A reader of this artifact must be able to tell a decision
+ * backed by a real fixture from one backed by five hand-authored queries; the
+ * previous payload could not express the difference. `eval` may be NULL when the
+ * fixture never scored (benchmark_unavailable). */
+static void write_benchmark_trace(const char *model_id, const rank_gate_eval_t *eval, int k,
+                                  const char *decision)
 {
    char id[64];
    db2_artifact_gen_id(id, sizeof(id));
-   char payload[512];
+   double cand = eval ? eval->mean_candidate : -1.0;
+   double inc = eval ? eval->mean_incumbent : -1.0;
+   char payload[768];
    snprintf(payload, sizeof(payload),
             "{\"surface\":\"kb_hybrid\",\"track\":\"recall\",\"metric\":\"ndcg@%d\","
             "\"model_id\":\"%s\",\"ndcg_candidate\":%.6f,\"ndcg_incumbent\":%.6f,"
-            "\"delta\":%.6f,\"decision\":\"%s\"}",
-            k, model_id ? model_id : "", ndcg_cand, ndcg_incumbent, ndcg_cand - ndcg_incumbent,
+            "\"delta\":%.6f,\"n_queries\":%d,\"wins\":%d,\"losses\":%d,\"ties\":%d,"
+            "\"min_queries\":%d,\"lift_epsilon\":%g,\"decision\":\"%s\"}",
+            k, model_id ? model_id : "", cand, inc, eval ? cand - inc : 0.0,
+            eval ? eval->n_queries : 0, eval ? eval->wins : 0, eval ? eval->losses : 0,
+            eval ? eval->ties : 0, RANK_FIT_MIN_BENCH_QUERIES, RANK_FIT_LIFT_EPSILON,
             decision ? decision : "");
    db2_artifact_write(id, "benchmark_trace", "committed", "global", "", "", 1.0, payload);
 }
@@ -656,8 +727,8 @@ int kb_ranker_fit_run(const config_t *cfg, char *id_out, int id_out_len, char **
    const char *bench_path =
        cfg->kb_ranker_fit_benchmark[0] ? cfg->kb_ranker_fit_benchmark : RANK_FIT_DEFAULT_BENCHMARK;
    int k = cfg->kb_ranker_fit_bench_k > 0 ? cfg->kb_ranker_fit_bench_k : RANK_FIT_DEFAULT_BENCH_K;
-   double ndcg_cand = benchmark_ndcg(bench_path, k, cand_w);
-   double ndcg_incumbent = benchmark_ndcg(bench_path, k, incumbent_w);
+   rank_gate_eval_t eval;
+   int eval_rc = benchmark_compare(bench_path, k, cand_w, incumbent_w, &eval);
 
    /* Write the fitted model as proposed regardless — it is the record of the fit.
     * Only a benchmark win promotes it. */
@@ -677,11 +748,11 @@ int kb_ranker_fit_run(const config_t *cfg, char *id_out, int id_out_len, char **
    cJSON_AddStringToObject(gate, "benchmark", bench_path);
    cJSON_AddItemToObject(report, "gate", gate);
 
-   if (ndcg_cand < 0.0 || ndcg_incumbent < 0.0)
+   if (eval_rc != 0)
    {
       /* Fixture unreadable → cannot prove lift → keep the default, hold proposed. */
       cJSON_AddStringToObject(gate, "result", "benchmark_unavailable");
-      write_benchmark_trace(model_id, ndcg_cand, ndcg_incumbent, k, "benchmark_unavailable");
+      write_benchmark_trace(model_id, NULL, k, "benchmark_unavailable");
       cJSON_AddStringToObject(report, "status", "proposed");
       cJSON_AddStringToObject(report, "reason", "benchmark_unavailable");
       if (report_out)
@@ -690,16 +761,43 @@ int kb_ranker_fit_run(const config_t *cfg, char *id_out, int id_out_len, char **
       return 1;
    }
 
-   cJSON_AddNumberToObject(gate, "ndcg_candidate", ndcg_cand);
-   cJSON_AddNumberToObject(gate, "ndcg_incumbent", ndcg_incumbent);
-   cJSON_AddNumberToObject(gate, "delta", ndcg_cand - ndcg_incumbent);
+   cJSON_AddNumberToObject(gate, "ndcg_candidate", eval.mean_candidate);
+   cJSON_AddNumberToObject(gate, "ndcg_incumbent", eval.mean_incumbent);
+   cJSON_AddNumberToObject(gate, "delta", eval.mean_candidate - eval.mean_incumbent);
+   cJSON_AddNumberToObject(gate, "n_queries", eval.n_queries);
+   cJSON_AddNumberToObject(gate, "wins", eval.wins);
+   cJSON_AddNumberToObject(gate, "losses", eval.losses);
+   cJSON_AddNumberToObject(gate, "ties", eval.ties);
+   cJSON_AddNumberToObject(gate, "min_queries", RANK_FIT_MIN_BENCH_QUERIES);
 
-   if (ndcg_cand > ndcg_incumbent + RANK_FIT_LIFT_EPSILON)
+   /* Underpowered gate → refuse. A gate that cannot detect a regression must not be
+    * allowed to authorise one; hold the model proposed and say why. */
+   if (eval.n_queries < RANK_FIT_MIN_BENCH_QUERIES)
+   {
+      cJSON_AddStringToObject(gate, "result", "benchmark_underpowered");
+      write_benchmark_trace(model_id, &eval, k, "benchmark_underpowered");
+      cJSON_AddStringToObject(report, "status", "proposed");
+      cJSON_AddStringToObject(report, "reason", "benchmark_underpowered");
+      if (report_out)
+         *report_out = cJSON_PrintUnformatted(report);
+      cJSON_Delete(report);
+      return 1;
+   }
+
+   /* Two independent conditions, both required:
+    *   mean lift  — the aggregate metric actually moved by a shippable margin;
+    *   paired majority — it moved because more queries improved than regressed,
+    *                     not because one query improved enormously.
+    * Either alone is satisfiable by an overfitted model. */
+   int has_lift = eval.mean_candidate > eval.mean_incumbent + RANK_FIT_LIFT_EPSILON;
+   int has_majority = eval.wins > eval.losses;
+
+   if (has_lift && has_majority)
    {
       int crc = kb_ranker_model_commit(model_id);
       const char *decision = (crc == 0) ? "commit" : "commit_failed";
       cJSON_AddStringToObject(gate, "result", decision);
-      write_benchmark_trace(model_id, ndcg_cand, ndcg_incumbent, k, decision);
+      write_benchmark_trace(model_id, &eval, k, decision);
       cJSON_AddStringToObject(report, "status", crc == 0 ? "committed" : "error");
       if (report_out)
          *report_out = cJSON_PrintUnformatted(report);
@@ -708,11 +806,14 @@ int kb_ranker_fit_run(const config_t *cfg, char *id_out, int id_out_len, char **
       return rv;
    }
 
-   /* No lift — the fitted model stays proposed; the {0.6,0.4} default keeps serving. */
-   cJSON_AddStringToObject(gate, "result", "no_lift");
-   write_benchmark_trace(model_id, ndcg_cand, ndcg_incumbent, k, "no_lift");
+   /* No lift — the fitted model stays proposed; the {0.6,0.4} default keeps serving.
+    * Distinguish the two failure shapes so the operator can tell "no real gain" from
+    * "gain concentrated in a minority of queries". */
+   const char *reason = !has_lift ? "no_lift" : "no_paired_majority";
+   cJSON_AddStringToObject(gate, "result", reason);
+   write_benchmark_trace(model_id, &eval, k, reason);
    cJSON_AddStringToObject(report, "status", "proposed");
-   cJSON_AddStringToObject(report, "reason", "no_lift");
+   cJSON_AddStringToObject(report, "reason", reason);
    if (report_out)
       *report_out = cJSON_PrintUnformatted(report);
    cJSON_Delete(report);

@@ -861,6 +861,10 @@ int handle_hosts_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "hosts.list");
 }
+int handle_embedders_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "embedders.list");
+}
 int handle_primary_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "primary.get");

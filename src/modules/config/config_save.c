@@ -384,14 +384,6 @@ int config_save(const config_t *cfg)
       } page2[] = {
           {"kb_mode", offsetof(config_t, kb_mode)},
           {"llm_embed_backend", offsetof(config_t, llm_embed_backend)},
-          {"llm_embed_host", offsetof(config_t, llm_embed_host)},
-          {"llm_embed_gpu", offsetof(config_t, llm_embed_gpu)},
-          {"llm_embed_tier", offsetof(config_t, llm_embed_tier)},
-          {"llm_rerank_backend", offsetof(config_t, llm_rerank_backend)},
-          {"llm_rerank_host", offsetof(config_t, llm_rerank_host)},
-          {"llm_rerank_gpu", offsetof(config_t, llm_rerank_gpu)},
-          {"llm_rerank_tier", offsetof(config_t, llm_rerank_tier)},
-          {"llm_rerank_endpoint", offsetof(config_t, llm_rerank_endpoint)},
           {"llm_synth_backend", offsetof(config_t, llm_synth_backend)},
           {"llm_synth_host", offsetof(config_t, llm_synth_host)},
           {"llm_synth_gpu", offsetof(config_t, llm_synth_gpu)},
@@ -478,18 +470,6 @@ int config_save(const config_t *cfg)
       cJSON_AddStringToObject(root, "memory_weight_profile", cfg->memory_weight_profile);
    if (cfg->memory_rerank_mode[0])
       cJSON_AddStringToObject(root, "memory_rerank_mode", cfg->memory_rerank_mode);
-   if (cfg->memory_rerank_enabled || cfg->memory_rerank_command[0] ||
-       cfg->memory_rerank_top_k > 0 || cfg->memory_rerank_mix != 0.0)
-   {
-      cJSON *mr = cJSON_AddObjectToObject(root, "memory_rerank");
-      cJSON_AddBoolToObject(mr, "enabled", cfg->memory_rerank_enabled);
-      if (cfg->memory_rerank_command[0])
-         cJSON_AddStringToObject(mr, "command", cfg->memory_rerank_command);
-      if (cfg->memory_rerank_top_k > 0)
-         cJSON_AddNumberToObject(mr, "top_k", cfg->memory_rerank_top_k);
-      if (cfg->memory_rerank_mix != 0.0)
-         cJSON_AddNumberToObject(mr, "mix", cfg->memory_rerank_mix);
-   }
    if (cfg->memory_query_expansion_mode[0] || cfg->memory_query_expansion_k > 0)
    {
       cJSON *qe = cJSON_AddObjectToObject(root, "memory_query_expansion");
@@ -887,6 +867,8 @@ int config_save(const config_t *cfg)
       cJSON_AddBoolToObject(root, "delegate_graph_context_enabled", 1);
    if (cfg->ingress_preinject_enabled)
       cJSON_AddBoolToObject(root, "ingress_preinject_enabled", 1);
+   if (strcmp(cfg->code_context_mode, "on") != 0)
+      cJSON_AddStringToObject(root, "code_context_mode", cfg->code_context_mode);
    if (cfg->ingress_preinject_anthropic_enabled)
       cJSON_AddBoolToObject(root, "ingress_preinject_anthropic_enabled", 1);
    if (cfg->ingress_compress_enabled)
@@ -1400,24 +1382,29 @@ const char *config_embedding_command(const config_t *cfg, const char *requested)
 {
    if (requested && requested[0])
       return requested;
-   if (cfg && cfg->embedding_command[0])
-      return cfg->embedding_command;
-   /* No explicit command: if the deployment points us at an embedder service,
-    * embed against it in-process (memory_embed_text speaks http:// directly, no
-    * fork, no python). This makes a configured embedder the default with zero
-    * config and survives a config reseed -- the deploy stack exports
-    * AIMEE_EMBEDDER_URL / AIMEE_LLM_URL for the aimee-llm container. Only when
-    * nothing is configured do we fall back to the 384-dim builtin (correct for an
-    * unconfigured shim/test setup). */
+   /* This is the ONE place an embedder address is resolved. Precedence, and why:
+    *
+    * AIMEE_EMBEDDER_URL OUTRANKS the stored command, because the env var is how the
+    * RUNNING embedder announces itself. The shipped config pre-selects nothing (first
+    * boot leaves the choice to the wizard), and when the entrypoint does start the
+    * bundled in-container model it exports AIMEE_EMBEDDER_URL pointing at it — so the
+    * bundled model and an operator's external endpoint arrive by the same route and
+    * obey one rule. Checking config first would make the variable dead and let the kb
+    * embed locally while its schema was sized for the external endpoint.
+    *
+    * memory_embed_text speaks http:// directly, so this costs no fork and no python.
+    *
+    * Deliberately NOT falling back to AIMEE_LLM_URL: that knob is synthesis-only since
+    * the aimee-llm container was retired, and letting it select an embedder would point
+    * retrieval at a chat endpoint. */
    const char *env = getenv("AIMEE_EMBEDDER_URL");
    if (env && env[0])
       return env;
-   /* AIMEE_LLM_URL: the single unified-container knob also drives embedding (the
-    * same aimee-llm container serves /embed). AIMEE_EMBEDDER_URL takes precedence
-    * when an operator pins the embedder somewhere else. */
-   env = getenv("AIMEE_LLM_URL");
-   if (env && env[0])
-      return env;
+   if (cfg && cfg->embedding_command[0])
+      return cfg->embedding_command;
+   /* Nothing selected at all: the lexical builtin, which fills the deployment's
+    * configured width (config is the single place that is declared). Correct for a
+    * first boot before the wizard runs, and for an unconfigured shim/test setup. */
    return "builtin";
 }
 

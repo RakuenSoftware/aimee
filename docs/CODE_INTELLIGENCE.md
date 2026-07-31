@@ -66,6 +66,60 @@ Text and vector matches find names and concepts. The call/import/dependency grap
 neighbors. Memory links add prior decisions and known constraints. Fusion keeps the evidence for each
 signal so a client can explain the result.
 
+## Task-conditioned context
+
+`GET /v1/code/context` is the strict, bounded ingress contract over the hybrid ranker. It requires
+one active project, reads only its current generation, returns at most four code-plus-memory items,
+and caps the rendered packet at 1,200 tokens. Exact lexical and structural evidence leads. A
+vector-only result must clear the quality floor, and exact active-project memory is appended only
+when it is linked to accepted code. Every code item carries project, path, generation, freshness, confidence,
+provenance, and a line-or-file span.
+
+A query without sufficient current-project code evidence returns HTTP 200 with
+`status: abstained`, an `answerability.decision` of `no_answer`, empty `results`, and empty `why`.
+It does not substitute global episodic
+memory. The same local-first policy applies to the older hybrid memory annotations: project memory
+is selected before workspace/shared memory and broad scope is never implicit.
+
+Hybrid code responses always include `vector_status`: `disabled`, `ok`, `empty`, `stale`,
+`unavailable`, or `unauthorized`. When the vector leg is stale, unavailable, or unauthorized,
+dependency and dimension/retryability metadata are included; lexical and graph results remain usable
+when they independently answer the query.
+
+Ingress rollout is controlled by `code_context_mode`:
+
+- `off` uses only the existing project-local preview path;
+- `observe` retrieves and validates the packet, records its decision, and
+  preserves existing model-visible bytes; and
+- `on` (the shipping default after the E6 paired promotion gate) injects a packet only on the first
+  turn of a session task or a low-overlap task change.
+
+`on` does not repeat context for an ordinary follow-up and does not broaden after `no_answer` or an
+unavailable KB. An unavailable first/new-task lookup rearms only its exact session/project marker,
+so a related follow-up can use the dependency breaker's single recovery probe; successful,
+genuinely empty, stale, and abstained results remain consumed. If the request working directory
+cannot resolve a durable active-project identity, agent ingress suppresses code and memory recall
+rather than issuing an unscoped query.
+
+## Dependency status and recovery
+
+Agent-facing retrieval preserves six outcomes: `ok`, `empty`, `abstained`, `stale`, `unavailable`,
+and `unauthorized`. `empty` is emitted only after a valid response; an outage or malformed response
+is never converted to an empty list. Stale results carry the observed/current generation or vector
+dimension when available. Unavailable results name the failed dependency, say whether retry is
+safe, and include a bounded retry delay.
+
+The server-side KB client and the KB-side external embedder each use a process-local circuit
+breaker. Three consecutive transient failures open it with bounded exponential backoff and jitter.
+Calls during the delay are suppressed, then exactly one half-open recovery probe is admitted.
+Success closes the breaker without restarting the client. A reachable KB reporting its own
+embedder or vector-store outage does not open the KB transport breaker, so unrelated KB operations
+remain usable. Built-in local embeddings bypass the external dependency breaker.
+
+Local inspection, editing, and tests do not depend on KB recovery. Clients may fall back to those
+local operations on `unavailable`, but must not silently retry without a bound or report an
+Aimee-assisted result for the failed turn.
+
 ## Audits
 
 ```bash

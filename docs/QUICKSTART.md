@@ -5,34 +5,48 @@ Run the services on one machine. Install only the thin client where you write co
 ## 1. Start the managed server
 
 You need Docker with Compose v2. The managed server mounts the Docker socket so its browser wizard
-can start the KB and inference containers.
+can start the KB container.
 
 ```bash
 git clone https://github.com/RakuenSoftware/aimee.git
 cd aimee
+docker compose -f compose.server-managed.yaml up -d
+docker compose -f compose.server-managed.yaml logs aimee-server
+```
+
+The server generates a dashboard login on first boot and prints it once, in that log:
+
+```text
+[webchat] FIRST-BOOT DASHBOARD LOGIN (shown once — copy it now)
+[webchat]     username: aimee-0a901de6e2c3
+[webchat]     password: <64 hex characters>
+```
+
+Copy it before the log rotates. Only the username is kept on disk afterwards, so the password cannot
+be read back; if you lose it, reset that account's password inside the container or start again from
+an empty volume. To choose the credential yourself instead, set both variables before `up` — then
+nothing is generated and nothing is printed:
+
+```bash
 export AIMEE_WEBCHAT_USER=operator
 read -rsp 'Initial webchat password: ' AIMEE_WEBCHAT_PASSWORD && echo
 export AIMEE_WEBCHAT_PASSWORD
 docker compose -f compose.server-managed.yaml up -d
 unset AIMEE_WEBCHAT_PASSWORD
-docker compose -f compose.server-managed.yaml logs aimee-server
 ```
 
-Open <https://localhost:8443> and sign in with that pair. The variables are first-boot transport,
-not runtime configuration: the entrypoint immediately encrypts them into the server Vault, removes
-them from its inherited environment, and only then starts long-lived services. Authentication reads
-only fixed Vault records through one-shot pipes; no password, verifier, session bearer, or TLS private
-key is written to the data volume or container logs. Then create the initial agent and choose CPU or GPU inference, git
-accounts, and workspaces.
-The final **Deploy** step starts:
+Those variables are first-boot transport, not runtime configuration: the entrypoint encrypts them
+into the server Vault, removes them from its inherited environment, and only then starts long-lived
+services. Authentication reads only fixed Vault records through one-shot pipes; no password,
+verifier, session bearer, or TLS private key is written to the data volume or container logs.
 
-- `aimee-kb`, including private PostgreSQL 18, pgvector, and pgvectorscale;
-- `aimee-llm`, with the selected inference tier.
+Open <https://localhost:8443> and sign in. If you signed in with the generated login, the wizard's
+account step replaces it with a permanent one; a deployment that supplied its own pair skips that
+step. Then work through the initial agent, deploy topology, git accounts, and workspaces.
 
-The managed worker starts KB before LLM. It waits for KB health only where the identity one-shots
-require it; it does not wait for LLM model readiness. First-boot model downloads continue in the
-LLM container after the wizard reports that the stack containers are up, while KB initialization
-and CPU indexing proceed. Check `aimee-llm` status/logs if a download later fails.
+The final **Deploy** step starts `aimee-kb`, including private PostgreSQL 18, pgvector, and
+pgvectorscale. There is no inference container: the KB embeds in-process from weights baked into its
+image, and synthesis is external-only (see [Choosing an embedder](#choosing-an-embedder)).
 
 For a local managed KB, Deploy also runs two explicit one-shot jobs before it
 reports success:
@@ -57,32 +71,78 @@ Deploy also claims the signed-in browser account as the first remote owner. It d
 `aimee remote set ...` command that provisions that user's bearer, mTLS certificate, and explicit
 `full` write grant. Keep that page open until you run the command in step 3.
 
-When the wizard creates a local `aimee-llm`, it also creates a separate, persistent 256-bit service
-identity for `aimee-kb`. The managed stack supplies the endpoint, role/tier configuration, and bearer
-to both containers, then the KB uses that credential for embedding, reranking, and synthesis. This is
-automatic; do not copy the user's enrollment bearer into the LLM configuration. The managed LLM
-refuses to start if its service credential is missing.
+Complete the account step before exposing the host. A deployment that injects both
+`AIMEE_WEBCHAT_USER` and `AIMEE_WEBCHAT_PASSWORD` uses that pair and skips account replacement.
+Supply both or neither: a partial pair is treated as absent, and the server generates and logs a
+credential instead.
 
-Complete the account step before exposing the host. Deployments that inject both
-`AIMEE_WEBCHAT_USER` and `AIMEE_WEBCHAT_PASSWORD` use that explicit pair and skip account
-replacement. When the browser UI is enabled, set both on first boot; a missing or partial pair is
-rejected instead of generating a credential in logs. Supplied values are sealed into Vault and
-scrubbed before services start.
+The browser login is a **local PAM account**, not an aimee credential. First boot provisions the
+supplied (or generated) pair as a real system account in the `aimee-webchat` group and authenticates
+it through the `aimee` PAM service, the same stack SmoothNAS uses and the same one a KB means when
+`/v1/identity/auth-mode` reports `pam`. The plaintext first-boot value is removed once that account
+exists. Only accounts in that group are dashboard logins: the container's own system users are never
+accepted, and the dashboard cannot see or modify them.
+
+The Vault holds aimee's own secrets — the session key, TLS material, provider credentials. A host
+password is not one of those and is never sealed into it.
+
+When the appliance is connected to a KB that reports `oidc`, the identity provider owns accounts and
+the wizard's account step disappears; local account creation is refused. Dashboard login itself
+remains PAM in this release — the OIDC login flow arrives in 0.4.0.
+
+### Choosing an embedder
+
+The wizard's **Deploy topology** step records which embedder the KB uses. Choose one before Deploy.
+The bundled `bekko-a25m` (384-dimension) ships inside the KB image, so it needs no download and no
+second container. Point the KB at your own endpoint instead if you need a wider model.
+
+Nothing is selected on a fresh install, and an unselected KB is not broken — it falls back to a
+builtin lexical embedder and says so once, in the KB log:
+
+```text
+aimee-kb: no embedder selected; the bundled model stays unloaded (the builtin
+lexical embedder serves until the wizard selects one)
+```
+
+Retrieval still works in that state, but it is keyword matching, not vector search. If you skipped
+the step, set it from the server and re-run Deploy:
+
+```bash
+aimee config set embedding_model bekko-a25m
+```
+
+Confirm the model actually loaded rather than assuming it did:
+
+```bash
+docker compose -f compose.server-managed.yaml logs aimee-kb | grep -i embedder
+aimee kb status
+```
+
+A loaded embedder logs its dimension and serving identity:
+
+```text
+aimee-kb: starting bundled embedder (bekko-a25m) on :8760
+embedder-server: loaded hotchpotch/bekko-embedding-v1-a25m dim=384 threads=8 quant=fp32
+```
+
+Decide before you ingest. Changing the embedder later re-embeds everything already indexed, and
+changing to one of a different dimension rebuilds the vector schema as well. The wizard names which
+of the two a given switch costs.
 
 ### Choosing an image channel
 
 The stack runs the released `:latest` images by default. To run a tested-but-unreleased build, set
-`AIMEE_IMAGE_TAG` once — it moves the server, the KB and the LLM together:
+`AIMEE_IMAGE_TAG` once — it moves the server and the KB together:
 
 ```bash
 AIMEE_IMAGE_TAG=testing docker compose -f compose.server-managed.yaml up -d
 ```
 
 Set it for the wizard's **Deploy** step too, not just the server: the server re-runs Compose for the
-managed services, so the tag has to be in its environment or the KB and LLM fall back to `:latest`
-while the server runs `:testing`. The line above already does this. Mixing versions this way is a
-real failure mode, not a theoretical one — a KB and a server from different builds can disagree
-about the inference contract and leave the KB permanently unhealthy.
+managed services, so the tag has to be in its environment or the KB falls back to `:latest` while the
+server runs `:testing`. The line above already does this. Mixing versions this way is a real failure
+mode, not a theoretical one — a KB and a server from different builds can disagree about the
+contract between them and leave the KB permanently unhealthy.
 
 A single service can still be pinned individually (`AIMEE_KB_IMAGE=…`), and an explicit pin always
 wins over `AIMEE_IMAGE_TAG`.

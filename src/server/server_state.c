@@ -6,6 +6,7 @@
 #include "gw_mutate_stats.h" /* gw_stat_to_json — gateway-mutation economizer counters */
 #include "tool_condense.h"   /* tool_condense_stats_snapshot — tool-output condense savings */
 #include "token_audit.h"     /* db1_token_audit_spend_breakdown — avoided-$ aggregate */
+#include "embedder_catalog.h"
 #include "server.h"
 #include "dashboard.h"
 #include "render.h"                   /* decision_to_json + db2_decision_log_list */
@@ -362,9 +363,17 @@ int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          cJSON_Delete(mj);
       }
    }
-   else
+   else if (rc > 0)
    {
       resp = jo_err("memory not found");
+   }
+   else
+   {
+      char *typed = kb_client_last_result_json("memory lookup failed");
+      resp = typed ? cJSON_Parse(typed) : NULL;
+      free(typed);
+      if (!resp)
+         resp = jo_err("knowledge service unavailable");
    }
    return send_and_free(conn, resp);
 }
@@ -1173,6 +1182,26 @@ int handle_hosts_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    }
 
    cJSON_AddItemToObject(resp, "hosts", arr);
+   return send_and_free(conn, resp);
+}
+
+/* embedders.list — the embedders this deployment can offer, for the setup wizard's
+ * page-2 picker. Read-only. The shaping lives in embedder_catalog.c so it can be tested
+ * without linking the server; this is just transport. */
+int handle_embedders_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+
+   char *raw = embedder_registry_read();
+   const char *err = NULL;
+   cJSON *arr = embedder_catalog_build(raw, &err);
+   free(raw);
+   if (!arr)
+      return server_send_error(conn, err ? err : "embedder registry unavailable", NULL);
+
+   cJSON *resp = jo_ok();
+   cJSON_AddItemToObject(resp, "embedders", arr);
    return send_and_free(conn, resp);
 }
 

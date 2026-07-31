@@ -494,7 +494,7 @@ static int embeddings_handler(const char *body, char *resp, int cap)
          ok = 0;
          break;
       }
-      int d = memory_embed_text(inputs[i], cmd, vecs[i], EMBED_MAX_DIM);
+      int d = memory_embed_text(inputs[i], cmd, EMBED_INPUT_DOCUMENT, vecs[i], EMBED_MAX_DIM);
       if (d <= 0)
       {
          ok = 0;

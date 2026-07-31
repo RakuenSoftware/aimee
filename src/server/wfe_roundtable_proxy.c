@@ -280,6 +280,20 @@ static char *post_go_roundtable(const char *body, int receive_timeout_ms, int *s
    return out;
 }
 
+static const char *roundtable_response_error_message(const cJSON *response)
+{
+   cJSON *error = cJSON_GetObjectItemCaseSensitive(response, "error");
+   if (cJSON_IsString(error) && error->valuestring[0])
+      return error->valuestring;
+   if (cJSON_IsObject(error))
+   {
+      cJSON *message = cJSON_GetObjectItemCaseSensitive(error, "message");
+      if (cJSON_IsString(message) && message->valuestring[0])
+         return message->valuestring;
+   }
+   return "Go roundtable request failed";
+}
+
 int wfe_roundtable_proxy(server_conn_t *conn, const cJSON *request)
 {
    roundtable_proxy_runtime_t runtime = roundtable_proxy_runtime(request);
@@ -353,13 +367,21 @@ int wfe_roundtable_proxy(server_conn_t *conn, const cJSON *request)
    }
    cJSON *response = cJSON_Parse(body);
    free(body);
-   cJSON *error = response ? cJSON_GetObjectItemCaseSensitive(response, "error") : NULL;
-   if (status < 200 || status >= 300 || !response)
+   if (!response)
+      return server_send_error(conn, "Go roundtable request failed", NULL);
+   if (status < 200 || status >= 300)
    {
-      int rc = server_send_error(
-          conn, cJSON_IsString(error) ? error->valuestring : "Go roundtable request failed", NULL);
-      cJSON_Delete(response);
-      return rc;
+      /* The Go endpoint deliberately returns a partial roundtable result on
+       * deadline/degraded failures. Keep that machine-readable evidence in the
+       * dispatch result while also marking it as an error for the async op-run
+       * worker and human CLI. The old server_send_error path retained only the
+       * message and silently discarded participant_failures/deadline_hit. */
+      const char *message = roundtable_response_error_message(response);
+      cJSON_DeleteItemFromObjectCaseSensitive(response, "status");
+      cJSON_AddStringToObject(response, "status", "error");
+      if (!cJSON_GetObjectItemCaseSensitive(response, "message"))
+         cJSON_AddStringToObject(response, "message", message);
+      return server_send_ok(conn, response);
    }
    cJSON *result = cJSON_DetachItemFromObject(response, "roundtable");
    cJSON_Delete(response);

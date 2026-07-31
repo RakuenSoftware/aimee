@@ -18,51 +18,6 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
-int config_set_autonomous(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->autonomous = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_verify_enabled(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->verify_enabled = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_roundtable_replay_verify_enabled(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->roundtable_replay_verify_enabled = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
 int config_set_roundtable_require_evidence(int value)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));
@@ -1947,6 +1902,66 @@ int config_set_reasoning_row_budget(int value)
    if (rc == 0)
    {
       cfg->reasoning_row_budget = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_reasoning_time_limit_ms(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->reasoning_time_limit_ms = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_bandit_exploration_fraction(double value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->bandit_exploration_fraction = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_bandit_ipw_weight_cap(double value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->bandit_ipw_weight_cap = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_bandit_exploration_window_seconds(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->bandit_exploration_window_seconds = value;
       rc = config_save(cfg);
    }
    free(cfg);

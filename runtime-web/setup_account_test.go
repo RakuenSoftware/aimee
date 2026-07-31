@@ -364,3 +364,52 @@ func TestSetupAccountIsCompleteForOperatorConfiguredLogin(t *testing.T) {
 		t.Fatalf("status = %#v", status)
 	}
 }
+
+// The roundtable admin gate lives in the C server, which runs as `aimee`, while
+// runtime-web runs as root. The replacement marker is how the two agree on who
+// the appliance administrator is — so it has to be readable by the OTHER
+// process. Written 0600 it was not, the gate fell through to its "admin"
+// fallback, and it refused the very operator whose name was in the file.
+//
+// Reproduced on a live appliance: complete the wizard as `virant`, and
+// POST /v1/roundtables/active returns 403; make the marker readable and the same
+// request returns 200. Nothing in either process could catch that alone — both
+// halves were correct in isolation.
+func TestReplacementMarkerIsReadableByTheServerProcess(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "webchat", "bootstrap-replaced")
+
+	rollback, err := writeReplacementMarker(marker, "virant")
+	if err != nil {
+		t.Fatalf("writeReplacementMarker: %v", err)
+	}
+	if rollback == nil {
+		t.Fatal("no rollback returned")
+	}
+
+	fi, err := os.Stat(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := fi.Mode().Perm(); perm&0o044 == 0 {
+		t.Fatalf("marker mode %o is unreadable by the server process; the admin gate "+
+			"cannot resolve the administrator and refuses them", perm)
+	}
+	// The directory has to be traversable for the same reason.
+	di, err := os.Stat(filepath.Dir(marker))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := di.Mode().Perm(); perm&0o055 == 0 {
+		t.Fatalf("marker dir mode %o blocks the server process", perm)
+	}
+
+	// It is identity metadata, not a credential: the content is a username.
+	body, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(body)) != "virant" {
+		t.Fatalf("marker content = %q; want the replacement username", string(body))
+	}
+}

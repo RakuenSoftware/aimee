@@ -24,6 +24,69 @@
 # 3. DB2. An unset AIMEE_DB2_URL means the operator configured no database, so
 #    run the in-image PostgreSQL 18 + pgvector cluster. Any value in
 #    AIMEE_DB2_URL selects an external server and nothing is started here.
+# ---- bundled embedder -------------------------------------------------------
+# The weights are baked into the image, but the model is NOT loaded unless it has been
+# SELECTED. Half a gigabyte of resident model is not something to spend on a kb that was
+# never told to embed with it, and on the wizard path the selection always exists before
+# this container is deployed (`aimee config deploy-env` emits EMBEDDER_MODEL for the
+# bundled embedder, or AIMEE_EMBEDDER_URL for an external one).
+#
+# Selection, in precedence order:
+#   AIMEE_EMBEDDER_URL set  -> an external embedder; start nothing.
+#   EMBEDDER_MODEL set      -> the bundled embedder; start it.
+#   embedding_model in cfg  -> same, for a hand-run container.
+#   none of the above       -> start nothing. The kb falls back to its builtin lexical
+#                              embedder, which needs no model and no port, so an
+#                              unconfigured container is idle rather than half-configured.
+#
+# When it DOES start, the loopback URL is exported as AIMEE_EMBEDDER_URL. That makes the
+# bundled embedder just "an embedder at a URL" and reuses one precedence rule for both
+# cases, instead of a second mechanism that can disagree with the first.
+#
+# Starting is best-effort: the kb degrades honestly when embedding is unavailable, whereas
+# an entrypoint that refuses takes the whole knowledge base down with it.
+# Ask the binary, never the file. This used to parse aimee.yaml with a sed regex, which
+# hardcoded the config paths and assumed a top-level `embedding_model:` key — a second
+# reader of a setting config owns. It worked only because config_save happens to write
+# the key at root, and it failed SILENTLY: an unparsed key reads as "nothing selected",
+# so the builtin serves forever and nothing says why.
+read_cfg_embedding_model() {
+    aimee-kb --print-embedding-model 2>/dev/null || true
+}
+
+start_embedder() {
+    if [ -n "${AIMEE_EMBEDDER_URL:-}" ]; then
+        echo "aimee-kb: external embedder configured ($AIMEE_EMBEDDER_URL); bundled model not loaded" >&2
+        return 0
+    fi
+    if [ -z "${EMBEDDER_MODEL:-}" ]; then
+        EMBEDDER_MODEL="$(read_cfg_embedding_model)"
+    fi
+    if [ -z "$EMBEDDER_MODEL" ]; then
+        echo "aimee-kb: no embedder selected; the bundled model stays unloaded (the builtin" \
+             "lexical embedder serves until the wizard selects one)" >&2
+        return 0
+    fi
+    export EMBEDDER_MODEL
+
+    venv="${EMBEDDER_VENV:-/opt/aimee/embedder-venv}"
+    server=/opt/aimee/scripts/embedder-server.py
+    if [ ! -x "$venv/bin/python" ] || [ ! -f "$server" ]; then
+        echo "aimee-kb: '$EMBEDDER_MODEL' selected but this image has no bundled embedder" >&2
+        return 0
+    fi
+    : "${EMBEDDER_PORT:=8760}"
+    export EMBEDDER_PORT
+    # One precedence rule for both cases: the kb reaches the bundled embedder the same way
+    # it would reach an external one.
+    AIMEE_EMBEDDER_URL="http://127.0.0.1:$EMBEDDER_PORT"
+    export AIMEE_EMBEDDER_URL
+    echo "aimee-kb: starting bundled embedder ($EMBEDDER_MODEL) on :$EMBEDDER_PORT" >&2
+    "$venv/bin/python" "$server" >&2 &
+    embedder_pid=$!
+}
+
+
 set -e
 
 # Kubernetes/Docker credential environment is first-boot transport only. Record
@@ -47,10 +110,23 @@ export AIMEE_HOME
 [ -n "${AIMEE_DB2_URL:-}" ] && external_db=1
 aimee-kb --bootstrap-vault-env
 _secret_names=$(aimee-kb --list-credential-env-names)
+had_credential_env=0
 for _secret_name in $_secret_names; do
+    eval "_secret_was_set=\${${_secret_name}+x}"
+    [ "$_secret_was_set" = x ] && had_credential_env=1
     unset "$_secret_name"
 done
-if [ "$vault_bootstrapped" -eq 0 ]; then
+unset _secret_was_set
+# Container metadata is deliberately credential-free after the disposable
+# bootstrap. Resolve the DB topology from Vault without printing the URL. The
+# fixed probe distinguishes the entrypoint's own embedded socket DSN from an
+# operator-supplied external connection string.
+if aimee-kb --vault-db2-external; then
+    external_db=1
+else
+    external_db=0
+fi
+if [ "$vault_bootstrapped" -eq 0 ] || [ "$had_credential_env" -eq 1 ]; then
     if [ "$external_db" -eq 1 ]; then
         exec /bin/sh "$0" --aimee-internal-vault-bootstrapped-external-db "$@"
     fi
@@ -74,6 +150,31 @@ fi
 
 # 3. Embedded DB2, only when the operator configured no external server.
 if [ "$external_db" -eq 0 ]; then
+    PGMAJOR="${AIMEE_DB2_PG_MAJOR:-18}"
+    # Overridable so the entrypoint's cluster handling is testable without a real
+    # PostgreSQL install; deployments never set it.
+    PGBIN="${AIMEE_DB2_PG_BIN:-/usr/lib/postgresql/$PGMAJOR/bin}"
+    PGDATA="$AIMEE_HOME/postgres"
+    PGSOCK="$AIMEE_HOME/run"
+    DB=aimee_shared
+    mkdir -p "$PGSOCK"
+
+    # A one-shot that SHARES the kb's volume finds the cluster already up, owned
+    # by the long-lived kb container -- the managed deploy's aimee-server-identity
+    # job is exactly this. Connect to that cluster instead of provisioning a
+    # second one over the same data directory.
+    #
+    # This has to precede the root check below: that job runs as root on purpose
+    # (it chowns the server identity it installs), and PostgreSQL forbids running
+    # the SERVER as root, not connecting to one as root. Refusing here failed
+    # managed server identity enrollment on every clean install.
+    if "$PGBIN/pg_isready" --host="$PGSOCK" --quiet 2>/dev/null; then
+        echo "aimee-kb: PostgreSQL already running on $PGSOCK; using it instead of" \
+             "starting a second cluster" >&2
+        start_embedder
+        exec aimee-kb "$@"
+    fi
+
     # PostgreSQL refuses to run as root, unconditionally. The image declares
     # USER aimee, so this only trips when a runtime overrides it (e.g. --user root
     # to work around bind-mount ownership). Say so, rather than letting initdb
@@ -84,12 +185,6 @@ if [ "$external_db" -eq 0 ]; then
         echo "  AIMEE_DB2_URL to an external PostgreSQL server to skip the internal one." >&2
         exit 1
     fi
-    PGMAJOR="${AIMEE_DB2_PG_MAJOR:-18}"
-    PGBIN="/usr/lib/postgresql/$PGMAJOR/bin"
-    PGDATA="$AIMEE_HOME/postgres"
-    PGSOCK="$AIMEE_HOME/run"
-    DB=aimee_shared
-    mkdir -p "$PGSOCK"
 
     if [ ! -f "$PGDATA/PG_VERSION" ]; then
         # initdb as the current (aimee) user, so that user is the cluster
@@ -134,7 +229,26 @@ if [ "$external_db" -eq 0 ]; then
     # libpq reads a directory-valued host as a socket path. Even this local,
     # passwordless DSN follows the credential-shaped config contract: give it
     # to a disposable bootstrap helper, then let the KB load it from Vault.
-    AIMEE_DB2_URL="postgresql:///$DB?host=$PGSOCK" aimee-kb --bootstrap-vault-env
+    #
+    # Name the role explicitly. initdb made THIS user the cluster superuser, and
+    # this DSN is sealed into a Vault on a volume other containers share: a
+    # sharer running as a different OS user (the managed deploy's root
+    # aimee-server-identity job) would otherwise have libpq default the role to
+    # its own user name and fail with "DB2 not reachable". Vault holds this value
+    # for every sharer, and the entrypoint scrubs AIMEE_DB2_URL from the
+    # environment before exec, so their own compose-supplied DSN cannot fix it.
+    # Fall back to the bare DSN if the runtime has no passwd entry for this uid:
+    # an empty user= is worse than none, and libpq's default is right whenever
+    # every reader runs as this same user anyway.
+    cluster_owner=$(id -un 2>/dev/null || true)
+    if [ -n "$cluster_owner" ]; then
+        embedded_dsn="postgresql:///$DB?host=$PGSOCK&user=$cluster_owner"
+    else
+        embedded_dsn="postgresql:///$DB?host=$PGSOCK"
+    fi
+    AIMEE_DB2_URL="$embedded_dsn" aimee-kb --bootstrap-vault-env
+
+    start_embedder
 
     # Not exec: the trap above has to outlive the kb so the cluster shuts down
     # cleanly. Forward the stop signal so the kb still gets its own shutdown.
@@ -192,4 +306,5 @@ if [ "$external_db" -eq 0 ]; then
     exit "$rc"
 fi
 
+start_embedder
 exec aimee-kb "$@"

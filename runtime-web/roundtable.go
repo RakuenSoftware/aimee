@@ -36,7 +36,7 @@ func (s *server) handleRoundtables(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Write(data)
 	case http.MethodPost:
-		if currentUser(r) != "admin" {
+		if !s.isAdmin(r) {
 			writeJSONError(w, http.StatusForbidden, "administrator access required")
 			return
 		}
@@ -76,7 +76,7 @@ func (s *server) handleRoundtableItem(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 			return
 		}
-		if currentUser(r) != "admin" {
+		if !s.isAdmin(r) {
 			writeJSONError(w, http.StatusForbidden, "administrator access required")
 			return
 		}
@@ -101,7 +101,7 @@ func (s *server) handleRoundtableItem(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		method = http.MethodGet
 	case http.MethodPut:
-		if currentUser(r) != "admin" {
+		if !s.isAdmin(r) {
 			writeJSONError(w, http.StatusForbidden, "administrator access required")
 			return
 		}
@@ -111,7 +111,7 @@ func (s *server) handleRoundtableItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case http.MethodDelete:
-		if currentUser(r) != "admin" {
+		if !s.isAdmin(r) {
 			writeJSONError(w, http.StatusForbidden, "administrator access required")
 			return
 		}

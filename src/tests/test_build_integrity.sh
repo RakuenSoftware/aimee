@@ -9,11 +9,64 @@ FAIL=0
 pass() { echo "  PASS: $1"; }
 fail() { echo "  FAIL: $1"; FAIL=1; }
 
+if python3 ../scripts/check-vault-only-container-env.py >/dev/null; then
+    pass "server and KB container definitions keep credentials out of long-lived environments"
+else
+    fail "server or KB container definitions persist credentials outside Vault"
+fi
+
+# Docker E2E must exercise the same operator contract as production: build the
+# image, seal first-boot credentials through the disposable helper, and only
+# then create the long-lived service without rebuilding it.
+container_smoke_bootstrap_ok=1
+for smoke_spec in \
+    "../scripts/aimee-kb-docker-smoke.sh:kb" \
+    "../scripts/aimee-server-docker-smoke.sh:all" \
+    "../scripts/aimee-server-standalone-docker-smoke.sh:server"; do
+    smoke_script=${smoke_spec%:*}
+    bootstrap_target=${smoke_spec##*:}
+    smoke_build_line=$(grep -nF '"${DC[@]}" build' "$smoke_script" | cut -d: -f1)
+    smoke_bootstrap_line=$(grep -nF \
+        "scripts/aimee-compose-vault-bootstrap.sh -f \"\$bootstrap_compose\" $bootstrap_target" \
+        "$smoke_script" | cut -d: -f1)
+    smoke_up_line=$(grep -nF '"${DC[@]}" up -d --no-build' "$smoke_script" | cut -d: -f1)
+    if [ -z "$smoke_build_line" ] || [ -z "$smoke_bootstrap_line" ] || [ -z "$smoke_up_line" ] ||
+       [ "$smoke_build_line" -ge "$smoke_bootstrap_line" ] ||
+       [ "$smoke_bootstrap_line" -ge "$smoke_up_line" ] ||
+       grep -qF '"${DC[@]}" up -d --build' "$smoke_script"; then
+        container_smoke_bootstrap_ok=0
+    fi
+done
+if [ "$container_smoke_bootstrap_ok" -eq 1 ]; then
+    pass "Docker smokes Vault-bootstrap before creating long-lived containers"
+else
+    fail "Docker smoke bypasses the disposable Vault bootstrap contract"
+fi
+
+# Debian installs runuser under /usr/sbin. The disposable helper overrides the
+# image entrypoint, so its path must match the runtime image exactly.
+if grep -qF -- '--entrypoint /usr/sbin/runuser aimee-server' \
+        ../scripts/aimee-compose-vault-bootstrap.sh &&
+   ! grep -qF -- '--entrypoint /usr/bin/runuser' \
+        ../scripts/aimee-compose-vault-bootstrap.sh; then
+    pass "server Vault bootstrap uses the runtime image's runuser path"
+else
+    fail "server Vault bootstrap points at a missing runuser binary"
+fi
+
 # The server image entrypoint must honor Docker's explicit command override, but
 # even an override must first consume credential env into Vault and scrub it.
 # Stub only the short-lived bootstrap transport so this can run outside the
 # image; the explicit child proves it received no credential value.
 entrypoint_test_dir=$(mktemp -d /tmp/aimee-entrypoint.XXXXXX)
+cat >"$entrypoint_test_dir/aimee-server" <<'SH'
+#!/bin/sh
+[ -n "${ENTRYPOINT_TEST_API_KEY:-}" ] || exit 3
+[ "$*" = "--bootstrap-vault-env --drop-user aimee" ] || exit 4
+[ -z "${ENTRYPOINT_TEST_BOOTSTRAP_FAIL:-}" ] || exit 9
+exit 0
+SH
+chmod +x "$entrypoint_test_dir/aimee-server"
 cat >"$entrypoint_test_dir/runuser" <<'SH'
 #!/bin/sh
 [ -n "${ENTRYPOINT_TEST_API_KEY:-}" ] || exit 3
@@ -27,11 +80,21 @@ entrypoint_output=$(env -i PATH="$entrypoint_test_dir:/usr/bin:/bin" \
     AIMEE_HOME="$entrypoint_test_dir/home" ENTRYPOINT_TEST_API_KEY=first-boot-only \
     sh ../deploy/container/server-entrypoint.sh sh -c \
     'printf "%s\n" "${ENTRYPOINT_TEST_API_KEY-unset}"' 2>/dev/null)
-rm -rf "$entrypoint_test_dir"
 if [ "$entrypoint_output" = "unset" ]; then
     pass "server entrypoint Vault-ingests and scrubs before an explicit command override"
 else
     fail "server entrypoint bypassed Vault ingestion or leaked a credential to an override"
+fi
+entrypoint_fail_output=$(env -i PATH="$entrypoint_test_dir:/usr/bin:/bin" \
+    AIMEE_HOME="$entrypoint_test_dir/home" ENTRYPOINT_TEST_API_KEY=first-boot-only \
+    ENTRYPOINT_TEST_BOOTSTRAP_FAIL=1 \
+    sh ../deploy/container/server-entrypoint.sh sh -c 'printf "%s\n" child-started' 2>/dev/null)
+entrypoint_fail_rc=$?
+rm -rf "$entrypoint_test_dir"
+if [ "$entrypoint_fail_rc" -ne 0 ] && [ -z "$entrypoint_fail_output" ]; then
+    pass "server entrypoint aborts before children when Vault bootstrap fails"
+else
+    fail "server entrypoint continued after Vault bootstrap failure"
 fi
 
 # The KB entrypoint can remain PID 1 while supervising its embedded PostgreSQL,
@@ -42,7 +105,16 @@ kb_entrypoint_test_dir=$(mktemp -d /tmp/aimee-kb-entrypoint.XXXXXX)
 cat >"$kb_entrypoint_test_dir/aimee-kb" <<'SH'
 #!/bin/sh
 case "${1:-}" in
-    --bootstrap-vault-env) exit 0 ;;
+    --bootstrap-vault-env)
+        [ -z "${ENTRYPOINT_BOOTSTRAP_LOG:-}" ] || printf x >>"$ENTRYPOINT_BOOTSTRAP_LOG"
+        exit 0
+        ;;
+    --vault-db2-external) exit 0 ;;
+    # The entrypoint asks the binary which embedder is selected instead of parsing
+    # aimee.yaml. Exit 1 = nothing selected, so this stub starts no embedder; without
+    # the case the stub would fall through and print "clean", which the entrypoint
+    # would take as a MODEL NAME.
+    --print-embedding-model) exit 1 ;;
     --list-credential-env-names)
         [ -n "${AIMEE_DB2_URL:-}" ] && printf '%s\n' AIMEE_DB2_URL
         [ -n "${ENTRYPOINT_TEST_API_KEY:-}" ] && printf '%s\n' ENTRYPOINT_TEST_API_KEY
@@ -58,34 +130,110 @@ else
 fi
 SH
 chmod +x "$kb_entrypoint_test_dir/aimee-kb"
+# stderr is captured separately, not folded in: the entrypoint legitimately logs
+# operator diagnostics there (which embedder it started, or why it started none),
+# and folding them into stdout would turn this into an assertion that the
+# entrypoint is silent. What must hold is that no credential VALUE reaches either
+# stream, and that the final process image is credential-free.
+kb_entrypoint_stderr="$kb_entrypoint_test_dir/stderr.log"
 kb_entrypoint_output=$(env -i PATH="$kb_entrypoint_test_dir:/usr/bin:/bin" \
     AIMEE_HOME="$kb_entrypoint_test_dir/home" \
     AIMEE_DB2_URL=postgresql://external.invalid/aimee \
     ENTRYPOINT_TEST_API_KEY=first-boot-only \
-    sh ../deploy/container/aimee-kb-entrypoint.sh 2>&1)
-rm -rf "$kb_entrypoint_test_dir"
-if [ "$kb_entrypoint_output" = "clean" ]; then
+    sh ../deploy/container/aimee-kb-entrypoint.sh 2>"$kb_entrypoint_stderr")
+if [ "$kb_entrypoint_output" = "clean" ] &&
+    ! grep -qE 'first-boot-only|external\.invalid' "$kb_entrypoint_stderr"; then
     pass "KB entrypoint clean-reexec removes inherited first-boot credentials"
 else
-    fail "KB entrypoint left first-boot credentials in its long-lived process image ($kb_entrypoint_output)"
+    fail "KB entrypoint left first-boot credentials in its long-lived process image ($kb_entrypoint_output, stderr=$(tr '\n' ' ' <"$kb_entrypoint_stderr"))"
 fi
+
+# Treat the internal bootstrap marker as untrusted input. A container runtime
+# can supply entrypoint arguments, so inheriting any credential must force one
+# more credential-free exec even when that marker was present at first boot.
+kb_bootstrap_log="$kb_entrypoint_test_dir/bootstrap.log"
+kb_marked_stderr="$kb_entrypoint_test_dir/stderr-marked.log"
+kb_marked_output=$(env -i PATH="$kb_entrypoint_test_dir:/usr/bin:/bin" \
+    AIMEE_HOME="$kb_entrypoint_test_dir/home-marked" \
+    AIMEE_DB2_URL=postgresql://external.invalid/aimee \
+    ENTRYPOINT_TEST_API_KEY=first-boot-only \
+    ENTRYPOINT_BOOTSTRAP_LOG="$kb_bootstrap_log" \
+    sh ../deploy/container/aimee-kb-entrypoint.sh \
+    --aimee-internal-vault-bootstrapped-external-db 2>"$kb_marked_stderr")
+kb_bootstrap_count=$(wc -c <"$kb_bootstrap_log")
+kb_marked_stderr_text=$(tr '\n' ' ' <"$kb_marked_stderr")
+kb_marked_stderr_dirty=0
+grep -qE 'first-boot-only|external\.invalid' "$kb_marked_stderr" && kb_marked_stderr_dirty=1
+if [ "$kb_marked_output" = "clean" ] && [ "$kb_bootstrap_count" -eq 2 ] &&
+    [ "$kb_marked_stderr_dirty" -eq 0 ]; then
+    pass "KB entrypoint ignores a spoofed bootstrap marker when credentials are inherited"
+else
+    fail "KB entrypoint trusted a bootstrap marker before a clean re-exec ($kb_marked_output, bootstraps=$kb_bootstrap_count, stderr=$kb_marked_stderr_text)"
+fi
+
+# A one-shot sharing the kb's volume (the managed deploy's aimee-server-identity
+# job) finds the cluster already running and must CONNECT to it, not provision a
+# second one over the same data directory. That job runs as root deliberately, and
+# refusing it there -- PostgreSQL forbids running the server as root, not
+# connecting as one -- failed managed server identity enrollment on every clean
+# install. Stub pg_isready as "a cluster is up" and assert the entrypoint reaches
+# the binary instead of exiting.
+kb_shared_dir=$(mktemp -d /tmp/aimee-kb-shared.XXXXXX)
+mkdir -p "$kb_shared_dir/bin" "$kb_shared_dir/pgbin"
+cat >"$kb_shared_dir/bin/aimee-kb" <<'SH'
+#!/bin/sh
+case "${1:-}" in
+    --bootstrap-vault-env|--list-credential-env-names) exit 0 ;;
+    --vault-db2-external) exit 1 ;;   # embedded lane: the path that provisions
+    --print-embedding-model) exit 1 ;;
+esac
+printf 'reached-binary:%s\n' "${1:-none}"
+SH
+cat >"$kb_shared_dir/pgbin/pg_isready" <<'SH'
+#!/bin/sh
+exit 0
+SH
+cat >"$kb_shared_dir/pgbin/initdb" <<'SH'
+#!/bin/sh
+echo "initdb-must-not-run" >&2
+exit 1
+SH
+chmod +x "$kb_shared_dir/bin/aimee-kb" "$kb_shared_dir/pgbin/pg_isready" \
+    "$kb_shared_dir/pgbin/initdb"
+kb_shared_stderr="$kb_shared_dir/stderr.log"
+kb_shared_output=$(env -i PATH="$kb_shared_dir/bin:/usr/bin:/bin" \
+    AIMEE_HOME="$kb_shared_dir/home" \
+    AIMEE_DB2_PG_BIN="$kb_shared_dir/pgbin" \
+    sh ../deploy/container/aimee-kb-entrypoint.sh \
+    managed-server-identity 2>"$kb_shared_stderr" || true)
+rm -rf "$kb_entrypoint_test_dir"
+if [ "$kb_shared_output" = "reached-binary:managed-server-identity" ] &&
+    ! grep -q 'initdb-must-not-run' "$kb_shared_stderr"; then
+    pass "KB entrypoint reuses an already-running cluster instead of provisioning a second"
+else
+    fail "KB entrypoint did not reuse the running cluster ($kb_shared_output, stderr=$(tr '\n' ' ' <"$kb_shared_stderr"))"
+fi
+rm -rf "$kb_shared_dir"
 
 # The server image intentionally supervises multiple long-lived planes, so it
 # still needs a PID-1 subreaper. It must not start tini until after first-boot
 # credentials have been sealed and unset: an earlier tini permanently retains
 # the original container environment even when every child scrubs its copy.
-vault_bootstrap_line=$(grep -nF 'runuser -u aimee -- aimee-server --bootstrap-vault-env' \
+vault_bootstrap_line=$(grep -nF 'aimee-server --bootstrap-vault-env --drop-user aimee' \
     ../deploy/container/server-entrypoint.sh | cut -d: -f1)
 credential_unset_line=$(grep -nF 'unset "$_secret_name"' \
     ../deploy/container/server-entrypoint.sh | cut -d: -f1)
 tini_exec_line=$(grep -nF 'exec /usr/bin/tini -- aimee-server-entrypoint --aimee-internal-vault-bootstrapped' \
+    ../deploy/container/server-entrypoint.sh | cut -d: -f1)
+credential_reexec_condition=$(grep -nF 'if [ "$vault_bootstrapped" -eq 0 ] || [ "$had_credential_env" -eq 1 ]; then' \
     ../deploy/container/server-entrypoint.sh | cut -d: -f1)
 first_unrelated_child_line=$(grep -nF 'mkdir -p "$AIMEE_HOME"' \
     ../deploy/container/server-entrypoint.sh | head -1 | cut -d: -f1)
 if grep -qE '^[[:space:]]+tini \\' ../Dockerfile.server &&
    grep -qF 'ENTRYPOINT ["aimee-server-entrypoint"]' ../Dockerfile.server &&
    [ -n "$vault_bootstrap_line" ] && [ -n "$credential_unset_line" ] &&
-   [ -n "$tini_exec_line" ] && [ -n "$first_unrelated_child_line" ] &&
+   [ -n "$tini_exec_line" ] && [ -n "$credential_reexec_condition" ] &&
+   [ -n "$first_unrelated_child_line" ] &&
    [ "$vault_bootstrap_line" -lt "$credential_unset_line" ] &&
    [ "$credential_unset_line" -lt "$tini_exec_line" ] &&
    [ "$credential_unset_line" -lt "$first_unrelated_child_line" ] &&
@@ -106,10 +254,13 @@ kb_clean_reexec_first=$(grep -nF 'exec /bin/sh "$0" --aimee-internal-vault-boots
     ../deploy/container/aimee-kb-entrypoint.sh | head -1 | cut -d: -f1)
 kb_clean_reexec_last=$(grep -nF 'exec /bin/sh "$0" --aimee-internal-vault-bootstrapped-' \
     ../deploy/container/aimee-kb-entrypoint.sh | tail -1 | cut -d: -f1)
+kb_credential_reexec_condition=$(grep -nF 'if [ "$vault_bootstrapped" -eq 0 ] || [ "$had_credential_env" -eq 1 ]; then' \
+    ../deploy/container/aimee-kb-entrypoint.sh | cut -d: -f1)
 kb_first_unrelated_child_line=$(grep -nF 'mkdir -p "$AIMEE_HOME"' \
     ../deploy/container/aimee-kb-entrypoint.sh | head -1 | cut -d: -f1)
 if [ -n "$kb_vault_bootstrap_line" ] && [ -n "$kb_credential_unset_line" ] &&
    [ -n "$kb_clean_reexec_first" ] && [ -n "$kb_clean_reexec_last" ] &&
+   [ -n "$kb_credential_reexec_condition" ] &&
    [ -n "$kb_first_unrelated_child_line" ] &&
    [ "$kb_vault_bootstrap_line" -lt "$kb_credential_unset_line" ] &&
    [ "$kb_credential_unset_line" -lt "$kb_clean_reexec_first" ] &&
@@ -602,6 +753,49 @@ else
     fail "Makefile DB boundary regressions:$make_boundary_failures"
 fi
 
+# 7f-bis. Header dependency tracking must cover every compiled object.
+#
+# DEPS was $(ALL_OBJS:.o=.d). Objects reachable only as a direct prerequisite of a
+# test target were in no *_OBJS variable, so their .d files were never included:
+# ~959 of 2033 objects had NO header tracking. Editing a header then left them
+# stale, and a stale object built against an older struct layout links cleanly and
+# then crashes on a field offset at runtime. That is how unit-test-memory came to
+# segfault on a tree whose tests all "passed".
+#
+# Two assertions: the wiring is structurally correct, and -- when a build tree is
+# present -- it empirically covers every .d on disk.
+dep_failures=""
+deps_assign=$(grep -E '^DEPS[[:space:]]*=' "$makefile_file" || true)
+if [ -z "$deps_assign" ]; then
+    dep_failures="$dep_failures deps-unassigned"
+elif ! echo "$deps_assign" | grep -Fq '$(OBJDIR)'; then
+    # A purely variable-derived DEPS can only ever cover hand-listed objects.
+    dep_failures="$dep_failures deps-not-discovered-from-objdir"
+fi
+
+objdir=$(sed -n 's/^OBJDIR[[:space:]]*=[[:space:]]*\(.*\)$/\1/p' "$makefile_file" | head -1)
+[ -n "$objdir" ] || objdir="build/obj"
+if find "$objdir" -name '*.d' 2>/dev/null | grep -q .; then
+    printf 'print-%%:\n\t@echo $($%s)\n' '*' > /tmp/aimee_bi_print.mk 2>/dev/null ||
+        : # non-writable /tmp: the structural check above still stands
+    if [ -f /tmp/aimee_bi_print.mk ]; then
+        find "$objdir" -name '*.d' | sort -u > /tmp/aimee_bi_ondisk.txt
+        make -f "$makefile_file" -f /tmp/aimee_bi_print.mk print-DEPS 2>/dev/null |
+            tr ' ' '\n' | grep '\.d$' | sort -u > /tmp/aimee_bi_included.txt
+        uncovered=$(comm -13 /tmp/aimee_bi_included.txt /tmp/aimee_bi_ondisk.txt | wc -l)
+        if [ "$uncovered" -ne 0 ]; then
+            dep_failures="$dep_failures $uncovered-objects-without-header-tracking"
+        fi
+        rm -f /tmp/aimee_bi_print.mk /tmp/aimee_bi_ondisk.txt /tmp/aimee_bi_included.txt
+    fi
+fi
+
+if [ -z "$dep_failures" ]; then
+    pass "every compiled object has header dependency tracking"
+else
+    fail "header dependency tracking gaps:$dep_failures"
+fi
+
 # 7g. The KB service split must keep explicit module-boundary directories and
 # container packaging for the headless aimee-kb deployment shape.
 split_failures=""
@@ -639,8 +833,8 @@ if [ -f ../compose.yaml ]; then
     if grep -Eq '^[[:space:]]+postgres:' ../compose.yaml; then
         split_failures="$split_failures compose-retains-sibling-postgres-service"
     fi
-    if ! grep -Eq 'AIMEE_DB2_URL[=:]' ../compose.yaml; then
-        split_failures="$split_failures compose-missing-db2-url"
+    if grep -Eq 'AIMEE_DB2_URL[=:]' ../compose.yaml; then
+        split_failures="$split_failures compose-persists-db2-url-outside-vault"
     fi
 else
     split_failures="$split_failures missing-compose-yaml"
