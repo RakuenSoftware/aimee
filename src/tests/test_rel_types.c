@@ -68,44 +68,61 @@ static void test_kind_allowed(void)
    printf("  PASS: test_kind_allowed\n");
 }
 
-static void test_describe(void)
+static void test_canonicalize_aliases(void)
 {
-   char buf[128];
+   char out[REL_TYPE_NAME_MAX];
 
-   /* The type signature is what extraction prompts need: a bare "device_has_ip"
-    * leaves a model guessing, and its reasonable guesses (has_ip) are staged as
-    * provisional Class-C edges rather than committed as validated Class-B ones. */
-   const rel_type_def_t *ip = rel_types_seed_lookup("device_has_ip");
-   assert(rel_types_describe(ip, buf, sizeof(buf)) > 0);
-   assert(strcmp(buf, "device_has_ip (device->ip)") == 0);
+   /* The case that motivated this: a model writes has_ip for a relation we
+    * already model, and without folding it the gate stages a provisional
+    * rel_type on a Class-C edge instead of committing Class B. */
+   rel_type_canonicalize("has_ip", out, sizeof(out));
+   assert(strcmp(out, "device_has_ip") == 0);
+   rel_type_canonicalize("hasIP", out, sizeof(out)); /* normalized, then folded */
+   assert(strcmp(out, "device_has_ip") == 0);
+   rel_type_canonicalize("hostname", out, sizeof(out));
+   assert(strcmp(out, "has_hostname") == 0);
+   rel_type_canonicalize("Works At", out, sizeof(out));
+   assert(strcmp(out, "works_for") == 0);
+   rel_type_canonicalize("married_to", out, sizeof(out));
+   assert(strcmp(out, "spouse") == 0);
 
-   const rel_type_def_t *wf = rel_types_seed_lookup("works_for");
-   rel_types_describe(wf, buf, sizeof(buf));
-   assert(strcmp(buf, "works_for (person->org)") == 0);
+   /* A real seed type is already canonical and must never be rewritten. */
+   rel_type_canonicalize("device_has_ip", out, sizeof(out));
+   assert(strcmp(out, "device_has_ip") == 0);
+   rel_type_canonicalize("knows", out, sizeof(out));
+   assert(strcmp(out, "knows") == 0);
 
-   /* NODE_SCALAR reads as "value"; a NODE_OTHER wildcard collapses to "any". */
-   const rel_type_def_t *hr = rel_types_seed_lookup("has_role");
-   rel_types_describe(hr, buf, sizeof(buf));
-   assert(strcmp(buf, "has_role (person->value)") == 0);
+   /* Genuinely new predicates pass through normalized. Folding these would
+    * destroy information: founded is not member_of, mentors is not knows. */
+   rel_type_canonicalize("founded", out, sizeof(out));
+   assert(strcmp(out, "founded") == 0);
+   rel_type_canonicalize("mentors", out, sizeof(out));
+   assert(strcmp(out, "mentors") == 0);
+   rel_type_canonicalize("drives", out, sizeof(out));
+   assert(strcmp(out, "drives") == 0);
 
-   const rel_type_def_t *li = rel_types_seed_lookup("located_in");
-   rel_types_describe(li, buf, sizeof(buf));
-   assert(strcmp(buf, "located_in (any->place)") == 0);
+   rel_type_canonicalize("", out, sizeof(out));
+   assert(out[0] == '\0');
+   rel_type_canonicalize(NULL, out, sizeof(out));
+   assert(out[0] == '\0');
 
-   assert(rel_types_describe(NULL, buf, sizeof(buf)) == 0);
-   assert(rel_types_describe(wf, NULL, 0) == 0);
-
-   /* Every seed row must render, and fit the 128-byte budget the prompt uses. */
-   for (int i = 0; i < rel_types_seed_count(); i++)
+   /* Every alias resolves to a seed type, and folding is idempotent. */
+   assert(rel_types_alias_count() > 0);
+   for (int i = 0; i < rel_types_alias_count(); i++)
    {
-      int n = rel_types_describe(rel_types_seed_at(i), buf, sizeof(buf));
-      assert(n > 0 && n < (int)sizeof(buf));
+      const char *canon = NULL;
+      const char *alias = rel_types_alias_at(i, &canon);
+      assert(alias && canon);
+      assert(rel_types_seed_lookup(canon) != NULL);
+      rel_type_canonicalize(alias, out, sizeof(out));
+      assert(strcmp(out, canon) == 0);
+      char twice[REL_TYPE_NAME_MAX];
+      rel_type_canonicalize(out, twice, sizeof(twice));
+      assert(strcmp(twice, out) == 0);
    }
-
-   assert(strcmp(rel_types_kind_word(NODE_IP), "ip") == 0);
-   assert(strcmp(rel_types_kind_word(NODE_SCALAR), "value") == 0);
-   assert(strcmp(rel_types_kind_word(NODE_OTHER), "any") == 0);
-   printf("  PASS: test_describe\n");
+   assert(rel_types_alias_at(-1, NULL) == NULL);
+   assert(rel_types_alias_at(rel_types_alias_count(), NULL) == NULL);
+   printf("  PASS: test_canonicalize_aliases\n");
 }
 
 static void test_functional_classification(void)
@@ -153,7 +170,7 @@ int main(void)
    test_normalize();
    test_seed_lookup_case_insensitive();
    test_kind_allowed();
-   test_describe();
+   test_canonicalize_aliases();
    test_functional_classification();
    test_enum_text();
    test_governance_rel_types();

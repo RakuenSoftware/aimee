@@ -84,6 +84,30 @@ extern "C"
     * Case/format-insensitive. Returns NULL if not a seed type. */
    const rel_type_def_t *rel_types_seed_lookup(const char *rel_type);
 
+   /* Normalize, then resolve a known synonym to its canonical seed rel_type:
+    * "has_ip" -> "device_has_ip", "hostname" -> "has_hostname". Unknown labels
+    * pass through normalized and unchanged, so a genuinely new predicate is
+    * still distinguishable and still stages as provisional (§7.2).
+    *
+    * This mirrors what entities already have. db2_entity_alias_bind() maps an
+    * alias to a canonical node so aliased facts share one entity; relations had
+    * no equivalent, so a model's reasonable synonym for a relation we already
+    * model was staged as a provisional rel_type on a Class-C edge instead of
+    * committing the validated Class-B edge. Measured on the Tier-A benchmark,
+    * 22% of novel-predicate emissions duplicated an existing seed predicate.
+    *
+    * Canonicalize at the boundary, where a model's label first enters, NOT
+    * inside rel_types_seed_lookup: callers take semantics from the returned def
+    * but persist and query the relation string they were given, so resolving
+    * inside lookup would apply device_has_ip's semantics to an edge stored as
+    * has_ip — and the two would never dedupe. */
+   void rel_type_canonicalize(const char *in, char *out, size_t out_len);
+
+   /* Number of seed aliases, and the i-th (alias, canonical) pair. Exposed so
+    * the console and tests can show what will be folded. */
+   int rel_types_alias_count(void);
+   const char *rel_types_alias_at(int i, const char **canonical_out);
+
    /* Seed iteration (used to upsert the seed into the DB2 table). */
    int rel_types_seed_count(void);
    const rel_type_def_t *rel_types_seed_at(int i);
@@ -91,20 +115,6 @@ extern "C"
    /* Is `kind` permitted in the head (is_head=1) or tail (is_head=0) slot of
     * `def`? NODE_OTHER in the def's list is the ANY wildcard. */
    int rel_type_kind_allowed(const rel_type_def_t *def, int is_head, memory_node_kind_t kind);
-
-   /* Short lowercase word for an entity kind, for prompts and operator output
-    * ("person", "org", "device", "ip", "value", "any"). Never NULL. */
-   const char *rel_types_kind_word(memory_node_kind_t kind);
-
-   /* Render one seed relation as "name (head->tail)", e.g.
-    * "device_has_ip (device->ip)". Extraction prompts previously sent only the
-    * bare name, so a model had to guess our naming convention from the word
-    * alone and reasonably produced synonyms like has_ip — which the gate then
-    * staged as a provisional rel_type on a Class-C edge instead of committing
-    * the validated Class-B edge device_has_ip would have produced. The type
-    * signature is already in the ontology; showing it costs a few tokens and
-    * removes the guess. Returns the number of bytes written (excluding NUL). */
-   int rel_types_describe(const rel_type_def_t *def, char *out, size_t out_len);
 
    /* Is `rel_type` single-valued (functional)? A functional relation's new object
     * contradicts any prior object for the same subject, so the commit path applies

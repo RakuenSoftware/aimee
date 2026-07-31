@@ -68,12 +68,7 @@
  * in lockstep with the write gate — no second copy of the relation list. */
 static void mf_build_system_prompt(char *buf, size_t cap)
 {
-   /* Each entry is "name (head->tail)" rather than a bare name. The seed
-    * ontology already carries the type signature; withholding it made the model
-    * guess our naming convention, and a reasonable guess like has_ip for
-    * device_has_ip is staged as a provisional rel_type on a Class-C edge rather
-    * than committing the validated Class-B edge. Sized for the descriptors. */
-   char rels[1536];
+   char rels[768];
    size_t p = 0;
    int n = rel_types_seed_count();
    for (int i = 0; i < n && p < sizeof(rels) - 1; i++)
@@ -81,14 +76,10 @@ static void mf_build_system_prompt(char *buf, size_t cap)
       const rel_type_def_t *d = rel_types_seed_at(i);
       if (!d || !d->rel_type || !d->rel_type[0])
          continue;
-      char desc[128];
-      rel_types_describe(d, desc, sizeof(desc));
-      p += (size_t)snprintf(rels + p, sizeof(rels) - p, "%s%s", p ? ", " : "", desc);
+      p += (size_t)snprintf(rels + p, sizeof(rels) - p, "%s%s", p ? ", " : "", d->rel_type);
    }
    if (!p) /* defensive: an empty seed would leave the model unconstrained */
-      snprintf(rels, sizeof(rels),
-               "works_for (person->org), has_role (person->value), "
-               "lives_in (person->place), born_in (person->place)");
+      snprintf(rels, sizeof(rels), "works_for, has_role, lives_in, born_in");
    snprintf(buf, cap, MF_SYSTEM_PROMPT_TMPL, rels);
 }
 
@@ -283,12 +274,22 @@ static int mf_commit_facts(const char *llm_json)
       const cJSON *obj_j = cJSON_GetObjectItemCaseSensitive(f, "object");
       const cJSON *conf_j = cJSON_GetObjectItemCaseSensitive(f, "confidence");
       const char *subject = cJSON_IsString(subj_j) ? subj_j->valuestring : "";
-      const char *relation = cJSON_IsString(rel_j) ? rel_j->valuestring : "";
+      const char *raw_relation = cJSON_IsString(rel_j) ? rel_j->valuestring : "";
       const char *object = cJSON_IsString(obj_j) ? obj_j->valuestring : "";
       double conf = cJSON_IsNumber(conf_j) ? conf_j->valuedouble : 0.0;
 
-      if (!subject[0] || !relation[0] || !object[0] || conf < MF_CONF_FLOOR)
+      if (!subject[0] || !raw_relation[0] || !object[0] || conf < MF_CONF_FLOOR)
          continue;
+
+      /* Fold a known synonym onto its canonical seed relation before anything
+       * downstream sees it: the gate would otherwise return NOVEL for "has_ip"
+       * and stage a provisional rel_type on a Class-C edge, when we already
+       * model exactly that relation as device_has_ip. Entities have had this
+       * (db2_entity_alias_bind); relations have not. Unknown labels pass through
+       * normalized, so a genuinely new predicate still stages for §7.2. */
+      char relation_buf[REL_TYPE_NAME_MAX];
+      rel_type_canonicalize(raw_relation, relation_buf, sizeof(relation_buf));
+      const char *relation = relation_buf[0] ? relation_buf : raw_relation;
 
       /* The extractor supplies no node kinds, so guess: subject via
        * mf_subject_kind, object OTHER (unknown). But the kind gate REJECTS a
@@ -342,8 +343,7 @@ static int mf_process_one(const config_t *cfg, const mf_job_t *job)
    if (!request_json)
       return -1;
 
-   /* Grown with the relation list: the descriptors carry type signatures now. */
-   char sys_prompt[4096];
+   char sys_prompt[2560];
    mf_build_system_prompt(sys_prompt, sizeof(sys_prompt));
 
    /* The job row and source memory are already copied locally. Release the

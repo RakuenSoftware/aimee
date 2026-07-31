@@ -179,6 +179,36 @@
       }
     }
   },
+  "fabrication": {
+    "_note": "a triple is counted here when a subject or object cannot be traced to the source note. Gold-independent: it measures invented entities, not disagreement with my labels. The write gate cannot catch these \u2014 a well-formed triple about someone never mentioned looks valid.",
+    "predicted_triples": 64,
+    "ungrounded_triples": 2,
+    "fabrication_rate": 0.0312,
+    "examples": [
+      {
+        "id": "tr04",
+        "triple": [
+          "user",
+          "lives_in",
+          "current_location"
+        ],
+        "ungrounded_args": [
+          "object"
+        ]
+      },
+      {
+        "id": "tr11",
+        "triple": [
+          "user",
+          "lives_in",
+          "home"
+        ],
+        "ungrounded_args": [
+          "object"
+        ]
+      }
+    ]
+  },
   "relation_agnostic": {
     "_note": "diagnostic, not a quality score: subject+object matched, relation ignored. The gap to lenient F1 is the share of error that is edge labelling rather than a missed fact.",
     "precision": 0.4062,

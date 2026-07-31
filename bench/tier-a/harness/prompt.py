@@ -39,11 +39,21 @@ KIND_WORD = {
 }
 
 
+def _seed_body():
+    """The SEED_ONTOLOGY initialiser only.
+
+    Bounded at its closing brace: rel_types.c also holds SEED_ALIASES, whose
+    entries look identical to a regex scanning for {"name". Reading to EOF
+    silently pulled aliases in as if they were relations."""
+    src = (REPO / "src" / "rel_types.c").read_text()
+    start = src.index("SEED_ONTOLOGY[] = {")
+    end = src.index("\n};", start)
+    return src[start:end]
+
+
 def seed_relations():
     """Parse the seed ontology order out of rel_types.c — same order the C builder emits."""
-    src = (REPO / "src" / "rel_types.c").read_text()
-    body = src[src.index("SEED_ONTOLOGY[] = {"):]
-    return re.findall(r'^\s*\{"([a-z_]+)"', body, re.M)
+    return re.findall(r'^\s*\{"([a-z_]+)"', _seed_body(), re.M)
 
 
 def _kinds_text(raw):
@@ -58,8 +68,7 @@ def seed_descriptors():
 
     The prompt used to send bare names, which made the model guess our naming
     convention; the type signature was in the ontology all along."""
-    src = (REPO / "src" / "rel_types.c").read_text()
-    body = src[src.index("SEED_ONTOLOGY[] = {"):]
+    body = _seed_body()
     out = []
     for m in re.finditer(
         r'\{"([a-z_]+)",\s*(\{[^}]*\}),\s*\d+,\s*(\{[^}]*\}),\s*\d+,', body):
@@ -72,8 +81,7 @@ def symmetric_relations():
     rel_type_def_t). For these the ontology states that one assertion implies
     both directions, so scoring must accept either argument order — the C
     comment is explicit: "one assertion implies both directions"."""
-    src = (REPO / "src" / "rel_types.c").read_text()
-    body = src[src.index("SEED_ONTOLOGY[] = {"):]
+    body = _seed_body()
     out = set()
     for m in re.finditer(
         r'\{"([a-z_]+)",\s*\{[^}]*\},\s*\d+,\s*\{[^}]*\},\s*\d+,\s*(\d+)', body):
@@ -87,8 +95,7 @@ def inverse_relations():
 
     The header calls these "auto-enforced": asserting one direction commits the
     other, so both spellings are the same fact."""
-    src = (REPO / "src" / "rel_types.c").read_text()
-    body = src[src.index("SEED_ONTOLOGY[] = {"):]
+    body = _seed_body()
     out = {}
     for m in re.finditer(
         r'\{"([a-z_]+)",\s*\{[^}]*\},\s*\d+,\s*\{[^}]*\},\s*\d+,\s*\d+,\s*(NULL|"([a-z_]+)")',
@@ -99,13 +106,18 @@ def inverse_relations():
 
 
 def system_prompt():
-    return TEMPLATE % ", ".join(seed_descriptors())
-
-
-def system_prompt_bare_names():
-    """The pre-fix prompt: predicate names with no type signature. Kept so the
-    two can be benchmarked head to head."""
     return TEMPLATE % ", ".join(seed_relations())
+
+
+def system_prompt_with_signatures():
+    """REJECTED EXPERIMENT, kept so the negative result stays reproducible.
+
+    Sends "device_has_ip (device->ip)" instead of the bare name, on the theory
+    that the model was guessing our naming convention. Benchmarked in
+    results/promptfix: it regressed four of five models and collapsed
+    Qwen3.5-0.8B from 35 triples to 13. Production sends bare names; the naming
+    problem is handled by rel_type_canonicalize() instead.""" 
+    return TEMPLATE % ", ".join(seed_descriptors())
 
 
 def system_prompt_conf_fixed():

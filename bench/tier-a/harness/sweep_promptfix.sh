@@ -30,7 +30,7 @@ for M in $MODELS; do
   PRED="$OUT/$SLUG.pred.jsonl"
   [ -s "$PRED" ] && { echo "SKIP $M"; continue; }
   echo "=== RUN $M ==="
-  if $PY harness/run_hf.py --model "$M" --gold data/gold.jsonl --out "$PRED" \
+  if $PY harness/run_hf.py --model "$M" --gold data/gold.jsonl --out "$PRED" --signature-prompt \
        >"$OUT/$SLUG.log" 2>&1; then
     $PY harness/score.py --gold data/gold.jsonl --pred "$PRED" \
         --json-out "$OUT/$SLUG.score.json" >/dev/null 2>>"$OUT/$SLUG.log"

@@ -286,6 +286,82 @@ const rel_type_def_t *rel_types_seed_lookup(const char *rel_type)
    return NULL;
 }
 
+/* ── Relation aliases ────────────────────────────────────────────────────────
+ * Synonyms models reach for when naming a relation we already model. Every entry
+ * must resolve to an ACTIVE seed rel_type — rel_types_self_validate() enforces
+ * that, so a typo here fails the build's tests rather than silently misfiling
+ * facts.
+ *
+ * Deliberately conservative: only labels that mean the SAME relation, never a
+ * near-neighbour. "founded" is not member_of, "mentors" is not knows; those are
+ * genuinely new relations and must keep staging as provisional so §7.2 can
+ * decide on them. Folding them here would quietly destroy information. */
+static const struct
+{
+   const char *alias;
+   const char *canonical;
+} SEED_ALIASES[] = {
+    {"has_ip", "device_has_ip"},
+    {"ip", "device_has_ip"},
+    {"ip_address", "device_has_ip"},
+    {"hostname", "has_hostname"},
+    {"has_host", "has_hostname"},
+    {"host_name", "has_hostname"},
+    {"works_at", "works_for"},
+    {"employed_by", "works_for"},
+    {"employer", "works_for"},
+    {"belongs_to", "member_of"},
+    {"aka", "also_known_as"},
+    {"alias", "also_known_as"},
+    {"also_called", "also_known_as"},
+    {"married_to", "spouse"},
+    {"wife", "spouse"},
+    {"husband", "spouse"},
+    {"mother_of", "parent_of"},
+    {"father_of", "parent_of"},
+    {"son_of", "child_of"},
+    {"daughter_of", "child_of"},
+    {"resides_in", "lives_in"},
+    {"birthplace", "born_in"},
+    {"governed_by", "linked_policy"},
+    {"replaces", "supersedes"},
+};
+
+static const int SEED_ALIAS_COUNT = (int)(sizeof(SEED_ALIASES) / sizeof(SEED_ALIASES[0]));
+
+int rel_types_alias_count(void)
+{
+   return SEED_ALIAS_COUNT;
+}
+
+const char *rel_types_alias_at(int i, const char **canonical_out)
+{
+   if (i < 0 || i >= SEED_ALIAS_COUNT)
+      return NULL;
+   if (canonical_out)
+      *canonical_out = SEED_ALIASES[i].canonical;
+   return SEED_ALIASES[i].alias;
+}
+
+void rel_type_canonicalize(const char *in, char *out, size_t out_len)
+{
+   if (!out || out_len == 0)
+      return;
+   rel_type_normalize(in, out, out_len);
+   if (!out[0])
+      return;
+   /* A real seed type is already canonical; never rewrite one. */
+   for (int i = 0; i < SEED_COUNT; i++)
+      if (strcmp(SEED_ONTOLOGY[i].rel_type, out) == 0)
+         return;
+   for (int i = 0; i < SEED_ALIAS_COUNT; i++)
+      if (strcmp(SEED_ALIASES[i].alias, out) == 0)
+      {
+         snprintf(out, out_len, "%s", SEED_ALIASES[i].canonical);
+         return;
+      }
+}
+
 static int is_known_kind(memory_node_kind_t k)
 {
    switch (k)
@@ -341,59 +417,6 @@ int rel_type_kind_allowed(const rel_type_def_t *def, int is_head, memory_node_ki
       if (list[i] == NODE_OTHER || list[i] == kind)
          return 1;
    return 0;
-}
-
-const char *rel_types_kind_word(memory_node_kind_t kind)
-{
-   switch (kind)
-   {
-   case NODE_PERSON:
-      return "person";
-   case NODE_ORG:
-      return "org";
-   case NODE_DEVICE:
-      return "device";
-   case NODE_IP:
-      return "ip";
-   case NODE_PLACE:
-      return "place";
-   case NODE_SCALAR:
-      return "value";
-   case NODE_CONCEPT:
-      return "concept";
-   case NODE_EVENT:
-      return "event";
-   case NODE_TIME_EXPR:
-      return "time";
-   default:
-      return "any";
-   }
-}
-
-/* Join a kind list as "a|b", collapsing an ANY wildcard to "any". */
-static int kinds_to_text(const memory_node_kind_t *list, int n, char *out, size_t out_len)
-{
-   size_t p = 0;
-   for (int i = 0; i < n && p + 1 < out_len; i++)
-   {
-      if (list[i] == NODE_OTHER)
-         return snprintf(out, out_len, "any");
-      p += (size_t)snprintf(out + p, out_len - p, "%s%s", p ? "|" : "",
-                            rel_types_kind_word(list[i]));
-   }
-   if (!p)
-      p = (size_t)snprintf(out, out_len, "any");
-   return (int)p;
-}
-
-int rel_types_describe(const rel_type_def_t *def, char *out, size_t out_len)
-{
-   if (!def || !out || !out_len)
-      return 0;
-   char head[64], tail[64];
-   kinds_to_text(def->head_kinds, def->head_kind_count, head, sizeof(head));
-   kinds_to_text(def->tail_kinds, def->tail_kind_count, tail, sizeof(tail));
-   return snprintf(out, out_len, "%s (%s->%s)", def->rel_type, head, tail);
 }
 
 /* Set equality over the small kind lists (order-independent, dup-tolerant). */
@@ -476,6 +499,30 @@ int rel_types_self_validate(char *err, size_t errlen)
          if (!inv->inverse_rel_type || strcmp(inv->inverse_rel_type, d->rel_type) != 0)
             FAIL("%s: inverse %s does not point back", d->rel_type, d->inverse_rel_type);
       }
+   }
+
+   /* Aliases: each must be normalized already, must NOT shadow a real seed type,
+    * and must resolve to an ACTIVE one. A broken entry here would silently
+    * misfile facts, so it fails the tests instead. */
+   for (int i = 0; i < SEED_ALIAS_COUNT; i++)
+   {
+      const char *a = SEED_ALIASES[i].alias;
+      const char *c = SEED_ALIASES[i].canonical;
+      char norm[REL_TYPE_NAME_MAX];
+      rel_type_normalize(a, norm, sizeof(norm));
+      if (strcmp(norm, a) != 0)
+         FAIL("alias %s is not in canonical form (%s)", a, norm);
+      for (int j = 0; j < SEED_COUNT; j++)
+         if (strcmp(SEED_ONTOLOGY[j].rel_type, a) == 0)
+            FAIL("alias %s shadows a seed rel_type", a);
+      const rel_type_def_t *target = rel_types_seed_lookup(c);
+      if (!target)
+         FAIL("alias %s -> %s: target is not a seed rel_type", a, c);
+      if (target->status != REL_STATUS_ACTIVE)
+         FAIL("alias %s -> %s: target is not active", a, c);
+      for (int j = 0; j < i; j++)
+         if (strcmp(SEED_ALIASES[j].alias, a) == 0)
+            FAIL("alias %s is duplicated", a);
    }
    return 0;
 #undef FAIL

@@ -103,6 +103,9 @@ def main():
     ap.add_argument("--repetition-penalty", type=float, default=None,
                     help="DIAGNOSTIC: production sets none. Used only to test "
                          "whether a model's repetition loop is rescuable.")
+    ap.add_argument("--signature-prompt", action="store_true",
+                    help="REJECTED EXPERIMENT: send type signatures alongside "
+                         "predicate names. Regressed 4/5 models; kept reproducible.")
     ap.add_argument("--conf-fixed-prompt", action="store_true",
                     help="ABLATION: send the production prompt with the schema "
                          "example's confidence literal raised from 0.0 to 0.9. "
@@ -111,6 +114,7 @@ def main():
 
     prompt.verify_against_source()
     sys_prompt = (prompt.system_prompt_conf_fixed() if args.conf_fixed_prompt
+                  else prompt.system_prompt_with_signatures() if args.signature_prompt
                   else prompt.system_prompt())
     rows = [json.loads(l) for l in open(args.gold) if l.strip()]
 
