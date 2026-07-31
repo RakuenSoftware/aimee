@@ -285,6 +285,7 @@ static void test_starved_pool_gives_up_so_it_can_be_restarted(void)
 
    void *a = db2_pool_lease(1000), *b = db2_pool_lease(1000);
    assert(a && b); /* every member leased, and never returned */
+   db2_pool_note_lease_site(a, "leaky_worker.c:123");
    usleep(120 * 1000);
 
    pthread_t w;
@@ -300,6 +301,10 @@ static void test_starved_pool_gives_up_so_it_can_be_restarted(void)
    (void)db2_pool_reaper_sweep();
    assert(g_starved_calls == 1);
    assert(strstr(g_starved_reason, "lease leak") != NULL);
+   /* The fatal line must name a holder, not just a count: an operator reading it
+    * needs to know WHICH code leaked. Unattributed is still reported explicitly
+    * rather than omitted, so the gap is visible instead of silent. */
+   assert(strstr(g_starved_reason, "leaky_worker.c:123") != NULL);
 
    pthread_join(w, NULL);
    db2_pool_return(a);
