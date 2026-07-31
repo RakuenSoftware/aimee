@@ -209,17 +209,17 @@
   },
   "over_extraction": {
     "empty_gold_notes": 23,
-    "on_schema_empty_gold_notes": 18,
-    "notes_correctly_empty": 0,
-    "abstention_rate_on_schema": 0.0,
+    "on_schema_empty_gold_notes": 20,
+    "notes_correctly_empty": 2,
+    "abstention_rate_on_schema": 0.1,
     "spurious_triples": 18
   },
   "output_health": {
     "notes": 70,
     "json_parse_ok": 65,
     "json_parse_rate": 0.9286,
-    "schema_ok": 65,
-    "schema_rate": 0.9286,
+    "schema_ok": 67,
+    "schema_rate": 0.9571,
     "malformed_facts": 0,
     "dropped_by_conf_floor": 1,
     "predicted_triples": 77,

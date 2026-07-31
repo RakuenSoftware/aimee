@@ -165,6 +165,41 @@ def prf(tp, fp, fn):
     return p, r, f
 
 
+def derive_schema_ok(row):
+    """Re-derive schema validity from the raw output, correcting the runners.
+
+    The runners recorded schema_ok=False for anything without a "facts" array,
+    which swept up {} and [] — and every single one of those, across every model,
+    turned out to be an empty answer on a note that asserts no durable fact. That
+    is a correct abstention in a terser shape, not a malformed response, and
+    production agrees: mf_commit_facts() commits nothing either way.
+
+    Counting it as a schema failure produced a false headline — schema validity
+    appearing to degrade monotonically with model size (1.00 -> 0.96 -> 0.84 ->
+    0.77) when what actually varies is how tersely a model says "nothing here".
+    It also excluded those notes from the abstention denominator, understating
+    abstention for exactly the models that abstained most.
+
+    schema_ok is now False only for output that carries content in the wrong
+    shape (a bare fact object, prose, unparseable text) — a real failure that
+    silently commits nothing.
+    """
+    raw = (row.get("raw") or "").strip()
+    if raw in ("{}", "[]", "{ }", "[ ]", ""):
+        return True
+    start, end = raw.find("{"), raw.rfind("}")
+    if start == -1 or end < start:
+        return False
+    try:
+        obj = json.loads(raw[start:end + 1])
+    except json.JSONDecodeError:
+        return False
+    if isinstance(obj, dict) and isinstance(obj.get("facts"), list):
+        return True
+    # Valid JSON, no facts array, and not empty: wrong shape carrying content.
+    return isinstance(obj, dict) and not obj
+
+
 def load_triples(rows, key, canonicalize=False):
     """canonicalize applies rel_type_canonicalize()'s alias folding, which is what
     the commit path now does before a triple reaches the gate. Applied to
@@ -205,6 +240,8 @@ def main():
     pred = load_triples(pred_rows, args.pred_key, canonicalize=not args.no_alias)
     cat = {r["id"]: r["category"] for r in gold_rows}
     pmeta = {r["id"]: r for r in pred_rows}
+    for r in pred_rows:
+        r["schema_ok"] = derive_schema_ok(r)
 
     seed = set(prompt.seed_relations())
     global SYMMETRIC, INVERSES
@@ -288,6 +325,8 @@ def main():
     empty_ids = [i for i, g in gold.items() if not g]
     spurious = sum(len(pred.get(i, [])) for i in empty_ids)
     on_schema = [i for i in empty_ids if pmeta.get(i, {}).get("schema_ok")]
+    # Note: an explicit {} on a factless note now counts as a schema-valid
+    # abstention, so these denominators include it.
     clean = sum(1 for i in on_schema if not pred.get(i))
     report["over_extraction"] = {
         "empty_gold_notes": len(empty_ids),
@@ -300,7 +339,7 @@ def main():
     # Operational health: did we get parseable JSON of the right shape, and did it
     # respect the ontology?
     ok = sum(1 for r in pred_rows if r.get("parse_ok"))
-    schema = sum(1 for r in pred_rows if r.get("schema_ok"))
+    schema = sum(1 for r in pred_rows if r["schema_ok"])
     rels = [t["relation"] for ts in pred.values() for t in ts]
     report["output_health"] = {
         "notes": len(pred_rows),

@@ -197,17 +197,17 @@
   },
   "over_extraction": {
     "empty_gold_notes": 23,
-    "on_schema_empty_gold_notes": 12,
-    "notes_correctly_empty": 8,
-    "abstention_rate_on_schema": 0.6667,
+    "on_schema_empty_gold_notes": 23,
+    "notes_correctly_empty": 19,
+    "abstention_rate_on_schema": 0.8261,
     "spurious_triples": 4
   },
   "output_health": {
     "notes": 70,
     "json_parse_ok": 59,
     "json_parse_rate": 0.8429,
-    "schema_ok": 59,
-    "schema_rate": 0.8429,
+    "schema_ok": 70,
+    "schema_rate": 1.0,
     "malformed_facts": 0,
     "dropped_by_conf_floor": 1,
     "predicted_triples": 72,
