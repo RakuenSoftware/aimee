@@ -157,14 +157,14 @@ int kb_handle_ingest(int fd, cJSON *req)
    {
       for (int w = 0; w < config_workspace_count(); w++)
       {
-         int n =
-             workspace_discover_projects(config_workspaces(w), 3, projects, MAX_DISCOVERED_PROJECTS);
+         int n = workspace_discover_projects(config_workspaces(w), 3, projects,
+                                             MAX_DISCOVERED_PROJECTS);
          for (int i = 0; i < n; i++)
          {
             char pname[256];
             char pws[256];
-            if (workspace_repo_index_keys(projects[i], config_workspaces(w), pname, sizeof(pname), pws,
-                                          sizeof(pws)) != 0)
+            if (workspace_repo_index_keys(projects[i], config_workspaces(w), pname, sizeof(pname),
+                                          pws, sizeof(pws)) != 0)
             {
                aimee_log(LOG_ERROR, "kb.ingest.identity",
                          "skipping root='%s': no durable project identity", projects[i]);
@@ -254,8 +254,7 @@ char *kb_service_ingest_status_json(void)
 }
 
 /* Add a per-tier provider sub-object {configured, base_url, model} (no api_key). */
-static void kb_health_add_curator_tier(cJSON *curator, const char *key,
-                                       kb_curator_stage_t stage)
+static void kb_health_add_curator_tier(cJSON *curator, const char *key, kb_curator_stage_t stage)
 {
    cJSON *t = cJSON_AddObjectToObject(curator, key);
    if (!t)

@@ -1036,7 +1036,6 @@ void cmd_doctor(app_ctx_t *ctx, int argc, char **argv)
          subcheck = argv[i];
    }
 
-
    /* `aimee doctor storage` runs just the Knowledge Store check. The legacy
     * `db` spelling remains accepted for compatibility. Exit codes
     * mirror the full-suite semantics so CI can gate on a single

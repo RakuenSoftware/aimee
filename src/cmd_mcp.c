@@ -148,8 +148,9 @@ static void mcp_cmd_recheck(app_ctx_t *ctx, int argc, char **argv)
          (void)db1_mcp_osv_cache_upsert(target.ecosystem, target.name, target.version, "clean", "");
       const char *action = "allow";
       if (result.verdict == OSV_VERDICT_MALWARE)
-         action = target_allowlisted(&target) ? "allow_allowlisted"
-                                              : (config_mcp_osv_enforce() ? "block" : "shadow_block");
+         action = target_allowlisted(&target)
+                      ? "allow_allowlisted"
+                      : (config_mcp_osv_enforce() ? "block" : "shadow_block");
       (void)db1_mcp_osv_audit(client->name, target.ecosystem, target.name, target.version, verdict,
                               action, result.advisory_ids);
       printf("%s: %s:%s %s%s%s\n", client->name, target.ecosystem, target.name, verdict,

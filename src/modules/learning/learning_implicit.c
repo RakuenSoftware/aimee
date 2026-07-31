@@ -44,7 +44,8 @@ void learning_implicit_detect_turn(const char *user_text)
       return;
    if (!config_present())
       return;
-   if (!config_learning_implicit_citation_repair() && !config_learning_implicit_citation_continuation())
+   if (!config_learning_implicit_citation_repair() &&
+       !config_learning_implicit_citation_continuation())
       return;
 
    struct timespec t0, t1;
@@ -55,7 +56,8 @@ void learning_implicit_detect_turn(const char *user_text)
       emit_implicit("citation_then_repair", "negative", "Implicit citation_then_repair signal",
                     "User turn classified as repair/correction after memory retrieval.", NULL, 0,
                     NULL, NULL);
-   else if (kind == DOGFOOD_AUTOLABEL_CONTINUATION && config_learning_implicit_citation_continuation())
+   else if (kind == DOGFOOD_AUTOLABEL_CONTINUATION &&
+            config_learning_implicit_citation_continuation())
       emit_implicit(
           "citation_then_continuation", "positive", "Implicit citation_then_continuation signal",
           "User turn classified as continuation after memory retrieval.", NULL, 0, NULL, NULL);

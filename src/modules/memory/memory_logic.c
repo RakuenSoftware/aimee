@@ -68,7 +68,6 @@ int memory_promote(void)
    int nkinds = db2_memory_promotion_list_kinds_in_tier("L1", kinds,
                                                         (int)(sizeof(kinds) / sizeof(kinds[0])));
 
-
    int total = 0;
    for (int i = 0; i < nkinds; i++)
    {
@@ -85,8 +84,9 @@ int memory_promote(void)
          if (db2_calibration_profile_read("memory", kinds[i].kind, "global", "", cal_buf,
                                           sizeof(cal_buf)) == 0)
          {
-            double target = config_calibration_tau_memory_auto() > 0.0 ? config_calibration_tau_memory_auto()
-                                                                  : lc.promote_confidence;
+            double target = config_calibration_tau_memory_auto() > 0.0
+                                ? config_calibration_tau_memory_auto()
+                                : lc.promote_confidence;
             has_calibration = db2_calibration_threshold_from_profile_json(
                                   cal_buf, target, &calibrated_threshold) == 0;
          }

@@ -2083,10 +2083,9 @@ void cmd_verify(app_ctx_t *ctx, int argc, char **argv)
    char verify_prompt[CONFIG_COPY_MAX];
    config_verify_prompt_copy(verify_prompt, sizeof(verify_prompt));
    const char *base_prompt =
-       verify_prompt[0]
-           ? verify_prompt
-           : "Review these code changes for bugs, security issues, and correctness. "
-             "If everything looks good, say LGTM. If you find problems, list them.";
+       verify_prompt[0] ? verify_prompt
+                        : "Review these code changes for bugs, security issues, and correctness. "
+                          "If everything looks good, say LGTM. If you find problems, list them.";
 
    if (diff_out && diff_out[0])
    {

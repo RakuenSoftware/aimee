@@ -153,8 +153,8 @@ static int registry_target_allowlisted(const osv_target_t *target)
 
 static int registry_osv_blocks_client(const config_mcp_client_t *client)
 {
-   if (!client || !config_mcp_osv_enabled() ||
-       client->transport != CONFIG_MCP_TRANSPORT_STDIO || client->command_count <= 0)
+   if (!client || !config_mcp_osv_enabled() || client->transport != CONFIG_MCP_TRANSPORT_STDIO ||
+       client->command_count <= 0)
       return 0;
 
    const char *argv[CONFIG_MCP_MAX_COMMAND_ARGS + 1];

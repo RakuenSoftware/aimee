@@ -362,9 +362,9 @@ static void cmd_config_dispositions_print_json(void)
          continue;
       cJSON_AddStringToObject(row, "name", config_disposition_name(i));
       cJSON_AddNumberToObject(row, "value", config_disposition_value(i));
-      cJSON_AddStringToObject(
-          row, "source",
-          config_disposition_source_name((config_disposition_source_t)config_disposition_source(i)));
+      cJSON_AddStringToObject(row, "source",
+                              config_disposition_source_name(
+                                  (config_disposition_source_t)config_disposition_source(i)));
       cJSON_AddItemToArray(arr, row);
    }
 

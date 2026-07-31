@@ -238,7 +238,6 @@ static void test_surface_list_discovers_audit_tuples(void)
    printf("  surface_list_discovers_audit_tuples: ok\n");
 }
 
-
 /* kb_calibrate_run reads config through accessors now. This suite links the real
  * config module, so the two cases that drive it write an aimee.yaml under an
  * isolated AIMEE_HOME rather than handing over a struct -- the values are the

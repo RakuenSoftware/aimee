@@ -582,8 +582,7 @@ static int reflect_call_synthesis_agent(const char *query, const memory_t *facts
 
    char *resp = NULL;
    size_t resp_len = 0;
-   int rc = platform_exec_pipe(cognify_command, input_str, strlen(input_str), &resp,
-                               &resp_len);
+   int rc = platform_exec_pipe(cognify_command, input_str, strlen(input_str), &resp, &resp_len);
    free(input_str);
    if (rc != 0 || !resp || resp_len == 0)
    {

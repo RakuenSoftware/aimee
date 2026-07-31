@@ -601,6 +601,18 @@ def render_config(fields, sections, flat):
 # not silently omitted from generated reference docs.
 ENV_RE = re.compile(r'(?:getenv|copy_env)\(\s*"(AIMEE_[A-Z0-9_]+)"')
 
+# Helpers that take the env var NAME as an argument and getenv() it internally.
+# config_sidecar_endpoint is the OCR/TSR resolver: centralising those two reads
+# moved "AIMEE_OCR_URL" / "AIMEE_TSR_URL" out of a literal getenv() call and into
+# a parameter, and the scan above stopped seeing them -- two variables dropped
+# out of the generated reference while still being read at runtime. That is the
+# exact silent-omission this scan exists to prevent, so the shape is matched
+# rather than the vars being hard-coded into ENV_DYNAMIC (which is for
+# credentials with no getenv at all). Add a helper here when it takes an env
+# name; the name must still appear as a literal at the call site.
+ENV_BY_NAME_RE = re.compile(
+    r'config_sidecar_endpoint\([^;]*?"(AIMEE_[A-Z0-9_]+)"', re.S)
+
 # Credential names consumed by the generic first-boot sealer are intentionally
 # not read through individual getenv() calls. Keep their deployment contract in
 # the generated reference anyway.
@@ -976,7 +988,10 @@ def parse_env_vars():
     for f in sorted(SRC.rglob("*")):
         if f.suffix not in (".c", ".h", ".inc") or "/tests/" in f.as_posix():
             continue
-        for m in ENV_RE.finditer(f.read_text(encoding="utf-8", errors="ignore")):
+        text = f.read_text(encoding="utf-8", errors="ignore")
+        for m in ENV_RE.finditer(text):
+            found.add(m.group(1))
+        for m in ENV_BY_NAME_RE.finditer(text):
             found.add(m.group(1))
     return found | ENV_DYNAMIC
 

@@ -186,8 +186,8 @@ int anti_pattern_extract_from_feedback(void)
          char title64[65];
          snprintf(title64, sizeof(title64), "%.64s", rules[i].title);
          kb_reasoning_result_t res;
-         if (kb_reasoning_query("superseded_by(?a, ?b)", NULL, "anti_pattern", title64,
-                                &res) == 0 &&
+         if (kb_reasoning_query("superseded_by(?a, ?b)", NULL, "anti_pattern", title64, &res) ==
+                 0 &&
              res.n_rows > 0)
             LOG_DEBUG("reasoning.learning", "anti_pattern='%s' superseded by case — flagged",
                       title64);
@@ -225,8 +225,8 @@ int anti_pattern_extract_from_failures(void)
          char title64[65];
          snprintf(title64, sizeof(title64), "%.64s", chosen);
          kb_reasoning_result_t res;
-         if (kb_reasoning_query("superseded_by(?a, ?b)", NULL, "anti_pattern", title64,
-                                &res) == 0 &&
+         if (kb_reasoning_query("superseded_by(?a, ?b)", NULL, "anti_pattern", title64, &res) ==
+                 0 &&
              res.n_rows > 0)
             LOG_DEBUG("reasoning.learning", "anti_pattern='%s' superseded by case — flagged",
                       title64);

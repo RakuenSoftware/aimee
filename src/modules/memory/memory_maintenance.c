@@ -222,8 +222,9 @@ int memory_maintenance_run(unsigned int modes, int force, int dry_run,
             out->rescored = rescored;
          if (config_memory_profile_cards_enabled())
          {
-            int min_obs =
-                config_memory_profile_cards_min_obs() > 0 ? config_memory_profile_cards_min_obs() : 10;
+            int min_obs = config_memory_profile_cards_min_obs() > 0
+                              ? config_memory_profile_cards_min_obs()
+                              : 10;
             int stale = config_memory_profile_cards_stale_secs() > 0
                             ? config_memory_profile_cards_stale_secs()
                             : 86400;
@@ -288,8 +289,9 @@ int memory_maintenance_run(unsigned int modes, int force, int dry_run,
       {
          int min_cluster =
              config_memory_improve_min_cluster() > 0 ? config_memory_improve_min_cluster() : 3;
-         double max_conf =
-             config_memory_improve_max_confidence() > 0.0 ? config_memory_improve_max_confidence() : 0.6;
+         double max_conf = config_memory_improve_max_confidence() > 0.0
+                               ? config_memory_improve_max_confidence()
+                               : 0.6;
          int summarized = memory_improve_summarise(dry_run, min_cluster, max_conf);
          if (summarized > 0)
             out->summarized = summarized;

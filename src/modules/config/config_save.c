@@ -1789,8 +1789,8 @@ int config_apply_roundtable_preset(const config_roundtable_preset_t *p)
          n = CONFIG_RT_PRESET_MAX_SEATS;
       for (int i = 0; i < n; i++)
       {
-         snprintf(cfg->ensemble_reference_models[i], sizeof(cfg->ensemble_reference_models[i]), "%s",
-                  p->models[i]);
+         snprintf(cfg->ensemble_reference_models[i], sizeof(cfg->ensemble_reference_models[i]),
+                  "%s", p->models[i]);
          snprintf(cfg->ensemble_reference_personas[i], sizeof(cfg->ensemble_reference_personas[i]),
                   "%s", p->personas[i]);
       }
@@ -1804,8 +1804,8 @@ int config_apply_roundtable_preset(const config_roundtable_preset_t *p)
       if (p->turns[0])
          snprintf(cfg->roundtable_turns, sizeof(cfg->roundtable_turns), "%s", p->turns);
       if (p->pipeline_done_bar[0])
-         snprintf(cfg->roundtable_pipeline_done_bar, sizeof(cfg->roundtable_pipeline_done_bar), "%s",
-                  p->pipeline_done_bar);
+         snprintf(cfg->roundtable_pipeline_done_bar, sizeof(cfg->roundtable_pipeline_done_bar),
+                  "%s", p->pipeline_done_bar);
       cfg->roundtable_pipeline_max_passes = p->pipeline_max_passes;
       cfg->roundtable_pipeline_max_attempts_per_pass = p->pipeline_max_attempts_per_pass;
       cfg->roundtable_pipeline_max_cost_usd = p->pipeline_max_cost_usd;

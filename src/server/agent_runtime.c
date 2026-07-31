@@ -1700,9 +1700,9 @@ char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *n
    {
       if (!skip_kb_client && config_memory_prospective_enabled())
       {
-         int cap_matches =
-             config_memory_prospective_max_matches() > 0 ? config_memory_prospective_max_matches()
-                                                         : 3;
+         int cap_matches = config_memory_prospective_max_matches() > 0
+                               ? config_memory_prospective_max_matches()
+                               : 3;
          if (cap_matches > MEMORY_PROSPECTIVE_MAX_MATCHES)
             cap_matches = MEMORY_PROSPECTIVE_MAX_MATCHES;
          memory_prospective_t triggered[MEMORY_PROSPECTIVE_MAX_MATCHES];

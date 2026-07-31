@@ -257,7 +257,6 @@ void cmd_memory(app_ctx_t *ctx, int argc, char **argv)
       cmd_require_db1("cannot initialize DB1");
    }
 
-
    /* compact --focus <topic>: generate a structured 11-section summary locally. */
    if (strcmp(sub, "compact") == 0)
    {

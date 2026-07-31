@@ -282,7 +282,8 @@ int handle_workspace_mirror_sync(server_ctx_t *ctx, server_conn_t *conn, cJSON *
    for (int i = 0; i < ws_n; i++)
       if (strcmp(config_workspaces(i), root) == 0)
       {
-         is_mirror = ws_provider_kind_from_string(config_workspace_providers(i)) == WS_PROVIDER_MIRROR;
+         is_mirror =
+             ws_provider_kind_from_string(config_workspace_providers(i)) == WS_PROVIDER_MIRROR;
          break;
       }
    if (!is_mirror)

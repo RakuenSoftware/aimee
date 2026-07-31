@@ -206,7 +206,6 @@ cJSON *tool_payload_rewrite_status(cJSON *args)
 {
    (void)args;
 
-
    cJSON *r = cJSON_CreateObject();
    cJSON_AddBoolToObject(r, "enabled", config_cache_aware_rewrite_enabled() ? 1 : 0);
 

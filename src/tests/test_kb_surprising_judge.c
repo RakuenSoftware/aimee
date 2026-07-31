@@ -94,11 +94,9 @@ static void test_judge_error_paths(void)
    kb_graph_surprising_t links[1] = {mk_link("file:p:x", "file:p:y", 0.9, -1)};
    kb_surprising_verdict_t out[1];
    char err[256];
-   int r1 =
-       kb_surprising_judge("printf 'not json at all'", "p", links, 1, out, err, sizeof(err));
+   int r1 = kb_surprising_judge("printf 'not json at all'", "p", links, 1, out, err, sizeof(err));
    assert(r1 == -1);
-   int r2 =
-       kb_surprising_judge("printf '{\"other\":1}'", "p", links, 1, out, err, sizeof(err));
+   int r2 = kb_surprising_judge("printf '{\"other\":1}'", "p", links, 1, out, err, sizeof(err));
    assert(r2 == 0);
    assert(out[0].judged == 0); /* no verdict -> left unconfirmed */
    printf("  PASS: unparseable -> -1, no-verdicts -> 0 (unconfirmed)\n");

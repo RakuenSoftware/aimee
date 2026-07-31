@@ -515,8 +515,8 @@ static double estimated_agent_call_cost(const agent_config_t *acfg, const char *
    return agent_token_cost(acfg, agent_name, prompt_tokens, completion_tokens);
 }
 
-static double estimated_round_cost(const agent_config_t *acfg, const ensemble_panel_t *panel, int ref_count,
-                                   int tokens_per_call)
+static double estimated_round_cost(const agent_config_t *acfg, const ensemble_panel_t *panel,
+                                   int ref_count, int tokens_per_call)
 {
    double total = 0.0;
    for (int i = 0; i < ref_count; i++)
@@ -561,8 +561,8 @@ static int build_synthesis_prompt(char *buf, size_t cap, const char *original_pr
    return 0;
 }
 
-static int run_aggregator(agent_config_t *acfg, const ensemble_panel_t *panel, const char *synthesis_prompt,
-                          long deadline_abs_ms, agent_result_t *out)
+static int run_aggregator(agent_config_t *acfg, const ensemble_panel_t *panel,
+                          const char *synthesis_prompt, long deadline_abs_ms, agent_result_t *out)
 {
    memset(out, 0, sizeof(*out));
 
@@ -1094,8 +1094,8 @@ static int repair_review_json(agent_config_t *acfg, const ensemble_panel_t *pane
       return -1;
    agent_result_t res;
    memset(&res, 0, sizeof(res));
-   int rc = agent_run_named(acfg, panel->reference_models[participant], "review", NULL,
-                            prompt, 512, 0.2, &res);
+   int rc = agent_run_named(acfg, panel->reference_models[participant], "review", NULL, prompt, 512,
+                            0.2, &res);
    free(prompt);
    if (rc != 0 || !res.response || !res.response[0])
    {
@@ -1215,8 +1215,7 @@ static int run_round_parallel(agent_config_t *acfg, const ensemble_panel_t *pane
        * aimee's own index rather than a worktree a remote seat cannot reach, and
        * still get no write tools. Drafting stays tool-less. */
       tasks[i].use_tools = (mode == ROUNDTABLE_REVIEW);
-      tasks[i].require_initial_tool_call =
-          (mode == ROUNDTABLE_REVIEW && panel->require_evidence);
+      tasks[i].require_initial_tool_call = (mode == ROUNDTABLE_REVIEW && panel->require_evidence);
       tasks[i].agent = panel->reference_models[i];
       tasks[i].system_prompt = personas[i];
       tasks[i].user_prompt = prompts[i];
@@ -1272,10 +1271,10 @@ fail:
    return -1;
 }
 
-static int run_round_sequential(agent_config_t *acfg, const ensemble_panel_t *panel, const char *task,
-                                const char *artifact, char **peer_notes, roundtable_mode_t mode,
-                                int round, const char *brief, const char *context,
-                                agent_result_t *results)
+static int run_round_sequential(agent_config_t *acfg, const ensemble_panel_t *panel,
+                                const char *task, const char *artifact, char **peer_notes,
+                                roundtable_mode_t mode, int round, const char *brief,
+                                const char *context, agent_result_t *results)
 {
    int ref_count = panel->reference_count;
    int order[ENSEMBLE_MAX_REFS];
@@ -1296,8 +1295,8 @@ static int run_round_sequential(agent_config_t *acfg, const ensemble_panel_t *pa
       if (mode == ROUNDTABLE_REVIEW)
       {
          agent_run_require_initial_tool_call(panel->require_evidence);
-         agent_run_named_with_tools(acfg, panel->reference_models[i], "review", persona,
-                                    prompt, 0, 0.3 + (0.05 * i), &results[i]);
+         agent_run_named_with_tools(acfg, panel->reference_models[i], "review", persona, prompt, 0,
+                                    0.3 + (0.05 * i), &results[i]);
          agent_run_require_initial_tool_call(0);
       }
       else
@@ -1351,8 +1350,8 @@ int ensemble_panelist_eligible(const agent_t *ag)
    return 1;
 }
 
-int ensemble_validate_panel_pins(const ensemble_panel_t *panel, const agent_config_t *acfg, char *err,
-                                 size_t err_n)
+int ensemble_validate_panel_pins(const ensemble_panel_t *panel, const agent_config_t *acfg,
+                                 char *err, size_t err_n)
 {
    if (err && err_n)
       err[0] = '\0';
@@ -1402,8 +1401,7 @@ static int panel_provider_seats(const agent_config_t *acfg, const int seated[],
    return total;
 }
 
-static int ensemble_pick_balanced_seat(const agent_config_t *acfg,
-                                       const int seated[])
+static int ensemble_pick_balanced_seat(const agent_config_t *acfg, const int seated[])
 {
    int best = -1;
    int best_agent_seats = 0;
@@ -1511,10 +1509,9 @@ void ensemble_resolve_random_seats(ensemble_panel_t *panel, const agent_config_t
 
    for (int i = 0; i < n; i++)
    {
-      snprintf(panel->reference_models[i], sizeof panel->reference_models[i], "%s",
-               models[i]);
-      snprintf(panel->reference_personas[i], sizeof panel->reference_personas[i],
-               "%s", personas[i]);
+      snprintf(panel->reference_models[i], sizeof panel->reference_models[i], "%s", models[i]);
+      snprintf(panel->reference_personas[i], sizeof panel->reference_personas[i], "%s",
+               personas[i]);
    }
    panel->reference_count = n;
    panel->reference_persona_count = n;
@@ -1524,8 +1521,7 @@ void ensemble_resolve_random_seats(ensemble_panel_t *panel, const agent_config_t
    {
       int idx = ensemble_pick_balanced_seat(acfg, seated);
       if (idx >= 0)
-         snprintf(panel->aggregator, sizeof panel->aggregator, "%s",
-                  acfg->agents[idx].name);
+         snprintf(panel->aggregator, sizeof panel->aggregator, "%s", acfg->agents[idx].name);
       else
          panel->aggregator[0] = '\0';
    }
@@ -1555,10 +1551,9 @@ void ensemble_filter_panel_authorization(ensemble_panel_t *panel, const agent_co
       }
       if (n != i)
       {
-         snprintf(panel->reference_models[n], sizeof(panel->reference_models[n]),
-                  "%s", name);
-         snprintf(panel->reference_personas[n], sizeof(panel->reference_personas[n]),
-                  "%s", panel->reference_personas[i]);
+         snprintf(panel->reference_models[n], sizeof(panel->reference_models[n]), "%s", name);
+         snprintf(panel->reference_personas[n], sizeof(panel->reference_personas[n]), "%s",
+                  panel->reference_personas[i]);
       }
       n++;
    }
@@ -1571,8 +1566,7 @@ void ensemble_filter_panel_authorization(ensemble_panel_t *panel, const agent_co
          panel->aggregator[0] = '\0';
    }
    if (!panel->aggregator[0] && n > 0)
-      snprintf(panel->aggregator, sizeof(panel->aggregator), "%s",
-               panel->reference_models[0]);
+      snprintf(panel->aggregator, sizeof(panel->aggregator), "%s", panel->reference_models[0]);
 }
 
 void ensemble_filter_panel_availability(ensemble_panel_t *panel, const agent_config_t *acfg)
@@ -1600,10 +1594,9 @@ void ensemble_filter_panel_availability(ensemble_panel_t *panel, const agent_con
       }
       if (n != i)
       {
-         snprintf(panel->reference_models[n], sizeof(panel->reference_models[n]),
-                  "%s", name);
-         snprintf(panel->reference_personas[n], sizeof(panel->reference_personas[n]),
-                  "%s", panel->reference_personas[i]);
+         snprintf(panel->reference_models[n], sizeof(panel->reference_models[n]), "%s", name);
+         snprintf(panel->reference_personas[n], sizeof(panel->reference_personas[n]), "%s",
+                  panel->reference_personas[i]);
       }
       n++;
    }
@@ -1615,8 +1608,7 @@ void ensemble_filter_panel_availability(ensemble_panel_t *panel, const agent_con
          panel->aggregator[0] = '\0';
    }
    if (!panel->aggregator[0] && n > 0)
-      snprintf(panel->aggregator, sizeof(panel->aggregator), "%s",
-               panel->reference_models[0]);
+      snprintf(panel->aggregator, sizeof(panel->aggregator), "%s", panel->reference_models[0]);
 }
 
 void ensemble_fill_implicit_panel(ensemble_panel_t *panel, const agent_config_t *acfg)
@@ -1638,8 +1630,7 @@ void ensemble_fill_implicit_panel(ensemble_panel_t *panel, const agent_config_t 
    for (int i = 0; i < acfg->agent_count && panel->reference_count < 2; i++)
    {
       const agent_t *ag = &acfg->agents[i];
-      if (seated[i] > 0 || !ensemble_panelist_eligible(ag) ||
-          !agent_is_available_for_routing(ag))
+      if (seated[i] > 0 || !ensemble_panelist_eligible(ag) || !agent_is_available_for_routing(ag))
          continue;
       const char *provider = ag->provider[0] ? ag->provider : ag->name;
       int provider_already_seated = 0;
@@ -1658,8 +1649,7 @@ void ensemble_fill_implicit_panel(ensemble_panel_t *panel, const agent_config_t 
       if (provider_already_seated)
          continue;
       int pos = panel->reference_count++;
-      snprintf(panel->reference_models[pos], sizeof(panel->reference_models[pos]),
-               "%s", ag->name);
+      snprintf(panel->reference_models[pos], sizeof(panel->reference_models[pos]), "%s", ag->name);
       panel->reference_personas[pos][0] = '\0';
       seated[i] = 1;
    }
@@ -1668,24 +1658,21 @@ void ensemble_fill_implicit_panel(ensemble_panel_t *panel, const agent_config_t 
    for (int i = 0; i < acfg->agent_count && panel->reference_count < 2; i++)
    {
       const agent_t *ag = &acfg->agents[i];
-      if (seated[i] > 0 || !ensemble_panelist_eligible(ag) ||
-          !agent_is_available_for_routing(ag))
+      if (seated[i] > 0 || !ensemble_panelist_eligible(ag) || !agent_is_available_for_routing(ag))
          continue;
       int pos = panel->reference_count++;
-      snprintf(panel->reference_models[pos], sizeof(panel->reference_models[pos]),
-               "%s", ag->name);
+      snprintf(panel->reference_models[pos], sizeof(panel->reference_models[pos]), "%s", ag->name);
       panel->reference_personas[pos][0] = '\0';
       seated[i] = 1;
    }
 
    panel->reference_persona_count = panel->reference_count;
    if (panel->reference_count > 0)
-      snprintf(panel->aggregator, sizeof(panel->aggregator), "%s",
-               panel->reference_models[0]);
+      snprintf(panel->aggregator, sizeof(panel->aggregator), "%s", panel->reference_models[0]);
 }
 
-int ensemble_prepare_runtime_panel(const char *requested, ensemble_panel_t *panel, const agent_config_t *acfg,
-                                   char *err, size_t err_n)
+int ensemble_prepare_runtime_panel(const char *requested, ensemble_panel_t *panel,
+                                   const agent_config_t *acfg, char *err, size_t err_n)
 {
    if (err && err_n)
       err[0] = '\0';
@@ -1967,8 +1954,8 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
    {
       memset(&local, 0, sizeof(local));
       local.mode = ROUNDTABLE_DRAFT;
-      local.turns = strcmp(panel->turns, "sequential") == 0 ? ROUNDTABLE_SEQUENTIAL
-                                                                     : ROUNDTABLE_PARALLEL;
+      local.turns =
+          strcmp(panel->turns, "sequential") == 0 ? ROUNDTABLE_SEQUENTIAL : ROUNDTABLE_PARALLEL;
       local.max_rounds = panel->max_rounds > 0 ? panel->max_rounds : 1;
       local.converge_threshold = panel->converge_threshold;
       local.deadline_ms = panel->deadline_ms;
@@ -2064,8 +2051,8 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
          panel_deadline_ms = remaining > 5000 ? (int)remaining : 5000;
       }
       int rc = local.turns == ROUNDTABLE_SEQUENTIAL
-                   ? run_round_sequential(acfg, panel, task, artifact, &peer_notes, local.mode, round,
-                                          local.brief, local.context, results)
+                   ? run_round_sequential(acfg, panel, task, artifact, &peer_notes, local.mode,
+                                          round, local.brief, local.context, results)
                    : run_round_parallel(acfg, panel, task, artifact, peer_notes, local.mode, round,
                                         local.brief, local.context, results, panel_deadline_ms);
       /* The parallel runner enforces the wall bound inside an in-flight provider
@@ -2108,8 +2095,8 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
                   out->cancelled = 1;
                   break;
                }
-               if (repair_review_json(acfg, panel, i, results[i].response, &fixed, &out->cost_usd) ==
-                       0 &&
+               if (repair_review_json(acfg, panel, i, results[i].response, &fixed,
+                                      &out->cost_usd) == 0 &&
                    parse_review_issue_keys(fixed, cur_review_keys, &cur_review_key_count, 64) == 0)
                {
                   free(results[i].response);

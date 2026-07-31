@@ -48,10 +48,9 @@ static char *cj_build_request(const char *mention_name, const char *mention_cont
    return json;
 }
 
-int kb_curator_judge_same_entity(const char *judge_cmd,
-                                 const char *mention_name, const char *mention_context,
-                                 const char *candidate_name, double score, int *out_same,
-                                 char *errbuf, size_t errlen)
+int kb_curator_judge_same_entity(const char *judge_cmd, const char *mention_name,
+                                 const char *mention_context, const char *candidate_name,
+                                 double score, int *out_same, char *errbuf, size_t errlen)
 {
    if (errbuf && errlen)
       errbuf[0] = '\0';

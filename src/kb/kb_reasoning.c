@@ -211,8 +211,7 @@ int kb_reasoning_query(const char *query, const char *bindings_json, const char 
 
    char *out = NULL;
    size_t out_len = 0;
-   int rc =
-       platform_exec_pipe(datalog_command, req_str, strlen(req_str), &out, &out_len);
+   int rc = platform_exec_pipe(datalog_command, req_str, strlen(req_str), &out, &out_len);
    free(req_str);
 
    if (rc != 0 || !out)
@@ -376,8 +375,8 @@ void kb_reasoning_seed_ruleset(void)
 
 /* ---- kb_reasoning_case_recall ---- */
 
-int kb_reasoning_case_recall(const char *trigger_json, const char *scope_kind,
-                             const char *scope_id, kb_reasoning_case_result_t *out, int max_out)
+int kb_reasoning_case_recall(const char *trigger_json, const char *scope_kind, const char *scope_id,
+                             kb_reasoning_case_result_t *out, int max_out)
 {
    (void)trigger_json;
    if (!out || max_out <= 0)

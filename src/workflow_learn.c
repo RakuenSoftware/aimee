@@ -222,7 +222,6 @@ static int wl_workspace_for_cwd(const char *cwd, char *out, size_t outlen)
       return 0;
    out[0] = '\0';
 
-
    for (int i = 0; i < config_workspace_count(); i++)
    {
       size_t wlen = strlen(config_workspaces(i));

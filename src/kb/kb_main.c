@@ -1776,8 +1776,8 @@ int main(int argc, char **argv)
    int vault_operator_enabled = vault_operator_enable && strcmp(vault_operator_enable, "1") == 0;
    const char *vault_tpm2_effective_tcti = NULL;
    const char *vault_tpm2_effective_nv_index = NULL;
-   kb_vault_tpm_runtime_identity(vault_tpm2_tcti, vault_tpm2_nv_index,
-                                 &vault_tpm2_effective_tcti, &vault_tpm2_effective_nv_index);
+   kb_vault_tpm_runtime_identity(vault_tpm2_tcti, vault_tpm2_nv_index, &vault_tpm2_effective_tcti,
+                                 &vault_tpm2_effective_nv_index);
    if ((vault_operator_enable && !vault_operator_enabled) ||
        (vault_operator_enabled != (vault_orchestrator_url && vault_orchestrator_url[0])))
    {
@@ -1911,13 +1911,13 @@ int main(int argc, char **argv)
       {
          if (attempt >= db2_max_attempts)
          {
-            fprintf(stderr, "aimee-kb: DB2 init failed for %s after %d attempts (%ds)\n",
-                    db2_url, attempt, attempt * db2_retry_secs);
+            fprintf(stderr, "aimee-kb: DB2 init failed for %s after %d attempts (%ds)\n", db2_url,
+                    attempt, attempt * db2_retry_secs);
             agent_http_cleanup();
             return 1;
          }
-         fprintf(stderr, "aimee-kb: DB2 not ready (%s); retry %d/%d in %ds\n", db2_url,
-                 attempt, db2_max_attempts, db2_retry_secs);
+         fprintf(stderr, "aimee-kb: DB2 not ready (%s); retry %d/%d in %ds\n", db2_url, attempt,
+                 db2_max_attempts, db2_retry_secs);
          sleep(db2_retry_secs);
          attempt++;
       }

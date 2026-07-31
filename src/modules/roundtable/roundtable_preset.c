@@ -402,8 +402,7 @@ static void preset_to_config_apply(const roundtable_preset_t *p, config_roundtab
    if (p->turns[0])
       snprintf(out->turns, sizeof(out->turns), "%s", p->turns);
    if (p->pipeline_done_bar[0])
-      snprintf(out->pipeline_done_bar, sizeof(out->pipeline_done_bar), "%s",
-               p->pipeline_done_bar);
+      snprintf(out->pipeline_done_bar, sizeof(out->pipeline_done_bar), "%s", p->pipeline_done_bar);
    out->pipeline_max_passes = p->pipeline_max_passes;
    out->pipeline_max_attempts_per_pass = p->pipeline_max_attempts_per_pass;
    out->pipeline_max_cost_usd = p->pipeline_max_cost_usd;

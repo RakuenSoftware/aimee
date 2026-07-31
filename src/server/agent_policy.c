@@ -410,7 +410,8 @@ void agent_trace_log(int plan_id, int turn, const char *direction, const char *c
          otel_initialized = 1;
          if (config_otel_endpoint()[0])
             otel_init(config_otel_endpoint(),
-                      config_otel_service_name()[0] ? config_otel_service_name() : "aimee", session_id());
+                      config_otel_service_name()[0] ? config_otel_service_name() : "aimee",
+                      session_id());
       }
    }
 

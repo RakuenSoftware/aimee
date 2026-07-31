@@ -386,8 +386,8 @@ int provider_cli_spawn_argv(const provider_cli_cfg_t *cfg, char *const argv[], i
     * has no credential, aimee's git cannot work either, so stripping would remove
     * the delegate's only route and leave it nothing — breakage dressed as policy.
     * No aimee route, no restriction. */
-   int strip_forge_creds = (!config_present() || config_require_aimee_git()) &&
-                           git_cred_forge_configured();
+   int strip_forge_creds =
+       (!config_present() || config_require_aimee_git()) && git_cred_forge_configured();
 
    /* Resolve the delegate's aimee endpoint before forking (aimee_home may read/
     * allocate). See delegate_child_export_aimee_endpoint. */

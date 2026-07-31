@@ -689,8 +689,9 @@ static int agent_satisfies_required_caps(const agent_t *ag, unsigned required_ca
  * window when sys_cfg->capability_routing is enabled.  Falls back to plain agent_route
  * when capability routing is disabled. */
 static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *role,
-                                            const agent_route_policy_t *sys_cfg, unsigned required_caps,
-                                            int min_context, agent_scope_t scope)
+                                            const agent_route_policy_t *sys_cfg,
+                                            unsigned required_caps, int min_context,
+                                            agent_scope_t scope)
 {
    if (!sys_cfg || !sys_cfg->capability_routing)
    {
@@ -994,8 +995,9 @@ agent_t *agent_route_escalation_target(agent_config_t *cfg, const char *role, in
    return best;
 }
 
-agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role, const agent_route_policy_t *sys_cfg,
-                               unsigned required_caps, int min_context)
+agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role,
+                               const agent_route_policy_t *sys_cfg, unsigned required_caps,
+                               int min_context)
 {
    return agent_route_with_caps_scoped(cfg, role, sys_cfg, required_caps, min_context,
                                        AGENT_SCOPE_UNSET);
@@ -1018,8 +1020,7 @@ agent_t *agent_route_with_caps_scoped(agent_config_t *cfg, const char *role,
     * best-effort: if no model satisfies them, relax them and route on the hard
     * caps (tools) + min_context rather than returning no route at all. Mirrors
     * delegate_filter_route_capabilities so both routing gates agree. */
-   if (!r && sys_cfg && sys_cfg->capability_routing &&
-       (required_caps & MODEL_CAP_MODALITY_SOFT))
+   if (!r && sys_cfg && sys_cfg->capability_routing && (required_caps & MODEL_CAP_MODALITY_SOFT))
       r = agent_route_with_caps_inner(cfg, role, sys_cfg, required_caps & ~MODEL_CAP_MODALITY_SOFT,
                                       min_context, scope);
    /* Still nothing: escalate rather than report no route. Only reachable with

@@ -179,8 +179,7 @@ static int console_typed_facts(char *out_buf, int out_cap)
 
    cJSON *c = cJSON_AddObjectToObject(root, "config");
    cJSON_AddBoolToObject(c, "typed_facts_enabled", config_typed_facts_enabled() ? 1 : 0);
-   cJSON_AddBoolToObject(c, "auto_promote",
-                         config_kb_typed_facts_auto_promote_enabled() ? 1 : 0);
+   cJSON_AddBoolToObject(c, "auto_promote", config_kb_typed_facts_auto_promote_enabled() ? 1 : 0);
    cJSON_AddNumberToObject(c, "promote_threshold", thr);
 
    /* Promotion review queue: every pending provisional relation (threshold 1 lists
@@ -254,8 +253,7 @@ static int console_typed_facts_config(const char *body, char *out_buf, int out_c
    cJSON_AddBoolToObject(resp, "enabled", config_typed_facts_enabled() ? 1 : 0);
    cJSON_AddBoolToObject(resp, "auto_promote",
                          config_kb_typed_facts_auto_promote_enabled() ? 1 : 0);
-   cJSON_AddNumberToObject(resp, "promote_threshold",
-                           config_kb_typed_facts_promote_threshold());
+   cJSON_AddNumberToObject(resp, "promote_threshold", config_kb_typed_facts_promote_threshold());
    char *s = cJSON_PrintUnformatted(resp);
    cJSON_Delete(resp);
    if (!s || strlen(s) >= (size_t)out_cap)

@@ -1273,10 +1273,8 @@ static void test_implicit_panel_ignores_legacy_roster_and_caps_two(void)
    /* Legacy ensemble fields do not authorize a larger/direct panel. */
    cfg.reference_count = 1;
    cfg.reference_persona_count = 1;
-   snprintf(cfg.reference_models[0], sizeof(cfg.reference_models[0]),
-            "MiniMax-M3");
-   snprintf(cfg.reference_personas[0], sizeof(cfg.reference_personas[0]),
-            "security");
+   snprintf(cfg.reference_models[0], sizeof(cfg.reference_models[0]), "MiniMax-M3");
+   snprintf(cfg.reference_personas[0], sizeof(cfg.reference_personas[0]), "security");
    snprintf(cfg.aggregator, sizeof(cfg.aggregator), "MiniMax-M3");
 
    ensemble_fill_implicit_panel(&cfg, &acfg);
@@ -1318,8 +1316,7 @@ static void test_configured_random_seats_fill_balanced_capacity(void)
    cfg.reference_count = 5;
    cfg.reference_persona_count = 5;
    for (int i = 0; i < cfg.reference_count; i++)
-      snprintf(cfg.reference_models[i], sizeof cfg.reference_models[i],
-               "$random");
+      snprintf(cfg.reference_models[i], sizeof cfg.reference_models[i], "$random");
 
    ensemble_resolve_random_seats(&cfg, &acfg);
 

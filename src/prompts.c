@@ -881,8 +881,8 @@ static int charter_total_entries(void)
  * are no longer a block of memory the caller can hand over. Each entry is used
  * within its own dstr_appendf, so the accessor's thread-local buffer is consumed
  * before the next index overwrites it. */
-static void charter_append_section(dstr_t *out, const char *label,
-                                   const char *(*entry)(int), int count)
+static void charter_append_section(dstr_t *out, const char *label, const char *(*entry)(int),
+                                   int count)
 {
    if (count <= 0)
       return;

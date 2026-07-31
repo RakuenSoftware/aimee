@@ -148,7 +148,8 @@ void hook_scope_labels_for_cwd(const char *cwd, char *workspace_out, size_t work
        * active project. Resolve the project independently from cwd so nested
        * repositories and non-repository working directories cannot inherit
        * the configured workspace directory's name as their project label. */
-      if (workspace_active_root_from_cwd(cwd, active_root, sizeof(active_root)) == 0 && active_root[0])
+      if (workspace_active_root_from_cwd(cwd, active_root, sizeof(active_root)) == 0 &&
+          active_root[0])
       {
          const char *slash = strrchr(active_root, '/');
          const char *name = slash ? slash + 1 : active_root;

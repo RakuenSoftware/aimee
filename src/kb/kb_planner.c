@@ -33,8 +33,7 @@ static int run_sidecar(const char *cmd, const char *request_json, char **out_jso
    return 0;
 }
 
-int kb_planner_search(const char *request_json, char **out_json,
-                      size_t *out_len)
+int kb_planner_search(const char *request_json, char **out_json, size_t *out_len)
 {
    const char *cmd = config_planner_search_command();
    if (!cmd || !cmd[0])
@@ -42,8 +41,7 @@ int kb_planner_search(const char *request_json, char **out_json,
    return run_sidecar(cmd, request_json, out_json, out_len);
 }
 
-int kb_planner_validate(const char *request_json, char **out_json,
-                        size_t *out_len)
+int kb_planner_validate(const char *request_json, char **out_json, size_t *out_len)
 {
    const char *cmd = config_constraint_solver_command();
    if (!cmd || !cmd[0])

@@ -1708,8 +1708,8 @@ int pre_tool_check_inner(const char *tool_name, const char *input_json, session_
             char path64[65];
             snprintf(path64, sizeof(path64), "%.64s", file_str);
             kb_reasoning_result_t res;
-            if (kb_reasoning_query("citation_reachable(?a, ?b)", NULL, "guardrail", path64,
-                                   &res) == 0 &&
+            if (kb_reasoning_query("citation_reachable(?a, ?b)", NULL, "guardrail", path64, &res) ==
+                    0 &&
                 res.n_rows > 0)
                LOG_DEBUG("reasoning.guardrail",
                          "shadow precedent found for '%s' via graph reasoning", path64);

@@ -407,7 +407,8 @@ double memory_surprise_weight(void)
 
 static int memory_surprise_window_size(void)
 {
-   int fallback = config_memory_salience_window_size() > 0 ? config_memory_salience_window_size() : 8;
+   int fallback =
+       config_memory_salience_window_size() > 0 ? config_memory_salience_window_size() : 8;
    return memory_env_int("AIMEE_MEMORY_SALIENCE_WINDOW_SIZE", fallback, 1, 64);
 }
 
@@ -787,10 +788,12 @@ void memory_maybe_run_maintenance(void)
    if (maintenance_running)
       return;
 
-   int trigger_inserts =
-       config_memory_maintenance_trigger_inserts() > 0 ? config_memory_maintenance_trigger_inserts() : 20;
-   int trigger_secs =
-       config_memory_maintenance_trigger_secs() > 0 ? config_memory_maintenance_trigger_secs() : 600;
+   int trigger_inserts = config_memory_maintenance_trigger_inserts() > 0
+                             ? config_memory_maintenance_trigger_inserts()
+                             : 20;
+   int trigger_secs = config_memory_maintenance_trigger_secs() > 0
+                          ? config_memory_maintenance_trigger_secs()
+                          : 600;
    const char *env_inserts = getenv("AIMEE_MEMORY_MAINTENANCE_TRIGGER_INSERTS");
    if (env_inserts && env_inserts[0])
    {

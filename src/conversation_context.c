@@ -220,7 +220,7 @@ char *conv_ctx_assemble(const char *sid, const char *query, int budget_bytes)
    if (budget_bytes <= 0)
       budget_bytes = config_virtual_context_assembly_budget() > 0
                          ? config_virtual_context_assembly_budget()
-                                                             : ASSEMBLE_DEFAULT_BUDGET;
+                         : ASSEMBLE_DEFAULT_BUDGET;
    if (budget_bytes <= 0)
       budget_bytes = ASSEMBLE_DEFAULT_BUDGET;
 
@@ -368,7 +368,6 @@ cJSON *tool_session_context_expand(cJSON *args)
 cJSON *tool_session_context_status(cJSON *args)
 {
    (void)args;
-
 
    const char *sid = session_id();
    cJSON *r = cJSON_CreateObject();

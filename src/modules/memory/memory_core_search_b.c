@@ -1574,8 +1574,7 @@ int memory_collect_variant_candidates(const char *raw_query, const char *norm_va
    config_memory_recall_lanes_fact_kinds_copy(fact_kinds, sizeof(fact_kinds));
    if (!config_present())
       return count;
-   const char *qe_mode =
-       expansion_mode[0] ? expansion_mode : "lexical";
+   const char *qe_mode = expansion_mode[0] ? expansion_mode : "lexical";
    const int qe_semantic =
        (strcmp(qe_mode, "semantic") == 0 || strcmp(qe_mode, "hybrid") == 0) ? 1 : 0;
    const int qe_lexical =
@@ -1630,16 +1629,13 @@ int memory_collect_variant_candidates(const char *raw_query, const char *norm_va
       {
          char sum_buf[16][16], fact_buf[16][16];
          const char *sum_ptrs[16], *fact_ptrs[16];
-         int n_sum = memory_parse_kinds_csv(summary_kinds[0]
-                                                ? summary_kinds
-                                                : "episode",
-                                            sum_buf, sum_ptrs, 16);
-         int n_fact = memory_parse_kinds_csv(fact_kinds[0]
-                                                 ? fact_kinds
-                                                 : "fact,preference",
+         int n_sum = memory_parse_kinds_csv(summary_kinds[0] ? summary_kinds : "episode", sum_buf,
+                                            sum_ptrs, 16);
+         int n_fact = memory_parse_kinds_csv(fact_kinds[0] ? fact_kinds : "fact,preference",
                                              fact_buf, fact_ptrs, 16);
-         int k_sum =
-             config_memory_recall_lanes_k_summary() > 0 ? config_memory_recall_lanes_k_summary() : 40;
+         int k_sum = config_memory_recall_lanes_k_summary() > 0
+                         ? config_memory_recall_lanes_k_summary()
+                         : 40;
          int k_fact =
              config_memory_recall_lanes_k_fact() > 0 ? config_memory_recall_lanes_k_fact() : 40;
 

@@ -112,7 +112,8 @@ static int dedup_eligible(char *key, size_t key_cap, const agent_t *ag, const ch
    /* Behaviour-affecting config flags that can change generation for this path. */
    char flags[96];
    snprintf(flags, sizeof(flags), "cs%d rc%d pi%d dw%d", config_cache_shaping_enabled(),
-            config_reasoning_cap_enabled(), config_ingress_preinject_enabled(), config_dedup_window_seconds());
+            config_reasoning_cap_enabled(), config_ingress_preinject_enabled(),
+            config_dedup_window_seconds());
    response_dedup_key_inputs_t in = {
        .principal = request_context_principal(),
        .source = rc ? rc->source : "",
@@ -127,8 +128,8 @@ static int dedup_eligible(char *key, size_t key_cap, const agent_t *ag, const ch
    };
    response_dedup_key(&in, key, key_cap);
    if (ttl_out)
-      *ttl_out =
-          config_dedup_window_seconds() > 0 ? config_dedup_window_seconds() : RESPONSE_DEDUP_TTL_SECONDS;
+      *ttl_out = config_dedup_window_seconds() > 0 ? config_dedup_window_seconds()
+                                                   : RESPONSE_DEDUP_TTL_SECONDS;
    return 1;
 }
 
@@ -1024,8 +1025,7 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
    }
 
    char *response_body = NULL;
-   int ra =
-       config_retry_max_attempts() > 0 ? config_retry_max_attempts() : HTTP_RETRY_MAX_ATTEMPTS;
+   int ra = config_retry_max_attempts() > 0 ? config_retry_max_attempts() : HTTP_RETRY_MAX_ATTEMPTS;
    int rb = config_retry_base_ms() > 0 ? config_retry_base_ms() : HTTP_RETRY_BASE_MS;
    int rm = config_retry_max_ms() > 0 ? config_retry_max_ms() : HTTP_RETRY_MAX_MS;
    int http_status = http_retry_post_context_bytes(url, auth_header, wire_body.data, wire_body.len,

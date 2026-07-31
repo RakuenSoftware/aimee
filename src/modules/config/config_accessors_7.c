@@ -41,7 +41,8 @@ int config_set_model_reasoning_effort(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->model_reasoning_effort, sizeof(cfg->model_reasoning_effort), "%s", value ? value : "");
+      snprintf(cfg->model_reasoning_effort, sizeof(cfg->model_reasoning_effort), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -131,7 +132,8 @@ int config_set_memory_weight_profile(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->memory_weight_profile, sizeof(cfg->memory_weight_profile), "%s", value ? value : "");
+      snprintf(cfg->memory_weight_profile, sizeof(cfg->memory_weight_profile), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -191,7 +193,8 @@ int config_set_vault_tpm2_blob_path(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->vault_tpm2_blob_path, sizeof(cfg->vault_tpm2_blob_path), "%s", value ? value : "");
+      snprintf(cfg->vault_tpm2_blob_path, sizeof(cfg->vault_tpm2_blob_path), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -221,7 +224,8 @@ int config_set_vault_tpm2_nv_index(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->vault_tpm2_nv_index, sizeof(cfg->vault_tpm2_nv_index), "%s", value ? value : "");
+      snprintf(cfg->vault_tpm2_nv_index, sizeof(cfg->vault_tpm2_nv_index), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -251,7 +255,8 @@ int config_set_memory_cognify_model(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->memory_cognify_model, sizeof(cfg->memory_cognify_model), "%s", value ? value : "");
+      snprintf(cfg->memory_cognify_model, sizeof(cfg->memory_cognify_model), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -266,7 +271,8 @@ int config_set_memory_cognify_command(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->memory_cognify_command, sizeof(cfg->memory_cognify_command), "%s", value ? value : "");
+      snprintf(cfg->memory_cognify_command, sizeof(cfg->memory_cognify_command), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -296,7 +302,8 @@ int config_set_session_worktree_base(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->session_worktree_base, sizeof(cfg->session_worktree_base), "%s", value ? value : "");
+      snprintf(cfg->session_worktree_base, sizeof(cfg->session_worktree_base), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -311,7 +318,8 @@ int config_set_delegate_sandbox_image(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->delegate_sandbox_image, sizeof(cfg->delegate_sandbox_image), "%s", value ? value : "");
+      snprintf(cfg->delegate_sandbox_image, sizeof(cfg->delegate_sandbox_image), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -326,7 +334,8 @@ int config_set_delegate_sandbox_package_access(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->delegate_sandbox_package_access, sizeof(cfg->delegate_sandbox_package_access), "%s", value ? value : "");
+      snprintf(cfg->delegate_sandbox_package_access, sizeof(cfg->delegate_sandbox_package_access),
+               "%s", value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -401,7 +410,8 @@ int config_set_memory_pagerank_relations(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->memory_pagerank_relations, sizeof(cfg->memory_pagerank_relations), "%s", value ? value : "");
+      snprintf(cfg->memory_pagerank_relations, sizeof(cfg->memory_pagerank_relations), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -416,7 +426,8 @@ int config_set_memory_citations_mode(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->memory_citations_mode, sizeof(cfg->memory_citations_mode), "%s", value ? value : "");
+      snprintf(cfg->memory_citations_mode, sizeof(cfg->memory_citations_mode), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -431,7 +442,8 @@ int config_set_memory_rewrite_command(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->memory_rewrite_command, sizeof(cfg->memory_rewrite_command), "%s", value ? value : "");
+      snprintf(cfg->memory_rewrite_command, sizeof(cfg->memory_rewrite_command), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -446,7 +458,8 @@ int config_set_memory_query_expansion_mode(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->memory_query_expansion_mode, sizeof(cfg->memory_query_expansion_mode), "%s", value ? value : "");
+      snprintf(cfg->memory_query_expansion_mode, sizeof(cfg->memory_query_expansion_mode), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -461,7 +474,8 @@ int config_set_memory_recall_lanes_summary_kinds(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->memory_recall_lanes_summary_kinds, sizeof(cfg->memory_recall_lanes_summary_kinds), "%s", value ? value : "");
+      snprintf(cfg->memory_recall_lanes_summary_kinds,
+               sizeof(cfg->memory_recall_lanes_summary_kinds), "%s", value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -476,7 +490,8 @@ int config_set_memory_recall_lanes_fact_kinds(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->memory_recall_lanes_fact_kinds, sizeof(cfg->memory_recall_lanes_fact_kinds), "%s", value ? value : "");
+      snprintf(cfg->memory_recall_lanes_fact_kinds, sizeof(cfg->memory_recall_lanes_fact_kinds),
+               "%s", value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -491,7 +506,8 @@ int config_set_memory_hard_negative_log(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->memory_hard_negative_log, sizeof(cfg->memory_hard_negative_log), "%s", value ? value : "");
+      snprintf(cfg->memory_hard_negative_log, sizeof(cfg->memory_hard_negative_log), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -521,7 +537,8 @@ int config_set_learning_synthesize_command(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->learning_synthesize_command, sizeof(cfg->learning_synthesize_command), "%s", value ? value : "");
+      snprintf(cfg->learning_synthesize_command, sizeof(cfg->learning_synthesize_command), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -536,7 +553,8 @@ int config_set_learning_embed_model_version(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->learning_embed_model_version, sizeof(cfg->learning_embed_model_version), "%s", value ? value : "");
+      snprintf(cfg->learning_embed_model_version, sizeof(cfg->learning_embed_model_version), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -551,7 +569,8 @@ int config_set_learning_synthesize_prompt_version(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->learning_synthesize_prompt_version, sizeof(cfg->learning_synthesize_prompt_version), "%s", value ? value : "");
+      snprintf(cfg->learning_synthesize_prompt_version,
+               sizeof(cfg->learning_synthesize_prompt_version), "%s", value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -661,7 +680,8 @@ int config_set_coord_closet_denylist(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->coord_closet_denylist, sizeof(cfg->coord_closet_denylist), "%s", value ? value : "");
+      snprintf(cfg->coord_closet_denylist, sizeof(cfg->coord_closet_denylist), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -706,7 +726,8 @@ int config_set_delegate_prompt_tier(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->delegate_prompt_tier, sizeof(cfg->delegate_prompt_tier), "%s", value ? value : "");
+      snprintf(cfg->delegate_prompt_tier, sizeof(cfg->delegate_prompt_tier), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -766,7 +787,8 @@ int config_set_computer_use_default_navigation(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->computer_use_default_navigation, sizeof(cfg->computer_use_default_navigation), "%s", value ? value : "");
+      snprintf(cfg->computer_use_default_navigation, sizeof(cfg->computer_use_default_navigation),
+               "%s", value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -806,7 +828,8 @@ int config_set_guardrails_semantic_mode(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->guardrails_semantic_mode, sizeof(cfg->guardrails_semantic_mode), "%s", value ? value : "");
+      snprintf(cfg->guardrails_semantic_mode, sizeof(cfg->guardrails_semantic_mode), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -821,7 +844,8 @@ int config_set_guardrails_semantic_command(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->guardrails_semantic_command, sizeof(cfg->guardrails_semantic_command), "%s", value ? value : "");
+      snprintf(cfg->guardrails_semantic_command, sizeof(cfg->guardrails_semantic_command), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -986,7 +1010,8 @@ int config_set_server_api_mtls_client_ca(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->server_api_mtls_client_ca, sizeof(cfg->server_api_mtls_client_ca), "%s", value ? value : "");
+      snprintf(cfg->server_api_mtls_client_ca, sizeof(cfg->server_api_mtls_client_ca), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1006,7 +1031,8 @@ int config_set_server_api_client_transport(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->server_api_client_transport, sizeof(cfg->server_api_client_transport), "%s", value ? value : "");
+      snprintf(cfg->server_api_client_transport, sizeof(cfg->server_api_client_transport), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1021,7 +1047,8 @@ int config_set_calibration_command(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->calibration_command, sizeof(cfg->calibration_command), "%s", value ? value : "");
+      snprintf(cfg->calibration_command, sizeof(cfg->calibration_command), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1036,7 +1063,8 @@ int config_set_calibration_prompt_version(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->calibration_prompt_version, sizeof(cfg->calibration_prompt_version), "%s", value ? value : "");
+      snprintf(cfg->calibration_prompt_version, sizeof(cfg->calibration_prompt_version), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1051,7 +1079,8 @@ int config_set_calibration_model_version(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->calibration_model_version, sizeof(cfg->calibration_model_version), "%s", value ? value : "");
+      snprintf(cfg->calibration_model_version, sizeof(cfg->calibration_model_version), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1081,7 +1110,8 @@ int config_set_ranker_fuse_command(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->ranker_fuse_command, sizeof(cfg->ranker_fuse_command), "%s", value ? value : "");
+      snprintf(cfg->ranker_fuse_command, sizeof(cfg->ranker_fuse_command), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1096,7 +1126,8 @@ int config_set_kb_ranker_fit_command(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->kb_ranker_fit_command, sizeof(cfg->kb_ranker_fit_command), "%s", value ? value : "");
+      snprintf(cfg->kb_ranker_fit_command, sizeof(cfg->kb_ranker_fit_command), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1111,7 +1142,8 @@ int config_set_kb_ranker_fit_benchmark(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->kb_ranker_fit_benchmark, sizeof(cfg->kb_ranker_fit_benchmark), "%s", value ? value : "");
+      snprintf(cfg->kb_ranker_fit_benchmark, sizeof(cfg->kb_ranker_fit_benchmark), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1126,7 +1158,8 @@ int config_set_kb_ranker_fit_objective(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->kb_ranker_fit_objective, sizeof(cfg->kb_ranker_fit_objective), "%s", value ? value : "");
+      snprintf(cfg->kb_ranker_fit_objective, sizeof(cfg->kb_ranker_fit_objective), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1141,7 +1174,8 @@ int config_set_reasoning_datalog_command(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->reasoning_datalog_command, sizeof(cfg->reasoning_datalog_command), "%s", value ? value : "");
+      snprintf(cfg->reasoning_datalog_command, sizeof(cfg->reasoning_datalog_command), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1156,7 +1190,8 @@ int config_set_bandit_optimize_command(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->bandit_optimize_command, sizeof(cfg->bandit_optimize_command), "%s", value ? value : "");
+      snprintf(cfg->bandit_optimize_command, sizeof(cfg->bandit_optimize_command), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1171,7 +1206,8 @@ int config_set_planner_search_command(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->planner_search_command, sizeof(cfg->planner_search_command), "%s", value ? value : "");
+      snprintf(cfg->planner_search_command, sizeof(cfg->planner_search_command), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1186,7 +1222,8 @@ int config_set_constraint_solver_command(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->constraint_solver_command, sizeof(cfg->constraint_solver_command), "%s", value ? value : "");
+      snprintf(cfg->constraint_solver_command, sizeof(cfg->constraint_solver_command), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1201,7 +1238,8 @@ int config_set_kb_synthesize_command(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->kb_synthesize_command, sizeof(cfg->kb_synthesize_command), "%s", value ? value : "");
+      snprintf(cfg->kb_synthesize_command, sizeof(cfg->kb_synthesize_command), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1236,7 +1274,8 @@ int config_set_kb_curator_extract_prompt_version(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->kb_curator_extract_prompt_version, sizeof(cfg->kb_curator_extract_prompt_version), "%s", value ? value : "");
+      snprintf(cfg->kb_curator_extract_prompt_version,
+               sizeof(cfg->kb_curator_extract_prompt_version), "%s", value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1251,7 +1290,8 @@ int config_set_kb_curator_embed_model_version(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->kb_curator_embed_model_version, sizeof(cfg->kb_curator_embed_model_version), "%s", value ? value : "");
+      snprintf(cfg->kb_curator_embed_model_version, sizeof(cfg->kb_curator_embed_model_version),
+               "%s", value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1266,7 +1306,8 @@ int config_set_kb_curator_invalidation_notify_socket(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->kb_curator_invalidation_notify_socket, sizeof(cfg->kb_curator_invalidation_notify_socket), "%s", value ? value : "");
+      snprintf(cfg->kb_curator_invalidation_notify_socket,
+               sizeof(cfg->kb_curator_invalidation_notify_socket), "%s", value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1281,7 +1322,8 @@ int config_set_kb_curator_extract_command(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->kb_curator_extract_command, sizeof(cfg->kb_curator_extract_command), "%s", value ? value : "");
+      snprintf(cfg->kb_curator_extract_command, sizeof(cfg->kb_curator_extract_command), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1296,7 +1338,8 @@ int config_set_kb_curator_stage_order(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->kb_curator_stage_order, sizeof(cfg->kb_curator_stage_order), "%s", value ? value : "");
+      snprintf(cfg->kb_curator_stage_order, sizeof(cfg->kb_curator_stage_order), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1311,7 +1354,8 @@ int config_set_kb_curator_user_presets(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->kb_curator_user_presets, sizeof(cfg->kb_curator_user_presets), "%s", value ? value : "");
+      snprintf(cfg->kb_curator_user_presets, sizeof(cfg->kb_curator_user_presets), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1326,7 +1370,8 @@ int config_set_kb_curator_custom_stages(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->kb_curator_custom_stages, sizeof(cfg->kb_curator_custom_stages), "%s", value ? value : "");
+      snprintf(cfg->kb_curator_custom_stages, sizeof(cfg->kb_curator_custom_stages), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1341,7 +1386,8 @@ int config_set_kb_curator_provider_base_url(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->kb_curator_provider_base_url, sizeof(cfg->kb_curator_provider_base_url), "%s", value ? value : "");
+      snprintf(cfg->kb_curator_provider_base_url, sizeof(cfg->kb_curator_provider_base_url), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1356,7 +1402,8 @@ int config_set_kb_curator_provider_model(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->kb_curator_provider_model, sizeof(cfg->kb_curator_provider_model), "%s", value ? value : "");
+      snprintf(cfg->kb_curator_provider_model, sizeof(cfg->kb_curator_provider_model), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1376,7 +1423,8 @@ int config_set_kb_curator_tier_b_base_url(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->kb_curator_tier_b_base_url, sizeof(cfg->kb_curator_tier_b_base_url), "%s", value ? value : "");
+      snprintf(cfg->kb_curator_tier_b_base_url, sizeof(cfg->kb_curator_tier_b_base_url), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1391,7 +1439,8 @@ int config_set_kb_curator_tier_b_model(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->kb_curator_tier_b_model, sizeof(cfg->kb_curator_tier_b_model), "%s", value ? value : "");
+      snprintf(cfg->kb_curator_tier_b_model, sizeof(cfg->kb_curator_tier_b_model), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1411,7 +1460,8 @@ int config_set_kb_curator_judge_command(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->kb_curator_judge_command, sizeof(cfg->kb_curator_judge_command), "%s", value ? value : "");
+      snprintf(cfg->kb_curator_judge_command, sizeof(cfg->kb_curator_judge_command), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1426,7 +1476,8 @@ int config_set_kb_curator_synthesize_command(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->kb_curator_synthesize_command, sizeof(cfg->kb_curator_synthesize_command), "%s", value ? value : "");
+      snprintf(cfg->kb_curator_synthesize_command, sizeof(cfg->kb_curator_synthesize_command), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1441,7 +1492,8 @@ int config_set_aux_default_provider(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->aux_default_provider, sizeof(cfg->aux_default_provider), "%s", value ? value : "");
+      snprintf(cfg->aux_default_provider, sizeof(cfg->aux_default_provider), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1471,7 +1523,8 @@ int config_set_db2_vector_corpus_index(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->db2_vector_corpus_index, sizeof(cfg->db2_vector_corpus_index), "%s", value ? value : "");
+      snprintf(cfg->db2_vector_corpus_index, sizeof(cfg->db2_vector_corpus_index), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1486,7 +1539,8 @@ int config_set_ensemble_aggregator(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->ensemble_aggregator, sizeof(cfg->ensemble_aggregator), "%s", value ? value : "");
+      snprintf(cfg->ensemble_aggregator, sizeof(cfg->ensemble_aggregator), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1531,7 +1585,8 @@ int config_set_roundtable_pipeline_done_bar(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->roundtable_pipeline_done_bar, sizeof(cfg->roundtable_pipeline_done_bar), "%s", value ? value : "");
+      snprintf(cfg->roundtable_pipeline_done_bar, sizeof(cfg->roundtable_pipeline_done_bar), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);

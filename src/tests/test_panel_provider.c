@@ -12,8 +12,7 @@
 static _Atomic int release_count;
 static _Atomic int run_mode;
 
-static int mock_aggregate(agent_config_t *agents, const ensemble_panel_t *panel,
-                          const char *prompt,
+static int mock_aggregate(agent_config_t *agents, const ensemble_panel_t *panel, const char *prompt,
                           aimee_panel_aggregate_result_t *out)
 {
    (void)agents;
@@ -107,7 +106,8 @@ int main(void)
       ITERATIONS_PER_WORKER = 100
    };
    pthread_t workers[WORKER_COUNT];
-   worker_ctx_t worker_ctx = {.agents = &agents, .panel = &panel, .iterations = ITERATIONS_PER_WORKER};
+   worker_ctx_t worker_ctx = {
+       .agents = &agents, .panel = &panel, .iterations = ITERATIONS_PER_WORKER};
    atomic_store_explicit(&release_count, 0, memory_order_relaxed);
    atomic_store_explicit(&run_mode, 0, memory_order_relaxed);
    for (int i = 0; i < WORKER_COUNT; i++)

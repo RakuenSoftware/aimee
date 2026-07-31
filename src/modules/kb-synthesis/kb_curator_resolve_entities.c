@@ -107,8 +107,7 @@ static int resolve_try_match(const char *scope_kind, const char *scope_id, const
    config_kb_curator_judge_command_copy(judge_command, sizeof(judge_command));
    provider_def_owned_t judge_provider;
    if (match_scores[0] >= CURATOR_ENTITY_JUDGE_LOW &&
-       (judge_command[0] ||
-        kb_curator_provider_for_stage(KB_CURATOR_STAGE_JUDGE, &judge_provider)))
+       (judge_command[0] || kb_curator_provider_for_stage(KB_CURATOR_STAGE_JUDGE, &judge_provider)))
    {
       char cand_name[256];
       if (pgvec_curator_entity_lookup(match_ids[0], NULL, 0, cand_name, sizeof(cand_name)) == 1)
@@ -116,9 +115,8 @@ static int resolve_try_match(const char *scope_kind, const char *scope_id, const
          int same = 0;
          char jerr[256];
          db2_lease_release_idle();
-         int jrc =
-             kb_curator_judge_same_entity(judge_command, name, context, cand_name,
-                                          match_scores[0], &same, jerr, sizeof(jerr));
+         int jrc = kb_curator_judge_same_entity(judge_command, name, context, cand_name,
+                                                match_scores[0], &same, jerr, sizeof(jerr));
          if (jrc == 0 && same)
          {
             aimee_log(LOG_INFO, "kb.curator.resolve",

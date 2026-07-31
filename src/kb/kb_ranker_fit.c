@@ -629,7 +629,7 @@ int kb_ranker_fit_run(char *id_out, int id_out_len, char **report_out)
    }
 
    int min_groups = config_kb_ranker_fit_min_groups() > 0 ? config_kb_ranker_fit_min_groups()
-                                                      : RANK_FIT_DEFAULT_MIN_GROUPS;
+                                                          : RANK_FIT_DEFAULT_MIN_GROUPS;
 
    cJSON *rows = NULL;
    int n_groups = 0, n_rows = 0, n_positive = 0;
@@ -722,9 +722,10 @@ int kb_ranker_fit_run(char *id_out, int id_out_len, char **report_out)
    weights_obj_to_vec(weights, cand_w);
    load_incumbent_weights(incumbent_w);
 
-   const char *bench_path =
-       config_kb_ranker_fit_benchmark()[0] ? config_kb_ranker_fit_benchmark() : RANK_FIT_DEFAULT_BENCHMARK;
-   int k = config_kb_ranker_fit_bench_k() > 0 ? config_kb_ranker_fit_bench_k() : RANK_FIT_DEFAULT_BENCH_K;
+   const char *bench_path = config_kb_ranker_fit_benchmark()[0] ? config_kb_ranker_fit_benchmark()
+                                                                : RANK_FIT_DEFAULT_BENCHMARK;
+   int k = config_kb_ranker_fit_bench_k() > 0 ? config_kb_ranker_fit_bench_k()
+                                              : RANK_FIT_DEFAULT_BENCH_K;
    rank_gate_eval_t eval;
    int eval_rc = benchmark_compare(bench_path, k, cand_w, incumbent_w, &eval);
 

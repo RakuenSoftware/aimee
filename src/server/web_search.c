@@ -768,8 +768,8 @@ char *web_search_ex(const char *query, int max_results, int fetch_pages, const c
    if (max_results > WEB_SEARCH_MAX_RESULTS)
       max_results = WEB_SEARCH_MAX_RESULTS;
    if (fetch_pages == WEB_SEARCH_FETCH_PAGES_UNSET)
-      fetch_pages =
-          (config_search_fetch_pages() >= 0) ? config_search_fetch_pages() : WEB_SEARCH_FETCH_PAGES_DEFAULT;
+      fetch_pages = (config_search_fetch_pages() >= 0) ? config_search_fetch_pages()
+                                                       : WEB_SEARCH_FETCH_PAGES_DEFAULT;
 
    char engines[WEB_SEARCH_MAX_ENGINES][32];
    int nengines = parse_engine_list(config_search_backends(), engines, WEB_SEARCH_MAX_ENGINES);

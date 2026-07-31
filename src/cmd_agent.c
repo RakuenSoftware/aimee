@@ -857,7 +857,7 @@ static void ag_add(app_ctx_t *ctx, int argc, char **argv)
       else if (strcmp(argv[i], "--price-in") == 0 && i + 1 < argc)
       {
          if (!ag_parse_price(argv[++i], &ag->price_in_per_mtok))
-            {
+         {
             ag_price_usage("--price-in", argv[i]);
             return;
          }
@@ -865,7 +865,7 @@ static void ag_add(app_ctx_t *ctx, int argc, char **argv)
       else if (strcmp(argv[i], "--price-out") == 0 && i + 1 < argc)
       {
          if (!ag_parse_price(argv[++i], &ag->price_out_per_mtok))
-            {
+         {
             ag_price_usage("--price-out", argv[i]);
             return;
          }
@@ -873,7 +873,7 @@ static void ag_add(app_ctx_t *ctx, int argc, char **argv)
       else if (strcmp(argv[i], "--price-cached") == 0 && i + 1 < argc)
       {
          if (!ag_parse_price(argv[++i], &ag->price_cached_per_mtok))
-            {
+         {
             ag_price_usage("--price-cached", argv[i]);
             return;
          }

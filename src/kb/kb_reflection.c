@@ -74,8 +74,7 @@ static int run_synthesis_pass(const db2_artifact_proposed_t *row)
       char bindings[128];
       snprintf(bindings, sizeof(bindings), "{\"?a\":\"%s\"}", row->id);
       kb_reasoning_result_t graph_ctx = {0};
-      if (kb_reasoning_query("citation_reachable(?a, ?b)", bindings, NULL, NULL, &graph_ctx) ==
-              0 &&
+      if (kb_reasoning_query("citation_reachable(?a, ?b)", bindings, NULL, NULL, &graph_ctx) == 0 &&
           graph_ctx.n_rows > 0)
       {
          cJSON *ev = cJSON_Parse(evidence);
@@ -124,10 +123,9 @@ static int run_synthesis_pass(const db2_artifact_proposed_t *row)
        * sidecar. A NULL return is a fail — skip this attempt (fail-closed: no
        * durable write happens on a failed/empty response). */
       char serr[256];
-      char *out = kb_curator_llm_run(KB_CURATOR_STAGE_SYNTHESIZE_REFLECTION,
-                                     REFLECTION_SYNTH_SYSTEM_PROMPT, req_str, NULL,
-                                     config_kb_synthesize_command(), REFLECTION_SYNTH_OUTBUF, serr,
-                                     sizeof(serr));
+      char *out = kb_curator_llm_run(
+          KB_CURATOR_STAGE_SYNTHESIZE_REFLECTION, REFLECTION_SYNTH_SYSTEM_PROMPT, req_str, NULL,
+          config_kb_synthesize_command(), REFLECTION_SYNTH_OUTBUF, serr, sizeof(serr));
       free(req_str);
 
       if (!out)
@@ -290,7 +288,8 @@ static void run_reflection_pass(void)
       provider_def_owned_t rprov;
       int have_provider =
           kb_curator_provider_for_stage(KB_CURATOR_STAGE_SYNTHESIZE_REFLECTION, &rprov);
-      if ((config_kb_synthesize_command()[0] != '\0' || have_provider) && config_kb_mdl_tiebreak_enabled())
+      if ((config_kb_synthesize_command()[0] != '\0' || have_provider) &&
+          config_kb_mdl_tiebreak_enabled())
       {
          run_synthesis_pass(&rows[i]);
       }
@@ -342,8 +341,8 @@ static void *reflection_thread_main(void *arg)
       /* Reload config periodically for live changes */
       long now = (long)time(NULL);
       if ((now - last_fired) % 300 == 0)
-      if (!config_review_scheduler_enabled())
-         continue;
+         if (!config_review_scheduler_enabled())
+            continue;
 
       idle_threshold = (long)config_review_idle_trigger_minutes() * 60;
       if (idle_threshold <= 0)

@@ -347,8 +347,8 @@ void memory_query_rewrite(const char *query, memory_query_rewrite_t *out)
       if (!input_str)
          return;
       size_t resp_len = 0;
-      int rc = platform_exec_pipe(config_memory_rewrite_command(), input_str, strlen(input_str), &resp,
-                                  &resp_len);
+      int rc = platform_exec_pipe(config_memory_rewrite_command(), input_str, strlen(input_str),
+                                  &resp, &resp_len);
       free(input_str);
       if (rc != 0)
       {
@@ -667,8 +667,7 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
     * fetch_max up to MEMORY_RERANK_BUFFER when a short, wide query
     * (e.g. "list all projects") would otherwise be starved. */
    {
-      if (config_memory_fetch_budget_enabled() &&
-          config_memory_fetch_budget_base() > 0)
+      if (config_memory_fetch_budget_enabled() && config_memory_fetch_budget_base() > 0)
       {
          int base = config_memory_fetch_budget_base();
          char fb_tokens[24][64];
@@ -806,8 +805,7 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
     * `archived` before reranking.  memory_get() keeps returning them;
     * this only affects the recall surface. */
    {
-      if (config_memory_lifecycle_enabled() &&
-          config_memory_lifecycle_hide_archived() && count > 0)
+      if (config_memory_lifecycle_enabled() && config_memory_lifecycle_hide_archived() && count > 0)
       {
          /* Batch-probe archive state via db2 and drop any archived ids from
           * the candidate array. */

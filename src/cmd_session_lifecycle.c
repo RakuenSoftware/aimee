@@ -667,7 +667,7 @@ static int count_active_sessions(void)
 static int stale_session_threshold_secs(void)
 {
    return config_worktree_stale_secs() > 0 ? config_worktree_stale_secs()
-                                                : CONFIG_DEFAULT_STALE_SESSION_SECS;
+                                           : CONFIG_DEFAULT_STALE_SESSION_SECS;
 }
 
 /* Remove sibling worktrees for a stale session.
@@ -1539,7 +1539,6 @@ void cmd_wrapup(app_ctx_t *ctx, int argc, char **argv)
 {
    (void)argc;
    (void)argv;
-
 
    const char *sid = session_id();
 

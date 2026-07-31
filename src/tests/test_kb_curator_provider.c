@@ -21,7 +21,6 @@ static void clear_llm_env(void)
    unsetenv("AIMEE_LLM_AUTH_REQUIRED");
 }
 
-
 static void test_tier_classification(void)
 {
    /* Tier-A: mechanical extract/index. */

@@ -86,7 +86,8 @@ static int build_sidecar_request(const db2_calibration_surface_t *surface,
    cJSON_AddNumberToObject(config_j, "prior_beta0", config_calibration_prior_beta0());
    cJSON_AddNumberToObject(config_j, "buckets", n_buckets);
    cJSON_AddNumberToObject(config_j, "credible_delta", config_calibration_credible_delta());
-   cJSON_AddNumberToObject(config_j, "conformal_window_size", config_calibration_conformal_window());
+   cJSON_AddNumberToObject(config_j, "conformal_window_size",
+                           config_calibration_conformal_window());
    cJSON_AddNumberToObject(config_j, "conformal_epsilon", config_calibration_conformal_epsilon());
    if (strcmp(surface->target_surface, "memory") == 0)
    {
@@ -177,8 +178,7 @@ int kb_calibrate_run(void)
 
          char *out = NULL;
          size_t out_len = 0;
-         int rc =
-             platform_exec_pipe(calibration_command, req_buf, strlen(req_buf), &out, &out_len);
+         int rc = platform_exec_pipe(calibration_command, req_buf, strlen(req_buf), &out, &out_len);
          if (rc != 0 || !out)
          {
             aimee_log(LOG_DEBUG, "calibration", "sidecar failed for %s/%s (exit %d)",

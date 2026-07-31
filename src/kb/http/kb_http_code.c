@@ -2452,9 +2452,9 @@ int handle_post_code_repo_trust(const char *body, char *out_buf, int out_cap, in
    if (changed)
    {
       if (config_present())
-         recomputed = db2_cross_repo_recompute_blocked_symbols(config_kb_curator_cross_repo_k(),
-                                                               config_kb_curator_cross_repo_m(),
-                                                               config_kb_curator_cross_repo_len_min());
+         recomputed = db2_cross_repo_recompute_blocked_symbols(
+             config_kb_curator_cross_repo_k(), config_kb_curator_cross_repo_m(),
+             config_kb_curator_cross_repo_len_min());
    }
 
    /* Build via cJSON so the (owner-supplied) project name is JSON-escaped rather

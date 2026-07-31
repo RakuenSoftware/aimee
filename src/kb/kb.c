@@ -1749,8 +1749,7 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
             char fm_arms[KB_BANDIT_MAX_ARMS][KB_BANDIT_MAX_ARM_ID];
             for (int i = 0; i < fm_dp->n_arms; i++)
                snprintf(fm_arms[i], KB_BANDIT_MAX_ARM_ID, "%s", fm_dp->arms[i]);
-            int a = kb_bandit_sample(fm_dp->id, NULL, fm_arms, fm_dp->n_arms,
-                                     fm_decision_id);
+            int a = kb_bandit_sample(fm_dp->id, NULL, fm_arms, fm_dp->n_arms, fm_decision_id);
             if (a >= 0 && a < fm_dp->n_arms)
                snprintf(fm_arm_id, sizeof(fm_arm_id), "%s", fm_arms[a]);
             else
@@ -1900,9 +1899,8 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
          for (int i = 0; i < n_results; i++)
             ids[i] = merged[i].doc_id;
 
-         int n_ranked =
-             kb_ranker_rerank_with_sketch(ids, lex_s, dense_s, age_s, sketch_features,
-                                          n_results, ranked_ids, ranked_scores);
+         int n_ranked = kb_ranker_rerank_with_sketch(ids, lex_s, dense_s, age_s, sketch_features,
+                                                     n_results, ranked_ids, ranked_scores);
          if (n_ranked == n_results)
          {
             /* Re-order merged[] to match ranked order. */

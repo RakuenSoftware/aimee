@@ -281,7 +281,8 @@ static int stage_ingest_docs(const kb_curator_extract_opts_t *opts)
    size_t selected = next_project % (size_t)np;
    next_project = (selected + 1) % (size_t)np;
    int total = 0;
-   int e = kb_doc_refresh(projects[selected].name, config_embedding_command_field(), CURATOR_DOC_SWEEP_BATCH);
+   int e = kb_doc_refresh(projects[selected].name, config_embedding_command_field(),
+                          CURATOR_DOC_SWEEP_BATCH);
    if (e > 0)
       total += e;
    int b = kb_doc_embed_backfill(projects[selected].name, config_embedding_command_field(),
@@ -469,9 +470,9 @@ cJSON *kb_curator_stages_json(void)
       if (config_kb_curator_custom_stages()[0])
       {
          kb_curator_custom_t cbuf[KB_CURATOR_MAX_CUSTOM];
-         size_t nc =
-             kb_curator_custom_stages_parse(config_kb_curator_custom_stages(), kb_curator_base_resolve,
-                                            cbuf, KB_CURATOR_MAX_CUSTOM, NULL);
+         size_t nc = kb_curator_custom_stages_parse(config_kb_curator_custom_stages(),
+                                                    kb_curator_base_resolve, cbuf,
+                                                    KB_CURATOR_MAX_CUSTOM, NULL);
          for (size_t i = 0; i < nc; i++)
          {
             cJSON *o = cJSON_CreateObject();
@@ -732,7 +733,6 @@ static void *drain_thread_main(void *arg)
 {
    kb_curator_drain_ctx_t *ctx = (kb_curator_drain_ctx_t *)arg;
 
-
    /* Cold-start backfill: a quiescent / already-indexed corpus never produces a
     * built>0 event, so the incremental rebuild below would never fire and
     * cross_repo_route would stay empty — silently demoting every legitimate
@@ -748,7 +748,6 @@ static void *drain_thread_main(void *arg)
    /* No artificial rate cap (§5): the curator drains the backlog continuously and
     * then idles. The natural throttle is backend throughput; cost control for a
     * paid provider lives at the provider (endpoint choice / its own limits). */
-
 
    while (!ctx->stop)
    {
@@ -837,18 +836,21 @@ static void *drain_thread_main(void *arg)
       {
          const char *embed_cmd = config_embedding_command_current(NULL);
          /* Bound LLM calls per poll — each op is one sidecar/LLM round-trip. */
-         int n =
-             kb_learning_synth_drain(SYNTH_DRAIN_BATCH, config_learning_synthesize_command(), embed_cmd,
-                                     config_learning_synthesize_k(), config_learning_synthesize_max_tokens());
+         int n = kb_learning_synth_drain(SYNTH_DRAIN_BATCH, config_learning_synthesize_command(),
+                                         embed_cmd, config_learning_synthesize_k(),
+                                         config_learning_synthesize_max_tokens());
          if (n > 0)
             aimee_log(LOG_DEBUG, "kb.learning.synth", "drained %d synthesis op(s)", n);
       }
 
       if (!config_kb_curator_extract_docs_enabled() && !config_kb_curator_extract_code_enabled() &&
-          !config_kb_curator_resolve_entities_enabled() && !config_kb_curator_index_narrative_enabled() &&
-          !config_kb_curator_index_claims_enabled() && !config_kb_curator_detect_contradictions_enabled() &&
-          !config_kb_curator_index_code_unit_enabled() && !config_kb_curator_link_artifacts_enabled() &&
-          !config_kb_curator_synthesize_enabled() && !config_kb_curator_promote_entity_enabled())
+          !config_kb_curator_resolve_entities_enabled() &&
+          !config_kb_curator_index_narrative_enabled() &&
+          !config_kb_curator_index_claims_enabled() &&
+          !config_kb_curator_detect_contradictions_enabled() &&
+          !config_kb_curator_index_code_unit_enabled() &&
+          !config_kb_curator_link_artifacts_enabled() && !config_kb_curator_synthesize_enabled() &&
+          !config_kb_curator_promote_entity_enabled())
       {
          kb_background_clear("curator");
          continue;
@@ -860,7 +862,8 @@ static void *drain_thread_main(void *arg)
                config_kb_curator_extract_command());
       opts.max_tokens =
           config_kb_curator_extract_max_tokens() > 0 ? config_kb_curator_extract_max_tokens() : 512;
-      opts.max_attempts = config_kb_curator_max_attempts() > 0 ? config_kb_curator_max_attempts() : 3;
+      opts.max_attempts =
+          config_kb_curator_max_attempts() > 0 ? config_kb_curator_max_attempts() : 3;
 
       /* A provider outage is shared by every LLM stage. Per-row retry stamps do
        * not help a large backlog: without this gate one pass simply advances to
@@ -941,7 +944,8 @@ static void *kb_curator_code_worker_main(void *arg)
                config_kb_curator_extract_command());
       opts.max_tokens =
           config_kb_curator_extract_max_tokens() > 0 ? config_kb_curator_extract_max_tokens() : 512;
-      opts.max_attempts = config_kb_curator_max_attempts() > 0 ? config_kb_curator_max_attempts() : 3;
+      opts.max_attempts =
+          config_kb_curator_max_attempts() > 0 ? config_kb_curator_max_attempts() : 3;
 
       int r = kb_curator_extract_code_unit_one(&opts);
       db2_lease_release_idle();
@@ -979,7 +983,8 @@ static void *kb_curator_doc_worker_main(void *arg)
                config_kb_curator_extract_command());
       opts.max_tokens =
           config_kb_curator_extract_max_tokens() > 0 ? config_kb_curator_extract_max_tokens() : 512;
-      opts.max_attempts = config_kb_curator_max_attempts() > 0 ? config_kb_curator_max_attempts() : 3;
+      opts.max_attempts =
+          config_kb_curator_max_attempts() > 0 ? config_kb_curator_max_attempts() : 3;
 
       int r = kb_curator_extract_one(&opts);
       db2_lease_release_idle();
@@ -1006,7 +1011,8 @@ static void *kb_curator_index_lane_main(void *arg)
                config_kb_curator_extract_command());
       opts.max_tokens =
           config_kb_curator_extract_max_tokens() > 0 ? config_kb_curator_extract_max_tokens() : 512;
-      opts.max_attempts = config_kb_curator_max_attempts() > 0 ? config_kb_curator_max_attempts() : 3;
+      opts.max_attempts =
+          config_kb_curator_max_attempts() > 0 ? config_kb_curator_max_attempts() : 3;
 
       /* Pure-DB2 projection-graph + cross-repo refresh once per poll, ahead of the
        * INDEX queue drain -- content-addressed, so cheap when nothing changed. */
@@ -1044,12 +1050,13 @@ void kb_curator_drain_init(kb_curator_drain_ctx_t *ctx)
       return;
    memset(ctx, 0, sizeof(*ctx));
 
-
    if (!config_kb_curator_extract_docs_enabled() && !config_kb_curator_extract_code_enabled() &&
-       !config_kb_curator_resolve_entities_enabled() && !config_kb_curator_index_narrative_enabled() &&
-       !config_kb_curator_index_claims_enabled() && !config_kb_curator_detect_contradictions_enabled() &&
-       !config_kb_curator_index_code_unit_enabled() && !config_kb_curator_link_artifacts_enabled() &&
-       !config_kb_curator_synthesize_enabled() && !config_kb_curator_promote_entity_enabled() &&
+       !config_kb_curator_resolve_entities_enabled() &&
+       !config_kb_curator_index_narrative_enabled() && !config_kb_curator_index_claims_enabled() &&
+       !config_kb_curator_detect_contradictions_enabled() &&
+       !config_kb_curator_index_code_unit_enabled() &&
+       !config_kb_curator_link_artifacts_enabled() && !config_kb_curator_synthesize_enabled() &&
+       !config_kb_curator_promote_entity_enabled() &&
        !config_kb_curator_projection_graph_enabled() && !config_kb_evidence_embed_enabled() &&
        !config_learning_synthesize_enabled() && !config_typed_facts_enabled())
    {

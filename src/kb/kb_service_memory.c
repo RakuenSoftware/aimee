@@ -94,8 +94,7 @@ int kb_handle_memory_find_facts(int fd, cJSON *req)
          for (int i = 0; i < ml_dp->n_arms; i++)
             snprintf(ml_arms[i], KB_BANDIT_MAX_ARM_ID, "%s", ml_dp->arms[i]);
 
-         int ml_arm =
-             kb_bandit_sample(ml_dp->id, NULL, ml_arms, ml_dp->n_arms, ml_decision_id);
+         int ml_arm = kb_bandit_sample(ml_dp->id, NULL, ml_arms, ml_dp->n_arms, ml_decision_id);
          if (ml_arm >= 0 && ml_arm < ml_dp->n_arms)
          {
             aimee_log(LOG_DEBUG, "kb.bandit", "%s arm=%s", ml_dp->id, ml_arms[ml_arm]);

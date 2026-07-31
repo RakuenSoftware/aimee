@@ -369,11 +369,10 @@ static int run_server(const char *socket_path, log_level_t log_level)
       server_http_set_bearer_extra(extra, extra_count);
    }
    cli_session_pty_set_forwarding(config_server_api_cli_session_forwarding());
-   int http_start = server_http_start(NULL, config_server_api_http_port(),
-                                      config_server_api_tls_port(),
-                                      config_server_api_bearer_token(),
-                                      config_server_api_rate_limit_per_min(),
-                                      config_server_api_remote_writes());
+   int http_start =
+       server_http_start(NULL, config_server_api_http_port(), config_server_api_tls_port(),
+                         config_server_api_bearer_token(), config_server_api_rate_limit_per_min(),
+                         config_server_api_remote_writes());
    if (http_start == SERVER_HTTP_START_MGMT_FATAL)
    {
       char management_error[256];

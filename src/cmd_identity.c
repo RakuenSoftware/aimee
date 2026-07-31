@@ -46,9 +46,9 @@ cJSON *identity_charter_json(void)
    cJSON *out = cJSON_CreateObject();
    if (!out)
       return NULL;
-   cJSON_AddItemToObject(out, "safety_axioms",
-                         charter_array_to_json(config_charter_safety_axioms,
-                                               config_charter_safety_axioms_count()));
+   cJSON_AddItemToObject(
+       out, "safety_axioms",
+       charter_array_to_json(config_charter_safety_axioms, config_charter_safety_axioms_count()));
    cJSON_AddItemToObject(out, "hard_constraints",
                          charter_array_to_json(config_charter_hard_constraints,
                                                config_charter_hard_constraints_count()));

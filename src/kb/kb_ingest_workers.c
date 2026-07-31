@@ -371,7 +371,8 @@ static void *kbiw_watch_thread(void *arg)
 
    for (int w = 0; w < config_workspace_count() && nwatches < 512; w++)
    {
-      int n = workspace_discover_projects(config_workspaces(w), 3, projects, MAX_DISCOVERED_PROJECTS);
+      int n =
+          workspace_discover_projects(config_workspaces(w), 3, projects, MAX_DISCOVERED_PROJECTS);
       for (int i = 0; i < n && nwatches < 512; i++)
       {
          int wd = inotify_add_watch(ifd, projects[i],

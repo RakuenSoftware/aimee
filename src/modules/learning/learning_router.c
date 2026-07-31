@@ -47,7 +47,7 @@ static int learning_proposal_ttl_days(void)
    if (!config_present())
       return LEARNING_DEFAULT_TTL_DAYS;
    return config_learning_proposal_ttl_days() > 0 ? config_learning_proposal_ttl_days()
-                                             : LEARNING_DEFAULT_TTL_DAYS;
+                                                  : LEARNING_DEFAULT_TTL_DAYS;
 }
 
 static int learning_max_commits_per_week(void)
@@ -55,7 +55,7 @@ static int learning_max_commits_per_week(void)
    if (!config_present())
       return LEARNING_DEFAULT_MAX_COMMITS_PER_WEEK;
    return config_learning_max_commits_per_week() > 0 ? config_learning_max_commits_per_week()
-                                                : LEARNING_DEFAULT_MAX_COMMITS_PER_WEEK;
+                                                     : LEARNING_DEFAULT_MAX_COMMITS_PER_WEEK;
 }
 #endif
 
