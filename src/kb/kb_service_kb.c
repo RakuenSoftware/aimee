@@ -159,15 +159,15 @@ int kb_handle_ingest(int fd, cJSON *req)
    }
    else
    {
-      for (int w = 0; w < cfg.workspace_count; w++)
+      for (int w = 0; w < config_workspace_count(); w++)
       {
          int n =
-             workspace_discover_projects(cfg.workspaces[w], 3, projects, MAX_DISCOVERED_PROJECTS);
+             workspace_discover_projects(config_workspaces(w), 3, projects, MAX_DISCOVERED_PROJECTS);
          for (int i = 0; i < n; i++)
          {
             char pname[256];
             char pws[256];
-            if (workspace_repo_index_keys(projects[i], cfg.workspaces[w], pname, sizeof(pname), pws,
+            if (workspace_repo_index_keys(projects[i], config_workspaces(w), pname, sizeof(pname), pws,
                                           sizeof(pws)) != 0)
             {
                aimee_log(LOG_ERROR, "kb.ingest.identity",

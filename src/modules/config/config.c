@@ -2321,6 +2321,26 @@ int config_reload(void)
  *
  * Returns config_reload()'s result (1 published / 0 no-op / -1 kept) when a change was
  * observed, else 0. */
+/* "Is the config readable?" — the only thing callers were ever asking when they
+ * wrote `config_load(&cfg) == 0` as a guard.
+ *
+ * config_load() does NOT fail for a missing, oversized, or unparsable file; all
+ * three return 0 with defaults filled in. It fails on exactly two things: an
+ * allocation failure, and strict mode rejecting a validated field. Callers that
+ * branched on it were distinguishing "config unavailable" from "field is at its
+ * default" — a distinction the accessors deliberately collapse, since they fall
+ * back to defaults. This keeps that distinction available without handing out a
+ * config_t. */
+int config_present(void)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return 0;
+   int rc = config_load(cfg);
+   free(cfg);
+   return rc == 0;
+}
+
 int config_reload_if_changed(void)
 {
    static struct timespec last_mt;

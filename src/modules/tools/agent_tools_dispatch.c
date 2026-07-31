@@ -1668,8 +1668,7 @@ static char *td_clarify_start(cJSON *args, const char *name, const char *dispatc
    }
    else
    {
-      config_t cfg;
-      if (config_load(&cfg) != 0 || db1_init(cfg.db1_path) != 0)
+      if (!config_present() || db1_init(config_db1_path()) != 0)
          result = safe_strdup("error: server storage unavailable");
       else
       {
@@ -1701,8 +1700,7 @@ static char *td_clarify_answer(cJSON *args, const char *name, const char *dispat
    }
    else
    {
-      config_t cfg;
-      if (config_load(&cfg) != 0 || db1_init(cfg.db1_path) != 0)
+      if (!config_present() || db1_init(config_db1_path()) != 0)
          result = safe_strdup("error: server storage unavailable");
       else
       {
@@ -1732,8 +1730,7 @@ static char *td_diagnose_start(cJSON *args, const char *name, const char *dispat
    }
    else
    {
-      config_t cfg;
-      if (config_load(&cfg) != 0 || db1_init(cfg.db1_path) != 0)
+      if (!config_present() || db1_init(config_db1_path()) != 0)
          result = safe_strdup("error: server storage unavailable");
       else
       {
@@ -1766,8 +1763,7 @@ static char *td_diagnose_observe(cJSON *args, const char *name, const char *disp
    }
    else
    {
-      config_t cfg;
-      if (config_load(&cfg) != 0 || db1_init(cfg.db1_path) != 0)
+      if (!config_present() || db1_init(config_db1_path()) != 0)
          result = safe_strdup("error: server storage unavailable");
       else
       {
@@ -1839,8 +1835,7 @@ static char *td_diagnose_evidence(cJSON *args, const char *name, const char *dis
                rank = DIAG_RANK_SPECULATION;
          }
          const char *src = (jsource && cJSON_IsString(jsource)) ? jsource->valuestring : "";
-         config_t cfg;
-         if (config_load(&cfg) != 0 || db1_init(cfg.db1_path) != 0)
+         if (!config_present() || db1_init(config_db1_path()) != 0)
             result = safe_strdup("error: server storage unavailable");
          else
          {
@@ -1873,8 +1868,7 @@ static char *td_diagnose_status(cJSON *args, const char *name, const char *dispa
    }
    else
    {
-      config_t cfg;
-      if (config_load(&cfg) != 0 || db1_init(cfg.db1_path) != 0)
+      if (!config_present() || db1_init(config_db1_path()) != 0)
          result = safe_strdup("error: server storage unavailable");
       else
       {
@@ -1921,8 +1915,6 @@ static char *td_search_docs(cJSON *args, const char *name, const char *dispatch_
    }
    else
    {
-      config_t cfg;
-      config_load(&cfg);
       int max = (mx && cJSON_IsNumber(mx)) ? mx->valueint : 3;
       cJSON *jscope = cJSON_GetObjectItemCaseSensitive(args, "scope");
       if (jscope && (!cJSON_IsString(jscope) || (strcmp(jscope->valuestring, "current") != 0 &&
@@ -1938,7 +1930,8 @@ static char *td_search_docs(cJSON *args, const char *name, const char *dispatch_
       /* Search with the kb's own embedder unless this server has an explicit
        * override.  A resolved builtin here is 384-dimensional and can never
        * query a remote kb corpus built with a production embedder. */
-      const char *embedding_command = cfg.embedding_command[0] ? cfg.embedding_command : NULL;
+      const char *ec = config_embedding_command_current(NULL);
+      const char *embedding_command = (ec && ec[0]) ? ec : NULL;
       char *envelope = kb_client_search_json_scoped_ex(project, all_projects, q->valuestring,
                                                        embedding_command, max, NULL, NULL);
       cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
@@ -1955,7 +1948,7 @@ static char *td_search_docs(cJSON *args, const char *name, const char *dispatch_
        * second search. Records the surfaced doc_ids + snippets so the next turn's
        * continuation/repair autolabel attributes a per-doc ranker outcome. The
        * bridge symbol is weak, so a delegate/lean binary simply skips this. */
-      if (cfg.learning_implicit_retrieval_outcome && retrieval_outcome_bridge_note &&
+      if (config_learning_implicit_retrieval_outcome() && retrieval_outcome_bridge_note &&
           cJSON_IsArray(hits))
       {
          int64_t ids[8];
@@ -2173,13 +2166,11 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
    }
 
    {
-      config_t cfg;
-      config_load(&cfg);
       /* DB1 backs session_state now. In production, aimee-server / CLI main
        * already called db1_init; this is idempotent. Keeping the call here
        * so delegate subprocesses that reach dispatch without going through
        * a main-opened DB1 still persist read-before-write tracking. */
-      db1_init(cfg.db1_path);
+      db1_init(config_db1_path());
 
       session_state_t state;
       session_state_load(&state, dispatch_sid);

@@ -1872,3 +1872,21 @@ int config_set_concurrency(const config_t *cfg)
 {
    return config_set_section("concurrency", config_save_concurrency, cfg);
 }
+
+/* Copy out the sandbox block whole. The one place a caller legitimately wants a
+ * struct rather than a field: sandbox_config_t is a self-contained POD that
+ * sandbox_* consumes as a unit, so per-field accessors would just be reassembled
+ * at every call site. Leaves *out zeroed when the config cannot be read, which is
+ * the all-defaults-off shape callers already used on load failure. */
+void config_sandbox(sandbox_config_t *out)
+{
+   if (!out)
+      return;
+   memset(out, 0, sizeof(*out));
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return;
+   if (config_load(cfg) == 0)
+      *out = cfg->sandbox;
+   free(cfg);
+}

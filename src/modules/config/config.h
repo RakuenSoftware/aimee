@@ -2179,6 +2179,16 @@ int config_reload(void);
  * (out-of-band write: CLI local config.set, manual edit, or autonomous config_save). Poll it
  * from the server's main-loop tick so a file change takes effect without a restart or SIGHUP.
  * First call reconciles unconditionally. Returns config_reload()'s 1/0/-1 on a change, else 0. */
+/* Non-zero when the config is readable. Replaces `config_load(&cfg) == 0` used
+ * purely as a validity probe -- note this is NOT "the file exists": a missing or
+ * unparsable file loads defaults and succeeds. See config.c for the full set of
+ * conditions that make it fail. */
+int config_present(void);
+
+/* Copy out the sandbox block whole (zeroed when the config cannot be read).
+ * See config_save.c for why this one is a struct rather than field accessors. */
+void config_sandbox(sandbox_config_t *out);
+
 int config_reload_if_changed(void);
 
 /* Re-applier registry (live-config-reload P3): a hook invoked after config_reload publishes a

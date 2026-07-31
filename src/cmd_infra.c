@@ -886,10 +886,10 @@ static void session_subcmd_clean(app_ctx_t *ctx, int argc, char **argv)
       else
       {
          /* Remove sibling worktrees for this session */
-         for (int j = 0; j < cfg.workspace_count; j++)
+         for (int j = 0; j < config_workspace_count(); j++)
          {
             char git_root[MAX_PATH_LEN];
-            if (git_repo_root(cfg.workspaces[j], git_root, sizeof(git_root)) == 0)
+            if (git_repo_root(config_workspaces(j), git_root, sizeof(git_root)) == 0)
                worktree_cleanup(git_root, sid, NULL);
          }
          db1_session_state_delete(sid);
@@ -1331,7 +1331,7 @@ static void workspace_cmd_list(app_ctx_t *ctx, int argc, char **argv)
    config_t cfg;
    config_load(&cfg);
 
-   if (cfg.workspace_count == 0)
+   if (config_workspace_count() == 0)
    {
       fprintf(stderr, "No workspaces configured. Use 'aimee workspace add <path>' to add one.\n");
       return;
@@ -1345,15 +1345,15 @@ static void workspace_cmd_list(app_ctx_t *ctx, int argc, char **argv)
    if (ctx->json_output)
    {
       cJSON *arr = cJSON_CreateArray();
-      for (int w = 0; w < cfg.workspace_count; w++)
+      for (int w = 0; w < config_workspace_count(); w++)
       {
          cJSON *ws_obj = cJSON_CreateObject();
-         cJSON_AddStringToObject(ws_obj, "path", cfg.workspaces[w]);
+         cJSON_AddStringToObject(ws_obj, "path", config_workspaces(w));
          cJSON *projs = cJSON_AddArrayToObject(ws_obj, "projects");
-         size_t ws_len = strlen(cfg.workspaces[w]);
+         size_t ws_len = strlen(config_workspaces(w));
          for (int p = 0; p < pcount; p++)
          {
-            if (strncmp(all_projects[p].root, cfg.workspaces[w], ws_len) == 0 &&
+            if (strncmp(all_projects[p].root, config_workspaces(w), ws_len) == 0 &&
                 (all_projects[p].root[ws_len] == '/' || all_projects[p].root[ws_len] == '\0'))
             {
                cJSON_AddItemToArray(projs, cJSON_CreateString(all_projects[p].name));
@@ -1365,13 +1365,13 @@ static void workspace_cmd_list(app_ctx_t *ctx, int argc, char **argv)
    }
    else
    {
-      for (int w = 0; w < cfg.workspace_count; w++)
+      for (int w = 0; w < config_workspace_count(); w++)
       {
-         fprintf(stderr, "%s\n", cfg.workspaces[w]);
-         size_t ws_len = strlen(cfg.workspaces[w]);
+         fprintf(stderr, "%s\n", config_workspaces(w));
+         size_t ws_len = strlen(config_workspaces(w));
          for (int p = 0; p < pcount; p++)
          {
-            if (strncmp(all_projects[p].root, cfg.workspaces[w], ws_len) == 0 &&
+            if (strncmp(all_projects[p].root, config_workspaces(w), ws_len) == 0 &&
                 (all_projects[p].root[ws_len] == '/' || all_projects[p].root[ws_len] == '\0'))
             {
                fprintf(stderr, "  %s\n", all_projects[p].name);

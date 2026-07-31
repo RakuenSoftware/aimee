@@ -1198,8 +1198,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       kb_http_json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
       if (!embed_cmd[0])
       {
-         config_t scfg;
-         if (config_load(&scfg) == 0)
+         if (config_present())
             snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedding_command_current(NULL));
       }
       char *raw =

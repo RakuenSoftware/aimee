@@ -118,21 +118,21 @@ cJSON *identity_local_operator_json(void)
 
 /* --- show subcommand --- */
 
-static void print_section(const char *label, const char entries[][CONFIG_CHARTER_ENTRY_LEN],
-                          int count)
+/* Same shape as charter_array_to_json: takes the indexed accessor, not the array.
+ * Each entry is printed before the next index overwrites the accessor's
+ * thread-local buffer. */
+static void print_section(const char *label, const char *(*entry)(int), int count)
 {
    if (count <= 0)
       return;
    printf("  %s:\n", label);
    for (int i = 0; i < count; i++)
-      printf("    - %s\n", entries[i]);
+      printf("    - %s\n", entry(i));
 }
 
 static void identity_show(app_ctx_t *ctx)
 {
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   if (config_load(&cfg) != 0)
+   if (!config_present())
       fatal("identity show: could not load config");
 
    if (ctx->json_output)
@@ -145,21 +145,23 @@ static void identity_show(app_ctx_t *ctx)
       return;
    }
 
-   int total = cfg.charter_safety_axioms_count + cfg.charter_hard_constraints_count +
-               cfg.charter_values_count + cfg.charter_tone_boundaries_count;
+   int total = config_charter_safety_axioms_count() + config_charter_hard_constraints_count() +
+               config_charter_values_count() + config_charter_tone_boundaries_count();
    if (total == 0)
       printf("Charter: (none configured — add a `charter:` block to aimee.yaml)\n");
    else
    {
       printf("Charter (immutable, loaded from aimee.yaml):\n");
-      print_section("Safety axioms", cfg.charter_safety_axioms, cfg.charter_safety_axioms_count);
-      print_section("Hard constraints", cfg.charter_hard_constraints,
-                    cfg.charter_hard_constraints_count);
-      print_section("Values", cfg.charter_values, cfg.charter_values_count);
-      print_section("Tone boundaries", cfg.charter_tone_boundaries,
-                    cfg.charter_tone_boundaries_count);
-      if (cfg.charter_working_profile_drift_limit > 0)
-         printf("  Working-profile drift limit: %d\n", cfg.charter_working_profile_drift_limit);
+      print_section("Safety axioms", config_charter_safety_axioms,
+                    config_charter_safety_axioms_count());
+      print_section("Hard constraints", config_charter_hard_constraints,
+                    config_charter_hard_constraints_count());
+      print_section("Values", config_charter_values, config_charter_values_count());
+      print_section("Tone boundaries", config_charter_tone_boundaries,
+                    config_charter_tone_boundaries_count());
+      if (config_charter_working_profile_drift_limit() > 0)
+         printf("  Working-profile drift limit: %d\n",
+                config_charter_working_profile_drift_limit());
    }
 
    printf("\nLocal operator (machine-local credential mapping):\n");
@@ -284,10 +286,6 @@ static void identity_working_profile(app_ctx_t *ctx, int argc, char **argv)
 
 cJSON *identity_snapshot_build(void)
 {
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   config_load(&cfg);
-
    cJSON *root = cJSON_CreateObject();
    if (!root)
       return NULL;

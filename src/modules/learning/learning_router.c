@@ -44,29 +44,26 @@ static void learning_ingest_record_ms(double ms)
 #if !defined(AIMEE_DB2_DISABLED)
 static int learning_proposal_ttl_days(void)
 {
-   config_t cfg;
-   if (config_load(&cfg) != 0)
+   if (!config_present())
       return LEARNING_DEFAULT_TTL_DAYS;
-   return cfg.learning_proposal_ttl_days > 0 ? cfg.learning_proposal_ttl_days
+   return config_learning_proposal_ttl_days() > 0 ? config_learning_proposal_ttl_days()
                                              : LEARNING_DEFAULT_TTL_DAYS;
 }
 
 static int learning_max_commits_per_week(void)
 {
-   config_t cfg;
-   if (config_load(&cfg) != 0)
+   if (!config_present())
       return LEARNING_DEFAULT_MAX_COMMITS_PER_WEEK;
-   return cfg.learning_max_commits_per_week > 0 ? cfg.learning_max_commits_per_week
+   return config_learning_max_commits_per_week() > 0 ? config_learning_max_commits_per_week()
                                                 : LEARNING_DEFAULT_MAX_COMMITS_PER_WEEK;
 }
 #endif
 
 int learning_router_enabled(void)
 {
-   config_t cfg;
-   if (config_load(&cfg) != 0)
+   if (!config_present())
       return 1;
-   return cfg.learning_router_enabled ? 1 : 0;
+   return config_learning_router_enabled() ? 1 : 0;
 }
 
 #if !defined(AIMEE_DB2_DISABLED)
@@ -398,8 +395,7 @@ int learning_router_record_signal(const learning_signal_input_t *raw_input,
     * changing routing.  Runs before signal insert so hostile delegate/tool
     * content can be surfaced in evidence even in Phase 0. */
    {
-      config_t icfg;
-      if (config_load(&icfg) == 0 && icfg.integrity_enabled)
+      if (config_present() && config_integrity_enabled())
       {
          const char *text = raw_input->description[0]       ? raw_input->description
                             : raw_input->correction_text[0] ? raw_input->correction_text
@@ -422,8 +418,8 @@ int learning_router_record_signal(const learning_signal_input_t *raw_input,
                LOG_WARN("integrity", "gate: signal=%s source=%s verdict=%s category=%s dry_run=%d",
                         raw_input->signal_type, integrity_source_name(src),
                         integrity_verdict_name(gate.verdict), gate.match_category,
-                        icfg.integrity_dry_run);
-               if (!icfg.integrity_dry_run && src != INTEGRITY_SOURCE_USER_STATED &&
+                        config_integrity_dry_run());
+               if (!config_integrity_dry_run() && src != INTEGRITY_SOURCE_USER_STATED &&
                    gate.verdict == INTEGRITY_VERDICT_REJECT)
                {
                   learning_dispatch_clear(out);

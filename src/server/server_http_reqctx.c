@@ -106,11 +106,10 @@ void server_http_populate_request_context(int fd, int is_tcp, const char *buf,
    /* A proxy is trusted to stamp identity only by presenting the shared secret.
     * Legacy config is accepted during migration; first-boot env input is read
     * from the process-local Vault cache, never from the environment. */
-   config_t cfg;
    char vault_secret[160] = "";
    const char *secret = "";
-   if (config_load(&cfg) == 0 && cfg.ingress_trusted_proxy_secret[0])
-      secret = cfg.ingress_trusted_proxy_secret;
+   if (config_present() && config_ingress_trusted_proxy_secret()[0])
+      secret = config_ingress_trusted_proxy_secret();
    else if (runtime_secret_get("AIMEE_INGRESS_PROXY_SECRET", vault_secret, sizeof(vault_secret)))
       secret = vault_secret;
    if (!ctx.trusted && secret[0])

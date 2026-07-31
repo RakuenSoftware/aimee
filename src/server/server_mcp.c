@@ -1235,16 +1235,16 @@ cJSON *tool_store_workflow(cJSON *args)
          config_t cfg;
          if (config_load(&cfg) == 0)
          {
-            for (int i = 0; i < cfg.workspace_count; i++)
+            for (int i = 0; i < config_workspace_count(); i++)
             {
-               size_t wlen = strlen(cfg.workspaces[i]);
+               size_t wlen = strlen(config_workspaces(i));
                if (wlen == 0)
                   continue;
-               if (strncmp(cwd, cfg.workspaces[i], wlen) == 0 &&
+               if (strncmp(cwd, config_workspaces(i), wlen) == 0 &&
                    (cwd[wlen] == '/' || cwd[wlen] == '\0'))
                {
-                  const char *slash = strrchr(cfg.workspaces[i], '/');
-                  const char *name = slash ? slash + 1 : cfg.workspaces[i];
+                  const char *slash = strrchr(config_workspaces(i), '/');
+                  const char *name = slash ? slash + 1 : config_workspaces(i);
                   snprintf(workspace, sizeof(workspace), "%s", name);
                   break;
                }

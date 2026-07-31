@@ -900,9 +900,8 @@ char *agent_compress_tool_result(const char *raw, size_t raw_len, const char *to
       return strdup("");
 
    /* Load application config and convert to compact_config_t */
-   config_t app_cfg;
    compact_config_t cfg;
-   int loaded = (config_load(&app_cfg) == 0);
+   int loaded = config_present();
    if (loaded)
       compact_cfg_from_app_config(&cfg);
    else
@@ -910,7 +909,7 @@ char *agent_compress_tool_result(const char *raw, size_t raw_len, const char *to
 
    /* Per-result model-visible cap (operator-configurable, default 32768).
     * Resolved ONCE here so the closet budget and the hard cap below agree. */
-   size_t cap = agent_tool_output_cap_clamp(loaded ? app_cfg.tool_output_max_bytes : 0);
+   size_t cap = agent_tool_output_cap_clamp(loaded ? config_tool_output_max_bytes() : 0);
 
    /* Shrink via the single shared core. Size the buffer for the one strategy that
     * can exceed raw_len (a JSON structural summary of a tiny body); every other
@@ -935,7 +934,7 @@ char *agent_compress_tool_result(const char *raw, size_t raw_len, const char *to
     * Default-off; return-only wiring (no cross-turn persistence in P1). */
    char *closet = NULL;
    size_t closet_len = 0;
-   if (loaded && app_cfg.coord_closet_enabled && compacted)
+   if (loaded && config_coord_closet_enabled() && compacted)
    {
       coord_set_t set;
       coord_set_init(&set);
@@ -952,14 +951,20 @@ char *agent_compress_tool_result(const char *raw, size_t raw_len, const char *to
       int hard_room = (int)cap - 256;
       if (hard_room < 0)
          hard_room = 0; /* tiny operator cap: no room for a closet */
-      int cb = app_cfg.coord_closet_budget_bytes;
+      int cb = config_coord_closet_budget_bytes();
       if (cb > hard_room)
          cb = hard_room;
+      /* Copy the denylist out of the accessor's thread-local buffer: ccfg.denylist
+       * is a borrowed pointer read after coord_closet_render() runs, and any other
+       * config_coord_closet_denylist() call in between would move the ground under
+       * it. */
+      char denylist[sizeof(((config_t *)0)->coord_closet_denylist)];
+      snprintf(denylist, sizeof(denylist), "%s", config_coord_closet_denylist());
       coord_closet_config_t ccfg = {
           .enabled = 1,
           .budget_bytes = cb,
-          .max_ratio_pct = app_cfg.coord_closet_max_ratio_pct,
-          .denylist = app_cfg.coord_closet_denylist[0] ? app_cfg.coord_closet_denylist : NULL,
+          .max_ratio_pct = config_coord_closet_max_ratio_pct(),
+          .denylist = denylist[0] ? denylist : NULL,
       };
       coord_evict_t why = COORD_EVICT_NONE;
       closet = coord_closet_render(&set, &ccfg, raw_len, &why);

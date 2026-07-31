@@ -1143,18 +1143,17 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
    }
 
    /* Per-signal RRF weights + rank constant are config-tunable (§5). */
-   config_t hcfg;
    double w_code = 1.0, w_graph = 1.0, w_vector = 1.0, w_memory = 1.0, rrf_k = KB_RRF_DEFAULT_K;
    int trust_on = 0; /* §3 actuation gate (default off) */
-   if (config_load(&hcfg) == 0)
+   if (config_present())
    {
-      w_code = hcfg.code_hybrid_weight_code;
-      w_graph = hcfg.code_hybrid_weight_graph;
-      w_vector = hcfg.code_hybrid_weight_vector;
-      w_memory = hcfg.code_hybrid_weight_memory;
-      if (hcfg.code_hybrid_rrf_k > 0)
-         rrf_k = hcfg.code_hybrid_rrf_k;
-      trust_on = hcfg.code_trust_actuation_enabled;
+      w_code = config_code_hybrid_weight_code();
+      w_graph = config_code_hybrid_weight_graph();
+      w_vector = config_code_hybrid_weight_vector();
+      w_memory = config_code_hybrid_weight_memory();
+      if (config_code_hybrid_rrf_k() > 0)
+         rrf_k = config_code_hybrid_rrf_k();
+      trust_on = config_code_trust_actuation_enabled();
    }
 
    /* Signal C — vector similarity (key = file_path; §5). Embed the query and
@@ -2451,11 +2450,10 @@ int handle_post_code_repo_trust(const char *body, char *out_buf, int out_cap, in
    int recomputed = -1; /* -1 = not attempted (no change); >=0 rows; -1 on a recompute error too */
    if (changed)
    {
-      config_t cfg;
-      if (config_load(&cfg) == 0)
-         recomputed = db2_cross_repo_recompute_blocked_symbols(cfg.kb_curator_cross_repo_k,
-                                                               cfg.kb_curator_cross_repo_m,
-                                                               cfg.kb_curator_cross_repo_len_min);
+      if (config_present())
+         recomputed = db2_cross_repo_recompute_blocked_symbols(config_kb_curator_cross_repo_k(),
+                                                               config_kb_curator_cross_repo_m(),
+                                                               config_kb_curator_cross_repo_len_min());
    }
 
    /* Build via cJSON so the (owner-supplied) project name is JSON-escaped rather

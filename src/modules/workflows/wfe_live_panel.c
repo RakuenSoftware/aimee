@@ -157,9 +157,7 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
       clock_gettime(CLOCK_MONOTONIC, &qn);
       int final = (qn.tv_sec - q0.tv_sec) >= seat_wait || seat_wait == 0;
 
-      config_t cfg;
-      memset(&cfg, 0, sizeof cfg);
-      if (config_load(&cfg) != 0 || agent_load_config(&acfg) != 0)
+      if (!config_present() || agent_load_config(&acfg) != 0)
       {
          if (final)
          {
@@ -180,7 +178,7 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
          if (final)
          {
             aimee_log(LOG_WARN, "wfe-panel", "%s -> park", panel_err);
-            rc_final = (pkt->roundtable && pkt->roundtable[0]) || cfg.roundtable_default[0]
+            rc_final = (pkt->roundtable && pkt->roundtable[0]) || config_roundtable_default()[0]
                            ? WFE_PANEL_PINNED_FAIL
                            : 0;
             break;
@@ -195,16 +193,22 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
          continue;
       }
 
-      const int panel_count = cfg.ensemble_reference_count;
+      /* Read the seats off the PANEL, and apply the two overrides to the PANEL —
+       * it is what delegate_roundtable_run consumes. Both used to be written to a
+       * local config_t that was passed on; once the engine took an
+       * ensemble_panel_t built earlier in this loop, writing them to the config_t
+       * became a pair of dead stores that silently dropped the min-successful and
+       * replay-verify overrides. */
+      const int panel_count = panel.reference_count;
       const char *lens_seat[WFE_PANEL_MAX];
       for (int i = 0; i < nlens; i++)
-         lens_seat[i] = cfg.ensemble_reference_models[i % panel_count];
+         lens_seat[i] = panel.reference_models[i % panel_count];
 
       /* Acquired roundtable seats are the whole panel. Review lenses are verdict
        * dimensions, not authorization to add more agents; attribute each lens
        * to an actual panel seat round-robin. */
-      cfg.ensemble_min_successful = panel_count;
-      cfg.roundtable_replay_verify_enabled = 0;
+      panel.min_successful = panel_count;
+      panel.replay_verify_enabled = 0;
 
       roundtable_opts_t opts;
       memset(&opts, 0, sizeof opts);
@@ -251,8 +255,7 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
        * reviewed: interpretation caps below blocking, contradicted claims are
        * rejected — the same rule as the compute roundtable, re-grounded. */
       wfe_replay_worktree_set_root(pkt->workdir);
-      roundtable_verify_items_with(&rt, wfe_replay_worktree_backend(),
-                                   cfg.roundtable_require_evidence);
+      roundtable_verify_items_with(&rt, wfe_replay_worktree_backend(), panel.require_evidence);
       wfe_replay_worktree_set_root(NULL);
       aimee_log(LOG_INFO, "wfe-panel",
                 "panel items: %d kept (verified=%d capped=%d degraded=%d), %d rejected",

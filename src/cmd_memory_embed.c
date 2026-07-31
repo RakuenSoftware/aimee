@@ -651,7 +651,7 @@ void mem_reflect(app_ctx_t *ctx, int argc, char **argv)
    if (scope_str == NULL)
    {
       /* Auto: use workspace/project from config if available, else NULL */
-      const char *workspace = (s_mem_cfg.workspace_count > 0) ? s_mem_cfg.workspaces[0] : NULL;
+      const char *workspace = (config_workspace_count() > 0) ? config_workspaces(0) : NULL;
       count = kb_client_memory_find_facts_visible(query, workspace, NULL, limit, facts,
                                                   REFLECT_MAX_RESULTS);
    }

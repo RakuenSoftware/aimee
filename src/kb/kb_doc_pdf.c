@@ -1125,9 +1125,8 @@ int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *fi
     * chunk so it lands in the isolated kb_pdf_embeddings relation. We do NOT embed
     * quarantined-pending (restricted) docs — they are withheld until an owner
     * confirms, at which point the confirm path enqueues their embed_pdf jobs. */
-   config_t pdf_cfg;
-   int cfg_ok = (config_load(&pdf_cfg) == 0);
-   int vector_enabled = cfg_ok && pdf_cfg.kb_pdf_vector_enabled;
+   int cfg_ok = (config_present());
+   int vector_enabled = cfg_ok && config_kb_pdf_vector_enabled();
    int embed_pdf_vec = vector_enabled && quarantine[0] == '\0';
 
    /* Phase B: resolve the TSR sidecar endpoint when the capability is on. Unlike embed_pdf,
@@ -1138,7 +1137,7 @@ int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *fi
     * a slow/failing sidecar never holds the txn open or poisons it (best-effort, the page
     * stays text-only on failure). tsr_attempted drives the per-document tsr_state marker
     * (ran | no_table | '' when off/absent). */
-   const char *tsr_ep = (cfg_ok && pdf_cfg.kb_pdf_tsr_enabled) ? config_tsr_endpoint() : "";
+   const char *tsr_ep = (cfg_ok && config_kb_pdf_tsr_enabled()) ? config_tsr_endpoint() : "";
    int tsr_attempted = (tsr_ep[0] != '\0');
    int tsr_found_table = 0;
 

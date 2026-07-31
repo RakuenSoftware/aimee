@@ -742,10 +742,7 @@ int kb_async_enabled(void)
          return 0;
    }
 
-   config_t cfg;
-   if (config_load(&cfg) == 0)
-      return cfg.memory_cognify_async_enabled ? 1 : 0;
-   return 0;
+   return (config_present() && config_memory_cognify_async_enabled()) ? 1 : 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1686,10 +1683,9 @@ static void kb_json_append_escaped(dstr_t *out, const char *s)
  * KB_DEFAULT_MAX_RESULTS. */
 static int kb_search_resolve_cap(int requested)
 {
-   config_t cfg;
    int cap = 50;
-   if (config_load(&cfg) == 0 && cfg.kb_search_max_results > 0)
-      cap = cfg.kb_search_max_results;
+   if (config_present() && config_kb_search_max_results() > 0)
+      cap = config_kb_search_max_results();
    if (requested <= 0)
       requested = KB_DEFAULT_MAX_RESULTS;
    if (requested > cap)
@@ -1735,8 +1731,7 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
     * When no override is given and live bandit decisions are enabled, sample the
     * fusion strategy from the kb_fusion_mode decision point; the choice is
     * rewarded from this search's recall sufficiency at the success exit below. */
-   config_t fusion_cfg;
-   int fusion_cfg_ok = (config_load(&fusion_cfg) == 0);
+   int fusion_cfg_ok = (config_present());
    const char *fusion_mode;
    char fm_decision_id[KB_BANDIT_MAX_DECISION] = {0};
    char fm_arm_id[KB_BANDIT_MAX_ARM_ID] = {0};
@@ -1746,7 +1741,7 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
       fusion_mode = fusion_mode_override;
    else
    {
-      if (fusion_cfg_ok && fusion_cfg.bandit_live_decision_enabled)
+      if (fusion_cfg_ok && config_bandit_live_decision_enabled())
       {
          fm_dp = kb_bandit_registry_get("kb_fusion_mode");
          if (fm_dp && fm_dp->n_arms > 0)
@@ -1767,8 +1762,8 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
       else if (db2_bandit_promotion_get("kb_fusion_mode", fm_promo, sizeof(fm_promo)) == 0 &&
                fm_promo[0])
          fusion_mode = fm_promo; /* promoted default (operator locked it in) */
-      else if (fusion_cfg_ok && fusion_cfg.kb_fusion_mode[0])
-         fusion_mode = fusion_cfg.kb_fusion_mode;
+      else if (fusion_cfg_ok && config_kb_fusion_mode()[0])
+         fusion_mode = config_kb_fusion_mode();
       else
          fusion_mode = "rrf";
    }
@@ -1818,7 +1813,7 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
    {
       if (strcmp(fusion_mode, "static_alpha") == 0)
       {
-         chosen_alpha = fusion_cfg_ok ? fusion_cfg.kb_fusion_static_alpha : 0.5;
+         chosen_alpha = fusion_cfg_ok ? config_kb_fusion_static_alpha() : 0.5;
          n_results = alpha_merge(lex_res, n_lex, vec_res, n_vec, merged, max_results, chosen_alpha);
       }
       else if (strcmp(fusion_mode, "dynamic_alpha") == 0)
@@ -1858,8 +1853,7 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
 #if !defined(AIMEE_DB2_DISABLED)
    if (n_results > 0)
    {
-      config_t kb_cfg;
-      int cfg_ok = (config_load(&kb_cfg) == 0);
+      int cfg_ok = (config_present());
 
       sketch_count_min_t count_min;
       int have_count_min =
@@ -1889,7 +1883,7 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
       }
 
       /* Apply linear ranker when enabled and a model is loaded. */
-      if (cfg_ok && kb_cfg.kb_ranker_enabled)
+      if (cfg_ok && config_kb_ranker_enabled())
       {
          int64_t ranked_ids[MAX_LEXICAL_RESULTS + MAX_VEC_RESULTS];
          double ranked_scores[MAX_LEXICAL_RESULTS + MAX_VEC_RESULTS];

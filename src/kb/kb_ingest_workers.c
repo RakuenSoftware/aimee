@@ -148,8 +148,8 @@ static void kbiw_enqueue_all(kb_service_ctx_t *ctx)
       return;
 
    int total = 0;
-   for (int w = 0; w < cfg.workspace_count; w++)
-      total += kbiw_enqueue_under(cfg.workspaces[w], cfg.workspaces[w], projects);
+   for (int w = 0; w < config_workspace_count(); w++)
+      total += kbiw_enqueue_under(config_workspaces(w), config_workspaces(w), projects);
 
    total += kbiw_enqueue_webusers(projects);
    free(projects);
@@ -382,9 +382,9 @@ static void *kbiw_watch_thread(void *arg)
       return NULL;
    }
 
-   for (int w = 0; w < cfg.workspace_count && nwatches < 512; w++)
+   for (int w = 0; w < config_workspace_count() && nwatches < 512; w++)
    {
-      int n = workspace_discover_projects(cfg.workspaces[w], 3, projects, MAX_DISCOVERED_PROJECTS);
+      int n = workspace_discover_projects(config_workspaces(w), 3, projects, MAX_DISCOVERED_PROJECTS);
       for (int i = 0; i < n && nwatches < 512; i++)
       {
          int wd = inotify_add_watch(ifd, projects[i],
@@ -393,7 +393,7 @@ static void *kbiw_watch_thread(void *arg)
             continue;
          watches[nwatches].wd = wd;
          snprintf(watches[nwatches].root, MAX_PATH_LEN, "%s", projects[i]);
-         snprintf(watches[nwatches].workspace, MAX_PATH_LEN, "%s", cfg.workspaces[w]);
+         snprintf(watches[nwatches].workspace, MAX_PATH_LEN, "%s", config_workspaces(w));
          watches[nwatches].last_queued = 0;
          nwatches++;
       }

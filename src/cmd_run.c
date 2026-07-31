@@ -166,9 +166,7 @@ void cmd_run(app_ctx_t *ctx, int argc, char **argv)
    }
    if (built_sys_prompt)
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      if (config_load(&cfg) == 0)
+      if (config_present())
       {
          char *with_dispositions = prompt_apply_dispositions(built_sys_prompt);
          if (with_dispositions)

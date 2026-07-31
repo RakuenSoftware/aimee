@@ -58,10 +58,9 @@ static int bash_delegate_cancel_requested(void)
  * the cap can't change mid-loop. */
 size_t agent_tool_output_cap(void)
 {
-   config_t cfg;
-   if (config_load(&cfg) != 0)
+   if (!config_present())
       return (size_t)AGENT_TOOL_OUTPUT_MAX;
-   return agent_tool_output_cap_clamp(cfg.tool_output_max_bytes);
+   return agent_tool_output_cap_clamp(config_tool_output_max_bytes());
 }
 static void bash_kill_child_tree(pid_t pid)
 {
@@ -687,14 +686,13 @@ static int lxc_cmd_safe(const char *cmd, const char *ro, const char *rw)
 }
 int64_t auto_snapshot_record(const char *path)
 {
-   config_t cfg;
-   if (config_load(&cfg) != 0 || !cfg.rewind_auto_snapshot)
+   if (!config_present() || !config_rewind_auto_snapshot())
       return 0;
    const char *sid = session_id();
    if (!sid || !sid[0])
       return 0;
 
-   if (db1_init(cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
       return 0;
 
    int64_t snap_id = agent_tools_get_snap_id();
@@ -803,11 +801,8 @@ char *tool_bash(const char *command, int timeout_ms)
    int stdout_pipe[2], stderr_pipe[2];
    if (pipe(stdout_pipe) != 0 || pipe(stderr_pipe) != 0)
       return safe_strdup("{\"stdout\":\"\",\"stderr\":\"pipe failed\",\"exit_code\":-1}");
-   config_t cfg;
    sandbox_config_t sbox_cfg;
-   memset(&sbox_cfg, 0, sizeof(sbox_cfg));
-   if (config_load(&cfg) == 0)
-      sbox_cfg = cfg.sandbox;
+   config_sandbox(&sbox_cfg);
    const char *guard_ro = agent_tools_parent_write_guard_root();
    const char *guard_rw = agent_tools_parent_write_guard_write_root();
    int guarded_parent = guard_ro && guard_ro[0];

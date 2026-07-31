@@ -228,9 +228,9 @@ int workspace_turn_resolve_mirror_cwd(const char *cwd, char *out, size_t out_cap
 
    config_t cfg;
    config_load(&cfg);
-   for (int i = 0; i < cfg.workspace_count; i++)
+   for (int i = 0; i < config_workspace_count(); i++)
    {
-      if (!cwd_in_workspace(cwd, cfg.workspaces[i]))
+      if (!cwd_in_workspace(cwd, config_workspaces(i)))
          continue;
       ws_provider_kind_t kind = cfg.workspace_providers[i][0]
                                     ? ws_provider_kind_from_string(cfg.workspace_providers[i])
@@ -238,7 +238,7 @@ int workspace_turn_resolve_mirror_cwd(const char *cwd, char *out, size_t out_cap
       if (kind == WS_PROVIDER_MIRROR)
       {
          ws_mirror_drift_t v;
-         return mirror_reconstruct_cwd(cwd, cfg.workspaces[i], cfg.workspace_vcs_remote[i],
+         return mirror_reconstruct_cwd(cwd, config_workspaces(i), cfg.workspace_vcs_remote[i],
                                        cfg.workspace_vcs_head[i], out, out_cap, NULL, 0, &v);
       }
       return 0; /* matched, but not a mirror workspace */
@@ -257,9 +257,9 @@ int workspace_turn_bind_active(const char *cwd)
    config_t cfg;
    config_load(&cfg);
 
-   for (int i = 0; i < cfg.workspace_count; i++)
+   for (int i = 0; i < config_workspace_count(); i++)
    {
-      if (!cwd_in_workspace(cwd, cfg.workspaces[i]))
+      if (!cwd_in_workspace(cwd, config_workspaces(i)))
          continue;
 
       /* Matched the workspace containing this turn's cwd. Only a non-shared
@@ -271,7 +271,7 @@ int workspace_turn_bind_active(const char *cwd)
       {
          /* The runner queue is keyed by the workspace root — the same id the
           * client's `aimee workspace serve <root>` polls. */
-         ws_runner_queue_t *q = ws_runner_registry_get_or_create(cfg.workspaces[i]);
+         ws_runner_queue_t *q = ws_runner_registry_get_or_create(config_workspaces(i));
          if (q)
          {
             /* Bind both the unary and streaming transports off the same queue so
@@ -288,7 +288,7 @@ int workspace_turn_bind_active(const char *cwd)
       {
          /* Drive the server-side mirror lifecycle from the registry's vcs
           * coordinates, then act on the reconstructed local tree (shared fs). */
-         return bind_mirror(cwd, cfg.workspaces[i], cfg.workspace_vcs_remote[i],
+         return bind_mirror(cwd, config_workspaces(i), cfg.workspace_vcs_remote[i],
                             cfg.workspace_vcs_head[i]);
       }
       return 0; /* matched, but shared (or no queue) — stay on shared */
@@ -349,10 +349,10 @@ int workspace_turn_workspace_authorized(const char *workspace, char *out, size_t
    }
    config_t cfg;
    config_load(&cfg);
-   for (int i = 0; i < cfg.workspace_count; i++)
+   for (int i = 0; i < config_workspace_count(); i++)
    {
       char root_real[MAX_PATH_LEN];
-      if (!realpath(cfg.workspaces[i], root_real))
+      if (!realpath(config_workspaces(i), root_real))
          continue;
       /* "/" as a registered root would authorize every path on the host, which is
        * not a workspace registration — it is the absence of one. */
@@ -373,7 +373,7 @@ int workspace_turn_workspace_authorized(const char *workspace, char *out, size_t
              "refusing to mount '%s' — it is not inside any registered workspace root (%d "
              "registered). A directory the operator never registered is not a tree aimee may "
              "hand a delegate",
-             real, cfg.workspace_count);
+             real, config_workspace_count());
    return 0;
 }
 

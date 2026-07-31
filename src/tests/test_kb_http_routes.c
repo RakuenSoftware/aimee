@@ -1351,6 +1351,42 @@ int config_load(config_t *cfg)
 /* Accessor stubs: the production seam moved from config_load to per-field
  * accessors. These return exactly what the stub above puts in the struct, so
  * the assertions below are unchanged. */
+int config_present(void)
+{
+   return 1; /* the config_load stub above always succeeds */
+}
+
+/* §5 hybrid RRF weights + rank constant, mirroring the struct above. */
+double config_code_hybrid_weight_code(void)
+{
+   return 1.0;
+}
+
+double config_code_hybrid_weight_graph(void)
+{
+   return 1.0;
+}
+
+double config_code_hybrid_weight_vector(void)
+{
+   return 1.0;
+}
+
+double config_code_hybrid_weight_memory(void)
+{
+   return 1.0;
+}
+
+double config_code_hybrid_rrf_k(void)
+{
+   return 60.0;
+}
+
+int config_code_trust_actuation_enabled(void)
+{
+   return 0; /* §3 actuation gate: memset-0 in the struct above */
+}
+
 int config_kb_curator_extract_docs_enabled(void)
 {
    return 1;

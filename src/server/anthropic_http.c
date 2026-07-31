@@ -286,8 +286,7 @@ static int gw_stage_model_pin(gw_request_t *r, void *ud)
  * keeps gw_stage_governance config-free. */
 static int anthropic_governance_enabled(void)
 {
-   config_t c;
-   int tri = (config_load(&c) == 0) ? c.module_governance : -1;
+   int tri = config_present() ? config_module_governance() : -1;
    return config_module_enabled(tri, gw_response_governance_enabled());
 }
 
@@ -296,9 +295,8 @@ static int messages_run_request_pipeline(cJSON *req, const delegate_driver_t *dr
 {
    /* P5 (§2.3): opt-in to inject the envelope on the Anthropic-native passthrough.
     * Read config here so gw_stage_memory stays config-free. */
-   config_t pcfg;
-   int cfg_ok = (config_load(&pcfg) == 0);
-   int allow_anthropic_inject = (cfg_ok && pcfg.ingress_preinject_anthropic_enabled) ? 1 : 0;
+   int allow_anthropic_inject =
+       (config_present() && config_ingress_preinject_anthropic_enabled()) ? 1 : 0;
 
    gw_request_t r = {
        .raw = req,

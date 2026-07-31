@@ -13,10 +13,6 @@
       "decls": 10,
       "loads": 8
     },
-    "src/cmd_identity.c": {
-      "decls": 2,
-      "loads": 2
-    },
     "src/cmd_infra.c": {
       "decls": 6,
       "loads": 4
@@ -32,14 +28,6 @@
     "src/cmd_provider.c": {
       "decls": 1,
       "loads": 1
-    },
-    "src/cmd_run.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/db2/canonical_index.c": {
-      "decls": 2,
-      "loads": 2
     },
     "src/dogfood.c": {
       "decls": 8,
@@ -70,12 +58,12 @@
       "loads": 0
     },
     "src/kb/http/kb_http.c": {
-      "decls": 2,
-      "loads": 2
+      "decls": 1,
+      "loads": 1
     },
     "src/kb/http/kb_http_code.c": {
-      "decls": 4,
-      "loads": 4
+      "decls": 2,
+      "loads": 2
     },
     "src/kb/http/kb_http_console.c": {
       "decls": 4,
@@ -85,21 +73,9 @@
       "decls": 2,
       "loads": 0
     },
-    "src/kb/kb.c": {
-      "decls": 4,
-      "loads": 4
-    },
-    "src/kb/kb_blob_store.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/kb/kb_calibrate.c": {
       "decls": 2,
       "loads": 0
-    },
-    "src/kb/kb_doc_pdf.c": {
-      "decls": 1,
-      "loads": 1
     },
     "src/kb/kb_ingest_workers.c": {
       "decls": 5,
@@ -165,23 +141,11 @@
       "decls": 2,
       "loads": 0
     },
-    "src/modules/benchmarks/agent_eval.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/modules/benchmarks/agent_eval_benchmarks.c": {
       "decls": 1,
       "loads": 1
     },
     "src/modules/benchmarks/agent_eval_memory_support.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/modules/css/css_render_cmd.c": {
-      "decls": 2,
-      "loads": 2
-    },
-    "src/modules/delegates/delegate_sandbox_image.c": {
       "decls": 1,
       "loads": 1
     },
@@ -200,10 +164,6 @@
     "src/modules/delegates/panel_roster.c": {
       "decls": 5,
       "loads": 0
-    },
-    "src/modules/git/git_verify_ops.c": {
-      "decls": 2,
-      "loads": 2
     },
     "src/modules/guardrails/guardrails_action_audit.c": {
       "decls": 2,
@@ -250,12 +210,8 @@
       "loads": 0
     },
     "src/modules/learning/learning_implicit.c": {
-      "decls": 4,
-      "loads": 4
-    },
-    "src/modules/learning/learning_router.c": {
-      "decls": 4,
-      "loads": 4
+      "decls": 1,
+      "loads": 1
     },
     "src/modules/lsp/lsp_manager.c": {
       "decls": 1,
@@ -301,19 +257,7 @@
       "decls": 2,
       "loads": 0
     },
-    "src/modules/tools/agent_tools.c": {
-      "decls": 3,
-      "loads": 3
-    },
-    "src/modules/tools/agent_tools_dispatch.c": {
-      "decls": 8,
-      "loads": 8
-    },
     "src/modules/vault/vault_custody_tpm2.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/modules/workflows/wfe_live_panel.c": {
       "decls": 1,
       "loads": 1
     },
@@ -331,7 +275,7 @@
     },
     "src/server/agent_policy.c": {
       "decls": 1,
-      "loads": 1
+      "loads": 0
     },
     "src/server/agent_route.c": {
       "decls": 3,
@@ -340,14 +284,6 @@
     "src/server/agent_runtime.c": {
       "decls": 1,
       "loads": 1
-    },
-    "src/server/aimee_ir_serve.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/server/anthropic_http.c": {
-      "decls": 2,
-      "loads": 2
     },
     "src/server/aux_router.c": {
       "decls": 2,
@@ -360,14 +296,6 @@
     "src/server/fidelity_check.c": {
       "decls": 1,
       "loads": 0
-    },
-    "src/server/openai_chat.c": {
-      "decls": 3,
-      "loads": 3
-    },
-    "src/server/provider_cli_adapter.c": {
-      "decls": 1,
-      "loads": 1
     },
     "src/server/server.c": {
       "decls": 7,
@@ -389,17 +317,9 @@
       "decls": 2,
       "loads": 2
     },
-    "src/server/server_coord_dispatcher.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/server/server_cron.c": {
       "decls": 5,
       "loads": 3
-    },
-    "src/server/server_http_reqctx.c": {
-      "decls": 1,
-      "loads": 1
     },
     "src/server/server_jobs_aux.c": {
       "decls": 3,
@@ -417,13 +337,9 @@
       "decls": 1,
       "loads": 1
     },
-    "src/server/server_skill_jobs.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/server/server_state.c": {
-      "decls": 3,
-      "loads": 3
+      "decls": 2,
+      "loads": 2
     },
     "src/server/server_workflow_api.c": {
       "decls": 1,
@@ -440,10 +356,6 @@
     "src/tests/support/ir_ingress_stubs.c": {
       "decls": 2,
       "loads": 0
-    },
-    "src/tests/support/ir_seam_memory_stub.c": {
-      "decls": 1,
-      "loads": 1
     },
     "src/tests/test_agent_caps.c": {
       "decls": 13,
@@ -699,8 +611,8 @@
     }
   },
   "totals": {
-    "decls": 558,
-    "files": 174,
-    "loads": 306
+    "decls": 507,
+    "files": 152,
+    "loads": 254
   }
 }
