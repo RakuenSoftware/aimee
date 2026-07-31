@@ -577,6 +577,13 @@ int config_embedding_dim_is_pinned(const config_t *cfg)
    return 0;
 }
 
+/* kb_http reads the pin through the no-arg form now; same answer as the
+ * config_t stub above. */
+int config_embedding_dim_pinned_current(void)
+{
+   return 0;
+}
+
 int db2_curator_invalidations_since(int64_t since_id, void *out, int max)
 {
    (void)since_id;
@@ -626,6 +633,24 @@ int db2_ontology_reject(const char *rel_type)
 int config_save(const config_t *cfg)
 {
    (void)cfg;
+   return 0;
+}
+
+/* The console writes through config_set / config_set_typed_facts now instead of
+ * mutating a config_t and calling config_save. Same contract as the stub above:
+ * report success without touching a real config file. */
+int config_set(const char *key, const char *value)
+{
+   (void)key;
+   (void)value;
+   return 0;
+}
+
+int config_set_typed_facts(int enabled, int auto_promote, int promote_threshold)
+{
+   (void)enabled;
+   (void)auto_promote;
+   (void)promote_threshold;
    return 0;
 }
 
@@ -688,6 +713,27 @@ cJSON *config_field_public_value_json(const config_t *cfg, const config_field_t 
    if (config_field_secret_name(f))
       return cJSON_CreateBool(g_stub_secret_configured);
    return cJSON_CreateBool(0);
+}
+
+/* The console renders values through the live-config form now; same answer. */
+cJSON *config_field_public_value_json_current(const config_field_t *f)
+{
+   return config_field_public_value_json(NULL, f);
+}
+
+/* Typed-facts knobs the console echoes back, read through accessors now.
+ * Mirror the values this file's config_load stub sets (all zero/off). */
+int config_typed_facts_enabled(void)
+{
+   return 0;
+}
+int config_kb_typed_facts_auto_promote_enabled(void)
+{
+   return 0;
+}
+int config_kb_typed_facts_promote_threshold(void)
+{
+   return 0;
 }
 int config_secret_store(const char *name, const char *value)
 {
@@ -1313,6 +1359,70 @@ int config_load(config_t *cfg)
 /* Accessor stubs: the production seam moved from config_load to per-field
  * accessors. These return exactly what the stub above puts in the struct, so
  * the assertions below are unchanged. */
+int config_present(void)
+{
+   return 1; /* the config_load stub above always succeeds */
+}
+
+/* Ingress compression gate: memset-0 in the struct the stub above fills. */
+int config_ingress_compress_enabled(void)
+{
+   return 0;
+}
+
+/* §4 surprising-links precision floor and judge command. The struct above leaves
+ * both at zero/empty: floor <= 0 disables self-suppress, and an empty judge
+ * command is what the hermetic judge stub below expects. */
+double config_code_surprising_precision_floor(void)
+{
+   return g_precision_floor;
+}
+
+size_t config_kb_curator_judge_command_copy(char *out, size_t n)
+{
+   if (out && n)
+      out[0] = '\0';
+   return n;
+}
+
+/* §2c reembed-on-dim-change gate: mirrors the struct the stub above fills, so a
+ * case that flips g_test_reembed_enabled moves both seams together. */
+int config_kb_reembed_on_dim_change(void)
+{
+   return g_test_reembed_enabled;
+}
+
+/* §5 hybrid RRF weights + rank constant, mirroring the struct above. */
+double config_code_hybrid_weight_code(void)
+{
+   return 1.0;
+}
+
+double config_code_hybrid_weight_graph(void)
+{
+   return 1.0;
+}
+
+double config_code_hybrid_weight_vector(void)
+{
+   return 1.0;
+}
+
+double config_code_hybrid_weight_memory(void)
+{
+   return 1.0;
+}
+
+double config_code_hybrid_rrf_k(void)
+{
+   return 60.0;
+}
+
+int config_code_trust_actuation_enabled(void)
+{
+   return 0; /* §3 actuation gate: memset-0 in the struct above */
+}
+
 int config_kb_curator_extract_docs_enabled(void)
 {
    return 1;
@@ -1341,6 +1451,32 @@ const char *config_embedding_command(const config_t *cfg, const char *requested)
    if (url && url[0])
       return url;
    return "builtin";
+}
+
+/* The config_t-free form callers use now. Same resolution order, minus the
+ * struct the caller no longer holds: request > env > builtin. */
+const char *config_embedding_command_current(const char *requested)
+{
+   return config_embedding_command(NULL, requested);
+}
+
+/* kb_intel_payload reads the demotion knobs through accessors now. Mirror the
+ * values the config_load stub above sets, so both seams agree. */
+int config_demotion_enabled(void)
+{
+   return 1;
+}
+int config_demotion_n_min(void)
+{
+   return 2;
+}
+int config_demotion_window(void)
+{
+   return 64;
+}
+double config_demotion_half_life_days(void)
+{
+   return 30.0;
 }
 
 int db2_calibration_surfaces_with_data(int min_rows)
@@ -1407,10 +1543,9 @@ int db2_demotion_profile_read(const char *memory_class, const char *scope_kind,
 
 /* kb_intel_payload's bandit.sample/close builders call these (kb_bandit.o unlinked):
  * stub sample as "disabled", reward as a no-op success. */
-int kb_bandit_sample(const config_t *cfg, const char *decision_point, const char *context_json,
+int kb_bandit_sample(const char *decision_point, const char *context_json,
                      const char (*arm_ids)[KB_BANDIT_MAX_ARM_ID], int n_arms, char *decision_id_out)
 {
-   (void)cfg;
    (void)decision_point;
    (void)context_json;
    (void)arm_ids;
@@ -1419,10 +1554,9 @@ int kb_bandit_sample(const config_t *cfg, const char *decision_point, const char
       decision_id_out[0] = '\0';
    return -1;
 }
-int kb_bandit_reward(const config_t *cfg, const char *decision_point, const char *decision_id,
-                     const char *arm_id, double reward)
+int kb_bandit_reward(const char *decision_point, const char *decision_id, const char *arm_id,
+                     double reward)
 {
-   (void)cfg;
    (void)decision_point;
    (void)decision_id;
    (void)arm_id;
@@ -4412,11 +4546,10 @@ int db2_entity_node_get(const char *node_key, void *out)
 /* §4 judge stub: confirm the first link (the disconnected file:x/file:y pair) with a
  * canned verdict so the route test stays hermetic (no curator-LLM link). Mirrors the
  * real kb_surprising_judge writing verdicts parallel to the links. */
-int kb_surprising_judge(const config_t *cfg, const char *judge_cmd, const char *project,
+int kb_surprising_judge(const char *judge_cmd, const char *project,
                         const kb_graph_surprising_t *links, int n, kb_surprising_verdict_t *out,
                         char *errbuf, size_t errlen)
 {
-   (void)cfg;
    (void)judge_cmd;
    (void)project;
    (void)links;

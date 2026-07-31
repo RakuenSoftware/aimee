@@ -1089,7 +1089,7 @@ static void test_context_budget_prefers_project_scope_over_global_l5(void)
       if (workspace_repo_identity(cwd, project, sizeof(project), NULL, 0) != 0 || !project[0])
       {
          char project_root[MAX_PATH_LEN];
-         if (workspace_active_root(NULL, cwd, project_root, sizeof(project_root)) == 0 &&
+         if (workspace_active_root_from_cwd(cwd, project_root, sizeof(project_root)) == 0 &&
              project_root[0])
          {
             const char *slash = strrchr(project_root, '/');
@@ -2367,6 +2367,33 @@ static void measure_query_embedding_memo_recall(void)
  * used 384-calibrated cosine floors, so semantic recall was silently dead for
  * Qwen3-0.6B (1024) / Qwen3-4B (2560). Verify the gate now tracks the active
  * embedding dim and the floor scales down for the compressed-range embedders. */
+
+/* memory_query_rewrite reads its settings through config accessors now, so these
+ * cases write a real aimee.yaml under the suite HOME instead of handing over a
+ * config_t. AIMEE_NO_CACHE=1 is already set for the suite, so each write is
+ * picked up by the next accessor read. */
+static void write_rewrite_config(int enabled, int hyde, int decompose, const char *command)
+{
+   char path[MAX_PATH_LEN];
+   snprintf(path, sizeof(path), "%s/aimee.yaml", config_default_dir());
+   FILE *fp = fopen(path, "w");
+   assert(fp != NULL);
+   fprintf(fp, "memory_rewrite:\n");
+   fprintf(fp, "  enabled: %s\n", enabled ? "true" : "false");
+   fprintf(fp, "  hyde: %s\n", hyde ? "true" : "false");
+   fprintf(fp, "  decompose: %s\n", decompose ? "true" : "false");
+   if (command && command[0])
+      fprintf(fp, "  command: \"%s\"\n", command);
+   fclose(fp);
+}
+
+static void clear_rewrite_config(void)
+{
+   char path[MAX_PATH_LEN];
+   snprintf(path, sizeof(path), "%s/aimee.yaml", config_default_dir());
+   unlink(path);
+}
+
 static void test_semantic_recall_is_embedder_aware(void)
 {
    setup();
@@ -3087,11 +3114,9 @@ int main(void)
 
    /* --- memory_query_rewrite: disabled when command is empty --- */
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      cfg.memory_rewrite_enabled = 1;
+      write_rewrite_config(1, 0, 0, "");
       memory_query_rewrite_t rw;
-      memory_query_rewrite("what kind of person is Caroline?", &cfg, &rw);
+      memory_query_rewrite("what kind of person is Caroline?", &rw);
       assert(rw.has_hyde == 0);
       assert(rw.has_decomp == 0);
       assert(rw.sub_question_count == 0);
@@ -3099,12 +3124,9 @@ int main(void)
 
    /* --- memory_query_rewrite: disabled when enabled=0 --- */
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      cfg.memory_rewrite_enabled = 0;
-      snprintf(cfg.memory_rewrite_command, sizeof(cfg.memory_rewrite_command), "echo '{}'");
+      write_rewrite_config(0, 0, 0, "echo '{}'");
       memory_query_rewrite_t rw;
-      memory_query_rewrite("compound question A and B?", &cfg, &rw);
+      memory_query_rewrite("compound question A and B?", &rw);
       assert(rw.has_hyde == 0);
       assert(rw.has_decomp == 0);
       assert(rw.sub_question_count == 0);
@@ -3112,16 +3134,12 @@ int main(void)
 
    /* --- memory_query_rewrite: valid JSON with hyde_answer and sub_questions --- */
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      cfg.memory_rewrite_enabled = 1;
-      cfg.memory_rewrite_hyde = 1;
-      cfg.memory_rewrite_decompose = 1;
-      snprintf(cfg.memory_rewrite_command, sizeof(cfg.memory_rewrite_command),
-               "printf '{\"hyde_answer\":\"Alice went to the museum on March 10.\","
-               "\"sub_questions\":[\"When did Alice go?\",\"Where did Alice go?\"]}'");
+      write_rewrite_config(1, 1, 1,
+                           "printf '{\\\"hyde_answer\\\":\\\"Alice went to the museum on "
+                           "March 10.\\\",\\\"sub_questions\\\":[\\\"When did Alice "
+                           "go?\\\",\\\"Where did Alice go?\\\"]}'");
       memory_query_rewrite_t rw;
-      memory_query_rewrite("when did alice visit the museum", &cfg, &rw);
+      memory_query_rewrite("when did alice visit the museum", &rw);
       assert(rw.has_hyde == 1);
       assert(strstr(rw.hyde_answer, "March 10") != NULL);
       assert(rw.has_decomp == 1);
@@ -3130,17 +3148,14 @@ int main(void)
 
    /* --- memory_query_rewrite: sub_questions capped at MEMORY_REWRITE_MAX_SUBQUERIES --- */
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      cfg.memory_rewrite_enabled = 1;
-      cfg.memory_rewrite_hyde = 1;
-      cfg.memory_rewrite_decompose = 1;
-      snprintf(cfg.memory_rewrite_command, sizeof(cfg.memory_rewrite_command),
-               "printf '{\"hyde_answer\":\"x\","
-               "\"sub_questions\":[\"a\",\"b\",\"c\",\"d\",\"e\",\"f\"]}'");
+      write_rewrite_config(1, 1, 1,
+                           "printf '{\\\"hyde_answer\\\":\\\"x\\\",\\\"sub_questions"
+                           "\\\":[\\\"a\\\",\\\"b\\\",\\\"c\\\",\\\"d\\\""
+                           ",\\\"e\\\",\\\"f\\\"]}'");
       memory_query_rewrite_t rw;
-      memory_query_rewrite("cap test query", &cfg, &rw);
+      memory_query_rewrite("cap test query", &rw);
       assert(rw.sub_question_count == MEMORY_REWRITE_MAX_SUBQUERIES);
+      clear_rewrite_config();
    }
 
    /* --- memory_expand_to_session_window: no-op with radius=0 --- */

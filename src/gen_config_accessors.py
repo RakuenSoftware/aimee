@@ -134,14 +134,34 @@ def members():
     # are not config_t fields at all — generating offsetof() for those is a
     # compile error, and a same-named accessor would be a lie about what it
     # reads. Track brace depth: depth 1 is config_t itself.
+    # A declaration is a logical statement, not a physical line. clang-format
+    # wraps a long one across lines, and matching per-line silently skipped
+    # those: identity_working_profile_injection_fields got no indexed accessor
+    # for no reason other than its [CONFIG_...][CONFIG_...] not fitting on one
+    # line, while the charter arrays beside it did. A field losing its accessor
+    # because of formatting is a silent hole in the encapsulation surface, so
+    # accumulate until the ';' and match the joined statement.
     depth = 0
+    pending = ""
     for line in body.splitlines():
         line = line.strip()
         opens, closes = line.count("{"), line.count("}")
         at_top = depth == 1 and opens == 0
         depth += opens - closes
         if not at_top:
+            pending = ""
             continue
+        # Preprocessor lines are not part of any declaration and do not end in
+        # ';'. Accumulating one swallows the field declared after it — that is
+        # how compact_enabled, worktree_stale_secs and aux_enabled (each
+        # preceded by a #define) lost their accessors on the first cut of this.
+        if line.startswith("#"):
+            continue
+        pending = f"{pending} {line}".strip() if pending else line
+        if not pending.endswith(";"):
+            continue
+        line = " ".join(pending.split())
+        pending = ""
         m = re.match(
             r"^(unsigned\s+int|int64_t|uint32_t|size_t|time_t|unsigned|int|long|double|float|char)"
             r"\s+([a-z_][a-z0-9_]*)\s*(\[[^;]*\])?\s*;$",
@@ -151,6 +171,12 @@ def members():
             continue
         base, name, arr = m.groups()
         base = "unsigned int" if base == "unsigned" else base
+        # The 2-D split below is index arithmetic that assumes "][" are adjacent.
+        # A wrapped declaration joins as "] [", which silently produced
+        # "char buf[[CONFIG_..." — strip whitespace so the shape a field is
+        # declared in cannot change the accessor generated for it.
+        if arr:
+            arr = re.sub(r"\s+", "", arr)
         if name in SKIP or f"config_{name}" in taken:
             continue
         if base == "char":
@@ -162,6 +188,24 @@ def members():
         elif base in SCALARS and not arr:
             out.append(("scalar", name, SCALARS[base]))
     return out
+
+
+def _widest_string(strings):
+    """Widest declared char[] among the string fields, resolved through config.h
+    defines. A caller-side buffer of this size can never truncate."""
+    text = HDR.read_text()
+    widest = 0
+    for _, name, arr in strings:
+        tok = arr.strip()[1:-1].strip()
+        if tok.isdigit():
+            w = int(tok)
+        else:
+            m = re.search(rf"#define\s+{re.escape(tok)}\s+(\d+)", text)
+            if not m:
+                continue
+            w = int(m.group(1))
+        widest = max(widest, w)
+    return widest
 
 
 def main():
@@ -182,7 +226,25 @@ def main():
     )
 
     h = [banner, "#ifndef DEC_CONFIG_ACCESSORS_H", "#define DEC_CONFIG_ACCESSORS_H 1", ""]
-    h.append("/* Scalars. Return 0 when no config can be read (fail closed). */")
+    # Self-contained: int64_t appears in these signatures, and a caller that includes
+    # only this header (the point of the accessor surface) must not have to include
+    # config.h first to get it.
+    h.append("#include <stddef.h> /* size_t, for the _copy forms */")
+    h.append("#include <stdint.h>")
+    h.append("")
+    h.append(
+        "/* A buffer of this size holds ANY string field whole, so a caller using it\n"
+        " * with a _copy accessor never truncates and never has to name config_t to\n"
+        " * spell the field's width. Generated as the widest string field. */"
+    )
+    h.append(f"#define CONFIG_COPY_MAX {_widest_string(strings)}")
+    h.append("")
+    h.append(
+        "/* Scalars. When config cannot be read, an accessor returns the field's DECLARED\n"
+        " * DEFAULT (config_field_read copies the defaults config_set_defaults applied), NOT\n"
+        " * zero. Returning 0 would INVERT every default-ON dial — reporting a fail-closed\n"
+        " * guard as disabled exactly when config is broken. */"
+    )
     for _, name, ctype in scalars:
         h.append(f"{ctype} config_{name}(void);")
     h.append("")
@@ -207,6 +269,23 @@ def main():
         h.append(f"int config_set_{name}({ctype} value);")
     for _, name, _arr in strings:
         h.append(f"int config_set_{name}(const char *value);")
+    h.append("")
+    h.append(
+        "/* Copy-out form for every string field.\n"
+        " *\n"
+        " * Prefer this over the pointer form whenever the value OUTLIVES the next\n"
+        " * call to the same accessor -- stored in a struct, passed to something that\n"
+        " * runs a subprocess or an HTTP round trip, or read again after other config\n"
+        " * reads. The pointer form hands back a per-accessor thread-local buffer, so\n"
+        " * in those cases it is a dangling read waiting to happen, and the caller has\n"
+        " * to hand-size a buffer (which meant naming config_t just to spell\n"
+        " * sizeof(((config_t *)0)->field), putting the type right back in the caller).\n"
+        " *\n"
+        " * Truncates to n and always NUL-terminates. Returns the field's full width so\n"
+        " * a caller can detect truncation; 0 when out is NULL or n is 0. */"
+    )
+    for _, name, _arr in strings:
+        h.append(f"size_t config_{name}_copy(char *out, size_t n);")
     h.append("")
     h.append(
         "/* char[][] fields: one row per call. Returns \"\" for an out-of-range\n"
@@ -252,6 +331,20 @@ def main():
             f"   config_field_read(offsetof(config_t, {name}), sizeof(buf), buf);",
             "   buf[sizeof(buf) - 1] = 0;",
             "   return buf;",
+            "}",
+            "",
+        ])
+    for _, name, arr in strings:
+        blocks.append([
+            f"size_t config_{name}_copy(char *out, size_t n)",
+            "{",
+            f"   char buf{arr};",
+            "   if (!out || n == 0)",
+            "      return 0;",
+            f"   config_field_read(offsetof(config_t, {name}), sizeof(buf), buf);",
+            "   buf[sizeof(buf) - 1] = 0;",
+            "   snprintf(out, n, \"%s\", buf);",
+            "   return sizeof(buf);",
             "}",
             "",
         ])

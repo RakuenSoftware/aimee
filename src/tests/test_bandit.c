@@ -10,6 +10,8 @@
  */
 
 #include <assert.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include <stdio.h>
 #include <string.h>
 #include "db2_test_shim.h"
@@ -52,20 +54,51 @@ static void test_bandit_arm_register(void)
    printf("  bandit_arm_register: ok\n");
 }
 
+/* kb_bandit_sample now reads the LIVE config rather than taking a config_t, so the
+ * "disabled" case must pin the config it reads — otherwise it inherits the developer's real
+ * aimee.yaml and fails wherever bandit_optimize_command is set. An empty HOME yields the
+ * declared defaults (command empty = disabled). */
+static char g_cfg_home[64];
+static char *g_saved_home;
+
+static void pin_empty_config(void)
+{
+   /* Fresh template per call: mkdtemp REWRITES the XXXXXX in place. */
+   snprintf(g_cfg_home, sizeof(g_cfg_home), "/tmp/aimee-test-bandit-XXXXXX");
+   assert(mkdtemp(g_cfg_home));
+   g_saved_home = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
+   setenv("HOME", g_cfg_home, 1);
+   unsetenv("AIMEE_HOME");
+   setenv("AIMEE_NO_CACHE", "1", 1);
+}
+
+static void unpin_config(void)
+{
+   unsetenv("AIMEE_NO_CACHE");
+   if (g_saved_home)
+   {
+      setenv("HOME", g_saved_home, 1);
+      free(g_saved_home);
+      g_saved_home = NULL;
+   }
+   else
+      unsetenv("HOME");
+   rmdir(g_cfg_home);
+}
+
 /* ---- 2. bandit_sample_disabled ---- */
 static void test_bandit_sample_disabled(void)
 {
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   /* bandit_optimize_command empty = disabled */
+   pin_empty_config(); /* bandit_optimize_command empty = disabled */
 
    char arm_ids[2][KB_BANDIT_MAX_ARM_ID];
    strncpy(arm_ids[0], "arm_a", KB_BANDIT_MAX_ARM_ID - 1);
    strncpy(arm_ids[1], "arm_b", KB_BANDIT_MAX_ARM_ID - 1);
 
    char decision_id[KB_BANDIT_MAX_DECISION] = "";
-   int rc = kb_bandit_sample(&cfg, "test_dp", NULL, (const char(*)[KB_BANDIT_MAX_ARM_ID])arm_ids, 2,
+   int rc = kb_bandit_sample("test_dp", NULL, (const char(*)[KB_BANDIT_MAX_ARM_ID])arm_ids, 2,
                              decision_id);
+   unpin_config();
    assert(rc == -1);
 
    printf("  bandit_sample_disabled: ok\n");
@@ -82,9 +115,7 @@ static void test_bandit_reward_closed(void)
    assert(rc == 0);
 
    /* Close with a reward. */
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   rc = kb_bandit_reward(&cfg, "test_dp2", fake_id, "arm_beta", 1.0);
+   rc = kb_bandit_reward("test_dp2", fake_id, "arm_beta", 1.0);
    assert(rc == 0);
 
    /* Verify arm stats were updated. */

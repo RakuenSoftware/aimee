@@ -48,9 +48,7 @@ void memory_refresh_coref_entities(int64_t memory_id, const char *content)
    if (memory_id <= 0 || !content || !content[0] || !memory_coref_has_pronoun(content))
       return;
 
-   config_t cfg;
-   config_load(&cfg);
-   const char *mode = memory_coref_mode_effective(&cfg);
+   const char *mode = memory_coref_mode_effective();
    if (strcmp(mode, "heuristic") != 0 && strcmp(mode, "llm") != 0)
       return;
 
@@ -61,7 +59,7 @@ void memory_refresh_coref_entities(int64_t memory_id, const char *content)
    /* LLM mode: delegate to cognifier for higher-recall resolution */
    if (strcmp(mode, "llm") == 0)
    {
-      int bound = memory_coref_llm_resolve(memory_id, content, session_buf, &cfg);
+      int bound = memory_coref_llm_resolve(memory_id, content, session_buf);
       memory_coref_audit_record(memory_id, session_buf, bound ? "bound" : "unbound", "", "llm",
                                 bound ? 1.0 : 0.0);
       return;
@@ -71,7 +69,7 @@ void memory_refresh_coref_entities(int64_t memory_id, const char *content)
    db2_memory_prior_row_t prior[64];
    int prior_max = (int)(sizeof(prior) / sizeof(prior[0]));
    int prior_n = db2_memory_list_prior_in_session(
-       session_buf, memory_id, memory_coref_window_effective(&cfg), prior, prior_max);
+       session_buf, memory_id, memory_coref_window_effective(), prior, prior_max);
 
    char chosen[128] = "";
    int ambiguous = 0;
@@ -389,10 +387,10 @@ int memory_fetch_row_by_unit_id(int64_t unit_id, memory_t *out)
 
 const char *memory_effective_embedding_cmd(const char *command)
 {
-   /* Single policy point: config_embedding_command (config_save.c). The caller
+   /* Single policy point: config_embedding_command_current (config_save.c). The caller
     * has already resolved config -> command upstream, so pass it as the request
     * override; this keeps memory_core consistent with the kb-side resolution. */
-   return config_embedding_command(NULL, command);
+   return config_embedding_command_current(command);
 }
 
 /* Per-recall query-embedding memo.
@@ -862,9 +860,7 @@ void memory_refresh_unit_embeddings(int64_t memory_id)
 {
    if (memory_id <= 0)
       return;
-   config_t cfg;
-   config_load(&cfg);
-   const char *embed_command = config_embedding_command(&cfg, NULL);
+   const char *embed_command = config_embedding_command_current(NULL);
 
    db2_memory_unit_row_t units[64];
    int unit_max = (int)(sizeof(units) / sizeof(units[0]));

@@ -907,3 +907,101 @@ int config_learning_synthesize_max_tokens(void)
    config_field_read(offsetof(config_t, learning_synthesize_max_tokens), sizeof(v), &v);
    return v;
 }
+
+int config_learning_synthesize_k(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, learning_synthesize_k), sizeof(v), &v);
+   return v;
+}
+
+int config_learning_implicit_citation_repair(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, learning_implicit_citation_repair), sizeof(v), &v);
+   return v;
+}
+
+int config_learning_implicit_citation_continuation(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, learning_implicit_citation_continuation), sizeof(v), &v);
+   return v;
+}
+
+int config_learning_implicit_repeat_question(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, learning_implicit_repeat_question), sizeof(v), &v);
+   return v;
+}
+
+int config_learning_implicit_repeated_correction(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, learning_implicit_repeated_correction), sizeof(v), &v);
+   return v;
+}
+
+int config_learning_implicit_workflow_repetition(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, learning_implicit_workflow_repetition), sizeof(v), &v);
+   return v;
+}
+
+int config_learning_implicit_retrieval_outcome(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, learning_implicit_retrieval_outcome), sizeof(v), &v);
+   return v;
+}
+
+int config_autonomous(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, autonomous), sizeof(v), &v);
+   return v;
+}
+
+int config_verify_enabled(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, verify_enabled), sizeof(v), &v);
+   return v;
+}
+
+int config_roundtable_replay_verify_enabled(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, roundtable_replay_verify_enabled), sizeof(v), &v);
+   return v;
+}
+
+int config_roundtable_require_evidence(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, roundtable_require_evidence), sizeof(v), &v);
+   return v;
+}
+
+int config_roundtable_chair_synthesis(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, roundtable_chair_synthesis), sizeof(v), &v);
+   return v;
+}
+
+int config_verify_cross_project(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, verify_cross_project), sizeof(v), &v);
+   return v;
+}
+
+int config_cross_verify(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, cross_verify), sizeof(v), &v);
+   return v;
+}

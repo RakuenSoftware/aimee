@@ -158,7 +158,7 @@ static void test_ranker_rerank_noop(void)
    /* The global weight cache starts empty (loaded=0) in a fresh process.
     * After test_ranker_model_write above opened+closed the DB without calling
     * kb_ranker_model_load(), the cache should still be unloaded. */
-   int n = kb_ranker_rerank(&cfg, ids, lex, dense, age, 3, ranked, NULL);
+   int n = kb_ranker_rerank(ids, lex, dense, age, 3, ranked, NULL);
    /* Returns 0 because g_weights.loaded == 0. */
    assert(n == 0);
 
@@ -190,7 +190,7 @@ static void test_ranker_rerank_sketch_features(void)
    int64_t ranked[2];
    double scores[2];
 
-   int n = kb_ranker_rerank_with_sketch(&cfg, ids, lex, dense, age, sketch, 2, ranked, scores);
+   int n = kb_ranker_rerank_with_sketch(ids, lex, dense, age, sketch, 2, ranked, scores);
    assert(n == 2);
    assert(ranked[0] == 20);
    assert(scores[0] > scores[1]);
@@ -220,7 +220,7 @@ static void test_drift_detect_disabled(void)
    memset(&cfg, 0, sizeof(cfg));
    cfg.drift_detect_shadow_enabled = 0;
 
-   int rc = kb_detect_observe(&cfg, 0.85, 10);
+   int rc = kb_detect_observe(0.85, 10);
    assert(rc == 0);
 
    printf("  drift_detect_disabled: ok\n");

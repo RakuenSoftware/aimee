@@ -37,9 +37,9 @@
  * Returns 0 when DB2 was reachable and pg_trgm is installed, or when
  * db2_url is unset (operator has opted out of DB2 wiring).
  * Returns -1 when DB2 was configured but unreachable / unhealthy. */
-static int bootstrap_db2(const config_t *cfg, int json_output)
+static int bootstrap_db2(int json_output)
 {
-   if (!cfg->db2_url[0])
+   if (!config_db2_url()[0])
    {
       if (!json_output)
          fprintf(stderr,
@@ -49,12 +49,12 @@ static int bootstrap_db2(const config_t *cfg, int json_output)
    }
 
    db2_set_embedding_dim_default(config_embedding_dim_default());
-   db2_set_embedding_dim(config_resolve_embedding_dim(cfg));
-   db2_set_embedding_dim_pinned(config_embedding_dim_is_pinned(cfg));
+   db2_set_embedding_dim(config_embedding_dim_current());
+   db2_set_embedding_dim_pinned(config_embedding_dim_pinned_current());
    /* unified-llm-container §2: activate the model-identity drift guard with the
     * configured embedder identity (empty => no-op, back-compat). */
-   db2_set_embedder_model_id(cfg->embedding_model);
-   if (db2_init(cfg->db2_url) == 0)
+   db2_set_embedder_model_id(config_embedding_model());
+   if (db2_init(config_db2_url()) == 0)
    {
       int schema_ok = 0;
       int have_pg_trgm = 0;
@@ -87,7 +87,7 @@ static int bootstrap_db2(const config_t *cfg, int json_output)
               "      \\c aimee\n"
               "      CREATE EXTENSION pg_trgm;\n"
               "  - Re-run `aimee init` once the above succeeds.\n",
-              cfg->db2_url);
+              config_db2_url());
    return -1;
 }
 
@@ -104,9 +104,7 @@ void cmd_init(app_ctx_t *ctx, int argc, char **argv)
 
    ensure_client_integrations();
 
-   config_t cfg;
-   config_load(&cfg);
-   config_save(&cfg);
+   (void)config_persist_defaults();
 
    /* Seed the built-in personas as editable files so users can document,
     * customize, and add their own. Idempotent — never overwrites. */
@@ -125,11 +123,11 @@ void cmd_init(app_ctx_t *ctx, int argc, char **argv)
    else if (songwriter)
       config_persist_mode("songwriter");
 
-   if (db1_init(cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
       fatal("failed to initialize database");
    db1_shutdown();
 
-   int db2_ok = (bootstrap_db2(&cfg, ctx->json_output) == 0);
+   int db2_ok = (bootstrap_db2(ctx->json_output) == 0);
 
    /* Create workspace-local .mcp.json for MCP-capable clients */
    char cwd[MAX_PATH_LEN];
@@ -180,15 +178,15 @@ void cmd_init(app_ctx_t *ctx, int argc, char **argv)
    if (ctx->json_output)
    {
       cJSON *root = cJSON_CreateObject();
-      cJSON_AddStringToObject(root, "db1_path", cfg.db1_path);
+      cJSON_AddStringToObject(root, "db1_path", config_db1_path());
       cJSON_AddBoolToObject(root, "db2_ready", db2_ok);
-      cJSON_AddStringToObject(root, "db2_url", cfg.db2_url);
+      cJSON_AddStringToObject(root, "db2_url", config_db2_url());
       emit_json_ctx(root, ctx->json_fields, ctx->response_profile);
       cJSON_Delete(root);
    }
    else
    {
-      fprintf(stderr, "Initialized: %s%s\n", cfg.db1_path,
+      fprintf(stderr, "Initialized: %s%s\n", config_db1_path(),
               db2_ok ? "" : " (DB2 not ready — see above)");
    }
 }
@@ -212,21 +210,11 @@ static int clone_repo(const char *url, const char *dest)
 }
 
 /* Register path in cfg, save, and discover+index its projects into db. */
-static void setup_register_workspace(config_t *cfg, const char *path, int *total_projects)
+static void setup_register_workspace(const char *path, int *total_projects)
 {
-   /* Duplicate check */
-   for (int i = 0; i < cfg->workspace_count; i++)
-   {
-      if (strcmp(cfg->workspaces[i], path) == 0)
-         goto discover; /* already registered, still index */
-   }
-   if (cfg->workspace_count < 64)
-   {
-      snprintf(cfg->workspaces[cfg->workspace_count++], MAX_PATH_LEN, "%s", path);
-      config_save(cfg);
-   }
+   /* -2 (already registered) and -3 (full) both still index below. */
+   (void)config_workspace_add(path, NULL, NULL, NULL);
 
-discover:;
    char projects[MAX_DISCOVERED_PROJECTS][MAX_PATH_LEN];
    int count =
        workspace_discover_projects(path, MAX_WORKSPACE_DEPTH, projects, MAX_DISCOVERED_PROJECTS);
@@ -261,10 +249,8 @@ void cmd_setup(app_ctx_t *ctx, int argc, char **argv)
 
    /* 1. Initialize database and config if missing — db1_init creates
     * the file and applies the DB1 schema if the connection is fresh. */
-   config_t cfg;
-   config_load(&cfg);
-   config_save(&cfg);
-   if (db1_init(cfg.db1_path) == 0)
+   (void)config_persist_defaults();
+   if (db1_init(config_db1_path()) == 0)
       db1_shutdown();
 
    /* 2. Check for aimee.workspace.yaml in CWD */
@@ -361,18 +347,17 @@ void cmd_setup(app_ctx_t *ctx, int argc, char **argv)
    }
 
    /* 6. If no workspaces configured, auto-add CWD */
-   if (cfg.workspace_count == 0 && have_cwd)
+   if (config_workspace_count() == 0 && have_cwd)
    {
-      snprintf(cfg.workspaces[0], MAX_PATH_LEN, "%s", cwd);
-      cfg.workspace_count = 1;
-      config_save(&cfg);
-      fprintf(stderr, "Auto-added workspace: %s\n", cwd);
+      if (config_workspace_add(cwd, NULL, NULL, NULL) == 0)
+         fprintf(stderr, "Auto-added workspace: %s\n", cwd);
    }
 
    /* 7. Discover and index projects in all workspaces */
    int total_projects = 0;
-   for (int w = 0; w < cfg.workspace_count; w++)
-      setup_register_workspace(&cfg, cfg.workspaces[w], &total_projects);
+   int ws_n = config_workspace_count();
+   for (int w = 0; w < ws_n; w++)
+      setup_register_workspace(config_workspaces(w), &total_projects);
    db1_stmt_cache_clear();
 
    /* 8. Generate .aimee-rules from detected stacks when manifest allows */
@@ -425,10 +410,10 @@ void cmd_status(app_ctx_t *ctx, int argc, char **argv)
    printf("aimee %s\n", AIMEE_VERSION);
 
    /* Database status */
-   config_t cfg;
-   config_load(&cfg);
+   char db1_path[CONFIG_COPY_MAX];
+   config_db1_path_copy(db1_path, sizeof(db1_path));
    db1_diag_t diag;
-   db1_diag_inspect(cfg.db1_path, 0, &diag);
+   db1_diag_inspect(db1_path, 0, &diag);
    if (diag.opened)
       printf("Database:  ok (schema v%d)\n", diag.schema_version);
    else
@@ -507,9 +492,7 @@ void cmd_hud(app_ctx_t *ctx, int argc, char **argv)
       }
    }
 
-   config_t cfg;
-   config_load(&cfg);
-   if (db1_init(cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
    {
       fprintf(stderr, "aimee: cannot initialize DB1\n");
       return;
@@ -565,9 +548,7 @@ void cmd_hud(app_ctx_t *ctx, int argc, char **argv)
 
 void cmd_usage(app_ctx_t *ctx, int argc, char **argv)
 {
-   config_t cfg;
-   config_load(&cfg);
-   if (db1_init(cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
    {
       fprintf(stderr, "aimee: cannot initialize DB1\n");
       return;
@@ -715,9 +696,7 @@ void cmd_usage(app_ctx_t *ctx, int argc, char **argv)
 void cmd_mode(app_ctx_t *ctx, int argc, char **argv)
 {
    {
-      config_t cfg;
-      config_load(&cfg);
-      db1_init(cfg.db1_path);
+      db1_init(config_db1_path());
    }
    const char *sid = session_id();
 
@@ -839,9 +818,7 @@ void cmd_implement(app_ctx_t *ctx, int argc, char **argv)
 void cmd_tdd(app_ctx_t *ctx, int argc, char **argv)
 {
    {
-      config_t cfg;
-      config_load(&cfg);
-      db1_init(cfg.db1_path);
+      db1_init(config_db1_path());
    }
    const char *sid = session_id();
 

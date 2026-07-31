@@ -10,7 +10,18 @@
 #ifndef DEC_CONFIG_ACCESSORS_H
 #define DEC_CONFIG_ACCESSORS_H 1
 
-/* Scalars. Return 0 when no config can be read (fail closed). */
+#include <stddef.h> /* size_t, for the _copy forms */
+#include <stdint.h>
+
+/* A buffer of this size holds ANY string field whole, so a caller using it
+ * with a _copy accessor never truncates and never has to name config_t to
+ * spell the field's width. Generated as the widest string field. */
+#define CONFIG_COPY_MAX 4096
+
+/* Scalars. When config cannot be read, an accessor returns the field's DECLARED
+ * DEFAULT (config_field_read copies the defaults config_set_defaults applied), NOT
+ * zero. Returning 0 would INVERT every default-ON dial — reporting a fail-closed
+ * guard as disabled exactly when config is broken. */
 int config_db2_pool_size(void);
 int config_workspace_count(void);
 int config_subagent_ban_enabled(void);
@@ -990,6 +1001,133 @@ int config_set_roundtable_default(const char *value);
 int config_set_roundtable_pipeline_done_bar(const char *value);
 int config_set_context_engine(const char *value);
 
+/* Copy-out form for every string field.
+ *
+ * Prefer this over the pointer form whenever the value OUTLIVES the next
+ * call to the same accessor -- stored in a struct, passed to something that
+ * runs a subprocess or an HTTP round trip, or read again after other config
+ * reads. The pointer form hands back a per-accessor thread-local buffer, so
+ * in those cases it is a dangling read waiting to happen, and the caller has
+ * to hand-size a buffer (which meant naming config_t just to spell
+ * sizeof(((config_t *)0)->field), putting the type right back in the caller).
+ *
+ * Truncates to n and always NUL-terminates. Returns the field's full width so
+ * a caller can detect truncation; 0 when out is NULL or n is 0. */
+size_t config_db1_path_copy(char *out, size_t n);
+size_t config_db2_url_copy(char *out, size_t n);
+size_t config_provider_copy(char *out, size_t n);
+size_t config_default_persona_copy(char *out, size_t n);
+size_t config_claude_model_copy(char *out, size_t n);
+size_t config_codex_model_copy(char *out, size_t n);
+size_t config_model_reasoning_effort_copy(char *out, size_t n);
+size_t config_openai_endpoint_copy(char *out, size_t n);
+size_t config_openai_model_copy(char *out, size_t n);
+size_t config_openai_key_cmd_copy(char *out, size_t n);
+size_t config_embedding_model_copy(char *out, size_t n);
+size_t config_embedding_endpoint_copy(char *out, size_t n);
+size_t config_memory_weight_profile_copy(char *out, size_t n);
+size_t config_memory_rerank_mode_copy(char *out, size_t n);
+size_t config_css_render_command_copy(char *out, size_t n);
+size_t config_vault_custody_copy(char *out, size_t n);
+size_t config_vault_tpm2_blob_path_copy(char *out, size_t n);
+size_t config_vault_tpm2_tcti_copy(char *out, size_t n);
+size_t config_vault_tpm2_nv_index_copy(char *out, size_t n);
+size_t config_memory_coref_mode_copy(char *out, size_t n);
+size_t config_memory_cognify_model_copy(char *out, size_t n);
+size_t config_memory_cognify_command_copy(char *out, size_t n);
+size_t config_code_context_mode_copy(char *out, size_t n);
+size_t config_session_worktree_base_copy(char *out, size_t n);
+size_t config_delegate_sandbox_image_copy(char *out, size_t n);
+size_t config_delegate_sandbox_package_access_copy(char *out, size_t n);
+size_t config_kb_pdf_tier_copy(char *out, size_t n);
+size_t config_tsr_command_copy(char *out, size_t n);
+size_t config_kb_pdf_blob_dir_copy(char *out, size_t n);
+size_t config_ocr_command_copy(char *out, size_t n);
+size_t config_memory_pagerank_relations_copy(char *out, size_t n);
+size_t config_memory_citations_mode_copy(char *out, size_t n);
+size_t config_memory_rewrite_command_copy(char *out, size_t n);
+size_t config_memory_query_expansion_mode_copy(char *out, size_t n);
+size_t config_memory_recall_lanes_summary_kinds_copy(char *out, size_t n);
+size_t config_memory_recall_lanes_fact_kinds_copy(char *out, size_t n);
+size_t config_memory_hard_negative_log_copy(char *out, size_t n);
+size_t config_dogfood_log_dir_copy(char *out, size_t n);
+size_t config_learning_synthesize_command_copy(char *out, size_t n);
+size_t config_learning_embed_model_version_copy(char *out, size_t n);
+size_t config_learning_synthesize_prompt_version_copy(char *out, size_t n);
+size_t config_verify_cmd_copy(char *out, size_t n);
+size_t config_verify_role_copy(char *out, size_t n);
+size_t config_verify_prompt_copy(char *out, size_t n);
+size_t config_search_backend_copy(char *out, size_t n);
+size_t config_search_searxng_url_copy(char *out, size_t n);
+size_t config_search_tavily_api_key_copy(char *out, size_t n);
+size_t config_search_backends_copy(char *out, size_t n);
+size_t config_coord_closet_denylist_copy(char *out, size_t n);
+size_t config_prompt_tier_copy(char *out, size_t n);
+size_t config_prompt_file_copy(char *out, size_t n);
+size_t config_delegate_prompt_tier_copy(char *out, size_t n);
+size_t config_otel_endpoint_copy(char *out, size_t n);
+size_t config_otel_service_name_copy(char *out, size_t n);
+size_t config_mcp_osv_endpoint_copy(char *out, size_t n);
+size_t config_computer_use_default_navigation_copy(char *out, size_t n);
+size_t config_proxy_url_copy(char *out, size_t n);
+size_t config_proxy_token_copy(char *out, size_t n);
+size_t config_ingress_trusted_proxy_secret_copy(char *out, size_t n);
+size_t config_guardrails_semantic_mode_copy(char *out, size_t n);
+size_t config_guardrails_semantic_command_copy(char *out, size_t n);
+size_t config_kb_api_bearer_token_copy(char *out, size_t n);
+size_t config_telemetry_metrics_token_copy(char *out, size_t n);
+size_t config_kb_client_url_copy(char *out, size_t n);
+size_t config_kb_client_bearer_token_copy(char *out, size_t n);
+size_t config_kb_mode_copy(char *out, size_t n);
+size_t config_llm_embed_backend_copy(char *out, size_t n);
+size_t config_llm_synth_backend_copy(char *out, size_t n);
+size_t config_llm_synth_host_copy(char *out, size_t n);
+size_t config_llm_synth_gpu_copy(char *out, size_t n);
+size_t config_llm_synth_tier_copy(char *out, size_t n);
+size_t config_llm_synth_endpoint_copy(char *out, size_t n);
+size_t config_llm_synth_model_copy(char *out, size_t n);
+size_t config_server_api_mtls_client_ca_copy(char *out, size_t n);
+size_t config_server_api_bearer_token_copy(char *out, size_t n);
+size_t config_server_api_client_transport_copy(char *out, size_t n);
+size_t config_calibration_command_copy(char *out, size_t n);
+size_t config_calibration_prompt_version_copy(char *out, size_t n);
+size_t config_calibration_model_version_copy(char *out, size_t n);
+size_t config_kb_fusion_mode_copy(char *out, size_t n);
+size_t config_ranker_fuse_command_copy(char *out, size_t n);
+size_t config_kb_ranker_fit_command_copy(char *out, size_t n);
+size_t config_kb_ranker_fit_benchmark_copy(char *out, size_t n);
+size_t config_kb_ranker_fit_objective_copy(char *out, size_t n);
+size_t config_reasoning_datalog_command_copy(char *out, size_t n);
+size_t config_bandit_optimize_command_copy(char *out, size_t n);
+size_t config_planner_search_command_copy(char *out, size_t n);
+size_t config_constraint_solver_command_copy(char *out, size_t n);
+size_t config_kb_synthesize_command_copy(char *out, size_t n);
+size_t config_trigger_auth_token_copy(char *out, size_t n);
+size_t config_kb_curator_tier_copy(char *out, size_t n);
+size_t config_kb_curator_extract_prompt_version_copy(char *out, size_t n);
+size_t config_kb_curator_embed_model_version_copy(char *out, size_t n);
+size_t config_kb_curator_invalidation_notify_socket_copy(char *out, size_t n);
+size_t config_kb_curator_extract_command_copy(char *out, size_t n);
+size_t config_kb_curator_stage_order_copy(char *out, size_t n);
+size_t config_kb_curator_user_presets_copy(char *out, size_t n);
+size_t config_kb_curator_custom_stages_copy(char *out, size_t n);
+size_t config_kb_curator_provider_base_url_copy(char *out, size_t n);
+size_t config_kb_curator_provider_model_copy(char *out, size_t n);
+size_t config_kb_curator_provider_api_key_copy(char *out, size_t n);
+size_t config_kb_curator_tier_b_base_url_copy(char *out, size_t n);
+size_t config_kb_curator_tier_b_model_copy(char *out, size_t n);
+size_t config_kb_curator_tier_b_api_key_copy(char *out, size_t n);
+size_t config_kb_curator_judge_command_copy(char *out, size_t n);
+size_t config_kb_curator_synthesize_command_copy(char *out, size_t n);
+size_t config_aux_default_provider_copy(char *out, size_t n);
+size_t config_aux_default_model_copy(char *out, size_t n);
+size_t config_db2_vector_corpus_index_copy(char *out, size_t n);
+size_t config_ensemble_aggregator_copy(char *out, size_t n);
+size_t config_roundtable_turns_copy(char *out, size_t n);
+size_t config_roundtable_default_copy(char *out, size_t n);
+size_t config_roundtable_pipeline_done_bar_copy(char *out, size_t n);
+size_t config_context_engine_copy(char *out, size_t n);
+
 /* char[][] fields: one row per call. Returns "" for an out-of-range
  * index, so a caller that loops past the count gets empty rather than
  * reading adjacent memory. Same thread-local lifetime as above. */
@@ -1002,6 +1140,7 @@ const char *config_charter_safety_axioms(int index);
 const char *config_charter_hard_constraints(int index);
 const char *config_charter_values(int index);
 const char *config_charter_tone_boundaries(int index);
+const char *config_identity_working_profile_injection_fields(int index);
 const char *config_compact_per_tool(int index);
 const char *config_mcp_osv_allow(int index);
 const char *config_computer_use_allowed_domains(int index);

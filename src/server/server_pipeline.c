@@ -170,9 +170,7 @@ static void enter_gate(int id, int gate_no, int pr)
    rtp_gate_create(id, gate_no, pr, run.head_sha, NULL);
    rtp_run_set_state(id, gate_no == 2 ? RTP_STATE_GATE2_PENDING : RTP_STATE_GATE1_PENDING, NULL);
 
-   config_t cfg;
-   int parked_releases =
-       (config_load(&cfg) == 0) ? cfg.roundtable_pipeline_parked_releases_slot : 1;
+   int parked_releases = config_roundtable_pipeline_parked_releases_slot();
    if (rtp_run_get(id, &run) == 0)
    {
       /* the chunk index is re-creatable from the retained origin, so dropping it
@@ -212,10 +210,6 @@ int handle_pipeline_start(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!idea || !idea[0])
       return server_send_error(conn, "usage: aimee pipeline start <idea>", NULL);
 
-   config_t cfg;
-   if (config_load(&cfg) != 0)
-      return server_send_error(conn, "pipeline: could not load configuration", NULL);
-
    /* v1 admission control: at most one active pipeline (section 1). Parked gates
     * may release the slot per roundtable.pipeline_parked_releases_slot. */
    int active = rtp_run_count_active();
@@ -223,7 +217,7 @@ int handle_pipeline_start(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(
           conn, "pipeline: another pipeline is already active (one active run at a time)", NULL);
 
-   const char *done_bar = jo_str(req, "done_bar", cfg.roundtable_pipeline_done_bar);
+   const char *done_bar = jo_str(req, "done_bar", config_roundtable_pipeline_done_bar());
    if (strcmp(done_bar, RTP_DONEBAR_ZERO_BLOCKING) != 0 &&
        strcmp(done_bar, RTP_DONEBAR_ZERO_BLOCKING_SUGGESTIONS) != 0 &&
        strcmp(done_bar, RTP_DONEBAR_ZERO_BLOCKING_QUESTIONS) != 0)
@@ -353,9 +347,7 @@ int handle_pipeline_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "pipeline: not found", NULL);
 
    /* lazily enforce the unanswered-gate TTL when the run is observed (#47). */
-   config_t scfg;
-   if (config_load(&scfg) == 0)
-      maybe_ttl_abandon(id, &run);
+   maybe_ttl_abandon(id, &run);
 
    const char *phase = phase_for_state(run.state);
    rtp_pass_t latest;
@@ -403,8 +395,6 @@ int handle_pipeline_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    const char *filter = jo_str(req, "state", NULL);
-   config_t lcfg;
-   int have_cfg = (config_load(&lcfg) == 0);
    /* Heap, not stack: rtp_run_t embeds a large inline brief[] (RTP_BRIEF_LEN), so
     * an array of 64 would be megabytes on the stack. */
    rtp_run_t *rows = calloc(64, sizeof(*rows));
@@ -418,8 +408,7 @@ int handle_pipeline_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    for (int i = 0; i < n; i++)
    {
       /* lazily enforce the unanswered-gate TTL on each observed run (#47). */
-      if (have_cfg)
-         maybe_ttl_abandon(rows[i].id, &rows[i]);
+      maybe_ttl_abandon(rows[i].id, &rows[i]);
       cJSON *o = cJSON_CreateObject();
       cJSON_AddNumberToObject(o, "pipeline_id", rows[i].id);
       cJSON_AddStringToObject(o, "state", rows[i].state);
@@ -1500,8 +1489,7 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    /* unanswered-gate TTL (#47): abandon an over-age awaiting-human gate before
     * doing anything else. Never applies to *_merge_pending (#57). */
    {
-      config_t tcfg;
-      if (config_load(&tcfg) == 0 && maybe_ttl_abandon(id, &run))
+      if (maybe_ttl_abandon(id, &run))
          return server_send_error(conn, "pipeline: gate TTL exceeded; pipeline abandoned", NULL);
    }
 
@@ -1539,10 +1527,6 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
              NULL);
       rtp_run_get(id, &run);
    }
-
-   config_t cfg;
-   if (config_load(&cfg) != 0)
-      return server_send_error(conn, "pipeline: could not load configuration", NULL);
 
    const char *phase = phase_for_state(run.state);
    const char *artifact = jo_str(req, "artifact", NULL);
@@ -1586,8 +1570,8 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
        * proposal_review; it never opens a PR/gate. */
       if (strcmp(latest.mode, RTP_MODE_DRAFT) == 0)
       {
-         int maxa = cfg.roundtable_pipeline_max_attempts_per_pass > 0
-                        ? cfg.roundtable_pipeline_max_attempts_per_pass
+         int maxa = config_roundtable_pipeline_max_attempts_per_pass() > 0
+                        ? config_roundtable_pipeline_max_attempts_per_pass()
                         : 2;
          if (hav_a && a.envelope_valid)
             return draft_complete(conn, &run, &latest, &a);
@@ -1803,8 +1787,7 @@ int handle_pipeline_gate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    /* Enforce the unanswered-gate TTL FIRST (#47), before authority/verdict: an
     * expired *_pending gate is abandoned and can never be passed/merged, even by
     * an authorized caller invoking pipeline.gate directly. */
-   config_t gcfg;
-   if (config_load(&gcfg) == 0 && maybe_ttl_abandon(id, &run))
+   if (maybe_ttl_abandon(id, &run))
       return server_send_error(conn, "pipeline: gate TTL exceeded; pipeline abandoned (not passed)",
                                NULL);
 

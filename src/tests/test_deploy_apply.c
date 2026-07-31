@@ -46,16 +46,15 @@ int platform_random_hex(char *out, size_t hex_len)
    return 0;
 }
 
-int config_load(config_t *cfg)
+/* deploy_apply asks config_present() then config_emit_deploy_env_current(); the
+ * config_load + config_emit_deploy_env pair these replace behaved the same way. */
+int config_present(void)
 {
-   if (cfg)
-      memset(cfg, 0, sizeof(*cfg));
-   return 0;
+   return 1;
 }
 
-void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n)
+void config_emit_deploy_env_current(char *buf, size_t n)
 {
-   (void)cfg;
    if (buf && n)
       snprintf(buf, n, "COMPOSE_PROFILES=%s\n", g_stub_profiles);
 }

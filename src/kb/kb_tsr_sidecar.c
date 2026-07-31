@@ -20,16 +20,6 @@
  * perimeter cannot OOM the ingest with an unbounded JSON body. */
 #define KB_TSR_MAX_RESP_BYTES (8 * 1024 * 1024)
 
-const char *kb_tsr_endpoint(const config_t *cfg)
-{
-   if (cfg && cfg->tsr_command[0])
-      return cfg->tsr_command;
-   const char *env = getenv("AIMEE_TSR_URL");
-   if (env && env[0])
-      return env;
-   return "";
-}
-
 void kb_tsr_free_cells(kb_tsr_cell_t *cells, int n)
 {
    (void)n;

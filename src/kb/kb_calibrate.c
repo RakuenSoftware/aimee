@@ -21,16 +21,20 @@ static int enumerate_surfaces(db2_calibration_surface_t *out, int max)
    return db2_calibration_surface_list(CAL_MIN_ROWS, out, max);
 }
 
-static int build_sidecar_request(const config_t *cfg, const db2_calibration_surface_t *surface,
+static int build_sidecar_request(const db2_calibration_surface_t *surface,
                                  const db2_calibration_bucket_t *buckets, int n_buckets,
                                  const db2_calibration_conformal_row_t *conformal_rows,
                                  int n_conformal, char *buf, size_t len)
 {
    cJSON *req = cJSON_CreateObject();
-   const char *model_version =
-       cfg->calibration_model_version[0] ? cfg->calibration_model_version : "beta-binomial-v1";
-   const char *prompt_version =
-       cfg->calibration_prompt_version[0] ? cfg->calibration_prompt_version : "v1";
+   /* Copied out: both are added to the JSON request and read again below, across
+    * other accessor calls. */
+   char mv[CONFIG_COPY_MAX];
+   char pv[CONFIG_COPY_MAX];
+   config_calibration_model_version_copy(mv, sizeof(mv));
+   config_calibration_prompt_version_copy(pv, sizeof(pv));
+   const char *model_version = mv[0] ? mv : "beta-binomial-v1";
+   const char *prompt_version = pv[0] ? pv : "v1";
    char feature_set_version[160];
    snprintf(feature_set_version, sizeof(feature_set_version), "%s/%s", prompt_version,
             model_version);
@@ -78,21 +82,22 @@ static int build_sidecar_request(const config_t *cfg, const db2_calibration_surf
    cJSON_AddItemToObject(inputs, "conformal_window", conformal);
 
    cJSON *config_j = cJSON_CreateObject();
-   cJSON_AddNumberToObject(config_j, "prior_alpha0", cfg->calibration_prior_alpha0);
-   cJSON_AddNumberToObject(config_j, "prior_beta0", cfg->calibration_prior_beta0);
+   cJSON_AddNumberToObject(config_j, "prior_alpha0", config_calibration_prior_alpha0());
+   cJSON_AddNumberToObject(config_j, "prior_beta0", config_calibration_prior_beta0());
    cJSON_AddNumberToObject(config_j, "buckets", n_buckets);
-   cJSON_AddNumberToObject(config_j, "credible_delta", cfg->calibration_credible_delta);
-   cJSON_AddNumberToObject(config_j, "conformal_window_size", cfg->calibration_conformal_window);
-   cJSON_AddNumberToObject(config_j, "conformal_epsilon", cfg->calibration_conformal_epsilon);
+   cJSON_AddNumberToObject(config_j, "credible_delta", config_calibration_credible_delta());
+   cJSON_AddNumberToObject(config_j, "conformal_window_size",
+                           config_calibration_conformal_window());
+   cJSON_AddNumberToObject(config_j, "conformal_epsilon", config_calibration_conformal_epsilon());
    if (strcmp(surface->target_surface, "memory") == 0)
    {
-      cJSON_AddNumberToObject(config_j, "tau_auto", cfg->calibration_tau_memory_auto);
-      cJSON_AddNumberToObject(config_j, "tau_flag", cfg->calibration_tau_memory_flag);
+      cJSON_AddNumberToObject(config_j, "tau_auto", config_calibration_tau_memory_auto());
+      cJSON_AddNumberToObject(config_j, "tau_flag", config_calibration_tau_memory_flag());
    }
    else if (strcmp(surface->target_surface, "working_profile") == 0)
    {
-      cJSON_AddNumberToObject(config_j, "tau_auto", cfg->calibration_tau_working_profile_auto);
-      cJSON_AddNumberToObject(config_j, "tau_flag", cfg->calibration_tau_working_profile_flag);
+      cJSON_AddNumberToObject(config_j, "tau_auto", config_calibration_tau_working_profile_auto());
+      cJSON_AddNumberToObject(config_j, "tau_flag", config_calibration_tau_working_profile_flag());
    }
    cJSON_AddItemToObject(inputs, "config", config_j);
 
@@ -108,9 +113,9 @@ static int build_sidecar_request(const config_t *cfg, const db2_calibration_surf
    return 0;
 }
 
-int kb_calibrate_run(const config_t *cfg)
+int kb_calibrate_run(void)
 {
-   if (!cfg || cfg->calibration_enabled == 0)
+   if (config_calibration_enabled() == 0)
       return 0;
 
    /* Enumerate surfaces to calibrate */
@@ -120,7 +125,7 @@ int kb_calibrate_run(const config_t *cfg)
       return 0;
 
    int written = 0;
-   int bucket_count = cfg->calibration_buckets;
+   int bucket_count = config_calibration_buckets();
    if (bucket_count < 2)
       bucket_count = DB2_CALIBRATION_BUCKETS;
    if (bucket_count > DB2_CALIBRATION_BUCKETS)
@@ -134,7 +139,7 @@ int kb_calibrate_run(const config_t *cfg)
       db2_calibration_bucket_t buckets[DB2_CALIBRATION_BUCKETS];
       int n_filled = db2_calibration_audit_stats(
           surf->target_surface, surf->kind, surf->scope_kind[0] ? surf->scope_kind : NULL,
-          surf->scope_id[0] ? surf->scope_id : NULL, cfg->calibration_conformal_window, buckets,
+          surf->scope_id[0] ? surf->scope_id : NULL, config_calibration_conformal_window(), buckets,
           bucket_count);
       if (n_filled < 0)
          continue;
@@ -150,18 +155,20 @@ int kb_calibrate_run(const config_t *cfg)
       db2_calibration_conformal_row_t conformal_rows[DB2_CALIBRATION_CONFORMAL_MAX];
       int n_conformal = db2_calibration_conformal_window(
           surf->target_surface, surf->kind, surf->scope_kind[0] ? surf->scope_kind : NULL,
-          surf->scope_id[0] ? surf->scope_id : NULL, cfg->calibration_conformal_window,
+          surf->scope_id[0] ? surf->scope_id : NULL, config_calibration_conformal_window(),
           conformal_rows, DB2_CALIBRATION_CONFORMAL_MAX);
       if (n_conformal < 0)
          n_conformal = 0;
 
       char payload_buf[16384] = "{}";
 
-      if (cfg->calibration_command[0])
+      char calibration_command[CONFIG_COPY_MAX];
+      config_calibration_command_copy(calibration_command, sizeof(calibration_command));
+      if (calibration_command[0])
       {
          /* Call sidecar */
          char req_buf[32768];
-         if (build_sidecar_request(cfg, surf, buckets, bucket_count, conformal_rows, n_conformal,
+         if (build_sidecar_request(surf, buckets, bucket_count, conformal_rows, n_conformal,
                                    req_buf, sizeof(req_buf)) != 0)
          {
             aimee_log(LOG_DEBUG, "calibration", "failed to build sidecar request for %s/%s",
@@ -171,8 +178,7 @@ int kb_calibrate_run(const config_t *cfg)
 
          char *out = NULL;
          size_t out_len = 0;
-         int rc =
-             platform_exec_pipe(cfg->calibration_command, req_buf, strlen(req_buf), &out, &out_len);
+         int rc = platform_exec_pipe(calibration_command, req_buf, strlen(req_buf), &out, &out_len);
          if (rc != 0 || !out)
          {
             aimee_log(LOG_DEBUG, "calibration", "sidecar failed for %s/%s (exit %d)",
@@ -214,10 +220,13 @@ int kb_calibrate_run(const config_t *cfg)
 
       /* Write calibration_profile artifact */
       char art_id[64];
-      const char *prompt_version =
-          cfg->calibration_prompt_version[0] ? cfg->calibration_prompt_version : "v1";
-      const char *model_version =
-          cfg->calibration_model_version[0] ? cfg->calibration_model_version : "beta-binomial-v1";
+      /* Copied out for the same reason as in the request builder above. */
+      char pv2[CONFIG_COPY_MAX];
+      char mv2[CONFIG_COPY_MAX];
+      config_calibration_prompt_version_copy(pv2, sizeof(pv2));
+      config_calibration_model_version_copy(mv2, sizeof(mv2));
+      const char *prompt_version = pv2[0] ? pv2 : "v1";
+      const char *model_version = mv2[0] ? mv2 : "beta-binomial-v1";
       char feature_set_version[160];
       snprintf(feature_set_version, sizeof(feature_set_version), "%s/%s", prompt_version,
                model_version);
@@ -240,9 +249,8 @@ int kb_calibrate_run(const config_t *cfg)
    return written;
 }
 
-int kb_calibrate_consume_drift_signals(const config_t *cfg)
+int kb_calibrate_consume_drift_signals(void)
 {
-   (void)cfg;
    db2_artifact_proposed_t rows[32];
    int n = db2_artifact_list_proposed(NULL, 64, rows, 32);
    if (n <= 0)

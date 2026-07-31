@@ -15,12 +15,18 @@ int workspace_discover_projects(const char *root, int max_depth, char projects[]
 /* Build session context from config workspaces + DB projects.
  * Reads describe files and style files for indexed projects.
  * Caller owns returned string. */
-char *workspace_build_context_from_config(const config_t *cfg);
+char *workspace_build_context_from_config(void);
 
 /* Resolve the active workspace root for a command running from cwd.
  * Prefers the current git/worktree top-level, then the most specific configured
  * workspace containing cwd, then cwd itself. Returns 0 on success. */
-int workspace_active_root(const config_t *cfg, const char *cwd, char *out, size_t out_len);
+int workspace_active_root(const char *cwd, char *out, size_t out_len);
+
+/* Same, but never consults the configured workspaces: git top-level, else cwd.
+ * Callers that resolve a PROJECT LABEL want this — letting a non-repository cwd
+ * inside a configured workspace fall back to that workspace would label it with
+ * the workspace directory's name, which is not its project. */
+int workspace_active_root_from_cwd(const char *cwd, char *out, size_t out_len);
 
 /* Resolve a path-independent project identity for code and memory scoping.
  *

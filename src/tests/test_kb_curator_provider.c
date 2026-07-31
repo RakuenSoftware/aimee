@@ -1,5 +1,6 @@
 /* test_kb_curator_provider.c: stage->provider resolution (curator-llm-backend §2). */
 #include "kb_curator_provider.h"
+#include "support/curator_config_stub.h"
 #include "runtime_secret.h"
 
 #include <assert.h>
@@ -40,42 +41,39 @@ static void test_tier_classification(void)
 
 static void test_unconfigured_idle(void)
 {
-   config_t cfg;
    memset(&cfg, 0, sizeof(cfg)); /* all providers empty */
-   provider_def_t def;
+   provider_def_owned_t def;
    /* Tier-A unconfigured -> idle. */
-   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, &def) == 0);
-   assert(def.base_url == NULL);
+   assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_EXTRACT_DOCS, &def) == 0);
+   assert(def.def.base_url == NULL);
    /* Tier-B unconfigured -> idle. */
-   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_JUDGE, &def) == 0);
+   assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_JUDGE, &def) == 0);
    printf("kb_curator_provider: unconfigured tiers idle ok\n");
 }
 
 static void test_tier_a_resolves(void)
 {
-   config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    snprintf(cfg.kb_curator_provider_base_url, sizeof(cfg.kb_curator_provider_base_url),
             "http://curator:8080/v1");
    snprintf(cfg.kb_curator_provider_model, sizeof(cfg.kb_curator_provider_model), "gemma-4-e4b");
    /* no api_key -> keyless */
 
-   provider_def_t def;
-   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, &def) == 1);
-   assert(strcmp(def.base_url, "http://curator:8080/v1") == 0);
-   assert(strcmp(def.model, "gemma-4-e4b") == 0);
-   assert(def.api_key == NULL); /* empty key => no bearer */
-   assert(def.wire == PROVIDER_WIRE_OPENAI_CHAT);
-   assert(def.disable_thinking == 1); /* Tier-A skips the reasoning pass */
+   provider_def_owned_t def;
+   assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_EXTRACT_DOCS, &def) == 1);
+   assert(strcmp(def.def.base_url, "http://curator:8080/v1") == 0);
+   assert(strcmp(def.def.model, "gemma-4-e4b") == 0);
+   assert(def.def.api_key == NULL); /* empty key => no bearer */
+   assert(def.def.wire == PROVIDER_WIRE_OPENAI_CHAT);
+   assert(def.def.disable_thinking == 1); /* Tier-A skips the reasoning pass */
 
    /* Tier-B still idle (no weak fallback to the Tier-A default). */
-   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &def) == 0);
+   assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_SYNTHESIZE, &def) == 0);
    printf("kb_curator_provider: tier-A resolves, tier-B no fallback ok\n");
 }
 
 static void test_tier_b_resolves(void)
 {
-   config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    /* both tiers configured, distinct providers + a tier-B key */
    snprintf(cfg.kb_curator_provider_base_url, sizeof(cfg.kb_curator_provider_base_url),
@@ -86,15 +84,15 @@ static void test_tier_b_resolves(void)
    snprintf(cfg.kb_curator_tier_b_model, sizeof(cfg.kb_curator_tier_b_model), "big-32b");
    snprintf(cfg.kb_curator_tier_b_api_key, sizeof(cfg.kb_curator_tier_b_api_key), "sk-secret");
 
-   provider_def_t a, b;
-   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_EXTRACT_CODE, &a) == 1);
-   assert(strcmp(a.model, "small") == 0 && a.api_key == NULL);
-   assert(a.disable_thinking == 1); /* Tier-A: reasoning off */
-   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_JUDGE, &b) == 1);
-   assert(strcmp(b.base_url, "https://api.big/v1") == 0);
-   assert(strcmp(b.model, "big-32b") == 0);
-   assert(b.api_key && strcmp(b.api_key, "sk-secret") == 0);
-   assert(b.disable_thinking == 0); /* Tier-B keeps its reasoning pass */
+   provider_def_owned_t a, b;
+   assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_EXTRACT_CODE, &a) == 1);
+   assert(strcmp(a.def.model, "small") == 0 && a.def.api_key == NULL);
+   assert(a.def.disable_thinking == 1); /* Tier-A: reasoning off */
+   assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_JUDGE, &b) == 1);
+   assert(strcmp(b.def.base_url, "https://api.big/v1") == 0);
+   assert(strcmp(b.def.model, "big-32b") == 0);
+   assert(b.def.api_key && strcmp(b.def.api_key, "sk-secret") == 0);
+   assert(b.def.disable_thinking == 0); /* Tier-B keeps its reasoning pass */
    printf("kb_curator_provider: tier-A and tier-B resolve independently ok\n");
 }
 
@@ -104,37 +102,36 @@ static void test_tier_b_resolves(void)
 static void test_env_bridge(void)
 {
    clear_llm_env(); /* start from a known-clean env, not just clean up at the end */
-   config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    setenv("LLM_ENDPOINT", "http://bundled:8080/v1", 1);
    setenv("LLM_MODEL", "gemma-3n-e4b", 1);
    setenv("LLM_API_KEY", "", 1); /* keyless local */
 
-   provider_def_t a, b;
+   provider_def_owned_t a, b;
    /* Tier-A from env. */
-   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, &a) == 1);
-   assert(strcmp(a.base_url, "http://bundled:8080/v1") == 0);
-   assert(strcmp(a.model, "gemma-3n-e4b") == 0);
-   assert(a.api_key == NULL); /* empty env key => keyless */
+   assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_EXTRACT_DOCS, &a) == 1);
+   assert(strcmp(a.def.base_url, "http://bundled:8080/v1") == 0);
+   assert(strcmp(a.def.model, "gemma-3n-e4b") == 0);
+   assert(a.def.api_key == NULL); /* empty env key => keyless */
    /* Tier-B does NOT take the Tier-A env endpoint — it stays idle (out zeroed).
     * Check two distinct Tier-B stages, not just one. */
-   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &b) == 0);
-   assert(b.base_url == NULL && b.model == NULL); /* idle => out zeroed */
-   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_JUDGE, &b) == 0);
+   assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_SYNTHESIZE, &b) == 0);
+   assert(b.def.base_url == NULL && b.def.model == NULL); /* idle => out zeroed */
+   assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_JUDGE, &b) == 0);
 
    /* A config tier_b enables Tier-B (capable model); Tier-A still uses env. */
    snprintf(cfg.kb_curator_tier_b_base_url, sizeof(cfg.kb_curator_tier_b_base_url),
             "https://api.big/v1");
    snprintf(cfg.kb_curator_tier_b_model, sizeof(cfg.kb_curator_tier_b_model), "big-32b");
-   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &b) == 1);
-   assert(strcmp(b.base_url, "https://api.big/v1") == 0 && strcmp(b.model, "big-32b") == 0);
-   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, &a) == 1);
-   assert(strcmp(a.base_url, "http://bundled:8080/v1") == 0); /* env still */
+   assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_SYNTHESIZE, &b) == 1);
+   assert(strcmp(b.def.base_url, "https://api.big/v1") == 0 && strcmp(b.def.model, "big-32b") == 0);
+   assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_EXTRACT_DOCS, &a) == 1);
+   assert(strcmp(a.def.base_url, "http://bundled:8080/v1") == 0); /* env still */
 
    /* No env, no config => idle. */
    clear_llm_env();
    memset(&cfg, 0, sizeof(cfg));
-   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, &a) == 0);
+   assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_EXTRACT_DOCS, &a) == 0);
    printf("kb_curator_provider: env bridge (Tier-A only; Tier-B needs config) ok\n");
 }
 
@@ -144,82 +141,81 @@ static void test_env_bridge(void)
 static void test_aimee_llm_url(void)
 {
    clear_llm_env();
-   config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    setenv("AIMEE_LLM_URL", "http://10.100.0.1:8742", 1);
 
-   provider_def_t a, b;
+   provider_def_owned_t a, b;
    /* Tier-A derives {url}/v1 + default model, keyless. */
-   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, &a) == 1);
-   assert(strcmp(a.base_url, "http://10.100.0.1:8742/v1") == 0);
-   assert(strcmp(a.model, "aimee-synth") == 0);
-   assert(a.api_key == NULL); /* keyless container => no bearer */
+   assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_EXTRACT_DOCS, &a) == 1);
+   assert(strcmp(a.def.base_url, "http://10.100.0.1:8742/v1") == 0);
+   assert(strcmp(a.def.model, "aimee-synth") == 0);
+   assert(a.def.api_key == NULL); /* keyless container => no bearer */
    /* Tier-B also resolves to the same capable container (the one env fallback
     * Tier-B accepts). */
-   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &b) == 1);
-   assert(strcmp(b.base_url, "http://10.100.0.1:8742/v1") == 0);
-   assert(strcmp(b.model, "aimee-synth") == 0);
+   assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_SYNTHESIZE, &b) == 1);
+   assert(strcmp(b.def.base_url, "http://10.100.0.1:8742/v1") == 0);
+   assert(strcmp(b.def.model, "aimee-synth") == 0);
 
    /* A managed KB authenticates every synth request with its service identity. */
    assert(runtime_secret_store("AIMEE_LLM_AUTH_TOKEN", "kb-to-llm-service-token") == 0);
-   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &b) == 1);
-   assert(b.api_key && strcmp(b.api_key, "kb-to-llm-service-token") == 0);
+   assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_SYNTHESIZE, &b) == 1);
+   assert(b.def.api_key && strcmp(b.def.api_key, "kb-to-llm-service-token") == 0);
 
    /* Managed mode must not silently downgrade the unified gateway to keyless. */
    runtime_secret_remove("AIMEE_LLM_AUTH_TOKEN");
    setenv("AIMEE_LLM_AUTH_REQUIRED", "1", 1);
-   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &b) == 0);
+   assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_SYNTHESIZE, &b) == 0);
    assert(runtime_secret_store("AIMEE_LLM_AUTH_TOKEN", "kb-to-llm-service-token") == 0);
-   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &b) == 1);
+   assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_SYNTHESIZE, &b) == 1);
 
    /* Trailing slash and an already-/v1 URL both normalize to exactly one /v1. */
    setenv("AIMEE_LLM_URL", "http://host:8742/", 1);
-   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_JUDGE, &b) == 1);
-   assert(strcmp(b.base_url, "http://host:8742/v1") == 0);
+   assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_JUDGE, &b) == 1);
+   assert(strcmp(b.def.base_url, "http://host:8742/v1") == 0);
    setenv("AIMEE_LLM_URL", "http://host:8742/v1", 1);
-   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_JUDGE, &b) == 1);
-   assert(strcmp(b.base_url, "http://host:8742/v1") == 0);
+   assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_JUDGE, &b) == 1);
+   assert(strcmp(b.def.base_url, "http://host:8742/v1") == 0);
 
    /* AIMEE_LLM_MODEL overrides the default model label. */
    setenv("AIMEE_LLM_URL", "http://host:8742", 1);
    setenv("AIMEE_LLM_MODEL", "gemma-4-12b", 1);
-   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, &a) == 1);
-   assert(strcmp(a.model, "gemma-4-12b") == 0);
+   assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_EXTRACT_DOCS, &a) == 1);
+   assert(strcmp(a.def.model, "gemma-4-12b") == 0);
 
    /* A config provider still wins over AIMEE_LLM_URL. */
    snprintf(cfg.kb_curator_provider_base_url, sizeof(cfg.kb_curator_provider_base_url),
             "http://pinned:9000/v1");
    snprintf(cfg.kb_curator_provider_model, sizeof(cfg.kb_curator_provider_model), "pinned");
-   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, &a) == 1);
-   assert(strcmp(a.base_url, "http://pinned:9000/v1") == 0);
+   assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_EXTRACT_DOCS, &a) == 1);
+   assert(strcmp(a.def.base_url, "http://pinned:9000/v1") == 0);
 
    clear_llm_env();
    memset(&cfg, 0, sizeof(cfg));
    snprintf(cfg.llm_synth_endpoint, sizeof(cfg.llm_synth_endpoint), "http://synth.internal:9100");
 
    /* The configured field alone resolves both tiers — no env var involved. */
-   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, &a) == 1);
-   assert(strcmp(a.base_url, "http://synth.internal:9100/v1") == 0);
-   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &b) == 1);
-   assert(strcmp(b.base_url, "http://synth.internal:9100/v1") == 0);
+   assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_EXTRACT_DOCS, &a) == 1);
+   assert(strcmp(a.def.base_url, "http://synth.internal:9100/v1") == 0);
+   assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_SYNTHESIZE, &b) == 1);
+   assert(strcmp(b.def.base_url, "http://synth.internal:9100/v1") == 0);
 
    /* The same normalization applies to the field, not just the env var. */
    snprintf(cfg.llm_synth_endpoint, sizeof(cfg.llm_synth_endpoint),
             "http://synth.internal:9100/v1/");
-   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &b) == 1);
-   assert(strcmp(b.base_url, "http://synth.internal:9100/v1") == 0);
+   assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_SYNTHESIZE, &b) == 1);
+   assert(strcmp(b.def.base_url, "http://synth.internal:9100/v1") == 0);
 
    /* AIMEE_LLM_URL outranks the stored field: a containerized deploy sets the
     * environment, not a writable aimee.yaml. */
    snprintf(cfg.llm_synth_endpoint, sizeof(cfg.llm_synth_endpoint), "http://from-config:9100");
    setenv("AIMEE_LLM_URL", "http://from-env:8742", 1);
-   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &b) == 1);
-   assert(strcmp(b.base_url, "http://from-env:8742/v1") == 0);
+   assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_SYNTHESIZE, &b) == 1);
+   assert(strcmp(b.def.base_url, "http://from-env:8742/v1") == 0);
 
    /* A value that names nothing must not resolve to a bare "/v1". */
    unsetenv("AIMEE_LLM_URL");
    snprintf(cfg.llm_synth_endpoint, sizeof(cfg.llm_synth_endpoint), "///");
-   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &b) == 0);
+   assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_SYNTHESIZE, &b) == 0);
 
    clear_llm_env();
    printf("kb_curator_provider: synth endpoint resolves from config ok\n");

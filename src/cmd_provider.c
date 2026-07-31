@@ -105,8 +105,6 @@ static void provider_list(app_ctx_t *ctx, int argc, char **argv)
 
    model_provider_t *providers[64];
    int n = model_provider_list(providers, 64);
-   config_t cfg = {0};
-   (void)config_load(&cfg);
 
    /* Default: only what the operator configured. This used to print the whole
     * built-in catalogue — seven rows, every one "[no key]" — under a heading
@@ -123,7 +121,7 @@ static void provider_list(app_ctx_t *ctx, int argc, char **argv)
       int available = provider_has_credentials(p);
       if (only_available && !available)
          continue;
-      if (!show_all && !only_available && !provider_is_configured(p, cfg.provider))
+      if (!show_all && !only_available && !provider_is_configured(p, config_provider()))
          continue;
       const char *key_var = provider_first_env_var(p);
       printf("%-20s  %-24s  %-10s  %s\n", p->name, p->display_name ? p->display_name : "",

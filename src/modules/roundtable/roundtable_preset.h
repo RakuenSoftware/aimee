@@ -16,6 +16,7 @@
 
 #include "cJSON.h"
 #include "config.h"
+#include "roundtable_types.h" /* ensemble_panel_t */
 #include <stddef.h>
 
 /* Bounds mirror the config_t arrays (config.h). ENSEMBLE_MAX_REFS == 32 seats;
@@ -107,7 +108,8 @@ int roundtable_preset_apply_to_config(const char *name, char *err, size_t errn);
  * acquired, 0 only when neither a configured default nor the implicit saved
  * "default" exists, and -1 when an explicitly named/configured preset is
  * missing. `resolved` receives the acquired name when provided. */
-int roundtable_preset_resolve_runtime(const char *requested, config_t *cfg, char *resolved,
+int roundtable_preset_resolve_runtime(const char *requested, ensemble_panel_t *panel,
+                                      char *resolved,
                                       size_t resolved_n, char *err, size_t err_n);
 
 /* Synthesize a preset named `name` from the live config_t (ensemble_* and roundtable_*)

@@ -112,10 +112,46 @@ static void assert_disposition(const config_t *cfg, int index, const char *name,
    assert(cfg->dispositions[index].source == source);
 }
 
+/* A YAML `true` must read back as true. cJSON stores a parsed boolean in its
+ * `type` and leaves valueint at 0, so `x = item->valueint` on a bool node yields
+ * FALSE for `true`. Three intelligence.synthesize keys did exactly that; the
+ * worst was mdl_tiebreak_enabled, which defaults to 1, so writing `true` TURNED
+ * IT OFF. reflection_shadow is a fail-closed gate, so `true` failing to enable it
+ * meant durable writes an operator had asked to suppress. */
+static void test_bool_true_parses_as_true(void)
+{
+   config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+
+   cJSON *root = cJSON_CreateObject();
+   cJSON *intel = cJSON_AddObjectToObject(root, "intelligence");
+   cJSON *syn = cJSON_AddObjectToObject(intel, "synthesize");
+   cJSON_AddTrueToObject(syn, "mdl_tiebreak_enabled");
+   cJSON_AddTrueToObject(syn, "reflection_shadow");
+   config_apply_mdl_settings(&cfg, root);
+   assert(cfg.kb_mdl_tiebreak_enabled == 1);
+   assert(cfg.kb_reflection_synthesis_shadow == 1);
+   cJSON_Delete(root);
+
+   /* `false` must still be false, and the numeric form must still work. */
+   root = cJSON_CreateObject();
+   intel = cJSON_AddObjectToObject(root, "intelligence");
+   syn = cJSON_AddObjectToObject(intel, "synthesize");
+   cJSON_AddFalseToObject(syn, "mdl_tiebreak_enabled");
+   cJSON_AddNumberToObject(syn, "reflection_shadow", 1);
+   config_apply_mdl_settings(&cfg, root);
+   assert(cfg.kb_mdl_tiebreak_enabled == 0);
+   assert(cfg.kb_reflection_synthesis_shadow == 1);
+   cJSON_Delete(root);
+
+   printf("bool-true ");
+}
+
 int main(void)
 {
    printf("config: ");
    test_kb_curator_tier();
+   test_bool_true_parses_as_true();
 
    /* Use isolated temp HOME */
    char tmpdir[512];
@@ -486,11 +522,12 @@ int main(void)
                "--background-index");
       cfg.lsp_servers[0].extension_count = 1;
       snprintf(cfg.lsp_servers[0].extensions[0], sizeof(cfg.lsp_servers[0].extensions[0]), "c");
-      /* require_aimee_git (default ON) + delegate_sandbox (default OFF): both are
-       * enforcement dials, so a value that does not survive save+reload is a guard
-       * silently in the wrong state after every restart. */
+      /* require_aimee_git + delegate_sandbox (both default ON): enforcement dials, so a
+       * value that does not survive save+reload is a guard silently in the wrong state
+       * after every restart. Set each to its OPT-OUT — the direction config_save has to
+       * persist explicitly, and the direction that is unsafe to lose. */
       cfg.require_aimee_git = 0;
-      cfg.delegate_sandbox = 1;
+      cfg.delegate_sandbox = 0;
       cfg.subagent_ban_enabled = 0; /* default-ON dial: opt-out must survive save+reload */
       config_save(&cfg);
 
@@ -533,7 +570,7 @@ int main(void)
        * turn it off. Save-without-parse and parse-without-save are the same bug from
        * opposite ends; a round-trip is the only thing that catches either. */
       assert(cfg2.require_aimee_git == 0);
-      assert(cfg2.delegate_sandbox == 1);
+      assert(cfg2.delegate_sandbox == 0);
       /* Same save-without-parse / parse-without-save class as require_aimee_git:
        * subagent_ban_enabled is written only as the opt-out and must parse back. */
       assert(cfg2.subagent_ban_enabled == 0);
@@ -854,10 +891,7 @@ int main(void)
 
    /* --- config_guardrail_mode --- */
    {
-      static config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      config_load(&cfg);
-      const char *mode = config_guardrail_mode(&cfg);
+      const char *mode = config_guardrail_mode();
       assert(mode != NULL);
       assert(strcmp(mode, "approve") == 0 || strcmp(mode, "prompt") == 0 ||
              strcmp(mode, "deny") == 0);

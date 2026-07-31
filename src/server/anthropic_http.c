@@ -286,8 +286,7 @@ static int gw_stage_model_pin(gw_request_t *r, void *ud)
  * keeps gw_stage_governance config-free. */
 static int anthropic_governance_enabled(void)
 {
-   config_t c;
-   int tri = (config_load(&c) == 0) ? c.module_governance : -1;
+   int tri = config_present() ? config_module_governance() : -1;
    return config_module_enabled(tri, gw_response_governance_enabled());
 }
 
@@ -296,9 +295,8 @@ static int messages_run_request_pipeline(cJSON *req, const delegate_driver_t *dr
 {
    /* P5 (§2.3): opt-in to inject the envelope on the Anthropic-native passthrough.
     * Read config here so gw_stage_memory stays config-free. */
-   config_t pcfg;
-   int cfg_ok = (config_load(&pcfg) == 0);
-   int allow_anthropic_inject = (cfg_ok && pcfg.ingress_preinject_anthropic_enabled) ? 1 : 0;
+   int allow_anthropic_inject =
+       (config_present() && config_ingress_preinject_anthropic_enabled()) ? 1 : 0;
 
    gw_request_t r = {
        .raw = req,
@@ -552,8 +550,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
    prov_body = anthropic_build_prov_body(req, driver, ag, parity, messages, tools, system_text,
                                          responses_wire);
    const char *pristine_body = prov_body ? prov_body : "{}";
-   config_t econ_cfg;
-   int economizer_active = config_load(&econ_cfg) == 0 && econ_mode(&econ_cfg) != ECON_MODE_OFF;
+   int economizer_active = econ_mode_current() != ECON_MODE_OFF;
    econ_wire_route_t wire_route = parity           ? ECON_WIRE_ANTHROPIC_MESSAGES
                                   : responses_wire ? ECON_WIRE_OPENAI_RESPONSES
                                                    : ECON_WIRE_OPENAI_CHAT;
@@ -1229,8 +1226,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    }
 
    const char *pristine_body = prov_body ? prov_body : "{}";
-   config_t econ_cfg;
-   int economizer_active = config_load(&econ_cfg) == 0 && econ_mode(&econ_cfg) != ECON_MODE_OFF;
+   int economizer_active = econ_mode_current() != ECON_MODE_OFF;
    econ_wire_route_t wire_route = parity           ? ECON_WIRE_ANTHROPIC_MESSAGES
                                   : responses_wire ? ECON_WIRE_OPENAI_RESPONSES
                                                    : ECON_WIRE_OPENAI_CHAT;

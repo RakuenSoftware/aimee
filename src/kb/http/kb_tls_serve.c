@@ -672,11 +672,16 @@ static SSL_CTX *g_mtls_ctx = NULL;
 #define KB_MTLS_CONNECTIONS_MAX   64
 #define KB_MTLS_QUEUE_CAP         64
 #define KB_MTLS_WORKER_STACK_SIZE (16 * 1024 * 1024)
-/* Request routes load config_t on the worker stack. Keep ample headroom for
- * route-local state and TLS/libpq frames; live memory queries exhausted 4 MiB
- * once nested search and config frames were active concurrently. */
-_Static_assert(KB_MTLS_WORKER_STACK_SIZE >= sizeof(config_t) + 1024 * 1024,
-               "kb mTLS worker stack must accommodate config_t plus route headroom");
+/* Keep ample headroom for route-local state and TLS/libpq frames; live memory
+ * queries exhausted 4 MiB once nested search frames were active concurrently.
+ *
+ * This used to be asserted as sizeof(config_t) + 1 MiB, because routes loaded a
+ * whole ~750 KiB config_t onto this stack. They no longer do -- config is read a
+ * field at a time -- so the config term is gone and the floor is stated
+ * directly. The headroom is still needed for the nested-search case, which is
+ * what actually exhausted the old 4 MiB. */
+_Static_assert(KB_MTLS_WORKER_STACK_SIZE >= 8 * 1024 * 1024,
+               "kb mTLS worker stack must keep headroom for nested route + TLS/libpq frames");
 static pthread_t g_mtls_workers[KB_MTLS_CONNECTIONS_MAX];
 static int g_mtls_workers_started = 0;
 static int g_mtls_connection_limit = KB_MTLS_CONNECTIONS_MAX;

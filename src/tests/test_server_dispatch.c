@@ -10,6 +10,7 @@
 #include "../db1/server_sessions.h"
 #include "kb_client.h" /* kb_health_t for the stub below */
 #include "agent_config.h"
+#include "config_fields.h" /* config_field_lookup / _set_value for the config_set stub */
 #include "agent_eval.h"
 #include "hud.h"
 #include "log.h"
@@ -1246,6 +1247,39 @@ int config_load(config_t *cfg)
    return 0;
 }
 
+/* The config_load stub above always succeeds, so the probe the handlers now use
+ * in its place has to say so too -- otherwise config.show / config.get would
+ * report "failed to load config" against a config this suite considers loaded. */
+int config_present(void)
+{
+   return 1;
+}
+
+/* api.disable persists through this now instead of load_file/save here. The
+ * stateful mode's disk copy is what it would write, so mirror the port change
+ * onto it; non-stateful is a no-op success, matching the config_save stub. */
+int config_disable_api_http_listener(void)
+{
+   if (g_config_stateful)
+      g_config_disk.server_api_http_port = 0;
+   return 0;
+}
+
+/* The generated accessors read every field through this. Serve them out of the
+ * SAME in-memory config the config_load stub returns, so an accessor and a
+ * config_load observed in one test can never disagree. Non-stateful mode zeroes,
+ * matching the config_load stub above. */
+int config_field_read(size_t offset, size_t size, void *dst)
+{
+   if (!dst || size == 0)
+      return -1;
+   if (g_config_stateful)
+      memcpy(dst, (const char *)&g_config_snapshot + offset, size);
+   else
+      memset(dst, 0, size);
+   return 0;
+}
+
 int config_load_file(config_t *cfg)
 {
    if (g_config_stateful)
@@ -1265,6 +1299,55 @@ int config_reload(void)
    {
       g_config_snapshot = g_config_disk;
       g_config_reload_calls++;
+   }
+   return 0;
+}
+
+/* The provider endpoint writes through config_set now instead of mutating a
+ * config_t and calling config_save. Mirror what the real one does against this
+ * file's simulated state: patch the field on "disk" AND republish it to the
+ * snapshot, so a following config_load observes the write. */
+int config_set(const char *key, const char *value)
+{
+   const config_field_t *f = config_field_lookup(key);
+   if (!f || !value)
+      return -1;
+   if (g_config_stateful)
+   {
+      if (config_field_set_value(&g_config_disk, f, value) != 0)
+         return -1;
+      (void)config_field_set_value(&g_config_snapshot, f, value);
+   }
+   return 0;
+}
+
+/* Enrolled-bearer writes go through the config module now instead of mutating
+ * server_api_bearer_extra on a config_t. Mirror the config_save stub's model:
+ * apply to the simulated disk AND the snapshot, so a read-back sees the write.
+ * Note the config_save stub deliberately SCRUBS bearer state on the way to
+ * disk (credentials live in Vault, not the config file), so these do the same. */
+int config_server_api_bearer_extra_append(const char *token)
+{
+   if (!token || !token[0])
+      return -1;
+   if (!g_config_stateful)
+      return 0;
+   int slot = g_config_snapshot.server_api_bearer_extra_count;
+   if (slot < 0 || slot >= AIMEE_API_BEARER_EXTRA_MAX)
+      return -2;
+   snprintf(g_config_snapshot.server_api_bearer_extra[slot],
+            sizeof(g_config_snapshot.server_api_bearer_extra[0]), "%s", token);
+   g_config_snapshot.server_api_bearer_extra_count = slot + 1;
+   return slot;
+}
+
+int config_server_api_bearer_extra_clear(void)
+{
+   if (g_config_stateful)
+   {
+      memset(g_config_snapshot.server_api_bearer_extra, 0,
+             sizeof(g_config_snapshot.server_api_bearer_extra));
+      g_config_snapshot.server_api_bearer_extra_count = 0;
    }
    return 0;
 }
@@ -1315,9 +1398,8 @@ const char *config_output_dir(void)
    return "/tmp";
 }
 
-const char *config_guardrail_mode(const config_t *cfg)
+const char *config_guardrail_mode(void)
 {
-   (void)cfg;
    return "off";
 }
 
@@ -2057,7 +2139,10 @@ static void test_api_enroll_preserves_sequential_bearers(void)
    cJSON_Delete(second);
 
    assert(strcmp(first_bearer, second_bearer) != 0);
-   assert(g_config_reload_calls == 2);
+   /* Enrolling touches VAULT only. config_save never persisted the enrolled set
+    * (config_load migrates any legacy value out and scrubs the fields), so the
+    * save+reload this used to do republished an unchanged config. No reload now. */
+   assert(g_config_reload_calls == 0);
    assert(g_config_disk.server_api_bearer_token[0] == '\0');
    assert(g_config_disk.server_api_bearer_extra_count == 0);
    assert(g_config_snapshot.server_api_bearer_extra_count == 0);

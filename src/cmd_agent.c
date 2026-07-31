@@ -310,28 +310,8 @@ static int ag_set_model_concurrency(const char *model, int limit)
 {
    if (!model || !model[0] || limit <= 0)
       return 0;
-
-   config_t cfg;
-   if (config_load(&cfg) != 0)
-      return -1;
-
-   for (int i = 0; i < cfg.concurrency_per_model_count; i++)
-   {
-      if (strcmp(cfg.concurrency_per_model[i].key, model) == 0)
-      {
-         cfg.concurrency_per_model[i].limit = limit;
-         return config_set_concurrency(&cfg);
-      }
-   }
-
-   if (cfg.concurrency_per_model_count >= CONFIG_CONCURRENCY_MAX_ENTRIES)
-      return -1;
-
-   config_concurrency_entry_t *entry =
-       &cfg.concurrency_per_model[cfg.concurrency_per_model_count++];
-   snprintf(entry->key, sizeof(entry->key), "%s", model);
-   entry->limit = limit;
-   return config_set_concurrency(&cfg);
+   int rc = config_set_model_concurrency(model, limit);
+   return rc == -2 ? -1 : rc; /* table full kept as the caller's -1 */
 }
 
 static int ag_model_still_configured(const agent_config_t *cfg, const char *model)
@@ -349,22 +329,7 @@ static int ag_clear_model_concurrency_if_unused(const agent_config_t *agents, co
    if (!model || !model[0] || ag_model_still_configured(agents, model))
       return 0;
 
-   config_t cfg;
-   if (config_load(&cfg) != 0)
-      return -1;
-
-   for (int i = 0; i < cfg.concurrency_per_model_count; i++)
-   {
-      if (strcmp(cfg.concurrency_per_model[i].key, model) != 0)
-         continue;
-      memmove(&cfg.concurrency_per_model[i], &cfg.concurrency_per_model[i + 1],
-              (size_t)(cfg.concurrency_per_model_count - i - 1) *
-                  sizeof(cfg.concurrency_per_model[0]));
-      cfg.concurrency_per_model_count--;
-      return config_set_concurrency(&cfg);
-   }
-
-   return 0;
+   return config_remove_model_concurrency(model);
 }
 
 static void ag_ensure_fallback(agent_config_t *cfg, const char *name)
@@ -892,17 +857,26 @@ static void ag_add(app_ctx_t *ctx, int argc, char **argv)
       else if (strcmp(argv[i], "--price-in") == 0 && i + 1 < argc)
       {
          if (!ag_parse_price(argv[++i], &ag->price_in_per_mtok))
-            return ag_price_usage("--price-in", argv[i]);
+         {
+            ag_price_usage("--price-in", argv[i]);
+            return;
+         }
       }
       else if (strcmp(argv[i], "--price-out") == 0 && i + 1 < argc)
       {
          if (!ag_parse_price(argv[++i], &ag->price_out_per_mtok))
-            return ag_price_usage("--price-out", argv[i]);
+         {
+            ag_price_usage("--price-out", argv[i]);
+            return;
+         }
       }
       else if (strcmp(argv[i], "--price-cached") == 0 && i + 1 < argc)
       {
          if (!ag_parse_price(argv[++i], &ag->price_cached_per_mtok))
-            return ag_price_usage("--price-cached", argv[i]);
+         {
+            ag_price_usage("--price-cached", argv[i]);
+            return;
+         }
       }
       else if (strcmp(argv[i], "--tools-enabled") == 0 || strcmp(argv[i], "--tools") == 0)
          ag->tools_enabled = 1;

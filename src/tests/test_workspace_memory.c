@@ -626,7 +626,7 @@ static void test_ws_context_prefers_project_scope_when_available(void)
    char cwd[MAX_PATH_LEN];
    char project_root[MAX_PATH_LEN];
    assert(getcwd(cwd, sizeof(cwd)) != NULL);
-   assert(workspace_active_root(NULL, cwd, project_root, sizeof(project_root)) == 0);
+   assert(workspace_active_root_from_cwd(cwd, project_root, sizeof(project_root)) == 0);
    /* Project scope keys on the repo identity (canonical remote) with a
     * basename fallback, matching memory_scope_labels_for_cwd() in production. */
    char project_buf[MAX_PATH_LEN];
@@ -702,7 +702,7 @@ static void test_api_memory_stats_includes_scope_counts(void)
    char cwd[MAX_PATH_LEN];
    char project_root[MAX_PATH_LEN];
    assert(getcwd(cwd, sizeof(cwd)) != NULL);
-   assert(workspace_active_root(NULL, cwd, project_root, sizeof(project_root)) == 0);
+   assert(workspace_active_root_from_cwd(cwd, project_root, sizeof(project_root)) == 0);
    const char *slash = strrchr(project_root, '/');
    const char *project_name = slash ? slash + 1 : project_root;
 

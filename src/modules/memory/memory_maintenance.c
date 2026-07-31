@@ -95,25 +95,25 @@ static void mm_state_save(const memory_maintenance_summary_t *summary)
 
 /* Resolve the configured cadence (seconds between cycles). Zero / unset
  * falls back to the header default. */
-static int mm_interval_secs(const config_t *cfg)
+static int mm_interval_secs(void)
 {
-   if (cfg && cfg->memory_maintenance_interval_seconds > 0)
-      return cfg->memory_maintenance_interval_seconds;
+   int configured = config_memory_maintenance_interval_seconds();
+   if (configured > 0)
+      return configured;
    return MEMORY_MAINTENANCE_DEFAULT_INTERVAL_SECS;
 }
 
 /* Idle guard: skip a cycle when the DB hasn't changed AND the cadence
  * hasn't lapsed.  Both predicates must hold for a skip — a burst of
  * inserts always gets the next cycle, regardless of timer. */
-static int mm_should_skip(const config_t *cfg, const db1_maintenance_state_t *state,
-                          int64_t current_count)
+static int mm_should_skip(const db1_maintenance_state_t *state, int64_t current_count)
 {
    if (!state->present)
       return 0; /* first cycle always runs */
    if (current_count != state->last_memory_count)
       return 0; /* new inserts — don't skip */
 
-   int interval = mm_interval_secs(cfg);
+   int interval = mm_interval_secs();
    if (interval <= 0)
       return 0;
 
@@ -156,10 +156,9 @@ cJSON *memory_maintenance_summary_to_json(const memory_maintenance_summary_t *su
 #if defined(AIMEE_DB2_DISABLED)
 /* The server profile keeps DB1-backed summary/metrics helpers from this file.
  * The maintenance runner itself is DB2-owned and must run inside aimee-kb. */
-int memory_maintenance_run(const config_t *cfg, unsigned int modes, int force, int dry_run,
+int memory_maintenance_run(unsigned int modes, int force, int dry_run,
                            memory_maintenance_summary_t *summary)
 {
-   (void)cfg;
    (void)modes;
    (void)force;
    (void)dry_run;
@@ -168,15 +167,14 @@ int memory_maintenance_run(const config_t *cfg, unsigned int modes, int force, i
    return -1;
 }
 
-int memory_maintenance_maybe_run(const config_t *cfg, memory_maintenance_summary_t *summary_out)
+int memory_maintenance_maybe_run(memory_maintenance_summary_t *summary_out)
 {
-   (void)cfg;
    if (summary_out)
       memset(summary_out, 0, sizeof(*summary_out));
    return 0;
 }
 #else
-int memory_maintenance_run(const config_t *cfg, unsigned int modes, int force, int dry_run,
+int memory_maintenance_run(unsigned int modes, int force, int dry_run,
                            memory_maintenance_summary_t *summary)
 {
    if (modes == 0)
@@ -198,7 +196,7 @@ int memory_maintenance_run(const config_t *cfg, unsigned int modes, int force, i
    if (db1_maintenance_state_load)
       (void)db1_maintenance_state_load(MAINTENANCE_STATE_KEY, &state);
 
-   if (!force && mm_should_skip(cfg, &state, count_before))
+   if (!force && mm_should_skip(&state, count_before))
    {
       out->skipped = 1;
       out->memory_count_after = count_before;
@@ -222,12 +220,13 @@ int memory_maintenance_run(const config_t *cfg, unsigned int modes, int force, i
          int rescored = memory_compute_effectiveness();
          if (rescored > 0)
             out->rescored = rescored;
-         if (cfg && cfg->memory_profile_cards_enabled)
+         if (config_memory_profile_cards_enabled())
          {
-            int min_obs =
-                cfg->memory_profile_cards_min_obs > 0 ? cfg->memory_profile_cards_min_obs : 10;
-            int stale = cfg->memory_profile_cards_stale_secs > 0
-                            ? cfg->memory_profile_cards_stale_secs
+            int min_obs = config_memory_profile_cards_min_obs() > 0
+                              ? config_memory_profile_cards_min_obs()
+                              : 10;
+            int stale = config_memory_profile_cards_stale_secs() > 0
+                            ? config_memory_profile_cards_stale_secs()
                             : 86400;
             int refreshed = memory_profile_card_refresh(min_obs, stale);
             if (refreshed > 0)
@@ -271,7 +270,7 @@ int memory_maintenance_run(const config_t *cfg, unsigned int modes, int force, i
    /* Compact: dedupe near-duplicate keys via the improve module. */
    if (modes & MEMORY_MAINTENANCE_MODE_COMPACT)
    {
-      if (cfg && cfg->memory_improve_dedupe_enabled)
+      if (config_memory_improve_dedupe_enabled())
       {
          int merged = memory_improve_dedupe(dry_run);
          if (merged > 0)
@@ -284,14 +283,15 @@ int memory_maintenance_run(const config_t *cfg, unsigned int modes, int force, i
    {
       /* Either the maintenance-summarize gate or the (formerly inert) improve
        * summarise toggle enables the LLM-backed cluster summarisation. */
-      int enabled = cfg && (cfg->memory_maintenance_summarize_enabled ||
-                            cfg->memory_improve_summarise_enabled);
+      int enabled = (config_memory_maintenance_summarize_enabled() ||
+                     config_memory_improve_summarise_enabled());
       if (enabled)
       {
          int min_cluster =
-             cfg->memory_improve_min_cluster > 0 ? cfg->memory_improve_min_cluster : 3;
-         double max_conf =
-             cfg->memory_improve_max_confidence > 0.0 ? cfg->memory_improve_max_confidence : 0.6;
+             config_memory_improve_min_cluster() > 0 ? config_memory_improve_min_cluster() : 3;
+         double max_conf = config_memory_improve_max_confidence() > 0.0
+                               ? config_memory_improve_max_confidence()
+                               : 0.6;
          int summarized = memory_improve_summarise(dry_run, min_cluster, max_conf);
          if (summarized > 0)
             out->summarized = summarized;
@@ -336,13 +336,13 @@ int memory_maintenance_run(const config_t *cfg, unsigned int modes, int force, i
    return 0;
 }
 
-int memory_maintenance_maybe_run(const config_t *cfg, memory_maintenance_summary_t *summary_out)
+int memory_maintenance_maybe_run(memory_maintenance_summary_t *summary_out)
 {
-   if (!cfg || !cfg->memory_maintenance_enabled)
+   if (!config_memory_maintenance_enabled())
       return 0;
    memory_maintenance_summary_t summary;
    memset(&summary, 0, sizeof(summary));
-   if (memory_maintenance_run(cfg, 0 /* default modes */, 0 /* honour idle guard */, 0 /* commit */,
+   if (memory_maintenance_run(0 /* default modes */, 0 /* honour idle guard */, 0 /* commit */,
                               &summary) != 0)
       return 0;
    if (summary_out)

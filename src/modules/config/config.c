@@ -358,7 +358,26 @@ static int config_has_explicit_database_override(const cJSON *root)
    return 0;
 }
 
-/* Strict mode: errors instead of warnings, exit non-zero on validation failure */
+/* Strict mode: errors instead of warnings, exit non-zero on validation failure.
+ *
+ * OPT-IN, and deliberately so. Nothing in the shipping binaries sets it, which
+ * means config_load never returns non-zero in production: config_load_file only
+ * fails when `issues > 0 && g_config_strict`. Every `if (config_load(&cfg) != 0)`
+ * in the tree is therefore unreachable today, including server_main's own
+ * "server startup rejected invalid configuration".
+ *
+ * Turning it on by default was tried and reverted -- it is not a free tightening.
+ * Strict treats an UNKNOWN key as an error, but aimee deliberately tolerates and
+ * PRESERVES keys it does not recognise: config_set patches the YAML in place so
+ * an operator's own annotations survive a write (test_config_set.c pins
+ * "custom_note: keep-me"). Defaulting strict on makes aimee refuse to load a
+ * config it just preserved, and test_config.c:963 pins the opposite contract --
+ * that strict DOES reject unknown keys. Both hold only while strict is opt-in.
+ *
+ * Making runtime validation fatal is a product decision, not a refactor: it needs
+ * a split between "unknown key" (tolerate, for forward-compat and annotations)
+ * and "known key, wrong shape" (refuse to start). See the config-t-encapsulation
+ * proposal for the write-up. */
 int g_config_strict;
 
 static const config_schema_entry_t config_schema[] = {
@@ -435,6 +454,22 @@ static const config_schema_entry_t config_schema[] = {
     {"learning", SCHEMA_OBJECT, 0},
     {"intelligence", SCHEMA_OBJECT, 0},
     {"kb", SCHEMA_OBJECT, 0},
+    /* Both of these are REAL, parsed keys that were missing from this allowlist,
+     * so an operator config containing either drew "unknown key". That was a
+     * warning while strict mode was off; with strict on it is fatal, and
+     * worktree_gc is the worse of the two -- config_save WRITES it
+     * (config_save.c:610), so aimee emitted a config it would then refuse to
+     * load. Parsed at config_sections.c:147 and :808 respectively. */
+    {"worktree_gc", SCHEMA_OBJECT, 0},
+    {"autonomy", SCHEMA_OBJECT, 0},
+    {"context", SCHEMA_OBJECT, 0},
+    {"routing", SCHEMA_OBJECT, 0},
+    {"telemetry", SCHEMA_OBJECT, 0},
+    {"memory_window", SCHEMA_OBJECT, 0},
+    {"memory_rewrite", SCHEMA_OBJECT, 0},
+    {"memory_negation", SCHEMA_OBJECT, 0},
+    {"delegate_max_inflight", SCHEMA_INT, 0},
+    {"cross_verify", SCHEMA_BOOL_OR_OBJECT, 0},
     {"charter", SCHEMA_OBJECT, 0},
     {"identity", SCHEMA_OBJECT, 0},
     {"skills", SCHEMA_OBJECT, 0},
@@ -489,6 +524,8 @@ static const char *schema_type_name(schema_type_t t)
       return "array";
    case SCHEMA_OBJECT:
       return "object";
+   case SCHEMA_BOOL_OR_OBJECT:
+      return "boolean or object";
    }
    return "unknown";
 }
@@ -507,6 +544,8 @@ static int schema_type_matches(schema_type_t expected, const cJSON *item)
       return cJSON_IsArray(item);
    case SCHEMA_OBJECT:
       return cJSON_IsObject(item);
+   case SCHEMA_BOOL_OR_OBJECT:
+      return cJSON_IsBool(item) || cJSON_IsObject(item);
    }
    return 0;
 }
@@ -667,6 +706,11 @@ static void config_set_defaults(config_t *cfg)
 
    /* Defaults */
    snprintf(cfg->db1_path, sizeof(cfg->db1_path), "%s", config_default_db1_path());
+   /* Default-ON: a delegate's shell and file ops run inside its own container rather
+    * than in-process with aimee-server's filesystem and environment. Non-flat (the
+    * parse below carries an env override), so the default lives here, not in
+    * config_flat_defaults[]. */
+   cfg->delegate_sandbox = 1;
    snprintf(cfg->delegate_sandbox_package_access, sizeof(cfg->delegate_sandbox_package_access),
             "proxy");
    cfg->compact_enabled = 1; /* default on; set before no-config early returns */
@@ -1016,110 +1060,6 @@ static void config_apply_inference_backend_defaults(config_t *cfg, const cJSON *
       cfg->memory_rewrite_enabled = accel;
 }
 
-int econ_mode(const config_t *cfg)
-{
-   if (!cfg)
-      return ECON_MODE_OFF;
-   /* modules.economizer:false is an authoritative hard kill. */
-   if (cfg->module_economizer == 0)
-      return ECON_MODE_OFF;
-   return cfg->economizer_mode;
-}
-
-const char *econ_mode_name(int mode)
-{
-   switch (mode)
-   {
-   case ECON_MODE_OFF:
-      return "off";
-   case ECON_MODE_AGGRESSIVE:
-      return "aggressive";
-   case ECON_MODE_SAFE:
-   default:
-      return "safe";
-   }
-}
-
-int econ_mode_parse(const char *s)
-{
-   if (s && strcasecmp(s, "off") == 0)
-      return ECON_MODE_OFF;
-   if (s && strcasecmp(s, "safe") == 0)
-      return ECON_MODE_SAFE;
-   if (s && strcasecmp(s, "aggressive") == 0)
-      return ECON_MODE_AGGRESSIVE;
-   return -1;
-}
-
-const char *guardrails_semantic_mode_name(int mode)
-{
-   switch (mode)
-   {
-   case GSEM_MODE_DRY_RUN:
-      return "dry_run";
-   case GSEM_MODE_ADVISORY:
-      return "advisory";
-   case GSEM_MODE_ENFORCE:
-      return "enforce";
-   case GSEM_MODE_OFF:
-   default:
-      return "off";
-   }
-}
-
-int guardrails_semantic_mode_parse(const char *s)
-{
-   if (!s)
-      return GSEM_MODE_OFF;
-   if (strcasecmp(s, "dry_run") == 0 || strcasecmp(s, "dryrun") == 0)
-      return GSEM_MODE_DRY_RUN;
-   if (strcasecmp(s, "advisory") == 0)
-      return GSEM_MODE_ADVISORY;
-   if (strcasecmp(s, "enforce") == 0)
-      return GSEM_MODE_ENFORCE;
-   return GSEM_MODE_OFF; /* "off"/"0"/"false"/unknown -> fail-safe off */
-}
-
-int econ_reduction_master_on(const config_t *cfg)
-{
-   return econ_mode(cfg) != ECON_MODE_OFF;
-}
-
-int config_module_enabled(int config_tristate, int env_default)
-{
-   /* (Future tier 1: admin/governance FORCE would short-circuit here.) Tier 2: an explicit
-    * user config tristate (0/1) is canonical. Tier 3: -1 (unspecified) falls back to the
-    * deprecated env default. See config.h for the full precedence contract. */
-   if (config_tristate == 0 || config_tristate == 1)
-      return config_tristate;
-   return env_default ? 1 : 0;
-}
-
-int econ_gateway_mutate_on(const config_t *cfg)
-{
-   return econ_mode(cfg) == ECON_MODE_AGGRESSIVE;
-}
-
-void econ_preset(const config_t *cfg, econ_preset_t *out)
-{
-   if (!out)
-      return;
-   memset(out, 0, sizeof *out);
-   int mode = econ_mode(cfg);
-   if (mode == ECON_MODE_OFF)
-      return;
-   out->json_compact = 1;
-   if (mode == ECON_MODE_AGGRESSIVE)
-   {
-      out->history_fold = 1;
-      out->compress = 1;
-      out->command_filter = 1;
-      out->freeze_guard_horizon = 1;
-      out->gateway_seam = 1;
-      out->gateway_session_disable_ttl_ms = 3600000;
-   }
-}
-
 static int config_snapshot_live(void);
 
 static void config_apply_runtime_secrets(config_t *cfg)
@@ -1389,10 +1329,10 @@ int config_load_file(config_t *cfg)
 
    /* Default-on; parse the explicit opt-out so `subagent_ban_enabled: false` loads. */
 
-   /* Delegate sandbox: default 0 (off) from the zeroed config_t, so only an
-    * explicit `delegate_sandbox: true` turns it on. A deploy that cannot easily
-    * write aimee.yaml (e.g. a container image whose config is baked) can enable
-    * it with AIMEE_DELEGATE_SANDBOX=1 in the environment — the env wins. */
+   /* Delegate sandbox: default 1 (on) from config_set_defaults, so an unconfigured
+    * install isolates delegates; only an explicit `delegate_sandbox: false` opts out.
+    * A deploy that cannot easily write aimee.yaml (e.g. a container image whose config
+    * is baked) can flip it with AIMEE_DELEGATE_SANDBOX=0/1 — the env wins. */
    item = cJSON_GetObjectItemCaseSensitive(root, "delegate_sandbox");
    if (cJSON_IsBool(item))
       cfg->delegate_sandbox = cJSON_IsTrue(item);
@@ -1931,6 +1871,23 @@ static void config_snapshot_publish(const config_t *cfg)
    atomic_store_explicit(&g_snap_inited, 1, memory_order_release);
 }
 
+/* Seed the live snapshot from the config on disk. The daemons' entry point: they
+ * were each doing config_load into a stack config_t purely to hand it straight
+ * back, which is the whole 750 KB struct crossing the module boundary to travel
+ * nowhere. Returns 0 on success. */
+
+int config_snapshot_seed(void)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+      config_snapshot_init(cfg);
+   free(cfg);
+   return rc;
+}
+
 void config_snapshot_init(const config_t *cfg)
 {
    if (!cfg)
@@ -2039,8 +1996,16 @@ int config_field_read(size_t offset, size_t size, void *dst)
    if (!cfg)
       return -1;
    int rc = config_load(cfg);
-   if (rc == 0)
-      memcpy(dst, (const char *)cfg + offset, size);
+   /* Copy even when config_load FAILED. config_load_file applies config_set_defaults
+    * before it can return an error, so cfg holds each field's declared default — and the
+    * default is the only honest answer for a field we could not read.
+    *
+    * Copying only on rc == 0 made every generated accessor return its zero seed on a load
+    * failure, which silently INVERTS every default-ON dial: config_subagent_ban_enabled()
+    * would report "ban disabled", turning a fail-closed guard fail-open exactly when
+    * config is broken. Callers that must distinguish "read failed" from "value is 0"
+    * still have rc. */
+   memcpy(dst, (const char *)cfg + offset, size);
    free(cfg);
    return rc;
 }
@@ -2107,6 +2072,80 @@ int config_autonomy_lookup(const char *env_name, long *out)
    return 0;
 }
 
+/* Structured-PDF sidecar endpoints. Config first, then the deployment env var, else ""
+ * (feature off). The env var is how a compose/container deployment points the KB at a
+ * sidecar it just started; the config key is the operator's persistent choice, so an
+ * explicitly configured command outranks it. (Deliberately the OPPOSITE precedence to
+ * config_embedding_command, which documents why the running embedder's announcement must
+ * win there.) Lives here so no KB caller reads the environment. */
+static const char *config_sidecar_endpoint(size_t offset, size_t size, const char *env_name,
+                                           char *buf, size_t buflen)
+{
+   buf[0] = '\0';
+   config_field_read(offset, size, buf);
+   buf[buflen - 1] = '\0';
+   if (buf[0])
+      return buf;
+   const char *env = getenv(env_name);
+   if (env && env[0])
+   {
+      snprintf(buf, buflen, "%s", env);
+      return buf;
+   }
+   buf[0] = '\0';
+   return buf;
+}
+
+const char *config_tsr_endpoint(void)
+{
+   static _Thread_local char buf[1024];
+   return config_sidecar_endpoint(offsetof(config_t, tsr_command),
+                                  sizeof(((config_t *)0)->tsr_command), "AIMEE_TSR_URL", buf,
+                                  sizeof(buf));
+}
+
+const char *config_ocr_endpoint(void)
+{
+   static _Thread_local char buf[1024];
+   return config_sidecar_endpoint(offsetof(config_t, ocr_command),
+                                  sizeof(((config_t *)0)->ocr_command), "AIMEE_OCR_URL", buf,
+                                  sizeof(buf));
+}
+
+int config_module_roundtable_enabled(void)
+{
+   /* Moved out of roundtable_activation.c, which read this env var itself and took a
+    * config_t to reach the tristate. Same truthy/falsey set and the same warn-then-off
+    * behavior for an unrecognized value. */
+   int env_default = 0;
+   const char *v = getenv("AIMEE_MODULE_ROUNDTABLE");
+   if (v && v[0])
+   {
+      if (strcasecmp(v, "1") == 0 || strcasecmp(v, "true") == 0 || strcasecmp(v, "on") == 0 ||
+          strcasecmp(v, "yes") == 0)
+         env_default = 1;
+      else if (strcasecmp(v, "0") == 0 || strcasecmp(v, "false") == 0 ||
+               strcasecmp(v, "off") == 0 || strcasecmp(v, "no") == 0)
+         env_default = 0;
+      else
+         fprintf(stderr, "aimee: invalid AIMEE_MODULE_ROUNDTABLE value; defaulting off\n");
+   }
+   int tristate = -1;
+   config_field_read(offsetof(config_t, module_roundtable),
+                     sizeof(((config_t *)0)->module_roundtable), &tristate);
+   return config_module_enabled(tristate, env_default);
+}
+
+int config_antipatterns_bypass(void)
+{
+   /* See config.h for why this stays env-only. Value-checked and fail-closed. */
+   const char *v = getenv("AIMEE_ANTIPATTERNS_BYPASS");
+   if (!v || !v[0])
+      return 0;
+   return strcasecmp(v, "1") == 0 || strcasecmp(v, "true") == 0 || strcasecmp(v, "on") == 0 ||
+          strcasecmp(v, "yes") == 0;
+}
+
 int config_reload(void)
 {
    /* Hold the writer lock across the WHOLE reload (load + validate + token + publish) so two
@@ -2142,13 +2181,11 @@ int config_reload(void)
       pthread_mutex_unlock(&g_snap_wlock);
       return 0; /* self-reload no-op guard: nothing logically changed */
    }
-   /* capture the OLD snapshot (if any) so re-appliers can diff their section, then publish. */
-   config_t old;
-   int have_old =
-       atomic_load_explicit(&g_snap_inited, memory_order_acquire) && config_snapshot_get(&old) == 0;
+   /* Publish BEFORE running the re-appliers: they read config through accessors,
+    * which must already see the new snapshot. */
    config_snapshot_publish(&fresh);
    for (int i = 0; i < g_reapplier_count; i++)
-      g_reappliers[i](have_old ? &old : &fresh, &fresh);
+      g_reappliers[i]();
    pthread_mutex_unlock(&g_snap_wlock);
    return 1; /* a new snapshot was published */
 }
@@ -2170,6 +2207,26 @@ int config_reload(void)
  *
  * Returns config_reload()'s result (1 published / 0 no-op / -1 kept) when a change was
  * observed, else 0. */
+/* "Is the config readable?" — the only thing callers were ever asking when they
+ * wrote `config_load(&cfg) == 0` as a guard.
+ *
+ * config_load() does NOT fail for a missing, oversized, or unparsable file; all
+ * three return 0 with defaults filled in. It fails on exactly two things: an
+ * allocation failure, and strict mode rejecting a validated field. Callers that
+ * branched on it were distinguishing "config unavailable" from "field is at its
+ * default" — a distinction the accessors deliberately collapse, since they fall
+ * back to defaults. This keeps that distinction available without handing out a
+ * config_t. */
+int config_present(void)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return 0;
+   int rc = config_load(cfg);
+   free(cfg);
+   return rc == 0;
+}
+
 int config_reload_if_changed(void)
 {
    static struct timespec last_mt;
@@ -2317,46 +2374,6 @@ const char *config_embedding_command_field(void)
    config_field_read(offsetof(config_t, embedding_command), sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
-}
-
-/* Copy ONE element of a config array out to the caller.
- *
- * The per-member accessors (config_cron_job_id(i), ...) suit a caller that
- * wants one field. They do not suit one that passes the whole element onward —
- * the trigger scheduler hands a trigger_rule_t to source callbacks, and the
- * cron runner hands a cron_job_t to the executor. Those callers previously did
- *   const cron_job_t *job = &cfg.cron_jobs[i];
- * which required holding a config_t purely to reach the element.
- *
- * The ELEMENT types stay public on purpose: cron_job_t and trigger_rule_t are
- * shared domain types (db1/cron_jobs.h uses cron_job_t with no config
- * involved). config_t is the secret here, not them.
- *
- * Returns 0 and fills |out| on success; -1 for a bad index or unreadable
- * config, leaving |out| untouched so a caller that ignores the return value
- * gets its own zeroed struct rather than stale data. */
-int config_cron_job_at(int index, cron_job_t *out)
-{
-   if (!out || index < 0 || index >= CRON_JOBS_MAX)
-      return -1;
-   return config_field_read(offsetof(config_t, cron_jobs) + (size_t)index * sizeof(*out),
-                            sizeof(*out), out);
-}
-
-int config_trigger_rule_at(int index, trigger_rule_t *out)
-{
-   if (!out || index < 0 || index >= TRIGGER_RULES_MAX)
-      return -1;
-   return config_field_read(offsetof(config_t, trigger_rules) + (size_t)index * sizeof(*out),
-                            sizeof(*out), out);
-}
-
-int config_mcp_client_at(int index, config_mcp_client_t *out)
-{
-   if (!out || index < 0 || index >= CONFIG_MCP_MAX_CLIENTS)
-      return -1;
-   return config_field_read(offsetof(config_t, mcp_clients) + (size_t)index * sizeof(*out),
-                            sizeof(*out), out);
 }
 
 const char *config_embedding_command_current(const char *requested)

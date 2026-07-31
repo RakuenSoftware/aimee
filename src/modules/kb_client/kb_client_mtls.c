@@ -322,10 +322,9 @@ static void pool_sync_enabled(int enabled)
    pthread_mutex_unlock(&g_lock);
 }
 
-static void pool_config_reapplier(const config_t *old_cfg, const config_t *new_cfg)
+static void pool_config_reapplier(void)
 {
-   (void)old_cfg;
-   pool_sync_enabled(new_cfg && config_transport_kb_pool_enabled());
+   pool_sync_enabled(config_transport_kb_pool_enabled());
 }
 
 void kb_client_mtls_pool_register_reload(void)

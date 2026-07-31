@@ -88,20 +88,13 @@ int kb_handle_memory_find_facts(int fd, cJSON *req)
    {
       if (config_bandit_live_decision_enabled())
       {
-         /* Still materialised here only because kb_bandit_sample takes a
-          * const config_t *. Removing this one means changing that signature —
-          * tracked as remaining debt by check-config-encapsulation.py rather
-          * than cascaded into this change. */
-         config_t cfg;
-         config_load(&cfg);
          /* Arms come from the registry (source of truth); each arm id is the
           * literal retrieval limit. */
          char ml_arms[KB_BANDIT_MAX_ARMS][KB_BANDIT_MAX_ARM_ID];
          for (int i = 0; i < ml_dp->n_arms; i++)
             snprintf(ml_arms[i], KB_BANDIT_MAX_ARM_ID, "%s", ml_dp->arms[i]);
 
-         int ml_arm =
-             kb_bandit_sample(&cfg, ml_dp->id, NULL, ml_arms, ml_dp->n_arms, ml_decision_id);
+         int ml_arm = kb_bandit_sample(ml_dp->id, NULL, ml_arms, ml_dp->n_arms, ml_decision_id);
          if (ml_arm >= 0 && ml_arm < ml_dp->n_arms)
          {
             aimee_log(LOG_DEBUG, "kb.bandit", "%s arm=%s", ml_dp->id, ml_arms[ml_arm]);
@@ -132,7 +125,7 @@ int kb_handle_memory_find_facts(int fd, cJSON *req)
       cJSON *facts = resp ? cJSON_GetObjectItemCaseSensitive(resp, "facts") : NULL;
       int n_results = cJSON_IsArray(facts) ? cJSON_GetArraySize(facts) : 0;
       double reward = kb_bandit_recall_sufficiency_reward(n_results, limit);
-      kb_bandit_reward(NULL, ml_dp->id, ml_decision_id, ml_arm_id, reward);
+      kb_bandit_reward(ml_dp->id, ml_decision_id, ml_arm_id, reward);
    }
    return kb_reply_or_error(fd, resp, "failed to search memory facts");
 }

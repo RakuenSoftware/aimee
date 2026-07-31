@@ -132,6 +132,36 @@ int config_load(config_t *cfg)
    }
    return 0;
 }
+
+/* The generated accessors read through this. Serve the same shape the
+ * config_load stub above does, so both agree.
+ *
+ * Note this changes what the LINKER needs: with a config_load stub, LTO could
+ * see kb_pdf_assets_enabled was always 0, fold the branch away, and drop the
+ * call to kb_doc_pdf_render_assets entirely. An accessor is opaque, so that
+ * branch now survives to link time and the symbol must exist -- hence the stub
+ * below. It is never called; g_pdf_flag only enables the ingest path. */
+int config_field_read(size_t offset, size_t size, void *dst)
+{
+   if (!dst || size == 0)
+      return -1;
+   static config_t stub;
+   memset(&stub, 0, sizeof(stub));
+   stub.kb_pdf_ingest_enabled = g_pdf_flag;
+   memcpy(dst, (const char *)&stub + offset, size);
+   return 0;
+}
+
+int kb_doc_pdf_render_assets(const char *project, const char *file_path,
+                             const char *sensitivity_class, const unsigned char *pdf_bytes, int n)
+{
+   (void)project;
+   (void)file_path;
+   (void)sensitivity_class;
+   (void)pdf_bytes;
+   (void)n;
+   return 0;
+}
 int kb_pdf_sensitivity_valid(const char *s)
 {
    return s &&

@@ -48,18 +48,13 @@ int server_mgmt_read_load_config(server_mgmt_read_config_t *out)
       memset(out, 0, sizeof(*out));
    if (!out)
       return -1;
-   config_t active;
-   memset(&active, 0, sizeof(active));
-   if (config_load(&active) != 0)
-   {
-      OPENSSL_cleanse(&active, sizeof(active));
+   if (!config_present())
       return -1;
-   }
-   out->mtls = active.server_api_mtls;
-   out->remote_writes = active.server_api_remote_writes;
-   memcpy(out->client_transport, active.server_api_client_transport, sizeof(out->client_transport));
-   out->cli_session_forwarding = active.server_api_cli_session_forwarding;
-   out->require_aimee_git = active.require_aimee_git;
-   OPENSSL_cleanse(&active, sizeof(active));
+   out->mtls = config_server_api_mtls();
+   out->remote_writes = config_server_api_remote_writes();
+   snprintf(out->client_transport, sizeof(out->client_transport), "%s",
+            config_server_api_client_transport());
+   out->cli_session_forwarding = config_server_api_cli_session_forwarding();
+   out->require_aimee_git = config_require_aimee_git();
    return 0;
 }

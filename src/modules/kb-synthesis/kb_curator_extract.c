@@ -614,9 +614,6 @@ int kb_curator_extract_one(const kb_curator_extract_opts_t *opts)
    /* Route through the §2 dispatch: a configured Tier-A provider (incl. the
     * bundled-Gemma LLM_ENDPOINT env) runs in-process via provider_client; else
     * the resolved sidecar command. extract_docs is Tier-A. */
-   config_t cfg;
-   config_load(&cfg);
-
    aimee_log(LOG_INFO, "kb.curator.extract", "invoking curator LLM for doc %lld (cmd fallback: %s)",
              (long long)job.document_id, cmd);
 
@@ -629,8 +626,8 @@ int kb_curator_extract_one(const kb_curator_extract_opts_t *opts)
    const char *sys_prompt = novel_mode ? CE_SYSTEM_PROMPT : CE_EXTRACT_DOC_PROMPT;
    cJSON *extract_schema = ce_build_extract_schema();
    char *resp_str =
-       kb_curator_llm_run(&cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, sys_prompt, req_str, extract_schema,
-                          cmd, CE_OUTBUF, sidecar_err, sizeof(sidecar_err));
+       kb_curator_llm_run(KB_CURATOR_STAGE_EXTRACT_DOCS, sys_prompt, req_str, extract_schema, cmd,
+                          CE_OUTBUF, sidecar_err, sizeof(sidecar_err));
    cJSON_Delete(extract_schema);
    free(req_str);
 

@@ -529,8 +529,7 @@ int handle_get_code_search(const char *query_string, char *out_buf, int out_cap)
    }
    /* Enrich matched-line spans only when ingress compression is enabled (the
     * lossy-fold consumer). Default-off keeps the query and JSON identical. */
-   config_t scfg;
-   int enrich = (config_load(&scfg) == 0 && scfg.ingress_compress_enabled) ? 1 : 0;
+   int enrich = (config_present() && config_ingress_compress_enabled()) ? 1 : 0;
    int n = code_search_local_first(project, all_projects, query, hits, max_r, enrich);
    if (n < 0)
    {
@@ -1143,18 +1142,17 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
    }
 
    /* Per-signal RRF weights + rank constant are config-tunable (§5). */
-   config_t hcfg;
    double w_code = 1.0, w_graph = 1.0, w_vector = 1.0, w_memory = 1.0, rrf_k = KB_RRF_DEFAULT_K;
    int trust_on = 0; /* §3 actuation gate (default off) */
-   if (config_load(&hcfg) == 0)
+   if (config_present())
    {
-      w_code = hcfg.code_hybrid_weight_code;
-      w_graph = hcfg.code_hybrid_weight_graph;
-      w_vector = hcfg.code_hybrid_weight_vector;
-      w_memory = hcfg.code_hybrid_weight_memory;
-      if (hcfg.code_hybrid_rrf_k > 0)
-         rrf_k = hcfg.code_hybrid_rrf_k;
-      trust_on = hcfg.code_trust_actuation_enabled;
+      w_code = config_code_hybrid_weight_code();
+      w_graph = config_code_hybrid_weight_graph();
+      w_vector = config_code_hybrid_weight_vector();
+      w_memory = config_code_hybrid_weight_memory();
+      if (config_code_hybrid_rrf_k() > 0)
+         rrf_k = config_code_hybrid_rrf_k();
+      trust_on = config_code_trust_actuation_enabled();
    }
 
    /* Signal C — vector similarity (key = file_path; §5). Embed the query and
@@ -1169,7 +1167,7 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
     * only with an active project, which is also the bucket queried here. */
    if (w_vector > 0.0 && project[0])
    {
-      const char *embed_cmd = config_embedding_command(&hcfg, NULL);
+      const char *embed_cmd = config_embedding_command_current(NULL);
       float qvec[EMBED_MAX_DIM];
       int qdim = memory_embed_text(query, embed_cmd, EMBED_INPUT_QUERY, qvec, EMBED_MAX_DIM);
       if (qdim > 0 && qdim == db2_embedding_dim())
@@ -1930,9 +1928,8 @@ int handle_get_code_graph_surprising(const char *query_string, char *out_buf, in
     * structural generator's precision (confirmed/judged); when NOT judging, suppress
     * the unjudged candidates if that sampled precision has fallen below the configured
     * floor — they'd be mostly false positives. Floor <= 0 (default) disables it. */
-   config_t scfg;
-   int have_cfg = (config_load(&scfg) == 0);
-   double precision_floor = have_cfg ? scfg.code_surprising_precision_floor : 0.0;
+   int have_cfg = config_present();
+   double precision_floor = have_cfg ? config_code_surprising_precision_floor() : 0.0;
    int stat_judged = 0, stat_confirmed = 0;
    surprising_stats_get(project, &stat_judged, &stat_confirmed);
    int suppressed = 0;
@@ -1958,8 +1955,11 @@ int handle_get_code_graph_surprising(const char *query_string, char *out_buf, in
       if (verdicts)
       {
          char jerr[256] = "";
-         int r = kb_surprising_judge(&scfg, scfg.kb_curator_judge_command, project, out, jn,
-                                     verdicts, jerr, sizeof(jerr));
+         /* Copied out: the command reaches the judge, which runs a sidecar or a
+          * provider round trip. */
+         char judge_cmd[CONFIG_COPY_MAX];
+         config_kb_curator_judge_command_copy(judge_cmd, sizeof(judge_cmd));
+         int r = kb_surprising_judge(judge_cmd, project, out, jn, verdicts, jerr, sizeof(jerr));
          if (r > 0)
          {
             judged_n = r;
@@ -2451,11 +2451,10 @@ int handle_post_code_repo_trust(const char *body, char *out_buf, int out_cap, in
    int recomputed = -1; /* -1 = not attempted (no change); >=0 rows; -1 on a recompute error too */
    if (changed)
    {
-      config_t cfg;
-      if (config_load(&cfg) == 0)
-         recomputed = db2_cross_repo_recompute_blocked_symbols(cfg.kb_curator_cross_repo_k,
-                                                               cfg.kb_curator_cross_repo_m,
-                                                               cfg.kb_curator_cross_repo_len_min);
+      if (config_present())
+         recomputed = db2_cross_repo_recompute_blocked_symbols(
+             config_kb_curator_cross_repo_k(), config_kb_curator_cross_repo_m(),
+             config_kb_curator_cross_repo_len_min());
    }
 
    /* Build via cJSON so the (owner-supplied) project name is JSON-escaped rather

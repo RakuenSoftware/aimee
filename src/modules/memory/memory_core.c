@@ -196,10 +196,9 @@ int memory_query_plan(const char *query, int limit, int hard_cap, memory_query_p
    return 0;
 }
 
-void memory_query_rewrite(const char *query, const config_t *cfg, memory_query_rewrite_t *out)
+void memory_query_rewrite(const char *query, memory_query_rewrite_t *out)
 {
    (void)query;
-   (void)cfg;
    if (out)
       memset(out, 0, sizeof(*out));
 }

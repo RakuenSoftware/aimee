@@ -782,15 +782,13 @@ cJSON *tool_memory_briefing(cJSON *args)
 
 cJSON *tool_get_identity(void)
 {
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   if (config_load(&cfg) != 0)
+   if (!config_present())
       return text_content("error: could not load config");
 
    cJSON *obj = cJSON_CreateObject();
    if (!obj)
       return text_content("error: out of memory");
-   cJSON_AddItemToObject(obj, "charter", identity_charter_json(&cfg));
+   cJSON_AddItemToObject(obj, "charter", identity_charter_json());
    cJSON_AddItemToObject(obj, "local_operator", identity_local_operator_json());
    cJSON_AddItemToObject(obj, "working_profile", identity_working_profile_json());
 
@@ -1232,19 +1230,18 @@ cJSON *tool_store_workflow(cJSON *args)
       char cwd[MAX_PATH_LEN];
       if (getcwd(cwd, sizeof(cwd)))
       {
-         config_t cfg;
-         if (config_load(&cfg) == 0)
+         if (config_present())
          {
-            for (int i = 0; i < cfg.workspace_count; i++)
+            for (int i = 0; i < config_workspace_count(); i++)
             {
-               size_t wlen = strlen(cfg.workspaces[i]);
+               size_t wlen = strlen(config_workspaces(i));
                if (wlen == 0)
                   continue;
-               if (strncmp(cwd, cfg.workspaces[i], wlen) == 0 &&
+               if (strncmp(cwd, config_workspaces(i), wlen) == 0 &&
                    (cwd[wlen] == '/' || cwd[wlen] == '\0'))
                {
-                  const char *slash = strrchr(cfg.workspaces[i], '/');
-                  const char *name = slash ? slash + 1 : cfg.workspaces[i];
+                  const char *slash = strrchr(config_workspaces(i), '/');
+                  const char *name = slash ? slash + 1 : config_workspaces(i);
                   snprintf(workspace, sizeof(workspace), "%s", name);
                   break;
                }

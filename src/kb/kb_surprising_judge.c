@@ -109,7 +109,7 @@ static int sj_add_pair(cJSON *pairs, const char *project, int idx,
    return 1;
 }
 
-int kb_surprising_judge(const config_t *cfg, const char *judge_cmd, const char *project,
+int kb_surprising_judge(const char *judge_cmd, const char *project,
                         const kb_graph_surprising_t *links, int n, kb_surprising_verdict_t *out,
                         char *errbuf, size_t errlen)
 {
@@ -149,7 +149,7 @@ int kb_surprising_judge(const config_t *cfg, const char *judge_cmd, const char *
    }
 
    char local_err[256];
-   char *response = kb_curator_llm_run(cfg, KB_CURATOR_STAGE_JUDGE, SJ_SYSTEM_PROMPT, request, NULL,
+   char *response = kb_curator_llm_run(KB_CURATOR_STAGE_JUDGE, SJ_SYSTEM_PROMPT, request, NULL,
                                        judge_cmd, 0, local_err, sizeof(local_err));
    free(request);
    if (!response)

@@ -546,9 +546,7 @@ static double memory_scene_cluster_bonus(const memory_t *matches, int count, int
    if (!matches || count <= 1 || idx < 0 || idx >= count)
       return 0.0;
 
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.memory_scenes_enabled)
+   if (!config_memory_scenes_enabled())
       return 0.0;
 
    db2_memory_scene_membership_t memberships[16];
@@ -1180,9 +1178,7 @@ static int memory_collect_code_matches(const char *query, int fetch_limit, memor
    if (!scratch)
       return count;
    int cap = 64;
-   config_t code_cfg;
-   config_load(&code_cfg);
-   const char *embed_cmd = config_embedding_command(&code_cfg, NULL);
+   const char *embed_cmd = config_embedding_command_current(NULL);
    int got = memory_collect_memory_matches_via_vector(query, embed_cmd, fetch_limit, scratch, cap);
    for (int i = 0; i < got && count < max; i++)
       count = memory_append_unique(out, count, max, &scratch[i]);
@@ -1569,11 +1565,16 @@ int memory_collect_variant_candidates(const char *raw_query, const char *norm_va
     * Semantic mode augments BOTH the lexical query (for unit/memory matches)
     * AND the expanded_terms[][] buffer (for alias/entity/summary/chunk paths),
     * so the two retrieval legs see the same expansion footprint. */
-   MEMORY_AUTOFREE config_t *qe_cfg = memory_config_load_heap();
-   if (!qe_cfg)
+   /* Copied out: each is read again below, across other config reads. */
+   char expansion_mode[CONFIG_COPY_MAX];
+   char summary_kinds[CONFIG_COPY_MAX];
+   char fact_kinds[CONFIG_COPY_MAX];
+   config_memory_query_expansion_mode_copy(expansion_mode, sizeof(expansion_mode));
+   config_memory_recall_lanes_summary_kinds_copy(summary_kinds, sizeof(summary_kinds));
+   config_memory_recall_lanes_fact_kinds_copy(fact_kinds, sizeof(fact_kinds));
+   if (!config_present())
       return count;
-   const char *qe_mode =
-       qe_cfg->memory_query_expansion_mode[0] ? qe_cfg->memory_query_expansion_mode : "lexical";
+   const char *qe_mode = expansion_mode[0] ? expansion_mode : "lexical";
    const int qe_semantic =
        (strcmp(qe_mode, "semantic") == 0 || strcmp(qe_mode, "hybrid") == 0) ? 1 : 0;
    const int qe_lexical =
@@ -1581,8 +1582,8 @@ int memory_collect_variant_candidates(const char *raw_query, const char *norm_va
 
    if (qe_semantic)
    {
-      const char *embed_cmd = config_embedding_command(qe_cfg, NULL);
-      int k = qe_cfg->memory_query_expansion_k > 0 ? qe_cfg->memory_query_expansion_k : 5;
+      const char *embed_cmd = config_embedding_command_current(NULL);
+      int k = config_memory_query_expansion_k() > 0 ? config_memory_query_expansion_k() : 5;
       if (memory_expand_query_semantic(signal_query[0] ? signal_query : norm_variant, embed_cmd, k,
                                        expanded_signal, sizeof(expanded_signal)) < 0)
          return -1;
@@ -1604,8 +1605,8 @@ int memory_collect_variant_candidates(const char *raw_query, const char *norm_va
    }
    if (qe_semantic)
    {
-      const char *embed_cmd = config_embedding_command(qe_cfg, NULL);
-      int k = qe_cfg->memory_query_expansion_k > 0 ? qe_cfg->memory_query_expansion_k : 5;
+      const char *embed_cmd = config_embedding_command_current(NULL);
+      int k = config_memory_query_expansion_k() > 0 ? config_memory_query_expansion_k() : 5;
       expanded_count =
           memory_expand_query_terms_semantic(signal_query[0] ? signal_query : norm_variant,
                                              embed_cmd, k, expanded_terms, expanded_count, 48);
@@ -1623,23 +1624,20 @@ int memory_collect_variant_candidates(const char *raw_query, const char *norm_va
       if (!lexical_scratch)
          return count;
       int lexical_cap = 64;
-      const char *lexical_embed_cmd = config_embedding_command(qe_cfg, NULL);
-      if (qe_cfg->memory_recall_lanes_enabled)
+      const char *lexical_embed_cmd = config_embedding_command_current(NULL);
+      if (config_memory_recall_lanes_enabled())
       {
          char sum_buf[16][16], fact_buf[16][16];
          const char *sum_ptrs[16], *fact_ptrs[16];
-         int n_sum = memory_parse_kinds_csv(qe_cfg->memory_recall_lanes_summary_kinds[0]
-                                                ? qe_cfg->memory_recall_lanes_summary_kinds
-                                                : "episode",
-                                            sum_buf, sum_ptrs, 16);
-         int n_fact = memory_parse_kinds_csv(qe_cfg->memory_recall_lanes_fact_kinds[0]
-                                                 ? qe_cfg->memory_recall_lanes_fact_kinds
-                                                 : "fact,preference",
+         int n_sum = memory_parse_kinds_csv(summary_kinds[0] ? summary_kinds : "episode", sum_buf,
+                                            sum_ptrs, 16);
+         int n_fact = memory_parse_kinds_csv(fact_kinds[0] ? fact_kinds : "fact,preference",
                                              fact_buf, fact_ptrs, 16);
-         int k_sum =
-             qe_cfg->memory_recall_lanes_k_summary > 0 ? qe_cfg->memory_recall_lanes_k_summary : 40;
+         int k_sum = config_memory_recall_lanes_k_summary() > 0
+                         ? config_memory_recall_lanes_k_summary()
+                         : 40;
          int k_fact =
-             qe_cfg->memory_recall_lanes_k_fact > 0 ? qe_cfg->memory_recall_lanes_k_fact : 40;
+             config_memory_recall_lanes_k_fact() > 0 ? config_memory_recall_lanes_k_fact() : 40;
 
          /* Summary lane */
          int got_sum = memory_collect_memory_matches_via_vector_with_kinds(

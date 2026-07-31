@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include "aimee.h"
 #include "db.h"
 #include "db1.h"
@@ -20,6 +22,26 @@
 static void setup(void)
 {
    db2_test_shim_open();
+}
+
+/* Point config at a temp dir this test owns and write the keys the case needs.
+ * memory_maintenance_maybe_run reads live config rather than taking a config_t,
+ * so a case that does not write its own precondition would silently inherit the
+ * developer's real aimee.yaml and stop testing what it names. Uses a per-pid
+ * path rather than mkdtemp() on a static buffer — mkdtemp rewrites its XXXXXX
+ * template in place, so a second call on the same buffer fails. */
+static void write_test_config(const char *yaml)
+{
+   char dir[256], path[320];
+   snprintf(dir, sizeof(dir), "/tmp/aimee-curiosity-cfg-%d", (int)getpid());
+   mkdir(dir, 0755);
+   setenv("AIMEE_HOME", dir, 1);
+   setenv("AIMEE_NO_CACHE", "1", 1);
+   snprintf(path, sizeof(path), "%s/aimee.yaml", dir);
+   FILE *f = fopen(path, "w");
+   assert(f);
+   fputs(yaml, f);
+   fclose(f);
 }
 
 int main(void)
@@ -396,14 +418,11 @@ int main(void)
                                   &created) == 0);
       assert(created.routing_score == 0.0);
 
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      cfg.memory_maintenance_enabled = 1;
-      cfg.memory_maintenance_interval_seconds = 3600;
+      write_test_config("memory_maintenance:\n  enabled: true\n  interval_seconds: 3600\n");
 
       memory_maintenance_summary_t first;
       memset(&first, 0, sizeof(first));
-      assert(memory_maintenance_maybe_run(&cfg, &first) == 1);
+      assert(memory_maintenance_maybe_run(&first) == 1);
       assert(first.skipped == 0);
       assert(first.rescored == 1);
 
@@ -413,7 +432,7 @@ int main(void)
 
       memory_maintenance_summary_t second;
       memset(&second, 0, sizeof(second));
-      assert(memory_maintenance_maybe_run(&cfg, &second) == 0);
+      assert(memory_maintenance_maybe_run(&second) == 0);
       assert(second.skipped == 1);
       assert(second.rescored == 0);
    }

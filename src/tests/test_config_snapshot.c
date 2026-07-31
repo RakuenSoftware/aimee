@@ -19,13 +19,19 @@
  * every mention of the type is tracked debt (check-config-encapsulation.py). */
 static config_t g_stage;
 
-/* P3 re-applier probe. */
+/* P3 re-applier probe.
+ *
+ * The hook takes no arguments now and reads config the way a real re-applier
+ * does. That makes this a STRONGER check than the old one: it used to be handed
+ * the new config_t, which proved only that config_reload passed the right
+ * pointer. Reading the accessor here proves the property the contract actually
+ * rests on -- that the snapshot is already published when a re-applier runs, so
+ * an accessor called inside one returns the NEW value. */
 static _Atomic int g_reapply_calls = 0;
 static int g_last_mode = -1;
-static void probe_reapplier(const config_t *o, const config_t *n)
+static void probe_reapplier(void)
 {
-   (void)o;
-   g_last_mode = n->economizer_mode;
+   g_last_mode = econ_mode_current();
    atomic_fetch_add_explicit(&g_reapply_calls, 1, memory_order_relaxed);
 }
 
@@ -266,7 +272,8 @@ int main(void)
       write_marker(1, 1111); /* change back to safe */
       assert(config_reload() == 1);
       assert(atomic_load_explicit(&g_reapply_calls, memory_order_relaxed) == before + 1);
-      assert(g_last_mode == ECON_MODE_SAFE); /* re-applier saw the NEW value */
+      /* The accessor, called from inside the re-applier, returned the NEW value. */
+      assert(g_last_mode == ECON_MODE_SAFE);
       /* a no-op reload does NOT fire the re-applier */
       int mid = atomic_load_explicit(&g_reapply_calls, memory_order_relaxed);
       assert(config_reload() == 0);

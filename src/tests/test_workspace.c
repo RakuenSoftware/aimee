@@ -6,6 +6,24 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "aimee.h"
+
+/* workspace_active_root reads the configured workspaces through accessors now
+ * instead of taking a config_t, so a case that wants specific workspaces has to
+ * write them to a config file it owns. Per-pid dir rather than mkdtemp on a
+ * static buffer, which fails on a second call. */
+static void write_test_config(const char *yaml)
+{
+   char dir[256], path[320];
+   snprintf(dir, sizeof(dir), "/tmp/aimee-workspace-cfg-%d", (int)getpid());
+   mkdir(dir, 0755);
+   setenv("AIMEE_HOME", dir, 1);
+   setenv("AIMEE_NO_CACHE", "1", 1);
+   snprintf(path, sizeof(path), "%s/aimee.yaml", dir);
+   FILE *f = fopen(path, "w");
+   assert(f);
+   fputs(yaml, f);
+   fclose(f);
+}
 #include "workspace.h"
 #include "worktree_gc.h"
 #include "platform_test_util.h"
@@ -388,13 +406,11 @@ int main(void)
       assert(mkdir(project, 0755) == 0);
       assert(mkdir(nested, 0755) == 0);
 
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      snprintf(cfg.workspaces[0], sizeof(cfg.workspaces[0]), "%s", ws1);
-      snprintf(cfg.workspaces[1], sizeof(cfg.workspaces[1]), "%s", ws2);
-      cfg.workspace_count = 2;
+      char yaml[1400];
+      snprintf(yaml, sizeof(yaml), "workspaces:\n  - \"%s\"\n  - \"%s\"\n", ws1, ws2);
+      write_test_config(yaml);
 
-      assert(workspace_active_root(&cfg, nested, resolved, sizeof(resolved)) == 0);
+      assert(workspace_active_root(nested, resolved, sizeof(resolved)) == 0);
       assert(strcmp(resolved, ws2) == 0);
    }
 
@@ -405,9 +421,8 @@ int main(void)
       assert(mkdir(outside, 0755) == 0);
       assert(realpath(outside, expected) != NULL);
 
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      assert(workspace_active_root(&cfg, outside, resolved, sizeof(resolved)) == 0);
+      write_test_config("workspaces: []\n");
+      assert(workspace_active_root(outside, resolved, sizeof(resolved)) == 0);
       assert(strcmp(resolved, expected) == 0);
    }
 
@@ -421,7 +436,7 @@ int main(void)
       assert(mkdir(srcdir, 0755) == 0);
       assert(mkdir(subdir, 0755) == 0);
 
-      assert(workspace_active_root(NULL, subdir, resolved, sizeof(resolved)) == 0);
+      assert(workspace_active_root_from_cwd(subdir, resolved, sizeof(resolved)) == 0);
       assert(strcmp(resolved, repo) == 0);
    }
 

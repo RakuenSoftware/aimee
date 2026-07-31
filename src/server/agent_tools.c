@@ -200,9 +200,7 @@ int agent_tools_session_isolation_blocks(const char *path, const char *cwd)
     * this file (it is cheap and reads the cached config). Default-off: when the
     * flag is unset — or the config is unreadable, which leaves the default 0 —
     * this is a no-op, matching the feature's opt-in nature. */
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.require_session_worktree)
+   if (!config_require_session_worktree())
       return 0;
    /* normalize_path resolves '.'/'..'/relative against cwd, closing traversal
     * escapes. Match the canonical managed-worktree location plus the workflow
@@ -327,10 +325,8 @@ static void append_federated_kb_tools(cJSON *tools, int openai_format,
 
 static void append_remote_tools(cJSON *tools, int openai_format)
 {
-   config_t cfg;
-   config_load(&cfg);
    computer_use_policy_t cu_policy;
-   computer_use_policy_from_config(&cfg, &cu_policy);
+   computer_use_policy_from_config(&cu_policy);
 
    cJSON *remote_tools = mcp_client_registry_build_namespaced_tools(1000);
    if (cJSON_IsArray(remote_tools))

@@ -12,7 +12,6 @@
 #include "memory_ontology.h"
 
 /* File-scope config, loaded once by cmd_memory before dispatch. */
-extern config_t s_mem_cfg;
 
 /* Env-knob readers and option-shape helpers used by the subcommand handlers. */
 double cmd_memory_env_weight(const char *name, double fallback);

@@ -21,6 +21,11 @@ void config_parse_database(config_t *cfg, cJSON *root);
  * other config consumers are unaffected. */
 int config_apply_db2_url_env_override(config_t *cfg);
 
+/* The db2 URL this process should dial: AIMEE_DB2_URL when set, else the stored
+ * db2_url. Written into caller storage (it carries a credential and outlives any
+ * shared buffer). Returns 1 when non-empty. */
+int config_db2_url_effective(char *out, size_t n);
+
 /* THE embedding width. This is the only place in the tree the number is written:
  * selecting an embedder records its width in config (bekko-a25m -> 384), the env
  * and the wizard change it through the accessors above, and everything else —
@@ -39,6 +44,10 @@ int config_embedding_dim_default(void);
  * default. Callers that need a usable width (not a pin signal) want
  * config_embedding_dim_effective(). Non-mutating. */
 int config_resolve_embedding_dim(const config_t *cfg);
+
+/* No-arg form of the above, against the loaded config. Still the PIN signal
+ * (0 = nothing pinned), NOT the effective width -- see config_embedding_dim_current. */
+int config_resolve_embedding_dim_current(void);
 
 /* The width to actually embed and size columns with: the pin when there is one,
  * else config_embedding_dim_default(). Pass this to db2_set_embedding_dim() —
@@ -63,6 +72,10 @@ int config_embedding_dim_current(void);
  * there is no local default to fall back to. Non-mutating. */
 int config_synth_chat_endpoint(const config_t *cfg, char *out, size_t out_len);
 
+/* Same resolver without a config_t: reads llm_synth_endpoint through its accessor.
+ * AIMEE_LLM_URL still outranks the stored field, and normalization is shared. */
+int config_synth_chat_endpoint_current(char *out, size_t out_len);
+
 /* embedder-runtime-fetch-autodim §2a: 1 iff the operator pinned a positive
  * embedding dim — defined as config_resolve_embedding_dim(cfg) > 0, so "pinned"
  * is exactly consistent with the value db2_set_embedding_dim receives. A pinned
@@ -71,6 +84,10 @@ int config_synth_chat_endpoint(const config_t *cfg, char *out, size_t out_len);
  * non-numeric / empty is NOT a pin (config_resolve already maps it to 0), nor is
  * an unset cfg->embedding_dim. Pass to db2_set_embedding_dim_pinned(). */
 int config_embedding_dim_is_pinned(const config_t *cfg);
+
+/* No-arg form for callers holding no config_t; same answer as
+ * config_embedding_dim_is_pinned against the live config. Prefer this. */
+int config_embedding_dim_pinned_current(void);
 
 /* Emit the deploy-time environment the compose stack consumes for the page-2
  * backend record (setup wizard). Writes shell-sourceable KEY=VALUE lines to buf:
@@ -85,5 +102,8 @@ int config_embedding_dim_is_pinned(const config_t *cfg);
  * Pure/non-mutating; the single translation both the entrypoint and an operator
  * `compose up` wrapper source. */
 void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n);
+
+/* Same emitter, reading the live config itself. */
+void config_emit_deploy_env_current(char *buf, size_t n);
 
 #endif

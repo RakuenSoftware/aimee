@@ -1224,10 +1224,9 @@ int canonical_index_scan_project(const char *name, const char *root, int force, 
       return -1;
 
    /* CSS style-graph and git co-change write paths are opt-in; read once per scan. */
-   config_t scan_cfg;
-   int cfg_ok = (config_load(&scan_cfg) == 0);
-   int css_on = cfg_ok && scan_cfg.css_style_graph_enabled;
-   int cochange_on = cfg_ok && scan_cfg.code_cochange_git_enabled;
+   int cfg_ok = (config_present());
+   int css_on = cfg_ok && config_css_style_graph_enabled();
+   int cochange_on = cfg_ok && config_code_cochange_git_enabled();
 
    char abs_root[MAX_PATH_LEN];
    if (realpath(root, abs_root) == NULL)
@@ -1334,10 +1333,9 @@ int canonical_index_scan_files(const char *name, const char *root_label,
       return -1;
 
    /* CSS style-graph and git co-change write paths are opt-in; read once per scan. */
-   config_t scan_cfg;
-   int cfg_ok = (config_load(&scan_cfg) == 0);
-   int css_on = cfg_ok && scan_cfg.css_style_graph_enabled;
-   int cochange_on = cfg_ok && scan_cfg.code_cochange_git_enabled;
+   int cfg_ok = (config_present());
+   int css_on = cfg_ok && config_css_style_graph_enabled();
+   int cochange_on = cfg_ok && config_code_cochange_git_enabled();
 
    void *conn = ci_conn();
    if (!conn)

@@ -338,23 +338,23 @@ int memory_cognify_parse_response(const char *json, memory_cognify_result_t *out
  *
  * Returns 0 on success, -1 if disabled / command error.
  */
-int memory_cognify_unit(int64_t memory_id, const char *text, const config_t *cfg,
-                        memory_cognify_result_t *out)
+int memory_cognify_unit(int64_t memory_id, const char *text, memory_cognify_result_t *out)
 {
    memory_cognify_result_t local;
    if (!out)
       out = &local;
    memset(out, 0, sizeof(*out));
 
-   if (!cfg || !cfg->memory_cognify_enabled)
+   const char *cognify_command = config_memory_cognify_command();
+   if (!config_memory_cognify_enabled())
       return -1;
-   if (!cfg->memory_cognify_command[0])
+   if (!cognify_command || !cognify_command[0])
       return -1;
    if (!text || !text[0])
       return -1;
 
 #if defined(AIMEE_DB2_DISABLED)
-   if (cfg->memory_cognify_async_enabled && memory_id > 0 && db1_cognify_job_enqueue)
+   if (config_memory_cognify_async_enabled() && memory_id > 0 && db1_cognify_job_enqueue)
    {
       db1_cognify_job_enqueue(memory_id);
       return 0;
@@ -363,7 +363,7 @@ int memory_cognify_unit(int64_t memory_id, const char *text, const config_t *cfg
 #else
    /* When async is enabled, enqueue and return immediately; a drain worker
     * will process the job later via memory_cognify_drain(). */
-   if (cfg->memory_cognify_async_enabled && memory_id > 0 && db1_cognify_job_enqueue)
+   if (config_memory_cognify_async_enabled() && memory_id > 0 && db1_cognify_job_enqueue)
    {
       db1_cognify_job_enqueue(memory_id);
       return 0;
@@ -382,8 +382,7 @@ int memory_cognify_unit(int64_t memory_id, const char *text, const config_t *cfg
 
    char *resp = NULL;
    size_t resp_len = 0;
-   int rc = platform_exec_pipe(cfg->memory_cognify_command, input_str, strlen(input_str), &resp,
-                               &resp_len);
+   int rc = platform_exec_pipe(cognify_command, input_str, strlen(input_str), &resp, &resp_len);
    free(input_str);
    if (rc != 0 || !resp || resp_len == 0)
    {
@@ -493,18 +492,14 @@ static int mcj_claim_next(int64_t *job_id, int64_t *memory_id, int *attempts, in
 }
 #endif
 
-int memory_cognify_drain(const config_t *cfg, int timeout_secs, memory_cognify_queue_stats_t *out)
+int memory_cognify_drain(int timeout_secs, memory_cognify_queue_stats_t *out)
 {
 #if defined(AIMEE_DB2_DISABLED)
-   (void)cfg;
    (void)timeout_secs;
    if (out)
       return memory_cognify_queue_status(out);
    return 0;
 #else
-   if (!cfg)
-      return -1;
-
    time_t started = time(NULL);
    memory_cognify_queue_stats_t stats;
    memset(&stats, 0, sizeof(stats));
@@ -535,7 +530,7 @@ int memory_cognify_drain(const config_t *cfg, int timeout_secs, memory_cognify_q
       if (content[0])
       {
          memory_cognify_result_t result;
-         rc = memory_cognify_unit(mid, content, cfg, &result);
+         rc = memory_cognify_unit(mid, content, &result);
          if (rc != 0)
             snprintf(errbuf, sizeof(errbuf), "cognify_unit failed for memory %lld", (long long)mid);
       }

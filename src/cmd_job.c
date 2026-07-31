@@ -114,7 +114,7 @@ static void job_start(app_ctx_t *ctx, int argc, char **argv)
    {
       /* Extract file paths from the step action if present.
          For now, use an empty file list; the caller can populate via MCP. */
-      int tid = db1_coord_job_add_task(job_id, plan.steps[i].id, "[]", "", "", "");
+      int tid = db1_coord_job_add_task(job_id, plan.steps[i].id, "[]", "", "", "", "");
       if (tid > 0)
          added++;
    }

@@ -477,7 +477,7 @@ static void bootstrap_local_tools_end(int lockfd)
 }
 #endif
 
-static int bootstrap_db2_try_url(config_t *cfg, const char *url, int save_config, cJSON *resp)
+static int bootstrap_db2_try_url(const char *url, int save_config, cJSON *resp)
 {
    if (!url || !url[0])
       return -1;
@@ -494,8 +494,7 @@ static int bootstrap_db2_try_url(config_t *cfg, const char *url, int save_config
 
    if (save_config)
    {
-      snprintf(cfg->db2_url, sizeof(cfg->db2_url), "%s", url);
-      if (config_save(cfg) != 0)
+      if (config_set("db2_url", url) != 0)
       {
          /* DB2 is already proven healthy (db2_init + health probe above). The
           * config persist is only a fast-path cache for later starts — the URL
@@ -580,11 +579,12 @@ static int bootstrap_db2_with_local_tools(cJSON *steps)
    return rc == 0 ? 0 : -1;
 }
 
-/* Resolve and bootstrap DB2 for `cfg`. Mutates cfg.db2_url to the URL that
- * succeeded and persists it via config_save. `resp` collects step-level
- * details (used by the init RPC; pass a throwaway object when calling from
- * startup). Returns 0 on success, 1 on failure. */
-static int kb_bootstrap_db2_resolve(config_t *cfg, cJSON *resp)
+/* Resolve and bootstrap DB2, persisting the URL that succeeded via config_set
+ * (which republishes the live snapshot, so a caller re-reading afterwards sees
+ * it). `resp` collects step-level details (used by the init RPC; pass a
+ * throwaway object when calling from startup). Returns 0 on success, 1 on
+ * failure. */
+static int kb_bootstrap_db2_resolve(cJSON *resp)
 {
    cJSON *steps = cJSON_AddArrayToObject(resp, "steps");
 
@@ -595,31 +595,28 @@ static int kb_bootstrap_db2_resolve(config_t *cfg, cJSON *resp)
     * an earlier boot goes stale. Preferring the cached value (as before) made
     * the kb connect to the old/wrong address forever — even though the correct
     * URL was right there in the environment. The successful bootstrap below
-    * re-persists this URL, refreshing the cache. The cached value is used only
-    * as a fallback when AIMEE_DB2_URL is unset (manual / non-container setups). */
-   config_apply_db2_url_env_override(cfg);
+    * re-persists this URL (config_set inside bootstrap_db2_try_url), refreshing
+    * the cache. The cached value is used only as a fallback when AIMEE_DB2_URL is
+    * unset (manual / non-container setups). That precedence now lives in
+    * config_db2_url_effective() rather than being applied to a struct here.
+    *
+    * `url` is a stable copy for the same reason it always was: try_url used to
+    * write the winner back through the same buffer it was reading, and
+    * snprintf'ing a buffer onto itself is undefined -- on glibc it truncated the
+    * destination to empty, leaving db2_init() with an empty URL. */
+   char url[CONFIG_DB2_URL_LEN];
+   int have_url = config_db2_url_effective(url, sizeof(url));
 
-   if (cfg->db2_url[0])
-   {
-      /* Pass a stable copy: bootstrap_db2_try_url writes the winning URL back
-       * into cfg->db2_url via snprintf, and snprintf'ing a buffer onto itself
-       * (src == dst) is undefined — on glibc it truncates the destination to
-       * empty. That left cfg->db2_url blank, so the real db2_init(cfg->db2_url)
-       * below failed with an empty URL. Only triggered when db2_url came from
-       * AIMEE_DB2_URL with no configured value (e.g. the container deploy). */
-      char url[sizeof(cfg->db2_url)];
-      snprintf(url, sizeof(url), "%s", cfg->db2_url);
-      if (bootstrap_db2_try_url(cfg, url, 1, resp) == 0)
-         return 0;
-   }
-
-   if (!cfg->db2_url[0] && bootstrap_db2_try_url(cfg, AIMEE_DB2_BOOTSTRAP_URL, 1, resp) == 0)
+   if (have_url && bootstrap_db2_try_url(url, 1, resp) == 0)
       return 0;
 
-   if (!cfg->db2_url[0])
+   if (!have_url && bootstrap_db2_try_url(AIMEE_DB2_BOOTSTRAP_URL, 1, resp) == 0)
+      return 0;
+
+   if (!have_url)
    {
       (void)bootstrap_db2_with_local_tools(steps);
-      if (bootstrap_db2_try_url(cfg, AIMEE_DB2_BOOTSTRAP_URL, 1, resp) == 0)
+      if (bootstrap_db2_try_url(AIMEE_DB2_BOOTSTRAP_URL, 1, resp) == 0)
          return 0;
    }
 
@@ -637,11 +634,9 @@ static int kb_bootstrap_db2_resolve(config_t *cfg, cJSON *resp)
 
 static int kb_bootstrap_db2(int json_output)
 {
-   config_t cfg;
-   config_load(&cfg);
    cJSON *resp = cJSON_CreateObject();
 
-   (void)kb_bootstrap_db2_resolve(&cfg, resp);
+   (void)kb_bootstrap_db2_resolve(resp);
 
    int ok = 0;
    cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
@@ -711,14 +706,11 @@ static int kb_cmd_enroll(int argc, char **argv)
  * db2_init and exits; does not start the service. */
 static int kb_run_fusion_probe(const char *query)
 {
-   config_t cfg;
-   config_load(&cfg);
-
    /* memory_find_facts takes the lexical-fallback path (which skips the fusion
     * block) unless the pgvector memory collection exists, so ensure it. */
    if (pgvec_memory_vector_collection_exists() <= 0)
    {
-      int dim = cfg.embedding_dim > 0 ? cfg.embedding_dim : 1024;
+      int dim = config_embedding_dim() > 0 ? config_embedding_dim() : 1024;
       (void)pgvec_memory_vector_collection_recreate(dim);
    }
 
@@ -767,19 +759,17 @@ static int kb_run_fusion_probe(const char *query)
  * remote thin-client `aimee team` needs human-actor forwarding to kb — P5.) */
 static int kb_cmd_tenancy_init_db2(void)
 {
-   config_t cfg;
-   config_load(&cfg);
-   config_apply_db2_url_env_override(&cfg);
-   if (!cfg.db2_url[0])
+   char db2_url[CONFIG_DB2_URL_LEN];
+   if (!config_db2_url_effective(db2_url, sizeof(db2_url)))
    {
       fprintf(stderr, "aimee-kb: db2_url not configured (set AIMEE_DB2_URL or run `aimee init`)\n");
       return -1;
    }
    db2_set_embedding_dim_default(config_embedding_dim_default());
-   db2_set_embedding_dim(config_embedding_dim_effective(&cfg));
-   if (db2_init(cfg.db2_url) != 0)
+   db2_set_embedding_dim(config_embedding_dim_current());
+   if (db2_init(db2_url) != 0)
    {
-      fprintf(stderr, "aimee-kb: DB2 not reachable at %s\n", cfg.db2_url);
+      fprintf(stderr, "aimee-kb: DB2 not reachable at %s\n", db2_url);
       return -1;
    }
    return 0;
@@ -1758,8 +1748,19 @@ int main(int argc, char **argv)
    agent_http_init();
    kb_install_signal_handlers();
 
-   config_t kb_cfg;
-   config_load(&kb_cfg);
+   /* Seed the live snapshot first: from here every config read in this process
+    * is an accessor against it, and the bootstrap below republishes through
+    * config_set when it persists a resolved db2_url. */
+   (void)config_snapshot_seed();
+
+   /* Copied out because kb_vault_tpm_runtime_identity hands BACK one of these
+    * pointers (whichever wins over the env) and main holds it to the end. */
+   char vault_tpm2_tcti[CONFIG_COPY_MAX];
+   char vault_tpm2_nv_index[CONFIG_COPY_MAX];
+   char vault_custody[CONFIG_COPY_MAX];
+   config_vault_tpm2_tcti_copy(vault_tpm2_tcti, sizeof(vault_tpm2_tcti));
+   config_vault_tpm2_nv_index_copy(vault_tpm2_nv_index, sizeof(vault_tpm2_nv_index));
+   config_vault_custody_copy(vault_custody, sizeof(vault_custody));
 
    /* aimee-kb records the AUTHORITATIVE memory-mutation events on its own
     * observability bus at the store (every caller). Open the KB audit ledger so
@@ -1775,8 +1776,8 @@ int main(int argc, char **argv)
    int vault_operator_enabled = vault_operator_enable && strcmp(vault_operator_enable, "1") == 0;
    const char *vault_tpm2_effective_tcti = NULL;
    const char *vault_tpm2_effective_nv_index = NULL;
-   kb_vault_tpm_runtime_identity(kb_cfg.vault_tpm2_tcti, kb_cfg.vault_tpm2_nv_index,
-                                 &vault_tpm2_effective_tcti, &vault_tpm2_effective_nv_index);
+   kb_vault_tpm_runtime_identity(vault_tpm2_tcti, vault_tpm2_nv_index, &vault_tpm2_effective_tcti,
+                                 &vault_tpm2_effective_nv_index);
    if ((vault_operator_enable && !vault_operator_enabled) ||
        (vault_operator_enabled != (vault_orchestrator_url && vault_orchestrator_url[0])))
    {
@@ -1784,7 +1785,7 @@ int main(int argc, char **argv)
       agent_http_cleanup();
       return 1;
    }
-   if (vault_operator_enabled && strcmp(kb_cfg.vault_custody, "tpm2") != 0)
+   if (vault_operator_enabled && strcmp(vault_custody, "tpm2") != 0)
    {
       fputs("aimee-kb: vault operator status requires TPM2 custody\n", stderr);
       agent_http_cleanup();
@@ -1806,22 +1807,22 @@ int main(int argc, char **argv)
     * overrides the configured value (containerized deploys without a writable
     * aimee.yaml). */
    db2_set_embedding_dim_default(config_embedding_dim_default());
-   db2_set_embedding_dim(config_resolve_embedding_dim(&kb_cfg));
-   db2_set_embedding_dim_pinned(config_embedding_dim_is_pinned(&kb_cfg));
+   db2_set_embedding_dim(config_resolve_embedding_dim_current());
+   db2_set_embedding_dim_pinned(config_embedding_dim_pinned_current());
    /* unified-llm-container §2: activate the model-identity drift guard (the kb applies
     * the schema, so this is the load-bearing site). Empty embedding_model => no-op. */
-   db2_set_embedder_model_id(kb_cfg.embedding_model);
+   db2_set_embedder_model_id(config_embedding_model());
    /* §2b: on a FRESH DB with no pin, let db2_init derive the dim from the running
     * embedder's /health instead of the default — but only when a REAL remote embed
     * command is configured (the lexical "builtin" has no /health and a fixed dim,
     * so probing it would never succeed and would stall the retry loop). */
    {
-      const char *embed_cmd = config_embedding_command(&kb_cfg, NULL);
+      const char *embed_cmd = config_embedding_command_current(NULL);
       if (embed_cmd && strcmp(embed_cmd, "builtin") != 0)
          embedder_probe_register(embed_cmd);
    }
    /* Size the DB2 connection pool (leased by worker threads) before db2_init. */
-   db2_set_pool_size(aimee_resolve_db2_pool_size(kb_cfg.db2_connection_pool_size));
+   db2_set_pool_size(aimee_resolve_db2_pool_size(config_db2_connection_pool_size()));
 
    /* AIMEE_DB2_URL, when set, is the source of truth and overrides any db2_url
     * cached in aimee.yaml from a previous boot — applied here unconditionally,
@@ -1830,19 +1831,21 @@ int main(int argc, char **argv)
     * new bridge IP, the persisted db2_url goes stale. kb_bootstrap_db2_resolve()
     * already prefers the env URL, but it only runs when db2_url is empty (the
     * gate below), so a populated-but-stale cached URL would skip the override
-    * entirely and db2_init() below would dial the dead address and exit. Apply
-    * the override here so the kb self-heals across Postgres IP drift. */
-   config_apply_db2_url_env_override(&kb_cfg);
+    * entirely and db2_init() below would dial the dead address and exit. The
+    * precedence now lives in config_db2_url_effective(), which every read below
+    * goes through, so there is no struct to pre-apply it to and no window in
+    * which a stale cached value is visible. */
 
    /* Auto-bootstrap on startup so kb keeps working for users who upgrade past
     * the "DB2 required" cutover (#1151) without their config being touched.
     * Mirrors the init RPC's fallback chain: env URL → default URL → createdb
     * locally. Persists the resolved URL to config so subsequent starts are a
     * fast path. */
-   if (!kb_cfg.db2_url[0])
+   char db2_url[CONFIG_DB2_URL_LEN];
+   if (!config_db2_url_effective(db2_url, sizeof(db2_url)))
    {
       cJSON *resp = cJSON_CreateObject();
-      int rc = kb_bootstrap_db2_resolve(&kb_cfg, resp);
+      int rc = kb_bootstrap_db2_resolve(resp);
       if (rc != 0)
       {
          /* kb_bootstrap_db2_resolve already recorded WHY each fallback failed —
@@ -1882,7 +1885,12 @@ int main(int argc, char **argv)
    /* Publish the fully resolved daemon config before request threads start.
     * This keeps hot-path config reads on the lock-free snapshot instead of
     * racing through the process-wide file mtime cache. */
-   config_snapshot_init(&kb_cfg);
+   /* Republish: the bootstrap above may have persisted a resolved db2_url. */
+   (void)config_snapshot_seed();
+   /* And re-read it. The value taken before the bootstrap is the PRE-bootstrap
+    * one; when the bootstrap succeeded it wrote a different URL, and dialling the
+    * old one here would undo the whole point of bootstrapping. */
+   (void)config_db2_url_effective(db2_url, sizeof(db2_url));
 
    /* DB2 owns project, workspace, and global knowledge for aimee-kb.
     *
@@ -1899,17 +1907,17 @@ int main(int argc, char **argv)
       const int db2_max_attempts = 24; /* ~2 min at 5s spacing */
       const int db2_retry_secs = 5;
       int attempt = 1;
-      while (db2_init(kb_cfg.db2_url) != 0)
+      while (db2_init(db2_url) != 0)
       {
          if (attempt >= db2_max_attempts)
          {
-            fprintf(stderr, "aimee-kb: DB2 init failed for %s after %d attempts (%ds)\n",
-                    kb_cfg.db2_url, attempt, attempt * db2_retry_secs);
+            fprintf(stderr, "aimee-kb: DB2 init failed for %s after %d attempts (%ds)\n", db2_url,
+                    attempt, attempt * db2_retry_secs);
             agent_http_cleanup();
             return 1;
          }
-         fprintf(stderr, "aimee-kb: DB2 not ready (%s); retry %d/%d in %ds\n", kb_cfg.db2_url,
-                 attempt, db2_max_attempts, db2_retry_secs);
+         fprintf(stderr, "aimee-kb: DB2 not ready (%s); retry %d/%d in %ds\n", db2_url, attempt,
+                 db2_max_attempts, db2_retry_secs);
          sleep(db2_retry_secs);
          attempt++;
       }
@@ -1935,7 +1943,7 @@ int main(int argc, char **argv)
    /* Every TPM2-custodied daemon takes the same NV-index singleton, including
     * deployments where D3 operator status is disabled. This closes the mixed
     * enabled/disabled race before custody initialization or any listener. */
-   if (strcmp(kb_cfg.vault_custody, "tpm2") == 0)
+   if (strcmp(vault_custody, "tpm2") == 0)
    {
       char lock_error[192] = "";
       if (kb_vault_tpm_runtime_lock_acquire(
@@ -1960,7 +1968,7 @@ int main(int argc, char **argv)
     * vault.custody value is likewise rejected. */
    {
       char custody_err[160] = "";
-      if (kb_vault_policy_select(kb_cfg.vault_custody, custody_err, sizeof(custody_err)) != 0)
+      if (kb_vault_policy_select(vault_custody, custody_err, sizeof(custody_err)) != 0)
       {
          fprintf(stderr, "aimee-kb: %s\n", custody_err);
          db2_shutdown();
@@ -2228,14 +2236,14 @@ int main(int argc, char **argv)
       agent_http_cleanup();
       return 1;
    }
-   g_ctx.worker_count = kb_cfg.kb_connection_workers;
+   g_ctx.worker_count = config_kb_connection_workers();
 
    /* #4-full render backend: register the command-driven computed-style render
     * adapter when css_render_command is configured (no-op otherwise — the oracle
     * then reports UNAVAILABLE rather than guessing). */
    css_render_cmd_register();
 
-   int http_port = http_port_override >= 0 ? http_port_override : kb_cfg.kb_api_http_port;
+   int http_port = http_port_override >= 0 ? http_port_override : config_kb_api_http_port();
    if (http_port <= 0)
    {
       kb_service_shutdown(&g_ctx);
@@ -2262,7 +2270,7 @@ int main(int argc, char **argv)
    kb_oidc_jwks_fleet_enable();
    /* P9a: register the /v1/metrics + /v1/telemetry/metrics scrape/ingest token
     * (config telemetry.metrics_token, a SHA-256 hex) before the listener accepts. */
-   kb_http_set_telemetry_token(kb_cfg.telemetry_metrics_token);
+   kb_http_set_telemetry_token(config_telemetry_metrics_token());
    if (vault_tpm_runtime_lock &&
        kb_vault_tpm_runtime_lock_revalidate(vault_tpm_runtime_lock) != KB_VAULT_TPM_RUNTIME_LOCK_OK)
    {
@@ -2292,7 +2300,7 @@ int main(int argc, char **argv)
       agent_http_cleanup();
       return 1;
    }
-   if (kb_http_start(http_port, kb_cfg.kb_api_bearer_token) != 0)
+   if (kb_http_start(http_port, config_kb_api_bearer_token()) != 0)
    {
       /* Another instance owns the port; yield gracefully with success so
        * systemd (Restart=on-failure) doesn't restart-loop. */
@@ -2317,7 +2325,7 @@ int main(int argc, char **argv)
     * tools/list. Boot filters by install target — a no-op when none are
     * configured. Each plugin is OSV-scanned at startup (same gate as the server
     * path; see kb_mcp_osv_stub.c). Torn down after kb_http_stop() below. */
-   (void)mcp_client_registry_boot(&kb_cfg, CONFIG_MCP_INSTALL_KB);
+   (void)mcp_client_registry_boot(CONFIG_MCP_INSTALL_KB);
 
    /* Optional distributed-mode mTLS listener (every request presents a CA-issued
     * client cert; scope comes from the cert). Enabled by AIMEE_KB_MTLS_PORT. */

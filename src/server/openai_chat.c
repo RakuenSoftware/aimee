@@ -103,8 +103,7 @@ static void record_avoided_turn(const char *model, double avoided_cost)
 static int dedup_eligible(char *key, size_t key_cap, const agent_t *ag, const char *endpoint,
                           const char *body, const char *context, int *ttl_out)
 {
-   config_t cfg;
-   if (config_load(&cfg) != 0 || !cfg.dedup_enabled)
+   if (!config_present() || !config_dedup_enabled())
       return 0;
    const char *idem = request_context_idempotency_key();
    if (!idem || !idem[0])
@@ -112,8 +111,9 @@ static int dedup_eligible(char *key, size_t key_cap, const agent_t *ag, const ch
    const request_context_t *rc = request_context_get();
    /* Behaviour-affecting config flags that can change generation for this path. */
    char flags[96];
-   snprintf(flags, sizeof(flags), "cs%d rc%d pi%d dw%d", cfg.cache_shaping_enabled,
-            cfg.reasoning_cap_enabled, cfg.ingress_preinject_enabled, cfg.dedup_window_seconds);
+   snprintf(flags, sizeof(flags), "cs%d rc%d pi%d dw%d", config_cache_shaping_enabled(),
+            config_reasoning_cap_enabled(), config_ingress_preinject_enabled(),
+            config_dedup_window_seconds());
    response_dedup_key_inputs_t in = {
        .principal = request_context_principal(),
        .source = rc ? rc->source : "",
@@ -128,8 +128,8 @@ static int dedup_eligible(char *key, size_t key_cap, const agent_t *ag, const ch
    };
    response_dedup_key(&in, key, key_cap);
    if (ttl_out)
-      *ttl_out =
-          cfg.dedup_window_seconds > 0 ? cfg.dedup_window_seconds : RESPONSE_DEDUP_TTL_SECONDS;
+      *ttl_out = config_dedup_window_seconds() > 0 ? config_dedup_window_seconds()
+                                                   : RESPONSE_DEDUP_TTL_SECONDS;
    return 1;
 }
 
@@ -467,11 +467,7 @@ static int embeddings_handler(const char *body, char *resp, int cap)
                           "invalid embeddings request: expected `input` string or array");
       return 400;
    }
-
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   config_load(&cfg);
-   const char *cmd = config_embedding_command(&cfg, NULL);
+   const char *cmd = config_embedding_command_current(NULL);
 
    float **vecs = calloc((size_t)n, sizeof(float *));
    int *dims = calloc((size_t)n, sizeof(int));
@@ -1011,8 +1007,7 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
       return -1;
    }
 
-   config_t econ_cfg;
-   int economizer_active = config_load(&econ_cfg) == 0 && econ_mode(&econ_cfg) != ECON_MODE_OFF;
+   int economizer_active = econ_mode_current() != ECON_MODE_OFF;
    int wire_anthropic = driver && driver->name && strcmp(driver->name, "anthropic") == 0;
    econ_wire_route_t wire_route = wire_anthropic              ? ECON_WIRE_ANTHROPIC_MESSAGES
                                   : strstr(url, "/responses") ? ECON_WIRE_OPENAI_RESPONSES
@@ -1030,12 +1025,9 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
    }
 
    char *response_body = NULL;
-   config_t retry_cfg;
-   config_load(&retry_cfg);
-   int ra =
-       retry_cfg.retry_max_attempts > 0 ? retry_cfg.retry_max_attempts : HTTP_RETRY_MAX_ATTEMPTS;
-   int rb = retry_cfg.retry_base_ms > 0 ? retry_cfg.retry_base_ms : HTTP_RETRY_BASE_MS;
-   int rm = retry_cfg.retry_max_ms > 0 ? retry_cfg.retry_max_ms : HTTP_RETRY_MAX_MS;
+   int ra = config_retry_max_attempts() > 0 ? config_retry_max_attempts() : HTTP_RETRY_MAX_ATTEMPTS;
+   int rb = config_retry_base_ms() > 0 ? config_retry_base_ms() : HTTP_RETRY_BASE_MS;
+   int rm = config_retry_max_ms() > 0 ? config_retry_max_ms() : HTTP_RETRY_MAX_MS;
    int http_status = http_retry_post_context_bytes(url, auth_header, wire_body.data, wire_body.len,
                                                    &response_body, agent->timeout_ms, extra_headers,
                                                    ra, rb, rm, agent->provider, agent->model, NULL);
@@ -1073,8 +1065,7 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
  * deprecated env default. Cached config_load; keeps gw_stage_governance config-free. */
 static int openai_governance_enabled(void)
 {
-   config_t c;
-   int tri = (config_load(&c) == 0) ? c.module_governance : -1;
+   int tri = config_present() ? config_module_governance() : -1;
    return config_module_enabled(tri, gw_response_governance_enabled());
 }
 
