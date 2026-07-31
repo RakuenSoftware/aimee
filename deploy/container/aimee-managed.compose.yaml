@@ -137,7 +137,6 @@ services:
 
 volumes:
   aimee-managed-kb-home:
-  aimee-managed-llm-models:
   aimee-managed-authority-home:
   aimee-server-workspaces:
     external: true
