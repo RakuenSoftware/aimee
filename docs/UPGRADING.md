@@ -1,9 +1,19 @@
 # Upgrading from v0.2.192
 
+There is no route back. 0.3.0 rewrites storage, credentials, and remote identity, and a 0.2 server
+will not read what it leaves behind. Your backup is the rollback plan; there is no downgrade
+command. Take the backup before step one, not after the first thing goes wrong.
+
 Read [What's new](WHATS_NEW.md) first. This cycle changes deployment, storage, credentials, remote
 identity, workflows, and removed commands.
 
-## Before
+Do not install from the `v0.2.196` or `v0.3.0` tags. Both were promoted in error part-way through
+this cycle and are not releases; an installation from either is an untested mid-cycle build missing
+the fixes listed under
+[If you installed from a mid-cycle tag](WHATS_NEW.md#if-you-installed-from-a-mid-cycle-tag).
+Several of those are cases where a fresh install came up healthy and silently did nothing useful.
+
+## Do all of this before you touch the running deployment
 
 1. Stop starting new workflows and wait for active writes to finish.
 2. Run `aimee audit checkpoint` and `aimee audit verify`.
@@ -15,7 +25,7 @@ identity, workflows, and removed commands.
 
 Do not rely on a raw copy of a live SQLite main file. Take a consistent backup with its WAL state.
 
-## Deployment changes
+## The combined image is gone, and the new stack will not adopt your old database
 
 - Replace `aimee-combined` with the managed server or split stack.
 - New KB containers start private PostgreSQL when `AIMEE_DB2_URL` is unset.
@@ -25,7 +35,7 @@ Do not rely on a raw copy of a live SQLite main file. Take a consistent backup w
 - Never use `docker compose down -v` until the new database has been verified and the backup has
   been restored in a clean test.
 
-## Identity and credentials
+## Credentials move into the vault, and clients re-enrol
 
 - Move agent keys and OAuth tokens into the server vault.
 - Remove legacy client plaintext only after a successful provider probe.
@@ -45,7 +55,7 @@ with:
 ```
 
 Older images gate startup on `aimee-server --webchat-vault-check`, which wants the vault to hold a
-webchat login — the sealed `AIMEE_WEBCHAT_USER`/`AIMEE_WEBCHAT_PASSWORD` pair, or one of the
+webchat login: the sealed `AIMEE_WEBCHAT_USER`/`AIMEE_WEBCHAT_PASSWORD` pair, or one of the
 `legacy_primary` / `legacy_hashes` / `accounts` records. This release holds none of them on purpose:
 PAM owns the accounts and the first-boot password is never sealed (see below). There is nothing for
 the old check to find, and adding something for it to find would mean persisting a password this
@@ -68,8 +78,8 @@ sealed into the vault, and the shadow verifiers behind them are no longer erased
 `webchat/logins` into the vault is in a state this upgrade cannot repair by itself: that migration
 sealed the verifiers into the vault's `legacy_hashes` record and then erased them from
 `/etc/shadow`. Those accounts therefore have no PAM credential to restore, and only the first-boot
-pair is provisioned. Any dashboard account created through the wizard on such an appliance — the
-account named in `webchat/bootstrap-replaced` — must be recreated after upgrading.
+pair is provisioned. Any dashboard account created through the wizard on such an appliance (the
+account named in `webchat/bootstrap-replaced`) must be recreated after upgrading.
 
 To tell whether you are affected:
 
@@ -157,7 +167,7 @@ Common refusal reasons are `absent`, `invalid`, `unknown_kid`, `wrong_team`,
 `no_team_configured`, `replay`, and `replay_unavailable`. Use the structured `403`, request ID, and
 server log. A grant for the wrong spelling is a grant for nobody.
 
-## Removed surfaces
+## What is gone, and what replaces it
 
 - `aimee chat`
 - `aimee work` and its routes/tools/tables
@@ -169,7 +179,7 @@ server log. A grant for the wrong spelling is a grant for nobody.
 
 Update scripts to use named `/v1` routes, workflows/jobs, and browser/MCP/ACP/API chat surfaces.
 
-## After
+## Verify these before you call the upgrade done
 
 ```bash
 aimee remote status

@@ -4,7 +4,7 @@ The browser is a client of `aimee-server`, `aimee-wfe`, and `aimee-kb`. It owns 
 state; it does not own product data.
 
 Login is a **local PAM account** in the `aimee-webchat` group, checked through the `aimee` PAM
-service — the same stack the KB's `/v1/identity/login/pam` uses. Accounts outside that group are
+service, the same stack the KB's `/v1/identity/login/pam` uses. Accounts outside that group are
 never dashboard logins, so the container's own system users cannot sign in. An unavailable PAM stack
 is reported as such rather than as a wrong password.
 

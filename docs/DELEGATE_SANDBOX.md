@@ -65,7 +65,7 @@ a sandbox audit event with the missing boundary.
 
 Never silently fall back from container to host shell.
 
-## Non-sandbox security — unresolved
+## Non-sandbox security, unresolved
 
 This section is a marker, not a description of shipped behavior. Tracked in
 [issue #2190](https://github.com/RakuenSoftware/aimee/issues/2190).
@@ -76,9 +76,9 @@ open:
 - **The INERT path contradicts "never silently fall back".** When the dial is on but no docker
   daemon is reachable, `delegate_sandbox_log_posture()` logs `INERT` at boot and delegates then run
   on the host. `delegate_sandbox_require_isolation` is the fail-closed guard, but it defaults to
-  off — so the default posture claims sandboxed and, on a box without docker, is not.
-- **The in-process boundary is undefined.** When there is no sandbox — no docker, a runtime that
-  ignores `--network none`, or a deliberate opt-out — what protects the host is an implicit union of
+  off, so the default posture claims sandboxed and, on a box without docker, is not.
+- **The in-process boundary is undefined.** When there is no sandbox (no docker, a runtime that
+  ignores `--network none`, or a deliberate opt-out), what protects the host is an implicit union of
   the shell-git gate, the credential strip, and the guardrails path policy. That union is not stated
   as a guarantee anywhere and is not tested as one.
 
