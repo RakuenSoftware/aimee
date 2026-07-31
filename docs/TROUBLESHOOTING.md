@@ -46,6 +46,67 @@ workspace authority, worktree, sandbox image, package gate, network policy, and 
 No network is the container default. Add the narrow egress the task needs; do not disable isolation
 globally.
 
+## Delegate cannot open a file that is plainly there
+
+The file tool answers `cannot open <path>` for a file you can see in the delegate's worktree.
+
+Its sandbox mounted an empty directory. When aimee-server runs in a container and drives a sibling
+Docker daemon, a bind source expressed in the server's own filesystem does not exist on the daemon's
+host, and Docker creates it empty rather than failing. Look at where the mount actually points:
+
+```bash
+docker inspect <aimee-delegate-...> --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}'
+```
+
+A source equal to its destination on a sibling-daemon host means the translation did not apply. The
+entrypoint derives it and says so at startup:
+
+```bash
+docker logs <server> 2>&1 | grep 'derived host-path map'
+```
+
+See [Delegate sandbox](DELEGATE_SANDBOX.md).
+
+## Delegated shell is refused as unsandboxed
+
+```text
+refused: a delegated shell requires sandbox isolation, but the sandbox is off/unavailable
+```
+
+The delegate has no assigned worktree, so there was nothing to containerise and it fell through to
+running beside the server. That refusal is correct: aimee-server holds the Docker socket, so an
+unsandboxed shell there is a host-root escalation. Give the delegate a workspace. Do not reach for
+`sandbox.mode` to make the message go away.
+
+## A settings change seems to have been ignored
+
+Read the log before assuming the field needs a restart:
+
+```bash
+docker logs <server> 2>&1 | grep '^config: config file change'
+```
+
+`rejected (kept running config)` means the file did not validate and the previous configuration is
+still serving, so the edit did nothing. `reloaded` means it applied, and the field is live.
+
+If neither line appears, the field is one of the startup-bound ones. [Settings](SETTINGS.md) lists
+the classes.
+
+## A deploy reported success and changed nothing
+
+Check what is actually running before believing any other result:
+
+```bash
+docker pull <image>            # let the output show; a quiet pull hides a no-op
+docker image inspect <image> --format '{{.Id}}'
+docker inspect <container> --format '{{.Image}}'
+```
+
+A tag that looks current makes `pull` a no-op, Compose then reports `Running` and keeps the old
+container, and every check after that silently tests the previous build. Assert the two IDs match
+before drawing a conclusion. `aimee --version` reporting an older commit than your branch is normal
+for a docs-only change, because the image only rebuilds when image-affecting paths change.
+
 ## Workflow parks
 
 Read the named park reason and latest artifact. Common causes are a human gate, no valid panel,
