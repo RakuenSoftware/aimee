@@ -37,7 +37,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 8
+        "fn": 7
       },
       "infra": {
         "precision": 0.0,
@@ -45,7 +45,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 6
+        "fn": 7
       },
       "multi_fact": {
         "precision": 0.0,
@@ -127,7 +127,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 8
+        "fn": 7
       },
       "infra": {
         "precision": 0.0,
@@ -135,7 +135,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 6
+        "fn": 7
       },
       "multi_fact": {
         "precision": 0.0,
@@ -196,7 +196,7 @@
     "fn": 72
   },
   "over_extraction": {
-    "empty_gold_notes": 21,
+    "empty_gold_notes": 22,
     "on_schema_empty_gold_notes": 5,
     "notes_correctly_empty": 5,
     "abstention_rate_on_schema": 1.0,

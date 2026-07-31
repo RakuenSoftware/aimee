@@ -135,15 +135,19 @@ def rel_equal(a, b):
     return a == b or (a in _EQUIV and b in _EQUIV.get(a, ()))
 
 
+USE_ALT = True
+
+
 def triple_eq(p, g, lenient):
     # A gold triple may list alternative renderings of the same fact — naming a
     # device by description rather than hostname, located_in for a person where
     # lives_in was labelled. Matching an alternative satisfies the gold triple
     # and scores as a true positive; it is an equally correct answer, not one to
     # be excused from the denominator.
-    for a in g.get("alt") or ():
-        if _triple_eq_one(p, a, lenient):
-            return True
+    if USE_ALT:
+        for a in g.get("alt") or ():
+            if _triple_eq_one(p, a, lenient):
+                return True
     return _triple_eq_one(p, g, lenient)
 
 
@@ -316,6 +320,10 @@ def main():
                     help="'pred' scores what production would commit (confidence "
                          "floor applied); 'pred_nofloor' scores the same extraction "
                          "with MF_CONF_FLOOR lifted.")
+    ap.add_argument("--no-alt", action="store_true",
+                    help="ignore alternative renderings entirely: both endpoints "
+                         "must match the labelled entity exactly. The strictest "
+                         "reading available.")
     ap.add_argument("--no-alias", action="store_true",
                     help="skip rel_type_canonicalize() alias folding. Production "
                          "folds, so this only exists to measure what aliasing buys.")
@@ -339,6 +347,8 @@ def main():
     for r in pred_rows:
         r["schema_ok"] = derive_schema_ok(r)
 
+    global USE_ALT
+    USE_ALT = not args.no_alt
     seed = set(prompt.seed_relations())
     global SYMMETRIC, INVERSES
     SYMMETRIC = prompt.symmetric_relations()

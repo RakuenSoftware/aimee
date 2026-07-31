@@ -1,11 +1,11 @@
 {
   "strict": {
-    "precision": 0.6066,
-    "recall": 0.5139,
-    "f1": 0.5564,
-    "tp": 37,
-    "fp": 24,
-    "fn": 35,
+    "precision": 0.5902,
+    "recall": 0.5,
+    "f1": 0.5414,
+    "tp": 36,
+    "fp": 25,
+    "fn": 36,
     "by_category": {
       "ambiguous": {
         "precision": 0.25,
@@ -32,20 +32,20 @@
         "fn": 3
       },
       "implicit": {
-        "precision": 0.4444,
-        "recall": 0.5,
-        "f1": 0.4706,
-        "tp": 4,
-        "fp": 5,
+        "precision": 0.3333,
+        "recall": 0.4286,
+        "f1": 0.375,
+        "tp": 3,
+        "fp": 6,
         "fn": 4
       },
       "infra": {
         "precision": 0.75,
-        "recall": 0.5,
-        "f1": 0.6,
+        "recall": 0.4286,
+        "f1": 0.5455,
         "tp": 3,
         "fp": 1,
-        "fn": 3
+        "fn": 4
       },
       "multi_fact": {
         "precision": 0.7273,
@@ -90,12 +90,12 @@
     }
   },
   "lenient": {
-    "precision": 0.623,
-    "recall": 0.5278,
-    "f1": 0.5714,
-    "tp": 38,
-    "fp": 23,
-    "fn": 34,
+    "precision": 0.6066,
+    "recall": 0.5139,
+    "f1": 0.5564,
+    "tp": 37,
+    "fp": 24,
+    "fn": 35,
     "by_category": {
       "ambiguous": {
         "precision": 0.25,
@@ -122,20 +122,20 @@
         "fn": 3
       },
       "implicit": {
-        "precision": 0.4444,
-        "recall": 0.5,
-        "f1": 0.4706,
-        "tp": 4,
-        "fp": 5,
+        "precision": 0.3333,
+        "recall": 0.4286,
+        "f1": 0.375,
+        "tp": 3,
+        "fp": 6,
         "fn": 4
       },
       "infra": {
         "precision": 0.75,
-        "recall": 0.5,
-        "f1": 0.6,
+        "recall": 0.4286,
+        "f1": 0.5455,
         "tp": 3,
         "fp": 1,
-        "fn": 3
+        "fn": 4
       },
       "multi_fact": {
         "precision": 0.7273,
@@ -196,11 +196,11 @@
     "fn": 28
   },
   "over_extraction": {
-    "empty_gold_notes": 21,
-    "on_schema_empty_gold_notes": 21,
+    "empty_gold_notes": 22,
+    "on_schema_empty_gold_notes": 22,
     "notes_correctly_empty": 12,
-    "abstention_rate_on_schema": 0.5714,
-    "spurious_triples": 9
+    "abstention_rate_on_schema": 0.5455,
+    "spurious_triples": 10
   },
   "output_health": {
     "notes": 70,

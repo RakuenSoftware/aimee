@@ -42,6 +42,14 @@ def main():
             if t["relation"] != t["relation"].strip().lower():
                 errs.append(f"{nid}: relation not lowercase: {t['relation']!r}")
             for a in t.get("alt", []):
+                # An alternative may differ ONLY in the predicate. Both endpoints
+                # must name the same entity; surface variation (Dr. vs Dr, case,
+                # underscores) is already absorbed by normalisation. Renaming an
+                # endpoint asserts a fact about a different node.
+                if (a["subject"].casefold() != t["subject"].casefold()
+                        or a["object"].casefold() != t["object"].casefold()):
+                    errs.append(f"{nid}: alt {a} changes an endpoint - an "
+                                f"alternative may differ only in the predicate")
                 ak = (a["subject"].casefold(), a["relation"].casefold(), a["object"].casefold())
                 if ak == key:
                     errs.append(f"{nid}: alt identical to its gold triple {ak}")

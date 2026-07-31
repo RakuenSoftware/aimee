@@ -1,11 +1,11 @@
 {
   "strict": {
-    "precision": 0.7857,
-    "recall": 0.7639,
-    "f1": 0.7746,
-    "tp": 55,
-    "fp": 15,
-    "fn": 17,
+    "precision": 0.7714,
+    "recall": 0.75,
+    "f1": 0.7606,
+    "tp": 54,
+    "fp": 16,
+    "fn": 18,
     "by_category": {
       "ambiguous": {
         "precision": 0.3333,
@@ -32,20 +32,20 @@
         "fn": 0
       },
       "implicit": {
-        "precision": 0.75,
-        "recall": 0.75,
-        "f1": 0.75,
-        "tp": 6,
-        "fp": 2,
+        "precision": 0.625,
+        "recall": 0.7143,
+        "f1": 0.6667,
+        "tp": 5,
+        "fp": 3,
         "fn": 2
       },
       "infra": {
         "precision": 0.8571,
-        "recall": 1.0,
-        "f1": 0.9231,
+        "recall": 0.8571,
+        "f1": 0.8571,
         "tp": 6,
         "fp": 1,
-        "fn": 0
+        "fn": 1
       },
       "multi_fact": {
         "precision": 0.76,
@@ -90,12 +90,12 @@
     }
   },
   "lenient": {
-    "precision": 0.8143,
-    "recall": 0.7917,
-    "f1": 0.8028,
-    "tp": 57,
-    "fp": 13,
-    "fn": 15,
+    "precision": 0.8,
+    "recall": 0.7778,
+    "f1": 0.7887,
+    "tp": 56,
+    "fp": 14,
+    "fn": 16,
     "by_category": {
       "ambiguous": {
         "precision": 0.3333,
@@ -122,20 +122,20 @@
         "fn": 0
       },
       "implicit": {
-        "precision": 0.75,
-        "recall": 0.75,
-        "f1": 0.75,
-        "tp": 6,
-        "fp": 2,
+        "precision": 0.625,
+        "recall": 0.7143,
+        "f1": 0.6667,
+        "tp": 5,
+        "fp": 3,
         "fn": 2
       },
       "infra": {
         "precision": 0.8571,
-        "recall": 1.0,
-        "f1": 0.9231,
+        "recall": 0.8571,
+        "f1": 0.8571,
         "tp": 6,
         "fp": 1,
-        "fn": 0
+        "fn": 1
       },
       "multi_fact": {
         "precision": 0.8,
@@ -219,11 +219,11 @@
     "fn": 11
   },
   "over_extraction": {
-    "empty_gold_notes": 21,
-    "on_schema_empty_gold_notes": 21,
+    "empty_gold_notes": 22,
+    "on_schema_empty_gold_notes": 22,
     "notes_correctly_empty": 20,
-    "abstention_rate_on_schema": 0.9524,
-    "spurious_triples": 1
+    "abstention_rate_on_schema": 0.9091,
+    "spurious_triples": 2
   },
   "output_health": {
     "notes": 70,

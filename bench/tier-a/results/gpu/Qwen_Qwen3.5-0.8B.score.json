@@ -37,15 +37,15 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 4,
-        "fn": 8
+        "fn": 7
       },
       "infra": {
         "precision": 0.75,
-        "recall": 0.5,
-        "f1": 0.6,
+        "recall": 0.4286,
+        "f1": 0.5455,
         "tp": 3,
         "fp": 1,
-        "fn": 3
+        "fn": 4
       },
       "multi_fact": {
         "precision": 1.0,
@@ -127,15 +127,15 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 4,
-        "fn": 8
+        "fn": 7
       },
       "infra": {
         "precision": 0.75,
-        "recall": 0.5,
-        "f1": 0.6,
+        "recall": 0.4286,
+        "f1": 0.5455,
         "tp": 3,
         "fp": 1,
-        "fn": 3
+        "fn": 4
       },
       "multi_fact": {
         "precision": 1.0,
@@ -196,10 +196,10 @@
     "fn": 46
   },
   "over_extraction": {
-    "empty_gold_notes": 21,
-    "on_schema_empty_gold_notes": 21,
-    "notes_correctly_empty": 16,
-    "abstention_rate_on_schema": 0.7619,
+    "empty_gold_notes": 22,
+    "on_schema_empty_gold_notes": 22,
+    "notes_correctly_empty": 17,
+    "abstention_rate_on_schema": 0.7727,
     "spurious_triples": 5
   },
   "output_health": {
