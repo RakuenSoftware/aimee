@@ -487,3 +487,53 @@ keeps a grounded low-confidence fact and drops an ungrounded high-confidence one
 Not fixed: the four non-zero small models were all measured with
 `disable_thinking` set, which cost E4B 0.09. Their thinking-on numbers do not
 exist yet.
+
+## Defect 18: the refusal check was written over a cause, not an outcome
+
+Defect 16 added a check that refuses to score a row which hit `--max-tokens`,
+with the commit message "this class of defect fails loudly or it recurs". It
+recurred within the hour. `Qwen3.6-27B` timed out on three of six Tier-B topics
+against `--timeout 1800` and scored 0.50 format / 0.40 coverage, because the
+check looked at `truncated` and not at `error`.
+
+The check was written over one cause. It is now written over the outcome: a row
+that produced no usable response is not evidence about the model unless the model
+is what produced the emptiness. Truncation and transport error both block.
+
+`--timeout` is also now settable from the sweep, because a per-request bound is a
+harness choice like any other.
+
+## Defect 19: the two lanes contended, and the file said they would
+
+`sweep_b.sh` grew a `cpufit` lane so a model too large for the card could run
+beside the GPU ladder instead of blocking it. The header claimed "it is CPU-bound
+and the gpu lane is not, so serialising them buys nothing."
+
+Three lines above, the same file describes serving an MoE with
+`-ot ".ffn_.*_exps.=CPU"`, which is a CPU workload by construction.
+`docs/LOCAL_INFERENCE.md` describes it too. Running dense `Qwen3.6-27B` on 8
+threads beside `gemma-4-26B-A4B` drove load average to 39.6 on 20 cores:
+
+| | uncontended | contended |
+| --- | ---: | ---: |
+| gemma-4-26B-A4B generation | 27.32 tok/s | 3.03 tok/s |
+| Qwen3.6-27B per topic | ~9 min (est) | 28 min, 3 of 6 timed out |
+
+Nine times slower, not the 10-20% the working assumption tolerates. Both results
+discarded and both re-queued to run alone.
+
+The correctness guard held: `prune_models.sh` refuses to delete weights a live
+`llama-server` holds open, so the lanes never corrupted each other. The cost was
+throughput and two wasted runs.
+
+## Defect 20: overwriting a script while bash is executing it
+
+`sweep_b.sh` was pushed to the CT twice while a sweep was mid-loop. Bash reads a
+script incrementally by byte offset, so rewriting the file shifts everything
+after the read point. The `cpufit` run completed its work and then died on
+`line 150: unexpected EOF while looking for matching '"'` reading a stale offset
+into the new file.
+
+No result was lost, because a `for` loop is parsed as one compound command before
+it runs, and the trailing `echo` is all that was left. That is luck, not design.
+Push to a new path and swap, or stop the sweep first.

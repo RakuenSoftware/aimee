@@ -20,13 +20,20 @@
 #           number in that directory was confounded. They are now a declared CPU
 #           lane, in a directory that says so.
 #
-# cpufit is designed to run CONCURRENTLY with gpu: it is CPU-bound and the gpu
-# lane is not, so serialising them buys nothing. It takes its own port and a
-# bounded thread count so it cannot starve the gpu lane's prompt processing or
-# the MoE expert offload. prune_models.sh already refuses to delete weights a
-# live llama-server holds open, so the two lanes cannot prune each other's model.
+# DO NOT run cpufit concurrently with a gpu lane that has a MoE in it. That was
+# the original design, on the claim that a CPU lane and a GPU lane do not
+# contend. They do, and this file says why three lines above: an MoE served with
+# `-ot .ffn_.*_exps.=CPU` is a CPU workload by construction. Running
+# Qwen3.6-27B (20 threads' worth of dense CPU work) beside gemma-4-26B-A4B drove
+# load average to 39.6 on 20 cores. The MoE fell from 27.32 tok/s to 3.03, and
+# the CPU model timed out on three of six topics. Both results were discarded.
 #
-# Usage: sweep_b.sh [gpu|cpu|cpufit]
+# prune_models.sh does refuse to delete weights a live llama-server holds open,
+# so the lanes were never a correctness hazard to each other. Only a throughput
+# one, and a large one.
+#
+# Usage: sweep_b.sh [gpu|cpu|cpufit|sub1b]
+# Env:   TIMEOUT (per-request seconds, default 1800), THREADS, PORT, SERVER
 set -u
 cd "$(dirname "$0")/.."
 MODE=${1:-gpu}
@@ -117,7 +124,11 @@ for entry in "${MODELS[@]}"; do
     sleep 15
   done
   if [ "$ready" = 1 ]; then
+    # TIMEOUT is settable because the per-request bound is a harness choice, and
+    # a bound that fires is not a model result: Qwen3.6-27B timed out on three of
+    # six topics at the 1800s default and score_b.py now refuses such rows.
     if $PY harness/run_b.py --model "$LABEL" --topics data/topics.jsonl \
+         --timeout "${TIMEOUT:-1800}" \
          --out "$PRED" --base-url "http://127.0.0.1:$PORT" >>"$LOG" 2>&1; then
       $PY harness/score_b.py --topics data/topics.jsonl --pred "$PRED" \
           --json-out "$OUT/$LABEL.score.json" >/dev/null 2>>"$LOG"

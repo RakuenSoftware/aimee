@@ -1,0 +1,2 @@
+{"model":"Qwen3.6-27B","mode":"cpufit","place":"-ngl 0 -t 8","extra":"","cpu_layer_warnings":0
+0,"resident_on_gpu":false}

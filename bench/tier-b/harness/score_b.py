@@ -118,18 +118,28 @@ def main():
         raise SystemExit(
             f"incomplete predictions: {args.pred} has {len(preds)} rows, "
             f"topics has {len(topics)}. Re-run or delete the partial file.")
-    # A row that hit the harness's own --max-tokens cap is a harness artifact, not
-    # a model result: production allows CURATOR_SYNTH_OUTBUF (16384), so a response
-    # cut off below that would not have been cut off in the deployment being
-    # measured. Scoring it as a format failure charges the model for my bound.
-    # gemma-4-12B lost format 1.0 -> 0.833 and coverage 1.0 -> 0.75 to exactly one
-    # such row before this check existed.
-    cut = [p["id"] for p in preds if p.get("truncated")]
-    if cut:
+    # Refuse any row the harness prevented from producing a response, whatever
+    # the mechanism. Scoring one charges the model for a bound I chose.
+    #
+    # This started as a check on --max-tokens alone, after gemma-4-12B lost
+    # format 1.0 -> 0.833 and coverage 1.0 -> 0.75 to a single truncated row.
+    # That fixed the symptom. An hour later Qwen3.6-27B timed out on three of six
+    # topics against --timeout and scored 0.50/0.40, because the refusal looked at
+    # `truncated` and not at `error`. Same defect, different field. So the rule is
+    # now stated over the outcome rather than over one cause: a row without a
+    # usable response is not evidence about the model unless the model is what
+    # produced the emptiness.
+    blocked = {}
+    for p in preds:
+        if p.get("truncated"):
+            blocked[p["id"]] = "hit --max-tokens"
+        elif p.get("error"):
+            blocked[p["id"]] = p["error"]
+    if blocked:
+        detail = ", ".join(f"{k} ({v})" for k, v in sorted(blocked.items()))
         raise SystemExit(
-            f"truncated predictions: {args.pred} rows {cut} hit --max-tokens. "
-            f"Re-run those with a higher cap; scoring them would charge the model "
-            f"for the harness bound.")
+            f"harness-blocked predictions: {args.pred} -> {detail}. Re-run those "
+            f"rows; scoring them would charge the model for the harness bound.")
 
     per, fmt_ok = [], 0
     cov_hit = cov_tot = 0
