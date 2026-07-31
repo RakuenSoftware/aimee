@@ -28,13 +28,19 @@ an empty volume. To choose the credential yourself instead, seal it before the f
 is then generated and nothing is printed:
 
 ```bash
-export AIMEE_WEBCHAT_USER=operator
+export AIMEE_WEBCHAT_USER=admin
 read -rsp 'Initial webchat password: ' AIMEE_WEBCHAT_PASSWORD && echo
 export AIMEE_WEBCHAT_PASSWORD
 scripts/aimee-compose-vault-bootstrap.sh -f compose.server-managed.yaml server
 unset AIMEE_WEBCHAT_PASSWORD
 docker compose -f compose.server-managed.yaml up -d
 ```
+
+Any name works here, including one that is also a group in the image. First boot creates the account
+with `aimee-webchat` as its primary group, so `useradd` never tries to make a group of its own. The
+wizard's account step is stricter and refuses a name that is already a group
+([#2209](https://github.com/RakuenSoftware/aimee/issues/2209)), so the two disagree until that is
+settled. Sealing the pair here is the path that accepts either.
 
 Run the bootstrap script; do not simply export the variables and `up`. `compose.server-managed.yaml`
 deliberately keeps these two out of the server's `environment:` block, because anything listed there
@@ -48,9 +54,44 @@ authenticates against PAM from the first login onward. There is no parallel cred
 no password, verifier, session bearer, or TLS private key is written to the data volume or
 container logs.
 
-Open <https://localhost:8443> and sign in. If you signed in with the generated login, the wizard's
-account step replaces it with a permanent one; a deployment that supplied its own pair skips that
-step. Then work through the initial agent, deploy topology, git accounts, and workspaces.
+Open <https://localhost:8443> and sign in.
+
+![The aimee sign-in page](images/login.png)
+
+Signing in lands you in the chat view with **Set up this instance** already open at step 1 of 6. It
+is a dialog, not a separate page. Closing it does not lose your place: the **Setup** button in the
+header reopens it and shows how many steps are left.
+
+### Step 1: replace the temporary login
+
+![Step 1 of the setup wizard, secure your account](images/wizard-1-account.png)
+
+The generated login is temporary. This step creates the account you will keep, as a real local PAM
+account, and removes the plaintext of the temporary one. A deployment that sealed its own
+`AIMEE_WEBCHAT_USER` pair before first boot skips this step.
+
+Pick a username that is not already a group on the host. The image ships the usual Unix groups, so
+`operator`, `backup`, `staff`, `users`, `news`, `mail`, `proxy`, `adm` and `aimee` will fail here
+with a `useradd` error rather than a readable message
+([#2209](https://github.com/RakuenSoftware/aimee/issues/2209)).
+
+### Step 2: choose the primary provider
+
+![Step 2 of the setup wizard, primary provider](images/wizard-2-provider.png)
+
+An API key for Anthropic or OpenAI, or a Claude or Codex subscription seat signed in through the
+browser. The key is sealed into the server vault and never written to the data volume. You can
+change the primary later on the Agents tab.
+
+### Step 3: choose the knowledge base
+
+![Step 3 of the setup wizard, knowledge base](images/wizard-3-knowledge-base.png)
+
+Deploy one locally, or point at an existing `aimee-kb`. A local knowledge base is the default and
+needs nothing else installed.
+
+The remaining steps cover embedder and synthesizer placement, optional git host connections, and
+workspaces. Steps 5 and 6 can both be skipped and set later.
 
 The final **Deploy** step starts `aimee-kb`, including private PostgreSQL 18, pgvector, and
 pgvectorscale. There is no inference container: the KB embeds in-process from weights baked into its

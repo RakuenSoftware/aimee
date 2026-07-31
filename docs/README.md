@@ -16,7 +16,8 @@ Start here:
 | understand memory and retrieval | [Knowledge](KNOWLEDGE.md), [curator](CURATOR_PIPELINE.md), and [retrieval](retrieval-stack.md) |
 | check support or feature state | [Compatibility](COMPATIBILITY.md) and [status](STATUS.md) |
 | diagnose a failure | [Troubleshooting](TROUBLESHOOTING.md) |
-| upgrade from the last release | [What's new](WHATS_NEW.md) |
+| upgrade from the last release | [What's new](WHATS_NEW.md) and [upgrading](UPGRADING.md) |
+| cut a release | [Releasing](RELEASING.md) |
 | work on aimee itself | [Technical reference](../src/README.md) and [owners](../OWNERS.md) |
 
 ## Product guides
