@@ -608,3 +608,35 @@ message rather than proceeding.
 The general lesson is the one already written down for container deploys and
 ignored here: issue a stop, then ASSERT the stop took, in the script, before
 acting on the assumption. `pkill` followed by a relaunch is not a stop.
+
+## The cross-configuration noise floor is about 0.03 F1
+
+`gemma-4-12B`, one gold set, one prompt, one llama.cpp commit, thinking on:
+
+| config | F1 | precision | recall | triples | abstention |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Q8_0 / 5080 / CUDA | 0.8235 | 0.8116 | 0.8358 | 69 | 0.8261 |
+| Q8_0 / 7900 XTX / Vulkan | 0.8438 | 0.8852 | 0.8060 | 61 | 0.9130 |
+| Q6_K / 7900 XTX / Vulkan | 0.8550 | 0.8750 | 0.8358 | 64 | 0.9130 |
+
+Split of the +0.0315 seen earlier:
+
+- **quantisation**, Q6 against Q8 on the same card and backend: **+0.0112**
+- **backend**, Vulkan against CUDA at the same quantisation: **+0.0203**
+
+Neither is a capability change. Recall is not even monotonic across the three
+(0.8358, 0.8060, 0.8358), and the abstention column tracks the F1 column almost
+exactly: the configurations differ in how readily the model declines to emit on
+the 23 empty-gold notes, not in what it can extract. On 69 notes one triple is
+worth about 0.007 F1, so the whole 0.03 spread is roughly four triples.
+
+Consequences worth holding onto:
+
+1. **Q6 is not "better than Q8".** It is +0.011 on one model on one corpus, in
+   the direction that abstention alone explains. Anyone reading these tables
+   should not conclude a lower quantisation improves extraction.
+2. **0.03 is the floor below which cross-host comparison says nothing.** A
+   challenger scoring within 0.03 of Gemma 4 on a different host has not been
+   shown to differ from it at all.
+3. The 0.002 gap between gemma-4-12B and gemma-4-E4B, reported earlier as
+   "within noise", is now quantified: it is a seventh of the noise floor.
