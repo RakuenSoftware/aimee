@@ -619,6 +619,42 @@ static int kb_relay_send(server_conn_t *conn, char *json, const char *fallback)
    return send_and_free(conn, resp);
 }
 
+/* As kb_relay_send, but a kb-reported failure is returned AS an error.
+ *
+ * kb_relay_send hands any parseable body straight through, so a refusal arrives
+ * as a successful response that merely contains an error field -- the CLI has no
+ * printer for it, so the operator sees nothing and exit 0. Now that the client
+ * preserves the kb's body on a non-2xx (kb_client_v1_post_json_keep_error), the
+ * reason is present and worth surfacing. Recognises both shapes the kb uses:
+ * {"error": "..."} and {"status": "error"|"unavailable", ...}. */
+static int kb_relay_send_checked(server_conn_t *conn, char *json, const char *fallback)
+{
+   cJSON *resp = json ? cJSON_Parse(json) : NULL;
+   free(json);
+   if (!resp)
+      return server_send_error(conn, fallback, NULL);
+
+   const cJSON *err = cJSON_GetObjectItemCaseSensitive(resp, "error");
+   const cJSON *st = cJSON_GetObjectItemCaseSensitive(resp, "status");
+   const char *reason = NULL;
+   if (cJSON_IsString(err) && err->valuestring && err->valuestring[0])
+      reason = err->valuestring;
+   else if (cJSON_IsString(st) && st->valuestring &&
+            (strcmp(st->valuestring, "error") == 0 || strcmp(st->valuestring, "unavailable") == 0))
+   {
+      const cJSON *msg = cJSON_GetObjectItemCaseSensitive(resp, "message");
+      reason = (cJSON_IsString(msg) && msg->valuestring[0]) ? msg->valuestring : fallback;
+   }
+   if (reason)
+   {
+      char msg[512];
+      snprintf(msg, sizeof(msg), "%s", reason);
+      cJSON_Delete(resp);
+      return server_send_error(conn, msg, NULL);
+   }
+   return send_and_free(conn, resp);
+}
+
 int handle_kb_build(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -732,7 +768,7 @@ int handle_kb_reembed(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    int status = 0;
    char *json = kb_client_reembed(confirm, force, dry_run, target_dim, clear_maintenance, &status);
-   return kb_relay_send(conn, json, "knowledge service reembed failed");
+   return kb_relay_send_checked(conn, json, "knowledge service reembed failed");
 }
 
 /* memory.embed — (re)generate memory embeddings.
@@ -757,8 +793,8 @@ int handle_memory_embed(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!all && memory_id <= 0)
       return server_send_error(conn, "memory.embed requires all=true or memory_id", NULL);
 
-   return kb_relay_send(conn, kb_client_memory_embed_json(all, memory_id, version, NULL),
-                        "knowledge service memory embed failed");
+   return kb_relay_send_checked(conn, kb_client_memory_embed_json(all, memory_id, version, NULL),
+                                "knowledge service memory embed failed");
 }
 
 int handle_kb_ingest_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
