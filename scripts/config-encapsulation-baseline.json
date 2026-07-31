@@ -9,10 +9,6 @@
       "decls": 5,
       "loads": 5
     },
-    "src/cmd_infra.c": {
-      "decls": 6,
-      "loads": 4
-    },
     "src/cmd_memory_embed.c": {
       "decls": 4,
       "loads": 3
@@ -49,10 +45,6 @@
       "decls": 2,
       "loads": 2
     },
-    "src/kb/http/kb_http_console.c": {
-      "decls": 4,
-      "loads": 3
-    },
     "src/kb/http/kb_tls_serve.c": {
       "decls": 2,
       "loads": 0
@@ -81,17 +73,9 @@
       "decls": 1,
       "loads": 0
     },
-    "src/kb/kb_reflection.c": {
-      "decls": 5,
-      "loads": 3
-    },
     "src/kb/kb_service_agent.c": {
       "decls": 1,
       "loads": 1
-    },
-    "src/kb/kb_service_kb.c": {
-      "decls": 5,
-      "loads": 3
     },
     "src/kb/kb_surprising_judge.c": {
       "decls": 1,
@@ -182,8 +166,8 @@
       "loads": 3
     },
     "src/posix/server_compute.c": {
-      "decls": 9,
-      "loads": 1
+      "decls": 3,
+      "loads": 0
     },
     "src/server/agent_policy.c": {
       "decls": 1,
@@ -202,8 +186,8 @@
       "loads": 0
     },
     "src/server/server.c": {
-      "decls": 7,
-      "loads": 7
+      "decls": 1,
+      "loads": 0
     },
     "src/server/server_api_status.c": {
       "decls": 1,
@@ -282,7 +266,7 @@
       "loads": 1
     },
     "src/tests/test_config.c": {
-      "decls": 100,
+      "decls": 101,
       "loads": 84
     },
     "src/tests/test_config_accessors.c": {
@@ -393,10 +377,6 @@
       "decls": 1,
       "loads": 0
     },
-    "src/tests/test_kb_reflection.c": {
-      "decls": 6,
-      "loads": 0
-    },
     "src/tests/test_mcp_client_registry.c": {
       "decls": 1,
       "loads": 0
@@ -471,8 +451,8 @@
     }
   },
   "totals": {
-    "decls": 398,
-    "files": 117,
-    "loads": 222
+    "decls": 361,
+    "files": 112,
+    "loads": 201
   }
 }

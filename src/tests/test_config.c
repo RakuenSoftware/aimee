@@ -112,10 +112,46 @@ static void assert_disposition(const config_t *cfg, int index, const char *name,
    assert(cfg->dispositions[index].source == source);
 }
 
+/* A YAML `true` must read back as true. cJSON stores a parsed boolean in its
+ * `type` and leaves valueint at 0, so `x = item->valueint` on a bool node yields
+ * FALSE for `true`. Three intelligence.synthesize keys did exactly that; the
+ * worst was mdl_tiebreak_enabled, which defaults to 1, so writing `true` TURNED
+ * IT OFF. reflection_shadow is a fail-closed gate, so `true` failing to enable it
+ * meant durable writes an operator had asked to suppress. */
+static void test_bool_true_parses_as_true(void)
+{
+   config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+
+   cJSON *root = cJSON_CreateObject();
+   cJSON *intel = cJSON_AddObjectToObject(root, "intelligence");
+   cJSON *syn = cJSON_AddObjectToObject(intel, "synthesize");
+   cJSON_AddTrueToObject(syn, "mdl_tiebreak_enabled");
+   cJSON_AddTrueToObject(syn, "reflection_shadow");
+   config_apply_mdl_settings(&cfg, root);
+   assert(cfg.kb_mdl_tiebreak_enabled == 1);
+   assert(cfg.kb_reflection_synthesis_shadow == 1);
+   cJSON_Delete(root);
+
+   /* `false` must still be false, and the numeric form must still work. */
+   root = cJSON_CreateObject();
+   intel = cJSON_AddObjectToObject(root, "intelligence");
+   syn = cJSON_AddObjectToObject(intel, "synthesize");
+   cJSON_AddFalseToObject(syn, "mdl_tiebreak_enabled");
+   cJSON_AddNumberToObject(syn, "reflection_shadow", 1);
+   config_apply_mdl_settings(&cfg, root);
+   assert(cfg.kb_mdl_tiebreak_enabled == 0);
+   assert(cfg.kb_reflection_synthesis_shadow == 1);
+   cJSON_Delete(root);
+
+   printf("bool-true ");
+}
+
 int main(void)
 {
    printf("config: ");
    test_kb_curator_tier();
+   test_bool_true_parses_as_true();
 
    /* Use isolated temp HOME */
    char tmpdir[512];

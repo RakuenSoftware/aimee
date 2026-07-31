@@ -162,9 +162,9 @@ static int console_overview(char *out_buf, int out_cap)
  * by hand). Read-only. */
 static int console_typed_facts(char *out_buf, int out_cap)
 {
-   config_t cfg;
-   config_load(&cfg);
-   int thr = cfg.kb_typed_facts_promote_threshold > 0 ? cfg.kb_typed_facts_promote_threshold : 3;
+   int thr = config_kb_typed_facts_promote_threshold() > 0
+                 ? config_kb_typed_facts_promote_threshold()
+                 : 3;
 
    cJSON *root = cJSON_CreateObject();
    if (!root)
@@ -178,8 +178,9 @@ static int console_typed_facts(char *out_buf, int out_cap)
    cJSON_AddStringToObject(root, "generated_at", ts);
 
    cJSON *c = cJSON_AddObjectToObject(root, "config");
-   cJSON_AddBoolToObject(c, "typed_facts_enabled", cfg.typed_facts_enabled ? 1 : 0);
-   cJSON_AddBoolToObject(c, "auto_promote", cfg.kb_typed_facts_auto_promote_enabled ? 1 : 0);
+   cJSON_AddBoolToObject(c, "typed_facts_enabled", config_typed_facts_enabled() ? 1 : 0);
+   cJSON_AddBoolToObject(c, "auto_promote",
+                         config_kb_typed_facts_auto_promote_enabled() ? 1 : 0);
    cJSON_AddNumberToObject(c, "promote_threshold", thr);
 
    /* Promotion review queue: every pending provisional relation (threshold 1 lists
@@ -411,7 +412,7 @@ static int pipeline_config_key_allowed(const char *key)
 
 /* Current value of every pipeline-relevant config key, so the GUI renders the
  * toggles, order, presets, and custom stages from one round trip. */
-static cJSON *pipeline_config_json(const config_t *cfg)
+static cJSON *pipeline_config_json(void)
 {
    cJSON *out = cJSON_CreateObject();
    for (size_t i = 0; i < sizeof(PIPELINE_CONFIG_KEYS) / sizeof(PIPELINE_CONFIG_KEYS[0]); i++)
@@ -419,7 +420,7 @@ static cJSON *pipeline_config_json(const config_t *cfg)
       const config_field_t *f = config_field_lookup(PIPELINE_CONFIG_KEYS[i]);
       if (f)
          cJSON_AddItemToObject(out, PIPELINE_CONFIG_KEYS[i],
-                               config_field_public_value_json(cfg, f));
+                               config_field_public_value_json_current(f));
    }
    cJSON *stages = kb_curator_stages_json();
    const cJSON *st = NULL;
@@ -430,7 +431,7 @@ static cJSON *pipeline_config_json(const config_t *cfg)
          continue; /* embedder-gated, or a key two stages share */
       const config_field_t *f = config_field_lookup(ck);
       if (f)
-         cJSON_AddItemToObject(out, ck, config_field_public_value_json(cfg, f));
+         cJSON_AddItemToObject(out, ck, config_field_public_value_json_current(f));
    }
    cJSON_Delete(stages);
    return out;
@@ -459,13 +460,10 @@ static int console_send(cJSON *resp, int status, const char *fallback, char *out
  * aimee-server. */
 static int console_pipeline(char *out_buf, int out_cap)
 {
-   config_t cfg;
-   config_load(&cfg);
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddItemToObject(resp, "stages", kb_curator_stages_json());
    cJSON_AddItemToObject(resp, "presets", kb_curator_presets_json());
-   cJSON_AddItemToObject(resp, "config", pipeline_config_json(&cfg));
-   OPENSSL_cleanse(&cfg, sizeof(cfg));
+   cJSON_AddItemToObject(resp, "config", pipeline_config_json());
    return console_send(resp, 200, "{\"error\":\"pipeline too large\"}", out_buf, out_cap);
 }
 
@@ -643,8 +641,6 @@ static const kb_setting_t *kb_setting_lookup(const char *key)
  * better than an uneditable one. */
 static int console_settings(char *out_buf, int out_cap)
 {
-   config_t cfg;
-   config_load(&cfg);
    cJSON *resp = cJSON_CreateObject();
    cJSON *arr = cJSON_AddArrayToObject(resp, "fields");
    for (size_t i = 0; i < sizeof(KB_SETTINGS) / sizeof(KB_SETTINGS[0]); i++)
@@ -660,7 +656,6 @@ static int console_settings(char *out_buf, int out_cap)
       cJSON_AddBoolToObject(o, "secret", config_field_secret_name(f) ? 1 : 0);
       cJSON_AddItemToArray(arr, o);
    }
-   OPENSSL_cleanse(&cfg, sizeof(cfg));
    return console_send(resp, 200, "{\"error\":\"settings too large\"}", out_buf, out_cap);
 }
 

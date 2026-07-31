@@ -125,9 +125,10 @@ static cJSON *git_sub_commit(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
                "Output ONLY the message, no quotes or prefix.",
                diff_text);
 
-      /* Try aux router first (cheap local model when configured) */
-      if (ctx->cfg)
-         msg = aux_call("commit_message", prompt, 128);
+      /* Try aux router first (cheap local model when configured). aux_call reads
+       * auxiliary.* itself and returns NULL when it is off, so the old
+       * "does the CLI context carry a config" guard no longer decides anything. */
+      msg = aux_call("commit_message", prompt, 128);
 
       /* Fall back to cheapest configured agent */
       if (!msg)
@@ -789,9 +790,7 @@ static void session_subcmd_list(app_ctx_t *ctx, int argc, char **argv)
    (void)argv;
 
    {
-      config_t cfg;
-      config_load(&cfg);
-      db1_init(cfg.db1_path);
+      db1_init(config_db1_path());
    }
 
    db1_session_state_summary_t rows[128];
@@ -845,19 +844,10 @@ static void session_subcmd_clean(app_ctx_t *ctx, int argc, char **argv)
          dry_run = 1;
    }
 
-   config_t cfg_buf;
-   config_t *cfgp = ctx->cfg;
-   if (!cfgp)
-   {
-      config_load(&cfg_buf);
-      cfgp = &cfg_buf;
-   }
-   config_t cfg = *cfgp;
+   int threshold = (config_worktree_stale_secs() > 0) ? config_worktree_stale_secs()
+                                                      : CONFIG_DEFAULT_STALE_SESSION_SECS;
 
-   int threshold =
-       (cfg.worktree_stale_secs > 0) ? cfg.worktree_stale_secs : CONFIG_DEFAULT_STALE_SESSION_SECS;
-
-   db1_init(cfg.db1_path);
+   db1_init(config_db1_path());
 
    db1_session_state_summary_t rows[256];
    int total = db1_session_state_list(rows, 256);
@@ -1328,9 +1318,6 @@ static void workspace_cmd_list(app_ctx_t *ctx, int argc, char **argv)
    (void)argc;
    (void)argv;
 
-   config_t cfg;
-   config_load(&cfg);
-
    if (config_workspace_count() == 0)
    {
       fprintf(stderr, "No workspaces configured. Use 'aimee workspace add <path>' to add one.\n");
@@ -1388,9 +1375,6 @@ static void workspace_cmd_remove(app_ctx_t *ctx, int argc, char **argv)
       fprintf(stderr, "Usage: aimee workspace remove <path>\n");
       return;
    }
-
-   config_t cfg;
-   config_load(&cfg);
 
    /* Try to match by path (absolute or as provided) */
    char abs[MAX_PATH_LEN];

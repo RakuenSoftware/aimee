@@ -53,9 +53,9 @@ static const char *const REFLECTION_SYNTH_SYSTEM_PROMPT =
 /* Declared in kb_service_workers.c */
 extern kb_service_ctx_t *g_kb_ctx;
 
-static int run_synthesis_pass(const config_t *cfg, const db2_artifact_proposed_t *row)
+static int run_synthesis_pass(const db2_artifact_proposed_t *row)
 {
-   int n_attempts = cfg->kb_synthesize_n_attempts > 0 ? cfg->kb_synthesize_n_attempts : 3;
+   int n_attempts = config_kb_synthesize_n_attempts() > 0 ? config_kb_synthesize_n_attempts() : 3;
    if (n_attempts > MDL_MAX_CANDIDATES)
       n_attempts = MDL_MAX_CANDIDATES;
 
@@ -126,7 +126,7 @@ static int run_synthesis_pass(const config_t *cfg, const db2_artifact_proposed_t
       char serr[256];
       char *out = kb_curator_llm_run(KB_CURATOR_STAGE_SYNTHESIZE_REFLECTION,
                                      REFLECTION_SYNTH_SYSTEM_PROMPT, req_str, NULL,
-                                     cfg->kb_synthesize_command, REFLECTION_SYNTH_OUTBUF, serr,
+                                     config_kb_synthesize_command(), REFLECTION_SYNTH_OUTBUF, serr,
                                      sizeof(serr));
       free(req_str);
 
@@ -195,7 +195,7 @@ static int run_synthesis_pass(const config_t *cfg, const db2_artifact_proposed_t
     * NO durable candidate — fail-closed, nothing enters the promotion pipeline.
     * Promoting the shadow stream to normal is a bandit decision
     * (reflection_synthesis_mode), wired separately; this never flips itself. */
-   if (cfg->kb_reflection_synthesis_shadow)
+   if (config_kb_reflection_synthesis_shadow())
    {
       aimee_log(LOG_INFO, "kb.reflection",
                 "shadow synthesis (scored, unpromoted): source=%s winner=%d conf=%.2f "
@@ -240,10 +240,10 @@ static int run_synthesis_pass(const config_t *cfg, const db2_artifact_proposed_t
    return write_rc;
 }
 
-static void run_reflection_pass(const config_t *cfg)
+static void run_reflection_pass(void)
 {
    db2_artifact_proposed_t rows[10];
-   int batch = cfg->review_batch_cap > 0 ? cfg->review_batch_cap : 10;
+   int batch = config_review_batch_cap() > 0 ? config_review_batch_cap() : 10;
    if (batch > 10)
       batch = 10;
 
@@ -253,7 +253,7 @@ static void run_reflection_pass(const config_t *cfg)
    if (n <= 0)
       return;
 
-   long cooldown_secs = (long)cfg->review_session_cooldown_hours * 3600;
+   long cooldown_secs = (long)config_review_session_cooldown_hours() * 3600;
    long now = (long)time(NULL);
    int processed = 0;
 
@@ -290,9 +290,9 @@ static void run_reflection_pass(const config_t *cfg)
       provider_def_owned_t rprov;
       int have_provider =
           kb_curator_provider_for_stage(KB_CURATOR_STAGE_SYNTHESIZE_REFLECTION, &rprov);
-      if ((cfg->kb_synthesize_command[0] != '\0' || have_provider) && cfg->kb_mdl_tiebreak_enabled)
+      if ((config_kb_synthesize_command()[0] != '\0' || have_provider) && config_kb_mdl_tiebreak_enabled())
       {
-         run_synthesis_pass(cfg, &rows[i]);
+         run_synthesis_pass(&rows[i]);
       }
       else
       {
@@ -309,9 +309,9 @@ static void run_reflection_pass(const config_t *cfg)
 
 static kb_reflection_ctx_t *g_rctx = NULL;
 
-static void run_reflection_pass_releasing_lease(const config_t *cfg)
+static void run_reflection_pass_releasing_lease(void)
 {
-   run_reflection_pass(cfg);
+   run_reflection_pass();
    /* A pass acquires DB2 even when there is no eligible work. Return the lazy
     * lease before the scheduler's long half-window backoff. */
    db2_lease_release_idle();
@@ -320,10 +320,7 @@ static void run_reflection_pass_releasing_lease(const config_t *cfg)
 static void *reflection_thread_main(void *arg)
 {
    kb_reflection_ctx_t *ctx = (kb_reflection_ctx_t *)arg;
-
-   config_t cfg;
-   config_load(&cfg);
-   long idle_threshold = (long)cfg.review_idle_trigger_minutes * 60;
+   long idle_threshold = (long)config_review_idle_trigger_minutes() * 60;
    if (idle_threshold <= 0)
       idle_threshold = 1800;
 
@@ -345,12 +342,10 @@ static void *reflection_thread_main(void *arg)
       /* Reload config periodically for live changes */
       long now = (long)time(NULL);
       if ((now - last_fired) % 300 == 0)
-         config_load(&cfg);
-
-      if (!cfg.review_scheduler_enabled)
+      if (!config_review_scheduler_enabled())
          continue;
 
-      idle_threshold = (long)cfg.review_idle_trigger_minutes * 60;
+      idle_threshold = (long)config_review_idle_trigger_minutes() * 60;
       if (idle_threshold <= 0)
          idle_threshold = 1800;
 
@@ -365,7 +360,7 @@ static void *reflection_thread_main(void *arg)
       aimee_log(LOG_INFO, "kb.reflection", "idle=%lds >= threshold=%lds; firing reflection pass",
                 idle_secs, idle_threshold);
       kb_background_set("reflection", "idle=%lds threshold=%lds", idle_secs, idle_threshold);
-      run_reflection_pass_releasing_lease(&cfg);
+      run_reflection_pass_releasing_lease();
       kb_background_clear("reflection");
       last_fired = now;
 
@@ -381,10 +376,7 @@ void kb_reflection_init(kb_reflection_ctx_t *ctx)
       return;
    memset(ctx, 0, sizeof(*ctx));
    g_rctx = ctx;
-
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.review_scheduler_enabled)
+   if (!config_review_scheduler_enabled())
    {
       aimee_log(LOG_DEBUG, "kb.reflection",
                 "scheduler disabled (learning.review.scheduler_enabled=0)");

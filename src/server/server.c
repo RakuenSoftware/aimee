@@ -25,7 +25,7 @@
 #include "server_mgmt_status.h"
 #include "server_mgmt_jwks_cache.h"
 #include "kb_client_mtls.h"
-#include "config.h" /* config_t / config_load for api.status, api.enable */
+#include "config.h" /* config accessors for api.status, api.enable */
 #include <aimee/delegates/delegate_backend_docker.h>
 #include "workspace_provider.h" /* the shared provider: probe docker for the sandbox posture */
 #include "workspace_turn.h"     /* the ONE workspace bound, shared with the delegate turn */
@@ -690,10 +690,10 @@ static int handle_launch_run(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       snprintf(sid, sizeof(sid), "%02x%02x%02x%02x", rnd[0], rnd[1], rnd[2], rnd[3]);
    }
 
-   config_t cfg;
-   config_load(&cfg);
-
-   const char *provider = cfg.provider[0] ? cfg.provider : "claude";
+   /* Copied out: held across the worktree/session work below. */
+   char provider_buf[sizeof(((config_t *)0)->provider)];
+   snprintf(provider_buf, sizeof(provider_buf), "%s", config_provider());
+   const char *provider = provider_buf[0] ? provider_buf : "claude";
    int builtin = 1;
 
    /* Worktree mappings persist in DB1; load (or initialize) per sid. */
@@ -748,14 +748,14 @@ static int handle_launch_run(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *launch_resp = jo_ok();
    cJSON_AddStringToObject(launch_resp, "session_id", sid);
    cJSON_AddStringToObject(launch_resp, "provider", provider);
-   if (strcmp(provider, "claude") == 0 && cfg.claude_model[0])
-      cJSON_AddStringToObject(launch_resp, "model", cfg.claude_model);
+   if (strcmp(provider, "claude") == 0 && config_claude_model()[0])
+      cJSON_AddStringToObject(launch_resp, "model", config_claude_model());
    else if ((strcmp(provider, "codex") == 0 || strcmp(provider, "codex-oauth") == 0 ||
              strcmp(provider, "chatgpt") == 0) &&
-            cfg.codex_model[0])
-      cJSON_AddStringToObject(launch_resp, "model", cfg.codex_model);
+            config_codex_model()[0])
+      cJSON_AddStringToObject(launch_resp, "model", config_codex_model());
    cJSON_AddBoolToObject(launch_resp, "builtin", builtin);
-   if (cfg.autonomous)
+   if (config_autonomous())
       cJSON_AddBoolToObject(launch_resp, "autonomous", 1);
    if (target_dir[0])
       cJSON_AddStringToObject(launch_resp, "worktree_cwd", target_dir);
@@ -997,9 +997,6 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "invalid session_id (must be alphanumeric/dash/underscore)",
                                request_id);
 
-   config_t cfg;
-   config_load(&cfg);
-
    session_state_t state;
    session_state_load(&state, sid);
    hooks_ensure_cwd_worktree(&state, sid, cwd);
@@ -1078,8 +1075,8 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    }
 
    /* Skill review nudge: every N tool hooks, fire a background review delegate. */
-   if (cfg.skills_review_enabled && rc != 2 &&
-       skill_review_should_fire(state.hook_call_count, cfg.skills_review_nudge_interval))
+   if (config_skills_review_enabled() && rc != 2 &&
+       skill_review_should_fire(state.hook_call_count, config_skills_review_nudge_interval()))
       server_compute_skill_review_async(ctx, sid);
 
    /* Build response */
@@ -1166,9 +1163,7 @@ static void session_start_worktree_gc(const char *hook_input)
 {
    /* Auto-GC is gated on config (worktree_gc.enabled). The AIMEE_WORKTREE_GC
     * env var, when present, overrides the config flag in either direction. */
-   config_t cfg;
-   config_load(&cfg);
-   int enabled = cfg.worktree_gc_enabled;
+   int enabled = config_worktree_gc_enabled();
    const char *gc_env = getenv("AIMEE_WORKTREE_GC");
    if (gc_env && gc_env[0])
       enabled = (gc_env[0] == '1' || gc_env[0] == 't' || gc_env[0] == 'T');
@@ -1194,8 +1189,8 @@ static void session_start_worktree_gc(const char *hook_input)
          {
             worktree_gc_options_t opts;
             worktree_gc_options_init(&opts);
-            if (cfg.worktree_gc_max_age_days > 0)
-               opts.max_age_days = cfg.worktree_gc_max_age_days;
+            if (config_worktree_gc_max_age_days() > 0)
+               opts.max_age_days = config_worktree_gc_max_age_days();
             const char *days_env = getenv("AIMEE_WORKTREE_GC_DAYS");
             if (days_env && days_env[0])
             {
@@ -1995,8 +1990,7 @@ static int server_shell_git_blocked(const char *command, const char *cwd)
                 "the host");
       return 0;
    }
-   config_t cfg;
-   if (config_load(&cfg) == 0 && !cfg.require_aimee_git)
+   if (config_present() && !config_require_aimee_git())
    {
       aimee_log(LOG_DEBUG, "shell-git-gate", "allow: require_aimee_git is off (operator opt-out)");
       return 0;
@@ -2036,8 +2030,7 @@ static int server_shell_git_blocked(const char *command, const char *cwd)
  * prevent. An operator must not have to read the code to learn that. */
 static void delegate_sandbox_log_posture(void)
 {
-   config_t cfg;
-   int dial_on = (config_load(&cfg) == 0) && cfg.delegate_sandbox;
+   int dial_on = config_present() && config_delegate_sandbox();
    if (!dial_on)
    {
       aimee_log(LOG_INFO, "delegate-sandbox",
@@ -2094,8 +2087,7 @@ static void delegate_sandbox_log_posture(void)
 
 static void server_shell_git_gate_log_posture(void)
 {
-   config_t cfg;
-   int dial_on = (config_load(&cfg) != 0) || cfg.require_aimee_git;
+   int dial_on = !config_present() || config_require_aimee_git();
    if (!dial_on)
    {
       aimee_log(LOG_INFO, "shell-git-gate",
@@ -2171,11 +2163,13 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
     * (and `aimee server start/restart` can probe liveness). */
    server_pid_write(socket_path);
    /* Initialize DB1 (aimee-server is DB1's exclusive owner). */
-   config_t cfg;
-   config_load(&cfg);
-   if (db1_init(cfg.db1_path) != 0)
+   /* Copied out: named twice here, and the warning path must report the SAME
+    * path db1_init was given. */
+   char db1_path[MAX_PATH_LEN];
+   snprintf(db1_path, sizeof(db1_path), "%s", config_db1_path());
+   if (db1_init(db1_path) != 0)
       LOG_WARN("server", "db1_init failed for %s — DB1-backed handlers will be unavailable",
-               cfg.db1_path);
+               db1_path);
    else
    {
       db1_apply_server_pragmas();
@@ -2212,11 +2206,12 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
       platform_evloop_destroy(&ctx->evloop);
       return -1;
    }
-   int compute_threads = aimee_resolve_compute_threads(cfg.compute_threads);
-   int session_threads = aimee_resolve_session_threads(cfg.session_threads);
+   int compute_threads = aimee_resolve_compute_threads(config_compute_threads());
+   int session_threads = aimee_resolve_session_threads(config_session_threads());
    /* Background (sessionless) delegates run on-demand, gated by the per-model
     * concurrency limiter; this only sets the pathological-fan-out backstop. */
-   delegate_ondemand_set_ceiling(aimee_resolve_delegate_max_inflight(cfg.delegate_max_inflight));
+   delegate_ondemand_set_ceiling(
+       aimee_resolve_delegate_max_inflight(config_delegate_max_inflight()));
    /* Mutex for ctx->conns array (accept inserts; conn_close swap-shrinks). */
    pthread_mutex_init(&ctx->conns_mutex, NULL);
    /* Provider concurrency slots: global active count per agent. */

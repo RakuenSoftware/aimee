@@ -119,10 +119,6 @@ int kb_handle_ingest(int fd, cJSON *req)
 
    if (!db2_is_initialized())
       return kb_send_error(fd, "failed to open knowledge service store");
-
-   config_t cfg;
-   config_load(&cfg);
-
    int use_all =
        !cJSON_IsString(ws_j) || !ws_j->valuestring[0] || strcmp(ws_j->valuestring, "all") == 0;
 
@@ -258,7 +254,7 @@ char *kb_service_ingest_status_json(void)
 }
 
 /* Add a per-tier provider sub-object {configured, base_url, model} (no api_key). */
-static void kb_health_add_curator_tier(cJSON *curator, const char *key, const config_t *cfg,
+static void kb_health_add_curator_tier(cJSON *curator, const char *key,
                                        kb_curator_stage_t stage)
 {
    cJSON *t = cJSON_AddObjectToObject(curator, key);
@@ -273,14 +269,13 @@ static void kb_health_add_curator_tier(cJSON *curator, const char *key, const co
 
 /* Curator observability block for /v1/health (§4): which tiers have a provider
  * (Tier-A extract/index, Tier-B reason/judge) and the curator queue depth. */
-static void kb_health_add_curator(cJSON *resp, const config_t *cfg,
-                                  kb_curator_queue_counts_t *out_counts)
+static void kb_health_add_curator(cJSON *resp, kb_curator_queue_counts_t *out_counts)
 {
    cJSON *curator = cJSON_AddObjectToObject(resp, "curator");
    if (!curator)
       return;
-   kb_health_add_curator_tier(curator, "tier_a", cfg, KB_CURATOR_STAGE_EXTRACT_DOCS);
-   kb_health_add_curator_tier(curator, "tier_b", cfg, KB_CURATOR_STAGE_JUDGE);
+   kb_health_add_curator_tier(curator, "tier_a", KB_CURATOR_STAGE_EXTRACT_DOCS);
+   kb_health_add_curator_tier(curator, "tier_b", KB_CURATOR_STAGE_JUDGE);
 
    kb_curator_queue_counts_t qc;
    kb_curator_queue_counts(&qc);
@@ -347,8 +342,6 @@ static cJSON *kb_service_health_object(void)
     * raw config field — otherwise an env-configured embedder is wrongly reported
     * embed_ok:false while embed_command shows a real URL. The "builtin" fallback
     * (nothing configured) still reports false, as before. */
-   config_t cfg;
-   config_load(&cfg);
    const char *embed_cmd = config_embedding_command_current(NULL);
    int embed_ok = (embed_cmd[0] && strcmp(embed_cmd, "builtin") != 0) ? 1 : 0;
    cJSON_AddBoolToObject(resp, "embed_ok", embed_ok);
@@ -361,7 +354,7 @@ static cJSON *kb_service_health_object(void)
     * llama.cpp doesn't expose it). api_key is never surfaced. */
    kb_curator_queue_counts_t qc;
    memset(&qc, 0, sizeof(qc));
-   kb_health_add_curator(resp, &cfg, &qc);
+   kb_health_add_curator(resp, &qc);
 
    /* Freshness: read last_ingest_at from kb_runtime_state */
    char last_ingest_at[64] = "";
@@ -446,12 +439,12 @@ static cJSON *kb_service_health_object(void)
    db2_kb_runtime_state_get("last_maintenance_pruned", maint_pruned_buf, sizeof(maint_pruned_buf));
    cJSON_AddNumberToObject(resp, "last_maintenance_orphans_pruned", atoi(maint_pruned_buf));
 
-   cJSON_AddBoolToObject(resp, "maintenance_enabled", cfg.kb_maintenance_enabled);
+   cJSON_AddBoolToObject(resp, "maintenance_enabled", config_kb_maintenance_enabled());
 
    /* Typed-facts capability (proposal §8): the KB advertises its own typed-facts
     * state so aimee-server can gate per-turn fact injection on it WITHOUT owning
     * the config. The server never reads typed_facts_enabled itself. */
-   cJSON_AddBoolToObject(resp, "typed_facts_enabled", cfg.typed_facts_enabled ? 1 : 0);
+   cJSON_AddBoolToObject(resp, "typed_facts_enabled", config_typed_facts_enabled() ? 1 : 0);
 
    return resp;
 }
@@ -494,9 +487,6 @@ int kb_handle_file_get(int fd, cJSON *req)
 
 int kb_handle_maintenance_run(int fd, cJSON *req)
 {
-   config_t cfg;
-   config_load(&cfg);
-
    int dry_run = 0;
    int force = 0;
    if (req)
@@ -509,7 +499,7 @@ int kb_handle_maintenance_run(int fd, cJSON *req)
       }
    }
 
-   if (!cfg.kb_maintenance_enabled && !force)
+   if (!config_kb_maintenance_enabled() && !force)
    {
       cJSON *resp = cJSON_CreateObject();
       cJSON_AddStringToObject(resp, "status", "disabled");
@@ -524,10 +514,10 @@ int kb_handle_maintenance_run(int fd, cJSON *req)
 
    kb_maintenance_config_t mcfg;
    kb_maintenance_config_defaults(&mcfg);
-   mcfg.lambda = cfg.kb_maintenance_lambda;
-   mcfg.confidence_floor = cfg.kb_maintenance_floor;
-   mcfg.min_age_days = cfg.kb_maintenance_min_age_days;
-   mcfg.orphan_prune_days = cfg.kb_maintenance_orphan_days;
+   mcfg.lambda = config_kb_maintenance_lambda();
+   mcfg.confidence_floor = config_kb_maintenance_floor();
+   mcfg.min_age_days = config_kb_maintenance_min_age_days();
+   mcfg.orphan_prune_days = config_kb_maintenance_orphan_days();
    mcfg.dry_run = dry_run;
 
    kb_maintenance_result_t result;
