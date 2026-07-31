@@ -247,9 +247,7 @@ static int en_evidence_embed(void)
 static int stage_embed_code(const kb_curator_extract_opts_t *opts)
 {
    (void)opts;
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.embedding_command[0])
+   if (!config_embedding_command_field()[0])
       return 0;
    project_info_t projects[CURATOR_PROJECT_SWEEP_MAX];
    int np = index_list_projects(projects, CURATOR_PROJECT_SWEEP_MAX);
@@ -274,9 +272,7 @@ static int stage_ingest_docs(const kb_curator_extract_opts_t *opts)
     * sufficient.  Rotating one bounded project per pass prevents an early large
     * corpus from starving every later project in lexical name order. */
    static size_t next_project = 0;
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.embedding_command[0])
+   if (!config_embedding_command_field()[0])
       return 0;
    project_info_t projects[CURATOR_PROJECT_SWEEP_MAX];
    int np = index_list_projects(projects, CURATOR_PROJECT_SWEEP_MAX);
@@ -285,10 +281,10 @@ static int stage_ingest_docs(const kb_curator_extract_opts_t *opts)
    size_t selected = next_project % (size_t)np;
    next_project = (selected + 1) % (size_t)np;
    int total = 0;
-   int e = kb_doc_refresh(projects[selected].name, cfg.embedding_command, CURATOR_DOC_SWEEP_BATCH);
+   int e = kb_doc_refresh(projects[selected].name, config_embedding_command_field(), CURATOR_DOC_SWEEP_BATCH);
    if (e > 0)
       total += e;
-   int b = kb_doc_embed_backfill(projects[selected].name, cfg.embedding_command,
+   int b = kb_doc_embed_backfill(projects[selected].name, config_embedding_command_field(),
                                  CURATOR_DOC_SWEEP_BATCH);
    if (b > 0)
       total += b;
@@ -309,10 +305,8 @@ static int stage_ingest_docs(const kb_curator_extract_opts_t *opts)
 static int stage_embed_evidence(const kb_curator_extract_opts_t *opts)
 {
    (void)opts;
-   config_t cfg;
-   config_load(&cfg);
-   const char *embed_cmd = config_embedding_command(&cfg, NULL);
-   int n = kb_evidence_embed_drain(cfg.kb_evidence_embed_batch, embed_cmd);
+   const char *embed_cmd = config_embedding_command_current(NULL);
+   int n = kb_evidence_embed_drain(config_kb_evidence_embed_batch(), embed_cmd);
    if (n > 0)
       aimee_log(LOG_DEBUG, "kb.evidence.embed", "drained %d evidence op(s)", n);
    return n > 0 ? 1 : 0;
@@ -472,13 +466,11 @@ cJSON *kb_curator_stages_json(void)
     * the GUI) but not composed into the runner. Reuses the same validating parser
     * as the runner, so only well-formed entries appear. */
    {
-      config_t cfg;
-      config_load(&cfg);
-      if (cfg.kb_curator_custom_stages[0])
+      if (config_kb_curator_custom_stages()[0])
       {
          kb_curator_custom_t cbuf[KB_CURATOR_MAX_CUSTOM];
          size_t nc =
-             kb_curator_custom_stages_parse(cfg.kb_curator_custom_stages, kb_curator_base_resolve,
+             kb_curator_custom_stages_parse(config_kb_curator_custom_stages(), kb_curator_base_resolve,
                                             cbuf, KB_CURATOR_MAX_CUSTOM, NULL);
          for (size_t i = 0; i < nc; i++)
          {
@@ -556,11 +548,9 @@ cJSON *kb_curator_presets_json(void)
     * the GUI edits via config.set). Marked builtin:false so the GUI shows them as
     * deletable. Malformed entries are skipped; capped so a bad config can't blow up
     * the response. */
-   config_t cfg;
-   config_load(&cfg);
-   if (cfg.kb_curator_user_presets[0])
+   if (config_kb_curator_user_presets()[0])
    {
-      cJSON *ups = cJSON_Parse(cfg.kb_curator_user_presets);
+      cJSON *ups = cJSON_Parse(config_kb_curator_user_presets());
       if (ups && cJSON_IsArray(ups))
       {
          int count = 0;
@@ -665,13 +655,13 @@ static int kb_curator_order_valid(const char *order, char *err, size_t err_sz)
  * custom name/budget on the base op's native lane, and appends to out[]. `cbuf`
  * (capacity cbuf_n) backs the custom name storage, so it must outlive out[]'s use.
  * Fail-safe: invalid entries are skipped with one WARN, mirroring stage_order. */
-static size_t kb_curator_append_custom(const config_t *cfg, kb_curator_stage_desc_t *out, size_t k,
-                                       size_t max, kb_curator_custom_t *cbuf, size_t cbuf_n)
+static size_t kb_curator_append_custom(kb_curator_stage_desc_t *out, size_t k, size_t max,
+                                       kb_curator_custom_t *cbuf, size_t cbuf_n)
 {
-   if (!cbuf || cbuf_n == 0 || !cfg->kb_curator_custom_stages[0])
+   if (!cbuf || cbuf_n == 0 || !config_kb_curator_custom_stages()[0])
       return k;
    int nrej = 0;
-   size_t nc = kb_curator_custom_stages_parse(cfg->kb_curator_custom_stages,
+   size_t nc = kb_curator_custom_stages_parse(config_kb_curator_custom_stages(),
                                               kb_curator_base_resolve, cbuf, cbuf_n, &nrej);
    if (nrej > 0)
       aimee_log(LOG_WARN, "kb.curator.custom",
@@ -695,21 +685,21 @@ static size_t kb_curator_append_custom(const config_t *cfg, kb_curator_stage_des
  * WARN and falls back to registry order, so a bad config can never corrupt the
  * pipeline. Fills `out` (capacity `max`); `cbuf` (capacity `cbuf_n`) backs the
  * custom stages' name storage and must outlive `out`. Returns the count. */
-static size_t kb_curator_ordered_stages(const config_t *cfg, kb_curator_stage_desc_t *out,
-                                        size_t max, kb_curator_custom_t *cbuf, size_t cbuf_n)
+static size_t kb_curator_ordered_stages(kb_curator_stage_desc_t *out, size_t max,
+                                        kb_curator_custom_t *cbuf, size_t cbuf_n)
 {
    size_t n = sizeof(CURATOR_STAGES) / sizeof(CURATOR_STAGES[0]);
    size_t reg = n < max ? n : max;
    for (size_t i = 0; i < reg; i++)
       out[i] = CURATOR_STAGES[i];
-   const char *order = cfg->kb_curator_stage_order;
+   const char *order = config_kb_curator_stage_order();
    char err[160];
    if (!order[0] || !kb_curator_order_valid(order, err, sizeof(err)))
    {
       if (order[0])
          aimee_log(LOG_WARN, "kb.curator.order",
                    "ignoring invalid kb_curator_stage_order (%s); using registry order", err);
-      return kb_curator_append_custom(cfg, out, reg, max, cbuf, cbuf_n);
+      return kb_curator_append_custom(out, reg, max, cbuf, cbuf_n);
    }
    /* `used` is indexed by built-in registry position; guard its width against the
     * built-in count so adding a 33rd stage can't silently overflow it. */
@@ -735,15 +725,13 @@ static size_t kb_curator_ordered_stages(const config_t *cfg, kb_curator_stage_de
    for (size_t i = 0; i < n && k < max; i++)
       if (!used[i])
          out[k++] = CURATOR_STAGES[i];
-   return kb_curator_append_custom(cfg, out, k, max, cbuf, cbuf_n);
+   return kb_curator_append_custom(out, k, max, cbuf, cbuf_n);
 }
 
 static void *drain_thread_main(void *arg)
 {
    kb_curator_drain_ctx_t *ctx = (kb_curator_drain_ctx_t *)arg;
 
-   config_t cfg;
-   config_load(&cfg);
 
    /* Cold-start backfill: a quiescent / already-indexed corpus never produces a
     * built>0 event, so the incremental rebuild below would never fire and
@@ -761,7 +749,6 @@ static void *drain_thread_main(void *arg)
     * then idles. The natural throttle is backend throughput; cost control for a
     * paid provider lives at the provider (endpoint choice / its own limits). */
 
-   long last_cfg_reload = (long)time(NULL);
 
    while (!ctx->stop)
    {
@@ -772,21 +759,12 @@ static void *drain_thread_main(void *arg)
       if (ctx->stop)
          break;
 
-      long now = (long)time(NULL);
-
-      /* Reload config periodically */
-      if (now - last_cfg_reload >= 300)
-      {
-         config_load(&cfg);
-         last_cfg_reload = now;
-      }
-
       /* Cold-start cross-repo metadata backfill (see cross_repo_cold_start_pending
        * above): once, as soon as the store is ready, so a quiescent corpus's
        * routes/identities exist before the structural-edge gate queries them.
        * Cleared only on a successful (0-return) rebuild, so a failed attempt stays
        * pending and retries — the one-shot guarantee is the flag-clear here. */
-      if (cross_repo_cold_start_pending && cfg.kb_curator_cross_repo_graph_enabled &&
+      if (cross_repo_cold_start_pending && config_kb_curator_cross_repo_graph_enabled() &&
           kb_cross_repo_meta_rebuild() == 0)
          cross_repo_cold_start_pending = 0;
 
@@ -807,8 +785,15 @@ static void *drain_thread_main(void *arg)
        * curator extract gates. Pulls "memory_facts" jobs enqueued by memory.store
        * and runs the general LLM extractor over each memory's content. Gated on
        * typed_facts_enabled (a no-op when off). */
-      if (cfg.typed_facts_enabled)
+      if (config_typed_facts_enabled())
       {
+         /* The last config_t in this file. kb_memory_facts_drain hands it to
+          * kb_curator_llm_run -> kb_curator_provider_for_stage, which cannot take
+          * accessors until provider_def_t owns its strings (see
+          * docs/proposals/pending/config-t-encapsulation.md). Scoped to this call
+          * so the ~750 KB frame exists only while that branch runs. */
+         config_t cfg;
+         config_load(&cfg);
          int n = kb_memory_facts_drain(&cfg, 8);
          if (n > 0)
             aimee_log(LOG_DEBUG, "kb.memory.facts", "drained %d memory_facts job(s)", n);
@@ -819,10 +804,10 @@ static void *drain_thread_main(void *arg)
           * using them become durable/recallable WITHOUT a human approving each.
           * Default-on with typed facts; the threshold is operator-tunable via
           * kb.typed_facts.promote_threshold (§8), falling back to the built-in. */
-         if (cfg.kb_typed_facts_auto_promote_enabled)
+         if (config_kb_typed_facts_auto_promote_enabled())
          {
-            int thr = cfg.kb_typed_facts_promote_threshold > 0
-                          ? cfg.kb_typed_facts_promote_threshold
+            int thr = config_kb_typed_facts_promote_threshold() > 0
+                          ? config_kb_typed_facts_promote_threshold()
                           : KB_ONTO_PROMOTE_DEFAULT_THRESHOLD;
             char cands[KB_ONTO_PROMOTE_BATCH][REL_TYPE_NAME_MAX];
             int nc = db2_ontology_eval_candidates(thr, cands, KB_ONTO_PROMOTE_BATCH);
@@ -846,7 +831,7 @@ static void *drain_thread_main(void *arg)
       /* Backfill: queue extract_doc curation for docs that entered kb_documents
        * via the drain (kb_doc_refresh) rather than the ingest-route hook -- else
        * drain-ingested docs are never curated. Idempotent, self-gated. */
-      kb_curator_queue_docs_all_projects(cfg.kb_curator_extract_docs_enabled);
+      kb_curator_queue_docs_all_projects(config_kb_curator_extract_docs_enabled());
 
       /* Code projection-graph + incremental cross-repo metadata refresh moved to
        * the CPU/index lane (kb_curator_projection_sweep, driven by
@@ -855,22 +840,22 @@ static void *drain_thread_main(void *arg)
 
       /* Candidate-generation synthesis drain — the heavy LLM pass, on the
        * scheduler, never on the capture hot path. Off by default. */
-      if (cfg.learning_synthesize_enabled && cfg.learning_synthesize_command[0])
+      if (config_learning_synthesize_enabled() && config_learning_synthesize_command()[0])
       {
-         const char *embed_cmd = config_embedding_command(&cfg, NULL);
+         const char *embed_cmd = config_embedding_command_current(NULL);
          /* Bound LLM calls per poll — each op is one sidecar/LLM round-trip. */
          int n =
-             kb_learning_synth_drain(SYNTH_DRAIN_BATCH, cfg.learning_synthesize_command, embed_cmd,
-                                     cfg.learning_synthesize_k, cfg.learning_synthesize_max_tokens);
+             kb_learning_synth_drain(SYNTH_DRAIN_BATCH, config_learning_synthesize_command(), embed_cmd,
+                                     config_learning_synthesize_k(), config_learning_synthesize_max_tokens());
          if (n > 0)
             aimee_log(LOG_DEBUG, "kb.learning.synth", "drained %d synthesis op(s)", n);
       }
 
-      if (!cfg.kb_curator_extract_docs_enabled && !cfg.kb_curator_extract_code_enabled &&
-          !cfg.kb_curator_resolve_entities_enabled && !cfg.kb_curator_index_narrative_enabled &&
-          !cfg.kb_curator_index_claims_enabled && !cfg.kb_curator_detect_contradictions_enabled &&
-          !cfg.kb_curator_index_code_unit_enabled && !cfg.kb_curator_link_artifacts_enabled &&
-          !cfg.kb_curator_synthesize_enabled && !cfg.kb_curator_promote_entity_enabled)
+      if (!config_kb_curator_extract_docs_enabled() && !config_kb_curator_extract_code_enabled() &&
+          !config_kb_curator_resolve_entities_enabled() && !config_kb_curator_index_narrative_enabled() &&
+          !config_kb_curator_index_claims_enabled() && !config_kb_curator_detect_contradictions_enabled() &&
+          !config_kb_curator_index_code_unit_enabled() && !config_kb_curator_link_artifacts_enabled() &&
+          !config_kb_curator_synthesize_enabled() && !config_kb_curator_promote_entity_enabled())
       {
          kb_background_clear("curator");
          continue;
@@ -879,10 +864,10 @@ static void *drain_thread_main(void *arg)
       kb_curator_extract_opts_t opts;
       memset(&opts, 0, sizeof(opts));
       snprintf(opts.extract_command, sizeof(opts.extract_command), "%s",
-               cfg.kb_curator_extract_command);
+               config_kb_curator_extract_command());
       opts.max_tokens =
-          cfg.kb_curator_extract_max_tokens > 0 ? cfg.kb_curator_extract_max_tokens : 512;
-      opts.max_attempts = cfg.kb_curator_max_attempts > 0 ? cfg.kb_curator_max_attempts : 3;
+          config_kb_curator_extract_max_tokens() > 0 ? config_kb_curator_extract_max_tokens() : 512;
+      opts.max_attempts = config_kb_curator_max_attempts() > 0 ? config_kb_curator_max_attempts() : 3;
 
       /* A provider outage is shared by every LLM stage. Per-row retry stamps do
        * not help a large backlog: without this gate one pass simply advances to
@@ -899,8 +884,8 @@ static void *drain_thread_main(void *arg)
        * at most once, not once per drained job. */
       kb_curator_stage_desc_t ordered[16 + KB_CURATOR_MAX_CUSTOM];
       kb_curator_custom_t customs[KB_CURATOR_MAX_CUSTOM];
-      size_t nordered = kb_curator_ordered_stages(
-          &cfg, ordered, sizeof(ordered) / sizeof(ordered[0]), customs, KB_CURATOR_MAX_CUSTOM);
+      size_t nordered = kb_curator_ordered_stages(ordered, sizeof(ordered) / sizeof(ordered[0]),
+                                                  customs, KB_CURATOR_MAX_CUSTOM);
 
       /* Drain a batch of curator jobs back-to-back. Each iteration runs ONE job
        * from the highest-priority non-empty stage (the rc chain below). Draining a
@@ -952,9 +937,7 @@ static void *kb_curator_code_worker_main(void *arg)
    kb_curator_drain_ctx_t *ctx = (kb_curator_drain_ctx_t *)arg;
    while (!ctx->stop)
    {
-      config_t cfg;
-      config_load(&cfg);
-      if (!cfg.kb_curator_extract_code_enabled)
+      if (!config_kb_curator_extract_code_enabled())
       {
          sleep(DRAIN_POLL_SECS);
          continue;
@@ -962,10 +945,10 @@ static void *kb_curator_code_worker_main(void *arg)
       kb_curator_extract_opts_t opts;
       memset(&opts, 0, sizeof(opts));
       snprintf(opts.extract_command, sizeof(opts.extract_command), "%s",
-               cfg.kb_curator_extract_command);
+               config_kb_curator_extract_command());
       opts.max_tokens =
-          cfg.kb_curator_extract_max_tokens > 0 ? cfg.kb_curator_extract_max_tokens : 512;
-      opts.max_attempts = cfg.kb_curator_max_attempts > 0 ? cfg.kb_curator_max_attempts : 3;
+          config_kb_curator_extract_max_tokens() > 0 ? config_kb_curator_extract_max_tokens() : 512;
+      opts.max_attempts = config_kb_curator_max_attempts() > 0 ? config_kb_curator_max_attempts() : 3;
 
       int r = kb_curator_extract_code_unit_one(&opts);
       db2_lease_release_idle();
@@ -992,9 +975,7 @@ static void *kb_curator_doc_worker_main(void *arg)
    kb_curator_drain_ctx_t *ctx = (kb_curator_drain_ctx_t *)arg;
    while (!ctx->stop)
    {
-      config_t cfg;
-      config_load(&cfg);
-      if (!cfg.kb_curator_extract_docs_enabled)
+      if (!config_kb_curator_extract_docs_enabled())
       {
          sleep(DRAIN_POLL_SECS);
          continue;
@@ -1002,10 +983,10 @@ static void *kb_curator_doc_worker_main(void *arg)
       kb_curator_extract_opts_t opts;
       memset(&opts, 0, sizeof(opts));
       snprintf(opts.extract_command, sizeof(opts.extract_command), "%s",
-               cfg.kb_curator_extract_command);
+               config_kb_curator_extract_command());
       opts.max_tokens =
-          cfg.kb_curator_extract_max_tokens > 0 ? cfg.kb_curator_extract_max_tokens : 512;
-      opts.max_attempts = cfg.kb_curator_max_attempts > 0 ? cfg.kb_curator_max_attempts : 3;
+          config_kb_curator_extract_max_tokens() > 0 ? config_kb_curator_extract_max_tokens() : 512;
+      opts.max_attempts = config_kb_curator_max_attempts() > 0 ? config_kb_curator_max_attempts() : 3;
 
       int r = kb_curator_extract_one(&opts);
       db2_lease_release_idle();
@@ -1026,15 +1007,13 @@ static void *kb_curator_index_lane_main(void *arg)
     * short interval when its queues are empty. */
    while (!ctx->stop)
    {
-      config_t cfg;
-      config_load(&cfg);
       kb_curator_extract_opts_t opts;
       memset(&opts, 0, sizeof(opts));
       snprintf(opts.extract_command, sizeof(opts.extract_command), "%s",
-               cfg.kb_curator_extract_command);
+               config_kb_curator_extract_command());
       opts.max_tokens =
-          cfg.kb_curator_extract_max_tokens > 0 ? cfg.kb_curator_extract_max_tokens : 512;
-      opts.max_attempts = cfg.kb_curator_max_attempts > 0 ? cfg.kb_curator_max_attempts : 3;
+          config_kb_curator_extract_max_tokens() > 0 ? config_kb_curator_extract_max_tokens() : 512;
+      opts.max_attempts = config_kb_curator_max_attempts() > 0 ? config_kb_curator_max_attempts() : 3;
 
       /* Pure-DB2 projection-graph + cross-repo refresh once per poll, ahead of the
        * INDEX queue drain -- content-addressed, so cheap when nothing changed. */
@@ -1043,8 +1022,8 @@ static void *kb_curator_index_lane_main(void *arg)
       /* Same stage-order resolution as the LLM lane; run_pass filters to this lane. */
       kb_curator_stage_desc_t ordered[16 + KB_CURATOR_MAX_CUSTOM];
       kb_curator_custom_t customs[KB_CURATOR_MAX_CUSTOM];
-      size_t nordered = kb_curator_ordered_stages(
-          &cfg, ordered, sizeof(ordered) / sizeof(ordered[0]), customs, KB_CURATOR_MAX_CUSTOM);
+      size_t nordered = kb_curator_ordered_stages(ordered, sizeof(ordered) / sizeof(ordered[0]),
+                                                  customs, KB_CURATOR_MAX_CUSTOM);
 
       int r = 0, drained = 0;
       while (!ctx->stop && drained < CURATOR_DRAIN_BATCH)
@@ -1072,16 +1051,14 @@ void kb_curator_drain_init(kb_curator_drain_ctx_t *ctx)
       return;
    memset(ctx, 0, sizeof(*ctx));
 
-   config_t cfg;
-   config_load(&cfg);
 
-   if (!cfg.kb_curator_extract_docs_enabled && !cfg.kb_curator_extract_code_enabled &&
-       !cfg.kb_curator_resolve_entities_enabled && !cfg.kb_curator_index_narrative_enabled &&
-       !cfg.kb_curator_index_claims_enabled && !cfg.kb_curator_detect_contradictions_enabled &&
-       !cfg.kb_curator_index_code_unit_enabled && !cfg.kb_curator_link_artifacts_enabled &&
-       !cfg.kb_curator_synthesize_enabled && !cfg.kb_curator_promote_entity_enabled &&
-       !cfg.kb_curator_projection_graph_enabled && !cfg.kb_evidence_embed_enabled &&
-       !cfg.learning_synthesize_enabled && !cfg.typed_facts_enabled)
+   if (!config_kb_curator_extract_docs_enabled() && !config_kb_curator_extract_code_enabled() &&
+       !config_kb_curator_resolve_entities_enabled() && !config_kb_curator_index_narrative_enabled() &&
+       !config_kb_curator_index_claims_enabled() && !config_kb_curator_detect_contradictions_enabled() &&
+       !config_kb_curator_index_code_unit_enabled() && !config_kb_curator_link_artifacts_enabled() &&
+       !config_kb_curator_synthesize_enabled() && !config_kb_curator_promote_entity_enabled() &&
+       !config_kb_curator_projection_graph_enabled() && !config_kb_evidence_embed_enabled() &&
+       !config_learning_synthesize_enabled() && !config_typed_facts_enabled())
    {
       aimee_log(LOG_DEBUG, "kb.curator.drain",
                 "all gates off (kb_curator_extract_docs_enabled=0,"
@@ -1109,9 +1086,9 @@ void kb_curator_drain_init(kb_curator_drain_ctx_t *ctx)
     * sidecar extractions. Job claims are transactional (UPDATE ... SELECT ...
     * LIMIT 1), so concurrent workers never double-claim. */
    ctx->code_active = 0;
-   if (cfg.kb_curator_extract_code_enabled && cfg.kb_curator_extract_code_workers > 1)
+   if (config_kb_curator_extract_code_enabled() && config_kb_curator_extract_code_workers() > 1)
    {
-      int extra = cfg.kb_curator_extract_code_workers - 1;
+      int extra = config_kb_curator_extract_code_workers() - 1;
       if (extra > KB_CURATOR_MAX_CODE_WORKERS)
          extra = KB_CURATOR_MAX_CODE_WORKERS;
       for (int i = 0; i < extra; i++)
@@ -1131,9 +1108,9 @@ void kb_curator_drain_init(kb_curator_drain_ctx_t *ctx)
     * still contributes one doc per pass. Claims are transactional (UPDATE ...
     * SELECT ... LIMIT 1 FOR UPDATE SKIP LOCKED), so workers never double-claim. */
    ctx->doc_active = 0;
-   if (cfg.kb_curator_extract_docs_enabled && cfg.kb_curator_extract_docs_workers > 1)
+   if (config_kb_curator_extract_docs_enabled() && config_kb_curator_extract_docs_workers() > 1)
    {
-      int extra = cfg.kb_curator_extract_docs_workers - 1;
+      int extra = config_kb_curator_extract_docs_workers() - 1;
       if (extra > KB_CURATOR_MAX_DOC_WORKERS)
          extra = KB_CURATOR_MAX_DOC_WORKERS;
       for (int i = 0; i < extra; i++)
