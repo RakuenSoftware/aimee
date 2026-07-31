@@ -1,0 +1,100 @@
+#!/bin/bash
+# The challenger slate, on the 7900 XTX at .254, in parallel with .253's queue.
+#
+# Three models that could plausibly beat Gemma 4 for synthesis, all in the
+# <=35B band, all with a licence we can actually ship against:
+#
+#   GLM-4.7-Flash          30B-A3B MoE, MIT
+#   Olmo-3.1-32B-Think     32B dense, Apache-2.0, reasoning-tuned
+#   Magistral-Small-2509   24B dense, Apache-2.0, reasoning-tuned
+#
+# The two Think/reasoning models are here for a measured reason rather than a
+# hunch: the largest single effect on this benchmark so far is that leaving
+# thinking ON is worth +0.09 F1 to gemma-4-E4B. A model trained for that is the
+# obvious next thing to try.
+#
+# QUANTISATION IS NOT Q8 HERE, AND THAT IS A REAL CONFOUND.
+#
+# .254 has 24GB of VRAM and 3GB of free system RAM, so a model must fit the card
+# whole; there is no RAM to offload experts into. At Q8_0 a 32B dense model is
+# ~34GB and does not fit. Q6_K and Q5_K_M do. Every .253 number was Q8_0, which
+# was validated byte-identical to transformers bf16 on this task. Q6/Q5 were
+# not.
+#
+# So this sweep carries a CONTROL: gemma-4-12B, already measured at Q8_0 on
+# .253 (0.8235 strict F1, thinking on), re-run here at Q6_K on the same gold
+# set. The control's delta IS the quant-plus-device correction. Without it a
+# challenger beating Gemma by 0.02 would be indistinguishable from quantisation
+# noise, and I would have no way to tell which.
+#
+# llama.cpp is build 10210, commit 0005475 — the same commit .253 runs, so the
+# runtime is not a variable.
+set -u
+cd "$(dirname "$0")/.."
+ROOT=${ROOT:-/mnt/media/tierbench}
+PY=${PY:-$ROOT/venv/bin/python}
+BIN=$ROOT/bin/llama-b10210
+OUT=results/challenger-254
+mkdir -p "$OUT"
+export HF_HOME=${HF_HOME:-$ROOT/hf}
+export LD_LIBRARY_PATH="$BIN"
+PORT=${PORT:-8091}
+
+# Device 1 is the 7900 XTX. Device 0 is the PHOENIX iGPU at 8GB, which would
+# silently take layers and wreck both throughput and fit if left visible.
+export GGML_VK_VISIBLE_DEVICES=1
+
+# Control first. If the control does not reproduce close to its .253 number the
+# rest of this sweep is uninterpretable, and I want to know that before spending
+# hours on the challengers rather than after.
+MODELS=(
+  "gemma-4-12B-it.q6|unsloth/gemma-4-12B-it-GGUF:Q6_K|"
+  "GLM-4.7-Flash.q6|unsloth/GLM-4.7-Flash-GGUF:Q6_K|"
+  "Magistral-Small-2509.q6|unsloth/Magistral-Small-2509-GGUF:Q6_K|"
+  "Olmo-3.1-32B-Think.q5|bartowski/allenai_Olmo-3.1-32B-Think-GGUF:Q5_K_M|"
+)
+
+for entry in "${MODELS[@]}"; do
+  IFS='|' read -r LABEL REPO EXTRA <<<"$entry"
+  PRED="$OUT/$LABEL.pred.jsonl"; LOG="$OUT/$LABEL.server.log"
+  [ -s "$PRED" ] && { echo "SKIP $LABEL"; continue; }
+  echo "=== SERVE $LABEL (7900 XTX, vulkan) ==="
+  # shellcheck disable=SC2086
+  "$BIN/llama-server" -hf "$REPO" --port "$PORT" -c 8192 --no-webui --no-mmproj \
+      -ngl 99 $EXTRA >"$LOG" 2>&1 &
+  SRV=$!
+  ready=0
+  for _ in $(seq 1 360); do
+    curl -sf "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && { ready=1; break; }
+    kill -0 $SRV 2>/dev/null || break
+    sleep 10
+  done
+  if [ "$ready" = 1 ]; then
+    if $PY harness/run_llamacpp.py --model "$LABEL" --gold data/gold.jsonl \
+         --out "$PRED" --base-url "http://127.0.0.1:$PORT" >>"$LOG" 2>&1; then
+      for KEY in pred_grounded pred pred_nofloor; do
+        $PY harness/score.py --gold data/gold.jsonl --pred "$PRED" \
+            --pred-key "$KEY" --json-out "$OUT/$LABEL.score.$KEY.json" \
+            >/dev/null 2>>"$LOG"
+      done
+      cp "$OUT/$LABEL.score.pred_grounded.json" "$OUT/$LABEL.score.json"
+      echo "OK   $LABEL"
+    else
+      echo "FAIL $LABEL -> $(tail -3 "$LOG" | tr '\n' ' ' | cut -c1-180)"
+      rm -f "$PRED"
+    fi
+  else
+    echo "FAIL $LABEL -> server never healthy: $(tail -3 "$LOG" | tr '\n' ' ' | cut -c1-180)"
+  fi
+  # Device provenance. .253 learned this the hard way: a directory named "gpu"
+  # held a model llama.cpp had quietly placed on CPU. Record what served it.
+  offl=$(grep -oE 'offloaded [0-9]+/[0-9]+ layers to GPU' "$LOG" 2>/dev/null | tail -1) || true
+  cpu_layers=$(grep -c 'assigned to device CPU' "$LOG" 2>/dev/null) || true
+  printf '{"model":"%s","host":"192.168.1.254","gpu":"7900XTX","backend":"vulkan","repo":"%s","offload":"%s","cpu_layer_warnings":%s}\n' \
+    "$LABEL" "$REPO" "${offl:-unknown}" "${cpu_layers:-0}" > "$OUT/$LABEL.device.json"
+  kill $SRV 2>/dev/null; wait $SRV 2>/dev/null
+  sleep 5
+  # 43TB free on /mnt/media, so weights are kept rather than pruned. Re-running a
+  # model here costs nothing but time.
+done
+echo "SWEEP_CHALLENGER_254_DONE"
