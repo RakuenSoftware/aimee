@@ -2258,18 +2258,6 @@ int config_typed_facts_enabled(void)
    return config_flag(offsetof(config_t, typed_facts_enabled));
 }
 
-double config_typed_facts_conf_floor(void)
-{
-   /* Same read path as the flag accessors above, so a hot reload is picked up. */
-   double v = MF_CONF_FLOOR_FALLBACK;
-   config_field_read(offsetof(config_t, typed_facts_conf_floor), sizeof(v), &v);
-   /* Out-of-range means misconfigured, not "accept everything": fall back rather
-    * than silently disabling the check or rejecting every fact. */
-   if (v < 0.0 || v > 1.0)
-      return MF_CONF_FLOOR_FALLBACK;
-   return v;
-}
-
 int config_wfe_live_forge_enabled(void)
 {
    return config_flag(offsetof(config_t, wfe_live_forge_enabled));

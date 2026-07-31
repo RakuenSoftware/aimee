@@ -77,7 +77,6 @@ static const elig_row_t g_eligibility[] = {
     {"delegate_sandbox_require_isolation", 1},
     {"delegate_sandbox_learn_packages", 1},
     {"typed_facts_enabled", 1},
-    {"typed_facts_conf_floor", 1},
     {"kb_pdf_tier", 0},
     {"kb_pdf_ingest_enabled", 1},
     {"kb_pdf_vector_enabled", 1},

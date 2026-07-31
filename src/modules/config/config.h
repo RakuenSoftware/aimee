@@ -872,13 +872,6 @@ typedef struct config
     * memory_bm25_weight: lexical (BM25-style) score weight (0 = use profile/default).
     * memory_semantic_weight: semantic/embedding score weight (0 = use profile/default). */
    double memory_bm25_weight;
-   /* typed_facts_conf_floor: minimum model-reported confidence for a extracted
-    * fact to commit. A single global constant assumes every provider emits a
-    * calibrated confidence, and they do not — measured across 18 models, some
-    * emit 0.0 for every fact they are certain of, one is anti-correlated, and
-    * only a few carry real signal. Per-provider so it can be calibrated rather
-    * than guessed; 0 disables the check entirely. */
-   double typed_facts_conf_floor;
    double memory_semantic_weight;
 
    /* Cosine-similarity floor scale for the semantic-memory legs. The floors in
@@ -2349,11 +2342,6 @@ int config_memory_derive_facts_enabled(void);
 int config_memory_routing_enabled(void);
 int config_transport_kb_pool_enabled(void);
 int config_typed_facts_enabled(void);
-/* Minimum model-reported confidence for an extracted fact to commit. 0 disables
- * the check. See typed_facts_conf_floor in config_t for why this is per-provider
- * rather than a constant. */
-#define MF_CONF_FLOOR_FALLBACK 0.6
-double config_typed_facts_conf_floor(void);
 int config_wfe_live_forge_enabled(void);
 double config_memory_semantic_floor_scale(void);
 int config_ingress_audit_async(void);
