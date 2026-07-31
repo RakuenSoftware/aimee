@@ -3,7 +3,9 @@
 #
 # 26B in bf16 is ~52GB against 15.5GB of VRAM. Offloading it would run at roughly
 # 5-8 hours for 70 notes (the 12B probe managed 74s a note offloaded), so this
-# runs NF4-quantised and fully resident instead.
+# runs NF4-quantised with device_map=auto: resident where it fits, spilled to
+# CPU beyond that. NF4 alone is not enough — 26B at NF4 is ~19GB against 15.5GB
+# of VRAM, so pinning device_map=cuda OOMs on load.
 #
 # Quantisation is a confound, so E4B is re-run at NF4 as a control. The 26B
 # number is only meaningful against E4B-NF4, never against the bf16 table. That
@@ -32,7 +34,7 @@ for M in $MODELS; do
   [ -s "$PRED" ] && { echo "SKIP $M"; continue; }
   echo "=== RUN $M (NF4) ==="
   if $PY harness/run_hf.py --model "$M" --gold data/gold.jsonl --out "$PRED" \
-       --load-4bit >"$OUT/$SLUG.log" 2>&1; then
+       --load-4bit --device auto >"$OUT/$SLUG.log" 2>&1; then
     $PY harness/score.py --gold data/gold.jsonl --pred "$PRED" \
         --json-out "$OUT/$SLUG.score.json" >/dev/null 2>>"$OUT/$SLUG.log"
     $PY harness/score.py --gold data/gold.jsonl --pred "$PRED" --no-alias \

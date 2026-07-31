@@ -1,0 +1,46 @@
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Fetching 26 files:   0%|          | 0/26 [00:00<?, ?it/s]Fetching 26 files:   4%|▍         | 1/26 [01:16<31:58, 76.75s/it]Fetching 26 files:   8%|▊         | 2/26 [01:31<16:07, 40.32s/it]Fetching 26 files:  12%|█▏        | 3/26 [01:46<11:00, 28.70s/it]Fetching 26 files:  15%|█▌        | 4/26 [01:47<06:33, 17.86s/it]Fetching 26 files:  19%|█▉        | 5/26 [01:54<04:50, 13.85s/it]Fetching 26 files:  23%|██▎       | 6/26 [01:55<03:12,  9.64s/it]Fetching 26 files:  27%|██▋       | 7/26 [02:00<02:32,  8.01s/it]Fetching 26 files:  31%|███       | 8/26 [02:02<01:48,  6.05s/it]Fetching 26 files:  35%|███▍      | 9/26 [02:14<02:12,  7.79s/it]Fetching 26 files:  38%|███▊      | 10/26 [03:04<05:34, 20.88s/it]Fetching 26 files:  42%|████▏     | 11/26 [03:08<03:59, 15.95s/it]Fetching 26 files:  46%|████▌     | 12/26 [03:12<02:50, 12.15s/it]Fetching 26 files:  50%|█████     | 13/26 [03:12<01:51,  8.62s/it]Fetching 26 files:  54%|█████▍    | 14/26 [03:16<01:23,  6.99s/it]Fetching 26 files:  58%|█████▊    | 15/26 [03:21<01:11,  6.48s/it]Fetching 26 files:  62%|██████▏   | 16/26 [03:23<00:51,  5.18s/it]Fetching 26 files:  65%|██████▌   | 17/26 [03:30<00:50,  5.64s/it]Fetching 26 files:  69%|██████▉   | 18/26 [03:55<01:32, 11.51s/it]Fetching 26 files:  73%|███████▎  | 19/26 [04:17<01:41, 14.51s/it]Fetching 26 files:  77%|███████▋  | 20/26 [04:38<01:38, 16.47s/it]Fetching 26 files:  81%|████████  | 21/26 [04:46<01:10, 14.03s/it]Fetching 26 files:  85%|████████▍ | 22/26 [05:03<00:59, 14.98s/it]Fetching 26 files:  88%|████████▊ | 23/26 [05:05<00:33, 11.02s/it]Fetching 26 files:  92%|█████████▏| 24/26 [05:06<00:16,  8.08s/it]Fetching 26 files:  96%|█████████▌| 25/26 [05:07<00:05,  5.90s/it]Fetching 26 files: 100%|██████████| 26/26 [05:07<00:00,  4.20s/it]Fetching 26 files: 100%|██████████| 26/26 [05:07<00:00, 11.83s/it]
+[transformers] The fast path is not available because one of the required library is not installed. Falling back to torch implementation. To install follow https://github.com/fla-org/flash-linear-attention#installation and https://github.com/Dao-AILab/causal-conv1d
+Loading weights:   0%|          | 0/693 [00:00<?, ?it/s]Loading weights:   0%|          | 1/693 [00:01<13:15,  1.15s/it]Loading weights:   0%|          | 2/693 [00:02<13:34,  1.18s/it]Loading weights:   1%|▏         | 9/693 [00:02<02:07,  5.36it/s]Loading weights:   2%|▏         | 13/693 [00:03<02:04,  5.48it/s]Loading weights:   2%|▏         | 15/693 [00:04<03:31,  3.20it/s]Loading weights:   4%|▍         | 31/693 [00:05<01:18,  8.45it/s]Loading weights:   5%|▍         | 33/693 [00:06<01:47,  6.12it/s]Loading weights:   7%|▋         | 49/693 [00:07<01:01, 10.42it/s]Loading weights:   7%|▋         | 51/693 [00:08<01:28,  7.26it/s]Loading weights:   8%|▊         | 58/693 [00:08<01:15,  8.41it/s]Loading weights:   9%|▊         | 60/693 [00:09<01:50,  5.72it/s]Loading weights:  11%|█▏        | 78/693 [00:10<00:46, 13.29it/s]Loading weights:  12%|█▏        | 83/693 [00:12<01:37,  6.24it/s]Loading weights:  14%|█▍        | 99/693 [00:12<00:52, 11.29it/s]Loading weights:  15%|█▌        | 107/693 [00:14<01:09,  8.46it/s]Loading weights:  17%|█▋        | 117/693 [00:14<00:49, 11.75it/s]Loading weights:  18%|█▊        | 124/693 [00:16<01:11,  7.96it/s]Loading weights:  19%|█▊        | 129/693 [00:18<01:39,  5.68it/s]Loading weights:  21%|██        | 147/693 [00:18<00:49, 10.98it/s]Loading weights:  22%|██▏       | 151/693 [00:18<01:08,  7.96it/s]
+Traceback (most recent call last):
+  File "/opt/tierA/bench/tier-a/harness/run_hf.py", line 207, in <module>
+    main()
+    ~~~~^^
+  File "/opt/tierA/bench/tier-a/harness/run_hf.py", line 139, in main
+    model = AutoModelForCausalLM.from_pretrained(args.model, **load_kwargs)
+  File "/opt/bench/lib/python3.13/site-packages/transformers/models/auto/auto_factory.py", line 402, in from_pretrained
+    return model_class.from_pretrained(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        pretrained_model_name_or_path, *model_args, config=config, **hub_kwargs, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/bench/lib/python3.13/site-packages/transformers/modeling_utils.py", line 4456, in from_pretrained
+    loading_info, disk_offload_index = cls._load_pretrained_model(model, state_dict, checkpoint_files, load_config)
+                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/bench/lib/python3.13/site-packages/transformers/modeling_utils.py", line 4590, in _load_pretrained_model
+    loading_info, disk_offload_index = convert_and_load_state_dict_in_model(
+                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        model=model,
+        ^^^^^^^^^^^^
+    ...<3 lines>...
+        disk_offload_index=disk_offload_index,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/bench/lib/python3.13/site-packages/transformers/core_model_loading.py", line 1695, in convert_and_load_state_dict_in_model
+    realized_value = mapping.convert(
+        first_param_name,
+    ...<3 lines>...
+        loading_info=loading_info,
+    )
+  File "/opt/bench/lib/python3.13/site-packages/transformers/core_model_loading.py", line 990, in convert
+    collected_tensors = self.materialize_tensors()
+  File "/opt/bench/lib/python3.13/site-packages/transformers/core_model_loading.py", line 955, in materialize_tensors
+    tensors = [func() for func in tensors]
+               ~~~~^^
+  File "/opt/bench/lib/python3.13/site-packages/transformers/core_model_loading.py", line 1239, in _job
+    return _materialize_copy(tensor, device, dtype)
+  File "/opt/bench/lib/python3.13/site-packages/transformers/core_model_loading.py", line 1217, in _materialize_copy
+    tensor = tensor.to(device=device, dtype=dtype)
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 1024.00 MiB. GPU 0 has a total capacity of 15.51 GiB of which 363.38 MiB is free. Including non-PyTorch memory, this process has 15.14 GiB memory in use. Of the allocated memory 14.55 GiB is allocated by PyTorch, and 288.10 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)

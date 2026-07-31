@@ -2,7 +2,7 @@
 # Qwen3.6-35B-A3B — the other MoE ceiling data point, for the article.
 #
 # 35B total / 3B active, Apache-2.0. At NF4 it is ~19GB against 15.5GB of VRAM,
-# so accelerate will keep most of it resident and offload the remainder; expect
+# so device_map=auto keeps most of it resident and offloads the remainder; expect
 # it slower than the 26B but far short of the 74s a note that full bf16 offload
 # cost on the 12B.
 #
@@ -28,7 +28,7 @@ for M in $MODELS; do
   [ -s "$PRED" ] && { echo "SKIP $M"; continue; }
   echo "=== RUN $M (NF4) ==="
   if $PY harness/run_hf.py --model "$M" --gold data/gold.jsonl --out "$PRED" \
-       --load-4bit >"$OUT/$SLUG.log" 2>&1; then
+       --load-4bit --device auto >"$OUT/$SLUG.log" 2>&1; then
     $PY harness/score.py --gold data/gold.jsonl --pred "$PRED" \
         --json-out "$OUT/$SLUG.score.json" >/dev/null 2>>"$OUT/$SLUG.log"
     $PY harness/score.py --gold data/gold.jsonl --pred "$PRED" --no-alias \

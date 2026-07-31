@@ -1,0 +1,45 @@
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Fetching 2 files:   0%|          | 0/2 [00:00<?, ?it/s]Fetching 2 files:  50%|█████     | 1/2 [00:25<00:25, 25.50s/it]Fetching 2 files: 100%|██████████| 2/2 [03:40<00:00, 125.31s/it]Fetching 2 files: 100%|██████████| 2/2 [03:40<00:00, 110.34s/it]
+Loading weights:   0%|          | 0/1013 [00:00<?, ?it/s]Loading weights:   0%|          | 2/1013 [00:01<15:11,  1.11it/s]Loading weights:   0%|          | 3/1013 [00:02<12:31,  1.34it/s]Loading weights:   0%|          | 4/1013 [00:03<17:12,  1.02s/it]Loading weights:   2%|▏         | 23/1013 [00:03<01:36, 10.31it/s]Loading weights:   3%|▎         | 31/1013 [00:06<02:35,  6.30it/s]Loading weights:   4%|▍         | 45/1013 [00:06<01:24, 11.40it/s]Loading weights:   5%|▌         | 53/1013 [00:08<02:10,  7.33it/s]Loading weights:   7%|▋         | 69/1013 [00:08<01:29, 10.51it/s]Loading weights:   7%|▋         | 74/1013 [00:10<01:53,  8.27it/s]Loading weights:   9%|▉         | 89/1013 [00:10<01:08, 13.51it/s]Loading weights:   9%|▉         | 96/1013 [00:12<01:55,  7.96it/s]Loading weights:  11%|█         | 111/1013 [00:12<01:10, 12.72it/s]Loading weights:  12%|█▏        | 119/1013 [00:15<01:55,  7.74it/s]Loading weights:  13%|█▎        | 133/1013 [00:15<01:14, 11.83it/s]Loading weights:  14%|█▍        | 141/1013 [00:17<01:47,  8.09it/s]Loading weights:  15%|█▌        | 155/1013 [00:17<01:09, 12.33it/s]Loading weights:  16%|█▌        | 163/1013 [00:19<01:37,  8.68it/s]Loading weights:  18%|█▊        | 178/1013 [00:19<01:13, 11.29it/s]Loading weights:  18%|█▊        | 178/1013 [00:19<01:32,  8.98it/s]
+Traceback (most recent call last):
+  File "/opt/tierA/bench/tier-a/harness/run_hf.py", line 207, in <module>
+    main()
+    ~~~~^^
+  File "/opt/tierA/bench/tier-a/harness/run_hf.py", line 139, in main
+    model = AutoModelForCausalLM.from_pretrained(args.model, **load_kwargs)
+  File "/opt/bench/lib/python3.13/site-packages/transformers/models/auto/auto_factory.py", line 402, in from_pretrained
+    return model_class.from_pretrained(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        pretrained_model_name_or_path, *model_args, config=config, **hub_kwargs, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/bench/lib/python3.13/site-packages/transformers/modeling_utils.py", line 4456, in from_pretrained
+    loading_info, disk_offload_index = cls._load_pretrained_model(model, state_dict, checkpoint_files, load_config)
+                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/bench/lib/python3.13/site-packages/transformers/modeling_utils.py", line 4590, in _load_pretrained_model
+    loading_info, disk_offload_index = convert_and_load_state_dict_in_model(
+                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        model=model,
+        ^^^^^^^^^^^^
+    ...<3 lines>...
+        disk_offload_index=disk_offload_index,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/bench/lib/python3.13/site-packages/transformers/core_model_loading.py", line 1695, in convert_and_load_state_dict_in_model
+    realized_value = mapping.convert(
+        first_param_name,
+    ...<3 lines>...
+        loading_info=loading_info,
+    )
+  File "/opt/bench/lib/python3.13/site-packages/transformers/core_model_loading.py", line 990, in convert
+    collected_tensors = self.materialize_tensors()
+  File "/opt/bench/lib/python3.13/site-packages/transformers/core_model_loading.py", line 955, in materialize_tensors
+    tensors = [func() for func in tensors]
+               ~~~~^^
+  File "/opt/bench/lib/python3.13/site-packages/transformers/core_model_loading.py", line 1239, in _job
+    return _materialize_copy(tensor, device, dtype)
+  File "/opt/bench/lib/python3.13/site-packages/transformers/core_model_loading.py", line 1217, in _materialize_copy
+    tensor = tensor.to(device=device, dtype=dtype)
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 968.00 MiB. GPU 0 has a total capacity of 15.51 GiB of which 893.38 MiB is free. Including non-PyTorch memory, this process has 14.63 GiB memory in use. Of the allocated memory 13.40 GiB is allocated by PyTorch, and 935.77 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)
