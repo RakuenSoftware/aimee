@@ -28,13 +28,19 @@ an empty volume. To choose the credential yourself instead, seal it before the f
 is then generated and nothing is printed:
 
 ```bash
-export AIMEE_WEBCHAT_USER=operator
+export AIMEE_WEBCHAT_USER=admin
 read -rsp 'Initial webchat password: ' AIMEE_WEBCHAT_PASSWORD && echo
 export AIMEE_WEBCHAT_PASSWORD
 scripts/aimee-compose-vault-bootstrap.sh -f compose.server-managed.yaml server
 unset AIMEE_WEBCHAT_PASSWORD
 docker compose -f compose.server-managed.yaml up -d
 ```
+
+Any name works here, including one that is also a group in the image. First boot creates the account
+with `aimee-webchat` as its primary group, so `useradd` never tries to make a group of its own. The
+wizard's account step is stricter and refuses a name that is already a group
+([#2209](https://github.com/RakuenSoftware/aimee/issues/2209)), so the two disagree until that is
+settled. Sealing the pair here is the path that accepts either.
 
 Run the bootstrap script; do not simply export the variables and `up`. `compose.server-managed.yaml`
 deliberately keeps these two out of the server's `environment:` block, because anything listed there
