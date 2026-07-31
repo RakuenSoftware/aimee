@@ -227,11 +227,10 @@ static char *build_session_context(const char *client_cwd)
     * engineer, so this is a no-op until the operator changes it). */
    if (strcmp(persona_name, "engineer") == 0)
    {
-      config_t persona_cfg;
-      if (config_load(&persona_cfg) == 0 && persona_cfg.default_persona[0] &&
-          strcmp(persona_cfg.default_persona, "engineer") != 0)
+      const char *configured = config_default_persona();
+      if (configured[0] && strcmp(configured, "engineer") != 0)
       {
-         snprintf(persona_name, sizeof(persona_name), "%s", persona_cfg.default_persona);
+         snprintf(persona_name, sizeof(persona_name), "%s", configured);
          mode = aimee_mode_from_string(persona_name);
       }
    }
@@ -1414,19 +1413,11 @@ void cmd_launch(app_ctx_t *ctx, int argc, char **argv)
 
    /* Now emit a JSON metadata line with launch info for the client.
     * The client needs: provider, and the worktree path to chdir to. */
-   config_t cfg_local;
-   config_t *cfg_ptr = ctx->cfg;
-   if (!cfg_ptr)
-   {
-      config_load(&cfg_local);
-      cfg_ptr = &cfg_local;
-   }
-   config_t cfg = *cfg_ptr;
 
    /* Determine provider */
    const char *provider = "claude";
-   if (cfg.provider[0])
-      provider = cfg.provider;
+   if (config_provider()[0])
+      provider = config_provider();
 
    int use_builtin = 1;
 
@@ -1499,13 +1490,13 @@ void cmd_launch(app_ctx_t *ctx, int argc, char **argv)
    int launch_has_changelog = 0;
    {
       /* Ensure db1 is open for the wm_get lookup. Idempotent. */
-      db1_init(cfg.db1_path);
+      db1_init(config_db1_path());
       wm_entry_t wm_entry;
       if (db1_wm_get(session_id(), "session_changelog", &wm_entry) == 0)
          launch_has_changelog = 1;
    }
 
-   if (cfg.autonomous)
+   if (config_autonomous())
       fprintf(stderr,
               "aimee: warning: autonomous mode is active — aimee guardrails are the sole safety "
               "boundary\n");
@@ -1513,11 +1504,11 @@ void cmd_launch(app_ctx_t *ctx, int argc, char **argv)
    /* Emit launch metadata as a JSON line with a known prefix */
    cJSON *meta = cJSON_CreateObject();
    cJSON_AddStringToObject(meta, "provider", provider);
-   if (strcmp(provider, "claude") == 0 && cfg.claude_model[0])
-      cJSON_AddStringToObject(meta, "model", cfg.claude_model);
+   if (strcmp(provider, "claude") == 0 && config_claude_model()[0])
+      cJSON_AddStringToObject(meta, "model", config_claude_model());
    cJSON_AddBoolToObject(meta, "builtin", use_builtin);
    cJSON_AddStringToObject(meta, "session_id", session_id());
-   if (cfg.autonomous)
+   if (config_autonomous())
       cJSON_AddBoolToObject(meta, "autonomous", 1);
    if (target_dir[0])
       cJSON_AddStringToObject(meta, "worktree_cwd", target_dir);
@@ -1549,8 +1540,6 @@ void cmd_wrapup(app_ctx_t *ctx, int argc, char **argv)
    (void)argc;
    (void)argv;
 
-   config_t cfg;
-   config_load(&cfg);
 
    const char *sid = session_id();
 
@@ -1616,7 +1605,7 @@ void cmd_wrapup(app_ctx_t *ctx, int argc, char **argv)
 
    /* Prune other stale sessions in background (non-blocking).
     * Done at exit so new session startup isn't impacted by old session cleanup. */
-   platform_hooks_background_cleanup(&cfg);
+   platform_hooks_background_cleanup();
 
    if (ctx->json_output)
       emit_ok_ctx(ctx->json_fields, ctx->response_profile);

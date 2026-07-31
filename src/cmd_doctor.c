@@ -496,10 +496,9 @@ static void check_secrets(check_result_t *r)
    snprintf(r->message, sizeof(r->message), "secret storage available, %d key(s) stored", count);
 }
 
-static void check_index(check_result_t *r, config_t *cfg, int db2_ready)
+static void check_index(check_result_t *r, int db2_ready)
 {
    r->name = "Index";
-   (void)cfg;
 
    if (!db2_ready)
    {
@@ -554,10 +553,9 @@ static void check_index(check_result_t *r, config_t *cfg, int db2_ready)
    }
 }
 
-static void check_memory(check_result_t *r, config_t *cfg, int db2_ready)
+static void check_memory(check_result_t *r, int db2_ready)
 {
    r->name = "Memory";
-   (void)cfg;
 
    if (!db2_ready)
    {
@@ -768,9 +766,8 @@ static void check_guardrails_semantic(check_result_t *r, config_t *cfg)
 
 /* --- Fix functions --- */
 
-static int fix_orphaned_l0(config_t *cfg)
+static int fix_orphaned_l0(void)
 {
-   (void)cfg;
    int changes = db2_memory_prune_orphaned_l0();
    if (changes < 0)
    {
@@ -784,7 +781,6 @@ static int fix_orphaned_l0(config_t *cfg)
 
 static int fix_reindex(config_t *cfg)
 {
-   (void)cfg;
 
    /* The canonical index is owned by the knowledge service. The doctor's
     * reindex fix asks it to scan all configured workspaces; if unavailable,
@@ -815,7 +811,6 @@ static int fix_hooks(void)
 
 static int fix_vector_store(config_t *cfg)
 {
-   (void)cfg;
    fprintf(stderr, "  fix: run 'aimee kb build' to trigger a rebuild via the knowledge service\n");
    return 0;
 }
@@ -984,8 +979,8 @@ char *doctor_checks_json(void)
    check_hooks(&checks[n++]);
    check_mcp(&checks[n++]);
    check_secrets(&checks[n++]);
-   check_index(&checks[n++], &cfg, db2_session.ready);
-   check_memory(&checks[n++], &cfg, db2_session.ready);
+   check_index(&checks[n++], db2_session.ready);
+   check_memory(&checks[n++], db2_session.ready);
    kb_health_t kb_health;
    int kb_rc = check_kb_gather(&kb_health);
    check_kb_process(&checks[n++], kb_rc);
@@ -1116,8 +1111,8 @@ void cmd_doctor(app_ctx_t *ctx, int argc, char **argv)
    check_hooks(&checks[n++]);
    check_mcp(&checks[n++]);
    check_secrets(&checks[n++]);
-   check_index(&checks[n++], &cfg, db2_session.ready);
-   check_memory(&checks[n++], &cfg, db2_session.ready);
+   check_index(&checks[n++], db2_session.ready);
+   check_memory(&checks[n++], db2_session.ready);
    kb_health_t kb_health;
    int kb_rc = check_kb_gather(&kb_health);
    check_kb_process(&checks[n++], kb_rc);
@@ -1195,7 +1190,7 @@ void cmd_doctor(app_ctx_t *ctx, int argc, char **argv)
    {
       fprintf(stderr, "\nApplying fixes...\n");
       if (db2_session.ready)
-         fix_orphaned_l0(&cfg);
+         fix_orphaned_l0();
       else
          fprintf(stderr, "  fix: skipped L0 prune; shared knowledge unavailable\n");
       fix_reindex(&cfg);

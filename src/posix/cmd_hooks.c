@@ -64,7 +64,7 @@ void platform_hooks_background_reindex(char idx_names[][128], char idx_roots[][M
    _exit(0);
 }
 
-void platform_hooks_background_cleanup(const config_t *cfg)
+void platform_hooks_background_cleanup(void)
 {
    /* Double-fork: same pattern — intermediate exits immediately, worker
     * runs under init so no zombie is left in the caller. */

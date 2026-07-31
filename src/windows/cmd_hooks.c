@@ -43,7 +43,7 @@ void platform_hooks_background_reindex(char idx_names[][128], char idx_roots[][M
    }
 }
 
-void platform_hooks_background_cleanup(const config_t *cfg)
+void platform_hooks_background_cleanup(void)
 {
    /* No fork on Windows: run synchronously.  prune_stale_sessions is
     * pure DB1 + kb_client, so we only need DB1 here. */

@@ -18,7 +18,7 @@
       "loads": 8
     },
     "src/cmd_doctor.c": {
-      "decls": 9,
+      "decls": 6,
       "loads": 2
     },
     "src/cmd_dogfood.c": {
@@ -49,10 +49,6 @@
       "decls": 1,
       "loads": 1
     },
-    "src/cmd_session_lifecycle.c": {
-      "decls": 5,
-      "loads": 3
-    },
     "src/db2/canonical_index.c": {
       "decls": 2,
       "loads": 2
@@ -73,10 +69,6 @@
       "decls": 2,
       "loads": 0
     },
-    "src/headers/cmd_hooks_platform.h": {
-      "decls": 1,
-      "loads": 0
-    },
     "src/headers/fidelity_check.h": {
       "decls": 1,
       "loads": 0
@@ -88,10 +80,6 @@
     "src/headers/memory.h": {
       "decls": 1,
       "loads": 0
-    },
-    "src/index.c": {
-      "decls": 1,
-      "loads": 1
     },
     "src/kb/http/kb_http.c": {
       "decls": 2,
@@ -372,10 +360,6 @@
     "src/posix/agent_runtime.c": {
       "decls": 3,
       "loads": 3
-    },
-    "src/posix/cmd_hooks.c": {
-      "decls": 1,
-      "loads": 0
     },
     "src/posix/server_compute.c": {
       "decls": 9,
@@ -773,18 +757,14 @@
       "decls": 4,
       "loads": 5
     },
-    "src/windows/cmd_hooks.c": {
-      "decls": 1,
-      "loads": 0
-    },
     "src/workflow_learn.c": {
       "decls": 1,
       "loads": 0
     }
   },
   "totals": {
-    "decls": 689,
-    "files": 195,
-    "loads": 337
+    "decls": 677,
+    "files": 190,
+    "loads": 333
   }
 }
