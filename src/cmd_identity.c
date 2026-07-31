@@ -27,36 +27,40 @@
 
 /* --- shared JSON helpers --- */
 
-static cJSON *charter_array_to_json(const char entries[][CONFIG_CHARTER_ENTRY_LEN], int count)
+/* Takes the section's indexed accessor rather than the array: the entries are no
+ * longer a block of memory the caller holds. Each entry is copied into the JSON
+ * string immediately, so the accessor's thread-local buffer is consumed before
+ * the next index overwrites it. */
+static cJSON *charter_array_to_json(const char *(*entry)(int), int count)
 {
    cJSON *arr = cJSON_CreateArray();
    if (!arr)
       return NULL;
    for (int i = 0; i < count; i++)
-      cJSON_AddItemToArray(arr, cJSON_CreateString(entries[i]));
+      cJSON_AddItemToArray(arr, cJSON_CreateString(entry(i)));
    return arr;
 }
 
-cJSON *identity_charter_json(const config_t *cfg)
+cJSON *identity_charter_json(void)
 {
    cJSON *out = cJSON_CreateObject();
    if (!out)
       return NULL;
+   cJSON_AddItemToObject(out, "safety_axioms",
+                         charter_array_to_json(config_charter_safety_axioms,
+                                               config_charter_safety_axioms_count()));
+   cJSON_AddItemToObject(out, "hard_constraints",
+                         charter_array_to_json(config_charter_hard_constraints,
+                                               config_charter_hard_constraints_count()));
    cJSON_AddItemToObject(
-       out, "safety_axioms",
-       charter_array_to_json(cfg->charter_safety_axioms, cfg->charter_safety_axioms_count));
-   cJSON_AddItemToObject(
-       out, "hard_constraints",
-       charter_array_to_json(cfg->charter_hard_constraints, cfg->charter_hard_constraints_count));
-   cJSON_AddItemToObject(out, "values",
-                         charter_array_to_json(cfg->charter_values, cfg->charter_values_count));
-   cJSON_AddItemToObject(
-       out, "tone_boundaries",
-       charter_array_to_json(cfg->charter_tone_boundaries, cfg->charter_tone_boundaries_count));
+       out, "values", charter_array_to_json(config_charter_values, config_charter_values_count()));
+   cJSON_AddItemToObject(out, "tone_boundaries",
+                         charter_array_to_json(config_charter_tone_boundaries,
+                                               config_charter_tone_boundaries_count()));
    cJSON_AddNumberToObject(out, "working_profile_drift_limit",
-                           cfg->charter_working_profile_drift_limit);
-   int total = cfg->charter_safety_axioms_count + cfg->charter_hard_constraints_count +
-               cfg->charter_values_count + cfg->charter_tone_boundaries_count;
+                           config_charter_working_profile_drift_limit());
+   int total = config_charter_safety_axioms_count() + config_charter_hard_constraints_count() +
+               config_charter_values_count() + config_charter_tone_boundaries_count();
    cJSON_AddNumberToObject(out, "total_entries", total);
    return out;
 }
@@ -134,7 +138,7 @@ static void identity_show(app_ctx_t *ctx)
    if (ctx->json_output)
    {
       cJSON *obj = cJSON_CreateObject();
-      cJSON_AddItemToObject(obj, "charter", identity_charter_json(&cfg));
+      cJSON_AddItemToObject(obj, "charter", identity_charter_json());
       cJSON_AddItemToObject(obj, "local_operator", identity_local_operator_json());
       cJSON_AddItemToObject(obj, "working_profile", identity_working_profile_json());
       emit_json_ctx(obj, ctx->json_fields, ctx->response_profile);
@@ -295,7 +299,7 @@ cJSON *identity_snapshot_build(void)
    strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%SZ", &tm_buf);
    cJSON_AddStringToObject(root, "snapshot_at", ts);
    cJSON_AddStringToObject(root, "version", AIMEE_VERSION);
-   cJSON_AddItemToObject(root, "charter", identity_charter_json(&cfg));
+   cJSON_AddItemToObject(root, "charter", identity_charter_json());
    cJSON_AddItemToObject(root, "local_operator", identity_local_operator_json());
    cJSON_AddItemToObject(root, "working_profile", identity_working_profile_json());
    return root;

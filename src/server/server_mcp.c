@@ -790,7 +790,7 @@ cJSON *tool_get_identity(void)
    cJSON *obj = cJSON_CreateObject();
    if (!obj)
       return text_content("error: out of memory");
-   cJSON_AddItemToObject(obj, "charter", identity_charter_json(&cfg));
+   cJSON_AddItemToObject(obj, "charter", identity_charter_json());
    cJSON_AddItemToObject(obj, "local_operator", identity_local_operator_json());
    cJSON_AddItemToObject(obj, "working_profile", identity_working_profile_json());
 

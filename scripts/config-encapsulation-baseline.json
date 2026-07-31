@@ -26,7 +26,7 @@
       "loads": 1
     },
     "src/cmd_identity.c": {
-      "decls": 3,
+      "decls": 2,
       "loads": 2
     },
     "src/cmd_infra.c": {
@@ -53,10 +53,6 @@
       "decls": 13,
       "loads": 4
     },
-    "src/dashboard.c": {
-      "decls": 2,
-      "loads": 2
-    },
     "src/db2/canonical_index.c": {
       "decls": 2,
       "loads": 2
@@ -79,10 +75,6 @@
     },
     "src/headers/cmd_hooks_platform.h": {
       "decls": 2,
-      "loads": 0
-    },
-    "src/headers/commands.h": {
-      "decls": 1,
       "loads": 0
     },
     "src/headers/fidelity_check.h": {
@@ -412,10 +404,6 @@
     "src/server/aux_router.c": {
       "decls": 2,
       "loads": 0
-    },
-    "src/server/dashboard_server.c": {
-      "decls": 2,
-      "loads": 2
     },
     "src/server/deploy_apply.c": {
       "decls": 1,
@@ -795,8 +783,8 @@
     }
   },
   "totals": {
-    "decls": 704,
-    "files": 198,
-    "loads": 342
+    "decls": 698,
+    "files": 195,
+    "loads": 338
   }
 }

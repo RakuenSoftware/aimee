@@ -1871,7 +1871,7 @@ int handle_identity_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (config_load(&cfg) != 0)
       return server_send_error(conn, "identity show: could not load config", NULL);
    cJSON *resp = cJSON_CreateObject();
-   cJSON_AddItemToObject(resp, "charter", identity_charter_json(&cfg));
+   cJSON_AddItemToObject(resp, "charter", identity_charter_json());
    cJSON_AddItemToObject(resp, "local_operator", identity_local_operator_json());
    cJSON_AddItemToObject(resp, "working_profile", identity_working_profile_json());
    return send_and_free(conn, resp);
