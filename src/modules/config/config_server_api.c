@@ -155,56 +155,6 @@ void config_parse_server_api(config_t *cfg, const cJSON *root)
    runtime_secret_wipe(bearer_env, sizeof(bearer_env));
 }
 
-/* Append one enrolled bearer. Returns the slot used, -1 on failure, -2 when the
- * table is full. Callers hold g_api_bearer_mutation_lock, so the count read
- * inside is stable for the duration. */
-int config_server_api_bearer_extra_append(const char *token)
-{
-   if (!token || !token[0])
-      return -1;
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = -1;
-   if (config_load(cfg) == 0)
-   {
-      int slot = cfg->server_api_bearer_extra_count;
-      if (slot < 0)
-         slot = 0;
-      if (slot >= AIMEE_API_BEARER_EXTRA_MAX)
-         rc = -2;
-      else
-      {
-         snprintf(cfg->server_api_bearer_extra[slot], sizeof(cfg->server_api_bearer_extra[0]), "%s",
-                  token);
-         cfg->server_api_bearer_extra_count = slot + 1;
-         rc = (config_save(cfg) == 0) ? slot : -1;
-      }
-   }
-   runtime_secret_wipe(cfg, sizeof(*cfg));
-   free(cfg);
-   return rc;
-}
-
-/* Revoke every enrolled bearer -- the persistent half of a rotation. Without
- * this the credentials would return after a restart. */
-int config_server_api_bearer_extra_clear(void)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = -1;
-   if (config_load(cfg) == 0)
-   {
-      memset(cfg->server_api_bearer_extra, 0, sizeof(cfg->server_api_bearer_extra));
-      cfg->server_api_bearer_extra_count = 0;
-      rc = config_save(cfg);
-   }
-   runtime_secret_wipe(cfg, sizeof(*cfg));
-   free(cfg);
-   return rc;
-}
-
 int config_server_api_bearer_extra_snapshot(char out[][256], int max)
 {
    if (!out || max <= 0)

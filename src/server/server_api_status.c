@@ -17,7 +17,11 @@
 #include "server.h"
 #include "turn_registry.h"
 #include "server_http.h" /* server_http_api_status_report */
-#include "config.h"      /* config_t / config_load for api.status, api.enable */
+#include "config.h"      /* config accessors + setters for api.status / api.enable */
+
+/* Defined below; the enrolled-bearer picture is Vault state, not config. */
+static int api_bearer_primary(char *out, size_t out_n);
+static int api_bearer_extra_count(void);
 #include <aimee/delegates/delegate_backend_docker.h>
 #include <aimee/delegates/delegate_backend_local.h>
 #include <aimee/delegates/delegate_backend_ssh.h>
@@ -118,11 +122,13 @@ int handle_api_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)ctx;
    (void)req;
 
-   config_t cfg;
-   config_load(&cfg);
-   int http_port = cfg.server_api_http_port;
-   int bearer_configured = cfg.server_api_bearer_token[0] != '\0';
-   int rate_limit = cfg.server_api_rate_limit_per_min;
+   int http_port = config_server_api_http_port();
+   /* Vault, not config: config_load scrubs the bearer fields after migrating any
+    * legacy value out, so asking config would report an enabled API as unkeyed. */
+   char probe[256];
+   int bearer_configured = api_bearer_primary(probe, sizeof(probe));
+   runtime_secret_wipe(probe, sizeof(probe));
+   int rate_limit = config_server_api_rate_limit_per_min();
 
    char report[2048];
    server_http_api_status_report(http_port, bearer_configured, rate_limit, report, sizeof(report));
@@ -170,23 +176,35 @@ static int server_api_mint_bearer(char *out, size_t out_cap)
    return out && out_cap >= 65 && platform_random_hex(out, 64) == 0 ? 0 : -1;
 }
 
-static int server_api_load_mutable(config_t *cfg)
+/* The enrolled-bearer picture is VAULT state, not config. config_save persists
+ * neither the primary nor the extras, and config_load migrates any legacy values
+ * out to Vault and scrubs them from the struct. These two helpers read that state
+ * where it actually lives, instead of staging it through a config_t. */
+static int api_bearer_primary(char *out, size_t out_n)
 {
-   if (!cfg || config_load_file(cfg) != 0)
-      return -1;
-   (void)runtime_secret_get("AIMEE_API_BEARER_TOKEN", cfg->server_api_bearer_token,
-                            sizeof(cfg->server_api_bearer_token));
-   cfg->server_api_bearer_extra_count = 0;
+   if (out && out_n)
+      out[0] = '\0';
+   return runtime_secret_get("AIMEE_API_BEARER_TOKEN", out, out_n) ? 1 : 0;
+}
+
+/* Number of contiguous enrolled bearers. The Vault secret name is keyed on the
+ * slot index, so a caller must know the count BEFORE minting the next one. */
+static int api_bearer_extra_count(void)
+{
+   int n = 0;
    for (int i = 0; i < AIMEE_API_BEARER_EXTRA_MAX; i++)
    {
-      char name[96];
+      char name[96], val[256];
       snprintf(name, sizeof(name), "AIMEE_API_BEARER_TOKEN_EXTRA_%d", i);
-      if (!runtime_secret_get(name, cfg->server_api_bearer_extra[i],
-                              sizeof(cfg->server_api_bearer_extra[i])))
+      if (!runtime_secret_get(name, val, sizeof(val)))
+      {
+         runtime_secret_wipe(val, sizeof(val));
          break;
-      cfg->server_api_bearer_extra_count++;
+      }
+      runtime_secret_wipe(val, sizeof(val));
+      n++;
    }
-   return 0;
+   return n;
 }
 
 /* api.enable: turn on the loopback /v1 listener. Picks a default port and rate
@@ -199,50 +217,48 @@ int handle_api_enable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)ctx;
 
    pthread_mutex_lock(&g_api_bearer_mutation_lock);
-   config_t cfg;
-   if (server_api_load_mutable(&cfg) != 0)
-   {
-      pthread_mutex_unlock(&g_api_bearer_mutation_lock);
-      return handle_api_error(conn, "failed to load aimee.api config");
-   }
 
+   /* Port/rate come from the request, else the current config, else the defaults. */
    cJSON *jport = cJSON_GetObjectItemCaseSensitive(req, "port");
-   if (cJSON_IsNumber(jport) && jport->valuedouble > 0)
-      cfg.server_api_http_port = (int)jport->valuedouble;
    cJSON *jrate = cJSON_GetObjectItemCaseSensitive(req, "rate_limit");
-   if (cJSON_IsNumber(jrate) && jrate->valuedouble > 0)
-      cfg.server_api_rate_limit_per_min = (int)jrate->valuedouble;
+   int port = (cJSON_IsNumber(jport) && jport->valuedouble > 0) ? (int)jport->valuedouble
+                                                                : config_server_api_http_port();
+   int rate = (cJSON_IsNumber(jrate) && jrate->valuedouble > 0)
+                  ? (int)jrate->valuedouble
+                  : config_server_api_rate_limit_per_min();
    int with_vscode = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "vscode"));
+   if (port <= 0)
+      port = API_DEFAULT_PORT;
+   if (rate <= 0)
+      rate = API_DEFAULT_RATE_LIMIT;
 
-   if (cfg.server_api_http_port <= 0)
-      cfg.server_api_http_port = API_DEFAULT_PORT;
-   if (cfg.server_api_rate_limit_per_min <= 0)
-      cfg.server_api_rate_limit_per_min = API_DEFAULT_RATE_LIMIT;
-
+   /* Bearer presence is a VAULT question, not a config one -- asking config would
+    * report "unset" for a perfectly good token and mint a second one over it. */
+   char bearer[256];
    int generated = 0;
-   if (cfg.server_api_bearer_token[0] == '\0')
+   if (!api_bearer_primary(bearer, sizeof(bearer)))
    {
-      if (server_api_mint_bearer(cfg.server_api_bearer_token,
-                                 sizeof(cfg.server_api_bearer_token)) != 0 ||
-          vault_runtime_secret_set("AIMEE_API_BEARER_TOKEN", cfg.server_api_bearer_token) != 0)
+      if (server_api_mint_bearer(bearer, sizeof(bearer)) != 0 ||
+          vault_runtime_secret_set("AIMEE_API_BEARER_TOKEN", bearer) != 0)
       {
+         runtime_secret_wipe(bearer, sizeof(bearer));
          pthread_mutex_unlock(&g_api_bearer_mutation_lock);
          return handle_api_error(conn, "failed to generate bearer token");
       }
       generated = 1;
    }
 
-   if (config_save(&cfg) != 0)
+   if (config_set_server_api_http_port(port) != 0 ||
+       config_set_server_api_rate_limit_per_min(rate) != 0)
    {
+      runtime_secret_wipe(bearer, sizeof(bearer));
       pthread_mutex_unlock(&g_api_bearer_mutation_lock);
       return handle_api_error(conn, "failed to persist aimee.api config");
    }
-   (void)config_reload();
    pthread_mutex_unlock(&g_api_bearer_mutation_lock);
 
    char snippets[2048];
-   server_http_api_status_report(cfg.server_api_http_port, 1, cfg.server_api_rate_limit_per_min,
-                                 snippets, sizeof(snippets));
+   server_http_api_status_report(port, 1, rate, snippets, sizeof(snippets));
 
    char report[4096];
    int off = snprintf(report, sizeof(report),
@@ -250,23 +266,22 @@ int handle_api_enable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                       "  bearer token: %s%s\n"
                       "  rate limit:   %d req/min\n"
                       "\nRestart the server to apply: aimee server restart\n\n%s",
-                      cfg.server_api_http_port, cfg.server_api_bearer_token,
-                      generated ? "   (newly generated — store it now)" : "",
-                      cfg.server_api_rate_limit_per_min, snippets);
+                      port, bearer, generated ? "   (newly generated — store it now)" : "", rate,
+                      snippets);
    if (with_vscode && off > 0 && (size_t)off < sizeof(report))
       snprintf(report + off, sizeof(report) - (size_t)off,
                "\nVS Code aimee extension (Settings -> Extensions -> aimee):\n"
                "  aimee.apiBase     = http://127.0.0.1:%d/v1\n"
                "  aimee.bearerToken = %s\n"
                "  aimee.model       = aimee\n",
-               cfg.server_api_http_port, cfg.server_api_bearer_token);
+               port, bearer);
 
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddBoolToObject(resp, "enabled", 1);
-   cJSON_AddNumberToObject(resp, "http_port", cfg.server_api_http_port);
-   cJSON_AddStringToObject(resp, "bearer_token", cfg.server_api_bearer_token);
-   cJSON_AddNumberToObject(resp, "rate_limit_per_min", cfg.server_api_rate_limit_per_min);
+   cJSON_AddNumberToObject(resp, "http_port", port);
+   cJSON_AddStringToObject(resp, "bearer_token", bearer);
+   cJSON_AddNumberToObject(resp, "rate_limit_per_min", rate);
    cJSON_AddBoolToObject(resp, "vscode", with_vscode);
    cJSON_AddStringToObject(resp, "report", report);
    int rc = server_send_response(conn, resp);
@@ -284,48 +299,38 @@ int handle_api_rotate_bearer(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)req;
 
    pthread_mutex_lock(&g_api_bearer_mutation_lock);
-   config_t cfg;
-   if (server_api_load_mutable(&cfg) != 0)
+   char bearer[256];
+   if (server_api_mint_bearer(bearer, sizeof(bearer)) != 0 ||
+       vault_runtime_secret_set("AIMEE_API_BEARER_TOKEN", bearer) != 0)
    {
-      pthread_mutex_unlock(&g_api_bearer_mutation_lock);
-      return handle_api_error(conn, "failed to load aimee.api config");
-   }
-   if (server_api_mint_bearer(cfg.server_api_bearer_token, sizeof(cfg.server_api_bearer_token)) !=
-           0 ||
-       vault_runtime_secret_set("AIMEE_API_BEARER_TOKEN", cfg.server_api_bearer_token) != 0)
-   {
+      runtime_secret_wipe(bearer, sizeof(bearer));
       pthread_mutex_unlock(&g_api_bearer_mutation_lock);
       return handle_api_error(conn, "failed to generate bearer token");
    }
-   /* Rotation is the explicit revoke-all operation. Persist that revocation;
-    * otherwise the additional credentials would return after a restart. */
+   /* Rotation is the explicit revoke-all operation. Deleting the Vault secrets IS
+    * the persistence: config_save never wrote the enrolled set (config_load
+    * migrates any legacy values out to Vault and scrubs them), so the config
+    * write this used to do persisted nothing. */
    for (int i = 0; i < AIMEE_API_BEARER_EXTRA_MAX; i++)
    {
       char name[96];
       snprintf(name, sizeof(name), "AIMEE_API_BEARER_TOKEN_EXTRA_%d", i);
       if (vault_runtime_secret_delete(name) != 0)
       {
+         runtime_secret_wipe(bearer, sizeof(bearer));
          pthread_mutex_unlock(&g_api_bearer_mutation_lock);
          return handle_api_error(conn, "failed to revoke enrolled bearer from Vault");
       }
    }
-   memset(cfg.server_api_bearer_extra, 0, sizeof(cfg.server_api_bearer_extra));
-   cfg.server_api_bearer_extra_count = 0;
-   if (config_save(&cfg) != 0)
-   {
-      pthread_mutex_unlock(&g_api_bearer_mutation_lock);
-      return handle_api_error(conn, "failed to persist aimee.api config");
-   }
-   (void)config_reload();
 
    /* Hot-swap the running listener's primary and atomically clear its enrolled
     * set. After this returns none of the previous credentials authorize. */
-   server_http_set_bearer(cfg.server_api_bearer_token);
+   server_http_set_bearer(bearer);
    pthread_mutex_unlock(&g_api_bearer_mutation_lock);
 
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddStringToObject(resp, "bearer_token", cfg.server_api_bearer_token);
+   cJSON_AddStringToObject(resp, "bearer_token", bearer);
    int rc = server_send_response(conn, resp);
    cJSON_Delete(resp);
    return rc;
@@ -349,19 +354,19 @@ int handle_api_enroll_bearer(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)req;
 
    pthread_mutex_lock(&g_api_bearer_mutation_lock);
-   config_t cfg;
-   if (server_api_load_mutable(&cfg) != 0)
-   {
-      pthread_mutex_unlock(&g_api_bearer_mutation_lock);
-      return handle_api_error(conn, "failed to load aimee.api config");
-   }
-
-   if (cfg.server_api_bearer_token[0] == '\0')
+   /* Both the primary's presence and the enrolled count are VAULT state. Reading
+    * either from config would report "unset" for a live credential -- the config
+    * fields are legacy migration staging that config_load scrubs. */
+   char primary[256];
+   int have_primary = api_bearer_primary(primary, sizeof(primary));
+   runtime_secret_wipe(primary, sizeof(primary));
+   if (!have_primary)
    {
       pthread_mutex_unlock(&g_api_bearer_mutation_lock);
       return handle_api_error(conn, "no primary bearer configured; run api.enable first");
    }
-   if (cfg.server_api_bearer_extra_count >= AIMEE_API_BEARER_EXTRA_MAX)
+   int enrolled = api_bearer_extra_count();
+   if (enrolled >= AIMEE_API_BEARER_EXTRA_MAX)
    {
       pthread_mutex_unlock(&g_api_bearer_mutation_lock);
       return handle_api_error(conn, "enrolled bearer limit reached; perform an explicit revoke-all "
@@ -375,7 +380,7 @@ int handle_api_enroll_bearer(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return handle_api_error(conn, "failed to generate bearer token");
    }
 
-   int slot = cfg.server_api_bearer_extra_count;
+   int slot = enrolled;
    char vault_name[96];
    snprintf(vault_name, sizeof(vault_name), "AIMEE_API_BEARER_TOKEN_EXTRA_%d", slot);
    if (vault_runtime_secret_set(vault_name, minted) != 0)
@@ -384,29 +389,28 @@ int handle_api_enroll_bearer(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       pthread_mutex_unlock(&g_api_bearer_mutation_lock);
       return handle_api_error(conn, "failed to store enrolled bearer in Vault");
    }
-   snprintf(cfg.server_api_bearer_extra[slot], sizeof(cfg.server_api_bearer_extra[0]), "%s",
-            minted);
-   cfg.server_api_bearer_extra_count = slot + 1;
-
-   if (config_save(&cfg) != 0)
-   {
-      pthread_mutex_unlock(&g_api_bearer_mutation_lock);
-      return handle_api_error(conn, "failed to persist aimee.api config");
-   }
-   (void)config_reload();
-
-   /* Hot-swap so the new token authorizes immediately. The live auth layer has
-    * its own lock for concurrent connection workers. */
+   /* The Vault write above IS the persistence -- config_save never stored the
+    * enrolled set. Re-read the whole set for the hot-swap so the live listener
+    * reflects Vault exactly. */
+   int now_enrolled = slot + 1;
+   char extra_buf[AIMEE_API_BEARER_EXTRA_MAX][256];
    const char *extra[AIMEE_API_BEARER_EXTRA_MAX];
-   for (int i = 0; i < cfg.server_api_bearer_extra_count; i++)
-      extra[i] = cfg.server_api_bearer_extra[i];
-   server_http_set_bearer_extra(extra, cfg.server_api_bearer_extra_count);
+   int n_extra = 0;
+   for (int i = 0; i < now_enrolled && i < AIMEE_API_BEARER_EXTRA_MAX; i++)
+   {
+      char name[96];
+      snprintf(name, sizeof(name), "AIMEE_API_BEARER_TOKEN_EXTRA_%d", i);
+      if (!runtime_secret_get(name, extra_buf[i], sizeof(extra_buf[i])))
+         break;
+      extra[n_extra++] = extra_buf[i];
+   }
+   server_http_set_bearer_extra(extra, n_extra);
    pthread_mutex_unlock(&g_api_bearer_mutation_lock);
 
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddStringToObject(resp, "bearer_token", minted);
-   cJSON_AddNumberToObject(resp, "enrolled_count", cfg.server_api_bearer_extra_count);
+   cJSON_AddNumberToObject(resp, "enrolled_count", now_enrolled);
    cJSON_AddNumberToObject(resp, "enrolled_max", AIMEE_API_BEARER_EXTRA_MAX);
    int rc = server_send_response(conn, resp);
    cJSON_Delete(resp);

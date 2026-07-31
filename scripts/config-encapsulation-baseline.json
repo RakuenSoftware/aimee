@@ -386,8 +386,8 @@
       "loads": 0
     },
     "src/server/server_api_status.c": {
-      "decls": 6,
-      "loads": 3
+      "decls": 1,
+      "loads": 1
     },
     "src/server/server_compute.c": {
       "decls": 3,
@@ -711,8 +711,8 @@
     }
   },
   "totals": {
-    "decls": 569,
+    "decls": 564,
     "files": 177,
-    "loads": 311
+    "loads": 309
   }
 }

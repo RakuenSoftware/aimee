@@ -2113,7 +2113,10 @@ static void test_api_enroll_preserves_sequential_bearers(void)
    cJSON_Delete(second);
 
    assert(strcmp(first_bearer, second_bearer) != 0);
-   assert(g_config_reload_calls == 2);
+   /* Enrolling touches VAULT only. config_save never persisted the enrolled set
+    * (config_load migrates any legacy value out and scrubs the fields), so the
+    * save+reload this used to do republished an unchanged config. No reload now. */
+   assert(g_config_reload_calls == 0);
    assert(g_config_disk.server_api_bearer_token[0] == '\0');
    assert(g_config_disk.server_api_bearer_extra_count == 0);
    assert(g_config_snapshot.server_api_bearer_extra_count == 0);
