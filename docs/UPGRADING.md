@@ -34,27 +34,25 @@ Do not rely on a raw copy of a live SQLite main file. Take a consistent backup w
   user the required remote-write grant. The old global `remote_writes` value authorizes nothing.
 - Review mTLS revocation, org catalogs, budgets, rate limits, and egress policy.
 
-## This upgrade is one-way
+## This upgrade is one-way, by design
 
-Once a server volume has been booted by this release, **an older image will not start on it again**.
-It crash-loops with:
+0.3.0 does not preserve backwards compatibility, and that includes the image itself: once a server
+volume has been booted by this release, an older image will not start on it again. It crash-loops
+with:
 
 ```
 [webchat] ERROR: browser UI requires a complete first-boot login sealed in Vault
 ```
 
-Older images gate startup on `aimee-server --webchat-vault-check`, which requires the vault to hold
-a webchat login — the sealed `AIMEE_WEBCHAT_USER`/`AIMEE_WEBCHAT_PASSWORD` pair, or one of the
-`legacy_primary` / `legacy_hashes` / `accounts` records. This release deliberately holds none of
-them: PAM owns the accounts and the first-boot password is never sealed, which is the point of the
-change described below. There is nothing for the old check to find.
+Older images gate startup on `aimee-server --webchat-vault-check`, which wants the vault to hold a
+webchat login — the sealed `AIMEE_WEBCHAT_USER`/`AIMEE_WEBCHAT_PASSWORD` pair, or one of the
+`legacy_primary` / `legacy_hashes` / `accounts` records. This release holds none of them on purpose:
+PAM owns the accounts and the first-boot password is never sealed (see below). There is nothing for
+the old check to find, and adding something for it to find would mean persisting a password this
+release deliberately does not keep.
 
-So rolling the image back is not an escape hatch here. Verify the upgrade on a disposable copy of
-the volume first, and keep the backups from *Before* — restoring a pre-upgrade volume is the only
-way back.
-
-Reproduced by running the previous image against a volume created by this release, with a healthy
-KB: it crash-looped, while the same image on its own volume was fine.
+Plan accordingly rather than treating the image tag as a rollback: keep the backups from *Before*,
+and restore a pre-upgrade volume if you need to go back.
 
 ## Browser logins become PAM accounts
 
