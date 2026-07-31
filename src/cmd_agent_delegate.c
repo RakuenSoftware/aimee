@@ -521,8 +521,6 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
          fprintf(stderr, "error: aggregate requires a prompt\n");
          return;
       }
-      config_t cfg;
-      config_load(&cfg);
       agent_config_t acfg;
       if (agent_load_config(&acfg) != 0)
       {
@@ -809,9 +807,7 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
    }
    if (template_sys_prompt)
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      if (config_load(&cfg) == 0)
+      if (config_present())
       {
          char *with_dispositions = prompt_apply_dispositions(template_sys_prompt);
          if (with_dispositions)
@@ -2003,9 +1999,6 @@ void cmd_verify(app_ctx_t *ctx, int argc, char **argv)
 {
    (void)ctx;
 
-   config_t cfg;
-   config_load(&cfg);
-
    if (argc >= 1 && strcmp(argv[0], "enable") == 0)
    {
       config_set("cross_verify", "true");
@@ -2024,10 +2017,11 @@ void cmd_verify(app_ctx_t *ctx, int argc, char **argv)
    {
       if (argc == 1)
       {
-         printf("cross_verify: %s\n", cfg.cross_verify ? "enabled" : "disabled");
-         printf("verify_cmd: %s\n", cfg.verify_cmd[0] ? cfg.verify_cmd : "(not set)");
-         printf("verify_role: %s\n", cfg.verify_role[0] ? cfg.verify_role : "review");
-         printf("verify_prompt: %s\n", cfg.verify_prompt[0] ? cfg.verify_prompt : "(default)");
+         printf("cross_verify: %s\n", config_cross_verify() ? "enabled" : "disabled");
+         printf("verify_cmd: %s\n", config_verify_cmd()[0] ? config_verify_cmd() : "(not set)");
+         printf("verify_role: %s\n", config_verify_role()[0] ? config_verify_role() : "review");
+         printf("verify_prompt: %s\n",
+                config_verify_prompt()[0] ? config_verify_prompt() : "(default)");
          return;
       }
       /* Configure: --verify-cmd, --role, --prompt */
@@ -2045,17 +2039,21 @@ void cmd_verify(app_ctx_t *ctx, int argc, char **argv)
    }
 
    /* Default: delegate verifies current changes */
-   if (!cfg.cross_verify)
+   if (!config_cross_verify())
    {
       fprintf(stderr, "cross-verification is disabled. Run: aimee verify enable\n");
       return;
    }
 
    /* Step 1: run verify_cmd if set (compilation/tests) */
-   if (cfg.verify_cmd[0])
+   /* Copied out: cmd_argv borrows it across safe_exec_capture, which is a whole
+    * subprocess round trip. */
+   char verify_cmd[sizeof(((config_t *)0)->verify_cmd)];
+   snprintf(verify_cmd, sizeof(verify_cmd), "%s", config_verify_cmd());
+   if (verify_cmd[0])
    {
-      fprintf(stderr, "aimee: running verify command: %s\n", cfg.verify_cmd);
-      const char *cmd_argv[] = {"/bin/sh", "-c", cfg.verify_cmd, NULL};
+      fprintf(stderr, "aimee: running verify command: %s\n", verify_cmd);
+      const char *cmd_argv[] = {"/bin/sh", "-c", verify_cmd, NULL};
       char *cmd_out = NULL;
       int cmd_rc = safe_exec_capture(cmd_argv, &cmd_out, AGENT_TOOL_OUTPUT_MAX);
       if (cmd_rc != 0)
@@ -2071,7 +2069,10 @@ void cmd_verify(app_ctx_t *ctx, int argc, char **argv)
    }
 
    /* Step 2: delegate a review to an agent */
-   const char *role = cfg.verify_role[0] ? cfg.verify_role : "review";
+   /* Same: both survive the git-diff subprocess below. */
+   char verify_role[sizeof(((config_t *)0)->verify_role)];
+   snprintf(verify_role, sizeof(verify_role), "%s", config_verify_role());
+   const char *role = verify_role[0] ? verify_role : "review";
 
    /* Build the review prompt: get the current staged + unstaged diff as context. */
    const char *diff_argv[] = {"git", "diff", "HEAD", NULL};
@@ -2079,9 +2080,11 @@ void cmd_verify(app_ctx_t *ctx, int argc, char **argv)
    safe_exec_capture(diff_argv, &diff_out, AGENT_TOOL_OUTPUT_MAX);
 
    char *review_prompt = NULL;
+   char verify_prompt[sizeof(((config_t *)0)->verify_prompt)];
+   snprintf(verify_prompt, sizeof(verify_prompt), "%s", config_verify_prompt());
    const char *base_prompt =
-       cfg.verify_prompt[0]
-           ? cfg.verify_prompt
+       verify_prompt[0]
+           ? verify_prompt
            : "Review these code changes for bugs, security issues, and correctness. "
              "If everything looks good, say LGTM. If you find problems, list them.";
 

@@ -148,20 +148,20 @@ static void admission_ensure_configured(void)
    pthread_mutex_lock(&mu);
    if (mtime != applied_mtime)
    {
-      config_t cfg;
-      config_load(&cfg); /* mtime-cached */
-      int global_max = cfg.maximum_total_concurrent_agent_sessions > 0
-                           ? cfg.maximum_total_concurrent_agent_sessions
+      int global_max = config_maximum_total_concurrent_agent_sessions() > 0
+                           ? config_maximum_total_concurrent_agent_sessions()
                            : AGENT_ADMISSION_DEFAULT_GLOBAL_MAX;
-      int default_model = cfg.concurrency_default > 0 ? cfg.concurrency_default : 5;
+      int default_model = config_concurrency_default() > 0 ? config_concurrency_default() : 5;
       agent_admission_model_limit_t overrides[CONFIG_CONCURRENCY_MAX_ENTRIES];
       int n = 0;
-      for (int i = 0; i < cfg.concurrency_per_model_count && n < CONFIG_CONCURRENCY_MAX_ENTRIES;
-           i++)
+      int entries = config_concurrency_per_model_count();
+      for (int i = 0; i < entries && n < CONFIG_CONCURRENCY_MAX_ENTRIES; i++)
       {
-         snprintf(overrides[n].model, sizeof(overrides[n].model), "%s",
-                  cfg.concurrency_per_model[i].key);
-         overrides[n].limit = cfg.concurrency_per_model[i].limit;
+         config_concurrency_entry_t e;
+         if (config_concurrency_per_model_at(i, &e) != 0)
+            continue;
+         snprintf(overrides[n].model, sizeof(overrides[n].model), "%s", e.key);
+         overrides[n].limit = e.limit;
          n++;
       }
       agent_admission_configure(global_max, default_model, overrides, n);

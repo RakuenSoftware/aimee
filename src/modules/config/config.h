@@ -2451,6 +2451,9 @@ const char *config_embedding_command_field(void);
  * Returns 0 on success, -1 on a bad index or unreadable config. */
 int config_cron_job_at(int index, cron_job_t *out);
 
+/* One per-model concurrency override, copied out. See config_cron_job_at. */
+int config_concurrency_per_model_at(int index, config_concurrency_entry_t *out);
+
 /* One aux-task route, copied out. See config_cron_job_at. */
 int config_aux_task_at(int index, config_aux_task_t *out);
 int config_trigger_rule_at(int index, trigger_rule_t *out);

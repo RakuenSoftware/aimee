@@ -3,7 +3,7 @@
   "files": {
     "src/cmd_agent_delegate.c": {
       "decls": 3,
-      "loads": 3
+      "loads": 0
     },
     "src/cmd_core.c": {
       "decls": 5,
@@ -54,7 +54,7 @@
       "loads": 7
     },
     "src/kb/kb_main.c": {
-      "decls": 5,
+      "decls": 6,
       "loads": 3
     },
     "src/kb/kb_memory_facts.c": {
@@ -84,14 +84,6 @@
     "src/kb_calibrate.h": {
       "decls": 1,
       "loads": 0
-    },
-    "src/modules/benchmarks/agent_eval_benchmarks.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/modules/benchmarks/agent_eval_memory_support.c": {
-      "decls": 1,
-      "loads": 1
     },
     "src/modules/guardrails/guardrails_action_audit.c": {
       "decls": 2,
@@ -160,10 +152,6 @@
     "src/server/agent_policy.c": {
       "decls": 1,
       "loads": 0
-    },
-    "src/server/agent_runtime.c": {
-      "decls": 1,
-      "loads": 1
     },
     "src/server/fidelity_check.c": {
       "decls": 1,
@@ -423,8 +411,8 @@
     }
   },
   "totals": {
-    "decls": 331,
-    "files": 105,
-    "loads": 193
+    "decls": 329,
+    "files": 102,
+    "loads": 187
   }
 }

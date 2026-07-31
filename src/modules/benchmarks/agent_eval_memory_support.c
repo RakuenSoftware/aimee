@@ -1256,10 +1256,8 @@ int mem_eval_open_temp_db(void)
     * configured). Without this, db2_embedding_dim()'s 1024 default disagrees with
     * the builtin embed and every vector insert fails. Mirrors bootstrap_db2's pin.
     * (The sqlite shim ignores vector dim, so this only bites the real-libpq store.) */
-   config_t dim_cfg;
-   config_load(&dim_cfg);
    db2_set_embedding_dim_default(config_embedding_dim_default());
-   db2_set_embedding_dim(config_resolve_embedding_dim(&dim_cfg));
+   db2_set_embedding_dim(config_resolve_embedding_dim_current());
    db2_set_embedding_dim_pinned(config_embedding_dim_pinned_current());
 
    if (db2_eval_open_temp_store() != 0)

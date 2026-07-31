@@ -61,6 +61,26 @@ int config_apply_db2_url_env_override(config_t *cfg)
    return 0;
 }
 
+/* The db2 URL this process should dial: the AIMEE_DB2_URL runtime secret when
+ * present, else the stored db2_url. Same precedence
+ * config_apply_db2_url_env_override applied to a caller's struct, without the
+ * caller holding one and without mutating anything -- the env value is
+ * authoritative per boot and is only re-persisted by a SUCCESSFUL bootstrap.
+ *
+ * Writes into caller-supplied storage rather than returning a pointer: the value
+ * is a credential-bearing URL, and callers hold it across db2_init and a retry
+ * loop, well past the life of any shared buffer. Returns 1 when non-empty. */
+int config_db2_url_effective(char *out, size_t n)
+{
+   if (!out || n == 0)
+      return 0;
+   out[0] = '\0';
+   if (runtime_secret_get("AIMEE_DB2_URL", out, n) && out[0])
+      return 1;
+   snprintf(out, n, "%s", config_db2_url());
+   return out[0] ? 1 : 0;
+}
+
 int config_embedding_dim_default(void)
 {
    return CONFIG_EMBEDDING_DIM_DEFAULT;
@@ -73,6 +93,27 @@ int config_embedding_dim_default(void)
  * derived (pinned > recorded > probed > default); setting it is an operator pin.
  * Returns 0 for "nothing pinned" — see config_embedding_dim_effective() for a
  * width you can use. Non-mutating so const callers can use it. */
+/* No-arg form: same value against the loaded config. Deliberately mirrors
+ * config_resolve_embedding_dim (the PIN signal, 0 when nothing is pinned) rather
+ * than config_embedding_dim_current (the effective width) -- the two callers of
+ * this are pinning db2, and collapsing them would silently turn "unpinned" into
+ * the default. */
+int config_resolve_embedding_dim_current(void)
+{
+   int dim = config_embedding_dim();
+   const char *env = getenv("AIMEE_EMBEDDING_DIM");
+   if (env && env[0])
+   {
+      char *end = NULL;
+      long v = strtol(env, &end, 10);
+      if (end && *end == '\0' && v >= 1 && v <= EMBED_MAX_DIM)
+         return (int)v;
+      fprintf(stderr, "aimee: config warning: AIMEE_EMBEDDING_DIM must be 1..%d, got \"%s\"\n",
+              EMBED_MAX_DIM, env);
+   }
+   return dim;
+}
+
 int config_resolve_embedding_dim(const config_t *cfg)
 {
    int dim = cfg ? cfg->embedding_dim : 0;

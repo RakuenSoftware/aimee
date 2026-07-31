@@ -123,12 +123,11 @@ static void mem_eval_finalize_bucket_array(mem_eval_bucket_scores_t *buckets, in
 
 static int mem_eval_drain_async_queues(mem_eval_async_drain_totals_t *totals)
 {
-   config_t cfg;
-   if (config_load(&cfg) != 0)
+   if (!config_present())
       return -1;
 
-   int cognify_enabled = cfg.memory_cognify_enabled && cfg.memory_cognify_command[0];
-   if (!cfg.memory_cognify_async_enabled && !cognify_enabled)
+   int cognify_enabled = config_memory_cognify_enabled() && config_memory_cognify_command()[0];
+   if (!config_memory_cognify_async_enabled() && !cognify_enabled)
       return 0;
 
    const char *embed_cmd = config_embedding_command_current(NULL);

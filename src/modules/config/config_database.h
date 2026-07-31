@@ -21,6 +21,11 @@ void config_parse_database(config_t *cfg, cJSON *root);
  * other config consumers are unaffected. */
 int config_apply_db2_url_env_override(config_t *cfg);
 
+/* The db2 URL this process should dial: AIMEE_DB2_URL when set, else the stored
+ * db2_url. Written into caller storage (it carries a credential and outlives any
+ * shared buffer). Returns 1 when non-empty. */
+int config_db2_url_effective(char *out, size_t n);
+
 /* THE embedding width. This is the only place in the tree the number is written:
  * selecting an embedder records its width in config (bekko-a25m -> 384), the env
  * and the wizard change it through the accessors above, and everything else —
@@ -39,6 +44,10 @@ int config_embedding_dim_default(void);
  * default. Callers that need a usable width (not a pin signal) want
  * config_embedding_dim_effective(). Non-mutating. */
 int config_resolve_embedding_dim(const config_t *cfg);
+
+/* No-arg form of the above, against the loaded config. Still the PIN signal
+ * (0 = nothing pinned), NOT the effective width -- see config_embedding_dim_current. */
+int config_resolve_embedding_dim_current(void);
 
 /* The width to actually embed and size columns with: the pin when there is one,
  * else config_embedding_dim_default(). Pass this to db2_set_embedding_dim() —

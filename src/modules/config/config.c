@@ -2549,6 +2549,17 @@ int config_aux_task_at(int index, config_aux_task_t *out)
                             sizeof(*out), out);
 }
 
+/* One per-model concurrency override, copied out. Named type already existed
+ * (config_concurrency_entry_t), so this is the plain config_cron_job_at shape. */
+int config_concurrency_per_model_at(int index, config_concurrency_entry_t *out)
+{
+   if (!out || index < 0 || index >= CONFIG_CONCURRENCY_MAX_ENTRIES)
+      return -1;
+   return config_field_read(offsetof(config_t, concurrency_per_model) +
+                                (size_t)index * sizeof(*out),
+                            sizeof(*out), out);
+}
+
 int config_cron_job_at(int index, cron_job_t *out)
 {
    if (!out || index < 0 || index >= CRON_JOBS_MAX)
