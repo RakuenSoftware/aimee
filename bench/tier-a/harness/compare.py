@@ -69,7 +69,7 @@ def main():
         label, _, path = arg.partition("=")
         cols.append((label, json.load(open(path))))
 
-    w = max(len(c[0]) for c in cols) + 2
+    w = max(max(len(c[0]) for c in cols) + 2, 10)  # min width: short labels ran values together
     print(f"{'':<22}" + "".join(f"{c[0]:>{w}}" for c in cols))
     for name, get in AXES:
         vals = []
