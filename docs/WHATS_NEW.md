@@ -108,8 +108,9 @@ See [Event bus](EVENT_BUS.md).
 
 - The KB container can own a private PostgreSQL 18 cluster with pgvector and pgvectorscale. An
   export helper moves that data to an external PostgreSQL server.
-- The KB owns embedding, retrieval, curation, and code-index storage; inference stays in the
-  separate `aimee-llm` service.
+- The KB owns embedding, retrieval, curation, and code-index storage, and now serves the embedder
+  itself from weights baked into its image. Synthesis is the only remaining inference role and it is
+  external-only.
 - Cross-repository symbol and dependency edges now feed caller lookup, search, and blast radius.
 - CSS migration analysis adds a style graph, dead/conflicting-rule checks, and an optional isolated
   Chromium sidecar for computed-style verification.
@@ -121,12 +122,13 @@ See [Event bus](EVENT_BUS.md).
 
 ## Deployment and clients
 
-- The all-in-one `aimee-combined` image is retired. Use the managed server or the split server, KB,
-  and inference stack.
+- The all-in-one `aimee-combined` image is retired. Use the managed server or the split server and
+  KB stack.
 - New KB containers run PostgreSQL privately when `AIMEE_DB2_URL` is not set. Existing external
   databases remain supported.
-- `aimee-llm` chooses CPU or GPU tiers at runtime. CPU images can be pre-baked for offline use; GPU
-  tiers keep models in a persistent volume.
+- The server generates a dashboard login on first boot when the deployment supplies none, and prints
+  it once to the container log. Supply `AIMEE_WEBCHAT_USER` and `AIMEE_WEBCHAT_PASSWORD` to choose
+  your own; supply both or neither.
 - Linux, macOS, and Windows use the same DB-free thin client and native TLS backend.
 - Server-to-KB mTLS pooling and resident thin-client HTTPS keep-alive now default on. The measured
   compression flags remain off because they saved bytes but missed the latency gate.
@@ -151,6 +153,8 @@ See [Event bus](EVENT_BUS.md).
   if you need them.
 - `aimee migrate v2`, whose server operation had already been removed.
 - The combined appliance image and its compose file.
+- The `aimee-llm` container and the reranker. The KB embeds in-container; point `AIMEE_LLM_URL` at
+  your own endpoint for synthesis.
 - The legacy KB Unix-socket autostart path.
 - Client-held plaintext agent credentials and the session credential-push endpoint.
 - The generic `/v1/rpc` transport. Named `/v1` routes are authoritative.

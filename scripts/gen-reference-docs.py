@@ -545,7 +545,7 @@ def render_config(fields, sections, flat):
 
     for title, blurb, group in (
         ("Deploy-time keys", "Consumed once by `config_emit_deploy_env` to stand up the "
-         "aimee-llm container (`aimee config deploy-env`); not read at runtime. Set at "
+         "managed sibling services (`aimee config deploy-env`); not read at runtime. Set at "
          "deploy, not tuned day-to-day.", deploy),
         ("Advanced tuning keys", "Expert scalars with sensible defaults; settable in the "
          "config file but off the everyday surface.", advanced),
@@ -680,7 +680,7 @@ ENV_DESC = {
     "AIMEE_GITHUB_OAUTH_CLIENT_ID": ("Server runtime", "Client ID of a GitHub OAuth App for the webchat \"Sign in with GitHub\" button; populates the github.com git credential. Public. Overrides the built-in default baked in via oauth_defaults.h."),
     "AIMEE_GITHUB_OAUTH_CLIENT_SECRET": ("Server runtime", "First-boot transport for the GitHub OAuth App client secret. The entrypoint synchronously seals it into Vault and scrubs the environment before aimee-server starts; startup fails closed if custody cannot be established. Enables browser redirect sign-in; without it the button falls back to the device-code flow."),
     "AIMEE_GITLAB_OAUTH_CLIENT_ID": ("Server runtime", "Client ID of a GitLab OAuth application (device flow enabled) for the webchat \"Sign in with GitLab\" button on gitlab.com. Public. Overrides the built-in default baked in via oauth_defaults.h."),
-    "AIMEE_DEPLOY_ENABLED": ("Server runtime", "Set to 1 to enable the server-orchestrated deploy: the setup wizard runs `docker compose up -d` for the managed sibling services (aimee-kb + aimee-llm) via a mounted Docker socket. Off unless the deploy compose sets it."),
+    "AIMEE_DEPLOY_ENABLED": ("Server runtime", "Set to 1 to enable the server-orchestrated deploy: the setup wizard runs `docker compose up -d` for the managed sibling service (aimee-kb) via a mounted Docker socket. Off unless the deploy compose sets it."),
     "AIMEE_DEPLOY_COMPOSE_FILE": ("Server runtime", "Path to the managed compose file the server-orchestrated deploy runs (default /opt/aimee/deploy/aimee-managed.compose.yaml)."),
     "AIMEE_INGRESS_PROXY_SECRET": ("Server runtime", "First-boot transport for the shared secret authenticating trusted ingress identity headers. It is sealed into Vault and removed from the environment before the long-lived server starts."),
     "AIMEE_PARALLEL_MAX": ("Server runtime", "Maximum parallel agent fan-out."),
@@ -692,7 +692,7 @@ ENV_DESC = {
     "AIMEE_SOCK": ("Server runtime", "Sandbox helper socket path."),
     # Knowledge base
     "AIMEE_LLM_URL": ("Knowledge base (aimee-kb)", "Synthesis endpoint (curator Tier-A + Tier-B at {url}/v1). No longer selects an embedder: the kb embeds in-container, and AIMEE_EMBEDDER_URL points at an external embedder. See docs/KB_LLM_BACKENDS.md."),
-    "AIMEE_LLM_AUTH_TOKEN": ("Managed KB and inference", "First-boot transport for the bearer service identity shared by aimee-kb and its aimee-llm gateway. aimee-kb synchronously seals it into Vault, scrubs the environment, and cleanly re-execs before serving; wizard-managed deploys generate the 256-bit value in Vault. This is separate from user/server bearers."),
+    "AIMEE_LLM_AUTH_TOKEN": ("Managed KB and inference", "First-boot transport for the bearer aimee-kb presents to the external synthesis endpoint. aimee-kb synchronously seals it into Vault, scrubs the environment, and cleanly re-execs before serving; wizard-managed deploys generate the 256-bit value in Vault. This is separate from user/server bearers."),
     "AIMEE_LLM_AUTH_REQUIRED": ("Managed KB and inference", "Set to 1 on wizard-managed KBs so synthesis clients refuse to contact the LLM when its bearer service identity is missing."),
     "AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE": ("Managed KB and inference", "Explicit first-boot migration/adoption transport for an existing wizard-managed LLM credential. aimee-server seals it into Vault and scrubs the environment before normal startup. Ordinary inherited AIMEE_LLM_AUTH_TOKEN is ignored by managed credential creation so stale child-service state cannot win. Must be a 32..512 character RFC 6750 b64token."),
     "AIMEE_OFFLINE_ALLOW_NO_SWAP_MLOCK_FALLBACK": (

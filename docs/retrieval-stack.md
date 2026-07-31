@@ -13,13 +13,14 @@ were used.
 
 ## Embedding
 
-One embedder identity and dimension applies to a deployment. The KB stores derived vectors in DB2;
-`aimee-llm` serves the model.
+One embedder identity and dimension applies to a deployment. The KB stores derived vectors in DB2
+and serves the model itself, from weights baked into its image. The bundled `bekko-a25m` is
+384-dimension; an external endpoint (`AIMEE_EMBEDDER_URL`) can serve a wider one.
 
-Every tier serves the same 768-dim embedder, so the tier is a GPU-offload choice and an
-index built under one tier is readable under another.
+The embedder is selected in the wizard's Deploy topology step. Until one is selected the KB serves a
+builtin lexical embedder — retrieval works, but it is keyword matching rather than vector search.
 
-Check [Inference tiers](AIMEE_KB_SYNTH_TIERS.md) for the current model names and hardware estimates.
+Check [Inference tiers](AIMEE_KB_SYNTH_TIERS.md) for sizing the synthesis endpoint.
 
 The configured dimension must equal the model output. DB2 records the dimension used to create its
 vector columns and refuses startup on drift. Silent empty vector search is worse than a hard start
