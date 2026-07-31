@@ -11,10 +11,15 @@ import json
 import re
 import time
 
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
-
 import prompt
+
+# torch and transformers are imported inside main(), not here, because
+# run_llamacpp.py imports CONF_FLOOR and extract_json from this module and needs
+# neither. At module scope they made the llama.cpp runner depend on a ~2GB GPU
+# stack it never calls: the .254 host has no torch, and the challenger control
+# died on `ModuleNotFoundError: No module named 'torch'` after downloading 10GB
+# of weights. It only ever worked on .253 because that box happens to have torch
+# installed for the transformers lane.
 
 
 # Production drops any fact below this confidence (MF_CONF_FLOOR).
@@ -87,6 +92,12 @@ def build_inputs(tok, note, model_id, sys_prompt):
 
 
 def main():
+    # Imported here: see the note at the top of the file. Only the transformers
+    # path needs these, and only main() takes that path.
+    global torch, AutoModelForCausalLM, AutoTokenizer
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True)
     ap.add_argument("--gold", required=True)

@@ -537,3 +537,50 @@ into the new file.
 No result was lost, because a `for` loop is parsed as one compound command before
 it runs, and the trailing `echo` is all that was left. That is luck, not design.
 Push to a new path and swap, or stop the sweep first.
+
+## Defect 21: run_llamacpp.py depended on torch it never used
+
+`run_llamacpp.py` imports `CONF_FLOOR` and `extract_json` from `run_hf.py`,
+which imported `torch` and `transformers` at module scope. So the llama.cpp
+runner carried a hard dependency on a ~2GB GPU stack it never calls.
+
+It never surfaced on .253, which has torch installed for the transformers lane.
+On .254 the challenger control downloaded 10GB of weights, served them, and then
+died on `ModuleNotFoundError: No module named 'torch'`.
+
+Fixed: both imports moved inside `main()`, which is the only code path that uses
+them. `run_llamacpp.py` now imports clean with no torch, and `test_score.py`
+passes on .254.
+
+## The cross-host control does not reproduce, and that is a finding
+
+`gemma-4-12B`, same gold set, thinking on, same llama.cpp commit (0005475):
+
+| | Q8_0 / 5080 / CUDA | Q6_K / 7900 XTX / Vulkan | delta |
+| --- | ---: | ---: | ---: |
+| strict F1 | 0.8235 | 0.8550 | +0.0315 |
+| precision | 0.8116 | 0.8750 | +0.0634 |
+| recall | 0.8358 | 0.8358 | +0.0000 |
+| abstention | 0.8261 | 0.9130 | +0.0869 |
+| predicted triples | 69 | 64 | -5 |
+| schema / fabrication | 1.00 / 0.000 | 1.00 / 0.000 | unchanged |
+
+Recall is IDENTICAL. Every gold fact the Q8 run found, the Q6 run also found.
+The whole difference is five fewer predicted triples: the second configuration
+abstains more on the empty-gold notes, so precision rises and F1 with it.
+
++0.0315 is larger than the entire measured gap between gemma-4-12B and
+gemma-4-E4B (0.0018). So a challenger on .254 beating Gemma by 0.02 would be
+inside this correction, and .254 numbers CANNOT be compared against the .253
+ladder directly. They can only be read against a .254 control.
+
+The delta bundles two changes, quantisation and backend. CUDA and Vulkan differ
+in floating-point reduction order, so greedy decoding legitimately diverges
+between them; this is not evidence that Q6 is "better" than Q8. A Q8 run on the
+7900 XTX is queued to separate the two: Q8-here versus Q6-here is the quant
+effect, Q8-here versus Q8-on-.253 is the backend effect.
+
+Note also the latency column, which is not comparable at all: 781ms median here
+against 11650ms on .253. The .253 thinking-ladder timings were taken while the
+cpufit lane was saturating the box (defect 19), so every latency figure from
+that ladder is contended and should not be quoted.
