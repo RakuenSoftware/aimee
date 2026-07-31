@@ -58,7 +58,7 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `fidelity_check_enabled` | bool | Run the answer-fidelity judge on terminal-text turns (default off; requires kb_evidence_emit_enabled + ingress_preinject_enabled). |
 | `gateway_pin_model` | bool | Gateway forces the proxied /v1/messages served model to the configured primary's model, overriding the client-requested model. Default off (the passthrough honors the client model); enable for single-model Anthropic-compatible shims. |
 | `gateway_prevent_subagents` | bool | Gateway strips subagent-spawning tools (Task/Agent/etc.) from proxied requests so the served model cannot spawn subagents. Default off. |
-| `guardrail_mode` | string | Guardrail enforcement mode (off / warn / block). |
+| `guardrail_mode` | string | Guardrail enforcement mode: approve (default; a tool call needs approval, so an unattended delegate is blocked), prompt, or deny. |
 | `guardrails_blast_radius_advisory_enabled` | bool | Surface a structural blast-radius advisory (graph-impacted files) before an edit (advisory, fail-open). |
 | `guardrails_semantic_command` | string | External semantic-guardrail classifier command. |
 | `guardrails_semantic_mode` | string | Semantic guardrail mode: off, dry_run, advisory, or enforce. |
