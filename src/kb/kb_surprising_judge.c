@@ -109,7 +109,7 @@ static int sj_add_pair(cJSON *pairs, const char *project, int idx,
    return 1;
 }
 
-int kb_surprising_judge(const config_t *cfg, const char *judge_cmd, const char *project,
+int kb_surprising_judge(const char *judge_cmd, const char *project,
                         const kb_graph_surprising_t *links, int n, kb_surprising_verdict_t *out,
                         char *errbuf, size_t errlen)
 {

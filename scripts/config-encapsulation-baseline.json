@@ -13,24 +13,8 @@
       "decls": 2,
       "loads": 0
     },
-    "src/headers/fidelity_check.h": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/kb/http/kb_http_code.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/kb/http/kb_tls_serve.c": {
       "decls": 2,
-      "loads": 0
-    },
-    "src/kb/kb_surprising_judge.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/kb/kb_surprising_judge.h": {
-      "decls": 1,
       "loads": 0
     },
     "src/modules/guardrails/guardrails_action_audit.c": {
@@ -41,25 +25,9 @@
       "decls": 2,
       "loads": 0
     },
-    "src/modules/memory/memory_core_internal.h": {
-      "decls": 2,
-      "loads": 1
-    },
-    "src/modules/memory/memory_core_search_b.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/modules/memory/memory_core_search_c.c": {
-      "decls": 3,
-      "loads": 0
-    },
     "src/modules/vault/vault_custody_tpm2.c": {
       "decls": 1,
       "loads": 1
-    },
-    "src/server/fidelity_check.c": {
-      "decls": 1,
-      "loads": 0
     },
     "src/server/server_mcp.c": {
       "decls": 1,
@@ -189,10 +157,6 @@
       "decls": 4,
       "loads": 0
     },
-    "src/tests/test_fidelity_check.c": {
-      "decls": 1,
-      "loads": 0
-    },
     "src/tests/test_gateway_p4_delegate.c": {
       "decls": 1,
       "loads": 1
@@ -218,7 +182,7 @@
       "loads": 1
     },
     "src/tests/test_kb_http_routes.c": {
-      "decls": 9,
+      "decls": 8,
       "loads": 1
     },
     "src/tests/test_kb_maintenance.c": {
@@ -299,8 +263,8 @@
     }
   },
   "totals": {
-    "decls": 275,
-    "files": 74,
-    "loads": 159
+    "decls": 262,
+    "files": 65,
+    "loads": 157
   }
 }

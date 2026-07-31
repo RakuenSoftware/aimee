@@ -1928,9 +1928,8 @@ int handle_get_code_graph_surprising(const char *query_string, char *out_buf, in
     * structural generator's precision (confirmed/judged); when NOT judging, suppress
     * the unjudged candidates if that sampled precision has fallen below the configured
     * floor — they'd be mostly false positives. Floor <= 0 (default) disables it. */
-   config_t scfg;
-   int have_cfg = (config_load(&scfg) == 0);
-   double precision_floor = have_cfg ? scfg.code_surprising_precision_floor : 0.0;
+   int have_cfg = config_present();
+   double precision_floor = have_cfg ? config_code_surprising_precision_floor() : 0.0;
    int stat_judged = 0, stat_confirmed = 0;
    surprising_stats_get(project, &stat_judged, &stat_confirmed);
    int suppressed = 0;
@@ -1956,8 +1955,11 @@ int handle_get_code_graph_surprising(const char *query_string, char *out_buf, in
       if (verdicts)
       {
          char jerr[256] = "";
-         int r = kb_surprising_judge(&scfg, scfg.kb_curator_judge_command, project, out, jn,
-                                     verdicts, jerr, sizeof(jerr));
+         /* Copied out: the command reaches the judge, which runs a sidecar or a
+          * provider round trip. */
+         char judge_cmd[CONFIG_COPY_MAX];
+         config_kb_curator_judge_command_copy(judge_cmd, sizeof(judge_cmd));
+         int r = kb_surprising_judge(judge_cmd, project, out, jn, verdicts, jerr, sizeof(jerr));
          if (r > 0)
          {
             judged_n = r;

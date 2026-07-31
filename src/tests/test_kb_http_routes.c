@@ -1362,6 +1362,21 @@ int config_ingress_compress_enabled(void)
    return 0;
 }
 
+/* §4 surprising-links precision floor and judge command. The struct above leaves
+ * both at zero/empty: floor <= 0 disables self-suppress, and an empty judge
+ * command is what the hermetic judge stub below expects. */
+double config_code_surprising_precision_floor(void)
+{
+   return g_precision_floor;
+}
+
+size_t config_kb_curator_judge_command_copy(char *out, size_t n)
+{
+   if (out && n)
+      out[0] = '\0';
+   return n;
+}
+
 /* §2c reembed-on-dim-change gate: mirrors the struct the stub above fills, so a
  * case that flips g_test_reembed_enabled moves both seams together. */
 int config_kb_reembed_on_dim_change(void)
@@ -4523,11 +4538,10 @@ int db2_entity_node_get(const char *node_key, void *out)
 /* §4 judge stub: confirm the first link (the disconnected file:x/file:y pair) with a
  * canned verdict so the route test stays hermetic (no curator-LLM link). Mirrors the
  * real kb_surprising_judge writing verdicts parallel to the links. */
-int kb_surprising_judge(const config_t *cfg, const char *judge_cmd, const char *project,
+int kb_surprising_judge(const char *judge_cmd, const char *project,
                         const kb_graph_surprising_t *links, int n, kb_surprising_verdict_t *out,
                         char *errbuf, size_t errlen)
 {
-   (void)cfg;
    (void)judge_cmd;
    (void)project;
    (void)links;
