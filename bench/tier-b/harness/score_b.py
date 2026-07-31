@@ -118,6 +118,18 @@ def main():
         raise SystemExit(
             f"incomplete predictions: {args.pred} has {len(preds)} rows, "
             f"topics has {len(topics)}. Re-run or delete the partial file.")
+    # A row that hit the harness's own --max-tokens cap is a harness artifact, not
+    # a model result: production allows CURATOR_SYNTH_OUTBUF (16384), so a response
+    # cut off below that would not have been cut off in the deployment being
+    # measured. Scoring it as a format failure charges the model for my bound.
+    # gemma-4-12B lost format 1.0 -> 0.833 and coverage 1.0 -> 0.75 to exactly one
+    # such row before this check existed.
+    cut = [p["id"] for p in preds if p.get("truncated")]
+    if cut:
+        raise SystemExit(
+            f"truncated predictions: {args.pred} rows {cut} hit --max-tokens. "
+            f"Re-run those with a higher cap; scoring them would charge the model "
+            f"for the harness bound.")
 
     per, fmt_ok = [], 0
     cov_hit = cov_tot = 0

@@ -42,9 +42,15 @@ def main():
     ap.add_argument("--model", required=True)
     ap.add_argument("--topics", required=True)
     ap.add_argument("--out", required=True)
-    # CURATOR_SYNTH_OUTBUF is 16384; a synthesis paragraph needs far less, and a
-    # bound keeps a runaway model from stalling a CPU run for an hour.
-    ap.add_argument("--max-tokens", type=int, default=1024)
+    # CURATOR_SYNTH_OUTBUF is 16384. 1024 was set here on the reasoning that a
+    # synthesis paragraph needs far less, which was true of the paragraph and
+    # false of the generation: with thinking left on (as production leaves it),
+    # the models spend 400-1000 tokens reasoning before a 40-70 word answer.
+    # gemma-4-12B hit 1024 on one topic and scored zero on it, which read as a
+    # model format failure and was mine. 4096 clears the observed ceiling by 4x
+    # and still bounds a runaway on a CPU run. score_b.py refuses to score any
+    # row that reaches the cap, so this cannot fail silently again.
+    ap.add_argument("--max-tokens", type=int, default=4096)
     ap.add_argument("--timeout", type=float, default=1800)
     args = ap.parse_args()
 
