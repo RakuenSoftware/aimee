@@ -17,10 +17,6 @@
       "decls": 10,
       "loads": 8
     },
-    "src/cmd_doctor.c": {
-      "decls": 6,
-      "loads": 2
-    },
     "src/cmd_dogfood.c": {
       "decls": 1,
       "loads": 1
@@ -213,14 +209,6 @@
       "decls": 5,
       "loads": 0
     },
-    "src/modules/economizer/tool_condense.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/modules/economizer/tool_condense.h": {
-      "decls": 1,
-      "loads": 0
-    },
     "src/modules/git/git_verify_ops.c": {
       "decls": 2,
       "loads": 2
@@ -314,7 +302,7 @@
       "loads": 0
     },
     "src/modules/roundtable/delegate_ensemble.c": {
-      "decls": 16,
+      "decls": 14,
       "loads": 0
     },
     "src/modules/roundtable/delegate_ensemble.h": {
@@ -763,8 +751,8 @@
     }
   },
   "totals": {
-    "decls": 677,
-    "files": 190,
-    "loads": 333
+    "decls": 667,
+    "files": 187,
+    "loads": 331
   }
 }

@@ -156,6 +156,27 @@ int config_embedding_dim_is_pinned(const config_t *cfg)
    return config_resolve_embedding_dim(cfg) > 0;
 }
 
+/* No-arg form for callers that hold no config_t, matching
+ * config_embedding_dim_current. The config_t form stays: it is a pure function
+ * of one field plus AIMEE_EMBEDDING_DIM, and test_config walks the whole
+ * pinned/not-pinned table with hand-built configs and no I/O. */
+int config_embedding_dim_pinned_current(void)
+{
+   /* Mirrors config_resolve_embedding_dim: a VALID env override is a pin, else
+    * the configured field is a pin when positive. Deliberately not
+    * config_embedding_dim_current() > 0 -- that form substitutes the declared
+    * default when nothing is pinned, so it is true even for an unpinned deploy. */
+   const char *env = getenv("AIMEE_EMBEDDING_DIM");
+   if (env && env[0])
+   {
+      char *end = NULL;
+      long v = strtol(env, &end, 10);
+      if (end && *end == '\0' && v >= 1 && v <= EMBED_MAX_DIM)
+         return 1;
+   }
+   return config_embedding_dim() > 0;
+}
+
 /* Map a role backend string to the plugin's AIMEE_LLM_<ROLE>_MODE value. Empty
  * (unconfigured) yields "" so the caller can skip emitting it. */
 static const char *deploy_role_mode(const char *backend)

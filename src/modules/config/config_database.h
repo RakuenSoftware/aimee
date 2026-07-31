@@ -72,6 +72,10 @@ int config_synth_chat_endpoint(const config_t *cfg, char *out, size_t out_len);
  * an unset cfg->embedding_dim. Pass to db2_set_embedding_dim_pinned(). */
 int config_embedding_dim_is_pinned(const config_t *cfg);
 
+/* No-arg form for callers holding no config_t; same answer as
+ * config_embedding_dim_is_pinned against the live config. Prefer this. */
+int config_embedding_dim_pinned_current(void);
+
 /* Emit the deploy-time environment the compose stack consumes for the page-2
  * backend record (setup wizard). Writes shell-sourceable KEY=VALUE lines to buf:
  *   COMPOSE_PROFILES  — which optional services to bring up ("kb" for a local kb,

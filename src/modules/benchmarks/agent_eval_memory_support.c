@@ -1260,7 +1260,7 @@ int mem_eval_open_temp_db(void)
    config_load(&dim_cfg);
    db2_set_embedding_dim_default(config_embedding_dim_default());
    db2_set_embedding_dim(config_resolve_embedding_dim(&dim_cfg));
-   db2_set_embedding_dim_pinned(config_embedding_dim_is_pinned(&dim_cfg));
+   db2_set_embedding_dim_pinned(config_embedding_dim_pinned_current());
 
    if (db2_eval_open_temp_store() != 0)
    {

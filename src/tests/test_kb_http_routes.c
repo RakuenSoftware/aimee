@@ -569,6 +569,13 @@ int config_embedding_dim_is_pinned(const config_t *cfg)
    return 0;
 }
 
+/* kb_http reads the pin through the no-arg form now; same answer as the
+ * config_t stub above. */
+int config_embedding_dim_pinned_current(void)
+{
+   return 0;
+}
+
 int db2_curator_invalidations_since(int64_t since_id, void *out, int max)
 {
    (void)since_id;

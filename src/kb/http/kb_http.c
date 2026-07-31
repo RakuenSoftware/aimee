@@ -1089,7 +1089,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       int target = kb_http_json_int(body, "target_dim", 0);
       if (target <= 0)
       {
-         if (config_embedding_dim_is_pinned(&rcfg))
+         if (config_embedding_dim_pinned_current())
             target = config_resolve_embedding_dim(&rcfg);
          else if (db2_probe_embedder_dim(8000, &target) != 0 || target <= 0)
          {

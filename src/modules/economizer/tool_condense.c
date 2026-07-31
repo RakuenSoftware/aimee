@@ -1077,7 +1077,7 @@ static int tc_is_diagnostics_invocation(const tc_reco_result_t *r)
    return 0;
 }
 
-char *tool_condense_apply(const config_t *cfg, const char *cmdline, int exit_code, const char *raw,
+char *tool_condense_apply(const char *cmdline, int exit_code, const char *raw,
                           const char *spill_dir, tc_stats_t *stats)
 {
    if (stats)

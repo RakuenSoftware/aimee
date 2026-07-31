@@ -1170,7 +1170,7 @@ const char *panel_persona_name(roundtable_mode_t mode, int model_index)
  * NULL-system-prompt run, never dropping a panelist). persona_compose_delegate_prompt
  * resolves project->user->built-in and itself falls back to a usable persona, so
  * an unknown custom name is non-fatal. */
-static char *panel_persona_prompt(const config_t *cfg, roundtable_mode_t mode, int model_index)
+static char *panel_persona_prompt(roundtable_mode_t mode, int model_index)
 {
    const char *name = panel_persona_name(mode, model_index);
    if (!name)
@@ -1202,7 +1202,7 @@ static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const c
          goto fail;
       /* Per-participant persona is the system prompt (draft: engineer; review:
        * the diverse lineup); the round prompt still drives the output shape. */
-      personas[i] = panel_persona_prompt(cfg, mode, i);
+      personas[i] = panel_persona_prompt(mode, i);
       tasks[i].role = mode == ROUNDTABLE_REVIEW ? "review" : "draft";
       /* Reviewers get aimee. A panelist holding only a diff cannot answer the
        * questions that decide whether a change is REAL — does anything call this?
@@ -1291,7 +1291,7 @@ static int run_round_sequential(agent_config_t *acfg, const config_t *cfg, const
       if (!prompt)
          return -1;
       /* Persona binds to the stable model index `i`, not the shuffled slot. */
-      char *persona = panel_persona_prompt(cfg, mode, i);
+      char *persona = panel_persona_prompt(mode, i);
       memset(&results[i], 0, sizeof(results[i]));
       if (mode == ROUNDTABLE_REVIEW)
       {
@@ -1402,7 +1402,7 @@ static int panel_provider_seats(const agent_config_t *acfg, const int seated[],
    return total;
 }
 
-static int ensemble_pick_balanced_seat(const config_t *cfg, const agent_config_t *acfg,
+static int ensemble_pick_balanced_seat(const agent_config_t *acfg,
                                        const int seated[])
 {
    int best = -1;
@@ -1496,7 +1496,7 @@ void ensemble_resolve_random_seats(config_t *cfg, const agent_config_t *acfg)
          n++;
          continue;
       }
-      int idx = ensemble_pick_balanced_seat(cfg, acfg, seated);
+      int idx = ensemble_pick_balanced_seat(acfg, seated);
       if (idx < 0)
       {
          aimee_log(LOG_WARN, "delegate.panel",
@@ -1522,7 +1522,7 @@ void ensemble_resolve_random_seats(config_t *cfg, const agent_config_t *acfg)
    /* An aggregator explicitly set to "$random" resolves the same way. */
    if (cfg->ensemble_aggregator[0] && strcmp(cfg->ensemble_aggregator, RT_SEAT_RANDOM) == 0)
    {
-      int idx = ensemble_pick_balanced_seat(cfg, acfg, seated);
+      int idx = ensemble_pick_balanced_seat(acfg, seated);
       if (idx >= 0)
          snprintf(cfg->ensemble_aggregator, sizeof cfg->ensemble_aggregator, "%s",
                   acfg->agents[idx].name);

@@ -272,10 +272,10 @@ int main(void)
       memset(&cfg, 0, sizeof cfg);
       cfg.module_economizer = -1;
       cfg.economizer_mode = ECON_MODE_SAFE;
-      assert(tool_condense_apply(&cfg, "pytest -q", 0, "one test passed\n", "/tmp", NULL) == NULL);
+      assert(tool_condense_apply("pytest -q", 0, "one test passed\n", "/tmp", NULL) == NULL);
       cfg.economizer_mode = ECON_MODE_AGGRESSIVE;
       char *condensed =
-          tool_condense_apply(&cfg, "pytest -q", 0, "one test passed\n", "/tmp", NULL);
+          tool_condense_apply("pytest -q", 0, "one test passed\n", "/tmp", NULL);
       free(condensed);
    }
 

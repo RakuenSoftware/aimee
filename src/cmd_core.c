@@ -50,7 +50,7 @@ static int bootstrap_db2(const config_t *cfg, int json_output)
 
    db2_set_embedding_dim_default(config_embedding_dim_default());
    db2_set_embedding_dim(config_resolve_embedding_dim(cfg));
-   db2_set_embedding_dim_pinned(config_embedding_dim_is_pinned(cfg));
+   db2_set_embedding_dim_pinned(config_embedding_dim_pinned_current());
    /* unified-llm-container §2: activate the model-identity drift guard with the
     * configured embedder identity (empty => no-op, back-compat). */
    db2_set_embedder_model_id(cfg->embedding_model);
