@@ -1137,16 +1137,31 @@ static const char *const PANEL_DEFAULT_PERSONAS[] = {
  * while REVIEW round-robins the diverse critique lineup keyed on the stable model
  * index. The returned pointer is a borrowed string literal or config field; do
  * not free it. */
-const char *panel_persona_name(const config_t *cfg, roundtable_mode_t mode, int model_index)
+/* The resolution table itself, split out from the config read so it stays a pure
+ * function: `configured_slot` is this slot's configured persona (NULL or "" when
+ * unset or out of range) and `default_persona` the configured default. Keeping
+ * these as parameters is what lets test_delegate_ensemble walk the whole table
+ * without writing a config file per assertion. */
+const char *panel_persona_for_slot(roundtable_mode_t mode, int model_index,
+                                   const char *configured_slot, const char *default_persona)
 {
-   if (!cfg || model_index < 0)
+   if (model_index < 0)
       return NULL;
-   if (model_index < cfg->ensemble_reference_persona_count &&
-       cfg->ensemble_reference_personas[model_index][0])
-      return cfg->ensemble_reference_personas[model_index];
+   if (configured_slot && configured_slot[0])
+      return configured_slot;
    if (mode != ROUNDTABLE_REVIEW)
-      return cfg->default_persona[0] ? cfg->default_persona : "engineer";
+      return (default_persona && default_persona[0]) ? default_persona : "engineer";
    return PANEL_DEFAULT_PERSONAS[model_index % PANEL_DEFAULT_PERSONA_COUNT];
+}
+
+const char *panel_persona_name(roundtable_mode_t mode, int model_index)
+{
+   const char *slot = NULL;
+   if (model_index >= 0 && model_index < config_ensemble_reference_persona_count())
+      slot = config_ensemble_reference_personas(model_index);
+   /* Two distinct accessors, so two distinct thread-local buffers -- safe to
+    * hold both across this call. */
+   return panel_persona_for_slot(mode, model_index, slot, config_default_persona());
 }
 
 /* Compose the system prompt for panelist `model_index` (draft: engineer; review:
@@ -1157,7 +1172,7 @@ const char *panel_persona_name(const config_t *cfg, roundtable_mode_t mode, int 
  * an unknown custom name is non-fatal. */
 static char *panel_persona_prompt(const config_t *cfg, roundtable_mode_t mode, int model_index)
 {
-   const char *name = panel_persona_name(cfg, mode, model_index);
+   const char *name = panel_persona_name(mode, model_index);
    if (!name)
       return NULL;
    char *sys = persona_compose_delegate_prompt(name, NULL, NULL);

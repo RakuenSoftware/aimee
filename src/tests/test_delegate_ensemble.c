@@ -1388,40 +1388,42 @@ static void test_panel_treats_providerless_agents_as_distinct(void)
 
 static void test_panel_persona_name_assignment(void)
 {
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.ensemble_reference_count = 6;
+   /* Drives the pure resolution table directly: panel_persona_name() now reads
+    * live config, so exercising it would mean writing a config file between
+    * every assertion. panel_persona_for_slot takes the two config-derived
+    * inputs as parameters, which is the same coverage with no I/O. */
+
    /* REVIEW mode: round-robin the diverse default lineup keyed on the model
     * index (stable, independent of any sequential shuffle). */
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 0), "original-request") == 0);
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 1), "security") == 0);
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 2), "architect") == 0);
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 3), "qa") == 0);
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 4), "reviewer") == 0);
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 5), "reviewer-constructive") == 0);
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 0, NULL, ""), "original-request") == 0);
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 1, NULL, ""), "security") == 0);
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 2, NULL, ""), "architect") == 0);
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 3, NULL, ""), "qa") == 0);
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 4, NULL, ""), "reviewer") == 0);
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 5, NULL, ""), "reviewer-constructive") ==
+          0);
+
    /* DRAFT authors every panelist as the configured default persona; an unset
     * default_persona falls back to the built-in `engineer`. */
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 0), "engineer") == 0);
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 4), "engineer") == 0);
-   snprintf(cfg.default_persona, sizeof(cfg.default_persona), "architect");
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 0), "architect") == 0);
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 4), "architect") == 0);
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_DRAFT, 0, NULL, ""), "engineer") == 0);
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_DRAFT, 4, NULL, ""), "engineer") == 0);
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_DRAFT, 0, NULL, "architect"), "architect") == 0);
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_DRAFT, 4, NULL, "architect"), "architect") == 0);
+
    /* the configured default persona does not disturb the REVIEW lineup */
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 0), "original-request") == 0);
-   cfg.default_persona[0] = '\0';
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 0, NULL, "architect"),
+                 "original-request") == 0);
+
    /* a configured persona pins to its model slot; an empty entry within the
     * configured range still falls back to the mode default */
-   cfg.ensemble_reference_persona_count = 2;
-   snprintf(cfg.ensemble_reference_personas[1], 64, "security");
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 1), "security") == 0); /* override */
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 0), "original-request") ==
-          0);                                                                 /* empty->dflt */
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 3), "qa") == 0); /* beyond->dflt */
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 1, "security", ""), "security") == 0);
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 0, "", ""), "original-request") == 0);
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 3, NULL, ""), "qa") == 0);
+
    /* the per-slot override also binds in DRAFT; empty/beyond slots fall to engineer */
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 1), "security") == 0); /* override */
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 0), "engineer") == 0); /* empty->dflt */
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 3), "engineer") ==
-          0); /* beyond->dflt */
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_DRAFT, 1, "security", ""), "security") == 0);
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_DRAFT, 0, "", ""), "engineer") == 0);
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_DRAFT, 3, NULL, ""), "engineer") == 0);
    printf("  test_panel_persona_name_assignment: ok\n");
 }
 

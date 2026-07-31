@@ -99,6 +99,15 @@ int ensemble_prepare_runtime_panel(const char *requested, config_t *cfg, const a
  * round-robins the diverse default lineup keyed on the stable model index.
  * Borrowed pointer (string literal or config field) — do not free. Exposed for
  * tests. */
-const char *panel_persona_name(const config_t *cfg, roundtable_mode_t mode, int model_index);
+/* Lifetime: the returned string is either a compile-time constant or an
+ * accessor's thread-local buffer, so it is valid until the next call to the
+ * SAME accessor on this thread. Consume it before calling back in. */
+const char *panel_persona_name(roundtable_mode_t mode, int model_index);
+
+/* The pure resolution table behind panel_persona_name, exposed for testing:
+ * configured_slot is the slot's configured persona (NULL/"" when unset or out of
+ * range), default_persona the configured default. No config read, no I/O. */
+const char *panel_persona_for_slot(roundtable_mode_t mode, int model_index,
+                                   const char *configured_slot, const char *default_persona);
 
 #endif /* DEC_DELEGATE_ENSEMBLE_H */

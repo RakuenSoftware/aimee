@@ -354,11 +354,11 @@
       "loads": 0
     },
     "src/modules/roundtable/delegate_ensemble.c": {
-      "decls": 18,
+      "decls": 17,
       "loads": 0
     },
     "src/modules/roundtable/delegate_ensemble.h": {
-      "decls": 10,
+      "decls": 9,
       "loads": 0
     },
     "src/modules/roundtable/roundtable_preset.c": {
@@ -650,7 +650,7 @@
       "loads": 0
     },
     "src/tests/test_delegate_ensemble.c": {
-      "decls": 50,
+      "decls": 49,
       "loads": 0
     },
     "src/tests/test_delegate_sandbox_image.c": {
@@ -815,7 +815,7 @@
     }
   },
   "totals": {
-    "decls": 724,
+    "decls": 721,
     "files": 203,
     "loads": 349
   }
