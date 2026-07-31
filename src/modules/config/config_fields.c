@@ -7,7 +7,10 @@
  * NB: the three guardrails_semantic_*_threshold fields are doubles; they were
  * historically (mis)typed CFG_STRING in cmd_data.c, which only worked because
  * that table was unreachable. They are CFG_FLOAT here. */
+#include "config_accessors.h" /* config_field_read */
 #include "config_fields.h"
+#include "runtime_secret.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -532,6 +535,65 @@ cJSON *config_field_public_value_json_current(const config_field_t *f)
    cJSON *out = config_field_public_value_json(cfg, f);
    free(cfg);
    return out;
+}
+
+/* Widest string field config_fields[] exposes; a longer one is truncated here
+ * rather than read past. */
+#define CONFIG_FIELD_RENDER_MAX 4096
+
+/* Render one field for display, without the caller holding a config_t. The
+ * `aimee config get` path: it used to load a whole config and index into it by
+ * f->offset, which is the config_t layout leaking into a CLI. Writes the same
+ * text that path printed, including "(unset)" for an empty string and
+ * "configured"/"not configured" for a Vault-backed secret -- a secret's VALUE is
+ * never rendered here. Returns 0 on success. */
+int config_field_render(const config_field_t *f, char *out, size_t n)
+{
+   if (!f || !out || n == 0)
+      return -1;
+   out[0] = '\0';
+
+   /* Read f->size, never a fixed buffer size: config_field_read copies exactly
+    * what it is asked for from f->offset, so over-asking walks off the end of the
+    * field into whatever config_t happens to hold next. */
+   if (config_field_secret_name(f))
+   {
+      char buf[CONFIG_FIELD_RENDER_MAX] = "";
+      size_t want = f->size < sizeof(buf) ? f->size : sizeof(buf);
+      (void)config_field_read(f->offset, want, buf);
+      buf[want ? want - 1 : 0] = '\0';
+      snprintf(out, n, "%s", buf[0] ? "configured" : "not configured");
+      runtime_secret_wipe(buf, sizeof(buf));
+      return 0;
+   }
+
+   if (f->is_bool || f->type == CFG_BOOL)
+   {
+      int v = 0;
+      (void)config_field_read(f->offset, sizeof(v), &v);
+      snprintf(out, n, "%s", v ? "true" : "false");
+   }
+   else if (f->type == CFG_INT)
+   {
+      int v = 0;
+      (void)config_field_read(f->offset, sizeof(v), &v);
+      snprintf(out, n, "%d", v);
+   }
+   else if (f->type == CFG_FLOAT)
+   {
+      double v = 0.0;
+      (void)config_field_read(f->offset, sizeof(v), &v);
+      snprintf(out, n, "%g", v);
+   }
+   else
+   {
+      char buf[CONFIG_FIELD_RENDER_MAX] = "";
+      size_t want = f->size < sizeof(buf) ? f->size : sizeof(buf);
+      (void)config_field_read(f->offset, want, buf);
+      buf[want ? want - 1 : 0] = '\0';
+      snprintf(out, n, "%s", buf[0] ? buf : "(unset)");
+   }
+   return 0;
 }
 
 int config_field_set_value(config_t *cfg, const config_field_t *f, const char *value)

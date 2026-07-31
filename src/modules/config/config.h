@@ -2175,6 +2175,16 @@ void config_snapshot_init(const config_t *cfg);
 /* Load the config and publish it as the live snapshot in one step, without the
  * caller ever holding a config_t. What the daemons actually want at startup. */
 int config_snapshot_seed(void);
+
+/* The accessor primitive: copy `size` bytes at `offset` out of the live config,
+ * preferring the pinned snapshot and heap-loading when none is live. Declared here
+ * so the module's own hand-written accessors can use it; the generated shards each
+ * carry their own local prototype. */
+int config_field_read(size_t offset, size_t size, void *dst);
+
+/* dispositions[index].source as a config_disposition_source_t value. Hand-written
+ * because the accessor generator skips typedef'd-enum struct members. */
+int config_disposition_source(int index);
 int config_snapshot_get(config_t *out);
 
 int config_reload(void);

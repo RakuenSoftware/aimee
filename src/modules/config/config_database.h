@@ -94,4 +94,7 @@ int config_embedding_dim_pinned_current(void);
  * `compose up` wrapper source. */
 void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n);
 
+/* Same emitter, reading the live config itself. */
+void config_emit_deploy_env_current(char *buf, size_t n);
+
 #endif

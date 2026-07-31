@@ -214,6 +214,21 @@ static const char *deploy_role_mode(const char *backend)
    return "";
 }
 
+/* Same emitter without the caller holding a config_t. */
+void config_emit_deploy_env_current(char *buf, size_t n)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+   {
+      if (buf && n)
+         buf[0] = '\0';
+      return;
+   }
+   (void)config_load(cfg);
+   config_emit_deploy_env(cfg, buf, n);
+   free(cfg);
+}
+
 void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n)
 {
    if (!buf || n == 0)

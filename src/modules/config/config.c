@@ -2017,6 +2017,22 @@ static void config_snapshot_publish(const config_t *cfg)
  * were each doing config_load into a stack config_t purely to hand it straight
  * back, which is the whole 750 KB struct crossing the module boundary to travel
  * nowhere. Returns 0 on success. */
+/* The generator skips struct-array members whose type is a typedef'd enum (it
+ * matches base C types only), which is why dispositions[].source has no
+ * generated accessor while .name and .value do. Same reason config_mcp_client_at
+ * is hand-written. */
+int config_disposition_source(int index)
+{
+   int v = 0;
+   if (index < 0 || index >= CONFIG_MAX_DISPOSITIONS)
+      return 0;
+   config_field_read(offsetof(config_t, dispositions) +
+                         (size_t)index * sizeof(((config_t *)0)->dispositions[0]) +
+                         offsetof(config_disposition_t, source),
+                     sizeof(v), &v);
+   return v;
+}
+
 int config_snapshot_seed(void)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));
