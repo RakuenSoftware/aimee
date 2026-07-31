@@ -37,6 +37,38 @@ int model_sampling_get(const char *model_key, model_sampling_row_t *out)
    return 0;
 }
 
+/* Models that accept exactly one temperature and 4xx on anything else.
+ * |vendor| is the catalog vendor (agent_t.catalog_provider), which is derived
+ * from the endpoint host, so this still applies to an agents.json entry that
+ * names no wire provider at all — the case that made kimi-k3 fail every
+ * delegate with "invalid temperature: only 1 is allowed for this model". */
+static const struct
+{
+   const char *vendor;
+   const char *model_key;
+   double temperature;
+} g_required_temperature[] = {
+    {"moonshotai", "k3", 1.0},
+    {"mistral", "mistral-vibe-cli", 1.0},
+    {NULL, NULL, -1},
+};
+
+double model_sampling_required_temperature(const agent_t *agent)
+{
+   if (!agent || !agent->model[0])
+      return -1;
+   for (int i = 0; g_required_temperature[i].model_key; i++)
+   {
+      const char *vendor = g_required_temperature[i].vendor;
+      if (vendor && strcmp(agent->catalog_provider, vendor) != 0 &&
+          strcmp(agent->provider, vendor) != 0)
+         continue;
+      if (str_contains_ci(agent->model, g_required_temperature[i].model_key))
+         return g_required_temperature[i].temperature;
+   }
+   return -1;
+}
+
 static double provider_fixed_temperature(const agent_t *agent)
 {
    if (!agent || !agent->provider[0])
@@ -73,6 +105,9 @@ void model_sampling_apply_openai(const agent_t *agent, struct cJSON *req, double
    model_sampling_row_t row;
    int has_row = sampling_for_agent(agent, &row);
 
+   /* First writer wins (add_number_if_missing), so the model's hard constraint
+    * goes in ahead of the caller's preference rather than losing to it. */
+   add_number_if_missing(req, "temperature", model_sampling_required_temperature(agent));
    if (caller_temperature >= 0)
       add_number_if_missing(req, "temperature", caller_temperature);
    else if (has_row && row.temperature >= 0)
@@ -94,6 +129,7 @@ void model_sampling_apply_anthropic(const agent_t *agent, struct cJSON *req,
    model_sampling_row_t row;
    int has_row = sampling_for_agent(agent, &row);
 
+   add_number_if_missing(req, "temperature", model_sampling_required_temperature(agent));
    if (caller_temperature >= 0)
       add_number_if_missing(req, "temperature", caller_temperature);
    else if (has_row && row.temperature >= 0)
