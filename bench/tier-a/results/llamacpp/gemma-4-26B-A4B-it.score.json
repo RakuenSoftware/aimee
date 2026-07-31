@@ -1,11 +1,11 @@
 {
   "strict": {
-    "precision": 0.8986,
-    "recall": 0.9118,
-    "f1": 0.9051,
-    "tp": 62,
-    "fp": 7,
-    "fn": 6,
+    "precision": 0.913,
+    "recall": 0.9265,
+    "f1": 0.9197,
+    "tp": 63,
+    "fp": 6,
+    "fn": 5,
     "by_category": {
       "ambiguous": {
         "precision": 0.3333,
@@ -24,12 +24,12 @@
         "fn": 0
       },
       "governance": {
-        "precision": 0.75,
-        "recall": 0.75,
-        "f1": 0.75,
-        "tp": 3,
-        "fp": 1,
-        "fn": 1
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "tp": 4,
+        "fp": 0,
+        "fn": 0
       },
       "implicit": {
         "precision": 0.8571,

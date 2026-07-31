@@ -1,101 +1,11 @@
 {
   "strict": {
-    "precision": 0.6522,
-    "recall": 0.2206,
-    "f1": 0.3297,
-    "tp": 15,
-    "fp": 8,
-    "fn": 53,
-    "by_category": {
-      "ambiguous": {
-        "precision": 0.5,
-        "recall": 0.5,
-        "f1": 0.5,
-        "tp": 1,
-        "fp": 1,
-        "fn": 1
-      },
-      "first_person": {
-        "precision": 0.6667,
-        "recall": 0.2222,
-        "f1": 0.3333,
-        "tp": 2,
-        "fp": 1,
-        "fn": 7
-      },
-      "governance": {
-        "precision": 0.6667,
-        "recall": 0.5,
-        "f1": 0.5714,
-        "tp": 2,
-        "fp": 1,
-        "fn": 2
-      },
-      "implicit": {
-        "precision": 1.0,
-        "recall": 0.1429,
-        "f1": 0.25,
-        "tp": 1,
-        "fp": 0,
-        "fn": 6
-      },
-      "infra": {
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "tp": 0,
-        "fp": 3,
-        "fn": 7
-      },
-      "multi_fact": {
-        "precision": 1.0,
-        "recall": 0.0909,
-        "f1": 0.1667,
-        "tp": 2,
-        "fp": 0,
-        "fn": 20
-      },
-      "negation": {
-        "precision": 0.5,
-        "recall": 0.5,
-        "f1": 0.5,
-        "tp": 1,
-        "fp": 1,
-        "fn": 1
-      },
-      "novel_pred": {
-        "precision": 0.6667,
-        "recall": 0.2857,
-        "f1": 0.4,
-        "tp": 2,
-        "fp": 1,
-        "fn": 5
-      },
-      "third_person": {
-        "precision": 1.0,
-        "recall": 0.5,
-        "f1": 0.6667,
-        "tp": 4,
-        "fp": 0,
-        "fn": 4
-      },
-      "transient": {
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "tp": 0,
-        "fp": 0,
-        "fn": 0
-      }
-    }
-  },
-  "lenient": {
-    "precision": 0.7391,
-    "recall": 0.25,
-    "f1": 0.3736,
-    "tp": 17,
-    "fp": 6,
-    "fn": 51,
+    "precision": 0.7826,
+    "recall": 0.2647,
+    "f1": 0.3956,
+    "tp": 18,
+    "fp": 5,
+    "fn": 50,
     "by_category": {
       "ambiguous": {
         "precision": 0.5,
@@ -146,12 +56,102 @@
         "fn": 20
       },
       "negation": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "tp": 2,
+        "fp": 0,
+        "fn": 0
+      },
+      "novel_pred": {
+        "precision": 1.0,
+        "recall": 0.4286,
+        "f1": 0.6,
+        "tp": 3,
+        "fp": 0,
+        "fn": 4
+      },
+      "third_person": {
+        "precision": 1.0,
+        "recall": 0.5,
+        "f1": 0.6667,
+        "tp": 4,
+        "fp": 0,
+        "fn": 4
+      },
+      "transient": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "tp": 0,
+        "fp": 0,
+        "fn": 0
+      }
+    }
+  },
+  "lenient": {
+    "precision": 0.7826,
+    "recall": 0.2647,
+    "f1": 0.3956,
+    "tp": 18,
+    "fp": 5,
+    "fn": 50,
+    "by_category": {
+      "ambiguous": {
         "precision": 0.5,
         "recall": 0.5,
         "f1": 0.5,
         "tp": 1,
         "fp": 1,
         "fn": 1
+      },
+      "first_person": {
+        "precision": 0.6667,
+        "recall": 0.2222,
+        "f1": 0.3333,
+        "tp": 2,
+        "fp": 1,
+        "fn": 7
+      },
+      "governance": {
+        "precision": 0.6667,
+        "recall": 0.5,
+        "f1": 0.5714,
+        "tp": 2,
+        "fp": 1,
+        "fn": 2
+      },
+      "implicit": {
+        "precision": 1.0,
+        "recall": 0.1429,
+        "f1": 0.25,
+        "tp": 1,
+        "fp": 0,
+        "fn": 6
+      },
+      "infra": {
+        "precision": 0.3333,
+        "recall": 0.1429,
+        "f1": 0.2,
+        "tp": 1,
+        "fp": 2,
+        "fn": 6
+      },
+      "multi_fact": {
+        "precision": 1.0,
+        "recall": 0.0909,
+        "f1": 0.1667,
+        "tp": 2,
+        "fp": 0,
+        "fn": 20
+      },
+      "negation": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "tp": 2,
+        "fp": 0,
+        "fn": 0
       },
       "novel_pred": {
         "precision": 1.0,

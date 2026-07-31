@@ -1,11 +1,11 @@
 {
   "strict": {
-    "precision": 0.7288,
-    "recall": 0.6324,
-    "f1": 0.6772,
-    "tp": 43,
-    "fp": 16,
-    "fn": 25,
+    "precision": 0.7627,
+    "recall": 0.6618,
+    "f1": 0.7087,
+    "tp": 45,
+    "fp": 14,
+    "fn": 23,
     "by_category": {
       "ambiguous": {
         "precision": 0.25,
@@ -16,12 +16,12 @@
         "fn": 1
       },
       "first_person": {
-        "precision": 0.875,
-        "recall": 0.7778,
-        "f1": 0.8235,
-        "tp": 7,
-        "fp": 1,
-        "fn": 2
+        "precision": 1.0,
+        "recall": 0.8889,
+        "f1": 0.9412,
+        "tp": 8,
+        "fp": 0,
+        "fn": 1
       },
       "governance": {
         "precision": 0.75,
@@ -72,12 +72,12 @@
         "fn": 3
       },
       "third_person": {
-        "precision": 0.8571,
-        "recall": 0.75,
-        "f1": 0.8,
-        "tp": 6,
-        "fp": 1,
-        "fn": 2
+        "precision": 1.0,
+        "recall": 0.875,
+        "f1": 0.9333,
+        "tp": 7,
+        "fp": 0,
+        "fn": 1
       },
       "transient": {
         "precision": 0.0,

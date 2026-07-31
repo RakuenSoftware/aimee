@@ -1,11 +1,11 @@
 {
   "strict": {
-    "precision": 0.5763,
-    "recall": 0.5,
-    "f1": 0.5354,
-    "tp": 34,
-    "fp": 25,
-    "fn": 34,
+    "precision": 0.6102,
+    "recall": 0.5294,
+    "f1": 0.5669,
+    "tp": 36,
+    "fp": 23,
+    "fn": 32,
     "by_category": {
       "ambiguous": {
         "precision": 0.25,
@@ -56,20 +56,20 @@
         "fn": 16
       },
       "negation": {
-        "precision": 0.1667,
-        "recall": 0.5,
-        "f1": 0.25,
-        "tp": 1,
-        "fp": 5,
-        "fn": 1
+        "precision": 0.3333,
+        "recall": 1.0,
+        "f1": 0.5,
+        "tp": 2,
+        "fp": 4,
+        "fn": 0
       },
       "novel_pred": {
-        "precision": 0.8333,
-        "recall": 0.7143,
-        "f1": 0.7692,
-        "tp": 5,
-        "fp": 1,
-        "fn": 2
+        "precision": 1.0,
+        "recall": 0.8571,
+        "f1": 0.9231,
+        "tp": 6,
+        "fp": 0,
+        "fn": 1
       },
       "third_person": {
         "precision": 0.8571,
@@ -90,12 +90,12 @@
     }
   },
   "lenient": {
-    "precision": 0.5932,
-    "recall": 0.5147,
-    "f1": 0.5512,
-    "tp": 35,
-    "fp": 24,
-    "fn": 33,
+    "precision": 0.6102,
+    "recall": 0.5294,
+    "f1": 0.5669,
+    "tp": 36,
+    "fp": 23,
+    "fn": 32,
     "by_category": {
       "ambiguous": {
         "precision": 0.25,
@@ -146,12 +146,12 @@
         "fn": 16
       },
       "negation": {
-        "precision": 0.1667,
-        "recall": 0.5,
-        "f1": 0.25,
-        "tp": 1,
-        "fp": 5,
-        "fn": 1
+        "precision": 0.3333,
+        "recall": 1.0,
+        "f1": 0.5,
+        "tp": 2,
+        "fp": 4,
+        "fn": 0
       },
       "novel_pred": {
         "precision": 1.0,

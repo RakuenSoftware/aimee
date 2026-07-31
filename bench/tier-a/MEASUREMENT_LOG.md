@@ -4,8 +4,9 @@ A running record of the defects found in this benchmark's **own instrumentation*
 kept because it is the most transferable thing here. The models behaved roughly
 as expected throughout. The grader did not.
 
-Ten defects. Nine inflated the apparent failure rate, one deflated it, several
-inverted a conclusion, and none were in the models.
+Eleven defects. Most inflated the apparent failure rate, one deflated it, two
+distorted the ranking rather than the level, several inverted a conclusion, and
+none were in the models.
 
 ---
 
@@ -184,6 +185,35 @@ measures extraction, not aimee's pipeline — and that aliasing code exists to
 compensate for an imperfect embedder, not to license loose scoring. **Strict is
 the headline metric**: both endpoints exact, predicate flexible, no assumption of
 a resolution step that is not being measured.
+
+## 11. Per-model error audits: predicate coverage, containment in strict
+
+**Found by** repeating the best-model error audit across every model, and
+aggregating the disagreements that recurred.
+
+Three more:
+
+- **Containment belonged in strict too.** "2 of the junior engineers" for a gold
+  of "junior engineers", "clinical director at st vincent's" for "clinical
+  director". In each case the model was MORE faithful to the note than the label
+  — the note says "mentors two of the junior engineers". Strict was penalising
+  models for being more specific than an under-specified gold.
+- **Predicate equivalence was too thin.** Models write `joined` and
+  `board_member` for `member_of`, `profession` for `has_role`, `met` for `knows`,
+  `started_at` for attending, `located_in` for `lives_in`. Endpoints identical,
+  predicate different — which the rules already permit; the table just did not
+  cover them.
+- **Honorifics and converse predicates**, above.
+
+**Impact, and the useful part:** the leaders barely moved (26B unchanged at
+0.920, 12B unchanged at 0.855) while the smaller models gained 0.02-0.05.
+Weaker models reach for non-canonical predicates more often, so a thin
+equivalence table was penalising them specifically. That is a *rank-distorting*
+bias, not a level shift — the same defect class as the incomplete gold, pointing
+the other way.
+
+Every credit granted by the new rules was audited individually. All legitimate;
+no over-crediting.
 
 ## What this cost, and what it is worth
 

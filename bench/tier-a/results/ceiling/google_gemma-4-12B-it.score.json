@@ -1,11 +1,11 @@
 {
   "strict": {
-    "precision": 0.873,
-    "recall": 0.8088,
-    "f1": 0.8397,
-    "tp": 55,
-    "fp": 8,
-    "fn": 13,
+    "precision": 0.8889,
+    "recall": 0.8235,
+    "f1": 0.855,
+    "tp": 56,
+    "fp": 7,
+    "fn": 12,
     "by_category": {
       "ambiguous": {
         "precision": 0.3333,
@@ -64,12 +64,12 @@
         "fn": 0
       },
       "novel_pred": {
-        "precision": 0.8333,
-        "recall": 0.7143,
-        "f1": 0.7692,
-        "tp": 5,
-        "fp": 1,
-        "fn": 2
+        "precision": 1.0,
+        "recall": 0.8571,
+        "f1": 0.9231,
+        "tp": 6,
+        "fp": 0,
+        "fn": 1
       },
       "third_person": {
         "precision": 1.0,

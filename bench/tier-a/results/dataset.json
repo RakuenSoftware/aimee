@@ -117,11 +117,11 @@
         "params": "350M",
         "licence": "lfm1.0",
         "class": "reference",
-        "f1_production": 0.0238,
+        "f1_production": 0.0714,
         "f1_no_floor": 0.0,
-        "precision": 0.0625,
-        "recall": 0.0147,
-        "f1_strict": 0.0238,
+        "precision": 0.1875,
+        "recall": 0.0441,
+        "f1_strict": 0.0714,
         "schema_rate": 0.1449,
         "json_parse_rate": 0.1449,
         "in_seed_ontology": 0.375,
@@ -177,12 +177,12 @@
           "fn": 7
         },
         "multi_fact": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
-          "tp": 0,
-          "fp": 4,
-          "fn": 22
+          "precision": 0.5,
+          "recall": 0.0909,
+          "f1": 0.1538,
+          "tp": 2,
+          "fp": 2,
+          "fn": 20
         },
         "negation": {
           "precision": 0.0,
@@ -657,11 +657,11 @@
         "params": "1.7B",
         "licence": "apache-2.0",
         "class": "superseded",
-        "f1_production": 0.3736,
+        "f1_production": 0.3956,
         "f1_no_floor": 0.4962,
-        "precision": 0.7391,
-        "recall": 0.25,
-        "f1_strict": 0.3297,
+        "precision": 0.7826,
+        "recall": 0.2647,
+        "f1_strict": 0.3956,
         "schema_rate": 0.9855,
         "json_parse_rate": 0.9855,
         "in_seed_ontology": 0.8261,
@@ -725,12 +725,12 @@
           "fn": 20
         },
         "negation": {
-          "precision": 0.5,
-          "recall": 0.5,
-          "f1": 0.5,
-          "tp": 1,
-          "fp": 1,
-          "fn": 1
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "tp": 2,
+          "fp": 0,
+          "fn": 0
         },
         "novel_pred": {
           "precision": 1.0,
@@ -872,11 +872,11 @@
         "params": "800M",
         "licence": "apache-2.0",
         "class": "actionable",
-        "f1_production": 0.3922,
+        "f1_production": 0.4118,
         "f1_no_floor": 0.3556,
-        "precision": 0.5882,
-        "recall": 0.2941,
-        "f1_strict": 0.3922,
+        "precision": 0.6176,
+        "recall": 0.3088,
+        "f1_strict": 0.4118,
         "schema_rate": 1.0,
         "json_parse_rate": 1.0,
         "in_seed_ontology": 0.7941,
@@ -940,12 +940,12 @@
           "fn": 17
         },
         "negation": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
-          "tp": 0,
-          "fp": 3,
-          "fn": 2
+          "precision": 0.3333,
+          "recall": 0.5,
+          "f1": 0.4,
+          "tp": 1,
+          "fp": 2,
+          "fn": 1
         },
         "novel_pred": {
           "precision": 1.0,
@@ -1091,7 +1091,7 @@
         "f1_no_floor": 0.3284,
         "precision": 0.3548,
         "recall": 0.3235,
-        "f1_strict": 0.3077,
+        "f1_strict": 0.3385,
         "schema_rate": 1.0,
         "json_parse_rate": 1.0,
         "in_seed_ontology": 0.8548,
@@ -1299,11 +1299,11 @@
         "params": "E2B (2.3B eff)",
         "licence": "apache-2.0",
         "class": "actionable",
-        "f1_production": 0.6412,
+        "f1_production": 0.6565,
         "f1_no_floor": 0.5103,
-        "precision": 0.6667,
-        "recall": 0.6176,
-        "f1_strict": 0.5954,
+        "precision": 0.6825,
+        "recall": 0.6324,
+        "f1_strict": 0.6412,
         "schema_rate": 0.9855,
         "json_parse_rate": 0.971,
         "in_seed_ontology": 0.8889,
@@ -1351,12 +1351,12 @@
           "fn": 4
         },
         "infra": {
-          "precision": 0.5,
-          "recall": 0.4286,
-          "f1": 0.4615,
-          "tp": 3,
-          "fp": 3,
-          "fn": 4
+          "precision": 0.6667,
+          "recall": 0.5714,
+          "f1": 0.6154,
+          "tp": 4,
+          "fp": 2,
+          "fn": 3
         },
         "multi_fact": {
           "precision": 0.7778,
@@ -1518,7 +1518,7 @@
         "f1_no_floor": 0.6992,
         "precision": 0.8364,
         "recall": 0.6765,
-        "f1_strict": 0.7154,
+        "f1_strict": 0.7317,
         "schema_rate": 1.0,
         "json_parse_rate": 1.0,
         "in_seed_ontology": 0.8909,
@@ -1729,11 +1729,11 @@
         "params": "1B",
         "licence": "apache-2.0",
         "class": "actionable",
-        "f1_production": 0.5674,
+        "f1_production": 0.5957,
         "f1_no_floor": 0.5429,
-        "precision": 0.5479,
-        "recall": 0.5882,
-        "f1_strict": 0.5532,
+        "precision": 0.5753,
+        "recall": 0.6176,
+        "f1_strict": 0.5957,
         "schema_rate": 0.913,
         "json_parse_rate": 0.8841,
         "in_seed_ontology": 0.7671,
@@ -1773,12 +1773,12 @@
           "fn": 1
         },
         "implicit": {
-          "precision": 0.2222,
-          "recall": 0.2857,
-          "f1": 0.25,
-          "tp": 2,
-          "fp": 7,
-          "fn": 5
+          "precision": 0.3333,
+          "recall": 0.4286,
+          "f1": 0.375,
+          "tp": 3,
+          "fp": 6,
+          "fn": 4
         },
         "infra": {
           "precision": 0.5714,
@@ -1789,12 +1789,12 @@
           "fn": 3
         },
         "multi_fact": {
-          "precision": 0.7222,
-          "recall": 0.5909,
-          "f1": 0.65,
-          "tp": 13,
-          "fp": 5,
-          "fn": 9
+          "precision": 0.7778,
+          "recall": 0.6364,
+          "f1": 0.7,
+          "tp": 14,
+          "fp": 4,
+          "fn": 8
         },
         "negation": {
           "precision": 0.1667,
@@ -2159,11 +2159,11 @@
         "params": "1B",
         "licence": "apache-2.0",
         "class": "actionable",
-        "f1_production": 0.4706,
+        "f1_production": 0.5147,
         "f1_no_floor": 0.4118,
-        "precision": 0.4706,
-        "recall": 0.4706,
-        "f1_strict": 0.4412,
+        "precision": 0.5147,
+        "recall": 0.5147,
+        "f1_strict": 0.5147,
         "schema_rate": 0.971,
         "json_parse_rate": 0.971,
         "in_seed_ontology": 0.6324,
@@ -2203,12 +2203,12 @@
           "fn": 1
         },
         "implicit": {
-          "precision": 0.3333,
-          "recall": 0.2857,
-          "f1": 0.3077,
-          "tp": 2,
-          "fp": 4,
-          "fn": 5
+          "precision": 0.5,
+          "recall": 0.4286,
+          "f1": 0.4615,
+          "tp": 3,
+          "fp": 3,
+          "fn": 4
         },
         "infra": {
           "precision": 0.4286,
@@ -2219,12 +2219,12 @@
           "fn": 4
         },
         "multi_fact": {
-          "precision": 0.4444,
-          "recall": 0.1818,
-          "f1": 0.2581,
-          "tp": 4,
-          "fp": 5,
-          "fn": 18
+          "precision": 0.6667,
+          "recall": 0.2727,
+          "f1": 0.3871,
+          "tp": 6,
+          "fp": 3,
+          "fn": 16
         },
         "negation": {
           "precision": 0.25,
@@ -2481,11 +2481,11 @@
         "params": "3B",
         "licence": "apache-2.0",
         "class": "actionable",
-        "f1_production": 0.5512,
+        "f1_production": 0.5669,
         "f1_no_floor": 0.5797,
-        "precision": 0.5932,
-        "recall": 0.5147,
-        "f1_strict": 0.5354,
+        "precision": 0.6102,
+        "recall": 0.5294,
+        "f1_strict": 0.5669,
         "schema_rate": 1.0,
         "json_parse_rate": 1.0,
         "in_seed_ontology": 0.8475,
@@ -2549,12 +2549,12 @@
           "fn": 16
         },
         "negation": {
-          "precision": 0.1667,
-          "recall": 0.5,
-          "f1": 0.25,
-          "tp": 1,
-          "fp": 5,
-          "fn": 1
+          "precision": 0.3333,
+          "recall": 1.0,
+          "f1": 0.5,
+          "tp": 2,
+          "fp": 4,
+          "fn": 0
         },
         "novel_pred": {
           "precision": 1.0,
