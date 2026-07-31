@@ -410,10 +410,10 @@ void cmd_status(app_ctx_t *ctx, int argc, char **argv)
    printf("aimee %s\n", AIMEE_VERSION);
 
    /* Database status */
-   config_t cfg;
-   config_load(&cfg);
+   char db1_path[CONFIG_COPY_MAX];
+   config_db1_path_copy(db1_path, sizeof(db1_path));
    db1_diag_t diag;
-   db1_diag_inspect(cfg.db1_path, 0, &diag);
+   db1_diag_inspect(db1_path, 0, &diag);
    if (diag.opened)
       printf("Database:  ok (schema v%d)\n", diag.schema_version);
    else
@@ -494,7 +494,7 @@ void cmd_hud(app_ctx_t *ctx, int argc, char **argv)
 
    config_t cfg;
    config_load(&cfg);
-   if (db1_init(cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
    {
       fprintf(stderr, "aimee: cannot initialize DB1\n");
       return;
@@ -552,7 +552,7 @@ void cmd_usage(app_ctx_t *ctx, int argc, char **argv)
 {
    config_t cfg;
    config_load(&cfg);
-   if (db1_init(cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
    {
       fprintf(stderr, "aimee: cannot initialize DB1\n");
       return;
@@ -702,7 +702,7 @@ void cmd_mode(app_ctx_t *ctx, int argc, char **argv)
    {
       config_t cfg;
       config_load(&cfg);
-      db1_init(cfg.db1_path);
+      db1_init(config_db1_path());
    }
    const char *sid = session_id();
 
@@ -826,7 +826,7 @@ void cmd_tdd(app_ctx_t *ctx, int argc, char **argv)
    {
       config_t cfg;
       config_load(&cfg);
-      db1_init(cfg.db1_path);
+      db1_init(config_db1_path());
    }
    const char *sid = session_id();
 

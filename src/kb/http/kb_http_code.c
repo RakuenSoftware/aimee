@@ -529,8 +529,7 @@ int handle_get_code_search(const char *query_string, char *out_buf, int out_cap)
    }
    /* Enrich matched-line spans only when ingress compression is enabled (the
     * lossy-fold consumer). Default-off keeps the query and JSON identical. */
-   config_t scfg;
-   int enrich = (config_load(&scfg) == 0 && scfg.ingress_compress_enabled) ? 1 : 0;
+   int enrich = (config_present() && config_ingress_compress_enabled()) ? 1 : 0;
    int n = code_search_local_first(project, all_projects, query, hits, max_r, enrich);
    if (n < 0)
    {

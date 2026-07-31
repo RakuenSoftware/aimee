@@ -1123,9 +1123,10 @@ cJSON *dogfood_build_report_for_month(const char *dir_override, const char *mont
       snprintf(dir, sizeof(dir), "%s", dir_override);
    else
    {
-      config_t cfg;
-      if (config_load(&cfg) == 0 && cfg.dogfood_log_dir[0])
-         snprintf(dir, sizeof(dir), "%s", cfg.dogfood_log_dir);
+      char log_dir[CONFIG_COPY_MAX];
+      config_dogfood_log_dir_copy(log_dir, sizeof(log_dir));
+      if (log_dir[0])
+         snprintf(dir, sizeof(dir), "%s", log_dir);
       else
          snprintf(dir, sizeof(dir), "%s/dogfood", config_output_dir());
    }

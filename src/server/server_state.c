@@ -1545,9 +1545,6 @@ int handle_workspace_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    (void)req;
-   config_t cfg;
-   config_load(&cfg);
-
    /* Listing workspaces is a read of the registry; the kb call only enriches
     * each entry with its already-indexed project names. Probe liveness first so
     * a down kb degrades to empty project lists instead of blocking this RPC on a
@@ -1564,11 +1561,11 @@ int handle_workspace_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       cJSON *ws_obj = cJSON_CreateObject();
       jo_add_str(ws_obj, "path", config_workspaces(w));
       jo_add_str(ws_obj, "provider",
-                 cfg.workspace_providers[w][0] ? cfg.workspace_providers[w] : "shared");
-      if (cfg.workspace_vcs_remote[w][0])
-         jo_add_str(ws_obj, "remote", cfg.workspace_vcs_remote[w]);
-      if (cfg.workspace_vcs_head[w][0])
-         jo_add_str(ws_obj, "head", cfg.workspace_vcs_head[w]);
+                 config_workspace_providers(w)[0] ? config_workspace_providers(w) : "shared");
+      if (config_workspace_vcs_remote(w)[0])
+         jo_add_str(ws_obj, "remote", config_workspace_vcs_remote(w));
+      if (config_workspace_vcs_head(w)[0])
+         jo_add_str(ws_obj, "head", config_workspace_vcs_head(w));
       cJSON *projs = cJSON_AddArrayToObject(ws_obj, "projects");
       size_t ws_len = strlen(config_workspaces(w));
       for (int p = 0; p < pcount; p++)

@@ -1356,6 +1356,12 @@ int config_present(void)
    return 1; /* the config_load stub above always succeeds */
 }
 
+/* Ingress compression gate: memset-0 in the struct the stub above fills. */
+int config_ingress_compress_enabled(void)
+{
+   return 0;
+}
+
 /* §2c reembed-on-dim-change gate: mirrors the struct the stub above fills, so a
  * case that flips g_test_reembed_enabled moves both seams together. */
 int config_kb_reembed_on_dim_change(void)

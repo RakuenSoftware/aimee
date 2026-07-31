@@ -2,20 +2,12 @@
   "_note": "Ratchet baseline for check-config-encapsulation.py. config_t is a secret of the config module; these are the sites that still materialise it. Counts may only DECREASE. Migrate a file to config accessors, then rerun with --update-baseline.",
   "files": {
     "src/cmd_core.c": {
-      "decls": 5,
-      "loads": 5
+      "decls": 4,
+      "loads": 4
     },
     "src/cmd_memory_internal.h": {
       "decls": 1,
       "loads": 0
-    },
-    "src/cmd_provider.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/dogfood.c": {
-      "decls": 1,
-      "loads": 1
     },
     "src/headers/aimee.h": {
       "decls": 2,
@@ -26,16 +18,12 @@
       "loads": 0
     },
     "src/kb/http/kb_http_code.c": {
-      "decls": 2,
-      "loads": 2
+      "decls": 1,
+      "loads": 1
     },
     "src/kb/http/kb_tls_serve.c": {
       "decls": 2,
       "loads": 0
-    },
-    "src/kb/kb_ingest_workers.c": {
-      "decls": 5,
-      "loads": 7
     },
     "src/kb/kb_surprising_judge.c": {
       "decls": 1,
@@ -48,18 +36,6 @@
     "src/modules/guardrails/guardrails_action_audit.c": {
       "decls": 2,
       "loads": 0
-    },
-    "src/modules/kb-synthesis/kb_curator_extract.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/modules/kb-synthesis/kb_curator_resolve_entities.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/modules/kb-synthesis/kb_curator_synthesize.c": {
-      "decls": 1,
-      "loads": 1
     },
     "src/modules/kb_client/kb_client_mtls.c": {
       "decls": 2,
@@ -77,15 +53,7 @@
       "decls": 3,
       "loads": 0
     },
-    "src/modules/roundtable/roundtable_provider.c": {
-      "decls": 2,
-      "loads": 0
-    },
     "src/modules/vault/vault_custody_tpm2.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/posix/agent_runtime.c": {
       "decls": 1,
       "loads": 1
     },
@@ -94,18 +62,14 @@
       "loads": 0
     },
     "src/server/server_mcp.c": {
-      "decls": 2,
-      "loads": 2
-    },
-    "src/server/server_state.c": {
-      "decls": 2,
-      "loads": 2
-    },
-    "src/server/server_workflow_api.c": {
       "decls": 1,
       "loads": 1
     },
-    "src/server/web_search.c": {
+    "src/server/server_state.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/server/server_workflow_api.c": {
       "decls": 1,
       "loads": 1
     },
@@ -335,8 +299,8 @@
     }
   },
   "totals": {
-    "decls": 293,
-    "files": 83,
-    "loads": 177
+    "decls": 275,
+    "files": 74,
+    "loads": 159
   }
 }

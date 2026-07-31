@@ -129,6 +129,18 @@ int config_load(config_t *c)
 /* run_engine reads these two directly now. Empty is what the zeroed struct gave
  * it, and both engines are skipped as unconfigured -- the duckduckgo path this
  * suite drives is unaffected. */
+/* Engine selection: empty backends + empty backend, so web_search falls through
+ * to its duckduckgo default -- the path this suite drives, and what the zeroed
+ * config_t the old stub returned produced. */
+const char *config_search_backends(void)
+{
+   return "";
+}
+const char *config_search_backend(void)
+{
+   return "";
+}
+
 /* run_engine takes the _copy form (the value crosses an HTTP round trip). Empty
  * is what the zeroed struct gave it: both engines skipped as unconfigured. */
 size_t config_search_tavily_api_key_copy(char *out, size_t n)

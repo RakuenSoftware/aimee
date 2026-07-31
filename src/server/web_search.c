@@ -767,20 +767,16 @@ char *web_search_ex(const char *query, int max_results, int fetch_pages, const c
       max_results = 5;
    if (max_results > WEB_SEARCH_MAX_RESULTS)
       max_results = WEB_SEARCH_MAX_RESULTS;
-
-   config_t cfg;
-   config_load(&cfg);
-
    if (fetch_pages == WEB_SEARCH_FETCH_PAGES_UNSET)
       fetch_pages =
-          (cfg.search_fetch_pages >= 0) ? cfg.search_fetch_pages : WEB_SEARCH_FETCH_PAGES_DEFAULT;
+          (config_search_fetch_pages() >= 0) ? config_search_fetch_pages() : WEB_SEARCH_FETCH_PAGES_DEFAULT;
 
    char engines[WEB_SEARCH_MAX_ENGINES][32];
-   int nengines = parse_engine_list(cfg.search_backends, engines, WEB_SEARCH_MAX_ENGINES);
+   int nengines = parse_engine_list(config_search_backends(), engines, WEB_SEARCH_MAX_ENGINES);
    if (nengines == 0)
    {
       snprintf(engines[0], sizeof(engines[0]), "%s",
-               cfg.search_backend[0] ? cfg.search_backend : "duckduckgo");
+               config_search_backend()[0] ? config_search_backend() : "duckduckgo");
       nengines = 1;
    }
 

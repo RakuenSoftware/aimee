@@ -864,8 +864,7 @@ native_provider_http:
             db1_agent_job_heartbeat_ext(dj, final_text_only_turn ? "final_response" : "model",
                                         api_call_count);
       }
-      config_t econ_cfg;
-      int economizer_active = config_load(&econ_cfg) == 0 && econ_mode(&econ_cfg) != ECON_MODE_OFF;
+      int economizer_active = config_present() && econ_mode_current() != ECON_MODE_OFF;
       econ_wire_route_t wire_route = anthropic                   ? ECON_WIRE_ANTHROPIC_MESSAGES
                                      : chatgpt                   ? ECON_WIRE_OPENAI_RESPONSES
                                      : strstr(url, "/responses") ? ECON_WIRE_OPENAI_RESPONSES

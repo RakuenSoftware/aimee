@@ -782,9 +782,7 @@ cJSON *tool_memory_briefing(cJSON *args)
 
 cJSON *tool_get_identity(void)
 {
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   if (config_load(&cfg) != 0)
+   if (!config_present())
       return text_content("error: could not load config");
 
    cJSON *obj = cJSON_CreateObject();

@@ -205,16 +205,13 @@ int kb_curator_synthesize_one(const kb_curator_extract_opts_t *opts)
    void *conn = db2_conn();
    if (!conn)
       return 0;
-
-   config_t cfg;
-   config_load(&cfg);
    /* Run when enabled AND we have somewhere to send the work: a configured
     * Tier-B provider (§2) or the legacy sidecar command. */
    provider_def_owned_t synth_provider;
    int have_provider =
        kb_curator_provider_for_stage(KB_CURATOR_STAGE_SYNTHESIZE, &synth_provider);
-   if (!cfg.kb_curator_synthesize_enabled ||
-       (!cfg.kb_curator_synthesize_command[0] && !have_provider))
+   if (!config_kb_curator_synthesize_enabled() ||
+       (!config_kb_curator_synthesize_command()[0] && !have_provider))
       return 0;
 
    char ent_id[64] = "", scope_kind[64] = "", scope_id[128] = "";
@@ -239,7 +236,7 @@ int kb_curator_synthesize_one(const kb_curator_extract_opts_t *opts)
 
    cJSON *cites = cJSON_CreateArray();
    int n_sources = 0;
-   char *request = synth_build_request(conn, ent_id, topic_name, cfg.kb_curator_synthesize_k, cites,
+   char *request = synth_build_request(conn, ent_id, topic_name, config_kb_curator_synthesize_k(), cites,
                                        &n_sources);
    if (!request || n_sources == 0)
    {
@@ -258,7 +255,7 @@ int kb_curator_synthesize_one(const kb_curator_extract_opts_t *opts)
    char serr[256];
    char *response =
        kb_curator_llm_run(KB_CURATOR_STAGE_SYNTHESIZE, CURATOR_SYNTH_SYSTEM_PROMPT, request, NULL,
-                          cfg.kb_curator_synthesize_command, CURATOR_SYNTH_OUTBUF, serr,
+                          config_kb_curator_synthesize_command(), CURATOR_SYNTH_OUTBUF, serr,
                           sizeof(serr));
    free(request);
    if (!response)
