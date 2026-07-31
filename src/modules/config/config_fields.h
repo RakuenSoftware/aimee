@@ -40,9 +40,10 @@ typedef enum
 typedef enum
 {
    FGROUP_RUNTIME = 0, /* everyday user-facing knob (default) */
-   FGROUP_DEPLOY,      /* deploy-time infra (LLM-container topology): consumed once by
-                          config_emit_deploy_env to stand up the aimee-llm container,
-                          never read at runtime. Set at deploy, not tuned day-to-day. */
+   FGROUP_DEPLOY,      /* deploy-time infra topology: consumed once by
+                          config_emit_deploy_env to stand up the managed sibling
+                          services, never read at runtime. Set at deploy, not
+                          tuned day-to-day. */
    FGROUP_ADVANCED,    /* expert tuning scalar with a good default; file-settable, off surface */
    FGROUP_DEV,         /* dev/QA-only (e.g. dogfood_*); not part of the user surface */
 } config_field_group_t;

@@ -116,7 +116,7 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 
 ### Deploy-time keys (7)
 
-Consumed once by `config_emit_deploy_env` to stand up the aimee-llm container (`aimee config deploy-env`); not read at runtime. Set at deploy, not tuned day-to-day.
+Consumed once by `config_emit_deploy_env` to stand up the managed sibling services (`aimee config deploy-env`); not read at runtime. Set at deploy, not tuned day-to-day.
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -344,7 +344,7 @@ The binaries read 226 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_BACKGROUND_THREADS` | Background worker thread count. |
 | `AIMEE_COMPUTE_THREADS` | Compute-pool thread count. |
 | `AIMEE_DEPLOY_COMPOSE_FILE` | Path to the managed compose file the server-orchestrated deploy runs (default /opt/aimee/deploy/aimee-managed.compose.yaml). |
-| `AIMEE_DEPLOY_ENABLED` | Set to 1 to enable the server-orchestrated deploy: the setup wizard runs `docker compose up -d` for the managed sibling services (aimee-kb + aimee-llm) via a mounted Docker socket. Off unless the deploy compose sets it. |
+| `AIMEE_DEPLOY_ENABLED` | Set to 1 to enable the server-orchestrated deploy: the setup wizard runs `docker compose up -d` for the managed sibling service (aimee-kb) via a mounted Docker socket. Off unless the deploy compose sets it. |
 | `AIMEE_GITHUB_OAUTH_CLIENT_ID` | Client ID of a GitHub OAuth App for the webchat "Sign in with GitHub" button; populates the github.com git credential. Public. Overrides the built-in default baked in via oauth_defaults.h. |
 | `AIMEE_GITLAB_OAUTH_CLIENT_ID` | Client ID of a GitLab OAuth application (device flow enabled) for the webchat "Sign in with GitLab" button on gitlab.com. Public. Overrides the built-in default baked in via oauth_defaults.h. |
 | `AIMEE_MGMT_STATUS_KEY_ID` | Identifier of the management-status verification key. |
@@ -596,7 +596,7 @@ The binaries read 226 `AIMEE_*` environment variables (scanned from `getenv()` i
 | Variable | Description |
 |----------|-------------|
 | `AIMEE_LLM_AUTH_REQUIRED` | Set to 1 on wizard-managed KBs so synthesis clients refuse to contact the LLM when its bearer service identity is missing. |
-| `AIMEE_LLM_AUTH_TOKEN` | First-boot transport for the bearer service identity shared by aimee-kb and its aimee-llm gateway. aimee-kb synchronously seals it into Vault, scrubs the environment, and cleanly re-execs before serving; wizard-managed deploys generate the 256-bit value in Vault. This is separate from user/server bearers. |
+| `AIMEE_LLM_AUTH_TOKEN` | First-boot transport for the bearer aimee-kb presents to the external synthesis endpoint. aimee-kb synchronously seals it into Vault, scrubs the environment, and cleanly re-execs before serving; wizard-managed deploys generate the 256-bit value in Vault. This is separate from user/server bearers. |
 | `AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE` | Explicit first-boot migration/adoption transport for an existing wizard-managed LLM credential. aimee-server seals it into Vault and scrubs the environment before normal startup. Ordinary inherited AIMEE_LLM_AUTH_TOKEN is ignored by managed credential creation so stale child-service state cannot win. Must be a 32..512 character RFC 6750 b64token. |
 | `AIMEE_OFFLINE_ALLOW_NO_SWAP_MLOCK_FALLBACK` | Internal managed-authority switch: still attempts mlockall first, but when an unprivileged container cannot raise RLIMIT_MEMLOCK, permits the offline one-shot to continue only if the kernel reports no active swap. Operator-run custody tools leave this unset and retain mandatory mlockall. |
 
