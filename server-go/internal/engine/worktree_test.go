@@ -200,6 +200,81 @@ func TestEnsureMigratesLegacySliceWhenIdenticalTargetRefAlreadyExists(t *testing
 	}
 }
 
+func TestEnsureRestoresDurableBranchFromIdenticalDelegateAlias(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=t@example",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=t@example")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	run("init", "-b", "testing", repo)
+	if err := os.WriteFile(filepath.Join(repo, "README"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run("-C", repo, "add", "README")
+	run("-C", repo, "commit", "-m", "init")
+
+	id := "wi_parent.sa90502568a.g0.0"
+	target := "aimee/wi/" + id
+	alias := "aimee/wi/sa90502568a-doc-fix-v3"
+	run("-C", repo, "branch", target)
+	run("-C", repo, "branch", alias)
+	trees := filepath.Join(root, "trees")
+	if err := os.MkdirAll(trees, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(trees, id)
+	run("-C", repo, "worktree", "add", "--lock", path, alias)
+
+	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: "wi_parent", Repo: repo,
+		ProposalPath: "parent", WorkflowName: "build", StartStage: "slices"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: id, Repo: repo, ProposalPath: "p",
+		WorkflowName: "slice", StartStage: "freeze", ParentID: "wi_parent"}); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewWorktreeManager(store, trees)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, _ := store.WorkItem(ctx, id)
+	dirtyPath := filepath.Join(path, "uncommitted.txt")
+	if err := os.WriteFile(dirtyPath, []byte("preserve me"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := manager.Ensure(ctx, item, false); err == nil {
+		t.Fatal("restored durable branch despite uncommitted alias work")
+	}
+	if data, err := os.ReadFile(dirtyPath); err != nil || string(data) != "preserve me" {
+		t.Fatalf("uncommitted alias work was not preserved: %q err=%v", data, err)
+	}
+	if err := os.Remove(dirtyPath); err != nil {
+		t.Fatal(err)
+	}
+	gotPath, gotBranch, err := manager.Ensure(ctx, item, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != path || gotBranch != target {
+		t.Fatalf("got path=%q branch=%q", gotPath, gotBranch)
+	}
+	actual, err := gitText(ctx, path, "branch", "--show-current")
+	if err != nil || actual != target {
+		t.Fatalf("restored branch=%q err=%v", actual, err)
+	}
+}
+
 func TestRepoIntegrationBranchUsesAdmittedCheckoutNotOriginHEAD(t *testing.T) {
 	repo := t.TempDir()
 	run := func(args ...string) {

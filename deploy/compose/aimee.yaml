@@ -34,13 +34,21 @@ services:
       # the builtin serves forever — the wizard's embedder silently never runs.
       EMBEDDER_MODEL: ${EMBEDDER_MODEL:-}
       AIMEE_EMBEDDER_URL: ${AIMEE_EMBEDDER_URL:-}
-      # Embedding dim — CPU tier default 1024; the GPU override sets 2560.
-      AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-1024}
+      # Embedding dim. Leave EMPTY so the kb uses the dimension of the embedder it
+      # actually serves (the bundled bekko-a25m is 384). This carried the retired
+      # aimee-llm CPU tier's 1024: with the bundled embedder the kb came up healthy,
+      # accepted writes, and then refused every vector upsert with
+      # "dim mismatch: got 384, expected 1024" — dense retrieval silently dead.
+      # Set it ONLY for an external AIMEE_EMBEDDER_URL, whose width the kb cannot
+      # know.
+      AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
       AIMEE_KB_HTTP_BIND: "1"
       # The curator synth sidecar (curator-extract.py) reads LLM_ENDPOINT, NOT
-      # AIMEE_LLM_URL — without it the sidecar exits 256 and code-unit synthesis
-      # never drains. Point it at the same aimee-llm gateway (/v1).
-      LLM_ENDPOINT: ${LLM_ENDPOINT:-http://aimee-llm:8742/v1}
+      # AIMEE_LLM_URL. Defaulted empty for the same reason as AIMEE_LLM_URL above:
+      # the aimee-llm container is retired, so the old http://aimee-llm:8742/v1
+      # default pointed every deploy at a host that can never resolve. Set it to
+      # your own synth endpoint (/v1) to drain code-unit synthesis.
+      LLM_ENDPOINT: ${LLM_ENDPOINT:-}
       LLM_MODEL: ${LLM_MODEL:-aimee-synth}
     command: ["--http-port=8741"]
     ports:
@@ -90,4 +98,3 @@ volumes:
   aimee-kb-home:
   aimee-server-home:
   aimee-server-workspaces:
-  aimee-llm-models:

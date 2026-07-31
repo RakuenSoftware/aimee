@@ -508,7 +508,7 @@ char *kb_client_reembed(int confirm, int force, int dry_run, int target_dim, int
    cJSON_AddBoolToObject(req, "dry_run", dry_run ? 1 : 0);
    if (target_dim > 0)
       cJSON_AddNumberToObject(req, "target_dim", target_dim);
-   char *resp = kb_client_v1_post_json("/v1/reembed", req, 120000, status_out);
+   char *resp = kb_client_v1_post_json_keep_error("/v1/reembed", req, 120000, status_out);
    cJSON_Delete(req);
    return resp;
 }
@@ -1101,7 +1101,10 @@ static char *kb_v1_action_request_timeout(const char *action, cJSON *req, int ti
    free(escaped);
 
    int http_status = -1;
-   char *json = kb_client_v1_post_json(path, req, timeout_ms, &http_status);
+   /* keep_error: on a refusal the kb's body says WHY. Without it this returned a
+    * synthesised "returned HTTP 400", which relays as a successful response
+    * containing an error nobody reads -- the caller saw exit 0 and no output. */
+   char *json = kb_client_v1_post_json_keep_error(path, req, timeout_ms, &http_status);
    cJSON_Delete(req);
    if (json)
       return json;
@@ -1509,7 +1512,16 @@ static const char *kb_client_v1_auth_header(char *buf, size_t buf_len)
    return buf;
 }
 
-char *kb_client_v1_post_json(const char *path, cJSON *body, int timeout_ms, int *status_out)
+/* keep_error: return the response body even on a non-2xx status.
+ *
+ * The default (0) frees it and returns NULL, which loses whatever the kb said
+ * about WHY it refused. That is how `aimee kb reembed` reported a generic
+ * "knowledge service reembed failed" while the kb was answering
+ * "kb.reembed_on_dim_change is disabled; set it true...", and how
+ * `aimee memory embed --all` exited 0 printing nothing against
+ * "memory.embed all=true requires version". */
+static char *kb_client_v1_post_json_impl(const char *path, cJSON *body, int timeout_ms,
+                                         int *status_out, int keep_error)
 {
    if (!kb_transport_begin(status_out))
       return NULL;
@@ -1530,6 +1542,8 @@ char *kb_client_v1_post_json(const char *path, cJSON *body, int timeout_ms, int 
       free(body_json);
       if (*wire_status < 200 || *wire_status >= 300 || !r)
       {
+         if (keep_error && r)
+            return r;
          free(r);
          return NULL;
       }
@@ -1550,6 +1564,8 @@ char *kb_client_v1_post_json(const char *path, cJSON *body, int timeout_ms, int 
       free(url);
       if (status < 200 || status >= 300 || !response)
       {
+         if (keep_error && response)
+            return response;
          free(response);
          return NULL;
       }
@@ -1559,6 +1575,17 @@ char *kb_client_v1_post_json(const char *path, cJSON *body, int timeout_ms, int 
    free(body_json);
    kb_transport_complete(path, NULL, -1);
    return NULL;
+}
+
+char *kb_client_v1_post_json(const char *path, cJSON *body, int timeout_ms, int *status_out)
+{
+   return kb_client_v1_post_json_impl(path, body, timeout_ms, status_out, 0);
+}
+
+char *kb_client_v1_post_json_keep_error(const char *path, cJSON *body, int timeout_ms,
+                                        int *status_out)
+{
+   return kb_client_v1_post_json_impl(path, body, timeout_ms, status_out, 1);
 }
 
 char *kb_client_v1_post_body(const char *path, const char *body, int timeout_ms, int *status_out)

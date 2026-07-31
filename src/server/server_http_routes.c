@@ -2110,6 +2110,11 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/kb/ingest", NULL, RM_EXACT, "kb.ingest", 0, rh_dispatch_op_async},
     {"POST", "/v1/kb/update", NULL, RM_EXACT, "kb.update", 0, rh_dispatch_op_async},
     {"POST", "/v1/kb/docs/push", NULL, RM_EXACT, "kb.docs.push", 0, rh_dispatch_op_async},
+    /* Both rebuild vectors and can run for minutes on a real corpus, so they take
+     * the async lane like the rest: kb.reembed drops and recreates every derived
+     * vector table, memory.embed re-embeds the memory corpus after it. */
+    {"POST", "/v1/kb/reembed", NULL, RM_EXACT, "kb.reembed", 0, rh_dispatch_op_async},
+    {"POST", "/v1/memory/embed", NULL, RM_EXACT, "memory.embed", 0, rh_dispatch_op_async},
     {"POST", "/v1/graph/sync_code", NULL, RM_EXACT, "graph.sync_code", 0, rh_dispatch_op_async},
     {"POST", "/v1/index/scan", NULL, RM_EXACT, "index.scan", 0, rh_dispatch_op_async},
     {"POST", "/v1/index/ingest", NULL, RM_EXACT, "index.ingest", 0, rh_dispatch_op_async},

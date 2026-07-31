@@ -1073,9 +1073,15 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       }
       if (!config_kb_reembed_on_dim_change())
       {
+         /* Name the file. This gate lives in aimee-kb's OWN config, not the
+          * server's, and `aimee config set` targets the server -- so an operator
+          * following the documented re-embed had no way to act on "set it true".
+          * The path is what makes this message useful. */
          snprintf(out_buf, (size_t)out_cap,
-                  "{\"error\":\"kb.reembed_on_dim_change is disabled; set it true to enable the "
-                  "attended dim-change reset\"}");
+                  "{\"error\":\"kb.reembed_on_dim_change is disabled; set 'kb: "
+                  "reembed_on_dim_change: true' in aimee-kb's own $AIMEE_HOME/aimee.yaml and "
+                  "restart it (this gate is read by aimee-kb, not by aimee-server, so `aimee "
+                  "config set` does not reach it)\"}");
          return 403;
       }
       int confirm = kb_http_json_bool(body, "confirm", 0);

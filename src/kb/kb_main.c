@@ -1624,8 +1624,16 @@ int main(int argc, char **argv)
       int n = home ? snprintf(embedded, sizeof(embedded), "postgresql:///aimee_shared?host=%s/run",
                               home)
                    : -1;
-      int external =
-          present && (n <= 0 || (size_t)n >= sizeof(embedded) || strcmp(db2_url, embedded) != 0);
+      /* Prefix match to a parameter boundary, not string equality: the entrypoint
+       * seals the embedded DSN with an explicit &user=<cluster owner> so that
+       * containers sharing the socket connect as the right role. That trailing
+       * parameter does not make the topology external, and treating it as such
+       * would stop the KB provisioning its own cluster. */
+      size_t embedded_len = n > 0 ? (size_t)n : 0;
+      int matches_embedded = embedded_len > 0 && embedded_len < sizeof(embedded) &&
+                             strncmp(db2_url, embedded, embedded_len) == 0 &&
+                             (db2_url[embedded_len] == '\0' || db2_url[embedded_len] == '&');
+      int external = present && !matches_embedded;
       runtime_secret_wipe(db2_url, sizeof(db2_url));
       runtime_secret_wipe(embedded, sizeof(embedded));
       return external ? 0 : 1;

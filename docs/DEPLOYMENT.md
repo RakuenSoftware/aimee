@@ -6,8 +6,8 @@
 docker compose -f compose.server-managed.yaml up -d
 ```
 
-The browser wizard launches the KB and inference containers. This requires the host Docker socket,
-which gives the server Docker-host authority.
+The browser wizard launches the KB container. This requires the host Docker socket, which gives the
+server Docker-host authority.
 
 Use it for a trusted single-host install where browser-managed setup matters more than that larger
 boundary.
@@ -47,8 +47,12 @@ them synchronously, and exits before the service is created.
 
 ## Inference
 
-`aimee-llm` serves embedding and synthesis. Select a CPU or GPU tier with the deployment
-settings. GPU models live in a persistent model volume; the CPU offline image may bake its model.
+The KB embeds in-process from weights baked into its image, so embedding needs no second container
+and no model download. Select the embedder in the wizard's Deploy topology step, or set
+`embedding_model`; point `AIMEE_EMBEDDER_URL` at your own endpoint for a wider model.
+
+Synthesis is external-only. `AIMEE_LLM_URL` defaults empty, so a deployment that wants synthesis
+supplies its own endpoint.
 
 The KB must report explicit degradation when a configured inference stage is unavailable. It cannot
 claim a dense or synthesized result after silently skipping that stage.

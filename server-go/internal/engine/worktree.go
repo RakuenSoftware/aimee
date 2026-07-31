@@ -65,24 +65,32 @@ func (m *WorktreeManager) Ensure(ctx context.Context, item db1.WorkItem, feature
 				}
 				return candidate, branch, nil
 			}
+			// Delegate repair turns can create a temporary side branch while
+			// editing, then leave the managed worktree attached to that alias.
+			// If both refs name the exact same commit, switching back to the
+			// durable branch is lossless. Do not guess when either the commit or
+			// the worktree differs: that may contain work requiring a human.
+			if target, targetErr := gitText(ctx, item.Repo, "rev-parse", "--verify", branch+"^{commit}"); targetErr == nil {
+				current, currentErr := gitText(ctx, candidate, "rev-parse", "HEAD^{commit}")
+				status, statusErr := gitText(ctx, candidate, "status", "--porcelain")
+				if currentErr == nil && statusErr == nil && status == "" && target == current {
+					if _, switchErr := gitText(ctx, candidate, "switch", branch); switchErr != nil {
+						return "", "", fmt.Errorf("restore durable worktree branch %q from identical alias %q: %w", branch, actual, switchErr)
+					}
+					if err := m.db.SetWorktree(ctx, item.ID, candidate); err != nil {
+						return "", "", err
+					}
+					return candidate, branch, nil
+				}
+			}
 			// The former C engine named a generated slice
 			// <parent>-<slice-hash> while Go uses the durable child item ID. A
 			// crash/replay can lose the DB path after implementation but leave
 			// this registered worktree and its commits. Rename that exact legacy
 			// branch in place; deleting/recreating the tree would discard work.
 			if legacySliceBranch(item.ID) == actual {
-				if target, existsErr := gitText(ctx, item.Repo, "rev-parse", "--verify", branch+"^{commit}"); existsErr == nil {
-					legacy, legacyErr := gitText(ctx, candidate, "rev-parse", "HEAD^{commit}")
-					if legacyErr != nil || target != legacy {
-						return "", "", fmt.Errorf("managed worktree uses legacy branch %q but target branch %q has different work", actual, branch)
-					}
-					// A crash between branch creation and DB persistence can leave
-					// both names pointing at the same commit. Removing that unattached,
-					// identical alias is lossless; git refuses the deletion if another
-					// worktree has it checked out.
-					if _, deleteErr := gitText(ctx, item.Repo, "branch", "-D", branch); deleteErr != nil {
-						return "", "", fmt.Errorf("remove identical replay branch %q: %w", branch, deleteErr)
-					}
+				if _, existsErr := gitText(ctx, item.Repo, "rev-parse", "--verify", branch+"^{commit}"); existsErr == nil {
+					return "", "", fmt.Errorf("managed worktree uses legacy branch %q but target branch %q has different work", actual, branch)
 				}
 				if _, renameErr := gitText(ctx, candidate, "branch", "-m", branch); renameErr != nil {
 					return "", "", fmt.Errorf("migrate legacy worktree branch: %w", renameErr)
