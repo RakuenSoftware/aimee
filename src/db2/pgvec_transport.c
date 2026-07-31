@@ -9,6 +9,7 @@
 #include "log.h"
 
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,6 +19,21 @@ static pthread_mutex_t latency_mu = PTHREAD_MUTEX_INITIALIZER;
 static int64_t latency_total_us = 0;
 static int64_t latency_count = 0;
 static int64_t latency_max_us = 0;
+
+/* Vector upserts refused for width disagreement, and the last width offered.
+ * Relaxed: these are reported, never branched on. */
+static _Atomic long long g_dim_refused = 0;
+static _Atomic int g_dim_last_offered = 0;
+
+long long db2_embedding_dim_refused_count(void)
+{
+   return atomic_load_explicit(&g_dim_refused, memory_order_relaxed);
+}
+
+int db2_embedding_dim_last_offered(void)
+{
+   return atomic_load_explicit(&g_dim_last_offered, memory_order_relaxed);
+}
 
 static int64_t monotonic_us(void)
 {
@@ -275,6 +291,10 @@ int pgvec_memory_upsert(int64_t point_id, const float *vec, int dim, const char 
    int expect = db2_embedding_dim();
    if (expect > 0 && dim != expect)
    {
+      /* Record it as well as logging it: a per-row WARN in the kb log is invisible
+       * to anyone reading health, and this condition silently drops every vector. */
+      atomic_fetch_add_explicit(&g_dim_refused, 1, memory_order_relaxed);
+      atomic_store_explicit(&g_dim_last_offered, dim, memory_order_relaxed);
       aimee_log(
           LOG_WARN, "pgvec",
           "memory embedding dim mismatch: got %d, expected %d (point_id=%lld); refusing upsert",

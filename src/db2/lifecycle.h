@@ -32,6 +32,16 @@ extern "C"
     * 0 means neither was supplied — treat as an error, never as a default. */
    int db2_embedding_dim(void);
 
+   /* How many vector upserts have been refused for disagreeing with that width,
+    * and the last width actually offered.
+    *
+    * A wrong AIMEE_EMBEDDING_DIM is otherwise invisible: the kb starts, reports
+    * healthy, accepts writes, and refuses every upsert with a per-row WARN, so a
+    * deployment can store zero vectors indefinitely while looking fine. Health
+    * publishes this so the condition is legible without reading kb logs. */
+   long long db2_embedding_dim_refused_count(void);
+   int db2_embedding_dim_last_offered(void);
+
    /* embedder-runtime-fetch-autodim §2a: mark whether the operator pinned the dim
     * (see config_embedding_dim_is_pinned). Call beside db2_set_embedding_dim,
     * before db2_init. When UNpinned (0, the default), db2_init prefers a recorded
