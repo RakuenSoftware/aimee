@@ -185,6 +185,26 @@ def test_conf_floor_applied_to_pred_only():
     print("  PASS: floored and capability views differ as intended")
 
 
+def test_degenerate_entities():
+    """Normalisation must never destroy a value or invent one.
+
+    Article stripping used to empty a subject legitimately named "a", and
+    ground_text(None) produced the literal string "none" — which can match a note
+    containing that word.
+    """
+    import sys as _sys
+    _sys.path.insert(0, str(HERE))
+    import score as S
+
+    assert S.norm_entity("a") == "a", "a single-article entity must survive"
+    assert S.norm_entity("the") == "the"
+    assert S.norm_entity("the KB") == "kb", "a leading article is still stripped"
+    assert S.norm_entity("Dr. Okafor") == "okafor"
+    assert S.norm("a") == "a"
+    assert S.ground_text(None) == "", "None must not become the word 'none'"
+    print("  PASS: degenerate entities are not destroyed or invented")
+
+
 def test_incomplete_file_refused():
     g = [G("a", "x", [T("A", "knows", "B")]), G("b", "y", [T("C", "knows", "D")])]
     try:

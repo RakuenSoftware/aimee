@@ -4,7 +4,7 @@ A running record of the defects found in this benchmark's **own instrumentation*
 kept because it is the most transferable thing here. The models behaved roughly
 as expected throughout. The grader did not.
 
-Thirteen defects. Most inflated the apparent failure rate, one deflated it, two
+Fourteen defects. Most inflated the apparent failure rate, one deflated it, two
 distorted the ranking rather than the level, several inverted a conclusion, one
 overturned the central result of the entire exercise, and none were in the
 models.
@@ -287,6 +287,42 @@ at 1e-6 against figures the scorer rounds to 4dp.
 That these pass does not retroactively validate the twelve defects above; most
 were wrong *labels* or wrong *rules*, which arithmetic tests cannot catch. What
 the tests do is stop the rules regressing now that they are right.
+
+## 14. Scorer deep dive: properties, not outputs
+
+Previous passes audited what the scorer *said* about real predictions. This one
+attacked the scorer itself.
+
+**Clean:**
+- *Order invariance.* Greedy matching iterates gold and predictions in list
+  order, so it could in principle depend on that order. Twelve shuffles per
+  model: identical F1 every time.
+- *Monotonicity of the relaxations.* Each rule may only ADD matches, never
+  remove one. Checked per note and per model against exact-match-only:
+  **zero violations**. Worth knowing how much the rules carry — they add 3 to 11
+  true positives per model, and granite-4.0-h-1b gains 46% (24 -> 35). Rules
+  doing that much work had better be tested, which until now they were not.
+
+**Found:**
+- *The completeness guard was in the wrong place.* It lived in score.py's
+  main(), so every ad-hoc analysis importing the module skipped it — an
+  unfinished 31B run scored 0.527 in the order-invariance check before I noticed
+  it was 49 notes of 70. Now a shared `load_pred_file()` that refuses.
+- *Endpoint asymmetry.* Containment applied to objects but not subjects, an
+  accident of where the failing cases happened to appear. Zero impact on current
+  data, but it would have produced a surprising result the first time a model
+  elaborated a subject the way they routinely elaborate objects. Made symmetric;
+  no score changed.
+- *Two normalisation bugs, from feeding it malformed input.* An entity
+  legitimately named "a" normalised to the empty string, because article
+  stripping ran unconditionally. And `ground_text(None)` produced the literal
+  string "none", which can match a note containing that word. Both fixed, both
+  now regression-tested.
+
+**The pattern worth naming:** every one of these was found by asking what the
+scorer must be *true of*, rather than by looking at what it produced. Output
+audits find the bugs your data happens to trip. Property checks find the ones it
+does not — yet.
 
 ## What this cost, and what it is worth
 

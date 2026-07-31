@@ -45,7 +45,9 @@ def norm(s):
     # hostnames survive intact.
     s = re.sub(r"^[^\w]+|[^\w]+$", "", s)
     toks = s.split()
-    while toks and toks[0] in ARTICLES:
+    # Never strip the value away entirely: an entity legitimately named "A"
+    # would otherwise normalise to the empty string and match nothing.
+    while len(toks) > 1 and toks[0] in ARTICLES:
         toks.pop(0)
     return " ".join(toks)
 
@@ -74,7 +76,7 @@ def norm_entity(s):
         t = NUMBER_WORDS.get(t, t)
         if t:
             toks.append(t)
-    while toks and (toks[0] in ARTICLES or toks[0] in HONORIFICS):
+    while len(toks) > 1 and (toks[0] in ARTICLES or toks[0] in HONORIFICS):
         toks.pop(0)
     return " ".join(toks)
 
@@ -88,6 +90,18 @@ def tok_f1(a, b):
         return 0.0
     p, r = inter / len(ta), inter / len(tb)
     return 2 * p * r / (p + r)
+
+
+def entity_match(pred, gold, lenient):
+    """Endpoint comparison, applied identically to subjects and objects.
+
+    Containment was originally on objects only, which was an accident of where
+    the failing cases happened to appear rather than a principle. It currently
+    changes nothing on either side, but treating the two endpoints differently
+    would produce a surprising result the first time a model elaborated a subject
+    the way they routinely elaborate objects.
+    """
+    return obj_match(pred, gold, lenient)
 
 
 def obj_match(pred, gold, lenient):
@@ -198,15 +212,16 @@ def _triple_eq_one(p, g, lenient):
         # The ontology declares some relations symmetric ("one assertion implies
         # both directions"), so argument order carries no information for them.
         if g["relation"] in (SYMMETRIC or ()):
-            return p["subject"] == g["object"] and obj_match(p["object"], g["subject"], lenient)
+            return entity_match(p["subject"], g["object"], lenient) \
+                and obj_match(p["object"], g["subject"], lenient)
         return False
     # inverse_rel_type is documented as "auto-enforced": asserting (a parent_of b)
     # commits (b child_of a) too, so the two forms are one fact and scoring them
     # as different answers measures direction of phrasing, not correctness.
-    if (INVERSES or {}).get(g["relation"]) == p["relation"]:
-        return p["subject"] == g["object"] and obj_match(p["object"], g["subject"], lenient)
-    if SCORING_CONVERSES.get(g["relation"]) == p["relation"]:
-        return p["subject"] == g["object"] and obj_match(p["object"], g["subject"], lenient)
+    if (INVERSES or {}).get(g["relation"]) == p["relation"] \
+       or SCORING_CONVERSES.get(g["relation"]) == p["relation"]:
+        return entity_match(p["subject"], g["object"], lenient) \
+            and obj_match(p["object"], g["subject"], lenient)
     return False
 
 
@@ -249,6 +264,8 @@ def ground_text(s):
     spelling. Underscores and hyphens become spaces, and number words are mapped
     to digits on BOTH sides so the two forms meet.
     """
+    if s is None:
+        return ""
     s = re.sub(r"[_\-/]+", " ", str(s).casefold())
     s = re.sub(r"[^\w\s.:]+", " ", s)
     s = re.sub(r"\s+", " ", s).strip()
@@ -325,6 +342,30 @@ def derive_schema_ok(row):
         return True
     # Valid JSON, no facts array, and not empty: wrong shape carrying content.
     return isinstance(obj, dict) and not obj
+
+
+def load_pred_file(path, gold_rows):
+    """Load a prediction file, refusing an incomplete one.
+
+    The completeness check used to live only in main(), so every ad-hoc analysis
+    that imported this module skipped it — and a partial run scores as
+    catastrophically bad rather than as missing. A 1-note remnant once reported
+    F1 0.031 for a model that scores 0.926, and a half-finished 31B run reported
+    0.527 in an order-invariance check. Shared loader so that cannot recur.
+    """
+    rows = [json.loads(l) for l in open(path) if l.strip()]
+    excluded = {r["id"] for r in gold_rows if r.get("excluded")}
+    rows = [r for r in rows if r["id"] not in excluded]
+    wanted = [r for r in gold_rows if r["id"] not in excluded]
+    if len(rows) != len(wanted):
+        raise ValueError(
+            f"incomplete predictions: {path} has {len(rows)} scorable rows, "
+            f"gold has {len(wanted)}. The run is unfinished or was abandoned.")
+    return rows
+
+
+def load_gold_file(path):
+    return [json.loads(l) for l in open(path) if l.strip()]
 
 
 def load_triples(rows, key, canonicalize=False):
