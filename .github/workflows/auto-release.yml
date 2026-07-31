@@ -1,17 +1,36 @@
-# Auto-release on every push to main.
+# Release on push to main, AFTER a human approves the version.
+#
+# `:testing` is the automated channel (publish-testing.yml, no approval). `main`
+# is not. This workflow used to tag and publish on every push to `main`, and
+# under the testing->main promote flow that made a merge into a release: it
+# invented the next version, pushed the tag, built thin clients for four
+# platforms, published the images and moved `:latest`, with nobody intending
+# any of it. v0.2.196 and v0.2.192+1 were published that way mid-cycle on
+# 2026-07-27 and 2026-07-28 while v0.2.192 remained the last release anyone
+# meant to make.
+#
+# Inference is kept, because computing the next patch from the tags is right
+# almost always. What was missing is consent. The version is now computed in a
+# job that changes nothing, published to the run summary, and everything that
+# has an effect waits behind the `release` environment. The approver sees the
+# exact number before it exists.
+#
+# NOTE: this is only a gate if the `release` environment has required reviewers
+# configured in repository settings. Without them GitHub approves it
+# automatically and the old behaviour returns.
 #
 # On each push to `main` (which, under the testing->main promote flow, is a
 # promote merge) this uses a higher version declared in aimee_version.h (for a
 # planned major/minor release), otherwise computes the next semver PATCH from
-# the highest existing `v*` tag. It creates and pushes that tag, then cuts a
-# full release by calling the reusable build workflows:
+# the highest existing `v*` tag. After approval it creates and pushes that tag,
+# then cuts a full release by calling the reusable build workflows:
 #   - release-thin-client.yml  -> aimee CLI binaries (Linux/macOS/Windows) on the GitHub Release
 #   - publish-images.yml       -> aimee-server / aimee-kb multi-arch images, tagged :<version> + :latest
 #
 # Reusable workflows are invoked directly (workflow_call), so this works with the
 # default GITHUB_TOKEN -- no PAT needed (a tag pushed by GITHUB_TOKEN would not,
 # by design, re-trigger the tag-on:push workflows, hence the direct call).
-name: Auto release
+name: Release (main, approval required)
 
 on:
   push:
@@ -75,16 +94,54 @@ jobs:
           echo "version=$next" >> "$GITHUB_OUTPUT"
           echo "Next version: v${next} (latest ${latest:-<none>}, declared v${declared})"
 
-      - name: Create and push tag
+      - name: Publish the proposed version for the approver
         run: |
+          v="v${{ steps.bump.outputs.version }}"
+          {
+            echo "## Awaiting approval to release $v"
+            echo
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| version | \`$v\` |"
+            echo "| commit | \`${GITHUB_SHA}\` |"
+            echo "| pushed by | ${GITHUB_ACTOR} |"
+            echo
+            echo "Approving publishes thin clients for four platforms, publishes"
+            echo "aimee-server and aimee-kb, and moves \`:latest\`. Rejecting leaves"
+            echo "no tag and no artifacts."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=Release awaiting approval::$v from ${GITHUB_SHA}"
+
+  # Nothing above this point has an effect. Everything below waits for a
+  # reviewer on the `release` environment, and the version they are approving is
+  # in the run summary written by the job above.
+  tag:
+    needs: version
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Re-check the version is still free, then tag
+        run: |
+          tag="v${{ needs.version.outputs.version }}"
+          # Re-check after the approval wait: another release may have landed
+          # while this sat in the queue.
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "::error::$tag was created while this run waited for approval; re-run to compute a fresh version"
+            exit 1
+          fi
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
-          tag="v${{ steps.bump.outputs.version }}"
           git tag -a "$tag" -m "aimee $tag"
           git push origin "$tag"
 
   thin-clients:
-    needs: version
+    needs: [version, tag]
     uses: ./.github/workflows/release-thin-client.yml
     permissions:
       contents: write
@@ -92,7 +149,7 @@ jobs:
       version: ${{ needs.version.outputs.version }}
 
   images:
-    needs: version
+    needs: [version, tag]
     uses: ./.github/workflows/publish-images.yml
     permissions:
       contents: read
@@ -119,8 +176,8 @@ jobs:
   # same number instead of silently skipping it. Every step is `|| true` so this
   # cleanup can never mask the original failure, and the run still reports it.
   rollback-tag:
-    needs: [version, thin-clients, images]
-    if: always() && needs.version.result == 'success' && (needs.images.result == 'failure' || needs.images.result == 'cancelled' || needs.thin-clients.result == 'failure' || needs.thin-clients.result == 'cancelled')
+    needs: [version, tag, thin-clients, images]
+    if: always() && needs.tag.result == 'success' && (needs.images.result == 'failure' || needs.images.result == 'cancelled' || needs.thin-clients.result == 'failure' || needs.thin-clients.result == 'cancelled')
     runs-on: ubuntu-latest
     permissions:
       contents: write
