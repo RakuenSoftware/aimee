@@ -179,6 +179,15 @@
       }
     }
   },
+  "relation_agnostic": {
+    "_note": "diagnostic, not a quality score: subject+object matched, relation ignored. The gap to lenient F1 is the share of error that is edge labelling rather than a missed fact.",
+    "precision": 0.4932,
+    "recall": 0.5625,
+    "f1": 0.5255,
+    "tp": 36,
+    "fp": 37,
+    "fn": 28
+  },
   "over_extraction": {
     "empty_gold_notes": 23,
     "on_schema_empty_gold_notes": 23,

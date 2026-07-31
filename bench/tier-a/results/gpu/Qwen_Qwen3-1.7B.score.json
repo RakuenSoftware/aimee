@@ -1,11 +1,11 @@
 {
   "strict": {
-    "precision": 0.4783,
-    "recall": 0.1719,
-    "f1": 0.2529,
-    "tp": 11,
-    "fp": 12,
-    "fn": 53,
+    "precision": 0.5217,
+    "recall": 0.1875,
+    "f1": 0.2759,
+    "tp": 12,
+    "fp": 11,
+    "fn": 52,
     "by_category": {
       "ambiguous": {
         "precision": 0.5,
@@ -32,12 +32,12 @@
         "fn": 2
       },
       "implicit": {
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "tp": 0,
-        "fp": 1,
-        "fn": 6
+        "precision": 1.0,
+        "recall": 0.1667,
+        "f1": 0.2857,
+        "tp": 1,
+        "fp": 0,
+        "fn": 5
       },
       "infra": {
         "precision": 0.0,
@@ -90,12 +90,12 @@
     }
   },
   "lenient": {
-    "precision": 0.4783,
-    "recall": 0.1719,
-    "f1": 0.2529,
-    "tp": 11,
-    "fp": 12,
-    "fn": 53,
+    "precision": 0.5217,
+    "recall": 0.1875,
+    "f1": 0.2759,
+    "tp": 12,
+    "fp": 11,
+    "fn": 52,
     "by_category": {
       "ambiguous": {
         "precision": 0.5,
@@ -122,12 +122,12 @@
         "fn": 2
       },
       "implicit": {
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "tp": 0,
-        "fp": 1,
-        "fn": 6
+        "precision": 1.0,
+        "recall": 0.1667,
+        "f1": 0.2857,
+        "tp": 1,
+        "fp": 0,
+        "fn": 5
       },
       "infra": {
         "precision": 0.0,
@@ -178,6 +178,15 @@
         "fn": 0
       }
     }
+  },
+  "relation_agnostic": {
+    "_note": "diagnostic, not a quality score: subject+object matched, relation ignored. The gap to lenient F1 is the share of error that is edge labelling rather than a missed fact.",
+    "precision": 0.6957,
+    "recall": 0.25,
+    "f1": 0.3678,
+    "tp": 16,
+    "fp": 7,
+    "fn": 48
   },
   "over_extraction": {
     "empty_gold_notes": 23,

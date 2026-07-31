@@ -1,11 +1,11 @@
 {
   "strict": {
-    "precision": 0.5,
-    "recall": 0.5781,
-    "f1": 0.5362,
-    "tp": 37,
-    "fp": 37,
-    "fn": 27,
+    "precision": 0.5405,
+    "recall": 0.625,
+    "f1": 0.5797,
+    "tp": 40,
+    "fp": 34,
+    "fn": 24,
     "by_category": {
       "ambiguous": {
         "precision": 0.0,
@@ -32,12 +32,12 @@
         "fn": 3
       },
       "implicit": {
-        "precision": 0.2222,
-        "recall": 0.3333,
-        "f1": 0.2667,
-        "tp": 2,
-        "fp": 7,
-        "fn": 4
+        "precision": 0.3333,
+        "recall": 0.5,
+        "f1": 0.4,
+        "tp": 3,
+        "fp": 6,
+        "fn": 3
       },
       "infra": {
         "precision": 0.6667,
@@ -48,12 +48,12 @@
         "fn": 1
       },
       "multi_fact": {
-        "precision": 0.5714,
-        "recall": 0.5455,
-        "f1": 0.5581,
-        "tp": 12,
-        "fp": 9,
-        "fn": 10
+        "precision": 0.6667,
+        "recall": 0.6364,
+        "f1": 0.6512,
+        "tp": 14,
+        "fp": 7,
+        "fn": 8
       },
       "negation": {
         "precision": 0.1667,
@@ -90,12 +90,12 @@
     }
   },
   "lenient": {
-    "precision": 0.5,
-    "recall": 0.5781,
-    "f1": 0.5362,
-    "tp": 37,
-    "fp": 37,
-    "fn": 27,
+    "precision": 0.5405,
+    "recall": 0.625,
+    "f1": 0.5797,
+    "tp": 40,
+    "fp": 34,
+    "fn": 24,
     "by_category": {
       "ambiguous": {
         "precision": 0.0,
@@ -122,12 +122,12 @@
         "fn": 3
       },
       "implicit": {
-        "precision": 0.2222,
-        "recall": 0.3333,
-        "f1": 0.2667,
-        "tp": 2,
-        "fp": 7,
-        "fn": 4
+        "precision": 0.3333,
+        "recall": 0.5,
+        "f1": 0.4,
+        "tp": 3,
+        "fp": 6,
+        "fn": 3
       },
       "infra": {
         "precision": 0.6667,
@@ -138,12 +138,12 @@
         "fn": 1
       },
       "multi_fact": {
-        "precision": 0.5714,
-        "recall": 0.5455,
-        "f1": 0.5581,
-        "tp": 12,
-        "fp": 9,
-        "fn": 10
+        "precision": 0.6667,
+        "recall": 0.6364,
+        "f1": 0.6512,
+        "tp": 14,
+        "fp": 7,
+        "fn": 8
       },
       "negation": {
         "precision": 0.1667,
@@ -178,6 +178,15 @@
         "fn": 0
       }
     }
+  },
+  "relation_agnostic": {
+    "_note": "diagnostic, not a quality score: subject+object matched, relation ignored. The gap to lenient F1 is the share of error that is edge labelling rather than a missed fact.",
+    "precision": 0.6892,
+    "recall": 0.7969,
+    "f1": 0.7391,
+    "tp": 51,
+    "fp": 23,
+    "fn": 13
   },
   "over_extraction": {
     "empty_gold_notes": 23,

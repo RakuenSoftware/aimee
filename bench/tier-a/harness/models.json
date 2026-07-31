@@ -6,7 +6,10 @@
     {"id": "google/gemma-4-E2B-it",                   "params": "E2B (2.3B eff)", "licence": "apache-2.0", "class": "actionable", "note": "smallest official Gemma 4; same family as the incumbent"},
     {"id": "Qwen/Qwen3.5-0.8B",                       "params": "800M",           "licence": "apache-2.0", "class": "actionable", "note": "current sub-1B Qwen; Qwen3.6 ships no small variant"},
     {"id": "Qwen/Qwen3.5-2B",                         "params": "2B",             "licence": "apache-2.0", "class": "actionable", "note": "what the next size up buys"},
-    {"id": "ibm-granite/granite-4.0-350m",            "params": "350M",           "licence": "apache-2.0", "class": "actionable", "note": "current Granite; no Granite 5 exists"},
+    {"id": "ibm-granite/granite-4.1-3b",              "params": "3B",             "licence": "apache-2.0", "class": "actionable", "note": "newest Granite; 4.1's smallest member, IBM did not refresh the nano class"},
+    {"id": "ibm-granite/granite-4.0-1b",              "params": "1B",             "licence": "apache-2.0", "class": "actionable", "note": "non-hybrid; needs the KV-cache fallback"},
+    {"id": "ibm-granite/granite-4.0-h-1b",            "params": "1B",             "licence": "apache-2.0", "class": "actionable", "note": "hybrid-mamba 1B"},
+    {"id": "ibm-granite/granite-4.0-350m",            "params": "350M",           "licence": "apache-2.0", "class": "actionable", "note": "current Granite at this size; no 4.1/4.2 nano exists"},
     {"id": "ibm-granite/granite-4.0-h-350m",          "params": "350M",           "licence": "apache-2.0", "class": "actionable", "note": "hybrid-mamba variant"},
 
     {"id": "LiquidAI/LFM2.5-230M",                    "params": "230M",           "licence": "lfm1.0",     "class": "reference",  "note": "smallest candidate; $10M revenue ceiling"},

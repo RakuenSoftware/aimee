@@ -38,6 +38,21 @@ def seed_relations():
     return re.findall(r'^\s*\{"([a-z_]+)"', body, re.M)
 
 
+def symmetric_relations():
+    """Relations the ontology declares symmetric (is_symmetric, field 6 of
+    rel_type_def_t). For these the ontology states that one assertion implies
+    both directions, so scoring must accept either argument order — the C
+    comment is explicit: "one assertion implies both directions"."""
+    src = (REPO / "src" / "rel_types.c").read_text()
+    body = src[src.index("SEED_ONTOLOGY[] = {"):]
+    out = set()
+    for m in re.finditer(
+        r'\{"([a-z_]+)",\s*\{[^}]*\},\s*\d+,\s*\{[^}]*\},\s*\d+,\s*(\d+)', body):
+        if m.group(2) == "1":
+            out.add(m.group(1))
+    return out
+
+
 def system_prompt():
     return TEMPLATE % ", ".join(seed_relations())
 

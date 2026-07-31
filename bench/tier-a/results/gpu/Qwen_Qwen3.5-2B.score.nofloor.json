@@ -1,95 +1,5 @@
 {
   "strict": {
-    "precision": 0.2714,
-    "recall": 0.2969,
-    "f1": 0.2836,
-    "tp": 19,
-    "fp": 51,
-    "fn": 45,
-    "by_category": {
-      "ambiguous": {
-        "precision": 0.2,
-        "recall": 0.5,
-        "f1": 0.2857,
-        "tp": 1,
-        "fp": 4,
-        "fn": 1
-      },
-      "first_person": {
-        "precision": 0.875,
-        "recall": 0.875,
-        "f1": 0.875,
-        "tp": 7,
-        "fp": 1,
-        "fn": 1
-      },
-      "governance": {
-        "precision": 0.2,
-        "recall": 0.25,
-        "f1": 0.2222,
-        "tp": 1,
-        "fp": 4,
-        "fn": 3
-      },
-      "implicit": {
-        "precision": 0.2857,
-        "recall": 0.3333,
-        "f1": 0.3077,
-        "tp": 2,
-        "fp": 5,
-        "fn": 4
-      },
-      "infra": {
-        "precision": 0.1667,
-        "recall": 0.2,
-        "f1": 0.1818,
-        "tp": 1,
-        "fp": 5,
-        "fn": 4
-      },
-      "multi_fact": {
-        "precision": 0.25,
-        "recall": 0.0909,
-        "f1": 0.1333,
-        "tp": 2,
-        "fp": 6,
-        "fn": 20
-      },
-      "negation": {
-        "precision": 0.1667,
-        "recall": 0.5,
-        "f1": 0.25,
-        "tp": 1,
-        "fp": 5,
-        "fn": 1
-      },
-      "novel_pred": {
-        "precision": 0.3333,
-        "recall": 0.3333,
-        "f1": 0.3333,
-        "tp": 2,
-        "fp": 4,
-        "fn": 4
-      },
-      "third_person": {
-        "precision": 0.2857,
-        "recall": 0.2222,
-        "f1": 0.25,
-        "tp": 2,
-        "fp": 5,
-        "fn": 7
-      },
-      "transient": {
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "tp": 0,
-        "fp": 12,
-        "fn": 0
-      }
-    }
-  },
-  "lenient": {
     "precision": 0.2857,
     "recall": 0.3125,
     "f1": 0.2985,
@@ -178,6 +88,105 @@
         "fn": 0
       }
     }
+  },
+  "lenient": {
+    "precision": 0.3,
+    "recall": 0.3281,
+    "f1": 0.3134,
+    "tp": 21,
+    "fp": 49,
+    "fn": 43,
+    "by_category": {
+      "ambiguous": {
+        "precision": 0.2,
+        "recall": 0.5,
+        "f1": 0.2857,
+        "tp": 1,
+        "fp": 4,
+        "fn": 1
+      },
+      "first_person": {
+        "precision": 0.875,
+        "recall": 0.875,
+        "f1": 0.875,
+        "tp": 7,
+        "fp": 1,
+        "fn": 1
+      },
+      "governance": {
+        "precision": 0.2,
+        "recall": 0.25,
+        "f1": 0.2222,
+        "tp": 1,
+        "fp": 4,
+        "fn": 3
+      },
+      "implicit": {
+        "precision": 0.2857,
+        "recall": 0.3333,
+        "f1": 0.3077,
+        "tp": 2,
+        "fp": 5,
+        "fn": 4
+      },
+      "infra": {
+        "precision": 0.1667,
+        "recall": 0.2,
+        "f1": 0.1818,
+        "tp": 1,
+        "fp": 5,
+        "fn": 4
+      },
+      "multi_fact": {
+        "precision": 0.5,
+        "recall": 0.1818,
+        "f1": 0.2667,
+        "tp": 4,
+        "fp": 4,
+        "fn": 18
+      },
+      "negation": {
+        "precision": 0.1667,
+        "recall": 0.5,
+        "f1": 0.25,
+        "tp": 1,
+        "fp": 5,
+        "fn": 1
+      },
+      "novel_pred": {
+        "precision": 0.3333,
+        "recall": 0.3333,
+        "f1": 0.3333,
+        "tp": 2,
+        "fp": 4,
+        "fn": 4
+      },
+      "third_person": {
+        "precision": 0.2857,
+        "recall": 0.2222,
+        "f1": 0.25,
+        "tp": 2,
+        "fp": 5,
+        "fn": 7
+      },
+      "transient": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "tp": 0,
+        "fp": 12,
+        "fn": 0
+      }
+    }
+  },
+  "relation_agnostic": {
+    "_note": "diagnostic, not a quality score: subject+object matched, relation ignored. The gap to lenient F1 is the share of error that is edge labelling rather than a missed fact.",
+    "precision": 0.3857,
+    "recall": 0.4219,
+    "f1": 0.403,
+    "tp": 27,
+    "fp": 43,
+    "fn": 37
   },
   "over_extraction": {
     "empty_gold_notes": 23,

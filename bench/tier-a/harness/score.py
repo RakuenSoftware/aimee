@@ -19,12 +19,23 @@ import prompt
 
 ARTICLES = {"the", "a", "an"}
 
+# Models emit ages and counts as words as readily as digits ("Nina is seven").
+# The ontology stores a scalar either way, so treating them as different answers
+# measures spelling, not extraction.
+NUMBER_WORDS = {
+    "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
+    "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
+    "eleven": "11", "twelve": "12",
+}
+
 
 def norm(s):
     if s is None:
         return ""
     s = str(s).casefold().strip()
     s = re.sub(r"\s+", " ", s)
+    if s in NUMBER_WORDS:
+        return NUMBER_WORDS[s]
     # Strip edge punctuation but preserve internal dots/colons so IPs and
     # hostnames survive intact.
     s = re.sub(r"^[^\w]+|[^\w]+$", "", s)
@@ -51,15 +62,44 @@ def obj_match(pred, gold, lenient):
     return lenient and tok_f1(pred, gold) >= 0.6
 
 
-def match_note(preds, golds, lenient):
-    """Greedy 1-1 match. Returns (tp, matched_pred_idx)."""
+SYMMETRIC = None  # populated from the ontology in main()
+
+
+def triple_eq(p, g, lenient):
+    if p["relation"] != g["relation"]:
+        return False
+    if p["subject"] == g["subject"] and obj_match(p["object"], g["object"], lenient):
+        return True
+    # The ontology declares some relations symmetric ("one assertion implies both
+    # directions"), so the argument order carries no information for them and
+    # penalising a swap would measure nothing real.
+    if g["relation"] in (SYMMETRIC or ()):
+        return p["subject"] == g["object"] and obj_match(p["object"], g["subject"], lenient)
+    return False
+
+
+def match_note(preds, golds, lenient, ignore_relation=False):
+    """Greedy 1-1 match. Returns (tp, matched_pred_idx).
+
+    ignore_relation credits a pair on subject and object alone. That is not a
+    quality metric — it is a diagnostic that separates "did not find the fact"
+    from "found it and labelled the edge differently". The two failures have
+    completely different fixes: the first needs a better model, the second is
+    what the rel_types reconciliation gate already exists to absorb.
+    """
     used, tp = set(), 0
     for g in golds:
         for i, p in enumerate(preds):
             if i in used:
                 continue
-            if p["subject"] == g["subject"] and p["relation"] == g["relation"] \
-               and obj_match(p["object"], g["object"], lenient):
+            if ignore_relation:
+                ok = (p["subject"] == g["subject"]
+                      and obj_match(p["object"], g["object"], lenient)) or \
+                     (p["subject"] == g["object"]
+                      and obj_match(p["object"], g["subject"], lenient))
+            else:
+                ok = triple_eq(p, g, lenient)
+            if ok:
                 used.add(i)
                 tp += 1
                 break
@@ -106,6 +146,17 @@ def main():
     pmeta = {r["id"]: r for r in pred_rows}
 
     seed = set(prompt.seed_relations())
+    global SYMMETRIC
+    SYMMETRIC = prompt.symmetric_relations()
+
+    # Diagnostic: how much of the error is edge-labelling rather than a missed
+    # fact? Scored on the lenient object rule, relation ignored.
+    TPr = FPr = FNr = 0
+    for nid, g in gold.items():
+        p = pred.get(nid, [])
+        tp, used = match_note(p, g, True, ignore_relation=True)
+        TPr, FPr, FNr = TPr + tp, FPr + (len(p) - len(used)), FNr + (len(g) - tp)
+    Pr, Rr, Fr = prf(TPr, FPr, FNr)
 
     report = {}
     for mode in ("strict", "lenient"):
@@ -128,6 +179,14 @@ def main():
                                     tp=v[0], fp=v[1], fn=v[2])
                             for k, v in sorted(by_cat.items())},
         }
+
+    report["relation_agnostic"] = {
+        "_note": "diagnostic, not a quality score: subject+object matched, relation "
+                 "ignored. The gap to lenient F1 is the share of error that is edge "
+                 "labelling rather than a missed fact.",
+        "precision": round(Pr, 4), "recall": round(Rr, 4), "f1": round(Fr, 4),
+        "tp": TPr, "fp": FPr, "fn": FNr,
+    }
 
     # Over-extraction: notes whose gold is the empty list. Any triple here is a
     # false positive that the write gate would then have to catch.
