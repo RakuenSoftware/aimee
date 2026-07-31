@@ -83,7 +83,7 @@ int64_t kb_curator_entity_point_id(const char *artifact_id)
  * A judge error is treated as "not the same" (create), so a flaky sidecar can
  * only over-create, never collapse distinct entities. */
 static int resolve_try_match(const char *scope_kind, const char *scope_id, const float *vec,
-                             int dim, const char *name, const char *context, const config_t *cfg)
+                             int dim, const char *name, const char *context)
 {
    int64_t match_ids[1];
    double match_scores[1];
@@ -101,9 +101,13 @@ static int resolve_try_match(const char *scope_kind, const char *scope_id, const
    /* Judge the ambiguous band when there's somewhere to send it: a configured
     * Tier-B provider (§2) or the legacy judge sidecar command. The score check is
     * first so the provider lookup runs only for an actual ambiguous-band match. */
+   /* Copied out: passed to kb_curator_judge_same_entity, which runs the sidecar
+    * or a provider round trip. */
+   char judge_command[sizeof(((config_t *)0)->kb_curator_judge_command)];
+   snprintf(judge_command, sizeof(judge_command), "%s", config_kb_curator_judge_command());
    provider_def_owned_t judge_provider;
    if (match_scores[0] >= CURATOR_ENTITY_JUDGE_LOW &&
-       (cfg->kb_curator_judge_command[0] ||
+       (judge_command[0] ||
         kb_curator_provider_for_stage(KB_CURATOR_STAGE_JUDGE, &judge_provider)))
    {
       char cand_name[256];
@@ -113,8 +117,8 @@ static int resolve_try_match(const char *scope_kind, const char *scope_id, const
          char jerr[256];
          db2_lease_release_idle();
          int jrc =
-             kb_curator_judge_same_entity(cfg, cfg->kb_curator_judge_command, name, context,
-                                          cand_name, match_scores[0], &same, jerr, sizeof(jerr));
+             kb_curator_judge_same_entity(judge_command, name, context, cand_name,
+                                          match_scores[0], &same, jerr, sizeof(jerr));
          if (jrc == 0 && same)
          {
             aimee_log(LOG_INFO, "kb.curator.resolve",
@@ -220,7 +224,7 @@ int kb_curator_resolve_entities_one(const kb_curator_extract_opts_t *opts)
        * workspace/global entity resolves onto it instead of creating a
        * near-duplicate. The searches run before the upsert, so they only see
        * previously-committed entities. */
-      int merged = resolve_try_match(scope_kind, scope_id, vec, dim, name, context, &cfg);
+      int merged = resolve_try_match(scope_kind, scope_id, vec, dim, name, context);
       if (merged == 0)
       {
          void *conn = db2_conn();
@@ -230,7 +234,7 @@ int kb_curator_resolve_entities_one(const kb_curator_extract_opts_t *opts)
          while (merged == 0 && conn &&
                 kb_curator_broaden_scope(conn, ck, cid, wk, sizeof(wk), wid, sizeof(wid)))
          {
-            merged = resolve_try_match(wk, wid, vec, dim, name, context, &cfg);
+            merged = resolve_try_match(wk, wid, vec, dim, name, context);
             snprintf(ck, sizeof(ck), "%s", wk);
             snprintf(cid, sizeof(cid), "%s", wid);
          }

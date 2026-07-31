@@ -13,7 +13,7 @@ static void test_no_command(void)
    /* Empty command -> error, *out_same untouched. */
    int same = 42;
    char err[256];
-   int rc = kb_curator_judge_same_entity(NULL, "", "Acme", "ctx", "Acme Corp", 0.78, &same, err,
+   int rc = kb_curator_judge_same_entity("", "Acme", "ctx", "Acme Corp", 0.78, &same, err,
                                          sizeof(err));
    assert(rc == -1);
    assert(same == 42); /* left untouched */
@@ -25,7 +25,7 @@ static void test_same_true(void)
    int same = -1;
    char err[256];
    /* The sidecar ignores stdin and emits the canonical affirmative response. */
-   int rc = kb_curator_judge_same_entity(NULL, "printf '{\"same_entity\": true}'", "Acme",
+   int rc = kb_curator_judge_same_entity("printf '{\"same_entity\": true}'", "Acme",
                                          "the vendor", "Acme Corp", 0.80, &same, err, sizeof(err));
    assert(rc == 0);
    assert(same == 1);
@@ -36,7 +36,7 @@ static void test_same_false(void)
 {
    int same = -1;
    char err[256];
-   int rc = kb_curator_judge_same_entity(NULL, "printf '{\"same_entity\": false}'", "Apple",
+   int rc = kb_curator_judge_same_entity("printf '{\"same_entity\": false}'", "Apple",
                                          "the fruit", "Apple Inc", 0.72, &same, err, sizeof(err));
    assert(rc == 0);
    assert(same == 0);
@@ -48,8 +48,7 @@ static void test_prose_wrapped(void)
    /* A chatty model may prefix prose before the JSON object; we scan to '{'. */
    int same = -1;
    char err[256];
-   int rc = kb_curator_judge_same_entity(
-       NULL, "printf 'Sure! Here is my verdict:\\n{\"same_entity\": true}\\n'", "K8s",
+   int rc = kb_curator_judge_same_entity("printf 'Sure! Here is my verdict:\\n{\"same_entity\": true}\\n'", "K8s",
        "orchestrator", "Kubernetes", 0.83, &same, err, sizeof(err));
    assert(rc == 0);
    assert(same == 1);
@@ -60,7 +59,7 @@ static void test_garbage_output(void)
 {
    int same = 7;
    char err[256];
-   int rc = kb_curator_judge_same_entity(NULL, "echo not-json-at-all", "x", "", "y", 0.75, &same,
+   int rc = kb_curator_judge_same_entity("echo not-json-at-all", "x", "", "y", 0.75, &same,
                                          err, sizeof(err));
    assert(rc == -1);
    assert(same == 7);
@@ -72,7 +71,7 @@ static void test_nonzero_exit(void)
    int same = 9;
    char err[256];
    int rc =
-       kb_curator_judge_same_entity(NULL, "false", "x", "", "y", 0.75, &same, err, sizeof(err));
+       kb_curator_judge_same_entity("false", "x", "", "y", 0.75, &same, err, sizeof(err));
    assert(rc == -1);
    assert(same == 9);
    printf("  non-zero exit -> error OK\n");

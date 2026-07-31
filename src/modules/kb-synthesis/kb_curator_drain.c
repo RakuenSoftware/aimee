@@ -787,14 +787,7 @@ static void *drain_thread_main(void *arg)
        * typed_facts_enabled (a no-op when off). */
       if (config_typed_facts_enabled())
       {
-         /* The last config_t in this file. kb_memory_facts_drain hands it to
-          * kb_curator_llm_run -> kb_curator_provider_for_stage, which cannot take
-          * accessors until provider_def_t owns its strings (see
-          * docs/proposals/pending/config-t-encapsulation.md). Scoped to this call
-          * so the ~750 KB frame exists only while that branch runs. */
-         config_t cfg;
-         config_load(&cfg);
-         int n = kb_memory_facts_drain(&cfg, 8);
+         int n = kb_memory_facts_drain(8);
          if (n > 0)
             aimee_log(LOG_DEBUG, "kb.memory.facts", "drained %d memory_facts job(s)", n);
 

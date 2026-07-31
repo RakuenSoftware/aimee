@@ -126,6 +126,17 @@ int config_load(config_t *c)
    memset(c, 0, sizeof(*c));
    return 0;
 }
+/* run_engine reads these two directly now. Empty is what the zeroed struct gave
+ * it, and both engines are skipped as unconfigured -- the duckduckgo path this
+ * suite drives is unaffected. */
+const char *config_search_tavily_api_key(void)
+{
+   return "";
+}
+const char *config_search_searxng_url(void)
+{
+   return "";
+}
 int config_retry_max_attempts(void)
 {
    return 0;

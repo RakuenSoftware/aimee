@@ -426,14 +426,7 @@ int handle_api_disable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)req;
 
    pthread_mutex_lock(&g_api_bearer_mutation_lock);
-   config_t cfg;
-   if (config_load_file(&cfg) != 0)
-   {
-      pthread_mutex_unlock(&g_api_bearer_mutation_lock);
-      return handle_api_error(conn, "failed to load aimee.api config");
-   }
-   cfg.server_api_http_port = 0;
-   if (config_save(&cfg) != 0)
+   if (config_disable_api_http_listener() != 0)
    {
       pthread_mutex_unlock(&g_api_bearer_mutation_lock);
       return handle_api_error(conn, "failed to persist aimee.api config");

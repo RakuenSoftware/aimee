@@ -1733,6 +1733,30 @@ int config_workspace_remove(const char *path)
    return rc;
 }
 
+/* Disable the /v1 HTTP listener and persist, reading the FILE rather than the
+ * live snapshot.
+ *
+ * The generated config_set_server_api_http_port() would work everywhere else,
+ * but it goes through config_load, which in the SERVER returns the published
+ * snapshot. This runs inside aimee-server under the bearer-mutation lock, and
+ * writing back a snapshot would discard anything written to aimee.yaml since the
+ * last publish. Reading the file keeps the read-modify-write over the same thing
+ * config_save is about to overwrite. */
+int config_disable_api_http_listener(void)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load_file(cfg);
+   if (rc == 0)
+   {
+      cfg->server_api_http_port = 0;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
 /* Materialise the config file: load (defaults when absent) and write it back.
  * Idempotent, and the one thing `aimee init` / `aimee setup` actually wanted
  * from their load-then-save round trip. */

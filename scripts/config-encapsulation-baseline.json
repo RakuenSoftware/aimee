@@ -53,14 +53,6 @@
       "decls": 3,
       "loads": 0
     },
-    "src/kb/kb_memory_facts.c": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/kb/kb_memory_facts.h": {
-      "decls": 1,
-      "loads": 0
-    },
     "src/kb/kb_reasoning.c": {
       "decls": 1,
       "loads": 0
@@ -85,21 +77,9 @@
       "decls": 2,
       "loads": 0
     },
-    "src/modules/kb-synthesis/kb_curator_drain.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/modules/kb-synthesis/kb_curator_extract.c": {
       "decls": 1,
       "loads": 1
-    },
-    "src/modules/kb-synthesis/kb_curator_judge.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/modules/kb-synthesis/kb_curator_judge.h": {
-      "decls": 1,
-      "loads": 0
     },
     "src/modules/kb-synthesis/kb_curator_resolve_entities.c": {
       "decls": 2,
@@ -157,10 +137,6 @@
       "decls": 1,
       "loads": 0
     },
-    "src/server/server_api_status.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/server/server_mcp.c": {
       "decls": 2,
       "loads": 2
@@ -174,7 +150,7 @@
       "loads": 1
     },
     "src/server/web_search.c": {
-      "decls": 2,
+      "decls": 3,
       "loads": 1
     },
     "src/tests/fuzz_corpus/seed.c": {
@@ -278,10 +254,6 @@
       "loads": 1
     },
     "src/tests/test_curator_queue.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/tests/test_curator_resolve_entities.c": {
       "decls": 1,
       "loads": 0
     },
@@ -407,8 +379,8 @@
     }
   },
   "totals": {
-    "decls": 324,
-    "files": 101,
-    "loads": 181
+    "decls": 317,
+    "files": 94,
+    "loads": 179
   }
 }

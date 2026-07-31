@@ -1247,6 +1247,16 @@ int config_present(void)
    return 1;
 }
 
+/* api.disable persists through this now instead of load_file/save here. The
+ * stateful mode's disk copy is what it would write, so mirror the port change
+ * onto it; non-stateful is a no-op success, matching the config_save stub. */
+int config_disable_api_http_listener(void)
+{
+   if (g_config_stateful)
+      g_config_disk.server_api_http_port = 0;
+   return 0;
+}
+
 /* The generated accessors read every field through this. Serve them out of the
  * SAME in-memory config the config_load stub returns, so an accessor and a
  * config_load observed in one test can never disagree. Non-stateful mode zeroes,

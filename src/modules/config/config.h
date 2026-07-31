@@ -2370,6 +2370,10 @@ int config_workspace_remove(const char *path);
  * exist yet. Idempotent. */
 int config_persist_defaults(void);
 
+/* Disable the /v1 HTTP listener and persist. Reads the FILE, not the snapshot --
+ * see config_save.c for why this one cannot use the generated setter. */
+int config_disable_api_http_listener(void);
+
 /* The ensemble/roundtable settings a preset applies, as plain data this module
  * owns. The caller fills it from whatever its own preset format is; config never
  * learns that format, and this is one persisted write rather than ~16. Widths

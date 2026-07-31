@@ -307,7 +307,7 @@ static int mf_commit_facts(const char *llm_json)
    return committed;
 }
 
-static int mf_process_one(const config_t *cfg, const mf_job_t *job)
+static int mf_process_one(const mf_job_t *job)
 {
    memory_t mem;
    memset(&mem, 0, sizeof(mem));
@@ -360,9 +360,9 @@ static int mf_process_one(const config_t *cfg, const mf_job_t *job)
    return n;
 }
 
-int kb_memory_facts_drain(const config_t *cfg, int batch)
+int kb_memory_facts_drain(int batch)
 {
-   if (!cfg || !config_typed_facts_enabled() || batch <= 0)
+   if (!config_typed_facts_enabled() || batch <= 0)
       return 0;
    if (!db2_conn())
       return 0;
@@ -378,7 +378,7 @@ int kb_memory_facts_drain(const config_t *cfg, int batch)
       memset(&job, 0, sizeof(job));
       if (!mf_claim_job(&job))
          break;
-      (void)mf_process_one(cfg, &job);
+      (void)mf_process_one(&job);
       processed++;
    }
    return processed;
