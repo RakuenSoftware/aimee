@@ -265,7 +265,7 @@ rather than grinding leaves:
   (11 -> 1), `workspace.c`, `prompts.c`, the memory maintenance runner, and a 15-file
   automated sweep.
 
-`scratchpad/convert_cfg.py` does the safe shape and REFUSES the rest — missing accessor,
+`scripts/config-convert-locals.py` does the safe shape and REFUSES the rest — missing accessor,
 `(void)X;` in an `#ifdef`, `config_load` used as a guard, or the local's address escaping.
 Its first escape rule matched only `func(&X` (first argument position), so
 `agent_route_with_caps_scoped(&acfg, role, &route_cfg, ...)` slipped through and it deleted
