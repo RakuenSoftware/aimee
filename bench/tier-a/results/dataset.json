@@ -1,0 +1,2894 @@
+{
+  "HuggingFaceTB/SmolLM2-360M-Instruct": {
+    "production": {
+      "summary": {
+        "model": "HuggingFaceTB/SmolLM2-360M-Instruct",
+        "condition": "production",
+        "params": "360M",
+        "licence": "apache-2.0",
+        "class": "superseded",
+        "f1_production": 0.0,
+        "f1_no_floor": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1_strict": 0.0,
+        "schema_rate": 0.0,
+        "json_parse_rate": 1.0,
+        "in_seed_ontology": null,
+        "abstention_on_factless": null,
+        "spurious_triples": 0,
+        "dropped_by_conf_floor": 0,
+        "median_latency_ms_gpu": 259.6,
+        "median_completion_tokens": 20,
+        "notes_scored": 70,
+        "cpu_prompt_tok_s": 196.6,
+        "cpu_gen_tok_s": 21.2,
+        "cpu_est_ms_per_note": 4304
+      },
+      "by_category": {
+        "ambiguous": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 2
+        },
+        "first_person": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 8
+        },
+        "governance": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 4
+        },
+        "implicit": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 6
+        },
+        "infra": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 5
+        },
+        "multi_fact": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 22
+        },
+        "negation": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 2
+        },
+        "novel_pred": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 6
+        },
+        "third_person": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 9
+        },
+        "transient": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 0
+        }
+      }
+    }
+  },
+  "LiquidAI/LFM2-350M-Extract": {
+    "production": {
+      "summary": {
+        "model": "LiquidAI/LFM2-350M-Extract",
+        "condition": "production",
+        "params": "350M",
+        "licence": "lfm1.0",
+        "class": "reference",
+        "f1_production": 0.0,
+        "f1_no_floor": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1_strict": 0.0,
+        "schema_rate": 0.1429,
+        "json_parse_rate": 0.1429,
+        "in_seed_ontology": 0.0,
+        "abstention_on_factless": 0.75,
+        "spurious_triples": 4,
+        "dropped_by_conf_floor": 3,
+        "median_latency_ms_gpu": 3384.3,
+        "median_completion_tokens": 512,
+        "notes_scored": 70,
+        "cpu_prompt_tok_s": 269.9,
+        "cpu_gen_tok_s": 36.2,
+        "cpu_est_ms_per_note": 2806
+      },
+      "by_category": {
+        "ambiguous": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 2
+        },
+        "first_person": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 8
+        },
+        "governance": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 4
+        },
+        "implicit": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 6
+        },
+        "infra": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 5
+        },
+        "multi_fact": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 4,
+          "fn": 22
+        },
+        "negation": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 4,
+          "fn": 2
+        },
+        "novel_pred": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 6
+        },
+        "third_person": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 4,
+          "fn": 9
+        },
+        "transient": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 4,
+          "fn": 0
+        }
+      }
+    },
+    "ablation_conf": {
+      "summary": {
+        "model": "LiquidAI/LFM2-350M-Extract",
+        "condition": "ablation_conf",
+        "params": "350M",
+        "licence": "lfm1.0",
+        "class": "reference",
+        "f1_production": 0.0,
+        "f1_no_floor": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1_strict": 0.0,
+        "schema_rate": 0.1286,
+        "json_parse_rate": 0.1286,
+        "in_seed_ontology": 0.0,
+        "abstention_on_factless": 0.3333,
+        "spurious_triples": 2,
+        "dropped_by_conf_floor": 0,
+        "median_latency_ms_gpu": 3351.9,
+        "median_completion_tokens": 512,
+        "notes_scored": 70
+      },
+      "by_category": {
+        "ambiguous": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 2
+        },
+        "first_person": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 8
+        },
+        "governance": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 4
+        },
+        "implicit": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 6
+        },
+        "infra": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 1,
+          "fn": 5
+        },
+        "multi_fact": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 4,
+          "fn": 22
+        },
+        "negation": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 2
+        },
+        "novel_pred": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 6
+        },
+        "third_person": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 1,
+          "fn": 9
+        },
+        "transient": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 1,
+          "fn": 0
+        }
+      }
+    }
+  },
+  "LiquidAI/LFM2.5-230M": {
+    "production": {
+      "summary": {
+        "model": "LiquidAI/LFM2.5-230M",
+        "condition": "production",
+        "params": "230M",
+        "licence": "lfm1.0",
+        "class": "reference",
+        "f1_production": 0.0,
+        "f1_no_floor": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1_strict": 0.0,
+        "schema_rate": 0.6571,
+        "json_parse_rate": 0.6571,
+        "in_seed_ontology": null,
+        "abstention_on_factless": 1.0,
+        "spurious_triples": 0,
+        "dropped_by_conf_floor": 12,
+        "median_latency_ms_gpu": 298.1,
+        "median_completion_tokens": 43,
+        "notes_scored": 70,
+        "cpu_prompt_tok_s": 402.0,
+        "cpu_gen_tok_s": 38.8,
+        "cpu_est_ms_per_note": 2233
+      },
+      "by_category": {
+        "ambiguous": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 2
+        },
+        "first_person": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 8
+        },
+        "governance": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 4
+        },
+        "implicit": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 6
+        },
+        "infra": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 5
+        },
+        "multi_fact": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 22
+        },
+        "negation": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 2
+        },
+        "novel_pred": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 6
+        },
+        "third_person": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 9
+        },
+        "transient": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 0
+        }
+      }
+    }
+  },
+  "Qwen/Qwen3-0.6B": {
+    "production": {
+      "summary": {
+        "model": "Qwen/Qwen3-0.6B",
+        "condition": "production",
+        "params": "600M",
+        "licence": "apache-2.0",
+        "class": "superseded",
+        "f1_production": 0.0,
+        "f1_no_floor": 0.2774,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1_strict": 0.0,
+        "schema_rate": 0.9714,
+        "json_parse_rate": 0.9857,
+        "in_seed_ontology": null,
+        "abstention_on_factless": 1.0,
+        "spurious_triples": 0,
+        "dropped_by_conf_floor": 73,
+        "median_latency_ms_gpu": 359.2,
+        "median_completion_tokens": 30,
+        "notes_scored": 70,
+        "cpu_prompt_tok_s": 136.1,
+        "cpu_gen_tok_s": 15.2,
+        "cpu_est_ms_per_note": 6095
+      },
+      "by_category": {
+        "ambiguous": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 2
+        },
+        "first_person": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 8
+        },
+        "governance": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 4
+        },
+        "implicit": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 6
+        },
+        "infra": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 5
+        },
+        "multi_fact": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 22
+        },
+        "negation": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 2
+        },
+        "novel_pred": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 6
+        },
+        "third_person": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 9
+        },
+        "transient": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 0
+        }
+      }
+    },
+    "ablation_conf": {
+      "summary": {
+        "model": "Qwen/Qwen3-0.6B",
+        "condition": "ablation_conf",
+        "params": "600M",
+        "licence": "apache-2.0",
+        "class": "superseded",
+        "f1_production": 0.2794,
+        "f1_no_floor": 0.2857,
+        "precision": 0.2639,
+        "recall": 0.2969,
+        "f1_strict": 0.2794,
+        "schema_rate": 0.9857,
+        "json_parse_rate": 0.9857,
+        "in_seed_ontology": 0.5139,
+        "abstention_on_factless": 0.087,
+        "spurious_triples": 21,
+        "dropped_by_conf_floor": 4,
+        "median_latency_ms_gpu": 468.1,
+        "median_completion_tokens": 30,
+        "notes_scored": 70
+      },
+      "by_category": {
+        "ambiguous": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 5,
+          "fn": 2
+        },
+        "first_person": {
+          "precision": 0.5,
+          "recall": 0.5,
+          "f1": 0.5,
+          "tp": 4,
+          "fp": 4,
+          "fn": 4
+        },
+        "governance": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 3,
+          "fn": 4
+        },
+        "implicit": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 7,
+          "fn": 6
+        },
+        "infra": {
+          "precision": 0.1429,
+          "recall": 0.2,
+          "f1": 0.1667,
+          "tp": 1,
+          "fp": 6,
+          "fn": 4
+        },
+        "multi_fact": {
+          "precision": 0.4286,
+          "recall": 0.2727,
+          "f1": 0.3333,
+          "tp": 6,
+          "fp": 8,
+          "fn": 16
+        },
+        "negation": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 5,
+          "fn": 2
+        },
+        "novel_pred": {
+          "precision": 0.4,
+          "recall": 0.3333,
+          "f1": 0.3636,
+          "tp": 2,
+          "fp": 3,
+          "fn": 4
+        },
+        "third_person": {
+          "precision": 0.8571,
+          "recall": 0.6667,
+          "f1": 0.75,
+          "tp": 6,
+          "fp": 1,
+          "fn": 3
+        },
+        "transient": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 11,
+          "fn": 0
+        }
+      }
+    }
+  },
+  "Qwen/Qwen3-1.7B": {
+    "production": {
+      "summary": {
+        "model": "Qwen/Qwen3-1.7B",
+        "condition": "production",
+        "params": "1.7B",
+        "licence": "apache-2.0",
+        "class": "superseded",
+        "f1_production": 0.2529,
+        "f1_no_floor": 0.4211,
+        "precision": 0.4783,
+        "recall": 0.1719,
+        "f1_strict": 0.2529,
+        "schema_rate": 0.9857,
+        "json_parse_rate": 0.9857,
+        "in_seed_ontology": 0.7391,
+        "abstention_on_factless": 0.9545,
+        "spurious_triples": 1,
+        "dropped_by_conf_floor": 46,
+        "median_latency_ms_gpu": 433.0,
+        "median_completion_tokens": 33,
+        "notes_scored": 70,
+        "cpu_prompt_tok_s": 53.5,
+        "cpu_gen_tok_s": 10.4,
+        "cpu_est_ms_per_note": 12088
+      },
+      "by_category": {
+        "ambiguous": {
+          "precision": 0.5,
+          "recall": 0.5,
+          "f1": 0.5,
+          "tp": 1,
+          "fp": 1,
+          "fn": 1
+        },
+        "first_person": {
+          "precision": 0.6667,
+          "recall": 0.25,
+          "f1": 0.3636,
+          "tp": 2,
+          "fp": 1,
+          "fn": 6
+        },
+        "governance": {
+          "precision": 0.6667,
+          "recall": 0.5,
+          "f1": 0.5714,
+          "tp": 2,
+          "fp": 1,
+          "fn": 2
+        },
+        "implicit": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 1,
+          "fn": 6
+        },
+        "infra": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 3,
+          "fn": 5
+        },
+        "multi_fact": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 2,
+          "fn": 22
+        },
+        "negation": {
+          "precision": 0.5,
+          "recall": 0.5,
+          "f1": 0.5,
+          "tp": 1,
+          "fp": 1,
+          "fn": 1
+        },
+        "novel_pred": {
+          "precision": 0.3333,
+          "recall": 0.1667,
+          "f1": 0.2222,
+          "tp": 1,
+          "fp": 2,
+          "fn": 5
+        },
+        "third_person": {
+          "precision": 1.0,
+          "recall": 0.4444,
+          "f1": 0.6154,
+          "tp": 4,
+          "fp": 0,
+          "fn": 5
+        },
+        "transient": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 0
+        }
+      }
+    },
+    "ablation_conf": {
+      "summary": {
+        "model": "Qwen/Qwen3-1.7B",
+        "condition": "ablation_conf",
+        "params": "1.7B",
+        "licence": "apache-2.0",
+        "class": "superseded",
+        "f1_production": 0.3571,
+        "f1_no_floor": 0.3776,
+        "precision": 0.4167,
+        "recall": 0.3125,
+        "f1_strict": 0.3571,
+        "schema_rate": 1.0,
+        "json_parse_rate": 1.0,
+        "in_seed_ontology": 0.8125,
+        "abstention_on_factless": 0.8261,
+        "spurious_triples": 5,
+        "dropped_by_conf_floor": 31,
+        "median_latency_ms_gpu": 437.7,
+        "median_completion_tokens": 35,
+        "notes_scored": 70
+      },
+      "by_category": {
+        "ambiguous": {
+          "precision": 0.25,
+          "recall": 0.5,
+          "f1": 0.3333,
+          "tp": 1,
+          "fp": 3,
+          "fn": 1
+        },
+        "first_person": {
+          "precision": 1.0,
+          "recall": 0.5,
+          "f1": 0.6667,
+          "tp": 4,
+          "fp": 0,
+          "fn": 4
+        },
+        "governance": {
+          "precision": 0.6667,
+          "recall": 0.5,
+          "f1": 0.5714,
+          "tp": 2,
+          "fp": 1,
+          "fn": 2
+        },
+        "implicit": {
+          "precision": 0.3333,
+          "recall": 0.3333,
+          "f1": 0.3333,
+          "tp": 2,
+          "fp": 4,
+          "fn": 4
+        },
+        "infra": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 6,
+          "fn": 5
+        },
+        "multi_fact": {
+          "precision": 0.2857,
+          "recall": 0.1818,
+          "f1": 0.2222,
+          "tp": 4,
+          "fp": 10,
+          "fn": 18
+        },
+        "negation": {
+          "precision": 0.3333,
+          "recall": 0.5,
+          "f1": 0.4,
+          "tp": 1,
+          "fp": 2,
+          "fn": 1
+        },
+        "novel_pred": {
+          "precision": 0.3333,
+          "recall": 0.1667,
+          "f1": 0.2222,
+          "tp": 1,
+          "fp": 2,
+          "fn": 5
+        },
+        "third_person": {
+          "precision": 1.0,
+          "recall": 0.5556,
+          "f1": 0.7143,
+          "tp": 5,
+          "fp": 0,
+          "fn": 4
+        },
+        "transient": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 0
+        }
+      }
+    }
+  },
+  "Qwen/Qwen3.5-0.8B": {
+    "production": {
+      "summary": {
+        "model": "Qwen/Qwen3.5-0.8B",
+        "condition": "production",
+        "params": "800M",
+        "licence": "apache-2.0",
+        "class": "actionable",
+        "f1_production": 0.3232,
+        "f1_no_floor": 0.3259,
+        "precision": 0.4571,
+        "recall": 0.25,
+        "f1_strict": 0.3232,
+        "schema_rate": 1.0,
+        "json_parse_rate": 1.0,
+        "in_seed_ontology": 0.6571,
+        "abstention_on_factless": 0.7391,
+        "spurious_triples": 6,
+        "dropped_by_conf_floor": 36,
+        "median_latency_ms_gpu": 552.3,
+        "median_completion_tokens": 26,
+        "notes_scored": 70
+      },
+      "by_category": {
+        "ambiguous": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 3,
+          "fn": 2
+        },
+        "first_person": {
+          "precision": 0.7143,
+          "recall": 0.625,
+          "f1": 0.6667,
+          "tp": 5,
+          "fp": 2,
+          "fn": 3
+        },
+        "governance": {
+          "precision": 1.0,
+          "recall": 0.25,
+          "f1": 0.4,
+          "tp": 1,
+          "fp": 0,
+          "fn": 3
+        },
+        "implicit": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 4,
+          "fn": 6
+        },
+        "infra": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 4,
+          "fn": 5
+        },
+        "multi_fact": {
+          "precision": 1.0,
+          "recall": 0.2727,
+          "f1": 0.4286,
+          "tp": 6,
+          "fp": 0,
+          "fn": 16
+        },
+        "negation": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 3,
+          "fn": 2
+        },
+        "novel_pred": {
+          "precision": 1.0,
+          "recall": 0.1667,
+          "f1": 0.2857,
+          "tp": 1,
+          "fp": 0,
+          "fn": 5
+        },
+        "third_person": {
+          "precision": 0.75,
+          "recall": 0.3333,
+          "f1": 0.4615,
+          "tp": 3,
+          "fp": 1,
+          "fn": 6
+        },
+        "transient": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 2,
+          "fn": 0
+        }
+      }
+    },
+    "ablation_conf": {
+      "summary": {
+        "model": "Qwen/Qwen3.5-0.8B",
+        "condition": "ablation_conf",
+        "params": "800M",
+        "licence": "apache-2.0",
+        "class": "actionable",
+        "f1_production": 0.3495,
+        "f1_no_floor": 0.3382,
+        "precision": 0.4615,
+        "recall": 0.2812,
+        "f1_strict": 0.3495,
+        "schema_rate": 1.0,
+        "json_parse_rate": 1.0,
+        "in_seed_ontology": 0.6667,
+        "abstention_on_factless": 0.6087,
+        "spurious_triples": 9,
+        "dropped_by_conf_floor": 33,
+        "median_latency_ms_gpu": 487.4,
+        "median_completion_tokens": 26,
+        "notes_scored": 70
+      },
+      "by_category": {
+        "ambiguous": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 2,
+          "fn": 2
+        },
+        "first_person": {
+          "precision": 0.8571,
+          "recall": 0.75,
+          "f1": 0.8,
+          "tp": 6,
+          "fp": 1,
+          "fn": 2
+        },
+        "governance": {
+          "precision": 1.0,
+          "recall": 0.25,
+          "f1": 0.4,
+          "tp": 1,
+          "fp": 0,
+          "fn": 3
+        },
+        "implicit": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 3,
+          "fn": 6
+        },
+        "infra": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 3,
+          "fn": 5
+        },
+        "multi_fact": {
+          "precision": 0.75,
+          "recall": 0.2727,
+          "f1": 0.4,
+          "tp": 6,
+          "fp": 2,
+          "fn": 16
+        },
+        "negation": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 3,
+          "fn": 2
+        },
+        "novel_pred": {
+          "precision": 0.5,
+          "recall": 0.1667,
+          "f1": 0.25,
+          "tp": 1,
+          "fp": 1,
+          "fn": 5
+        },
+        "third_person": {
+          "precision": 0.8,
+          "recall": 0.4444,
+          "f1": 0.5714,
+          "tp": 4,
+          "fp": 1,
+          "fn": 5
+        },
+        "transient": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 5,
+          "fn": 0
+        }
+      }
+    }
+  },
+  "Qwen/Qwen3.5-2B": {
+    "production": {
+      "summary": {
+        "model": "Qwen/Qwen3.5-2B",
+        "condition": "production",
+        "params": "2B",
+        "licence": "apache-2.0",
+        "class": "actionable",
+        "f1_production": 0.315,
+        "f1_no_floor": 0.2985,
+        "precision": 0.3175,
+        "recall": 0.3125,
+        "f1_strict": 0.2992,
+        "schema_rate": 1.0,
+        "json_parse_rate": 1.0,
+        "in_seed_ontology": 0.8413,
+        "abstention_on_factless": 0.3043,
+        "spurious_triples": 16,
+        "dropped_by_conf_floor": 7,
+        "median_latency_ms_gpu": 557.8,
+        "median_completion_tokens": 28,
+        "notes_scored": 70
+      },
+      "by_category": {
+        "ambiguous": {
+          "precision": 0.2,
+          "recall": 0.5,
+          "f1": 0.2857,
+          "tp": 1,
+          "fp": 4,
+          "fn": 1
+        },
+        "first_person": {
+          "precision": 0.875,
+          "recall": 0.875,
+          "f1": 0.875,
+          "tp": 7,
+          "fp": 1,
+          "fn": 1
+        },
+        "governance": {
+          "precision": 0.25,
+          "recall": 0.25,
+          "f1": 0.25,
+          "tp": 1,
+          "fp": 3,
+          "fn": 3
+        },
+        "implicit": {
+          "precision": 0.2857,
+          "recall": 0.3333,
+          "f1": 0.3077,
+          "tp": 2,
+          "fp": 5,
+          "fn": 4
+        },
+        "infra": {
+          "precision": 0.1667,
+          "recall": 0.2,
+          "f1": 0.1818,
+          "tp": 1,
+          "fp": 5,
+          "fn": 4
+        },
+        "multi_fact": {
+          "precision": 0.375,
+          "recall": 0.1364,
+          "f1": 0.2,
+          "tp": 3,
+          "fp": 5,
+          "fn": 19
+        },
+        "negation": {
+          "precision": 0.25,
+          "recall": 0.5,
+          "f1": 0.3333,
+          "tp": 1,
+          "fp": 3,
+          "fn": 1
+        },
+        "novel_pred": {
+          "precision": 0.3333,
+          "recall": 0.3333,
+          "f1": 0.3333,
+          "tp": 2,
+          "fp": 4,
+          "fn": 4
+        },
+        "third_person": {
+          "precision": 0.2857,
+          "recall": 0.2222,
+          "f1": 0.25,
+          "tp": 2,
+          "fp": 5,
+          "fn": 7
+        },
+        "transient": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 8,
+          "fn": 0
+        }
+      }
+    },
+    "ablation_conf": {
+      "summary": {
+        "model": "Qwen/Qwen3.5-2B",
+        "condition": "ablation_conf",
+        "params": "2B",
+        "licence": "apache-2.0",
+        "class": "actionable",
+        "f1_production": 0.2969,
+        "f1_no_floor": 0.2901,
+        "precision": 0.2969,
+        "recall": 0.2969,
+        "f1_strict": 0.2969,
+        "schema_rate": 0.9714,
+        "json_parse_rate": 1.0,
+        "in_seed_ontology": 0.8594,
+        "abstention_on_factless": 0.1429,
+        "spurious_triples": 18,
+        "dropped_by_conf_floor": 3,
+        "median_latency_ms_gpu": 559.2,
+        "median_completion_tokens": 28,
+        "notes_scored": 70
+      },
+      "by_category": {
+        "ambiguous": {
+          "precision": 0.2,
+          "recall": 0.5,
+          "f1": 0.2857,
+          "tp": 1,
+          "fp": 4,
+          "fn": 1
+        },
+        "first_person": {
+          "precision": 0.8571,
+          "recall": 0.75,
+          "f1": 0.8,
+          "tp": 6,
+          "fp": 1,
+          "fn": 2
+        },
+        "governance": {
+          "precision": 0.25,
+          "recall": 0.25,
+          "f1": 0.25,
+          "tp": 1,
+          "fp": 3,
+          "fn": 3
+        },
+        "implicit": {
+          "precision": 0.2857,
+          "recall": 0.3333,
+          "f1": 0.3077,
+          "tp": 2,
+          "fp": 5,
+          "fn": 4
+        },
+        "infra": {
+          "precision": 0.1667,
+          "recall": 0.2,
+          "f1": 0.1818,
+          "tp": 1,
+          "fp": 5,
+          "fn": 4
+        },
+        "multi_fact": {
+          "precision": 0.375,
+          "recall": 0.1364,
+          "f1": 0.2,
+          "tp": 3,
+          "fp": 5,
+          "fn": 19
+        },
+        "negation": {
+          "precision": 0.2,
+          "recall": 0.5,
+          "f1": 0.2857,
+          "tp": 1,
+          "fp": 4,
+          "fn": 1
+        },
+        "novel_pred": {
+          "precision": 0.3333,
+          "recall": 0.3333,
+          "f1": 0.3333,
+          "tp": 2,
+          "fp": 4,
+          "fn": 4
+        },
+        "third_person": {
+          "precision": 0.2857,
+          "recall": 0.2222,
+          "f1": 0.25,
+          "tp": 2,
+          "fp": 5,
+          "fn": 7
+        },
+        "transient": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 9,
+          "fn": 0
+        }
+      }
+    }
+  },
+  "google/gemma-4-E2B-it": {
+    "production": {
+      "summary": {
+        "model": "google/gemma-4-E2B-it",
+        "condition": "production",
+        "params": "E2B (2.3B eff)",
+        "licence": "apache-2.0",
+        "class": "actionable",
+        "f1_production": 0.5385,
+        "f1_no_floor": 0.4828,
+        "precision": 0.5303,
+        "recall": 0.5469,
+        "f1_strict": 0.5231,
+        "schema_rate": 0.9714,
+        "json_parse_rate": 0.9714,
+        "in_seed_ontology": 0.8636,
+        "abstention_on_factless": 0.619,
+        "spurious_triples": 8,
+        "dropped_by_conf_floor": 15,
+        "median_latency_ms_gpu": 629.8,
+        "median_completion_tokens": 26,
+        "notes_scored": 70,
+        "cpu_prompt_tok_s": 38.6,
+        "cpu_gen_tok_s": 6.3,
+        "cpu_est_ms_per_note": 17985
+      },
+      "by_category": {
+        "ambiguous": {
+          "precision": 0.2,
+          "recall": 0.5,
+          "f1": 0.2857,
+          "tp": 1,
+          "fp": 4,
+          "fn": 1
+        },
+        "first_person": {
+          "precision": 0.875,
+          "recall": 0.875,
+          "f1": 0.875,
+          "tp": 7,
+          "fp": 1,
+          "fn": 1
+        },
+        "governance": {
+          "precision": 0.5,
+          "recall": 0.5,
+          "f1": 0.5,
+          "tp": 2,
+          "fp": 2,
+          "fn": 2
+        },
+        "implicit": {
+          "precision": 0.2857,
+          "recall": 0.3333,
+          "f1": 0.3077,
+          "tp": 2,
+          "fp": 5,
+          "fn": 4
+        },
+        "infra": {
+          "precision": 0.3333,
+          "recall": 0.4,
+          "f1": 0.3636,
+          "tp": 2,
+          "fp": 4,
+          "fn": 3
+        },
+        "multi_fact": {
+          "precision": 0.5714,
+          "recall": 0.5455,
+          "f1": 0.5581,
+          "tp": 12,
+          "fp": 9,
+          "fn": 10
+        },
+        "negation": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 2,
+          "fn": 2
+        },
+        "novel_pred": {
+          "precision": 0.6,
+          "recall": 0.5,
+          "f1": 0.5455,
+          "tp": 3,
+          "fp": 2,
+          "fn": 3
+        },
+        "third_person": {
+          "precision": 1.0,
+          "recall": 0.6667,
+          "f1": 0.8,
+          "tp": 6,
+          "fp": 0,
+          "fn": 3
+        },
+        "transient": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 2,
+          "fn": 0
+        }
+      }
+    },
+    "ablation_conf": {
+      "summary": {
+        "model": "google/gemma-4-E2B-it",
+        "condition": "ablation_conf",
+        "params": "E2B (2.3B eff)",
+        "licence": "apache-2.0",
+        "class": "actionable",
+        "f1_production": 0.5333,
+        "f1_no_floor": 0.507,
+        "precision": 0.507,
+        "recall": 0.5625,
+        "f1_strict": 0.5185,
+        "schema_rate": 0.9286,
+        "json_parse_rate": 0.9286,
+        "in_seed_ontology": 0.8873,
+        "abstention_on_factless": 0.2778,
+        "spurious_triples": 13,
+        "dropped_by_conf_floor": 7,
+        "median_latency_ms_gpu": 741.1,
+        "median_completion_tokens": 27,
+        "notes_scored": 70
+      },
+      "by_category": {
+        "ambiguous": {
+          "precision": 0.2,
+          "recall": 0.5,
+          "f1": 0.2857,
+          "tp": 1,
+          "fp": 4,
+          "fn": 1
+        },
+        "first_person": {
+          "precision": 0.875,
+          "recall": 0.875,
+          "f1": 0.875,
+          "tp": 7,
+          "fp": 1,
+          "fn": 1
+        },
+        "governance": {
+          "precision": 0.4,
+          "recall": 0.5,
+          "f1": 0.4444,
+          "tp": 2,
+          "fp": 3,
+          "fn": 2
+        },
+        "implicit": {
+          "precision": 0.2857,
+          "recall": 0.3333,
+          "f1": 0.3077,
+          "tp": 2,
+          "fp": 5,
+          "fn": 4
+        },
+        "infra": {
+          "precision": 0.3333,
+          "recall": 0.4,
+          "f1": 0.3636,
+          "tp": 2,
+          "fp": 4,
+          "fn": 3
+        },
+        "multi_fact": {
+          "precision": 0.5714,
+          "recall": 0.5455,
+          "f1": 0.5581,
+          "tp": 12,
+          "fp": 9,
+          "fn": 10
+        },
+        "negation": {
+          "precision": 0.25,
+          "recall": 0.5,
+          "f1": 0.3333,
+          "tp": 1,
+          "fp": 3,
+          "fn": 1
+        },
+        "novel_pred": {
+          "precision": 0.6,
+          "recall": 0.5,
+          "f1": 0.5455,
+          "tp": 3,
+          "fp": 2,
+          "fn": 3
+        },
+        "third_person": {
+          "precision": 1.0,
+          "recall": 0.6667,
+          "f1": 0.8,
+          "tp": 6,
+          "fp": 0,
+          "fn": 3
+        },
+        "transient": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 4,
+          "fn": 0
+        }
+      }
+    }
+  },
+  "google/gemma-4-E4B-it": {
+    "production": {
+      "summary": {
+        "model": "google/gemma-4-E4B-it",
+        "condition": "production",
+        "params": "E4B (4.5B eff)",
+        "licence": "apache-2.0",
+        "class": "incumbent",
+        "f1_production": 0.623,
+        "f1_no_floor": 0.6179,
+        "precision": 0.6552,
+        "recall": 0.5938,
+        "f1_strict": 0.6066,
+        "schema_rate": 1.0,
+        "json_parse_rate": 1.0,
+        "in_seed_ontology": 0.8448,
+        "abstention_on_factless": 0.8261,
+        "spurious_triples": 4,
+        "dropped_by_conf_floor": 1,
+        "median_latency_ms_gpu": 847.8,
+        "median_completion_tokens": 26,
+        "notes_scored": 70,
+        "cpu_prompt_tok_s": 19.4,
+        "cpu_gen_tok_s": 3.3,
+        "cpu_est_ms_per_note": 35230
+      },
+      "by_category": {
+        "ambiguous": {
+          "precision": 0.25,
+          "recall": 0.5,
+          "f1": 0.3333,
+          "tp": 1,
+          "fp": 3,
+          "fn": 1
+        },
+        "first_person": {
+          "precision": 1.0,
+          "recall": 0.75,
+          "f1": 0.8571,
+          "tp": 6,
+          "fp": 0,
+          "fn": 2
+        },
+        "governance": {
+          "precision": 0.75,
+          "recall": 0.75,
+          "f1": 0.75,
+          "tp": 3,
+          "fp": 1,
+          "fn": 1
+        },
+        "implicit": {
+          "precision": 0.4286,
+          "recall": 0.5,
+          "f1": 0.4615,
+          "tp": 3,
+          "fp": 4,
+          "fn": 3
+        },
+        "infra": {
+          "precision": 0.3333,
+          "recall": 0.2,
+          "f1": 0.25,
+          "tp": 1,
+          "fp": 2,
+          "fn": 4
+        },
+        "multi_fact": {
+          "precision": 0.619,
+          "recall": 0.5909,
+          "f1": 0.6047,
+          "tp": 13,
+          "fp": 8,
+          "fn": 9
+        },
+        "negation": {
+          "precision": 0.5,
+          "recall": 0.5,
+          "f1": 0.5,
+          "tp": 1,
+          "fp": 1,
+          "fn": 1
+        },
+        "novel_pred": {
+          "precision": 1.0,
+          "recall": 0.8333,
+          "f1": 0.9091,
+          "tp": 5,
+          "fp": 0,
+          "fn": 1
+        },
+        "third_person": {
+          "precision": 0.8333,
+          "recall": 0.5556,
+          "f1": 0.6667,
+          "tp": 5,
+          "fp": 1,
+          "fn": 4
+        },
+        "transient": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 0
+        }
+      }
+    },
+    "ablation_conf": {
+      "summary": {
+        "model": "google/gemma-4-E4B-it",
+        "condition": "ablation_conf",
+        "params": "E4B (4.5B eff)",
+        "licence": "apache-2.0",
+        "class": "incumbent",
+        "f1_production": 0.6281,
+        "f1_no_floor": 0.623,
+        "precision": 0.6667,
+        "recall": 0.5938,
+        "f1_strict": 0.6116,
+        "schema_rate": 1.0,
+        "json_parse_rate": 1.0,
+        "in_seed_ontology": 0.8421,
+        "abstention_on_factless": 0.8261,
+        "spurious_triples": 4,
+        "dropped_by_conf_floor": 1,
+        "median_latency_ms_gpu": 856.9,
+        "median_completion_tokens": 26,
+        "notes_scored": 70
+      },
+      "by_category": {
+        "ambiguous": {
+          "precision": 0.25,
+          "recall": 0.5,
+          "f1": 0.3333,
+          "tp": 1,
+          "fp": 3,
+          "fn": 1
+        },
+        "first_person": {
+          "precision": 1.0,
+          "recall": 0.75,
+          "f1": 0.8571,
+          "tp": 6,
+          "fp": 0,
+          "fn": 2
+        },
+        "governance": {
+          "precision": 0.75,
+          "recall": 0.75,
+          "f1": 0.75,
+          "tp": 3,
+          "fp": 1,
+          "fn": 1
+        },
+        "implicit": {
+          "precision": 0.4286,
+          "recall": 0.5,
+          "f1": 0.4615,
+          "tp": 3,
+          "fp": 4,
+          "fn": 3
+        },
+        "infra": {
+          "precision": 0.5,
+          "recall": 0.2,
+          "f1": 0.2857,
+          "tp": 1,
+          "fp": 1,
+          "fn": 4
+        },
+        "multi_fact": {
+          "precision": 0.619,
+          "recall": 0.5909,
+          "f1": 0.6047,
+          "tp": 13,
+          "fp": 8,
+          "fn": 9
+        },
+        "negation": {
+          "precision": 0.5,
+          "recall": 0.5,
+          "f1": 0.5,
+          "tp": 1,
+          "fp": 1,
+          "fn": 1
+        },
+        "novel_pred": {
+          "precision": 1.0,
+          "recall": 0.8333,
+          "f1": 0.9091,
+          "tp": 5,
+          "fp": 0,
+          "fn": 1
+        },
+        "third_person": {
+          "precision": 0.8333,
+          "recall": 0.5556,
+          "f1": 0.6667,
+          "tp": 5,
+          "fp": 1,
+          "fn": 4
+        },
+        "transient": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 0
+        }
+      }
+    }
+  },
+  "ibm-granite/granite-4.0-350m": {
+    "production": {
+      "summary": {
+        "model": "ibm-granite/granite-4.0-350m",
+        "condition": "production",
+        "params": "350M",
+        "licence": "apache-2.0",
+        "class": "actionable",
+        "f1_production": 0.0,
+        "f1_no_floor": 0.1789,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1_strict": 0.0,
+        "schema_rate": 0.8286,
+        "json_parse_rate": 0.8286,
+        "in_seed_ontology": 0.0,
+        "abstention_on_factless": 0.85,
+        "spurious_triples": 3,
+        "dropped_by_conf_floor": 53,
+        "median_latency_ms_gpu": 301.5,
+        "median_completion_tokens": 22,
+        "notes_scored": 70,
+        "cpu_prompt_tok_s": 246.3,
+        "cpu_gen_tok_s": 29.4,
+        "cpu_est_ms_per_note": 3257
+      },
+      "by_category": {
+        "ambiguous": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 2
+        },
+        "first_person": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 1,
+          "fn": 8
+        },
+        "governance": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 4
+        },
+        "implicit": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 1,
+          "fn": 6
+        },
+        "infra": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 1,
+          "fn": 5
+        },
+        "multi_fact": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 1,
+          "fn": 22
+        },
+        "negation": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 2
+        },
+        "novel_pred": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 6
+        },
+        "third_person": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 9
+        },
+        "transient": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 2,
+          "fn": 0
+        }
+      }
+    },
+    "ablation_conf": {
+      "summary": {
+        "model": "ibm-granite/granite-4.0-350m",
+        "condition": "ablation_conf",
+        "params": "350M",
+        "licence": "apache-2.0",
+        "class": "actionable",
+        "f1_production": 0.0,
+        "f1_no_floor": 0.1805,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1_strict": 0.0,
+        "schema_rate": 0.9429,
+        "json_parse_rate": 0.9429,
+        "in_seed_ontology": 0.0,
+        "abstention_on_factless": 0.7391,
+        "spurious_triples": 6,
+        "dropped_by_conf_floor": 56,
+        "median_latency_ms_gpu": 252.9,
+        "median_completion_tokens": 23,
+        "notes_scored": 70
+      },
+      "by_category": {
+        "ambiguous": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 2,
+          "fn": 2
+        },
+        "first_person": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 1,
+          "fn": 8
+        },
+        "governance": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 4
+        },
+        "implicit": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 1,
+          "fn": 6
+        },
+        "infra": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 1,
+          "fn": 5
+        },
+        "multi_fact": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 4,
+          "fn": 22
+        },
+        "negation": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 2
+        },
+        "novel_pred": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 6
+        },
+        "third_person": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 9
+        },
+        "transient": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 4,
+          "fn": 0
+        }
+      }
+    }
+  },
+  "ibm-granite/granite-4.0-h-1b": {
+    "production": {
+      "summary": {
+        "model": "ibm-granite/granite-4.0-h-1b",
+        "condition": "production",
+        "params": null,
+        "licence": null,
+        "class": null,
+        "f1_production": 0.3609,
+        "f1_no_floor": 0.3529,
+        "precision": 0.3478,
+        "recall": 0.375,
+        "f1_strict": 0.3609,
+        "schema_rate": 0.9714,
+        "json_parse_rate": 0.9714,
+        "in_seed_ontology": 0.6087,
+        "abstention_on_factless": 0.087,
+        "spurious_triples": 21,
+        "dropped_by_conf_floor": 3,
+        "median_latency_ms_gpu": 1180.7,
+        "median_completion_tokens": 28,
+        "notes_scored": 70,
+        "cpu_prompt_tok_s": 56.8,
+        "cpu_gen_tok_s": 8.9,
+        "cpu_est_ms_per_note": 12428
+      },
+      "by_category": {
+        "ambiguous": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 4,
+          "fn": 2
+        },
+        "first_person": {
+          "precision": 0.75,
+          "recall": 0.75,
+          "f1": 0.75,
+          "tp": 6,
+          "fp": 2,
+          "fn": 2
+        },
+        "governance": {
+          "precision": 0.4,
+          "recall": 0.5,
+          "f1": 0.4444,
+          "tp": 2,
+          "fp": 3,
+          "fn": 2
+        },
+        "implicit": {
+          "precision": 0.1667,
+          "recall": 0.1667,
+          "f1": 0.1667,
+          "tp": 1,
+          "fp": 5,
+          "fn": 5
+        },
+        "infra": {
+          "precision": 0.1429,
+          "recall": 0.2,
+          "f1": 0.1667,
+          "tp": 1,
+          "fp": 6,
+          "fn": 4
+        },
+        "multi_fact": {
+          "precision": 0.3,
+          "recall": 0.1364,
+          "f1": 0.1875,
+          "tp": 3,
+          "fp": 7,
+          "fn": 19
+        },
+        "negation": {
+          "precision": 0.25,
+          "recall": 0.5,
+          "f1": 0.3333,
+          "tp": 1,
+          "fp": 3,
+          "fn": 1
+        },
+        "novel_pred": {
+          "precision": 0.6667,
+          "recall": 0.6667,
+          "f1": 0.6667,
+          "tp": 4,
+          "fp": 2,
+          "fn": 2
+        },
+        "third_person": {
+          "precision": 0.8571,
+          "recall": 0.6667,
+          "f1": 0.75,
+          "tp": 6,
+          "fp": 1,
+          "fn": 3
+        },
+        "transient": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 12,
+          "fn": 0
+        }
+      }
+    },
+    "ablation_conf": {
+      "summary": {
+        "model": "ibm-granite/granite-4.0-h-1b",
+        "condition": "ablation_conf",
+        "params": null,
+        "licence": null,
+        "class": null,
+        "f1_production": 0.3478,
+        "f1_no_floor": 0.3453,
+        "precision": 0.3243,
+        "recall": 0.375,
+        "f1_strict": 0.3478,
+        "schema_rate": 0.9857,
+        "json_parse_rate": 0.9857,
+        "in_seed_ontology": 0.6351,
+        "abstention_on_factless": 0.0,
+        "spurious_triples": 23,
+        "dropped_by_conf_floor": 1,
+        "median_latency_ms_gpu": 1074.5,
+        "median_completion_tokens": 28,
+        "notes_scored": 70
+      },
+      "by_category": {
+        "ambiguous": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 4,
+          "fn": 2
+        },
+        "first_person": {
+          "precision": 0.75,
+          "recall": 0.75,
+          "f1": 0.75,
+          "tp": 6,
+          "fp": 2,
+          "fn": 2
+        },
+        "governance": {
+          "precision": 0.4,
+          "recall": 0.5,
+          "f1": 0.4444,
+          "tp": 2,
+          "fp": 3,
+          "fn": 2
+        },
+        "implicit": {
+          "precision": 0.1429,
+          "recall": 0.1667,
+          "f1": 0.1538,
+          "tp": 1,
+          "fp": 6,
+          "fn": 5
+        },
+        "infra": {
+          "precision": 0.1429,
+          "recall": 0.2,
+          "f1": 0.1667,
+          "tp": 1,
+          "fp": 6,
+          "fn": 4
+        },
+        "multi_fact": {
+          "precision": 0.25,
+          "recall": 0.1364,
+          "f1": 0.1765,
+          "tp": 3,
+          "fp": 9,
+          "fn": 19
+        },
+        "negation": {
+          "precision": 0.1667,
+          "recall": 0.5,
+          "f1": 0.25,
+          "tp": 1,
+          "fp": 5,
+          "fn": 1
+        },
+        "novel_pred": {
+          "precision": 0.6667,
+          "recall": 0.6667,
+          "f1": 0.6667,
+          "tp": 4,
+          "fp": 2,
+          "fn": 2
+        },
+        "third_person": {
+          "precision": 0.8571,
+          "recall": 0.6667,
+          "f1": 0.75,
+          "tp": 6,
+          "fp": 1,
+          "fn": 3
+        },
+        "transient": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 12,
+          "fn": 0
+        }
+      }
+    }
+  },
+  "ibm-granite/granite-4.0-h-350m": {
+    "production": {
+      "summary": {
+        "model": "ibm-granite/granite-4.0-h-350m",
+        "condition": "production",
+        "params": "350M",
+        "licence": "apache-2.0",
+        "class": "actionable",
+        "f1_production": 0.0,
+        "f1_no_floor": 0.1412,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1_strict": 0.0,
+        "schema_rate": 0.3143,
+        "json_parse_rate": 0.3143,
+        "in_seed_ontology": 1.0,
+        "abstention_on_factless": 1.0,
+        "spurious_triples": 0,
+        "dropped_by_conf_floor": 20,
+        "median_latency_ms_gpu": 740.2,
+        "median_completion_tokens": 26,
+        "notes_scored": 70
+      },
+      "by_category": {
+        "ambiguous": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 2
+        },
+        "first_person": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 1,
+          "fn": 8
+        },
+        "governance": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 4
+        },
+        "implicit": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 6
+        },
+        "infra": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 5
+        },
+        "multi_fact": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 22
+        },
+        "negation": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 2
+        },
+        "novel_pred": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 6
+        },
+        "third_person": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 9
+        },
+        "transient": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 0
+        }
+      }
+    }
+  },
+  "ibm-granite/granite-4.1-3b": {
+    "production": {
+      "summary": {
+        "model": "ibm-granite/granite-4.1-3b",
+        "condition": "production",
+        "params": null,
+        "licence": null,
+        "class": null,
+        "f1_production": 0.48,
+        "f1_no_floor": 0.5362,
+        "precision": 0.4918,
+        "recall": 0.4688,
+        "f1_strict": 0.48,
+        "schema_rate": 1.0,
+        "json_parse_rate": 1.0,
+        "in_seed_ontology": 0.8525,
+        "abstention_on_factless": 0.5217,
+        "spurious_triples": 11,
+        "dropped_by_conf_floor": 13,
+        "median_latency_ms_gpu": 465.5,
+        "median_completion_tokens": 27,
+        "notes_scored": 70
+      },
+      "by_category": {
+        "ambiguous": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 4,
+          "fn": 2
+        },
+        "first_person": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "tp": 8,
+          "fp": 0,
+          "fn": 0
+        },
+        "governance": {
+          "precision": 0.25,
+          "recall": 0.25,
+          "f1": 0.25,
+          "tp": 1,
+          "fp": 3,
+          "fn": 3
+        },
+        "implicit": {
+          "precision": 0.2222,
+          "recall": 0.3333,
+          "f1": 0.2667,
+          "tp": 2,
+          "fp": 7,
+          "fn": 4
+        },
+        "infra": {
+          "precision": 0.5,
+          "recall": 0.4,
+          "f1": 0.4444,
+          "tp": 2,
+          "fp": 2,
+          "fn": 3
+        },
+        "multi_fact": {
+          "precision": 0.6364,
+          "recall": 0.3182,
+          "f1": 0.4242,
+          "tp": 7,
+          "fp": 4,
+          "fn": 15
+        },
+        "negation": {
+          "precision": 0.1667,
+          "recall": 0.5,
+          "f1": 0.25,
+          "tp": 1,
+          "fp": 5,
+          "fn": 1
+        },
+        "novel_pred": {
+          "precision": 0.5,
+          "recall": 0.5,
+          "f1": 0.5,
+          "tp": 3,
+          "fp": 3,
+          "fn": 3
+        },
+        "third_person": {
+          "precision": 0.8571,
+          "recall": 0.6667,
+          "f1": 0.75,
+          "tp": 6,
+          "fp": 1,
+          "fn": 3
+        },
+        "transient": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 2,
+          "fn": 0
+        }
+      }
+    },
+    "ablation_conf": {
+      "summary": {
+        "model": "ibm-granite/granite-4.1-3b",
+        "condition": "ablation_conf",
+        "params": null,
+        "licence": null,
+        "class": null,
+        "f1_production": 0.4677,
+        "f1_no_floor": 0.5362,
+        "precision": 0.4833,
+        "recall": 0.4531,
+        "f1_strict": 0.4677,
+        "schema_rate": 1.0,
+        "json_parse_rate": 1.0,
+        "in_seed_ontology": 0.85,
+        "abstention_on_factless": 0.5217,
+        "spurious_triples": 11,
+        "dropped_by_conf_floor": 14,
+        "median_latency_ms_gpu": 479.3,
+        "median_completion_tokens": 27,
+        "notes_scored": 70
+      },
+      "by_category": {
+        "ambiguous": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 4,
+          "fn": 2
+        },
+        "first_person": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "tp": 8,
+          "fp": 0,
+          "fn": 0
+        },
+        "governance": {
+          "precision": 0.25,
+          "recall": 0.25,
+          "f1": 0.25,
+          "tp": 1,
+          "fp": 3,
+          "fn": 3
+        },
+        "implicit": {
+          "precision": 0.2222,
+          "recall": 0.3333,
+          "f1": 0.2667,
+          "tp": 2,
+          "fp": 7,
+          "fn": 4
+        },
+        "infra": {
+          "precision": 0.5,
+          "recall": 0.4,
+          "f1": 0.4444,
+          "tp": 2,
+          "fp": 2,
+          "fn": 3
+        },
+        "multi_fact": {
+          "precision": 0.6,
+          "recall": 0.2727,
+          "f1": 0.375,
+          "tp": 6,
+          "fp": 4,
+          "fn": 16
+        },
+        "negation": {
+          "precision": 0.1667,
+          "recall": 0.5,
+          "f1": 0.25,
+          "tp": 1,
+          "fp": 5,
+          "fn": 1
+        },
+        "novel_pred": {
+          "precision": 0.5,
+          "recall": 0.5,
+          "f1": 0.5,
+          "tp": 3,
+          "fp": 3,
+          "fn": 3
+        },
+        "third_person": {
+          "precision": 0.8571,
+          "recall": 0.6667,
+          "f1": 0.75,
+          "tp": 6,
+          "fp": 1,
+          "fn": 3
+        },
+        "transient": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 2,
+          "fn": 0
+        }
+      }
+    }
+  },
+  "unsloth/gemma-3-270m-it": {
+    "production": {
+      "summary": {
+        "model": "unsloth/gemma-3-270m-it",
+        "condition": "production",
+        "params": "270M",
+        "licence": "gemma",
+        "class": "superseded",
+        "f1_production": 0.0,
+        "f1_no_floor": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1_strict": 0.0,
+        "schema_rate": 0.0,
+        "json_parse_rate": 1.0,
+        "in_seed_ontology": null,
+        "abstention_on_factless": null,
+        "spurious_triples": 0,
+        "dropped_by_conf_floor": 0,
+        "median_latency_ms_gpu": 273.1,
+        "median_completion_tokens": 22,
+        "notes_scored": 70
+      },
+      "by_category": {
+        "ambiguous": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 2
+        },
+        "first_person": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 8
+        },
+        "governance": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 4
+        },
+        "implicit": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 6
+        },
+        "infra": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 5
+        },
+        "multi_fact": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 22
+        },
+        "negation": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 2
+        },
+        "novel_pred": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 6
+        },
+        "third_person": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 9
+        },
+        "transient": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 0
+        }
+      }
+    },
+    "ablation_conf": {
+      "summary": {
+        "model": "unsloth/gemma-3-270m-it",
+        "condition": "ablation_conf",
+        "params": "270M",
+        "licence": "gemma",
+        "class": "superseded",
+        "f1_production": 0.0,
+        "f1_no_floor": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1_strict": 0.0,
+        "schema_rate": 0.0,
+        "json_parse_rate": 1.0,
+        "in_seed_ontology": null,
+        "abstention_on_factless": null,
+        "spurious_triples": 0,
+        "dropped_by_conf_floor": 0,
+        "median_latency_ms_gpu": 263.7,
+        "median_completion_tokens": 22,
+        "notes_scored": 70
+      },
+      "by_category": {
+        "ambiguous": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 2
+        },
+        "first_person": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 8
+        },
+        "governance": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 4
+        },
+        "implicit": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 6
+        },
+        "infra": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 5
+        },
+        "multi_fact": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 22
+        },
+        "negation": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 2
+        },
+        "novel_pred": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 6
+        },
+        "third_person": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 9
+        },
+        "transient": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 0
+        }
+      }
+    }
+  },
+  "unsloth/gemma-3n-E4B-it": {
+    "production": {
+      "summary": {
+        "model": "unsloth/gemma-3n-E4B-it",
+        "condition": "production",
+        "params": "E4B",
+        "licence": "gemma",
+        "class": "superseded",
+        "f1_production": 0.5816,
+        "f1_no_floor": 0.5775,
+        "precision": 0.5325,
+        "recall": 0.6406,
+        "f1_strict": 0.5816,
+        "schema_rate": 0.9429,
+        "json_parse_rate": 1.0,
+        "in_seed_ontology": 0.8961,
+        "abstention_on_factless": 0.0526,
+        "spurious_triples": 18,
+        "dropped_by_conf_floor": 1,
+        "median_latency_ms_gpu": 1760.4,
+        "median_completion_tokens": 37,
+        "notes_scored": 70
+      },
+      "by_category": {
+        "ambiguous": {
+          "precision": 0.2,
+          "recall": 0.5,
+          "f1": 0.2857,
+          "tp": 1,
+          "fp": 4,
+          "fn": 1
+        },
+        "first_person": {
+          "precision": 0.875,
+          "recall": 0.875,
+          "f1": 0.875,
+          "tp": 7,
+          "fp": 1,
+          "fn": 1
+        },
+        "governance": {
+          "precision": 0.6,
+          "recall": 0.75,
+          "f1": 0.6667,
+          "tp": 3,
+          "fp": 2,
+          "fn": 1
+        },
+        "implicit": {
+          "precision": 0.5714,
+          "recall": 0.6667,
+          "f1": 0.6154,
+          "tp": 4,
+          "fp": 3,
+          "fn": 2
+        },
+        "infra": {
+          "precision": 0.4286,
+          "recall": 0.6,
+          "f1": 0.5,
+          "tp": 3,
+          "fp": 4,
+          "fn": 2
+        },
+        "multi_fact": {
+          "precision": 0.5789,
+          "recall": 0.5,
+          "f1": 0.5366,
+          "tp": 11,
+          "fp": 8,
+          "fn": 11
+        },
+        "negation": {
+          "precision": 0.3333,
+          "recall": 1.0,
+          "f1": 0.5,
+          "tp": 2,
+          "fp": 4,
+          "fn": 0
+        },
+        "novel_pred": {
+          "precision": 0.6667,
+          "recall": 0.6667,
+          "f1": 0.6667,
+          "tp": 4,
+          "fp": 2,
+          "fn": 2
+        },
+        "third_person": {
+          "precision": 0.8571,
+          "recall": 0.6667,
+          "f1": 0.75,
+          "tp": 6,
+          "fp": 1,
+          "fn": 3
+        },
+        "transient": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 7,
+          "fn": 0
+        }
+      }
+    },
+    "ablation_conf": {
+      "summary": {
+        "model": "unsloth/gemma-3n-E4B-it",
+        "condition": "ablation_conf",
+        "params": "E4B",
+        "licence": "gemma",
+        "class": "superseded",
+        "f1_production": 0.5839,
+        "f1_no_floor": 0.5839,
+        "precision": 0.5479,
+        "recall": 0.625,
+        "f1_strict": 0.5839,
+        "schema_rate": 0.9,
+        "json_parse_rate": 1.0,
+        "in_seed_ontology": 0.8904,
+        "abstention_on_factless": 0.0,
+        "spurious_triples": 16,
+        "dropped_by_conf_floor": 0,
+        "median_latency_ms_gpu": 1691.8,
+        "median_completion_tokens": 36,
+        "notes_scored": 70
+      },
+      "by_category": {
+        "ambiguous": {
+          "precision": 0.2,
+          "recall": 0.5,
+          "f1": 0.2857,
+          "tp": 1,
+          "fp": 4,
+          "fn": 1
+        },
+        "first_person": {
+          "precision": 0.875,
+          "recall": 0.875,
+          "f1": 0.875,
+          "tp": 7,
+          "fp": 1,
+          "fn": 1
+        },
+        "governance": {
+          "precision": 0.75,
+          "recall": 0.75,
+          "f1": 0.75,
+          "tp": 3,
+          "fp": 1,
+          "fn": 1
+        },
+        "implicit": {
+          "precision": 0.5714,
+          "recall": 0.6667,
+          "f1": 0.6154,
+          "tp": 4,
+          "fp": 3,
+          "fn": 2
+        },
+        "infra": {
+          "precision": 0.4286,
+          "recall": 0.6,
+          "f1": 0.5,
+          "tp": 3,
+          "fp": 4,
+          "fn": 2
+        },
+        "multi_fact": {
+          "precision": 0.5882,
+          "recall": 0.4545,
+          "f1": 0.5128,
+          "tp": 10,
+          "fp": 7,
+          "fn": 12
+        },
+        "negation": {
+          "precision": 0.3333,
+          "recall": 1.0,
+          "f1": 0.5,
+          "tp": 2,
+          "fp": 4,
+          "fn": 0
+        },
+        "novel_pred": {
+          "precision": 0.6667,
+          "recall": 0.6667,
+          "f1": 0.6667,
+          "tp": 4,
+          "fp": 2,
+          "fn": 2
+        },
+        "third_person": {
+          "precision": 0.8571,
+          "recall": 0.6667,
+          "f1": 0.75,
+          "tp": 6,
+          "fp": 1,
+          "fn": 3
+        },
+        "transient": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 6,
+          "fn": 0
+        }
+      }
+    }
+  }
+}

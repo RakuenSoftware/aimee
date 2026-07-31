@@ -1,0 +1,213 @@
+{
+  "strict": {
+    "precision": 0.4833,
+    "recall": 0.4531,
+    "f1": 0.4677,
+    "tp": 29,
+    "fp": 31,
+    "fn": 35,
+    "by_category": {
+      "ambiguous": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "tp": 0,
+        "fp": 4,
+        "fn": 2
+      },
+      "first_person": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "tp": 8,
+        "fp": 0,
+        "fn": 0
+      },
+      "governance": {
+        "precision": 0.25,
+        "recall": 0.25,
+        "f1": 0.25,
+        "tp": 1,
+        "fp": 3,
+        "fn": 3
+      },
+      "implicit": {
+        "precision": 0.2222,
+        "recall": 0.3333,
+        "f1": 0.2667,
+        "tp": 2,
+        "fp": 7,
+        "fn": 4
+      },
+      "infra": {
+        "precision": 0.5,
+        "recall": 0.4,
+        "f1": 0.4444,
+        "tp": 2,
+        "fp": 2,
+        "fn": 3
+      },
+      "multi_fact": {
+        "precision": 0.6,
+        "recall": 0.2727,
+        "f1": 0.375,
+        "tp": 6,
+        "fp": 4,
+        "fn": 16
+      },
+      "negation": {
+        "precision": 0.1667,
+        "recall": 0.5,
+        "f1": 0.25,
+        "tp": 1,
+        "fp": 5,
+        "fn": 1
+      },
+      "novel_pred": {
+        "precision": 0.5,
+        "recall": 0.5,
+        "f1": 0.5,
+        "tp": 3,
+        "fp": 3,
+        "fn": 3
+      },
+      "third_person": {
+        "precision": 0.8571,
+        "recall": 0.6667,
+        "f1": 0.75,
+        "tp": 6,
+        "fp": 1,
+        "fn": 3
+      },
+      "transient": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "tp": 0,
+        "fp": 2,
+        "fn": 0
+      }
+    }
+  },
+  "lenient": {
+    "precision": 0.4833,
+    "recall": 0.4531,
+    "f1": 0.4677,
+    "tp": 29,
+    "fp": 31,
+    "fn": 35,
+    "by_category": {
+      "ambiguous": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "tp": 0,
+        "fp": 4,
+        "fn": 2
+      },
+      "first_person": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "tp": 8,
+        "fp": 0,
+        "fn": 0
+      },
+      "governance": {
+        "precision": 0.25,
+        "recall": 0.25,
+        "f1": 0.25,
+        "tp": 1,
+        "fp": 3,
+        "fn": 3
+      },
+      "implicit": {
+        "precision": 0.2222,
+        "recall": 0.3333,
+        "f1": 0.2667,
+        "tp": 2,
+        "fp": 7,
+        "fn": 4
+      },
+      "infra": {
+        "precision": 0.5,
+        "recall": 0.4,
+        "f1": 0.4444,
+        "tp": 2,
+        "fp": 2,
+        "fn": 3
+      },
+      "multi_fact": {
+        "precision": 0.6,
+        "recall": 0.2727,
+        "f1": 0.375,
+        "tp": 6,
+        "fp": 4,
+        "fn": 16
+      },
+      "negation": {
+        "precision": 0.1667,
+        "recall": 0.5,
+        "f1": 0.25,
+        "tp": 1,
+        "fp": 5,
+        "fn": 1
+      },
+      "novel_pred": {
+        "precision": 0.5,
+        "recall": 0.5,
+        "f1": 0.5,
+        "tp": 3,
+        "fp": 3,
+        "fn": 3
+      },
+      "third_person": {
+        "precision": 0.8571,
+        "recall": 0.6667,
+        "f1": 0.75,
+        "tp": 6,
+        "fp": 1,
+        "fn": 3
+      },
+      "transient": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "tp": 0,
+        "fp": 2,
+        "fn": 0
+      }
+    }
+  },
+  "over_extraction": {
+    "empty_gold_notes": 23,
+    "on_schema_empty_gold_notes": 23,
+    "notes_correctly_empty": 12,
+    "abstention_rate_on_schema": 0.5217,
+    "spurious_triples": 11
+  },
+  "output_health": {
+    "notes": 70,
+    "json_parse_ok": 70,
+    "json_parse_rate": 1.0,
+    "schema_ok": 70,
+    "schema_rate": 1.0,
+    "malformed_facts": 1,
+    "dropped_by_conf_floor": 14,
+    "predicted_triples": 60,
+    "in_seed_ontology": 0.85,
+    "catch_all_relations": 0
+  },
+  "latency_ms": {
+    "median": 479.3,
+    "p90": 862.4,
+    "mean": 507.9
+  },
+  "completion_tokens": {
+    "median": 27,
+    "mean": 27.8,
+    "max": 95
+  },
+  "model": "ibm-granite/granite-4.1-3b",
+  "scored_key": "pred"
+}
