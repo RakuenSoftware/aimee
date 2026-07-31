@@ -195,11 +195,31 @@ int kb_curator_provider_for_stage(const config_t *cfg, kb_curator_stage_t stage,
    out->api_key = api_key[0] ? api_key : NULL; /* keyless local endpoint => no bearer */
    out->wire = PROVIDER_WIRE_OPENAI_CHAT;
    out->temperature = -1.0; /* let the provider default */
-   /* Tier-A is mechanical, grammar-constrained extraction/indexing — it does not
-    * need (and is hurt by) a reasoning model's chain-of-thought: the reasoning pass
-    * adds latency at drain volume and, worse, can consume the output budget so the
-    * JSON answer comes back truncated/empty (observed: memory-fact extraction landed
-    * 0 facts). Skip thinking for Tier-A; Tier-B (judge/synthesize) keeps it. */
-   out->disable_thinking = (kb_curator_stage_tier(stage) == KB_CURATOR_TIER_A);
+   /* Thinking is NOT disabled for Tier-A any more (out is zeroed above, so the
+    * flag stays off unless a provider def sets it deliberately).
+    *
+    * It was introduced in #1148 for a specific failure: the reasoning model on
+    * the .254 gpu-mid stack spent its completion budget on a chain-of-thought
+    * pass and returned an empty or 512-token-truncated body, committing zero
+    * typed facts. Two things have since undermined that reasoning.
+    *
+    * The truncation was never MF_LLM_OUT_CAP, which was already 8192 then and
+    * still is — something downstream on that stack capped at 512. A serving
+    * limit was worked around by changing model behaviour for every Tier-A stage
+    * on every provider.
+    *
+    * And it measurably hurts. Benchmarked on the Tier-A extraction gold set,
+    * gemma-4-E4B scores 0.738 with thinking suppressed and 0.828 with it on, at
+    * no latency cost (251ms vs 273ms median) and with zero truncations — median
+    * completion 25 tokens against the 8192 cap. The mechanism is not deeper
+    * reasoning but output-contract adherence: with thinking off the model
+    * collapses the relation into a JSON key, {"subject":"user",
+    * "also_known_as":"JBailes"}, which mf_commit_facts drops. The flag was
+    * making structured output LESS reliable, which is the opposite of its
+    * purpose.
+    *
+    * The generic provider_def_t.disable_thinking mechanism is kept — a specific
+    * deployment whose model genuinely misbehaves can still set it. What is
+    * removed is the blanket policy. */
    return 1;
 }
