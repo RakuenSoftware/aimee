@@ -399,10 +399,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--gold", required=True)
     ap.add_argument("--pred", required=True)
-    ap.add_argument("--pred-key", default="pred",
-                    help="'pred' scores what production would commit (confidence "
-                         "floor applied); 'pred_nofloor' scores the same extraction "
-                         "with MF_CONF_FLOOR lifted.")
+    ap.add_argument("--pred-key", default="pred_grounded",
+                    help="'pred_grounded' (default) scores what production commits "
+                         "today: every extracted fact whose subject and object both "
+                         "trace to the note. 'pred' applies the retired "
+                         "MF_CONF_FLOOR instead, and 'pred_nofloor' applies no gate "
+                         "at all. See the note in main() on why the default moved.")
     ap.add_argument("--no-alt", action="store_true",
                     help="ignore alternative renderings entirely: both endpoints "
                          "must match the labelled entity exactly. The strictest "
@@ -429,6 +431,28 @@ def main():
         raise SystemExit(
             f"incomplete predictions: {args.pred} has {len(pred_rows)} rows, "
             f"gold has {len(gold_rows)}. Re-run the model or delete the partial file.")
+    # The default scoring view is the gate the product actually applies.
+    #
+    # It used to be 'pred', the MF_CONF_FLOOR view, and that stayed the default
+    # after the floor was removed from src/kb/kb_memory_facts.c and replaced by
+    # fact_grounded(). So every Tier-A number was scored against a gate the
+    # shipping code no longer has. The cost was not uniform: it took 0.006 off
+    # gemma-4-E4B and it took ALL of Qwen3-0.6B, which extracted 72 triples,
+    # every one of them discarded at the floor, and was reported as F1 0.0000.
+    # The mechanism was already written down in run_hf.py's docstring: the
+    # prompt's own schema example carries the literal "confidence":0.0 and small
+    # models copy it. The floor measured prompt-copying, not extraction.
+    #
+    # Synthesised here rather than in the runners so every prediction file
+    # already on disk gets the corrected view without being re-run.
+    if args.pred_key == "pred_grounded":
+        gnote = {r["id"]: ground_text(r["note"]) for r in gold_rows}
+        for r in pred_rows:
+            nn = gnote[r["id"]]
+            r["pred_grounded"] = [
+                t for t in (r.get("pred_nofloor") or [])
+                if grounded(t.get("subject"), nn) and grounded(t.get("object"), nn)
+            ]
     gold = load_triples(gold_rows, "gold")
     pred = load_triples(pred_rows, args.pred_key, canonicalize=not args.no_alias)
     cat = {r["id"]: r["category"] for r in gold_rows}

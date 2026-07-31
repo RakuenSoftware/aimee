@@ -173,16 +173,38 @@ def test_abstention_counts_terse_empty():
     print("  PASS: a terse {} counts as abstention, not malformed")
 
 
-def test_conf_floor_applied_to_pred_only():
+def test_conf_floor_is_no_longer_the_default_gate():
+    """The default view must be the gate src/kb/kb_memory_facts.c applies today.
+
+    MF_CONF_FLOOR was removed and replaced by fact_grounded(); the scorer kept
+    defaulting to the floored view for a while afterwards, which reported
+    Qwen3-0.6B as F1 0.0000 when it had extracted 72 triples the shipping code
+    would have committed. The floored view still exists, behind an explicit flag,
+    because the historical sweeps were scored with it.
+    """
     g = [G("a", "Marta lives in Lisbon.", [T("Marta", "lives_in", "Lisbon")])]
     p = P("a", [T("Marta", "lives_in", "Lisbon", confidence=0.1)])
-    p["pred"] = []                      # what production would commit
-    p["pred_nofloor"] = p["pred_nofloor"]
-    r_floor = score([p], g)
+    p["pred"] = []                      # what the retired floor would commit
+    r_default = score([p], g)
+    r_floor = score([p], g, extra=("--pred-key", "pred"))
     r_cap = score([p], g, extra=("--pred-key", "pred_nofloor"))
-    near(r_floor["strict"]["f1"], 0.0, "floored view drops the low-confidence fact")
-    near(r_cap["strict"]["f1"], 1.0, "capability view keeps it")
-    print("  PASS: floored and capability views differ as intended")
+    near(r_default["strict"]["f1"], 1.0,
+         "default view keeps a grounded fact regardless of self-reported confidence")
+    near(r_floor["strict"]["f1"], 0.0, "the retired floored view still drops it")
+    near(r_cap["strict"]["f1"], 1.0, "ungated view keeps it")
+    print("  PASS: default is the grounding gate, floor available explicitly")
+
+
+def test_grounding_gate_drops_an_invented_endpoint():
+    """The default gate must drop what production drops: an endpoint that cannot
+    be traced to the note. A well-formed triple about someone never mentioned is
+    the failure the write gate cannot catch."""
+    g = [G("a", "Marta lives in Lisbon.", [T("Marta", "lives_in", "Lisbon")])]
+    p = P("a", [T("Marta", "lives_in", "Lisbon", confidence=0.9),
+                T("Bartholomew", "lives_in", "Reykjavik", confidence=0.9)])
+    r = score([p], g)
+    near(r["strict"]["precision"], 1.0, "the invented triple is gated out, not scored")
+    print("  PASS: grounding gate drops an ungrounded endpoint")
 
 
 def test_degenerate_entities():

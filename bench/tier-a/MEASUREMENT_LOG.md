@@ -428,3 +428,62 @@ the whole time; nothing read it.
 
 Fixed: cap is 4096, and `score_b.py` refuses to score a file containing a
 truncated row rather than zeroing it.
+
+## Defect 17: the scorer kept applying a gate the product had removed
+
+`score.py --pred-key` defaulted to `pred`, the MF_CONF_FLOOR view. The floor was
+removed from `src/kb/kb_memory_facts.c` and replaced by `fact_grounded()`, partly
+*because of* this benchmark's evidence, and the default never moved. So every
+Tier-A figure reported after that change was scored against a gate the shipping
+code does not have.
+
+The mechanism was already written down, in `run_hf.py`'s own docstring: the
+prompt's schema example carries the literal `"confidence":0.0`, and small models
+copy it verbatim. The floor was measuring prompt-copying, not extraction.
+`src/kb/kb_memory_facts.c:48` says it outright: "Qwen3-0.6B commits nothing at
+0.6, while 40% of what it extracts is correct."
+
+Cost, by model, floored view -> shipping gate:
+
+| model | floored | shipping | delta |
+| --- | ---: | ---: | ---: |
+| Qwen3-0.6B | 0.0000 | 0.4058 | +0.4058 |
+| granite-4.0-350m | 0.0000 | 0.2063 | +0.2063 |
+| Qwen3-1.7B | 0.4000 | 0.5937 | +0.1937 |
+| granite-4.0-h-350m | 0.0000 | 0.1364 | +0.1364 |
+| granite-4.1-3b | 0.5714 | 0.6522 | +0.0808 |
+| LFM2.5-230M | 0.0000 | 0.0263 | +0.0263 |
+| gemma-4-E2B | 0.6462 | 0.5793 | -0.0669 |
+| gemma-4-E4B | 0.8281 | 0.8217 | -0.0064 |
+
+The gate is not uniformly generous: it costs E2B 0.067, because grounding drops
+extractions the floor let through. It is not a leniency change, it is a
+correctness one.
+
+Four of the six models I reported as scoring exactly 0.0000 are not zero under
+the gate that ships. The claim built on that table, that nothing below about 600M
+parameters produces usable extraction, was a claim about a retired config value.
+Only SmolLM2-360M and gemma-3-270m are genuinely 0, and their failures are
+specific and separately diagnosed:
+
+| model | what it actually emits | genuine? |
+| --- | --- | --- |
+| gemma-3-270m | `{"content": "<the note, echoed back>"}` | yes, no schema at all |
+| SmolLM2-360M | a bare fact object, no `facts` wrapper | yes, shape |
+| LFM2.5-230M | `facts` array with `relation` and `object`, no `subject` | one missing field |
+| granite-4.0-h-350m | correct extraction, JSON unterminated by one brace | truncated framing |
+| LFM2-350M-Extract | correct shape, repeats one fact to the token cap | repetition loop |
+| Qwen3-0.6B | correct schema on 97% of notes, 72 triples | no, config artifact |
+
+Fixed: the default is now `pred_grounded`, synthesised in the scorer so every
+prediction file already on disk gets the corrected view without re-running. `pred`
+and `pred_nofloor` remain behind explicit flags, because the historical sweeps
+were scored with the floor and the log above refers to those numbers.
+
+Also fixed: `test_score.py` asserted the floored view was the default, so the
+suite would have passed forever with the wrong gate. It now asserts the default
+keeps a grounded low-confidence fact and drops an ungrounded high-confidence one.
+
+Not fixed: the four non-zero small models were all measured with
+`disable_thinking` set, which cost E4B 0.09. Their thinking-on numbers do not
+exist yet.
