@@ -19,9 +19,7 @@ int handle_config_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    (void)req;
-
-   config_t cfg;
-   if (config_load(&cfg) != 0)
+   if (!config_present())
       return server_send_error(conn, "config: could not load configuration", NULL);
 
    cJSON *obj = cJSON_CreateObject();
@@ -34,14 +32,13 @@ int handle_config_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    for (int i = 0; config_fields[i].key; i++)
    {
       cJSON_AddItemToObject(obj, config_fields[i].key,
-                            config_field_public_value_json(&cfg, &config_fields[i]));
+                            config_field_public_value_json_current(&config_fields[i]));
       if (config_field_secret_name(&config_fields[i]))
          cJSON_AddBoolToObject(secrets, config_fields[i].key, 1);
       if (config_fields[i].group != FGROUP_RUNTIME)
          cJSON_AddStringToObject(groups, config_fields[i].key,
                                  config_field_group_name(&config_fields[i]));
    }
-   runtime_secret_wipe(&cfg, sizeof(cfg));
 
    cJSON *resp = jo_ok();
    cJSON_AddItemToObject(resp, "config", obj);
@@ -62,16 +59,13 @@ int handle_config_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    const config_field_t *f = config_field_lookup(key);
    if (!f)
       return server_send_error(conn, "config: unknown key", NULL);
-
-   config_t cfg;
-   if (config_load(&cfg) != 0)
+   if (!config_present())
       return server_send_error(conn, "config: could not load configuration", NULL);
 
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "key", key);
-   cJSON_AddItemToObject(resp, "value", config_field_public_value_json(&cfg, f));
+   cJSON_AddItemToObject(resp, "value", config_field_public_value_json_current(f));
    cJSON_AddBoolToObject(resp, "secret", config_field_secret_name(f) ? 1 : 0);
-   runtime_secret_wipe(&cfg, sizeof(cfg));
    return server_send_ok(conn, resp);
 }
 

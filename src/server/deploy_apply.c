@@ -236,15 +236,14 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
       *managed_kb_out = 0;
    if (managed_identity_out)
       *managed_identity_out = 0;
-   config_t cfg;
-   if (config_load(&cfg) < 0)
+   if (!config_present())
    {
       if (err && err_cap)
          snprintf(err, err_cap, "could not load the saved wizard configuration");
       return NULL;
    }
    char env[2048];
-   config_emit_deploy_env(&cfg, env, sizeof(env));
+   config_emit_deploy_env_current(env, sizeof(env));
 
    char llm_token[513] = "";
    /* Currently always 0: config_emit_deploy_env stopped emitting the "llm" profile when

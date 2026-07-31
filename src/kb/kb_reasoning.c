@@ -145,21 +145,24 @@ static cJSON *build_fact_array(const char *scope_kind, const char *scope_id)
 
 /* ---- kb_reasoning_query ---- */
 
-int kb_reasoning_query(const config_t *cfg, const char *query, const char *bindings_json,
-                       const char *scope_kind, const char *scope_id,
-                       kb_reasoning_result_t *result_out)
+int kb_reasoning_query(const char *query, const char *bindings_json, const char *scope_kind,
+                       const char *scope_id, kb_reasoning_result_t *result_out)
 {
-   if (!cfg || !query || !result_out)
+   if (!query || !result_out)
       return -1;
-   if (!cfg->reasoning_datalog_command[0])
+   /* Copied out: the command is passed to platform_exec_pipe further down, past
+    * other accessor calls that would reclaim the thread-local buffer. */
+   char datalog_command[sizeof(((config_t *)0)->reasoning_datalog_command)];
+   snprintf(datalog_command, sizeof(datalog_command), "%s", config_reasoning_datalog_command());
+   if (!datalog_command[0])
       return -1;
 
    memset(result_out, 0, sizeof(*result_out));
 
-   int row_budget =
-       cfg->reasoning_row_budget > 0 ? cfg->reasoning_row_budget : REASONING_DEFAULT_ROW_BUDGET;
-   int time_limit_ms = cfg->reasoning_time_limit_ms > 0 ? cfg->reasoning_time_limit_ms
-                                                        : REASONING_DEFAULT_TIME_LIMIT_MS;
+   int row_budget = config_reasoning_row_budget() > 0 ? config_reasoning_row_budget()
+                                                      : REASONING_DEFAULT_ROW_BUDGET;
+   int time_limit_ms = config_reasoning_time_limit_ms() > 0 ? config_reasoning_time_limit_ms()
+                                                            : REASONING_DEFAULT_TIME_LIMIT_MS;
 
    cJSON *facts = build_fact_array(scope_kind, scope_id);
    if (!facts)
@@ -209,7 +212,7 @@ int kb_reasoning_query(const config_t *cfg, const char *query, const char *bindi
    char *out = NULL;
    size_t out_len = 0;
    int rc =
-       platform_exec_pipe(cfg->reasoning_datalog_command, req_str, strlen(req_str), &out, &out_len);
+       platform_exec_pipe(datalog_command, req_str, strlen(req_str), &out, &out_len);
    free(req_str);
 
    if (rc != 0 || !out)
@@ -455,12 +458,11 @@ int kb_reasoning_case_recall(const char *trigger_json, const char *scope_kind,
 
 /* ---- kb_reasoning_contradiction_check ---- */
 
-int kb_reasoning_contradiction_check(const config_t *cfg, const char *artifact_a_id,
-                                     const char *artifact_b_id)
+int kb_reasoning_contradiction_check(const char *artifact_a_id, const char *artifact_b_id)
 {
-   if (!cfg || !artifact_a_id || !artifact_b_id)
+   if (!artifact_a_id || !artifact_b_id)
       return -1;
-   if (!cfg->reasoning_datalog_command[0])
+   if (!config_reasoning_datalog_command()[0])
       return -1;
 
    char bindings[512];
@@ -468,7 +470,7 @@ int kb_reasoning_contradiction_check(const config_t *cfg, const char *artifact_a
             artifact_b_id);
 
    kb_reasoning_result_t result;
-   int rc = kb_reasoning_query(cfg, "contradiction_ok(?a, ?b)", bindings, NULL, NULL, &result);
+   int rc = kb_reasoning_query("contradiction_ok(?a, ?b)", bindings, NULL, NULL, &result);
    if (rc != 0)
       return -1;
 

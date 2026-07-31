@@ -41,11 +41,9 @@ void reflection_test_release_idle(void)
 
 /* Graph enrichment: report "no citations" so run_synthesis_pass takes the plain
  * evidence path (the graph seam is exercised elsewhere). */
-int kb_reasoning_query(const config_t *cfg, const char *query, const char *bindings_json,
-                       const char *program, const char *facts_json,
-                       kb_reasoning_result_t *result_out)
+int kb_reasoning_query(const char *query, const char *bindings_json, const char *program,
+                       const char *facts_json, kb_reasoning_result_t *result_out)
 {
-   (void)cfg;
    (void)query;
    (void)bindings_json;
    (void)program;

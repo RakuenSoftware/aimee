@@ -194,10 +194,7 @@ static int kb_handle_memory_repair(int fd, cJSON *req)
    int failed_only = cJSON_IsTrue(failed_only_j) ? 1 : 0;
    int reset_stuck = cJSON_IsTrue(reset_stuck_j) ? 1 : 0;
    int64_t memory_id = cJSON_IsNumber(memory_id_j) ? (int64_t)memory_id_j->valuedouble : 0;
-   config_t repair_cfg;
-   config_load(&repair_cfg);
-   const char *embed_cmd = config_embedding_command(
-       &repair_cfg,
+   const char *embed_cmd = config_embedding_command_current(
        (cJSON_IsString(embed_j) && embed_j->valuestring[0]) ? embed_j->valuestring : NULL);
 
    if (reset_stuck)
@@ -293,10 +290,7 @@ static int kb_handle_memory_verify(int fd, cJSON *req)
    cJSON *embed_j = cJSON_GetObjectItemCaseSensitive(req, "embedding_command");
    int do_detail = cJSON_IsTrue(detail_j) ? 1 : 0;
    int do_timings = cJSON_IsTrue(timings_j) ? 1 : 0;
-   config_t verify_cfg;
-   config_load(&verify_cfg);
-   const char *embed_cmd = config_embedding_command(
-       &verify_cfg,
+   const char *embed_cmd = config_embedding_command_current(
        (cJSON_IsString(embed_j) && embed_j->valuestring[0]) ? embed_j->valuestring : NULL);
 
    pgvec_verify_snapshot_t snap;
@@ -483,10 +477,7 @@ static int kb_handle_memory_embed(int fd, cJSON *req)
    int64_t memory_id = cJSON_IsNumber(mem_j) ? (int64_t)mem_j->valuedouble : 0;
    int all = cJSON_IsTrue(all_j) ? 1 : 0;
    const char *version = (cJSON_IsString(ver_j) && ver_j->valuestring[0]) ? ver_j->valuestring : "";
-   config_t embed_cfg;
-   config_load(&embed_cfg);
-   const char *embed_cmd = config_embedding_command(
-       &embed_cfg,
+   const char *embed_cmd = config_embedding_command_current(
        (cJSON_IsString(embed_j) && embed_j->valuestring[0]) ? embed_j->valuestring : NULL);
 
    if (!all && memory_id <= 0)
@@ -642,10 +633,7 @@ static int kb_handle_memory_reembed_start(int fd, cJSON *req)
     * CONFIGURED embedder, then builtin. Never silently builtin in production:
     * builtin emits 384-dim vectors that a real halfvec(1024)/(2560) column
     * rejects, leaving memory_embeddings empty. */
-   config_t reembed_cfg;
-   config_load(&reembed_cfg);
-   const char *embed_cmd = config_embedding_command(
-       &reembed_cfg,
+   const char *embed_cmd = config_embedding_command_current(
        (cJSON_IsString(embed_j) && embed_j->valuestring[0]) ? embed_j->valuestring : NULL);
 
    char ts_now[32];

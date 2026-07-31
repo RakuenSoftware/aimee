@@ -387,10 +387,10 @@ int memory_fetch_row_by_unit_id(int64_t unit_id, memory_t *out)
 
 const char *memory_effective_embedding_cmd(const char *command)
 {
-   /* Single policy point: config_embedding_command (config_save.c). The caller
+   /* Single policy point: config_embedding_command_current (config_save.c). The caller
     * has already resolved config -> command upstream, so pass it as the request
     * override; this keeps memory_core consistent with the kb-side resolution. */
-   return config_embedding_command(NULL, command);
+   return config_embedding_command_current(command);
 }
 
 /* Per-recall query-embedding memo.

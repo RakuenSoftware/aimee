@@ -74,7 +74,7 @@ static int run_synthesis_pass(const config_t *cfg, const db2_artifact_proposed_t
       char bindings[128];
       snprintf(bindings, sizeof(bindings), "{\"?a\":\"%s\"}", row->id);
       kb_reasoning_result_t graph_ctx = {0};
-      if (kb_reasoning_query(cfg, "citation_reachable(?a, ?b)", bindings, NULL, NULL, &graph_ctx) ==
+      if (kb_reasoning_query("citation_reachable(?a, ?b)", bindings, NULL, NULL, &graph_ctx) ==
               0 &&
           graph_ctx.n_rows > 0)
       {

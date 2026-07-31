@@ -9,11 +9,34 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include "db2_test_shim.h"
 #include "../kb_reasoning.h"
 #include "config.h"
 #include "config_learning.h"
+
+/* The "disabled" cases below assert that an unset reasoning.datalog_command
+ * returns -1. They used to guarantee that precondition with memset on a local
+ * config_t; now that the reasoning entry points read config themselves, the
+ * precondition has to come from the config they read. Point HOME at an empty
+ * temp dir so it is the suite that decides, not whatever the developer running
+ * it happens to have configured -- otherwise a machine with a real
+ * datalog_command would both fail here AND execute it. */
+static char g_home[256];
+
+static void isolate_home(void)
+{
+   snprintf(g_home, sizeof(g_home), "/tmp/aimee-test-reasoning-XXXXXX");
+   assert(mkdtemp(g_home) != NULL);
+   assert(setenv("HOME", g_home, 1) == 0);
+   assert(unsetenv("AIMEE_HOME") == 0);
+   assert(setenv("AIMEE_NO_CACHE", "1", 1) == 0);
+   /* No aimee.yaml written: config_load fills defaults, and the default
+    * reasoning.datalog_command is empty -- which is the condition under test. */
+   assert(config_reasoning_datalog_command()[0] == '\0');
+}
 
 static void open_db(void)
 {
@@ -47,11 +70,8 @@ static void test_reasoning_case_write(void)
 /* ---- 2. reasoning_contradiction_check_disabled ---- */
 static void test_reasoning_contradiction_check_disabled(void)
 {
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   /* reasoning_datalog_command empty = disabled */
-
-   int rc = kb_reasoning_contradiction_check(&cfg, "artifact-a", "artifact-b");
+   /* reasoning_datalog_command unset in the suite's config = disabled */
+   int rc = kb_reasoning_contradiction_check("artifact-a", "artifact-b");
    assert(rc == -1);
 
    printf("  reasoning_contradiction_check_disabled: ok\n");
@@ -60,11 +80,8 @@ static void test_reasoning_contradiction_check_disabled(void)
 /* ---- 3. reasoning_query_disabled ---- */
 static void test_reasoning_query_disabled(void)
 {
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-
    kb_reasoning_result_t result;
-   int rc = kb_reasoning_query(&cfg, "contradiction_ok(?a, ?b)", NULL, NULL, NULL, &result);
+   int rc = kb_reasoning_query("contradiction_ok(?a, ?b)", NULL, NULL, NULL, &result);
    assert(rc == -1);
 
    printf("  reasoning_query_disabled: ok\n");
@@ -103,6 +120,7 @@ int main(void)
 {
    printf("reasoning:\n");
 
+   isolate_home();
    test_reasoning_case_write();
    test_reasoning_contradiction_check_disabled();
    test_reasoning_query_disabled();

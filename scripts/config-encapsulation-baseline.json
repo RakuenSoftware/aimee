@@ -82,22 +82,14 @@
       "loads": 0
     },
     "src/kb/kb_reasoning.c": {
-      "decls": 2,
+      "decls": 1,
       "loads": 0
     },
     "src/kb/kb_reflection.c": {
       "decls": 5,
       "loads": 3
     },
-    "src/kb/kb_service.c": {
-      "decls": 4,
-      "loads": 4
-    },
     "src/kb/kb_service_agent.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/kb/kb_service_artifacts.c": {
       "decls": 1,
       "loads": 1
     },
@@ -117,10 +109,6 @@
       "decls": 1,
       "loads": 0
     },
-    "src/kb_reasoning.h": {
-      "decls": 2,
-      "loads": 0
-    },
     "src/modules/benchmarks/agent_eval_benchmarks.c": {
       "decls": 1,
       "loads": 1
@@ -132,10 +120,6 @@
     "src/modules/guardrails/guardrails_action_audit.c": {
       "decls": 2,
       "loads": 0
-    },
-    "src/modules/guardrails/guardrails_orchestrator.c": {
-      "decls": 1,
-      "loads": 1
     },
     "src/modules/kb-synthesis/kb_curator_drain.c": {
       "decls": 1,
@@ -168,10 +152,6 @@
     "src/modules/lsp/lsp_manager.c": {
       "decls": 1,
       "loads": 1
-    },
-    "src/modules/memory/memory_advanced.c": {
-      "decls": 2,
-      "loads": 2
     },
     "src/modules/memory/memory_core_internal.h": {
       "decls": 2,
@@ -225,10 +205,6 @@
       "decls": 2,
       "loads": 0
     },
-    "src/server/deploy_apply.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/server/fidelity_check.c": {
       "decls": 1,
       "loads": 0
@@ -245,10 +221,6 @@
       "decls": 1,
       "loads": 1
     },
-    "src/server/server_config.c": {
-      "decls": 2,
-      "loads": 2
-    },
     "src/server/server_cron.c": {
       "decls": 5,
       "loads": 3
@@ -260,10 +232,6 @@
     "src/server/server_mcp.c": {
       "decls": 2,
       "loads": 2
-    },
-    "src/server/server_mgmt_read_source.c": {
-      "decls": 1,
-      "loads": 1
     },
     "src/server/server_state.c": {
       "decls": 2,
@@ -397,10 +365,6 @@
       "decls": 1,
       "loads": 0
     },
-    "src/tests/test_deploy_apply.c": {
-      "decls": 2,
-      "loads": 1
-    },
     "src/tests/test_features.c": {
       "decls": 4,
       "loads": 0
@@ -446,7 +410,7 @@
       "loads": 0
     },
     "src/tests/test_kb_reflection.c": {
-      "decls": 7,
+      "decls": 6,
       "loads": 0
     },
     "src/tests/test_mcp_client_registry.c": {
@@ -478,7 +442,7 @@
       "loads": 0
     },
     "src/tests/test_reasoning.c": {
-      "decls": 4,
+      "decls": 2,
       "loads": 0
     },
     "src/tests/test_retrieval_outcome_bridge.c": {
@@ -495,10 +459,6 @@
     },
     "src/tests/test_server_jobs_aux.c": {
       "decls": 3,
-      "loads": 1
-    },
-    "src/tests/test_server_mgmt_read_source.c": {
-      "decls": 1,
       "loads": 1
     },
     "src/tests/test_token_audit_load.c": {
@@ -527,8 +487,8 @@
     }
   },
   "totals": {
-    "decls": 433,
-    "files": 131,
-    "loads": 242
+    "decls": 412,
+    "files": 121,
+    "loads": 228
   }
 }

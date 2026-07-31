@@ -21,10 +21,7 @@ int kb_send_error(int fd, const char *message);
  * proposed+flagged_for_review so a human reviewer sees it. */
 static void reasoning_enforce_contradiction_check(const char *id)
 {
-   config_t cfg;
-   config_load(&cfg);
-
-   if (!cfg.reasoning_datalog_command[0])
+   if (!config_reasoning_datalog_command()[0])
       return;
 
 #define ENFORCE_LINK_MAX 8
@@ -34,7 +31,7 @@ static void reasoning_enforce_contradiction_check(const char *id)
    {
       if (strcmp(links[i].link_kind, "contradicts") != 0)
          continue;
-      int result = kb_reasoning_contradiction_check(&cfg, id, links[i].to_id);
+      int result = kb_reasoning_contradiction_check(id, links[i].to_id);
       if (result == 0)
       {
          db2_artifact_flag_review(id, "datalog_structural_check_failed");

@@ -1239,6 +1239,14 @@ int config_load(config_t *cfg)
    return 0;
 }
 
+/* The config_load stub above always succeeds, so the probe the handlers now use
+ * in its place has to say so too -- otherwise config.show / config.get would
+ * report "failed to load config" against a config this suite considers loaded. */
+int config_present(void)
+{
+   return 1;
+}
+
 /* The generated accessors read every field through this. Serve them out of the
  * SAME in-memory config the config_load stub returns, so an accessor and a
  * config_load observed in one test can never disagree. Non-stateful mode zeroes,

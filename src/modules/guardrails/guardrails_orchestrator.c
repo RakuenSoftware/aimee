@@ -1703,14 +1703,12 @@ int pre_tool_check_inner(const char *tool_name, const char *input_json, session_
 #if !defined(AIMEE_DB2_DISABLED)
       if (ap_count == 0)
       {
-         config_t rcfg;
-         config_load(&rcfg);
-         if (rcfg.reasoning_datalog_command[0] && file_str)
+         if (config_reasoning_datalog_command()[0] && file_str)
          {
             char path64[65];
             snprintf(path64, sizeof(path64), "%.64s", file_str);
             kb_reasoning_result_t res;
-            if (kb_reasoning_query(&rcfg, "citation_reachable(?a, ?b)", NULL, "guardrail", path64,
+            if (kb_reasoning_query("citation_reachable(?a, ?b)", NULL, "guardrail", path64,
                                    &res) == 0 &&
                 res.n_rows > 0)
                LOG_DEBUG("reasoning.guardrail",
