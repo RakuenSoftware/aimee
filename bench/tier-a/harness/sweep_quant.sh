@@ -31,11 +31,19 @@ set -u
 cd "$(dirname "$0")/.."
 PY=${PY:-/opt/bench/bin/python}
 SERVER=${SERVER:-/opt/llama.cpp/build-cuda/bin/llama-server}
-OUT=results/quant
+OUT=${OUT:-results/quant}
 mkdir -p "$OUT"
 export HF_HOME=${HF_HOME:-/opt/hf}
 PORT=${PORT:-8097}
 MAXTOK=8192
+# DEVICE pins the backend device. On a box with more than one GPU this is not
+# optional: .254 enumerates the Phoenix iGPU as Vulkan0 and the 7900 XTX as
+# Vulkan1, and llama.cpp defaults to the first. An unpinned run there measures
+# an 8GB integrated GPU sharing host RAM, which is how this benchmark previously
+# recorded a 30B MoE at 0.68 tok/s and read it as a broken architecture.
+DEVICE=${DEVICE:-}
+DEVARG=""
+[ -n "$DEVICE" ] && DEVARG="--device $DEVICE"
 
 # label|repo:quant
 MODELS=(
@@ -53,7 +61,8 @@ for entry in "${MODELS[@]}"; do
   [ -s "$PRED" ] && { echo "SKIP $LABEL"; continue; }
 
   echo "=== SERVE $LABEL ($REPO) ==="
-  $SERVER -hf "$REPO" --port "$PORT" -c 8192 --no-webui --no-mmproj -ngl 99 \
+  # shellcheck disable=SC2086
+  $SERVER -hf "$REPO" --port "$PORT" -c 8192 --no-webui --no-mmproj -ngl 99 $DEVARG \
       >"$LOG" 2>&1 &
   SRV=$!
   ready=0
@@ -93,11 +102,14 @@ for entry in "${MODELS[@]}"; do
   #
   # Recorded even on failure: an arm that would not fit is itself a result.
   hwm_kib=$(grep -oE '^VmHWM:[[:space:]]+[0-9]+' "/proc/$SRV/status" 2>/dev/null | grep -oE '[0-9]+')
-  model_mib=$(grep -oE 'CUDA0 model buffer size *= *[0-9.]+ MiB' "$LOG" | tail -1 | grep -oE '[0-9.]+' | tail -1)
+  # Match CUDA0 or Vulkan0/1 — the buffer line is named for the backend, and a
+  # CUDA-only pattern silently yields null on the Vulkan host.
+  model_mib=$(grep -oE '(CUDA[0-9]|Vulkan[0-9]) model buffer size *= *[0-9.]+ MiB' "$LOG" | tail -1 | grep -oE '[0-9.]+' | tail -1)
+  served_on=$(grep -oE 'using device [A-Za-z0-9]+' "$LOG" | tail -1 | sed 's/using device //')
   kv_mib=$(grep -oiE 'KV self size *= *[0-9.]+ MiB' "$LOG" | tail -1 | grep -oE '[0-9.]+' | tail -1)
   cpu_mib=$(grep -oE 'CPU model buffer size *= *[0-9.]+ MiB' "$LOG" | tail -1 | grep -oE '[0-9.]+' | tail -1)
-  printf '{"model":"%s","repo":"%s","thinking":true,"no_mmproj":true,"ctx":8192,"peak_host_rss_mib":%s,"gpu_model_mib":%s,"cpu_model_mib":%s,"kv_mib":%s}\n' \
-    "$LABEL" "$REPO" "$( [ -n "${hwm_kib:-}" ] && echo $((hwm_kib/1024)) || echo null )" \
+  printf '{"model":"%s","repo":"%s","thinking":true,"no_mmproj":true,"ctx":8192,"device_requested":"%s","device_used":"%s","peak_host_rss_mib":%s,"gpu_model_mib":%s,"cpu_model_mib":%s,"kv_mib":%s}\n' \
+    "$LABEL" "$REPO" "${DEVICE:-default}" "${served_on:-unknown}" "$( [ -n "${hwm_kib:-}" ] && echo $((hwm_kib/1024)) || echo null )" \
     "${model_mib:-null}" "${cpu_mib:-null}" "${kv_mib:-null}" \
     > "$OUT/$LABEL.device.json"
 
@@ -107,16 +119,17 @@ for entry in "${MODELS[@]}"; do
   # near full before. Keep only the weights currently under test.
   [ -x harness/prune_models.sh ] && KEEP="$REPO" HF_HOME="$HF_HOME" \
       bash harness/prune_models.sh 2>/dev/null | tail -1
-  df -h /opt | tail -1
+  df -h . | tail -1
 done
 # Quality against memory, in one table, because neither number decides alone.
-$PY - <<'EOF'
+OUT="$OUT" $PY - <<'EOF'
 import json, glob, os
+out = os.environ["OUT"]
 rows = []
-for f in sorted(glob.glob("results/quant/*.device.json")):
+for f in sorted(glob.glob(f"{out}/*.device.json")):
     d = json.load(open(f))
     lab = d["model"]
-    s = f"results/quant/{lab}.score.json"
+    s = f"{out}/{lab}.score.json"
     sc = json.load(open(s)) if os.path.exists(s) else None
     rows.append((lab, sc, d))
 hdr = ("arm", "F1", "P", "R", "hostRSS", "gpuMiB", "kvMiB")
