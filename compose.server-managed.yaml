@@ -45,6 +45,18 @@ services:
       AIMEE_HOME: /var/lib/aimee
       AIMEE_DB1_URL: sqlite:///var/lib/aimee/aimee.db
       AIMEE_SERVER_HTTP_BIND: "1"
+      # Reachable address(es) to place in the self-signed cert's SANs, for clients
+      # that verify by NAME rather than TOFU-pinning the leaf (generic HTTPS
+      # tooling: curl, browsers, probes). Empty keeps the default container
+      # hostname + loopback set. pki.c reads this from the process environment, so
+      # without this passthrough the documented knob reaches the binary from
+      # nowhere and setting it appears to do nothing.
+      #
+      # It also pins the cert's CN (pki_resolve_server_cn), which is what keeps a
+      # self-signed cert STABLE across container recreates — so set it before first
+      # start. Changing it later does not re-issue an existing cert (one is minted
+      # only when absent), and forcing a re-issue breaks every TOFU-pinned client.
+      AIMEE_TLS_EXTRA_SAN: ${AIMEE_TLS_EXTRA_SAN:-}
       # Browser webchat (the wizard lives here). Credentials are streamed into
       # Vault by scripts/aimee-compose-vault-bootstrap.sh before `up`; never add
       # them to this long-lived service's persistent container environment.

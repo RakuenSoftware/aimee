@@ -132,6 +132,13 @@ services:
       AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE: ${AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE:-/run/aimee/management/jwks-trust-bundle.json}
       # The one-time AIMEE_KB_CONN enrollment credential is streamed into Vault.
       AIMEE_SERVER_HTTP_BIND: "1"
+      # Reachable address(es) for the self-signed cert's SANs, for clients that
+      # verify by NAME instead of TOFU-pinning the leaf. Empty keeps the default
+      # container hostname + loopback set. pki.c reads it from the environment, so
+      # without this passthrough the knob cannot reach the binary at all. It also
+      # pins the CN, which keeps the cert stable across recreates — set it before
+      # first start; a later change does not re-issue an existing cert.
+      AIMEE_TLS_EXTRA_SAN: ${AIMEE_TLS_EXTRA_SAN:-}
       # Browser webchat (HTTPS on :8443). ON by default — it is a first-class
       # surface whose binary is built into the image. Set
       # AIMEE_RUNTIME_WEB_ENABLED=0 to ship server-only. Set both variables on
