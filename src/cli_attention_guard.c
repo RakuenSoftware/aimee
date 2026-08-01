@@ -1324,14 +1324,23 @@ static void attn_git_current_branch(const char *dir, char *out, size_t outlen)
  * else the local branch, since a fresh worktree often carries only the remote-tracking
  * ref. 0 when neither resolves -- the caller treats that as unresolved and fails closed.
  *
- * The remote is preferred because this ref is the yardstick for lineage, and a local
- * default branch goes stale the moment it is not pulled. On a box whose local `testing`
- * sat 2542 commits behind origin/testing, every session branch cut from the CURRENT
- * default shared a merge base the stale local ref did not contain, so
- * attn_git_shares_foreign_session_history() flagged all of them and refused every
- * mutating op -- including the write of the `require_session_worktree: false` hatch
- * that is the documented way out. Measuring against the branch the sessions are
- * actually cut from is what the rule means by "the default branch". */
+ * When both resolve, the one that already contains the other wins. This ref is the
+ * yardstick for lineage, and a local default branch goes stale the moment it is not
+ * pulled. On a box whose local `testing` sat 2542 commits behind origin/testing, every
+ * session branch cut from the CURRENT default shared a merge base the stale local ref
+ * did not contain, so attn_git_shares_foreign_session_history() flagged all of them and
+ * refused every mutating op -- including the write of the `require_session_worktree:
+ * false` hatch that is the documented way out. Preferring the containing ref also keeps
+ * a local default carrying unpushed commits from being discarded in favour of a remote
+ * that lacks them. */
+static int attn_git_ref_exists(const char *dir, const char *ref)
+{
+   char cmd[2600];
+   snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse --verify --quiet '%s^{commit}' >/dev/null 2>&1",
+            dir, ref);
+   return system(cmd) == 0;
+}
+
 static int attn_git_default_ref(const char *dir, const char *defbr, char *out, size_t outlen)
 {
    if (!dir || !dir[0] || !defbr || !defbr[0] || !out || !outlen)
@@ -1340,20 +1349,32 @@ static int attn_git_default_ref(const char *dir, const char *defbr, char *out, s
       return 0;
    char remote[300];
    snprintf(remote, sizeof(remote), "origin/%s", defbr);
-   const char *forms[2] = {remote, defbr};
-   for (int i = 0; i < 2; i++)
+
+   int has_local = attn_git_ref_exists(dir, defbr);
+   int has_remote = attn_git_ref_exists(dir, remote);
+   if (!has_local && !has_remote)
+      return 0;
+   if (has_local && !has_remote)
    {
-      char cmd[2600];
-      snprintf(cmd, sizeof(cmd),
-               "git -C '%s' rev-parse --verify --quiet '%s^{commit}' >/dev/null 2>&1", dir,
-               forms[i]);
-      if (system(cmd) == 0)
-      {
-         snprintf(out, outlen, "%s", forms[i]);
-         return 1;
-      }
+      snprintf(out, outlen, "%s", defbr);
+      return 1;
    }
-   return 0;
+   if (has_remote && !has_local)
+   {
+      snprintf(out, outlen, "%s", remote);
+      return 1;
+   }
+
+   /* Both resolve: take whichever already contains the other, so neither a local
+    * branch left behind nor one carrying unpushed default-branch commits can
+    * shrink the yardstick. Ties (identical refs) fall to the local name. */
+   char cmd[2600];
+   snprintf(cmd, sizeof(cmd),
+            "git -C '%s' merge-base --is-ancestor '%s^{commit}' '%s^{commit}' >/dev/null 2>&1", dir,
+            remote, defbr);
+   int local_contains_remote = system(cmd) == 0;
+   snprintf(out, outlen, "%s", local_contains_remote ? defbr : remote);
+   return 1;
 }
 
 /* 1 iff the worktree's HEAD shares unmerged history with a registered session branch
