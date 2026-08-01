@@ -20,10 +20,16 @@
 # also lands byte-identical, the GGUF path is not costing gemma-4 anything on
 # this task and the shipped recommendation stands on model numbers.
 #
-# Both arms run here rather than against the existing results/gpu E2B, because
-# that run predates the current prompt. Comparing a new run to an old one would
-# confound runtime with prompt, which is the exact mistake this lane exists to
-# avoid. Matched settings, one variable: the runtime.
+# Four arms, so runtime and thinking are each isolated rather than confounded:
+#
+#   arm 1  transformers  thinking OFF |  runtime delta, thinking held off
+#   arm 2  llama.cpp     thinking OFF |
+#   arm 3  transformers  thinking ON  |  runtime delta, thinking held on
+#   arm 4  llama.cpp     thinking ON  |  <- the shipped configuration
+#
+# Reading 1v2 and 3v4 gives the runtime effect; 1v3 and 2v4 give the thinking
+# effect. Nothing is compared against the older results/gpu E2B, which predates
+# the current prompt and would confound runtime with prompt version.
 set -u
 cd "$(dirname "$0")/.."
 PY=${PY:-/opt/bench/bin/python}
@@ -57,10 +63,7 @@ if [ -s "$OUT/$L.pred.jsonl" ]; then echo "SKIP $L"; else
   fi
 fi
 
-# --- arm 2: llama.cpp, Q8_0, same prompt and same cap ---
-# Thinking is left OFF to match arm 1: run_hf.py applies the chat template with
-# no thinking toggle for gemma, so sending --thinking here would change two
-# variables at once and answer neither question.
+# --- arm 2: llama.cpp, Q8_0, thinking OFF — matches arm 1 ---
 L=E2B.llamacpp
 if [ -s "$OUT/$L.pred.jsonl" ]; then echo "SKIP $L"; else
   echo "=== $L (llama.cpp, Q8_0) ==="
@@ -88,17 +91,26 @@ if [ -s "$OUT/$L.pred.jsonl" ]; then echo "SKIP $L"; else
   kill $SRV 2>/dev/null; wait $SRV 2>/dev/null; sleep 5
 fi
 
-# --- arm 3: llama.cpp, Q8_0, thinking ON ---
-# Arms 1 and 2 both landed near 0.57, well below the 0.6912 the thinking lane
-# recorded for this model on the same prompt. That gap crosses the thinking
-# variable, so it cannot be read off arms 1 and 2 alone: they answer the runtime
-# question and nothing else. This arm is identical to arm 2 except for
-# --thinking, which makes the thinking delta a one-variable comparison too.
-#
-# There is no transformers counterpart because run_hf.py has no thinking toggle
-# for gemma — its chat template is applied as-is. That asymmetry is itself worth
-# recording: every gemma number in results/gpu is thinking-OFF by construction,
-# not by choice.
+# --- arm 3: transformers, bf16, thinking ON — the shipped configuration ---
+# run_hf.py could not send this until now: it passed enable_thinking only for
+# Qwen3, and gemma-4's template defaults it to false, so every gemma number in
+# results/gpu is thinking-OFF by default rather than by choice. Production does
+# not suppress thinking (kb_curator_provider.c:198), so arms 3 and 4 are the
+# configuration we actually ship and arms 1 and 2 are the control.
+L=E2B.transformers.thinking
+if [ -s "$OUT/$L.pred.jsonl" ]; then echo "SKIP $L"; else
+  echo "=== $L (transformers, bf16, thinking ON) ==="
+  if $PY harness/run_hf.py --model google/gemma-4-E2B-it --gold data/gold.jsonl \
+       --thinking --max-new-tokens $MAXTOK --dtype bfloat16 --device cuda \
+       --out "$OUT/$L.pred.jsonl" >"$OUT/$L.run.log" 2>&1; then
+    score "$L"
+  else
+    echo "FAIL $L -> runner error: $(tail -3 "$OUT/$L.run.log" | tr '\n' ' ' | cut -c1-200)"
+    rm -f "$OUT/$L.pred.jsonl"
+  fi
+fi
+
+# --- arm 4: llama.cpp, Q8_0, thinking ON — same config, other runtime ---
 L=E2B.llamacpp.thinking
 if [ -s "$OUT/$L.pred.jsonl" ]; then echo "SKIP $L"; else
   echo "=== $L (llama.cpp, Q8_0, thinking ON) ==="
