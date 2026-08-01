@@ -16,7 +16,7 @@ import (
 
 const (
 	defaultBootstrapUsername = "aimee"
-	setupAccountMinPassword  = 8
+	setupAccountMinPassword  = 6
 )
 
 // setupAccountSystem isolates account mutations so the onboarding transaction
@@ -284,7 +284,8 @@ func (s *server) handleSetupAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(req.Password) < setupAccountMinPassword {
-		writeJSONError(w, http.StatusBadRequest, "password must be at least 8 characters")
+		writeJSONError(w, http.StatusBadRequest,
+			fmt.Sprintf("password must be at least %d characters", setupAccountMinPassword))
 		return
 	}
 	if strings.ContainsAny(req.Password, "\x00\r\n") {

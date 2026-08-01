@@ -314,7 +314,7 @@ func TestSetupAccountValidatesBootstrapCallerAndCredentials(t *testing.T) {
 	}{
 		{"bootstrap caller required", "someone", `{"username":"virant","password":"long enough","password_confirmation":"long enough"}`, http.StatusForbidden},
 		{"new username required", "aimee", `{"username":"aimee","password":"long enough","password_confirmation":"long enough"}`, http.StatusBadRequest},
-		{"password minimum", "aimee", `{"username":"virant","password":"short","password_confirmation":"short"}`, http.StatusBadRequest},
+		{"password below the minimum", "aimee", `{"username":"virant","password":"short","password_confirmation":"short"}`, http.StatusBadRequest},
 		{"password confirmation", "aimee", `{"username":"virant","password":"long enough","password_confirmation":"different"}`, http.StatusBadRequest},
 		{"password newline", "aimee", "{\"username\":\"virant\",\"password\":\"long enough\\nroot:hijack\",\"password_confirmation\":\"long enough\\nroot:hijack\"}", http.StatusBadRequest},
 	}
@@ -411,5 +411,43 @@ func TestReplacementMarkerIsReadableByTheServerProcess(t *testing.T) {
 	}
 	if strings.TrimSpace(string(body)) != "virant" {
 		t.Fatalf("marker content = %q; want the replacement username", string(body))
+	}
+}
+
+// The minimum itself, from both sides. "Something short is rejected" does not say
+// where the line is, so a change to setupAccountMinPassword can pass unnoticed;
+// this fails until the number is updated deliberately.
+//
+// It gets its own server because a successful creation retires the bootstrap
+// account, and every later case in a shared table then answers 409.
+func TestSetupAccountPasswordMinimumBoundary(t *testing.T) {
+	// Pin the NUMBER, not just the constant. Deriving both passwords from
+	// setupAccountMinPassword makes the test self-consistent at any value, so it
+	// would pass just as happily if the minimum drifted back to 8 and locked
+	// operators out of six-character passwords again.
+	if setupAccountMinPassword != 6 {
+		t.Fatalf("the account minimum is 6 characters; got %d", setupAccountMinPassword)
+	}
+	const short = "abcde"  // 5
+	const exact = "abcdef" // 6
+
+	s, _ := newSetupAccountTestServer(t)
+	body := `{"username":"virant","password":"` + short + `","password_confirmation":"` + short + `"}`
+	req := withUser(httptest.NewRequest(http.MethodPost, "/api/setup/account", strings.NewReader(body)), "aimee")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rr := httptest.NewRecorder()
+	s.handleSetupAccount(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("%d characters must be refused: code=%d body=%s", len(short), rr.Code, rr.Body.String())
+	}
+
+	s2, _ := newSetupAccountTestServer(t)
+	body = `{"username":"virant","password":"` + exact + `","password_confirmation":"` + exact + `"}`
+	req = withUser(httptest.NewRequest(http.MethodPost, "/api/setup/account", strings.NewReader(body)), "aimee")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rr = httptest.NewRecorder()
+	s2.handleSetupAccount(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("exactly %d characters must be accepted: code=%d body=%s", len(exact), rr.Code, rr.Body.String())
 	}
 }

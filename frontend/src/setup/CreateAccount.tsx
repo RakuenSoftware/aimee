@@ -9,6 +9,9 @@ function csrf(): string {
   }
 }
 
+/** Mirror of setupAccountMinPassword (runtime-web/setup_account.go). */
+const MIN_PASSWORD = 6;
+
 export default function CreateAccount({ onCreated }: { onCreated: (username: string) => void }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -26,8 +29,11 @@ export default function CreateAccount({ onCreated }: { onCreated: (username: str
       setError('Choose a username other than aimee.');
       return;
     }
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters.');
+    // Keep in step with setupAccountMinPassword in runtime-web/setup_account.go:
+    // the server rejects independently, and a client limit that is stricter than
+    // the server's just refuses a password the deployment would have accepted.
+    if (password.length < MIN_PASSWORD) {
+      setError(`Password must be at least ${MIN_PASSWORD} characters.`);
       return;
     }
     if (password !== confirmation) {
