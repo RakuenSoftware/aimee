@@ -142,15 +142,15 @@ static int kb_search_handler(const char *body, char *resp, int cap)
    if (all_projects)
    {
       if (!project && cJSON_IsString(jc) && jc->valuestring[0] &&
-          workspace_repo_identity(jc->valuestring, resolved_project, sizeof(resolved_project), NULL,
-                                  0) == 0)
+          server_active_project_from_cwd(jc->valuestring, resolved_project,
+                                         sizeof(resolved_project)) == 0)
          project = resolved_project;
    }
    else if (!project)
    {
       if (!cJSON_IsString(jc) || !jc->valuestring[0] ||
-          workspace_repo_identity(jc->valuestring, resolved_project, sizeof(resolved_project), NULL,
-                                  0) != 0)
+          server_active_project_from_cwd(jc->valuestring, resolved_project,
+                                         sizeof(resolved_project)) != 0)
       {
          cJSON_Delete(req);
          snprintf(resp, (size_t)cap,
