@@ -428,8 +428,18 @@ static int pem_to_der(const unsigned char *pem, DWORD pem_len, unsigned char **d
  * 0 (no material configured), or -1 (present but failed to load). The server's
  * key is PKCS#8 (OpenSSL PEM_write_bio_PrivateKey), so NCRYPT_PKCS8_PRIVATE_KEY_BLOB
  * imports it directly. (NTFS ACLs, not POSIX mode bits, govern key secrecy here.) */
+/* Process-local; see aimee_tls_suppress_client_cert in aimee_tls.h. */
+static int g_suppress_client_cert = 0;
+
+void aimee_tls_suppress_client_cert(int on)
+{
+   g_suppress_client_cert = on ? 1 : 0;
+}
+
 static int schannel_load_client_identity(aimee_tls_t *t)
 {
+   if (g_suppress_client_cert)
+      return 0; /* diagnostic probe: answer as if no identity were configured */
    const char *home = aimee_home();
    if (!home || !*home)
       return 0;

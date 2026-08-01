@@ -493,6 +493,13 @@ aimee_tls_t *aimee_tls_connect(int fd, const char *host)
    return t;
 }
 
+/* No-op: this backend never presents a client certificate, so there is nothing to
+ * suppress. Defined so `aimee remote set/trust` can call it unconditionally. */
+void aimee_tls_suppress_client_cert(int on)
+{
+   (void)on;
+}
+
 int aimee_tls_write_all(aimee_tls_t *t, const void *buf, size_t len)
 {
    if (!t || !t->ctx)
