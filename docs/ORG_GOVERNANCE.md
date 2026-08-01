@@ -20,6 +20,24 @@ docker exec -e 'AIMEE_DB2_URL=postgresql:///aimee_shared?host=/var/lib/aimee/run
 
 Every example below is the `aimee-kb ...` part of that.
 
+Expect noise, and expect the occasional retry. Each of these commands runs the full DB2
+initialisation before its read, so it emits several `NOTICE` lines first and, against a KB that is
+serving, can lose a race with the daemon's own schema pass:
+
+```text
+aimee: db2_init: schema apply failed: ERROR:  tuple concurrently updated
+aimee-kb: DB2 not reachable at postgresql:///aimee_shared?...
+```
+
+That message names the wrong problem. The KB is reachable; two schema applies collided. Run it again.
+Tracked in [#2217](https://github.com/RakuenSoftware/aimee/issues/2217).
+
+To read the answer rather than the notices:
+
+```bash
+docker exec ... aimee-kb team list 2>&1 | grep -v '^NOTICE'
+```
+
 ## Teams own projects, and projects scope everything else
 
 ```bash
@@ -104,8 +122,8 @@ aimee-kb telemetry allow --schema <S> --metrics a,b,c [--disabled]
 Nothing is exported until a schema names the metrics it may export. `--disabled` registers the
 allowlist without turning it on, so the set can be reviewed before it emits anything.
 
-## These commands are missing from `aimee-kb --help`
+## Where else to look
 
-`--help` lists only `enroll` and the `vault` subcommands. `team`, `project`, `models`, `spend`,
-`budget`, `rate` and `telemetry` all dispatch (`src/kb/kb_main.c`), and each prints its own usage
-when called with no arguments. Until the help text catches up, this page is the index.
+`aimee-kb --help` lists all of these, and each prints its own usage when called with no arguments.
+The generated [command reference](gen/cli-commands.md) does not: it documents the `aimee` client, and
+these are the KB binary.
