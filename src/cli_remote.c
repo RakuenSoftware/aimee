@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #ifdef __linux__
 #include <openssl/evp.h>
 #include <openssl/pem.h>
@@ -325,10 +326,47 @@ done:
    EVP_PKEY_CTX_free(kctx);
    return rc;
 }
+
+/* Move a refused client identity out of the active path, into
+ * <aimee_home>/tls/refused-<UTC stamp>/, and report that directory in |dir_out|.
+ * Never deletes: the certificate is the only record of what this client was
+ * previously paired to, and an operator reconstructing a re-provisioning needs
+ * it. Both files move or the function fails — a half-moved identity would leave
+ * the connection path failing closed on partial material. Returns 0 on success. */
+static int remote_archive_client_cert(char *dir_out, size_t dir_n)
+{
+   char tls_dir[600];
+   snprintf(tls_dir, sizeof(tls_dir), "%s/tls", aimee_home());
+   time_t now = time(NULL);
+   struct tm utc;
+   char stamp[32];
+   if (!gmtime_r(&now, &utc) || strftime(stamp, sizeof(stamp), "%Y%m%dT%H%M%SZ", &utc) == 0)
+      return -1;
+   snprintf(dir_out, dir_n, "%s/refused-%s", tls_dir, stamp);
+   if (AIMEE_MKDIR(dir_out) != 0)
+      return -1;
+   static const char *const names[] = {"client.crt", "client.key"};
+   for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+   {
+      char from[1400], to[1400];
+      snprintf(from, sizeof(from), "%s/%s", tls_dir, names[i]);
+      snprintf(to, sizeof(to), "%s/%s", dir_out, names[i]);
+      if (rename(from, to) != 0)
+         return -1;
+   }
+   return 0;
+}
 #else
 static int remote_enroll_client_cert(int quiet)
 {
    (void)quiet;
+   return -1;
+}
+
+static int remote_archive_client_cert(char *dir_out, size_t dir_n)
+{
+   if (dir_n)
+      dir_out[0] = '\0';
    return -1;
 }
 #endif
@@ -343,6 +381,52 @@ static int remote_health_ok(void)
    int ok = (body != NULL && st >= 200 && st < 500);
    free(body);
    return ok;
+}
+
+/* Re-probe with the stored mTLS identity suppressed, to tell two failures apart
+ * that are otherwise identical at the client (both surface as "no HTTP status"):
+ *
+ *   a) the server is genuinely unreachable, versus
+ *   b) the server is fine but REFUSES this client's certificate — the usual cause
+ *      being a re-provisioned server whose new client-CA did not issue it.
+ *
+ * TLS 1.3 makes (b) look like (a): client auth is verified only after the
+ * client's handshake completes, so aimee_tls_connect() reports success and the
+ * following read dies on the server's alert with no status to report.
+ *
+ * Returns 1 only when the server answers WITHOUT the identity — which is
+ * positive proof of (b). Returns 0 when nothing is stored (so the failure cannot
+ * be an identity problem) or when the probe still gets no answer. */
+static int remote_probe_without_client_cert(void)
+{
+#ifdef WITH_TLS
+   char crt[700], key[700];
+   if (aimee_tls_client_cert_eligible(aimee_home(), crt, sizeof(crt), key, sizeof(key)) == 0)
+      return 0;
+   aimee_tls_suppress_client_cert(1);
+   aimee_client_suppress_conn_errors(1);
+   int ok = remote_health_ok();
+   aimee_client_suppress_conn_errors(0);
+   aimee_tls_suppress_client_cert(0); /* scoped to the probe — never left set */
+   return ok;
+#else
+   return 0;
+#endif
+}
+
+/* Recover from a refused client identity: archive it, then mint a replacement.
+ * Only called once remote_probe_without_client_cert() has PROVEN the stored cert
+ * is the blocker, so this never discards an identity that was working. Returns 1
+ * when the identity is out of the active path (|dir_out| names the archive), 0 if
+ * it could not be moved. Re-enrollment is best effort: a server that cannot sign
+ * a new cert still leaves a working bearer-only channel, which beats the wedged
+ * state the refused cert caused. */
+static int remote_recover_client_cert(char *dir_out, size_t dir_n, int json_output)
+{
+   if (remote_archive_client_cert(dir_out, dir_n) != 0)
+      return 0;
+   remote_enroll_client_cert(json_output /* quiet under --json */);
+   return 1;
 }
 
 /* A TLS peer can be reachable and verified while still rejecting the supplied
@@ -472,7 +556,8 @@ static int remote_set(const char *url, const char *token, int json_output)
     * Verification is forced strict (env var suspended) so a self-signed/private
     * server is always pinned even if AIMEE_TLS_INSECURE happens to be set. */
    int is_https = (strncmp(url, "https://", 8) == 0);
-   int pinned = 0, verified = 0;
+   int pinned = 0, verified = 0, refused_identity = 0, recovered_identity = 0;
+   char archived_dir[700] = "";
    if (is_https)
    {
       char *saved_insecure = tls_insecure_suspend();
@@ -488,6 +573,22 @@ static int remote_set(const char *url, const char *token, int json_output)
       {
          pinned = 1;
          verified = remote_health_ok(); /* re-probe against the pinned cert */
+      }
+      /* Still no answer: before blaming the network, rule out the one local cause
+       * that mimics an unreachable server — a client certificate this server
+       * refuses. Re-pairing is exactly when that happens (the server was
+       * re-provisioned), and the stored identity is ours to replace, so recover
+       * in place rather than making the operator find and delete it by hand. */
+      if (!verified)
+      {
+         refused_identity = remote_probe_without_client_cert();
+         if (refused_identity)
+         {
+            recovered_identity =
+                remote_recover_client_cert(archived_dir, sizeof(archived_dir), json_output);
+            if (recovered_identity)
+               verified = remote_health_ok();
+         }
       }
       tls_insecure_restore(saved_insecure);
    }
@@ -519,21 +620,50 @@ static int remote_set(const char *url, const char *token, int json_output)
 
    if (json_output)
       printf("{\"ok\":%s,\"url\":\"%s\",\"token\":%s,\"pinned\":%s,\"verified\":%s,"
-             "\"enrolled\":%s,\"mtls_enrolled\":%s}\n",
+             "\"enrolled\":%s,\"mtls_enrolled\":%s,\"client_cert_refused\":%s,"
+             "\"client_cert_recovered\":%s}\n",
              remote_set_failed ? "false" : "true", url, token && *token ? "true" : "false",
              pinned ? "true" : "false", verified ? "true" : "false", enrolled ? "true" : "false",
-             mtls_enrolled ? "true" : "false");
+             mtls_enrolled ? "true" : "false", refused_identity ? "true" : "false",
+             recovered_identity ? "true" : "false");
    else
    {
       printf("Remote server set to %s%s\n", url, token && *token ? " (with token)" : "");
       if (is_https && verified)
+      {
          printf(pinned ? "  TLS: verified against the pinned certificate.\n"
                        : "  TLS: verified against the system trust store.\n");
+         if (recovered_identity)
+            printf("  mTLS: this server refused the stored client certificate (it was issued by a "
+                   "different\n"
+                   "        server instance). Archived it to %s\n"
+                   "        and enrolled a replacement.\n",
+                   archived_dir);
+      }
+      else if (is_https && refused_identity && recovered_identity)
+         printf("  mTLS: this server refused the stored client certificate; archived it to\n"
+                "        %s. The server still does\n"
+                "        not answer, so something beyond the certificate is wrong.\n",
+                archived_dir);
+      else if (is_https && refused_identity)
+         printf("  mTLS: this server refused the stored client certificate, and it could not be "
+                "moved aside.\n"
+                "        Move %s/tls/client.crt and client.key out of the way, then re-run "
+                "`aimee remote set`.\n",
+                aimee_home());
+      else if (is_https && pinned)
+         printf("  TLS: pinned this server's certificate, but it did not answer over the pinned "
+                "channel.\n"
+                "       The server is reachable (its certificate was just fetched), so this is a "
+                "rejected\n"
+                "       connection rather than a network problem — check the server log for the "
+                "reason.\n");
       else if (is_https)
-         printf(
-             "  TLS: could not establish trust (server unreachable, or cert pinning is not "
-             "available on this platform).\n"
-             "       Start the server and re-run `aimee remote set`, or `aimee remote trust`.\n");
+         printf("  TLS: could not reach %s to fetch its certificate (server down, wrong "
+                "address/port,\n"
+                "       or cert pinning is not available on this platform).\n"
+                "       Start the server and re-run `aimee remote set`, or `aimee remote trust`.\n",
+                url);
    }
    return remote_set_failed ? 1 : 0;
 }
@@ -565,12 +695,51 @@ static int remote_trust(int json_output)
    }
    aimee_client_set_remote(url, token[0] ? token : NULL);
    int verified = remote_health_ok();
+   /* `remote trust` is the command an operator reaches for precisely when a server
+    * was re-provisioned — the same event that invalidates the client certificate.
+    * Re-pinning alone would leave them stuck, so apply the identical recovery. */
+   int refused_identity = 0, recovered_identity = 0;
+   char archived_dir[700] = "";
+   if (!verified)
+   {
+      refused_identity = remote_probe_without_client_cert();
+      if (refused_identity)
+      {
+         recovered_identity =
+             remote_recover_client_cert(archived_dir, sizeof(archived_dir), json_output);
+         if (recovered_identity)
+            verified = remote_health_ok();
+      }
+   }
    tls_insecure_restore(saved_insecure);
    if (json_output)
-      printf("{\"ok\":true,\"pinned\":true,\"verified\":%s}\n", verified ? "true" : "false");
+      printf("{\"ok\":true,\"pinned\":true,\"verified\":%s,\"client_cert_refused\":%s,"
+             "\"client_cert_recovered\":%s}\n",
+             verified ? "true" : "false", refused_identity ? "true" : "false",
+             recovered_identity ? "true" : "false");
+   else if (verified)
+   {
+      printf("  TLS: verified against the pinned certificate.\n");
+      if (recovered_identity)
+         printf("  mTLS: this server refused the stored client certificate (it was issued by a "
+                "different\n"
+                "        server instance). Archived it to %s\n"
+                "        and enrolled a replacement.\n",
+                archived_dir);
+   }
+   else if (refused_identity && recovered_identity)
+      printf("  mTLS: this server refused the stored client certificate; archived it to\n"
+             "        %s. The server still does\n"
+             "        not answer, so something beyond the certificate is wrong.\n",
+             archived_dir);
+   else if (refused_identity)
+      printf("  mTLS: this server refused the stored client certificate, and it could not be moved "
+             "aside.\n"
+             "        Move %s/tls/client.crt and client.key out of the way, then re-run "
+             "`aimee remote trust`.\n",
+             aimee_home());
    else
-      printf(verified ? "  TLS: verified against the pinned certificate.\n"
-                      : "  TLS: pinned, but the server still does not verify — check it.\n");
+      printf("  TLS: pinned, but the server still does not verify — check it.\n");
    return verified ? 0 : 1;
 }
 
