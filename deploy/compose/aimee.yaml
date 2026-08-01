@@ -5,7 +5,7 @@
 #   docker compose -f deploy/compose/aimee.yaml -f deploy/compose/aimee.gpu.yaml up -d   # GPU LLM
 #
 # The kb embeds in-container (bekko-a25m, baked into the image) and calls
-# AIMEE_LLM_URL only for synthesis; see docs/KB_LLM_BACKENDS.md and
+# SYNTHESIS_ENDPOINT only for synthesis; see docs/KB_LLM_BACKENDS.md and
 # docs/SYNTHESIS_MODELS.md. There is no reranking model — it was measured out of
 # the stack. Server /v1 on :8740, kb /v1 on :8741, webchat on :8443.
 name: aimee
@@ -25,29 +25,27 @@ services:
       # External DB2 credentials are streamed into the KB Vault by the
       # disposable Compose helper; never persist them in Config.Env.
       # Synthesis only. The kb embeds in-container; there is no reranker.
-      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-}
+      SYNTHESIS_ENDPOINT: ${SYNTHESIS_ENDPOINT:-}
       # The wizard's embedder choice, and the endpoint for an external one. The kb
       # MUST receive both: `aimee config deploy-env` emits them, and without them
       # reaching the container the entrypoint sees no selection, starts nothing, and
       # the builtin serves forever — the wizard's embedder silently never runs.
       EMBEDDER_MODEL: ${EMBEDDER_MODEL:-}
-      AIMEE_EMBEDDER_URL: ${AIMEE_EMBEDDER_URL:-}
+      EMBEDDER_URL: ${EMBEDDER_URL:-}
       # Embedding dim. Leave EMPTY so the kb uses the dimension of the embedder it
       # actually serves (the bundled bekko-a25m is 384). This carried the retired
       # aimee-llm CPU tier's 1024: with the bundled embedder the kb came up healthy,
       # accepted writes, and then refused every vector upsert with
       # "dim mismatch: got 384, expected 1024" — dense retrieval silently dead.
-      # Set it ONLY for an external AIMEE_EMBEDDER_URL, whose width the kb cannot
+      # Set it ONLY for an external EMBEDDER_URL, whose width the kb cannot
       # know.
-      AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
+      EMBEDDER_DIMS: ${EMBEDDER_DIMS:-}
       AIMEE_KB_HTTP_BIND: "1"
-      # The curator synth sidecar (curator-extract.py) reads LLM_ENDPOINT, NOT
-      # AIMEE_LLM_URL. Defaulted empty for the same reason as AIMEE_LLM_URL above:
-      # the aimee-llm container is retired, so the old http://aimee-llm:8742/v1
-      # default pointed every deploy at a host that can never resolve. Set it to
-      # your own synth endpoint (/v1) to drain code-unit synthesis.
-      LLM_ENDPOINT: ${LLM_ENDPOINT:-}
-      LLM_MODEL: ${LLM_MODEL:-aimee-synth}
+      # The curator synth sidecar (curator-extract.py) reads the same
+      # SYNTHESIS_ENDPOINT above. It used to need its own LLM_ENDPOINT, defaulted to
+      # a retired container this file never even defined, so every fresh deployment
+      # aimed the sidecar at a dead host while the kb used AIMEE_LLM_URL. One
+      # endpoint, one spelling.
     command: ["--http-port=8741"]
     ports:
       - "8741:8741"

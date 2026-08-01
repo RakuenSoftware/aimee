@@ -46,7 +46,7 @@ WAIT_SECONDS="${WAIT_SECONDS:-300}"
 
 # The kb embeds in-container from weights baked into the image: no tier to pick and
 # nothing to download. Select the bundled model (the image pre-selects nothing) and
-# let AIMEE_EMBEDDING_DIM default from config, so the schema width and the model's
+# let EMBEDDER_DIMS default from config, so the schema width and the model's
 # output width come from one source rather than being pinned apart here.
 : "${EMBEDDER_MODEL:=bekko-a25m}"
 export EMBEDDER_MODEL

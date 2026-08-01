@@ -175,9 +175,9 @@ ENV AIMEE_HOME=/var/lib/aimee
 # internal cluster. Operators can still set the variable to select an external DB2.
 # No baked embedder/LLM endpoint defaults. The kb runs NO model runtime; it calls
 # an external aimee-llm container (CPU/GPU) or endpoint. Point it with ONE of:
-#   AIMEE_LLM_URL       unified container -> embed + synth (one knob)
-#   AIMEE_EMBEDDER_URL  pin the embedder (/embed) independently
-#   LLM_ENDPOINT        Tier-A synth only (small-model interface)
+#   SYNTHESIS_ENDPOINT       unified container -> embed + synth (one knob)
+#   EMBEDDER_URL  pin the embedder (/embed) independently
+#   SYNTHESIS_ENDPOINT        Tier-A synth only (small-model interface)
 # One of these is REQUIRED. The seeded default config selects the remote embedder
 # sidecar, so with no endpoint set the DB2 dim probe fails and db2_init refuses to
 # initialise rather than record a wrong vector width (db2_init.c) -- the kb then
@@ -188,7 +188,7 @@ ENV AIMEE_HOME=/var/lib/aimee
 # only when no embed command is configured at all, and the baked config always
 # configures one. The deploy unit (compose / smoothnas plugin) sets these and
 # brings up a default CPU aimee-llm sibling, which is why this is invisible there. (Old combined leftovers
-# AIMEE_EMBEDDER_URL=embedder:8080 / LLM_ENDPOINT=llm:8080 were removed: on a
+# EMBEDDER_URL=embedder:8080 / SYNTHESIS_ENDPOINT=llm:8080 were removed: on a
 # split deploy they silently pointed at non-existent services.)
 # Bind the /v1 HTTP API on 0.0.0.0 (not the 127.0.0.1 default), so the published
 # port and container-IP access reach it from outside the container.
@@ -208,7 +208,7 @@ COPY scripts/embedder-server.py /opt/aimee/scripts/embedder-server.py
 # embeds with no download and an air-gapped install works. Pinned to the registry's
 # revision: a floating ref would let a rebuild change the vector space silently.
 #
-# A deployment that wants a wider embedder points AIMEE_EMBEDDER_URL at its own endpoint
+# A deployment that wants a wider embedder points EMBEDDER_URL at its own endpoint
 # rather than baking a second model in here.
 #
 # FETCH ONLY WHAT THE TORCH PATH LOADS. snapshot_download takes the whole repo by

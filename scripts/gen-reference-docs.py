@@ -705,16 +705,16 @@ ENV_DESC = {
     "AIMEE_WORKTREE_GC_DAYS": ("Server runtime", "Age threshold (days) for worktree GC."),
     "AIMEE_SOCK": ("Server runtime", "Sandbox helper socket path."),
     # Knowledge base
-    "AIMEE_LLM_URL": ("Knowledge base (aimee-kb)", "Synthesis endpoint (every curator stage, at {url}/v1). No longer selects an embedder: the kb embeds in-container, and AIMEE_EMBEDDER_URL points at an external embedder. See docs/SYNTHESIS_MODELS.md for what to put behind it and docs/KB_LLM_BACKENDS.md for the provider surface."),
-    "AIMEE_LLM_AUTH_TOKEN": ("Managed KB and inference", "First-boot transport for the bearer aimee-kb presents to the external synthesis endpoint. aimee-kb synchronously seals it into Vault, scrubs the environment, and cleanly re-execs before serving; wizard-managed deploys generate the 256-bit value in Vault. This is separate from user/server bearers."),
-    "AIMEE_LLM_AUTH_REQUIRED": ("Managed KB and inference", "Set to 1 on wizard-managed KBs so synthesis clients refuse to contact the LLM when its bearer service identity is missing."),
-    "AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE": ("Managed KB and inference", "Explicit first-boot migration/adoption transport for an existing wizard-managed LLM credential. aimee-server seals it into Vault and scrubs the environment before normal startup. Ordinary inherited AIMEE_LLM_AUTH_TOKEN is ignored by managed credential creation so stale child-service state cannot win. Must be a 32..512 character RFC 6750 b64token."),
+    "SYNTHESIS_ENDPOINT": ("Knowledge base (aimee-kb)", "Synthesis endpoint (every curator stage, at {url}/v1). No longer selects an embedder: the kb embeds in-container, and EMBEDDER_URL points at an external embedder. See docs/SYNTHESIS_MODELS.md for what to put behind it and docs/KB_LLM_BACKENDS.md for the provider surface."),
+    "SYNTHESIS_API_KEY": ("Managed KB and inference", "First-boot transport for the bearer aimee-kb presents to the external synthesis endpoint. aimee-kb synchronously seals it into Vault, scrubs the environment, and cleanly re-execs before serving; wizard-managed deploys generate the 256-bit value in Vault. This is separate from user/server bearers."),
+    "SYNTHESIS_AUTH_REQUIRED": ("Managed KB and inference", "Set to 1 on wizard-managed KBs so synthesis clients refuse to contact the LLM when its bearer service identity is missing."),
+    "AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE": ("Managed KB and inference", "Explicit first-boot migration/adoption transport for an existing wizard-managed LLM credential. aimee-server seals it into Vault and scrubs the environment before normal startup. Ordinary inherited SYNTHESIS_API_KEY is ignored by managed credential creation so stale child-service state cannot win. Must be a 32..512 character RFC 6750 b64token."),
     "AIMEE_OFFLINE_ALLOW_NO_SWAP_MLOCK_FALLBACK": (
         "Managed KB and inference",
         "Internal managed-authority switch: still attempts mlockall first, but when an unprivileged container cannot raise RLIMIT_MEMLOCK, permits the offline one-shot to continue only if the kernel reports no active swap. Operator-run custody tools leave this unset and retain mandatory mlockall.",
     ),
-    "AIMEE_LLM_MODEL": ("Knowledge base (aimee-kb)", "Model label sent to AIMEE_LLM_URL's chat endpoint (single-model gateways ignore it). Default 'aimee-synth'."),
-    "AIMEE_EMBEDDER_URL": ("Knowledge base (aimee-kb)", "Embedder endpoint override (/embed, /embed_batch); takes precedence over AIMEE_LLM_URL for embedding."),
+    "SYNTHESIS_MODEL": ("Knowledge base (aimee-kb)", "Model label sent to SYNTHESIS_ENDPOINT's chat endpoint (single-model gateways ignore it). Default 'aimee-synth'."),
+    "EMBEDDER_URL": ("Knowledge base (aimee-kb)", "Embedder endpoint override (/embed, /embed_batch); takes precedence over SYNTHESIS_ENDPOINT for embedding."),
     "AIMEE_KB_API_URL": ("Knowledge base (aimee-kb)", "aimee-kb HTTP API base URL."),
     "AIMEE_KB_API_BEARER_TOKEN": ("Knowledge base (aimee-kb)", "First-boot transport for the aimee-kb API bearer token. Server and KB bootstrap paths seal it into Vault and remove it from the environment before long-lived service startup."),
     "AIMEE_KB_API_CA_BUNDLE": ("Knowledge base (aimee-kb)", "CA bundle path for verifying the aimee-kb TLS certificate."),
@@ -795,7 +795,7 @@ ENV_DESC = {
         "`AIMEE_DB2_STATEMENT_TIMEOUT_MS`; exactly `0` opts out, independently of the "
         "statement bound.",
     ),
-    "AIMEE_EMBEDDING_DIM": ("Database & vectors", "Embedding dimension (drives halfvec column sizing)."),
+    "EMBEDDER_DIMS": ("Database & vectors", "Embedding dimension (drives halfvec column sizing)."),
     "AIMEE_PGVEC_SLOW_QUERY_MS": ("Database & vectors", "Slow-query log threshold (ms) for the pgvector transport."),
     # Memory
     "AIMEE_MEMORY_CITATIONS_MODE": ("Memory", "Citation rendering mode for memory recall."),
@@ -1095,9 +1095,9 @@ EXT_DESC = {
     "CODEX_CWD": ("Codex / Claude integration", "Working directory reported by the Codex frontend."),
     "CODEX_THREAD_ID": ("Codex / Claude integration", "Codex conversation/thread id."),
     "CLAUDE_SESSION_ID": ("Codex / Claude integration", "Claude Code session id when aimee runs as its backend."),
-    "LLM_API_KEY": ("Provider credentials", "Bearer credential used by the generic llm-chat sidecar; prefer the vault or a secret command."),
-    "LLM_ENDPOINT": ("Provider endpoints", "OpenAI-compatible base URL used by the generic llm-chat sidecar."),
-    "LLM_MODEL": ("Provider endpoints", "Model requested by the generic llm-chat sidecar."),
+    "SYNTHESIS_API_KEY": ("Provider credentials", "Bearer credential used by the generic llm-chat sidecar; prefer the vault or a secret command."),
+    "SYNTHESIS_ENDPOINT": ("Provider endpoints", "OpenAI-compatible base URL used by the generic llm-chat sidecar."),
+    "SYNTHESIS_MODEL": ("Provider endpoints", "Model requested by the generic llm-chat sidecar."),
 }
 
 

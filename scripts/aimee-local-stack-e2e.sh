@@ -23,7 +23,7 @@
 #                 postgresql://aimee@localhost/aimee_shared via local peer auth)
 #   KB_URL        external kb base URL           (hybrid mode; default
 #                 http://localhost:8741)
-#   AIMEE_EMBEDDER_URL  embedder endpoint        (full mode; optional)
+#   EMBEDDER_URL  embedder endpoint        (full mode; optional)
 #   SERVER_PORT   server loopback HTTP port       (default 8740)
 #   SERVER_TLS_PORT server TLS /v1 port           (default SERVER_PORT + 3)
 #   BEARER        server first-boot bearer        (default random per run)
@@ -99,7 +99,7 @@ sed "s#/opt/aimee/scripts/#${REPO}/scripts/#g" \
 # builtin hash and the embedder-fidelity gate below reports DEGRADED. An http(s)
 # URL is used directly (aimee POSTs raw text to {url}/embed).
 if [[ -n "${AIMEE_E2E_EMBEDDER_URL:-}" ]]; then
-  bold "==> Using real embedder for memory: ${AIMEE_E2E_EMBEDDER_URL} (dim=${AIMEE_EMBEDDING_DIM:-unset})"
+  bold "==> Using real embedder for memory: ${AIMEE_E2E_EMBEDDER_URL} (dim=${EMBEDDER_DIMS:-unset})"
   # The SERVER forwards its own embedding_command to the kb on memory.store /
   # memory search (server/server_api.c); the kb also reads its own for direct
   # embedding. Set it in BOTH configs (replace an existing line, else append).
@@ -112,7 +112,7 @@ if [[ -n "${AIMEE_E2E_EMBEDDER_URL:-}" ]]; then
   }
   set_embed_cmd "$AIMEE_HOME/aimee.yaml"                     # server config
   set_embed_cmd "$AIMEE_HOME/.config/aimee/aimee.yaml"      # kb config
-  [[ -n "${AIMEE_EMBEDDING_DIM:-}" ]] && export AIMEE_EMBEDDING_DIM
+  [[ -n "${EMBEDDER_DIMS:-}" ]] && export EMBEDDER_DIMS
 fi
 export AIMEE_SERVER_HTTP_BIND=1
 export AIMEE_DEPLOY_ENABLED=1
@@ -133,7 +133,7 @@ ulimit -S -s 65536 || true
 if [[ "$MODE" == "full" ]]; then
   bold "==> Mode FULL (T5): local server + local kb"
   export AIMEE_DB2_URL="${AIMEE_DB2_URL:-postgresql:///aimee_shared}"
-  [[ -n "${AIMEE_EMBEDDER_URL:-}" ]] && export AIMEE_EMBEDDER_URL
+  [[ -n "${EMBEDDER_URL:-}" ]] && export EMBEDDER_URL
   export AIMEE_KB_HTTP_BIND=1
   echo "    DB2: ${AIMEE_DB2_URL}"
   # Capture kb output so the embedder-fidelity gate below can see whether pgvec
@@ -257,7 +257,7 @@ bold "==> Embedder fidelity (semantic vector path)"
 mm="$(grep -aoE 'memory embedding dim mismatch: got [0-9]+, expected [0-9]+' "$AIMEE_HOME/kb.log" 2>/dev/null | tail -1 || true)"
 if [[ -n "$mm" ]]; then
   yellow "  DEGRADED  ${mm}; vectors refused — semantic search NOT exercised (list/keyword only)."
-  yellow "            Wire a real embedder: point AIMEE_EMBEDDER_URL / AIMEE_LLM_URL at a"
+  yellow "            Wire a real embedder: point EMBEDDER_URL / SYNTHESIS_ENDPOINT at a"
   yellow "            Qwen3-Embedding endpoint whose dim matches the corpus (1024 CPU / 2560 GPU)."
   if [[ "${AIMEE_E2E_REQUIRE_REAL_EMBEDDER:-0}" == "1" ]]; then
     red "  FAIL  real embedder required (AIMEE_E2E_REQUIRE_REAL_EMBEDDER=1) but the run degraded to the builtin embedder"

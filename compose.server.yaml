@@ -35,16 +35,16 @@ services:
       # disposable Compose helper; never persist them in Config.Env.
       # Synthesis only, at {url}/v1. The kb embeds in-container and there is no
       # reranking model — see docs/SYNTHESIS_MODELS.md. Override
-      # AIMEE_EMBEDDER_URL to point embedding at an external service.
-      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-}
+      # EMBEDDER_URL to point embedding at an external service.
+      SYNTHESIS_ENDPOINT: ${SYNTHESIS_ENDPOINT:-}
       # The wizard's embedder choice, and the endpoint for an external one. The kb
       # MUST receive both: `aimee config deploy-env` emits them, and without them
       # reaching the container the entrypoint sees no selection, starts nothing, and
       # the builtin serves forever — the wizard's embedder silently never runs.
       EMBEDDER_MODEL: ${EMBEDDER_MODEL:-}
-      AIMEE_EMBEDDER_URL: ${AIMEE_EMBEDDER_URL:-}
+      EMBEDDER_URL: ${EMBEDDER_URL:-}
       # Embedding dim — empty = config default 1024 (CPU tier); set 2560 for GPU.
-      AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
+      EMBEDDER_DIMS: ${EMBEDDER_DIMS:-}
       # Internal-only enrollment/JWKS lane; never published on the host. The
       # listener always binds all interfaces; this value is the advertised DNS
       # name placed in its server certificate and must match the client endpoint.

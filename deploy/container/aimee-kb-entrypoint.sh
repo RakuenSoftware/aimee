@@ -29,17 +29,17 @@
 # SELECTED. Half a gigabyte of resident model is not something to spend on a kb that was
 # never told to embed with it, and on the wizard path the selection always exists before
 # this container is deployed (`aimee config deploy-env` emits EMBEDDER_MODEL for the
-# bundled embedder, or AIMEE_EMBEDDER_URL for an external one).
+# bundled embedder, or EMBEDDER_URL for an external one).
 #
 # Selection, in precedence order:
-#   AIMEE_EMBEDDER_URL set  -> an external embedder; start nothing.
+#   EMBEDDER_URL set  -> an external embedder; start nothing.
 #   EMBEDDER_MODEL set      -> the bundled embedder; start it.
 #   embedding_model in cfg  -> same, for a hand-run container.
 #   none of the above       -> start nothing. The kb falls back to its builtin lexical
 #                              embedder, which needs no model and no port, so an
 #                              unconfigured container is idle rather than half-configured.
 #
-# When it DOES start, the loopback URL is exported as AIMEE_EMBEDDER_URL. That makes the
+# When it DOES start, the loopback URL is exported as EMBEDDER_URL. That makes the
 # bundled embedder just "an embedder at a URL" and reuses one precedence rule for both
 # cases, instead of a second mechanism that can disagree with the first.
 #
@@ -55,8 +55,8 @@ read_cfg_embedding_model() {
 }
 
 start_embedder() {
-    if [ -n "${AIMEE_EMBEDDER_URL:-}" ]; then
-        echo "aimee-kb: external embedder configured ($AIMEE_EMBEDDER_URL); bundled model not loaded" >&2
+    if [ -n "${EMBEDDER_URL:-}" ]; then
+        echo "aimee-kb: external embedder configured ($EMBEDDER_URL); bundled model not loaded" >&2
         return 0
     fi
     if [ -z "${EMBEDDER_MODEL:-}" ]; then
@@ -79,8 +79,8 @@ start_embedder() {
     export EMBEDDER_PORT
     # One precedence rule for both cases: the kb reaches the bundled embedder the same way
     # it would reach an external one.
-    AIMEE_EMBEDDER_URL="http://127.0.0.1:$EMBEDDER_PORT"
-    export AIMEE_EMBEDDER_URL
+    EMBEDDER_URL="http://127.0.0.1:$EMBEDDER_PORT"
+    export EMBEDDER_URL
     echo "aimee-kb: starting bundled embedder ($EMBEDDER_MODEL) on :$EMBEDDER_PORT" >&2
     "$venv/bin/python" "$server" >&2 &
     embedder_pid=$!

@@ -11,7 +11,7 @@ retiring the aimee-llm container:
                         container. The entrypoint saw no selection, started nothing,
                         and the builtin lexical embedder served forever. The headline
                         feature of the cutover, dead end to end.
-  * AIMEE_EMBEDDER_URL  same: an external embedder could be configured and would
+  * EMBEDDER_URL  same: an external embedder could be configured and would
                         never be used.
   * AIMEE_LLM_SYNTH_URL emitted for an external synth endpoint, read by nobody — it
                         had been the retired gateway's own knob.

@@ -39,7 +39,7 @@ WAIT_SECONDS="${WAIT_SECONDS:-300}"
 
 # The kb embeds in-container from weights baked into the image, so there is no tier
 # to pick and nothing to download. Select the bundled model (the image pre-selects
-# nothing) and let AIMEE_EMBEDDING_DIM default from config so the schema width and
+# nothing) and let EMBEDDER_DIMS default from config so the schema width and
 # the model's output width come from one source.
 : "${EMBEDDER_MODEL:=bekko-a25m}"
 export EMBEDDER_MODEL
@@ -149,13 +149,13 @@ check "POST memory.find_facts (fusion)" '"facts"' -X POST -H 'content-type: appl
 
 bold "==> Embed backend round-trip (in-container, inside the kb container)"
 # The embedder is a process INSIDE the kb container, not a service beside it: the
-# entrypoint starts it on loopback, exports AIMEE_EMBEDDER_URL, and then runs the kb.
+# entrypoint starts it on loopback, exports EMBEDDER_URL, and then runs the kb.
 #
 # Getting at that value took three tries, so the reasoning is recorded here:
 #
 #  1. `compose exec` does NOT see it. It spawns a fresh process from the container's
 #     CONFIGURED environment (image ENV + the compose `environment:` block), never a
-#     variable exported at runtime. And AIMEE_EMBEDDER_URL must be declared in compose
+#     variable exported at runtime. And EMBEDDER_URL must be declared in compose
 #     with an empty default so an operator can point the kb at an external endpoint —
 #     so `compose exec` reads "" no matter what the entrypoint did.
 #  2. /proc/1/environ does NOT see it either, for two reasons. On the embedded-DB path
@@ -183,9 +183,9 @@ read_kb_env() {
   ' 2>/dev/null || true
 }
 
-emb_url="$(read_kb_env AIMEE_EMBEDDER_URL)"
+emb_url="$(read_kb_env EMBEDDER_URL)"
 if [[ -z "$emb_url" ]]; then
-  red   "  FAIL  the kb process was given no AIMEE_EMBEDDER_URL (EMBEDDER_MODEL=${EMBEDDER_MODEL})"
+  red   "  FAIL  the kb process was given no EMBEDDER_URL (EMBEDDER_MODEL=${EMBEDDER_MODEL})"
   printf '        the entrypoint should have started the bundled model and exported it\n'
   printf '        kb process environment (embedder-related):\n'
   "${DC[@]}" exec -T aimee-kb sh -c '

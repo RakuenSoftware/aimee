@@ -64,11 +64,11 @@ done
 # without this the topologies would come up with no HTTP embedder and the round-trip
 # check would have nothing to probe.
 export EMBEDDER_MODEL="${EMBEDDER_MODEL:-bekko-a25m}"
-# AIMEE_EMBEDDING_DIM is deliberately NOT set: the config default (384) must match
+# EMBEDDER_DIMS is deliberately NOT set: the config default (384) must match
 # what the selected model returns. Pinning a width here is how you get a schema
 # sized for one embedder and vectors from another — the dim guard would refuse
 # every insert, and CI would be testing a topology no user can deploy.
-unset AIMEE_EMBEDDING_DIM
+unset EMBEDDER_DIMS
 
 # There are no optional Compose profiles left. Empty also overrides anything in
 # the committed .env.
