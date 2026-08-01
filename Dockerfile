@@ -156,6 +156,8 @@ RUN set -eux; \
         -exec cp -a {} /out/ ';' ; \
     rm -rf /tmp/llamacpp-src
 # The model, fetched ONCE here so the running container never downloads anything.
+# -sS: silent, but still reports errors. Without it curl writes a progress meter on every
+# buffer flush, which is thousands of lines of noise in a non-tty build log.
 # An explicit repo+filename per model id: no quant-tag resolution at runtime, which
 # is what silently served the wrong file when a tag stopped matching. UD-Q6_K_XL
 # (Unsloth Dynamic Q6) is published only in unsloth's repos.
@@ -166,7 +168,7 @@ RUN set -eux; \
       *) echo "AIMEE_SYNTHESIS_MODEL must be gemma-4-E2B-it or gemma-4-E4B-it (got '$AIMEE_SYNTHESIS_MODEL')" >&2; exit 1 ;; \
     esac; \
     mkdir -p /out/model; \
-    curl -fL --retry 5 --retry-delay 5 --retry-all-errors \
+    curl -fL -sS --retry 5 --retry-delay 5 --retry-all-errors \
         -o /out/model/synthesis.gguf \
         "https://huggingface.co/${repo}/resolve/main/${f}"; \
     test -s /out/model/synthesis.gguf; \
