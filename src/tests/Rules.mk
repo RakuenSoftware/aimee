@@ -3797,8 +3797,10 @@ $(TESTPREFIX)/unit-test-coord-jobs: $(OBJDIR)/tests/test_coord_jobs.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # deploy_apply.c is #included by the test for its statics, and the two config
-# symbols it calls are stubbed there — so this links nothing else.
-$(TESTPREFIX)/unit-test-deploy-apply: $(OBJDIR)/tests/test_deploy_apply.o
+# symbols it calls are stubbed there — so this links nothing else but cJSON,
+# which deploy_apply.c uses to scope `docker compose ps` to the managed services.
+$(TESTPREFIX)/unit-test-deploy-apply: $(OBJDIR)/tests/test_deploy_apply.o \
+                                      $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lpthread
 
 $(TESTPREFIX)/unit-test-plan-waves: $(OBJDIR)/tests/test_plan_waves.o \
