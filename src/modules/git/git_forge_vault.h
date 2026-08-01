@@ -38,4 +38,22 @@ int git_forge_vault_sshkey(const char *principal, char *out, size_t out_len);
  * Same 1/0/-1 contract as the per-principal accessors. */
 int git_forge_vault_server_token(char *out, size_t out_len);
 
+/* The commit identity, under the same "git" agent, in the SERVER principal's
+ * vault. Supplied at installation as AIMEE_GIT_AUTHOR_NAME / _EMAIL and sealed by
+ * the first-boot env bootstrap, like every other install-time secret.
+ *
+ * aimee cannot fall back to the machine's git config: git_ops.c points
+ * GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM at /dev/null on purpose, so a commit
+ * carries the identity aimee supplies or it carries none and fails. This is that
+ * identity. */
+#define GIT_AUTHOR_NAME_CRED  "author_name"
+#define GIT_AUTHOR_EMAIL_CRED "author_email"
+
+/* Read the configured commit identity. Returns 1 when BOTH a name and an email
+ * were written, 0 when the identity is not configured, -1 on a fail-closed
+ * crypto/IO error. Both buffers are empty on a non-1 return: a half-configured
+ * identity is not an identity, so it reports 0 rather than committing as half a
+ * person. */
+int git_identity_get(char *name_out, size_t name_len, char *email_out, size_t email_len);
+
 #endif /* GIT_FORGE_VAULT_H */

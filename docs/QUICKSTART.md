@@ -48,6 +48,19 @@ persists in the container's `Config.Env` for the life of the deployment and is r
 `docker inspect`. The script streams them into Vault through a one-shot container instead, so
 `docker compose up` on its own never sees them and would leave you with a generated login.
 
+aimee also needs a git identity, sealed the same way. Without it every commit aimee makes has no
+author and git refuses it, so `aimee git commit`, delegate commits and workflow commits all fail:
+
+```bash
+export AIMEE_GIT_AUTHOR_NAME='Your Name'
+export AIMEE_GIT_AUTHOR_EMAIL='you@example.com'
+scripts/aimee-compose-vault-bootstrap.sh -f compose.server-managed.yaml server
+```
+
+There is deliberately no default. aimee points `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` at
+`/dev/null` so a commit cannot silently inherit the machine's identity, and it will not invent a bot
+author: a commit that cannot say who made it is not made.
+
 Those variables are first-boot transport, not runtime configuration. On first boot the entrypoint
 reads that sealed pair and provisions it as a real local PAM account, then the appliance
 authenticates against PAM from the first login onward. There is no parallel credential store, and

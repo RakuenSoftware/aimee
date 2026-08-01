@@ -30,6 +30,28 @@ type CommandVerifier struct {
 
 const defaultCommandVerifyLock = "aimee-wfe-command-verify.lock"
 
+// gitIdentityArgs returns the `-c user.name=... -c user.email=...` the WFE commits
+// under, read from the identity aimee was installed with.
+//
+// aimee has no ambient identity to fall back on: the server's git paths point
+// GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM at /dev/null, so a commit carries the
+// identity aimee supplies or it has no author and git refuses it.
+//
+// The WFE used to supply an aimee-wfe persona instead. That is worse than
+// untidy: GitHub adds a Co-authored-by trailer to the squash of any PR whose
+// commits carry two distinct authors, and the standing directive forbids those.
+// One author, no trailer.
+//
+// Empty means the deployment configured none; callers refuse rather than commit
+// anonymously.
+func gitIdentityArgs() []string {
+	name, email := os.Getenv("AIMEE_GIT_AUTHOR_NAME"), os.Getenv("AIMEE_GIT_AUTHOR_EMAIL")
+	if strings.TrimSpace(name) == "" || strings.TrimSpace(email) == "" {
+		return nil
+	}
+	return []string{"-c", "user.name=" + name, "-c", "user.email=" + email}
+}
+
 func defaultVerifyCommand() []string {
 	// `git verify` is a key=value-style infrastructure command. Its machine
 	// format is selected with format=json; `--json` is parsed as a value-taking
@@ -722,7 +744,11 @@ func commitChanges(ctx context.Context, workdir, stage string) error {
 	} else if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 1 {
 		return err
 	}
-	_, err := gitText(ctx, workdir, "-c", "user.name=aimee-wfe", "-c", "user.email=wfe@aimee.local", "commit", "-m", "wfe: "+stage)
+	ident := gitIdentityArgs()
+	if len(ident) == 0 {
+		return fmt.Errorf("no git identity configured: seal AIMEE_GIT_AUTHOR_NAME and AIMEE_GIT_AUTHOR_EMAIL at install")
+	}
+	_, err := gitText(ctx, workdir, append(ident, "commit", "-m", "wfe: "+stage)...)
 	return err
 }
 
@@ -860,8 +886,7 @@ func integrateFeatureBase(ctx context.Context, workdir, parentID string) (string
 	if _, err := gitText(ctx, workdir, "merge-base", "--is-ancestor", base, "HEAD"); err == nil {
 		return "", nil
 	}
-	if _, err := gitText(ctx, workdir, "-c", "user.name=aimee-wfe", "-c", "user.email=wfe@aimee.local",
-		"merge", "--no-edit", base); err == nil {
+	if _, err := gitText(ctx, workdir, append(gitIdentityArgs(), "merge", "--no-edit", base)...); err == nil {
 		return "", nil
 	}
 	// Merge failed (conflict or otherwise): restore a clean worktree before parking.
@@ -1682,8 +1707,7 @@ func refreshPullRequestBase(ctx context.Context, workdir, base string) (bool, st
 	if _, err := gitText(ctx, workdir, "fetch", "--no-tags", "origin", refspec); err != nil {
 		return false, "", fmt.Errorf("refresh pull request base: %w", err)
 	}
-	if _, err := gitText(ctx, workdir, "-c", "user.name=aimee-wfe", "-c",
-		"user.email=wfe@aimee.local", "merge", "--no-edit", baseRef); err != nil {
+	if _, err := gitText(ctx, workdir, append(gitIdentityArgs(), "merge", "--no-edit", baseRef)...); err != nil {
 		lower := strings.ToLower(err.Error())
 		if strings.Contains(lower, "conflict") || strings.Contains(lower, "automatic merge failed") {
 			_, _ = gitText(ctx, workdir, "merge", "--abort")
