@@ -136,8 +136,14 @@ CODE = {
         {"fact": "host",
          "text": "{host} answers on {ip}.",
          "gold": [{"s": "{host}", "r": "device_has_ip", "o": "{ip}"}]},
+        # NOT "The {service} box has hostname ..." — that phrasing invites the
+        # subject "aimee-security-sidecar box" while gold says
+        # "aimee-security-sidecar", and the scorer requires an exact subject
+        # under both strict and lenient. That is the same naming-choice trap
+        # LABELING.md flags on mf04 as the weakest note in the original set;
+        # a template should not manufacture more of them.
         {"fact": "host",
-         "text": "The {service} box has hostname {host} and IP {ip}.",
+         "text": "{service} has hostname {host} and IP {ip}.",
          "gold": [{"s": "{service}", "r": "has_hostname", "o": "{host}"},
                   {"s": "{service}", "r": "device_has_ip", "o": "{ip}"}]},
         {"fact": "host",
