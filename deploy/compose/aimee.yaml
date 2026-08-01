@@ -1,15 +1,12 @@
-# aimee split stack via docker-compose (aimee-llm + self-contained aimee-kb +
-# aimee-server). Runs on Docker or any Docker-API daemon (e.g. LXC2Docker).
+# aimee split stack via Docker Compose (self-contained aimee-kb + aimee-server).
+# Runs on Docker or any Docker-API daemon (for example, LXC2Docker).
 #
-#   docker compose -f deploy/compose/aimee.yaml up -d                 # CPU LLM
-#   docker compose -f deploy/compose/aimee.yaml -f deploy/compose/aimee.gpu.yaml up -d   # GPU LLM
+#   docker compose -f deploy/compose/aimee.yaml up -d
 #
-# The kb runs NO model — it calls the aimee-llm container for embedding,
-# reranking and synthesis via AIMEE_LLM_URL (the one knob; see
-# docs/KB_LLM_BACKENDS.md). aimee-llm is the unified Vulkan llama.cpp container;
-# this base uses the CPU tier (1024-dim). Layer aimee.gpu.yaml for the GPU tier
-# (2560-dim + /dev/dri passthrough). Server /v1 on :8740, kb /v1 on :8741,
-# webchat on :8443.
+# This single-KB profile declares no standalone inference service. Embedding and
+# synthesis are roles of the KB: the selected profile runs them in this container
+# or points the KB at remote endpoints. Server /v1 is on :8740,
+# KB /v1 is on :8741, and the browser is on :8443.
 name: aimee
 services:
   aimee-kb:
@@ -26,7 +23,9 @@ services:
       AIMEE_WORKSPACES_DIR: /var/lib/aimee-workspaces
       # External DB2 credentials are streamed into the KB Vault by the
       # disposable Compose helper; never persist them in Config.Env.
-      # One knob: embed + rerank + synth all via the aimee-llm container.
+      # Remote synthesis endpoint for a profile that places synthesis externally.
+      # Empty leaves that remote placement unavailable; an internal placement is
+      # configured as a KB role rather than as another Compose service.
       AIMEE_LLM_URL: ${AIMEE_LLM_URL:-}
       # The wizard's embedder choice, and the endpoint for an external one. The kb
       # MUST receive both: `aimee config deploy-env` emits them, and without them
@@ -43,11 +42,8 @@ services:
       # know.
       AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
       AIMEE_KB_HTTP_BIND: "1"
-      # The curator synth sidecar (curator-extract.py) reads LLM_ENDPOINT, NOT
-      # AIMEE_LLM_URL. Defaulted empty for the same reason as AIMEE_LLM_URL above:
-      # the aimee-llm container is retired, so the old http://aimee-llm:8742/v1
-      # default pointed every deploy at a host that can never resolve. Set it to
-      # your own synth endpoint (/v1) to drain code-unit synthesis.
+      # The curator adapter reads LLM_ENDPOINT rather than AIMEE_LLM_URL. Set it
+      # only when this KB uses a remote synthesis placement.
       LLM_ENDPOINT: ${LLM_ENDPOINT:-}
       LLM_MODEL: ${LLM_MODEL:-aimee-synth}
     command: ["--http-port=8741"]

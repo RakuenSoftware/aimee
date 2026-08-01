@@ -9,7 +9,7 @@ embedding/reranking, code indexing, basic memory recall, or the deterministic Ti
 
 ## Public contracts
 
-`src/modules/kb-synthesis/` owns the KB curator family — 21 sources and 16 headers relocated from
+`src/modules/kb-synthesis/` owns the KB curator family: 21 sources and 16 headers relocated from
 `src/kb/`: the curator pipeline and queue, extraction (evidence/code), grounding, entity resolution,
 contradiction reconciliation, judging, promotion, the index writers (narrative/claims/code-unit),
 artifact linking, LLM and sidecar drivers, notify/version, and `kb_curator_synthesize.{c,h}`. These are

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate a Markdown API reference from api/openapi-v1.yaml.
 
-Output: docs/gen/api-v1.md — a deterministic, dependency-light reference of
+Output: docs/gen/api-v1.md: a deterministic, dependency-light reference of
 every /v1 endpoint (method, summary, parameters, request body, responses).
 The output is committed; re-running on an unchanged spec is a byte-for-byte
 no-op (the AC: "docs/gen built from OpenAPI in CI; build is a no-op on main").
@@ -70,7 +70,7 @@ def render_responses(responses: dict) -> list[str]:
     for code in sorted(responses.keys(), key=str):
         body = responses[code] or {}
         desc = (body.get("description", "") or "").replace("\n", " ").strip()
-        lines.append(f"- `{code}` — {desc}")
+        lines.append(f"- `{code}`: {desc}")
     return lines
 
 
@@ -84,7 +84,7 @@ def main() -> int:
     paths = spec.get("paths", {})
 
     out: list[str] = []
-    out.append(f"# {title} — v{version}")
+    out.append(f"# {title}: v{version}")
     out.append("")
     out.append(
         "> Auto-generated from `api/openapi-v1.yaml` by `scripts/gen-api-docs.py`. "

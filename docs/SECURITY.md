@@ -55,8 +55,8 @@ boundary.
 
 ## Remote access
 
-`aimee remote set` pins the server certificate and rotates the bootstrap bearer. On Linux it also
-enrolls a client certificate. Verify the printed fingerprint out of band.
+`aimee remote set` stores the supplied bearer, pins the server certificate, and on Linux enrolls a
+client certificate. It does not rotate the bearer. Verify the printed fingerprint out of band.
 
 After bootstrap, `aimee remote enroll` adds a bounded per-client bearer without invalidating
 existing clients. A bearer rotation is an explicit revoke-all: it replaces the primary and clears

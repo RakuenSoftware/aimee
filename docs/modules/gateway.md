@@ -22,7 +22,7 @@ namespace and remains as a compatibility name; renaming it requires the compatib
 `gateway_delegate_run_request_pipeline` retain their existing contracts.
 
 The descriptor sets `ownership_complete: true`. That latch exhaustively checks the module-local C and
-private-header files — the module has no private headers — and requires this canonical document.
+private-header files (the module has no private headers) and requires this canonical document.
 Public-header and test entries are explicit audited claims, not auto-discovered completeness domains,
 so the latch does not police the public-header inventory. Completeness is a statement about file
 ownership only; it does not assert that every owned export has a caller, or that every declared test
@@ -35,8 +35,8 @@ public-surface audit is recorded in `docs/validation/core-modularization-slice-3
 rather than linking `gateway_policy.c`.
 
 Gateway main, context, pairing, session-key, and channel/session code remains under `src/gateway` and
-awaits a caller and lifecycle audit. That directory is the `aimee-gateway` delivery binary — delivery
-routing, Telegram/ntfy/webhook platforms, pairing, STT and TTS — and is a distinct ownership surface
+awaits a caller and lifecycle audit. That directory contains the `aimee-gateway` delivery binary,
+delivery routing, Telegram/ntfy/webhook platforms, pairing, STT, and TTS. It is a distinct ownership surface
 from this module despite the shared gateway name; `GATEWAY_SRCS` in `src/Makefile` refers to it, not
 to `src/modules/gateway`. The gateway-mutation family remains owned by economizer under
 `src/modules/economizer/gateway_mutate*.c`. Optional delivery implementations (`platform_*`,

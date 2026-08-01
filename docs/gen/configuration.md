@@ -1,14 +1,14 @@
 # Configuration Reference
 
-> Auto-generated from the canonical source tables by `scripts/gen-reference-docs.py` — config keys from `src/modules/config/config_fields.c` + `src/config*.c`, env vars scanned from `getenv()` in `src/`, and the workflow surface from `src/modules/workflows/`. Do not edit by hand; run `make -C src docs-gen` to regenerate.
+> Auto-generated from the canonical source tables by `scripts/gen-reference-docs.py`: config keys from `src/modules/config/config_fields.c` + `src/config*.c`, env vars scanned from `getenv()` in `src/`, and the workflow surface from `src/modules/workflows/`. Do not edit by hand; run `make -C src docs-gen` to regenerate.
 
 This reference covers every configurable surface:
 
-1. **Config-store keys** — the `aimee config` keys + config-file sections (below).
-2. **Environment variables** — `AIMEE_*` runtime/deployment overrides.
-3. **External & provider environment** — provider keys, endpoints, proxy, editor.
-4. **Workflow engine** — workflow definition + custom-block (`blocks.yaml`) schema.
-5. **Other config files** — `agents.json`, toolsets, guardrails.
+1. **Config-store keys**: the `aimee config` keys + config-file sections (below).
+2. **Environment variables**: `AIMEE_*` runtime/deployment overrides.
+3. **External & provider environment**: provider keys, endpoints, proxy, editor.
+4. **Workflow engine**: workflow definition + custom-block (`blocks.yaml`) schema.
+5. **Other config files**: `agents.json`, toolsets, guardrails.
 
 CLI commands + flags are documented separately in [`cli-commands.md`](cli-commands.md).
 
@@ -20,7 +20,7 @@ aimee config get <key>            # read one value
 aimee config set <key> <value>    # set one value
 ```
 
-Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
+Structured options (arrays, nested objects: e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
 ## CLI-settable keys (85)
 
@@ -34,7 +34,7 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `cache_aware_rewrite_enabled` | bool | Rewrite prompts to align with the provider's prompt cache. |
 | `cache_shaping_enabled` | bool | Enable prompt cache-shaping. |
 | `claude_model` | string | Default Claude model (empty = CLI default). |
-| `client_integrations_enabled` | bool | Auto-register aimee (MCP server, hooks, slash commands) into detected AI-tool user configs — Claude Code (~/.claude), Gemini, Copilot, Codex. Default-ON; set false, or export AIMEE_NO_CLIENT_INTEGRATIONS, to keep aimee out of every tool's global config and wire a single project by hand. |
+| `client_integrations_enabled` | bool | Auto-register aimee (MCP server, hooks, slash commands) into detected AI-tool user configs: Claude Code (~/.claude), Gemini, Copilot, Codex. Default-ON; set false, or export AIMEE_NO_CLIENT_INTEGRATIONS, to keep aimee out of every tool's global config and wire a single project by hand. |
 | `code_cochange_git_enabled` | bool | Mine git history at `index scan` time into co_edited edges (files that change together in a commit), which blast radius already reads. Incremental and idempotent via a per-project HEAD marker; bulk commits (>25 code files) are skipped. Default on. |
 | `code_trust_actuation_enabled` | bool | Use earned code-graph trust lessons only as an equal-score retrieval tiebreak (default off). |
 | `cost_reward_enabled` | bool | Factor token cost into the reward signal. |
@@ -47,10 +47,10 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `dedup_window_seconds` | int | Window (seconds) for response dedup. |
 | `default_persona` | string | Persona a fresh primary session starts as, and the persona draft roundtable panelists author with when none is set (default 'engineer'). |
 | `delegate_graph_context_enabled` | bool | Prepend a structural code-graph context block (callers/dependencies of files a delegate task references) to the delegate prompt (advisory, fail-open, default off). |
-| `delegate_sandbox` | bool | Run a delegate's shell and file ops INSIDE its own container (via the `docker` delegate backend) instead of in-process in aimee-server. On by default; set `delegate_sandbox: false` to opt out, and a delegate's `bash`/read/write/list then run with aimee-server's filesystem and environment. This is not yet a full sandbox on its own: the container still has a network, so `require_aimee_git` and the credential strip remain the live boundary. The delegate image must carry whatever the work needs (a toolchain, or `verify` fails). The server logs OFF/INERT/ARMED at boot, probing `docker version` — check it, because an unreachable daemon means every delegate runs on the host; set `delegate_sandbox_require_isolation` to refuse rather than fall back to un-isolated host execution. |
-| `delegate_sandbox_learn_packages` | bool | Learned toolchain for delegate sandboxes (default on). aimee captures the apt packages a delegate installs inside its `--network none` sandbox, records them per project (git root), and pre-bakes the learned set into that project's next sandbox image build — augmenting a declared `.aimee/project.yaml` from+packages spec, or synthesizing one (FROM the resolved base + the learned packages) when none is declared. Best-effort: a learned build that fails falls back to the un-augmented image. The first delegate turn after a new package is learned pays a one-time image build. |
-| `delegate_sandbox_package_access` | string | Runtime package-access policy for a `--network none` delegate sandbox. aimee always performs and logs the fetch (the delegate holds no outside socket); this selects how much: `proxy` (default) proxies package-manager fetches to any host — egress-via-aimee, for out-of-the-box functionality; `off` no runtime proxy (build-time installs + learned pre-bake only); `gated` host-allowlisted registries, off-allowlist requires human approval; `governance` allowlist from a governance provider, off-allowlist refused. Only meaningful when `delegate_sandbox` is on. |
-| `delegate_sandbox_require_isolation` | bool | Fail-closed guard for the `--network none` delegate sandbox (default off; only meaningful when `delegate_sandbox` is on). aimee always passes `--network none`, but some runtimes ignore it and give the sandbox real egress, defeating the package-access proxy. After the container starts aimee asks the host daemon whether a network with an IP is attached and always logs an error on a breach; when this is set, sandboxing is mandatory — aimee refuses to run the delegate at all (rather than fall back to un-isolated in-process host execution) on any failure to isolate: a breach, an unverifiable probe, docker being unavailable, or a failed acquire. |
+| `delegate_sandbox` | bool | Run a delegate's shell and file ops INSIDE its own container (via the `docker` delegate backend) instead of in-process in aimee-server. On by default; set `delegate_sandbox: false` to opt out, and a delegate's `bash`/read/write/list then run with aimee-server's filesystem and environment. This is not yet a full sandbox on its own: the container still has a network, so `require_aimee_git` and the credential strip remain the live boundary. The delegate image must carry whatever the work needs (a toolchain, or `verify` fails). The server logs OFF/INERT/ARMED at boot, probing `docker version`. Check it because an unreachable daemon means every delegate runs on the host; set `delegate_sandbox_require_isolation` to refuse rather than fall back to un-isolated host execution. |
+| `delegate_sandbox_learn_packages` | bool | Learned toolchain for delegate sandboxes (default on). aimee captures the apt packages a delegate installs inside its `--network none` sandbox, records them per project (git root), and pre-bakes the learned set into that project's next sandbox image build. It augments a declared `.aimee/project.yaml` from+packages spec, or synthesizing one (FROM the resolved base + the learned packages) when none is declared. Best-effort: a learned build that fails falls back to the un-augmented image. The first delegate turn after a new package is learned pays a one-time image build. |
+| `delegate_sandbox_package_access` | string | Runtime package-access policy for a `--network none` delegate sandbox. aimee always performs and logs the fetch (the delegate holds no outside socket); this selects how much: `proxy` (default) proxies package-manager fetches to any host through aimee for out-of-the-box functionality; `off` no runtime proxy (build-time installs + learned pre-bake only); `gated` host-allowlisted registries, off-allowlist requires human approval; `governance` allowlist from a governance provider, off-allowlist refused. Only meaningful when `delegate_sandbox` is on. |
+| `delegate_sandbox_require_isolation` | bool | Fail-closed guard for the `--network none` delegate sandbox (default off; only meaningful when `delegate_sandbox` is on). aimee always passes `--network none`, but some runtimes ignore it and give the sandbox real egress, defeating the package-access proxy. After the container starts aimee asks the host daemon whether a network with an IP is attached and always logs an error on a breach; when this is set, sandboxing is mandatory. aimee refuses to run the delegate at all (rather than fall back to un-isolated in-process host execution) on any failure to isolate: a breach, an unverifiable probe, docker being unavailable, or a failed acquire. |
 | `embedding_command` | string | Command that produces embeddings (overrides the endpoint). |
 | `embedding_dim` | int | Embedding vector dimension. |
 | `embedding_endpoint` | string | Embeddings provider endpoint URL. |
@@ -231,59 +231,59 @@ Internal dogfood/QA knobs; not part of the user surface.
 
 Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from the section parsers in `src/config*.c`; a key shown as a bare name that is itself a nested object is noted in the section description (see *Coverage & limitations*).
 
-- **`aimee`** — _Core API/runtime settings._ Keys: `api`
-- **`autonomy`** — `auto_resume_cap_parks`, `ci_retry_max`, `concurrency`, `fanout`, `max_resumes`, `max_turns`, `max_wall_secs`, `skeptics`, `stale_abandon_secs`, `unit_max`, `unit_retry`
-- **`auxiliary`** — _Auxiliary (cheap/background) model used for side tasks._ Keys: `default_max_tokens`, `default_model`, `default_provider`, `enabled`, `tasks`
-- **`cache_shaping`** — _Prompt-cache shaping._ Keys: `enabled`, `min_chars`
-- **`charter`** — _Operating charter: values, constraints, safety axioms, tone._ Keys: `hard_constraints`, `safety_axioms`, `tone_boundaries`, `values`, `working_profile_drift_limit`
-- **`compact`** — _Transcript compaction thresholds._ Keys: `coord_closet`, `enabled`, `head_bytes`, `per_tool`, `tail_bytes`, `threshold`
-- **`computer_use`** — _Computer-use (browser) tool settings._ Keys: `allowed_domains`, `default_navigation`, `enabled`, `redact_sensitive_screenshots`
-- **`concurrency`** — _Per-model / per-provider concurrency limits._ Keys: `default`, `maximum_total_concurrent_agent_sessions`, `per_model`, `per_provider`, `preempt`
-- **`context`** — _Context-engine selection._ Keys: `engine`
-- **`cost_reward`** — _Cost-aware reward shaping._ Keys: `enabled`, `lambda_pct`, `ref_usd_milli`
-- **`cron_jobs`** — _Scheduled job definitions (array of objects)._ Keys: `context_from`, `deliver`, `enabled`, `id`, `mode`, `pre_wake_gate`, `prompt`, `schedule`, `script`, `skills`, `when_context_contains`, `workdir`
-- **`cross_verify`** — _Cross-model output verification._ Keys: `enabled`, `prompt`, `role`, `verify_cmd`
-- **`db2`** — _DB2 / vector store settings._ Keys: `vector`
-- **`dedup`** — _Response deduplication._ Keys: `enabled`, `window_seconds`
-- **`dogfood`** — _Session capture for dogfood data._ Keys: `commit_raw`, `enabled`, `inline_tagging`, `log_dir`
-- **`ensemble`** — _Roundtable ensemble panel + aggregator._ Keys: `aggregator`, `max_cost_usd`, `min_successful`, `reference_models`, `reference_personas`
-- **`fold`** — `enabled`, `excerpt_bytes`, `freeze`, `min_fold_msgs`, `recall`, `register_enabled`, `retained_msgs`
-- **`guardrails`** — _Semantic guardrail policy._ Keys: `blast_radius`, `semantic`
-- **`identity`** — _Working-profile identity injection._ Keys: `working_profile_injection`
-- **`ingress`** — _Ingress (proxy frontends) behavior._ Keys: `audit_async`, `trusted_proxy_secret`, `usage_accounting_enabled`
-- **`integrity`** — _Integrity gate._ Keys: `dry_run`, `enabled`
-- **`intelligence`** — _Intelligence subsystems (bandit, planner, ranking, reasoning) + their external commands; most children are nested objects._ Keys: `bandit`, `bandit_optimize_command`, `calibrate`, `constraint_solver_command`, `demotion`, `kb`, `planner`, `planner_search_command`, `ranker_fuse_command`, `ranking`, `reasoning`, `reasoning_datalog_command`, `synthesize`
-- **`kb`** — _Knowledge-base client + curator / evidence / maintenance / mining (nested objects)._ Keys: `api`, `background_ingest`, `code_hybrid`, `connection_pool_size`, `connection_workers`, `curator`, `evidence`, `maintenance`, `mining`, `purge_fence_ttl_s`, `reembed_on_dim_change`, `search_max_results`, `typed_facts`, `worker_count`
-- **`learning`** — _Learning subsystem (router, implicit, embed, synthesize; nested objects)._ Keys: `embed`, `implicit`, `review`, `router`, `synthesize`
-- **`lsp_servers`** — _LSP server definitions (array of objects)._ Keys: `args`, `command`, `extensions`, `name`
-- **`mcp`** — _MCP integration (e.g. OSV)._ Keys: `osv`
-- **`mcp_clients`** — _MCP client connections (array of objects)._ Keys: `bearer_token_env`, `command`, `cwd`, `install`, `name`, `transport`, `url`
-- **`memory`** — _Memory subsystem; most children (recall, lifecycle, …) are nested objects with their own keys._ Keys: `abstain`, `aggregation`, `bm25_weight`, `briefing`, `citations`, `cognify`, `context_budget`, `coref`, `derive_facts`, `directives`, `dispositions`, `episode_summaries`, `failure_detection`, `fetch_budget`, `hard_negative_log`, `improve`, `lifecycle`, `pagerank`, `profile_cards`, `prospective`, `recall`, `rewrite`, `routing`, `salience`, `scenes`, `semantic_floor_scale`, `semantic_weight`
-- **`memory_maintenance`** — _Memory maintenance scheduling._ Keys: `enabled`, `interval_seconds`, `summarize_enabled`, `trigger_inserts`, `trigger_secs`
-- **`memory_negation`** — _Negation handling in memory._ Keys: `enabled`
-- **`memory_query_expansion`** — _Recall query expansion._ Keys: `k`, `mode`
-- **`memory_recall_lanes`** — _Per-lane recall floors / caps._ Keys: `enabled`, `fact_kinds`, `floor_fact`, `floor_summary`, `k_fact`, `k_summary`, `summary_kinds`
-- **`memory_rewrite`** — _Recall query rewriting._ Keys: `command`, `decompose`, `enabled`, `hyde`, `max_subqueries`
-- **`memory_window`** — _Memory-window neighbour expansion._ Keys: `radius`
-- **`model_meta`** — _Model metadata + capability routing._ Keys: `capability_routing`, `refresh_minutes`
-- **`otel`** — _OpenTelemetry export._ Keys: `endpoint`, `service_name`
-- **`reasoning_cap`** — _Reasoning-effort cap._ Keys: `enabled`
-- **`retry`** — _Provider retry / backoff._ Keys: `base_ms`, `max_attempts`, `max_ms`
-- **`rewind`** — _Auto-snapshot / rewind._ Keys: `auto_snapshot`
-- **`roundtable`** — _Roundtable pipeline thresholds, caps, gates, and turns._ Keys: `converge_threshold`, `deadline_ms`, `default`, `max_rounds`, `pipeline_done_bar`, `pipeline_gate_ttl_h`, `pipeline_max_attempts_per_pass`, `pipeline_max_cost_usd`, `pipeline_max_passes`, `pipeline_max_total_cost_usd`, `pipeline_parked_releases_slot`, `pipeline_unknown_context_tokens`, `turns`
-- **`routing`** — _Capability-gated delegate routing: whether to gate seat choice on capability before cost, and whether to prefer free local seats._ Keys: `enabled`, `prefer_local`
-- **`sandbox`** — _Tool sandbox (paths, network, mode)._ Keys: `allow_paths`, `mode`, `network`
-- **`script`** — _Script-tool allowlist._ Keys: `allowed_tools`
-- **`search`** — _Web-search backend (Tavily / SearXNG)._ Keys: `backend`, `backends`, `fetch_pages`, `max_results`, `searxng_url`, `tavily_api_key`
-- **`session`** — _Session / worktree limits._ Keys: `max_sessions`, `max_worktrees`, `stale_threshold_secs`, `virtual_context`
-- **`skills`** — _Skill subsystem (capability, dispatch, eval, review; nested objects)._ Keys: `capability`, `dispatch`, `eval`, `review`
-- **`telemetry`** — `metrics_token`
-- **`transport`** — _Transport tweaks (cache-aware rewrite)._ Keys: `cache_aware_rewrite`, `kb_gzip_enabled`, `kb_pool_enabled`, `server_keepalive_enabled`, `thinclient_gzip_enabled`
-- **`trigger`** — _Trigger listener (auth, concurrency)._ Keys: `auth_token`, `max_concurrent`
-- **`trigger_rules`** — _Trigger rule definitions (array of objects)._ Keys: `event`, `mode`, `pipeline`, `schedule`, `source`
-- **`vault`** — `custody`, `tpm2`
-- **`workspaces`** — _Workspace definitions (array of objects)._ Keys: `head`, `path`, `provider`, `remote`, `sandbox_image`
-- **`worktree_gc`** — `enabled`, `max_age_days`
+- **`aimee`**: _Core API/runtime settings._ Keys: `api`
+- **`autonomy`**: `auto_resume_cap_parks`, `ci_retry_max`, `concurrency`, `fanout`, `max_resumes`, `max_turns`, `max_wall_secs`, `skeptics`, `stale_abandon_secs`, `unit_max`, `unit_retry`
+- **`auxiliary`**: _Auxiliary (cheap/background) model used for side tasks._ Keys: `default_max_tokens`, `default_model`, `default_provider`, `enabled`, `tasks`
+- **`cache_shaping`**: _Prompt-cache shaping._ Keys: `enabled`, `min_chars`
+- **`charter`**: _Operating charter: values, constraints, safety axioms, tone._ Keys: `hard_constraints`, `safety_axioms`, `tone_boundaries`, `values`, `working_profile_drift_limit`
+- **`compact`**: _Transcript compaction thresholds._ Keys: `coord_closet`, `enabled`, `head_bytes`, `per_tool`, `tail_bytes`, `threshold`
+- **`computer_use`**: _Computer-use (browser) tool settings._ Keys: `allowed_domains`, `default_navigation`, `enabled`, `redact_sensitive_screenshots`
+- **`concurrency`**: _Per-model / per-provider concurrency limits._ Keys: `default`, `maximum_total_concurrent_agent_sessions`, `per_model`, `per_provider`, `preempt`
+- **`context`**: _Context-engine selection._ Keys: `engine`
+- **`cost_reward`**: _Cost-aware reward shaping._ Keys: `enabled`, `lambda_pct`, `ref_usd_milli`
+- **`cron_jobs`**: _Scheduled job definitions (array of objects)._ Keys: `context_from`, `deliver`, `enabled`, `id`, `mode`, `pre_wake_gate`, `prompt`, `schedule`, `script`, `skills`, `when_context_contains`, `workdir`
+- **`cross_verify`**: _Cross-model output verification._ Keys: `enabled`, `prompt`, `role`, `verify_cmd`
+- **`db2`**: _DB2 / vector store settings._ Keys: `vector`
+- **`dedup`**: _Response deduplication._ Keys: `enabled`, `window_seconds`
+- **`dogfood`**: _Session capture for dogfood data._ Keys: `commit_raw`, `enabled`, `inline_tagging`, `log_dir`
+- **`ensemble`**: _Roundtable ensemble panel + aggregator._ Keys: `aggregator`, `max_cost_usd`, `min_successful`, `reference_models`, `reference_personas`
+- **`fold`**: `enabled`, `excerpt_bytes`, `freeze`, `min_fold_msgs`, `recall`, `register_enabled`, `retained_msgs`
+- **`guardrails`**: _Semantic guardrail policy._ Keys: `blast_radius`, `semantic`
+- **`identity`**: _Working-profile identity injection._ Keys: `working_profile_injection`
+- **`ingress`**: _Ingress (proxy frontends) behavior._ Keys: `audit_async`, `trusted_proxy_secret`, `usage_accounting_enabled`
+- **`integrity`**: _Integrity gate._ Keys: `dry_run`, `enabled`
+- **`intelligence`**: _Intelligence subsystems (bandit, planner, ranking, reasoning) + their external commands; most children are nested objects._ Keys: `bandit`, `bandit_optimize_command`, `calibrate`, `constraint_solver_command`, `demotion`, `kb`, `planner`, `planner_search_command`, `ranker_fuse_command`, `ranking`, `reasoning`, `reasoning_datalog_command`, `synthesize`
+- **`kb`**: _Knowledge-base client + curator / evidence / maintenance / mining (nested objects)._ Keys: `api`, `background_ingest`, `code_hybrid`, `connection_pool_size`, `connection_workers`, `curator`, `evidence`, `maintenance`, `mining`, `purge_fence_ttl_s`, `reembed_on_dim_change`, `search_max_results`, `typed_facts`, `worker_count`
+- **`learning`**: _Learning subsystem (router, implicit, embed, synthesize; nested objects)._ Keys: `embed`, `implicit`, `review`, `router`, `synthesize`
+- **`lsp_servers`**: _LSP server definitions (array of objects)._ Keys: `args`, `command`, `extensions`, `name`
+- **`mcp`**: _MCP integration (e.g. OSV)._ Keys: `osv`
+- **`mcp_clients`**: _MCP client connections (array of objects)._ Keys: `bearer_token_env`, `command`, `cwd`, `install`, `name`, `transport`, `url`
+- **`memory`**: _Memory subsystem; most children (recall, lifecycle, …) are nested objects with their own keys._ Keys: `abstain`, `aggregation`, `bm25_weight`, `briefing`, `citations`, `cognify`, `context_budget`, `coref`, `derive_facts`, `directives`, `dispositions`, `episode_summaries`, `failure_detection`, `fetch_budget`, `hard_negative_log`, `improve`, `lifecycle`, `pagerank`, `profile_cards`, `prospective`, `recall`, `rewrite`, `routing`, `salience`, `scenes`, `semantic_floor_scale`, `semantic_weight`
+- **`memory_maintenance`**: _Memory maintenance scheduling._ Keys: `enabled`, `interval_seconds`, `summarize_enabled`, `trigger_inserts`, `trigger_secs`
+- **`memory_negation`**: _Negation handling in memory._ Keys: `enabled`
+- **`memory_query_expansion`**: _Recall query expansion._ Keys: `k`, `mode`
+- **`memory_recall_lanes`**: _Per-lane recall floors / caps._ Keys: `enabled`, `fact_kinds`, `floor_fact`, `floor_summary`, `k_fact`, `k_summary`, `summary_kinds`
+- **`memory_rewrite`**: _Recall query rewriting._ Keys: `command`, `decompose`, `enabled`, `hyde`, `max_subqueries`
+- **`memory_window`**: _Memory-window neighbour expansion._ Keys: `radius`
+- **`model_meta`**: _Model metadata + capability routing._ Keys: `capability_routing`, `refresh_minutes`
+- **`otel`**: _OpenTelemetry export._ Keys: `endpoint`, `service_name`
+- **`reasoning_cap`**: _Reasoning-effort cap._ Keys: `enabled`
+- **`retry`**: _Provider retry / backoff._ Keys: `base_ms`, `max_attempts`, `max_ms`
+- **`rewind`**: _Auto-snapshot / rewind._ Keys: `auto_snapshot`
+- **`roundtable`**: _Roundtable pipeline thresholds, caps, gates, and turns._ Keys: `converge_threshold`, `deadline_ms`, `default`, `max_rounds`, `pipeline_done_bar`, `pipeline_gate_ttl_h`, `pipeline_max_attempts_per_pass`, `pipeline_max_cost_usd`, `pipeline_max_passes`, `pipeline_max_total_cost_usd`, `pipeline_parked_releases_slot`, `pipeline_unknown_context_tokens`, `turns`
+- **`routing`**: _Capability-gated delegate routing: whether to gate seat choice on capability before cost, and whether to prefer free local seats._ Keys: `enabled`, `prefer_local`
+- **`sandbox`**: _Tool sandbox (paths, network, mode)._ Keys: `allow_paths`, `mode`, `network`
+- **`script`**: _Script-tool allowlist._ Keys: `allowed_tools`
+- **`search`**: _Web-search backend (Tavily / SearXNG)._ Keys: `backend`, `backends`, `fetch_pages`, `max_results`, `searxng_url`, `tavily_api_key`
+- **`session`**: _Session / worktree limits._ Keys: `max_sessions`, `max_worktrees`, `stale_threshold_secs`, `virtual_context`
+- **`skills`**: _Skill subsystem (capability, dispatch, eval, review; nested objects)._ Keys: `capability`, `dispatch`, `eval`, `review`
+- **`telemetry`**: `metrics_token`
+- **`transport`**: _Transport tweaks (cache-aware rewrite)._ Keys: `cache_aware_rewrite`, `kb_gzip_enabled`, `kb_pool_enabled`, `server_keepalive_enabled`, `thinclient_gzip_enabled`
+- **`trigger`**: _Trigger listener (auth, concurrency)._ Keys: `auth_token`, `max_concurrent`
+- **`trigger_rules`**: _Trigger rule definitions (array of objects)._ Keys: `event`, `mode`, `pipeline`, `schedule`, `source`
+- **`vault`**: `custody`, `tpm2`
+- **`workspaces`**: _Workspace definitions (array of objects)._ Keys: `head`, `path`, `provider`, `remote`, `sandbox_image`
+- **`worktree_gc`**: `enabled`, `max_age_days`
 
 ## Other top-level config-file keys (5)
 
@@ -382,7 +382,7 @@ The binaries read 226 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_WEBCHAT_EDITOR_BIN` | Override path to the code-server binary used for the in-browser editor. |
 | `AIMEE_WEBCHAT_EDITOR_IDLE_SECS` | Idle timeout in seconds before a per-webuser code-server editor is reaped. Default 1800 (30 min); positive values are clamped to [60, 604800]; 0 disables idle reaping; malformed/negative/overflow values fall back to the default. An actively-open editor is kept alive by the proxy keepalive, so it is not reaped mid-session. |
 | `AIMEE_WEBCHAT_EDITOR_UID` | Dedicated service user the per-webuser code-server drops to (defence in depth; only honoured when aimee-server runs as root). |
-| `AIMEE_WEBCHAT_GIT` | Per-webuser webchat git surface — repo connect/clone, git ops (pull/commit/push/branch), per-host token + SSH-key credential intake, the workspace forge-token broker, project listing + session-dir resolution, and "Sign in with GitHub" (on by default; set to the literal value 0 to disable the entire surface — all of those routes then return 503, e.g. for a chat/editor-only deployment; any other value leaves it on). Independent of AIMEE_WEBCHAT_EDITOR. |
+| `AIMEE_WEBCHAT_GIT` | Per-webuser webchat git surface: repo connect/clone, git ops (pull/commit/push/branch), per-host token + SSH-key credential intake, the workspace forge-token broker, project listing + session-dir resolution, and "Sign in with GitHub". It is on by default. Set the literal value 0 to disable the entire surface; all of those routes then return 503. Any other value leaves it on. Independent of AIMEE_WEBCHAT_EDITOR. |
 | `AIMEE_WEBCHAT_PASSWORD` | Optional first-boot webchat password paired with AIMEE_WEBCHAT_USER. The bootstrap record is sealed into Vault and removed from the environment before runtime-web starts. |
 | `AIMEE_WEBCHAT_USER` | Optional first-boot webchat username paired with AIMEE_WEBCHAT_PASSWORD. The bootstrap record is sealed into Vault and removed from the environment before runtime-web starts. |
 | `AIMEE_WEBCHAT_USERS` | Optional first-boot webchat account registry. It is sealed into Vault and removed from the environment before runtime-web starts. |
@@ -446,9 +446,9 @@ The binaries read 226 `AIMEE_*` environment variables (scanned from `getenv()` i
 | Variable | Description |
 |----------|-------------|
 | `AIMEE_DB2_EVAL_URL` | Separate DB2 URL used by evaluation harnesses; never the production default. |
-| `AIMEE_DB2_IDLE_IN_TRANSACTION_TIMEOUT_MS` | Per-connection `idle_in_transaction_session_timeout` in ms, defaulting to the same pool stuck-lease ceiling (`DB2_POOL_HOLD_CEILING_MS`, 300000). `statement_timeout` bounds a STATEMENT, so a unit of work that opens a transaction and then stalls before its next statement is invisible to it and holds its pool member indefinitely — measured at ~4.5 hours against a five-minute ceiling. Postgres ends such a backend itself, so the stalled thread unwinds and the lease is returned without a restart. Same value grammar as `AIMEE_DB2_STATEMENT_TIMEOUT_MS`; exactly `0` opts out, independently of the statement bound. |
+| `AIMEE_DB2_IDLE_IN_TRANSACTION_TIMEOUT_MS` | Per-connection `idle_in_transaction_session_timeout` in ms, defaulting to the same pool stuck-lease ceiling (`DB2_POOL_HOLD_CEILING_MS`, 300000). `statement_timeout` bounds a STATEMENT, so a unit of work that opens a transaction and then stalls before its next statement is invisible to it and holds its pool member indefinitely. This measured at about 4.5 hours against a five-minute ceiling. Postgres ends such a backend itself, so the stalled thread unwinds and the lease is returned without a restart. Same value grammar as `AIMEE_DB2_STATEMENT_TIMEOUT_MS`; exactly `0` opts out, independently of the statement bound. |
 | `AIMEE_DB2_POOL_SIZE` | DB2 connection-pool size override. |
-| `AIMEE_DB2_STATEMENT_TIMEOUT_MS` | Per-connection `statement_timeout` in ms. Defaults to the pool's stuck-lease ceiling (`DB2_POOL_HOLD_CEILING_MS`, 300000), because a statement must not outlive the duration that defines a lease as stuck — the pool can report such a lease but cannot reclaim it. The value must be canonical decimal digits with no sign, surrounding whitespace or leading zero. Exactly `0` disables the bound — a deliberate opt-out for genuinely long work — and every other spelling of zero (`00`, `+0`, `-0`, ` 0`) is treated as malformed. Anything malformed or out-of-range falls back to the default and never to unlimited, so no typo can silently remove the bound. |
+| `AIMEE_DB2_STATEMENT_TIMEOUT_MS` | Per-connection `statement_timeout` in ms. Defaults to the pool's stuck-lease ceiling (`DB2_POOL_HOLD_CEILING_MS`, 300000), because a statement must not outlive the duration that defines a lease as stuck. The pool can report such a lease but cannot reclaim it. The value must be canonical decimal digits with no sign, surrounding whitespace or leading zero. Exactly `0` disables the bound. This is a deliberate opt-out for genuinely long work. Every other spelling of zero (`00`, `+0`, `-0`, ` 0`) is treated as malformed. Anything malformed or out-of-range falls back to the default and never to unlimited, so no typo can silently remove the bound. |
 | `AIMEE_DIM_PROBE_BUDGET_MS` | Time budget for probing an embedder's output dimension. |
 | `AIMEE_EMBEDDING_DIM` | Embedding dimension (drives halfvec column sizing). |
 | `AIMEE_PGVEC_SLOW_QUERY_MS` | Slow-query log threshold (ms) for the pgvector transport. |
@@ -523,7 +523,7 @@ The binaries read 226 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_AUTONOMY_BASE` | Integration branch used by autonomous workflow work; distinct from the repository default branch. |
 | `AIMEE_AUTONOMY_MAX_ACTIVE_PER_PRINCIPAL` | Maximum active autonomous work items for one authenticated principal. |
 | `AIMEE_AUTONOMY_MAX_USD` | Default USD ceiling for an autonomous work item; 0 disables this default ceiling. |
-| `AIMEE_AUTONOMY_PANEL_RETRIES` | Per-(work item, stage) budget for auto-retrying a TRANSIENT roundtable park (`panel_degraded`/`panel_unreachable`) in an autonomous run, one retry per scheduler backstop sweep, before it escalates to a human. Default 6. An explicit `0` disables auto-retry (a degraded panel escalates immediately — the pre-feature behavior, useful during a known provider incident); a malformed/negative value floors to the default so a typo can't silently disable the rail. |
+| `AIMEE_AUTONOMY_PANEL_RETRIES` | Per-(work item, stage) budget for auto-retrying a TRANSIENT roundtable park (`panel_degraded`/`panel_unreachable`) in an autonomous run, one retry per scheduler backstop sweep, before it escalates to a human. Default 6. An explicit `0` disables auto-retry, so a degraded panel escalates immediately. A malformed or negative value floors to the default so a typo cannot silently disable the rail. |
 | `AIMEE_AUTONOMY_SUBMIT_RATE_PER_MIN` | Autonomous-submission rate limit per principal. |
 | `AIMEE_AUTONOMY_SUBMIT_WINDOW_SECS` | Window used by the autonomous-submission rate limiter. |
 | `AIMEE_AUTONOMY_USD_PER_SEC` | Fallback spend estimator for autonomous admission when exact provider cost is unavailable. |
@@ -546,7 +546,7 @@ The binaries read 226 `AIMEE_*` environment variables (scanned from `getenv()` i
 | Variable | Description |
 |----------|-------------|
 | `AIMEE_MCP_CWD` | Working-directory hint for MCP git-root resolution. |
-| `AIMEE_MCP_TOOL_PROFILE` | MCP tools/list presentation profile: 'core'/'lean' (default — Tier-0 high-frequency tools only, with find_tools/describe_tool reaching the rest) or 'full' (present every tool upfront). |
+| `AIMEE_MCP_TOOL_PROFILE` | MCP tools/list presentation profile: 'core'/'lean' (default: Tier-0 high-frequency tools only, with find_tools/describe_tool reaching the rest) or 'full' (present every tool upfront). |
 | `AIMEE_VERIFY_LOCK_FILE` | Override the host-wide file lock that serializes complete repository verification runs. |
 | `AIMEE_VERIFY_PARALLEL` | Run `aimee git verify` steps in parallel. |
 | `AIMEE_VERIFY_STEP_TIMEOUT_MS` | Per-step timeout (ms) for git verify. |
@@ -602,7 +602,7 @@ The binaries read 226 `AIMEE_*` environment variables (scanned from `getenv()` i
 
 ### Undocumented (add to `ENV_DESC` in gen-reference-docs.py)
 
-> These are read by the code but have no description yet — the generator surfaces them so the reference can't silently fall behind.
+> These are read by the code but have no description yet: the generator surfaces them so the reference can't silently fall behind.
 
 `AIMEE_SESSION_WORKTREE_BASE`
 
@@ -699,11 +699,11 @@ nodes:
 
 ### Block parameters (`params:`)
 
-- **`gate.roundtable`** — `panel.required` (list of required reviewer personas), `panel.eligible` (list of additional eligible personas), `quorum` (int; effective quorum is `max(2, quorum)` and at least the required-panel size).
-- **`gate.human`** — parks the run for a human decision. **Inviolable**: never auto-satisfied in autonomous mode, and declaring it auto-satisfiable (`policy: preauthorized` / `optional: true`) is rejected at validation. Cleared only by a human's signed approval via the gate endpoint.
+- **`gate.roundtable`**: `panel.required` (list of required reviewer personas), `panel.eligible` (list of additional eligible personas), `quorum` (int; effective quorum is `max(2, quorum)` and at least the required-panel size).
+- **`gate.human`**: parks the run for a human decision. **Inviolable**: never auto-satisfied in autonomous mode, and declaring it auto-satisfiable (`policy: preauthorized` / `optional: true`) is rejected at validation. Cleared only by a human's signed approval via the gate endpoint.
 - Other blocks take no params today; unknown params are ignored by the validator.
 
-### Custom blocks — `$AIMEE_HOME/workflows/blocks.yaml`
+### Custom blocks: `$AIMEE_HOME/workflows/blocks.yaml`
 
 Operator-owned (refused if a symlink or group/world-writable). Adds blocks to the catalog above:
 
@@ -721,19 +721,19 @@ blocks:
 
 ### Run-level controls (not in the definition)
 
-- **Per-stage loop cap** — `params.max_rounds` bounds retries for a node that loops through `on_fail` (default `20`). Exhaustion parks the run with `retry_limit` or a more specific convergence reason. The retired `max_iters` and `on_max` fields are ignored by the Go engine.
-- **Cost cap** — an optional per-work-item USD ceiling set at run creation (`work_item_max_cost_usd`); the engine parks the run when cumulative cost reaches it.
-- **Trigger / autonomy mode** — `interactive` vs `autonomous`, set when the run is created.
+- **Per-stage loop cap**: `params.max_rounds` bounds retries for a node that loops through `on_fail` (default `20`). Exhaustion parks the run with `retry_limit` or a more specific convergence reason. The retired `max_iters` and `on_max` fields are ignored by the Go engine.
+- **Cost cap**: an optional per-work-item USD ceiling set at run creation (`work_item_max_cost_usd`); the engine parks the run when cumulative cost reaches it.
+- **Trigger / autonomy mode**: `interactive` vs `autonomous`, set when the run is created.
 
 ### Workflow environment overrides
 
-`AIMEE_WORKFLOW_REPO` (repo the engine operates on) and `AIMEE_WORKFLOW_BASE` (base branch for freeze/diff) — see Environment variables above.
+`AIMEE_WORKFLOW_REPO` (repo the engine operates on) and `AIMEE_WORKFLOW_BASE` (base branch for freeze/diff): see Environment variables above.
 
 ## Other configuration files
 
 Beyond the config store, aimee reads a few standalone JSON/policy files (paths under `$AIMEE_HOME` unless an env override is set).
 
-### `agents.json` — agent / model definitions
+### `agents.json`: agent / model definitions
 
 `{"default_agent": "<name>", "agents": [ {<agent>}, … ]}`. Each agent object's fields (scanned from `src/server/agent_config.c`):
 
@@ -810,25 +810,25 @@ Beyond the config store, aimee reads a few standalone JSON/policy files (paths u
 | `tunnels` | Tunnel definitions. |
 | `user` | Remote user (ssh backend). |
 
-### Toolsets — `AIMEE_TOOLSETS_CONFIG` (or the config `toolsets` map)
+### Toolsets: `AIMEE_TOOLSETS_CONFIG` (or the config `toolsets` map)
 
 Named tool allowlists. `{"toolsets": {"<name>": { … }}}`; each toolset:
 
-- `tools` / `allowed_tools` — the tool names the set permits.
-- `include` — inherit another toolset's tools.
-- `script` — script-tool configuration for the set.
+- `tools` / `allowed_tools`: the tool names the set permits.
+- `include`: inherit another toolset's tools.
+- `script`: script-tool configuration for the set.
 
-### Guardrails — `AIMEE_GUARDRAILS_PATH`
+### Guardrails: `AIMEE_GUARDRAILS_PATH`
 
 A policy file governing path read/write classification and pre-tool enforcement (antipattern blocking). It is a behavioral policy rather than a flat key schema; the tunable thresholds are exposed as the `guardrails` section + `guardrails_semantic_*` / `guardrail_mode` keys documented above.
 
 ## Coverage & limitations
 
-This reference is generated by scanning the canonical source tables, which covers the scalar/keyed config surface but has known blind spots — listed here so a reader can tell *deliberately out of scope* from *not auto-derived*:
+This reference is generated by scanning the canonical source tables, which covers the scalar/keyed config surface but has known blind spots. They are listed here so a reader can tell *deliberately out of scope* from *not auto-derived*:
 
 - **Array/object element fields** are captured when the parser iterates with `cJSON_ArrayForEach` over a section's array; fields read through other access patterns (`cJSON_GetArrayItem`, indexing) or nested more than one object deep may appear only under their parent section name.
 - **Env vars built at runtime** (a name assembled with `snprintf`/concatenation and passed to `getenv(var)`) are not discoverable by the string-literal scan. Provider API-key vars are the known case and are handled via each agent's `api_key_env`; only the common defaults are listed.
 - **Compile-time `-D` defines** used as build-level configuration are not scanned (they are not runtime-overridable config).
-- **Separate config files** — `agents.json`, toolsets, guardrails, and custom workflow blocks (`blocks.yaml`) / workflow definitions are documented in their own sections above. Per-agent field set is scanned from `agent_config.c`; the guardrails *policy* is behavioral (path classification + pre-tool enforcement), with its tunables exposed as config keys.
+- **Separate config files**: `agents.json`, toolsets, guardrails, and custom workflow blocks (`blocks.yaml`) / workflow definitions are documented in their own sections above. Per-agent field set is scanned from `agent_config.c`; the guardrails *policy* is behavioral (path classification + pre-tool enforcement), with its tunables exposed as config keys.
 
-If the scan ever finds a config var with no description, it is emitted under an **Undocumented** heading in the relevant section — so a new option cannot silently bypass this reference.
+If the scan ever finds a config var with no description, it is emitted under an **Undocumented** heading in the relevant section, so a new option cannot silently bypass this reference.

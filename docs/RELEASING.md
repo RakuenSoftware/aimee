@@ -78,7 +78,8 @@ If a tag survives a failed run, delete it by hand before the next release or tha
 
 The repository can carry tags that were never released. `v0.2.196` and `v0.3.0` are both marked
 prerelease for exactly that reason: they exist, they have artifacts, and they are not releases anyone
-announced. `api/releases/latest` returns `v0.2.192`.
+announced. As of 2026-08-01, the next approved release, `v0.3.1`, is the result from
+`api/releases/latest`.
 
 Do not read the tag list to decide what shipped. Read the releases, and check whether the one you are
 looking at is marked prerelease.

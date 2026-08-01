@@ -1,11 +1,11 @@
 # We spent a night measuring our retrieval stack, and deleted the reranker
 
-*Draft — 2026-07-30. Numbers from `docs/validation/`, raw artifacts in
+*Draft, 2026-07-30. Numbers from `docs/validation/`, raw artifacts in
 `benchmarks/results/`.*
 
 We set out to answer a small question: which embedding model should our knowledge
-base use? We ended up answering a much larger one, which is that our reranker —
-a component nobody was questioning — was making retrieval *worse*.
+base use? We ended up answering a much larger one: our reranker, a component nobody was
+questioning, was making retrieval *worse*.
 
 This is a writeup of what we measured, what we got wrong, and the one
 methodological lesson that turned out to matter more than any individual number.
@@ -14,7 +14,7 @@ methodological lesson that turned out to matter more than any individual number.
 
 Our KB does dense retrieval over ~26k documents, then reranks the top candidates
 with a cross-encoder before answering. Standard architecture. We had a fresh
-evaluation suite — 10,000 queries against the full corpus, built from our own
+evaluation suite with 10,000 queries against the full corpus, built from our own
 content, with three categories: prose, code, and cited artifacts.
 
 The plan was to pick an embedder and move on.
@@ -22,7 +22,7 @@ The plan was to pick an embedder and move on.
 ## Trap 1: benchmark scores are not deployed scores
 
 Our first candidate won its benchmark decisively. Then we noticed the harness was
-scoring every model **with its card-recommended prefix** — `search_query:` /
+scoring every model **with its card-recommended prefix**: `search_query:` /
 `search_document:` for one model, an instruction sentence for another, nothing at
 all for a third.
 
@@ -46,8 +46,8 @@ reproduces the benchmark's input conditions.**
 With the embedder settled we turned to the reranker, which was English-only and
 had to be replaced for multilingual support anyway.
 
-Measured against the suite's reranking view — 20 candidates in arbitrary order,
-one relevant — reranking looked transformative:
+Measured against the suite's reranking view of 20 candidates in arbitrary order and one relevant
+result, reranking looked transformative:
 
 | reranker | NDCG@10 |
 | --- | ---: |
@@ -64,7 +64,7 @@ end to end, over the full corpus, 10,000 queries:
 
 | pipeline | NDCG@10 | vs dense |
 | --- | ---: | ---: |
-| dense only | **0.5909** | — |
+| dense only | **0.5909** | n/a |
 | + GTE @ depth 10 | 0.5803 | −0.0106 |
 | + GTE @ depth 20 | 0.5861 | −0.0048 |
 | + GTE @ depth 50 | 0.5942 | **+0.0032** |
@@ -72,7 +72,7 @@ end to end, over the full corpus, 10,000 queries:
 Reranking *degrades* the result at every depth anyone would actually run.
 
 The mechanism is visible in the numbers. The reranker's standalone capability
-tops out around 0.59–0.62 at these truncations — which is where dense retrieval
+tops out around 0.59–0.62 at these truncations, which is where dense retrieval
 already sits. **Its ceiling is below the ranking it is being asked to improve**,
 so on average every reordering is a step backwards.
 
@@ -104,7 +104,7 @@ The cost profile is everything you would want:
 
 | pipeline | NDCG@10 | vs dense |
 | --- | ---: | ---: |
-| dense only | **0.5909** | — |
+| dense only | **0.5909** | n/a |
 | colbert-xm @ depth 20 | 0.4663 | −0.1247 |
 | colbert-xm @ depth 50 | 0.4437 | −0.1473 |
 | cascade colbert→GTE | 0.5346 | −0.0563 |
@@ -114,7 +114,7 @@ It gets *worse* with more candidates, meaning it actively promotes irrelevant
 documents. Every cascade and fusion variant failed too.
 
 We think this is a domain-mismatch result rather than an indictment of late
-interaction — the cost profile proves the architecture works. But it is the only
+interaction; the cost profile proves the architecture works. But it is the only
 licence-clean multilingual ColBERT available, so the architecture currently has
 no viable candidate for us.
 
@@ -124,8 +124,8 @@ Across **ten** reranking configurations, exactly one beat dense retrieval: GTE a
 depth 50, by **+0.0032**, for 143 ms per query on GPU and unaffordable on CPU.
 
 So we deleted the reranker. That removes a GGUF conversion pipeline, a separate
-score-head artifact, a release workflow, and an entire serving component — and
-it makes the CPU and GPU tiers return identical rankings, which they previously
+score-head artifact, a release workflow, and an entire serving component. It also
+makes the CPU and GPU tiers return identical rankings, which they previously
 could not.
 
 Modern retrieval-trained embedders appear to have closed the gap that rerankers
@@ -137,12 +137,12 @@ was adopted; measured against a current embedder it is worth less than nothing.
 Six substantive claims we made during this work were wrong and corrected only by
 measuring:
 
-- CPU reranking feasibility — off by **10×** (extrapolated from the wrong runtime)
-- late-interaction speedup — off by **3×**
-- storage cost — off by **5.7×** (assumed 128-dim vectors, the model emitted 1024)
-- "latency is linear in tokens" — it is superlinear
-- "truncate documents, don't trim candidates" — true for capability, false for usefulness
-- "uniform embedding dimensions are an architectural win" — the system already handled it
+- **CPU reranking feasibility:** off by **10×** (extrapolated from the wrong runtime)
+- **Late-interaction speedup:** off by **3×**
+- **Storage cost:** off by **5.7×** (assumed 128-dim vectors, the model emitted 1024)
+- **"Latency is linear in tokens":** it is superlinear
+- **"Truncate documents, don't trim candidates":** true for capability, false for usefulness
+- **"Uniform embedding dimensions are an architectural win":** the system already handled it
 
 But the pattern underneath is the important part. **Almost every failure was
 silent, not loud:**
@@ -151,7 +151,8 @@ silent, not loud:**
 - a prefix flag worth 0.025 NDCG that nothing warned about
 - `-ngl 0` silently overridden by an auto-fit heuristic
 - `-np 4` quietly quartering the context window to 512 tokens
-- a GPU ONNX provider silently falling back to CPU — a 22-hour run masquerading as a 35-minute one
+- **Detect provider fallback.** A GPU ONNX provider silently fell back to CPU, turning a 35-minute
+  estimate into a 22-hour run.
 - a reranker returning **constant scores**, which reproduced the no-rerank baseline to sixteen decimal places
 
 That last one is the one to sit with. We caught it *only* because matching the
@@ -161,6 +162,6 @@ baseline exactly was too perfect to be real. Had it returned 0.21 instead of
 None of these threw an error. Each produced a plausible number.
 
 **If you take one thing from this: on a retrieval stack, the dominant failure
-mode is silent-wrong, not loud-wrong.** Record provenance — model, precision,
-device, truncation, sample size, harness — for every figure. A number without it
+mode is silent-wrong, not loud-wrong.** Record the model, precision, device, truncation, sample
+size, and harness for every figure. A number without that provenance
 is not evidence.

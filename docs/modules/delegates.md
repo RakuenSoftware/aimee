@@ -21,10 +21,10 @@ tests, and this document; it sets `ownership_complete: true`. `delegates` is the
 the program whose headers all live under the canonical `src/modules/delegates/include/aimee/delegates/`
 tree, so it declares no `private_headers`: the module root holds no header, and an absent field is an
 empty declared set against an empty actual set. An earlier slice declared the panel and IR-rescue
-pieces — three sources and two tests — and this declaration completes the remaining twenty-four sources
+pieces (three sources and two tests), and this declaration completes the remaining twenty-four sources
 and the broader direct-test set. Make compiles all twenty-seven sources; CMake compiles twenty-three,
 omitting `aimee_ir_rescue.c`, `delegate_ephemeral_ws.c`, `delegate_sandbox_image.c`, and
-`gw_orch_delegates.c`, the server/kb-side units — the same intentional thin-client boundary recorded
+`gw_orch_delegates.c`. These server/KB-side units follow the same intentional thin-client boundary recorded
 for gateway, learning, workspace, vault, config, and git, though CMake reaches far more of this module
 than of those. `docs/validation/core-modularization-slice-52.md` records the declaration audit and
 `docs/validation/core-modularization-slice-53.md` the completeness audit; the two were split so the

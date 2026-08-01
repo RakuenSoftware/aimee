@@ -1,6 +1,6 @@
 # Upgrading from v0.2.192
 
-There is no route back. 0.3.0 rewrites storage, credentials, and remote identity, and a 0.2 server
+There is no route back. 0.3.1 rewrites storage, credentials, and remote identity, and a 0.2 server
 will not read what it leaves behind. Your backup is the rollback plan; there is no downgrade
 command. Take the backup before step one, not after the first thing goes wrong.
 
@@ -46,7 +46,7 @@ Do not rely on a raw copy of a live SQLite main file. Take a consistent backup w
 
 ## This upgrade is one-way, by design
 
-0.3.0 does not preserve backwards compatibility, and that includes the image itself: once a server
+0.3.1 does not preserve backwards compatibility, and that includes the image itself: once a server
 volume has been booted by this release, an older image will not start on it again. It crash-loops
 with:
 
@@ -103,7 +103,7 @@ certificate-bound `full` grant during enrollment. Additional remote users need K
 and exact subject grants. `aimee.api.remote_writes=data|full` remains parsed, warns at startup, and
 increments `remote_writes.global_ignored`; it does not authorize a user write.
 
-Re-run the managed wizard's Deploy step to create the default team, server
+Re-run the managed wizard and use the summary's Deploy action to create the default team, server
 workload identity, signed generation-1 JWKS, and root-owned public trust volume.
 The one-shot authority image remains separate from the ordinary KB/server
 images, and the server mounts only its public output read-only.
