@@ -9,7 +9,7 @@
 #include "server_delegate_monitor.h" /* delegate heartbeat begin/end (keep slow delegates alive) */
 #include "server_compute_impl.h"
 #include "agent_config.h"
-#include "gateway_policy.h"
+#include <aimee/gateway/gateway_policy.h>
 #include "presence.h"
 #include "compute_pool.h"
 #include "agent.h"
@@ -17,25 +17,25 @@
 #include "cmd_agent_delegate_impl.h"
 #include "config.h"
 #include "token_tracker.h"
-#include "delegate_credential_retry.h"
-#include "delegate_launch.h"
-#include "delegate_sandbox_image.h"
-#include "delegate_source_authority.h"
+#include <aimee/delegates/delegate_credential_retry.h>
+#include <aimee/delegates/delegate_launch.h>
+#include <aimee/delegates/delegate_sandbox_image.h>
+#include <aimee/delegates/delegate_source_authority.h>
 #include "agent_source_authority.h" /* TLS source-authority context (race-free in-process) */
 #include "server_coord_dispatcher.h"
-#include "delegate_credentials.h"
+#include <aimee/delegates/delegate_credentials.h>
 #include "vault_service.h" /* WP-C.1 vault-first credential resolution */
 #include <openssl/crypto.h>
-#include "delegate_economics.h"
-#include "delegate_run_phases.h"
+#include <aimee/delegates/delegate_economics.h>
+#include <aimee/delegates/delegate_run_phases.h>
 #include "db1/delegate_learning.h"
 #include "kb_client.h"
 #include "kb_bandit.h"
 #include "db1/interaction_events.h"
-#include "delegate_role.h"
+#include <aimee/delegates/delegate_role.h>
 #include "delegate_ensemble.h"
 #include "evidence_replay.h"
-#include "delegate_ephemeral_ws.h"
+#include <aimee/delegates/delegate_ephemeral_ws.h>
 #include "guardrails.h"
 #include "liveness.h"
 #include "log.h"
@@ -43,7 +43,9 @@
 #include "openai_runs_store.h"
 #include "platform_process.h"
 #include "prompts.h"
+#include <limits.h>
 #include "persona.h"
+#include "roundtable_preset.h"
 #include "server_http.h"
 #include "provider_catalog.h"
 #include "role_templates.h"
@@ -142,6 +144,7 @@ static void compute_update_background_job(compute_ctx_t *cctx, cJSON *resp)
    cJSON *tool_calls = cJSON_GetObjectItemCaseSensitive(resp, "tool_calls");
    cJSON *response = cJSON_GetObjectItemCaseSensitive(resp, "response");
    cJSON *message = cJSON_GetObjectItemCaseSensitive(resp, "message");
+   cJSON *cost_usd = cJSON_GetObjectItemCaseSensitive(resp, "cost_usd");
    int has_response = cJSON_IsString(response) && response->valuestring[0];
    int has_message = cJSON_IsString(message) && message->valuestring[0];
 
@@ -200,7 +203,15 @@ static void compute_update_background_job(compute_ctx_t *cctx, cJSON *resp)
       db1_agent_job_free(&job); /* zero-init by get on miss; safe either way */
    }
 
-   db1_agent_job_update(cctx->background_job_id, job_status, cursor_turn, result);
+   cJSON *cost_known = cJSON_GetObjectItemCaseSensitive(resp, "cost_known");
+   /* An absent or false cost_known means the delegate produced no measurement.
+    * Leave the stored cost unknown rather than recording a false zero. */
+   int has_cost =
+       cJSON_IsTrue(cost_known) && cJSON_IsNumber(cost_usd) && cost_usd->valuedouble >= 0.0;
+   if (db1_agent_job_complete(cctx->background_job_id, job_status, cursor_turn, result, has_cost,
+                              has_cost ? cost_usd->valuedouble : 0.0) != 0)
+      aimee_log(LOG_ERROR, "delegate", "background job %d terminal status/cost write failed",
+                cctx->background_job_id);
 }
 
 static void compute_update_coord_task(compute_ctx_t *cctx, cJSON *resp)
@@ -217,10 +228,8 @@ static void compute_update_coord_task(compute_ctx_t *cctx, cJSON *resp)
    }
    else if (strcmp(status_text, "preempted") == 0)
    {
-      config_t cfg;
-      config_load(&cfg);
       if (db1_coord_job_release_task_bounded_owned(cctx->coord_task_id, cctx->coord_claim_owner,
-                                                   cfg.concurrency_preempt_requeue_max) == 0)
+                                                   config_concurrency_preempt_requeue_max()) == 0)
       {
          server_coord_dispatcher_notify();
          return;
@@ -535,6 +544,18 @@ void delegate_child_export_context_env(void)
  * with the response and apply_error attached when present. Economics and
  * handoff-validation fields are added the same way for both. Returns a new
  * cJSON object; the caller attaches checkout info and responds. */
+/* Publish the realized cost only when the audit actually recorded one. A
+ * missing audit row means the spend is unknown, not zero: the consumer must be
+ * able to tell those apart or unmeasured provider spend is committed as free. */
+static void delegate_add_measured_cost_json(cJSON *resp, const char *deleg_id)
+{
+   double cost = 0.0;
+   int known = db1_token_audit_cost_for_delegation_ex(deleg_id, &cost) == 0;
+   cJSON_AddBoolToObject(resp, "cost_known", known);
+   if (known)
+      cJSON_AddNumberToObject(resp, "cost_usd", cost);
+}
+
 static cJSON *delegate_build_result_response(
     const char *deleg_id, int rc, const agent_result_t *result, const agent_config_t *acfg,
     const char *role, const agent_t *target_agent, int applied_changes, int handoff_checked,
@@ -554,6 +575,7 @@ static cJSON *delegate_build_result_response(
       cJSON_AddNumberToObject(resp, "prompt_tokens", result->prompt_tokens);
       cJSON_AddNumberToObject(resp, "completion_tokens", result->completion_tokens);
       delegate_economics_add_agent_result_json(resp, acfg, role, result, target_agent);
+      delegate_add_measured_cost_json(resp, deleg_id);
       if (applied_changes >= 0)
          cJSON_AddNumberToObject(resp, "applied_changes", applied_changes);
       if (handoff_checked)
@@ -577,6 +599,7 @@ static cJSON *delegate_build_result_response(
       cJSON_AddNumberToObject(resp, "prompt_tokens", result->prompt_tokens);
       cJSON_AddNumberToObject(resp, "completion_tokens", result->completion_tokens);
       delegate_economics_add_agent_result_json(resp, acfg, role, result, target_agent);
+      delegate_add_measured_cost_json(resp, deleg_id);
       if (result->response)
          cJSON_AddStringToObject(resp, "response", result->response);
       if (apply_error[0])
@@ -604,6 +627,40 @@ static void delegate_append_owned_block(const char **system_prompt, char **templ
       *system_prompt = combined;
    }
    free(block);
+}
+
+/* Convert a USD ceiling into a conservative total-token ceiling after routing,
+ * when the actual model and authoritative DB1 pricing are known. Charging one
+ * synthetic token in every usage class deliberately overstates the per-token
+ * rate (notably for cached input), which makes the resulting token ceiling a
+ * safety bound rather than a spend prediction. */
+static int delegate_apply_cost_limit(agent_t *agent, double max_cost_usd, int input_tokens,
+                                     int *max_tokens, char *err, size_t err_cap)
+{
+   if (max_cost_usd <= 0.0)
+      return 0;
+   if (!agent || !agent->model[0])
+   {
+      snprintf(err, err_cap, "max_cost_usd requires a routed model");
+      return -1;
+   }
+   int token_cap = 0, total_cap = 0;
+   int ceiling = token_cost_ceiling(agent->model, max_cost_usd, input_tokens, *max_tokens,
+                                    &token_cap, &total_cap);
+   if (ceiling < 0)
+   {
+      snprintf(err, err_cap, "cannot enforce max_cost_usd %.6f for model '%s'", max_cost_usd,
+               agent->model);
+      return -1;
+   }
+   if (ceiling == 0) /* explicitly free model */
+      return 0;
+   *max_tokens = token_cap;
+   if (agent->max_tokens <= 0 || agent->max_tokens > token_cap)
+      agent->max_tokens = token_cap;
+   if (agent->middleware.cost_limit <= 0 || agent->middleware.cost_limit > total_cap)
+      agent->middleware.cost_limit = total_cap;
+   return 0;
 }
 
 void delegate_worker(void *arg)
@@ -646,6 +703,7 @@ void delegate_worker(void *arg)
    cJSON *jrole = cJSON_GetObjectItemCaseSensitive(req, "role");
    cJSON *jprompt = cJSON_GetObjectItemCaseSensitive(req, "prompt");
    cJSON *jmax = cJSON_GetObjectItemCaseSensitive(req, "max_tokens");
+   cJSON *jmaxcost = cJSON_GetObjectItemCaseSensitive(req, "max_cost_usd");
    cJSON *jsystem = cJSON_GetObjectItemCaseSensitive(req, "system_prompt");
    cJSON *jid = cJSON_GetObjectItemCaseSensitive(req, "delegation_id");
    cJSON *jsid = cJSON_GetObjectItemCaseSensitive(req, "session_id");
@@ -653,19 +711,24 @@ void delegate_worker(void *arg)
    cJSON *jbranch = cJSON_GetObjectItemCaseSensitive(req, "branch");
    cJSON *jtimeout = cJSON_GetObjectItemCaseSensitive(req, "timeout_ms");
    cJSON *jmaxturns = cJSON_GetObjectItemCaseSensitive(req, "max_turns");
+   cJSON *jmaxturnscap = cJSON_GetObjectItemCaseSensitive(req, "max_turns_cap");
    cJSON *jhandoff = cJSON_GetObjectItemCaseSensitive(req, "handoff_json");
    cJSON *jtools = cJSON_GetObjectItemCaseSensitive(req, "tools");
+   cJSON *jprovided_target = cJSON_GetObjectItemCaseSensitive(req, "provided_target");
    cJSON *jtier = cJSON_GetObjectItemCaseSensitive(req, "tier");
    cJSON *jvia = cJSON_GetObjectItemCaseSensitive(req, "via");
+   cJSON *jparticipant = cJSON_GetObjectItemCaseSensitive(req, "participant");
    cJSON *jprovider = cJSON_GetObjectItemCaseSensitive(req, "provider");
    cJSON *jmodel = cJSON_GetObjectItemCaseSensitive(req, "model");
    cJSON *jparent_deleg = cJSON_GetObjectItemCaseSensitive(req, "parent_delegation_id");
    cJSON *jreq_caps = cJSON_GetObjectItemCaseSensitive(req, "required_caps");
    cJSON *jmin_ctx = cJSON_GetObjectItemCaseSensitive(req, "min_context");
+   cJSON *jscope = cJSON_GetObjectItemCaseSensitive(req, "scope");
    const char *role =
        delegate_role_canonicalize(cJSON_IsString(jrole) ? jrole->valuestring : "execute");
    const char *prompt = cJSON_IsString(jprompt) ? jprompt->valuestring : "";
    int max_tokens = cJSON_IsNumber(jmax) ? (int)jmax->valuedouble : 0; /* 0 => model-derived */
+   double max_cost_usd = cJSON_IsNumber(jmaxcost) ? jmaxcost->valuedouble : 0.0;
    const char *system_prompt = cJSON_IsString(jsystem) ? jsystem->valuestring : NULL;
    const char *sid = cJSON_IsString(jsid) ? jsid->valuestring : NULL;
    const char *cwd = cJSON_IsString(jcwd) ? jcwd->valuestring : "";
@@ -673,11 +736,18 @@ void delegate_worker(void *arg)
        (cJSON_IsString(jbranch) && jbranch->valuestring[0]) ? jbranch->valuestring : NULL;
    int timeout_ms = cJSON_IsNumber(jtimeout) ? (int)jtimeout->valuedouble : 0;
    int max_turns = cJSON_IsNumber(jmaxturns) ? (int)jmaxturns->valuedouble : -1;
+   int max_turns_cap = cJSON_IsNumber(jmaxturnscap) && jmaxturnscap->valuedouble > 0
+                           ? (int)jmaxturnscap->valuedouble
+                           : 0;
    int handoff_json = cJSON_IsTrue(jhandoff);
+   /* Only the JSON boolean literal true opts out; absent, false, and malformed
+    * values preserve automatic evidence grounding. */
+   int caller_provided_target = cJSON_IsTrue(jprovided_target);
    const char *toolset_override =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "toolset"));
    int tier_override = cJSON_IsNumber(jtier) ? (int)jtier->valuedouble : -1;
    const char *via_name = cJSON_IsString(jvia) ? jvia->valuestring : NULL;
+   const char *participant = cJSON_IsString(jparticipant) ? jparticipant->valuestring : NULL;
    cJSON *jacp_cmd = cJSON_GetObjectItemCaseSensitive(req, "acp_command");
    cJSON *jacp_args = cJSON_GetObjectItemCaseSensitive(req, "acp_args");
    const char *acp_command =
@@ -700,6 +770,41 @@ void delegate_worker(void *arg)
    {
       delegation_compute_error(cctx, "delegate requires a 'persona' (e.g. engineer, qa, security, "
                                      "reviewer, architect)");
+      compute_ctx_free(cctx);
+      return;
+   }
+   /* The role must name a real role, and the persona a real persona. Both used to
+    * be taken on trust here, so `delegate bogusrole` and `--persona nosuchpersona`
+    * ran to completion: the unknown role fell back to a generic prompt with
+    * read-only tool defaults, and the missing persona file left the delegate with
+    * no identity or principles at all — in both cases returning a plausible answer
+    * to a caller who believed its request had been honoured. The CLI guards these
+    * locally, but the /v1 route reaches this worker directly and bypassed it, so
+    * the check belongs here, at the single boundary every builder crosses. */
+   {
+      const char *removed = delegate_role_removed_reason(role);
+      if (removed)
+      {
+         delegation_compute_error(cctx, removed);
+         compute_ctx_free(cctx);
+         return;
+      }
+   }
+   if (!delegate_role_known(cwd && cwd[0] ? cwd : NULL, role))
+   {
+      char rolemsg[192];
+      snprintf(rolemsg, sizeof(rolemsg),
+               "unknown delegate role '%s' (see 'aimee delegate --list-roles')", role);
+      delegation_compute_error(cctx, rolemsg);
+      compute_ctx_free(cctx);
+      return;
+   }
+   if (!persona_exists(cwd && cwd[0] ? cwd : NULL, persona_override))
+   {
+      char personamsg[192];
+      snprintf(personamsg, sizeof(personamsg), "unknown persona '%s' (see 'aimee persona list')",
+               persona_override);
+      delegation_compute_error(cctx, personamsg);
       compute_ctx_free(cctx);
       return;
    }
@@ -738,6 +843,32 @@ void delegate_worker(void *arg)
       delegation_compute_error(cctx, "failed to load agent config");
       compute_ctx_free(cctx);
       return;
+   }
+   /* A participant is a delegate-service continuation token. Resolve it here,
+    * behind the generic delegation boundary, so coordinators never learn or
+    * retain the concrete agent identity. The durable job row survives service
+    * restarts and therefore makes discussion continuity restart-safe. */
+   char participant_agent[MAX_AGENT_NAME] = "";
+   if (participant && participant[0])
+   {
+      if (via_name && via_name[0])
+      {
+         delegation_compute_error(cctx, "invalid delegate participant continuation");
+         compute_ctx_free(cctx);
+         return;
+      }
+      db1_agent_job_t prior;
+      memset(&prior, 0, sizeof(prior));
+      if (db1_agent_job_get_by_participant(participant, &prior) != 0 || !prior.agent_name[0])
+      {
+         db1_agent_job_free(&prior);
+         delegation_compute_error(cctx, "delegate participant continuation is unknown");
+         compute_ctx_free(cctx);
+         return;
+      }
+      snprintf(participant_agent, sizeof(participant_agent), "%s", prior.agent_name);
+      db1_agent_job_free(&prior);
+      via_name = participant_agent;
    }
    /* Inline --acp <cmd>: synthesize an ephemeral kind:acp agent and route to it
     * by name, exactly like --via. The external ACP agent runs its own model, so
@@ -790,8 +921,26 @@ void delegate_worker(void *arg)
                                                                persona_override, cwd, &tmpl);
             agent_result_t result;
             memset(&result, 0, sizeof(result));
-            int rc = agent_execute_cli_session(cag, NULL, sysp ? sysp : "", prompt,
-                                               AGENT_DEFAULT_MAX_TOKENS, 0.3, &result);
+            int cli_max_tokens = AGENT_DEFAULT_MAX_TOKENS;
+            int cli_cost_failed = 0;
+            if (max_cost_usd != 0.0)
+            {
+               size_t bytes = strlen(sysp ? sysp : "") + strlen(prompt);
+               int input_tokens = bytes > (size_t)(INT_MAX - 32768) ? INT_MAX : (int)bytes + 32768;
+               char cost_err[256] = "";
+               if (max_cost_usd < 0.0 ||
+                   delegate_apply_cost_limit(cag, max_cost_usd, input_tokens, &cli_max_tokens,
+                                             cost_err, sizeof(cost_err)) != 0)
+               {
+                  snprintf(result.error, sizeof(result.error), "%s",
+                           max_cost_usd < 0.0 ? "max_cost_usd cannot be negative" : cost_err);
+                  cli_cost_failed = 1;
+               }
+            }
+            int rc = cli_cost_failed
+                         ? -1
+                         : agent_execute_cli_session(cag, NULL, sysp ? sysp : "", prompt,
+                                                     cli_max_tokens, 0.3, &result);
             run_cmd_set_cwd(NULL);
             workspace_turn_unbind_active();
             free(tmpl);
@@ -807,6 +956,13 @@ void delegate_worker(void *arg)
    }
    unsigned required_caps = cJSON_IsNumber(jreq_caps) ? (unsigned)jreq_caps->valuedouble : 0;
    int min_context = cJSON_IsNumber(jmin_ctx) ? (int)jmin_ctx->valuedouble : 0;
+   /* The packet's scope CEILING. Routing is the server's job, so the ceiling is
+    * enforced here rather than by the caller. Absent or unparseable leaves it
+    * UNSET, which admits every seat - the client validates the spelling, so an
+    * unparseable value here means a non-CLI caller, and the permissive default
+    * matches the previous behaviour for every existing caller. */
+   agent_scope_t scope =
+       cJSON_IsString(jscope) ? agent_scope_from_string(jscope->valuestring) : AGENT_SCOPE_UNSET;
    {
       char route_err[256];
       unsigned inferred_caps = 0;
@@ -836,9 +992,7 @@ void delegate_worker(void *arg)
       if (!acp_command && tier_override < 0 && !(via_name && via_name[0]) &&
           !(provider_override && provider_override[0]) && !(model_override && model_override[0]))
       {
-         config_t dr_cfg;
-         config_load(&dr_cfg);
-         if (dr_cfg.bandit_live_decision_enabled)
+         if (config_bandit_live_decision_enabled())
          {
             static const char *const dr_arms[2] = {"cheapest", "premium"};
             if (kb_client_bandit_sample("delegate_routing", dr_arms, 2, dr_arm_id,
@@ -867,21 +1021,30 @@ void delegate_worker(void *arg)
       }
    }
 
-   config_t route_cfg;
-   config_load(&route_cfg);
-   target_agent = agent_route_with_caps(&acfg, role, &route_cfg, required_caps, min_context);
+   agent_route_policy_t policy;
+   agent_route_policy_current(&policy);
+   target_agent =
+       agent_route_with_caps_scoped(&acfg, role, &policy, required_caps, min_context, scope);
    if (!target_agent)
    {
       char caps_buf[128];
       model_capability_format_flags(required_caps, caps_buf, sizeof(caps_buf));
       char errmsg[256];
       snprintf(errmsg, sizeof(errmsg),
-               "no configured model supports required capabilities (caps=%s, min_context=%d)",
-               caps_buf[0] ? caps_buf : "none", min_context);
+               "no configured model supports required capabilities (caps=%s, min_context=%d, "
+               "scope=%s)",
+               caps_buf[0] ? caps_buf : "none", min_context, agent_scope_name(scope));
       delegation_compute_error(cctx, errmsg);
       compute_ctx_free(cctx);
       return;
    }
+   /* Record the placement together with the ceiling it was made under. A scope
+    * that silently failed to bind is indistinguishable from one that bound and
+    * admitted the seat unless the effective value is observable, and this is the
+    * only place that knows both. */
+   if (scope != AGENT_SCOPE_UNSET)
+      aimee_log(LOG_INFO, "delegate", "routed role '%s' to '%s' under scope ceiling %s", role,
+                target_agent->name, agent_scope_name(scope));
    /* An agent flagged "Primary Agent Only" (agents.json `primary_only`) is never
     * a delegation target. A claude-oauth subscription is pre-flagged this way at
     * add time: driving a personal Claude plan as an automated delegate may breach
@@ -906,6 +1069,7 @@ void delegate_worker(void *arg)
       target_agent->timeout_ms =
           delegate_effective_timeout_ms(timeout_ms, target_agent->timeout_ms);
    delegate_apply_max_turns_policy(&acfg, role, max_turns);
+   delegate_apply_max_turns_cap(&acfg, role, max_turns_cap);
    if (cctx->background_job_id > 0 && target_agent)
       db1_agent_job_set_agent(cctx->background_job_id, target_agent->name);
    /* Resolve the credential (WP-C.1 vault-FIRST + WP-C.3 per-principal cooldown):
@@ -941,10 +1105,8 @@ void delegate_worker(void *arg)
     * AIMEE_DELEGATE_DEPTH/AIMEE_PARENT_DELEGATION_ID as request fields. Stale
     * completed parents are ignored so a primary shell with leaked env does not
     * get misclassified as a live delegate. */
-   config_t cfg;
-   config_load(&cfg);
-   int max_depth = cfg.max_delegation_depth > 0 ? cfg.max_delegation_depth
-                                                : CONFIG_DEFAULT_MAX_DELEGATION_DEPTH;
+   int max_depth = config_max_delegation_depth() > 0 ? config_max_delegation_depth()
+                                                     : CONFIG_DEFAULT_MAX_DELEGATION_DEPTH;
    cJSON *jreq_depth = cJSON_GetObjectItemCaseSensitive(req, "delegation_depth");
    int req_parent_depth = 0;
    const char *request_parent = NULL;
@@ -973,8 +1135,8 @@ void delegate_worker(void *arg)
     * delegate. Counting all first-level delegates for the whole operator
     * session exhausts long, deliberate delegate-heavy workflows; runaway risk
     * comes from sub-delegation fan-out below a root delegate. */
-   int max_spawns = cfg.max_delegation_spawns > 0 ? cfg.max_delegation_spawns
-                                                  : CONFIG_DEFAULT_MAX_DELEGATION_SPAWNS;
+   int max_spawns = config_max_delegation_spawns() > 0 ? config_max_delegation_spawns()
+                                                       : CONFIG_DEFAULT_MAX_DELEGATION_SPAWNS;
    const char *effective_sid = sid ? sid : session_id();
    int total_spawns = 0;
    char root_deleg_id[64] = "";
@@ -1089,7 +1251,12 @@ void delegate_worker(void *arg)
        delegate_assemble_system_prompt(system_prompt, role, prompt, cwd, persona_override,
                                        delegate_worktree_path, &template_sys_prompt);
 
-   /* Ground read-only inspection roles in parent diff evidence. */
+   /* This is delegate_worker's sole parent-diff evidence injection point.
+    * Ground read-only inspection roles in parent diff evidence unless the
+    * caller supplied the complete review target inline. In that case an
+    * unrelated current-worktree diff is competing evidence and can make a
+    * plan reviewer incorrectly demand implementation. */
+   if (!caller_provided_target)
    {
       char *evidence = delegate_prepend_parent_diff_evidence(prompt, role, delegate_allows_writes,
                                                              cwd, deleg_id);
@@ -1220,6 +1387,31 @@ void delegate_worker(void *arg)
    if (learning_sys_prompt)
       system_prompt = learning_sys_prompt;
 
+   int rc = -1;
+   int cost_limit_failed = 0;
+   if (max_cost_usd != 0.0)
+   {
+      size_t input_bytes =
+          strlen(run_prompt ? run_prompt : "") + strlen(system_prompt ? system_prompt : "");
+      /* One byte per token is a conservative tokenizer-independent ceiling.
+       * Reserve additional input for tool schemas/provider framing that is not
+       * present in the two prompt strings. */
+      const size_t framing_tokens = 32768;
+      int input_tokens = input_bytes > (size_t)(INT_MAX - (int)framing_tokens)
+                             ? INT_MAX
+                             : (int)input_bytes + (int)framing_tokens;
+      char cost_err[256] = "";
+      if (max_cost_usd < 0.0 ||
+          delegate_apply_cost_limit(target_agent, max_cost_usd, input_tokens, &max_tokens, cost_err,
+                                    sizeof(cost_err)) != 0)
+      {
+         snprintf(result.error, sizeof(result.error), "%s",
+                  max_cost_usd < 0.0 ? "max_cost_usd cannot be negative" : cost_err);
+         rc = -1;
+         cost_limit_failed = 1;
+      }
+   }
+
    /* Provider-backed delegates can call back into aimee-server tools while
     * waiting on the model. Keep the server compute budget available for
     * those callbacks; delegate concurrency is already governed above by the
@@ -1238,7 +1430,6 @@ void delegate_worker(void *arg)
       parent_write_guard_active = 1;
    }
 
-   int rc;
    /* Thread-local, not the process env: delegate turns run on POOLED worker threads
     * and overlap by design (session_threads defaults above 1; panels fan out through
     * agent_run_parallel). The old save/restore around a process-wide setenv looked
@@ -1375,7 +1566,11 @@ void delegate_worker(void *arg)
            ? 0
            : workspace_turn_bind_container(deleg_id, sbx_image_arg, container_ws, container_ws_ro);
 
-   if (container_bound < 0)
+   if (cost_limit_failed)
+   {
+      /* Result error was populated before any provider dispatch. */
+   }
+   else if (container_bound < 0)
    {
       /* HARD isolation refusal (delegate_sandbox_require_isolation): the runtime would
        * not provide a network-isolated sandbox. Refuse the delegation rather than fall
@@ -1625,12 +1820,11 @@ void delegate_worker(void *arg)
    if (dr_decision_id[0] && dr_arm_id[0])
    {
       double reward = rc == 0 ? 1.0 : 0.0;
-      config_t rcfg;
-      if (rc == 0 && config_load(&rcfg) == 0 && rcfg.cost_reward_enabled)
+      if (rc == 0 && config_cost_reward_enabled())
       {
          double dcost = db1_token_audit_cost_for_delegation(deleg_id);
-         reward = cost_shaped_reward(1, dcost, rcfg.cost_reward_lambda_pct,
-                                     rcfg.cost_reward_ref_usd_milli);
+         reward = cost_shaped_reward(1, dcost, config_cost_reward_lambda_pct(),
+                                     config_cost_reward_ref_usd_milli());
       }
       kb_client_bandit_close("delegate_routing", dr_decision_id, dr_arm_id, reward);
    }
@@ -1771,12 +1965,6 @@ compute_ctx_t *create_compute_ctx(server_ctx_t *ctx, server_conn_t *conn, cJSON 
    return cctx;
 }
 
-static int roundtable_run_cancel_requested(void *ctx)
-{
-   const char *run_id = (const char *)ctx;
-   return run_id && run_id[0] && openai_runs_store_cancel_requested(run_id);
-}
-
 int handle_tool_execute(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    compute_ctx_t *cctx = create_compute_ctx(ctx, conn, req);
@@ -1857,7 +2045,15 @@ int server_delegate_launch_async(server_ctx_t *ctx, server_conn_t *conn, cJSON *
 
    char lease_owner[32];
    snprintf(lease_owner, sizeof(lease_owner), "%d", (int)getpid());
-   int job_id = db1_agent_job_create(role, prompt, "", lease_owner);
+   /* A positive `via` pin is already an assignment, even if execution must wait
+    * for provider capacity. Persist it at creation so the Go control plane's
+    * unassigned-job lease cannot cancel a correctly seated roundtable member
+    * merely because its worker has not started yet. Generic routing remains
+    * empty until the worker actually selects an eligible agent. */
+   cJSON *jvia = cJSON_GetObjectItemCaseSensitive(req, "via");
+   const char *initial_agent =
+       cJSON_IsString(jvia) && jvia->valuestring[0] ? jvia->valuestring : "";
+   int job_id = db1_agent_job_create(role, prompt, initial_agent, lease_owner);
    if (job_id <= 0)
    {
       compute_ctx_free(cctx);
@@ -1897,8 +2093,31 @@ int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "job_id", job_id);
+   db1_agent_job_t job;
+   if (db1_agent_job_get(job_id, &job) == 0)
+   {
+      if (job.participant_token[0])
+         cJSON_AddStringToObject(resp, "participant", job.participant_token);
+      db1_agent_job_free(&job);
+   }
    cJSON_AddStringToObject(resp, "job_status", "pending");
    return server_send_ok(conn, resp);
+}
+
+/* Resolve the one runtime panel contract shared by aggregate and roundtable.
+ * A saved preset contributes its exact seats. Only the no-preset fallback is
+ * synthesized, and that helper has a structural two-seat maximum. */
+static int prepare_roundtable_panel(cJSON *req, ensemble_panel_t *panel, agent_config_t *acfg,
+                                    char *err, size_t err_n)
+{
+   cJSON *jrt = cJSON_GetObjectItemCaseSensitive(req, "roundtable");
+   if (jrt && !cJSON_IsString(jrt))
+   {
+      snprintf(err, err_n, "roundtable must name a saved preset");
+      return -1;
+   }
+   const char *requested = cJSON_IsString(jrt) ? jrt->valuestring : NULL;
+   return ensemble_prepare_runtime_panel(requested, panel, acfg, err, err_n);
 }
 
 /* Convene the ensemble panel from enabled registry agents when no explicit
@@ -1925,23 +2144,19 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
       return server_send_error(conn, errmsg, NULL);
    }
 
-   config_t cfg;
-   config_load(&cfg);
+   ensemble_panel_t panel;
+   ensemble_panel_from_config(&panel);
    agent_config_t acfg;
    memset(&acfg, 0, sizeof(acfg));
    if (agent_load_config(&acfg) != 0)
       return server_send_error(conn, "could not load agents.json", NULL);
-   ensemble_default_panel_from_agents(&cfg, &acfg);
-   /* Also gate an EXPLICIT reference_models list: never run an unauthorized
-    * claude as a panelist, however it got into the panel. */
-   ensemble_filter_panel_authorization(&cfg, &acfg);
-   /* Runtime gate: drop unkeyed/unhealthy panelists so the round isn't silently
-    * degraded by a model that is in the list/roster but can't actually run. */
-   ensemble_filter_panel_availability(&cfg, &acfg);
+   char pin_err[256] = "no enabled review agent is currently available";
+   if (prepare_roundtable_panel(req, &panel, &acfg, pin_err, sizeof pin_err) != 0)
+      return server_send_error(conn, pin_err, NULL);
    bind_request_session_creds(req);
 
    delegate_ensemble_result_t result;
-   int rc = delegate_ensemble_run(&acfg, &cfg, prompt, &result);
+   int rc = delegate_ensemble_run(&acfg, &panel, prompt, &result);
    if (rc != 0)
       return server_send_error(conn, "ensemble run failed (no enabled agents in agents.json?)",
                                NULL);
@@ -1953,222 +2168,6 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    cJSON_AddNumberToObject(resp, "participants_total", result.participants_total);
    cJSON_AddNumberToObject(resp, "participants_failed", result.participants_failed);
    cJSON_AddNumberToObject(resp, "cost_usd", result.cost_usd);
-   return server_send_ok(conn, resp);
-}
-
-/* Replay-verification backend (Part A): the roundtable runs server-side, where the
- * code index is reached over the kb socket via kb_client (the server itself is
- * AIMEE_DB2_DISABLED). Installed lazily so the verifier engine — which references
- * no index/kb symbol — stays linkable in every binary. */
-static int rt_replay_project_count(void)
-{
-   project_info_t tmp[1];
-   int n = kb_client_index_list(tmp, 1);
-   return n < 0 ? 0 : n; /* >0 = at least one indexed project (enough to ground) */
-}
-
-static const replay_backend_t rt_replay_kb_backend = {
-    .find_symbol = kb_client_index_find,
-    .find_callers = kb_client_index_find_callers,
-    .code_search = kb_client_index_code_search,
-    .project_count = rt_replay_project_count,
-};
-
-/* Assemble the read-only aimee context injected into every roundtable panelist
- * prompt. Panelists run with NO tools, so — unlike a normal delegate, which
- * reaches aimee memory and the code graph through tools mid-run — they can only
- * see them if the context is pre-loaded. Combines aimee memory recall (graph-code
- * fusion on, so code-graph-fused memory flows in) with the same code-index and
- * structural-graph snippets a regular delegate is seeded with. Best-effort and
- * fail-open: returns a heap string the caller frees, or NULL when nothing is
- * available (recall disabled/empty and kb unreachable). */
-static char *roundtable_build_aimee_context(const char *prompt)
-{
-   if (!prompt || !prompt[0])
-      return NULL;
-   dstr_t s;
-   dstr_init(&s);
-
-   config_t cfg;
-   if (config_load(&cfg) == 0 && cfg.memory_recall_enabled)
-   {
-      int limit = cfg.memory_recall_limit_tokens_turn > 0 ? cfg.memory_recall_limit_tokens_turn : 0;
-      char *env = kb_client_memory_recall_json_ex(prompt, limit, 0 /* not session start */, "on");
-      cJSON *j = env ? cJSON_Parse(env) : NULL;
-      free(env);
-      cJSON *recall = j ? cJSON_GetObjectItemCaseSensitive(j, "recall") : NULL;
-      if (recall)
-      {
-         /* Same six recall sections the primary agent gets, in priority order. */
-         static const char *const sections[][2] = {{"identity", "Identity"},
-                                                   {"preferences", "Preferences"},
-                                                   {"active_context", "Active Context"},
-                                                   {"open_commitments", "Open Commitments"},
-                                                   {"reminders", "Reminders"},
-                                                   {"directives", "Directives"}};
-         int any = 0;
-         for (int si = 0; si < (int)(sizeof(sections) / sizeof(sections[0])); si++)
-         {
-            cJSON *arr = cJSON_GetObjectItemCaseSensitive(recall, sections[si][0]);
-            if (!cJSON_IsArray(arr) || cJSON_GetArraySize(arr) <= 0)
-               continue;
-            if (!any)
-            {
-               dstr_append_str(&s, "## Aimee memory\n");
-               any = 1;
-            }
-            dstr_appendf(&s, "### %s\n", sections[si][1]);
-            cJSON *it = NULL;
-            cJSON_ArrayForEach(it, arr)
-            {
-               const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(it, "text"));
-               if (text && text[0])
-                  dstr_appendf(&s, "- %s\n", text);
-            }
-         }
-         if (any)
-            dstr_append_char(&s, '\n');
-      }
-      cJSON_Delete(j);
-   }
-
-   /* Code graph: the same code-index search + structural neighborhood a normal
-    * delegate is seeded with. delegate_inject_graph_context is itself gated by
-    * delegate_graph_context_enabled and both helpers fail open (NULL on a miss). */
-   char *code = delegate_inject_code_context(prompt);
-   if (code)
-   {
-      dstr_append_str(&s, code);
-      free(code);
-   }
-   char *graph = delegate_inject_graph_context(prompt, NULL);
-   if (graph)
-   {
-      dstr_append_str(&s, graph);
-      free(graph);
-   }
-
-   if (s.len == 0)
-   {
-      dstr_free(&s);
-      return NULL;
-   }
-   return dstr_steal(&s);
-}
-
-int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   (void)ctx;
-   /* Idempotent: point the replay engine at the kb_client code-index backend. */
-   if (!evidence_replay_active_backend())
-      evidence_replay_set_backend(&rt_replay_kb_backend);
-   cJSON *jprompt = cJSON_GetObjectItemCaseSensitive(req, "prompt");
-   const char *prompt = cJSON_IsString(jprompt) ? jprompt->valuestring : "";
-   if (!prompt || !prompt[0])
-      return server_send_error(conn, "missing prompt", NULL);
-   if (strlen(prompt) < 20)
-   {
-      char errmsg[88];
-      snprintf(errmsg, sizeof(errmsg), "roundtable prompt too short (%zu chars, min 20)",
-               strlen(prompt));
-      return server_send_error(conn, errmsg, NULL);
-   }
-
-   config_t cfg;
-   config_load(&cfg);
-   roundtable_opts_t opts;
-   memset(&opts, 0, sizeof(opts));
-   opts.mode = ROUNDTABLE_DRAFT;
-   opts.turns = strcmp(cfg.roundtable_turns, "sequential") == 0 ? ROUNDTABLE_SEQUENTIAL
-                                                                : ROUNDTABLE_PARALLEL;
-   opts.max_rounds = cfg.roundtable_max_rounds > 0 ? cfg.roundtable_max_rounds : 1;
-   opts.converge_threshold = cfg.roundtable_converge_threshold;
-   opts.deadline_ms = cfg.roundtable_deadline_ms;
-   opts.parent_session_id = compute_request_session_id(req); /* fold panel cost onto it */
-   cJSON *jrun = cJSON_GetObjectItemCaseSensitive(req, "__run_id");
-   if (cJSON_IsString(jrun) && jrun->valuestring && jrun->valuestring[0])
-   {
-      opts.cancel_requested = roundtable_run_cancel_requested;
-      opts.cancel_ctx = jrun->valuestring;
-   }
-   normalized_roundtable_brief_t brief;
-   char brief_err[128];
-   brief_err[0] = '\0';
-   if (normalize_roundtable_brief(req, &brief, brief_err, sizeof(brief_err)) != 0)
-      return server_send_error(conn, brief_err[0] ? brief_err : "invalid brief", NULL);
-   opts.brief = brief.rendered;
-   opts.brief_truncated = brief.truncated;
-   opts.questions = brief.question_ptrs;
-   opts.question_count = brief.question_count;
-   cJSON *jmode = cJSON_GetObjectItemCaseSensitive(req, "mode");
-   if (cJSON_IsString(jmode) && strcmp(jmode->valuestring, "review") == 0)
-      opts.mode = ROUNDTABLE_REVIEW;
-   cJSON *jturns = cJSON_GetObjectItemCaseSensitive(req, "turns");
-   if (cJSON_IsString(jturns) && strcmp(jturns->valuestring, "sequential") == 0)
-      opts.turns = ROUNDTABLE_SEQUENTIAL;
-   else if (cJSON_IsString(jturns) && strcmp(jturns->valuestring, "parallel") == 0)
-      opts.turns = ROUNDTABLE_PARALLEL;
-   cJSON *jrounds = cJSON_GetObjectItemCaseSensitive(req, "rounds");
-   if (cJSON_IsNumber(jrounds) && jrounds->valuedouble > 0)
-   {
-      opts.max_rounds = (int)jrounds->valuedouble;
-      if (opts.max_rounds > ROUNDTABLE_MAX_ROUNDS_REQUEST)
-         opts.max_rounds = ROUNDTABLE_MAX_ROUNDS_REQUEST;
-   }
-   cJSON *japply = cJSON_GetObjectItemCaseSensitive(req, "apply");
-   if (cJSON_IsBool(japply))
-      opts.apply_review = cJSON_IsTrue(japply) ? 1 : 0;
-
-   agent_config_t acfg;
-   memset(&acfg, 0, sizeof(acfg));
-   if (agent_load_config(&acfg) != 0)
-   {
-      free(brief.rendered);
-      return server_send_error(conn, "could not load agents.json", NULL);
-   }
-   ensemble_default_panel_from_agents(&cfg, &acfg);
-   /* Also gate an EXPLICIT reference_models list: never run an unauthorized
-    * claude as a panelist, however it got into the panel. */
-   ensemble_filter_panel_authorization(&cfg, &acfg);
-   /* Runtime gate: drop unkeyed/unhealthy panelists so the round isn't silently
-    * degraded by a model that is in the list/roster but can't actually run. */
-   ensemble_filter_panel_availability(&cfg, &acfg);
-   bind_request_session_creds(req);
-
-   /* Give the tool-less panelists read-only access to aimee memory + the code
-    * graph by pre-loading it into their prompt (best-effort; NULL = none). */
-   char *rt_context = roundtable_build_aimee_context(prompt);
-   opts.context = rt_context;
-
-   roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, prompt, &opts, &result);
-   if (rc != 0)
-   {
-      free(rt_context);
-      free(brief.rendered);
-      return server_send_error(conn, "roundtable run failed (no enabled agents in agents.json?)",
-                               NULL);
-   }
-
-   cJSON *resp = jo_ok();
-   cJSON_AddStringToObject(resp, "artifact", result.artifact ? result.artifact : "");
-   cJSON_AddNumberToObject(resp, "rounds_run", result.rounds_run);
-   cJSON_AddBoolToObject(resp, "converged", result.converged ? 1 : 0);
-   cJSON_AddBoolToObject(resp, "degraded", result.degraded ? 1 : 0);
-   cJSON_AddBoolToObject(resp, "truncated", result.truncated ? 1 : 0);
-   cJSON_AddBoolToObject(resp, "cost_capped", result.cost_capped ? 1 : 0);
-   cJSON_AddBoolToObject(resp, "deadline_hit", result.deadline_hit ? 1 : 0);
-   cJSON_AddBoolToObject(resp, "cancelled", result.cancelled ? 1 : 0);
-   cJSON_AddNumberToObject(resp, "best_round", result.best_round);
-   cJSON_AddNumberToObject(resp, "participants_total", result.participants_total);
-   cJSON_AddNumberToObject(resp, "participants_failed", result.participants_failed);
-   cJSON_AddNumberToObject(resp, "items_round", result.items_round);
-   cJSON_AddNumberToObject(resp, "artifact_round", result.artifact_round);
-   cJSON_AddNumberToObject(resp, "cost_usd", result.cost_usd);
-   add_roundtable_arrays(resp, &result);
-   delegate_roundtable_result_free(&result);
-   free(rt_context);
-   free(brief.rendered);
    return server_send_ok(conn, resp);
 }
 

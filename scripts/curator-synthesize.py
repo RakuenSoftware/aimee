@@ -27,6 +27,38 @@ import subprocess
 import sys
 
 
+# Keep one curator attempt inside the native sidecar's 300-second watchdog.
+# Durable curator jobs own retries; the generic llm-chat retry loop must not
+# leave multiple CPU generations running for one job.
+CURATOR_LLM_TIMEOUT_DEFAULT = 285
+CURATOR_LLM_TIMEOUT_MAX = 285
+
+
+def resolve_llm_endpoint(env) -> tuple[str, str | None]:
+    """OpenAI-compatible base URL for the sidecar, or an error to report.
+
+    LLM_ENDPOINT wins when set; otherwise derive it from AIMEE_LLM_URL, the one
+    endpoint the kb is actually configured with (the container sets it, and the
+    Dockerfile's own comment says "endpoints come from env").
+
+    There is deliberately NO baked-in default. This used to fall back to a
+    hardcoded LAN address, which failed two ways: where nothing owned that IP,
+    every curator code-extraction job failed `No route to host` and the queue
+    never drained; and where something DID own it, the sidecar posted the
+    user's code and prompts to a machine that just happened to hold that
+    address. embed-remote.py already removed its equivalent fallback for the
+    same reason. Fail closed instead.
+    """
+    endpoint = env.get("LLM_ENDPOINT", "").strip()
+    if endpoint:
+        return endpoint, None
+    base = env.get("AIMEE_LLM_URL", "").strip().rstrip("/")
+    if not base:
+        return "", ("no LLM endpoint configured: set AIMEE_LLM_URL (preferred) "
+                    "or LLM_ENDPOINT for the curator sidecar")
+    return (base if base.endswith("/v1") else base + "/v1"), None
+
+
 def emit_error(msg: str) -> None:
     json.dump({"version": 1, "status": "error", "error": msg}, sys.stdout)
     sys.stdout.write("\n")
@@ -91,17 +123,25 @@ def call_llm(prompt: str, max_tokens: int) -> tuple:
     env = os.environ.copy()
     env["LLM_NO_THINKING"] = "1"
     env["LLM_MAX_TOKENS"] = str(max_tokens)
-    env.setdefault("LLM_ENDPOINT", "http://192.168.1.122:8080")
+    endpoint, endpoint_err = resolve_llm_endpoint(env)
+    if endpoint_err:
+        return None, endpoint_err
+    env["LLM_ENDPOINT"] = endpoint
     env.setdefault("LLM_MODEL", "qwen3")
 
-    timeout_s = int(env.get("LLM_TIMEOUT", "120"))
+    timeout_s = min(
+        max(int(env.get("LLM_TIMEOUT", str(CURATOR_LLM_TIMEOUT_DEFAULT))), 1),
+        CURATOR_LLM_TIMEOUT_MAX,
+    )
+    env["LLM_TIMEOUT"] = str(timeout_s)
+    env["LLM_RETRIES"] = "0"
     try:
         result = subprocess.run(
             ["python3", llm_script],
             input=prompt,
             capture_output=True,
             text=True,
-            timeout=timeout_s,
+            timeout=timeout_s + 5,
             env=env,
         )
         if result.returncode != 0:

@@ -622,9 +622,20 @@ static int node_bool(const wfe_node_t *node, const char *key)
  * the step's assigned agent (or "$random", or "" to route by role). out_cost (may
  * be NULL) receives the server-side wall-clock USD estimate for the turn (WP-5
  * budget). Returns:
- *   1  provider ran and succeeded,
- *   0  no provider installed (caller falls back to its fail-closed path),
- *  -1  provider ran and failed (caller should loop/retry). */
+ *   1  provider ran and changed the requested artifact/worktree,
+ *   0  no provider installed (caller falls back to its legacy path),
+ *  -1  provider ran and failed (caller should loop/retry),
+ *  -2  provider completed but proved the requested write was a no-op. */
+#define WFE_DISPATCH_NO_CHANGE (-2)
+
+int wfe_delegate_error_is_no_change(const char *error)
+{
+   if (!error || !strstr(error, "result treated as incomplete"))
+      return 0;
+   return strstr(error, "no file changes detected") != NULL ||
+          strstr(error, "no owned files changed") != NULL;
+}
+
 static int wfe_delegate_dispatch(const char *workdir, const char *role, const char *prompt,
                                  const char *artifact_path, char out_commit_sha[64],
                                  double *out_cost)
@@ -645,7 +656,11 @@ static int wfe_delegate_dispatch(const char *workdir, const char *role, const ch
       *out_cost = (ok0 && ok1) ? wfe_autonomy_cost_estimate((double)(t1.tv_sec - t0.tv_sec) +
                                                             (double)(t1.tv_nsec - t0.tv_nsec) / 1e9)
                                : 0.0;
-   return rc == 0 ? 1 : -1;
+   if (rc == WFE_DELEGATE_OK)
+      return 1;
+   if (rc == WFE_DELEGATE_NO_CHANGE)
+      return WFE_DISPATCH_NO_CHANGE;
+   return -1;
 }
 
 /* Attach the measured delegate cost to a result, so a turn's wall-clock cost is
@@ -1023,64 +1038,18 @@ static wfe_step_result_t exec_implement(wfe_ctx *ctx, const wfe_node_t *node)
                   base_prompt, feedback);
       else
          snprintf(prompt, sizeof prompt, "%s", base_prompt);
-      /* Snapshot HEAD so a NO-OP dispatch is detectable below. */
-      char pre_head[64] = "";
-      {
-         const char *argv[] = {"git", "-C", wd, "rev-parse", "HEAD", NULL};
-         char *o = NULL;
-         if (git_capture(argv, &o) == 0 && o)
-         {
-            chomp(o);
-            snprintf(pre_head, sizeof pre_head, "%s", o);
-         }
-         free(o);
-      }
       int impl_rc = wfe_delegate_dispatch(wd, "engineer", prompt, NULL, commit, &cost);
-      /* A dispatch that reports no new work (impl_rc < 0 — e.g. the write-role
-       * delegate produced no diff, flagged by delegate_detect_noop_write) is a
-       * FAILED attempt on a roundtable on_fail RETRY (feedback present): looping
-       * re-dispatches a different agent rather than re-running the panel on an
-       * unchanged tree. On the FIRST pass (no feedback) the SAME no-diff dispatch
-       * instead means a PRIOR implement iteration already committed the work and
-       * advanced HEAD, but the slice looped back here (e.g. a transient verify
-       * failure); this delegate correctly finds nothing left to do. Do NOT loop on
-       * that — fall through to the mandatory verify below so a now-passing committed
-       * tree advances instead of spinning to the attempt cap. A genuine no-op with
-       * no committed work still fails verify there and loops, so unverified work is
-       * never advanced. (Without this, once any iteration commits the artifact every
-       * later delegate no-ops -> impl_rc < 0 -> the slice loops forever, never
-       * reaching the verify that would let the committed tree pass — observed live.) */
-      if (impl_rc < 0)
-      {
-         if (feedback[0])
-            return with_cost(wfe_step_looped(), cost);
-         db1_lifecycle_event_add(wfe_ctx_work_item(ctx), node->id, "loop", "engine",
-                                 "impl no-op dispatch (first pass): verifying committed tree", "",
-                                 cost);
-      }
-      /* A dispatch that changed NOTHING (reply-only, no tool edits, so the
-       * provider's add+commit no-opped and HEAD is unchanged) is a FAILED
-       * attempt, not an advance: freezing the identical tree re-runs verify and
-       * a full 4-seat panel on a diff the panel already rejected. Observed
-       * live: whole review rounds burned on byte-identical artifacts. Loop so
-       * the retry re-dispatches (a $random re-roll picks a different agent). */
-      if (pre_head[0] && commit[0] && strcmp(pre_head, commit) == 0 && feedback[0])
-      {
-         /* A no-op is a failed attempt only on a roundtable on_fail RETRY (feedback
-          * present): re-advancing the identical, already-rejected diff would re-run
-          * the 4-seat panel on a byte-identical artifact forever. On the FIRST pass
-          * (no feedback) a no-op instead means a PRIOR implement iteration already
-          * committed the work and advanced HEAD, but its mechanical verify failed
-          * transiently (e.g. the sandbox could not acquire a container) and looped
-          * back; this iteration's delegate correctly finds nothing left to do. Do
-          * NOT loop on that — fall through to the mandatory verify below so a
-          * now-passing committed tree can advance instead of spinning to the attempt
-          * cap. A genuine no-op with no committed work still fails verify there and
-          * loops, so this never advances unverified work. */
-         db1_lifecycle_event_add(wfe_ctx_work_item(ctx), node->id, "loop", "engine",
-                                 "impl no-op: delegate made no edits (post-review)", "", cost);
+      if (impl_rc == -1)
          return with_cost(wfe_step_looped(), cost);
-      }
+      /* NO_CHANGE is an outcome, not a failed execution. The packet may already
+       * be satisfied by an earlier slice or retry, including after a roundtable
+       * requested a correction that another slice landed. Let the mandatory
+       * mechanical and adversarial gates below decide. If the unchanged tree is
+       * still deficient, those gates fail and the engine retries as before. */
+      if (impl_rc == WFE_DISPATCH_NO_CHANGE)
+         db1_lifecycle_event_add(wfe_ctx_work_item(ctx), node->id, "noop", "engine",
+                                 "implement delegate made no changes; verifying current tree", "",
+                                 cost);
    }
 
    char base[64] = "", head[64] = "", dhash[65] = "", err[128] = "";
@@ -1113,11 +1082,19 @@ static wfe_step_result_t exec_document(wfe_ctx *ctx, const wfe_node_t *node)
    resolve_workdir(ctx, wd, sizeof wd);
    char commit[64] = "";
    double cost = 0.0;
-   if (wfe_delegate_dispatch(wd, "engineer",
-                             "Document the change on the work-item branch (README/CHANGELOG/docs "
-                             "+ inline comments), then commit.",
-                             NULL, commit, &cost) < 0)
+   int doc_rc = wfe_delegate_dispatch(
+       wd, "engineer",
+       "Document the change on the work-item branch (README/CHANGELOG/docs + inline comments), "
+       "then commit.",
+       NULL, commit, &cost);
+   if (doc_rc == -1)
       return with_cost(wfe_step_looped(), cost);
+   /* Documentation can already be complete (especially after merged slices).
+    * Freeze the unchanged tree and let the downstream documentation roundtable
+    * judge completeness instead of requiring a meaningless edit. */
+   if (doc_rc == WFE_DISPATCH_NO_CHANGE)
+      db1_lifecycle_event_add(wfe_ctx_work_item(ctx), node->id, "noop", "engine",
+                              "document delegate made no changes; freezing current tree", "", cost);
    char base[64] = "", head[64] = "", dhash[65] = "", err[128] = "";
    if (wfe_git_freeze(wd, "HEAD", base, head, dhash, err, sizeof err) != 0 || !head[0])
       return with_cost(wfe_step_failed_class(WFE_FAIL_CORRUPTION, 0), cost); /* worktree/git */
@@ -1279,6 +1256,91 @@ static wfe_step_result_t exec_source_archive(wfe_ctx *ctx, const wfe_node_t *nod
    return wfe_step_advanced(handle, head, 0.0);
 }
 
+/* Does this slice CREATE a path that already exists on `base_ref`, with
+ * different content? That is an add/add conflict waiting to happen at merge.
+ *
+ * Slices of one work item are cut from the feature branch at the same instant
+ * and merged one at a time. When two of them each *create* the same file — the
+ * normal shape when the deliverable is a single document — the first merges and
+ * every later one hits `add/add`: two independently authored versions with no
+ * common ancestor for the content. Nothing mechanical resolves that; a rebase
+ * reproduces it exactly. Left undetected it surfaces only at merge, as a bare
+ * forge 400, after every slice has paid its full implementation cost.
+ *
+ * Checked against the CURRENT feature head rather than against sibling slices,
+ * which is both simpler and race-free: there is no shared mutable state to
+ * serialise, only a read of a branch that already reflects whatever has merged.
+ * The trade-off is that it fires from the second colliding slice onward, not on
+ * the first — the first one is not yet a collision.
+ *
+ * Identical content is NOT flagged: git merges an add/add cleanly when both
+ * sides added the same bytes, so failing it would reject work that would land.
+ *
+ * Returns 1 and fills `path_out` when a diverging collision exists, else 0.
+ * Fails SAFE: any git error returns 0, leaving today's behaviour (surface at
+ * merge) rather than failing a slice on a command we could not run. */
+int wfe_slice_recreates_base_path(const char *workdir, const char *base_ref, const char *base_sha,
+                                  char *path_out, size_t path_cap)
+{
+   if (path_out && path_cap)
+      path_out[0] = '\0';
+   if (!workdir || !workdir[0] || !base_ref || !base_ref[0] || !base_sha || !base_sha[0])
+      return 0;
+
+   /* Paths this slice ADDED relative to where it was cut. -z keeps paths with
+    * spaces/specials unambiguous (no core.quotePath quoting). */
+   const char *argv[] = {"git",    "-C",   workdir, "diff", "--name-only", "-z", "--diff-filter=A",
+                         base_sha, "HEAD", NULL};
+   char *added = NULL;
+   if (git_capture(argv, &added) != 0 || !added)
+   {
+      free(added);
+      return 0;
+   }
+
+   int found = 0;
+   for (const char *p = added; *p && !found; p += strlen(p) + 1)
+   {
+      char ours[80] = "", theirs[80] = "";
+      char spec_ours[1200], spec_theirs[1200];
+      snprintf(spec_ours, sizeof spec_ours, "HEAD:%s", p);
+      snprintf(spec_theirs, sizeof spec_theirs, "%s:%s", base_ref, p);
+
+      /* Absent on the base ref -> no collision; this slice is the only author. */
+      const char *tv[] = {"git", "-C", workdir, "rev-parse", "--verify", "-q", spec_theirs, NULL};
+      char *t = NULL;
+      if (git_capture(tv, &t) != 0 || !t || !t[0])
+      {
+         free(t);
+         continue;
+      }
+      snprintf(theirs, sizeof theirs, "%s", t);
+      chomp(theirs);
+      free(t);
+
+      const char *ov[] = {"git", "-C", workdir, "rev-parse", "--verify", "-q", spec_ours, NULL};
+      char *o = NULL;
+      if (git_capture(ov, &o) != 0 || !o || !o[0])
+      {
+         free(o);
+         continue;
+      }
+      snprintf(ours, sizeof ours, "%s", o);
+      chomp(ours);
+      free(o);
+
+      /* Same blob on both sides merges cleanly — only divergence conflicts. */
+      if (ours[0] && theirs[0] && strcmp(ours, theirs) != 0)
+      {
+         if (path_out && path_cap)
+            snprintf(path_out, path_cap, "%s", p);
+         found = 1;
+      }
+   }
+   free(added);
+   return found;
+}
+
 /* freeze: capture the cumulative diff at a stable freeze commit. */
 static wfe_step_result_t exec_freeze(wfe_ctx *ctx, const wfe_node_t *node)
 {
@@ -1289,6 +1351,35 @@ static wfe_step_result_t exec_freeze(wfe_ctx *ctx, const wfe_node_t *node)
    if (wfe_git_freeze(wd, base_branch ? base_branch : "HEAD", base, head, dhash, err, sizeof err) !=
        0)
       return wfe_step_failed();
+
+   /* Fail now, not at merge, if this slice re-creates a file a sibling already
+    * landed on the feature branch with different content. That is an add/add
+    * conflict: no rebase or retry resolves it, so letting it reach merge only
+    * spends the rest of the pipeline to arrive at an unwinnable merge. Naming
+    * the path here is the difference between an actionable failure and the bare
+    * forge 400 it would otherwise become. */
+   if (base_branch && base_branch[0])
+   {
+      char clash[1024];
+      if (wfe_slice_recreates_base_path(wd, base_branch, base, clash, sizeof clash))
+      {
+         /* PERMANENT, not TRANSIENT: re-running the slice produces another
+          * independently authored version of the same file, which collides the
+          * same way. There is no new input that changes the outcome, so the
+          * taxonomy's "never auto-retry without new input" rule applies at its
+          * strongest here.
+          *
+          * The colliding path is known (`clash`) but not reported: this block
+          * interface carries no message field, by design — a step speaks only
+          * through wfe_step_result_t. Surfacing it needs that struct widened,
+          * which is a broader change than this fix; until then the operator sees
+          * a permanent freeze failure rather than the path. Still a strict
+          * improvement on discovering it as a bare forge 400 at merge, after the
+          * whole pipeline has run. */
+         return wfe_step_failed_class(WFE_FAIL_PERMANENT, 0);
+      }
+   }
+
    char handle[80];
    snprintf(handle, sizeof handle, "%s.out", node->id);
    return wfe_step_advanced(handle, dhash, 0.0);
@@ -1514,6 +1605,13 @@ static wfe_step_result_t exec_merge(wfe_ctx *ctx, const wfe_node_t *node)
       return wfe_step_advanced("merged", "", 0.0);
    case WFE_MERGE_NOT_MERGEABLE:
       return wfe_step_looped();
+   case WFE_MERGE_CONFLICT:
+      /* Terminal: the conflict is a property of the two trees, so every retry
+       * reproduces it. Looping (or parking in the self-resolving merge_pending)
+       * would re-attempt it forever while holding the run's active-root slot and
+       * blocking every other work item behind it. Fail so the slot is released
+       * and a human sees a conflict that needs a content decision. */
+      return wfe_step_failed();
    default:
       /* transient/unknown forge error on the merge act itself: park for a human
        * re-drive rather than hard-failing the run. We only reach here with a

@@ -13,7 +13,6 @@ config_mcp_transport_t config_mcp_transport_from_string(const char *s);
 
 void config_parse_memory_rewrite_section(config_t *cfg, cJSON *root);
 void config_parse_memory_negation_section(config_t *cfg, cJSON *root);
-void config_parse_memory_rerank_section(config_t *cfg, cJSON *root);
 void config_parse_memory_query_expansion_section(config_t *cfg, cJSON *root);
 void config_parse_memory_recall_lanes_section(config_t *cfg, cJSON *root);
 void config_parse_memory_window_section(config_t *cfg, cJSON *root);
@@ -22,7 +21,7 @@ void config_parse_memory_maintenance_section(config_t *cfg, cJSON *root);
 void config_parse_worktree_gc_section(config_t *cfg, cJSON *root);
 void config_parse_fold_section(config_t *cfg, cJSON *root);
 void config_parse_modules_section(config_t *cfg, cJSON *root);
-void config_parse_economizer_section(config_t *cfg, cJSON *root);
+int config_parse_economizer_section(config_t *cfg, cJSON *root);
 void config_parse_autonomy_section(config_t *cfg, cJSON *root);
 void config_parse_memory_section(config_t *cfg, cJSON *root);
 void config_parse_cross_verify_section(config_t *cfg, cJSON *root);
@@ -50,5 +49,10 @@ void config_parse_ensemble_section(config_t *cfg, cJSON *root);
 void config_parse_roundtable_section(config_t *cfg, cJSON *root);
 
 void config_parse_kb_section2(config_t *cfg, cJSON *root);
+
+/* context.engine: name — selects the active context-compaction engine
+ * (context_engine_set_active in server_main). Re-homed from the deleted
+ * config_plugin.c, which was mis-filed under the plugin subsystem. */
+void config_parse_context_engine(config_t *cfg, cJSON *root);
 
 #endif /* DEC_CONFIG_SECTIONS_H */

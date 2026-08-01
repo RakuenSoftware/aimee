@@ -1,0 +1,34 @@
+{
+  "descriptor_version": 1,
+  "id": "governance",
+  "dependencies": [
+    "audit",
+    "config",
+    "delegates",
+    "execution-policy",
+    "gateway",
+    "ir",
+    "module-runtime",
+    "protocols",
+    "routing",
+    "tools",
+    "vault"
+  ],
+  "enabled_by_default": false,
+  "runtime_toggle": {
+    "supported": false
+  },
+  "ownership_complete": true,
+  "sources": [
+    "src/modules/governance/gw_stage_governance.c"
+  ],
+  "private_headers": [
+    "src/modules/governance/gw_stage_governance.h"
+  ],
+  "tests": [
+    "src/tests/test_response_governance_stage.c"
+  ],
+  "docs": [
+    "docs/modules/governance.md"
+  ]
+}

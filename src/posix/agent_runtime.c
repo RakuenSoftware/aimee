@@ -6,20 +6,22 @@
 #include "aimee.h"
 #include "agent.h"
 #include "aimee_ir_shadow.h"
-#include "aimee_backend.h"  /* anthropic_backend_parse / openai_backend_parse */
-#include "aimee_ir.h"       /* aimee_response_t + block accessors */
-#include "tool_call_args.h" /* assistant_message arg normalize/sanitize */
+#include <aimee/translation/aimee_backend.h> /* anthropic_backend_parse / openai_backend_parse */
+#include <aimee/ir/aimee_ir.h>               /* aimee_response_t + block accessors */
+#include "tool_call_args.h"                  /* assistant_message arg normalize/sanitize */
 #include "agent_exec.h"
 #include "agent_protocol.h"
 #include "agent_runtime_messages.h"
 #include "agent_tools.h"
 #include "agent_tunnel.h"
-#include "delegate_driver.h"
-#include "delegate_role.h"
-#include "delegate_xml_fallback.h"
-#include "gateway_delegate.h"
-#include "gateway_policy.h"
+#include <aimee/delegates/delegate_driver.h>
+#include <aimee/delegates/delegate_role.h>
+#include <aimee/delegates/delegate_xml_fallback.h>
+#include <aimee/gateway/gateway_delegate.h>
+#include <aimee/gateway/gateway_policy.h>
 #include "http_retry.h"
+#include "economizer.h"
+#include "economizer_wire_snapshot.h"
 #include "log.h"
 #include "middleware.h"
 #include "model_registry.h"
@@ -30,9 +32,6 @@
 #include "liveness.h"
 #include "provider_cli_adapter.h"
 #include "config.h"
-#include "economizer.h"
-#include "fold_recall.h"
-#include "dstr.h"
 #include "cJSON.h"
 #include <ctype.h>
 #include <fcntl.h>
@@ -90,6 +89,28 @@ static int agent_delegation_stopped(char *buf, size_t bufsz)
    return 1;
 }
 
+/* Apply the SAFE contract at the authenticated local-tool completion boundary.
+ * The result has not crossed a provider boundary yet. econ_json_compact removes
+ * only RFC 8259 whitespace outside strings and succeeds only when strictly
+ * shorter; malformed/non-JSON output remains byte-identical. */
+static char *agent_economize_fresh_tool_result(char *result)
+{
+   if (!result)
+      return NULL;
+   econ_preset_t preset;
+   econ_preset_current(&preset);
+   if (!preset.json_compact)
+      return result;
+
+   uint8_t *compacted = NULL;
+   size_t compacted_len = 0;
+   if (econ_json_compact(result, strlen(result), &compacted, &compacted_len) != ECON_JSON_OK)
+      return result;
+   (void)compacted_len; /* output is NUL-terminated for the existing tool-result surface */
+   free(result);
+   return (char *)compacted;
+}
+
 static int agent_durable_cancelled(char *buf, size_t bufsz)
 {
    int job_id = agent_get_durable_job_id();
@@ -138,6 +159,55 @@ static int agent_should_inject_respond_tool(const agent_t *agent, const char *ro
    if (is_chatgpt_provider(agent) || is_anthropic_provider(agent))
       return 0;
    return 1;
+}
+
+static int agent_tool_result_usable(const char *result)
+{
+   int usable = result && result[0] && strncmp(result, "error", 5) != 0;
+   if (usable && result[0] == '{')
+   {
+      cJSON *root = cJSON_Parse(result);
+      if (root)
+      {
+         if (cJSON_GetObjectItemCaseSensitive(root, "error"))
+            usable = 0;
+         cJSON_Delete(root);
+      }
+   }
+   return usable;
+}
+
+static int agent_bootstrap_repository_evidence(cJSON *messages, int turn, int timeout_ms,
+                                               char *last_tool_name, size_t last_tool_name_n,
+                                               char *last_tool_result, size_t last_tool_result_n)
+{
+   static const char *const name = "list_files";
+   /* Never let a synthetic evidence call fall back to the server process CWD.
+    * Delegate execution installs its effective worktree in thread-local command
+    * context; a direct roundtable without a checkout must remain ungrounded. */
+   const char *worktree = run_cmd_get_cwd();
+   if (!worktree || !worktree[0] || !aimee_path_is_absolute(worktree))
+      return 0;
+   cJSON *arg_obj = cJSON_CreateObject();
+   if (!arg_obj)
+      return 0;
+   cJSON_AddStringToObject(arg_obj, "path", worktree);
+   char *args = cJSON_PrintUnformatted(arg_obj);
+   cJSON_Delete(arg_obj);
+   if (!args)
+      return 0;
+   char *result = dispatch_tool_call_ctx(name, args, timeout_ms);
+   agent_trace_log(0, turn, "tool_call", NULL, name, args, result, NULL);
+   if (last_tool_name && last_tool_name_n)
+      snprintf(last_tool_name, last_tool_name_n, "%s", name);
+   if (last_tool_result && last_tool_result_n)
+      snprintf(last_tool_result, last_tool_result_n, "%.500s", result ? result : "");
+   int usable = agent_tool_result_usable(result);
+   if (usable)
+      agent_session_append_repository_evidence(messages, name, args, result);
+   free(result);
+   free(args);
+   return usable;
 }
 
 static int request_prompt_token_estimate(cJSON *messages, const char *system_prompt)
@@ -196,130 +266,6 @@ static void maybe_compact_before_request(const agent_t *agent, cJSON *messages,
       message_history_repair(messages);
       messages_compact_consecutive(messages);
    }
-}
-
-/* Text of the most-recent user message (string or first text block); NULL if none. */
-static const char *newest_user_text(const cJSON *messages)
-{
-   int n = cJSON_GetArraySize((cJSON *)messages);
-   for (int i = n - 1; i >= 0; i--)
-   {
-      cJSON *m = cJSON_GetArrayItem((cJSON *)messages, i);
-      const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(m, "role"));
-      if (!role || strcmp(role, "user") != 0)
-         continue;
-      cJSON *c = cJSON_GetObjectItem(m, "content");
-      if (cJSON_IsString(c))
-         return c->valuestring;
-      if (cJSON_IsArray(c))
-      {
-         cJSON *b;
-         cJSON_ArrayForEach(b, c)
-         {
-            const char *t = cJSON_GetStringValue(cJSON_GetObjectItem(b, "type"));
-            if (t && strcmp(t, "text") == 0)
-               return cJSON_GetStringValue(cJSON_GetObjectItem(b, "text"));
-         }
-      }
-      return NULL;
-   }
-   return NULL;
-}
-
-/* Add the recall-worthy coordinates (paths, handle:/memory: ids) of the folded
- * prefix messages[0..split) to the recall index for future re-touch detection. */
-static void recall_index_from_fold(const cJSON *messages, int split, fold_recall_index_t *ix)
-{
-   coord_set_t set;
-   coord_set_init(&set);
-   coord_provenance_t prov = {COORD_LANE_AGENT, -1, -1, -1};
-   for (int i = 0; i < split; i++)
-   {
-      cJSON *it = cJSON_GetArrayItem((cJSON *)messages, i);
-      if (!it)
-         continue;
-      char *s = cJSON_PrintUnformatted(it);
-      if (!s)
-         continue;
-      coord_closet_nominate(s, strlen(s), &prov, &set);
-      free(s);
-   }
-   for (size_t i = 0; i < set.count; i++)
-      if (set.items[i].kind == COORD_KIND_PATH || set.items[i].kind == COORD_KIND_HANDLE)
-         fold_recall_index_add(ix, set.items[i].value);
-   coord_set_free(&set);
-}
-
-/* Fold §1/§3/§4 (P2b/P2c/P4): build a rolling-fold view of the Anthropic message
- * array if the fold is enabled. Populates *out (zeroed on no-fold). The fold's
- * Coordinate Closet is rendered during this call, so the config's denylist (a
- * pointer into the local config_t) only needs to be valid here — out holds owned
- * cJSON that the caller frees with fold_result_free AFTER the request is
- * serialized. `freeze` (may be NULL) is the per-run fold-freeze state honored only
- * when fold_freeze_enabled; `recall` (may be NULL) is the per-run recall index for
- * §4 re-touch hints, honored only when fold_recall_enabled. `turn` is the current
- * turn index (for recall residency). Returns 1 if a fold view was produced. */
-static int build_fold_view(const cJSON *messages, fold_freeze_t *freeze,
-                           fold_recall_index_t *recall, int turn, fold_result_t *out)
-{
-   memset(out, 0, sizeof(*out));
-   config_t cfg;
-   if (config_load(&cfg) != 0 || !cfg.fold_enabled)
-      return 0;
-   fold_config_t fc;
-   memset(&fc, 0, sizeof(fc));
-   fc.enabled = 1;
-   fc.retained_msgs = cfg.fold_retained_msgs;
-   fc.min_fold_msgs = cfg.fold_min_fold_msgs;
-   fc.reasoning_excerpt_bytes = cfg.fold_excerpt_bytes;
-   fc.register_enabled = cfg.fold_register_enabled;
-   fc.closet.enabled = cfg.coord_closet_enabled;
-   fc.closet.budget_bytes = cfg.coord_closet_budget_bytes;
-   fc.closet.max_ratio_pct = cfg.coord_closet_max_ratio_pct;
-   fc.closet.denylist = cfg.coord_closet_denylist[0] ? cfg.coord_closet_denylist : NULL;
-   fold_freeze_t *fz = NULL;
-   if (cfg.fold_freeze_enabled && freeze)
-   {
-      if (freeze->tail_cap_msgs == 0 && cfg.fold_freeze_tail_cap_msgs > 0)
-         freeze->tail_cap_msgs = cfg.fold_freeze_tail_cap_msgs;
-      fz = freeze;
-   }
-   context_fold_view(messages, &fc, fz, out);
-   if (!out->folded)
-      return 0;
-   aimee_log(LOG_DEBUG, "fold", "folded=%d retained=%d reused_boundary=%d epochs=%d",
-             out->folded_msgs, out->retained_msgs, out->reused_boundary, fz ? fz->epochs : 0);
-
-   /* §4 recall: detect re-touch of a previously-folded coordinate in this turn's
-    * newest user message and surface a hint in the fold preamble; then index this
-    * fold's coordinates for future turns. Detection precedes indexing so a
-    * just-folded key does not trivially match the same turn. */
-   if (cfg.fold_recall_enabled && recall)
-   {
-      const char *uq = newest_user_text(messages);
-      dstr_t hints;
-      dstr_init(&hints);
-      size_t hit = uq ? fold_recall_detect(recall, uq, turn, cfg.fold_recall_ttl_turns, &hints) : 0;
-      if (hit && out->messages)
-      {
-         cJSON *m0 = cJSON_GetArrayItem(out->messages, 0);
-         const char *body = m0 ? cJSON_GetStringValue(cJSON_GetObjectItem(m0, "content")) : NULL;
-         if (m0 && body)
-         {
-            dstr_t merged;
-            dstr_init(&merged);
-            dstr_appendf(&merged, "[fold recall — re-touched coordinates]\n%s\n%s",
-                         dstr_cstr(&hints), body);
-            cJSON *ns = cJSON_CreateString(dstr_cstr(&merged)); /* copies; merged freed below */
-            if (ns) /* on OOM leave the original content intact rather than nulling it */
-               cJSON_ReplaceItemInObjectCaseSensitive(m0, "content", ns);
-            dstr_free(&merged);
-         }
-      }
-      dstr_free(&hints);
-      recall_index_from_fold(messages, out->folded_msgs, recall);
-   }
-   return out->folded;
 }
 
 static void track_anthropic_payload_rewrite(const delegate_driver_t *driver, const agent_t *agent,
@@ -593,28 +539,27 @@ native_provider_http:
 
    int turn = 0;
    int total_calls = 0;
-   /* §3 fold-freeze: per-run boundary state, persisted across turns so the folded
-    * prefix stays byte-identical (warm provider cache). Honored only when
-    * fold_freeze_enabled; ignored otherwise. */
-   fold_freeze_t agent_fold_freeze;
-   memset(&agent_fold_freeze, 0, sizeof(agent_fold_freeze));
-   /* Context economizer (delegate seam): per-run reducer state persisted across
-    * turns so the §3 fold-freeze boundary stays byte-identical (warm provider
-    * cache). Honored only when reduce.delegate_seam is enabled. */
-   reduce_state_t agent_reduce_state;
-   memset(&agent_reduce_state, 0, sizeof(agent_reduce_state));
-   /* §4 fold recall: per-run page table of folded-away coordinates, for re-touch
-    * hints across turns. Honored only when fold_recall_enabled. */
-   fold_recall_index_t agent_fold_recall;
-   fold_recall_index_init(&agent_fold_recall);
+   int successful_tool_calls = 0;
    int api_call_count = 0; /* cumulative provider API calls; published via heartbeat */
    int final_instruction_added = 0;
    int final_tool_retry_count = 0;
    int degenerate_retry_count = 0;
+   int required_evidence_retry_count = 0;
+   int required_evidence_responses = 0;
+   /* A provider may emit a reasoning-only/empty turn while tools are offered
+    * even though it has finished investigating (observed with Codex review
+    * seats). Retrying with the identical tool contract can repeat forever and
+    * discard an otherwise healthy panelist. Preserve tools for the normal run,
+    * but make the one bounded degenerate-response retry a synthesis-only turn. */
    int tok = agent_request_max_tokens(agent, max_tokens);
-   int max_t = agent_resolve_max_turns(agent, role);
+   /* Turn-budget policy keys off the BUDGET role, not the routing role: the
+    * primary webchat turn is routed as "code" (server_compute.c) but must be
+    * budgeted as a primary session — uncapped, and never told its tool budget is
+    * exhausted. `budget_role` is NULL exactly when this is a primary turn. */
+   const char *budget_role = agent_budget_role(role);
+   int max_t = agent_resolve_max_turns(agent, budget_role);
    int initial_max_t = max_t;
-   int final_after_turns = delegate_final_after_turns_for_role(role);
+   int final_after_turns = delegate_final_after_turns_for_role(budget_role);
 
    /* Stuck detection state */
    char last_tool_sig[256] = {0};
@@ -645,13 +590,29 @@ native_provider_http:
    rtr_tracker_t rtr;
    memset(&rtr, 0, sizeof(rtr));
 
-   int mw_max_turns = role ? max_t : 0;
+   int mw_max_turns = budget_role ? max_t : 0;
    mw_pipeline_t mw_pipeline;
    mw_pipeline_cfgs_t mw_cfgs;
    mw_pipeline_build(&mw_pipeline, &mw_cfgs, &agent->middleware, mw_max_turns, agent->model);
 
+   /* Persistent only within this agent loop; AGGRESSIVE may freeze a reduced
+    * prefix across turns. SAFE never enters context_reduce. */
+   reduce_state_t agent_reduce_state;
+   memset(&agent_reduce_state, 0, sizeof(agent_reduce_state));
+
    while (turn < max_t)
    {
+      /* Stop before issuing a fourth provider request without evidence. The
+       * third response is allowed to execute its calls; if none succeeds, the
+       * next iteration fails closed here. */
+      if (agent_required_evidence_budget_exhausted(
+              agent->require_initial_tool_call, successful_tool_calls, required_evidence_responses))
+      {
+         snprintf(out->error, sizeof(out->error),
+                  "repository evidence not obtained within %d provider responses",
+                  AGENT_REQUIRED_EVIDENCE_RETRY_LIMIT + 1);
+         break;
+      }
       char cancel_reason[128];
       if (agent_durable_cancelled(cancel_reason, sizeof(cancel_reason)))
       {
@@ -681,7 +642,7 @@ native_provider_http:
          mw_ctx.tool_calls = total_calls;
          mw_ctx.consecutive_errors = consecutive_errors;
 
-         mw_pipeline_cfgs_set_max_turns(&mw_cfgs, role ? max_t : 0);
+         mw_pipeline_cfgs_set_max_turns(&mw_cfgs, budget_role ? max_t : 0);
          mw_result_t mw_res = mw_pipeline_run(&mw_pipeline, &mw_ctx);
 
          if (mw_res.action == MW_STOP)
@@ -759,119 +720,89 @@ native_provider_http:
 
       maybe_compact_before_request(&fb_agent, messages, (chatgpt || anthropic) ? sys : NULL);
 
-      /* Primary sessions (role == NULL) never close the tool budget — the user
-       * can always send another message.  Pass max_turns=0 so HARD never fires. */
-      liveness_final_response_mode_t final_mode =
-          liveness_final_response_mode(turn, role ? max_t : 0, total_calls, final_after_turns);
+      /* Primary sessions never close the tool budget — the user can always send
+       * another message.  budget_role is NULL for them (including the webchat
+       * turn, which is ROUTED as "code"), so max_turns=0 and HARD never fires. */
+      liveness_final_response_mode_t final_mode = liveness_final_response_mode(
+          turn, budget_role ? max_t : 0, total_calls, final_after_turns);
       int final_instruction_turn = final_mode != LIVENESS_FINAL_RESPONSE_NONE;
       int final_text_only_turn = !liveness_final_response_allows_tools(final_mode);
+      /* A final-only turn cannot satisfy an evidence gate. Keep read-only tools
+       * available until one actually succeeds; provider tool_choice is a request,
+       * not an enforcement boundary, and some compatible endpoints ignore it. */
+      if (agent_required_evidence_keep_tools(agent->require_initial_tool_call,
+                                             successful_tool_calls))
+      {
+         final_instruction_turn = 0;
+         final_text_only_turn = 0;
+      }
       if (final_instruction_turn && !final_instruction_added)
       {
          agent_session_append_final_instruction(messages);
          final_instruction_added = 1;
       }
       cJSON *active_tools = final_text_only_turn ? NULL : tools;
+      /* Evidence-gated review can require one real repository lookup. Force
+       * provider tool selection only until the first successful tool call;
+       * leaving it required would prevent the final text turn forever. */
+      fb_agent.require_initial_tool_call = agent_require_initial_tool_choice(
+          agent->require_initial_tool_call, successful_tool_calls, active_tools != NULL);
 
-      /* Context economizer (delegate seam): record a baseline + foldable-opportunity
-       * ledger row, and — when reduce.history_fold is on — ACTUALLY fold the prefix
-       * (provider-agnostic rolling skeleton + Coordinate Closet). The reduced view,
-       * when produced, replaces `messages` for the request build of every provider
-       * branch below and is freed after the request is serialized. Cheap
-       * (mtime-cached) config load keeps this dark by default; default-off is
-       * byte-identical to the prior behavior. */
+      /* AGGRESSIVE opts into the existing lossy context reducers on OpenAI-family
+       * routes. SAFE never touches previously sent history, and native Anthropic
+       * history is never reduced because its exact prefix controls cache reuse. */
       reduce_result_t agent_reduce_result;
       memset(&agent_reduce_result, 0, sizeof(agent_reduce_result));
-      int reduce_active = 0; /* 1 once a real reduction replaced the message array */
+      int reduce_active = 0;
       {
-         config_t ecfg;
-         if (config_load(&ecfg) == 0 && econ_reduction_master_on(&ecfg))
+         econ_preset_t preset;
+         econ_preset_current(&preset);
+         /* The closet denylist is a borrowed pointer stored in rcfg and read
+          * after the reduce runs, so it is copied out of the accessor buffer. */
+         char closet_denylist[CONFIG_COPY_MAX];
+         config_coord_closet_denylist_copy(closet_denylist, sizeof(closet_denylist));
+         if (!anthropic && (preset.history_fold || preset.compress))
          {
-            econ_preset_t ep;
-            econ_preset(&ecfg, &ep);
             reduce_config_t rcfg;
-            memset(&rcfg, 0, sizeof(rcfg));
+            memset(&rcfg, 0, sizeof rcfg);
             rcfg.delegate_seam = 1;
-            /* The synthetic fold turns are {role,content:string} — valid input for
-             * anthropic / openai builders, but the chatgpt Responses
-             * builder passes the array through unconverted and its API expects
-             * top-level typed items, so feeding it folded turns is unverified.
-             * Keep the Responses path measure-only here; fold it in a later slice
-             * once verified live. */
-            /* history_fold is a SAFE+AGGRESSIVE lever: recall-restorable (non-destructive)
-             * and freeze-guarded, so it is cache-favorable even on Anthropic (frozen on
-             * first send). (!chatgpt: the Responses builder can't take folded turns yet —
-             * a separate constraint, not a tier decision.) */
-            rcfg.history_fold = ep.history_fold && !chatgpt;
-            /* Compress LOSSILY shrinks tool-result bodies in place -> the AGGRESSIVE tier
-             * only. Shape (role/type, ids, typed items) is preserved, so it is valid for
-             * all builders including chatgpt/Responses. */
-            rcfg.compress = ep.compress;
-            rcfg.measure_only =
-                !(rcfg.history_fold || rcfg.compress); /* a lever on -> mutate; else shadow */
-            /* Tier model: fold is ALWAYS freeze-guarded (cache-favorability gated). This is
-             * what makes fold cache-safe on Anthropic -- the folded prefix is frozen on
-             * first send and only re-folded when the savings beat the cache-write cost over
-             * the horizon, so a cache miss never costs more than it saves. Not togglable. */
+            rcfg.history_fold = preset.history_fold && !chatgpt;
+            rcfg.compress = preset.compress;
             rcfg.freeze_guard_enabled = 1;
-            rcfg.freeze_guard_horizon = ep.freeze_guard_horizon;
-            rcfg.fold.retained_msgs = ecfg.fold_retained_msgs;
-            rcfg.fold.min_fold_msgs = ecfg.fold_min_fold_msgs;
-            rcfg.fold.reasoning_excerpt_bytes = ecfg.fold_excerpt_bytes;
-            rcfg.fold.compact_head_bytes = ecfg.compact_head_bytes; /* compact.* drives the */
-            rcfg.fold.compact_tail_bytes = ecfg.compact_tail_bytes; /* shared shrink core    */
-            rcfg.fold.register_enabled = ecfg.fold_register_enabled;
-            rcfg.fold.closet.enabled = ecfg.coord_closet_enabled;
-            rcfg.fold.closet.budget_bytes = ecfg.coord_closet_budget_bytes;
-            rcfg.fold.closet.max_ratio_pct = ecfg.coord_closet_max_ratio_pct;
-            rcfg.fold.closet.denylist =
-                ecfg.coord_closet_denylist[0] ? ecfg.coord_closet_denylist : NULL;
-            /* Per-turn provenance: each loop turn is a distinct request at the single
-             * delegate seam, so clear the cross-seam `reduced` flag while preserving
-             * the across-turn freeze boundary in agent_reduce_state.freeze. */
+            rcfg.freeze_guard_horizon = preset.freeze_guard_horizon;
+            rcfg.fold.retained_msgs = config_fold_retained_msgs();
+            rcfg.fold.min_fold_msgs = config_fold_min_fold_msgs();
+            rcfg.fold.reasoning_excerpt_bytes = config_fold_excerpt_bytes();
+            rcfg.fold.compact_head_bytes = config_compact_head_bytes();
+            rcfg.fold.compact_tail_bytes = config_compact_tail_bytes();
+            rcfg.fold.register_enabled = config_fold_register_enabled();
+            rcfg.fold.closet.enabled = config_coord_closet_enabled();
+            rcfg.fold.closet.budget_bytes = config_coord_closet_budget_bytes();
+            rcfg.fold.closet.max_ratio_pct = config_coord_closet_max_ratio_pct();
+            rcfg.fold.closet.denylist = closet_denylist[0] ? closet_denylist : NULL;
             agent_reduce_state.reduced = 0;
             agent_reduce_state.turn = turn;
-            /* session_id param unused by the transform; the ledger writer resolves
-             * the session itself (a local `session_id[]` array shadows the fn here). */
             if (context_reduce(messages, sys, fb_agent.model, NULL, REDUCE_SEAM_DELEGATE, &rcfg,
-                               &agent_reduce_state, &agent_reduce_result) == 0)
+                               &agent_reduce_state, &agent_reduce_result) == 0 &&
+                agent_reduce_result.mutated && agent_reduce_result.messages)
+               reduce_active = 1;
+            else if (!reduce_active)
             {
-               agent_record_reduce_ledger(&agent_reduce_result, fb_agent.model, agent->name, role);
-               if (agent_reduce_result.mutated && agent_reduce_result.messages)
-                  reduce_active = 1;
-            }
-            else
-            {
-               /* hard bypass: internal failure -> forward the original transcript */
                context_reduce_result_free(&agent_reduce_result);
-               memset(&agent_reduce_result, 0, sizeof(agent_reduce_result));
+               memset(&agent_reduce_result, 0, sizeof agent_reduce_result);
             }
          }
       }
-      /* When the economizer produced a reduced view, every provider branch builds
-       * its request from it (and the Anthropic-only build_fold_view path is skipped
-       * to avoid double-folding). */
       cJSON *eff_messages = reduce_active ? agent_reduce_result.messages : messages;
 
       /* Build request (use fb_agent which may have fallback model after turn 0) */
       cJSON *req;
-      fold_result_t fold_view; /* §1 rolling fold; freed after req is serialized */
-      memset(&fold_view, 0, sizeof(fold_view));
       if (chatgpt)
          req = agent_build_request_responses(&fb_agent, eff_messages, active_tools, sys);
       else if (anthropic)
       {
-         /* Fold first so payload-rewrite tracking and the request both observe the
-          * actually-sent (possibly folded) message array. The economizer's reduced
-          * view takes precedence; otherwise fall back to the Anthropic build_fold_view. */
-         cJSON *anth_msgs = eff_messages;
-         if (!reduce_active)
-         {
-            build_fold_view(messages, &agent_fold_freeze, &agent_fold_recall, turn, &fold_view);
-            if (fold_view.folded)
-               anth_msgs = fold_view.messages;
-         }
-         track_anthropic_payload_rewrite(driver, &fb_agent, anth_msgs, sys);
-         req = agent_build_request_anthropic(&fb_agent, anth_msgs, active_tools, sys, tok,
+         track_anthropic_payload_rewrite(driver, &fb_agent, eff_messages, sys);
+         req = agent_build_request_anthropic(&fb_agent, eff_messages, active_tools, sys, tok,
                                              temperature);
       }
       else
@@ -888,17 +819,12 @@ native_provider_http:
       {
          snprintf(out->error, sizeof(out->error), "gateway request pipeline failed");
          cJSON_Delete(req);
-         fold_result_free(&fold_view);
          context_reduce_result_free(&agent_reduce_result);
          break;
       }
 
       char *body = cJSON_PrintUnformatted(req);
-      /* Order matters: req may hold a non-owning reference into fold_view.messages
-       * OR agent_reduce_result.messages (agent_build_request_anthropic's
-       * AddItemReference fallback), so req must be deleted before either is freed. */
       cJSON_Delete(req);
-      fold_result_free(&fold_view);
       context_reduce_result_free(&agent_reduce_result);
       if (!body)
       {
@@ -927,13 +853,10 @@ native_provider_http:
          free(body);
          break;
       }
-
-      config_t retry_cfg;
-      config_load(&retry_cfg);
       int ra =
-          retry_cfg.retry_max_attempts > 0 ? retry_cfg.retry_max_attempts : HTTP_RETRY_MAX_ATTEMPTS;
-      int rb = retry_cfg.retry_base_ms > 0 ? retry_cfg.retry_base_ms : HTTP_RETRY_BASE_MS;
-      int rm = retry_cfg.retry_max_ms > 0 ? retry_cfg.retry_max_ms : HTTP_RETRY_MAX_MS;
+          config_retry_max_attempts() > 0 ? config_retry_max_attempts() : HTTP_RETRY_MAX_ATTEMPTS;
+      int rb = config_retry_base_ms() > 0 ? config_retry_base_ms() : HTTP_RETRY_BASE_MS;
+      int rm = config_retry_max_ms() > 0 ? config_retry_max_ms() : HTTP_RETRY_MAX_MS;
 
       {
          int dj = agent_get_durable_job_id();
@@ -941,9 +864,23 @@ native_provider_http:
             db1_agent_job_heartbeat_ext(dj, final_text_only_turn ? "final_response" : "model",
                                         api_call_count);
       }
-      int http_status =
-          http_retry_post_context(url, auth_header, body, &response_body, per_call, extra_headers,
-                                  ra, rb, rm, agent->provider, fb_agent.model, session_id);
+      int economizer_active = config_present() && econ_mode_current() != ECON_MODE_OFF;
+      econ_wire_route_t wire_route = anthropic                   ? ECON_WIRE_ANTHROPIC_MESSAGES
+                                     : chatgpt                   ? ECON_WIRE_OPENAI_RESPONSES
+                                     : strstr(url, "/responses") ? ECON_WIRE_OPENAI_RESPONSES
+                                                                 : ECON_WIRE_OPENAI_CHAT;
+      econ_wire_snapshot_t *wire_snapshot = NULL;
+      econ_wire_bytes_t wire_body;
+      if (econ_wire_select(economizer_active, wire_route, body, strlen(body), &wire_snapshot,
+                           &wire_body) != 0)
+      {
+         snprintf(out->error, sizeof(out->error), "economizer wire fence unavailable");
+         free(body);
+         break;
+      }
+      int http_status = http_retry_post_context_bytes(
+          url, auth_header, wire_body.data, wire_body.len, &response_body, per_call, extra_headers,
+          ra, rb, rm, agent->provider, fb_agent.model, session_id);
       api_call_count++;
       {
          int dj = agent_get_durable_job_id();
@@ -951,6 +888,7 @@ native_provider_http:
             db1_agent_job_heartbeat_ext(dj, "", api_call_count);
       }
       free(body);
+      econ_wire_snapshot_destroy(wire_snapshot);
 
       /* Model fallback on first turn: if 400, retry with fallback_model */
       if (http_status == 400 && turn == 0 && fb_agent.fallback_model[0])
@@ -964,25 +902,19 @@ native_provider_http:
          snprintf(out->served_model, MAX_MODEL_LEN, "%s", fb_agent.model);
 
          cJSON *fb_req;
-         fold_result_t fb_fold_view; /* §1 rolling fold; freed after fb_req serialized */
-         memset(&fb_fold_view, 0, sizeof(fb_fold_view));
          if (chatgpt)
             fb_req = agent_build_request_responses(&fb_agent, messages, active_tools, sys);
          else if (anthropic)
          {
-            build_fold_view(messages, &agent_fold_freeze, NULL, turn, &fb_fold_view);
-            cJSON *fb_anth_msgs = fb_fold_view.folded ? fb_fold_view.messages : messages;
-            track_anthropic_payload_rewrite(driver, &fb_agent, fb_anth_msgs, sys);
-            fb_req = agent_build_request_anthropic(&fb_agent, fb_anth_msgs, active_tools, sys, tok,
+            track_anthropic_payload_rewrite(driver, &fb_agent, messages, sys);
+            fb_req = agent_build_request_anthropic(&fb_agent, messages, active_tools, sys, tok,
                                                    temperature);
          }
          else
             fb_req =
                 agent_build_request_openai(&fb_agent, messages, active_tools, tok, temperature);
          char *fb_body = cJSON_PrintUnformatted(fb_req);
-         /* delete fb_req before freeing the fold view (req may reference it) */
          cJSON_Delete(fb_req);
-         fold_result_free(&fb_fold_view);
          if (fb_body)
          {
             {
@@ -990,9 +922,19 @@ native_provider_http:
                if (dj > 0)
                   db1_agent_job_heartbeat_ext(dj, "model", api_call_count);
             }
-            http_status = http_retry_post_context(url, auth_header, fb_body, &response_body,
-                                                  per_call, extra_headers, ra, rb, rm,
-                                                  fb_agent.provider, fb_agent.model, session_id);
+            econ_wire_snapshot_t *fb_snapshot = NULL;
+            econ_wire_bytes_t fb_wire_body;
+            if (econ_wire_select(economizer_active, wire_route, fb_body, strlen(fb_body),
+                                 &fb_snapshot, &fb_wire_body) != 0)
+            {
+               snprintf(out->error, sizeof(out->error),
+                        "economizer wire fence unavailable for fallback");
+               free(fb_body);
+               break;
+            }
+            http_status = http_retry_post_context_bytes(
+                url, auth_header, fb_wire_body.data, fb_wire_body.len, &response_body, per_call,
+                extra_headers, ra, rb, rm, fb_agent.provider, fb_agent.model, session_id);
             api_call_count++;
             {
                int dj = agent_get_durable_job_id();
@@ -1000,6 +942,7 @@ native_provider_http:
                   db1_agent_job_heartbeat_ext(dj, "", api_call_count);
             }
             free(fb_body);
+            econ_wire_snapshot_destroy(fb_snapshot);
          }
       }
 
@@ -1083,7 +1026,73 @@ native_provider_http:
          ir_primary =
              agent_ir_parse_responses(response_body, rescue_mode, &n_rescued, &parsed) == 0;
          if (!ir_primary)
+         {
+            /* An unparseable body used to become an indistinguishable "empty
+             * response": the turn reported no content and no tool calls, the
+             * body was freed, and nothing said whether the provider returned an
+             * error, an unknown event shape, or genuinely nothing. Every codex
+             * failure looked identical and could not be told apart from a model
+             * that simply said nothing. Log a bounded excerpt so the wire is
+             * recoverable from the log alone. */
+            LOG_WARN("agent", "delegate '%s': responses body did not parse; first %d bytes: %.400s",
+                     agent->name, (int)(response_body ? strlen(response_body) : 0),
+                     response_body ? response_body : "(null)");
             memset(&parsed, 0, sizeof(parsed));
+         }
+         else if (!parsed.content && parsed.call_count == 0)
+         {
+            /* Parsed cleanly yet carries neither text nor a tool call. The head
+             * of the stream says nothing useful here -- it is always
+             * response.created -- so report the SHAPE instead: which event types
+             * arrived, and the tail, where response.completed carries the final
+             * output array. That names the item types we are failing to extract
+             * rather than leaving it to be guessed. */
+            const char *b = response_body ? response_body : "";
+            size_t blen = strlen(b);
+            int n_item_done = 0, n_delta = 0, n_completed = 0, n_reasoning = 0, n_failed = 0;
+            for (const char *q = b; (q = strstr(q, "event: ")) != NULL; q++)
+            {
+               if (strncmp(q + 7, "response.output_item.done", 25) == 0)
+                  n_item_done++;
+               else if (strncmp(q + 7, "response.output_text.delta", 26) == 0)
+                  n_delta++;
+               else if (strncmp(q + 7, "response.completed", 18) == 0)
+                  n_completed++;
+               else if (strncmp(q + 7, "response.failed", 15) == 0)
+                  n_failed++;
+            }
+            for (const char *q = b; (q = strstr(q, "\"type\":\"reasoning\"")) != NULL; q++)
+               n_reasoning++;
+            /* Name the item types actually arriving: counting only "reasoning"
+             * left four items per turn unaccounted for once reasoning intent was
+             * declared. Collect the item.type of every output_item.done. */
+            char types[512] = "";
+            for (const char *q = b; (q = strstr(q, "event: response.output_item.done")) != NULL;
+                 q++)
+            {
+               const char *it = strstr(q, "\"item\":{");
+               if (!it)
+                  break;
+               const char *ty = strstr(it, "\"type\":\"");
+               if (!ty)
+                  continue;
+               ty += 8;
+               const char *end = strchr(ty, '"');
+               if (!end || end - ty > 40)
+                  continue;
+               char one[64];
+               snprintf(one, sizeof(one), "%.*s,", (int)(end - ty), ty);
+               if (strlen(types) + strlen(one) < sizeof(types) - 1)
+                  strcat(types, one);
+            }
+            const char *tail = blen > 600 ? b + blen - 600 : b;
+            LOG_WARN("agent",
+                     "delegate '%s': responses body parsed but yielded no content and no tool "
+                     "call; %zu bytes, events: output_item.done=%d output_text.delta=%d "
+                     "completed=%d failed=%d reasoning_items=%d; item_types=[%s]; tail: %.400s",
+                     agent->name, blen, n_item_done, n_delta, n_completed, n_failed, n_reasoning,
+                     types, tail);
+         }
       }
       else
       {
@@ -1114,12 +1123,65 @@ native_provider_http:
        * to delegate calls here: the primary spawns delegates via the very Task/Subagent
        * tool this would drop, so policing the primary's response would neuter aimee's
        * own delegation. Drop count discarded, as in the ingress (anthropic_http.c). */
+      int denied_calls = 0;
+      char denied_tool[64] = "";
       if (role != NULL)
+      {
+         for (int i = 0; i < parsed.call_count; i++)
+         {
+            if (gateway_policy_is_denied_tool(parsed.calls[i].name))
+            {
+               if (!denied_tool[0])
+                  snprintf(denied_tool, sizeof denied_tool, "%s", parsed.calls[i].name);
+               denied_calls++;
+            }
+         }
          gateway_policy_police_parsed_response(&parsed);
+      }
 
       /* Log response trace */
       agent_trace_log(0, turn, "response", parsed.content ? parsed.content : "(tool_calls)", NULL,
                       NULL, NULL, NULL);
+
+      if (agent_required_evidence_keep_tools(agent->require_initial_tool_call,
+                                             successful_tool_calls))
+         required_evidence_responses++;
+
+      /* ChatGPT can expose provider-native Task/Agent tools outside the function
+       * catalog, ignore a named tool_choice, or return a native tool response the
+       * wire parser cannot recognize. The gateway still denies identified native
+       * delegation calls. When no advertised call survives, perform one bounded,
+       * read-only bootstrap from the delegate's explicit worktree and return its
+       * output to that same seat. */
+      /* This value is intentionally captured after policy compaction. A mixed
+       * [denied, allowed] response retains its allowed call and never falls back. */
+      int remaining_calls_after_policy = parsed.call_count;
+      if (agent_required_evidence_needs_fallback(agent->require_initial_tool_call,
+                                                 successful_tool_calls, chatgpt,
+                                                 remaining_calls_after_policy))
+      {
+         if (denied_calls > 0)
+            aimee_log(LOG_WARN, "agent.evidence",
+                      "provider selected denied tool '%s'; bootstrapping seat with list_files",
+                      denied_tool[0] ? denied_tool : "Subagent");
+         else
+            aimee_log(LOG_WARN, "agent.evidence",
+                      "provider returned no executable repository call; bootstrapping seat with "
+                      "list_files");
+         total_calls++;
+         if (agent_bootstrap_repository_evidence(messages, turn, agent->timeout_ms, last_tool_name,
+                                                 sizeof last_tool_name, last_tool_result,
+                                                 sizeof last_tool_result))
+         {
+            successful_tool_calls++;
+            if (turn >= max_t - 1 && max_t < initial_max_t + 1)
+               max_t++;
+            turn++;
+            agent_free_parsed_response(&parsed);
+            continue;
+         }
+         consecutive_errors++;
+      }
 
       /* Accumulate tokens */
       out->prompt_tokens += parsed.prompt_tokens;
@@ -1261,6 +1323,27 @@ native_provider_http:
          break;
       }
 
+      /* Enforce the evidence requirement at the response boundary, not merely in
+       * provider request shaping. Providers can ignore tool_choice, and policy
+       * policing can remove an unusable call while leaving a nominal tool-call
+       * response. Neither is repository evidence. Retry with an explicit
+       * instruction, then fail closed after the bounded retry budget. */
+      if (agent_required_evidence_reject_response(agent->require_initial_tool_call,
+                                                  successful_tool_calls, parsed.is_tool_call,
+                                                  parsed.call_count))
+      {
+         if (agent_session_retry_required_evidence(messages, &turn, &max_t, initial_max_t,
+                                                   &required_evidence_retry_count, out->error,
+                                                   sizeof(out->error)))
+         {
+            agent_free_parsed_response(&parsed);
+            continue;
+         }
+         out->success = 0;
+         agent_free_parsed_response(&parsed);
+         break;
+      }
+
       if (!parsed.is_tool_call)
       {
          /* Final text response */
@@ -1294,6 +1377,16 @@ native_provider_http:
          }
          else
          {
+            /* No tool call means the provider omitted synthesis entirely; give
+             * it the same bounded degenerate-response correction used for
+             * reasoning-only content. The final-tool retry below is mutually
+             * exclusive because it requires total_calls > 0. */
+            if (total_calls == 0 &&
+                agent_session_retry_degenerate_response(messages, &turn, &degenerate_retry_count))
+            {
+               agent_free_parsed_response(&parsed);
+               continue;
+            }
             if (total_calls > 0 &&
                 agent_session_retry_final_tool_violation(
                     messages, "an empty final response", &turn, &max_t, initial_max_t,
@@ -1549,12 +1642,20 @@ native_provider_http:
          }
          char *result_str = dispatch_tool_call_ctx(parsed.calls[i].name, parsed.calls[i].arguments,
                                                    agent->timeout_ms);
+         result_str = agent_economize_fresh_tool_result(result_str);
          {
             int dj = agent_get_durable_job_id();
             if (dj > 0)
                db1_agent_job_heartbeat_ext(dj, "", api_call_count);
          }
          total_calls++;
+
+         /* An attempted lookup is not evidence. Validation/policy/directive
+          * failures never reach this branch; dispatch failures conventionally
+          * return "error:" or a JSON object containing an error member. */
+         int usable_tool_result = agent_tool_result_usable(result_str);
+         if (usable_tool_result)
+            successful_tool_calls++;
 
          /* Track consecutive tool errors for mw_stall_detect */
          if (result_str && strncmp(result_str, "error", 5) == 0)
@@ -1695,8 +1796,6 @@ native_provider_http:
       }
    }
 
-   fold_recall_index_free(&agent_fold_recall);
-
    /* If we exhausted turns without a final response, set a clear error */
    if (!out->success && !out->response && turn >= max_t)
    {
@@ -1743,6 +1842,7 @@ native_provider_http:
                            (end_ts.tv_nsec - loop_start.tv_nsec) / 1000000);
    out->turns = turn;
    out->tool_calls = total_calls;
+   out->successful_tool_calls = successful_tool_calls;
 
    /* Confidence estimation and abstention */
    if (out->response)

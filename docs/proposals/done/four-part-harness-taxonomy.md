@@ -83,17 +83,17 @@ should be re-tested, and likely trimmed, as models improve).
 |-----------|------------------------|------|-------|
 | Turn execution / ingress translation | [`conversation.c`](../../../src/conversation.c), [`proxy_bootstrap.c`](../../../src/proxy_bootstrap.c), [`server`](../../../src/server) | loop | durable (wire-format bridge) |
 | Retry / recovery loop detection | [`trace_analysis.c`](../../../src/trace_analysis.c) | loop | durable (observability) |
-| MCP tool surface | [`mcp_tools.c`](../../../src/modules/protocols/mcp/mcp_tools.c), [`toolset.c`](../../../src/toolset.c) | tool | durable (the bridge itself) |
+| MCP tool surface | [`mcp_tools.c`](../../../src/mcp_tools.c), [`toolset.c`](../../../src/toolset.c) | tool | durable (the bridge itself) |
 | Per-tool prompt augmentation | [`src/tool_prompts/`](../../../src/tool_prompts), [`gen_tool_prompts.py`](../../../src/gen_tool_prompts.py) | tool | **delete-pressure** |
-| Anti-pattern warnings | [`guardrails_semantic.c`](../../../src/modules/guardrails/guardrails_semantic.c), `db2/anti_patterns` | tool/context | **delete-pressure** (the advisory half) |
-| Delegate router | [`cmd_agent_delegate.c`](../../../src/cmd_agent_delegate.c), [`learning_router.c`](../../../src/modules/learning/learning_router.c) | tool | durable (economics, not capability) |
-| 4-tier memory | [`memory_core.c`](../../../src/modules/memory/memory_core.c), `memory_*.c` | context | **durable (state the model can't have)** |
+| Anti-pattern warnings | [`guardrails_semantic.c`](../../../src/guardrails_semantic.c), `db2/anti_patterns` | tool/context | **delete-pressure** (the advisory half) |
+| Delegate router | [`cmd_agent_delegate.c`](../../../src/cmd_agent_delegate.c), [`learning_router.c`](../../../src/learning_router.c) | tool | durable (economics, not capability) |
+| 4-tier memory | [`memory_core.c`](../../../src/memory_core.c), `memory_*.c` | context | **durable (state the model can't have)** |
 | Knowledge base + curator | [`src/kb/`](../../../src/kb), `kb_curator_*` | context | **durable** |
-| Context assembly / briefing | [`memory_assemble.c`](../../../src/modules/memory/memory_assemble.c), [`session_briefing.c`](../../../src/session_briefing.c) | context | durable mechanism, **delete-pressure** on its hand-tuned heuristics |
+| Context assembly / briefing | [`memory_assemble.c`](../../../src/memory_assemble.c), [`session_briefing.c`](../../../src/session_briefing.c) | context | durable mechanism, **delete-pressure** on its hand-tuned heuristics |
 | Compaction | [`compact.c`](../../../src/compact.c) | context | durable (fights context rot) |
-| Sensitive-file blocking | [`file_safety.c`](../../../src/file_safety.c), [`guardrails.c`](../../../src/modules/guardrails/guardrails.c) | control | **durable (authority, not capability)** |
-| Git verify / branch ownership | [`git_verify.c`](../../../src/modules/git/git_verify.c), [`branch_ownership.c`](../../../src/branch_ownership.c) | control | durable |
-| Worktree isolation | [`workspace.c`](../../../src/modules/workspace/workspace.c), [`worktree_gc.c`](../../../src/worktree_gc.c) | control | durable (blast radius) |
+| Sensitive-file blocking | [`file_safety.c`](../../../src/file_safety.c), [`guardrails.c`](../../../src/guardrails.c) | control | **durable (authority, not capability)** |
+| Git verify / branch ownership | [`git_verify.c`](../../../src/git_verify.c), [`branch_ownership.c`](../../../src/branch_ownership.c) | control | durable |
+| Worktree isolation | [`workspace.c`](../../../src/workspace.c), [`worktree_gc.c`](../../../src/worktree_gc.c) | control | durable (blast radius) |
 | Budgets / cost + success tracking | delegate status, `learning_router.c` | control | durable |
 
 The single most important reading of this table: **aimee's delete-pressure
@@ -211,7 +211,7 @@ investment:
   blast radius*, not capability. A more capable model that is *allowed* to clobber
   `.env` or another session's worktree is more dangerous, not less. Authority
   bounds should track trust and concurrency, never model IQ.
-- **Delegate routing economics** ([`learning_router.c`](../../../src/modules/learning/learning_router.c)).
+- **Delegate routing economics** ([`learning_router.c`](../../../src/learning_router.c)).
   Routing to the cheapest capable model is an economic bet that survives model
   improvement. Only the router's *complexity* is subject to pressure — the routing
   itself is durable.

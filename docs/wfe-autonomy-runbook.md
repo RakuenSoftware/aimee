@@ -10,7 +10,14 @@ Use this when an autonomous workflow stops or behaves unexpectedly.
 4. Check agent admission, provider, worktree, verification, and forge health for that node.
 5. Repair the named condition and resume the same work item.
 
-The default build opens a final PR; it does not merge the repository default branch automatically.
+The default build opens a draft final PR; it does not mark the PR ready or merge the repository
+default branch automatically. The draft must have a proposal-derived title and include the original
+request, approved plan, diff summary, slice PRs, completed gates, and human-review boundary.
+
+If a final PR is non-draft, has a work-item ID for a title, lacks that review context, or was merged
+without the explicit human handoff, treat the run as failed even when its lifecycle row says
+`accepted`. Preserve the PR and lifecycle audit trail, revoke any agent-accessible write credential,
+and verify repository protection before running another live workflow.
 
 ## Never force past
 
@@ -21,6 +28,7 @@ The default build opens a final PR; it does not merge the repository default bra
 - non-green required CI;
 - a degraded panel without quorum;
 - a forge identity or branch-confinement failure.
+- the draft state of a final workflow PR.
 
 ## Recovery
 
@@ -36,3 +44,25 @@ a human decision; raising every limit usually spends more without creating progr
 Keep the work-item ID, request IDs, lifecycle events, artifacts, provider attempt, verification log,
 and audit result. Tool and credential paths are audited through the event bus; trigger delivery is
 not yet an integrated bus consumer.
+
+## Automatic proposal admission
+
+The autonomous pending-proposal watcher scans the watched branch on every poll and decides whether
+each pending proposal is eligible for a new run. The decisions are governed by five behaviors:
+
+1. **Identity derivation.** Pending-proposal identity is derived from the complete proposal file
+   bytes together with workflow and mode. The watched-branch commit is not part of the identity
+   and is therefore not sufficient on its own to identify a pending proposal.
+2. **No duplicate runs on branch-only advances.** Advancing the watched branch without changing the
+   proposal bytes does not start a duplicate run. The watcher treats the unchanged bytes as the
+   same pending proposal and leaves its prior run status intact.
+3. **Byte changes re-eligibility.** Changing the proposal bytes produces a new pending-proposal
+   identity, which makes the proposal eligible for a new run on the next scan.
+4. **Admission cap queues eligible proposals.** The live trigger admission cap can queue an
+   otherwise eligible proposal when the cap is reached on a given scan. The cap is edited in
+   **Workflows → Run policy**; an otherwise eligible proposal that exceeds the cap is held
+   for a later scan instead of being admitted or rejected.
+5. **Cap-queued proposals stay eligible on later scans.** A proposal queued by the cap remains
+   eligible on a later scan; the watcher does not require manual firing to retry a proposal that
+   was only held back by the cap. As long as the proposal bytes, workflow, and mode are
+   unchanged, it is reconsidered on every subsequent scan until the cap admits it.

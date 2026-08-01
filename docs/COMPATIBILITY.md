@@ -25,9 +25,9 @@ required.
 | Claude Code | session, pre-tool, post-tool | yes | Anthropic Messages ingress |
 | Codex CLI | session and tool hooks where supported | local plugin | OpenAI Responses ingress |
 | VS Code | no native hook contract | yes | ACP and OpenAI-compatible model endpoint |
-| GitHub Copilot | supported hook subset | yes | not applicable |
-| Claude Desktop | not applicable | yes | not applicable |
-| OpenCode and similar front ends | not applicable | optional | OpenAI Chat Completions ingress |
+| GitHub Copilot | supported hook subset | yes | none |
+| Claude Desktop | none | yes | none |
+| OpenCode and similar front ends | none | optional | OpenAI Chat Completions ingress |
 
 Client setup updates detected registrations without duplicating them. Set
 `AIMEE_NO_CLIENT_INTEGRATIONS=1` to opt out.

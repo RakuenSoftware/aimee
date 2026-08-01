@@ -1,6 +1,7 @@
 #ifndef DEC_DASHBOARD_H
 #define DEC_DASHBOARD_H 1
 
+#include "aimee_features.h"
 #include <stddef.h>
 
 #define CORS_ORIGIN_LEN  256
@@ -23,7 +24,6 @@ char *api_traces(void);
 char *api_memory_stats(void);
 char *api_plans(void);
 char *api_logs(void);
-char *api_dashboard_plugins(void);
 char *api_dashboard_reminders(void);
 char *api_dashboard_recall(void);
 char *api_dashboard_directives(void);
@@ -38,8 +38,9 @@ char *api_bench_results(void);
 char *api_doctor(void);
 char *api_payload_rewrite_status(void);
 
-/* PAM credential check (Linux only). Returns 1 on success, 0 on failure. */
-int pam_check_credentials(const char *user, const char *password);
+/* pam_check_credentials moved to headers/pam_auth.h (posix/pam_auth.c), which
+ * dashboard.c includes: aimee-kb needs the same check and does not link the
+ * dashboard. */
 
 /* Base64 decode (minimal, for Authorization header). Returns decoded length. */
 int base64_decode(const char *in, char *out, size_t out_len);

@@ -1,0 +1,29 @@
+{
+  "artifacts": {
+    "hardware_reranking.json": {
+      "bytes": 693,
+      "sha256": "0ac6ddeb72c6df3a25f082086a51d8c2fcba8b57348dfdb825743aed3e0c3754"
+    },
+    "raw_reranking_ettin68m.jsonl": {
+      "bytes": 12344100,
+      "sha256": "ea15cda7838f49bb1ea092a685f79ae02b4a43898568347d1e72b6401ac59ee5"
+    },
+    "summary_reranking_ettin68m.json": {
+      "bytes": 867,
+      "sha256": "a903b731d1762ba4902ada0ac35d56d3a34a2c189daa0c7b09627f3c68e9ceab"
+    }
+  },
+  "label": "ettin68m",
+  "latest_rows": 10000,
+  "metrics": {
+    "mrr_at_10": 0.5190944047619047,
+    "ndcg_at_10": 0.6073530897164886,
+    "recall_at_1": 0.33,
+    "recall_at_10": 0.8832,
+    "recall_at_5": 0.7618
+  },
+  "raw_rows": 10014,
+  "secret_scan": "pass",
+  "suite_manifest_sha256": "16d2c16add86052ff24be410699ab9452ee1a36252de6dba31ab5391de7ab81c",
+  "view": "reranking"
+}

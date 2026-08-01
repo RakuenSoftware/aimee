@@ -34,6 +34,23 @@ int main(void)
    assert(platform_mkdtemp(home) != NULL);
    platform_setenv("AIMEE_HOME", home);
 
+   /* --- existence vs. load's engineer fallback --- */
+   {
+      /* persona_load() returns 0 for an unknown name and hands back the engineer
+       * built-in, so it can never report a typo. Dispatch needs a predicate that
+       * can, or `--persona nosuchpersona` silently runs as engineer. */
+      persona_t p;
+      assert(persona_load(NULL, "nosuchpersona", &p) == 0);
+      assert(strcmp(p.name, "engineer") == 0);
+      persona_free(&p);
+
+      assert(persona_exists(NULL, "engineer") == 1);
+      assert(persona_exists(NULL, "qa") == 1);
+      assert(persona_exists(NULL, "nosuchpersona") == 0);
+      assert(persona_exists(NULL, "") == 0);
+      assert(persona_exists(NULL, NULL) == 0);
+   }
+
    /* --- built-in metadata --- */
    {
       persona_t p;
@@ -63,9 +80,14 @@ int main(void)
       persona_free(&p);
 
       /* --- reviewer built-ins: read-only, review-oriented roles, no gate --- */
-      const char *reviewers[] = {
-          "qa", "security", "reviewer", "architect", "reviewer-constructive", "technical-writer"};
-      for (int i = 0; i < 6; i++)
+      const char *reviewers[] = {"qa",
+                                 "security",
+                                 "reviewer",
+                                 "architect",
+                                 "reviewer-constructive",
+                                 "technical-writer",
+                                 "original-request"};
+      for (int i = 0; i < 7; i++)
       {
          assert(persona_load(NULL, reviewers[i], &p) == 0);
          assert(p.builtin == 1);
@@ -77,6 +99,8 @@ int main(void)
          assert(has_role(&p, "review") && has_role(&p, "diagnose"));
          assert(!has_role(&p, "code") && !has_role(&p, "refactor")); /* no write roles */
          assert(p.brief_text && strstr(p.brief_text, "READ-ONLY delegates") != NULL);
+         if (strcmp(reviewers[i], "original-request") == 0)
+            assert(strstr(p.brief_text, "blocking drift") != NULL);
          persona_free(&p);
       }
 
@@ -262,8 +286,8 @@ int main(void)
       char dir[PATH_MAX];
       snprintf(dir, sizeof(dir), "%s/defaults", home);
       int w = persona_install_defaults(dir);
-      assert(w == 9); /* engineer, novel, songwriter, qa, security, reviewer, architect,
-                         reviewer-constructive, technical-writer */
+      assert(w == 10); /* engineer, novel, songwriter, qa, security, reviewer, architect,
+                          reviewer-constructive, original-request, technical-writer */
       char path[PATH_MAX];
       snprintf(path, sizeof(path), "%s/novel.md", dir);
       FILE *f = fopen(path, "r");

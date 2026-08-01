@@ -1,6 +1,6 @@
 /* retrieval_outcome_bridge.c: dogfood-autolabel -> retrieval outcome bridge.
  * See retrieval_outcome_bridge.h and
- * docs/proposals/pending/kb-hybrid-outcome-wiring.md. */
+ * docs/proposals/done/kb-hybrid-outcome-wiring.md. */
 
 #include "retrieval_outcome_bridge.h"
 #include "config.h"
@@ -193,8 +193,7 @@ void retrieval_outcome_bridge_on_autolabel(const char *prior_answer, int is_cont
    if (g_mem.n <= 0 && g_rank.n <= 0)
       return;
 
-   config_t cfg;
-   if (config_load(&cfg) != 0 || !cfg.learning_implicit_retrieval_outcome)
+   if (!config_learning_implicit_retrieval_outcome())
    {
       retrieval_outcome_bridge_reset();
       return;

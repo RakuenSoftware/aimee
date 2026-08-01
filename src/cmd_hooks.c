@@ -6,7 +6,6 @@
 #include "db1.h"
 #include "headers/cmd_hooks_scope.h"
 #include "memory_redirect.h"
-#include "headers/plugin.h"
 #include "platform_process.h"
 #include "agent_config.h"
 #include "agent_coord.h"
@@ -16,7 +15,7 @@
 #include "wfe_store.h"       /* db1_work_item_get (delivered==accepted) */
 #include "wfe_enforce.h"     /* the enforce dial -> deny (hard) vs warn (soft) */
 #include "wfe_native_gate.h" /* wfe_native_tool_externalizes / wfe_is_shell_tool */
-#include "audit_action.h"
+#include <aimee/audit/audit_action.h>
 #include "trace_analysis.h"
 #include "workspace.h"
 #include "commands.h"
@@ -144,10 +143,7 @@ static void emit_pretool_rewrite_unsupported_json(int rewrite_rc, const char *re
  * a guard that fails open is not a guard. */
 static int require_aimee_git_on(void)
 {
-   config_t cfg;
-   if (config_load(&cfg) != 0)
-      return 1;
-   return cfg.require_aimee_git;
+   return config_require_aimee_git();
 }
 
 static void s2_native_gate_pretool(const char *sid, const char *tool_name, const char *tool_input)
@@ -279,8 +275,6 @@ void cmd_hooks(app_ctx_t *ctx, int argc, char **argv)
    argc--;
    argv++;
 
-   config_t cfg;
-   config_load(&cfg);
    audit_log_open();
    audit_ensure_key(); /* provision the per-action audit key (best-effort) */
 
@@ -323,34 +317,8 @@ void cmd_hooks(app_ctx_t *ctx, int argc, char **argv)
    }
 
    /* DB1 owns its own connection; session_state_load/save delegate to DB1. */
-   if (db1_init(cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
       fatal("cannot open database");
-
-   /* Run enabled plugin hooks for this phase.
-    * Plugin hook failures are advisory: warn but don't block execution. */
-   {
-      const char *event = (strcmp(phase, "pre") == 0) ? "PreToolUse" : "PostToolUse";
-      plugin_t plugins[PLUGIN_MAX_PLUGINS];
-      int pcount = plugin_registry_load(plugins, PLUGIN_MAX_PLUGINS);
-      const char *roots[64];
-      for (int ri = 0; ri < cfg.workspace_count && ri < 64; ri++)
-         roots[ri] = cfg.workspaces[ri];
-      plugin_discover_local(roots, cfg.workspace_count, plugins, &pcount, PLUGIN_MAX_PLUGINS);
-
-      static char hook_cmds[PLUGIN_MAX_PLUGINS * PLUGIN_MAX_HOOKS][512];
-      int hook_count = plugin_collect_hooks(plugins, pcount, event, hook_cmds,
-                                            PLUGIN_MAX_PLUGINS * PLUGIN_MAX_HOOKS);
-      for (int hi = 0; hi < hook_count; hi++)
-      {
-         char *out = NULL;
-         size_t out_len = 0;
-         int rc = platform_exec_pipe(hook_cmds[hi], input, strlen(input), &out, &out_len);
-         audit_log("plugin-hook", "phase=%s rc=%d hook=%s", event, rc, hook_cmds[hi]);
-         if (rc != 0)
-            LOG_WARN("plugin-hook", "%s hook '%s' exited with code %d", event, hook_cmds[hi], rc);
-         free(out);
-      }
-   }
 
    if (strcmp(phase, "pre") == 0)
    {
@@ -469,7 +437,7 @@ void cmd_hooks(app_ctx_t *ctx, int argc, char **argv)
       s2_native_gate_pretool(sid, tool_name, tool_input);
 
       char msg[1024] = "";
-      int rc = pre_tool_check(tool_name, tool_input, &state, config_guardrail_mode(&cfg), cwd, msg,
+      int rc = pre_tool_check(tool_name, tool_input, &state, config_guardrail_mode(), cwd, msg,
                               sizeof(msg));
 
       session_state_save(&state, sid);

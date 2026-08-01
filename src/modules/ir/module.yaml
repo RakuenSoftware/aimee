@@ -1,0 +1,28 @@
+{
+  "descriptor_version": 1,
+  "id": "ir",
+  "dependencies": [
+    "module-runtime"
+  ],
+  "ownership_complete": true,
+  "runtime_toggle": {
+    "supported": false
+  },
+  "sources": [
+    "src/modules/ir/aimee_ir.c",
+    "src/modules/ir/aimee_ir_metrics.c"
+  ],
+  "public_headers": [
+    "src/modules/ir/include/aimee/ir/aimee_ir.h",
+    "src/modules/ir/include/aimee/ir/aimee_ir_metrics.h",
+    "src/modules/ir/include/aimee/ir/panel_result.h"
+  ],
+  "tests": [
+    "src/tests/test_aimee_ir.c",
+    "src/tests/test_aimee_ir_metrics.c",
+    "src/tests/test_panel_ir_contract.c"
+  ],
+  "docs": [
+    "docs/modules/ir.md"
+  ]
+}

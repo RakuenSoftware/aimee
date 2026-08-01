@@ -1,14 +1,57 @@
 #ifndef AIMEE_SERVER_MGMT_TOKEN_H
 #define AIMEE_SERVER_MGMT_TOKEN_H
-#include "kb_verifier.h"
-int server_mgmt_token_verify(const char *jwt, const char *jwks_json, const char *issuer,
-                             const char *audience, long now, kb_verify_result_t *out);
-int server_mgmt_token_verify_bound(const char *jwt, const char *jwks_json, const char *issuer,
-                                   const char *audience, const char *peer_cert_cn, long now,
-                                   kb_verify_result_t *out, char *capability, size_t cap_n,
-                                   char *jti, size_t jti_n);
-int server_mgmt_action_authorize(const char *jwt, const char *jwks_json, const char *issuer,
-                                 const char *audience, const char *peer_cert_cn, long now,
-                                 int remote_writes, const char *required_capability,
-                                 kb_verify_result_t *out, char *jti, size_t jti_n);
+
+#include <stddef.h>
+#include <stdint.h>
+
+#define SERVER_MGMT_TOKEN_MAX_LIFETIME 90
+
+typedef struct
+{
+   int version;
+   char issuer[256];
+   char audience[128];
+   char subject[577];
+   int64_t team_id;
+   char capability[65];
+   char jti[129];
+   char correlation_id[129];
+   char request_sha256[65];
+   char peer_issuer[512];
+   char peer_serial[80];
+   char peer_fingerprint[65];
+   char kid[65];
+   int64_t issued_at;
+   int64_t expires_at;
+} server_mgmt_token_claims_t;
+
+typedef enum
+{
+   SERVER_MGMT_TOKEN_INVALID = 0,
+   SERVER_MGMT_TOKEN_OK = 1,
+   SERVER_MGMT_TOKEN_UNKNOWN_KID = 2,
+} server_mgmt_token_result_t;
+
+server_mgmt_token_result_t
+server_mgmt_token_verify_ex(const char *jwt, size_t jwt_len, const char *jwks_json,
+                            const char *expected_issuer, const char *expected_audience,
+                            const char *peer_issuer, const char *peer_serial,
+                            const char *peer_fingerprint, const char *request_sha256, int64_t now,
+                            server_mgmt_token_claims_t *out);
+
+/* Read flow only: authenticates every fixed binding and requires remote_reads,
+ * but returns the signed request digest for nonce-bound recomputation. */
+server_mgmt_token_result_t server_mgmt_token_verify_read_claims_ex(
+    const char *jwt, size_t jwt_len, const char *jwks_json, const char *expected_issuer,
+    const char *expected_audience, const char *peer_issuer, const char *peer_serial,
+    const char *peer_fingerprint, int64_t now, server_mgmt_token_claims_t *out);
+
+/* Verify an authenticated, caller-supplied management JWKS and return one
+ * fully typed claim tuple. No caller may reparse the compact token. */
+int server_mgmt_token_verify(const char *jwt, size_t jwt_len, const char *jwks_json,
+                             const char *expected_issuer, const char *expected_audience,
+                             const char *peer_issuer, const char *peer_serial,
+                             const char *peer_fingerprint, const char *request_sha256, int64_t now,
+                             server_mgmt_token_claims_t *out);
+
 #endif

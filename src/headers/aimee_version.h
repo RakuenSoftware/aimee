@@ -1,9 +1,23 @@
 #ifndef DEC_AIMEE_VERSION_H
 #define DEC_AIMEE_VERSION_H 1
 
-/* Version -- can be overridden at compile time via -DAIMEE_VERSION='"..."' */
+/* Release series, MAJOR.MINOR. The only version component declared in the tree.
+ *
+ * The PATCH is never written here. It is inferred at release time from the
+ * highest v<series>.* tag, so shipping 0.3.1 after 0.3.0 needs no commit to
+ * this file and cannot drift from what was actually tagged. Moving to a new
+ * series IS a decision, so it is an explicit edit of this one line and nothing
+ * infers it. */
+#ifndef AIMEE_VERSION_SERIES
+#define AIMEE_VERSION_SERIES "0.3"
+#endif
+
+/* Full version -- can be overridden at compile time via -DAIMEE_VERSION='"..."'
+ * (release and image builds inject the resolved version this way). The patch
+ * component of this fallback is a placeholder for local builds, not a release
+ * number; nothing reads it to decide what to publish. */
 #ifndef AIMEE_VERSION
-#define AIMEE_VERSION "0.2.0"
+#define AIMEE_VERSION AIMEE_VERSION_SERIES ".0"
 #endif
 
 /* HEAD commit timestamp -- embedded at build time for stale-binary detection.

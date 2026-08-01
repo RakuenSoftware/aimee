@@ -10,6 +10,7 @@
  * JSON) degrades to parse_ok=0 and recommendation="allow". The deterministic
  * guardrail result is unaffected. One warning is logged on failure. */
 #include "guardrails_semantic.h"
+#include <aimee/audit/obs_bus.h> /* guardrail events cross the event bus, not a direct db1 insert */
 #include "db1/guardrail_events.h"
 #if !defined(AIMEE_DB2_DISABLED)
 #include "db2/bandit.h"
@@ -244,22 +245,44 @@ const char *gsem_policy(const gsem_output_t *out, double warn_t, double prompt_t
    return "allow";
 }
 
-void gsem_apply_strictness_arm(config_t *cfg)
+/* Effective semantic thresholds: the configured value, clamped when the
+ * "guardrail_strictness" bandit arm is promoted to strict.
+ *
+ * This replaced gsem_apply_strictness_arm(config_t *), which mutated a caller's
+ * config in place and so required every caller to hold the struct. The clamp is
+ * transient — it was never saved — so it belongs behind a function that answers
+ * "what threshold applies right now", not behind a struct edit.
+ *
+ * Returning the value rather than mutating also makes the clamp testable on its
+ * own, which it was not before. */
+static int gsem_strict_arm_active(void)
 {
 #if defined(AIMEE_DB2_DISABLED)
-   (void)cfg;
+   return 0;
 #else
    char arm[64] = "";
-   if (!cfg || db2_bandit_promotion_get("guardrail_strictness", arm, sizeof(arm)) != 0 ||
-       strcmp(arm, "strict") != 0)
-      return;
-   if (cfg->guardrails_semantic_warn_threshold > 0.30)
-      cfg->guardrails_semantic_warn_threshold = 0.30;
-   if (cfg->guardrails_semantic_prompt_threshold > 0.55)
-      cfg->guardrails_semantic_prompt_threshold = 0.55;
-   if (cfg->guardrails_semantic_block_threshold > 0.80)
-      cfg->guardrails_semantic_block_threshold = 0.80;
+   if (db2_bandit_promotion_get("guardrail_strictness", arm, sizeof(arm)) != 0)
+      return 0;
+   return strcmp(arm, "strict") == 0;
 #endif
+}
+
+double gsem_effective_warn_threshold(void)
+{
+   double v = config_guardrails_semantic_warn_threshold();
+   return (gsem_strict_arm_active() && v > 0.30) ? 0.30 : v;
+}
+
+double gsem_effective_prompt_threshold(void)
+{
+   double v = config_guardrails_semantic_prompt_threshold();
+   return (gsem_strict_arm_active() && v > 0.55) ? 0.55 : v;
+}
+
+double gsem_effective_block_threshold(void)
+{
+   double v = config_guardrails_semantic_block_threshold();
+   return (gsem_strict_arm_active() && v > 0.80) ? 0.80 : v;
 }
 
 int gsem_format_advisory_message(char *buf, size_t buf_len, const char *action,
@@ -307,5 +330,10 @@ void gsem_record(const char *session_id, const gsem_input_t *in, const gsem_outp
    bounded_copy(e.explanation, sizeof(e.explanation), out->explanation);
    e.dry_run = dry_run;
 
-   db1_guardrail_event_insert(&e);
+   /* The guardrail-semantic risk event now crosses the event bus (the second
+    * module migrated onto it): this publishes; the bus consumer performs the real
+    * db1 guardrail_events insert, and the capture tap records it alongside the
+    * governed-action audit rows in one replayable stream. The direct insert is
+    * gone. Off the critical path and best-effort, as before. */
+   obs_bus_emit_guardrail(&e);
 }

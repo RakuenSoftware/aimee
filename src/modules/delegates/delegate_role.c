@@ -1,4 +1,4 @@
-#include "delegate_role.h"
+#include <aimee/delegates/delegate_role.h>
 #include "role_templates.h" /* role_template_max_turns (per-role cap) */
 
 #include <string.h>
@@ -25,18 +25,65 @@ static int delegate_agent_supports_role(const agent_t *agent, const char *role)
 {
    if (!agent || !role || !role[0])
       return 0;
-   for (int i = 0; i < agent->role_count; i++)
+   /* Single source of truth for role eligibility: has the `all` wildcard or the
+    * role itself. No exec-role fallback (see agent_has_role / agent_supports_role). */
+   return agent_has_role(agent, role);
+}
+
+/* Roles deleted in the persona-vs-role cull. They are named here so an operator
+ * or custom persona that still requests one gets a CLEAR error, rather than the
+ * hazardous half-supported state of the name still being accepted as an
+ * arbitrary role string while its semantics (write classification, tool
+ * defaults, built-in template) have all been removed - which would silently hand
+ * back a read-only delegate with a generic prompt. */
+static const char *const g_removed_roles[] = {"prose",   "line-edit", "lyric", "hook",
+                                              "prosody", "songform",  NULL};
+
+const char *delegate_role_removed_reason(const char *role)
+{
+   if (!role || !role[0])
+      return NULL;
+   for (int i = 0; g_removed_roles[i]; i++)
    {
-      /* "all" is a wildcard: the agent serves every role. */
-      if (strcmp(agent->roles[i], "all") == 0 || strcmp(agent->roles[i], role) == 0)
-         return 1;
+      if (strcmp(role, g_removed_roles[i]) == 0)
+         /* Do NOT advertise "declare it in exec_roles" as a workaround: the CLI
+          * rejects the name before routing is consulted, so that advice would
+          * send an operator down a path that cannot work. */
+         return "removed: novel/songwriter work is a PERSONA concern, not a delegate role. "
+                "Use a persona with a general role such as draft, review or validate.";
    }
-   for (int i = 0; i < agent->exec_role_count; i++)
-   {
-      if (strcmp(agent->exec_roles[i], role) == 0)
+   return NULL;
+}
+
+/* Roles with a built-in prompt template, plus `plan` (the planner alias target,
+ * whose prompt is assembled by the planner rather than a template). This is the
+ * identity of a role name, which is why it lives beside the alias table: the two
+ * must agree, and test_delegate_role asserts every alias resolves to a member.
+ *
+ * Kept as a positive list because the removed-role blacklist above only rejects
+ * six names. Any OTHER unknown name used to reach exactly the state that
+ * blacklist exists to prevent — no template (so a generic prompt), no write
+ * classification (so silently read-only), and no role eligibility an agent could
+ * actually declare. An operator's custom role is still honoured: those are
+ * template files, and delegate_role_known() accepts anything with one. */
+static const char *const g_known_roles[] = {"review",    "validate",   "diagnose",   "code",
+                                            "refactor",  "explain",    "draft",      "execute",
+                                            "summarize", "format",     "search",     "reason",
+                                            "plan",      "continuity", "beat-check", NULL};
+
+int delegate_role_known(const char *project_root, const char *role)
+{
+   if (!role || !role[0])
+      return 0;
+   const char *canonical = delegate_role_canonicalize(role);
+   for (int i = 0; g_known_roles[i]; i++)
+      if (strcmp(canonical, g_known_roles[i]) == 0)
          return 1;
-   }
-   return 0;
+   /* A project- or user-level template file defines a custom role. Check the
+    * name as given AND canonicalized so an alias to a custom role still works. */
+   char path[ROLE_TEMPLATE_PATH_MAX];
+   return role_template_path(project_root, canonical, path, sizeof(path)) == 0 ||
+          role_template_path(project_root, role, path, sizeof(path)) == 0;
 }
 
 const char *delegate_role_canonicalize(const char *role)
@@ -56,11 +103,7 @@ int delegate_role_is_write(const char *role)
    if (!role || !role[0])
       return 0;
    const char *canonical = delegate_role_canonicalize(role);
-   return strcmp(canonical, "code") == 0 || strcmp(canonical, "refactor") == 0 ||
-          /* Novel-mode write roles: they draft/edit manuscript files. */
-          strcmp(canonical, "prose") == 0 || strcmp(canonical, "line-edit") == 0 ||
-          /* Songwriter-mode write roles: they draft/edit lyric files. */
-          strcmp(canonical, "lyric") == 0 || strcmp(canonical, "hook") == 0;
+   return strcmp(canonical, "code") == 0 || strcmp(canonical, "refactor") == 0;
 }
 
 int delegate_role_enable_tools_by_default(const char *role)
@@ -72,10 +115,8 @@ int delegate_role_enable_tools_by_default(const char *role)
    return strcmp(role, "review") == 0 || strcmp(role, "search") == 0 ||
           strcmp(role, "execute") == 0 || strcmp(role, "diagnose") == 0 ||
           strcmp(role, "validate") == 0 ||
-          /* Novel-mode read-only roles inspect the world bible by default. */
-          strcmp(role, "continuity") == 0 || strcmp(role, "beat-check") == 0 ||
-          /* Songwriter-mode read-only roles inspect the songbook by default. */
-          strcmp(role, "prosody") == 0 || strcmp(role, "songform") == 0;
+          /* Novel-mode read-only checks inspect the world bible by default. */
+          strcmp(role, "continuity") == 0 || strcmp(role, "beat-check") == 0;
 }
 
 int delegate_role_result_cache_enabled(const char *role)
@@ -158,5 +199,20 @@ void delegate_apply_max_turns_policy(agent_config_t *cfg, const char *role, int 
        * declared cap down to the role default. */
       if (cfg->agents[i].max_turns < 0)
          cfg->agents[i].max_turns = default_cap;
+   }
+}
+
+void delegate_apply_max_turns_cap(agent_config_t *cfg, const char *role, int cap)
+{
+   if (!cfg || !role || !role[0] || cap <= 0)
+      return;
+
+   const char *canonical_role = delegate_role_canonicalize(role);
+   for (int i = 0; i < cfg->agent_count; i++)
+   {
+      if (!delegate_agent_supports_role(&cfg->agents[i], canonical_role))
+         continue;
+      if (cfg->agents[i].max_turns <= 0 || cfg->agents[i].max_turns > cap)
+         cfg->agents[i].max_turns = cap;
    }
 }

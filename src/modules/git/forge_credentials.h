@@ -86,24 +86,26 @@ const char *forge_cred_askpass_shim(void);
 /* --- Server-held forge identity (workspace-resource-plane §6) ----------------
  * A forge credential the SERVER itself holds, used for instance-held workspaces
  * when a filesystem-poor surface (e.g. telegram) drives a git op and supplies no
- * token of its own. The default source is the environment: AIMEE_FORGE_TOKEN
- * (the credential) and AIMEE_FORGE_SCOPE (default "workspace"). A production hub
- * points AIMEE_FORGE_TOKEN at a GitHub/GitLab App installation token that the
- * App machinery refreshes; this layer just consumes it. Like the per-workspace
- * tokens it is kept out of the command line and never logged. */
+ * token of its own. A static token is read through the registered server-Vault
+ * provider; AIMEE_FORGE_TOKEN is accepted only by the first-boot Vault bootstrap
+ * and is never a runtime source. AIMEE_FORGE_SCOPE is non-secret metadata. */
 
-/* If a server identity is configured (AIMEE_FORGE_TOKEN non-empty), copy the
- * token into tok_out[tok_cap] and the scope into scope_out[scope_cap] and return
- * 1; otherwise clear the outputs and return 0. */
+/* If a server identity is configured, copy the token into tok_out[tok_cap] and
+ * scope into scope_out[scope_cap], returning 1; otherwise clear outputs and
+ * return 0. */
 int forge_cred_server_identity(char *tok_out, size_t tok_cap, char *scope_out, size_t scope_cap);
 
 /* Register an optional App installation-token provider (forge_app_token.c). When
  * registered AND `configured()` is true, forge_cred_server_identity sources the
  * token from `get()` instead of raw AIMEE_FORGE_TOKEN. The server registers this
  * at startup; leaving it unregistered (thin client / unit tests) keeps the raw
- * AIMEE_FORGE_TOKEN behavior unchanged. Decoupled via pointers so forge_credentials
- * (core, widely linked) carries no link dependency on the App-token module. */
+ * static server-Vault provider. Decoupled via pointers so forge_credentials
+ * (core, widely linked) carries no link dependency on either provider module. */
 void forge_cred_register_app_token_provider(int (*configured)(void), int (*get)(char *, size_t));
+
+/* Register the server-vault reader for the static forge identity. The server
+ * installs this at boot; thin clients have no server identity. */
+void forge_cred_register_static_token_provider(int (*get)(char *, size_t));
 
 /* Build an exec envp carrying the SERVER identity (GH_TOKEN + the GIT_ASKPASS
  * shim), or NULL when no server identity is configured. Mirrors

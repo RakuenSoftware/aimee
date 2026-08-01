@@ -14,7 +14,7 @@
  * tags the result by content hash, and reuses it on later turns; the delegate then
  * RUNS that image `--network none`. The per-workspace/global forms are `image:` only. */
 
-#include "delegate_sandbox_image.h"
+#include <aimee/delegates/delegate_sandbox_image.h>
 
 #include "aimee.h" /* MAX_PATH_LEN */
 #include "cJSON.h"
@@ -685,8 +685,7 @@ int delegate_sandbox_resolve_image(const char *cwd, char *out, size_t cap)
       }
    }
 
-   config_t cfg;
-   if (config_load(&cfg) != 0)
+   if (!config_present())
    {
       if (have_base)
       {
@@ -701,13 +700,13 @@ int delegate_sandbox_resolve_image(const char *cwd, char *out, size_t cap)
    {
       int best = -1;
       size_t best_len = 0;
-      for (int i = 0; i < cfg.workspace_count; i++)
+      for (int i = 0; i < config_workspace_count(); i++)
       {
-         if (!cfg.workspace_sandbox_image[i][0])
+         if (!config_workspace_sandbox_image(i)[0])
             continue;
-         if (cwd_under_root(cwd, cfg.workspaces[i]))
+         if (cwd_under_root(cwd, config_workspaces(i)))
          {
-            size_t len = strlen(cfg.workspaces[i]);
+            size_t len = strlen(config_workspaces(i));
             if (len > best_len)
             {
                best = i;
@@ -717,22 +716,22 @@ int delegate_sandbox_resolve_image(const char *cwd, char *out, size_t cap)
       }
       if (best >= 0)
       {
-         snprintf(base, sizeof(base), "%s", cfg.workspace_sandbox_image[best]);
+         snprintf(base, sizeof(base), "%s", config_workspace_sandbox_image(best));
          have_base = 1;
       }
    }
 
    /* 3. Global default (image ref only). */
-   if (!have_base && cfg.delegate_sandbox_image[0])
+   if (!have_base && config_delegate_sandbox_image()[0])
    {
-      snprintf(base, sizeof(base), "%s", cfg.delegate_sandbox_image);
+      snprintf(base, sizeof(base), "%s", config_delegate_sandbox_image());
       have_base = 1;
    }
 
    /* 4. Learned toolchain: layer the project's captured apt packages onto the base
     * (synthesizing FROM the backend default when no base was resolved). Best-effort —
     * a failed derived build falls back to the base image below. */
-   if (cfg.delegate_sandbox_learn_packages && overlay_ok)
+   if (config_delegate_sandbox_learn_packages() && overlay_ok)
    {
       const char *overlay_base = have_base ? base : SBX_DEFAULT_BASE;
       if (apply_learned_overlay(cwd, overlay_base, out, cap) == 0)

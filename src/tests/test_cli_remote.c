@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "aimee_client.h"
@@ -19,6 +20,41 @@ static void reset_state(void)
    unsetenv("AIMEE_SERVER_TOKEN");
 }
 
+static void test_help_arity_and_help_token_handling(void)
+{
+   reset_state();
+   char path[256];
+   snprintf(path, sizeof(path), "%s/remote.conf", g_home);
+   unlink(path);
+
+   char *set_help[] = {(char *)"set", (char *)"--help"};
+   assert(cli_remote_cmd(2, set_help, 1) == 0);
+   assert(access(path, F_OK) != 0);
+
+   char *status_help[] = {(char *)"status", (char *)"-h"};
+   assert(cli_remote_cmd(2, status_help, 1) == 0);
+   assert(access(path, F_OK) != 0);
+
+   char *too_many[] = {(char *)"set", (char *)"http://example.test:8740", (char *)"tok",
+                       (char *)"unexpected"};
+   assert(cli_remote_cmd(4, too_many, 1) == 2);
+   assert(access(path, F_OK) != 0);
+
+   char *token_named_help[] = {(char *)"set", (char *)"http://example.test:8740", (char *)"help"};
+   assert(cli_remote_cmd(3, token_named_help, 1) == 0);
+   assert(access(path, F_OK) == 0);
+   cli_remote_load_persisted();
+   char desc[128] = {0};
+   char token[128] = {0};
+   assert(aimee_client_remote_active(desc, sizeof(desc)) == 1);
+   assert(strcmp(desc, "example.test:8740") == 0);
+   assert(aimee_client_remote_token(token, sizeof(token)) == 1);
+   assert(strcmp(token, "help") == 0);
+   unlink(path);
+   reset_state();
+   PASS("remote help/arity is side-effect free and a token named help is preserved");
+}
+
 static void test_set_then_load(void)
 {
    reset_state();
@@ -26,6 +62,20 @@ static void test_set_then_load(void)
    char *tok = (char *)"tok123";
    char *argv[] = {(char *)"set", url, tok};
    assert(cli_remote_cmd(3, argv, 1) == 0);
+
+   char path[256];
+   struct stat st;
+   snprintf(path, sizeof(path), "%s/remote.conf", g_home);
+   assert(stat(path, &st) == 0);
+   assert((st.st_mode & 0777) == 0600);
+
+   /* Re-setting a target must repair an older, permissive config rather than
+    * preserving its mode through O_CREAT. */
+   assert(chmod(path, 0644) == 0);
+   assert(cli_remote_cmd(3, argv, 1) == 0);
+   assert(stat(path, &st) == 0);
+   assert((st.st_mode & 0777) == 0600);
+   PASS("remote.conf is created private and permissive files are repaired");
 
    /* Persisted config drives the transport once loaded. */
    cli_remote_load_persisted();
@@ -92,11 +142,12 @@ static void test_https_set_restores_insecure_env(void)
    /* `remote set` forces strict verification (suspends AIMEE_TLS_INSECURE) so a
     * self-signed server is always pinned even when the env var is set. It must
     * RESTORE the caller's env afterward — never permanently clobber it. Use an
-    * unresolvable https host: trust can't be established, but config still
-    * persists and the env var must come back. (Regression for the auto-pin fix.) */
+    * unresolvable https host: trust can't be established, so setup must report
+    * failure even though the target remains persisted for a later `remote trust`.
+    * The env var must still come back. (Regression for the auto-pin fix.) */
    setenv("AIMEE_TLS_INSECURE", "1", 1);
    char *argv[] = {(char *)"set", (char *)"https://made-host.invalid:8799", (char *)"tok"};
-   assert(cli_remote_cmd(3, argv, 1) == 0); /* set always persists config */
+   assert(cli_remote_cmd(3, argv, 1) == 1);
    int is_https = 0;
    assert(aimee_client_remote_active_scheme(NULL, 0, &is_https) == 1);
    assert(is_https == 1); /* scheme reporting must not depend on requesting a description */
@@ -114,6 +165,7 @@ int main(void)
    setenv("AIMEE_HOME", dir, 1);
 
    printf("test_cli_remote:\n");
+   test_help_arity_and_help_token_handling();
    test_set_then_load();
    test_env_wins_over_file();
    test_clear();

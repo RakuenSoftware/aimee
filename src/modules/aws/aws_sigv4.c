@@ -189,11 +189,19 @@ int aws_sigv4_sign(const aws_sigv4_request_t *req, aws_sigv4_result_t *out)
    if (!req->method || !req->payload_hash || !req->amz_date || !req->date || !req->region ||
        !req->service || !req->access_key_id || !req->secret_access_key)
       return -1;
+   if (req->access_key_id_len == 0 || req->access_key_id_len > 128 ||
+       req->secret_access_key_len == 0 || req->secret_access_key_len > 255 ||
+       memchr(req->access_key_id, '\0', req->access_key_id_len) ||
+       memchr(req->secret_access_key, '\0', req->secret_access_key_len) ||
+       (!!req->session_token != (req->session_token_len != 0)) ||
+       req->session_token_len >= AWS_SIGV4_TOKEN_MAX ||
+       (req->session_token && memchr(req->session_token, '\0', req->session_token_len)))
+      return -1;
    if (!payload_hash_valid(req->payload_hash) || (req->n_headers && !req->headers) ||
        (req->n_query && !req->query))
       return -1;
    if (strlen(req->amz_date) >= sizeof(out->amz_date) ||
-       (req->session_token && strlen(req->session_token) >= sizeof(out->security_token)))
+       req->session_token_len >= sizeof(out->security_token))
       return -1;
    if (req->n_headers > AWS_SIGV4_MAX_HEADERS || req->n_query > AWS_SIGV4_MAX_QUERY)
       return -1;
@@ -201,11 +209,12 @@ int aws_sigv4_sign(const aws_sigv4_request_t *req, aws_sigv4_result_t *out)
    memset(out, 0, sizeof(*out));
    snprintf(out->amz_date, sizeof(out->amz_date), "%s", req->amz_date);
 
-   int has_token = req->session_token && req->session_token[0];
+   int has_token = req->session_token_len != 0;
    if (has_token)
    {
       out->has_security_token = 1;
-      snprintf(out->security_token, sizeof(out->security_token), "%s", req->session_token);
+      memcpy(out->security_token, req->session_token, req->session_token_len);
+      out->security_token[req->session_token_len] = '\0';
    }
 
    /* 1. Canonical URI: percent-encode each path segment once (keep '/'). */
@@ -318,11 +327,13 @@ int aws_sigv4_sign(const aws_sigv4_request_t *req, aws_sigv4_result_t *out)
    unsigned char k_date[32] = {0}, k_region[32] = {0}, k_service[32] = {0}, k_signing[32] = {0},
                  sig[32] = {0};
    int rc = -1;
-   int ksl = snprintf((char *)k_secret, sizeof(k_secret), "AWS4%s", req->secret_access_key);
-   if (ksl < 0 || (size_t)ksl >= sizeof(k_secret))
+   if (4 + req->secret_access_key_len > sizeof(k_secret))
       goto cleanup;
+   memcpy(k_secret, "AWS4", 4);
+   memcpy(k_secret + 4, req->secret_access_key, req->secret_access_key_len);
+   size_t ksl = 4 + req->secret_access_key_len;
    unsigned int len = 0;
-   if (!HMAC(EVP_sha256(), k_secret, ksl, (const unsigned char *)req->date, strlen(req->date),
+   if (!HMAC(EVP_sha256(), k_secret, (int)ksl, (const unsigned char *)req->date, strlen(req->date),
              k_date, &len))
       goto cleanup;
    if (!HMAC(EVP_sha256(), k_date, 32, (const unsigned char *)req->region, strlen(req->region),
@@ -341,8 +352,8 @@ int aws_sigv4_sign(const aws_sigv4_request_t *req, aws_sigv4_result_t *out)
 
    /* 7. Authorization header. */
    if ((size_t)snprintf(out->authorization, sizeof(out->authorization),
-                        "AWS4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s",
-                        req->access_key_id, scope, out->signed_headers,
+                        "AWS4-HMAC-SHA256 Credential=%.*s/%s, SignedHeaders=%s, Signature=%s",
+                        (int)req->access_key_id_len, req->access_key_id, scope, out->signed_headers,
                         out->signature) >= sizeof(out->authorization))
       goto cleanup;
    rc = 0;

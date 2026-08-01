@@ -20,6 +20,7 @@
 #include "db2/feature_rows.h"
 #include "db2/memory_promotion.h"
 #include "db2/memory_query.h"
+#include "db2/memory_scope_query.h"
 #include "memory_graph_fusion.h"
 #include "kb_mdl.h"
 #include "db2/memory_relations.h"
@@ -118,9 +119,7 @@ int memory_generate_candidates(const char *query, const char *norm_query,
    if (source_stats_count)
       *source_stats_count = 0;
 
-   config_t embed_cfg;
-   config_load(&embed_cfg);
-   const char *embed_cmd = config_embedding_command(&embed_cfg, NULL);
+   const char *embed_cmd = config_embedding_command_current(NULL);
    int variant_fetch_limit = fetch_limit;
    int semantic_fetch_limit = fetch_limit;
    if (plan && plan->route == MEM_ROUTE_HYBRID)
@@ -205,9 +204,7 @@ int memory_generate_candidates(const char *query, const char *norm_query,
    /* Negation lexical recall: when query has negative polarity, search for
     * not_<token> synthetic terms so negative facts surface as candidates. */
    {
-      config_t neg_cfg;
-      if (config_load(&neg_cfg) == 0 && neg_cfg.memory_negation_enabled &&
-          memory_query_polarity(query) == POLARITY_NEGATIVE)
+      if (config_memory_negation_enabled() && memory_query_polarity(query) == POLARITY_NEGATIVE)
       {
          /* Build a synthetic "not_<token>" query from the query tokens */
          char neg_q[1024];
@@ -236,7 +233,7 @@ int memory_generate_candidates(const char *query, const char *norm_query,
              * complement (and the sole negation lane on the shim). Recovers
              * negatives phrased differently from the query that the literal FTS
              * match misses. */
-            const char *embed_cmd = config_embedding_command(&neg_cfg, NULL);
+            const char *embed_cmd = config_embedding_command_current(NULL);
             int got = memory_collect_memory_matches_via_vector(neg_q, embed_cmd, fetch_limit,
                                                                scratch, cap);
             for (int s = 0; s < got && count < max; s++)
@@ -283,17 +280,17 @@ int memory_generate_candidates(const char *query, const char *norm_query,
  * Both fields are optional; missing / null means "not generated".
  */
 
-void memory_query_rewrite(const char *query, const config_t *cfg, memory_query_rewrite_t *out)
+void memory_query_rewrite(const char *query, memory_query_rewrite_t *out)
 {
    memset(out, 0, sizeof(*out));
-   if (!query || !query[0] || !cfg || !cfg->memory_rewrite_enabled)
+   if (!query || !query[0] || !config_memory_rewrite_enabled())
       return;
    /* Need either the in-process curator-LLM seam (KB build) or a subprocess
     * command; nothing to do if neither is available. */
    int have_inproc = (memory_rewrite_llm_inproc != NULL);
-   if (!have_inproc && !cfg->memory_rewrite_command[0])
+   if (!have_inproc && !config_memory_rewrite_command()[0])
       return;
-   if (!cfg->memory_rewrite_hyde && !cfg->memory_rewrite_decompose)
+   if (!config_memory_rewrite_hyde() && !config_memory_rewrite_decompose())
       return;
 
    /* Only rewrite for SEMANTIC and HYBRID routes (not LEXICAL / GRAPH) */
@@ -306,7 +303,8 @@ void memory_query_rewrite(const char *query, const config_t *cfg, memory_query_r
       }
    }
 
-   int max_sub = cfg->memory_rewrite_max_subqueries > 0 ? cfg->memory_rewrite_max_subqueries : 4;
+   int max_sub =
+       config_memory_rewrite_max_subqueries() > 0 ? config_memory_rewrite_max_subqueries() : 4;
    char *resp = NULL;
 
    if (have_inproc)
@@ -315,12 +313,12 @@ void memory_query_rewrite(const char *query, const config_t *cfg, memory_query_r
        * through the curator LLM (small/fast tier). No subprocess, no sidecar
        * script — this is the production path (rewrite runs KB-side). */
       const char *hyde_line =
-          cfg->memory_rewrite_hyde
+          config_memory_rewrite_hyde()
               ? "- hyde_answer: a single short hypothetical answer to the query, as if you knew "
                 "the fact. 1-3 sentences, declarative prose, no caveats.\n"
               : "";
       char decomp_line[192] = "";
-      if (cfg->memory_rewrite_decompose)
+      if (config_memory_rewrite_decompose())
          snprintf(decomp_line, sizeof(decomp_line),
                   "- sub_questions: up to %d simpler sub-queries that together cover the original "
                   "(array of strings, may be empty if already atomic).\n",
@@ -332,7 +330,7 @@ void memory_query_rewrite(const char *query, const config_t *cfg, memory_query_r
                "fences. Schema: {\"hyde_answer\": \"...\" (or \"\"), \"sub_questions\": [...] (or "
                "[])}",
                hyde_line, decomp_line);
-      resp = memory_rewrite_llm_inproc(cfg, sys_prompt, query);
+      resp = memory_rewrite_llm_inproc(sys_prompt, query);
    }
    else
    {
@@ -341,16 +339,16 @@ void memory_query_rewrite(const char *query, const config_t *cfg, memory_query_r
       if (!input)
          return;
       cJSON_AddStringToObject(input, "query", query);
-      cJSON_AddBoolToObject(input, "hyde", cfg->memory_rewrite_hyde);
-      cJSON_AddBoolToObject(input, "decompose", cfg->memory_rewrite_decompose);
+      cJSON_AddBoolToObject(input, "hyde", config_memory_rewrite_hyde());
+      cJSON_AddBoolToObject(input, "decompose", config_memory_rewrite_decompose());
       cJSON_AddNumberToObject(input, "max_subqueries", max_sub);
       char *input_str = cJSON_PrintUnformatted(input);
       cJSON_Delete(input);
       if (!input_str)
          return;
       size_t resp_len = 0;
-      int rc = platform_exec_pipe(cfg->memory_rewrite_command, input_str, strlen(input_str), &resp,
-                                  &resp_len);
+      int rc = platform_exec_pipe(config_memory_rewrite_command(), input_str, strlen(input_str),
+                                  &resp, &resp_len);
       free(input_str);
       if (rc != 0)
       {
@@ -391,7 +389,7 @@ void memory_query_rewrite(const char *query, const config_t *cfg, memory_query_r
    }
 
    /* hyde_answer */
-   if (cfg->memory_rewrite_hyde)
+   if (config_memory_rewrite_hyde())
    {
       cJSON *ha = cJSON_GetObjectItemCaseSensitive(j, "hyde_answer");
       if (cJSON_IsString(ha) && ha->valuestring[0])
@@ -402,7 +400,7 @@ void memory_query_rewrite(const char *query, const config_t *cfg, memory_query_r
    }
 
    /* sub_questions */
-   if (cfg->memory_rewrite_decompose)
+   if (config_memory_rewrite_decompose())
    {
       cJSON *sq = cJSON_GetObjectItemCaseSensitive(j, "sub_questions");
       if (cJSON_IsArray(sq))
@@ -429,18 +427,15 @@ void memory_query_rewrite(const char *query, const config_t *cfg, memory_query_r
 
 int memory_find_facts(const char *query, int limit, memory_t *out, int max)
 {
-   /* Stage timing: separate the embed-spawn and rerank-spawn costs (the suspected
-    * dominant terms in live find_facts latency) from the rest, one line per call.
-    * Counters live in memory_core_helpers.inc (same TU). */
+   /* Stage timing: separate the embed-spawn cost (the suspected dominant term in
+    * live find_facts latency) from the rest, one line per call. Counters live in
+    * memory_core_helpers.inc (same TU). */
    long long _ff_t0 = util_now_ms();
    s_qembed_ms = 0;
    s_qembed_spawns = 0;
-   s_rerank_ms = 0;
-   s_rerank_calls = 0;
    int n = memory_find_facts_scoped(query, NULL, NULL, limit, out, max);
-   aimee_log(LOG_INFO, "memory.find_facts.timing",
-             "total=%lldms embed=%lldms/%d rerank=%lldms/%d results=%d", util_now_ms() - _ff_t0,
-             s_qembed_ms, s_qembed_spawns, s_rerank_ms, s_rerank_calls, n);
+   aimee_log(LOG_INFO, "memory.find_facts.timing", "total=%lldms embed=%lldms/%d results=%d",
+             util_now_ms() - _ff_t0, s_qembed_ms, s_qembed_spawns, n);
    /* Dogfood record at the non-scoped entry point so MCP/agent callers land
     * here; scoped callers (CLI cmd_memory_find_facts) log themselves. */
    if (n > 0 && out)
@@ -535,6 +530,15 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
    if (!query || !query[0])
       return 0;
 
+   /* One immutable snapshot for the whole recall keeps every feature gate
+    * internally consistent and avoids repeated large heap allocations. */
+   /* The RESOLVED embedder command (request > config > env > builtin), copied
+    * out: prewarm holds it across the batched embedder call, and
+    * config_embedding_command_current returns a thread-local. CONFIG_COPY_MAX
+    * cannot truncate any config string. */
+   char embed_command[CONFIG_COPY_MAX];
+   snprintf(embed_command, sizeof(embed_command), "%s", config_embedding_command_current(NULL));
+
    /* Fresh query-embedding memo for this recall: every lane / HyDE pass /
     * sub-query below embeds via memory_embed_text_runtime, which reuses vectors
     * cached here instead of re-spawning the embedder for identical text. */
@@ -547,15 +551,14 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
     * unavailable.  Gated behind memory.aggregation.enabled so point-query
     * behaviour stays byte-identical until operators opt in. */
    {
-      config_t agg_cfg;
-      if (config_load(&agg_cfg) == 0 && agg_cfg.memory_aggregation_enabled)
+      if (config_memory_aggregation_enabled())
       {
          memory_aggregation_hint_t hint;
          if (memory_detect_aggregation_shape(query, &hint) && hint.detected)
          {
             int req_limit = limit > 0 ? limit : 20;
-            int cap = agg_cfg.memory_aggregation_max_items > 0
-                          ? agg_cfg.memory_aggregation_max_items
+            int cap = config_memory_aggregation_max_items() > 0
+                          ? config_memory_aggregation_max_items()
                           : MEMORY_AGGREGATION_DEFAULT_MAX_ITEMS;
             if (cap > max)
                cap = max;
@@ -600,14 +603,13 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
    memory_query_rewrite_t rewrite;
    memset(&rewrite, 0, sizeof(rewrite));
    {
-      config_t cfg;
       /* Fire when enabled and a rewrite mechanism exists: either the legacy
        * subprocess command, or the in-process curator-LLM seam (KB build). The
        * in-process path needs no command, so requiring one would silently
        * disable HyDE on an accelerated backend that only configures a provider. */
-      if (config_load(&cfg) == 0 && cfg.memory_rewrite_enabled &&
-          (cfg.memory_rewrite_command[0] || memory_rewrite_llm_inproc))
-         memory_query_rewrite(query, &cfg, &rewrite);
+      if (config_memory_rewrite_enabled() &&
+          (config_memory_rewrite_command()[0] || memory_rewrite_llm_inproc))
+         memory_query_rewrite(query, &rewrite);
    }
 
    memory_query_intent_t intent = memory_query_intent(query, norm_query);
@@ -619,8 +621,7 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
     * texts are built with the same helpers the lanes use (so they match and hit);
     * any that don't match simply fall back to an individual embed. */
    {
-      config_t pw_cfg;
-      if (config_load(&pw_cfg) == 0 && pw_cfg.embedding_command[0])
+      if (embed_command[0])
       {
          const char *bt[3 + 2 * MEMORY_REWRITE_MAX_SUBQUERIES];
          char sem_main[1024];
@@ -642,7 +643,7 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
             if (sem_sub[q][0])
                bt[bn++] = sem_sub[q];
          }
-         memory_query_embed_prewarm(bt, bn, pw_cfg.embedding_command);
+         memory_query_embed_prewarm(bt, bn, embed_command);
       }
    }
 
@@ -666,15 +667,13 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
     * fetch_max up to MEMORY_RERANK_BUFFER when a short, wide query
     * (e.g. "list all projects") would otherwise be starved. */
    {
-      config_t fb_cfg;
-      if (config_load(&fb_cfg) == 0 && fb_cfg.memory_fetch_budget_enabled &&
-          fb_cfg.memory_fetch_budget_base > 0)
+      if (config_memory_fetch_budget_enabled() && config_memory_fetch_budget_base() > 0)
       {
-         int base = fb_cfg.memory_fetch_budget_base;
+         int base = config_memory_fetch_budget_base();
          char fb_tokens[24][64];
          int ntok = memory_split_tokens(norm_query, fb_tokens, 24);
          double spec;
-         if (fb_cfg.memory_fetch_budget_shape_aware)
+         if (config_memory_fetch_budget_shape_aware())
          {
             spec = memory_fetch_budget_factor(plan.shape, ntok);
          }
@@ -687,7 +686,7 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
             dynamic_max = fetch_min;
          if (dynamic_max > MEMORY_RERANK_BUFFER)
             dynamic_max = MEMORY_RERANK_BUFFER;
-         if (fb_cfg.memory_fetch_budget_shape_aware)
+         if (config_memory_fetch_budget_shape_aware())
             fetch_max = dynamic_max;
          else if (dynamic_max < fetch_max)
             fetch_max = dynamic_max;
@@ -806,9 +805,7 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
     * `archived` before reranking.  memory_get() keeps returning them;
     * this only affects the recall surface. */
    {
-      config_t lc_cfg;
-      if (config_load(&lc_cfg) == 0 && lc_cfg.memory_lifecycle_enabled &&
-          lc_cfg.memory_lifecycle_hide_archived && count > 0)
+      if (config_memory_lifecycle_enabled() && config_memory_lifecycle_hide_archived() && count > 0)
       {
          /* Batch-probe archive state via db2 and drop any archived ids from
           * the candidate array. */
@@ -923,14 +920,13 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
    if (reranked > max)
       reranked = max;
    {
-      config_t floor_cfg;
-      if (config_load(&floor_cfg) == 0 && floor_cfg.memory_recall_lanes_enabled)
+      if (config_memory_recall_lanes_enabled())
       {
          int eff =
              memory_apply_lane_floor(candidates, count, s_lane_summary_ids, s_lane_summary_count,
-                                     floor_cfg.memory_recall_lanes_floor_summary, reranked);
+                                     config_memory_recall_lanes_floor_summary(), reranked);
          memory_apply_lane_floor(candidates, count, s_lane_fact_ids, s_lane_fact_count,
-                                 floor_cfg.memory_recall_lanes_floor_fact, eff);
+                                 config_memory_recall_lanes_floor_fact(), eff);
       }
    }
    for (int i = 0; i < reranked; i++)
@@ -938,10 +934,9 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
 
    /* Session window expansion: inject conversational neighbours when enabled */
    {
-      config_t win_cfg;
-      if (config_load(&win_cfg) == 0 && win_cfg.memory_window_radius > 0)
+      if (config_memory_window_radius() > 0)
          reranked =
-             memory_expand_to_session_window(out, reranked, max, win_cfg.memory_window_radius);
+             memory_expand_to_session_window(out, reranked, max, config_memory_window_radius());
    }
 
    clock_gettime(CLOCK_MONOTONIC, &ts1);
@@ -951,15 +946,51 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
    return reranked;
 }
 
-int memory_find_facts_visible(const char *query, const char *workspace, const char *project,
-                              int limit, memory_t *out, int max)
+static void memory_sort_scope_buckets(memory_t *matches, int count, int *scope_rank)
+{
+   for (int i = 0; i < count; i++)
+      scope_rank[i] = db2_memory_scope_context_rank(matches[i].id);
+   /* Stable insertion sort: relevance ordering from the reranker is retained
+    * inside each hard visibility bucket. */
+   for (int i = 1; i < count; i++)
+   {
+      memory_t current = matches[i];
+      int current_rank = scope_rank[i];
+      int j = i;
+      while (j > 0 && scope_rank[j - 1] < current_rank)
+      {
+         matches[j] = matches[j - 1];
+         scope_rank[j] = scope_rank[j - 1];
+         j--;
+      }
+      matches[j] = current;
+      scope_rank[j] = current_rank;
+   }
+}
+
+int memory_find_facts_visible_ex(const char *query, const char *workspace, const char *project,
+                                 int include_all, int limit, memory_t *out, int max)
 {
    if (!query || !query[0])
       return 0;
+   db2_memory_scope_context_t previous_scope;
+   db2_memory_scope_context_get(&previous_scope);
+   if (previous_scope.active)
+      include_all = previous_scope.include_all;
+   db2_memory_scope_context_set(workspace, project, include_all);
    /* Fresh query-embedding memo for this recall (see memory_find_facts_scoped). */
    memory_query_embed_cache_reset();
    if (!memory_vector_ready())
-      return memory_find_facts_visible_lexical_fallback(query, workspace, project, limit, out, max);
+   {
+      int fallback =
+          memory_find_facts_visible_lexical_fallback(query, workspace, project, limit, out, max);
+      if (previous_scope.active)
+         db2_memory_scope_context_set(previous_scope.workspace, previous_scope.project,
+                                      previous_scope.include_all);
+      else
+         db2_memory_scope_context_clear();
+      return fallback;
+   }
    if (limit <= 0)
       limit = 20;
    if (limit > max)
@@ -1007,6 +1038,11 @@ int memory_find_facts_visible(const char *query, const char *workspace, const ch
    if (!candidates)
    {
       pgvec_memory_vector_scope_hint_clear();
+      if (previous_scope.active)
+         db2_memory_scope_context_set(previous_scope.workspace, previous_scope.project,
+                                      previous_scope.include_all);
+      else
+         db2_memory_scope_context_clear();
       return -1;
    }
    int scope_rank[MEMORY_RERANK_BUFFER];
@@ -1017,13 +1053,18 @@ int memory_find_facts_visible(const char *query, const char *workspace, const ch
    if (count < 0)
    {
       pgvec_memory_vector_scope_hint_clear();
+      if (previous_scope.active)
+         db2_memory_scope_context_set(previous_scope.workspace, previous_scope.project,
+                                      previous_scope.include_all);
+      else
+         db2_memory_scope_context_clear();
       return -1;
    }
    int kept = 0;
    for (int i = 0; i < count; i++)
    {
-      int rank = memory_scope_visibility_rank(candidates[i].id, workspace, project);
-      if (rank <= 0)
+      int rank = db2_memory_scope_context_rank(candidates[i].id);
+      if (rank <= 0 && !include_all)
          continue;
       if (kept != i)
          candidates[kept] = candidates[i];
@@ -1031,48 +1072,47 @@ int memory_find_facts_visible(const char *query, const char *workspace, const ch
       kept++;
    }
    count = kept;
-   int reranked =
-       memory_rerank_matches(query, candidates, count, limit, semantic_ids, semantic_scores,
+   /* Rerank the full retained pool. memory_rerank_matches sorts all `count`
+    * rows even when its return value is capped, so passing the request limit
+    * here would truncate before the mandatory local-first bucket order. */
+   int ranked_count =
+       memory_rerank_matches(query, candidates, count, count, semantic_ids, semantic_scores,
                              semantic_hit_count, source_stats, source_stats_count);
+   memory_sort_scope_buckets(candidates, ranked_count, scope_rank);
+   int reranked = ranked_count < limit ? ranked_count : limit;
    if (reranked > max)
       reranked = max;
-   for (int i = 0; i < reranked; i++)
-      scope_rank[i] = memory_scope_visibility_rank(candidates[i].id, workspace, project);
-   for (int i = 0; i < reranked - 1; i++)
    {
-      int best = i;
-      for (int j = i + 1; j < reranked; j++)
+      if (config_memory_recall_lanes_enabled())
       {
-         if (scope_rank[j] > scope_rank[best])
-            best = j;
-      }
-      if (best != i)
-      {
-         memory_t tmp_mem = candidates[i];
-         int tmp_rank = scope_rank[i];
-         candidates[i] = candidates[best];
-         scope_rank[i] = scope_rank[best];
-         candidates[best] = tmp_mem;
-         scope_rank[best] = tmp_rank;
+         int eff = memory_apply_lane_floor(candidates, ranked_count, s_lane_summary_ids,
+                                           s_lane_summary_count,
+                                           config_memory_recall_lanes_floor_summary(), reranked);
+         memory_apply_lane_floor(candidates, ranked_count, s_lane_fact_ids, s_lane_fact_count,
+                                 config_memory_recall_lanes_floor_fact(), eff);
       }
    }
-   {
-      config_t floor_cfg;
-      if (config_load(&floor_cfg) == 0 && floor_cfg.memory_recall_lanes_enabled)
-      {
-         int eff =
-             memory_apply_lane_floor(candidates, count, s_lane_summary_ids, s_lane_summary_count,
-                                     floor_cfg.memory_recall_lanes_floor_summary, reranked);
-         memory_apply_lane_floor(candidates, count, s_lane_fact_ids, s_lane_fact_count,
-                                 floor_cfg.memory_recall_lanes_floor_fact, eff);
-      }
-   }
+   /* Lane floors may promote a summary/fact after the first bucket pass.
+    * Re-apply the hard scope order last so relevance features can only move
+    * candidates within their scope bucket. */
+   memory_sort_scope_buckets(candidates, ranked_count, scope_rank);
    for (int i = 0; i < reranked; i++)
       out[i] = candidates[i];
    clock_gettime(CLOCK_MONOTONIC, &ts1);
    memory_record_query_plan_metrics(&plan, memory_query_elapsed_ms(&ts0, &ts1));
    pgvec_memory_vector_scope_hint_clear();
+   if (previous_scope.active)
+      db2_memory_scope_context_set(previous_scope.workspace, previous_scope.project,
+                                   previous_scope.include_all);
+   else
+      db2_memory_scope_context_clear();
    return reranked;
+}
+
+int memory_find_facts_visible(const char *query, const char *workspace, const char *project,
+                              int limit, memory_t *out, int max)
+{
+   return memory_find_facts_visible_ex(query, workspace, project, 0, limit, out, max);
 }
 
 int memory_diagnose(const char *query, int limit, memory_diagnostic_t *out, int max)
@@ -1091,10 +1131,18 @@ int memory_diagnose_scoped(const char *query, const char *scope_type, const char
    if (!norm_query[0])
       snprintf(norm_query, sizeof(norm_query), "%s", query);
 
+   db2_memory_scope_context_t request_scope;
+   db2_memory_scope_context_get(&request_scope);
+   int explicit_scope = scope_type && scope_type[0];
+   /* A promoted shortcut is a bounded global cache.  It cannot prove the hard
+    * visibility/order contract for an ambient or explicit scope, so only the
+    * legacy unscoped diagnostic route may use it. */
+   int allow_shortcut = !request_scope.active && !explicit_scope;
    int64_t shortcut_ids[8];
    int shortcut_promoted = 0;
-   int shortcut_n =
-       db2_retrieval_shortcut_lookup(norm_query, shortcut_ids, 8, &shortcut_promoted, NULL);
+   int shortcut_n = allow_shortcut ? db2_retrieval_shortcut_lookup(norm_query, shortcut_ids, 8,
+                                                                   &shortcut_promoted, NULL)
+                                   : 0;
    memory_t shortcut_matches[8];
    int shortcut_match_n = 0;
    if (shortcut_n > 0)
@@ -1105,8 +1153,12 @@ int memory_diagnose_scoped(const char *query, const char *scope_type, const char
    memory_t *matches = (memory_t *)calloc(64, sizeof(*matches));
    if (!matches)
       return -1;
-   int count = memory_find_facts_scoped(query, scope_type, scope_value, limit > 0 ? limit : 10,
-                                        matches, 64);
+   int count = request_scope.active && !explicit_scope
+                   ? memory_find_facts_visible_ex(query, request_scope.workspace,
+                                                  request_scope.project, request_scope.include_all,
+                                                  limit > 0 ? limit : 10, matches, 64)
+                   : memory_find_facts_scoped(query, scope_type, scope_value,
+                                              limit > 0 ? limit : 10, matches, 64);
    if (count < 0)
    {
       free(matches);
@@ -1115,9 +1167,7 @@ int memory_diagnose_scoped(const char *query, const char *scope_type, const char
    if (count > max)
       count = max;
 
-   config_t embed_cfg;
-   config_load(&embed_cfg);
-   const char *embed_cmd = config_embedding_command(&embed_cfg, NULL);
+   const char *embed_cmd = config_embedding_command_current(NULL);
    int64_t semantic_ids[128];
    double semantic_scores[128];
    int semantic_hit_count = 0;
@@ -1180,9 +1230,7 @@ int memory_explain_match(const char *query, int64_t memory_id, memory_diagnostic
    if (memory_get(memory_id, &mem) != 0)
       return -1;
 
-   config_t embed_cfg;
-   config_load(&embed_cfg);
-   const char *embed_cmd = config_embedding_command(&embed_cfg, NULL);
+   const char *embed_cmd = config_embedding_command_current(NULL);
    int64_t semantic_ids[128];
    double semantic_scores[128];
    int semantic_hit_count = 0;
@@ -1727,8 +1775,16 @@ int memory_ask_query_scoped(const char *query, const char *scope_type, const cha
    }
 
    memory_t matches[8];
-   int count =
-       memory_find_facts_scoped(query, scope_type, scope_value, limit > 0 ? limit : 5, matches, 8);
+   db2_memory_scope_context_t request_scope;
+   db2_memory_scope_context_get(&request_scope);
+   int count;
+   if (request_scope.active && (!scope_type || !scope_type[0]))
+      count = memory_find_facts_visible_ex(query, request_scope.workspace, request_scope.project,
+                                           request_scope.include_all, limit > 0 ? limit : 5,
+                                           matches, 8);
+   else
+      count = memory_find_facts_scoped(query, scope_type, scope_value, limit > 0 ? limit : 5,
+                                       matches, 8);
    if (count < 0)
    {
       snprintf(out->error, sizeof(out->error),
@@ -1765,12 +1821,12 @@ int memory_ask_query_scoped(const char *query, const char *scope_type, const cha
       return 0;
    }
 
-   config_t cfg;
-   config_load(&cfg);
+   char citations_mode_buf[CONFIG_COPY_MAX];
+   config_memory_citations_mode_copy(citations_mode_buf, sizeof(citations_mode_buf));
    const char *citations_mode = getenv("AIMEE_MEMORY_CITATIONS_MODE");
    if (!citations_mode || !citations_mode[0])
-      citations_mode = cfg.memory_citations_mode;
-   int strip_unverified = cfg.memory_citations_strip_unverified;
+      citations_mode = citations_mode_buf;
+   int strip_unverified = config_memory_citations_strip_unverified();
    const char *strip_env = getenv("AIMEE_MEMORY_CITATIONS_STRIP_UNVERIFIED");
    if (strip_env && strip_env[0])
       strip_unverified = atoi(strip_env) != 0;
@@ -1783,7 +1839,7 @@ int memory_ask_query_scoped(const char *query, const char *scope_type, const cha
 
    int is_required =
        (citations_mode && citations_mode[0] && strcmp(citations_mode, "required") == 0);
-   int reprompt_on_miss = cfg.memory_citations_reprompt_on_miss;
+   int reprompt_on_miss = config_memory_citations_reprompt_on_miss();
    if (is_required)
       memory_runtime_state_increment("memory.citation.required", 1);
 
@@ -1791,7 +1847,11 @@ int memory_ask_query_scoped(const char *query, const char *scope_type, const cha
    {
       memory_runtime_state_increment("memory.citation.reprompted", 1);
       memory_t reprompt_matches[8];
-      int reprompt_count = memory_find_facts(query, 5, reprompt_matches, 8);
+      int reprompt_count =
+          request_scope.active
+              ? memory_find_facts_visible_ex(query, request_scope.workspace, request_scope.project,
+                                             request_scope.include_all, 5, reprompt_matches, 8)
+              : memory_find_facts(query, 5, reprompt_matches, 8);
       if (reprompt_count < 0)
       {
          snprintf(out->error, sizeof(out->error),
@@ -1851,9 +1911,9 @@ int memory_ask_query_scoped(const char *query, const char *scope_type, const cha
    out->confidence = memory_answer_confidence(matches, count, anchor, out->citation_count, 0,
                                               out->low_confidence);
 
-   double threshold = cfg.memory_abstain_gate > 0.0 ? cfg.memory_abstain_gate : 0.40;
+   double threshold = config_memory_abstain_gate() > 0.0 ? config_memory_abstain_gate() : 0.40;
    double chunk_floor =
-       cfg.memory_chunk_min_confidence > 0.0 ? cfg.memory_chunk_min_confidence : 0.0;
+       config_memory_chunk_min_confidence() > 0.0 ? config_memory_chunk_min_confidence() : 0.0;
    if (chunk_floor > 1.0)
       chunk_floor = 1.0;
    char query_terms_storage[32][64];
@@ -1861,7 +1921,7 @@ int memory_ask_query_scoped(const char *query, const char *scope_type, const cha
    int term_count = memory_split_tokens(norm_query, query_terms_storage, 32);
    for (int i = 0; i < term_count; i++)
       query_terms[i] = query_terms_storage[i];
-   int abstain_enabled = cfg.memory_abstain_enabled && threshold > 0.0;
+   int abstain_enabled = config_memory_abstain_enabled() && threshold > 0.0;
    if (!citations_mode || !citations_mode[0] || strcmp(citations_mode, "off") == 0)
       citation_required_abstain = 0;
    double active_chunk_floor = abstain_enabled ? chunk_floor : 0.0;

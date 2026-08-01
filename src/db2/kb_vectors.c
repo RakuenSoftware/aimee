@@ -1,6 +1,8 @@
 #include "kb_vectors.h"
 #include "pgvec_transport.h"
 
+#include <stddef.h>
+
 const char *pgvec_kb_vector_collection_name(void)
 {
    return PGVEC_KB_TABLE;
@@ -28,8 +30,20 @@ int pgvec_kb_vector_delete_project(const char *project)
    return pgvec_kb_delete_project(project);
 }
 
+int pgvec_kb_vector_delete_current_project(const char *project)
+{
+   return pgvec_kb_delete_current_project(project);
+}
+
 int pgvec_kb_vector_search_project(const char *project, const float *vec, int dim, int limit,
                                    int64_t *ids, double *scores, int max)
 {
-   return pgvec_kb_search(project, vec, dim, limit, ids, scores, max);
+   return pgvec_kb_vector_search_scoped(project, NULL, vec, dim, limit, ids, scores, max);
+}
+
+int pgvec_kb_vector_search_scoped(const char *project, const char *exclude_project,
+                                  const float *vec, int dim, int limit, int64_t *ids,
+                                  double *scores, int max)
+{
+   return pgvec_kb_search_scoped(project, exclude_project, vec, dim, limit, ids, scores, max);
 }

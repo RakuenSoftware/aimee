@@ -1,10 +1,12 @@
 #include <assert.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "db_postgres.h"
 #include "db2.h"
 #include "db2_internal.h"
+#include "db2_pool.h"
 #include "db2/db_schema.h"  /* §2b: db2_dim_read_t / DB2_DIM_* for the dim-read stub */
 #include "../headers/log.h" /* log_level_t for the aimee_log stub below */
 #include <stdarg.h>
@@ -34,6 +36,9 @@ static int g_fail_prepare = 0;
 static int g_schema_present = 1;
 static int g_extension_present = 1;
 static int g_fake_conn = 0;
+static int g_worker_conn = 0;
+static int g_distinct_worker_conn = 0;
+static void *g_last_exec_conn = NULL;
 /* §2a: knob for the db2_embedding_dim_get stub (the recorded kb_meta dim db2_init
  * reads) and a capture of the embed_dim db_apply_schema_postgres actually received
  * — together they exercise the recorded-dim precedence wiring through db2_init. */
@@ -51,13 +56,14 @@ void *aimee_pg_open(const char *conninfo, char *errbuf, size_t errlen)
          snprintf(errbuf, errlen, "%s", "open failed");
       return NULL;
    }
-   return &g_fake_conn;
+   return (g_distinct_worker_conn && g_open_calls > 1) ? (void *)&g_worker_conn
+                                                       : (void *)&g_fake_conn;
 }
 
 void aimee_pg_close(void *pg_conn)
 {
    g_close_calls++;
-   assert(pg_conn == &g_fake_conn);
+   assert(pg_conn == &g_fake_conn || pg_conn == &g_worker_conn);
 }
 
 int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t errlen)
@@ -115,11 +121,10 @@ int db2_embedding_model_record_or_check(void *pg_conn, const char *model_id, con
    return 0;
 }
 
-int db2_reranker_model_record(void *pg_conn, const char *model_id, const char *contract,
-                              char *errbuf, size_t errlen)
+int db2_embedder_serving_record_or_check(void *pg_conn, const char *serving_id, char *errbuf,
+                                         size_t errlen)
 {
-   (void)model_id;
-   (void)contract;
+   (void)serving_id;
    (void)errbuf;
    (void)errlen;
    assert(pg_conn == &g_fake_conn);
@@ -136,7 +141,8 @@ void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
 int aimee_pg_exec(void *pg_conn, const char *sql, char *errbuf, size_t errlen)
 {
    g_exec_calls++;
-   assert(pg_conn == &g_fake_conn);
+   assert(pg_conn == &g_fake_conn || pg_conn == &g_worker_conn);
+   g_last_exec_conn = pg_conn;
    assert(strcmp(sql, "SELECT 1") == 0);
    if (g_fail_exec)
    {
@@ -162,7 +168,7 @@ aimee_pg_stmt_t *aimee_pg_prepare(void *pg_conn, const char *sql, char *errbuf, 
    static aimee_pg_stmt_t index_stmt = {.kind = STMT_INDEX};
 
    g_prepare_calls++;
-   assert(pg_conn == &g_fake_conn);
+   assert(pg_conn == &g_fake_conn || pg_conn == &g_worker_conn);
    if (g_fail_prepare)
    {
       if (errbuf && errlen)
@@ -220,7 +226,8 @@ int aimee_pg_bind_text(aimee_pg_stmt_t *stmt, const char *name, const char *valu
    assert(stmt != NULL);
    assert(stmt->kind == STMT_SCHEMA);
    assert(strcmp(name, "t") == 0);
-   assert(strcmp(value, "memories") == 0);
+   assert(strcmp(value, "memories") == 0 || strcmp(value, "kb_documents") == 0 ||
+          strcmp(value, "kb_async_jobs") == 0);
    return 0;
 }
 
@@ -274,6 +281,8 @@ static void reset_mocks(void)
    g_fail_prepare = 0;
    g_schema_present = 1;
    g_extension_present = 1;
+   g_distinct_worker_conn = 0;
+   g_last_exec_conn = NULL;
    g_recorded_dim = 0;
    g_schema_dim = -1;
    db2_shutdown();
@@ -467,6 +476,75 @@ static void test_health_probe_fails_without_init_or_query_failure(void)
    assert(db2_health_probe(&schema_ok, &have_pg_trgm) == -1);
 }
 
+static void *acquire_from_worker(void *arg)
+{
+   *(void **)arg = db2_conn();
+   return NULL;
+}
+
+typedef struct
+{
+   int rc;
+   int schema_ok;
+   int tables_ok;
+} worker_health_result_t;
+
+static void *probe_from_worker(void *arg)
+{
+   worker_health_result_t *result = arg;
+   int have_pg_trgm = 0;
+   result->rc = db2_health_probe(&result->schema_ok, &have_pg_trgm);
+   if (result->rc == 0 && have_pg_trgm)
+      result->rc = db2_kb_health_probe(&result->tables_ok);
+   return NULL;
+}
+
+static int worker_pool_reset(void *conn)
+{
+   assert(conn == &g_worker_conn);
+   return 0;
+}
+
+static void test_worker_health_probe_never_shares_init_connection(void)
+{
+   reset_mocks();
+   g_distinct_worker_conn = 1;
+   db2_pool_set_test_ops(NULL, NULL, worker_pool_reset);
+   assert(db2_init("postgres://db2.test/aimee") == 0);
+
+   worker_health_result_t result = {0};
+   pthread_t worker;
+   assert(pthread_create(&worker, NULL, probe_from_worker, &result) == 0);
+   assert(pthread_join(worker, NULL) == 0);
+
+   assert(result.rc == 0);
+   assert(result.schema_ok == 1);
+   assert(result.tables_ok == 1);
+   assert(g_open_calls == 2); /* owner plus the worker's lazy pool member */
+   assert(g_last_exec_conn == &g_worker_conn);
+
+   db2_shutdown();
+   db2_pool_set_test_ops(NULL, NULL, NULL);
+}
+
+static void test_worker_acquire_failure_never_shares_init_connection(void)
+{
+   reset_mocks();
+   assert(db2_init("postgres://db2.test/aimee") == 0);
+
+   /* Simulate an unavailable pool and a failed overflow connection. Sharing the
+    * init thread's PGconn here corrupts libpq under concurrent load. */
+   db2_pool_shutdown();
+   g_fail_open = 1;
+   void *worker_conn = &g_fake_conn;
+   pthread_t worker;
+   assert(pthread_create(&worker, NULL, acquire_from_worker, &worker_conn) == 0);
+   pthread_join(worker, NULL);
+   assert(worker_conn == NULL);
+   assert(db2_conn() == &g_fake_conn); /* the owning init thread keeps its handle */
+   db2_shutdown();
+}
+
 int main(void)
 {
    test_init_shutdown_roundtrip();
@@ -478,6 +556,8 @@ int main(void)
    test_health_probe_reports_schema_and_extension();
    test_init_fails_without_pg_trgm();
    test_health_probe_fails_without_init_or_query_failure();
+   test_worker_health_probe_never_shares_init_connection();
+   test_worker_acquire_failure_never_shares_init_connection();
    printf("db2: all tests passed\n");
    return 0;
 }

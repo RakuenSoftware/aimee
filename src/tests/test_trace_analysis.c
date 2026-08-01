@@ -24,6 +24,43 @@ static void insert_trace(int plan_id, int turn, const char *tool_name, const cha
    assert(db1_execution_trace_insert(&row) == 0);
 }
 
+/* Concurrent delegates all wrote into one undifferentiated execution_trace
+ * stream: their turn numbers interleaved and no row could be attributed to the
+ * job that produced it, so any latency read off the table mixed several jobs
+ * together. A trace you cannot attribute is worse than no trace -- it invites a
+ * confident wrong conclusion. Rows must carry their session. */
+static void test_traces_are_attributable_to_their_session(void)
+{
+   db1_execution_trace_insert_row_t a = {.plan_id = 0,
+                                         .session_id = "sess-alpha",
+                                         .turn = 0,
+                                         .direction = "call",
+                                         .content = "",
+                                         .tool_name = "read_file",
+                                         .tool_args = "{}",
+                                         .tool_result = "ok",
+                                         .context_hash = NULL};
+   db1_execution_trace_insert_row_t b = {.plan_id = 0,
+                                         .session_id = "sess-beta",
+                                         .turn = 0,
+                                         .direction = "call",
+                                         .content = "",
+                                         .tool_name = "read_file",
+                                         .tool_args = "{}",
+                                         .tool_result = "ok",
+                                         .context_hash = NULL};
+   assert(db1_execution_trace_insert(&a) == 0);
+   assert(db1_execution_trace_insert(&b) == 0);
+   /* Same turn, same tool, same instant -- separable only by session. */
+   assert(db1_execution_trace_count_for_session("sess-alpha") == 1);
+   assert(db1_execution_trace_count_for_session("sess-beta") == 1);
+   /* An unattributed row (primary session) stays valid and does not collide. */
+   db1_execution_trace_insert_row_t c = a;
+   c.session_id = NULL;
+   assert(db1_execution_trace_insert(&c) == 0);
+   assert(db1_execution_trace_count_for_session("sess-alpha") == 1);
+}
+
 static int count_rows_pg(const char *sql)
 {
    void *conn = db2_conn();
@@ -88,6 +125,7 @@ int main(void)
    test_retry_loops_and_duplicates();
    test_recovery_and_incremental_mining();
    test_common_sequence();
+   test_traces_are_attributable_to_their_session();
    db1_shutdown();
    db2_test_shim_close();
    printf("trace_analysis: all tests passed\n");

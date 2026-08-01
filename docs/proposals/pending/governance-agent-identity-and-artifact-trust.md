@@ -29,7 +29,7 @@ mTLS → `cert:<CN>` (server-applied prefix, sanitized charset), webchat →
 - a networked bearer client is **anonymous** (all-or-nothing server principal,
   pre-mTLS TOFU);
 - the governed-action audit actor is just the coarse role `primary|delegate`
-  (`src/guardrails_action_audit.c:119`);
+  (`src/modules/guardrails/guardrails_action_audit.c:119`);
 - cross-client memory scoping trusts an **unauthenticated env var**
   (`AIMEE_HOOK_CLIENT`), a load-bearing boundary the memory-interception
   close-out explicitly flagged for multi-principal use.
@@ -96,7 +96,7 @@ governance is visible:
 - **configured MCP servers / ingress clients** per config.
 
 Surface it through the pending
-[operator-audit-activity-surface](operator-audit-activity-surface.md) rendering
+[operator-audit-activity-surface](operator-audit-activity-residual.md) rendering
 work. Registry mutations (new trigger rule, new delegate, new plugin) write
 chain rows, and — for autonomous sources — require a `decision_log` entry naming
 the owner, tying fleet membership to the shipped decision-record machinery. The

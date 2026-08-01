@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "delegate_economics.h"
+#include <aimee/delegates/delegate_economics.h>
 
 static void add_agent(agent_config_t *cfg, int idx, const char *name, int tier)
 {

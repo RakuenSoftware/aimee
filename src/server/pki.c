@@ -1,7 +1,7 @@
 /* pki.c: see pki.h. aimee's self-generated client-cert CA + issuance/revocation. */
 #include "pki.h"
 #include "vault_service.h"   /* seal/inject the CA key */
-#include "vault_principal.h" /* vault_principal_cert_sanitize */
+#include "vault_principal.h" /* vault_principal_name_sanitize */
 #include "config.h"          /* config_default_dir */
 #include "db1_internal.h"    /* db1_conn */
 #include "aimee.h"           /* MAX_PATH_LEN */
@@ -26,7 +26,8 @@
 #include <unistd.h>    /* gethostname, close */
 #include <arpa/inet.h> /* inet_pton — classify AIMEE_TLS_EXTRA_SAN entries */
 
-#define PKI_CA_AGENT     "__pki_ca__" /* vault agent name under which the CA key is sealed */
+#define PKI_CA_AGENT     "__pki_ca__"     /* vault agent name under which the CA key is sealed */
+#define PKI_SERVER_AGENT "__pki_server__" /* Vault-only native TLS identity key */
 #define PKI_CA_CN        "aimee-client-CA"
 #define PKI_CA_DAYS      3650 /* CA validity (10y) */
 #define PKI_KEY_PEM_MAX  4000 /* an EC P-256 key PEM is ~240B; cap well under MAX_API_KEY_LEN */
@@ -61,6 +62,20 @@ void pki_reset_for_test(void)
 static void ca_cert_path(char *out, size_t n)
 {
    snprintf(out, n, "%s/tls/client-ca.crt", config_default_dir());
+}
+
+int pki_server_tls_key_load(char *out, size_t cap)
+{
+   if (!out || cap < PKI_KEY_PEM_MAX)
+      return -1;
+   out[0] = '\0';
+   vault_status_t st = vault_service_inject_api_key("", PKI_SERVER_AGENT, out, cap, time(NULL));
+   if (st != VAULT_OK || !out[0])
+   {
+      OPENSSL_cleanse(out, cap);
+      return -1;
+   }
+   return 0;
 }
 
 /* --- DB1 (caller holds no lock; sqlite is serialized) --- */
@@ -447,13 +462,6 @@ void pki_resolve_server_cn(char *out, size_t cap)
    snprintf(out, cap, "aimee-server");
 }
 
-/* Generate a self-signed EC P-256 server certificate at (cert_path, key_path)
- * when neither already exists. Makes native TLS zero-config: with
- * aimee.api.tls_port set but no operator cert present, the server provisions its
- * own rather than fall back to a plaintext-only listener. The channel is secured
- * regardless of trust; clients pin the cert or pass AIMEE_TLS_INSECURE=1. The key
- * is written 0600; the cert (public) is world-readable. Returns 0 if a usable
- * cert exists (already present or freshly written), -1 on failure (logged). */
 void pki_build_server_san(const char *cn, const char *extra, char *out, size_t cap)
 {
    if (!out || cap == 0)
@@ -500,24 +508,172 @@ void pki_build_server_san(const char *cn, const char *extra, char *out, size_t c
    }
 }
 
+/* Native server identity keys are Vault-only. `key_path` below exists solely as
+ * a one-way migration source for pre-policy installs; it is never a destination. */
+static int read_legacy_server_key(const char *path, char *out, size_t cap)
+{
+   if (!path || !path[0] || !out || cap < 2)
+      return -1;
+   int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+   if (fd < 0)
+      return -1;
+   struct stat st;
+   if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size <= 0 || (size_t)st.st_size >= cap)
+   {
+      close(fd);
+      return -1;
+   }
+   size_t off = 0, want = (size_t)st.st_size;
+   while (off < want)
+   {
+      ssize_t n = read(fd, out + off, want - off);
+      if (n < 0 && errno == EINTR)
+         continue;
+      if (n <= 0)
+         break;
+      off += (size_t)n;
+   }
+   close(fd);
+   if (off != want)
+   {
+      OPENSSL_cleanse(out, cap);
+      return -1;
+   }
+   out[off] = '\0';
+   return 0;
+}
+
+static EVP_PKEY *private_key_from_pem(const char *pem)
+{
+   BIO *bio = pem ? BIO_new_mem_buf(pem, -1) : NULL;
+   EVP_PKEY *key = bio ? PEM_read_bio_PrivateKey(bio, NULL, NULL, NULL) : NULL;
+   BIO_free(bio);
+   return key;
+}
+
+static int server_cert_matches_key(const char *cert_path, const char *key_pem)
+{
+   FILE *f = cert_path ? fopen(cert_path, "r") : NULL;
+   X509 *cert = f ? PEM_read_X509(f, NULL, NULL, NULL) : NULL;
+   if (f)
+      fclose(f);
+   EVP_PKEY *key = private_key_from_pem(key_pem);
+   int ok = cert && key && X509_check_private_key(cert, key) == 1;
+   EVP_PKEY_free(key);
+   X509_free(cert);
+   return ok ? 0 : -1;
+}
+
+static int private_keys_equal(const char *a, const char *b)
+{
+   EVP_PKEY *ka = private_key_from_pem(a), *kb = private_key_from_pem(b);
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+   int equal = ka && kb && EVP_PKEY_eq(ka, kb) == 1;
+#else
+   int equal = ka && kb && EVP_PKEY_cmp(ka, kb) == 1;
+#endif
+   EVP_PKEY_free(ka);
+   EVP_PKEY_free(kb);
+   return equal;
+}
+
+static int erase_legacy_server_key(const char *path)
+{
+   int fd = open(path, O_WRONLY | O_CLOEXEC | O_NOFOLLOW);
+   if (fd < 0)
+      return errno == ENOENT ? 0 : -1;
+   struct stat st;
+   if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_nlink != 1 || st.st_size < 0)
+   {
+      close(fd);
+      return -1;
+   }
+   unsigned char zero[512] = {0};
+   off_t left = st.st_size;
+   while (left > 0)
+   {
+      size_t chunk = left > (off_t)sizeof(zero) ? sizeof(zero) : (size_t)left;
+      ssize_t n = write(fd, zero, chunk);
+      if (n < 0 && errno == EINTR)
+         continue;
+      if (n <= 0)
+      {
+         close(fd);
+         return -1;
+      }
+      left -= n;
+   }
+   int rc = fsync(fd) == 0 && ftruncate(fd, 0) == 0 && fsync(fd) == 0 ? 0 : -1;
+   close(fd);
+   if (rc == 0 && unlink(path) != 0)
+      rc = -1;
+   return rc;
+}
+
 int pki_ensure_self_signed_server_cert(const char *cert_path, const char *key_path)
 {
    if (!cert_path || !cert_path[0] || !key_path || !key_path[0])
       return -1;
 
-   /* An existing cert is AUTHORITATIVE: if a usable cert+key are already on disk,
-    * use them and never recreate. Regenerating would silently invalidate every
-    * client that pinned the previous cert (TOFU) — precisely the outage this
-    * guarantee prevents. To apply a changed hostname / AIMEE_TLS_EXTRA_SAN an
-    * operator deletes the cert and restarts (an explicit act), rather than the
-    * server rotating it out from under live clients on a whim (e.g. a container
-    * recreate that shifts gethostname()). */
+   /* An existing public cert is AUTHORITATIVE. Its matching key must already be
+    * in Vault or be present in the one-time legacy migration file. */
    struct stat st;
-   if (stat(cert_path, &st) == 0 && stat(key_path, &st) == 0)
+   if (stat(cert_path, &st) == 0)
    {
-      aimee_log(LOG_DEBUG, "pki", "server TLS cert present at %s; using it (not regenerating)",
-                cert_path);
-      return 0;
+      char vault_key[PKI_KEY_PEM_MAX] = "", legacy_key[PKI_KEY_PEM_MAX] = "";
+      int have_vault = pki_server_tls_key_load(vault_key, sizeof(vault_key)) == 0;
+      int have_legacy = read_legacy_server_key(key_path, legacy_key, sizeof(legacy_key)) == 0;
+      struct stat legacy_st;
+      int legacy_exists = lstat(key_path, &legacy_st) == 0;
+      int rc = -1;
+      if (legacy_exists && !have_legacy)
+         aimee_log(LOG_ERROR, "pki", "legacy server TLS key is not a safe bounded regular file");
+      else if (have_vault && server_cert_matches_key(cert_path, vault_key) != 0)
+         aimee_log(LOG_ERROR, "pki", "Vault-held server TLS key does not match %s", cert_path);
+      else if (have_vault && have_legacy && !private_keys_equal(vault_key, legacy_key))
+         aimee_log(LOG_ERROR, "pki", "legacy server TLS key conflicts with the Vault identity");
+      else if (!have_vault && (!have_legacy || server_cert_matches_key(cert_path, legacy_key) != 0))
+         aimee_log(LOG_ERROR, "pki", "server TLS certificate has no matching Vault key");
+      else
+      {
+         if (!have_vault &&
+             vault_service_set_server(PKI_SERVER_AGENT, VAULT_API_KEY_CRED, legacy_key) != VAULT_OK)
+            aimee_log(LOG_ERROR, "pki", "failed to seal legacy server TLS key into Vault");
+         else
+         {
+            char verify[PKI_KEY_PEM_MAX] = "";
+            if (pki_server_tls_key_load(verify, sizeof(verify)) == 0 &&
+                server_cert_matches_key(cert_path, verify) == 0 &&
+                (!have_legacy || erase_legacy_server_key(key_path) == 0))
+            {
+               rc = 0;
+               aimee_log(LOG_DEBUG, "pki", "server TLS cert present at %s; Vault identity kept",
+                         cert_path);
+            }
+            OPENSSL_cleanse(verify, sizeof(verify));
+         }
+      }
+      OPENSSL_cleanse(vault_key, sizeof(vault_key));
+      OPENSSL_cleanse(legacy_key, sizeof(legacy_key));
+      return rc;
+   }
+
+   /* A key without its public certificate cannot be recovered as an identity.
+    * Remove that orphan before generating anything new so a cleanup failure
+    * cannot leave an on-disk credential alongside a newly sealed Vault key. */
+   struct stat orphan_st;
+   if (lstat(key_path, &orphan_st) == 0)
+   {
+      if (erase_legacy_server_key(key_path) != 0)
+      {
+         aimee_log(LOG_ERROR, "pki", "cannot safely erase orphaned legacy server TLS key");
+         return -1;
+      }
+   }
+   else if (errno != ENOENT)
+   {
+      aimee_log(LOG_ERROR, "pki", "cannot inspect legacy server TLS key path");
+      return -1;
    }
 
    /* No cert yet — provision a self-signed one. The CN prefers an operator-declared
@@ -565,26 +721,22 @@ int pki_ensure_self_signed_server_cert(const char *cert_path, const char *key_pa
       }
       mkdir(dir, 0700);
       int ok = 0;
-      int kfd = open(key_path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-      if (kfd >= 0)
+      if (vault_service_set_server(PKI_SERVER_AGENT, VAULT_API_KEY_CRED, key_pem) == VAULT_OK)
       {
-         FILE *kf = fdopen(kfd, "w");
-         if (kf)
+         char verify[PKI_KEY_PEM_MAX] = "";
+         if (pki_server_tls_key_load(verify, sizeof(verify)) == 0 &&
+             private_keys_equal(key_pem, verify))
          {
-            fputs(key_pem, kf);
-            if (fclose(kf) == 0)
+            FILE *cf = fopen(cert_path, "w");
+            if (cf)
             {
-               FILE *cf = fopen(cert_path, "w");
-               if (cf)
-               {
-                  fputs(cert_pem, cf);
-                  if (fclose(cf) == 0)
-                     ok = 1;
-               }
+               fputs(cert_pem, cf);
+               if (fclose(cf) == 0 && server_cert_matches_key(cert_path, verify) == 0 &&
+                   (access(key_path, F_OK) != 0 || erase_legacy_server_key(key_path) == 0))
+                  ok = 1;
             }
          }
-         else
-            close(kfd);
+         OPENSSL_cleanse(verify, sizeof(verify));
       }
       OPENSSL_cleanse(key_pem, strlen(key_pem));
       free(key_pem);
@@ -596,8 +748,8 @@ int pki_ensure_self_signed_server_cert(const char *cert_path, const char *key_pa
                    cert_path);
       }
       else
-         aimee_log(LOG_ERROR, "pki", "failed to write self-signed server TLS cert to %s/%s",
-                   cert_path, key_path);
+         aimee_log(LOG_ERROR, "pki", "failed to seal server TLS identity or write cert %s",
+                   cert_path);
    }
 done:
    if (key)
@@ -726,7 +878,7 @@ int pki_issue(const char *cn, int validity_days, char *cert_pem, size_t cert_len
               size_t key_len, char *serial_out, size_t serial_len)
 {
    char san[VAULT_CERT_CN_MAX + 1];
-   if (!cn || !vault_principal_cert_sanitize(cn, san, sizeof(san)) || !cert_pem || !key_pem ||
+   if (!cn || !vault_principal_name_sanitize(cn, san, sizeof(san)) || !cert_pem || !key_pem ||
        !serial_out)
       return -1;
    if (validity_days <= 0)
@@ -795,7 +947,7 @@ int pki_sign_csr(const char *cn, int validity_days, const char *csr_pem, char *c
                  size_t cert_len, char *serial_out, size_t serial_len)
 {
    char san[VAULT_CERT_CN_MAX + 1];
-   if (!cn || !vault_principal_cert_sanitize(cn, san, sizeof(san)) || !csr_pem || !cert_pem ||
+   if (!cn || !vault_principal_name_sanitize(cn, san, sizeof(san)) || !csr_pem || !cert_pem ||
        !serial_out || cert_len == 0 || serial_len == 0)
       return -1;
    if (validity_days <= 0)

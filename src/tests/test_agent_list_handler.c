@@ -16,6 +16,7 @@
 #include "cJSON.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
+#include "agent_exec.h"
 
 /* --- capture layer: stub the transport so we can read what the handler sent --- */
 
@@ -42,8 +43,91 @@ int server_send_error(void *conn, const char *message, const char *request_id)
    return 0;
 }
 
+/* The classified variant. handle_agent_probe's argument check calls this one, so
+ * the stub layer has to cover it too or the target does not link. Captured into
+ * the same buffer: these tests assert on the message, and the kind is asserted
+ * where it decides an HTTP status (runtime-web's TestRPCErrorStatus...). */
+char g_last_error_kind[64];
+int server_send_error_kind(void *conn, const char *kind, const char *message,
+                           const char *request_id)
+{
+   (void)conn;
+   (void)request_id;
+   snprintf(g_last_error_kind, sizeof(g_last_error_kind), "%s", kind ? kind : "");
+   snprintf(g_last_error, sizeof(g_last_error), "%s", message ? message : "");
+   return 0;
+}
+
 /* The real handler under test. Declared here to avoid dragging server.h. */
 int handle_agent_list(void *ctx, void *conn, cJSON *req);
+int handle_agent_probe(void *ctx, void *conn, cJSON *req);
+int handle_agent_roles(void *ctx, void *conn, cJSON *req);
+int handle_agent_personas(void *ctx, void *conn, cJSON *req);
+
+/* Probe transport seams. This target intentionally links no production agent
+ * transport: the handler's observable response and backend selection are under
+ * test, while these stubs record the exact executor contract it chose. */
+static int g_cli_calls, g_http_calls, g_execute_failure;
+static agent_t g_executed_agent;
+
+void agent_http_init(void)
+{
+}
+
+int agent_execute(const agent_t *agent, const char *system_prompt, const char *user_prompt,
+                  int max_tokens, double temperature, agent_result_t *out)
+{
+   (void)system_prompt;
+   (void)user_prompt;
+   (void)max_tokens;
+   (void)temperature;
+   g_http_calls++;
+   g_executed_agent = *agent;
+   if (g_execute_failure)
+   {
+      snprintf(out->error, sizeof(out->error), "injected HTTP failure");
+      return -1;
+   }
+   out->response = strdup("ok");
+   out->latency_ms = 11;
+   return 0;
+}
+
+int agent_execute_with_tools_for_role(const agent_t *agent, const agent_network_t *network,
+                                      const char *role, const char *system_prompt,
+                                      const char *user_prompt, int max_tokens, double temperature,
+                                      agent_result_t *out)
+{
+   (void)network;
+   (void)system_prompt;
+   (void)user_prompt;
+   (void)max_tokens;
+   (void)temperature;
+   assert(strcmp(role, "explain") == 0);
+   g_cli_calls++;
+   g_executed_agent = *agent;
+   if (g_execute_failure)
+   {
+      snprintf(out->error, sizeof(out->error), "injected CLI failure");
+      return -1;
+   }
+   out->response = strdup("ok");
+   out->latency_ms = 12;
+   return 0;
+}
+
+int agent_http_get(const char *url, const char *headers, char **response_buf, int timeout_ms)
+{
+   (void)headers;
+   (void)timeout_ms;
+   if (strstr(url, "/models"))
+      *response_buf = strdup("{\"data\":[{\"id\":\"http-model\"}]}");
+   else if (strstr(url, "/slots"))
+      *response_buf = strdup("{\"slots\":3,\"context_window\":8192}");
+   else
+      return -1;
+   return 200;
+}
 
 /* --- helpers --- */
 
@@ -73,6 +157,24 @@ static void reset_capture(void)
       cJSON_Delete(g_last_response);
    g_last_response = NULL;
    g_last_error[0] = '\0';
+   g_cli_calls = g_http_calls = g_execute_failure = 0;
+   memset(&g_executed_agent, 0, sizeof(g_executed_agent));
+}
+
+static cJSON *probe_request(const char *name, int no_run)
+{
+   cJSON *req = cJSON_CreateObject();
+   cJSON *args = cJSON_AddArrayToObject(req, "args");
+   cJSON_AddItemToArray(args, cJSON_CreateString(name));
+   if (no_run)
+      cJSON_AddItemToArray(args, cJSON_CreateString("--no-run"));
+   return req;
+}
+
+static int response_bool(const char *name)
+{
+   cJSON *v = cJSON_GetObjectItemCaseSensitive(g_last_response, name);
+   return cJSON_IsTrue(v);
 }
 
 /* --- tests --- */
@@ -153,6 +255,247 @@ static void test_primary_only_round_trips(void)
    printf("  PASS: primary_only round-trips through the list handler\n");
 }
 
+static void test_cli_probe_uses_backend_executor_and_config_discovery(void)
+{
+   set_home_empty();
+   write_agents("{\"agents\":[{\"name\":\"claude\",\"provider\":\"claude\","
+                "\"backend\":\"tmux-cli\",\"cli_kind\":\"claude\",\"model\":\"opus\","
+                "\"timeout_ms\":600000,\"cli_idle_timeout_ms\":600000,\"session_reuse\":true,"
+                "\"max_parallel\":4,\"context_window\":200000,\"roles\":[\"explain\"]}]}\n");
+   reset_capture();
+   cJSON *req = probe_request("claude", 0);
+   assert(handle_agent_probe(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+
+   assert(g_last_error[0] == '\0' && g_last_response);
+   assert(g_cli_calls == 1 && g_http_calls == 0);
+   assert(g_executed_agent.timeout_ms == 60000);
+   assert(g_executed_agent.cli_idle_timeout_ms == 60000);
+   assert(g_executed_agent.session_reuse == 0);
+   assert(g_executed_agent.force_cli_isolation == 1);
+   assert(response_bool("model_available") && response_bool("execution_ok"));
+   assert(cJSON_GetObjectItem(g_last_response, "models_status")->valueint == 0);
+   assert(strcmp(cJSON_GetObjectItem(g_last_response, "slots_source")->valuestring, "config") == 0);
+   assert(cJSON_GetObjectItem(g_last_response, "model_probe") == NULL);
+   printf("  PASS: CLI probe uses backend executor with bounded isolated policy\n");
+}
+
+static void test_cli_probe_failure_and_no_run_are_observable(void)
+{
+   set_home_empty();
+   write_agents("{\"agents\":[{\"name\":\"cli\",\"provider\":\"x\","
+                "\"backend\":\"provider-cli\",\"model\":\"m\",\"roles\":[\"explain\"]}]}\n");
+   reset_capture();
+   g_execute_failure = 1;
+   cJSON *req = probe_request("cli", 0);
+   assert(handle_agent_probe(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+   assert(g_cli_calls == 1 && !response_bool("execution_ok"));
+   assert(strstr(cJSON_GetObjectItem(g_last_response, "execution_message")->valuestring,
+                 "injected CLI failure"));
+
+   reset_capture();
+   req = probe_request("cli", 1);
+   assert(handle_agent_probe(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+   assert(g_cli_calls == 0 && g_http_calls == 0);
+   assert(cJSON_GetObjectItem(g_last_response, "execution_ok") == NULL);
+   printf("  PASS: CLI probe failure and --no-run response contracts are explicit\n");
+}
+
+static void test_unknown_backend_fails_closed(void)
+{
+   set_home_empty();
+   write_agents("{\"agents\":[{\"name\":\"mystery\",\"provider\":\"x\","
+                "\"backend\":\"telepathy\",\"model\":\"m\",\"roles\":[\"explain\"]}]}\n");
+   reset_capture();
+   cJSON *req = probe_request("mystery", 0);
+   assert(handle_agent_probe(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+   assert(g_cli_calls == 0 && g_http_calls == 0);
+   assert(!response_bool("model_available") && !response_bool("execution_ok"));
+   assert(cJSON_GetObjectItem(g_last_response, "models_status")->valueint == -1);
+   assert(strstr(cJSON_GetObjectItem(g_last_response, "model_probe")->valuestring,
+                 "unsupported agent backend"));
+   printf("  PASS: unknown probe backend fails closed without transport fallback\n");
+}
+
+static void test_http_probe_preserves_discovery_and_plain_execution(void)
+{
+   set_home_empty();
+   write_agents("{\"agents\":[{\"name\":\"http\",\"provider\":\"openai\","
+                "\"endpoint\":\"http://model.test/v1\",\"model\":\"http-model\","
+                "\"auth_type\":\"none\",\"roles\":[\"explain\"]}]}\n");
+   reset_capture();
+   cJSON *req = probe_request("http", 0);
+   assert(handle_agent_probe(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+   assert(g_http_calls == 1 && g_cli_calls == 0);
+   assert(response_bool("model_available") && response_bool("execution_ok"));
+   assert(cJSON_GetObjectItem(g_last_response, "models_status")->valueint == 200);
+   assert(strcmp(cJSON_GetObjectItem(g_last_response, "slots_source")->valuestring, "probe") == 0);
+   assert(cJSON_GetObjectItem(g_last_response, "detected_slots")->valueint == 3);
+   printf("  PASS: HTTP probe preserves model/slot discovery and plain execution\n");
+}
+
+/* The SERVER projection is what the GUI reads. It must carry the same identity
+ * and pricing the CLI shows, or the two disagree about what an agent is and what
+ * it costs. `provider` alone is ambiguous for a third-party model served over
+ * another vendor's API, so catalog_provider and a canonical provider:model ref
+ * are both required. */
+static void test_list_exposes_catalog_identity_and_pricing(void)
+{
+   set_home_empty();
+   write_agents("{\"agents\":["
+                /* Anthropic WIRE format, MiniMax VENDOR. */
+                "{\"name\":\"MiniMax-M3\",\"provider\":\"anthropic\","
+                "\"endpoint\":\"https://api.minimax.io/anthropic\","
+                "\"model\":\"MiniMax-M3\",\"auth_type\":\"bearer\","
+                "\"api_key\":\"k\",\"roles\":[\"all\"]},"
+                /* Operator-priced agent: the override must win over the catalog. */
+                "{\"name\":\"priced\",\"provider\":\"anthropic\","
+                "\"endpoint\":\"https://api.anthropic.com\","
+                "\"model\":\"claude-opus-4-8\",\"auth_type\":\"bearer\","
+                "\"api_key\":\"k\",\"price_in_per_mtok\":1.5,"
+                "\"price_out_per_mtok\":2.5,\"roles\":[\"all\"]}"
+                "]}\n");
+   reset_capture();
+
+   assert(handle_agent_list(NULL, NULL, NULL) == 0);
+   assert(g_last_error[0] == '\0' && g_last_response != NULL);
+   cJSON *agents = cJSON_GetObjectItemCaseSensitive(g_last_response, "agents");
+   assert(cJSON_IsArray(agents) && cJSON_GetArraySize(agents) == 2);
+
+   cJSON *mm = cJSON_GetArrayItem(agents, 0);
+   /* Wire provider is untouched; catalog identity is the vendor. */
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(mm, "provider")),
+                 "anthropic") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(mm, "catalog_provider")),
+                 "minimax") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(mm, "model_ref")),
+                 "minimax:MiniMax-M3") == 0);
+
+   cJSON *pr = cJSON_GetArrayItem(agents, 1);
+   cJSON *pin = cJSON_GetObjectItemCaseSensitive(pr, "price_base_in_per_mtok");
+   cJSON *pout = cJSON_GetObjectItemCaseSensitive(pr, "price_base_out_per_mtok");
+   assert(cJSON_IsNumber(pin) && pin->valuedouble == 1.5);
+   assert(cJSON_IsNumber(pout) && pout->valuedouble == 2.5);
+   cJSON *ovr = cJSON_GetObjectItemCaseSensitive(pr, "price_overridden");
+   assert(cJSON_IsBool(ovr) && cJSON_IsTrue(ovr));
+
+   /* The unpriced-override agent reports the catalog rate as NOT overridden. */
+   cJSON *ovr0 = cJSON_GetObjectItemCaseSensitive(mm, "price_overridden");
+   assert(cJSON_IsBool(ovr0) && !cJSON_IsTrue(ovr0));
+
+   printf("  PASS: list exposes catalog identity and pricing\n");
+}
+
+/* Read the roles array off the captured response. */
+static int response_has_role(const char *role)
+{
+   cJSON *roles = cJSON_GetObjectItemCaseSensitive(g_last_response, "roles");
+   cJSON *item = NULL;
+   cJSON_ArrayForEach(item, roles) if (cJSON_IsString(item) &&
+                                       strcmp(item->valuestring, role) == 0) return 1;
+   return 0;
+}
+
+static cJSON *args_request(const char *a, const char *b)
+{
+   cJSON *req = cJSON_CreateObject();
+   cJSON *args = cJSON_AddArrayToObject(req, "args");
+   cJSON_AddItemToArray(args, cJSON_CreateString(a));
+   if (b)
+      cJSON_AddItemToArray(args, cJSON_CreateString(b));
+   return req;
+}
+
+/* `agent roles <name>` with no csv reads as a query and was the only way to ask
+ * what an agent's roles were — but it RESET the agent to the default list,
+ * silently dropping every role outside it (notably the `all` wildcard). Run
+ * against a live appliance it destroyed operator configuration with no output
+ * saying so. Omitting the csv must now report and write nothing; a reset has to
+ * be named explicitly. */
+static void test_roles_without_csv_reports_and_does_not_write(void)
+{
+   set_home_empty();
+   write_agents("{\"agents\":[{\"name\":\"a1\",\"provider\":\"anthropic\",\"model\":\"m\","
+                "\"roles\":[\"code\",\"diagnose\",\"all\"]}]}\n");
+   reset_capture();
+
+   cJSON *req = args_request("a1", NULL);
+   assert(handle_agent_roles(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+
+   assert(g_last_error[0] == '\0');
+   assert(g_last_response != NULL);
+   /* Reported verbatim... */
+   assert(response_has_role("code"));
+   assert(response_has_role("diagnose"));
+   assert(response_has_role("all"));
+   /* ...and NOT replaced by the default set. */
+   assert(!response_has_role("summarize"));
+
+   /* Nothing was persisted: re-reading still shows the operator's roles. */
+   reset_capture();
+   assert(handle_agent_list(NULL, NULL, NULL) == 0);
+   cJSON *agents = cJSON_GetObjectItemCaseSensitive(g_last_response, "agents");
+   cJSON *a1 = cJSON_GetArrayItem(agents, 0);
+   cJSON *roles = cJSON_GetObjectItemCaseSensitive(a1, "roles");
+   assert(cJSON_GetArraySize(roles) == 3);
+   printf("  PASS: agent roles with no csv reports and does not write\n");
+}
+
+/* An explicit csv still sets, and `--reset` still restores the default set. */
+static void test_roles_csv_sets_and_reset_restores_defaults(void)
+{
+   set_home_empty();
+   write_agents("{\"agents\":[{\"name\":\"a1\",\"provider\":\"anthropic\",\"model\":\"m\","
+                "\"roles\":[\"code\"]}]}\n");
+   reset_capture();
+
+   cJSON *req = args_request("a1", "review,validate,all");
+   assert(handle_agent_roles(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+   assert(g_last_error[0] == '\0');
+   assert(response_has_role("review") && response_has_role("validate") && response_has_role("all"));
+   assert(!response_has_role("code"));
+
+   reset_capture();
+   req = args_request("a1", "--reset");
+   assert(handle_agent_roles(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+   assert(g_last_error[0] == '\0');
+   assert(response_has_role("summarize") && response_has_role("code"));
+   /* --reset is the default set, which does not include the wildcard. */
+   assert(!response_has_role("all"));
+   printf("  PASS: agent roles csv sets, --reset restores defaults\n");
+}
+
+static void test_personas_without_csv_reports_and_does_not_write(void)
+{
+   set_home_empty();
+   write_agents("{\"agents\":[{\"name\":\"a1\",\"provider\":\"anthropic\",\"model\":\"m\","
+                "\"roles\":[\"code\"],\"personas\":[\"engineer\",\"qa\"]}]}\n");
+   reset_capture();
+
+   cJSON *req = args_request("a1", NULL);
+   assert(handle_agent_personas(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+
+   assert(g_last_error[0] == '\0');
+   cJSON *personas = cJSON_GetObjectItemCaseSensitive(g_last_response, "personas");
+   assert(cJSON_GetArraySize(personas) == 2);
+
+   /* Not flattened to ["all"] on disk either. */
+   reset_capture();
+   assert(handle_agent_list(NULL, NULL, NULL) == 0);
+   cJSON *agents = cJSON_GetObjectItemCaseSensitive(g_last_response, "agents");
+   cJSON *a1 = cJSON_GetArrayItem(agents, 0);
+   assert(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(a1, "personas")) == 2);
+   printf("  PASS: agent personas with no csv reports and does not write\n");
+}
+
 int main(void)
 {
    printf("agent_list_handler:\n");
@@ -160,6 +503,14 @@ int main(void)
    test_empty_config_is_ok_with_empty_array();
    test_populated_config_lists_agents();
    test_primary_only_round_trips();
+   test_cli_probe_uses_backend_executor_and_config_discovery();
+   test_cli_probe_failure_and_no_run_are_observable();
+   test_unknown_backend_fails_closed();
+   test_http_probe_preserves_discovery_and_plain_execution();
+   test_list_exposes_catalog_identity_and_pricing();
+   test_roles_without_csv_reports_and_does_not_write();
+   test_roles_csv_sets_and_reset_restores_defaults();
+   test_personas_without_csv_reports_and_does_not_write();
    printf("all agent_list_handler tests passed\n");
    return 0;
 }

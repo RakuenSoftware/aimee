@@ -1,18 +1,34 @@
 /* kb_client_mtls.c: aimee-server's distributed-mode mTLS transport to a remote
  * aimee-kb. (distributed-mode-auth proposal, client integration.)
  *
- * When AIMEE_KB_CONN holds an `aimee://` connection string, the server enrolls
+ * When the server Vault holds an `AIMEE_KB_CONN` `aimee://` connection string,
+ * the server enrolls
  * once (kb_tls_enroll: TOFU-pin the CA by fingerprint, generate a keypair + CSR,
- * redeem the token for a client cert) and then routes its /v1 kb calls over
- * mutual TLS with that identity. Selected at the top of the kb_client v1
- * transport (kb_client.c) ahead of the HTTP-URL and Unix-socket transports. */
+ * redeem the token for a client cert), persists that identity atomically under
+ * AIMEE_HOME, and then routes its /v1 kb calls over mutual TLS. Persistence is
+ * mandatory because the enrollment token is single-use: keeping the certificate
+ * only in process memory makes the next container restart permanently lose KB.
+ * Selected at the top of the kb_client v1 transport (kb_client.c) ahead of the
+ * HTTP-URL and Unix-socket transports. */
 #include "kb_client_mtls.h"
 #include "kb_enroll.h" /* connection-string parse (for host/port) */
-#include "kb_tls.h"    /* kb_tls_enroll / kb_tls_client_request */
+#include "kb_pki.h"
+#include "kb_tls.h" /* kb_tls_enroll / kb_tls_client_request */
+#include "config.h"
+#include "cJSON.h"
+#include "runtime_secret.h"
 
 #include <pthread.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <math.h>
+#include <openssl/crypto.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+#include <sys/stat.h>
+#include <time.h>
+#include <unistd.h>
 
 /* The enrolled identity, established once on first use. Immutable after init
  * (guarded by g_lock during enrollment), so request-time reads need no lock. */
@@ -23,19 +39,498 @@ static int g_port = 0;
 static char g_ca[8192];
 static char g_cert[8192];
 static char g_key[8192];
+static char g_identity_path_override[1024];
+
+#define KB_CLIENT_IDENTITY_MAX 32768
+
+static int identity_path(char *out, size_t cap)
+{
+   const char *base = config_default_dir();
+   int n = g_identity_path_override[0]
+               ? snprintf(out, cap, "%s", g_identity_path_override)
+               : snprintf(out, cap, "%s/kb-client-identity.json", base ? base : "");
+   return n > 0 && (size_t)n < cap && out[0] == '/' ? 0 : -1;
+}
+
+static int identity_material_valid(const char *ca, const char *cert, const char *key)
+{
+   if (!ca || !cert || !key || !ca[0] || !cert[0] || !key[0] ||
+       kb_pki_verify_client_cert(ca, cert) != 1)
+      return 0;
+   SSL_CTX *ctx = kb_tls_client_ctx(ca, cert, key);
+   if (!ctx)
+      return 0;
+   SSL_CTX_free(ctx);
+   return kb_tls_cert_expires_within(cert, 0) == 0;
+}
+
+static int identity_matches_connection(const kb_enroll_conn_t *connection, const char *ca)
+{
+   char fingerprint[KB_PKI_FP_HEX];
+   return connection && ca && kb_pki_ca_fingerprint(ca, fingerprint, sizeof(fingerprint)) == 0 &&
+          strcasecmp(fingerprint, connection->ca_sha256) == 0;
+}
+
+typedef struct
+{
+   int version;
+   char host[256];
+   int port;
+   char server_id[128];
+   long long team_id;
+} identity_metadata_t;
+
+static int identity_load(const kb_enroll_conn_t *connection, char *ca, size_t ca_cap, char *cert,
+                         size_t cert_cap, char *key, size_t key_cap, identity_metadata_t *metadata)
+{
+   if (metadata)
+      memset(metadata, 0, sizeof(*metadata));
+   char path[1024];
+   if (identity_path(path, sizeof(path)) != 0)
+      return -1;
+   int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+   struct stat st;
+   if (fd < 0 || fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_uid != geteuid() ||
+       st.st_nlink != 1 || (st.st_mode & (S_IRWXG | S_IRWXO)) || st.st_size < 1 ||
+       st.st_size >= KB_CLIENT_IDENTITY_MAX)
+   {
+      if (fd >= 0)
+         close(fd);
+      return -1;
+   }
+   char *raw = calloc(1, (size_t)st.st_size + 1);
+   size_t used = 0;
+   while (raw && used < (size_t)st.st_size)
+   {
+      ssize_t n = read(fd, raw + used, (size_t)st.st_size - used);
+      if (n <= 0)
+         break;
+      used += (size_t)n;
+   }
+   char extra = 0;
+   ssize_t trailing = raw ? read(fd, &extra, 1) : -1;
+   close(fd);
+   if (!raw || used != (size_t)st.st_size || trailing != 0 || memchr(raw, '\0', used))
+   {
+      if (raw)
+      {
+         OPENSSL_cleanse(raw, (size_t)st.st_size + 1);
+         free(raw);
+      }
+      return -1;
+   }
+   const char *parse_end = NULL;
+   cJSON *j = cJSON_ParseWithLengthOpts(raw, used + 1, &parse_end, 1);
+   int parsed_all = parse_end == raw + used;
+   OPENSSL_cleanse(raw, (size_t)st.st_size + 1);
+   free(raw);
+   cJSON *version = j ? cJSON_GetObjectItemCaseSensitive(j, "version") : NULL;
+   cJSON *jca = j ? cJSON_GetObjectItemCaseSensitive(j, "ca") : NULL;
+   cJSON *jcert = j ? cJSON_GetObjectItemCaseSensitive(j, "cert") : NULL;
+   cJSON *jkey = j ? cJSON_GetObjectItemCaseSensitive(j, "key") : NULL;
+   cJSON *state = j ? cJSON_GetObjectItemCaseSensitive(j, "state") : NULL;
+   cJSON *host = j ? cJSON_GetObjectItemCaseSensitive(j, "host") : NULL;
+   cJSON *port = j ? cJSON_GetObjectItemCaseSensitive(j, "port") : NULL;
+   cJSON *server_id = j ? cJSON_GetObjectItemCaseSensitive(j, "server_id") : NULL;
+   cJSON *team_id = j ? cJSON_GetObjectItemCaseSensitive(j, "team_id") : NULL;
+   int is_v1 = cJSON_IsNumber(version) && version->valuedouble == 1;
+   int is_v2 = cJSON_IsNumber(version) && version->valuedouble == 2 && cJSON_IsString(state) &&
+               strcmp(state->valuestring, "ready") == 0 && cJSON_IsString(host) &&
+               host->valuestring[0] &&
+               strlen(host->valuestring) < sizeof(((identity_metadata_t *)0)->host) &&
+               cJSON_IsNumber(port) && port->valuedouble >= 1 && port->valuedouble <= 65535 &&
+               floor(port->valuedouble) == port->valuedouble && cJSON_IsString(server_id) &&
+               server_id->valuestring[0] &&
+               strlen(server_id->valuestring) < sizeof(((identity_metadata_t *)0)->server_id) &&
+               cJSON_IsNumber(team_id) && team_id->valuedouble >= 1 &&
+               team_id->valuedouble <= 9007199254740991.0 &&
+               floor(team_id->valuedouble) == team_id->valuedouble;
+   int endpoint_ok = is_v1 ? connection != NULL
+                           : (!connection || (strcmp(connection->host, host->valuestring) == 0 &&
+                                              connection->port == (int)port->valuedouble));
+   int ok = parsed_all && (is_v1 || is_v2) && endpoint_ok && cJSON_IsString(jca) &&
+            cJSON_IsString(jcert) && cJSON_IsString(jkey) && strlen(jca->valuestring) < ca_cap &&
+            strlen(jcert->valuestring) < cert_cap && strlen(jkey->valuestring) < key_cap &&
+            (!connection || identity_matches_connection(connection, jca->valuestring)) &&
+            identity_material_valid(jca->valuestring, jcert->valuestring, jkey->valuestring);
+   if (ok)
+   {
+      snprintf(ca, ca_cap, "%s", jca->valuestring);
+      snprintf(cert, cert_cap, "%s", jcert->valuestring);
+      snprintf(key, key_cap, "%s", jkey->valuestring);
+      if (metadata)
+      {
+         metadata->version = is_v2 ? 2 : 1;
+         if (is_v2)
+         {
+            snprintf(metadata->host, sizeof(metadata->host), "%s", host->valuestring);
+            metadata->port = (int)port->valuedouble;
+            snprintf(metadata->server_id, sizeof(metadata->server_id), "%s",
+                     server_id->valuestring);
+            metadata->team_id = (long long)team_id->valuedouble;
+         }
+      }
+   }
+   if (cJSON_IsString(jkey))
+      OPENSSL_cleanse(jkey->valuestring, strlen(jkey->valuestring));
+   cJSON_Delete(j);
+   return ok ? 0 : -1;
+}
+
+static int identity_save(const char *ca, const char *cert, const char *key)
+{
+   char path[1024], temporary[1080];
+   if (identity_path(path, sizeof(path)) != 0)
+      return -1;
+   int tn = snprintf(temporary, sizeof(temporary), "%s.tmp.%ld", path, (long)getpid());
+   if (tn <= 0 || (size_t)tn >= sizeof(temporary))
+      return -1;
+   cJSON *j = cJSON_CreateObject();
+   if (!j || !cJSON_AddNumberToObject(j, "version", 1) || !cJSON_AddStringToObject(j, "ca", ca) ||
+       !cJSON_AddStringToObject(j, "cert", cert) || !cJSON_AddStringToObject(j, "key", key))
+   {
+      cJSON_Delete(j);
+      return -1;
+   }
+   char *raw = cJSON_PrintUnformatted(j);
+   cJSON *jkey = cJSON_GetObjectItemCaseSensitive(j, "key");
+   if (cJSON_IsString(jkey))
+      OPENSSL_cleanse(jkey->valuestring, strlen(jkey->valuestring));
+   cJSON_Delete(j);
+   if (!raw)
+      return -1;
+   size_t length = strlen(raw);
+   (void)unlink(temporary);
+   int fd = open(temporary, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+   size_t used = 0;
+   while (fd >= 0 && used < length)
+   {
+      ssize_t n = write(fd, raw + used, length - used);
+      if (n <= 0)
+         break;
+      used += (size_t)n;
+   }
+   int ok = fd >= 0 && used == length && fsync(fd) == 0 && fchmod(fd, 0600) == 0;
+   if (fd >= 0)
+   {
+      if (close(fd) != 0)
+         ok = 0;
+      fd = -1;
+   }
+   OPENSSL_cleanse(raw, length);
+   free(raw);
+   if (!ok || rename(temporary, path) != 0)
+   {
+      (void)unlink(temporary);
+      return -1;
+   }
+   return 0;
+}
+
+#define KB_POOL_TOTAL_MAX   8
+#define KB_POOL_IDLE_MAX    2
+#define KB_POOL_WAITERS_MAX 64
+#define KB_POOL_IDLE_SECS   30
+#define KB_POOL_AGE_SECS    (10 * 60)
+#define KB_POOL_REQ_MAX     1000
+
+typedef struct
+{
+   kb_tls_client_conn_t *conn;
+   unsigned generation;
+   unsigned requests;
+   time_t created_at;
+   time_t last_used_at;
+   int busy;
+} kb_pool_entry_t;
+
+static kb_pool_entry_t g_pool[KB_POOL_TOTAL_MAX];
+static pthread_cond_t g_pool_cv = PTHREAD_COND_INITIALIZER;
+static unsigned g_identity_generation = 1;
+static int g_pool_waiters = 0;
+static int g_pool_connecting = 0;
+static unsigned long g_pool_borrow_exhausted_total = 0;
+static SSL_CTX *g_pool_ctx = NULL;
+static SSL_SESSION *g_pool_session = NULL;
+static unsigned long g_pool_handshakes_total = 0;
+static unsigned long g_pool_resumed_total = 0;
+static int g_pool_enabled_last = -1;
+
+static void pool_close_entry_locked(kb_pool_entry_t *entry);
+
+void kb_client_mtls_reset_for_test(void)
+{
+   pthread_mutex_lock(&g_lock);
+   for (int i = 0; i < KB_POOL_TOTAL_MAX; i++)
+      if (g_pool[i].conn)
+         pool_close_entry_locked(&g_pool[i]);
+   SSL_CTX_free(g_pool_ctx);
+   g_pool_ctx = NULL;
+   SSL_SESSION_free(g_pool_session);
+   g_pool_session = NULL;
+   g_identity_generation++;
+   g_enrolled = 0;
+   g_host[0] = '\0';
+   g_port = 0;
+   g_ca[0] = '\0';
+   g_cert[0] = '\0';
+   OPENSSL_cleanse(g_key, sizeof(g_key));
+   pthread_cond_broadcast(&g_pool_cv);
+   pthread_mutex_unlock(&g_lock);
+}
+
+void kb_client_mtls_set_identity_path_for_test(const char *absolute_path)
+{
+   pthread_mutex_lock(&g_lock);
+   snprintf(g_identity_path_override, sizeof(g_identity_path_override), "%s",
+            absolute_path ? absolute_path : "");
+   pthread_mutex_unlock(&g_lock);
+}
+
+static int pool_feature_enabled(void)
+{
+   const char *override = getenv("AIMEE_TRANSPORT_KB_POOL_ENABLED");
+   if (override)
+      return strcmp(override, "1") == 0 || strcasecmp(override, "true") == 0;
+   pthread_mutex_lock(&g_lock);
+   int enabled = g_pool_enabled_last == 1;
+   pthread_mutex_unlock(&g_lock);
+   return enabled;
+}
+
+/* Apply a hot flag transition exactly once. Disabling closes idle entries now;
+ * borrowed entries carry the old generation and drain when returned. */
+static void pool_sync_enabled(int enabled)
+{
+   pthread_mutex_lock(&g_lock);
+   if (g_pool_enabled_last != enabled)
+   {
+      g_pool_enabled_last = enabled;
+      if (!enabled)
+      {
+         g_identity_generation++;
+         SSL_CTX_free(g_pool_ctx);
+         g_pool_ctx = NULL;
+         SSL_SESSION_free(g_pool_session);
+         g_pool_session = NULL;
+         for (int i = 0; i < KB_POOL_TOTAL_MAX; i++)
+            if (g_pool[i].conn && !g_pool[i].busy)
+               pool_close_entry_locked(&g_pool[i]);
+         pthread_cond_broadcast(&g_pool_cv);
+      }
+   }
+   pthread_mutex_unlock(&g_lock);
+}
+
+static void pool_config_reapplier(void)
+{
+   pool_sync_enabled(config_transport_kb_pool_enabled());
+}
+
+void kb_client_mtls_pool_register_reload(void)
+{
+   pool_sync_enabled(config_transport_kb_pool_enabled());
+   config_reload_register_reapplier(pool_config_reapplier);
+}
+
+static time_t monotonic_seconds(void)
+{
+   struct timespec ts;
+   return clock_gettime(CLOCK_MONOTONIC, &ts) == 0 ? ts.tv_sec : 0;
+}
+
+static void pool_close_entry_locked(kb_pool_entry_t *entry)
+{
+   kb_tls_client_conn_t *conn = entry->conn;
+   memset(entry, 0, sizeof(*entry));
+   /* SSL shutdown is bounded by the socket deadline. Keeping this under the
+    * lock makes entry ownership simple; the pool contains at most eight. */
+   kb_tls_client_conn_close(conn);
+}
+
+static void pool_expire_idle_locked(time_t now)
+{
+   for (int i = 0; i < KB_POOL_TOTAL_MAX; i++)
+      if (g_pool[i].conn && !g_pool[i].busy &&
+          (g_pool[i].generation != g_identity_generation ||
+           now - g_pool[i].last_used_at >= KB_POOL_IDLE_SECS ||
+           now - g_pool[i].created_at >= KB_POOL_AGE_SECS || g_pool[i].requests >= KB_POOL_REQ_MAX))
+         pool_close_entry_locked(&g_pool[i]);
+}
+
+static kb_pool_entry_t *pool_borrow(int *pool_error)
+{
+   if (pool_error)
+      *pool_error = -1;
+   pthread_mutex_lock(&g_lock);
+   for (;;)
+   {
+      time_t now = monotonic_seconds();
+      pool_expire_idle_locked(now);
+      int total = 0;
+      for (int i = 0; i < KB_POOL_TOTAL_MAX; i++)
+      {
+         if (g_pool[i].conn)
+         {
+            total++;
+            if (!g_pool[i].busy && g_pool[i].generation == g_identity_generation)
+            {
+               g_pool[i].busy = 1;
+               pthread_mutex_unlock(&g_lock);
+               return &g_pool[i];
+            }
+         }
+      }
+
+      if (total + g_pool_connecting < KB_POOL_TOTAL_MAX && !g_pool_connecting)
+      {
+         char host[sizeof(g_host)], ca[sizeof(g_ca)], cert[sizeof(g_cert)], key[sizeof(g_key)];
+         int port = g_port;
+         unsigned generation = g_identity_generation;
+         snprintf(host, sizeof(host), "%s", g_host);
+         snprintf(ca, sizeof(ca), "%s", g_ca);
+         snprintf(cert, sizeof(cert), "%s", g_cert);
+         snprintf(key, sizeof(key), "%s", g_key);
+         if (!g_pool_ctx)
+            g_pool_ctx = kb_tls_client_ctx(ca, cert, key);
+         SSL_CTX *ctx = g_pool_ctx;
+         if (!ctx || SSL_CTX_up_ref(ctx) != 1)
+         {
+            pthread_mutex_unlock(&g_lock);
+            return NULL;
+         }
+         SSL_SESSION *session = g_pool_session;
+         if (session && SSL_SESSION_up_ref(session) != 1)
+            session = NULL;
+         g_pool_connecting = 1;
+         pthread_mutex_unlock(&g_lock);
+         kb_tls_client_conn_t *conn = kb_tls_client_conn_open_session(host, port, ctx, session);
+         SSL_SESSION_free(session);
+         SSL_CTX_free(ctx);
+         pthread_mutex_lock(&g_lock);
+         g_pool_connecting = 0;
+         g_pool_handshakes_total++;
+         if (kb_tls_client_conn_session_reused(conn))
+            g_pool_resumed_total++;
+         pthread_cond_broadcast(&g_pool_cv);
+         if (!conn || generation != g_identity_generation)
+         {
+            kb_tls_client_conn_close(conn);
+            pthread_mutex_unlock(&g_lock);
+            return NULL;
+         }
+         for (int i = 0; i < KB_POOL_TOTAL_MAX; i++)
+            if (!g_pool[i].conn)
+            {
+               g_pool[i].conn = conn;
+               g_pool[i].generation = generation;
+               g_pool[i].created_at = monotonic_seconds();
+               g_pool[i].last_used_at = g_pool[i].created_at;
+               g_pool[i].busy = 1;
+               pthread_mutex_unlock(&g_lock);
+               return &g_pool[i];
+            }
+         kb_tls_client_conn_close(conn);
+         pthread_mutex_unlock(&g_lock);
+         return NULL;
+      }
+
+      if (g_pool_waiters >= KB_POOL_WAITERS_MAX)
+      {
+         g_pool_borrow_exhausted_total++;
+         if (pool_error)
+            *pool_error = KB_CLIENT_ERR_POOL_EXHAUSTED;
+         pthread_mutex_unlock(&g_lock);
+         return NULL;
+      }
+      struct timespec deadline;
+      clock_gettime(CLOCK_REALTIME, &deadline);
+      deadline.tv_sec += 30;
+      g_pool_waiters++;
+      int wait_rc = pthread_cond_timedwait(&g_pool_cv, &g_lock, &deadline);
+      g_pool_waiters--;
+      if (wait_rc == ETIMEDOUT)
+      {
+         g_pool_borrow_exhausted_total++;
+         if (pool_error)
+            *pool_error = KB_CLIENT_ERR_POOL_EXHAUSTED;
+         pthread_mutex_unlock(&g_lock);
+         return NULL;
+      }
+   }
+}
+
+static void pool_return(kb_pool_entry_t *entry, int reusable)
+{
+   pthread_mutex_lock(&g_lock);
+   entry->requests++;
+   entry->last_used_at = monotonic_seconds();
+   if (reusable)
+   {
+      SSL_SESSION *session = kb_tls_client_conn_get1_session(entry->conn);
+      if (session)
+      {
+         SSL_SESSION_free(g_pool_session);
+         g_pool_session = session;
+      }
+   }
+   int idle = 0;
+   for (int i = 0; i < KB_POOL_TOTAL_MAX; i++)
+      if (g_pool[i].conn && !g_pool[i].busy)
+         idle++;
+   if (!reusable || entry->generation != g_identity_generation ||
+       entry->requests >= KB_POOL_REQ_MAX ||
+       entry->last_used_at - entry->created_at >= KB_POOL_AGE_SECS || idle >= KB_POOL_IDLE_MAX)
+      pool_close_entry_locked(entry);
+   else
+      entry->busy = 0;
+   pthread_cond_signal(&g_pool_cv);
+   pthread_mutex_unlock(&g_lock);
+}
 
 int kb_client_mtls_configured(void)
 {
-   const char *c = getenv("AIMEE_KB_CONN");
-   return (c && c[0]) ? 1 : 0;
+   char connection[4096];
+   int have_connection = runtime_secret_get("AIMEE_KB_CONN", connection, sizeof(connection));
+   OPENSSL_cleanse(connection, sizeof(connection));
+   if (have_connection)
+      return 1;
+   char ca[sizeof(g_ca)], cert[sizeof(g_cert)], key[sizeof(g_key)];
+   identity_metadata_t metadata;
+   int configured =
+       identity_load(NULL, ca, sizeof(ca), cert, sizeof(cert), key, sizeof(key), &metadata) == 0 &&
+       metadata.version == 2;
+   OPENSSL_cleanse(key, sizeof(key));
+   return configured;
 }
 
-/* Enroll once: parse AIMEE_KB_CONN, then kb_tls_enroll into the static identity.
- * Returns 0 if enrolled (already or now), -1 on failure. */
+int kb_client_mtls_managed_metadata(char *server_id_out, size_t server_id_cap,
+                                    long long *team_id_out)
+{
+   if (server_id_out && server_id_cap)
+      server_id_out[0] = '\0';
+   if (team_id_out)
+      *team_id_out = 0;
+   char ca[sizeof(g_ca)], cert[sizeof(g_cert)], key[sizeof(g_key)];
+   identity_metadata_t metadata;
+   int ok =
+       identity_load(NULL, ca, sizeof(ca), cert, sizeof(cert), key, sizeof(key), &metadata) == 0 &&
+       metadata.version == 2 && server_id_out && server_id_cap > strlen(metadata.server_id) &&
+       team_id_out;
+   OPENSSL_cleanse(key, sizeof(key));
+   if (!ok)
+      return 0;
+   snprintf(server_id_out, server_id_cap, "%s", metadata.server_id);
+   *team_id_out = metadata.team_id;
+   return 1;
+}
+
+/* Load the durable identity or enroll once and persist it before use. The
+ * connection string remains configured after its token is consumed, so a
+ * restart can recover the certificate while still taking host/port + CA pin
+ * from the operator-supplied value. */
 static int ensure_enrolled(void)
 {
-   if (g_enrolled)
-      return 0;
    int rc = -1;
    pthread_mutex_lock(&g_lock);
    if (g_enrolled)
@@ -43,16 +538,44 @@ static int ensure_enrolled(void)
       pthread_mutex_unlock(&g_lock);
       return 0;
    }
-   const char *conn = getenv("AIMEE_KB_CONN");
+   char connection[4096];
+   int have_connection = runtime_secret_get("AIMEE_KB_CONN", connection, sizeof(connection));
+   const char *conn = have_connection ? connection : NULL;
    kb_enroll_conn_t pc;
-   if (conn && conn[0] && kb_enroll_conn_string_parse(conn, &pc) == 0 &&
-       kb_tls_enroll(conn, g_ca, sizeof(g_ca), g_cert, sizeof(g_cert), g_key, sizeof(g_key)) == 0)
+   if (conn && conn[0] && kb_enroll_conn_string_parse(conn, &pc) == 0)
    {
-      snprintf(g_host, sizeof(g_host), "%s", pc.host);
-      g_port = pc.port;
-      g_enrolled = 1;
-      rc = 0;
+      if (identity_load(&pc, g_ca, sizeof(g_ca), g_cert, sizeof(g_cert), g_key, sizeof(g_key),
+                        NULL) == 0 ||
+          (kb_tls_enroll(conn, g_ca, sizeof(g_ca), g_cert, sizeof(g_cert), g_key, sizeof(g_key)) ==
+               0 &&
+           identity_save(g_ca, g_cert, g_key) == 0))
+      {
+         snprintf(g_host, sizeof(g_host), "%s", pc.host);
+         g_port = pc.port;
+         g_enrolled = 1;
+         rc = 0;
+      }
    }
+   else if (!conn || !conn[0])
+   {
+      identity_metadata_t metadata;
+      if (identity_load(NULL, g_ca, sizeof(g_ca), g_cert, sizeof(g_cert), g_key, sizeof(g_key),
+                        &metadata) == 0 &&
+          metadata.version == 2)
+      {
+         snprintf(g_host, sizeof(g_host), "%s", metadata.host);
+         g_port = metadata.port;
+         g_enrolled = 1;
+         rc = 0;
+      }
+   }
+   if (rc != 0)
+   {
+      OPENSSL_cleanse(g_key, sizeof(g_key));
+      g_ca[0] = '\0';
+      g_cert[0] = '\0';
+   }
+   OPENSSL_cleanse(connection, sizeof(connection));
    pthread_mutex_unlock(&g_lock);
    return rc;
 }
@@ -63,62 +586,220 @@ static int ensure_enrolled(void)
 
 static void maybe_renew(void)
 {
-   if (kb_tls_cert_expires_within(g_cert, KB_CLIENT_MTLS_RENEW_WINDOW) != 1)
-      return;
    pthread_mutex_lock(&g_lock);
    if (g_enrolled && kb_tls_cert_expires_within(g_cert, KB_CLIENT_MTLS_RENEW_WINDOW) == 1)
    {
       char nc[sizeof(g_cert)], nk[sizeof(g_key)];
       if (kb_tls_renew(g_host, g_port, g_ca, g_cert, g_key, nc, sizeof(nc), nk, sizeof(nk)) == 0)
       {
-         snprintf(g_cert, sizeof(g_cert), "%s", nc);
-         snprintf(g_key, sizeof(g_key), "%s", nk);
+         /* Never switch the live process to an identity a restart would lose.
+          * The old cert remains usable through its existing validity window if
+          * storage is temporarily unavailable. */
+         if (identity_save(g_ca, nc, nk) == 0)
+         {
+            snprintf(g_cert, sizeof(g_cert), "%s", nc);
+            snprintf(g_key, sizeof(g_key), "%s", nk);
+            g_identity_generation++;
+            SSL_CTX_free(g_pool_ctx);
+            g_pool_ctx = NULL;
+            SSL_SESSION_free(g_pool_session);
+            g_pool_session = NULL;
+            pthread_cond_broadcast(&g_pool_cv);
+         }
       }
+      OPENSSL_cleanse(nk, sizeof(nk));
    }
    pthread_mutex_unlock(&g_lock);
 }
 
-char *kb_client_mtls_request(const char *method, const char *path, const char *body,
-                             int *status_out)
+#define KB_CLIENT_MTLS_DEFAULT_TIMEOUT_MS 30000
+
+char *kb_client_mtls_request_timeout_with_type(const char *method, const char *path,
+                                               const char *body, const char *content_type,
+                                               int timeout_ms, int *status_out)
 {
    if (status_out)
       *status_out = -1;
    if (!method || !path || ensure_enrolled() != 0)
       return NULL;
+   if (timeout_ms <= 0)
+      timeout_ms = KB_CLIENT_MTLS_DEFAULT_TIMEOUT_MS;
    maybe_renew();
-
-   /* Snapshot the identity under the lock so a concurrent renew cannot mutate it
-    * mid-request. */
-   char host[sizeof(g_host)];
-   char *ca, *cert, *key;
-   int port;
-   pthread_mutex_lock(&g_lock);
-   snprintf(host, sizeof(host), "%s", g_host);
-   port = g_port;
-   ca = strdup(g_ca);
-   cert = strdup(g_cert);
-   key = strdup(g_key);
-   pthread_mutex_unlock(&g_lock);
-   if (!ca || !cert || !key)
-   {
-      free(ca);
-      free(cert);
-      free(key);
-      return NULL;
-   }
 
    size_t cap = 1u << 20; /* 1 MiB — covers kb /v1 responses (status/search/etc.) */
    char *resp = malloc(cap);
+   int pool_enabled = pool_feature_enabled();
+   pool_sync_enabled(pool_enabled);
+   if (!pool_enabled)
+   {
+      char host[sizeof(g_host)], ca[sizeof(g_ca)], cert[sizeof(g_cert)], key[sizeof(g_key)];
+      int port;
+      pthread_mutex_lock(&g_lock);
+      snprintf(host, sizeof(host), "%s", g_host);
+      snprintf(ca, sizeof(ca), "%s", g_ca);
+      snprintf(cert, sizeof(cert), "%s", g_cert);
+      snprintf(key, sizeof(key), "%s", g_key);
+      port = g_port;
+      pthread_mutex_unlock(&g_lock);
+      int status = -1;
+      int reusable = 0;
+      kb_tls_client_conn_t *conn = resp ? kb_tls_client_conn_open(host, port, ca, cert, key) : NULL;
+      int rc = conn && kb_tls_client_conn_set_timeout(conn, timeout_ms) == 0
+                   ? kb_tls_client_conn_request_with_type(
+                         conn, method, path, (body && body[0]) ? body : NULL, NULL, content_type, 1,
+                         resp, cap, &status, &reusable)
+                   : -1;
+      kb_tls_client_conn_close(conn);
+      if (status_out)
+         *status_out = status;
+      char *out = (rc == 0 && status >= 200 && status < 300) ? strdup(resp) : NULL;
+      free(resp);
+      return out;
+   }
+   int pool_error = -1;
+   kb_pool_entry_t *entry = resp ? pool_borrow(&pool_error) : NULL;
+   if (!entry)
+   {
+      free(resp);
+      if (status_out)
+         *status_out = pool_error;
+      return NULL;
+   }
    int status = -1;
-   int rc = resp ? kb_tls_client_request(host, port, ca, cert, key, method, path,
-                                         (body && body[0]) ? body : NULL, resp, cap, &status)
-                 : -1;
-   free(ca);
-   free(cert);
-   free(key);
+   int reusable = 0;
+   int rc = kb_tls_client_conn_set_timeout(entry->conn, timeout_ms) == 0
+                ? kb_tls_client_conn_request_with_type(
+                      entry->conn, method, path, (body && body[0]) ? body : NULL, NULL,
+                      content_type, 0, resp, cap, &status, &reusable)
+                : -1;
+   pool_return(entry, rc == 0 && reusable);
    if (status_out)
       *status_out = status;
    char *out = (rc == 0 && status >= 200 && status < 300) ? strdup(resp) : NULL;
    free(resp);
    return out;
+}
+
+char *kb_client_mtls_request_timeout(const char *method, const char *path, const char *body,
+                                     int timeout_ms, int *status_out)
+{
+   return kb_client_mtls_request_timeout_with_type(method, path, body, NULL, timeout_ms,
+                                                   status_out);
+}
+
+char *kb_client_mtls_request(const char *method, const char *path, const char *body,
+                             int *status_out)
+{
+   return kb_client_mtls_request_timeout(method, path, body, KB_CLIENT_MTLS_DEFAULT_TIMEOUT_MS,
+                                         status_out);
+}
+
+int kb_client_mtls_management_jwks(char *envelope_out, size_t envelope_cap, size_t *envelope_len)
+{
+   if (envelope_out && envelope_cap)
+      memset(envelope_out, 0, envelope_cap);
+   if (envelope_len)
+      *envelope_len = 0;
+   if (!envelope_out || envelope_cap < 2 || !envelope_len)
+      return -1;
+   int status = -1;
+   char *response = kb_client_mtls_request("GET", "/v1/management/jwks", NULL, &status);
+   if (!response || status != 200)
+   {
+      free(response);
+      return -1;
+   }
+   size_t n = strnlen(response, 3072);
+   if (!n || n >= 3072 || n + 1 > envelope_cap)
+   {
+      free(response);
+      return -1;
+   }
+   memcpy(envelope_out, response, n + 1);
+   *envelope_len = n;
+   free(response);
+   return 0;
+}
+
+int kb_client_mtls_management_jwks_fetch(void *ctx, char *envelope_out, size_t envelope_cap,
+                                         size_t *envelope_len)
+{
+   (void)ctx;
+   return kb_client_mtls_management_jwks(envelope_out, envelope_cap, envelope_len);
+}
+
+void kb_client_mtls_pool_stats(int *total_out, int *idle_out, int *busy_out, int *waiters_out,
+                               unsigned long *borrow_exhausted_total_out)
+{
+   int total = 0, idle = 0, busy = 0;
+   pthread_mutex_lock(&g_lock);
+   pool_expire_idle_locked(monotonic_seconds());
+   for (int i = 0; i < KB_POOL_TOTAL_MAX; i++)
+      if (g_pool[i].conn)
+      {
+         total++;
+         if (g_pool[i].busy)
+            busy++;
+         else
+            idle++;
+      }
+   if (total_out)
+      *total_out = total;
+   if (idle_out)
+      *idle_out = idle;
+   if (busy_out)
+      *busy_out = busy;
+   if (waiters_out)
+      *waiters_out = g_pool_waiters;
+   if (borrow_exhausted_total_out)
+      *borrow_exhausted_total_out = g_pool_borrow_exhausted_total;
+   pthread_mutex_unlock(&g_lock);
+}
+
+void kb_client_mtls_pool_reset(void)
+{
+   pthread_mutex_lock(&g_lock);
+   g_identity_generation++;
+   SSL_CTX_free(g_pool_ctx);
+   g_pool_ctx = NULL;
+   SSL_SESSION_free(g_pool_session);
+   g_pool_session = NULL;
+   for (int i = 0; i < KB_POOL_TOTAL_MAX; i++)
+      if (g_pool[i].conn && !g_pool[i].busy)
+         pool_close_entry_locked(&g_pool[i]);
+   pthread_cond_broadcast(&g_pool_cv);
+   pthread_mutex_unlock(&g_lock);
+}
+
+void kb_client_mtls_tls_stats(unsigned long *handshakes_total_out, unsigned long *resumed_total_out)
+{
+   pthread_mutex_lock(&g_lock);
+   if (handshakes_total_out)
+      *handshakes_total_out = g_pool_handshakes_total;
+   if (resumed_total_out)
+      *resumed_total_out = g_pool_resumed_total;
+   pthread_mutex_unlock(&g_lock);
+}
+
+int kb_client_mtls_heartbeat(const char *server_id, const char *health, const char *version)
+{
+   if (!server_id || !server_id[0] || strlen(server_id) > 127 || !health || strlen(health) > 127 ||
+       !version || strlen(version) > 63)
+      return -1;
+   cJSON *root = cJSON_CreateObject();
+   if (!root)
+      return -1;
+   cJSON_AddStringToObject(root, "server_id", server_id);
+   cJSON_AddStringToObject(root, "health", health);
+   cJSON_AddStringToObject(root, "version", version);
+   char *body = cJSON_PrintUnformatted(root);
+   cJSON_Delete(root);
+   if (!body)
+      return -1;
+   int status = -1;
+   char *response = kb_client_mtls_request("POST", "/v1/server/heartbeat", body, &status);
+   int ok = status == 200 && response != NULL;
+   free(body);
+   free(response);
+   return ok ? 0 : -1;
 }

@@ -167,16 +167,94 @@ static void test_health_half_opens_after_cooldown(void)
    backdate_last_failure("flaky", PROVIDER_DOWN_COOLDOWN_SECONDS + 5);
    assert(provider_catalog_get_health("flaky") == CATALOG_HEALTH_DEGRADED);
 
-   /* A probe failure snaps it straight back to DOWN for another cooldown. */
+   /* A probe failure snaps it straight back to DOWN - AND lengthens the next
+    * cooldown, because a probe that re-fails is evidence the outage is not the
+    * 60-second blip the base cooldown assumes. */
    provider_catalog_record_failure("flaky", "retryable");
    assert(provider_catalog_get_health("flaky") == CATALOG_HEALTH_DOWN);
+   int after_one_trip = provider_catalog_cooldown_seconds("flaky");
+   assert(after_one_trip > PROVIDER_DOWN_COOLDOWN_SECONDS);
 
-   /* A probe success clears the breaker entirely. */
+   /* The base cooldown is no longer enough to half-open it: the backoff binds. */
    backdate_last_failure("flaky", PROVIDER_DOWN_COOLDOWN_SECONDS + 5);
+   assert(provider_catalog_get_health("flaky") == CATALOG_HEALTH_DOWN);
+
+   /* The longer cooldown does. */
+   backdate_last_failure("flaky", after_one_trip + 5);
    assert(provider_catalog_get_health("flaky") == CATALOG_HEALTH_DEGRADED);
+
+   /* A probe success clears the breaker entirely - and resets the backoff, so a
+    * recovered provider is not left serving out a penalty it has disproved. */
    provider_catalog_record_success("flaky");
    assert(provider_catalog_get_health("flaky") == CATALOG_HEALTH_HEALTHY);
+   assert(provider_catalog_cooldown_seconds("flaky") == PROVIDER_DOWN_COOLDOWN_SECONDS);
    printf("  health_half_opens_after_cooldown: OK\n");
+}
+
+/* REGRESSION (real outage, 2026-07-23). The codex delegate hit its plan quota:
+ * every dispatch returned HTTP 429 usage_limit_reached with a reset SIX DAYS
+ * out. Roundtables collapsed below quorum for hours while two other delegates
+ * were healthy.
+ *
+ * The breaker behaved exactly as designed and that was the problem: 3 failures
+ * open it, but the half-open cooldown is a FIXED 60s regardless of how long the
+ * agent has been failing, and DEGRADED is not excluded from routing. So the seat
+ * returned to full eligibility every minute, and being tier 0 with the largest
+ * parallel budget it won seat resolution again, for six days.
+ *
+ * This pins the defect: an agent that has failed continuously must not come back
+ * as readily as one that failed three times a minute ago. */
+static void test_persistent_failure_backs_off_further_than_a_blip(void)
+{
+   reset_catalog();
+   agent_t ag = make_agent("quota-exhausted", "https://api.example.com");
+   provider_catalog_init(&ag, 1);
+
+   /* A brief blip: exactly enough to trip the breaker. This is what a flaky
+    * provider looks like - three quick failures, then it recovers. */
+   for (int i = 0; i < 3; i++)
+      provider_catalog_record_failure("quota-exhausted", "retryable");
+   assert(provider_catalog_get_health("quota-exhausted") == CATALOG_HEALTH_DOWN);
+   int blip_cooldown = provider_catalog_cooldown_seconds("quota-exhausted");
+   assert(blip_cooldown > 0);
+
+   /* Now reproduce the REAL outage cycle: the cooldown elapses, the breaker
+    * half-opens, the agent is routed to, it fails AGAIN, and back to DOWN. This
+    * is what happened to codex every ~minute for six days. Each half-open probe
+    * that re-fails is a genuine signal the outage persists, so the cooldown must
+    * grow - otherwise the agent re-enters routing on a fixed 60s heartbeat
+    * forever, which is exactly the bug. */
+   for (int cycle = 0; cycle < 5; cycle++)
+   {
+      int cd = provider_catalog_cooldown_seconds("quota-exhausted");
+      backdate_last_failure("quota-exhausted", cd + 5);
+      assert(provider_catalog_get_health("quota-exhausted") == CATALOG_HEALTH_DEGRADED);
+      provider_catalog_record_failure("quota-exhausted", "retryable"); /* probe re-fails */
+      assert(provider_catalog_get_health("quota-exhausted") == CATALOG_HEALTH_DOWN);
+   }
+   int persistent_cooldown = provider_catalog_cooldown_seconds("quota-exhausted");
+
+   /* The core assertion. Before the fix these were EQUAL - 60s either way - so a
+    * seat that had re-failed five probes in a row was retried as eagerly as one
+    * that blipped once. */
+   assert(persistent_cooldown > blip_cooldown);
+
+   /* Still DOWN well past the base cooldown: the whole point is that the agent
+    * stops re-entering the routable set every minute. */
+   backdate_last_failure("quota-exhausted", blip_cooldown + 5);
+   assert(provider_catalog_get_health("quota-exhausted") == CATALOG_HEALTH_DOWN);
+
+   /* But it is never wedged forever - the breaker still half-opens once the
+    * longer cooldown elapses, so a recovered provider returns without a restart. */
+   backdate_last_failure("quota-exhausted", persistent_cooldown + 5);
+   assert(provider_catalog_get_health("quota-exhausted") == CATALOG_HEALTH_DEGRADED);
+
+   /* And one success wipes the penalty: recovery must be immediate, not serve
+    * out a backoff the agent has already disproved. */
+   provider_catalog_record_success("quota-exhausted");
+   assert(provider_catalog_get_health("quota-exhausted") == CATALOG_HEALTH_HEALTHY);
+   assert(provider_catalog_cooldown_seconds("quota-exhausted") == blip_cooldown);
+   printf("  persistent_failure_backs_off_further_than_a_blip: OK\n");
 }
 
 static void test_health_unknown_agent_is_healthy(void)
@@ -302,6 +380,7 @@ int main(void)
    test_health_down_after_three_failures();
    test_health_recovers_on_success();
    test_health_half_opens_after_cooldown();
+   test_persistent_failure_backs_off_further_than_a_blip();
    test_health_unknown_agent_is_healthy();
 
    test_locality_local_agent();

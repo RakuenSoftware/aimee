@@ -10,8 +10,8 @@
 #include <string.h>
 
 #include "config.h"
-#include "../headers/gateway_delegate.h"
-#include "../headers/gateway_policy.h"
+#include <aimee/gateway/gateway_delegate.h>
+#include <aimee/gateway/gateway_policy.h>
 #include "../vendor/headers/cJSON.h"
 
 #define PASS(name) printf("  PASS: %s\n", (name))
@@ -25,6 +25,14 @@ int config_load(config_t *cfg)
       cfg->gateway_prevent_subagents = g_prevent;
    }
    return 0;
+}
+
+/* Accessor stubs: the production seam moved from config_load to per-field
+ * accessors. Values match what this file's config_load stub produced, so the
+ * assertions below are unchanged. */
+int config_gateway_prevent_subagents(void)
+{
+   return g_prevent;
 }
 const char *guardrails_canonical_tool_name(const char *n)
 {

@@ -92,6 +92,35 @@ func TestHealthIdentifiesGoImplementation(t *testing.T) {
 	}
 }
 
+func TestWorkflowStopCancelsAndStopsEveryDescendant(t *testing.T) {
+	server, store, _ := newTestServer(t)
+	ctx := context.Background()
+	for _, in := range []db1.CreateWorkItem{
+		{ID: "wi_api_stop", Repo: "repo", ProposalPath: "root", WorkflowName: "build", StartStage: "slices"},
+		{ID: "wi_api_stop.child", Repo: "repo", ProposalPath: "child", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_api_stop"},
+	} {
+		if err := store.CreateWorkItem(ctx, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cancelled := make(map[string]bool)
+	server.SetSchedulerCancel(func(id string) { cancelled[id] = true })
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/workflow/items/wi_api_stop/stop", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	for _, id := range []string{"wi_api_stop", "wi_api_stop.child"} {
+		item, err := store.WorkItem(ctx, id)
+		if err != nil || item.State != "stopped" {
+			t.Fatalf("%s item=%+v err=%v", id, item, err)
+		}
+		if !cancelled[id] {
+			t.Fatalf("scheduler did not cancel %s", id)
+		}
+	}
+}
+
 func TestBearerAuthentication(t *testing.T) {
 	server, _, _ := newTestServer(t)
 	handler := RequireBearer(server, "secret-token")
@@ -182,6 +211,26 @@ nodes:
 	server.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/trigger/fire", bytes.NewReader(body)))
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "already filed") {
 		t.Fatalf("duplicate status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if err := os.WriteFile(filepath.Join(repo, "unrelated.txt"), []byte("advance watched ref\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "unrelated.txt")
+	runGit(t, repo, "commit", "-m", "advance branch without changing proposal")
+	rec = httptest.NewRecorder()
+	server.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/trigger/fire", bytes.NewReader(body)))
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "already filed") {
+		t.Fatalf("moving-ref duplicate status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if err := os.WriteFile(filepath.Join(proposalDir, "large.md"), []byte(proposal+"\nchanged blob\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "docs/proposals/pending/large.md")
+	runGit(t, repo, "commit", "-m", "change proposal blob")
+	rec = httptest.NewRecorder()
+	server.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/trigger/fire", bytes.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("changed blob status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	linkedBody := []byte(`{"source":"proposals","proposal":"linked","workspace":` +
 		strconv.Quote(repo) + `,"ref":"HEAD","pipeline":"build","mode":"autonomous"}`)
@@ -358,5 +407,32 @@ func runGit(t *testing.T, dir string, args ...string) {
 	command := exec.Command("git", append([]string{"-C", dir}, args...)...)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, output)
+	}
+}
+
+// trigger.max_concurrent = 0 is an operator saying "admit nothing". The store's
+// cap sentinel treats <=0 as unlimited (child slices depend on that), so the
+// admission paths must refuse a configured 0 explicitly — otherwise "pause
+// admission" silently removes the limit instead of applying it.
+func TestConfiguredZeroConcurrencyPausesAdmission(t *testing.T) {
+	server, _, _ := newTestServer(t)
+	configPath := filepath.Join(t.TempDir(), "aimee.yaml")
+	if err := os.WriteFile(configPath, []byte("trigger:\n  max_concurrent: 0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := appconfig.NewStore(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.SetConfigStore(store)
+	if got := store.Int("trigger.max_concurrent", 2); got != 0 {
+		t.Fatalf("config did not load max_concurrent=0, got %d", got)
+	}
+	body := strings.NewReader(`{"proposal_md":"## do a thing\n\nwhy: because","workflow":"build","repo":"/tmp"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/dev/submit", body)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409 paused-admission, got %d: %s", rec.Code, rec.Body.String())
 	}
 }

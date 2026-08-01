@@ -16,7 +16,7 @@ typedef enum
    CFG_BOOL,
    CFG_INT,
    CFG_FLOAT,
-   CFG_ECON_TIER /* int enum stored, but get/set as an "off|safe|aggressive" string */
+   CFG_ECON_MODE /* int enum stored, but get/set as "off|safe|aggressive" */
 } config_field_type_t;
 
 /* When a config.set / Settings change takes effect (live-config-reload P2). Default 0 = HOT.
@@ -40,9 +40,10 @@ typedef enum
 typedef enum
 {
    FGROUP_RUNTIME = 0, /* everyday user-facing knob (default) */
-   FGROUP_DEPLOY,      /* deploy-time infra (LLM-container topology): consumed once by
-                          config_emit_deploy_env to stand up the aimee-llm container,
-                          never read at runtime. Set at deploy, not tuned day-to-day. */
+   FGROUP_DEPLOY,      /* deploy-time infra topology: consumed once by
+                          config_emit_deploy_env to stand up the managed sibling
+                          services, never read at runtime. Set at deploy, not
+                          tuned day-to-day. */
    FGROUP_ADVANCED,    /* expert tuning scalar with a good default; file-settable, off surface */
    FGROUP_DEV,         /* dev/QA-only (e.g. dogfood_*); not part of the user surface */
 } config_field_group_t;
@@ -54,8 +55,13 @@ typedef struct
    size_t size;
    int is_bool; /* 1 for bool fields */
    config_field_type_t type;
-   reload_class_t reload_class;  /* omitted -> RELOAD_HOT (0) */
-   config_field_group_t group;   /* omitted -> FGROUP_RUNTIME (0) */
+   reload_class_t reload_class; /* omitted -> RELOAD_HOT (0) */
+   config_field_group_t group;  /* omitted -> FGROUP_RUNTIME (0) */
+   /* Canonical Vault/runtime-cache record for a credential compatibility
+    * field. NULL means the field is ordinary configuration. Credential values
+    * may exist in config_t transiently for consumers, but must never be
+    * serialized or returned by a generic config surface. */
+   const char *secret_name;
 } config_field_t;
 
 /* Human label for the reload class, for the config.set / Settings verdict. */
@@ -76,8 +82,34 @@ const config_field_t *config_field_lookup(const char *key);
  * int/float -> Number, string -> String). Never reads past the field. */
 cJSON *config_field_value_json(const config_t *cfg, const config_field_t *f);
 
+/* Return the canonical Vault record name for a credential field, or NULL for
+ * ordinary configuration. Public config surfaces must use
+ * config_field_public_value_json(), which reports only configured/unconfigured
+ * for credentials and never returns their value. */
+const char *config_field_secret_name(const config_field_t *f);
+cJSON *config_field_public_value_json(const config_t *cfg, const config_field_t *f);
+
+/* Live-config form; prefer this outside the config module. */
+cJSON *config_field_public_value_json_current(const config_field_t *f);
+
+/* Render one field for display without a config_t. Same text `aimee config get`
+ * always printed: "(unset)" for an empty string, "configured"/"not configured"
+ * for a Vault-backed secret (never the value). Returns 0 on success. */
+int config_field_render(const config_field_t *f, char *out, size_t n);
+
 /* Parse `value` and assign it into the field. Returns 0 on success, -1 on an
  * invalid value (e.g. non-boolean text for a bool field). */
 int config_field_set_value(config_t *cfg, const config_field_t *f, const char *value);
+
+/* Apply the table-driven defaults for every FLAT config field into cfg. Called by
+ * config_set_defaults so a flat field's default lives only in config_flat_defaults[].
+ * Non-flat defaults remain in config_set_defaults. */
+void config_apply_flat_defaults(config_t *cfg);
+
+/* Table-driven parse of the flat scalar config fields from a parsed YAML root
+ * (Proposal A, step 3). Assigns each present, correctly-typed flat field; matches
+ * the inline config_load parse. config_load calls this instead of the per-field
+ * blocks. (css_render_command is excluded and keeps its bespoke block.) */
+void config_parse_flat_fields(config_t *cfg, const cJSON *root);
 
 #endif /* CONFIG_FIELDS_H */

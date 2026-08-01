@@ -1,6 +1,6 @@
 #include "server_mcp_skill.h"
 #include "aimee.h"
-#include "skill.h"
+#include <aimee/skills/skill.h>
 
 #include <stdio.h>
 #include <stdlib.h>

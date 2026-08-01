@@ -8,7 +8,7 @@
 
 #include <stddef.h>
 
-#include "aimee_ir.h" /* aimee_response_t */
+#include <aimee/ir/aimee_ir.h> /* aimee_response_t */
 
 struct cJSON;
 

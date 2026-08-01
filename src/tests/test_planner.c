@@ -11,7 +11,9 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "cJSON.h"
 #include "db2_test_shim.h"
@@ -73,16 +75,48 @@ static void test_config_planner_overrides(void)
    printf("  config_planner_overrides: ok\n");
 }
 
+/* kb_planner_* now read the LIVE config instead of taking a config_t, so the "disabled"
+ * cases must pin the config they read. Without this they would inherit the developer's real
+ * aimee.yaml and fail on any machine that has a planner command configured. An empty HOME
+ * gives the declared defaults (both commands empty). */
+static char g_cfg_home[64];
+static char *g_saved_home;
+
+static void pin_empty_config(void)
+{
+   /* Fresh template per call: mkdtemp REWRITES the XXXXXX in place, so reusing one
+    * static buffer makes the second call fail. */
+   snprintf(g_cfg_home, sizeof(g_cfg_home), "/tmp/aimee-test-planner-XXXXXX");
+   assert(mkdtemp(g_cfg_home));
+   g_saved_home = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
+   setenv("HOME", g_cfg_home, 1);
+   unsetenv("AIMEE_HOME");
+   setenv("AIMEE_NO_CACHE", "1", 1);
+}
+
+static void unpin_config(void)
+{
+   unsetenv("AIMEE_NO_CACHE");
+   if (g_saved_home)
+   {
+      setenv("HOME", g_saved_home, 1);
+      free(g_saved_home);
+      g_saved_home = NULL;
+   }
+   else
+      unsetenv("HOME");
+   rmdir(g_cfg_home);
+}
+
 /* ---- 3. planner_search_disabled ---- */
 static void test_planner_search_disabled(void)
 {
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   /* planner_search_command intentionally empty */
+   pin_empty_config(); /* planner_search_command intentionally empty */
 
    char *out = NULL;
    size_t out_len = 0;
-   int rc = kb_planner_search(&cfg, "{\"version\":1}", &out, &out_len);
+   int rc = kb_planner_search("{\"version\":1}", &out, &out_len);
+   unpin_config();
    assert(rc == -1);
    assert(out == NULL);
    assert(out_len == 0);
@@ -93,13 +127,12 @@ static void test_planner_search_disabled(void)
 /* ---- 4. planner_validate_disabled ---- */
 static void test_planner_validate_disabled(void)
 {
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   /* constraint_solver_command intentionally empty */
+   pin_empty_config(); /* constraint_solver_command intentionally empty */
 
    char *out = NULL;
    size_t out_len = 0;
-   int rc = kb_planner_validate(&cfg, "{\"version\":1}", &out, &out_len);
+   int rc = kb_planner_validate("{\"version\":1}", &out, &out_len);
+   unpin_config();
    assert(rc == -1);
    assert(out == NULL);
    assert(out_len == 0);

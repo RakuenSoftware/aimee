@@ -62,6 +62,7 @@ int pgvec_kb_delete(int64_t point_id);
 
 /* Delete all kb embedding rows for a given project. */
 int pgvec_kb_delete_project(const char *project);
+int pgvec_kb_delete_current_project(const char *project);
 
 /* KB PDF vectors (structured-PDF Phase A1): a DEDICATED relation that the general
  * /v1/search transport never reads. Mirrors pgvec_kb_* but targets
@@ -93,6 +94,8 @@ int pgvec_memory_search(const float *vec, int dim, const char *record_type,
  * Returns number of results written (<= max), -1 on error. */
 int pgvec_kb_search(const char *project, const float *vec, int dim, int limit, int64_t *ids,
                     double *scores, int max);
+int pgvec_kb_search_scoped(const char *project, const char *exclude_project, const float *vec,
+                           int dim, int limit, int64_t *ids, double *scores, int max);
 
 /* Upsert a single curator entity vector row.  Stores scope_kind, scope_id,
  * canonical_name and artifact_id as first-class columns (not embedded in

@@ -559,17 +559,16 @@ static lsp_server_t *get_or_spawn(const char *workspace, const char *ext)
    }
 
    /* No existing server — try to spawn one from config */
-   config_t cfg;
-   if (config_load(&cfg) != 0)
-      return NULL;
-
-   for (int i = 0; i < cfg.lsp_server_count; i++)
+   int n = config_lsp_server_count();
+   for (int i = 0; i < n; i++)
    {
-      const config_lsp_server_t *sc = &cfg.lsp_servers[i];
-      for (int j = 0; j < sc->extension_count; j++)
+      config_lsp_server_t sc;
+      if (config_lsp_server_at(i, &sc) != 0)
+         continue;
+      for (int j = 0; j < sc.extension_count; j++)
       {
-         if (strcmp(sc->extensions[j], ext) == 0)
-            return spawn_server(sc, workspace);
+         if (strcmp(sc.extensions[j], ext) == 0)
+            return spawn_server(&sc, workspace);
       }
    }
 

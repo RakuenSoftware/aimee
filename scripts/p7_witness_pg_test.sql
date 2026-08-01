@@ -1,0 +1,216 @@
+-- P7-witness-e1 real-PG17 gate: C<->SQL digest parity, append atomicity, the
+-- append-only triggers, and the runtime least-privilege ACLs. Run against a
+-- throwaway database provisioned from schema.sql as the owner.
+\set ON_ERROR_STOP on
+
+-- ---------------------------------------------------------------------------
+-- 1. C<->SQL digest parity. The pinned vector is produced by the C
+--    vault_witness_record_digest for the shared parity fixture (see
+--    test_vault_witness_record.c: test_pinned_digest_vector). If the SQL packing
+--    or the C preimage drifts, exactly one side changes and this fails.
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE d BYTEA; g BYTEA;
+BEGIN
+  d := public.org_vault_witness_record_digest(
+    0::smallint, '42', 'acme', 'anthropic', 'req-1', 'team-7', 'anthropic:default', 'g1',
+    '2026-07-23T12:00:00Z',
+    decode(repeat('01',32),'hex'), true, decode(repeat('02',32),'hex'),
+    decode(repeat('03',32),'hex'), 5::bigint, 6::bigint, 3::bigint);
+  IF encode(d,'hex') <> '719157b1cf64398bff14d0bcdd8548b5b27c9e888709dcf11f8e558b1c302fde' THEN
+    RAISE EXCEPTION 'WITNESS FAIL: record digest parity: got %', encode(d,'hex');
+  END IF;
+
+  g := public.org_vault_witness_genesis('acme','anthropic');
+  IF encode(g,'hex') <> '7222cdf5e667854188aa2e2733a70bff5c6680109dd3fb8e06862d80433a2555' THEN
+    RAISE EXCEPTION 'WITNESS FAIL: genesis parity: got %', encode(g,'hex');
+  END IF;
+  RAISE NOTICE 'WITNESS OK: C<->SQL digest and genesis parity';
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 2. Append advances the shard head atomically; first record links to genesis.
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE r1 RECORD; r2 RECORD; v_head BYTEA; v_pred BYTEA;
+BEGIN
+  SELECT * INTO r1 FROM public.org_vault_witness_append(
+    0::smallint, '1', 'acme', 'anthropic', 'req-a', 'team-1', 'anthropic:default', 'grp-a',
+    '2026-07-23T12:00:00Z', decode(repeat('aa',32),'hex'), false, NULL);
+  IF r1.shard_seq <> 1 THEN
+    RAISE EXCEPTION 'WITNESS FAIL: first append seq % (want 1)', r1.shard_seq;
+  END IF;
+  -- The first record's witness predecessor must be the genesis sentinel.
+  SELECT witness_pred_hash INTO v_pred FROM public.kb_vault_witness_log
+    WHERE tenant='acme' AND provider='anthropic' AND shard_seq=1;
+  IF v_pred <> public.org_vault_witness_genesis('acme','anthropic') THEN
+    RAISE EXCEPTION 'WITNESS FAIL: first record does not link to genesis';
+  END IF;
+
+  SELECT * INTO r2 FROM public.org_vault_witness_append(
+    0::smallint, '2', 'acme', 'anthropic', 'req-b', 'team-1', 'anthropic:default', 'grp-b',
+    '2026-07-23T12:00:01Z', decode(repeat('bb',32),'hex'), false, NULL);
+  IF r2.shard_seq <> 2 THEN
+    RAISE EXCEPTION 'WITNESS FAIL: second append seq % (want 2)', r2.shard_seq;
+  END IF;
+  -- The second record's witness predecessor must be the first record's hash, and
+  -- the shard head must now equal the second record's hash.
+  SELECT witness_pred_hash INTO v_pred FROM public.kb_vault_witness_log
+    WHERE tenant='acme' AND provider='anthropic' AND shard_seq=2;
+  IF v_pred <> r1.record_hash THEN
+    RAISE EXCEPTION 'WITNESS FAIL: chain link broken at seq 2';
+  END IF;
+  SELECT head_hash INTO v_head FROM public.kb_vault_witness_shard
+    WHERE tenant='acme' AND provider='anthropic';
+  IF v_head <> r2.record_hash THEN
+    RAISE EXCEPTION 'WITNESS FAIL: shard head not advanced to seq 2';
+  END IF;
+  RAISE NOTICE 'WITNESS OK: append chain + shard head advance';
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 3. A rewrap/open source (kind 1/2) must not carry a source predecessor.
+-- ---------------------------------------------------------------------------
+DO $$
+BEGIN
+  BEGIN
+    PERFORM public.org_vault_witness_append(
+      1::smallint, 'op1', 'acme', 'openai', '', '', '', 'grp',
+      '2026-07-23T12:00:02Z', decode(repeat('cc',32),'hex'), true, decode(repeat('dd',32),'hex'));
+    RAISE EXCEPTION 'WITNESS FAIL: rewrap append with source predecessor was accepted';
+  EXCEPTION WHEN sqlstate '22023' THEN
+    NULL; -- expected invalid input
+  END;
+  RAISE NOTICE 'WITNESS OK: source-predecessor rule enforced';
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 4. Append-only triggers reject UPDATE / DELETE / TRUNCATE on the evidence log
+--    and the checkpoint table.
+-- ---------------------------------------------------------------------------
+DO $$
+BEGIN
+  BEGIN
+    UPDATE public.kb_vault_witness_log SET group_id='x' WHERE tenant='acme';
+    RAISE EXCEPTION 'WITNESS FAIL: evidence log UPDATE was allowed';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'WORM:%' THEN RAISE; END IF;
+  END;
+  BEGIN
+    DELETE FROM public.kb_vault_witness_log WHERE tenant='acme';
+    RAISE EXCEPTION 'WITNESS FAIL: evidence log DELETE was allowed';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'WORM:%' THEN RAISE; END IF;
+  END;
+  BEGIN
+    TRUNCATE public.kb_vault_witness_log;
+    RAISE EXCEPTION 'WITNESS FAIL: evidence log TRUNCATE was allowed';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'WORM:%' THEN RAISE; END IF;
+  END;
+  RAISE NOTICE 'WITNESS OK: evidence log is append-only';
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 5. Runtime least-privilege: aimee_kb_runtime (if present) has no direct DML on
+--    the witness tables and no EXECUTE on the witness functions.
+-- ---------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF EXISTS(SELECT 1 FROM pg_catalog.pg_roles WHERE rolname='aimee_kb_runtime') THEN
+    IF has_table_privilege('aimee_kb_runtime','public.kb_vault_witness_log','INSERT') OR
+       has_table_privilege('aimee_kb_runtime','public.kb_vault_witness_log','DELETE') OR
+       has_table_privilege('aimee_kb_runtime','public.kb_vault_witness_shard','UPDATE') OR
+       has_table_privilege('aimee_kb_runtime','public.kb_vault_witness_shard','DELETE') OR
+       has_table_privilege('aimee_kb_runtime','public.kb_vault_witness_shard','INSERT') OR
+       has_table_privilege('aimee_kb_runtime','public.kb_vault_witness_checkpoint','INSERT') THEN
+      RAISE EXCEPTION 'WITNESS FAIL: runtime has direct DML on a witness table';
+    END IF;
+    IF has_function_privilege('aimee_kb_runtime',
+         'public.org_vault_witness_append(smallint,text,text,text,text,text,text,text,text,bytea,boolean,bytea)',
+         'EXECUTE') THEN
+      RAISE EXCEPTION 'WITNESS FAIL: runtime can execute org_vault_witness_append';
+    END IF;
+    RAISE NOTICE 'WITNESS OK: runtime least-privilege on witness surface';
+  ELSE
+    RAISE NOTICE 'WITNESS SKIP: aimee_kb_runtime role absent';
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 6. Checkpoint leaf-set builder over intact shards: robust to the number of
+--    shards (the shared RLS-gate DB has several from audit witnessing). Asserts
+--    one leaf per non-empty shard and that every leaf head matches its shard head.
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE v_leaves BIGINT; v_shards BIGINT; v_mismatch BIGINT;
+BEGIN
+  SELECT count(*) INTO v_shards FROM public.kb_vault_witness_shard WHERE seq > 0;
+  SELECT count(*) INTO v_leaves FROM public.org_vault_witness_checkpoint_leaves();
+  IF v_leaves <> v_shards THEN
+    RAISE EXCEPTION 'WITNESS FAIL: leaves % <> non-empty shards %', v_leaves, v_shards;
+  END IF;
+  SELECT count(*) INTO v_mismatch
+    FROM public.org_vault_witness_checkpoint_leaves() l
+    JOIN public.kb_vault_witness_shard sh
+      ON sh.tenant=l.tenant AND sh.provider=l.provider
+    WHERE sh.head_hash <> l.head_hash OR sh.seq <> l.seq;
+  IF v_mismatch <> 0 THEN
+    RAISE EXCEPTION 'WITNESS FAIL: % checkpoint leaves disagree with shard heads', v_mismatch;
+  END IF;
+  RAISE NOTICE 'WITNESS OK: checkpoint leaf-set builder matches shard heads';
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 7. Checkpoint persist: fenced, monotonic seq, first-checkpoint-no-predecessor,
+--    append-only, fence-stale refusal. (Synthetic signed values; the real root and
+--    signature are produced by the C producer — this validates the DB contract.)
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE v_fence BIGINT; v_seq BIGINT;
+  z BYTEA := decode(repeat('00',32),'hex');
+  root1 BYTEA := decode(repeat('a1',32),'hex');
+  root2 BYTEA := decode(repeat('a2',32),'hex');
+  kid BYTEA := decode(repeat('cc',16),'hex');
+  sig BYTEA := decode(repeat('dd',64),'hex');
+  ld BYTEA := decode(repeat('ee',32),'hex');
+BEGIN
+  SELECT fencing_token INTO v_fence FROM public.kb_vault_control WHERE singleton=1;
+
+  -- First checkpoint: seq 1, no predecessor.
+  v_seq := public.org_vault_witness_checkpoint_persist(
+    1::bigint, root1, false, NULL, 1, ''::bytea, ld, kid, 1::smallint, 1, sig, v_fence);
+  IF v_seq <> 1 THEN RAISE EXCEPTION 'WITNESS FAIL: first checkpoint seq % (want 1)', v_seq; END IF;
+
+  -- A non-first checkpoint (seq 2) WITHOUT a predecessor is rejected.
+  BEGIN
+    PERFORM public.org_vault_witness_checkpoint_persist(
+      2::bigint, root2, false, NULL, 1, ''::bytea, ld, kid, 1::smallint, 1, sig, v_fence);
+    RAISE EXCEPTION 'WITNESS FAIL: seq-2 checkpoint without predecessor accepted';
+  EXCEPTION WHEN sqlstate 'P7W04' THEN NULL; -- expected checkpoint_predecessor_inconsistent
+  END;
+
+  -- Second checkpoint: seq 2, WITH predecessor -> accepted.
+  v_seq := public.org_vault_witness_checkpoint_persist(
+    2::bigint, root2, true, root1, 1, ''::bytea, ld, kid, 1::smallint, 1, sig, v_fence);
+  IF v_seq <> 2 THEN RAISE EXCEPTION 'WITNESS FAIL: second checkpoint seq % (want 2)', v_seq; END IF;
+
+  -- Fence-stale refusal.
+  BEGIN
+    PERFORM public.org_vault_witness_checkpoint_persist(
+      3::bigint, root2, true, root1, 1, ''::bytea, ld, kid, 1::smallint, 1, sig, v_fence + 999);
+    RAISE EXCEPTION 'WITNESS FAIL: stale fence accepted';
+  EXCEPTION WHEN sqlstate 'P7W03' THEN NULL; -- expected checkpoint_fence_stale
+  END;
+
+  -- Append-only: UPDATE on a checkpoint row is blocked.
+  BEGIN
+    UPDATE public.kb_vault_witness_checkpoint SET shard_count=9 WHERE seq=1;
+    RAISE EXCEPTION 'WITNESS FAIL: checkpoint UPDATE allowed';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'WORM:%' THEN RAISE; END IF;
+  END;
+  RAISE NOTICE 'WITNESS OK: checkpoint persist fenced/monotonic/append-only';
+END $$;
+
+DO $$ BEGIN RAISE NOTICE 'p7_witness_pg_test: all checks passed'; END $$;

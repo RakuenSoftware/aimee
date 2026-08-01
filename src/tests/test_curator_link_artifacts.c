@@ -10,7 +10,7 @@
 
 #include "aimee.h"
 #include "db2_test_shim.h"
-#include "../kb/kb_curator_link_artifacts.h"
+#include "kb_curator_link_artifacts.h"
 
 /* Controllable stubs for the embed + vector-NN deps (the sqlite shim has no
  * pgvector). Default: embedding succeeds (384-d) but the NN search returns
@@ -21,10 +21,12 @@ static int64_t g_search_pid = 0;
 static double g_search_score = 0.0;
 static char g_lookup_aid[64] = "";
 
-int memory_embed_text(const char *text, const char *command, float *out, int max_dim)
+int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
+                      float *out, int max_dim)
 {
    (void)text;
    (void)command;
+   (void)input_type;
    int dim = max_dim < 384 ? max_dim : 384;
    for (int i = 0; i < dim; i++)
       out[i] = 0.0f;

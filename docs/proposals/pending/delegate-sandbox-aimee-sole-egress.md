@@ -108,7 +108,7 @@ first. Same ordering applies to everything below.
 
 ## The gap
 
-`td_bash` (`src/posix/agent_tools_dispatch.c:328`) does not use a backend. It
+`td_bash` (`src/modules/tools/agent_tools_dispatch.c:328`) does not use a backend. It
 routes to the detached workspace provider, else falls through to `run_cmd` —
 **in-process, inside the aimee-server container**. The docker backend's `exec()` has
 exactly one caller: `server.c:499`, a `delegate.*` RPC.

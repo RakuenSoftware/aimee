@@ -26,6 +26,11 @@ typedef struct
    pthread_t owner;     /* owner thread while leased */
    int64_t lease_ms;    /* CLOCK_MONOTONIC ms at lease time */
    int64_t last_reopen; /* CLOCK_MONOTONIC ms of last poison-reopen */
+   /* Who took this lease ("file.c:line" of the db2_lease_begin). A stuck lease
+    * means a live thread that missed its db2_lease_end, and "member 3" alone
+    * cannot be acted on — this is what turns the reaper's log into the name of
+    * the leaking path. Points at a string literal, so it is never freed. */
+   const char *site;
 } db2_pool_member_t;
 
 static db2_pool_member_t g_members[DB2_POOL_MAX_SIZE];
@@ -36,7 +41,13 @@ static pthread_cond_t g_cond = PTHREAD_COND_INITIALIZER;
 static int g_active = 0;
 static int g_waiters = 0;
 static long g_grants = 0, g_timeouts = 0, g_stuck = 0, g_poisoned = 0;
-static int64_t g_hold_ceiling_ms = 300000; /* settable for tests */
+static int64_t g_hold_ceiling_ms = DB2_POOL_HOLD_CEILING_MS; /* settable for tests */
+/* Consecutive fully-starved sweeps observed so far. */
+static int g_starved_sweeps = 0;
+/* Test seam: what to do when the pool proves unrecoverable. NULL = abort the
+ * process (production). Tests substitute a recorder so the policy is checkable
+ * without killing the test runner. */
+static void (*g_starved_action)(const char *reason) = NULL;
 static pthread_t g_reaper_thread;
 static volatile int g_reaper_stop = 0;
 static int g_reaper_running = 0;
@@ -170,6 +181,7 @@ void *db2_pool_lease(int timeout_ms)
          if (!g_members[i].leased && g_members[i].conn)
          {
             g_members[i].leased = 1;
+            g_members[i].site = NULL;
             g_members[i].owner = pthread_self();
             g_members[i].lease_ms = mono_ms();
             g_grants++;
@@ -195,6 +207,7 @@ void *db2_pool_lease(int timeout_ms)
          {
             g_members[slot].conn = c;
             g_members[slot].leased = 1;
+            g_members[slot].site = NULL;
             g_members[slot].owner = pthread_self();
             g_members[slot].lease_ms = mono_ms();
             g_grants++;
@@ -306,22 +319,76 @@ void db2_pool_discard(void *conn)
  * leases observed this sweep. */
 int db2_pool_reaper_sweep(void)
 {
-   int stuck = 0;
+   int stuck = 0, live = 0, waiters = 0;
+   char reason[256] = "";
+   /* Who held the first stuck member, so the fatal line names a code location
+    * instead of only a count. */
+   const char *first_site = NULL;
    pthread_mutex_lock(&g_mtx);
    int64_t now = mono_ms();
    for (int i = 0; i < g_size; i++)
    {
       if (!g_members[i].leased || !g_members[i].conn || !g_members[i].lease_ms)
          continue;
+      live++;
       if (now - g_members[i].lease_ms > g_hold_ceiling_ms)
       {
          stuck++;
          g_stuck++;
-         POOL_LOG("member %d leased %lldms (> %lldms ceiling) — missed lease_end?", i,
-                  (long long)(now - g_members[i].lease_ms), (long long)g_hold_ceiling_ms);
+         if (!first_site)
+            first_site = g_members[i].site;
+         POOL_LOG("member %d leased %lldms (> %lldms ceiling) by %s — missed lease_end?", i,
+                  (long long)(now - g_members[i].lease_ms), (long long)g_hold_ceiling_ms,
+                  g_members[i].site ? g_members[i].site : "unattributed");
       }
    }
+   waiters = g_waiters;
+
+   /* SELF-HEAL. Every member stuck past the ceiling, with callers queued behind
+    * them, is not slowness — it is a lease leak, and this pool deliberately
+    * cannot reclaim (a live thread may still be using the connection; libpq
+    * forbids concurrent use). So no future sweep can improve matters: the
+    * process will serve nothing from here until it is restarted.
+    *
+    * Measured: a kb in exactly this state logged 1096 consecutive failed health
+    * checks over ~3 hours with every pool member held ~4.5 hours past a 5-minute
+    * ceiling, and sat there. /v1/health is a static string and still timed out,
+    * because no worker thread was free to answer it — a starved pool starves the
+    * whole HTTP surface, so nothing outside the process can even see why.
+    *
+    * Requires waiters: a fully-leased pool with nobody queued is a busy kb, not
+    * a stuck one. Requires several consecutive sweeps so one unlucky sample
+    * cannot restart a healthy service. */
+   int starved = (g_size > 0 && stuck == g_size && stuck == live && waiters > 0);
+   if (starved)
+   {
+      g_starved_sweeps++;
+      snprintf(reason, sizeof(reason),
+               "all %d pool members stuck past the %lldms ceiling with %d waiter(s) for %d "
+               "consecutive sweeps — lease leak, unrecoverable in-process; first holder: %s",
+               g_size, (long long)g_hold_ceiling_ms, waiters, g_starved_sweeps,
+               first_site ? first_site : "unattributed");
+   }
+   else
+      g_starved_sweeps = 0;
+   int give_up = starved && g_starved_sweeps >= DB2_POOL_STARVED_SWEEPS;
+   void (*action)(const char *) = g_starved_action;
    pthread_mutex_unlock(&g_mtx);
+
+   if (give_up)
+   {
+      POOL_LOG("FATAL: %s; exiting so the restart policy can recover", reason);
+      if (action)
+         action(reason);
+      else
+      {
+         /* _exit, not abort: this is a diagnosed unrecoverable state, not memory
+          * corruption, and a core dump of a pool full of idle connections tells
+          * an operator nothing the log line above does not. */
+         fflush(NULL);
+         _exit(DB2_POOL_STARVED_EXIT_CODE);
+      }
+   }
    return stuck;
 }
 
@@ -360,10 +427,34 @@ void db2_pool_shutdown(void)
    pthread_mutex_unlock(&g_mtx);
 }
 
+/* Attribute a lease to the db2_lease_begin that caused it. Best-effort: an
+ * unattributed lease still logs, just without a name. */
+void db2_pool_note_lease_site(void *conn, const char *site)
+{
+   if (!conn || !site)
+      return;
+   pthread_mutex_lock(&g_mtx);
+   for (int i = 0; i < g_size; i++)
+      if (g_members[i].conn == conn && g_members[i].leased)
+      {
+         g_members[i].site = site;
+         break;
+      }
+   pthread_mutex_unlock(&g_mtx);
+}
+
+void db2_pool_set_test_starved_action(void (*action)(const char *reason))
+{
+   pthread_mutex_lock(&g_mtx);
+   g_starved_action = action;
+   g_starved_sweeps = 0;
+   pthread_mutex_unlock(&g_mtx);
+}
+
 void db2_pool_set_test_ceiling_ms(int ceiling_ms)
 {
    pthread_mutex_lock(&g_mtx);
-   g_hold_ceiling_ms = ceiling_ms > 0 ? ceiling_ms : 300000;
+   g_hold_ceiling_ms = ceiling_ms > 0 ? ceiling_ms : DB2_POOL_HOLD_CEILING_MS;
    pthread_mutex_unlock(&g_mtx);
 }
 

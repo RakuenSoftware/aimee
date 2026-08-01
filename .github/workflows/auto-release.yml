@@ -1,16 +1,36 @@
-# Auto-release on every push to main.
+# Release on push to main, AFTER a human approves the version.
+#
+# `:testing` is the automated channel (publish-testing.yml, no approval). `main`
+# is not. This workflow used to tag and publish on every push to `main`, and
+# under the testing->main promote flow that made a merge into a release: it
+# invented the next version, pushed the tag, built thin clients for four
+# platforms, published the images and moved `:latest`, with nobody intending
+# any of it. v0.2.196 and v0.2.192+1 were published that way mid-cycle on
+# 2026-07-27 and 2026-07-28 while v0.2.192 remained the last release anyone
+# meant to make.
+#
+# Inference is kept, because computing the next patch from the tags is right
+# almost always. What was missing is consent. The version is now computed in a
+# job that changes nothing, published to the run summary, and everything that
+# has an effect waits behind the `release` environment. The approver sees the
+# exact number before it exists.
+#
+# NOTE: this is only a gate if the `release` environment has required reviewers
+# configured in repository settings. Without them GitHub approves it
+# automatically and the old behaviour returns.
 #
 # On each push to `main` (which, under the testing->main promote flow, is a
-# promote merge) this computes the next semver PATCH from the highest existing
-# `v*` tag, creates and pushes that tag, then cuts a full release by calling the
-# reusable build workflows:
+# promote merge) this uses a higher version declared in aimee_version.h (for a
+# planned major/minor release), otherwise computes the next semver PATCH from
+# the highest existing `v*` tag. After approval it creates and pushes that tag,
+# then cuts a full release by calling the reusable build workflows:
 #   - release-thin-client.yml  -> aimee CLI binaries (Linux/macOS/Windows) on the GitHub Release
 #   - publish-images.yml       -> aimee-server / aimee-kb multi-arch images, tagged :<version> + :latest
 #
 # Reusable workflows are invoked directly (workflow_call), so this works with the
 # default GITHUB_TOKEN -- no PAT needed (a tag pushed by GITHUB_TOKEN would not,
 # by design, re-trigger the tag-on:push workflows, hence the direct call).
-name: Auto release
+name: Release (main, approval required)
 
 on:
   push:
@@ -39,37 +59,86 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Compute next patch version
+      - name: Infer the next version in the declared series
         id: bump
         run: |
-          latest=$(git tag --list 'v*' --sort=-v:refname | head -n1)
+          # The tree declares MAJOR.MINOR and nothing else. The patch is whatever
+          # comes next in that series, so a patch release needs no commit and
+          # cannot disagree with what was tagged. Moving series is an explicit
+          # edit of AIMEE_VERSION_SERIES, never inferred.
+          series=$(awk '$1 == "#define" && $2 == "AIMEE_VERSION_SERIES" {gsub(/"/, "", $3); print $3; exit}' \
+            src/headers/aimee_version.h)
+          if ! [[ "$series" =~ ^[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::AIMEE_VERSION_SERIES must be MAJOR.MINOR; got '${series:-<empty>}'"
+            exit 1
+          fi
+          # Highest patch already tagged in THIS series. Tags from other series
+          # are irrelevant: a 0.4.0 tag must not make the 0.3 line jump.
+          latest=$(git tag --list "v${series}.*" --sort=-v:refname | head -n1)
           if [ -z "$latest" ]; then
-            next="0.0.1"
+            next="${series}.0"
           else
-            v="${latest#v}"
-            IFS='.' read -r major minor patch <<< "$v"
-            # Guard against malformed tags; default missing components to 0.
-            major=${major:-0}; minor=${minor:-0}; patch=${patch:-0}
-            patch=$((patch + 1))
-            next="${major}.${minor}.${patch}"
+            patch="${latest##*.}"
+            [[ "$patch" =~ ^[0-9]+$ ]] || { echo "::error::cannot read a patch number from tag ${latest}"; exit 1; }
+            next="${series}.$((patch + 1))"
           fi
           if git rev-parse -q --verify "refs/tags/v${next}" >/dev/null; then
             echo "::error::tag v${next} already exists; aborting to avoid clobbering a release"
             exit 1
           fi
           echo "version=$next" >> "$GITHUB_OUTPUT"
-          echo "Next version: v${next} (from ${latest:-<none>})"
+          echo "series=$series" >> "$GITHUB_OUTPUT"
+          echo "Next version: v${next} (series ${series}, highest in series ${latest:-<none>})"
 
-      - name: Create and push tag
+      - name: Publish the proposed version for the approver
         run: |
+          v="v${{ steps.bump.outputs.version }}"
+          {
+            echo "## Awaiting approval to release $v"
+            echo
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| version | \`$v\` |"
+            echo "| series | \`${{ steps.bump.outputs.series }}\` (declared) |"
+            echo "| commit | \`${GITHUB_SHA}\` |"
+            echo "| pushed by | ${GITHUB_ACTOR} |"
+            echo
+            echo "Approving publishes thin clients for four platforms, publishes"
+            echo "aimee-server and aimee-kb, and moves \`:latest\`. Rejecting leaves"
+            echo "no tag and no artifacts."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=Release awaiting approval::$v from ${GITHUB_SHA}"
+
+  # Nothing above this point has an effect. Everything below waits for a
+  # reviewer on the `release` environment, and the version they are approving is
+  # in the run summary written by the job above.
+  tag:
+    needs: version
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Re-check the version is still free, then tag
+        run: |
+          tag="v${{ needs.version.outputs.version }}"
+          # Re-check after the approval wait: another release may have landed
+          # while this sat in the queue.
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "::error::$tag was created while this run waited for approval; re-run to compute a fresh version"
+            exit 1
+          fi
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
-          tag="v${{ steps.bump.outputs.version }}"
           git tag -a "$tag" -m "aimee $tag"
           git push origin "$tag"
 
   thin-clients:
-    needs: version
+    needs: [version, tag]
     uses: ./.github/workflows/release-thin-client.yml
     permissions:
       contents: write
@@ -77,16 +146,50 @@ jobs:
       version: ${{ needs.version.outputs.version }}
 
   images:
-    needs: version
+    needs: [version, tag]
     uses: ./.github/workflows/publish-images.yml
-    # contents: write (not read) because publish-images.yml nests the
-    # publish-rerank-artifacts.yml job, which creates/uploads the
-    # rerank-artifacts release. A nested reusable workflow can't request more
-    # than the caller grants, so a read-only ceiling here fails the whole run
-    # at startup ("nested job 'rerank-artifacts' is requesting 'contents:
-    # write', but is only allowed 'contents: read'").
     permissions:
-      contents: write
+      contents: read
       packages: write
     with:
       version: ${{ needs.version.outputs.version }}
+
+  # Undo the tag when the release did not actually ship.
+  #
+  # The tag is pushed by the `version` job because release-thin-client attaches
+  # its GitHub Release to an existing tag — so it cannot be deferred until after
+  # the artifacts exist. That ordering means a failure in `images` or
+  # `thin-clients` leaves a released version number behind with nothing (or only
+  # half of it) published, and nothing reconciles the two.
+  #
+  # That is not hypothetical. On 2026-07-22 three runs failed or were cancelled
+  # after tagging: v0.2.193, v0.2.194 and v0.2.195 all exist, and no images were
+  # published for any of them. `:latest` stayed on the 2026-07-14 build for two
+  # weeks while three version numbers claimed to be newer — and the aimee-kb
+  # image of that vintage predates PostgreSQL shipping inside it, so anything
+  # deploying `:latest` got a kb that could not bootstrap.
+  #
+  # Deleting the tag makes a failed release a no-op: the next attempt reuses the
+  # same number instead of silently skipping it. Every step is `|| true` so this
+  # cleanup can never mask the original failure, and the run still reports it.
+  rollback-tag:
+    needs: [version, tag, thin-clients, images]
+    if: always() && needs.tag.result == 'success' && (needs.images.result == 'failure' || needs.images.result == 'cancelled' || needs.thin-clients.result == 'failure' || needs.thin-clients.result == 'cancelled')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Delete the tag and any partial release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v${{ needs.version.outputs.version }}"
+          echo "::warning::release $tag did not complete (images=${{ needs.images.result }}, thin-clients=${{ needs.thin-clients.result }}); removing the tag so the version is not claimed"
+          gh release delete "$tag" --yes --cleanup-tag 2>/dev/null || true
+          git push origin --delete "$tag" 2>/dev/null || true
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "::error::could not remove $tag — delete it by hand before the next release, or the version is skipped"
+            exit 1
+          fi
+          echo "removed $tag"

@@ -2,27 +2,14 @@
 
 #include "db2_tenant.h"
 #include "kb_vault_policy.h"
+#include "kb_vault_protected_use.h"
 #include "org_vault_key_use.h"
-#include "vault_crypto.h"
 #include "vault_server_key.h"
 
 #include <openssl/crypto.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
-
-#if defined(__linux__)
-#include <sys/mman.h>
-#include <unistd.h>
-#endif
-
-typedef struct
-{
-   unsigned char plaintext[DB2_VAULT_KEY_USE_CIPHERTEXT_MAX];
-   unsigned char kek[VAULT_KEK_LEN];
-   unsigned char dek[VAULT_DEK_LEN];
-   uint8_t aad[VAULT_ENVELOPE_AAD_MAX];
-} key_use_arena_t;
 
 static int bounded(const char *s, size_t max, int empty_ok)
 {
@@ -37,44 +24,6 @@ static int digest_valid(const char *s)
       if (!((s[i] >= '0' && s[i] <= '9') || (s[i] >= 'a' && s[i] <= 'f')))
          return 0;
    return 1;
-}
-
-static key_use_arena_t *arena_new(size_t *mapped)
-{
-#if defined(__linux__) && defined(MADV_DONTDUMP)
-   long page = sysconf(_SC_PAGESIZE);
-   if (page <= 0)
-      return NULL;
-   size_t n = (sizeof(key_use_arena_t) + (size_t)page - 1) & ~((size_t)page - 1);
-   void *p = mmap(NULL, n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-   if (p == MAP_FAILED)
-      return NULL;
-   if (mlock(p, n) != 0 || madvise(p, n, MADV_DONTDUMP) != 0)
-   {
-      OPENSSL_cleanse(p, n);
-      (void)munlock(p, n);
-      (void)munmap(p, n);
-      return NULL;
-   }
-   *mapped = n;
-   return p;
-#else
-   (void)mapped;
-   return NULL;
-#endif
-}
-
-static void arena_free(key_use_arena_t *arena, size_t mapped)
-{
-   if (!arena)
-      return;
-   OPENSSL_cleanse(arena, mapped);
-#if defined(__linux__)
-   (void)munlock(arena, mapped);
-   (void)munmap(arena, mapped);
-#else
-   (void)mapped;
-#endif
 }
 
 static int scope_begin(const kb_principal_t *caller, int64_t team_id, char actor[576])
@@ -120,6 +69,8 @@ kb_vault_key_use(const kb_principal_t *caller, int64_t team_id,
    size_t fresh_att_len = 0;
    uint64_t anchor_version = 0;
    kb_vault_key_use_status_t result = KB_VAULT_KEY_USE_RETRY;
+   int old_cancel_state = PTHREAD_CANCEL_ENABLE;
+   int cancel_disabled = 0;
 
    if (vault_hwm_read(key_id, &anchor_version, fresh_att, sizeof(fresh_att), &fresh_att_len) != 0)
       goto done;
@@ -157,20 +108,12 @@ kb_vault_key_use(const kb_principal_t *caller, int64_t team_id,
    }
 
    uint64_t epoch = vault_use_epoch_snapshot();
-   size_t mapped = 0;
-   key_use_arena_t *arena = arena_new(&mapped);
-   if (!arena)
+   cancel_disabled = pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old_cancel_state) == 0;
+   if (!cancel_disabled)
       goto done;
-   int old_cancel_state = PTHREAD_CANCEL_ENABLE;
-   int guard_held = 0;
-   if (pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old_cancel_state) != 0)
-   {
-      arena_free(arena, mapped);
-      goto done;
-   }
 
    if (scope_begin(caller, team_id, actor) != 0)
-      goto cleanup;
+      goto done;
    rc =
        db2_vault_key_use_admit(actor, team_id, origin, use_id, key_id, principal, agent, cred,
                                (int64_t)anchor_version, request_digest, provider, model, operation,
@@ -179,26 +122,26 @@ kb_vault_key_use(const kb_principal_t *caller, int64_t team_id,
    {
       db2_tenant_scope_rollback();
       result = KB_VAULT_KEY_USE_INTEGRITY;
-      goto cleanup;
+      goto done;
    }
    if (rc == DB2_VAULT_KEY_USE_SEALED)
    {
       db2_tenant_scope_rollback();
       result = KB_VAULT_KEY_USE_SEALED;
-      goto cleanup;
+      goto done;
    }
    rc = scope_finish(rc);
    if (rc < 0)
-      goto cleanup;
+      goto done;
    if (admitted.seal_epoch < 1)
    {
       result = KB_VAULT_KEY_USE_INTEGRITY;
-      goto cleanup;
+      goto done;
    }
    if (rc == 0)
    {
       result = KB_VAULT_KEY_USE_REPLAY;
-      goto cleanup;
+      goto done;
    }
    if (admitted.version != (int64_t)anchor_version ||
        admitted.hwm_attestation_len != candidate.hwm_attestation_len ||
@@ -206,40 +149,13 @@ kb_vault_key_use(const kb_principal_t *caller, int64_t team_id,
                      candidate.hwm_attestation_len) != 0)
    {
       result = KB_VAULT_KEY_USE_INTEGRITY;
-      goto cleanup;
+      goto done;
    }
-
-   if (vault_use_begin(epoch, (uint64_t)admitted.seal_epoch, arena->kek) != 0)
-   {
-      result = vault_is_sealed() ? KB_VAULT_KEY_USE_SEALED : KB_VAULT_KEY_USE_RETRY;
-      goto cleanup;
-   }
-   guard_held = 1;
-   size_t aad_len = 0;
-   if (vault_aad_build_v2(principal, agent, cred, admitted.version, arena->aad, sizeof(arena->aad),
-                          &aad_len) != 0 ||
-       vault_dek_unwrap(arena->kek, admitted.wrapped_dek, arena->dek) != 0 ||
-       (vault_secret_decrypt(arena->dek, arena->aad, aad_len, admitted.nonce, admitted.ciphertext,
-                             admitted.ciphertext_len, admitted.tag, arena->plaintext) != 0 &&
-        (vault_aad_build_v1_safe(principal, agent, cred, admitted.version, arena->aad,
-                                 sizeof(arena->aad), &aad_len) != 0 ||
-         vault_secret_decrypt(arena->dek, arena->aad, aad_len, admitted.nonce, admitted.ciphertext,
-                              admitted.ciphertext_len, admitted.tag, arena->plaintext) != 0)))
-      result = KB_VAULT_KEY_USE_INTEGRITY;
-   else
-      result = callback(arena->plaintext, admitted.ciphertext_len, callback_ctx) == 0
-                   ? KB_VAULT_KEY_USE_OK
-                   : KB_VAULT_KEY_USE_CALLBACK_FAILED;
-cleanup:
-   arena_free(arena, mapped);
-   if (guard_held)
-      vault_use_end();
-   OPENSSL_cleanse(&candidate, sizeof(candidate));
-   OPENSSL_cleanse(&admitted, sizeof(admitted));
-   OPENSSL_cleanse(fresh_att, sizeof(fresh_att));
-   (void)pthread_setcancelstate(old_cancel_state, NULL);
-   return result;
+   result =
+       kb_vault_protected_use(epoch, principal, agent, cred, &admitted, callback, callback_ctx);
 done:
+   if (cancel_disabled)
+      (void)pthread_setcancelstate(old_cancel_state, NULL);
    OPENSSL_cleanse(&candidate, sizeof(candidate));
    OPENSSL_cleanse(&admitted, sizeof(admitted));
    OPENSSL_cleanse(fresh_att, sizeof(fresh_att));

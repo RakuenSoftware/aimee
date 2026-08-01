@@ -182,6 +182,12 @@ const char *text_split_reasoning_prefix(const char *text, const char **reasoning
  * non-ASCII. A string that ends on a complete character is left untouched. */
 void text_trim_partial_utf8(char *s);
 
+/* Replace malformed UTF-8 bytes in a NUL-terminated string with ASCII '?', in
+ * place. Valid code points are unchanged and the byte length never grows, so
+ * callers may safely use this on fixed buffers before sending text to a strict
+ * UTF-8 boundary such as Postgres. Returns the number of bytes replaced. */
+size_t text_sanitize_utf8(char *s);
+
 /* Basic Porter-like stemming. Result written to buf. Returns buf. */
 char *stem_word(const char *word, char *buf, size_t buf_len);
 

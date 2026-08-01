@@ -41,7 +41,7 @@ every clone into one namespace.
 
 2. **Org collision.** `git_project_clone` derives the project name from the
    URL basename and discards the owner (`derive_name`,
-   `src/server/git_project.c:24-52`): `RakuenSoftware/foo` and `jbailes/foo`
+   `src/modules/git/git_project.c:24-52`): `RakuenSoftware/foo` and `jbailes/foo`
    both target `webusers/<user>/foo` — the second clone fails, and the kb
    would merge two different repos under one key if it didn't.
 

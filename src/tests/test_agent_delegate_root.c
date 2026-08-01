@@ -516,9 +516,23 @@ void test_container_execute_script_runs_in_sandbox(void)
    free(g_sbx_exec_cmd);
    g_sbx_exec_cmd = NULL;
 
+   /* dispatch_tool_call applies the same worktree guardrails as production.
+    * The unit binary is normally launched from repo/src, while real delegate
+    * turns carry the repository/worktree root in their thread-local cwd. Give
+    * this routing test the same context so it tests the container seam rather
+    * than being rejected earlier for running from a source subdirectory. */
+   char sandbox_root[] = "/tmp/aimee-container-route.XXXXXX";
+   assert(mkdtemp(sandbox_root) != NULL);
+   char sandbox_cwd[MAX_PATH_LEN];
+   assert(snprintf(sandbox_cwd, sizeof(sandbox_cwd), "%s/.aimee/worktrees/unit-test-agent/main",
+                   sandbox_root) < (int)sizeof(sandbox_cwd));
+   assert(platform_mkdir_p(sandbox_cwd, 0700) == 0 || access(sandbox_cwd, F_OK) == 0);
+   run_cmd_set_cwd(sandbox_cwd);
    char *result =
        dispatch_tool_call("execute_script", "{\"language\":\"bash\",\"body\":\"echo hi\"}", 5000);
+   run_cmd_set_cwd(NULL);
    workspace_provider_clear_active();
+   platform_test_rmrf(sandbox_root);
 
    assert(g_sbx_exec_called == 1);
    assert(g_sbx_exec_cmd && strstr(g_sbx_exec_cmd, "echo hi"));

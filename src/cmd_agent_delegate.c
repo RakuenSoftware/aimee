@@ -12,18 +12,19 @@
 #include "prompts.h"
 #include "persona.h"
 #include "role_templates.h"
-#include "skill.h"
+#include <aimee/skills/skill.h>
 #include "events.h"
 #include "agent_coord.h"
-#include "delegate_role.h"
-#include "delegate_plan.h"
-#include "delegate_launch.h"
-#include "delegate_economics.h"
+#include <aimee/delegates/delegate_role.h>
+#include "delegate_verify.h"
+#include <aimee/delegates/delegate_plan.h>
+#include <aimee/delegates/delegate_launch.h>
+#include <aimee/delegates/delegate_economics.h>
 #include "delegate_ensemble.h"
 #include "memory_platform.h"
 #include "workspace.h"
 #include "guardrails.h"
-#include "delegate_source_authority.h"
+#include <aimee/delegates/delegate_source_authority.h>
 #include "toolset.h"
 #include "liveness.h"
 #include "cJSON.h"
@@ -468,6 +469,12 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
 {
    (void)ctx;
 
+   /* Function-scoped: parsed from --scope below, and read again by the
+    * escalation-target lookup much later. It was declared inside the parse block,
+    * which does not reach that use -- an incomplete refactor that never surfaced
+    * because nothing compiles this file. */
+   agent_scope_t scope = AGENT_SCOPE_WHOLE_TASK; /* the documented default */
+
    if (argc < 1)
    {
       delegate_print_help();
@@ -514,16 +521,16 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
          fprintf(stderr, "error: aggregate requires a prompt\n");
          return;
       }
-      config_t cfg;
-      config_load(&cfg);
       agent_config_t acfg;
       if (agent_load_config(&acfg) != 0)
       {
          fprintf(stderr, "error: could not load agent config\n");
          return;
       }
+      ensemble_panel_t panel;
+      ensemble_panel_from_config(&panel);
       delegate_ensemble_result_t result;
-      if (delegate_ensemble_run(&acfg, &cfg, argv[1], &result) != 0)
+      if (delegate_ensemble_run(&acfg, &panel, argv[1], &result) != 0)
       {
          fprintf(stderr, "error: ensemble failed\n");
          return;
@@ -554,17 +561,15 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
    {
       const char *parent_env = getenv("AIMEE_PARENT_DELEGATION_ID");
       const char *depth_env = getenv("AIMEE_DELEGATE_DEPTH");
-      config_t dcfg;
-      config_load(&dcfg);
-      int known = db1_init(dcfg.db1_path) == 0;
+      int known = db1_init(config_db1_path()) == 0;
       int active = known ? db1_delegation_spawn_is_active(parent_env) : 0;
       if (delegate_chain_env_should_clear(depth_env, parent_env, known, active))
       {
          platform_setenv("AIMEE_PARENT_DELEGATION_ID", "");
          platform_setenv("AIMEE_DELEGATE_DEPTH", "");
       }
-      int max_depth = dcfg.max_delegation_depth > 0 ? dcfg.max_delegation_depth
-                                                    : CONFIG_DEFAULT_MAX_DELEGATION_DEPTH;
+      int max_depth = config_max_delegation_depth() > 0 ? config_max_delegation_depth()
+                                                        : CONFIG_DEFAULT_MAX_DELEGATION_DEPTH;
       char depth_err[256];
       if (delegate_check_chain_depth(max_depth, depth_err, sizeof(depth_err)) != 0)
       {
@@ -679,12 +684,15 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
    delegate_prompt_plan_t prompt_plan;
    if (!role || delegate_resolve_prompt_inputs(prompt, file_prompt, &prompt_plan) != 0)
       fatal("usage: aimee delegate <role> [\"prompt\"] [--tools|--no-tools] [--prompt-file "
-            "PATH|--prompt-stdin]");
+            "PATH|--prompt-stdin] [--scope bounded|whole_task] [--via AGENT]");
 
    const char *task_prompt = prompt_plan.task_prompt;
    prompt = prompt_plan.user_prompt;
 
    {
+      const char *removed = delegate_role_removed_reason(role);
+      if (removed)
+         fatal("role '%s' was %s", role, removed);
       const char *canonical = delegate_role_canonicalize(role);
       if (canonical != role)
          LOG_INFO("delegate", "delegate: role alias '%s' -> '%s'", role, canonical);
@@ -727,6 +735,22 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
       char route_err[256];
       unsigned required_caps = 0;
       int min_context = 0;
+      /* Packet SCOPE, set by whoever decomposes the work. Absent means
+       * whole_task: boundedness is opt-in, because under uncertainty we
+       * over-select toward capability rather than risk a misplacement. */
+      const char *scope_opt = opt_get(&opts, "scope");
+      if (scope_opt && scope_opt[0])
+      {
+         scope = agent_scope_from_string(scope_opt);
+         if (scope == AGENT_SCOPE_UNSET)
+            fatal("--scope expects \"bounded\" or \"whole_task\", got '%s'", scope_opt);
+      }
+      /* Resolved HERE, not left UNSET for a downstream router to interpret. This
+       * command routes through the mutably-filtered cfg and plain agent_route(),
+       * which carry no packet scope - so leaving it UNSET made
+       * delegate_filter_route_scope() a no-op and the advertised "default
+       * whole_task" silently unenforced, letting a bounded-only local seat win on
+       * price. */
       int drop_deprecated = !(via_agent_name && via_agent_name[0]) &&
                             !(provider_override && provider_override[0]) &&
                             !(model_override && model_override[0]);
@@ -737,6 +761,8 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
          fatal("%s", route_err);
       if (delegate_filter_route_capabilities(&cfg, role, required_caps, min_context,
                                              drop_deprecated, route_err, sizeof(route_err)) != 0)
+         fatal("%s", route_err);
+      if (delegate_filter_route_scope(&cfg, scope, route_err, sizeof(route_err)) != 0)
          fatal("%s", route_err);
       if (delegate_route_preflight(&cfg, role, route_err, sizeof(route_err)) != 0)
          fatal("%s", route_err);
@@ -772,10 +798,8 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
    /* Fall back to tier-based prompt when no explicit prompt or role template */
    if (!sys_prompt)
    {
-      config_t delegate_cfg;
-      config_load(&delegate_cfg);
-      prompt_tier_t dtier = delegate_cfg.delegate_prompt_tier[0]
-                                ? prompt_tier_from_string(delegate_cfg.delegate_prompt_tier)
+      prompt_tier_t dtier = config_delegate_prompt_tier()[0]
+                                ? prompt_tier_from_string(config_delegate_prompt_tier())
                                 : PROMPT_MINIMAL;
       template_sys_prompt = prompt_build(dtier, cwd_for_template, NULL);
       if (template_sys_prompt)
@@ -783,11 +807,9 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
    }
    if (template_sys_prompt)
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      if (config_load(&cfg) == 0)
+      if (config_present())
       {
-         char *with_dispositions = prompt_apply_dispositions(template_sys_prompt, &cfg);
+         char *with_dispositions = prompt_apply_dispositions(template_sys_prompt);
          if (with_dispositions)
          {
             free(template_sys_prompt);
@@ -859,8 +881,18 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
     * ~/.config/aimee/projects/<name>/project.yaml; defaults to 20K tokens. */
    if (sys_prompt)
    {
+      /* Precedence: --token-budget, then an explicit project.yaml value, then what
+       * the eligible models actually accept. The old behaviour stopped at the
+       * 20K constant, so a 200K or 1M-context model still had its system prompt
+       * tail-truncated -- silently, apart from a WARN. */
       int budget = token_budget_override > 0 ? token_budget_override
                                              : delegate_token_budget_load(cwd_for_template, role);
+      if (token_budget_override <= 0 && budget == DELEGATE_TOKEN_BUDGET_DEFAULT)
+      {
+         int model_budget = delegate_token_budget_for_agents(&cfg);
+         if (model_budget > budget)
+            budget = model_budget;
+      }
       char *limited = delegate_prompt_limit(sys_prompt, budget);
       if (limited)
       {
@@ -1641,11 +1673,83 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
       const char *verify_argv[] = {"/bin/sh", "-c", verify_cmd, NULL};
       char *verify_out = NULL;
       int verify_rc = safe_exec_capture(verify_argv, &verify_out, AGENT_TOOL_OUTPUT_MAX);
+      verify_outcome_t verify_outcome = verify_classify(verify_rc);
+
+      /* MISPLACEMENT SIGNAL — ADVISORY ONLY. The seat completed its run but its
+       * work product failed a verifier that genuinely executed.
+       *
+       * This used to RE-DISPATCH once to a dearer seat automatically. That
+       * coupling is retired: a verifier failure has many causes a dearer model
+       * will not fix - invalid tests, a broken environment, ambiguous
+       * requirements, an impossible task - so "the output failed a check" does
+       * not establish "the seat was badly chosen", and spending on a dearer seat
+       * is a poor default response to that ambiguity. It also let whoever
+       * supplied the verify command decide when to spend.
+       *
+       * The operator's own rule points the same way: over-selecting beats
+       * laddering, so capability gating and the scope ceiling are what should
+       * pick a sufficient seat on the FIRST attempt. A failure here is evidence
+       * the routing policy needs correcting, not a licence to retry dearer.
+       *
+       * So: report it. Name the seat a retry SHOULD use if a human or an
+       * operator-owned policy decides one is warranted, and let them dispatch it
+       * explicitly. The target-selection logic is kept precisely because that
+       * judgement - which seat is genuinely dearer AND still eligible under the
+       * packet's scope and capability requirements - is the part worth keeping.
+       */
+      /* A COPY, not a pointer into cfg. cfg is this function's stack and the
+       * name is read much later when the JSON is built; borrowing the pointer
+       * would be correct today and dangling the moment anything between here and
+       * there reloads the config, which delegate paths do elsewhere. */
+      char suggested_target[MAX_AGENT_NAME] = {0};
+      if (verify_escalation_warranted(rc, verify_outcome))
+      {
+         agent_t *failed_seat = agent_find(&cfg, result.agent_name);
+         int failed_tier = failed_seat ? failed_seat->cost_tier : -1;
+         /* The packet's OWN scope, not UNSET: scope is fixed at decomposition and
+          * survives re-routing. Passing UNSET reclassified a bounded packet as
+          * whole_task during target selection, which could exclude a perfectly
+          * valid bounded-capable seat. */
+         agent_t *target = agent_route_escalation_target(&cfg, role, failed_tier, 0, scope);
+         if (target)
+         {
+            snprintf(suggested_target, sizeof(suggested_target), "%s", target->name);
+            LOG_WARN("delegate",
+                     "MISPLACEMENT: '%s' (tier %d) completed but failed verification for role "
+                     "'%s'. A dearer eligible seat exists ('%s', tier %d). Investigate the "
+                     "PLACEMENT, not just the diff; re-dispatch explicitly if warranted.",
+                     result.agent_name[0] ? result.agent_name : "?", failed_tier, role,
+                     target->name, target->cost_tier);
+         }
+         else
+         {
+            LOG_WARN("delegate",
+                     "MISPLACEMENT: '%s' failed verification for role '%s' and NO dearer eligible "
+                     "seat exists - the placement cannot be corrected by spending more",
+                     result.agent_name[0] ? result.agent_name : "?", role);
+         }
+      }
       free(verify_out);
+      verify_out = NULL;
       if (verify_rc != 0)
       {
-         event_notify(AIMEE_EVENT_VERIFY_FAIL, "delegate verify failed");
-         fprintf(stderr, "aimee: verify command failed (exit %d): %s\n", verify_rc, verify_cmd);
+         /* Distinguish "the verifier ran and reported failure" from "the verifier
+          * could not be run". Only the former is evidence about the delegate's
+          * work product; the latter is a setup defect and must never be read as
+          * the model having been inadequate. */
+         if (verify_outcome == VERIFY_OUTCOME_INFRA_ERROR)
+         {
+            event_notify(AIMEE_EVENT_VERIFY_FAIL, "verify command could not be run");
+            fprintf(stderr,
+                    "aimee: verify command could not be RUN (exit %d): %s\n"
+                    "aimee: this is a verifier/environment problem, not a delegate result\n",
+                    verify_rc, verify_cmd);
+         }
+         else
+         {
+            event_notify(AIMEE_EVENT_VERIFY_FAIL, "delegate verify failed");
+            fprintf(stderr, "aimee: verify command failed (exit %d): %s\n", verify_rc, verify_cmd);
+         }
          if (json_output)
          {
             cJSON *obj = agent_result_to_json(&result);
@@ -1653,6 +1757,35 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
                                                      agent_route(&cfg, role));
             cJSON_AddBoolToObject(obj, "verify_passed", 0);
             cJSON_AddNumberToObject(obj, "verify_exit_code", verify_rc);
+            /* Machine-readable category, so a caller can tell an attributable
+             * work-product failure from an unusable verifier. */
+            cJSON_AddStringToObject(obj, "verify_outcome", verify_outcome_name(verify_outcome));
+            /* ADVISORY, and with NO in-tree consumer today - stated plainly so
+             * the next reader does not mistake it for a contract something acts
+             * on. These fields are produced only by an IN-PROCESS run with
+             * --verify; the flag is refused on the server-routed path, which is
+             * how every supported deployment invokes delegates. They exist so a
+             * human reading the JSON, or a future operator-owned retry policy,
+             * can see the placement judgement without re-deriving it.
+             *
+             * True when the failure is attributable to the work product rather
+             * than to an unusable verifier - i.e. the placement is worth
+             * investigating. Nothing is re-dispatched automatically.
+             *
+             * `escalated` was dropped rather than pinned false. Not for tidiness
+             * - `verify_outcome` and this field are both emitted unconditionally,
+             * so "always-present" is the house style. It is dropped because it
+             * could only ever have been produced by this same in-process path,
+             * so no deployed caller has ever read it and there is nothing to
+             * break. */
+            cJSON_AddBoolToObject(obj, "escalation_warranted",
+                                  verify_escalation_warranted(rc, verify_outcome));
+            /* The seat a retry SHOULD use - genuinely dearer AND still eligible
+             * under this packet's scope and capability requirements. Absent when
+             * no such seat exists, which is itself the answer: the placement
+             * cannot be corrected by spending more. */
+            if (suggested_target[0])
+               cJSON_AddStringToObject(obj, "suggested_escalation_target", suggested_target);
             if (handoff_checked)
                delegate_handoff_add_validation_json(obj, &handoff_validation);
             char *json = cJSON_Print(obj);
@@ -1691,19 +1824,32 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
    else if (rc == 0)
    {
       /* Auto-verify from app config: tool verifies delegate's changes */
-      config_t app_cfg;
-      config_load(&app_cfg);
-      if (app_cfg.cross_verify && app_cfg.verify_cmd[0])
+      if (config_cross_verify() && config_verify_cmd()[0])
       {
-         fprintf(stderr, "aimee: cross-verify: running %s\n", app_cfg.verify_cmd);
-         const char *cv_argv[] = {"/bin/sh", "-c", app_cfg.verify_cmd, NULL};
+         fprintf(stderr, "aimee: cross-verify: running %s\n", config_verify_cmd());
+         const char *cv_argv[] = {"/bin/sh", "-c", config_verify_cmd(), NULL};
          char *cv_out = NULL;
          int cv_rc = safe_exec_capture(cv_argv, &cv_out, AGENT_TOOL_OUTPUT_MAX);
          free(cv_out);
-         if (cv_rc != 0)
+         verify_outcome_t cv_outcome = verify_classify(cv_rc);
+         if (cv_outcome == VERIFY_OUTCOME_INFRA_ERROR)
+         {
+            event_notify(AIMEE_EVENT_VERIFY_FAIL, "cross-verify could not be run");
+            fprintf(stderr,
+                    "aimee: cross-verify could not be RUN (exit %d) — verifier/environment "
+                    "problem, not a delegate result\n",
+                    cv_rc);
+         }
+         else if (cv_rc != 0)
          {
             event_notify(AIMEE_EVENT_VERIFY_FAIL, "cross-verify failed");
             fprintf(stderr, "aimee: cross-verify FAILED (exit %d)\n", cv_rc);
+            if (verify_escalation_warranted(rc, cv_outcome))
+               LOG_WARN("delegate",
+                        "MISPLACEMENT: agent '%s' completed but its work failed verification for "
+                        "role '%s'. Escalation is warranted — placement, not the model, is the "
+                        "defect to investigate.",
+                        result.agent_name[0] ? result.agent_name : "?", role);
          }
          else
          {
@@ -1853,21 +1999,16 @@ void cmd_verify(app_ctx_t *ctx, int argc, char **argv)
 {
    (void)ctx;
 
-   config_t cfg;
-   config_load(&cfg);
-
    if (argc >= 1 && strcmp(argv[0], "enable") == 0)
    {
-      cfg.cross_verify = 1;
-      config_save(&cfg);
+      config_set("cross_verify", "true");
       printf("cross-verification enabled\n");
       return;
    }
 
    if (argc >= 1 && strcmp(argv[0], "disable") == 0)
    {
-      cfg.cross_verify = 0;
-      config_save(&cfg);
+      config_set("cross_verify", "false");
       printf("cross-verification disabled\n");
       return;
    }
@@ -1876,39 +2017,43 @@ void cmd_verify(app_ctx_t *ctx, int argc, char **argv)
    {
       if (argc == 1)
       {
-         printf("cross_verify: %s\n", cfg.cross_verify ? "enabled" : "disabled");
-         printf("verify_cmd: %s\n", cfg.verify_cmd[0] ? cfg.verify_cmd : "(not set)");
-         printf("verify_role: %s\n", cfg.verify_role[0] ? cfg.verify_role : "review");
-         printf("verify_prompt: %s\n", cfg.verify_prompt[0] ? cfg.verify_prompt : "(default)");
+         printf("cross_verify: %s\n", config_cross_verify() ? "enabled" : "disabled");
+         printf("verify_cmd: %s\n", config_verify_cmd()[0] ? config_verify_cmd() : "(not set)");
+         printf("verify_role: %s\n", config_verify_role()[0] ? config_verify_role() : "review");
+         printf("verify_prompt: %s\n",
+                config_verify_prompt()[0] ? config_verify_prompt() : "(default)");
          return;
       }
       /* Configure: --verify-cmd, --role, --prompt */
       for (int i = 1; i < argc; i++)
       {
          if (strcmp(argv[i], "--verify-cmd") == 0 && i + 1 < argc)
-            snprintf(cfg.verify_cmd, sizeof(cfg.verify_cmd), "%s", argv[++i]);
+            config_set("verify_cmd", argv[++i]);
          else if (strcmp(argv[i], "--role") == 0 && i + 1 < argc)
-            snprintf(cfg.verify_role, sizeof(cfg.verify_role), "%s", argv[++i]);
+            config_set("verify_role", argv[++i]);
          else if (strcmp(argv[i], "--prompt") == 0 && i + 1 < argc)
-            snprintf(cfg.verify_prompt, sizeof(cfg.verify_prompt), "%s", argv[++i]);
+            config_set("verify_prompt", argv[++i]);
       }
-      config_save(&cfg);
       printf("cross-verify config updated\n");
       return;
    }
 
    /* Default: delegate verifies current changes */
-   if (!cfg.cross_verify)
+   if (!config_cross_verify())
    {
       fprintf(stderr, "cross-verification is disabled. Run: aimee verify enable\n");
       return;
    }
 
    /* Step 1: run verify_cmd if set (compilation/tests) */
-   if (cfg.verify_cmd[0])
+   /* Copied out: cmd_argv borrows it across safe_exec_capture, which is a whole
+    * subprocess round trip. */
+   char verify_cmd[CONFIG_COPY_MAX];
+   config_verify_cmd_copy(verify_cmd, sizeof(verify_cmd));
+   if (verify_cmd[0])
    {
-      fprintf(stderr, "aimee: running verify command: %s\n", cfg.verify_cmd);
-      const char *cmd_argv[] = {"/bin/sh", "-c", cfg.verify_cmd, NULL};
+      fprintf(stderr, "aimee: running verify command: %s\n", verify_cmd);
+      const char *cmd_argv[] = {"/bin/sh", "-c", verify_cmd, NULL};
       char *cmd_out = NULL;
       int cmd_rc = safe_exec_capture(cmd_argv, &cmd_out, AGENT_TOOL_OUTPUT_MAX);
       if (cmd_rc != 0)
@@ -1924,7 +2069,10 @@ void cmd_verify(app_ctx_t *ctx, int argc, char **argv)
    }
 
    /* Step 2: delegate a review to an agent */
-   const char *role = cfg.verify_role[0] ? cfg.verify_role : "review";
+   /* Same: both survive the git-diff subprocess below. */
+   char verify_role[CONFIG_COPY_MAX];
+   config_verify_role_copy(verify_role, sizeof(verify_role));
+   const char *role = verify_role[0] ? verify_role : "review";
 
    /* Build the review prompt: get the current staged + unstaged diff as context. */
    const char *diff_argv[] = {"git", "diff", "HEAD", NULL};
@@ -1932,11 +2080,12 @@ void cmd_verify(app_ctx_t *ctx, int argc, char **argv)
    safe_exec_capture(diff_argv, &diff_out, AGENT_TOOL_OUTPUT_MAX);
 
    char *review_prompt = NULL;
+   char verify_prompt[CONFIG_COPY_MAX];
+   config_verify_prompt_copy(verify_prompt, sizeof(verify_prompt));
    const char *base_prompt =
-       cfg.verify_prompt[0]
-           ? cfg.verify_prompt
-           : "Review these code changes for bugs, security issues, and correctness. "
-             "If everything looks good, say LGTM. If you find problems, list them.";
+       verify_prompt[0] ? verify_prompt
+                        : "Review these code changes for bugs, security issues, and correctness. "
+                          "If everything looks good, say LGTM. If you find problems, list them.";
 
    if (diff_out && diff_out[0])
    {

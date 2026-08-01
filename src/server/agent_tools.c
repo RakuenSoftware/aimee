@@ -1,4 +1,12 @@
-/* agent_tools.c: tool execution, checkpoints, and tool definition JSON builders */
+/* agent_tools.c: tool execution, checkpoints, and tool definition JSON builders.
+ *
+ * BOUNDARY (core modularization): this is the server-side session-state slice of
+ * the tools contract (turn/snapshot/toolset state, e.g. agent_tools_begin_turn /
+ * agent_tools_set_snap_id / agent_tools_set_active_toolset). It is deliberately
+ * NOT part of the `tools` module — the tool-call dispatcher and implementations
+ * live in src/modules/tools/ (agent_tools_dispatch.c, agent_tools.c). The two
+ * halves communicate only through the public agent_tools.h. Do NOT add tool
+ * dispatch or tool implementations here; they belong in src/modules/tools/. */
 #include "aimee.h"
 #include "util.h"
 #include "agent_tools.h"
@@ -10,10 +18,12 @@
 #include "diff.h"
 #include "dstr.h"
 #include "guardrails.h"
-#include "mcp_client_registry.h"
+#include "aimee/protocols/mcp/mcp_client_registry.h"
+#include "kb_client.h" /* federate aimee-kb-hosted plugin defs into tools/list */
 #include "log.h"
 #include "toolset.h"
 #include "tool_schema_sanitizer.h"
+#include "tool_egress.h"
 #include "cJSON.h"
 #include <ctype.h>
 #include <pthread.h>
@@ -190,9 +200,7 @@ int agent_tools_session_isolation_blocks(const char *path, const char *cwd)
     * this file (it is cheap and reads the cached config). Default-off: when the
     * flag is unset — or the config is unreadable, which leaves the default 0 —
     * this is a no-op, matching the feature's opt-in nature. */
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.require_session_worktree)
+   if (!config_require_session_worktree())
       return 0;
    /* normalize_path resolves '.'/'..'/relative against cwd, closing traversal
     * escapes. Match the canonical managed-worktree location plus the workflow
@@ -228,73 +236,124 @@ static int tools_array_has_name(cJSON *tools, const char *name, int openai_forma
    return 0;
 }
 
-static void append_remote_tools(cJSON *tools, int openai_format)
+/* Emit one MCP tool DEF into |tools| in the caller's wire format. |fullname| is
+ * the namespaced "<client>:<tool>". |schema_src| is borrowed (deep-copied); a
+ * missing schema becomes an empty object schema. */
+static void emit_remote_tool_def(cJSON *tools, const char *fullname, const cJSON *desc,
+                                 const cJSON *schema_src, int openai_format)
 {
-   config_t cfg;
-   config_load(&cfg);
-   computer_use_policy_t cu_policy;
-   computer_use_policy_from_config(&cfg, &cu_policy);
-
-   cJSON *remote_tools = mcp_client_registry_build_namespaced_tools(1000);
-   if (!cJSON_IsArray(remote_tools))
+   cJSON *schema;
+   if (!schema_src)
    {
-      cJSON_Delete(remote_tools);
-      return;
-   }
-
-   cJSON *remote_tool = NULL;
-   cJSON_ArrayForEach(remote_tool, remote_tools)
-   {
-      cJSON *name = cJSON_GetObjectItemCaseSensitive(remote_tool, "name");
-      if (!cJSON_IsString(name) || !name->valuestring[0])
-         continue;
-      if (computer_use_is_tool_name(name->valuestring) && !cu_policy.enabled)
-         continue;
-
-      const char *raw_name = strchr(name->valuestring, ':');
-      if (raw_name && raw_name[1] && tools_array_has_name(tools, raw_name + 1, openai_format))
-         LOG_WARN("mcp-tools", "remote tool name collides with builtin, namespaced as %s",
-                  name->valuestring);
-
-      cJSON *desc = cJSON_GetObjectItemCaseSensitive(remote_tool, "description");
-      cJSON *schema = cJSON_GetObjectItemCaseSensitive(remote_tool, "inputSchema");
-      if (!schema)
+      schema = cJSON_CreateObject();
+      if (schema)
       {
-         schema = cJSON_CreateObject();
          cJSON_AddStringToObject(schema, "type", "object");
          cJSON_AddObjectToObject(schema, "properties");
       }
-      else
-      {
-         schema = cJSON_Duplicate(schema, 1);
-      }
-      if (!schema)
-         continue;
+   }
+   else
+   {
+      schema = cJSON_Duplicate(schema_src, 1);
+   }
+   if (!schema)
+      return;
 
-      if (openai_format)
-      {
-         cJSON *tool = cJSON_CreateObject();
-         cJSON *fn = cJSON_CreateObject();
-         cJSON_AddStringToObject(tool, "type", "function");
-         cJSON_AddStringToObject(fn, "name", name->valuestring);
-         cJSON_AddStringToObject(fn, "description", cJSON_IsString(desc) ? desc->valuestring : "");
-         cJSON_AddItemToObject(fn, "parameters", schema);
-         cJSON_AddItemToObject(tool, "function", fn);
-         cJSON_AddItemToArray(tools, tool);
-      }
-      else
-      {
-         cJSON *tool = cJSON_CreateObject();
-         cJSON_AddStringToObject(tool, "type", "function");
-         cJSON_AddStringToObject(tool, "name", name->valuestring);
-         cJSON_AddStringToObject(tool, "description",
-                                 cJSON_IsString(desc) ? desc->valuestring : "");
-         cJSON_AddItemToObject(tool, "parameters", schema);
-         cJSON_AddItemToArray(tools, tool);
-      }
+   const char *desc_str = cJSON_IsString((cJSON *)desc) ? desc->valuestring : "";
+   cJSON *tool = cJSON_CreateObject();
+   if (!tool)
+   {
+      cJSON_Delete(schema);
+      return;
+   }
+   if (openai_format)
+   {
+      cJSON *fn = cJSON_CreateObject();
+      cJSON_AddStringToObject(tool, "type", "function");
+      cJSON_AddStringToObject(fn, "name", fullname);
+      cJSON_AddStringToObject(fn, "description", desc_str);
+      cJSON_AddItemToObject(fn, "parameters", schema);
+      cJSON_AddItemToObject(tool, "function", fn);
+   }
+   else
+   {
+      cJSON_AddStringToObject(tool, "type", "function");
+      cJSON_AddStringToObject(tool, "name", fullname);
+      cJSON_AddStringToObject(tool, "description", desc_str);
+      cJSON_AddItemToObject(tool, "parameters", schema);
+   }
+   cJSON_AddItemToArray(tools, tool);
+}
+
+/* Federate the tool DEFS of MCP plugins aimee-kb HOSTS (config install: kb) into
+ * this server's tools/list, so a session reaches them exactly like a locally
+ * hosted plugin. Defs ride the tool_registry.snapshot RPC ("mcp_tools" array).
+ * Server-hosted plugins already added to |tools| take precedence: a kb def whose
+ * namespaced name is already present is skipped. Invocation of these names routes
+ * back to the kb (agent_tools_dispatch.c). Best-effort — kb unreachable => no
+ * federated tools, never an error. */
+static void append_federated_kb_tools(cJSON *tools, int openai_format,
+                                      const computer_use_policy_t *cu_policy)
+{
+   char *envelope = kb_client_tool_registry_snapshot_json();
+   if (!envelope)
+      return;
+   cJSON *resp = cJSON_Parse(envelope);
+   free(envelope);
+   if (!resp)
+      return;
+
+   cJSON *mcp_tools = cJSON_GetObjectItemCaseSensitive(resp, "mcp_tools");
+   cJSON *entry = NULL;
+   cJSON_ArrayForEach(entry, mcp_tools)
+   {
+      cJSON *name = cJSON_GetObjectItemCaseSensitive(entry, "name");
+      if (!cJSON_IsString(name) || !name->valuestring[0])
+         continue;
+      if (computer_use_is_tool_name(name->valuestring) && !cu_policy->enabled)
+         continue;
+      /* Local (server-hosted) precedence: skip a kb def that collides. */
+      if (tools_array_has_name(tools, name->valuestring, openai_format))
+         continue;
+      cJSON *desc = cJSON_GetObjectItemCaseSensitive(entry, "description");
+      cJSON *schema = cJSON_GetObjectItemCaseSensitive(entry, "inputSchema");
+      emit_remote_tool_def(tools, name->valuestring, desc, schema, openai_format);
    }
 
+   cJSON_Delete(resp);
+}
+
+static void append_remote_tools(cJSON *tools, int openai_format)
+{
+   computer_use_policy_t cu_policy;
+   computer_use_policy_from_config(&cu_policy);
+
+   cJSON *remote_tools = mcp_client_registry_build_namespaced_tools(1000);
+   if (cJSON_IsArray(remote_tools))
+   {
+      cJSON *remote_tool = NULL;
+      cJSON_ArrayForEach(remote_tool, remote_tools)
+      {
+         cJSON *name = cJSON_GetObjectItemCaseSensitive(remote_tool, "name");
+         if (!cJSON_IsString(name) || !name->valuestring[0])
+            continue;
+         if (computer_use_is_tool_name(name->valuestring) && !cu_policy.enabled)
+            continue;
+
+         const char *raw_name = strchr(name->valuestring, ':');
+         if (raw_name && raw_name[1] && tools_array_has_name(tools, raw_name + 1, openai_format))
+            LOG_WARN("mcp-tools", "remote tool name collides with builtin, namespaced as %s",
+                     name->valuestring);
+
+         cJSON *desc = cJSON_GetObjectItemCaseSensitive(remote_tool, "description");
+         cJSON *schema = cJSON_GetObjectItemCaseSensitive(remote_tool, "inputSchema");
+         emit_remote_tool_def(tools, name->valuestring, desc, schema, openai_format);
+      }
+   }
    cJSON_Delete(remote_tools);
+
+   /* After local (server-hosted) plugins, federate aimee-kb-hosted plugin defs. */
+   append_federated_kb_tools(tools, openai_format, &cu_policy);
 }
 
 cJSON *delegate_respond_spec(void)
@@ -992,6 +1051,9 @@ static cJSON *tp_web_search(void)
    cJSON *props = cJSON_CreateObject();
    tp_prop(props, "query", "string", "The search query");
    tp_prop(props, "max_results", "integer", "Maximum results to return (default 5, max 10)");
+   tp_prop(props, "fetch_pages", "boolean",
+           "Fetch the top results and return relevant extracted page text as well as engine "
+           "snippets (default true). Set false for a faster, snippets-only search.");
    cJSON_AddItemToObject(params, "properties", props);
    cJSON *req = cJSON_CreateArray();
    cJSON_AddItemToArray(req, cJSON_CreateString("query"));
@@ -1186,6 +1248,9 @@ static cJSON *tp_search_docs(void)
    cJSON *props = cJSON_CreateObject();
    tp_prop(props, "query", "string",
            "What you want to know about the project — a question or topic");
+   tp_prop(props, "project", "string",
+           "Stable indexed project ID. Defaults to the active project resolved from cwd.");
+   tp_prop(props, "scope", "string", "current (default) or all for explicit cross-project search");
    tp_prop(props, "max_results", "integer", "Maximum passages to return (default 3, max 8)");
    cJSON_AddItemToObject(params, "properties", props);
    cJSON *req = cJSON_CreateArray();
@@ -1268,8 +1333,10 @@ static const builtin_tool_def_t g_builtin_tools[] = {
      "read by handle (r1..rN) without re-emitting a URL.",
      tp_web_search, TSURF_ALL},
     {"web_read",
-     "Read a web page token-lean: fetches once server-side and returns only the query-relevant "
-     "spans (exact API/error/version needles guaranteed in), cited by id and fenced as untrusted. "
+     "Read a web page token-lean: fetches once server-side and returns the parts of the page the "
+     "query occurs in, cited by id and fenced as untrusted. Extraction is deterministic: matches "
+     "are located, widened to readable windows, merged, and emitted in document order until the "
+     "span budget is spent. "
      "Accepts a web_search handle ('r2') or a raw http(s) URL. Prefer this over curl-ing a page "
      "into context; span=N / mode=\"full\" recover anything the ranker dropped.",
      tp_web_read, TSURF_ALL},
@@ -1453,6 +1520,107 @@ void agent_tools_set_shell_git_gate(agent_shell_git_gate_fn fn)
 agent_shell_git_gate_fn agent_tools_shell_git_gate(void)
 {
    return g_shell_git_gate;
+}
+
+/* See agent_tools.h. Exact-set coverage between the built-in tool table and the
+ * egress declaration registry. Count equality would not be enough: an omitted
+ * declaration plus a stale extra one yields equal counts, so both directions
+ * are checked by name. */
+int agent_tools_validate_egress_table(char *err, size_t err_len)
+{
+   size_t n = sizeof(g_builtin_tools) / sizeof(g_builtin_tools[0]);
+
+   /* 1. Every built-in is declared, and declared to something valid. */
+   for (size_t i = 0; i < n; i++)
+   {
+      const char *name = g_builtin_tools[i].name;
+      if (tool_egress_for(name) == TOOL_EGRESS_UNSET)
+      {
+         if (err && err_len)
+            snprintf(err, err_len,
+                     "tool \"%s\" has no egress declaration; add it to "
+                     "modules/workflows/tool_egress.c",
+                     name);
+         return -1;
+      }
+      /* 2. No duplicate names within the tool table itself, compared the same
+       *    case-insensitive way the registry resolves them. */
+      for (size_t j = i + 1; j < n; j++)
+         if (tool_egress_names_equal(name, g_builtin_tools[j].name))
+         {
+            if (err && err_len)
+               snprintf(err, err_len, "tool \"%s\" is registered twice", name);
+            return -1;
+         }
+   }
+
+   /* 3. No duplicate declaration names, compared the SAME case-insensitive way
+    *    tool_egress_for() resolves them. A case-variant duplicate would other-
+    *    wise be accepted while lookup silently used only the first entry --
+    *    which is exactly how a conflicting classification could hide. */
+   int m = tool_egress_count();
+   for (int i = 0; i < m; i++)
+      for (int j = i + 1; j < m; j++)
+         if (tool_egress_names_equal(tool_egress_name_at(i), tool_egress_name_at(j)))
+         {
+            if (err && err_len)
+               snprintf(err, err_len, "egress declaration for \"%s\" is duplicated",
+                        tool_egress_name_at(i));
+            return -1;
+         }
+
+   /* 4. Every declaration resolves to something real, in the right direction:
+    *      - a canonical entry must name a registered built-in;
+    *      - an alias must name a canonical entry that exists and agrees on class.
+    *    Aliases are validated rather than skipped, so an alias can never stand in
+    *    for the canonical declaration a built-in is required to have. */
+   for (int i = 0; i < m; i++)
+   {
+      const char *dname = tool_egress_name_at(i);
+      const char *canon = tool_egress_canonical_at(i);
+      if (canon)
+      {
+         int target = -1;
+         for (int j = 0; j < m; j++)
+            if (tool_egress_names_equal(canon, tool_egress_name_at(j)) &&
+                tool_egress_canonical_at(j) == NULL)
+            {
+               target = j;
+               break;
+            }
+         if (target < 0)
+         {
+            if (err && err_len)
+               snprintf(err, err_len, "egress alias \"%s\" names no canonical declaration \"%s\"",
+                        dname, canon);
+            return -1;
+         }
+         if (tool_egress_class_at(target) != tool_egress_class_at(i))
+         {
+            if (err && err_len)
+               snprintf(err, err_len,
+                        "egress alias \"%s\" (%s) disagrees with canonical \"%s\" (%s)", dname,
+                        tool_egress_class_name(tool_egress_class_at(i)), canon,
+                        tool_egress_class_name(tool_egress_class_at(target)));
+            return -1;
+         }
+         continue;
+      }
+      int found = 0;
+      for (size_t j = 0; j < n && !found; j++)
+         if (tool_egress_names_equal(dname, g_builtin_tools[j].name))
+            found = 1;
+      if (!found)
+      {
+         if (err && err_len)
+            snprintf(err, err_len,
+                     "egress declaration for \"%s\" names no registered tool "
+                     "(stale entry in modules/workflows/tool_egress.c)",
+                     dname);
+         return -1;
+      }
+   }
+   return 0;
 }
 
 static void emit_builtin_tools(cJSON *tools, unsigned surface)

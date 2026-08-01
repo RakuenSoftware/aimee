@@ -15,6 +15,11 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 
+/* The HTTP client is also used by small standalone binaries that do not link
+ * the agent runtime. In the server this resolves to the parallel worker's
+ * thread-local cancellation flag; elsewhere the weak symbol is absent. */
+int agent_request_cancelled(void) __attribute__((weak));
+
 static SSL_CTX *s_ssl_ctx;
 
 void agent_http_init(void)
@@ -135,6 +140,28 @@ static int64_t conn_now_ns(void)
 static int conn_past_deadline(const http_conn_t *conn)
 {
    return conn->deadline_ns && conn_now_ns() > conn->deadline_ns;
+}
+
+static int conn_cancelled(void)
+{
+   return agent_request_cancelled && agent_request_cancelled();
+}
+
+/* A panel deadline is shorter than an individual provider timeout. Once a
+ * connection exists, poll blocking socket/TLS operations frequently enough for
+ * the parallel worker's cancellation flag to interrupt the provider call before
+ * pthread_join can extend the panel past its wall-clock budget. */
+#define HTTP_CANCEL_POLL_MS 100
+
+static void conn_enable_cancel_poll(http_conn_t *conn)
+{
+   if (!conn || conn->fd < 0 || !agent_request_cancelled)
+      return;
+   struct timeval tv;
+   tv.tv_sec = 0;
+   tv.tv_usec = HTTP_CANCEL_POLL_MS * 1000;
+   setsockopt(conn->fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+   setsockopt(conn->fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 }
 
 static int connect_with_timeout(const char *host, int port, int timeout_ms)
@@ -385,6 +412,8 @@ static int conn_open(http_conn_t *conn, const parsed_url_t *url, int timeout_ms)
       }
    }
 
+   conn_enable_cancel_poll(conn);
+
    if (url->use_ssl)
    {
       if (!s_ssl_ctx)
@@ -406,7 +435,23 @@ static int conn_open(http_conn_t *conn, const parsed_url_t *url, int timeout_ms)
       /* Enable hostname verification */
       SSL_set1_host(conn->ssl, url->host);
 
-      if (SSL_connect(conn->ssl) <= 0)
+      int connected = 0;
+      while (!conn_cancelled() && !conn_past_deadline(conn))
+      {
+         int rc = SSL_connect(conn->ssl);
+         if (rc == 1)
+         {
+            connected = 1;
+            break;
+         }
+         int ssl_err = SSL_get_error(conn->ssl, rc);
+         if (ssl_err == SSL_ERROR_WANT_READ || ssl_err == SSL_ERROR_WANT_WRITE ||
+             (ssl_err == SSL_ERROR_SYSCALL &&
+              (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)))
+            continue;
+         break;
+      }
+      if (!connected)
       {
          SSL_free(conn->ssl);
          close(conn->fd);
@@ -435,9 +480,29 @@ static void conn_close(http_conn_t *conn)
 
 static ssize_t conn_write(http_conn_t *conn, const void *buf, size_t len)
 {
-   if (conn->ssl)
-      return SSL_write(conn->ssl, buf, (int)len);
-   return send(conn->fd, buf, len, 0);
+   for (;;)
+   {
+      if (conn_cancelled() || conn_past_deadline(conn))
+         return -1;
+      if (conn->ssl)
+      {
+         ssize_t n = SSL_write(conn->ssl, buf, (int)len);
+         if (n > 0)
+            return n;
+         int err = SSL_get_error(conn->ssl, (int)n);
+         if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE ||
+             (err == SSL_ERROR_SYSCALL &&
+              (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)))
+            continue;
+         return -1;
+      }
+      ssize_t n = send(conn->fd, buf, len, 0);
+      if (n >= 0)
+         return n;
+      if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
+         continue;
+      return -1;
+   }
 }
 
 static ssize_t conn_read(http_conn_t *conn, void *buf, size_t len)
@@ -450,6 +515,8 @@ static ssize_t conn_read(http_conn_t *conn, void *buf, size_t len)
     * actually past. Only a real EOF or error ends the read early. */
    for (;;)
    {
+      if (conn_cancelled())
+         return -1;
       if (conn->ssl)
       {
          ssize_t n = SSL_read(conn->ssl, buf, (int)len);
@@ -462,7 +529,7 @@ static ssize_t conn_read(http_conn_t *conn, void *buf, size_t len)
              (err == SSL_ERROR_SYSCALL &&
               (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)))
          {
-            if (conn_past_deadline(conn))
+            if (conn_cancelled() || conn_past_deadline(conn))
                return -1;
             continue; /* SO_RCVTIMEO fired; peer is slow, not gone */
          }
@@ -471,8 +538,8 @@ static ssize_t conn_read(http_conn_t *conn, void *buf, size_t len)
       ssize_t n = recv(conn->fd, buf, len, 0);
       if (n >= 0)
          return n;
-      if (errno == EINTR ||
-          ((errno == EAGAIN || errno == EWOULDBLOCK) && !conn_past_deadline(conn)))
+      if (errno == EINTR || ((errno == EAGAIN || errno == EWOULDBLOCK) && !conn_cancelled() &&
+                             !conn_past_deadline(conn)))
          continue;
       return -1;
    }
@@ -538,7 +605,18 @@ static int send_request(http_conn_t *conn, const char *method, const parsed_url_
          off += n;
    }
 
-   /* Append newline-separated extra headers */
+   /* Append extra headers, one per line.
+    *
+    * Callers use BOTH conventions for the separator: some pass "A: x\nB: y",
+    * others pass "A: x\r\n". Splitting on '\n' alone leaves a trailing '\r' on
+    * every line of the second form, which is then re-terminated here and emits
+    * "A: x\r\r\n" -- a bare CR inside the header block.
+    *
+    * Lenient origins ignore that; CDNs do not. Measured live: with a trailing
+    * "\r\n" Accept header, example.com returned 200 while
+    * raw.githubusercontent.com and en.wikipedia.org both returned 400. That is
+    * why page reads failed against real sites while search (which happened to
+    * use bare '\n') worked. Trim the CR so both conventions are accepted. */
    if (extra_headers && extra_headers[0])
    {
       char tmp[512];
@@ -547,6 +625,9 @@ static int send_request(http_conn_t *conn, const char *method, const parsed_url_
       char *line = strtok_r(tmp, "\n", &saveptr);
       while (line)
       {
+         size_t ll = strlen(line);
+         while (ll > 0 && (line[ll - 1] == '\r' || line[ll - 1] == ' '))
+            line[--ll] = '\0';
          if (line[0])
          {
             int n = snprintf(req + off, cap - (size_t)off, "%s\r\n", line);
@@ -1209,8 +1290,49 @@ int agent_http_get_stream(const char *url, const char *extra_headers, agent_http
 int agent_http_post(const char *url, const char *auth_header, const char *body, char **response_buf,
                     int timeout_ms, const char *extra_headers)
 {
-   return agent_http_post_content_type(url, auth_header, "Content-Type: application/json", body,
-                                       response_buf, timeout_ms, extra_headers);
+   return agent_http_post_bytes(url, auth_header, body, body ? strlen(body) : 0, response_buf,
+                                timeout_ms, extra_headers);
+}
+
+int agent_http_post_bytes(const char *url, const char *auth_header, const void *body,
+                          size_t body_len, char **response_buf, int timeout_ms,
+                          const char *extra_headers)
+{
+   *response_buf = NULL;
+
+   parsed_url_t pu;
+   if (parse_url(url, &pu) < 0)
+      return -1;
+
+   aimee_log(LOG_DEBUG, "agent_http", "connecting to %s:%d (timeout %dms)", pu.host, pu.port,
+             timeout_ms);
+   http_conn_t conn;
+   if (conn_open(&conn, &pu, timeout_ms) < 0)
+   {
+      aimee_log(LOG_ERROR, "agent_http", "TCP connect failed: %s:%d", pu.host, pu.port);
+      return -1;
+   }
+
+   aimee_log(LOG_DEBUG, "agent_http", "connected; sending request to %s:%d (%zu body bytes)",
+             pu.host, pu.port, body_len);
+   if (send_request(&conn, "POST", &pu, "Content-Type: application/json", auth_header,
+                    extra_headers, "aimee/1.0", body, body_len) < 0)
+   {
+      aimee_log(LOG_ERROR, "agent_http", "send_request failed: %s:%d", pu.host, pu.port);
+      conn_close(&conn);
+      return -1;
+   }
+
+   size_t resp_len = 0;
+   int status = http_read_response(&conn, response_buf, &resp_len);
+   conn_close(&conn);
+   if (status < 0)
+   {
+      free(*response_buf);
+      *response_buf = NULL;
+      aimee_log(LOG_ERROR, "agent_http", "read_response failed: %s:%d", pu.host, pu.port);
+   }
+   return status;
 }
 
 int agent_http_post_content_type(const char *url, const char *auth_header, const char *content_type,
@@ -1300,6 +1422,38 @@ int agent_http_put(const char *url, const char *auth_header, const char *body, c
    return status;
 }
 
+int agent_http_patch(const char *url, const char *auth_header, const char *body,
+                     char **response_buf, int timeout_ms, const char *extra_headers)
+{
+   *response_buf = NULL;
+
+   parsed_url_t pu;
+   if (parse_url(url, &pu) < 0)
+      return -1;
+
+   http_conn_t conn;
+   if (conn_open(&conn, &pu, timeout_ms) < 0)
+      return -1;
+
+   if (send_request(&conn, "PATCH", &pu, "Content-Type: application/json", auth_header,
+                    extra_headers, "aimee/1.0", body, body ? strlen(body) : 0) < 0)
+   {
+      conn_close(&conn);
+      return -1;
+   }
+
+   size_t resp_len = 0;
+   int status = http_read_response(&conn, response_buf, &resp_len);
+   conn_close(&conn);
+   if (status < 0)
+   {
+      free(*response_buf);
+      *response_buf = NULL;
+      aimee_log(LOG_ERROR, "agent_http", "PATCH request failed");
+   }
+   return status;
+}
+
 int agent_http_post_form(const char *url, const char *body, char **response_buf, int timeout_ms)
 {
    *response_buf = NULL;
@@ -1335,6 +1489,14 @@ int agent_http_post_stream(const char *url, const char *auth_header, const char 
                            agent_http_stream_cb callback, void *userdata, int timeout_ms,
                            const char *extra_headers)
 {
+   return agent_http_post_stream_bytes(url, auth_header, body, body ? strlen(body) : 0, callback,
+                                       userdata, timeout_ms, extra_headers);
+}
+
+int agent_http_post_stream_bytes(const char *url, const char *auth_header, const void *body,
+                                 size_t body_len, agent_http_stream_cb callback, void *userdata,
+                                 int timeout_ms, const char *extra_headers)
+{
    parsed_url_t pu;
    if (parse_url(url, &pu) < 0)
       return -1;
@@ -1344,7 +1506,7 @@ int agent_http_post_stream(const char *url, const char *auth_header, const char 
       return -1;
 
    if (send_request(&conn, "POST", &pu, "Content-Type: application/json", auth_header,
-                    extra_headers, "aimee/1.0", body, body ? strlen(body) : 0) < 0)
+                    extra_headers, "aimee/1.0", body, body_len) < 0)
    {
       conn_close(&conn);
       return -1;

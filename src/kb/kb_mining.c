@@ -257,13 +257,11 @@ static int propose_recurrence(const char *role, const char *failure_mode, int ev
 
    /* Learning surface: check for existing case precedent before proposing. */
    {
-      config_t mining_cfg;
-      config_load(&mining_cfg);
       char *tmp_json = cJSON_PrintUnformatted(payload);
       if (tmp_json)
       {
          kb_reasoning_case_result_t cases[1];
-         int nc = kb_reasoning_case_recall(&mining_cfg, tmp_json, "workspace", "", cases, 1);
+         int nc = kb_reasoning_case_recall(tmp_json, "workspace", "", cases, 1);
          if (nc > 0 && cases[0].artifact_id[0])
             cJSON_AddStringToObject(payload, "prior_case_id", cases[0].artifact_id);
          free(tmp_json);
@@ -282,9 +280,7 @@ static int propose_recurrence(const char *role, const char *failure_mode, int ev
     * an existing pending proposal rather than spamming new ones (and never produces
     * both a direct artifact and a proposal for one cluster). */
    {
-      config_t lcfg;
-      config_load(&lcfg);
-      if (lcfg.kb_mining_failure_learning_enabled)
+      if (config_kb_mining_failure_learning_enabled())
       {
          char target_key[256];
          snprintf(target_key, sizeof(target_key), "delegate_exit:%s:%s", role ? role : "",

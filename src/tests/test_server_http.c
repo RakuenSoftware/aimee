@@ -1,17 +1,135 @@
 /* test_server_http.c: unit tests for the aimee-server /v1 persona routes and
  * the per-session persona store (no socket I/O). */
 #include "server_http.h"
+#include "server_http_authz.h"
+#include "server_http_internal.h"
+#include "runtime_secret.h"
+#include "http_content_encoding.h"
 #include "server.h" /* CAP_* / CAPS_* bits, server_capability_for_method */
 #include "server/server_mgmt_endpoint.h"
+#include "server/wfe_http_proxy.h"
+#include "agent_config.h"
+#include "config.h"
+#include "cJSON.h"
+#include "db1.h"
 #include "openai_runs_store.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
+#include "util.h"
 #include <netinet/in.h> /* INADDR_ANY / INADDR_LOOPBACK for the bind-policy test */
 #include <assert.h>
+#include <pthread.h>
 #include <stdio.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/un.h>
+#include <sys/wait.h>
+
+extern int g_remote_writes;
+
+typedef struct
+{
+   pthread_barrier_t *barrier;
+   int result;
+   char bearer[65];
+} wizard_bootstrap_thread_t;
+
+static void *wizard_bootstrap_thread(void *arg)
+{
+   wizard_bootstrap_thread_t *thread = arg;
+   int barrier_result = pthread_barrier_wait(thread->barrier);
+   assert(barrier_result == 0 || barrier_result == PTHREAD_BARRIER_SERIAL_THREAD);
+   thread->result =
+       server_http_first_user_bootstrap("webuser:alice", thread->bearer, sizeof(thread->bearer));
+   return NULL;
+}
+
+int kb_client_mtls_management_jwks_fetch(void *ctx, char *out, size_t cap, size_t *len)
+{
+   (void)ctx;
+   if (out && cap)
+      out[0] = 0;
+   if (len)
+      *len = 0;
+   return -1;
+}
+
+int kb_client_mtls_managed_metadata(char *server_id, size_t cap, long long *team_id)
+{
+   (void)server_id;
+   (void)cap;
+   (void)team_id;
+   return 0;
+}
+
+int audit_worm_append(const char *role, const char *principal, const char *action,
+                      const char *resource, const char *verdict, const char *detail)
+{
+   (void)role;
+   (void)principal;
+   (void)action;
+   (void)resource;
+   (void)verdict;
+   (void)detail;
+   return 0;
+}
+
+server_mgmt_checkpoint_result_t
+server_mgmt_checkpoint_client_verify(const server_mgmt_endpoint_request_t *rq,
+                                     const server_mgmt_token_claims_t *claims, uint64_t generation,
+                                     const char *digest)
+{
+   (void)rq;
+   (void)claims;
+   (void)generation;
+   (void)digest;
+   return SERVER_MGMT_CHECKPOINT_UNAVAILABLE;
+}
+
+int server_mgmt_checkpoint_client_start(const server_http_management_config_t *config)
+{
+   (void)config;
+   return 0;
+}
+
+void server_mgmt_checkpoint_client_stop(void)
+{
+}
+
+/* The route-only fixture links server_dev_submit without the autonomy driver;
+ * keep its shared intake cap at the production default. */
+double wfe_autonomy_default_max_cost_usd(void)
+{
+   return 5.0;
+}
+
+/* Narrow response-writer seams not otherwise needed by this route-only unit. */
+const char *ingress_preinject_turn_id(void)
+{
+   return "";
+}
+int anthropic_http_response_retry_after(void)
+{
+   return 0;
+}
+int server_conn_io_write_all(int fd, const void *buf, int n)
+{
+   const unsigned char *cursor = buf;
+   int sent = 0;
+   while (sent < n)
+   {
+      ssize_t rc = write(fd, cursor + sent, (size_t)(n - sent));
+      if (rc <= 0)
+         return -1;
+      sent += (int)rc;
+   }
+   return 0;
+}
 
 /* Stub completion handler: proves the route dispatches to a registered handler
  * and passes the body through, without linking the real inference stack. */
@@ -39,6 +157,55 @@ static int stub_models_provider(char ids[][SERVER_HTTP_MODEL_ID_MAX], int max)
    return 2;
 }
 
+/* Stub readiness providers. These stand in for the real snapshot provider so
+ * the route's own contract can be tested without a dependency closure:
+ *   _failing  a sampled snapshot with one dependency down (503)
+ *   _ok       everything sampled and healthy (200)
+ *   _bogus    a misbehaving provider: writes nothing, returns a nonsense
+ *             status. The route must fail closed rather than pass it through. */
+static int stub_ready_failing(char *resp, int cap)
+{
+   snprintf(resp, (size_t)cap,
+            "{\"ready\":false,\"status\":\"degraded\",\"service\":\"aimee-server\","
+            "\"dependencies\":{\"db1\":\"ok\",\"kb\":\"fail\"}}");
+   return 503;
+}
+
+static int stub_ready_ok(char *resp, int cap)
+{
+   snprintf(resp, (size_t)cap,
+            "{\"ready\":true,\"status\":\"ok\",\"service\":\"aimee-server\","
+            "\"dependencies\":{\"db1\":\"ok\",\"kb\":\"ok\"}}");
+   return 200;
+}
+
+static int stub_ready_bogus(char *resp, int cap)
+{
+   (void)resp;
+   (void)cap;
+   return 0;
+}
+
+/* Providers whose status and body disagree. The route must not pass either
+ * through: a provider samples, it does not get to define the contract. */
+static int stub_ready_200_not_ready(char *resp, int cap)
+{
+   snprintf(resp, (size_t)cap, "{\"ready\":false,\"status\":\"degraded\",\"dependencies\":{}}");
+   return 200;
+}
+
+static int stub_ready_503_ready(char *resp, int cap)
+{
+   snprintf(resp, (size_t)cap, "{\"ready\":true,\"status\":\"ok\",\"dependencies\":{}}");
+   return 503;
+}
+
+static int stub_ready_odd_status(char *resp, int cap)
+{
+   snprintf(resp, (size_t)cap, "{\"ready\":true,\"status\":\"ok\",\"dependencies\":{}}");
+   return 418;
+}
+
 /* Dispatch-backed first-class /v1 routes in server_http.o reference
  * server_dispatch() and server_active_ctx() (server.c / server_main.c, not
  * linked into this test). Stub them for linking. */
@@ -48,6 +215,9 @@ static int stub_models_provider(char ids[][SERVER_HTTP_MODEL_ID_MAX], int max)
 static _Thread_local char g_disp_method[96];
 static _Thread_local char g_disp_body[24576];
 static char g_agg_body[24576];
+static atomic_int g_op_context_clean;
+static server_ctx_t g_test_server_ctx;
+static int g_test_server_ctx_available = 1;
 
 int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, size_t msg_len)
 {
@@ -66,6 +236,22 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
       if (q && (size_t)(q - p) < sizeof(g_disp_method))
          snprintf(g_disp_method, sizeof(g_disp_method), "%.*s", (int)(q - p), p);
    }
+   if (strcmp(g_disp_method, "test.poison_op_context") == 0)
+   {
+      run_cmd_set_cwd("/client-only/checkout");
+      agent_set_request_session("stale-session");
+      agent_set_request_codex_creds("stale-token", "stale-account");
+      agent_set_request_vault_principal("stale-principal");
+   }
+   else if (strcmp(g_disp_method, "test.inspect_op_context") == 0)
+   {
+      agent_request_creds_t creds;
+      agent_request_creds_snapshot(&creds);
+      atomic_store(&g_op_context_clean, run_cmd_get_cwd() == NULL && creds.session_id[0] == '\0' &&
+                                            creds.codex_token[0] == '\0' &&
+                                            creds.codex_account_id[0] == '\0' &&
+                                            creds.vault_principal[0] == '\0');
+   }
    /* Mimic a real method handler: write an NDJSON response to the loopback fd
     * the first-class /v1 route handed us, so the capture path is exercised end to
     * end. */
@@ -76,43 +262,109 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
 }
 server_ctx_t *server_active_ctx(void)
 {
-   return NULL;
+   return g_test_server_ctx_available ? &g_test_server_ctx : NULL;
 }
 
-/* The HTTP router owns only the adapter around management authorization. The
- * authorization/audit stack has its own tests, so keep this route test isolated. */
-int server_mgmt_endpoint_dispatch(const char *jwt, const char *jwks, const char *issuer,
-                                  const char *audience, const char *peer_cn,
-                                  const char *required_cap, const char *target,
-                                  const char *request_digest, server_mgmt_action_fn action,
-                                  void *ctx, char *actor, size_t actor_cap, char *jti,
-                                  size_t jti_cap)
+static void submit_and_wait_op(const char *method)
 {
-   (void)jwt;
-   (void)jwks;
-   (void)issuer;
-   (void)audience;
-   (void)peer_cn;
-   (void)required_cap;
-   (void)target;
-   (void)request_digest;
-   (void)action;
-   (void)ctx;
-   (void)actor;
-   (void)actor_cap;
-   (void)jti;
-   (void)jti_cap;
-   return -1;
+   char response[8192];
+   assert(server_http_submit_op_run(method, "{}", CAPS_ALL, response, sizeof(response)) == 200);
+   cJSON *queued = cJSON_Parse(response);
+   assert(queued);
+   const char *run_id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(queued, "id"));
+   assert(run_id && run_id[0]);
+   char saved_id[128];
+   snprintf(saved_id, sizeof(saved_id), "%s", run_id);
+   cJSON_Delete(queued);
+   openai_run_status_t status = OPENAI_RUN_QUEUED;
+   for (int i = 0; i < 100; i++)
+   {
+      assert(openai_runs_store_status(saved_id, &status));
+      if (openai_run_status_terminal(status))
+         break;
+      usleep(10000);
+   }
+   assert(status == OPENAI_RUN_COMPLETED);
+}
+
+static void test_wfe_http_proxy_round_trip(void)
+{
+   char temp[] = "/tmp/aimee-wfe-proxy-XXXXXX";
+   assert(mkdtemp(temp) != NULL);
+   char socket_path[sizeof(((struct sockaddr_un *)0)->sun_path)];
+   assert(snprintf(socket_path, sizeof(socket_path), "%s/wfe.sock", temp) > 0);
+
+   int listener = socket(AF_UNIX, SOCK_STREAM, 0);
+   assert(listener >= 0);
+   struct sockaddr_un addr = {.sun_family = AF_UNIX};
+   assert(snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", socket_path) > 0);
+   assert(bind(listener, (struct sockaddr *)&addr, sizeof(addr)) == 0);
+   assert(listen(listener, 1) == 0);
+
+   pid_t child = fork();
+   assert(child >= 0);
+   if (child == 0)
+   {
+      int client = accept(listener, NULL, NULL);
+      if (client < 0)
+         _exit(10);
+      char request[4096] = "";
+      size_t used = 0;
+      while (used + 1 < sizeof(request))
+      {
+         ssize_t got = read(client, request + used, sizeof(request) - used - 1);
+         if (got <= 0)
+            _exit(11);
+         used += (size_t)got;
+         request[used] = '\0';
+         if (strstr(request, "{\"proposal_md\":\"test\"}"))
+            break;
+      }
+      if (!strstr(request, "POST /v1/dev/submit?source=release-test HTTP/1.1\r\n") ||
+          !strstr(request, "Authorization: Bearer proxy-test-token\r\n") ||
+          !strstr(request, "X-Aimee-Webuser: webuser:release-test\r\n"))
+         _exit(12);
+      const char *response = "HTTP/1.1 202 Accepted\r\nContent-Type: application/json\r\n"
+                             "Content-Length: 30\r\nConnection: close\r\n\r\n"
+                             "{\"ok\":true,\"work_item_id\":\"w\"}";
+      if (write(client, response, strlen(response)) != (ssize_t)strlen(response))
+         _exit(13);
+      close(client);
+      close(listener);
+      _exit(0);
+   }
+
+   setenv("AIMEE_WFE_HTTP_SOCKET", socket_path, 1);
+   assert(runtime_secret_store("AIMEE_API_BEARER_TOKEN", "proxy-test-token") == 0);
+   char response[256];
+   const char *body = "{\"proposal_md\":\"test\"}";
+   int status = wfe_http_proxy_request("POST", "/v1/dev/submit", "source=release-test", body,
+                                       (int)strlen(body), "webuser:release-test", response,
+                                       sizeof(response));
+   unsetenv("AIMEE_WFE_HTTP_SOCKET");
+   runtime_secret_remove("AIMEE_API_BEARER_TOKEN");
+   int child_status = 0;
+   assert(waitpid(child, &child_status, 0) == child);
+   assert(WIFEXITED(child_status) && WEXITSTATUS(child_status) == 0);
+   assert(status == 202);
+   assert(strcmp(response, "{\"ok\":true,\"work_item_id\":\"w\"}") == 0);
+   close(listener);
+   assert(unlink(socket_path) == 0);
+   assert(rmdir(temp) == 0);
 }
 
 int main(void)
 {
    printf("server_http: ");
 
+   test_wfe_http_proxy_round_trip();
+
    char home[PATH_MAX];
    snprintf(home, sizeof(home), "%s/aimee-shttp-XXXXXX", platform_tmpdir());
    assert(platform_mkdtemp(home) != NULL);
    platform_setenv("AIMEE_HOME", home);
+   assert(compute_pool_init(&g_test_server_ctx.orchestration_pool, 4) == 0);
+   g_test_server_ctx.orchestration_pool_initialized = 1;
 
    char resp[8192];
 
@@ -122,6 +374,99 @@ int main(void)
       assert(st == 200);
       assert(strstr(resp, "\"status\":\"ok\""));
       assert(strstr(resp, "\"service\":\"aimee-server\""));
+   }
+
+   /* --- /v1/health stays LIVENESS: unconditionally 200, never dependency-aware.
+    * Readiness lives at /v1/ready. Pinning the exact body here keeps the
+    * liveness contract — and the aimee-kb probe symmetry it mirrors — from
+    * drifting into a readiness answer, which would make an orchestrator restart
+    * a healthy process during a transient dependency outage. --- */
+   {
+      int st = server_http_route("GET", "/v1/health", NULL, 0, resp, sizeof(resp));
+      assert(st == 200);
+      assert(strcmp(resp, "{\"status\":\"ok\",\"service\":\"aimee-server\"}") == 0);
+   }
+
+   /* --- GET /v1/ready is readiness, and fails closed ---
+    * Unregistered means "not sampled yet", which must never read as ready. The
+    * body keeps one shape in every case so a client parsing .ready/.dependencies
+    * never special-cases an unsampled server. */
+   {
+      /* No provider: unknown ⇒ 503, not 200 and not a bare error shape. */
+      int st = server_http_route("GET", "/v1/ready", NULL, 0, resp, sizeof(resp));
+      assert(st == 503);
+      assert(strstr(resp, "\"ready\":false"));
+      assert(strstr(resp, "\"status\":\"unknown\""));
+      assert(strstr(resp, "\"dependencies\":"));
+
+      /* A sampled snapshot with a dependency down reports 503 and names it.
+       * This is the assertion that would fail against a blind endpoint: swap in
+       * stub_ready_ok below and it breaks, which is what proves the test
+       * detects blindness rather than observing a constant. */
+      server_http_set_ready_provider(stub_ready_failing);
+      st = server_http_route("GET", "/v1/ready", NULL, 0, resp, sizeof(resp));
+      assert(st == 503);
+      assert(strstr(resp, "\"ready\":false"));
+      assert(strstr(resp, "\"kb\":\"fail\""));
+
+      /* Everything healthy ⇒ 200. */
+      server_http_set_ready_provider(stub_ready_ok);
+      st = server_http_route("GET", "/v1/ready", NULL, 0, resp, sizeof(resp));
+      assert(st == 200);
+      assert(strstr(resp, "\"ready\":true"));
+
+      /* A misbehaving provider must not be able to advertise readiness. */
+      server_http_set_ready_provider(stub_ready_bogus);
+      st = server_http_route("GET", "/v1/ready", NULL, 0, resp, sizeof(resp));
+      assert(st == 503);
+      assert(strstr(resp, "\"ready\":false"));
+
+      /* Status and body must agree. A 200 that does not say ready:true, a 503
+       * that does, and any status outside {200,503} are all provider bugs — the
+       * route replaces them with the fail-closed answer rather than forwarding a
+       * contradiction a caller would have to reconcile. */
+      server_http_set_ready_provider(stub_ready_200_not_ready);
+      st = server_http_route("GET", "/v1/ready", NULL, 0, resp, sizeof(resp));
+      assert(st == 503);
+      assert(strstr(resp, "\"ready\":false"));
+
+      server_http_set_ready_provider(stub_ready_503_ready);
+      st = server_http_route("GET", "/v1/ready", NULL, 0, resp, sizeof(resp));
+      assert(st == 503);
+      assert(strstr(resp, "\"ready\":false"));
+      assert(!strstr(resp, "\"ready\":true"));
+
+      server_http_set_ready_provider(stub_ready_odd_status);
+      st = server_http_route("GET", "/v1/ready", NULL, 0, resp, sizeof(resp));
+      assert(st == 503);
+      assert(strstr(resp, "\"ready\":false"));
+
+      server_http_set_ready_provider(NULL);
+   }
+
+   /* Legacy management environment cannot bypass the composed action packet. */
+   {
+      platform_setenv("AIMEE_MGMT_JWKS", "{\"keys\":[]}");
+      platform_setenv("AIMEE_MGMT_ISSUER", "legacy-issuer");
+      platform_setenv("AIMEE_MGMT_AUDIENCE", "legacy-audience");
+      platform_setenv("AIMEE_MGMT_PEER_CN", "legacy-peer");
+      int st = server_http_route("POST", "/v1/management/action",
+                                 "{\"token\":\"legacy\",\"target\":\"x\"}", 31, resp, sizeof(resp));
+      assert(st == 403);
+      assert(!strcmp(resp, "{\"result\":\"denied\",\"effect\":\"none\"}"));
+   }
+
+   /* Shutdown closes the full-action gate before dependency teardown. An
+    * already-admitted request remains accounted for until its final response. */
+   {
+      server_http_management_actions_start();
+      assert(server_http_management_action_begin() == 0);
+      server_http_management_actions_shutdown_begin();
+      assert(!server_http_management_action_allowed());
+      assert(server_http_management_action_begin() != 0);
+      server_http_management_action_end();
+      server_http_management_actions_stop_and_wait();
+      server_http_management_actions_start();
    }
 
    /* --- GET /v1/version reports the build version --- */
@@ -267,6 +612,17 @@ int main(void)
    {
       int st = server_http_route("POST", "/v1/health", NULL, 0, resp, sizeof(resp));
       assert(st == 404);
+   }
+
+   /* Go owns workflow state, but the public C resource plane must forward to it.
+    * An absent private socket is a service outage, not a retired 410 endpoint. */
+   {
+      unsetenv("AIMEE_WFE_HTTP_SOCKET");
+      int st = server_http_route("POST", "/v1/dev/submit", "{}", 2, resp, sizeof(resp));
+      assert(st == 503);
+      assert(strstr(resp, "control plane is unavailable"));
+      st = server_http_route("GET", "/v1/workflow/items/wi_test", NULL, 0, resp, sizeof(resp));
+      assert(st == 503);
    }
 
    /* --- GET /v1/personas lists built-ins --- */
@@ -457,7 +813,12 @@ int main(void)
       st = server_http_route("GET", "/v1/kb/status", NULL, 0, resp, sizeof(resp));
       assert(st == 200);
       assert(strstr(resp, "\"epoch\":3")); /* stub body */
+      st = server_http_route("GET", "/v1/kb/status", "{\"project\":\"release-e2e\"}", 25, resp,
+                             sizeof(resp));
+      assert(st == 200 && strstr(resp, "release-e2e"));
       server_http_set_kb_status_provider(NULL);
+      st = server_http_route("GET", "/v1/kb/ingest/status", NULL, 0, resp, sizeof(resp));
+      assert(st == 200 && strstr(resp, "\"pending\":0"));
    }
 
    /* --- GET /v1/agents: 503 until a provider is wired, then emits --- */
@@ -553,6 +914,126 @@ int main(void)
       server_http_set_notes_search_handler(NULL);
    }
 
+   /* --- server_http_authorize_multi: pairing a client must not evict one ---
+    *
+    * Enrolling a client used to be implemented AS rotating the single global
+    * bearer, so the second client to pair silently invalidated the first and
+    * every already-paired client started failing at the same instant. The whole
+    * point of the extra set is that both credentials keep working. */
+   {
+      const char *primary = "primary-token-aaaaaaaaaaaaaaaaaaaaaaaa";
+      const char *e1 = "enrolled-one-bbbbbbbbbbbbbbbbbbbbbbbbbb";
+      const char *e2 = "enrolled-two-cccccccccccccccccccccccccc";
+      const char *extra[] = {e1, e2};
+
+      char hdr[384];
+      snprintf(hdr, sizeof(hdr), "Bearer %s", primary);
+      assert(server_http_authorize_multi(1, primary, extra, 2, hdr, NULL, 0) == 0);
+
+      /* ...and BOTH enrolled clients still work — the property that was missing */
+      snprintf(hdr, sizeof(hdr), "Bearer %s", e1);
+      assert(server_http_authorize_multi(1, primary, extra, 2, hdr, NULL, 0) == 0);
+      snprintf(hdr, sizeof(hdr), "Bearer %s", e2);
+      assert(server_http_authorize_multi(1, primary, extra, 2, hdr, NULL, 0) == 0);
+
+      /* An unrelated token is still refused: the set is additive, not permissive. */
+      assert(server_http_authorize_multi(1, primary, extra, 2, "Bearer nope", NULL, 0) == 401);
+      assert(server_http_authorize_multi(1, primary, extra, 2, NULL, NULL, 0) == 401);
+
+      /* x-api-key honours the extra set exactly as Authorization does. */
+      assert(server_http_authorize_multi(1, primary, extra, 2, NULL, e2, 0) == 0);
+      assert(server_http_authorize_multi(1, primary, extra, 2, NULL, "nope", 0) == 401);
+
+      /* A near-miss must not pass: no prefix/substring acceptance. */
+      snprintf(hdr, sizeof(hdr), "Bearer %.*s", 10, e1);
+      assert(server_http_authorize_multi(1, primary, extra, 2, hdr, NULL, 0) == 401);
+
+      /* With no extras it must behave exactly like the single-token function. */
+      assert(server_http_authorize_multi(1, primary, NULL, 0, "Bearer nope", NULL, 0) ==
+             server_http_authorize(1, primary, "Bearer nope", NULL, 0));
+      snprintf(hdr, sizeof(hdr), "Bearer %s", primary);
+      assert(server_http_authorize_multi(1, primary, NULL, 0, hdr, NULL, 0) == 0);
+
+      /* UDS stays unauthenticated regardless of the extra set. */
+      assert(server_http_authorize_multi(0, primary, extra, 2, "Bearer nope", NULL, 0) == 0);
+
+      /* A 503 (no bearer configured on TCP) is a server misconfiguration that
+       * extra tokens must not paper over. */
+      assert(server_http_authorize_multi(1, "", extra, 2, "Bearer nope", NULL, 0) == 503);
+
+      /* Empty slots in the set are skipped, not treated as a wildcard match on
+       * an empty presented token. */
+      const char *sparse[] = {"", e1, ""};
+      assert(server_http_authorize_multi(1, primary, sparse, 3, "Bearer ", NULL, 0) == 401);
+      snprintf(hdr, sizeof(hdr), "Bearer %s", e1);
+      assert(server_http_authorize_multi(1, primary, sparse, 3, hdr, NULL, 0) == 0);
+
+      /* Live publication preserves enrolled clients at startup, while explicit
+       * rotation revokes the entire old set atomically. */
+      char live[256] = "";
+      server_http_set_bearer_extra(extra, 2);
+      server_http_update_primary_bearer(live, sizeof(live), primary, 0);
+      assert(server_http_enrolled_bearer_count() == 2);
+      snprintf(hdr, sizeof(hdr), "Bearer %s", e1);
+      assert(server_http_authorize_enrolled(1, live, hdr, NULL, 0) == 0);
+      server_http_update_primary_bearer(live, sizeof(live), "rotated-primary", 1);
+      assert(server_http_enrolled_bearer_count() == 0);
+      assert(server_http_authorize_enrolled(1, live, hdr, NULL, 0) == 401);
+      assert(server_http_authorize_enrolled(1, live, "Bearer rotated-primary", NULL, 0) == 0);
+
+      /* bearer_tokens_extra predates wizard enrollment and permits existing
+       * operator-supplied values longer than the new 64-hex minted token. An
+       * upgrade must not truncate and silently revoke those clients. */
+      char long_token[192];
+      memset(long_token, 'L', sizeof(long_token) - 1);
+      long_token[sizeof(long_token) - 1] = '\0';
+      const char *long_extra[] = {long_token};
+      server_http_set_bearer_extra(long_extra, 1);
+      snprintf(hdr, sizeof(hdr), "Bearer %s", long_token);
+      assert(server_http_authorize_enrolled(1, live, hdr, NULL, 0) == 0);
+      server_http_set_bearer_extra(NULL, 0);
+
+      printf("  PASS: authorize_multi accepts every enrolled client, rejects the rest\n");
+   }
+
+   /* --- server_http_auth_error_body: the 401 must carry a way out ---
+    *
+    * A bearer rotation invalidates every already-paired client at once, and the
+    * old body said only "missing or invalid bearer token" — indistinguishable
+    * from a typo, with no recovery path. Recovery must use the trusted local
+    * socket; the message must never direct an operator to a plaintext config
+    * credential because API bearers are Vault-only. */
+   {
+      const char *b401 = server_http_auth_error_body(401);
+      assert(b401 != NULL);
+      /* still identifies the failure */
+      assert(strstr(b401, "missing or invalid bearer token") != NULL);
+      assert(strstr(b401, "\"type\":\"authentication_error\"") != NULL);
+      /* ...and now says how to recover through the kernel-attested local path. */
+      assert(strstr(b401, "rotation") != NULL);
+      assert(strstr(b401, "aimee api enable") != NULL);
+      assert(strstr(b401, "aimee remote set") != NULL);
+      assert(strstr(b401, "Vault-only") != NULL);
+      assert(strstr(b401, "aimee.api.bearer_token") == NULL);
+
+      /* The 503 case is a server misconfiguration, not a client credential
+       * problem — it must NOT tell the caller to go re-pair. */
+      const char *b503 = server_http_auth_error_body(503);
+      assert(b503 != NULL);
+      assert(strstr(b503, "requires a configured bearer token") != NULL);
+      assert(strstr(b503, "aimee remote set") == NULL);
+      assert(strcmp(b401, b503) != 0);
+
+      /* Both must be parseable JSON objects, since clients decode before display. */
+      cJSON *j401 = cJSON_Parse(b401);
+      assert(j401 != NULL);
+      cJSON_Delete(j401);
+      cJSON *j503 = cJSON_Parse(b503);
+      assert(j503 != NULL);
+      cJSON_Delete(j503);
+      printf("  PASS: auth_error_body carries rotation recovery path\n");
+   }
+
    /* --- server_http_authorize: UDS vs TCP + bearer + session-key rule --- */
    {
       /* UDS is always authorized regardless of token, when no session key. */
@@ -581,25 +1062,301 @@ int main(void)
       assert(server_http_authorize(0, "secret", NULL, NULL, 1) == 0);
    }
 
-   /* --- server_http_bootstrap_gate: the one-time bootstrap bearer may ONLY
-    *     rotate itself; every other TCP route is refused until it is rotated. --- */
+   /* --- API primaries are operator/random Vault credentials, never a published
+    *     value with hidden special capabilities. Enrollment remains additive. --- */
    {
-      unsetenv("AIMEE_API_BEARER_TOKEN"); /* TOFU active */
-      const char *BOOT = "aimee-local-dev";
-      /* Bootstrap still live: real routes refused (1), rotate_bearer allowed (0). */
-      assert(server_http_bootstrap_gate(1, BOOT, "GET", "/v1/config") == 1);
-      assert(server_http_bootstrap_gate(1, BOOT, "POST", "/v1/config/set") == 1);
-      assert(server_http_bootstrap_gate(1, BOOT, "POST", "/v1/api/rotate_bearer") == 0);
-      /* GET on the rotate path is not the rotate op -> still refused. */
-      assert(server_http_bootstrap_gate(1, BOOT, "GET", "/v1/api/rotate_bearer") == 1);
-      /* UDS is exempt (local trust). */
-      assert(server_http_bootstrap_gate(0, BOOT, "GET", "/v1/config") == 0);
-      /* Once rotated to a strong bearer, the gate is off for every route. */
-      assert(server_http_bootstrap_gate(1, "deadbeef-strong-token", "GET", "/v1/config") == 0);
-      /* Operator-pinned bearer opts out of TOFU even if it equals the bootstrap. */
-      setenv("AIMEE_API_BEARER_TOKEN", BOOT, 1);
-      assert(server_http_bootstrap_gate(1, BOOT, "GET", "/v1/config") == 0);
-      unsetenv("AIMEE_API_BEARER_TOKEN");
+      const char *PRIMARY = "unit-test-random-primary";
+      const char *enrolled[] = {"wizard-user-token"};
+      server_http_set_bearer_extra(enrolled, 1);
+      int bootstrap_only = -1;
+      assert(server_http_authorize_enrolled_request(1, PRIMARY, "Bearer unit-test-random-primary",
+                                                    NULL, 0, &bootstrap_only) == 0);
+      assert(bootstrap_only == 0);
+      assert(server_http_authorize_enrolled_request(1, PRIMARY, "Bearer wizard-user-token", NULL, 0,
+                                                    &bootstrap_only) == 0);
+      assert(bootstrap_only == 0);
+      server_http_set_bearer_extra(NULL, 0);
+
+      uint32_t primary_caps =
+          server_http_effective_conn_caps(1, PRIMARY, SERVER_REMOTE_WRITES_OFF, 1, 0);
+      assert((primary_caps & CAP_SESSION_ADMIN) == 0);
+      assert((primary_caps & CAP_DELEGATE) == 0);
+      assert(server_http_route_allowed_caps(1, CAPS_AUTHENTICATED, "POST", "/v1/api/enroll_bearer",
+                                            SERVER_REMOTE_WRITES_OFF) == 1);
+      assert(server_http_route_allowed_caps(1, CAPS_READ_ONLY | CAP_DELEGATE, "POST",
+                                            "/v1/cert/sign", SERVER_REMOTE_WRITES_OFF) == 1);
+      assert((server_http_enrollment_caps(CAPS_READ_ONLY, 1, 0, 1, "deployment-token", "POST",
+                                          "/v1/cert/sign") &
+              CAP_DELEGATE) != 0);
+      assert(server_http_enrollment_caps(CAPS_READ_ONLY, 1, 0, 0, "deployment-token", "POST",
+                                         "/v1/cert/sign") == CAPS_READ_ONLY);
+      assert(server_http_enrollment_caps(CAPS_READ_ONLY, 1, 0, 1, "scope:read", "POST",
+                                         "/v1/cert/sign") == CAPS_READ_ONLY);
+      assert((server_http_enrollment_caps(CAPS_READ_ONLY, 1, 0, 1, "deployment-token", "POST",
+                                          "/v1/api/enroll_bearer") &
+              CAP_SESSION_ADMIN) != 0);
+   }
+
+   /* --- P5-B3b dedicated management transport classification. The two
+    *     nonce/status routes have no generic cert/bearer fallback, while a
+    *     management-profile leaf cannot escape onto any other route. --- */
+   {
+      assert(server_http_management_auth("POST", "/v1/management/challenge", 1, 1, 1,
+                                         "p5-kb-management") == SERVER_HTTP_MANAGEMENT_ALLOW);
+      assert(server_http_management_auth("GET", "/v1/management/health", 1, 1, 1,
+                                         "p5-kb-management") == SERVER_HTTP_MANAGEMENT_ALLOW);
+      assert(server_http_management_auth("GET", "/v1/management/health", 1, 0, 0, NULL) ==
+             SERVER_HTTP_MANAGEMENT_DENY);
+      assert(server_http_management_auth("GET", "/v1/management/health", 1, 1, 0,
+                                         "p5-kb-management") == SERVER_HTTP_MANAGEMENT_DENY);
+      assert(server_http_management_auth("GET", "/v1/management/health", 1, 1, 1,
+                                         "generic-client") == SERVER_HTTP_MANAGEMENT_DENY);
+      assert(server_http_management_auth("GET", "/v1/health", 1, 1, 1, "p5-kb-management") ==
+             SERVER_HTTP_MANAGEMENT_DENY);
+      assert(server_http_management_auth("POST", "/v1/management/action", 1, 1, 1,
+                                         "p5-kb-management") == SERVER_HTTP_MANAGEMENT_ALLOW);
+      assert(server_http_management_auth("POST", "/v1/management/action/challenge", 1, 1, 1,
+                                         "p5-kb-management") == SERVER_HTTP_MANAGEMENT_ALLOW);
+      assert(server_http_management_auth("POST", "/v1/management/read/challenge", 1, 1, 1,
+                                         "p5-kb-management") == SERVER_HTTP_MANAGEMENT_ALLOW);
+      assert(server_http_management_auth("GET", "/v1/management/read/agents", 1, 1, 1,
+                                         "p5-kb-management") == SERVER_HTTP_MANAGEMENT_ALLOW);
+      assert(server_http_management_auth("POST", "/v1/management/read/config/challenge", 1, 1, 1,
+                                         "p5-kb-management") == SERVER_HTTP_MANAGEMENT_ALLOW);
+      assert(server_http_management_auth("GET", "/v1/management/read/config", 1, 1, 1,
+                                         "p5-kb-management") == SERVER_HTTP_MANAGEMENT_ALLOW);
+      assert(server_http_management_auth("GET", "/v1/health", 0, 1, 0, "generic-client") ==
+             SERVER_HTTP_MANAGEMENT_NOT_APPLICABLE);
+      assert(server_http_management_auth("POST", "/v1/management/health", 1, 1, 1,
+                                         "p5-kb-management") == SERVER_HTTP_MANAGEMENT_DENY);
+      /* Cross-lane denial is unconditional: neither the exact management leaf
+       * on data TLS nor a bearer/UDS request can reach these handlers. */
+      assert(server_http_management_auth("POST", "/v1/management/challenge", 0, 1, 1,
+                                         "p5-kb-management") == SERVER_HTTP_MANAGEMENT_DENY);
+      assert(server_http_management_auth("GET", "/v1/management/health", 0, 0, 0, NULL) ==
+             SERVER_HTTP_MANAGEMENT_DENY);
+      assert(server_http_management_auth("GET", "/v1/health", 0, 1, 1, "p5-kb-management") ==
+             SERVER_HTTP_MANAGEMENT_DENY);
+   }
+
+   /* --- Dedicated management environment packet and bind policy. --- */
+   {
+      static const char *const vars[] = {
+          "AIMEE_SERVER_MGMT_BIND",
+          "AIMEE_SERVER_MGMT_PORT",
+          "AIMEE_SERVER_MGMT_TLS_CERT",
+          "AIMEE_SERVER_MGMT_TLS_KEY", /* forbidden legacy path input */
+          "AIMEE_SERVER_MGMT_CLIENT_CA",
+          "AIMEE_SERVER_ID",
+          "AIMEE_MGMT_STATUS_KEY_ID",
+          "AIMEE_MGMT_STATUS_PUBLIC_KEY",
+          "AIMEE_SERVER_MGMT_STATUS_ENDPOINT",
+          "AIMEE_SERVER_MGMT_STATUS_CA_FILE",
+          "AIMEE_SERVER_MGMT_STATUS_LEAF_PIN",
+          "AIMEE_SERVER_MGMT_STATUS_SECONDARY_LEAF_PIN",
+          "AIMEE_SERVER_MGMT_STATUS_CLIENT_CERT",
+          "AIMEE_SERVER_MGMT_STATUS_CLIENT_KEY", /* forbidden legacy path input */
+          "AIMEE_SERVER_MGMT_ISSUER",
+          "AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE",
+      };
+      for (size_t i = 0; i < sizeof(vars) / sizeof(vars[0]); i++)
+         unsetenv(vars[i]);
+      runtime_secret_remove("AIMEE_SERVER_MGMT_TLS_PRIVATE_KEY");
+      runtime_secret_remove("AIMEE_SERVER_MGMT_STATUS_CLIENT_PRIVATE_KEY");
+      server_http_management_config_t mc;
+      assert(server_http_management_config_from_env(&mc) == 0 && !mc.enabled);
+      uint32_t bind_addr = 0;
+      assert(server_http_management_bind_addr("127.0.0.1", &bind_addr) == 0);
+      assert(bind_addr == htonl(INADDR_LOOPBACK));
+      assert(server_http_management_bind_addr("0.0.0.0", &bind_addr) == -1);
+      assert(server_http_management_bind_addr("255.255.255.255", &bind_addr) == -1);
+      assert(server_http_management_bind_addr("169.254.1.1", &bind_addr) == -1);
+      assert(server_http_management_bind_addr("224.0.0.1", &bind_addr) == -1);
+      assert(server_http_management_bind_addr("127.000.0.1", &bind_addr) == -1);
+      assert(server_http_management_bind_addr("localhost", &bind_addr) == -1);
+      assert(server_http_management_bind_addr("::1", &bind_addr) == -1);
+      assert(server_http_management_bind_addr(NULL, &bind_addr) == -1);
+      assert(server_http_management_bind_addr("127.0.0.1", NULL) == -1);
+
+      setenv("AIMEE_SERVER_MGMT_BIND", "127.0.0.1", 1);
+      assert(server_http_management_config_from_env(&mc) == -1); /* partial */
+      setenv("AIMEE_SERVER_MGMT_PORT", "9443", 1);
+      setenv("AIMEE_SERVER_MGMT_TLS_CERT", "/etc/aimee/management/server.pem", 1);
+      setenv("AIMEE_SERVER_MGMT_CLIENT_CA", "/etc/aimee/management/client-ca.pem", 1);
+      assert(runtime_secret_store("AIMEE_SERVER_MGMT_TLS_PRIVATE_KEY", "server-key-pem") == 0);
+      setenv("AIMEE_SERVER_ID", "p5b3c-server", 1);
+      setenv("AIMEE_MGMT_STATUS_KEY_ID", "status-v1", 1);
+      setenv("AIMEE_MGMT_STATUS_PUBLIC_KEY",
+             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", 1);
+      setenv("AIMEE_SERVER_MGMT_STATUS_ENDPOINT", "https://kb.test", 1);
+      setenv("AIMEE_SERVER_MGMT_STATUS_CA_FILE", "/etc/aimee/management/kb-ca.pem", 1);
+      setenv("AIMEE_SERVER_MGMT_STATUS_LEAF_PIN",
+             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", 1);
+      setenv("AIMEE_SERVER_MGMT_STATUS_CLIENT_CERT", "/etc/aimee/management/client.pem", 1);
+      assert(runtime_secret_store("AIMEE_SERVER_MGMT_STATUS_CLIENT_PRIVATE_KEY",
+                                  "status-client-key-pem") == 0);
+      setenv("AIMEE_SERVER_MGMT_ISSUER", "https://kb.test", 1);
+      setenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE", "/etc/aimee/management/jwks-roots.pem", 1);
+      assert(server_http_management_config_from_env(&mc) == 0 && mc.enabled && mc.port == 9443);
+      assert(strcmp(mc.bind, "127.0.0.1") == 0);
+      assert(strcmp(mc.cert, "/etc/aimee/management/server.pem") == 0);
+      assert(strcmp(mc.status_endpoint, "https://kb.test") == 0);
+      unsetenv("AIMEE_SERVER_MGMT_BIND");
+      assert(server_http_management_config_from_env(&mc) == 0 && mc.enabled);
+      assert(strcmp(mc.bind, "127.0.0.1") == 0);
+      setenv("AIMEE_SERVER_MGMT_BIND", "127.0.0.1", 1);
+
+      const char *bad_ports[] = {"", "0", "09443", "+9443", "65536", "9443x"};
+      for (size_t i = 0; i < sizeof(bad_ports) / sizeof(bad_ports[0]); i++)
+      {
+         setenv("AIMEE_SERVER_MGMT_PORT", bad_ports[i], 1);
+         assert(server_http_management_config_from_env(&mc) == -1);
+      }
+      setenv("AIMEE_SERVER_MGMT_PORT", "9443", 1);
+      setenv("AIMEE_SERVER_MGMT_TLS_KEY", "/etc/aimee/management/server.key", 1);
+      assert(server_http_management_config_from_env(&mc) == -1);
+      unsetenv("AIMEE_SERVER_MGMT_TLS_KEY");
+      setenv("AIMEE_SERVER_MGMT_STATUS_CLIENT_KEY", "/etc/aimee/management/client.key", 1);
+      assert(server_http_management_config_from_env(&mc) == -1);
+      unsetenv("AIMEE_SERVER_MGMT_STATUS_CLIENT_KEY");
+      setenv("AIMEE_SERVER_MGMT_STATUS_ENDPOINT", "https://kb.test/v1/management/status", 1);
+      assert(server_http_management_config_from_env(&mc) == -1);
+      setenv("AIMEE_SERVER_MGMT_STATUS_ENDPOINT", "https://kb.test", 1);
+      setenv("AIMEE_SERVER_ID", "bad/server", 1);
+      assert(server_http_management_config_from_env(&mc) == -1);
+      setenv("AIMEE_SERVER_ID", "p5b3c-server", 1);
+      setenv("AIMEE_MGMT_STATUS_PUBLIC_KEY",
+             "A123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", 1);
+      assert(server_http_management_config_from_env(&mc) == -1);
+      for (size_t i = 0; i < sizeof(vars) / sizeof(vars[0]); i++)
+         unsetenv(vars[i]);
+      runtime_secret_remove("AIMEE_SERVER_MGMT_TLS_PRIVATE_KEY");
+      runtime_secret_remove("AIMEE_SERVER_MGMT_STATUS_CLIENT_PRIVATE_KEY");
+   }
+
+   /* --- Management requests use one exact, bodyless HTTP/1.1 frame. --- */
+   {
+      const char challenge[] = "POST /v1/management/challenge HTTP/1.1\r\nHost: server.test\r\n"
+                               "Content-Type: application/json\r\nContent-Length: 0\r\n"
+                               "Connection: keep-alive\r\n\r\n";
+      const char health[] = "GET /v1/management/health HTTP/1.1\r\nHost: server.test\r\n"
+                            "X-Aimee-Management-Status: staple\r\n"
+                            "Content-Type: application/json\r\nContent-Length: 0\r\n"
+                            "Connection: keep-alive\r\n\r\n";
+      const char action_challenge[] =
+          "POST /v1/management/action/challenge HTTP/1.1\r\nHost: server.test\r\n"
+          "Content-Type: application/json\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n";
+      const char action[] =
+          "POST /v1/management/action HTTP/1.1\r\nHost: server.test\r\n"
+          "Content-Type: application/json\r\nContent-Length: 42\r\nConnection: close\r\n"
+          "Authorization: Bearer token\r\nX-Aimee-Management-Status: staple\r\n\r\n";
+      const char read_challenge[] =
+          "POST /v1/management/read/challenge HTTP/1.1\r\nHost: server.test\r\n"
+          "Content-Type: application/json\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n";
+      const char read_agents[] =
+          "GET /v1/management/read/agents HTTP/1.1\r\nHost: server.test\r\n"
+          "Content-Length: 0\r\nConnection: close\r\nAuthorization: Bearer token\r\n"
+          "X-Aimee-Management-Status: staple\r\n\r\n";
+      assert(server_http_management_framing_valid("POST", "/v1/management/challenge", challenge,
+                                                  strlen(challenge)) == 1);
+      assert(server_http_management_framing_valid("GET", "/v1/management/health", health,
+                                                  strlen(health)) == 1);
+      assert(server_http_management_action_framing_valid("POST", "/v1/management/action/challenge",
+                                                         action_challenge,
+                                                         strlen(action_challenge)) == 1);
+      assert(server_http_management_action_framing_valid("POST", "/v1/management/action", action,
+                                                         strlen(action)) == 1);
+      assert(server_http_management_read_framing_valid("POST", "/v1/management/read/challenge",
+                                                       read_challenge,
+                                                       strlen(read_challenge)) == 1);
+      assert(server_http_management_read_framing_valid("GET", "/v1/management/read/agents",
+                                                       read_agents, strlen(read_agents)) == 1);
+      const char read_config_challenge[] =
+          "POST /v1/management/read/config/challenge HTTP/1.1\r\nHost: server.test\r\n"
+          "Content-Type: application/json\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n";
+      const char read_config[] = "GET /v1/management/read/config HTTP/1.1\r\nHost: server.test\r\n"
+                                 "Authorization: Bearer token\r\nX-Aimee-Management-Status: {}\r\n"
+                                 "Content-Length: 0\r\nConnection: close\r\n\r\n";
+      assert(server_http_management_read_framing_valid(
+                 "POST", "/v1/management/read/config/challenge", read_config_challenge,
+                 strlen(read_config_challenge)) == 1);
+      assert(server_http_management_read_framing_valid("GET", "/v1/management/read/config",
+                                                       read_config, strlen(read_config)) == 1);
+      char read_with_type[1024];
+      snprintf(read_with_type, sizeof(read_with_type), "%.*sContent-Type: application/json\r\n\r\n",
+               (int)(strlen(read_agents) - 2), read_agents);
+      assert(!server_http_management_read_framing_valid("GET", "/v1/management/read/agents",
+                                                        read_with_type, strlen(read_with_type)));
+      const char read_empty_length[] =
+          "POST /v1/management/read/challenge HTTP/1.1\r\nHost: server.test\r\n"
+          "Content-Type: application/json\r\nContent-Length: \r\n"
+          "Connection: keep-alive\r\n\r\n";
+      const char read_bad_length[] =
+          "POST /v1/management/read/challenge HTTP/1.1\r\nHost: server.test\r\n"
+          "Content-Type: application/json\r\nContent-Length: +0\r\n"
+          "Connection: keep-alive\r\n\r\n";
+      const char read_overflow_length[] =
+          "POST /v1/management/read/challenge HTTP/1.1\r\nHost: server.test\r\n"
+          "Content-Type: application/json\r\nContent-Length: 184467440737095516160\r\n"
+          "Connection: keep-alive\r\n\r\n";
+      assert(!server_http_management_read_framing_valid(
+          "POST", "/v1/management/read/challenge", read_empty_length, strlen(read_empty_length)));
+      assert(!server_http_management_read_framing_valid("POST", "/v1/management/read/challenge",
+                                                        read_bad_length, strlen(read_bad_length)));
+      assert(!server_http_management_read_framing_valid("POST", "/v1/management/read/challenge",
+                                                        read_overflow_length,
+                                                        strlen(read_overflow_length)));
+      const char closing_challenge[] =
+          "POST /v1/management/action/challenge HTTP/1.1\r\nHost: server.test\r\n"
+          "Content-Type: application/json\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+      assert(!server_http_management_action_framing_valid(
+          "POST", "/v1/management/action/challenge", closing_challenge, strlen(closing_challenge)));
+      char duplicate_auth[1024];
+      snprintf(duplicate_auth, sizeof(duplicate_auth), "%.*sAuthorization: Bearer second\r\n\r\n",
+               (int)(strlen(action) - 2), action);
+      assert(!server_http_management_action_framing_valid("POST", "/v1/management/action",
+                                                          duplicate_auth, strlen(duplicate_auth)));
+      const char duplicate[] = "GET /v1/management/health HTTP/1.1\r\nContent-Length: 0\r\n"
+                               "Content-Length: 0\r\n\r\n";
+      const char duplicate_status[] =
+          "GET /v1/management/health HTTP/1.1\r\nHost: x\r\n"
+          "X-Aimee-Management-Status: one\r\nX-Aimee-Management-Status: two\r\n"
+          "Content-Type: application/json\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n";
+      const char transfer[] = "GET /v1/management/health HTTP/1.1\r\nTransfer-Encoding: chunked\r\n"
+                              "Content-Length: 0\r\n\r\n";
+      const char expect[] = "GET /v1/management/health HTTP/1.1\r\nExpect: 100-continue\r\n"
+                            "Content-Length: 0\r\n\r\n";
+      const char upgrade[] = "GET /v1/management/health HTTP/1.1\r\nUpgrade: websocket\r\n"
+                             "Content-Length: 0\r\n\r\n";
+      const char connection_upgrade[] =
+          "GET /v1/management/health HTTP/1.1\r\nHost: x\r\n"
+          "X-Aimee-Management-Status: staple\r\nContent-Type: application/json\r\n"
+          "Content-Length: 0\r\nConnection: Upgrade\r\n\r\n";
+      const char body[] = "POST /v1/management/challenge HTTP/1.1\r\nContent-Length: 1\r\n\r\nx";
+      const char no_length[] = "GET /v1/management/health HTTP/1.1\r\nHost: x\r\n\r\n";
+      const char query[] = "GET /v1/management/health?x=1 HTTP/1.1\r\nContent-Length: 0\r\n\r\n";
+      const char lf[] = "GET /v1/management/health HTTP/1.1\nContent-Length: 0\n\n";
+      assert(!server_http_management_framing_valid("GET", "/v1/management/health", duplicate,
+                                                   strlen(duplicate)));
+      assert(!server_http_management_framing_valid("GET", "/v1/management/health", duplicate_status,
+                                                   strlen(duplicate_status)));
+      assert(!server_http_management_framing_valid("GET", "/v1/management/health", transfer,
+                                                   strlen(transfer)));
+      assert(!server_http_management_framing_valid("GET", "/v1/management/health", expect,
+                                                   strlen(expect)));
+      assert(!server_http_management_framing_valid("GET", "/v1/management/health", upgrade,
+                                                   strlen(upgrade)));
+      assert(!server_http_management_framing_valid("GET", "/v1/management/health",
+                                                   connection_upgrade, strlen(connection_upgrade)));
+      assert(!server_http_management_framing_valid("POST", "/v1/management/challenge", body,
+                                                   strlen(body)));
+      assert(!server_http_management_framing_valid("GET", "/v1/management/health", no_length,
+                                                   strlen(no_length)));
+      assert(!server_http_management_framing_valid("GET", "/v1/management/health", query,
+                                                   strlen(query)));
+      assert(!server_http_management_framing_valid("GET", "/v1/management/health", lf, strlen(lf)));
+      assert(!server_http_management_framing_valid("GET", "/v1/management/health", health,
+                                                   strlen(health) - 1));
    }
 
    /* --- typed SSE framing: embedded newlines become repeated data: lines --- */
@@ -616,6 +1373,7 @@ int main(void)
 
       /* Public routes require no capabilities. */
       assert(server_http_route_caps("GET", "/v1/health") == 0);
+      assert(server_http_route_caps("GET", "/v1/ready") == 0);
       assert(server_http_route_caps("GET", "/v1/version") == 0);
       assert(server_http_route_caps("GET", "/v1/capabilities") == 0);
       assert(server_http_route_caps("GET", "/v1/models") == 0);
@@ -628,6 +1386,12 @@ int main(void)
              server_capability_for_method("memory.recall"));
       assert(server_http_route_caps("POST", "/v1/chat/completions") ==
              server_capability_for_method("chat.send_stream"));
+      /* Help is a narrow read endpoint. Keep generic MCP execution privileged:
+       * the help handler force-selects get_help before dispatch. */
+      assert(server_http_route_caps("POST", "/v1/help") == CAP_SESSION_READ);
+      assert(server_http_route_caps("POST", "/v1/help") ==
+             server_capability_for_method("help.get"));
+      assert(server_http_route_caps("POST", "/v1/mcp/call") == CAP_TOOL_EXECUTE);
 
       /* Reads sit within the read-only set; compute requires CAP_CHAT. */
       assert((server_http_route_caps("GET", "/v1/rules") & ~CAPS_READ_ONLY) == 0);
@@ -671,6 +1435,19 @@ int main(void)
        * registers/removes over TCP (gated by the write capability above). */
       assert(server_http_route_is_local_only("POST", "/v1/workspaces") == 0);
       assert(server_http_route_is_local_only("DELETE", "/v1/workspaces/%2Fp") == 0);
+
+      /* INDEXING IS A DATA-PLANE WRITE. It was absent from g_v1_write_ops, so the
+       * write-tier gate never saw it: on a clean install the same bearer got 403
+       * on /v1/memory/store and 200 on /v1/index/ingest, and kb queued curator
+       * work for the new project. Registration staying exempt while its ingest is
+       * gated is exactly what §1.4 and Parts 2-4 of QUICKSTART promise, so the
+       * pair is asserted together — they are easy to conflate, and conflating
+       * them is how the gap got in. */
+      assert(server_http_route_is_local_only("POST", "/v1/index/ingest") == 1);
+      /* The index READ family must stay ungated, or every query needs a grant. */
+      assert(server_http_route_is_local_only("POST", "/v1/index/find") == 0);
+      assert(server_http_route_is_local_only("POST", "/v1/index/deps") == 0);
+      assert(server_http_route_is_local_only("POST", "/v1/memory/search") == 0);
 
       /* Detached-runner reverse channel: tool:execute, TCP-reachable (the
        * serving client drives it remotely). An unscoped TCP bearer holds
@@ -728,10 +1505,10 @@ int main(void)
       /* Privileged exec/control routes (delegate/cron/agent/provider/worktree/...)
        * are local-only over TCP unless remote_writes==full; data-plane writes need
        * only remote_writes>=data. Fail-closed at the default. */
-      const char *exec_paths[] = {"/v1/delegate/launch",     "/v1/delegate/backend_exec",
-                                  "/v1/delegate/roundtable", "/v1/cron/add",
-                                  "/v1/agent/add",           "/v1/worktree/gc",
-                                  "/v1/model/refresh",       "/v1/api/disable"};
+      const char *exec_paths[] = {"/v1/delegate/launch",   "/v1/delegate/backend_exec",
+                                  "/v1/roundtable/review", "/v1/cron/add",
+                                  "/v1/agent/add",         "/v1/worktree/gc",
+                                  "/v1/model/refresh",     "/v1/api/disable"};
       for (size_t i = 0; i < sizeof(exec_paths) / sizeof(exec_paths[0]); i++)
       {
          assert(server_http_route_allowed(1, "plain", "POST", exec_paths[i],
@@ -743,9 +1520,9 @@ int main(void)
          assert(server_http_route_allowed(0, NULL, "POST", exec_paths[i],
                                           SERVER_REMOTE_WRITES_OFF) == 1); /* UDS always */
       }
-      assert(server_http_route_caps("POST", "/v1/delegate/roundtable") == CAP_DELEGATE);
+      assert(server_http_route_caps("POST", "/v1/roundtable/review") == CAP_DELEGATE);
       assert(server_http_route_allowed(1, "scope:project:alpha:s3cr3t", "POST",
-                                       "/v1/delegate/roundtable", SERVER_REMOTE_WRITES_FULL) == 0);
+                                       "/v1/roundtable/review", SERVER_REMOTE_WRITES_FULL) == 0);
       /* The detached-workspace plane is exempt: reachable over TCP at remote_writes=off
        * (still cap-gated -> a scoped query-only bearer is still denied). */
       assert(server_http_route_allowed(1, "plain", "POST", "/v1/runner/poll", 0) == 1);
@@ -773,7 +1550,106 @@ int main(void)
       assert(server_http_route_caps("DELETE", "/v1/personas/alice") == CAP_SESSION_ADMIN);
       assert(server_http_route_caps("POST", "/v1/personas") == CAP_SESSION_ADMIN);
       assert(server_http_route_caps("GET", "/v1/role_templates") == CAP_SESSION_READ);
+      /* MCP startup is catalog introspection, not tool execution. Query-only
+       * remote clients must be able to complete tools/list; mcp.call remains
+       * separately gated by CAP_TOOL_EXECUTE. */
+      assert(server_capability_for_method("mcp.tools_list") == CAP_SESSION_READ);
+      assert(server_http_route_caps("GET", "/v1/mcp/tools_list") == CAP_SESSION_READ);
+      assert(server_http_route_allowed_caps(1, CAPS_READ_ONLY, "GET", "/v1/mcp/tools_list",
+                                            SERVER_REMOTE_WRITES_OFF) == 1);
+      assert(server_capability_for_method("mcp.call") == CAP_TOOL_EXECUTE);
+      assert(server_http_route_allowed_caps(1, CAPS_READ_ONLY, "POST", "/v1/mcp/call",
+                                            SERVER_REMOTE_WRITES_OFF) == 0);
       assert(server_http_route_caps("DELETE", "/v1/role_templates/qa") == CAP_SESSION_ADMIN);
+      assert(server_http_route_caps("GET", "/v1/roundtables") == CAP_SESSION_READ);
+      assert(server_http_route_caps("PUT", "/v1/roundtables/default") == CAP_SESSION_ADMIN);
+      assert(server_http_route_caps("DELETE", "/v1/roundtables/default") == CAP_SESSION_ADMIN);
+      assert(server_http_route_caps("POST", "/v1/roundtables/active") == CAP_SESSION_ADMIN);
+      /* With no bootstrap record at all, the gate keeps its historical shape. */
+      assert(route_roundtable_mutation_authorized("webuser:admin") == 1);
+      assert(route_roundtable_mutation_authorized("webuser:") == 0);
+      assert(route_roundtable_mutation_authorized("webuser:alice") == 0);
+      assert(route_roundtable_mutation_authorized("uid:1000") == 0);
+      assert(route_roundtable_mutation_authorized("cert:operator") == 0);
+      assert(route_roundtable_mutation_authorized(NULL) == 0);
+
+      /* Once setup replaces the generated bootstrap login, THAT account is the
+       * appliance administrator. Hardcoding "admin" locked the real operator out
+       * of every roundtable policy mutation on their own appliance — creating a
+       * preset, and "save as default" (POST /v1/roundtables/active) — while the
+       * browser only reported "administrator access required". */
+      {
+         char wc[512];
+         snprintf(wc, sizeof(wc), "%s/webchat", config_default_dir());
+         assert(mkdir(wc, 0700) == 0 || errno == EEXIST);
+         char marker[600];
+         snprintf(marker, sizeof(marker), "%s/bootstrap-replaced", wc);
+         FILE *mf = fopen(marker, "w");
+         assert(mf);
+         fputs("virant\n", mf);
+         fclose(mf);
+
+         assert(route_roundtable_mutation_authorized("webuser:virant") == 1);
+         /* and the pre-replacement name is no longer privileged */
+         assert(route_roundtable_mutation_authorized("webuser:admin") == 0);
+         assert(route_roundtable_mutation_authorized("webuser:alice") == 0);
+         assert(route_roundtable_mutation_authorized("uid:0") == 0);
+         unlink(marker);
+
+         /* Before replacement, the recorded bootstrap account governs. The file
+          * is "<explicit|generated>:<name>". */
+         char bu[600];
+         snprintf(bu, sizeof(bu), "%s/bootstrap-user", wc);
+         FILE *bf = fopen(bu, "w");
+         assert(bf);
+         fputs("generated:aimee-0123456789ab\n", bf);
+         fclose(bf);
+         assert(route_roundtable_mutation_authorized("webuser:aimee-0123456789ab") == 1);
+         assert(route_roundtable_mutation_authorized("webuser:admin") == 0);
+         unlink(bu);
+      }
+      /* An unset roundtable.default does not mean "no active panel": resolution
+       * falls back to the preset literally named "default", which is the one the
+       * image seeds. The list used to report active:"" for every entry, so the
+       * Roundtable tab showed nothing selected while reviews were in fact
+       * resolving through that preset — and "save as default" appeared to do
+       * nothing even when it succeeded. */
+      {
+         char rtdir[512];
+         snprintf(rtdir, sizeof(rtdir), "%s/roundtables", config_default_dir());
+         assert(mkdir(rtdir, 0700) == 0 || errno == EEXIST);
+         char seeded[600];
+         snprintf(seeded, sizeof(seeded), "%s/default.json", rtdir);
+         FILE *sf = fopen(seeded, "w");
+         assert(sf);
+         fputs(
+             "{\"name\":\"default\",\"seats\":[{\"model\":\"$random\",\"persona\":\"reviewer\"}]}",
+             sf);
+         fclose(sf);
+
+         char list_resp[4096];
+         int list_st = route_roundtables_list(list_resp, sizeof(list_resp));
+         assert(list_st == 200);
+         assert(strstr(list_resp, "\"active\":\"default\"") != NULL);
+         unlink(seeded);
+      }
+      assert(roundtable_policy_config_key("roundtable.default") == 1);
+      assert(roundtable_policy_config_key("roundtable.require_evidence") == 1);
+      assert(roundtable_policy_config_key("autonomy.concurrency") == 0);
+      assert(roundtable_policy_config_key(NULL) == 0);
+      char roundtable_resp[512];
+      const char *agent_attempt = "{\"seats\":[{\"model\":\"codex\"}]}";
+      int roundtable_st =
+          server_http_route("PUT", "/v1/roundtables/agent-attempt", agent_attempt,
+                            (int)strlen(agent_attempt), roundtable_resp, sizeof(roundtable_resp));
+      assert(roundtable_st == 403);
+      assert(strstr(roundtable_resp, "authenticated appliance administrator") != NULL);
+      const char *config_attempt = "{\"key\":\"roundtable.default\",\"value\":\"agent-choice\"}";
+      roundtable_st =
+          server_http_route("POST", "/v1/config/set", config_attempt, (int)strlen(config_attempt),
+                            roundtable_resp, sizeof(roundtable_resp));
+      assert(roundtable_st == 403);
+      assert(strstr(roundtable_resp, "authenticated appliance administrator") != NULL);
       /* Proposals read surfaces: the timeline + proposal-markdown reads share the
        * dashboard-read cap (ownership is enforced in-handler, not by the route cap),
        * while the operator "list all items" view requires CAP_WORKFLOW_ADMIN. The
@@ -797,6 +1673,7 @@ int main(void)
       assert(server_http_route_caps("GET", "/v1/workflow/repo/file") == CAP_DASHBOARD_READ);
       /* Presence is session-scoped; the streaming routes carry caps too. */
       assert(server_http_route_caps("GET", "/v1/sessions") == CAP_SESSION_READ);
+      assert(server_http_route_caps("POST", "/v1/sessions/list") == CAP_SESSION_READ);
       assert(server_http_route_caps("POST", "/v1/sessions/s1/attach") == CAP_SESSION_READ);
       assert(server_http_route_caps("GET", "/v1/sessions/s1/events") == CAP_SESSION_READ);
       assert(server_http_route_caps("POST", "/v1/chat/stream") ==
@@ -936,23 +1813,96 @@ int main(void)
       assert(server_http_route_allowed(1, "plain", "POST", "/v1/memory/search",
                                        SERVER_REMOTE_WRITES_DATA) == 1);
 
+      /* CAP_GRANT_ADMIN sits inside CAPS_ALL (so the UDS operator has it) and OUTSIDE
+       * CAPS_AUTHENTICATED (so a mere authenticated bearer does not), matching
+       * CAP_WORKFLOW_ADMIN and CAP_SHADOW_ADMIN. A bearer able to administer grants could
+       * grant ITSELF a higher tier, which is why it cannot be in the authenticated set. */
+      assert((CAPS_ALL & CAP_GRANT_ADMIN) == CAP_GRANT_ADMIN);
+      assert((CAPS_AUTHENTICATED & CAP_GRANT_ADMIN) == 0);
+      assert((CAPS_READ_ONLY & CAP_GRANT_ADMIN) == 0);
+
+      /* GRANT ADMINISTRATION IS UDS-ONLY, and nothing on the TCP side can reach it.
+       *
+       * This is the one property standing between a fully-trusted remote peer and the
+       * ability to widen its own access: a TCP bearer at remote_writes=full receives
+       * CAPS_ALL (asserted just below), so no capability and no tier distinguishes it from
+       * the local operator. If grant administration were reachable that way, anyone holding
+       * `full` could grant themselves `full` on any server in their team and the tier system
+       * would be decorative.
+       *
+       * Checked ahead of both the tier gate and the capability gate, so it cannot be
+       * satisfied by having enough of either. */
+      assert(v1_route_requires_uds("POST", "/v1/grants/write-tier") == 1);
+      assert(v1_route_requires_uds("POST", "/v1/grants/write-tier/revoke") == 1);
+      assert(v1_route_requires_uds("GET", "/v1/grants/write-tier") == 1);
+      /* A prefix, so a verb added later inherits the restriction instead of having to
+       * remember it. */
+      assert(v1_route_requires_uds("POST", "/v1/grants/write-tier/anything-future") == 1);
+      /* And it claims nothing it should not. */
+      assert(v1_route_requires_uds("POST", "/v1/memory/store") == 0);
+      assert(v1_route_requires_uds("GET", "/v1/kb/status") == 0);
+      /* A shorter path that merely shares a prefix must not be captured. */
+      assert(v1_route_requires_uds("GET", "/v1/grants") == 0);
+      assert(v1_route_requires_uds(NULL, "/v1/grants/write-tier") == 0);
+      assert(v1_route_requires_uds("POST", NULL) == 0);
+
+      /* Over TCP: refused at EVERY tier and with EVERY capability set, including CAPS_ALL
+       * — which is exactly what a remote_writes=full bearer holds. */
+      for (int tier = SERVER_REMOTE_WRITES_OFF; tier <= SERVER_REMOTE_WRITES_FULL; tier++)
+      {
+         assert(server_http_route_allowed_caps(1, CAPS_ALL, "POST", "/v1/grants/write-tier",
+                                               tier) == 0);
+         assert(server_http_route_allowed_caps(1, CAPS_ALL, "POST", "/v1/grants/write-tier/revoke",
+                                               tier) == 0);
+         assert(server_http_route_allowed_caps(1, CAPS_ALL, "GET", "/v1/grants/write-tier", tier) ==
+                0);
+         assert(server_http_route_allowed_caps(1, CAPS_AUTHENTICATED, "POST",
+                                               "/v1/grants/write-tier", tier) == 0);
+      }
+      /* Over UDS: permitted. The route is the local operator's, so it must not be
+       * unreachable everywhere — a check that refused both transports would look like
+       * this one passing. */
+      assert(server_http_route_allowed_caps(0, CAPS_ALL, "POST", "/v1/grants/write-tier",
+                                            SERVER_REMOTE_WRITES_OFF) == 1);
+      assert(server_http_route_allowed_caps(0, CAPS_ALL, "GET", "/v1/grants/write-tier",
+                                            SERVER_REMOTE_WRITES_OFF) == 1);
+
       /* conn caps by level: data keeps CAPS_AUTHENTICATED, full grants CAPS_ALL. */
       assert(server_http_conn_caps(1, "plain", SERVER_REMOTE_WRITES_OFF) == CAPS_AUTHENTICATED);
       assert(server_http_conn_caps(1, "plain", SERVER_REMOTE_WRITES_DATA) == CAPS_AUTHENTICATED);
       assert(server_http_conn_caps(1, "plain", SERVER_REMOTE_WRITES_FULL) == CAPS_ALL);
 
-      /* P8 thin-client posture is independent of the operator's generic TCP
-       * remote_writes setting: bearer fallback is query-only and a cert gains
-       * authenticated session capabilities, never CAPS_ALL. */
+      /* P8 thin-client posture uses the resolved per-user tier: bearer fallback
+       * is query-only, a cert gains authenticated session capabilities at
+       * off/data, and only a verified full grant gains CAPS_ALL. */
       uint32_t fallback = CAPS_READ_ONLY & ~(uint32_t)CAP_CHAT;
       assert(server_http_effective_conn_caps(1, "plain", SERVER_REMOTE_WRITES_FULL, 1, 0) ==
              fallback);
-      assert(server_http_effective_conn_caps(1, "plain", SERVER_REMOTE_WRITES_FULL, 1, 1) ==
+      /* The cutover metric reconstructs the retired global switch. It must not
+       * reuse today's optional-mTLS fallback caps or the denied write vanishes
+       * from remote_writes.global_ignored. */
+      assert(server_http_retired_global_would_allow(-1, 1, "plain", SERVER_REMOTE_WRITES_FULL, 1, 0,
+                                                    "POST", "/v1/memory/store") == 1);
+      assert(server_http_retired_global_would_allow(-1, 1, "plain", SERVER_REMOTE_WRITES_OFF, 1, 0,
+                                                    "POST", "/v1/memory/store") == 0);
+      assert(server_http_effective_conn_caps(1, "plain", SERVER_REMOTE_WRITES_OFF, 1, 1) ==
              CAPS_AUTHENTICATED);
-      assert(server_http_mtls_transport_allowed(1, 1, 0) == 1);
-      assert(server_http_mtls_transport_allowed(1, 2, 0) == 0);
-      assert(server_http_mtls_transport_allowed(1, 2, 1) == 1);
-      assert(server_http_mtls_transport_allowed(0, 2, 0) == 1);
+      assert(server_http_effective_conn_caps(1, "plain", SERVER_REMOTE_WRITES_DATA, 1, 1) ==
+             CAPS_AUTHENTICATED);
+      assert(server_http_effective_conn_caps(1, "plain", SERVER_REMOTE_WRITES_FULL, 1, 1) ==
+             CAPS_ALL);
+      assert(server_http_route_allowed_caps(
+                 1, server_http_effective_conn_caps(1, "plain", SERVER_REMOTE_WRITES_FULL, 1, 1),
+                 "POST", "/v1/kb/build", SERVER_REMOTE_WRITES_FULL) == 1);
+      assert(server_http_mtls_transport_allowed(1, 1, 0, "GET", "/v1/config") == 1);
+      assert(server_http_mtls_transport_allowed(1, 2, 0, "GET", "/v1/config") == 0);
+      assert(server_http_mtls_transport_allowed(1, 2, 1, "GET", "/v1/config") == 1);
+      assert(server_http_mtls_transport_allowed(0, 2, 0, "GET", "/v1/config") == 1);
+      assert(server_http_mtls_transport_allowed(1, 2, 0, "POST", "/v1/cert/sign") == 1);
+      assert(server_http_mtls_transport_allowed(1, 2, 0, "POST", "/v1/api/enroll_bearer") == 1);
+      assert(server_http_mtls_transport_allowed(1, 2, 0, "POST", "/v1/api/rotate_bearer") == 1);
+      assert(server_http_mtls_transport_allowed(1, 2, 0, "GET", "/v1/cert/sign") == 0);
+      assert(server_http_mtls_transport_allowed(1, 2, 0, "POST", "/v1/cert/sign/extra") == 0);
       assert(server_http_route_allowed_caps(1, fallback, "POST", "/v1/memory/store",
                                             SERVER_REMOTE_WRITES_OFF) == 0);
       assert(server_http_route_allowed_caps(1, CAPS_AUTHENTICATED, "POST", "/v1/memory/store",
@@ -961,6 +1911,10 @@ int main(void)
                                             SERVER_REMOTE_WRITES_OFF) == 0);
       assert(server_http_route_allowed_caps(1, CAPS_AUTHENTICATED, "POST", "/v1/chat/completions",
                                             SERVER_REMOTE_WRITES_OFF) == 1);
+      assert(server_http_route_allowed_caps(1, CAPS_READ_ONLY, "POST", "/v1/help",
+                                            SERVER_REMOTE_WRITES_OFF) == 1);
+      assert(server_http_route_allowed_caps(1, CAPS_READ_ONLY, "POST", "/v1/mcp/call",
+                                            SERVER_REMOTE_WRITES_OFF) == 0);
 
       /* UDS is always full, independent of the level. */
       assert(server_http_conn_caps(0, NULL, SERVER_REMOTE_WRITES_OFF) == CAPS_ALL);
@@ -985,12 +1939,12 @@ int main(void)
       assert(server_http_route("GET", "/v1/rules", NULL, 0, rb, sizeof(rb)) == 503);
       openai_runs_store_reset();
       const char *roundtable_body = "{\"prompt\":\"draft\"}";
-      assert(server_http_route("POST", "/v1/delegate/roundtable", roundtable_body,
+      assert(server_http_route("POST", "/v1/roundtable/review", roundtable_body,
                                (int)strlen(roundtable_body), rb, sizeof(rb)) == 200);
       assert(strstr(rb, "\"object\":\"op.run\""));
-      assert(strstr(rb, "\"method\":\"delegate.roundtable\""));
+      assert(strstr(rb, "\"method\":\"roundtable.review\""));
       assert(strstr(rb, "\"status\":\"queued\""));
-      for (int i = 0; i < 100 && strcmp(g_disp_method, "delegate.roundtable") != 0; i++)
+      for (int i = 0; i < 100 && strcmp(g_disp_method, "roundtable.review") != 0; i++)
          usleep(1000);
       char *large_body = malloc(9200);
       assert(large_body);
@@ -1026,9 +1980,32 @@ int main(void)
       g_disp_method[0] = '\0';
       g_disp_body[0] = '\0';
       openai_runs_store_reset();
-      assert(server_http_submit_op_run("delegate.roundtable", "{\"prompt\":\"draft\"}",
+
+      /* A pooled orchestration worker must begin every op with empty checkout
+       * and credential TLS, even when the previous op leaked both. This is the
+       * roundtable artifact/Codex-seat isolation boundary under concurrency.
+       * Keep the normal four-worker coverage above, then use a fresh one-worker
+       * pool solely to guarantee that poison and inspect reuse one thread. */
+      compute_pool_shutdown(&g_test_server_ctx.orchestration_pool);
+      assert(compute_pool_init(&g_test_server_ctx.orchestration_pool, 1) == 0);
+      atomic_store(&g_op_context_clean, 0);
+      submit_and_wait_op("test.poison_op_context");
+      submit_and_wait_op("test.inspect_op_context");
+      assert(atomic_load(&g_op_context_clean) == 1);
+      openai_runs_store_reset();
+
+      assert(server_http_submit_op_run("roundtable.review", "{\"prompt\":\"draft\"}",
                                        CAP_TOOL_EXECUTE, rb, sizeof(rb)) == 403);
       assert(strstr(rb, "insufficient capabilities"));
+      g_test_server_ctx_available = 0;
+      assert(server_http_submit_op_run("roundtable.review", "{\"prompt\":\"draft\"}", CAP_DELEGATE,
+                                       rb, sizeof(rb)) == 503);
+      assert(strstr(rb, "orchestration unavailable"));
+      g_test_server_ctx_available = 1;
+      compute_pool_close(&g_test_server_ctx.orchestration_pool);
+      assert(server_http_submit_op_run("roundtable.review", "{\"prompt\":\"draft\"}", CAP_DELEGATE,
+                                       rb, sizeof(rb)) == 503);
+      assert(strstr(rb, "orchestration unavailable"));
       /* The /v1/rpc bridge was retired: the path is now unrouted (404). */
       assert(server_http_route("POST", "/v1/rpc", "{}", 2, rb, sizeof(rb)) == 404);
       /* A deeper run path (two segments, no /stop|/events) does not match. */
@@ -1042,6 +2019,8 @@ int main(void)
       /* Enabled listener: emits the loopback base URL, model id, and providers. */
       server_http_api_status_report(8910, 1, 60, report, sizeof(report));
       assert(strstr(report, "http://127.0.0.1:8910/v1"));
+      assert(strstr(report, "server loopback"));
+      assert(strstr(report, "ssh -L 8910:127.0.0.1:8910 <server-host>"));
       assert(strstr(report, "model aimee"));
       assert(strstr(report, "Continue"));
       assert(strstr(report, "Copilot"));
@@ -1049,6 +2028,15 @@ int main(void)
       assert(strstr(report, "60 req/min"));
       /* Recommends a project-scoped bearer for the editor. */
       assert(strstr(report, "scope:project:<id>:<secret>"));
+
+      /* A configured retired global is visible before the first refusal. The
+       * live rig uses this as proof that its full-mode server actually started
+       * with the value it intends to exercise. It still grants no authority. */
+      g_remote_writes = SERVER_REMOTE_WRITES_FULL;
+      server_http_api_status_report(8910, 1, 60, report, sizeof(report));
+      assert(strstr(report, "aimee.api.remote_writes NO LONGER AUTHORIZES"));
+      assert(strstr(report, "remote_writes.global_ignored"));
+      g_remote_writes = SERVER_REMOTE_WRITES_OFF;
 
       /* Missing bearer is called out (the listener refuses to bind without it). */
       server_http_api_status_report(8910, 0, 0, report, sizeof(report));
@@ -1058,7 +2046,9 @@ int main(void)
       /* Disabled listener: explains how to turn it on, no provider snippets. */
       server_http_api_status_report(0, 0, 0, report, sizeof(report));
       assert(strstr(report, "disabled"));
-      assert(strstr(report, "http_port: 8910"));
+      assert(strstr(report, "aimee api enable"));
+      assert(strstr(report, "directly into Vault"));
+      assert(!strstr(report, "bearer_token:"));
       assert(!strstr(report, "http://127.0.0.1"));
 
       /* Never overflows a tiny buffer. */
@@ -1220,7 +2210,180 @@ int main(void)
       unsetenv("AIMEE_WEBCHAT_GIT");
    }
 
+   /* Negotiated buffered responses use real RFC 1952 gzip framing and remain
+    * byte-equivalent after bounded decoding. */
+   {
+      int pair[2];
+      assert(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0);
+      char body[8193];
+      for (size_t i = 0; i < sizeof(body) - 1; i++)
+         body[i] = (char)('a' + ((i * 31 + (i / 97) * 7) % 26));
+      body[sizeof(body) - 1] = '\0';
+      server_http_gzip_set(1);
+      send_response(pair[0], 200, body, "gzip-test");
+      close(pair[0]);
+      unsigned char wire[16385];
+      size_t used = 0;
+      for (;;)
+      {
+         ssize_t n = read(pair[1], wire + used, sizeof(wire) - used - 1);
+         if (n <= 0)
+            break;
+         used += (size_t)n;
+      }
+      close(pair[1]);
+      wire[used] = '\0';
+      char *payload = strstr((char *)wire, "\r\n\r\n");
+      assert(payload && strstr((char *)wire, "Content-Encoding: gzip\r\n"));
+      assert(strstr((char *)wire, "Accept-Request-Encoding: gzip\r\n"));
+      payload += 4;
+      unsigned char *decoded = NULL;
+      size_t decoded_len = 0;
+      assert(http_gzip_decompress(payload, used - (size_t)(payload - (char *)wire), 1u << 20, 1000,
+                                  &decoded, &decoded_len) == 0);
+      assert(decoded_len == strlen(body) && memcmp(decoded, body, decoded_len) == 0);
+      free(decoded);
+      server_http_gzip_set(0);
+   }
+
+   /* Every data-plane request accepts one unambiguous HTTP/1.1 frame and
+    * rejects duplicate lengths, transfer coding, obs-fold, and pipelining. */
+   {
+      const char *valid = "GET /v1/health HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n";
+      const char *valid_no_length = "OPTIONS /v1/health HTTP/1.1\r\nHost: localhost\r\n\r\n";
+      const char *partial =
+          "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4\r\n\r\n{}";
+      const char *route_oversize =
+          "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4194305\r\n\r\n";
+      const char *length_overflow = "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\n"
+                                    "Content-Length: 18446744073709551616\r\n\r\n";
+      const char *duplicate =
+          "POST /v1/responses HTTP/1.1\r\nContent-Length: 1\r\nContent-Length: 1\r\n\r\nx";
+      const char *chunked =
+          "POST /v1/responses HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n";
+      const char *conflicting_connection =
+          "GET /v1/health HTTP/1.1\r\nConnection: keep-alive\r\nConnection: close\r\n\r\n";
+      const char *folded = "GET /v1/health HTTP/1.1\r\n X-folded: bad\r\n\r\n";
+      const char *pipelined =
+          "GET /v1/health HTTP/1.1\r\nContent-Length: 0\r\n\r\nGET /v1/health HTTP/1.1\r\n\r\n";
+      assert(server_http_request_framing_valid(valid, strlen(valid)) == 1);
+      assert(server_http_request_framing_valid(valid_no_length, strlen(valid_no_length)) == 1);
+      assert(server_http_request_framing_valid(partial, strlen(partial)) == 1);
+      assert(server_http_request_framing_valid(route_oversize, strlen(route_oversize)) == 1);
+      assert(server_http_request_framing_valid(length_overflow, strlen(length_overflow)) == 0);
+      assert(server_http_request_framing_valid(duplicate, strlen(duplicate)) == 0);
+      assert(server_http_request_framing_valid(chunked, strlen(chunked)) == 0);
+      assert(server_http_request_framing_valid(conflicting_connection,
+                                               strlen(conflicting_connection)) == 0);
+      assert(server_http_request_framing_valid(folded, strlen(folded)) == 0);
+      assert(server_http_request_framing_valid(pipelined, strlen(pipelined)) == 0);
+   }
+
+   /* The wizard creates one durable identity transaction: additive bearer now,
+    * explicit full tier only after the CSR certificate is bound. */
+   {
+      assert(db1_init(":memory:") == 0);
+      assert(runtime_secret_store("AIMEE_API_BEARER_TOKEN", "primary") == 0);
+      assert(config_set_server_api_mtls(1) == 0);
+      for (int i = 0; i < AIMEE_API_BEARER_EXTRA_MAX; i++)
+      {
+         char name[96];
+         snprintf(name, sizeof(name), "AIMEE_API_BEARER_TOKEN_EXTRA_%d", i);
+         runtime_secret_remove(name);
+      }
+
+      pthread_barrier_t barrier;
+      pthread_t workers[2];
+      wizard_bootstrap_thread_t attempts[2] = {{.barrier = &barrier}, {.barrier = &barrier}};
+      assert(pthread_barrier_init(&barrier, NULL, 3) == 0);
+      assert(pthread_create(&workers[0], NULL, wizard_bootstrap_thread, &attempts[0]) == 0);
+      assert(pthread_create(&workers[1], NULL, wizard_bootstrap_thread, &attempts[1]) == 0);
+      int barrier_result = pthread_barrier_wait(&barrier);
+      assert(barrier_result == 0 || barrier_result == PTHREAD_BARRIER_SERIAL_THREAD);
+      assert(pthread_join(workers[0], NULL) == 0);
+      assert(pthread_join(workers[1], NULL) == 0);
+      assert(pthread_barrier_destroy(&barrier) == 0);
+      assert(attempts[0].result == 0 && attempts[1].result == 0);
+      assert(strcmp(attempts[0].bearer, attempts[1].bearer) == 0);
+
+      char bearer[65], again[65], principal[128];
+      snprintf(bearer, sizeof(bearer), "%s", attempts[0].bearer);
+      assert(strlen(bearer) == 64 && server_http_enrolled_bearer_count() == 1);
+      assert(config_server_api_bearer_extra_count() == 1);
+      assert(strcmp(config_server_api_bearer_extra(0), bearer) == 0);
+      assert(server_http_authorize_enrolled(1, "primary", NULL, bearer, 0) == 0);
+      assert(server_http_first_user_bootstrap("webuser:alice", again, sizeof(again)) == 0);
+      assert(strcmp(again, bearer) == 0); /* refresh is idempotent */
+      assert(server_http_first_user_bootstrap("webuser:bob", again, sizeof(again)) == -2);
+
+      assert(server_http_first_user_cert_tier("A1B2", principal, sizeof(principal)) == 0);
+      int effective_tier = SERVER_REMOTE_WRITES_OFF;
+      assert(server_http_first_user_apply_cert_grant(0, "A1B2", &effective_tier, principal,
+                                                     sizeof(principal)) == 0);
+      assert(effective_tier == SERVER_REMOTE_WRITES_OFF && !principal[0]);
+      assert(server_http_first_user_bind_cert(bearer, "A1B2") == 1);
+      assert(server_http_first_user_cert_tier("A1B2", principal, sizeof(principal)) == 2);
+      assert(strcmp(principal, "webuser:alice") == 0);
+      effective_tier = SERVER_REMOTE_WRITES_OFF;
+      assert(server_http_first_user_apply_cert_grant(1, "A1B2", &effective_tier, principal,
+                                                     sizeof(principal)) == 2);
+      assert(effective_tier == SERVER_REMOTE_WRITES_FULL);
+      assert(strcmp(principal, "webuser:alice") == 0);
+      assert(server_http_first_user_bootstrap("webuser:alice", again, sizeof(again)) == 1);
+      runtime_secret_remove("AIMEE_API_BEARER_TOKEN");
+      runtime_secret_remove("AIMEE_API_BEARER_TOKEN_EXTRA_0");
+      db1_shutdown();
+   }
+
+   compute_pool_shutdown(&g_test_server_ctx.orchestration_pool);
+   g_test_server_ctx.orchestration_pool_initialized = 0;
    platform_test_rmrf(home);
    printf("OK\n");
    return 0;
+}
+
+/* The kb_client transport, stubbed. This test links the /v1 route table, which now
+ * references the grant handlers, and those call kb over HTTP. The test never invokes them —
+ * its concern is the route gate, not the handler bodies — so refusing stubs are both
+ * sufficient and the safer default: if a grant handler is ever reached from here by
+ * accident, it fails closed rather than proceeding against a fabricated kb.
+ *
+ * The handlers' own behaviour is covered by test_kb_client_grants.c (interpretation of kb's
+ * answers) and test_kb_http_grants.c (kb's side). */
+char *kb_client_v1_post_json(const char *path, cJSON *body, int timeout_ms, int *status_out)
+{
+   (void)path;
+   (void)body;
+   (void)timeout_ms;
+   if (status_out)
+      *status_out = 0;
+   return NULL;
+}
+
+char *kb_client_v1_get_json(const char *path, int timeout_ms, int *status_out)
+{
+   (void)path;
+   (void)timeout_ms;
+   if (status_out)
+      *status_out = 0;
+   return NULL;
+}
+
+char *kb_client_query_escape(const char *s)
+{
+   (void)s;
+   return NULL;
+}
+
+char *kb_client_project_status_json(const char *project)
+{
+   char buf[256];
+   snprintf(buf, sizeof(buf), "{\"project\":\"%s\",\"chunks\":7,\"vector_points\":7}",
+            project ? project : "");
+   return strdup(buf);
+}
+
+char *kb_client_ingest_status_json(void)
+{
+   return strdup("{\"queue\":{\"pending\":0,\"running\":0},\"workers\":{\"configured\":1}}");
 }

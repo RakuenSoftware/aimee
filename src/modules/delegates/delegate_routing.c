@@ -65,7 +65,7 @@ static int agent_meets_filter(const agent_t *ag, unsigned required_caps, int min
                               int drop_deprecated)
 {
    model_capability_t cap;
-   int have_cap = model_capability_get(ag->provider, ag->model, &cap);
+   int have_cap = model_capability_get(agent_catalog_provider(ag), ag->model, &cap);
    if (drop_deprecated && have_cap && cap.deprecated)
       return 0;
    unsigned effective_flags = have_cap ? cap.flags : 0;
@@ -97,6 +97,51 @@ static int agent_meets_filter(const agent_t *ag, unsigned required_caps, int min
    return 1;
 }
 
+/* Disable every agent whose declared ceiling cannot serve this packet's scope.
+ *
+ * The error deliberately LISTS the fleet and its ceilings: the panel's operational
+ * caveat was that "no agent can serve this" leaves the operator guessing unless it
+ * says which seats exist and what each is limited to. */
+int delegate_filter_route_scope(agent_config_t *cfg, agent_scope_t scope, char *errbuf,
+                                size_t errbuf_sz)
+{
+   if (errbuf && errbuf_sz > 0)
+      errbuf[0] = '\0';
+   if (!cfg || scope == AGENT_SCOPE_UNSET)
+      return 0; /* unset resolves to whole_task at the routing filter */
+
+   int kept = 0;
+   for (int i = 0; i < cfg->agent_count; i++)
+   {
+      agent_t *ag = &cfg->agents[i];
+      if (!ag->enabled)
+         continue;
+      if (ag->max_scope != AGENT_SCOPE_UNSET && scope > ag->max_scope)
+      {
+         ag->enabled = 0;
+         continue;
+      }
+      kept++;
+   }
+   if (kept > 0)
+      return 0;
+
+   size_t n = 0;
+   n += (size_t)snprintf(errbuf + n, errbuf_sz - n,
+                         "no agent can serve scope '%s'. Fleet ceilings:", agent_scope_name(scope));
+   for (int i = 0; i < cfg->agent_count && n + 40 < errbuf_sz; i++)
+   {
+      const char *ceil = cfg->agents[i].max_scope == AGENT_SCOPE_UNSET
+                             ? "unbounded"
+                             : agent_scope_name(cfg->agents[i].max_scope);
+      n += (size_t)snprintf(errbuf + n, errbuf_sz - n, " %s=%s", cfg->agents[i].name, ceil);
+   }
+   if (n + 60 < errbuf_sz)
+      snprintf(errbuf + n, errbuf_sz - n,
+               ". Raise a ceiling, lower the packet scope, or add a capable agent.");
+   return -1;
+}
+
 int delegate_filter_route_capabilities(agent_config_t *cfg, const char *role,
                                        unsigned required_caps, int min_context, int drop_deprecated,
                                        char *errbuf, size_t errbuf_sz)
@@ -112,7 +157,7 @@ int delegate_filter_route_capabilities(agent_config_t *cfg, const char *role,
    for (int i = 0; i < cfg->agent_count; i++)
    {
       agent_t *ag = &cfg->agents[i];
-      if (ag->enabled && (agent_has_role(ag, role) || agent_is_exec_role(ag, role)))
+      if (ag->enabled && agent_has_role(ag, role))
          role_candidates++;
    }
    if (role_candidates == 0)
@@ -131,7 +176,7 @@ int delegate_filter_route_capabilities(agent_config_t *cfg, const char *role,
       for (int i = 0; i < cfg->agent_count; i++)
       {
          agent_t *ag = &cfg->agents[i];
-         if (!ag->enabled || (!agent_has_role(ag, role) && !agent_is_exec_role(ag, role)))
+         if (!ag->enabled || !agent_has_role(ag, role))
             continue;
          if (agent_meets_filter(ag, required_caps, min_context, drop_deprecated))
             kept_full++;
@@ -156,7 +201,7 @@ int delegate_filter_route_capabilities(agent_config_t *cfg, const char *role,
       agent_t *ag = &cfg->agents[i];
       if (!ag->enabled)
          continue;
-      if (!agent_has_role(ag, role) && !agent_is_exec_role(ag, role))
+      if (!agent_has_role(ag, role))
          continue;
       if (!agent_meets_filter(ag, eff, min_context, drop_deprecated))
       {
@@ -196,7 +241,7 @@ agent_t *delegate_route_by_provider(agent_config_t *cfg, const char *role, const
       if (!ag->enabled || strcmp(ag->provider, provider) != 0 ||
           !agent_is_available_for_routing(ag))
          continue;
-      if (role && !agent_has_role(ag, role) && !agent_is_exec_role(ag, role))
+      if (role && !agent_has_role(ag, role))
          continue;
       if (!best || ag->cost_tier < best->cost_tier)
       {
@@ -222,7 +267,7 @@ int delegate_max_cost_tier(agent_config_t *cfg, const char *role)
       agent_t *ag = &cfg->agents[i];
       if (!ag->enabled || !agent_is_available_for_routing(ag))
          continue;
-      if (role && !agent_has_role(ag, role) && !agent_is_exec_role(ag, role))
+      if (role && !agent_has_role(ag, role))
          continue;
       if (ag->cost_tier > max_tier)
          max_tier = ag->cost_tier;
@@ -274,6 +319,9 @@ int delegate_apply_route_overrides(agent_config_t *cfg, const char *role, const 
 {
    if (!cfg)
       return 0;
+   /* Callers load a request-local config today, but reset explicitly so a
+    * reused config can never leak a previous request's positive pin. */
+   cfg->route_pinned = 0;
    if (errbuf && errbuf_sz > 0)
       errbuf[0] = '\0';
 
@@ -355,7 +403,7 @@ int delegate_apply_route_overrides(agent_config_t *cfg, const char *role, const 
          route_err(errbuf, errbuf_sz, "%s", emsg, NULL);
          return -1;
       }
-      if (role && role[0] && !agent_has_role(selected, role) && !agent_is_exec_role(selected, role))
+      if (role && role[0] && !agent_has_role(selected, role))
       {
          route_err(errbuf, errbuf_sz, "agent '%s' cannot handle role '%s'", via_name, role);
          return -1;
@@ -388,6 +436,7 @@ int delegate_apply_route_overrides(agent_config_t *cfg, const char *role, const 
 
    if (selected)
    {
+      cfg->route_pinned = 1;
       for (int i = 0; i < cfg->agent_count; i++)
       {
          if (&cfg->agents[i] != selected)
@@ -396,6 +445,8 @@ int delegate_apply_route_overrides(agent_config_t *cfg, const char *role, const 
    }
    else if (selected_tier >= 0)
    {
+      /* A tier is a pool, not a pin: every enabled role-eligible peer in the
+       * selected tier remains a valid substitute. */
       for (int i = 0; i < cfg->agent_count; i++)
       {
          if (cfg->agents[i].cost_tier != selected_tier)

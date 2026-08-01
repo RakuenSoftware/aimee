@@ -12,8 +12,8 @@
 #include "agent_config.h"
 #include "agent_exec.h"
 #include "agent_protocol.h"
-#include "delegate_driver.h"
-#include "delegate_xml_fallback.h"
+#include <aimee/delegates/delegate_driver.h>
+#include <aimee/delegates/delegate_xml_fallback.h>
 #include "model_provider.h"
 #include "model_sampling.h"
 #include "platform_test_util.h"
@@ -346,6 +346,42 @@ static void test_openai_provider_fixed_temperature_fallback(void)
 
    provider->fixed_temperature = old_fixed_temperature;
    printf("openai_provider_fixed_temperature_fallback OK\n");
+}
+
+/* A model that accepts exactly one temperature must get that value even when
+ * the caller asked for another. kimi-k3 names no wire provider in agents.json,
+ * so the constraint has to resolve off the catalog vendor; sending the caller's
+ * temperature instead failed every delegate with HTTP 400 "invalid temperature:
+ * only 1 is allowed for this model". */
+static void test_openai_required_temperature_overrides_caller(void)
+{
+   agent_t agent;
+   memset(&agent, 0, sizeof(agent));
+   snprintf(agent.catalog_provider, sizeof(agent.catalog_provider), "moonshotai");
+   snprintf(agent.model, sizeof(agent.model), "k3-256k");
+   assert(model_sampling_required_temperature(&agent) == 1.0);
+
+   cJSON *messages = cJSON_CreateArray();
+   cJSON *req = agent_build_request_openai(&agent, messages, NULL, 1024, 0.2);
+   assert(req != NULL);
+   assert(cJSON_GetObjectItem(req, "temperature")->valuedouble == 1.0);
+   cJSON_Delete(req);
+   cJSON_Delete(messages);
+
+   /* An unconstrained model still honours the caller. */
+   agent_t other;
+   memset(&other, 0, sizeof(other));
+   snprintf(other.provider, sizeof(other.provider), "openai");
+   snprintf(other.model, sizeof(other.model), "unknown-local-model");
+   assert(model_sampling_required_temperature(&other) < 0);
+
+   messages = cJSON_CreateArray();
+   req = agent_build_request_openai(&other, messages, NULL, 1024, 0.2);
+   assert(req != NULL);
+   assert(cJSON_GetObjectItem(req, "temperature")->valuedouble == 0.2);
+   cJSON_Delete(req);
+   cJSON_Delete(messages);
+   printf("openai_required_temperature_overrides_caller OK\n");
 }
 
 static void test_agent_config_recommended_sampling_roundtrip(void)
@@ -908,6 +944,82 @@ static void test_openai_request_omits_empty_tools(void)
    printf("openai_request_omits_empty_tools OK\n");
 }
 
+static void test_evidence_review_requires_initial_tool_choice(void)
+{
+   agent_t agent;
+   memset(&agent, 0, sizeof(agent));
+   snprintf(agent.provider, sizeof(agent.provider), "openai");
+   snprintf(agent.model, sizeof(agent.model), "gpt-test");
+   agent.require_initial_tool_call = 1;
+   cJSON *messages = make_one_user_message();
+   cJSON *tools = make_one_dummy_tool();
+
+   cJSON *openai = agent_build_request_openai(&agent, messages, tools, 32, 0.0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(openai, "tool_choice")), "required") ==
+          0);
+   cJSON_Delete(openai);
+
+   snprintf(agent.provider, sizeof(agent.provider), "minimax");
+   snprintf(agent.model, sizeof(agent.model), "MiniMax-M3");
+   cJSON *minimax = agent_build_request_openai(&agent, messages, tools, 32, 0.0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(minimax, "tool_choice")), "required") ==
+          0);
+   cJSON_Delete(minimax);
+
+   snprintf(agent.provider, sizeof(agent.provider), "mistral");
+   snprintf(agent.model, sizeof(agent.model), "mistral-large");
+   cJSON *mistral = agent_build_request_openai(&agent, messages, tools, 32, 0.0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(mistral, "tool_choice")), "required") ==
+          0);
+   cJSON_Delete(mistral);
+
+   cJSON *responses = agent_build_request_responses(&agent, messages, tools, "review");
+   cJSON *responses_choice = cJSON_GetObjectItem(responses, "tool_choice");
+   assert(cJSON_IsObject(responses_choice));
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(responses_choice, "type")), "function") ==
+          0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(responses_choice, "name")), "noop") == 0);
+   cJSON_Delete(responses);
+
+   cJSON *response_tools = cJSON_CreateArray();
+   cJSON *read_file = cJSON_CreateObject();
+   cJSON_AddStringToObject(read_file, "type", "function");
+   cJSON_AddStringToObject(read_file, "name", "read_file");
+   cJSON_AddItemToArray(response_tools, read_file);
+   cJSON *code_search = cJSON_CreateObject();
+   cJSON_AddStringToObject(code_search, "type", "function");
+   cJSON_AddStringToObject(code_search, "name", "code_search");
+   cJSON_AddItemToArray(response_tools, code_search);
+   responses = agent_build_request_responses(&agent, messages, response_tools, "review");
+   responses_choice = cJSON_GetObjectItem(responses, "tool_choice");
+   assert(cJSON_IsObject(responses_choice));
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(responses_choice, "name")),
+                 "code_search") == 0);
+   cJSON_Delete(responses);
+   cJSON_Delete(response_tools);
+
+   cJSON *malformed_tools = cJSON_CreateArray();
+   cJSON_AddItemToArray(malformed_tools, cJSON_CreateObject());
+   responses = agent_build_request_responses(&agent, messages, malformed_tools, "review");
+   assert(cJSON_GetObjectItem(responses, "tool_choice") == NULL);
+   cJSON_Delete(responses);
+   cJSON_Delete(malformed_tools);
+
+   cJSON *anthropic = agent_build_request_anthropic(&agent, messages, tools, "review", 32, 0.0);
+   cJSON *choice = cJSON_GetObjectItem(anthropic, "tool_choice");
+   assert(cJSON_IsObject(choice));
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(choice, "type")), "any") == 0);
+   cJSON_Delete(anthropic);
+
+   cJSON_Delete(messages);
+   cJSON_Delete(tools);
+   assert(agent_require_initial_tool_choice(1, 0, 1) == 1);
+   assert(agent_require_initial_tool_choice(1, 1, 1) == 0);
+   assert(agent_require_initial_tool_choice(1, 0, 0) == 0);
+   assert(agent_require_initial_tool_choice(0, 0, 1) == 0);
+   printf("evidence_review_requires_initial_tool_choice OK\n");
+}
+
 static void test_provider_network_error_mentions_local_http_init(void)
 {
    const char *msg = provider_error_message(PROVIDER_ERR_NETWORK);
@@ -978,6 +1090,7 @@ int main(void)
    test_openai_sampling_opt_out_unchanged();
    test_openai_sampling_unknown_opt_in_unchanged();
    test_openai_provider_fixed_temperature_fallback();
+   test_openai_required_temperature_overrides_caller();
    test_agent_config_recommended_sampling_roundtrip();
    test_parse_response_openai_sanitizes_invalid_tool_arguments();
    test_parse_response_captures_provider_model();
@@ -998,6 +1111,7 @@ int main(void)
 
    test_openai_request_llama_compat_options();
    test_openai_request_omits_empty_tools();
+   test_evidence_review_requires_initial_tool_choice();
    test_provider_network_error_mentions_local_http_init();
    test_minimax_driver_has_own_caps();
 

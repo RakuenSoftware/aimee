@@ -1,5 +1,8 @@
 # Troubleshooting
 
+For server/KB liveness, retrieval readiness, breaker diagnostics, queue depth, and
+safe dependency recovery, see [Retrieval readiness and recovery](runbooks/retrieval-readiness-and-recovery.md).
+
 Start at the first broken boundary.
 
 ```bash
@@ -18,12 +21,12 @@ For local use, check the Unix socket, service manager, server log, and config-di
 
 ## Reads work; writes fail
 
-Check both remote-write controls:
-
-- deployment posture permits the route's tier;
-- the authenticated user has that tier.
-
-Use the structured `403` reason. Do not widen every user to test one grant.
+Read the structured `403` first. For the first wizard user, confirm the Linux client completed mTLS
+enrollment with the exact command shown after the summary's Deploy action; using Deploy again as that same user is
+idempotent and shows the pairing state. For an additional PAM/OIDC user, check `AIMEE_SERVER_ID`,
+`AIMEE_SERVER_TEAM_ID`, the management-JWKS trust bundle, exact subject spelling, grant tier, and
+identity-token refusal reason. `aimee.api.remote_writes` cannot fix either denial. Do not widen every
+user to test one grant.
 
 ## KB is unavailable
 
@@ -42,6 +45,96 @@ workspace authority, worktree, sandbox image, package gate, network policy, and 
 
 No network is the container default. Add the narrow egress the task needs; do not disable isolation
 globally.
+
+## Delegate cannot open a file that is plainly there
+
+The file tool answers `cannot open <path>` for a file you can see in the delegate's worktree.
+
+Its sandbox mounted an empty directory. When aimee-server runs in a container and drives a sibling
+Docker daemon, a bind source expressed in the server's own filesystem does not exist on the daemon's
+host, and Docker creates it empty rather than failing. Look at where the mount actually points:
+
+```bash
+docker inspect <aimee-delegate-...> --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}'
+```
+
+A source equal to its destination on a sibling-daemon host means the translation did not apply. The
+entrypoint derives it and says so at startup:
+
+```bash
+docker logs <server> 2>&1 | grep 'derived host-path map'
+```
+
+See [Delegate sandbox](DELEGATE_SANDBOX.md).
+
+## Delegated shell is refused as unsandboxed
+
+```text
+refused: a delegated shell requires sandbox isolation, but the sandbox is off/unavailable
+```
+
+The delegate has no assigned worktree, so there was nothing to containerise and it fell through to
+running beside the server. That refusal is correct: aimee-server holds the Docker socket, so an
+unsandboxed shell there is a host-root escalation. Give the delegate a workspace. Do not reach for
+`sandbox.mode` to make the message go away.
+
+## A settings change seems to have been ignored
+
+Read the log before assuming the field needs a restart. The C server writes to a file, not to the
+container's stdout, so `docker logs` will not show this:
+
+```bash
+docker exec <server> grep 'config file change' /var/lib/aimee/server.log | tail -3
+```
+
+`rejected (kept running config)` means the file did not validate and the previous configuration is
+still serving, so the edit did nothing. `reloaded` means it applied, and the field is live.
+
+If neither line appears, the field is one of the startup-bound ones. [Settings](SETTINGS.md) lists
+the classes.
+
+## A deploy reported success and changed nothing
+
+Check what is actually running before believing any other result:
+
+```bash
+docker pull <image>            # let the output show; a quiet pull hides a no-op
+docker image inspect <image> --format '{{.Id}}'
+docker inspect <container> --format '{{.Image}}'
+```
+
+A tag that looks current makes `pull` a no-op, Compose then reports `Running` and keeps the old
+container, and every check after that silently tests the previous build. Assert the two IDs match
+before drawing a conclusion. `aimee --version` reporting an older commit than your branch is normal
+for a docs-only change, because the image only rebuilds when image-affecting paths change.
+
+## `kb status` reports failed jobs and nothing says why
+
+```text
+Queue:     0 pending, 0 running, 9 failed
+```
+
+Ask the jobs, not the counter:
+
+```bash
+docker exec <kb> sh -c "/usr/lib/postgresql/18/bin/psql --host=/var/lib/aimee/run \
+  --dbname=aimee_shared --no-psqlrc -c \"select kind, left(last_error,80), count(*) \
+  from kb_async_jobs where status='failed' group by 1,2\""
+```
+
+On a default install the answer is usually one row:
+
+```text
+ memory_facts | no curator provider or command configured | 9
+```
+
+That is not a storage fault. The selected KB has no ready synthesis role, so curator work has nowhere
+to run and each attempt is recorded as a failure rather than skipped. The count grows quietly and
+`kb status` does not name the cause.
+
+Configure synthesis inside that KB container or point it at a remote endpoint supported by the
+profile. Otherwise expect the count. `aimee kb status` shows the curator tiers as
+`configured: false` until a role is ready. See [KB model tiers](AIMEE_KB_SYNTH_TIERS.md).
 
 ## Workflow parks
 

@@ -9,6 +9,7 @@
 #include "config.h"
 #include "memory.h"
 #include "headers/curator_profile.h"
+#include "workspace.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,6 +24,23 @@ static void kb_require_runtime_result(const char *result, const char *op)
    if (!result || strncmp(result, "error:", 6) != 0)
       return;
    fatal("%s failed: %s", op, result + 7);
+}
+
+static int kb_cmd_resolve_project(const char *project, const char *root_path, char *out,
+                                  size_t out_len)
+{
+   kb_resolve_project(project, root_path, out, out_len);
+   if (out[0])
+      return 0;
+   char cwd[MAX_PATH_LEN];
+   const char *root = root_path;
+   if (!root || !root[0])
+   {
+      if (!getcwd(cwd, sizeof(cwd)))
+         return -1;
+      root = cwd;
+   }
+   return workspace_repo_identity(root, out, out_len, NULL, 0);
 }
 
 static void print_stats(const kb_stats_t *stats)
@@ -101,16 +119,17 @@ static void kb_cmd_update(app_ctx_t *ctx, int argc, char **argv)
    else if (!getcwd(root, sizeof(root)))
       root[0] = '\0';
 
-   config_t cfg;
-   config_load(&cfg);
    /* Pass NULL when no local embedder is configured (the thin client has none)
     * so the kb embeds with its OWN embedder; defaulting to "builtin" (384-dim
     * hash) would mismatch a real-embedder corpus (1024/2560-dim) and return
     * nothing. */
-   const char *embed_cmd = cfg.embedding_command[0] ? cfg.embedding_command : NULL;
+   const char *embed_cmd =
+       config_embedding_command_field()[0] ? config_embedding_command_field() : NULL;
 
    char proj[256];
-   kb_resolve_project(project, root, proj, sizeof(proj));
+   kb_cmd_resolve_project(project, root, proj, sizeof(proj));
+   if (!proj[0])
+      fatal("cannot read or persist a stable project identity for %s", root);
 
    if (!ctx->json_output)
       printf("Updating KB for project '%s'...\n", proj);
@@ -170,27 +189,33 @@ static void kb_cmd_search(app_ctx_t *ctx, int argc, char **argv)
 
    const char *query = opt_pos(&opts, 0);
    if (!query)
-      fatal("usage: aimee kb search <query> [--project name] [--max N] [--fusion-mode "
+      fatal("usage: aimee kb search <query> [--project name] [--scope current|all] [--max N] "
+            "[--fusion-mode "
             "rrf|static_alpha|dynamic_alpha]");
 
    const char *project = opt_get(&opts, "project");
+   const char *scope = opt_get(&opts, "scope");
+   if (scope && strcmp(scope, "current") != 0 && strcmp(scope, "all") != 0)
+      fatal("kb search --scope must be current or all");
+   int all_projects = scope && strcmp(scope, "all") == 0;
    int max_results = opt_get_int(&opts, "max", KB_DEFAULT_MAX_RESULTS);
    const char *fusion_mode_override = opt_get(&opts, "fusion-mode");
 
-   config_t cfg;
-   config_load(&cfg);
    /* Pass NULL when no local embedder is configured (the thin client has none)
     * so the kb embeds with its OWN embedder; defaulting to "builtin" (384-dim
     * hash) would mismatch a real-embedder corpus (1024/2560-dim) and return
     * nothing. */
-   const char *embed_cmd = cfg.embedding_command[0] ? cfg.embedding_command : NULL;
+   const char *embed_cmd =
+       config_embedding_command_field()[0] ? config_embedding_command_field() : NULL;
 
    char proj[256];
-   kb_resolve_project(project, NULL, proj, sizeof(proj));
+   kb_cmd_resolve_project(project, NULL, proj, sizeof(proj));
+   if (!proj[0] && !all_projects)
+      fatal("no active project; pass --project with a stable project id");
 
    const char *format = ctx->json_output ? "json" : "text";
-   char *resp_json =
-       kb_client_search_json_ex(proj, query, embed_cmd, max_results, format, fusion_mode_override);
+   char *resp_json = kb_client_search_json_scoped_ex(proj, all_projects, query, embed_cmd,
+                                                     max_results, format, fusion_mode_override);
    cJSON *resp = resp_json ? cJSON_Parse(resp_json) : NULL;
    free(resp_json);
 
@@ -228,7 +253,9 @@ static void kb_cmd_status(app_ctx_t *ctx, int argc, char **argv)
    const char *project = opt_get(&opts, "project");
 
    char proj[256];
-   kb_resolve_project(project, NULL, proj, sizeof(proj));
+   kb_cmd_resolve_project(project, NULL, proj, sizeof(proj));
+   if (!proj[0])
+      fatal("no active project; pass --project with a stable project id");
 
    char *resp_json = kb_client_project_status_json(proj);
    cJSON *resp = resp_json ? cJSON_Parse(resp_json) : NULL;
@@ -292,7 +319,9 @@ static void kb_cmd_clear(app_ctx_t *ctx, int argc, char **argv)
    const char *project = opt_get(&opts, "project");
 
    char proj[256];
-   kb_resolve_project(project, NULL, proj, sizeof(proj));
+   kb_cmd_resolve_project(project, NULL, proj, sizeof(proj));
+   if (!proj[0])
+      fatal("no active project; pass --project with a stable project id");
 
    char *resp_json = kb_client_clear_json(proj);
    cJSON *resp = resp_json ? cJSON_Parse(resp_json) : NULL;
@@ -415,13 +444,11 @@ static void kb_cmd_repair(app_ctx_t *ctx, int argc, char **argv)
 
    if (reindex_corpus)
    {
-      config_t cfg;
-      config_load(&cfg);
 
       const char *configured =
-          cfg.db2_vector_corpus_index[0] ? cfg.db2_vector_corpus_index : "auto";
-      int64_t threshold = cfg.db2_vector_corpus_diskann_threshold > 0
-                              ? cfg.db2_vector_corpus_diskann_threshold
+          config_db2_vector_corpus_index()[0] ? config_db2_vector_corpus_index() : "auto";
+      int64_t threshold = config_db2_vector_corpus_diskann_threshold() > 0
+                              ? config_db2_vector_corpus_diskann_threshold()
                               : 1000000;
 
       /* Resolve which index type the config selects (no DB needed for the policy). */
@@ -459,16 +486,17 @@ static void kb_cmd_repair(app_ctx_t *ctx, int argc, char **argv)
    else if (!getcwd(root, sizeof(root)))
       root[0] = '\0';
 
-   config_t cfg;
-   config_load(&cfg);
    /* Pass NULL when no local embedder is configured (the thin client has none)
     * so the kb embeds with its OWN embedder; defaulting to "builtin" (384-dim
     * hash) would mismatch a real-embedder corpus (1024/2560-dim) and return
     * nothing. */
-   const char *embed_cmd = cfg.embedding_command[0] ? cfg.embedding_command : NULL;
+   const char *embed_cmd =
+       config_embedding_command_field()[0] ? config_embedding_command_field() : NULL;
 
    char proj[256];
-   kb_resolve_project(project, root, proj, sizeof(proj));
+   kb_cmd_resolve_project(project, root, proj, sizeof(proj));
+   if (!proj[0])
+      fatal("cannot read or persist a stable project identity for %s", root);
 
    if (!ctx->json_output)
       printf("Repairing documentation index for project '%s' from %s...\n", proj, root);

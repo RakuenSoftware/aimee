@@ -9,9 +9,12 @@
 #include "db.h"
 #include "db1.h"
 #include "db2.h"
+#include "db2_internal.h"
 #include "db2_test_shim.h"
+#include "db_postgres.h"
 #include "platform_test_util.h"
 #include "../db2/code_projection.h"
+#include "../db2/entity_edges.h"
 #include "../db2/entity_nodes.h"
 
 static char g_db_path[512];
@@ -32,6 +35,17 @@ static void teardown(void)
    db1_shutdown();
    platform_test_remove_sqlite(g_db_path);
    g_db_path[0] = '\0';
+}
+
+static long scalar(const char *sql)
+{
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(), sql, err, sizeof(err));
+   assert(st);
+   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
+   long value = (long)aimee_pg_column_int64(st, 0);
+   aimee_pg_finalize(st);
+   return value;
 }
 
 /* Test: create a generation, check it returns a positive id. */
@@ -126,6 +140,59 @@ static void test_update_counts_invalid(void)
    teardown();
 }
 
+static void test_generic_graph_visibility_tracks_projection_lifecycle(void)
+{
+   setup();
+   char err[256] = "";
+   assert(aimee_pg_exec(db2_conn(),
+                        "INSERT INTO projects(name,root,scanned_at) VALUES('proj','/x','t');"
+                        "INSERT INTO code_projection_generations(id,project,state) VALUES"
+                        " (101,'proj','pending'),(102,'proj','visible'),"
+                        " (103,'proj','superseded');"
+                        "INSERT INTO entity_edges(source,relation,target,edge_origin,"
+                        " projection_generation_id) VALUES"
+                        " ('subject','rel','ordinary','session',0),"
+                        " ('subject','rel','pending','code_projection',101),"
+                        " ('subject','rel','visible','code_projection',102),"
+                        " ('subject','rel','superseded','code_projection',103)",
+                        err, sizeof(err)) == 0);
+   edge_t edges[8];
+   assert(db2_entity_edge_list_by_entity("subject", edges, 8) == 2);
+   assert(aimee_pg_exec(db2_conn(),
+                        "UPDATE projects SET lifecycle_state='detached' WHERE name='proj'", err,
+                        sizeof(err)) == 0);
+   assert(db2_entity_edge_list_by_entity("subject", edges, 8) == 1);
+   assert(strcmp(edges[0].target, "ordinary") == 0);
+   teardown();
+}
+
+static void test_publish_is_atomic_and_project_bound(void)
+{
+   setup();
+   char err[256] = "";
+   assert(aimee_pg_exec(db2_conn(),
+                        "INSERT INTO projects(name,root,scanned_at) VALUES"
+                        " ('proj','/x','t'),('other','/y','t');"
+                        "INSERT INTO code_projection_generations(id,project,state) VALUES"
+                        " (201,'proj','visible'),(202,'proj','pending'),"
+                        " (203,'other','pending')",
+                        err, sizeof(err)) == 0);
+
+   assert(db2_code_projection_generation_publish(999, "proj") == -1);
+   assert(scalar("SELECT count(*) FROM code_projection_generations"
+                 " WHERE project='proj' AND state='visible'") == 1);
+   assert(db2_code_projection_generation_publish(203, "proj") == -1);
+   assert(scalar("SELECT count(*) FROM code_projection_generations"
+                 " WHERE project='proj' AND state='visible'") == 1);
+
+   assert(db2_code_projection_generation_publish(202, "proj") == 0);
+   assert(scalar("SELECT count(*) FROM code_projection_generations"
+                 " WHERE id=201 AND state='superseded'") == 1);
+   assert(scalar("SELECT count(*) FROM code_projection_generations"
+                 " WHERE id=202 AND state='visible'") == 1);
+   teardown();
+}
+
 int main(void)
 {
    printf("test_generation_create... ");
@@ -166,6 +233,14 @@ int main(void)
 
    printf("test_update_counts_invalid... ");
    test_update_counts_invalid();
+   printf("ok\n");
+
+   printf("test_generic_graph_visibility_tracks_projection_lifecycle... ");
+   test_generic_graph_visibility_tracks_projection_lifecycle();
+   printf("ok\n");
+
+   printf("test_publish_is_atomic_and_project_bound... ");
+   test_publish_is_atomic_and_project_bound();
    printf("ok\n");
 
    printf("code_projection: all tests passed\n");

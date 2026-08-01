@@ -3,8 +3,7 @@
 #define _GNU_SOURCE
 #endif
 #include "server_compute_impl.h"
-#include "skill_curator.h"
-#include "gw_orch_delegates.h"
+#include <aimee/delegates/gw_orch_delegates.h>
 #include "config.h"
 #include "log.h"
 #include "cJSON.h"
@@ -63,8 +62,7 @@ static int skill_review_spawn_delegate(void *ctx, const char *role, const char *
  * config-free (mirrors coord_delegates_enabled in server_coord_dispatcher.c). */
 static int skill_review_delegates_enabled(void)
 {
-   config_t cfg;
-   int tri = (config_load(&cfg) == 0) ? cfg.module_delegates : -1;
+   int tri = config_present() ? config_module_delegates() : -1;
    return config_module_enabled(tri, gw_orch_delegates_enabled());
 }
 
@@ -102,10 +100,4 @@ void server_compute_skill_review_async(server_ctx_t *ctx, const char *session_id
    }
    if (backing.spawn_rc != 0)
       LOG_WARN("skill_review", "failed to submit review job for session %s", session_id);
-}
-
-void server_compute_skill_curator_async(server_ctx_t *ctx)
-{
-   (void)ctx;
-   skill_curator_maybe();
 }

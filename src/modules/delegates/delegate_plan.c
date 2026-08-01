@@ -1,4 +1,4 @@
-#include "delegate_plan.h"
+#include <aimee/delegates/delegate_plan.h>
 #include "util.h"
 #include <ctype.h>
 #include <stdio.h>

@@ -27,7 +27,8 @@ int db2_css_important_audit(const char *pf, css_important_t *out, int max)
                               " JOIN css_rules c ON c.id = d.rule_id"
                               " JOIN files f ON f.id = c.file_id"
                               " JOIN projects p ON p.id = f.project_id"
-                              " WHERE d.important = 1"
+                              " WHERE d.important=1 AND p.lifecycle_state='current'"
+                              " AND f.generation=p.current_generation"
                               " GROUP BY p.name, d.property ORDER BY cnt DESC, d.property LIMIT ?1";
    static const char *q_filt =
        "SELECT p.name, d.property, COUNT(*) AS cnt, MIN(f.path) AS sample"
@@ -35,7 +36,8 @@ int db2_css_important_audit(const char *pf, css_important_t *out, int max)
        " JOIN css_rules c ON c.id = d.rule_id"
        " JOIN files f ON f.id = c.file_id"
        " JOIN projects p ON p.id = f.project_id"
-       " WHERE d.important = 1 AND p.name = ?2"
+       " WHERE d.important=1 AND p.name=?2 AND p.lifecycle_state='current'"
+       " AND f.generation=p.current_generation"
        " GROUP BY p.name, d.property ORDER BY cnt DESC, d.property LIMIT ?1";
    char err[CSSI_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, filt ? q_filt : q_all, err, sizeof(err));
@@ -75,13 +77,15 @@ int db2_css_high_specificity(const char *pf, css_high_spec_t *out, int max)
                               " c.line FROM css_rules c"
                               " JOIN files f ON f.id = c.file_id"
                               " JOIN projects p ON p.id = f.project_id"
-                              " WHERE c.spec_a > 0"
+                              " WHERE c.spec_a>0 AND p.lifecycle_state='current'"
+                              " AND f.generation=p.current_generation"
                               " ORDER BY c.spec_a DESC, c.spec_b DESC, f.path LIMIT ?1";
    static const char *q_filt = "SELECT p.name, f.path, c.selector, c.spec_a, c.spec_b, c.spec_c,"
                                " c.line FROM css_rules c"
                                " JOIN files f ON f.id = c.file_id"
                                " JOIN projects p ON p.id = f.project_id"
-                               " WHERE c.spec_a > 0 AND p.name = ?2"
+                               " WHERE c.spec_a>0 AND p.name=?2 AND p.lifecycle_state='current'"
+                               " AND f.generation=p.current_generation"
                                " ORDER BY c.spec_a DESC, c.spec_b DESC, f.path LIMIT ?1";
    char err[CSSI_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, filt ? q_filt : q_all, err, sizeof(err));
@@ -180,12 +184,18 @@ int db2_css_unused_custom_properties(const char *pf, css_unused_var_t *out, int 
 
    /* Pass 1: collect referenced var() names from values that mention var(. */
    static const char *r_all = "SELECT d.value FROM css_declarations d"
-                              " WHERE d.value LIKE '%var(%'";
+                              " JOIN css_rules c ON c.id=d.rule_id"
+                              " JOIN files f ON f.id=c.file_id"
+                              " JOIN projects p ON p.id=f.project_id"
+                              " WHERE d.value LIKE '%var(%' AND p.lifecycle_state='current'"
+                              " AND f.generation=p.current_generation";
    static const char *r_filt = "SELECT d.value FROM css_declarations d"
                                " JOIN css_rules c ON c.id = d.rule_id"
                                " JOIN files f ON f.id = c.file_id"
                                " JOIN projects p ON p.id = f.project_id"
-                               " WHERE d.value LIKE '%var(%' AND p.name = ?1";
+                               " WHERE d.value LIKE '%var(%' AND p.name=?1"
+                               " AND p.lifecycle_state='current'"
+                               " AND f.generation=p.current_generation";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, filt ? r_filt : r_all, err, sizeof(err));
    if (!st)
    {
@@ -209,13 +219,16 @@ int db2_css_unused_custom_properties(const char *pf, css_unused_var_t *out, int 
        " JOIN css_rules c ON c.id = d.rule_id"
        " JOIN files f ON f.id = c.file_id"
        " JOIN projects p ON p.id = f.project_id"
-       " WHERE d.property LIKE '--%' GROUP BY d.property ORDER BY d.property";
+       " WHERE d.property LIKE '--%' AND p.lifecycle_state='current'"
+       " AND f.generation=p.current_generation GROUP BY d.property ORDER BY d.property";
    static const char *d_filt = "SELECT d.property, MIN(p.name), MIN(f.path), MIN(c.line)"
                                " FROM css_declarations d"
                                " JOIN css_rules c ON c.id = d.rule_id"
                                " JOIN files f ON f.id = c.file_id"
                                " JOIN projects p ON p.id = f.project_id"
-                               " WHERE d.property LIKE '--%' AND p.name = ?1"
+                               " WHERE d.property LIKE '--%' AND p.name=?1"
+                               " AND p.lifecycle_state='current'"
+                               " AND f.generation=p.current_generation"
                                " GROUP BY d.property ORDER BY d.property";
    st = aimee_pg_prepare(conn, filt ? d_filt : d_all, err, sizeof(err));
    if (!st)
@@ -395,12 +408,18 @@ int db2_css_token_candidates(const char *pf, int min_count, css_token_cand_t *ou
    if (!conn)
       return -1;
    int filt = (pf && pf[0]) ? 1 : 0;
-   static const char *q_all = "SELECT d.value FROM css_declarations d WHERE d.value <> ''";
+   static const char *q_all = "SELECT d.value FROM css_declarations d"
+                              " JOIN css_rules c ON c.id=d.rule_id"
+                              " JOIN files f ON f.id=c.file_id"
+                              " JOIN projects p ON p.id=f.project_id WHERE d.value<>''"
+                              " AND p.lifecycle_state='current'"
+                              " AND f.generation=p.current_generation";
    static const char *q_filt = "SELECT d.value FROM css_declarations d"
                                " JOIN css_rules c ON c.id = d.rule_id"
                                " JOIN files f ON f.id = c.file_id"
                                " JOIN projects p ON p.id = f.project_id"
-                               " WHERE d.value <> '' AND p.name = ?1";
+                               " WHERE d.value<>'' AND p.name=?1 AND p.lifecycle_state='current'"
+                               " AND f.generation=p.current_generation";
    char err[CSSI_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, filt ? q_filt : q_all, err, sizeof(err));
    if (!st)

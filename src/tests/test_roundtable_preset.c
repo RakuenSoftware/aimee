@@ -19,12 +19,15 @@ static const char *PRESET_JSON = "{"
                                  "    { \"model\": \"gpu-mid\", \"persona\": \"security\" },"
                                  "    { \"model\": \"glm\", \"persona\": \"\" }"
                                  "  ],"
-                                 "  \"aggregator\": \"claude\","
+                                 "  \"aggregator\": \"ignored-legacy-value\","
+                                 "  \"chairman\": \"codex\","
+                                 "  \"chairman_enabled\": true,"
                                  "  \"min_successful\": 2,"
                                  "  \"max_cost_usd\": 1.5,"
                                  "  \"max_rounds\": 3,"
                                  "  \"converge_threshold\": 2,"
-                                 "  \"deadline_ms\": 360000,"
+                                 "  \"deadline_ms\": 600000,"
+                                 "  \"discussion\": true,"
                                  "  \"turns\": \"parallel\","
                                  "  \"pipeline\": {"
                                  "    \"done_bar\": \"zero_blocking\","
@@ -49,12 +52,14 @@ static void check_fields(const roundtable_preset_t *p)
    assert(strcmp(p->seats[1].persona, "security") == 0);
    assert(strcmp(p->seats[2].model, "glm") == 0);
    assert(p->seats[2].persona[0] == '\0');
-   assert(strcmp(p->aggregator, "claude") == 0);
+   assert(strcmp(p->chairman, "codex") == 0);
+   assert(p->chairman_enabled == 1);
    assert(p->min_successful == 2);
    assert(p->max_cost_usd == 1.5);
    assert(p->max_rounds == 3);
    assert(p->converge_threshold == 2);
-   assert(p->deadline_ms == 360000);
+   assert(p->deadline_ms == 600000);
+   assert(p->discussion == 1);
    assert(strcmp(p->turns, "parallel") == 0);
    assert(strcmp(p->pipeline_done_bar, "zero_blocking") == 0);
    assert(p->pipeline_max_passes == 4);
@@ -91,6 +96,12 @@ int main(void)
    assert(roundtable_preset_from_json(PRESET_JSON, NULL, &p, &err) == 0);
    check_fields(&p);
 
+   roundtable_preset_t invalid;
+   const char *errmsg = NULL;
+   assert(roundtable_preset_from_json("{\"chairman_enabled\":true}", "invalid", &invalid,
+                                      &errmsg) != 0);
+   assert(errmsg && strcmp(errmsg, "chairman_enabled requires a chairman") == 0);
+
    /* url_name overrides body name */
    roundtable_preset_t p2;
    assert(roundtable_preset_from_json(PRESET_JSON, "override-name", &p2, &err) == 0);
@@ -105,6 +116,7 @@ int main(void)
    /* to_json emits a re-parseable object */
    cJSON *j = roundtable_preset_to_json(&loaded);
    assert(j != NULL);
+   assert(cJSON_GetObjectItemCaseSensitive(j, "aggregator") == NULL);
    char *text = cJSON_PrintUnformatted(j);
    cJSON_Delete(j);
    assert(text != NULL);
@@ -123,28 +135,52 @@ int main(void)
    roundtable_preset_t missing;
    assert(roundtable_preset_load("nope", &missing) != 0);
 
+   /* Runtime resolution uses an explicit preset exactly, otherwise the saved
+    * default. It never invents or expands seats. */
+   ensemble_panel_t runtime;
+   memset(&runtime, 0, sizeof runtime);
+   char resolved[RT_PRESET_NAME_MAX], rerr[128];
+   assert(roundtable_preset_resolve_runtime("deep-review", &runtime, resolved, sizeof resolved,
+                                            rerr, sizeof rerr) == 1);
+   assert(strcmp(resolved, "deep-review") == 0);
+   assert(runtime.reference_count == 3);
+   assert(strcmp(runtime.reference_models[2], "glm") == 0);
+   assert(roundtable_preset_resolve_runtime("missing", &runtime, resolved, sizeof resolved, rerr,
+                                            sizeof rerr) == -1);
+
+   roundtable_preset_t default_preset = p;
+   snprintf(default_preset.name, sizeof default_preset.name, "default");
+   assert(roundtable_preset_save(&default_preset) == 0);
+   memset(&runtime, 0, sizeof runtime);
+   assert(roundtable_preset_resolve_runtime(NULL, &runtime, resolved, sizeof resolved, rerr,
+                                            sizeof rerr) == 1);
+   assert(strcmp(resolved, "default") == 0);
+   assert(runtime.reference_count == 3);
+
    /* apply_to_config mirrors the preset onto the live config_t */
+   assert(config_set_ensemble_aggregator("c-only") == 0);
    char aerr[128];
    assert(roundtable_preset_apply_to_config("deep-review", aerr, sizeof(aerr)) == 0);
-   config_t cfg;
-   assert(config_load(&cfg) == 0);
-   assert(cfg.ensemble_reference_count == 3);
-   assert(cfg.ensemble_reference_persona_count == 3);
-   assert(strcmp(cfg.ensemble_reference_models[0], "codex") == 0);
-   assert(strcmp(cfg.ensemble_reference_personas[0], "reviewer") == 0);
-   assert(strcmp(cfg.ensemble_reference_models[1], "gpu-mid") == 0);
-   assert(strcmp(cfg.ensemble_reference_personas[1], "security") == 0);
-   assert(strcmp(cfg.ensemble_aggregator, "claude") == 0);
-   assert(cfg.ensemble_min_successful == 2);
-   assert(cfg.roundtable_max_rounds == 3);
-   assert(cfg.roundtable_converge_threshold == 2);
-   assert(cfg.roundtable_deadline_ms == 360000);
-   assert(strcmp(cfg.roundtable_turns, "parallel") == 0);
-   assert(cfg.roundtable_pipeline_gate_ttl_h == 24);
-   assert(strcmp(cfg.roundtable_default, "deep-review") == 0);
+   assert(config_ensemble_reference_count() == 3);
+   assert(config_ensemble_reference_persona_count() == 3);
+   assert(strcmp(config_ensemble_reference_models(0), "codex") == 0);
+   assert(strcmp(config_ensemble_reference_personas(0), "reviewer") == 0);
+   assert(strcmp(config_ensemble_reference_models(1), "gpu-mid") == 0);
+   assert(strcmp(config_ensemble_reference_personas(1), "security") == 0);
+   /* Applying a Go roundtable preset must not silently mutate the separate C
+    * compatibility route while that route still exists. */
+   assert(strcmp(config_ensemble_aggregator(), "c-only") == 0);
+   assert(config_ensemble_min_successful() == 2);
+   assert(config_roundtable_max_rounds() == 3);
+   assert(config_roundtable_converge_threshold() == 2);
+   assert(config_roundtable_deadline_ms() == 600000);
+   assert(strcmp(config_roundtable_turns(), "parallel") == 0);
+   assert(config_roundtable_pipeline_gate_ttl_h() == 24);
+   assert(strcmp(config_roundtable_default(), "deep-review") == 0);
 
    /* delete removes the file */
    assert(roundtable_preset_delete("deep-review") == 0);
+   assert(roundtable_preset_delete("default") == 0);
    assert(roundtable_preset_load("deep-review", &loaded) != 0);
    assert(roundtable_preset_delete("deep-review") != 0); /* already gone */
 

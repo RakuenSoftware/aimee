@@ -9,7 +9,7 @@ in a prompt asking a model to behave.
 - A thin client cannot open DB1 or DB2.
 - A server process cannot query DB2 directly; a KB process cannot query DB1.
 - Remote routes require an authenticated principal and declared capabilities.
-- Remote writes need both deployment posture and a per-user grant.
+- Remote writes need a KB-signed user identity and a per-user grant.
 - Tool calls pass schema, path, policy, worktree, and backend checks before execution.
 - Agent credentials are resolved inside the server and are not returned to workflows or delegates.
 - Migrated action paths enter one ordered event-bus audit seam.
@@ -40,7 +40,7 @@ has no user principal.
 | --- | --- |
 | local client → server | filesystem ownership and Unix-socket permissions |
 | remote client → server | TLS, certificate pin, bearer or mTLS identity, route capabilities |
-| user → write route | authenticated user grant plus deployment write posture |
+| user → write route | signed identity token, server/team trust, per-user write grant, replay check |
 | browser → web service | login, secure cookie, CSRF checks, principal propagation |
 | server → KB | service authentication, TLS where configured, typed `/v1` routes |
 | workflow → resource plane | direct supervised peer, kernel identity, narrow internal operations |
@@ -55,19 +55,27 @@ boundary.
 
 ## Remote access
 
-`aimee remote set` pins the server certificate and rotates the bootstrap bearer. On Linux it also
-enrolls a client certificate. Verify the printed fingerprint out of band.
+`aimee remote set` stores the supplied bearer, pins the server certificate, and on Linux enrolls a
+client certificate. It does not rotate the bearer. Verify the printed fingerprint out of band.
 
-The remote write posture is a ceiling:
+After bootstrap, `aimee remote enroll` adds a bounded per-client bearer without invalidating
+existing clients. A bearer rotation is an explicit revoke-all: it replaces the primary and clears
+every additionally enrolled bearer in persisted and live state.
 
-| Posture | Maximum remote authority |
-| --- | --- |
-| `off` | reads only |
-| `data` | memory, documents, and index ingestion for an authorized user |
-| `full` | data plus runner and workspace mutation for an authorized user |
+When `AIMEE_API_BEARER_TOKEN` supplies the primary, rotate that deployment secret and restart
+instead of calling the API rotation route. A changed deployment primary revokes enrolled bearers;
+an unchanged primary preserves them across an ordinary restart.
 
-A user's grant can only reduce that ceiling. It cannot raise it. Setting `remote_writes=full` grants
-nothing on its own.
+The shared bearer is read-only. Remote write authority comes from a short-lived, single-use,
+KB-signed identity token whose `(server, team, subject)` has a live grant. `data` permits memory,
+document, and index writes. `full` also permits agent, delegate, runner, and workspace control.
+
+The server pins the signing authority through `AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE` and enforces its
+configured server and team IDs. Token replay, unknown keys, wrong audience/team, expired grants, and
+unavailable replay storage fail closed. Grant administration is local-Unix-socket only.
+
+`aimee.api.remote_writes` is still parsed so old configuration loads, but it no longer authorizes a
+user write. A non-off value produces a warning and the `remote_writes.global_ignored` diagnostic.
 
 Enrollment material in `remote.conf` is mode `0600`, opened without following symlinks. Do not copy
 one client's certificate to another machine. Revoke the old identity and enroll the replacement.
@@ -148,6 +156,14 @@ Do not store secrets in:
 - delegate container environments unless the policy explicitly grants that one credential;
 - client-side key files.
 
+Container environment variables are permitted only as first-boot transport.
+Run `scripts/aimee-compose-vault-bootstrap.sh` before `docker compose up`; it
+streams credential-shaped values into a disposable helper, seals them in the
+owning server or KB Vault, and removes the helper. Long-lived server and KB
+services must not declare credential-shaped environment keys, even when the
+value would be supplied through Compose interpolation. The build-integrity gate
+enforces this metadata boundary.
+
 Local CLI agents may use a login that remains on the thin client when execution runs there. The
 server sends commands over the authorized runner channel; it does not copy the login.
 
@@ -207,7 +223,7 @@ Nothing phones home by default. Network calls happen for configured providers, g
 sources, vulnerability checks, telemetry exporters, or other explicit integrations.
 
 Memory and document ingestion can retain sensitive source text. Scope the KB, configure retention,
-and avoid sending restricted evidence to an external reranker or synthesis provider. Memory audit
+and avoid sending restricted evidence to an external synthesis provider. Memory audit
 uses fingerprints for keys that can contain personal data.
 
 ## Non-goals
@@ -223,7 +239,7 @@ uses fingerprints for keys that can contain personal data.
 
 - change browser bootstrap credentials;
 - verify certificate fingerprints before enrollment;
-- keep remote writes at the lowest useful tier;
+- configure server/team/JWKS trust before enabling remote users;
 - grant users individually and review grants regularly;
 - keep the Docker socket out of deployments that do not need managed launch;
 - use the vault, never plaintext config, for credentials;

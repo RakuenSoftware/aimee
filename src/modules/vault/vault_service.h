@@ -36,6 +36,25 @@ typedef enum
 /* A short human-readable label for a status (for error responses/logging). */
 const char *vault_status_str(vault_status_t s);
 
+/* Audit hook: a sink notified after each credential-access op with NON-SECRET
+ * fields only — the operation ("vault.get" / "vault.get_server" / "vault.set" /
+ * "vault.delete" / "vault.unlock"), the principal (WHO — VAULT_SERVER_PRINCIPAL
+ * for the server's own autonomous reads), the (agent, cred) identity (WHICH
+ * credential — never its value), the transport, and the outcome status. The
+ * secret plaintext is NEVER passed. This is the security audit trail for "who
+ * read/mutated which credential, over what channel, with what outcome" — the
+ * denials (locked/unattested/wrong-transport) are as important as the successes.
+ *
+ * Installed once at startup by a server-only bridge that forwards to the
+ * audit/event-bus ledger; vault_service itself has NO event-bus dependency, so it
+ * stays linkable into every binary (the bus is D7-confined to aimee-server). NULL
+ * by default — an offline CLI/test context with no bridge simply records nothing.
+ * Set once before serving; not re-entrant with concurrent installs. */
+typedef void (*vault_audit_hook_fn)(const char *op, const char *principal, const char *agent,
+                                    const char *cred, attested_transport_t transport,
+                                    vault_status_t status);
+void vault_service_set_audit_hook(vault_audit_hook_fn fn);
+
 /* Unlock the `uid:` vault: derive the KEK from the client root key + the
  * principal's stored salt and cache it (TTL'd). Requires an attested UDS peer
  * (ATTEST_UDS_PEERCRED) with a non-empty principal and a 32-byte root key — a
@@ -47,7 +66,7 @@ vault_status_t vault_service_unlock(const char *principal, attested_transport_t 
 
 /* Unlock the `webuser:` vault (WP-C.2): derive the KEK from the login password
  * via scrypt and cache it. Requires an ATTEST_WEBCHAT_TRUSTED principal (the
- * webchat backend's server.token-gated assertion) with a non-empty principal and
+ * webchat backend's root-UDS-gated assertion) with a non-empty principal and
  * password — refused on any other transport (VAULT_ERR_TRANSPORT). The caller
  * must OPENSSL_cleanse `password`. */
 vault_status_t vault_service_unlock_password(const char *principal, attested_transport_t transport,

@@ -1,8 +1,9 @@
 /* server_mcp_tools.c: server-owned MCP tool discovery */
 #include "server.h"
+#include "server_mcp_surface.h"
 #include "config.h"
 #include "db1.h"
-#include "mcp_tools.h"
+#include "aimee/protocols/mcp/mcp_tools.h"
 #include "osv_check.h"
 #include "toolset.h"
 #include "cJSON.h"
@@ -21,13 +22,13 @@ static int server_client_target(const config_mcp_client_t *client, osv_target_t 
    return osv_infer_target_from_argv(client->command_count, argv, target);
 }
 
-static int server_target_allowlisted(const config_t *cfg, const osv_target_t *target)
+static int server_target_allowlisted(const osv_target_t *target)
 {
    char key[256];
    snprintf(key, sizeof(key), "%s:%s", target->ecosystem, target->name);
-   for (int i = 0; i < cfg->mcp_osv_allow_count; i++)
+   for (int i = 0; i < config_mcp_osv_allow_count(); i++)
    {
-      if (strcmp(cfg->mcp_osv_allow[i], key) == 0)
+      if (strcmp(config_mcp_osv_allow(i), key) == 0)
          return 1;
    }
    return 0;
@@ -182,7 +183,10 @@ cJSON *mcp_build_full_served_list(void)
 {
    cJSON *tools = mcp_build_tools_list();
    if (tools)
+   {
       append_server_only_tools(tools);
+      server_mcp_filter_unavailable_tools(tools);
+   }
    return tools;
 }
 
@@ -208,8 +212,9 @@ int handle_mcp_tools_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    }
 
    /* Presentation profile: shrink the initial tools/list for external MCP
-    * clients. Default "core" (lean) is lossless — find_tools/describe_tool reach
-    * the rest; set AIMEE_MCP_TOOL_PROFILE=full to present everything. Applied at
+    * clients. Default "core" (lean) remains complete — find_tools/describe_tool
+    * discover the rest and call_tool dispatches it; set AIMEE_MCP_TOOL_PROFILE=full
+    * to present everything. Applied at
     * the served-list choke point so mcp_build_tools_list() (and its golden test)
     * stays intact. */
    {
@@ -230,10 +235,8 @@ int handle_mcp_audit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    (void)req;
-   config_t cfg;
-   config_load(&cfg);
-   if (db1_init(cfg.db1_path) != 0)
-      return server_send_error(conn, "db1_init failed", cfg.db1_path);
+   if (db1_init(config_db1_path()) != 0)
+      return server_send_error(conn, "db1_init failed", config_db1_path());
 
    cJSON *resp = cJSON_CreateObject();
    cJSON *items = cJSON_CreateArray();
@@ -244,9 +247,12 @@ int handle_mcp_audit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "out of memory", NULL);
    }
 
-   for (int i = 0; i < cfg.mcp_client_count; i++)
+   for (int i = 0; i < config_mcp_client_count(); i++)
    {
-      config_mcp_client_t *client = &cfg.mcp_clients[i];
+      config_mcp_client_t client_buf;
+      if (config_mcp_client_at(i, &client_buf) != 0)
+         continue;
+      config_mcp_client_t *client = &client_buf;
       osv_target_t target;
       if (server_client_target(client, &target) != 0)
       {
@@ -266,10 +272,8 @@ int handle_mcp_audit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 int handle_mcp_recheck(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   config_t cfg;
-   config_load(&cfg);
-   if (db1_init(cfg.db1_path) != 0)
-      return server_send_error(conn, "db1_init failed", cfg.db1_path);
+   if (db1_init(config_db1_path()) != 0)
+      return server_send_error(conn, "db1_init failed", config_db1_path());
 
    cJSON *name = cJSON_GetObjectItemCaseSensitive(req, "name");
    const char *filter = cJSON_IsString(name) && name->valuestring[0] ? name->valuestring : NULL;
@@ -284,9 +288,12 @@ int handle_mcp_recheck(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    }
 
    int matched = 0;
-   for (int i = 0; i < cfg.mcp_client_count; i++)
+   for (int i = 0; i < config_mcp_client_count(); i++)
    {
-      config_mcp_client_t *client = &cfg.mcp_clients[i];
+      config_mcp_client_t client_buf;
+      if (config_mcp_client_at(i, &client_buf) != 0)
+         continue;
+      config_mcp_client_t *client = &client_buf;
       if (filter && strcmp(filter, client->name) != 0)
          continue;
       matched++;
@@ -300,7 +307,7 @@ int handle_mcp_recheck(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          continue;
       }
 
-      osv_result_t result = osv_query_target(cfg.mcp_osv_endpoint, &target, 10000);
+      osv_result_t result = osv_query_target(config_mcp_osv_endpoint(), &target, 10000);
       const char *verdict = server_osv_verdict_name(result.verdict);
       if (result.verdict == OSV_VERDICT_MALWARE)
          (void)db1_mcp_osv_cache_upsert(target.ecosystem, target.name, target.version, "malware",
@@ -309,9 +316,9 @@ int handle_mcp_recheck(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          (void)db1_mcp_osv_cache_upsert(target.ecosystem, target.name, target.version, "clean", "");
       const char *action = "allow";
       if (result.verdict == OSV_VERDICT_MALWARE)
-         action = server_target_allowlisted(&cfg, &target)
+         action = server_target_allowlisted(&target)
                       ? "allow_allowlisted"
-                      : (cfg.mcp_osv_enforce ? "block" : "shadow_block");
+                      : (config_mcp_osv_enforce() ? "block" : "shadow_block");
       (void)db1_mcp_osv_audit(client->name, target.ecosystem, target.name, target.version, verdict,
                               action, result.advisory_ids);
       cJSON_AddStringToObject(item, "ecosystem", target.ecosystem);

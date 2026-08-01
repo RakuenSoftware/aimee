@@ -14,6 +14,8 @@
 #include "kb_ranker_fit.h"
 #include "kb_service_agent.h"
 #include "learning_evidence.h"
+#include "aimee/protocols/mcp/mcp_client_registry.h" /* invoke kb-hosted MCP plugin tools */
+#include "kb_mcp_audit_bridge.h" /* record kb-hosted tool-call outcomes on the kb bus */
 
 #include <stdlib.h>
 #include <stdint.h>
@@ -56,6 +58,18 @@ int kb_handle_tool_registry_snapshot(int fd, cJSON *req)
 {
    (void)req;
    cJSON *resp = db2_kb_service_tool_registry_snapshot_json();
+   if (resp)
+   {
+      /* Federate the tool DEFS of MCP plugins THIS kb hosts (config install: kb)
+       * alongside the tool prompts, so servers can merge them into tools/list and
+       * route calls back here (kb_client_mcp_call). Absent/empty when this kb
+       * hosts no plugins. */
+      cJSON *mcp_tools = mcp_client_registry_build_namespaced_tools(1000);
+      if (cJSON_IsArray(mcp_tools) && cJSON_GetArraySize(mcp_tools) > 0)
+         cJSON_AddItemToObject(resp, "mcp_tools", mcp_tools);
+      else
+         cJSON_Delete(mcp_tools);
+   }
    return kb_reply_or_error(fd, resp, "tool_registry snapshot failed");
 }
 
@@ -66,6 +80,54 @@ int kb_handle_tool_registry_lookup(int fd, cJSON *req)
       return kb_send_error(fd, "missing name");
    cJSON *resp = db2_kb_service_tool_registry_lookup_json(name->valuestring);
    return kb_reply_or_error(fd, resp, "tool_registry lookup failed");
+}
+
+/* Invoke a tool on an MCP plugin THIS kb hosts (config install: kb). Reached
+ * from a server over the mTLS /v1/actions/mcp.call channel (kb_client_mcp_call);
+ * the namespaced "<client>:<tool>" resolves against this kb's own registry, so a
+ * plugin runs in exactly the daemon that hosts it. Auth is the action channel's
+ * (same gate as every other kb RPC). Request: {name, arguments?, timeout_ms?};
+ * reply: {status:"ok", result:<mcp result>} or an error. */
+int kb_handle_mcp_call(int fd, cJSON *req)
+{
+   cJSON *name = cJSON_GetObjectItemCaseSensitive(req, "name");
+   if (!cJSON_IsString(name) || !name->valuestring[0])
+      return kb_send_error(fd, "missing name");
+   cJSON *args = cJSON_GetObjectItemCaseSensitive(req, "arguments");
+   cJSON *timeout_j = cJSON_GetObjectItemCaseSensitive(req, "timeout_ms");
+   int timeout_ms = cJSON_IsNumber(timeout_j) ? (int)timeout_j->valuedouble : 30000;
+   if (timeout_ms <= 0 || timeout_ms > 120000)
+      timeout_ms = 30000; /* clamp to a sane bound regardless of caller input */
+
+   /* The calling server's dispatch role, threaded over the request for the audit
+    * actor (the plugin is shared to everything on the kb, so who called matters). */
+   cJSON *actor_j = cJSON_GetObjectItemCaseSensitive(req, "actor");
+   const char *actor = cJSON_IsString(actor_j) ? actor_j->valuestring : NULL;
+
+   cJSON *result = NULL;
+   char err[256];
+   err[0] = '\0';
+   int rc =
+       mcp_client_registry_call_tool(name->valuestring, args, timeout_ms, &result, err, sizeof err);
+   /* Record the OUTCOME on the kb's own audit bus (content-free) — the kb-hosted
+    * mirror of the server-side tool-call audit. Fires on every path. */
+   kb_mcp_audit_record(actor, name->valuestring, "outbound", rc != 0 ? "tool_error" : "",
+                       rc != 0 ? "error" : "ok");
+   if (rc != 0)
+   {
+      cJSON_Delete(result);
+      return kb_send_error(fd, err[0] ? err : "mcp call failed");
+   }
+
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+   {
+      cJSON_Delete(result);
+      return kb_send_error(fd, "out of memory");
+   }
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddItemToObject(resp, "result", result ? result : cJSON_CreateObject());
+   return kb_reply_or_error(fd, resp, "mcp call failed");
 }
 
 int kb_handle_relations_schema_list(int fd, cJSON *req)
@@ -440,11 +502,8 @@ int kb_handle_dashboard_directives(int fd, cJSON *req)
 int kb_handle_maintenance_calibrate_promotions(int fd, cJSON *req)
 {
    (void)req;
-   config_t cfg;
-   config_load(&cfg);
-
-   int signals = kb_calibrate_consume_drift_signals(&cfg);
-   int n = kb_calibrate_run(&cfg);
+   int signals = kb_calibrate_consume_drift_signals();
+   int n = kb_calibrate_run();
 
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", n >= 0 ? "ok" : "error");
@@ -596,10 +655,7 @@ int kb_handle_ranker_record_outcome(int fd, cJSON *req)
 int kb_handle_maintenance_compute_demotions(int fd, cJSON *req)
 {
    (void)req;
-   config_t cfg;
-   config_load(&cfg);
-
-   int n = kb_demote_run(&cfg);
+   int n = kb_demote_run();
 
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", n >= 0 ? "ok" : "error");

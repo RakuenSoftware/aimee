@@ -18,25 +18,35 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <errno.h>
 #include <stdlib.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <string.h>
 
+static int g_idle_release_calls;
+void reflection_test_release_idle(void);
+#define db2_lease_release_idle reflection_test_release_idle
 #include <sqlite3.h>
 
 #include "db2_test_shim.h"
 
 /* The unit under test (pulls its own headers). */
 #include "../kb/kb_reflection.c"
+#undef db2_lease_release_idle
+
+void reflection_test_release_idle(void)
+{
+   g_idle_release_calls++;
+}
 
 /* ── Stubs for deps the reflection TU references but this test does not link ── */
 
 /* Graph enrichment: report "no citations" so run_synthesis_pass takes the plain
  * evidence path (the graph seam is exercised elsewhere). */
-int kb_reasoning_query(const config_t *cfg, const char *query, const char *bindings_json,
-                       const char *program, const char *facts_json,
-                       kb_reasoning_result_t *result_out)
+int kb_reasoning_query(const char *query, const char *bindings_json, const char *program,
+                       const char *facts_json, kb_reasoning_result_t *result_out)
 {
-   (void)cfg;
    (void)query;
    (void)bindings_json;
    (void)program;
@@ -87,13 +97,54 @@ static int count_session_synthesis(sqlite3 *db)
 
 /* A config wired to run synthesis via the command seam (no provider ⇒ the
  * reflection Tier-B stage falls back to kb_synthesize_command). */
-static void base_cfg(config_t *cfg, const char *cmd)
+/* run_synthesis_pass reads config through accessors now instead of taking a
+ * config_t. This suite links the REAL config module (TEST_CORE_OBJS), so the
+ * settings come from a real aimee.yaml under an isolated HOME rather than from
+ * stubs -- stubbing them here would collide with the linked accessors. Same
+ * values base_cfg used to write into the struct; each case still overrides the
+ * same field it always did. AIMEE_NO_CACHE=1 makes each rewrite take effect. */
+static char g_home[256];
+static int g_mdl_tiebreak = 1;
+static int g_n_attempts = 2;
+static int g_shadow = 0;
+static char g_synth_cmd[512] = "";
+
+static void write_cfg(void)
 {
-   memset(cfg, 0, sizeof(*cfg));
-   cfg->kb_mdl_tiebreak_enabled = 1;
-   cfg->kb_synthesize_n_attempts = 2;
-   cfg->kb_reflection_synthesis_shadow = 0;
-   snprintf(cfg->kb_synthesize_command, sizeof(cfg->kb_synthesize_command), "%s", cmd);
+   char path[512];
+   snprintf(path, sizeof(path), "%s/aimee.yaml", config_default_dir());
+   FILE *fp = fopen(path, "w");
+   assert(fp != NULL);
+   fprintf(fp, "intelligence:\n  synthesize:\n");
+   fprintf(fp, "    mdl_tiebreak_enabled: %s\n", g_mdl_tiebreak ? "true" : "false");
+   fprintf(fp, "    synthesize_n_attempts: %d\n", g_n_attempts);
+   fprintf(fp, "    reflection_shadow: %s\n", g_shadow ? "true" : "false");
+   fprintf(fp, "    synthesize_command: \"%s\"\n", g_synth_cmd);
+   fclose(fp);
+   /* Prove the file round-tripped rather than trusting it: a silently unparsed
+    * key would turn every assertion below into a test of the defaults. */
+   assert(config_kb_synthesize_n_attempts() == g_n_attempts);
+   assert(config_kb_reflection_synthesis_shadow() == g_shadow);
+   assert(strcmp(config_kb_synthesize_command(), g_synth_cmd) == 0);
+}
+
+static void isolate_home(void)
+{
+   snprintf(g_home, sizeof(g_home), "/tmp/aimee-test-kb-reflection-XXXXXX");
+   assert(mkdtemp(g_home) != NULL);
+   /* AIMEE_HOME rather than HOME: it IS the config dir, where the default is
+    * $HOME/.config/aimee -- two levels that would need creating. */
+   assert(setenv("AIMEE_HOME", g_home, 1) == 0);
+   assert(setenv("AIMEE_NO_CACHE", "1", 1) == 0);
+}
+
+static void base_cfg(const char *cmd)
+{
+   g_mdl_tiebreak = 1;
+   g_n_attempts = 2;
+   g_shadow = 0;
+   snprintf(g_synth_cmd, sizeof(g_synth_cmd), "%s", cmd);
+   write_cfg();
 }
 
 static void mk_row(db2_artifact_proposed_t *row)
@@ -109,16 +160,17 @@ static void mk_row(db2_artifact_proposed_t *row)
 /* Valid response, normal mode ⇒ exactly one durable candidate written. */
 static void test_valid_writes_one(void)
 {
+   g_idle_release_calls = 0;
    db2_test_shim_open();
    sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
-   config_t cfg;
-   base_cfg(&cfg, "printf '%s' '" VALID_JSON "'");
+   base_cfg("printf '%s' '" VALID_JSON "'");
    db2_artifact_proposed_t row;
    mk_row(&row);
 
-   int rc = run_synthesis_pass(&cfg, &row);
+   int rc = run_synthesis_pass(&row);
    assert(rc == 0);
    assert(count_session_synthesis(db) == 1);
+   assert(g_idle_release_calls == g_n_attempts);
    db2_test_shim_close();
    printf("  valid response, normal mode → 1 candidate written OK\n");
 }
@@ -126,17 +178,19 @@ static void test_valid_writes_one(void)
 /* Valid response, SHADOW mode ⇒ scored but NO durable write (fail-closed). */
 static void test_shadow_writes_none(void)
 {
+   g_idle_release_calls = 0;
    db2_test_shim_open();
    sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
-   config_t cfg;
-   base_cfg(&cfg, "printf '%s' '" VALID_JSON "'");
-   cfg.kb_reflection_synthesis_shadow = 1;
+   base_cfg("printf '%s' '" VALID_JSON "'");
+   g_shadow = 1;
+   write_cfg();
    db2_artifact_proposed_t row;
    mk_row(&row);
 
-   int rc = run_synthesis_pass(&cfg, &row);
+   int rc = run_synthesis_pass(&row);
    assert(rc == 0); /* shadow is a clean no-write success */
    assert(count_session_synthesis(db) == 0);
+   assert(g_idle_release_calls == g_n_attempts);
    db2_test_shim_close();
    printf("  valid response, shadow mode → 0 candidates written OK\n");
 }
@@ -144,16 +198,17 @@ static void test_shadow_writes_none(void)
 /* Non-JSON response ⇒ defer (no valid candidate), NO durable write. */
 static void test_garbage_writes_none(void)
 {
+   g_idle_release_calls = 0;
    db2_test_shim_open();
    sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
-   config_t cfg;
-   base_cfg(&cfg, "printf '%s' 'not json at all'");
+   base_cfg("printf '%s' 'not json at all'");
    db2_artifact_proposed_t row;
    mk_row(&row);
 
-   int rc = run_synthesis_pass(&cfg, &row);
+   int rc = run_synthesis_pass(&row);
    assert(rc == -1); /* no valid candidates */
    assert(count_session_synthesis(db) == 0);
+   assert(g_idle_release_calls == g_n_attempts);
    db2_test_shim_close();
    printf("  garbage response → defer, 0 candidates written OK\n");
 }
@@ -161,27 +216,41 @@ static void test_garbage_writes_none(void)
 /* Command failure (non-zero exit ⇒ kb_curator_llm_run returns NULL) ⇒ no write. */
 static void test_command_failure_writes_none(void)
 {
+   g_idle_release_calls = 0;
    db2_test_shim_open();
    sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
-   config_t cfg;
-   base_cfg(&cfg, "false");
+   base_cfg("false");
    db2_artifact_proposed_t row;
    mk_row(&row);
 
-   int rc = run_synthesis_pass(&cfg, &row);
+   int rc = run_synthesis_pass(&row);
    assert(rc == -1);
    assert(count_session_synthesis(db) == 0);
+   assert(g_idle_release_calls == g_n_attempts);
    db2_test_shim_close();
    printf("  command failure → 0 candidates written OK\n");
+}
+
+static void test_empty_pass_releases_before_backoff(void)
+{
+   g_idle_release_calls = 0;
+   db2_test_shim_open();
+   base_cfg("false");
+   run_reflection_pass_releasing_lease();
+   assert(g_idle_release_calls == 1);
+   db2_test_shim_close();
+   printf("  empty pass releases its DB lease before scheduler backoff OK\n");
 }
 
 int main(void)
 {
    printf("test_kb_reflection: reflection synthesis write-gate\n");
+   isolate_home();
    test_valid_writes_one();
    test_shadow_writes_none();
    test_garbage_writes_none();
    test_command_failure_writes_none();
+   test_empty_pass_releases_before_backoff();
    printf("test_kb_reflection: all passed\n");
    return 0;
 }

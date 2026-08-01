@@ -145,6 +145,7 @@ int db2_membership_default_team(const char *identity_key, int64_t *out_team)
        err, sizeof(err));
    if (!st)
       return -1;
+   aimee_pg_bind_text(st, "?1", identity_key);
    int rc = -1;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {

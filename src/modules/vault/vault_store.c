@@ -28,8 +28,8 @@
 static pthread_mutex_t g_vault_write_mu = PTHREAD_MUTEX_INITIALIZER;
 
 #define VAULT_FILE_VERSION 1
-#define VAULT_SECRET_MAX   4096 /* max credential plaintext length */
-#define VAULT_AAD_MAX      320  /* "principal|agent|cred" (160 + 64 + 64 + seps) */
+#define VAULT_SECRET_MAX   (64 * 1024) /* opaque OAuth docs and SSH credentials */
+#define VAULT_AAD_MAX      320         /* "principal|agent|cred" (160 + 64 + 64 + seps) */
 
 /* Detach + free the (agent,cred) entry from the creds array if present. */
 static void remove_cred(cJSON *creds, cJSON *entry)
@@ -256,10 +256,25 @@ static cJSON *find_cred(cJSON *root, const char *agent, const char *cred)
    return NULL;
 }
 
-/* Build the AEAD AAD "principal|agent|cred" into out; returns its length or -1. */
+/* Build the AEAD AAD "principal|agent|cred" into out; returns its length or -1.
+ *
+ * REFUSES a component containing the '|' delimiter. Without that check two
+ * different slots can produce the same AAD — agent "claude" + cred "api_key|x"
+ * and agent "claude|api_key" + cred "x" both yield "<p>|claude|api_key|x" — and
+ * the AAD then no longer binds a ciphertext to its (agent, cred) slot, which is
+ * the entire property it exists to provide. vault_aad_build_v1_safe (the
+ * Postgres backend's builder) rejects '|' for exactly this reason; this is the
+ * file backend's half of the same rule.
+ *
+ * Refusing the input rather than escaping or length-prefixing is deliberate: it
+ * leaves the AAD byte-identical for every valid entry, so nothing already
+ * encrypted at rest has to be re-wrapped. */
 static int build_aad(const char *principal, const char *agent, const char *cred, char *out,
                      size_t cap)
 {
+   if (!principal || !agent || !cred || strchr(principal, '|') || strchr(agent, '|') ||
+       strchr(cred, '|'))
+      return -1;
    int n = snprintf(out, cap, "%s|%s|%s", principal, agent, cred);
    return (n < 0 || (size_t)n >= cap) ? -1 : n;
 }

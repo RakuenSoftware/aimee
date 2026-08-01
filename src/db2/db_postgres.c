@@ -2,8 +2,11 @@
  * docs/STORAGE_TIERS.md. */
 
 #include "db_postgres.h"
+
+#include "db2_pool.h" /* DB2_POOL_HOLD_CEILING_MS — the pool owns the figure */
 #include <ctype.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -863,6 +866,290 @@ resource_failure:
 
 /* --- libpq-dependent code below ---------------------------------- */
 
+/* Not a second opinion on the figure — the pool owns it. */
+#define DB2_DEFAULT_STATEMENT_TIMEOUT_MS DB2_POOL_HOLD_CEILING_MS
+
+/* Same figure as the statement bound, and for the same reason: a lease must not
+ * outlive the pool's hold ceiling. statement_timeout only bounds a statement, so
+ * a unit of work that OPENS a transaction and then stalls before its next
+ * statement — waiting on a lock, an external call, anything not SQL — is
+ * invisible to it and holds its pool member indefinitely. Measured: leases held
+ * ~4.5 hours against a 5-minute ceiling, with statement_timeout correctly set
+ * the whole time, because nothing was executing to time out.
+ *
+ * Postgres ends the backend itself, so the blocked thread's next call fails, it
+ * unwinds, and the lease is RETURNED — the pool recovers without a restart,
+ * which is the outcome the reaper's give-up path cannot produce. */
+#define DB2_DEFAULT_IDLE_IN_TRANSACTION_TIMEOUT_MS DB2_POOL_HOLD_CEILING_MS
+#define DB2_CONNECT_TIMEOUT_S                      "10"
+
+/* Out-of-range is a typo like any other, and the truncating cast makes it the
+ * WORST kind: "4294967296" narrows to int 0, which is the sentinel for "no
+ * statement timeout". An unchecked overflow therefore does not merely pick a
+ * strange bound, it silently removes the bound entirely — the exact outcome this
+ * function exists to make impossible. errno must be inspected because strtol
+ * saturates at LONG_MAX/LONG_MIN rather than reporting failure in its return. */
+/* Takes the RAW value, not the variable name: the reference-doc generator scans
+ * for literal getenv("AIMEE_*") calls, so hiding the lookup behind a parameter
+ * makes the variable invisible to it — which silently dropped a documented
+ * variable from docs/gen the first time this was extracted. Each wrapper keeps
+ * its own getenv literal; the validation stays shared. */
+static int db2_pg_timeout_ms_parse(const char *raw, int fallback)
+{
+   if (!raw || !raw[0])
+      return fallback;
+
+   /* Canonical decimal only, checked before strtol rather than after: digits, and
+    * no redundant leading zero.
+    *
+    * strtol accepts " 0", "\t0", "+0" and "-0" and returns 0 — and 0 is the
+    * sentinel that DISABLES the bound — so each of those malformed spellings
+    * silently opted out of the safety property. Digits-only fixed those but still
+    * let "00" through, and "00" is not the documented opt-out; the contract is
+    * that EXACTLY "0" disables and everything else malformed falls back. The
+    * leading-zero rule makes that literally true, and it also stops "007" quietly
+    * meaning a 7ms timeout.
+    *
+    * This is the fourth way this function has been able to reach "unbounded" by
+    * accident, after the unchecked overflow, the unchecked errno and the signed
+    * zeroes. Hence a rule that rejects by construction rather than a fourth
+    * enumeration of bad spellings. */
+   for (const char *c = raw; *c; c++)
+      if (*c < '0' || *c > '9')
+         return fallback;
+   if (raw[0] == '0' && raw[1])
+      return fallback;
+
+   char *end = NULL;
+   errno = 0;
+   long v = strtol(raw, &end, 10);
+   if (!end || *end || errno == ERANGE || v < 0 || v > INT_MAX)
+      return fallback; /* a typo must not remove the bound */
+   return (int)v;
+}
+
+int db2_pg_statement_timeout_ms(void)
+{
+   return db2_pg_timeout_ms_parse(getenv("AIMEE_DB2_STATEMENT_TIMEOUT_MS"),
+                                  DB2_DEFAULT_STATEMENT_TIMEOUT_MS);
+}
+
+int db2_pg_idle_in_transaction_timeout_ms(void)
+{
+   return db2_pg_timeout_ms_parse(getenv("AIMEE_DB2_IDLE_IN_TRANSACTION_TIMEOUT_MS"),
+                                  DB2_DEFAULT_IDLE_IN_TRANSACTION_TIMEOUT_MS);
+}
+
+/* PQconnectdb accepts EITHER a keyword/value string ("host=db user=aimee") OR a
+ * URI ("postgresql://user@host/db"), and the two forms cannot be mixed. Appending
+ * " connect_timeout=10" to a URI is not merely ineffective: libpq parses it
+ * without complaint and folds the trailing text into the DATABASE NAME, yielding
+ * dbname="aimee_shared connect_timeout=10 ...". The connection then fails on a
+ * database that does not exist, and the bounds are silently absent — so the
+ * mistake costs both the connection and the property it was meant to add.
+ *
+ * Deployments set AIMEE_DB2_URL as a URI, so both forms must be handled: a URI
+ * takes its parameters in the query string, joined with '&' after a '?'.
+ *
+ * Both URI schemes count. libpq accepts postgres:// as well as postgresql://, so
+ * recognising only the longer one would put a postgres:// deployment straight
+ * back into the mixed-form bug above. */
+static int conninfo_is_uri(const char *s)
+{
+   return strncmp(s, "postgresql://", 13) == 0 || strncmp(s, "postgres://", 11) == 0;
+}
+
+/* Does the conninfo already set this exact option?
+ *
+ * This has to walk the string's real grammar, not search it. A bare strstr() was
+ * wrong in three ways, each a live defect: it matched INSIDE values, so
+ * dbname=keepalives_test suppressed keepalives on an ordinary conninfo; it
+ * matched keys sharing a prefix, so keepalives_idle=30 suppressed the whole
+ * group; and checking only for a preceding separator still matches option-shaped
+ * text inside a QUOTED value, so dbname='tenant keepalives=off' — a legal
+ * conninfo, and a tenant name is attacker-influenced in a multi-tenant
+ * deployment — silently dropped the bounds.
+ *
+ * Every one of those failures is silent and in the unsafe direction: the option
+ * appears set, so the bound is not added. So the scan tracks where values begin
+ * and end, honouring single quotes and backslash escapes for the keyword/value
+ * form, and looks only at the query component of a URI. */
+static int hexval(int c)
+{
+   if (c >= '0' && c <= '9')
+      return c - '0';
+   if (c >= 'a' && c <= 'f')
+      return c - 'a' + 10;
+   if (c >= 'A' && c <= 'F')
+      return c - 'A' + 10;
+   return -1;
+}
+
+/* Compare one URI query key against `key`, decoding percent-escapes as libpq
+ * does. A raw byte compare misses connect%5Ftimeout=3 — which libpq reads as
+ * connect_timeout=3 — so the bound gets appended a second time and, since the
+ * later value wins, silently overrides what the caller asked for. */
+static int uri_key_equals(const char *p, const char *key)
+{
+   size_t i = 0;
+   while (*p && *p != '=' && *p != '&')
+   {
+      int c = (unsigned char)*p;
+      if (c == '%' && hexval((unsigned char)p[1]) >= 0 && hexval((unsigned char)p[2]) >= 0)
+      {
+         c = hexval((unsigned char)p[1]) * 16 + hexval((unsigned char)p[2]);
+         p += 3;
+      }
+      else
+         p++;
+      if (key[i] == '\0' || (unsigned char)key[i] != (unsigned char)c)
+         return 0;
+      i++;
+   }
+   return key[i] == '\0' && *p == '=';
+}
+
+static int conninfo_has_key(const char *base, const char *key)
+{
+   size_t klen = strlen(key);
+
+   if (conninfo_is_uri(base))
+   {
+      /* Only the query string holds options. Anything earlier is userinfo, host
+       * or path — a password or database name there must never be read as one. */
+      const char *p = strchr(base, '?');
+      if (!p)
+         return 0;
+      for (p++; *p;)
+      {
+         if (uri_key_equals(p, key))
+            return 1;
+         const char *amp = strchr(p, '&');
+         if (!amp)
+            break;
+         p = amp + 1;
+      }
+      return 0;
+   }
+
+   for (const char *p = base; *p;)
+   {
+      while (isspace((unsigned char)*p))
+         p++;
+      if (!*p)
+         break;
+      const char *kstart = p;
+      while (*p && *p != '=' && !isspace((unsigned char)*p))
+         p++;
+      size_t this_len = (size_t)(p - kstart);
+      while (isspace((unsigned char)*p))
+         p++;
+      if (*p != '=')
+      {
+         /* Not a key=value pair; the token is junk. Nothing was consumed by the
+          * value scan below, so step one byte to guarantee progress. */
+         if (p == kstart)
+            p++;
+         continue;
+      }
+      p++;
+      while (isspace((unsigned char)*p))
+         p++;
+      int match = (this_len == klen && strncmp(kstart, key, klen) == 0);
+      if (*p == '\'')
+      {
+         for (p++; *p && *p != '\''; p++)
+            if (*p == '\\' && p[1])
+               p++;
+         if (*p == '\'')
+            p++;
+      }
+      else
+      {
+         for (; *p && !isspace((unsigned char)*p); p++)
+            if (*p == '\\' && p[1])
+               p++;
+      }
+      if (match)
+         return 1;
+   }
+   return 0;
+}
+
+/* Append the safety parameters unless the caller already set them, so an
+ * explicit conninfo still wins. */
+int db2_pg_conninfo_with_bounds(const char *conninfo, char *out, size_t out_sz)
+{
+   const char *base = conninfo ? conninfo : "";
+   int uri = conninfo_is_uri(base);
+   /* First added parameter opens the query string; the rest extend it.
+    *
+    * A URI already ending in '?' or '&' needs NO separator. Adding one there
+    * creates an empty query parameter, and libpq rejects that outright —
+    * "missing key/value separator" — so the whole connection fails rather than
+    * merely losing a bound. `postgresql://h/db?` is a conninfo libpq accepts on
+    * its own, so this is reachable from a legal input. */
+   size_t blen = strlen(base);
+   char last = blen ? base[blen - 1] : '\0';
+   const char *sep1;
+   if (!uri)
+      sep1 = " ";
+   else if (last == '?' || last == '&')
+      sep1 = "";
+   else
+      sep1 = strchr(base, '?') ? "&" : "?";
+   const char *sep = uri ? "&" : " ";
+
+   char params[256];
+   int n = 0;
+   params[0] = '\0';
+
+/* Add a key only if the caller did not set that exact key, so their value always
+ * wins and nothing is ever specified twice. */
+#define ADD_IF_UNSET(key, val)                                                                     \
+   do                                                                                              \
+   {                                                                                               \
+      if (!conninfo_has_key(base, (key)) && n >= 0 && (size_t)n < sizeof params)                   \
+         n += snprintf(params + n, sizeof params - (size_t)n, "%s%s=%s", n ? sep : sep1, (key),    \
+                       (val));                                                                     \
+   } while (0)
+
+   ADD_IF_UNSET("connect_timeout", DB2_CONNECT_TIMEOUT_S);
+
+   /* One uniform rule for every key: the caller's value wins where they set one,
+    * ours fills in where they did not. No key is special-cased.
+    *
+    * An earlier version treated an explicit `keepalives=` as the caller owning
+    * the whole group and added none of the tuning keys. That was wrong for
+    * `keepalives=1`: the caller is ASKING for keepalives, and withholding the
+    * tuning leaves libpq's default idle — 7200s — where this code intends 30s,
+    * so the setting meant to detect a vanished peer would take two hours to do
+    * it. It also made the invariant conditional, which is how the gap hid.
+    *
+    * With `keepalives=0` the tuning keys are still emitted and simply unused;
+    * carrying three ignored settings is a cosmetic cost, and it buys a rule with
+    * no exception to forget. */
+   ADD_IF_UNSET("keepalives", "1");
+   ADD_IF_UNSET("keepalives_idle", "30");
+   ADD_IF_UNSET("keepalives_interval", "10");
+   ADD_IF_UNSET("keepalives_count", "3");
+#undef ADD_IF_UNSET
+
+   /* Two ways to get this wrong, and the first version chose the second one.
+    * Truncating yields a malformed conninfo. Returning the base unchanged yields
+    * a well-formed but UNBOUNDED one — which quietly breaks the guarantee that
+    * every connection carries these bounds, on the long TLS conninfo most likely
+    * to need them. Report the failure instead and let the caller refuse. */
+   if (strlen(base) + strlen(params) + 1 > out_sz)
+   {
+      if (out_sz)
+         out[0] = '\0';
+      return -1;
+   }
+   snprintf(out, out_sz, "%s%s", base, params);
+   return 0;
+}
+
 #ifdef AIMEE_DISABLE_POSTGRES
 
 /* Build-time opt-out for platforms where libpq isn't available (mostly
@@ -1092,9 +1379,40 @@ static void copy_err(char *errbuf, size_t errlen, const char *src)
    snprintf(errbuf, errlen, "%s", src ? src : "");
 }
 
+/* Bounds every connection this process opens, so no single operation can hold a
+ * pool lease indefinitely.
+ *
+ * This exists because there were no bounds here at all — not because any outage
+ * was traced to their absence. The reaper deliberately will not reclaim a live
+ * thread's connection (libpq forbids concurrent use), so an over-ceiling lease is
+ * something the pool can report but not stop. With no statement_timeout, a query
+ * that never returns is indistinguishable from one that is merely slow, and
+ * bounding the statement is the only lever available at this layer.
+ *
+ * The pool already declares 300s as the longest a lease may reasonably be held.
+ * That figure is now ENFORCED at the server rather than only observed after the
+ * fact: a statement cannot outlive the ceiling that defines "stuck".
+ *
+ * Keepalives matter for the same reason — a peer that vanishes without a FIN
+ * leaves a read blocked forever, which no statement_timeout can interrupt
+ * because the server never sees the query.
+ *
+ * The default is the pool's own DB2_POOL_HOLD_CEILING_MS, so the two cannot
+ * drift apart.
+ *
+ * AIMEE_DB2_STATEMENT_TIMEOUT_MS overrides the default for a deployment with
+ * genuinely longer work; 0 disables it, which restores the old unbounded
+ * behaviour and should be a deliberate choice. */
 void *aimee_pg_open(const char *conninfo, char *errbuf, size_t errlen)
 {
-   PGconn *conn = PQconnectdb(conninfo ? conninfo : "");
+   char bounded[2048];
+   if (db2_pg_conninfo_with_bounds(conninfo, bounded, sizeof bounded) != 0)
+   {
+      copy_err(errbuf, errlen, "conninfo too long to carry the connection safety bounds");
+      return NULL;
+   }
+
+   PGconn *conn = PQconnectdb(bounded);
    if (!conn)
    {
       copy_err(errbuf, errlen, "PQconnectdb returned NULL");
@@ -1105,6 +1423,44 @@ void *aimee_pg_open(const char *conninfo, char *errbuf, size_t errlen)
       copy_err(errbuf, errlen, PQerrorMessage(conn));
       PQfinish(conn);
       return NULL;
+   }
+
+   /* Both bounds, applied the same way and refused the same way. The idle bound
+    * is what releases a lease whose holder is stalled OUTSIDE a statement — the
+    * case statement_timeout structurally cannot see. */
+   int timeout_ms = db2_pg_statement_timeout_ms();
+   int idle_ms = db2_pg_idle_in_transaction_timeout_ms();
+   if (timeout_ms > 0 || idle_ms > 0)
+   {
+      char sql[192];
+      if (timeout_ms > 0 && idle_ms > 0)
+         snprintf(sql, sizeof sql,
+                  "SET statement_timeout = %d; SET idle_in_transaction_session_timeout = %d",
+                  timeout_ms, idle_ms);
+      else if (timeout_ms > 0)
+         snprintf(sql, sizeof sql, "SET statement_timeout = %d", timeout_ms);
+      else
+         snprintf(sql, sizeof sql, "SET idle_in_transaction_session_timeout = %d", idle_ms);
+      PGresult *r = PQexec(conn, sql);
+      int ok = r && PQresultStatus(r) == PGRES_COMMAND_OK;
+      if (r)
+         PQclear(r);
+      if (!ok)
+      {
+         /* Refuse the connection rather than hand back an unbounded one. A
+          * caller that asked for bounds and silently got none is worse than a
+          * caller that fails: the pool would carry a member it cannot reclaim,
+          * with nothing in the connection to say so. */
+         /* Keep libpq's reason: a refused connection is otherwise
+          * indistinguishable between a permission error, an ALTER ROLE
+          * restriction and a connection-state problem. */
+         char why[512];
+         snprintf(why, sizeof why, "could not set statement_timeout on the connection: %s",
+                  PQerrorMessage(conn));
+         copy_err(errbuf, errlen, why);
+         PQfinish(conn);
+         return NULL;
+      }
    }
    return conn;
 }

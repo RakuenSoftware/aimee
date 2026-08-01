@@ -20,7 +20,8 @@ operations. Exact command and config tables are generated from source:
 - `aimee-wfe` owns workflow definitions and lifecycle state.
 - `aimee-kb` owns durable memory, documents, the code graph, retrieval, curation, PostgreSQL, and
   pgvector.
-- `aimee-llm` serves embedding, reranking, and synthesis on CPU or GPU.
+- Each KB owns its embedding and synthesis placements. A role can run inside that KB container or
+  use a remote endpoint; there is no separate inference service.
 - `aimee-runtime-web` serves the browser workspace.
 
 The server and KB each run a bounded shared-memory event bus. Governed actions, memory mutations,
@@ -32,15 +33,17 @@ one ordered audit tap. See [Event bus](docs/EVENT_BUS.md).
 After the services are running, enroll the client and check every boundary:
 
 ```bash
-aimee remote set https://host:8743 <bootstrap-bearer>
+aimee remote set https://host:8743 <wizard-bearer>
 aimee remote status
 aimee status
 aimee kb status
 aimee audit verify
 ```
 
-Confirm the server certificate fingerprint out of band. The bootstrap bearer is for enrollment,
-not daily use. The first successful enrollment rotates it and records the client identity.
+Copy the command from the setup summary, then confirm the server certificate fingerprint out of
+band. `remote set` stores the bearer, pins the server certificate, and on Linux enrolls a client
+mTLS certificate. It does not rotate the bearer. Use `aimee remote enroll` when you need a separate
+bearer for an additional client without invalidating existing clients.
 
 Register a workspace from the machine that holds the files:
 
@@ -67,7 +70,7 @@ aimee memory read
 
 The KB stores typed records with source, scope, confidence, freshness, and links to artifacts.
 Curation joins duplicates, records contradictions, and lets stale evidence decay. Recall mixes
-lexical, dense, graph, and recency signals, then may rerank or synthesize. A low-evidence query can
+lexical, dense, graph, and recency signals, then may synthesize. A low-evidence query can
 abstain instead of inventing an answer.
 
 Working memory is session scratch:
@@ -299,13 +302,22 @@ copied table in this manual.
 `aimee remote set` stores the target in `~/.config/aimee/remote.conf`. That file is private to the
 user and opened without following symlinks.
 
-Remote authorization has two layers:
+The shared bearer authorizes reads. The first wizard user's explicit `full` grant is bound to the
+mTLS certificate enrolled by `aimee remote set`; the bearer alone cannot exercise it. Additional
+users need a short-lived KB-signed identity token and a grant for the exact
+`(server_id, team_id, subject)`. `data` covers memory, docs, and index ingestion. `full` also covers
+agent, delegate, runner, and workspace control.
 
-1. the deployment posture permits `off`, `data`, or `full` writes;
-2. the authenticated user has the matching grant.
+The server must know `AIMEE_SERVER_ID`, `AIMEE_SERVER_TEAM_ID`, and the root-owned
+`AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE`. Grant changes are local-socket only:
 
-Both must allow the operation. `data` covers memory, docs, and index ingestion. `full` also covers
-runner and workspace mutation. A global setting never grants a user authority by itself.
+```bash
+aimee kb grant set --server <id> --team <n> --subject <subject> --tier data
+aimee kb grant list --server <id> --team <n>
+```
+
+`aimee.api.remote_writes` remains readable for compatibility but no longer authorizes user writes.
+See [Upgrading](docs/UPGRADING.md#restore-remote-writes) for subject forms and first-grant recovery.
 
 Use `aimee remote clear` to return to the local Unix socket.
 
@@ -360,7 +372,7 @@ Read [What's new](docs/WHATS_NEW.md) before changing deployment manifests.
 | --- | --- |
 | client cannot connect | `aimee remote status`; URL, DNS, port, TLS fingerprint, bearer, client cert |
 | local socket missing | service manager, `aimee server start`, server log, config-dir permissions |
-| reads work but writes fail | deployment `remote_writes` posture and the authenticated user's grant |
+| reads work but writes fail | server id/team/JWKS trust, exact subject grant, identity-token refusal reason |
 | KB unavailable | `aimee kb status`, KB bearer, `AIMEE_KB_API_URL`, PostgreSQL readiness |
 | memory search is empty | KB scope, ingest status, embedding readiness, query filters |
 | delegate cannot write | assigned worktree, write role, sandbox backend, source authority |

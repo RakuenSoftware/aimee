@@ -1,11 +1,11 @@
 # Virtual-Context Assembly: Rollout Validation Report
 
-Closes the operational acceptance criteria recorded as
-`virtual-context-assembly-rollout-validation.md`. The parent design record,
-`virtual-context-assembly-and-tool-chain-paging.md`, shipped the assembler,
-deterministic stubbing, the `session_context_*` tools, and the benchmark gate;
-this validates them for real and flips the default on. Those two design records
-are no longer present in this tree.
+Closes the operational acceptance criteria of
+[virtual-context-assembly-rollout-validation.md](../proposals/done/virtual-context-assembly-rollout-validation.md).
+The parent feature
+([virtual-context-assembly-and-tool-chain-paging.md](../proposals/done/virtual-context-assembly-and-tool-chain-paging.md))
+shipped the assembler, deterministic stubbing, the `session_context_*` tools,
+and the benchmark gate; this validates them for real and flips the default on.
 
 ## Summary
 

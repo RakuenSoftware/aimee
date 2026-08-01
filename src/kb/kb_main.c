@@ -1,9 +1,13 @@
 #include "aimee.h"
+#include "aimee_home.h"
 #include "agent_exec.h"
 #include "config.h"
 #include "config_database.h"
 #include "css_render_cmd.h"
 #include "db2/code_index.h"
+#include "db2/db2.h"
+#include "kb_witness_cadence.h"
+#include "managed_server_identity_install.h"
 #include "kb_auth_oidc.h"
 #include "kb_oidc_jwks_fleet.h"
 #include "kb_identity.h"
@@ -13,6 +17,7 @@
 #include "kb_insights_util.h"
 #include "org_budget.h"
 #include "org_rate.h"
+#include "org_egress.h"
 #include "org_telemetry.h"
 #include "org_model_catalog.h"
 #include "org_vault_key_use.h"
@@ -20,6 +25,7 @@
 #include "project.h"
 #include "kb_enroll.h"
 #include "kb_http.h"
+#include "aimee/protocols/mcp/mcp_client_registry.h" /* host install:kb MCP plugins */
 #include "kb_tls.h"
 #include "kb_paths.h"
 #include "kb_service.h"
@@ -35,8 +41,20 @@
 #include "db2/rel_types_store.h" /* db2_rel_types_ensure_seed (typed-fact ontology) */
 #include "db2/vault_pg.h"        /* vault_pg_backend + vault_store_set_backend (kb vault bind) */
 #include "kb/kb_vault_policy.h"  /* kb_vault_policy_select (custody selection, P7 §3) */
-#include "vault_server_key.h"    /* startup durable seal-epoch synchronization */
+#include "kb/kb_management_runtime.h"
+#include "kb/kb_vault_operator_runtime.h"
+#include "kb_vault_operator_status.h"
+#include "kb_vault_tpm_runtime_lock.h"
+#include "db2/kb_audit_worm.h"
+#include "db2/vault_operator_status_runtime.h"
+#include "vault_server_key.h"       /* startup durable seal-epoch synchronization */
+#include "vault_env_bootstrap.h"    /* first-boot credential env -> Vault */
+#include "vault_config_bootstrap.h" /* legacy config credential -> Vault */
+#include "runtime_secret.h"         /* wipe Vault-sourced runtime cache at exit */
+#include "kb_memory_audit_bridge.h" /* record memory mutations on aimee-kb's own obs bus */
+#include "log.h"                    /* audit_log_open — KB memory-audit ledger */
 #include <signal.h>
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -51,6 +69,250 @@
 #endif
 
 static kb_service_ctx_t g_ctx;
+
+typedef struct
+{
+   kb_vault_activation_latch_t activation;
+   kb_vault_operator_runtime_t runtime;
+   kb_vault_operator_mutation_t mutation;
+   int activation_initialized;
+   int runtime_initialized;
+   int mutation_initialized;
+} kb_vault_operator_components_t;
+
+static void kb_vault_operator_components_destroy(kb_vault_operator_components_t *components);
+
+static int kb_vault_operator_components_init(kb_vault_operator_components_t *components,
+                                             db2_vault_operator_runtime_t *database,
+                                             kb_vault_tpm_runtime_lock_t *singleton)
+{
+   if (!components || !database || !singleton)
+      return -1;
+   memset(components, 0, sizeof(*components));
+   if (kb_vault_activation_latch_init(&components->activation) != 0)
+      return -1;
+   components->activation_initialized = 1;
+   if (kb_vault_operator_runtime_init(&components->runtime, database, singleton,
+                                      &components->activation) != 0)
+   {
+      kb_vault_operator_components_destroy(components);
+      return -1;
+   }
+   components->runtime_initialized = 1;
+   kb_vault_operator_mutation_deps_t deps;
+   memset(&deps, 0, sizeof(deps));
+   kb_vault_operator_runtime_fill_deps(&components->runtime, &deps);
+   if (kb_vault_operator_mutation_init(&components->mutation, &deps, &components->runtime) != 0)
+   {
+      kb_vault_operator_components_destroy(components);
+      return -1;
+   }
+   components->mutation_initialized = 1;
+   return 0;
+}
+
+static void kb_vault_operator_components_destroy(kb_vault_operator_components_t *components)
+{
+   if (!components)
+      return;
+   if (components->mutation_initialized)
+      kb_vault_operator_mutation_destroy(&components->mutation);
+   if (components->runtime_initialized)
+      kb_vault_operator_runtime_destroy(&components->runtime);
+   if (components->activation_initialized)
+      kb_vault_activation_latch_destroy(&components->activation);
+   memset(components, 0, sizeof(*components));
+}
+
+_Static_assert((int)DB2_VAULT_STATE_SEALED_IDLE == (int)KB_VAULT_OPERATOR_STATE_SEALED_IDLE,
+               "vault operator state wire mismatch");
+_Static_assert((int)DB2_VAULT_OPERATION_RECOVERY_REQUIRED ==
+                   (int)KB_VAULT_OPERATOR_OPERATION_RECOVERY_REQUIRED,
+               "vault operator operation wire mismatch");
+_Static_assert((int)DB2_VAULT_REMEDIATION_FINALIZE == (int)KB_VAULT_OPERATOR_REMEDIATION_FINALIZE,
+               "vault operator remediation wire mismatch");
+
+static int kb_vault_operator_provider_status(void *opaque, db2_vault_provider_status_t *out)
+{
+   (void)opaque;
+   if (!out)
+      return -1;
+   switch (vault_custody_selected_local_status())
+   {
+   case VAULT_CUSTODY_LOCAL_AVAILABLE_SEALED:
+      *out = DB2_VAULT_PROVIDER_AVAILABLE_SEALED;
+      return 0;
+   case VAULT_CUSTODY_LOCAL_AVAILABLE_UNSEALED:
+      *out = DB2_VAULT_PROVIDER_AVAILABLE_UNSEALED;
+      return 0;
+   case VAULT_CUSTODY_LOCAL_UNAVAILABLE:
+      *out = DB2_VAULT_PROVIDER_UNAVAILABLE;
+      return 0;
+   case VAULT_CUSTODY_LOCAL_MALFORMED:
+      *out = DB2_VAULT_PROVIDER_MALFORMED;
+      return 0;
+   }
+   return -1;
+}
+
+static int kb_vault_operator_project(kb_vault_operator_status_t *out, void *opaque)
+{
+   db2_vault_operator_runtime_t *runtime = opaque;
+   db2_vault_operator_status_t status;
+   int rc =
+       db2_vault_operator_runtime_status(runtime, kb_vault_operator_provider_status, NULL, &status);
+   if (rc == DB2_VAULT_OPERATOR_UNAVAILABLE || !out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   out->state = (kb_vault_operator_state_t)status.state;
+   out->operation_state = (kb_vault_operator_operation_state_t)status.snapshot.operation_state;
+   out->remediation = (kb_vault_operator_remediation_t)status.remediation;
+   out->flags = status.snapshot.operation_present ? 1u : 0u;
+   out->seal_epoch = (uint64_t)status.snapshot.seal_epoch;
+   out->control_fence = (uint64_t)status.snapshot.control_fence;
+   out->old_generation = (uint64_t)status.snapshot.old_generation;
+   out->new_generation = (uint64_t)status.snapshot.new_generation;
+   out->last_opened_fence = (uint64_t)status.snapshot.last_opened_fence;
+   memcpy(out->operation_id, status.snapshot.operation_id, sizeof(out->operation_id));
+   return kb_vault_operator_status_validate(out) ? 0 : -1;
+}
+
+static int kb_vault_operator_service_project(kb_vault_operator_status_t *out, void *opaque)
+{
+   kb_vault_operator_components_t *components = opaque;
+   return components && components->runtime_initialized
+              ? kb_vault_operator_project(out, components->runtime.database)
+              : -1;
+}
+
+static int kb_vault_operator_service_mutate(kb_vault_operator_opcode_t opcode,
+                                            const uint8_t request_id[16], const uint8_t *secret,
+                                            size_t secret_len, kb_vault_operator_result_t *result,
+                                            void *opaque)
+{
+   kb_vault_operator_components_t *components = opaque;
+   return components && components->mutation_initialized
+              ? kb_vault_operator_mutation_execute(opcode, request_id, secret, secret_len, result,
+                                                   &components->mutation)
+              : -1;
+}
+
+static int kb_vault_operator_service_post_wipe(kb_vault_operator_opcode_t opcode,
+                                               kb_vault_operator_result_t result, void *opaque)
+{
+   (void)opcode;
+   (void)result;
+   kb_vault_operator_components_t *components = opaque;
+   return components && components->mutation_initialized
+              ? kb_vault_operator_mutation_after_secret_wipe(&components->mutation)
+              : -1;
+}
+
+static int kb_vault_operator_status_equal(const db2_vault_operator_status_t *a,
+                                          const db2_vault_operator_status_t *b)
+{
+   return a && b && a->state == b->state && a->remediation == b->remediation &&
+          a->provider == b->provider &&
+          db2_vault_operator_snapshot_equal(&a->snapshot, &b->snapshot);
+}
+
+static int kb_cmd_vault(int argc, char **argv)
+{
+   if (argc < 3)
+   {
+      fputs("Usage: aimee-kb vault status [--json]\n"
+            "       aimee-kb vault start --request-id=<32-lowercase-hex> "
+            "[--secret-stdin] [--json]\n"
+            "       aimee-kb vault resume [--secret-stdin] [--json]\n"
+            "       aimee-kb vault unseal [--secret-stdin] [--json]\n",
+            stderr);
+      return KB_VAULT_OPERATOR_CLIENT_TRANSPORT_FAILURE;
+   }
+
+   int json = 0;
+   int secret_stdin = 0;
+   const char *request_text = NULL;
+   for (int i = 3; i < argc; i++)
+   {
+      if (strcmp(argv[i], "--json") == 0 && !json)
+         json = 1;
+      else if (strcmp(argv[i], "--secret-stdin") == 0 && !secret_stdin)
+         secret_stdin = 1;
+      else if (strncmp(argv[i], "--request-id=", 13) == 0 && !request_text)
+         request_text = argv[i] + 13;
+      else
+      {
+         fprintf(stderr, "aimee-kb vault: invalid or duplicate option: %s\n", argv[i]);
+         return KB_VAULT_OPERATOR_CLIENT_TRANSPORT_FAILURE;
+      }
+   }
+
+   kb_vault_operator_status_t status;
+   if (strcmp(argv[2], "status") == 0)
+   {
+      if (secret_stdin || request_text)
+      {
+         fputs("aimee-kb vault status: mutation options are not accepted\n", stderr);
+         return KB_VAULT_OPERATOR_CLIENT_TRANSPORT_FAILURE;
+      }
+      kb_vault_operator_client_result_t client = kb_vault_operator_status_client(&status);
+      if (client == KB_VAULT_OPERATOR_CLIENT_TRANSPORT_FAILURE)
+      {
+         fputs("aimee-kb vault status: operator status service unavailable\n", stderr);
+         return client;
+      }
+      char output[768];
+      if (kb_vault_operator_status_format(&status, json, output, sizeof(output)) < 0)
+         return KB_VAULT_OPERATOR_CLIENT_TRANSPORT_FAILURE;
+      fputs(output, stdout);
+      return client;
+   }
+
+   kb_vault_operator_opcode_t opcode;
+   uint8_t request_id[KB_VAULT_OPERATOR_REQUEST_ID_LEN];
+   const uint8_t *request = NULL;
+   if (strcmp(argv[2], "start") == 0)
+   {
+      opcode = KB_VAULT_OPERATOR_OPCODE_START;
+      if (!request_text || kb_vault_operator_request_id_parse(request_text, request_id) != 0)
+      {
+         fputs("aimee-kb vault start: --request-id must be 32 lowercase hexadecimal bytes\n",
+               stderr);
+         return KB_VAULT_OPERATOR_CLIENT_TRANSPORT_FAILURE;
+      }
+      request = request_id;
+   }
+   else if (strcmp(argv[2], "resume") == 0)
+      opcode = KB_VAULT_OPERATOR_OPCODE_RESUME;
+   else if (strcmp(argv[2], "unseal") == 0)
+      opcode = KB_VAULT_OPERATOR_OPCODE_UNSEAL;
+   else
+   {
+      fprintf(stderr, "aimee-kb vault: unknown command: %s\n", argv[2]);
+      return KB_VAULT_OPERATOR_CLIENT_TRANSPORT_FAILURE;
+   }
+   if (opcode != KB_VAULT_OPERATOR_OPCODE_START && request_text)
+   {
+      fputs("aimee-kb vault: --request-id is accepted only by start\n", stderr);
+      return KB_VAULT_OPERATOR_CLIENT_TRANSPORT_FAILURE;
+   }
+
+   kb_vault_operator_result_t operation_result;
+   kb_vault_operator_client_result_t client =
+       kb_vault_operator_mutation_client(opcode, request, secret_stdin, &operation_result, &status);
+   memset(request_id, 0, sizeof(request_id));
+   if (client == KB_VAULT_OPERATOR_CLIENT_TRANSPORT_FAILURE)
+   {
+      fputs("aimee-kb vault: operator mutation service unavailable\n", stderr);
+      return client;
+   }
+   char output[896];
+   if (kb_vault_operator_mutation_format(operation_result, &status, json, output, sizeof(output)) <
+       0)
+      return KB_VAULT_OPERATOR_CLIENT_TRANSPORT_FAILURE;
+   fputs(output, stdout);
+   return client;
+}
 
 #define AIMEE_DB2_BOOTSTRAP_DB  "aimee_shared"
 #define AIMEE_DB2_BOOTSTRAP_URL "postgres:///aimee_shared"
@@ -164,7 +426,19 @@ static int bootstrap_local_tools_begin(void)
    char path[1024];
    snprintf(path, sizeof(path), "%s/aimee-db2-bootstrap-%u-%s.lock", tmp, (unsigned)getuid(),
             AIMEE_DB2_BOOTSTRAP_DB);
-   int fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0600);
+   /* O_EXCL first, so we can tell "we just created the lock" from "a previous
+    * attempt left it behind". This matters: open(O_CREAT) stamps a NEW file
+    * with the current time, so the cooldown check below saw `now - mtime == 0`
+    * and skipped — meaning the very FIRST bootstrap on a fresh host, the one
+    * case the fallback exists for, never ran. It only became reachable once the
+    * cooldown had expired, five minutes into a crash loop. */
+   int created = 1;
+   int fd = open(path, O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, 0600);
+   if (fd < 0)
+   {
+      created = 0;
+      fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0600);
+   }
    if (fd < 0)
       return -2;
    if (flock(fd, LOCK_EX | LOCK_NB) != 0)
@@ -174,7 +448,8 @@ static int bootstrap_local_tools_begin(void)
    }
    struct stat st;
    time_t now = time(NULL);
-   if (fstat(fd, &st) == 0 && st.st_mtime > 0 && now - st.st_mtime < DB2_BOOTSTRAP_COOLDOWN_SECS)
+   if (!created && fstat(fd, &st) == 0 && st.st_mtime > 0 &&
+       now - st.st_mtime < DB2_BOOTSTRAP_COOLDOWN_SECS)
    {
       flock(fd, LOCK_UN); /* attempted within the cooldown window — skip */
       close(fd);
@@ -202,7 +477,7 @@ static void bootstrap_local_tools_end(int lockfd)
 }
 #endif
 
-static int bootstrap_db2_try_url(config_t *cfg, const char *url, int save_config, cJSON *resp)
+static int bootstrap_db2_try_url(const char *url, int save_config, cJSON *resp)
 {
    if (!url || !url[0])
       return -1;
@@ -219,8 +494,7 @@ static int bootstrap_db2_try_url(config_t *cfg, const char *url, int save_config
 
    if (save_config)
    {
-      snprintf(cfg->db2_url, sizeof(cfg->db2_url), "%s", url);
-      if (config_save(cfg) != 0)
+      if (config_set("db2_url", url) != 0)
       {
          /* DB2 is already proven healthy (db2_init + health probe above). The
           * config persist is only a fast-path cache for later starts — the URL
@@ -305,11 +579,12 @@ static int bootstrap_db2_with_local_tools(cJSON *steps)
    return rc == 0 ? 0 : -1;
 }
 
-/* Resolve and bootstrap DB2 for `cfg`. Mutates cfg.db2_url to the URL that
- * succeeded and persists it via config_save. `resp` collects step-level
- * details (used by the init RPC; pass a throwaway object when calling from
- * startup). Returns 0 on success, 1 on failure. */
-static int kb_bootstrap_db2_resolve(config_t *cfg, cJSON *resp)
+/* Resolve and bootstrap DB2, persisting the URL that succeeded via config_set
+ * (which republishes the live snapshot, so a caller re-reading afterwards sees
+ * it). `resp` collects step-level details (used by the init RPC; pass a
+ * throwaway object when calling from startup). Returns 0 on success, 1 on
+ * failure. */
+static int kb_bootstrap_db2_resolve(cJSON *resp)
 {
    cJSON *steps = cJSON_AddArrayToObject(resp, "steps");
 
@@ -320,31 +595,28 @@ static int kb_bootstrap_db2_resolve(config_t *cfg, cJSON *resp)
     * an earlier boot goes stale. Preferring the cached value (as before) made
     * the kb connect to the old/wrong address forever — even though the correct
     * URL was right there in the environment. The successful bootstrap below
-    * re-persists this URL, refreshing the cache. The cached value is used only
-    * as a fallback when AIMEE_DB2_URL is unset (manual / non-container setups). */
-   config_apply_db2_url_env_override(cfg);
+    * re-persists this URL (config_set inside bootstrap_db2_try_url), refreshing
+    * the cache. The cached value is used only as a fallback when AIMEE_DB2_URL is
+    * unset (manual / non-container setups). That precedence now lives in
+    * config_db2_url_effective() rather than being applied to a struct here.
+    *
+    * `url` is a stable copy for the same reason it always was: try_url used to
+    * write the winner back through the same buffer it was reading, and
+    * snprintf'ing a buffer onto itself is undefined -- on glibc it truncated the
+    * destination to empty, leaving db2_init() with an empty URL. */
+   char url[CONFIG_DB2_URL_LEN];
+   int have_url = config_db2_url_effective(url, sizeof(url));
 
-   if (cfg->db2_url[0])
-   {
-      /* Pass a stable copy: bootstrap_db2_try_url writes the winning URL back
-       * into cfg->db2_url via snprintf, and snprintf'ing a buffer onto itself
-       * (src == dst) is undefined — on glibc it truncates the destination to
-       * empty. That left cfg->db2_url blank, so the real db2_init(cfg->db2_url)
-       * below failed with an empty URL. Only triggered when db2_url came from
-       * AIMEE_DB2_URL with no configured value (e.g. the container deploy). */
-      char url[sizeof(cfg->db2_url)];
-      snprintf(url, sizeof(url), "%s", cfg->db2_url);
-      if (bootstrap_db2_try_url(cfg, url, 1, resp) == 0)
-         return 0;
-   }
-
-   if (!cfg->db2_url[0] && bootstrap_db2_try_url(cfg, AIMEE_DB2_BOOTSTRAP_URL, 1, resp) == 0)
+   if (have_url && bootstrap_db2_try_url(url, 1, resp) == 0)
       return 0;
 
-   if (!cfg->db2_url[0])
+   if (!have_url && bootstrap_db2_try_url(AIMEE_DB2_BOOTSTRAP_URL, 1, resp) == 0)
+      return 0;
+
+   if (!have_url)
    {
       (void)bootstrap_db2_with_local_tools(steps);
-      if (bootstrap_db2_try_url(cfg, AIMEE_DB2_BOOTSTRAP_URL, 1, resp) == 0)
+      if (bootstrap_db2_try_url(AIMEE_DB2_BOOTSTRAP_URL, 1, resp) == 0)
          return 0;
    }
 
@@ -362,11 +634,9 @@ static int kb_bootstrap_db2_resolve(config_t *cfg, cJSON *resp)
 
 static int kb_bootstrap_db2(int json_output)
 {
-   config_t cfg;
-   config_load(&cfg);
    cJSON *resp = cJSON_CreateObject();
 
-   (void)kb_bootstrap_db2_resolve(&cfg, resp);
+   (void)kb_bootstrap_db2_resolve(resp);
 
    int ok = 0;
    cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
@@ -420,8 +690,7 @@ static int kb_cmd_enroll(int argc, char **argv)
    char conn[1024];
    if (kb_enroll_mint(kb_default_config_dir(), host, port, scope, conn, sizeof(conn)) != 0)
    {
-      fprintf(stderr, "aimee-kb enroll: failed to mint enrollment (check CA / token store under "
-                      "the kb config dir)\n");
+      fprintf(stderr, "aimee-kb enroll: failed to mint enrollment (check CA and Vault custody)\n");
       return 1;
    }
    puts(conn);
@@ -437,14 +706,11 @@ static int kb_cmd_enroll(int argc, char **argv)
  * db2_init and exits; does not start the service. */
 static int kb_run_fusion_probe(const char *query)
 {
-   config_t cfg;
-   config_load(&cfg);
-
    /* memory_find_facts takes the lexical-fallback path (which skips the fusion
     * block) unless the pgvector memory collection exists, so ensure it. */
    if (pgvec_memory_vector_collection_exists() <= 0)
    {
-      int dim = cfg.embedding_dim > 0 ? cfg.embedding_dim : 1024;
+      int dim = config_embedding_dim() > 0 ? config_embedding_dim() : 1024;
       (void)pgvec_memory_vector_collection_recreate(dim);
    }
 
@@ -493,21 +759,102 @@ static int kb_run_fusion_probe(const char *query)
  * remote thin-client `aimee team` needs human-actor forwarding to kb — P5.) */
 static int kb_cmd_tenancy_init_db2(void)
 {
-   config_t cfg;
-   config_load(&cfg);
-   config_apply_db2_url_env_override(&cfg);
-   if (!cfg.db2_url[0])
+   char db2_url[CONFIG_DB2_URL_LEN];
+   if (!config_db2_url_effective(db2_url, sizeof(db2_url)))
    {
       fprintf(stderr, "aimee-kb: db2_url not configured (set AIMEE_DB2_URL or run `aimee init`)\n");
       return -1;
    }
-   db2_set_embedding_dim(cfg.embedding_dim > 0 ? cfg.embedding_dim : 1024);
-   if (db2_init(cfg.db2_url) != 0)
+   db2_set_embedding_dim_default(config_embedding_dim_default());
+   db2_set_embedding_dim(config_embedding_dim_current());
+   /* These commands read a deployment somebody else is running. Applying the
+    * schema from here races the daemon's own pass, and Postgres answers "tuple
+    * concurrently updated", which surfaced below as "DB2 not reachable" against a
+    * KB that was reachable and healthy. Verify instead. */
+   db2_set_schema_readonly(1);
+   if (db2_init(db2_url) != 0)
    {
-      fprintf(stderr, "aimee-kb: DB2 not reachable at %s\n", cfg.db2_url);
+      fprintf(stderr, "aimee-kb: DB2 not reachable at %s\n", db2_url);
       return -1;
    }
    return 0;
+}
+
+static int kb_parse_unsigned(const char *text, unsigned long long max, unsigned long long *out)
+{
+   if (!text || !text[0] || !out)
+      return -1;
+   char *end = NULL;
+   errno = 0;
+   unsigned long long value = strtoull(text, &end, 10);
+   if (errno || !end || *end || value > max)
+      return -1;
+   *out = value;
+   return 0;
+}
+
+static int kb_cmd_managed_server_identity(int argc, char **argv)
+{
+   if (argc < 3 || strcmp(argv[2], "install") != 0)
+   {
+      fputs("Usage: aimee-kb managed-server-identity install --server-home=PATH "
+            "--host=HOST --port=N --endpoint=URL --uid=N\n",
+            stderr);
+      return 1;
+   }
+   kb_managed_server_identity_install_options_t options = {0};
+   int port_seen = 0, owner_seen = 0;
+   unsigned long long owner = 0;
+   for (int i = 3; i < argc; i++)
+   {
+      if (strncmp(argv[i], "--server-home=", 14) == 0 && !options.server_home)
+         options.server_home = argv[i] + 14;
+      else if (strncmp(argv[i], "--host=", 7) == 0 && !options.host)
+         options.host = argv[i] + 7;
+      else if (strncmp(argv[i], "--port=", 7) == 0 && !port_seen)
+      {
+         unsigned long long port = 0;
+         port_seen = 1;
+         if (kb_parse_unsigned(argv[i] + 7, 65535, &port) == 0)
+            options.port = (int)port;
+      }
+      else if (strncmp(argv[i], "--endpoint=", 11) == 0 && !options.endpoint)
+         options.endpoint = argv[i] + 11;
+      else if (strncmp(argv[i], "--uid=", 6) == 0 && !owner_seen)
+      {
+         owner_seen = 1;
+         if (kb_parse_unsigned(argv[i] + 6, (unsigned long long)(uid_t)-1, &owner) != 0)
+            owner_seen = -1;
+      }
+      else
+      {
+         fprintf(stderr, "aimee-kb managed-server-identity: invalid or duplicate option: %s\n",
+                 argv[i]);
+         return 1;
+      }
+   }
+   if (!options.server_home || !options.host || !options.endpoint || options.port < 1 ||
+       options.port > 65535 || owner_seen != 1)
+   {
+      fputs("aimee-kb managed-server-identity: incomplete install options\n", stderr);
+      return 1;
+   }
+   options.owner = (uid_t)owner;
+   int initialized = 0;
+   for (int attempt = 0; attempt < 60 && !initialized; attempt++)
+   {
+      if (kb_cmd_tenancy_init_db2() == 0)
+         initialized = 1;
+      else
+         sleep(1);
+   }
+   if (!initialized)
+      return 1;
+   int rc = kb_managed_server_identity_install(&options) == 0 ? 0 : 1;
+   if (rc)
+      fputs("aimee-kb managed-server-identity: install failed\n", stderr);
+   db2_shutdown();
+   return rc;
 }
 
 /* Operator-facing spend reporting CLI (P3b):
@@ -1200,9 +1547,129 @@ static int kb_cmd_tenancy(int argc, char **argv)
 
 int main(int argc, char **argv)
 {
+   if (argc > 1 && strcmp(argv[1], "--list-credential-env-names") == 0)
+      return vault_env_print_credential_names() == 0 ? 0 : 1;
+
+   /* A native launch follows the same disposable first-boot boundary as the
+    * container entrypoint. unsetenv() alone can leave inherited bytes visible
+    * in /proc/<pid>/environ, so a credential-bearing process may seal into
+    * Vault but may not become the long-lived KB. The bootstrap helper itself is
+    * already short-lived and therefore does not need to re-exec. */
+   if (!(argc > 1 && (strcmp(argv[1], "--bootstrap-vault-env") == 0 ||
+                      strcmp(argv[1], "--bootstrap-vault-stdin") == 0)))
+   {
+      int credential_env = vault_env_has_credential_environment();
+      if (credential_env < 0)
+      {
+         fputs("aimee-kb: malformed credential environment name\n", stderr);
+         return 1;
+      }
+      if (credential_env > 0)
+      {
+         if (vault_env_bootstrap_init_all() < 0 || vault_env_has_credential_environment() != 0)
+         {
+            runtime_secret_clear();
+            fputs("aimee-kb: first-boot credential Vault bootstrap failed\n", stderr);
+            return 1;
+         }
+         runtime_secret_clear();
+         execvp(argv[0], argv);
+         fprintf(stderr, "aimee-kb: clean-environment re-exec failed: %s\n", strerror(errno));
+         return 1;
+      }
+   }
+
+   /* The local file Vault is still bound here (before KB switches ordinary
+    * tenant Vault operations to Postgres), so it can break the DB credential
+    * bootstrap cycle and hydrate process memory without retaining env secrets. */
+   if (vault_env_bootstrap_init_all() < 0)
+   {
+      fputs("aimee-kb: credential Vault bootstrap failed\n", stderr);
+      return 1;
+   }
+   if (argc == 2 && strcmp(argv[1], "--bootstrap-vault-stdin") == 0 &&
+       (vault_env_import_stream(stdin) < 0 || vault_env_bootstrap_init_all() < 0 ||
+        vault_env_has_credential_environment() != 0))
+   {
+      runtime_secret_clear();
+      fputs("aimee-kb: streamed credential Vault bootstrap failed\n", stderr);
+      return 1;
+   }
+   if (vault_config_bootstrap_init() < 0)
+   {
+      fputs("aimee-kb: credential config Vault migration failed\n", stderr);
+      return 1;
+   }
+   {
+      char legacy_enroll[1024];
+      int n = snprintf(legacy_enroll, sizeof(legacy_enroll), "%s/kb-enroll-tokens",
+                       kb_default_config_dir());
+      if (n <= 0 || (size_t)n >= sizeof(legacy_enroll) ||
+          kb_enroll_store_migrate(legacy_enroll) != 0)
+      {
+         fputs("aimee-kb: enrollment credential Vault migration failed\n", stderr);
+         return 1;
+      }
+   }
+   (void)atexit(runtime_secret_clear);
+
+   if (argc > 1 && (strcmp(argv[1], "--bootstrap-vault-env") == 0 ||
+                    strcmp(argv[1], "--bootstrap-vault-stdin") == 0))
+      return 0;
+
+   /* Entrypoint decision probe: presence only, never the DB credential. A KB
+    * restarted without first-boot environment metadata must still select the
+    * external database whose URL is held exclusively in Vault. */
+   if (argc == 2 && strcmp(argv[1], "--vault-db2-external") == 0)
+   {
+      char db2_url[4096];
+      int present = runtime_secret_get("AIMEE_DB2_URL", db2_url, sizeof(db2_url));
+      char embedded[4096];
+      const char *home = aimee_home();
+      int n = home ? snprintf(embedded, sizeof(embedded), "postgresql:///aimee_shared?host=%s/run",
+                              home)
+                   : -1;
+      /* Prefix match to a parameter boundary, not string equality: the entrypoint
+       * seals the embedded DSN with an explicit &user=<cluster owner> so that
+       * containers sharing the socket connect as the right role. That trailing
+       * parameter does not make the topology external, and treating it as such
+       * would stop the KB provisioning its own cluster. */
+      size_t embedded_len = n > 0 ? (size_t)n : 0;
+      int matches_embedded = embedded_len > 0 && embedded_len < sizeof(embedded) &&
+                             strncmp(db2_url, embedded, embedded_len) == 0 &&
+                             (db2_url[embedded_len] == '\0' || db2_url[embedded_len] == '&');
+      int external = present && !matches_embedded;
+      runtime_secret_wipe(db2_url, sizeof(db2_url));
+      runtime_secret_wipe(embedded, sizeof(embedded));
+      return external ? 0 : 1;
+   }
+   /* The entrypoint's selection query. It used to parse aimee.yaml with a sed regex —
+    * a second reader of a setting, hardcoding the file paths and assuming the key sits
+    * at the top level. It worked only because config_save happens to write it there,
+    * and its failure was silent: an unparsed key reads as "no embedder selected", the
+    * builtin serves forever, and nothing says so. Ask config instead, which is the
+    * only thing that knows where the value lives and how it is spelled. */
+   if (argc == 2 && strcmp(argv[1], "--print-embedding-model") == 0)
+   {
+      const char *model = config_embedding_model();
+      if (!model || !model[0])
+         return 1; /* nothing selected — the caller starts no embedder */
+      printf("%s\n", model);
+      return 0;
+   }
+   if (argc == 2 && strcmp(argv[1], "--vault-llm-auth-configured") == 0)
+   {
+      char token[513];
+      int present = runtime_secret_get("AIMEE_LLM_AUTH_TOKEN", token, sizeof(token));
+      runtime_secret_wipe(token, sizeof(token));
+      return present ? 0 : 1;
+   }
+
    /* Subcommands (must precede the daemon flag loop). */
    if (argc > 1 && strcmp(argv[1], "enroll") == 0)
       return kb_cmd_enroll(argc, argv);
+   if (argc > 1 && strcmp(argv[1], "managed-server-identity") == 0)
+      return kb_cmd_managed_server_identity(argc, argv);
    if (argc > 1 && (strcmp(argv[1], "team") == 0 || strcmp(argv[1], "project") == 0 ||
                     strcmp(argv[1], "models") == 0))
       return kb_cmd_tenancy(argc, argv);
@@ -1214,6 +1681,8 @@ int main(int argc, char **argv)
       return kb_cmd_rate(argc, argv);
    if (argc > 1 && strcmp(argv[1], "telemetry") == 0)
       return kb_cmd_telemetry(argc, argv);
+   if (argc > 1 && strcmp(argv[1], "vault") == 0)
+      return kb_cmd_vault(argc, argv);
 
    log_level_t log_level = LOG_INFO;
    int bootstrap_db2 = 0;
@@ -1254,6 +1723,20 @@ int main(int argc, char **argv)
              "Usage: aimee-kb [options]\n"
              "       aimee-kb enroll --host=HOST --port=N [--scope=SCOPE]\n"
              "                       Mint a one-time enrollment connection string for a client\n"
+             "       aimee-kb vault status [--json]\n"
+             "       aimee-kb vault start --request-id=<32-lowercase-hex> "
+             "[--secret-stdin] [--json]\n"
+             "       aimee-kb vault resume [--secret-stdin] [--json]\n"
+             "       aimee-kb vault unseal [--secret-stdin] [--json]\n"
+             "       aimee-kb team create|list|add-member|remove-member ...\n"
+             "       aimee-kb project create|list ...\n"
+             "       aimee-kb models list | models org add|set|remove|entitle|unentitle ...\n"
+             "       aimee-kb budget set|show --team N ...\n"
+             "       aimee-kb rate set|show --dim D --scope S ...\n"
+             "       aimee-kb spend [--team N] [--since D] [--until D] [--json]\n"
+             "       aimee-kb telemetry show|allow ...\n"
+             "                       Run any of the above with no arguments for its own usage.\n"
+             "                       See docs/ORG_GOVERNANCE.md.\n"
              "  --socket=PATH        (deprecated, ignored) Unix socket path\n"
              "  --bg-socket=PATH     (deprecated, ignored) Background-worker socket path\n"
              "  --http-port=N        TCP port for /v1/* REST API (required; default 0 = off)\n"
@@ -1279,30 +1762,81 @@ int main(int argc, char **argv)
    agent_http_init();
    kb_install_signal_handlers();
 
-   config_t kb_cfg;
-   config_load(&kb_cfg);
+   /* Seed the live snapshot first: from here every config read in this process
+    * is an accessor against it, and the bootstrap below republishes through
+    * config_set when it persists a resolved db2_url. */
+   (void)config_snapshot_seed();
+
+   /* Copied out because kb_vault_tpm_runtime_identity hands BACK one of these
+    * pointers (whichever wins over the env) and main holds it to the end. */
+   char vault_tpm2_tcti[CONFIG_COPY_MAX];
+   char vault_tpm2_nv_index[CONFIG_COPY_MAX];
+   char vault_custody[CONFIG_COPY_MAX];
+   config_vault_tpm2_tcti_copy(vault_tpm2_tcti, sizeof(vault_tpm2_tcti));
+   config_vault_tpm2_nv_index_copy(vault_tpm2_nv_index, sizeof(vault_tpm2_nv_index));
+   config_vault_custody_copy(vault_custody, sizeof(vault_custody));
+
+   /* aimee-kb records the AUTHORITATIVE memory-mutation events on its own
+    * observability bus at the store (every caller). Open the KB audit ledger so
+    * the bus consumer can persist the rows, then install the store-side hook. */
+   audit_log_open();
+   kb_memory_audit_bridge_install();
+
+   /* P7-D3a is an all-or-none service-manager contract. The listener fd and
+    * pathname are fixed in the wire module; only activation and the dedicated
+    * primary Postgres credential are environment-backed. */
+   const char *vault_operator_enable = getenv("AIMEE_KB_VAULT_OPERATOR_ENABLED");
+   const char *vault_orchestrator_url = getenv("AIMEE_KB_VAULT_ORCHESTRATOR_URL");
+   int vault_operator_enabled = vault_operator_enable && strcmp(vault_operator_enable, "1") == 0;
+   const char *vault_tpm2_effective_tcti = NULL;
+   const char *vault_tpm2_effective_nv_index = NULL;
+   kb_vault_tpm_runtime_identity(vault_tpm2_tcti, vault_tpm2_nv_index, &vault_tpm2_effective_tcti,
+                                 &vault_tpm2_effective_nv_index);
+   if ((vault_operator_enable && !vault_operator_enabled) ||
+       (vault_operator_enabled != (vault_orchestrator_url && vault_orchestrator_url[0])))
+   {
+      fputs("aimee-kb: incomplete or invalid vault operator configuration\n", stderr);
+      agent_http_cleanup();
+      return 1;
+   }
+   if (vault_operator_enabled && strcmp(vault_custody, "tpm2") != 0)
+   {
+      fputs("aimee-kb: vault operator status requires TPM2 custody\n", stderr);
+      agent_http_cleanup();
+      return 1;
+   }
+   kb_vault_tpm_runtime_lock_t *vault_tpm_runtime_lock = NULL;
+   db2_vault_operator_runtime_t vault_operator_runtime;
+   memset(&vault_operator_runtime, 0, sizeof(vault_operator_runtime));
+   int vault_operator_runtime_opened = 0;
+   kb_vault_operator_service_t *vault_operator_service = NULL;
+   kb_vault_operator_components_t vault_operator_components;
+   memset(&vault_operator_components, 0, sizeof(vault_operator_components));
+   db2_vault_operator_status_t vault_operator_startup_before;
+   memset(&vault_operator_startup_before, 0, sizeof(vault_operator_startup_before));
 
    /* aimee-kb owns DB2; tell the DB2 layer the deployment's embedding dimension
     * (one embedder: 1024 pplx-0.6b / 2560 pplx-4b) before any db2_init() so the
     * halfvec embedding columns are created at the right size. AIMEE_EMBEDDING_DIM
     * overrides the configured value (containerized deploys without a writable
     * aimee.yaml). */
-   db2_set_embedding_dim(config_resolve_embedding_dim(&kb_cfg));
-   db2_set_embedding_dim_pinned(config_embedding_dim_is_pinned(&kb_cfg));
+   db2_set_embedding_dim_default(config_embedding_dim_default());
+   db2_set_embedding_dim(config_resolve_embedding_dim_current());
+   db2_set_embedding_dim_pinned(config_embedding_dim_pinned_current());
    /* unified-llm-container §2: activate the model-identity drift guard (the kb applies
     * the schema, so this is the load-bearing site). Empty embedding_model => no-op. */
-   db2_set_embedder_model_id(kb_cfg.embedding_model);
+   db2_set_embedder_model_id(config_embedding_model());
    /* §2b: on a FRESH DB with no pin, let db2_init derive the dim from the running
     * embedder's /health instead of the default — but only when a REAL remote embed
     * command is configured (the lexical "builtin" has no /health and a fixed dim,
     * so probing it would never succeed and would stall the retry loop). */
    {
-      const char *embed_cmd = config_embedding_command(&kb_cfg, NULL);
+      const char *embed_cmd = config_embedding_command_current(NULL);
       if (embed_cmd && strcmp(embed_cmd, "builtin") != 0)
          embedder_probe_register(embed_cmd);
    }
    /* Size the DB2 connection pool (leased by worker threads) before db2_init. */
-   db2_set_pool_size(aimee_resolve_db2_pool_size(kb_cfg.db2_connection_pool_size));
+   db2_set_pool_size(aimee_resolve_db2_pool_size(config_db2_connection_pool_size()));
 
    /* AIMEE_DB2_URL, when set, is the source of truth and overrides any db2_url
     * cached in aimee.yaml from a previous boot — applied here unconditionally,
@@ -1311,28 +1845,66 @@ int main(int argc, char **argv)
     * new bridge IP, the persisted db2_url goes stale. kb_bootstrap_db2_resolve()
     * already prefers the env URL, but it only runs when db2_url is empty (the
     * gate below), so a populated-but-stale cached URL would skip the override
-    * entirely and db2_init() below would dial the dead address and exit. Apply
-    * the override here so the kb self-heals across Postgres IP drift. */
-   config_apply_db2_url_env_override(&kb_cfg);
+    * entirely and db2_init() below would dial the dead address and exit. The
+    * precedence now lives in config_db2_url_effective(), which every read below
+    * goes through, so there is no struct to pre-apply it to and no window in
+    * which a stale cached value is visible. */
 
    /* Auto-bootstrap on startup so kb keeps working for users who upgrade past
     * the "DB2 required" cutover (#1151) without their config being touched.
     * Mirrors the init RPC's fallback chain: env URL → default URL → createdb
     * locally. Persists the resolved URL to config so subsequent starts are a
     * fast path. */
-   if (!kb_cfg.db2_url[0])
+   char db2_url[CONFIG_DB2_URL_LEN];
+   if (!config_db2_url_effective(db2_url, sizeof(db2_url)))
    {
       cJSON *resp = cJSON_CreateObject();
-      int rc = kb_bootstrap_db2_resolve(&kb_cfg, resp);
-      cJSON_Delete(resp);
+      int rc = kb_bootstrap_db2_resolve(resp);
       if (rc != 0)
       {
+         /* kb_bootstrap_db2_resolve already recorded WHY each fallback failed —
+          * the per-step command outcomes plus a message and a remediation. That
+          * detail used to be discarded, so the only thing an operator saw was
+          * "bootstrap failed", which does not distinguish "Postgres is not
+          * running" from "this image ships no Postgres at all" (the published
+          * aimee-kb:latest predating the embedded-DB2 packaging is exactly the
+          * latter). Print it: this message is the whole diagnosis for a KB that
+          * will not start. */
          fprintf(stderr, "aimee-kb: db2_url not configured and bootstrap failed; "
                          "run `aimee init` or set AIMEE_DB2_URL\n");
+         const cJSON *msg = cJSON_GetObjectItemCaseSensitive(resp, "message");
+         if (cJSON_IsString(msg) && msg->valuestring[0])
+            fprintf(stderr, "aimee-kb:   cause: %s\n", msg->valuestring);
+         const cJSON *steps = cJSON_GetObjectItemCaseSensitive(resp, "steps");
+         const cJSON *step = NULL;
+         cJSON_ArrayForEach(step, steps)
+         {
+            char *one = cJSON_PrintUnformatted(step);
+            if (one)
+            {
+               fprintf(stderr, "aimee-kb:   step: %s\n", one);
+               free(one);
+            }
+         }
+         const cJSON *fix = cJSON_GetObjectItemCaseSensitive(resp, "remediation");
+         if (cJSON_IsString(fix) && fix->valuestring[0])
+            fprintf(stderr, "aimee-kb:   remediation: %s\n", fix->valuestring);
+         cJSON_Delete(resp);
          agent_http_cleanup();
          return 1;
       }
+      cJSON_Delete(resp);
    }
+
+   /* Publish the fully resolved daemon config before request threads start.
+    * This keeps hot-path config reads on the lock-free snapshot instead of
+    * racing through the process-wide file mtime cache. */
+   /* Republish: the bootstrap above may have persisted a resolved db2_url. */
+   (void)config_snapshot_seed();
+   /* And re-read it. The value taken before the bootstrap is the PRE-bootstrap
+    * one; when the bootstrap succeeded it wrote a different URL, and dialling the
+    * old one here would undo the whole point of bootstrapping. */
+   (void)config_db2_url_effective(db2_url, sizeof(db2_url));
 
    /* DB2 owns project, workspace, and global knowledge for aimee-kb.
     *
@@ -1349,17 +1921,17 @@ int main(int argc, char **argv)
       const int db2_max_attempts = 24; /* ~2 min at 5s spacing */
       const int db2_retry_secs = 5;
       int attempt = 1;
-      while (db2_init(kb_cfg.db2_url) != 0)
+      while (db2_init(db2_url) != 0)
       {
          if (attempt >= db2_max_attempts)
          {
-            fprintf(stderr, "aimee-kb: DB2 init failed for %s after %d attempts (%ds)\n",
-                    kb_cfg.db2_url, attempt, attempt * db2_retry_secs);
+            fprintf(stderr, "aimee-kb: DB2 init failed for %s after %d attempts (%ds)\n", db2_url,
+                    attempt, attempt * db2_retry_secs);
             agent_http_cleanup();
             return 1;
          }
-         fprintf(stderr, "aimee-kb: DB2 not ready (%s); retry %d/%d in %ds\n", kb_cfg.db2_url,
-                 attempt, db2_max_attempts, db2_retry_secs);
+         fprintf(stderr, "aimee-kb: DB2 not ready (%s); retry %d/%d in %ds\n", db2_url, attempt,
+                 db2_max_attempts, db2_retry_secs);
          sleep(db2_retry_secs);
          attempt++;
       }
@@ -1382,6 +1954,27 @@ int main(int argc, char **argv)
     * custody + seal/unseal before any key-holding activation on a hardened tier. */
    vault_store_set_backend(&vault_pg_backend);
 
+   /* Every TPM2-custodied daemon takes the same NV-index singleton, including
+    * deployments where D3 operator status is disabled. This closes the mixed
+    * enabled/disabled race before custody initialization or any listener. */
+   if (strcmp(vault_custody, "tpm2") == 0)
+   {
+      char lock_error[192] = "";
+      if (kb_vault_tpm_runtime_lock_acquire(
+              vault_tpm2_effective_tcti, vault_tpm2_effective_nv_index, &vault_tpm_runtime_lock,
+              lock_error, sizeof(lock_error)) != KB_VAULT_TPM_RUNTIME_LOCK_OK ||
+          kb_vault_tpm_runtime_lock_revalidate(vault_tpm_runtime_lock) !=
+              KB_VAULT_TPM_RUNTIME_LOCK_OK)
+      {
+         fprintf(stderr, "aimee-kb: %s; refusing to start\n",
+                 lock_error[0] ? lock_error : "TPM runtime singleton validation failed");
+         db2_shutdown();
+         kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
+         agent_http_cleanup();
+         return 1;
+      }
+   }
+
    /* Select the custody provider for the vault's server KEK (P10/P7 slice 3b).
     * `file` (default) keeps today's self-unsealing behavior; `mock` binds the
     * test/dev seal-barrier anchor; tpm2/pkcs11/kms are declared but unimplemented
@@ -1389,13 +1982,74 @@ int main(int argc, char **argv)
     * vault.custody value is likewise rejected. */
    {
       char custody_err[160] = "";
-      if (kb_vault_policy_select(kb_cfg.vault_custody, custody_err, sizeof(custody_err)) != 0)
+      if (kb_vault_policy_select(vault_custody, custody_err, sizeof(custody_err)) != 0)
       {
          fprintf(stderr, "aimee-kb: %s\n", custody_err);
          db2_shutdown();
+         kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
          agent_http_cleanup();
          return 1;
       }
+   }
+
+   {
+      /* P7-witness-e2: a key-holding kb must have a working checkpoint signer
+       * before serving, so org key use can never outrun the evidence that witnesses
+       * it. No-op on a dev/no-live-key kb. */
+      char witness_err[220] = "";
+      if (kb_witness_boot_check(witness_err, sizeof(witness_err)) != 0)
+      {
+         fprintf(stderr, "aimee-kb: %s\n", witness_err);
+         db2_shutdown();
+         kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
+         agent_http_cleanup();
+         return 1;
+      }
+   }
+
+   if (vault_operator_enabled)
+   {
+      char operator_error[256] = "";
+      if (kb_vault_tpm_runtime_lock_revalidate(vault_tpm_runtime_lock) !=
+              KB_VAULT_TPM_RUNTIME_LOCK_OK ||
+          vault_seal() != 0)
+      {
+         fputs("aimee-kb: cannot establish sealed D3 operator startup state\n", stderr);
+         db2_shutdown();
+         kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
+         agent_http_cleanup();
+         return 1;
+      }
+#if defined(AIMEE_P7_D3_INTEGRATION_TEST_OVERRIDE)
+      LOG_WARN("kb.vault", "P7-D3 integration-only loopback TPM override is ACTIVE");
+      if (db2_kb_audit_append("integration", "aimee-kb", "vault.tpm.test_override", "p7-d3",
+                              "allow", "integration-only build flag active") != 0)
+      {
+         fputs("aimee-kb: cannot WORM-audit P7-D3 test override; refusing to start\n", stderr);
+         db2_shutdown();
+         kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
+         agent_http_cleanup();
+         return 1;
+      }
+#endif
+      if (db2_vault_operator_runtime_open(&vault_operator_runtime, vault_orchestrator_url,
+                                          operator_error,
+                                          sizeof(operator_error)) != DB2_VAULT_OPERATOR_OK ||
+          db2_vault_operator_runtime_status(
+              &vault_operator_runtime, kb_vault_operator_provider_status, NULL,
+              &vault_operator_startup_before) != DB2_VAULT_OPERATOR_OK ||
+          kb_vault_operator_startup_mode(
+              (kb_vault_operator_state_t)vault_operator_startup_before.state) < 0)
+      {
+         fprintf(stderr, "aimee-kb: vault operator authority/status unavailable: %s\n",
+                 operator_error[0] ? operator_error : "initial status failed");
+         db2_vault_operator_runtime_close(&vault_operator_runtime);
+         db2_shutdown();
+         kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
+         agent_http_cleanup();
+         return 1;
+      }
+      vault_operator_runtime_opened = 1;
    }
 
    /* Diagnostic mode: run the fusion off-vs-on recall probe and exit without
@@ -1403,7 +2057,10 @@ int main(int argc, char **argv)
    if (fusion_probe_query)
    {
       int rc = kb_run_fusion_probe(fusion_probe_query);
+      if (vault_operator_runtime_opened)
+         db2_vault_operator_runtime_close(&vault_operator_runtime);
       db2_shutdown();
+      kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
       agent_http_cleanup();
       return rc;
    }
@@ -1441,11 +2098,134 @@ int main(int argc, char **argv)
       {
          (void)vault_seal();
          fprintf(stderr, "aimee-kb: %s; refusing to start\n", startup_error);
+         if (vault_operator_runtime_opened)
+            db2_vault_operator_runtime_close(&vault_operator_runtime);
          db2_shutdown();
+         kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
          agent_http_cleanup();
          return 1;
       }
    }
+
+   if (vault_operator_enabled)
+   {
+      db2_vault_operator_status_t startup_after;
+      memset(&startup_after, 0, sizeof(startup_after));
+      if (db2_vault_operator_runtime_status(&vault_operator_runtime,
+                                            kb_vault_operator_provider_status, NULL,
+                                            &startup_after) != DB2_VAULT_OPERATOR_OK ||
+          !kb_vault_operator_status_equal(&vault_operator_startup_before, &startup_after) ||
+          kb_vault_operator_startup_mode((kb_vault_operator_state_t)startup_after.state) < 0 ||
+          kb_vault_tpm_runtime_lock_revalidate(vault_tpm_runtime_lock) !=
+              KB_VAULT_TPM_RUNTIME_LOCK_OK ||
+          kb_vault_operator_components_init(&vault_operator_components, &vault_operator_runtime,
+                                            vault_tpm_runtime_lock) != 0 ||
+          !(vault_operator_service = kb_vault_operator_service_start_mutations_ex(
+                KB_VAULT_OPERATOR_LISTEN_FD, kb_vault_operator_service_project,
+                kb_vault_operator_service_mutate, kb_vault_operator_service_post_wipe,
+                &vault_operator_components)))
+      {
+         fputs("aimee-kb: vault operator post-epoch status/listener validation failed\n", stderr);
+         kb_vault_operator_components_destroy(&vault_operator_components);
+         db2_vault_operator_runtime_close(&vault_operator_runtime);
+         vault_operator_runtime_opened = 0;
+         db2_shutdown();
+         kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
+         agent_http_cleanup();
+         return 1;
+      }
+
+      /* A sealed startup exposes only the fixed operator socket until one exact
+       * mutation completes the durable open and publishes the activation latch. */
+      if (kb_vault_operator_startup_mode((kb_vault_operator_state_t)startup_after.state) > 0)
+      {
+         LOG_INFO("kb.vault", "vault operator local mode active (state=%d)",
+                  (int)startup_after.state);
+         g_ctx.start_time = (uint64_t)time(NULL);
+         g_ctx.running = 1;
+         kb_vault_operator_status_t activated;
+         memset(&activated, 0, sizeof(activated));
+         while (g_ctx.running)
+         {
+            int wait_rc = kb_vault_activation_latch_wait(&vault_operator_components.activation, 200,
+                                                         &activated);
+            if (wait_rc < 0)
+            {
+               g_ctx.running = 0;
+               break;
+            }
+            if (wait_rc > 0)
+               break;
+         }
+         if (!g_ctx.running ||
+             kb_vault_operator_mutation_activation_window_valid(
+                 &vault_operator_components.mutation) != 0 ||
+             kb_vault_operator_runtime_activation_validate(&vault_operator_components.runtime,
+                                                           &activated) != 0 ||
+             kb_vault_operator_mutation_activation_window_valid(
+                 &vault_operator_components.mutation) != 0)
+         {
+            (void)vault_seal();
+            kb_vault_operator_service_stop(vault_operator_service);
+            vault_operator_service = NULL;
+            kb_vault_operator_components_destroy(&vault_operator_components);
+            db2_vault_operator_runtime_close(&vault_operator_runtime);
+            vault_operator_runtime_opened = 0;
+            embedder_probe_unregister();
+            db2_shutdown();
+            kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
+            agent_http_cleanup();
+            return g_ctx.running ? 1 : 0;
+         }
+      }
+      if (kb_vault_operator_runtime_mark_general_serving(&vault_operator_components.runtime) != 0)
+      {
+         (void)vault_seal();
+         kb_vault_operator_service_stop(vault_operator_service);
+         vault_operator_service = NULL;
+         kb_vault_operator_components_destroy(&vault_operator_components);
+         db2_vault_operator_runtime_close(&vault_operator_runtime);
+         vault_operator_runtime_opened = 0;
+         db2_shutdown();
+         kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
+         agent_http_cleanup();
+         return 1;
+      }
+      if (kb_vault_operator_mutation_mark_general_serving(&vault_operator_components.mutation) != 0)
+      {
+         (void)vault_seal();
+         kb_vault_operator_service_stop(vault_operator_service);
+         vault_operator_service = NULL;
+         kb_vault_operator_components_destroy(&vault_operator_components);
+         db2_vault_operator_runtime_close(&vault_operator_runtime);
+         vault_operator_runtime_opened = 0;
+         db2_shutdown();
+         kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
+         agent_http_cleanup();
+         return 1;
+      }
+   }
+
+#if defined(AIMEE_P2B_INTEGRATION_TEST_OVERRIDE)
+   if (kb_egress_release_allowed())
+   {
+      LOG_WARN("kb.egress", "P2b integration-only egress override is ACTIVE");
+      if (db2_kb_audit_append("integration", "aimee-kb", "egress.test_override", "p2b", "allow",
+                              "integration-only build flag active") != 0)
+      {
+         fprintf(stderr, "aimee-kb: cannot WORM-audit P2b test override; refusing to start\n");
+         kb_vault_operator_service_stop(vault_operator_service);
+         vault_operator_service = NULL;
+         kb_vault_operator_components_destroy(&vault_operator_components);
+         if (vault_operator_runtime_opened)
+            db2_vault_operator_runtime_close(&vault_operator_runtime);
+         db2_shutdown();
+         kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
+         agent_http_cleanup();
+         return 1;
+      }
+   }
+#endif
 
    /* Hidden directories (`.git`, `.aimee`, `.worktrees`, etc.) hold
     * dotfile state, not source code, so they are never indexed. The
@@ -1460,21 +2240,34 @@ int main(int argc, char **argv)
 
    if (kb_service_init(&g_ctx) != 0)
    {
+      kb_vault_operator_service_stop(vault_operator_service);
+      vault_operator_service = NULL;
+      kb_vault_operator_components_destroy(&vault_operator_components);
+      if (vault_operator_runtime_opened)
+         db2_vault_operator_runtime_close(&vault_operator_runtime);
       db2_shutdown();
+      kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
       agent_http_cleanup();
       return 1;
    }
-   g_ctx.worker_count = kb_cfg.kb_connection_workers;
+   g_ctx.worker_count = config_kb_connection_workers();
 
    /* #4-full render backend: register the command-driven computed-style render
     * adapter when css_render_command is configured (no-op otherwise — the oracle
     * then reports UNAVAILABLE rather than guessing). */
    css_render_cmd_register();
 
-   int http_port = http_port_override >= 0 ? http_port_override : kb_cfg.kb_api_http_port;
+   int http_port = http_port_override >= 0 ? http_port_override : config_kb_api_http_port();
    if (http_port <= 0)
    {
+      kb_service_shutdown(&g_ctx);
+      kb_vault_operator_service_stop(vault_operator_service);
+      vault_operator_service = NULL;
+      kb_vault_operator_components_destroy(&vault_operator_components);
+      if (vault_operator_runtime_opened)
+         db2_vault_operator_runtime_close(&vault_operator_runtime);
       db2_shutdown();
+      kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
       agent_http_cleanup();
       fprintf(stderr,
               "aimee-kb: HTTP is the only transport; set --http-port=N or kb_api_http_port\n");
@@ -1491,18 +2284,62 @@ int main(int argc, char **argv)
    kb_oidc_jwks_fleet_enable();
    /* P9a: register the /v1/metrics + /v1/telemetry/metrics scrape/ingest token
     * (config telemetry.metrics_token, a SHA-256 hex) before the listener accepts. */
-   kb_http_set_telemetry_token(kb_cfg.telemetry_metrics_token);
-   if (kb_http_start(http_port, kb_cfg.kb_api_bearer_token) != 0)
+   kb_http_set_telemetry_token(config_telemetry_metrics_token());
+   if (vault_tpm_runtime_lock &&
+       kb_vault_tpm_runtime_lock_revalidate(vault_tpm_runtime_lock) != KB_VAULT_TPM_RUNTIME_LOCK_OK)
+   {
+      fputs("aimee-kb: TPM runtime singleton lost before listener activation\n", stderr);
+      kb_service_shutdown(&g_ctx);
+      kb_vault_operator_service_stop(vault_operator_service);
+      vault_operator_service = NULL;
+      kb_vault_operator_components_destroy(&vault_operator_components);
+      if (vault_operator_runtime_opened)
+         db2_vault_operator_runtime_close(&vault_operator_runtime);
+      db2_shutdown();
+      kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
+      agent_http_cleanup();
+      return 1;
+   }
+   if (kb_management_runtime_start() != 0)
+   {
+      fprintf(stderr, "aimee-kb: invalid management runtime configuration; refusing to start\n");
+      kb_service_shutdown(&g_ctx);
+      kb_vault_operator_service_stop(vault_operator_service);
+      vault_operator_service = NULL;
+      kb_vault_operator_components_destroy(&vault_operator_components);
+      if (vault_operator_runtime_opened)
+         db2_vault_operator_runtime_close(&vault_operator_runtime);
+      db2_shutdown();
+      kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
+      agent_http_cleanup();
+      return 1;
+   }
+   if (kb_http_start(http_port, config_kb_api_bearer_token()) != 0)
    {
       /* Another instance owns the port; yield gracefully with success so
        * systemd (Restart=on-failure) doesn't restart-loop. */
       LOG_WARN("kb_http",
                "failed to start HTTP listener on port %d; another instance likely owns it",
                http_port);
+      kb_management_runtime_stop();
+      kb_service_shutdown(&g_ctx);
+      kb_vault_operator_service_stop(vault_operator_service);
+      vault_operator_service = NULL;
+      kb_vault_operator_components_destroy(&vault_operator_components);
+      if (vault_operator_runtime_opened)
+         db2_vault_operator_runtime_close(&vault_operator_runtime);
       db2_shutdown();
+      kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
       agent_http_cleanup();
       return 0;
    }
+
+   /* Now that this instance owns the port, boot the MCP plugins this kb HOSTS
+    * (config install: kb) so their tools are live for the first federated
+    * tools/list. Boot filters by install target — a no-op when none are
+    * configured. Each plugin is OSV-scanned at startup (same gate as the server
+    * path; see kb_mcp_osv_stub.c). Torn down after kb_http_stop() below. */
+   (void)mcp_client_registry_boot(CONFIG_MCP_INSTALL_KB);
 
    /* Optional distributed-mode mTLS listener (every request presents a CA-issued
     * client cert; scope comes from the cert). Enabled by AIMEE_KB_MTLS_PORT. */
@@ -1534,20 +2371,51 @@ int main(int argc, char **argv)
 
    (void)shutdown_forensics_record_unclean_exits();
    (void)shutdown_forensics_mark_started("kb", (time_t)g_ctx.start_time);
+   /* P2b recovery owns stale dispatch leases; bounded batches keep startup and
+    * periodic work predictable while the SQL advisory lock makes it singleton. */
+   {
+      int64_t recovered = 0;
+      do
+      {
+         recovered = 0;
+      } while (db2_org_egress_recover(100, &recovered) == 0 && recovered == 100);
+   }
+   db2_lease_release_idle();
+   time_t next_egress_recovery = time(NULL) + 5;
    /* HTTP listener runs on its own thread; block here until a signal
     * (SIGINT/SIGTERM/SIGHUP) flips running, then tear down. */
    while (g_ctx.running)
    {
+      time_t now = time(NULL);
+      if (now >= next_egress_recovery)
+      {
+         int64_t recovered = 0;
+         (void)db2_org_egress_recover(100, &recovered);
+         next_egress_recovery = now + 5;
+      }
+      kb_management_runtime_tick((int64_t)now);
+      kb_witness_cadence_tick(now); /* P7-witness-e2: periodic checkpoint cadence */
+      /* Main-thread maintenance leases lazily from the DB2 pool. Return the
+       * lease before sleeping so the daemon does not pin one member forever. */
+      db2_lease_release_idle();
       struct timespec ts = {.tv_sec = 0, .tv_nsec = 200L * 1000 * 1000};
       nanosleep(&ts, NULL);
    }
    int rc = 0;
    kb_mtls_stop();
    kb_http_stop();
+   mcp_client_registry_shutdown(); /* stop kb-hosted MCP plugins (install: kb) */
+   kb_management_runtime_stop();
    kb_service_shutdown(&g_ctx);
+   kb_vault_operator_service_stop(vault_operator_service);
+   vault_operator_service = NULL;
+   kb_vault_operator_components_destroy(&vault_operator_components);
+   if (vault_operator_runtime_opened)
+      db2_vault_operator_runtime_close(&vault_operator_runtime);
    (void)shutdown_forensics_mark_stopped("kb", getpid());
    embedder_probe_unregister(); /* §2b: deregister the probe before db2_shutdown */
    db2_shutdown();
+   kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
    agent_http_cleanup();
    return rc == 0 ? 0 : 1;
 }

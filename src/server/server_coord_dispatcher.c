@@ -9,8 +9,8 @@
 #include "server_coord_dispatcher.h"
 #include "server.h"
 #include "server_compute_impl.h"
-#include "gw_orch_delegates.h"
-#include "delegate_role.h" /* delegate_role_is_write — force tools for coord write tasks */
+#include <aimee/delegates/gw_orch_delegates.h>
+#include <aimee/delegates/delegate_role.h> /* delegate_role_is_write — force tools for coord write tasks */
 #include "config.h"
 #include "db1.h"
 #include "log.h"
@@ -38,6 +38,11 @@ typedef struct
    int spawn_rc; /* 0 spawned, -1 refused/failed; -1 until the adapter runs */
 } coord_spawn_backing_t;
 
+/* Coord write tasks are unattended and may otherwise inherit an unlimited code
+ * role. Forty-eight turns leaves headroom above successful live runs while
+ * preventing a confused model from continuing indefinitely after useful work. */
+#define COORD_WRITE_MAX_TURNS 48
+
 /* The spawn_delegate capability for coord tasks: build the delegate request + compute ctx from
  * (role, brief) and the backing, then submit to an on-demand delegate worker. Returns 0/-1 and
  * also records it in the backing so the dispatcher can release+retry a refused claim. */
@@ -62,7 +67,10 @@ static int coord_spawn_delegate(void *ctx, const char *role, const char *brief)
     * roles already opt in via delegate_role_enable_tools_by_default; a caller can
     * still pass tools:false explicitly, which server_compute honors. */
    if (delegate_role_is_write(req_role))
+   {
       cJSON_AddTrueToObject(req, "tools");
+      cJSON_AddNumberToObject(req, "max_turns_cap", COORD_WRITE_MAX_TURNS);
+   }
    cJSON_AddStringToObject(req, "prompt", brief ? brief : "");
    /* Persona (the delegate's identity, required for every delegate) is carried on
     * the coord task now — the orchestrator that enqueued it (coord planner or the
@@ -110,8 +118,7 @@ static int coord_spawn_delegate(void *ctx, const char *role, const char *brief)
  * gw_orch_delegates module config-free. */
 static int coord_delegates_enabled(void)
 {
-   config_t cfg;
-   int tri = (config_load(&cfg) == 0) ? cfg.module_delegates : -1;
+   int tri = config_present() ? config_module_delegates() : -1;
    return config_module_enabled(tri, gw_orch_delegates_enabled());
 }
 

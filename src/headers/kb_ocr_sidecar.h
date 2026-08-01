@@ -7,8 +7,6 @@
 #ifndef AIMEE_KB_OCR_SIDECAR_H
 #define AIMEE_KB_OCR_SIDECAR_H
 
-#include "config.h"
-
 typedef struct
 {
    char text[1024];
@@ -16,7 +14,6 @@ typedef struct
 } kb_ocr_line_t;
 
 /* Resolved OCR endpoint URL: cfg->ocr_command, else $AIMEE_OCR_URL, else "" (disabled). */
-const char *kb_ocr_endpoint(const config_t *cfg);
 
 /* OCR one rendered page image (PNG bytes). On success the out-params receive a heap array
  * (free with kb_ocr_free_lines). Returns: 1 = text recognised, 0 = no text, -1 =

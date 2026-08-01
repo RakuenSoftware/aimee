@@ -324,8 +324,20 @@ extern "C"
    } db2_kb_ingest_recent_t;
 
    int db2_kb_ingest_queue_reset_running(void);
+
+   /* Queue priority. The claim is ordered by priority first, then id, so a request
+    * someone is waiting on does not sit behind a full background sweep — a reindex
+    * of a large workspace enqueues thousands of rows, and strict FIFO made every
+    * later interactive ingest wait them out. Two levels only: work a caller is
+    * blocked on, and everything else. */
+   typedef enum
+   {
+      DB2_KB_INGEST_PRIO_BULK = 0,        /* periodic sweep, inotify re-scan */
+      DB2_KB_INGEST_PRIO_INTERACTIVE = 10 /* an explicit ingest request */
+   } db2_kb_ingest_priority_t;
+
    int db2_kb_ingest_queue_enqueue(const char *project, const char *root_path,
-                                   const char *workspace, int force);
+                                   const char *workspace, int force, int priority);
    int db2_kb_ingest_queue_claim_next(db2_kb_ingest_job_t *out);
    int db2_kb_ingest_queue_complete(int64_t job_id, int files_indexed, int chunks_added,
                                     int embeddings_added);
@@ -339,6 +351,7 @@ extern "C"
                              size_t hash_cap, char *ingested_at_out, size_t ingested_at_cap);
    char *db2_kb_file_index_get_content(const char *project, const char *file_path);
    int db2_kb_file_index_delete_project(const char *project);
+   int db2_kb_file_index_delete_current_project(const char *project);
    cJSON *db2_kb_file_index_snapshot_json(const char *project);
 
    int db2_kb_service_async_queue_status(db2_kb_service_async_queue_stats_t *out);
@@ -354,6 +367,7 @@ extern "C"
    int db2_kb_service_collect_project_status(const char *project,
                                              db2_kb_service_project_status_t *out);
    int db2_kb_service_clear_project(const char *project);
+   int db2_kb_service_clear_current_project(const char *project);
    cJSON *db2_kb_service_learning_list_json(const char *state, const char *sink, int max_rows);
    cJSON *db2_kb_service_learning_get_json(int id);
    cJSON *db2_kb_service_learning_reject_json(int id);

@@ -196,14 +196,11 @@ static void tool_execute_worker(void *arg)
       run_cmd_set_cwd(use_cwd);
 
    /* Guardrail pre-check */
-   config_t cfg;
-   config_load(&cfg);
-
    session_state_t state;
    session_state_load(&state, sid);
 
    char msg[1024] = "";
-   int rc = pre_tool_check(tool, args, &state, config_guardrail_mode(&cfg), cwd, msg, sizeof(msg));
+   int rc = pre_tool_check(tool, args, &state, config_guardrail_mode(), cwd, msg, sizeof(msg));
    session_state_save(&state, sid);
 
    if (rc != 0)
@@ -471,15 +468,29 @@ static void chat_stream_worker_pooled(void *arg)
     * without a registry entry rather than failing it — the turn still has
     * intrinsic token/deadline bounds; the condition is logged. */
    turn_entry_t *cancel_entry = NULL;
+   atomic_int shutdown_cancel;
+   atomic_init(&shutdown_cancel, 0);
+   atomic_int *request_cancel = NULL;
    if (delta_session[0])
    {
       cancel_entry = turn_registry_publish(delta_session, delta_turn);
       if (cancel_entry)
+      {
          cctx->turn_entry = cancel_entry; /* owner is set inside publish, under the lock */
+         request_cancel = &cancel_entry->cancel;
+      }
+      else if (turn_registry_is_shutting_down())
+      {
+         /* A turn racing with shutdown is born cancelled. This local flag lives
+          * through chat_stream_worker and prevents a late unregistered provider
+          * call from escaping the shutdown drain. */
+         atomic_store(&shutdown_cancel, 1);
+         request_cancel = &shutdown_cancel;
+      }
       else
          LOG_WARN("chat", "turn registry rejected session %s; turn not cancellable", delta_session);
    }
-   agent_set_request_cancel(cancel_entry ? &cancel_entry->cancel : NULL);
+   agent_set_request_cancel(request_cancel);
 
    if (!locked && sid[0])
       presence_emit_turn_started(sid, turn_id);

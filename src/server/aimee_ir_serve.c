@@ -1,14 +1,14 @@
 /* aimee_ir_serve.c -- see aimee_ir_serve.h. */
 #include "aimee_ir_serve.h"
 
-#include "aimee_backend.h"
-#include "aimee_frontend.h"
+#include <aimee/translation/aimee_backend.h>
+#include <aimee/translation/aimee_frontend.h>
 #include "gw_stage_memory.h" /* ir_stage_memory + gw_stage_memory_enabled */
 #include "config.h"          /* config_load + config_module_enabled (modules.memory) */
-#include "aimee_ir_metrics.h"
+#include <aimee/ir/aimee_ir_metrics.h>
 #include "aimee.h"          /* size macros for agent_types.h */
 #include "agent_protocol.h" /* parsed_response_t (Slice 3 transitional adapter) */
-#include "aimee_ir.h"
+#include <aimee/ir/aimee_ir.h>
 #include "cJSON.h"
 
 #include <stdio.h>
@@ -47,8 +47,7 @@ int aimee_ir_stream_relay_enabled(void)
  * call site, mirroring the legacy gw_stage_slot_t catalogs. */
 static int ir_memory_enabled(void)
 {
-   config_t c;
-   int tri = (config_load(&c) == 0) ? c.module_memory : -1;
+   int tri = config_present() ? config_module_memory() : -1;
    return config_module_enabled(tri, gw_stage_memory_enabled());
 }
 

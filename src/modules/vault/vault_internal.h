@@ -103,6 +103,19 @@ typedef struct
     * reuse inherited provider locks, sessions, handles, or plaintext caches;
     * the process must exec before using custody again. */
    void (*after_fork_child)(void *ctx);
+   /* Read only process-local provider state.  This callback must not perform
+    * backend I/O and must honor timeout_ms while acquiring its own state lock.
+    * Kept last so legacy positional provider initializers remain compatible. */
+   int (*local_status)(void *ctx, unsigned timeout_ms);
+   /* Closed D3b authorization results (vault_custody_auth_result_t).  The
+    * preflight is read-only and generation-bound; typed_unseal publishes a KEK
+    * only on VAULT_CUSTODY_AUTHORIZED.  Kept last for source compatibility with
+    * legacy positional test providers. */
+   int (*authorization_preflight)(void *ctx, const void *secret, size_t secret_len,
+                                  uint64_t expected_generation);
+   int (*typed_unseal)(void *ctx, const void *secret, size_t secret_len);
+   int (*authorization_preflight_current)(void *ctx, const void *secret, size_t secret_len,
+                                          uint64_t *generation);
 } vault_custody_provider_t;
 
 /* ── Backend binders ──────────────────────────────────────────────────────────

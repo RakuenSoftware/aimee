@@ -33,6 +33,15 @@ extern "C"
       KB_PRIN_OIDC,  /* issuer-scoped OIDC subject (iss, sub) */
       KB_PRIN_CERT,  /* mTLS machine identity (cert_issuer, cert_serial) */
       KB_PRIN_OWNER, /* the owner/bearer principal (no-IdP single-org case) */
+      /* A local host account, authenticated by PAM. Its identity key is the BARE
+       * username — the fourth form the subject grammar already admits, alongside
+       * owner / oidc: / cert: — so there is no prefix to invent. `owner` is
+       * reserved within this form and the login route refuses it.
+       *
+       * A distinct kind rather than reusing KB_PRIN_OWNER because the two are not
+       * the same authority: owner is the single unscoped bearer, while a host
+       * account is one of many named subjects a grant can be written against. */
+      KB_PRIN_HOST,
    } kb_principal_kind_t;
 
    /* An authenticated principal. Opaque by convention: only the constructors
@@ -53,6 +62,14 @@ extern "C"
     * authenticated = 1. Returns 0 on success, -1 on invalid args. */
    int kb_principal_from_verify(const kb_verify_result_t *v, const char *issuer,
                                 kb_principal_t *out);
+
+   /* Build a principal for a local host account whose password PAM has just
+    * accepted. `username` must match the bare-username form of the subject
+    * grammar (db2_intent_bare_username) and must not be the reserved name `owner`;
+    * both are refused here as well as at the route, because a principal that
+    * cannot be a legal subject must never reach a tenant scope. Sets
+    * authenticated = 1. Returns 0 on success, -1 on invalid args. */
+   int kb_principal_from_host_account(const char *username, kb_principal_t *out);
 
    /* Build a machine principal from a verified mTLS peer certificate. `serial` is
     * normalized via kb_cert_serial_normalize(). Sets authenticated = 1. */

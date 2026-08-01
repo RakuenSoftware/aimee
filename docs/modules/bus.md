@@ -1,6 +1,6 @@
 # Event-bus module
 
-**Owner:** runtime core  
+**Owner:** runtime core
 **Paths:** `src/modules/bus/`, `server-go/bus/`
 
 ## Owns

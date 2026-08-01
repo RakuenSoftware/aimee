@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Panel, Badge, InlineStatus, Button } from "@rakuensoftware/smoothgui";
-import { FIELD_HELP, SECTION_HELP, RESTART_KEYS } from "./settingsHelp";
+import { FIELD_HELP, SECTION_HELP, RESTART_KEYS, OWNED_ELSEWHERE } from "./settingsHelp";
 import { resetAll as resetTutorials } from "../help/tutorialState";
 import { setDismissed as setSetupDismissed, requestOpenWizard } from "../setup/setupState";
 
@@ -9,7 +9,16 @@ import { setDismissed as setSetupDismissed, requestOpenWizard } from "../setup/s
  * GET /api/config (config.show); a change persists to aimee.yaml via POST
  * /api/config/set and takes effect on the next turn. The control is inferred
  * from the value's JSON type: boolean → toggle, number → number field, string →
- * text field. */
+ * text field.
+ *
+ * Keys the /api/settings allowlist declares as enums (kb_fusion_mode) render as
+ * a dropdown instead of free text, and save through /api/settings so its per-key
+ * validation still applies.
+ *
+ * This page lists the options NO other tab owns. Anything in OWNED_ELSEWHERE is
+ * configured by the tab that has the context to set it safely (see the notes on
+ * that map); the section header names that tab so the option is still findable.
+ * The key stays fully settable from aimee.yaml and the CLI either way. */
 
 type Val = boolean | number | string;
 
@@ -50,7 +59,7 @@ function category(key: string): string {
     [/^(provider|openai|anthropic|model|delegate|agent|roundtable|default_persona|persona)/, "Providers & delegates"],
     [/^(autonomous|cross_verify|max_iterations|reasoning|verify|autopilot|trigger)/, "Agent behavior"],
     [/^(learning|intelligence|calibrat|bandit)/, "Learning & intelligence"],
-    [/^(kb_curator|curator|synth|embed|rerank|extract|index)/, "Knowledge curation"],
+    [/^(kb_curator|curator|synth|embed|extract|index)/, "Knowledge curation"],
   ];
   for (const [re, name] of rules) if (re.test(key)) return name;
   return "Other";
@@ -72,6 +81,8 @@ export default function Settings() {
   // by config.show. Runtime keys are absent from this map. Drives the default-hidden
   // "advanced" surface so the everyday page shows only the operator-facing options.
   const [fieldGroups, setFieldGroups] = useState<Record<string, string>>({});
+  // key -> allowed values, for the config keys /api/settings declares as enums.
+  const [enumOptions, setEnumOptions] = useState<Record<string, string[]>>({});
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [filter, setFilter] = useState("");
@@ -86,6 +97,17 @@ export default function Settings() {
         setLoaded(true);
       })
       .catch(() => setLoaded(true));
+    // Enum options are advisory chrome: on failure the affected rows just fall
+    // back to a text input rather than blocking the page.
+    getJSON<{ fields?: { key: string; type: string; options?: string[] }[] }>("/api/settings")
+      .then((d) => {
+        const opts: Record<string, string[]> = {};
+        for (const f of d.fields || []) {
+          if (f.type === "enum" && f.options?.length) opts[f.key] = f.options;
+        }
+        setEnumOptions(opts);
+      })
+      .catch(() => setEnumOptions({}));
   }, []);
 
   useEffect(() => {
@@ -94,8 +116,12 @@ export default function Settings() {
 
   const save = useCallback(
     async (key: string) => {
+      // Enum keys go through /api/settings so its per-key validation (e.g.
+      // rejecting an unknown persona) still runs; both endpoints proxy the same
+      // /v1/config/set and return the same shape.
+      const url = enumOptions[key] ? "/api/settings" : "/api/config/set";
       const { status: st, data } = await postJSON<{ error?: string; notice?: string; value?: Val }>(
-        "/api/config/set",
+        url,
         { key, value: draft[key] },
       );
       if (st >= 200 && st < 300 && !data.error) {
@@ -107,7 +133,7 @@ export default function Settings() {
         setStatus({ kind: "err", msg: data.error || `save failed (${st})` });
       }
     },
-    [draft],
+    [draft, enumOptions],
   );
 
   // Group + filter the fields for rendering.
@@ -115,6 +141,10 @@ export default function Settings() {
     const q = filter.trim().toLowerCase();
     const keys = Object.keys(values)
       .filter((k) => {
+        // Owned by another tab: never listed here, not even under "Show advanced"
+        // or a search term — a second editable copy is exactly the problem this
+        // removes. The section header points at the owning tab instead.
+        if (OWNED_ELSEWHERE[k]) return false;
         // Everyday surface: hide deploy/advanced/dev keys unless the operator opts in.
         // A search term reveals matching off-surface keys regardless (so they stay findable).
         if (!showAdvanced && !q && fieldGroups[k]) return false;
@@ -136,15 +166,31 @@ export default function Settings() {
     return Object.entries(byCat).sort(([a], [b]) => a.localeCompare(b));
   }, [values, filter, fieldGroups, showAdvanced]);
 
-  // How many keys are currently hidden as off-surface (for the toggle label).
+  // Counts describe what this page governs, so options another tab owns are out
+  // of both (they are not "hidden advanced" — they are not this page's at all).
   const hiddenCount = useMemo(
-    () => (showAdvanced ? 0 : Object.keys(values).filter((k) => fieldGroups[k]).length),
+    () =>
+      showAdvanced
+        ? 0
+        : Object.keys(values).filter((k) => fieldGroups[k] && !OWNED_ELSEWHERE[k]).length,
     [values, fieldGroups, showAdvanced],
   );
   const runtimeCount = useMemo(
-    () => Object.keys(values).filter((k) => !fieldGroups[k]).length,
+    () => Object.keys(values).filter((k) => !fieldGroups[k] && !OWNED_ELSEWHERE[k]).length,
     [values, fieldGroups],
   );
+
+  // Where the options this page no longer lists actually live. Rendered as one
+  // always-visible line (not per section) so it survives a section disappearing
+  // entirely once every key in it moved to its owning tab.
+  const movedOwners = useMemo(() => {
+    const seen: string[] = [];
+    for (const k of Object.keys(values)) {
+      const owner = OWNED_ELSEWHERE[k];
+      if (owner && !seen.includes(owner)) seen.push(owner);
+    }
+    return seen.sort();
+  }, [values]);
 
   return (
     <div style={{ padding: 16, fontFamily: "system-ui", height: "100%", overflow: "auto" }}>
@@ -200,6 +246,13 @@ export default function Settings() {
         advanced-tuning, and dev-only options are hidden behind <em>Show advanced</em> (still
         settable, and any of them surfaces when you search). Each option is described below.
       </p>
+      {movedOwners.length > 0 && (
+        <p style={{ fontSize: 12, color: "#666", margin: "0 0 12px" }}>
+          Options owned by another tab are configured there, not here:{" "}
+          <strong>{movedOwners.join(" · ")}</strong>. Each option has one owner, so a value set in
+          its own tab is never silently overwritten by an edit made here.
+        </p>
+      )}
 
       {!loaded && <div style={{ color: "#888" }}>loading…</div>}
       {loaded && Object.keys(values).length === 0 && (
@@ -222,6 +275,7 @@ export default function Settings() {
                   value={draft[k]}
                   dirty={draft[k] !== values[k]}
                   group={fieldGroups[k]}
+                  options={enumOptions[k]}
                   onChange={(v) => setDraft((p) => ({ ...p, [k]: v }))}
                   onSave={() => save(k)}
                   onReset={() => setDraft((p) => ({ ...p, [k]: values[k] }))}
@@ -240,6 +294,7 @@ function SettingRow({
   value,
   dirty,
   group,
+  options,
   onChange,
   onSave,
   onReset,
@@ -248,6 +303,7 @@ function SettingRow({
   value: Val;
   dirty: boolean;
   group?: string;
+  options?: string[];
   onChange: (v: Val) => void;
   onSave: () => void;
   onReset: () => void;
@@ -256,7 +312,7 @@ function SettingRow({
   const needsRestart = RESTART_KEYS.has(fieldKey);
   // Off-surface classification badge (deploy/advanced/dev); runtime keys carry none.
   const groupTitle: Record<string, string> = {
-    deploy: "Deploy-time: set once when standing up the aimee-llm container; not tuned day-to-day.",
+    deploy: "Deploy-time: set once when standing up the stack; not tuned day-to-day.",
     advanced: "Advanced tuning: has a sensible default; rarely changed.",
     dev: "Dev-only: internal QA/dogfood knob.",
   };
@@ -302,7 +358,21 @@ function SettingRow({
         )}
       </div>
       <div style={{ flex: "0 0 auto", display: "flex", alignItems: "center", gap: 6, marginTop: 1 }}>
-        {typeof value === "boolean" ? (
+        {options ? (
+          <select
+            value={String(value ?? "")}
+            onChange={(e) => onChange(e.target.value)}
+            style={{ ...input, width: 220, fontFamily: "system-ui" }}
+          >
+            {/* Keep an out-of-list saved value selectable so the dropdown never
+             * silently rewrites it to the first option. */}
+            {(options.includes(String(value ?? "")) ? options : [String(value ?? ""), ...options]).map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
+        ) : typeof value === "boolean" ? (
           <Button
             size="sm"
             onClick={() => onChange(!value)}

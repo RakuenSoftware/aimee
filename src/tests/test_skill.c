@@ -7,7 +7,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "skill.h"
+#include <aimee/skills/skill.h>
 
 /* --- Helpers --- */
 

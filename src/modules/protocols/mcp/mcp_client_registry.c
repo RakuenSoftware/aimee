@@ -1,4 +1,4 @@
-#include "mcp_client_registry.h"
+#include "aimee/protocols/mcp/mcp_client_registry.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,6 +9,7 @@
 #include "mcp_osv_cache.h"
 #include "osv_check.h"
 #include "platform.h"
+#include "runtime_secret.h"
 
 #ifdef AIMEE_POSIX
 #include <pthread.h>
@@ -135,25 +136,25 @@ static cJSON *registry_copy_tool_locked(const char *client_name, const char *too
    return NULL;
 }
 
-static int registry_target_allowlisted(const config_t *cfg, const osv_target_t *target)
+static int registry_target_allowlisted(const osv_target_t *target)
 {
-   if (!cfg || !target || !target->ecosystem[0] || !target->name[0])
+   if (!target || !target->ecosystem[0] || !target->name[0])
       return 0;
 
    char key[256];
    snprintf(key, sizeof(key), "%s:%s", target->ecosystem, target->name);
-   for (int i = 0; i < cfg->mcp_osv_allow_count; i++)
+   for (int i = 0; i < config_mcp_osv_allow_count(); i++)
    {
-      if (strcmp(cfg->mcp_osv_allow[i], key) == 0)
+      if (strcmp(config_mcp_osv_allow(i), key) == 0)
          return 1;
    }
    return 0;
 }
 
-static int registry_osv_blocks_client(const config_t *cfg, const config_mcp_client_t *client)
+static int registry_osv_blocks_client(const config_mcp_client_t *client)
 {
-   if (!cfg || !client || !cfg->mcp_osv_enabled ||
-       client->transport != CONFIG_MCP_TRANSPORT_STDIO || client->command_count <= 0)
+   if (!client || !config_mcp_osv_enabled() || client->transport != CONFIG_MCP_TRANSPORT_STDIO ||
+       client->command_count <= 0)
       return 0;
 
    const char *argv[CONFIG_MCP_MAX_COMMAND_ARGS + 1];
@@ -165,9 +166,10 @@ static int registry_osv_blocks_client(const config_t *cfg, const config_mcp_clie
    if (osv_infer_target_from_argv(client->command_count, argv, &target) != 0)
       return 0;
 
-   osv_result_t result = osv_check_cached(
-       cfg->mcp_osv_endpoint, &target, cfg->mcp_osv_cache_ttl_hours, cfg->mcp_osv_offline, 10000);
-   int allowlisted = registry_target_allowlisted(cfg, &target);
+   osv_result_t result =
+       osv_check_cached(config_mcp_osv_endpoint(), &target, config_mcp_osv_cache_ttl_hours(),
+                        config_mcp_osv_offline(), 10000);
+   int allowlisted = registry_target_allowlisted(&target);
    if (allowlisted)
    {
       if (result.verdict == OSV_VERDICT_MALWARE)
@@ -186,19 +188,19 @@ static int registry_osv_blocks_client(const config_t *cfg, const config_mcp_clie
    if (result.verdict == OSV_VERDICT_MALWARE)
    {
       registry_warn(client->name, "%s %s:%s has malware advisories: %s",
-                    cfg->mcp_osv_enforce ? "blocked" : "shadow-block", target.ecosystem,
+                    config_mcp_osv_enforce() ? "blocked" : "shadow-block", target.ecosystem,
                     target.name, result.advisory_ids[0] ? result.advisory_ids : "MAL-*");
       (void)db1_mcp_osv_audit(client->name, target.ecosystem, target.name, target.version,
-                              "malware", cfg->mcp_osv_enforce ? "block" : "shadow_block",
+                              "malware", config_mcp_osv_enforce() ? "block" : "shadow_block",
                               result.advisory_ids);
-      return cfg->mcp_osv_enforce ? 1 : 0;
+      return config_mcp_osv_enforce() ? 1 : 0;
    }
    (void)db1_mcp_osv_audit(client->name, target.ecosystem, target.name, target.version,
                            result.verdict == OSV_VERDICT_CLEAN ? "clean" : "unknown", "allow",
                            result.advisory_ids);
    if (result.verdict == OSV_VERDICT_UNKNOWN)
    {
-      if (cfg->mcp_osv_offline)
+      if (config_mcp_osv_offline())
          registry_warn(client->name, "OSV offline/cache miss: allowing %s:%s", target.ecosystem,
                        target.name);
       else
@@ -208,7 +210,7 @@ static int registry_osv_blocks_client(const config_t *cfg, const config_mcp_clie
    return 0;
 }
 
-static int registry_start_client(const config_t *cfg, const config_mcp_client_t *client)
+static int registry_start_client(const config_mcp_client_t *client)
 {
    if (!client || !client->name[0])
       return -1;
@@ -224,7 +226,7 @@ static int registry_start_client(const config_t *cfg, const config_mcp_client_t 
       return -1;
    }
 
-   if (registry_osv_blocks_client(cfg, client))
+   if (registry_osv_blocks_client(client))
       return -1;
 
    mcp_transport_t *transport = NULL;
@@ -238,10 +240,11 @@ static int registry_start_client(const config_t *cfg, const config_mcp_client_t 
    }
    else if (client->transport == CONFIG_MCP_TRANSPORT_SSE)
    {
-      const char *bearer = NULL;
+      char bearer[4096] = "";
       if (client->bearer_token_env[0])
-         bearer = getenv(client->bearer_token_env);
-      transport = mcp_transport_sse_open(client->url, bearer);
+         (void)runtime_secret_get(client->bearer_token_env, bearer, sizeof(bearer));
+      transport = mcp_transport_sse_open(client->url, bearer[0] ? bearer : NULL);
+      runtime_secret_wipe(bearer, sizeof(bearer));
    }
 
    if (!transport)
@@ -273,11 +276,8 @@ static int registry_start_client(const config_t *cfg, const config_mcp_client_t 
    return 0;
 }
 
-int mcp_client_registry_boot(const config_t *cfg)
+int mcp_client_registry_boot(config_mcp_install_t host)
 {
-   if (!cfg)
-      return 0;
-
    REGISTRY_LOCK();
    if (g_registry_booted)
    {
@@ -292,8 +292,15 @@ int mcp_client_registry_boot(const config_t *cfg)
       g_registry_atexit_registered = 1;
    }
 
-   for (int i = 0; i < cfg->mcp_client_count; i++)
-      (void)registry_start_client(cfg, &cfg->mcp_clients[i]);
+   /* Boot only the clients this daemon hosts: aimee-server starts install:server
+    * plugins, aimee-kb starts install:kb plugins. A plugin is owned by exactly one
+    * daemon, so its tools resolve unambiguously. */
+   for (int i = 0; i < config_mcp_client_count(); i++)
+   {
+      config_mcp_client_t client;
+      if (config_mcp_client_at(i, &client) == 0 && client.install == host)
+         (void)registry_start_client(&client);
+   }
 
    g_registry_booted = 1;
    int count = g_registry_count;
@@ -507,4 +514,24 @@ int mcp_client_registry_call_tool(const char *qualified_name, const cJSON *args,
                                  err_buf, err_buf_len);
    REGISTRY_UNLOCK();
    return rc;
+}
+
+/* The transport kind serving a namespaced tool, for the audit `mode` field. Zero
+ * if the tool is not namespaced or its client is not live. Read under the registry
+ * lock so it does not race a concurrent shutdown. */
+mcp_transport_kind_t mcp_client_registry_transport_kind(const char *qualified_name)
+{
+   char client_name[64];
+   char tool_name[128];
+   if (split_namespaced_tool(qualified_name, client_name, sizeof(client_name), tool_name,
+                             sizeof(tool_name)) != 0)
+      return (mcp_transport_kind_t)0;
+
+   REGISTRY_LOCK();
+   int idx = registry_find_locked(client_name);
+   mcp_transport_kind_t kind = (idx >= 0 && g_registry[idx].session.transport)
+                                   ? g_registry[idx].session.transport->kind
+                                   : (mcp_transport_kind_t)0;
+   REGISTRY_UNLOCK();
+   return kind;
 }

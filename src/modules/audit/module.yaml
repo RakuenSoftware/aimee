@@ -1,0 +1,38 @@
+{
+  "descriptor_version": 1,
+  "id": "audit",
+  "dependencies": [
+    "config",
+    "module-runtime",
+    "vault"
+  ],
+  "runtime_toggle": {
+    "supported": false
+  },
+  "ownership_complete": true,
+  "sources": [
+    "src/modules/audit/audit_action.c",
+    "src/modules/audit/obs_bus.c",
+    "src/modules/audit/audit_ledger.c",
+    "src/modules/audit/audit_replay.c",
+    "src/modules/audit/audit_worm.c",
+    "src/modules/audit/audit_worm_chain.c"
+  ],
+  "public_headers": [
+    "src/modules/audit/include/aimee/audit/audit_action.h",
+    "src/modules/audit/include/aimee/audit/obs_bus.h",
+    "src/modules/audit/include/aimee/audit/audit_ledger.h",
+    "src/modules/audit/include/aimee/audit/audit_replay.h",
+    "src/modules/audit/include/aimee/audit/audit_worm.h",
+    "src/modules/audit/include/aimee/audit/audit_worm_chain.h"
+  ],
+  "tests": [
+    "src/tests/test_audit_action.c",
+    "src/tests/test_audit_ledger.c",
+    "src/tests/test_audit_worm.c",
+    "src/tests/test_audit_worm_chain.c"
+  ],
+  "docs": [
+    "docs/modules/audit.md"
+  ]
+}

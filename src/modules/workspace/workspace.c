@@ -2,6 +2,7 @@
 #include "aimee.h"
 #include "log.h"
 #include "workspace.h"
+#include "config_accessors.h"
 #include "index.h"
 #include "kb_client.h"
 #include "headers/branch_ownership.h"
@@ -10,11 +11,25 @@
 #include "headers/util.h"
 #include "report_enrichment.h" /* report_subject_from_project_root — canonical repo identity */
 #include "util_url.h"          /* util_url_workspace_parent — org/namespace parent */
+#include "workspace_manifest.h"
+#include "headers/platform_random.h"
 #include <dirent.h>
+#include <ctype.h>
+#include <fcntl.h>
 #include <stdint.h>
 #include <errno.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+#ifndef O_CLOEXEC
+#define O_CLOEXEC 0
+#endif
+#ifndef O_NOFOLLOW
+#define O_NOFOLLOW 0
+#endif
+#ifndef O_DIRECTORY
+#define O_DIRECTORY 0
+#endif
 
 /* --- recursive git discovery --- */
 
@@ -114,7 +129,12 @@ int workspace_discover_projects(const char *root, int max_depth, char projects[]
    return count;
 }
 
-int workspace_active_root(const config_t *cfg, const char *cwd, char *out, size_t out_len)
+/* Shared body. consult_workspaces selects the policy the old `cfg`/NULL argument
+ * used to encode: NULL meant "resolve from cwd alone", which two callers relied
+ * on deliberately so a non-repository cwd inside a configured workspace could not
+ * inherit that workspace's directory name as its project label. */
+static int workspace_active_root_impl(int consult_workspaces, const char *cwd, char *out,
+                                      size_t out_len)
 {
    if (!out || out_len == 0)
       return -1;
@@ -143,13 +163,14 @@ int workspace_active_root(const config_t *cfg, const char *cwd, char *out, size_
       char resolved_cwd[MAX_PATH_LEN];
       const char *cwd_abs = realpath(cwd, resolved_cwd) ? resolved_cwd : cwd;
 
-      if (cfg)
+      if (consult_workspaces)
       {
          int best = -1;
          size_t best_len = 0;
-         for (int i = 0; i < cfg->workspace_count; i++)
+         int workspace_count = config_workspace_count();
+         for (int i = 0; i < workspace_count; i++)
          {
-            const char *ws = cfg->workspaces[i];
+            const char *ws = config_workspaces(i);
             size_t ws_len = strlen(ws);
             if (ws_len == 0)
                continue;
@@ -165,7 +186,7 @@ int workspace_active_root(const config_t *cfg, const char *cwd, char *out, size_
          }
          if (best >= 0)
          {
-            snprintf(out, out_len, "%s", cfg->workspaces[best]);
+            snprintf(out, out_len, "%s", config_workspaces(best));
             return 0;
          }
       }
@@ -174,13 +195,239 @@ int workspace_active_root(const config_t *cfg, const char *cwd, char *out, size_
       return 0;
    }
 
-   if (cfg && cfg->workspace_count > 0 && cfg->workspaces[0][0])
+   if (consult_workspaces && config_workspace_count() > 0 && config_workspaces(0)[0])
    {
-      snprintf(out, out_len, "%s", cfg->workspaces[0]);
+      snprintf(out, out_len, "%s", config_workspaces(0));
       return 0;
    }
 
    return -1;
+}
+
+int workspace_active_root(const char *cwd, char *out, size_t out_len)
+{
+   return workspace_active_root_impl(1, cwd, out, out_len);
+}
+
+int workspace_active_root_from_cwd(const char *cwd, char *out, size_t out_len)
+{
+   return workspace_active_root_impl(0, cwd, out, out_len);
+}
+
+static int workspace_identity_value_ok(const char *id)
+{
+   if (!id || !id[0] || strlen(id) >= 128)
+      return 0;
+   for (const unsigned char *p = (const unsigned char *)id; *p; p++)
+      if (!(isalnum(*p) || *p == '.' || *p == '_' || *p == ':' || *p == '/' || *p == '@' ||
+            *p == '+' || *p == '-'))
+         return 0;
+   return 1;
+}
+
+static int workspace_copy_identity(char *out, size_t out_len, const char *id)
+{
+   if (!out)
+      return 0;
+   if (out_len == 0 || !id || strlen(id) >= out_len)
+      return -1;
+   snprintf(out, out_len, "%s", id);
+   return 0;
+}
+
+static int workspace_git_line(const char *root, const char *arg, char *out, size_t out_len)
+{
+   if (!root || !root[0] || !arg || !out || out_len == 0)
+      return -1;
+   out[0] = '\0';
+   const char *argv[] = {"git", "-C", root, "rev-parse", arg, NULL};
+   char *captured = NULL;
+   if (safe_exec_capture(argv, &captured, MAX_PATH_LEN * 2) != 0 || !captured)
+   {
+      free(captured);
+      return -1;
+   }
+   size_t n = strcspn(captured, "\r\n");
+   if (n >= out_len)
+      n = out_len - 1;
+   memcpy(out, captured, n);
+   out[n] = '\0';
+   free(captured);
+   return out[0] ? 0 : -1;
+}
+
+static void workspace_project_root(const char *cwd, char *out, size_t out_len)
+{
+   if (workspace_git_line(cwd, "--show-toplevel", out, out_len) == 0)
+      return;
+   char resolved[MAX_PATH_LEN];
+   snprintf(out, out_len, "%s", realpath(cwd, resolved) ? resolved : cwd);
+}
+
+static void workspace_manifest_repo_path(const char *manifest_dir, const manifest_repo_t *repo,
+                                         char *out, size_t out_len)
+{
+   if (repo->path[0])
+   {
+      if (repo->path[0] == '/')
+         snprintf(out, out_len, "%s", repo->path);
+      else
+         snprintf(out, out_len, "%s/%s", manifest_dir, repo->path);
+      return;
+   }
+   const char *base = strrchr(repo->url, '/');
+   base = base ? base + 1 : repo->url;
+   char name[256];
+   snprintf(name, sizeof(name), "%s", base);
+   size_t len = strlen(name);
+   if (len > 4 && strcmp(name + len - 4, ".git") == 0)
+      name[len - 4] = '\0';
+   snprintf(out, out_len, "%s/%s", manifest_dir, name);
+}
+
+/* Search the project and its workspace ancestors. A per-repository id wins;
+ * a top-level id applies only when the manifest directory is the project root,
+ * which prevents one workspace id from collapsing a multi-repo workspace. */
+static int workspace_manifest_identity(const char *project_root, char *out, size_t out_len)
+{
+   char dir[MAX_PATH_LEN];
+   snprintf(dir, sizeof(dir), "%s", project_root);
+   for (int depth = 0; depth <= MAX_WORKSPACE_DEPTH && dir[0]; depth++)
+   {
+      workspace_manifest_t manifest;
+      int load_rc = workspace_manifest_load(dir, &manifest);
+      if (load_rc == -2)
+         return -2;
+      if (load_rc == 0)
+      {
+         for (int i = 0; i < manifest.repo_count; i++)
+         {
+            if (!workspace_identity_value_ok(manifest.repos[i].id))
+               continue;
+            char declared[MAX_PATH_LEN], resolved[MAX_PATH_LEN];
+            workspace_manifest_repo_path(dir, &manifest.repos[i], declared, sizeof(declared));
+            const char *candidate = realpath(declared, resolved) ? resolved : declared;
+            if (strcmp(candidate, project_root) == 0)
+            {
+               snprintf(out, out_len, "%s", manifest.repos[i].id);
+               return 0;
+            }
+         }
+         if (strcmp(dir, project_root) == 0 && workspace_identity_value_ok(manifest.id))
+         {
+            snprintf(out, out_len, "%s", manifest.id);
+            return 0;
+         }
+      }
+      char *slash = strrchr(dir, '/');
+      if (!slash || slash == dir)
+         break;
+      *slash = '\0';
+   }
+   return -1;
+}
+
+static int workspace_read_project_id(const char *path, char *out, size_t out_len)
+{
+   int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+   if (fd < 0)
+      return -1;
+   struct stat st;
+   if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || (st.st_mode & 0077) != 0)
+   {
+      close(fd);
+      return -1;
+   }
+   char id[64];
+   ssize_t n = read(fd, id, sizeof(id) - 1);
+   close(fd);
+   if (n <= 0)
+      return -1;
+   id[n] = '\0';
+   id[strcspn(id, "\r\n")] = '\0';
+   if (strlen(id) != 36)
+      return -1;
+   for (size_t i = 0; id[i]; i++)
+   {
+      int hyphen = i == 8 || i == 13 || i == 18 || i == 23;
+      if ((hyphen && id[i] != '-') ||
+          (!hyphen && !((id[i] >= '0' && id[i] <= '9') || (id[i] >= 'a' && id[i] <= 'f'))))
+         return -1;
+   }
+   snprintf(out, out_len, "local:%s", id);
+   return 0;
+}
+
+static int workspace_fsync_dir(const char *path)
+{
+   int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_DIRECTORY);
+   if (fd < 0)
+      return -1;
+   int rc = fsync(fd);
+   close(fd);
+   return rc;
+}
+
+static int workspace_persisted_identity(const char *project_root, char *out, size_t out_len)
+{
+   char common[MAX_PATH_LEN] = "";
+   char dir[MAX_PATH_LEN];
+   char path[MAX_PATH_LEN];
+   if (workspace_git_line(project_root, "--git-common-dir", common, sizeof(common)) == 0)
+   {
+      if (common[0] == '/')
+         snprintf(dir, sizeof(dir), "%s", common);
+      else
+         snprintf(dir, sizeof(dir), "%s/%s", project_root, common);
+      snprintf(path, sizeof(path), "%s/aimee-project-id", dir);
+   }
+   else
+   {
+      snprintf(dir, sizeof(dir), "%s/.aimee", project_root);
+      struct stat st;
+      if (lstat(dir, &st) != 0)
+      {
+         if (mkdir(dir, 0700) != 0 && errno != EEXIST)
+            return -1;
+         if (workspace_fsync_dir(project_root) != 0)
+            return -1;
+      }
+      else if (!S_ISDIR(st.st_mode) || S_ISLNK(st.st_mode))
+         return -1;
+      snprintf(path, sizeof(path), "%s/project-id", dir);
+   }
+
+   if (workspace_read_project_id(path, out, out_len) == 0)
+      return 0;
+
+   unsigned char raw[16];
+   if (platform_random_bytes(raw, sizeof(raw)) != 0)
+      return -1;
+   raw[6] = (unsigned char)((raw[6] & 0x0f) | 0x40); /* RFC 4122 v4 */
+   raw[8] = (unsigned char)((raw[8] & 0x3f) | 0x80);
+   char id[37];
+   snprintf(id, sizeof(id), "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+            raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7], raw[8], raw[9], raw[10],
+            raw[11], raw[12], raw[13], raw[14], raw[15]);
+   int fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+   if (fd >= 0)
+   {
+      size_t len = strlen(id);
+      int ok = write(fd, id, len) == (ssize_t)len && write(fd, "\n", 1) == 1 && fsync(fd) == 0;
+      close(fd);
+      if (!ok)
+      {
+         unlink(path);
+         workspace_fsync_dir(dir);
+         return -1;
+      }
+      if (workspace_fsync_dir(dir) != 0)
+         return -1;
+   }
+   else if (errno != EEXIST)
+      return -1;
+
+   return workspace_read_project_id(path, out, out_len);
 }
 
 int workspace_repo_identity(const char *cwd, char *project_out, size_t project_len,
@@ -193,17 +440,41 @@ int workspace_repo_identity(const char *cwd, char *project_out, size_t project_l
    if (!cwd || !cwd[0])
       return -1;
 
-   /* Canonical repo identity: reads `origin` and normalizes any transport/case
-    * to https://host/owner/repo; a repo with no usable remote falls back to a
-    * stable local:<repo-root> subject. */
+   char project_root[MAX_PATH_LEN];
+   workspace_project_root(cwd, project_root, sizeof(project_root));
+
+   char identity[512] = "";
+   int manifest_rc = workspace_manifest_identity(project_root, identity, sizeof(identity));
+   if (manifest_rc == 0)
+   {
+      if (workspace_copy_identity(project_out, project_len, identity) != 0 ||
+          workspace_copy_identity(workspace_out, workspace_len, identity) != 0)
+         goto fail;
+      return 0;
+   }
+   if (manifest_rc == -2)
+      goto fail;
+
+   /* Canonical forge identity: reads the configured remote and normalizes any
+    * transport/case to https://host/owner/repo. Path-derived local identities
+    * are deliberately replaced by a persisted UUID below. */
    report_subject_t subj;
-   if (report_subject_from_project_root(cwd, &subj) != 0 || !subj.id[0])
-      return -1;
+   int remote_identity = report_subject_from_project_root(project_root, &subj) == 0 && subj.id[0] &&
+                         strncmp(subj.id, "local:", 6) != 0;
+   if (!remote_identity)
+   {
+      if (workspace_persisted_identity(project_root, identity, sizeof(identity)) != 0)
+         goto fail;
+      if (workspace_copy_identity(project_out, project_len, identity) != 0 ||
+          workspace_copy_identity(workspace_out, workspace_len, identity) != 0)
+         goto fail;
+      return 0;
+   }
 
    /* Project scope = the repository itself, not its checkout path, so clones on
     * different machines share one scope. */
-   if (project_out && project_len > 0)
-      snprintf(project_out, project_len, "%s", subj.id);
+   if (workspace_copy_identity(project_out, project_len, subj.id) != 0)
+      goto fail;
 
    /* Workspace scope = the org/namespace parent (https://host/owner) when the
     * identity has one; local-only repos have no parent, so scope the workspace
@@ -211,25 +482,34 @@ int workspace_repo_identity(const char *cwd, char *project_out, size_t project_l
    if (workspace_out && workspace_len > 0)
    {
       char *parent = util_url_workspace_parent(subj.id);
-      snprintf(workspace_out, workspace_len, "%s", parent ? parent : subj.id);
+      int copy_rc =
+          workspace_copy_identity(workspace_out, workspace_len, parent ? parent : subj.id);
       free(parent);
+      if (copy_rc != 0)
+         goto fail;
    }
    return 0;
+
+fail:
+   if (project_out && project_len > 0)
+      project_out[0] = '\0';
+   if (workspace_out && workspace_len > 0)
+      workspace_out[0] = '\0';
+   return -1;
 }
 
-void workspace_repo_index_keys(const char *root, const char *fallback_workspace, char *name_out,
-                               size_t name_len, char *ws_out, size_t ws_len)
+int workspace_repo_index_keys(const char *root, const char *fallback_workspace, char *name_out,
+                              size_t name_len, char *ws_out, size_t ws_len)
 {
+   (void)fallback_workspace;
    if (workspace_repo_identity(root, name_out, name_len, ws_out, ws_len) == 0 && name_out &&
        name_out[0])
-      return;
-
-   /* Non-repo root: legacy basename project key + the configured workspace. */
-   const char *base = root ? strrchr(root, '/') : NULL;
+      return 0;
    if (name_out && name_len > 0)
-      snprintf(name_out, name_len, "%s", base ? base + 1 : (root ? root : ""));
+      name_out[0] = '\0';
    if (ws_out && ws_len > 0)
-      snprintf(ws_out, ws_len, "%s", fallback_workspace ? fallback_workspace : "");
+      ws_out[0] = '\0';
+   return -1;
 }
 
 /* --- context generation --- */
@@ -288,10 +568,9 @@ static const char *skip_frontmatter(const char *content)
 }
 #endif
 
-char *workspace_build_context_from_config(const config_t *cfg)
+char *workspace_build_context_from_config(void)
 {
 #ifdef AIMEE_DB1_DISABLED
-   (void)cfg;
    return NULL;
 #else
    size_t bufsize = 64 * 1024;
@@ -317,9 +596,10 @@ char *workspace_build_context_from_config(const config_t *cfg)
    int pcount = kb_client_index_list(projects, 256);
 
    /* Group projects by workspace and emit context */
-   for (int w = 0; w < cfg->workspace_count; w++)
+   int workspace_count = config_workspace_count();
+   for (int w = 0; w < workspace_count; w++)
    {
-      const char *ws_root = cfg->workspaces[w];
+      const char *ws_root = config_workspaces(w);
       size_t ws_len = strlen(ws_root);
 
       /* Find projects belonging to this workspace */
@@ -383,10 +663,12 @@ char *workspace_build_context_from_config(const config_t *cfg)
    for (int p = 0; p < pcount; p++)
    {
       int found_ws = 0;
-      for (int w = 0; w < cfg->workspace_count; w++)
+      int ws_n = config_workspace_count();
+      for (int w = 0; w < ws_n; w++)
       {
-         size_t ws_len = strlen(cfg->workspaces[w]);
-         if (strncmp(projects[p].root, cfg->workspaces[w], ws_len) == 0 &&
+         const char *ws = config_workspaces(w);
+         size_t ws_len = strlen(ws);
+         if (strncmp(projects[p].root, ws, ws_len) == 0 &&
              (projects[p].root[ws_len] == '/' || projects[p].root[ws_len] == '\0'))
          {
             found_ws = 1;
@@ -433,16 +715,13 @@ char *resolve_proposal_path(const char *proposal)
       return realpath(proposal, NULL);
 
    /* 2. Try from config workspaces */
-   config_t cfg;
-   if (config_load(&cfg) == 0)
+   int workspace_count = config_workspace_count();
+   for (int w = 0; w < workspace_count; w++)
    {
-      for (int w = 0; w < cfg.workspace_count; w++)
-      {
-         char path[MAX_PATH_LEN];
-         snprintf(path, sizeof(path), "%s/%s", cfg.workspaces[w], proposal);
-         if (access(path, R_OK) == 0)
-            return realpath(path, NULL);
-      }
+      char path[MAX_PATH_LEN];
+      snprintf(path, sizeof(path), "%s/%s", config_workspaces(w), proposal);
+      if (access(path, R_OK) == 0)
+         return realpath(path, NULL);
    }
 
    /* 3. Search docs/proposals/ subdirectories for the filename */
@@ -464,9 +743,9 @@ char *resolve_proposal_path(const char *proposal)
          return realpath(search_path, NULL);
 
       /* Relative to each workspace root */
-      for (int w = 0; w < cfg.workspace_count; w++)
+      for (int w = 0; w < workspace_count; w++)
       {
-         snprintf(search_path, sizeof(search_path), "%s/docs/proposals/%s/%s", cfg.workspaces[w],
+         snprintf(search_path, sizeof(search_path), "%s/docs/proposals/%s/%s", config_workspaces(w),
                   subdirs[i], filename);
          if (access(search_path, R_OK) == 0)
             return realpath(search_path, NULL);
@@ -676,7 +955,8 @@ static void worktree_registry_paths(const char *git_root, char *repo_path, size_
 }
 
 static void worktree_registry_append(const char *path, const char *git_root, const char *wt_path,
-                                     const char *branch, const char *sid, const char *work_name)
+                                     const char *branch, const char *sid, const char *work_name,
+                                     const char *base_branch)
 {
    if (!path || !path[0])
       return;
@@ -693,13 +973,19 @@ static void worktree_registry_append(const char *path, const char *git_root, con
    FILE *f = fopen(path, "a");
    if (!f)
       return;
-   fprintf(f, "%s\t%s\t%s\t%s\t%s\n", git_root ? git_root : "", wt_path ? wt_path : "",
-           branch ? branch : "", sid ? sid : "", work_name ? work_name : "");
+   /* base_branch is the 6th column: the ref this worktree's branch was cut from.
+    * The attention guard reads it to enforce that a PRIMARY session is rooted on the
+    * default branch and a DELEGATE on its parent's branch. It is written HERE, by the
+    * launcher, precisely because the guarded agent cannot forge it -- unlike an env var,
+    * which an LLM can set on any command. */
+   fprintf(f, "%s\t%s\t%s\t%s\t%s\t%s\n", git_root ? git_root : "", wt_path ? wt_path : "",
+           branch ? branch : "", sid ? sid : "", work_name ? work_name : "",
+           base_branch ? base_branch : "");
    fclose(f);
 }
 
 void worktree_registry_record(const char *git_root, const char *wt_path, const char *branch,
-                              const char *sid, const char *work_name)
+                              const char *sid, const char *work_name, const char *base_branch)
 {
    if (!git_root || !git_root[0] || !wt_path || !wt_path[0])
       return;
@@ -707,8 +993,8 @@ void worktree_registry_record(const char *git_root, const char *wt_path, const c
    char repo_path[MAX_PATH_LEN], global_path[MAX_PATH_LEN];
    worktree_registry_paths(git_root, repo_path, sizeof(repo_path), global_path,
                            sizeof(global_path));
-   worktree_registry_append(repo_path, git_root, wt_path, branch, sid, work_name);
-   worktree_registry_append(global_path, git_root, wt_path, branch, sid, work_name);
+   worktree_registry_append(repo_path, git_root, wt_path, branch, sid, work_name, base_branch);
+   worktree_registry_append(global_path, git_root, wt_path, branch, sid, work_name, base_branch);
 }
 
 static void worktree_registry_remove_from_file(const char *path, const char *wt_path)
@@ -881,17 +1167,107 @@ int worktree_find_branch_registered(const char *branch, char *out_dir, size_t ou
  * Callers that want a specific base (delegates inheriting a parent, or the
  * session-checkout path that bases on origin/<primary>) pass base_ref instead
  * and never reach here. */
-void worktree_detect_base_branch(const char *git_root, char *buf, size_t buf_len)
-{
-   if (!git_root || !buf || buf_len == 0)
-      return;
-   snprintf(buf, buf_len, "HEAD"); /* safe default */
+/* Resolve the base ref for a NEW session worktree.
+ *
+ * Order, in full:
+ *   1. CONFIGURED  session_worktree_base / AIMEE_SESSION_WORKTREE_BASE, when it names an
+ *                  explicit ref. Verified to exist rather than handed to git blind.
+ *   2. DEFAULT     the remote's advertised default branch (origin/HEAD), fetched fresh.
+ *   3. main
+ *   4. master
+ * Each of 2-4 prefers the remote-tracking ref (origin/<x>) and accepts the local branch
+ * only when no remote-tracking ref exists, so a repo WITH a remote never silently starts
+ * from a stale local copy.
+ *
+ * What is deliberately NOT in the chain: the currently checked-out branch. The old code
+ * ended at `rev-parse --abbrev-ref HEAD`, so when the shared checkout happened to sit on
+ * some session or feature branch, every new session was cut from it and silently
+ * inherited unmerged work it did not author and could not separate from its own. main and
+ * master are dumb fallbacks but they are STABLE; "whatever is checked out" is not.
+ *
+ * Returns 0 and fills `buf`, or -1 with `buf` emptied when nothing resolves. */
 
-   char cmd[MAX_PATH_LEN + 128];
+/* Resolve one candidate branch NAME to a usable ref, preferring origin/<name>.
+ * Returns 1 and fills out on success. */
+static int wt_resolve_candidate(const char *git_root, const char *name, char *out, size_t outlen)
+{
+   if (!name || !name[0])
+      return 0;
+   char cmd[MAX_PATH_LEN + 160];
    int rc;
 
-   /* Resolve the default branch NAME (short, e.g. "main"). Prefer origin/HEAD;
-    * symbolic-ref --short yields "origin/main", so strip the remote prefix. */
+   char remote_ref[160];
+   snprintf(remote_ref, sizeof(remote_ref), "origin/%s", name);
+   snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse --verify --quiet '%s' >/dev/null 2>&1",
+            git_root, remote_ref);
+   free(run_cmd(cmd, &rc));
+   if (rc == 0)
+   {
+      snprintf(out, outlen, "%s", remote_ref);
+      return 1;
+   }
+
+   snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse --verify --quiet '%s' >/dev/null 2>&1",
+            git_root, name);
+   free(run_cmd(cmd, &rc));
+   if (rc == 0)
+   {
+      snprintf(out, outlen, "%s", name);
+      return 1;
+   }
+   return 0;
+}
+
+int worktree_detect_base_branch(const char *git_root, char *buf, size_t buf_len)
+{
+   if (!git_root || !buf || buf_len == 0)
+      return -1;
+   buf[0] = '\0';
+
+   char cmd[MAX_PATH_LEN + 160];
+   int rc;
+
+   /* ---- 1. configured ---- */
+   char mode[64] = "";
+   const char *env_mode = getenv("AIMEE_SESSION_WORKTREE_BASE");
+   if (env_mode && env_mode[0])
+      snprintf(mode, sizeof(mode), "%s", env_mode);
+   else
+   {
+      const char *cfg_mode = config_session_worktree_base();
+      snprintf(mode, sizeof(mode), "%s", (cfg_mode && cfg_mode[0]) ? cfg_mode : "remote_default");
+   }
+
+   if (strcmp(mode, "current") == 0)
+   {
+      /* Only reachable by explicit opt-in, for offline/detached workflows that accept
+       * inheriting the source checkout's branch. Never a fallback. */
+      snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse --abbrev-ref HEAD 2>/dev/null", git_root);
+      char *cur = run_cmd(cmd, &rc);
+      if (rc == 0 && cur && cur[0])
+      {
+         size_t l = strlen(cur);
+         while (l && (cur[l - 1] == '\n' || cur[l - 1] == '\r'))
+            cur[--l] = '\0';
+         if (cur[0])
+            snprintf(buf, buf_len, "%s", cur);
+      }
+      free(cur);
+      return buf[0] ? 0 : -1;
+   }
+   if (strcmp(mode, "remote_default") != 0 && strcmp(mode, "local_default") != 0)
+   {
+      snprintf(cmd, sizeof(cmd),
+               "git -C '%s' rev-parse --verify --quiet '%s^{commit}' >/dev/null 2>&1", git_root,
+               mode);
+      free(run_cmd(cmd, &rc));
+      if (rc != 0)
+         return -1; /* an explicit ref that does not exist is an operator error */
+      snprintf(buf, buf_len, "%s", mode);
+      return 0;
+   }
+
+   /* ---- 2. the remote's advertised default ---- */
    char def[96] = {0};
    snprintf(cmd, sizeof(cmd),
             "git -C '%s' symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null", git_root);
@@ -899,7 +1275,7 @@ void worktree_detect_base_branch(const char *git_root, char *buf, size_t buf_len
    if (rc == 0 && out && out[0])
    {
       size_t len = strlen(out);
-      while (len > 0 && (out[len - 1] == '\n' || out[len - 1] == '\r' || out[len - 1] == ' '))
+      while (len && (out[len - 1] == '\n' || out[len - 1] == '\r' || out[len - 1] == ' '))
          out[--len] = '\0';
       const char *name = out;
       if (strncmp(name, "origin/", 7) == 0)
@@ -909,68 +1285,58 @@ void worktree_detect_base_branch(const char *git_root, char *buf, size_t buf_len
    }
    free(out);
 
-   /* Fall back to a common local default branch when origin/HEAD is unset. */
+   /* origin/HEAD is unset on repos whose remote was added after clone -- repair once. */
    if (!def[0])
    {
-      const char *candidates[] = {"main", "master", "trunk"};
-      for (int b = 0; b < 3; b++)
+      const char *setargv[] = {"remote", "set-head", "origin", "-a", NULL};
+      git_net_exec(git_root, setargv, NULL, 0);
+      snprintf(cmd, sizeof(cmd),
+               "git -C '%s' symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null", git_root);
+      out = run_cmd(cmd, &rc);
+      if (rc == 0 && out && out[0])
       {
-         snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse --verify --quiet '%s' >/dev/null 2>&1",
-                  git_root, candidates[b]);
-         char *cand_out = run_cmd(cmd, &rc);
-         free(cand_out);
-         if (rc == 0)
-         {
-            snprintf(def, sizeof(def), "%s", candidates[b]);
-            break;
-         }
+         size_t len = strlen(out);
+         while (len && (out[len - 1] == '\n' || out[len - 1] == '\r' || out[len - 1] == ' '))
+            out[--len] = '\0';
+         const char *name = out;
+         if (strncmp(name, "origin/", 7) == 0)
+            name += 7;
+         if (name[0])
+            snprintf(def, sizeof(def), "%s", name);
       }
+      free(out);
    }
 
    if (def[0])
    {
-      /* Refresh the default branch from origin so the worktree starts from the
-       * latest upstream, not a stale local copy. Best-effort and hang-proof
-       * (git_net_exec bounds the wall clock): a remote-less or offline repo just
-       * leaves the existing refs untouched. */
+      /* Start from the latest upstream. Best-effort and hang-proof; offline leaves the
+       * existing remote-tracking ref in place. */
       const char *fetch_argv[] = {"fetch", "--quiet", "origin", def, NULL};
       git_net_exec(git_root, fetch_argv, NULL, 0);
 
-      /* Prefer the freshly fetched remote-tracking ref; fall back to the local
-       * branch when there is no upstream (purely local repo). */
-      char remote_ref[128];
-      snprintf(remote_ref, sizeof(remote_ref), "origin/%s", def);
-      snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse --verify --quiet '%s' >/dev/null 2>&1",
-               git_root, remote_ref);
-      free(run_cmd(cmd, &rc));
-      if (rc == 0)
+      if (strcmp(mode, "local_default") == 0)
       {
-         snprintf(buf, buf_len, "%s", remote_ref);
-         return;
+         snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse --verify --quiet '%s' >/dev/null 2>&1",
+                  git_root, def);
+         free(run_cmd(cmd, &rc));
+         if (rc == 0)
+         {
+            snprintf(buf, buf_len, "%s", def);
+            return 0;
+         }
       }
-
-      snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse --verify --quiet '%s' >/dev/null 2>&1",
-               git_root, def);
-      free(run_cmd(cmd, &rc));
-      if (rc == 0)
-      {
-         snprintf(buf, buf_len, "%s", def);
-         return;
-      }
+      else if (wt_resolve_candidate(git_root, def, buf, buf_len))
+         return 0;
    }
 
-   /* Last resort: the current branch (may be detached -> stays "HEAD"). */
-   snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse --abbrev-ref HEAD 2>/dev/null", git_root);
-   out = run_cmd(cmd, &rc);
-   if (rc == 0 && out && out[0])
-   {
-      size_t len = strlen(out);
-      while (len > 0 && (out[len - 1] == '\n' || out[len - 1] == '\r'))
-         out[--len] = '\0';
-      if (len > 0 && strcmp(out, "HEAD") != 0)
-         snprintf(buf, buf_len, "%s", out);
-   }
-   free(out);
+   /* ---- 3. main, then 4. master ---- */
+   if (wt_resolve_candidate(git_root, "main", buf, buf_len))
+      return 0;
+   if (wt_resolve_candidate(git_root, "master", buf, buf_len))
+      return 0;
+
+   buf[0] = '\0';
+   return -1;
 }
 
 static int worktree_create_sibling_at_ref(const char *git_root, const char *sid,
@@ -1001,7 +1367,7 @@ static int worktree_create_sibling_at_ref(const char *git_root, const char *sid,
       struct stat git_st;
       if (stat(git_file, &git_st) == 0)
       {
-         worktree_registry_record(git_root, wt_path, branch_name, sid, work_name);
+         worktree_registry_record(git_root, wt_path, branch_name, sid, work_name, base_ref);
          return 0; /* already exists and valid */
       }
 
@@ -1020,7 +1386,18 @@ static int worktree_create_sibling_at_ref(const char *git_root, const char *sid,
        * branch so a fresh session always starts from there rather than from
        * whatever branch the source checkout happens to have checked out.
        * Falls back to main / master / trunk / HEAD when no default is known. */
-      worktree_detect_base_branch(git_root, base_branch, sizeof(base_branch));
+      /* Remote default by policy. A hard failure here is deliberate: guessing a base
+       * is what let sessions inherit another session's branch. */
+      if (worktree_detect_base_branch(git_root, base_branch, sizeof(base_branch)) != 0)
+      {
+         fprintf(stderr,
+                 "aimee: cannot resolve the session worktree base for '%s'. The default is the "
+                 "REMOTE default branch (origin/HEAD); it is unset or unreachable here. Fix the "
+                 "remote (git remote set-head origin -a) or set session_worktree_base / "
+                 "AIMEE_SESSION_WORKTREE_BASE to an explicit ref.\n",
+                 git_root);
+         return -1;
+      }
    }
 
    char wt_parent[MAX_PATH_LEN];
@@ -1050,7 +1427,7 @@ static int worktree_create_sibling_at_ref(const char *git_root, const char *sid,
    {
       fprintf(stderr, "aimee: created worktree at %s\n", wt_path);
       free(out);
-      worktree_registry_record(git_root, wt_path, branch_name, sid, work_name);
+      worktree_registry_record(git_root, wt_path, branch_name, sid, work_name, base_branch);
 
       /* Register branch ownership so other sessions can't write to it.
        * Use the main repo root (git_root), not the worktree path. */
@@ -1074,7 +1451,7 @@ static int worktree_create_sibling_at_ref(const char *git_root, const char *sid,
       {
          LOG_INFO("workspace", "worktree '%s' already present (creation race) - reusing", wt_path);
          free(out);
-         worktree_registry_record(git_root, wt_path, branch_name, sid, work_name);
+         worktree_registry_record(git_root, wt_path, branch_name, sid, work_name, base_branch);
          return 0;
       }
    }
@@ -1094,7 +1471,7 @@ static int worktree_create_sibling_at_ref(const char *git_root, const char *sid,
       fprintf(stderr, "aimee: created worktree at %s (reused branch %s)\n", wt_path, branch_name);
       free(out);
       free(out2);
-      worktree_registry_record(git_root, wt_path, branch_name, sid, work_name);
+      worktree_registry_record(git_root, wt_path, branch_name, sid, work_name, base_branch);
 #ifndef AIMEE_DB1_DISABLED
       mcp_git_branch_own_register(git_root, branch_name);
 #endif
@@ -1240,7 +1617,7 @@ int worktree_create_sibling_on_branch(const char *git_root, const char *sid, con
       struct stat git_st;
       if (stat(git_file, &git_st) == 0)
       {
-         worktree_registry_record(git_root, wt_path, branch, sid, work_name);
+         worktree_registry_record(git_root, wt_path, branch, sid, work_name, branch);
          return 0;
       }
       rmdir(wt_path);
@@ -1265,7 +1642,8 @@ int worktree_create_sibling_on_branch(const char *git_root, const char *sid, con
    {
       fprintf(stderr, "aimee: created worktree at %s on branch %s\n", wt_path, branch);
       free(out);
-      worktree_registry_record(git_root, wt_path, branch, sid, work_name);
+      /* Attaching an EXISTING branch: the worktree is rooted on that branch itself. */
+      worktree_registry_record(git_root, wt_path, branch, sid, work_name, branch);
 #ifndef AIMEE_DB1_DISABLED
       mcp_git_branch_own_register(git_root, branch);
 #endif

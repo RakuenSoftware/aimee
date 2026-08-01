@@ -19,9 +19,7 @@ static int css_render_cmd_adapter(const char *html, const char *css, char **out_
       *out_json = NULL;
    if (err)
       *err = NULL;
-
-   config_t cfg;
-   if (config_load(&cfg) != 0 || !cfg.css_render_command[0])
+   if (!config_present() || !config_css_render_command()[0])
    {
       if (err)
          *err = strdup("css_render_command not configured");
@@ -40,7 +38,7 @@ static int css_render_cmd_adapter(const char *html, const char *css, char **out_
 
    char *out = NULL;
    size_t out_len = 0;
-   int rc = platform_exec_pipe(cfg.css_render_command, input, strlen(input), &out, &out_len);
+   int rc = platform_exec_pipe(config_css_render_command(), input, strlen(input), &out, &out_len);
    free(input);
 
    if (rc != 0)
@@ -70,12 +68,11 @@ static int css_render_cmd_adapter(const char *html, const char *css, char **out_
 
 int css_render_cmd_register(void)
 {
-   config_t cfg;
-   if (config_load(&cfg) != 0)
+   if (!config_present())
       return 0;
-   if (!cfg.css_style_graph_enabled || !cfg.css_render_command[0])
+   if (!config_css_style_graph_enabled() || !config_css_render_command()[0])
       return 0;
    css_render_oracle_set_adapter(css_render_cmd_adapter);
-   LOG_INFO("css_render", "registered command render backend: %s", cfg.css_render_command);
+   LOG_INFO("css_render", "registered command render backend: %s", config_css_render_command());
    return 1;
 }

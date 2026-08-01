@@ -3,8 +3,8 @@
 # testing branch can be deployed/validated (e.g. on .254) WITHOUT promoting to
 # main.
 #
-# Builds the split images (aimee-server, aimee-kb) so a split compose stack (the
-# .254 layout: postgres + aimee-llm + aimee-kb + aimee-server) can pull `:testing`.
+# Builds the split images plus the isolated one-shot authority bootstrap so a
+# managed stack can pull a single coherent `:testing` channel.
 # Versioned + `:latest` publishing of the full image set
 # stays owned by main (auto-release.yml -> publish-images.yml). Keeping testing on
 # a `:testing` tag — never a version number — avoids confusing a tested-but-
@@ -18,15 +18,19 @@ on:
     # Only rebuild when something that affects the image changes.
     paths:
       - "src/**"
+      # The Go WFE/API service and browser runtime are compiled into aimee-server.
+      # Go-only fixes must publish a deployable testing image just like C changes.
+      - "server-go/**"
+      - "runtime-web/**"
       - "config/**"
       - "deploy/container/**"
       - "scripts/**"
       # The images bundle the webchat UI (frontend/ SPA + webchat/ Go server) —
       # see the frontend-build/webchat-build stages in Dockerfile.server.
       - "frontend/**"
-      - "webchat/**"
       - "Dockerfile"
       - "Dockerfile.server"
+      - "Dockerfile.authority-bootstrap"
       - ".github/workflows/publish-testing.yml"
   workflow_dispatch:
 
@@ -51,6 +55,7 @@ jobs:
         image:
           - { name: aimee-server,    dockerfile: Dockerfile.server }
           - { name: aimee-kb,        dockerfile: Dockerfile }
+          - { name: aimee-authority-bootstrap, dockerfile: Dockerfile.authority-bootstrap }
     steps:
       - uses: actions/checkout@v4
 
@@ -82,13 +87,12 @@ jobs:
           # builds are fast and never start the LTO C build from scratch.
           cache-from: type=gha,scope=${{ matrix.image.name }}-amd64
           cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}-amd64
-          # WITH_WEBCHAT bundles the browser UI (default for aimee-server; the
-          # aimee-kb image ignores it). WITH_LLM=0: no LLM is bundled — the deploy
-          # stack runs a separate, profile-gated aimee-llm container instead (see
-          # compose.server.yaml).
+          # WITH_RUNTIME_WEB bundles the browser UI (default for aimee-server; the
+          # aimee-kb image ignores it). The kb embeds in-container; synth resolves an
+          # external endpoint.
           build-args: |
             AIMEE_VERSION=testing-${{ env.SHA7 }}
-            WITH_WEBCHAT=1
+            WITH_RUNTIME_WEB=1
             WITH_LLM=0
           tags: |
             ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }}:testing

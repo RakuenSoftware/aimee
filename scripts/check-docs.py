@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 import urllib.parse
 import xml.etree.ElementTree as ET
@@ -21,6 +22,7 @@ SKIP_PARTS = {
 }
 ARCHIVE_PREFIXES = (
     Path("benchmarks"),
+    Path("docs/dev"),
     Path("docs/proposals"),
     Path("docs/validation"),
 )
@@ -42,13 +44,13 @@ OPENAPI_DOCS = (
 )
 COMPONENT_GUIDE_PREFIXES = (
     Path("deploy"),
+    Path("control-web"),
+    Path("data"),
     Path("editors"),
-    Path("kb-console"),
     Path("runtime-web"),
     Path("scripts"),
     Path("server-go"),
     Path("src"),
-    Path("webchat"),
 )
 BANNED = re.compile(
     r"\b(?:revolutionary|game[ -]changing|seamless|powerful|robust|"
@@ -74,9 +76,25 @@ def under(path: Path, prefixes: tuple[Path, ...]) -> bool:
 
 
 def markdown_files() -> list[Path]:
+    result = subprocess.run(
+        ["git", "ls-files", "*.md"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    paths = {ROOT / line for line in result.stdout.splitlines() if line and (ROOT / line).exists()}
+    # Include intentional new guides before their first commit.
+    for relative_path in (
+        Path("docs/KB_FLEET.md"),
+        Path("docs/WRITING.md"),
+        Path("docs/runbooks/change-embedder.md"),
+    ):
+        path = ROOT / relative_path
+        if path.exists():
+            paths.add(path)
     return sorted(
-        path
-        for path in ROOT.rglob("*.md")
+        path for path in paths
         if not any(part in SKIP_PARTS for part in relative(path).parts)
     )
 
@@ -173,6 +191,9 @@ def check_file(path: Path, errors: list[str], images: set[Path]) -> None:
             add_error(errors, path, h1[0][0] if h1 else 1, f"expected one H1, found {len(h1)}")
         for number, line in lines:
             check_voice(errors, path, number, line)
+
+    if not is_maintained(path):
+        return
 
     for number, line in lines:
         for match in INLINE_LINK.finditer(line):

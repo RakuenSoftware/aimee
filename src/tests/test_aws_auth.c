@@ -42,11 +42,23 @@
 #define TS_REGION "us-east-1"
 #define TS_SVC    "service"
 
+static int sign_test(const aws_sigv4_request_t *request, aws_sigv4_result_t *result)
+{
+   aws_sigv4_request_t req = *request;
+   if (!req.access_key_id_len && req.access_key_id)
+      req.access_key_id_len = strlen(req.access_key_id);
+   if (!req.secret_access_key_len && req.secret_access_key)
+      req.secret_access_key_len = strlen(req.secret_access_key);
+   if (!req.session_token_len && req.session_token)
+      req.session_token_len = strlen(req.session_token);
+   return aws_sigv4_sign(&req, result);
+}
+
 static void check_vector(const char *name, const aws_sigv4_request_t *req, const char *want_crhash,
                          const char *want_sts, const char *want_sig)
 {
    aws_sigv4_result_t r;
-   int rc = aws_sigv4_sign(req, &r);
+   int rc = sign_test(req, &r);
    assert(rc == 0);
    if (strcmp(r.canonical_request_hash, want_crhash) != 0)
    {
@@ -159,7 +171,7 @@ static void test_sigv4_vectors(void)
                                  .access_key_id = TS_AKID,
                                  .secret_access_key = TS_SECRET};
       aws_sigv4_result_t r;
-      assert(aws_sigv4_sign(&req, &r) == 0);
+      assert(sign_test(&req, &r) == 0);
       /* second line of the canonical request is the encoded URI */
       assert(strstr(r.canonical_request, "\n/example%20space/\n") != NULL);
       check_vector("normalize-path/get-space", &req,
@@ -202,7 +214,7 @@ static void test_sigv4_payload_modes(void)
                                  .access_key_id = TS_AKID,
                                  .secret_access_key = TS_SECRET};
       aws_sigv4_result_t r;
-      assert(aws_sigv4_sign(&req, &r) == 0);
+      assert(sign_test(&req, &r) == 0);
       /* the exact hashed-payload appears as the last line of the canonical request */
       assert(strstr(r.canonical_request, modes[i]) != NULL);
       snprintf(sigs[i], sizeof(sigs[i]), "%s", r.signature);
@@ -230,7 +242,7 @@ static void test_sigv4_security_token(void)
                               .secret_access_key = TS_SECRET,
                               .session_token = "FQoGZXIvYXdzTOKEN=="};
    aws_sigv4_result_t r;
-   assert(aws_sigv4_sign(&req, &r) == 0);
+   assert(sign_test(&req, &r) == 0);
    assert(r.has_security_token == 1);
    assert(strstr(r.signed_headers, "x-amz-security-token") != NULL);
    assert(strcmp(r.security_token, "FQoGZXIvYXdzTOKEN==") == 0);
@@ -390,6 +402,46 @@ static void test_web_identity(void)
    {
       aws_webid_status_t st = aws_webidentity_validate("not-a-jwt", jwks, iss, aud, now, NULL);
       assert(st != AWS_WEBID_OK);
+   }
+   /* Nonfinite/out-of-long-range NumericDates are rejected before conversion and
+    * every failure clears a caller-provided claims object. */
+   {
+      const char *bad_dates[] = {
+          "{\"iss\":\"https://token.actions.githubusercontent.com\","
+          "\"aud\":\"sts.amazonaws.com\",\"sub\":\"s\",\"exp\":1e999,\"iat\":1}",
+          "{\"iss\":\"https://token.actions.githubusercontent.com\","
+          "\"aud\":\"sts.amazonaws.com\",\"sub\":\"s\",\"exp\":1e20,\"iat\":1}",
+          "{\"iss\":\"https://token.actions.githubusercontent.com\","
+          "\"aud\":\"sts.amazonaws.com\",\"sub\":\"s\",\"exp\":1000300,\"iat\":1e999}",
+      };
+      for (size_t i = 0; i < sizeof(bad_dates) / sizeof(bad_dates[0]); ++i)
+      {
+         char *jwt = make_jwt(bad_dates[i], key);
+         aws_webid_claims_t claims;
+         memset(&claims, 0xa5, sizeof(claims));
+         assert(aws_webidentity_validate(jwt, jwks, iss, aud, now, &claims) != AWS_WEBID_OK);
+         const unsigned char *bytes = (const unsigned char *)&claims;
+         for (size_t j = 0; j < sizeof(claims); ++j)
+            assert(bytes[j] == 0);
+         free(jwt);
+      }
+   }
+   /* Reject an active JSON NUL escape, but not printable literal backslash-u text. */
+   {
+      char *jwt = make_jwt("{\"iss\":\"https://token.actions.githubusercontent.com\","
+                           "\"aud\":\"sts.amazonaws.com\",\"sub\":\"bad\\u0000suffix\","
+                           "\"exp\":1000300,\"iat\":999990}",
+                           key);
+      assert(aws_webidentity_validate(jwt, jwks, iss, aud, now, NULL) != AWS_WEBID_OK);
+      free(jwt);
+      jwt = make_jwt("{\"iss\":\"https://token.actions.githubusercontent.com\","
+                     "\"aud\":\"sts.amazonaws.com\",\"sub\":\"literal\\\\u0000\","
+                     "\"exp\":1000300,\"iat\":999990}",
+                     key);
+      aws_webid_claims_t claims;
+      assert(aws_webidentity_validate(jwt, jwks, iss, aud, now, &claims) == AWS_WEBID_OK);
+      assert(strcmp(claims.subject, "literal\\u0000") == 0);
+      free(jwt);
    }
    /* fail-CLOSED on empty/NULL expected iss or aud: a validly-signed token whose
     * iss/aud match the token itself must still be REJECTED, never accept-any. */

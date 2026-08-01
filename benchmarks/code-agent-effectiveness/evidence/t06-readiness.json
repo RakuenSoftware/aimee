@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "origin": {
+    "path": "battery/codex_results/cells/aimee__t06_semver__r1/aimee-readiness.json",
+    "sha256": "a5dd73c96bec0df3dae6f0eb7d5c44d9867fdf9089f0b036deee8755ed9ce8f3"
+  },
+  "project": "codex-t06-semver-r1-a14c49e9",
+  "runtime": {
+    "client_version": "aimee v0.2.195-1003-g627c1ffc",
+    "server_version": "testing-8bc6aa5",
+    "kb_version": "vtesting-8bc6aa5"
+  },
+  "build": {
+    "embeddings_added": 35
+  },
+  "symbol": {
+    "identifier": "end_of_month",
+    "file_path": "app/dates.py",
+    "line": 7,
+    "projects": [
+      "codex-t03-model-migration-r1-4125b941",
+      "codex-t03-model-migration-r1-dbcb04e8",
+      "codex-t06-semver-r1-a14c49e9",
+      "codex-t09-root-cause-r1",
+      "codex-t50-toposort-r1-31301348",
+      "codex-t50-toposort-r1-ec3ead31",
+      "fixture",
+      "source"
+    ]
+  },
+  "callers": {
+    "active_project_hits": [
+      {
+        "caller": "billing_period_days",
+        "file_path": "app/billing.py",
+        "line": 3
+      },
+      {
+        "caller": "invoice_due",
+        "file_path": "app/invoices.py",
+        "line": 3
+      },
+      {
+        "caller": "month_report_path",
+        "file_path": "app/reports.py",
+        "line": 6
+      }
+    ],
+    "distinct_project_count": 8
+  },
+  "blast_radius": {
+    "file": "app/dates.py",
+    "dependencies": [],
+    "dependents": []
+  }
+}

@@ -1,5 +1,5 @@
 #include "mcp_skill_tools.h"
-#include "mcp_tools.h"
+#include "aimee/protocols/mcp/mcp_tools.h"
 
 void mcp_add_skill_tools(cJSON *tools)
 {

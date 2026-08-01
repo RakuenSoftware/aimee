@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-07-29",
+  "commands": [
+    "aimee status",
+    "python3 battery/codex_matrix.py --resume"
+  ],
+  "status_output": [
+    "aimee-server: ok",
+    "state: ok",
+    "aimee-kb: unreachable",
+    "the knowledge base did not answer; memory and kb search will not work"
+  ],
+  "runner_checkpoint": {
+    "score_path": "battery/codex_results/score.json",
+    "score_sha256": "ec7325e4bfb0197517d11bdad2b7837a70f3ee6e4ca8c3b8631bc1e26180f675",
+    "complete": 97,
+    "expected": 600,
+    "result_artifacts_preserved": true,
+    "resume_refused_while_kb_unreachable": true
+  },
+  "capture_note": "Reconstructed immediately from the live status probe and persisted score checkpoint because the runner had no separate outage-result artifact. This tracked record is the durable E0 source; it does not claim byte-for-byte provenance for terminal formatting."
+}

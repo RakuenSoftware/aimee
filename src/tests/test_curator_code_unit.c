@@ -17,8 +17,10 @@
 #include "cJSON.h"
 #include "config.h"
 #include "kb_curator_extract.h"
-#include "kb/kb_curator_grounding.h"
-#include "kb/kb_curator_sidecar.h"
+#include "kb_curator_queue.h"
+#include "kb_curator_grounding.h"
+#include "kb_curator_provider.h"
+#include "kb_curator_sidecar.h"
 
 /* The deep-curator code-extract gate is now ON by compiled default, but the
  * gate-off tests below need it OFF. Point AIMEE_HOME at an isolated temp config
@@ -177,6 +179,33 @@ static void test_extract_code_unit_one_empty_queue(void)
    printf("  PASS: test_extract_code_unit_one_empty_queue\n");
 }
 
+static void test_provider_outage_requeues_code_unit(void)
+{
+   db2_test_shim_open();
+   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   assert(db != NULL);
+   assert(sqlite3_exec(db,
+                       "INSERT INTO kb_code_unit_jobs (id,project,file_path,symbol,status,attempts,"
+                       "claimed_by,claimed_at) VALUES (9602,'p','out.c','out_fn','running',3,"
+                       "'kb.curator.drain',datetime('now'))",
+                       NULL, NULL, NULL) == SQLITE_OK);
+
+   kb_curator_provider_backoff_recovered();
+   kb_curator_mark_retry_provider_unavailable_code(
+       9602, 3, "llm-chat.py exit 1: HTTP 503 from http://aimee-llm:8742/v1/chat/completions");
+
+   char buf[256];
+   assert(ccu_test_job_field(db, 9602, "status", buf, sizeof(buf)) == 0);
+   assert(strcmp(buf, "pending") == 0);
+   assert(ccu_test_job_field(db, 9602, "attempts", buf, sizeof(buf)) == 0);
+   assert(strcmp(buf, "2") == 0);
+   assert(kb_curator_provider_backoff_active());
+   kb_curator_provider_backoff_recovered();
+
+   db2_test_shim_close();
+   printf("  PASS: provider outage requeues code unit without spending attempt budget\n");
+}
+
 static void test_queue_dedup_via_conflict(void)
 {
    db2_test_shim_open();
@@ -307,7 +336,9 @@ static void run_extract_scenario(const char *side_effects_json, const char *call
    char sql[2048];
    snprintf(sql, sizeof(sql),
             "INSERT INTO projects (id, name, root, scanned_at) VALUES (1,'testproj','/repo','t');"
-            "INSERT INTO files (id, project_id, path, scanned_at) VALUES (1,1,'%s','t');",
+            "INSERT INTO files (id, project_id, path, scanned_at) VALUES (1,1,'%s','t');"
+            "INSERT INTO terms (file_id,name,kind,line)"
+            " VALUES (1,'target_fn','definition',1);",
             src_path);
    assert(sqlite3_exec(db, sql, NULL, NULL, NULL) == SQLITE_OK);
    if (callee)
@@ -410,6 +441,7 @@ static void test_extract_reads_body_from_db2_when_file_absent(void)
        "INSERT INTO projects (id, name, root, scanned_at)"
        " VALUES (1,'testproj','/nonexistent-root-xyzzy','t');"
        "INSERT INTO files (id, project_id, path, scanned_at) VALUES (1,1,'src/foo.c','t');"
+       "INSERT INTO terms (file_id,name,kind,line) VALUES (1,'target_fn','definition',1);"
        "INSERT INTO file_contents (file_id, content)"
        " VALUES (1,'int target_fn(void) { return 0; }\n');"
        "INSERT INTO kb_code_unit_jobs (project, file_path, symbol, kind, line)"
@@ -670,6 +702,97 @@ static void test_pick_sidecar_command_resolution(void)
    printf("  PASS: test_pick_sidecar_command_resolution\n");
 }
 
+/* A job whose attempts are exhausted goes to status='failed' — which is neither
+ * 'pending' nor 'done'. The queue counters used to report only those two, so a
+ * curator that failed EVERY job read as pending=0 done=0: identical to an idle,
+ * healthy queue. Health said "ok" while indexing was dead.
+ *
+ * Assert the failing jobs are counted AND that a sample diagnostic comes back,
+ * because the count alone does not tell an operator what to fix. */
+static void test_queue_counts_surface_failures(void)
+{
+   db2_test_shim_open();
+   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   assert(db != NULL);
+
+   assert(sqlite3_exec(db, "INSERT INTO projects (name,root,scanned_at) VALUES ('p','/p','t')",
+                       NULL, NULL, NULL) == SQLITE_OK);
+   assert(sqlite3_exec(db,
+                       "INSERT INTO kb_documents"
+                       " (id,project,file_path,file_hash,chunk_index,content) VALUES"
+                       " (9305,'p','a.md','h1',0,'a'),(9306,'p','b.md','h2',0,'b')",
+                       NULL, NULL, NULL) == SQLITE_OK);
+
+   assert(sqlite3_exec(db,
+                       "INSERT INTO kb_code_unit_jobs (id,project,file_path,symbol,status,attempts,"
+                       "last_error,updated_at) VALUES "
+                       "(9301,'p','a.c','fn_a','failed',3,'older code-unit failure',"
+                       "'2026-07-28 10:00:00'),"
+                       "(9302,'p','b.c','fn_b','failed',3,'newer code-unit failure',"
+                       "'2026-07-28 10:01:00'),"
+                       "(9303,'p','c.c','fn_c','pending',1,'newest but pending',"
+                       "'2026-07-28 10:04:00'),"
+                       "(9304,'p','d.c','fn_d','done',1,'newest but recovered',"
+                       "'2026-07-28 10:05:00')",
+                       NULL, NULL, NULL) == SQLITE_OK);
+   assert(sqlite3_exec(db,
+                       "INSERT INTO kb_async_jobs (id,kind,document_id,project,status,attempts,"
+                       "last_error,updated_at) VALUES "
+                       "(9305,'extract_doc',9305,'p','failed',3,'latest extract failure',"
+                       "'2026-07-28 10:02:00'),"
+                       "(9306,'extract_doc',9306,'p','done',1,'later recovered extract error',"
+                       "'2026-07-28 10:03:00')",
+                       NULL, NULL, NULL) == SQLITE_OK);
+
+   kb_curator_queue_counts_t qc;
+   memset(&qc, 0, sizeof(qc));
+   kb_curator_queue_counts(&qc);
+
+   /* The two dead jobs are visible instead of vanishing between the buckets. */
+   assert(qc.code_unit_failing == 2);
+   assert(qc.code_unit_pending == 1);
+   assert(qc.code_unit_done == 1);
+   assert(qc.extract_failing == 1);
+
+   /* The newest terminal reason across both queues travels with the count;
+    * newer pending/done historical errors are deliberately ignored. */
+   assert(strcmp(qc.last_error, "latest extract failure") == 0);
+   assert(strstr(qc.last_error, "recovered") == NULL);
+
+   db2_test_shim_close();
+   printf("  PASS: test_queue_counts_surface_failures (failed jobs counted, not silently dropped "
+          "between pending and done)\n");
+}
+
+static void test_stale_generation_job_is_not_claimed(void)
+{
+   db2_test_shim_open();
+   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   assert(db != NULL);
+   assert(sqlite3_exec(db,
+                       "INSERT INTO projects"
+                       " (id,name,root,scanned_at,current_generation)"
+                       " VALUES (1,'p','/p','t',2);"
+                       "INSERT INTO files"
+                       " (id,project_id,generation,path,scanned_at)"
+                       " VALUES (1,1,2,'same.c','t');"
+                       "INSERT INTO terms (file_id,name,kind,line)"
+                       " VALUES (1,'same_fn','definition',1);"
+                       "INSERT INTO kb_code_unit_jobs"
+                       " (project,generation,file_path,symbol,status)"
+                       " VALUES ('p',1,'same.c','same_fn','pending')",
+                       NULL, NULL, NULL) == SQLITE_OK);
+
+   kb_curator_extract_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.max_attempts = 3;
+   opts.max_tokens = 256;
+   assert(kb_curator_extract_code_unit_one(&opts) == 0);
+
+   db2_test_shim_close();
+   printf("  PASS: stale-generation code-unit job is not claimed for a re-added path\n");
+}
+
 int main(void)
 {
    printf("curator_code_unit:\n");
@@ -683,6 +806,7 @@ int main(void)
    test_queue_code_units_for_project_gate_off();
    test_queue_null_args();
    test_extract_code_unit_one_empty_queue();
+   test_provider_outage_requeues_code_unit();
    test_queue_dedup_via_conflict();
 
    test_grounding_side_effecting_predicate();
@@ -699,6 +823,8 @@ int main(void)
    test_sidecar_quoting_end_to_end();
    test_append_sidecar_error();
 
+   test_queue_counts_surface_failures();
+   test_stale_generation_job_is_not_claimed();
    printf("ok\n");
    return 0;
 }

@@ -7,10 +7,12 @@
  * NB: the three guardrails_semantic_*_threshold fields are doubles; they were
  * historically (mis)typed CFG_STRING in cmd_data.c, which only worked because
  * that table was unreachable. They are CFG_FLOAT here. */
+#include "config_accessors.h" /* config_field_read */
 #include "config_fields.h"
+#include "runtime_secret.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h> /* strcasecmp for the economizer tier token check */
 
 /* Entries omit the trailing reload_class -> RELOAD_HOT (0) by C zero-fill; suppress the
  * pedantic missing-field-initializer warning for the whole intentional table (P2). */
@@ -18,7 +20,7 @@
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 const config_field_t config_fields[] = {
     {"db2_url", offsetof(config_t, db2_url), sizeof(((config_t *)0)->db2_url), 0, CFG_STRING,
-     RELOAD_RESTART}, /* the postgres pool is opened at startup */
+     RELOAD_RESTART, FGROUP_RUNTIME, "AIMEE_DB2_URL"}, /* the postgres pool is opened at startup */
     {"provider", offsetof(config_t, provider), sizeof(((config_t *)0)->provider), 0, CFG_STRING},
     {"default_persona", offsetof(config_t, default_persona),
      sizeof(((config_t *)0)->default_persona), 0, CFG_STRING},
@@ -48,25 +50,10 @@ const config_field_t config_fields[] = {
     {"kb_client_url", offsetof(config_t, kb_client_url), sizeof(((config_t *)0)->kb_client_url), 0,
      CFG_STRING, RELOAD_RESTART},
     {"kb_client_bearer_token", offsetof(config_t, kb_client_bearer_token),
-     sizeof(((config_t *)0)->kb_client_bearer_token), 0, CFG_STRING, RELOAD_RESTART},
+     sizeof(((config_t *)0)->kb_client_bearer_token), 0, CFG_STRING, RELOAD_RESTART, FGROUP_RUNTIME,
+     "AIMEE_KB_API_BEARER_TOKEN"},
     {"llm_embed_backend", offsetof(config_t, llm_embed_backend),
      sizeof(((config_t *)0)->llm_embed_backend), 0, CFG_STRING, RELOAD_RESTART, FGROUP_DEPLOY},
-    {"llm_embed_host", offsetof(config_t, llm_embed_host), sizeof(((config_t *)0)->llm_embed_host),
-     0, CFG_STRING, RELOAD_RESTART, FGROUP_DEPLOY},
-    {"llm_embed_gpu", offsetof(config_t, llm_embed_gpu), sizeof(((config_t *)0)->llm_embed_gpu), 0,
-     CFG_STRING, RELOAD_RESTART, FGROUP_DEPLOY},
-    {"llm_embed_tier", offsetof(config_t, llm_embed_tier), sizeof(((config_t *)0)->llm_embed_tier),
-     0, CFG_STRING, RELOAD_RESTART, FGROUP_DEPLOY},
-    {"llm_rerank_backend", offsetof(config_t, llm_rerank_backend),
-     sizeof(((config_t *)0)->llm_rerank_backend), 0, CFG_STRING, RELOAD_RESTART, FGROUP_DEPLOY},
-    {"llm_rerank_host", offsetof(config_t, llm_rerank_host),
-     sizeof(((config_t *)0)->llm_rerank_host), 0, CFG_STRING, RELOAD_RESTART, FGROUP_DEPLOY},
-    {"llm_rerank_gpu", offsetof(config_t, llm_rerank_gpu), sizeof(((config_t *)0)->llm_rerank_gpu),
-     0, CFG_STRING, RELOAD_RESTART, FGROUP_DEPLOY},
-    {"llm_rerank_tier", offsetof(config_t, llm_rerank_tier),
-     sizeof(((config_t *)0)->llm_rerank_tier), 0, CFG_STRING, RELOAD_RESTART, FGROUP_DEPLOY},
-    {"llm_rerank_endpoint", offsetof(config_t, llm_rerank_endpoint),
-     sizeof(((config_t *)0)->llm_rerank_endpoint), 0, CFG_STRING, RELOAD_RESTART, FGROUP_DEPLOY},
     {"llm_synth_backend", offsetof(config_t, llm_synth_backend),
      sizeof(((config_t *)0)->llm_synth_backend), 0, CFG_STRING, RELOAD_RESTART, FGROUP_DEPLOY},
     {"llm_synth_host", offsetof(config_t, llm_synth_host), sizeof(((config_t *)0)->llm_synth_host),
@@ -85,9 +72,10 @@ const config_field_t config_fields[] = {
      sizeof(((config_t *)0)->memory_coref_window), 0, CFG_INT, RELOAD_HOT, FGROUP_ADVANCED},
     {"memory_rerank_mode", offsetof(config_t, memory_rerank_mode),
      sizeof(((config_t *)0)->memory_rerank_mode), 0, CFG_STRING},
-    {"memory_rerank_enabled", offsetof(config_t, memory_rerank_enabled), sizeof(int), 0, CFG_BOOL},
     {"ingress_preinject_enabled", offsetof(config_t, ingress_preinject_enabled), sizeof(int), 0,
      CFG_BOOL},
+    {"code_context_mode", offsetof(config_t, code_context_mode),
+     sizeof(((config_t *)0)->code_context_mode), 0, CFG_STRING, RELOAD_HOT, FGROUP_ADVANCED},
     {"ingress_preinject_anthropic_enabled", offsetof(config_t, ingress_preinject_anthropic_enabled),
      sizeof(int), 0, CFG_BOOL, RELOAD_HOT, FGROUP_ADVANCED},
     {"ingress_compress_enabled", offsetof(config_t, ingress_compress_enabled), sizeof(int), 0,
@@ -108,6 +96,8 @@ const config_field_t config_fields[] = {
      RELOAD_HOT, FGROUP_ADVANCED},
     {"require_session_worktree", offsetof(config_t, require_session_worktree), sizeof(int), 0,
      CFG_BOOL},
+    {"session_worktree_base", offsetof(config_t, session_worktree_base),
+     sizeof(((config_t *)0)->session_worktree_base), 0, CFG_STRING, RELOAD_HOT, FGROUP_ADVANCED},
     {"require_aimee_memory", offsetof(config_t, require_aimee_memory), sizeof(int), 0, CFG_BOOL},
     {"require_aimee_git", offsetof(config_t, require_aimee_git), sizeof(int), 0, CFG_BOOL},
     {"subagent_ban_enabled", offsetof(config_t, subagent_ban_enabled), sizeof(int), 0, CFG_BOOL},
@@ -143,6 +133,8 @@ const config_field_t config_fields[] = {
      CFG_STRING},
     {"css_style_graph_enabled", offsetof(config_t, css_style_graph_enabled), sizeof(int), 0,
      CFG_BOOL},
+    {"code_cochange_git_enabled", offsetof(config_t, code_cochange_git_enabled), sizeof(int), 0,
+     CFG_BOOL},
     {"wfe_live_forge_enabled", offsetof(config_t, wfe_live_forge_enabled), sizeof(int), 0,
      CFG_BOOL},
     {"wfe_proposals_autoscan_enabled", offsetof(config_t, wfe_proposals_autoscan_enabled),
@@ -165,10 +157,6 @@ const config_field_t config_fields[] = {
      CFG_BOOL},
     {"fidelity_check_enabled", offsetof(config_t, fidelity_check_enabled), sizeof(int), 0,
      CFG_BOOL},
-    {"memory_rerank_command", offsetof(config_t, memory_rerank_command),
-     sizeof(((config_t *)0)->memory_rerank_command), 0, CFG_STRING},
-    {"memory_rerank_top_k", offsetof(config_t, memory_rerank_top_k), sizeof(int), 0, CFG_INT,
-     RELOAD_HOT, FGROUP_ADVANCED},
     {"memory_query_expansion_mode", offsetof(config_t, memory_query_expansion_mode),
      sizeof(((config_t *)0)->memory_query_expansion_mode), 0, CFG_STRING},
     {"memory_query_expansion_k", offsetof(config_t, memory_query_expansion_k), sizeof(int), 0,
@@ -182,6 +170,12 @@ const config_field_t config_fields[] = {
      CFG_FLOAT, RELOAD_HOT, FGROUP_ADVANCED},
     {"autonomous", offsetof(config_t, autonomous), sizeof(int), 1, CFG_BOOL},
     {"cross_verify", offsetof(config_t, cross_verify), sizeof(int), 1, CFG_BOOL},
+    {"verify_cmd", offsetof(config_t, verify_cmd), sizeof(((config_t *)0)->verify_cmd), 0,
+     CFG_STRING},
+    {"verify_role", offsetof(config_t, verify_role), sizeof(((config_t *)0)->verify_role), 0,
+     CFG_STRING},
+    {"verify_prompt", offsetof(config_t, verify_prompt), sizeof(((config_t *)0)->verify_prompt), 0,
+     CFG_STRING},
     {"max_iterations", offsetof(config_t, max_iterations), sizeof(int), 0, CFG_INT},
     {"max_iterations_delegate", offsetof(config_t, max_iterations_delegate), sizeof(int), 0,
      CFG_INT},
@@ -189,9 +183,9 @@ const config_field_t config_fields[] = {
      sizeof(int), 0, CFG_INT, RELOAD_HOT, FGROUP_ADVANCED},
     {"memory_maintenance_trigger_secs", offsetof(config_t, memory_maintenance_trigger_secs),
      sizeof(int), 0, CFG_INT, RELOAD_HOT, FGROUP_ADVANCED},
-    /* memory_rerank_{enabled,command,top_k} and memory_query_expansion_{mode,k} are already
-     * declared once above (see ~L87-153). The duplicate rows that used to sit here were
-     * shadowed dead weight — config_field_lookup returns the first match — and were removed. */
+    /* memory_query_expansion_{mode,k} is already declared once above. The duplicate rows
+     * that used to sit here were shadowed dead weight — config_field_lookup returns the
+     * first match — and were removed. */
     {"memory_improve_dedupe_enabled", offsetof(config_t, memory_improve_dedupe_enabled),
      sizeof(int), 0, CFG_BOOL, RELOAD_HOT, FGROUP_ADVANCED},
     {"memory_improve_summarise_enabled", offsetof(config_t, memory_improve_summarise_enabled),
@@ -299,6 +293,14 @@ const config_field_t config_fields[] = {
      sizeof(int), 0, CFG_INT},
     {"cache_aware_rewrite_enabled", offsetof(config_t, cache_aware_rewrite_enabled), sizeof(int), 0,
      CFG_BOOL},
+    {"transport.kb_pool_enabled", offsetof(config_t, transport_kb_pool_enabled), sizeof(int), 0,
+     CFG_BOOL, RELOAD_HOT, FGROUP_ADVANCED},
+    {"transport.server_keepalive_enabled", offsetof(config_t, transport_server_keepalive_enabled),
+     sizeof(int), 0, CFG_BOOL, RELOAD_HOT, FGROUP_ADVANCED},
+    {"transport.thinclient_gzip_enabled", offsetof(config_t, transport_thinclient_gzip_enabled),
+     sizeof(int), 0, CFG_BOOL, RELOAD_HOT, FGROUP_ADVANCED},
+    {"transport.kb_gzip_enabled", offsetof(config_t, transport_kb_gzip_enabled), sizeof(int), 0,
+     CFG_BOOL, RELOAD_HOT, FGROUP_ADVANCED},
     {"cost_reward_enabled", offsetof(config_t, cost_reward_enabled), sizeof(int), 0, CFG_BOOL},
     {"cost_reward_lambda_pct", offsetof(config_t, cost_reward_lambda_pct), sizeof(int), 0, CFG_INT,
      RELOAD_HOT, FGROUP_ADVANCED},
@@ -311,7 +313,8 @@ const config_field_t config_fields[] = {
      sizeof(int), 0, CFG_BOOL, RELOAD_HOT, FGROUP_ADVANCED},
     {"ingress_audit_async", offsetof(config_t, ingress_audit_async), sizeof(int), 0, CFG_BOOL},
     {"ingress_trusted_proxy_secret", offsetof(config_t, ingress_trusted_proxy_secret),
-     sizeof(((config_t *)0)->ingress_trusted_proxy_secret), 0, CFG_STRING},
+     sizeof(((config_t *)0)->ingress_trusted_proxy_secret), 0, CFG_STRING, RELOAD_HOT,
+     FGROUP_RUNTIME, "AIMEE_INGRESS_PROXY_SECRET"},
     {"dedup_window_seconds", offsetof(config_t, dedup_window_seconds), sizeof(int), 0, CFG_INT},
     {"cache_min_chars", offsetof(config_t, cache_min_chars), sizeof(int), 0, CFG_INT, RELOAD_HOT,
      FGROUP_ADVANCED},
@@ -331,9 +334,11 @@ const config_field_t config_fields[] = {
     {"kb_api_http_port", offsetof(config_t, kb_api_http_port), sizeof(int), 0, CFG_INT,
      RELOAD_RESTART},
     {"kb_api_bearer_token", offsetof(config_t, kb_api_bearer_token),
-     sizeof(((config_t *)0)->kb_api_bearer_token), 0, CFG_STRING, RELOAD_RESTART},
+     sizeof(((config_t *)0)->kb_api_bearer_token), 0, CFG_STRING, RELOAD_RESTART, FGROUP_RUNTIME,
+     "AIMEE_KB_API_BEARER_TOKEN"},
     {"telemetry.metrics_token", offsetof(config_t, telemetry_metrics_token),
-     sizeof(((config_t *)0)->telemetry_metrics_token), 0, CFG_STRING, RELOAD_RESTART},
+     sizeof(((config_t *)0)->telemetry_metrics_token), 0, CFG_STRING, RELOAD_RESTART,
+     FGROUP_RUNTIME, "AIMEE_TELEMETRY_METRICS_TOKEN"},
     {"kb_mining_enabled", offsetof(config_t, kb_mining_enabled), sizeof(int), 0, CFG_BOOL},
     {"kb_mining_min_poll_s", offsetof(config_t, kb_mining_min_poll_s), sizeof(int), 0, CFG_INT,
      RELOAD_HOT, FGROUP_ADVANCED},
@@ -374,11 +379,9 @@ const config_field_t config_fields[] = {
     /* Trigger admission policy. The scheduler reads this from the live config snapshot on
      * every sweep, so GUI changes take effect without a restart. */
     {"trigger.max_concurrent", offsetof(config_t, trigger_max_concurrent), sizeof(int), 0, CFG_INT},
-    /* The economizer is a SINGLE tiered control: get/set as an "off|safe|aggressive" string
-     * (CFG_ECON_TIER stores the int enum). The old per-lever reduce.* / economizer.enabled|
-     * aggressive keys were removed; the per-tier lever values are internal presets (econ_preset).
-     * HOT: read per-request via config_load, so a config.set applies live. */
-    {"economizer", offsetof(config_t, economizer_tier), sizeof(int), 0, CFG_ECON_TIER, RELOAD_HOT},
+    /* The only economizer control: off, safe, or aggressive. */
+    {"economizer.mode", offsetof(config_t, economizer_mode), sizeof(int), 0, CFG_ECON_MODE,
+     RELOAD_HOT},
     /* Autonomous-development pipeline knobs (Phase-C). New config_t fields bridged to the
      * AIMEE_AUTONOMY_* env vars at startup (a set env var still overrides); a change
      * applies on the next server start. */
@@ -498,9 +501,99 @@ cJSON *config_field_value_json(const config_t *cfg, const config_field_t *f)
       return cJSON_CreateNumber(*(const int *)base);
    if (f->type == CFG_FLOAT)
       return cJSON_CreateNumber(*(const double *)base);
-   if (f->type == CFG_ECON_TIER)
-      return cJSON_CreateString(econ_tier_name(*(const int *)base));
+   if (f->type == CFG_ECON_MODE)
+      return cJSON_CreateString(econ_mode_name(*(const int *)base));
    return cJSON_CreateString(base);
+}
+
+const char *config_field_secret_name(const config_field_t *f)
+{
+   return f ? f->secret_name : NULL;
+}
+
+cJSON *config_field_public_value_json(const config_t *cfg, const config_field_t *f)
+{
+   if (!cfg || !f)
+      return cJSON_CreateNull();
+   if (!config_field_secret_name(f))
+      return config_field_value_json(cfg, f);
+   const char *base = (const char *)cfg + f->offset;
+   return cJSON_CreateBool(base[0] ? 1 : 0);
+}
+
+/* Live-config form for callers outside this module, which under the
+ * encapsulation rule may not hold a config_t. Heap, not stack: config_t is
+ * ~750 KB, and this is called per field while rendering a console page. */
+cJSON *config_field_public_value_json_current(const config_field_t *f)
+{
+   if (!f)
+      return cJSON_CreateNull();
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return cJSON_CreateNull();
+   (void)config_load(cfg);
+   cJSON *out = config_field_public_value_json(cfg, f);
+   free(cfg);
+   return out;
+}
+
+/* Widest string field config_fields[] exposes; a longer one is truncated here
+ * rather than read past. */
+#define CONFIG_FIELD_RENDER_MAX 4096
+
+/* Render one field for display, without the caller holding a config_t. The
+ * `aimee config get` path: it used to load a whole config and index into it by
+ * f->offset, which is the config_t layout leaking into a CLI. Writes the same
+ * text that path printed, including "(unset)" for an empty string and
+ * "configured"/"not configured" for a Vault-backed secret -- a secret's VALUE is
+ * never rendered here. Returns 0 on success. */
+int config_field_render(const config_field_t *f, char *out, size_t n)
+{
+   if (!f || !out || n == 0)
+      return -1;
+   out[0] = '\0';
+
+   /* Read f->size, never a fixed buffer size: config_field_read copies exactly
+    * what it is asked for from f->offset, so over-asking walks off the end of the
+    * field into whatever config_t happens to hold next. */
+   if (config_field_secret_name(f))
+   {
+      char buf[CONFIG_FIELD_RENDER_MAX] = "";
+      size_t want = f->size < sizeof(buf) ? f->size : sizeof(buf);
+      (void)config_field_read(f->offset, want, buf);
+      buf[want ? want - 1 : 0] = '\0';
+      snprintf(out, n, "%s", buf[0] ? "configured" : "not configured");
+      runtime_secret_wipe(buf, sizeof(buf));
+      return 0;
+   }
+
+   if (f->is_bool || f->type == CFG_BOOL)
+   {
+      int v = 0;
+      (void)config_field_read(f->offset, sizeof(v), &v);
+      snprintf(out, n, "%s", v ? "true" : "false");
+   }
+   else if (f->type == CFG_INT)
+   {
+      int v = 0;
+      (void)config_field_read(f->offset, sizeof(v), &v);
+      snprintf(out, n, "%d", v);
+   }
+   else if (f->type == CFG_FLOAT)
+   {
+      double v = 0.0;
+      (void)config_field_read(f->offset, sizeof(v), &v);
+      snprintf(out, n, "%g", v);
+   }
+   else
+   {
+      char buf[CONFIG_FIELD_RENDER_MAX] = "";
+      size_t want = f->size < sizeof(buf) ? f->size : sizeof(buf);
+      (void)config_field_read(f->offset, want, buf);
+      buf[want ? want - 1 : 0] = '\0';
+      snprintf(out, n, "%s", buf[0] ? buf : "(unset)");
+   }
+   return 0;
 }
 
 int config_field_set_value(config_t *cfg, const config_field_t *f, const char *value)
@@ -521,17 +614,169 @@ int config_field_set_value(config_t *cfg, const config_field_t *f, const char *v
       *(int *)base = atoi(value);
    else if (f->type == CFG_FLOAT)
       *(double *)base = atof(value);
-   else if (f->type == CFG_ECON_TIER)
+   else if (f->type == CFG_ECON_MODE)
    {
-      /* Accept only a recognized tier token so `config set economizer bogus` is a clean
-       * error rather than a silent fall-through to safe. */
-      if (strcasecmp(value, "off") && strcasecmp(value, "0") && strcasecmp(value, "false") &&
-          strcasecmp(value, "safe") && strcasecmp(value, "aggressive") &&
-          strcasecmp(value, "aggro"))
+      int parsed = econ_mode_parse(value);
+      if (parsed < 0)
          return -1;
-      *(int *)base = econ_tier_parse(value);
+      *(int *)base = parsed;
    }
    else
       snprintf(base, f->size, "%s", value);
    return 0;
+}
+
+/* Flat-field defaults (Proposal A, step 1). Single home for the default value of
+ * every FLAT config field (see test_config_field_eligibility.c). config_set_defaults
+ * applies these table-driven instead of hand-assigning each — so a default lives in
+ * exactly one place (here), keyed by the same name as its config_fields[] descriptor.
+ * Values are in config_field_set_value's string form (bool: "true"/"false"; int: a
+ * decimal; string: the literal). Non-flat fields keep their bespoke defaults in
+ * config_set_defaults (side effects, env derivation, or computed values). */
+static const struct
+{
+   const char *key;
+   const char *value;
+} config_flat_defaults[] = {
+    {"db2_url", ""},
+    /* EMPTY on purpose: a fresh install has no primary until one is chosen.
+     *
+     * This defaulted to "claude", which pre-populated an install with a provider
+     * the operator never picked. chat_agent_add_builtin_provider then synthesized
+     * a claude tmux-CLI agent for it, and chat_agent_select_provider PINNED the
+     * turn to that agent — so on a machine with no claude CLI every turn died
+     * with "no agent available for role 'code'", naming an internal role, while
+     * the agents the operator had actually added sat right there disabled for the
+     * turn. Completing the setup wizard did not help: the wizard writes
+     * agents.json's default_agent, and this pin overrode it.
+     *
+     * Empty means "not chosen": select_provider returns without pinning, every
+     * configured agent stays eligible, and agents.json's default_agent decides —
+     * which is what the wizard set. Setting a primary explicitly still pins, as
+     * before. Only NEW installs see this; an existing config has its own value
+     * persisted and is unaffected. */
+    {"provider", ""},
+    {"default_persona", "engineer"},
+    {"claude_model", ""},
+    {"openai_endpoint", "https://api.openai.com/v1"},
+    {"openai_model", "gpt-4o"},
+    {"openai_key_cmd", ""},
+    {"guardrail_mode", "approve"},
+    {"embedding_command", ""},
+    {"embedding_model", ""},
+    {"embedding_endpoint", ""},
+    {"kb_client_url", ""},
+    {"kb_client_bearer_token", ""},
+    {"memory_rerank_mode", ""},
+    {"ingress_preinject_enabled", "true"},
+    {"code_context_mode", "on"},
+    {"ingress_preinject_anthropic_enabled", "false"},
+    {"ingress_compress_enabled", "true"},
+    {"gateway_prevent_subagents", "false"},
+    {"gateway_pin_model", "false"},
+    {"require_session_worktree", "true"},
+    {"require_aimee_memory", "true"},
+    {"require_aimee_git", "true"},
+    {"subagent_ban_enabled", "true"},
+    {"delegate_sandbox_require_isolation", "false"},
+    {"delegate_sandbox_learn_packages", "true"},
+    {"typed_facts_enabled", "true"},
+    {"kb_pdf_ingest_enabled", "false"},
+    {"kb_pdf_vector_enabled", "false"},
+    {"kb_pdf_tsr_enabled", "false"},
+    {"tsr_command", ""},
+    {"kb_pdf_assets_enabled", "false"},
+    {"kb_pdf_blob_dir", ""},
+    {"kb_pdf_blob_recon_secs", "3600"},
+    {"kb_pdf_blob_orphan_alarm_mb", "1024"},
+    {"kb_pdf_ocr_enabled", "false"},
+    {"ocr_command", ""},
+    {"css_style_graph_enabled", "true"},
+    {"code_cochange_git_enabled", "true"},
+    {"wfe_live_forge_enabled", "false"},
+    {"wfe_proposals_autoscan_enabled", "false"},
+    {"client_integrations_enabled", "true"},
+    {"audit_action_enabled", "true"},
+    {"audit_worm_enabled", "false"},
+    {"css_render_command",
+     "curl -s --max-time 30 --data-binary @- http://aimee-css-render:8780/render"},
+    {"kb_evidence_emit_enabled", "false"},
+    {"fidelity_check_enabled", "false"},
+    {"autonomous", "false"},
+    {"max_iterations", "0"},
+    {"max_iterations_delegate", "0"},
+    {"verify_enabled", "false"},
+    {"delegate_graph_context_enabled", "false"},
+    {"verify_cross_project", "false"},
+    {"cross_verify", "false"},
+    {"verify_cmd", ""},
+    {"verify_role", ""},
+    {"verify_prompt", ""},
+    {NULL, NULL}, /* sentinel — config_apply_flat_defaults iterates until .key is NULL */
+};
+
+void config_apply_flat_defaults(config_t *cfg)
+{
+   if (!cfg)
+      return;
+   for (int i = 0; config_flat_defaults[i].key; i++)
+   {
+      const config_field_t *f = config_field_lookup(config_flat_defaults[i].key);
+      if (f)
+         (void)config_field_set_value(cfg, f, config_flat_defaults[i].value);
+   }
+}
+
+/* Assign a flat field from its parsed JSON node, matching the inline config_load
+ * parse exactly: a present, correctly-typed value is assigned; anything else
+ * leaves the field at its default. Strings use the non-empty guard (an explicit
+ * "" leaves the default) — the form 45 of the 51 genericised string fields already
+ * used, and behaviour-identical for the rest because their default is "". */
+static void config_field_set_from_json(config_t *cfg, const config_field_t *f, const cJSON *item)
+{
+   char *base = (char *)cfg + f->offset;
+   switch (f->type)
+   {
+   case CFG_BOOL:
+      if (cJSON_IsBool(item))
+         *(int *)base = cJSON_IsTrue(item);
+      break;
+   case CFG_INT:
+      if (cJSON_IsNumber(item))
+         *(int *)base = (int)item->valuedouble;
+      break;
+   case CFG_FLOAT:
+      if (cJSON_IsNumber(item))
+         *(double *)base = item->valuedouble;
+      break;
+   case CFG_STRING:
+      if (cJSON_IsString(item) && item->valuestring[0])
+         snprintf(base, f->size, "%s", item->valuestring);
+      break;
+   case CFG_ECON_MODE:
+      break; /* not a flat field; parsed by its bespoke handler */
+   }
+}
+
+/* Table-driven parse of the flat scalar fields (Proposal A, step 3): replaces the
+ * per-field inline `item = GetObjectItem(root, key); if (typed) cfg->x = ...` blocks
+ * in config_load with one loop over the flat set. css_render_command is the sole
+ * exception — its default is non-empty AND its inline guard admits an explicit ""
+ * (to disable rendering), so it keeps its bespoke block to preserve that behaviour. */
+void config_parse_flat_fields(config_t *cfg, const cJSON *root)
+{
+   if (!cfg || !root)
+      return;
+   for (int i = 0; config_flat_defaults[i].key; i++)
+   {
+      const char *key = config_flat_defaults[i].key;
+      if (strcmp(key, "css_render_command") == 0)
+         continue; /* kept inline: non-empty default + empty-string is meaningful */
+      const cJSON *item = cJSON_GetObjectItemCaseSensitive((cJSON *)root, key);
+      if (!item)
+         continue;
+      const config_field_t *f = config_field_lookup(key);
+      if (f)
+         config_field_set_from_json(cfg, f, item);
+   }
 }

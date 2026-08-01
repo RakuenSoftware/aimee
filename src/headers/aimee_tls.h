@@ -41,6 +41,23 @@ extern "C"
    int aimee_tls_client_cert_eligible(const char *home, char *crt, size_t crt_n, char *key,
                                       size_t key_n);
 
+   /* Suppress presenting the stored mTLS identity for subsequent handshakes in
+    * this process (off by default; process-local, never touches disk).
+    *
+    * `aimee remote set/trust` uses this to retry a failed trust probe WITHOUT the
+    * stored certificate. A client cert the server refuses — typically one minted
+    * by a PREVIOUS server instance's client-CA, after the server was
+    * re-provisioned — is otherwise indistinguishable from an unreachable host:
+    * TLS 1.3 sends client-auth failures only after the client's handshake has
+    * already completed, so the connect succeeds and the *read* fails with no
+    * status. Retrying suppressed turns that ambiguity into a definite answer.
+    *
+    * This deliberately bypasses the fail-closed permission gate, so it must stay
+    * scoped to a diagnostic probe: turn it on, probe, turn it off. Never leave it
+    * set across ordinary requests, which would silently downgrade a broken mTLS
+    * deployment to bearer-only TLS — exactly what the gate exists to prevent. */
+   void aimee_tls_suppress_client_cert(int on);
+
    /* Open a fresh TLS connection to |host|:|port| WITHOUT verifying the server,
     * and return its leaf certificate as PEM (caller free()s *pem_out) plus the
     * SHA-256 fingerprint as uppercase colon-hex in |fp_out|. For `aimee remote

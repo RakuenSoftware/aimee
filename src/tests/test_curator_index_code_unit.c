@@ -10,14 +10,16 @@
 
 #include "aimee.h"
 #include "db2_test_shim.h"
-#include "../kb/kb_curator_index_code_unit.h"
+#include "kb_curator_index_code_unit.h"
 
 /* Stub the heavy embed + vector deps the handler references but this test never
  * reaches (the handler returns early with no seeded code_unit artifacts). */
-int memory_embed_text(const char *text, const char *command, float *out, int max_dim)
+int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
+                      float *out, int max_dim)
 {
    (void)text;
    (void)command;
+   (void)input_type;
    (void)out;
    (void)max_dim;
    return 0;

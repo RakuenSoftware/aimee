@@ -1,5 +1,7 @@
 #include "vault_custody_pkcs11.h"
 #include "vault_crypto.h"
+#include "runtime_secret.h"
+#include <openssl/crypto.h>
 #include <string.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -20,29 +22,49 @@ static int open_token(pk11_ctx *c)
    const char *mod = getenv("AIMEE_VAULT_PKCS11_MODULE");
    if (!mod || !*mod)
       mod = "/usr/lib/softhsm/libsofthsm2.so";
-   const char *pin = getenv("AIMEE_VAULT_PKCS11_PIN");
+   char pin[256] = "";
+   if (!runtime_secret_get("AIMEE_VAULT_PKCS11_PIN", pin, sizeof(pin)))
+      return -1;
    const char *slot_s = getenv("AIMEE_VAULT_PKCS11_SLOT");
    unsigned long slot = slot_s ? strtoul(slot_s, NULL, 10) : 0;
-   if (!pin || !*pin)
-      return -1;
    c->dl = dlopen(mod, RTLD_NOW | RTLD_LOCAL);
    if (!c->dl)
+   {
+      OPENSSL_cleanse(pin, sizeof(pin));
       return -1;
+   }
    CK_C_GetFunctionList get = (CK_C_GetFunctionList)dlsym(c->dl, "C_GetFunctionList");
    if (!get || get(&c->f) != CKR_OK)
+   {
+      OPENSSL_cleanse(pin, sizeof(pin));
       return -1;
+   }
    if (c->f->C_Initialize(NULL_PTR) != CKR_OK)
+   {
+      OPENSSL_cleanse(pin, sizeof(pin));
       return -1;
+   }
    CK_ULONG n = 8;
    CK_SLOT_ID slots[8];
    if (c->f->C_GetSlotList(CK_TRUE, slots, &n) != CKR_OK || !n)
+   {
+      OPENSSL_cleanse(pin, sizeof(pin));
       return -1;
+   }
    if (slot_s && slot >= n)
+   {
+      OPENSSL_cleanse(pin, sizeof(pin));
       return -1;
+   }
    slot = slot_s ? slots[slot] : slots[0];
    if (c->f->C_OpenSession(slot, CKF_SERIAL_SESSION | CKF_RW_SESSION, NULL, NULL, &c->s) != CKR_OK)
+   {
+      OPENSSL_cleanse(pin, sizeof(pin));
       return -1;
-   if (c->f->C_Login(c->s, CKU_USER, (CK_UTF8CHAR_PTR)pin, (CK_ULONG)strlen(pin)) != CKR_OK)
+   }
+   CK_RV login_rc = c->f->C_Login(c->s, CKU_USER, (CK_UTF8CHAR_PTR)pin, (CK_ULONG)strlen(pin));
+   OPENSSL_cleanse(pin, sizeof(pin));
+   if (login_rc != CKR_OK)
       return -1;
    c->sealed = 0;
    return 0;
@@ -114,8 +136,15 @@ static int rotate(void *v, const char *a, int *b, int *c, char *d, size_t e, cha
    (void)g;
    return -1;
 }
-static const vault_custody_provider_t p = {"pkcs11", &g,   get_kek, rotate, sealed, unseal,
-                                           seal,     NULL, NULL,    NULL,   NULL};
+static const vault_custody_provider_t p = {
+    .name = "pkcs11",
+    .ctx = &g,
+    .get_kek = get_kek,
+    .rotate = rotate,
+    .is_sealed = sealed,
+    .unseal = unseal,
+    .seal = seal,
+};
 #else
 static int fail(void *v, uint8_t k[VAULT_KEK_LEN])
 {
@@ -152,8 +181,14 @@ static int rot(void *v, const char *a, int *b, int *c, char *d, size_t e, char *
    (void)g;
    return -1;
 }
-static const vault_custody_provider_t p = {"pkcs11", NULL, fail, rot,  yes, no,
-                                           no_seal,  NULL, NULL, NULL, NULL};
+static const vault_custody_provider_t p = {
+    .name = "pkcs11",
+    .get_kek = fail,
+    .rotate = rot,
+    .is_sealed = yes,
+    .unseal = no,
+    .seal = no_seal,
+};
 #endif
 const vault_custody_provider_t *vault_custody_pkcs11_provider(void)
 {

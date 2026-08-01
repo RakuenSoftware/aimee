@@ -1,8 +1,14 @@
 name: CI
 
 on:
+  # Re-run the gate on each integration tip; PR checks alone only cover the
+  # merge preview that existed when the PR ran.
+  push:
+    branches: [main, testing, feature/core-modularization]
   pull_request:
-    branches: [main, testing]
+    branches: [main, testing, feature/core-modularization, 'aimee/feat/**']
+    # Slice sub-PRs target aimee/feat/<work-item-id>; include them so each slice
+    # must pass the same complete gate as the final feature PR.
     # `edited` re-runs the gate when a PR title/body is edited after open, so
     # attribution can't be added post-hoc without failing CI.
     types: [opened, synchronize, reopened, edited]
@@ -11,6 +17,12 @@ on:
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  # Every CI job is deliberately read-only: jobs only check out, build, and
+  # inspect the repository; none comments, labels, publishes, or mutates it.
+  # A future write-capable job must opt in with its own minimal permissions.
+  contents: read
 
 jobs:
   no-coauthor-trailers:
@@ -27,13 +39,42 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           range="${BASE_SHA}..${HEAD_SHA}"
           # Match the actual trailer forms only (anchored), not prose that happens
           # to mention them: a "co-authored-by:" line, or the markdown-link
           # "Generated with [Claude Code]"/"[Codex ...]" attribution line.
-          hits=$(git log "$range" --format='%H%n%B' \
-                 | grep -inE '^[[:space:]]*co-authored-by:|generated with \[(claude|codex)' || true)
+          # Immutable commits that entered testing carrying a trailer. They are
+          # grandfathered only for the testing -> main integration PR; exact SHAs
+          # keep the exception from hiding descendants or any newly introduced
+          # trailer.
+          #
+          # These are not ours to strip. The trailer is added by GITHUB, not by
+          # aimee: the WFE authors its commits as aimee-wfe <wfe@aimee.local>, so
+          # squash-merging a PR that mixes its commits with a human's produces a
+          # Co-authored-by line for the second author. Rewriting them would rewrite
+          # published history on testing to fix a message GitHub generated.
+          #
+          # This list grows once per promote until that is addressed at the source
+          # (have the WFE author as the operator, or strip the trailer from the
+          # squash message at merge time). Growth is the signal that it has not
+          # been.
+          hits=$(
+            for commit in $(git rev-list "$range"); do
+              if [ "$BASE_REF" = main ] && [ "$HEAD_REF" = testing ]; then
+                case "$commit" in
+                  9f327867cd62a14e50e9a41af9b871fc7792e4bd|003255217a10a8559e47bf0b6fedeb2c0faa6cce|\
+                  d173e054353a1069bd07a307477ad281a3d39d59|0b694e1970eab860b503b433bb69f708fc445abc)
+                    continue
+                    ;;
+                esac
+              fi
+              git show -s --format='%H%n%B' "$commit" \
+                | grep -inE '^[[:space:]]*co-authored-by:|generated with \[(claude|codex)' || true
+            done
+          )
           if [ -n "$hits" ]; then
             echo "::error::New commit(s) in $range carry AI co-authorship trailers; remove them (standing directive)."
             echo "$hits"
@@ -75,11 +116,13 @@ jobs:
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q clang-format-19
+          sudo apt-get install -y -q clang-format-19 ripgrep
       - name: Check formatting
         run: cd src && make lint
       - name: Check 3db tier dependencies
         run: ./scripts/check_tier_deps.sh
+      - name: Check managed authority packaging boundary
+        run: python3 scripts/check-managed-authority-packaging.py
 
   build:
     runs-on: ubuntu-latest
@@ -103,7 +146,7 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
           sudo apt-get install -y -q gcc make \
-            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev \
+            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev
       - name: Build
         run: cd src && make -j$(nproc) all server
@@ -124,7 +167,15 @@ jobs:
           ./aimee version
           ./aimee-server --version
           ./aimee-kb --version
-          test -x ./aimee-webchat
+          test -x ./aimee-runtime-web
+      # A configured remote is an exclusive transport: no local probe, no local
+      # execution, no local fallback. The test is black-box (temp HOME, a local
+      # HTTP stand-in, and a unix-socket sentinel that must never be contacted),
+      # needs only the client this job already built, and runs in seconds. It
+      # also lives in the `integration-tests` make target, which no workflow
+      # invokes — without this step the guarantee is unenforced in CI.
+      - name: Thin-client remote exclusivity
+        run: python3 scripts/test-thin-client-remote-exclusive.py ./aimee
 
   build-integrity:
     runs-on: ubuntu-latest
@@ -148,7 +199,7 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
           sudo apt-get install -y -q gcc make \
-            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev \
+            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev
       - name: Build integrity
         run: cd src && make build-integrity
@@ -201,7 +252,7 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
           sudo apt-get install -y -q gcc make \
-            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev \
+            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev postgresql-client
       - name: Wait for Postgres
         run: |
@@ -211,7 +262,411 @@ jobs:
           done
           echo "Postgres did not become ready in time"; docker logs aimee-pg || true; exit 1
       - name: Unit tests
-        run: cd src && make -j$(nproc) unit-tests
+        run: |
+          # Runner image metadata is outside the repository's control. Install
+          # deterministic root-owned copies so the positive path exercises the
+          # production trust walk without depending on /usr/bin ownership/mode.
+          sudo install -d -o root -g root -m 0755 /run/aimee-test-helpers
+          for helper in cat env yes true; do
+            sudo install -o root -g root -m 0755 "$(type -P "$helper")" \
+              "/run/aimee-test-helpers/$helper"
+          done
+          sudo stat -Lc '%U:%G %a %n' /run/aimee-test-helpers \
+            /run/aimee-test-helpers/cat /run/aimee-test-helpers/env \
+            /run/aimee-test-helpers/yes /run/aimee-test-helpers/true
+          printf '%s\n' 'deterministic root-owned test fixture' | \
+            sudo tee /run/aimee-test-helpers/root-file >/dev/null
+          sudo chown root:root /run/aimee-test-helpers/root-file
+          sudo chmod 0644 /run/aimee-test-helpers/root-file
+          sudo stat -Lc '%U:%G %a %n' /run/aimee-test-helpers/root-file
+          export AIMEE_TEST_TRUSTED_CAT=/run/aimee-test-helpers/cat
+          export AIMEE_TEST_TRUSTED_ENV=/run/aimee-test-helpers/env
+          export AIMEE_TEST_TRUSTED_YES=/run/aimee-test-helpers/yes
+          export AIMEE_TEST_TRUSTED_TRUE=/run/aimee-test-helpers/true
+          export AIMEE_TEST_TRUSTED_ROOT_FILE=/run/aimee-test-helpers/root-file
+          cd src && make -j$(nproc) unit-tests build/obj/tests/p7-pkcs11-harness
+
+  # The data-plane identity mint, end to end, against a live Postgres and a live
+  # signed-HWM KMS helper.
+  #
+  # WHY THIS IS ITS OWN JOB RATHER THAN A make TARGET. The mint's one genuine
+  # failure mode so far was an UNSPECIFIED ARGUMENT EVALUATION ORDER bug that no
+  # unit test could ever have caught: the whole chain — envelope decrypt under
+  # custody, RSA-3072 parse, sign, self-verify — succeeded, and only the result
+  # mapping was wrong. Nothing short of running the real mint and looking at the
+  # returned token distinguishes that from a real crypto fault.
+  #
+  # It is NOT wired as an opt-in make target, because that pattern has already
+  # failed here: p1-rls-gate-check prints "enforced in CI" when AIMEE_TEST_PG_URL
+  # is unset, and no workflow has ever invoked it. A gate that skips by default is
+  # a gate that is off.
+  #
+  # BLOCKING. The data-plane identity mint, end to end, against a live Postgres and
+  # a live signed-HWM KMS helper.
+  #
+  # WHY THIS JOB EXISTS. The mint's one genuine failure so far was an unspecified
+  # ARGUMENT EVALUATION ORDER bug that no unit test could have caught: envelope
+  # decrypt under custody, RSA-3072 parse, sign and self-verify all SUCCEEDED, and
+  # only the result mapping was wrong. Nothing short of running the real mint and
+  # looking at the returned token distinguishes that from a crypto fault.
+  #
+  # WHY THE MINT RUNS INSIDE A CONTAINER. The provisioners mlockall so signing key
+  # material can never reach swap, which needs RLIMIT_MEMLOCK raised. Requiring the
+  # RUNNER to allow that would make this job depend on a host capability nothing in
+  # this repo controls and which changes with the runner image — a review rightly
+  # objected to it. `docker run --ulimit memlock=-1` sets the limit for the container
+  # regardless of the host, so the requirement is met by configuration rather than by
+  # hope. It is also exactly the shape this job was verified in (ubuntu:24.04, root,
+  # the pgvector container over TCP, no peer socket), so CI now runs the thing that
+  # was proven rather than an untested variation on it.
+  #
+  # --network host so the harness reaches Postgres on 127.0.0.1:5432 the same way it
+  # does locally, keeping one code path for both.
+  identity-mint-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start Postgres (pgvector) with pull retry
+        # Same image and retry rationale as unit-tests: the schema needs the vector
+        # and pg_trgm extensions, which the runner's preinstalled Postgres does not
+        # ship. A container has no postgres OS account and no peer socket, which is
+        # why the harness takes AIMEE_TEST_PG_SUPERUSER_URL.
+        run: |
+          img=pgvector/pgvector:pg18
+          for attempt in 1 2 3 4 5; do
+            docker pull "$img" && break
+            echo "docker pull $img failed (attempt $attempt/5); backing off"
+            sleep $((attempt * 10))
+          done
+          docker run -d --name aimee-mint-pg --network host \
+            -e POSTGRES_USER=aimee -e POSTGRES_PASSWORD=aimee -e POSTGRES_DB=aimee_mint_ci \
+            "$img"
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 40); do
+            docker exec aimee-mint-pg pg_isready -U aimee >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          echo "Postgres did not become ready in time"; docker logs aimee-mint-pg || true; exit 1
+      - name: Build and mint inside a memlock-capable container
+        # One step, because the build and the mint have to share the container that
+        # holds the raised limit.
+        #
+        # pkg-config, libzstd-dev and zlib1g-dev are listed EXPLICITLY and the other
+        # jobs in this file do not list them. They are not optional:
+        #   - PQ_CFLAGS comes from `pkg-config --cflags libpq`, so without pkg-config
+        #     there is no -I/usr/include/postgresql and db2/db_postgres.c fails with
+        #     "libpq-fe.h: No such file or directory" despite libpq-dev being present.
+        #   - L_CORE/L_KB link -lzstd -lz, so without those the provisioners fail at
+        #     link with "cannot find -lzstd".
+        # The other jobs survive without them only because GitHub's runner images
+        # happen to preinstall them — an undeclared dependency that holds until the
+        # image changes. Both failures are immediate in a clean container, which is how
+        # they were found.
+        run: |
+          cat > /tmp/mint-job.sh <<'JOB'
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive LC_ALL=C
+          echo "memlock soft=$(ulimit -l) hard=$(ulimit -H -l)"
+          apt-get update -q
+          apt-get install -y -q gcc make pkg-config \
+            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
+            libpq-dev postgresql-client libzstd-dev zlib1g-dev python3
+          cd /src/src
+          # The provisioner targets are ../-prefixed PATHS, not bare names; building by
+          # bare name fails with "No rule to make target". identity-mint-live has a
+          # convenience alias because it is out of `all` on purpose — a driver, not a
+          # shipped binary.
+          make -j"$(nproc)" ../aimee-kb-token-roots-provision ../aimee-kb-jwks-publish \
+                            identity-mint-live
+          cd /src
+          exec scripts/run-identity-mint-e2e.sh
+          JOB
+          docker run --rm --network host --ulimit memlock=-1 \
+            -e AIMEE_TEST_PG_SUPERUSER_URL=postgres://aimee:aimee@127.0.0.1:5432/aimee_mint_ci \
+            -v "$PWD:/src" -v /tmp/mint-job.sh:/tmp/mint-job.sh:ro \
+            ubuntu:24.04 bash /tmp/mint-job.sh
+
+  # BLOCKING. The OIDC relying-party login against a REAL identity provider.
+  #
+  # WHY A SEPARATE JOB FROM THE UNIT SUITE. Every unit test stubs the token-endpoint
+  # POST. That is right for them — a socket in a unit test is a flake — but it left a
+  # class of defect entirely uncovered, and one was found the first time this ran for
+  # real: kb's HTTP client discarded every non-2xx body, so the token exchange's DENIED
+  # result was UNREACHABLE and every identity-provider refusal surfaced as
+  # "unparseable response". A unit test cannot see that, because a stub returns
+  # whatever it is told to.
+  #
+  # It is also the ONLY thing covering `.deliver_error_body = 1` in the exchange:
+  # removing that line passes the entire unit suite, and is caught here.
+  #
+  # What this exercises that nothing else does: a real TLS handshake trusted via the
+  # system CA bundle only, the IdP echoing kb's state, a real client-secret-basic form
+  # POST, a real RS256 id_token verified by KID against a live JWKS that also carries
+  # an encryption key, the audience override, the nonce arriving inside a signed
+  # payload, and the IdP refusing both a replayed code and a wrong PKCE verifier.
+  oidc-login-live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        # pkg-config, libzstd-dev and zlib1g-dev for the same reasons as the mint job:
+        # PQ_CFLAGS comes from pkg-config, and L_KB links -lzstd -lz.
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
+          sudo apt-get install -y -q gcc make pkg-config \
+            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
+            libpq-dev libzstd-dev zlib1g-dev python3 curl ca-certificates
+      - name: Start the identity provider
+        id: idp
+        run: |
+          out=$(sudo bash scripts/oidc-live-idp-up.sh /tmp/aimee-oidc-idp)
+          echo "$out"
+          echo "$out" | grep '^CA_FILE=' >> "$GITHUB_OUTPUT"
+      - name: Trust the IdP's CA, and resolve its name
+        # kb's egress client anchors trust ONLY in the system bundle (it ignores
+        # SSL_CERT_FILE on purpose), so the CA goes into the bundle rather than an env
+        # var. /etc/hosts because the certificate names idp.aimee.test and the client
+        # verifies against that name.
+        run: |
+          sudo cp "${{ steps.idp.outputs.CA_FILE }}" /usr/local/share/ca-certificates/aimee-test-idp-ca.crt
+          sudo update-ca-certificates
+          echo "127.0.0.1 idp.aimee.test" | sudo tee -a /etc/hosts
+      - name: Build the live driver
+        # Out of `all` on purpose: a driver, not a shipped binary. It links the real
+        # token-exchange POST, which is why that call lives in its own translation unit
+        # — everything else links the codec without dragging in TLS.
+        run: cd src && make -j$(nproc) oidc-login-live
+      - name: The login, end to end, against the real IdP
+        run: sudo -E bash scripts/run-oidc-login-live.sh 127.0.0.1
+      - name: IdP logs on failure
+        if: failure()
+        run: docker logs aimee-oidc-idp 2>&1 | tail -60
+
+  # BLOCKING. Does a minted identity token's TIER actually gate a real write?
+  #
+  # WHY IT IS HERE. This is the sentence acceptance §11 opens with, and until this
+  # job nothing in CI asked it. identity-mint-e2e mints a token and checks its
+  # STRUCTURE, then discards it — it never presents one to a server. The unit tests
+  # verify tokens with the JWKS handed to them directly. The grant rigs drive the
+  # admin routes over UDS, which is structurally EXEMPT from the gate. So every
+  # green build so far proved grant ADMINISTRATION and left ENFORCEMENT — the point
+  # of the feature — untested.
+  #
+  # It is blocking because the failure it catches is silent: a gate that stops
+  # refusing still returns 200, and every other job stays green.
+  #
+  # Needs a real Postgres (kb will not boot without one) and root: the JWKS trust
+  # bundle must be a root-owned 0600 single-link file or the server refuses to load
+  # it, which is a property worth keeping rather than relaxing for CI.
+  write-tier-enforce-live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start Postgres (pgvector) with pull retry
+        run: |
+          img=pgvector/pgvector:pg18
+          for attempt in 1 2 3 4 5; do
+            docker pull "$img" && break
+            echo "docker pull $img failed (attempt $attempt/5); backing off"
+            sleep $((attempt * 10))
+          done
+          docker run -d --name aimee-enforce-pg --network host \
+            -e POSTGRES_USER=aimee -e POSTGRES_PASSWORD=aimee -e POSTGRES_DB=aimee_enforce_ci \
+            "$img"
+      - name: Install dependencies
+        # pkg-config, libzstd-dev and zlib1g-dev for the same reasons as the mint job:
+        # PQ_CFLAGS comes from pkg-config, and L_KB/L_SERVER link -lzstd -lz.
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
+          sudo apt-get install -y -q gcc make pkg-config \
+            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
+            libpq-dev postgresql-client libzstd-dev zlib1g-dev python3 curl ca-certificates
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 40); do
+            docker exec aimee-enforce-pg pg_isready -U aimee >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          echo "Postgres did not become ready in time"; docker logs aimee-enforce-pg || true; exit 1
+      - name: Build the stack and the enforcement driver
+        # aimee-kb FORKS aimee-kb-resolver from beside its own executable, so `all` is
+        # required rather than just the three obvious binaries — that omission is what
+        # broke oidc-login-live on its first real runner while passing locally.
+        # The driver target is a ../-prefixed PATH with a convenience alias; it is out
+        # of `all` on purpose, being a rig and not a shipped binary.
+        run: cd src && make -j"$(nproc)" all && make -j"$(nproc)" write-tier-enforce-live
+      - name: The tier gate, end to end
+        # Root for the trust bundle; -E so the build's environment survives sudo. The
+        # connecting role must be a superuser (the pgvector image's POSTGRES_USER is
+        # one) because the rig provisions its own throwaway database and extensions.
+        run: sudo -E bash scripts/run-write-tier-enforce-live.sh postgres://aimee:aimee@127.0.0.1:5432/aimee_enforce_ci
+      - name: Postgres logs on failure
+        if: failure()
+        run: docker logs aimee-enforce-pg 2>&1 | tail -60
+
+  # BLOCKING. The PAM half of acceptance §11, against a real PAM stack.
+  #
+  # WHY IT IS HERE. §11 requires the happy path on BOTH identity paths. OIDC has a
+  # live rig and a blocking job; PAM had neither. Its only coverage is
+  # test_kb_http_identity_login.c, which cannot call PAM at all — so "does this
+  # authenticate a real OS user on a real host?" was never asked. §10 phase 5
+  # flagged precisely this ("a working pam_unix-backed service file and two known
+  # test users") and it was never closed.
+  #
+  # The failure modes are ones no unit test can see: wrong PAM service name, missing
+  # service file, or kb unable to read /etc/shadow. Each returns "authentication
+  # failed" for EVERY user — deliberately indistinguishable from a wrong password,
+  # which is exactly what makes it easy to ship broken and hard to notice.
+  #
+  # It needs no vault chain: post_login_pam checks the password BEFORE filing a mint
+  # intent, so a 401 (credential rejected) separates cleanly from a 403 (accepted,
+  # then refused for want of a grant). Runner-created throwaway accounts and a
+  # Postgres for kb to boot against are the whole fixture.
+  pam-login-live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start Postgres (pgvector) with pull retry
+        run: |
+          img=pgvector/pgvector:pg18
+          for attempt in 1 2 3 4 5; do
+            docker pull "$img" && break
+            echo "docker pull $img failed (attempt $attempt/5); backing off"
+            sleep $((attempt * 10))
+          done
+          docker run -d --name aimee-pam-pg --network host \
+            -e POSTGRES_USER=aimee -e POSTGRES_PASSWORD=aimee -e POSTGRES_DB=aimee_pam_ci \
+            "$img"
+      - name: Install dependencies
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
+          sudo apt-get install -y -q gcc make pkg-config \
+            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
+            libpq-dev postgresql-client libzstd-dev zlib1g-dev python3 curl ca-certificates \
+            libpam-modules passwd
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 40); do
+            docker exec aimee-pam-pg pg_isready -U aimee >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          echo "Postgres did not become ready in time"; docker logs aimee-pam-pg || true; exit 1
+      - name: Build the stack
+        # `all` rather than aimee-kb alone: kb forks aimee-kb-resolver from beside its
+        # own executable.
+        run: cd src && make -j"$(nproc)" all
+      - name: PAM login, end to end, against real host accounts
+        # Root because pam_unix reads /etc/shadow and the rig creates and deletes
+        # throwaway accounts. It restores every piece of host state it touches.
+        run: sudo -E bash scripts/run-pam-login-live.sh postgres://aimee:aimee@127.0.0.1:5432/aimee_pam_ci
+      - name: Postgres logs on failure
+        if: failure()
+        run: docker logs aimee-pam-pg 2>&1 | tail -60
+
+  # BLOCKING. The three §11 criteria that were nearly shipped as "reviewer decides".
+  #
+  # WHY IT IS HERE. Revocation lag, CSRF on the PAM login, and the startup warning
+  # for a retired remote_writes were all filed as "not proven" and left to a
+  # reviewer. That was wrong: every one of them is measurable with the same
+  # environment the other live rigs stand up, and none needs the vault/KMS chain.
+  # Two of the three turned out to be MET all along — the startup warning existed
+  # and I had grepped the wrong file, because aimee-server logs to
+  # $AIMEE_HOME/server.log and not to stdout.
+  #
+  # It uses scripts/lib/aimee-live-env.sh, the shared environment, rather than a
+  # fourth private copy of the boot recipe.
+  authz-residual-live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start Postgres (pgvector) with pull retry
+        run: |
+          img=pgvector/pgvector:pg18
+          for attempt in 1 2 3 4 5; do
+            docker pull "$img" && break
+            echo "docker pull $img failed (attempt $attempt/5); backing off"
+            sleep $((attempt * 10))
+          done
+          docker run -d --name aimee-resid-pg --network host \
+            -e POSTGRES_USER=aimee -e POSTGRES_PASSWORD=aimee -e POSTGRES_DB=aimee_resid_ci \
+            "$img"
+      - name: Install dependencies
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
+          sudo apt-get install -y -q gcc make pkg-config \
+            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
+            libpq-dev postgresql-client libzstd-dev zlib1g-dev python3 curl ca-certificates
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 40); do
+            docker exec aimee-resid-pg pg_isready -U aimee >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          echo "Postgres did not become ready in time"; docker logs aimee-resid-pg || true; exit 1
+      - name: Build the stack
+        run: cd src && make -j"$(nproc)" all
+      - name: Revocation, CSRF and the startup warning, measured
+        run: sudo -E bash scripts/run-authz-residual-live.sh postgres://aimee:aimee@127.0.0.1:5432/aimee_resid_ci
+      - name: Postgres logs on failure
+        if: failure()
+        run: docker logs aimee-resid-pg 2>&1 | tail -60
+
+  # BLOCKING. The P1 DB-layer tenancy-isolation gate.
+  #
+  # WHY IT IS HERE NOW. scripts/run-p1-rls-gate.sh has existed and passed for a long
+  # time, and NO WORKFLOW HAS EVER INVOKED IT — its make target printed
+  # "enforced in CI" while nothing enforced it. I corrected that message earlier in this
+  # branch and left the gate unwired as out of scope.
+  #
+  # Then it caught a real authorization regression: a new SQL function declared with
+  # DROP FUNCTION IF EXISTS and the same signature as a shipped one silently replaced
+  # it and swapped its authorization from admin-or-team-lead to owner-only. The build,
+  # the full unit suite and make lint all passed. Only this gate failed, with
+  # "per-user-write-tier-rls-test.sql:199: ERROR: grant administration denied".
+  #
+  # A gate that catches an authorization regression nothing else can see does not belong
+  # behind somebody remembering to run it.
+  #
+  # It needs a real Postgres with pgvector and pg_trgm — RLS cannot be enforced by the
+  # SQLite shim — and a superuser, because it creates a throwaway database, extensions
+  # and the three-role split.
+  p1-rls-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start Postgres (pgvector) with pull retry
+        run: |
+          img=pgvector/pgvector:pg18
+          for attempt in 1 2 3 4 5; do
+            docker pull "$img" && break
+            echo "docker pull $img failed (attempt $attempt/5); backing off"
+            sleep $((attempt * 10))
+          done
+          docker run -d --name aimee-rls-pg --network host \
+            -e POSTGRES_USER=aimee -e POSTGRES_PASSWORD=aimee -e POSTGRES_DB=aimee_rls_ci \
+            "$img"
+      - name: Install dependencies
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
+          sudo apt-get install -y -q postgresql-client python3
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 40); do
+            docker exec aimee-rls-pg pg_isready -U aimee >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          echo "Postgres did not become ready in time"; docker logs aimee-rls-pg || true; exit 1
+      - name: P1 RLS isolation gate
+        # The connecting role must be a superuser; the pgvector image's POSTGRES_USER is
+        # one. The script provisions its own throwaway database, so nothing here needs
+        # cleaning up between runs.
+        run: bash scripts/run-p1-rls-gate.sh postgres://aimee:aimee@127.0.0.1:5432/aimee_rls_ci
 
   init-migrate-service-test:
     runs-on: ubuntu-latest
@@ -235,7 +690,7 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
           sudo apt-get install -y -q gcc make \
-            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev \
+            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev
       - name: Init/migrate service routing smoke test
         run: cd src && make -j$(nproc) init-migrate-service-test
@@ -252,22 +707,38 @@ jobs:
           #  (1) bare `choco install mingw` flakes ~50% on the Chocolatey CDN;
           #  (2) the choco package's gcc path changes between versions (v15.2.0
           #      moved it), so a hardcoded `...\mingw64\bin` breaks.
-          # Prefer the MSYS2 mingw64 toolchain pre-installed on the runner image
-          # (no network); otherwise choco-install with retries and *discover* the
-          # gcc.exe location instead of hardcoding it.
+          # Prefer a complete pre-installed MSYS2 toolchain (no network). Runner
+          # images have moved between mingw64 and ucrt64, so probe both. If neither
+          # is complete, use MSYS2's own package manager before falling back to
+          # Chocolatey; a Chocolatey outage must not be the only installation path.
           function Find-MingwBin {
-            if (Test-Path "C:\msys64\mingw64\bin\gcc.exe") { return "C:\msys64\mingw64\bin" }
+            foreach ($candidate in @("C:\msys64\ucrt64\bin", "C:\msys64\mingw64\bin")) {
+              if ((Test-Path "$candidate\gcc.exe") -and
+                  (Test-Path "$candidate\mingw32-make.exe")) { return $candidate }
+            }
             $g = Get-ChildItem -Path "C:\ProgramData\chocolatey\lib\mingw","C:\ProgramData\mingw64" `
                    -Recurse -Filter gcc.exe -ErrorAction SilentlyContinue |
                  Where-Object { $_.FullName -match 'mingw64' } | Select-Object -First 1
-            if ($g) { return (Split-Path $g.FullName) }
+            if ($g) {
+              $candidate = Split-Path $g.FullName
+              if (Test-Path "$candidate\mingw32-make.exe") { return $candidate }
+            }
             return $null
           }
           $bin = Find-MingwBin
+          $pacman = "C:\msys64\usr\bin\pacman.exe"
+          if (-not $bin -and (Test-Path $pacman)) {
+            for ($i = 0; $i -lt 3 -and -not $bin; $i++) {
+              & $pacman -Sy --noconfirm --needed `
+                mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-make
+              if ($LASTEXITCODE -ne 0) { Start-Sleep (15 * ($i + 1)) }
+              $bin = Find-MingwBin
+            }
+          }
           if (-not $bin) {
             for ($i = 0; $i -lt 3 -and -not $bin; $i++) {
               choco install mingw -y --no-progress
-              if ($LASTEXITCODE -ne 0) { Start-Sleep 15 }
+              if ($LASTEXITCODE -ne 0) { Start-Sleep (15 * ($i + 1)) }
               $bin = Find-MingwBin
             }
           }
@@ -290,7 +761,7 @@ jobs:
         run: cmake -B build -G "MinGW Makefiles" -DAIMEE_THIN_CLIENT=ON -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF
 
       # Windows ships only the thin client (aimee.exe). aimee-server, aimee-kb,
-      # aimee-gateway, and aimee-webchat are Linux/Docker components and are not
+      # aimee-gateway, and aimee-runtime-web are Linux/Docker components and are not
       # built here, so the MinGW runner needs no libpq/zstd/OpenSSL.
       - name: Build the thin client
         run: cmake --build build --parallel 2 --target aimee
@@ -316,11 +787,44 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install MinGW-w64
-        run: choco install mingw
-      - name: Add MinGW to PATH
-        shell: powershell
-        run: echo "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Set up MinGW-w64
+        shell: pwsh
+        run: |
+          function Find-MingwBin {
+            foreach ($candidate in @("C:\msys64\ucrt64\bin", "C:\msys64\mingw64\bin")) {
+              if ((Test-Path "$candidate\gcc.exe") -and
+                  (Test-Path "$candidate\mingw32-make.exe")) { return $candidate }
+            }
+            $g = Get-ChildItem -Path "C:\ProgramData\chocolatey\lib\mingw","C:\ProgramData\mingw64" `
+                   -Recurse -Filter gcc.exe -ErrorAction SilentlyContinue |
+                 Where-Object { $_.FullName -match 'mingw64' } | Select-Object -First 1
+            if ($g) {
+              $candidate = Split-Path $g.FullName
+              if (Test-Path "$candidate\mingw32-make.exe") { return $candidate }
+            }
+            return $null
+          }
+          $bin = Find-MingwBin
+          $pacman = "C:\msys64\usr\bin\pacman.exe"
+          if (-not $bin -and (Test-Path $pacman)) {
+            for ($i = 0; $i -lt 3 -and -not $bin; $i++) {
+              & $pacman -Sy --noconfirm --needed `
+                mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-make
+              if ($LASTEXITCODE -ne 0) { Start-Sleep (15 * ($i + 1)) }
+              $bin = Find-MingwBin
+            }
+          }
+          if (-not $bin) {
+            for ($i = 0; $i -lt 3 -and -not $bin; $i++) {
+              choco install mingw -y --no-progress
+              if ($LASTEXITCODE -ne 0) { Start-Sleep (15 * ($i + 1)) }
+              $bin = Find-MingwBin
+            }
+          }
+          if (-not $bin) { Write-Error "MinGW gcc.exe and mingw32-make.exe not found"; exit 1 }
+          Write-Host "Using MinGW at $bin"
+          & "$bin\gcc.exe" --version
+          echo "$bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       - name: Download SQLite amalgamation
         shell: powershell
         run: |
@@ -442,7 +946,7 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
           sudo apt-get install -y -q gcc make \
-            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev \
+            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev
       - name: Memory retrieval eval (corpus + regression check)
         run: cd src && make -j$(nproc) memory-retrieval-eval-check
@@ -472,7 +976,7 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
           sudo apt-get install -y -q gcc make \
-            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev \
+            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev
       - name: Build PR benchmark binary
         run: |
@@ -573,7 +1077,7 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
           sudo apt-get install -y -q gcc make \
-            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev \
+            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev
       - name: Thin-client adoption E2E
         run: scripts/aimee-thinclient-adoption-e2e.sh
@@ -605,9 +1109,28 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
           sudo apt-get install -y -q gcc make git \
-            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libpq-dev
+            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libpq-dev libp11-kit-dev
       - name: Build + run the opt-in tree-sitter test
         run: |
           cd src
           make AIMEE_TREESITTER=1 build/obj/tests/unit-test-code-treesitter
           ./build/obj/tests/unit-test-code-treesitter
+
+  vault-pkcs11-token:
+    name: vault-pkcs11-token
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          sudo apt-get install -y -q gcc make \
+            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
+            libpq-dev softhsm2 opensc
+      - name: Run the SoftHSM2 PKCS#11 custody gate (must not skip)
+        env:
+          AIMEE_PKCS11_GATE_REQUIRE: "1"
+        run: bash scripts/p7_pkcs11_softhsm_test.sh

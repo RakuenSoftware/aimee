@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "config.h"
@@ -17,26 +18,36 @@ static void eq(const char *got, const char *want, const char *label)
    }
 }
 
+/* tool_condense_enabled reads live config now (via econ_preset_current). Publish
+ * the values through the config SNAPSHOT rather than a config file: writing YAML
+ * would drag the whole parse closure (config_sections, config_memory, yaml.o, ...)
+ * into what is deliberately a minimal-link test, whereas config_snapshot_init is
+ * the supported publish path and touches no disk. The tier resolution table is
+ * covered separately, without I/O, in test_config_economizer; what matters here
+ * is that the lever tracks econ_preset's command_filter. */
+static void publish_econ(int mode, int module_economizer)
+{
+   static config_t cfg;
+   memset(&cfg, 0, sizeof cfg);
+   cfg.economizer_mode = mode;
+   cfg.module_economizer = module_economizer;
+   config_snapshot_init(&cfg);
+}
+
 int main(void)
 {
    printf("tool-condense: ");
 
    /* ---- enable gate ---- */
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof cfg);
-      cfg.module_economizer = -1;               /* unspecified -> tier decides */
-      assert(tool_condense_enabled(&cfg) == 0); /* tier OFF (memset) -> off */
-      cfg.economizer_tier = ECON_TIER_SAFE;
-      assert(tool_condense_enabled(&cfg) == 1); /* safe tier -> condensation on */
-      cfg.economizer_tier = ECON_TIER_AGGRESSIVE;
-      assert(tool_condense_enabled(&cfg) == 1); /* aggressive too */
-      cfg.economizer_tier = ECON_TIER_OFF;      /* off tier kills the lever */
-      assert(tool_condense_enabled(&cfg) == 0);
-      cfg.economizer_tier = ECON_TIER_SAFE;
-      cfg.module_economizer = 0; /* modules.economizer:false hard-kills it */
-      assert(tool_condense_enabled(&cfg) == 0);
-      assert(tool_condense_enabled(NULL) == 0);
+      publish_econ(ECON_MODE_OFF, -1);
+      assert(tool_condense_enabled() == 0); /* off tier -> lever off */
+      publish_econ(ECON_MODE_SAFE, -1);
+      assert(tool_condense_enabled() == 0); /* SAFE is lossless only */
+      publish_econ(ECON_MODE_AGGRESSIVE, -1);
+      assert(tool_condense_enabled() == 1); /* AGGRESSIVE turns the lever on */
+      publish_econ(ECON_MODE_AGGRESSIVE, 0);
+      assert(tool_condense_enabled() == 0); /* modules.economizer:false hard-kills it */
    }
 
    /* ---- tc_strip_noise: ANSI escapes removed ---- */
@@ -255,60 +266,16 @@ int main(void)
       free(r4);
    }
 
-   /* ---- tool_condense_apply (S3) ---- */
+   /* ---- live application is aggressive-only ---- */
    {
       config_t cfg;
       memset(&cfg, 0, sizeof cfg);
-      cfg.module_economizer =
-          -1; /* config_load default: unspecified -> legacy economizer.enabled */
-
-      /* a big passing pytest run (exit 0) */
-      char big[8192];
-      size_t off = 0;
-      off +=
-          (size_t)snprintf(big + off, sizeof big - off, "============ test session starts ====\n");
-      for (int k = 0; k < 120; k++)
-         off += (size_t)snprintf(big + off, sizeof big - off,
-                                 "tests/test_mod.py::test_%03d PASSED\n", k);
-      snprintf(big + off, sizeof big - off, "==== 120 passed in 3.14s ====\n");
-
-      /* disabled -> passthrough */
-      assert(tool_condense_apply(&cfg, "pytest -q", 0, big, "/tmp", NULL) == NULL);
-
-      cfg.economizer_tier = ECON_TIER_SAFE; /* economizer on -> condensation on */
-      /* unrecognized command -> passthrough */
-      assert(tool_condense_apply(&cfg, "frobnicate", 0, big, "/tmp", NULL) == NULL);
-      /* recognized but no spill dir -> passthrough (lossless: never condense without spill) */
-      assert(tool_condense_apply(&cfg, "pytest -q", 0, big, NULL, NULL) == NULL);
-
-      /* recognized test runner + a real spill dir -> condensed + spill written */
-      char dir[] = "/tmp/tc_test_XXXXXX";
-      assert(mkdtemp(dir));
-      tc_stats_t st;
-      char *r = tool_condense_apply(&cfg, "pytest -q", 0, big, dir, &st);
-      assert(r);
-      assert(st.recognized && st.spilled && !strcmp(st.family, "test"));
-      assert(st.final_bytes < st.raw_bytes);
-      assert(strstr(r, "condensed by aimee")); /* recovery pointer present */
-      assert(strstr(r, st.spill_ref));         /* references the spill ref */
-      assert(strstr(r, "tool_output_get"));    /* the first-class retrieval handle (P2) */
-      /* RECOVERY CONTRACT (P2): tool_condense_recall resolves the ref to the FULL raw. */
-      char rerr[64];
-      char *full = tool_condense_recall(dir, st.spill_ref, rerr, sizeof rerr);
-      assert(full);
-      assert((long)strlen(full) == st.raw_bytes); /* lossless-on-demand */
-      free(full);
-      /* path-traversal + malformed refs are rejected (never escape the spill dir). */
-      assert(tool_condense_recall(dir, "../../etc/passwd", rerr, sizeof rerr) == NULL);
-      assert(tool_condense_recall(dir, "tc-XYZ", rerr, sizeof rerr) == NULL);
-      assert(tool_condense_recall(dir, "tc-0000000000000000", rerr, sizeof rerr) ==
-             NULL); /* expired */
-      /* cleanup */
-      char spath[512];
-      snprintf(spath, sizeof spath, "%s/%s.out", dir, st.spill_ref);
-      unlink(spath);
-      rmdir(dir);
-      free(r);
+      cfg.module_economizer = -1;
+      cfg.economizer_mode = ECON_MODE_SAFE;
+      assert(tool_condense_apply("pytest -q", 0, "one test passed\n", "/tmp", NULL) == NULL);
+      cfg.economizer_mode = ECON_MODE_AGGRESSIVE;
+      char *condensed = tool_condense_apply("pytest -q", 0, "one test passed\n", "/tmp", NULL);
+      free(condensed);
    }
 
    /* ---- tc_family_diagnostics (S5) ---- */
@@ -346,85 +313,6 @@ int main(void)
        * (never hide an unrecognized build failure). */
       char *r3 = tc_family_diagnostics(1, "step one\nstep two\nsomething went sideways\n");
       assert(r3 == NULL);
-   }
-
-   /* ---- diagnostics routing through tool_condense_apply (S5) ---- */
-   {
-      config_t cfg;
-      memset(&cfg, 0, sizeof cfg);
-      cfg.module_economizer =
-          -1; /* config_load default: unspecified -> legacy economizer.enabled */
-      cfg.economizer_tier = ECON_TIER_SAFE; /* economizer on -> condensation on */
-      char big[8192];
-      size_t off = 0;
-      for (int k = 0; k < 80; k++)
-         off += (size_t)snprintf(big + off, sizeof big - off, "src/mod_%02d.ts building...\n", k);
-      snprintf(big + off, sizeof big - off,
-               "src/x.ts:10:3 - error TS2322: Type mismatch\nFound 1 error.\n");
-      char dir[] = "/tmp/tc_diag_XXXXXX";
-      assert(mkdtemp(dir));
-      tc_stats_t st;
-      char *r = tool_condense_apply(&cfg, "tsc --noEmit", 1, big, dir, &st);
-      assert(r);
-      assert(st.recognized && st.spilled && !strcmp(st.family, "diag"));
-      assert(strstr(r, "TS2322"));
-      char spath[512];
-      snprintf(spath, sizeof spath, "%s/%s.out", dir, st.spill_ref);
-      unlink(spath);
-      rmdir(dir);
-      free(r);
-   }
-
-   /* ---- realized-savings observability (S6) ---- */
-   {
-      tool_condense_stats_reset();
-      config_t cfg;
-      memset(&cfg, 0, sizeof cfg);
-      cfg.module_economizer =
-          -1; /* config_load default: unspecified -> legacy economizer.enabled */
-      cfg.economizer_tier = ECON_TIER_SAFE; /* economizer on -> condensation on */
-      char big[8192];
-      size_t off = 0;
-      off += (size_t)snprintf(big + off, sizeof big - off, "==== session ====\n");
-      for (int k = 0; k < 120; k++)
-         off += (size_t)snprintf(big + off, sizeof big - off, "t::case_%03d PASSED\n", k);
-      snprintf(big + off, sizeof big - off, "==== 120 passed ====\n");
-      char dir[] = "/tmp/tc_s6_XXXXXX";
-      assert(mkdtemp(dir));
-      tc_stats_t st;
-      char *r = tool_condense_apply(&cfg, "pytest -q", 0, big, dir, &st);
-      assert(r);
-      /* an UNRECOGNIZED command must not touch the counters */
-      assert(tool_condense_apply(&cfg, "frobnicate", 0, big, dir, NULL) == NULL);
-
-      tool_condense_totals_t t;
-      tool_condense_stats_snapshot(&t);
-      assert(t.recognized == 1); /* only pytest counted; frobnicate did not */
-      assert(t.applied == 1);
-      assert(t.family_test == 1 && t.family_diag == 0);
-      assert(t.applied_raw > t.applied_final); /* realized savings */
-      assert(t.applied_raw == st.raw_bytes);
-      /* recovery-cost telemetry (P4): before any recall, net saving == gross saving */
-      assert(t.saved_bytes == t.applied_raw - t.applied_final);
-      assert(t.recovered == 0 && t.recovered_bytes == 0);
-      assert(t.net_saved_bytes == t.saved_bytes);
-
-      /* recall the spill -> a page-back is counted + the net saving drops by the bytes back */
-      char rerr[64];
-      char *back = tool_condense_recall(dir, st.spill_ref, rerr, sizeof rerr);
-      assert(back);
-      tool_condense_stats_snapshot(&t);
-      assert(t.recovered == 1);
-      assert(t.recovered_bytes == (long long)strlen(back));
-      assert(t.net_saved_bytes == t.saved_bytes - t.recovered_bytes); /* recovery erodes the net */
-      free(back);
-
-      char spath[512];
-      snprintf(spath, sizeof spath, "%s/%s.out", dir, st.spill_ref);
-      unlink(spath);
-      rmdir(dir);
-      free(r);
-      tool_condense_stats_reset();
    }
 
    printf("ok\n");

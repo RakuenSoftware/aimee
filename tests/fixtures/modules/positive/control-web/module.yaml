@@ -1,0 +1,7 @@
+{
+  "descriptor_version": 1,
+  "id": "control-web",
+  "dependencies": ["config", "gateway"],
+  "enabled_by_default": false,
+  "runtime_toggle": {"supported": true}
+}

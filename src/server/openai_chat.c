@@ -18,33 +18,33 @@
 #include "server_http.h"
 #include "openai_shape.h"
 #include "ingress_preinject.h"
-#include "gateway_pipeline.h"         /* gw_request_t + gw_pipeline_run_request — shared seam */
-#include "gw_stage_memory.h"          /* gw_stage_memory + gw_memory_system_prompt (P3) */
-#include "gw_stage_registry.h"        /* Slice 7: config-driven stage catalog */
-#include "gw_stage_governance.h"      /* response seam Slice 2: togglable governance */
-#include "dogfood.h"                  /* dogfood_autolabel_next_turn_live */
-#include "learning_implicit.h"        /* learning_implicit_detect_turn */
-#include "retrieval_outcome_bridge.h" /* retrieval_outcome_bridge_on_autolabel */
-#include "openai_responses_store.h"   /* previous_response_id continuation store */
-#include "openai_runs_store.h"        /* GET /v1/runs/{id} record store */
+#include <aimee/gateway/gateway_pipeline.h> /* gw_request_t + gw_pipeline_run_request — shared seam */
+#include "gw_stage_memory.h"                /* gw_stage_memory + gw_memory_system_prompt (P3) */
+#include "gw_stage_registry.h"              /* Slice 7: config-driven stage catalog */
+#include "gw_stage_governance.h"            /* response seam Slice 2: togglable governance */
+#include "dogfood.h"                        /* dogfood_autolabel_next_turn_live */
+#include "learning_implicit.h"              /* learning_implicit_detect_turn */
+#include "retrieval_outcome_bridge.h"       /* retrieval_outcome_bridge_on_autolabel */
+#include "openai_responses_store.h"         /* previous_response_id continuation store */
+#include "openai_runs_store.h"              /* GET /v1/runs/{id} record store */
 #include "aimee.h" /* EMBED_MAX_DIM, MAX_PATH_LEN (used by agent_types.h below) */
 #include "aimee_errors.h"
 #include "config.h" /* config_t, config_load */
 #include "agent_config.h"
 #include "agent_exec.h"
-#include "economizer.h"
+#include "agent_protocol.h"                  /* parsed_response_t, message_history_repair */
+#include <aimee/delegates/delegate_driver.h> /* single provider step for the Codex proxy */
+#include "http_retry.h"
+#include "economizer_wire_snapshot.h"
 #include "gateway_mutate_wire.h"
 #include "server_http_identity.h"
-#include "agent_protocol.h"  /* parsed_response_t, message_history_repair */
-#include "delegate_driver.h" /* single provider step for the Codex proxy */
-#include "http_retry.h"
 #include "cJSON.h"
 #include "agent_tools.h" /* agent_tools_set_tool_event_cb — /v1/runs tool events */
 #include "agent_types.h"
-#include "gateway_policy.h" /* gateway_policy_apply_request — tool-policing stage */
-#include "router_advise.h"  /* gw_stage_router — the request->workflow seam */
-#include "aimee_ir_serve.h" /* IR-routed /v1/responses parse */
-#include "memory.h"         /* memory_embed_text */
+#include <aimee/gateway/gateway_policy.h> /* gateway_policy_apply_request — tool-policing stage */
+#include "router_advise.h"                /* gw_stage_router — the request->workflow seam */
+#include "aimee_ir_serve.h"               /* IR-routed /v1/responses parse */
+#include "memory.h"                       /* memory_embed_text */
 #include "request_context.h"
 #include "response_dedup.h"
 #include "token_tracker.h"
@@ -103,8 +103,7 @@ static void record_avoided_turn(const char *model, double avoided_cost)
 static int dedup_eligible(char *key, size_t key_cap, const agent_t *ag, const char *endpoint,
                           const char *body, const char *context, int *ttl_out)
 {
-   config_t cfg;
-   if (config_load(&cfg) != 0 || !cfg.dedup_enabled)
+   if (!config_present() || !config_dedup_enabled())
       return 0;
    const char *idem = request_context_idempotency_key();
    if (!idem || !idem[0])
@@ -112,8 +111,9 @@ static int dedup_eligible(char *key, size_t key_cap, const agent_t *ag, const ch
    const request_context_t *rc = request_context_get();
    /* Behaviour-affecting config flags that can change generation for this path. */
    char flags[96];
-   snprintf(flags, sizeof(flags), "cs%d rc%d pi%d dw%d", cfg.cache_shaping_enabled,
-            cfg.reasoning_cap_enabled, cfg.ingress_preinject_enabled, cfg.dedup_window_seconds);
+   snprintf(flags, sizeof(flags), "cs%d rc%d pi%d dw%d", config_cache_shaping_enabled(),
+            config_reasoning_cap_enabled(), config_ingress_preinject_enabled(),
+            config_dedup_window_seconds());
    response_dedup_key_inputs_t in = {
        .principal = request_context_principal(),
        .source = rc ? rc->source : "",
@@ -128,10 +128,17 @@ static int dedup_eligible(char *key, size_t key_cap, const agent_t *ag, const ch
    };
    response_dedup_key(&in, key, key_cap);
    if (ttl_out)
-      *ttl_out =
-          cfg.dedup_window_seconds > 0 ? cfg.dedup_window_seconds : RESPONSE_DEDUP_TTL_SECONDS;
+      *ttl_out = config_dedup_window_seconds() > 0 ? config_dedup_window_seconds()
+                                                   : RESPONSE_DEDUP_TTL_SECONDS;
    return 1;
 }
+
+/* Defined below, after the gateway pipeline they depend on; the chat tool-relay
+ * branch in run_completion is their first caller. */
+static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *tools,
+                                  const char *system_prompt, int max_tokens, double temperature,
+                                  parsed_response_t *out);
+static int openai_governance_enabled(void);
 
 /* Shared body for both endpoints. chat != 0 selects the chat.completion shape
  * (and chat-request parse); otherwise the legacy text_completion shape. */
@@ -202,6 +209,78 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
       openai_format_error_code(resp, cap, "server_error", "no agent configured",
                                AIMEE_ERR_NO_PRIMARY);
       return 503;
+   }
+
+   /* Tool relay: when the caller supplies `tools`, this endpoint must return the
+    * model's tool_calls for the CALLER to execute — the stateless half of the
+    * OpenAI contract that every agentic client depends on. Without it a client
+    * sees a provider that cannot call tools and refuses to run at all.
+    *
+    * This does NOT make the endpoint agentic: aimee still executes nothing and
+    * holds no loop state (that remains /v1/runs). agent_execute_messages is the
+    * same passthrough the /v1/responses ingress uses, so inbound tools go
+    * through the shared tool-policing stage rather than around it.
+    *
+    * Dedup is skipped here: its key does not cover `tools`, so a cached
+    * tool-free reply must never be replayed for a tool-bearing request. */
+   if (chat)
+   {
+      char *instructions = NULL;
+      cJSON *messages = NULL, *tools = NULL;
+      if (openai_split_chat_request(body, &instructions, &messages, &tools) == 0 && tools)
+      {
+         parsed_response_t parsed;
+         int trc = agent_execute_messages(
+             ag, messages, tools, instructions ? instructions : pi_env,
+             openai_request_int(body, "max_tokens", OPENAI_CHAT_MAX_TOKENS, 32768),
+             openai_request_double(body, "temperature", OPENAI_CHAT_TEMPERATURE, 2.0), &parsed);
+         free(instructions);
+         cJSON_Delete(messages);
+         cJSON_Delete(tools);
+         free(pi_env);
+         free(prompt);
+
+         if (trc != 0)
+         {
+            agent_free_parsed_response(&parsed);
+            openai_format_error(resp, cap, "upstream_error", "completion failed");
+            return 502;
+         }
+
+         if (agent_ingress_accounting_enabled())
+            agent_ingress_record_cost(ag->name, ag->model, model, parsed.stop_reason,
+                                      parsed.prompt_tokens, parsed.completion_tokens,
+                                      parsed.cache_write_tokens, parsed.cache_read_tokens,
+                                      "openai-ingress", NULL);
+
+         /* Same response-side policing the streaming path runs, so a denied
+          * subagent-spawning call cannot reach an external caller. */
+         if (parsed.is_tool_call && parsed.call_count > 0 && gateway_prevent_subagents_enabled())
+            (void)gw_response_run_governance(&parsed, openai_governance_enabled());
+
+         long tcreated = (long)time(NULL);
+         char tid[48];
+         snprintf(tid, sizeof(tid), "chatcmpl-%ld", tcreated);
+
+         int tlen;
+         if (parsed.is_tool_call && parsed.call_count > 0)
+            tlen =
+                openai_format_chat_completion_tool_calls(tid, model, &parsed, tcreated, resp, cap);
+         else
+            tlen = openai_format_chat_completion(tid, model, parsed.content ? parsed.content : "",
+                                                 tcreated, parsed.prompt_tokens,
+                                                 parsed.completion_tokens, resp, cap);
+         agent_free_parsed_response(&parsed);
+         if (tlen < 0)
+         {
+            openai_format_error(resp, cap, "server_error", "response did not fit the buffer");
+            return 500;
+         }
+         return 200;
+      }
+      free(instructions);
+      cJSON_Delete(messages);
+      cJSON_Delete(tools);
    }
 
    /* §4 short-window dedup: serve a re-sent identical request (same account/source
@@ -467,11 +546,7 @@ static int embeddings_handler(const char *body, char *resp, int cap)
                           "invalid embeddings request: expected `input` string or array");
       return 400;
    }
-
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   config_load(&cfg);
-   const char *cmd = config_embedding_command(&cfg, NULL);
+   const char *cmd = config_embedding_command_current(NULL);
 
    float **vecs = calloc((size_t)n, sizeof(float *));
    int *dims = calloc((size_t)n, sizeof(int));
@@ -494,7 +569,7 @@ static int embeddings_handler(const char *body, char *resp, int cap)
          ok = 0;
          break;
       }
-      int d = memory_embed_text(inputs[i], cmd, vecs[i], EMBED_MAX_DIM);
+      int d = memory_embed_text(inputs[i], cmd, EMBED_INPUT_DOCUMENT, vecs[i], EMBED_MAX_DIM);
       if (d <= 0)
       {
          ok = 0;
@@ -747,6 +822,68 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
    double temperature = openai_request_double(body, "temperature", OPENAI_CHAT_TEMPERATURE, 2.0);
    int max_tokens = openai_request_int(body, "max_tokens", OPENAI_CHAT_MAX_TOKENS, 32768);
 
+   /* Tool relay, streaming half. Agentic clients stream by default, so without
+    * this the buffered relay in run_completion would never be reached by them.
+    * Same statelessness contract as that branch. This handler already computes
+    * the whole reply before chunking it, so the calls ship in a single delta
+    * followed by a tool_calls finish frame. */
+   {
+      char *instructions = NULL;
+      cJSON *messages = NULL, *tools = NULL;
+      if (openai_split_chat_request(body, &instructions, &messages, &tools) == 0 && tools)
+      {
+         parsed_response_t parsed;
+         int trc = agent_execute_messages(ag, messages, tools, instructions, max_tokens,
+                                          temperature, &parsed);
+         free(instructions);
+         cJSON_Delete(messages);
+         cJSON_Delete(tools);
+         free(prompt);
+
+         emit_chunk(emit, ctx, id, model, created, 1, NULL, 0); /* role frame */
+         if (trc != 0)
+         {
+            emit_chunk(emit, ctx, id, model, created, 0, "completion failed", 0);
+            emit_chunk(emit, ctx, id, model, created, 0, NULL, 1);
+            agent_free_parsed_response(&parsed);
+            return 0;
+         }
+
+         if (agent_ingress_accounting_enabled())
+            agent_ingress_record_cost(ag->name, ag->model, model, parsed.stop_reason,
+                                      parsed.prompt_tokens, parsed.completion_tokens,
+                                      parsed.cache_write_tokens, parsed.cache_read_tokens,
+                                      "openai-ingress", NULL);
+
+         if (parsed.is_tool_call && parsed.call_count > 0 && gateway_prevent_subagents_enabled())
+            (void)gw_response_run_governance(&parsed, openai_governance_enabled());
+
+         if (parsed.is_tool_call && parsed.call_count > 0)
+         {
+            char frame[4096];
+            if (parsed.content && parsed.content[0])
+               emit_chunk(emit, ctx, id, model, created, 0, parsed.content, 0);
+            if (openai_format_chat_chunk_tool_calls(id, model, created, &parsed, frame,
+                                                    sizeof(frame)) > 0)
+               emit(ctx, frame);
+            if (openai_format_chat_chunk_finish(id, model, created, "tool_calls", frame,
+                                                sizeof(frame)) > 0)
+               emit(ctx, frame);
+         }
+         else
+         {
+            /* Policing may have dropped every call; fall back to a text turn. */
+            emit_chunk(emit, ctx, id, model, created, 0, parsed.content ? parsed.content : "", 0);
+            emit_chunk(emit, ctx, id, model, created, 0, NULL, 1);
+         }
+         agent_free_parsed_response(&parsed);
+         return 0;
+      }
+      free(instructions);
+      cJSON_Delete(messages);
+      cJSON_Delete(tools);
+   }
+
    agent_result_t result;
    memset(&result, 0, sizeof(result));
    /* P1 pre-injection: prepend the <aimee-context> envelope as the system
@@ -917,32 +1054,6 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
    if (!agent || !messages)
       return -1;
 
-   /* Context economizer (gateway seam, SHADOW-MODE ONLY): when reduce.gateway_seam
-    * is on, measure this inbound /v1/responses request's baseline + foldable
-    * opportunity and record a forecast ledger row. measure_only is forced on, so the
-    * client request — the `messages` (input) array + `system_prompt` (instructions)
-    * — is NEVER mutated (we ignore res.messages, NULL in measure-only) and is
-    * forwarded byte-identical. Done at ingress, before the gateway pipeline, so the
-    * baseline reflects the pristine client request. Fully guarded; context_reduce
-    * hard-bypasses on any internal error, so this can never perturb the response.
-    * Cheap mtime-cached config load keeps it dark by default. */
-   {
-      config_t ecfg;
-      econ_preset_t ep;
-      if (config_load(&ecfg) == 0)
-         econ_preset(&ecfg, &ep);
-      else
-         memset(&ep, 0, sizeof ep);
-      if (ep.gateway_seam)
-      {
-         reduce_result_t gw_res;
-         if (gw_economizer_measure(messages, system_prompt, agent->model, ecfg.fold_retained_msgs,
-                                   &gw_res) == 0)
-            agent_record_reduce_ledger(&gw_res, agent->model, "gateway", NULL);
-         context_reduce_result_free(&gw_res);
-      }
-   }
-
    delegate_drivers_init();
    const delegate_driver_t *driver = delegate_driver_get(agent->provider);
    if (!driver || !driver->build_request || !driver->parse_response)
@@ -1004,79 +1115,69 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
 
    int tok = agent_request_max_tokens(agent, max_tokens);
 
-   /* Economizer gateway MUTATION (primary-agent reduction, /v1/responses buffered).
-    * Default-OFF. Box the `input` messages by REFERENCE so the pristine array is never
-    * mutated/freed, run the shared buffered orchestration, and build the body from the
-    * effective (reduced or pristine) array. On a bad reduction the upstream 4xx is
-    * caught below (restore-resend from pristine); 5xx disables the session. */
+   /* AGGRESSIVE may apply the existing lossy reducer to OpenAI-family request
+    * history. SAFE never enters this path. Anthropic-backed routes remain
+    * untouched to preserve their cache prefix. */
    gw_mutate_ctx_t gwmc;
    gw_mutate_ctx_init(&gwmc);
    cJSON *mbox = NULL;
-   cJSON *eff_messages = messages;
-   /* Gateway mutation is OpenAI-only (never an Anthropic prompt-cached upstream). The
-    * /v1/responses path is OpenAI-wire, but gate defensively on the serving driver so an
-    * Anthropic-backed provider on this endpoint is still excluded. */
+   cJSON *econ_messages = messages;
    int upstream_is_anthropic = driver && driver->name && strcmp(driver->name, "anthropic") == 0;
    if (gw_mutate_upstream_ok(upstream_is_anthropic))
    {
       mbox = cJSON_CreateObject();
-      cJSON_AddItemReferenceToObject(mbox, "input", messages); /* reference: messages stays owned */
-      gw_buffered_mutate(mbox, "input", agent->model, eff_system,
-                         server_http_identity_session_hdr(), server_http_identity_bearer(),
-                         server_http_identity_principal(), &gwmc);
-      cJSON *bi = cJSON_GetObjectItemCaseSensitive(mbox, "input");
-      if (bi)
-         eff_messages = bi;
+      if (mbox)
+      {
+         cJSON_AddItemReferenceToObject(mbox, "input", messages);
+         gw_buffered_mutate(mbox, "input", agent->model, eff_system,
+                            server_http_identity_session_hdr(), server_http_identity_bearer(),
+                            server_http_identity_principal(), &gwmc);
+         cJSON *reduced = cJSON_GetObjectItemCaseSensitive(mbox, "input");
+         if (reduced)
+            econ_messages = reduced;
+      }
    }
 
    char *body =
-       openai_build_body(agent, driver, eff_messages, eff_tools, eff_system, tok, temperature);
+       openai_build_body(agent, driver, econ_messages, eff_tools, eff_system, tok, temperature);
    if (!body)
    {
       cJSON_Delete(mbox);
-      cJSON_Delete(gw_raw);
       gw_mutate_ctx_free(&gwmc);
+      cJSON_Delete(gw_raw);
+      return -1;
+   }
+
+   int economizer_active = econ_mode_current() != ECON_MODE_OFF;
+   int wire_anthropic = driver && driver->name && strcmp(driver->name, "anthropic") == 0;
+   econ_wire_route_t wire_route = wire_anthropic              ? ECON_WIRE_ANTHROPIC_MESSAGES
+                                  : strstr(url, "/responses") ? ECON_WIRE_OPENAI_RESPONSES
+                                                              : ECON_WIRE_OPENAI_CHAT;
+   econ_wire_snapshot_t *wire_snapshot = NULL;
+   econ_wire_bytes_t wire_body;
+   if (econ_wire_select(economizer_active, wire_route, body, strlen(body), &wire_snapshot,
+                        &wire_body) != 0)
+   {
+      free(body);
+      cJSON_Delete(mbox);
+      gw_mutate_ctx_free(&gwmc);
+      cJSON_Delete(gw_raw);
       return -1;
    }
 
    char *response_body = NULL;
-   config_t retry_cfg;
-   config_load(&retry_cfg);
-   int ra =
-       retry_cfg.retry_max_attempts > 0 ? retry_cfg.retry_max_attempts : HTTP_RETRY_MAX_ATTEMPTS;
-   int rb = retry_cfg.retry_base_ms > 0 ? retry_cfg.retry_base_ms : HTTP_RETRY_BASE_MS;
-   int rm = retry_cfg.retry_max_ms > 0 ? retry_cfg.retry_max_ms : HTTP_RETRY_MAX_MS;
-   /* This IS the "gateway_retry_post_with_reduction" path: it wraps
-    * http_retry_post_context (whose no-4xx-retry contract is unchanged) with a SINGLE
-    * restore-from-pristine resend on a reduction 4xx. */
-   int http_status =
-       http_retry_post_context(url, auth_header, body, &response_body, agent->timeout_ms,
-                               extra_headers, ra, rb, rm, agent->provider, agent->model, NULL);
+   int ra = config_retry_max_attempts() > 0 ? config_retry_max_attempts() : HTTP_RETRY_MAX_ATTEMPTS;
+   int rb = config_retry_base_ms() > 0 ? config_retry_base_ms() : HTTP_RETRY_BASE_MS;
+   int rm = config_retry_max_ms() > 0 ? config_retry_max_ms() : HTTP_RETRY_MAX_MS;
+   int http_status = http_retry_post_context_bytes(url, auth_header, wire_body.data, wire_body.len,
+                                                   &response_body, agent->timeout_ms, extra_headers,
+                                                   ra, rb, rm, agent->provider, agent->model, NULL);
    free(body);
+   econ_wire_snapshot_destroy(wire_snapshot);
 
-   if (gw_buffered_after_status(mbox, "input", http_status, &gwmc) == GW_POST_RESEND)
-   {
-      /* Restored pristine into mbox["input"]; rebuild the body from it and resend once. */
-      cJSON *bi = cJSON_GetObjectItemCaseSensitive(mbox, "input");
-      char *rbody = openai_build_body(agent, driver, bi ? bi : messages, eff_tools, eff_system, tok,
-                                      temperature);
-      if (rbody)
-      {
-         free(response_body);
-         response_body = NULL;
-         http_status = http_retry_post_context(url, auth_header, rbody, &response_body,
-                                               agent->timeout_ms, extra_headers, ra, rb, rm,
-                                               agent->provider, agent->model, NULL);
-         free(rbody);
-      }
-      /* If the resend body could not be rebuilt (rare OOM), fall through with the
-       * original reduction 4xx already in response_body -> the caller sees the failure
-       * (fail-safe: the session is already disabled for subsequent turns). */
-   }
-
-   cJSON_Delete(mbox); /* frees the reduced/restored array + the reference wrapper, NOT messages */
-   cJSON_Delete(gw_raw); /* kept alive so eff_system survived a resend */
+   cJSON_Delete(mbox);
    gw_mutate_ctx_free(&gwmc);
+   cJSON_Delete(gw_raw);
 
    if (http_status != 200 || !response_body)
    {
@@ -1105,8 +1206,7 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
  * deprecated env default. Cached config_load; keeps gw_stage_governance config-free. */
 static int openai_governance_enabled(void)
 {
-   config_t c;
-   int tri = (config_load(&c) == 0) ? c.module_governance : -1;
+   int tri = config_present() ? config_module_governance() : -1;
    return config_module_enabled(tri, gw_response_governance_enabled());
 }
 

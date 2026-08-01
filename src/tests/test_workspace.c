@@ -6,6 +6,24 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "aimee.h"
+
+/* workspace_active_root reads the configured workspaces through accessors now
+ * instead of taking a config_t, so a case that wants specific workspaces has to
+ * write them to a config file it owns. Per-pid dir rather than mkdtemp on a
+ * static buffer, which fails on a second call. */
+static void write_test_config(const char *yaml)
+{
+   char dir[256], path[320];
+   snprintf(dir, sizeof(dir), "/tmp/aimee-workspace-cfg-%d", (int)getpid());
+   mkdir(dir, 0755);
+   setenv("AIMEE_HOME", dir, 1);
+   setenv("AIMEE_NO_CACHE", "1", 1);
+   snprintf(path, sizeof(path), "%s/aimee.yaml", dir);
+   FILE *f = fopen(path, "w");
+   assert(f);
+   fputs(yaml, f);
+   fclose(f);
+}
 #include "workspace.h"
 #include "worktree_gc.h"
 #include "platform_test_util.h"
@@ -139,6 +157,50 @@ int main(void)
       int count =
           workspace_discover_projects(ws, MAX_WORKSPACE_DEPTH, projects, MAX_DISCOVERED_PROJECTS);
       assert(count == 3);
+   }
+
+   /* --- webuser clone layout: why the reconciler scans PER-USER roots --- */
+   {
+      /* The GUI clone route lays repos out as <base>/webusers/<user>/<org>/<repo>.
+       * Scanning the base at the reconciler's depth bottoms out at <org> and
+       * finds nothing, which is how every GUI-cloned repo on a real deployment
+       * stayed out of the index while the wizard reported success. Scanning each
+       * per-user root instead puts the repo within reach. */
+      char base[512], user[512], org[512], repo_a[512], repo_b[512];
+      snprintf(base, sizeof(base), "%s/wu", tmpdir);
+      snprintf(user, sizeof(user), "%s/alice", base);
+      snprintf(org, sizeof(org), "%s/AnOrg", user);
+      snprintf(repo_a, sizeof(repo_a), "%s/repo-a", org);
+      snprintf(repo_b, sizeof(repo_b), "%s/repo-b", org);
+      mkdir(base, 0755);
+      mkdir(user, 0755);
+      mkdir(org, 0755);
+      create_git_repo(repo_a);
+      create_git_repo(repo_b);
+
+      char projects[MAX_DISCOVERED_PROJECTS][MAX_PATH_LEN];
+
+      /* Depth 3 from the base: base(0) user(1) org(2) repo(3) -- reachable only
+       * because the layout is exactly three deep. One more nesting level, or a
+       * base one directory higher, and the repos vanish. */
+      int from_base = workspace_discover_projects(base, 3, projects, MAX_DISCOVERED_PROJECTS);
+
+      /* From the per-user root the repos sit at depth 2, leaving real headroom.
+       * This is what the reconciler does, and it must find both. */
+      int from_user = workspace_discover_projects(user, 3, projects, MAX_DISCOVERED_PROJECTS);
+      assert(from_user == 2);
+
+      /* The failure this guards: one extra level below the scan root and the
+       * base-rooted scan goes blind while the per-user scan still works. */
+      char deep_org[512], deep_repo[512];
+      snprintf(deep_org, sizeof(deep_org), "%s/Nested", org);
+      snprintf(deep_repo, sizeof(deep_repo), "%s/repo-c", deep_org);
+      mkdir(deep_org, 0755);
+      create_git_repo(deep_repo);
+      int base_deep = workspace_discover_projects(base, 3, projects, MAX_DISCOVERED_PROJECTS);
+      int user_deep = workspace_discover_projects(user, 3, projects, MAX_DISCOVERED_PROJECTS);
+      assert(base_deep == from_base); /* the deeper repo is invisible from the base */
+      assert(user_deep == 3);         /* but not from the per-user root */
    }
 
    /* --- discover_projects: nested repos (deep directory structure) --- */
@@ -344,13 +406,11 @@ int main(void)
       assert(mkdir(project, 0755) == 0);
       assert(mkdir(nested, 0755) == 0);
 
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      snprintf(cfg.workspaces[0], sizeof(cfg.workspaces[0]), "%s", ws1);
-      snprintf(cfg.workspaces[1], sizeof(cfg.workspaces[1]), "%s", ws2);
-      cfg.workspace_count = 2;
+      char yaml[1400];
+      snprintf(yaml, sizeof(yaml), "workspaces:\n  - \"%s\"\n  - \"%s\"\n", ws1, ws2);
+      write_test_config(yaml);
 
-      assert(workspace_active_root(&cfg, nested, resolved, sizeof(resolved)) == 0);
+      assert(workspace_active_root(nested, resolved, sizeof(resolved)) == 0);
       assert(strcmp(resolved, ws2) == 0);
    }
 
@@ -361,9 +421,8 @@ int main(void)
       assert(mkdir(outside, 0755) == 0);
       assert(realpath(outside, expected) != NULL);
 
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      assert(workspace_active_root(&cfg, outside, resolved, sizeof(resolved)) == 0);
+      write_test_config("workspaces: []\n");
+      assert(workspace_active_root(outside, resolved, sizeof(resolved)) == 0);
       assert(strcmp(resolved, expected) == 0);
    }
 
@@ -377,7 +436,7 @@ int main(void)
       assert(mkdir(srcdir, 0755) == 0);
       assert(mkdir(subdir, 0755) == 0);
 
-      assert(workspace_active_root(NULL, subdir, resolved, sizeof(resolved)) == 0);
+      assert(workspace_active_root_from_cwd(subdir, resolved, sizeof(resolved)) == 0);
       assert(strcmp(resolved, repo) == 0);
    }
 
@@ -658,6 +717,73 @@ int main(void)
       assert(worktree_gc_apply(repo, cands, n, &opts) == 1);
       assert(access(wt, F_OK) != 0);             /* worktree removed under force */
       assert(branch_exists(repo, "feat/ahead")); /* unmerged branch preserved */
+   }
+
+   /* --- stable project identity: explicit manifest ids win; local UUIDs
+    *     survive checkout moves and are shared by linked git worktrees. --- */
+   {
+      char explicit_root[512], manifest[640], project[256], workspace[256];
+      snprintf(explicit_root, sizeof(explicit_root), "%s/identity-explicit", tmpdir);
+      assert(mkdir(explicit_root, 0755) == 0);
+      snprintf(manifest, sizeof(manifest), "%s/aimee.workspace.yaml", explicit_root);
+      write_text_file(manifest, "id: billing-api\n");
+      assert(workspace_repo_identity(explicit_root, project, sizeof(project), workspace,
+                                     sizeof(workspace)) == 0);
+      assert(strcmp(project, "billing-api") == 0);
+      assert(strcmp(workspace, "billing-api") == 0);
+      char tiny[4] = "x";
+      assert(workspace_repo_identity(explicit_root, tiny, sizeof(tiny), NULL, 0) != 0);
+      assert(tiny[0] == '\0');
+
+      char invalid_root[512], invalid_manifest[640], invalid_id[256] = "sentinel";
+      snprintf(invalid_root, sizeof(invalid_root), "%s/identity-invalid", tmpdir);
+      assert(mkdir(invalid_root, 0755) == 0);
+      snprintf(invalid_manifest, sizeof(invalid_manifest), "%s/aimee.workspace.yaml", invalid_root);
+      write_text_file(invalid_manifest, "id: invalid identity with spaces\n");
+      assert(workspace_repo_identity(invalid_root, invalid_id, sizeof(invalid_id), NULL, 0) != 0);
+      assert(invalid_id[0] == '\0');
+
+      char local_a[512], local_b[512], first[256], second[256], sidecar[640];
+      snprintf(local_a, sizeof(local_a), "%s/identity-local-a", tmpdir);
+      snprintf(local_b, sizeof(local_b), "%s/identity-local-b", tmpdir);
+      assert(mkdir(local_a, 0755) == 0);
+      assert(workspace_repo_identity(local_a, first, sizeof(first), NULL, 0) == 0);
+      assert(strncmp(first, "local:", 6) == 0 && strlen(first) == 42);
+      snprintf(sidecar, sizeof(sidecar), "%s/.aimee/project-id", local_a);
+      struct stat sidecar_st;
+      assert(stat(sidecar, &sidecar_st) == 0);
+      assert((sidecar_st.st_mode & 0777) == 0600);
+      assert(rename(local_a, local_b) == 0);
+      assert(workspace_repo_identity(local_b, second, sizeof(second), NULL, 0) == 0);
+      assert(strcmp(first, second) == 0);
+
+      char repo[512], wt[512], seed[640], cmd[2048], main_id[256], wt_id[256];
+      snprintf(repo, sizeof(repo), "%s/identity-git", tmpdir);
+      snprintf(wt, sizeof(wt), "%s/identity-git-wt", tmpdir);
+      init_real_git_repo(repo);
+      snprintf(seed, sizeof(seed), "%s/seed.txt", repo);
+      write_text_file(seed, "seed\n");
+      snprintf(cmd, sizeof(cmd), "git -C '%s' add seed.txt && git -C '%s' commit -q -m seed", repo,
+               repo);
+      assert(system(cmd) == 0);
+      assert(workspace_repo_identity(repo, main_id, sizeof(main_id), NULL, 0) == 0);
+      assert(strncmp(main_id, "local:", 6) == 0);
+      snprintf(cmd, sizeof(cmd), "git -C '%s' worktree add -q -b identity-wt '%s'", repo, wt);
+      assert(system(cmd) == 0);
+      assert(workspace_repo_identity(wt, wt_id, sizeof(wt_id), NULL, 0) == 0);
+      assert(strcmp(main_id, wt_id) == 0);
+      snprintf(cmd, sizeof(cmd), "git -C '%s' worktree remove -f '%s'", repo, wt);
+      assert(system(cmd) == 0);
+
+      /* Index keys never degrade to a checkout basename when persistence is
+       * impossible: that would create a second logical project silently. */
+      char missing[512], missing_project[256] = "sentinel", missing_workspace[256] = "sentinel";
+      snprintf(missing, sizeof(missing), "%s/no-such-parent/repo", tmpdir);
+      assert(workspace_repo_index_keys(missing, "legacy-workspace", missing_project,
+                                       sizeof(missing_project), missing_workspace,
+                                       sizeof(missing_workspace)) != 0);
+      assert(missing_project[0] == '\0');
+      assert(missing_workspace[0] == '\0');
    }
 
    /* Cleanup */

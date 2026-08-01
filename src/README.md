@@ -12,7 +12,6 @@ boundaries and the [manual](../MANUAL.md) for use.
 | `aimee-kb` | C11 | DB2, memory, documents, code graph, retrieval, curation |
 | `aimee-wfe` | Go | workflow definitions, lifecycle, artifacts, scheduler, worktrees, forge |
 | `aimee-runtime-web` | Go | authenticated browser proxy and UI service |
-| `aimee-llm` | container service | embedding, reranking, and synthesis inference |
 
 The server image supervises `aimee-server` and `aimee-wfe` as peers. Workflow lifecycle has one
 writer: Go. The C server supplies typed agent, credential, policy, and forge resources; it does not
@@ -41,10 +40,15 @@ server-go/
   internal/api/          workflow/control-plane routes
 
 runtime-web/             Go browser service
+control-web/             Go knowledge-base administration service
 frontend/                browser application
 api/                     OpenAPI sources and SDK generation
 scripts/                 checks, generation, deployment, smoke tests
 ```
+
+Embedding and synthesis are KB-owned roles. Each can run inside the selected KB container or use a
+remote endpoint. The current server configuration names one KB URL; fleet selection is the next
+routing boundary. There is no standalone inference runtime artifact.
 
 ## Event bus
 

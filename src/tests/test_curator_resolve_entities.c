@@ -10,16 +10,18 @@
 #include <sqlite3.h>
 
 #include "db2_test_shim.h"
-#include "../kb/kb_curator_resolve_entities.h"
+#include "kb_curator_resolve_entities.h"
 
 /* Stub the heavy embed + vector deps the handler references. Returns a full
  * 384-dim vector so the resolve match/upsert path is exercised (the builtin
  * embedder is not linked here). Keeps the link off memory_core.o /
  * pgvec_transport.o. */
-int memory_embed_text(const char *text, const char *command, float *out, int max_dim)
+int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
+                      float *out, int max_dim)
 {
    (void)text;
    (void)command;
+   (void)input_type;
    int dim = max_dim < 384 ? max_dim : 384;
    for (int i = 0; i < dim; i++)
       out[i] = 0.01f * (float)(i + 1);
@@ -96,12 +98,10 @@ int pgvec_curator_entity_lookup(int64_t point_id, char *artifact_id_out, int aid
       name_out[0] = '\0';
    return 0;
 }
-int kb_curator_judge_same_entity(const config_t *cfg, const char *judge_cmd,
-                                 const char *mention_name, const char *mention_context,
-                                 const char *candidate_name, double score, int *out_same,
-                                 char *errbuf, size_t errlen)
+int kb_curator_judge_same_entity(const char *judge_cmd, const char *mention_name,
+                                 const char *mention_context, const char *candidate_name,
+                                 double score, int *out_same, char *errbuf, size_t errlen)
 {
-   (void)cfg;
    (void)judge_cmd;
    (void)mention_name;
    (void)mention_context;

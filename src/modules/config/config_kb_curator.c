@@ -8,7 +8,7 @@
  *     extract_code:
  *       enabled: false
  *     extract_command: ""
- *     extract_max_tokens: 2048
+ *     extract_max_tokens: 512
  *     max_attempts: 3
  */
 
@@ -84,7 +84,10 @@ void config_kb_curator_defaults(config_t *cfg)
    cfg->kb_curator_judge_command[0] = '\0';
    cfg->kb_curator_synthesize_command[0] = '\0';
    cfg->kb_curator_synthesize_k = 8;
-   cfg->kb_curator_extract_max_tokens = 2048;
+   /* The bundled CPU synth produces roughly 2-4 tokens/s.  Keep its default
+    * curator completion inside the five-minute provider deadline so background
+    * extraction cannot monopolize the one-slot gateway until timeout. */
+   cfg->kb_curator_extract_max_tokens = 512;
    cfg->kb_curator_max_attempts = 3;
    cfg->kb_curator_provider_base_url[0] = '\0';
    cfg->kb_curator_provider_model[0] = '\0';
@@ -538,11 +541,10 @@ void config_save_kb_curator(const config_t *cfg, cJSON *root)
        cfg->kb_curator_projection_graph_enabled || cfg->kb_curator_synthesize_enabled ||
        cfg->kb_curator_promote_entity_enabled || cfg->kb_curator_extract_command[0] ||
        cfg->kb_curator_judge_command[0] || cfg->kb_curator_synthesize_command[0] ||
-       cfg->kb_curator_extract_max_tokens != 2048 || cfg->kb_curator_max_attempts != 3 ||
+       cfg->kb_curator_extract_max_tokens != 512 || cfg->kb_curator_max_attempts != 3 ||
        cfg->kb_curator_synthesize_k != 8 || cfg->kb_curator_promote_min_sources != 3 ||
        cfg->kb_curator_provider_base_url[0] || cfg->kb_curator_provider_model[0] ||
-       cfg->kb_curator_provider_api_key[0] || cfg->kb_curator_tier_b_base_url[0] ||
-       cfg->kb_curator_tier_b_model[0] || cfg->kb_curator_tier_b_api_key[0];
+       cfg->kb_curator_tier_b_base_url[0] || cfg->kb_curator_tier_b_model[0];
    int cross_repo_nondefault =
        !cfg->kb_curator_cross_repo_graph_enabled ||
        cfg->kb_curator_cross_repo_distinctiveness_v != 1 || cfg->kb_curator_cross_repo_k != 5 ||
@@ -663,14 +665,14 @@ void config_save_kb_curator(const config_t *cfg, cJSON *root)
             cJSON_AddStringToObject(cur, "judge_command", cfg->kb_curator_judge_command);
          if (cfg->kb_curator_synthesize_command[0])
             cJSON_AddStringToObject(cur, "synthesize_command", cfg->kb_curator_synthesize_command);
-         if (cfg->kb_curator_extract_max_tokens != 2048)
+         if (cfg->kb_curator_extract_max_tokens != 512)
             cJSON_AddNumberToObject(cur, "extract_max_tokens", cfg->kb_curator_extract_max_tokens);
          if (cfg->kb_curator_max_attempts != 3)
             cJSON_AddNumberToObject(cur, "max_attempts", cfg->kb_curator_max_attempts);
          kb_curator_save_provider(cur, "provider", cfg->kb_curator_provider_base_url,
-                                  cfg->kb_curator_provider_model, cfg->kb_curator_provider_api_key);
+                                  cfg->kb_curator_provider_model, "");
          kb_curator_save_provider(cur, "tier_b", cfg->kb_curator_tier_b_base_url,
-                                  cfg->kb_curator_tier_b_model, cfg->kb_curator_tier_b_api_key);
+                                  cfg->kb_curator_tier_b_model, "");
       }
    }
 

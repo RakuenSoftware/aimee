@@ -1,6 +1,6 @@
 # Implementation plan: setup wizard + per-tab tutorials
 
-Companion to [`setup-wizard-and-tab-tutorials.md`](./setup-wizard-and-tab-tutorials.md).
+Companion to [`proposal-setup-wizard-and-tab-tutorials.md`](./proposal-setup-wizard-and-tab-tutorials.md).
 This plan is the concrete, sliced build-out. Each slice is independently
 shippable, **frontend-only**, and verifiable with `npm run check` + `npm test`
 (no C-server or Go-webchat rebuild required for the MVP).

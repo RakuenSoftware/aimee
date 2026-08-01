@@ -12,8 +12,9 @@
 #include <stdio.h>
 
 #include "aimee.h" /* MODE_APPROVE */
-#include "audit_action.h"
-#include "audit_worm.h"
+#include <aimee/audit/audit_action.h>
+#include <aimee/audit/obs_bus.h> /* the per-action row now crosses the event bus, not a direct write */
+#include <aimee/audit/audit_worm.h>
 #include "config.h"
 #include "guardrails.h"
 #include "log.h"
@@ -27,10 +28,7 @@ static int audit_action_is_enabled(void)
 {
    if (g_audit_action_enabled < 0)
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof cfg);
-      config_load(&cfg);
-      g_audit_action_enabled = cfg.audit_action_enabled ? 1 : 0;
+      g_audit_action_enabled = config_audit_action_enabled() ? 1 : 0;
    }
    return g_audit_action_enabled;
 }
@@ -45,10 +43,7 @@ static int audit_worm_is_enabled(void)
 {
    if (g_audit_worm_enabled < 0)
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof cfg);
-      config_load(&cfg);
-      g_audit_worm_enabled = cfg.audit_worm_enabled ? 1 : 0;
+      g_audit_worm_enabled = config_audit_worm_enabled() ? 1 : 0;
    }
    return g_audit_worm_enabled;
 }
@@ -56,10 +51,8 @@ static int audit_worm_is_enabled(void)
 /* Clear both cached gates so the next audit call re-reads config. Runs after a
  * reload publishes the new snapshot (registered via config_reload_register_
  * reapplier), so a config.set / SIGHUP applies live instead of needing a restart. */
-static void audit_gate_reload_reapplier(const config_t *old_cfg, const config_t *new_cfg)
+static void audit_gate_reload_reapplier(void)
 {
-   (void)old_cfg;
-   (void)new_cfg;
    g_audit_action_enabled = -1;
    g_audit_worm_enabled = -1;
 }
@@ -129,7 +122,12 @@ static void emit_action_audit(const char *tool_name, const char *input_json,
    char command[288];
    audit_command_preview(tool_name, input_json, command, sizeof command);
    long long task_id = state ? (long long)state->active_task_id : 0;
-   audit_action_log(actor, tool_name, args_hash, command, mode, reason, verdict, task_id);
+   /* The governed-action row now goes over the event bus (delivery step 3): this
+    * emit publishes the row; a consumer thread performs the real ledger append via
+    * audit_action_log. The direct call is gone — the bus is the sole route (an
+    * all-or-nothing migration, no flagged parallel write). Still off the verdict's
+    * critical path and best-effort: a publish failure never blocks the tool. */
+   obs_bus_emit(actor, tool_name, args_hash, command, mode, reason, verdict, task_id);
    emit_worm_row(actor, tool_name, args_hash, mode, reason, verdict, task_id);
 }
 

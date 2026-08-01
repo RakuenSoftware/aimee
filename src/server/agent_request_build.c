@@ -9,8 +9,8 @@
 #include "agent_request_shaping.h" /* agent_request_shape_user_prompt */
 #include "model_sampling.h"        /* model_sampling_apply_{openai,anthropic} */
 #include "config.h"
-#include "aimee_ir.h"
-#include "aimee_backend.h"
+#include <aimee/ir/aimee_ir.h>
+#include <aimee/translation/aimee_backend.h>
 #include "cJSON.h"
 #include <stdlib.h>
 #include <string.h>
@@ -81,11 +81,10 @@ cJSON *agent_build_request(const agent_t *agent, const char *system_prompt, cons
       /* cache_control system marking (default-off): split the system at the
        * <aimee-context> volatile boundary and mark the stable prefix cacheable. The
        * IR backend emitted a plain system string; re-apply the marking on top. */
-      config_t cs;
-      if (config_load(&cs) == 0 && cs.cache_shaping_enabled)
+      if (config_cache_shaping_enabled())
       {
          cJSON_DeleteItemFromObjectCaseSensitive(req, "system");
-         agent_anthropic_set_system(req, system_prompt, 1, cs.cache_min_chars);
+         agent_anthropic_set_system(req, system_prompt, 1, config_cache_min_chars());
       }
       model_sampling_apply_anthropic(agent, req, temperature);
    }

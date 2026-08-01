@@ -1,12 +1,12 @@
 /* mcp_tools.c: shared MCP tool definitions */
 #include "cJSON.h"
-#include "mcp_client_registry.h"
+#include <aimee/protocols/mcp/mcp_client_registry.h>
 #include "mcp_skill_tools.h"
-#include "mcp_tools.h"
+#include <aimee/protocols/mcp/mcp_tools.h>
 #include "mcp_tools_gateway.h"
-#include "plugin.h"
 #include "session_search_tool.h"
 #include "log.h"
+#include "agent_code_capabilities.h"
 #include <stdio.h>
 #include <string.h>
 static int tools_array_has_name(cJSON *tools, const char *name)
@@ -19,6 +19,31 @@ static int tools_array_has_name(cJSON *tools, const char *name)
          return 1;
    }
    return 0;
+}
+
+static void mcp_add_memory_scope_properties(cJSON *properties)
+{
+   cJSON *scope = cJSON_AddObjectToObject(properties, "scope");
+   cJSON_AddStringToObject(scope, "type", "string");
+   cJSON_AddStringToObject(
+       scope, "description",
+       "current (default) returns active project, workspace, then shared/global memory; all "
+       "explicitly appends other projects at the tail");
+   cJSON *scope_values = cJSON_AddArrayToObject(scope, "enum");
+   cJSON_AddItemToArray(scope_values, cJSON_CreateString("current"));
+   cJSON_AddItemToArray(scope_values, cJSON_CreateString("all"));
+   cJSON *project = cJSON_AddObjectToObject(properties, "project");
+   cJSON_AddStringToObject(project, "type", "string");
+   cJSON_AddStringToObject(project, "description", "Explicit active project identity override");
+   cJSON *workspace = cJSON_AddObjectToObject(properties, "workspace");
+   cJSON_AddStringToObject(workspace, "type", "string");
+   cJSON_AddStringToObject(workspace, "description", "Explicit active workspace identity override");
+   cJSON *cwd = cJSON_AddObjectToObject(properties, "cwd");
+   cJSON_AddStringToObject(cwd, "type", "string");
+   cJSON_AddStringToObject(
+       cwd, "description",
+       "Active checkout path. The MCP stdio proxy injects this automatically; direct clients may "
+       "supply it when project/workspace overrides are unavailable.");
 }
 static void add_session_context_tools(cJSON *tools)
 {
@@ -94,7 +119,9 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(f, "type", "object");
       cJSON_AddStringToObject(f, "description",
                               "Canonical scope/filter: {scope:{workspace,project,session},"
-                              "filters:{tier[],kind[],entity[]}}. Omit to search all scopes.");
+                              "filters:{tier[],kind[],entity[]}}. Explicit values retain exact "
+                              "scope semantics; otherwise active-project local-first applies.");
+      mcp_add_memory_scope_properties(p);
       cJSON *req = cJSON_CreateArray();
       cJSON_AddItemToArray(req, cJSON_CreateString("query"));
       cJSON_AddItemToObject(s, "required", req);
@@ -117,6 +144,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON *l = cJSON_AddObjectToObject(p, "limit");
       cJSON_AddStringToObject(l, "type", "integer");
       cJSON_AddStringToObject(l, "description", "Maximum number of graph relations to return");
+      mcp_add_memory_scope_properties(p);
       cJSON *req = cJSON_CreateArray();
       cJSON_AddItemToArray(req, cJSON_CreateString("query"));
       cJSON_AddItemToObject(s, "required", req);
@@ -150,6 +178,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON *q = cJSON_AddObjectToObject(p, "entity");
       cJSON_AddStringToObject(q, "type", "string");
       cJSON_AddStringToObject(q, "description", "Entity name to inspect in aimee memory");
+      mcp_add_memory_scope_properties(p);
       cJSON *req = cJSON_CreateArray();
       cJSON_AddItemToArray(req, cJSON_CreateString("entity"));
       cJSON_AddItemToObject(s, "required", req);
@@ -170,6 +199,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON *l = cJSON_AddObjectToObject(p, "limit");
       cJSON_AddStringToObject(l, "type", "integer");
       cJSON_AddStringToObject(l, "description", "Maximum number of edges to return");
+      mcp_add_memory_scope_properties(p);
       cJSON *req = cJSON_CreateArray();
       cJSON_AddItemToArray(req, cJSON_CreateString("entity"));
       cJSON_AddItemToObject(s, "required", req);
@@ -192,6 +222,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON *l = cJSON_AddObjectToObject(p, "limit");
       cJSON_AddStringToObject(l, "type", "integer");
       cJSON_AddStringToObject(l, "description", "Maximum items to include in the block");
+      mcp_add_memory_scope_properties(p);
       cJSON *req = cJSON_CreateArray();
       cJSON_AddItemToArray(req, cJSON_CreateString("query"));
       cJSON_AddItemToObject(s, "required", req);
@@ -219,10 +250,13 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
    {
       cJSON *s = cJSON_CreateObject();
       cJSON_AddStringToObject(s, "type", "object");
-      cJSON_AddObjectToObject(s, "properties");
+      cJSON *p = cJSON_AddObjectToObject(s, "properties");
+      mcp_add_memory_scope_properties(p);
       cJSON_AddItemToArray(
           tools, mcp_tool_new("list_facts",
-                              "List all stored facts in aimee's long-term memory (L2 tier).", s));
+                              "List active-project, workspace, then shared/global facts in "
+                              "aimee's long-term memory (L2 tier).",
+                              s));
    }
 
    /* memory_briefing */
@@ -235,6 +269,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(l, "description",
                               "Approximate character/token budget for the returned bundle "
                               "(default 1500). Lower sections are truncated first.");
+      mcp_add_memory_scope_properties(p);
       cJSON_AddItemToArray(
           tools, mcp_tool_new("memory_briefing",
                               "Return a deterministic start-of-session context bundle: "
@@ -391,6 +426,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(lt, "description",
                               "Character/token budget for the rendered bundle. 0 = default "
                               "(1800 session, 600 per-turn).");
+      mcp_add_memory_scope_properties(p);
       cJSON_AddItemToArray(
           tools, mcp_tool_new("memory_recall",
                               "Return a six-section proactive-recall bundle (identity, "
@@ -545,14 +581,27 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(id, "type", "string");
       cJSON_AddStringToObject(id, "description",
                               "Symbol name to find (function, class, variable, etc.)");
+      cJSON *project = cJSON_AddObjectToObject(p, "project");
+      cJSON_AddStringToObject(project, "type", "string");
+      cJSON_AddStringToObject(project, "description",
+                              "Indexed project id. Optional; defaults from the MCP request cwd.");
+      cJSON *scope = cJSON_AddObjectToObject(p, "scope");
+      cJSON_AddStringToObject(scope, "type", "string");
+      cJSON *scope_values = cJSON_AddArrayToObject(scope, "enum");
+      cJSON_AddItemToArray(scope_values, cJSON_CreateString(AIMEE_CODE_SCOPE_CURRENT));
+      cJSON_AddItemToArray(scope_values, cJSON_CreateString(AIMEE_CODE_SCOPE_ALL));
+      cJSON_AddStringToObject(scope, "description",
+                              "Search the current project (default) or explicitly all projects.");
       cJSON *req = cJSON_CreateArray();
       cJSON_AddItemToArray(req, cJSON_CreateString("identifier"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools, mcp_tool_new("find_symbol",
-                              "Find a code symbol (function, class, variable) across all "
-                              "indexed projects. Returns file path, line number, and kind.",
-                              s));
+          tools,
+          mcp_tool_new(AIMEE_CODE_TOOL_FIND_SYMBOL,
+                       "Find a code symbol (function, class, variable) in the active indexed "
+                       "project by default. Set scope=all for labeled cross-project results. "
+                       "Returns file path, line number, and kind.",
+                       s));
    }
 
    /* ast_grep_search */
@@ -581,7 +630,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
           tools,
-          mcp_tool_new("ast_grep_search",
+          mcp_tool_new(AIMEE_CODE_TOOL_AST_GREP_SEARCH,
                        "AST-aware structural code search using ast-grep. Finds code patterns "
                        "by structure rather than text, using meta-variables ($VAR, $$$). "
                        "More precise than regex for language-aware queries. "
@@ -623,19 +672,25 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                                           "background=true.\"}},\"required\":[\"job_id\"]}")));
    }
 
-   /* ensemble_review */
+   /* roundtable_review */
    {
       cJSON_AddItemToArray(
           tools,
           mcp_tool_new(
-              "ensemble_review",
-              "Run the multi-agent roundtable in review mode against caller-provided diff "
-              "text. Returns a queued run id; poll /v1/runs/{id}. The result's items "
-              "describe items_round while artifact is artifact_round (the best round); "
-              "compare those fields before assuming the findings match the artifact.",
+              "roundtable_review",
+              "Start an asynchronous review of a supplied artifact with the configured Go "
+              "roundtable. Every seat is an ordinary delegate request. Returns a run_id "
+              "immediately; poll roundtable_status until synthesis completes.",
               cJSON_Parse("{\"type\":\"object\",\"properties\":{"
                           "\"diff\":{\"type\":\"string\",\"description\":\"Unified diff or code "
                           "under review.\",\"minLength\":20},"
+                          "\"original_request\":{\"type\":\"string\",\"description\":\"Complete "
+                          "original request used to detect goal drift.\"},"
+                          "\"artifact_stage\":{\"type\":\"string\",\"enum\":[\"intent\",\"plan\","
+                          "\"frozen_diff\"],\"description\":\"Lifecycle stage of the supplied "
+                          "artifact; defaults to frozen_diff.\"},"
+                          "\"workdir\":{\"type\":\"string\",\"description\":\"Optional checkout "
+                          "available to delegate tools.\"},"
                           "\"brief\":{\"description\":\"Optional directed review brief as a string "
                           "or object with focus/fixes/invariants/questions string arrays.\","
                           "\"anyOf\":[{\"type\":\"string\"},{\"type\":\"object\","
@@ -644,11 +699,22 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                           "\"string\"}},\"invariants\":{\"type\":\"array\",\"items\":{\"type\":"
                           "\"string\"}},\"questions\":{\"type\":\"array\",\"items\":{\"type\":"
                           "\"string\"}}}}]},"
-                          "\"rounds\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":16,"
-                          "\"description\":\"Max review rounds.\"},"
-                          "\"turns\":{\"type\":\"string\",\"enum\":[\"parallel\",\"sequential\"],"
-                          "\"description\":\"Round execution mode.\"}},"
+                          "\"roundtable\":{\"type\":\"string\",\"description\":\"Saved "
+                          "roundtable preset to use. Omit to use the configured default.\"}},"
                           "\"required\":[\"diff\"]}")));
+   }
+
+   /* roundtable_status */
+   {
+      cJSON_AddItemToArray(
+          tools,
+          mcp_tool_new(
+              "roundtable_status",
+              "Get an asynchronous roundtable review by run_id. Poll until status is completed, "
+              "failed, or cancelled; a completed snapshot contains the synthesized result.",
+              cJSON_Parse("{\"type\":\"object\",\"properties\":{\"run_id\":{\"type\":"
+                          "\"string\",\"description\":\"Run id returned by roundtable_review.\"}},"
+                          "\"required\":[\"run_id\"]}")));
    }
 
    /* mcp_tools_pipeline.inc: roundtable authoring pipeline (pipeline_*) MCP tool
@@ -774,15 +840,23 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(pi, "type", "string");
       cJSON_AddItemToObject(pp, "items", pi);
       cJSON_AddStringToObject(pp, "description", "File paths to preview blast radius for");
+      cJSON *scope = cJSON_AddObjectToObject(p, "scope");
+      cJSON_AddStringToObject(scope, "type", "string");
+      cJSON *scope_values = cJSON_AddArrayToObject(scope, "enum");
+      cJSON_AddItemToArray(scope_values, cJSON_CreateString(AIMEE_CODE_SCOPE_CURRENT));
+      cJSON_AddStringToObject(scope, "description",
+                              "Single-project preview scope; defaults to current. Cross-project "
+                              "scope=all is intentionally unsupported.");
       cJSON *req = cJSON_CreateArray();
-      cJSON_AddItemToArray(req, cJSON_CreateString("project"));
       cJSON_AddItemToArray(req, cJSON_CreateString("paths"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools, mcp_tool_new("preview_blast_radius",
-                              "Preview the blast radius of proposed file changes before starting "
-                              "work. Returns affected files, severity, and warnings.",
-                              s));
+          tools,
+          mcp_tool_new(AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS,
+                       "Preview the blast radius of proposed file changes before starting work. "
+                       "The project defaults from the MCP request cwd. Returns affected files, "
+                       "severity, and warnings.",
+                       s));
    }
 
    /* delegate_reply */
@@ -1038,7 +1112,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       } git_params[] = {
           {"action", "string",
            "Sub-action for: branch (create/switch/list/delete/claim/orphan), pr "
-           "(create/view/list/edit/checks/watch/merge_status/wait), stash "
+           "(create/view/list/edit/checks/merge_status/merge), stash "
            "(push/pop/apply/list/drop), tag (create/list/delete), issue (list), verify "
            "(run/check/conflicts/env/prepare-pr/status)."},
           {"message", "string",
@@ -1059,7 +1133,12 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
           {"title", "string", "pr: title (create/edit)."},
           {"body", "string", "pr: body (create/edit)."},
           {"number", "integer", "pr: PR number (view/edit/checks/watch/merge_status/wait)."},
-          {"wait", "boolean", "pr checks: poll until checks settle."},
+          {"wait", "boolean",
+           "Deprecated for pr checks: blocking waits are rejected; poll snapshots instead."},
+          {"auto", "boolean",
+           "pr merge: enable GitHub auto-merge so protected moving branches merge when ready."},
+          {"merge_method", "string", "pr merge: merge / squash / rebase (default merge)."},
+          {"expected_head_sha", "string", "pr merge: refuse if the head SHA has moved."},
           {"state", "string", "issue: filter open/closed/all (default open)."},
           {"url", "string", "clone: repository URL."},
           {"path", "string", "clone: local path; verify: repo path."},
@@ -1447,6 +1526,19 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(q, "type", "string");
       cJSON_AddStringToObject(q, "description",
                               "What you want to know about the project — a question or topic");
+      cJSON *proj = cJSON_AddObjectToObject(p, "project");
+      cJSON_AddStringToObject(proj, "type", "string");
+      cJSON_AddStringToObject(
+          proj, "description",
+          "Stable indexed project ID. Defaults to the active project resolved from cwd.");
+      cJSON *scope = cJSON_AddObjectToObject(p, "scope");
+      cJSON_AddStringToObject(scope, "type", "string");
+      cJSON_AddStringToObject(scope, "description",
+                              "current (default) or all for explicit cross-project search");
+      cJSON *cwd = cJSON_AddObjectToObject(p, "cwd");
+      cJSON_AddStringToObject(cwd, "type", "string");
+      cJSON_AddStringToObject(cwd, "description",
+                              "Workspace path used to resolve the active project");
       cJSON *mx = cJSON_AddObjectToObject(p, "max_results");
       cJSON_AddStringToObject(mx, "type", "integer");
       cJSON_AddStringToObject(mx, "description", "Maximum passages to return (default 3, max 8)");
@@ -1719,48 +1811,6 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
     * separate, namespaced entries). */
    if (collapse)
       mcp_collapse_families(tools);
-
-   /* Plugin tools: load registry + project-local, add enabled tools */
-   {
-      plugin_t plugins[PLUGIN_MAX_PLUGINS];
-      int pcount = plugin_registry_load(plugins, PLUGIN_MAX_PLUGINS);
-      /* Also discover local plugins from configured workspaces */
-      config_t pcfg;
-      config_load(&pcfg);
-      const char *roots[64];
-      for (int ri = 0; ri < pcfg.workspace_count && ri < 64; ri++)
-         roots[ri] = pcfg.workspaces[ri];
-      plugin_discover_local(roots, pcfg.workspace_count, plugins, &pcount, PLUGIN_MAX_PLUGINS);
-
-      static plugin_tool_t ptool_buf[PLUGIN_MAX_PLUGINS * PLUGIN_MAX_TOOLS];
-      int ptool_count = plugin_collect_tools(plugins, pcount, ptool_buf,
-                                             (int)(sizeof(ptool_buf) / sizeof(ptool_buf[0])));
-      for (int pi = 0; pi < ptool_count; pi++)
-      {
-         const plugin_tool_t *pt = &ptool_buf[pi];
-         /* Namespace: "plugin:<name>" */
-         char namespaced[128];
-         snprintf(namespaced, sizeof(namespaced), "plugin:%s", pt->name);
-
-         if (tools_array_has_name(tools, pt->name) || tools_array_has_name(tools, namespaced))
-         {
-            LOG_WARN("mcp-tools", "plugin tool '%s' conflicts, skipped", pt->name);
-            continue;
-         }
-
-         cJSON *schema = cJSON_Parse(pt->input_schema_json);
-         if (!schema)
-            schema = cJSON_CreateObject();
-
-         /* Include permission level in the description */
-         char desc[640];
-         snprintf(desc, sizeof(desc), "%s [plugin, permission=%s]",
-                  pt->description[0] ? pt->description : pt->name,
-                  plugin_permission_name(pt->permission));
-
-         cJSON_AddItemToArray(tools, mcp_tool_new(namespaced, desc, schema));
-      }
-   }
 
    cJSON *remote_tools = mcp_client_registry_build_namespaced_tools(1000);
    if (cJSON_IsArray(remote_tools))

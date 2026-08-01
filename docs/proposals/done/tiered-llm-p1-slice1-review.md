@@ -1,7 +1,5 @@
 # P1 Slice 1 — review request (tenancy schema + Postgres hardening)
 
-- **State:** done; preserved as a review record.
-
 Branch `worktree-claude+tiered-llm-p1-tenancy`, 6 commits, ~2329 lines. This is the
 first slice of the converged P1 plan. Requesting roundtable approval to proceed to
 slice 2 (identity resolution). The full diff is attached as context.

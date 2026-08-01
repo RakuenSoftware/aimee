@@ -10,6 +10,7 @@ a registry change that isn't reflected in the committed map fails `make lint`
 instead of silently leaving the client without its first-class /v1 route.
 """
 import glob
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -42,8 +43,39 @@ def main() -> int:
               "server_http_routes.c; run scripts/gen-cli-v1-routes.py and commit.")
         return 1
     n = sum(1 for ln in fresh.splitlines() if ln.lstrip().startswith('{"'))
-    print(f"check-cli-v1-routes: ok ({n} client /v1 routes in sync)")
+
+    orphans = unreachable_methods()
+    if orphans:
+        print("check-cli-v1-routes: FAIL — these /v1 methods have a route and a "
+              "marshaller but no `aimee <cmd> <sub>` row in the dispatch table in "
+              "src/cli_v1_routes.c, so no thin client can invoke them:")
+        for m in orphans:
+            print(f"  {m}")
+        return 1
+
+    print(f"check-cli-v1-routes: ok ({n} client /v1 routes in sync, all reachable)")
     return 0
+
+
+# The generated block above keeps method -> /v1 path in sync with the server, but
+# the CLI subcommand -> method table is hand-written, so a method could be fully
+# plumbed (path + marshaller + printer) and still be unreachable from the CLI.
+# That is how `aimee kb build` shipped answering "command 'kb' has no /v1 route"
+# while POST /v1/kb/build worked -- every piece existed except the dispatch row.
+ROUTE_RE = re.compile(r'\{"([a-z0-9_.]+)",\s*"(?:GET|POST|PUT|DELETE)",\s*"/v1/[^"]+"\}')
+MARSHAL_RE = re.compile(r'\{"([a-z0-9_.]+)",\s*marshal_[a-z0-9_]+\}')
+DISPATCH_RE = re.compile(r'\{"[a-z0-9_-]+",\s*(?:NULL|"[a-z0-9 _-]*")\s*,\s*"([a-z0-9_.]+)"')
+
+
+def unreachable_methods():
+    routed, marshalled = set(), set()
+    for f in sorted(glob.glob(TARGET_GLOB)):
+        text = Path(f).read_text(encoding="utf-8")
+        routed |= set(ROUTE_RE.findall(text))
+        marshalled |= set(MARSHAL_RE.findall(text))
+    dispatch = set(DISPATCH_RE.findall(
+        Path(ROOT / "src" / "cli_v1_routes.c").read_text(encoding="utf-8")))
+    return sorted((routed & marshalled) - dispatch)
 
 
 if __name__ == "__main__":

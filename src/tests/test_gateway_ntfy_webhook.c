@@ -2,6 +2,7 @@
 #include "gateway/platform_ntfy.h"
 #include "gateway/platform_webhook.h"
 #include "gateway/gateway_platform.h"
+#include "runtime_secret.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -42,6 +43,7 @@ static void test_webhook_check_config_fails_without_secret(void)
 {
    /* Ensure the env vars are not set. */
    unsetenv("AIMEE_GATEWAY_WEBHOOK_SECRET");
+   runtime_secret_remove("AIMEE_GATEWAY_WEBHOOK_SECRET");
    unsetenv("AIMEE_GATEWAY_WEBHOOK_INSECURE");
 
    platform_adapter_t *a = webhook_adapter_get();
@@ -70,7 +72,7 @@ static void test_webhook_check_config_passes_when_insecure(void)
 
 static void test_webhook_check_config_passes_with_secret(void)
 {
-   setenv("AIMEE_GATEWAY_WEBHOOK_SECRET", "supersecret", 1);
+   assert(runtime_secret_store("AIMEE_GATEWAY_WEBHOOK_SECRET", "supersecret") == 0);
    unsetenv("AIMEE_GATEWAY_WEBHOOK_INSECURE");
 
    platform_adapter_t *a = webhook_adapter_get();
@@ -82,7 +84,7 @@ static void test_webhook_check_config_passes_with_secret(void)
     * (it only validates config presence, not HMAC capability). */
    assert(rc == 0);
 
-   unsetenv("AIMEE_GATEWAY_WEBHOOK_SECRET");
+   runtime_secret_remove("AIMEE_GATEWAY_WEBHOOK_SECRET");
    PASS("webhook_check_config_passes_with_secret");
 }
 

@@ -4,6 +4,7 @@ import { BootstrapBanner, DiffBlock, Message, RewindMarker, ThinkingBlock, ToolB
 import { renderWithMentions } from './chat/markdown';
 import ProjectPicker from '../components/ProjectPicker';
 import { useSessions } from '../SessionContext';
+import { reconcileSessionMessages } from '../sessionPersistence';
 
 /* ---- Types ---- */
 
@@ -236,9 +237,8 @@ function flushPendingTabs(): void {
   if (pendingTabsToPersist) writePendingTabs();
 }
 
-/* Conversation/tab persistence is local (localStorage) and mirrors the top
- * SessionContext, which owns the session/tab list. Each tab's aimeeSid still
- * ties to its server-side session state for continuity within a session. */
+/* localStorage is a fast cache. SessionContext reconciles it with the
+ * authenticated user's server-owned session list and transcript. */
 
 function rulesBannerDismissedKey(root: string): string {
   return root ? `${RULES_BANNER_DISMISSED_KEY}:${root}` : RULES_BANNER_DISMISSED_KEY;
@@ -303,9 +303,8 @@ interface ActiveStreamRefs {
   /* aimeeSid of the tab that owns this stream. Captured at send time so SSE
    * events (notably the provider `session` id) are applied to the originating
    * tab — never to whatever tab happens to be active when the event arrives.
-   * Without this, switching tabs mid-stream cross-writes the provider sid onto
-   * the wrong tab, and since claude_session_id outranks aimee_session_id on the
-   * server the two conversations then merge into one. */
+   * Without this, switching tabs mid-stream cross-writes provider metadata onto
+   * the wrong tab and corrupts the browser's restored-session cache. */
   originSid: string;
 }
 
@@ -1337,20 +1336,47 @@ export default function Chat() {
   const activeSessionId = activeSession?.id ?? '';
   const sessionProject = activeSession?.projectRoot ?? '';
 
-  // Keep one conversation tab per session: adopt an existing tab (preserving its
-  // messages/sids), migrate a legacy untagged tab, or create a fresh one.
+  // Keep one conversation tab per account-scoped session. Match both the UI id
+  // and stable aimee id so legacy browser-only tabs migrate without duplication.
   useEffect(() => {
     if (!sessions.length) return;
     setTabs(prev => {
       const byId = new Map(prev.filter(t => t.sessionId).map(t => [t.sessionId as string, t]));
+      const byAimeeId = new Map(prev.filter(t => t.aimeeSid).map(t => [t.aimeeSid, t]));
       const untagged = prev.filter(t => !t.sessionId);
       let u = 0;
       const next = sessions.map((s, i) => {
-        const existing = byId.get(s.id);
-        if (existing) return existing.title === s.name ? existing : { ...existing, title: s.name };
+        const existing = byId.get(s.id) ?? byAimeeId.get(s.aimeeSid);
+        if (existing) {
+          const messages = reconcileSessionMessages(existing.messages, s.messages);
+          if (existing.sessionId === s.id && existing.title === s.name &&
+              existing.aimeeSid === s.aimeeSid && messages === existing.messages &&
+              (!s.claudeSid || existing.sid === s.claudeSid)) return existing;
+          return {
+            ...existing,
+            sessionId: s.id,
+            title: s.name,
+            messages,
+            sid: s.claudeSid || existing.sid,
+            aimeeSid: s.aimeeSid,
+          };
+        }
         const adopt = untagged[u++];
-        if (adopt) return { ...adopt, sessionId: s.id, title: s.name };
-        return normalizeTab({ sessionId: s.id, title: s.name, messages: [], sid: '' }, i);
+        if (adopt) return {
+          ...adopt,
+          sessionId: s.id,
+          title: s.name,
+          messages: reconcileSessionMessages(adopt.messages, s.messages),
+          sid: s.claudeSid || adopt.sid,
+          aimeeSid: s.aimeeSid,
+        };
+        return normalizeTab({
+          sessionId: s.id,
+          title: s.name,
+          messages: s.messages,
+          sid: s.claudeSid,
+          aimeeSid: s.aimeeSid,
+        }, i);
       });
       // No-op if unchanged (avoid a render loop).
       if (next.length === prev.length && next.every((t, i) => t === prev[i])) return prev;
@@ -1375,12 +1401,20 @@ export default function Chat() {
   const [activeSkill, setActiveSkill] = useState<string>('');
   const [availablePersonas, setAvailablePersonas] = useState<PersonaInfo[]>([]);
   const [activePersona, setActivePersona] = useState<string>('');
+  /* The agent serving this tab's turns. `activeAgent` is the SESSION PIN (empty
+   * = not pinned); `defaultAgent` is what an unpinned turn actually lands on,
+   * reported by /api/agents (server-side agent_default_primary). The selector
+   * shows the pin when there is one, else the default, so it always names the
+   * agent you are really talking to. */
+  const [activeAgent, setActiveAgent] = useState<string>('');
+  const [defaultAgent, setDefaultAgent] = useState<string>('');
   const [lspDiag, setLspDiag] = useState<{ errors: number; warnings: number; active_servers: number } | null>(null);
   const [workflowInfo, setWorkflowInfo] = useState<WorkflowSessionInfo | null>(null);
   const [workflowLoading, setWorkflowLoading] = useState(false);
   const [workflowError, setWorkflowError] = useState<string | null>(null);
   const [workflowChanged, setWorkflowChanged] = useState(false);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
+  const [pluginLoaderAvailable, setPluginLoaderAvailable] = useState(false);
   const [pluginsLoading, setPluginsLoading] = useState(false);
   const [pluginsError, setPluginsError] = useState<string | null>(null);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
@@ -1422,10 +1456,6 @@ export default function Chat() {
   const tabsRef = useRef<TabData[]>(tabs);
   const activeIdxRef = useRef(activeIdx);
   const projectRootRef = useRef(projectRoot);
-  // Live `working` for the presence-event effect: lets turn_done decide whether
-  // THIS surface originated the turn (skip persist) or is merely observing a
-  // turn that ran/completed while detached (persist it into history).
-  const workingRef = useRef(working);
   // Live mirror of remoteTurnActive so sendMessage can synchronously tell whether
   // a server/foreign turn (e.g. a steer auto-continue) is in flight for the tab.
   const remoteTurnActiveRef = useRef(false);
@@ -1499,7 +1529,6 @@ export default function Chat() {
       if (!live.has(sid)) bgStreamsRef.current.delete(sid);
     }
   }, [tabs]);
-  useEffect(() => { workingRef.current = working; }, [working]);
   // Cancel any pending stream-flush timer on unmount.
   useEffect(() => () => { if (flushTimerRef.current !== null) window.clearTimeout(flushTimerRef.current); }, []);
 
@@ -1522,9 +1551,9 @@ export default function Chat() {
     };
     // Always flush the coalesced tabs write when the page goes away or is hidden
     // — NOT just on beforeunload. bfcache navigation (back/forward) and OS
-    // background-kill on mobile don't fire beforeunload, and since the transcript
-    // restores SOLELY from localStorage, a dropped write shows up as a gap on
-    // reload. visibilitychange→hidden catches a backgrounded tab before a kill.
+    // background-kill on mobile don't fire beforeunload. Keeping this fast cache
+    // current also avoids waiting for a server refresh after bfcache navigation.
+    // visibilitychange→hidden catches a backgrounded tab before a kill.
     // Detach presence only on a GENUINE unload: a tab going to the background — or
     // entering bfcache (pagehide persisted=true, restored without re-mounting) —
     // is still an active session and must stay attached.
@@ -1602,9 +1631,25 @@ export default function Chat() {
     const turnIdOf = (raw: string): string => {
       try { return (JSON.parse(raw) as { turn_id?: string }).turn_id || ''; } catch { return ''; }
     };
+    // Did THIS surface originate the turn? Read the send refs directly rather
+    // than the `working` render state: `working` is derived from workBySid
+    // (recomputeWorkCounts -> setWorkBySid -> re-render), so a ref synced to it
+    // in a useEffect lags the POST by a render + effect flush. turn_started
+    // routinely arrives inside that window, the surface's OWN turn was then
+    // classified as foreign, and turn_done appended a SECOND assistant message
+    // beside the one pollLiveTurn was already rendering — the doubled replies.
+    // activeSendAbortRefs is populated synchronously before the POST, so it is
+    // already accurate when the first ring event lands.
+    const hasLocalSendFor = (sid: string): boolean => {
+      for (const owner of activeSendAbortRefs.current.values())
+        if (owner === sid) return true;
+      for (const q of sendQueuesRef.current.values())
+        for (const it of q) if (it.originSid === sid) return true;
+      return false;
+    };
     es.addEventListener('turn_started', (ev: MessageEvent<string>) => {
       saveCursor(ev);
-      curTurnId = turnIdOf(ev.data); observed = ''; wasWorking = workingRef.current;
+      curTurnId = turnIdOf(ev.data); observed = ''; wasWorking = hasLocalSendFor(activeAimeeSid);
       // A steer continuation is server-initiated: render it even if this surface
       // still looks "working" from the just-cancelled turn's closing stream. Only
       // for the session this events stream is bound to (the one we steered).
@@ -1639,10 +1684,11 @@ export default function Chat() {
       const tid = turnIdOf(ev.data) || curTurnId; // turn_started always carries turn_id
       const text = observed;
       // Persist a turn observed-while-detached EXACTLY ONCE. Gates:
-      //  - wasWorking: snapshot at turn_started — THIS surface originated the turn
-      //    (its own send path stores the assistant message). This is the sole
-      //    "did I originate it" gate; a NEW local send mid-observation must NOT
-      //    drop a foreign turn, so the live workingRef is deliberately not used.
+      //  - wasWorking: snapshot at turn_started (see hasLocalSendFor) — THIS
+      //    surface originated the turn, and its own send path already renders and
+      //    stores the assistant message. This is the sole "did I originate it"
+      //    gate, and it is snapshotted, not re-read: a NEW local send mid-
+      //    observation must NOT make us drop a foreign turn.
       //  - cursor resume (above) means a fresh mount / auto-reconnect does NOT
       //    replay already-seen turns, so the ring no longer re-emits a completed
       //    turn. persistedTurnsRef (turn_id dedup) + the content-tail guard remain
@@ -1735,9 +1781,8 @@ export default function Chat() {
     saveTabs(tabs);
   }, [tabs]);
 
-  /* (Server-session-as-tab-list restore was removed: the top SessionContext is
-   * now the source of truth for the session/tab list, mirrored locally. Each
-   * tab's aimeeSid still ties to its server-side session state.) */
+  /* SessionContext restores and refreshes the authenticated user's server-side
+   * session list; the reconciliation effect above maps it onto chat tabs. */
 
   useEffect(() => {
     if (activeIdx >= tabs.length) {
@@ -1801,10 +1846,15 @@ export default function Chat() {
       .catch(() => {});
   }, []);
 
-  /* Reflect the active tab's current persona (per-session, else durable default) */
+  /* Reflect the active tab's current persona (per-session, else durable default).
+     A tab that has not sent its first message yet has NO aimee session id — it
+     used to be left blank here, so the <select> fell back to whatever option
+     happened to be first rather than the persona the turn would actually use.
+     Ask without a sid in that case: the server answers with the durable default,
+     which is engineer unless the operator changed it. */
   useEffect(() => {
-    if (!activePersonaSid) return;
-    fetch(`/api/chat/persona?sid=${encodeURIComponent(activePersonaSid)}`)
+    const q = activePersonaSid ? `?sid=${encodeURIComponent(activePersonaSid)}` : '';
+    fetch(`/api/chat/persona${q}`)
       .then(r => r.json())
       .then((d: { name?: string }) => setActivePersona(d.name ?? ''))
       .catch(() => {});
@@ -1814,15 +1864,28 @@ export default function Chat() {
     setPluginsLoading(true);
     try {
       const resp = await fetch('/api/plugins');
+      if (!resp.ok) {
+        setPluginLoaderAvailable(false);
+        setPlugins([]);
+        setPluginsError(null);
+        return;
+      }
       const data = await resp.json() as PluginInfo[];
+      setPluginLoaderAvailable(true);
       setPlugins(Array.isArray(data) ? data : []);
       setPluginsError(null);
     } catch {
+      setPluginLoaderAvailable(false);
+      setPlugins([]);
       setPluginsError('Failed to load plugins');
     } finally {
       setPluginsLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    void refreshPlugins();
+  }, [refreshPlugins]);
 
   useEffect(() => {
     if (pluginsOpen) void refreshPlugins();
@@ -1839,9 +1902,21 @@ export default function Chat() {
   useEffect(() => {
     fetch('/api/agents')
       .then(r => r.json())
-      .then((d: { agents?: AgentInfo[] }) => setAgents(d.agents ?? []))
+      .then((d: { agents?: AgentInfo[]; default_agent?: string }) => {
+        setAgents(d.agents ?? []);
+        setDefaultAgent(d.default_agent ?? '');
+      })
       .catch(() => {});
   }, []);
+
+  /* Reflect this tab's pinned agent (empty = following the configured default) */
+  useEffect(() => {
+    if (!activePersonaSid) { setActiveAgent(''); return; }
+    fetch(`/api/chat/primary?sid=${encodeURIComponent(activePersonaSid)}`)
+      .then(r => r.json())
+      .then((d: { agent?: string }) => setActiveAgent(d.agent ?? ''))
+      .catch(() => {});
+  }, [activePersonaSid]);
 
   useEffect(() => {
     fetch('/api/metrics')
@@ -1965,6 +2040,24 @@ export default function Chat() {
     } catch { setActivePersona(prev); }
   }
 
+  /* Pin the agent that serves this tab's turns. Per session (like the persona),
+     so other tabs and the durable config are untouched; it takes effect on the
+     next turn (chat_stream_worker reads the pin before cfg.provider). */
+  async function changeAgent(name: string) {
+    const sid = tabsRef.current[activeIdxRef.current]?.aimeeSid;
+    if (!sid || !name) return;
+    const prev = activeAgent;
+    setActiveAgent(name);
+    try {
+      const resp = await fetch('/api/chat/primary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrf || '' },
+        body: JSON.stringify({ sid, agent: name }),
+      });
+      if (!resp.ok) setActiveAgent(prev);
+    } catch { setActiveAgent(prev); }
+  }
+
   async function togglePlugin(name: string) {
     try {
       const resp = await fetch(`/api/plugins/${encodeURIComponent(name)}/toggle`, {
@@ -2012,6 +2105,28 @@ export default function Chat() {
     streamMsgsRef.current = msgs;
     setStreamMsgs(msgs);
   }, [activeIdx]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A server refresh can hydrate the currently selected session without
+  // changing its tab index (the normal fresh-browser case). Load that account-
+  // scoped transcript directly; later local stream updates do not retrigger this
+  // effect because SessionContext's server snapshot is unchanged.
+  useEffect(() => {
+    const serverMessages = activeSession?.messages;
+    if (!serverMessages) return;
+    const tab = tabsRef.current.find(candidate => candidate.sessionId === activeSessionId);
+    // A non-empty shorter snapshot can be a focus refresh racing an active
+    // stream. An explicit empty transcript, however, is authoritative and must
+    // clear stale browser history restored from the local cache.
+    if (!tab || (serverMessages.length > 0 && serverMessages.length < tab.messages.length)) return;
+    if (sameTabMessages(tab.messages, serverMessages) &&
+        sameTabMessages(streamToTabMessages(streamMsgsRef.current), serverMessages)) return;
+    const hydrated = serverMessages.map(message => ({
+      id: nextId(), type: message.role, text: message.text,
+    }));
+    streamMsgsRef.current = hydrated;
+    renderedSidRef.current = tab.aimeeSid;
+    setStreamMsgs(hydrated);
+  }, [activeSessionId, activeSession?.messages, tabs[activeIdx]?.sessionId]);
 
   /* Save current tab messages back to tabs state */
   const saveTabMessages = useCallback((tabIndex: number, msgs: StreamMsg[]) => {
@@ -2211,15 +2326,18 @@ export default function Chat() {
    * provider session (empty claude session id + new aimee session id) so the next
    * turn starts clean — no resume of a stale/gone session. */
   function clearChat() {
+    const nextAimeeSid = newAimeeSessionId();
     setStreamMsgs([]);
     setTabs(prev => {
       const next = [...prev];
       if (next[activeIdx]) {
-        next[activeIdx] = { ...next[activeIdx], sid: '', aimeeSid: newAimeeSessionId(), attachId: undefined, messages: [] };
+        next[activeIdx] = { ...next[activeIdx], sid: '', aimeeSid: nextAimeeSid, attachId: undefined, messages: [] };
       }
       return next;
     });
-    if (activeSession) patchSession(activeSession.id, { claudeSid: '', aimeeSid: '', attachId: '' });
+    if (activeSession) patchSession(activeSession.id, {
+      claudeSid: '', aimeeSid: nextAimeeSid, attachId: '', messages: [],
+    });
   }
 
   async function pauseWorkflow() {
@@ -2402,12 +2520,14 @@ export default function Chat() {
       (sendQueuesRef.current.get(activeSidForTitle)?.length ?? 0) > 0;
     if (!hasExistingMessages) {
       const title = text.substring(0, 30) + (text.length > 30 ? '…' : '');
+      const sessionId = tabsRef.current[idx]?.sessionId;
       setTabs(prev => {
         const next = [...prev];
         if (next[idx]) next[idx] = { ...next[idx], title };
         tabsRef.current = next;
         return next;
       });
+      if (sessionId) patchSession(sessionId, { name: title });
     }
 
     const userMsgId = nextId();
@@ -2511,7 +2631,6 @@ export default function Chat() {
         body: JSON.stringify({
           message: text,
           aimee_session_id: aimeeSid,
-          claude_session_id: activeTab?.sid ?? '',
           attach_id: attachId,
           cwd: projectRootRef.current,
         }),
@@ -2742,10 +2861,11 @@ export default function Chat() {
         const sid = String(data.id ?? '');
         // Apply the provider session id to the tab that OWNS this stream, located
         // by its stable aimeeSid — not activeIdxRef, which may have moved if the
-        // user switched tabs mid-turn. Cross-writing it merges two conversations
-        // because claude_session_id outranks aimee_session_id server-side.
+        // user switched tabs mid-turn. This is display/cache metadata only; the
+        // backend resumes from its authenticated server-side binding.
         const owner = streamRefs.originSid;
         if (owner) {
+          const sessionId = tabsRef.current.find(t => t.aimeeSid === owner)?.sessionId;
           setTabs(prev => {
             const idx = prev.findIndex(t => t.aimeeSid === owner);
             if (idx < 0) return prev;
@@ -2754,6 +2874,7 @@ export default function Chat() {
             tabsRef.current = next;
             return next;
           });
+          if (sessionId && sid) patchSession(sessionId, { claudeSid: sid });
         }
         break;
       }
@@ -2832,7 +2953,9 @@ export default function Chat() {
       {/* The project belongs to the active SESSION (top tab); picking one here
           binds it to this session, and the agent runs with it as cwd. A Clear
           button resets this conversation (fresh provider session). */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      {/* Reserve the tutorial launcher's top-right corner. Without this padding,
+          its absolute "?" button sits directly over Clear and steals clicks. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingRight: 48, boxSizing: 'border-box' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <ProjectPicker
             key={activeSessionId}
@@ -3045,6 +3168,37 @@ export default function Chat() {
             </select>
           </>
         )}
+        {agents.length > 0 && (
+          <>
+            <span style={{ fontSize: '11px', color: tokens.borderLight, fontFamily: 'system-ui', marginLeft: '4px' }}>|</span>
+            <span style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui' }}>
+              Agent:
+            </span>
+            <select
+              value={activeAgent || defaultAgent}
+              onChange={e => changeAgent(e.target.value)}
+              title={activeAgent
+                ? 'The agent serving this tab (pinned for this session)'
+                : `Following the configured primary${defaultAgent ? ` (${defaultAgent})` : ''} — pick one to pin it for this session`}
+              style={{
+                fontSize: '11px', fontFamily: 'system-ui',
+                // Unpinned (following the default) reads as the muted state, the
+                // same way an unset persona does.
+                background: activeAgent ? tokens.primary : tokens.surface,
+                color: activeAgent ? tokens.surface : tokens.textFaint,
+                border: `1px solid ${activeAgent ? tokens.primary : tokens.borderLight}`,
+                borderRadius: '10px', cursor: 'pointer', padding: '2px 6px',
+                outline: 'none',
+              }}
+            >
+              {agents.map(a => (
+                <option key={a.name} value={a.name}>
+                  {a.name}{a.name === defaultAgent ? ' (primary)' : ''}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
         {availablePersonas.length > 0 && (
           <>
             <span style={{ fontSize: '11px', color: tokens.borderLight, fontFamily: 'system-ui', marginLeft: '4px' }}>|</span>
@@ -3133,7 +3287,7 @@ export default function Chat() {
           metrics={allTimeMetrics}
         />
 
-        <PluginsPanel
+        {pluginLoaderAvailable && <PluginsPanel
           open={pluginsOpen}
           plugins={plugins}
           loading={pluginsLoading}
@@ -3141,7 +3295,7 @@ export default function Chat() {
           onToggle={() => { setPluginsOpen(o => !o); setRulesOpen(false); setContextOpen(false); }}
           onRefresh={() => { void refreshPlugins(); }}
           onPluginToggle={name => { void togglePlugin(name); }}
-        />
+        />}
 
         {/* Rules sidebar */}
         <RulesPanel open={rulesOpen} onToggle={() => { setRulesOpen(o => !o); setPluginsOpen(false); setContextOpen(false); }} />

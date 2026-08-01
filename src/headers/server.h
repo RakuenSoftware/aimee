@@ -1,12 +1,20 @@
 #ifndef DEC_SERVER_H
 #define DEC_SERVER_H 1
 
+#include "aimee_features.h"
 #include <stdint.h>
 #include <pthread.h>
 #include <sys/types.h>
 #include "compute_pool.h"
 #include "platform_event.h"
 #include "provider_catalog.h"
+
+/* True when `name` is a provider the chat path can resolve: a built-in CLI
+ * provider, a known adapter, or an agent in `acfg` (matched by name or by
+ * provider). Gates the durable primary write in handle_provider_set so a
+ * mistyped `aimee provider <word>` cannot brick every later chat turn.
+ * `acfg` may be NULL to check only the built-in/adapter sets. */
+int provider_name_settable(const char *name, const agent_config_t *acfg);
 #include "vault_principal.h"
 
 /* Forward declaration */
@@ -28,8 +36,6 @@ typedef struct cJSON cJSON;
 #define SERVER_READ_BUF_SIZE   65536              /* initial per-connection read buffer */
 #define SERVER_WRITE_BUF_SIZE  262144             /* 256KB */
 #define SERVER_DEFAULT_SOCKET  "aimee.sock"
-#define SERVER_TOKEN_FILE      "server.token"
-#define SERVER_TOKEN_LEN       64 /* 64 hex bytes = 32 raw bytes */
 /* Listen backlog: number of connections the kernel will queue between
  * accept() calls. When the queue is full, new connect() calls fail with
  * ECONNREFUSED — observable as "aimee: server unavailable" from CLI
@@ -43,11 +49,12 @@ typedef struct cJSON cJSON;
 #define CONN_WRITE_DEADLINE_MS 10000 /* 10 seconds */
 
 /* Per-method payload size limits */
-#define LIMIT_MEMORY   (256 * 1024)      /* 256KB for memory operations */
-#define LIMIT_TOOL     (4 * 1024 * 1024) /* 4MB for tool I/O */
-#define LIMIT_DELEGATE (4 * 1024 * 1024) /* 4MB: supports 2MB prompt-file + JSON overhead */
-#define LIMIT_CHAT     (512 * 1024)      /* 512KB for chat messages */
-#define LIMIT_INGEST   (1024 * 1024)     /* 1MB: client-pushed code files (kb req cap) */
+#define LIMIT_MEMORY     (256 * 1024)        /* 256KB for memory operations */
+#define LIMIT_TOOL       (4 * 1024 * 1024)   /* 4MB for tool I/O */
+#define LIMIT_DELEGATE   (4 * 1024 * 1024)   /* 4MB: supports 2MB prompt-file + JSON overhead */
+#define LIMIT_ROUNDTABLE (128 * 1024 * 1024) /* 16MB artifact plus worst-case JSON escaping */
+#define LIMIT_CHAT       (512 * 1024)        /* 512KB for chat messages */
+#define LIMIT_INGEST     (1024 * 1024)       /* 1MB: client-pushed code files (kb req cap) */
 #define LIMIT_TRANSCRIPT                                                                           \
    (3 * 1024 * 1024)               /* 3MB: session transcript snapshots (< SHTTP_MAX_BODY) */
 #define LIMIT_DEFAULT (256 * 1024) /* 256KB default */
@@ -86,8 +93,19 @@ typedef struct cJSON cJSON;
  * only), so a mere authenticated bearer cannot tap live traffic. */
 #define CAP_SHADOW_ADMIN (1u << 17)
 
+/* Operator-level: administer per-user /v1 write-tier grants — who may write to which
+ * remote server. Deliberately OUTSIDE CAPS_AUTHENTICATED for the same reason as the two
+ * above, and the reason is sharper here: a bearer that could administer grants could grant
+ * ITSELF a higher tier, which would make the whole tier system decorative.
+ *
+ * This is defence in depth and not the primary control. The primary control is
+ * v1_route_requires_uds, which refuses these routes over TCP regardless of capability —
+ * necessary because a remote_writes=full bearer holds CAPS_ALL and would otherwise satisfy
+ * any capability check. kb then independently requires admin or team-lead authority. */
+#define CAP_GRANT_ADMIN (1u << 18)
+
 /* Composite capability sets */
-#define CAPS_ALL 0x3FFFFu
+#define CAPS_ALL 0x7FFFFu
 #define CAPS_READ_ONLY                                                                             \
    (CAP_CHAT | CAP_MEMORY_READ | CAP_RULES_READ | CAP_INDEX_READ | CAP_SESSION_READ |              \
     CAP_DASHBOARD_READ | CAP_DESCRIBE_READ)
@@ -164,7 +182,7 @@ typedef struct
     * is live and propagated across the loopback_rpc fake-conn boundary. The
     * vault principal ("uid:<n>" / "webuser:<name>" / "" when un-attested) is the
     * single security key for the vault file + KEK cache — derived from the
-    * kernel-attested peer_uid or the server.token-gated webuser assertion, NEVER
+    * kernel-attested peer_uid or root-UDS-gated webuser assertion, NEVER
     * a client-supplied session_id. Empty principal => no vault (fail-closed). */
    attested_transport_t attested_transport;
    char vault_principal[VAULT_PRINCIPAL_MAX];
@@ -186,13 +204,14 @@ typedef struct
    int listen_fd;
    platform_evloop_t evloop;
    char socket_path[4096];
-   char token[SERVER_TOKEN_LEN * 2 + 1]; /* hex string */
    server_conn_t conns[SERVER_MAX_CONNECTIONS];
    int conn_count;
    pthread_mutex_t conns_mutex; /* serialises slot allocation/free and conn_count */
    compute_pool_t pool;
    compute_pool_t request_pool;
    int request_pool_initialized;
+   compute_pool_t orchestration_pool;
+   int orchestration_pool_initialized;
    pthread_mutex_t session_pools_mutex;
    int session_pools_initialized;
    int session_threads;
@@ -215,13 +234,12 @@ int server_run(server_ctx_t *ctx);
 /* True if an aimee-server instance is already running for `socket_path` (pid-file
  * + liveness check). Used by the offline --rotate-master-key guard (D13 F2). */
 int server_is_running(const char *socket_path);
-/* Drain detached LLM orchestration coordinators before DB1 shutdown. */
-void server_http_op_runs_drain(int timeout_ms);
-/* Boot-time delegate-vault provisioning: seal operator-supplied delegate API
- * keys ($AIMEE_DELEGATE_SECRETS_FILE / AIMEE_DELEGATE_KEY_<AGENT>) into the
- * server-principal vault so a fresh server's delegates work with no manual
- * `vault set`. No-op when no source is set; returns the count provisioned. */
+/* Boot-time credential provisioning: seal operator-supplied delegate API keys
+ * and the first-boot AIMEE_FORGE_TOKEN into the server-principal Vault, then
+ * scrub credential environment variables. No-op when no source is set; returns
+ * the count provisioned. */
 int server_vault_bootstrap(void);
+int server_vault_bootstrap_prepare(void);
 /* Resolve a delegate name to its canonical agents.json name: returns 1 and
  * writes `canon` (NUL-terminated, capped at `cap`) when known, else 0. The
  * provisioning module calls this through an injected pointer so it carries no
@@ -247,6 +265,19 @@ server_ctx_t *server_active_ctx(void);
 /* Response helpers (shared across handler files) */
 int server_send_response(server_conn_t *conn, cJSON *resp);
 int server_send_error(server_conn_t *conn, const char *message, const char *request_id);
+
+/* Fault classes for server_send_error_kind. The dispatch envelope otherwise says
+ * only "error", which leaves anything mapping it to HTTP unable to separate a
+ * caller's mistake from a server-side failure — so runtime-web called all of
+ * them 502. Optional and additive: an unclassified error keeps the old
+ * behaviour. */
+#define SERVER_ERR_INVALID_ARGUMENT  "invalid_argument"  /* caller sent bad/missing input */
+#define SERVER_ERR_NOT_FOUND         "not_found"         /* named thing does not exist */
+#define SERVER_ERR_PERMISSION_DENIED "permission_denied" /* caller not allowed */
+#define SERVER_ERR_UNAVAILABLE       "unavailable"       /* a dependency is down */
+
+int server_send_error_kind(server_conn_t *conn, const char *kind, const char *message,
+                           const char *request_id);
 
 /* Declared from cJSON.h so the inline below needs no cJSON.h include here; the
  * real declaration is identical, so including both is harmless. */
@@ -288,10 +319,16 @@ int handle_trajectory_batch(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 
 /* State handlers (server_state.c) */
 int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+/* Resolve request-local project/workspace memory identity and activate it for
+ * subsequent kb_client memory calls on this worker thread. Returns 1 when the
+ * active identity is missing; caller must clear the client context. */
+int server_memory_scope_begin(cJSON *req);
 int handle_memory_store(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_read(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_benchmark(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_scan(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -319,6 +356,8 @@ int handle_kb_build(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_update(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_ingest(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_docs_push(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_kb_reembed(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_memory_embed(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_ingest_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_optimize_export(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -343,6 +382,7 @@ int handle_wm_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_wm_context(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_primary_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_hosts_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_embedders_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_primary_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_primary_clear(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_attempt_record(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -353,16 +393,14 @@ int handle_dashboard_delegations(server_ctx_t *ctx, server_conn_t *conn, cJSON *
 int handle_dashboard_traces(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_dashboard_plans(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_dashboard_logs(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_dashboard_plugins(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_plugin_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_plugin_enable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_plugin_disable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_dashboard_onboard(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_dashboard_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_lsp_diagnostics_summary(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_dashboard_all(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_dashboard_audit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_audit_verify(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_audit_captures(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_audit_replay(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_audit_checkpoint(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_audit_seal(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_audit_snapshot(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -386,7 +424,7 @@ int handle_identity_diff(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_tool_execute(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_roundtable_review_proxy(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 /* Deepening sweep (Part B): analysis-only — proposes seams per area and re-grounds
  * each against the live code index; returns a JSON report. Files nothing. */
 int handle_dev_sweep(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -441,6 +479,9 @@ int handle_agent_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_local(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_remove(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+/* Returns 0 only after the atomic agents.json replacement committed; every
+ * nonzero result is proven pre-effect.  Used by the management action barrier. */
+int server_agent_management_set_enabled(const char *name, int enabled);
 int handle_agent_enable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_roles(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_personas(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -463,6 +504,11 @@ cJSON *mcp_build_full_served_list(void);
 int handle_mcp_audit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_mcp_recheck(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_get_help(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+
+/* Record the served-call verdict from a sub-handler that returned early (same
+ * thread as handle_mcp_call). See server_mcp.c. */
+void server_mcp_served_outcome(const char *verdict, const char *reason);
 int handle_toolset_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_toolset_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_toolset_resolve(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

@@ -2,10 +2,23 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
-#include "delegate_role.h"
+#include <aimee/delegates/delegate_role.h>
 #include "agent_types.h"
 #include <stdlib.h>   /* mkdtemp */
 #include <sys/stat.h> /* mkdir */
+
+/* delegate_agent_supports_role() now defers to the canonical agent_has_role()
+ * (declared-role membership, `all` wildcard included). Stub it here — the real
+ * definition lives in agent_route.o, which this unit test does not link. */
+int agent_has_role(const agent_t *agent, const char *role)
+{
+   if (!agent || !role || !role[0])
+      return 0;
+   for (int i = 0; i < agent->role_count; i++)
+      if (strcmp(agent->roles[i], "all") == 0 || strcmp(agent->roles[i], role) == 0)
+         return 1;
+   return 0;
+}
 
 /* role_template_max_turns() (reached via delegate_default_max_turns_for_role) reads
  * <config_default_dir()>/role_templates/<canonical-role>.md and parses `max_turns:`
@@ -173,31 +186,96 @@ static void test_is_write_null_empty(void)
 
 static void test_novel_roles(void)
 {
-   /* Write roles draft/edit manuscript files. */
-   assert(delegate_role_is_write("prose") == 1);
-   assert(delegate_role_is_write("line-edit") == 1);
-   /* Read-only review roles. */
+   /* continuity and beat-check survive the persona-vs-role cull: they are real
+    * read-only inspection actions a novel persona genuinely delegates, not
+    * restatements of who the delegate is. */
    assert(delegate_role_is_write("continuity") == 0);
    assert(delegate_role_is_write("beat-check") == 0);
-   /* Read-only novel roles auto-enable tools like review/validate. */
    assert(delegate_role_auto_tools_for_invocation("continuity", -1, 0) == 1);
    assert(delegate_role_auto_tools_for_invocation("beat-check", 2, 0) == 1);
    assert(delegate_role_auto_tools_for_invocation("continuity", 1, 0) == 0);
    printf("  PASS: test_novel_roles\n");
 }
 
-static void test_songwriter_roles(void)
+/* The cull deleted the roles that only restated a persona. Writing prose or a
+ * lyric is the `draft` action performed BY a novel/songwriter persona, so these
+ * names must now be rejected outright rather than silently degrading to a
+ * read-only delegate with a generic prompt. */
+static void test_culled_persona_roles_are_rejected(void)
 {
-   /* Write roles draft/edit lyric files. */
-   assert(delegate_role_is_write("lyric") == 1);
-   assert(delegate_role_is_write("hook") == 1);
-   /* Read-only review roles. */
-   assert(delegate_role_is_write("prosody") == 0);
-   assert(delegate_role_is_write("songform") == 0);
-   /* Read-only songwriter roles auto-enable tools. */
-   assert(delegate_role_auto_tools_for_invocation("prosody", -1, 0) == 1);
-   assert(delegate_role_auto_tools_for_invocation("songform", 2, 0) == 1);
-   printf("  PASS: test_songwriter_roles\n");
+   static const char *const culled[] = {"prose", "line-edit", "lyric",
+                                        "hook",  "prosody",   "songform"};
+   for (size_t i = 0; i < sizeof(culled) / sizeof(culled[0]); i++)
+   {
+      assert(delegate_role_removed_reason(culled[i]) != NULL);
+      /* And they must not linger as write roles, which would hand tool access
+       * to a name routing will refuse. */
+      assert(delegate_role_is_write(culled[i]) == 0);
+   }
+   /* Surviving roles are not swept up by the removal check. */
+   assert(delegate_role_removed_reason("draft") == NULL);
+   assert(delegate_role_removed_reason("continuity") == NULL);
+   assert(delegate_role_removed_reason(NULL) == NULL);
+   assert(delegate_role_removed_reason("") == NULL);
+   printf("  PASS: test_culled_persona_roles_are_rejected\n");
+}
+
+/* An unknown role name used to be accepted verbatim and dispatched: no template
+ * (generic prompt), no write classification (silently read-only), no agent role
+ * an operator could grant. That is the same hazard the removed-role blacklist
+ * guards, so the check has to be a positive list, not six special cases. */
+static void test_unknown_roles_are_not_known(void)
+{
+   static const char *const unknown[] = {"bogusrole", "revieww", "delete-everything", "", NULL};
+   for (int i = 0; unknown[i]; i++)
+      assert(delegate_role_known(NULL, unknown[i]) == 0);
+   assert(delegate_role_known(NULL, NULL) == 0);
+
+   /* Culled names are not known either — dispatch must reach the removed-role
+    * reason, never treat them as a live role. */
+   static const char *const culled[] = {"prose", "line-edit", "lyric", "hook", NULL};
+   for (int i = 0; culled[i]; i++)
+      assert(delegate_role_known(NULL, culled[i]) == 0);
+   printf("  PASS: test_unknown_roles_are_not_known\n");
+}
+
+/* Every shipped role, and every alias target, must be known. This is the drift
+ * guard: adding an alias whose canonical name is not a real role would make the
+ * alias dispatch-refused, and the failure would only show up in production. */
+static void test_known_roles_cover_documented_and_aliased(void)
+{
+   static const char *const roles[] = {"review",    "validate",   "diagnose",   "code",
+                                       "refactor",  "explain",    "draft",      "execute",
+                                       "summarize", "format",     "search",     "reason",
+                                       "plan",      "continuity", "beat-check", NULL};
+   for (int i = 0; roles[i]; i++)
+      assert(delegate_role_known(NULL, roles[i]) == 1);
+
+   static const char *const aliases[] = {"implement",
+                                         "build",
+                                         "reviewer",
+                                         "verifier",
+                                         "test",
+                                         "check",
+                                         "evaluate",
+                                         "inspect",
+                                         "research",
+                                         "enforce",
+                                         "recall",
+                                         "synthesize",
+                                         "rank-fuse",
+                                         "classify-score",
+                                         "planner",
+                                         "planning",
+                                         "evaluate-optimize",
+                                         NULL};
+   for (int i = 0; aliases[i]; i++)
+   {
+      assert(delegate_role_known(NULL, aliases[i]) == 1);
+      /* and the alias must resolve INTO the known set, not merely match it */
+      assert(delegate_role_known(NULL, delegate_role_canonicalize(aliases[i])) == 1);
+   }
+   printf("  PASS: test_known_roles_cover_documented_and_aliased\n");
 }
 
 static void test_inspection_turn_policies(void)
@@ -253,6 +331,34 @@ static void test_apply_max_turns_policy(void)
    printf("  PASS: test_apply_max_turns_policy\n");
 }
 
+static void test_apply_max_turns_cap(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.agent_count = 5;
+   for (int i = 0; i < 4; i++)
+   {
+      snprintf(cfg.agents[i].roles[0], sizeof(cfg.agents[i].roles[0]), "code");
+      cfg.agents[i].role_count = 1;
+   }
+   cfg.agents[0].max_turns = -1; /* inherited unlimited */
+   cfg.agents[1].max_turns = 0;  /* explicitly unlimited */
+   cfg.agents[2].max_turns = 20; /* stricter agent cap */
+   cfg.agents[3].max_turns = 200;
+   snprintf(cfg.agents[4].roles[0], sizeof(cfg.agents[4].roles[0]), "review");
+   cfg.agents[4].role_count = 1;
+   cfg.agents[4].max_turns = 200;
+
+   delegate_apply_max_turns_cap(&cfg, "code", 48);
+   assert(cfg.agents[0].max_turns == 48);
+   assert(cfg.agents[1].max_turns == 48);
+   assert(cfg.agents[2].max_turns == 20);
+   assert(cfg.agents[3].max_turns == 48);
+   assert(cfg.agents[4].max_turns == 200); /* ineligible role untouched */
+
+   printf("  PASS: test_apply_max_turns_cap\n");
+}
+
 static void test_auto_tools_policy(void)
 {
    assert(delegate_role_auto_tools_for_invocation("diagnose", -1, 0) == 1);
@@ -286,9 +392,12 @@ int main(void)
    test_is_write_read_only_roles();
    test_is_write_null_empty();
    test_novel_roles();
-   test_songwriter_roles();
+   test_culled_persona_roles_are_rejected();
+   test_unknown_roles_are_not_known();
+   test_known_roles_cover_documented_and_aliased();
    test_inspection_turn_policies();
    test_apply_max_turns_policy();
+   test_apply_max_turns_cap();
    test_auto_tools_policy();
    printf("All tests passed.\n");
    return 0;

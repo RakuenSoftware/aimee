@@ -2,7 +2,7 @@
 
 > Auto-generated from `api/openapi-v1.yaml` by `scripts/gen-api-docs.py`. Do not edit by hand; run `make docs-gen` to regenerate.
 
-Total endpoints: 79
+Total endpoints: 92
 
 ## Endpoints
 
@@ -70,7 +70,7 @@ Responses:
 
 Set a team/project period budget cap (org-admin, P4a)
 
-Upserts the hard-cap config for (team, optional project, period). Org-admin gated at the DB layer and WORM-audited atomically with the mutation; a non-admin caller receives 403. A hard reduction of the limit below the current period's already committed (spend + reserved) is rejected as retroactive (409). limit_usd and soft_limit_usd are NUMERIC decimal strings (never floats). soft_limit_usd is a config-only operator-signal threshold (P4a does not enforce it; a soft limit never refuses). BUDGET ONLY: the rate limiter is deferred to P4b; the reserve-before-dispatch enforcement rides with P2b.
+Upserts the hard-cap config for (team, optional project, period). Org-admin gated at the DB layer and WORM-audited atomically with the mutation; a non-admin caller receives 403. A hard reduction of the limit below the current period's already committed (spend + reserved) is rejected as retroactive (409). limit_usd and soft_limit_usd are NUMERIC decimal strings (never floats). soft_limit_usd is a config-only operator-signal threshold. P4a does not enforce it; a soft limit never refuses). BUDGET ONLY: the rate limiter is deferred to P4b; the reserve-before-dispatch enforcement rides with P2b.
 
 Request body (`application/json`).
 
@@ -86,7 +86,7 @@ Responses:
 
 Show a team's budget caps + current-period counters (org-admin or team-lead, P4a)
 
-Returns every configured cap for the team (optionally filtered to one project), each joined to its current UTC period counter: limit, spend, reserved, and remaining (= limit - spend - reserved). Authorization is enforced at the DB layer inside a SECURITY DEFINER function; the caller must be an org-admin OR a lead of the requested team. All money fields are NUMERIC strings (never floats).
+Returns every configured cap for the team (optionally filtered to one project), each joined to its current UTC period counter: limit, spend, reserved, and remaining (= limit - spend - reserved). Authorization is enforced at the DB layer inside a SECURITY DEFINER function. The caller must be an org-admin OR a lead of the requested team. All money fields are NUMERIC strings (never floats).
 
 | Name | In | Required | Type | Description |
 |------|----|----------|------|-------------|
@@ -118,15 +118,18 @@ Blast-radius computation for a file
 
 | Name | In | Required | Type | Description |
 |------|----|----------|------|-------------|
-| `project` | query | yes | string |  |
+| `project` | query | no | string | Stable project identity. Defaults to the authenticated active project. |
+| `generation` | query | no | integer | Optional observed current generation; stale observations fail closed. |
 | `file_path` | query | no | string |  |
 
 Responses:
 
-- `200`: Blast radius
+- `200`: Current-generation blast radius with provenance-bearing edges
 - `400`: Missing required parameters
 - `401`: Unauthorized
-- `404`: File not found in index
+- `404`: Project is detached/unknown or the file is not indexed
+- `409`: Active project is required or the observed generation is stale
+- `503`: Canonical index unavailable
 
 ### `POST /v1/code/build`
 
@@ -148,7 +151,9 @@ Call sites for a symbol in the canonical code index
 | Name | In | Required | Type | Description |
 |------|----|----------|------|-------------|
 | `symbol` | query | yes | string |  |
-| `project` | query | no | string |  |
+| `project` | query | no | string | Stable project identity. Defaults to the authenticated active project. |
+| `scope` | query | no | string (current, all) | Cross-project lookup requires `all`; send `project` too to protect that active project's candidates before the result limit. |
+| `generation` | query | no | integer | Optional observed current generation; stale observations fail closed. |
 | `max_results` | query | no | integer |  |
 
 Responses:
@@ -156,6 +161,32 @@ Responses:
 - `200`: Caller results
 - `400`: Missing symbol parameter
 - `401`: Unauthorized
+- `403`: Scoped credentials cannot request all projects
+- `404`: Project is unknown or detached
+- `409`: Active project is required or the observed generation is stale
+- `503`: Canonical index unavailable
+
+### `GET /v1/code/context`
+
+Bounded task-conditioned context for the active project
+
+Reuses hybrid RRF retrieval but returns only current-generation evidence for one active project. Exact lexical and structural evidence leads; vector-only evidence must clear the quality floor. Memory is additive, locally ordered, and anchored to accepted code. A weak query returns HTTP 200 with status `no_answer`, empty results, and empty why rather than broadening to global memory.
+
+| Name | In | Required | Type | Description |
+|------|----|----------|------|-------------|
+| `query` | query | yes | string |  |
+| `symbol` | query | no | string |  |
+| `project` | query | yes | string | Stable identity of the authenticated active project; cross-project scope is forbidden. |
+| `generation` | query | no | integer | Optional observed current generation; stale observations fail closed. |
+| `max_results` | query | no | integer | Accepted for client compatibility and clamped to the fixed packet maximum of four. |
+
+Responses:
+
+- `200`: Answerable bounded packet or explicit no_answer
+- `400`: Missing or invalid query
+- `401`: Unauthorized
+- `404`: Project is unknown, detached, or has no current generation
+- `409`: Active project is required or the observed generation is stale
 - `503`: Canonical index unavailable
 
 ### `GET /v1/code/cross-repo-deps`
@@ -185,7 +216,9 @@ Symbol/identifier lookup across the canonical index
 | Name | In | Required | Type | Description |
 |------|----|----------|------|-------------|
 | `identifier` | query | yes | string |  |
-| `project` | query | no | string |  |
+| `project` | query | no | string | Stable project identity. Defaults to the authenticated active project. |
+| `scope` | query | no | string (current, all) | Cross-project lookup requires `all`; send `project` too to protect that active project's candidates before the result limit. |
+| `generation` | query | no | integer | Optional observed current generation; stale observations fail closed. |
 | `max_results` | query | no | integer |  |
 
 Responses:
@@ -193,6 +226,10 @@ Responses:
 - `200`: Code find results
 - `400`: Missing identifier parameter
 - `401`: Unauthorized
+- `403`: Scoped credentials cannot request all projects
+- `404`: Project is unknown or detached
+- `409`: Active project is required or the observed generation is stale
+- `503`: Canonical index unavailable
 
 ### `GET /v1/code/project-stats`
 
@@ -208,6 +245,59 @@ Responses:
 - `400`: Missing required parameters
 - `401`: Unauthorized
 - `503`: Canonical index unavailable
+
+### `POST /v1/code/project/detach`
+
+Detach the current generation of a stable project
+
+Marks the project and its current generation detached so default/current queries no longer return it. Data is retained for audit and later re-add or explicit purge. Requires an authenticated unscoped owner credential.
+
+Request body (`application/json`).
+
+Responses:
+
+- `200`: Project generation detached
+- `400`: Invalid request
+- `403`: Verified unscoped owner principal required
+- `404`: Project not found
+- `405`: Method not allowed
+- `503`: Canonical index unavailable
+
+### `POST /v1/code/project/gc`
+
+Dry-run or confirm detached-generation garbage collection
+
+Omit `confirm_hash` for a read-only manifest. To delete expired detached generations and aliases, repeat the request with the exact SHA-256 hash and a reason. The manifest binds the retention policy and UTC cutoff as well as exact physical target fingerprints. Requires an authenticated unscoped owner credential.
+
+Request body (`application/json`).
+
+Responses:
+
+- `200`: Dry-run or confirmed garbage-collection manifest
+- `400`: Invalid request or confirmed operation without a reason
+- `403`: Verified unscoped owner principal required
+- `404`: Project not found
+- `405`: Method not allowed
+- `409`: Target manifest changed; run the dry run again
+- `503`: Audit or canonical-index operation failed
+
+### `POST /v1/code/project/purge`
+
+Dry-run or confirm exact deletion of one stable project
+
+Omit `confirm_hash` for a read-only manifest. To delete, repeat the request with that exact SHA-256 hash and a reason. Confirmation fails if any target row changed, and audit failure blocks mutation. Requires an authenticated unscoped owner credential.
+
+Request body (`application/json`).
+
+Responses:
+
+- `200`: Dry-run or confirmed purge manifest
+- `400`: Invalid request or confirmed operation without a reason
+- `403`: Verified unscoped owner principal required
+- `404`: Project not found
+- `405`: Method not allowed
+- `409`: Target manifest changed; run the dry run again
+- `503`: Audit or canonical-index operation failed
 
 ### `GET /v1/code/projects`
 
@@ -260,7 +350,9 @@ Full-text code search across indexed file contents
 | Name | In | Required | Type | Description |
 |------|----|----------|------|-------------|
 | `query` | query | yes | string |  |
-| `project` | query | no | string |  |
+| `project` | query | no | string | Stable project identity. Defaults to the authenticated active project. |
+| `scope` | query | no | string (current, all) | Cross-project search requires `all`; send `project` too to protect that active project's candidates before the result limit. |
+| `generation` | query | no | integer | Optional observed current generation; stale observations fail closed. |
 | `max_results` | query | no | integer |  |
 
 Responses:
@@ -268,6 +360,9 @@ Responses:
 - `200`: Code search results
 - `400`: Missing query parameter
 - `401`: Unauthorized
+- `403`: Scoped credentials cannot request all projects
+- `404`: Project is unknown or detached
+- `409`: Active project is required or the observed generation is stale
 - `503`: Canonical index unavailable
 
 ### `GET /v1/code/structure`
@@ -276,7 +371,8 @@ Definitions for a file in the canonical code index
 
 | Name | In | Required | Type | Description |
 |------|----|----------|------|-------------|
-| `project` | query | yes | string |  |
+| `project` | query | no | string | Stable project identity. Defaults to the authenticated active project. |
+| `generation` | query | no | integer | Optional observed current generation; stale observations fail closed. |
 | `file_path` | query | yes | string |  |
 | `max_results` | query | no | integer |  |
 
@@ -285,6 +381,8 @@ Responses:
 - `200`: File definitions
 - `400`: Missing required parameters
 - `401`: Unauthorized
+- `404`: Project is unknown or detached
+- `409`: Active project is required or the observed generation is stale
 - `503`: Canonical index unavailable
 
 ### `POST /v1/code/update`
@@ -337,6 +435,77 @@ Responses:
 - `401`: Unauthorized
 - `403`: Forbidden (credential not permitted for this route)
 
+### `GET /v1/console/pipeline`
+
+Curator pipeline registry, presets, and current config (console)
+
+The curator pipeline as data for the web console's Pipeline page: the live
+stage registry (name, label, lane, budget, order, config_key, requires),
+the built-in presets, and the current value of every config key the page
+toggles. The kb owns the curator, so this is served in-process.
+Requires a console-admin credential.
+
+Responses:
+
+- `200`: Pipeline envelope
+- `401`: Unauthorized
+- `403`: Forbidden (credential not permitted for this route)
+
+### `POST /v1/console/pipeline/config`
+
+Set one curator-pipeline config key (console)
+
+Sets a single pipeline config key and persists it to aimee.yaml; the
+curator picks it up on its next config load. The key must be a stage
+enable flag advertised by the live registry, or one of the pipeline's own
+keys (stage order, user presets, custom stages). Anything else is 403, so
+this route cannot reach arbitrary config. Requires a console-admin
+credential.
+
+Request body (`application/json`).
+
+Responses:
+
+- `200`: Saved; echoes the stored value
+- `400`: Missing/invalid key or value
+- `401`: Unauthorized
+- `403`: Not a pipeline config key, or credential not permitted
+
+### `GET /v1/console/settings`
+
+KB-owned configuration (console)
+
+Every config option aimee-kb owns, including the embedder, synthesis
+tier, and knowledge base itself, with its current value, section, and
+whether it needs a kb restart. The split from aimee-server's own settings
+is by which binary reads the option (KB_SETTINGS in
+src/kb/http/kb_http_console.c). Requires a console-admin credential.
+
+Responses:
+
+- `200`: KB-owned settings
+- `401`: Unauthorized
+- `403`: Forbidden (credential not permitted for this route)
+
+### `POST /v1/console/settings/config`
+
+Set one KB-owned config option (console)
+
+Sets a single KB-owned option and persists it to aimee.yaml. The key must
+be one the KB owns. Anything else (aimee-server's keys, db2_url, the
+agent roster) is 403, so this route cannot reach arbitrary config. Options
+flagged `restart` take effect when aimee-kb next starts. Requires a
+console-admin credential.
+
+Request body (`application/json`).
+
+Responses:
+
+- `200`: Saved; echoes the stored value
+- `400`: Missing/invalid key or value
+- `401`: Unauthorized
+- `403`: Not a KB-owned setting, or credential not permitted
+
 ### `GET /v1/decisions`
 
 List governance decision records (console)
@@ -359,7 +528,7 @@ Responses:
 
 - `201`: Created decision
 - `400`: Bad request
-- `409`: Conflict: an active decision already exists for this scope
+- `409`: Conflict because an active decision already exists for this scope
 
 ### `GET /v1/decisions/{id}`
 
@@ -694,7 +863,7 @@ Responses:
 
 Purge every kb store for a project under a generation fence
 
-Writes the project-purge generation fence, then deletes the project from every kb store the ingest path writes (chunks, file index, vectors, code embeddings, curator code-unit vectors, canonical index, code-unit jobs, pdf vectors, minhash), continuing past per-store failures. The fence is NOT cleared here. Call purge-finalize (or purge-cancel) once the caller's own deletion completed. Idempotent.
+Writes the project-purge generation fence, then deletes the project from every kb store the ingest path writes (chunks, file index, vectors, code embeddings, curator code-unit vectors, canonical index, code-unit jobs, pdf vectors, minhash), continuing past per-store failures. The fence is not cleared here. Call purge-finalize (or purge-cancel) once the caller's own deletion completed. Idempotent.
 
 Request body (`application/json`).
 
@@ -735,7 +904,7 @@ Responses:
 
 List the caller's entitled org models (P2a)
 
-Returns the org models the authenticated caller is entitled to use: the join of the org model catalog with the caller's team entitlements, actor-bound to the verified principal (a caller can never see another principal's entitled models). Catalog-only: the surface carries provider/wire/endpoint/model_id/display_name and NO credential or slot reference. Disabled catalog entries are excluded.
+Returns the org models the authenticated caller is entitled to use. This is the join of the org model catalog with the caller's team entitlements, actor-bound to the verified principal (a caller can never see another principal's entitled models). Catalog-only: the surface carries provider/wire/endpoint/model_id/display_name and NO credential or slot reference. Disabled catalog entries are excluded.
 
 Responses:
 
@@ -753,7 +922,7 @@ Request body (`application/json`).
 Responses:
 
 - `200`: Catalog entry upserted
-- `400`: Invalid model_id
+- `400`: Invalid model_id, provider, or wire
 - `401`: Authentication required
 - `403`: Not authorized (not an org-admin)
 
@@ -767,7 +936,7 @@ Responses:
 
 - `200`: Entitlement granted
 - `401`: Authentication required
-- `403`: Not authorized (not an org-admin)
+- `403`: Not authorized (not an org-admin), or unknown model/team
 
 ### `POST /v1/models/org/remove`
 
@@ -783,14 +952,14 @@ Responses:
 
 ### `POST /v1/models/org/set`
 
-Alias of /models/org/add: upsert an org model catalog entry (org-admin, P2a)
+Upsert an org model catalog entry; alias of /models/org/add (org-admin, P2a)
 
 Request body (`application/json`).
 
 Responses:
 
 - `200`: Catalog entry upserted
-- `400`: Invalid model_id
+- `400`: Invalid model_id, provider, or wire
 - `401`: Authentication required
 - `403`: Not authorized (not an org-admin)
 
@@ -846,7 +1015,7 @@ Responses:
 
 Set a keyed fixed-window rate-limit policy (org-admin, P4b)
 
-Upserts the admin-set rate policy for (dim, scope). dim is the limiter dimension (team | project | cert | model | cred_slot); scope is the concrete id/name, or "*" for the dim default applied when no specific row exists. window_seconds is the fixed-window width and max_count the requests admitted per window (max_count = 0 is an always-deny). Org-admin gated at the DB layer and WORM-audited atomically with the mutation; a non-admin caller receives 403. The policy is authoritative and never caller-supplied at enforcement time; the P2b egress path passes only the resolved identity to org_rate_check, which looks the policy up. RATE ONLY: the enforcement wiring at egress rides with P2b; the budget core is P4a.
+Upserts the admin-set rate policy for (dim, scope). dim is the limiter dimension (team | project | cert | model | cred_slot); scope is the concrete id/name, or "*" for the dim default applied when no specific row exists. window_seconds is the fixed-window width and max_count the requests admitted per window (max_count = 0 is an always-deny). Org-admin gated at the DB layer and WORM-audited atomically with the mutation; a non-admin caller receives 403. The policy is authoritative and never caller-supplied at enforcement time. The P2b egress path passes only the resolved identity to org_rate_check, which looks the policy up. RATE ONLY: the enforcement wiring at egress rides with P2b; the budget core is P4a.
 
 Request body (`application/json`).
 
@@ -861,7 +1030,7 @@ Responses:
 
 Show a keyed rate-limit policy (org-admin or team-lead, P4b)
 
-Returns the rate policy for the exact (dim, scope) pair (0 or 1 row). Authorization is enforced at the DB layer inside a SECURITY DEFINER function; the caller must be an org-admin, OR (for dim=team) a lead of that team, OR (for dim=project) a lead of the team that owns the project. The global dims (model, cred_slot) and the "*" default are admin-only. Read-only.
+Returns the rate policy for the exact (dim, scope) pair (0 or 1 row). Authorization is enforced at the DB layer inside a SECURITY DEFINER function. The caller must be an org-admin, OR (for dim=team) a lead of that team, OR (for dim=project) a lead of the team that owns the project. The global dims (model, cred_slot) and the "*" default are admin-only. Read-only.
 
 | Name | In | Required | Type | Description |
 |------|----|----------|------|-------------|
@@ -979,7 +1148,7 @@ Responses:
 
 ### `GET /v1/scopes`
 
-Scope lattice: distinct scopes with cert counts (console)
+List distinct scopes and certificate counts in the scope lattice (console)
 
 Responses:
 
@@ -990,13 +1159,123 @@ Responses:
 
 Hybrid knowledge search
 
+Searches the authenticated active project by default. A request without an active project fails with `scope_required`; deliberate cross-project retrieval requires `scope: all`. Send the active `project` together with `scope: all` to reserve the result head for local evidence while allowing labeled cross-project results in the tail.
+
 Request body (`application/json`).
 
 Responses:
 
 - `200`: Search results
-- `400`: Bad request (missing query)
+- `400`: Bad request (missing query or invalid scope)
 - `401`: Unauthorized
+- `403`: Scoped credentials cannot request all projects
+- `409`: No active project is available (`scope_required`)
+
+### `GET /v1/servers`
+
+List registered servers for one team
+
+Returns the primary-backed, tenant-scoped server registry view.
+
+| Name | In | Required | Type | Description |
+|------|----|----------|------|-------------|
+| `team` | query | yes | integer | Positive signed-64-bit team id serialized as canonical decimal without a sign or leading zero. |
+
+Responses:
+
+- `200`: Bounded server registry list
+- `400`: Invalid or missing team
+- `401`: Authentication required
+- `403`: Actor is not authorized for the requested team
+- `503`: Registry unavailable
+
+### `POST /v1/servers/{server_id}/actions`
+
+Enable or disable one agent on one registered server
+
+Executes one identity-propagating, journaled management action. The server's remote_writes policy remains authoritative and the request is never safely retryable after an ambiguous dispatch.
+
+| Name | In | Required | Type | Description |
+|------|----|----------|------|-------------|
+| `server_id` | path | yes | string |  |
+| `team` | query | yes | integer | Positive signed-64-bit team id serialized as canonical decimal without a sign or leading zero. |
+
+Request body (`application/json`).
+
+Responses:
+
+- `200`: Action succeeded
+- `400`: Invalid team or action envelope
+- `401`: Authentication required
+- `403`: Actor, team, capability, or server policy denied the action
+- `404`: Server not found
+- `409`: Replay, registry conflict, or unresolved prior intent
+- `502`: Action result is indeterminate
+- `503`: Management runtime or dependency unavailable
+
+### `GET /v1/servers/{server_id}/agents`
+
+Read the bounded public agent projection from one registered server
+
+Performs the nonce-bound management-read exchange over the server's pinned mTLS session. The response contains only the seven frozen public agent fields and is authorized independently from remote_writes.
+
+| Name | In | Required | Type | Description |
+|------|----|----------|------|-------------|
+| `server_id` | path | yes | string |  |
+| `team` | query | yes | integer | Positive signed-64-bit team id serialized as canonical decimal without a sign or leading zero. |
+
+Responses:
+
+- `200`: Complete bounded agent projection
+- `400`: Invalid path or team query
+- `401`: Authentication required
+- `403`: Management read denied
+- `404`: Server not found
+- `409`: Read intent or target state conflict
+- `502`: Authenticated management response failed integrity validation
+- `503`: Management read runtime or dependency unavailable
+
+### `GET /v1/servers/{server_id}/config`
+
+Read the bounded safe configuration projection from one registered server
+
+| Name | In | Required | Type | Description |
+|------|----|----------|------|-------------|
+| `server_id` | path | yes | string |  |
+| `team` | query | yes | integer |  |
+
+Responses:
+
+- `200`: Complete five-field safe configuration projection
+- `400`: Invalid path or team query
+- `401`: Authentication required
+- `403`: Management read denied
+- `404`: Server not found
+- `409`: Read intent or target state conflict
+- `502`: Authenticated management response failed integrity validation
+- `503`: Management read runtime or dependency unavailable
+
+### `GET /v1/servers/{server_id}/health`
+
+Verify a registered server through the management health exchange
+
+Performs the live, nonce-bound management challenge and signed-status exchange. It does not return the registry's cached heartbeat row.
+
+| Name | In | Required | Type | Description |
+|------|----|----------|------|-------------|
+| `server_id` | path | yes | string |  |
+| `team` | query | yes | integer |  |
+
+Responses:
+
+- `200`: Live management health verification succeeded
+- `400`: Invalid team or management health request
+- `401`: Authentication required
+- `403`: Server health request denied
+- `404`: Server not found
+- `409`: Registry state changed during the exchange
+- `502`: Management health integrity verification failed
+- `503`: Management health runtime or dependency unavailable
 
 ### `GET /v1/team`
 

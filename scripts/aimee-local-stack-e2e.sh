@@ -24,8 +24,9 @@
 #   KB_URL        external kb base URL           (hybrid mode; default
 #                 http://localhost:8741)
 #   AIMEE_EMBEDDER_URL  embedder endpoint        (full mode; optional)
-#   SERVER_PORT   server /v1 TCP port            (default 8740)
-#   BEARER        server bearer token            (default aimee-local-dev)
+#   SERVER_PORT   server loopback HTTP port       (default 8740)
+#   SERVER_TLS_PORT server TLS /v1 port           (default SERVER_PORT + 3)
+#   BEARER        server first-boot bearer        (default random per run)
 #   WAIT_SECONDS  health wait budget             (default 90)
 #
 # Exit code: 0 = all checks passed.
@@ -34,7 +35,8 @@ set -euo pipefail
 
 MODE="${MODE:-full}"
 SERVER_PORT="${SERVER_PORT:-8740}"
-BEARER="${BEARER:-aimee-local-dev}"
+SERVER_TLS_PORT="${SERVER_TLS_PORT:-$((SERVER_PORT + 3))}"
+BEARER="${BEARER:-$(openssl rand -hex 32)}"
 KB_URL="${KB_URL:-http://localhost:8741}"
 WAIT_SECONDS="${WAIT_SECONDS:-90}"
 
@@ -49,19 +51,21 @@ done
 cd "$(dirname "$0")/.."
 REPO="$(pwd)"
 
-red()   { printf '\033[31m%s\033[0m\n' "$*"; }
-green() { printf '\033[32m%s\033[0m\n' "$*"; }
-bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
+red()    { printf '\033[31m%s\033[0m\n' "$*"; }
+green()  { printf '\033[32m%s\033[0m\n' "$*"; }
+yellow() { printf '\033[33m%s\033[0m\n' "$*"; }
+bold()   { printf '\033[1m%s\033[0m\n' "$*"; }
 
-SERVER_URL="http://127.0.0.1:${SERVER_PORT}"
+SERVER_URL="https://127.0.0.1:${SERVER_TLS_PORT}"
 AUTH=(-H "Authorization: Bearer ${BEARER}")
+IDENTITY=()
 PASS=0
 FAIL=0
 
 check() {
   local name="$1" expect="$2"; shift 2
   local body
-  if body="$(curl -fsS --max-time 20 "${AUTH[@]}" "$@" 2>/dev/null)" && [[ "$body" == *"$expect"* ]]; then
+  if body="$(curl -fksS --max-time 20 "${IDENTITY[@]}" "${AUTH[@]}" "$@" 2>/dev/null)" && [[ "$body" == *"$expect"* ]]; then
     green "  PASS  $name"; PASS=$((PASS + 1))
   else
     red   "  FAIL  $name"
@@ -71,24 +75,48 @@ check() {
 }
 
 # --- build ----------------------------------------------------------------
-bold "==> Building aimee-server + aimee-kb"
-make -C src ../aimee-server ../aimee-kb >/dev/null
+bold "==> Building aimee client + server + kb"
+make -C src ../aimee ../aimee-server ../aimee-kb >/dev/null
 
 # --- scratch home ---------------------------------------------------------
 SCRATCH="$(mktemp -d)"
 export AIMEE_HOME="$SCRATCH"
 mkdir -p "$AIMEE_HOME/.config/aimee"
-# Server config: enable the /v1 listener (port + bearer) from the baked default,
-# and allow data writes over the bearer so the write→read round-trip below can
-# store a memory (the baked default is remote_writes:"off").
-sed "s/8740/${SERVER_PORT}/; s/aimee-local-dev/${BEARER}/; s/remote_writes: \"off\"/remote_writes: \"data\"/" \
+# Server config: move both /v1 listeners to the requested scratch ports. The
+# managed policy requests a client certificate and keeps the retired global
+# write switch off; the wizard creates the first user's explicit grant. The
+# bearer is injected only into the server's first-boot process below.
+sed "s/8740/${SERVER_PORT}/; s/8743/${SERVER_TLS_PORT}/" \
     deploy/container/aimee-server.yaml > "$AIMEE_HOME/aimee.yaml"
 # kb config: the baked container config points sidecar commands at the in-image
 # /opt/aimee/scripts/ path; for a NATIVE local run rewrite them to the repo's
 # scripts/ so the kb can actually popen embed-remote.py etc.
 sed "s#/opt/aimee/scripts/#${REPO}/scripts/#g" \
     deploy/container/aimee.yaml > "$AIMEE_HOME/.config/aimee/aimee.yaml"
+# Optional: point memory embedding at a REAL small embedder so the semantic
+# vector path is actually exercised (see scripts/test-embedder-qwen.sh, which
+# serves Qwen3-Embedding-0.6B at 1024-d). Without this the kb falls back to the
+# builtin hash and the embedder-fidelity gate below reports DEGRADED. An http(s)
+# URL is used directly (aimee POSTs raw text to {url}/embed).
+if [[ -n "${AIMEE_E2E_EMBEDDER_URL:-}" ]]; then
+  bold "==> Using real embedder for memory: ${AIMEE_E2E_EMBEDDER_URL} (dim=${AIMEE_EMBEDDING_DIM:-unset})"
+  # The SERVER forwards its own embedding_command to the kb on memory.store /
+  # memory search (server/server_api.c); the kb also reads its own for direct
+  # embedding. Set it in BOTH configs (replace an existing line, else append).
+  set_embed_cmd() {  # $1 = config file
+    if grep -qE '^embedding_command:' "$1"; then
+      sed -i "s#^embedding_command:.*#embedding_command: \"${AIMEE_E2E_EMBEDDER_URL}\"#" "$1"
+    else
+      printf '\nembedding_command: "%s"\n' "${AIMEE_E2E_EMBEDDER_URL}" >> "$1"
+    fi
+  }
+  set_embed_cmd "$AIMEE_HOME/aimee.yaml"                     # server config
+  set_embed_cmd "$AIMEE_HOME/.config/aimee/aimee.yaml"      # kb config
+  [[ -n "${AIMEE_EMBEDDING_DIM:-}" ]] && export AIMEE_EMBEDDING_DIM
+fi
 export AIMEE_SERVER_HTTP_BIND=1
+export AIMEE_DEPLOY_ENABLED=1
+export AIMEE_API_REMOTE_WRITES=off
 export AIMEE_DB1_URL="sqlite://${AIMEE_HOME}/aimee.db"
 
 kb_pid=""; server_pid=""
@@ -108,7 +136,9 @@ if [[ "$MODE" == "full" ]]; then
   [[ -n "${AIMEE_EMBEDDER_URL:-}" ]] && export AIMEE_EMBEDDER_URL
   export AIMEE_KB_HTTP_BIND=1
   echo "    DB2: ${AIMEE_DB2_URL}"
-  "$REPO/aimee-kb" --http-port=8741 &
+  # Capture kb output so the embedder-fidelity gate below can see whether pgvec
+  # accepted the memory vectors or refused them on a dim mismatch.
+  "$REPO/aimee-kb" --http-port=8741 >"$AIMEE_HOME/kb.log" 2>&1 &
   kb_pid=$!
   export AIMEE_KB_API_URL="http://127.0.0.1:8741"
 elif [[ "$MODE" == "hybrid" ]]; then
@@ -125,19 +155,78 @@ else
 fi
 
 bold "==> Starting aimee-server"
-"$REPO/aimee-server" --socket="$AIMEE_HOME/aimee-server.sock" &
+AIMEE_API_BEARER_TOKEN="$BEARER" \
+  "$REPO/aimee-server" --socket="$AIMEE_HOME/aimee-server.sock" &
 server_pid=$!
 
-bold "==> Waiting up to ${WAIT_SECONDS}s for server /v1/health"
+# The enrollment claim is issued over the server's operator UDS, while the client
+# uses the public TLS listener. Wait for both halves of that real wizard path.
+bold "==> Waiting for the operator socket and TLS listener (up to ${WAIT_SECONDS}s)"
 deadline=$((SECONDS + WAIT_SECONDS))
 while true; do
-  if curl -fsS --max-time 3 "${AUTH[@]}" "${SERVER_URL}/v1/health" >/dev/null 2>&1; then
-    green "    server is up"; break
-  fi
+  status="$(curl -sk --max-time 3 -o /dev/null -w '%{http_code}' \
+    "${SERVER_URL}/v1/health" 2>/dev/null || true)"
+  [[ -S "$AIMEE_HOME/aimee-server.sock" && "$status" != 000 ]] && break
   if ! kill -0 "$server_pid" 2>/dev/null; then red "    aimee-server exited during startup"; exit 1; fi
-  if (( SECONDS >= deadline )); then red "    server did not come up within ${WAIT_SECONDS}s"; exit 1; fi
+  if (( SECONDS >= deadline )); then red "    server listeners did not start within ${WAIT_SECONDS}s"; exit 1; fi
   sleep 2
 done
+
+# Exercise the same path as the setup UI: Deploy claims the immutable first
+# wizard user and returns an enrollment-only bearer. The displayed `remote set`
+# command then pins the leaf, generates a local key, submits its CSR, and installs
+# the signed client certificate. Keep client state separate from server state.
+CLIENT_HOME="$SCRATCH/client"
+mkdir -p "$CLIENT_HOME"
+bold "==> Claiming the first wizard user"
+deploy_status="$(curl -sS --unix-socket "$AIMEE_HOME/aimee-server.sock" \
+  -H 'X-Aimee-Webuser: local-stack-e2e' \
+  -H 'content-type: application/json' -X POST -d '{}' -o "$SCRATCH/deploy-apply.json" \
+  -w '%{http_code}' http://localhost/v1/deploy/apply)"
+[[ "$deploy_status" == 200 ]] || {
+  red "    Deploy returned HTTP $deploy_status"; sed -n '1,8p' "$SCRATCH/deploy-apply.json" >&2; exit 1
+}
+ENROLL_TOKEN="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["enrollment"]["bearer_token"])' \
+  "$SCRATCH/deploy-apply.json")"
+[[ ${#ENROLL_TOKEN} == 64 ]] || { red "    Deploy did not return an enrollment bearer"; exit 1; }
+
+bold "==> Enrolling the thin client"
+if ! AIMEE_HOME="$CLIENT_HOME" AIMEE_NO_CLIENT_INTEGRATIONS=1 \
+     "$REPO/aimee" remote set "$SERVER_URL" "$ENROLL_TOKEN" \
+     >"$SCRATCH/remote-set.out" 2>"$SCRATCH/remote-set.err"; then
+  red "    remote set failed"
+  sed -n '1,8p' "$SCRATCH/remote-set.err" >&2
+  exit 1
+fi
+BEARER="$(sed -n '2p' "$CLIENT_HOME/remote.conf")"
+[[ -n "$BEARER" ]] || { red "    remote set did not persist a bearer"; exit 1; }
+AUTH=(-H "Authorization: Bearer ${BEARER}")
+CLIENT_CERT="$CLIENT_HOME/tls/client.crt"
+CLIENT_KEY="$CLIENT_HOME/tls/client.key"
+[[ -s "$CLIENT_CERT" && -s "$CLIENT_KEY" ]] || {
+  red "    remote set did not install the client certificate"; exit 1
+}
+
+# Before the first certificate presentation can promote the one-client roster to
+# required mTLS, prove the enrollment bearer alone reaches the route gate but has
+# no write authority.
+bearer_only_code="$(curl -sk --max-time 10 -o "$SCRATCH/bearer-only.json" -w '%{http_code}' \
+  "${AUTH[@]}" -H 'content-type: application/json' -X POST \
+  -d '{"session_id":"local-stack-e2e","key":"bearer-only","value":"deny","category":"general"}' \
+  "$SERVER_URL/v1/wm/set")"
+[[ "$bearer_only_code" == 403 ]] || {
+  red "    bearer-only write returned HTTP $bearer_only_code, expected 403"; exit 1
+}
+IDENTITY=(--cert "$CLIENT_CERT" --key "$CLIENT_KEY")
+green "    enrolled: bound the first-user grant to mTLS; bearer-only write denied"
+
+bold "==> Waiting for /v1/health"
+if curl -fksS --max-time 5 "${IDENTITY[@]}" "${AUTH[@]}" \
+     "${SERVER_URL}/v1/health" >/dev/null 2>&1; then
+  green "    server is up"
+else
+  red "    server up but /v1/health failed with the enrolled client"; exit 1
+fi
 
 bold "==> Core contract"
 check "GET /v1/health"  '"service":"aimee-server"' "${SERVER_URL}/v1/health"
@@ -150,10 +239,33 @@ check "POST /v1/kb/search -> hits"  '"hits"'   -X POST -H 'content-type: applica
                                                "${SERVER_URL}/v1/kb/search"
 
 bold "==> Write→read round-trip (store a memory, read it back)"
-if SERVER_URL="$SERVER_URL" BEARER="$BEARER" "$REPO/scripts/aimee-write-read-e2e.sh"; then
+if SERVER_URL="$SERVER_URL" BEARER="$BEARER" CLIENT_CERT="$CLIENT_CERT" CLIENT_KEY="$CLIENT_KEY" \
+   "$REPO/scripts/aimee-write-read-e2e.sh"; then
   green "  PASS  write→read round-trip"; PASS=$((PASS + 1))
 else
   red   "  FAIL  write→read round-trip"; FAIL=$((FAIL + 1))
+fi
+
+# Embedder fidelity: the round-trip above passes on list + KEYWORD retrieval even
+# when no real embedder is wired — the memory embedding silently falls back to the
+# builtin hash (a vestigial 384-d stand-in) whose vectors pgvec then REFUSES on a
+# dim mismatch against a corpus built by the real embedder (Qwen3-Embedding: 1024-d
+# CPU / 2560-d GPU). That makes the semantic/vector path a no-op while the run still
+# reports green. Surface it: if kb refused the memory vector, the semantic path was
+# NOT exercised — announce it loudly, and hard-fail under AIMEE_E2E_REQUIRE_REAL_EMBEDDER=1.
+bold "==> Embedder fidelity (semantic vector path)"
+mm="$(grep -aoE 'memory embedding dim mismatch: got [0-9]+, expected [0-9]+' "$AIMEE_HOME/kb.log" 2>/dev/null | tail -1 || true)"
+if [[ -n "$mm" ]]; then
+  yellow "  DEGRADED  ${mm}; vectors refused — semantic search NOT exercised (list/keyword only)."
+  yellow "            Wire a real embedder: point AIMEE_EMBEDDER_URL / AIMEE_LLM_URL at a"
+  yellow "            Qwen3-Embedding endpoint whose dim matches the corpus (1024 CPU / 2560 GPU)."
+  if [[ "${AIMEE_E2E_REQUIRE_REAL_EMBEDDER:-0}" == "1" ]]; then
+    red "  FAIL  real embedder required (AIMEE_E2E_REQUIRE_REAL_EMBEDDER=1) but the run degraded to the builtin embedder"
+    FAIL=$((FAIL + 1))
+  fi
+else
+  green "  PASS  memory vectors accepted (no dim mismatch) — real semantic path exercised"
+  PASS=$((PASS + 1))
 fi
 
 echo

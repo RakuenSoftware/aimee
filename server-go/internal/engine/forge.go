@@ -21,6 +21,17 @@ type PullRequest struct {
 	Base string
 	Head string
 }
+
+// PullRequestSpec is the review contract the workflow hands to the forge. A
+// root workflow always sets Draft: automation may assemble and publish the
+// handoff, but making it reviewable and merging it are human actions. Slice PRs
+// stay non-draft because their CI-gated merge into the private feature branch
+// is part of autonomous assembly.
+type PullRequestSpec struct {
+	Title string
+	Body  string
+	Draft bool
+}
 type CIState string
 
 const (
@@ -31,7 +42,7 @@ const (
 
 type Forge interface {
 	Push(context.Context, string, string, string) error
-	Open(context.Context, string, string, string, string, string) (PullRequest, error)
+	Open(context.Context, string, string, string, string, PullRequestSpec) (PullRequest, error)
 	CI(context.Context, string, string) (CIState, error)
 	Merge(context.Context, string, string, string) error
 }
@@ -41,7 +52,7 @@ type unavailableForge struct{}
 func (unavailableForge) Push(context.Context, string, string, string) error {
 	return errors.New("forge resource plane is unavailable")
 }
-func (unavailableForge) Open(context.Context, string, string, string, string, string) (PullRequest, error) {
+func (unavailableForge) Open(context.Context, string, string, string, string, PullRequestSpec) (PullRequest, error) {
 	return PullRequest{}, errors.New("forge resource plane is unavailable")
 }
 
@@ -99,7 +110,7 @@ func NewHTTPForge(cfg HTTPForgeConfig) (*HTTPForge, error) {
 		client: &http.Client{Transport: transport, Timeout: cfg.Timeout}}, nil
 }
 
-func (f *HTTPForge) Open(ctx context.Context, repo, workdir, head, base, title string) (PullRequest, error) {
+func (f *HTTPForge) Open(ctx context.Context, repo, workdir, head, base string, spec PullRequestSpec) (PullRequest, error) {
 	if !managedBranch(head) {
 		return PullRequest{}, fmt.Errorf("refuse push of unmanaged branch %q", head)
 	}
@@ -114,14 +125,18 @@ func (f *HTTPForge) Open(ctx context.Context, repo, workdir, head, base, title s
 	if err != nil || repoOrigin != workOrigin {
 		return PullRequest{}, errors.New("worktree origin does not match admitted repository")
 	}
-	if title == "" {
-		title = "aimee workflow " + head
+	if strings.TrimSpace(spec.Title) == "" {
+		return PullRequest{}, errors.New("pull request title is required")
+	}
+	if strings.TrimSpace(spec.Body) == "" {
+		return PullRequest{}, errors.New("pull request body is required")
 	}
 	var result struct {
 		URL string `json:"url"`
 	}
 	if err := f.execute(ctx, map[string]any{"op": "open", "workdir": workdir,
-		"head": head, "base": base, "title": title}, &result); err != nil {
+		"head": head, "base": base, "title": spec.Title, "body": spec.Body,
+		"draft": spec.Draft}, &result); err != nil {
 		return PullRequest{}, err
 	}
 	if result.URL == "" {
@@ -205,6 +220,28 @@ func (f *HTTPForge) execute(ctx context.Context, input, output any) error {
 		return fmt.Errorf("decode forge response: %w", err)
 	}
 	return nil
+}
+
+// mergeErrIsConflict reports whether a failed Merge describes a content
+// conflict, which is terminal, rather than a lost race, which a retry wins.
+//
+// GitHub answers HTTP 405/409 for both. A lost race means head or base moved
+// while we were merging ("Base branch was modified"); retrying wins it. A
+// content conflict is a property of the two trees, so no retry can ever win and
+// the step must fail instead of pending forever.
+//
+// Match the noun phrase "merge conflict" (this also covers "merge conflicts").
+// The bare word "conflict" is deliberately NOT matched: HTTP 409 is literally
+// named "Conflict" and its lost-race messages can carry that bare word, which
+// would misclassify a winnable race as terminal.
+//
+// Fails safe: an unrecognised message is reported as NOT a conflict, preserving
+// the retrying behaviour rather than rejecting work on a message we do not know.
+func mergeErrIsConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "merge conflict")
 }
 
 func managedBranch(branch string) bool {

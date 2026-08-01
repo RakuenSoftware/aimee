@@ -24,6 +24,7 @@ typedef struct
    pthread_cond_t cond;
    int ready;
    int release;
+   int done;
 } gate_t;
 
 static void increment_counter(void *arg)
@@ -49,6 +50,8 @@ static void gated_task(void *arg)
    pthread_cond_broadcast(&gate->cond);
    while (!gate->release)
       pthread_cond_wait(&gate->cond, &gate->mutex);
+   gate->done++;
+   pthread_cond_broadcast(&gate->cond);
    pthread_mutex_unlock(&gate->mutex);
 }
 
@@ -192,6 +195,31 @@ int main(void)
       pthread_cond_broadcast(&gate.cond);
       pthread_mutex_unlock(&gate.mutex);
       compute_pool_shutdown(&pool);
+   }
+
+   /* --- Closing admission rejects new work while shutdown still drains --- */
+   {
+      compute_pool_t pool;
+      assert(compute_pool_init(&pool, 1) == 0);
+      gate_t gate = {
+          .mutex = PTHREAD_MUTEX_INITIALIZER,
+          .cond = PTHREAD_COND_INITIALIZER,
+      };
+      assert(compute_pool_submit(&pool, gated_task, &gate) == 0);
+      pthread_mutex_lock(&gate.mutex);
+      while (gate.ready < 1)
+         pthread_cond_wait(&gate.cond, &gate.mutex);
+      pthread_mutex_unlock(&gate.mutex);
+      compute_pool_close(&pool);
+      int flag = 0;
+      assert(compute_pool_submit(&pool, set_flag, &flag) == COMPUTE_POOL_SUBMIT_CLOSED);
+      pthread_mutex_lock(&gate.mutex);
+      gate.release = 1; /* represents dependency cancellation before the join */
+      pthread_cond_broadcast(&gate.cond);
+      pthread_mutex_unlock(&gate.mutex);
+      compute_pool_shutdown(&pool);
+      assert(flag == 0);
+      assert(gate.done == 1); /* close rejected new work but drained admitted work */
    }
 
    /* --- Thread count clamping --- */

@@ -6,30 +6,30 @@
 #include <stdio.h>
 #include <string.h>
 
-int vault_principal_cert_sanitize(const char *cn, char *out, size_t out_len)
+int vault_principal_name_sanitize(const char *name, char *out, size_t out_len)
 {
    if (out && out_len)
       out[0] = '\0';
-   if (!cn || !cn[0] || !out || out_len == 0)
+   if (!name || !name[0] || !out || out_len == 0)
       return 0;
-   size_t n = strlen(cn);
+   size_t n = strlen(name);
    if (n > VAULT_CERT_CN_MAX || n >= out_len)
       return 0;
    for (size_t i = 0; i < n; i++)
    {
-      unsigned char c = (unsigned char)cn[i];
+      unsigned char c = (unsigned char)name[i];
       int ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
                c == '.' || c == '_' || c == '-';
       if (!ok)
          return 0; /* reject ':' (namespace collision), '/', whitespace, control, etc. */
    }
-   memcpy(out, cn, n);
+   memcpy(out, name, n);
    out[n] = '\0';
    return 1;
 }
 
 attested_transport_t vault_principal_resolve(int is_tcp, int is_tls, long peer_uid,
-                                             const char *webuser, int webuser_token_ok,
+                                             const char *webuser, int webuser_attested,
                                              const char *cert_cn, char *out, size_t out_len)
 {
    if (out && out_len)
@@ -47,7 +47,7 @@ attested_transport_t vault_principal_resolve(int is_tcp, int is_tls, long peer_u
    if (cert_cn && cert_cn[0] && is_tcp && is_tls)
    {
       char san[VAULT_CERT_CN_MAX + 1];
-      if (vault_principal_cert_sanitize(cert_cn, san, sizeof(san)))
+      if (vault_principal_name_sanitize(cert_cn, san, sizeof(san)))
          snprintf(out, out_len, VAULT_CERT_PRINCIPAL_PREFIX "%s", san);
       return ATTEST_MTLS_CLIENT;
    }
@@ -74,13 +74,19 @@ attested_transport_t vault_principal_resolve(int is_tcp, int is_tls, long peer_u
     * rather than gaining bearer-only server-write authority. */
    int tls_bearer = is_tcp && is_tls && !webuser_asserted;
 
-   /* A webuser assertion is honored ONLY under the server.token trust boundary
-    * (the secret only the webchat backend holds). Asserted WITHOUT a valid token
+   /* A webuser assertion is honored ONLY under the root-owned webchat UDS trust
+    * boundary. Asserted WITHOUT valid kernel attestation
     * it is a spoof: the principal is refused (empty), and the connection is
     * classified by its underlying transport — never granted a vault identity. */
-   if (webuser_asserted && webuser_token_ok)
+   if (webuser_asserted && webuser_attested)
    {
-      snprintf(out, out_len, "webuser:%s", webuser);
+      /* Same sanitize-or-no-principal rule as the cert CN above. An unusable name
+       * yields NO vault identity but KEEPS the ATTEST_WEBCHAT_TRUSTED
+       * classification, so gating still sees a webchat hop rather than silently
+       * downgrading it to a bearer — the cert path's reasoning, applied here. */
+      char san[VAULT_CERT_CN_MAX + 1];
+      if (vault_principal_name_sanitize(webuser, san, sizeof(san)))
+         snprintf(out, out_len, "webuser:%s", san);
       return ATTEST_WEBCHAT_TRUSTED;
    }
 

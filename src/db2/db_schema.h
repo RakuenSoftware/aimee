@@ -6,6 +6,13 @@
 
 #include <stddef.h>
 
+/* DB2 schema version. Recorded in kb_meta.schema_version at apply (migrate) time,
+ * and checked by a hardened-tier runtime kb (which cannot apply DDL) to refuse a
+ * stale / un-migrated schema. BUMP this whenever schema.sql adds or changes objects
+ * that a runtime kb depends on, so a runtime kb started against an old schema fails
+ * closed rather than running degraded. */
+#define AIMEE_DB2_SCHEMA_VERSION 1
+
 struct sqlite3;
 
 #ifdef __cplusplus
@@ -14,12 +21,15 @@ extern "C"
 #endif
 
    /* Apply the consolidated Postgres schema to an already-open libpq
-    * connection (PGconn *, passed as void * so this header stays
-    * libpq-free). |embed_dim| is the deployment's configured embedding
-    * dimension (e.g. 1024 for pplx-0.6b, 2560 for pplx-4b); the schema's
-    * halfvec embedding columns are created at that dimension. A value <= 0 or
-    * > EMBED_MAX_DIM falls back to the 1024 default. Returns 0 on success, -1
-    * on failure (writes to errbuf/errlen). */
+    * connection (PGconn *, passed as void * so this header stays libpq-free).
+    * |embed_dim| is the deployment's embedding width — from config, the single
+    * place it is declared (config_embedding_dim_effective) — and the schema's
+    * halfvec embedding columns are created at that dimension.
+    *
+    * A value <= 0 or > EMBED_MAX_DIM is an ERROR, not a fallback: this layer holds
+    * no width of its own, and substituting one would size a corpus for an embedder
+    * that is not the one running. Returns 0 on success, -1 on failure (writes to
+    * errbuf/errlen). */
    int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t errlen);
 
    /* embedder-runtime-fetch-autodim §2: record schema_embedding_dim in kb_meta on
@@ -69,11 +79,15 @@ extern "C"
    int db2_embedding_model_record_or_check(void *conn, const char *model_id, const char *compat_csv,
                                            char *errbuf, size_t errlen);
 
-   /* unified-llm-container §2: record the RERANKER identity + scoring contract in
-    * kb_meta. Record-only (no corpus vectors, no persisted score cache to
-    * invalidate) — never refuses. model_id NULL/empty -> no-op. Returns 0 / -1. */
-   int db2_reranker_model_record(void *conn, const char *model_id, const char *contract,
-                                 char *errbuf, size_t errlen);
+   /* Record/check the embedder's vector-space identity (the gateway's /health
+    * serving_id: model + pooling + prefix pair) in kb_meta.schema_embedder_serving_id.
+    * Catches what the dim and model-id guards cannot: a pooling or prefix change keeps
+    * both the width and the name while producing a different vector space. Empty
+    * serving_id -> no-op (an endpoint that reports no identity). No compat list — a
+    * pooling/prefix change is definitionally a different space. Returns 0
+    * (recorded/match), -1 (mismatch / DB error, errbuf set). */
+   int db2_embedder_serving_record_or_check(void *conn, const char *serving_id, char *errbuf,
+                                           size_t errlen);
 
    /* Apply the consolidated SQLite schema for DB2's libpq shim/test
     * compatibility path. Production DB2 remains Postgres-only. */

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@rakuensoftware/smoothgui';
 import { parseOwner, repoAlreadyCloned, type CloneKbAnnotations, type GitProjectsResponse, type ProjectDetail } from './ownerUrl';
+import { notifySetupUpdated } from './setupState';
 
 /* Wizard — Workspaces & projects. A workspace is your collection of projects: the
  * repos under an owner/org (e.g. github.com/RakuenSoftware). Point at that owner,
@@ -51,9 +52,11 @@ interface CloneResult extends CloneKbAnnotations {
 export interface ConnectWorkspaceProps {
   /** Continue to the wizard summary. */
   onDone: () => void;
+  /** Keep setup readiness synchronized with the actual cloned inventory. */
+  onProjectsChanged?: (count: number) => void;
 }
 
-export default function ConnectWorkspace({ onDone }: ConnectWorkspaceProps) {
+export default function ConnectWorkspace({ onDone, onProjectsChanged }: ConnectWorkspaceProps) {
   const [ownerInput, setOwnerInput] = useState('');
   const [token, setToken] = useState('');
   const [repos, setRepos] = useState<Repo[]>([]);
@@ -73,11 +76,12 @@ export default function ConnectWorkspace({ onDone }: ConnectWorkspaceProps) {
       if (r.ok) {
         setProjects(d.projects || []);
         setDetails(d.details || []);
+        onProjectsChanged?.((d.projects || []).length);
       }
     } catch {
       /* server unavailable — leave empty */
     }
-  }, []);
+  }, [onProjectsChanged]);
 
   useEffect(() => {
     loadProjects();
@@ -147,6 +151,7 @@ export default function ConnectWorkspace({ onDone }: ConnectWorkspaceProps) {
       }
       setResults(d.results || []);
       await loadProjects();
+      notifySetupUpdated();
     } catch {
       setErr('aimee-server unavailable');
     } finally {

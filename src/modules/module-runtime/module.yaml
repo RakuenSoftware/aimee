@@ -1,0 +1,21 @@
+{
+  "descriptor_version": 1,
+  "id": "module-runtime",
+  "dependencies": [],
+  "runtime_toggle": {
+    "supported": false
+  },
+  "ownership_complete": true,
+  "sources": [
+    "src/modules/module-runtime/pre_llm_hook.c"
+  ],
+  "public_headers": [
+    "src/modules/module-runtime/include/aimee/module-runtime/pre_llm_hook.h"
+  ],
+  "tests": [
+    "src/tests/test_plugin_c_hook.c"
+  ],
+  "docs": [
+    "docs/modules/module-runtime.md"
+  ]
+}

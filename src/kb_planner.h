@@ -4,7 +4,6 @@
 #ifndef DEC_KB_PLANNER_H
 #define DEC_KB_PLANNER_H 1
 
-#include "config.h"
 #include <stddef.h>
 
 #ifdef __cplusplus
@@ -21,7 +20,7 @@ extern "C"
     *
     * Returns 0 on success; -1 on error (command empty, exec fail, sidecar
     * non-zero exit). Caller frees *out_json. */
-   int kb_planner_search(const config_t *cfg, const char *request_json, char **out_json,
+   int kb_planner_search(const char *request_json, char **out_json,
                          size_t *out_len);
 
    /* Validate a plan against constraint_pack via constraint_solver_command sidecar.
@@ -30,7 +29,7 @@ extern "C"
     *   out_json / out_len: receive malloc'd sidecar stdout (caller frees).
     *
     * Returns 0 on success; -1 on error. */
-   int kb_planner_validate(const config_t *cfg, const char *request_json, char **out_json,
+   int kb_planner_validate(const char *request_json, char **out_json,
                            size_t *out_len);
 
    /* Write a plan_candidate or plan_template artifact in 'proposed' state.

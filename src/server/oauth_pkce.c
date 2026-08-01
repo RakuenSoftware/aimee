@@ -204,6 +204,13 @@ int oauth_pkce_build_auth_url(const oauth_pkce_auth_request_t *req, char *out, s
       if (append_encoded(out, outlen, &pos, req->state) != 0)
          return -1;
    }
+   if (req->nonce && *req->nonce)
+   {
+      if (append_literal(out, outlen, &pos, "&nonce=") != 0)
+         return -1;
+      if (append_encoded(out, outlen, &pos, req->nonce) != 0)
+         return -1;
+   }
 
    out[pos] = '\0';
    return (int)pos;

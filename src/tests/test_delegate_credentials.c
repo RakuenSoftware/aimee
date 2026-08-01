@@ -5,7 +5,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "delegate_credentials.h"
+#include <aimee/delegates/delegate_credentials.h>
 
 static agent_credential_t make_cred(const char *name, const char *env_var)
 {

@@ -2,8 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import { Button, Panel, InlineStatus } from "@rakuensoftware/smoothgui";
 
 /* Roundtable page: configure the named multi-model review panels ("roundtables")
- * aimee convenes. A preset captures the seats (a model + a persona per seat), the
- * aggregator, the guard/loop knobs, and the authoring-pipeline caps. Presets are
+ * aimee convenes. A preset captures required positive seat bindings (a model +
+ * persona), optional chairman, guard/loop knobs, and
+ * authoring-pipeline caps.
+ * Runtime fills all remaining eligible agent capacity; bindings never form an
+ * exclusion list. Presets are
  * stored server-side (roundtable_preset.{c,h}); making one "active" mirrors its
  * values into the live ensemble/roundtable config the runtime reads. Several
  * named presets can coexist; one is the active default. */
@@ -46,13 +49,12 @@ type Preset = {
   name: string;
   description: string;
   seats: Seat[];
-  aggregator: string;
+  chairman: string;
+  chairman_enabled: boolean;
   min_successful: number;
   max_cost_usd: number;
-  max_rounds: number;
-  converge_threshold: number;
   deadline_ms: number;
-  turns: string;
+  discussion: boolean;
   pipeline: Pipeline;
 };
 type PresetSummary = { name: string; description?: string; active?: boolean; synthesized?: boolean };
@@ -86,13 +88,12 @@ function emptyPreset(name: string): Preset {
     name,
     description: "",
     seats: [{ model: "", persona: "" }],
-    aggregator: "",
+    chairman: "",
+    chairman_enabled: false,
     min_successful: 2,
     max_cost_usd: 0,
-    max_rounds: 3,
-    converge_threshold: 2,
-    deadline_ms: 360000,
-    turns: "parallel",
+    deadline_ms: 600000,
+    discussion: false,
     pipeline: { ...DEFAULT_PIPELINE },
   };
 }
@@ -108,6 +109,27 @@ function normalize(p: Partial<Preset> & { name: string }): Preset {
     pipeline: { ...base.pipeline, ...(p.pipeline || {}) },
   };
 }
+
+/* Roundtable-wide flags (not preset fields — see the `globals` state below).
+ * Help text is grounded in their readers in src/modules/roundtable/
+ * delegate_ensemble.c and src/modules/workflows/wfe_live_panel.c. */
+const GLOBAL_FLAGS: { key: string; label: string; help: string }[] = [
+  {
+    key: "roundtable.require_evidence",
+    label: "Require evidence",
+    help: "Panelists must cite evidence for their findings; unevidenced items are dropped when the panel is verified.",
+  },
+  {
+    key: "roundtable.replay_verify_enabled",
+    label: "Replay-verify findings",
+    help: "After a panel completes, replay its findings to verify them before they are reported.",
+  },
+  {
+    key: "roundtable.chair_synthesis",
+    label: "Chair synthesis",
+    help: "The chair writes a synthesis pass over the panel's output instead of returning the raw per-seat results.",
+  },
+];
 
 const numField = (v: number, set: (n: number) => void, min = 0): React.ReactNode => (
   <input
@@ -132,6 +154,13 @@ export default function Roundtable() {
   const [models, setModels] = useState<string[]>([]);
   const [personas, setPersonas] = useState<string[]>([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  /* Global roundtable behaviour, migrated off the Settings page. These three are
+   * the roundtable config keys that are NOT preset fields (preset_overlay_config
+   * in src/modules/roundtable/roundtable_preset.c never writes them), so they
+   * apply to every panel regardless of which preset is active — but they had no
+   * owner in the GUI. They live here, next to the presets they govern. */
+  const [globals, setGlobals] = useState<Record<string, boolean>>({});
+  const [globalsBusy, setGlobalsBusy] = useState("");
 
   const refresh = useCallback(() => {
     getJSON<{ roundtables?: PresetSummary[]; active?: string }>("/api/roundtables")
@@ -158,7 +187,29 @@ export default function Roundtable() {
     getJSON<{ personas?: { name: string }[] }>("/api/chat/personas")
       .then((d) => setPersonas((d.personas || []).map((p) => p.name).filter(Boolean).sort()))
       .catch(() => setPersonas([]));
+    getJSON<{ config?: Record<string, unknown> }>("/api/config")
+      .then((d) => {
+        const c = d.config || {};
+        const out: Record<string, boolean> = {};
+        for (const k of GLOBAL_FLAGS.map((f) => f.key)) out[k] = c[k] === true || c[k] === 1;
+        setGlobals(out);
+      })
+      .catch(() => setGlobals({}));
   }, [refresh]);
+
+  const setGlobal = async (key: string, next: boolean) => {
+    setGlobalsBusy(key);
+    const prev = globals[key];
+    setGlobals((g) => ({ ...g, [key]: next })); // optimistic
+    const { status: st } = await sendJSON("POST", "/api/config/set", { key, value: next });
+    setGlobalsBusy("");
+    if (st >= 200 && st < 300) {
+      setStatus({ kind: "ok", msg: `${key} ${next ? "enabled" : "disabled"}` });
+    } else {
+      setGlobals((g) => ({ ...g, [key]: prev }));
+      setStatus({ kind: "err", msg: `save failed (${st})` });
+    }
+  };
 
   const patch = (p: Partial<Preset>) => setForm((f) => (f ? { ...f, ...p } : f));
   const patchPipeline = (p: Partial<Pipeline>) =>
@@ -188,6 +239,10 @@ export default function Roundtable() {
 
   const save = async () => {
     if (!form) return;
+    if (form.chairman_enabled && !form.chairman.trim()) {
+      setStatus({ kind: "err", msg: "select a chairman before enabling final review" });
+      return;
+    }
     const seats = form.seats.filter((s) => s.model.trim());
     const body = { ...form, seats };
     const { status: st } = await sendJSON("PUT", `/api/roundtables/${encodeURIComponent(form.name)}`, body);
@@ -251,11 +306,39 @@ export default function Roundtable() {
       </div>
 
       <div style={{ maxWidth: 760 }}>
+        <Panel title="Roundtable behaviour">
+          <p style={{ fontSize: 12, color: "#666", margin: "0 0 8px" }}>
+            These apply to every panel, whichever preset is active. (Seats, limits, and the pipeline
+            caps are per preset — set those below.)
+          </p>
+          <div style={{ display: "grid", gap: 8 }}>
+            {GLOBAL_FLAGS.map((f) => (
+              <label key={f.key} style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13 }}>
+                <input
+                  type="checkbox"
+                  checked={!!globals[f.key]}
+                  disabled={globalsBusy === f.key}
+                  onChange={(e) => setGlobal(f.key, e.target.checked)}
+                  style={{ marginTop: 2 }}
+                />
+                <span>
+                  {f.label} <code style={{ color: "#aaa", fontSize: 11 }}>{f.key}</code>
+                  <div style={{ fontSize: 12, color: "#777", lineHeight: 1.4 }}>{f.help}</div>
+                </span>
+              </label>
+            ))}
+          </div>
+        </Panel>
+
         <Panel title="Presets" count={presets.length}>
           <p style={{ fontSize: 12, color: "#666", margin: "0 0 8px" }}>
             A roundtable is a panel of models, each playing a persona, that review or draft together. Configure
             several named presets and pick one as the active default — the active preset drives what{" "}
             <code>aimee delegate roundtable</code> convenes.
+          </p>
+          <p style={{ fontSize: 12, color: "#666", margin: "0 0 8px" }}>
+            Roundtable policy is read-only to agents and automation. Creating, editing, deleting, or selecting the
+            default requires an authenticated appliance-administrator action from this UI.
           </p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
             {presets.map((p) => (
@@ -269,8 +352,14 @@ export default function Roundtable() {
                   fontWeight: p.active ? 700 : 400,
                 }}
               >
-                {p.name}
-                {p.active ? " ★" : ""}
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  {p.active && (
+                    <span aria-label="Default roundtable" title="Default roundtable" style={{ color: "#b26a00" }}>
+                      ★
+                    </span>
+                  )}
+                  <span>{p.name}</span>
+                </span>
               </Button>
             ))}
             <Button size="md" onClick={newPreset} style={{ borderStyle: "dashed" }} title="Create a new roundtable preset, prompting for its name.">
@@ -288,14 +377,23 @@ export default function Roundtable() {
                 placeholder="what this panel is for"
               />
 
-              {/* Seats: who is at the table. */}
+              {/* Positive pins: required participants, never an exclusion list. */}
               <div style={{ marginTop: 14, marginBottom: 4, fontSize: 13, fontWeight: 600 }}>
-                Seats ({form.seats.length}) — a model + the persona it reviews as
+                Required seats / positive pins ({form.seats.filter((s) => s.model.trim()).length})
               </div>
               <p style={{ fontSize: 12, color: "#666", margin: "0 0 8px" }}>
-                A <strong>specific</strong> model is honored exactly — if it can't be reached, the
+                Every configured seat is filled. Assignment spreads seats across providers and
+                distinct models first, then reuses eligible models up to their parallel capacity
+                until the table is full. A specific seat is a positive must-use pin; it never
+                excludes other enabled, eligible agents. A <strong>specific</strong> model is
+                honored exactly — if it can't be reached, the
                 workflow run fails (never silently swapped). <strong>Random</strong> lets any
                 review-capable agent fill the seat, retrying a different one until one is accepted.
+              </p>
+              <p style={{ fontSize: 12, color: "#666", margin: "0 0 8px" }}>
+                Reviews always include an <strong>original-request alignment</strong> assessment.
+                Direction drift or an unclear/missing assessment fails workflow gates closed;
+                refinements that still advance the request remain aligned.
               </p>
               {form.seats.map((seat, i) => {
                 const isRandom = seat.model === RANDOM_MODEL;
@@ -338,22 +436,34 @@ export default function Roundtable() {
                 </div>
                 );
               })}
-              <Button size="md" onClick={addSeat} style={{ borderStyle: "dashed", marginBottom: 8 }} title="Add another model/persona seat to the panel.">
-                + Add seat
+              <Button size="md" onClick={addSeat} style={{ borderStyle: "dashed", marginBottom: 8 }} title="Require another model/persona participant without excluding automatic seats.">
+                + Add required seat
               </Button>
 
-              {/* Aggregator + guards. */}
               <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginTop: 10 }}>
-                <div style={{ flex: "1 1 240px" }} title="Model that synthesizes the panel's outputs; blank uses the engine default.">
-                  <label style={lbl}>Aggregator (synthesis model)</label>
+                <div style={{ flex: "1 1 240px" }} title="Optional chairman that reviews deterministic synthesis and submits the final feedback.">
+                  <label style={lbl}>Chairman</label>
                   <input
                     list={modelList}
                     style={input}
-                    value={form.aggregator}
-                    onChange={(e) => patch({ aggregator: e.target.value })}
-                    placeholder="blank = engine default"
+                    value={form.chairman}
+                    onChange={(e) => patch({ chairman: e.target.value })}
+                    placeholder="agent used when enabled"
                   />
+                  {form.chairman_enabled && form.chairman !== RANDOM_MODEL && models.length > 0 && !models.includes(form.chairman) && (
+                    <span style={{ fontSize: 11, color: "#9a6700" }}>
+                      This name is not in the current configured-agent list; acquisition will park until it is eligible.
+                    </span>
+                  )}
                 </div>
+                <label style={{ ...lbl, alignSelf: "center", marginBottom: 0 }} title="After deterministic synthesis, require this chairman to review and submit final feedback.">
+                  <input
+                    type="checkbox"
+                    checked={form.chairman_enabled}
+                    onChange={(e) => patch({ chairman_enabled: e.target.checked })}
+                  />{" "}
+                  Chairman final review
+                </label>
                 <div title="Minimum number of seats that must succeed for the round to count.">
                   <label style={lbl}>Min successful</label>
                   {numField(form.min_successful, (n) => patch({ min_successful: n }), 1)}
@@ -362,32 +472,21 @@ export default function Roundtable() {
                   <label style={lbl}>Max cost (USD, 0 = none)</label>
                   {numField(form.max_cost_usd, (n) => patch({ max_cost_usd: n }))}
                 </div>
+                <label style={{ ...lbl, alignSelf: "center", marginBottom: 0 }} title="After independent analysis, let the seated agents compare reports. Ordinary issues always stop after one cycle; only a disputed foundational issue can extend discussion until a strict majority forms.">
+                  <input
+                    type="checkbox"
+                    checked={form.discussion}
+                    onChange={(e) => patch({ discussion: e.target.checked })}
+                  />{" "}
+                  Discussion mode
+                </label>
               </div>
 
-              {/* Loop knobs. */}
+              {/* Execution guard. Independent analysis always runs once in parallel. */}
               <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginTop: 10 }}>
-                <div title="Maximum number of review/revise rounds.">
-                  <label style={lbl}>Max rounds</label>
-                  {numField(form.max_rounds, (n) => patch({ max_rounds: n }))}
-                </div>
-                <div title="Agreement level required to stop looping early.">
-                  <label style={lbl}>Converge threshold</label>
-                  {numField(form.converge_threshold, (n) => patch({ converge_threshold: n }))}
-                </div>
                 <div title="Overall time budget for the roundtable in milliseconds.">
                   <label style={lbl}>Deadline (ms)</label>
                   {numField(form.deadline_ms, (n) => patch({ deadline_ms: n }))}
-                </div>
-                <div title="Whether seats run in parallel or one after another.">
-                  <label style={lbl}>Turns</label>
-                  <select
-                    style={{ ...input, width: 140 }}
-                    value={form.turns}
-                    onChange={(e) => patch({ turns: e.target.value })}
-                  >
-                    <option value="parallel">parallel</option>
-                    <option value="sequential">sequential</option>
-                  </select>
                 </div>
               </div>
 

@@ -7,6 +7,8 @@
 #include "commands.h"
 #include "agent.h"
 #include "agent_adapter.h"
+#include "model_registry.h"  /* model_capability_t, MODEL_PROVIDER_MAX */
+#include "agent_tier_lint.h" /* agent_resolved_price[_at_context] */
 #include "cJSON.h"
 #include "json_fluent.h" /* jo_ok */
 #include "log.h"
@@ -26,6 +28,10 @@
 /* --- Agent management RPCs --- */
 
 static pthread_once_t g_agent_http_once = PTHREAD_ONCE_INIT;
+/* A manual CLI diagnostic must be bounded independently from delegate
+ * admission, but it also must not launch an unbounded pile of interactive CLI
+ * processes when several operators click Test at once. */
+static pthread_mutex_t g_agent_cli_probe_mu = PTHREAD_MUTEX_INITIALIZER;
 #define SERVER_AGENT_MAX_ARGS 64
 
 static void server_agent_http_init_once(void)
@@ -317,25 +323,7 @@ static int server_agent_set_model_concurrency(const char *model, int limit)
 {
    if (!model || !model[0] || limit <= 0)
       return 0;
-
-   config_t cfg;
-   if (config_load(&cfg) != 0)
-      return -1;
-   for (int i = 0; i < cfg.concurrency_per_model_count; i++)
-   {
-      if (strcmp(cfg.concurrency_per_model[i].key, model) == 0)
-      {
-         cfg.concurrency_per_model[i].limit = limit;
-         return config_save(&cfg);
-      }
-   }
-   if (cfg.concurrency_per_model_count >= CONFIG_CONCURRENCY_MAX_ENTRIES)
-      return -1;
-   config_concurrency_entry_t *entry =
-       &cfg.concurrency_per_model[cfg.concurrency_per_model_count++];
-   snprintf(entry->key, sizeof(entry->key), "%s", model);
-   entry->limit = limit;
-   return config_save(&cfg);
+   return config_set_model_concurrency(model, limit);
 }
 
 static int server_agent_model_still_configured(const agent_config_t *cfg, const char *model)
@@ -354,20 +342,7 @@ static int server_agent_clear_model_concurrency_if_unused(const agent_config_t *
    if (!model || !model[0] || server_agent_model_still_configured(agents, model))
       return 0;
 
-   config_t cfg;
-   if (config_load(&cfg) != 0)
-      return -1;
-   for (int i = 0; i < cfg.concurrency_per_model_count; i++)
-   {
-      if (strcmp(cfg.concurrency_per_model[i].key, model) != 0)
-         continue;
-      memmove(&cfg.concurrency_per_model[i], &cfg.concurrency_per_model[i + 1],
-              (size_t)(cfg.concurrency_per_model_count - i - 1) *
-                  sizeof(cfg.concurrency_per_model[0]));
-      cfg.concurrency_per_model_count--;
-      return config_save(&cfg);
-   }
-   return 0;
+   return config_remove_model_concurrency(model);
 }
 
 static void server_agent_ensure_fallback(agent_config_t *cfg, const char *name)
@@ -400,6 +375,19 @@ static void server_agent_remove_fallback(agent_config_t *cfg, const char *name)
    }
 }
 
+/* Forward decl: the read-only variant below wraps this. */
+static cJSON *server_agent_to_json(const agent_t *ag);
+
+/* The agent record marked as a pure read, so a client can word its output as a
+ * report rather than a confirmation of a write. agent.roles / agent.personas
+ * serve both: with a csv they mutate, without one they only report. */
+static cJSON *server_agent_read_json(const agent_t *ag)
+{
+   cJSON *obj = server_agent_to_json(ag);
+   cJSON_AddBoolToObject(obj, "read_only", 1);
+   return obj;
+}
+
 static cJSON *server_agent_to_json(const agent_t *ag)
 {
    cJSON *obj = cJSON_CreateObject();
@@ -408,12 +396,75 @@ static cJSON *server_agent_to_json(const agent_t *ag)
    cJSON_AddStringToObject(obj, "model", ag->model);
    cJSON_AddStringToObject(obj, "auth_type", ag->auth_type);
    cJSON_AddStringToObject(obj, "provider", ag->provider);
+   /* Catalog (vendor) identity, which differs from `provider` (the wire shape)
+    * for a third-party model served over another vendor's API. This is the
+    * SERVER-side projection the GUI reads, so the same identity and pricing the
+    * CLI shows must be available here or the two disagree. */
+   cJSON_AddStringToObject(obj, "catalog_provider", agent_catalog_provider(ag));
+   if (ag->model[0])
+   {
+      char ref[MODEL_PROVIDER_MAX + MAX_MODEL_LEN + 2];
+      snprintf(ref, sizeof(ref), "%s:%s", agent_catalog_provider(ag), ag->model);
+      cJSON_AddStringToObject(obj, "model_ref", ref);
+      model_capability_t dcap;
+      if (model_capability_get(agent_catalog_provider(ag), ag->model, &dcap) &&
+          dcap.display_name[0])
+         cJSON_AddStringToObject(obj, "model_display_name", dcap.display_name);
+   }
    cJSON_AddNumberToObject(obj, "cost_tier", ag->cost_tier);
+   /* Effective BASE-band price ($/Mtok): operator override first, else catalog.
+    * Emitted only when both required axes resolve, so a consumer never reads an
+    * unknown price as free; cached is omitted when unpublished. `price_bands`
+    * carries the context-band schedule, without which a large request would be
+    * shown at half its applicable rate. */
+   {
+      double pin = 0.0, pout = 0.0, pcached = 0.0;
+      if (agent_resolved_price(ag, &pin, &pout, &pcached))
+      {
+         cJSON_AddNumberToObject(obj, "price_base_in_per_mtok", pin);
+         cJSON_AddNumberToObject(obj, "price_base_out_per_mtok", pout);
+         if (pcached > 0.0)
+            cJSON_AddNumberToObject(obj, "price_base_cached_per_mtok", pcached);
+
+         model_capability_t cap;
+         if (ag->model[0] && model_capability_get(agent_catalog_provider(ag), ag->model, &cap) &&
+             cap.price_band_count > 0)
+         {
+            cJSON *bands = cJSON_AddArrayToObject(obj, "price_bands");
+            for (int b = 0; bands && b < cap.price_band_count; b++)
+            {
+               double bin = 0.0, bout = 0.0, bcached = 0.0;
+               int above = cap.price_bands[b].above_tokens;
+               if (!agent_resolved_price_at_context(ag, above + 1, &bin, &bout, &bcached))
+                  continue;
+               cJSON *e = cJSON_CreateObject();
+               if (!e)
+                  continue;
+               cJSON_AddNumberToObject(e, "above_tokens", above);
+               cJSON_AddNumberToObject(e, "in_per_mtok", bin);
+               cJSON_AddNumberToObject(e, "out_per_mtok", bout);
+               if (bcached > 0.0)
+                  cJSON_AddNumberToObject(e, "cached_per_mtok", bcached);
+               cJSON_AddItemToArray(bands, e);
+            }
+         }
+      }
+      cJSON_AddBoolToObject(obj, "price_overridden",
+                            ag->price_in_per_mtok > 0.0 || ag->price_out_per_mtok > 0.0 ||
+                                ag->price_cached_per_mtok > 0.0);
+   }
    cJSON_AddBoolToObject(obj, "enabled", ag->enabled);
+   cJSON_AddBoolToObject(obj, "delegate_available", agent_is_available_for_routing(ag));
    cJSON_AddBoolToObject(obj, "tools_enabled", ag->tools_enabled);
    cJSON_AddBoolToObject(obj, "primary_only", ag->primary_only);
    cJSON_AddNumberToObject(obj, "max_turns", ag->max_turns);
    cJSON_AddNumberToObject(obj, "max_parallel", ag->max_parallel);
+   /* Live occupancy, so an out-of-process router (the Go WFE) can avoid seating
+    * an agent that is already at max_parallel. Omitted entirely when unknown --
+    * a consumer must not read "absent" as "idle". */
+   int active = agent_route_agent_active(ag->name);
+   if (active >= 0)
+      cJSON_AddNumberToObject(obj, "active_delegates", active);
    if (ag->middleware.context_window > 0)
       cJSON_AddNumberToObject(obj, "context_window", ag->middleware.context_window);
    cJSON *roles = cJSON_CreateArray();
@@ -474,6 +525,13 @@ int handle_agent_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    for (int i = 0; i < cfg.agent_count; i++)
       cJSON_AddItemToArray(arr, server_agent_to_json(&cfg.agents[i]));
    cJSON_AddItemToObject(resp, "agents", arr);
+   /* The agent a request that names no provider actually lands on, resolved the
+    * same way the runtime resolves it (agent_default_primary: the configured
+    * default when it is enabled, else the first enabled seat). Callers had no
+    * way to show "which agent am I talking to by default" without duplicating
+    * that fallback — the webchat agent selector defaults its selection to this. */
+   const agent_t *primary = agent_default_primary(&cfg);
+   cJSON_AddStringToObject(resp, "default_agent", primary ? primary->name : "");
    /* Whether at least one configured agent is enabled AND routable as a delegate
     * right now. Lets a caller (e.g. the client-setup sub-agent-ban gate) decide
     * with ONE round-trip whether redirecting sub-agents to `aimee delegate` is
@@ -593,7 +651,8 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    char *argv[SERVER_AGENT_MAX_ARGS];
    int argc = server_agent_args(req, argv, (int)(sizeof(argv) / sizeof(argv[0])));
    if (argc < 3)
-      return server_send_error(conn, "usage: agent add <name> <endpoint> <model>", NULL);
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "usage: agent add <name> <endpoint> <model>", NULL);
 
    opt_parsed_t opts;
    opt_parse(argc - 3, argv + 3, bool_flags, &opts);
@@ -626,17 +685,18 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    ag->enabled = opt_has(&opts, "disabled") ? 0 : 1;
 
    /* A literal --key is a secret: vault it (encrypted at rest), never persist it
-    * in agents.json. A $VAR reference is not a secret — keep it as a reference
-    * that resolves from the environment at run time. */
+    * in agents.json. A $VAR reference contains only a Vault slot name; the
+    * environment value itself is accepted during first boot, sealed, scrubbed,
+    * and exposed at runtime only through the locked Vault cache. */
    const char *key = opt_get(&opts, "key");
    if (key && key[0])
    {
       if (key[0] == '$')
       {
-         /* An env reference is not a secret: store it UNEXPANDED so agents.json
-          * holds "$VAR", not the resolved value. agent_load_config expands it
-          * from the environment at run time. Expanding here would serialize the
-          * plaintext key to disk — the exact leak the literal branch avoids.
+         /* A slot reference is not a secret: store it UNEXPANDED so agents.json
+          * holds "$VAR", not the resolved value. agent_load_config resolves it
+          * from the Vault-backed runtime cache. Expanding here would serialize
+          * the plaintext key to disk — the exact leak the literal branch avoids.
           * api_key_disk is set explicitly too, so the on-disk form is correct
           * regardless of how the agent is re-saved later. */
          snprintf(ag->api_key, sizeof(ag->api_key), "%s", key);
@@ -923,7 +983,9 @@ int handle_agent_remove(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       snprintf(cfg.default_agent, sizeof(cfg.default_agent), "%s",
                cfg.agent_count > 0 ? cfg.agents[0].name : "");
 
-   if (agent_save_config(&cfg) != 0)
+   /* Removing the last delegate legitimately empties the registry, which the
+    * deletion guard would otherwise refuse. */
+   if (agent_save_config_after_removal(&cfg) != 0)
       return server_send_error(conn, "could not save agents.json", NULL);
    (void)server_agent_clear_model_concurrency_if_unused(&cfg, removed_model);
 
@@ -931,6 +993,37 @@ int handle_agent_remove(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON_AddStringToObject(resp, "name", removed);
    cJSON_AddBoolToObject(resp, "removed", 1);
    return server_send_ok(conn, resp);
+}
+
+static int agent_set_enabled_commit(const char *name, int enabled, cJSON **response)
+{
+   if (response)
+      *response = NULL;
+   if (!name || !name[0])
+      return -1;
+   agent_config_t cfg;
+   if (agent_load_config(&cfg) != 0)
+      return -1;
+   agent_t *ag = agent_find(&cfg, name);
+   if (!ag)
+      return -1;
+   ag->enabled = enabled ? 1 : 0;
+   cJSON *rendered = response ? server_agent_to_json(ag) : NULL;
+   if ((response && !rendered) || agent_save_config(&cfg) != 0)
+   {
+      cJSON_Delete(rendered);
+      return -1;
+   }
+   if (rendered)
+      cJSON_AddStringToObject(rendered, "status", "ok");
+   if (response)
+      *response = rendered;
+   return 0;
+}
+
+int server_agent_management_set_enabled(const char *name, int enabled)
+{
+   return agent_set_enabled_commit(name, enabled, NULL);
 }
 
 static int handle_agent_set_enabled(server_ctx_t *ctx, server_conn_t *conn, cJSON *req, int enabled)
@@ -942,19 +1035,9 @@ static int handle_agent_set_enabled(server_ctx_t *ctx, server_conn_t *conn, cJSO
       return server_send_error(
           conn, enabled ? "agent.enable requires name" : "agent.disable requires name", NULL);
 
-   agent_config_t cfg;
-   if (agent_load_config(&cfg) != 0)
-      return server_send_error(conn, "agents.json not found or invalid", NULL);
-   agent_t *ag = agent_find(&cfg, argv[0]);
-   if (!ag)
-      return server_send_error(conn, "agent not found", NULL);
-   ag->enabled = enabled ? 1 : 0;
-
-   if (agent_save_config(&cfg) != 0)
-      return server_send_error(conn, "could not save agents.json", NULL);
-
-   cJSON *resp = server_agent_to_json(ag);
-   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON *resp = NULL;
+   if (agent_set_enabled_commit(argv[0], enabled, &resp) != 0)
+      return server_send_error(conn, "agent enablement change failed before commit", NULL);
    return server_send_ok(conn, resp);
 }
 
@@ -970,8 +1053,8 @@ int handle_agent_disable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 /* Surgically update ONLY an agent's roles, preserving endpoint/model/provider/
  * auth/vault key (unlike agent.add, which resets the record). argv[0]=name,
- * optional argv[1]=comma-separated roles; omitting the roles resets to the full
- * default capable set. Fixes existing agents crippled to summarize/format/draft. */
+ * optional argv[1]=comma-separated roles, or `--reset` for the full default
+ * capable set. Omitting argv[1] REPORTS the current roles and writes nothing. */
 int handle_agent_roles(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -987,11 +1070,19 @@ int handle_agent_roles(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!ag)
       return server_send_error(conn, "agent not found", NULL);
 
-   if (argc >= 2 && argv[1][0])
-      server_agent_set_roles_csv(ag, argv[1]);
-   else
+   /* No csv reports the current roles and writes NOTHING. It used to reset the
+    * agent to the default list, so `agent roles <name>` — which reads as a query,
+    * and was the ONLY way to ask what an agent's roles were — silently dropped
+    * every role outside that list, including the `all` wildcard. A reset is still
+    * available, but it now has to be asked for by name. */
+   if (argc < 2 || !argv[1][0])
+      return server_send_ok(conn, server_agent_read_json(ag));
+
+   if (strcmp(argv[1], "--reset") == 0)
       server_agent_set_roles_csv(
           ag, "code,review,explain,refactor,draft,execute,summarize,format,reason,search");
+   else
+      server_agent_set_roles_csv(ag, argv[1]);
 
    if (agent_save_config(&cfg) != 0)
       return server_send_error(conn, "could not save agents.json", NULL);
@@ -1003,8 +1094,8 @@ int handle_agent_roles(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 /* Surgically update ONLY an agent's personas (the delegate identities it may be
  * dispatched AS), preserving everything else. argv[0]=name, optional argv[1]=
- * comma-separated personas ("all" = every persona); omitting resets to ["all"].
- * Mirrors handle_agent_roles. */
+ * comma-separated personas ("all" = every persona), or `--reset` for ["all"].
+ * Omitting argv[1] REPORTS and writes nothing. Mirrors handle_agent_roles. */
 int handle_agent_personas(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -1020,10 +1111,14 @@ int handle_agent_personas(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!ag)
       return server_send_error(conn, "agent not found", NULL);
 
-   if (argc >= 2 && argv[1][0])
-      server_agent_set_personas_csv(ag, argv[1]);
-   else
+   /* No csv reports and writes nothing — see handle_agent_roles. */
+   if (argc < 2 || !argv[1][0])
+      return server_send_ok(conn, server_agent_read_json(ag));
+
+   if (strcmp(argv[1], "--reset") == 0)
       server_agent_set_personas_csv(ag, "all");
+   else
+      server_agent_set_personas_csv(ag, argv[1]);
 
    if (agent_save_config(&cfg) != 0)
       return server_send_error(conn, "could not save agents.json", NULL);
@@ -1152,7 +1247,8 @@ int handle_agent_probe(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    opt_parse(argc, argv, bool_flags, &opts);
    const char *name = opt_pos(&opts, 0);
    if (!name || !name[0])
-      return server_send_error(conn, "agent.probe requires name", NULL);
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT, "agent.probe requires name",
+                                    NULL);
 
    agent_config_t cfg;
    if (agent_load_config(&cfg) != 0)
@@ -1160,6 +1256,11 @@ int handle_agent_probe(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    agent_t *ag = agent_find(&cfg, name);
    if (!ag)
       return server_send_error(conn, "agent not found", NULL);
+
+   const int cli_backend = strcmp(ag->backend, AGENT_BACKEND_PROVIDER_CLI) == 0 ||
+                           strcmp(ag->backend, AGENT_BACKEND_CLI_STDIO) == 0 ||
+                           strcmp(ag->backend, AGENT_BACKEND_TMUX_CLI) == 0;
+   const int http_backend = ag->backend[0] == '\0';
 
    /* Present the agent's own credentials on the introspection GETs — hosted
     * providers (e.g. MiMo) return 401 on /models without a bearer even though
@@ -1169,35 +1270,72 @@ int handle_agent_probe(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       auth_header[0] = '\0';
    const char *probe_auth = auth_header[0] ? auth_header : NULL;
 
-   server_agent_http_ensure();
    char model_found[MAX_MODEL_LEN] = {0}, model_msg[256] = {0}, slots_msg[256] = {0};
    int model_available = 0, slots = 0, context_window = 0;
-   int models_status = server_agent_probe_models(ag->endpoint, probe_auth, ag->model, model_found,
-                                                 sizeof(model_found), &model_available, model_msg,
-                                                 sizeof(model_msg));
-   const char *slots_source = "probe";
-   int slots_probe_skipped = 0;
+   int models_status = 0;
+   const char *slots_source = "config";
+   int slots_probe_skipped = 1;
    int slots_status = 0;
-   if (server_agent_should_probe_slots(ag))
-      slots_status = server_agent_probe_slots(ag->endpoint, probe_auth, &slots, &context_window,
-                                              slots_msg, sizeof(slots_msg));
+   if (http_backend)
+   {
+      server_agent_http_ensure();
+      models_status = server_agent_probe_models(ag->endpoint, probe_auth, ag->model, model_found,
+                                                sizeof(model_found), &model_available, model_msg,
+                                                sizeof(model_msg));
+      if (server_agent_should_probe_slots(ag))
+      {
+         slots_status = server_agent_probe_slots(ag->endpoint, probe_auth, &slots, &context_window,
+                                                 slots_msg, sizeof(slots_msg));
+         slots_source = "probe";
+         slots_probe_skipped = 0;
+      }
+   }
+   else if (cli_backend)
+   {
+      /* CLI providers have no /models endpoint. A configured CLI/model is the
+       * discovery contract; execution below is the actual availability test. */
+      model_available = 1;
+   }
    else
+   {
+      models_status = -1;
+      snprintf(model_msg, sizeof(model_msg), "unsupported agent backend: %s", ag->backend);
+   }
+   if (slots_probe_skipped)
    {
       slots = ag->max_parallel;
       context_window = ag->middleware.context_window;
-      slots_source = "config";
-      slots_probe_skipped = 1;
    }
    int run_ok = 0, latency_ms = 0;
    char run_msg[512] = {0};
    if (!opt_has(&opts, "no-run"))
    {
-      agent_result_t result;
+      agent_result_t result = {0};
       /* Deliberate low-level exemption: this is a diagnostic PROBE ("agent test").
        * It must NOT go through agent_dispatch_one — the concurrency cap would make
        * a merely-busy agent report as failing, and a manual test should not feed the
-       * production health catalog. So it calls the plain agent_execute primitive. */
-      int rc = agent_execute(ag, NULL, "Respond with ok.", 16, 0.0, &result);
+       * production health catalog. CLI backends still need their backend-aware,
+       * tool-capable executor; plain agent_execute only knows direct HTTP. */
+      int rc = -1;
+      if (http_backend)
+         rc = agent_execute(ag, NULL, "Respond with ok.", 16, 0.0, &result);
+      else if (cli_backend)
+      {
+         agent_t local = *ag;
+         if (local.timeout_ms <= 0 || local.timeout_ms > 60000)
+            local.timeout_ms = 60000;
+         if (local.cli_idle_timeout_ms <= 0 || local.cli_idle_timeout_ms > 60000)
+            local.cli_idle_timeout_ms = 60000;
+         local.session_reuse = 0;
+         local.force_cli_isolation = 1;
+         pthread_mutex_lock(&g_agent_cli_probe_mu);
+         rc = agent_execute_with_tools_for_role(&local, &cfg.network, "explain",
+                                                "You are performing a bounded availability probe.",
+                                                "Respond with ok.", 16, 0.0, &result);
+         pthread_mutex_unlock(&g_agent_cli_probe_mu);
+      }
+      else
+         snprintf(result.error, sizeof(result.error), "unsupported agent backend: %s", ag->backend);
       run_ok = (rc == 0);
       latency_ms = result.latency_ms;
       snprintf(run_msg, sizeof(run_msg), "%s",

@@ -27,6 +27,7 @@ extern "C"
    typedef struct
    {
       int64_t id;
+      char project[256];
       char file_path[1024];
       char file_hash[32];
       char heading_path[256];
@@ -82,8 +83,11 @@ extern "C"
     * Returns the count, 0 for no matches / empty query, -1 on SQL / conn error. */
    int db2_kb_documents_fts_search(const char *project, const char *query, int64_t *ids,
                                    double *scores, int max);
+   int db2_kb_documents_fts_search_scoped(const char *project, const char *exclude_project,
+                                          const char *query, int64_t *ids, double *scores,
+                                          int max);
 
-   /* INSERT OR IGNORE a kb_async_jobs row: (kind, document_id, project,
+   /* INSERT OR IGNORE a kb_async_jobs row: (kind, subject id, project,
     * status='pending'). Used by kb_build to enqueue an async embedding
     * job for a freshly-inserted chunk. Returns 0 on success, -1 on
     * SQL / connection error. */
@@ -290,12 +294,13 @@ extern "C"
       char sensitivity_class[16];
    } db2_kb_doc_asset_t;
 
-   /* Insert a crop asset row. blob_ref is the content-addressed sha256 (KB-internal). The
-    * denormalised document_key/sensitivity_class come from the source doc (the live ACL is the
-    * authority at read time). Returns the new opaque id (>0) or -1. */
-   int db2_kb_doc_asset_insert(const char *document_key, int page_no, double x0, double y0,
-                               double x1, double y1, const char *kind, const char *caption,
-                               const char *content_type, const char *blob_ref,
+   /* Insert a project-owned crop asset row. blob_ref is the content-addressed sha256
+    * (KB-internal). The denormalised project/document_key/sensitivity_class come from
+    * the source doc (the live ACL is the authority at read time). Returns the new
+    * opaque id (>0) or -1. */
+   int db2_kb_doc_asset_insert(const char *project, const char *document_key, int page_no,
+                               double x0, double y0, double x1, double y1, const char *kind,
+                               const char *caption, const char *content_type, const char *blob_ref,
                                const char *sensitivity_class);
 
    /* open_asset resolve: given the OPAQUE row id, return its blob_ref + content_type IFF the

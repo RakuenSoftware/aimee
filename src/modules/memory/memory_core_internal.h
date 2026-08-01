@@ -23,6 +23,15 @@ static inline void memory_autofree_impl(void *p)
 }
 #define MEMORY_AUTOFREE __attribute__((cleanup(memory_autofree_impl)))
 
+/* memory_config_load_heap() lived here because config_t is ~750 KiB and memory
+ * retrieval is a deep chain where several stages read config -- stacking
+ * automatic copies exhausted the 8 MiB thread stack, so the snapshots went on
+ * the heap with MEMORY_AUTOFREE to cover every early return.
+ *
+ * The accessors make the whole problem go away: a stage reads the field it
+ * wants, not the struct, so there is nothing to copy and nothing to free.
+ * Removed rather than converted. */
+
 /* memory_core real-branch shared types (moved from memory_core.c #else) */
 typedef enum
 {
@@ -113,6 +122,9 @@ double memory_content_surprise(const char *session_id, const char *content);
 const char *memory_effective_embedding_cmd(const char *command);
 int memory_embed_command_is_http(const char *cmd);
 int memory_embed_http_post(const char *base, const char *path, const char *body, char **resp);
+int memory_embed_serving_id(const char *command, char *out, size_t out_len);
+int memory_embed_http_post_status(const char *base, const char *path, const char *body, char **resp,
+                                  int *status_out);
 int memory_embed_text_runtime(const char *text, const char *command, float *out, int max_dim);
 int memory_env_int(const char *name, int fallback, int min_value, int max_value);
 double memory_env_weight(const char *name, double fallback);
@@ -170,8 +182,6 @@ int memory_vector_ready(void);
 
 extern __thread long long s_qembed_ms;
 extern __thread int s_qembed_spawns;
-extern __thread int s_rerank_calls;
-extern __thread long long s_rerank_ms;
 /* promoted cross-TU (former .inc statics) */
 void memory_alias_insert(int64_t memory_id, const char *alias, double weight);
 int memory_alias_is_useful_token(const char *token);
@@ -179,10 +189,10 @@ void memory_alias_join_tokens(char *buf, size_t buf_len, char tokens[][64], int 
 void memory_coref_audit_record(int64_t memory_id, const char *session_id, const char *outcome,
                                const char *entity, const char *mode, double confidence);
 int memory_coref_has_pronoun(const char *content);
-int memory_coref_llm_resolve(int64_t memory_id, const char *content, const char *session_buf,
-                             const config_t *cfg);
-const char *memory_coref_mode_effective(const config_t *cfg);
-int memory_coref_window_effective(const config_t *cfg);
+int memory_coref_llm_resolve(int64_t memory_id, const char *content,
+                             const char *session_buf);
+const char *memory_coref_mode_effective(void);
+int memory_coref_window_effective(void);
 void memory_entity_insert(int64_t memory_id, const char *entity, const char *role, double weight);
 int memory_extract_named_entities(const char *text, char names[][128], int max_names);
 void memory_format_date(char *buf, size_t buf_len, int year, int month, int day);

@@ -70,6 +70,10 @@ int agent_run_named_with_tools(agent_config_t *cfg, const char *name, const char
                                const char *system_prompt, const char *user_prompt, int max_tokens,
                                double temperature, agent_result_t *out);
 
+/* Thread-local invocation policy used by parallel task workers. It affects only
+ * the next in-thread named tool run and must be cleared by the caller. */
+void agent_run_require_initial_tool_call(int on);
+
 /* One-shot, TOOL-FREE text generation for UI drafting: selects a single non-CLI
  * (HTTP-provider) agent (prefer `agent_name`, else default, else first enabled
  * non-CLI) and runs the plain-completion agent_execute() — no tools, no worktree,
@@ -157,12 +161,6 @@ void agent_ingress_record_cost(const char *agent_name, const char *agent_model,
                                const char *requested_model, const char *stop_reason,
                                int prompt_tokens, int completion_tokens, int cache_write_tokens,
                                int cache_read_tokens, const char *source, const char *kind);
-/* Record a context-economizer ledger row (usage_kind="avoided", FORECAST-only —
- * see context_reduce.h). Forward-declared struct so this broad header need not
- * pull in context_reduce.h; the caller includes it for the full type. */
-struct reduce_result_s;
-void agent_record_reduce_ledger(const struct reduce_result_s *r, const char *model,
-                                const char *agent_name, const char *role);
 /* Master gate (proposal §2/§7 rollout knob): returns 1 when
  * ingress_usage_accounting_enabled is set. The stateless ingress handlers call
  * this before writing their cost rows so ingress accounting can be flipped on
@@ -190,6 +188,11 @@ task_type_t task_type_classify(const char *prompt);
 /* Resolve the effective max-turns limit for an agent invocation.
  * Primary sessions (role == NULL) ignore agent->max_turns; only delegates cap. */
 int agent_resolve_max_turns(const agent_t *agent, const char *role);
+
+/* Map a routing role to the role a run is BUDGETED as: NULL (i.e. "primary,
+ * uncapped") for a primary turn, otherwise `role` unchanged. See the definition
+ * in posix/agent_max_turns.c. */
+const char *agent_budget_role(const char *role);
 const char *task_type_name(task_type_t type);
 
 /* Context assembly */
@@ -354,8 +357,15 @@ int agent_http_get_pinned(const char *url, const char *pinned_ip, const char *ex
                           char **response_buf, int timeout_ms);
 int agent_http_put(const char *url, const char *auth_header, const char *body, char **response_buf,
                    int timeout_ms, const char *extra_headers);
+int agent_http_patch(const char *url, const char *auth_header, const char *body,
+                     char **response_buf, int timeout_ms, const char *extra_headers);
 int agent_http_post(const char *url, const char *auth_header, const char *body, char **response_buf,
                     int timeout_ms, const char *extra_headers);
+/* Exact-length JSON POST used by immutable provider-wire snapshots. Unlike the
+ * compatibility wrapper above, this never recomputes the body boundary. */
+int agent_http_post_bytes(const char *url, const char *auth_header, const void *body,
+                          size_t body_len, char **response_buf, int timeout_ms,
+                          const char *extra_headers);
 int agent_http_post_content_type(const char *url, const char *auth_header, const char *content_type,
                                  const char *body, char **response_buf, int timeout_ms,
                                  const char *extra_headers);
@@ -374,6 +384,9 @@ int agent_http_get_stream(const char *url, const char *extra_headers, agent_http
 int agent_http_post_stream(const char *url, const char *auth_header, const char *body,
                            agent_http_stream_cb callback, void *userdata, int timeout_ms,
                            const char *extra_headers);
+int agent_http_post_stream_bytes(const char *url, const char *auth_header, const void *body,
+                                 size_t body_len, agent_http_stream_cb callback, void *userdata,
+                                 int timeout_ms, const char *extra_headers);
 int agent_http_post_form(const char *url, const char *body, char **response_buf, int timeout_ms);
 void agent_http_init(void);
 void agent_http_cleanup(void);

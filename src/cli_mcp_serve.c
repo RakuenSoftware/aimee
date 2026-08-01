@@ -19,7 +19,7 @@
 
 #define MCP_LINE_MAX         65536
 #define MCP_PROTOCOL_VERSION "2024-11-05"
-#define MCP_VERSION          "0.2.0"
+#define MCP_VERSION          AIMEE_VERSION
 
 #define DEFAULT_TIMEOUT_MS  30000
 #define DELEGATE_TIMEOUT_MS 300000
@@ -167,9 +167,28 @@ static cJSON *server_request(cJSON *req, int timeout_ms)
          char *body = cJSON_PrintUnformatted(req);
          if (body)
          {
-            int status = 0;
-            resp = cli_http_request(endpoint, verb ? verb : "POST", path, body, bearer, timeout_ms,
-                                    &status);
+            /* Catalog/discovery GETs are safe to retry when a TLS accept worker
+             * is momentarily saturated.  A burst of fresh MCP bridges used to
+             * fail tools/list at roughly the server's 64-connection ceiling,
+             * even though the listener recovered milliseconds later.  Never
+             * retry POST tool calls here: a lost response must not duplicate a
+             * mutation whose first attempt may have completed. */
+            const char *http_verb = verb ? verb : "POST";
+            int attempts = strcmp(http_verb, "GET") == 0 ? RECONNECT_RETRIES : 1;
+            useconds_t delay = RECONNECT_DELAY_INIT_US;
+            for (int attempt = 0; attempt < attempts; attempt++)
+            {
+               int status = 0;
+               resp =
+                   cli_http_request(endpoint, http_verb, path, body, bearer, timeout_ms, &status);
+               if (resp)
+                  break;
+               if (attempt < attempts - 1)
+               {
+                  usleep(delay);
+                  delay = delay * 2 < RECONNECT_DELAY_MAX_US ? delay * 2 : RECONNECT_DELAY_MAX_US;
+               }
+            }
             free(body);
          }
       }
@@ -223,8 +242,17 @@ static cJSON *forward_to_server(const char *tool, cJSON *args, int timeout_ms)
    cJSON *arguments = args ? cJSON_Duplicate(args, 1) : cJSON_CreateObject();
    if (!arguments)
       arguments = cJSON_CreateObject();
-   if (cwd[0] && cJSON_IsObject(arguments) && !cJSON_GetObjectItemCaseSensitive(arguments, "cwd"))
+   /* cwd is transport identity, not a value the model must invent. This makes
+    * ordinary no-override memory and code-intelligence calls local-first even
+    * when the long-running server has a different process cwd. The transport
+    * value is authoritative: a model-supplied cwd must not retarget an ordered
+    * read to another checkout. Explicit project/workspace selectors remain
+    * untouched. */
+   if (cwd[0] && cJSON_IsObject(arguments))
+   {
+      cJSON_DeleteItemFromObjectCaseSensitive(arguments, "cwd");
       cJSON_AddStringToObject(arguments, "cwd", cwd);
+   }
    cJSON_AddItemToObject(req, "arguments", arguments);
 
    cJSON *resp = server_request(req, timeout_ms);
@@ -302,7 +330,7 @@ static void handle_initialize(cJSON *id)
        "(e.g. get_help(\"work queue\")). The tools/list is a curated core set; the "
        "full catalog is larger — call find_tools(\"<keyword>\") to discover more "
        "tools and describe_tool(\"<name>\") for a tool's full input schema, then "
-       "call any discovered tool by name (it need not appear in tools/list). Do "
+       "call call_tool with that name and matching arguments. Do "
        "not use provider-native sub-agent tools such as spawn_agent or Agent; use "
        "the aimee delegate tool for delegated work.");
 
@@ -327,8 +355,25 @@ static void handle_tools_list(cJSON *id)
    cJSON *tools = cJSON_GetObjectItemCaseSensitive(resp, "tools");
    if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0 || !cJSON_IsArray(tools))
    {
+      /* Preserve an actionable /v1 error (notably authz failures) instead of
+       * collapsing every non-list response to an opaque startup error. */
+      const char *detail = NULL;
+      cJSON *message = cJSON_GetObjectItemCaseSensitive(resp, "message");
+      cJSON *error = cJSON_GetObjectItemCaseSensitive(resp, "error");
+      if (cJSON_IsString(message))
+         detail = message->valuestring;
+      else if (cJSON_IsObject(error))
+      {
+         message = cJSON_GetObjectItemCaseSensitive(error, "message");
+         if (cJSON_IsString(message))
+            detail = message->valuestring;
+      }
+
+      char errmsg[640];
+      snprintf(errmsg, sizeof(errmsg), "Failed to list tools%s%s", detail ? ": " : "",
+               detail ? detail : "");
       cJSON_Delete(resp);
-      mcp_error(id, -32603, "Failed to list tools");
+      mcp_error(id, -32603, errmsg);
       return;
    }
 
@@ -357,6 +402,13 @@ static void handle_tools_call(cJSON *id, cJSON *req)
 
    const char *tool = name->valuestring;
 
+   /* A remote bridge only needs the detached-workspace long poll once an
+    * actual tool may touch its working tree. Starting it at process startup
+    * consumed one TLS worker per short-lived discovery client; the abandoned
+    * polls then filled the 64-worker cap and made an unrelated tools/list fail.
+    * The helper is idempotent, so subsequent tool calls are cheap. */
+   cli_workspace_reverse_channel_start();
+
    int timeout = DEFAULT_TIMEOUT_MS;
    if (strcmp(tool, "delegate") == 0)
       timeout = DELEGATE_TIMEOUT_MS;
@@ -371,9 +423,13 @@ static void handle_tools_call(cJSON *id, cJSON *req)
 
    /* Check server response status */
    cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (status && cJSON_IsString(status) && strcmp(status->valuestring, "error") == 0)
+   cJSON *error = cJSON_GetObjectItemCaseSensitive(resp, "error");
+   if ((cJSON_IsString(status) && strcmp(status->valuestring, "error") == 0) ||
+       cJSON_IsObject(error))
    {
       cJSON *msg = cJSON_GetObjectItemCaseSensitive(resp, "message");
+      if (!cJSON_IsString(msg) && cJSON_IsObject(error))
+         msg = cJSON_GetObjectItemCaseSensitive(error, "message");
       const char *errmsg = (msg && cJSON_IsString(msg)) ? msg->valuestring : "server error";
       /* Server-side delegation handlers already attach actionable Fix
        * guidance for known error patterns (see delegation_error_guidance),
@@ -984,10 +1040,6 @@ int cli_mcp_serve(void)
     * by cli_main so write() to a dead server socket surfaces EPIPE rather
     * than killing the bridge. */
    setvbuf(stdout, NULL, _IONBF, 0);
-
-   /* If pointed at a remote aimee-server, serve this client's working tree to it
-    * over the reverse-channel so file/exec tools route back here (Phase 2b). */
-   cli_workspace_reverse_channel_start();
 
    char *message = NULL;
    int rc;

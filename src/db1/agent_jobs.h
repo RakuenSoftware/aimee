@@ -18,6 +18,7 @@ extern "C"
 
 #define DB1_AJ_ROLE_LEN   32
 #define DB1_AJ_AGENT_LEN  64
+#define DB1_AJ_PARTICIPANT_LEN 65
 #define DB1_AJ_STATUS_LEN 32
 #define DB1_AJ_TS_LEN     32
 
@@ -38,6 +39,7 @@ extern "C"
        * db1_agent_job_get/list_recent; free with db1_agent_job_free. */
       char *prompt;
       char agent_name[DB1_AJ_AGENT_LEN];
+      char participant_token[DB1_AJ_PARTICIPANT_LEN];
       char status[DB1_AJ_STATUS_LEN];
       char *result;
       int cursor_turn;
@@ -53,6 +55,9 @@ extern "C"
        * with the same (current_tool, api_call_count) across polls means
        * forward progress has stalled. */
       int api_call_count;
+      double cost_usd;
+      /* 0 means no measurement is available, never "the job was free". */
+      int cost_known;
       char created_at[DB1_AJ_TS_LEN];
       char updated_at[DB1_AJ_TS_LEN];
    } db1_agent_job_t;
@@ -65,6 +70,14 @@ extern "C"
 
    /* UPDATE status/cursor_turn/result + updated_at=now. */
    void db1_agent_job_update(int job_id, const char *status, int cursor_turn, const char *result);
+
+   /* Publish a terminal status, result and the realized cost copied from the
+    * completed delegate response in one checked write, so a status poll can
+    * never observe a terminal job whose cost is still the default zero.
+    * has_cost==0 leaves the stored cost and its known flag untouched, so an
+    * unmeasured terminal write stays explicitly unknown. Returns 0 on success. */
+   int db1_agent_job_complete(int job_id, const char *status, int cursor_turn, const char *result,
+                              int has_cost, double cost_usd);
 
    /* UPDATE agent_name + updated_at=now once routing has selected an agent. */
    void db1_agent_job_set_agent(int job_id, const char *agent_name);
@@ -107,20 +120,19 @@ extern "C"
    int db1_agent_job_classify_stale(int job_id, int idle_threshold_secs, int in_tool_threshold_secs,
                                     char *out_state, size_t out_state_cap);
 
-   /* Load by id. Returns 0 on hit, -1 on miss. On hit, out->prompt and
+   /* Read-only. Load by id. Returns 0 on hit, -1 on miss. On hit, out->prompt and
     * out->result are heap-allocated (never NULL) and must be released with
     * db1_agent_job_free. On miss, out is zero-initialized (free is still safe). */
    int db1_agent_job_get(int job_id, db1_agent_job_t *out);
+
+   /* Resolve an unguessable participant capability to its durable delegate job.
+    * Exact-token lookup keeps agent identity behind the delegation boundary. */
+   int db1_agent_job_get_by_participant(const char *participant_token, db1_agent_job_t *out);
 
    /* Release the heap-owned fields (prompt/result) of a job loaded by
     * db1_agent_job_get / db1_agent_job_list_recent. Idempotent and NULL-safe:
     * tolerates a zero-initialized struct (a failed get) and double calls. */
    void db1_agent_job_free(db1_agent_job_t *job);
-
-   /* Repair finished job rows created before routed agent metadata was
-    * persisted. Matches blank agent_name rows to nearby agent_log rows with
-    * the same role. Returns rows changed, or -1 on DB error. */
-   int db1_agent_job_backfill_agent_names_from_log(void);
 
    /* Check if a heartbeat_at timestamp is older than `stale_minutes`
     * ago. Returns 1 if stale, 0 if fresh or unparseable. */
@@ -130,7 +142,7 @@ extern "C"
     * Returns 0 on success, -1 on error. */
    int db1_agent_job_take_lease(int job_id, const char *owner);
 
-   /* List most recent `max` jobs (ORDER BY id DESC). Returns count. Each
+   /* Read-only. List most recent `max` jobs (ORDER BY id DESC). Returns count. Each
     * returned row owns heap prompt/result; free every returned row with
     * db1_agent_job_free. When include_heavy == 0, the (potentially large)
     * prompt/result are returned as empty strings (not loaded) so list callers
@@ -143,6 +155,11 @@ extern "C"
 
    /* Cancel one job by id with a reason. Returns rows changed (0/1). */
    int db1_agent_job_cancel_by_id(int job_id, const char *reason);
+
+   /* Cancel every pending/running delegate row left by an earlier server
+    * process. Call once during server startup, before any worker can exist.
+    * Empty results receive the cancellation reason; existing results remain. */
+   int db1_agent_job_cancel_nonterminal_on_restart(const char *reason);
 
    /* Cancel all 'running' jobs older than `threshold_seconds`, with a
     * fixed reason. Returns rows changed. */

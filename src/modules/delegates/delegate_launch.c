@@ -1,8 +1,8 @@
-#include "delegate_launch.h"
+#include <aimee/delegates/delegate_launch.h>
 #include "aimee.h"
 #include "agent_tasks.h"
 #include "db1.h"
-#include "delegate_role.h"
+#include <aimee/delegates/delegate_role.h>
 #include "log.h"
 #include <stdio.h>
 #include <stdlib.h>

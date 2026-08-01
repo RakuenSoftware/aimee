@@ -17,6 +17,7 @@
 #include "cJSON.h"
 #include <unistd.h>
 #include <sys/stat.h>
+#include "agent_tier_lint.h"
 #include <dirent.h>
 #include <time.h>
 
@@ -46,14 +47,14 @@ typedef struct
 
 /* --- Individual check functions --- */
 
-static doctor_db2_session_t check_database(check_result_t *r, config_t *cfg)
+static doctor_db2_session_t check_database(check_result_t *r)
 {
    doctor_db2_session_t session = {0, 0};
    r->name = "Knowledge Store";
 
    /* Open shared knowledge storage once for the doctor run. Later checks reuse
     * the same connection instead of closing it between probes. */
-   if (!cfg->db2_url[0])
+   if (!config_db2_url()[0])
    {
       r->status = CHECK_ERROR;
       snprintf(r->message, sizeof(r->message), "shared knowledge URL not configured");
@@ -71,10 +72,10 @@ static doctor_db2_session_t check_database(check_result_t *r, config_t *cfg)
     * intentionally uniform) plus the pin flag, so an unpinned doctor run derives
     * the recorded dim rather than refusing on the 1024 default. A genuine
     * pin/recorded mismatch still surfaces via #337's record_or_check guard. */
-   else if ((db2_set_embedding_dim(config_resolve_embedding_dim(cfg)),
-             db2_set_embedding_dim_pinned(config_embedding_dim_is_pinned(cfg)),
-             db2_set_embedder_model_id(cfg->embedding_model), /* unified-llm §2 drift guard */
-             db2_init(cfg->db2_url)) == 0)
+   else if ((db2_set_embedding_dim(config_embedding_dim_current()),
+             db2_set_embedding_dim_pinned(config_embedding_dim_pinned_current()),
+             db2_set_embedder_model_id(config_embedding_model()), /* unified-llm §2 drift guard */
+             db2_init(config_db2_url())) == 0)
    {
       session.ready = 1;
       session.owned = 1;
@@ -241,7 +242,7 @@ static void check_server(check_result_t *r)
    r->status = CHECK_OK;
 }
 
-static void check_config(check_result_t *r, config_t *cfg)
+static void check_config(check_result_t *r)
 {
    r->name = "Config";
 
@@ -255,7 +256,7 @@ static void check_config(check_result_t *r, config_t *cfg)
       return;
    }
 
-   if (cfg->workspace_count == 0)
+   if (config_workspace_count() == 0)
    {
       r->status = CHECK_WARN;
       snprintf(r->message, sizeof(r->message), "no workspaces configured");
@@ -266,24 +267,24 @@ static void check_config(check_result_t *r, config_t *cfg)
 
    /* Verify workspace paths exist */
    int missing = 0;
-   for (int i = 0; i < cfg->workspace_count; i++)
+   for (int i = 0; i < config_workspace_count(); i++)
    {
-      if (stat(cfg->workspaces[i], &st) != 0 || !S_ISDIR(st.st_mode))
+      if (stat(config_workspaces(i), &st) != 0 || !S_ISDIR(st.st_mode))
          missing++;
    }
 
    if (missing > 0)
    {
       r->status = CHECK_WARN;
-      snprintf(r->message, sizeof(r->message), "%d workspace(s), %d missing", cfg->workspace_count,
-               missing);
+      snprintf(r->message, sizeof(r->message), "%d workspace(s), %d missing",
+               config_workspace_count(), missing);
       snprintf(r->remediation, sizeof(r->remediation),
                "Run 'aimee workspace list' and remove stale entries");
    }
    else
    {
       r->status = CHECK_OK;
-      snprintf(r->message, sizeof(r->message), "%d workspace(s)", cfg->workspace_count);
+      snprintf(r->message, sizeof(r->message), "%d workspace(s)", config_workspace_count());
    }
 }
 
@@ -322,6 +323,44 @@ static void check_agents(check_result_t *r)
       snprintf(r->message, sizeof(r->message), "%d configured, %d enabled", acfg.agent_count,
                enabled);
    }
+}
+
+/* cost_tier IS the ordering agent_route() minimises, so a tier that disagrees
+ * with published price means cheapest-first routing is not minimising cost. */
+static void check_agent_tier_prices(check_result_t *r)
+{
+   r->name = "Agent tiers";
+
+   agent_config_t acfg;
+   if (agent_load_config(&acfg) != 0)
+   {
+      r->status = CHECK_OK;
+      snprintf(r->message, sizeof(r->message), "no agents configured");
+      return;
+   }
+
+   agent_tier_conflict_t conflicts[AGENT_TIER_LINT_MAX];
+   int n = agent_tier_price_conflicts(&acfg, conflicts, AGENT_TIER_LINT_MAX);
+   if (n <= 0)
+   {
+      r->status = CHECK_OK;
+      snprintf(r->message, sizeof(r->message), "cost_tier ordering agrees with catalog price");
+      return;
+   }
+
+   const agent_tier_conflict_t *c = &conflicts[0];
+   r->status = CHECK_WARN;
+   snprintf(r->message, sizeof(r->message),
+            "%d tier/price contradiction%s: '%s' is tier %d ($%.2f/$%.2f per Mtok) but '%s' is "
+            "tier %d ($%.2f/$%.2f)",
+            n, n == 1 ? "" : "s", c->cheaper_tier_agent, c->cheaper_tier, c->cheaper_tier_in,
+            c->cheaper_tier_out, c->costlier_tier_agent, c->costlier_tier, c->costlier_tier_in,
+            c->costlier_tier_out);
+   snprintf(r->remediation, sizeof(r->remediation),
+            "Routing minimises cost_tier, so it currently prefers the more expensive model. Set "
+            "'%s' to a higher cost_tier than '%s', or set tier_price_exempt with a reason if its "
+            "billing is not per-token.",
+            c->cheaper_tier_agent, c->costlier_tier_agent);
 }
 
 static void check_hardware(check_result_t *r)
@@ -391,7 +430,7 @@ static void check_hooks(check_result_t *r)
    }
 }
 
-static void check_mcp(check_result_t *r, config_t *cfg)
+static void check_mcp(check_result_t *r)
 {
    r->name = "MCP";
 
@@ -399,14 +438,14 @@ static void check_mcp(check_result_t *r, config_t *cfg)
    struct stat st;
    char path[MAX_PATH_LEN];
 
-   for (int i = 0; i < cfg->workspace_count; i++)
+   for (int i = 0; i < config_workspace_count(); i++)
    {
-      snprintf(path, sizeof(path), "%s/.mcp.json", cfg->workspaces[i]);
+      snprintf(path, sizeof(path), "%s/.mcp.json", config_workspaces(i));
       if (stat(path, &st) == 0)
          found++;
    }
 
-   if (cfg->workspace_count == 0)
+   if (config_workspace_count() == 0)
    {
       r->status = CHECK_WARN;
       snprintf(r->message, sizeof(r->message), "no workspaces to check");
@@ -422,7 +461,8 @@ static void check_mcp(check_result_t *r, config_t *cfg)
    else
    {
       r->status = CHECK_OK;
-      snprintf(r->message, sizeof(r->message), "%d/%d workspace(s)", found, cfg->workspace_count);
+      snprintf(r->message, sizeof(r->message), "%d/%d workspace(s)", found,
+               config_workspace_count());
    }
 }
 
@@ -456,10 +496,9 @@ static void check_secrets(check_result_t *r)
    snprintf(r->message, sizeof(r->message), "secret storage available, %d key(s) stored", count);
 }
 
-static void check_index(check_result_t *r, config_t *cfg, int db2_ready)
+static void check_index(check_result_t *r, int db2_ready)
 {
    r->name = "Index";
-   (void)cfg;
 
    if (!db2_ready)
    {
@@ -514,10 +553,9 @@ static void check_index(check_result_t *r, config_t *cfg, int db2_ready)
    }
 }
 
-static void check_memory(check_result_t *r, config_t *cfg, int db2_ready)
+static void check_memory(check_result_t *r, int db2_ready)
 {
    r->name = "Memory";
-   (void)cfg;
 
    if (!db2_ready)
    {
@@ -691,12 +729,12 @@ static void check_kb_maintenance(check_result_t *r, int kb_rc, const kb_health_t
             h->last_maintenance_orphans_pruned);
 }
 
-static void check_guardrails_semantic(check_result_t *r, config_t *cfg)
+static void check_guardrails_semantic(check_result_t *r)
 {
    r->name = "guardrails.semantic";
    r->status = CHECK_OK;
 
-   int gmode = guardrails_semantic_mode_parse(cfg->guardrails_semantic_mode);
+   int gmode = guardrails_semantic_mode_parse(config_guardrails_semantic_mode());
    const char *mode_name = guardrails_semantic_mode_name(gmode);
    if (gmode == GSEM_MODE_OFF)
    {
@@ -728,9 +766,8 @@ static void check_guardrails_semantic(check_result_t *r, config_t *cfg)
 
 /* --- Fix functions --- */
 
-static int fix_orphaned_l0(config_t *cfg)
+static int fix_orphaned_l0(void)
 {
-   (void)cfg;
    int changes = db2_memory_prune_orphaned_l0();
    if (changes < 0)
    {
@@ -742,9 +779,8 @@ static int fix_orphaned_l0(config_t *cfg)
    return 0;
 }
 
-static int fix_reindex(config_t *cfg)
+static int fix_reindex(void)
 {
-   (void)cfg;
 
    /* The canonical index is owned by the knowledge service. The doctor's
     * reindex fix asks it to scan all configured workspaces; if unavailable,
@@ -773,9 +809,8 @@ static int fix_hooks(void)
    return 0;
 }
 
-static int fix_vector_store(config_t *cfg)
+static int fix_vector_store(void)
 {
-   (void)cfg;
    fprintf(stderr, "  fix: run 'aimee kb build' to trigger a rebuild via the knowledge service\n");
    return 0;
 }
@@ -927,31 +962,30 @@ static void print_forensics_text(FILE *out, const shutdown_ctx_t *rows, int coun
 
 char *doctor_checks_json(void)
 {
-   config_t cfg;
-   config_load(&cfg);
 
    check_result_t checks[MAX_CHECKS];
    memset(checks, 0, sizeof(checks));
 
    int n = 0;
-   doctor_db2_session_t db2_session = check_database(&checks[n++], &cfg);
+   doctor_db2_session_t db2_session = check_database(&checks[n++]);
    check_server(&checks[n++]);
-   check_config(&checks[n++], &cfg);
+   check_config(&checks[n++]);
    check_agents(&checks[n++]);
+   check_agent_tier_prices(&checks[n++]);
    check_hardware(&checks[n++]);
    check_provider_catalog(&checks[n++]);
    check_hooks(&checks[n++]);
-   check_mcp(&checks[n++], &cfg);
+   check_mcp(&checks[n++]);
    check_secrets(&checks[n++]);
-   check_index(&checks[n++], &cfg, db2_session.ready);
-   check_memory(&checks[n++], &cfg, db2_session.ready);
+   check_index(&checks[n++], db2_session.ready);
+   check_memory(&checks[n++], db2_session.ready);
    kb_health_t kb_health;
    int kb_rc = check_kb_gather(&kb_health);
    check_kb_process(&checks[n++], kb_rc);
    check_kb_vector_store(&checks[n++], kb_rc, &kb_health);
    check_kb_freshness(&checks[n++], kb_rc, &kb_health);
    check_kb_maintenance(&checks[n++], kb_rc, &kb_health);
-   check_guardrails_semantic(&checks[n++], &cfg);
+   check_guardrails_semantic(&checks[n++]);
    shutdown_ctx_t forensics[5];
    int forensic_count = gather_shutdown_forensics(&checks[n++], forensics, 5);
 
@@ -1002,9 +1036,6 @@ void cmd_doctor(app_ctx_t *ctx, int argc, char **argv)
          subcheck = argv[i];
    }
 
-   config_t cfg;
-   config_load(&cfg);
-
    /* `aimee doctor storage` runs just the Knowledge Store check. The legacy
     * `db` spelling remains accepted for compatibility. Exit codes
     * mirror the full-suite semantics so CI can gate on a single
@@ -1013,7 +1044,7 @@ void cmd_doctor(app_ctx_t *ctx, int argc, char **argv)
    {
       check_result_t r;
       memset(&r, 0, sizeof(r));
-      doctor_db2_session_t db2_session = check_database(&r, &cfg);
+      doctor_db2_session_t db2_session = check_database(&r);
       if (ctx->json_output)
       {
          cJSON *obj = cJSON_CreateObject();
@@ -1065,24 +1096,25 @@ void cmd_doctor(app_ctx_t *ctx, int argc, char **argv)
    memset(checks, 0, sizeof(checks));
 
    int n = 0;
-   doctor_db2_session_t db2_session = check_database(&checks[n++], &cfg);
+   doctor_db2_session_t db2_session = check_database(&checks[n++]);
    check_server(&checks[n++]);
-   check_config(&checks[n++], &cfg);
+   check_config(&checks[n++]);
    check_agents(&checks[n++]);
+   check_agent_tier_prices(&checks[n++]);
    check_hardware(&checks[n++]);
    check_provider_catalog(&checks[n++]);
    check_hooks(&checks[n++]);
-   check_mcp(&checks[n++], &cfg);
+   check_mcp(&checks[n++]);
    check_secrets(&checks[n++]);
-   check_index(&checks[n++], &cfg, db2_session.ready);
-   check_memory(&checks[n++], &cfg, db2_session.ready);
+   check_index(&checks[n++], db2_session.ready);
+   check_memory(&checks[n++], db2_session.ready);
    kb_health_t kb_health;
    int kb_rc = check_kb_gather(&kb_health);
    check_kb_process(&checks[n++], kb_rc);
    check_kb_vector_store(&checks[n++], kb_rc, &kb_health);
    check_kb_freshness(&checks[n++], kb_rc, &kb_health);
    check_kb_maintenance(&checks[n++], kb_rc, &kb_health);
-   check_guardrails_semantic(&checks[n++], &cfg);
+   check_guardrails_semantic(&checks[n++]);
    shutdown_ctx_t forensics[5];
    int forensic_count = gather_shutdown_forensics(&checks[n++], forensics, 5);
 
@@ -1153,12 +1185,12 @@ void cmd_doctor(app_ctx_t *ctx, int argc, char **argv)
    {
       fprintf(stderr, "\nApplying fixes...\n");
       if (db2_session.ready)
-         fix_orphaned_l0(&cfg);
+         fix_orphaned_l0();
       else
          fprintf(stderr, "  fix: skipped L0 prune; shared knowledge unavailable\n");
-      fix_reindex(&cfg);
+      fix_reindex();
       fix_hooks();
-      fix_vector_store(&cfg);
+      fix_vector_store();
       fprintf(stderr, "Done.\n");
    }
 

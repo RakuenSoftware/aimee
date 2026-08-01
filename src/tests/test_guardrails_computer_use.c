@@ -3,7 +3,10 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 static computer_use_policy_t base_policy(void)
 {
@@ -74,20 +77,34 @@ static void test_redaction(void)
    assert(strstr(out, "ghp_secret") == NULL);
 }
 
+/* computer_use_policy_from_config reads live config rather than taking a
+ * config_t, so the projection this case checks has to be written to a config
+ * file the test owns — a hand-built struct no longer reaches the function. */
+static void write_test_config(const char *yaml)
+{
+   char dir[256], path[320];
+   snprintf(dir, sizeof(dir), "/tmp/aimee-computer-use-cfg-%d", (int)getpid());
+   mkdir(dir, 0755);
+   setenv("AIMEE_HOME", dir, 1);
+   setenv("AIMEE_NO_CACHE", "1", 1);
+   snprintf(path, sizeof(path), "%s/aimee.yaml", dir);
+   FILE *f = fopen(path, "w");
+   assert(f);
+   fputs(yaml, f);
+   fclose(f);
+}
+
 static void test_config_projection(void)
 {
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.computer_use_enabled = 1;
-   snprintf(cfg.computer_use_default_navigation, sizeof(cfg.computer_use_default_navigation), "%s",
-            "block");
-   cfg.computer_use_redact_sensitive_screenshots = 0;
-   snprintf(cfg.computer_use_allowed_domains[0], sizeof(cfg.computer_use_allowed_domains[0]), "%s",
-            "example.test");
-   cfg.computer_use_allowed_domain_count = 1;
+   write_test_config("computer_use:\n"
+                     "  enabled: true\n"
+                     "  default_navigation: \"block\"\n"
+                     "  redact_sensitive_screenshots: false\n"
+                     "  allowed_domains:\n"
+                     "    - \"example.test\"\n");
 
    computer_use_policy_t p;
-   computer_use_policy_from_config(&cfg, &p);
+   computer_use_policy_from_config(&p);
    assert(p.enabled == 1);
    assert(strcmp(p.default_navigation, "block") == 0);
    assert(p.redact_sensitive_screenshots == 0);

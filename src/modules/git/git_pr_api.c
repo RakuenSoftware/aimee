@@ -293,6 +293,20 @@ static int gh_put(const gh_ctx_t *cx, const char *path, const char *body, char *
    return st;
 }
 
+static int gh_patch(const gh_ctx_t *cx, const char *path, const char *body, char **resp)
+{
+   *resp = NULL;
+   char url[512];
+   if ((size_t)snprintf(url, sizeof(url), "https://api.github.com/repos/%s/%s/%s", cx->owner,
+                        cx->repo, path) >= sizeof(url))
+      return -1;
+   char auth[PR_TOKEN_MAX + 32];
+   snprintf(auth, sizeof(auth), "Authorization: Bearer %s", cx->token);
+   int st = agent_http_patch(url, auth, body, resp, 20000, GH_ACCEPT);
+   wipe(auth, sizeof(auth));
+   return st;
+}
+
 /* Surface GitHub's own "message" field into err when a call fails. */
 static void gh_err(const char *resp, int status, const char *what, char *err, size_t errlen)
 {
@@ -343,6 +357,14 @@ int git_pr_https_origin_url(const char *repo_dir, char *out, size_t out_cap, cha
 int git_pr_create_via_api_ex(const char *principal, const char *repo_dir, const char *head_in,
                              const char *base_in, const char *title, const char *body, char *out,
                              size_t out_cap, char *err, size_t errlen)
+{
+   return git_pr_create_via_api_ex_draft(principal, repo_dir, head_in, base_in, title, body, 0, out,
+                                         out_cap, err, errlen);
+}
+
+int git_pr_create_via_api_ex_draft(const char *principal, const char *repo_dir, const char *head_in,
+                                   const char *base_in, const char *title, const char *body,
+                                   int draft, char *out, size_t out_cap, char *err, size_t errlen)
 {
    if (out && out_cap)
       out[0] = '\0';
@@ -401,6 +423,7 @@ int git_pr_create_via_api_ex(const char *principal, const char *repo_dir, const 
    cJSON_AddStringToObject(j, "head", head);
    cJSON_AddStringToObject(j, "base", base);
    cJSON_AddStringToObject(j, "body", bclean ? bclean : "");
+   cJSON_AddBoolToObject(j, "draft", draft ? 1 : 0);
    free(bclean);
    char *jbody = cJSON_PrintUnformatted(j);
    cJSON_Delete(j);
@@ -449,10 +472,13 @@ int git_pr_create_via_api_ex(const char *principal, const char *repo_dir, const 
 }
 
 int git_pr_find_open_via_api(const char *principal, const char *repo_dir, const char *head,
-                             const char *base, char *out, size_t out_cap, char *err, size_t errlen)
+                             const char *base, char *out, size_t out_cap, int *number_out,
+                             char *err, size_t errlen)
 {
    if (out && out_cap)
       out[0] = '\0';
+   if (number_out)
+      *number_out = 0;
    if (!head || !head[0] || !base || !base[0] || strlen(head) > 200 || strlen(base) > 200 ||
        strchr(head, '&') || strchr(head, '?') || strchr(base, '&') || strchr(base, '?'))
    {
@@ -478,14 +504,63 @@ int git_pr_find_open_via_api(const char *principal, const char *repo_dir, const 
    cJSON *array = cJSON_Parse(response);
    const cJSON *first = cJSON_IsArray(array) ? cJSON_GetArrayItem(array, 0) : NULL;
    const cJSON *url = first ? cJSON_GetObjectItem(first, "html_url") : NULL;
+   const cJSON *number = first ? cJSON_GetObjectItem(first, "number") : NULL;
    if (cJSON_IsString(url) && url->valuestring && url->valuestring[0])
    {
       snprintf(out, out_cap, "%s", url->valuestring);
+      if (number_out && cJSON_IsNumber(number) && number->valueint > 0)
+         *number_out = number->valueint;
       found = 1;
    }
    cJSON_Delete(array);
    free(response);
    return found;
+}
+
+int git_pr_update_via_api(const char *principal, const char *repo_dir, int number,
+                          const char *title, const char *body, char *err, size_t errlen)
+{
+   if (err && errlen)
+      err[0] = '\0';
+   if (number <= 0 || !title || !title[0] || !body || !body[0])
+   {
+      snprintf(err, errlen, "invalid PR update");
+      return -1;
+   }
+   gh_ctx_t cx;
+   if (gh_ctx_resolve(principal, repo_dir, &cx, err, errlen) != 0)
+      return -1;
+
+   char *clean = strdup(body);
+   if (clean)
+      strip_ai_attribution(clean);
+   cJSON *json = cJSON_CreateObject();
+   cJSON_AddStringToObject(json, "title", title);
+   cJSON_AddStringToObject(json, "body", clean ? clean : body);
+   free(clean);
+   char *payload = cJSON_PrintUnformatted(json);
+   cJSON_Delete(json);
+   if (!payload)
+   {
+      gh_ctx_done(&cx);
+      snprintf(err, errlen, "internal error");
+      return -1;
+   }
+
+   char path[64];
+   snprintf(path, sizeof(path), "pulls/%d", number);
+   char *response = NULL;
+   int status = gh_patch(&cx, path, payload, &response);
+   free(payload);
+   gh_ctx_done(&cx);
+   if (status < 200 || status >= 300)
+   {
+      gh_err(response, status, "pr update", err, errlen);
+      free(response);
+      return -1;
+   }
+   free(response);
+   return 0;
 }
 
 int git_pr_info_via_api(const char *principal, const char *repo_dir, int number, git_pr_info_t *out,
@@ -619,7 +694,13 @@ int git_pr_merge_via_api(const char *principal, const char *repo_dir, int number
    else if (st == 405 || st == 409)
    {
       gh_err(resp, st, "pr merge", err, errlen);
-      res = 2; /* not mergeable / head moved */
+      /* Separate the terminal case from the retryable one. A content conflict is
+       * a property of the two trees: retrying reproduces it exactly. A moved
+       * head/base is a lost race that a retry wins. Both arrive as 405/409, so
+       * the body is the only discriminator GitHub gives us. Match on the message
+       * text produced by gh_err rather than the raw body so a conflict reported
+       * with different JSON framing still classifies. */
+      res = git_pr_merge_err_is_conflict(err) ? 3 : 2;
    }
    else
    {

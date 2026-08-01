@@ -2,11 +2,11 @@
  *
  * Split out of test_agent.c (2000-line hard limit), mirroring its link line.
  *
- * A "$VAR" api_key is a reference, not a secret: it is resolved into the runtime
- * agent_t.api_key at load, but the verbatim reference is preserved in
- * api_key_disk so a save re-serializes the reference, not the expanded value.
- * Without this, any agent-config mutation (add/enable/remove) would rewrite the
- * loaded secret back into agents.json as plaintext. */
+ * A "$VAR" api_key is first-boot routing metadata, not a secret. Bootstrap has
+ * already ingested and unset the environment value before config is loaded; the
+ * locked Vault-backed runtime cache supplies the value here. The verbatim
+ * reference is preserved only until server startup migrates it to the agent's
+ * Vault slot. A config save must never write the resolved value. */
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -17,13 +17,15 @@
 #include "agent_config.h"
 #include "config.h"
 #include "platform_path.h"
+#include "runtime_secret.h"
 
 static void test_apikey_ref_not_serialized(void)
 {
    const char *cfg_dir = config_default_dir();
    assert(platform_mkdir_p(cfg_dir, 0700) == 0 || access(cfg_dir, F_OK) == 0);
 
-   setenv("AIMEE_APIKEY_REF_TEST", "sk-super-secret-value", 1);
+   unsetenv("AIMEE_APIKEY_REF_TEST");
+   assert(runtime_secret_store("AIMEE_APIKEY_REF_TEST", "sk-super-secret-value") == 0);
 
    {
       FILE *f = fopen(agent_config_path(), "w");
@@ -61,7 +63,7 @@ static void test_apikey_ref_not_serialized(void)
    agent_t *ag2 = agent_find(&reloaded, "reftest");
    assert(ag2 != NULL && strcmp(ag2->api_key, "sk-super-secret-value") == 0);
 
-   unsetenv("AIMEE_APIKEY_REF_TEST");
+   runtime_secret_remove("AIMEE_APIKEY_REF_TEST");
    printf("  PASS: test_apikey_ref_not_serialized\n");
 }
 
@@ -294,8 +296,12 @@ static void test_reasoning_timeout_default(void)
             /* minimax => MODEL_CAP_REASONING; no timeout_ms => reasoning default */
             "{\"name\":\"rsn\",\"provider\":\"minimax\",\"model\":\"MiniMax-M3\","
             "\"endpoint\":\"https://api.minimax.io/v1/chat/completions\",\"roles\":[\"review\"]},"
-            /* mistral => not reasoning; no timeout_ms => standard default */
-            "{\"name\":\"plain\",\"provider\":\"mistral\",\"model\":\"mistral-medium-latest\","
+            /* A model the CATALOG marks non-reasoning => standard default.
+             * mistral-medium-latest used to sit here, chosen while the bundled
+             * snapshot was unreachable and the heuristic answered instead; the
+             * real catalog marks it reasoning:true, so it stopped testing the
+             * non-reasoning branch the moment the snapshot became readable. */
+            "{\"name\":\"plain\",\"provider\":\"mistral\",\"model\":\"ministral-8b-latest\","
             "\"endpoint\":\"https://api.mistral.ai/v1/chat/completions\",\"roles\":[\"review\"]},"
             /* explicit timeout always wins, even for a reasoning model */
             "{\"name\":\"pinned\",\"provider\":\"minimax\",\"model\":\"MiniMax-M3\","

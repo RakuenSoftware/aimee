@@ -1,8 +1,6 @@
 #ifndef AIMEE_PROMPTS_H
 #define AIMEE_PROMPTS_H 1
 
-typedef struct config config_t;
-
 /* Tiered system prompt profiles.
  *
  * MINIMAL  — low-token prompt for simple/delegate tasks
@@ -109,7 +107,7 @@ char *prompt_build_mode(aimee_mode_t mode, prompt_tier_t tier, const char *cwd,
 /* Append lower-priority disposition guidance derived from config.
  * Returns a heap-allocated prompt string; caller must free().
  * If no dispositions are configured, returns a duplicate of base_prompt. */
-char *prompt_apply_dispositions(const char *base_prompt, const config_t *cfg);
+char *prompt_apply_dispositions(const char *base_prompt);
 
 /* Prepend the operator-authored charter at the top of the prompt so
  * it has highest precedence over dispositions, the working profile,
@@ -117,7 +115,7 @@ char *prompt_apply_dispositions(const char *base_prompt, const config_t *cfg);
  * least one of the four arrays has entries. Returns a heap-allocated
  * string; caller must free(). If no charter is configured, returns a
  * duplicate of base_prompt. */
-char *prompt_apply_charter(const char *base_prompt, const config_t *cfg);
+char *prompt_apply_charter(const char *base_prompt);
 
 /* Append a `## Working Profile` section to the base prompt describing
  * the committed learned-preference state — soft-constraint framing so
@@ -127,6 +125,6 @@ char *prompt_apply_charter(const char *base_prompt, const config_t *cfg);
  * injected; when enabled with a non-empty allow list, only those
  * fields are. No-op when disabled or no committed rows match the
  * allow list. Returns a heap-allocated string; caller must free(). */
-char *prompt_apply_working_profile(const char *base_prompt, const config_t *cfg);
+char *prompt_apply_working_profile(const char *base_prompt);
 
 #endif /* AIMEE_PROMPTS_H */

@@ -11,13 +11,17 @@ Start here:
 | understand the new runtime spine | [Event bus](EVENT_BUS.md) |
 | configure a deployment | [Settings](SETTINGS.md) and [generated configuration](gen/configuration.md) |
 | call the API | [Public API](PUBLIC_API.md) and [generated routes](gen/api-v1.md) |
-| find a command | [Command map](COMMANDS.md) and [generated command reference](gen/cli-commands.md) |
+| find a command | [Generated command reference](gen/cli-commands.md) |
 | operate delegates and workflows | [Delegates](DELEGATES.md), [sandbox](DELEGATE_SANDBOX.md), and [workflows](WORKFLOWS.md) |
 | understand memory and retrieval | [Knowledge](KNOWLEDGE.md), [curator](CURATOR_PIPELINE.md), and [retrieval](retrieval-stack.md) |
+| understand KB scaling and model placement | [KB fleet and model placement](KB_FLEET.md) |
 | check support or feature state | [Compatibility](COMPATIBILITY.md) and [status](STATUS.md) |
 | diagnose a failure | [Troubleshooting](TROUBLESHOOTING.md) |
-| upgrade from the last release | [What's new](WHATS_NEW.md) |
-| work on aimee itself | [Technical reference](../src/README.md), [owners](../OWNERS.md), and [writing guide](WRITING.md) |
+| upgrade from the last release | [What's new](WHATS_NEW.md) and [upgrading](UPGRADING.md) |
+| cut a release | [Releasing](RELEASING.md) |
+| write or review documentation | [Documentation voice and maintenance](WRITING.md) |
+| set budgets, rate limits, or a model catalog | [Teams, budgets, and rate limits](ORG_GOVERNANCE.md) |
+| work on aimee itself | [Technical reference](../src/README.md) and [owners](../OWNERS.md) |
 
 ## Product guides
 
@@ -42,21 +46,21 @@ Start here:
 - [Web git security](WEBCHAT_GIT_SECURITY.md)
 - [Sandbox verification](DELEGATE_SANDBOX_VERIFY.md)
 - [Benchmarks](BENCHMARKS.md)
+- [Change the KB embedder](runbooks/change-embedder.md)
 - [Vault key rotation](runbooks/vault-master-key-rotation.md)
+- [Witness evidence and egress gate](runbooks/witness-evidence-and-egress-gate.md)
 - [Workflow autonomy](wfe-autonomy-runbook.md)
 
 ## Engineering
 
-- [Writing documentation](WRITING.md)
-- [Agent and MCP contract](agent.md)
 - [Module contracts](modules/README.md)
 - [Technical reference](../src/README.md)
-- [Proposals](PROPOSALS.md) and [roadmap](ROADMAP.md)
 - [Go rewrite direction](dev/GO_REWRITE.md)
 - [Workflow ownership](dev/WFE_OWNERSHIP.md)
 - [Sanitizer call-site register](SANITIZER_CALL_SITES.md)
 - [Route parity](v1-op-parity-buildout.md)
 - [Lean refactor audit](lean-refactor-audit.md)
+- [Refactor baselines](refactor-baselines.md)
 
 ## Source of truth
 

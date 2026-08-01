@@ -13,9 +13,9 @@
  * max_tokens: 0 = use task config or agent default.
  *
  * Returns malloc'd string on success (caller frees), NULL otherwise. */
-char *aux_call(const config_t *cfg, const char *task_name, const char *prompt, int max_tokens);
+char *aux_call(const char *task_name, const char *prompt, int max_tokens);
 
 /* Print the resolved task->provider/model mapping to stdout. */
-void aux_config_show(const config_t *cfg);
+void aux_config_show(void);
 
 #endif /* DEC_AUX_ROUTER_H */

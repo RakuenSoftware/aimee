@@ -107,7 +107,7 @@ static void test_seam_register_and_finalize(void)
    assert(a.is_current == 1);
    assert(strcmp(a.capture_status, RTP_CAP_PENDING) == 0);
 
-   /* finalize for an unrelated run id is a no-op (ordinary ensemble_review). */
+   /* finalize for an unrelated run id is a no-op (ordinary roundtable_review). */
    assert(rtp_seam_finalize("oprun_not_pipeline", 1, 0, "{\"converged\":true}") == 0);
 
    /* finalize the real run with a valid converged review that answers 2 of the

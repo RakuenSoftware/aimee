@@ -14,6 +14,12 @@
  *                               kb_ranker_model_load; a benchmark_trace is written.
  *   6. gate_hold_on_no_lift:    a model that does not beat the incumbent stays
  *                               proposed (not committed).
+ *   6b. gate_refuses_underpowered_benchmark:
+ *                               a fixture below RANK_FIT_MIN_BENCH_QUERIES refuses
+ *                               to promote even a model that wins it outright.
+ *   6c. gate_refuses_minority_gain:
+ *                               mean lift concentrated in a minority of queries is
+ *                               refused (paired win/loss majority required).
  *   7. sidecar_refusal:         a sidecar refusal (e.g. version_mismatch) is
  *                               surfaced and no model is committed.
  *   8. sidecar_recovers_order:  the real rank-fit.py recovers a planted separable
@@ -190,10 +196,11 @@ static void test_closed_loop_capture(void)
 static void test_fit_disabled(void)
 {
    open_db();
-   config_t cfg;
+   static config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
+   config_snapshot_init(&cfg);
    char *rep = NULL;
-   int rc = kb_ranker_fit_run(&cfg, NULL, 0, &rep);
+   int rc = kb_ranker_fit_run(NULL, 0, &rep);
    assert(rc == 1);
    assert(rep);
    cJSON *o = cJSON_Parse(rep);
@@ -213,14 +220,15 @@ static void test_fit_below_floor(void)
    insert_attr("e1", 100, "accepted");
    insert_attr("e1", 101, "contradicted");
 
-   config_t cfg;
+   static config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    cfg.kb_ranker_fit_enabled = 1;
    cfg.kb_ranker_fit_min_groups = 8;
    snprintf(cfg.kb_ranker_fit_command, sizeof(cfg.kb_ranker_fit_command), "/bin/true");
 
+   config_snapshot_init(&cfg);
    char *rep = NULL;
-   int rc = kb_ranker_fit_run(&cfg, NULL, 0, &rep);
+   int rc = kb_ranker_fit_run(NULL, 0, &rep);
    assert(rc == 1);
    cJSON *o = cJSON_Parse(rep);
    free(rep);
@@ -245,13 +253,79 @@ static void seed_two_groups(void)
    insert_attr("e2", 103, "contradicted");
 }
 
-/* Fixture where the incumbent {0.6,0.4} mis-ranks: the relevant doc (a) scores
- * lower than the irrelevant doc (b) under a dense-leaning blend. A lex-only
- * model ranks a first → higher NDCG. */
-static const char *FIXTURE =
-    "[{\"query\":\"q\",\"candidates\":["
-    "{\"subject_id\":\"a\",\"relevance\":1.0,\"features\":{\"dense.cos\":0.5,\"lex.cos\":0.5}},"
-    "{\"subject_id\":\"b\",\"relevance\":0.0,\"features\":{\"dense.cos\":0.9,\"lex.cos\":0.1}}]}]";
+/* ---- Gate fixtures -------------------------------------------------------
+ *
+ * The gate needs at least RANK_FIT_MIN_BENCH_QUERIES (30) queries to decide
+ * anything, so these are built rather than hand-written. Each shape below is
+ * chosen for what it does to the {0.6 dense, 0.4 lex} incumbent:
+ *
+ *   LEX_WINS   incumbent mis-ranks (dense-leaning blend puts the irrelevant doc
+ *              first); a lex-only model ranks correctly.  lex +0.369/query.
+ *   DENSE_WINS the mirror image; a lex-only model mis-ranks it.  lex -0.369/query.
+ *   WIN_BIG    incumbent buries the one relevant doc at rank 3; lex-only puts it
+ *              first.  lex +0.5/query.
+ *   LOSE_SMALL graded relevance where lex-only swaps the top two.  lex -0.14/query.
+ *
+ * Mixing them produces a fixture with a known win/loss split AND a known mean
+ * lift, which is what lets the paired-majority condition be tested independently
+ * of the mean-lift condition. */
+
+#define Q_LEX_WINS                                                                                 \
+   "{\"query\":\"lw\",\"candidates\":["                                                            \
+   "{\"subject_id\":\"a\",\"relevance\":1.0,\"features\":{\"dense.cos\":0.5,\"lex.cos\":0.5}},"    \
+   "{\"subject_id\":\"b\",\"relevance\":0.0,\"features\":{\"dense.cos\":0.9,\"lex.cos\":0.1}}]}"
+
+#define Q_DENSE_WINS                                                                               \
+   "{\"query\":\"dw\",\"candidates\":["                                                            \
+   "{\"subject_id\":\"a\",\"relevance\":1.0,\"features\":{\"dense.cos\":0.9,\"lex.cos\":0.1}},"    \
+   "{\"subject_id\":\"b\",\"relevance\":0.0,\"features\":{\"dense.cos\":0.5,\"lex.cos\":0.5}}]}"
+
+#define Q_WIN_BIG                                                                                  \
+   "{\"query\":\"wb\",\"candidates\":["                                                            \
+   "{\"subject_id\":\"a\",\"relevance\":1.0,\"features\":{\"dense.cos\":0.0,\"lex.cos\":1.0}},"    \
+   "{\"subject_id\":\"b\",\"relevance\":0.0,\"features\":{\"dense.cos\":1.0,\"lex.cos\":0.0}},"    \
+   "{\"subject_id\":\"c\",\"relevance\":0.0,\"features\":{\"dense.cos\":0.9,\"lex.cos\":0.0}}]}"
+
+#define Q_LOSE_SMALL                                                                               \
+   "{\"query\":\"ls\",\"candidates\":["                                                            \
+   "{\"subject_id\":\"a\",\"relevance\":1.0,\"features\":{\"dense.cos\":1.0,\"lex.cos\":0.9}},"    \
+   "{\"subject_id\":\"b\",\"relevance\":0.5,\"features\":{\"dense.cos\":0.9,\"lex.cos\":1.0}},"    \
+   "{\"subject_id\":\"c\",\"relevance\":0.0,\"features\":{\"dense.cos\":0.0,\"lex.cos\":0.0}}]}"
+
+/* Concatenate `a` repeated na times then `b` repeated nb times into a JSON array.
+ * Returns a malloc'd string the caller frees. */
+static char *build_fixture(const char *a, int na, const char *b, int nb)
+{
+   size_t cap = (strlen(a) + 2) * (size_t)na + (strlen(b) + 2) * (size_t)nb + 4;
+   char *buf = malloc(cap);
+   assert(buf);
+   size_t off = 0;
+   off += (size_t)snprintf(buf + off, cap - off, "[");
+   for (int i = 0; i < na; i++)
+      off += (size_t)snprintf(buf + off, cap - off, "%s%s", i ? "," : "", a);
+   for (int i = 0; i < nb; i++)
+      off += (size_t)snprintf(buf + off, cap - off, "%s%s", (na || i) ? "," : "", b);
+   snprintf(buf + off, cap - off, "]");
+   return buf;
+}
+
+/* 24 lex-wins + 8 dense-wins = 32 queries. A lex-only model takes 24 wins to 8
+ * losses (a real majority) with mean lift ~+0.185. */
+static char *fixture_lex_majority(void)
+{
+   return build_fixture(Q_LEX_WINS, 24, Q_DENSE_WINS, 8);
+}
+
+/* 12 win-big + 20 lose-small = 32 queries. A lex-only model gains ~+0.0998 mean
+ * NDCG while LOSING on 20 of 32 queries — the overfitting shape a mean-only gate
+ * cannot see. */
+static char *fixture_minority_gain(void)
+{
+   return build_fixture(Q_WIN_BIG, 12, Q_LOSE_SMALL, 20);
+}
+
+/* One query — below the gate's minimum, whatever its content. */
+static const char *FIXTURE_UNDERPOWERED = "[" Q_LEX_WINS "]";
 
 static char *stub_weights(const char *w)
 {
@@ -272,9 +346,11 @@ static void test_gate_commit_on_lift(void)
        "/tmp/rf_stub_win.sh",
        stub_weights("{\"dense.cos\":0.0,\"lex.cos\":1.0,\"temp.recency\":0.0,"
                     "\"sketch.frequency_kind_scope\":0.0,\"sketch.distinct_sources_hll\":0.0}"));
-   write_file("/tmp/rf_fix.json", FIXTURE);
+   char *fix = fixture_lex_majority();
+   write_file("/tmp/rf_fix.json", fix);
+   free(fix);
 
-   config_t cfg;
+   static config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    cfg.kb_ranker_fit_enabled = 1;
    cfg.kb_ranker_fit_min_groups = 2;
@@ -282,9 +358,10 @@ static void test_gate_commit_on_lift(void)
    snprintf(cfg.kb_ranker_fit_command, sizeof(cfg.kb_ranker_fit_command), "/tmp/rf_stub_win.sh");
    snprintf(cfg.kb_ranker_fit_benchmark, sizeof(cfg.kb_ranker_fit_benchmark), "/tmp/rf_fix.json");
 
+   config_snapshot_init(&cfg);
    char id[64] = "";
    char *rep = NULL;
-   int rc = kb_ranker_fit_run(&cfg, id, sizeof(id), &rep);
+   int rc = kb_ranker_fit_run(id, sizeof(id), &rep);
    assert(rep);
    cJSON *o = cJSON_Parse(rep);
    free(rep);
@@ -293,6 +370,10 @@ static void test_gate_commit_on_lift(void)
    cJSON *gate = cJSON_GetObjectItemCaseSensitive(o, "gate");
    assert(strcmp(sstr(gate, "result"), "commit") == 0);
    assert(snum(gate, "ndcg_candidate") > snum(gate, "ndcg_incumbent"));
+   /* Both gate conditions are visible and were genuinely met, not just the mean. */
+   assert((int)snum(gate, "n_queries") == 32);
+   assert((int)snum(gate, "wins") == 24);
+   assert((int)snum(gate, "losses") == 8);
    /* Round-trip: the committed model loads and parses. */
    assert(kb_ranker_model_load() == 0);
    /* Evidence trail recorded. */
@@ -313,17 +394,20 @@ static void test_gate_hold_on_no_lift(void)
        "/tmp/rf_stub_lose.sh",
        stub_weights("{\"dense.cos\":1.0,\"lex.cos\":0.0,\"temp.recency\":0.0,"
                     "\"sketch.frequency_kind_scope\":0.0,\"sketch.distinct_sources_hll\":0.0}"));
-   write_file("/tmp/rf_fix.json", FIXTURE);
+   char *fix = fixture_lex_majority();
+   write_file("/tmp/rf_fix.json", fix);
+   free(fix);
 
-   config_t cfg;
+   static config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    cfg.kb_ranker_fit_enabled = 1;
    cfg.kb_ranker_fit_min_groups = 2;
    snprintf(cfg.kb_ranker_fit_command, sizeof(cfg.kb_ranker_fit_command), "/tmp/rf_stub_lose.sh");
    snprintf(cfg.kb_ranker_fit_benchmark, sizeof(cfg.kb_ranker_fit_benchmark), "/tmp/rf_fix.json");
 
+   config_snapshot_init(&cfg);
    char *rep = NULL;
-   int rc = kb_ranker_fit_run(&cfg, NULL, 0, &rep);
+   int rc = kb_ranker_fit_run(NULL, 0, &rep);
    cJSON *o = cJSON_Parse(rep);
    free(rep);
    assert(rc == 1);
@@ -336,6 +420,91 @@ static void test_gate_hold_on_no_lift(void)
    printf("  gate_hold_on_no_lift: ok\n");
 }
 
+/* ---- 6b. an underpowered fixture refuses to promote at all ----
+ * The regression this guards: the shipped default fixture holds 5 queries and the
+ * old gate promoted on it with a 1e-6 epsilon. Content is irrelevant here — the
+ * model would WIN this query outright; the gate must still refuse on size. */
+static void test_gate_refuses_underpowered_benchmark(void)
+{
+   open_db();
+   seed_two_groups();
+   write_exec(
+       "/tmp/rf_stub_win.sh",
+       stub_weights("{\"dense.cos\":0.0,\"lex.cos\":1.0,\"temp.recency\":0.0,"
+                    "\"sketch.frequency_kind_scope\":0.0,\"sketch.distinct_sources_hll\":0.0}"));
+   write_file("/tmp/rf_fix.json", FIXTURE_UNDERPOWERED);
+
+   static config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.kb_ranker_fit_enabled = 1;
+   cfg.kb_ranker_fit_min_groups = 2;
+   cfg.kb_ranker_fit_bench_k = 5;
+   snprintf(cfg.kb_ranker_fit_command, sizeof(cfg.kb_ranker_fit_command), "/tmp/rf_stub_win.sh");
+   snprintf(cfg.kb_ranker_fit_benchmark, sizeof(cfg.kb_ranker_fit_benchmark), "/tmp/rf_fix.json");
+
+   config_snapshot_init(&cfg);
+   char *rep = NULL;
+   int rc = kb_ranker_fit_run(NULL, 0, &rep);
+   cJSON *o = cJSON_Parse(rep);
+   free(rep);
+   assert(rc == 1);
+   assert(strcmp(sstr(o, "status"), "proposed") == 0);
+   assert(strcmp(sstr(o, "reason"), "benchmark_underpowered") == 0);
+   cJSON *gate = cJSON_GetObjectItemCaseSensitive(o, "gate");
+   assert((int)snum(gate, "n_queries") == 1);
+   /* The candidate DID win the query — refusal is on power, not on merit. */
+   assert((int)snum(gate, "wins") == 1);
+   assert(snum(gate, "ndcg_candidate") > snum(gate, "ndcg_incumbent"));
+   /* Nothing promoted. */
+   assert(kb_ranker_model_load() == -1);
+   cJSON_Delete(o);
+   close_db();
+   printf("  gate_refuses_underpowered_benchmark: ok\n");
+}
+
+/* ---- 6c. mean lift concentrated in a minority of queries is refused ----
+ * The overfitting shape: +0.0998 mean NDCG built from 12 large wins against 20
+ * smaller losses. The old mean-only gate would have committed this. */
+static void test_gate_refuses_minority_gain(void)
+{
+   open_db();
+   seed_two_groups();
+   write_exec(
+       "/tmp/rf_stub_win.sh",
+       stub_weights("{\"dense.cos\":0.0,\"lex.cos\":1.0,\"temp.recency\":0.0,"
+                    "\"sketch.frequency_kind_scope\":0.0,\"sketch.distinct_sources_hll\":0.0}"));
+   char *fix = fixture_minority_gain();
+   write_file("/tmp/rf_fix.json", fix);
+   free(fix);
+
+   static config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.kb_ranker_fit_enabled = 1;
+   cfg.kb_ranker_fit_min_groups = 2;
+   cfg.kb_ranker_fit_bench_k = 5;
+   snprintf(cfg.kb_ranker_fit_command, sizeof(cfg.kb_ranker_fit_command), "/tmp/rf_stub_win.sh");
+   snprintf(cfg.kb_ranker_fit_benchmark, sizeof(cfg.kb_ranker_fit_benchmark), "/tmp/rf_fix.json");
+
+   config_snapshot_init(&cfg);
+   char *rep = NULL;
+   int rc = kb_ranker_fit_run(NULL, 0, &rep);
+   cJSON *o = cJSON_Parse(rep);
+   free(rep);
+   assert(rc == 1);
+   assert(strcmp(sstr(o, "status"), "proposed") == 0);
+   assert(strcmp(sstr(o, "reason"), "no_paired_majority") == 0);
+   cJSON *gate = cJSON_GetObjectItemCaseSensitive(o, "gate");
+   /* The mean genuinely rose — that is exactly why a mean-only gate was unsafe. */
+   assert(snum(gate, "ndcg_candidate") > snum(gate, "ndcg_incumbent"));
+   assert((int)snum(gate, "n_queries") == 32);
+   assert((int)snum(gate, "wins") == 12);
+   assert((int)snum(gate, "losses") == 20);
+   assert(kb_ranker_model_load() == -1);
+   cJSON_Delete(o);
+   close_db();
+   printf("  gate_refuses_minority_gain: ok\n");
+}
+
 /* ---- 7. sidecar refusal is surfaced, nothing committed ---- */
 static void test_sidecar_refusal(void)
 {
@@ -345,14 +514,15 @@ static void test_sidecar_refusal(void)
               "#!/bin/sh\ncat >/dev/null\nprintf '%s' "
               "'{\"status\":\"refused\",\"reason\":\"version_mismatch\"}'\n");
 
-   config_t cfg;
+   static config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    cfg.kb_ranker_fit_enabled = 1;
    cfg.kb_ranker_fit_min_groups = 2;
    snprintf(cfg.kb_ranker_fit_command, sizeof(cfg.kb_ranker_fit_command), "/tmp/rf_stub_refuse.sh");
 
+   config_snapshot_init(&cfg);
    char *rep = NULL;
-   int rc = kb_ranker_fit_run(&cfg, NULL, 0, &rep);
+   int rc = kb_ranker_fit_run(NULL, 0, &rep);
    cJSON *o = cJSON_Parse(rep);
    free(rep);
    assert(rc == 1);
@@ -497,6 +667,8 @@ int main(void)
    test_fit_below_floor();
    test_gate_commit_on_lift();
    test_gate_hold_on_no_lift();
+   test_gate_refuses_underpowered_benchmark();
+   test_gate_refuses_minority_gain();
    test_sidecar_refusal();
    test_sidecar_recovers_order();
    test_sidecar_pairwise();

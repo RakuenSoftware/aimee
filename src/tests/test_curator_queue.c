@@ -12,13 +12,69 @@
 
 #include "aimee.h"
 #include "kb_curator_extract.h"
-#include "kb/kb_curator_sidecar.h"
+#include "kb_curator_provider.h"
+#include "kb_curator_sidecar.h"
 #include "platform_test_util.h"
 #include "db2_test_shim.h"
+#include "db2/kb_payload.h"
 #include "../kb_curator_queue.h"
 #include "../kb_curator_extract.h"
 #include "../kb/kb_memory_facts.h"
 #include "config.h"
+
+/* An upstream outage must not be charged to the job. The gateway opens a circuit
+ * breaker and 503s everything for its cooldown, so three claims inside one
+ * cooldown used to drive a job to terminal 'failed' — permanent data loss from a
+ * condition that heals in a minute. Observed live: every failed row at exactly
+ * attempts=3, last_error "provider HTTP 503".
+ *
+ * Classification is what decides retry-vs-terminal, so pin it directly: a
+ * provider-availability failure is distinguishable from a real job failure. */
+static void test_provider_unavailable_is_not_a_job_failure(void)
+{
+   /* The breaker's own 503, and the two other ways the upstream declines. */
+   assert(kb_curator_error_is_provider_unavailable("provider HTTP 503"));
+   assert(kb_curator_error_is_provider_unavailable("provider HTTP 429"));
+   assert(kb_curator_error_is_provider_unavailable("provider HTTP -1"));
+   /* Exact text emitted by the bundled curator-extract.py -> llm-chat.py path. */
+   assert(kb_curator_error_is_provider_unavailable(
+       "llm-chat.py exit 1: llm-chat: HTTP 503 from http://aimee-llm:8742/v1/chat/completions"));
+   assert(kb_curator_error_is_provider_unavailable(
+       "{\"error\": {\"code\": \"provider_unavailable\", \"message\": \"synth upstream "
+       "circuit is open\"}}"));
+   /* Exact timeout envelope emitted by llm-chat.py on a failed upstream
+    * request. Live regression: this used to spend attempt 3/3 and permanently
+    * fail the code-unit row even though the provider, not the row, was broken. */
+   assert(kb_curator_error_is_provider_unavailable(
+       "llm-chat.py exit 1: llm-chat: request to http://aimee-llm:8742/v1/chat/completions "
+       "failed after 1 tries: timed out"));
+
+   /* A 4xx that is ABOUT the request, a malformed reply, and a missing document
+    * are all real job failures: retrying them forever would be the poison-job
+    * loop the attempt budget exists to stop. */
+   assert(!kb_curator_error_is_provider_unavailable("provider HTTP 400"));
+   assert(!kb_curator_error_is_provider_unavailable("provider HTTP 422"));
+   assert(!kb_curator_error_is_provider_unavailable("sidecar returned non-JSON"));
+   assert(!kb_curator_error_is_provider_unavailable("kb_documents row not found"));
+   assert(!kb_curator_error_is_provider_unavailable("artifact write failed"));
+   assert(!kb_curator_error_is_provider_unavailable("local parser timed out"));
+
+   /* Absent/empty error text must not be guessed into a retry. */
+   assert(!kb_curator_error_is_provider_unavailable(NULL));
+   assert(!kb_curator_error_is_provider_unavailable(""));
+   printf("  PASS: provider-unavailable is classified apart from job failure\n");
+}
+
+static void test_provider_outage_arms_global_backoff(void)
+{
+   kb_curator_provider_backoff_recovered();
+   assert(!kb_curator_provider_backoff_active());
+   kb_curator_provider_backoff_note();
+   assert(kb_curator_provider_backoff_active());
+   kb_curator_provider_backoff_recovered();
+   assert(!kb_curator_provider_backoff_active());
+   printf("  PASS: provider outage arms process-wide LLM-lane backoff\n");
+}
 
 static sqlite3 *open_db(void)
 {
@@ -45,6 +101,23 @@ static int jobs(sqlite3 *db)
    int n = sqlite3_column_int(st, 0);
    sqlite3_finalize(st);
    return n;
+}
+
+static void test_polymorphic_async_subject(sqlite3 *db)
+{
+   /* memory_facts uses a memories.id as the queue subject. It must not require
+    * an unrelated kb_documents row with the same numeric id. */
+   assert(db2_kb_async_enqueue("memory_facts", 777777, "memory") == 0);
+   sqlite3_stmt *st = NULL;
+   assert(sqlite3_prepare_v2(db,
+                             "SELECT count(*) FROM kb_async_jobs"
+                             " WHERE kind='memory_facts' AND document_id=777777",
+                             -1, &st, NULL) == SQLITE_OK);
+   assert(sqlite3_step(st) == SQLITE_ROW);
+   assert(sqlite3_column_int(st, 0) == 1);
+   sqlite3_finalize(st);
+   seed(db, "DELETE FROM kb_async_jobs WHERE kind='memory_facts' AND document_id=777777");
+   printf("  PASS: polymorphic async subject accepts a memory id without a document row\n");
 }
 
 static const char *job_status(sqlite3 *db, int64_t id)
@@ -84,10 +157,9 @@ static int job_attempts(sqlite3 *db, int64_t id)
  * the follow-on claim from re-running these jobs and muddying the assertions. */
 static void test_reclaim_stale_running_extract_doc(sqlite3 *db)
 {
-   /* Backing docs: kb_async_jobs.document_id is a FK onto kb_documents. The ids
-    * sit deliberately far above the docs seeded earlier in this process, because
-    * kb_async_jobs is UNIQUE(kind, document_id) and those already hold
-    * extract_doc rows. */
+   /* Backing docs preserve the semantic validity of the extract_doc fixtures.
+    * The ids sit deliberately far above docs seeded earlier in this process,
+    * because kb_async_jobs is UNIQUE(kind, document_id). */
    seed(db, "INSERT INTO kb_documents (id,project,file_path,file_hash,chunk_index,content,doc_kind)"
             " VALUES (9001,'p','r1.md','rh1',0,'t','')");
    seed(db, "INSERT INTO kb_documents (id,project,file_path,file_hash,chunk_index,content,doc_kind)"
@@ -142,7 +214,7 @@ static void test_reclaim_stale_running_memory_facts(sqlite3 *db)
    config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    cfg.typed_facts_enabled = 1;
-   (void)kb_memory_facts_drain(&cfg, 8);
+   (void)kb_memory_facts_drain(8);
 
    assert(strcmp(job_status(db, 9003), "failed") == 0);  /* orphan reclaimed */
    assert(strcmp(job_status(db, 9002), "running") == 0); /* extract_doc untouched */
@@ -170,11 +242,11 @@ static void test_retry_backoff_defers_reclaim(sqlite3 *db)
    seed(db, "UPDATE kb_async_jobs SET status='done' WHERE status='pending'");
 
    seed(db, "INSERT INTO kb_documents (id,project,file_path,file_hash,chunk_index,content,doc_kind)"
-            " VALUES (9101,'p','bo.md','boh',0,'t','')");
+            " VALUES (9401,'p','bo.md','boh',0,'t','')");
    /* Backoff still running: the job is pending but must be passed over. */
    seed(db,
         "INSERT INTO kb_async_jobs (id,kind,document_id,project,status,attempts,next_attempt_at)"
-        " VALUES (9101,'extract_doc',9101,'p','pending',1,'2999-01-01 00:00:00')");
+        " VALUES (9401,'extract_doc',9401,'p','pending',1,'2999-01-01 00:00:00')");
 
    kb_curator_extract_opts_t opts;
    memset(&opts, 0, sizeof(opts));
@@ -182,13 +254,13 @@ static void test_retry_backoff_defers_reclaim(sqlite3 *db)
    snprintf(opts.extract_command, sizeof(opts.extract_command), "%s", "true");
 
    (void)kb_curator_extract_one(&opts);
-   assert(job_attempts(db, 9101) == 1); /* untouched: still deferred */
-   assert(strcmp(job_status(db, 9101), "pending") == 0);
+   assert(job_attempts(db, 9401) == 1); /* untouched: still deferred */
+   assert(strcmp(job_status(db, 9401), "pending") == 0);
 
    /* Backoff elapsed: claimable again. */
-   seed(db, "UPDATE kb_async_jobs SET next_attempt_at='2000-01-01 00:00:00' WHERE id=9101");
+   seed(db, "UPDATE kb_async_jobs SET next_attempt_at='2000-01-01 00:00:00' WHERE id=9401");
    (void)kb_curator_extract_one(&opts);
-   assert(job_attempts(db, 9101) == 2); /* claimed: attempts advanced */
+   assert(job_attempts(db, 9401) == 2); /* claimed: attempts advanced */
 
    printf("  PASS: test_retry_backoff_defers_reclaim (deferred, then claimed)\n");
 }
@@ -228,6 +300,41 @@ static void test_retry_delay_curve(void)
    printf("  PASS: test_retry_delay_curve\n");
 }
 
+/* The behaviour that matters: a job already AT its attempt limit must survive the
+ * provider being down. Before the fix this row went terminal 'failed' and the
+ * document left the pipeline for good. */
+static void test_provider_outage_requeues(sqlite3 *db)
+{
+   seed(db, "INSERT INTO kb_documents (id,project,file_path,file_hash,chunk_index,content,doc_kind)"
+            " VALUES (9601,'p','out.md','oh1',0,'t','')");
+   /* attempts=3 is the exhausted budget: the next terminal decision fails it. */
+   seed(db, "INSERT INTO kb_async_jobs (id,kind,document_id,project,status,attempts,claimed_by,"
+            "claimed_at,created_at,updated_at) VALUES (9601,'extract_doc',9601,'p','running',3,"
+            "'kb.curator.drain',datetime('now'),datetime('now'),datetime('now'))");
+
+   kb_curator_mark_retry_provider_unavailable(9601, 3, "provider HTTP 503");
+
+   /* Retryable, not terminal — the outage says nothing about this document. */
+   assert(strcmp(job_status(db, 9601), "pending") == 0);
+   /* The claim's increment is given back, so a long outage cannot walk the
+    * budget to exhaustion one refused claim at a time. */
+   assert(job_attempts(db, 9601) == 2);
+   printf("  PASS: provider outage requeues at attempt limit without spending budget\n");
+}
+
+static void test_only_current_document_generation_queues(sqlite3 *db)
+{
+   int before = jobs(db);
+   seed(db, "UPDATE projects SET current_generation=2 WHERE name='p'");
+   seed(db, "INSERT INTO kb_documents"
+            " (project,generation,file_path,file_hash,chunk_index,content,doc_kind) VALUES"
+            " ('p',1,'stale.md','stale',0,'old',''),"
+            " ('p',2,'current.md','current',0,'new','')");
+   (void)kb_curator_queue_docs_for_project("p");
+   assert(jobs(db) == before + 1);
+   printf("  PASS: only current-generation documents enter the curator queue\n");
+}
+
 int main(void)
 {
    /* Deterministic config: HOME with no aimee.yaml -> config_load (called inside
@@ -238,6 +345,13 @@ int main(void)
 
    printf("test_curator_queue:\n");
    sqlite3 *db = open_db();
+
+   /* Curator work is generation-fenced: queued documents are eligible only
+    * while their stable project and generation are current. */
+   seed(db, "INSERT INTO projects (name,root,scanned_at)"
+            " VALUES ('p','/p','2026-01-01 00:00:00')");
+
+   test_polymorphic_async_subject(db);
 
    /* Contract: every non-pdf doc gets one extract_doc job; PDFs are excluded;
     * re-running enqueues nothing. Guard for "docs present but zero jobs". */
@@ -271,6 +385,10 @@ int main(void)
    test_retry_delay_curve();
    test_retry_backoff_defers_reclaim(db);
    test_retry_backoff_ignores_fresh_jobs(db);
+   test_provider_unavailable_is_not_a_job_failure();
+   test_provider_outage_arms_global_backoff();
+   test_provider_outage_requeues(db);
+   test_only_current_document_generation_queues(db);
 
    printf("test_curator_queue: all tests passed\n");
    return 0;

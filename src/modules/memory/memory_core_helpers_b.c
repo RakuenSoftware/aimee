@@ -5,6 +5,7 @@
 #define _GNU_SOURCE
 #endif
 #include "memory_core_internal.h"
+#include "runtime_secret.h"
 /* memory_core_helpers.c: split from memory_core.c into a real translation unit
  * (was memory_core_helpers.inc, textually included only to stay under the
  * line-check ceiling). Cross-TU declarations live in the module header. */
@@ -47,9 +48,7 @@ void memory_refresh_coref_entities(int64_t memory_id, const char *content)
    if (memory_id <= 0 || !content || !content[0] || !memory_coref_has_pronoun(content))
       return;
 
-   config_t cfg;
-   config_load(&cfg);
-   const char *mode = memory_coref_mode_effective(&cfg);
+   const char *mode = memory_coref_mode_effective();
    if (strcmp(mode, "heuristic") != 0 && strcmp(mode, "llm") != 0)
       return;
 
@@ -60,7 +59,7 @@ void memory_refresh_coref_entities(int64_t memory_id, const char *content)
    /* LLM mode: delegate to cognifier for higher-recall resolution */
    if (strcmp(mode, "llm") == 0)
    {
-      int bound = memory_coref_llm_resolve(memory_id, content, session_buf, &cfg);
+      int bound = memory_coref_llm_resolve(memory_id, content, session_buf);
       memory_coref_audit_record(memory_id, session_buf, bound ? "bound" : "unbound", "", "llm",
                                 bound ? 1.0 : 0.0);
       return;
@@ -70,7 +69,7 @@ void memory_refresh_coref_entities(int64_t memory_id, const char *content)
    db2_memory_prior_row_t prior[64];
    int prior_max = (int)(sizeof(prior) / sizeof(prior[0]));
    int prior_n = db2_memory_list_prior_in_session(
-       session_buf, memory_id, memory_coref_window_effective(&cfg), prior, prior_max);
+       session_buf, memory_id, memory_coref_window_effective(), prior, prior_max);
 
    char chosen[128] = "";
    int ambiguous = 0;
@@ -302,8 +301,7 @@ static void memory_refresh_temporal_refs(int64_t memory_id, const char *key, con
 
 static void memory_refresh_negation_tokens(int64_t memory_id, const char *key, const char *content)
 {
-   config_t neg_cfg;
-   if (config_load(&neg_cfg) != 0 || !neg_cfg.memory_negation_enabled)
+   if (!config_memory_negation_enabled())
       return;
 
    /* Combine key + content for tokenisation */
@@ -389,10 +387,10 @@ int memory_fetch_row_by_unit_id(int64_t unit_id, memory_t *out)
 
 const char *memory_effective_embedding_cmd(const char *command)
 {
-   /* Single policy point: config_embedding_command (config_save.c). The caller
+   /* Single policy point: config_embedding_command_current (config_save.c). The caller
     * has already resolved config -> command upstream, so pass it as the request
     * override; this keeps memory_core consistent with the kb-side resolution. */
-   return config_embedding_command(NULL, command);
+   return config_embedding_command_current(command);
 }
 
 /* Per-recall query-embedding memo.
@@ -442,18 +440,154 @@ static void memory_embed_http_url(const char *base, const char *path, char *out,
 
 /* POST body to {base}{path}; on success returns 0 with the response body in
  * *resp (caller frees). Any transport error or non-2xx leaves *resp NULL. */
-int memory_embed_http_post(const char *base, const char *path, const char *body, char **resp)
+int memory_embed_http_post_status(const char *base, const char *path, const char *body, char **resp,
+                                  int *status_out)
 {
    char url[1024];
+   char auth[640] = "";
+   char token[512] = "";
+   const char *auth_header = NULL;
+   int have_token = runtime_secret_get("AIMEE_LLM_AUTH_TOKEN", token, sizeof(token));
+   const char *auth_required = getenv("AIMEE_LLM_AUTH_REQUIRED");
+   if (status_out)
+      *status_out = -1;
+   if (auth_required && strcmp(auth_required, "1") == 0 && !have_token)
+   {
+      if (status_out)
+         *status_out = 401;
+      return -1;
+   }
+   if (have_token)
+   {
+      /* Managed tokens are capped at 512 bytes; this also rejects any longer
+       * external token instead of truncating an Authorization header. */
+      int n = snprintf(auth, sizeof(auth), "Authorization: Bearer %s", token);
+      if (n < 0 || (size_t)n >= sizeof(auth))
+      {
+         runtime_secret_wipe(token, sizeof(token));
+         runtime_secret_wipe(auth, sizeof(auth));
+         if (status_out)
+            *status_out = 401;
+         return -1;
+      }
+      auth_header = auth;
+   }
    memory_embed_http_url(base, path, url, sizeof(url));
    *resp = NULL;
-   int status = agent_http_post(url, NULL, body, resp, MEMORY_EMBED_HTTP_TIMEOUT_MS, NULL);
+   int status = agent_http_post(url, auth_header, body, resp, MEMORY_EMBED_HTTP_TIMEOUT_MS, NULL);
+   if (status_out)
+      *status_out = status;
+   runtime_secret_wipe(token, sizeof(token));
+   runtime_secret_wipe(auth, sizeof(auth));
    if (status < 200 || status >= 300 || !*resp)
    {
       free(*resp);
       *resp = NULL;
       return -1;
    }
+   return 0;
+}
+
+int memory_embed_http_post(const char *base, const char *path, const char *body, char **resp)
+{
+   return memory_embed_http_post_status(base, path, body, resp, NULL);
+}
+
+/* Read the embedder's vector-space identity from its /health `serving_id`.
+ *
+ * The dim guard cannot see a pooling or prefix change — same width, same model name,
+ * different vector space — so the gateway folds all three into one opaque id and the
+ * kb records it against the corpus. This is the kb's side of that: ask the serving
+ * endpoint what space it is serving, rather than inferring it from local config, so
+ * the answer reflects what will actually be applied to the text.
+ *
+ * Returns 0 with a NUL-terminated id in `out`. An empty `out` is SUCCESS and means
+ * "this endpoint reports no identity" (a legacy embedder, or a gateway predating the
+ * field): the guard treats that as a no-op rather than a mismatch. Non-zero means the
+ * endpoint could not be reached at all, which the caller retries.
+ */
+int memory_embed_serving_id(const char *command, char *out, size_t out_len)
+{
+   if (!out || out_len == 0)
+      return -1;
+   out[0] = '\0';
+   if (!command || !command[0])
+      return 0;
+   if (strcmp(command, "builtin") == 0)
+   {
+      /* The builtin lexical embedder DOES have a vector space, and it needs an identity
+       * for the same reason the model-backed ones do. Reporting none left the one
+       * transition nothing could catch: a corpus embedded lexically and then queried with
+       * the bundled model shares its 384 width, so the dim guard is silent, and with no
+       * recorded identity the serving_id guard recorded the model's fresh and mixed the
+       * two spaces without a word.
+       *
+       * It is a deterministic feature hash over tokens and bigrams, so the space is fixed
+       * by the code rather than by any file: hence a constant, and hence the VERSION.
+       * BUMP IT whenever memory_embed_text_builtin's hashing, weighting or width changes —
+       * that is a different space, and an unbumped identity would claim otherwise. */
+      snprintf(out, out_len, "builtin/lexical-v1");
+      return 0;
+   }
+   if (!memory_embed_command_is_http(command))
+   {
+      /* A SIDECAR command (the shipped container's embed-remote.py) owns endpoint
+       * resolution — AIMEE_EMBEDDER_URL over AIMEE_LLM_URL, plus the bearer — so ask it
+       * rather than re-deriving that precedence here and getting it subtly different.
+       * This is the default deployment shape: without it the guard would be inactive in
+       * exactly the configuration everything ships with. Mirrors the `--dim` probe. */
+      char cmd[1200];
+      snprintf(cmd, sizeof(cmd), "%s --serving-id", command);
+      FILE *pipe = popen(cmd, "r");
+      if (!pipe)
+         return -1;
+      char buf[192] = "";
+      size_t n = fread(buf, 1, sizeof(buf) - 1, pipe);
+      buf[n] = '\0';
+      if (pclose(pipe) != 0)
+         return -1; /* unreachable / not ready -> caller retries */
+      /* Trim the trailing newline; an empty line means "reports no identity". */
+      size_t len = strlen(buf);
+      while (len > 0 && (buf[len - 1] == '\n' || buf[len - 1] == '\r' || buf[len - 1] == ' '))
+         buf[--len] = '\0';
+      snprintf(out, out_len, "%s", buf);
+      return 0;
+   }
+
+   char url[1024];
+   memory_embed_http_url(command, "/health", url, sizeof(url));
+   char auth[640];
+   const char *auth_header = NULL;
+   const char *token = getenv("AIMEE_LLM_AUTH_TOKEN");
+   const char *auth_required = getenv("AIMEE_LLM_AUTH_REQUIRED");
+   if (auth_required && strcmp(auth_required, "1") == 0 && (!token || !token[0]))
+      return -1;
+   if (token && token[0])
+   {
+      int n = snprintf(auth, sizeof(auth), "Authorization: Bearer %s", token);
+      if (n < 0 || (size_t)n >= sizeof(auth))
+         return -1;
+      auth_header = auth;
+   }
+
+   char *body = NULL;
+   int status = agent_http_get(url, auth_header, &body, MEMORY_EMBED_HTTP_TIMEOUT_MS);
+   /* 503 is expected while the embedder warms up and still carries the payload —
+    * serving_id is registry data, not a measurement, so it is readable before the
+    * child can embed. Anything else with no body is a transport failure. */
+   if (!body || (status != 200 && status != 503))
+   {
+      free(body);
+      return -1;
+   }
+   cJSON *root = cJSON_Parse(body);
+   free(body);
+   if (!root)
+      return -1;
+   cJSON *sid = cJSON_GetObjectItemCaseSensitive(root, "serving_id");
+   if (cJSON_IsString(sid) && sid->valuestring && sid->valuestring[0])
+      snprintf(out, out_len, "%s", sid->valuestring);
+   cJSON_Delete(root);
    return 0;
 }
 
@@ -476,9 +610,6 @@ static __thread int s_qembed_misses = 0;
  * time spent in actual embed spawns (cache misses) and how many ran. */
 __thread long long s_qembed_ms = 0;
 __thread int s_qembed_spawns = 0;
-/* Cross-encoder rerank spawn time + count, same per-recall probe. */
-__thread long long s_rerank_ms = 0;
-__thread int s_rerank_calls = 0;
 
 /* Begin a fresh per-recall memo window. Call at every top-level recall entry
  * point before any lane embeds the query. */
@@ -514,12 +645,12 @@ int memory_embed_text_runtime(const char *text, const char *command, float *out,
 
    s_qembed_misses++;
    long long _emb_t0 = util_now_ms();
-   int dim = memory_embed_text(text, effective_cmd, out, max_dim);
+   int dim = memory_embed_text(text, effective_cmd, EMBED_INPUT_QUERY, out, max_dim);
    if (dim <= 0 && strcmp(effective_cmd, "builtin") != 0)
    {
       aimee_log(LOG_WARN, "memory",
                 "query embedding failed for configured command; retrying with builtin embeddings");
-      dim = memory_embed_text(text, "builtin", out, max_dim);
+      dim = memory_embed_text(text, "builtin", EMBED_INPUT_QUERY, out, max_dim);
    }
    s_qembed_ms += util_now_ms() - _emb_t0;
    s_qembed_spawns++;
@@ -717,7 +848,7 @@ static void memory_embed_unit_row(int64_t unit_id, const char *unit_type, const 
 
    float vec[EMBED_MAX_DIM];
    const char *model = (command && command[0]) ? command : "builtin";
-   int dim = memory_embed_text(text, model, vec, EMBED_MAX_DIM);
+   int dim = memory_embed_text(text, model, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
    if (dim <= 0)
       return;
 
@@ -729,9 +860,7 @@ void memory_refresh_unit_embeddings(int64_t memory_id)
 {
    if (memory_id <= 0)
       return;
-   config_t cfg;
-   config_load(&cfg);
-   const char *embed_command = config_embedding_command(&cfg, NULL);
+   const char *embed_command = config_embedding_command_current(NULL);
 
    db2_memory_unit_row_t units[64];
    int unit_max = (int)(sizeof(units) / sizeof(units[0]));

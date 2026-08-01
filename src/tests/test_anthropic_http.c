@@ -10,7 +10,7 @@
 #include "../headers/agent_config.h"
 #include "../headers/agent_exec.h"
 #include "../headers/agent_protocol.h"
-#include "../modules/delegates/delegate_driver.h"
+#include <aimee/delegates/delegate_driver.h>
 #include "../headers/log.h"
 #include "../headers/server_http.h"
 #include "../vendor/headers/cJSON.h"
@@ -40,6 +40,7 @@ static int g_stream_status = 200;
 static const char *g_stream_payload;
 static const char *g_response_body = NULL;
 static int g_response_status = 200;
+static int g_proof_gated = 0;
 
 static void reset_capture(void)
 {
@@ -51,6 +52,7 @@ static void reset_capture(void)
    g_stream_payload = NULL;
    g_response_body = NULL;
    g_response_status = 200;
+   g_proof_gated = 0;
 }
 
 int agent_load_config(agent_config_t *cfg)
@@ -322,6 +324,14 @@ char *ingress_preinject_apply(const char *instructions, const char *envelope)
    (void)instructions;
    return envelope ? strdup(envelope) : NULL;
 }
+/* The economizer seam moved from config_load to econ_mode_current(). Mirror
+ * exactly what the config_load stub below produces (module_economizer = 1, so
+ * mode is authoritative) so these assertions are unchanged. */
+int econ_mode_current(void)
+{
+   return g_proof_gated ? ECON_MODE_SAFE : ECON_MODE_OFF;
+}
+
 /* messages_run_request_pipeline reads config for the P5 anthropic-inject opt-in;
  * these whitebox tests run with it off (zeroed). */
 int config_load(config_t *cfg)
@@ -332,6 +342,8 @@ int config_load(config_t *cfg)
       /* -1 = unspecified: memset-0 would read as user-disabled and gate the modules. */
       cfg->module_memory = cfg->module_governance = -1;
       cfg->module_delegates = cfg->module_workflows = -1;
+      cfg->module_economizer = 1;
+      cfg->economizer_mode = g_proof_gated ? ECON_MODE_SAFE : ECON_MODE_OFF;
    }
    return 0;
 }
@@ -680,7 +692,7 @@ static void test_messages_buffered_anthropic_strips_stream_false_path(void)
 
    reset_capture();
    g_driver = &anthropic;
-   assert(messages_buffered("{\"model\":\"ignored\",\"stream\":true,"
+   assert(messages_buffered("{\"max_tokens\":16,\"model\":\"ignored\",\"stream\":true,"
                             "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
                             resp, sizeof(resp)) == 200);
    sent = parse(g_last_body);
@@ -734,7 +746,7 @@ static void test_messages_buffered_openai_family_translates(void)
    reset_capture();
    g_driver = &openai;
    assert(
-       messages_buffered("{\"model\":\"ignored\",\"system\":\"SYS\","
+       messages_buffered("{\"max_tokens\":16,\"model\":\"ignored\",\"system\":\"SYS\","
                          "\"messages\":[{\"role\":\"assistant\",\"content\":["
                          "{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"Read\","
                          "\"input\":{\"path\":\"a.c\"}}]}],"
@@ -768,7 +780,7 @@ static void test_messages_buffered_system_prompt_driver_no_duplicate_system(void
 
    reset_capture();
    g_driver = &chatgpt;
-   assert(messages_buffered("{\"model\":\"ignored\",\"system\":\"SYS\","
+   assert(messages_buffered("{\"max_tokens\":16,\"model\":\"ignored\",\"system\":\"SYS\","
                             "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
                             resp, sizeof(resp)) == 200);
    sent = parse(g_last_body);
@@ -794,7 +806,7 @@ static void test_messages_buffered_system_prompt_capability_no_duplicate_system(
 
    reset_capture();
    g_driver = &capable;
-   assert(messages_buffered("{\"model\":\"ignored\",\"system\":\"SYS\","
+   assert(messages_buffered("{\"max_tokens\":16,\"model\":\"ignored\",\"system\":\"SYS\","
                             "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
                             resp, sizeof(resp)) == 200);
    sent = parse(g_last_body);
@@ -896,6 +908,53 @@ static void test_messages_preinject_appends_system_block(void)
    PASS("messages_preinject_appends_system_block");
 }
 
+static void test_proof_gated_ingress_wire_parity(void)
+{
+   const char *request = "{\"model\":\"ignored\",\"max_tokens\":64,"
+                         "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
+   const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
+   const delegate_driver_t openai = {.name = "openai", .build_request = openai_driver_build};
+   char resp[4096];
+   char *off_body;
+   emit_capture_t cap;
+
+   reset_capture();
+   g_driver = &anthropic;
+   assert(messages_buffered(request, resp, sizeof(resp)) == 200);
+   off_body = strdup(g_last_body);
+   assert(off_body != NULL);
+   g_proof_gated = 1;
+   assert(messages_buffered(request, resp, sizeof(resp)) == 200);
+   assert(strcmp(g_last_body, off_body) == 0);
+   free(off_body);
+
+   reset_capture();
+   memset(&cap, 0, sizeof(cap));
+   g_driver = &anthropic;
+   g_stream_payload = "event: message_stop\n"
+                      "data: {\"type\":\"message_stop\"}\n\n";
+   assert(messages_stream(request, cap_emit, &cap) == 0);
+   off_body = strdup(g_last_body);
+   assert(off_body != NULL);
+   g_proof_gated = 1;
+   memset(&cap, 0, sizeof(cap));
+   assert(messages_stream(request, cap_emit, &cap) == 0);
+   assert(strcmp(g_last_body, off_body) == 0);
+   free(off_body);
+
+   reset_capture();
+   g_driver = &openai;
+   assert(messages_buffered(request, resp, sizeof(resp)) == 200);
+   off_body = strdup(g_last_body);
+   assert(off_body != NULL);
+   g_proof_gated = 1;
+   assert(messages_buffered(request, resp, sizeof(resp)) == 200);
+   assert(strcmp(g_last_body, off_body) == 0);
+   free(off_body);
+   reset_capture();
+   PASS("proof_gated_ingress_wire_parity");
+}
+
 int main(void)
 {
    test_translate_request_anthropic_passthrough();
@@ -913,6 +972,26 @@ int main(void)
    test_messages_buffered_system_prompt_capability_no_duplicate_system();
    test_messages_stream_openai_family_translates();
    test_messages_stream_chatgpt_buffered_replays_responses();
+   test_proof_gated_ingress_wire_parity();
    printf("anthropic_http: OK\n");
+   return 0;
+}
+
+/* anthropic_http.c now asks config_present() + per-field accessors instead of
+ * loading a config_t. These reproduce exactly what the config_load stub they
+ * replaced produced: config readable, modules unspecified (-1) so the env
+ * default decides, economizer on, and the P5 anthropic-inject opt-in off. */
+int config_present(void)
+{
+   return 1;
+}
+
+int config_module_governance(void)
+{
+   return -1;
+}
+
+int config_ingress_preinject_anthropic_enabled(void)
+{
    return 0;
 }

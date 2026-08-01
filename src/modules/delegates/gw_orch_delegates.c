@@ -3,7 +3,7 @@
  * catalog through the seam. The coord-specific capability adapter that actually spawns lives
  * at the producer (server_coord_dispatcher.c); this module only decides whether the module is
  * enabled and drives the runner, so it stays I/O-free and unit-testable with a fake caps. */
-#include "gw_orch_delegates.h"
+#include <aimee/delegates/gw_orch_delegates.h>
 
 #include <stdlib.h>
 #include <strings.h> /* strcasecmp */

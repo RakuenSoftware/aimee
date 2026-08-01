@@ -72,7 +72,7 @@ per-item USD cap).
   <autonomous_base>`; ci/mergeable/is_merged/merge map `gh` output to the engine enums,
   unknown → fail closed. `exec_pr_open` derives the work-item branch `aimee/wi/<id>`.
   Closes the criterion-5 **code** gap
-  [autonomous-dev-execution-substrate.md](autonomous-dev-execution-substrate.md)
+  [autonomous-dev-execution-substrate.md](done/autonomous-dev-execution-substrate.md)
   deferred here. The CODE floor for full-autonomous-development is now complete.
 
 - **intake-auth hardening on `POST /v1/dev/submit` (PR #872).** The public intake

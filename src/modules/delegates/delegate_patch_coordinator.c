@@ -1,5 +1,5 @@
 /* delegate_patch_coordinator.c: read-only integration policy summary. */
-#include "delegate_patch_coordinator.h"
+#include <aimee/delegates/delegate_patch_coordinator.h>
 #include "cmd_agent_delegate_impl.h"
 
 #include <stdio.h>

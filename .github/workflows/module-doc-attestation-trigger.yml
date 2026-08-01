@@ -1,0 +1,67 @@
+name: Module document attestation trigger
+
+# This protected-base workflow never checks out or executes pull-request code.
+# It authenticates the trigger; the separately deployed verifier resolves Git
+# objects and publishes the required module-doc-attestation check.
+on:
+  pull_request_target:
+    branches: [feature/core-modularization]
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: module-doc-attestation-trigger-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  request-attestation:
+    name: module-doc-attestation-trigger
+    if: ${{ vars.MODULE_DOC_ATTESTATION_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      id-token: write
+    env:
+      VERIFIER_AUDIENCE: ${{ vars.MODULE_DOC_VERIFIER_AUDIENCE }}
+      VERIFIER_SPKI: ${{ vars.MODULE_DOC_VERIFIER_SPKI }}
+      VERIFIER_URL: ${{ vars.MODULE_DOC_VERIFIER_URL }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Request protected external verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${VERIFIER_AUDIENCE}" || -z "${VERIFIER_SPKI}" || -z "${VERIFIER_URL}" ]]; then
+            echo "::error::MODULE_DOC_VERIFIER_AUDIENCE, MODULE_DOC_VERIFIER_SPKI, and MODULE_DOC_VERIFIER_URL must be configured"
+            exit 1
+          fi
+          case "${VERIFIER_URL}" in
+            https://*) ;;
+            *) echo "::error::MODULE_DOC_VERIFIER_URL must use HTTPS"; exit 1 ;;
+          esac
+          if [[ ! "${VERIFIER_SPKI}" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
+            echo "::error::MODULE_DOC_VERIFIER_SPKI must be one base64 SHA-256 digest"
+            exit 1
+          fi
+
+          audience=$(python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["VERIFIER_AUDIENCE"], safe=""))')
+          token_response=$(curl --silent --show-error --fail-with-body --max-redirs 0 \
+            --proto '=https' --tlsv1.2 \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${audience}")
+          oidc_token=$(TOKEN_RESPONSE="${token_response}" python3 -c \
+            'import json, os, sys; value=json.loads(os.environ["TOKEN_RESPONSE"]); token=value.get("value"); (isinstance(token, str) and token) or sys.exit("OIDC response lacks a non-empty token"); print(token)')
+          echo "::add-mask::${oidc_token}"
+
+          request=$(OIDC_TOKEN="${oidc_token}" python3 -c \
+            'import json, os; print(json.dumps({"schema":"aimee.module-doc-trigger.v1","pull_request":int(os.environ["PR_NUMBER"]),"oidc_token":os.environ["OIDC_TOKEN"]}, separators=(",", ":")))')
+          # Transport hardening is part of the repository guarantees documented
+          # in .github/module-doc-attestation/README.md.
+          printf '%s' "${request}" | curl --silent --show-error --fail --max-redirs 0 \
+              --proto '=https' --tlsv1.2 \
+              --pinnedpubkey "sha256//${VERIFIER_SPKI}" \
+              -H 'Content-Type: application/json' \
+              --data-binary @- \
+              --output /dev/null \
+              "${VERIFIER_URL}"

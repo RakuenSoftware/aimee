@@ -129,3 +129,74 @@ char *kb_client_tool_registry_snapshot_json(void)
    cJSON *req = cJSON_CreateObject();
    return kb_v1_action_request("tool_registry.snapshot", req);
 }
+
+/* Invoke a tool on an MCP plugin the KB hosts (config install: kb), over the
+ * mTLS /v1/actions/mcp.call channel. Always an RPC — plugins run only in the
+ * hosting daemon, never in-process here, so there is no DB2 short-circuit.
+ * On success returns 0 and, if out_result is non-NULL, sets it to an owned cJSON
+ * (the plugin's tools/call result). On failure returns -1 with a message in
+ * err_buf. |args| is borrowed (deep-copied into the request). */
+int kb_client_mcp_call(const char *qualified_name, const cJSON *args, int timeout_ms,
+                       const char *actor, cJSON **out_result, char *err_buf, size_t err_buf_len)
+{
+   if (out_result)
+      *out_result = NULL;
+   if (err_buf && err_buf_len)
+      err_buf[0] = '\0';
+   if (!qualified_name || !qualified_name[0])
+   {
+      if (err_buf && err_buf_len)
+         snprintf(err_buf, err_buf_len, "missing tool name");
+      return -1;
+   }
+
+   cJSON *req = cJSON_CreateObject();
+   if (!req)
+      return -1;
+   cJSON_AddStringToObject(req, "name", qualified_name);
+   if (args)
+   {
+      cJSON *args_copy = cJSON_Duplicate(args, 1);
+      if (args_copy)
+         cJSON_AddItemToObject(req, "arguments", args_copy);
+   }
+   if (timeout_ms > 0)
+      cJSON_AddNumberToObject(req, "timeout_ms", timeout_ms);
+   if (actor && actor[0])
+      cJSON_AddStringToObject(req, "actor", actor); /* kb records it as the audit actor */
+
+   char *json = kb_v1_action_request("mcp.call", req); /* consumes req */
+   if (!json)
+   {
+      if (err_buf && err_buf_len)
+         snprintf(err_buf, err_buf_len, "mcp.call transport failed");
+      return -1;
+   }
+   cJSON *resp = cJSON_Parse(json);
+   free(json);
+   if (!resp)
+   {
+      if (err_buf && err_buf_len)
+         snprintf(err_buf, err_buf_len, "mcp.call returned an invalid response");
+      return -1;
+   }
+
+   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
+   {
+      cJSON *e = cJSON_GetObjectItemCaseSensitive(resp, "error");
+      if (err_buf && err_buf_len)
+         snprintf(err_buf, err_buf_len, "%s",
+                  cJSON_IsString(e) ? e->valuestring : "mcp.call failed");
+      cJSON_Delete(resp);
+      return -1;
+   }
+
+   cJSON *result = cJSON_DetachItemFromObjectCaseSensitive(resp, "result");
+   cJSON_Delete(resp);
+   if (out_result)
+      *out_result = result;
+   else
+      cJSON_Delete(result);
+   return 0;
+}

@@ -87,14 +87,16 @@ func NewStore(path string) (*Store, error) {
 }
 
 var policyDefaults = map[string]any{
-	"trigger.max_concurrent":         2,
-	"trigger.scan_interval_secs":     5,
-	"autonomy.auto_resume_cap_parks": true,
-	"autonomy.max_wall_secs":         1800,
-	"autonomy.max_turns":             300,
-	"autonomy.max_resumes":           50,
-	"autonomy.stale_abandon_secs":    3600,
-	"autonomy.concurrency":           2,
+	"trigger.max_concurrent":            2,
+	"trigger.scan_interval_secs":        5,
+	"autonomy.auto_resume_cap_parks":    true,
+	"autonomy.max_wall_secs":            1800,
+	"autonomy.max_turns":                300,
+	"autonomy.max_resumes":              50,
+	"autonomy.stale_abandon_secs":       3600,
+	"autonomy.concurrency":              5,
+	"autonomy.per_workflow_concurrency": 1,
+	"autonomy.delegate_pending_secs":    120,
 }
 
 var configurableTypes = map[string]string{
@@ -102,7 +104,15 @@ var configurableTypes = map[string]string{
 	"trigger.scan_interval_secs": "int",
 	"autonomy.max_wall_secs":     "int", "autonomy.max_turns": "int",
 	"autonomy.max_resumes": "int", "autonomy.stale_abandon_secs": "int",
-	"autonomy.concurrency": "int",
+	"autonomy.concurrency":              "int",
+	"autonomy.per_workflow_concurrency": "int",
+	"autonomy.delegate_pending_secs":    "int",
+}
+
+type intBounds struct{ min, max int64 }
+
+var configurableIntBounds = map[string]intBounds{
+	"autonomy.delegate_pending_secs": {min: 2, max: 3600},
 }
 
 func (s *Store) Values() (map[string]any, error) {
@@ -193,6 +203,29 @@ func (s *Store) BoolValue(key string) (bool, bool, error) {
 		return false, false, fmt.Errorf("config key %q is not boolean", key)
 	}
 	return b, true, nil
+}
+
+// StringValue reads a scalar string without adding it to the Workflows UI's
+// mutable policy allowlist. Internal control-plane modules use it for existing
+// product configuration such as roundtable.default.
+func (s *Store) StringValue(key string) (string, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	root, err := s.read()
+	if err != nil {
+		return "", false, err
+	}
+	values := make(map[string]any)
+	flatten(root, "", values)
+	value, ok := values[key]
+	if !ok {
+		return "", false, nil
+	}
+	text, ok := value.(string)
+	if !ok {
+		return "", false, fmt.Errorf("config key %q is not a string", key)
+	}
+	return text, true, nil
 }
 
 func (s *Store) Set(key string, value any) error {
@@ -322,6 +355,9 @@ func validateKeyValue(key string, value any) error {
 		n, ok := number(value)
 		if !ok || n < 0 {
 			return fmt.Errorf("%s must be a non-negative integer", key)
+		}
+		if bounds, bounded := configurableIntBounds[key]; bounded && (n < bounds.min || n > bounds.max) {
+			return fmt.Errorf("%s must be between %d and %d", key, bounds.min, bounds.max)
 		}
 	case "bool":
 		if _, ok := value.(bool); !ok {

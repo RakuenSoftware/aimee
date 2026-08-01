@@ -30,17 +30,135 @@
 #define log_warn(...) aimee_log(LOG_WARN, "sandbox", __VA_ARGS__)
 #define log_info(...) aimee_log(LOG_INFO, "sandbox", __VA_ARGS__)
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+/* -------------------------------------------------------------------------
+ * Audit hook + test seam (see sandbox.h)
+ * ---------------------------------------------------------------------- */
+
+/* Installed once at startup by the server-only bridge; NULL = no audit. */
+static sandbox_audit_hook_fn g_sbx_audit_hook = NULL;
+void sandbox_set_audit_hook(sandbox_audit_hook_fn fn)
+{
+   g_sbx_audit_hook = fn;
+}
+
+/* Test-only availability override (NULL in production). */
+static int (*g_sbx_avail_override)(const char **) = NULL;
+void sandbox_set_available_override_for_test(int (*fn)(const char **reason))
+{
+   g_sbx_avail_override = fn;
+}
+
+/* Characters allowed in a bare program path we are willing to surface verbatim.
+ * A real program token is a plain path; anything else is refused (see below). */
+static int sbx_prog_char(char c)
+{
+   return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' ||
+          c == '/' || c == '.' || c == '-' || c == '+';
+}
+
+/* True if the whitespace-delimited token [tok, end) is a SIMPLE `NAME=value`
+ * environment assignment whose whole token is safe to skip: the value must
+ * contain no shell byte that could span the whitespace boundary or start a
+ * construct (quote, '$', backtick, backslash) or otherwise smuggle secret bytes
+ * into the next token. Anything fancier and we refuse to keep parsing. */
+static int sbx_is_simple_assignment(const char *tok, const char *end)
+{
+   const char *p = tok;
+   if (!((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') || *p == '_'))
+      return 0;
+   while (p < end && ((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') ||
+                      (*p >= '0' && *p <= '9') || *p == '_'))
+      p++;
+   if (p >= end || *p != '=')
+      return 0; /* not NAME= */
+   for (const char *v = p + 1; v < end; v++)
+   {
+      char c = *v;
+      if (c == '\'' || c == '"' || c == '$' || c == '`' || c == '\\' || c == '(' || c == ')' ||
+          c == ';' || c == '&' || c == '|' || c == '<' || c == '>' || c == '{' || c == '}')
+         return 0;
+   }
+   return 1;
+}
+
+/* Safe-by-construction: emit the program basename ONLY when the command is a run
+ * of simple `NAME=value` assignments followed by a bare program path. Any shell
+ * construct in the way — a leading subshell '(', a quote, '$', a value that spans
+ * whitespace, an assignment we can't cleanly skip — could carry secret bytes, so
+ * we emit the fixed marker "unparsed" instead of raw command text. Emitting NO
+ * program bytes is strictly safer than risking a secret in the audit trail. */
+void sandbox_command_program(const char *cmd, char *out, size_t out_len)
+{
+   if (!out || out_len == 0)
+      return;
+   out[0] = '\0';
+   if (!cmd)
+      return;
+   const char *p = cmd;
+   for (;;)
+   {
+      while (*p == ' ' || *p == '\t')
+         p++;
+      if (!*p)
+         return; /* only assignments / blank — no program to name */
+      const char *end = p;
+      while (*end && *end != ' ' && *end != '\t')
+         end++;
+      if (sbx_is_simple_assignment(p, end))
+      {
+         p = end; /* skip the whole assignment token, value included */
+         continue;
+      }
+      break; /* p..end is the program-token candidate */
+   }
+   const char *end = p;
+   while (*end && *end != ' ' && *end != '\t')
+      end++;
+   for (const char *s = p; s < end; s++)
+   {
+      if (!sbx_prog_char(*s))
+      {
+         snprintf(out, out_len, "unparsed");
+         return;
+      }
+   }
+   const char *base = p;
+   for (const char *s = p; s < end; s++)
+      if (*s == '/')
+         base = s + 1;
+   size_t blen = (size_t)(end - base);
+   if (blen >= out_len)
+      blen = out_len - 1;
+   memcpy(out, base, blen);
+   out[blen] = '\0';
+}
+
+/* Fire the audit hook (if installed) for a degraded-isolation outcome. Extracts
+ * the NON-SECRET program name; never passes the raw command line. */
+static void sbx_audit_degraded(const char *cmd, const sandbox_config_t *cfg, const char *verdict,
+                               const char *reason)
+{
+   sandbox_audit_hook_fn h = g_sbx_audit_hook;
+   if (!h)
+      return;
+   char prog[64];
+   sandbox_command_program(cmd, prog, sizeof prog);
+   h(prog, cfg->mode, cfg->network_isolated, verdict, reason ? reason : "");
+}
 
 /* -------------------------------------------------------------------------
  * Container detection
@@ -82,6 +200,8 @@ int sandbox_detect_container(void)
 
 int sandbox_available(const char **reason)
 {
+   if (g_sbx_avail_override)
+      return g_sbx_avail_override(reason);
 #ifndef __linux__
    if (reason)
       *reason = "Linux namespaces not available on this platform";
@@ -462,20 +582,80 @@ static void bind_aimee_runtime_paths(const char *sandbox_root)
  *   3. pivot_root or chroot into it.
  * ---------------------------------------------------------------------- */
 
+/* Remove sandbox roots left behind by earlier runs.
+ *
+ * setup_mount_ns() mkdtemp()s /tmp/aimee-sandbox-XXXXXX in the HOST namespace,
+ * then mounts a tmpfs over it inside the child's new mount namespace. When the
+ * sandboxed process exits the namespace goes with it and the tmpfs unmounts —
+ * but the host-side directory stays. Nothing removes it: it is created in the
+ * child after fork, so the parent never learns the path, and sandbox_spawn()
+ * returns the pid without waiting, so there is no point in this module where
+ * the child is known to have exited.
+ *
+ * One empty directory leaks per sandboxed run. They accumulate: a development
+ * box had 477, part of a /tmp that had exhausted its inode table (857k inodes
+ * across 40k directories, with 45GB of space still free) — at which point
+ * nothing on the machine could create a file.
+ *
+ * Sweeping with rmdir is safe BY CONSTRUCTION and needs no age heuristic: root
+ * creation is serialised across processes until the tmpfs is mounted, a root
+ * that is then in use cannot be removed (rmdir fails EBUSY), and a root that is
+ * merely non-empty fails ENOTEMPTY. Only the leaked ones — unmounted and empty
+ * — can be removed, so a sweep can never disturb a running sandbox, including
+ * one owned by a different process or user. Errors are ignored for exactly
+ * that reason. */
+static void reap_stale_sandbox_roots(void)
+{
+   DIR *d = opendir("/tmp");
+   if (!d)
+      return;
+   struct dirent *e;
+   while ((e = readdir(d)) != NULL)
+   {
+      if (strncmp(e->d_name, "aimee-sandbox-", 14) != 0)
+         continue;
+      char path[SANDBOX_MAX_PATH_LEN];
+      int n = snprintf(path, sizeof(path), "/tmp/%s", e->d_name);
+      if (n > 0 && (size_t)n < sizeof(path))
+         (void)rmdir(path); /* EBUSY = in use, ENOTEMPTY = not ours to judge */
+   }
+   closedir(d);
+}
+
 static int setup_mount_ns(const sandbox_config_t *cfg, const char *workspace,
                           const char *read_only_path, const char *write_path)
 {
+   /* A second process must not reap our root between mkdtemp() and mount().
+    * Locking the shared /tmp directory inode avoids creating another file that
+    * itself needs lifecycle management. Linux flock() accepts directory fds. */
+   int root_lock_fd = open("/tmp", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+   if (root_lock_fd < 0)
+      return -1;
+   if (flock(root_lock_fd, LOCK_EX) != 0)
+   {
+      close(root_lock_fd);
+      return -1;
+   }
+
+   /* Clear roots orphaned by earlier runs before adding another. */
+   reap_stale_sandbox_roots();
+
    /* Create a private tmpfs to serve as the sandbox root */
    char sandbox_root[] = "/tmp/aimee-sandbox-XXXXXX";
    if (mkdtemp(sandbox_root) == NULL)
+   {
+      close(root_lock_fd);
       return -1;
+   }
 
    /* Mount tmpfs at sandbox root */
    if (mount("none", sandbox_root, "tmpfs", 0, "size=64m") != 0)
    {
       rmdir(sandbox_root);
+      close(root_lock_fd);
       return -1;
    }
+   close(root_lock_fd);
 
    /* Bind essential system paths */
    for (int i = 0; g_essential_paths[i]; i++)
@@ -585,10 +765,12 @@ static pid_t sandbox_exec_internal(const sandbox_config_t *cfg, const char *cmd,
       {
          log_warn("sandbox: unavailable (%s) — refusing unsandboxed guarded execution",
                   unavail_reason ? unavail_reason : "unknown reason");
+         sbx_audit_degraded(cmd, cfg, "refused", unavail_reason);
          return -1;
       }
       log_warn("sandbox: unavailable (%s) — running unsandboxed",
                unavail_reason ? unavail_reason : "unknown reason");
+      sbx_audit_degraded(cmd, cfg, "unsandboxed_fallback", unavail_reason);
       pid_t pid = fork();
       if (pid == 0)
       {
@@ -718,6 +900,10 @@ static pid_t sandbox_exec_internal(const sandbox_config_t *cfg, const char *cmd,
       close(setup_pipe[0]);
       if (n != 1 || setup_status != '1')
       {
+         /* Child reported that in-namespace setup (unshare / mount ns) failed;
+          * a require-isolation exec is refused rather than downgraded. This is a
+          * child-side degradation the parent CAN observe, so it is audited. */
+         sbx_audit_degraded(cmd, cfg, "refused", "namespace setup failed in child");
          waitpid(pid, NULL, 0);
          return -1;
       }

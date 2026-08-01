@@ -13,7 +13,7 @@
 #ifndef DEC_ROUTER_ADVISE_H
 #define DEC_ROUTER_ADVISE_H 1
 
-#include "gateway_pipeline.h" /* gw_request_t (anonymous typedef; can't fwd-declare) */
+#include <aimee/gateway/gateway_pipeline.h> /* gw_request_t (anonymous typedef; can't fwd-declare) */
 
 /* Gateway pipeline stage. Extracts this turn's user query from the request and
  * records the advisory routing/enforce decision. Returns 0 (never mutates the

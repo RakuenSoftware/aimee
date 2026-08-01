@@ -1,11 +1,12 @@
 /* delegate_credential_retry.c: same-request retry within a credential pool. */
 
-#include "delegate_credential_retry.h"
+#include <aimee/delegates/delegate_credential_retry.h>
 
 #include "agent_config.h" /* agent_set_request_codex_creds, *_token_present */
 #include "agent_exec.h"
 #include "config.h" /* config_output_dir */
-#include "delegate_credentials.h"
+#include <aimee/delegates/delegate_credentials.h>
+#include "runtime_secret.h"
 #include "vault_service.h" /* vault_service_inject_api_key, VAULT_*_CRED */
 
 #include <openssl/crypto.h> /* OPENSSL_cleanse */
@@ -73,15 +74,15 @@ delegate_cred_resolve_status_t delegate_resolve_credentials(
    if (!target_agent)
       return DELEGATE_CRED_RESOLVE_OK;
 
-   /* Restore persisted per-credential cooldown/health (shared env pool AND
+   /* Restore persisted per-credential cooldown/health (shared named pool AND
     * per-principal vault rows) before consulting either path. */
    const char *dir = config_output_dir();
    snprintf(credential_state_path, credential_state_path_cap, "%s/delegate-credential-state.tsv",
             dir ? dir : "/tmp");
    (void)delegate_credentials_load_file(credential_state_path, time(NULL));
 
-   /* WP-C.1 vault-FIRST (D14/D15): a vaulted cred beats the env lease; LOCKED
-    * fails the run; a miss falls through to the env pool. */
+   /* WP-C.1 vault-FIRST (D14/D15): a per-principal cred beats the shared lease;
+    * LOCKED fails the run; a miss falls through to the shared Vault slots. */
    if (vault_principal && vault_principal[0])
    {
       /* WP-C.3 per-principal 429 backpressure: a vaulted cred is a single key (no
@@ -107,13 +108,14 @@ delegate_cred_resolve_status_t delegate_resolve_credentials(
          snprintf(leased_cred_name, leased_cred_name_cap, "%s", VAULT_API_KEY_CRED);
          return DELEGATE_CRED_RESOLVE_OK;
       }
-      /* miss -> codex override / env pool below */
+      /* miss -> codex override / shared named pool below */
    }
 
    /* WP-C.3 codex-oauth: a vaulted token overrides the on-disk/session token. */
    codex_oauth_apply_vault_override(vault_principal, target_agent);
 
-   /* Lease one credential from the shared env pool (principal ""), if configured. */
+   /* Lease one credential from the shared Vault-backed pool (principal ""), if
+    * configured. api_key_env is a legacy slot name, never a runtime env read. */
    if (target_agent->credential_count > 0)
    {
       char leased_env[MAX_CRED_ENV_VAR_LEN] = "";
@@ -121,9 +123,10 @@ delegate_cred_resolve_status_t delegate_resolve_credentials(
                                        target_agent->credential_count, leased_cred_name,
                                        leased_cred_name_cap, leased_env, sizeof(leased_env)) != 0)
          return DELEGATE_CRED_RESOLVE_POOL_EMPTY;
-      const char *value = getenv(leased_env);
-      if (value && value[0])
+      char value[MAX_API_KEY_LEN] = "";
+      if (runtime_secret_get(leased_env, value, sizeof(value)) && value[0])
          snprintf(target_agent->api_key, MAX_API_KEY_LEN, "%s", value);
+      OPENSSL_cleanse(value, sizeof(value));
    }
    return DELEGATE_CRED_RESOLVE_OK;
 }
@@ -191,10 +194,11 @@ int delegate_run_with_credential_retry(agent_config_t *cfg, agent_t *agent, cons
       if (credential_state_path && credential_state_path[0])
          (void)delegate_credentials_save_file(credential_state_path);
 
-      const char *value = getenv(next_env);
+      char value[MAX_API_KEY_LEN] = "";
       agent->api_key[0] = '\0';
-      if (value && value[0])
+      if (runtime_secret_get(next_env, value, sizeof(value)) && value[0])
          snprintf(agent->api_key, sizeof(agent->api_key), "%s", value);
+      OPENSSL_cleanse(value, sizeof(value));
 
       memset(result, 0, sizeof(*result));
       rc = run_delegate_attempt(cfg, role, system_prompt, run_prompt, max_tokens, force_tools,

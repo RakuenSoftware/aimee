@@ -49,7 +49,7 @@ Use cursors where an operation exposes pagination. Do not infer numeric offsets.
 | workflow → resource plane | supervised local peer and narrow internal route |
 
 Authentication identifies the principal. Each route then checks capabilities, scope, and write tier.
-A deployment-wide remote-write posture does not replace the user's grant.
+The shared bearer is read-only; writes use a KB-signed identity and exact subject grant.
 
 Send remote bearer credentials as:
 

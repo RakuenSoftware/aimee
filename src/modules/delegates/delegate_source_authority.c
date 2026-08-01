@@ -1,4 +1,4 @@
-#include "delegate_source_authority.h"
+#include <aimee/delegates/delegate_source_authority.h>
 #include "commands.h"
 #include "log.h"
 #include "platform_process.h"

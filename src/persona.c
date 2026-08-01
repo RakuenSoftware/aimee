@@ -87,6 +87,17 @@ static const char *REVIEWER_CONSTRUCTIVE_BRIEF =
     "- You produce the review yourself; use READ-ONLY delegates only — `aimee delegate review "
     "\"...\"` (or diagnose, validate, research) to investigate in parallel.\n";
 
+static const char *ORIGINAL_REQUEST_BRIEF =
+    "- Begin by restating the original request's concrete outcome and constraints, then compare "
+    "the reviewed direction to them.\n"
+    "- Treat a refinement that advances the requested outcome as aligned. Treat substitution of "
+    "a different goal, architecture, or deliverable without support in the request as blocking "
+    "drift, even when the substitute is well implemented.\n"
+    "- Cite the request clause and the conflicting part of the change. If the original request is "
+    "missing or the relationship cannot be established, report alignment as unclear; never "
+    "approve by omission.\n"
+    "- You produce the review yourself; use READ-ONLY delegates only.\n";
+
 static const char *TECH_WRITER_BRIEF =
     "- Use `aimee index find <name>` / `aimee memory search <terms>` to locate the change under "
     "review and the documentation around it.\n"
@@ -117,6 +128,9 @@ static const builtin_persona_t g_builtins[] = {
     {"reviewer-constructive", AIMEE_MODE_REVIEWER_CONSTRUCTIVE,
      "Senior constructive code reviewer (assess as written)", "review,diagnose,validate,research",
      "", "", "readonly"},
+    {"original-request", AIMEE_MODE_REVIEWER,
+     "Original-request alignment reviewer (detects goal and scope drift)",
+     "review,diagnose,validate,research", "", "", "readonly"},
     {"technical-writer", AIMEE_MODE_TECH_WRITER, "Senior technical writer / documentation reviewer",
      "review,diagnose,validate,research", "", "", "readonly"},
     {NULL, 0, NULL, NULL, NULL, NULL, NULL},
@@ -173,6 +187,8 @@ void persona_delegation_block(const persona_t *p, char *buf, size_t n)
 
 static const char *builtin_brief(const builtin_persona_t *b)
 {
+   if (b && strcmp(b->name, "original-request") == 0)
+      return ORIGINAL_REQUEST_BRIEF;
    if (b->mode == AIMEE_MODE_NOVEL)
       return NOVEL_BRIEF;
    if (b->mode == AIMEE_MODE_SONGWRITER)
@@ -205,6 +221,16 @@ static const builtin_persona_t *builtin_find(const char *name)
 int persona_is_builtin(const char *name)
 {
    return builtin_find(name) != NULL;
+}
+
+int persona_exists(const char *project_root, const char *name)
+{
+   if (!name || !name[0])
+      return 0;
+   if (persona_is_builtin(name))
+      return 1;
+   char path[PERSONA_PATH_MAX];
+   return persona_path(project_root, name, path, sizeof(path)) == 0;
 }
 
 /* --- helpers ------------------------------------------------------------- */

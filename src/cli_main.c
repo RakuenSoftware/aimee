@@ -11,7 +11,7 @@
 #include "cli_code_audit.h"
 #include "cli_css.h"
 #include "cli_mcp_serve.h"
-#include "acp_server.h"
+#include "aimee/protocols/acp/acp_server.h"
 #include "cli_profile.h"
 #include "client_constants.h"
 #include "client_integrations.h"
@@ -19,7 +19,7 @@
 #include "code_collect.h"          /* code_index_install_branch_hook (index watch) */
 #include "harness_memory_audit.h"  /* hmem_audit (diagnostic when project unresolved) */
 #include "harness_memory_common.h" /* hmem_resolve_project (client-side project key) */
-#include "delegate_plan.h"
+#include <aimee/delegates/delegate_plan.h>
 #include "cli_chat_stream.h"
 #include "platform.h"
 #include "platform_path.h" /* platform_getppid */
@@ -132,11 +132,45 @@ static const client_help_t client_help[] = {
 #include "cli_help_data.h"
 };
 
+/* Commands the Windows thin client does not carry: they reach the server over the
+ * Unix-domain /v1 socket, which it does not build (see the _WIN32 guard in the
+ * dispatcher). Windows help listed them anyway, so `aimee` advertised
+ * `manuscript` and `persona` as core commands and both answered "has no /v1
+ * route" -- which reads as a route someone forgot to add rather than a platform
+ * that does not carry the command. */
+static int client_cmd_available(const char *name)
+{
+#ifdef _WIN32
+   static const char *const unavailable[] = {"manuscript", "persona", "roles", NULL};
+   for (int i = 0; unavailable[i]; i++)
+      if (strcmp(name, unavailable[i]) == 0)
+         return 0;
+#else
+   (void)name;
+#endif
+   return 1;
+}
+
+/* `remote` is marked ADVANCED, which hides it from the default help. On Windows it
+ * is the one command a new user MUST run -- it is how the client is pointed at its
+ * server (QUICKSTART 3.2) -- so hiding it left the only required setup step
+ * undiscoverable from `aimee` with no arguments. */
+static client_cmd_tier_t client_cmd_tier(const client_help_t *entry)
+{
+#ifdef _WIN32
+   if (strcmp(entry->name, "remote") == 0)
+      return CLIENT_TIER_CORE;
+#endif
+   return entry->tier;
+}
+
 static void print_client_commands(FILE *out, client_cmd_tier_t tier)
 {
    for (int i = 0; client_help[i].name; i++)
    {
-      if (client_help[i].tier != tier || client_help[i].hidden_default)
+      if (client_cmd_tier(&client_help[i]) != tier || client_help[i].hidden_default)
+         continue;
+      if (!client_cmd_available(client_help[i].name))
          continue;
       fprintf(out, "  %-16s %s\n", client_help[i].name, client_help[i].help);
    }
@@ -150,8 +184,16 @@ static void usage(void)
                    "Commands:\n");
    print_client_commands(stderr, CLIENT_TIER_CORE);
    fprintf(stderr, "\n"
-                   "Run 'aimee help --all' to see all commands including advanced and admin.\n"
-                   "Server is started automatically if not running.\n");
+                   "Run 'aimee help --all' to see all commands including advanced and admin.\n");
+#ifdef _WIN32
+   /* Windows is the thin client only -- there is no local server to start, so the
+    * POSIX footer promised something that never happens here. Point at the step
+    * that actually has to happen instead. */
+   fprintf(stderr, "Point this client at your server with "
+                   "'aimee remote set <url> <token>'.\n");
+#else
+   fprintf(stderr, "Server is started automatically if not running.\n");
+#endif
 }
 
 static int client_help_command(int argc, char **argv)
@@ -201,42 +243,45 @@ static void client_delegate_plan_usage(void)
 
 static void client_delegate_usage(void)
 {
-   fprintf(stderr, "Usage: aimee delegate <role> [\"prompt\"] --persona NAME [options]\n"
-                   "\n"
-                   "Delegate a bounded task to a sub-agent. A persona is required.\n"
-                   "\n"
-                   "Options:\n"
-                   "  --persona NAME     REQUIRED. Run the delegate as a persona (e.g. engineer,\n"
-                   "                     qa, security, reviewer, architect, or a custom persona):\n"
-                   "                     sets its identity + principles\n"
-                   "  --json             Output result as JSON\n"
-                   "  --background       Run asynchronously (returns job ID)\n"
-                   "  --durable          Persist result to disk\n"
-                   "  --tools            Enable tool use for the delegate\n"
-                   "  --files F          Preload comma-separated file contents\n"
-                   "  --context-file F   Preload a specific file (repeatable)\n"
-                   "  --context SYMS     Preload code for comma-separated symbols via the index\n"
-                   "  --context-dir DIR  Include directory contents as context\n"
-                   "  --prompt-file PATH Read user prompt from file\n"
-                   "  --prompt-stdin     Read user prompt from stdin\n"
-                   "  --system S         Override system prompt\n"
-                   "  --max-tokens N     Limit response tokens\n"
-                   "  --max-turns N      Override the delegate turn limit\n"
-                   "  --timeout N        Timeout in milliseconds\n"
-                   "  --handoff-json     Require delegate_result_v1 JSON handoff output\n"
-                   "  --worktree BRANCH  Check out BRANCH in the session worktree\n"
-                   "  --via AGENT        Route to a specific agent by name\n"
-                   "  --acp CMD          Route via an inline ACP agent (e.g. --acp claude)\n"
-                   "  --acp-args ARGS    Arguments passed to the --acp command\n"
-                   "  --provider NAME    Route through a specific provider\n"
-                   "  --model NAME       Override provider model\n"
-                   "  --tier N           Route to the best agent at cost tier N\n"
-                   "\n"
-                   "Subcommands:\n"
-                   "  aimee delegate plan <proposal.md>        Generate read-only work packets\n"
-                   "  aimee delegate launch <plan.json>        Queue a reviewed packet plan\n"
-                   "  aimee delegate status <job_id>           Check background task status\n"
-                   "  aimee delegate --list-roles              List available roles\n");
+   fprintf(stderr,
+           "Usage: aimee delegate <role> [\"prompt\"] --persona NAME [options]\n"
+           "\n"
+           "Delegate a bounded task to a sub-agent. A persona is required.\n"
+           "\n"
+           "Options:\n"
+           "  --persona NAME     REQUIRED. Run the delegate as a persona (e.g. engineer,\n"
+           "                     qa, security, reviewer, architect, or a custom persona):\n"
+           "                     sets its identity + principles\n"
+           "  --json             Output result as JSON\n"
+           "  --background       Run asynchronously (returns job ID)\n"
+           "  --durable          Persist result to disk\n"
+           "  --tools            Enable tool use for the delegate\n"
+           "  --files F          Preload comma-separated file contents\n"
+           "  --context-file F   Preload a specific file (repeatable)\n"
+           "  --context SYMS     Preload code for comma-separated symbols via the index\n"
+           "  --context-dir DIR  Include directory contents as context\n"
+           "  --prompt-file PATH Read user prompt from file\n"
+           "  --prompt-stdin     Read user prompt from stdin\n"
+           "  --system S         Override system prompt\n"
+           "  --max-tokens N     Limit response tokens\n"
+           "  --max-turns N      Override the delegate turn limit\n"
+           "  --timeout N        Timeout in milliseconds\n"
+           "  --handoff-json     Require delegate_result_v1 JSON handoff output\n"
+           "  --worktree BRANCH  Check out BRANCH in the session worktree\n"
+           "  --via AGENT        Route to a specific agent by name\n"
+           "  --acp CMD          Route via an inline ACP agent (e.g. --acp claude)\n"
+           "  --acp-args ARGS    Arguments passed to the --acp command\n"
+           "  --provider NAME    Route through a specific provider\n"
+           "  --model NAME       Override provider model\n"
+           "  --tier N           Route to the best agent at cost tier N\n"
+           "  --scope S          Packet size: \"bounded\" or \"whole_task\"; agents with a\n"
+           "                     lower max_scope are excluded (default whole_task)\n"
+           "\n"
+           "Subcommands:\n"
+           "  aimee delegate plan <proposal.md>        Generate read-only work packets\n"
+           "  aimee delegate launch <plan.json>        Queue a reviewed packet plan\n"
+           "  aimee delegate status <job_id>           Check background task status\n"
+           "  aimee delegate --list-roles              List available roles\n");
 }
 
 static void client_delegate_launch_usage(void)
@@ -547,11 +592,30 @@ static void ensemble_usage(void)
            "  See docs/ENSEMBLE.md. `aimee delegate aggregate|roundtable` remain as aliases.\n");
 }
 
-static int unsupported_client_command(const char *cmd, int json_output)
+/* Report a command that could not be routed. Two very different causes share this
+ * path: the command family genuinely has no /v1 route, or it has routes and the
+ * SUBCOMMAND was wrong. Blaming the command for the latter sends users (and
+ * maintainers) hunting for a missing route that already exists -- e.g. `aimee
+ * economizer status` reported "command 'economizer' has no /v1 route" when the
+ * registered subcommand is `stats`. So name the subcommand and list the real ones
+ * whenever the family has any. */
+static int unsupported_client_command(const char *cmd, const char *subcmd, int json_output)
 {
    const char *name = (cmd && cmd[0]) ? cmd : "launch";
-   char msg[256];
-   snprintf(msg, sizeof(msg), "command '%s' has no /v1 route; add a /v1 route", name);
+   char subs[512];
+   int have_subs = cli_v1_subcommands(name, subs, sizeof(subs));
+   char msg[768];
+   if (!client_cmd_available(name))
+      snprintf(msg, sizeof(msg),
+               "'%s' is not available on the Windows thin client; it needs the local "
+               "Unix socket, so run it on the server host",
+               name);
+   else if (have_subs > 0 && subcmd && subcmd[0])
+      snprintf(msg, sizeof(msg), "'%s' is not a subcommand of '%s'; try: %s", subcmd, name, subs);
+   else if (have_subs > 0)
+      snprintf(msg, sizeof(msg), "'%s' needs a subcommand; try: %s", name, subs);
+   else
+      snprintf(msg, sizeof(msg), "command '%s' has no /v1 route", name);
 
    if (json_output)
    {
@@ -685,7 +749,7 @@ static int handle_subagent_guard(void)
           "BLOCKED: the primary agent must not spawn its own sub-agents (Task/Agent/"
           "spawn_agent) — they escape this session's guardrails. Delegate instead so the child "
           "inherits the session's guardrails, memory, and KB: `aimee delegate <role> \"<task>\" "
-          "--persona <persona>`, or `aimee delegate roundtable \"<task>\" --mode review` for a "
+          "--persona <persona>`, or `aimee roundtable review \"<task>\"` for a "
           "multi-model panel.";
       if (cli_hook_client_uses_pretool_json())
       {
@@ -713,7 +777,11 @@ static int cli_delegate_probe(void)
    if (!req)
       return -1;
    cJSON_AddStringToObject(req, "method", "agent.list");
-   cJSON *resp = cli_v1_dispatch_local(req, 3000);
+   /* Transport selection is exclusive: a configured remote must receive the
+    * probe instead of probing the co-located UDS before the real command is
+    * forwarded remotely.  Otherwise every ordinary thin-client invocation
+    * executes agent.list locally and then executes its command remotely. */
+   cJSON *resp = cli_v1_dispatch(req, 3000);
    cJSON_Delete(req);
    if (!resp)
       return -1; /* server unreachable / no route -> unknown */
@@ -832,45 +900,15 @@ static int handle_hooks(int argc, char **argv, int json_output)
       return wt_deny;
    }
 
-   const char *sock = cli_ensure_server_for_method(method);
-   if (!sock)
+   /* Exclusive transport: with a remote configured, the whole pre_tool_check
+    * (memory-file guard included) runs on the remote via cli_v1_dispatch below.
+    * The client no longer runs any local pre-check — see the memory-guard note
+    * in docs/THIN_CLIENT.md. */
+   const int use_remote = cli_v1_has_remote_endpoint();
+   const char *sock = use_remote ? NULL : cli_ensure_server_for_method(method);
+   if (!use_remote && !sock)
    {
       int deny = client_failopen_subagent_deny(phase, tool_name);
-      /* No co-located server, but a remote store is configured: the full
-       * pre_tool_check needs local session state, yet the memory-file guard can
-       * still run against the remote (memory_redirect captures there). Enforce
-       * it so an agent can't own its own memory bytes even on a remote-only host
-       * (session-start has the analogous handle_session_start_remote path). */
-      if (deny < 0 && strcmp(phase, "pre") == 0 && cli_v1_has_remote_endpoint() && json)
-      {
-         /* memory_redirect_check captures to the configured remote endpoint and
-          * denies the raw write (fail-open spill if the store is unreachable).
-          * pre_tool_check is skipped — it needs local session state. */
-         int rc = 0;
-         cJSON *tn = cJSON_GetObjectItemCaseSensitive(json, "tool_name");
-         cJSON *tin = cJSON_GetObjectItemCaseSensitive(json, "tool_input");
-         if (cJSON_IsString(tn) && tn->valuestring[0] && cJSON_IsObject(tin))
-         {
-            cJSON *hpj = cJSON_GetObjectItemCaseSensitive(json, "harness_project");
-            const char *hp = (cJSON_IsString(hpj) && hpj->valuestring[0]) ? hpj->valuestring : NULL;
-            char mr_msg[1024] = "";
-            if (memory_redirect_check(tn->valuestring, tin, hook_cwd, hp, mr_msg, sizeof(mr_msg)) ==
-                2)
-            {
-               if (cli_hook_client_uses_pretool_json())
-                  emit_pretool_deny_json(mr_msg);
-               else
-               {
-                  fprintf(stderr, "aimee: %s\n", mr_msg);
-                  rc = 2;
-               }
-            }
-         }
-         free(stdin_data);
-         cJSON_Delete(json);
-         free(tool_input_heap);
-         return rc;
-      }
       if (deny < 0)
          fprintf(stderr, "aimee: hooks %s: server unavailable — tool call allowed\n", phase);
       free(stdin_data);
@@ -932,7 +970,7 @@ static int handle_hooks(int argc, char **argv, int json_output)
          hmem_audit("project-unresolved", NULL, NULL, "hooks pre");
    }
 
-   cJSON *resp = cli_v1_dispatch_local(req, 5000);
+   cJSON *resp = cli_v1_dispatch(req, 5000);
    cJSON_Delete(req);
    free(stdin_data);
 
@@ -1690,8 +1728,8 @@ int main(int argc, char **argv)
       /* No subcommand: print usage. `aimee` used to forward a "launch" to the
        * server and exec a provider TUI, which is not a sensible default for a
        * CLI — it made the bare command do the single heaviest thing available,
-       * and off a TTY it exited 0 having printed nothing at all. `aimee chat`
-       * still launches a session; the bare command now says what it can do. */
+       * and off a TTY it exited 0 having printed nothing at all. Interactive
+       * clients use the ACP/editor surfaces; the bare command says what it can do. */
       (void)debug;
       usage();
       return 0;
@@ -1769,11 +1807,17 @@ int main(int argc, char **argv)
       }
       /* aggregate / roundtable (and anything else) fall through to the /v1 routes. */
    }
+   /* `remote` configures the transport itself: it writes remote.conf and pins the
+    * server certificate, all locally, before any transport exists. It must stay
+    * outside the _WIN32 guard below -- it is the FIRST command a Windows thin
+    * client runs (QUICKSTART 3.2), and gating it on the Unix socket made it
+    * unreachable there ("command 'remote' has no /v1 route"), so the documented
+    * setup could not be completed at all. It needs no AF_UNIX. */
+   if (strcmp(cmd, "remote") == 0)
+      return cli_remote_cmd(sub_argc, sub_argv, json_output);
 #ifndef _WIN32
    /* manuscript mode talks to the server over the Unix-domain /v1 socket
     * (http_uds_client, AF_UNIX), which the Windows client does not build. */
-   if (strcmp(cmd, "remote") == 0)
-      return cli_remote_cmd(sub_argc, sub_argv, json_output);
    if (strcmp(cmd, "manuscript") == 0)
       return cmd_manuscript_run(sub_argc, sub_argv, json_output);
    /* persona management likewise goes over the /v1 socket (server-owned config). */
@@ -2023,5 +2067,5 @@ int main(int argc, char **argv)
       }
    }
 
-   return unsupported_client_command(cmd, json_output);
+   return unsupported_client_command(cmd, sub_argc >= 1 ? sub_argv[0] : NULL, json_output);
 }

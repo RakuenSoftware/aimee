@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"os/exec"
@@ -73,6 +74,54 @@ func TestHTTPForgePushRejectsUnmanagedBranchAndMismatchedOrigin(t *testing.T) {
 	}
 }
 
+func TestHTTPForgeOpenCarriesCompleteDraftHandoff(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "forge.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	var request map[string]any
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"url":"https://github.com/acme/one/pull/7"}`))
+	})}
+	go server.Serve(listener)
+	defer server.Close()
+
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	worktree := filepath.Join(root, "worktree")
+	for _, dir := range []string{repo, worktree} {
+		if output, err := exec.Command("git", "init", dir).CombinedOutput(); err != nil {
+			t.Fatalf("git init %s: %v: %s", dir, err, output)
+		}
+		if output, err := exec.Command("git", "-C", dir, "remote", "add", "origin", "https://github.com/acme/one.git").CombinedOutput(); err != nil {
+			t.Fatalf("add repo origin: %v: %s", err, output)
+		}
+	}
+	forge, err := NewHTTPForge(HTTPForgeConfig{UnixSocket: socket})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := PullRequestSpec{Title: "Describe the completed feature", Body: "## Summary\n\nReview this.", Draft: true}
+	pr, err := forge.Open(t.Context(), repo, worktree, "aimee/feat/wi_example", "testing", spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pr.URL != "https://github.com/acme/one/pull/7" {
+		t.Fatalf("PR = %+v", pr)
+	}
+	for key, want := range map[string]any{"op": "open", "title": spec.Title, "body": spec.Body,
+		"draft": true, "head": "aimee/feat/wi_example", "base": "testing"} {
+		if request[key] != want {
+			t.Fatalf("request[%q] = %#v, want %#v; request=%#v", key, request[key], want, request)
+		}
+	}
+}
+
 func TestPullNumber(t *testing.T) {
 	for _, input := range []string{"42", "https://github.com/acme/repo/pull/42"} {
 		number, err := pullNumber(input)
@@ -82,5 +131,48 @@ func TestPullNumber(t *testing.T) {
 	}
 	if _, err := pullNumber("https://github.com/acme/repo/pull/not-a-number"); err == nil {
 		t.Fatal("invalid pull reference accepted")
+	}
+}
+
+func TestMergeErrIsConflict(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			// The exact string the resource plane produced in production while
+			// slices g0.1/g0.2 retried an unwinnable merge every 15 seconds.
+			name: "live conflict payload",
+			err: errors.New(`forge resource 400: {"error":"github API (pr merge, HTTP 405): ` +
+				`Pull Request has merge conflicts"}`),
+			want: true,
+		},
+		{name: "singular", err: errors.New("Pull Request has a merge conflict"), want: true},
+		{name: "mixed case", err: errors.New("Merge Conflict detected"), want: true},
+		{name: "upper case", err: errors.New("MERGE CONFLICTS PRESENT"), want: true},
+		{
+			// A lost race: head or base moved mid-merge. Retrying wins it, so it
+			// must stay retryable even though GitHub answers 405 here too.
+			name: "lost race",
+			err:  errors.New("Base branch was modified. Review and try the merge again."),
+			want: false,
+		},
+		{
+			// HTTP 409 is literally named "Conflict"; the bare word must not be
+			// enough to reject a winnable race.
+			name: "bare conflict word",
+			err:  errors.New("forge resource 409: Conflict"),
+			want: false,
+		},
+		{name: "unrelated failure", err: errors.New("forge resource plane is unavailable"), want: false},
+		{name: "empty message", err: errors.New(""), want: false},
+		{name: "nil error", err: nil, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := mergeErrIsConflict(tc.err); got != tc.want {
+				t.Fatalf("mergeErrIsConflict(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
 	}
 }

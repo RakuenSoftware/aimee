@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "aimee_ir.h"
+#include <aimee/ir/aimee_ir.h>
 #include "cJSON.h"
 
 static char *dup(const char *s)

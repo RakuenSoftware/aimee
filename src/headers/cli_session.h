@@ -38,6 +38,12 @@ typedef struct
    /* Clean response text already streamed to the caller this turn (so recv emits
     * only the growth as an incremental delta). malloc'd; freed on destroy. */
    char *stream_emitted;
+   /* Per-session claude HOME minted by cli_session_isolated_claude_home for an
+    * isolated delegate seat (NULL when the seat runs in the shared HOME). Owned by
+    * the session: cli_session_destroy rm-rf's the tree and frees this, so the home
+    * is reclaimed the moment the delegate exits instead of lingering for the 1h
+    * age-based sweep. malloc'd. */
+   char *iso_home;
 } cli_session_t;
 
 /* Incremental stream callback: invoked by cli_session_recv with each newly
@@ -57,6 +63,18 @@ cli_session_stream_cb_t cli_session_get_stream_cb(void **ud_out);
 typedef int (*cli_session_cancel_cb_t)(void *ud);
 void cli_session_set_cancel_check(cli_session_cancel_cb_t cb, void *ud);
 cli_session_cancel_cb_t cli_session_get_cancel_check(void **ud_out);
+
+/* Liveness heartbeat callback: cli_session_recv invokes it periodically (throttled
+ * to ~CLI_SESSION_HEARTBEAT_MS) while it waits for the CLI to finish a turn. A
+ * tmux-CLI delegate (e.g. claude) runs the model loop inside the CLI process, so
+ * aimee's HTTP progress heartbeat never fires and the stale-idle monitor would
+ * cancel a long-but-healthy turn. This proves the recv loop is alive; a genuinely
+ * wedged CLI is still bounded by recv's own idle timeout. Thread-local, saved and
+ * restored around a nested turn like the stream/cancel callbacks. */
+typedef void (*cli_session_heartbeat_cb_t)(void *ud);
+void cli_session_set_heartbeat_cb(cli_session_heartbeat_cb_t cb, void *ud);
+cli_session_heartbeat_cb_t cli_session_get_heartbeat_cb(void **ud_out);
+#define CLI_SESSION_HEARTBEAT_MS 15000
 
 /* Provider-error grace (thread-local, ms): how long recv tolerates the CLI
  * sitting in a provider error/retry state before giving up with -4. 0 disables
@@ -103,6 +121,31 @@ int cli_session_create(cli_session_t *s, const char *session_name, const char *c
  * for the TUI to start at all); the bypass warning is left untouched. */
 void cli_session_prepare_claude(const char *work_dir, int autonomous);
 
+/* Mint a per-session claude HOME so concurrent delegate seats don't share one
+ * ~/.claude.json + ~/.claude runtime tree (which claude-code writes non-atomically
+ * all turn, wedging concurrent seats). Only the OAuth token + settings.json are
+ * shared (symlinked); the rest is per-turn. Best-effort: returns 0 and fills
+ * home_out on success, -1 on any failure (caller then uses the shared HOME).
+ * Reaps per-session homes older than an hour on each call. */
+int cli_session_isolated_claude_home(const char *work_dir, char *home_out, size_t home_out_sz);
+
+/* Mint a runtime-only HOME/CODEX_HOME for a codex delegate, materializing its
+ * vaulted OAuth document under the runtime tier. The caller attaches the home
+ * to cli_session_t so destroy removes it. */
+int cli_session_isolated_codex_home(char *home_out, size_t home_out_sz);
+
+/* Materialize seam: read the vaulted (agent, "oauth") token into `out`. The strong
+ * implementation (server_cli_oauth.c) reads the vault; a weak default in
+ * cli_session.c returns non-zero. Returns 0 (token written) or non-zero (no
+ * entry). */
+int cli_oauth_vault_materialize_get(const char *agent, char *out, size_t out_len);
+
+/* Hand a minted isolated HOME (from cli_session_isolated_claude_home) to the
+ * session so cli_session_destroy reclaims it on exit. Copies `home`; pass NULL to
+ * clear. Call after a successful cli_session_create so every teardown path (error
+ * or normal) removes the home. No-op-safe when the seat uses the shared HOME. */
+void cli_session_set_isolated_home(cli_session_t *s, const char *home);
+
 /* Kills the tmux session. No-op if already dead. */
 void cli_session_destroy(cli_session_t *s);
 
@@ -144,6 +187,14 @@ char *cli_session_extract_response(const char *raw, const char *cli_kind, const 
 /* Build a deterministic session name: "aimee-<agent>-<hash(role)>".
  * Caller must free returned string. */
 char *cli_session_make_name(const char *agent_name, const char *role);
+
+/* Resolve the tmux execution name and reuse policy from the runtime identity.
+ * Delegations are always isolated, even when they run outside a bound web
+ * session; primary turns may reuse only their explicitly scoped pane. */
+char *cli_session_make_execution_name(const char *agent_name, int configured_reuse,
+                                      const char *session_id, int session_override,
+                                      const char *delegation_id, int force_isolation,
+                                      int *reuse_out);
 
 /* --- Parser --- */
 /* Extract plain text response from raw CLI terminal capture.

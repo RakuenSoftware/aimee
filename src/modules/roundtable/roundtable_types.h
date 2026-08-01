@@ -56,6 +56,10 @@ typedef struct
    /* Originating session: panel + aggregator runs fold their cost onto it via
     * db1_cost_fold_record, so the ensemble is accounted like a delegate. */
    const char *parent_session_id;
+   /* Leading effective-panel seats [0..required_participants) are caller-authored
+    * must-use lenses. Later auto-filled seats are best-effort. Zero means every
+    * participant is required (legacy/default). Values above panel size fail. */
+   int required_participants;
 } roundtable_opts_t;
 
 /* Replay-verification evidence (Part A of the replayable-verification proposal).
@@ -91,6 +95,7 @@ typedef struct
    char identity_key[128];
    char sources[256];
    int count;
+   int tool_grounded; /* at least one contributing seat obtained successful Aimee evidence */
    review_evidence_t evidence; /* Part A: structured replay evidence (zeroed = EV_NONE) */
 } roundtable_review_item_t;
 
@@ -113,10 +118,22 @@ typedef struct
    int deadline_hit;
    int cancelled;
    int best_round;
-   int participants_total;  /* reference models per round (panel size) */
-   int participants_failed; /* participants that returned no usable response in the final round run
-                             */
+   int participants_total;           /* reference models per round (panel size) */
+   int participants_failed;          /* unusable responses in the adopted best round */
+   /* Failures in the adopted best round's required prefix. This is always <=
+    * participants_failed; degraded remains run-level and sticky across rounds. */
+   int participants_required_failed;
+   int participants_tool_used; /* adopted review round: seats with >=1 Aimee tool call */
+   int participant_tool_calls; /* adopted review round: total Aimee tool calls */
+   int participant_successful_tool_calls; /* adopted review round: non-error results */
+   int evidence_coverage_incomplete; /* evidence gate was on but a responding seat used none */
    double cost_usd;
+   /* Explicit assessment of whether the reviewed direction still serves the
+    * originating request. `unclear` is fail-closed for workflow gates: a panel
+    * that did not compare the work to the ask cannot approve it by omission. */
+   char original_request_alignment[16]; /* aligned | drifted | unclear */
+   char original_request_alignment_summary[512];
+   char original_request_alignment_sources[256];
    roundtable_review_item_t items[ROUNDTABLE_MAX_REVIEW_ITEMS];
    int item_count;
    int items_round;
@@ -135,5 +152,30 @@ typedef struct
    int degraded_count; /* kept but unverified (index unavailable) */
    int capped_count;   /* interpretive items capped at suggestion */
 } roundtable_result_t;
+
+/* The ensemble/roundtable settings ONE run needs, as plain data. Previously a
+ * config_t was threaded through the runtime as a value carrier -- mutated in
+ * memory to overlay a preset, never persisted. That made every panel function a
+ * config_t consumer for what is really a dozen scalars. Populate with
+ * ensemble_panel_from_config(), then overlay a preset if one is requested.
+ * Widths match the corresponding config fields exactly. */
+#define ENSEMBLE_PANEL_MAX_SEATS 32
+typedef struct
+{
+   char reference_models[ENSEMBLE_PANEL_MAX_SEATS][128];
+   char reference_personas[ENSEMBLE_PANEL_MAX_SEATS][64];
+   int reference_count;
+   int reference_persona_count;
+   char aggregator[128];
+   int min_successful;
+   double max_cost_usd;
+   int max_rounds;
+   int converge_threshold;
+   int deadline_ms;
+   int chair_synthesis;
+   int require_evidence;
+   int replay_verify_enabled;
+   char turns[16];
+} ensemble_panel_t;
 
 #endif /* AIMEE_ROUNDTABLE_TYPES_H */

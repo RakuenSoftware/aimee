@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "aimee_ir_metrics.h"
+#include <aimee/ir/aimee_ir_metrics.h>
 
 int main(void)
 {

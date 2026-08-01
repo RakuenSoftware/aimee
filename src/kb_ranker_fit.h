@@ -18,7 +18,7 @@ extern "C"
     * touching the kb.c retrieval hot path (endpoint-driven, mirroring the memory
     * surface's evidence pattern). The training view then joins these outcomes to
     * the already-written feature_rows. See
-    * docs/proposals/pending/kb-hybrid-outcome-wiring.md. */
+    * docs/proposals/done/kb-hybrid-outcome-wiring.md. */
 
    /* Mint a kb_hybrid retrieval_event capturing the surfaced kb_document doc_ids.
     * id_out receives the event id (>= 37 bytes; may be NULL). 0 ok / -1 error. */
@@ -72,7 +72,7 @@ extern "C"
     *  -1  hard error (bad config, DB failure).
     * id_out (may be NULL) receives the written artifact id (committed or proposed).
     * report_out (may be NULL) receives a malloc'd JSON report (caller frees). */
-   int kb_ranker_fit_run(const config_t *cfg, char *id_out, int id_out_len, char **report_out);
+   int kb_ranker_fit_run(char *id_out, int id_out_len, char **report_out);
 
 #ifdef __cplusplus
 }

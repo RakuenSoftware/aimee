@@ -151,38 +151,31 @@ static void test_rpc_policy_denial(void)
    free(result);
 }
 
-static void test_rpc_hmac_mismatch(void)
+static void test_rpc_descriptor_is_the_only_capability(void)
 {
    g_dispatch_calls = 0;
    char *result = tool_execute_script(
        "python",
-       "import json, os, socket, struct\n"
+       "import json, os, struct\n"
+       "assert os.environ.get('AIMEE_RPC_TOKEN') is None\n"
+       "assert os.environ.get('AIMEE_RPC_SOCKET') is None\n"
        "frame = json.dumps({'id': 1, 'tool': 'read_file', 'args': {'path':'x'}, "
-       "'hmac': 'bad'}, separators=(',', ':')).encode()\n"
-       "if os.environ.get('AIMEE_RPC_FD'):\n"
-       "    fd = os.dup(int(os.environ['AIMEE_RPC_FD']))\n"
-       "    os.write(fd, struct.pack('!I', len(frame)) + frame)\n"
-       "    hdr = os.read(fd, 4)\n"
-       "    size = struct.unpack('!I', hdr)[0]\n"
-       "    print(os.read(fd, size).decode())\n"
-       "    os.close(fd)\n"
-       "else:\n"
-       "    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
-       "    s.connect(os.environ['AIMEE_RPC_SOCKET'])\n"
-       "    s.sendall(struct.pack('!I', len(frame)) + frame)\n"
-       "    hdr = s.recv(4)\n"
-       "    size = struct.unpack('!I', hdr)[0]\n"
-       "    print(s.recv(size).decode())\n"
-       "    s.close()\n",
+       "'hmac': 'obsolete-and-ignored'}, separators=(',', ':')).encode()\n"
+       "fd = os.dup(int(os.environ['AIMEE_RPC_FD']))\n"
+       "os.write(fd, struct.pack('!I', len(frame)) + frame)\n"
+       "hdr = os.read(fd, 4)\n"
+       "size = struct.unpack('!I', hdr)[0]\n"
+       "print(os.read(fd, size).decode())\n"
+       "os.close(fd)\n",
        5, NULL, NULL);
    assert(result != NULL);
    cJSON *json = parse_json_or_die(result);
    assert(cJSON_GetObjectItem(json, "exit_code")->valueint == 0);
-   assert(cJSON_GetObjectItem(json, "script_tool_calls")->valueint == 0);
-   assert(cJSON_GetObjectItem(json, "script_hmac_failures")->valueint == 1);
-   assert(g_dispatch_calls == 0);
+   assert(cJSON_GetObjectItem(json, "script_tool_calls")->valueint == 1);
+   assert(cJSON_GetObjectItem(json, "script_hmac_failures")->valueint == 0);
+   assert(g_dispatch_calls == 1);
    const char *stdout_text = cJSON_GetObjectItem(json, "stdout")->valuestring;
-   assert(strstr(stdout_text, "\"code\":\"auth_failed\"") != NULL);
+   assert(strstr(stdout_text, "\"ok\":true") != NULL);
    cJSON_Delete(json);
    free(result);
 }
@@ -250,7 +243,7 @@ int main(void)
    test_python_rpc_allowed_tool();
    test_bash_rpc_shim();
    test_rpc_policy_denial();
-   test_rpc_hmac_mismatch();
+   test_rpc_descriptor_is_the_only_capability();
    test_nine_tool_fan_in();
    test_script_timeout();
    test_script_stdout_cap();

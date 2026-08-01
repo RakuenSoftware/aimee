@@ -33,11 +33,14 @@ typedef struct
 #define WFE_PANEL_UNREACHABLE (-1)
 /* a PINNED seat model could not be fulfilled -> the run FAILS (no substitution) */
 #define WFE_PANEL_PINNED_FAIL (-2)
+/* The optional roundtable module is explicitly unavailable. This maps to a permanent
+ * failure for the current workflow execution, not a transient outage schedulers may retry. */
+#define WFE_PANEL_MODULE_DISABLED (-3)
 
 /* A panel provider runs the configured panel against the review packet and fills
  * up to `max` verdicts. Returns the number of verdicts (>=0), or a WFE_PANEL_*
- * sentinel: WFE_PANEL_UNREACHABLE (-1) -> park DEGRADED; WFE_PANEL_PINNED_FAIL
- * (-2) -> fail the run (a user-pinned seat model was unavailable). */
+ * sentinel: UNREACHABLE parks for transient retry, PINNED_FAIL fails because a
+ * required seat is unavailable, and MODULE_DISABLED fails permanently for the startup. */
 typedef int (*wfe_panel_run_fn)(const wfe_review_packet_t *pkt, const char *const *required,
                                 int nreq, const char *const *eligible, int nelig,
                                 wfe_verdict_t *out, int max);

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate a Markdown API reference from api/openapi-v1.yaml.
 
-Output: docs/gen/api-v1.md — a deterministic, dependency-light reference of
+Output: docs/gen/api-v1.md: a deterministic, dependency-light reference of
 every /v1 endpoint (method, summary, parameters, request body, responses).
 The output is committed; re-running on an unchanged spec is a byte-for-byte
 no-op (the AC: "docs/gen built from OpenAPI in CI; build is a no-op on main").
@@ -74,11 +74,6 @@ def render_responses(responses: dict) -> list[str]:
     return lines
 
 
-def normalize_markdown(text: str) -> str:
-    """Apply the mechanical project voice rules to source-derived prose."""
-    return text.replace(" — ", ": ").replace("—", "-")
-
-
 def main() -> int:
     with open(SPEC, "r", encoding="utf-8") as fh:
         spec = yaml.safe_load(fh)
@@ -130,7 +125,7 @@ def main() -> int:
             out.append("")
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    text = normalize_markdown("\n".join(out).rstrip("\n") + "\n")
+    text = "\n".join(out).rstrip("\n") + "\n"
     # Idempotence: only write when changed (so `make docs-gen` is a no-op on main).
     if OUT.exists() and OUT.read_text(encoding="utf-8") == text:
         print(f"gen-api-docs: {OUT.relative_to(ROOT)} up to date (no-op)")

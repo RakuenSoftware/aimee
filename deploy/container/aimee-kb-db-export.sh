@@ -58,7 +58,7 @@ fi
 # The cluster is normally already running under the kb. Start it if this runs in a
 # stopped container, and leave it as it was found.
 started_here=0
-# Name an existing maintenance database explicitly.  With only --host, libpq
+# Name an existing maintenance database explicitly. With only --host, libpq
 # defaults the database name to the OS user ("aimee"); the readiness result is
 # still positive, but PostgreSQL logs a misleading FATAL for every probe because
 # that database intentionally does not exist.

@@ -57,13 +57,28 @@ extern "C"
     * Returns 1 when configured (out filled; base_url non-empty), 0 when idle
     * (out zeroed — the stage must not run).
     *
-    * Lifetime: out->base_url/model/api_key alias strings owned elsewhere — either
-    * inside *cfg (config path) or the process environment (env path). Keep *cfg
-    * alive and don't mutate the environment (setenv/putenv) while using *out; the
-    * def is a borrowed view, not a copy. out->api_key is NULL when no key applies
-    * (keyless local endpoint); provider_client treats NULL as "no bearer". */
-   int kb_curator_provider_for_stage(const config_t *cfg, kb_curator_stage_t stage,
-                                     provider_def_t *out);
+    * Lifetime: *out OWNS its strings (see provider_def_owned_t) — nothing external
+    * has to be kept alive, and mutating the environment afterwards cannot change
+    * what was resolved. Pass &out->def wherever a provider_def_t is wanted, and do
+    * not copy the struct by value (def would still point into the original).
+    * out->def.api_key is NULL when no key applies (keyless local endpoint);
+    * provider_client treats NULL as "no bearer". */
+   int kb_curator_provider_for_stage(kb_curator_stage_t stage, provider_def_owned_t *out);
+
+   /* True when an error means the configured provider would not serve work now
+    * (as opposed to rejecting one malformed job). Recognizes both the direct
+    * provider-client wording and the bundled llm-chat.py sidecar envelope. */
+   int kb_curator_error_is_provider_unavailable(const char *error_msg);
+
+   /* Process-wide outage gate shared by every curator LLM stage. A per-job
+    * next_attempt_at prevents one row from spinning, but it does not prevent a
+    * large queue from walking fresh rows while the provider circuit is open.
+    * note() applies a bounded exponential cooldown, active() lets workers avoid
+    * claiming during it, and recovered() resets the curve after a successful
+    * provider response. */
+   int kb_curator_provider_backoff_active(void);
+   void kb_curator_provider_backoff_note(void);
+   void kb_curator_provider_backoff_recovered(void);
 
 #ifdef __cplusplus
 }

@@ -20,7 +20,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "audit_worm_chain.h"
+#include <aimee/audit/audit_worm_chain.h>
 
 /* hex32 uses hand-verifiable vectors (no SHA needed): sequential bytes map to
  * their own two-hex-digit values, and all-zero bytes are the genesis prev. */

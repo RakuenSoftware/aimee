@@ -3,6 +3,21 @@
 aimee stores code as symbols, references, calls, imports, repository dependencies, embeddings, and
 git co-change. The graph lives in DB2 and can span every repository in a workspace.
 
+## Local-first scope
+
+Agent-facing code and knowledge searches default to the authenticated active project. The active
+project is protected before candidate limits and ranking cutoffs, so a large global or stale corpus
+cannot crowd it out. Missing project context returns the typed `scope_required` error; it never
+widens silently. Use `scope=all` (or `"scope":"all"` in JSON) only for a deliberate cross-project
+query. A project-scoped credential cannot request that broader scope.
+For an unscoped owner, `project=<active>&scope=all` keeps the active project as the protected head
+bucket and appends labeled results from other projects. This applies to symbol, text, caller, hybrid,
+ranked knowledge/document, and typed-facet returns; each bucket is selected before the final limit.
+
+Code requests may carry an observed `generation`. If it is no longer current, the request returns
+`stale_generation` with the current generation instead of mixing old and new index data. Detached
+projects are excluded from current queries.
+
 ## Index
 
 ```bash
@@ -27,8 +42,20 @@ aimee index blast-radius <file>
 aimee graph explain <relationship>
 ```
 
+The CLI and installed MCP proxy derive the stable active-project identity from the request cwd.
+Direct HTTP/MCP clients must send a stable `project` or explicit all-project scope. A checkout
+basename is not a project identity and is never used as a fallback.
+
 Caller and blast-radius results cross repository boundaries after dependencies have been resolved.
 Vendored code, caches, generated trees, and configured excludes stay out of the project graph.
+
+Blast radius resolves the target in the current project generation before returning an empty graph.
+Python imports use dotted module identities (`app/dates.py` → `app.dates`), including explicit
+`from app import dates`, package `__init__`, and imports relative to the importing file. Exact
+normalized equality replaces path-substring matching. Direct call edges are included only when the
+export is unique in the current project; cross-project edges require an existing structural route.
+Each returned edge identifies its `provenance`, `confidence`, `project`, `generation`, and
+`freshness`. Local current-project edges are emitted before any route-gated cross-project tail.
 
 `ast_grep_search` is advertised only when its helper readiness contract passes. An unavailable helper
 returns unsupported; it does not fall back to a different search and label it AST-aware.
@@ -38,6 +65,60 @@ returns unsupported; it does not fall back to a different search and label it AS
 Text and vector matches find names and concepts. The call/import/dependency graph supplies structural
 neighbors. Memory links add prior decisions and known constraints. Fusion keeps the evidence for each
 signal so a client can explain the result.
+
+## Task-conditioned context
+
+`GET /v1/code/context` is the strict, bounded ingress contract over the hybrid ranker. It requires
+one active project, reads only its current generation, returns at most four code-plus-memory items,
+and caps the rendered packet at 1,200 tokens. Exact lexical and structural evidence leads. A
+vector-only result must clear the quality floor, and exact active-project memory is appended only
+when it is linked to accepted code. Every code item carries project, path, generation, freshness, confidence,
+provenance, and a line-or-file span.
+
+A query without sufficient current-project code evidence returns HTTP 200 with
+`status: abstained`, an `answerability.decision` of `no_answer`, empty `results`, and empty `why`.
+It does not substitute global episodic
+memory. The same local-first policy applies to the older hybrid memory annotations: project memory
+is selected before workspace/shared memory and broad scope is never implicit.
+
+Hybrid code responses always include `vector_status`: `disabled`, `ok`, `empty`, `stale`,
+`unavailable`, or `unauthorized`. When the vector leg is stale, unavailable, or unauthorized,
+dependency and dimension/retryability metadata are included; lexical and graph results remain usable
+when they independently answer the query.
+
+Ingress rollout is controlled by `code_context_mode`:
+
+- `off` uses only the existing project-local preview path;
+- `observe` retrieves and validates the packet, records its decision, and
+  preserves existing model-visible bytes; and
+- `on` (the shipping default after the E6 paired promotion gate) injects a packet only on the first
+  turn of a session task or a low-overlap task change.
+
+`on` does not repeat context for an ordinary follow-up and does not broaden after `no_answer` or an
+unavailable KB. An unavailable first/new-task lookup rearms only its exact session/project marker,
+so a related follow-up can use the dependency breaker's single recovery probe; successful,
+genuinely empty, stale, and abstained results remain consumed. If the request working directory
+cannot resolve a durable active-project identity, agent ingress suppresses code and memory recall
+rather than issuing an unscoped query.
+
+## Dependency status and recovery
+
+Agent-facing retrieval preserves six outcomes: `ok`, `empty`, `abstained`, `stale`, `unavailable`,
+and `unauthorized`. `empty` is emitted only after a valid response; an outage or malformed response
+is never converted to an empty list. Stale results carry the observed/current generation or vector
+dimension when available. Unavailable results name the failed dependency, say whether retry is
+safe, and include a bounded retry delay.
+
+The server-side KB client and the KB-side external embedder each use a process-local circuit
+breaker. Three consecutive transient failures open it with bounded exponential backoff and jitter.
+Calls during the delay are suppressed, then exactly one half-open recovery probe is admitted.
+Success closes the breaker without restarting the client. A reachable KB reporting its own
+embedder or vector-store outage does not open the KB transport breaker, so unrelated KB operations
+remain usable. Built-in local embeddings bypass the external dependency breaker.
+
+Local inspection, editing, and tests do not depend on KB recovery. Clients may fall back to those
+local operations on `unavailable`, but must not silently retry without a bound or report an
+Aimee-assisted result for the failed turn.
 
 ## Audits
 
@@ -71,7 +152,33 @@ Incremental scan updates changed content. Use `--force` after extractor/schema c
 repair says the generation is inconsistent.
 
 An empty scan cannot mark a previously populated project healthy without recording why no files were
-seen. Index writes require the remote data-write tier and user grant.
+seen. Remote index writes require a data grant for the authenticated subject.
 
 Before a broad edit, query callers and blast radius, then inspect the named files. The graph narrows
 work; it does not replace tests.
+
+## Project generations and lifecycle
+
+Moving or re-adding a checkout updates its alias and retains one stable project identity. A new
+generation is created only when a detached project is re-added; default queries read the current
+generation only.
+
+Lifecycle operations are intentionally distinct:
+
+```bash
+aimee workspace remove /path/to/repo       # unregister only; preserves indexed data
+aimee index detach stable-project-id        # hide current generation; preserve data
+aimee index purge stable-project-id         # read-only exact-target manifest
+aimee index purge stable-project-id \
+  --confirm <manifest-sha256> --reason '<reason>'
+aimee index gc [stable-project-id] --retention-days 30
+aimee index gc [stable-project-id] --retention-days 30 \
+  --confirm <manifest-sha256> --reason '<reason>'
+```
+
+Purge and garbage collection are dry-run by default. Their manifest includes the stable project,
+generation, policy criteria, per-table counts, and SHA-256 fingerprints of the exact physical
+targets. Confirmation recomputes that manifest in a serializable transaction and fails if any row
+or criterion changed. A confirmed mutation requires an authenticated unscoped owner, derives the
+principal from that verified request context, and records the principal, project, generation,
+timestamp, reason, criteria, manifest hash, and counts. If audit commit fails, deletion is refused.

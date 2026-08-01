@@ -15,10 +15,111 @@ export const RESTART_KEYS = new Set<string>([
   // in src/config_fields.c. (embedding_endpoint/model/dim apply on the next turn.)
   "kb_mode", "kb_client_url", "kb_client_bearer_token",
   "llm_embed_backend", "llm_embed_host", "llm_embed_gpu", "llm_embed_tier",
-  "llm_rerank_backend", "llm_rerank_host", "llm_rerank_gpu", "llm_rerank_tier", "llm_rerank_endpoint",
   "llm_synth_backend", "llm_synth_host", "llm_synth_gpu", "llm_synth_tier", "llm_synth_endpoint",
   "llm_synth_model",
 ]);
+
+/* Keys another tab OWNS, so the Settings page does not list them: a single
+ * owner per option, and the owning tab is the one with the context to set it
+ * safely. The key itself stays fully get/set-able (aimee.yaml, `aimee config`,
+ * and the owning tab's own writes) — this map only decides what Settings shows.
+ * Value = where the option actually lives, shown to the operator.
+ *
+ * Grounded per key against the code, not by prefix:
+ *
+ *  - roundtable.* (the 13 preset-mirrored keys): the Roundtable tab's "make
+ *    active" runs preset_overlay_config (src/modules/roundtable/roundtable_preset.c),
+ *    which WRITES these exact fields from the active preset. Editing them here
+ *    silently loses the edit the next time a preset is activated. The three
+ *    roundtable flags that are NOT preset fields — replay_verify_enabled,
+ *    chair_synthesis, require_evidence — are not listed here; they moved INTO
+ *    the Roundtable tab as global options instead.
+ *  - kb_curator_*: owned by the kb console's Pipeline page, which configures the
+ *    curator from the live stage registry.
+ *  - provider / claude_model / openai_*: owned by the Agents tab. The openai_*
+ *    trio only feeds the legacy fallback agent that chat_agent_add_legacy_openai
+ *    (src/posix/server_compute.c) synthesizes when the roster has no match;
+ *    PrimaryChooser is the supported way to set a primary.
+ *  - default_persona: the Chat tab sets it per session and the Personas tab
+ *    manages the roster; it already defaults to engineer.
+ *
+ *  - the embedder / synth tiers and the knowledge base proper: the kb
+ *    runs all of them, so they are configured in the kb console's Settings page.
+ *    Split by which BINARY reads the key, not by prefix — kb_mode,
+ *    kb_client_url, kb_client_bearer_token and kb_evidence_emit_enabled stay
+ *    here because they are aimee-server's own client/ingress config.
+ */
+const KB_CONSOLE_SETTINGS = "Settings page (kb console)";
+
+export const OWNED_ELSEWHERE: Record<string, string> = {
+  // Mirrored from the active roundtable preset (Roundtable tab).
+  "roundtable.default": "Roundtable tab",
+  "roundtable.max_rounds": "Roundtable tab",
+  "roundtable.converge_threshold": "Roundtable tab",
+  "roundtable.deadline_ms": "Roundtable tab",
+  "roundtable.turns": "Roundtable tab",
+  "roundtable.pipeline_done_bar": "Roundtable tab",
+  "roundtable.pipeline_max_passes": "Roundtable tab",
+  "roundtable.pipeline_max_attempts_per_pass": "Roundtable tab",
+  "roundtable.pipeline_max_cost_usd": "Roundtable tab",
+  "roundtable.pipeline_max_total_cost_usd": "Roundtable tab",
+  "roundtable.pipeline_gate_ttl_h": "Roundtable tab",
+  "roundtable.pipeline_parked_releases_slot": "Roundtable tab",
+  "roundtable.pipeline_unknown_context_tokens": "Roundtable tab",
+  // The three standalone roundtable flags now live in the Roundtable tab too.
+  "roundtable.replay_verify_enabled": "Roundtable tab",
+  "roundtable.chair_synthesis": "Roundtable tab",
+  "roundtable.require_evidence": "Roundtable tab",
+  // Curator pipeline (kb console → Pipeline).
+  kb_curator_tier: "Pipeline page (kb console)",
+  kb_curator_extract_docs_workers: "Pipeline page (kb console)",
+  kb_curator_extract_code_workers: "Pipeline page (kb console)",
+  kb_evidence_embed_enabled: "Pipeline page (kb console)",
+  // Primary agent + its legacy provider breadcrumbs (Agents tab).
+  provider: "Agents tab",
+  claude_model: "Agents tab",
+  openai_endpoint: "Agents tab",
+  openai_model: "Agents tab",
+  openai_key_cmd: "Agents tab",
+  // Persona (Chat tab per session, Personas tab for the roster).
+  default_persona: "Chat tab / Personas tab",
+  /* KB-owned: aimee-kb runs the embedder and the synth tier, so
+   * their model/endpoint/topology keys are configured in the kb console's own
+   * Settings page (KB_SETTINGS in src/kb/http/kb_http_console.c is the source of
+   * truth for this list). aimee-server still READS some of these — one owner is
+   * about who edits the value, not who consumes it. */
+  embedding_command: KB_CONSOLE_SETTINGS,
+  embedding_model: KB_CONSOLE_SETTINGS,
+  embedding_dim: KB_CONSOLE_SETTINGS,
+  embedding_endpoint: KB_CONSOLE_SETTINGS,
+  llm_embed_backend: KB_CONSOLE_SETTINGS,
+  llm_embed_host: KB_CONSOLE_SETTINGS,
+  llm_embed_gpu: KB_CONSOLE_SETTINGS,
+  llm_embed_tier: KB_CONSOLE_SETTINGS,
+  llm_synth_backend: KB_CONSOLE_SETTINGS,
+  llm_synth_host: KB_CONSOLE_SETTINGS,
+  llm_synth_gpu: KB_CONSOLE_SETTINGS,
+  llm_synth_tier: KB_CONSOLE_SETTINGS,
+  llm_synth_endpoint: KB_CONSOLE_SETTINGS,
+  llm_synth_model: KB_CONSOLE_SETTINGS,
+  kb_search_max_results: KB_CONSOLE_SETTINGS,
+  kb_fusion_mode: KB_CONSOLE_SETTINGS,
+  // The kb console's Typed Facts page owns the master switch, beside the
+  // promotion queue it gates.
+  typed_facts_enabled: "Typed Facts page (kb console)",
+  kb_mining_enabled: KB_CONSOLE_SETTINGS,
+  kb_api_http_port: KB_CONSOLE_SETTINGS,
+  kb_api_bearer_token: KB_CONSOLE_SETTINGS,
+  kb_pdf_tier: KB_CONSOLE_SETTINGS,
+  ocr_command: KB_CONSOLE_SETTINGS,
+  tsr_command: KB_CONSOLE_SETTINGS,
+  css_style_graph_enabled: KB_CONSOLE_SETTINGS,
+  css_render_command: KB_CONSOLE_SETTINGS,
+  /* NOT moved, despite the kb_ prefix: these are how AIMEE-SERVER reaches a kb
+   * (read in server/server_main.c and server/ingress_preinject.c), so the server
+   * owns them: kb_mode, kb_client_url, kb_client_bearer_token,
+   * kb_evidence_emit_enabled. */
+};
 
 // One line per section (see category() in Settings.tsx).
 export const SECTION_HELP: Record<string, string> = {
@@ -34,7 +135,7 @@ export const SECTION_HELP: Record<string, string> = {
     "What aimee adds to a request and how it trims context to save tokens. Most are off by default.",
   "Audit & governance": "Logging of actions and the guardrails that gate risky ones.",
   "Agent behavior": "How autonomously aimee runs, per-turn limits, and fix verification.",
-  "Learning & intelligence": "Feedback-driven learning and the reranking knobs it feeds.",
+  "Learning & intelligence": "Feedback-driven learning and the knobs it feeds.",
   Other: "Options that don't fall under the sections above.",
 };
 
@@ -56,7 +157,8 @@ export const FIELD_HELP: Record<string, string> = {
     "When on (default), the scheduler auto-resumes a wall-cap park to give a long run a fresh wall window instead of leaving it to be reaped — so autonomous runs drive to completion unattended. Bounded by max_resumes. Turn-cap parks are never auto-resumed (raise max_turns instead).",
   "autonomy.max_resumes":
     "Max auto-resumes per run before the reaper is allowed to abandon it. Default 50. Bounds a genuinely-wedged run so auto-resume can't loop forever. 0 = never auto-resume.",
-  // Knowledge curation — curator pipeline stage gates (see the Pipeline tab)
+  // Knowledge curation — curator pipeline stage gates. Also read by the kb
+  // console's Pipeline page, which is where these stages are configured.
   kb_curator_extract_docs_enabled:
     "Curator: extract structured claims and entities from ingested documents (LLM). The entry stage for document knowledge; feeds claim indexing and contradiction detection.",
   kb_curator_extract_code_enabled:
@@ -109,15 +211,10 @@ export const FIELD_HELP: Record<string, string> = {
     "Where the knowledge base runs: 'local' deploys an aimee-kb here; 'remote' connects to an existing one (see kb_client_url).",
   kb_client_url: "URL of an existing aimee-kb to connect to when kb_mode is 'remote'. Nothing is deployed locally.",
   kb_client_bearer_token: "Bearer token for the remote aimee-kb (kb_mode='remote'). Needs a restart.",
-  llm_embed_backend: "How the embedder is served: 'local' (on the shared aimee-llm container), 'external' (an endpoint), or 'off'.",
-  llm_embed_host: "Host that runs the local aimee-llm container serving the embedder.",
+  llm_embed_backend: "How the embedder is served: 'local' (inside the knowledge base, from weights in its image), 'external' (an endpoint), or 'off'.",
+  llm_embed_host: "Unused. The embedder runs inside the knowledge base, so there is no host to name.",
   llm_embed_gpu: "GPU index on the host for a local embedder; blank runs it on CPU.",
   llm_embed_tier: "Local embedder tier: cpu / small / mid / large (sizes the model to the card).",
-  llm_rerank_backend: "How the reranker is served: 'local', 'external', or 'off'.",
-  llm_rerank_host: "Host that runs the local reranker.",
-  llm_rerank_gpu: "GPU index on the host for a local reranker; blank runs it on CPU.",
-  llm_rerank_tier: "Local reranker tier: cpu / small / mid / large.",
-  llm_rerank_endpoint: "Endpoint URL for an external reranker.",
   llm_synth_backend: "How the synthesizer is served: 'local', 'external', or 'off'.",
   llm_synth_host: "Host that runs the local synthesizer.",
   llm_synth_gpu: "GPU index on the host for a local synthesizer; blank runs it on CPU.",
@@ -132,6 +229,8 @@ export const FIELD_HELP: Record<string, string> = {
   typed_facts_enabled: "Turn on the typed-fact knowledge layer. Off by default.",
   kb_search_max_results:
     "Cap on results from a knowledge-base search. Requests asking for more are clamped to this. Default 50.",
+  kb_fusion_mode:
+    "How lexical and dense knowledge-base search results are blended. 'rrf' is the safe default; 'static_alpha' uses a fixed weight; 'dynamic_alpha' adapts the weight per query (boosting exact-token queries).",
   kb_api_http_port: "TCP port for the knowledge-base REST API. 0 disables it. Needs a restart.",
   kb_api_bearer_token:
     "Bearer token required by the knowledge-base API. Blank means no auth. Can be scoped for limited access. Needs a restart.",
@@ -165,12 +264,7 @@ export const FIELD_HELP: Record<string, string> = {
   kb_mining_min_poll_s: "Fewest seconds between miner passes. Default 300.",
 
   // Memory — retrieval quality
-  memory_rerank_enabled:
-    "Second-pass scoring of retrieved memories with a cross-encoder for sharper ordering. Off by default; needs a rerank command set.",
-  memory_rerank_command:
-    "Command that scores (query, candidate) pairs for the reranker. Blank disables reranking even when it's switched on.",
   memory_rerank_mode: "Which reranking strategy runs on retrieved memories.",
-  memory_rerank_top_k: "How many candidates the reranker scores. Default 50.",
   memory_query_expansion_mode: "How queries are widened before search: lexical (default) or semantic.",
   memory_query_expansion_k: "How many extra related terms to add when widening a query. Default 5.",
   memory_coref_mode: "How pronouns and references in stored text are tied back to their subject. Blank leaves it off.",

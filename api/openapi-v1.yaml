@@ -5,7 +5,9 @@ info:
   description: |
     Public HTTP API for the aimee knowledge-base sidecar (aimee-kb).
     Enabled by setting kb.api.http_port in aimee config.
-    Optional bearer-token auth via kb.api.bearer_token.
+    Optional bearer-token auth uses a Vault-backed credential. A Kubernetes or
+    first-boot environment value is synchronously sealed and scrubbed before the
+    long-lived service starts; configuration reads expose only configured state.
 
 servers:
   - url: "http://127.0.0.1:{port}/v1"
@@ -88,6 +90,65 @@ components:
       properties:
         error:
           type: string
+
+    ServerLiveHealthResponse:
+      type: object
+      additionalProperties: false
+      required: [server_id, status]
+      properties:
+        server_id:
+          type: string
+        status:
+          type: string
+          const: ok
+
+    ServerAgentsResponse:
+      type: object
+      additionalProperties: false
+      required: [server_id, team, agents]
+      properties:
+        server_id:
+          type: string
+          minLength: 1
+          maxLength: 127
+          pattern: "^[A-Za-z0-9._-]+$"
+        team:
+          type: integer
+          format: int64
+          minimum: 1
+        agents:
+          type: array
+          maxItems: 16
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, provider, model, enabled, delegate_available, primary_only, max_parallel]
+            properties:
+              name: { type: string, minLength: 1, maxLength: 63, pattern: "^[A-Za-z0-9._-]+$" }
+              provider: { type: string, minLength: 1, maxLength: 15, pattern: "^[A-Za-z0-9._-]+$" }
+              model: { type: string, minLength: 1, maxLength: 127, pattern: "^[A-Za-z0-9._:/+-]+$" }
+              enabled: { type: boolean }
+              delegate_available: { type: boolean }
+              primary_only: { type: boolean }
+              max_parallel: { type: integer, minimum: 0, maximum: 1024 }
+
+    ServerSafeConfigResponse:
+      type: object
+      additionalProperties: false
+      required: [server_id, team, config]
+      properties:
+        server_id: { type: string, minLength: 1, maxLength: 127, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$" }
+        team: { type: integer, format: int64, minimum: 1 }
+        config:
+          type: object
+          additionalProperties: false
+          required: [mtls, remote_writes, client_transport, cli_session_forwarding, require_aimee_git]
+          properties:
+            mtls: { type: string, enum: [off, optional, required] }
+            remote_writes: { type: string, enum: [off, data, full] }
+            client_transport: { type: string, enum: [socket, http, auto] }
+            cli_session_forwarding: { type: boolean }
+            require_aimee_git: { type: boolean }
 
     # ── Phase 3–4: Ingest API and corpus staging schemas ───────────────────
 
@@ -238,6 +299,9 @@ components:
     SearchHit:
       type: object
       properties:
+        project:
+          type: string
+          description: Stable owning project identity; empty only for non-project shared artifacts.
         artifact_id:
           type: string
         score:
@@ -265,10 +329,17 @@ components:
           type: string
         project:
           type: string
-        scope_kind:
+          description: >-
+            Stable project identity. Defaults to the authenticated active project. With
+            `scope: all`, this identifies the protected active-project head bucket.
+        scope:
           type: string
-        scope_id:
-          type: string
+          enum: [current, all]
+          default: current
+          description: >-
+            Search the current project by default. Cross-project search requires the explicit
+            value `all` and an unscoped owner credential. When an active `project` is also sent,
+            local candidates are selected before the limit and other projects extend the tail.
         max_results:
           type: integer
           default: 10
@@ -291,6 +362,80 @@ components:
           type: integer
         fusion_mode_used:
           type: string
+
+    ProjectLifecycleRequest:
+      type: object
+      required: [project]
+      properties:
+        project:
+          type: string
+          description: Stable project identity, never a checkout basename.
+        confirm_hash:
+          type: string
+          description: >-
+            SHA-256 manifest hash returned by a dry run. Omit for a read-only dry run; include it
+            to confirm purge or garbage collection against the exact same physical rows.
+        reason:
+          type: string
+          maxLength: 512
+          description: Required for confirmed purge and garbage collection.
+        retention_days:
+          type: integer
+          minimum: 0
+          maximum: 3650
+          default: 30
+          description: Detached-generation retention for garbage collection only.
+
+    ProjectLifecycleManifest:
+      type: object
+      properties:
+        status:
+          type: string
+        operation:
+          type: string
+          enum: [purge, gc]
+        project:
+          type: string
+        generation:
+          type: integer
+          format: int64
+        mode:
+          type: string
+          enum: [dry_run, confirmed]
+        criteria:
+          type: string
+        manifest_hash:
+          type: string
+          description: SHA-256 of the operation, criteria, counts, and per-target fingerprints.
+        total_rows:
+          type: integer
+          format: int64
+        counts:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+        target_fingerprints:
+          type: object
+          additionalProperties:
+            type: string
+
+    ProjectDetachResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        operation:
+          type: string
+          enum: [detach]
+        project:
+          type: string
+        generation:
+          type: integer
+          format: int64
+        state:
+          type: string
+          enum: [detached]
 
     ArtifactResponse:
       type: object
@@ -387,6 +532,105 @@ components:
           type: string
           nullable: true
 
+    CodeContextSpan:
+      type: object
+      required: [kind, line_start, line_end]
+      properties:
+        kind:
+          type: string
+          enum: [line, file]
+        line_start:
+          type: integer
+          minimum: 0
+        line_end:
+          type: integer
+          minimum: 0
+        symbol:
+          type: string
+
+    CodeContextAnchor:
+      type: object
+      required: [project, file_path, generation, freshness]
+      properties:
+        project: { type: string }
+        file_path: { type: string }
+        generation: { type: integer, format: int64, minimum: 1 }
+        freshness: { type: string, enum: [current] }
+
+    CodeContextResult:
+      type: object
+      required: [project, file_path, generation, freshness, confidence, accepted, provenance, span]
+      properties:
+        project: { type: string }
+        file_path: { type: string }
+        generation: { type: integer, format: int64, minimum: 1 }
+        freshness: { type: string, enum: [current] }
+        confidence: { type: number, format: double, minimum: 0, maximum: 1 }
+        accepted: { type: boolean, enum: [true] }
+        provenance:
+          type: array
+          minItems: 1
+          items: { type: string, enum: [code, graph, vector, memory] }
+        span:
+          $ref: "#/components/schemas/CodeContextSpan"
+        snippet: { type: string }
+        content_hash: { type: string }
+        vector_score: { type: number, format: double }
+
+    CodeContextMemory:
+      type: object
+      required: [memory_id, kind, content, scope, provenance, confidence, anchor]
+      properties:
+        memory_id: { type: integer, format: int64 }
+        kind: { type: string }
+        headline: { type: string }
+        content: { type: string }
+        scope: { type: string, enum: [project] }
+        scope_rank: { type: integer, minimum: 1 }
+        provenance: { type: string, enum: [memory] }
+        confidence: { type: number, format: double }
+        anchor:
+          $ref: "#/components/schemas/CodeContextAnchor"
+
+    CodeContextAnswerability:
+      type: object
+      required: [decision, reason, candidate_count, accepted_code_count, top_confidence, vector_floor]
+      properties:
+        decision: { type: string, enum: [answerable, no_answer] }
+        reason: { type: string }
+        candidate_count: { type: integer, minimum: 0 }
+        accepted_code_count: { type: integer, minimum: 0, maximum: 4 }
+        top_confidence: { type: number, format: double, minimum: 0, maximum: 1 }
+        vector_floor: { type: number, format: double, minimum: 0, maximum: 1 }
+
+    CodeContextResponse:
+      type: object
+      required: [status, project, generation, freshness, resolved, max_results, max_tokens,
+                 item_count, answerability, results, why]
+      properties:
+        status: { type: string, enum: [ok, no_answer] }
+        query: { type: string }
+        symbol: { type: string }
+        project: { type: string }
+        generation: { type: integer, format: int64, minimum: 1 }
+        freshness: { type: string, enum: [current] }
+        resolved: { type: boolean, enum: [true] }
+        max_results: { type: integer, enum: [4] }
+        max_tokens: { type: integer, enum: [1200] }
+        item_count: { type: integer, minimum: 0, maximum: 4 }
+        answerability:
+          $ref: "#/components/schemas/CodeContextAnswerability"
+        results:
+          type: array
+          maxItems: 4
+          items:
+            $ref: "#/components/schemas/CodeContextResult"
+        why:
+          type: array
+          maxItems: 4
+          items:
+            $ref: "#/components/schemas/CodeContextMemory"
+
     CodeCallerHit:
       type: object
       properties:
@@ -479,23 +723,90 @@ components:
           type: string
           nullable: true
 
+    BlastRadiusDependentEdge:
+      type: object
+      required: [path, provenance, confidence, project, generation, freshness]
+      properties:
+        path:
+          type: string
+          description: Dependent file path.
+        provenance:
+          type: string
+          description: Comma-separated structural evidence (`import`, `call`, `projection`, or `cross_repo`).
+        confidence:
+          type: string
+          enum: [high, medium, low]
+        project:
+          type: string
+        generation:
+          type: integer
+          format: int64
+          minimum: 1
+        freshness:
+          type: string
+          enum: [current]
+
+    BlastRadiusDependencyEdge:
+      type: object
+      required: [identity, provenance, confidence, project, generation, freshness]
+      properties:
+        identity:
+          type: string
+          description: Normalized import identity.
+        provenance:
+          type: string
+          description: Comma-separated structural evidence (`import`, `call`, `projection`, or `cross_repo`).
+        confidence:
+          type: string
+          enum: [high, medium, low]
+        project:
+          type: string
+        generation:
+          type: integer
+          format: int64
+          minimum: 1
+        freshness:
+          type: string
+          enum: [current]
+
     BlastRadiusResponse:
       type: object
+      required: [file, project, generation, freshness, resolved, dependents, dependent_count,
+                 dependent_edges, dependencies, dependency_count, dependency_edges]
       properties:
         file:
           type: string
+        project:
+          type: string
+        generation:
+          type: integer
+          format: int64
+          minimum: 1
+        freshness:
+          type: string
+          enum: [current]
+        resolved:
+          type: boolean
         dependents:
           type: array
           items:
             type: string
         dependent_count:
           type: integer
+        dependent_edges:
+          type: array
+          items:
+            $ref: "#/components/schemas/BlastRadiusDependentEdge"
         dependencies:
           type: array
           items:
             type: string
         dependency_count:
           type: integer
+        dependency_edges:
+          type: array
+          items:
+            $ref: "#/components/schemas/BlastRadiusDependencyEdge"
 
     CodeScanRequest:
       type: object
@@ -721,7 +1032,7 @@ components:
           type: boolean
         displaced:
           type: object
-          description: "Present when fence_replaced: the displaced owner's ids."
+          description: Present when fence_replaced. Contains the displaced owner's IDs.
           properties:
             generation:
               type: string
@@ -730,7 +1041,7 @@ components:
         stores:
           type: object
           description: >
-            Per-store outcome, in fan-out order: a deleted-row count on
+            Per-store outcome in fan-out order. Each value is a deleted-row count on
             success (0 for primitives that report no count) or
             {"error": "..."} on failure.
           additionalProperties: true
@@ -757,7 +1068,7 @@ components:
         fence:
           type: string
           description: >
-            Present when refreshed is false: the current fence as
+            Present when refreshed is false. Contains the current fence as
             "generation purge_id" (empty when no fence exists).
 
     MaintenancePurgeClearResponse:
@@ -771,7 +1082,7 @@ components:
         fence:
           type: string
           description: >
-            Present when cleared is false: the current fence as
+            Present when cleared is false. Contains the current fence as
             "generation purge_id" (empty when no fence exists).
 
     PipelineStatusResponse:
@@ -1058,6 +1369,234 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /servers:
+    get:
+      operationId: listFleetServers
+      summary: List registered servers for one team
+      description: Returns the primary-backed, tenant-scoped server registry view.
+      parameters:
+        - name: team
+          in: query
+          required: true
+          description: Positive signed-64-bit team id serialized as canonical decimal without a sign or leading zero.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        "200":
+          description: Bounded server registry list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [servers]
+                properties:
+                  servers:
+                    type: array
+                    maxItems: 64
+                    items:
+                      type: object
+                      required: [server_id, cert_cn, mgmt_cert_cn, endpoint, status, health, version]
+                      properties:
+                        server_id: { type: string }
+                        cert_cn: { type: string }
+                        mgmt_cert_cn: { type: string }
+                        endpoint: { type: string }
+                        status: { type: string }
+                        health: { type: string }
+                        version: { type: string }
+        "400": { description: Invalid or missing team }
+        "401": { description: Authentication required }
+        "403": { description: Actor is not authorized for the requested team }
+        "503": { description: Registry unavailable }
+
+  /servers/{server_id}/health:
+    get:
+      operationId: getServerLiveHealth
+      summary: Verify a registered server through the management health exchange
+      description: >-
+        Performs the live, nonce-bound management challenge and signed-status
+        exchange. It does not return the registry's cached heartbeat row.
+      parameters:
+        - name: server_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 127
+            pattern: "^[A-Za-z0-9._-]+$"
+        - name: team
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        "200":
+          description: Live management health verification succeeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServerLiveHealthResponse"
+        "400":
+          description: Invalid team or management health request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Server health request denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Server not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Registry state changed during the exchange
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Management health integrity verification failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Management health runtime or dependency unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /servers/{server_id}/agents:
+    get:
+      operationId: getServerAgents
+      summary: Read the bounded public agent projection from one registered server
+      description: >-
+        Performs the nonce-bound management-read exchange over the server's pinned mTLS
+        session. The response contains only the seven frozen public agent fields and is
+        authorized independently from remote_writes.
+      parameters:
+        - name: server_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 127
+            pattern: "^[A-Za-z0-9._-]+$"
+        - name: team
+          in: query
+          required: true
+          description: Positive signed-64-bit team id serialized as canonical decimal without a sign or leading zero.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        "200":
+          description: Complete bounded agent projection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServerAgentsResponse"
+        "400": { description: Invalid path or team query }
+        "401": { description: Authentication required }
+        "403": { description: Management read denied }
+        "404": { description: Server not found }
+        "409": { description: Read intent or target state conflict }
+        "502": { description: Authenticated management response failed integrity validation }
+        "503": { description: Management read runtime or dependency unavailable }
+
+  /servers/{server_id}/config:
+    get:
+      operationId: getServerSafeConfig
+      summary: Read the bounded safe configuration projection from one registered server
+      parameters:
+        - name: server_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 127, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$" }
+        - name: team
+          in: query
+          required: true
+          schema: { type: integer, format: int64, minimum: 1 }
+      responses:
+        "200":
+          description: Complete five-field safe configuration projection
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerSafeConfigResponse" }
+        "400": { description: Invalid path or team query }
+        "401": { description: Authentication required }
+        "403": { description: Management read denied }
+        "404": { description: Server not found }
+        "409": { description: Read intent or target state conflict }
+        "502": { description: Authenticated management response failed integrity validation }
+        "503": { description: Management read runtime or dependency unavailable }
+
+  /servers/{server_id}/actions:
+    post:
+      operationId: executeServerManagementAction
+      summary: Enable or disable one agent on one registered server
+      description: >-
+        Executes one identity-propagating, journaled management action. The server's
+        remote_writes policy remains authoritative and the request is never safely retryable
+        after an ambiguous dispatch.
+      parameters:
+        - name: server_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 127
+            pattern: "^[A-Za-z0-9._-]+$"
+        - name: team
+          in: query
+          required: true
+          description: Positive signed-64-bit team id serialized as canonical decimal without a sign or leading zero.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action, agent]
+              properties:
+                action: { type: string, enum: [agent.enable, agent.disable] }
+                agent: { type: string, minLength: 1, maxLength: 63, pattern: "^[A-Za-z0-9._-]+$" }
+      responses:
+        "200": { description: Action succeeded }
+        "400": { description: Invalid team or action envelope }
+        "401": { description: Authentication required }
+        "403": { description: "Actor, team, capability, or server policy denied the action" }
+        "404": { description: Server not found }
+        "409": { description: "Replay, registry conflict, or unresolved prior intent" }
+        "502": { description: Action result is indeterminate }
+        "503": { description: Management runtime or dependency unavailable }
+
   /console/overview:
     get:
       operationId: getConsoleOverview
@@ -1082,6 +1621,197 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "403":
           description: Forbidden (credential not permitted for this route)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /console/pipeline:
+    get:
+      operationId: getConsolePipeline
+      summary: Curator pipeline registry, presets, and current config (console)
+      description: |
+        The curator pipeline as data for the web console's Pipeline page: the live
+        stage registry (name, label, lane, budget, order, config_key, requires),
+        the built-in presets, and the current value of every config key the page
+        toggles. The kb owns the curator, so this is served in-process.
+        Requires a console-admin credential.
+      responses:
+        "200":
+          description: Pipeline envelope
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stages:
+                    type: array
+                    items: { type: object }
+                  presets:
+                    type: array
+                    items: { type: object }
+                  config:
+                    type: object
+                    description: Current value per pipeline config key.
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden (credential not permitted for this route)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /console/pipeline/config:
+    post:
+      operationId: setConsolePipelineConfig
+      summary: Set one curator-pipeline config key (console)
+      description: |
+        Sets a single pipeline config key and persists it to aimee.yaml; the
+        curator picks it up on its next config load. The key must be a stage
+        enable flag advertised by the live registry, or one of the pipeline's own
+        keys (stage order, user presets, custom stages). Anything else is 403, so
+        this route cannot reach arbitrary config. Requires a console-admin
+        credential.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key, value]
+              properties:
+                key: { type: string }
+                value:
+                  description: Boolean for a stage toggle, string for the order/presets/custom-stage keys.
+                  oneOf:
+                    - type: boolean
+                    - type: string
+                    - type: integer
+      responses:
+        "200":
+          description: Saved; echoes the stored value
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  key: { type: string }
+                  value: {}
+        "400":
+          description: Missing/invalid key or value
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not a pipeline config key, or credential not permitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /console/settings:
+    get:
+      operationId: getConsoleSettings
+      summary: KB-owned configuration (console)
+      description: |
+        Every config option aimee-kb owns, including the embedder, synthesis
+        tier, and knowledge base itself, with its current value, section, and
+        whether it needs a kb restart. The split from aimee-server's own settings
+        is by which binary reads the option (KB_SETTINGS in
+        src/kb/http/kb_http_console.c). Requires a console-admin credential.
+      responses:
+        "200":
+          description: KB-owned settings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  fields:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        key: { type: string }
+                        section: { type: string }
+                        restart: { type: boolean }
+                        value: {}
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden (credential not permitted for this route)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /console/settings/config:
+    post:
+      operationId: setConsoleSetting
+      summary: Set one KB-owned config option (console)
+      description: |
+        Sets a single KB-owned option and persists it to aimee.yaml. The key must
+        be one the KB owns. Anything else (aimee-server's keys, db2_url, the
+        agent roster) is 403, so this route cannot reach arbitrary config. Options
+        flagged `restart` take effect when aimee-kb next starts. Requires a
+        console-admin credential.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key, value]
+              properties:
+                key: { type: string }
+                value:
+                  oneOf:
+                    - type: boolean
+                    - type: string
+                    - type: integer
+      responses:
+        "200":
+          description: Saved; echoes the stored value
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  key: { type: string }
+                  value: {}
+                  restart: { type: boolean }
+        "400":
+          description: Missing/invalid key or value
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not a KB-owned setting, or credential not permitted
           content:
             application/json:
               schema:
@@ -1220,7 +1950,7 @@ paths:
       operationId: listEntitledModels
       summary: List the caller's entitled org models (P2a)
       description: >
-        Returns the org models the authenticated caller is entitled to use: the join
+        Returns the org models the authenticated caller is entitled to use. This is the join
         of the org model catalog with the caller's team entitlements, actor-bound to the
         verified principal (a caller can never see another principal's entitled models).
         Catalog-only: the surface carries provider/wire/endpoint/model_id/display_name
@@ -1275,13 +2005,13 @@ paths:
                 properties:
                   id: { type: integer }
                   model_id: { type: string }
-        "400": { description: Invalid model_id, provider, or wire }
+        "400": { description: "Invalid model_id, provider, or wire" }
         "401": { description: Authentication required }
         "403": { description: Not authorized (not an org-admin) }
   /models/org/set:
     post:
       operationId: setOrgModel
-      summary: "Alias of /models/org/add: upsert an org model catalog entry (org-admin, P2a)"
+      summary: Upsert an org model catalog entry; alias of /models/org/add (org-admin, P2a)
       requestBody:
         required: true
         content:
@@ -1298,7 +2028,7 @@ paths:
                 enabled: { type: boolean }
       responses:
         "200": { description: Catalog entry upserted }
-        "400": { description: Invalid model_id, provider, or wire }
+        "400": { description: "Invalid model_id, provider, or wire" }
         "401": { description: Authentication required }
         "403": { description: Not authorized (not an org-admin) }
   /models/org/remove:
@@ -1343,7 +2073,7 @@ paths:
       responses:
         "200": { description: Entitlement granted }
         "401": { description: Authentication required }
-        "403": { description: Not authorized (not an org-admin), or unknown model/team }
+        "403": { description: "Not authorized (not an org-admin), or unknown model/team" }
   /models/org/unentitle:
     post:
       operationId: unentitleOrgModel
@@ -1465,7 +2195,7 @@ paths:
         receives 403. A hard reduction of the limit below the current period's already
         committed (spend + reserved) is rejected as retroactive (409). limit_usd and
         soft_limit_usd are NUMERIC decimal strings (never floats). soft_limit_usd is a
-        config-only operator-signal threshold (P4a does not enforce it; a soft limit
+        config-only operator-signal threshold. P4a does not enforce it; a soft limit
         never refuses). BUDGET ONLY: the rate limiter is deferred to P4b; the
         reserve-before-dispatch enforcement rides with P2b.
       requestBody:
@@ -1505,7 +2235,7 @@ paths:
         Returns every configured cap for the team (optionally filtered to one project),
         each joined to its current UTC period counter: limit, spend, reserved, and
         remaining (= limit - spend - reserved). Authorization is enforced at the DB layer
-        inside a SECURITY DEFINER function; the caller must be an org-admin OR a lead of
+        inside a SECURITY DEFINER function. The caller must be an org-admin OR a lead of
         the requested team. All money fields are NUMERIC strings (never floats).
       parameters:
         - name: team
@@ -1557,7 +2287,7 @@ paths:
         fixed-window width and max_count the requests admitted per window (max_count = 0 is
         an always-deny). Org-admin gated at the DB layer and WORM-audited atomically with
         the mutation; a non-admin caller receives 403. The policy is authoritative and
-        never caller-supplied at enforcement time; the P2b egress path passes only the
+        never caller-supplied at enforcement time. The P2b egress path passes only the
         resolved identity to org_rate_check, which looks the policy up. RATE ONLY: the
         enforcement wiring at egress rides with P2b; the budget core is P4a.
       requestBody:
@@ -1594,7 +2324,7 @@ paths:
       summary: Show a keyed rate-limit policy (org-admin or team-lead, P4b)
       description: >
         Returns the rate policy for the exact (dim, scope) pair (0 or 1 row).
-        Authorization is enforced at the DB layer inside a SECURITY DEFINER function; the
+        Authorization is enforced at the DB layer inside a SECURITY DEFINER function. The
         caller must be an org-admin, OR (for dim=team) a lead of that team, OR (for
         dim=project) a lead of the team that owns the project. The global dims (model,
         cred_slot) and the "*" default are admin-only. Read-only.
@@ -1713,7 +2443,7 @@ paths:
   /scopes:
     get:
       operationId: listScopes
-      summary: "Scope lattice: distinct scopes with cert counts (console)"
+      summary: List distinct scopes and certificate counts in the scope lattice (console)
       responses:
         "200":
           description: Scope list
@@ -1754,7 +2484,7 @@ paths:
         "400":
           description: Bad request
         "409":
-          description: "Conflict: an active decision already exists for this scope"
+          description: Conflict because an active decision already exists for this scope
 
   /decisions/{id}:
     get:
@@ -2195,6 +2925,11 @@ paths:
     post:
       operationId: postSearch
       summary: Hybrid knowledge search
+      description: >-
+        Searches the authenticated active project by default. A request without an active project
+        fails with `scope_required`; deliberate cross-project retrieval requires `scope: all`.
+        Send the active `project` together with `scope: all` to reserve the result head for local
+        evidence while allowing labeled cross-project results in the tail.
       requestBody:
         required: true
         content:
@@ -2209,9 +2944,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/SearchResponse"
         "400":
-          description: Bad request (missing query)
+          description: Bad request (missing query or invalid scope)
         "401":
           description: Unauthorized
+        "403":
+          description: Scoped credentials cannot request all projects
+        "409":
+          description: No active project is available (`scope_required`)
 
   /artifacts/{id}:
     get:
@@ -2269,8 +3008,25 @@ paths:
             type: string
         - name: project
           in: query
+          description: Stable project identity. Defaults to the authenticated active project.
           schema:
             type: string
+        - name: scope
+          in: query
+          description: >-
+            Cross-project lookup requires `all`; send `project` too to protect that active
+            project's candidates before the result limit.
+          schema:
+            type: string
+            enum: [current, all]
+            default: current
+        - name: generation
+          in: query
+          description: Optional observed current generation; stale observations fail closed.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
         - name: max_results
           in: query
           schema:
@@ -2287,6 +3043,14 @@ paths:
           description: Missing identifier parameter
         "401":
           description: Unauthorized
+        "403":
+          description: Scoped credentials cannot request all projects
+        "404":
+          description: Project is unknown or detached
+        "409":
+          description: Active project is required or the observed generation is stale
+        "503":
+          description: Canonical index unavailable
 
   /code/search:
     get:
@@ -2300,8 +3064,25 @@ paths:
             type: string
         - name: project
           in: query
+          description: Stable project identity. Defaults to the authenticated active project.
           schema:
             type: string
+        - name: scope
+          in: query
+          description: >-
+            Cross-project search requires `all`; send `project` too to protect that active
+            project's candidates before the result limit.
+          schema:
+            type: string
+            enum: [current, all]
+            default: current
+        - name: generation
+          in: query
+          description: Optional observed current generation; stale observations fail closed.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
         - name: max_results
           in: query
           schema:
@@ -2318,6 +3099,61 @@ paths:
           description: Missing query parameter
         "401":
           description: Unauthorized
+        "403":
+          description: Scoped credentials cannot request all projects
+        "404":
+          description: Project is unknown or detached
+        "409":
+          description: Active project is required or the observed generation is stale
+        "503":
+          description: Canonical index unavailable
+
+  /code/context:
+    get:
+      operationId: getCodeContext
+      summary: Bounded task-conditioned context for the active project
+      description: >-
+        Reuses hybrid RRF retrieval but returns only current-generation evidence for one active
+        project. Exact lexical and structural evidence leads; vector-only evidence must clear the
+        quality floor. Memory is additive, locally ordered, and anchored to accepted code. A weak
+        query returns HTTP 200 with status `no_answer`, empty results, and empty why rather than
+        broadening to global memory.
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema: { type: string }
+        - name: symbol
+          in: query
+          schema: { type: string }
+        - name: project
+          in: query
+          required: true
+          description: Stable identity of the authenticated active project; cross-project scope is forbidden.
+          schema: { type: string }
+        - name: generation
+          in: query
+          description: Optional observed current generation; stale observations fail closed.
+          schema: { type: integer, format: int64, minimum: 1 }
+        - name: max_results
+          in: query
+          description: Accepted for client compatibility and clamped to the fixed packet maximum of four.
+          schema: { type: integer, default: 4, maximum: 4 }
+      responses:
+        "200":
+          description: Answerable bounded packet or explicit no_answer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CodeContextResponse"
+        "400":
+          description: Missing or invalid query
+        "401":
+          description: Unauthorized
+        "404":
+          description: Project is unknown, detached, or has no current generation
+        "409":
+          description: Active project is required or the observed generation is stale
         "503":
           description: Canonical index unavailable
 
@@ -2333,8 +3169,25 @@ paths:
             type: string
         - name: project
           in: query
+          description: Stable project identity. Defaults to the authenticated active project.
           schema:
             type: string
+        - name: scope
+          in: query
+          description: >-
+            Cross-project lookup requires `all`; send `project` too to protect that active
+            project's candidates before the result limit.
+          schema:
+            type: string
+            enum: [current, all]
+            default: current
+        - name: generation
+          in: query
+          description: Optional observed current generation; stale observations fail closed.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
         - name: max_results
           in: query
           schema:
@@ -2351,6 +3204,12 @@ paths:
           description: Missing symbol parameter
         "401":
           description: Unauthorized
+        "403":
+          description: Scoped credentials cannot request all projects
+        "404":
+          description: Project is unknown or detached
+        "409":
+          description: Active project is required or the observed generation is stale
         "503":
           description: Canonical index unavailable
 
@@ -2385,16 +3244,24 @@ paths:
       parameters:
         - name: project
           in: query
-          required: true
+          required: false
+          description: Stable project identity. Defaults to the authenticated active project.
           schema:
             type: string
+        - name: generation
+          in: query
+          description: Optional observed current generation; stale observations fail closed.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
         - name: file_path
           in: query
           schema:
             type: string
       responses:
         "200":
-          description: Blast radius
+          description: Current-generation blast radius with provenance-bearing edges
           content:
             application/json:
               schema:
@@ -2404,7 +3271,11 @@ paths:
         "401":
           description: Unauthorized
         "404":
-          description: File not found in index
+          description: Project is detached/unknown or the file is not indexed
+        "409":
+          description: Active project is required or the observed generation is stale
+        "503":
+          description: Canonical index unavailable
 
   /code/structure:
     get:
@@ -2413,9 +3284,17 @@ paths:
       parameters:
         - name: project
           in: query
-          required: true
+          required: false
+          description: Stable project identity. Defaults to the authenticated active project.
           schema:
             type: string
+        - name: generation
+          in: query
+          description: Optional observed current generation; stale observations fail closed.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
         - name: file_path
           in: query
           required: true
@@ -2437,6 +3316,10 @@ paths:
           description: Missing required parameters
         "401":
           description: Unauthorized
+        "404":
+          description: Project is unknown or detached
+        "409":
+          description: Active project is required or the observed generation is stale
         "503":
           description: Canonical index unavailable
 
@@ -2531,6 +3414,107 @@ paths:
           description: Response too large; narrow the query
         "503":
           description: Canonical index unavailable
+
+  /code/project/detach:
+    post:
+      operationId: postCodeProjectDetach
+      summary: Detach the current generation of a stable project
+      description: >-
+        Marks the project and its current generation detached so default/current queries no longer
+        return it. Data is retained for audit and later re-add or explicit purge. Requires an
+        authenticated unscoped owner credential.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectLifecycleRequest"
+      responses:
+        "200":
+          description: Project generation detached
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectDetachResponse"
+        "400":
+          description: Invalid request
+        "403":
+          description: Verified unscoped owner principal required
+        "404":
+          description: Project not found
+        "405":
+          description: Method not allowed
+        "503":
+          description: Canonical index unavailable
+
+  /code/project/purge:
+    post:
+      operationId: postCodeProjectPurge
+      summary: Dry-run or confirm exact deletion of one stable project
+      description: >-
+        Omit `confirm_hash` for a read-only manifest. To delete, repeat the request with that exact
+        SHA-256 hash and a reason. Confirmation fails if any target row changed, and audit failure
+        blocks mutation. Requires an authenticated unscoped owner credential.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectLifecycleRequest"
+      responses:
+        "200":
+          description: Dry-run or confirmed purge manifest
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectLifecycleManifest"
+        "400":
+          description: Invalid request or confirmed operation without a reason
+        "403":
+          description: Verified unscoped owner principal required
+        "404":
+          description: Project not found
+        "405":
+          description: Method not allowed
+        "409":
+          description: Target manifest changed; run the dry run again
+        "503":
+          description: Audit or canonical-index operation failed
+
+  /code/project/gc:
+    post:
+      operationId: postCodeProjectGc
+      summary: Dry-run or confirm detached-generation garbage collection
+      description: >-
+        Omit `confirm_hash` for a read-only manifest. To delete expired detached generations and
+        aliases, repeat the request with the exact SHA-256 hash and a reason. The manifest binds the
+        retention policy and UTC cutoff as well as exact physical target fingerprints. Requires an
+        authenticated unscoped owner credential.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectLifecycleRequest"
+      responses:
+        "200":
+          description: Dry-run or confirmed garbage-collection manifest
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectLifecycleManifest"
+        "400":
+          description: Invalid request or confirmed operation without a reason
+        "403":
+          description: Verified unscoped owner principal required
+        "404":
+          description: Project not found
+        "405":
+          description: Method not allowed
+        "409":
+          description: Target manifest changed; run the dry run again
+        "503":
+          description: Audit or canonical-index operation failed
 
   /code/scan:
     post:
@@ -2719,7 +3703,7 @@ paths:
         from every kb store the ingest path writes (chunks, file index,
         vectors, code embeddings, curator code-unit vectors, canonical index,
         code-unit jobs, pdf vectors, minhash), continuing past per-store
-        failures. The fence is NOT cleared here. Call purge-finalize (or
+        failures. The fence is not cleared here. Call purge-finalize (or
         purge-cancel) once the caller's own deletion completed. Idempotent.
       requestBody:
         required: true

@@ -18,11 +18,26 @@ typedef struct
 
 typedef struct
 {
+   char provenance[48];
+   char confidence[16];
+   char project[128];
+   long long generation;
+   char freshness[16];
+} blast_edge_meta_t;
+
+typedef struct
+{
    char file[MAX_PATH_LEN];
    char dependents[64][MAX_PATH_LEN];
    int dependent_count;
    char dependencies[64][MAX_PATH_LEN];
    int dependency_count;
+   char project[128];
+   long long generation;
+   char freshness[16];
+   int resolved;
+   blast_edge_meta_t dependent_meta[64];
+   blast_edge_meta_t dependency_meta[64];
 } blast_radius_t;
 
 typedef struct
@@ -86,6 +101,15 @@ int extract_imports(const char *ext, const char *content, char **out, int max);
  * behaves exactly like extract_imports). `sys` must hold at least `max` ints. */
 int extract_imports_sys(const char *ext, const char *content, char **out, int *sys, int max);
 
+/* Stable import identities shared by extractors and graph queries. Python paths
+ * use dotted module identities; relative imports resolve against importer_path.
+ * Non-Python paths remain slash-normalized exact identities. */
+int code_path_import_identity(const char *path, char *out, size_t out_cap);
+int code_import_identity(const char *importer_path, const char *raw_import, char *out,
+                         size_t out_cap);
+int code_import_resolves_path(const char *importer_path, const char *raw_import,
+                              const char *target_path);
+
 /* Extract exports from file content. Returns count. Caller frees each string. */
 int extract_exports(const char *ext, const char *content, char **out, int max);
 
@@ -109,6 +133,26 @@ int extract_calls(const char *ext, const char *content, call_ref_t *out, int max
 
 /* Find all callers of a given symbol across a project. Returns count. */
 int index_find_callers(const char *project, const char *symbol, caller_hit_t *out, int max);
+
+/* One canonical unordered co-change pair (a < b lexically). */
+typedef struct
+{
+   char a[128];
+   char b[128];
+} cochange_pair_t;
+
+/* Pure: from a single commit's code-file basenames (may contain duplicates and
+ * be unsorted), emit canonical unordered pairs (a < b) into `out`. Deduplicates
+ * first, then emits nothing unless 2 <= distinct <= max_files (the bulk-commit
+ * gate). Returns the number of pairs written (<= out_cap). No I/O — the git and
+ * DB sides of the co-change backfill are kept thin around this. */
+int cochange_pairs_for_commit(char names[][128], int n, int max_files, cochange_pair_t *out,
+                              int out_cap);
+
+/* True iff `s` is a plain git object id (lowercase hex, 4..64 chars). The
+ * co-change backfill validates the stored marker/HEAD with this before
+ * interpolating it into a git command, since kb_runtime_state is editable. */
+int cochange_is_hex_sha(const char *s);
 
 /* Code search result */
 typedef struct

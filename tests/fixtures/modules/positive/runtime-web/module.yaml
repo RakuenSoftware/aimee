@@ -1,0 +1,7 @@
+{
+  "descriptor_version": 1,
+  "id": "runtime-web",
+  "dependencies": ["config", "gateway"],
+  "enabled_by_default": true,
+  "runtime_toggle": {"supported": true}
+}

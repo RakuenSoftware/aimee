@@ -4,6 +4,8 @@
  * yaml.c shim handles parse/emit so this file's schema-extraction code
  * never sees the format change. */
 #include <pthread.h>
+#include <limits.h>
+#include <sched.h>
 #include <stdarg.h>
 #include <stdatomic.h>
 #include <stdint.h>
@@ -11,6 +13,7 @@
 #include "json_fluent.h"
 #include "aimee_home.h"
 #include "config_database.h"
+#include "config_fields.h"
 #include "config_internal.h"
 #include "config_sections.h"
 #include "config_learning.h"
@@ -19,6 +22,7 @@
 #include "maintenance.h"
 #include "platform_process.h"
 #include "platform_path.h"
+#include "runtime_secret.h"
 #include "sandbox.h"
 #include "toolset.h"
 #include "cJSON.h"
@@ -36,6 +40,91 @@ extern int toolset_registry_load_file(toolset_registry_t *registry, const char *
 __thread int g_aimee_compute_threads_override = 0;
 
 static __thread char g_session_override[64];
+static config_secret_writer_fn g_secret_writer;
+
+void config_secret_writer_set(config_secret_writer_fn writer)
+{
+   g_secret_writer = writer;
+}
+
+int config_secret_store(const char *name, const char *value)
+{
+   return g_secret_writer ? g_secret_writer(name, value ? value : "") : -1;
+}
+
+int config_migrate_legacy_credentials(config_secret_writer_fn writer,
+                                      config_secret_present_fn present)
+{
+   config_t cfg;
+   if (!writer || config_load_file(&cfg) != 0)
+      return -1;
+
+   /* These two historical fields represented the same effective credential.
+    * Refuse to choose between conflicting plaintext values unless Vault already
+    * has the authoritative value, in which case both copies are safe to scrub. */
+   if (cfg.kb_api_bearer_token[0] && cfg.kb_client_bearer_token[0] &&
+       strcmp(cfg.kb_api_bearer_token, cfg.kb_client_bearer_token) != 0 &&
+       (!present || !present("AIMEE_KB_API_BEARER_TOKEN")))
+   {
+      runtime_secret_wipe(&cfg, sizeof(cfg));
+      return -1;
+   }
+
+   int scrubbed = 0;
+   int failed = 0;
+#define MIGRATE_LEGACY_SECRET(name_, field_)                                                       \
+   do                                                                                              \
+   {                                                                                               \
+      if (cfg.field_[0])                                                                           \
+      {                                                                                            \
+         if ((!present || !present((name_))) && writer((name_), cfg.field_) != 0)                  \
+            failed = 1;                                                                            \
+         if (!failed)                                                                              \
+         {                                                                                         \
+            runtime_secret_wipe(cfg.field_, sizeof(cfg.field_));                                   \
+            scrubbed = 1;                                                                          \
+         }                                                                                         \
+      }                                                                                            \
+   } while (0)
+   MIGRATE_LEGACY_SECRET("AIMEE_DB2_URL", db2_url);
+   MIGRATE_LEGACY_SECRET("AIMEE_SEARCH_TAVILY_API_KEY", search_tavily_api_key);
+   MIGRATE_LEGACY_SECRET("AIMEE_PROXY_TOKEN", proxy_token);
+   MIGRATE_LEGACY_SECRET("AIMEE_INGRESS_PROXY_SECRET", ingress_trusted_proxy_secret);
+   MIGRATE_LEGACY_SECRET("AIMEE_KB_API_BEARER_TOKEN", kb_api_bearer_token);
+   MIGRATE_LEGACY_SECRET("AIMEE_TELEMETRY_METRICS_TOKEN", telemetry_metrics_token);
+   MIGRATE_LEGACY_SECRET("AIMEE_KB_API_BEARER_TOKEN", kb_client_bearer_token);
+   MIGRATE_LEGACY_SECRET("AIMEE_TRIGGER_AUTH_TOKEN", trigger_auth_token);
+   MIGRATE_LEGACY_SECRET("AIMEE_KB_CURATOR_PROVIDER_API_KEY", kb_curator_provider_api_key);
+   MIGRATE_LEGACY_SECRET("AIMEE_KB_CURATOR_TIER_B_API_KEY", kb_curator_tier_b_api_key);
+   MIGRATE_LEGACY_SECRET("AIMEE_API_BEARER_TOKEN", server_api_bearer_token);
+#undef MIGRATE_LEGACY_SECRET
+
+   for (int i = 0; i < AIMEE_API_BEARER_EXTRA_MAX && !failed; i++)
+   {
+      char name[96];
+      snprintf(name, sizeof(name), "AIMEE_API_BEARER_TOKEN_EXTRA_%d", i);
+      if (!cfg.server_api_bearer_extra[i][0])
+         continue;
+      if ((!present || !present(name)) && writer(name, cfg.server_api_bearer_extra[i]) != 0)
+      {
+         failed = 1;
+         break;
+      }
+      runtime_secret_wipe(cfg.server_api_bearer_extra[i], sizeof(cfg.server_api_bearer_extra[i]));
+      scrubbed = 1;
+   }
+   if (!failed && cfg.server_api_bearer_extra_count)
+   {
+      cfg.server_api_bearer_extra_count = 0;
+      scrubbed = 1;
+   }
+
+   int rc = failed ? -1 : scrubbed;
+   if (!failed && scrubbed && config_save(&cfg) != 0)
+      rc = -1;
+   runtime_secret_wipe(&cfg, sizeof(cfg));
+   return rc;
+}
 
 static __thread int g_session_id_drop;
 void session_id_refresh(void)
@@ -269,7 +358,26 @@ static int config_has_explicit_database_override(const cJSON *root)
    return 0;
 }
 
-/* Strict mode: errors instead of warnings, exit non-zero on validation failure */
+/* Strict mode: errors instead of warnings, exit non-zero on validation failure.
+ *
+ * OPT-IN, and deliberately so. Nothing in the shipping binaries sets it, which
+ * means config_load never returns non-zero in production: config_load_file only
+ * fails when `issues > 0 && g_config_strict`. Every `if (config_load(&cfg) != 0)`
+ * in the tree is therefore unreachable today, including server_main's own
+ * "server startup rejected invalid configuration".
+ *
+ * Turning it on by default was tried and reverted -- it is not a free tightening.
+ * Strict treats an UNKNOWN key as an error, but aimee deliberately tolerates and
+ * PRESERVES keys it does not recognise: config_set patches the YAML in place so
+ * an operator's own annotations survive a write (test_config_set.c pins
+ * "custom_note: keep-me"). Defaulting strict on makes aimee refuse to load a
+ * config it just preserved, and test_config.c:963 pins the opposite contract --
+ * that strict DOES reject unknown keys. Both hold only while strict is opt-in.
+ *
+ * Making runtime validation fatal is a product decision, not a refactor: it needs
+ * a split between "unknown key" (tolerate, for forward-compat and annotations)
+ * and "known key, wrong shape" (refuse to start). See the config-t-encapsulation
+ * proposal for the write-up. */
 int g_config_strict;
 
 static const config_schema_entry_t config_schema[] = {
@@ -277,95 +385,37 @@ static const config_schema_entry_t config_schema[] = {
      * config_schema[] initializer in config.c. Extracted so config.c stays under
      * the 2000-line cap and new keys have a low-churn home (one line each here). */
     {"db1_path", SCHEMA_STRING, 0},
-    {"db2_url", SCHEMA_STRING, 0},
     {"db2_pool_size", SCHEMA_INT, 0},
-    {"kb_client_url", SCHEMA_STRING, 0},
-    {"kb_client_bearer_token", SCHEMA_STRING, 0},
     {"kb_mode", SCHEMA_STRING, 0},
     {"llm_embed_backend", SCHEMA_STRING, 0},
-    {"llm_embed_host", SCHEMA_STRING, 0},
-    {"llm_embed_gpu", SCHEMA_STRING, 0},
-    {"llm_embed_tier", SCHEMA_STRING, 0},
-    {"llm_rerank_backend", SCHEMA_STRING, 0},
-    {"llm_rerank_host", SCHEMA_STRING, 0},
-    {"llm_rerank_gpu", SCHEMA_STRING, 0},
-    {"llm_rerank_tier", SCHEMA_STRING, 0},
-    {"llm_rerank_endpoint", SCHEMA_STRING, 0},
     {"llm_synth_backend", SCHEMA_STRING, 0},
     {"llm_synth_host", SCHEMA_STRING, 0},
     {"llm_synth_gpu", SCHEMA_STRING, 0},
     {"llm_synth_tier", SCHEMA_STRING, 0},
     {"llm_synth_endpoint", SCHEMA_STRING, 0},
     {"llm_synth_model", SCHEMA_STRING, 0},
-    {"guardrail_mode", SCHEMA_STRING, 0},
-    {"ingress_preinject_enabled", SCHEMA_BOOL, 0},
-    {"ingress_preinject_anthropic_enabled", SCHEMA_BOOL, 0},
-    {"ingress_compress_enabled", SCHEMA_BOOL, 0},
     {"ingress_cache_placement_enabled", SCHEMA_BOOL, 0},
     {"ingress_compress_min_chars", SCHEMA_INT, 0},
-    {"gateway_prevent_subagents", SCHEMA_BOOL, 0},
-    {"gateway_pin_model", SCHEMA_BOOL, 0},
-    {"css_style_graph_enabled", SCHEMA_BOOL, 0},
-    {"wfe_live_forge_enabled", SCHEMA_BOOL, 0},
-    {"wfe_proposals_autoscan_enabled", SCHEMA_BOOL, 0},
-    {"client_integrations_enabled", SCHEMA_BOOL, 0},
-    {"audit_action_enabled", SCHEMA_BOOL, 0},
-    {"audit_worm_enabled", SCHEMA_BOOL, 0},
-    {"css_render_command", SCHEMA_STRING, 0},
-    {"typed_facts_enabled", SCHEMA_BOOL, 0},
-    {"kb_pdf_ingest_enabled", SCHEMA_BOOL, 0},
-    {"kb_pdf_vector_enabled", SCHEMA_BOOL, 0},
-    {"kb_pdf_tsr_enabled", SCHEMA_BOOL, 0},
-    {"tsr_command", SCHEMA_STRING, 0},
-    {"kb_pdf_assets_enabled", SCHEMA_BOOL, 0},
-    {"kb_pdf_blob_dir", SCHEMA_STRING, 0},
-    {"kb_pdf_blob_recon_secs", SCHEMA_INT, 0},
-    {"kb_pdf_blob_orphan_alarm_mb", SCHEMA_INT, 0},
-    {"kb_pdf_ocr_enabled", SCHEMA_BOOL, 0},
-    {"ocr_command", SCHEMA_STRING, 0},
     {"ingress_preinject_assembly_budget", SCHEMA_INT, 0},
     {"ingress_max_raw_scans", SCHEMA_INT, 0},
     {"code_span_max_lines", SCHEMA_INT, 0},
-    {"require_session_worktree", SCHEMA_BOOL, 0},
-    {"require_aimee_memory", SCHEMA_BOOL, 0},
-    {"require_aimee_git", SCHEMA_BOOL, 0},
-    {"subagent_ban_enabled", SCHEMA_BOOL, 0},
     {"delegate_sandbox", SCHEMA_BOOL, 0},
     {"delegate_sandbox_image", SCHEMA_STRING, 0},
     {"delegate_sandbox_package_access", SCHEMA_STRING, 0}, /* valid: proxy|off|gated|governance */
-    {"delegate_sandbox_require_isolation", SCHEMA_BOOL, 0},
-    {"delegate_sandbox_learn_packages", SCHEMA_BOOL, 0},
     {"guardrails", SCHEMA_OBJECT, 0},
     {"toolsets", SCHEMA_OBJECT, 0},
     {"script", SCHEMA_OBJECT, 0},
-    {"provider", SCHEMA_STRING, 0},
-    {"default_persona", SCHEMA_STRING, 0},
     {"use_builtin_cli", SCHEMA_BOOL, 0},
-    {"claude_model", SCHEMA_STRING, 0},
     {"codex_model", SCHEMA_STRING, 0},
     {"model_reasoning_effort", SCHEMA_STRING, 0},
-    {"openai_endpoint", SCHEMA_STRING, 0},
-    {"openai_model", SCHEMA_STRING, 0},
-    {"openai_key_cmd", SCHEMA_STRING, 0},
-    {"embedding_command", SCHEMA_STRING, 0},
-    {"embedding_model", SCHEMA_STRING, 0},
-    {"embedding_endpoint", SCHEMA_STRING, 0},
     {"embedding_dim", SCHEMA_INT, 0},
     {"memory_weight_profile", SCHEMA_STRING, 0},
-    {"memory_rerank_mode", SCHEMA_STRING, 0},
-    {"memory_rerank", SCHEMA_OBJECT, 0},
     {"memory_query_expansion", SCHEMA_OBJECT, 0},
     {"memory_recall_lanes", SCHEMA_OBJECT, 0},
     {"memory_maintenance", SCHEMA_OBJECT, 0},
     {"memory", SCHEMA_OBJECT, 0},
     {"workspaces", SCHEMA_ARRAY, 0},
-    {"autonomous", SCHEMA_BOOL, 0},
-    {"verify_enabled", SCHEMA_BOOL, 0},
-    {"verify_cross_project", SCHEMA_BOOL, 0},
-    {"cross_verify", SCHEMA_OBJECT, 0},
     {"retry", SCHEMA_OBJECT, 0},
-    {"max_iterations", SCHEMA_INT, 0},
-    {"max_iterations_delegate", SCHEMA_INT, 0},
     {"max_delegation_depth", SCHEMA_INT, 0},
     {"max_delegation_spawns", SCHEMA_INT, 0},
     {"max_background_processes", SCHEMA_INT, 0},
@@ -377,9 +427,8 @@ static const config_schema_entry_t config_schema[] = {
     {"search", SCHEMA_OBJECT, 0},
     {"compact", SCHEMA_OBJECT, 0},
     {"fold", SCHEMA_OBJECT, 0},
-    {"modules", SCHEMA_OBJECT, 0}, /* memory/governance/delegates/workflows/economizer toggles */
-    {"economizer", SCHEMA_STRING,
-     0}, /* off|safe|aggressive (deprecated object form still parses) */
+    {"modules", SCHEMA_OBJECT, 0},    /* memory/governance/delegates/workflows/economizer toggles */
+    {"economizer", SCHEMA_OBJECT, 0}, /* {mode: off|safe|aggressive} */
     {"sessions", SCHEMA_OBJECT, 0},
     {"sandbox", SCHEMA_OBJECT, 0},
     {"prompt_tier", SCHEMA_STRING, 0},
@@ -405,12 +454,29 @@ static const config_schema_entry_t config_schema[] = {
     {"learning", SCHEMA_OBJECT, 0},
     {"intelligence", SCHEMA_OBJECT, 0},
     {"kb", SCHEMA_OBJECT, 0},
+    /* Both of these are REAL, parsed keys that were missing from this allowlist,
+     * so an operator config containing either drew "unknown key". That was a
+     * warning while strict mode was off; with strict on it is fatal, and
+     * worktree_gc is the worse of the two -- config_save WRITES it
+     * (config_save.c:610), so aimee emitted a config it would then refuse to
+     * load. Parsed at config_sections.c:147 and :808 respectively. */
+    {"worktree_gc", SCHEMA_OBJECT, 0},
+    {"autonomy", SCHEMA_OBJECT, 0},
+    {"context", SCHEMA_OBJECT, 0},
+    {"routing", SCHEMA_OBJECT, 0},
+    {"telemetry", SCHEMA_OBJECT, 0},
+    {"memory_window", SCHEMA_OBJECT, 0},
+    {"memory_rewrite", SCHEMA_OBJECT, 0},
+    {"memory_negation", SCHEMA_OBJECT, 0},
+    {"delegate_max_inflight", SCHEMA_INT, 0},
+    {"cross_verify", SCHEMA_BOOL_OR_OBJECT, 0},
     {"charter", SCHEMA_OBJECT, 0},
     {"identity", SCHEMA_OBJECT, 0},
     {"skills", SCHEMA_OBJECT, 0},
     {"auxiliary", SCHEMA_OBJECT, 0},
     {"model_meta", SCHEMA_OBJECT, 0},
     {"db2", SCHEMA_OBJECT, 0},
+    {"vault", SCHEMA_OBJECT, 0},
     {"ensemble", SCHEMA_OBJECT, 0},
     {"roundtable", SCHEMA_OBJECT, 0},
     {"cron_jobs", SCHEMA_ARRAY, 0},
@@ -458,6 +524,8 @@ static const char *schema_type_name(schema_type_t t)
       return "array";
    case SCHEMA_OBJECT:
       return "object";
+   case SCHEMA_BOOL_OR_OBJECT:
+      return "boolean or object";
    }
    return "unknown";
 }
@@ -476,6 +544,33 @@ static int schema_type_matches(schema_type_t expected, const cJSON *item)
       return cJSON_IsArray(item);
    case SCHEMA_OBJECT:
       return cJSON_IsObject(item);
+   case SCHEMA_BOOL_OR_OBJECT:
+      return cJSON_IsBool(item) || cJSON_IsObject(item);
+   }
+   return 0;
+}
+
+/* Map a config_fields[] descriptor type to the schema validation type, so a flat
+ * scalar can be validated against config_fields[] without a duplicate config_schema[]
+ * row (Proposal A, step 2). Returns 0 for types that are not a plain top-level
+ * scalar (none such reach here — flat fields are STRING/BOOL/INT). */
+static int config_field_schema_type(config_field_type_t t, schema_type_t *out)
+{
+   switch (t)
+   {
+   case CFG_STRING:
+      *out = SCHEMA_STRING;
+      return 1;
+   case CFG_BOOL:
+      *out = SCHEMA_BOOL;
+      return 1;
+   case CFG_INT:
+   case CFG_FLOAT: /* schema has no float type; a number validates as SCHEMA_INT */
+      *out = SCHEMA_INT;
+      return 1;
+   case CFG_ECON_MODE: /* stored int enum, written as an "off|safe|aggressive" string */
+      *out = SCHEMA_STRING;
+      return 1;
    }
    return 0;
 }
@@ -501,6 +596,24 @@ static int config_validate(const cJSON *root)
 
       if (!found)
       {
+         /* Flat scalar keys are not hand-listed in config_schema[] — they are
+          * derived from config_fields[] (Proposal A, step 2), the single source
+          * of truth for every get/set-able top-level scalar. A key the schema
+          * does not name but config_fields[] does is a known flat scalar; validate
+          * its JSON type against the descriptor's type. Only genuinely unknown
+          * keys (in neither table) are reported. */
+         schema_type_t derived;
+         const config_field_t *ff = config_field_lookup(item->string);
+         if (ff && config_field_schema_type(ff->type, &derived))
+         {
+            if (!schema_type_matches(derived, item))
+            {
+               fprintf(stderr, "aimee: config %s: \"%s\" expected %s, got %s\n", level,
+                       item->string, schema_type_name(derived), jo_type_name(item));
+               issues++;
+            }
+            continue;
+         }
          fprintf(stderr, "aimee: config %s: unknown key \"%s\"\n", level, item->string);
          issues++;
          continue;
@@ -586,15 +699,20 @@ static void config_set_defaults(config_t *cfg)
 {
    memset(cfg, 0, sizeof(*cfg));
 
+   /* Flat-field defaults are table-driven (config_flat_defaults[] in config_fields.c),
+    * so each lives in exactly one place. Non-flat defaults (side effects, env-derived,
+    * or computed) are set explicitly below. */
+   config_apply_flat_defaults(cfg);
+
    /* Defaults */
    snprintf(cfg->db1_path, sizeof(cfg->db1_path), "%s", config_default_db1_path());
-   snprintf(cfg->guardrail_mode, sizeof(cfg->guardrail_mode), "%s", MODE_APPROVE);
+   /* Default-ON: a delegate's shell and file ops run inside its own container rather
+    * than in-process with aimee-server's filesystem and environment. Non-flat (the
+    * parse below carries an env override), so the default lives here, not in
+    * config_flat_defaults[]. */
+   cfg->delegate_sandbox = 1;
    snprintf(cfg->delegate_sandbox_package_access, sizeof(cfg->delegate_sandbox_package_access),
             "proxy");
-   cfg->delegate_sandbox_require_isolation =
-       0;                                    /* default OFF: breach degrades loudly, not fatally */
-   cfg->delegate_sandbox_learn_packages = 1; /* default ON: learn + pre-bake the toolchain */
-   snprintf(cfg->provider, sizeof(cfg->provider), "claude");
    cfg->compact_enabled = 1; /* default on; set before no-config early returns */
    cfg->coord_closet_enabled =
        1; /* fold §2: default-ON — conserves identifiers elided by the
@@ -610,17 +728,16 @@ static void config_set_defaults(config_t *cfg)
    cfg->fold_freeze_tail_cap_msgs = 0;
    cfg->fold_recall_enabled = 0; /* fold §4: default-off */
    cfg->fold_recall_ttl_turns = 0;
-   /* Context economizer: the SINGLE control. Default SAFE (lossless: Anthropic prompt
-    * caching + deterministic tool condensation + recall-restorable history fold on
-    * OpenAI). The concrete per-tier levers are resolved by econ_preset(); there is no
-    * per-lever config surface. See docs/features/economizer.md. */
-   cfg->economizer_tier = ECON_TIER_SAFE;
+   /* SAFE is useful without provider-specific pricing guesses: it only compacts
+    * strict JSON returned by a local tool before that result's first dispatch. */
+   cfg->economizer_mode = ECON_MODE_SAFE;
    /* Pluggable-module toggles default to -1 (unspecified) so the resolver falls back to each
     * module's deprecated env toggle / default-ON until an operator writes the `modules:` block. */
    cfg->module_memory = -1;
    cfg->module_governance = -1;
    cfg->module_delegates = -1;
    cfg->module_workflows = -1;
+   cfg->module_roundtable = -1;
    cfg->module_economizer = -1;
    /* Autonomous-dev knobs — defaults match the historical AIMEE_AUTONOMY_* env defaults
     * (adversarial + fan-out tiers OFF; retry/unit caps at their wfe defaults). */
@@ -651,11 +768,13 @@ static void config_set_defaults(config_t *cfg)
    cfg->memory_fetch_budget_base = 128;
    cfg->memory_fetch_budget_shape_aware = 1;
    cfg->kb_search_max_results = 50;
+   /* -1 = operator did not say. web_search_ex resolves it to the built-in
+    * default; 0/1 are explicit off/on. memset-0 above would otherwise read as an
+    * explicit "off" and silently disable page fetching. */
+   cfg->search_fetch_pages = -1;
    /* structured-pdf Phase C blob reconciliation: default hourly sweep, alarm at 1 GiB of
     * reclaimable orphan bytes (config_t is memset-0 above, so these explicit values are the
     * defaults). The sweep is still a no-op until kb_pdf_assets_enabled is on. */
-   cfg->kb_pdf_blob_recon_secs = 3600;
-   cfg->kb_pdf_blob_orphan_alarm_mb = 1024;
    /* Embedding dimension. 0 = UNSET (the operator did not pin a dim): readers fall
     * back to 1024 (db2_embedding_dim(), kb_main, kb_ingest_workers), and — crucially
     * — config_embedding_dim_is_pinned() reports NOT-pinned, so §2a's recorded-dim
@@ -664,16 +783,6 @@ static void config_set_defaults(config_t *cfg)
     * is authoritative and refuses a mismatch. (Was defaulted to 1024, which made
     * every deployment look "pinned" and silently disabled §2a/§2b.) */
    cfg->embedding_dim = 0;
-   /* The cross-encoder rerank stage (Ettin reranker sized to the embedder tier:
-    * 1b with the 4b embedder, 400m with the 0.6b; served by the
-    * embedder service /rerank, client scripts/rerank-remote.py) is the third
-    * pipeline stage after the embedder, and is default-ON: every retrieval
-    * runs a top-K cross-encoder pass over the dense/lexical candidates. It
-    * degrades safely to plain hybrid ordering if the reranker service is absent
-    * or errors, so default-on is safe even without the embedder container. */
-   cfg->memory_rerank_enabled = 1;
-   snprintf(cfg->memory_rerank_command, sizeof(cfg->memory_rerank_command), "%s",
-            "python3 /opt/aimee/scripts/rerank-remote.py");
    cfg->memory_routing_enabled = 1;
    /* Negation-aware retrieval defaults ON: for negatively-polarised queries it
     * promotes memories carrying the same negated concept (overlapping "not_<token>"
@@ -689,7 +798,6 @@ static void config_set_defaults(config_t *cfg)
     * defaults OFF here and config_apply_inference_backend_defaults() flips it ON only
     * for an accelerated backend. An explicit config value always wins. HyDE mode
     * defaults on so the rewrite, once enabled, generates a hypothetical answer. */
-   cfg->typed_facts_enabled = 1;
    /* structured-PDF pipeline defaults OFF (plain pdftotext); the tier drives the 5
     * stage gates. See kb_pdf_apply_tier. */
    snprintf(cfg->kb_pdf_tier, sizeof(cfg->kb_pdf_tier), "off");
@@ -739,6 +847,7 @@ static void config_set_defaults(config_t *cfg)
    cfg->learning_implicit_repeat_question = 0;
    cfg->learning_implicit_repeated_correction = 0;
    cfg->learning_implicit_workflow_repetition = 0;
+   snprintf(cfg->session_worktree_base, sizeof(cfg->session_worktree_base), "remote_default");
    cfg->integrity_enabled = 0;
    cfg->integrity_dry_run = 1;
    /* Ingress envelope DEFAULT-ON (operator decision 2026-06-28): inject the
@@ -752,8 +861,6 @@ static void config_set_defaults(config_t *cfg)
     * (ingress_preinject_build returns early when neither preinject nor typed-facts
     * is on, before the compress flag is read — so compress alone is a safe no-op).
     * Anthropic injection + failure-mining stay opt-in (separate gates). */
-   cfg->ingress_preinject_enabled = 1;
-   cfg->ingress_compress_enabled = 1;
    cfg->ingress_cache_placement_enabled = 1;
    cfg->ingress_preinject_assembly_budget = 6144;
    cfg->ingress_max_raw_scans = 0;
@@ -766,21 +873,17 @@ static void config_set_defaults(config_t *cfg)
     * (.aimee/worktrees/...), never the shared primary checkout. Concurrent aimee
     * sessions sharing one checkout collide on a single git HEAD. Explicit
     * `require_session_worktree: false` bypasses (see cli_attention_guard.c). */
-   cfg->require_session_worktree = 1;
    /* Default ON: agent-authored durable memories go through aimee's memory
     * system, not external per-harness memory files. Explicit
     * `require_aimee_memory: false` bypasses (see cli_attention_guard.c). */
-   cfg->require_aimee_memory = 1;
    /* Default ON: a delegate never runs `git`/`gh` in a shell — git and forge
     * actions go through aimee's git_* tools and execute on aimee-server, where
     * the forge credential stays in-process. Explicit `require_aimee_git: false`
     * bypasses (see wfe_native_gate.c). */
-   cfg->require_aimee_git = 1;
    /* Default-on: the primary agent must not spawn its OWN sub-agents (Task/Agent/
     * spawn_agent/RemoteTrigger); delegation goes through `aimee delegate` so the
     * child inherits this session's guardrails. Enforced only when usable delegates
     * are configured; `subagent_ban_enabled: false` opts out. */
-   cfg->subagent_ban_enabled = 1;
    /* Default-on as of the virtual-context rollout: the long-session benchmark
     * gate (make virtual-context-eval-check) passes on synthetic and real
     * tool-heavy session fixtures. Rollback: set session.virtual_context.enabled
@@ -792,6 +895,16 @@ static void config_set_defaults(config_t *cfg)
    cfg->cache_aware_rewrite_hard_context_threshold = 0.85;
    cfg->cache_aware_rewrite_max_defer_turns = 20;
    cfg->cache_aware_rewrite_segment_check_turns = 5;
+   /* Live three-node mTLS validation promoted connection reuse to the default:
+    * pooled server->KB requests cut warm p50 from 4.762 ms to 1.589 ms, while
+    * resident thin-client keep-alive cut p50 from 4.900 ms to 0.109 ms.
+    * Both remain independently rollbackable through their transport settings. */
+   cfg->transport_kb_pool_enabled = 1;
+   cfg->transport_server_keepalive_enabled = 1;
+   /* gzip saved wire bytes but increased latency on the measured LAN, so both
+    * compression directions remain opt-in pending a qualifying remote profile. */
+   cfg->transport_thinclient_gzip_enabled = 0;
+   cfg->transport_kb_gzip_enabled = 0;
    cfg->cost_reward_enabled = 0;
    cfg->cost_reward_lambda_pct = 30;
    cfg->cost_reward_ref_usd_milli = 500;
@@ -850,42 +963,16 @@ static void config_set_defaults(config_t *cfg)
    config_kb_curator_defaults(cfg); /* kb.curator.* + kb.evidence.embed.* */
    cfg->skills_review_enabled = 0;
    cfg->skills_review_nudge_interval = 10;
-   cfg->skills_curator_enabled = 0;
-   cfg->skills_curator_interval_hours = 168;
    cfg->skills_stale_after_days = 30;
    cfg->skills_archive_after_days = 90;
    cfg->skills_dispatch_enabled = 1;
+   cfg->skills_curator_enabled = 0;
+   cfg->skills_curator_interval_hours = 168;
    cfg->skills_dispatch_max_index = 24;
    cfg->skills_dispatch_advisory = 0;
    cfg->skills_capability_autostub = 0;
    cfg->skills_eval_gate_enabled = 0;
    cfg->skills_eval_threshold = 0.01;
-   cfg->css_style_graph_enabled = 1;        /* default-on: the indexer builds the CSS style
-                                               graph so the read-only css signals/report work
-                                               out of the box (set false to opt out) */
-   cfg->wfe_live_forge_enabled = 0;         /* default-OFF (2026-07-17): the live forge does
-                                               REAL git push + PR + merge, so it stays opt-in
-                                               while the autonomous pipeline is under test.
-                                               When OFF the forge provider is not registered
-                                               and every forge op fails closed (an autonomous
-                                               run parks, never opens/merges a real PR). Set
-                                               true to opt in; the merge-target rail still
-                                               bounds every op even when enabled. */
-   cfg->wfe_proposals_autoscan_enabled = 0; /* default-OFF: no automatic every-tick
-                                               proposal filing; file one at a time
-                                               manually via trigger.fire. */
-   cfg->client_integrations_enabled = 1;    /* default-ON: aimee auto-registers into
-                                               detected AI-tool user configs. Set false
-                                               (or export AIMEE_NO_CLIENT_INTEGRATIONS)
-                                               to keep aimee out of global tool configs
-                                               and wire a single project by hand. */
-   cfg->audit_action_enabled = 1;           /* default-ON: the trajectory_export reader (S3)
-                                               shipped, so the passive per-action audit row
-                                               is on by default; set false to opt out */
-   snprintf(cfg->css_render_command, sizeof(cfg->css_render_command), "%s",
-            CONFIG_DEFAULT_CSS_RENDER_COMMAND); /* default-on render backend (inert
-                                                   until the sidecar is up); set empty
-                                                   to disable */
    snprintf(cfg->vault_custody, sizeof(cfg->vault_custody), "file"); /* default custody
                                                                         (self-unsealing) */
    cfg->vault_tpm2_blob_path[0] = '\0'; /* empty -> <config>/vault/tpm2-kek.blob at use */
@@ -895,20 +982,25 @@ static void config_set_defaults(config_t *cfg)
             CONFIG_DEFAULT_VAULT_TPM2_NV_INDEX);
    cfg->worktree_gc_enabled = 1;
    cfg->worktree_gc_max_age_days = 14;
+   cfg->prefer_local_agents = 0;
    cfg->model_meta_refresh_minutes = 60;
-   cfg->model_meta_capability_routing = 0;
+   /* Capability routing ON by default. Routing previously consulted cost_tier
+    * and role support only, so a packet could be handed to a model whose context
+    * window could not hold it — the failure surfaced as a provider error rather
+    * than a routing decision. Safe to default on now that the gate FAILS UPWARD
+    * (agent_route_with_caps escalates to the most capable seat instead of
+    * returning no route), so enabling it cannot cost an operator a route they
+    * had. Set model_meta.capability_routing=false to restore cost-tier-only. */
+   cfg->model_meta_capability_routing = 1;
    snprintf(cfg->db2_vector_corpus_index, sizeof(cfg->db2_vector_corpus_index), "auto");
    cfg->db2_vector_corpus_diskann_threshold = 1000000;
    cfg->ensemble_min_successful = 2;
    cfg->ensemble_max_cost_usd = 0.0; /* 0 = no cost cap (unlimited) by default */
-   snprintf(cfg->default_persona, sizeof(cfg->default_persona), "engineer");
    cfg->roundtable_max_rounds = 1;
    cfg->roundtable_converge_threshold = 10;
-   /* Saner default: 6 min (was 10). Long enough for a multi-round reasoning-model
-    * ensemble, short enough that a wedged run fails fast instead of a 10-min
-    * silent block. Overridable via roundtable.deadline_ms. Paired with the
-    * round-boundary progress logging so an in-flight run is observably advancing. */
-   cfg->roundtable_deadline_ms = 360000;
+   /* Ten-minute default safety bound for a complete roundtable. It remains
+    * overridable via roundtable.deadline_ms in GUI and CLI configuration. */
+   cfg->roundtable_deadline_ms = 600000;
    snprintf(cfg->roundtable_turns, sizeof(cfg->roundtable_turns), "parallel");
    snprintf(cfg->roundtable_pipeline_done_bar, sizeof(cfg->roundtable_pipeline_done_bar),
             "zero_blocking");
@@ -937,9 +1029,6 @@ static void config_set_defaults(config_t *cfg)
    cfg->identity_working_profile_injection_fields_count = 0;
    cfg->memory_recall_lanes_floor_summary = 4;
    cfg->memory_recall_lanes_floor_fact = 4;
-   snprintf(cfg->openai_endpoint, sizeof(cfg->openai_endpoint), "https://api.openai.com/v1");
-   snprintf(cfg->openai_model, sizeof(cfg->openai_model), "gpt-4o");
-   cfg->openai_key_cmd[0] = '\0';
    cfg->workspace_count = 0;
    config_parse_database(cfg, NULL);
 }
@@ -971,115 +1060,49 @@ static void config_apply_inference_backend_defaults(config_t *cfg, const cJSON *
       cfg->memory_rewrite_enabled = accel;
 }
 
-int econ_tier(const config_t *cfg)
+static int config_snapshot_live(void);
+
+static void config_apply_runtime_secrets(config_t *cfg)
 {
    if (!cfg)
-      return ECON_TIER_OFF;
-   /* modules.economizer:false is still an authoritative hard kill over the tier. */
-   if (cfg->module_economizer == 0)
-      return ECON_TIER_OFF;
-   return cfg->economizer_tier;
-}
-
-const char *econ_tier_name(int tier)
-{
-   switch (tier)
-   {
-   case ECON_TIER_OFF:
-      return "off";
-   case ECON_TIER_AGGRESSIVE:
-      return "aggressive";
-   case ECON_TIER_SAFE:
-   default:
-      return "safe";
-   }
-}
-
-int econ_tier_parse(const char *s)
-{
-   if (s && (strcasecmp(s, "off") == 0 || strcasecmp(s, "0") == 0 || strcasecmp(s, "false") == 0))
-      return ECON_TIER_OFF;
-   if (s && (strcasecmp(s, "aggressive") == 0 || strcasecmp(s, "aggro") == 0))
-      return ECON_TIER_AGGRESSIVE;
-   return ECON_TIER_SAFE; /* default / "safe" / unknown -> lossless */
-}
-
-const char *guardrails_semantic_mode_name(int mode)
-{
-   switch (mode)
-   {
-   case GSEM_MODE_DRY_RUN:
-      return "dry_run";
-   case GSEM_MODE_ADVISORY:
-      return "advisory";
-   case GSEM_MODE_ENFORCE:
-      return "enforce";
-   case GSEM_MODE_OFF:
-   default:
-      return "off";
-   }
-}
-
-int guardrails_semantic_mode_parse(const char *s)
-{
-   if (!s)
-      return GSEM_MODE_OFF;
-   if (strcasecmp(s, "dry_run") == 0 || strcasecmp(s, "dryrun") == 0)
-      return GSEM_MODE_DRY_RUN;
-   if (strcasecmp(s, "advisory") == 0)
-      return GSEM_MODE_ADVISORY;
-   if (strcasecmp(s, "enforce") == 0)
-      return GSEM_MODE_ENFORCE;
-   return GSEM_MODE_OFF; /* "off"/"0"/"false"/unknown -> fail-safe off */
-}
-
-int econ_reduction_master_on(const config_t *cfg)
-{
-   /* Any economization at all runs unless the tier is off. */
-   return econ_tier(cfg) != ECON_TIER_OFF;
-}
-
-int config_module_enabled(int config_tristate, int env_default)
-{
-   /* (Future tier 1: admin/governance FORCE would short-circuit here.) Tier 2: an explicit
-    * user config tristate (0/1) is canonical. Tier 3: -1 (unspecified) falls back to the
-    * deprecated env default. See config.h for the full precedence contract. */
-   if (config_tristate == 0 || config_tristate == 1)
-      return config_tristate;
-   return env_default ? 1 : 0;
-}
-
-int econ_gateway_mutate_on(const config_t *cfg)
-{
-   /* The live-primary mutator is an AGGRESSIVE-tier action. (The call site additionally
-    * restricts it to OpenAI-family egress -- it never runs against Anthropic.) */
-   return econ_tier(cfg) == ECON_TIER_AGGRESSIVE ? 1 : 0;
-}
-
-void econ_preset(const config_t *cfg, econ_preset_t *out)
-{
-   if (!out)
       return;
-   memset(out, 0, sizeof *out);
-   int tier = econ_tier(cfg);
-   if (tier == ECON_TIER_OFF)
-      return; /* verbatim passthrough: every lever off */
-   /* SAFE and AGGRESSIVE both fold history (recall-restorable, freeze-guarded ->
-    * cache-safe on Anthropic) and run deterministic tool-output condensation. */
-   out->history_fold = 1;
-   out->command_filter = 1;
-   out->freeze_guard_horizon = 1; /* conservative break-even: one reuse pays the cache write */
-   out->gateway_session_disable_ttl_ms = 3600000; /* 1h circuit-breaker window */
-   if (tier == ECON_TIER_AGGRESSIVE)
+#define APPLY_RUNTIME_SECRET(name_, field_)                                                        \
+   do                                                                                              \
+   {                                                                                               \
+      char _value[sizeof(cfg->field_)];                                                            \
+      if (runtime_secret_get((name_), _value, sizeof(_value)))                                     \
+         snprintf(cfg->field_, sizeof(cfg->field_), "%s", _value);                                 \
+      runtime_secret_wipe(_value, sizeof(_value));                                                 \
+   } while (0)
+   APPLY_RUNTIME_SECRET("AIMEE_DB2_URL", db2_url);
+   APPLY_RUNTIME_SECRET("AIMEE_SEARCH_TAVILY_API_KEY", search_tavily_api_key);
+   APPLY_RUNTIME_SECRET("AIMEE_PROXY_TOKEN", proxy_token);
+   APPLY_RUNTIME_SECRET("AIMEE_INGRESS_PROXY_SECRET", ingress_trusted_proxy_secret);
+   APPLY_RUNTIME_SECRET("AIMEE_KB_API_BEARER_TOKEN", kb_api_bearer_token);
+   APPLY_RUNTIME_SECRET("AIMEE_TELEMETRY_METRICS_TOKEN", telemetry_metrics_token);
+   APPLY_RUNTIME_SECRET("AIMEE_KB_API_BEARER_TOKEN", kb_client_bearer_token);
+   APPLY_RUNTIME_SECRET("AIMEE_TRIGGER_AUTH_TOKEN", trigger_auth_token);
+   APPLY_RUNTIME_SECRET("AIMEE_KB_CURATOR_PROVIDER_API_KEY", kb_curator_provider_api_key);
+   APPLY_RUNTIME_SECRET("AIMEE_KB_CURATOR_TIER_B_API_KEY", kb_curator_tier_b_api_key);
+   APPLY_RUNTIME_SECRET("AIMEE_API_BEARER_TOKEN", server_api_bearer_token);
+#undef APPLY_RUNTIME_SECRET
+   cfg->server_api_bearer_extra_count = 0;
+   for (int i = 0; i < AIMEE_API_BEARER_EXTRA_MAX; i++)
    {
-      /* Lossy tool-body compression + the live inbound /v1 mutation seam. Both are
-       * OpenAI-family only at their call sites -- Anthropic context is never mutated. */
-      out->compress = 1;
-      out->gateway_seam = 1;
+      char name[96];
+      char value[sizeof(cfg->server_api_bearer_extra[0])];
+      snprintf(name, sizeof(name), "AIMEE_API_BEARER_TOKEN_EXTRA_%d", i);
+      if (!runtime_secret_get(name, value, sizeof(value)))
+      {
+         runtime_secret_wipe(value, sizeof(value));
+         break;
+      }
+      snprintf(cfg->server_api_bearer_extra[i], sizeof(cfg->server_api_bearer_extra[i]), "%s",
+               value);
+      runtime_secret_wipe(value, sizeof(value));
+      cfg->server_api_bearer_extra_count++;
    }
 }
-
-static int config_snapshot_live(void);
 
 /* Public config read. In the SERVER (once config_snapshot_init has seeded the live snapshot)
  * this returns the current snapshot — a lock-free POD copy that reflects the last reload
@@ -1088,9 +1111,14 @@ static int config_snapshot_live(void);
  * path directly so a reload always re-reads disk, never the snapshot it is about to replace. */
 int config_load(config_t *cfg)
 {
+   int rc;
    if (config_snapshot_live())
-      return config_snapshot_get(cfg);
-   return config_load_file(cfg);
+      rc = config_snapshot_get(cfg);
+   else
+      rc = config_load_file(cfg);
+   if (rc == 0)
+      config_apply_runtime_secrets(cfg);
+   return rc;
 }
 
 int config_load_file(config_t *cfg)
@@ -1166,27 +1194,48 @@ int config_load_file(config_t *cfg)
 #if defined(__GNUC__)
    if (validate_toolsets && toolset_registry_init && toolset_registry_load_file)
    {
-      toolset_registry_t registry;
       char toolset_err[TOOLSET_ERROR_MAX] = "";
-      toolset_registry_init(&registry);
-      if (toolset_registry_load_file(&registry, path, toolset_err, sizeof(toolset_err)) != 0)
+      /* toolset_registry_t is large enough to add over a MiB to this function's
+       * frame after LTO. Config loads occur deep inside memory-query call chains,
+       * so a stack copy can exhaust the default 8 MiB worker stack. */
+      toolset_registry_t *registry = calloc(1, sizeof(*registry));
+      if (!registry)
       {
-         fprintf(stderr, "aimee: config validation: %s\n",
-                 toolset_err[0] ? toolset_err : "invalid toolset configuration");
+         fprintf(stderr, "aimee: config validation: out of memory loading toolsets\n");
          issues++;
+      }
+      else
+      {
+         toolset_registry_init(registry);
+         if (toolset_registry_load_file(registry, path, toolset_err, sizeof(toolset_err)) != 0)
+         {
+            fprintf(stderr, "aimee: config validation: %s\n",
+                    toolset_err[0] ? toolset_err : "invalid toolset configuration");
+            issues++;
+         }
+         free(registry);
       }
    }
 #else
    if (validate_toolsets)
    {
-      toolset_registry_t registry;
       char toolset_err[TOOLSET_ERROR_MAX] = "";
-      toolset_registry_init(&registry);
-      if (toolset_registry_load_file(&registry, path, toolset_err, sizeof(toolset_err)) != 0)
+      toolset_registry_t *registry = calloc(1, sizeof(*registry));
+      if (!registry)
       {
-         fprintf(stderr, "aimee: config validation: %s\n",
-                 toolset_err[0] ? toolset_err : "invalid toolset configuration");
+         fprintf(stderr, "aimee: config validation: out of memory loading toolsets\n");
          issues++;
+      }
+      else
+      {
+         toolset_registry_init(registry);
+         if (toolset_registry_load_file(registry, path, toolset_err, sizeof(toolset_err)) != 0)
+         {
+            fprintf(stderr, "aimee: config validation: %s\n",
+                    toolset_err[0] ? toolset_err : "invalid toolset configuration");
+            issues++;
+         }
+         free(registry);
       }
    }
 #endif
@@ -1226,33 +1275,9 @@ int config_load_file(config_t *cfg)
 
    config_parse_database(cfg, root);
 
-   item = cJSON_GetObjectItemCaseSensitive(root, "guardrail_mode");
-   if (cJSON_IsString(item) && item->valuestring[0])
-      snprintf(cfg->guardrail_mode, sizeof(cfg->guardrail_mode), "%s", item->valuestring);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "provider");
-   if (cJSON_IsString(item) && item->valuestring[0])
-      snprintf(cfg->provider, sizeof(cfg->provider), "%s", item->valuestring);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "default_persona");
-   if (cJSON_IsString(item) && item->valuestring[0])
-      snprintf(cfg->default_persona, sizeof(cfg->default_persona), "%s", item->valuestring);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "openai_endpoint");
-   if (cJSON_IsString(item) && item->valuestring[0])
-      snprintf(cfg->openai_endpoint, sizeof(cfg->openai_endpoint), "%s", item->valuestring);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "openai_model");
-   if (cJSON_IsString(item) && item->valuestring[0])
-      snprintf(cfg->openai_model, sizeof(cfg->openai_model), "%s", item->valuestring);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "openai_key_cmd");
-   if (cJSON_IsString(item) && item->valuestring[0])
-      snprintf(cfg->openai_key_cmd, sizeof(cfg->openai_key_cmd), "%s", item->valuestring);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "claude_model");
-   if (cJSON_IsString(item) && item->valuestring[0])
-      snprintf(cfg->claude_model, sizeof(cfg->claude_model), "%s", item->valuestring);
+   /* Flat scalar fields are parsed table-driven from config_fields[] (Proposal A,
+    * step 3): one loop replaces the per-field inline blocks below. */
+   config_parse_flat_fields(cfg, root);
 
    item = cJSON_GetObjectItemCaseSensitive(root, "codex_model");
    if (cJSON_IsString(item) && item->valuestring[0])
@@ -1263,34 +1288,6 @@ int config_load_file(config_t *cfg)
       snprintf(cfg->model_reasoning_effort, sizeof(cfg->model_reasoning_effort), "%s",
                item->valuestring);
 
-   item = cJSON_GetObjectItemCaseSensitive(root, "autonomous");
-   if (cJSON_IsBool(item))
-      cfg->autonomous = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "verify_enabled");
-   if (cJSON_IsBool(item))
-      cfg->verify_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "delegate_graph_context_enabled");
-   if (cJSON_IsBool(item))
-      cfg->delegate_graph_context_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "verify_cross_project");
-   if (cJSON_IsBool(item))
-      cfg->verify_cross_project = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "ingress_preinject_enabled");
-   if (cJSON_IsBool(item))
-      cfg->ingress_preinject_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "ingress_preinject_anthropic_enabled");
-   if (cJSON_IsBool(item))
-      cfg->ingress_preinject_anthropic_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "ingress_compress_enabled");
-   if (cJSON_IsBool(item))
-      cfg->ingress_compress_enabled = cJSON_IsTrue(item);
-
    item = cJSON_GetObjectItemCaseSensitive(root, "ingress_cache_placement_enabled");
    if (cJSON_IsBool(item))
       cfg->ingress_cache_placement_enabled = cJSON_IsTrue(item);
@@ -1299,40 +1296,9 @@ int config_load_file(config_t *cfg)
    if (cJSON_IsNumber(item) && item->valuedouble > 0)
       cfg->ingress_compress_min_chars = (int)item->valuedouble;
 
-   item = cJSON_GetObjectItemCaseSensitive(root, "gateway_prevent_subagents");
-   if (cJSON_IsBool(item))
-      cfg->gateway_prevent_subagents = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "gateway_pin_model");
-   if (cJSON_IsBool(item))
-      cfg->gateway_pin_model = cJSON_IsTrue(item);
-
    /* CSS migration assistant style-graph write path (WP-C). The field +
     * descriptor + save existed, but the YAML load parse was missing, so the
     * flag never took effect during indexing. */
-   item = cJSON_GetObjectItemCaseSensitive(root, "css_style_graph_enabled");
-   if (cJSON_IsBool(item))
-      cfg->css_style_graph_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "wfe_live_forge_enabled");
-   if (cJSON_IsBool(item))
-      cfg->wfe_live_forge_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "wfe_proposals_autoscan_enabled");
-   if (cJSON_IsBool(item))
-      cfg->wfe_proposals_autoscan_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "client_integrations_enabled");
-   if (cJSON_IsBool(item))
-      cfg->client_integrations_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "audit_action_enabled");
-   if (cJSON_IsBool(item))
-      cfg->audit_action_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "audit_worm_enabled");
-   if (cJSON_IsBool(item))
-      cfg->audit_worm_enabled = cJSON_IsTrue(item);
 
    item = cJSON_GetObjectItemCaseSensitive(root, "css_render_command");
    if (cJSON_IsString(item) && item->valuestring)
@@ -1354,33 +1320,19 @@ int config_load_file(config_t *cfg)
    if (cJSON_IsNumber(item) && item->valuedouble >= 0)
       cfg->tool_output_max_bytes = (int)item->valuedouble;
 
-   item = cJSON_GetObjectItemCaseSensitive(root, "require_session_worktree");
-   if (cJSON_IsBool(item))
-      cfg->require_session_worktree = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "require_aimee_memory");
-   if (cJSON_IsBool(item))
-      cfg->require_aimee_memory = cJSON_IsTrue(item);
-
    /* require_aimee_git had a config_fields[] row, a schema row, a default, a
     * config_save writer and NO parse — so `require_aimee_git: false` in aimee.yaml
     * never loaded, and `aimee config set require_aimee_git false` persisted a value
     * that silently reverted to ON at the next restart. The operator escape hatch
     * cmd_hooks.c offers ("Operator: require_aimee_git: false ...") could not work.
     * Exactly the failure the comment below this block already warns about. */
-   item = cJSON_GetObjectItemCaseSensitive(root, "require_aimee_git");
-   if (cJSON_IsBool(item))
-      cfg->require_aimee_git = cJSON_IsTrue(item);
 
    /* Default-on; parse the explicit opt-out so `subagent_ban_enabled: false` loads. */
-   item = cJSON_GetObjectItemCaseSensitive(root, "subagent_ban_enabled");
-   if (cJSON_IsBool(item))
-      cfg->subagent_ban_enabled = cJSON_IsTrue(item);
 
-   /* Delegate sandbox: default 0 (off) from the zeroed config_t, so only an
-    * explicit `delegate_sandbox: true` turns it on. A deploy that cannot easily
-    * write aimee.yaml (e.g. a container image whose config is baked) can enable
-    * it with AIMEE_DELEGATE_SANDBOX=1 in the environment — the env wins. */
+   /* Delegate sandbox: default 1 (on) from config_set_defaults, so an unconfigured
+    * install isolates delegates; only an explicit `delegate_sandbox: false` opts out.
+    * A deploy that cannot easily write aimee.yaml (e.g. a container image whose config
+    * is baked) can flip it with AIMEE_DELEGATE_SANDBOX=0/1 — the env wins. */
    item = cJSON_GetObjectItemCaseSensitive(root, "delegate_sandbox");
    if (cJSON_IsBool(item))
       cfg->delegate_sandbox = cJSON_IsTrue(item);
@@ -1403,18 +1355,6 @@ int config_load_file(config_t *cfg)
               "keeping default \"proxy\" (valid: proxy, off, gated, governance)\n",
               item->valuestring);
 
-   item = cJSON_GetObjectItemCaseSensitive(root, "delegate_sandbox_require_isolation");
-   if (cJSON_IsBool(item))
-      cfg->delegate_sandbox_require_isolation = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "delegate_sandbox_learn_packages");
-   if (cJSON_IsBool(item))
-      cfg->delegate_sandbox_learn_packages = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "typed_facts_enabled");
-   if (cJSON_IsBool(item))
-      cfg->typed_facts_enabled = cJSON_IsTrue(item);
-
    /* structured-PDF gates. These have config_fields[] rows (CLI/server-settable) but
     * historically lacked a file parse, so a value set in aimee.yaml never loaded back on a
     * fresh process. Parse them here as top-level bools so both the Phase-1/2 ingest gate
@@ -1427,62 +1367,6 @@ int config_load_file(config_t *cfg)
       snprintf(cfg->kb_pdf_tier, sizeof(cfg->kb_pdf_tier), "%s", item->valuestring);
       kb_pdf_apply_tier(cfg, cfg->kb_pdf_tier);
    }
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "kb_pdf_ingest_enabled");
-   if (cJSON_IsBool(item))
-      cfg->kb_pdf_ingest_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "kb_pdf_vector_enabled");
-   if (cJSON_IsBool(item))
-      cfg->kb_pdf_vector_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "kb_pdf_tsr_enabled");
-   if (cJSON_IsBool(item))
-      cfg->kb_pdf_tsr_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "tsr_command");
-   if (cJSON_IsString(item) && item->valuestring)
-      snprintf(cfg->tsr_command, sizeof(cfg->tsr_command), "%s", item->valuestring);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "kb_pdf_assets_enabled");
-   if (cJSON_IsBool(item))
-      cfg->kb_pdf_assets_enabled = cJSON_IsTrue(item);
-   item = cJSON_GetObjectItemCaseSensitive(root, "kb_pdf_blob_dir");
-   if (cJSON_IsString(item) && item->valuestring)
-      snprintf(cfg->kb_pdf_blob_dir, sizeof(cfg->kb_pdf_blob_dir), "%s", item->valuestring);
-   item = cJSON_GetObjectItemCaseSensitive(root, "kb_pdf_blob_recon_secs");
-   if (cJSON_IsNumber(item))
-      cfg->kb_pdf_blob_recon_secs = (int)item->valuedouble;
-   item = cJSON_GetObjectItemCaseSensitive(root, "kb_pdf_blob_orphan_alarm_mb");
-   if (cJSON_IsNumber(item))
-      cfg->kb_pdf_blob_orphan_alarm_mb = (int)item->valuedouble;
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "kb_pdf_ocr_enabled");
-   if (cJSON_IsBool(item))
-      cfg->kb_pdf_ocr_enabled = cJSON_IsTrue(item);
-   item = cJSON_GetObjectItemCaseSensitive(root, "ocr_command");
-   if (cJSON_IsString(item) && item->valuestring)
-      snprintf(cfg->ocr_command, sizeof(cfg->ocr_command), "%s", item->valuestring);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "kb_evidence_emit_enabled");
-   if (cJSON_IsBool(item))
-      cfg->kb_evidence_emit_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "fidelity_check_enabled");
-   if (cJSON_IsBool(item))
-      cfg->fidelity_check_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "embedding_command");
-   if (cJSON_IsString(item) && item->valuestring[0])
-      snprintf(cfg->embedding_command, sizeof(cfg->embedding_command), "%s", item->valuestring);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "embedding_model");
-   if (cJSON_IsString(item) && item->valuestring[0])
-      snprintf(cfg->embedding_model, sizeof(cfg->embedding_model), "%s", item->valuestring);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "embedding_endpoint");
-   if (cJSON_IsString(item) && item->valuestring[0])
-      snprintf(cfg->embedding_endpoint, sizeof(cfg->embedding_endpoint), "%s", item->valuestring);
 
    item = cJSON_GetObjectItemCaseSensitive(root, "embedding_dim");
    if (cJSON_IsNumber(item) && item->valuedouble > 0)
@@ -1500,22 +1384,6 @@ int config_load_file(config_t *cfg)
           {"kb_mode", offsetof(config_t, kb_mode), sizeof(((config_t *)0)->kb_mode)},
           {"llm_embed_backend", offsetof(config_t, llm_embed_backend),
            sizeof(((config_t *)0)->llm_embed_backend)},
-          {"llm_embed_host", offsetof(config_t, llm_embed_host),
-           sizeof(((config_t *)0)->llm_embed_host)},
-          {"llm_embed_gpu", offsetof(config_t, llm_embed_gpu),
-           sizeof(((config_t *)0)->llm_embed_gpu)},
-          {"llm_embed_tier", offsetof(config_t, llm_embed_tier),
-           sizeof(((config_t *)0)->llm_embed_tier)},
-          {"llm_rerank_backend", offsetof(config_t, llm_rerank_backend),
-           sizeof(((config_t *)0)->llm_rerank_backend)},
-          {"llm_rerank_host", offsetof(config_t, llm_rerank_host),
-           sizeof(((config_t *)0)->llm_rerank_host)},
-          {"llm_rerank_gpu", offsetof(config_t, llm_rerank_gpu),
-           sizeof(((config_t *)0)->llm_rerank_gpu)},
-          {"llm_rerank_tier", offsetof(config_t, llm_rerank_tier),
-           sizeof(((config_t *)0)->llm_rerank_tier)},
-          {"llm_rerank_endpoint", offsetof(config_t, llm_rerank_endpoint),
-           sizeof(((config_t *)0)->llm_rerank_endpoint)},
           {"llm_synth_backend", offsetof(config_t, llm_synth_backend),
            sizeof(((config_t *)0)->llm_synth_backend)},
           {"llm_synth_host", offsetof(config_t, llm_synth_host),
@@ -1542,17 +1410,11 @@ int config_load_file(config_t *cfg)
       snprintf(cfg->memory_weight_profile, sizeof(cfg->memory_weight_profile), "%s",
                item->valuestring);
 
-   item = cJSON_GetObjectItemCaseSensitive(root, "memory_rerank_mode");
-   if (cJSON_IsString(item) && item->valuestring[0])
-      snprintf(cfg->memory_rerank_mode, sizeof(cfg->memory_rerank_mode), "%s", item->valuestring);
-
    config_parse_memory_rewrite_section(cfg, root);
 
    config_apply_inference_backend_defaults(cfg, root);
 
    config_parse_memory_negation_section(cfg, root);
-
-   config_parse_memory_rerank_section(cfg, root);
 
    config_parse_memory_query_expansion_section(cfg, root);
 
@@ -1567,7 +1429,11 @@ int config_load_file(config_t *cfg)
    config_parse_worktree_gc_section(cfg, root);
    config_parse_fold_section(cfg, root);
    config_parse_modules_section(cfg, root);
-   config_parse_economizer_section(cfg, root);
+   if (config_parse_economizer_section(cfg, root) != 0)
+   {
+      cJSON_Delete(root);
+      return -1;
+   }
    config_parse_autonomy_section(cfg, root);
 
    config_parse_memory_section(cfg, root);
@@ -1674,13 +1540,6 @@ int config_load_file(config_t *cfg)
    config_parse_retry_section(cfg, root);
 
    /* Agent iteration limits */
-   item = cJSON_GetObjectItemCaseSensitive(root, "max_iterations");
-   if (cJSON_IsNumber(item))
-      cfg->max_iterations = (int)item->valuedouble;
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "max_iterations_delegate");
-   if (cJSON_IsNumber(item))
-      cfg->max_iterations_delegate = (int)item->valuedouble;
 
    /* Delegation depth/spawn limits */
    item = cJSON_GetObjectItemCaseSensitive(root, "max_delegation_depth");
@@ -1775,6 +1634,10 @@ int config_load_file(config_t *cfg)
 
    config_parse_computer_use(cfg, root);
 
+   /* context.engine: active context-compaction engine (re-homed from the
+    * removed config_plugin.c; read by context_engine_set_active in server_main) */
+   config_parse_context_engine(cfg, root);
+
    /* Neural-assisted semantic guardrails (guardrails.semantic.*) */
    {
       config_parse_guardrails_section(cfg, root);
@@ -1837,6 +1700,7 @@ int config_load_file(config_t *cfg)
       }
    }
    cJSON_Delete(root);
+
    /* Update mtime cache */
    {
       struct stat st;
@@ -1854,7 +1718,7 @@ int config_load_file(config_t *cfg)
    return 0;
 }
 
-/* ---- live config snapshot: double-buffer + seqlock (live-config-reload P1a) ----
+/* ---- live config snapshot: reader-pinned double buffer (live-config-reload P1a) ----
  *
  * A single writer (config_reload, serialized by g_snap_wlock) publishes a fresh config_t
  * into the inactive slot of a two-slot double buffer and flips the active index; readers
@@ -1864,9 +1728,77 @@ int config_load_file(config_t *cfg)
 static config_t g_snap[2];
 static _Atomic unsigned g_snap_seq = 0;    /* seqlock: even = stable, odd = writing */
 static _Atomic unsigned g_snap_active = 0; /* index (0/1) of the live slot */
-static uint64_t g_snap_token = 0;          /* content-hash of the active snapshot */
-static _Atomic int g_snap_inited = 0;      /* atomic so the config_load wrapper's read is visible */
+/* One atomic admission word closes the delayed-pin TOCTOU that a separate reader
+ * count plus writer zero-check would leave.  The high bit reserves a slot for
+ * its writer; the remaining bits count readers that may touch its ordinary
+ * config_t payload. */
+#define CONFIG_SNAPSHOT_WRITER_RESERVED ((unsigned)(UINT_MAX ^ (UINT_MAX >> 1)))
+#define CONFIG_SNAPSHOT_READER_MAX      (CONFIG_SNAPSHOT_WRITER_RESERVED - 1u)
+static _Atomic unsigned g_snap_state[2] = {0, 0};
+static uint64_t g_snap_token = 0;     /* content-hash of the active snapshot */
+static _Atomic int g_snap_inited = 0; /* atomic so the config_load wrapper's read is visible */
 static pthread_mutex_t g_snap_wlock = PTHREAD_MUTEX_INITIALIZER;
+
+/* Test-only coordination seam.  The focused test links a separately compiled
+ * config object with this macro; production objects contain neither the hook
+ * nor the destructive state controls. */
+#ifdef AIMEE_CONFIG_SNAPSHOT_TESTING
+#include "config_snapshot_test.h"
+static config_snapshot_test_hook_fn g_snap_test_hook;
+static void *g_snap_test_hook_ctx;
+
+static void config_snapshot_test_event(config_snapshot_test_event_t event, unsigned slot)
+{
+   if (g_snap_test_hook)
+      g_snap_test_hook(event, slot, g_snap_test_hook_ctx);
+}
+
+void config_snapshot_test_set_hook(config_snapshot_test_hook_fn hook, void *ctx)
+{
+   g_snap_test_hook = hook;
+   g_snap_test_hook_ctx = ctx;
+}
+
+unsigned config_snapshot_test_writer_reserved(void)
+{
+   return CONFIG_SNAPSHOT_WRITER_RESERVED;
+}
+
+unsigned config_snapshot_test_reader_max(void)
+{
+   return CONFIG_SNAPSHOT_READER_MAX;
+}
+
+int config_snapshot_test_set_slot_state(unsigned slot, unsigned state)
+{
+   if (slot > 1)
+      return -1;
+   atomic_store_explicit(&g_snap_state[slot], state, memory_order_release);
+   return 0;
+}
+
+unsigned config_snapshot_test_get_slot_state(unsigned slot)
+{
+   return slot <= 1 ? atomic_load_explicit(&g_snap_state[slot], memory_order_acquire) : UINT_MAX;
+}
+
+unsigned config_snapshot_test_active_slot(void)
+{
+   return atomic_load_explicit(&g_snap_active, memory_order_acquire);
+}
+#else
+static void config_snapshot_test_event(int event, unsigned slot)
+{
+   (void)event;
+   (void)slot;
+}
+#define CONFIG_SNAPSHOT_TEST_BEFORE_RESERVE    0
+#define CONFIG_SNAPSHOT_TEST_RESERVE_CONTENDED 0
+#define CONFIG_SNAPSHOT_TEST_BEFORE_WRITE      0
+#define CONFIG_SNAPSHOT_TEST_AFTER_OBSERVE     0
+#define CONFIG_SNAPSHOT_TEST_PIN_ACQUIRED      0
+#define CONFIG_SNAPSHOT_TEST_PIN_VALIDATED     0
+#endif
 
 /* Re-applier registry (P3): hooks run after a reload publishes, under g_snap_wlock. */
 #define CONFIG_MAX_REAPPLIERS 16
@@ -1905,14 +1837,55 @@ static uint64_t config_snapshot_token(const config_t *c)
 /* Publish `cfg` into the inactive slot and flip. Caller holds g_snap_wlock (single writer). */
 static void config_snapshot_publish(const config_t *cfg)
 {
+   unsigned current = atomic_load_explicit(&g_snap_active, memory_order_acquire);
+   unsigned nxt = current ^ 1u;
+   unsigned expected = 0;
+   config_snapshot_test_event(CONFIG_SNAPSHOT_TEST_BEFORE_RESERVE, nxt);
+   /* Reserve exactly the drained inactive slot.  Readers admit themselves by
+    * CAS on this same word, so either their pin wins (and we wait for release)
+    * or this reservation wins (and no delayed reader can reach the payload). */
+   unsigned contention_spins = 0;
+   while (!atomic_compare_exchange_weak_explicit(&g_snap_state[nxt], &expected,
+                                                 CONFIG_SNAPSHOT_WRITER_RESERVED,
+                                                 memory_order_acquire, memory_order_relaxed))
+   {
+      config_snapshot_test_event(CONFIG_SNAPSHOT_TEST_RESERVE_CONTENDED, nxt);
+      expected = 0;
+      /* Readers need no writer-held resource to unpin. Bound CPU spinning and
+       * yield the processor so a pinned reader can run its release-decrement. */
+      atomic_signal_fence(memory_order_seq_cst);
+      if (++contention_spins == 64)
+      {
+         sched_yield();
+         contention_spins = 0;
+      }
+   }
+   config_snapshot_test_event(CONFIG_SNAPSHOT_TEST_BEFORE_WRITE, nxt);
    unsigned s = atomic_load_explicit(&g_snap_seq, memory_order_relaxed);
    atomic_store_explicit(&g_snap_seq, s + 1, memory_order_release); /* -> odd (writing) */
-   unsigned nxt = atomic_load_explicit(&g_snap_active, memory_order_relaxed) ^ 1u;
    g_snap[nxt] = *cfg; /* fill the slot no reader is on */
    atomic_store_explicit(&g_snap_active, nxt, memory_order_release);
    g_snap_token = config_snapshot_token(cfg);
    atomic_store_explicit(&g_snap_seq, s + 2, memory_order_release); /* -> even (stable) */
+   atomic_store_explicit(&g_snap_state[nxt], 0, memory_order_release);
    atomic_store_explicit(&g_snap_inited, 1, memory_order_release);
+}
+
+/* Seed the live snapshot from the config on disk. The daemons' entry point: they
+ * were each doing config_load into a stack config_t purely to hand it straight
+ * back, which is the whole 750 KB struct crossing the module boundary to travel
+ * nowhere. Returns 0 on success. */
+
+int config_snapshot_seed(void)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+      config_snapshot_init(cfg);
+   free(cfg);
+   return rc;
 }
 
 void config_snapshot_init(const config_t *cfg)
@@ -1935,11 +1908,106 @@ int config_snapshot_get(config_t *out)
       if (s0 & 1u)
          continue; /* a publish is in progress */
       unsigned act = atomic_load_explicit(&g_snap_active, memory_order_acquire);
-      *out = g_snap[act]; /* POD copy */
+      config_snapshot_test_event(CONFIG_SNAPSHOT_TEST_AFTER_OBSERVE, act);
+      unsigned state = atomic_load_explicit(&g_snap_state[act], memory_order_acquire);
+      for (;;)
+      {
+         if (state & CONFIG_SNAPSHOT_WRITER_RESERVED)
+            break;
+         if (state == CONFIG_SNAPSHOT_READER_MAX)
+            return -1; /* bounded failure: output and admission word stay unchanged */
+         if (atomic_compare_exchange_weak_explicit(&g_snap_state[act], &state, state + 1,
+                                                   memory_order_acquire, memory_order_relaxed))
+            break;
+      }
+      if (state & CONFIG_SNAPSHOT_WRITER_RESERVED)
+         continue;
+      config_snapshot_test_event(CONFIG_SNAPSHOT_TEST_PIN_ACQUIRED, act);
       unsigned s1 = atomic_load_explicit(&g_snap_seq, memory_order_acquire);
-      if (s0 == s1)
-         return 0; /* stable — no publish raced the copy */
+      unsigned act1 = atomic_load_explicit(&g_snap_active, memory_order_acquire);
+      if (s0 != s1 || (s1 & 1u) || act != act1)
+      {
+         atomic_fetch_sub_explicit(&g_snap_state[act], 1, memory_order_release);
+         continue;
+      }
+      config_snapshot_test_event(CONFIG_SNAPSHOT_TEST_PIN_VALIDATED, act);
+      *out = g_snap[act]; /* reservation excludes writers until the release-unpin below */
+      atomic_fetch_sub_explicit(&g_snap_state[act], 1, memory_order_release);
+      return 0;
    }
+}
+
+/* Read ONE field out of the live snapshot under a reader pin, without copying
+ * the whole ~750 KB struct.
+ *
+ * config_snapshot_get copies everything, which is what every accessor would
+ * otherwise pay per call. The pin protocol here is identical to that function's
+ * — seqlock validate, bounded reader admission, release-unpin — but the payload
+ * is memcpy(dst, base + offset, size) instead of a whole-struct assignment.
+ *
+ * Returns 0 on success, -1 when no snapshot is live (caller falls back to a
+ * cached load) or when reader admission is saturated. */
+static int config_snapshot_read_field(size_t offset, size_t size, void *dst)
+{
+   if (!dst || !atomic_load_explicit(&g_snap_inited, memory_order_acquire))
+      return -1;
+   for (;;)
+   {
+      unsigned s0 = atomic_load_explicit(&g_snap_seq, memory_order_acquire);
+      if (s0 & 1u)
+         continue;
+      unsigned act = atomic_load_explicit(&g_snap_active, memory_order_acquire);
+      unsigned state = atomic_load_explicit(&g_snap_state[act], memory_order_acquire);
+      for (;;)
+      {
+         if (state & CONFIG_SNAPSHOT_WRITER_RESERVED)
+            break;
+         if (state == CONFIG_SNAPSHOT_READER_MAX)
+            return -1;
+         if (atomic_compare_exchange_weak_explicit(&g_snap_state[act], &state, state + 1,
+                                                   memory_order_acquire, memory_order_relaxed))
+            break;
+      }
+      if (state & CONFIG_SNAPSHOT_WRITER_RESERVED)
+         continue;
+      unsigned s1 = atomic_load_explicit(&g_snap_seq, memory_order_acquire);
+      unsigned act1 = atomic_load_explicit(&g_snap_active, memory_order_acquire);
+      if (s0 != s1 || (s1 & 1u) || act != act1)
+      {
+         atomic_fetch_sub_explicit(&g_snap_state[act], 1, memory_order_release);
+         continue;
+      }
+      memcpy(dst, (const char *)&g_snap[act] + offset, size);
+      atomic_fetch_sub_explicit(&g_snap_state[act], 1, memory_order_release);
+      return 0;
+   }
+}
+
+/* Field read with a fallback: prefer the pinned snapshot; if none is live (early
+ * startup, or a tool that never called config_snapshot_init) fall back to a
+ * heap-loaded config so accessors work everywhere config_load worked. Heap, not
+ * stack — a 750 KB frame is what overflowed the stack in the memory-search
+ * path. Fails closed by leaving |dst| as the caller zeroed it. */
+int config_field_read(size_t offset, size_t size, void *dst)
+{
+   if (config_snapshot_read_field(offset, size, dst) == 0)
+      return 0;
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   /* Copy even when config_load FAILED. config_load_file applies config_set_defaults
+    * before it can return an error, so cfg holds each field's declared default — and the
+    * default is the only honest answer for a field we could not read.
+    *
+    * Copying only on rc == 0 made every generated accessor return its zero seed on a load
+    * failure, which silently INVERTS every default-ON dial: config_subagent_ban_enabled()
+    * would report "ban disabled", turning a fail-closed guard fail-open exactly when
+    * config is broken. Callers that must distinguish "read failed" from "value is 0"
+    * still have rc. */
+   memcpy(dst, (const char *)cfg + offset, size);
+   free(cfg);
+   return rc;
 }
 
 int config_autonomy_lookup(const char *env_name, long *out)
@@ -2004,6 +2072,80 @@ int config_autonomy_lookup(const char *env_name, long *out)
    return 0;
 }
 
+/* Structured-PDF sidecar endpoints. Config first, then the deployment env var, else ""
+ * (feature off). The env var is how a compose/container deployment points the KB at a
+ * sidecar it just started; the config key is the operator's persistent choice, so an
+ * explicitly configured command outranks it. (Deliberately the OPPOSITE precedence to
+ * config_embedding_command, which documents why the running embedder's announcement must
+ * win there.) Lives here so no KB caller reads the environment. */
+static const char *config_sidecar_endpoint(size_t offset, size_t size, const char *env_name,
+                                           char *buf, size_t buflen)
+{
+   buf[0] = '\0';
+   config_field_read(offset, size, buf);
+   buf[buflen - 1] = '\0';
+   if (buf[0])
+      return buf;
+   const char *env = getenv(env_name);
+   if (env && env[0])
+   {
+      snprintf(buf, buflen, "%s", env);
+      return buf;
+   }
+   buf[0] = '\0';
+   return buf;
+}
+
+const char *config_tsr_endpoint(void)
+{
+   static _Thread_local char buf[1024];
+   return config_sidecar_endpoint(offsetof(config_t, tsr_command),
+                                  sizeof(((config_t *)0)->tsr_command), "AIMEE_TSR_URL", buf,
+                                  sizeof(buf));
+}
+
+const char *config_ocr_endpoint(void)
+{
+   static _Thread_local char buf[1024];
+   return config_sidecar_endpoint(offsetof(config_t, ocr_command),
+                                  sizeof(((config_t *)0)->ocr_command), "AIMEE_OCR_URL", buf,
+                                  sizeof(buf));
+}
+
+int config_module_roundtable_enabled(void)
+{
+   /* Moved out of roundtable_activation.c, which read this env var itself and took a
+    * config_t to reach the tristate. Same truthy/falsey set and the same warn-then-off
+    * behavior for an unrecognized value. */
+   int env_default = 0;
+   const char *v = getenv("AIMEE_MODULE_ROUNDTABLE");
+   if (v && v[0])
+   {
+      if (strcasecmp(v, "1") == 0 || strcasecmp(v, "true") == 0 || strcasecmp(v, "on") == 0 ||
+          strcasecmp(v, "yes") == 0)
+         env_default = 1;
+      else if (strcasecmp(v, "0") == 0 || strcasecmp(v, "false") == 0 ||
+               strcasecmp(v, "off") == 0 || strcasecmp(v, "no") == 0)
+         env_default = 0;
+      else
+         fprintf(stderr, "aimee: invalid AIMEE_MODULE_ROUNDTABLE value; defaulting off\n");
+   }
+   int tristate = -1;
+   config_field_read(offsetof(config_t, module_roundtable),
+                     sizeof(((config_t *)0)->module_roundtable), &tristate);
+   return config_module_enabled(tristate, env_default);
+}
+
+int config_antipatterns_bypass(void)
+{
+   /* See config.h for why this stays env-only. Value-checked and fail-closed. */
+   const char *v = getenv("AIMEE_ANTIPATTERNS_BYPASS");
+   if (!v || !v[0])
+      return 0;
+   return strcasecmp(v, "1") == 0 || strcasecmp(v, "true") == 0 || strcasecmp(v, "on") == 0 ||
+          strcasecmp(v, "yes") == 0;
+}
+
 int config_reload(void)
 {
    /* Hold the writer lock across the WHOLE reload (load + validate + token + publish) so two
@@ -2020,19 +2162,30 @@ int config_reload(void)
       pthread_mutex_unlock(&g_snap_wlock);
       return -1; /* parse failure -> keep the running snapshot */
    }
+   /* The published snapshot must equal what config_load() returns, and config_load
+    * is config_load_file + this. Without it a reload publishes a snapshot with every
+    * Vault-only secret blanked, because config_load_file may serve the process cache
+    * and skip the parse that rehydrates them.
+    *
+    * That is not hypothetical: the server mints the API primary bearer AFTER its
+    * first config_load, so the cache still holds the pre-mint config. The 1s
+    * config_reload_if_changed tick then republished that stale copy over the good
+    * snapshot seeded by config_snapshot_init, leaving server_api_bearer_token empty
+    * and failing first-user bootstrap on every clean install (the wizard's Deploy
+    * step returned 500). Applied before the token so an unchanged reload stays a
+    * no-op rather than churning the snapshot. */
+   config_apply_runtime_secrets(&fresh);
    uint64_t tok = config_snapshot_token(&fresh);
    if (atomic_load_explicit(&g_snap_inited, memory_order_acquire) && tok == g_snap_token)
    {
       pthread_mutex_unlock(&g_snap_wlock);
       return 0; /* self-reload no-op guard: nothing logically changed */
    }
-   /* capture the OLD snapshot (if any) so re-appliers can diff their section, then publish. */
-   config_t old;
-   int have_old =
-       atomic_load_explicit(&g_snap_inited, memory_order_acquire) && config_snapshot_get(&old) == 0;
+   /* Publish BEFORE running the re-appliers: they read config through accessors,
+    * which must already see the new snapshot. */
    config_snapshot_publish(&fresh);
    for (int i = 0; i < g_reapplier_count; i++)
-      g_reappliers[i](have_old ? &old : &fresh, &fresh);
+      g_reappliers[i]();
    pthread_mutex_unlock(&g_snap_wlock);
    return 1; /* a new snapshot was published */
 }
@@ -2054,6 +2207,26 @@ int config_reload(void)
  *
  * Returns config_reload()'s result (1 published / 0 no-op / -1 kept) when a change was
  * observed, else 0. */
+/* "Is the config readable?" — the only thing callers were ever asking when they
+ * wrote `config_load(&cfg) == 0` as a guard.
+ *
+ * config_load() does NOT fail for a missing, oversized, or unparsable file; all
+ * three return 0 with defaults filled in. It fails on exactly two things: an
+ * allocation failure, and strict mode rejecting a validated field. Callers that
+ * branched on it were distinguishing "config unavailable" from "field is at its
+ * default" — a distinction the accessors deliberately collapse, since they fall
+ * back to defaults. This keeps that distinction available without handing out a
+ * config_t. */
+int config_present(void)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return 0;
+   int rc = config_load(cfg);
+   free(cfg);
+   return rc == 0;
+}
+
 int config_reload_if_changed(void)
 {
    static struct timespec last_mt;
@@ -2077,4 +2250,142 @@ int config_reload_if_changed(void)
    last_ino = st.st_ino;
    seeded = 1;
    return config_reload();
+}
+
+/* ── opaque boolean accessors ────────────────────────────────────────────────
+ *
+ * Each of these existed only as a field read behind a caller-declared config_t.
+ * A caller that wants one boolean should not have to name the type, include its
+ * header, or put ~750 KB on the stack to get it. The load below is served from
+ * the config module's snapshot/mtime cache, so this is not a per-call reparse.
+ *
+ * Heap, not stack: these are called from paths that nest several frames deep,
+ * and a 750 KB frame is what overflowed the stack in the memory-search path. */
+static int config_flag(size_t offset)
+{
+   int v = 0; /* fail closed: an unreadable config must not enable a feature */
+   config_field_read(offset, sizeof(v), &v);
+   return v;
+}
+
+int config_audit_worm_enabled(void)
+{
+   return config_flag(offsetof(config_t, audit_worm_enabled));
+}
+
+int config_bandit_live_decision_enabled(void)
+{
+   return config_flag(offsetof(config_t, bandit_live_decision_enabled));
+}
+
+int config_css_style_graph_enabled(void)
+{
+   return config_flag(offsetof(config_t, css_style_graph_enabled));
+}
+
+int config_delegate_graph_context_enabled(void)
+{
+   return config_flag(offsetof(config_t, delegate_graph_context_enabled));
+}
+
+int config_drift_detect_shadow_enabled(void)
+{
+   return config_flag(offsetof(config_t, drift_detect_shadow_enabled));
+}
+
+int config_guardrails_blast_radius_advisory_enabled(void)
+{
+   return config_flag(offsetof(config_t, guardrails_blast_radius_advisory_enabled));
+}
+
+int config_ingress_usage_accounting_enabled(void)
+{
+   return config_flag(offsetof(config_t, ingress_usage_accounting_enabled));
+}
+
+int config_kb_pdf_vector_enabled(void)
+{
+   return config_flag(offsetof(config_t, kb_pdf_vector_enabled));
+}
+
+int config_memory_derive_facts_enabled(void)
+{
+   return config_flag(offsetof(config_t, memory_derive_facts_enabled));
+}
+
+int config_memory_routing_enabled(void)
+{
+   return config_flag(offsetof(config_t, memory_routing_enabled));
+}
+
+int config_transport_kb_pool_enabled(void)
+{
+   return config_flag(offsetof(config_t, transport_kb_pool_enabled));
+}
+
+int config_typed_facts_enabled(void)
+{
+   return config_flag(offsetof(config_t, typed_facts_enabled));
+}
+
+int config_wfe_live_forge_enabled(void)
+{
+   return config_flag(offsetof(config_t, wfe_live_forge_enabled));
+}
+
+/* Non-boolean opaque accessors. Same contract as config_flag: heap-loaded from
+ * the config module's cache, fail closed. */
+double config_memory_semantic_floor_scale(void)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return 0.0; /* caller treats <= 0 as "unset" and derives from dimension */
+   config_load(cfg);
+   double v = cfg->memory_semantic_floor_scale;
+   free(cfg);
+   return v;
+}
+
+int config_ingress_audit_async(void)
+{
+   return config_flag(offsetof(config_t, ingress_audit_async));
+}
+
+/* Opaque form: resolve the embedding command without the caller ever holding a
+ * config_t. config_t is ~750 KB, so a caller that only wants this one string was
+ * paying three quarters of a megabyte of stack for it — nested across the memory
+ * search path that overflowed an 8 MB stack. The load is cached inside the
+ * config module (config_load consults a snapshot/mtime cache), so this is not a
+ * per-call reparse.
+ *
+ * Returns a pointer into a function-local static, valid until the next call on
+ * this thread. Callers copy it if they need to keep it. */
+/* The RAW configured embedding command, with no resolution applied.
+ *
+ * config_embedding_command_current() answers "what should I embed with", which
+ * is never empty — it falls back to an endpoint or the builtin. Callers that
+ * need "did the operator configure an embedder at all" have to see the empty
+ * string, so they get the field itself. The generated accessor for this field
+ * is suppressed because the resolving function already owns the name. */
+const char *config_embedding_command_field(void)
+{
+   static _Thread_local char buf[512];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, embedding_command), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_embedding_command_current(const char *requested)
+{
+   if (requested && requested[0])
+      return requested;
+   static _Thread_local char cached[512];
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return "builtin"; /* allocation failure must not fabricate an embedder */
+   config_load(cfg);
+   snprintf(cached, sizeof(cached), "%s", config_embedding_command(cfg, NULL));
+   free(cfg);
+   return cached;
 }

@@ -144,8 +144,7 @@ static int forge_push_branch(const char *dir, const char *branch, const char *wh
  * A config_load failure reads as DISABLED (fail closed). */
 static int forge_on(void)
 {
-   config_t cfg;
-   return config_load(&cfg) == 0 && cfg.wfe_live_forge_enabled;
+   return config_wfe_live_forge_enabled();
 }
 
 /* A live forge op may proceed only if BOTH the operator switch is on AND the
@@ -315,6 +314,13 @@ static wfe_merge_result_t live_merge(const char *repo, const char *pr)
    case 2:
       aimee_log(LOG_WARN, "wfe-forge", "merge of PR %d: %s", num, err);
       return WFE_MERGE_NOT_MERGEABLE;
+   case 3:
+      /* A content conflict, not a lost race. Looping here re-attempts a merge
+       * that is identical every time and can never succeed, while the run holds
+       * the single active-root slot. Terminal, and say what conflicted. */
+      aimee_log(LOG_ERROR, "wfe-forge", "merge of PR %d conflicts and cannot be retried: %s", num,
+                err);
+      return WFE_MERGE_CONFLICT;
    default:
       aimee_log(LOG_WARN, "wfe-forge", "merge of PR %d: %s", num, err);
       return WFE_MERGE_ERROR; /* unknown -> park for a human */
@@ -405,8 +411,9 @@ static int live_open(const char *repo, const char *branch, const char *base, con
       return -1;
    /* git_pr_create_via_api_ex strips AI attribution from the body itself. */
    char url[512] = "", err[200] = "";
-   if (git_pr_create_via_api_ex(NULL, dir, branch, base, title ? title : "", body ? body : "", url,
-                                sizeof url, err, sizeof err) != 0)
+   int draft = wfe_base_is_protected(base);
+   if (git_pr_create_via_api_ex_draft(NULL, dir, branch, base, title ? title : "", body ? body : "",
+                                      draft, url, sizeof url, err, sizeof err) != 0)
    {
       aimee_log(LOG_WARN, "wfe-forge", "pr create for %s failed: %s", branch, err);
       return -1;

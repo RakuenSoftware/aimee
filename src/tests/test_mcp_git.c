@@ -771,7 +771,7 @@ static void test_git_pr_wait_missing_number(void)
    cJSON_Delete(args);
 }
 
-static void test_git_pr_wait_parses_plain_checks_output(void)
+static void test_git_pr_wait_is_rejected_without_running_gh(void)
 {
    char tmpdir[] = "/tmp/aimee-test-gh-XXXXXX";
    assert(mkdtemp(tmpdir) != NULL);
@@ -780,17 +780,7 @@ static void test_git_pr_wait_parses_plain_checks_output(void)
    snprintf(gh_path, sizeof(gh_path), "%s/gh", tmpdir);
    FILE *fp = fopen(gh_path, "w");
    assert(fp != NULL);
-   fputs("#!/bin/sh\n"
-         "for arg in \"$@\"; do\n"
-         "  if [ \"$arg\" = \"--json\" ]; then\n"
-         "    echo 'unexpected --json' >&2\n"
-         "    exit 2\n"
-         "  fi\n"
-         "done\n"
-         "printf 'unit-tests\\tpass\\t1s\\thttps://example.test/unit\\n'\n"
-         "printf 'lint\\tfail\\t2s\\thttps://example.test/lint\\n'\n"
-         "exit 1\n",
-         fp);
+   fputs("#!/bin/sh\nexit 99\n", fp);
    fclose(fp);
    assert(chmod(gh_path, 0700) == 0);
 
@@ -811,7 +801,56 @@ static void test_git_pr_wait_parses_plain_checks_output(void)
    cJSON *resp = handle_git_pr(args);
    char *text = get_mcp_text(resp);
    assert(text != NULL);
-   assert(strstr(text, "checks complete: 1/2 failed, 1 passed") != NULL);
+   assert(strstr(text, "blocking PR check waits are disabled") != NULL);
+   assert(strstr(text, "poll") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   if (saved_path[0])
+      assert(setenv("PATH", saved_path, 1) == 0);
+   else
+      unsetenv("PATH");
+   char cmd[640];
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmpdir);
+   system(cmd);
+}
+
+static void test_git_pr_auto_merge_accepts_pending_checks_without_claiming_merge(void)
+{
+   char tmpdir[] = "/tmp/aimee-test-gh-auto-XXXXXX";
+   assert(mkdtemp(tmpdir) != NULL);
+
+   char gh_path[512];
+   snprintf(gh_path, sizeof(gh_path), "%s/gh", tmpdir);
+   FILE *fp = fopen(gh_path, "w");
+   assert(fp != NULL);
+   fputs("#!/bin/sh\n"
+         "if [ \"$1\" = pr ] && [ \"$2\" = checks ]; then exit 8; fi\n"
+         "if [ \"$1\" = pr ] && [ \"$2\" = merge ]; then exit 0; fi\n"
+         "exit 2\n",
+         fp);
+   fclose(fp);
+   assert(chmod(gh_path, 0700) == 0);
+
+   const char *old_path = getenv("PATH");
+   char saved_path[4096] = "";
+   if (old_path)
+      snprintf(saved_path, sizeof(saved_path), "%s", old_path);
+   char new_path[8192];
+   snprintf(new_path, sizeof(new_path), "%s%s%s", tmpdir, old_path ? ":" : "",
+            old_path ? old_path : "");
+   assert(setenv("PATH", new_path, 1) == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "merge");
+   cJSON_AddNumberToObject(args, "number", 123);
+   cJSON_AddBoolToObject(args, "auto", 1);
+   cJSON *resp = handle_git_pr(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "--auto") != NULL);
+   assert(strstr(text, "\"auto_merge_enabled\":true") != NULL);
+   assert(strstr(text, "\"merged\":false") != NULL);
    cJSON_Delete(resp);
    cJSON_Delete(args);
 
@@ -1311,8 +1350,8 @@ static void test_verify_load_config_emits_parallel_steps(void)
    assert(cfg.count == 1);
    assert(strcmp(cfg.steps[0].name, "verify-local") == 0);
    assert(strstr(cfg.steps[0].run, "AIMEE_VERIFY_MAKE_JOBS") != NULL);
-   /* The generated step defaults the job counts to $(nproc) so a fresh install
-    * builds and runs the suite in parallel. */
+   /* Builds can use $(nproc), while tests use a bounded per-verifier default so
+    * concurrent workflow verification cannot multiply into host-wide overload. */
    assert(strstr(cfg.steps[0].run, "nproc") != NULL);
    assert(strstr(cfg.steps[0].run, "AIMEE_VERIFY_TEST_JOBS") != NULL);
 
@@ -1398,6 +1437,34 @@ static void test_verify_load_config_prefers_check_linking_for_build(void)
    verify_test_teardown(tmpdir, fake_home);
 }
 
+/* A small repository may expose only `make test`. The generated test step must
+ * not depend on a build step that was never emitted, or the wave scheduler can
+ * never submit it and reports exit -1 before running the repository's tests. */
+static void test_verify_load_config_test_only_has_no_missing_build_dependency(void)
+{
+   char tmpdir[256], fake_home[256];
+   verify_test_setup_repo(tmpdir, sizeof(tmpdir), "aimee-test-verify-test-only");
+   verify_test_set_fake_home(fake_home, sizeof(fake_home));
+
+   char makefile_path[512];
+   snprintf(makefile_path, sizeof(makefile_path), "%s/Makefile", tmpdir);
+   FILE *f = fopen(makefile_path, "w");
+   assert(f != NULL);
+   fputs(".PHONY: test\n"
+         "test:\n"
+         "\t@echo tests\n",
+         f);
+   fclose(f);
+
+   verify_config_t cfg;
+   assert(verify_load_config(tmpdir, &cfg) == 0);
+   assert(cfg.count == 1);
+   assert(strcmp(cfg.steps[0].name, "test") == 0);
+   assert(cfg.steps[0].after[0] == '\0');
+
+   verify_test_teardown(tmpdir, fake_home);
+}
+
 static void test_verify_load_config_normalizes_build_integrity_order(void)
 {
    char tmpdir[256], fake_home[256];
@@ -1451,7 +1518,7 @@ static void test_verify_load_config_falls_back_to_verify_local(void)
    assert(strcmp(cfg.steps[0].name, "verify-local") == 0);
    assert(strcmp(cfg.steps[0].run,
                  "make -j${AIMEE_VERIFY_MAKE_JOBS:-$(nproc 2>/dev/null || echo 4)} "
-                 "AIMEE_VERIFY_TEST_JOBS=${AIMEE_VERIFY_TEST_JOBS:-$(nproc 2>/dev/null || echo 4)} "
+                 "AIMEE_VERIFY_TEST_JOBS=${AIMEE_VERIFY_TEST_JOBS:-2} "
                  "verify-local") == 0);
 
    verify_test_teardown(tmpdir, fake_home);
@@ -2195,6 +2262,59 @@ static void *run_sync_verify_thread(void *arg)
    return NULL;
 }
 
+static void test_git_verify_serializes_across_sessions(void)
+{
+   char tmpdir[256];
+   verify_test_setup_repo(tmpdir, sizeof(tmpdir), "aimee-test-verify-global-lock");
+
+   char marker[512], overlap[512], yaml[2048];
+   snprintf(marker, sizeof(marker), "%s/verify-running", tmpdir);
+   snprintf(overlap, sizeof(overlap), "%s/verify-overlapped", tmpdir);
+   snprintf(yaml, sizeof(yaml),
+            "verify:\n"
+            "  enforce: true\n"
+            "  steps:\n"
+            "    - name: exclusive\n"
+            "      run: if mkdir '%s'; then sleep 0.4; rmdir '%s'; else echo overlap > '%s'; "
+            "exit 1; fi\n",
+            marker, marker, overlap);
+   char fake_home[256];
+   verify_test_write_yaml(tmpdir, fake_home, sizeof(fake_home), yaml);
+
+   char dirty[512];
+   snprintf(dirty, sizeof(dirty), "%s/dirty", tmpdir);
+   FILE *f = fopen(dirty, "w");
+   assert(f != NULL);
+   fputs("force both runs past the clean-tree cache\n", f);
+   fclose(f);
+
+   char saved_cwd[4096];
+   assert(getcwd(saved_cwd, sizeof(saved_cwd)) != NULL);
+   assert(chdir(tmpdir) == 0);
+
+   sync_verify_thread_t first = {.session_id = "sid-global-lock-a", .resp = NULL};
+   sync_verify_thread_t second = {.session_id = "sid-global-lock-b", .resp = NULL};
+   pthread_t first_tid, second_tid;
+   assert(pthread_create(&first_tid, NULL, run_sync_verify_thread, &first) == 0);
+   struct stat st;
+   for (int i = 0; i < 200 && stat(marker, &st) != 0; i++)
+      usleep(10000);
+   assert(stat(marker, &st) == 0);
+   assert(pthread_create(&second_tid, NULL, run_sync_verify_thread, &second) == 0);
+
+   assert(pthread_join(first_tid, NULL) == 0);
+   assert(pthread_join(second_tid, NULL) == 0);
+   assert(first.resp != NULL && second.resp != NULL);
+   assert(strstr(get_mcp_text(first.resp), "PASS") != NULL);
+   assert(strstr(get_mcp_text(second.resp), "PASS") != NULL);
+   assert(access(overlap, F_OK) != 0);
+   cJSON_Delete(first.resp);
+   cJSON_Delete(second.resp);
+
+   assert(chdir(saved_cwd) == 0);
+   verify_test_teardown(tmpdir, fake_home);
+}
+
 static void test_git_verify_sync_cancelled_by_session_close(void)
 {
    char tmpdir[256];
@@ -2383,7 +2503,8 @@ int main(void)
    test_git_pr_edit_requires_fields();
    test_git_pr_checks_missing_number();
    test_git_pr_wait_missing_number();
-   test_git_pr_wait_parses_plain_checks_output();
+   test_git_pr_wait_is_rejected_without_running_gh();
+   test_git_pr_auto_merge_accepts_pending_checks_without_claiming_merge();
    assert(check_branch_has_merged_pr_for(NULL) == 0);
    assert(check_branch_has_merged_pr_for("") == 0);
    test_git_issue_list_defaults();
@@ -2398,6 +2519,7 @@ int main(void)
    test_git_verify_async_does_not_starve_server_pool();
    test_git_verify_async_rejects_same_session_overlap();
    test_git_verify_async_reaps_finished_jobs();
+   test_git_verify_serializes_across_sessions();
    test_git_verify_sync_cancelled_by_session_close();
    test_git_verify_sync_rejects_same_session_overlap();
 
@@ -2408,6 +2530,7 @@ int main(void)
    test_verify_load_config_emits_parallel_steps();
    test_verify_load_config_collapses_generated_pipeline_to_verify_local();
    test_verify_load_config_prefers_check_linking_for_build();
+   test_verify_load_config_test_only_has_no_missing_build_dependency();
    test_verify_load_config_normalizes_build_integrity_order();
    test_verify_load_config_falls_back_to_verify_local();
    test_verify_load_config_old_flat_format_ignored();

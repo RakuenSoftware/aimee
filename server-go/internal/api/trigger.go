@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -378,8 +379,13 @@ func (s *Server) fileProposal(ctx context.Context, request triggerFireRequest) (
 	if err != nil {
 		return "", "", err
 	}
-	identity := fmt.Sprintf("git:%s:%s:%s:%s:%s", commit, proposalPath, wfe.Hash(content),
-		request.Pipeline, request.Mode)
+	proposalHash := wfe.Hash(content)
+	identity := db1.GitProposalIdentity(proposalHash, request.Pipeline, request.Mode)
+	if existing, findErr := s.db.WorkItemByGitProposal(ctx, workspace, proposalHash, request.Pipeline, request.Mode); findErr == nil {
+		return "", "", fmt.Errorf("proposal already filed as %s", existing.ID)
+	} else if !errors.Is(findErr, sql.ErrNoRows) {
+		return "", "", findErr
+	}
 	workItemID, err := mintWorkItemID()
 	if err != nil {
 		return "", "", err
@@ -394,6 +400,13 @@ func (s *Server) fileProposal(ctx context.Context, request triggerFireRequest) (
 	cap := 2
 	if s.config != nil {
 		cap = s.config.Int("trigger.max_concurrent", cap)
+	}
+	// The store's cap sentinel is "<=0 means unlimited" (child slices rely on it),
+	// but an operator who sets trigger.max_concurrent to 0 means "admit nothing".
+	// Honour that here rather than silently removing the limit.
+	if cap == 0 {
+		_ = s.artifacts.DeleteWorkItem(workItemID)
+		return "", "", fmt.Errorf("%w (admission paused: trigger.max_concurrent is 0)", db1.ErrAdmissionFull)
 	}
 	if err := s.db.AdmitRoot(ctx, db1.CreateWorkItem{
 		ID: workItemID, Repo: workspace, ProposalPath: identity, WorkflowName: definition.Name,

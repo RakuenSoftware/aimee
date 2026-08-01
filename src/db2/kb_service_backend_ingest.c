@@ -25,16 +25,9 @@ static void db2_kb_resolve_project(const char *project, char *out, size_t out_le
 {
    if (!out || out_len == 0)
       return;
+   out[0] = '\0';
    if (project && project[0])
-   {
       snprintf(out, out_len, "%s", project);
-      return;
-   }
-   char path[MAX_PATH_LEN];
-   if (!getcwd(path, sizeof(path)))
-      path[0] = '\0';
-   const char *base = strrchr(path, '/');
-   snprintf(out, out_len, "%s", base ? base + 1 : path);
 }
 
 /* ── kb_ingest_queue ─────────────────────────────────────────────────────── */
@@ -60,10 +53,10 @@ int db2_kb_ingest_queue_reset_running(void)
 }
 
 int db2_kb_ingest_queue_enqueue(const char *project, const char *root_path, const char *workspace,
-                                int force)
+                                int force, int priority)
 {
    void *conn = db2_conn();
-   if (!conn || !project || !root_path)
+   if (!conn || !project || !project[0] || !root_path)
       return -1;
 
    char proj[256];
@@ -73,10 +66,15 @@ int db2_kb_ingest_queue_enqueue(const char *project, const char *root_path, cons
    char err[KBS_ERRBUF] = "";
    aimee_pg_stmt_t *s =
        aimee_pg_prepare(conn,
-                        "INSERT INTO kb_ingest_queue (project, root_path, workspace, force)"
-                        " VALUES (?1, ?2, ?3, ?4)"
+                        "INSERT INTO kb_ingest_queue (project, root_path, workspace, force,"
+                        " priority) VALUES (?1, ?2, ?3, ?4, ?5)"
                         " ON CONFLICT (project) WHERE status IN ('pending', 'running')"
-                        " DO UPDATE SET force = GREATEST(EXCLUDED.force, kb_ingest_queue.force)",
+                        " DO UPDATE SET force = GREATEST(EXCLUDED.force, kb_ingest_queue.force),"
+                        /* Promote, never demote. A project already queued by the background
+                         * sweep must jump the queue when someone then asks for it directly —
+                         * otherwise the dedup would pin it at bulk priority and the waiting
+                         * caller gains nothing from asking. */
+                        " priority = GREATEST(EXCLUDED.priority, kb_ingest_queue.priority)",
                         err, sizeof(err));
    if (!s)
       return -1;
@@ -85,6 +83,7 @@ int db2_kb_ingest_queue_enqueue(const char *project, const char *root_path, cons
    aimee_pg_bind_text(s, "?2", root_path);
    aimee_pg_bind_text(s, "?3", ws);
    aimee_pg_bind_int(s, "?4", force);
+   aimee_pg_bind_int(s, "?5", priority);
    (void)aimee_pg_step(s, err, sizeof(err));
    int inserted = aimee_pg_stmt_changes(s);
    aimee_pg_finalize(s);
@@ -105,7 +104,10 @@ int db2_kb_ingest_queue_claim_next(db2_kb_ingest_job_t *out)
                         "UPDATE kb_ingest_queue SET status = 'running', started_at = pg_now_text()"
                         " WHERE id = ("
                         "   SELECT id FROM kb_ingest_queue WHERE status = 'pending'"
-                        "   ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED"
+                        /* priority first, then FIFO within a priority — so a bulk
+                         * reindex cannot starve work a caller is blocked on, and
+                         * equal-priority jobs keep their arrival order. */
+                        "   ORDER BY priority DESC, id LIMIT 1 FOR UPDATE SKIP LOCKED"
                         " ) RETURNING id, project, root_path, workspace, force",
                         err, sizeof(err));
    if (!s)
@@ -153,9 +155,9 @@ int db2_kb_ingest_queue_complete(int64_t job_id, int files_indexed, int chunks_a
    aimee_pg_bind_int(s, "?2", files_indexed);
    aimee_pg_bind_int(s, "?3", chunks_added);
    aimee_pg_bind_int(s, "?4", embeddings_added);
-   (void)aimee_pg_step(s, err, sizeof(err));
+   int step = aimee_pg_step(s, err, sizeof(err));
    aimee_pg_finalize(s);
-   return 0;
+   return step == AIMEE_PG_DONE ? 0 : -1;
 }
 
 int db2_kb_ingest_queue_fail(int64_t job_id, const char *error_message)
@@ -275,7 +277,7 @@ int db2_kb_file_index_upsert(const char *project, const char *file_path, const c
                              const char *content)
 {
    void *conn = db2_conn();
-   if (!conn || !project || !file_path || !file_hash)
+   if (!conn || !project || !project[0] || !file_path || !file_hash)
       return -1;
 
    char proj[256];
@@ -284,10 +286,13 @@ int db2_kb_file_index_upsert(const char *project, const char *file_path, const c
    char err[KBS_ERRBUF] = "";
    aimee_pg_stmt_t *s =
        aimee_pg_prepare(conn,
-                        "INSERT INTO kb_file_index (project, file_path, file_hash, content)"
-                        " VALUES (?1, ?2, ?3, ?4)"
-                        " ON CONFLICT (project, file_path) DO UPDATE"
-                        " SET file_hash = EXCLUDED.file_hash, ingested_at = pg_now_text(),"
+                        "INSERT INTO kb_file_index"
+                        " (project,generation,file_path,file_hash,content)"
+                        " VALUES (?1,(SELECT current_generation FROM projects"
+                        " WHERE name=?1 AND lifecycle_state='current'),?2,?3,?4)"
+                        " ON CONFLICT (project, generation, file_path) DO UPDATE"
+                        " SET file_hash=EXCLUDED.file_hash,"
+                        "     ingested_at=pg_now_text(),"
                         "     content = COALESCE(EXCLUDED.content, kb_file_index.content)",
                         err, sizeof(err));
    if (!s)
@@ -308,7 +313,7 @@ int db2_kb_file_index_upsert(const char *project, const char *file_path, const c
 char *db2_kb_file_index_get_content(const char *project, const char *file_path)
 {
    void *conn = db2_conn();
-   if (!conn || !project || !file_path)
+   if (!conn || !project || !project[0] || !file_path)
       return NULL;
 
    char proj[256];
@@ -316,8 +321,11 @@ char *db2_kb_file_index_get_content(const char *project, const char *file_path)
 
    char err[KBS_ERRBUF] = "";
    aimee_pg_stmt_t *s = aimee_pg_prepare(conn,
-                                         "SELECT content FROM kb_file_index"
-                                         " WHERE project = ?1 AND file_path = ?2",
+                                         "SELECT k.content FROM kb_file_index k"
+                                         " JOIN projects p ON p.name=k.project"
+                                         " WHERE k.project=?1 AND k.file_path=?2"
+                                         " AND p.lifecycle_state='current'"
+                                         " AND k.generation=p.current_generation",
                                          err, sizeof(err));
    if (!s)
       return NULL;
@@ -340,7 +348,7 @@ int db2_kb_file_index_get(const char *project, const char *file_path, char *hash
                           size_t hash_cap, char *ingested_at_out, size_t ingested_at_cap)
 {
    void *conn = db2_conn();
-   if (!conn || !project || !file_path)
+   if (!conn || !project || !project[0] || !file_path)
       return 0;
 
    char proj[256];
@@ -348,8 +356,11 @@ int db2_kb_file_index_get(const char *project, const char *file_path, char *hash
 
    char err[KBS_ERRBUF] = "";
    aimee_pg_stmt_t *s = aimee_pg_prepare(conn,
-                                         "SELECT file_hash, ingested_at FROM kb_file_index"
-                                         " WHERE project = ?1 AND file_path = ?2",
+                                         "SELECT k.file_hash,k.ingested_at FROM kb_file_index k"
+                                         " JOIN projects p ON p.name=k.project"
+                                         " WHERE k.project=?1 AND k.file_path=?2"
+                                         " AND p.lifecycle_state='current'"
+                                         " AND k.generation=p.current_generation",
                                          err, sizeof(err));
    if (!s)
       return 0;
@@ -373,7 +384,7 @@ int db2_kb_file_index_get(const char *project, const char *file_path, char *hash
 int db2_kb_file_index_delete_project(const char *project)
 {
    void *conn = db2_conn();
-   if (!conn || !project)
+   if (!conn || !project || !project[0])
       return -1;
 
    char proj[256];
@@ -392,19 +403,45 @@ int db2_kb_file_index_delete_project(const char *project)
    return deleted;
 }
 
+int db2_kb_file_index_delete_current_project(const char *project)
+{
+   void *conn = db2_conn();
+   if (!conn || !project || !project[0])
+      return -1;
+
+   char proj[256];
+   db2_kb_resolve_project(project, proj, sizeof(proj));
+   char err[KBS_ERRBUF] = "";
+   aimee_pg_stmt_t *s = aimee_pg_prepare(conn,
+                                         "DELETE FROM kb_file_index WHERE project=?1"
+                                         " AND generation=(SELECT current_generation FROM projects"
+                                         " WHERE name=?1 AND lifecycle_state='current')",
+                                         err, sizeof(err));
+   if (!s)
+      return -1;
+   aimee_pg_bind_text(s, "?1", proj);
+   aimee_pg_step_t rc = aimee_pg_step(s, err, sizeof(err));
+   int deleted = aimee_pg_stmt_changes(s);
+   aimee_pg_finalize(s);
+   return rc == AIMEE_PG_DONE ? deleted : -1;
+}
+
 cJSON *db2_kb_file_index_snapshot_json(const char *project)
 {
    void *conn = db2_conn();
-   if (!conn || !project)
+   if (!conn || !project || !project[0])
       return cJSON_CreateArray();
 
    char proj[256];
    db2_kb_resolve_project(project, proj, sizeof(proj));
 
    char err[KBS_ERRBUF] = "";
-   aimee_pg_stmt_t *s = aimee_pg_prepare(
-       conn, "SELECT file_path, file_hash, ingested_at FROM kb_file_index WHERE project = ?1", err,
-       sizeof(err));
+   aimee_pg_stmt_t *s =
+       aimee_pg_prepare(conn,
+                        "SELECT k.file_path,k.file_hash,k.ingested_at FROM kb_file_index k"
+                        " JOIN projects p ON p.name=k.project WHERE k.project=?1"
+                        " AND p.lifecycle_state='current' AND k.generation=p.current_generation",
+                        err, sizeof(err));
    if (!s)
       return cJSON_CreateArray();
 

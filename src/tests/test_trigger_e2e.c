@@ -33,17 +33,20 @@ int config_load(config_t *cfg)
    cfg->module_memory = cfg->module_governance = cfg->module_delegates = cfg->module_workflows = -1;
    return 0;
 }
+
+/* Accessor stub: same contract as the struct stub above — module_workflows is
+ * -1 (unspecified), not 0, because 0 reads as user-DISABLED and would gate the
+ * trigger's workflow dispatch, breaking the proposal -> run e2e this file
+ * exists to prove. */
+int config_module_workflows(void)
+{
+   return -1;
+}
 int config_module_enabled(int config_tristate, int env_default)
 {
    if (config_tristate == 0 || config_tristate == 1)
       return config_tristate;
    return env_default ? 1 : 0;
-}
-
-#include "skill_curator.h"
-int skill_curator_maybe(void)
-{
-   return 0;
 }
 
 #include "db1_trigger.h"

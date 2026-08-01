@@ -14,6 +14,7 @@
 #include "cJSON.h"
 #include "log.h"
 #include "oauth_pkce.h"
+#include "runtime_secret.h"
 
 /* agent_http_post (agent_exec.h): performs the HTTPS POST. Forward-declared to
  * keep this TU off the heavyweight agent_exec.h / agent_types.h include chain;
@@ -35,35 +36,23 @@ extern int agent_http_post(const char *url, const char *auth_header, const char 
 
 /* Cached installation token. Tokens are short-lived; the cache holds at most
  * one because a hub has a single App identity. */
-#define FORGE_APP_TOKEN_MAX 512
+#define FORGE_APP_TOKEN_MAX       512
+#define FORGE_APP_PRIVATE_KEY_MAX 4096
 
 /* --- JWT minting --------------------------------------------------------- */
 
-/* Load an RSA private key from `pem`: if it looks like PEM text use an in-memory
- * BIO, otherwise treat it as a filesystem path to a .pem file. Caller frees the
- * returned EVP_PKEY with EVP_PKEY_free; returns NULL on error. */
+/* Load an RSA private key from Vault-sourced PEM text. Filesystem paths are not
+ * accepted: persistent credential material belongs only in Vault. */
 static EVP_PKEY *forge_app_load_privkey(const char *pem)
 {
-   if (!pem || !pem[0])
+   if (!pem || !strstr(pem, "-----BEGIN"))
       return NULL;
 
-   EVP_PKEY *pkey = NULL;
-   if (strstr(pem, "-----BEGIN") != NULL)
-   {
-      BIO *bio = BIO_new_mem_buf(pem, -1);
-      if (!bio)
-         return NULL;
-      pkey = PEM_read_bio_PrivateKey(bio, NULL, NULL, NULL);
-      BIO_free(bio);
-   }
-   else
-   {
-      FILE *fp = fopen(pem, "r");
-      if (!fp)
-         return NULL;
-      pkey = PEM_read_PrivateKey(fp, NULL, NULL, NULL);
-      fclose(fp);
-   }
+   BIO *bio = BIO_new_mem_buf(pem, -1);
+   if (!bio)
+      return NULL;
+   EVP_PKEY *pkey = PEM_read_bio_PrivateKey(bio, NULL, NULL, NULL);
+   BIO_free(bio);
    return pkey;
 }
 
@@ -228,9 +217,9 @@ int forge_app_token_needs_refresh(long expires_at, long now, long skew_secs)
 int forge_app_token_configured(void)
 {
    const char *id = getenv("AIMEE_FORGE_APP_ID");
-   const char *key = getenv("AIMEE_FORGE_APP_PRIVATE_KEY");
    const char *inst = getenv("AIMEE_FORGE_APP_INSTALLATION_ID");
-   return (id && id[0] && key && key[0] && inst && inst[0]) ? 1 : 0;
+   return (id && id[0] && runtime_secret_has("AIMEE_FORGE_APP_PRIVATE_KEY") && inst && inst[0]) ? 1
+                                                                                                : 0;
 }
 
 /* --- Token cache + mint -------------------------------------------------- */
@@ -259,7 +248,6 @@ int forge_app_token_get(char *tok_out, size_t tok_cap)
       return 0;
 
    const char *app_id = getenv("AIMEE_FORGE_APP_ID");
-   const char *private_key = getenv("AIMEE_FORGE_APP_PRIVATE_KEY");
    const char *installation_id = getenv("AIMEE_FORGE_APP_INSTALLATION_ID");
    const char *api_base_env = getenv("AIMEE_FORGE_API_BASE");
 
@@ -285,10 +273,18 @@ int forge_app_token_get(char *tok_out, size_t tok_cap)
       return 1;
    }
 
+   char private_key[FORGE_APP_PRIVATE_KEY_MAX];
+   if (!runtime_secret_get("AIMEE_FORGE_APP_PRIVATE_KEY", private_key, sizeof(private_key)))
+   {
+      pthread_mutex_unlock(&g_forge_app_lock);
+      return -1;
+   }
+
    /* Mint a new installation token. iat is backdated 60s for clock skew; ttl is
     * 540s (GitHub caps App JWTs at 600s). */
    long now = time(NULL);
    char *jwt = forge_app_build_jwt(app_id, private_key, now - 60, 540);
+   runtime_secret_wipe(private_key, sizeof(private_key));
    if (!jwt)
    {
       LOG_ERROR(FORGE_APP_LOG, "failed to build App JWT (check AIMEE_FORGE_APP_PRIVATE_KEY)");
@@ -308,6 +304,8 @@ int forge_app_token_get(char *tok_out, size_t tok_cap)
    char *resp = NULL;
    int status = agent_http_post(url, auth_header, "", &resp, 15000, NULL);
 
+   runtime_secret_wipe(auth_header, sizeof(auth_header));
+   runtime_secret_wipe(jwt, strlen(jwt));
    free(jwt);
 
    if (status < 200 || status >= 300 || !resp)
@@ -332,6 +330,7 @@ int forge_app_token_get(char *tok_out, size_t tok_cap)
    snprintf(g_forge_app_cache.token, sizeof(g_forge_app_cache.token), "%s", token);
    g_forge_app_cache.expires_at = expires_at;
    snprintf(tok_out, tok_cap, "%s", token);
+   runtime_secret_wipe(token, sizeof(token));
 
    /* Never log the token itself — only the refresh event + expiry. */
    LOG_INFO(FORGE_APP_LOG, "refreshed GitHub App installation token (expires_at=%ld)", expires_at);

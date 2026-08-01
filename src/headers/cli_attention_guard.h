@@ -61,8 +61,41 @@ int attn_weight_for(attn_op_t op);
  * worktree, else 0. The effective target is the absolute `file_path` when given
  * (Edit/Write), otherwise `cwd` (a relative file_path resolves under cwd; a Bash
  * mutation runs there). Read/raw-scan ops are never blocked. Used by
- * handle_attention_guard only when require_session_worktree is enabled. */
-int attn_session_isolation_blocked(attn_op_t op, const char *file_path, const char *cwd);
+ * handle_attention_guard only when require_session_worktree is enabled.
+ * `session_id` (the hook's session id, may be NULL) admits this session's own
+ * harness scratch dir — "<tmp>/claude-<uid>/<slug>/<session-id>/..." — which is
+ * harness-owned temp space rather than repo content. */
+int attn_session_isolation_blocked(attn_op_t op, const char *file_path, const char *cwd,
+                                   const char *session_id);
+
+/* Writes the effective target that attn_session_isolation_blocked judges — the
+ * absolute `file_path` when given, `cwd`/`file_path` joined when relative, else
+ * `cwd` — lexically normalized. Exposed so the refusal diagnostic can name the
+ * path it actually judged rather than assuming it was the cwd. */
+void attn_session_isolation_target(const char *file_path, const char *cwd, char *out, size_t outsz);
+
+/* 1 = BLOCK: this worktree's branch lineage is not permitted. A primary session must be
+ * cut from the default branch; a delegate may be cut from its parent's branch. Applies
+ * to worktrees that HAVE a launcher-written registry row; see
+ * attn_unregistered_lineage_blocked for the ones that do not. */
+int attn_session_branch_blocked(const char *base_branch, const char *default_branch,
+                                int base_is_registered);
+
+/* 1 = BLOCK: lineage decision for a managed worktree with NO registry row. Only one
+ * launcher writes rows, so a missing row does not mean hand-rolled -- Claude Code's
+ * EnterWorktree creates legitimate worktrees and writes none. Provenance therefore comes
+ * from git: `shares_foreign_session_history` is 1 when this branch shares a commit with
+ * another registered session branch that the default branch does not already contain,
+ * which is the "cut from another session" case the rule exists to catch. An unresolvable
+ * default branch (`default_resolved` 0) blocks, as the registry path does. */
+int attn_unregistered_lineage_blocked(int default_resolved, int shares_foreign_session_history);
+
+/* 1 = BLOCK: a WRITING Bash command reaches outside every managed worktree -- `cd <abs>`
+ * to an unmanaged directory, or a redirect to an absolute path outside one. The
+ * isolation check judges the cwd for Bash, so without this a command starting in a good
+ * worktree can write anywhere. Pattern-based, not a sandbox; see the implementation's
+ * LIMITS note. */
+int attn_bash_escapes_worktree(const char *bash_cmd, const char *cwd);
 
 /* External-memory decision (pure, testable). Returns 1 to BLOCK a tool call
  * that would WRITE an external file-based agent-memory store

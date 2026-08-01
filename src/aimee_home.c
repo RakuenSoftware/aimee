@@ -6,6 +6,28 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* The user's home directory, or NULL if it cannot be determined.
+ *
+ * Windows does not set HOME -- it sets USERPROFILE. Reading only HOME made
+ * aimee_home() return NULL for every Windows user, so the thin client could not
+ * locate its own config directory: `aimee remote set` failed with
+ * "cannot securely write (null)/remote.conf", which is QUICKSTART 3.2 and
+ * therefore the whole documented Windows setup. HOME still wins where it is set
+ * (MSYS/Cygwin/Git-Bash shells set it, and honouring it keeps those consistent
+ * with the POSIX builds). */
+static const char *user_home(void)
+{
+   const char *home = getenv("HOME");
+   if (home && home[0])
+      return home;
+#ifdef _WIN32
+   home = getenv("USERPROFILE");
+   if (home && home[0])
+      return home;
+#endif
+   return NULL;
+}
+
 const char *aimee_home(void)
 {
    /* Thread-local: this is a per-call scratch buffer whose pointer is returned
@@ -25,8 +47,8 @@ const char *aimee_home(void)
       return path;
    }
 
-   const char *home = getenv("HOME");
-   if (!home || !home[0])
+   const char *home = user_home();
+   if (!home)
       return NULL;
 
    /* 2. AIMEE_PROFILE selects a sibling under ~/.config/aimee/profiles/.
@@ -61,8 +83,8 @@ const char *aimee_profiles_dir(void)
       return path;
    }
 
-   const char *home = getenv("HOME");
-   if (!home || !home[0])
+   const char *home = user_home();
+   if (!home)
       return NULL;
 
    int n = snprintf(path, sizeof(path), "%s/.config/aimee/profiles", home);

@@ -54,16 +54,15 @@ int handle_workspace_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    const char *provider = "shared";
    char reg_remote[512] = "", reg_head[128] = "";
    {
-      config_t cfg;
-      config_load(&cfg);
-      for (int i = 0; i < cfg.workspace_count; i++)
-         if (strcmp(cfg.workspaces[i], root) == 0)
+      int ws_n = config_workspace_count();
+      for (int i = 0; i < ws_n; i++)
+         if (strcmp(config_workspaces(i), root) == 0)
          {
-            if (cfg.workspace_providers[i][0])
+            if (config_workspace_providers(i)[0])
                provider = ws_provider_kind_to_string(
-                   ws_provider_kind_from_string(cfg.workspace_providers[i]));
-            snprintf(reg_remote, sizeof(reg_remote), "%s", cfg.workspace_vcs_remote[i]);
-            snprintf(reg_head, sizeof(reg_head), "%s", cfg.workspace_vcs_head[i]);
+                   ws_provider_kind_from_string(config_workspace_providers(i)));
+            snprintf(reg_remote, sizeof(reg_remote), "%s", config_workspace_vcs_remote(i));
+            snprintf(reg_head, sizeof(reg_head), "%s", config_workspace_vcs_head(i));
             break;
          }
    }
@@ -156,25 +155,24 @@ int handle_workspace_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          return server_send_error(conn, "workspace: not a directory", NULL);
    }
 
-   config_t cfg;
-   config_load(&cfg);
-   for (int i = 0; i < cfg.workspace_count; i++)
-      if (strcmp(cfg.workspaces[i], abs) == 0)
-         return server_send_error(conn, "workspace: already registered", NULL);
-   if (cfg.workspace_count >= 64)
-      return server_send_error(conn, "workspace: maximum workspace count reached (64)", NULL);
-
-   int idx = cfg.workspace_count++;
-   snprintf(cfg.workspaces[idx], MAX_PATH_LEN, "%s", abs);
-   snprintf(cfg.workspace_providers[idx], sizeof(cfg.workspace_providers[idx]), "%s",
-            (provider && strcmp(provider, "shared") != 0) ? provider : "");
    /* Mirror workspaces carry the client VCS coordinates the lifecycle seeds from. */
-   snprintf(cfg.workspace_vcs_remote[idx], sizeof(cfg.workspace_vcs_remote[idx]), "%s",
-            is_mirror ? remote : "");
-   snprintf(cfg.workspace_vcs_head[idx], sizeof(cfg.workspace_vcs_head[idx]), "%s",
-            (is_mirror && head) ? head : "");
-   if (config_save(&cfg) != 0)
+   int add_rc = config_workspace_add(abs, provider, is_mirror ? remote : NULL,
+                                     (is_mirror && head) ? head : NULL);
+   if (add_rc == -2)
+      return server_send_error(conn, "workspace: already registered", NULL);
+   if (add_rc == -3)
+      return server_send_error(conn, "workspace: maximum workspace count reached (64)", NULL);
+   if (add_rc != 0)
       return server_send_error(conn, "workspace: failed to save config", NULL);
+
+   /* Republish the live snapshot now instead of waiting for the server loop's
+    * config_reload_if_changed() tick. In the server, config_load() returns the
+    * snapshot rather than disk, so until that tick a `workspace list` issued right
+    * after this `workspace add` read a config without the new entry and reported
+    * "No workspaces configured" — intermittently, depending on where the write
+    * landed in the poll interval. Making the write read-your-writes consistent
+    * costs one reload on a rare path. */
+   (void)config_reload_if_changed();
 
    /* A `detached` workspace's root lives on the client; this server cannot
     * enumerate or read it, so we don't discover projects or kick a server-side
@@ -225,9 +223,35 @@ int handle_workspace_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       kb_client_index_scan_result_t res;
       memset(&res, 0, sizeof(res));
       int rc = kb_client_index_scan(name, projects[i], 0, &res);
-      cJSON_AddBoolToObject(p, "indexed", rc == 0 && !res.skipped);
-      if (rc != 0 || res.skipped)
-         jo_add_str(p, "reason", res.reason[0] ? res.reason : "knowledge service unavailable");
+
+      /* A SCAN THAT VISITED NOTHING IS NOT AN INDEXED PROJECT. kb is handed a
+       * filesystem PATH here, and it may not be able to read it -- in the managed
+       * topology aimee-server and aimee-kb are separate containers with no shared
+       * volume, so a path that exists for the server is absent for kb. kb then
+       * walks an empty directory, finds no files, and answers success. rc == 0 and
+       * !skipped, so this reported `indexed: true` for a project where nothing was
+       * indexed at all: the user is told their repo is in the knowledge base,
+       * searches return nothing or another project's files, and no error is
+       * printed anywhere.
+       *
+       * `inspected` is the right test, not `files`: a project already indexed and
+       * unchanged legitimately reports files == 0 with inspected > 0, and calling
+       * that "not indexed" would be its own wrong answer. inspected == 0 means kb
+       * saw no files to consider, which is the failure this distinguishes. Older
+       * kb builds do not report inspected (documented as 0), so fall back to files
+       * rather than calling a working older kb broken. */
+      int ok = server_workspace_scan_indexed(rc, res.skipped, res.inspected, res.files);
+      cJSON_AddBoolToObject(p, "indexed", ok);
+      if (!ok)
+      {
+         if (rc != 0 || res.skipped)
+            jo_add_str(p, "reason", res.reason[0] ? res.reason : "knowledge service unavailable");
+         else
+            jo_add_str(p, "reason",
+                       "knowledge service saw no files at that path — it may not be able to "
+                       "read it (aimee-kb runs in its own container and does not share the "
+                       "server's filesystem)");
+      }
       cJSON_AddItemToArray(arr, p);
    }
    cJSON_AddNumberToObject(resp, "project_count", count);
@@ -253,13 +277,13 @@ int handle_workspace_mirror_sync(server_ctx_t *ctx, server_conn_t *conn, cJSON *
    const char *diff = jo_str(req, "diff", "");
 
    /* Only a registered `mirror` workspace has a server-side tree to mirror. */
-   config_t cfg;
-   config_load(&cfg);
    int is_mirror = 0;
-   for (int i = 0; i < cfg.workspace_count; i++)
-      if (strcmp(cfg.workspaces[i], root) == 0)
+   int ws_n = config_workspace_count();
+   for (int i = 0; i < ws_n; i++)
+      if (strcmp(config_workspaces(i), root) == 0)
       {
-         is_mirror = ws_provider_kind_from_string(cfg.workspace_providers[i]) == WS_PROVIDER_MIRROR;
+         is_mirror =
+             ws_provider_kind_from_string(config_workspace_providers(i)) == WS_PROVIDER_MIRROR;
          break;
       }
    if (!is_mirror)

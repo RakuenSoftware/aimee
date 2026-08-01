@@ -1,7 +1,5 @@
 # Triggers as workflow blocks — graph-native run starts
 
-- **State:** shipped.
-
 ## Why
 
 Triggers today live *outside* the workflow system: a `trigger_rules` list in

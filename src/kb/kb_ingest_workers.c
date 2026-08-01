@@ -23,6 +23,7 @@
 #include "kb_service.h"
 #include "log.h"
 #include "workspace.h"
+#include "workspace_scope.h"
 
 #include "db2/db2.h" /* db2_lease_release_idle */
 #include "db2/canonical_index.h"
@@ -35,7 +36,9 @@
 #include "kb_doc_hash.h"
 #include "memory.h"
 
+#include <dirent.h>
 #include <pthread.h>
+#include <sys/stat.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -69,11 +72,73 @@ void kb_worker_notify(kb_service_ctx_t *ctx)
 /* Periodic enqueue-all (DB2-direct)                                   */
 /* ------------------------------------------------------------------ */
 
+/* Enqueue every project discovered under `root`, attributing them to `ws_root`
+ * for the durable project identity. Returns the number enqueued. */
+static int kbiw_enqueue_under(const char *root, const char *ws_root, char (*projects)[MAX_PATH_LEN])
+{
+   int n = workspace_discover_projects(root, 3, projects, MAX_DISCOVERED_PROJECTS);
+   int total = 0;
+   for (int i = 0; i < n; i++)
+   {
+      char pname[256];
+      char pws[256];
+      if (workspace_repo_index_keys(projects[i], ws_root, pname, sizeof(pname), pws, sizeof(pws)) !=
+          0)
+      {
+         aimee_log(LOG_ERROR, "kb.ingest.identity",
+                   "skipping root='%s': no durable project identity", projects[i]);
+         continue;
+      }
+      db2_kb_ingest_queue_enqueue(pname, projects[i], pws, 0, DB2_KB_INGEST_PRIO_BULK);
+      total++;
+   }
+   return total;
+}
+
+/* Webchat clones do NOT live under a configured workspace. The GUI clone route
+ * drops them in <webusers_base>/<user>/<org>/<repo> and pushes one best-effort
+ * /v1/code/scan; if this service was unreachable at that moment nothing ever
+ * retried, so the repo stayed on disk and out of the index permanently. That is
+ * exactly what happened on a deployment where every repo an operator cloned was
+ * invisible to search while the wizard reported success.
+ *
+ * Reconciling the tree here makes ingestion self-healing: the clone is durable
+ * on disk, so a scan we lost is one we can always recompute. Each per-user root
+ * is scanned separately because discovery is depth-limited and <user> sits one
+ * level below the base -- scanning the base itself would bottom out at the org
+ * directory and find nothing. */
+static int kbiw_enqueue_webusers(char (*projects)[MAX_PATH_LEN])
+{
+   char base[MAX_PATH_LEN];
+   if (ws_scope_webusers_base(base, sizeof(base)) != 0)
+      return 0;
+
+   DIR *d = opendir(base);
+   if (!d)
+      return 0; /* no webchat users on this deployment */
+
+   int total = 0;
+   struct dirent *ent;
+   while ((ent = readdir(d)) != NULL)
+   {
+      if (ent->d_name[0] == '.') /* skips . .. and the .registry/.locks siblings */
+         continue;
+      char user_root[MAX_PATH_LEN];
+      if (snprintf(user_root, sizeof(user_root), "%s/%s", base, ent->d_name) >=
+          (int)sizeof(user_root))
+         continue;
+      struct stat st;
+      if (stat(user_root, &st) != 0 || !S_ISDIR(st.st_mode))
+         continue;
+      total += kbiw_enqueue_under(user_root, user_root, projects);
+   }
+   closedir(d);
+   return total;
+}
+
 static void kbiw_enqueue_all(kb_service_ctx_t *ctx)
 {
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.kb_bg_ingest_enabled || !db2_is_initialized())
+   if (!config_kb_bg_ingest_enabled() || !db2_is_initialized())
       return;
 
    char(*projects)[MAX_PATH_LEN] = calloc(MAX_DISCOVERED_PROJECTS, MAX_PATH_LEN);
@@ -81,19 +146,10 @@ static void kbiw_enqueue_all(kb_service_ctx_t *ctx)
       return;
 
    int total = 0;
-   for (int w = 0; w < cfg.workspace_count; w++)
-   {
-      int n = workspace_discover_projects(cfg.workspaces[w], 3, projects, MAX_DISCOVERED_PROJECTS);
-      for (int i = 0; i < n; i++)
-      {
-         char pname[256];
-         char pws[256];
-         workspace_repo_index_keys(projects[i], cfg.workspaces[w], pname, sizeof(pname), pws,
-                                   sizeof(pws));
-         db2_kb_ingest_queue_enqueue(pname, projects[i], pws, 0);
-         total++;
-      }
-   }
+   for (int w = 0; w < config_workspace_count(); w++)
+      total += kbiw_enqueue_under(config_workspaces(w), config_workspaces(w), projects);
+
+   total += kbiw_enqueue_webusers(projects);
    free(projects);
 
    if (total > 0)
@@ -124,10 +180,7 @@ static void kbiw_process_job(const db2_kb_ingest_job_t *job)
       kb_background_clear("ingest");
       return;
    }
-
-   config_t cfg;
-   config_load(&cfg);
-   const char *embed_cmd = config_embedding_command(&cfg, NULL);
+   const char *embed_cmd = config_embedding_command_current(NULL);
 
    kb_stats_t stats;
    memset(&stats, 0, sizeof(stats));
@@ -251,9 +304,7 @@ static void *kbiw_timer_thread(void *arg)
 
    for (;;)
    {
-      config_t cfg;
-      config_load(&cfg);
-      int interval_secs = cfg.kb_bg_ingest_interval_hours * 3600;
+      int interval_secs = config_kb_bg_ingest_interval_hours() * 3600;
       if (interval_secs <= 0)
          interval_secs = 6 * 3600;
 
@@ -270,9 +321,7 @@ static void *kbiw_timer_thread(void *arg)
       }
       if (ctx->ingest_stop)
          return NULL;
-
-      config_load(&cfg);
-      if (cfg.kb_bg_ingest_enabled)
+      if (config_kb_bg_ingest_enabled())
          kbiw_enqueue_all(ctx);
    }
 }
@@ -294,10 +343,6 @@ static void *kbiw_watch_thread(void *arg)
       aimee_log(LOG_WARN, "kb.ingest.watch", "inotify_init1 failed");
       return NULL;
    }
-
-   config_t cfg;
-   config_load(&cfg);
-
    /* Heap-allocate the watch table: at 512 * (2 * MAX_PATH_LEN + ...) bytes it
     * is ~4.2 MB, which overflows the default 8 MB pthread stack and segfaults
     * this thread at startup. Keep it off the stack. */
@@ -324,9 +369,10 @@ static void *kbiw_watch_thread(void *arg)
       return NULL;
    }
 
-   for (int w = 0; w < cfg.workspace_count && nwatches < 512; w++)
+   for (int w = 0; w < config_workspace_count() && nwatches < 512; w++)
    {
-      int n = workspace_discover_projects(cfg.workspaces[w], 3, projects, MAX_DISCOVERED_PROJECTS);
+      int n =
+          workspace_discover_projects(config_workspaces(w), 3, projects, MAX_DISCOVERED_PROJECTS);
       for (int i = 0; i < n && nwatches < 512; i++)
       {
          int wd = inotify_add_watch(ifd, projects[i],
@@ -335,7 +381,7 @@ static void *kbiw_watch_thread(void *arg)
             continue;
          watches[nwatches].wd = wd;
          snprintf(watches[nwatches].root, MAX_PATH_LEN, "%s", projects[i]);
-         snprintf(watches[nwatches].workspace, MAX_PATH_LEN, "%s", cfg.workspaces[w]);
+         snprintf(watches[nwatches].workspace, MAX_PATH_LEN, "%s", config_workspaces(w));
          watches[nwatches].last_queued = 0;
          nwatches++;
       }
@@ -353,9 +399,7 @@ static void *kbiw_watch_thread(void *arg)
       ssize_t n = read(ifd, evbuf, sizeof(evbuf));
       if (n <= 0)
          continue;
-
-      config_load(&cfg);
-      int debounce = cfg.kb_bg_watch_debounce_secs;
+      int debounce = config_kb_bg_watch_debounce_secs();
       time_t now = time(NULL);
 
       for (char *p = evbuf; p < evbuf + n;)
@@ -370,9 +414,14 @@ static void *kbiw_watch_thread(void *arg)
                break;
             char pname[256];
             char pws[256];
-            workspace_repo_index_keys(watches[j].root, watches[j].workspace, pname, sizeof(pname),
-                                      pws, sizeof(pws));
-            db2_kb_ingest_queue_enqueue(pname, watches[j].root, pws, 0);
+            if (workspace_repo_index_keys(watches[j].root, watches[j].workspace, pname,
+                                          sizeof(pname), pws, sizeof(pws)) != 0)
+            {
+               aimee_log(LOG_ERROR, "kb.ingest.identity",
+                         "skipping root='%s': no durable project identity", watches[j].root);
+               break;
+            }
+            db2_kb_ingest_queue_enqueue(pname, watches[j].root, pws, 0, DB2_KB_INGEST_PRIO_BULK);
             watches[j].last_queued = now;
             kb_worker_notify(ctx);
             break;
@@ -406,10 +455,7 @@ void kb_ingest_workers_start(kb_service_ctx_t *ctx)
    ctx->ingest_count = 0;
    ctx->ingest_timer_active = 0;
    ctx->bg_watch_active = 0;
-
-   config_t cfg;
-   config_load(&cfg);
-   int cap = cfg.kb_worker_count;
+   int cap = config_kb_worker_count();
    if (cap < 0)
       cap = 0;
    if (cap > KB_WORKER_MAX)
@@ -434,13 +480,13 @@ void kb_ingest_workers_start(kb_service_ctx_t *ctx)
    if (ctx->ingest_count == 0)
       return;
 
-   if (cfg.kb_bg_ingest_enabled)
+   if (config_kb_bg_ingest_enabled())
    {
       if (pthread_create(&ctx->ingest_timer_thread, NULL, kbiw_timer_thread, ctx) == 0)
          ctx->ingest_timer_active = 1;
    }
 
-   if (cfg.kb_bg_watch_enabled)
+   if (config_kb_bg_watch_enabled())
    {
       if (pthread_create(&ctx->bg_watch_thread, NULL, kbiw_watch_thread, ctx) == 0)
          ctx->bg_watch_active = 1;
@@ -582,7 +628,12 @@ int kb_ingest_doc_content(const char *project, const char *source_path, const ch
           project, source_path, hash, ci, chunks[ci].heading_path, chunks[ci].line_start,
           chunks[ci].line_end, chunks[ci].content, chunks[ci].token_count);
       if (doc_ids[ci] < 0)
-         continue;
+      {
+         db2_kb_txn_rollback();
+         free(doc_ids);
+         free(chunks);
+         return -1;
+      }
       db2_kb_documents_link_neighbours(doc_ids[ci], prev_doc_id);
       prev_doc_id = doc_ids[ci];
    }
@@ -610,7 +661,8 @@ int kb_ingest_doc_content(const char *project, const char *source_path, const ch
        * re-acquire lazily. See kb_curator_extract_code / kb_service_code_embed. */
       db2_lease_release_idle();
       float vec[EMBED_MAX_DIM];
-      int dim = memory_embed_text(embed_text, effective_cmd, vec, EMBED_MAX_DIM);
+      int dim =
+          memory_embed_text(embed_text, effective_cmd, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
       if (dim > 0)
       {
          accept_generated_embedding(doc_id, vec, dim);
@@ -647,10 +699,13 @@ int kb_doc_refresh(const char *project, const char *embedding_cmd, int max_docs)
        " JOIN file_contents fc ON fc.file_id = f.id"
        " JOIN projects p ON f.project_id = p.id"
        " WHERE p.name = ?1"
+       "   AND p.lifecycle_state='current'"
+       "   AND f.generation=p.current_generation"
        "   AND (f.path LIKE '%.md' OR f.path LIKE '%.markdown' OR f.path LIKE '%.rst'"
        "        OR f.path LIKE '%.txt' OR f.path LIKE '%.adoc' OR f.path LIKE '%.org')"
        "   AND NOT EXISTS (SELECT 1 FROM kb_documents kd"
-       "                   WHERE kd.project = p.name AND kd.file_path = f.path)"
+       "                   WHERE kd.project=p.name AND kd.generation=p.current_generation"
+       "                     AND kd.file_path=f.path)"
        " LIMIT ?2";
 
    char err[256] = "";
@@ -719,8 +774,10 @@ int kb_doc_embed_backfill(const char *project, const char *embedding_cmd, int ma
       max_chunks = 200;
 
    static const char *sql =
-       "SELECT kd.id, kd.heading_path, kd.content FROM kb_documents kd"
-       " WHERE kd.project = ?1"
+       "SELECT kd.id,kd.heading_path,kd.content FROM kb_documents kd"
+       " JOIN projects p ON p.name=kd.project"
+       " WHERE kd.project=?1 AND p.lifecycle_state='current'"
+       "   AND kd.generation=p.current_generation"
        "   AND NOT EXISTS (SELECT 1 FROM kb_embeddings ke WHERE ke.point_id = kd.id)"
        " LIMIT ?2";
 
@@ -769,7 +826,8 @@ int kb_doc_embed_backfill(const char *project, const char *embedding_cmd, int ma
        * so holding the lease across it trips the stuck-lease ceiling. */
       db2_lease_release_idle();
       float vec[EMBED_MAX_DIM];
-      int dim = memory_embed_text(embed_text, effective_cmd, vec, EMBED_MAX_DIM);
+      int dim =
+          memory_embed_text(embed_text, effective_cmd, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
       if (dim > 0 && sync_vector_embedding(rows[i].id, vec, dim) == 0)
          embedded++;
       free(rows[i].content);

@@ -84,4 +84,11 @@ int cli_oauth_scrape_codex_code(const char *pane, char *out, size_t n);
  * chars); 0 otherwise. */
 int cli_oauth_code_is_safe(const char *code);
 
+/* 1 iff the claude credentials JSON at `path` exists and carries an "expiresAt"
+ * (epoch-ms) strictly in the future — i.e. a genuinely fresh sign-in, not a leftover
+ * expired token. 0 for absent / unreadable / no expiresAt / already expired. This is
+ * what makes a claude re-auth wait for the real browser step instead of "succeeding"
+ * instantly against a stale file. */
+int cli_oauth_claude_token_is_fresh(const char *path);
+
 #endif /* DEC_SERVER_CLI_OAUTH_H */

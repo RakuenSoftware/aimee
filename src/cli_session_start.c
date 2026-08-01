@@ -5,9 +5,11 @@
  * its own TU holds cli_main.c under the source line limit. */
 #include "cli_client.h"
 #include "cli_session_start.h"
+#include "session_degraded_notice.h"
 #include "cJSON.h"
 #include "cli_attention_guard.h" /* attn_require_session_worktree, attn_session_isolation_blocked */
 #include "cmd_self_update.h"     /* aimee_self_update_notice */
+#include "agent_code_capabilities.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -49,6 +51,15 @@ static void ss_add(struct ss_sbuf *b, const char *s)
    memcpy(b->p + b->len, s, n);
    b->len += n;
    b->p[b->len] = '\0';
+}
+
+/* A remote or long-running daemon cannot infer the thin client's active
+ * checkout from its own process cwd. Carry it with every ordered memory read. */
+static void ss_add_memory_cwd(cJSON *body)
+{
+   char cwd[4096];
+   if (body && getcwd(cwd, sizeof(cwd)))
+      cJSON_AddStringToObject(body, "cwd", cwd);
 }
 
 /* Render one recall section ([{title,description}|{text}]) as markdown. */
@@ -232,6 +243,7 @@ static void ss_worktree_key(const char *sid, char *out, size_t cap)
  * the thin client links no workspace helpers) and surface a directive telling the
  * agent to enter it before its first mutating tool call. No-op when isolation is
  * off, the session is already inside a worktree, or there is no local git repo. */
+
 static void ss_append_worktree_isolation(struct ss_sbuf *ctx, const char *sid)
 {
    if (!attn_require_session_worktree())
@@ -243,7 +255,7 @@ static void ss_append_worktree_isolation(struct ss_sbuf *ctx, const char *sid)
    /* Already inside a managed (.aimee/.claude/.codex) worktree -> a mutating op
     * would not be blocked; don't nag or create a redundant worktree. Mirrors the
     * guard's own decision so the directive fires exactly when it would block. */
-   if (!attn_session_isolation_blocked(ATTN_OP_SOFT, NULL, cwd))
+   if (!attn_session_isolation_blocked(ATTN_OP_SOFT, NULL, cwd, sid))
       return;
 
    /* Need a stable session id to name the worktree; Claude Code always sends one. */
@@ -329,9 +341,14 @@ static int handle_session_start_remote(const char *sid)
     * Rules + key facts) from session.brief_assemble. This is the primary
     * payload and the never-empty floor: the server always emits at least
     * persona principles, so a fresh session is never left with an empty brief
-    * (the pre-Phase-1 behaviour when recall was empty). The endpoint takes no
-    * input; send an empty object. */
-   cJSON *brief = ss_retry_post(endpoint, bearer, "/v1/session/brief_assemble", "{}");
+    * (the pre-Phase-1 behaviour when recall was empty). */
+   cJSON *brief_body = cJSON_CreateObject();
+   ss_add_memory_cwd(brief_body);
+   char *brief_body_s = cJSON_PrintUnformatted(brief_body);
+   cJSON_Delete(brief_body);
+   cJSON *brief = ss_retry_post(endpoint, bearer, "/v1/session/brief_assemble",
+                                brief_body_s ? brief_body_s : "{}");
+   free(brief_body_s);
    if (brief)
    {
       const char *out = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(brief, "output"));
@@ -346,6 +363,7 @@ static int handle_session_start_remote(const char *sid)
    cJSON *rbody = cJSON_CreateObject();
    cJSON_AddStringToObject(rbody, "task_hint", "session start");
    cJSON_AddBoolToObject(rbody, "session_start", 1);
+   ss_add_memory_cwd(rbody);
    char *rbody_s = cJSON_PrintUnformatted(rbody);
    cJSON_Delete(rbody);
    cJSON *resp = ss_retry_post(endpoint, bearer, "/v1/memory/recall", rbody_s);
@@ -370,6 +388,28 @@ static int handle_session_start_remote(const char *sid)
       }
       free(b.p);
       cJSON_Delete(resp);
+   }
+
+   /* Dependency health: if the knowledge service is down, the agent needs to know
+    * BEFORE it interprets an empty search as an authoritative "not found". Read
+    * the same /v1/ready snapshot the operator sees, so the two never disagree.
+    * A single GET, not ss_retry_post: this is advisory, and a server too sick to
+    * answer once is exactly the case the notice describes. Must run here, while
+    * endpoint/bearer are still live. */
+   {
+      int rstatus = 0;
+      cJSON *rdy = cli_http_request(endpoint, "GET", "/v1/ready", NULL, bearer,
+                                    SESSION_START_RECALL_TIMEOUT_MS, &rstatus);
+      if (rdy)
+      {
+         const cJSON *deps = cJSON_GetObjectItemCaseSensitive(rdy, "dependencies");
+         char notice[640];
+         if (ss_degraded_notice(cJSON_GetStringValue(cJSON_GetObjectItem(deps, "kb")),
+                                cJSON_GetStringValue(cJSON_GetObjectItem(deps, "retrieval")),
+                                notice, sizeof notice))
+            ss_add(&ctx, notice);
+         cJSON_Delete(rdy);
+      }
    }
 
    free(endpoint);
@@ -570,6 +610,7 @@ int handle_user_prompt_submit(void)
    cJSON *body = cJSON_CreateObject();
    cJSON_AddStringToObject(body, "task_hint", prompt);
    cJSON_AddBoolToObject(body, "session_start", 0);
+   ss_add_memory_cwd(body);
    char *body_s = cJSON_PrintUnformatted(body);
    cJSON_Delete(body);
 
@@ -599,8 +640,9 @@ int handle_user_prompt_submit(void)
       struct ss_sbuf ctx = {0};
       ss_add(&ctx, "<aimee-context>\n");
       ss_add(&ctx, b.p);
-      ss_add(&ctx, "explore-with: find_symbol, lsp_references, ast_grep_search, search_graph, "
-                   "get_context_block\n");
+      ss_add(&ctx, "explore-with: " AIMEE_CODE_TOOL_FIND_SYMBOL
+                   ", lsp_references, " AIMEE_CODE_TOOL_AST_GREP_SEARCH ", " AIMEE_CODE_TOOL_INDEX
+                   " command=" AIMEE_CODE_INDEX_COMMAND_HYBRID ", get_context_block\n");
       ss_add(&ctx, "</aimee-context>");
 
       cJSON *out = cJSON_CreateObject();
@@ -640,6 +682,7 @@ int handle_pre_compact(void)
    cJSON *body = cJSON_CreateObject();
    cJSON_AddStringToObject(body, "task_hint", "compaction re-prime");
    cJSON_AddBoolToObject(body, "session_start", 1);
+   ss_add_memory_cwd(body);
    char *body_s = cJSON_PrintUnformatted(body);
    cJSON_Delete(body);
 
@@ -707,6 +750,17 @@ int handle_session_start(int json_output)
     * in the environment of the claude subprocess it forks. */
    int nonblocking = (getenv("AIMEE_SESSION_ID") != NULL);
 
+   /* Remote configuration is an exclusive transport choice.  Select it before
+    * any local availability probe so one hook invocation cannot touch both the
+    * co-located and remote servers. */
+   if (cli_v1_has_remote_endpoint())
+   {
+      int rc = handle_session_start_remote(sid);
+      cJSON_Delete(hook_json);
+      free(stdin_data);
+      return rc;
+   }
+
    const char *sock = cli_ensure_server_for_method("hooks.session_start");
 
    /* .md memory is retired: central memory is NOT re-materialized into local .md
@@ -715,16 +769,6 @@ int handle_session_start(int json_output)
 
    if (!sock)
    {
-      /* No co-located server. If a remote /v1 endpoint is configured, the thin
-       * client serves session-start itself via the read-only recall route — no
-       * local aimee-server needed (see handle_session_start_remote). */
-      if (cli_v1_has_remote_endpoint())
-      {
-         int rc = handle_session_start_remote(sid);
-         cJSON_Delete(hook_json);
-         free(stdin_data);
-         return rc;
-      }
       if (!nonblocking)
          fprintf(stderr, "aimee: cannot run session-start; server unavailable\n");
       cJSON_Delete(hook_json);

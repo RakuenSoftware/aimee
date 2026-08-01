@@ -1,11 +1,11 @@
 /* cmd_audit.c: `aimee audit` — verify / checkpoint the WORM audit store. In
- * thin-client mode this routes to /v1/audit/* (server-side, over the store on the
+ * thin-client mode this routes to /v1/audit/... (server-side, over the store on the
  * server host); this local handler backs the monolith/server-side path and
  * provides command recognition. Exit codes (verify): 0 green, 1 amber, 2 red. */
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "audit_worm.h"
+#include <aimee/audit/audit_worm.h>
 #include "commands.h"
 
 static void audit_sub_verify(app_ctx_t *ctx, int argc, char **argv)

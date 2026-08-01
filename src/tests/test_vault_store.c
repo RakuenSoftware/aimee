@@ -56,6 +56,35 @@ static void test_set_get_roundtrip(void)
    printf("  PASS: test_set_get_roundtrip\n");
 }
 
+/* OAuth documents and SSH private keys are opaque credentials and can exceed a
+ * small API-token buffer. They must still fit in Vault so migration never has
+ * to retain a plaintext file merely because the credential is structured. */
+static void test_structured_credential_roundtrip(void)
+{
+   const char *principal = "uid:structured";
+   uint8_t salt[VAULT_SALT_LEN];
+   assert(vault_store_get_or_create_salt(principal, salt) == 0);
+   uint8_t kek[VAULT_KEK_LEN];
+   make_kek(kek, 71);
+
+   const size_t len = 8192;
+   char *secret = malloc(len + 1);
+   char *out = malloc(len + 1);
+   assert(secret && out);
+   memset(secret, 'x', len);
+   secret[0] = '{';
+   secret[len - 1] = '}';
+   secret[len] = '\0';
+   assert(vault_store_set(principal, kek, "codex", "oauth", secret) == 0);
+   assert(vault_store_get(principal, kek, "codex", "oauth", out, len + 1) == 0);
+   assert(memcmp(out, secret, len + 1) == 0);
+   memset(secret, 0, len + 1);
+   memset(out, 0, len + 1);
+   free(secret);
+   free(out);
+   printf("  PASS: test_structured_credential_roundtrip\n");
+}
+
 static void test_at_rest_is_ciphertext_only(void)
 {
    const char *principal = "uid:1000";
@@ -324,6 +353,50 @@ static void test_intra_principal_aad_swap(void)
    printf("  PASS: test_intra_principal_aad_swap\n");
 }
 
+/* The AAD is "principal|agent|cred" with '|' as the delimiter, so two DIFFERENT
+ * (agent, cred) pairs can produce the SAME AAD when a component contains '|':
+ *
+ *   agent "claude",          cred "api_key|x"  -> uid:9101|claude|api_key|x
+ *   agent "claude|api_key",  cred "x"          -> uid:9101|claude|api_key|x
+ *
+ * If both are storable, the AAD stops binding an entry to its slot and the
+ * guarantee test_intra_principal_aad_swap proves for ordinary names evaporates
+ * for these two: their ciphertexts are interchangeable and still authenticate.
+ *
+ * vault_aad_build_v1_safe (the Postgres backend's builder) already rejects '|'
+ * in every component for this reason. This asserts the file backend does too. */
+static void test_aad_delimiter_is_unambiguous(void)
+{
+   const char *p = "uid:9101";
+   uint8_t kek[VAULT_KEK_LEN];
+   make_kek(kek, 92);
+   uint8_t salt[VAULT_SALT_LEN];
+   assert(vault_store_get_or_create_salt(p, salt) == 0);
+
+   /* Neither colliding form may be stored at all. Refusing the input keeps the
+    * AAD format unchanged for every valid entry, so nothing already at rest has
+    * to be re-encrypted. */
+   assert(vault_store_set(p, kek, "claude", "api_key|x", "A") == -1);
+   assert(vault_store_set(p, kek, "claude|api_key", "x", "B") == -1);
+   /* And a '|' in the principal is refused for the same reason. */
+   assert(vault_store_set("uid:9101|evil", kek, "claude", "api_key", "C") == -1);
+
+   /* The ordinary case is untouched. */
+   assert(vault_store_set(p, kek, "claude", "api_key", "GOOD") == 0);
+   char out[64];
+   assert(vault_store_get(p, kek, "claude", "api_key", out, sizeof(out)) == 0);
+   assert(strcmp(out, "GOOD") == 0);
+
+   /* A read with a '|'-bearing selector cannot succeed. It reports NO_ENTRY
+    * rather than an error, which is correct and not a weaker answer: such an
+    * entry can no longer be written, so it genuinely does not exist, and the
+    * lookup never reaches the AAD. What matters is that it never returns another
+    * slot's secret. */
+   assert(vault_store_get(p, kek, "claude|api_key", "x", out, sizeof(out)) == VAULT_STORE_NO_ENTRY);
+   assert(vault_store_get(p, kek, "claude", "api_key|x", out, sizeof(out)) == VAULT_STORE_NO_ENTRY);
+   printf("  PASS: test_aad_delimiter_is_unambiguous\n");
+}
+
 /* WP-C.4 dual-access: a credential written with set_dual carries a second DEK
  * wrap under the server KEK; the server can decrypt it with NO user KEK, while
  * the user path is unchanged. A wrong server KEK fails closed. */
@@ -419,6 +492,7 @@ int main(void)
    setenv("AIMEE_HOME", g_home, 1);
 
    test_set_get_roundtrip();
+   test_structured_credential_roundtrip();
    test_at_rest_is_ciphertext_only();
    test_wrong_kek_fails_closed();
    test_no_entry_vs_error();
@@ -427,6 +501,7 @@ int main(void)
    test_salt_is_stable();
    test_attacker_principal_filename_safety();
    test_intra_principal_aad_swap();
+   test_aad_delimiter_is_unambiguous();
    test_dual_wrap_server_get();
    test_server_get_legacy_then_backfill();
    test_dual_wrap_at_rest_ciphertext_only();

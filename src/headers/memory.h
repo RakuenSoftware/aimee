@@ -91,10 +91,8 @@ typedef struct
    double salience;
    double surprise;
    double pagerank;
-   double cross_encoder;  /* raw cross-encoder rerank score (0.0 when disabled/unavailable) */
-   double hybrid_total;   /* hybrid score BEFORE cross-encoder blend, for explain surface */
-   double blended_total;  /* final score AFTER cross-encoder blend (== total when rerank ran) */
-   double rerank_mix;     /* blend weight used (0.0 when rerank did not run) */
+   double hybrid_total;   /* lexical+dense hybrid score, for the explain surface */
+   double blended_total;  /* final score after the post-hybrid passes */
    double graph_score;    /* utility-weighted graph boost contribution */
    double code_proximity; /* code-projection edge proximity score */
    double utility;        /* decayed utility signal from feedback */
@@ -360,6 +358,23 @@ int memory_reject(int64_t id, const char *reason);
 int memory_list(const char *tier, const char *kind, int limit, memory_t *out, int max);
 int memory_delete(int64_t id);
 int memory_stats(memory_stats_t *out);
+
+/* Audit hook: notified after each memory MUTATION at the store — insert, an
+ * exact-key or near-duplicate content overwrite ("memory.merge"), update, delete,
+ * and reject — with NON-CONTENT fields only: the operation, the memory id, and
+ * (for insert/merge) its tier / kind / key identity, confidence, and session. (A
+ * supersede is recorded as its follow-on insert.) This fires in aimee-kb, at the
+ * authoritative mutation site, so it catches every caller regardless of entry
+ * point — agent-driven via kb_client, KB-internal maintenance, and CLI. A
+ * KB-side bridge forwards it to aimee-kb's own observability bus. The memory
+ * CONTENT (and use_cases / reject reason) — the PII payload — is NEVER passed;
+ * and the key/kind, which can themselves embed PII, are fingerprinted by the
+ * bridge before they reach any ledger. update/delete/reject carry only the id
+ * (the row's identity is not re-read on the mutation path). The memory module has
+ * NO event-bus dependency (the bus lives only in the bridge). NULL by default. */
+typedef void (*memory_audit_hook_fn)(const char *op, int64_t id, const char *tier, const char *kind,
+                                     const char *key, double confidence, const char *session_id);
+void memory_set_audit_hook(memory_audit_hook_fn fn);
 int memory_rebuild_derived_indexes(int limit);
 int memory_repair_vector_index(int64_t memory_id, const char *command);
 int memory_repair_vector_index_failed_only(const char *command, int limit, int *failed_out);
@@ -540,6 +555,8 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
                              int limit, memory_t *out, int max);
 int memory_find_facts_visible(const char *query, const char *workspace, const char *project,
                               int limit, memory_t *out, int max);
+int memory_find_facts_visible_ex(const char *query, const char *workspace, const char *project,
+                                 int include_all, int limit, memory_t *out, int max);
 
 /* --- Conversation Scanning --- */
 int memory_scan_conversations(char dirs[][MAX_PATH_LEN], int dir_count);
@@ -658,7 +675,7 @@ typedef struct
 /* Call the external rewrite command (memory.rewrite.command) and parse results
  * into out. Silently no-ops if rewriting is disabled or the command fails.
  * cfg must be loaded by the caller. */
-void memory_query_rewrite(const char *query, const config_t *cfg, memory_query_rewrite_t *out);
+void memory_query_rewrite(const char *query, memory_query_rewrite_t *out);
 
 /* --- Negation and Absence Memory --- */
 
@@ -750,7 +767,7 @@ memory_query_shape_t memory_classify_deriver_shape(const char *query);
  * Results are written into |out|.  Returns the number of derived facts, or 0
  * if the deriver is disabled / inapplicable. */
 int memory_derive_facts(const char *query, int64_t *candidate_ids, int cand_count,
-                        const config_t *cfg, memory_derived_facts_t *out);
+                        memory_derived_facts_t *out);
 
 /* Format |facts| as a compact JSON string (caller must free). */
 char *memory_derived_facts_to_json(const memory_derived_facts_t *facts);
@@ -938,7 +955,29 @@ int memory_graph_prune(void);
 int memory_graph_normalize(void);
 
 int memory_embed(int64_t memory_id, const char *command);
-int memory_embed_text(const char *text, const char *command, float *out, int max_dim);
+/* `input_type` declares which side of the embedder this text is (see
+ * embed_input_type_t). It is required rather than defaulted so the compiler forces
+ * every call site to state it — a query silently embedded as a document costs
+ * retrieval quality and raises no error. */
+int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
+                      float *out, int max_dim);
+
+typedef struct
+{
+   char state[16]; /* closed | open | half_open */
+   int available;
+   unsigned failure_streak;
+   unsigned recovery_attempt;
+   int64_t retry_after_ms;
+   int64_t last_success_ms;
+   int64_t last_failure_ms;
+   uint64_t suppressed_calls;
+} memory_embedder_health_t;
+
+void memory_embedder_health(memory_embedder_health_t *out);
+int memory_embedder_last_result_unauthorized(void);
+void memory_embedder_dependency_reset_for_tests(void);
+void memory_embedder_dependency_set_clock_for_tests(int64_t (*now_ms)(void));
 double cosine_similarity(const float *a, const float *b, int dim);
 
 /* Test hooks for the per-recall query-embedding memo (memory_core_helpers.inc).
@@ -1084,12 +1123,11 @@ typedef struct
    int coref_count;
 } memory_cognify_result_t;
 
-/* Call the configured cognifier command (cfg->memory_cognify_command) with the
+/* Call the configured cognifier command (memory.cognify.command) with the
  * given memory text and write extracted triples into memory_relations and
  * claims as new memories.  Returns 0 on success, -1 on error or if cognification
  * is disabled.  When db is non-NULL, extracted relations are persisted. */
-int memory_cognify_unit(int64_t memory_id, const char *text, const config_t *cfg,
-                        memory_cognify_result_t *out);
+int memory_cognify_unit(int64_t memory_id, const char *text, memory_cognify_result_t *out);
 
 /* Parse a raw JSON string (as returned by the cognifier command) into a
  * memory_cognify_result_t.  Returns 0 on success, -1 on parse error. */
@@ -1116,7 +1154,7 @@ int memory_cognify_queue_status(memory_cognify_queue_stats_t *out);
  * before being marked 'failed'.  Writes aggregate stats to *out (if non-NULL).
  * timeout_secs: stop after this many seconds (0 = run until queue empty).
  * Returns 0 on success, -1 on fatal error. */
-int memory_cognify_drain(const config_t *cfg, int timeout_secs, memory_cognify_queue_stats_t *out);
+int memory_cognify_drain(int timeout_secs, memory_cognify_queue_stats_t *out);
 
 /* --- Per-Session Episode Cards --- */
 
@@ -1137,7 +1175,7 @@ typedef struct
  * succeeds the card is stored as a memory_unit with is_episode_card=1 and
  * REL_SUMMARISES edges pointing to each constituent memory.
  * Returns the new memory_unit id on success, 0 on error or if disabled. */
-int64_t memory_episode_card_generate(const char *source_session, const config_t *cfg);
+int64_t memory_episode_card_generate(const char *source_session);
 
 /* Parse a raw episode-card JSON string into a memory_episode_card_t.
  * Returns 0 on success, -1 on parse error or missing title. */
@@ -1613,13 +1651,13 @@ typedef struct
  * `dry_run` is 1 no mutations run and summary.dry_run is set.  `cfg` is
  * optional; pass NULL for hardwired defaults.  Returns 0 on success
  * (even when skipped), -1 on error. */
-int memory_maintenance_run(const config_t *cfg, unsigned int modes, int force, int dry_run,
+int memory_maintenance_run(unsigned int modes, int force, int dry_run,
                            memory_maintenance_summary_t *summary);
 
 /* Scheduler entry point: run a cycle when `interval_seconds` has
  * elapsed since the last run (or when no previous run exists).  Cheap
  * no-op when not yet due.  Returns 1 if a cycle ran, 0 if skipped. */
-int memory_maintenance_maybe_run(const config_t *cfg, memory_maintenance_summary_t *summary_out);
+int memory_maintenance_maybe_run(memory_maintenance_summary_t *summary_out);
 
 /* Fetch the last-persisted maintenance summary (for the dashboard
  * card).  Returns 0 if a record exists, -1 otherwise. */

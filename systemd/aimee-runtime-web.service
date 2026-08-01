@@ -1,0 +1,19 @@
+[Unit]
+Description=Aimee Runtime Web Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Environment=HOME=/root
+# Local webchat identity is attested by Unix-socket peer credentials; no shared
+# plaintext proxy secret is required.
+ExecStart=/usr/local/bin/aimee-runtime-web --port 8080
+WorkingDirectory=/root/aimee
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

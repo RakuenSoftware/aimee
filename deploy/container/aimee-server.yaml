@@ -4,52 +4,42 @@
 # Enables the server's inbound /v1 HTTP API. The listener binds only when BOTH a
 # port and a bearer token are configured (src/server/server_http.c). The image
 # sets AIMEE_SERVER_HTTP_BIND=1 so the TLS listener binds 0.0.0.0 (the published
-# container port); the bearer below is still required on every request.
+# container port); a Vault-held bearer is still required on every request.
 #
 # Plaintext /v1 (http_port) is LOOPBACK-ONLY by design — the server refuses to
 # bind it on a non-loopback interface so the bearer + credentials can never cross
 # the wire in cleartext. Remote thin clients MUST use the TLS listener (tls_port);
-# the server auto-provisions a self-signed cert at $AIMEE_HOME/tls/server.{crt,key}
-# on first start. Mount your own cert there to override.
-#
-# `bearer_token: aimee-local-dev` is a ONE-TIME BOOTSTRAP, not a standing
-# credential. The first thin client that connects (`aimee remote set <url>
-# aimee-local-dev`) automatically calls api.rotate_bearer, which mints a strong
-# random per-deployment bearer, hot-swaps it in, and persists it here — the
-# bootstrap token stops working the instant that happens. The exposure window is
-# only "deploy → first client enrolls". To skip the bootstrap entirely, pin your
-# own token out-of-band via the AIMEE_API_BEARER_TOKEN env (a secret store /
-# .gitignore'd per-host .env); an explicit env token disables the TOFU rotation.
+# the server writes only the self-signed public cert at
+# $AIMEE_HOME/tls/server.crt and seals its private key in Vault. The API primary
+# is likewise minted directly into Vault unless AIMEE_API_BEARER_TOKEN supplies
+# an operator-known first-boot value.
 aimee:
   api:
     http_port: 8740
     tls_port: 8743
-    bearer_token: "aimee-local-dev"
+    # Request client certificates during first-run enrollment.  The durable
+    # roster starts empty, so bearer setup still works; after every enrolled
+    # certificate has been presented the server atomically promotes this lane
+    # to required mTLS.  Starting with mTLS disabled would make the wizard's
+    # certificate enrollment inert until an undocumented server restart.
+    mtls: optional
     rate_limit_per_min: 0
-    # This image binds the TLS /v1 on 0.0.0.0 so a thin client drives it remotely,
-    # including delegates/roundtables/tools — which require remote_writes="full".
-    # The image also forces this via AIMEE_API_REMOTE_WRITES (Dockerfile.server) so
-    # it survives a fresh redeploy that reseeds this file. Trusted networks only
-    # (ships a known dev bearer); for any exposed deployment set your own bearer +
-    # TLS and lower this:
-    #   remote_writes: data   # data writes (memory/work/rules/skill), cap-gated
-    #   remote_writes: "off"  # TCP bearer is read/query/chat only
-    remote_writes: "full"
-
-    # remote_writes controls what a TCP bearer may do over the published port:
-    #   off    read/query/chat only (mutations are local-UDS-only)
-    #   data   + data writes (memory/work/rules/skill), capability-gated
-    #   full   + delegate/tool/roundtable (CAPS_ALL)
-    # Default `full` so the thin-client model works out of the box: a remote
-    # `aimee` client driving this server can run delegates and the roundtable
-    # without extra setup. The bearer token above is the trust boundary, so
-    # OVERRIDE IT (and front with TLS) for any deployment exposed beyond a
-# Delegate roundtable / MoA ensemble, on by default. The panel is the seeded
-# agents.json roster; a thin client pushes the per-agent API keys per session
-# (no keys are baked in), so the roundtable works once a client has connected.
+    # Compatibility field only: it no longer authorizes any caller. The wizard
+    # binds the first user's explicit full grant to mTLS; additional users use
+    # authority-managed grants. Keep this off to avoid a misleading legacy
+    # warning and `remote_writes.global_ignored` diagnostics.
+    remote_writes: "off"
+# Delegate roundtable / MoA ensemble, on by default. The onboarding wizard creates
+# the initial agents.json roster; provider credentials live in the server-owned
+# encrypted vault (no keys are baked into the image or sent by a thin client per
+# session).
 ensemble:
   enabled: true
-  # No reference_models pinned: the panel is built DYNAMICALLY from the enabled +
-  # currently-available delegates (auto-seeded, then unkeyed/unhealthy ones are
-  # dropped). Pin a list here (or via a workflow) only to override that default.
+  # No reference_models pinned: the panel is built dynamically from the enabled,
+  # currently-available agents the operator configured. Pin a list here (or via a
+  # workflow) only to override that default.
 
+# The image ships one canonical preset. Naming it explicitly makes the API/UI
+# mark it as the default instead of relying on the resolver's implicit fallback.
+roundtable:
+  default: default

@@ -9,6 +9,12 @@
 
 static int g_max_iterations = 0;
 static int g_max_iterations_delegate = 0;
+static int g_primary_turn = 0;
+
+int agent_routing_primary_turn(void)
+{
+   return g_primary_turn;
+}
 
 int config_load(config_t *cfg)
 {
@@ -16,6 +22,19 @@ int config_load(config_t *cfg)
    cfg->max_iterations = g_max_iterations;
    cfg->max_iterations_delegate = g_max_iterations_delegate;
    return 0;
+}
+
+/* Accessor stubs: the production seam moved from config_load to per-field
+ * accessors. Values match what this file's config_load stub produced, so the
+ * assertions below are unchanged. */
+int config_max_iterations(void)
+{
+   return g_max_iterations;
+}
+
+int config_max_iterations_delegate(void)
+{
+   return g_max_iterations_delegate;
 }
 
 static agent_t make_agent(int max_turns)
@@ -93,6 +112,50 @@ static void test_zero_means_unlimited(void)
    printf("  PASS: max_turns<=0 means infinite for both primary and delegate\n");
 }
 
+/* Regression: the primary webchat turn is ROUTED as "code" (server_compute.c
+ * calls agent_run_with_tools(&acfg, "code", ...)) but must be BUDGETED as a
+ * primary session. Before agent_budget_role() existed, a chat turn resolved the
+ * DELEGATE cap and then HARD-closed, injecting "[FINAL RESPONSE REQUIRED] The
+ * tool turn budget is exhausted" into an ordinary conversation. */
+static void test_primary_turn_is_not_budgeted_as_delegate(void)
+{
+   agent_t a = make_agent(0); /* agents.json ships max_turns: 0 */
+   g_max_iterations = 200;
+   g_max_iterations_delegate = 14;
+
+   g_primary_turn = 1;
+   const char *budget_role = agent_budget_role("code");
+   int t = agent_resolve_max_turns(&a, budget_role);
+   g_primary_turn = 0;
+
+   assert(budget_role == NULL);
+   assert(t == 200); /* the PRIMARY cap, not the 14-turn delegate cap */
+
+   g_max_iterations = 0;
+   g_max_iterations_delegate = 0;
+   printf("  PASS: primary turn routed as \"code\" is budgeted as primary\n");
+}
+
+/* A real delegate keeps the delegate budget: the flag is thread-local and is
+ * never set on the delegate worker threads a primary turn spawns. */
+static void test_delegate_turn_keeps_delegate_budget(void)
+{
+   agent_t a = make_agent(0);
+   g_max_iterations = 200;
+   g_max_iterations_delegate = 14;
+
+   g_primary_turn = 0;
+   const char *budget_role = agent_budget_role("code");
+   int t = agent_resolve_max_turns(&a, budget_role);
+
+   assert(budget_role != NULL && strcmp(budget_role, "code") == 0);
+   assert(t == 14);
+
+   g_max_iterations = 0;
+   g_max_iterations_delegate = 0;
+   printf("  PASS: delegate turn keeps the delegate budget\n");
+}
+
 int main(void)
 {
    printf("test_agent_max_turns:\n");
@@ -104,6 +167,8 @@ int main(void)
    test_delegate_falls_back_to_config();
    test_delegate_default_is_infinite();
    test_zero_means_unlimited();
+   test_primary_turn_is_not_budgeted_as_delegate();
+   test_delegate_turn_keeps_delegate_budget();
 
    printf("test_agent_max_turns: all tests passed\n");
    return 0;

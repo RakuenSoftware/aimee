@@ -6,8 +6,8 @@
 docker compose -f compose.server-managed.yaml up -d
 ```
 
-The browser wizard launches the KB and inference containers. This requires the host Docker socket,
-which gives the server Docker-host authority.
+The browser wizard launches the KB container. This requires the host Docker socket, which gives the
+server Docker-host authority.
 
 Use it for a trusted single-host install where browser-managed setup matters more than that larger
 boundary.
@@ -18,12 +18,28 @@ boundary.
 docker compose -f deploy/compose/aimee.yaml up -d
 ```
 
-Server, KB, and inference are declared together and no browser action needs to create them. This is
-the safer default when the server must not control Docker.
+Server and one KB are declared together, and no browser action needs to create them. The KB owns its
+embedding and synthesis role placements. Each role can run inside the KB container or use a remote
+endpoint supported by the selected profile. There is no separate inference service. This is the
+safer default when the server must not control Docker.
+
+The one-KB Compose files are deployment profiles, not the fleet limit. The target architecture can
+route among several KB containers with explicit corpus, authority, and capability identity. Fleet
+routing is not integrated in this checkout; see [KB fleet and model placement](KB_FLEET.md).
 
 ## External PostgreSQL
 
-Set `AIMEE_DB2_URL` for the KB. The operator owns:
+Use `AIMEE_DB2_URL` only as first-boot input, seal it into the KB Vault with a
+disposable container, then remove it before creating the long-lived service:
+
+```bash
+export AIMEE_DB2_URL='postgresql://...'
+./scripts/aimee-compose-vault-bootstrap.sh -f deploy/compose/aimee.yaml kb
+unset AIMEE_DB2_URL
+docker compose -f deploy/compose/aimee.yaml up -d
+```
+
+The operator owns:
 
 - PostgreSQL availability and backups;
 - TLS and service identity;
@@ -31,15 +47,19 @@ Set `AIMEE_DB2_URL` for the KB. The operator owns:
 - connection limits and latency;
 - migration and restore testing.
 
-Only `aimee-kb` receives DB2 credentials.
+No long-lived server or KB container stores DB2 credentials in `Config.Env`.
+The disposable `--rm` bootstrap streams first-boot values over stdin, seals
+them synchronously, and exits before the service is created.
 
 ## Inference
 
-`aimee-llm` serves embedding, reranking, and synthesis. Select a CPU or GPU tier with the deployment
-settings. GPU models live in a persistent model volume; the CPU offline image may bake its model.
+Embedding and synthesis belong to the KB that serves the request. A role can run inside its KB
+container or use a remote endpoint. Internal availability depends on the KB image and profile;
+remote placement needs an explicit endpoint and credential. No standalone inference container is
+part of either topology.
 
 The KB must report explicit degradation when a configured inference stage is unavailable. It cannot
-claim a dense, reranked, or synthesized result after silently skipping that stage.
+claim a dense or synthesized result after silently skipping that stage.
 
 ## Network ports
 
@@ -50,10 +70,10 @@ Use the compose files and generated configuration as the source of truth. Typica
 | browser | 8443 | user network, HTTPS |
 | server `/v1` | 8743 | enrolled clients only |
 | KB `/v1` | 8741 | deployment network only |
-| inference | 8742 | deployment network only |
+| remote model endpoint | provider-defined | deployment network only |
 
-Do not publish PostgreSQL or inference ports unless a separate host needs them. Apply TLS and service
-identity before crossing a trusted container network.
+Do not publish PostgreSQL or a remote model endpoint unless a separate host needs it. Apply TLS and
+service identity before crossing a trusted container network.
 
 ## Volumes and backup
 
@@ -75,10 +95,12 @@ named volumes.
 - change bootstrap browser credentials;
 - keep server and KB networks private;
 - verify TLS fingerprints and issue one client identity per machine;
-- set remote writes to the lowest ceiling and grant users individually;
+- configure server ID, team ID, and the root-owned management-JWKS trust bundle;
+- grant remote users individually and review revoked rows;
 - use the split stack if the Docker socket is not required;
 - keep delegates networkless by default;
-- move provider, git, database, and witness secrets into their owning vault/secret manager;
+- stream first-boot provider, git, database, and witness secrets into their owning Vault, then
+  recreate/start long-lived services without credential environment mappings;
 - ship WORM evidence to an off-host witness when host compromise is in scope;
 - alert on failed health, audit verification, witness lag, bus drops, database pressure, and agent
   reaping.

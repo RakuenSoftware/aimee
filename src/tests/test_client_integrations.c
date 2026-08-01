@@ -82,6 +82,13 @@ static void test_codex_delegate_policy_is_explicit(void)
    assert(strstr(skill, "Do not call provider-native sub-agent tools") != NULL);
    assert(strstr(skill, "`spawn_agent`") != NULL);
    assert(strstr(skill, "`delegate` MCP tool") != NULL);
+
+   const char *code_prompt = codex_code_exploration_prompt();
+   assert(strstr(code_prompt, AIMEE_CODE_TOOL_FIND_SYMBOL) != NULL);
+   assert(strstr(code_prompt, AIMEE_CODE_TOOL_AST_GREP_SEARCH) != NULL);
+   assert(strstr(code_prompt, AIMEE_CODE_TOOL_INDEX) != NULL);
+   assert(strstr(code_prompt, AIMEE_CODE_INDEX_COMMAND_HYBRID) != NULL);
+   assert(strstr(code_prompt, "search_graph") == NULL);
 }
 
 static void test_mcp_config_uses_resolved_command(void)
@@ -220,7 +227,7 @@ static void test_resolved_aimee_bin_path_fallback(void)
 
 /* --- Test ensure_claude_code_mcp: non-destructive merge behavior --- */
 
-static void test_claude_mcp_creates_fresh_settings(void)
+static void test_claude_mcp_creates_fresh_user_config(void)
 {
    char tmpdir[512];
    snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-claude-XXXXXX", platform_tmpdir());
@@ -235,19 +242,18 @@ static void test_claude_mcp_creates_fresh_settings(void)
    fclose(fp);
    chmod(fake_bin, 0755);
 
-   /* The function checks ~/.local/bin/aimee which may not exist
-    * in test environment. We test the JSON merge logic directly instead. */
-   char settings_path[512];
-   snprintf(settings_path, sizeof(settings_path), "%s/settings.json", tmpdir);
+   char config_path[512];
+   snprintf(config_path, sizeof(config_path), "%s/.claude.json", tmpdir);
 
    /* Write a settings file with existing data */
-   fp = fopen(settings_path, "w");
+   fp = fopen(config_path, "w");
    assert(fp != NULL);
    fputs("{\"existingKey\": true, \"mcpServers\": {\"other\": {\"command\": \"other-mcp\"}}}", fp);
    fclose(fp);
 
-   /* Simulate what ensure_claude_code_mcp does: merge aimee into mcpServers */
-   cJSON *root = read_json_file(settings_path);
+   ensure_claude_code_mcp_entry(config_path, fake_bin);
+
+   cJSON *root = read_json_file(config_path);
    assert(root != NULL);
    assert(cJSON_IsObject(root));
 
@@ -264,44 +270,17 @@ static void test_claude_mcp_creates_fresh_settings(void)
    assert(cJSON_IsString(other_cmd));
    assert(strcmp(other_cmd->valuestring, "other-mcp") == 0);
 
-   /* Add aimee server (simulating the merge) */
-   char aimee_bin[512];
-   const char *home = getenv("HOME");
-   if (home)
-      snprintf(aimee_bin, sizeof(aimee_bin), "%s/.local/bin/aimee", home);
-   else
-      snprintf(aimee_bin, sizeof(aimee_bin), "/aimee");
-   cJSON *aimee_server = cJSON_CreateObject();
-   cJSON_AddStringToObject(aimee_server, "command", aimee_bin);
-   cJSON_AddItemToObject(servers, "aimee", aimee_server);
-
-   /* Write back and re-read */
-   char *json_out = cJSON_Print(root);
-   assert(json_out != NULL);
-   fp = fopen(settings_path, "w");
-   fputs(json_out, fp);
-   fclose(fp);
-   free(json_out);
-   cJSON_Delete(root);
-
-   /* Re-read and verify everything was preserved */
-   root = read_json_file(settings_path);
-   assert(root != NULL);
-
-   existing = cJSON_GetObjectItem(root, "existingKey");
-   assert(existing != NULL && cJSON_IsTrue(existing));
-
-   servers = cJSON_GetObjectItem(root, "mcpServers");
-   assert(cJSON_IsObject(servers));
-
-   other = cJSON_GetObjectItem(servers, "other");
-   assert(cJSON_IsObject(other));
-
    cJSON *aimee = cJSON_GetObjectItem(servers, "aimee");
    assert(cJSON_IsObject(aimee));
    cJSON *cmd = cJSON_GetObjectItem(aimee, "command");
    assert(cJSON_IsString(cmd));
-   assert(strcmp(cmd->valuestring, aimee_bin) == 0);
+   assert(strcmp(cmd->valuestring, fake_bin) == 0);
+   cJSON *type = cJSON_GetObjectItem(aimee, "type");
+   assert(cJSON_IsString(type));
+   assert(strcmp(type->valuestring, "stdio") == 0);
+   cJSON *args = cJSON_GetObjectItem(aimee, "args");
+   assert(cJSON_IsArray(args));
+   assert(strcmp(cJSON_GetArrayItem(args, 0)->valuestring, "mcp-serve") == 0);
 
    cJSON_Delete(root);
 
@@ -424,6 +403,49 @@ static void test_claude_hooks_subagent_ban_gate(void)
     * owns them now). */
    assert(hook_event_has_cmd(hooks, "PreToolUse", "attention-guard"));
    cJSON_Delete(root);
+
+   /* The path written into the user's GLOBAL config must be the INSTALLED
+    * client, never the binary that happened to run the wiring.
+    *
+    * Running a client built in a throwaway worktree used to rewrite
+    * ~/.claude/settings.json to that worktree path. When the worktree was
+    * deleted, every hook in every session failed with
+    *   /bin/sh: 1: /home/.../aimee-<sha>/aimee: not found
+    * in projects that had nothing to do with the build. Durable config must
+    * never capture a transient path.
+    *
+    * Asserted against the decision function directly: an end-to-end check
+    * cannot reach this, because the test binary is not named `aimee` and so
+    * takes the same fallback either way — it passes with the bug present. */
+   {
+      char out[512];
+      const char *installed = "/home/dev/.local/bin/aimee";
+      const char *worktree_exe = "/home/dev/dev/aimee-225c45f/aimee";
+
+      /* The regression: an install exists, so the transient path must lose. */
+      assert(client_integrations_pick_bin_path(installed, worktree_exe, out, sizeof(out)) == 0);
+      assert(strcmp(out, installed) == 0);
+
+      /* No install yet (first-run bootstrap) -> the running binary is all we
+       * have, and is still better than nothing. */
+      assert(client_integrations_pick_bin_path(NULL, worktree_exe, out, sizeof(out)) == 0);
+      assert(strcmp(out, worktree_exe) == 0);
+      assert(client_integrations_pick_bin_path("", worktree_exe, out, sizeof(out)) == 0);
+      assert(strcmp(out, worktree_exe) == 0);
+
+      /* Neither available -> fail rather than emit a half-formed command. */
+      assert(client_integrations_pick_bin_path(NULL, NULL, out, sizeof(out)) != 0);
+      assert(client_integrations_pick_bin_path("", "", out, sizeof(out)) != 0);
+
+      /* A path that would be truncated must fail, not be silently cut into a
+       * different (wrong, possibly existing) path. */
+      char tiny[8];
+      assert(client_integrations_pick_bin_path(installed, NULL, tiny, sizeof(tiny)) != 0);
+      assert(client_integrations_pick_bin_path(installed, NULL, out, 0) != 0);
+      assert(client_integrations_pick_bin_path(installed, NULL, NULL, sizeof(out)) != 0);
+
+      printf("  PASS: config records the installed client, not a transient build path\n");
+   }
 
    /* Delegates gone -> the SAME settings must have the guard + deny removed. */
    client_integrations_set_delegate_probe(stub_delegates_none);
@@ -1179,7 +1201,7 @@ int main(void)
    test_read_json_file_valid();
    test_read_json_file_invalid();
    test_resolved_aimee_bin_path_fallback();
-   test_claude_mcp_creates_fresh_settings();
+   test_claude_mcp_creates_fresh_user_config();
    test_claude_hooks_create_post_hook_on_fresh_settings();
    test_claude_hooks_patch_existing_matcher();
    test_claude_hooks_repoint_stale_command();

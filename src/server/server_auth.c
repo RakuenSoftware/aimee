@@ -22,6 +22,7 @@ const method_policy_t method_registry[] = {
     {"api.status", CAP_SESSION_READ, "public /v1 API status"},
     {"api.enable", CAP_SESSION_ADMIN, "enable public /v1 API listener"},
     {"api.rotate_bearer", CAP_SESSION_ADMIN, "rotate the public /v1 API bearer"},
+    {"api.enroll_bearer", CAP_SESSION_ADMIN, "add a /v1 API bearer without revoking existing ones"},
     {"api.disable", CAP_SESSION_ADMIN, "disable public /v1 API listener"},
     {"init.run", CAP_TOOL_EXECUTE, "initialize local stores"},
     {"launch.run", CAP_TOOL_EXECUTE, "launch session"},
@@ -39,6 +40,8 @@ const method_policy_t method_registry[] = {
     {"trajectory.batch", CAP_DELEGATE, "trajectory batch generation"},
     /* Memory (exact before prefix) */
     {"memory.store", CAP_MEMORY_WRITE, "store memory"},
+    {"memory.delete", CAP_MEMORY_WRITE, "delete a memory"},
+    {"memory.supersede", CAP_MEMORY_WRITE, "supersede a memory"},
     {"memory.user_capture", CAP_MEMORY_WRITE, "capture per-user memory"},
     {"memory.*", CAP_MEMORY_READ, "memory operation"},
     /* Index (prefix) */
@@ -66,13 +69,13 @@ const method_policy_t method_registry[] = {
     {"dashboard.*", CAP_DASHBOARD_READ, "dashboard operation"},
     {"economizer.*", CAP_DASHBOARD_READ, "economizer telemetry"},
     {"audit.verify", CAP_DASHBOARD_READ, "WORM audit chain verify"},
+    {"audit.captures", CAP_DASHBOARD_READ, "list audit-on-bus capture streams"},
+    {"audit.replay", CAP_DASHBOARD_READ, "replay an audit-on-bus capture stream"},
     {"audit.checkpoint", CAP_TOOL_EXECUTE, "WORM audit checkpoint"},
     {"audit.seal", CAP_TOOL_EXECUTE, "WORM audit seal snapshot"},
     {"audit.snapshot", CAP_TOOL_EXECUTE, "WORM audit metric snapshot"},
-    {"plugin.list", CAP_DASHBOARD_READ, "plugin list"},
     {"hosts.list", CAP_DASHBOARD_READ, "host + GPU inventory"},
-    {"plugin.enable", CAP_TOOL_EXECUTE, "enable plugin"},
-    {"plugin.disable", CAP_TOOL_EXECUTE, "disable plugin"},
+    {"embedders.list", CAP_DASHBOARD_READ, "selectable embedder inventory"},
     {"lsp.*", CAP_DASHBOARD_READ, "lsp status"},
     /* Workspace. Reads (context/get/list) are index:read; register/remove
      * mutate the instance-scoped registry and a detached client performs them
@@ -90,7 +93,7 @@ const method_policy_t method_registry[] = {
     {"tool.execute", CAP_TOOL_EXECUTE, "execute tool"},
     {"delegate", CAP_DELEGATE, "delegate task"},
     {"delegate.aggregate", CAP_DELEGATE, "Mixture-of-Agents ensemble aggregate"},
-    {"delegate.roundtable", CAP_DELEGATE, "multi-round agent roundtable"},
+    {"roundtable.review", CAP_DELEGATE, "Go roundtable review transport"},
     {"dev.sweep", CAP_DELEGATE, "deepening sweep (spawns proposer delegates; analysis-only)"},
     {"delegate.status", CAP_DELEGATE, "delegate status"},
     /* Credential vault (WP-C.1): UDS-only in practice — the service layer refuses
@@ -132,10 +135,15 @@ const method_policy_t method_registry[] = {
     {"chat.send_stream", CAP_CHAT, "chat stream"},
     {"chat.graceful_cancel", CAP_CHAT, "cancel an in-flight chat turn (owner-authz)"},
     {"chat.interrupt", CAP_CHAT, "stop an in-flight turn and queue a steer (owner-authz)"},
-    {"mcp.tools_list", CAP_TOOL_EXECUTE, "MCP tool list"},
+    /* Tool definitions are read-only session metadata. Keeping this behind
+     * CAP_TOOL_EXECUTE makes an authenticated query-only/thin-client bearer
+     * fail during the MCP startup handshake before it can call even read-only
+     * tools. Tool execution remains independently gated at mcp.call. */
+    {"mcp.tools_list", CAP_SESSION_READ, "MCP tool list"},
     {"mcp.audit", CAP_TOOL_EXECUTE, "MCP OSV audit"},
     {"mcp.recheck", CAP_TOOL_EXECUTE, "MCP OSV recheck"},
     {"mcp.call", CAP_TOOL_EXECUTE, "MCP tool call"},
+    {"help.get", CAP_SESSION_READ, "read the built-in help index"},
     /* Triggers */
     {"trigger.*", CAP_TOOL_EXECUTE, "trigger operation"},
 
@@ -167,6 +175,8 @@ const method_policy_t method_registry[] = {
     {"kb.update", CAP_INDEX_ADMIN, "update knowledge base"},
     {"kb.docs.push", CAP_INDEX_ADMIN, "push documents into the knowledge base (ingest)"},
     {"kb.ingest.status", CAP_INDEX_READ, "knowledge-base ingest status (read)"},
+    {"kb.reembed", CAP_INDEX_ADMIN, "reset and re-embed the vector store (dim change)"},
+    {"memory.embed", CAP_INDEX_ADMIN, "(re)generate memory embeddings"},
     /* Code index/graph rebuilds (mutating) — distinct from the index.* reads. */
     {"index.scan", CAP_INDEX_ADMIN, "scan / re-index the codebase"},
     {"repo.trust", CAP_INDEX_ADMIN, "set per-repo cross-repo trust"},

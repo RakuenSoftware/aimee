@@ -65,6 +65,10 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
  * Valid only between bind and unbind, on the binding thread. */
 int workspace_turn_container_bound(void);
 
+/* Test seam: force workspace_turn_container_bound()'s result. -1 restores the real
+ * thread-bound state; 0/1 pin it. For tests exercising the container-delegate exemption. */
+void workspace_turn_set_container_bound_for_test(int bound);
+
 /* Clear any provider bound for this thread by workspace_turn_bind_active.
  * Safe to call unconditionally (no-op if nothing was bound). */
 void workspace_turn_unbind_active(void);

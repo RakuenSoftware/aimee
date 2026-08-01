@@ -10,7 +10,7 @@ interface Item {
   workflow: string;
   version: string;
   stage: string;
-  state: string; // active | accepted | rejected | abandoned
+  state: string; // active | accepted | rejected | stopped | abandoned
   mode: string;
   pause_reason: string;
   repo: string;
@@ -124,18 +124,27 @@ async function sendAction<T>(url: string, method: "POST" | "DELETE"): Promise<{ 
   return { status: r.status, data };
 }
 
-const isTerminal = (s: string) => s === "accepted" || s === "rejected" || s === "abandoned";
+export const isTerminal = (s: string) =>
+  s === "accepted" || s === "rejected" || s === "stopped" || s === "abandoned";
+
+// The Go WFE API uses human_gate/manual while the retained C workflow surface
+// uses pending_human/operator_paused. The runtime UI fronts either engine, so
+// control visibility must understand both wire-compatible spellings.
+export const isHumanGatePause = (reason: string) => reason === "human_gate" || reason === "pending_human";
 
 // A human status label + tone from the row's state + pause_reason + stage. Derived
 // strictly from the documented enums — no invented "drafting" state.
 function statusOf(it: Item): { label: string; variant: BadgeVariant } {
   if (it.state === "accepted") return { label: "merged (accepted)", variant: "success" };
   if (it.state === "rejected") return { label: "rejected", variant: "error" };
+  if (it.state === "stopped") return { label: "stopped", variant: "neutral" };
   if (it.state === "abandoned") return { label: "abandoned", variant: "neutral" };
   // active:
   switch (it.pause_reason) {
+    case "manual":
     case "operator_paused":
       return { label: `paused · ${it.stage}`, variant: "warning" };
+    case "human_gate":
     case "pending_human":
       return { label: `awaiting approval · ${it.stage}`, variant: "warning" };
     case "ci_pending":
@@ -424,12 +433,12 @@ export default function WorkflowActions() {
     [selId, acting, refreshList, openProposal],
   );
 
-  const canDecide = !!detail && detail.pause_reason === "pending_human";
+  const canDecide = !!detail && isHumanGatePause(detail.pause_reason);
   // Which lifecycle controls apply to the current item.
   const term = !!detail && isTerminal(detail.state);
   const paused = !!detail && !term && !!detail.pause_reason;
   const canPause = !!detail && !term && !detail.pause_reason;
-  const canResume = paused && detail!.pause_reason !== "pending_human";
+  const canResume = paused && !isHumanGatePause(detail!.pause_reason);
   const canStop = !!detail && !term;
 
   return (
@@ -635,7 +644,7 @@ export default function WorkflowActions() {
 // workflows start and how far each one drives (trigger -> PR). Kept here under
 // Workflows because that is exactly what they tune. Config-backed + live; exported
 // Values saved here are the live runtime authority.
-const RUN_POLICY_FIELDS: { key: string; label: string; help: string; kind: "int" | "bool" }[] = [
+const RUN_POLICY_FIELDS: { key: string; label: string; help: string; kind: "int" | "bool"; min?: number; max?: number }[] = [
   {
     key: "trigger.max_concurrent",
     label: "Trigger admission cap",
@@ -683,6 +692,14 @@ const RUN_POLICY_FIELDS: { key: string; label: string; help: string; kind: "int"
     label: "Concurrency",
     kind: "int",
     help: "Max autonomous runs driven concurrently per scheduler sweep. Default 2.",
+  },
+  {
+    key: "autonomy.delegate_pending_secs",
+    label: "Unassigned delegate lease (s)",
+    kind: "int",
+    min: 2,
+    max: 3600,
+    help: "Seconds an admitted delegate job may remain pending without an assigned eligible agent before it is cancelled and safely retried. Live range 2–3600; default 120.",
   },
 ];
 
@@ -739,6 +756,8 @@ function RunPolicyPanel() {
                   ) : (
                     <input
                       type="number"
+                      min={f.min}
+                      max={f.max}
                       defaultValue={Number(cfg?.[f.key] ?? 0)}
                       style={{
                         width: 90,
@@ -748,7 +767,16 @@ function RunPolicyPanel() {
                       }}
                       onBlur={(e) => {
                         const v = parseInt(e.target.value, 10);
-                        if (!Number.isNaN(v) && v !== Number(cfg?.[f.key])) save(f.key, v);
+                        const inRange =
+                          !Number.isNaN(v) &&
+                          (f.min === undefined || v >= f.min) &&
+                          (f.max === undefined || v <= f.max);
+                        if (!inRange) {
+                          setErr(`${f.label} must be between ${f.min ?? 0} and ${f.max ?? "the supported maximum"}.`);
+                          e.currentTarget.value = String(cfg?.[f.key] ?? 0);
+                          return;
+                        }
+                        if (v !== Number(cfg?.[f.key])) save(f.key, v);
                       }}
                     />
                   )}

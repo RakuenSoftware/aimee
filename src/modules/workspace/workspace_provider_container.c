@@ -222,7 +222,12 @@ static int wsc_list(const workspace_provider_t *p, const char *dir, const char *
       return -1;
 
    char **entries = NULL;
-   if (self->backend->list_dir(self->backend, self->state, dir, &entries) != 0)
+   /* The backend's list_dir returns the ENTRY COUNT on success (>= 0) and a negative
+    * value on failure — NOT 0/non-zero (see docker_list_dir/local_list_dir `return i`,
+    * and the backend test asserting `list_dir(...) >= 2`). Treating any non-zero as
+    * failure rejected every NON-EMPTY directory as "glob failed", so list_files worked
+    * only on empty dirs; the real count is taken from the NUL-terminated entries below. */
+   if (self->backend->list_dir(self->backend, self->state, dir, &entries) < 0)
       return -1;
    if (!entries)
    {

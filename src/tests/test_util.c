@@ -128,6 +128,25 @@ static void test_trim_partial_utf8(void)
    printf("  PASS: test_trim_partial_utf8\n");
 }
 
+static void test_sanitize_utf8(void)
+{
+   char cp1252[] = "legacy \x92quote\x94 and \x86mark";
+   assert(text_sanitize_utf8(cp1252) == 3);
+   assert(strcmp(cp1252, "legacy ?quote? and ?mark") == 0);
+
+   char valid[] = "caf\xc3\xa9 \xe2\x80\x94 \xf0\x9f\x98\x80";
+   assert(text_sanitize_utf8(valid) == 0);
+   assert(strcmp(valid, "caf\xc3\xa9 \xe2\x80\x94 \xf0\x9f\x98\x80") == 0);
+
+   char malformed[] = {'x', (char)0xc0, (char)0xaf, ' ',        (char)0xed, (char)0xa0, (char)0x80,
+                       ' ', (char)0xf4, (char)0x90, (char)0x80, (char)0x80, '\0'};
+   assert(text_sanitize_utf8(malformed) == 9);
+   assert(strcmp(malformed, "x?? ??? ????") == 0);
+   assert(text_sanitize_utf8(NULL) == 0);
+
+   printf("  PASS: test_sanitize_utf8\n");
+}
+
 static void test_normalize_key(void)
 {
    char buf[256];
@@ -403,6 +422,7 @@ int main(void)
    test_stem_word();
    test_is_likely_path();
    test_trim_partial_utf8();
+   test_sanitize_utf8();
    test_split_reasoning_prefix();
    test_shlex_split();
    test_split_camel_case();

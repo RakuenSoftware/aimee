@@ -160,9 +160,8 @@ void db2_kb_runtime_state_vector_rebuild_lock_release(void)
 
 static int kbrs_fence_ttl_s(void)
 {
-   config_t cfg;
-   if (config_load(&cfg) == 0 && cfg.kb_purge_fence_ttl_s > 0)
-      return cfg.kb_purge_fence_ttl_s;
+   if (config_kb_purge_fence_ttl_s() > 0)
+      return config_kb_purge_fence_ttl_s();
    return KBRS_FENCE_TTL_DFLT;
 }
 

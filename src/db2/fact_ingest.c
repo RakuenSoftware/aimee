@@ -45,9 +45,7 @@ int db2_typed_fact_ingress(const char *query, char *facts_out, size_t facts_cap)
    if (!query || !query[0])
       return 0;
 
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.typed_facts_enabled)
+   if (!config_typed_facts_enabled())
       return 0;
 
    int requests_sensitive = memory_pii_turn_requests_sensitive(query);

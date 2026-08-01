@@ -16,7 +16,7 @@
 #include "coord_closet.h"
 #include "computer_use.h"
 #include "config.h"
-#include "mcp_client_registry.h"
+#include "aimee/protocols/mcp/mcp_client_registry.h"
 #include "log.h"
 #include "dstr.h"
 #include "otel.h"
@@ -264,7 +264,13 @@ int tool_validate(const char *tool_name, const char *args_json, char *err_out, s
          cJSON_Delete(remote_tool);
          return rc;
       }
-      return -1;
+      /* Not a plugin THIS server hosts: it may be federated from aimee-kb (config
+       * install: kb), whose schema we do not hold locally. Defer validation to the
+       * kb, which owns the plugin and validates on tools/call; dispatch routes the
+       * call there (agent_tools_dispatch.c) and surfaces any error. */
+      if (err_out && err_len)
+         err_out[0] = '\0';
+      return 0;
    }
 
    tool_registry_entry_t entry;
@@ -388,208 +394,6 @@ char *agent_collect_tool_prompts(void)
    return dstr_steal(&ctx.out);
 }
 
-/* --- Policy checking --- */
-
-static char *g_policy_json = NULL;
-
-int policy_load(void)
-{
-   const char *paths[] = {".aimee-policy.json", NULL};
-   char global_path[MAX_PATH_LEN];
-   snprintf(global_path, sizeof(global_path), "%s/policy.json", config_default_dir());
-   paths[1] = global_path;
-
-   for (int i = 0; i < 2; i++)
-   {
-      FILE *f = fopen(paths[i], "r");
-      if (!f)
-         continue;
-      fseek(f, 0, SEEK_END);
-      long sz = ftell(f);
-      fseek(f, 0, SEEK_SET);
-      if (sz > 0 && sz < 1024 * 1024)
-      {
-         free(g_policy_json);
-         g_policy_json = malloc((size_t)sz + 1);
-         if (!g_policy_json)
-         {
-            fclose(f);
-            return -1;
-         }
-         size_t nread = fread(g_policy_json, 1, (size_t)sz, f);
-         if (ferror(f) || (long)nread != sz)
-         {
-            free(g_policy_json);
-            g_policy_json = NULL;
-            fclose(f);
-            return -1;
-         }
-         g_policy_json[nread] = '\0';
-      }
-      fclose(f);
-      return 0;
-   }
-   return -1;
-}
-
-int policy_check_tool(const char *tool_name, const char *side_effect, const char *args_json,
-                      char *reason_out, size_t reason_len)
-{
-   if (computer_use_is_tool_name(tool_name))
-   {
-      config_t cfg;
-      config_load(&cfg);
-      computer_use_policy_t cu_policy;
-      computer_use_policy_from_config(&cfg, &cu_policy);
-      computer_use_decision_t decision;
-      char cu_reason[256] = "";
-      if (computer_use_classify(&cu_policy, tool_name, args_json, &decision, cu_reason,
-                                sizeof(cu_reason)) &&
-          decision != COMPUTER_USE_DECISION_ALLOW)
-      {
-         if (reason_out && reason_len > 0)
-            snprintf(reason_out, reason_len, "%s",
-                     cu_reason[0] ? cu_reason : "computer-use action requires approval");
-         return -1;
-      }
-   }
-
-   /* Hardcoded discovery-shell intercept — fires unconditionally, no policy file required. */
-   if (strcmp(tool_name, "bash") == 0 && args_json)
-   {
-      cJSON *args = cJSON_Parse(args_json);
-      cJSON *cmd = args ? cJSON_GetObjectItem(args, "command") : NULL;
-      if (cmd && cJSON_IsString(cmd) && policy_is_source_discovery(cmd->valuestring))
-      {
-         snprintf(reason_out, reason_len,
-                  "Use `aimee index find <symbol>` or `aimee index overview` for code "
-                  "discovery. Fall back to shell search only if aimee returns nothing.");
-         cJSON_Delete(args);
-         return -1;
-      }
-      cJSON_Delete(args);
-   }
-
-   if (!g_policy_json)
-   {
-      policy_load();
-      if (!g_policy_json)
-         return 0;
-   }
-
-   cJSON *policy = cJSON_Parse(g_policy_json);
-   if (!policy)
-      return 0;
-
-   if (strcmp(tool_name, "bash") == 0 && args_json)
-   {
-      cJSON *args = cJSON_Parse(args_json);
-      cJSON *cmd = args ? cJSON_GetObjectItem(args, "command") : NULL;
-
-      cJSON *forbidden = cJSON_GetObjectItem(policy, "forbidden_commands");
-      if (forbidden && cJSON_IsArray(forbidden) && cmd && cJSON_IsString(cmd))
-      {
-         int n = cJSON_GetArraySize(forbidden);
-         for (int i = 0; i < n; i++)
-         {
-            cJSON *pat = cJSON_GetArrayItem(forbidden, i);
-            if (pat && cJSON_IsString(pat) && strstr(cmd->valuestring, pat->valuestring))
-            {
-               snprintf(reason_out, reason_len, "command matches forbidden pattern: %s",
-                        pat->valuestring);
-               cJSON_Delete(args);
-               cJSON_Delete(policy);
-               return -1;
-            }
-         }
-      }
-
-      cJSON_Delete(args);
-   }
-
-   /* Check tool_rules path-prefix restrictions (Feature 4) */
-   cJSON *tool_rules = cJSON_GetObjectItem(policy, "tool_rules");
-   if (tool_rules && cJSON_IsArray(tool_rules) && args_json)
-   {
-      /* Extract path from tool args */
-      cJSON *args = cJSON_Parse(args_json);
-      const char *target_path = NULL;
-      if (args)
-      {
-         cJSON *p = cJSON_GetObjectItem(args, "path");
-         if (p && cJSON_IsString(p))
-            target_path = p->valuestring;
-         else
-         {
-            cJSON *cmd = cJSON_GetObjectItem(args, "command");
-            if (cmd && cJSON_IsString(cmd))
-               target_path = cmd->valuestring;
-         }
-      }
-
-      if (target_path)
-      {
-         int n = cJSON_GetArraySize(tool_rules);
-         for (int i = 0; i < n; i++)
-         {
-            cJSON *rule = cJSON_GetArrayItem(tool_rules, i);
-            if (!rule)
-               continue;
-            cJSON *prefix = cJSON_GetObjectItem(rule, "path_prefix");
-            if (!prefix || !cJSON_IsString(prefix))
-               continue;
-
-            size_t plen = strlen(prefix->valuestring);
-            if (strncmp(target_path, prefix->valuestring, plen) == 0 &&
-                (target_path[plen] == '/' || target_path[plen] == '\0'))
-            {
-               /* Path matches this rule; check if tool is allowed */
-               cJSON *allowed = cJSON_GetObjectItem(rule, "allowed_tools");
-               if (allowed && cJSON_IsArray(allowed))
-               {
-                  int found = 0;
-                  int an = cJSON_GetArraySize(allowed);
-                  for (int j = 0; j < an; j++)
-                  {
-                     cJSON *at = cJSON_GetArrayItem(allowed, j);
-                     if (at && cJSON_IsString(at) && strcmp(at->valuestring, tool_name) == 0)
-                     {
-                        found = 1;
-                        break;
-                     }
-                  }
-                  if (!found)
-                  {
-                     snprintf(reason_out, reason_len, "tool '%s' not allowed for path %s",
-                              tool_name, prefix->valuestring);
-                     cJSON_Delete(args);
-                     cJSON_Delete(policy);
-                     return -1;
-                  }
-               }
-               break; /* First matching prefix wins */
-            }
-         }
-      }
-      cJSON_Delete(args);
-   }
-
-   cJSON *levels = cJSON_GetObjectItem(policy, "approval_levels");
-   if (levels && side_effect)
-   {
-      cJSON *level = cJSON_GetObjectItem(levels, side_effect);
-      if (level && cJSON_IsString(level) && strcmp(level->valuestring, "block") == 0)
-      {
-         snprintf(reason_out, reason_len, "policy blocks %s operations", side_effect);
-         cJSON_Delete(policy);
-         return -1;
-      }
-   }
-
-   cJSON_Delete(policy);
-   return 0;
-}
-
 /* --- Execution trace --- */
 
 void agent_trace_log(int plan_id, int turn, const char *direction, const char *content,
@@ -604,16 +408,19 @@ void agent_trace_log(int plan_id, int turn, const char *direction, const char *c
       if (!otel_initialized)
       {
          otel_initialized = 1;
-         config_t ocfg;
-         config_load(&ocfg);
-         if (ocfg.otel_endpoint[0])
-            otel_init(ocfg.otel_endpoint,
-                      ocfg.otel_service_name[0] ? ocfg.otel_service_name : "aimee", session_id());
+         if (config_otel_endpoint()[0])
+            otel_init(config_otel_endpoint(),
+                      config_otel_service_name()[0] ? config_otel_service_name() : "aimee",
+                      session_id());
       }
    }
 
    db1_execution_trace_insert_row_t row = {
        .plan_id = plan_id,
+       /* Attribute the row to its delegate. Concurrent delegates previously wrote
+        * into one undifferentiated stream, so their turns interleaved and any
+        * timing read off it mixed several jobs together. */
+       .session_id = session_id(),
        .turn = turn,
        .direction = direction,
        .content = content,
@@ -1052,15 +859,15 @@ char *agent_load_project_contract(const char *project_root)
 
 /* Build a compact_config_t from the application-level config_t.
  * Per-tool entries are stored as "tool_name=threshold" strings in config. */
-static void compact_cfg_from_app_config(const config_t *app, compact_config_t *out)
+static void compact_cfg_from_app_config(compact_config_t *out)
 {
    memset(out, 0, sizeof(*out));
-   out->enabled = app->compact_enabled;
-   out->threshold = app->compact_threshold;
-   out->head_bytes = app->compact_head_bytes;
-   out->tail_bytes = app->compact_tail_bytes;
+   out->enabled = config_compact_enabled();
+   out->threshold = config_compact_threshold();
+   out->head_bytes = config_compact_head_bytes();
+   out->tail_bytes = config_compact_tail_bytes();
 
-   int count = app->compact_per_tool_count;
+   int count = config_compact_per_tool_count();
    if (count > COMPACT_MAX_PER_TOOL)
       count = COMPACT_MAX_PER_TOOL;
 
@@ -1068,7 +875,7 @@ static void compact_cfg_from_app_config(const config_t *app, compact_config_t *o
    {
       char tool[64];
       int thresh = 0;
-      if (sscanf(app->compact_per_tool[i], "%63[^=]=%d", tool, &thresh) == 2)
+      if (sscanf(config_compact_per_tool(i), "%63[^=]=%d", tool, &thresh) == 2)
       {
          snprintf(out->per_tool[i].tool, sizeof(out->per_tool[i].tool), "%s", tool);
          out->per_tool[i].threshold = thresh;
@@ -1094,17 +901,16 @@ char *agent_compress_tool_result(const char *raw, size_t raw_len, const char *to
       return strdup("");
 
    /* Load application config and convert to compact_config_t */
-   config_t app_cfg;
    compact_config_t cfg;
-   int loaded = (config_load(&app_cfg) == 0);
+   int loaded = config_present();
    if (loaded)
-      compact_cfg_from_app_config(&app_cfg, &cfg);
+      compact_cfg_from_app_config(&cfg);
    else
       memset(&cfg, 0, sizeof(cfg)); /* use defaults on load failure */
 
    /* Per-result model-visible cap (operator-configurable, default 32768).
     * Resolved ONCE here so the closet budget and the hard cap below agree. */
-   size_t cap = agent_tool_output_cap_clamp(loaded ? app_cfg.tool_output_max_bytes : 0);
+   size_t cap = agent_tool_output_cap_clamp(loaded ? config_tool_output_max_bytes() : 0);
 
    /* Shrink via the single shared core. Size the buffer for the one strategy that
     * can exceed raw_len (a JSON structural summary of a tiny body); every other
@@ -1129,7 +935,7 @@ char *agent_compress_tool_result(const char *raw, size_t raw_len, const char *to
     * Default-off; return-only wiring (no cross-turn persistence in P1). */
    char *closet = NULL;
    size_t closet_len = 0;
-   if (loaded && app_cfg.coord_closet_enabled && compacted)
+   if (loaded && config_coord_closet_enabled() && compacted)
    {
       coord_set_t set;
       coord_set_init(&set);
@@ -1146,14 +952,20 @@ char *agent_compress_tool_result(const char *raw, size_t raw_len, const char *to
       int hard_room = (int)cap - 256;
       if (hard_room < 0)
          hard_room = 0; /* tiny operator cap: no room for a closet */
-      int cb = app_cfg.coord_closet_budget_bytes;
+      int cb = config_coord_closet_budget_bytes();
       if (cb > hard_room)
          cb = hard_room;
+      /* Copy the denylist out of the accessor's thread-local buffer: ccfg.denylist
+       * is a borrowed pointer read after coord_closet_render() runs, and any other
+       * config_coord_closet_denylist() call in between would move the ground under
+       * it. */
+      char denylist[CONFIG_COPY_MAX];
+      config_coord_closet_denylist_copy(denylist, sizeof(denylist));
       coord_closet_config_t ccfg = {
           .enabled = 1,
           .budget_bytes = cb,
-          .max_ratio_pct = app_cfg.coord_closet_max_ratio_pct,
-          .denylist = app_cfg.coord_closet_denylist[0] ? app_cfg.coord_closet_denylist : NULL,
+          .max_ratio_pct = config_coord_closet_max_ratio_pct(),
+          .denylist = denylist[0] ? denylist : NULL,
       };
       coord_evict_t why = COORD_EVICT_NONE;
       closet = coord_closet_render(&set, &ccfg, raw_len, &why);

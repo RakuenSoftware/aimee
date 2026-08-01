@@ -292,13 +292,13 @@ static int days_between(const char *earlier, const char *later)
  *     (today = now_local_iso8601), the time since the most recent event.
  */
 int memory_derive_facts(const char *query, int64_t *candidate_ids, int cand_count,
-                        const config_t *cfg, memory_derived_facts_t *out)
+                        memory_derived_facts_t *out)
 {
    if (!out)
       return 0;
    memset(out, 0, sizeof(*out));
 
-   if (!cfg || !cfg->memory_derive_facts_enabled)
+   if (!config_memory_derive_facts_enabled())
       return 0;
    if (!query || !candidate_ids || cand_count <= 0)
       return 0;

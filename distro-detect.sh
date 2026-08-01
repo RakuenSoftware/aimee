@@ -1,25 +1,44 @@
 #!/usr/bin/env bash
 # distro-detect.sh — detect the host package manager and map abstract
 # dependency names to distro-specific package names.
-# Source this file; it exports PKG_MGR, PKG_INSTALL, and PKG_UPDATE.
+# Source this file; it exports AIMEE_SUDO, PKG_MGR, PKG_INSTALL, and PKG_UPDATE.
+
+# Privilege prefix for package/service operations. Empty when already root — a
+# stock container or cloud base image typically runs as root and ships NO sudo, so
+# hardcoding `sudo` made install-deps.sh die with "sudo: command not found" on the
+# most common first-run environment. Non-root without sudo is a hard error: the
+# caller cannot install packages at all, and failing here beats failing later.
+detect_sudo() {
+    if [ "$(id -u)" -eq 0 ]; then
+        AIMEE_SUDO=""
+    elif command -v sudo &>/dev/null; then
+        AIMEE_SUDO="sudo"
+    else
+        echo "Error: this script installs system packages and needs root." >&2
+        echo "Run it as root, or install sudo and re-run as a user with sudo rights." >&2
+        exit 1
+    fi
+    export AIMEE_SUDO
+}
 
 detect_pkg_manager() {
+    detect_sudo
     if command -v dnf &>/dev/null; then
         PKG_MGR="dnf"
-        PKG_INSTALL="sudo dnf install -y"
-        PKG_UPDATE="sudo dnf makecache"
+        PKG_INSTALL="$AIMEE_SUDO dnf install -y"
+        PKG_UPDATE="$AIMEE_SUDO dnf makecache"
     elif command -v yum &>/dev/null; then
         PKG_MGR="yum"
-        PKG_INSTALL="sudo yum install -y"
-        PKG_UPDATE="sudo yum makecache"
+        PKG_INSTALL="$AIMEE_SUDO yum install -y"
+        PKG_UPDATE="$AIMEE_SUDO yum makecache"
     elif command -v apt-get &>/dev/null; then
         PKG_MGR="apt"
-        PKG_INSTALL="sudo apt-get install -y"
-        PKG_UPDATE="sudo apt-get update -qq"
+        PKG_INSTALL="$AIMEE_SUDO apt-get install -y"
+        PKG_UPDATE="$AIMEE_SUDO apt-get update -qq"
     elif command -v pacman &>/dev/null; then
         PKG_MGR="pacman"
-        PKG_INSTALL="sudo pacman -S --noconfirm"
-        PKG_UPDATE="sudo pacman -Sy"
+        PKG_INSTALL="$AIMEE_SUDO pacman -S --noconfirm"
+        PKG_UPDATE="$AIMEE_SUDO pacman -Sy"
     elif command -v brew &>/dev/null; then
         PKG_MGR="brew"
         PKG_INSTALL="brew install"
@@ -41,6 +60,7 @@ pkg_name() {
                 libsqlite3-dev)      echo "sqlite-devel" ;;
                 libpq-dev)           echo "libpq-devel" ;;
                 libzstd-dev)         echo "libzstd-devel" ;;
+                zlib1g-dev)          echo "zlib-devel" ;;
                 libcurl4-openssl-dev) echo "libcurl-devel" ;;
                 libpam0g-dev)        echo "pam-devel" ;;
                 libsecret-1-dev)     echo "libsecret-devel" ;;
@@ -72,6 +92,7 @@ pkg_name() {
                 libsqlite3-dev)      echo "sqlite" ;;
                 libpq-dev)           echo "postgresql-libs" ;;
                 libzstd-dev)         echo "zstd" ;;
+                zlib1g-dev)          echo "zlib" ;;
                 libcurl4-openssl-dev) echo "curl" ;;
                 libpam0g-dev)        echo "pam" ;;
                 libsecret-1-dev)     echo "libsecret" ;;
@@ -90,6 +111,7 @@ pkg_name() {
                 libsqlite3-dev)      echo "sqlite" ;;
                 libpq-dev)           echo "libpq" ;;
                 libzstd-dev)         echo "zstd" ;;
+                zlib1g-dev)          echo "zlib" ;;
                 libcurl4-openssl-dev) echo "curl" ;;
                 libpam0g-dev)        echo "" ;;  # PAM is built-in on macOS
                 universal-ctags)     echo "universal-ctags" ;;
@@ -132,6 +154,7 @@ REQUIRED_DEPS=(
     libsqlite3-dev
     libpq-dev
     libzstd-dev
+    zlib1g-dev
     libcurl4-openssl-dev
     libpam0g-dev
     universal-ctags
@@ -151,6 +174,7 @@ dep_present() {
         libsqlite3-dev)       pkg-config --exists sqlite3 2>/dev/null ;;
         libpq-dev)            pkg-config --exists libpq 2>/dev/null ;;
         libzstd-dev)          pkg-config --exists libzstd 2>/dev/null ;;
+        zlib1g-dev)           pkg-config --exists zlib 2>/dev/null ;;
         libcurl4-openssl-dev) pkg-config --exists libcurl 2>/dev/null ;;
         # No pkg-config .pc for PAM; probe the header the way cgo will, which
         # also resolves the macOS SDK location. If no C compiler is present yet

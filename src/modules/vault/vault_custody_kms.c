@@ -1,3 +1,6 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include "vault_custody_kms.h"
 #include "vault_crypto.h"
 #include "vault_hwm.h"
@@ -10,6 +13,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
+#ifdef __linux__
+#include <sys/syscall.h>
+#endif
 
 /* The helper is the cloud-KMS adapter: it receives the operation name and key
  * id via argv/env and must emit exactly one 32-byte decrypted root to stdout.
@@ -20,6 +26,82 @@ typedef struct
 } kms_ctx;
 static uint64_t g_hwm_version;
 static int g_hwm_ready;
+
+/* A provider helper receives only stdout. In particular it must not inherit
+ * live libpq/TLS/listener descriptors from an online custody process. Compute
+ * the portable fallback bound before fork; the child uses close_range when the
+ * kernel provides it and otherwise only invokes async-signal-safe close(2). */
+static long helper_fd_limit(void)
+{
+   long limit = sysconf(_SC_OPEN_MAX);
+   return limit > 3 ? limit : 1024;
+}
+
+/* The authority deliberately starts with stdio closed. Ensure the helper pipe
+ * never occupies 0/1/2 before fork: otherwise dup2(write, 1) may be a no-op and
+ * the subsequent endpoint cleanup can close the helper's stdout. CLOEXEC also
+ * makes every pre-exec failure path closed by construction. */
+static int helper_raise_fd(int *fd)
+{
+   if (!fd || *fd < 0)
+      return -1;
+   if (*fd > STDERR_FILENO)
+   {
+      int flags = fcntl(*fd, F_GETFD);
+      return flags >= 0 && fcntl(*fd, F_SETFD, flags | FD_CLOEXEC) == 0 ? 0 : -1;
+   }
+#ifdef F_DUPFD_CLOEXEC
+   int raised = fcntl(*fd, F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
+#else
+   int raised = fcntl(*fd, F_DUPFD, STDERR_FILENO + 1);
+   if (raised >= 0)
+   {
+      int flags = fcntl(raised, F_GETFD);
+      if (flags < 0 || fcntl(raised, F_SETFD, flags | FD_CLOEXEC) != 0)
+      {
+         close(raised);
+         raised = -1;
+      }
+   }
+#endif
+   if (raised < 0)
+      return -1;
+   close(*fd);
+   *fd = raised;
+   return 0;
+}
+
+static int helper_pipe(int p[2])
+{
+   if (!p)
+      return -1;
+#if defined(__linux__)
+   if (pipe2(p, O_CLOEXEC) != 0)
+      return -1;
+#else
+   if (pipe(p) != 0)
+      return -1;
+#endif
+   if (helper_raise_fd(&p[0]) == 0 && helper_raise_fd(&p[1]) == 0)
+      return 0;
+   close(p[0]);
+   close(p[1]);
+   p[0] = p[1] = -1;
+   return -1;
+}
+
+static void helper_close_fds(long limit)
+{
+   close(STDIN_FILENO);
+   close(STDERR_FILENO);
+#if defined(__linux__) && defined(SYS_close_range)
+   if (syscall(SYS_close_range, 3u, ~0u, 0u) == 0)
+      return;
+#endif
+   for (long fd = 3; fd < limit; ++fd)
+      close((int)fd);
+}
+
 static int hwm_call(const char *op, const char *key, uint64_t expected, uint64_t next,
                     uint64_t *ver, uint8_t *att, size_t *alen)
 {
@@ -31,8 +113,9 @@ static int hwm_call(const char *op, const char *key, uint64_t expected, uint64_t
        access(helper, X_OK) != 0)
       return -1;
    int p[2];
-   if (pipe(p) != 0)
+   if (helper_pipe(p) != 0)
       return -1;
+   long fd_limit = helper_fd_limit();
    pid_t pid = fork();
    if (pid < 0)
    {
@@ -45,9 +128,11 @@ static int hwm_call(const char *op, const char *key, uint64_t expected, uint64_t
       char e[32], n[32];
       snprintf(e, sizeof(e), "%llu", (unsigned long long)expected);
       snprintf(n, sizeof(n), "%llu", (unsigned long long)next);
-      dup2(p[1], 1);
+      if (dup2(p[1], STDOUT_FILENO) != STDOUT_FILENO)
+         _exit(127);
       close(p[0]);
       close(p[1]);
+      helper_close_fds(fd_limit);
       execl(helper, helper, op, key, e, n, (char *)NULL);
       _exit(127);
    }
@@ -119,8 +204,9 @@ static int get_kek(void *v, uint8_t out[VAULT_KEK_LEN])
        access(helper, X_OK) != 0)
       return -1;
    int p[2];
-   if (pipe(p) != 0)
+   if (helper_pipe(p) != 0)
       return -1;
+   long fd_limit = helper_fd_limit();
    pid_t pid = fork();
    if (pid < 0)
    {
@@ -130,9 +216,11 @@ static int get_kek(void *v, uint8_t out[VAULT_KEK_LEN])
    }
    if (pid == 0)
    {
-      dup2(p[1], STDOUT_FILENO);
+      if (dup2(p[1], STDOUT_FILENO) != STDOUT_FILENO)
+         _exit(127);
       close(p[0]);
       close(p[1]);
+      helper_close_fds(fd_limit);
       execl(helper, helper, "decrypt", key_id, (char *)NULL);
       _exit(127);
    }
@@ -201,8 +289,18 @@ static int rotate(void *v, const char *a, int *b, int *c, char *d, size_t e, cha
    (void)g;
    return -1;
 }
-static const vault_custody_provider_t p = {"kms", &g,       get_kek, rotate,     sealed, unseal,
-                                           seal,  hwm_read, hwm_cas, hwm_verify, NULL};
+static const vault_custody_provider_t p = {
+    .name = "kms",
+    .ctx = &g,
+    .get_kek = get_kek,
+    .rotate = rotate,
+    .is_sealed = sealed,
+    .unseal = unseal,
+    .seal = seal,
+    .hwm_read = hwm_read,
+    .hwm_cas = hwm_cas,
+    .hwm_verify = hwm_verify,
+};
 const vault_custody_provider_t *vault_custody_kms_provider(void)
 {
    return &p;

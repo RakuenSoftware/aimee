@@ -164,6 +164,8 @@ static wfe_step_result_t exec_roundtable(wfe_ctx *ctx, const wfe_node_t *node)
        * requirement — never silently swapped — so the run FAILS terminally rather
        * than degrading to a different panel. */
       return wfe_step_failed_class(WFE_FAIL_PERMANENT, 0);
+   if (nv == WFE_PANEL_MODULE_DISABLED)
+      return wfe_step_failed_class(WFE_FAIL_PERMANENT, 0);
    if (nv < 0)
       return wfe_step_pending(WFE_PAUSE_PANEL_UNREACHABLE);
 

@@ -8,8 +8,12 @@
 #ifndef DEC_SERVER_HTTP_H
 #define DEC_SERVER_HTTP_H 1
 
+#include "aimee_features.h"
 #include <stddef.h>
 #include <stdint.h>
+
+#define SERVER_HTTP_MGMT_PATH_MAX    4096
+#define SERVER_HTTP_START_MGMT_FATAL (-2)
 
 #ifdef __cplusplus
 extern "C"
@@ -30,6 +34,38 @@ extern "C"
    int dev_submit_run(const char *proposal_md, const char *workflow_opt, const char *repo,
                       const char *submitter, struct cJSON **out, char *err, size_t errlen);
 
+   typedef struct
+   {
+      int enabled;
+      int port;
+      uint32_t bind_addr;
+      char bind[16];
+      char cert[SERVER_HTTP_MGMT_PATH_MAX];
+      char key[SERVER_HTTP_MGMT_PATH_MAX]; /* Vault runtime-secret name, never a path */
+      char client_ca[SERVER_HTTP_MGMT_PATH_MAX];
+      char status_endpoint[SERVER_HTTP_MGMT_PATH_MAX];
+      char status_ca[SERVER_HTTP_MGMT_PATH_MAX];
+      char status_leaf_pin[65];
+      char status_secondary_leaf_pin[65];
+      char status_client_cert[SERVER_HTTP_MGMT_PATH_MAX];
+      char status_client_key[SERVER_HTTP_MGMT_PATH_MAX]; /* Vault runtime-secret name */
+      char status_key_id[65];
+      char status_public_key[65];
+   } server_http_management_config_t;
+
+   /* Parse the all-or-none dedicated-management packet. Public paths/metadata
+    * come from env; both private keys must already have been ingested into the
+    * process-local Vault cache. Legacy private-key path variables are rejected. */
+   int server_http_management_config_from_env(server_http_management_config_t *out);
+   const char *server_http_management_last_error(void);
+
+   /* Pure strict helpers used by startup/request tests. */
+   int server_http_management_bind_addr(const char *text, uint32_t *out);
+   int server_http_management_framing_valid(const char *method, const char *path,
+                                            const char *request, size_t request_len);
+   int server_http_management_action_framing_valid(const char *method, const char *path,
+                                                   const char *request, size_t request_len);
+
    /* Start the HTTP listener(s), spawning a detached accept-loop thread that
     * polls all bound sockets. The UDS at uds_path (unlinked first;
     * filesystem-permission auth, no token) is always bound. When tcp_port > 0
@@ -37,7 +73,9 @@ extern "C"
     * also bound and gated by `Authorization: Bearer <bearer_token>`; a
     * configured port with no bearer is refused (UDS still binds). Returns 0 if
     * the UDS bound, -1 on error. Idempotent-safe: a second call while running
-    * returns -1. rate_limit_per_min caps authorized TCP requests per 60s
+    * returns -1. A configured management-listener failure returns the distinct
+    * SERVER_HTTP_START_MGMT_FATAL so the process can fail closed. rate_limit_per_min caps
+    * authorized TCP requests per 60s
     * window (0 = unlimited); over-limit ⇒ 429 + Retry-After. */
    int server_http_start(const char *uds_path, int tcp_port, int tls_port, const char *bearer_token,
                          int rate_limit_per_min, int remote_writes);
@@ -67,15 +105,53 @@ extern "C"
    int server_http_authorize(int is_tcp, const char *bearer_cfg, const char *auth_header,
                              const char *api_key_header, int has_session_key);
 
-   /* Trust-on-first-use gate (pure — unit-testable). Returns 1 when an authorized
-    * TCP request must be REFUSED because the live listener bearer is still the
-    * one-time bootstrap default (AIMEE_BOOTSTRAP_BEARER) and the route is not the
-    * rotation endpoint — so the pre-set bearer can only mint the strong token and
-    * never perform a real operation. Returns 0 (allow) for UDS, once the bearer
-    * has been rotated (live_bearer != bootstrap), for the rotate_bearer route
-    * itself, or when the operator pinned AIMEE_API_BEARER_TOKEN (TOFU opt-out). */
-   int server_http_bootstrap_gate(int is_tcp, const char *live_bearer, const char *method,
-                                  const char *path);
+   /* JSON body for a server_http_authorize rejection (pure — unit-testable).
+    * |az| is that function's non-zero return. The 401 text carries the recovery
+    * path for a bearer rotation, which invalidates every already-paired client
+    * at once; clients echo this text verbatim, so it is the only guidance most
+    * operators will see. */
+   const char *server_http_auth_error_body(int az);
+
+   /* As server_http_authorize, but accepts any of |extra| alongside the primary
+    * bearer. This is what lets a client pair without revoking the credential
+    * every other client is already using. Compares every candidate regardless of
+    * an early match so timing does not reveal which token matched. */
+   int server_http_authorize_multi(int is_tcp, const char *bearer_cfg, const char *const *extra,
+                                   int extra_count, const char *auth_header,
+                                   const char *api_key_header, int has_session_key);
+
+   /* Publish the additional accepted bearers to the live listener. */
+   void server_http_set_bearer_extra(const char *const *bearers, int n);
+
+   /* How many additional bearers are currently accepted (diagnostics/tests). */
+   int server_http_enrolled_bearer_count(void);
+
+   /* server_http_authorize_multi against the live enrolled set. */
+   int server_http_authorize_enrolled(int is_tcp, const char *bearer_cfg, const char *auth_header,
+                                      const char *api_key_header, int has_session_key);
+   int server_http_authorize_enrolled_request(int is_tcp, const char *bearer_cfg,
+                                              const char *auth_header, const char *api_key_header,
+                                              int has_session_key, int *bootstrap_only);
+
+   /* Provision the authenticated setup-wizard user as the appliance's first
+    * remote owner.  The returned bearer is enrollment-only until /v1/cert/sign
+    * binds it to the client's CSR-produced mTLS certificate.  Returns 0 with a
+    * bearer ready, 1 when that owner is already paired, -2 when another user
+    * owns the appliance, or -1 on validation/storage/config failure. */
+   int server_http_first_user_bootstrap(const char *principal, char *bearer, size_t bearer_cap);
+
+   /* Complete and resolve the explicit first-user certificate grant. */
+   int server_http_first_user_bind_cert(const char *bearer, const char *cert_serial);
+   int server_http_first_user_cert_tier(const char *cert_serial, char *principal,
+                                        size_t principal_cap);
+   int server_http_first_user_apply_cert_grant(int mtls_authenticated, const char *cert_serial,
+                                               int *tier, char *principal, size_t principal_cap);
+
+   /* Synchronize the primary bearer with enrolled-bearer reads. Rotation clears
+    * enrolled credentials; startup preserves the extras just loaded from config. */
+   void server_http_update_primary_bearer(char *live, size_t live_sz, const char *bearer,
+                                          int revoke_enrolled);
+   void server_http_primary_bearer_snapshot(const char *live, char *out, size_t out_sz);
 
    /* Fixed-window per-bearer rate limiter (pure — unit-testable). State is a
     * single 60s window the caller owns. limit_per_min <= 0 disables limiting
@@ -110,12 +186,41 @@ extern "C"
    uint32_t server_http_route_caps(const char *method, const char *path);
    uint32_t server_http_conn_caps(int is_tcp, const char *bearer, int remote_writes);
 
+   /* Roundtable policy mutations require an attested interactive webuser in
+    * addition to their ordinary route capability. Exposed for policy tests. */
+   int route_roundtable_mutation_authorized(const char *principal);
+   int roundtable_policy_config_key(const char *key);
+
    /* Effective caps for a request after thin-client mTLS authentication. When
-    * mTLS is enabled, bearer fallback is a query-only floor and a durable cert
-    * gets the authenticated (but not full-trust) set. */
+    * mTLS is enabled, bearer fallback is a query-only floor. A durable cert gets
+    * the authenticated set at off/data and CAPS_ALL only when its verified
+    * per-user write tier is full. */
+   /* remote_writes.global_ignored: how many requests were refused that the
+    * retired aimee.api.remote_writes would formerly have allowed. Lets an
+    * operator size the cutover's impact instead of inferring it from
+    * complaints. */
+   uint64_t server_http_global_ignored_count(void);
+
    uint32_t server_http_effective_conn_caps(int is_tcp, const char *bearer, int remote_writes,
                                             int mtls_mode, int mtls_authenticated);
-   int server_http_mtls_transport_allowed(int is_tcp, int mtls_mode, int mtls_authenticated);
+   int server_http_mtls_transport_allowed(int is_tcp, int mtls_mode, int mtls_authenticated,
+                                          const char *method, const char *path);
+
+   /* Dedicated P5 management transport classifier. The management leaf is
+    * authorized only for the nonce/status health pair; those routes never fall
+    * back to a generic roster certificate or bearer, and a management-profile
+    * leaf never falls through to a generic route. TLS verification itself is
+    * completed by server_tls_peer_cert before this pure classifier is called. */
+   typedef enum
+   {
+      SERVER_HTTP_MANAGEMENT_NOT_APPLICABLE = 0,
+      SERVER_HTTP_MANAGEMENT_ALLOW = 1,
+      SERVER_HTTP_MANAGEMENT_DENY = 2
+   } server_http_management_auth_t;
+   server_http_management_auth_t server_http_management_auth(const char *method, const char *path,
+                                                             int management_lane, int verified_peer,
+                                                             int management_profile,
+                                                             const char *peer_cn);
 
    /* Parse one HTTP header value (case-insensitive name) from a raw request
     * buffer into out (NUL-terminated, bounded by n). Returns 1 when found, 0
@@ -132,6 +237,15 @@ extern "C"
                                              const char *path, uint32_t caps);
    int server_http_route_allowed(int is_tcp, const char *bearer, const char *method,
                                  const char *path, int remote_writes);
+   /* Whether a route is reachable ONLY over the local UDS listener — never over TCP,
+    * whatever the bearer and whatever aimee.api.remote_writes says.
+    *
+    * Distinct from server_http_route_is_local_only, whose name is historical and which
+    * reports whether a route dispatches a data-write op. Exposed so the property can be
+    * tested directly: it is the only thing standing between a fully-trusted TCP peer and
+    * grant administration, since such a peer already holds CAPS_ALL. */
+   int v1_route_requires_uds(const char *method, const char *path);
+
    int server_http_route_allowed_caps(int is_tcp, uint32_t have, const char *method,
                                       const char *path, int remote_writes);
 
@@ -166,8 +280,8 @@ extern "C"
    /* Stop the listener and close the socket. Safe if not started. */
    void server_http_stop(void);
 
-   /* Hot-swap the live TCP/TLS bearer without a restart. Call only from a /v1
-    * route handler (serialized on the listener thread). NULL/empty clears it. */
+   /* Hot-swap the live TCP/TLS bearer without a restart and revoke every
+    * additionally-enrolled bearer. NULL/empty clears the primary. */
    void server_http_set_bearer(const char *bearer);
 
    /* Default HTTP socket path: <config_default_dir>/aimee-http.sock. Returns a
@@ -180,6 +294,7 @@ extern "C"
    int server_http_route(const char *method, const char *path, const char *body, int body_len,
                          char *resp, int resp_cap);
 
+#if AIMEE_WITH_ROUNDTABLE
    /* Submit an existing dispatch method through the HTTP async op-run machinery
     * without going through a /v1 route. `body_json` is the method body before
     * method/__run_id injection. `conn_caps` are the caller capabilities to use
@@ -187,6 +302,7 @@ extern "C"
     * method capability before creating a run. */
    int server_http_submit_op_run(const char *op_method, const char *body_json, uint32_t conn_caps,
                                  char *resp, int resp_cap);
+#endif
 
    /* --- OpenAI-compatible completion seam ---
     * The /v1/chat/completions and /v1/completions routes run real inference,
@@ -338,6 +454,43 @@ extern "C"
     * generic body→(resp,status) shape; 503 until registered. Wired by
     * openai_chat_register (it pulls the agent dependency closure). */
    void server_http_set_runs_handler(server_http_completion_fn fn);
+
+   /* GET /v1/ready readiness seam. Unlike the JSON-provider seams above, a
+    * readiness answer carries a status code as well as a body, so the provider
+    * mirrors the models-raw shape: write the JSON body into resp[cap] and
+    * return the HTTP status (200 ready, 503 not ready).
+    *
+    * The provider must not perform I/O — it serves a snapshot sampled off the
+    * request path — so that a slow or wedged dependency cannot stall the
+    * listener. Until a provider is registered the route reports every
+    * dependency `unknown` and answers 503: readiness fails closed, so an
+    * unsampled server is never advertised as ready. Wired by
+    * server_native_register (it pulls the dependency closure). */
+   typedef int (*server_http_ready_fn)(char *resp, int cap);
+   void server_http_set_ready_provider(server_http_ready_fn fn);
+
+   /* Readiness sampler (server/server_ready.c). server_ready_register() takes
+    * one sample synchronously, starts the background sampler, and registers the
+    * provider above. server_ready_sample_now() forces a synchronous sample so a
+    * caller never has to wait on the interval. */
+   void server_ready_register(void);
+   void server_ready_sample_now(void);
+
+   /* The readiness decision as a pure function (no globals, locks, or I/O), so
+    * roll-up and staleness behavior can be tested by passing a clock instead of
+    * sleeping past a real interval. db1_ok/kb_ok: 1 ok, 0 fail, -1 unknown.
+    * Writes the JSON body and returns the HTTP status (200 ready / 503 not). */
+   typedef struct
+   {
+      int retrieval_ok; /* 1 usable, 0 failed, -1 unknown */
+      const char *failed_boundary;
+      const char *breaker_state;
+      long long retry_after_ms;
+      long long last_success_query_ms;
+      const char *last_ingest_at;
+   } server_ready_diagnostics_t;
+   int server_ready_render(int db1_ok, int kb_ok, const server_ready_diagnostics_t *diagnostics,
+                           long sampled_at, long now, int stale_secs, char *resp, int cap);
 
    void server_native_register(void);
 

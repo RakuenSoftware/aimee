@@ -6,6 +6,8 @@
 #include "db2/code_index.h"
 #include "db2/css_graph.h"
 #include "db2/entity_edges.h"
+#include "db2/kb_runtime_state.h"           /* co-change backfill idempotency marker */
+#include "modules/memory/memory_ontology.h" /* REL_CO_EDITED / NODE_FILE */
 #include <ctype.h>
 #include <dirent.h>
 #include <sys/stat.h>
@@ -609,6 +611,191 @@ static char *read_file_content(const char *path, size_t *out_len)
 }
 #endif
 
+/* --- Git co-change backfill ---
+ *
+ * Files that change together in a commit are coupled in ways the static call
+ * graph cannot see (shared wire formats, ordering assumptions, implicit
+ * contracts). We mine that from git history and fold it into the SAME
+ * co_edited edges the in-session co-edit path writes and index_blast_radius
+ * already reads (keyed by basename, weight = co-change count). No new table,
+ * no new reader — history just seeds the graph that was previously populated
+ * only from aimee's own edit windows. */
+
+#define COCHANGE_MAX_FILES  25  /* bulk-commit gate: skip sweeps/squashes above this */
+#define COCHANGE_NAME_CAP   64  /* per-commit distinct basenames we bother to hold */
+#define COCHANGE_CKPT_EVERY 200 /* commits between marker checkpoints (crash re-mine bound) */
+
+/* cochange_pairs_for_commit() (the pure pairing policy) lives in cochange.c and
+ * is declared in index.h. */
+
+#if !defined(AIMEE_DB2_DISABLED)
+static void cochange_flush(char names[][128], int ncount, cochange_pair_t *pairs, int max_pairs)
+{
+   int np = cochange_pairs_for_commit(names, ncount, COCHANGE_MAX_FILES, pairs, max_pairs);
+   for (int p = 0; p < np; p++)
+   {
+      int added = 0;
+      /* window_id 0: git-history provenance (no session window). Upsert bumps
+       * weight on repeat, so an N-times co-changed pair reaches weight N. */
+      db2_entity_edge_upsert(pairs[p].a, "co_edited", pairs[p].b, 0, (int)REL_CO_EDITED,
+                             (int)NODE_FILE, (int)NODE_FILE, &added);
+   }
+}
+
+/* Mine git history under `abs_root` into co_edited edges. Incremental: only
+ * commits after the last synced HEAD (a per-project marker in kb_runtime_state)
+ * are processed, so re-scans never double-count. After a rebase/force-update
+ * that orphans the marker, we resync it forward without re-mining (re-mining
+ * would double the accumulated weights). Silent no-op outside a git work tree. */
+static void index_backfill_cochange(const char *project, const char *abs_root)
+{
+   char *esc = shell_escape(abs_root);
+   if (!esc)
+      return;
+   char cmd[MAX_PATH_LEN * 2 + 512];
+   int rc;
+
+   snprintf(cmd, sizeof(cmd), "git -C %s rev-parse HEAD 2>/dev/null", esc);
+   char *head = run_cmd(cmd, &rc);
+   if (rc != 0 || !head)
+   {
+      free(head);
+      free(esc);
+      return;
+   }
+   head[strcspn(head, "\r\n")] = '\0';
+   if (!cochange_is_hex_sha(head)) /* never store/interpolate a non-object-id */
+   {
+      free(head);
+      free(esc);
+      return;
+   }
+
+   char key[192];
+   snprintf(key, sizeof(key), "cochange_head:%s", project);
+   char marker[128] = "";
+   int have_marker = (db2_kb_runtime_state_get(key, marker, sizeof(marker)) == 0 && marker[0]);
+   if (have_marker && !cochange_is_hex_sha(marker))
+   {
+      /* Corrupt/edited kb_runtime_state row: the marker is interpolated into a
+       * git command below, so an unvalidated value must never reach the shell.
+       * Resync forward without mining (same fail-safe as an orphaned marker). */
+      db2_kb_runtime_state_set(key, head);
+      free(head);
+      free(esc);
+      return;
+   }
+
+   char revspec[160] = "";
+   if (have_marker)
+   {
+      if (strcmp(marker, head) == 0) /* already synced to this HEAD */
+      {
+         free(head);
+         free(esc);
+         return;
+      }
+      /* marker is already validated to lowercase-hex above, so it is shell-inert;
+       * shell_escape it anyway so every value interpolated into a git command is
+       * escaped uniformly (matching abs_root), leaving no unescaped interpolation. */
+      char *emarker = shell_escape(marker);
+      const char *m = emarker ? emarker : marker;
+      snprintf(cmd, sizeof(cmd), "git -C %s merge-base --is-ancestor %s HEAD 2>/dev/null", esc, m);
+      char *anc = run_cmd(cmd, &rc);
+      free(anc);
+      if (rc != 0) /* marker orphaned (rebase/force-update): resync, do not re-mine */
+      {
+         db2_kb_runtime_state_set(key, head);
+         free(emarker);
+         free(head);
+         free(esc);
+         return;
+      }
+      snprintf(revspec, sizeof(revspec), "%s..HEAD", m);
+      free(emarker);
+   }
+
+   /* --reverse: process oldest->newest so the checkpoint marker only ever
+    * advances to a commit that is already an ancestor of HEAD.
+    * -M with --name-only emits a renamed file as a SINGLE (post-rename) path, not
+    * an old/new pair, so a rename yields no spurious old<->new co-change edge. */
+   snprintf(cmd, sizeof(cmd),
+            "git -C %s log --no-merges -M --reverse --format='@@%%H' --name-only %s 2>/dev/null",
+            esc, revspec);
+   char *log = run_cmd(cmd, &rc);
+   free(esc);
+   if (rc != 0 || !log)
+   {
+      free(log);
+      free(head);
+      return;
+   }
+
+   const int max_pairs = COCHANGE_MAX_FILES * (COCHANGE_MAX_FILES - 1) / 2;
+   cochange_pair_t *pairs = malloc(sizeof(*pairs) * (size_t)max_pairs);
+   if (!pairs)
+   {
+      free(log);
+      free(head);
+      return;
+   }
+
+   char names[COCHANGE_NAME_CAP][128];
+   int ncount = 0;
+   int in_commit = 0;
+   char cur_sha[128] = ""; /* commit whose files we are collecting */
+   int done = 0;           /* commits fully flushed since the last checkpoint */
+   for (char *line = log, *nl; line && *line; line = nl ? nl + 1 : NULL)
+   {
+      nl = strchr(line, '\n');
+      if (nl)
+         *nl = '\0';
+      if (line[0] == '@' && line[1] == '@') /* new commit boundary */
+      {
+         if (in_commit)
+         {
+            cochange_flush(names, ncount, pairs, max_pairs);
+            /* Checkpoint the marker to the just-finished commit every
+             * COCHANGE_CKPT_EVERY commits. A crash then re-mines at most that
+             * many commits on the next scan instead of the whole range, so the
+             * edge weights stay bounded (--reverse keeps cur_sha an ancestor of
+             * HEAD, so the resume ancestor-check still holds). */
+            if (cochange_is_hex_sha(cur_sha) && ++done >= COCHANGE_CKPT_EVERY)
+            {
+               db2_kb_runtime_state_set(key, cur_sha);
+               done = 0;
+            }
+         }
+         snprintf(cur_sha, sizeof(cur_sha), "%s", line + 2);
+         in_commit = 1;
+         ncount = 0;
+         continue;
+      }
+      if (!in_commit || !line[0])
+         continue;
+      const char *base = strrchr(line, '/');
+      base = base ? base + 1 : line;
+      const char *ext = get_extension(base);
+      if (!ext || !index_has_extractor(ext))
+         continue;
+      if (ncount >= COCHANGE_NAME_CAP) /* commit already over the gate; stop collecting */
+         continue;
+      snprintf(names[ncount], sizeof(names[0]), "%s", base);
+      ncount++;
+   }
+   if (in_commit)
+      cochange_flush(names, ncount, pairs, max_pairs);
+
+   /* Final marker = HEAD covers the whole processed range (the last --reverse
+    * commit is HEAD itself). */
+   db2_kb_runtime_state_set(key, head);
+
+   free(pairs);
+   free(log);
+   free(head);
+}
+#endif /* !AIMEE_DB2_DISABLED */
+
 int index_scan_project(const char *name, const char *root, int force)
 {
 #if defined(AIMEE_DB2_DISABLED)
@@ -635,8 +822,8 @@ int index_scan_project(const char *name, const char *root, int force)
    /* CSS migration assistant (WP-C): the style-graph write path is opt-in. Read
     * the flag once per scan; off by default, the indexer keeps only the legacy
     * lexical CSS class-name scan (file_exports). */
-   config_t css_cfg;
-   int css_graph_on = (config_load(&css_cfg) == 0) && css_cfg.css_style_graph_enabled;
+   int css_graph_on = config_css_style_graph_enabled();
+   int cochange_on = config_code_cochange_git_enabled();
 
    build_exclusion_list_t build_exclusions = {0};
    collect_build_exclusions(abs_root, &build_exclusions);
@@ -760,6 +947,11 @@ int index_scan_project(const char *name, const char *root, int force)
    }
 
    free(list.paths);
+
+   /* Seed co_edited edges from git history (incremental after the first scan). */
+   if (cochange_on)
+      index_backfill_cochange(name, abs_root);
+
    return scanned;
 #endif
 }
@@ -801,7 +993,8 @@ int index_blast_radius(const char *project, const char *file_path, blast_radius_
    if (db2_code_index_blast_radius(project, file_path, out) != 0)
       return -1;
 
-   /* Expand with co_edited graph edges (weight > 3). */
+   /* Expand with co_edited graph edges only when their legacy basename key
+    * resolves to exactly one current-project file. */
    {
       const char *base = strrchr(file_path, '/');
       const char *match_name = base ? base + 1 : file_path;
@@ -813,23 +1006,45 @@ int index_blast_radius(const char *project, const char *file_path, blast_radius_
          const char *related = co_buf[b];
          if (!related[0] || strcmp(related, match_name) == 0)
             continue;
-         int dup = 0;
+         char resolved[MAX_PATH_LEN];
+         if (db2_code_index_unique_file_basename(project, related, resolved, sizeof(resolved)) !=
+                 1 ||
+             strcmp(resolved, file_path) == 0)
+            continue;
+         int found = -1;
          for (int d = 0; d < out->dependent_count; d++)
          {
-            if (strstr(out->dependents[d], related))
+            if (strcmp(out->dependents[d], resolved) == 0 &&
+                strcmp(out->dependent_meta[d].project, project) == 0)
             {
-               dup = 1;
+               found = d;
                break;
             }
          }
-         if (!dup)
+         if (found < 0)
          {
-            snprintf(out->dependents[out->dependent_count], MAX_PATH_LEN, "%s (co-edited)",
-                     related);
-            out->dependent_count++;
+            if (out->dependent_count >= 64)
+               continue;
+            found = out->dependent_count++;
+            snprintf(out->dependents[found], MAX_PATH_LEN, "%s", resolved);
+            snprintf(out->dependent_meta[found].project, sizeof(out->dependent_meta[found].project),
+                     "%s", project);
+            out->dependent_meta[found].generation = out->generation;
+            snprintf(out->dependent_meta[found].freshness,
+                     sizeof(out->dependent_meta[found].freshness), "current");
+            snprintf(out->dependent_meta[found].confidence,
+                     sizeof(out->dependent_meta[found].confidence), "low");
          }
+         char *provenance = out->dependent_meta[found].provenance;
+         if (provenance[0] && !strstr(provenance, "projection"))
+            strncat(provenance, ",projection",
+                    sizeof(out->dependent_meta[found].provenance) - strlen(provenance) - 1);
+         else if (!provenance[0])
+            snprintf(provenance, sizeof(out->dependent_meta[found].provenance), "projection");
       }
    }
+
+   db2_code_index_blast_radius_local_first(project, out);
 
    return 0;
 #endif

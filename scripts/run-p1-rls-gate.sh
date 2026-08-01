@@ -24,6 +24,16 @@ fi
 # Admin URL points at the maintenance db; derive one on the same server.
 ADMIN_URL="${BASE_URL%/*}/postgres"
 TESTDB="aimee_p1_rls_gate"
+SCHEMA_ONLY_DB="aimee_schema_only_gate"
+
+echo "== Schema-only developer load: provisioning $SCHEMA_ONLY_DB =="
+psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "DROP DATABASE IF EXISTS $SCHEMA_ONLY_DB;"
+psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "CREATE DATABASE $SCHEMA_ONLY_DB;"
+SCHEMA_ONLY_URL="${BASE_URL%/*}/$SCHEMA_ONLY_DB"
+psql -v ON_ERROR_STOP=1 "$SCHEMA_ONLY_URL" -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+sed 's/__EMBED_DIM__/1024/g' "$ROOT/src/db2/schema.sql" | psql -v ON_ERROR_STOP=1 "$SCHEMA_ONLY_URL" -f - >/dev/null
+psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "DROP DATABASE $SCHEMA_ONLY_DB;"
+echo "== Schema-only developer load: PASSED =="
 
 echo "== P1 RLS gate: provisioning $TESTDB =="
 psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "DROP DATABASE IF EXISTS $TESTDB;"
@@ -40,6 +50,37 @@ psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/src/db2/schema_grants.sql"
 
 echo "== P1 RLS gate: running isolation assertions =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p1_rls_isolation_test.sql"
+
+echo "== Per-user write-tier grant isolation assertions =="
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/per-user-write-tier-rls-test.sql"
+
+echo "== Per-user identity token authority assertions =="
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/per-user-identity-authority-pg17-test.sql"
+
+# The subject grammar, against the corpus shared with the two C validators. Its
+# own step because it reuses the fixture the file above builds, and because a
+# failure here means "three copies of one rule have drifted", not "the authority
+# is broken".
+echo "== Subject grammar corpus (generated from src/tests/subject_corpus.h) =="
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/gen/subject-corpus.sql"
+
+echo "== P5-B status authority + revocation generation assertions =="
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p5b_status_pg17_test.sql"
+
+echo "== P5-C3 action-checkpoint primary admission assertions =="
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p5c3-action-checkpoint-pg17-test.sql"
+
+echo "== P5-B2b management-instance lineage assertions =="
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p5b2b_management_instance_pg_test.sql"
+
+echo "== P5-B1 fixed status-key authority assertions =="
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p5b1-status-key-pg17-test.sql"
+
+echo "== P5-B1b owner-only status-key bootstrap assertions =="
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p5b1b-status-bootstrap-pg17-test.sql"
+
+echo "== P5-B1 status-key revoke/rotation/disable/seal concurrency =="
+"$ROOT/scripts/p5b1-status-key-concurrency.sh" "$DB_URL"
 
 echo "== P3a cost-attribution isolation assertions (same provisioned db) =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p3a_rls_isolation_test.sql"
@@ -77,6 +118,20 @@ echo "== P7 whole-vault re-wrap concurrency and failure assertions =="
 echo "== P7 whole-vault re-wrap staging and promotion assertions =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p7_vault_rewrap_pg_test.sql"
 
+echo "== P7-witness-e1 evidence store: C<->SQL digest parity, append, WORM, ACLs =="
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p7_witness_pg_test.sql"
+
+# The cadence/boot/gate run as aimee_kb_runtime on the hardened tier; this DB has the
+# three-role split + schema_grants, so exercise the full witness surface AS that role
+# (every op must succeed; every forge/control path must stay denied). This is the
+# gate that catches a missing runtime grant — the class of bug the owner-only tests
+# never could.
+echo "== P7-witness runtime-role least-privilege gate (as aimee_kb_runtime) =="
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p7_witness_runtime_role_pg_test.sql"
+
+echo "== P7-witness-e2 wiring gate (isolated DB: audit + reseal + open ledgers) =="
+"$ROOT/scripts/run-p7-witness-wiring.sh" "$BASE_URL"
+
 echo "== P2a org-model catalog + entitlement isolation assertions (same provisioned db) =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p2a_catalog_rls_test.sql"
 
@@ -100,6 +155,12 @@ echo "== P4b rate shared-window-not-N× concurrency gate (genuinely parallel con
 
 echo "== P9a telemetry export + content-free ingest correctness + isolation assertions (same provisioned db) =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p9_telemetry_rls_test.sql"
+
+echo "== P5-C2b signed JWKS publication authority assertions =="
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p5c2b-jwks-publication-pg17-test.sql"
+
+echo "== P5-C2c authenticated JWKS fetch authority assertions =="
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p5c2c-jwks-fetch-pg17-test.sql"
 
 echo "== P1 RLS gate: cleanup =="
 psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "DROP DATABASE IF EXISTS $TESTDB;"

@@ -1,17 +1,21 @@
 /* agent_config.c: config loading/saving, agent routing, role checking, auth resolution */
 #include "aimee.h"
-#include "aimee_home.h" /* aimee_home() — honors AIMEE_HOME (appliance has no HOME) */
 #include "util.h"
 #include "agent_config.h"
+#include "agent_config_internal.h"
 #include "vault_principal.h" /* VAULT_PRINCIPAL_MAX for the per-turn vault principal */
-#include "vault_service.h"   /* vault_service_* : the permanent credential store (P4) */
+#include "runtime_secret.h"
+#include "vault_service.h" /* vault_service_* : the permanent credential store (P4) */
 #include "model_registry.h"
+#include "model_provider.h"
 #include "platform_path.h"
 #include "provider_cli_adapter.h"
 #include "oauth_flow.h" /* oauth_token_store/get : vault-backed auto-refreshing codex token */
 #include "cJSON.h"
 #include "json_fluent.h"
+#include <openssl/crypto.h>
 #include <ctype.h>
+#include <math.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -55,50 +59,7 @@ const char *agent_config_path(void)
    return path;
 }
 
-/* --- Env var expansion --- */
-
-static int agent_expand_env_from_vibe_dotenv(const char *name, char *dst, size_t dst_len)
-{
-   const char *home = getenv("HOME");
-   if (!name || !name[0] || !home || !home[0])
-      return 0;
-
-   char path[MAX_PATH_LEN];
-   snprintf(path, sizeof(path), "%s/.vibe/.env", home);
-
-   FILE *f = fopen(path, "r");
-   if (!f)
-      return 0;
-
-   char line[MAX_API_KEY_LEN + 128];
-   size_t name_len = strlen(name);
-   int found = 0;
-   while (fgets(line, sizeof(line), f))
-   {
-      char *p = line;
-      if (strncmp(p, "export ", 7) == 0)
-         p += 7;
-      if (strncmp(p, name, name_len) != 0 || p[name_len] != '=')
-         continue;
-
-      char *val = p + name_len + 1;
-      size_t len = strlen(val);
-      while (len > 0 && (val[len - 1] == '\n' || val[len - 1] == '\r'))
-         val[--len] = '\0';
-      if (len >= 2 &&
-          ((val[0] == '"' && val[len - 1] == '"') || (val[0] == '\'' && val[len - 1] == '\'')))
-      {
-         val[len - 1] = '\0';
-         val++;
-      }
-      snprintf(dst, dst_len, "%s", val);
-      found = 1;
-      break;
-   }
-
-   fclose(f);
-   return found;
-}
+/* --- First-boot environment references ---------------------------------- */
 
 void agent_expand_env(const char *src, char *dst, size_t dst_len)
 {
@@ -110,14 +71,13 @@ void agent_expand_env(const char *src, char *dst, size_t dst_len)
 
    if (src[0] == '$')
    {
-      const char *val = getenv(src + 1);
-      if (val)
-      {
-         snprintf(dst, dst_len, "%s", val);
+      /* Credential environment variables are consumed and unset before config
+       * loading. The only runtime view is the locked-memory cache hydrated from
+       * Vault; dotenv and direct getenv fallbacks are intentionally forbidden. */
+      if (runtime_secret_get(src + 1, dst, dst_len))
          return;
-      }
-      if (agent_expand_env_from_vibe_dotenv(src + 1, dst, dst_len))
-         return;
+      dst[0] = '\0';
+      return;
    }
 
    snprintf(dst, dst_len, "%s", src);
@@ -129,7 +89,7 @@ static const char *const anthropic_env_vars[] = {"ANTHROPIC_API_KEY", NULL};
 static const char *const gemini_env_vars[] = {"GEMINI_API_KEY", "GOOGLE_API_KEY", NULL};
 static const char *const minimax_env_vars[] = {"MINIMAX_API_KEY", NULL};
 
-static int agent_endpoint_is_localish(const char *endpoint)
+int agent_endpoint_is_localish(const char *endpoint)
 {
    if (!endpoint || !endpoint[0])
       return 0;
@@ -193,6 +153,175 @@ static void agent_normalize_legacy_claude_cli(agent_t *ag)
    ag->cli_kind[0] = '\0';
 }
 
+static void agent_derive_catalog_provider(agent_t *ag);
+
+/* Cost tier derived from a model's BASE input price. Provider-general
+ * registration expands one operator entry into several model targets, and
+ * sol/terra/luna are $5.00/$2.50/$1.00 — they cannot share a tier inherited from
+ * the registration, or "cheapest first" would pick arbitrarily among them.
+ *
+ * Deliberately banded rather than ordering on the raw price: routing directly on
+ * a float makes route choice churn every time the catalog refreshes, whereas a
+ * band is a stable policy boundary. Thresholds sit between the observed fleet
+ * price points ($0.30 / $0.95-1.00 / $2.00-2.50 / $5.00 / $10.00) so each lands
+ * in its own tier. */
+static int model_price_to_cost_tier(double in_per_mtok)
+{
+   if (in_per_mtok <= 0.0)
+      return -1; /* unknown: caller keeps the registration's declared tier */
+   if (in_per_mtok < 0.5)
+      return 0;
+   if (in_per_mtok < 1.5)
+      return 1;
+   if (in_per_mtok < 3.5)
+      return 2;
+   if (in_per_mtok < 7.5)
+      return 3;
+   return 4;
+}
+
+/* Expand a provider-general registration ("models": [...]) into one runtime
+ * agent per routable model.
+ *
+ * A model endpoint is what the runtime actually schedules: health, admission,
+ * cost and fallback are all per-model already. Materialising a target per model
+ * therefore needs no change to routing, dispatch or admission, whereas making
+ * routing return (agent, model) would thread a new compound identity through the
+ * highest-risk path. The registration stays the operator-facing object; these
+ * are its runtime targets.
+ *
+ * Targets are named `<registration>:<model>`, matching the canonical ref form
+ * model_capability_resolve_ref() already parses, so `--via codex:gpt-5.6-sol`
+ * addresses exactly one target and health keys stay distinct per model.
+ *
+ * Returns the number of targets written, or -1 if they do not fit — the caller
+ * must then reject the whole config rather than register a partial fleet, since
+ * a silently truncated expansion would drop models an operator declared. */
+static int agent_expand_one_model(agent_config_t *cfg, const agent_t *base, const char *model_id);
+
+/* Curated allowlist for "models": "auto". The provider CATALOG is discovery
+ * data, not exposure policy: a model appearing in it does not prove it is
+ * intended for this product, has complete capability metadata, or is enabled for
+ * the account. Returns NULL when the profile publishes no curated set, so "auto"
+ * fails loudly rather than exposing whatever the provider happens to list. */
+static const char **agent_provider_routable_models(const agent_t *base)
+{
+   const char *vendor = agent_catalog_provider(base);
+   model_provider_t *p = vendor && vendor[0] ? model_provider_get(vendor) : NULL;
+   if (!p && base->provider[0])
+      p = model_provider_get(base->provider);
+   return p ? p->routable_models : NULL;
+}
+
+static int agent_expand_provider_models(agent_config_t *cfg, const agent_t *base, cJSON *models)
+{
+   int written = 0;
+
+   /* "models": "auto" -> the provider profile's curated allowlist, so an
+    * operator can register a provider without naming its models at all. */
+   if (cJSON_IsString(models))
+   {
+      if (strcmp(cJSON_GetStringValue(models), "auto") != 0)
+         return -1;
+      const char **curated = agent_provider_routable_models(base);
+      if (!curated || !curated[0])
+         return -1;
+      for (int i = 0; curated[i]; i++)
+      {
+         int rc = agent_expand_one_model(cfg, base, curated[i]);
+         if (rc < 0)
+            return -1;
+         written += rc;
+      }
+      return written;
+   }
+
+   cJSON *m;
+   cJSON_ArrayForEach(m, models)
+   {
+      const char *model_id = cJSON_GetStringValue(m);
+      /* A non-string or empty entry is a config error. Skipping it would hand
+       * back a partial fleet with no indication anything was dropped. */
+      if (!model_id || !model_id[0])
+         return -1;
+      int rc = agent_expand_one_model(cfg, base, model_id);
+      if (rc < 0)
+         return -1;
+      written += rc;
+   }
+   return written;
+}
+
+/* Materialise one runtime target. Returns 1 when written, 0 when skipped as a
+ * duplicate, -1 when it does not fit. */
+static int agent_expand_one_model(agent_config_t *cfg, const agent_t *base, const char *model_id)
+{
+   char name[MAX_AGENT_NAME];
+   int n = snprintf(name, sizeof(name), "%s:%s", base->name, model_id);
+   /* A truncated name would collide with a sibling target and, because health
+    * and --via both key on the name, silently conflate two models. Reject the
+    * registration instead. */
+   if (n < 0 || (size_t)n >= sizeof(name))
+      return -1;
+
+   /* A name collision - a repeated model id, or a legacy agent already using the
+    * generated name - must REJECT the config, not silently drop a target. Health
+    * and --via both key on the name, so two entries sharing one would conflate
+    * distinct models, and quietly registering fewer models than the operator
+    * declared routes work to a set they never approved. */
+   for (int i = 0; i < cfg->agent_count; i++)
+   {
+      if (strcmp(cfg->agents[i].name, name) == 0)
+         return -1;
+   }
+
+   if (cfg->agent_count >= MAX_AGENTS)
+      return -1;
+
+   agent_t *ag = &cfg->agents[cfg->agent_count];
+   *ag = *base;
+   snprintf(ag->model, sizeof(ag->model), "%s", model_id);
+   snprintf(ag->name, sizeof(ag->name), "%s", name);
+   /* Record the generating registration so fallback grouping never has to infer
+    * it from the name. */
+   snprintf(ag->registration, sizeof(ag->registration), "%s", base->name);
+   /* Re-derive per target, since the vendor can depend on the model id — but
+    * ONLY when the registration's value was itself derived. An operator who
+    * pinned catalog_provider on the registration (a gateway speaking one wire
+    * format while serving another vendor's models) means it for every target;
+    * discarding it would silently swap the vendor identity that drives capability
+    * lookup, price, tier derivation and the canonical model ref. */
+   if (!ag->catalog_provider_explicit)
+   {
+      ag->catalog_provider[0] = '\0';
+      agent_derive_catalog_provider(ag);
+   }
+
+   model_capability_t cap;
+   if (model_capability_get(agent_catalog_provider(ag), ag->model, &cap))
+   {
+      int tier = model_price_to_cost_tier(cap.cost_in_per_mtok);
+      if (tier >= 0)
+         ag->cost_tier = tier;
+   }
+   else
+   {
+      /* The curated list is compiled in, so a vendor rename or retirement leaves
+       * a target the catalog cannot describe: it keeps the registration's tier
+       * and fails only when a request is sent. Warn loudly rather than fail the
+       * load — a local metadata gap should not take the whole fleet down, and
+       * routing's capability gate already declines to select what it cannot
+       * describe. */
+      LOG_WARN("agent",
+               "agent '%s': no catalog entry for %s:%s — tier and capability are unverified; "
+               "the model may have been renamed or retired",
+               ag->name, agent_catalog_provider(ag), ag->model);
+   }
+
+   cfg->agent_count++;
+   return 1;
+}
+
 static void agent_normalize_builtin_cost_tier(agent_t *ag)
 {
    if (!ag)
@@ -200,6 +329,295 @@ static void agent_normalize_builtin_cost_tier(agent_t *ag)
    if (strcmp(ag->backend, AGENT_BACKEND_PROVIDER_CLI) == 0 &&
        strcmp(ag->cli_kind, "mistral-plan") == 0 && ag->cost_tier > 0)
       ag->cost_tier = 0;
+}
+
+/* Vendor (catalog) identity for capability lookup. `provider` names the WIRE
+ * SHAPE; a third-party vendor served over another vendor's wire format needs its
+ * own catalog key or every model_capability_get() misses and falls through to
+ * the heuristic under the wrong provider branch. */
+
+/* Registrable vendor domains. Matching is on HOST LABELS, never a substring of
+ * the whole URL: "https://api.kimi.com.attacker.example/v1" contains
+ * "api.kimi.com" but its host is not under kimi.com, and a path or query segment
+ * must never select a vendor. */
+static const struct
+{
+   const char *domain;
+   const char *vendor;
+} g_catalog_vendor_domains[] = {
+    {"minimax.io", "minimax"},
+    {"minimaxi.com", "minimax"},
+    {"minimax.com", "minimax"},
+    {"kimi.com", "moonshotai"},
+    {"moonshot.cn", "moonshotai"},
+    {"moonshot.ai", "moonshotai"},
+    {NULL, NULL},
+};
+
+/* Wire/CLI provider names that are NOT catalog vendor keys. aimee names some
+ * providers after the CLI or product ("claude" for the Claude CLI/OAuth seat,
+ * "chatgpt"/"codex" for the Codex seat) while models.dev keys the vendor
+ * ("anthropic", "openai"). Without this map the primary agent resolves NO
+ * capability flags at all and an 8192 output ceiling. */
+static const struct
+{
+   const char *wire;
+   const char *vendor;
+} g_catalog_provider_aliases[] = {
+    {"claude", "anthropic"},
+    {"chatgpt", "openai"},
+    {"codex", "openai"},
+    {NULL, NULL},
+};
+
+/* Vendor namespaces as they appear in gateway/OpenRouter model ids
+ * ("moonshotai/kimi-k2.7-code"). */
+static const struct
+{
+   const char *ns;
+   const char *vendor;
+} g_catalog_vendor_namespaces[] = {
+    {"minimax", "minimax"},
+    {"moonshotai", "moonshotai"},
+    {"moonshot", "moonshotai"},
+    {"kimi", "moonshotai"},
+    {NULL, NULL},
+};
+
+/* Lowercased host of an endpoint URL, without scheme, userinfo, port or path.
+ * Returns 0 when no host could be parsed.
+ *
+ * The scheme must be ANCHORED: searching for "://" anywhere lets a scheme-less
+ * endpoint smuggle an authority through a path segment
+ * ("gateway.example/relay://api.minimax.io/v1" would otherwise parse as
+ * api.minimax.io), which for the legacy wire-provider rewrite would change auth
+ * and credential selection. Scheme-relative "//host/path" is accepted. */
+static int agent_endpoint_host(const char *endpoint, char *out, size_t out_len)
+{
+   if (!endpoint || !endpoint[0] || !out || out_len == 0)
+      return 0;
+   out[0] = '\0';
+
+   const char *p = endpoint;
+   if (p[0] == '/' && p[1] == '/')
+   {
+      p += 2; /* scheme-relative */
+   }
+   else
+   {
+      /* scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ) ":" "//" */
+      size_t i = 0;
+      if (isalpha((unsigned char)p[0]))
+      {
+         i = 1;
+         while (p[i] && (isalnum((unsigned char)p[i]) || p[i] == '+' || p[i] == '-' || p[i] == '.'))
+            i++;
+      }
+      if (i > 0 && p[i] == ':' && p[i + 1] == '/' && p[i + 2] == '/')
+         p += i + 3;
+      /* else: no scheme — treat the whole string as an authority + path. */
+   }
+
+   /* Userinfo (user:pass@host) must not be mistaken for the host, but only when
+    * the '@' precedes the authority's end. */
+   const char *authority_end = p + strcspn(p, "/?#");
+   const char *at = memchr(p, '@', (size_t)(authority_end - p));
+   if (at)
+      p = at + 1;
+
+   size_t n;
+   if (p[0] == '[')
+   {
+      /* Bracketed IPv6 literal: the colons inside are not a port separator. */
+      const char *close = memchr(p, ']', (size_t)(authority_end - p));
+      if (!close)
+         return 0;
+      n = (size_t)(close - p) + 1;
+   }
+   else
+   {
+      n = strcspn(p, ":/?#");
+   }
+   if (n == 0 || n >= out_len)
+      return 0;
+   for (size_t i = 0; i < n; i++)
+      out[i] = (char)tolower((unsigned char)p[i]);
+   out[n] = '\0';
+
+   /* Tolerate a trailing dot (fully-qualified form). */
+   if (n > 1 && out[n - 1] == '.')
+      out[n - 1] = '\0';
+   return out[0] ? 1 : 0;
+}
+
+/* 1 when `model` names the given vendor FAMILY: the prefix must be followed by
+ * end-of-string or a separator, never more letters. Unanchored matching let
+ * "minimaximum-production" be treated as MiniMax — which, in the legacy wire
+ * rewrite, would change the agent's auth type and credential env vars. */
+static int model_family_is(const char *model, const char *family)
+{
+   size_t n = strlen(family);
+   if (!model || strncasecmp(model, family, n) != 0)
+      return 0;
+   char c = model[n];
+   return c == '\0' || c == '-' || c == '_' || c == '.' || c == '/' || c == ':' || c == ' ';
+}
+
+/* 1 when host is `domain` itself or a subdomain of it. Label-anchored, so
+ * "kimi.com.evil.example" does NOT match "kimi.com". */
+static int host_is_within_domain(const char *host, const char *domain)
+{
+   size_t hl = strlen(host), dl = strlen(domain);
+   if (hl == dl)
+      return strcmp(host, domain) == 0;
+   if (hl < dl + 1)
+      return 0;
+   return host[hl - dl - 1] == '.' && strcmp(host + hl - dl, domain) == 0;
+}
+
+/* Derive catalog_provider when the operator did not set it explicitly. Host
+ * domain wins; a vendor-namespaced or vendor-prefixed model id is the fallback
+ * for gateways and CLI/OAuth backends whose endpoint does not name the vendor.
+ * Leaves the field empty when the wire provider is already the vendor (or when
+ * nothing is recognisable), so agent_catalog_provider() falls back and the
+ * caller can tell "derived nothing" from "derived something". */
+static void agent_derive_catalog_provider(agent_t *ag)
+{
+   if (!ag || ag->catalog_provider[0])
+      return;
+
+   char host[256];
+   if (agent_endpoint_host(ag->endpoint, host, sizeof(host)))
+   {
+      for (int i = 0; g_catalog_vendor_domains[i].domain; i++)
+      {
+         if (host_is_within_domain(host, g_catalog_vendor_domains[i].domain))
+         {
+            snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s",
+                     g_catalog_vendor_domains[i].vendor);
+            return;
+         }
+      }
+   }
+
+   /* Provider-alias fallback runs even with NO model: a provider-general
+    * registration carries only a provider until it is expanded, and its vendor
+    * identity is what selects the curated model list. Checked before the
+    * model-shaped rules below so an explicit model still wins where present. */
+   if (!ag->model[0])
+   {
+      for (int i = 0; g_catalog_provider_aliases[i].wire; i++)
+      {
+         if (strcasecmp(ag->provider, g_catalog_provider_aliases[i].wire) == 0)
+         {
+            snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s",
+                     g_catalog_provider_aliases[i].vendor);
+            return;
+         }
+      }
+      return;
+   }
+
+   /* Namespaced gateway id: "<vendor>/<model>". */
+   const char *slash = strchr(ag->model, '/');
+   if (slash && slash > ag->model)
+   {
+      size_t nlen = (size_t)(slash - ag->model);
+      for (int i = 0; g_catalog_vendor_namespaces[i].ns; i++)
+      {
+         const char *ns = g_catalog_vendor_namespaces[i].ns;
+         if (strlen(ns) == nlen && strncasecmp(ag->model, ns, nlen) == 0)
+         {
+            snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s",
+                     g_catalog_vendor_namespaces[i].vendor);
+            return;
+         }
+      }
+   }
+
+   /* Bare vendor-family model id. */
+   if (model_family_is(ag->model, "minimax"))
+   {
+      snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s", "minimax");
+      return;
+   }
+   if (model_family_is(ag->model, "kimi"))
+   {
+      snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s", "moonshotai");
+      return;
+   }
+
+   /* Last: the agent's own provider may be a wire/CLI name rather than a vendor. */
+   for (int i = 0; g_catalog_provider_aliases[i].wire; i++)
+   {
+      if (strcasecmp(ag->provider, g_catalog_provider_aliases[i].wire) == 0)
+      {
+         snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s",
+                  g_catalog_provider_aliases[i].vendor);
+         return;
+      }
+   }
+}
+
+/* Registration prefix of a route-target name: everything before the first ':'.
+ * Provider-general registration names targets `<registration>:<model>`, so this
+ * identifies siblings that share credentials, endpoint and wire protocol. A
+ * legacy single-model agent has no ':' and is its own registration. */
+void agent_registration_prefix(const char *name, char *out, size_t out_len)
+{
+   if (!out || out_len == 0)
+      return;
+   out[0] = '\0';
+   if (!name || !name[0])
+      return;
+   const char *colon = strchr(name, ':');
+   size_t n = colon ? (size_t)(colon - name) : strlen(name);
+   if (n >= out_len)
+      n = out_len - 1;
+   memcpy(out, name, n);
+   out[n] = '\0';
+}
+
+/* See agent_config.h for why this compares the stored registration rather than
+ * parsing the name, and why an unregistered agent has no siblings. */
+int agent_same_registration(const agent_t *a, const agent_t *b)
+{
+   if (!a || !b)
+      return 0;
+   if (!a->registration[0] || !b->registration[0])
+      return 0;
+   return strcmp(a->registration, b->registration) == 0;
+}
+
+const char *agent_scope_name(agent_scope_t s)
+{
+   switch (s)
+   {
+   case AGENT_SCOPE_BOUNDED:
+      return "bounded";
+   case AGENT_SCOPE_WHOLE_TASK:
+      return "whole_task";
+   default:
+      return "";
+   }
+}
+
+agent_scope_t agent_scope_from_string(const char *s)
+{
+   if (!s || !s[0])
+      return AGENT_SCOPE_UNSET;
+   if (strcmp(s, "bounded") == 0)
+      return AGENT_SCOPE_BOUNDED;
+   if (strcmp(s, "whole_task") == 0 || strcmp(s, "whole-task") == 0)
+      return AGENT_SCOPE_WHOLE_TASK;
+   return AGENT_SCOPE_UNSET;
+}
+
+const char *agent_catalog_provider(const agent_t *ag)
+{
+   if (!ag)
+      return "";
+   return ag->catalog_provider[0] ? ag->catalog_provider : ag->provider;
 }
 
 static int agent_provider_requires_credentials(const char *provider)
@@ -219,11 +637,12 @@ static int agent_provider_env_value(const char *provider, char *dst, size_t dst_
       return 0;
    for (int i = 0; envs[i]; i++)
    {
-      const char *value = getenv(envs[i]);
-      if (value && value[0])
+      char value[MAX_API_KEY_LEN];
+      if (runtime_secret_get(envs[i], value, sizeof(value)) && value[0])
       {
          if (dst && dst_len > 0)
             snprintf(dst, dst_len, "%s", value);
+         runtime_secret_wipe(value, sizeof(value));
          return 1;
       }
    }
@@ -253,9 +672,12 @@ int agent_has_resolvable_credentials(const agent_t *agent)
    }
    for (int i = 0; i < agent->credential_count; i++)
    {
-      const char *value = getenv(agent->credentials[i].api_key_env);
-      if (value && value[0])
+      char value[MAX_API_KEY_LEN];
+      if (runtime_secret_get(agent->credentials[i].api_key_env, value, sizeof(value)) && value[0])
+      {
+         runtime_secret_wipe(value, sizeof(value));
          return 1;
+      }
    }
    return agent_provider_env_value(agent->provider, NULL, 0);
 }
@@ -661,13 +1083,83 @@ int agent_load_config(agent_config_t *cfg)
             snprintf(ag->provider, sizeof(ag->provider), "%s", v->valuestring);
          if (!ag->provider[0])
             snprintf(ag->provider, sizeof(ag->provider), "%s", "openai");
-         if (strcmp(ag->provider, "openai") == 0 &&
-             (strstr(ag->endpoint, "api.minimax.") || strstr(ag->model, "MiniMax-M2")))
-            snprintf(ag->provider, sizeof(ag->provider), "%s", "minimax");
+         /* Legacy OpenAI-wire MiniMax normalisation. This rewrites the WIRE
+          * provider (so it changes auth and credential env-var selection), which
+          * makes a false positive worse than a catalog misderivation — it used
+          * substring matching over the whole endpoint, so a gateway with
+          * "api.minimax." anywhere in its path or userinfo was rewritten. Match
+          * the host's domain labels, and a model FAMILY rather than the literal
+          * "MiniMax-M2" (which stopped matching the moment M3 shipped). */
+         if (strcmp(ag->provider, "openai") == 0)
+         {
+            char lhost[256];
+            int minimax_host = agent_endpoint_host(ag->endpoint, lhost, sizeof(lhost)) &&
+                               (host_is_within_domain(lhost, "minimax.io") ||
+                                host_is_within_domain(lhost, "minimaxi.com") ||
+                                host_is_within_domain(lhost, "minimax.com"));
+            if (minimax_host || model_family_is(ag->model, "minimax"))
+               snprintf(ag->provider, sizeof(ag->provider), "%s", "minimax");
+         }
+
+         /* Catalog identity is SEPARATE from the wire provider above: rewriting
+          * `provider` for an Anthropic-wire third party would drop the
+          * anthropic-version header, the x-api-key auth coercion, and the
+          * credential env-var set. An explicit operator value always wins. */
+         v = cJSON_GetObjectItem(a, "catalog_provider");
+         if (v && cJSON_IsString(v) && v->valuestring[0])
+         {
+            snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s", v->valuestring);
+            ag->catalog_provider_explicit = 1;
+         }
+         agent_derive_catalog_provider(ag);
 
          v = cJSON_GetObjectItem(a, "cost_tier");
          if (v && cJSON_IsNumber(v))
             ag->cost_tier = v->valueint;
+
+         v = cJSON_GetObjectItem(a, "tier_price_exempt");
+         if (v && cJSON_IsString(v))
+            snprintf(ag->tier_price_exempt, sizeof(ag->tier_price_exempt), "%s", v->valuestring);
+
+         /* Operator price override ($/Mtok); absent or negative leaves it unset
+          * so the catalog answers. */
+         /* isfinite() matters: a parser can yield +inf from an overflowing
+          * literal, and a non-finite price defeats every ordered comparison in
+          * the resolver, making an unset axis look set. */
+         v = cJSON_GetObjectItem(a, "price_in_per_mtok");
+         if (v && cJSON_IsNumber(v) && isfinite(v->valuedouble) && v->valuedouble >= 0.0)
+            ag->price_in_per_mtok = v->valuedouble;
+         v = cJSON_GetObjectItem(a, "price_out_per_mtok");
+         if (v && cJSON_IsNumber(v) && isfinite(v->valuedouble) && v->valuedouble >= 0.0)
+            ag->price_out_per_mtok = v->valuedouble;
+         v = cJSON_GetObjectItem(a, "price_cached_per_mtok");
+         if (v && cJSON_IsNumber(v) && isfinite(v->valuedouble) && v->valuedouble >= 0.0)
+            ag->price_cached_per_mtok = v->valuedouble;
+
+         /* An unrecognised value must not silently mean "no ceiling": that would
+          * hand the hardest work to the seat the operator was trying to limit. */
+         /* Persisted so same-registration fallback grouping survives a save. The
+          * expanded targets are what get written (the registration entry itself
+          * is not a route target), so without this the grouping silently
+          * disappeared the first time anything called agent_save_config. */
+         v = cJSON_GetObjectItem(a, "registration");
+         if (v && cJSON_IsString(v))
+            snprintf(ag->registration, sizeof(ag->registration), "%s", v->valuestring);
+
+         v = cJSON_GetObjectItem(a, "max_scope");
+         if (v && cJSON_IsString(v) && v->valuestring[0])
+         {
+            ag->max_scope = agent_scope_from_string(v->valuestring);
+            if (ag->max_scope == AGENT_SCOPE_UNSET)
+            {
+               LOG_ERROR("agent",
+                         "agents.json: agent '%s' has unknown max_scope '%s'; "
+                         "use \"bounded\" or \"whole_task\"",
+                         ag->name, v->valuestring);
+               cJSON_Delete(root);
+               return -1;
+            }
+         }
 
          v = cJSON_GetObjectItem(a, "max_tokens");
          ag->max_tokens = (v && cJSON_IsNumber(v)) ? v->valueint : AGENT_DEFAULT_MAX_TOKENS;
@@ -685,7 +1177,8 @@ int agent_load_config(agent_config_t *cfg)
              * offline (same guarantees as the tools_enabled derivation below);
              * an unknown/non-reasoning model keeps the standard default. */
             model_capability_t tmc;
-            int reasoning = ag->model[0] && model_capability_get(ag->provider, ag->model, &tmc) &&
+            int reasoning = ag->model[0] &&
+                            model_capability_get(agent_catalog_provider(ag), ag->model, &tmc) &&
                             (tmc.flags & MODEL_CAP_REASONING);
             ag->timeout_ms = reasoning ? AGENT_REASONING_TIMEOUT_MS : AGENT_DEFAULT_TIMEOUT_MS;
          }
@@ -735,7 +1228,8 @@ int agent_load_config(agent_config_t *cfg)
              *    ON. So embedders/rerankers registered with a known non-tool model
              *    stay off, while any real chat/code delegate is capable by default. */
             model_capability_t mc;
-            int known = ag->model[0] && model_capability_get(ag->provider, ag->model, &mc);
+            int known =
+                ag->model[0] && model_capability_get(agent_catalog_provider(ag), ag->model, &mc);
             ag->tools_enabled = (known && !(mc.flags & MODEL_CAP_TOOLS)) ? 0 : 1;
          }
 
@@ -895,7 +1389,107 @@ int agent_load_config(agent_config_t *cfg)
           * Agent Only persists. */
          if (!primary_only_present)
             ag->primary_only = agent_is_claude_cli(ag) ? 1 : 0;
+
+         /* Provider-general registration: an explicit "models" array expands
+          * into one runtime target per model. Strictly OPT-IN — a legacy entry
+          * naming a single `model` keeps exactly its previous meaning, including
+          * its name for `--via`. Inferring provider-general mode from anything
+          * else would change cost, health and attribution on upgrade. */
+         cJSON *models_arr = cJSON_GetObjectItem(a, "models");
+         if (models_arr)
+         {
+            /* Reject an ill-formed registration rather than degrading it into
+             * something the operator did not write. An empty or non-array/string
+             * `models` would otherwise fall through and register the bare
+             * registration as a routable agent with NO model - routing would
+             * then dispatch whatever the catalog happens to default to. */
+            int models_ok = (cJSON_IsArray(models_arr) && cJSON_GetArraySize(models_arr) > 0) ||
+                            cJSON_IsString(models_arr);
+            if (!models_ok)
+            {
+               LOG_ERROR("agent",
+                         "agents.json: registration '%s' has an empty or malformed \"models\"; "
+                         "use a non-empty array of model ids or \"auto\"",
+                         ag->name);
+               cJSON_Delete(root);
+               return -1;
+            }
+            /* `model` and `models` together are ambiguous: the single value would
+             * be silently discarded by expansion. Make the operator choose. */
+            if (ag->model[0])
+            {
+               LOG_ERROR("agent",
+                         "agents.json: registration '%s' sets both \"model\" and \"models\"; "
+                         "use one or the other",
+                         ag->name);
+               cJSON_Delete(root);
+               return -1;
+            }
+         }
+         if (models_arr)
+         {
+            agent_t base = *ag;
+            int n = agent_expand_provider_models(cfg, &base, models_arr);
+            if (n < 0)
+            {
+               LOG_ERROR("agent",
+                         "agents.json: registration '%s' expands past the %d-target limit; "
+                         "refusing to load a partial fleet",
+                         base.name, MAX_AGENTS);
+               /* `data` was already freed immediately after cJSON_Parse. */
+               cJSON_Delete(root);
+               return -1;
+            }
+            /* The registration itself is not a route target. */
+            continue;
+         }
          cfg->agent_count++;
+      }
+   }
+
+   /* Q5 mitigation: a fleet where EVERY agent declares a ceiling below whole_task
+    * cannot serve a default-scope packet at all, and the failure would otherwise
+    * appear only at dispatch as a confusing "no route". Warn at load instead.
+    * Deliberately not fatal: an operator may legitimately run only bounded work. */
+   if (cfg->agent_count > 0)
+   {
+      int unbounded = 0;
+      for (int i = 0; i < cfg->agent_count; i++)
+      {
+         if (cfg->agents[i].enabled && (cfg->agents[i].max_scope == AGENT_SCOPE_UNSET ||
+                                        cfg->agents[i].max_scope >= AGENT_SCOPE_WHOLE_TASK))
+         {
+            unbounded = 1;
+            break;
+         }
+      }
+      if (!unbounded)
+         LOG_WARN("agent",
+                  "no enabled agent can serve whole_task work (every agent declares a lower "
+                  "max_scope); packets without an explicit scope will fail to route. Remove a "
+                  "ceiling or add a more capable agent.");
+   }
+
+   /* Whole-config name uniqueness. Checking only against agents committed SO FAR
+    * is order-dependent: an expansion generating `codex:gpt-5.6-sol` is caught
+    * when a legacy agent of that name was loaded first, but not when it is
+    * declared after. Both health and --via key on the name, so two entries
+    * sharing one conflate distinct models — and they may differ in endpoint,
+    * credentials, roles and model. Validate the final set once, so the check is
+    * independent of declaration order. */
+   for (int i = 0; i < cfg->agent_count; i++)
+   {
+      for (int j = i + 1; j < cfg->agent_count; j++)
+      {
+         if (strcmp(cfg->agents[i].name, cfg->agents[j].name) != 0)
+            continue;
+         LOG_ERROR("agent",
+                   "agents.json: two agents are both named '%s' (one may be generated by a "
+                   "provider-general registration); names must be unique because health and "
+                   "--via key on them",
+                   cfg->agents[i].name);
+         cJSON_Delete(root);
+         return -1;
       }
    }
 
@@ -1069,7 +1663,7 @@ static int agent_config_existing_agent_count(void)
    return n;
 }
 
-int agent_save_config(const agent_config_t *cfg)
+static int agent_save_config_impl(const agent_config_t *cfg, int emptied_by_removal)
 {
    cJSON *root = cJSON_CreateObject();
 
@@ -1090,12 +1684,14 @@ int agent_save_config(const agent_config_t *cfg)
       JSON_ADD_STR(a, "name", ag->name);
       JSON_ADD_STR(a, "endpoint", ag->endpoint);
       JSON_ADD_STR(a, "model", ag->model);
-      /* Persist the on-disk reference form ($VAR), never a resolved secret. Falls
-       * back to api_key for in-memory agents (e.g. `agent add $VAR`, which stores
-       * the unexpanded reference there); literal secrets belong in the vault. */
+      /* Persist references only. A literal API key is a credential and therefore
+       * belongs in Vault, never agents.json. In-memory callers may still put a
+       * $VAR reference in api_key; first boot resolves that from the locked
+       * Vault-backed runtime cache and the server migration canonicalizes it to
+       * the per-agent Vault slot. */
       {
          const char *disk_key = ag->api_key_disk[0] ? ag->api_key_disk : ag->api_key;
-         if (disk_key[0])
+         if (disk_key[0] == '$' && disk_key[1])
             JSON_ADD_STR(a, "api_key", disk_key);
       }
       if (ag->auth_cmd[0])
@@ -1104,6 +1700,22 @@ int agent_save_config(const agent_config_t *cfg)
          JSON_ADD_STR(a, "auth_type", ag->auth_type);
       if (strcmp(ag->provider, "openai") != 0)
          JSON_ADD_STR(a, "provider", ag->provider);
+      /* Only an operator-supplied catalog_provider round-trips; a derived value
+       * is recomputed at load so the derivation rules stay authoritative. */
+      if (ag->catalog_provider_explicit && ag->catalog_provider[0])
+         JSON_ADD_STR(a, "catalog_provider", ag->catalog_provider);
+      if (ag->tier_price_exempt[0])
+         JSON_ADD_STR(a, "tier_price_exempt", ag->tier_price_exempt);
+      if (ag->price_in_per_mtok > 0.0)
+         cJSON_AddNumberToObject(a, "price_in_per_mtok", ag->price_in_per_mtok);
+      if (ag->price_out_per_mtok > 0.0)
+         cJSON_AddNumberToObject(a, "price_out_per_mtok", ag->price_out_per_mtok);
+      if (ag->price_cached_per_mtok > 0.0)
+         cJSON_AddNumberToObject(a, "price_cached_per_mtok", ag->price_cached_per_mtok);
+      if (ag->max_scope != AGENT_SCOPE_UNSET)
+         JSON_ADD_STR(a, "max_scope", agent_scope_name(ag->max_scope));
+      if (ag->registration[0])
+         JSON_ADD_STR(a, "registration", ag->registration);
 
       cJSON *roles = cJSON_CreateArray();
       for (int j = 0; j < ag->role_count; j++)
@@ -1275,8 +1887,13 @@ int agent_save_config(const agent_config_t *cfg)
     * file that already has none) — never as a silent wipe of configured agents.
     * This is the agents.json-deletion guard: whatever the trigger (a load that
     * came back empty, a caller with a zeroed cfg), the destruction stops here, and
-    * it stops LOUDLY so the next occurrence is diagnosable rather than invisible. */
-   if (cfg->agent_count == 0)
+    * it stops LOUDLY so the next occurrence is diagnosable rather than invisible.
+    *
+    * Removing the LAST delegate reaches zero legitimately, and looks identical
+    * from here — so that one caller declares itself instead. Without the
+    * exemption the guard refused the removal and the delegate could never be
+    * deleted. */
+   if (cfg->agent_count == 0 && !emptied_by_removal)
    {
       int existing = agent_config_existing_agent_count();
       if (existing > 0)
@@ -1348,566 +1965,14 @@ int agent_save_config(const agent_config_t *cfg)
    return 0;
 }
 
-/* --- Routing --- */
-
-int agent_has_role(const agent_t *agent, const char *role)
+int agent_save_config(const agent_config_t *cfg)
 {
-   for (int i = 0; i < agent->role_count; i++)
-   {
-      /* "all" is a wildcard: the agent serves every role (routing only — tool
-       * use is still governed by exec_roles / tools_enabled). */
-      if (strcmp(agent->roles[i], "all") == 0 || strcmp(agent->roles[i], role) == 0)
-         return 1;
-   }
-   return 0;
+   return agent_save_config_impl(cfg, 0);
 }
 
-/* 1 if the agent may be dispatched AS `persona`. An agent with no personas list
- * (backward-compatible default) or one containing the "all" wildcard serves any
- * persona; otherwise the persona must be listed. A NULL/empty persona is treated
- * as unconstrained (routing then depends on role alone). */
-int agent_supports_persona(const agent_t *agent, const char *persona)
+int agent_save_config_after_removal(const agent_config_t *cfg)
 {
-   if (!agent)
-      return 0;
-   if (!persona || !persona[0] || agent->persona_count == 0)
-      return 1;
-   for (int i = 0; i < agent->persona_count; i++)
-   {
-      if (strcmp(agent->personas[i], "all") == 0 || strcmp(agent->personas[i], persona) == 0)
-         return 1;
-   }
-   return 0;
-}
-
-static int agent_supports_role(const agent_t *agent, const char *role)
-{
-   if (agent_has_role(agent, role))
-      return 1;
-
-   /* Execution roles can be handled by any enabled agent.  The tools_enabled
-    * flag controls whether tool use is offered during execution, not whether
-    * the agent is eligible for selection. */
-   if (agent_is_exec_role(agent, role))
-      return 1;
-
-   return 0;
-}
-
-static int agent_command_on_path(const char *cmd)
-{
-   if (!cmd || !cmd[0])
-      return 0;
-
-   char *tokens[32] = {0};
-   int count = shlex_split(cmd, tokens, 32);
-   if (count <= 0 || count >= 32)
-   {
-      util_free_tokens(tokens, count);
-      return 0;
-   }
-   for (int i = 0; i < count; i++)
-   {
-      if (util_token_is_shell_operator(tokens[i]))
-      {
-         util_free_tokens(tokens, count);
-         return 0;
-      }
-   }
-   const char *exe = (count > 0 && tokens[0]) ? tokens[0] : cmd;
-   int available = 0;
-
-   if (strchr(exe, '/'))
-   {
-      available = access(exe, X_OK) == 0;
-   }
-   else
-   {
-      const char *path = getenv("PATH");
-      if (!path || !path[0])
-         path = "/usr/local/bin:/usr/bin:/bin";
-
-      char *copy = safe_strdup(path);
-      char *saveptr = NULL;
-      for (char *dir = strtok_r(copy, ":", &saveptr); dir; dir = strtok_r(NULL, ":", &saveptr))
-      {
-         char candidate[MAX_PATH_LEN];
-         snprintf(candidate, sizeof(candidate), "%s/%s", dir[0] ? dir : ".", exe);
-         if (access(candidate, X_OK) == 0)
-         {
-            available = 1;
-            break;
-         }
-      }
-      free(copy);
-   }
-
-   util_free_tokens(tokens, count);
-   return available;
-}
-
-/* Optional route-time health filter; see agent_set_route_health_filter. */
-static int (*g_route_health_filter)(const char *agent_name) = NULL;
-
-void agent_set_route_health_filter(int (*fn)(const char *agent_name))
-{
-   g_route_health_filter = fn;
-}
-
-/* Optional route-time delegate-policy filter; see agent_set_route_policy_filter. */
-static int (*g_route_policy_filter)(const agent_t *agent) = NULL;
-
-void agent_set_route_policy_filter(int (*fn)(const agent_t *agent))
-{
-   g_route_policy_filter = fn;
-}
-
-/* See agent_config.h: marks the current thread's turn as PRIMARY (not
- * delegation) so the policy filter doesn't exclude the provider-named agent
- * from its own chat turn. */
-static _Thread_local int g_routing_primary_turn;
-
-void agent_routing_set_primary_turn(int on)
-{
-   g_routing_primary_turn = on ? 1 : 0;
-}
-
-int agent_routing_primary_turn(void)
-{
-   return g_routing_primary_turn;
-}
-
-agent_route_block_t agent_routing_block_reason(const agent_t *agent, char *detail, size_t detail_sz)
-{
-   if (detail && detail_sz)
-      detail[0] = '\0';
-   if (!agent)
-      return AGENT_ROUTE_NULL;
-   /* A provider the health catalog has marked unavailable (e.g. DOWN after a
-    * failure streak) must not receive new routed work, or delegates wedge on
-    * a dead endpoint. Treat it like a disabled agent so callers fall back to a
-    * healthy peer; routing returns NULL (clean "no agent" error) only when
-    * every candidate is filtered out. */
-   if (g_route_health_filter && agent->name[0] && g_route_health_filter(agent->name))
-      return AGENT_ROUTE_HEALTH_DOWN;
-   /* A claude-CLI agent can only ever execute as a delegate SERVER-SIDE (a
-    * client-only claude has no server session to drive — dispatch would just
-    * fail). Structural, so it is enforced even with no policy filter
-    * registered; the per-agent rules (the `primary_only` opt-out, primary
-    * self-delegation) live in the registered policy filter. */
-   if (agent_is_claude_cli(agent) && !agent->is_server_hosted)
-      return AGENT_ROUTE_CLIENT_ONLY_CLAUDE;
-   if (g_route_policy_filter && g_route_policy_filter(agent))
-   {
-      /* The filter is opaque here, but the agent record names the common case:
-       * a Primary-Agent-Only opt-out. Anything else is a generic policy block. */
-      if (detail && detail_sz && agent->primary_only)
-         snprintf(detail, detail_sz, "it is flagged \"Primary Agent Only\"");
-      return AGENT_ROUTE_POLICY_EXCLUDED;
-   }
-   if (strcmp(agent->backend, AGENT_BACKEND_TMUX_CLI) == 0)
-   {
-      const char *cmd =
-          agent->cli_cmd[0] ? agent->cli_cmd : (agent->cli_kind[0] ? agent->cli_kind : "claude");
-      if (!agent_command_on_path("tmux"))
-      {
-         if (detail && detail_sz)
-            snprintf(detail, detail_sz, "tmux");
-         return AGENT_ROUTE_MISSING_COMMAND;
-      }
-      if (!agent_command_on_path(cmd))
-      {
-         if (detail && detail_sz)
-            snprintf(detail, detail_sz, "%s", cmd);
-         return AGENT_ROUTE_MISSING_COMMAND;
-      }
-      return AGENT_ROUTE_OK;
-   }
-
-   if (strcmp(agent->backend, AGENT_BACKEND_PROVIDER_CLI) != 0 &&
-       strcmp(agent->backend, AGENT_BACKEND_CLI_STDIO) != 0)
-      return agent_has_resolvable_credentials(agent) ? AGENT_ROUTE_OK : AGENT_ROUTE_NO_CREDENTIALS;
-
-   const provider_cli_adapter_t *adapter = provider_cli_adapter_get(agent->cli_kind);
-   if (adapter && adapter->native_provider && adapter->native_provider[0])
-      return AGENT_ROUTE_OK;
-
-   const char *cmd = agent->cli_cmd[0] ? agent->cli_cmd : agent->cli_kind;
-   if (!agent_command_on_path(cmd))
-   {
-      if (detail && detail_sz)
-         snprintf(detail, detail_sz, "%s", cmd);
-      return AGENT_ROUTE_MISSING_COMMAND;
-   }
-   return AGENT_ROUTE_OK;
-}
-
-int agent_is_available_for_routing(const agent_t *agent)
-{
-   return agent_routing_block_reason(agent, NULL, 0) == AGENT_ROUTE_OK;
-}
-
-int agent_any_delegate_available(void)
-{
-   agent_config_t cfg;
-   if (agent_load_config(&cfg) != 0)
-      return 0;
-   for (int i = 0; i < cfg.agent_count; i++)
-      if (cfg.agents[i].enabled && agent_is_available_for_routing(&cfg.agents[i]))
-         return 1;
-   return 0;
-}
-
-agent_t *agent_find(agent_config_t *cfg, const char *name)
-{
-   for (int i = 0; i < cfg->agent_count; i++)
-   {
-      if (strcmp(cfg->agents[i].name, name) == 0)
-         return &cfg->agents[i];
-   }
-   return NULL;
-}
-
-agent_t *agent_default_primary(agent_config_t *cfg)
-{
-   /* An explicitly configured default wins — but only when it is actually
-    * usable. Routing to a disabled default (or, historically, a disabled
-    * agents[0]) makes every ingress request that doesn't name a model fast-fail
-    * as "failed to reach the primary provider" even though enabled agents
-    * exist, so the fallback deliberately skips disabled seats. */
-   if (cfg->default_agent[0])
-   {
-      agent_t *ag = agent_find(cfg, cfg->default_agent);
-      if (ag && ag->enabled)
-         return ag;
-   }
-   for (int i = 0; i < cfg->agent_count; i++)
-      if (cfg->agents[i].enabled)
-         return &cfg->agents[i];
-   return NULL;
-}
-
-/* Pick fairly from an array of equally eligible candidates.  `default_agent` is
- * the primary-session default, not a hidden delegate pin: letting it win every
- * unpinned delegation starves every peer at the same tier.  A process-wide
- * atomic cursor gives those peers round-robin opportunities while explicit
- * --via pins continue to be handled before this function is reached. */
-static agent_t *agent_pick_balanced(agent_t **candidates, int count)
-{
-   static unsigned cursor;
-   if (count <= 0)
-      return NULL;
-   if (count == 1)
-      return candidates[0];
-   unsigned pick = __atomic_fetch_add(&cursor, 1u, __ATOMIC_RELAXED);
-   return candidates[pick % (unsigned int)count];
-}
-
-int agent_is_claude_cli(const agent_t *agent)
-{
-   if (!agent)
-      return 0;
-   /* Only the Claude CLI (`claude` / `claude-code`) run via tmux or the
-    * provider-CLI binary — i.e. authenticated by the interactive `claude` login,
-    * NOT an API key. Other CLI agents (Codex CLI, gemini-cli, …) are not gated. */
-   if (strcmp(agent->cli_kind, "claude") != 0 && strcmp(agent->cli_kind, "claude-code") != 0)
-      return 0;
-   return strcmp(agent->backend, AGENT_BACKEND_TMUX_CLI) == 0 ||
-          strcmp(agent->backend, AGENT_BACKEND_PROVIDER_CLI) == 0 ||
-          strcmp(agent->backend, AGENT_BACKEND_CLI_STDIO) == 0;
-}
-
-/* --- generalized role dispatch: a viable delegate for a role ---
- * Return the index of an enabled, routable agent that serves `role` and is not
- * named in `exclude`, chosen uniformly at random among the eligible set (so
- * repeated requests for the same role vary — a roundtable of N `review`
- * delegates, excluding those already used, gets diverse reviewers). Returns -1
- * when none remain. Callers loop: pick -> run -> on failure add the agent to
- * `exclude` -> pick again, until one works. Eligibility + retry-until-viable is
- * the whole mechanism; a specific agent is used only when a caller pins one. */
-static unsigned g_role_rand_seed;
-static int g_role_rand_seeded;
-void delegate_role_pick_seed(unsigned seed)
-{
-   g_role_rand_seed = seed;
-   g_role_rand_seeded = 1;
-}
-static unsigned delegate_role_rand(void)
-{
-   if (g_role_rand_seeded)
-      return (unsigned)rand_r(&g_role_rand_seed);
-   unsigned v = 0;
-   FILE *f = fopen("/dev/urandom", "rb");
-   if (f)
-   {
-      if (fread(&v, 1, sizeof v, f) != sizeof v)
-         v = 0;
-      fclose(f);
-   }
-   if (!v)
-      v = (unsigned)time(NULL);
-   return v;
-}
-int delegate_pick_for_role(agent_config_t *cfg, const char *role, const char *const exclude[],
-                           int nexclude)
-{
-   if (!cfg || !role || !role[0])
-      return -1;
-   int elig[MAX_AGENTS];
-   int n = 0;
-   for (int i = 0; i < cfg->agent_count && i < MAX_AGENTS; i++)
-   {
-      agent_t *ag = &cfg->agents[i];
-      if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
-         continue;
-      int skip = 0;
-      for (int e = 0; e < nexclude && !skip; e++)
-         if (exclude[e] && strcmp(exclude[e], ag->name) == 0)
-            skip = 1;
-      if (skip)
-         continue;
-      elig[n++] = i;
-   }
-   if (n == 0)
-      return -1;
-   return elig[delegate_role_rand() % (unsigned)n];
-}
-
-int agent_pick_named_for_role(agent_config_t *cfg, const char *name, const char *role)
-{
-   if (!cfg || !name || !name[0] || !role || !role[0])
-      return -1;
-   for (int i = 0; i < cfg->agent_count && i < MAX_AGENTS; i++)
-   {
-      agent_t *ag = &cfg->agents[i];
-      if (strcmp(ag->name, name) != 0)
-         continue;
-      /* Same eligibility triple delegate_pick_for_role applies — a pinned seat
-       * resolves with NO substitution, so an agent that exists but is disabled,
-       * lacks the role, or is unroutable reports -1 (caller fails the run). */
-      if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
-         return -1;
-      return i;
-   }
-   return -1;
-}
-
-agent_t *agent_route(agent_config_t *cfg, const char *role)
-{
-   agent_t *primary_default = NULL;
-   if (agent_routing_primary_turn() && cfg->default_agent[0])
-      primary_default = agent_find(cfg, cfg->default_agent);
-
-   /* First pass: find the minimum tier; note if any tmux agent is there
-    * (tmux sessions are stateful and always preferred over HTTP peers). */
-   int min_tier = -1;
-   int has_tmux = 0;
-   for (int i = 0; i < cfg->agent_count; i++)
-   {
-      agent_t *ag = &cfg->agents[i];
-      if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
-         continue;
-      if (min_tier < 0 || ag->cost_tier < min_tier)
-      {
-         min_tier = ag->cost_tier;
-         has_tmux = 0;
-      }
-      if (ag->cost_tier == min_tier && strcmp(ag->backend, AGENT_BACKEND_TMUX_CLI) == 0)
-         has_tmux = 1;
-   }
-   if (min_tier < 0)
-      return NULL;
-
-   /* Second pass: collect candidates at min_tier (tmux-only if any exist). */
-   agent_t *candidates[MAX_AGENTS];
-   int count = 0;
-   for (int i = 0; i < cfg->agent_count; i++)
-   {
-      agent_t *ag = &cfg->agents[i];
-      if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
-         continue;
-      if (ag->cost_tier != min_tier)
-         continue;
-      if (has_tmux && strcmp(ag->backend, AGENT_BACKEND_TMUX_CLI) != 0)
-         continue;
-      if (ag == primary_default)
-         return ag;
-      if (count < MAX_AGENTS)
-         candidates[count++] = ag;
-   }
-   return agent_pick_balanced(candidates, count);
-}
-
-/* Route fairly among enabled agents at exactly the given cost_tier. */
-agent_t *agent_route_at_tier(agent_config_t *cfg, const char *role, int tier)
-{
-   agent_t *candidates[MAX_AGENTS];
-   int count = 0;
-   for (int i = 0; i < cfg->agent_count; i++)
-   {
-      agent_t *ag = &cfg->agents[i];
-      if (!ag->enabled || ag->cost_tier != tier || !agent_is_available_for_routing(ag))
-         continue;
-      if (role && !agent_supports_role(ag, role))
-         continue;
-      if (count < MAX_AGENTS)
-         candidates[count++] = ag;
-   }
-   return agent_pick_balanced(candidates, count);
-}
-
-static int agent_satisfies_required_caps(const agent_t *ag, unsigned required_caps, int min_context)
-{
-   if (!ag)
-      return 0;
-
-   unsigned missing_caps = required_caps;
-   if (ag->tools_enabled)
-      missing_caps &= ~MODEL_CAP_TOOLS;
-
-   if (required_caps == 0 && min_context <= 0)
-      return 1;
-
-   /* An explicit per-agent context_window override (agents.json
-    * `middleware.context_window`, set via `aimee agent --ctx` or auto-detected
-    * by `ag_probe_slots`) is authoritative for the min_context gate, so a model
-    * the capability catalog doesn't know about is a config change rather than a
-    * code change to the registry table. */
-   int override_ctx = ag->middleware.context_window;
-
-   model_capability_t caps;
-   if (model_capability_get(ag->provider, ag->model, &caps) == 0)
-   {
-      if (missing_caps != 0)
-         return 0;
-      /* No catalog entry: the override is the only context signal we have. */
-      return min_context <= 0 || (override_ctx > 0 && override_ctx >= min_context);
-   }
-
-   if (ag->tools_enabled)
-      caps.flags |= MODEL_CAP_TOOLS;
-   else
-      caps.flags &= ~MODEL_CAP_TOOLS;
-   if (required_caps && (caps.flags & required_caps) != required_caps)
-      return 0;
-   int effective_ctx = override_ctx > 0 ? override_ctx : caps.context_window;
-   if (min_context > 0 && effective_ctx > 0 && effective_ctx < min_context)
-      return 0;
-   if (caps.deprecated)
-      return 0;
-   return 1;
-}
-
-/* Route to the cheapest capable agent, filtering by required capability flags and minimum context
- * window when sys_cfg->model_meta_capability_routing is enabled.  Falls back to plain agent_route
- * when capability routing is disabled. */
-static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *role,
-                                            const config_t *sys_cfg, unsigned required_caps,
-                                            int min_context)
-{
-   if (!sys_cfg || !sys_cfg->model_meta_capability_routing)
-      return agent_route(cfg, role);
-
-   int min_tier = -1;
-   int has_tmux = 0;
-   for (int i = 0; i < cfg->agent_count; i++)
-   {
-      agent_t *ag = &cfg->agents[i];
-      if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
-         continue;
-
-      if (required_caps || min_context > 0)
-      {
-         if (!agent_satisfies_required_caps(ag, required_caps, min_context))
-            goto next_agent;
-      }
-
-      if (min_tier < 0 || ag->cost_tier < min_tier)
-      {
-         min_tier = ag->cost_tier;
-         has_tmux = 0;
-      }
-      if (ag->cost_tier == min_tier && strcmp(ag->backend, AGENT_BACKEND_TMUX_CLI) == 0)
-         has_tmux = 1;
-   next_agent:;
-   }
-
-   if (min_tier < 0)
-      return NULL;
-
-   agent_t *primary_default = NULL;
-   if (agent_routing_primary_turn() && cfg->default_agent[0])
-      primary_default = agent_find(cfg, cfg->default_agent);
-
-   agent_t *candidates[MAX_AGENTS];
-   int count = 0;
-   for (int i = 0; i < cfg->agent_count; i++)
-   {
-      agent_t *ag = &cfg->agents[i];
-      if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
-         continue;
-      if (ag->cost_tier != min_tier)
-         continue;
-      if (has_tmux && strcmp(ag->backend, AGENT_BACKEND_TMUX_CLI) != 0)
-         continue;
-
-      if (required_caps || min_context > 0)
-      {
-         if (!agent_satisfies_required_caps(ag, required_caps, min_context))
-            continue;
-      }
-
-      if (ag == primary_default)
-         return ag;
-      if (count < MAX_AGENTS)
-         candidates[count++] = ag;
-   }
-   return agent_pick_balanced(candidates, count);
-}
-
-agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role, const config_t *sys_cfg,
-                               unsigned required_caps, int min_context)
-{
-   agent_t *r = agent_route_with_caps_inner(cfg, role, sys_cfg, required_caps, min_context);
-   /* Modality caps (vision/pdf/audio) are inferred from prompt text and are
-    * best-effort: if no model satisfies them, relax them and route on the hard
-    * caps (tools) + min_context rather than returning no route at all. Mirrors
-    * delegate_filter_route_capabilities so both routing gates agree. */
-   if (!r && sys_cfg && sys_cfg->model_meta_capability_routing &&
-       (required_caps & MODEL_CAP_MODALITY_SOFT))
-      r = agent_route_with_caps_inner(cfg, role, sys_cfg, required_caps & ~MODEL_CAP_MODALITY_SOFT,
-                                      min_context);
-   return r;
-}
-
-/* --- Exec role check --- */
-
-static const char *default_exec_roles[] = {
-    "deploy", "validate", "test", "diagnose", "execute", "review", "code", "refactor", "draft",
-    "implement",
-    /* Novel-mode roles: routable + tool-enabled on any default agent. */
-    "continuity", "prose", "line-edit", "beat-check",
-    /* Songwriter-mode roles. */
-    "lyric", "hook", "prosody", "songform"};
-#define DEFAULT_EXEC_ROLE_COUNT 18
-
-int agent_is_exec_role(const agent_t *agent, const char *role)
-{
-   if (agent->exec_role_count > 0)
-   {
-      for (int i = 0; i < agent->exec_role_count; i++)
-      {
-         if (strcmp(agent->exec_roles[i], role) == 0)
-            return 1;
-      }
-      return 0;
-   }
-   for (int i = 0; i < DEFAULT_EXEC_ROLE_COUNT; i++)
-   {
-      if (strcmp(default_exec_roles[i], role) == 0)
-         return 1;
-   }
-   return 0;
+   return agent_save_config_impl(cfg, 1);
 }
 
 /* --- Auth resolution --- */
@@ -1978,38 +2043,17 @@ static long codex_jwt_exp(const char *jwt)
    return exp;
 }
 
-/* Read access_token + refresh_token from a codex auth.json (top-level keys or the
- * `tokens.{}` object). Returns 0 only when BOTH are present (a refresh_token is
- * required to manage the token in aimee's store). */
-static int codex_read_oauth_pair(const char *path, char *access, size_t an, char *refresh,
-                                 size_t rn)
+/* Parse access_token + refresh_token from codex auth JSON (top-level keys or
+ * `tokens.{}`). Returns 0 only when both are present: a refresh token is
+ * required to manage the credential in AIMEE's Vault-backed OAuth store. */
+static int codex_parse_oauth_pair(const char *data, char *access, size_t an, char *refresh,
+                                  size_t rn)
 {
    if (access && an)
       access[0] = '\0';
    if (refresh && rn)
       refresh[0] = '\0';
-   FILE *f = fopen(path, "rb");
-   if (!f)
-      return -1;
-   fseek(f, 0, SEEK_END);
-   long sz = ftell(f);
-   if (sz <= 0 || sz > 1024 * 1024)
-   {
-      fclose(f);
-      return -1;
-   }
-   rewind(f);
-   char *data = malloc((size_t)sz + 1);
-   if (!data)
-   {
-      fclose(f);
-      return -1;
-   }
-   size_t nread = fread(data, 1, (size_t)sz, f);
-   fclose(f);
-   data[nread] = '\0';
    cJSON *root = cJSON_Parse(data);
-   free(data);
    if (!root)
       return -1;
    cJSON *at = cJSON_GetObjectItemCaseSensitive(root, "access_token");
@@ -2034,11 +2078,11 @@ static int codex_read_oauth_pair(const char *path, char *access, size_t an, char
 }
 
 /* Vault-backed, auto-refreshing codex bearer. On first use, bootstrap aimee's
- * oauth store (server-sealed vault) from the codex CLI's auth.json; thereafter
+ * oauth store from the server-sealed, opaque codex OAuth document; thereafter
  * oauth_token_get() returns a token, refreshing via the stored refresh_token
  * against OpenAI's token endpoint whenever it is within the skew of expiry —
- * without ever rewriting the CLI's shared auth.json. Returns 0 + a bearer in
- * |buf|; -1 to fall back to the legacy on-disk read. */
+ * without reading or rewriting a persistent auth.json. Returns 0 + a bearer in
+ * |buf|; -1 when Vault has no usable OAuth document. */
 static int codex_oauth_vault_token(char *buf, size_t len)
 {
    for (int tries = 0; tries < 2; tries++)
@@ -2049,35 +2093,14 @@ static int codex_oauth_vault_token(char *buf, size_t len)
          return 0;
       if (tries > 0)
          break; /* bootstrapped already and still no token -> give up */
-      /* Bootstrap (or re-bootstrap after a failed refresh) from the on-disk auth. */
-      char path[MAX_PATH_LEN], access[MAX_API_KEY_LEN] = "", refresh[1024] = "";
-      int got = 0;
-      snprintf(path, sizeof(path), "%s/codex-auth.json", config_default_dir());
-      if (codex_read_oauth_pair(path, access, sizeof(access), refresh, sizeof(refresh)) == 0)
-         got = 1;
-      /* aimee's canonical home (honors AIMEE_HOME) — on an appliance the process
-       * has AIMEE_HOME set but no HOME, so the on-disk codex auth at
-       * <AIMEE_HOME>/.codex/auth.json is invisible to the HOME-only lookup below.
-       * This server-wide on-disk read (not a per-request vault principal) is
-       * deliberate: the /v1 ingress resolves creds here for BOTH the buffered and
-       * streaming paths, and the streaming ingress has no captured per-request
-       * identity, so a vault-principal approach could not cover streaming codex.
-       * The raw HOME branch below is kept for AIMEE_PROFILE setups, where
-       * aimee_home() points at the profile dir rather than the real ~/.codex. */
-      const char *ahome = aimee_home();
-      if (!got && ahome && ahome[0])
-      {
-         snprintf(path, sizeof(path), "%s/.codex/auth.json", ahome);
-         if (codex_read_oauth_pair(path, access, sizeof(access), refresh, sizeof(refresh)) == 0)
-            got = 1;
-      }
-      const char *home = getenv("HOME");
-      if (!got && home && home[0])
-      {
-         snprintf(path, sizeof(path), "%s/.codex/auth.json", home);
-         if (codex_read_oauth_pair(path, access, sizeof(access), refresh, sizeof(refresh)) == 0)
-            got = 1;
-      }
+      /* Bootstrap (or re-bootstrap after a rejected refresh) from the opaque
+       * vendor document stored in Vault by the login/legacy-migration path. */
+      char access[MAX_API_KEY_LEN] = "", refresh[1024] = "", document[64 * 1024];
+      vault_status_t vst =
+          vault_service_get_server_principal("codex", "oauth", document, sizeof(document));
+      int got = vst == VAULT_OK && codex_parse_oauth_pair(document, access, sizeof(access), refresh,
+                                                          sizeof(refresh)) == 0;
+      OPENSSL_cleanse(document, sizeof(document));
       if (!got)
          return -1;
       oauth_token_response_t resp;
@@ -2086,92 +2109,15 @@ static int codex_oauth_vault_token(char *buf, size_t len)
       snprintf(resp.refresh_token, sizeof(resp.refresh_token), "%s", refresh);
       resp.expires_at = codex_jwt_exp(access); /* 0 = unknown (no proactive refresh) */
       if (oauth_token_store(CODEX_OAUTH_STORE, &resp) != 0)
+      {
+         OPENSSL_cleanse(access, sizeof(access));
+         OPENSSL_cleanse(refresh, sizeof(refresh));
          return -1;
+      }
+      OPENSSL_cleanse(access, sizeof(access));
+      OPENSSL_cleanse(refresh, sizeof(refresh));
       /* loop: oauth_token_get now serves the vaulted token (refreshing if stale). */
    }
-   return -1;
-}
-
-static int agent_read_codex_oauth_token_from_path(const char *path, char *token, size_t token_len)
-{
-   if (!path || !path[0] || !token || token_len == 0)
-      return -1;
-   token[0] = '\0';
-
-   FILE *f = fopen(path, "rb");
-   if (!f)
-      return -1;
-   if (fseek(f, 0, SEEK_END) != 0)
-   {
-      fclose(f);
-      return -1;
-   }
-   long sz = ftell(f);
-   if (sz <= 0 || sz > 1024 * 1024)
-   {
-      fclose(f);
-      return -1;
-   }
-   rewind(f);
-
-   char *data = malloc((size_t)sz + 1);
-   if (!data)
-   {
-      fclose(f);
-      return -1;
-   }
-   size_t nread = fread(data, 1, (size_t)sz, f);
-   fclose(f);
-   data[nread] = '\0';
-
-   cJSON *root = cJSON_Parse(data);
-   free(data);
-   if (!root)
-      return -1;
-
-   cJSON *access = cJSON_GetObjectItem(root, "access_token");
-   if (!access)
-   {
-      cJSON *tokens = cJSON_GetObjectItem(root, "tokens");
-      if (tokens && cJSON_IsObject(tokens))
-         access = cJSON_GetObjectItem(tokens, "access_token");
-   }
-   if (access && cJSON_IsString(access) && access->valuestring[0])
-      snprintf(token, token_len, "%s", access->valuestring);
-   cJSON_Delete(root);
-
-   return token[0] ? 0 : -1;
-}
-
-static int agent_read_codex_oauth_token(char *token, size_t token_len)
-{
-   if (!token || token_len == 0)
-      return -1;
-   token[0] = '\0';
-
-   char path[MAX_PATH_LEN];
-   snprintf(path, sizeof(path), "%s/codex-auth.json", config_default_dir());
-   if (agent_read_codex_oauth_token_from_path(path, token, token_len) == 0)
-      return 0;
-
-   /* aimee's canonical home (honors AIMEE_HOME) — see codex_oauth_vault_token:
-    * an appliance sets AIMEE_HOME but not HOME, hiding <AIMEE_HOME>/.codex. */
-   const char *ahome = aimee_home();
-   if (ahome && ahome[0])
-   {
-      snprintf(path, sizeof(path), "%s/.codex/auth.json", ahome);
-      if (agent_read_codex_oauth_token_from_path(path, token, token_len) == 0)
-         return 0;
-   }
-
-   const char *home = getenv("HOME");
-   if (home && home[0])
-   {
-      snprintf(path, sizeof(path), "%s/.codex/auth.json", home);
-      if (agent_read_codex_oauth_token_from_path(path, token, token_len) == 0)
-         return 0;
-   }
-
    return -1;
 }
 
@@ -2190,8 +2136,7 @@ int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len)
    if (strcmp(auth_type, "codex-oauth") == 0)
    {
       /* Codex OAuth token, in precedence: per-turn token (set by the vault delegate
-       * path) > the permanent VAULT (turn principal, then server principal) >
-       * server-side file (legacy on-disk codex auth). */
+       * path) > the permanent Vault (turn principal, then server principal). */
       if (g_request_codex_token[0])
       {
          snprintf(buf, buf_len, "Authorization: Bearer %s", g_request_codex_token);
@@ -2203,27 +2148,21 @@ int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len)
          snprintf(buf, buf_len, "Authorization: Bearer %s", token);
          return 0;
       }
-      /* Vault-backed, auto-refreshing token (bootstrapped from the codex auth.json):
-       * preferred over the raw on-disk read so an expired access token self-heals
-       * via the stored refresh_token instead of 401ing. */
+      /* Vault-backed, auto-refreshing token bootstrapped from the opaque codex
+       * OAuth document already ingested by login or boot migration. */
       if (codex_oauth_vault_token(token, sizeof(token)) == 0)
       {
          snprintf(buf, buf_len, "Authorization: Bearer %s", token);
          return 0;
       }
-      if (agent_read_codex_oauth_token(token, sizeof(token)) != 0)
-      {
-         /* No usable codex token. If a prior refresh was rejected by the IdP, the
-          * refresh token is dead and the server cannot recover on its own — give
-          * the operator the exact remedy instead of a generic provider 401 (D6). */
-         if (oauth_token_reauth_required(CODEX_OAUTH_STORE))
-            snprintf(g_request_auth_error, sizeof(g_request_auth_error),
-                     "codex re-auth required: the stored OAuth refresh token was rejected — run "
-                     "`aimee codex reauth` to re-authenticate");
-         return -1;
-      }
-      snprintf(buf, buf_len, "Authorization: Bearer %s", token);
-      return 0;
+      /* No usable codex token. If a prior refresh was rejected by the IdP, the
+       * refresh token is dead and the server cannot recover on its own — give
+       * the operator the exact remedy instead of a generic provider 401 (D6). */
+      if (oauth_token_reauth_required(CODEX_OAUTH_STORE))
+         snprintf(g_request_auth_error, sizeof(g_request_auth_error),
+                  "codex re-auth required: the stored OAuth refresh token was rejected — run "
+                  "`aimee codex reauth` to re-authenticate");
+      return -1;
    }
 
    if (strcmp(auth_type, "oauth") == 0 && agent->auth_cmd[0])

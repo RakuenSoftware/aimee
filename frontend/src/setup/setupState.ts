@@ -5,7 +5,7 @@
 
 export const DISMISSED_KEY = 'aimee_setup_dismissed';
 export const OPEN_WIZARD_EVENT = 'aimee:open-setup-wizard';
-/** Fired after the wizard changes config so the header chip re-computes. */
+/** Fired after setup config or the cloned-project inventory changes. */
 export const SETUP_UPDATED_EVENT = 'aimee:setup-updated';
 
 export function isDismissed(): boolean {
@@ -36,7 +36,7 @@ export function requestOpenWizard(): void {
   }
 }
 
-/** Fire the event that tells the chip to re-read config after a wizard change. */
+/** Fire the event that tells the chip to re-read setup state after a mutation. */
 export function notifySetupUpdated(): void {
   try {
     if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(SETUP_UPDATED_EVENT));

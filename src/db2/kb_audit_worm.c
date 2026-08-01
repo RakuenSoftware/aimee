@@ -7,7 +7,7 @@
 #include <string.h>
 #include <time.h>
 
-#include "audit_worm_chain.h"
+#include <aimee/audit/audit_worm_chain.h>
 #include "config.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
@@ -25,10 +25,7 @@ int db2_kb_audit_worm_enabled(void)
 {
    if (g_kb_worm_enabled < 0)
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof cfg);
-      config_load(&cfg);
-      g_kb_worm_enabled = cfg.audit_worm_enabled ? 1 : 0;
+      g_kb_worm_enabled = config_audit_worm_enabled() ? 1 : 0;
    }
    return g_kb_worm_enabled;
 }
@@ -41,10 +38,11 @@ static void kb_worm_ts(char out[32])
    strftime(out, 32, "%Y-%m-%dT%H:%M:%SZ", &tmv);
 }
 
-int db2_kb_audit_append(const char *actor_role, const char *actor_principal, const char *action,
-                        const char *subject, const char *verdict, const char *detail)
+int db2_kb_audit_append_in_txn(void *conn, const char *actor_role, const char *actor_principal,
+                               const char *action, const char *subject, const char *verdict,
+                               const char *detail)
 {
-   if (!action || !action[0])
+   if (!conn || !aimee_pg_in_transaction(conn) || !action || !action[0])
       return -1;
    actor_role = actor_role ? actor_role : "";
    actor_principal = actor_principal ? actor_principal : "";
@@ -62,29 +60,25 @@ int db2_kb_audit_append(const char *actor_role, const char *actor_principal, con
       detail = detail_capped;
    }
 
-   void *conn = db2_conn();
-   if (!conn)
-      return -1;
    char err[256];
-   if (aimee_pg_exec(conn, "BEGIN", err, sizeof err) != 0)
-      return -1;
-
    long long seq = 1;
    char prev[65];
    snprintf(prev, sizeof prev, "%s", AUDIT_WORM_GENESIS_PREV);
    aimee_pg_stmt_t *q = aimee_pg_prepare(
        conn, "SELECT seq, row_hash FROM kb_audit_event ORDER BY seq DESC LIMIT 1", err, sizeof err);
-   if (q)
+   if (!q)
+      return -1;
+   aimee_pg_step_t qst = aimee_pg_step(q, err, sizeof err);
+   if (qst == AIMEE_PG_ROW)
    {
-      if (aimee_pg_step(q, err, sizeof err) == AIMEE_PG_ROW)
-      {
-         seq = aimee_pg_column_int64(q, 0) + 1;
-         const char *ph = aimee_pg_column_text(q, 1);
-         if (ph)
-            snprintf(prev, sizeof prev, "%s", ph);
-      }
-      aimee_pg_finalize(q);
+      seq = aimee_pg_column_int64(q, 0) + 1;
+      const char *ph = aimee_pg_column_text(q, 1);
+      if (ph)
+         snprintf(prev, sizeof prev, "%s", ph);
    }
+   aimee_pg_finalize(q);
+   if (qst != AIMEE_PG_ROW && qst != AIMEE_PG_DONE)
+      return -1;
 
    char ts[32];
    kb_worm_ts(ts);
@@ -99,10 +93,7 @@ int db2_kb_audit_append(const char *actor_role, const char *actor_principal, con
        " VALUES(?1,?2,?3,?4,?5,?6,?7,?8,'',?9,?10)",
        err, sizeof err);
    if (!ins)
-   {
-      aimee_pg_exec(conn, "ROLLBACK", err, sizeof err);
       return -1;
-   }
    aimee_pg_bind_int64(ins, "?1", seq);
    aimee_pg_bind_text(ins, "?2", ts);
    aimee_pg_bind_text(ins, "?3", actor_role);
@@ -116,13 +107,24 @@ int db2_kb_audit_append(const char *actor_role, const char *actor_principal, con
    aimee_pg_step_t st = aimee_pg_step(ins, err, sizeof err);
    aimee_pg_finalize(ins);
    if (st == AIMEE_PG_ERR)
-   {
-      aimee_pg_exec(conn, "ROLLBACK", err, sizeof err);
       return -1;
-   }
-   if (aimee_pg_exec(conn, "COMMIT", err, sizeof err) != 0)
+   return 0;
+}
+
+int db2_kb_audit_append(const char *actor_role, const char *actor_principal, const char *action,
+                        const char *subject, const char *verdict, const char *detail)
+{
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char err[256];
+   if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
+      return -1;
+   if (db2_kb_audit_append_in_txn(conn, actor_role, actor_principal, action, subject, verdict,
+                                  detail) != 0 ||
+       aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) != 0)
    {
-      aimee_pg_exec(conn, "ROLLBACK", err, sizeof err);
+      aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
       return -1;
    }
    return 0;

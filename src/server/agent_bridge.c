@@ -10,6 +10,7 @@
 #include "log.h"
 #include "model_sampling.h"
 #include "model_registry.h"
+#include "agent_config.h" /* agent_catalog_provider */
 #include "tool_call_args.h"
 #include "cJSON.h"
 #include <string.h>
@@ -116,14 +117,49 @@ static void openrouter_add_routing_hint(const agent_t *agent, cJSON *req)
    }
    cJSON_AddItemToObject(req, "models", models);
 }
+/* Reject the gross misconfiguration where the OUTPUT limit alone would consume
+ * the entire context window, leaving no room for any prompt at all.
+ *
+ * Scope, precisely: this function does NOT know the request's prompt size, so it
+ * cannot and does not guarantee `prompt + output <= window`. It only bounds the
+ * case that is invalid regardless of prompt — an output cap at or above the
+ * whole window. Half the window is a policy choice for that case, not a derived
+ * bound. agent_exec_context_budget_chars() clamps its own PROMPT arithmetic, but
+ * that is a local calculation; without this the REQUEST still carried the
+ * oversized limit, so a 200k-window agent pinned at 300k asked for 300k output.
+ *
+ * The window is the agent's effective ceiling: the operator's policy value when
+ * set, else the model catalog. Consulting only middleware.context_window left a
+ * catalogued 8k model with no override accepting a pinned 300k. */
+static int agent_clamp_to_context(const agent_t *agent, int tokens)
+{
+   if (!agent || tokens <= 0)
+      return tokens;
+   int window = agent->middleware.context_window;
+   if (window <= 0)
+   {
+      model_capability_t cap;
+      if (model_capability_get(agent_catalog_provider(agent), agent->model, &cap))
+         window = cap.context_window;
+   }
+   if (window > 1 && tokens >= window)
+      return window / 2;
+   return tokens;
+}
+
 int agent_request_max_tokens(const agent_t *agent, int requested)
 {
    if (requested > 0)
-      return requested; /* caller pinned an explicit budget (e.g. a short ping) */
+      return agent_clamp_to_context(agent, requested); /* caller pinned a budget */
    if (agent && agent->max_tokens > 0)
-      return agent->max_tokens; /* agents.json / --max-tokens pinned a cap */
+      return agent_clamp_to_context(agent, agent->max_tokens); /* agents.json cap */
    /* No explicit cap: use the model's own output ceiling, never a hardcoded one. */
-   return model_max_output(agent ? agent->provider : NULL, agent ? agent->model : NULL);
+   /* Catalog identity, not the wire provider: a third-party vendor on another
+    * vendor's API otherwise resolves the wrong capability row and gets the
+    * non-reasoning 8192 output ceiling instead of its real one. */
+   return agent_clamp_to_context(
+       agent,
+       model_max_output(agent ? agent_catalog_provider(agent) : NULL, agent ? agent->model : NULL));
 }
 
 cJSON *agent_build_request_openai(const agent_t *agent, cJSON *messages, cJSON *tools,
@@ -147,18 +183,18 @@ cJSON *agent_build_request_openai(const agent_t *agent, cJSON *messages, cJSON *
       if (agent_is_local_llama_compat(agent) || is_minimax)
          cJSON_AddBoolToObject(req, "parallel_tool_calls", 0);
       /* mistral and minimax default to not using tools without an explicit directive. */
-      if ((agent && strcmp(agent->provider, "mistral") == 0) || is_minimax)
+      if (agent && agent->require_initial_tool_call)
+         cJSON_AddStringToObject(req, "tool_choice", "required");
+      else if ((agent && strcmp(agent->provider, "mistral") == 0) || is_minimax)
          cJSON_AddStringToObject(req, "tool_choice", "auto");
    }
 
    cJSON_AddNumberToObject(req, "max_tokens", agent_request_max_tokens(agent, max_tokens));
    if (agent_is_mistral_vibe_model(agent))
-   {
       cJSON_AddStringToObject(req, "reasoning_effort", "high");
-      cJSON_AddNumberToObject(req, "temperature", 1.0);
-   }
-   else
-      model_sampling_apply_openai(agent, req, temperature);
+   /* The temperature=1 this model requires now comes from the shared
+    * required-temperature table, so the other request builder gets it too. */
+   model_sampling_apply_openai(agent, req, temperature);
    if (agent_is_local_llama_compat(agent) && !agent_request_prefers_no_think_prompt(agent))
    {
       cJSON *kwargs = cJSON_AddObjectToObject(req, "chat_template_kwargs");
@@ -190,7 +226,60 @@ cJSON *agent_build_request_responses(const agent_t *agent, cJSON *input, cJSON *
    else
       cJSON_AddItemReferenceToObject(req, "input", input);
    if (tools && cJSON_GetArraySize(tools) > 0)
+   {
       cJSON_AddItemReferenceToObject(req, "tools", tools);
+      if (agent && agent->require_initial_tool_call)
+      {
+         /* The ChatGPT Responses transport can expose provider-native tools in
+          * addition to this request's function catalog.  A generic `required`
+          * choice therefore does not guarantee that the first call is one Aimee
+          * can execute: Codex may select Task/Agent, which the gateway correctly
+          * removes, leaving an evidence-gated reviewer with no repository lookup.
+          *
+          * Pin only the first turn to an advertised read/search function.  Once
+          * it succeeds the runtime clears require_initial_tool_call and every
+          * advertised tool is available normally on subsequent turns. */
+         static const char *const preferred[] = {"code_search", "find_symbol", "grep",
+                                                 "list_files",  "read_file",   NULL};
+         const char *selected = NULL;
+         for (int p = 0; preferred[p] && !selected; p++)
+         {
+            cJSON *tool;
+            cJSON_ArrayForEach(tool, tools)
+            {
+               cJSON *name = cJSON_GetObjectItem(tool, "name");
+               if (!cJSON_IsString(name))
+               {
+                  cJSON *fn = cJSON_GetObjectItem(tool, "function");
+                  name = cJSON_GetObjectItem(fn, "name");
+               }
+               if (cJSON_IsString(name) && strcmp(name->valuestring, preferred[p]) == 0)
+               {
+                  selected = name->valuestring;
+                  break;
+               }
+            }
+         }
+         if (!selected)
+         {
+            cJSON *first = cJSON_GetArrayItem(tools, 0);
+            cJSON *name = cJSON_GetObjectItem(first, "name");
+            if (!cJSON_IsString(name))
+            {
+               cJSON *fn = cJSON_GetObjectItem(first, "function");
+               name = cJSON_GetObjectItem(fn, "name");
+            }
+            if (cJSON_IsString(name))
+               selected = name->valuestring;
+         }
+         if (selected)
+         {
+            cJSON *choice = cJSON_AddObjectToObject(req, "tool_choice");
+            cJSON_AddStringToObject(choice, "type", "function");
+            cJSON_AddStringToObject(choice, "name", selected);
+         }
+      }
+   }
 
    return req;
 }
@@ -208,17 +297,23 @@ cJSON *agent_build_request_anthropic(const agent_t *agent, cJSON *messages, cJSO
     * non-tools path. Default-off so the flag-rollout program can flip it
     * deliberately. The cache_min_chars floor is applied to the stable prefix
     * inside the helper, not the whole prompt. */
-   config_t cfg;
-   int cache_marking = (config_load(&cfg) == 0 && cfg.cache_shaping_enabled) ? 1 : 0;
+   int cache_marking = (config_cache_shaping_enabled()) ? 1 : 0;
    agent_anthropic_set_system(req, system_prompt, cache_marking,
-                              cache_marking ? cfg.cache_min_chars : 0);
+                              cache_marking ? config_cache_min_chars() : 0);
 
    if (safe_messages)
       cJSON_AddItemToObject(req, "messages", safe_messages);
    else
       cJSON_AddItemReferenceToObject(req, "messages", messages);
    if (tools && cJSON_GetArraySize(tools) > 0)
+   {
       cJSON_AddItemReferenceToObject(req, "tools", tools);
+      if (agent && agent->require_initial_tool_call)
+      {
+         cJSON *choice = cJSON_AddObjectToObject(req, "tool_choice");
+         cJSON_AddStringToObject(choice, "type", "any");
+      }
+   }
 
    model_sampling_apply_anthropic(agent, req, temperature);
 
@@ -507,6 +602,22 @@ static void responses_parse_sse_events(const char *body, parsed_response_t *out,
    free(data);
 }
 
+/* 1 if `resp`'s output array already carries a function_call item. */
+static int responses_object_has_function_call(cJSON *resp)
+{
+   cJSON *output = cJSON_GetObjectItemCaseSensitive(resp, "output");
+   if (!cJSON_IsArray(output))
+      return 0;
+   cJSON *item = NULL;
+   cJSON_ArrayForEach(item, output)
+   {
+      cJSON *type = cJSON_GetObjectItemCaseSensitive(item, "type");
+      if (type && cJSON_IsString(type) && strcmp(type->valuestring, "function_call") == 0)
+         return 1;
+   }
+   return 0;
+}
+
 /* 1 if `resp`'s output array already carries a non-empty output_text part. */
 static int responses_object_has_output_text(cJSON *resp)
 {
@@ -563,9 +674,39 @@ cJSON *agent_responses_sse_response_object(const char *body)
    responses_take_longer_content(&scratch, &part_text);
    responses_take_longer_content(&scratch, &done_text);
    responses_take_longer_content(&scratch, &delta_text);
-   cJSON_Delete(collected);
 
    cJSON *resp = completed ? completed : cJSON_Parse(body);
+   /* Codex's response.completed payload can arrive with an output array that
+    * omits the items it already streamed -- the same emptiness handled for text
+    * just below. A function_call delivered via response.output_item.done was
+    * therefore collected here and then thrown away with `collected`, so the
+    * whole turn produced no tool call and no text: the delegate reported
+    * "no content in final response" with tool_calls=0 on every attempt.
+    * Measured on a live codex turn: item_types=[reasoning,function_call] on the
+    * wire, zero tool calls extracted.
+    *
+    * Fold the streamed function_call items back in when the response object
+    * carries none of its own. Never when it does -- the completed payload is
+    * authoritative whenever it is populated. */
+   if (resp && !responses_object_has_function_call(resp))
+   {
+      const cJSON *item = NULL;
+      cJSON_ArrayForEach(item, collected)
+      {
+         const cJSON *type = cJSON_GetObjectItemCaseSensitive((cJSON *)item, "type");
+         if (!cJSON_IsString(type) || strcmp(type->valuestring, "function_call") != 0)
+            continue;
+         cJSON *output = cJSON_GetObjectItemCaseSensitive(resp, "output");
+         if (!cJSON_IsArray(output))
+            output = cJSON_AddArrayToObject(resp, "output");
+         cJSON *dup = cJSON_Duplicate(item, 1);
+         if (output && dup)
+            cJSON_AddItemToArray(output, dup);
+         else
+            cJSON_Delete(dup);
+      }
+   }
+   cJSON_Delete(collected);
    if (resp && scratch.content && scratch.content[0] && !responses_object_has_output_text(resp))
    {
       cJSON *output = cJSON_GetObjectItemCaseSensitive(resp, "output");

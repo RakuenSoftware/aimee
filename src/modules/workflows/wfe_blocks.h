@@ -42,9 +42,20 @@ typedef enum
 {
    WFE_MERGE_OK = 0,        /* merged now */
    WFE_MERGE_ALREADY,       /* already merged -> idempotent no-op success */
-   WFE_MERGE_NOT_MERGEABLE, /* conflict / lost race -> loop */
+   WFE_MERGE_NOT_MERGEABLE, /* lost race (head/base moved) -> loop; self-resolves */
+   WFE_MERGE_CONFLICT,      /* content conflict -> TERMINAL; retrying cannot win */
    WFE_MERGE_ERROR          /* forge error -> fail closed */
 } wfe_merge_result_t;
+
+typedef enum
+{
+   WFE_DELEGATE_ERROR = -1,
+   WFE_DELEGATE_OK = 0,
+   /* The delegate completed normally but the requested write was already
+    * satisfied, so it left the worktree unchanged. Producing blocks may pass
+    * the current tree to their authoritative gate instead of retrying blindly. */
+   WFE_DELEGATE_NO_CHANGE = 1
+} wfe_delegate_result_t;
 
 typedef struct
 {
@@ -85,11 +96,18 @@ typedef struct
     * selection is the delegate system's routing decision (routed by `role` +
     * capabilities), not a per-step choice. If the block produces a file artifact,
     * `artifact_path` is its path (else NULL). On success returns 0 and, if a commit
-    * was made, fills out_commit_sha (else ""). Non-zero => the caller emits
-    * failed/looped, never a crash. */
+    * was made, fills out_commit_sha (else ""). Return WFE_DELEGATE_NO_CHANGE
+    * only when the delegate completed but the write-role no-op detector proved
+    * the worktree stayed unchanged; return WFE_DELEGATE_ERROR for transport,
+    * provider, or execution failures. */
    int (*run)(const char *workdir, const char *role, const char *prompt, const char *artifact_path,
               char out_commit_sha[64], char *err, size_t errlen);
 } wfe_delegate_provider_t;
+
+/* Classify the stable no-op diagnostics emitted by delegate_detect_noop_write.
+ * Kept here so the server bridge can preserve NO_CHANGE across the coord queue
+ * without treating unrelated delegate failures as acceptable no-ops. */
+int wfe_delegate_error_is_no_change(const char *error);
 
 /* Install a delegate provider (NULL restores the default fail-closed provider). */
 void wfe_set_delegate_provider(const wfe_delegate_provider_t *p);
@@ -168,6 +186,23 @@ int wfe_tdd_red_ok(const char *workdir);
  * file. Best-effort by design so a non-git/degraded workdir stays drivable. Exposed
  * for the unit test. */
 int wfe_tdd_tests_survive(const char *workdir, const char *red_sha);
+
+/* Add/add pre-check at freeze. Returns 1 (and fills `path_out`) when this slice
+ * CREATES a path that already exists on `base_ref` with DIFFERENT content — the
+ * shape that cannot be merged once a sibling slice has landed the same file, and
+ * that no rebase resolves. Identical content is not flagged: git merges an
+ * add/add cleanly when both sides added the same bytes.
+ *
+ * Compared against the current feature head rather than against sibling slices,
+ * which is race-free — it reads a branch that already reflects whatever merged,
+ * so there is no shared mutable state to serialise. It therefore fires from the
+ * second colliding slice onward; the first is not yet a collision.
+ *
+ * Best-effort like the guard above: any git failure returns 0, leaving the merge
+ * to surface it, rather than failing a slice on a command we could not run.
+ * Exposed for the unit test. */
+int wfe_slice_recreates_base_path(const char *workdir, const char *base_ref, const char *base_sha,
+                                  char *path_out, size_t path_cap);
 
 /* ---- Child-workflow fan-out seam for foreach.workflow (sliced-lifecycle build).
  * The block decomposes the split packets into one CHILD workflow run per packet

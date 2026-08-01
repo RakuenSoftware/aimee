@@ -1,4 +1,6 @@
 #include "pgvec_transport.h"
+#include "memory_scope_query.h"
+#include "pgvec_scope_query.h"
 
 #include "../db2/db2_internal.h"
 #include "../db2/db_postgres.h"
@@ -7,6 +9,7 @@
 #include "log.h"
 
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,6 +19,21 @@ static pthread_mutex_t latency_mu = PTHREAD_MUTEX_INITIALIZER;
 static int64_t latency_total_us = 0;
 static int64_t latency_count = 0;
 static int64_t latency_max_us = 0;
+
+/* Vector upserts refused for width disagreement, and the last width offered.
+ * Relaxed: these are reported, never branched on. */
+static _Atomic long long g_dim_refused = 0;
+static _Atomic int g_dim_last_offered = 0;
+
+long long db2_embedding_dim_refused_count(void)
+{
+   return atomic_load_explicit(&g_dim_refused, memory_order_relaxed);
+}
+
+int db2_embedding_dim_last_offered(void)
+{
+   return atomic_load_explicit(&g_dim_last_offered, memory_order_relaxed);
+}
 
 static int64_t monotonic_us(void)
 {
@@ -273,6 +291,10 @@ int pgvec_memory_upsert(int64_t point_id, const float *vec, int dim, const char 
    int expect = db2_embedding_dim();
    if (expect > 0 && dim != expect)
    {
+      /* Record it as well as logging it: a per-row WARN in the kb log is invisible
+       * to anyone reading health, and this condition silently drops every vector. */
+      atomic_fetch_add_explicit(&g_dim_refused, 1, memory_order_relaxed);
+      atomic_store_explicit(&g_dim_last_offered, dim, memory_order_relaxed);
       aimee_log(
           LOG_WARN, "pgvec",
           "memory embedding dim mismatch: got %d, expected %d (point_id=%lld); refusing upsert",
@@ -476,6 +498,27 @@ int pgvec_kb_delete_project(const char *project)
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 
+int pgvec_kb_delete_current_project(const char *project)
+{
+   if (!project || !project[0])
+      return -1;
+   void *pg = db2_conn();
+   if (!pg)
+      return -1;
+   static const char *sql = "DELETE FROM kb_embeddings WHERE project=:project AND point_id IN ("
+                            " SELECT d.id FROM kb_documents d JOIN projects p ON p.name=d.project"
+                            " WHERE d.project=:project AND p.lifecycle_state='current'"
+                            " AND d.generation=p.current_generation)";
+   char errbuf[256];
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
+   if (!stmt)
+      return -1;
+   aimee_pg_bind_text(stmt, "project", project);
+   aimee_pg_step_t rc = aimee_pg_step(stmt, errbuf, sizeof(errbuf));
+   aimee_pg_finalize(stmt);
+   return rc == AIMEE_PG_DONE ? 0 : -1;
+}
+
 /* -------------------------------------------------------------------------
  * Scroll
  * ---------------------------------------------------------------------- */
@@ -542,18 +585,39 @@ int pgvec_memory_search(const float *vec, int dim, const char *record_type,
    if (!vec_text)
       return -1;
 
-   /* Build the WHERE clause.  record_type filter is always present.
-    * Scope filter is added only when workspace or project is non-empty.
-    * Kind IN filter is added only when n_kinds > 0. */
-   char where[1024] = "WHERE record_type = :record_type";
+   db2_memory_scope_context_t scope_ctx;
+   db2_memory_scope_context_get(&scope_ctx);
+   if (scope_ctx.active)
+   {
+      workspace = scope_ctx.workspace;
+      project = scope_ctx.project;
+   }
+
+   /* Build the WHERE clause. Active requests use the canonical memory scope
+    * tables, including legacy memory_workspaces rows, rather than stale
+    * denormalized embedding columns. Legacy direct callers without request
+    * context retain their existing column-filter behavior. */
+   char where[4096] = "WHERE e.record_type = :record_type";
    size_t wpos = strlen(where);
 
    int has_scope = (workspace && workspace[0]) || (project && project[0]);
-   if (has_scope)
+   if (scope_ctx.active)
    {
-      /* (primary_scope='global' OR workspace=:ws OR project=:pj) */
+      int nw = snprintf(where + wpos, sizeof(where) - wpos, "%s", PGVEC_MEMORY_SCOPE_FILTER_SQL);
+      if (nw < 0 || (size_t)nw >= sizeof(where) - wpos)
+      {
+         free(vec_text);
+         return -1;
+      }
+      wpos += (size_t)nw;
+   }
+   else if (has_scope)
+   {
+      /* Empty identity components are not wildcards: otherwise a project-only
+       * request would admit every row whose workspace column is empty. */
       snprintf(where + wpos, sizeof(where) - wpos,
-               " AND (primary_scope = 'global' OR workspace = :ws OR project = :pj)");
+               " AND (e.primary_scope = 'global' OR e.workspace = '_shared'"
+               " OR (:ws <> '' AND e.workspace = :ws) OR (:pj <> '' AND e.project = :pj))");
       wpos = strlen(where);
    }
 
@@ -563,7 +627,8 @@ int pgvec_memory_search(const float *vec, int dim, const char *record_type,
    if (kinds && n_kinds > 0)
    {
       size_t kpos = 0;
-      kpos += (size_t)snprintf(kinds_clause + kpos, sizeof(kinds_clause) - kpos, " AND kind IN (");
+      kpos +=
+          (size_t)snprintf(kinds_clause + kpos, sizeof(kinds_clause) - kpos, " AND e.kind IN (");
       for (int i = 0; i < n_kinds && kpos < sizeof(kinds_clause) - 4; i++)
       {
          if (!kinds[i] || !kinds[i][0])
@@ -583,13 +648,19 @@ int pgvec_memory_search(const float *vec, int dim, const char *record_type,
       kpos += (size_t)snprintf(kinds_clause + kpos, sizeof(kinds_clause) - kpos, ")");
    }
 
-   char sql[2048];
-   snprintf(sql, sizeof(sql),
-            "SELECT point_id, 1.0 - (embedding <=> :qvec::halfvec) AS score "
-            "FROM memory_embeddings %s%s "
-            "ORDER BY embedding <=> :qvec::halfvec "
-            "LIMIT :lim",
-            where, kinds_clause);
+   char sql[8192];
+   const char *scope_order = scope_ctx.active ? PGVEC_MEMORY_SCOPE_RANK_SQL " DESC, " : "";
+   int sql_len = snprintf(sql, sizeof(sql),
+                          "SELECT e.point_id, 1.0 - (embedding <=> :qvec::halfvec) AS score "
+                          "FROM memory_embeddings e %s%s "
+                          "ORDER BY %sembedding <=> :qvec::halfvec "
+                          "LIMIT :lim",
+                          where, kinds_clause, scope_order);
+   if (sql_len < 0 || (size_t)sql_len >= sizeof(sql))
+   {
+      free(vec_text);
+      return -1;
+   }
 
    char errbuf[256];
    aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
@@ -600,11 +671,13 @@ int pgvec_memory_search(const float *vec, int dim, const char *record_type,
    }
    aimee_pg_bind_text(stmt, "qvec", vec_text);
    aimee_pg_bind_text(stmt, "record_type", record_type);
-   if (has_scope)
+   if (!scope_ctx.active && has_scope)
    {
       aimee_pg_bind_text(stmt, "ws", workspace ? workspace : "");
       aimee_pg_bind_text(stmt, "pj", project ? project : "");
    }
+   if (scope_ctx.active)
+      db2_memory_scope_bind_current(stmt);
    aimee_pg_bind_int(stmt, "lim", limit > 0 ? limit : max);
 
    int64_t t0 = monotonic_us();
@@ -636,6 +709,12 @@ int pgvec_memory_search(const float *vec, int dim, const char *record_type,
 int pgvec_kb_search(const char *project, const float *vec, int dim, int limit, int64_t *ids,
                     double *scores, int max)
 {
+   return pgvec_kb_search_scoped(project, NULL, vec, dim, limit, ids, scores, max);
+}
+
+int pgvec_kb_search_scoped(const char *project, const char *exclude_project, const float *vec,
+                           int dim, int limit, int64_t *ids, double *scores, int max)
+{
    if (!vec || dim <= 0 || !ids || !scores || max <= 0)
       return -1;
    void *pg = db2_conn();
@@ -653,15 +732,29 @@ int pgvec_kb_search(const char *project, const float *vec, int dim, int limit, i
     * hits instead of searching everything. Mirrors pgvec_curator_entity_search,
     * which already exposes its scope filters as optional. */
    int has_project = (project && project[0]);
-   const char *sql = has_project ? "SELECT point_id, 1.0 - (embedding <=> :qvec::halfvec) AS score "
-                                   "FROM kb_embeddings "
-                                   "WHERE project = :project "
-                                   "ORDER BY embedding <=> :qvec::halfvec "
-                                   "LIMIT :lim"
-                                 : "SELECT point_id, 1.0 - (embedding <=> :qvec::halfvec) AS score "
-                                   "FROM kb_embeddings "
-                                   "ORDER BY embedding <=> :qvec::halfvec "
-                                   "LIMIT :lim";
+   int exclude = !has_project && exclude_project && exclude_project[0];
+   const char *sql =
+       has_project ? "SELECT e.point_id, 1.0 - (e.embedding <=> :qvec::halfvec) AS score "
+                     "FROM kb_embeddings e JOIN kb_documents d ON d.id=e.point_id "
+                     "JOIN projects p ON p.name=d.project "
+                     "WHERE e.project = :project AND d.project=e.project "
+                     "AND p.lifecycle_state='current' AND d.generation=p.current_generation "
+                     "ORDER BY e.embedding <=> :qvec::halfvec "
+                     "LIMIT :lim"
+       : exclude   ? "SELECT e.point_id, 1.0 - (e.embedding <=> :qvec::halfvec) AS score "
+                     "FROM kb_embeddings e JOIN kb_documents d ON d.id=e.point_id "
+                     "JOIN projects p ON p.name=d.project "
+                     "WHERE e.project <> :exclude_project AND d.project=e.project "
+                     "AND p.lifecycle_state='current' AND d.generation=p.current_generation "
+                     "ORDER BY e.embedding <=> :qvec::halfvec "
+                     "LIMIT :lim"
+                   : "SELECT e.point_id, 1.0 - (e.embedding <=> :qvec::halfvec) AS score "
+                     "FROM kb_embeddings e JOIN kb_documents d ON d.id=e.point_id "
+                     "JOIN projects p ON p.name=d.project "
+                     "WHERE d.project=e.project AND p.lifecycle_state='current' "
+                     "AND d.generation=p.current_generation "
+                     "ORDER BY e.embedding <=> :qvec::halfvec "
+                     "LIMIT :lim";
 
    char errbuf[256];
    aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
@@ -673,6 +766,8 @@ int pgvec_kb_search(const char *project, const float *vec, int dim, int limit, i
    aimee_pg_bind_text(stmt, "qvec", vec_text);
    if (has_project)
       aimee_pg_bind_text(stmt, "project", project);
+   else if (exclude)
+      aimee_pg_bind_text(stmt, "exclude_project", exclude_project);
    aimee_pg_bind_int(stmt, "lim", limit > 0 ? limit : max);
 
    int64_t t0 = monotonic_us();
@@ -814,15 +909,21 @@ int pgvec_kbpdf_search(const char *project, const float *vec, int dim, int limit
       return -1;
 
    int has_project = (project && project[0]);
-   const char *sql = has_project ? "SELECT point_id, 1.0 - (embedding <=> :qvec::halfvec) AS score "
-                                   "FROM kb_pdf_embeddings "
-                                   "WHERE project = :project "
-                                   "ORDER BY embedding <=> :qvec::halfvec "
-                                   "LIMIT :lim"
-                                 : "SELECT point_id, 1.0 - (embedding <=> :qvec::halfvec) AS score "
-                                   "FROM kb_pdf_embeddings "
-                                   "ORDER BY embedding <=> :qvec::halfvec "
-                                   "LIMIT :lim";
+   const char *sql = has_project
+                         ? "SELECT e.point_id, 1.0 - (e.embedding <=> :qvec::halfvec) AS score "
+                           "FROM kb_pdf_embeddings e JOIN kb_documents d ON d.id=e.point_id "
+                           "JOIN projects p ON p.name=d.project "
+                           "WHERE e.project = :project AND d.project=e.project "
+                           "AND p.lifecycle_state='current' AND d.generation=p.current_generation "
+                           "ORDER BY e.embedding <=> :qvec::halfvec "
+                           "LIMIT :lim"
+                         : "SELECT e.point_id, 1.0 - (e.embedding <=> :qvec::halfvec) AS score "
+                           "FROM kb_pdf_embeddings e JOIN kb_documents d ON d.id=e.point_id "
+                           "JOIN projects p ON p.name=d.project "
+                           "WHERE d.project=e.project AND p.lifecycle_state='current' "
+                           "AND d.generation=p.current_generation "
+                           "ORDER BY e.embedding <=> :qvec::halfvec "
+                           "LIMIT :lim";
 
    char errbuf[256];
    aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
@@ -1560,16 +1661,20 @@ int pgvec_code_upsert(int64_t point_id, const float *vec, int dim, const char *p
     * rather than by re-scan timestamp alone (auditable-correctness D7). */
    static const char *sql =
        "INSERT INTO code_embeddings"
-       "  (point_id, embedding, project, node_key, file_path, symbol,"
+       "  (point_id, embedding, project, generation, node_key, file_path, symbol,"
        "   content_hash, body_hash, source_hash, payload_json,"
        "   updated_at)"
        " VALUES"
-       "  (:point_id, :embedding::halfvec, :project, :node_key, :file_path, :symbol,"
+       "  (:point_id, :embedding::halfvec, :project,"
+       "   (SELECT current_generation FROM projects"
+       "     WHERE name = :project AND lifecycle_state = 'current'),"
+       "   :node_key, :file_path, :symbol,"
        "   :content_hash, :body_hash, :source_hash, :payload,"
        "   to_char(CURRENT_TIMESTAMP,'YYYY-MM-DD HH24:MI:SS'))"
        " ON CONFLICT (point_id) DO UPDATE SET"
        "  embedding = EXCLUDED.embedding,"
        "  project = EXCLUDED.project,"
+       "  generation = EXCLUDED.generation,"
        "  node_key = EXCLUDED.node_key,"
        "  file_path = EXCLUDED.file_path,"
        "  symbol = EXCLUDED.symbol,"
@@ -1653,14 +1758,16 @@ int pgvec_code_search(const char *project, const float *vec, int dim, int limit,
 
    const char *sql;
    if (project && *project)
-      sql = "SELECT point_id, 1.0 - (embedding <=> :qvec::halfvec) AS score"
-            " FROM code_embeddings"
-            " WHERE project = :project"
-            " ORDER BY embedding <=> :qvec::halfvec LIMIT :lim";
+      sql = "SELECT ce.point_id, 1.0 - (ce.embedding <=> :qvec::halfvec) AS score"
+            " FROM code_embeddings ce JOIN projects p ON p.name = ce.project"
+            " WHERE ce.project = :project AND p.lifecycle_state = 'current'"
+            "   AND ce.generation = p.current_generation"
+            " ORDER BY ce.embedding <=> :qvec::halfvec LIMIT :lim";
    else
-      sql = "SELECT point_id, 1.0 - (embedding <=> :qvec::halfvec) AS score"
-            " FROM code_embeddings"
-            " ORDER BY embedding <=> :qvec::halfvec LIMIT :lim";
+      sql = "SELECT ce.point_id, 1.0 - (ce.embedding <=> :qvec::halfvec) AS score"
+            " FROM code_embeddings ce JOIN projects p ON p.name = ce.project"
+            " WHERE p.lifecycle_state = 'current' AND ce.generation = p.current_generation"
+            " ORDER BY ce.embedding <=> :qvec::halfvec LIMIT :lim";
 
    char errbuf[256];
    aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
@@ -1719,15 +1826,17 @@ int pgvec_code_search_paths(const char *project, const float *vec, int dim, int 
 
    const char *sql;
    if (project && *project)
-      sql = "SELECT file_path, 1.0 - (embedding <=> :qvec::halfvec) AS score"
-            " FROM code_embeddings"
-            " WHERE project = :project AND file_path <> ''"
-            " ORDER BY embedding <=> :qvec::halfvec LIMIT :lim";
+      sql = "SELECT ce.file_path, 1.0 - (ce.embedding <=> :qvec::halfvec) AS score"
+            " FROM code_embeddings ce JOIN projects p ON p.name = ce.project"
+            " WHERE ce.project = :project AND ce.file_path <> ''"
+            "   AND p.lifecycle_state = 'current' AND ce.generation = p.current_generation"
+            " ORDER BY ce.embedding <=> :qvec::halfvec LIMIT :lim";
    else
-      sql = "SELECT file_path, 1.0 - (embedding <=> :qvec::halfvec) AS score"
-            " FROM code_embeddings"
-            " WHERE file_path <> ''"
-            " ORDER BY embedding <=> :qvec::halfvec LIMIT :lim";
+      sql = "SELECT ce.file_path, 1.0 - (ce.embedding <=> :qvec::halfvec) AS score"
+            " FROM code_embeddings ce JOIN projects p ON p.name = ce.project"
+            " WHERE ce.file_path <> '' AND p.lifecycle_state = 'current'"
+            "   AND ce.generation = p.current_generation"
+            " ORDER BY ce.embedding <=> :qvec::halfvec LIMIT :lim";
 
    char errbuf[256];
    aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
@@ -1803,11 +1912,16 @@ int pgvec_code_similar_pairs(const char *project, int k, double min_cosine, int 
    const char *sql = "SELECT ak, bk, cosine FROM ("
                      "  SELECT a.node_key AS ak, b.node_key AS bk,"
                      "         1.0 - (a.embedding <=> b.embedding) AS cosine"
-                     "  FROM (SELECT node_key, embedding, point_id, project FROM code_embeddings"
-                     "        WHERE project = :project AND node_key <> '' LIMIT :acap) a"
+                     "  FROM (SELECT ce.node_key, ce.embedding, ce.point_id, ce.project,"
+                     "               ce.generation FROM code_embeddings ce"
+                     "        JOIN projects p ON p.name = ce.project"
+                     "        WHERE ce.project = :project AND ce.node_key <> ''"
+                     "          AND p.lifecycle_state = 'current'"
+                     "          AND ce.generation = p.current_generation LIMIT :acap) a"
                      "  CROSS JOIN LATERAL ("
                      "     SELECT x.node_key, x.embedding FROM code_embeddings x"
-                     "     WHERE x.project = a.project AND x.point_id <> a.point_id"
+                     "     WHERE x.project = a.project AND x.generation = a.generation"
+                     "       AND x.point_id <> a.point_id"
                      "       AND x.node_key <> ''"
                      "     ORDER BY x.embedding <=> a.embedding LIMIT :k"
                      "  ) b"
@@ -1872,8 +1986,11 @@ int pgvec_code_node_path(const char *project, const char *node_key, char *out, i
    void *pg = db2_conn();
    if (!pg)
       return -1;
-   const char *sql = "SELECT file_path FROM code_embeddings"
-                     " WHERE project = :project AND node_key = :node_key AND file_path <> ''"
+   const char *sql = "SELECT ce.file_path FROM code_embeddings ce"
+                     " JOIN projects p ON p.name = ce.project"
+                     " WHERE ce.project = :project AND ce.node_key = :node_key"
+                     "   AND ce.file_path <> '' AND p.lifecycle_state = 'current'"
+                     "   AND ce.generation = p.current_generation"
                      " LIMIT 1";
    char errbuf[256];
    aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
@@ -1903,9 +2020,12 @@ int pgvec_code_exists_by_hash(const char *project, const char *node_key, const c
    void *pg = db2_conn();
    if (!pg)
       return 0;
-   static const char *sql = "SELECT 1 FROM code_embeddings"
-                            " WHERE project = :proj AND node_key = :nk AND content_hash = :ch"
-                            "   AND (:bh = '' OR body_hash = :bh) LIMIT 1";
+   static const char *sql = "SELECT 1 FROM code_embeddings ce"
+                            " JOIN projects p ON p.name = ce.project"
+                            " WHERE ce.project = :proj AND ce.node_key = :nk"
+                            "   AND ce.content_hash = :ch AND (:bh = '' OR ce.body_hash = :bh)"
+                            "   AND p.lifecycle_state = 'current'"
+                            "   AND ce.generation = p.current_generation LIMIT 1";
    char errbuf[256];
    aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
    if (!stmt)

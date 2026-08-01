@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <math.h>
 #include "aimee.h"
+#include "config_database.h" /* config_embedding_dim_current — the one width declaration */
 #include "db.h"
 #include "db1.h"
 #include "db2.h"
@@ -23,11 +24,31 @@
 #include "../db2/memory_payload.h" /* db2_memory_provenance_by_id (auditable-correctness P2) */
 #include "../db2/demotion.h"       /* retrieval_event write/read (auditable-correctness P2) */
 #include "../db2/code_index_ops.h" /* db2_code_file_hash (auditable-correctness P1.5) */
+#include "support/mock_agent_http.h"
 
 int memory_demote_from_failures(void);
 
 static char g_db_path[512];
 static char g_suite_home[512];
+static int64_t g_embedder_now_ms = 100000;
+
+static int64_t embedder_test_clock(void)
+{
+   return g_embedder_now_ms;
+}
+
+static int embedder_unauthorized_post(const char *url, const char *auth_header, const char *body,
+                                      char **response_buf, int timeout_ms,
+                                      const char *extra_headers)
+{
+   (void)url;
+   (void)auth_header;
+   (void)body;
+   (void)timeout_ms;
+   (void)extra_headers;
+   *response_buf = strdup("{\"status\":\"unauthorized\"}");
+   return 403;
+}
 
 static void memory_test_ensure_env(void)
 {
@@ -208,6 +229,18 @@ static void test_insert_merge(void)
    assert(m2.id == m1.id); /* merged, same ID */
    assert(m2.use_count >= 2);
    assert(m2.confidence >= 0.89); /* kept higher */
+   teardown();
+}
+
+static void test_near_duplicate_numeric_keys_remain_distinct(void)
+{
+   setup();
+   memory_t one, two;
+   assert(memory_insert(TIER_L1, KIND_FACT, "worker-1", "first worker", 0.8, "s1", &one) == 0);
+   assert(memory_insert(TIER_L1, KIND_FACT, "worker-2", "second worker", 0.8, "s2", &two) == 0);
+   assert(one.id > 0 && two.id > 0 && one.id != two.id);
+   assert(fetch_memory_count_by_key("worker-1") == 1);
+   assert(fetch_memory_count_by_key("worker-2") == 1);
    teardown();
 }
 
@@ -1056,7 +1089,7 @@ static void test_context_budget_prefers_project_scope_over_global_l5(void)
       if (workspace_repo_identity(cwd, project, sizeof(project), NULL, 0) != 0 || !project[0])
       {
          char project_root[MAX_PATH_LEN];
-         if (workspace_active_root(NULL, cwd, project_root, sizeof(project_root)) == 0 &&
+         if (workspace_active_root_from_cwd(cwd, project_root, sizeof(project_root)) == 0 &&
              project_root[0])
          {
             const char *slash = strrchr(project_root, '/');
@@ -1646,14 +1679,17 @@ static void test_memory_embed_records_embedder_version(void)
    FILE *fp = fopen(cfgpath, "w");
    assert(fp != NULL);
    fprintf(fp, "embedding_command: builtin\n"
-               "embedding_model: nomic-embed-text-v1.5\n"
+               "embedding_model: some-external-embedder\n"
                "embedding_dim: 768\n");
    fclose(fp);
 
    setup();
-   /* This test embeds with the builtin embedder, which emits 384-dim vectors;
-    * align the active dim so the upsert dim guard accepts them. */
-   db2_set_embedding_dim(384);
+   /* The builtin fills the DEPLOYMENT's width (config is the single place that is
+    * declared), not a width of its own — so the active dim comes from the same
+    * config this test just wrote (embedding_dim: 768) rather than a literal here.
+    * Pinning a different number would make the test contradict its own config and
+    * assert a coupling that no longer exists. */
+   db2_set_embedding_dim(config_embedding_dim_current());
    memory_t mem;
    assert(memory_insert(TIER_L2, KIND_FACT, "embed-version", "test content", 0.9, "", &mem) == 0);
    assert(memory_embed(mem.id, "builtin") == 0);
@@ -2331,6 +2367,33 @@ static void measure_query_embedding_memo_recall(void)
  * used 384-calibrated cosine floors, so semantic recall was silently dead for
  * Qwen3-0.6B (1024) / Qwen3-4B (2560). Verify the gate now tracks the active
  * embedding dim and the floor scales down for the compressed-range embedders. */
+
+/* memory_query_rewrite reads its settings through config accessors now, so these
+ * cases write a real aimee.yaml under the suite HOME instead of handing over a
+ * config_t. AIMEE_NO_CACHE=1 is already set for the suite, so each write is
+ * picked up by the next accessor read. */
+static void write_rewrite_config(int enabled, int hyde, int decompose, const char *command)
+{
+   char path[MAX_PATH_LEN];
+   snprintf(path, sizeof(path), "%s/aimee.yaml", config_default_dir());
+   FILE *fp = fopen(path, "w");
+   assert(fp != NULL);
+   fprintf(fp, "memory_rewrite:\n");
+   fprintf(fp, "  enabled: %s\n", enabled ? "true" : "false");
+   fprintf(fp, "  hyde: %s\n", hyde ? "true" : "false");
+   fprintf(fp, "  decompose: %s\n", decompose ? "true" : "false");
+   if (command && command[0])
+      fprintf(fp, "  command: \"%s\"\n", command);
+   fclose(fp);
+}
+
+static void clear_rewrite_config(void)
+{
+   char path[MAX_PATH_LEN];
+   snprintf(path, sizeof(path), "%s/aimee.yaml", config_default_dir());
+   unlink(path);
+}
+
 static void test_semantic_recall_is_embedder_aware(void)
 {
    setup();
@@ -2380,6 +2443,7 @@ int main(void)
    measure_query_embedding_memo_recall();
    test_insert_memory();
    test_insert_merge();
+   test_near_duplicate_numeric_keys_remain_distinct();
    test_touch_memory();
    test_promote();
    test_memory_promote_uses_calibration_profile();
@@ -2511,10 +2575,13 @@ int main(void)
    /* --- deterministic builtin embedding fallback --- */
    {
       float vec[4];
-      int dim = memory_embed_text("test", "", vec, 4);
+      memory_embedder_dependency_reset_for_tests();
+      memory_embedder_dependency_set_clock_for_tests(embedder_test_clock);
+      g_embedder_now_ms = 100000;
+      int dim = memory_embed_text("test", "", EMBED_INPUT_DOCUMENT, vec, 4);
       assert(dim == 4);
 
-      dim = memory_embed_text("test", NULL, vec, 4);
+      dim = memory_embed_text("test", NULL, EMBED_INPUT_DOCUMENT, vec, 4);
       assert(dim == 4);
    }
 
@@ -2525,11 +2592,27 @@ int main(void)
    {
       float vec[4];
 
+      /* A reachable external embedder's auth refusal is non-retryable and
+       * remains distinct from transport unavailability. */
+      mock_agent_http_reset();
+      mock_agent_http_set_post_handler(embedder_unauthorized_post);
+      memory_embedder_dependency_reset_for_tests();
+      int dim = memory_embed_text("ignored", "http://embedder", EMBED_INPUT_DOCUMENT, vec, 4);
+      assert(dim == 0);
+      assert(memory_embedder_last_result_unauthorized());
+      memory_embedder_health_t auth_health;
+      memory_embedder_health(&auth_health);
+      assert(strcmp(auth_health.state, "closed") == 0);
+      assert(auth_health.failure_streak == 0);
+      mock_agent_http_reset();
+      memory_embedder_dependency_reset_for_tests();
+
       /* A well-behaved sidecar emitting a JSON float array is parsed verbatim,
        * proving the float32 contract end-to-end through platform_exec_pipe. */
       for (int i = 0; i < 4; i++)
          vec[i] = -99.0f;
-      int dim = memory_embed_text("ignored", "printf '[0.5, 0.25, 0.125, 0.0625]'", vec, 4);
+      dim = memory_embed_text("ignored", "printf '[0.5, 0.25, 0.125, 0.0625]'",
+                              EMBED_INPUT_DOCUMENT, vec, 4);
       assert(dim == 4);
       assert(fabs(vec[0] - 0.5) < 1e-6 && fabs(vec[1] - 0.25) < 1e-6);
       assert(fabs(vec[2] - 0.125) < 1e-6 && fabs(vec[3] - 0.0625) < 1e-6);
@@ -2538,23 +2621,54 @@ int main(void)
        * corruption): dim is 0 and the sentinel survives. */
       for (int i = 0; i < 4; i++)
          vec[i] = -99.0f;
-      dim = memory_embed_text("ignored", "sh -c 'exit 1'", vec, 4);
+      dim = memory_embed_text("ignored", "sh -c 'exit 1'", EMBED_INPUT_DOCUMENT, vec, 4);
       assert(dim == 0);
       assert(vec[0] == -99.0f);
 
       /* A missing sidecar binary (sh exit 127) is a failure, not a corruption. */
       for (int i = 0; i < 4; i++)
          vec[i] = -99.0f;
-      dim = memory_embed_text("ignored", "/nonexistent/embedder-xyz", vec, 4);
+      dim = memory_embed_text("ignored", "/nonexistent/embedder-xyz", EMBED_INPUT_DOCUMENT, vec, 4);
       assert(dim == 0);
       assert(vec[0] == -99.0f);
 
       /* Non-JSON stdout is rejected, again without touching the vector. */
       for (int i = 0; i < 4; i++)
          vec[i] = -99.0f;
-      dim = memory_embed_text("ignored", "printf 'not json at all'", vec, 4);
+      dim = memory_embed_text("ignored", "printf 'not json at all'", EMBED_INPUT_DOCUMENT, vec, 4);
       assert(dim == 0);
       assert(vec[0] == -99.0f);
+
+      /* Three consecutive failures open the breaker. A good dependency is not
+       * hammered until the bounded delay expires, then one successful probe
+       * closes it without restarting this process. */
+      memory_embedder_health_t health;
+      memory_embedder_health(&health);
+      assert(strcmp(health.state, "open") == 0);
+      assert(health.retry_after_ms >= 1000 && health.retry_after_ms <= 1250);
+      dim = memory_embed_text("ignored", "printf '[1, 0, 0, 0]'", EMBED_INPUT_DOCUMENT, vec, 4);
+      assert(dim == 0);
+      memory_embedder_health(&health);
+      assert(health.suppressed_calls == 1);
+      g_embedder_now_ms += health.retry_after_ms;
+
+      /* A half-open probe that reaches the embedder but is refused proves the
+       * old transport outage recovered. Preserve unauthorized and close the
+       * transient breaker so the next call is not misreported as unavailable. */
+      mock_agent_http_set_post_handler(embedder_unauthorized_post);
+      dim = memory_embed_text("ignored", "http://embedder", EMBED_INPUT_DOCUMENT, vec, 4);
+      assert(dim == 0);
+      assert(memory_embedder_last_result_unauthorized());
+      memory_embedder_health(&health);
+      assert(strcmp(health.state, "closed") == 0 && health.failure_streak == 0);
+      mock_agent_http_reset();
+
+      dim = memory_embed_text("ignored", "printf '[1, 0, 0, 0]'", EMBED_INPUT_DOCUMENT, vec, 4);
+      assert(dim == 4);
+      memory_embedder_health(&health);
+      assert(strcmp(health.state, "closed") == 0 && health.available == 1);
+      memory_embedder_dependency_set_clock_for_tests(NULL);
+      memory_embedder_dependency_reset_for_tests();
    }
 
    /* --- kind_lifecycle_load: returns correct defaults for all 8 kinds --- */
@@ -2703,60 +2817,23 @@ int main(void)
       }
    }
 
-   /* --- cross_encoder: score_parts initialises cross_encoder to 0 --- */
-   {
-      memory_score_parts_t parts;
-      memset(&parts, 0, sizeof(parts));
-      assert(parts.cross_encoder == 0.0);
-   }
-
-   /* --- cross_encoder: score_parts survives memset --- */
-   {
-      memory_score_parts_t parts;
-      memset(&parts, 0, sizeof(parts));
-      parts.lexical = 1.5;
-      parts.semantic = 0.8;
-      parts.cross_encoder = 0.92;
-      parts.total = 3.22;
-      assert(parts.cross_encoder >= 0.91 && parts.cross_encoder <= 0.93);
-   }
-
-   /* --- memory_score_parts_t: new explain fields (hybrid_total,
-    *     blended_total, rerank_mix) exist and round-trip --- *
+   /* --- memory_score_parts_t: the explain fields round-trip --- *
     *
-    * The proposal's acceptance criterion calls for `aimee memory search
-    * --explain` to surface hybrid vs rerank vs blended scores so operators
-    * can see the rerank contribution per candidate.  These fields land
-    * on the score_parts struct; the JSON serializer (in cmd_memory_embed.c)
-    * is conditional so non-reranked pipelines stay byte-identical to the
-    * pre-change JSON. */
+    * `aimee memory search --explain` surfaces the hybrid score alongside the final
+    * total per candidate. The JSON serializer (cmd_memory_embed.c) emits them only
+    * when non-zero, so an unscored pipeline stays byte-identical. */
    {
       memory_score_parts_t parts;
       memset(&parts, 0, sizeof(parts));
-      /* Baseline: all three default to 0.0. */
       assert(parts.hybrid_total == 0.0);
       assert(parts.blended_total == 0.0);
-      assert(parts.rerank_mix == 0.0);
 
-      /* Simulated rerank: fields round-trip. */
-      parts.cross_encoder = 0.92;
       parts.hybrid_total = 4.1;
       parts.blended_total = 5.3;
-      parts.rerank_mix = 0.7;
       parts.total = parts.blended_total;
       assert(parts.hybrid_total == 4.1);
       assert(parts.blended_total == 5.3);
-      assert(parts.rerank_mix == 0.7);
       assert(parts.total == parts.blended_total);
-   }
-
-   /* --- memory_rerank_enabled: defaults to 0 (disabled) --- */
-   {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      assert(cfg.memory_rerank_enabled == 0);
-      assert(cfg.memory_rerank_command[0] == '\0');
-      assert(cfg.memory_rerank_top_k == 0);
    }
 
    /* --- memory_query_expansion_mode: empty means lexical (default) --- */
@@ -2767,7 +2844,7 @@ int main(void)
       assert(strcmp(cfg.memory_query_expansion_mode, "semantic") != 0);
    }
 
-   /* --- memory_find_facts_scoped: returns results (smoke test for reranker path) --- */
+   /* --- memory_find_facts_scoped: returns results --- */
    {
       setup();
       memory_t m1, m2, m3;
@@ -3037,11 +3114,9 @@ int main(void)
 
    /* --- memory_query_rewrite: disabled when command is empty --- */
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      cfg.memory_rewrite_enabled = 1;
+      write_rewrite_config(1, 0, 0, "");
       memory_query_rewrite_t rw;
-      memory_query_rewrite("what kind of person is Caroline?", &cfg, &rw);
+      memory_query_rewrite("what kind of person is Caroline?", &rw);
       assert(rw.has_hyde == 0);
       assert(rw.has_decomp == 0);
       assert(rw.sub_question_count == 0);
@@ -3049,12 +3124,9 @@ int main(void)
 
    /* --- memory_query_rewrite: disabled when enabled=0 --- */
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      cfg.memory_rewrite_enabled = 0;
-      snprintf(cfg.memory_rewrite_command, sizeof(cfg.memory_rewrite_command), "echo '{}'");
+      write_rewrite_config(0, 0, 0, "echo '{}'");
       memory_query_rewrite_t rw;
-      memory_query_rewrite("compound question A and B?", &cfg, &rw);
+      memory_query_rewrite("compound question A and B?", &rw);
       assert(rw.has_hyde == 0);
       assert(rw.has_decomp == 0);
       assert(rw.sub_question_count == 0);
@@ -3062,16 +3134,12 @@ int main(void)
 
    /* --- memory_query_rewrite: valid JSON with hyde_answer and sub_questions --- */
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      cfg.memory_rewrite_enabled = 1;
-      cfg.memory_rewrite_hyde = 1;
-      cfg.memory_rewrite_decompose = 1;
-      snprintf(cfg.memory_rewrite_command, sizeof(cfg.memory_rewrite_command),
-               "printf '{\"hyde_answer\":\"Alice went to the museum on March 10.\","
-               "\"sub_questions\":[\"When did Alice go?\",\"Where did Alice go?\"]}'");
+      write_rewrite_config(1, 1, 1,
+                           "printf '{\\\"hyde_answer\\\":\\\"Alice went to the museum on "
+                           "March 10.\\\",\\\"sub_questions\\\":[\\\"When did Alice "
+                           "go?\\\",\\\"Where did Alice go?\\\"]}'");
       memory_query_rewrite_t rw;
-      memory_query_rewrite("when did alice visit the museum", &cfg, &rw);
+      memory_query_rewrite("when did alice visit the museum", &rw);
       assert(rw.has_hyde == 1);
       assert(strstr(rw.hyde_answer, "March 10") != NULL);
       assert(rw.has_decomp == 1);
@@ -3080,17 +3148,14 @@ int main(void)
 
    /* --- memory_query_rewrite: sub_questions capped at MEMORY_REWRITE_MAX_SUBQUERIES --- */
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      cfg.memory_rewrite_enabled = 1;
-      cfg.memory_rewrite_hyde = 1;
-      cfg.memory_rewrite_decompose = 1;
-      snprintf(cfg.memory_rewrite_command, sizeof(cfg.memory_rewrite_command),
-               "printf '{\"hyde_answer\":\"x\","
-               "\"sub_questions\":[\"a\",\"b\",\"c\",\"d\",\"e\",\"f\"]}'");
+      write_rewrite_config(1, 1, 1,
+                           "printf '{\\\"hyde_answer\\\":\\\"x\\\",\\\"sub_questions"
+                           "\\\":[\\\"a\\\",\\\"b\\\",\\\"c\\\",\\\"d\\\""
+                           ",\\\"e\\\",\\\"f\\\"]}'");
       memory_query_rewrite_t rw;
-      memory_query_rewrite("cap test query", &cfg, &rw);
+      memory_query_rewrite("cap test query", &rw);
       assert(rw.sub_question_count == MEMORY_REWRITE_MAX_SUBQUERIES);
+      clear_rewrite_config();
    }
 
    /* --- memory_expand_to_session_window: no-op with radius=0 --- */

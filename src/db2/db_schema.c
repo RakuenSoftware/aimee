@@ -33,7 +33,288 @@ static void copy_sqlite_err(char *errbuf, size_t errlen, const char *src)
  * src/db2/schema_sqlite.sql and is embedded as AIMEE_DB2_SCHEMA_SQLITE_SQL. */
 
 #ifndef AIMEE_DISABLE_DB2_SQLITE_SHIM
-static void db2_run_sqlite_migrations(sqlite3 *db)
+static int db2_sqlite_name_seen(void *ctx, int argc, char **argv, char **columns)
+{
+   (void)columns;
+   if (ctx && argc > 0 && argv[0])
+      *(int *)ctx = 1;
+   return 0;
+}
+
+static int db2_sqlite_column_seen(void *ctx, int argc, char **argv, char **columns)
+{
+   (void)columns;
+   if (ctx && argc > 1 && argv[1] && strcmp(argv[1], "generation") == 0)
+      *(int *)ctx = 1;
+   return 0;
+}
+
+/* SQLite cannot drop the legacy UNIQUE(project_id,path) constraint in place.
+ * Rebuild the shim table once so retained generations can contain the same path.
+ * legacy_alter_table keeps child FKs aimed at the replacement `files` table;
+ * copying ids preserves every file_id relationship. */
+static int db2_sqlite_migrate_file_generations(sqlite3 *db)
+{
+   int files_exists = 0;
+   int has_generation = 0;
+   sqlite3_exec(db, "SELECT name FROM sqlite_master WHERE type='table' AND name='files'",
+                db2_sqlite_name_seen, &files_exists, NULL);
+   if (!files_exists)
+      return 0;
+   sqlite3_exec(db, "PRAGMA table_info(files)", db2_sqlite_column_seen, &has_generation, NULL);
+   if (has_generation)
+      return 0;
+
+   const char *sql =
+       "PRAGMA foreign_keys=OFF;"
+       "PRAGMA legacy_alter_table=ON;"
+       "BEGIN IMMEDIATE;"
+       "ALTER TABLE files RENAME TO files_generation_legacy;"
+       "CREATE TABLE files ("
+       " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+       " project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,"
+       " generation INTEGER NOT NULL DEFAULT 1 CHECK (generation > 0),"
+       " path TEXT NOT NULL, purpose TEXT NOT NULL DEFAULT '', hash TEXT NOT NULL DEFAULT '',"
+       " scanned_at TEXT NOT NULL, language TEXT NOT NULL DEFAULT '',"
+       " vendored INTEGER NOT NULL DEFAULT 0, UNIQUE(project_id,generation,path));"
+       "INSERT INTO files(id,project_id,generation,path,purpose,hash,scanned_at,language,vendored)"
+       " SELECT f.id,f.project_id,p.current_generation,f.path,f.purpose,f.hash,f.scanned_at,"
+       " f.language,f.vendored FROM files_generation_legacy f"
+       " JOIN projects p ON p.id=f.project_id;"
+       "DROP TABLE files_generation_legacy;"
+       "COMMIT;"
+       "PRAGMA legacy_alter_table=OFF;"
+       "PRAGMA foreign_keys=ON;";
+   char *err = NULL;
+   int rc = sqlite3_exec(db, sql, NULL, NULL, &err);
+   if (rc != SQLITE_OK)
+   {
+      sqlite3_exec(db, "ROLLBACK; PRAGMA legacy_alter_table=OFF; PRAGMA foreign_keys=ON", NULL,
+                   NULL, NULL);
+      sqlite3_free(err);
+      return -1;
+   }
+   return 0;
+}
+
+static int db2_sqlite_migrate_code_embedding_generations(sqlite3 *db)
+{
+   int table_exists = 0;
+   int projects_exists = 0;
+   int has_generation = 0;
+   sqlite3_exec(db, "SELECT name FROM sqlite_master WHERE type='table' AND name='code_embeddings'",
+                db2_sqlite_name_seen, &table_exists, NULL);
+   if (!table_exists)
+      return 0;
+   sqlite3_exec(db, "PRAGMA table_info(code_embeddings)", db2_sqlite_column_seen, &has_generation,
+                NULL);
+   if (has_generation)
+      return 0;
+
+   char *err = NULL;
+   int rc = sqlite3_exec(db,
+                         "ALTER TABLE code_embeddings ADD COLUMN generation INTEGER NOT NULL"
+                         " DEFAULT 1 CHECK (generation > 0);"
+                         "DROP INDEX IF EXISTS idx_code_embeddings_node;"
+                         "DROP INDEX IF EXISTS idx_code_embeddings_hash;",
+                         NULL, NULL, &err);
+   if (rc != SQLITE_OK)
+   {
+      sqlite3_free(err);
+      return -1;
+   }
+   sqlite3_exec(db, "SELECT name FROM sqlite_master WHERE type='table' AND name='projects'",
+                db2_sqlite_name_seen, &projects_exists, NULL);
+   if (projects_exists)
+      sqlite3_exec(db,
+                   "UPDATE code_embeddings SET generation=COALESCE((SELECT current_generation"
+                   " FROM projects WHERE name=code_embeddings.project),1)",
+                   NULL, NULL, NULL);
+   return 0;
+}
+
+/* Derived KB rows are retained across detach/re-add just like source index rows.
+ * Stamp a legacy table exactly once; unconditional backfills would relabel an
+ * intentionally retained generation on every later schema apply. */
+static int db2_sqlite_migrate_named_generation(sqlite3 *db, const char *table)
+{
+   int table_exists = 0;
+   int has_generation = 0;
+   char sql[512];
+   snprintf(sql, sizeof(sql), "SELECT name FROM sqlite_master WHERE type='table' AND name='%s'",
+            table);
+   sqlite3_exec(db, sql, db2_sqlite_name_seen, &table_exists, NULL);
+   if (!table_exists)
+      return 0;
+   snprintf(sql, sizeof(sql), "PRAGMA table_info(%s)", table);
+   sqlite3_exec(db, sql, db2_sqlite_column_seen, &has_generation, NULL);
+   if (has_generation)
+      return 0;
+
+   snprintf(sql, sizeof(sql),
+            "ALTER TABLE %s ADD COLUMN generation INTEGER NOT NULL DEFAULT 1"
+            " CHECK (generation > 0);"
+            "UPDATE %s SET generation=COALESCE((SELECT current_generation FROM projects"
+            " WHERE name=%s.project),1)",
+            table, table, table);
+   char *err = NULL;
+   int rc = sqlite3_exec(db, sql, NULL, NULL, &err);
+   if (rc != SQLITE_OK)
+   {
+      sqlite3_free(err);
+      return -1;
+   }
+   return 0;
+}
+
+/* These legacy tables encoded generation-independent uniqueness in their
+ * table definitions. Adding a generation column is insufficient: a re-added
+ * checkout would still update the detached row. Rebuild once so generation is
+ * part of the key and preserve ids/state while backfilling the active generation. */
+static int db2_sqlite_migrate_generation_keys(sqlite3 *db)
+{
+   static const struct
+   {
+      const char *table;
+      const char *sql;
+   } migrations[] = {
+       {"kb_file_index",
+        "PRAGMA foreign_keys=OFF;PRAGMA legacy_alter_table=ON;BEGIN IMMEDIATE;"
+        "ALTER TABLE kb_file_index RENAME TO kb_file_index_generation_legacy;"
+        "CREATE TABLE kb_file_index (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        " project TEXT NOT NULL,generation INTEGER NOT NULL DEFAULT 1 CHECK(generation>0),"
+        " file_path TEXT NOT NULL,file_hash TEXT NOT NULL,"
+        " ingested_at TEXT NOT NULL DEFAULT(datetime('now')),content TEXT DEFAULT NULL,"
+        " UNIQUE(project,generation,file_path));"
+        "INSERT INTO kb_file_index(id,project,generation,file_path,file_hash,ingested_at,content)"
+        " SELECT k.id,k.project,COALESCE(p.current_generation,1),k.file_path,k.file_hash,"
+        " k.ingested_at,k.content FROM kb_file_index_generation_legacy k"
+        " LEFT JOIN projects p ON p.name=k.project;"
+        "DROP TABLE kb_file_index_generation_legacy;"
+        "CREATE INDEX IF NOT EXISTS idx_kb_file_index_project ON kb_file_index(project);COMMIT;"
+        "PRAGMA legacy_alter_table=OFF;PRAGMA foreign_keys=ON;"},
+       {"kb_code_unit_jobs",
+        "PRAGMA foreign_keys=OFF;PRAGMA legacy_alter_table=ON;BEGIN IMMEDIATE;"
+        "ALTER TABLE kb_code_unit_jobs RENAME TO kb_code_unit_jobs_generation_legacy;"
+        "CREATE TABLE kb_code_unit_jobs (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        " project TEXT NOT NULL DEFAULT '',generation INTEGER NOT NULL DEFAULT 1"
+        " CHECK(generation>0),file_path TEXT NOT NULL DEFAULT '',"
+        " symbol TEXT NOT NULL DEFAULT '',kind TEXT NOT NULL DEFAULT 'function',"
+        " line INTEGER NOT NULL DEFAULT 0,status TEXT NOT NULL DEFAULT 'pending',"
+        " attempts INTEGER NOT NULL DEFAULT 0,last_error TEXT NOT NULL DEFAULT '',"
+        " claimed_by TEXT NOT NULL DEFAULT '',claimed_at TEXT NOT NULL DEFAULT '',"
+        " created_at TEXT NOT NULL DEFAULT(datetime('now')),"
+        " updated_at TEXT NOT NULL DEFAULT(datetime('now')),"
+        " next_attempt_at TEXT NOT NULL DEFAULT '',"
+        " UNIQUE(project,generation,file_path,symbol));"
+        "INSERT INTO kb_code_unit_jobs(id,project,generation,file_path,symbol,kind,line,status,"
+        " attempts,last_error,claimed_by,claimed_at,created_at,updated_at,next_attempt_at)"
+        " SELECT j.id,j.project,COALESCE(p.current_generation,1),j.file_path,j.symbol,j.kind,"
+        " j.line,j.status,j.attempts,j.last_error,j.claimed_by,j.claimed_at,j.created_at,"
+        " j.updated_at,j.next_attempt_at FROM kb_code_unit_jobs_generation_legacy j"
+        " LEFT JOIN projects p ON p.name=j.project;"
+        "DROP TABLE kb_code_unit_jobs_generation_legacy;"
+        "CREATE INDEX IF NOT EXISTS idx_kb_code_unit_jobs_status"
+        " ON kb_code_unit_jobs(status,id);COMMIT;"
+        "PRAGMA legacy_alter_table=OFF;PRAGMA foreign_keys=ON;"},
+       {"kb_minhash_signatures",
+        "PRAGMA foreign_keys=OFF;PRAGMA legacy_alter_table=ON;BEGIN IMMEDIATE;"
+        "ALTER TABLE kb_minhash_signatures RENAME TO kb_minhash_generation_legacy;"
+        "CREATE TABLE kb_minhash_signatures (project TEXT NOT NULL,"
+        " generation INTEGER NOT NULL DEFAULT 1 CHECK(generation>0),file_path TEXT NOT NULL,"
+        " file_hash TEXT NOT NULL DEFAULT '',signature_bytes BLOB NOT NULL,"
+        " updated_at TEXT NOT NULL DEFAULT(datetime('now')),"
+        " PRIMARY KEY(project,generation,file_path));"
+        "INSERT INTO kb_minhash_signatures(project,generation,file_path,file_hash,"
+        " signature_bytes,updated_at) SELECT s.project,COALESCE(p.current_generation,1),"
+        " s.file_path,s.file_hash,s.signature_bytes,s.updated_at"
+        " FROM kb_minhash_generation_legacy s LEFT JOIN projects p ON p.name=s.project;"
+        "DROP TABLE kb_minhash_generation_legacy;"
+        "CREATE INDEX IF NOT EXISTS idx_kb_minhash_signatures_project"
+        " ON kb_minhash_signatures(project);COMMIT;"
+        "PRAGMA legacy_alter_table=OFF;PRAGMA foreign_keys=ON;"},
+       {"kb_lsh_buckets",
+        "PRAGMA foreign_keys=OFF;PRAGMA legacy_alter_table=ON;BEGIN IMMEDIATE;"
+        "ALTER TABLE kb_lsh_buckets RENAME TO kb_lsh_generation_legacy;"
+        "CREATE TABLE kb_lsh_buckets (project TEXT NOT NULL,"
+        " generation INTEGER NOT NULL DEFAULT 1 CHECK(generation>0),band INTEGER NOT NULL,"
+        " band_hash TEXT NOT NULL,file_path TEXT NOT NULL,"
+        " updated_at TEXT NOT NULL DEFAULT(datetime('now')),"
+        " PRIMARY KEY(project,generation,band,band_hash,file_path));"
+        "INSERT INTO kb_lsh_buckets(project,generation,band,band_hash,file_path,updated_at)"
+        " SELECT b.project,COALESCE(p.current_generation,1),b.band,b.band_hash,b.file_path,"
+        " b.updated_at FROM kb_lsh_generation_legacy b"
+        " LEFT JOIN projects p ON p.name=b.project;"
+        "DROP TABLE kb_lsh_generation_legacy;"
+        "CREATE INDEX IF NOT EXISTS idx_kb_lsh_buckets_lookup"
+        " ON kb_lsh_buckets(project,band,band_hash);COMMIT;"
+        "PRAGMA legacy_alter_table=OFF;PRAGMA foreign_keys=ON;"},
+       {"css_migration_units",
+        "PRAGMA foreign_keys=OFF;PRAGMA legacy_alter_table=ON;BEGIN IMMEDIATE;"
+        "ALTER TABLE css_migration_units RENAME TO css_migration_units_generation_legacy;"
+        "CREATE TABLE css_migration_units (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        " project TEXT NOT NULL DEFAULT '',generation INTEGER NOT NULL DEFAULT 1"
+        " CHECK(generation>0),unit_path TEXT NOT NULL DEFAULT '',"
+        " state TEXT NOT NULL DEFAULT 'pending',total_tokens INTEGER NOT NULL DEFAULT 0,"
+        " resolved_tokens INTEGER NOT NULL DEFAULT 0,oracle_equivalent INTEGER NOT NULL DEFAULT -1,"
+        " note TEXT NOT NULL DEFAULT '',updated_at TEXT NOT NULL DEFAULT '',"
+        " UNIQUE(project,generation,unit_path));"
+        "INSERT INTO css_migration_units(id,project,generation,unit_path,state,total_tokens,"
+        " resolved_tokens,oracle_equivalent,note,updated_at)"
+        " SELECT u.id,u.project,COALESCE(p.current_generation,1),u.unit_path,u.state,"
+        " u.total_tokens,u.resolved_tokens,u.oracle_equivalent,u.note,u.updated_at"
+        " FROM css_migration_units_generation_legacy u LEFT JOIN projects p ON p.name=u.project;"
+        "DROP TABLE css_migration_units_generation_legacy;"
+        "CREATE INDEX IF NOT EXISTS idx_css_migration_project"
+        " ON css_migration_units(project,state);COMMIT;"
+        "PRAGMA legacy_alter_table=OFF;PRAGMA foreign_keys=ON;"},
+       {"css_render_snapshots",
+        "PRAGMA foreign_keys=OFF;PRAGMA legacy_alter_table=ON;BEGIN IMMEDIATE;"
+        "ALTER TABLE css_render_snapshots RENAME TO css_render_snapshots_generation_legacy;"
+        "CREATE TABLE css_render_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        " project TEXT NOT NULL DEFAULT '',generation INTEGER NOT NULL DEFAULT 1"
+        " CHECK(generation>0),unit_path TEXT NOT NULL DEFAULT '',phase TEXT NOT NULL DEFAULT '',"
+        " snapshot TEXT NOT NULL DEFAULT '',content_hash TEXT NOT NULL DEFAULT '',"
+        " captured_at TEXT NOT NULL DEFAULT '',UNIQUE(project,generation,unit_path,phase));"
+        "INSERT INTO css_render_snapshots(id,project,generation,unit_path,phase,snapshot,"
+        " content_hash,captured_at) SELECT s.id,s.project,COALESCE(p.current_generation,1),"
+        " s.unit_path,s.phase,s.snapshot,s.content_hash,s.captured_at"
+        " FROM css_render_snapshots_generation_legacy s"
+        " LEFT JOIN projects p ON p.name=s.project;"
+        "DROP TABLE css_render_snapshots_generation_legacy;"
+        "CREATE INDEX IF NOT EXISTS idx_css_render_snapshots_unit"
+        " ON css_render_snapshots(project,unit_path);COMMIT;"
+        "PRAGMA legacy_alter_table=OFF;PRAGMA foreign_keys=ON;"},
+   };
+
+   for (size_t i = 0; i < sizeof(migrations) / sizeof(migrations[0]); i++)
+   {
+      int table_exists = 0;
+      int has_generation = 0;
+      char probe[256];
+      snprintf(probe, sizeof(probe),
+               "SELECT name FROM sqlite_master WHERE type='table' AND name='%s'",
+               migrations[i].table);
+      sqlite3_exec(db, probe, db2_sqlite_name_seen, &table_exists, NULL);
+      if (!table_exists)
+         continue;
+      snprintf(probe, sizeof(probe), "PRAGMA table_info(%s)", migrations[i].table);
+      sqlite3_exec(db, probe, db2_sqlite_column_seen, &has_generation, NULL);
+      if (has_generation)
+         continue;
+      char *err = NULL;
+      if (sqlite3_exec(db, migrations[i].sql, NULL, NULL, &err) != SQLITE_OK)
+      {
+         sqlite3_exec(db, "ROLLBACK;PRAGMA legacy_alter_table=OFF;PRAGMA foreign_keys=ON", NULL,
+                      NULL, NULL);
+         sqlite3_free(err);
+         return -1;
+      }
+   }
+   return 0;
+}
+
+static int db2_run_sqlite_migrations(sqlite3 *db)
 {
    /* Each statement is independent; duplicate-column / missing-table errors are
     * ignored so legacy and fresh DBs both continue to the canonical schema. */
@@ -45,10 +326,53 @@ static void db2_run_sqlite_migrations(sqlite3 *db)
        "ALTER TABLE kb_async_jobs ADD COLUMN next_attempt_at TEXT NOT NULL DEFAULT ''",
        "ALTER TABLE kb_code_unit_jobs ADD COLUMN next_attempt_at TEXT NOT NULL DEFAULT ''",
        "ALTER TABLE kb_vault_rewrap_operation ADD COLUMN failure_from_state TEXT",
+       "ALTER TABLE projects ADD COLUMN lifecycle_state TEXT NOT NULL DEFAULT 'current'",
+       "ALTER TABLE projects ADD COLUMN current_generation INTEGER NOT NULL DEFAULT 1",
+       "CREATE TABLE IF NOT EXISTS code_project_aliases ("
+       " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+       " project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,"
+       " alias TEXT NOT NULL UNIQUE, alias_kind TEXT NOT NULL DEFAULT 'checkout',"
+       " is_current INTEGER NOT NULL DEFAULT 1 CHECK (is_current IN (0,1)),"
+       " first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL)",
+       "CREATE INDEX IF NOT EXISTS idx_code_project_alias_project"
+       " ON code_project_aliases(project_id, is_current)",
+       "CREATE TABLE IF NOT EXISTS code_project_generations ("
+       " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+       " project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,"
+       " generation INTEGER NOT NULL CHECK (generation > 0), root TEXT NOT NULL,"
+       " state TEXT NOT NULL DEFAULT 'current'"
+       " CHECK (state IN ('current','superseded','detached')),"
+       " created_at TEXT NOT NULL, detached_at TEXT NOT NULL DEFAULT '',"
+       " UNIQUE(project_id, generation))",
+       "CREATE INDEX IF NOT EXISTS idx_code_project_generation_state"
+       " ON code_project_generations(project_id, state, generation)",
+       "INSERT OR IGNORE INTO code_project_generations"
+       " (project_id,generation,root,state,created_at,detached_at)"
+       " SELECT id,current_generation,root,lifecycle_state,scanned_at,'' FROM projects",
+       "INSERT OR IGNORE INTO code_project_aliases"
+       " (project_id,alias,alias_kind,is_current,first_seen_at,last_seen_at)"
+       " SELECT id,root,'checkout',CASE WHEN lifecycle_state='current' THEN 1 ELSE 0 END,"
+       " scanned_at,scanned_at FROM projects WHERE substr(root,1,1)='/'",
+       "ALTER TABLE kb_doc_assets ADD COLUMN project TEXT NOT NULL DEFAULT ''",
+       "UPDATE kb_doc_assets SET project=(SELECT MIN(d.project) FROM kb_documents d"
+       " WHERE d.file_path=kb_doc_assets.document_key) WHERE project='' AND"
+       " (SELECT COUNT(DISTINCT d.project) FROM kb_documents d"
+       " WHERE d.file_path=kb_doc_assets.document_key)=1",
        NULL,
    };
    for (int i = 0; migrations[i]; i++)
       sqlite3_exec(db, migrations[i], NULL, NULL, NULL);
+   if (db2_sqlite_migrate_file_generations(db) != 0)
+      return -1;
+   if (db2_sqlite_migrate_code_embedding_generations(db) != 0)
+      return -1;
+   if (db2_sqlite_migrate_generation_keys(db) != 0)
+      return -1;
+   if (db2_sqlite_migrate_named_generation(db, "kb_documents") != 0)
+      return -1;
+   if (db2_sqlite_migrate_named_generation(db, "kb_doc_assets") != 0)
+      return -1;
+   return 0;
 }
 #endif
 
@@ -416,34 +740,63 @@ int db2_embedding_model_record_or_check(void *conn, const char *model_id, const 
    return -1;
 }
 
-/* unified-llm-container §2: record the RERANKER identity + scoring contract. The
- * reranker writes no corpus vectors and there is no persisted score cache, so a
- * swap is safe — this is record-only (drift observability), never a refusal. On a
- * change it refreshes the recorded value (a future score cache would key its
- * invalidation off this). model_id NULL/empty -> no-op. Returns 0 / -1 (DB err). */
-int db2_reranker_model_record(void *conn, const char *model_id, const char *contract, char *errbuf,
-                              size_t errlen)
+/* Record/check the embedder's VECTOR-SPACE identity (the gateway's /health
+ * serving_id: model + pooling + prefix pair, digested).
+ *
+ * The dim guard and the model-id guard both miss the two failures that actually
+ * happened here. Flipping pooling from `last` to `mean`, and adopting the card's
+ * query/document prefixes, each change every vector while the dim and the model name
+ * stay put: no error, right width, right name, different space, collapsed recall. This
+ * is the guard for that class.
+ *
+ *   - serving_id NULL/empty -> no-op (0): an endpoint that reports no identity (a
+ *     legacy embedder, or a gateway predating the field) must keep working.
+ *   - nothing recorded -> record and accept. A corpus embedded before this guard
+ *     existed cannot be distinguished from a fresh one, so it adopts the current id;
+ *     the drift it could not have detected is the operator's to resolve (the cutover
+ *     runbook says re-embed).
+ *   - recorded == serving_id -> match.
+ *   - recorded != serving_id -> REFUSE. There is no compat list: unlike a model swap,
+ *     where cosine agreement can be measured and admitted, a pooling or prefix change
+ *     is definitionally a different space.
+ */
+int db2_embedder_serving_record_or_check(void *conn, const char *serving_id, char *errbuf,
+                                         size_t errlen)
 {
    if (!conn)
       return -1;
-   if (!model_id || !*model_id)
-      return 0;
-   const char *want_contract = contract ? contract : "";
-   /* Skip the writes when the recorded identity already matches, so a steady-state
-    * restart incurs no redundant kb_meta writes (mirrors the embedder short-circuit). */
-   char rec_id[160] = "", rec_contract[96] = "";
-   if (kb_meta_get(conn, "schema_reranker_model_id", rec_id, sizeof(rec_id)) == 0 &&
-       kb_meta_get(conn, "schema_reranker_contract", rec_contract, sizeof(rec_contract)) == 0 &&
-       strcmp(rec_id, model_id) == 0 && strcmp(rec_contract, want_contract) == 0)
-      return 0;
-   if (kb_meta_set(conn, "schema_reranker_model_id", model_id) != 0 ||
-       kb_meta_set(conn, "schema_reranker_contract", want_contract) != 0)
+   if (!serving_id || !*serving_id)
+      return 0; /* identity unknown -> no-op (back-compat) */
+
+   char recorded[160] = "";
+   if (kb_meta_get(conn, "schema_embedder_serving_id", recorded, sizeof(recorded)) != 0)
    {
       if (errbuf && errlen)
-         snprintf(errbuf, errlen, "kb_meta write failed for reranker identity");
+         snprintf(errbuf, errlen, "kb_meta read failed for schema_embedder_serving_id");
       return -1;
    }
-   return 0;
+   if (!recorded[0] || strcmp(recorded, serving_id) == 0)
+   {
+      if (!recorded[0] && kb_meta_set(conn, "schema_embedder_serving_id", serving_id) != 0)
+      {
+         if (errbuf && errlen)
+            snprintf(errbuf, errlen, "kb_meta write failed for schema_embedder_serving_id");
+         return -1;
+      }
+      return 0;
+   }
+
+   /* Deliberately does not claim WHICH of model, pooling, prefixes or width changed: the
+    * identity is a digest, so the only honest statement is that the spaces differ. Saying
+    * "even at the same dim" was wrong the first time a width change hit it. */
+   if (errbuf && errlen)
+      snprintf(errbuf, errlen,
+               "embedder serving identity changed: corpus '%s' vs serving '%s'. The model, "
+               "its pooling, its query/document prefixes or its width differ, so the stored "
+               "vectors and new queries are not in the same space. Re-embed: aimee kb "
+               "reembed (docs/retrieval-stack.md).",
+               recorded, serving_id);
+   return -1;
 }
 
 int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t errlen)
@@ -452,12 +805,24 @@ int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t 
       return -1;
 
    /* The DB2 schema declares its halfvec embedding columns with the
-    * __EMBED_DIM__ placeholder so a deployment can run either embedder
-    * (0.6b=1024 or 4b=2560). Substitute the configured dimension here — the one
-    * place the schema is applied to Postgres. An out-of-range value falls back
-    * to the default 0.6b dimension rather than emitting invalid DDL. */
+    * __EMBED_DIM__ placeholder so a deployment can run an embedder of any
+    * supported width. Substitute the configured dimension here — the one place
+    * the schema is applied to Postgres.
+    *
+    * An unusable width is an ERROR, not something to paper over: this layer holds
+    * no default (the width is declared once, in config, and reaches db2 via
+    * db2_set_embedding_dim_default). Silently substituting one here is how a
+    * corpus gets columns sized for an embedder that is not the one running. */
    if (embed_dim <= 0 || embed_dim > EMBED_MAX_DIM)
-      embed_dim = 1024;
+   {
+      if (errbuf && errlen)
+         snprintf(errbuf, errlen,
+                  "embedding dimension %d is unusable (expected 1..%d); the deployment's "
+                  "width was never supplied to the DB2 layer — check that startup calls "
+                  "db2_set_embedding_dim_default(config_embedding_dim_default())",
+                  embed_dim, EMBED_MAX_DIM);
+      return -1;
+   }
    char dimbuf[16];
    snprintf(dimbuf, sizeof(dimbuf), "%d", embed_dim);
 
@@ -473,9 +838,14 @@ int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t 
    if (rc != 0)
       return rc;
    /* §2: record the dim on first apply / refuse a mismatch (kb_meta now exists).
-    * The unified-llm-container §2 model-identity guards (embedder + reranker) run
+    * The unified-llm-container §2 model-identity guard (the embedder) runs
     * in db2_init right after this, where the configured identity globals live —
     * keeping this lower schema layer free of an upward dependency on them. */
+   /* schema_version + schema_embedding_dim are recorded by schema.sql itself (so any
+    * applier — the C path here, or a plain `psql -f schema.sql` migrate — records
+    * them), which is what a hardened runtime kb reads to verify a complete, current
+    * migration. This C layer keeps the authoritative dim record-or-check (drift
+    * guard) above. */
    return db2_embedding_dim_record_or_check(pg_conn, embed_dim, errbuf, errlen);
 }
 
@@ -493,7 +863,11 @@ int db2_apply_schema_sqlite_shim(sqlite3 *db, char *errbuf, size_t errlen)
       copy_sqlite_err(errbuf, errlen, "sqlite shim unavailable");
       return -1;
    }
-   db2_run_sqlite_migrations(db);
+   if (db2_run_sqlite_migrations(db) != 0)
+   {
+      copy_sqlite_err(errbuf, errlen, sqlite3_errmsg(db));
+      return -1;
+   }
    char *err = NULL;
    int rc = sqlite3_exec(db, AIMEE_DB2_SCHEMA_SQLITE_SQL, NULL, NULL, &err);
    if (rc != SQLITE_OK)

@@ -4,9 +4,8 @@
 #include "aimee_errors.h"
 #include "db1.h"
 #include "db1/delegations.h" /* db1_delegation_spawn_is_stopped — admission cancel poll */
-#include "delegate_role.h"
-#include "skill_curator.h"
-#include "skill_review.h"
+#include <aimee/delegates/delegate_role.h>
+#include <aimee/skills/skill_review.h>
 #include "provider_catalog.h"
 #include "db2/agent_hints.h"
 #include "db2/agent_outcomes.h"
@@ -21,12 +20,12 @@
 #include "agent_tools.h"
 #include "agent_tunnel.h"
 #include "config.h"
-#include "delegate_driver.h"
+#include <aimee/delegates/delegate_driver.h>
 #include "http_retry.h"
 #include "log.h"
 #include "model_sampling.h"
 #include "payload_rewrite.h"
-#include "headers/plugin_c_hook.h"
+#include "aimee/module-runtime/pre_llm_hook.h"
 #include "prompts.h"
 #include "util.h"
 #include "cJSON.h"
@@ -76,9 +75,7 @@ static void agent_apply_runtime_config(agent_t *agent)
 {
    if (!agent)
       return;
-   config_t runtime_cfg;
-   if (config_load(&runtime_cfg) == 0)
-      agent->autonomous = runtime_cfg.autonomous;
+   agent->autonomous = config_autonomous();
 }
 
 static void classify_outcome(const agent_result_t *result, int max_turns, agent_outcome_t *outcome)
@@ -151,20 +148,20 @@ static void admission_ensure_configured(void)
    pthread_mutex_lock(&mu);
    if (mtime != applied_mtime)
    {
-      config_t cfg;
-      config_load(&cfg); /* mtime-cached */
-      int global_max = cfg.maximum_total_concurrent_agent_sessions > 0
-                           ? cfg.maximum_total_concurrent_agent_sessions
+      int global_max = config_maximum_total_concurrent_agent_sessions() > 0
+                           ? config_maximum_total_concurrent_agent_sessions()
                            : AGENT_ADMISSION_DEFAULT_GLOBAL_MAX;
-      int default_model = cfg.concurrency_default > 0 ? cfg.concurrency_default : 5;
+      int default_model = config_concurrency_default() > 0 ? config_concurrency_default() : 5;
       agent_admission_model_limit_t overrides[CONFIG_CONCURRENCY_MAX_ENTRIES];
       int n = 0;
-      for (int i = 0; i < cfg.concurrency_per_model_count && n < CONFIG_CONCURRENCY_MAX_ENTRIES;
-           i++)
+      int entries = config_concurrency_per_model_count();
+      for (int i = 0; i < entries && n < CONFIG_CONCURRENCY_MAX_ENTRIES; i++)
       {
-         snprintf(overrides[n].model, sizeof(overrides[n].model), "%s",
-                  cfg.concurrency_per_model[i].key);
-         overrides[n].limit = cfg.concurrency_per_model[i].limit;
+         config_concurrency_entry_t e;
+         if (config_concurrency_per_model_at(i, &e) != 0)
+            continue;
+         snprintf(overrides[n].model, sizeof(overrides[n].model), "%s", e.key);
+         overrides[n].limit = e.limit;
          n++;
       }
       agent_admission_configure(global_max, default_model, overrides, n);
@@ -271,6 +268,12 @@ int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char
                ag->max_parallel, aimee_err_slug(AIMEE_ERR_CONCURRENCY_LIMIT));
       return AGENT_RC_AT_LIMIT;
    }
+   /* The durable id is thread-local (agent_tasks.c), so overlapping workers
+    * cannot cross-attribute jobs. Persist only after admission: this agent is
+    * now actually being attempted, rather than merely considered or saturated. */
+   int durable_job_id = agent_get_durable_job_id();
+   if (durable_job_id > 0)
+      db1_agent_job_set_agent(durable_job_id, ag->name);
    int rc = use_tools ? agent_execute_with_tools_for_role(ag, net, role, system_prompt, user_prompt,
                                                           max_tokens, temperature, out)
                       : agent_execute(ag, system_prompt, user_prompt, max_tokens, temperature, out);
@@ -281,15 +284,33 @@ int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char
    {
       const char *ec = agent_error_is_retryable(out->error) ? "retryable" : "error";
       provider_catalog_record_failure(ag->name, ec);
+      /* Surface WHY a delegate attempt failed. Without this the only trace of a failed
+       * turn is the downstream "fallback: trying same-tier agent" line, which hides the
+       * reason — so a delegate that loops/falls-back to no diff is undiagnosable from the
+       * log. The tool-progress counters distinguish "model produced no/no-usable tool
+       * call" (tool_calls low or successful_tool_calls==0) from a provider/transport
+       * error, and stop_reason shows how the provider ended the turn. */
+      aimee_log(LOG_WARN, "agent",
+                "delegate '%s' attempt failed (rc=%d, class=%s, turns=%d, tool_calls=%d, "
+                "successful=%d, stop=%s): %s",
+                ag->name, rc, ec, out->turns, out->tool_calls, out->successful_tool_calls,
+                out->stop_reason[0] ? out->stop_reason : "-",
+                out->error[0] ? out->error : "(no error text)");
    }
    return rc;
 }
 
 /* Per-thread tool-mode override for agent_run_ex; see agent_run_force_no_tools. */
 static __thread int tl_force_no_tools = 0;
+static __thread int tl_require_initial_tool_call = 0;
 void agent_run_force_no_tools(int on)
 {
    tl_force_no_tools = on ? 1 : 0;
+}
+
+void agent_run_require_initial_tool_call(int on)
+{
+   tl_require_initial_tool_call = on ? 1 : 0;
 }
 
 int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_prompt,
@@ -379,6 +400,12 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
          if (cache_enabled && out->response)
             db1_agent_cache_put(role, user_prompt, out->response);
          return 0;
+      }
+      if (cfg->route_pinned)
+      {
+         free(out->response);
+         out->response = NULL;
+         break;
       }
       /* At-limit or a real failure: either way skip this agent and try the next
        * (health already recorded by agent_dispatch_one for a real failure). */
@@ -534,6 +561,7 @@ int agent_run_named_with_tools(agent_config_t *cfg, const char *name, const char
 
    agent_t local = *src; /* clone before mutating — see agent_run_named */
    agent_apply_runtime_config(&local);
+   local.require_initial_tool_call = tl_require_initial_tool_call;
    local.ablation = cfg->ablation;
    /* write_capable stays 0: this exists for REVIEWERS, and a reviewer that can edit
     * the code it is judging is not a reviewer — the tree that passed the gate would
@@ -601,7 +629,7 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
                                0.3, 1 /* use_tools */, out);
    free(enhanced);
 
-   if (agent_rc_should_try_another(rc, out->error) && cfg->fallback_count > 0)
+   if (!cfg->route_pinned && agent_rc_should_try_another(rc, out->error) && cfg->fallback_count > 0)
    {
       aimee_log(LOG_INFO, "agent",
                 "delegate agent '%s' retryable/at-limit, trying fallback chain (%d entries)",
@@ -633,8 +661,9 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
       }
    }
 
-   rc = agent_try_same_tier_fallback(cfg, &ag, role, system_prompt, user_prompt, max_tokens,
-                                     enforce_writes, out, rc);
+   if (!cfg->route_pinned)
+      rc = agent_try_same_tier_fallback(cfg, &ag, role, system_prompt, user_prompt, max_tokens,
+                                        enforce_writes, out, rc);
 
    /* health is recorded per-turn inside agent_dispatch_one (main + fallbacks +
     * same-tier), so no final record_success here. */
@@ -1143,12 +1172,9 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
 
    /* HTTP POST with retry */
    char *response_body = NULL;
-   config_t retry_cfg;
-   config_load(&retry_cfg);
-   int ra =
-       retry_cfg.retry_max_attempts > 0 ? retry_cfg.retry_max_attempts : HTTP_RETRY_MAX_ATTEMPTS;
-   int rb = retry_cfg.retry_base_ms > 0 ? retry_cfg.retry_base_ms : HTTP_RETRY_BASE_MS;
-   int rm = retry_cfg.retry_max_ms > 0 ? retry_cfg.retry_max_ms : HTTP_RETRY_MAX_MS;
+   int ra = config_retry_max_attempts() > 0 ? config_retry_max_attempts() : HTTP_RETRY_MAX_ATTEMPTS;
+   int rb = config_retry_base_ms() > 0 ? config_retry_base_ms() : HTTP_RETRY_BASE_MS;
+   int rm = config_retry_max_ms() > 0 ? config_retry_max_ms() : HTTP_RETRY_MAX_MS;
    int http_status = http_retry_post_context(url, auth_header, body, &response_body,
                                              agent->timeout_ms, extra_headers, ra, rb, rm,
                                              agent->provider, agent->model, session_id());
@@ -1469,11 +1495,12 @@ char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *n
 
    char cwd_buf[MAX_PATH_LEN];
    const char *cwd = agent_context_cwd(cwd_buf, sizeof(cwd_buf));
+   char memory_project[MAX_PATH_LEN] = "";
+   char memory_workspace[MAX_PATH_LEN] = "";
    if (cwd && cwd[0])
    {
       char root[MAX_PATH_LEN] = "";
-      config_t ws_cfg;
-      if (config_load(&ws_cfg) != 0 || workspace_active_root(&ws_cfg, cwd, root, sizeof(root)) != 0)
+      if (workspace_active_root(cwd, root, sizeof(root)) != 0)
          snprintf(root, sizeof(root), "%s", cwd);
       ctx_appendf(buf, cap, &pos,
                   "Workspace root: %s\n"
@@ -1481,7 +1508,13 @@ char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *n
                   "workspace root. Do not inspect sibling checkouts or parent repository paths "
                   "unless the user explicitly asks for them.\n",
                   root);
+      (void)workspace_repo_identity(cwd, memory_project, sizeof(memory_project), memory_workspace,
+                                    sizeof(memory_workspace));
    }
+   /* Keep every ordered memory read in this context build on one request-local
+    * repository identity.  An unresolved cwd deliberately yields global/shared
+    * memory only rather than another project's rows. */
+   kb_client_memory_scope_context_set(memory_workspace, memory_project, 0);
    ctx_appendf(buf, cap, &pos, "\n");
 
    /* Custom prompt override */
@@ -1575,28 +1608,22 @@ char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *n
 
    /* Scheduled maintenance + skill ticks. Non-blocking; never delay the reply. */
    {
-      config_t maint_cfg;
-      if (!skip_kb_client && config_load(&maint_cfg) == 0)
       {
-         if (maint_cfg.memory_maintenance_enabled)
+         if (!skip_kb_client && config_memory_maintenance_enabled())
          {
             char *resp = kb_client_memory_maintenance_run_json(0, 0, 0);
             free(resp);
          }
-         /* Review fires from server.c hook path; curator runs on scheduler tick. */
-         if (maint_cfg.skills_curator_enabled)
-            skill_curator_maybe();
       }
    }
    int recall_injected = 0;
    {
-      config_t recall_cfg;
-      if (!skip_kb_client && config_load(&recall_cfg) == 0 && recall_cfg.memory_recall_enabled)
+      if (!skip_kb_client && config_memory_recall_enabled())
       {
          /* Session-start mode = no task text yet; else the turn prompt is the hint. */
          int session_start = !(custom_prompt && custom_prompt[0]);
-         int limit_tokens = session_start ? recall_cfg.memory_recall_limit_tokens_session
-                                          : recall_cfg.memory_recall_limit_tokens_turn;
+         int limit_tokens = session_start ? config_memory_recall_limit_tokens_session()
+                                          : config_memory_recall_limit_tokens_turn();
          /* Graph-code fusion is always on for recall. */
          char *recall_envelope =
              kb_client_memory_recall_json_ex(custom_prompt, limit_tokens, session_start, "on");
@@ -1671,11 +1698,10 @@ char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *n
     * already surfaced reminders to avoid duplicating them. */
    if (!recall_injected)
    {
-      config_t prosp_cfg;
-      if (!skip_kb_client && config_load(&prosp_cfg) == 0 && prosp_cfg.memory_prospective_enabled)
+      if (!skip_kb_client && config_memory_prospective_enabled())
       {
-         int cap_matches = prosp_cfg.memory_prospective_max_matches > 0
-                               ? prosp_cfg.memory_prospective_max_matches
+         int cap_matches = config_memory_prospective_max_matches() > 0
+                               ? config_memory_prospective_max_matches()
                                : 3;
          if (cap_matches > MEMORY_PROSPECTIVE_MAX_MATCHES)
             cap_matches = MEMORY_PROSPECTIVE_MAX_MATCHES;
@@ -1956,10 +1982,7 @@ char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *n
 
    /* Guardrail warnings */
    {
-      const char *mode = MODE_APPROVE;
-      config_t gcfg;
-      if (config_load(&gcfg) == 0)
-         mode = config_guardrail_mode(&gcfg);
+      const char *mode = config_guardrail_mode();
       if (strcmp(mode, MODE_DENY) == 0)
       {
          ctx_appendf(buf, cap, &pos,
@@ -2001,6 +2024,7 @@ char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *n
                agent->exec_system_prompt[0] ? agent->exec_system_prompt
                                             : default_exec_instructions);
 
+   kb_client_memory_scope_context_clear();
    return buf;
 }
 

@@ -59,9 +59,9 @@ Raise live HIGH-tier precision on the reference 40-repo corpus to a **95 % CI lo
 (N ≥ 100, manual adjudication)** with **zero corroboration-audit failures**, **without** regressing
 genuine positives below the parent's recall floor (HIGH ≥70 %, HIGH+MEDIUM ≥85 %) measured against a
 **build-system-derived** ground-truth set. Re-run the checked-in acceptance harness
-([`src/tests/test_cross_repo_acceptance.c`](../../../src/tests/test_cross_repo_acceptance.c), extended by
+([`src/tests/test_cross_repo_acceptance.c`](../../src/tests/test_cross_repo_acceptance.c), extended by
 S8) and the live runbook
-([cross-repo-deps-acceptance](../../validation/cross-repo-deps-acceptance.md)). This proposal
+([cross-repo-deps-acceptance](../../docs/validation/cross-repo-deps-acceptance.md)). This proposal
 **gates** the parent's #5/#6 and P3.
 
 ## §0 Evidence — measured live failure modes (2026-06-28, `.254`, `:testing`)

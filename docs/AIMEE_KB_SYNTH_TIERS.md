@@ -1,56 +1,52 @@
-# Inference tiers
+# KB model tiers
 
-One `aimee-llm` image serves embedding, reranking, and synthesis. `AIMEE_LLM_TIER` selects the model
-set and concurrency at runtime.
+Tiers size model roles that run inside an `aimee-kb` container. They do not name separate inference
+services. A KB can instead use a remote endpoint for either role.
 
-| Tier | Intended host | Embedding width | Synthesis shape |
-| --- | --- | ---: | --- |
-| `cpu` | CPU-only host | 1024 | small local extraction/synthesis |
-| `small` | about 16 GB GPU | 2560 | Gemma 4 12B class |
-| `mid` | about 24 GB GPU | 2560 | Gemma 4 26B-A4B class, two slots |
-| `large` | about 32 GB GPU | 2560 | same class with more slots and context |
+| Tier | Intended host | Typical synthesis shape |
+| --- | --- | --- |
+| `cpu` | CPU-only host | small extraction and synthesis model |
+| `small` | about 16 GB GPU | Gemma 4 12B class |
+| `mid` | about 24 GB GPU | Gemma 4 26B-A4B class, two slots |
+| `large` | about 32 GB GPU | same class with more slots and context |
 
-The table follows the checked-in [inference supervisor](../scripts/aimee-llm-supervisor.sh) and
-[GPU compose profile](../deploy/compose/aimee.gpu.yaml). Hardware estimates include model
-residency, not every driver or concurrent workload. They are deployment estimates, not minimum
-guarantees. Validate on the real host before promising a slot count.
+These are planning estimates, not readiness guarantees. Internal model availability depends on the
+KB image and deployment profile. A remote endpoint owns its own sizing and concurrency.
 
-## Deploy
+Embedding width is not a tier property. It belongs to the selected embedder and the corpus vector
+schema. See [Retrieval stack](retrieval-stack.md).
 
-```yaml
-environment:
-  AIMEE_LLM_TIER: cpu   # cpu | small | mid | large
-```
+## Consumers and admission
 
-The normal image downloads models into a persistent volume on first boot. The pre-baked CPU image is
-for offline installs. Moving between GPU tiers keeps the 2560-wide embedding schema. Moving between
-CPU and GPU widths requires the DB2 re-embed procedure.
+Curator work and optional answer synthesis use the synthesis role of the selected KB. If that model
+is also exposed for delegate work, background and interactive consumers need separate admission
+limits so curation cannot take every slot.
 
-## Consumers
+In a fleet, admission is per KB and also subject to shared tenant budgets. Adding KB containers must
+not multiply a team's hard limit.
 
-The KB uses the gateway for curator and retrieval work. The server may also register the local
-synthesis model as a free delegate. These consumers have separate admission limits so background KB
-work cannot take every interactive slot.
+## Tune an internal role
 
-## Tune
+Concurrency, context, GPU layers, CPU offload, batch size, and model paths are deployment settings.
+Start from the profile default. Change one value at a time and record:
 
-Concurrency, context, GPU layers, CPU expert offload, batch size, and model paths are deployment
-settings. Start from the tier default. Change one value at a time and record:
-
+- KB identity and model role;
 - model identity and digest;
-- driver/runtime version;
+- driver and runtime version;
 - resident memory;
 - first-token and total latency;
 - tokens per second;
 - maximum stable concurrent slots;
-- retrieval and structured-output quality.
+- retrieval or structured-output quality.
 
-An out-of-memory restart is not backpressure. Lower slots or context until the service stays ready
-under the expected mixed load.
+An out-of-memory restart is not backpressure. Lower slots or context until the KB stays ready under
+the expected mixed load.
 
-## CPU and GPU separation
+## Keep routing explicit
 
-Cheap lexical/index work stays in PostgreSQL and KB workers. Model work goes to `aimee-llm`. GPU
-tiers use the larger embedder and reranker; the retrieval pipeline itself does not change.
+Cheap lexical and index work stays with PostgreSQL and KB workers. Embedding and synthesis run in the
+selected KB container or at that KB's configured remote endpoint. The server does not choose a
+standalone model service and must not move a request to a different KB merely because a model is
+available there.
 
-See [KB inference backends](KB_LLM_BACKENDS.md) and [Retrieval stack](retrieval-stack.md).
+See [KB model backends](KB_LLM_BACKENDS.md) and [KB fleet and model placement](KB_FLEET.md).

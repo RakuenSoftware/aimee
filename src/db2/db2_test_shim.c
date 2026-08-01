@@ -10,6 +10,7 @@
 #ifndef AIMEE_DISABLE_DB2_SQLITE_SHIM
 
 #include "db2_test_shim.h"
+#include "modules/config/config_embedding_dim.h" /* the one width declaration (no config link) */
 
 #include "db2.h"
 #include "db2_internal.h"
@@ -49,11 +50,12 @@ void db2_test_shim_open_path(const char *path)
     * memories, etc.). */
    sqlite3_exec(raw, "PRAGMA foreign_keys=ON", NULL, NULL, NULL);
 
-   /* Unit tests embed with the builtin (384-dim) embedder. Default the active
-    * embedding dim to 384 so the upsert dim guard accepts builtin vectors; tests
-    * that exercise a specific tier (0.6b=1024, 4b=2560) call db2_set_embedding_dim
-    * themselves after open and override this. */
-   db2_set_embedding_dim(384);
+   /* Unit tests embed with the builtin embedder, which fills the DEPLOYMENT's width.
+    * Take that width from config — the one place it is declared — so the shim and the
+    * builtin cannot disagree; a literal here was a second declaration. Tests that
+    * exercise a specific width call db2_set_embedding_dim themselves after open. */
+   db2_set_embedding_dim_default(CONFIG_EMBEDDING_DIM_DEFAULT);
+   db2_set_embedding_dim(CONFIG_EMBEDDING_DIM_DEFAULT);
 
    char err[512] = {0};
    rc = db2_apply_schema_sqlite_shim(raw, err, sizeof(err));

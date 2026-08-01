@@ -4,8 +4,8 @@
 #include "agent_coord.h"
 #include "agent_tasks.h"
 #include "cmd_agent_delegate_impl.h"
-#include "delegate_economics.h"
-#include "delegate_patch_coordinator.h"
+#include <aimee/delegates/delegate_economics.h>
+#include <aimee/delegates/delegate_patch_coordinator.h>
 #include "db1.h"
 #include "cJSON.h"
 
@@ -114,7 +114,7 @@ static void job_start(app_ctx_t *ctx, int argc, char **argv)
    {
       /* Extract file paths from the step action if present.
          For now, use an empty file list; the caller can populate via MCP. */
-      int tid = db1_coord_job_add_task(job_id, plan.steps[i].id, "[]", "", "", "");
+      int tid = db1_coord_job_add_task(job_id, plan.steps[i].id, "[]", "", "", "", "");
       if (tid > 0)
          added++;
    }

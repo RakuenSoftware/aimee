@@ -5,7 +5,7 @@
 
 `aimee` is a thin client: each command either runs a small local operation or forwards a typed request to `aimee-server`. Server-backed commands accept `--json` for machine-readable output. Run `aimee help <command>` for per-command help, or `aimee help --all` for every tier.
 
-Total commands: 65
+Total commands: 66
 
 ## Core commands
 
@@ -35,8 +35,10 @@ Subcommands:
                    research -> execute. REQUIRES --persona NAME (e.g.
                    engineer, qa, security, reviewer, architect). --tools
                    enables tool use for roles that do not enable it by
-                   default. See `aimee delegate <role> --help` for the full
-                   flag set (--persona, --context-file, --via, etc.).
+                   default. --scope bounded|whole_task caps how open-ended
+                   the task may be (enforced against each agent's max_scope).
+                   See `aimee delegate <role> --help` for the full flag set
+                   (--persona, --context-file, --via, --scope, etc.).
   plan             Generate read-only work packets from a proposal
   launch <plan>    Queue a reviewed packet plan into a coord job
   status <job_id> [job_id...]  Check background delegate status
@@ -90,6 +92,10 @@ Subcommands:
   ingest           Ingest documents (status: ingest status)
   status           Show knowledge-base status
   docs push        Push docs into the knowledge base
+  grant set        Set one subject's write tier (--server, --team, --subject, --tier)
+  grant show       Show one subject's grant (--server, --team, --subject)
+  grant list       List grants (--server, --team, [--include-revoked])
+  grant revoke     Revoke one subject's grant (--server, --team, --subject)
 ```
 
 ### `aimee manuscript`
@@ -560,7 +566,7 @@ Model provider profiles and catalogs.
 Subcommands:
 
 ```
-  list             List registered providers (--available, --json)
+  list             List configured providers (--all, --available, --json)
   show <name>      Show provider profile details
   models <name>    Fetch provider model catalog (--json)
   test <name>      Probe provider credentials and connectivity
@@ -592,6 +598,18 @@ Subcommands:
   show <role>      Print one role template
   edit <role>      Edit or create a template in $EDITOR
   rm <role>        Reset a built-in or remove a custom template
+```
+
+### `aimee roundtable`
+
+Review an artifact with a configured roundtable.
+
+Subcommands:
+
+```
+  review <artifact>  Run the configured roundtable review
+                     --roundtable NAME selects a saved preset
+                     --original-request TEXT supplies the governing request
 ```
 
 ### `aimee server`

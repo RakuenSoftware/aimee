@@ -16,6 +16,7 @@ int main(void)
    /* Empty completion on an otherwise-successful HTTP 200 -> retryable. */
    assert(agent_error_is_retryable("no content in response") == 1);
    assert(agent_error_is_retryable("no content in response stream") == 1);
+   assert(agent_error_is_retryable("no content in final response") == 1);
 
    /* Existing transient classes stay retryable. */
    assert(agent_error_is_retryable("HTTP 429 rate limit") == 1);
@@ -30,6 +31,44 @@ int main(void)
    assert(agent_error_is_retryable("HTTP 400 invalid request") == 0);
    assert(agent_error_is_retryable("HTTP 401 unauthorized") == 0);
    assert(agent_error_is_retryable("model refused the request") == 0);
+
+   /* A hard credential/subscription failure must remain a hard health signal
+    * for that agent while still allowing an unpinned delegation to try a peer. */
+   assert(agent_rc_should_try_another(-1, "HTTP 401 invalid_api_key") == 1);
+   assert(agent_rc_should_try_another(-1, "HTTP 403 authentication failed") == 1);
+   assert(agent_rc_should_try_another(-1, "reached your usage limit for this billing cycle") == 1);
+   assert(agent_rc_should_try_another(-1, "provider quota exhausted") == 1);
+   assert(agent_rc_should_try_another(-1, NULL) == 0);
+   assert(agent_rc_should_try_another(AGENT_RC_AT_LIMIT, NULL) == 1);
+   assert(agent_rc_should_try_another(-3, "quota exhausted") == 0);
+   /* Bare infrastructure auth statuses and benign prose must not fan out across
+    * the provider fleet. */
+   assert(agent_rc_should_try_another(-1, "HTTP 401 unauthorized") == 0);
+   assert(agent_rc_should_try_another(-1, "HTTP 403 from ingress policy") == 0);
+   assert(agent_rc_should_try_another(-1, "no usage limit configured") == 0);
+   assert(agent_rc_should_try_another(-1, "job quota exceeded") == 0);
+   assert(agent_rc_should_try_another(-1, "HTTP 400 invalid request") == 0);
+
+   /* Every peer-substitutable credential/subscription diagnostic remains a
+    * hard provider-health signal. The two classifiers must stay disjoint. */
+   static const char *const hard_peer_failures[] = {
+       "HTTP 403 authentication failed",
+       "invalid_api_key",
+       "invalid API key",
+       "incorrect API key",
+       "reached your usage limit",
+       "usage limit for this billing cycle",
+       "insufficient_quota",
+       "quota exhausted",
+       "exceeded your current quota",
+       "subscription has lapsed",
+       "payment required",
+   };
+   for (size_t i = 0; i < sizeof(hard_peer_failures) / sizeof(hard_peer_failures[0]); i++)
+   {
+      assert(agent_error_is_retryable(hard_peer_failures[i]) == 0);
+      assert(agent_rc_should_try_another(-1, hard_peer_failures[i]) == 1);
+   }
 
    /* Saturation is NOT a retryable provider error. agent_dispatch_one signals it
     * out-of-band via AGENT_RC_AT_LIMIT and callers key off that rc (never this

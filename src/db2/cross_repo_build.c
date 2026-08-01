@@ -333,7 +333,10 @@ int db2_cross_repo_rebuild_build_deps(void)
    int nproj = 0;
    {
       aimee_pg_stmt_t *ps =
-          aimee_pg_prepare(conn, "SELECT name FROM projects ORDER BY name", err, sizeof(err));
+          aimee_pg_prepare(conn,
+                           "SELECT name FROM projects WHERE lifecycle_state='current'"
+                           " ORDER BY name",
+                           err, sizeof(err));
       if (!ps)
          return -1;
       int pstep = AIMEE_PG_DONE;
@@ -374,7 +377,8 @@ int db2_cross_repo_rebuild_build_deps(void)
           conn,
           "SELECT p.name, f.path, fc.content FROM file_contents fc "
           "JOIN files f ON f.id = fc.file_id JOIN projects p ON p.id = f.project_id "
-          "WHERE f.vendored = 0 AND (f.path LIKE '%CMakeLists.txt' OR f.path LIKE '%.cmake' "
+          "WHERE p.lifecycle_state='current' AND f.generation=p.current_generation "
+          "AND f.vendored = 0 AND (f.path LIKE '%CMakeLists.txt' OR f.path LIKE '%.cmake' "
           "OR f.path LIKE '%.gitmodules' OR f.path LIKE '%Cargo.toml') "
           /* defense-in-depth vs R2a's collection skip: never attribute a dep declared
            * in a build-output/dep-cache/worktree subtree to the host repo. */

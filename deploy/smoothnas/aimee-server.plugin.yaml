@@ -6,9 +6,9 @@ metadata:
   description: >-
     aimee server — the /v1 API (primary model, agent loop, memory, delegates).
     Uses the aimee-kb plugin for shared/vector features via AIMEE_KB_API_URL.
-    Bundles the aimee-webchat browser UI (HTTPS :8443), a first-class surface
-    that is ON by default; this deploy serves it on :8443 — set a PAM login
-    (AIMEE_WEBCHAT_USER/PASSWORD) so an operator can sign in.
+    Bundles the aimee-runtime-web browser UI (HTTPS :8443), a first-class surface
+    that is ON by default; this deploy serves it on :8443. Set a login pair
+    (AIMEE_WEBCHAT_USER/PASSWORD); it is sealed into Vault during first boot.
   vendor: RakuenSoftware
   homepage: https://github.com/RakuenSoftware/aimee
 profiles:
@@ -33,6 +33,12 @@ services:
       # gateway (stable host address from inside any plugin container).
       AIMEE_KB_API_URL: http://10.100.0.1:8741
       AIMEE_SERVER_HTTP_BIND: "1"
+      # Refuse to start without a writable mount matching the kernel's
+      # core_pattern. Native-plane crashes must leave evidence across restarts.
+      AIMEE_REQUIRE_PERSISTENT_CORES: "1"
+      # Exercise the kernel path as the server user before every start; a
+      # missing mount, hostile hard rlimit, or ineffective core_pattern is fatal.
+      AIMEE_CORE_SELFTEST: "1"
       # ---- Delegate sandbox (needs the docker-socket profile above) -----------
       # Run server-executed delegates' tools in a --network none Docker sandbox.
       AIMEE_DELEGATE_SANDBOX: "1"
@@ -41,15 +47,9 @@ services:
       # are the SmoothNAS tier-bound bind sources for this plugin's `home` and
       # `workspaces` volumes; a future tierd could inject this automatically.
       AIMEE_SANDBOX_HOST_MOUNTS: "/var/lib/aimee=/mnt/media/.plugins/aimee-server/home,/var/lib/aimee-workspaces=/mnt/media/.plugins/aimee-server/workspaces"
-      # ---- Browser webchat (aimee-webchat, HTTPS on :8443) --------------------
-      # ON: the UI is a first-class surface and serves on :8443. Provide a PAM
-      # login below so an operator can sign in — set USER + a REAL password via
-      # the plugin's env override at deploy time (do NOT commit a real secret to
-      # this file). Without USER/PASSWORD the login page serves but no one can
-      # sign in. Set AIMEE_WEBCHAT_ENABLED=0 to opt this deploy out entirely.
-      AIMEE_WEBCHAT_ENABLED: "1"
-      # Webchat PAM login (USER + PASSWORD) is provided at deploy time via the
-      # plugin config block below — never committed here.
+      # The browser stays off until an operator streams the first login into the
+      # server Vault with --bootstrap-vault-stdin. Plugin config is durable
+      # deployment metadata and therefore may never carry a credential value.
     volumes:
       - name: home
         mode: tier-bound
@@ -59,6 +59,10 @@ services:
         mode: tier-bound
         slot: HDD
         bind: /var/lib/aimee-workspaces
+      - name: cores
+        mode: tier-bound
+        slot: HDD
+        bind: /mnt/media/cores
     ports:
       # Remote /v1 is served over native TLS on 8743 (https://). Plaintext 8740
       # is loopback-only in the server (it refuses a non-loopback plaintext bind),
@@ -69,7 +73,7 @@ services:
         expose: false
         hostExpose: true
       # webchat UI. The port is declared so the host can reach it once webchat is
-      # enabled; nothing listens on it while AIMEE_WEBCHAT_ENABLED=0 (a connection
+      # enabled; nothing listens on it while AIMEE_RUNTIME_WEB_ENABLED=0 (a connection
       # to :8443 is simply refused until the UI is turned on).
       - name: webchat
         port: 8443
@@ -92,30 +96,16 @@ services:
           Additional Subject Alternative Names for the self-signed server cert —
           the deployment's reachable IP(s)/hostname(s) (comma-separated). Lets
           thin clients pin+verify over the LAN with no AIMEE_TLS_INSECURE.
-      # Operator-set at deploy time (kept out of git). The webchat browser UI
-      # authenticates via PAM against this user/password; set BOTH to enable
-      # sign-in. Leave blank to serve the login page with no account.
-      - key: AIMEE_WEBCHAT_USER
+      # Credential-shaped config fields are intentionally absent. Use the
+      # documented stdin bootstrap against the installed container, then enable
+      # the browser surface; the long-lived plugin metadata remains clean.
+      - key: AIMEE_RUNTIME_WEB_ENABLED
         type: string
-        label: Webchat login user
-        default: ""
-        description: PAM login username for the browser UI (set with a password).
-      - key: AIMEE_WEBCHAT_PASSWORD
-        type: string
-        label: Webchat login password
-        default: ""
-        secret: true
-        description: PAM login password for the browser UI (set alongside the user).
-      # Optional: additional persistent browser logins beyond the primary above.
-      # Comma- and/or newline-separated "user:password" entries (only the first
-      # ':' splits, so a password may contain ':' but not a comma/newline). Each
-      # is provisioned on every start, so extra accounts survive a plugin update.
-      - key: AIMEE_WEBCHAT_USERS
-        type: string
-        label: Additional webchat logins
-        default: ""
-        secret: true
-        description: 'Extra PAM logins as "user:password" entries, comma-separated (e.g. admin:s3cret,laura:pw).'
+        label: Browser UI enabled
+        default: "0"
+        description: >-
+          Keep 0 for installation. After streaming the first login into Vault,
+          set to 1 and redeploy; this switch contains no credential material.
       # Optional: point the kb synthesis / curator passes at an OpenAI-compatible
       # endpoint. Blank = disabled.
       - key: LLM_ENDPOINT

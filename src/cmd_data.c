@@ -19,6 +19,7 @@
 #include "git_verify.h"
 #include "config_fields.h"
 #include "config_database.h" /* config_emit_deploy_env — page-2 compose env */
+#include "runtime_secret.h"
 #include <unistd.h>
 #include <sys/stat.h>
 #include <ctype.h>
@@ -145,13 +146,12 @@ void cmd_export(app_ctx_t *ctx, int argc, char **argv)
    /* Config */
    if (strcmp(category, "all") == 0 || strcmp(category, "config") == 0)
    {
-      config_t cfg;
-      if (config_load(&cfg) == 0)
+      if (config_present())
       {
          char path[4096];
          snprintf(path, sizeof(path), "%s/config.json", output);
          cJSON *c = cJSON_CreateObject();
-         cJSON_AddStringToObject(c, "guardrail_mode", config_guardrail_mode(&cfg));
+         cJSON_AddStringToObject(c, "guardrail_mode", config_guardrail_mode());
          /* Redact sensitive fields */
          cJSON_AddStringToObject(c, "note", "Sensitive fields redacted. Re-configure on target.");
 
@@ -335,40 +335,37 @@ void cmd_import(app_ctx_t *ctx, int argc, char **argv)
 
 /* --- cmd_config --- */
 
-static void cmd_config_dispositions_print_text(const config_t *cfg)
+static void cmd_config_dispositions_print_text(void)
 {
-   if (!cfg || cfg->disposition_count == 0)
+   if (config_disposition_count() == 0)
    {
       printf("No disposition traits configured.\n");
       return;
    }
 
-   for (int i = 0; i < cfg->disposition_count; i++)
-      printf(
-          "%s\t%.2f\t%s\n", cfg->dispositions[i].name, cfg->dispositions[i].value,
-          config_disposition_source_name((config_disposition_source_t)cfg->dispositions[i].source));
+   for (int i = 0; i < config_disposition_count(); i++)
+      printf("%s\t%.2f\t%s\n", config_disposition_name(i), config_disposition_value(i),
+             config_disposition_source_name(
+                 (config_disposition_source_t)config_disposition_source(i)));
 }
 
-static void cmd_config_dispositions_print_json(const config_t *cfg)
+static void cmd_config_dispositions_print_json(void)
 {
    cJSON *arr = cJSON_CreateArray();
    if (!arr)
       return;
 
-   if (cfg)
+   for (int i = 0; i < config_disposition_count(); i++)
    {
-      for (int i = 0; i < cfg->disposition_count; i++)
-      {
-         cJSON *row = cJSON_CreateObject();
-         if (!row)
-            continue;
-         cJSON_AddStringToObject(row, "name", cfg->dispositions[i].name);
-         cJSON_AddNumberToObject(row, "value", cfg->dispositions[i].value);
-         cJSON_AddStringToObject(row, "source",
-                                 config_disposition_source_name(
-                                     (config_disposition_source_t)cfg->dispositions[i].source));
-         cJSON_AddItemToArray(arr, row);
-      }
+      cJSON *row = cJSON_CreateObject();
+      if (!row)
+         continue;
+      cJSON_AddStringToObject(row, "name", config_disposition_name(i));
+      cJSON_AddNumberToObject(row, "value", config_disposition_value(i));
+      cJSON_AddStringToObject(row, "source",
+                              config_disposition_source_name(
+                                  (config_disposition_source_t)config_disposition_source(i)));
+      cJSON_AddItemToArray(arr, row);
    }
 
    char *json = cJSON_PrintUnformatted(arr);
@@ -381,27 +378,30 @@ static void cmd_config_dispositions_print_json(const config_t *cfg)
 
 static void cmd_config_show(app_ctx_t *ctx, int argc, char **argv)
 {
-   config_t cfg;
-   if (config_load(&cfg) < 0)
+   if (!config_present())
    {
       fprintf(stderr, "Failed to load config\n");
       return;
    }
    if (access(config_default_path(), F_OK) != 0)
-      config_save(&cfg); /* ensure file exists only when missing */
+      (void)config_persist_defaults(); /* ensure file exists only when missing */
 
-   /* Read and print the file directly for faithful JSON output */
-   FILE *fp = fopen(config_default_path(), "r");
-   if (!fp)
-   {
-      fprintf(stderr, "Cannot read %s\n", config_default_path());
+   /* Render the shared public field surface instead of echoing the YAML file.
+    * Besides producing the JSON this command promises, this makes the local
+    * fallback obey the same Vault redaction contract as config.show RPC: an
+    * unmigrated legacy credential can never be printed from disk. */
+   cJSON *out = cJSON_CreateObject();
+   if (!out)
       return;
-   }
-   char buf[4096];
-   size_t n;
-   while ((n = fread(buf, 1, sizeof(buf), fp)) > 0)
-      fwrite(buf, 1, n, stdout);
-   fclose(fp);
+   for (int i = 0; config_fields[i].key; i++)
+      cJSON_AddItemToObject(out, config_fields[i].key,
+                            config_field_public_value_json_current(&config_fields[i]));
+   char *json = cJSON_Print(out);
+   cJSON_Delete(out);
+   if (!json)
+      return;
+   printf("%s\n", json);
+   free(json);
    (void)ctx;
    return;
 }
@@ -420,17 +420,16 @@ static void cmd_config_dispositions(app_ctx_t *ctx, int argc, char **argv)
       }
    }
 
-   config_t cfg;
-   if (config_load(&cfg) < 0)
+   if (!config_present())
    {
       fprintf(stderr, "Failed to load config\n");
       return;
    }
 
    if (json_output)
-      cmd_config_dispositions_print_json(&cfg);
+      cmd_config_dispositions_print_json();
    else
-      cmd_config_dispositions_print_text(&cfg);
+      cmd_config_dispositions_print_text();
    (void)ctx;
    return;
 }
@@ -439,14 +438,13 @@ static void cmd_config_deploy_env(app_ctx_t *ctx, int argc, char **argv)
 {
    /* Emit the compose env for the page-2 backend record. Sourced by the deploy
     * wrapper: `eval "$(aimee config deploy-env)" && docker compose up -d`. */
-   config_t cfg;
-   if (config_load(&cfg) < 0)
+   if (!config_present())
    {
       fprintf(stderr, "Failed to load config\n");
       return;
    }
    char env[2048];
-   config_emit_deploy_env(&cfg, env, sizeof(env));
+   config_emit_deploy_env_current(env, sizeof(env));
    fputs(env, stdout);
    (void)ctx;
    return;
@@ -467,33 +465,20 @@ static void cmd_config_get(app_ctx_t *ctx, int argc, char **argv)
       return;
    }
 
-   config_t cfg;
-   if (config_load(&cfg) < 0)
+   if (!config_present())
    {
       fprintf(stderr, "Failed to load config\n");
       return;
    }
 
-   if (f->is_bool || f->type == CFG_BOOL)
+   char rendered[4096];
+   if (config_field_render(f, rendered, sizeof(rendered)) != 0)
    {
-      int val = *(int *)((char *)&cfg + f->offset);
-      printf("%s\n", val ? "true" : "false");
+      fprintf(stderr, "Failed to read config key: %s\n", key);
+      return;
    }
-   else if (f->type == CFG_INT)
-   {
-      int val = *(int *)((char *)&cfg + f->offset);
-      printf("%d\n", val);
-   }
-   else if (f->type == CFG_FLOAT)
-   {
-      double val = *(double *)((char *)&cfg + f->offset);
-      printf("%g\n", val);
-   }
-   else
-   {
-      const char *val = (const char *)&cfg + f->offset;
-      printf("%s\n", val[0] ? val : "(unset)");
-   }
+   printf("%s\n", rendered);
+   runtime_secret_wipe(rendered, sizeof(rendered));
    (void)ctx;
    return;
 }
@@ -514,48 +499,23 @@ static void cmd_config_set(app_ctx_t *ctx, int argc, char **argv)
       return;
    }
 
-   config_t cfg;
-   if (config_load(&cfg) < 0)
+   /* Surgical write: config_set edits the config YAML document in place (sets this
+    * one key, preserves every other), persists, and republishes — no whole-file
+    * rebuild from config_t. */
+   if (config_set(key, value) < 0)
    {
-      fprintf(stderr, "Failed to load config\n");
-      return;
-   }
-
-   if (f->is_bool || f->type == CFG_BOOL)
-   {
-      int *ptr = (int *)((char *)&cfg + f->offset);
-      if (strcmp(value, "true") == 0 || strcmp(value, "1") == 0)
-         *ptr = 1;
-      else if (strcmp(value, "false") == 0 || strcmp(value, "0") == 0)
-         *ptr = 0;
-      else
-      {
+      if ((f->is_bool || f->type == CFG_BOOL))
          fprintf(stderr, "Invalid boolean value: %s (use true/false)\n", value);
-         return;
-      }
-   }
-   else if (f->type == CFG_INT)
-   {
-      int *ptr = (int *)((char *)&cfg + f->offset);
-      *ptr = atoi(value);
-   }
-   else if (f->type == CFG_FLOAT)
-   {
-      double *ptr = (double *)((char *)&cfg + f->offset);
-      *ptr = atof(value);
-   }
-   else
-   {
-      char *ptr = (char *)&cfg + f->offset;
-      snprintf(ptr, f->size, "%s", value);
-   }
-
-   if (config_save(&cfg) < 0)
-   {
-      fprintf(stderr, "Failed to save config\n");
+      else if (f->type == CFG_ECON_MODE)
+         fprintf(stderr, "Invalid value: %s (use off|safe|aggressive)\n", value);
+      else
+         fprintf(stderr, "Failed to set config\n");
       return;
    }
-   fprintf(stderr, "%s = %s\n", key, value);
+   if (config_field_secret_name(f))
+      fprintf(stderr, "%s = [stored in Vault]\n", key);
+   else
+      fprintf(stderr, "%s = %s\n", key, value);
 
    /* Provider is now config-only, no manifest to update */
    (void)ctx;
@@ -605,10 +565,8 @@ void cmd_config(app_ctx_t *ctx, int argc, char **argv)
 static void db_subcmd_backup(app_ctx_t *ctx, int argc, char **argv)
 {
    (void)ctx;
-   config_t cfg;
-   config_load(&cfg);
    const char *out = (argc > 0) ? argv[0] : NULL;
-   if (db1_backup(cfg.db1_path, out) != 0)
+   if (db1_backup(config_db1_path(), out) != 0)
    {
       LOG_ERROR("db", "db backup failed");
       exit(1);
@@ -620,9 +578,7 @@ static void db_subcmd_check(app_ctx_t *ctx, int argc, char **argv)
    (void)ctx;
    (void)argc;
    (void)argv;
-   config_t cfg;
-   config_load(&cfg);
-   if (db1_check(cfg.db1_path, 1) != 0)
+   if (db1_check(config_db1_path(), 1) != 0)
       exit(1);
 }
 
@@ -635,9 +591,7 @@ static void db_subcmd_recover(app_ctx_t *ctx, int argc, char **argv)
       if (strcmp(argv[i], "--force") == 0)
          force = 1;
    }
-   config_t cfg;
-   config_load(&cfg);
-   if (db1_recover(cfg.db1_path, force) != 0)
+   if (db1_recover(config_db1_path(), force) != 0)
       exit(1);
 }
 

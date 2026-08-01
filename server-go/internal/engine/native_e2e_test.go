@@ -25,7 +25,8 @@ type e2eAgents struct {
 func (a *e2eAgents) Delegate(_ context.Context, request DelegateRequest) (DelegateResult, error) {
 	switch request.Role {
 	case "review":
-		return DelegateResult{Response: `{"verdict":"approve","findings":[]}`}, nil
+		return DelegateResult{Response: fmt.Sprintf(`{"run_id":%q,"artifact_hash":%q,"artifact_stage":%q,"original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`,
+			request.WorkItemID, request.ArtifactHash, request.ArtifactStage)}, nil
 	case "draft":
 		if strings.Contains(request.Prompt, "PACKET PLAN") || strings.Contains(request.Prompt, "Decompose the complete approved plan") {
 			return DelegateResult{Response: `{"schema_version":1,"packets":[{"packet_id":"p1","summary":"implement feature","target_blocks":["implement"],"dependencies":[],"acceptance_criteria":["feature exists"]}]}`}, nil
@@ -56,22 +57,50 @@ func (a *e2eAgents) Delegate(_ context.Context, request DelegateRequest) (Delega
 	}
 }
 
+func (a *e2eAgents) DelegateGroup(ctx context.Context, requests []DelegateRequest) []DelegateGroupResult {
+	return testDelegateGroup(ctx, requests, a.Delegate)
+}
+
 type passVerifier struct{}
 
 func (passVerifier) Verify(context.Context, string) error { return nil }
 
-type e2eForge struct{}
+type transientGateRunner struct {
+	mu       sync.Mutex
+	next     Runner
+	failures []string
+}
 
-func (e2eForge) Push(ctx context.Context, _, workdir, branch string) error {
+func (r *transientGateRunner) Run(ctx context.Context, request StepRequest) (StepResult, error) {
+	r.mu.Lock()
+	if request.Node.ID == "plan_gate" && len(r.failures) > 0 {
+		reason := r.failures[0]
+		r.failures = r.failures[1:]
+		r.mu.Unlock()
+		return StepResult{Status: StepPending, PauseReason: reason, Detail: "injected transient " + reason}, nil
+	}
+	r.mu.Unlock()
+	return r.next.Run(ctx, request)
+}
+
+type e2eForge struct {
+	mu    sync.Mutex
+	opens []PullRequestSpec
+}
+
+func (*e2eForge) Push(ctx context.Context, _, workdir, branch string) error {
 	_, err := gitText(ctx, workdir, "push", "-u", "origin", branch)
 	return err
 }
 
-func (e2eForge) Open(_ context.Context, _ string, _ string, head, base, _ string) (PullRequest, error) {
+func (f *e2eForge) Open(_ context.Context, _ string, _ string, head, base string, spec PullRequestSpec) (PullRequest, error) {
+	f.mu.Lock()
+	f.opens = append(f.opens, spec)
+	f.mu.Unlock()
 	return PullRequest{Ref: "pr:" + head, URL: "pr:" + head, Head: head, Base: base}, nil
 }
-func (e2eForge) CI(context.Context, string, string) (CIState, error) { return CIPassed, nil }
-func (e2eForge) Merge(ctx context.Context, workdir, _ string, base string) error {
+func (*e2eForge) CI(context.Context, string, string) (CIState, error) { return CIPassed, nil }
+func (*e2eForge) Merge(ctx context.Context, workdir, _ string, base string) error {
 	_, err := gitText(ctx, workdir, "push", "origin", "HEAD:refs/heads/"+base)
 	return err
 }
@@ -126,7 +155,7 @@ nodes:
   - id: plan_gate
     block: gate.roundtable
     in: {src: plan.out}
-    params: {panel: {required: [architect]}, quorum: 1}
+    params: {roundtable: default, panel: {required: [architect]}, quorum: 1}
     on_pass: split
     on_fail: plan
   - id: split
@@ -146,7 +175,7 @@ nodes:
   - id: gate
     block: gate.roundtable
     in: {src: freeze.out}
-    params: {panel: {required: [qa]}, quorum: 1}
+    params: {roundtable: default, panel: {required: [qa]}, quorum: 1}
     on_pass: document
     on_fail: split
   - id: document
@@ -185,7 +214,7 @@ nodes:
   - id: gate
     block: gate.roundtable
     in: {src: freeze.out}
-    params: {panel: {required: [qa]}, quorum: 1}
+    params: {roundtable: default, panel: {required: [qa]}, quorum: 1}
     on_pass: pr
     on_fail: impl
   - id: pr
@@ -243,17 +272,26 @@ nodes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner, err := NewNativeRunner(store, worktrees, &e2eAgents{}, passVerifier{}, artifacts, registry, e2eForge{})
+	forge := &e2eForge{}
+	runner, err := NewNativeRunner(store, worktrees, &e2eAgents{}, passVerifier{}, artifacts, registry, forge)
 	if err != nil {
 		t.Fatal(err)
 	}
-	eng, err := New(store, artifacts, workflowDir, runner)
+	// Every gate in this workflow names "default", and a named roundtable must
+	// resolve to a saved preset, so the end-to-end run needs a real one.
+	runner.SetRoundtableStore(unpinnedTestRoundtable(t, "architect"))
+	recoveringRunner := &transientGateRunner{next: runner, failures: []string{"roundtable_discussion", "roundtable_chairman"}}
+	eng, err := New(store, artifacts, workflowDir, recoveringRunner)
 	if err != nil {
 		t.Fatal(err)
 	}
 	scheduler := NewScheduler(store, eng, 2, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	scheduler.pollEvery = 20 * time.Millisecond
+	scheduler.transientPauses = []transientPause{
+		{reason: "roundtable_discussion", backoff: 100 * time.Millisecond},
+		{reason: "roundtable_chairman", backoff: 100 * time.Millisecond},
+	}
 	done := make(chan struct{})
 	go func() { scheduler.Run(ctx); close(done) }()
 	shutdown := func() { cancel(); <-done }
@@ -270,6 +308,47 @@ nodes:
 		if item.State == "accepted" {
 			if item.PRRef == "" {
 				t.Fatal("final PR ref was not persisted")
+			}
+			recoveringRunner.mu.Lock()
+			remainingFailures := len(recoveringRunner.failures)
+			recoveringRunner.mu.Unlock()
+			if remainingFailures != 0 {
+				t.Fatalf("%d transient roundtable failures were not exercised", remainingFailures)
+			}
+			forge.mu.Lock()
+			opens := append([]PullRequestSpec(nil), forge.opens...)
+			forge.mu.Unlock()
+			if len(opens) != 2 {
+				t.Fatalf("opened %d PRs, want slice + final: %+v", len(opens), opens)
+			}
+			if opens[0].Draft || opens[0].Title != "Implement feature" {
+				t.Fatalf("slice handoff = %+v, want meaningful non-draft slice PR", opens[0])
+			}
+			final := opens[1]
+			if !final.Draft || final.Title != "Build feature" {
+				t.Fatalf("final handoff = %+v, want meaningful draft PR", final)
+			}
+			for _, marker := range []string{"## Human review boundary", "intentionally a draft",
+				"## What this proposal does", "## What changed", "Original request",
+				"Approved implementation plan", rootID} {
+				if !strings.Contains(final.Body, marker) {
+					t.Fatalf("final PR body missing %q:\n%s", marker, final.Body)
+				}
+			}
+			events, err := store.Events(context.Background(), rootID, 0, 1000)
+			if err != nil {
+				t.Fatal(err)
+			}
+			seen := map[string]bool{}
+			for _, event := range events {
+				if event.Kind == "pause" {
+					seen[event.Detail] = true
+				}
+			}
+			for _, reason := range []string{"roundtable_discussion: injected transient roundtable_discussion", "roundtable_chairman: injected transient roundtable_chairman"} {
+				if !seen[reason] {
+					t.Fatalf("missing transient recovery event %q: %+v", reason, events)
+				}
 			}
 			shutdown = func() {}
 			cancel()

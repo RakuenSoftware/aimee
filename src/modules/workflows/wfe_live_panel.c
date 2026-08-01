@@ -1,19 +1,16 @@
 /* wfe_live_panel.c -- the live roundtable panel provider.
  *
  * gate.roundtable calls this to convene a diverse panel THROUGH THE ROUNDTABLE
- * ENGINE (delegate_roundtable_run, REVIEW mode): one structured-review panelist
- * per REQUIRED persona, whose findings are captured as review items with
- * replayable evidence, deduped across the panel, replay-VERIFIED against the
+ * ENGINE (delegate_roundtable_run, REVIEW mode): the exact seats from the
+ * named/default configured roundtable (or at most two fallback agents), whose findings are captured
+ * as review items with replayable evidence, deduped across the panel, replay-VERIFIED against the
  * gate's worktree (wfe_replay_worktree — interpretation never blocks, a
  * contradicted claim is rejected), and finally mapped onto per-lens verdicts
  * (wfe_panel_verdicts_from_roundtable) for the fail-closed wfe_gate_decide.
  * Registered from wfe_autonomy_register.
  *
- * Seat semantics are unchanged from the pre-engine panel: a PINNED seat model
- * is never substituted (unfulfillable -> the run FAILS); a "$random" or
- * unmatched lens picks any review-capable agent, preferring panel diversity but
- * reusing a seated agent when the roster is smaller than the panel; and when NO
- * review agent is eligible right now the panel QUEUES for a seat up to
+ * A configured seat model is never silently substituted; when no review agent
+ * is eligible right now the panel QUEUES for a seat up to
  * AIMEE_PANEL_SEAT_WAIT_SECS before the gate degrades.
  *
  * NOTE: the engine embeds the change in the prompt, and panelists additionally
@@ -36,8 +33,6 @@
 #include "config.h"
 #include "delegate_ensemble.h"
 #include "log.h"
-#include "roundtable_preset.h"
-#include "roundtable_seat_resolve.h"
 #include "roundtable_verify.h"
 
 #include <stdio.h>
@@ -81,134 +76,47 @@ static long wfe_panel_seat_wait_secs(void)
  * (severity/category/location/summary/recommendation + replayable evidence). */
 static char *build_review_task(const wfe_review_packet_t *pkt)
 {
+   static const char *fmt =
+       "Review the CHANGE UNDER REVIEW below AGAINST the ORIGINAL REQUEST below.\n\n"
+       "FOCUS: %s\n\nORIGINAL REQUEST:\n%s\n\n"
+       "CHANGE UNDER REVIEW (diff vs the base repo):\n%s\n\n"
+       "You have aimee's tools (code_search, find_symbol, search_memory, search_docs). "
+       "The diff shows what CHANGED; it does not show whether the change is REAL. Look "
+       "the rest up — do not infer it from the diff:\n"
+       "1. REACHABLE: for new behaviour, especially a guard/gate/check, find its callers. "
+       "Name the path from a real entrypoint to this code in the artifact that actually "
+       "ships. Code with no caller, or whose only caller needs a binary or config the "
+       "deployment lacks, is inert — that is a blocking defect no matter how correct the "
+       "code reads.\n"
+       "2. PRODUCT: every added file must be something we ship. Search for what writes it. "
+       "Run bookkeeping, scope/intent records and scratch files are not deliverables.\n"
+       "3. ALTERNATIVE EXISTS: if the change forbids or removes a way of doing something, "
+       "confirm the replacement it points people to actually exists and works on the "
+       "surface it targets. A rule with no working alternative is breakage.\n\n"
+       "For every item, location is \"file:line\" from the change wherever possible, and a "
+       "blocking severity REQUIRES reproducible factual evidence about this code.";
    const char *focus =
        (pkt->focus && pkt->focus[0]) ? pkt->focus : "correctness, quality, and completeness";
    const char *proposal = (pkt->proposal && pkt->proposal[0]) ? pkt->proposal : "(none provided)";
    const char *diff = (pkt->diff && pkt->diff[0])
                           ? pkt->diff
                           : "(no code diff — review the plan/proposal artifact against the ask)";
-   size_t cap = 1024 + strlen(focus) + strlen(proposal) + strlen(diff);
+   /* The former buffer already used strlen() of the complete request and diff,
+    * despite formatting only 4000 request bytes. Exact sizing therefore reduces
+    * allocation while making silent content truncation impossible. */
+   int needed = snprintf(NULL, 0, fmt, focus, proposal, diff);
+   if (needed < 0)
+      return NULL;
+   size_t cap = (size_t)needed + 1;
    char *buf = malloc(cap);
    if (!buf)
       return NULL;
-   snprintf(buf, cap,
-            "Review the CHANGE UNDER REVIEW below AGAINST what was asked.\n\n"
-            "FOCUS: %s\n\nORIGINAL PROPOSAL/REQUEST:\n%.4000s\n\n"
-            "CHANGE UNDER REVIEW (diff vs the base repo):\n%s\n\n"
-            "You have aimee's tools (code_search, find_symbol, search_memory, search_docs). "
-            "The diff shows what CHANGED; it does not show whether the change is REAL. Look "
-            "the rest up — do not infer it from the diff:\n"
-            "1. REACHABLE: for new behaviour, especially a guard/gate/check, find its callers. "
-            "Name the path from a real entrypoint to this code in the artifact that actually "
-            "ships. Code with no caller, or whose only caller needs a binary or config the "
-            "deployment lacks, is inert — that is a blocking defect no matter how correct the "
-            "code reads.\n"
-            "2. PRODUCT: every added file must be something we ship. Search for what writes it. "
-            "Run bookkeeping, scope/intent records and scratch files are not deliverables.\n"
-            "3. ALTERNATIVE EXISTS: if the change forbids or removes a way of doing something, "
-            "confirm the replacement it points people to actually exists and works on the "
-            "surface it targets. A rule with no working alternative is breakage.\n\n"
-            "For every item, location is \"file:line\" from the change wherever possible, and a "
-            "blocking severity REQUIRES reproducible factual evidence about this code.",
-            focus, proposal, diff);
-   return buf;
-}
-
-/* The seat model bound to `persona` in the active roundtable preset, or NULL when
- * no seat matches (the caller then treats the lens as "$random"). The model may
- * itself be the "$random" sentinel — a seat the user explicitly set to random. */
-static const char *seat_model_for_persona(const roundtable_preset_t *preset, const char *persona)
-{
-   if (!preset || !persona || !persona[0])
+   if (snprintf(buf, cap, fmt, focus, proposal, diff) != needed)
+   {
+      free(buf);
       return NULL;
-   for (int i = 0; i < preset->seat_count; i++)
-      if (strcmp(preset->seats[i].persona, persona) == 0)
-         return preset->seats[i].model;
-   return NULL;
-}
-
-/* Load the roundtable preset this gate convenes into *preset for its
- * persona->model bindings. `requested` is the node's params.roundtable (the gate
- * may name a specific preset); when empty it falls back to the configured default
- * (roundtable.default, else "default"). Returns 1 on success, 0 when no preset
- * loads — in which case every lens resolves as "$random", preserving the
- * pre-preset "any review-capable agent per persona" behaviour. A NAMED preset
- * that does not load is logged, since it is likely a workflow authoring error. */
-static int load_panel_preset(roundtable_preset_t *preset, const char *requested)
-{
-   memset(preset, 0, sizeof *preset);
-   config_t cfg;
-   memset(&cfg, 0, sizeof cfg);
-   const char *name = "default";
-   if (config_load(&cfg) == 0 && cfg.roundtable_default[0])
-      name = cfg.roundtable_default;
-   if (requested && requested[0])
-      name = requested; /* the node's explicit choice wins over the default */
-   if (roundtable_preset_load(name, preset) == 0)
-      return 1;
-   if (requested && requested[0])
-      aimee_log(LOG_WARN, "wfe-panel",
-                "roundtable preset '%s' not found -> every lens falls back to $random", requested);
-   return 0;
-}
-
-/* Resolve every lens to a concrete review agent. Pinned seats resolve exactly
- * once (unfulfillable -> WFE_PANEL_PINNED_FAIL); $random seats prefer a UNIQUE
- * agent per lens and downgrade to reuse when the roster is smaller than the
- * panel. Returns 0 with seat[0..nlens-1] set (pointers into acfg), or a
- * WFE_PANEL_* sentinel; `*any_pinned` reports whether any seat is pinned.
- * Returns 1 when no review agent is eligible AT ALL right now (caller queues). */
-static int resolve_seats(agent_config_t *acfg, const roundtable_preset_t *preset, int have_preset,
-                         const char *const *required, int nlens, const char *seat[],
-                         int *any_pinned)
-{
-   const char *used[MAX_AGENTS];
-   int nused = 0;
-   *any_pinned = 0;
-   for (int i = 0; i < nlens; i++)
-      seat[i] = NULL;
-
-   for (int i = 0; i < nlens; i++)
-   {
-      const char *model = have_preset ? seat_model_for_persona(preset, required[i]) : NULL;
-      if (rt_seat_is_random(model))
-         continue; /* $random / unmatched -> second pass */
-      int idx = -1;
-      if (rt_resolve_seat_model(acfg, model, "review", used, nused, &idx) != RT_SEAT_OK)
-      {
-         aimee_log(LOG_WARN, "wfe-panel", "pinned model '%s' for lens '%s' unavailable -> fail run",
-                   model, required[i]);
-         return WFE_PANEL_PINNED_FAIL;
-      }
-      seat[i] = acfg->agents[idx].name;
-      *any_pinned = 1;
-      if (nused < MAX_AGENTS)
-         used[nused++] = seat[i];
    }
-
-   for (int i = 0; i < nlens; i++)
-   {
-      if (seat[i])
-         continue;
-      int idx = -1, reused = 0;
-      rt_seat_resolve_t rc =
-          rt_resolve_seat_model(acfg, RT_SEAT_RANDOM, "review", used, nused, &idx);
-      if (rc == RT_SEAT_RANDOM_EXHAUSTED)
-      {
-         rc = rt_resolve_seat_model(acfg, RT_SEAT_RANDOM, "review", NULL, 0, &idx);
-         reused = 1;
-      }
-      if (rc != RT_SEAT_OK || idx < 0 || idx >= acfg->agent_count)
-         return 1; /* no eligible review agent at all right now -> queue */
-      seat[i] = acfg->agents[idx].name;
-      if (reused)
-         aimee_log(LOG_INFO, "wfe-panel",
-                   "reusing agent '%s' for lens '%s' (fewer eligible review agents than lenses)",
-                   seat[i], required[i]);
-      else if (nused < MAX_AGENTS)
-         used[nused++] = seat[i];
-   }
-   return 0;
+   return buf;
 }
 
 /* Convene the review roundtable through the engine and map the verified items
@@ -231,14 +139,6 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
    if (nlens > WFE_PANEL_MAX)
       nlens = WFE_PANEL_MAX;
 
-   roundtable_preset_t preset;
-   int have_preset = load_panel_preset(&preset, pkt->roundtable);
-
-   config_t cfg;
-   memset(&cfg, 0, sizeof cfg);
-   if (config_load(&cfg) != 0)
-      return WFE_PANEL_UNREACHABLE;
-
    char *task = build_review_task(pkt);
    if (!task)
       return WFE_PANEL_UNREACHABLE;
@@ -257,28 +157,35 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
       clock_gettime(CLOCK_MONOTONIC, &qn);
       int final = (qn.tv_sec - q0.tv_sec) >= seat_wait || seat_wait == 0;
 
-      const char *seat[WFE_PANEL_MAX];
-      int any_pinned = 0;
-      int src = resolve_seats(&acfg, &preset, have_preset, required, nlens, seat, &any_pinned);
-      if (src == WFE_PANEL_PINNED_FAIL)
+      if (!config_present() || agent_load_config(&acfg) != 0)
       {
-         rc_final = WFE_PANEL_PINNED_FAIL;
-         break;
-      }
-      if (src == 1)
-      {
-         /* Nothing seatable right now: queue for a seat until the deadline. */
          if (final)
          {
-            aimee_log(LOG_WARN, "wfe-panel", "no viable review agent for the panel -> degrade");
-            rc_final = 0;
+            rc_final = WFE_PANEL_UNREACHABLE;
+            break;
+         }
+         struct timespec nap = {WFE_PANEL_SEAT_POLL_SECS, 0};
+         nanosleep(&nap, NULL);
+         continue;
+      }
+
+      ensemble_panel_t panel;
+      ensemble_panel_from_config(&panel);
+      char panel_err[256];
+      if (ensemble_prepare_runtime_panel(pkt->roundtable, &panel, &acfg, panel_err,
+                                         sizeof panel_err) != 0)
+      {
+         if (final)
+         {
+            aimee_log(LOG_WARN, "wfe-panel", "%s -> park", panel_err);
+            rc_final = (pkt->roundtable && pkt->roundtable[0]) || config_roundtable_default()[0]
+                           ? WFE_PANEL_PINNED_FAIL
+                           : 0;
             break;
          }
          if (!queued_logged)
          {
-            aimee_log(LOG_INFO, "wfe-panel",
-                      "no eligible review agent for %d lens(es); queueing up to %lds", nlens,
-                      seat_wait);
+            aimee_log(LOG_INFO, "wfe-panel", "%s; queueing up to %lds", panel_err, seat_wait);
             queued_logged = 1;
          }
          struct timespec nap = {WFE_PANEL_SEAT_POLL_SECS, 0};
@@ -286,22 +193,22 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
          continue;
       }
 
-      /* Panel composition = the resolved seats; each lens rides in as the
-       * panelist's persona. The engine's internal index-backed replay stays
-       * OFF: the gate verifies against the WORKTREE below instead (the index
-       * lags the change under review). All lenses are required, so anything
-       * short of a full panel is a failed attempt. */
-      cfg.ensemble_reference_count = nlens;
-      cfg.ensemble_reference_persona_count = nlens;
+      /* Read the seats off the PANEL, and apply the two overrides to the PANEL —
+       * it is what delegate_roundtable_run consumes. Both used to be written to a
+       * local config_t that was passed on; once the engine took an
+       * ensemble_panel_t built earlier in this loop, writing them to the config_t
+       * became a pair of dead stores that silently dropped the min-successful and
+       * replay-verify overrides. */
+      const int panel_count = panel.reference_count;
+      const char *lens_seat[WFE_PANEL_MAX];
       for (int i = 0; i < nlens; i++)
-      {
-         snprintf(cfg.ensemble_reference_models[i], sizeof cfg.ensemble_reference_models[i], "%s",
-                  seat[i]);
-         snprintf(cfg.ensemble_reference_personas[i], sizeof cfg.ensemble_reference_personas[i],
-                  "%s", required[i]);
-      }
-      cfg.ensemble_min_successful = nlens;
-      cfg.roundtable_replay_verify_enabled = 0;
+         lens_seat[i] = panel.reference_models[i % panel_count];
+
+      /* Acquired roundtable seats are the whole panel. Review lenses are verdict
+       * dimensions, not authorization to add more agents; attribute each lens
+       * to an actual panel seat round-robin. */
+      panel.min_successful = panel_count;
+      panel.replay_verify_enabled = 0;
 
       roundtable_opts_t opts;
       memset(&opts, 0, sizeof opts);
@@ -309,20 +216,29 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
       opts.turns = ROUNDTABLE_PARALLEL;
       opts.max_rounds = 1;
       opts.deadline_ms = WFE_PANEL_DEADLINE_MS;
+      opts.required_participants = panel_count;
 
       roundtable_result_t rt;
       memset(&rt, 0, sizeof rt);
-      if (delegate_roundtable_run(&acfg, &cfg, task, &opts, &rt) != 0)
+      const char *previous_cwd = run_cmd_get_cwd();
+      char previous_cwd_copy[MAX_PATH_LEN];
+      snprintf(previous_cwd_copy, sizeof previous_cwd_copy, "%s", previous_cwd ? previous_cwd : "");
+      run_cmd_set_cwd(pkt->workdir);
+      int roundtable_rc = delegate_roundtable_run(&acfg, &panel, task, &opts, &rt);
+      run_cmd_set_cwd(previous_cwd_copy[0] ? previous_cwd_copy : NULL);
+      if (roundtable_rc != 0)
       {
          delegate_roundtable_result_free(&rt);
          rc_final = WFE_PANEL_UNREACHABLE;
          break;
       }
 
-      if (rt.participants_failed > 0 || rt.degraded)
+      if (rt.participants_required_failed > 0 || rt.degraded)
       {
-         aimee_log(LOG_WARN, "wfe-panel", "panel attempt: %d/%d panelist(s) failed%s%s",
-                   rt.participants_failed, rt.participants_total, rt.degraded ? " (degraded)" : "",
+         aimee_log(LOG_WARN, "wfe-panel",
+                   "panel attempt: %d/%d required and %d/%d total panelist(s) failed%s%s",
+                   rt.participants_required_failed, panel_count, rt.participants_failed,
+                   rt.participants_total, rt.degraded ? " (degraded)" : "",
                    final ? " -> degrade" : " -> re-seat and retry");
          delegate_roundtable_result_free(&rt);
          if (final)
@@ -339,8 +255,7 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
        * reviewed: interpretation caps below blocking, contradicted claims are
        * rejected — the same rule as the compute roundtable, re-grounded. */
       wfe_replay_worktree_set_root(pkt->workdir);
-      roundtable_verify_items_with(&rt, wfe_replay_worktree_backend(),
-                                   cfg.roundtable_require_evidence);
+      roundtable_verify_items_with(&rt, wfe_replay_worktree_backend(), panel.require_evidence);
       wfe_replay_worktree_set_root(NULL);
       aimee_log(LOG_INFO, "wfe-panel",
                 "panel items: %d kept (verified=%d capped=%d degraded=%d), %d rejected",
@@ -351,7 +266,7 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
                    rt.rejected_reason[i], rt.rejected[i].sources, rt.rejected[i].location,
                    rt.rejected[i].summary);
 
-      int filled = wfe_panel_verdicts_from_roundtable(&rt, required, seat, nlens,
+      int filled = wfe_panel_verdicts_from_roundtable(&rt, required, lens_seat, nlens,
                                                       pkt->artifact_hash, pkt->workdir, out);
       for (int i = 0; i < filled; i++)
          aimee_log(LOG_INFO, "wfe-panel", "lens '%s' verdict %s from agent '%s' (%d blocker(s))",

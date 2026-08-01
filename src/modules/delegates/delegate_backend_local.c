@@ -5,7 +5,7 @@
  * /bin/bash -c <command> in the workspace cwd with stdout/stderr
  * piped back to caller-provided buffers. */
 
-#include "delegate_backend_local.h"
+#include <aimee/delegates/delegate_backend_local.h>
 #include "util.h"
 
 #include "aimee.h" /* MAX_PATH_LEN */
@@ -377,11 +377,8 @@ static int resolve_in_workspace(const local_state_t *st, const char *rel, char *
 {
    if (!st || !rel || !out || outsz == 0)
       return -1;
-   if (rel[0] == '/')
-      return -1;
-   /* Walk the components, rejecting "..". Empty components ("//")
-    * are tolerated since `path/to/foo` and `path//to/foo` both
-    * resolve identically. */
+   /* Reject any parent-traversal segment (relative or absolute). Empty components
+    * ("//") are tolerated: `path/to/foo` and `path//to/foo` resolve identically. */
    const char *p = rel;
    while (*p)
    {
@@ -393,6 +390,22 @@ static int resolve_in_workspace(const local_state_t *st, const char *rel, char *
          return -1;
       if (*p == '/')
          p++;
+   }
+   if (rel[0] == '/')
+   {
+      /* The native file tools resolve to an ABSOLUTE path via the thread cwd before
+       * calling the provider. Accept it when it is within the workspace root (which the
+       * absolute path already names); refuse anything outside so the delegate cannot
+       * reach beyond its tree. Without this, read/write/list on an absolute in-workspace
+       * path is wrongly rejected — the same bug fixed for the docker backend. */
+      size_t wlen = strlen(st->workspace);
+      if (strncmp(rel, st->workspace, wlen) == 0 && (rel[wlen] == '/' || rel[wlen] == '\0'))
+      {
+         if (snprintf(out, outsz, "%s", rel) >= (int)outsz)
+            return -1;
+         return 0;
+      }
+      return -1;
    }
    if (snprintf(out, outsz, "%s/%s", st->workspace, rel) >= (int)outsz)
       return -1;

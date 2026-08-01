@@ -14,6 +14,7 @@
 #include "../db2/db_postgres.h"
 #include "../db2/artifacts.h"
 #include "../db2/kb_payload.h"
+#include "../db2/code_index.h"
 #include "../db2/lifecycle.h"
 #include "../db2/pgvec_kb_service.h"
 #include "../db2/sketch.h"
@@ -183,16 +184,16 @@ static void test_resolve_project_from_path(void)
 {
    char out[256];
    kb_resolve_project(NULL, "/home/user/myrepo", out, sizeof(out));
-   assert(strcmp(out, "myrepo") == 0);
-   printf("  PASS: resolve_project from path basename\n");
+   assert(out[0] == '\0');
+   printf("  PASS: resolve_project never invents a basename identity\n");
 }
 
 static void test_resolve_project_empty_string(void)
 {
    char out[256];
    kb_resolve_project("", "/home/user/project42", out, sizeof(out));
-   assert(strcmp(out, "project42") == 0);
-   printf("  PASS: resolve_project empty string treated as NULL\n");
+   assert(out[0] == '\0');
+   printf("  PASS: resolve_project empty string requires durable identity\n");
 }
 
 /* ------------------------------------------------------------------ */
@@ -260,6 +261,57 @@ static void test_build_single_file(void)
    unlink(fpath);
    platform_test_rmrf(tmpdir);
    printf("  PASS: build single markdown file\n");
+}
+
+static void test_build_sanitizes_malformed_utf8(void)
+{
+   char tmpdir[] = "/tmp/aimee_kb_test_utf8_XXXXXX";
+   assert(mkdtemp(tmpdir) != NULL);
+   char fpath[512];
+   snprintf(fpath, sizeof(fpath), "%s/legacy.md", tmpdir);
+   FILE *f = fopen(fpath, "wb");
+   assert(f != NULL);
+   const unsigned char body[] = "# Legacy\n\nA \x92quoted\x94 CP-1252 phrase.\n";
+   assert(fwrite(body, 1, sizeof(body) - 1, f) == sizeof(body) - 1);
+   fclose(f);
+
+   open_test_db();
+   kb_stats_t stats;
+   assert(kb_build(tmpdir, "test_utf8", NULL, 1, &stats) == 0);
+   assert(stats.files_indexed == 1);
+   assert(stats.chunks_added > 0);
+
+   char *stored = db2_kb_file_index_get_content("test_utf8", "legacy.md");
+   assert(stored != NULL);
+   assert(strcmp(stored, "# Legacy\n\nA ?quoted? CP-1252 phrase.\n") == 0);
+   free(stored);
+
+   char *result = kb_search_json("test_utf8", "quoted phrase", NULL, 3);
+   assert(result != NULL);
+   assert(strstr(result, "?quoted? CP-1252 phrase") != NULL);
+   free(result);
+   close_test_db();
+   unlink(fpath);
+   platform_test_rmrf(tmpdir);
+   printf("  PASS: malformed UTF-8 is sanitized before Postgres text boundaries\n");
+}
+
+static void test_chunk_insert_sanitizes_replayed_malformed_utf8(void)
+{
+   open_test_db();
+   assert(db2_code_index_project_upsert("test_utf8_boundary", "/test/utf8-boundary") > 0);
+   const char replayed[] = "durable \x92queue\x94 payload \xed\xa0\x80";
+   int64_t id = db2_kb_documents_insert_chunk("test_utf8_boundary", "legacy.md", "hash", 0, "", 1,
+                                              1, replayed, 4);
+   assert(id > 0);
+
+   db2_kb_document_row_t row;
+   assert(db2_kb_document_fetch(id, "test_utf8_boundary", &row) == 1);
+   assert(strcmp(row.content, "durable ?queue? payload ???") == 0);
+   /* The persistence adapter must not mutate caller-owned data. */
+   assert((unsigned char)replayed[8] == 0x92);
+   close_test_db();
+   printf("  PASS: replayed malformed UTF-8 is sanitized at chunk persistence boundary\n");
 }
 
 static void test_build_incremental_update(void)
@@ -723,6 +775,45 @@ static void test_search_json_structured(void)
    printf("  PASS: kb_search_json returns structured per-hit fields\n");
 }
 
+static void test_search_json_scope_all_keeps_active_project_first(void)
+{
+   char local_dir[] = "/tmp/aimee_kb_local_first_a_XXXXXX";
+   char other_dir[] = "/tmp/aimee_kb_local_first_b_XXXXXX";
+   assert(mkdtemp(local_dir) != NULL);
+   assert(mkdtemp(other_dir) != NULL);
+   char local_path[512], other_path[512];
+   snprintf(local_path, sizeof(local_path), "%s/local.md", local_dir);
+   snprintf(other_path, sizeof(other_path), "%s/other.md", other_dir);
+   write_file(local_path, "# Local\n\nshared local-first retrieval evidence\n");
+   write_file(other_path, "# Other\n\nshared local-first retrieval evidence with extra terms\n");
+
+   open_test_db();
+   assert(kb_build(local_dir, "proj-local", NULL, 1, NULL) == 0);
+   assert(kb_build(other_dir, "proj-other", NULL, 1, NULL) == 0);
+
+   char *result =
+       kb_search_json_scoped_ex("proj-local", 1, "shared local-first retrieval", NULL, 2, "rrf");
+   assert(result);
+   const char *local = strstr(result, "\"project\":\"proj-local\"");
+   const char *other = strstr(result, "\"project\":\"proj-other\"");
+   assert(local && other && local < other);
+   free(result);
+
+   result =
+       kb_search_json_scoped_ex("proj-local", 1, "shared local-first retrieval", NULL, 1, "rrf");
+   assert(result);
+   assert(strstr(result, "\"project\":\"proj-local\"") != NULL);
+   assert(strstr(result, "\"project\":\"proj-other\"") == NULL);
+   free(result);
+
+   close_test_db();
+   unlink(local_path);
+   unlink(other_path);
+   platform_test_rmrf(local_dir);
+   platform_test_rmrf(other_dir);
+   printf("  PASS: scope=all reserves the result head for the active project\n");
+}
+
 static void test_search_max_cap_above_legacy_limit(void)
 {
    /* Regression: prior to the configurable cap, kb_search silently clamped
@@ -815,6 +906,11 @@ static void test_purge_fence_blocks_ingest(void)
    char fpath[512];
    snprintf(fpath, sizeof(fpath), "%s/notes.md", tmpdir);
    write_file(fpath, "# Notes\n\nFenced project notes.\n");
+   char other_tmpdir[] = "/tmp/aimee_kb_test_other_XXXXXX";
+   assert(mkdtemp(other_tmpdir) != NULL);
+   char other_fpath[512];
+   snprintf(other_fpath, sizeof(other_fpath), "%s/notes.md", other_tmpdir);
+   write_file(other_fpath, "# Notes\n\nOther project notes.\n");
 
    open_test_db();
 
@@ -836,7 +932,7 @@ static void test_purge_fence_blocks_ingest(void)
     * unaffected. */
    kb_stats_t stats;
    assert(kb_build(tmpdir, "fence_proj", NULL, 0, &stats) == -1);
-   assert(kb_build(tmpdir, "other_proj", NULL, 0, &stats) == 0);
+   assert(kb_build(other_tmpdir, "other_proj", NULL, 0, &stats) == 0);
 
    /* Heartbeat: displaced ids no-op, matching ids refresh. */
    assert(db2_kb_purge_fence_heartbeat("fence_proj", "gen-0", "pid-1") == 0);
@@ -895,7 +991,9 @@ static void test_purge_fence_blocks_ingest(void)
 
    close_test_db();
    unlink(fpath);
+   unlink(other_fpath);
    platform_test_rmrf(tmpdir);
+   platform_test_rmrf(other_tmpdir);
    printf("  PASS: purge fence blocks ingest and follows the match rules\n");
 }
 
@@ -970,6 +1068,14 @@ static void test_status_format(void)
    assert(status.files > 0);
    assert(status.chunks > 0);
 
+   /* The operator-wide detailed health probe has no active project. It must
+    * aggregate current generations explicitly, never infer a checkout basename. */
+   memset(&status, 0, sizeof(status));
+   assert(db2_kb_service_collect_project_status(NULL, &status) == 0);
+   assert(status.project[0] == '\0');
+   assert(status.files > 0);
+   assert(status.chunks > 0);
+
    close_test_db();
    unlink(fpath);
    platform_test_rmrf(tmpdir);
@@ -1030,6 +1136,8 @@ int main(void)
    /* Build/search tests */
    test_build_empty_dir();
    test_build_single_file();
+   test_build_sanitizes_malformed_utf8();
+   test_chunk_insert_sanitizes_replayed_malformed_utf8();
    test_build_incremental_update();
    test_bloom_dedupe_skips_duplicate_content();
    test_minhash_shadow_signatures_persist();
@@ -1042,6 +1150,7 @@ int main(void)
    test_search_requires_query_embedding();
    test_search_json_empty();
    test_search_json_structured();
+   test_search_json_scope_all_keeps_active_project_first();
    test_search_max_cap_above_legacy_limit();
 
    /* Clear test */

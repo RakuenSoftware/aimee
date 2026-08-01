@@ -2,7 +2,7 @@
 #
 # This is the kb half of the split deployment: the aimee-server plugin reaches
 # it over the runtime bridge at AIMEE_KB_API_URL=http://10.100.0.1:8741, and it
-# in turn embeds/reranks against the unified **aimee-llm** (llama.cpp / Vulkan)
+# in turn embeds IN-CONTAINER from weights baked into its image
 # container — NOT a bundled torch embedder. The kb image already defaults to
 # `--http-port=8741` (Dockerfile CMD) + EXPOSE 8741, so no command override is
 # needed; AIMEE_KB_HTTP_BIND=1 makes it bind 0.0.0.0 so the published port is
@@ -10,8 +10,9 @@
 #
 # Embedder wiring (the point of this manifest): AIMEE_EMBEDDER_URL points at the
 # aimee-llm gateway at http://10.100.0.1:8742 (the GPU 7900 XTX tier on .254 —
-# Qwen3-Embedding-4B, 2560-dim). The gateway preserves the /embed + /embed_batch
-# + /rerank contract, so the baked embed-remote.py / in-process http embedder is
+# nomic-embed-text-v2-moe, 768-dim, the same embedder every tier serves). The
+# gateway preserves the /embed + /embed_batch contract, so the baked
+# embed-remote.py / in-process http embedder is
 # untouched. The kb sends NO bearer on the embed path (memory_embed_http_post
 # passes a NULL auth header), so the aimee-llm gateway MUST run with auth
 # disabled (AIMEE_LLM_AUTH_TOKEN empty) on the internal-only bridge — which is
@@ -20,7 +21,8 @@
 #
 # Images:
 #   ghcr.io/rakuensoftware/aimee-kb     (kb /v1 on :8741)
-#   pgvector/pgvector:pg17              (Postgres, public)
+# PostgreSQL 18 + pgvector are bundled in the aimee-kb image and persist under
+# the KB home volume; no database sibling service is required.
 apiVersion: smoothnas.io/v1
 kind: Plugin
 metadata:
@@ -28,8 +30,8 @@ metadata:
   version: 0.2.57
   description: >-
     aimee knowledge base — DB2 + pgvector shared/vector memory, served on /v1
-    (:8741). Bundles its own pgvector Postgres; embeds + reranks against the
-    external aimee-llm (llama.cpp / Vulkan GPU) container via AIMEE_EMBEDDER_URL,
+    (:8741). Bundles its own pgvector Postgres; embeds against the
+    embedder baked into its own image,
     not a torch embedder. The aimee-server plugin points AIMEE_KB_API_URL here.
   vendor: RakuenSoftware
   homepage: https://github.com/RakuenSoftware/aimee
@@ -40,61 +42,34 @@ profiles:
   # for runtimes that forbid an in-container raise.
   - aimee-stack
 services:
-  - name: postgres
-    artifact:
-      type: oci-image
-      image: pgvector/pgvector:pg17
-    container:
-      restartPolicy: unless-stopped
-      # Run as uid 1000 to match the smoothfs tier's forced owner (the stock
-      # postgres image otherwise drops to its own user and can't access its
-      # uid-1000-owned data dir). Requires SmoothNAS v0.1.20+ runtime.
-      user: "1000:1000"
-    env:
-      POSTGRES_DB: aimee_shared
-      POSTGRES_USER: aimee
-      POSTGRES_PASSWORD: aimee
-    volumes:
-      - name: pgdata
-        mode: tier-bound
-        slot: HDD
-        bind: /var/lib/postgresql/data
-    health:
-      test: ["CMD-SHELL", "pg_isready -U aimee -d aimee_shared"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   - name: kb
     artifact:
       type: oci-image
       image: ghcr.io/rakuensoftware/aimee-kb:latest
     container:
       restartPolicy: unless-stopped
-    dependsOn:
-      postgres:
-        condition: service_healthy
     env:
-      AIMEE_DB2_URL: postgresql://aimee:aimee@{{service.postgres.host}}:5432/aimee_shared
-      # ONE knob: point the kb at a unified aimee-llm container and it drives
-      # embedding (/embed), reranking (/rerank) AND synthesis (curator Tier-A +
-      # Tier-B, at {url}/v1). The kb runs NO model itself — this is just the URL it
-      # calls. 10.100.0.1:8742 is the GPU aimee-llm on the runtime bridge here.
-      #   - Pin only the embedder or reranker elsewhere with AIMEE_EMBEDDER_URL /
-      #     AIMEE_RERANKER_URL (they take precedence over AIMEE_LLM_URL).
+      # Synth endpoint (the kb embeds in-container). Point it at a container that
+      # embedding (/embed) AND synthesis (curator Tier-A + Tier-B, at {url}/v1).
+      # The kb runs NO model itself — this is just the URL it calls. 10.100.0.1:8742
+      # is the GPU aimee-llm on the runtime bridge here.
+      #   - Pin only the embedder elsewhere with AIMEE_EMBEDDER_URL (it takes
+      #     precedence over AIMEE_LLM_URL).
       #   - The gateway runs auth-off (empty AIMEE_LLM_AUTH_TOKEN) — the kb embed
       #     path sends no bearer.
       AIMEE_LLM_URL: http://10.100.0.1:8742
-      # Embedding dim is explicit. Default (unset) = 1024 (the CPU / 0.6B tier).
-      # This deploy uses the GPU 4B tier → set 2560. Changing it against a
-      # populated kb is a drop-and-rebuild re-embed (kb_meta drift guard).
-      AIMEE_EMBEDDING_DIM: "2560"
+      # Embedding dim is deliberately UNSET: the kb derives it from the selected
+      # 768-dim nomic embedder, so there is nothing tier-specific to pin, and an
+      # empty value lets the kb derive the dim (pinned > recorded > probed). A kb
+      # populated before the nomic cutover keeps its RECORDED dim and is migrated
+      # deliberately with `aimee kb reembed`, not by editing this value.
+      AIMEE_EMBEDDING_DIM: ""
       # Bind /v1 on 0.0.0.0 so the published :8741 is reachable from the
       # aimee-server plugin across the bridge.
       AIMEE_KB_HTTP_BIND: "1"
       # The curator synth sidecar (curator-extract.py) reads LLM_ENDPOINT, NOT
       # AIMEE_LLM_URL — without it the sidecar exits 256 and code-unit synthesis
-      # never drains. Point it at the same aimee-llm gateway (/v1) on the bridge.
+      # never drains. Point it at the same synth endpoint's /v1.
       LLM_ENDPOINT: http://10.100.0.1:8742/v1
       LLM_MODEL: aimee-synth
     volumes:
@@ -119,13 +94,14 @@ services:
     config:
       - key: AIMEE_LLM_URL
         type: string
-        label: LLM container URL (embed + rerank + synth)
+        label: LLM container URL (embed + synth)
         default: http://10.100.0.1:8742
         description: >-
-          One knob. The unified aimee-llm container the kb calls for embedding,
-          reranking and synthesis (Tier-A + Tier-B). CPU tier = Tier-A synth +
-          1024-dim embed; GPU tier = Tier-A+B synth + higher-dim embed (set
-          AIMEE_EMBEDDING_DIM=2560). Must run auth-off (the kb sends no bearer).
+          The endpoint the kb calls for synthesis
+          and synthesis (Tier-A + Tier-B). CPU tier = Tier-A synth;
+          GPU tier = Tier-A+B synth. Both serve the SAME 768-dim embedder, so the
+          tier does not change the embedding dimension. Must run auth-off (the kb
+          sends no bearer).
       - key: AIMEE_EMBEDDER_URL
         type: string
         label: Embedder URL (override)
@@ -133,17 +109,13 @@ services:
         description: >-
           Optional. Pin the embedder (/embed) at a specific endpoint, overriding
           AIMEE_LLM_URL for embedding only.
-      - key: AIMEE_RERANKER_URL
-        type: string
-        label: Reranker URL (override)
-        default: ""
-        description: >-
-          Optional. Pin the reranker (/rerank) at a specific endpoint, overriding
-          AIMEE_EMBEDDER_URL / AIMEE_LLM_URL for reranking only.
       - key: AIMEE_EMBEDDING_DIM
         type: string
         label: Embedding dimension
         default: ""
         description: >-
-          Embedding vector dim. Blank = 1024 (CPU / 0.6B tier). Set 2560 for the
-          GPU / 4B tier. Changing it against a populated kb forces a re-embed.
+          Embedding vector dim. LEAVE BLANK — the kb then derives it (a populated
+          kb uses its recorded dim; a fresh one probes the running embedder, which
+          reports 768 for the default nomic embedder on every tier). Setting a
+          value pins it and suppresses that derivation. Changing it against a
+          populated kb forces a re-embed.

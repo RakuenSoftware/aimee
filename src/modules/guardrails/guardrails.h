@@ -223,7 +223,7 @@ int worktree_create_sibling(const char *git_root, const char *session_id, const 
 void worktree_cleanup(const char *git_root, const char *session_id, const char *work_name);
 
 void worktree_registry_record(const char *git_root, const char *wt_path, const char *branch,
-                              const char *sid, const char *work_name);
+                              const char *sid, const char *work_name, const char *base_branch);
 int worktree_find_branch_in_repo(const char *git_root, const char *branch, char *out_dir,
                                  size_t out_len);
 int worktree_find_branch_registered(const char *branch, char *out_dir, size_t out_len);

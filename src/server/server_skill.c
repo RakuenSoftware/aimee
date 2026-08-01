@@ -1,6 +1,6 @@
 #include "server_skill.h"
 #include "aimee.h"
-#include "skill.h"
+#include <aimee/skills/skill.h>
 #include "cJSON.h"
 #include "json_fluent.h" /* jo_ok */
 #include "kb_client.h"
@@ -288,10 +288,9 @@ int handle_skill_lifecycle(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    const char *root = skill_req_cwd(req, cwd, sizeof(cwd));
    cJSON *jstale = cJSON_GetObjectItemCaseSensitive(req, "stale_after_days");
    cJSON *jarchive = cJSON_GetObjectItemCaseSensitive(req, "archive_after_days");
-   config_t cfg;
-   config_load(&cfg);
-   int stale_days = cJSON_IsNumber(jstale) ? jstale->valueint : cfg.skills_stale_after_days;
-   int archive_days = cJSON_IsNumber(jarchive) ? jarchive->valueint : cfg.skills_archive_after_days;
+   int stale_days = cJSON_IsNumber(jstale) ? jstale->valueint : config_skills_stale_after_days();
+   int archive_days =
+       cJSON_IsNumber(jarchive) ? jarchive->valueint : config_skills_archive_after_days();
    if (stale_days <= 0 || archive_days <= 0)
       return skill_send_error(conn, "skill lifecycle thresholds must be positive integers");
    skill_lifecycle_result_t result;
@@ -314,9 +313,7 @@ int handle_skill_autostub(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    char cwd[MAX_PATH_LEN], err[256] = "";
    const char *root = skill_req_cwd(req, cwd, sizeof(cwd));
    cJSON *jforce = cJSON_GetObjectItemCaseSensitive(req, "force");
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.skills_capability_autostub && !cJSON_IsTrue(jforce))
+   if (!config_skills_capability_autostub() && !cJSON_IsTrue(jforce))
    {
       cJSON *resp = cJSON_CreateObject();
       cJSON_AddStringToObject(resp, "status", "disabled");

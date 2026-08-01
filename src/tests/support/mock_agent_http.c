@@ -74,6 +74,19 @@ int agent_http_put(const char *url, const char *auth_header, const char *body, c
    return -1;
 }
 
+int agent_http_patch(const char *url, const char *auth_header, const char *body,
+                     char **response_buf, int timeout_ms, const char *extra_headers)
+{
+   (void)url;
+   (void)auth_header;
+   (void)body;
+   (void)timeout_ms;
+   (void)extra_headers;
+   if (response_buf)
+      *response_buf = NULL;
+   return -1;
+}
+
 int agent_http_post(const char *url, const char *auth_header, const char *body, char **response_buf,
                     int timeout_ms, const char *extra_headers)
 {

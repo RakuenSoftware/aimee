@@ -46,27 +46,6 @@ void config_parse_memory_negation_section(config_t *cfg, cJSON *root)
          cfg->memory_negation_enabled = cJSON_IsTrue(item) ? 1 : 0;
    }
 }
-void config_parse_memory_rerank_section(config_t *cfg, cJSON *root)
-{
-   cJSON *item = NULL;
-   cJSON *mem_rerank = cJSON_GetObjectItemCaseSensitive(root, "memory_rerank");
-   if (cJSON_IsObject(mem_rerank))
-   {
-      item = cJSON_GetObjectItemCaseSensitive(mem_rerank, "enabled");
-      if (cJSON_IsBool(item))
-         cfg->memory_rerank_enabled = cJSON_IsTrue(item);
-      item = cJSON_GetObjectItemCaseSensitive(mem_rerank, "command");
-      if (cJSON_IsString(item) && item->valuestring[0])
-         snprintf(cfg->memory_rerank_command, sizeof(cfg->memory_rerank_command), "%s",
-                  item->valuestring);
-      item = cJSON_GetObjectItemCaseSensitive(mem_rerank, "top_k");
-      if (cJSON_IsNumber(item) && item->valuedouble > 0)
-         cfg->memory_rerank_top_k = (int)item->valuedouble;
-      item = cJSON_GetObjectItemCaseSensitive(mem_rerank, "mix");
-      if (cJSON_IsNumber(item))
-         cfg->memory_rerank_mix = item->valuedouble;
-   }
-}
 void config_parse_memory_query_expansion_section(config_t *cfg, cJSON *root)
 {
    cJSON *item = NULL;
@@ -563,6 +542,14 @@ void config_parse_search_section(config_t *cfg, cJSON *root)
          snprintf(cfg->search_searxng_url, sizeof(cfg->search_searxng_url), "%s",
                   item->valuestring);
 
+      item = cJSON_GetObjectItemCaseSensitive(srch, "backends");
+      if (cJSON_IsString(item) && item->valuestring[0])
+         snprintf(cfg->search_backends, sizeof(cfg->search_backends), "%s", item->valuestring);
+
+      item = cJSON_GetObjectItemCaseSensitive(srch, "fetch_pages");
+      if (cJSON_IsBool(item))
+         cfg->search_fetch_pages = cJSON_IsTrue(item) ? 1 : 0;
+
       item = cJSON_GetObjectItemCaseSensitive(srch, "tavily_api_key");
       if (cJSON_IsString(item) && item->valuestring[0])
          snprintf(cfg->search_tavily_api_key, sizeof(cfg->search_tavily_api_key), "%s",
@@ -745,7 +732,7 @@ void config_parse_modules_section(config_t *cfg, cJSON *root)
    } toggles[] = {
        {"memory", &cfg->module_memory},         {"governance", &cfg->module_governance},
        {"delegates", &cfg->module_delegates},   {"workflows", &cfg->module_workflows},
-       {"economizer", &cfg->module_economizer},
+       {"roundtable", &cfg->module_roundtable}, {"economizer", &cfg->module_economizer},
    };
    for (size_t i = 0; i < sizeof(toggles) / sizeof(toggles[0]); i++)
    {
@@ -755,43 +742,51 @@ void config_parse_modules_section(config_t *cfg, cJSON *root)
    }
 }
 
-/* The economizer control. The canonical (and only) form is a STRING:
- * `economizer: off|safe|aggressive`. A deprecated OBJECT form ({enabled,aggressive})
- * from the retired two-tier surface is still accepted and mapped to a tier (with a
- * one-line WARN) so an existing config file keeps loading. The per-tier lever values
- * are internal presets (econ_preset), not config keys. */
-void config_parse_economizer_section(config_t *cfg, cJSON *root)
+/* Parse the public shape: economizer: {mode: off|safe|aggressive}. */
+int config_parse_economizer_section(config_t *cfg, cJSON *root)
 {
    cJSON *econ = cJSON_GetObjectItemCaseSensitive(root, "economizer");
-   if (cJSON_IsString(econ) && econ->valuestring)
+   if (!econ)
+      return 0;
+   if (!cJSON_IsObject(econ))
    {
-      const char *v = econ->valuestring;
-      /* Warn (don't fail) on an unrecognized tier so a typo like "agressive" doesn't
-       * silently resolve to safe -- fail-safe to the lossless default, but loudly. */
-      if (strcasecmp(v, "off") && strcasecmp(v, "0") && strcasecmp(v, "false") &&
-          strcasecmp(v, "safe") && strcasecmp(v, "aggressive") && strcasecmp(v, "aggro"))
-         fprintf(stderr, "aimee: config warning: unknown economizer tier \"%s\"; using \"safe\"\n",
-                 v);
-      cfg->economizer_tier = econ_tier_parse(v);
+      fprintf(stderr, "aimee: config error: economizer must be an object; use "
+                      "economizer: {mode: off|safe|aggressive}\n");
+      return -1;
    }
-   else if (cJSON_IsObject(econ))
+
+   cJSON *mode = NULL;
+   int fields = 0;
+   cJSON *field;
+   cJSON_ArrayForEach(field, econ)
    {
-      /* Deprecated back-compat: map the old {enabled,aggressive} pair onto a tier. */
-      int enabled = 1, aggressive = 0;
-      cJSON *e = cJSON_GetObjectItemCaseSensitive(econ, "enabled");
-      if (cJSON_IsBool(e))
-         enabled = cJSON_IsTrue(e) ? 1 : 0;
-      e = cJSON_GetObjectItemCaseSensitive(econ, "aggressive");
-      if (cJSON_IsBool(e))
-         aggressive = cJSON_IsTrue(e) ? 1 : 0;
-      cfg->economizer_tier = !enabled     ? ECON_TIER_OFF
-                             : aggressive ? ECON_TIER_AGGRESSIVE
-                                          : ECON_TIER_SAFE;
+      fields++;
+      if (field->string && strcmp(field->string, "mode") == 0 && !mode)
+         mode = field;
+      else
+      {
+         fprintf(stderr,
+                 "aimee: config error: invalid economizer field \"%s\"; only mode is allowed\n",
+                 field->string ? field->string : "");
+         return -1;
+      }
+   }
+   if (fields != 1 || !cJSON_IsString(mode) || !mode->valuestring)
+   {
+      fprintf(stderr, "aimee: config error: economizer.mode must be off, safe, or aggressive\n");
+      return -1;
+   }
+   int parsed = econ_mode_parse(mode->valuestring);
+   if (parsed < 0)
+   {
       fprintf(stderr,
-              "aimee: config warning: `economizer: {enabled,aggressive}` is deprecated; use "
-              "`economizer: %s` (mapped for you)\n",
-              econ_tier_name(cfg->economizer_tier));
+              "aimee: config error: economizer mode \"%s\" is unsupported; choose "
+              "off, safe, or aggressive\n",
+              mode->valuestring);
+      return -1;
    }
+   cfg->economizer_mode = parsed;
+   return 0;
 }
 
 /* Clamp an integer to [lo, hi]. */
@@ -1033,6 +1028,12 @@ void config_parse_mcp_clients_section(config_t *cfg, cJSON *root)
             snprintf(client->bearer_token_env, sizeof(client->bearer_token_env), "%s",
                      bearer->valuestring);
 
+         /* install: "server" (default) exposes the plugin only to this server's
+          * sessions; "kb" runs it on aimee-kb, shared to everything on that kb. */
+         cJSON *install = cJSON_GetObjectItemCaseSensitive(mcp_entry, "install");
+         if (cJSON_IsString(install) && strcasecmp(install->valuestring, "kb") == 0)
+            client->install = CONFIG_MCP_INSTALL_KB;
+
          if (client->transport == CONFIG_MCP_TRANSPORT_STDIO && client->command_count == 0)
             continue;
          if (client->transport == CONFIG_MCP_TRANSPORT_SSE && client->url[0] == '\0')
@@ -1148,6 +1149,18 @@ void config_parse_transport_section(config_t *cfg, cJSON *root)
    cJSON *tr = cJSON_GetObjectItemCaseSensitive(root, "transport");
    if (cJSON_IsObject(tr))
    {
+      item = cJSON_GetObjectItemCaseSensitive(tr, "kb_pool_enabled");
+      if (cJSON_IsBool(item))
+         cfg->transport_kb_pool_enabled = cJSON_IsTrue(item) ? 1 : 0;
+      item = cJSON_GetObjectItemCaseSensitive(tr, "server_keepalive_enabled");
+      if (cJSON_IsBool(item))
+         cfg->transport_server_keepalive_enabled = cJSON_IsTrue(item) ? 1 : 0;
+      item = cJSON_GetObjectItemCaseSensitive(tr, "thinclient_gzip_enabled");
+      if (cJSON_IsBool(item))
+         cfg->transport_thinclient_gzip_enabled = cJSON_IsTrue(item) ? 1 : 0;
+      item = cJSON_GetObjectItemCaseSensitive(tr, "kb_gzip_enabled");
+      if (cJSON_IsBool(item))
+         cfg->transport_kb_gzip_enabled = cJSON_IsTrue(item) ? 1 : 0;
       cJSON *cr = cJSON_GetObjectItemCaseSensitive(tr, "cache_aware_rewrite");
       if (cJSON_IsObject(cr))
       {
@@ -1354,6 +1367,13 @@ void config_parse_model_meta_section(config_t *cfg, cJSON *root)
       if (cJSON_IsBool(item))
          cfg->model_meta_capability_routing = cJSON_IsTrue(item) ? 1 : 0;
    }
+   cJSON *routing_cfg = cJSON_GetObjectItemCaseSensitive(root, "routing");
+   if (cJSON_IsObject(routing_cfg))
+   {
+      item = cJSON_GetObjectItemCaseSensitive(routing_cfg, "prefer_local");
+      if (cJSON_IsBool(item))
+         cfg->prefer_local_agents = cJSON_IsTrue(item) ? 1 : 0;
+   }
 }
 void config_parse_db2_section(config_t *cfg, cJSON *root)
 {
@@ -1479,8 +1499,8 @@ void config_parse_kb_section2(config_t *cfg, cJSON *root)
 {
    cJSON *item = NULL;
 
-   /* telemetry.metrics_token (P9a): the SHA-256 hex of the /v1/metrics +
-    * /v1/telemetry/metrics scrape/ingest token (never the plaintext). */
+   /* Legacy telemetry.metrics_token is parsed only for the boot migration. Its
+    * SHA-256 verifier is credential material and runtime custody is Vault-only. */
    cJSON *telemetry = cJSON_GetObjectItemCaseSensitive(root, "telemetry");
    if (cJSON_IsObject(telemetry))
    {
@@ -1592,4 +1612,18 @@ void config_parse_kb_section2(config_t *cfg, cJSON *root)
             cfg->code_hybrid_rrf_k = item->valuedouble;
       }
    }
+}
+
+/* context.engine: name — re-homed from the deleted config_plugin.c so that a
+ * single config_load() populates cfg->context_engine directly from the already
+ * parsed aimee.yaml root (the old code re-opened and re-parsed the file). The
+ * value drives context_engine_set_active() in server_main. */
+void config_parse_context_engine(config_t *cfg, cJSON *root)
+{
+   cJSON *ctx = cJSON_GetObjectItemCaseSensitive(root, "context");
+   if (!cJSON_IsObject(ctx))
+      return;
+   cJSON *eng = cJSON_GetObjectItemCaseSensitive(ctx, "engine");
+   if (cJSON_IsString(eng) && eng->valuestring && eng->valuestring[0])
+      snprintf(cfg->context_engine, sizeof(cfg->context_engine), "%s", eng->valuestring);
 }

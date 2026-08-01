@@ -19,6 +19,7 @@ typedef struct
 } rpc_opts_t;
 int cli_v1_args_request_json(int argc, char **argv);
 void __attribute__((unused)) cli_v1_sleep_ms(int ms);
+const char *cli_v1_run_failure_reason(cJSON *result, cJSON *snapshot);
 int git_verify_response_is_failure(cJSON *resp);
 double json_double(cJSON *obj, const char *key, double def);
 int json_int(cJSON *obj, const char *key, int def);
@@ -36,7 +37,7 @@ cJSON *marshal_delegate(int argc, char **argv);
 cJSON *marshal_delegate_aggregate(int argc, char **argv);
 cJSON *marshal_delegate_backend_exec(int argc, char **argv);
 cJSON *marshal_delegate_log(int argc, char **argv);
-cJSON *marshal_delegate_roundtable(int argc, char **argv);
+cJSON *marshal_roundtable_review(int argc, char **argv);
 cJSON *marshal_delegate_status(int argc, char **argv);
 cJSON *marshal_index_blast_radius(int argc, char **argv);
 cJSON *marshal_index_deps(int argc, char **argv);
@@ -51,12 +52,16 @@ cJSON *marshal_jobs_list(int argc, char **argv);
 cJSON *marshal_kb_build(int argc, char **argv);
 cJSON *marshal_kb_docs_push(int argc, char **argv);
 cJSON *marshal_kb_ingest(int argc, char **argv);
+cJSON *marshal_kb_reembed(int argc, char **argv);
+cJSON *marshal_memory_embed(int argc, char **argv);
 cJSON *marshal_kb_search(int argc, char **argv);
 cJSON *marshal_kb_status(int argc, char **argv);
 cJSON *marshal_kb_update(int argc, char **argv);
 cJSON *marshal_mcp_recheck(int argc, char **argv);
 cJSON *marshal_memory_benchmark(int argc, char **argv);
 cJSON *marshal_memory_get(int argc, char **argv);
+cJSON *marshal_memory_delete(int argc, char **argv);
+cJSON *marshal_memory_supersede(int argc, char **argv);
 cJSON *marshal_memory_list(int argc, char **argv);
 cJSON *marshal_memory_read(int argc, char **argv);
 cJSON *marshal_memory_recall(int argc, char **argv);
@@ -70,6 +75,19 @@ cJSON *marshal_notes_search(int argc, char **argv);
 cJSON *marshal_primary(int argc, char **argv);
 cJSON *marshal_repo_trust(int argc, char **argv);
 cJSON *marshal_request(const char *method, int argc, char **argv);
+
+/* Whether the last marshal_request that returned NULL already told the user why.
+ *
+ * A marshalling failure ends the command with no request sent, and for most methods the only
+ * evidence was the exit code — see cli_v1_forward. The shared forwarder now prints a generic
+ * explanation, but a marshaller that produced a SPECIFIC one must not be doubled up on. So a
+ * marshaller that prints calls marshal_request_note_reported(); the forwarder consults this
+ * and stays quiet.
+ *
+ * Reading it CLEARS it, so a stale flag cannot suppress the generic message on a later
+ * command in the same process. */
+void marshal_request_note_reported(void);
+int marshal_request_take_reported(void);
 cJSON *marshal_rules_delete(int argc, char **argv);
 cJSON *marshal_session_attach(int argc, char **argv);
 cJSON *marshal_session_brief(int argc, char **argv);
@@ -109,6 +127,8 @@ void pt_print_agent_add(const char *method, cJSON *resp);
 void pt_print_agent_disable(const char *method, cJSON *resp);
 void pt_print_agent_enable(const char *method, cJSON *resp);
 void pt_print_agent_list(const char *method, cJSON *resp);
+void pt_print_agent_personas(const char *method, cJSON *resp);
+void pt_print_agent_roles(const char *method, cJSON *resp);
 void pt_print_agent_local(const char *method, cJSON *resp);
 void pt_print_agent_probe(const char *method, cJSON *resp);
 void pt_print_agent_remove(const char *method, cJSON *resp);
@@ -126,7 +146,7 @@ void pt_print_cron_show(const char *method, cJSON *resp);
 void pt_print_delegate(const char *method, cJSON *resp);
 void pt_print_delegate_launch(const char *method, cJSON *resp);
 void pt_print_delegate_log(const char *method, cJSON *resp);
-void pt_print_delegate_roundtable(const char *method, cJSON *resp);
+void pt_print_roundtable_review(const char *method, cJSON *resp);
 void pt_print_delegate_status(const char *method, cJSON *resp);
 void pt_print_dogfood_report(const char *method, cJSON *resp);
 void pt_print_dogfood_tag(const char *method, cJSON *resp);
@@ -194,6 +214,9 @@ void pt_print_session_list(const char *method, cJSON *resp);
 void pt_print_session_presence(const char *method, cJSON *resp);
 void pt_print_skill_group(const char *method, cJSON *resp);
 void pt_print_skill_list(const char *method, cJSON *resp);
+void pt_print_grant_set(const char *method, cJSON *resp);
+void pt_print_grant_revoke(const char *method, cJSON *resp);
+void pt_print_grant_list(const char *method, cJSON *resp);
 void pt_print_skill_show(const char *method, cJSON *resp);
 void pt_print_toolset_list(const char *method, cJSON *resp);
 void pt_print_toolset_resolve(const char *method, cJSON *resp);

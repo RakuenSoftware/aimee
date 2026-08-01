@@ -3,33 +3,40 @@
  * Shrinks the initial tools/list shown to an external MCP client. Kept separate
  * from mcp_tools.c (which is at its line budget) and from the tool definitions
  * it filters. See AIMEE_MCP_TOOL_PROFILE; the default is "core" (P2) — lossless
- * because the find_tools/describe_tool discovery meta-tools (also defined here)
- * surface the full catalog on demand. Set it to "full" to present everything. */
+ * because the discovery meta-tools plus call_tool bridge (also defined here)
+ * surface and dispatch the full catalog on demand. Set it to "full" to present
+ * everything. */
 #include "cJSON.h"
-#include "mcp_tools.h"
+#include <aimee/protocols/mcp/mcp_tools.h>
+#include "agent_code_capabilities.h"
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 /* Tier-0 "core" presentation profile (MCP-native tool names): the high-frequency
  * tools an external MCP client is shown when AIMEE_MCP_TOOL_PROFILE=core|lean
  * (the default). Everything else — including plugin:* and remote-server tools —
  * is hidden from the initial tools/list to shrink the upfront payload, but stays
- * callable and is reachable via find_tools/describe_tool. Keep this list short
- * and edit it deliberately; it is the floor of what every lean client sees.
+ * callable through call_tool after find_tools/describe_tool discovery. Keep this
+ * list short and edit it deliberately; it is the floor of what every lean client
+ * sees.
  * test_tool_profile_filter mirrors this list and must be kept in sync. */
 static const char *const MCP_CORE_TOOLS[] = {
     "get_help",
     "find_tools",    /* discovery: the rest of the catalog is reachable via these */
     "describe_tool", /* discovery */
+    "call_tool",     /* schema-bound dispatch bridge for discovered tools */
     "search_docs",   /* orient */
     "search_memory",
     "memory_recall",
     "get_identity", /* grounding */
-    "find_symbol",
-    "ast_grep_search", /* code intel */
-    "git",             /* all git/gh ops via one multiplexed tool (command=...) */
+    AIMEE_CODE_TOOL_FIND_SYMBOL,
+    AIMEE_CODE_TOOL_AST_GREP_SEARCH,
+    AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS, /* direct adoption-critical code intel */
+    "git", /* all git/gh ops via one multiplexed tool (command=...) */
     "delegate",
-    "ensemble_review", /* multi-agent */
+    "roundtable_review", /* multi-agent */
+    "roundtable_status", /* poll asynchronous roundtable_review */
     "ask_user",
     "send_message", /* interaction */
     "note",         /* capture (note family: create/list/search) */
@@ -50,14 +57,15 @@ const char *mcp_tool_profile_effective(const char *explicit_profile)
       return explicit_profile;
    const char *e = getenv("AIMEE_MCP_TOOL_PROFILE");
    /* P2 default: "core" — lean is now the out-of-the-box presentation, kept
-    * lossless by find_tools/describe_tool. Operators set "full" to opt out. */
+    * lossless through find_tools/describe_tool + call_tool. Operators set "full"
+    * to opt out. */
    return (e && e[0]) ? e : "core";
 }
 
-/* Add the discovery meta-tools to a tools list. These keep the lean default
- * lossless: find_tools surfaces the catalog by keyword, describe_tool returns a
- * tool's full input schema, and the client may then call a tool by name even
- * when it is not in tools/list. Always present (in MCP_CORE_TOOLS above). */
+/* Add the discovery meta-tools and dispatch bridge to a tools list. MCP clients
+ * generally cannot invent a tool call whose schema was absent from tools/list:
+ * find_tools/describe_tool alone therefore make hidden tools discoverable but
+ * not callable. call_tool supplies the advertised schema-bound bridge. */
 void mcp_add_discovery_tools(cJSON *tools)
 {
    if (!tools)
@@ -69,8 +77,8 @@ void mcp_add_discovery_tools(cJSON *tools)
           t, "description",
           "Discover aimee tools beyond the curated core set shown in tools/list. Returns "
           "matching tool names + one-line descriptions (not full schemas). Call "
-          "describe_tool(name) for a match's input schema, then call the tool by name. Omit "
-          "'query' to list the whole catalog.");
+          "describe_tool(name) for a match's input schema, then call it through call_tool. "
+          "Omit 'query' to list the whole catalog.");
       cJSON *s = cJSON_CreateObject();
       cJSON_AddStringToObject(s, "type", "object");
       cJSON *p = cJSON_AddObjectToObject(s, "properties");
@@ -103,6 +111,97 @@ void mcp_add_discovery_tools(cJSON *tools)
       cJSON_AddItemToObject(t, "inputSchema", s);
       cJSON_AddItemToArray(tools, t);
    }
+   {
+      cJSON *t = cJSON_CreateObject();
+      cJSON_AddStringToObject(t, "name", "call_tool");
+      cJSON_AddStringToObject(
+          t, "description",
+          "Call a tool discovered with find_tools. Pass its exact name and an arguments "
+          "object matching the schema returned by describe_tool.");
+      cJSON *s = cJSON_CreateObject();
+      cJSON_AddStringToObject(s, "type", "object");
+      cJSON *p = cJSON_AddObjectToObject(s, "properties");
+      cJSON *nm = cJSON_AddObjectToObject(p, "name");
+      cJSON_AddStringToObject(nm, "type", "string");
+      cJSON_AddStringToObject(nm, "description", "Exact discovered tool name.");
+      cJSON *args = cJSON_AddObjectToObject(p, "arguments");
+      cJSON_AddStringToObject(args, "type", "object");
+      cJSON_AddStringToObject(args, "description",
+                              "Arguments matching the discovered tool's input schema; use {} "
+                              "for a tool with no parameters.");
+      cJSON *req = cJSON_AddArrayToObject(s, "required");
+      cJSON_AddItemToArray(req, cJSON_CreateString("name"));
+      cJSON_AddItemToArray(req, cJSON_CreateString("arguments"));
+      cJSON_AddItemToObject(t, "inputSchema", s);
+      cJSON_AddItemToArray(tools, t);
+   }
+}
+
+static int mcp_ci_contains(const char *haystack, const char *needle)
+{
+   if (!needle || !needle[0])
+      return 1;
+   if (!haystack)
+      return 0;
+   size_t nlen = strlen(needle);
+   for (const char *h = haystack; *h; h++)
+      if (strncasecmp(h, needle, nlen) == 0)
+         return 1;
+   return 0;
+}
+
+int mcp_tool_matches_query(const cJSON *tool, const char *query)
+{
+   if (!tool)
+      return 0;
+   const cJSON *name = cJSON_GetObjectItemCaseSensitive(tool, "name");
+   const cJSON *description = cJSON_GetObjectItemCaseSensitive(tool, "description");
+   return mcp_ci_contains(cJSON_IsString(name) ? name->valuestring : NULL, query) ||
+          mcp_ci_contains(cJSON_IsString(description) ? description->valuestring : NULL, query);
+}
+
+const char *mcp_code_project_from_args(cJSON *args)
+{
+   const cJSON *project = cJSON_GetObjectItemCaseSensitive(args, "project");
+   const char *explicit_project = cJSON_IsString(project) ? project->valuestring : NULL;
+   if (explicit_project && explicit_project[0])
+      return explicit_project;
+   /* The server request boundary resolves cwd to a stable identity before tool
+    * dispatch.  A bare basename here would recreate path-keyed project aliases
+    * and turn missing context into the wrong project. */
+   return NULL;
+}
+
+int mcp_code_scope_all(cJSON *args)
+{
+   cJSON *scope = cJSON_GetObjectItemCaseSensitive(args, "scope");
+   if (!scope)
+      return 0;
+   if (!cJSON_IsString(scope))
+      return -1;
+   if (!scope->valuestring[0] || strcmp(scope->valuestring, AIMEE_CODE_SCOPE_CURRENT) == 0)
+      return 0;
+   if (strcmp(scope->valuestring, AIMEE_CODE_SCOPE_ALL) == 0)
+      return 1;
+   return -1;
+}
+
+int mcp_call_tool_demux(const char *tool, cJSON *args, const char **out_tool, cJSON **out_args)
+{
+   if (!tool || strcmp(tool, "call_tool") != 0)
+      return 0;
+   if (!cJSON_IsObject(args) || !out_tool || !out_args)
+      return -1;
+
+   cJSON *name = cJSON_GetObjectItemCaseSensitive(args, "name");
+   cJSON *nested = cJSON_GetObjectItemCaseSensitive(args, "arguments");
+   if (!cJSON_IsString(name) || !name->valuestring[0] ||
+       strcmp(name->valuestring, "call_tool") == 0 || !cJSON_IsObject(nested))
+      return -1;
+
+   *out_tool = name->valuestring;
+   *out_args = nested;
+   return 1;
 }
 
 int mcp_filter_tools_for_profile(cJSON *tools, const char *profile)

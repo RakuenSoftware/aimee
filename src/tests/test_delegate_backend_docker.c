@@ -9,7 +9,7 @@
 #include <unistd.h>
 
 #include "aimee_home.h"
-#include "delegate_backend_docker.h"
+#include <aimee/delegates/delegate_backend_docker.h>
 
 /* Forward decls — definitions live further down with the rest of the
  * fixture-using cases; forward refs let us call them from earlier
@@ -101,6 +101,50 @@ static void test_docker_write_then_read_roundtrip(void)
    printf("  PASS: test_docker_write_then_read_roundtrip\n");
 }
 
+/* The native file tools (tool_read_file/tool_write_file) resolve to an ABSOLUTE
+ * in-workspace path via the thread cwd before calling the provider. The worktree is
+ * bind-mounted path-identically, so that path is valid in-container and MUST be accepted
+ * — previously it was rejected outright ("cannot open"/"cannot write" on a container
+ * delegate's own worktree), while a path OUTSIDE the workspace must still be refused. */
+static void test_docker_absolute_in_workspace_path_accepted(void)
+{
+   delegate_backend_reset_for_test();
+   delegate_backend_register_docker();
+   delegate_backend_t *b = delegate_backend_docker_get();
+   void *state = NULL;
+   setup_docker_fileio_state(b, "task-abs-1", &state);
+
+   char workdir[256];
+   snprintf(workdir, sizeof(workdir), "/tmp/aimee-docker-workdir-%d", (int)getpid());
+   char abs[512];
+
+   /* Read back a relative-written file via its ABSOLUTE in-workspace path. */
+   assert(b->write_file(b, state, "note.txt", "abs read\n") == 0);
+   snprintf(abs, sizeof(abs), "%s/note.txt", workdir);
+   char *content = NULL;
+   assert(b->read_file(b, state, abs, 0, 0, &content) == 0);
+   assert(content != NULL && strcmp(content, "abs read\n") == 0);
+   free(content);
+
+   /* Write via an ABSOLUTE in-workspace path, then read it back relatively. */
+   snprintf(abs, sizeof(abs), "%s/note2.txt", workdir);
+   assert(b->write_file(b, state, abs, "abs write\n") == 0);
+   content = NULL;
+   assert(b->read_file(b, state, "note2.txt", 0, 0, &content) == 0);
+   assert(content != NULL && strcmp(content, "abs write\n") == 0);
+   free(content);
+
+   /* An absolute path OUTSIDE the workspace root is still refused (no host escape),
+    * including a sibling that merely shares the workdir prefix. */
+   assert(b->write_file(b, state, "/tmp/outside-escape.txt", "x") == -1);
+   char sibling[320];
+   snprintf(sibling, sizeof(sibling), "%s-evil/x.txt", workdir);
+   assert(b->write_file(b, state, sibling, "x") == -1);
+
+   teardown_docker_fileio_state(b, state);
+   printf("  PASS: test_docker_absolute_in_workspace_path_accepted\n");
+}
+
 static void test_docker_path_validation_rejects_escapes(void)
 {
    delegate_backend_reset_for_test();
@@ -154,6 +198,7 @@ static void test_docker_list_dir_returns_entries(void)
  *   docker start <name>           -> exit 0 if .exists flag present, else 1
  *   docker create --name N ...    -> touch .exists flag, exit 0
  *   docker stop <name>            -> exit 0 (we don't track running state)
+ *   docker ps -aq --filter ...    -> print names of .exists state files
  *   docker rm -f <name>           -> remove the .exists flag
  *   docker exec -i N bash -c CMD  -> exec bash -c "CMD" locally so the
  *                                    test exercises the full exec path
@@ -192,6 +237,15 @@ static const char *write_fake_docker_fixture(void)
            "  stop)\n"
            "    exit 0\n"
            "    ;;\n"
+           "  ps)\n"
+           "    for path in \"$STATE_DIR\"/*.exists; do\n"
+           "      [ -e \"$path\" ] || continue\n"
+           "      name=\"${path##*/}\"\n"
+           "      id=\"${name%%.exists}\"\n"
+           "      printf '%%s aimee-delegate-%%s\\n' \"$id\" \"$id\"\n"
+           "    done\n"
+           "    exit 0\n"
+           "    ;;\n"
            "  rm)\n"
            "    name=\"${@: -1}\"\n"
            "    rm -f \"$STATE_DIR/$name.exists\"\n"
@@ -228,6 +282,44 @@ static int fake_container_exists(const char *container_name)
             container_name);
    struct stat s;
    return stat(p, &s) == 0;
+}
+
+static void test_remove_orphans_accepts_only_container_ids(void)
+{
+   const char *fixture = write_fake_docker_fixture();
+   setenv("AIMEE_DOCKER_BIN", fixture, 1);
+
+   char valid_path[512], valid_long_path[512], invalid_path[512];
+   snprintf(valid_path, sizeof(valid_path), "/tmp/aimee-fake-docker-state-%d/0123456789ab.exists",
+            (int)getpid());
+   snprintf(valid_long_path, sizeof(valid_long_path),
+            "/tmp/aimee-fake-docker-state-%d/"
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.exists",
+            (int)getpid());
+   snprintf(invalid_path, sizeof(invalid_path),
+            "/tmp/aimee-fake-docker-state-%d/"
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0.exists",
+            (int)getpid());
+   FILE *f = fopen(valid_path, "w");
+   assert(f != NULL);
+   fclose(f);
+   f = fopen(valid_long_path, "w");
+   assert(f != NULL);
+   fclose(f);
+   f = fopen(invalid_path, "w");
+   assert(f != NULL);
+   fclose(f);
+
+   assert(delegate_backend_docker_remove_orphans() == 2);
+   assert(!fake_container_exists("0123456789ab"));
+   assert(
+       !fake_container_exists("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"));
+   assert(
+       fake_container_exists("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0"));
+
+   teardown_fake_docker();
+   unsetenv("AIMEE_DOCKER_BIN");
+   printf("  PASS: test_remove_orphans_accepts_only_container_ids\n");
 }
 
 /* Did the last `docker create` argv (captured by the fixture) contain `needle`? */
@@ -779,8 +871,61 @@ static void test_docker_workspace_validation_refusals(void)
    printf("  PASS: docker_workspace_validation_refusals\n");
 }
 
+/* reap_aged removes delegate containers older than the threshold and keeps recent
+ * ones. Uses a self-contained fake docker: `ps` emits one ancient and one current
+ * container line in Go's CreatedAt format; `rm` logs the id it was asked to drop. */
+static void test_reap_aged_removes_only_old(void)
+{
+   char script[256], rmlog[256];
+   snprintf(script, sizeof(script), "/tmp/aimee-reap-docker-%d.sh", (int)getpid());
+   snprintf(rmlog, sizeof(rmlog), "/tmp/aimee-reap-rmlog-%d", (int)getpid());
+   unlink(rmlog);
+   FILE *f = fopen(script, "w");
+   assert(f != NULL);
+   fprintf(f,
+           "#!/bin/bash\n"
+           "case \"$1\" in\n"
+           "  ps)\n"
+           "    echo \"aaaaaaaaaaaa aimee-delegate-old 2000-01-01 00:00:00 +0000 UTC\"\n"
+           "    echo \"bbbbbbbbbbbb aimee-delegate-new $(date -u +'%%Y-%%m-%%d %%H:%%M:%%S') "
+           "+0000 UTC\"\n"
+           "    echo \"cccccccccccc some-other-container 2000-01-01 00:00:00 +0000 UTC\"\n"
+           "    ;;\n"
+           "  rm)\n"
+           "    shift 2\n"
+           "    echo \"$1\" >> %s\n"
+           "    ;;\n"
+           "esac\n"
+           "exit 0\n",
+           rmlog);
+   fclose(f);
+   assert(chmod(script, 0755) == 0);
+   setenv("AIMEE_DOCKER_BIN", script, 1);
+
+   assert(delegate_backend_docker_reap_aged(1800) == 1);
+
+   char buf[256] = {0};
+   f = fopen(rmlog, "r");
+   assert(f != NULL);
+   size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+   buf[n] = '\0';
+   fclose(f);
+   assert(strstr(buf, "aaaaaaaaaaaa") != NULL); /* ancient delegate -> reaped */
+   assert(strstr(buf, "bbbbbbbbbbbb") == NULL); /* current delegate -> kept */
+   /* Ancient, but NOT ours. The container-name prefix is enforced in C now that the
+    * `--filter name=^aimee-delegate-` anchor is gone, so this must survive. */
+   assert(strstr(buf, "cccccccccccc") == NULL);
+
+   unsetenv("AIMEE_DOCKER_BIN");
+   unlink(script);
+   unlink(rmlog);
+   printf("  PASS: test_reap_aged_removes_only_old\n");
+}
+
 int main(void)
 {
+   test_remove_orphans_accepts_only_container_ids();
+   test_reap_aged_removes_only_old();
    printf("delegate_backend_docker:\n");
    test_register_puts_docker_in_registry();
    test_file_ops_reject_null_state();
@@ -797,6 +942,7 @@ int main(void)
    test_docker_exec_set_cwd_prefixes_subsequent_calls();
    test_acquire_rejects_invalid_args();
    test_docker_write_then_read_roundtrip();
+   test_docker_absolute_in_workspace_path_accepted();
    test_docker_path_validation_rejects_escapes();
    test_docker_list_dir_returns_entries();
    test_docker_mounts_caller_workspace();
