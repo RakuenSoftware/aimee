@@ -118,11 +118,13 @@ reported without a CI on this page, it has not been tested and should not be
 read as a ranking. Note that overlapping single-run CIs do *not* imply a
 difference is insignificant — the paired test is the one to read.
 
-**The quantisation does not match.** Every number above was measured at Q8_0.
-The shipped default is `Q4_K_M`, which is roughly half the size and
-faster, and which we did not measure for quality. Expect the shipped
-configuration to be somewhat worse than the table says, by an amount we have not
-quantified.
+**The quantisation now matches.** Every number above was measured at Q8_0, and
+Q8_0 is what the bundled path fetches, so the table describes the shipped
+configuration rather than an approximation of it. This was not true of an earlier
+draft, which named `Q4_K_M`: that quantisation is not published in these repos at
+all, and llama.cpp's `-hf` would have fallen back to "the first file in the repo"
+— a ~15 GB BF16, or one of the mmproj/mtp side files. The cost of matching is
+size: ~7.5 GB for E4B rather than ~4 GB.
 
 **The gold set has one author and n is 69.** One person wrote and labelled the
 extraction set. There is no second annotator and no inter-rater agreement
@@ -230,6 +232,8 @@ disables the local options there rather than offering a choice that cannot work.
 Select the model with `SYNTHESIS_MODEL` (or in the wizard). The container fetches
 the weights on first start and keeps them on the data volume, under
 `$AIMEE_HOME/models` — so an image upgrade does not refetch several gigabytes.
+First start pulls ~7.5 GB for E4B (~4.6 GB for E2B) at Q8_0, the quantisation the
+numbers above were measured with.
 Leave `SYNTHESIS_ENDPOINT` empty: the container starts llama-server itself and
 points synthesis at loopback.
 

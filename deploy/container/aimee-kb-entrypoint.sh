@@ -96,8 +96,8 @@ start_embedder() {
 #   neither                -> start nothing. Synthesis is OFF, which is supported:
 #                             embedding, search, recall and indexing never call it.
 #
-# WEIGHTS LIVE ON THE PERSISTENT VOLUME, NOT IN THE IMAGE. gemma-4-E4B is ~4GB at
-# the shipped Q4_K_M and ~7.5GB at Q8_0; baking that would roughly double the image
+# WEIGHTS LIVE ON THE PERSISTENT VOLUME, NOT IN THE IMAGE. gemma-4-E4B is ~7.5GB
+# at the shipped Q8_0; baking that would roughly double the image
 # and re-download on every image bump. /var/lib/aimee is the aimee-kb-home volume,
 # so the weights survive image upgrades, rollbacks and rebuilds.
 #
@@ -114,9 +114,17 @@ start_embedder() {
 synthesis_repo_for_model() {
     # Explicit map, not a string-built repo name. An unknown model must not
     # silently become a 404 download that leaves synthesis quietly dead.
+    #
+    # THE QUANT IS EXPLICIT AND MUST EXIST IN THE REPO. llama.cpp's -hf defaults to
+    # Q4_K_M and, when that is absent, "falls back to the first file in the repo".
+    # These repos publish BF16, Q4_0 and Q8_0 — no Q4_K_M — so asking for it would
+    # have silently fetched whatever sorted first, which here includes a ~15GB BF16
+    # and the mmproj/mtp side files. Q8_0 is named because it is the quantisation
+    # docs/SYNTHESIS_MODELS.md actually measured, so the shipped configuration and
+    # the published numbers are the same thing.
     case "$1" in
-        gemma-4-E2B-it) echo "ggml-org/gemma-4-E2B-it-GGUF:Q4_K_M" ;;
-        gemma-4-E4B-it) echo "ggml-org/gemma-4-E4B-it-GGUF:Q4_K_M" ;;
+        gemma-4-E2B-it) echo "ggml-org/gemma-4-E2B-it-GGUF:Q8_0" ;;
+        gemma-4-E4B-it) echo "ggml-org/gemma-4-E4B-it-GGUF:Q8_0" ;;
         *) echo "" ;;
     esac
 }
