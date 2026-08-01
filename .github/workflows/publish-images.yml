@@ -5,7 +5,6 @@
 #   aimee-server     (Dockerfile.server)      ghcr.io/<owner>/aimee-server
 #   aimee-kb         (Dockerfile)             ghcr.io/<owner>/aimee-kb
 #   aimee-authority-bootstrap (Dockerfile.authority-bootstrap) ghcr.io/<owner>/aimee-authority-bootstrap
-#   aimee-embedder   (Dockerfile.embedder)    ghcr.io/<owner>/aimee-embedder (+ -4b)
 #   aimee-css-render (deploy/css-render/Dockerfile) ghcr.io/<owner>/aimee-css-render
 #
 # Multi-arch (linux/amd64 + linux/arm64) via the canonical build-by-digest then
@@ -73,11 +72,6 @@ jobs:
           - { name: aimee-server,    dockerfile: Dockerfile.server }
           - { name: aimee-kb,        dockerfile: Dockerfile }
           - { name: aimee-authority-bootstrap, dockerfile: Dockerfile.authority-bootstrap }
-          - { name: aimee-embedder,  dockerfile: Dockerfile.embedder }
-          # Higher-fidelity alternate tier: same Dockerfile, 4b embedder
-          # baked in. Pair with embedding_dim: 2560 (see docs). Default (above) is
-          # the 0.6b embedder.
-          - { name: aimee-embedder-4b, dockerfile: Dockerfile.embedder, embedder_arg: "EMBEDDER_MODEL=perplexity-ai/pplx-embed-v1-4b" }
           # #4-full render backend (headless-Chromium sidecar). Self-contained
           # under deploy/css-render (its own build context); independent of the C
           # build, so a failure here never blocks the aimee images (fail-fast off).
@@ -115,20 +109,17 @@ jobs:
           # Reuse layers across releases. Without this every release rebuilt all
           # images on both arches from scratch — re-running the full LTO C build
           # each time. Scoped per image+arch so the matrix legs never clobber each
-          # other. EXCLUDES aimee-embedder: its baked multi-GB
-          # model layers would blow the 10 GB GHA cache budget and evict the (small,
-          # high-reuse) C-image caches, defeating the purpose. The embedder's real
-          # win is the runtime model fetch (embedder-runtime-fetch-autodim proposal),
-          # not the layer cache.
-          cache-from: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-embedder-4b' && matrix.image.name != 'aimee-css-render') && format('type=gha,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
-          cache-to: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-embedder-4b' && matrix.image.name != 'aimee-css-render') && format('type=gha,mode=max,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
+          # other. EXCLUDES aimee-css-render: its browser layers would blow the
+          # 10 GB GHA cache budget and evict the (small, high-reuse) C-image
+          # caches, defeating the purpose.
+          cache-from: ${{ matrix.image.name != 'aimee-css-render' && format('type=gha,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
+          cache-to: ${{ matrix.image.name != 'aimee-css-render' && format('type=gha,mode=max,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
           # Images bundle the browser UI (WITH_RUNTIME_WEB=1, the default). webchat's
           # frontend dependency (@rakuensoftware/smoothgui) is vendored in-repo, so
           # the build needs no npm token. The aimee-kb image ignores WITH_RUNTIME_WEB.
           build-args: |
             AIMEE_VERSION=${{ needs.prep.outputs.version }}
             WITH_RUNTIME_WEB=1
-            ${{ matrix.image.embedder_arg }}
             ${{ matrix.image.extra_args }}
           outputs: type=image,name=ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }},push-by-digest=true,name-canonical=true,push=true
 
@@ -152,16 +143,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [aimee-server, aimee-kb, aimee-authority-bootstrap, aimee-embedder, aimee-embedder-4b, aimee-css-render]
+        image: [aimee-server, aimee-kb, aimee-authority-bootstrap, aimee-css-render]
     steps:
       - name: Normalize owner to lowercase
         run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
 
-      # Match ONLY this image's per-arch digests. A trailing `-*` would be greedy:
-      # `digest-aimee-embedder-*` also matches `digest-aimee-embedder-4b-*` (one
-      # image name is a prefix of another), which would pull another image's digests
-      # into this manifest and break the push. Anchor on the exact arch suffixes
-      # instead (brace expansion, no wildcard across `-`).
+      # Match ONLY this image's per-arch digests. A trailing `-*` would be greedy
+      # whenever one image name is a prefix of another, pulling another image's
+      # digests into this manifest and breaking the push. Anchor on the exact arch
+      # suffixes instead (brace expansion, no wildcard across `-`).
       - name: Download this image's digests
         uses: actions/download-artifact@v4
         with:
