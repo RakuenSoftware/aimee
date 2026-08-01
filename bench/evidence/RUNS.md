@@ -62,6 +62,12 @@ enforce, so this table cannot drift from what is scoreable.
 | promptfix | google_gemma-4-E4B-it | 70 | VALID | prompt correction |
 | promptfix | ibm-granite_granite-4.0-1b | 70 | VALID | prompt correction |
 | promptfix | ibm-granite_granite-4.1-3b | 70 | VALID | prompt correction |
+| sub1b | LFM2-350M-Extract | 70 | VALID | sub-1B ladder, thinking ON |
+| sub1b | LFM2.5-230M | 70 | VALID | sub-1B ladder, thinking ON |
+| sub1b | Qwen3-0.6B | 70 | VALID | sub-1B ladder, thinking ON |
+| sub1b | granite-4.0-350m | 70 | VALID | sub-1B ladder, thinking ON |
+| sub1b | granite-4.0-h-1b | 70 | VALID | sub-1B ladder, thinking ON |
+| sub1b | granite-4.0-h-350m | 70 | VALID | sub-1B ladder, thinking ON |
 | thinking | Qwen3.5-0.8B | 70 | VALID | thinking ON, cap 8192 — CURRENT |
 | thinking | Qwen3.5-2B | 70 | VALID | thinking ON, cap 8192 — CURRENT |
 | thinking | Qwen3.6-27B | 70 | INVALID: errored x60 | thinking ON, cap 8192 — CURRENT |
