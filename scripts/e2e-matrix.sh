@@ -70,9 +70,8 @@ export EMBEDDER_MODEL="${EMBEDDER_MODEL:-bekko-a25m}"
 # every insert, and CI would be testing a topology no user can deploy.
 unset AIMEE_EMBEDDING_DIM
 
-# No optional profile: the only remaining ones are `legacy-embedder` (the retired
-# torch service, kept for rollback) and `curator-llm` (a multi-GB Gemma GGUF that
-# would blow the runner's disk). Empty also overrides anything in the committed .env.
+# There are no optional Compose profiles left. Empty also overrides anything in
+# the committed .env.
 export COMPOSE_PROFILES="${COMPOSE_PROFILES:-}"
 # These topology smokes exercise the machine APIs, not browser authentication.
 # Disable webchat instead of inventing a credential fixture outside Vault.

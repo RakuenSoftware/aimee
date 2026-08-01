@@ -94,5 +94,3 @@ volumes:
     x-smoothnas: { tier: aimee-data }
   aimee-server-workspaces:
     x-smoothnas: { tier: aimee-data }
-  aimee-llm-models:
-    x-smoothnas: { tier: aimee-data }

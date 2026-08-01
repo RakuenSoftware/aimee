@@ -49,9 +49,6 @@ REQUIRED_COMPOSE_PATTERNS = {
     "kb-build-context": r"(?s)aimee-kb:.*build:.*context:\s*\.",
     "aimee-home-env": r"(?s)aimee-kb:.*AIMEE_HOME:\s*/var/lib/aimee",
     "kb-health": r"(?s)aimee-kb:.*healthcheck:.*http://127\.0\.0\.1:8741/v1/health",
-    # No inference service in the default topology: the kb embeds in-container. The
-    # legacy torch embedder is retained behind a profile for rollback.
-    "embedder-service": r"(?m)^\s{2}embedder:",
     # AIMEE_LLM_URL is SYNTH ONLY now and must carry no default — the container it used
     # to name is gone, so a default would point every deploy at a dead host.
     "llm-url-no-default": r"(?m)^\s*AIMEE_LLM_URL:\s*\$\{AIMEE_LLM_URL:-\}\s*$",
@@ -206,7 +203,7 @@ def kb_publication_failures(text: str) -> list[str]:
     if not isinstance(service, dict):
         return ["missing aimee-kb service"]
     failures: list[str] = []
-    required_services = {"aimee-kb", "embedder"}
+    required_services = {"aimee-kb"}
     missing_services = required_services - set(services)
     if missing_services:
         failures.append("missing required services: " + ", ".join(sorted(missing_services)))
@@ -601,7 +598,6 @@ def plant_test() -> int:
             "compose.yaml missing kb-build-context",
             "compose.yaml missing aimee-home-env",
             "compose.yaml missing kb-health",
-            "compose.yaml missing embedder-service",
             "compose.yaml missing llm-url-no-default",
             "missing .dockerignore",
         }
@@ -637,11 +633,6 @@ def plant_test() -> int:
             "\n".join(
                 [
                     "services:",
-                    "  embedder:",
-                    "    build:",
-                    "      context: .",
-                    "      dockerfile: Dockerfile.embedder",
-                    "    profiles: [\"legacy-embedder\"]",
                     "  aimee-kb:",
                     "    build:",
                     "      context: .",
@@ -793,7 +784,7 @@ def plant_test() -> int:
             print("kb-container-packaging plant: missed active legacy remote_writes default", file=sys.stderr)
             return 1
 
-        (root / ".env").write_text("COMPOSE_PROFILES=curator-llm\n", encoding="utf-8")
+        (root / ".env").write_text("COMPOSE_PROFILES=some-profile\n", encoding="utf-8")
         if ".env enables optional Compose profiles by default" not in check(root):
             print("kb-container-packaging plant: missed enabled default profile", file=sys.stderr)
             return 1
