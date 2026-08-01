@@ -46,15 +46,27 @@ jobs:
           # Match the actual trailer forms only (anchored), not prose that happens
           # to mention them: a "co-authored-by:" line, or the markdown-link
           # "Generated with [Claude Code]"/"[Codex ...]" attribution line.
-          # Two immutable commits entered testing before promotion scanning was
-          # enforced. They are grandfathered only for the testing -> main
-          # integration PR; exact SHAs keep the exception from hiding descendants
-          # or any newly introduced trailer.
+          # Immutable commits that entered testing carrying a trailer. They are
+          # grandfathered only for the testing -> main integration PR; exact SHAs
+          # keep the exception from hiding descendants or any newly introduced
+          # trailer.
+          #
+          # These are not ours to strip. The trailer is added by GITHUB, not by
+          # aimee: the WFE authors its commits as aimee-wfe <wfe@aimee.local>, so
+          # squash-merging a PR that mixes its commits with a human's produces a
+          # Co-authored-by line for the second author. Rewriting them would rewrite
+          # published history on testing to fix a message GitHub generated.
+          #
+          # This list grows once per promote until that is addressed at the source
+          # (have the WFE author as the operator, or strip the trailer from the
+          # squash message at merge time). Growth is the signal that it has not
+          # been.
           hits=$(
             for commit in $(git rev-list "$range"); do
               if [ "$BASE_REF" = main ] && [ "$HEAD_REF" = testing ]; then
                 case "$commit" in
-                  9f327867cd62a14e50e9a41af9b871fc7792e4bd|003255217a10a8559e47bf0b6fedeb2c0faa6cce)
+                  9f327867cd62a14e50e9a41af9b871fc7792e4bd|003255217a10a8559e47bf0b6fedeb2c0faa6cce|\
+                  d173e054353a1069bd07a307477ad281a3d39d59|0b694e1970eab860b503b433bb69f708fc445abc)
                     continue
                     ;;
                 esac
