@@ -110,8 +110,19 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
       if (!alive) return;
       setCfg(c);
       setHosts(h);
-      setEmbedModel(String(c.embedding_model ?? ''));
-      setEmbedModelSaved(String(c.embedding_model ?? ''));
+      // An unset embedding_model is NOT "the deployment default" — there is no
+      // default downstream. buildDesiredConfig omits the key, config_emit_deploy_env
+      // omits EMBEDDER_MODEL, and the kb entrypoint leaves the bundled model
+      // unloaded and serves the builtin lexical embedder forever. The instance then
+      // reports retrieval:"fail" and shows a permanent degraded banner, having
+      // downloaded the weights it never selected. Seed the shipped local model so
+      // the operator who accepts the default gets a working embedder.
+      //
+      // embedModelSaved keeps the RAW saved value, so embedderChangeImpact still
+      // sees from:'' on a fresh install and correctly charges nothing for this.
+      const savedModel = String(c.embedding_model ?? '');
+      setEmbedModel(savedModel || emb.find((e) => e.local)?.id || '');
+      setEmbedModelSaved(savedModel);
       setEmbedDim(c.embedding_dim == null ? '' : String(c.embedding_dim));
 
       // Seed the host from any local role that names one, else the local host.
@@ -301,7 +312,10 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
                     <>
                       <select style={input} value={embedModel}
                         onChange={(e) => { setEmbedModel(e.target.value); setConfirmText(''); }}>
-                        <option value="">(deployment default)</option>
+                        {/* Named for what it DOES. "(deployment default)" read as
+                            "someone sensible chose for me" and delivered no embedder
+                            at all — semantic search silently degraded to lexical. */}
+                        <option value="">(none — lexical only, search degraded)</option>
                         {localEmbedders.map((e) => (
                           <option key={e.id} value={e.id}>
                             {e.id} — {e.dim}-dim, {e.context} ctx{e.prefixed ? '' : ', no prefixes'}
