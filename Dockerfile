@@ -439,7 +439,14 @@ ARG LLAMACPP_VERSION
 ARG AIMEE_SYNTHESIS_MODEL
 COPY --from=llamacpp /out/ /opt/aimee/llama.cpp/
 # The shared objects ship beside the binary, which is not a default search path.
-ENV LD_LIBRARY_PATH=/opt/aimee/llama.cpp:${LD_LIBRARY_PATH}
+#
+# NO trailing ${LD_LIBRARY_PATH}. Nothing sets it earlier in this image, so
+# appending it expanded to a trailing colon — and an EMPTY entry in
+# LD_LIBRARY_PATH means "search the current working directory", which would let a
+# stray .so wherever the process happens to be running take precedence over the
+# real one. BuildKit flagged it as UndefinedVar; the warning was pointing at a
+# genuine loader hazard rather than at untidiness.
+ENV LD_LIBRARY_PATH=/opt/aimee/llama.cpp
 # Prove BOTH halves in THIS image before shipping it. A server that cannot resolve
 # its own .so files, or a model file that did not survive the copy, otherwise fails
 # at first synthesis — which is exactly the class of "it deployed fine and does
