@@ -51,6 +51,20 @@ MIX = {"transient": 0.17, "first_person": 0.11, "multi_fact": 0.11,
 
 DOMAIN_SHARE = {"code": 0.40, "business": 0.30, "sales": 0.30}
 
+# aimee is code-heavy, so the code share is held at 40% rather than allowed to
+# sag to whatever the RakuenSoftware and JBailes repos happen to supply (~25%).
+# torvalds/linux fills the gap: renames, moves, deletions and authorship are
+# structurally identical facts regardless of what the code does, so
+# `mm/slub.c -> mm/slab_common.c` exercises the same extraction as
+# `learning.h -> db2_learning.h`.
+#
+# It is CAPPED rather than merged wholesale. Linux carries ~1.4M commits against
+# ~18k across every other repo, so an uncapped merge would make "the code domain"
+# mean "the kernel" and collapse entity diversity onto subsystem names. The cap
+# is expressed as a share of code-domain facts, so the kernel supplements the
+# owned repos instead of replacing them.
+LINUX_MAX_SHARE = float(os.environ.get("LINUX_MAX_SHARE", "0.40"))
+
 
 def code_facts(inv, rng):
     """Flatten the mined inventory into per-fact-kind pools."""
@@ -102,6 +116,21 @@ def code_facts(inv, rng):
             "service": repo, "host": f"{repo.lower()}-{env}-{i%9+1}",
             "ip": f"10.{rng.randint(20,60)}.{rng.randint(0,255)}.{rng.randint(2,254)}",
             "repo": repo})
+    # Cap any single repo's contribution to each pool. Without this the kernel,
+    # at ~1.4M commits against ~18k everywhere else, would supply essentially
+    # every rename and deletion and the code domain would stop being about the
+    # owned repos at all.
+    for kind, pool in pools.items():
+        by_repo = {}
+        for f in pool:
+            by_repo.setdefault(f.get("repo", "?"), []).append(f)
+        if len(by_repo) > 1:
+            cap = max(1, int(len(pool) * LINUX_MAX_SHARE))
+            trimmed = []
+            for repo, items in by_repo.items():
+                rng.shuffle(items)
+                trimmed.extend(items[:cap] if len(items) > cap else items)
+            pools[kind] = trimmed
     for p in pools.values():
         rng.shuffle(p)
     return pools

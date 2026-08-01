@@ -26,8 +26,9 @@ TEMPLATE = (
     "state, feelings, plans, and one-off events. If the note RETRACTS or DENIES "
     'something ("no longer", "did not", "never", "is not", "has left", '
     '"was removed"), do NOT emit the negated fact - a retraction asserts a fact '
-    "is FALSE, so there is nothing durable to record; return an empty list. "
-    "If the note asserts no durable fact, return an empty list. No prose, no markdown."
+    "is FALSE, so there is nothing durable to record. "
+    'If the note asserts no durable fact, return exactly {"facts":[]} - the '
+    "wrapper object is ALWAYS required, never a bare []. No prose, no markdown."
 )
 
 # Bump when TEMPLATE changes. Results taken under different prompt versions are
@@ -36,13 +37,20 @@ TEMPLATE = (
 # produced it.
 #
 #   v1  original
+#   v3  the empty case is spelled out as {"facts":[]}. v1 and v2 both said
+#       "return an empty list" while the schema above showed a wrapper object,
+#       and models did what the sentence said: E2B UD-Q6 wrote a bare [] on 297
+#       of 1000 notes. mf_commit_facts looks for the first '{' and finds none, so
+#       every one of those was discarded. 184 were correct abstentions that cost
+#       nothing, but 113 were notes carrying real facts. The prompt asked for the
+#       wrong thing and the model complied.
 #   v2  explicit retraction/negation guidance. The v1 prompt named transient
 #       state, feelings, plans and one-off events as out of scope but said
 #       nothing about retractions, so "Ingrid is no longer on the renewals desk"
 #       produced a member_of triple — 51 spurious triples in the negation slice
 #       of the 1k small-corpus run, the graph-poisoning case that slice exists
 #       to catch.
-PROMPT_VERSION = "v2"
+PROMPT_VERSION = "v3"
 
 # Production caps the completion at MF_LLM_OUT_CAP.
 MAX_NEW_TOKENS = 8192

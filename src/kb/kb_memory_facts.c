@@ -78,8 +78,9 @@
    "state, feelings, plans, and one-off events. If the note RETRACTS or DENIES "                   \
    "something (\"no longer\", \"did not\", \"never\", \"is not\", \"has left\", "                  \
    "\"was removed\"), do NOT emit the negated fact - a retraction asserts a fact "                 \
-   "is FALSE, so there is nothing durable to record; return an empty list. "                       \
-   "If the note asserts no durable fact, return an empty list. No prose, no markdown."
+   "is FALSE, so there is nothing durable to record. "                                             \
+   "If the note asserts no durable fact, return exactly {\"facts\":[]} - the "                     \
+   "wrapper object is ALWAYS required, never a bare []. No prose, no markdown."
 
 /* Build the extraction system prompt, binding the model to the canonical relation
  * set (autonomous reconciliation, §7). Sourced from the seed ontology so it stays
