@@ -821,6 +821,68 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
    double temperature = openai_request_double(body, "temperature", OPENAI_CHAT_TEMPERATURE, 2.0);
    int max_tokens = openai_request_int(body, "max_tokens", OPENAI_CHAT_MAX_TOKENS, 32768);
 
+   /* Tool relay, streaming half. Agentic clients stream by default, so without
+    * this the buffered relay in run_completion would never be reached by them.
+    * Same statelessness contract as that branch. This handler already computes
+    * the whole reply before chunking it, so the calls ship in a single delta
+    * followed by a tool_calls finish frame. */
+   {
+      char *instructions = NULL;
+      cJSON *messages = NULL, *tools = NULL;
+      if (openai_split_chat_request(body, &instructions, &messages, &tools) == 0 && tools)
+      {
+         parsed_response_t parsed;
+         int trc = agent_execute_messages(ag, messages, tools, instructions, max_tokens,
+                                          temperature, &parsed);
+         free(instructions);
+         cJSON_Delete(messages);
+         cJSON_Delete(tools);
+         free(prompt);
+
+         emit_chunk(emit, ctx, id, model, created, 1, NULL, 0); /* role frame */
+         if (trc != 0)
+         {
+            emit_chunk(emit, ctx, id, model, created, 0, "completion failed", 0);
+            emit_chunk(emit, ctx, id, model, created, 0, NULL, 1);
+            agent_free_parsed_response(&parsed);
+            return 0;
+         }
+
+         if (agent_ingress_accounting_enabled())
+            agent_ingress_record_cost(ag->name, ag->model, model, parsed.stop_reason,
+                                      parsed.prompt_tokens, parsed.completion_tokens,
+                                      parsed.cache_write_tokens, parsed.cache_read_tokens,
+                                      "openai-ingress", NULL);
+
+         if (parsed.is_tool_call && parsed.call_count > 0 && gateway_prevent_subagents_enabled())
+            (void)gw_response_run_governance(&parsed, openai_governance_enabled());
+
+         if (parsed.is_tool_call && parsed.call_count > 0)
+         {
+            char frame[4096];
+            if (parsed.content && parsed.content[0])
+               emit_chunk(emit, ctx, id, model, created, 0, parsed.content, 0);
+            if (openai_format_chat_chunk_tool_calls(id, model, created, &parsed, frame,
+                                                    sizeof(frame)) > 0)
+               emit(ctx, frame);
+            if (openai_format_chat_chunk_finish(id, model, created, "tool_calls", frame,
+                                                sizeof(frame)) > 0)
+               emit(ctx, frame);
+         }
+         else
+         {
+            /* Policing may have dropped every call; fall back to a text turn. */
+            emit_chunk(emit, ctx, id, model, created, 0, parsed.content ? parsed.content : "", 0);
+            emit_chunk(emit, ctx, id, model, created, 0, NULL, 1);
+         }
+         agent_free_parsed_response(&parsed);
+         return 0;
+      }
+      free(instructions);
+      cJSON_Delete(messages);
+      cJSON_Delete(tools);
+   }
+
    agent_result_t result;
    memset(&result, 0, sizeof(result));
    /* P1 pre-injection: prepend the <aimee-context> envelope as the system

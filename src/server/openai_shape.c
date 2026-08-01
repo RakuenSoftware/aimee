@@ -956,6 +956,103 @@ int openai_format_chat_completion_tool_calls(const char *id, const char *model,
    return (len < 0 || len >= cap) ? -1 : len;
 }
 
+/* ── openai_format_chat_chunk_tool_calls (streaming SSE delta) ───────────── */
+
+int openai_format_chat_chunk_tool_calls(const char *id, const char *model, long created,
+                                        const parsed_response_t *parsed, char *resp, int cap)
+{
+   if (!resp || cap <= 0 || !parsed || parsed->call_count <= 0)
+      return -1;
+
+   cJSON *root = cJSON_CreateObject();
+   if (!root)
+      return -1;
+
+   cJSON_AddStringToObject(root, "id", id ? id : "");
+   cJSON_AddStringToObject(root, "object", "chat.completion.chunk");
+   cJSON_AddNumberToObject(root, "created", (double)created);
+   cJSON_AddStringToObject(root, "model", model ? model : "");
+
+   cJSON *choices = cJSON_AddArrayToObject(root, "choices");
+   cJSON *choice = cJSON_CreateObject();
+   if (!choices || !choice)
+   {
+      cJSON_Delete(choice);
+      cJSON_Delete(root);
+      return -1;
+   }
+   cJSON_AddNumberToObject(choice, "index", 0.0);
+   cJSON_AddItemToArray(choices, choice);
+
+   /* The upstream reply is buffered before it is chunked, so each call's
+    * arguments are complete and go out in a single delta. Clients accumulate
+    * by `index`, so emitting one frame per call is as valid as fragmenting. */
+   cJSON *delta = cJSON_AddObjectToObject(choice, "delta");
+   cJSON *tcs = cJSON_AddArrayToObject(delta, "tool_calls");
+   for (int i = 0; i < parsed->call_count; i++)
+   {
+      cJSON *tc = cJSON_CreateObject();
+      cJSON_AddNumberToObject(tc, "index", (double)i);
+      cJSON_AddStringToObject(tc, "id", parsed->calls[i].id);
+      cJSON_AddStringToObject(tc, "type", "function");
+      cJSON *fn = cJSON_AddObjectToObject(tc, "function");
+      cJSON_AddStringToObject(fn, "name", parsed->calls[i].name);
+      cJSON_AddStringToObject(fn, "arguments",
+                              parsed->calls[i].arguments ? parsed->calls[i].arguments : "{}");
+      cJSON_AddItemToArray(tcs, tc);
+   }
+   cJSON_AddNullToObject(choice, "finish_reason");
+
+   char *s = cJSON_PrintUnformatted(root);
+   cJSON_Delete(root);
+   if (!s)
+      return -1;
+
+   int len = snprintf(resp, (size_t)cap, "%s", s);
+   free(s);
+   return (len < 0 || len >= cap) ? -1 : len;
+}
+
+/* ── openai_format_chat_chunk_finish ─────────────────────────────────────── */
+
+int openai_format_chat_chunk_finish(const char *id, const char *model, long created,
+                                    const char *reason, char *resp, int cap)
+{
+   if (!resp || cap <= 0)
+      return -1;
+
+   cJSON *root = cJSON_CreateObject();
+   if (!root)
+      return -1;
+
+   cJSON_AddStringToObject(root, "id", id ? id : "");
+   cJSON_AddStringToObject(root, "object", "chat.completion.chunk");
+   cJSON_AddNumberToObject(root, "created", (double)created);
+   cJSON_AddStringToObject(root, "model", model ? model : "");
+
+   cJSON *choices = cJSON_AddArrayToObject(root, "choices");
+   cJSON *choice = cJSON_CreateObject();
+   if (!choices || !choice)
+   {
+      cJSON_Delete(choice);
+      cJSON_Delete(root);
+      return -1;
+   }
+   cJSON_AddNumberToObject(choice, "index", 0.0);
+   cJSON_AddItemToArray(choices, choice);
+   cJSON_AddItemToObject(choice, "delta", cJSON_CreateObject());
+   cJSON_AddStringToObject(choice, "finish_reason", reason ? reason : "stop");
+
+   char *s = cJSON_PrintUnformatted(root);
+   cJSON_Delete(root);
+   if (!s)
+      return -1;
+
+   int len = snprintf(resp, (size_t)cap, "%s", s);
+   free(s);
+   return (len < 0 || len >= cap) ? -1 : len;
+}
+
 /* ── openai_format_chat_chunk (streaming SSE delta) ──────────────────────── */
 
 int openai_format_chat_chunk(const char *id, const char *model, long created, int role,

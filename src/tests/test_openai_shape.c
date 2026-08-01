@@ -630,6 +630,52 @@ int main(void)
              -1);
    }
 
+   /* --- streaming: tool calls as SSE deltas + a tool_calls finish frame ---
+    * Agentic clients stream by default, so the buffered shape above is not
+    * enough on its own. */
+   {
+      parsed_response_t p;
+      memset(&p, 0, sizeof(p));
+      p.is_tool_call = 1;
+      p.call_count = 2;
+      snprintf(p.calls[0].id, sizeof(p.calls[0].id), "call_a");
+      snprintf(p.calls[0].name, sizeof(p.calls[0].name), "get_weather");
+      p.calls[0].arguments = strdup("{\"city\":\"Paris\"}");
+      snprintf(p.calls[1].id, sizeof(p.calls[1].id), "call_b");
+      snprintf(p.calls[1].name, sizeof(p.calls[1].name), "get_time");
+
+      assert(openai_format_chat_chunk_tool_calls("id1", "aimee", 1700000000, &p, resp,
+                                                 (int)sizeof(resp)) > 0);
+      cJSON *root = cJSON_Parse(resp);
+      assert(root);
+      cJSON *choice = cJSON_GetArrayItem(cJSON_GetObjectItem(root, "choices"), 0);
+      /* a delta frame must NOT terminate the turn */
+      assert(cJSON_IsNull(cJSON_GetObjectItem(choice, "finish_reason")));
+      cJSON *tcs = cJSON_GetObjectItem(cJSON_GetObjectItem(choice, "delta"), "tool_calls");
+      assert(cJSON_GetArraySize(tcs) == 2);
+      /* clients accumulate by index, so it must be present and ordered */
+      assert(cJSON_GetObjectItem(cJSON_GetArrayItem(tcs, 0), "index")->valuedouble == 0);
+      assert(cJSON_GetObjectItem(cJSON_GetArrayItem(tcs, 1), "index")->valuedouble == 1);
+      cJSON *fn1 = cJSON_GetObjectItem(cJSON_GetArrayItem(tcs, 1), "function");
+      assert(strcmp(cJSON_GetObjectItem(fn1, "arguments")->valuestring, "{}") == 0);
+      cJSON_Delete(root);
+      free(p.calls[0].arguments);
+
+      /* the terminal frame must say tool_calls, not stop */
+      assert(openai_format_chat_chunk_finish("id1", "aimee", 1700000000, "tool_calls", resp,
+                                             (int)sizeof(resp)) > 0);
+      root = cJSON_Parse(resp);
+      choice = cJSON_GetArrayItem(cJSON_GetObjectItem(root, "choices"), 0);
+      assert(strcmp(cJSON_GetObjectItem(choice, "finish_reason")->valuestring, "tool_calls") == 0);
+      cJSON_Delete(root);
+
+      /* default reason, and a refusal when there is nothing to send */
+      assert(openai_format_chat_chunk_finish("i", "m", 1, NULL, resp, (int)sizeof(resp)) > 0);
+      assert(strstr(resp, "\"finish_reason\":\"stop\""));
+      p.call_count = 0;
+      assert(openai_format_chat_chunk_tool_calls("i", "m", 1, &p, resp, (int)sizeof(resp)) == -1);
+   }
+
    printf("ok\n");
    return 0;
 }

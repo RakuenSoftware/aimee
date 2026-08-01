@@ -90,6 +90,22 @@ extern "C"
                                                 const parsed_response_t *parsed, long created,
                                                 char *resp, int cap);
 
+   /* Build a chat.completion.chunk carrying `delta.tool_calls[]` (each entry
+    * indexed, `arguments` a JSON string). The upstream reply is buffered before
+    * chunking, so each call's arguments are complete and ship in one delta;
+    * clients accumulate by `index` either way. finish_reason is null — pair this
+    * with openai_format_chat_chunk_finish(…, "tool_calls", …). Returns bytes
+    * written (excluding NUL), or -1 if it does not fit or there are no calls. */
+   int openai_format_chat_chunk_tool_calls(const char *id, const char *model, long created,
+                                           const parsed_response_t *parsed, char *resp, int cap);
+
+   /* Build the terminal chat.completion.chunk with an empty delta and an
+    * explicit finish_reason ("stop", "tool_calls", …). openai_format_chat_chunk's
+    * finish frame always says "stop"; a tool-call turn must not. Returns bytes
+    * written (excluding NUL), or -1 if it does not fit. */
+   int openai_format_chat_chunk_finish(const char *id, const char *model, long created,
+                                       const char *reason, char *resp, int cap);
+
    /* Build an OpenAI Responses object into resp[cap]:
     * {"id":…,"object":"response","created_at":…,"model":…,"status":"completed",
     *  "output":[{"id":…,"type":"message","status":"completed","role":"assistant",
