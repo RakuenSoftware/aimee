@@ -177,6 +177,36 @@ int aimee_client_has_remote(void)
    return (env && *env) ? 1 : 0;
 }
 
+/* A short, credential-free description of where this process actually sends
+ * requests. Failures print it, because "no remote configured" is otherwise
+ * invisible: with remote.conf absent the client silently uses the local socket
+ * and every command still answers — from a DIFFERENT aimee than the operator
+ * believes they are talking to. A whole debugging session was spent
+ * instrumenting a remote server that the failing commands were never reaching.
+ *
+ * Any userinfo in the URL is stripped: a credential must not reach a terminal,
+ * a log, or a pasted bug report. */
+const char *aimee_client_transport_label(void)
+{
+   static char label[sizeof(g_remote_url) + 32];
+   const char *url = g_remote_url[0] ? g_remote_url : getenv("AIMEE_SERVER_URL");
+   if (!url || !*url)
+      return "local Unix socket (no remote server configured)";
+
+   const char *scheme_end = strstr(url, "://");
+   const char *authority = scheme_end ? scheme_end + 3 : url;
+   const char *at = strchr(authority, '@');
+   if (!at)
+   {
+      snprintf(label, sizeof(label), "%s", url);
+      return label;
+   }
+   /* Keep the scheme, drop everything up to and including the '@'. */
+   int scheme_len = scheme_end ? (int)(scheme_end + 3 - url) : 0;
+   snprintf(label, sizeof(label), "%.*s%s", scheme_len, url, at + 1);
+   return label;
+}
+
 int aimee_client_parse_flag(char **argv, int *i, int argc, const char **url, const char **token)
 {
    const char *a = argv[*i];
