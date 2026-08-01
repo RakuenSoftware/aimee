@@ -45,16 +45,33 @@ def git(repo, *args, timeout=180):
 
 
 def find_repos(roots, max_depth=3):
+    """Working trees (a .git subdirectory) and bare repos (a *.git directory).
+
+    Bare clones matter because the org repos are fetched with
+    `--bare --filter=blob:none`: full commit history, no file contents. Renames,
+    deletions and authorship all come from commit metadata, so a blobless clone
+    carries every fact this miner needs at a fraction of the size — 46 repos in
+    26 MB against gigabytes for full checkouts.
+    """
     repos = []
     for root in roots:
         root = os.path.expanduser(root)
+        if root.endswith(".git") and os.path.isdir(root):
+            repos.append(root)
+            continue
         for dirpath, dirnames, _ in os.walk(root):
             if ".git" in dirnames:
                 repos.append(dirpath)
                 dirnames[:] = []
-            elif dirpath.count(os.sep) - root.count(os.sep) > max_depth:
+                continue
+            bare = [d for d in dirnames if d.endswith(".git")]
+            for b in bare:
+                repos.append(os.path.join(dirpath, b))
+            if bare:
+                dirnames[:] = [d for d in dirnames if not d.endswith(".git")]
+            if dirpath.count(os.sep) - root.count(os.sep) > max_depth:
                 dirnames[:] = []
-    return sorted(repos)
+    return sorted(set(repos))
 
 
 def mine_renames(repo, min_score=90):
@@ -136,6 +153,13 @@ def main():
     inventory = {"repos": {}, "people": {}, "generated_from": []}
     for repo in find_repos(args.roots):
         name = os.path.basename(repo)
+        if name.endswith(".git"):
+            name = name[:-4]
+        # Bare clones are named "<org>-<repo>.git"; the org prefix is noise in a
+        # note that says "X contributes to Y".
+        for pre in ("RakuenSoftware-", "JBailes-"):
+            if name.startswith(pre):
+                name = name[len(pre):]
         authors = mine_authors(repo)
         if not authors:
             continue

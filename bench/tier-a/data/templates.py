@@ -242,12 +242,20 @@ BUSINESS = {
         {"text": "Escalated to {person}, the {role}, as usual.",
          "gold": [{"s": "{person}", "r": "has_role", "o": "{role}"}]},
     ],
+    # Templates keyed only on {city} (30 values) or {team} (10) cap out early and
+    # hand their share to whichever sibling has the widest pool. Every cell needs
+    # enough HIGH-VARIETY shapes that the narrow ones are a garnish rather than a
+    # constraint.
     "ambiguous": [
         {"text": "Their lead on the {company} work left last month.", "gold": []},
         {"text": "The bigger of the two {city} accounts churned.", "gold": []},
         {"text": "She's moving off {company} to the other team.", "gold": []},
         {"text": "One of the {team} leads is leaving, not sure which.", "gold": []},
         {"text": "The other {role} at {company} handles that now.", "gold": []},
+        {"text": "Someone at {company} raised it, did not catch who.", "gold": []},
+        {"text": "{person} said their counterpart would follow up.", "gold": []},
+        {"text": "One of {person}'s reports is picking it up.", "gold": []},
+        {"text": "The {company} side has a new owner, name unclear.", "gold": []},
     ],
 }
 
