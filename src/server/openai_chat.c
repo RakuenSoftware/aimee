@@ -264,7 +264,8 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
 
          int tlen;
          if (parsed.is_tool_call && parsed.call_count > 0)
-            tlen = openai_format_chat_completion_tool_calls(tid, model, &parsed, tcreated, resp, cap);
+            tlen =
+                openai_format_chat_completion_tool_calls(tid, model, &parsed, tcreated, resp, cap);
          else
             tlen = openai_format_chat_completion(tid, model, parsed.content ? parsed.content : "",
                                                  tcreated, parsed.prompt_tokens,

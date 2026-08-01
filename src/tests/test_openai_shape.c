@@ -556,7 +556,8 @@ int main(void)
       messages = tools = NULL;
       instructions = NULL;
       assert(openai_split_chat_request("not json", &instructions, &messages, &tools) == -1);
-      assert(openai_split_chat_request("{\"messages\":[]}", &instructions, &messages, &tools) == -1);
+      assert(openai_split_chat_request("{\"messages\":[]}", &instructions, &messages, &tools) ==
+             -1);
       assert(!instructions && !messages && !tools);
    }
 
@@ -611,9 +612,8 @@ int main(void)
       assert(openai_format_chat_completion_tool_calls("i", "aimee", &p, 1, resp,
                                                       (int)sizeof(resp)) > 0);
       cJSON *root = cJSON_Parse(resp);
-      cJSON *msg =
-          cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(root, "choices"), 0),
-                              "message");
+      cJSON *msg = cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(root, "choices"), 0),
+                                       "message");
       assert(strcmp(cJSON_GetObjectItem(msg, "content")->valuestring, "let me check") == 0);
       cJSON_Delete(root);
    }
