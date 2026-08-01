@@ -111,7 +111,8 @@ def code_facts(inv, rng):
     # infra: service names are real, addresses are synthetic. A real internal IP
     # would be an operational detail leaking into a public benchmark.
     for i, repo in enumerate(repos):
-      for env in ("prod", "stage", "build"):
+      for env in ("prod", "stage", "build", "dev", "ci", "edge", "qa",
+                  "canary", "sandbox", "perf", "backup", "replica"):
         pools["host"].append({
             "service": repo, "host": f"{repo.lower()}-{env}-{i%9+1}",
             "ip": f"10.{rng.randint(20,60)}.{rng.randint(0,255)}.{rng.randint(2,254)}",
@@ -125,7 +126,14 @@ def code_facts(inv, rng):
         for f in pool:
             by_repo.setdefault(f.get("repo", "?"), []).append(f)
         if len(by_repo) > 1:
-            cap = max(1, int(len(pool) * LINUX_MAX_SHARE))
+            # Cap the dominant repo at LINUX_MAX_SHARE of the FINAL pool, not of
+            # the raw pool. Capping at a fraction of the raw total let the kernel
+            # keep 40% of a pool it already supplied 80% of, so it still ended up
+            # at 50% of code notes. Solving share = cap/(cap+others) for cap
+            # gives cap = others * share/(1-share).
+            biggest = max(len(v) for v in by_repo.values())
+            others = len(pool) - biggest
+            cap = max(1, int(others * LINUX_MAX_SHARE / (1 - LINUX_MAX_SHARE)))
             trimmed = []
             for repo, items in by_repo.items():
                 rng.shuffle(items)
@@ -279,6 +287,19 @@ def main():
     # reuse a fact — which would put near-duplicates in different strata and
     # break the independence the sign test needs — the shortfall goes to the
     # synthetic domains, and the ACTUAL split is reported below.
+    # Top up CODE first. The code domain is the one with a hard supply limit, so
+    # any shortfall used to be handed straight to the synthetic domains and code
+    # settled ~13 points under its 40% target. Give it a second pass against the
+    # pools that still have facts before letting business and sales absorb the
+    # remainder.
+    for _ in range(3):
+        short = args.large - len(rows)
+        if short <= 0:
+            break
+        before = len(rows)
+        emit("code", 1.0, short)
+        if len(rows) == before:
+            break
     short = args.large - len(rows)
     if short > 0:
         for _domain in ("business", "sales"):

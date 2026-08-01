@@ -55,6 +55,12 @@ CODE = {
         {"fact": "version",
          "text": "We cut {new_ver} of {repo}, replacing {old_ver}.",
          "gold": [{"s": "{new_ver}", "r": "supersedes", "o": "{old_ver}"}]},
+        {"fact": "version",
+         "text": "{repo} is on {new_ver} now; {old_ver} is retired.",
+         "gold": [{"s": "{new_ver}", "r": "supersedes", "o": "{old_ver}"}]},
+        {"fact": "version",
+         "text": "{old_ver} of {repo} was superseded by {new_ver}.",
+         "gold": [{"s": "{new_ver}", "r": "supersedes", "o": "{old_ver}"}]},
     ],
     "third_person": [
         # kind == "move": the name did NOT change, only the directory. Asserting
@@ -103,6 +109,31 @@ CODE = {
          "text": "{person} works on both {repo} and {repo2}.",
          "gold": [{"s": "{person}", "r": "member_of", "o": "{repo}"},
                   {"s": "{person}", "r": "member_of", "o": "{repo2}"}]},
+        # Multi-fact shapes over `rename`, whose pool is large. authorship2
+        # needs a person with >=3 commits in >=2 repos and only 69 people
+        # qualify, so it cannot carry a cell that wants ~440 notes; without
+        # these the code domain fell to 27% against its 40% target.
+        {"fact": "rename",
+         "text": "{old_base} in {repo} is now called {new_base}.",
+         "gold": [{"s": "{old_base}", "r": "also_known_as", "o": "{new_base}"},
+                  {"s": "{new_base}", "r": "located_in", "o": "{repo}"}]},
+        {"fact": "rename",
+         "text": "{repo} renamed {old_base} to {new_base} last cycle.",
+         "gold": [{"s": "{old_base}", "r": "also_known_as", "o": "{new_base}"},
+                  {"s": "{new_base}", "r": "located_in", "o": "{repo}"}]},
+        # `move` is the largest code pool by an order of magnitude (13,580 vs
+        # 2,880 renames and 69 authorship2). Cells that lean on scarce fact kinds
+        # cap out and drag the whole code domain below its share, so the bulk of
+        # multi_fact rides on moves.
+        {"fact": "move",
+         "text": "{base} sits in {new_dir} in {repo}, not {old_dir} any more.",
+         "gold": [{"s": "{base}", "r": "located_in", "o": "{new_dir}"}]},
+        {"fact": "move",
+         "text": "In {repo}, {base} was reorganised from {old_dir} into {new_dir}.",
+         "gold": [{"s": "{base}", "r": "located_in", "o": "{new_dir}"}]},
+        {"fact": "move",
+         "text": "{repo} keeps {base} under {new_dir} following the {old_dir} split.",
+         "gold": [{"s": "{base}", "r": "located_in", "o": "{new_dir}"}]},
     ],
     "negation": [
         # A deleted path is verifiable, and the note asserts a removal, so there

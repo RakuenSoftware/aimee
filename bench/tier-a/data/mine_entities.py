@@ -38,9 +38,45 @@ import re
 import subprocess
 
 
-def git(repo, *args, timeout=180):
-    out = subprocess.run(["git", "-C", repo, *args],
-                         capture_output=True, text=True, timeout=timeout)
+# Commits walked per repo, chosen from the repo's size.
+#
+# One cap cannot serve both ends of this range. The owned repos top out around
+# 4,700 commits, so a cap below that silently truncates them. torvalds/linux has
+# 1.46M, and even 20,000 exceeded the timeout because rename detection on a
+# blobless clone must fetch blobs on demand — which is how Linux landed 938
+# versions and 2,915 authors while contributing ZERO renames and ZERO deletions,
+# twice, with the mine reporting success both times.
+#
+# 3,000 kernel commits still yield roughly 9,000 renames and 6,700 deletions,
+# against a code domain that consumes about 4,000 notes in total.
+MAX_COMMITS = 20000
+HUGE_REPO_COMMITS = 100000
+HUGE_REPO_CAP = 3000
+
+
+def commit_cap(repo):
+    n = git(repo, "rev-list", "--count", "HEAD", timeout=120).strip()
+    try:
+        return HUGE_REPO_CAP if int(n) > HUGE_REPO_COMMITS else MAX_COMMITS
+    except ValueError:
+        return MAX_COMMITS
+
+
+def git(repo, *args, timeout=1800):
+    """Run git and decode leniently.
+
+    Commit metadata is NOT guaranteed UTF-8. The kernel's history carries
+    Latin-1 author names from the pre-2010 era, and strict decoding aborts the
+    whole mine on the first one ('utf-8' codec can't decode byte 0xe9). Author
+    names are used only as entity strings, so a replacement character in a rare
+    name costs nothing next to losing 1.4M commits.
+
+    The timeout is generous because `log --diff-filter` over the kernel walks
+    every commit; 180s was tuned for repos three orders of magnitude smaller.
+    """
+    out = subprocess.run(["git", "-C", repo, *args], capture_output=True,
+                         text=True, encoding="utf-8", errors="replace",
+                         timeout=timeout)
     return out.stdout if out.returncode == 0 else ""
 
 
@@ -74,7 +110,7 @@ def find_repos(roots, max_depth=3):
     return sorted(set(repos))
 
 
-def mine_renames(repo, min_score=90):
+def mine_renames(repo, min_score=90, cap=MAX_COMMITS):
     """High-confidence path changes, SPLIT BY KIND.
 
     git INFERS renames by content similarity; it does not record them. A low
@@ -91,8 +127,14 @@ def mine_renames(repo, min_score=90):
         kind="rename"  basename changed  -> also_known_as / supersedes
         kind="move"    directory changed -> located_in
     """
+    # Bounded walk. An unbounded `log --name-status` over torvalds/linux (1.46M
+    # commits) never returns, and git exits non-zero, so the pools came back
+    # EMPTY while the mine reported success — Linux appeared to contribute zero
+    # renames, moves and deletions while its authors and tags landed fine. The
+    # cap is far above what the corpus consumes: 200 kernel commits already yield
+    # ~600 renames, and the whole code domain needs ~4,000 notes.
     out = git(repo, "log", "--diff-filter=R", "--name-status",
-              "--format=%x01%H", "-M")
+              "--format=%x01%H", "-M", f"-{cap}")
     facts, sha = [], None
     for line in out.splitlines():
         if line.startswith("\x01"):
@@ -108,8 +150,9 @@ def mine_renames(repo, min_score=90):
     return facts
 
 
-def mine_deletions(repo):
-    out = git(repo, "log", "--diff-filter=D", "--name-status", "--format=%x01%H")
+def mine_deletions(repo, cap=MAX_COMMITS):
+    out = git(repo, "log", "--diff-filter=D", "--name-status",
+              "--format=%x01%H", f"-{cap}")
     facts, sha = [], None
     for line in out.splitlines():
         if line.startswith("\x01"):
@@ -121,12 +164,12 @@ def mine_deletions(repo):
     return facts
 
 
-def mine_authors(repo):
+def mine_authors(repo, cap=MAX_COMMITS):
     """(author -> commit count). The count lets the generator demand a floor:
     one drive-by commit does not make someone a contributor in the sense a
     person would assert in a remembered note."""
     counts = collections.Counter()
-    for line in git(repo, "log", "--format=%an").splitlines():
+    for line in git(repo, "log", "--format=%an", f"-{cap}").splitlines():
         name = line.strip()
         # Bot and CI identities are not people and must not become subjects.
         if not name or re.search(r"\b(bot|\[bot\]|actions|ci|dependabot|renovate)\b",
@@ -160,11 +203,12 @@ def main():
         for pre in ("RakuenSoftware-", "JBailes-"):
             if name.startswith(pre):
                 name = name[len(pre):]
-        authors = mine_authors(repo)
+        cap = commit_cap(repo)
+        authors = mine_authors(repo, cap)
         if not authors:
             continue
-        renames = mine_renames(repo, args.min_rename_score)
-        deletions = mine_deletions(repo)
+        renames = mine_renames(repo, args.min_rename_score, cap)
+        deletions = mine_deletions(repo, cap)
         versions = mine_versions(repo)
         inventory["repos"][name] = {
             "renames": renames,
