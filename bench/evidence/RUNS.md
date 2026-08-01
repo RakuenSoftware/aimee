@@ -26,7 +26,7 @@ enforce, so this table cannot drift from what is scoreable.
 | ceiling | google_gemma-4-26B-A4B-it | 1 | INVALID: incomplete (1/70) | thinking OFF — SUPERSEDED |
 | ceiling | google_gemma-4-E4B-it.nf4 | 70 | VALID | thinking OFF — SUPERSEDED |
 | challenger-254 | GLM-4.7-Flash.q6 | 70 | INVALID: errored x70 | 7900 XTX / Vulkan / Q6-Q5 — compare only within this lane |
-| challenger-254 | Magistral-Small-2509.q6 | 30 | INVALID: incomplete (30/70), errored x30 | 7900 XTX / Vulkan / Q6-Q5 — compare only within this lane |
+| challenger-254 | Magistral-Small-2509.q6 | 32 | INVALID: incomplete (32/70), errored x32 | 7900 XTX / Vulkan / Q6-Q5 — compare only within this lane |
 | challenger-254 | gemma-4-12B-it.q6 | 70 | VALID | 7900 XTX / Vulkan / Q6-Q5 — compare only within this lane |
 | diagnostics | HuggingFaceTB_SmolLM2-360M-Instruct.cap2048 | 12 | INVALID: incomplete (12/70) | cap and repetition-penalty variants |
 | diagnostics | HuggingFaceTB_SmolLM2-360M-Instruct.cap512 | 12 | INVALID: incomplete (12/70) | cap and repetition-penalty variants |
@@ -64,7 +64,7 @@ enforce, so this table cannot drift from what is scoreable.
 | promptfix | ibm-granite_granite-4.1-3b | 70 | VALID | prompt correction |
 | thinking | gemma-4-12B-it | 70 | VALID | thinking ON, cap 8192 — CURRENT |
 | thinking | gemma-4-26B-A4B-it | 70 | VALID | thinking ON, cap 8192 — CURRENT |
-| thinking | gemma-4-31B-it | 51 | INVALID: incomplete (51/70), errored x10 | thinking ON, cap 8192 — CURRENT |
+| thinking | gemma-4-31B-it | 55 | INVALID: incomplete (55/70), errored x11 | thinking ON, cap 8192 — CURRENT |
 | thinking | gemma-4-E2B-it | 70 | VALID | thinking ON, cap 8192 — CURRENT |
 | thinking | gemma-4-E4B-it | 70 | VALID | thinking ON, cap 8192 — CURRENT |
 
