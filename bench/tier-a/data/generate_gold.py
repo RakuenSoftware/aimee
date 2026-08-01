@@ -146,7 +146,16 @@ def main():
     ap.add_argument("--mid", type=int, default=3000)
     ap.add_argument("--small", type=int, default=1000)
     ap.add_argument("--strata", type=int, default=10)
-    ap.add_argument("--seed", type=int, default=20260801)
+    # 20260802, not 20260801. The original seed produced a corpus whose LARGE
+    # tier passed every gate while its SMALL tier failed template load: one
+    # sales/negation template drew 23 of 40 tier-1 slots from a cell that is
+    # 135/135/134 overall. Tiers 2 and 3 of the same cell were balanced, so the
+    # stratification is sound and that draw was simply unlucky — two other seeds
+    # pass cleanly. HARNESS_DESIGN.md says a tier that fails a gate is
+    # regenerated rather than shipped with a footnote, so it was. Recorded here
+    # because silently swapping a seed after seeing results is otherwise
+    # indistinguishable from tuning until the numbers look good.
+    ap.add_argument("--seed", type=int, default=20260802)
     args = ap.parse_args()
 
     rng = random.Random(args.seed)

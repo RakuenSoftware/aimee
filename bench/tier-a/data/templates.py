@@ -195,6 +195,13 @@ BUSINESS = {
          "gold": [{"s": "{policy}", "r": "decided_by", "o": "{team}"}]},
         {"text": "{team} owns the {policy}.",
          "gold": [{"s": "{policy}", "r": "decided_by", "o": "{team}"}]},
+        {"text": "{person} took the {policy} to the {team} for sign-off.",
+         "gold": [{"s": "{policy}", "r": "decided_by", "o": "{team}"}]},
+        {"text": "The {company} exception to the {policy} was signed off by "
+                 "the {team}.",
+         "gold": [{"s": "{policy}", "r": "decided_by", "o": "{team}"}]},
+        {"text": "{policy} changes go through {person} and the {team}.",
+         "gold": [{"s": "{policy}", "r": "decided_by", "o": "{team}"}]},
         # The gold names both policies in full, so the note must too. An
         # earlier version said "the {prev_year} one" and asserted a gold entity
         # that appears nowhere in the text — unextractable by construction.
@@ -214,7 +221,14 @@ BUSINESS = {
         {"text": "Long call with {person} today, pretty draining.", "gold": []},
         {"text": "Need to send {person} the deck before Thursday.", "gold": []},
         {"text": "{company} seem happy at the moment.", "gold": []},
+        # The {team} shape below caps at ten renderings, so without more
+        # high-variety siblings the remaining templates absorb its share and sit
+        # at ~33% each against an even 25%. Added rather than moving the gate.
         {"text": "Might restructure the {team} in the new year.", "gold": []},
+        {"text": "Still waiting on {person} to come back to me.", "gold": []},
+        {"text": "{company} rescheduled again, third time.", "gold": []},
+        {"text": "Owe {person} a proper answer on that.", "gold": []},
+        {"text": "Busy week, mostly {company} firefighting.", "gold": []},
     ],
     "implicit": [
         {"text": "Sent the quarterly report to {person} at {company} again.",
@@ -307,11 +321,20 @@ SALES = {
         {"text": "Renewed {company} onto {tier} for another year.",
          "gold": [{"s": "{company}", "r": "subscription_tier", "o": "{tier}"}]},
     ],
+    # Every template here must be able to render MANY distinct notes. A shape
+    # keyed only on {tier} can produce five, then caps out and hands its share to
+    # whichever template has the widest entity pool — which is how one template
+    # ended up carrying 45% of this cell. Ambiguity has to come from the
+    # unresolved REFERENT, not from having nothing to substitute.
     "ambiguous": [
         {"text": "Their biggest {city} account churned last month.", "gold": []},
         {"text": "The {company} renewal slipped again.", "gold": []},
         {"text": "One of the {tier} tier accounts is wobbling.", "gold": []},
         {"text": "The other contact at {company} handles renewals now.", "gold": []},
+        {"text": "Someone on {person}'s side signed off, not sure who.", "gold": []},
+        {"text": "One of the {company} stakeholders pushed back.", "gold": []},
+        {"text": "They want {product} but not for every team.", "gold": []},
+        {"text": "{person} mentioned a competitor, did not say which.", "gold": []},
     ],
 }
 
