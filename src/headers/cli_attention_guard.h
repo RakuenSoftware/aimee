@@ -75,10 +75,20 @@ int attn_session_isolation_blocked(attn_op_t op, const char *file_path, const ch
 void attn_session_isolation_target(const char *file_path, const char *cwd, char *out, size_t outsz);
 
 /* 1 = BLOCK: this worktree's branch lineage is not permitted. A primary session must be
- * cut from the default branch; a delegate may be cut from its parent's branch. An
- * unregistered worktree (no launcher-written registry row) always blocks. */
+ * cut from the default branch; a delegate may be cut from its parent's branch. Applies
+ * to worktrees that HAVE a launcher-written registry row; see
+ * attn_unregistered_lineage_blocked for the ones that do not. */
 int attn_session_branch_blocked(const char *base_branch, const char *default_branch,
                                 int base_is_registered);
+
+/* 1 = BLOCK: lineage decision for a managed worktree with NO registry row. Only one
+ * launcher writes rows, so a missing row does not mean hand-rolled -- Claude Code's
+ * EnterWorktree creates legitimate worktrees and writes none. Provenance therefore comes
+ * from git: `shares_foreign_session_history` is 1 when this branch shares a commit with
+ * another registered session branch that the default branch does not already contain,
+ * which is the "cut from another session" case the rule exists to catch. An unresolvable
+ * default branch (`default_resolved` 0) blocks, as the registry path does. */
+int attn_unregistered_lineage_blocked(int default_resolved, int shares_foreign_session_history);
 
 /* 1 = BLOCK: a WRITING Bash command reaches outside every managed worktree -- `cd <abs>`
  * to an unmanaged directory, or a redirect to an absolute path outside one. The
