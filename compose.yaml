@@ -26,18 +26,12 @@ services:
       # starts llama-server for it and points SYNTHESIS_ENDPOINT at loopback.
       # Empty on a non-llm image, or when synthesis is remote/off.
       SYNTHESIS_MODEL: ${SYNTHESIS_MODEL:-}
-      # Bearer for a remote synthesis endpoint. Blank for a bundled model on
-      # loopback, or for a keyless endpoint.
-      SYNTHESIS_API_KEY: ${SYNTHESIS_API_KEY:-}
       # The wizard's embedder choice, and the endpoint for an external one. The kb
       # MUST receive both: `aimee config deploy-env` emits them, and without them
       # reaching the container the entrypoint sees no selection, starts nothing, and
       # the builtin serves forever — the wizard's embedder silently never runs.
       EMBEDDER_MODEL: ${EMBEDDER_MODEL:-}
       EMBEDDER_URL: ${EMBEDDER_URL:-}
-      # Bearer for an EXTERNAL embedder endpoint. Blank for the bundled model,
-      # which is reached on loopback and needs no credential.
-      EMBEDDER_API_KEY: ${EMBEDDER_API_KEY:-}
       # Embedding dim — empty = config default 384 (bundled bekko-a25m). Only set
       # it for an external embedder of a different width; changing it against a
       # populated kb forces a re-embed, and the dim guard will refuse until you do.

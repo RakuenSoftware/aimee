@@ -306,8 +306,6 @@ void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n)
     * "external" with an empty URL emitted nothing and failed silently. */
    if (cfg->embedder_url[0])
       EMITF("EMBEDDER_URL=%s\n", cfg->embedder_url);
-   if (cfg->embedder_api_key[0])
-      EMITF("EMBEDDER_API_KEY=%s\n", cfg->embedder_api_key);
    /* SYNTHESIS_ENDPOINT, not AIMEE_LLM_SYNTH_URL. The latter was the retired gateway's
     * own variable — it told aimee-llm where to proxy synth — and with the gateway
     * gone NOTHING read it, so a wizard-configured external synth endpoint was dead
@@ -318,8 +316,12 @@ void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n)
       EMITF("SYNTHESIS_ENDPOINT=%s\n", cfg->synthesis_endpoint);
    if (cfg->synthesis_model[0])
       EMITF("SYNTHESIS_MODEL=%s\n", cfg->synthesis_model);
-   if (cfg->synthesis_api_key[0])
-      EMITF("SYNTHESIS_API_KEY=%s\n", cfg->synthesis_api_key);
+   /* embedder_api_key and synthesis_api_key are deliberately NOT emitted. A
+    * credential in a long-lived service environment is exactly what
+    * check-vault-only-container-env forbids: Config.Env persists, so anything
+    * written there outlives the boot that set it and shows up in `docker inspect`.
+    * They are sealed into Vault by the disposable bootstrap helper and read back
+    * with runtime_secret_get(). */
 
    /* Only a pinned dim (external embedder) is emitted; an in-container embedder's
     * width is derived from the selected model at runtime. */

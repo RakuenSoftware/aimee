@@ -2599,9 +2599,13 @@ int main(void)
       config_emit_deploy_env(&cfg, env, sizeof(env));
       assert(strstr(env, "COMPOSE_PROFILES=kb\n") != NULL);
       assert(strstr(env, "EMBEDDER_URL=https://emb.x/v1\n") != NULL);
-      assert(strstr(env, "EMBEDDER_API_KEY=emb-key\n") != NULL);
+      /* Credentials are NEVER emitted into a long-lived service environment:
+       * Config.Env persists and shows up in `docker inspect`. They are sealed into
+       * Vault by the disposable bootstrap helper (check-vault-only-container-env
+       * enforces this, and caught it when this emitted them). */
+      assert(strstr(env, "EMBEDDER_API_KEY") == NULL);
       assert(strstr(env, "EMBEDDER_DIMS=2560\n") != NULL);
-      assert(strstr(env, "SYNTHESIS_API_KEY=syn-key\n") != NULL);
+      assert(strstr(env, "SYNTHESIS_API_KEY") == NULL);
    }
 
    printf("all tests passed\n");

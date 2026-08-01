@@ -147,10 +147,11 @@ and reviewed but never run: this change was developed without a container runtim
 Treat the first `aimee-kb-llm` start as the thing that proves it, and read the
 container log rather than assuming silence means success.
 
-**The llama.cpp release asset is pinned but not checksummed.** `LLAMACPP_VERSION`
-fixes the version; `LLAMACPP_SHA256` is present and empty, so the build warns rather
-than verifying what it downloaded. Fill it in before treating a `*-llm` image as
-trusted.
+**llama.cpp is compiled from a pinned tag, not downloaded.** Upstream publishes a
+Linux binary for x64 only, so a download-based install cannot produce the arm64
+images at all. `LLAMACPP_VERSION` is a git tag, which is what the build verifies —
+and it is the only thing deciding which llama.cpp a user runs, so it needs
+deliberate bumping for security fixes.
 
 **The model-to-repo mapping is unverified.** `gemma-4-E2B-it` and `gemma-4-E4B-it`
 map to `ggml-org/gemma-4-E{2,4}B-it-GGUF:Q4_K_M`, taken from the benchmark

@@ -7,6 +7,9 @@
 # Global build args, declared before the first FROM so every stage can use them.
 ARG PG_MAJOR=18
 ARG PGVECTORSCALE_VERSION=0.9.0
+# Selects which llama.cpp stage the final image copies from (see llamacpp-* below).
+ARG AIMEE_WITH_LLAMACPP=0
+ARG LLAMACPP_VERSION=b4585
 
 FROM debian:trixie-slim AS build
 
@@ -85,6 +88,44 @@ RUN mkdir -p "/pgvectorscale/usr/lib/postgresql/${PG_MAJOR}/lib" \
         "/pgvectorscale/usr/lib/postgresql/${PG_MAJOR}/lib/" \
     && cp "/usr/share/postgresql/${PG_MAJOR}/extension/vectorscale"* \
         "/pgvectorscale/usr/share/postgresql/${PG_MAJOR}/extension/"
+
+# ---- llama.cpp, built from source (the *-llm image variants) -------------------
+# BUILT, NOT DOWNLOADED. Upstream publishes a Linux binary for x64 only — there is
+# no ubuntu-arm64 release asset, which a download-based install discovered the hard
+# way when the arm64 half of this matrix 404'd. Compiling from a pinned tag gives
+# both arches one code path, and a git tag is verifiable in a way an unchecksummed
+# release zip is not.
+#
+# THIS MAKES US THE VENDOR. Until now the deployment ran upstream's own image and
+# inherited its CVE fixes for free. LLAMACPP_VERSION is now the only thing deciding
+# which llama.cpp a user runs, and it does not move on its own.
+#
+# LLAMA_CURL=ON is required, not cosmetic: the entrypoint starts the server with
+# -hf, which fetches the model over HTTPS. Without it the server rejects -hf.
+FROM debian:trixie-slim AS llamacpp-1
+ARG LLAMACPP_VERSION
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        build-essential cmake git ca-certificates libcurl4-openssl-dev; \
+    git clone --depth 1 --branch "$LLAMACPP_VERSION" \
+        https://github.com/ggml-org/llama.cpp.git /tmp/llamacpp-src; \
+    cmake -S /tmp/llamacpp-src -B /tmp/llamacpp-src/build \
+        -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=ON \
+        -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=ON; \
+    cmake --build /tmp/llamacpp-src/build --target llama-server -j"$(nproc)"; \
+    mkdir -p /out; \
+    cp "$(find /tmp/llamacpp-src/build -name llama-server -type f -perm -u+x | head -1)" /out/; \
+    find /tmp/llamacpp-src/build -name '*.so*' -type f -exec cp {} /out/ ';' ; \
+    rm -rf /tmp/llamacpp-src
+
+# The non-llm variants copy an empty directory, so the COPY below stays
+# unconditional (Dockerfile has no conditional COPY) and costs them nothing.
+FROM debian:trixie-slim AS llamacpp-0
+RUN mkdir -p /out
+
+# Resolved from the global ARG: llamacpp-0 or llamacpp-1.
+FROM llamacpp-${AIMEE_WITH_LLAMACPP} AS llamacpp
 
 # Runtime must match the build stage: libpq5 here has to provide at least the
 # PostgreSQL 17 symbols the kb was linked against (PGDG's libpq 18 does).
@@ -311,43 +352,24 @@ PYBAKE
 # a+rX: readable everywhere, traversable on directories, and no file gains +x.
 RUN chmod -R a+rX /opt/aimee/models
 
-# ---- bundled llama.cpp (the *-llm image variants) -----------------------------
-# AIMEE_WITH_LLAMACPP=1 puts llama-server in the image so synthesis can run beside
-# the kb on the same host. SYNTHESIS_ENDPOINT then points at loopback; there is no
-# separate variable for a bundled model.
+# ---- bundled llama.cpp -------------------------------------------------------
+# Built in the llamacpp stage above; that stage is EMPTY on the non-llm variants,
+# so this COPY is unconditional and costs them nothing.
 #
-# THIS MAKES US THE VENDOR. Until now the deployment ran upstream's own image and
-# inherited its CVE fixes and version bumps for free. Bundling means this pin is
-# the only thing deciding which llama.cpp a user runs, and it does not move on its
-# own. It needs deliberate bumping, and it is the one place to change.
-ARG AIMEE_WITH_LLAMACPP=0
-ARG LLAMACPP_VERSION=b4585
-ARG LLAMACPP_SHA256=""
+# SYNTHESIS_ENDPOINT points at loopback when this is present; there is no separate
+# variable for a bundled model.
+ARG AIMEE_WITH_LLAMACPP
+ARG LLAMACPP_VERSION
+COPY --from=llamacpp /out/ /opt/aimee/llama.cpp/
+# The shared objects ship beside the binary, which is not a default search path.
+ENV LD_LIBRARY_PATH=/opt/aimee/llama.cpp:${LD_LIBRARY_PATH}
+# Prove the binary actually runs in THIS image before shipping it: a server that
+# cannot resolve its own .so files fails at first synthesis, not at build.
 RUN set -eux; \
     if [ "$AIMEE_WITH_LLAMACPP" = "1" ]; then \
-      arch="$(dpkg --print-architecture)"; \
-      case "$arch" in \
-        amd64) asset="llama-${LLAMACPP_VERSION}-bin-ubuntu-x64.zip" ;; \
-        arm64) asset="llama-${LLAMACPP_VERSION}-bin-ubuntu-arm64.zip" ;; \
-        *) echo "no llama.cpp release asset for $arch" >&2; exit 1 ;; \
-      esac; \
-      apt-get update && apt-get install -y --no-install-recommends unzip ca-certificates curl; \
-      curl -fsSL -o /tmp/llama.zip \
-        "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMACPP_VERSION}/${asset}"; \
-      if [ -n "$LLAMACPP_SHA256" ]; then \
-        echo "${LLAMACPP_SHA256}  /tmp/llama.zip" | sha256sum -c -; \
-      else \
-        echo "WARNING: LLAMACPP_SHA256 unset - release asset not verified" >&2; \
-      fi; \
-      unzip -j /tmp/llama.zip -d /opt/aimee/llama.cpp; \
       chmod +x /opt/aimee/llama.cpp/llama-server; \
-      rm -f /tmp/llama.zip; \
-      apt-get purge -y unzip && apt-get autoremove -y; \
-      rm -rf /var/lib/apt/lists/*; \
+      /opt/aimee/llama.cpp/llama-server --version; \
     fi
-# Recorded either way so the runtime can tell whether it has a local model runtime
-# without probing the filesystem. The wizard needs this: offering "run gemma-4
-# locally" on an image with no llama.cpp is an option that cannot work.
 ENV AIMEE_WITH_LLAMACPP=${AIMEE_WITH_LLAMACPP} \
     AIMEE_LLAMACPP_VERSION=${LLAMACPP_VERSION}
 
