@@ -36,15 +36,50 @@ PY=${PY:-/opt/bench/bin/python}
 # is written down here.
 DEFER="$LANE/DEFER.txt"
 
+# find_open_holder prints the pid of any process with this path open, and
+# succeeds only if one exists. /proc scan rather than lsof, which is not
+# installed on the bench containers.
+find_open_holder() {
+  local target=$1 pid fd
+  target=$(readlink -f "$target" 2>/dev/null || echo "$target")
+  for pid in $(ls /proc 2>/dev/null | grep -E '^[0-9]+$'); do
+    for fd in /proc/$pid/fd/*; do
+      [ -e "$fd" ] || continue
+      if [ "$(readlink -f "$fd" 2>/dev/null)" = "$target" ]; then
+        echo "$pid"; return 0
+      fi
+    done
+  done
+  return 1
+}
+
 healed=0
 kept=0
 deferred=0
+live=0
 for PRED in "$LANE"/*.pred.jsonl; do
   [ -e "$PRED" ] || continue
   LABEL=$(basename "$PRED" .pred.jsonl)
   if [ -f "$DEFER" ] && grep -qxF "$LABEL" "$DEFER"; then
     echo "DEFER $LABEL -> left in place, see $DEFER"
     deferred=$((deferred + 1))
+    continue
+  fi
+  # NEVER touch a file a live runner still holds open.
+  #
+  # An in-progress run is incomplete by definition, so the scorer refuses it and
+  # this loop deleted it — out from under the process still writing to it. The
+  # runner keeps its fd, so it goes on writing to an unlinked inode and every
+  # row is lost the moment it exits. That is exactly what happened to
+  # GLM-4.7-Flash: 22 minutes of a 2.5-hour run, silently destroyed by the
+  # mechanism meant to protect the results, while both the sweep and the runner
+  # reported no error at all.
+  #
+  # The check is on the file, not on a process name or a lock, because that is
+  # the thing that must not be deleted.
+  if holder=$(find_open_holder "$PRED"); then
+    echo "LIVE  $LABEL -> held open by pid $holder, leaving it alone"
+    live=$((live + 1))
     continue
   fi
   if reason=$($PY harness/score.py --gold "$GOLD" --pred "$PRED" \
@@ -56,4 +91,4 @@ for PRED in "$LANE"/*.pred.jsonl; do
     healed=$((healed + 1))
   fi
 done
-echo "verify_and_heal: $kept scoreable, $healed removed for re-run, $deferred deferred ($LANE)"
+echo "verify_and_heal: $kept scoreable, $healed removed for re-run, $deferred deferred, $live live ($LANE)"
