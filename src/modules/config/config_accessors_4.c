@@ -18,6 +18,28 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
+size_t config_kb_fusion_mode_copy(char *out, size_t n)
+{
+   char buf[32];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, kb_fusion_mode), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_ranker_fuse_command_copy(char *out, size_t n)
+{
+   char buf[512];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, ranker_fuse_command), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
 size_t config_kb_ranker_fit_command_copy(char *out, size_t n)
 {
    char buf[512];
@@ -238,39 +260,6 @@ size_t config_kb_curator_provider_api_key_copy(char *out, size_t n)
    return sizeof(buf);
 }
 
-size_t config_kb_curator_tier_b_base_url_copy(char *out, size_t n)
-{
-   char buf[256];
-   if (!out || n == 0)
-      return 0;
-   config_field_read(offsetof(config_t, kb_curator_tier_b_base_url), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   snprintf(out, n, "%s", buf);
-   return sizeof(buf);
-}
-
-size_t config_kb_curator_tier_b_model_copy(char *out, size_t n)
-{
-   char buf[128];
-   if (!out || n == 0)
-      return 0;
-   config_field_read(offsetof(config_t, kb_curator_tier_b_model), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   snprintf(out, n, "%s", buf);
-   return sizeof(buf);
-}
-
-size_t config_kb_curator_tier_b_api_key_copy(char *out, size_t n)
-{
-   char buf[256];
-   if (!out || n == 0)
-      return 0;
-   config_field_read(offsetof(config_t, kb_curator_tier_b_api_key), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   snprintf(out, n, "%s", buf);
-   return sizeof(buf);
-}
-
 size_t config_kb_curator_judge_command_copy(char *out, size_t n)
 {
    char buf[512];
@@ -387,8 +376,8 @@ const char *config_workspaces(int index)
    buf[0] = 0;
    if (index < 0 || index >= (64))
       return buf;
-   config_field_read(offsetof(config_t, workspaces) + (size_t)index * sizeof(buf), sizeof(buf),
-                     buf);
+   config_field_read(offsetof(config_t, workspaces) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
 }
@@ -471,8 +460,8 @@ const char *config_charter_values(int index)
    buf[0] = 0;
    if (index < 0 || index >= (CONFIG_CHARTER_MAX_ENTRIES))
       return buf;
-   config_field_read(offsetof(config_t, charter_values) + (size_t)index * sizeof(buf), sizeof(buf),
-                     buf);
+   config_field_read(offsetof(config_t, charter_values) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
 }
@@ -495,8 +484,7 @@ const char *config_identity_working_profile_injection_fields(int index)
    buf[0] = 0;
    if (index < 0 || index >= (CONFIG_WORKING_PROFILE_ALLOW_MAX))
       return buf;
-   config_field_read(offsetof(config_t, identity_working_profile_injection_fields) +
-                         (size_t)index * sizeof(buf),
+   config_field_read(offsetof(config_t, identity_working_profile_injection_fields) + (size_t)index * sizeof(buf),
                      sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
@@ -520,8 +508,8 @@ const char *config_mcp_osv_allow(int index)
    buf[0] = 0;
    if (index < 0 || index >= (CONFIG_MCP_OSV_MAX_ALLOW))
       return buf;
-   config_field_read(offsetof(config_t, mcp_osv_allow) + (size_t)index * sizeof(buf), sizeof(buf),
-                     buf);
+   config_field_read(offsetof(config_t, mcp_osv_allow) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
 }
@@ -619,7 +607,7 @@ int config_set_subagent_ban_enabled(int value)
    return rc;
 }
 
-int config_set_embedding_dim(int value)
+int config_set_embedder_dims(int value)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));
    if (!cfg)
@@ -627,7 +615,7 @@ int config_set_embedding_dim(int value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      cfg->embedding_dim = value;
+      cfg->embedder_dims = value;
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1933,21 +1921,6 @@ int config_set_memory_window_radius(int value)
    if (rc == 0)
    {
       cfg->memory_window_radius = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_kb_search_max_results(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->kb_search_max_results = value;
       rc = config_save(cfg);
    }
    free(cfg);

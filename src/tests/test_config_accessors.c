@@ -40,7 +40,7 @@ int main(void)
    /* Generated accessors */
    CK_INT(workspace_count);
    CK_INT(subagent_ban_enabled);
-   CK_INT(embedding_dim);
+   CK_INT(embedder_dims);
    CK_INT(memory_maintenance_enabled);
    CK_INT(memory_maintenance_trigger_secs);
    CK_STR(db1_path);

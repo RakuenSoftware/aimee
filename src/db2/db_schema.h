@@ -23,7 +23,7 @@ extern "C"
    /* Apply the consolidated Postgres schema to an already-open libpq
     * connection (PGconn *, passed as void * so this header stays libpq-free).
     * |embed_dim| is the deployment's embedding width — from config, the single
-    * place it is declared (config_embedding_dim_effective) — and the schema's
+    * place it is declared (config_embedder_dims_effective) — and the schema's
     * halfvec embedding columns are created at that dimension.
     *
     * A value <= 0 or > EMBED_MAX_DIM is an ERROR, not a fallback: this layer holds

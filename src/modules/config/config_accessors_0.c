@@ -39,10 +39,10 @@ int config_subagent_ban_enabled(void)
    return v;
 }
 
-int config_embedding_dim(void)
+int config_embedder_dims(void)
 {
    int v = 0;
-   config_field_read(offsetof(config_t, embedding_dim), sizeof(v), &v);
+   config_field_read(offsetof(config_t, embedder_dims), sizeof(v), &v);
    return v;
 }
 
@@ -595,8 +595,7 @@ int config_identity_working_profile_injection_enabled(void)
 int config_identity_working_profile_injection_fields_count(void)
 {
    int v = 0;
-   config_field_read(offsetof(config_t, identity_working_profile_injection_fields_count), sizeof(v),
-                     &v);
+   config_field_read(offsetof(config_t, identity_working_profile_injection_fields_count), sizeof(v), &v);
    return v;
 }
 
@@ -989,19 +988,5 @@ int config_roundtable_chair_synthesis(void)
 {
    int v = 0;
    config_field_read(offsetof(config_t, roundtable_chair_synthesis), sizeof(v), &v);
-   return v;
-}
-
-int config_verify_cross_project(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, verify_cross_project), sizeof(v), &v);
-   return v;
-}
-
-int config_cross_verify(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, cross_verify), sizeof(v), &v);
    return v;
 }

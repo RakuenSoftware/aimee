@@ -1167,7 +1167,7 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
     * only with an active project, which is also the bucket queried here. */
    if (w_vector > 0.0 && project[0])
    {
-      const char *embed_cmd = config_embedding_command_current(NULL);
+      const char *embed_cmd = config_embedder_command_current(NULL);
       float qvec[EMBED_MAX_DIM];
       int qdim = memory_embed_text(query, embed_cmd, EMBED_INPUT_QUERY, qvec, EMBED_MAX_DIM);
       if (qdim > 0 && qdim == db2_embedding_dim())

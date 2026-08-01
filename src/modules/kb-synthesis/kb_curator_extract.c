@@ -612,7 +612,7 @@ int kb_curator_extract_one(const kb_curator_extract_opts_t *opts)
    kb_curator_resolve_sidecar_command(opts, cmd, sizeof(cmd));
 
    /* Route through the §2 dispatch: a configured Tier-A provider (incl. the
-    * bundled-Gemma LLM_ENDPOINT env) runs in-process via provider_client; else
+    * bundled-Gemma SYNTHESIS_ENDPOINT env) runs in-process via provider_client; else
     * the resolved sidecar command. extract_docs is Tier-A. */
    aimee_log(LOG_INFO, "kb.curator.extract", "invoking curator LLM for doc %lld (cmd fallback: %s)",
              (long long)job.document_id, cmd);

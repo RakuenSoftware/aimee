@@ -566,12 +566,12 @@ int db2_probe_embedder_dim(int budget_ms, int *out)
       *out = 1024;
    return 0;
 }
-int config_resolve_embedding_dim(const config_t *cfg)
+int config_resolve_embedder_dims(const config_t *cfg)
 {
    (void)cfg;
    return 0;
 }
-int config_embedding_dim_is_pinned(const config_t *cfg)
+int config_embedder_dims_is_pinned(const config_t *cfg)
 {
    (void)cfg;
    return 0;
@@ -579,7 +579,7 @@ int config_embedding_dim_is_pinned(const config_t *cfg)
 
 /* kb_http reads the pin through the no-arg form now; same answer as the
  * config_t stub above. */
-int config_embedding_dim_pinned_current(void)
+int config_embedder_dims_pinned_current(void)
 {
    return 0;
 }
@@ -696,7 +696,8 @@ const config_field_t *config_field_lookup(const char *key)
    /* The KB-owned settings surface (KB_SETTINGS) plus the server-owned keys the
     * 403 cases probe — all real config keys, so the route's OWN allowlist is
     * what those assertions exercise, not a lookup miss. */
-   if (strncmp(key, "embedding_", 10) == 0 || strncmp(key, "llm_", 4) == 0 ||
+   if (strncmp(key, "embedder_", 9) == 0 || strncmp(key, "synthesis_", 10) == 0 ||
+       strncmp(key, "llm_", 4) == 0 ||
        strncmp(key, "kb_", 3) == 0 || strncmp(key, "css_", 4) == 0 ||
        strcmp(key, "typed_facts_enabled") == 0 || strcmp(key, "ocr_command") == 0 ||
        strcmp(key, "tsr_command") == 0 || strcmp(key, "db2_url") == 0)
@@ -1438,16 +1439,16 @@ const char *config_workspaces(int index)
    return index == 0 ? "/workspace" : "";
 }
 
-const char *config_embedding_command(const config_t *cfg, const char *requested)
+const char *config_embedder_command(const config_t *cfg, const char *requested)
 {
    if (requested && requested[0])
       return requested;
-   if (cfg && cfg->embedding_command[0])
-      return cfg->embedding_command;
-   const char *url = getenv("AIMEE_EMBEDDER_URL");
+   if (cfg && cfg->embedder_command[0])
+      return cfg->embedder_command;
+   const char *url = getenv("EMBEDDER_URL");
    if (url && url[0])
       return url;
-   url = getenv("AIMEE_LLM_URL");
+   url = getenv("SYNTHESIS_ENDPOINT");
    if (url && url[0])
       return url;
    return "builtin";
@@ -1455,9 +1456,9 @@ const char *config_embedding_command(const config_t *cfg, const char *requested)
 
 /* The config_t-free form callers use now. Same resolution order, minus the
  * struct the caller no longer holds: request > env > builtin. */
-const char *config_embedding_command_current(const char *requested)
+const char *config_embedder_command_current(const char *requested)
 {
-   return config_embedding_command(NULL, requested);
+   return config_embedder_command(NULL, requested);
 }
 
 /* kb_intel_payload reads the demotion knobs through accessors now. Mirror the
@@ -2541,8 +2542,8 @@ static void test_console_settings(void)
        kb_http_route_ex("GET", "/v1/console/settings", NULL, NULL, NULL, NULL, 0, buf, sizeof(buf));
    assert(status == 200);
    assert(strstr(buf, "\"fields\"") != NULL);
-   assert(strstr(buf, "\"embedding_model\"") != NULL);
-   assert(strstr(buf, "\"llm_synth_backend\"") != NULL);
+   assert(strstr(buf, "\"embedder_model\"") != NULL);
+   assert(strstr(buf, "\"synthesis_endpoint\"") != NULL);
    assert(strstr(buf, "\"Embedder\"") != NULL);
    /* Owned by the Typed Facts page, so it must not appear on this surface. */
    assert(strstr(buf, "\"typed_facts_enabled\"") == NULL);
@@ -4358,12 +4359,12 @@ static void test_code_context_no_answer_is_explicit(void)
 static void test_code_context_embedder_outage_is_not_no_answer(void)
 {
    char buf[2048];
-   assert(setenv("AIMEE_EMBEDDER_URL", "http://embedder-down", 1) == 0);
+   assert(setenv("EMBEDDER_URL", "http://embedder-down", 1) == 0);
    g_vec_enabled = 0;
    int s =
        kb_http_route_ex("GET", "/v1/code/context", "query=definitely-unrelated&project=proj-alpha",
                         NULL, NULL, NULL, 0, buf, sizeof(buf));
-   unsetenv("AIMEE_EMBEDDER_URL");
+   unsetenv("EMBEDDER_URL");
    assert(s == 503);
    assert(strstr(buf, "\"status\":\"unavailable\"") != NULL);
    assert(strstr(buf, "\"dependency\":\"embedder\"") != NULL);
@@ -4375,14 +4376,14 @@ static void test_code_context_embedder_outage_is_not_no_answer(void)
 static void test_code_context_embedder_auth_is_unauthorized(void)
 {
    char buf[2048];
-   assert(setenv("AIMEE_EMBEDDER_URL", "http://embedder-auth", 1) == 0);
+   assert(setenv("EMBEDDER_URL", "http://embedder-auth", 1) == 0);
    g_vec_enabled = 0;
    g_vec_unauthorized = 1;
    int s =
        kb_http_route_ex("GET", "/v1/code/context", "query=definitely-unrelated&project=proj-alpha",
                         NULL, NULL, NULL, 0, buf, sizeof(buf));
    g_vec_unauthorized = 0;
-   unsetenv("AIMEE_EMBEDDER_URL");
+   unsetenv("EMBEDDER_URL");
    assert(s == 401);
    assert(strstr(buf, "\"status\":\"unauthorized\"") != NULL);
    assert(strstr(buf, "\"dependency\":\"embedder\"") != NULL);
@@ -5922,21 +5923,21 @@ static void test_search_scope_all_keeps_active_project_first(void)
 }
 
 /* A managed KB normally has no raw embedding_command in aimee.yaml: the
- * wizard supplies AIMEE_LLM_URL. Search must resolve that deployment default
+ * wizard supplies SYNTHESIS_ENDPOINT. Search must resolve that deployment default
  * before entering the ranked backend, or it silently queries a 1024-dim corpus
  * with the 384-dim builtin vector. */
 static void test_search_uses_managed_embedder(void)
 {
    char buf[1024];
-   unsetenv("AIMEE_EMBEDDER_URL");
-   setenv("AIMEE_LLM_URL", "http://managed-llm:8742", 1);
+   unsetenv("EMBEDDER_URL");
+   setenv("SYNTHESIS_ENDPOINT", "http://managed-llm:8742", 1);
    g_test_search_embedding[0] = '\0';
    const char *body = "{\"query\":\"foo\",\"project\":\"proj-alpha\"}";
    int s = kb_http_route_ex("POST", "/v1/search", NULL, NULL, NULL, body, (int)strlen(body), buf,
                             sizeof(buf));
    assert(s == 200);
    assert(strcmp(g_test_search_embedding, "http://managed-llm:8742") == 0);
-   unsetenv("AIMEE_LLM_URL");
+   unsetenv("SYNTHESIS_ENDPOINT");
 }
 
 /* Producer->consumer contract: the /v1/search ranked handler and the kb_search

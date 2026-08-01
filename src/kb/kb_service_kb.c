@@ -336,12 +336,12 @@ static cJSON *kb_service_health_object(void)
    cJSON_AddNumberToObject(resp, "pgvec_indexed_vectors", pgvec_indexed);
 
    /* Embed: report whether an embedder is configured. The command can come from
-    * the config file OR the AIMEE_EMBEDDER_URL env (the deploy stack exports the
+    * the config file OR the EMBEDDER_URL env (the deploy stack exports the
     * latter), so resolve it the same way embed_command does instead of reading the
     * raw config field — otherwise an env-configured embedder is wrongly reported
     * embed_ok:false while embed_command shows a real URL. The "builtin" fallback
     * (nothing configured) still reports false, as before. */
-   const char *embed_cmd = config_embedding_command_current(NULL);
+   const char *embed_cmd = config_embedder_command_current(NULL);
    int embed_ok = (embed_cmd[0] && strcmp(embed_cmd, "builtin") != 0) ? 1 : 0;
    cJSON_AddBoolToObject(resp, "embed_ok", embed_ok);
    cJSON_AddStringToObject(resp, "embed_command", embed_cmd);

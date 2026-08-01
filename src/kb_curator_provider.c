@@ -12,7 +12,7 @@
 
 /* Model name sent to the unified aimee-llm gateway when none is configured. The
  * gateway serves a single baked model and ignores the request's model field, so
- * this is a label; an operator can override it with AIMEE_LLM_MODEL. */
+ * this is a label; an operator can override it with SYNTHESIS_MODEL. */
 #define AIMEE_LLM_DEFAULT_MODEL "aimee-synth"
 
 /* An outage is global to the provider, not local to one queue row. Without a
@@ -86,32 +86,18 @@ void kb_curator_provider_backoff_recovered(void)
    pthread_mutex_unlock(&provider_backoff_lock);
 }
 
-kb_curator_tier_t kb_curator_stage_tier(kb_curator_stage_t stage)
-{
-   switch (stage)
-   {
-   /* Tier-A: mechanical, grammar-constrained extract/index. */
-   case KB_CURATOR_STAGE_EXTRACT_DOCS:
-   case KB_CURATOR_STAGE_EXTRACT_CODE:
-   case KB_CURATOR_STAGE_INDEX_NARRATIVE:
-   case KB_CURATOR_STAGE_INDEX_CLAIMS:
-   case KB_CURATOR_STAGE_INDEX_CODE_UNIT:
-   case KB_CURATOR_STAGE_LINK_ARTIFACTS:
-      return KB_CURATOR_TIER_A;
-   /* Tier-B: reasoning / judge. */
-   case KB_CURATOR_STAGE_JUDGE:
-   case KB_CURATOR_STAGE_RESOLVE_ENTITIES:
-   case KB_CURATOR_STAGE_DETECT_CONTRADICTIONS:
-   case KB_CURATOR_STAGE_SYNTHESIZE:
-   case KB_CURATOR_STAGE_PROMOTE_ENTITY:
-   case KB_CURATOR_STAGE_SYNTHESIZE_REFLECTION:
-      return KB_CURATOR_TIER_B;
-   }
-   /* Fail safe: an unclassified / future stage routes to the capable tier (which
-    * simply idles when tier_b is unconfigured), NEVER silently to the small
-    * Tier-A model — a weak model on a reasoning stage poisons the graph. */
-   return KB_CURATOR_TIER_B;
-}
+/* kb_curator_stage_tier() lived here, mapping each stage to Tier-A (mechanical
+ * extract/index) or Tier-B (reasoning/judge) so the two could be served by
+ * DIFFERENT MODELS. That split is gone: there is one synthesis role and one model
+ * behind it, because measurement did not support running a cheaper one on the
+ * mechanical stages.
+ *
+ * Thinking is NOT suppressed for any stage. It measured positive-to-neutral
+ * everywhere it was tried — on the 69-note extraction set the default model gains
+ * 0.084 F1 with it (95% CI [+0.0094,+0.1712], paired bootstrap; see
+ * docs/SYNTHESIS_MODELS.md). An earlier per-tier suppression existed because a
+ * reasoning pass can consume the output budget and truncate the JSON answer; that
+ * is bounded by MF_LLM_OUT_CAP rather than by refusing to think. */
 
 int kb_curator_provider_for_stage(kb_curator_stage_t stage, provider_def_owned_t *out)
 {
@@ -122,23 +108,16 @@ int kb_curator_provider_for_stage(kb_curator_stage_t stage, provider_def_owned_t
    /* Each accessor hands back its own thread-local buffer, so the six reads below
     * are copied into *out's storage immediately rather than aliased -- that is the
     * whole reason this returns an owned def. */
-   if (kb_curator_stage_tier(stage) == KB_CURATOR_TIER_B)
-   {
-      snprintf(out->base_url, sizeof(out->base_url), "%s", config_kb_curator_tier_b_base_url());
-      snprintf(out->model, sizeof(out->model), "%s", config_kb_curator_tier_b_model());
-      snprintf(out->api_key, sizeof(out->api_key), "%s", config_kb_curator_tier_b_api_key());
-   }
-   else
-   {
-      snprintf(out->base_url, sizeof(out->base_url), "%s", config_kb_curator_provider_base_url());
-      snprintf(out->model, sizeof(out->model), "%s", config_kb_curator_provider_model());
-      snprintf(out->api_key, sizeof(out->api_key), "%s", config_kb_curator_provider_api_key());
-   }
+   /* One provider for every stage. This used to read kb_curator_tier_b_* for the
+    * reasoning stages and kb_curator_provider_* for the mechanical ones. */
+   snprintf(out->base_url, sizeof(out->base_url), "%s", config_kb_curator_provider_base_url());
+   snprintf(out->model, sizeof(out->model), "%s", config_kb_curator_provider_model());
+   snprintf(out->api_key, sizeof(out->api_key), "%s", config_kb_curator_provider_api_key());
 
    /* Env fallback when a tier has no config provider, in precedence order:
     *
     *  1. The configured SYNTHESIS endpoint, resolved by config — one field
-    *     (llm_synth_endpoint) with the AIMEE_LLM_URL override applied inside
+    *     (llm_synth_endpoint) with the SYNTHESIS_ENDPOINT override applied inside
     *     config_synth_chat_endpoint_current(), never here. It no longer names a
     *     co-deployed container: aimee-llm is retired and the kb embeds in-container,
     *     so this is synthesis-only and external-only, and it drives BOTH tiers via
@@ -148,7 +127,7 @@ int kb_curator_provider_for_stage(kb_curator_stage_t stage, provider_def_owned_t
     *     The URL is normalized (trailing slashes, /v1 suffix) in that one resolver,
     *     so this file cannot disagree with any other caller about what an operator's
     *     value means.
-    *  2. LLM_ENDPOINT — TIER-A ONLY. It is the small-model interface (the
+    *  2. SYNTHESIS_ENDPOINT — TIER-A ONLY. It is the small-model interface (the
     *     zero-config CPU sibling points Tier-A here); letting a small model serve
     *     the reasoning stages is the weak-model-poisons-the-graph case the tier
     *     split guards against, so Tier-B never falls back to it.
@@ -159,12 +138,12 @@ int kb_curator_provider_for_stage(kb_curator_stage_t stage, provider_def_owned_t
    {
       if (config_synth_chat_endpoint_current(out->base_url, sizeof(out->base_url)))
       {
-         const char *env_model = getenv("AIMEE_LLM_MODEL");
+         const char *env_model = getenv("SYNTHESIS_MODEL");
          snprintf(out->model, sizeof(out->model), "%s",
                   (env_model && env_model[0]) ? env_model : AIMEE_LLM_DEFAULT_MODEL);
          int have_service_token =
-             runtime_secret_get("AIMEE_LLM_AUTH_TOKEN", out->api_key, sizeof(out->api_key));
-         const char *auth_required = getenv("AIMEE_LLM_AUTH_REQUIRED");
+             runtime_secret_get("SYNTHESIS_API_KEY", out->api_key, sizeof(out->api_key));
+         const char *auth_required = getenv("SYNTHESIS_AUTH_REQUIRED");
          if (auth_required && strcmp(auth_required, "1") == 0 && !have_service_token)
          {
             /* Managed unified gateway must never receive a keyless request. Wipe
@@ -176,25 +155,18 @@ int kb_curator_provider_for_stage(kb_curator_stage_t stage, provider_def_owned_t
          if (!have_service_token)
             out->api_key[0] = '\0';
       }
-      else if (kb_curator_stage_tier(stage) == KB_CURATOR_TIER_A)
-      {
-         const char *env_ep = getenv("LLM_ENDPOINT");
-         if (!env_ep || !env_ep[0])
-         {
-            memset(out, 0, sizeof(*out));
-            return 0; /* neither config nor env — the stage stays idle */
-         }
-         const char *env_model = getenv("LLM_MODEL");
-         snprintf(out->base_url, sizeof(out->base_url), "%s", env_ep);
-         snprintf(out->model, sizeof(out->model), "%s",
-                  (env_model && env_model[0]) ? env_model : "");
-         if (!runtime_secret_get("LLM_API_KEY", out->api_key, sizeof(out->api_key)))
-            out->api_key[0] = '\0';
-      }
       else
       {
+         /* No configured endpoint — the stage stays idle, which is supported.
+          *
+          * A TIER-A-ONLY branch used to sit here reading the endpoint straight from
+          * the environment. It was a second path to the same endpoint that only the
+          * mechanical stages could take, so a deployment configured that way ran
+          * extraction and left the reasoning stages idle. config now ingests
+          * SYNTHESIS_ENDPOINT, so the branch above already sees it and every stage
+          * resolves identically. */
          memset(out, 0, sizeof(*out));
-         return 0; /* Tier-B with no config and no AIMEE_LLM_URL — stays idle */
+         return 0;
       }
    }
 
@@ -204,11 +176,8 @@ int kb_curator_provider_for_stage(kb_curator_stage_t stage, provider_def_owned_t
    out->def.api_key = out->api_key[0] ? out->api_key : NULL;
    out->def.wire = PROVIDER_WIRE_OPENAI_CHAT;
    out->def.temperature = -1.0; /* let the provider default */
-   /* Tier-A is mechanical, grammar-constrained extraction/indexing — it does not
-    * need (and is hurt by) a reasoning model's chain-of-thought: the reasoning pass
-    * adds latency at drain volume and, worse, can consume the output budget so the
-    * JSON answer comes back truncated/empty (observed: memory-fact extraction landed
-    * 0 facts). Skip thinking for Tier-A; Tier-B (judge/synthesize) keeps it. */
-   out->def.disable_thinking = (kb_curator_stage_tier(stage) == KB_CURATOR_TIER_A);
+   /* One global, operator-owned switch (synthesis_thinking, default on) rather
+    * than a rule implied by the stage. See the note above the resolver. */
+   out->def.disable_thinking = !config_synthesis_thinking();
    return 1;
 }

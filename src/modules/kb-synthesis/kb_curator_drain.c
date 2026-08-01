@@ -234,10 +234,10 @@ static void curator_index_set_status(const char *label)
  * kb_curator_queue_docs_for_project does) and returns 1=did work / 0=idle. */
 static int en_embedder(void)
 {
-   /* config_embedding_command_current resolves request > config > env > builtin;
+   /* config_embedder_command_current resolves request > config > env > builtin;
     * this stage only cares whether an embedder is CONFIGURED, so read the raw
     * field rather than the resolved value, which is never empty. */
-   return config_embedding_command_field()[0] != '\0';
+   return config_embedder_command_field()[0] != '\0';
 }
 static int en_evidence_embed(void)
 {
@@ -247,7 +247,7 @@ static int en_evidence_embed(void)
 static int stage_embed_code(const kb_curator_extract_opts_t *opts)
 {
    (void)opts;
-   if (!config_embedding_command_field()[0])
+   if (!config_embedder_command_field()[0])
       return 0;
    project_info_t projects[CURATOR_PROJECT_SWEEP_MAX];
    int np = index_list_projects(projects, CURATOR_PROJECT_SWEEP_MAX);
@@ -272,7 +272,7 @@ static int stage_ingest_docs(const kb_curator_extract_opts_t *opts)
     * sufficient.  Rotating one bounded project per pass prevents an early large
     * corpus from starving every later project in lexical name order. */
    static size_t next_project = 0;
-   if (!config_embedding_command_field()[0])
+   if (!config_embedder_command_field()[0])
       return 0;
    project_info_t projects[CURATOR_PROJECT_SWEEP_MAX];
    int np = index_list_projects(projects, CURATOR_PROJECT_SWEEP_MAX);
@@ -281,11 +281,11 @@ static int stage_ingest_docs(const kb_curator_extract_opts_t *opts)
    size_t selected = next_project % (size_t)np;
    next_project = (selected + 1) % (size_t)np;
    int total = 0;
-   int e = kb_doc_refresh(projects[selected].name, config_embedding_command_field(),
+   int e = kb_doc_refresh(projects[selected].name, config_embedder_command_field(),
                           CURATOR_DOC_SWEEP_BATCH);
    if (e > 0)
       total += e;
-   int b = kb_doc_embed_backfill(projects[selected].name, config_embedding_command_field(),
+   int b = kb_doc_embed_backfill(projects[selected].name, config_embedder_command_field(),
                                  CURATOR_DOC_SWEEP_BATCH);
    if (b > 0)
       total += b;
@@ -306,7 +306,7 @@ static int stage_ingest_docs(const kb_curator_extract_opts_t *opts)
 static int stage_embed_evidence(const kb_curator_extract_opts_t *opts)
 {
    (void)opts;
-   const char *embed_cmd = config_embedding_command_current(NULL);
+   const char *embed_cmd = config_embedder_command_current(NULL);
    int n = kb_evidence_embed_drain(config_kb_evidence_embed_batch(), embed_cmd);
    if (n > 0)
       aimee_log(LOG_DEBUG, "kb.evidence.embed", "drained %d evidence op(s)", n);
@@ -834,7 +834,7 @@ static void *drain_thread_main(void *arg)
        * scheduler, never on the capture hot path. Off by default. */
       if (config_learning_synthesize_enabled() && config_learning_synthesize_command()[0])
       {
-         const char *embed_cmd = config_embedding_command_current(NULL);
+         const char *embed_cmd = config_embedder_command_current(NULL);
          /* Bound LLM calls per poll — each op is one sidecar/LLM round-trip. */
          int n = kb_learning_synth_drain(SYNTH_DRAIN_BATCH, config_learning_synthesize_command(),
                                          embed_cmd, config_learning_synthesize_k(),

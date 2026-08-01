@@ -102,7 +102,7 @@ int kb_curator_index_claims_one(const kb_curator_extract_opts_t *opts)
       return 1;
    }
 
-   const char *embed_cmd = config_embedding_command_current(NULL);
+   const char *embed_cmd = config_embedder_command_current(NULL);
    float subj_vec[CURATOR_CLAIM_DIM];
    float val_vec[CURATOR_CLAIM_DIM];
    int d1 = memory_embed_text(subj_attr[0] ? subj_attr : value_text, embed_cmd,

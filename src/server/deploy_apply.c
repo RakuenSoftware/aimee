@@ -105,7 +105,7 @@ static int deploy_llm_token(char *out, size_t cap)
 {
    if (!out || cap < DEPLOY_LLM_TOKEN_HEX + 1)
       return -1;
-   /* AIMEE_LLM_AUTH_TOKEN is the child credential and may be stale inherited
+   /* SYNTHESIS_API_KEY is the child credential and may be stale inherited
     * process state. It is deliberately ignored here. Operators who must adopt
     * an existing managed LLM use the distinct, explicit override variable. */
    char configured[513];
@@ -117,13 +117,13 @@ static int deploy_llm_token(char *out, size_t cap)
          return -1;
       }
       snprintf(out, cap, "%s", configured);
-      int rc = vault_runtime_secret_set("AIMEE_LLM_AUTH_TOKEN", configured);
+      int rc = vault_runtime_secret_set("SYNTHESIS_API_KEY", configured);
       runtime_secret_wipe(configured, sizeof(configured));
       return rc;
    }
    runtime_secret_wipe(configured, sizeof(configured));
 
-   if (runtime_secret_get("AIMEE_LLM_AUTH_TOKEN", out, cap))
+   if (runtime_secret_get("SYNTHESIS_API_KEY", out, cap))
       return deploy_llm_token_valid(out) ? 0 : -1;
 
    const char *home = aimee_home();
@@ -151,7 +151,7 @@ static int deploy_llm_token(char *out, size_t cap)
          n--;
       out[n] = '\0';
       if (!deploy_llm_token_valid(out) ||
-          vault_runtime_secret_set("AIMEE_LLM_AUTH_TOKEN", out) != 0)
+          vault_runtime_secret_set("SYNTHESIS_API_KEY", out) != 0)
       {
          runtime_secret_wipe(out, cap);
          return -1;
@@ -165,7 +165,7 @@ static int deploy_llm_token(char *out, size_t cap)
    char proposed[DEPLOY_LLM_TOKEN_HEX + 1];
    if (platform_random_hex(proposed, DEPLOY_LLM_TOKEN_HEX) != 0)
       return -1;
-   if (vault_runtime_secret_set("AIMEE_LLM_AUTH_TOKEN", proposed) != 0)
+   if (vault_runtime_secret_set("SYNTHESIS_API_KEY", proposed) != 0)
    {
       runtime_secret_wipe(proposed, sizeof(proposed));
       return -1;
@@ -310,8 +310,11 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
        * Do not leave an inherited empty/stale duplicate before it: getenv and
        * Compose are not required to choose the later duplicate. */
       if (deploy_env_overrides(env, *e) ||
-          (managed_llm && (strncmp(*e, "AIMEE_LLM_AUTH_TOKEN=", 21) == 0 ||
-                           strncmp(*e, "AIMEE_LLM_AUTH_REQUIRED=", 24) == 0)))
+          /* sizeof-1, not a hand-counted length: these were literals matching the
+           * OLD names, and a rename silently stopped the filter matching. */
+          (managed_llm &&
+           (strncmp(*e, "SYNTHESIS_API_KEY=", sizeof("SYNTHESIS_API_KEY=") - 1) == 0 ||
+            strncmp(*e, "SYNTHESIS_AUTH_REQUIRED=", sizeof("SYNTHESIS_AUTH_REQUIRED=") - 1) == 0)))
          continue;
       envp[n] = strdup(*e);
       if (!envp[n])
@@ -345,16 +348,16 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
    }
    if (managed_llm)
    {
-      size_t len = strlen("AIMEE_LLM_AUTH_TOKEN=") + strlen(llm_token);
+      size_t len = strlen("SYNTHESIS_API_KEY=") + strlen(llm_token);
       envp[n] = malloc(len + 1);
       if (!envp[n])
       {
          free_envp(envp);
          return NULL;
       }
-      snprintf(envp[n++], len + 1, "AIMEE_LLM_AUTH_TOKEN=%s", llm_token);
+      snprintf(envp[n++], len + 1, "SYNTHESIS_API_KEY=%s", llm_token);
       memset(llm_token, 0, sizeof(llm_token));
-      envp[n] = strdup("AIMEE_LLM_AUTH_REQUIRED=1");
+      envp[n] = strdup("SYNTHESIS_AUTH_REQUIRED=1");
       if (!envp[n])
       {
          free_envp(envp);
@@ -656,10 +659,10 @@ static void *deploy_worker(void *arg)
        * finishes; KB initialization and CPU indexing do not wait for them. */
       if (managed_kb && managed_llm)
       {
-         const char *token = deploy_env_value(envp, "AIMEE_LLM_AUTH_TOKEN");
-         char record[sizeof("AIMEE_LLM_AUTH_TOKEN=") + 512];
+         const char *token = deploy_env_value(envp, "SYNTHESIS_API_KEY");
+         char record[sizeof("SYNTHESIS_API_KEY=") + 512];
          int record_len =
-             token ? snprintf(record, sizeof(record), "AIMEE_LLM_AUTH_TOKEN=%s", token) : -1;
+             token ? snprintf(record, sizeof(record), "SYNTHESIS_API_KEY=%s", token) : -1;
          const char *bootstrap_argv[16];
          int bootstrap_code = -1;
          used = strlen(out);

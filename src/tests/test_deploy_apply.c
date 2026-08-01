@@ -98,9 +98,9 @@ static void test_managed_llm_service_credential(void)
    char tmp[] = "/tmp/aimee-deploy-llm-token-XXXXXX";
    assert(mkdtemp(tmp) != NULL);
    assert(setenv("AIMEE_HOME", tmp, 1) == 0);
-   runtime_secret_remove("AIMEE_LLM_AUTH_TOKEN");
+   runtime_secret_remove("SYNTHESIS_API_KEY");
    runtime_secret_remove("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE");
-   unsetenv("AIMEE_LLM_AUTH_TOKEN");
+   unsetenv("SYNTHESIS_API_KEY");
    unsetenv("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE");
    snprintf(g_stub_profiles, sizeof(g_stub_profiles), "kb,llm");
 
@@ -113,13 +113,13 @@ static void test_managed_llm_service_credential(void)
    assert(managed_llm == 1);
    assert(managed_kb == 1);
    assert(managed_identity == 1);
-   const char *token = envp_value(envp, "AIMEE_LLM_AUTH_TOKEN");
+   const char *token = envp_value(envp, "SYNTHESIS_API_KEY");
    assert(token != NULL && strlen(token) == 64);
    for (size_t i = 0; i < 64; i++)
       assert(token[i] == 'a');
-   assert(envp_key_count(envp, "AIMEE_LLM_AUTH_TOKEN") == 1);
-   assert(strcmp(envp_value(envp, "AIMEE_LLM_AUTH_REQUIRED"), "1") == 0);
-   assert(envp_key_count(envp, "AIMEE_LLM_AUTH_REQUIRED") == 1);
+   assert(envp_key_count(envp, "SYNTHESIS_API_KEY") == 1);
+   assert(strcmp(envp_value(envp, "SYNTHESIS_AUTH_REQUIRED"), "1") == 0);
+   assert(envp_key_count(envp, "SYNTHESIS_AUTH_REQUIRED") == 1);
    assert(setenv("COMPOSE_PROFILES", "attacker-profile", 1) == 0);
    free_envp(envp);
    envp = build_deploy_envp(NULL, 0, NULL, NULL, NULL);
@@ -135,19 +135,19 @@ static void test_managed_llm_service_credential(void)
    /* Re-apply reads the vaulted identity instead of silently rotating it. */
    g_stub_random_hex = 'b';
    envp = build_deploy_envp(NULL, 0, NULL, NULL, NULL);
-   token = envp_value(envp, "AIMEE_LLM_AUTH_TOKEN");
+   token = envp_value(envp, "SYNTHESIS_API_KEY");
    assert(token != NULL && token[0] == 'a');
    free_envp(envp);
 
    /* Inherited empty OR non-empty child state cannot shadow the managed file. */
-   assert(setenv("AIMEE_LLM_AUTH_TOKEN", "stale-inherited-service-token-1234", 1) == 0);
-   assert(setenv("AIMEE_LLM_AUTH_REQUIRED", "0", 1) == 0);
+   assert(setenv("SYNTHESIS_API_KEY", "stale-inherited-service-token-1234", 1) == 0);
+   assert(setenv("SYNTHESIS_AUTH_REQUIRED", "0", 1) == 0);
    envp = build_deploy_envp(NULL, 0, NULL, NULL, NULL);
-   assert(envp_key_count(envp, "AIMEE_LLM_AUTH_TOKEN") == 1);
-   token = envp_value(envp, "AIMEE_LLM_AUTH_TOKEN");
+   assert(envp_key_count(envp, "SYNTHESIS_API_KEY") == 1);
+   token = envp_value(envp, "SYNTHESIS_API_KEY");
    assert(token != NULL && token[0] == 'a');
-   assert(strcmp(envp_value(envp, "AIMEE_LLM_AUTH_REQUIRED"), "1") == 0);
-   assert(envp_key_count(envp, "AIMEE_LLM_AUTH_REQUIRED") == 1);
+   assert(strcmp(envp_value(envp, "SYNTHESIS_AUTH_REQUIRED"), "1") == 0);
+   assert(envp_key_count(envp, "SYNTHESIS_AUTH_REQUIRED") == 1);
    free_envp(envp);
 
    /* First-boot override input is already in the cache by the time deploy runs;
@@ -155,9 +155,9 @@ static void test_managed_llm_service_credential(void)
    assert(runtime_secret_store("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE",
                                "operator-managed-service-token-1234") == 0);
    envp = build_deploy_envp(NULL, 0, NULL, NULL, NULL);
-   assert(strcmp(envp_value(envp, "AIMEE_LLM_AUTH_TOKEN"), "operator-managed-service-token-1234") ==
+   assert(strcmp(envp_value(envp, "SYNTHESIS_API_KEY"), "operator-managed-service-token-1234") ==
           0);
-   assert(envp_key_count(envp, "AIMEE_LLM_AUTH_TOKEN") == 1);
+   assert(envp_key_count(envp, "SYNTHESIS_API_KEY") == 1);
    free_envp(envp);
    runtime_secret_remove("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE");
    assert(runtime_secret_store("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE",
@@ -168,7 +168,7 @@ static void test_managed_llm_service_credential(void)
    /* A historical pre-Vault file is accepted only as one-shot migration input:
     * insecure modes and symlinks fail closed; a private regular file is sealed
     * and then erased. */
-   runtime_secret_remove("AIMEE_LLM_AUTH_TOKEN");
+   runtime_secret_remove("SYNTHESIS_API_KEY");
    int legacy_fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
    assert(legacy_fd >= 0);
    const char *legacy = "legacy-managed-service-token-1234";
@@ -186,19 +186,19 @@ static void test_managed_llm_service_credential(void)
    assert(rename(real_path, path) == 0);
    envp = build_deploy_envp(NULL, 0, NULL, NULL, NULL);
    assert(envp != NULL);
-   assert(strcmp(envp_value(envp, "AIMEE_LLM_AUTH_TOKEN"), legacy) == 0);
+   assert(strcmp(envp_value(envp, "SYNTHESIS_API_KEY"), legacy) == 0);
    free_envp(envp);
    assert(stat(path, &st) != 0 && errno == ENOENT);
 
    /* No local LLM means no credential is invented or passed. */
-   unsetenv("AIMEE_LLM_AUTH_TOKEN");
-   unsetenv("AIMEE_LLM_AUTH_REQUIRED");
+   unsetenv("SYNTHESIS_API_KEY");
+   unsetenv("SYNTHESIS_AUTH_REQUIRED");
    snprintf(g_stub_profiles, sizeof(g_stub_profiles), "kb");
    managed_llm = 1;
    managed_identity = 0;
    envp = build_deploy_envp(NULL, 0, &managed_llm, &managed_kb, &managed_identity);
-   assert(envp != NULL && envp_value(envp, "AIMEE_LLM_AUTH_TOKEN") == NULL);
-   assert(envp_value(envp, "AIMEE_LLM_AUTH_REQUIRED") == NULL);
+   assert(envp != NULL && envp_value(envp, "SYNTHESIS_API_KEY") == NULL);
+   assert(envp_value(envp, "SYNTHESIS_AUTH_REQUIRED") == NULL);
    assert(managed_llm == 0);
    assert(managed_kb == 1);
    assert(managed_identity == 1);
@@ -217,7 +217,7 @@ static void test_managed_llm_service_credential(void)
    runtime_secret_remove("AIMEE_KB_CONN");
    unsetenv("AIMEE_SERVER_ID");
 
-   runtime_secret_remove("AIMEE_LLM_AUTH_TOKEN");
+   runtime_secret_remove("SYNTHESIS_API_KEY");
    runtime_secret_remove("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE");
    assert(rmdir(tmp) == 0);
    unsetenv("AIMEE_HOME");
@@ -275,7 +275,7 @@ static void test_managed_kb_credential_bootstrap_is_stdin_only(void)
    int saw_rm = 0, saw_stdin_bootstrap = 0, saw_kb = 0;
    for (int i = 0; i < n; i++)
    {
-      assert(strstr(argv[i], "AIMEE_LLM_AUTH_TOKEN=") == NULL);
+      assert(strstr(argv[i], "SYNTHESIS_API_KEY=") == NULL);
       assert(strstr(argv[i], "Bearer ") == NULL);
       if (strcmp(argv[i], "--rm") == 0)
          saw_rm = 1;

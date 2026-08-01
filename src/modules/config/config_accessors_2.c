@@ -18,6 +18,41 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
+int config_kb_bg_ingest_interval_hours(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, kb_bg_ingest_interval_hours), sizeof(v), &v);
+   return v;
+}
+
+int config_kb_bg_watch_enabled(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, kb_bg_watch_enabled), sizeof(v), &v);
+   return v;
+}
+
+int config_kb_bg_watch_debounce_secs(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, kb_bg_watch_debounce_secs), sizeof(v), &v);
+   return v;
+}
+
+double config_code_hybrid_weight_code(void)
+{
+   double v = 0;
+   config_field_read(offsetof(config_t, code_hybrid_weight_code), sizeof(v), &v);
+   return v;
+}
+
+double config_code_hybrid_weight_graph(void)
+{
+   double v = 0;
+   config_field_read(offsetof(config_t, code_hybrid_weight_graph), sizeof(v), &v);
+   return v;
+}
+
 double config_code_hybrid_weight_vector(void)
 {
    double v = 0;
@@ -717,20 +752,29 @@ const char *config_openai_key_cmd(void)
    return buf;
 }
 
-const char *config_embedding_model(void)
+const char *config_embedder_model(void)
 {
    static _Thread_local char buf[128];
    buf[0] = 0;
-   config_field_read(offsetof(config_t, embedding_model), sizeof(buf), buf);
+   config_field_read(offsetof(config_t, embedder_model), sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
 }
 
-const char *config_embedding_endpoint(void)
+const char *config_embedder_url(void)
 {
    static _Thread_local char buf[512];
    buf[0] = 0;
-   config_field_read(offsetof(config_t, embedding_endpoint), sizeof(buf), buf);
+   config_field_read(offsetof(config_t, embedder_url), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_embedder_api_key(void)
+{
+   static _Thread_local char buf[256];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, embedder_api_key), sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
 }
@@ -1037,78 +1081,6 @@ const char *config_search_searxng_url(void)
    static _Thread_local char buf[512];
    buf[0] = 0;
    config_field_read(offsetof(config_t, search_searxng_url), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_search_tavily_api_key(void)
-{
-   static _Thread_local char buf[256];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, search_tavily_api_key), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_search_backends(void)
-{
-   static _Thread_local char buf[256];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, search_backends), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_coord_closet_denylist(void)
-{
-   static _Thread_local char buf[256];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, coord_closet_denylist), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_prompt_tier(void)
-{
-   static _Thread_local char buf[16];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, prompt_tier), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_prompt_file(void)
-{
-   static _Thread_local char buf[MAX_PATH_LEN];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, prompt_file), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_delegate_prompt_tier(void)
-{
-   static _Thread_local char buf[16];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, delegate_prompt_tier), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_otel_endpoint(void)
-{
-   static _Thread_local char buf[512];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, otel_endpoint), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_otel_service_name(void)
-{
-   static _Thread_local char buf[64];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, otel_service_name), sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
 }

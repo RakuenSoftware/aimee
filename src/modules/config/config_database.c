@@ -1,6 +1,6 @@
 #include "aimee.h"
 #include "config_database.h"
-#include "config_embedding_dim.h" /* CONFIG_EMBEDDING_DIM_DEFAULT — the one declaration */
+#include "config_embedder_dims.h" /* CONFIG_EMBEDDER_DIMS_DEFAULT — the one declaration */
 #include "runtime_secret.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -81,50 +81,50 @@ int config_db2_url_effective(char *out, size_t n)
    return out[0] ? 1 : 0;
 }
 
-int config_embedding_dim_default(void)
+int config_embedder_dims_default(void)
 {
-   return CONFIG_EMBEDDING_DIM_DEFAULT;
+   return CONFIG_EMBEDDER_DIMS_DEFAULT;
 }
 
-/* Effective embedding dimension: the AIMEE_EMBEDDING_DIM env override when set
- * and valid (1..EMBED_MAX_DIM), else cfg->embedding_dim. The env lets a
+/* Effective embedding dimension: the EMBEDDER_DIMS env override when set
+ * and valid (1..EMBED_MAX_DIM), else cfg->embedder_dims. The env lets a
  * containerized deploy set the dim without a writable aimee.yaml — it must match
  * the running embedder model. Normally it should be left UNSET so the dim is
  * derived (pinned > recorded > probed > default); setting it is an operator pin.
- * Returns 0 for "nothing pinned" — see config_embedding_dim_effective() for a
+ * Returns 0 for "nothing pinned" — see config_embedder_dims_effective() for a
  * width you can use. Non-mutating so const callers can use it. */
 /* No-arg form: same value against the loaded config. Deliberately mirrors
- * config_resolve_embedding_dim (the PIN signal, 0 when nothing is pinned) rather
- * than config_embedding_dim_current (the effective width) -- the two callers of
+ * config_resolve_embedder_dims (the PIN signal, 0 when nothing is pinned) rather
+ * than config_embedder_dims_current (the effective width) -- the two callers of
  * this are pinning db2, and collapsing them would silently turn "unpinned" into
  * the default. */
-int config_resolve_embedding_dim_current(void)
+int config_resolve_embedder_dims_current(void)
 {
-   int dim = config_embedding_dim();
-   const char *env = getenv("AIMEE_EMBEDDING_DIM");
+   int dim = config_embedder_dims();
+   const char *env = getenv("EMBEDDER_DIMS");
    if (env && env[0])
    {
       char *end = NULL;
       long v = strtol(env, &end, 10);
       if (end && *end == '\0' && v >= 1 && v <= EMBED_MAX_DIM)
          return (int)v;
-      fprintf(stderr, "aimee: config warning: AIMEE_EMBEDDING_DIM must be 1..%d, got \"%s\"\n",
+      fprintf(stderr, "aimee: config warning: EMBEDDER_DIMS must be 1..%d, got \"%s\"\n",
               EMBED_MAX_DIM, env);
    }
    return dim;
 }
 
-int config_resolve_embedding_dim(const config_t *cfg)
+int config_resolve_embedder_dims(const config_t *cfg)
 {
-   int dim = cfg ? cfg->embedding_dim : 0;
-   const char *env = getenv("AIMEE_EMBEDDING_DIM");
+   int dim = cfg ? cfg->embedder_dims : 0;
+   const char *env = getenv("EMBEDDER_DIMS");
    if (env && env[0])
    {
       char *end = NULL;
       long v = strtol(env, &end, 10);
       if (end && *end == '\0' && v >= 1 && v <= EMBED_MAX_DIM)
          return (int)v;
-      fprintf(stderr, "aimee: config warning: AIMEE_EMBEDDING_DIM must be 1..%d, got \"%s\"\n",
+      fprintf(stderr, "aimee: config warning: EMBEDDER_DIMS must be 1..%d, got \"%s\"\n",
               EMBED_MAX_DIM, env);
    }
    return dim;
@@ -133,19 +133,19 @@ int config_resolve_embedding_dim(const config_t *cfg)
 /* The width to embed and size columns with: the pin when there is one, else the
  * declared default. Every caller that used to keep its own fallback literal calls
  * this instead. */
-int config_embedding_dim_effective(const config_t *cfg)
+int config_embedder_dims_effective(const config_t *cfg)
 {
-   int dim = config_resolve_embedding_dim(cfg);
-   return dim > 0 ? dim : CONFIG_EMBEDDING_DIM_DEFAULT;
+   int dim = config_resolve_embedder_dims(cfg);
+   return dim > 0 ? dim : CONFIG_EMBEDDER_DIMS_DEFAULT;
 }
 
 /* No-arg form, for callers that want the deployment's width and hold no config_t
  * (the CLI doctor, reporting what it expects the embedder to return). Same answer
- * as config_embedding_dim_effective against the loaded config. */
-int config_embedding_dim_current(void)
+ * as config_embedder_dims_effective against the loaded config. */
+int config_embedder_dims_current(void)
 {
-   int pinned = config_embedding_dim();
-   const char *env = getenv("AIMEE_EMBEDDING_DIM");
+   int pinned = config_embedder_dims();
+   const char *env = getenv("EMBEDDER_DIMS");
    if (env && env[0])
    {
       char *end = NULL;
@@ -153,7 +153,7 @@ int config_embedding_dim_current(void)
       if (end && *end == '\0' && v >= 1 && v <= EMBED_MAX_DIM)
          return (int)v;
    }
-   return pinned > 0 ? pinned : CONFIG_EMBEDDING_DIM_DEFAULT;
+   return pinned > 0 ? pinned : CONFIG_EMBEDDER_DIMS_DEFAULT;
 }
 
 /* Trailing-slash trim + /v1 suffix, shared by both resolvers below so they cannot
@@ -176,7 +176,7 @@ static int config_synth_chat_endpoint_normalize(const char *endpoint, char *out,
    return 1;
 }
 
-/* The synthesis endpoint — see config_database.h. AIMEE_LLM_URL outranks the stored
+/* The synthesis endpoint — see config_database.h. SYNTHESIS_ENDPOINT outranks the stored
  * field for the same reason it does for the embedder: a containerized deploy sets
  * the environment, not a writable aimee.yaml. */
 int config_synth_chat_endpoint(const config_t *cfg, char *out, size_t out_len)
@@ -185,16 +185,16 @@ int config_synth_chat_endpoint(const config_t *cfg, char *out, size_t out_len)
       return 0;
    out[0] = '\0';
 
-   const char *endpoint = getenv("AIMEE_LLM_URL");
+   const char *endpoint = getenv("SYNTHESIS_ENDPOINT");
    if (!endpoint || !endpoint[0])
-      endpoint = cfg ? cfg->llm_synth_endpoint : NULL;
+      endpoint = cfg ? cfg->synthesis_endpoint : NULL;
    if (!endpoint || !endpoint[0])
       return 0;
    return config_synth_chat_endpoint_normalize(endpoint, out, out_len);
 }
 
 /* Same resolver, without the caller holding a config_t: reads llm_synth_endpoint
- * through its accessor. AIMEE_LLM_URL still outranks it, and the normalization is
+ * through its accessor. SYNTHESIS_ENDPOINT still outranks it, and the normalization is
  * the shared one above, so no caller can disagree about what an operator's value
  * means. */
 int config_synth_chat_endpoint_current(char *out, size_t out_len)
@@ -203,35 +203,35 @@ int config_synth_chat_endpoint_current(char *out, size_t out_len)
       return 0;
    out[0] = '\0';
 
-   const char *endpoint = getenv("AIMEE_LLM_URL");
+   const char *endpoint = getenv("SYNTHESIS_ENDPOINT");
    if (!endpoint || !endpoint[0])
-      endpoint = config_llm_synth_endpoint();
+      endpoint = config_synthesis_endpoint();
    if (!endpoint || !endpoint[0])
       return 0;
    return config_synth_chat_endpoint_normalize(endpoint, out, out_len);
 }
 
 /* §2a: pinned iff the resolved operator dim is positive. Keeping this defined in
- * terms of config_resolve_embedding_dim guarantees the pin flag agrees with the
+ * terms of config_resolve_embedder_dims guarantees the pin flag agrees with the
  * dim that was actually set (env "0"/non-numeric/empty and an unset cfg both
  * resolve to 0 → not pinned), so the recorded-dim override fires on exactly the
  * deployments that did not pin. */
-int config_embedding_dim_is_pinned(const config_t *cfg)
+int config_embedder_dims_is_pinned(const config_t *cfg)
 {
-   return config_resolve_embedding_dim(cfg) > 0;
+   return config_resolve_embedder_dims(cfg) > 0;
 }
 
 /* No-arg form for callers that hold no config_t, matching
- * config_embedding_dim_current. The config_t form stays: it is a pure function
- * of one field plus AIMEE_EMBEDDING_DIM, and test_config walks the whole
+ * config_embedder_dims_current. The config_t form stays: it is a pure function
+ * of one field plus EMBEDDER_DIMS, and test_config walks the whole
  * pinned/not-pinned table with hand-built configs and no I/O. */
-int config_embedding_dim_pinned_current(void)
+int config_embedder_dims_pinned_current(void)
 {
-   /* Mirrors config_resolve_embedding_dim: a VALID env override is a pin, else
+   /* Mirrors config_resolve_embedder_dims: a VALID env override is a pin, else
     * the configured field is a pin when positive. Deliberately not
-    * config_embedding_dim_current() > 0 -- that form substitutes the declared
+    * config_embedder_dims_current() > 0 -- that form substitutes the declared
     * default when nothing is pinned, so it is true even for an unpinned deploy. */
-   const char *env = getenv("AIMEE_EMBEDDING_DIM");
+   const char *env = getenv("EMBEDDER_DIMS");
    if (env && env[0])
    {
       char *end = NULL;
@@ -239,21 +239,12 @@ int config_embedding_dim_pinned_current(void)
       if (end && *end == '\0' && v >= 1 && v <= EMBED_MAX_DIM)
          return 1;
    }
-   return config_embedding_dim() > 0;
+   return config_embedder_dims() > 0;
 }
 
-/* Map a role backend string to the plugin's AIMEE_LLM_<ROLE>_MODE value. Empty
- * (unconfigured) yields "" so the caller can skip emitting it. */
-static const char *deploy_role_mode(const char *backend)
-{
-   if (strcmp(backend, "local") == 0)
-      return "local";
-   if (strcmp(backend, "external") == 0)
-      return "external";
-   if (strcmp(backend, "off") == 0)
-      return "off";
-   return "";
-}
+/* deploy_role_mode() lived here: it mapped a role backend string to the retired
+ * plugin's AIMEE_LLM_<ROLE>_MODE value. With llm_embed_backend/llm_synth_backend
+ * gone there is no backend string to map — a non-empty endpoint IS the mode. */
 
 /* Same emitter without the caller holding a config_t. */
 void config_emit_deploy_env_current(char *buf, size_t n)
@@ -285,7 +276,6 @@ void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n)
    } while (0)
 
    const int remote_kb = strcmp(cfg->kb_mode, "remote") == 0;
-   const char *eb = cfg->llm_embed_backend, *sb = cfg->llm_synth_backend;
 
    /* COMPOSE_PROFILES: a remote kb deploys nothing; a local kb runs the "kb" service
     * and that is all. There is no longer an inference service to gate a profile on —
@@ -308,27 +298,32 @@ void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n)
     * serves the selected model itself, so all the deploy layer passes on is WHICH model
     * (the wizard's choice, which the kb resolves from its registry) and, for an external
     * embedder, the endpoint to use instead. */
-   if (cfg->embedding_model[0])
-      EMITF("EMBEDDER_MODEL=%s\n", cfg->embedding_model);
-   if (strcmp(eb, "external") == 0 && cfg->embedding_endpoint[0])
-      EMITF("AIMEE_EMBEDDER_URL=%s\n", cfg->embedding_endpoint);
-
-   if (deploy_role_mode(sb)[0])
-      EMITF("AIMEE_LLM_SYNTH_MODE=%s\n", deploy_role_mode(sb));
-   if (strcmp(sb, "local") == 0 && cfg->llm_synth_tier[0])
-      EMITF("AIMEE_LLM_SYNTH_TIER=%s\n", cfg->llm_synth_tier);
-   /* AIMEE_LLM_URL, not AIMEE_LLM_SYNTH_URL. The latter was the retired gateway's
+   if (cfg->embedder_model[0])
+      EMITF("EMBEDDER_MODEL=%s\n", cfg->embedder_model);
+   /* A non-empty URL IS the external embedder — there is no separate backend
+    * selector to agree with any more. The llm_embed_backend/llm_synth_backend pair
+    * used to gate these emissions and could disagree with the fields it gated:
+    * "external" with an empty URL emitted nothing and failed silently. */
+   if (cfg->embedder_url[0])
+      EMITF("EMBEDDER_URL=%s\n", cfg->embedder_url);
+   if (cfg->embedder_api_key[0])
+      EMITF("EMBEDDER_API_KEY=%s\n", cfg->embedder_api_key);
+   /* SYNTHESIS_ENDPOINT, not AIMEE_LLM_SYNTH_URL. The latter was the retired gateway's
     * own variable — it told aimee-llm where to proxy synth — and with the gateway
     * gone NOTHING read it, so a wizard-configured external synth endpoint was dead
     * end to end: written to config, emitted into the environment, consumed by no
-    * one. AIMEE_LLM_URL is the variable config_synth_chat_endpoint() honours, which
+    * one. SYNTHESIS_ENDPOINT is the variable config_synth_chat_endpoint() honours, which
     * is what a containerized kb needs when it has no writable aimee.yaml. */
-   if (strcmp(sb, "external") == 0 && cfg->llm_synth_endpoint[0])
-      EMITF("AIMEE_LLM_URL=%s\n", cfg->llm_synth_endpoint);
+   if (cfg->synthesis_endpoint[0])
+      EMITF("SYNTHESIS_ENDPOINT=%s\n", cfg->synthesis_endpoint);
+   if (cfg->synthesis_model[0])
+      EMITF("SYNTHESIS_MODEL=%s\n", cfg->synthesis_model);
+   if (cfg->synthesis_api_key[0])
+      EMITF("SYNTHESIS_API_KEY=%s\n", cfg->synthesis_api_key);
 
    /* Only a pinned dim (external embedder) is emitted; an in-container embedder's
     * width is derived from the selected model at runtime. */
-   if (config_embedding_dim_is_pinned(cfg) && cfg->embedding_dim > 0)
-      EMITF("AIMEE_EMBEDDING_DIM=%d\n", cfg->embedding_dim);
+   if (config_embedder_dims_is_pinned(cfg) && cfg->embedder_dims > 0)
+      EMITF("EMBEDDER_DIMS=%d\n", cfg->embedder_dims);
 #undef EMITF
 }

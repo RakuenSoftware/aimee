@@ -175,7 +175,7 @@ static int kb_search_handler(const char *body, char *resp, int cap)
     * embedder, and a 384-dim builtin query vector cannot match a real-embedder
     * corpus (1024/2560-dim) — the dim mismatch yields zero hits even though the
     * corpus is fully embedded. */
-   const char *emb = config_embedding_command_field()[0] ? config_embedding_command_field() : NULL;
+   const char *emb = config_embedder_command_field()[0] ? config_embedder_command_field() : NULL;
 
    char *j = kb_client_search_json_scoped_ex(project, all_projects, jq->valuestring, emb,
                                              max_results, format, NULL);

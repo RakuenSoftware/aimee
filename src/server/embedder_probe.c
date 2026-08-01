@@ -33,7 +33,7 @@ static int probe_once(void)
    if (!g_embed_cmd[0])
       return -1;
    /* An http(s):// "command" is the in-process embed transport (the combined /
-    * unified-container deployments export AIMEE_LLM_URL and set no sidecar
+    * unified-container deployments export SYNTHESIS_ENDPOINT and set no sidecar
     * command) — there is nothing to exec, and popen would fork
     * `sh -c "http://... --dim"` forever. Probe by embedding a short text and
     * taking the vector's length: transport-exact, and independent of whether

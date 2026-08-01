@@ -124,7 +124,7 @@ static void kb_cmd_update(app_ctx_t *ctx, int argc, char **argv)
     * hash) would mismatch a real-embedder corpus (1024/2560-dim) and return
     * nothing. */
    const char *embed_cmd =
-       config_embedding_command_field()[0] ? config_embedding_command_field() : NULL;
+       config_embedder_command_field()[0] ? config_embedder_command_field() : NULL;
 
    char proj[256];
    kb_cmd_resolve_project(project, root, proj, sizeof(proj));
@@ -206,7 +206,7 @@ static void kb_cmd_search(app_ctx_t *ctx, int argc, char **argv)
     * hash) would mismatch a real-embedder corpus (1024/2560-dim) and return
     * nothing. */
    const char *embed_cmd =
-       config_embedding_command_field()[0] ? config_embedding_command_field() : NULL;
+       config_embedder_command_field()[0] ? config_embedder_command_field() : NULL;
 
    char proj[256];
    kb_cmd_resolve_project(project, NULL, proj, sizeof(proj));
@@ -491,7 +491,7 @@ static void kb_cmd_repair(app_ctx_t *ctx, int argc, char **argv)
     * hash) would mismatch a real-embedder corpus (1024/2560-dim) and return
     * nothing. */
    const char *embed_cmd =
-       config_embedding_command_field()[0] ? config_embedding_command_field() : NULL;
+       config_embedder_command_field()[0] ? config_embedder_command_field() : NULL;
 
    char proj[256];
    kb_cmd_resolve_project(project, root, proj, sizeof(proj));

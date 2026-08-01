@@ -819,7 +819,7 @@ int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t 
          snprintf(errbuf, errlen,
                   "embedding dimension %d is unusable (expected 1..%d); the deployment's "
                   "width was never supplied to the DB2 layer — check that startup calls "
-                  "db2_set_embedding_dim_default(config_embedding_dim_default())",
+                  "db2_set_embedding_dim_default(config_embedder_dims_default())",
                   embed_dim, EMBED_MAX_DIM);
       return -1;
    }

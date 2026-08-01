@@ -676,9 +676,9 @@ static void test_pick_sidecar_command_resolution(void)
    /* (a) explicit command wins verbatim, candidates ignored. */
    const char *none[] = {"/should/not/matter.py"};
    kb_curator_pick_sidecar_command(
-       "env LLM_ENDPOINT=x python3 /opt/aimee/scripts/curator-extract.py", none, 1, out,
+       "env SYNTHESIS_ENDPOINT=x python3 /opt/aimee/scripts/curator-extract.py", none, 1, out,
        sizeof(out));
-   assert(strcmp(out, "env LLM_ENDPOINT=x python3 /opt/aimee/scripts/curator-extract.py") == 0);
+   assert(strcmp(out, "env SYNTHESIS_ENDPOINT=x python3 /opt/aimee/scripts/curator-extract.py") == 0);
 
    /* (b) first READABLE candidate is chosen; a missing one ahead of it is skipped,
     *     and a 0644 (non-executable) file still qualifies. */

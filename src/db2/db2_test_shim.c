@@ -10,7 +10,7 @@
 #ifndef AIMEE_DISABLE_DB2_SQLITE_SHIM
 
 #include "db2_test_shim.h"
-#include "modules/config/config_embedding_dim.h" /* the one width declaration (no config link) */
+#include "modules/config/config_embedder_dims.h" /* the one width declaration (no config link) */
 
 #include "db2.h"
 #include "db2_internal.h"
@@ -54,8 +54,8 @@ void db2_test_shim_open_path(const char *path)
     * Take that width from config — the one place it is declared — so the shim and the
     * builtin cannot disagree; a literal here was a second declaration. Tests that
     * exercise a specific width call db2_set_embedding_dim themselves after open. */
-   db2_set_embedding_dim_default(CONFIG_EMBEDDING_DIM_DEFAULT);
-   db2_set_embedding_dim(CONFIG_EMBEDDING_DIM_DEFAULT);
+   db2_set_embedding_dim_default(CONFIG_EMBEDDER_DIMS_DEFAULT);
+   db2_set_embedding_dim(CONFIG_EMBEDDER_DIMS_DEFAULT);
 
    char err[512] = {0};
    rc = db2_apply_schema_sqlite_shim(raw, err, sizeof(err));

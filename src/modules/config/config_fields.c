@@ -34,14 +34,24 @@ const config_field_t config_fields[] = {
      0, CFG_STRING},
     {"guardrail_mode", offsetof(config_t, guardrail_mode), sizeof(((config_t *)0)->guardrail_mode),
      0, CFG_STRING},
-    {"embedding_command", offsetof(config_t, embedding_command),
-     sizeof(((config_t *)0)->embedding_command), 0, CFG_STRING},
-    {"embedding_model", offsetof(config_t, embedding_model),
-     sizeof(((config_t *)0)->embedding_model), 0, CFG_STRING},
-    {"embedding_endpoint", offsetof(config_t, embedding_endpoint),
-     sizeof(((config_t *)0)->embedding_endpoint), 0, CFG_STRING},
-    {"embedding_dim", offsetof(config_t, embedding_dim), sizeof(((config_t *)0)->embedding_dim), 0,
-     CFG_INT},
+    /* Embedder. The env names are declared HERE so config ingests them at startup
+     * like every other field. They used to be read by ad-hoc getenv() in
+     * config_database.c while these rows declared no env var at all — which is
+     * why they had to be hand-plumbed through compose YAML as a second surface. */
+    {"embedder_command", offsetof(config_t, embedder_command),
+     sizeof(((config_t *)0)->embedder_command), 0, CFG_STRING},
+    {"embedder_model", offsetof(config_t, embedder_model),
+     sizeof(((config_t *)0)->embedder_model), 0, CFG_STRING, RELOAD_HOT, FGROUP_RUNTIME,
+     "EMBEDDER_MODEL"},
+    {"embedder_url", offsetof(config_t, embedder_url), sizeof(((config_t *)0)->embedder_url), 0,
+     CFG_STRING, RELOAD_HOT, FGROUP_RUNTIME, "EMBEDDER_URL"},
+    {"embedder_api_key", offsetof(config_t, embedder_api_key),
+     sizeof(((config_t *)0)->embedder_api_key), 0, CFG_STRING, RELOAD_HOT, FGROUP_RUNTIME,
+     "EMBEDDER_API_KEY"},
+    /* One-way door once anything is embedded: DB2 records the column width and
+     * refuses startup on drift. 1..EMBED_MAX_DIM (4000, the DB2 ceiling). */
+    {"embedder_dims", offsetof(config_t, embedder_dims), sizeof(((config_t *)0)->embedder_dims), 0,
+     CFG_INT, RELOAD_RESTART, FGROUP_RUNTIME, "EMBEDDER_DIMS"},
     /* Setup-wizard page 2: KB mode + per-role LLM backend record (see config.h).
      * All wizard-settable; the deploy layer reads them. RELOAD_RESTART because the
      * deploy topology (what containers run) only changes on a restart. */
@@ -52,20 +62,31 @@ const config_field_t config_fields[] = {
     {"kb_client_bearer_token", offsetof(config_t, kb_client_bearer_token),
      sizeof(((config_t *)0)->kb_client_bearer_token), 0, CFG_STRING, RELOAD_RESTART, FGROUP_RUNTIME,
      "AIMEE_KB_API_BEARER_TOKEN"},
-    {"llm_embed_backend", offsetof(config_t, llm_embed_backend),
-     sizeof(((config_t *)0)->llm_embed_backend), 0, CFG_STRING, RELOAD_RESTART, FGROUP_DEPLOY},
-    {"llm_synth_backend", offsetof(config_t, llm_synth_backend),
-     sizeof(((config_t *)0)->llm_synth_backend), 0, CFG_STRING, RELOAD_RESTART, FGROUP_DEPLOY},
-    {"llm_synth_host", offsetof(config_t, llm_synth_host), sizeof(((config_t *)0)->llm_synth_host),
-     0, CFG_STRING, RELOAD_RESTART, FGROUP_DEPLOY},
-    {"llm_synth_gpu", offsetof(config_t, llm_synth_gpu), sizeof(((config_t *)0)->llm_synth_gpu), 0,
-     CFG_STRING, RELOAD_RESTART, FGROUP_DEPLOY},
-    {"llm_synth_tier", offsetof(config_t, llm_synth_tier), sizeof(((config_t *)0)->llm_synth_tier),
-     0, CFG_STRING, RELOAD_RESTART, FGROUP_DEPLOY},
-    {"llm_synth_endpoint", offsetof(config_t, llm_synth_endpoint),
-     sizeof(((config_t *)0)->llm_synth_endpoint), 0, CFG_STRING, RELOAD_RESTART, FGROUP_DEPLOY},
-    {"llm_synth_model", offsetof(config_t, llm_synth_model),
-     sizeof(((config_t *)0)->llm_synth_model), 0, CFG_STRING, RELOAD_RESTART, FGROUP_DEPLOY},
+    /* A fact about the running image, not a preference: the Dockerfile sets
+     * AIMEE_WITH_LLAMACPP in every variant. RELOAD_RESTART because it cannot change
+     * without replacing the image. */
+    {"aimee_with_llamacpp", offsetof(config_t, aimee_with_llamacpp),
+     sizeof(((config_t *)0)->aimee_with_llamacpp), 0, CFG_STRING, RELOAD_RESTART, FGROUP_RUNTIME,
+     "AIMEE_WITH_LLAMACPP"},
+    /* Synthesis. ONE endpoint: an aimee-kb *-llm image runs gemma-4 on the same
+     * host as the kb, so a bundled model is reached at a 127.0.0.1 URL and needs no
+     * second variable. Empty = synthesis off, which is supported.
+     *
+     * llm_embed_backend / llm_synth_backend / llm_synth_host / llm_synth_gpu /
+     * llm_synth_tier are GONE. They chose where to place the retired aimee-llm
+     * container; the aimee-kb image variant now encodes that. */
+    {"synthesis_endpoint", offsetof(config_t, synthesis_endpoint),
+     sizeof(((config_t *)0)->synthesis_endpoint), 0, CFG_STRING, RELOAD_RESTART, FGROUP_RUNTIME,
+     "SYNTHESIS_ENDPOINT"},
+    {"synthesis_model", offsetof(config_t, synthesis_model),
+     sizeof(((config_t *)0)->synthesis_model), 0, CFG_STRING, RELOAD_HOT, FGROUP_RUNTIME,
+     "SYNTHESIS_MODEL"},
+    {"synthesis_api_key", offsetof(config_t, synthesis_api_key),
+     sizeof(((config_t *)0)->synthesis_api_key), 0, CFG_STRING, RELOAD_HOT, FGROUP_RUNTIME,
+     "SYNTHESIS_API_KEY"},
+    /* Global, not per-stage: one switch the operator owns. Default on. */
+    {"synthesis_thinking", offsetof(config_t, synthesis_thinking), sizeof(int), 0, CFG_BOOL,
+     RELOAD_HOT, FGROUP_RUNTIME, "SYNTHESIS_THINKING"},
     {"memory_coref_mode", offsetof(config_t, memory_coref_mode),
      sizeof(((config_t *)0)->memory_coref_mode), 0, CFG_STRING},
     {"memory_coref_window", offsetof(config_t, memory_coref_window),
@@ -662,12 +683,13 @@ static const struct
     {"openai_model", "gpt-4o"},
     {"openai_key_cmd", ""},
     {"guardrail_mode", "approve"},
-    {"embedding_command", ""},
-    {"embedding_model", ""},
-    {"embedding_endpoint", ""},
+    {"embedder_command", ""},
+    {"embedder_model", ""},
+    {"embedder_url", ""},
     {"kb_client_url", ""},
     {"kb_client_bearer_token", ""},
     {"memory_rerank_mode", ""},
+    {"synthesis_thinking", "true"},
     {"ingress_preinject_enabled", "true"},
     {"code_context_mode", "on"},
     {"ingress_preinject_anthropic_enabled", "false"},

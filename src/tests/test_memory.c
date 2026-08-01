@@ -6,7 +6,7 @@
 #include <unistd.h>
 #include <math.h>
 #include "aimee.h"
-#include "config_database.h" /* config_embedding_dim_current — the one width declaration */
+#include "config_database.h" /* config_embedder_dims_current — the one width declaration */
 #include "db.h"
 #include "db1.h"
 #include "db2.h"
@@ -1689,7 +1689,7 @@ static void test_memory_embed_records_embedder_version(void)
     * config this test just wrote (embedding_dim: 768) rather than a literal here.
     * Pinning a different number would make the test contradict its own config and
     * assert a coupling that no longer exists. */
-   db2_set_embedding_dim(config_embedding_dim_current());
+   db2_set_embedding_dim(config_embedder_dims_current());
    memory_t mem;
    assert(memory_insert(TIER_L2, KIND_FACT, "embed-version", "test content", 0.9, "", &mem) == 0);
    assert(memory_embed(mem.id, "builtin") == 0);

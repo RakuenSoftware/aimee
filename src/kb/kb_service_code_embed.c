@@ -441,7 +441,7 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
     * dimension as the halfvec code_embeddings column. The earlier hardcoded
     * 384-dim deterministic hash never matched the 1024-d halfvec column, so every
     * upsert failed and no code vectors were ever stored. */
-   const char *embed_command = config_embedding_command_current(NULL);
+   const char *embed_command = config_embedder_command_current(NULL);
    int embed_dim = db2_embedding_dim();
    if (embed_dim <= 0 || embed_dim > CE_EMBED_MAX_DIM)
       embed_dim = 1024;

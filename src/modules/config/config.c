@@ -95,7 +95,6 @@ int config_migrate_legacy_credentials(config_secret_writer_fn writer,
    MIGRATE_LEGACY_SECRET("AIMEE_KB_API_BEARER_TOKEN", kb_client_bearer_token);
    MIGRATE_LEGACY_SECRET("AIMEE_TRIGGER_AUTH_TOKEN", trigger_auth_token);
    MIGRATE_LEGACY_SECRET("AIMEE_KB_CURATOR_PROVIDER_API_KEY", kb_curator_provider_api_key);
-   MIGRATE_LEGACY_SECRET("AIMEE_KB_CURATOR_TIER_B_API_KEY", kb_curator_tier_b_api_key);
    MIGRATE_LEGACY_SECRET("AIMEE_API_BEARER_TOKEN", server_api_bearer_token);
 #undef MIGRATE_LEGACY_SECRET
 
@@ -387,13 +386,8 @@ static const config_schema_entry_t config_schema[] = {
     {"db1_path", SCHEMA_STRING, 0},
     {"db2_pool_size", SCHEMA_INT, 0},
     {"kb_mode", SCHEMA_STRING, 0},
-    {"llm_embed_backend", SCHEMA_STRING, 0},
-    {"llm_synth_backend", SCHEMA_STRING, 0},
-    {"llm_synth_host", SCHEMA_STRING, 0},
-    {"llm_synth_gpu", SCHEMA_STRING, 0},
-    {"llm_synth_tier", SCHEMA_STRING, 0},
-    {"llm_synth_endpoint", SCHEMA_STRING, 0},
-    {"llm_synth_model", SCHEMA_STRING, 0},
+    {"synthesis_endpoint", SCHEMA_STRING, 0},
+    {"synthesis_model", SCHEMA_STRING, 0},
     {"ingress_cache_placement_enabled", SCHEMA_BOOL, 0},
     {"ingress_compress_min_chars", SCHEMA_INT, 0},
     {"ingress_preinject_assembly_budget", SCHEMA_INT, 0},
@@ -408,7 +402,7 @@ static const config_schema_entry_t config_schema[] = {
     {"use_builtin_cli", SCHEMA_BOOL, 0},
     {"codex_model", SCHEMA_STRING, 0},
     {"model_reasoning_effort", SCHEMA_STRING, 0},
-    {"embedding_dim", SCHEMA_INT, 0},
+    {"embedder_dims", SCHEMA_INT, 0},
     {"memory_weight_profile", SCHEMA_STRING, 0},
     {"memory_query_expansion", SCHEMA_OBJECT, 0},
     {"memory_recall_lanes", SCHEMA_OBJECT, 0},
@@ -777,12 +771,12 @@ static void config_set_defaults(config_t *cfg)
     * defaults). The sweep is still a no-op until kb_pdf_assets_enabled is on. */
    /* Embedding dimension. 0 = UNSET (the operator did not pin a dim): readers fall
     * back to 1024 (db2_embedding_dim(), kb_main, kb_ingest_workers), and — crucially
-    * — config_embedding_dim_is_pinned() reports NOT-pinned, so §2a's recorded-dim
+    * — config_embedder_dims_is_pinned() reports NOT-pinned, so §2a's recorded-dim
     * preference and §2b's fresh-DB embedder /health probe can derive the real dim.
     * A non-zero value here means the operator explicitly pinned it (yaml/env), which
     * is authoritative and refuses a mismatch. (Was defaulted to 1024, which made
     * every deployment look "pinned" and silently disabled §2a/§2b.) */
-   cfg->embedding_dim = 0;
+   cfg->embedder_dims = 0;
    cfg->memory_routing_enabled = 1;
    /* Negation-aware retrieval defaults ON: for negatively-polarised queries it
     * promotes memories carrying the same negated concept (overlapping "not_<token>"
@@ -1083,7 +1077,6 @@ static void config_apply_runtime_secrets(config_t *cfg)
    APPLY_RUNTIME_SECRET("AIMEE_KB_API_BEARER_TOKEN", kb_client_bearer_token);
    APPLY_RUNTIME_SECRET("AIMEE_TRIGGER_AUTH_TOKEN", trigger_auth_token);
    APPLY_RUNTIME_SECRET("AIMEE_KB_CURATOR_PROVIDER_API_KEY", kb_curator_provider_api_key);
-   APPLY_RUNTIME_SECRET("AIMEE_KB_CURATOR_TIER_B_API_KEY", kb_curator_tier_b_api_key);
    APPLY_RUNTIME_SECRET("AIMEE_API_BEARER_TOKEN", server_api_bearer_token);
 #undef APPLY_RUNTIME_SECRET
    cfg->server_api_bearer_extra_count = 0;
@@ -1368,9 +1361,9 @@ int config_load_file(config_t *cfg)
       kb_pdf_apply_tier(cfg, cfg->kb_pdf_tier);
    }
 
-   item = cJSON_GetObjectItemCaseSensitive(root, "embedding_dim");
+   item = cJSON_GetObjectItemCaseSensitive(root, "embedder_dims");
    if (cJSON_IsNumber(item) && item->valuedouble > 0)
-      cfg->embedding_dim = (int)item->valuedouble;
+      cfg->embedder_dims = (int)item->valuedouble;
 
    /* Setup-wizard page-2 backend record (kb_mode + per-role llm_* fields). All are
     * string fields; parse them from a compact table that mirrors config_fields.c.
@@ -1382,20 +1375,10 @@ int config_load_file(config_t *cfg)
          size_t off, sz;
       } page2[] = {
           {"kb_mode", offsetof(config_t, kb_mode), sizeof(((config_t *)0)->kb_mode)},
-          {"llm_embed_backend", offsetof(config_t, llm_embed_backend),
-           sizeof(((config_t *)0)->llm_embed_backend)},
-          {"llm_synth_backend", offsetof(config_t, llm_synth_backend),
-           sizeof(((config_t *)0)->llm_synth_backend)},
-          {"llm_synth_host", offsetof(config_t, llm_synth_host),
-           sizeof(((config_t *)0)->llm_synth_host)},
-          {"llm_synth_gpu", offsetof(config_t, llm_synth_gpu),
-           sizeof(((config_t *)0)->llm_synth_gpu)},
-          {"llm_synth_tier", offsetof(config_t, llm_synth_tier),
-           sizeof(((config_t *)0)->llm_synth_tier)},
-          {"llm_synth_endpoint", offsetof(config_t, llm_synth_endpoint),
-           sizeof(((config_t *)0)->llm_synth_endpoint)},
-          {"llm_synth_model", offsetof(config_t, llm_synth_model),
-           sizeof(((config_t *)0)->llm_synth_model)},
+          {"synthesis_endpoint", offsetof(config_t, synthesis_endpoint),
+           sizeof(((config_t *)0)->synthesis_endpoint)},
+          {"synthesis_model", offsetof(config_t, synthesis_model),
+           sizeof(((config_t *)0)->synthesis_model)},
       };
       for (size_t i = 0; i < sizeof(page2) / sizeof(page2[0]); i++)
       {
@@ -2076,7 +2059,7 @@ int config_autonomy_lookup(const char *env_name, long *out)
  * (feature off). The env var is how a compose/container deployment points the KB at a
  * sidecar it just started; the config key is the operator's persistent choice, so an
  * explicitly configured command outranks it. (Deliberately the OPPOSITE precedence to
- * config_embedding_command, which documents why the running embedder's announcement must
+ * config_embedder_command, which documents why the running embedder's announcement must
  * win there.) Lives here so no KB caller reads the environment. */
 static const char *config_sidecar_endpoint(size_t offset, size_t size, const char *env_name,
                                            char *buf, size_t buflen)
@@ -2362,21 +2345,21 @@ int config_ingress_audit_async(void)
  * this thread. Callers copy it if they need to keep it. */
 /* The RAW configured embedding command, with no resolution applied.
  *
- * config_embedding_command_current() answers "what should I embed with", which
+ * config_embedder_command_current() answers "what should I embed with", which
  * is never empty — it falls back to an endpoint or the builtin. Callers that
  * need "did the operator configure an embedder at all" have to see the empty
  * string, so they get the field itself. The generated accessor for this field
  * is suppressed because the resolving function already owns the name. */
-const char *config_embedding_command_field(void)
+const char *config_embedder_command_field(void)
 {
    static _Thread_local char buf[512];
    buf[0] = 0;
-   config_field_read(offsetof(config_t, embedding_command), sizeof(buf), buf);
+   config_field_read(offsetof(config_t, embedder_command), sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
 }
 
-const char *config_embedding_command_current(const char *requested)
+const char *config_embedder_command_current(const char *requested)
 {
    if (requested && requested[0])
       return requested;
@@ -2385,7 +2368,7 @@ const char *config_embedding_command_current(const char *requested)
    if (!cfg)
       return "builtin"; /* allocation failure must not fabricate an embedder */
    config_load(cfg);
-   snprintf(cached, sizeof(cached), "%s", config_embedding_command(cfg, NULL));
+   snprintf(cached, sizeof(cached), "%s", config_embedder_command(cfg, NULL));
    free(cfg);
    return cached;
 }

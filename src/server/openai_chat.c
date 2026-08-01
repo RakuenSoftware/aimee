@@ -546,7 +546,7 @@ static int embeddings_handler(const char *body, char *resp, int cap)
                           "invalid embeddings request: expected `input` string or array");
       return 400;
    }
-   const char *cmd = config_embedding_command_current(NULL);
+   const char *cmd = config_embedder_command_current(NULL);
 
    float **vecs = calloc((size_t)n, sizeof(float *));
    int *dims = calloc((size_t)n, sizeof(int));

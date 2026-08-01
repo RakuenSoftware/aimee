@@ -1178,7 +1178,7 @@ static int memory_collect_code_matches(const char *query, int fetch_limit, memor
    if (!scratch)
       return count;
    int cap = 64;
-   const char *embed_cmd = config_embedding_command_current(NULL);
+   const char *embed_cmd = config_embedder_command_current(NULL);
    int got = memory_collect_memory_matches_via_vector(query, embed_cmd, fetch_limit, scratch, cap);
    for (int i = 0; i < got && count < max; i++)
       count = memory_append_unique(out, count, max, &scratch[i]);
@@ -1582,7 +1582,7 @@ int memory_collect_variant_candidates(const char *raw_query, const char *norm_va
 
    if (qe_semantic)
    {
-      const char *embed_cmd = config_embedding_command_current(NULL);
+      const char *embed_cmd = config_embedder_command_current(NULL);
       int k = config_memory_query_expansion_k() > 0 ? config_memory_query_expansion_k() : 5;
       if (memory_expand_query_semantic(signal_query[0] ? signal_query : norm_variant, embed_cmd, k,
                                        expanded_signal, sizeof(expanded_signal)) < 0)
@@ -1605,7 +1605,7 @@ int memory_collect_variant_candidates(const char *raw_query, const char *norm_va
    }
    if (qe_semantic)
    {
-      const char *embed_cmd = config_embedding_command_current(NULL);
+      const char *embed_cmd = config_embedder_command_current(NULL);
       int k = config_memory_query_expansion_k() > 0 ? config_memory_query_expansion_k() : 5;
       expanded_count =
           memory_expand_query_terms_semantic(signal_query[0] ? signal_query : norm_variant,
@@ -1624,7 +1624,7 @@ int memory_collect_variant_candidates(const char *raw_query, const char *norm_va
       if (!lexical_scratch)
          return count;
       int lexical_cap = 64;
-      const char *lexical_embed_cmd = config_embedding_command_current(NULL);
+      const char *lexical_embed_cmd = config_embedder_command_current(NULL);
       if (config_memory_recall_lanes_enabled())
       {
          char sum_buf[16][16], fact_buf[16][16];

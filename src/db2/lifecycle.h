@@ -27,12 +27,12 @@ extern "C"
 
    /* Set the embedding dimension used to create the DB2 halfvec embedding
     * columns (one embedder per deployment). Call from startup — with
-    * config_resolve_embedding_dim() — BEFORE db2_init() applies the schema, so
+    * config_resolve_embedder_dims() — BEFORE db2_init() applies the schema, so
     * this layer stays config-free. Unset/<=0 means "nothing pinned", which lets
     * db2_init's §2a precedence fall through to the injected default. */
    void db2_set_embedding_dim(int dim);
 
-   /* Inject the DEFAULT width, from config_embedding_dim_default(). This layer
+   /* Inject the DEFAULT width, from config_embedder_dims_default(). This layer
     * holds no width literal of its own — the number is declared once, in config —
     * so call this beside db2_set_embedding_dim before db2_init. Without it
     * db2_embedding_dim() reports 0 and schema sizing fails loudly rather than
@@ -46,7 +46,7 @@ extern "C"
    /* How many vector upserts have been refused for disagreeing with that width,
     * and the last width actually offered.
     *
-    * A wrong AIMEE_EMBEDDING_DIM is otherwise invisible: the kb starts, reports
+    * A wrong EMBEDDER_DIMS is otherwise invisible: the kb starts, reports
     * healthy, accepts writes, and refuses every upsert with a per-row WARN, so a
     * deployment can store zero vectors indefinitely while looking fine. Health
     * publishes this so the condition is legible without reading kb logs. */
@@ -54,7 +54,7 @@ extern "C"
    int db2_embedding_dim_last_offered(void);
 
    /* embedder-runtime-fetch-autodim §2a: mark whether the operator pinned the dim
-    * (see config_embedding_dim_is_pinned). Call beside db2_set_embedding_dim,
+    * (see config_embedder_dims_is_pinned). Call beside db2_set_embedding_dim,
     * before db2_init. When UNpinned (0, the default), db2_init prefers a recorded
     * kb_meta.schema_embedding_dim over the configured default; when pinned (1) the
     * operator value is authoritative and a recorded mismatch is refused downstream.
