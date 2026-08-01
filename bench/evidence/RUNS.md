@@ -70,11 +70,12 @@ enforce, so this table cannot drift from what is scoreable.
 | sub1b | granite-4.0-350m | 70 | VALID | sub-1B ladder, thinking ON |
 | sub1b | granite-4.0-h-1b | 70 | VALID | sub-1B ladder, thinking ON |
 | sub1b | granite-4.0-h-350m | 70 | VALID | sub-1B ladder, thinking ON |
+| thinking | GLM-4.7-Flash.gv05 | 1 | INVALID: incomplete (1/70) | thinking ON, cap 8192 — CURRENT |
 | thinking | GLM-4.7-Flash | 69 | INVALID: incomplete (69/70) | thinking ON, cap 8192 — CURRENT |
 | thinking | Qwen3-1.7B | 70 | VALID | thinking ON, cap 8192 — CURRENT |
 | thinking | Qwen3.5-0.8B | 70 | VALID | thinking ON, cap 8192 — CURRENT |
 | thinking | Qwen3.5-2B | 70 | VALID | thinking ON, cap 8192 — CURRENT |
-| thinking | Qwen3.6-27B | 70 | INVALID: errored x60 | thinking ON, cap 8192 — CURRENT |
+| thinking | Qwen3.6-27B | 1 | INVALID: incomplete (1/70) | thinking ON, cap 8192 — CURRENT |
 | thinking | Qwen3.6-35B-A3B | 70 | INVALID: errored x64 | thinking ON, cap 8192 — CURRENT |
 | thinking | gemma-3n-E4B-it | 70 | VALID | thinking ON, cap 8192 — CURRENT |
 | thinking | gemma-4-12B-it | 70 | VALID | thinking ON, cap 8192 — CURRENT |
