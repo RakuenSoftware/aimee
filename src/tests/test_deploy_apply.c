@@ -379,6 +379,71 @@ static void test_compose_file_default(void)
    printf("  compose file default ok\n");
 }
 
+/* --- `docker compose ps` is scoped to the managed services --- */
+
+/* `ps` scopes to COMPOSE_PROJECT_NAME, not to the -f file, so it also reports
+ * aimee-server (started by compose.server-managed.yaml under the same project).
+ * The wizard counts these entries to choose its button label, so leaving the
+ * orchestrator in the list made a never-deployed box offer "Re-deploy". Labels
+ * are abbreviated to the one key the filter reads. */
+#define PS_SERVER_ENTRY                                                                            \
+   "{\"Name\":\"aimee-aimee-server-1\",\"State\":\"running\",\"Labels\":\"com.docker.compose."     \
+   "project=aimee,com.docker.compose.project.config_files=/opt/aimee-src/compose.server-managed."  \
+   "yaml\"}"
+#define PS_KB_ENTRY                                                                                \
+   "{\"Name\":\"aimee-aimee-kb-1\",\"State\":\"running\",\"Labels\":\"com.docker.compose."         \
+   "project=aimee,com.docker.compose.project.config_files=/opt/aimee/deploy/"                      \
+   "aimee-managed.compose."                                                                        \
+   "yaml\"}"
+
+static const char *k_managed = "/opt/aimee/deploy/aimee-managed.compose.yaml";
+
+static void test_ps_drops_the_orchestrator_from_the_service_list(void)
+{
+   /* NDJSON shape (newer compose). */
+   char ps[4096];
+   snprintf(ps, sizeof(ps), "%s\n%s\n", PS_KB_ENTRY, PS_SERVER_ENTRY);
+   deploy_filter_managed_ps(ps, sizeof(ps), k_managed);
+   assert(strstr(ps, "aimee-aimee-kb-1") != NULL);
+   assert(strstr(ps, "aimee-aimee-server-1") == NULL);
+
+   /* JSON array shape (older compose). */
+   snprintf(ps, sizeof(ps), "[%s,%s]", PS_SERVER_ENTRY, PS_KB_ENTRY);
+   deploy_filter_managed_ps(ps, sizeof(ps), k_managed);
+   assert(strstr(ps, "aimee-aimee-kb-1") != NULL);
+   assert(strstr(ps, "aimee-aimee-server-1") == NULL);
+   printf("  ps drops the orchestrator from the managed service list ok\n");
+}
+
+/* The regression itself: before any deploy, the only container in project
+ * "aimee" is the server running the wizard. That has to leave an EMPTY list, or
+ * the finish screen labels its button "Re-deploy" for a KB that does not exist. */
+static void test_ps_is_empty_before_the_first_deploy(void)
+{
+   char ps[4096];
+   snprintf(ps, sizeof(ps), "%s\n", PS_SERVER_ENTRY);
+   deploy_filter_managed_ps(ps, sizeof(ps), k_managed);
+   assert(strstr(ps, "aimee-aimee-server-1") == NULL);
+   /* an empty array, which parse_ps renders as zero services */
+   assert(strcmp(ps, "[]") == 0);
+   printf("  ps is empty before the first deploy ok\n");
+}
+
+/* A shape the filter cannot parse must pass through untouched — an unfiltered
+ * list is recoverable, a wrongly-emptied one silently misreports the stack. */
+static void test_ps_passes_through_unparseable_output(void)
+{
+   char ps[256];
+   snprintf(ps, sizeof(ps), "not json at all");
+   deploy_filter_managed_ps(ps, sizeof(ps), k_managed);
+   assert(strcmp(ps, "not json at all") == 0);
+
+   snprintf(ps, sizeof(ps), "   ");
+   deploy_filter_managed_ps(ps, sizeof(ps), k_managed);
+   assert(strcmp(ps, "   ") == 0);
+   printf("  unparseable ps output passes through ok\n");
+}
+
 int main(void)
 {
    printf("test_deploy_apply\n");
@@ -389,6 +454,9 @@ int main(void)
    test_managed_authority_bootstrap_is_isolated_and_secret_free();
    test_retire_targets_legacy_cpu_container();
    test_compose_file_default();
+   test_ps_drops_the_orchestrator_from_the_service_list();
+   test_ps_is_empty_before_the_first_deploy();
+   test_ps_passes_through_unparseable_output();
    printf("test_deploy_apply: all passed\n");
    return 0;
 }
