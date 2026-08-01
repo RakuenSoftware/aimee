@@ -51,13 +51,31 @@ against each other:
 | *gemma-4-12B-it (reference)* | *0.8472* | *0.792* | *0.910* | *95.7%* | *10,381 ms* |
 | *gemma-4-26B-A4B-it (reference)* | *0.8451* | *0.800* | *0.896* | *95.7%* | *44,714 ms* |
 
-The two reference rows show what you give up by staying local and small, and the
-answer is less than you might expect: E4B is within 0.026 F1 of a 12B model and
-within 0.023 of a 26B one. Neither reference model is an install candidate on a
-16 GB card or a CPU-only box, and neither is worth their latency here.
+**Only one comparison in that table is resolved by this data.** A paired
+bootstrap over the same 69 notes (5,000 replicates, `harness/bootstrap_ci.py`)
+gives:
 
-Where E4B does lose is recall — 0.791 against 0.910 for the 12B. It finds fewer
-of the facts that are there. It does not invent more.
+| Comparison | Δ F1 | 95% CI | |
+| --- | ---: | --- | --- |
+| E2B − E4B | −0.1305 | [−0.2469, −0.0151] | real |
+| 12B − E4B | +0.0255 | [−0.0632, +0.1133] | not resolved |
+| 26B − E4B | +0.0234 | [−0.0620, +0.1135] | not resolved |
+
+So E4B genuinely beats E2B. But **this set cannot separate E4B from either
+reference model** — both intervals span zero. Earlier drafts of this page read
+those gaps as "E4B is within 0.026 F1 of a 12B", which states a closeness the
+data does not measure. The defensible claim is stronger and simpler: on a
+69-note extraction set, a 7.5B model is not distinguishable from a 12B or a 26B
+one. That is partly a statement about the models and partly about the set —
+67 gold triples means one triple is worth about 0.01 F1, so a 0.02 gap is two
+facts.
+
+Neither reference model is an install candidate on a 16 GB card or a CPU-only
+box, and neither is worth their latency here.
+
+The recall column looks like E4B's weak point — 0.791 against 0.910 for the 12B.
+Treat that as unmeasured rather than as a finding: the aggregate F1 difference is
+not resolved, and the per-component split was not bootstrapped at all.
 
 E4B's low latency is not straightforwardly a speed win: it abstains on 91% of
 the notes that have nothing to extract and emits 25 tokens at the median, where
@@ -90,6 +108,15 @@ median. That puts a note at roughly 22 seconds on E4B and 11 on E2B, or about
 end-to-end timings.
 
 ## Caveats you should read before leaning on any of this
+
+**Most differences on this page are too small for the set to resolve.** With 67
+gold triples over 69 scored notes, one triple is worth about 0.01 F1. Every
+comparison that matters has been run through a paired bootstrap
+(`bench/tier-a/harness/bootstrap_ci.py`, 5,000 replicates, fixed seed, importing
+`score.py`'s own matching so it cannot drift from the scorer). Where a delta is
+reported without a CI on this page, it has not been tested and should not be
+read as a ranking. Note that overlapping single-run CIs do *not* imply a
+difference is insignificant — the paired test is the one to read.
 
 **The quantisation does not match.** Every number above was measured at Q8_0.
 The shipped default is `Q4_K_M`, which is roughly half the size and
@@ -134,6 +161,12 @@ cheap model could carry the mechanical stages. It cannot. Extraction F1, same
 | SmolLM2-360M-Instruct | 0.0000 | Omits the required output wrapper entirely |
 | gemma-3-270m-it | 0.0000 | Never terminates; hits the cap on every note |
 
+This conclusion is resolved: the best of them, `granite-4.0-h-1b`, is −0.3070 F1
+against E4B, 95% CI [−0.4461, −0.1633]. The *ordering within the table* is not —
+the gaps between adjacent rows below 0.3 are a few triples wide and this set
+cannot rank them. Read the table as "none of these can do the task", not as a
+league.
+
 Two further warnings that are not about size:
 
 - **Qwen3.5-0.8B and Qwen3.5-2B are unusable here regardless of their general
@@ -141,13 +174,29 @@ Two further warnings that are not about size:
   completion tokens at the median against an 8,192 cap, and 0% valid JSON for
   the 0.8B. aimee bounds synthesis output at `MF_LLM_OUT_CAP` (8192), so this is
   a deployment failure, not a benchmark artefact.
-- **Thinking mode helps small models and hurts large ones.** E4B gains 0.084 F1
-  with thinking on (0.738 → 0.822) and E2B gains 0.045 (0.646 → 0.691). The 26B
-  model loses 0.075 (0.920 → 0.845). aimee no longer suppresses thinking, which
-  is the right default for the models on this page; if you point synthesis at a
-  large external model, prefer it with thinking off. These on/off pairs come
+- **Thinking mode helps E4B and hurts the 26B.** Paired bootstrap, same 69
+  notes, 5,000 replicates:
+
+  | Model | Δ F1 from thinking | 95% CI | |
+  | --- | ---: | --- | --- |
+  | E4B | +0.0840 | [+0.0094, +0.1712] | real |
+  | 26B | −0.0746 | [−0.1595, −0.0048] | real |
+  | E2B | +0.0812 | [−0.0337, +0.2091] | not resolved |
+
+  Both resolved deltas sit close to their interval edge, so read them as "the
+  sign is right", not as a magnitude. E2B's gain is the same size as E4B's and
+  still fails to resolve, because E2B is noisier on this set. aimee no longer
+  suppresses thinking, which the E4B result supports; if you point synthesis at
+  a large external model, prefer it with thinking off. These on/off pairs come
   from different lanes, which is sound for accuracy — the same GGUF answers the
   same wherever it is served — but the latencies are not comparable across them.
+
+  One number in this bullet's previous version could not be reproduced: it cited
+  E2B thinking-off at 0.646, and no committed prediction file scores that. The
+  four E2B lanes score 0.6099 (`ablation-conf`), 0.5793 (`gpu`), 0.5255
+  (`promptfix`) and 0.6912 (`thinking`). The table above uses `ablation-conf`,
+  the lane that matches E4B's cited thinking-off score. The 0.646 figure is
+  unsourced and has been dropped rather than reconciled.
 
 ## Using an external model
 
