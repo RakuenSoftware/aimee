@@ -65,6 +65,7 @@ enforce, so this table cannot drift from what is scoreable.
 | sub1b | LFM2-350M-Extract | 70 | VALID | sub-1B ladder, thinking ON |
 | sub1b | LFM2.5-230M | 70 | VALID | sub-1B ladder, thinking ON |
 | sub1b | Qwen3-0.6B | 70 | VALID | sub-1B ladder, thinking ON |
+| sub1b | gemma-3-270m-it | 17 | INVALID: incomplete (17/70) | sub-1B ladder, thinking ON |
 | sub1b | granite-4.0-350m | 70 | VALID | sub-1B ladder, thinking ON |
 | sub1b | granite-4.0-h-1b | 70 | VALID | sub-1B ladder, thinking ON |
 | sub1b | granite-4.0-h-350m | 70 | VALID | sub-1B ladder, thinking ON |
