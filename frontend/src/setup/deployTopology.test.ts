@@ -8,6 +8,7 @@ import {
   embedderChangeImpact,
   embedderToConfig,
   imageHasLlamaCpp,
+  imageSynthesisModel,
   synthesisToConfig,
   type DeploySelection,
   type EmbedderChoice,
@@ -218,11 +219,24 @@ describe('buildDesiredConfig', () => {
 });
 
 describe('SYNTHESIS_MODELS', () => {
-  it('offers exactly the two models the entrypoint can fetch', () => {
-    // deploy/container/aimee-kb-entrypoint.sh maps these ids to ggml-org GGUF repos.
-    // An id offered here that the entrypoint does not know becomes a selection that
-    // silently never starts, so the two lists have to agree.
+  it('describes exactly the two models an image can bake', () => {
+    // The Dockerfile accepts these ids for AIMEE_SYNTHESIS_MODEL and rejects the
+    // build otherwise. This list is COPY, not a menu — the image carries one.
     expect(SYNTHESIS_MODELS.map((m) => m.id).sort())
       .toEqual(['gemma-4-E2B-it', 'gemma-4-E4B-it']);
+  });
+});
+
+describe('imageSynthesisModel', () => {
+  it('reports the model the image bakes', () => {
+    expect(imageSynthesisModel({ aimee_synthesis_model: 'gemma-4-E4B-it' }))
+      .toBe('gemma-4-E4B-it');
+  });
+
+  it('is empty when the image bakes none', () => {
+    // Absent reads as "no local model", so the UI offers none rather than a
+    // selection the container cannot honour.
+    expect(imageSynthesisModel({})).toBe('');
+    expect(imageSynthesisModel({ aimee_synthesis_model: '  ' })).toBe('');
   });
 });

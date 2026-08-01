@@ -15,8 +15,8 @@ distinction this page replaces.
 | You want | Do this | What you get |
 | --- | --- | --- |
 | **Simplest thing that works** | Point `SYNTHESIS_ENDPOINT` at an external OpenAI-compatible endpoint | Best quality, no local GPU or RAM cost, your notes leave the machine |
-| **Local, and quality matters most** | run `aimee-kb-llm` (or `aimee-kb-nomic-llm`) and select `gemma-4-E4B-it` | 0.82 F1 extraction (at Q8_0; ships UD-Q6_K_XL), 7.46 GB of weights, 3.3 tok/s on 8 CPU threads |
-| **Local, and the box is small** | the same image, selecting `gemma-4-E2B-it` | 0.69 F1 extraction, 4.61 GB of weights, 6.3 tok/s on 8 CPU threads |
+| **Local, and quality matters most** | pull `aimee-kb-llm-e4b` (or `aimee-kb-nomic-llm-e4b`) | 0.82 F1 extraction (at Q8_0; ships UD-Q6_K_XL), 7.46 GB of weights, 3.3 tok/s on 8 CPU threads |
+| **Local, and the box is small** | pull `aimee-kb-llm-e2b` (or `aimee-kb-nomic-llm-e2b`) | 0.69 F1 extraction, 4.61 GB of weights, 6.3 tok/s on 8 CPU threads |
 
 Those weight sizes and throughputs are Q8_0, which is what was measured. The
 shipped default is Q4_K_M, which is roughly half the size and faster —
@@ -228,22 +228,40 @@ Two further warnings that are not about size:
 
 ## Running one of these locally
 
-The two local rows need an image that ships llama.cpp: `aimee-kb-llm` (bekko-a25m
-embedder, 384-dim) or `aimee-kb-nomic-llm` (nomic-v2, 768-dim). The plain
-`aimee-kb` and `aimee-kb-nomic` images do not bundle it, and the setup wizard
-disables the local options there rather than offering a choice that cannot work.
+**The model is part of the image.** You do not select it at runtime — you pull the
+tag that carries it, exactly as you do for the embedder:
 
-Select the model with `SYNTHESIS_MODEL` (or in the wizard). The container fetches
-the weights on first start and keeps them on the data volume, under
-`$AIMEE_HOME/models` — so an image upgrade does not refetch several gigabytes.
-First start pulls 7.46 GB for E4B (4.71 GB for E2B) at UD-Q6_K_XL, from unsloth's
-GGUF repos — the UD quants are published there and not by ggml-org.
-Leave `SYNTHESIS_ENDPOINT` empty: the container starts llama-server itself and
-points synthesis at loopback.
+| image | embedder | synthesis |
+| --- | --- | --- |
+| `aimee-kb` | bekko-a25m (384) | none |
+| `aimee-kb-llm-e2b` | bekko-a25m (384) | gemma-4-E2B-it |
+| `aimee-kb-llm-e4b` | bekko-a25m (384) | gemma-4-E4B-it |
+| `aimee-kb-nomic` | nomic-v2 (768) | none |
+| `aimee-kb-nomic-llm-e2b` | nomic-v2 (768) | gemma-4-E2B-it |
+| `aimee-kb-nomic-llm-e4b` | nomic-v2 (768) | gemma-4-E4B-it |
 
-The embedder axis is a separate, one-way choice: the database records the vector
-width and refuses to start if it changes, so pick the `-nomic` variant up front if
-you want 768-dim vectors.
+Weights are baked at UD-Q6_K_XL — 7.46 GB for E4B, 4.71 GB for E2B — from
+unsloth's GGUF repos, which is where the UD quants are published.
+
+**The container downloads nothing.** An earlier design fetched the weights on
+first start and cached them on the data volume. That is a support burden: a
+first-run download fails on a rate limit, behind a proxy, on a flaky link, or on
+an air-gapped host, and it can silently serve the wrong file if a quant tag stops
+resolving. Every one of those reaches you as "synthesis never started", long after
+the deploy looked fine. `docker pull` is the one download, with the registry's
+retry and resume behind it, and an image either has its model or it does not.
+
+The cost is image size and more tags. That is the same trade the embedder already
+makes, and the reason it was made there first.
+
+Leave `SYNTHESIS_ENDPOINT` empty on these images: the container starts
+llama-server against the baked file and points synthesis at loopback. Setting it
+overrides that and uses the remote endpoint instead.
+
+The embedder axis is still the one-way choice: the database records the vector
+width and refuses to start if it changes, so pick `-nomic` up front if you want
+768-dim vectors. The synthesis axis is not one-way — you can move between an
+`-e2b` and an `-e4b` tag freely.
 
 ## Using an external model
 

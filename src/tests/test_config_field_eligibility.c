@@ -45,6 +45,7 @@ static const elig_row_t g_eligibility[] = {
     {"embedder_dims", 0},
     {"kb_mode", 0},
     {"aimee_with_llamacpp", 1},
+    {"aimee_synthesis_model", 1},
     {"kb_client_url", 1},
     {"kb_client_bearer_token", 1},
     {"synthesis_endpoint", 0},

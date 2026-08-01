@@ -67,6 +67,11 @@ const config_field_t config_fields[] = {
     {"aimee_with_llamacpp", offsetof(config_t, aimee_with_llamacpp),
      sizeof(((config_t *)0)->aimee_with_llamacpp), 0, CFG_STRING, RELOAD_RESTART, FGROUP_RUNTIME,
      "AIMEE_WITH_LLAMACPP"},
+    /* Which model the image bakes. Also image-set: it cannot change without
+     * pulling a different tag. */
+    {"aimee_synthesis_model", offsetof(config_t, aimee_synthesis_model),
+     sizeof(((config_t *)0)->aimee_synthesis_model), 0, CFG_STRING, RELOAD_RESTART, FGROUP_RUNTIME,
+     "AIMEE_SYNTHESIS_MODEL"},
     /* Synthesis. ONE endpoint: an aimee-kb *-llm image runs gemma-4 on the same
      * host as the kb, so a bundled model is reached at a 127.0.0.1 URL and needs no
      * second variable. Empty = synthesis off, which is supported.

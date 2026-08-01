@@ -22,12 +22,13 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (91)
+## CLI-settable keys (92)
 
 The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys are still `aimee config set`-able but are filed into their own subsections below (and hidden from the Settings surface by default).
 
 | Key | Type | Description |
 |-----|------|-------------|
+| `aimee_synthesis_model` | string | — |
 | `aimee_with_llamacpp` | string | Whether THIS IMAGE bundles llama.cpp ("1" on the aimee-kb-*-llm variants). Set by the Dockerfile, not by an operator: it is a fact about the running image, and the setup wizard reads it to decide whether the local synthesis models can be offered at all. |
 | `audit_action_enabled` | bool | Publish governed tool-action audit rows (default on); disabling it creates an audit coverage gap. |
 | `audit_worm_enabled` | bool | Dual-write governed-action audit rows into the append-only, hash-chained WORM store alongside audit.log (default off). |
@@ -119,6 +120,8 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `virtual_context_enabled` | bool | Enable virtual-context assembly. |
 | `wfe_live_forge_enabled` | bool | Gate for the autonomous live forge (default-ON). When off, the forge provider is not registered and every forge op fails closed, so an autonomous run can never open or merge a real PR. Even on, each op re-checks this flag and the merge-target rail. |
 | `wfe_proposals_autoscan_enabled` | bool | Automatically scan watched proposal directories; off requires explicit trigger.fire. |
+
+> **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `aimee_synthesis_model`
 
 ### Advanced tuning keys (78)
 

@@ -464,6 +464,7 @@ const char *config_kb_client_url(void);
 const char *config_kb_client_bearer_token(void);
 const char *config_kb_mode(void);
 const char *config_aimee_with_llamacpp(void);
+const char *config_aimee_synthesis_model(void);
 const char *config_synthesis_endpoint(void);
 const char *config_synthesis_model(void);
 const char *config_synthesis_api_key(void);
@@ -951,6 +952,7 @@ int config_set_kb_client_url(const char *value);
 int config_set_kb_client_bearer_token(const char *value);
 int config_set_kb_mode(const char *value);
 int config_set_aimee_with_llamacpp(const char *value);
+int config_set_aimee_synthesis_model(const char *value);
 int config_set_synthesis_endpoint(const char *value);
 int config_set_synthesis_model(const char *value);
 int config_set_synthesis_api_key(const char *value);
@@ -1073,6 +1075,7 @@ size_t config_kb_client_url_copy(char *out, size_t n);
 size_t config_kb_client_bearer_token_copy(char *out, size_t n);
 size_t config_kb_mode_copy(char *out, size_t n);
 size_t config_aimee_with_llamacpp_copy(char *out, size_t n);
+size_t config_aimee_synthesis_model_copy(char *out, size_t n);
 size_t config_synthesis_endpoint_copy(char *out, size_t n);
 size_t config_synthesis_model_copy(char *out, size_t n);
 size_t config_synthesis_api_key_copy(char *out, size_t n);
@@ -1134,6 +1137,7 @@ const char *config_computer_use_allowed_domains(int index);
 const char *config_server_api_bearer_extra(int index);
 const char *config_ensemble_reference_models(int index);
 const char *config_ensemble_reference_personas(int index);
+
 
 /* Struct-array elements: one member of one element per call. Bounds-checked
  * like the char[][] accessors — an out-of-range index yields 0 or "".

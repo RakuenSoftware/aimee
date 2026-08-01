@@ -1518,6 +1518,15 @@ typedef struct config
     * silently never starting. Absent reads as NOT bundled. */
    char aimee_with_llamacpp[8];
 
+   /* WHICH synthesis model this image bakes: "gemma-4-E2B-it", "gemma-4-E4B-it",
+    * or empty on a non-llm variant. Set as ENV by the Dockerfile, like
+    * aimee_with_llamacpp — a fact about the image, not a preference.
+    *
+    * The wizard needs it because the model is no longer a runtime choice: an image
+    * carries one, so the UI reports what it has instead of offering a menu it
+    * cannot honour. Same shape as the embedder, and for the same reason. */
+   char aimee_synthesis_model[64];
+
    /* Synthesis. ONE endpoint, whether the model is bundled or remote: an
     * aimee-kb *-llm image variant runs gemma-4-E2B-it or gemma-4-E4B-it on the
     * same host as the kb, so "local" is just a 127.0.0.1 URL and needs no

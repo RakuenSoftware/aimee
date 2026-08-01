@@ -9,6 +9,20 @@ ARG PG_MAJOR=18
 ARG PGVECTORSCALE_VERSION=0.9.0
 # Selects which llama.cpp stage the final image copies from (see llamacpp-* below).
 ARG AIMEE_WITH_LLAMACPP=0
+# Which synthesis model is BAKED into a *-llm image: gemma-4-E2B-it or
+# gemma-4-E4B-it. Empty on the non-llm variants.
+#
+# BAKED, NOT FETCHED AT RUNTIME. This mirrors the embedder decision below for the
+# same reason: a first-run download is a support burden. It fails on a rate limit,
+# behind a proxy, on a flaky link, on an air-gapped host, or silently serves the
+# wrong file when a quant tag stops resolving — and every one of those surfaces to
+# the operator as "synthesis never started", long after deploy. An image either
+# has its model or it does not, and `docker pull` is the one download, with the
+# registry's own retry and resume behind it.
+#
+# The cost is image size and a model-per-tag matrix. That is the trade the
+# embedder already makes.
+ARG AIMEE_SYNTHESIS_MODEL=""
 # Pinned llama.cpp. This version is load-bearing in three ways, all checked
 # against the tag rather than assumed:
 #   - gemma-4 / gemma-3n architecture support (b4585 had NONE — it would have
@@ -107,8 +121,11 @@ RUN mkdir -p "/pgvectorscale/usr/lib/postgresql/${PG_MAJOR}/lib" \
 # inherited its CVE fixes for free. LLAMACPP_VERSION is now the only thing deciding
 # which llama.cpp a user runs, and it does not move on its own.
 #
-# LLAMA_CURL=ON is required, not cosmetic: the entrypoint starts the server with
-# -hf, which fetches the model over HTTPS. Without it the server rejects -hf.
+# The .so copy takes SYMLINKS as well as regular files, with cp -a. The loader
+# resolves by SONAME — libllama-common.so.0 — which is a symlink to the versioned
+# file, so a `-type f` copy took the real file and left the name the binary
+# actually asks for behind. That failed as "cannot open shared object file" at
+# first run; the --version check in the final stage is what surfaced it at build.
 #
 # LLAMA_BUILD_TOOLS=ON is what provides the server at this tag: it lives in
 # tools/server (target llama-server), not examples/. Building with tools off
@@ -121,10 +138,11 @@ RUN mkdir -p "/pgvectorscale/usr/lib/postgresql/${PG_MAJOR}/lib" \
 # rest of the joined command, which fails as a puzzling no-op rather than loudly.
 FROM debian:trixie-slim AS llamacpp-1
 ARG LLAMACPP_VERSION
+ARG AIMEE_SYNTHESIS_MODEL
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
-        build-essential cmake git ca-certificates libcurl4-openssl-dev; \
+        build-essential cmake git ca-certificates curl libcurl4-openssl-dev; \
     git clone --depth 1 --branch "$LLAMACPP_VERSION" \
         https://github.com/ggml-org/llama.cpp.git /tmp/llamacpp-src; \
     cmake -S /tmp/llamacpp-src -B /tmp/llamacpp-src/build \
@@ -134,8 +152,25 @@ RUN set -eux; \
     cmake --build /tmp/llamacpp-src/build --target llama-server -j"$(nproc)"; \
     mkdir -p /out; \
     cp "$(find /tmp/llamacpp-src/build -name llama-server -type f -perm -u+x | head -1)" /out/; \
-    find /tmp/llamacpp-src/build -name '*.so*' -type f -exec cp {} /out/ ';' ; \
+    find /tmp/llamacpp-src/build \( -type f -o -type l \) -name '*.so*' \
+        -exec cp -a {} /out/ ';' ; \
     rm -rf /tmp/llamacpp-src
+# The model, fetched ONCE here so the running container never downloads anything.
+# An explicit repo+filename per model id: no quant-tag resolution at runtime, which
+# is what silently served the wrong file when a tag stopped matching. UD-Q6_K_XL
+# (Unsloth Dynamic Q6) is published only in unsloth's repos.
+RUN set -eux; \
+    case "$AIMEE_SYNTHESIS_MODEL" in \
+      gemma-4-E2B-it) repo=unsloth/gemma-4-E2B-it-GGUF; f=gemma-4-E2B-it-UD-Q6_K_XL.gguf ;; \
+      gemma-4-E4B-it) repo=unsloth/gemma-4-E4B-it-GGUF; f=gemma-4-E4B-it-UD-Q6_K_XL.gguf ;; \
+      *) echo "AIMEE_SYNTHESIS_MODEL must be gemma-4-E2B-it or gemma-4-E4B-it (got '$AIMEE_SYNTHESIS_MODEL')" >&2; exit 1 ;; \
+    esac; \
+    mkdir -p /out/model; \
+    curl -fL --retry 5 --retry-delay 5 --retry-all-errors \
+        -o /out/model/synthesis.gguf \
+        "https://huggingface.co/${repo}/resolve/main/${f}"; \
+    test -s /out/model/synthesis.gguf; \
+    echo "${AIMEE_SYNTHESIS_MODEL}" > /out/model/MODEL_ID
 
 # The non-llm variants copy an empty directory, so the COPY below stays
 # unconditional (Dockerfile has no conditional COPY) and costs them nothing.
@@ -370,26 +405,32 @@ PYBAKE
 # a+rX: readable everywhere, traversable on directories, and no file gains +x.
 RUN chmod -R a+rX /opt/aimee/models
 
-# ---- bundled llama.cpp -------------------------------------------------------
-# Built in the llamacpp stage above; that stage is EMPTY on the non-llm variants,
-# so this COPY is unconditional and costs them nothing.
+# ---- bundled llama.cpp + its model --------------------------------------------
+# Built and fetched in the llamacpp stage above; that stage is EMPTY on the non-llm
+# variants, so this COPY is unconditional and costs them nothing.
 #
-# SYNTHESIS_ENDPOINT points at loopback when this is present; there is no separate
-# variable for a bundled model.
+# The model is IN THE IMAGE. SYNTHESIS_ENDPOINT points at loopback when llama.cpp
+# is present, and the running container downloads nothing.
 ARG AIMEE_WITH_LLAMACPP
 ARG LLAMACPP_VERSION
+ARG AIMEE_SYNTHESIS_MODEL
 COPY --from=llamacpp /out/ /opt/aimee/llama.cpp/
 # The shared objects ship beside the binary, which is not a default search path.
 ENV LD_LIBRARY_PATH=/opt/aimee/llama.cpp:${LD_LIBRARY_PATH}
-# Prove the binary actually runs in THIS image before shipping it: a server that
-# cannot resolve its own .so files fails at first synthesis, not at build.
+# Prove BOTH halves in THIS image before shipping it. A server that cannot resolve
+# its own .so files, or a model file that did not survive the copy, otherwise fails
+# at first synthesis — which is exactly the class of "it deployed fine and does
+# nothing" this baking is meant to remove.
 RUN set -eux; \
     if [ "$AIMEE_WITH_LLAMACPP" = "1" ]; then \
       chmod +x /opt/aimee/llama.cpp/llama-server; \
       /opt/aimee/llama.cpp/llama-server --version; \
+      test -s /opt/aimee/llama.cpp/model/synthesis.gguf; \
+      test "$(cat /opt/aimee/llama.cpp/model/MODEL_ID)" = "$AIMEE_SYNTHESIS_MODEL"; \
     fi
 ENV AIMEE_WITH_LLAMACPP=${AIMEE_WITH_LLAMACPP} \
-    AIMEE_LLAMACPP_VERSION=${LLAMACPP_VERSION}
+    AIMEE_LLAMACPP_VERSION=${LLAMACPP_VERSION} \
+    AIMEE_SYNTHESIS_MODEL=${AIMEE_SYNTHESIS_MODEL}
 
 # Sidecar clients (the LLM access code the kb invokes via popen).
 COPY scripts/embed-remote.py scripts/llm-chat.py \

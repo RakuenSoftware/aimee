@@ -18,20 +18,6 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
-int config_kb_bg_ingest_interval_hours(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_bg_ingest_interval_hours), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_bg_watch_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_bg_watch_enabled), sizeof(v), &v);
-   return v;
-}
-
 int config_kb_bg_watch_debounce_secs(void)
 {
    int v = 0;
@@ -1081,6 +1067,33 @@ const char *config_search_searxng_url(void)
    static _Thread_local char buf[512];
    buf[0] = 0;
    config_field_read(offsetof(config_t, search_searxng_url), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_search_tavily_api_key(void)
+{
+   static _Thread_local char buf[256];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, search_tavily_api_key), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_search_backends(void)
+{
+   static _Thread_local char buf[256];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, search_backends), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_coord_closet_denylist(void)
+{
+   static _Thread_local char buf[256];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, coord_closet_denylist), sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
 }

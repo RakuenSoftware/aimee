@@ -77,11 +77,10 @@ export type EmbedderSelection =
 
 // --- the synthesis choice ------------------------------------------------
 
-/** A locally-servable synthesis model. Numbers are extraction F1 on the 69-note
- * gold set at Q8_0 (docs/SYNTHESIS_MODELS.md); the shipped default is Q4_K_M,
- * which was not measured for quality. Only the E2B/E4B gap is statistically
- * resolved by that set — see the paired bootstrap in the same doc — so these must
- * not be presented as a fine-grained ranking. */
+/** Human copy for a model an image may bake. NOT a menu: the image carries one
+ * model and this only describes whichever it is. Numbers are extraction F1 on the
+ * 69-note gold set at Q8_0 (docs/SYNTHESIS_MODELS.md); the images ship UD-Q6_K_XL,
+ * a different quantisation, so they are indicative rather than exact. */
 export interface SynthesisModelChoice {
   id: string;
   label: string;
@@ -91,15 +90,25 @@ export interface SynthesisModelChoice {
 export const SYNTHESIS_MODELS: SynthesisModelChoice[] = [
   {
     id: 'gemma-4-E4B-it',
-    label: 'gemma-4-E4B-it (recommended)',
-    blurb: 'The better model. 7.46 GB of weights, ~3.3 tok/s on 8 CPU threads.',
+    label: 'gemma-4-E4B-it',
+    blurb: 'The better model. 7.46 GB baked into this image, ~3.3 tok/s on 8 CPU threads.',
   },
   {
     id: 'gemma-4-E2B-it',
-    label: 'gemma-4-E2B-it (small box)',
-    blurb: '4.71 GB of weights. About twice the CPU speed, measurably weaker.',
+    label: 'gemma-4-E2B-it',
+    blurb: '4.71 GB baked into this image. About twice the CPU speed, measurably weaker.',
   },
 ];
+
+/** The synthesis model THIS IMAGE bakes, or '' when it bakes none.
+ *
+ * Like the embedder, this is decided by the tag you pulled (aimee-kb-llm-e2b vs
+ * -e4b) rather than at runtime, because the weights are in the image. The wizard
+ * reports it instead of offering a choice it cannot honour. */
+export function imageSynthesisModel(cfg: Record<string, unknown>): string {
+  const v = cfg['aimee_synthesis_model'];
+  return v == null ? '' : String(v).trim();
+}
 
 /** How synthesis is served.
  *

@@ -6,13 +6,16 @@
 #   aimee-authority-bootstrap (Dockerfile.authority-bootstrap) ghcr.io/<owner>/aimee-authority-bootstrap
 #   aimee-css-render (deploy/css-render/Dockerfile) ghcr.io/<owner>/aimee-css-render
 #
-# plus the aimee-kb 2x2, all four from the SAME Dockerfile via build-args
-# (embedder x bundled llama.cpp):
+# plus the aimee-kb matrix, all six from the SAME Dockerfile via build-args. Both
+# the embedder AND the synthesis model are baked, so which models a deployment runs
+# is a property of the tag it pulled — never a first-run download:
 #
-#   aimee-kb            bekko-a25m (384)  no llama.cpp
-#   aimee-kb-llm        bekko-a25m (384)  llama.cpp bundled
-#   aimee-kb-nomic      nomic-v2   (768)  no llama.cpp
-#   aimee-kb-nomic-llm  nomic-v2   (768)  llama.cpp bundled
+#   aimee-kb                  bekko-a25m (384)  no llama.cpp
+#   aimee-kb-llm-e2b          bekko-a25m (384)  llama.cpp + gemma-4-E2B-it
+#   aimee-kb-llm-e4b          bekko-a25m (384)  llama.cpp + gemma-4-E4B-it
+#   aimee-kb-nomic            nomic-v2   (768)  no llama.cpp
+#   aimee-kb-nomic-llm-e2b    nomic-v2   (768)  llama.cpp + gemma-4-E2B-it
+#   aimee-kb-nomic-llm-e4b    nomic-v2   (768)  llama.cpp + gemma-4-E4B-it
 #
 # The external-embedder deployment shares the bekko images and overrides
 # EMBEDDER_URL at runtime; there is no separate "external" image.
@@ -96,14 +99,18 @@ jobs:
           # ONE Dockerfile, four tags, selected by build-args. The embedder axis is
           # a one-way door per install (DB2 locks the vector-column width), and the
           # llama.cpp axis decides whether synthesis can run on the same host.
-          - { name: aimee-kb,             dockerfile: Dockerfile,
+          - { name: aimee-kb,                  dockerfile: Dockerfile,
               extra_args: "AIMEE_EMBEDDER=bekko-a25m\nAIMEE_WITH_LLAMACPP=0" }
-          - { name: aimee-kb-llm,         dockerfile: Dockerfile,
-              extra_args: "AIMEE_EMBEDDER=bekko-a25m\nAIMEE_WITH_LLAMACPP=1" }
-          - { name: aimee-kb-nomic,       dockerfile: Dockerfile,
+          - { name: aimee-kb-llm-e2b,          dockerfile: Dockerfile,
+              extra_args: "AIMEE_EMBEDDER=bekko-a25m\nAIMEE_WITH_LLAMACPP=1\nAIMEE_SYNTHESIS_MODEL=gemma-4-E2B-it" }
+          - { name: aimee-kb-llm-e4b,          dockerfile: Dockerfile,
+              extra_args: "AIMEE_EMBEDDER=bekko-a25m\nAIMEE_WITH_LLAMACPP=1\nAIMEE_SYNTHESIS_MODEL=gemma-4-E4B-it" }
+          - { name: aimee-kb-nomic,            dockerfile: Dockerfile,
               extra_args: "AIMEE_EMBEDDER=nomic-embed-text-v2-moe\nAIMEE_WITH_LLAMACPP=0" }
-          - { name: aimee-kb-nomic-llm,   dockerfile: Dockerfile,
-              extra_args: "AIMEE_EMBEDDER=nomic-embed-text-v2-moe\nAIMEE_WITH_LLAMACPP=1" }
+          - { name: aimee-kb-nomic-llm-e2b,    dockerfile: Dockerfile,
+              extra_args: "AIMEE_EMBEDDER=nomic-embed-text-v2-moe\nAIMEE_WITH_LLAMACPP=1\nAIMEE_SYNTHESIS_MODEL=gemma-4-E2B-it" }
+          - { name: aimee-kb-nomic-llm-e4b,    dockerfile: Dockerfile,
+              extra_args: "AIMEE_EMBEDDER=nomic-embed-text-v2-moe\nAIMEE_WITH_LLAMACPP=1\nAIMEE_SYNTHESIS_MODEL=gemma-4-E4B-it" }
           - { name: aimee-authority-bootstrap, dockerfile: Dockerfile.authority-bootstrap }
           # #4-full render backend (headless-Chromium sidecar). Self-contained
           # under deploy/css-render (its own build context); independent of the C
@@ -184,7 +191,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [aimee-server, aimee-kb, aimee-kb-llm, aimee-kb-nomic, aimee-kb-nomic-llm,
+        image: [aimee-server, aimee-kb, aimee-kb-llm-e2b, aimee-kb-llm-e4b,
+                aimee-kb-nomic, aimee-kb-nomic-llm-e2b, aimee-kb-nomic-llm-e4b,
                 aimee-authority-bootstrap, aimee-css-render]
     steps:
       - name: Normalize owner to lowercase

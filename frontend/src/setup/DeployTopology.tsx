@@ -9,6 +9,7 @@ import {
   configToSynthesis,
   embedderChangeImpact,
   imageHasLlamaCpp,
+  imageSynthesisModel,
   type EmbedderChoice,
   type EmbedderSelection,
   type SynthesisSelection,
@@ -131,6 +132,13 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
    * that refuses to boot. */
   const localEmbedders = useMemo(() => embedders.filter((e) => e.local), [embedders]);
   const hasLlama = useMemo(() => imageHasLlamaCpp(cfg), [cfg]);
+  /** The one model this image bakes, if any. Not a choice — see imageSynthesisModel. */
+  const bakedModel = useMemo(() => imageSynthesisModel(cfg), [cfg]);
+  const bakedInfo = useMemo(
+    () => SYNTHESIS_MODELS.find((m) => m.id === bakedModel),
+    [bakedModel],
+  );
+  const canRunLocal = hasLlama && bakedModel !== '';
 
   const embedder: EmbedderSelection = useMemo(
     () =>
@@ -289,18 +297,19 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
             onChange={(e) => setSynthRoute(e.target.value)}>
             <option value="off">None — synthesis off</option>
             <option value="external">External endpoint</option>
-            {SYNTHESIS_MODELS.map((m) => (
-              <option key={m.id} value={m.id} disabled={!hasLlama}>
-                {m.label}{hasLlama ? '' : ' — needs an image with llama.cpp'}
+            {canRunLocal && (
+              <option value={bakedModel}>
+                {bakedInfo?.label ?? bakedModel} — bundled in this image
               </option>
-            ))}
+            )}
           </select>
 
-          {!hasLlama && (
+          {!canRunLocal && (
             <div style={{ fontSize: 11, color: '#8a5a00', marginTop: 6 }}>
-              This image does not bundle llama.cpp, so it cannot run a model locally. Use an
-              {' '}<code>aimee-kb-llm</code> or <code>aimee-kb-nomic-llm</code> image, or point
-              synthesis at an external endpoint.
+              This image bundles no synthesis model, so it cannot run one locally. The model is
+              part of the image, like the embedder: pull an <code>aimee-kb-llm-e2b</code> or
+              {' '}<code>-e4b</code> tag (or the <code>-nomic-</code> equivalents) to get one, or
+              point synthesis at an external endpoint.
             </div>
           )}
           {synthRoute === 'off' && (
@@ -321,9 +330,7 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
           )}
           {synthRoute !== 'off' && synthRoute !== 'external' && (
             <div style={{ fontSize: 11, color: '#889', marginTop: 6 }}>
-              {SYNTHESIS_MODELS.find((m) => m.id === synthRoute)?.blurb} The weights download on
-              first start and are kept on the data volume, so an image upgrade does not refetch
-              them.
+              {bakedInfo?.blurb} It starts with the container and downloads nothing.
             </div>
           )}
         </div>

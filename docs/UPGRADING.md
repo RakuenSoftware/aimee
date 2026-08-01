@@ -222,12 +222,13 @@ without answering; `MF_LLM_OUT_CAP` bounds the damage either way.
 
 ## Choosing an aimee-kb image is a one-way door
 
-There are four `aimee-kb` images now, on two axes:
+There are six `aimee-kb` images now. BOTH models are baked, so which embedder and
+which synthesis model a deployment runs is decided by the tag it pulls:
 
-| | no llama.cpp | llama.cpp bundled |
-| --- | --- | --- |
-| bekko-a25m (384-dim) | `aimee-kb` | `aimee-kb-llm` |
-| nomic-v2 (768-dim) | `aimee-kb-nomic` | `aimee-kb-nomic-llm` |
+| | no synthesis | + gemma-4-E2B-it | + gemma-4-E4B-it |
+| --- | --- | --- | --- |
+| bekko-a25m (384-dim) | `aimee-kb` | `aimee-kb-llm-e2b` | `aimee-kb-llm-e4b` |
+| nomic-v2 (768-dim) | `aimee-kb-nomic` | `aimee-kb-nomic-llm-e2b` | `aimee-kb-nomic-llm-e4b` |
 
 **The embedder axis cannot be changed after the KB has embedded anything.** DB2
 records the vector-column width and refuses to start on drift, so moving between a
