@@ -215,26 +215,70 @@ int kb_managed_server_identity_install(const kb_managed_server_identity_install_
        kb_pki_ca_load_custodied(ca_dir, &ca) != 0)
       goto done;
 
+   /* Every precondition below used to be one silent `goto done`: the process
+    * exited 1 with no reason, so an operator repairing broken trust could not
+    * tell a rotated CA from an unreadable file from a wrong --host. Name the
+    * cause on stderr; none of these strings carry key material. */
    struct stat identity_stat;
-   if (lstat(identity_path, &identity_stat) == 0)
+   int have_identity = lstat(identity_path, &identity_stat) == 0;
+   int reissue = 0;
+   if (have_identity)
    {
-      if (!S_ISREG(identity_stat.st_mode) ||
-          kb_managed_server_identity_load(identity_path, options->owner, &identity) != 0 ||
-          strcmp(identity.host, options->host) != 0 || identity.port != options->port ||
-          strcmp(identity.endpoint, options->endpoint) != 0 ||
-          strcmp(identity.ca, ca.cert_pem) != 0)
+      if (!S_ISREG(identity_stat.st_mode))
+      {
+         fputs("managed-server-identity: stored identity is not a regular file\n", stderr);
          goto done;
+      }
+      if (kb_managed_server_identity_load(identity_path, options->owner, &identity) != 0)
+      {
+         fputs("managed-server-identity: stored identity could not be loaded (wrong owner or "
+               "corrupt file); re-run with --force to replace it\n",
+               stderr);
+         goto done;
+      }
+      int targets_differ = strcmp(identity.host, options->host) != 0 ||
+                           identity.port != options->port ||
+                           strcmp(identity.endpoint, options->endpoint) != 0;
+      int ca_differs = strcmp(identity.ca, ca.cert_pem) != 0;
+      if ((targets_differ || ca_differs) && !options->force)
+      {
+         fprintf(stderr,
+                 "managed-server-identity: stored identity %s; re-run with --force to re-issue\n",
+                 targets_differ ? "targets a different KB endpoint"
+                                : "was issued by a different CA");
+         goto done;
+      }
+      reissue = options->force;
    }
-   else
+   else if (errno != ENOENT)
    {
-      if (errno != ENOENT)
+      perror("managed-server-identity: cannot stat stored identity");
+      goto done;
+   }
+
+   if (!have_identity || reissue)
+   {
+      /* Keep the server on the team it already belongs to. Re-selecting could
+       * silently re-home an enrolled server when the owner has several. */
+      int64_t team_id = reissue ? identity.team_id : 0;
+      if (team_id <= 0 && select_team(&owner, &team_id) != 0)
+      {
+         fputs("managed-server-identity: no team available for the bootstrap owner\n", stderr);
          goto done;
-      int64_t team_id = 0;
-      if (select_team(&owner, &team_id) != 0 ||
-          kb_managed_server_identity_generate(&ca, options->host, options->port, options->endpoint,
-                                              team_id, &identity) != 0 ||
-          kb_managed_server_identity_save(identity_path, options->owner, &identity) != 0)
+      }
+      kb_managed_server_identity_clear(&identity);
+      memset(&identity, 0, sizeof(identity));
+      if (kb_managed_server_identity_generate(&ca, options->host, options->port, options->endpoint,
+                                              team_id, &identity) != 0)
+      {
+         fputs("managed-server-identity: could not generate a server identity\n", stderr);
          goto done;
+      }
+      if (kb_managed_server_identity_save(identity_path, options->owner, &identity) != 0)
+      {
+         fputs("managed-server-identity: could not persist the server identity\n", stderr);
+         goto done;
+      }
    }
 
    /* Loading a pending identity is the normal crash-recovery path. Older
