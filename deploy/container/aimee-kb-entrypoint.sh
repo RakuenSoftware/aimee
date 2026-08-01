@@ -86,6 +86,90 @@ start_embedder() {
     embedder_pid=$!
 }
 
+# ---- bundled synthesis (the *-llm image variants) ---------------------------
+# Same shape as the embedder above, and deliberately so: selection resolves to a
+# URL, and the kb then reaches a bundled model exactly as it reaches a remote one.
+#
+#   SYNTHESIS_ENDPOINT set -> a remote endpoint; start nothing.
+#   SYNTHESIS_MODEL set    -> the bundled model; fetch if needed, start it, and
+#                             export SYNTHESIS_ENDPOINT at loopback.
+#   neither                -> start nothing. Synthesis is OFF, which is supported:
+#                             embedding, search, recall and indexing never call it.
+#
+# WEIGHTS LIVE ON THE PERSISTENT VOLUME, NOT IN THE IMAGE. gemma-4-E4B is ~4GB at
+# the shipped Q4_K_M and ~7.5GB at Q8_0; baking that would roughly double the image
+# and re-download on every image bump. /var/lib/aimee is the aimee-kb-home volume,
+# so the weights survive image upgrades, rollbacks and rebuilds.
+#
+# HF_HOME IS SCOPED TO THIS PROCESS ONLY. The image sets HF_HOME=/opt/aimee/models
+# with HF_HUB_OFFLINE=1 for the BAKED EMBEDDER weights. Exporting a different
+# HF_HOME globally would leave the embedder unable to find them and, being offline,
+# it would fail closed rather than re-download. Two model stores, two lifetimes:
+# the embedder's is immutable and in the image, synthesis' is mutable and on the
+# volume.
+#
+# Downloading is best-effort and can take a long time on first start. The kb
+# degrades honestly when synthesis is unavailable, whereas an entrypoint that
+# blocked or refused would take the whole knowledge base down waiting for a model.
+synthesis_repo_for_model() {
+    # Explicit map, not a string-built repo name. An unknown model must not
+    # silently become a 404 download that leaves synthesis quietly dead.
+    case "$1" in
+        gemma-4-E2B-it) echo "ggml-org/gemma-4-E2B-it-GGUF:Q4_K_M" ;;
+        gemma-4-E4B-it) echo "ggml-org/gemma-4-E4B-it-GGUF:Q4_K_M" ;;
+        *) echo "" ;;
+    esac
+}
+
+start_synthesis() {
+    if [ -n "${SYNTHESIS_ENDPOINT:-}" ]; then
+        echo "aimee-kb: remote synthesis configured ($SYNTHESIS_ENDPOINT); bundled model not loaded" >&2
+        return 0
+    fi
+    if [ -z "${SYNTHESIS_MODEL:-}" ]; then
+        echo "aimee-kb: no synthesis model selected; synthesis is off (embedding, search," \
+             "recall and indexing are unaffected)" >&2
+        return 0
+    fi
+
+    llama=/opt/aimee/llama.cpp/llama-server
+    if [ ! -x "$llama" ]; then
+        echo "aimee-kb: '$SYNTHESIS_MODEL' selected but this image has no bundled llama.cpp." \
+             "Use an aimee-kb-*-llm image, or point SYNTHESIS_ENDPOINT at a remote endpoint." >&2
+        return 0
+    fi
+
+    repo="$(synthesis_repo_for_model "$SYNTHESIS_MODEL")"
+    if [ -z "$repo" ]; then
+        echo "aimee-kb: '$SYNTHESIS_MODEL' is not a known bundled synthesis model" \
+             "(gemma-4-E2B-it, gemma-4-E4B-it); synthesis stays off" >&2
+        return 0
+    fi
+
+    : "${SYNTHESIS_PORT:=8761}"
+    export SYNTHESIS_PORT
+    models_dir="${AIMEE_HOME:-/var/lib/aimee}/models"
+    mkdir -p "$models_dir" 2>/dev/null || true
+
+    echo "aimee-kb: starting bundled synthesis ($SYNTHESIS_MODEL) on :$SYNTHESIS_PORT;" \
+         "weights under $models_dir (first start downloads them)" >&2
+    # --no-mmproj: every benchmark run passed it and the shipped service never did,
+    # so production loaded a ~0.5GB vision/audio projector for a text-only task that
+    # cannot use it. -hf also FETCHES the projector unless MMPROJ_AUTO is off, so
+    # both the download and the resident cost are avoided here.
+    HF_HOME="$models_dir" \
+    HF_HUB_OFFLINE=0 \
+    LLAMA_ARG_MMPROJ_AUTO=false \
+        "$llama" -hf "$repo" --host 127.0.0.1 --port "$SYNTHESIS_PORT" \
+                 -c 8192 --no-webui --no-mmproj >&2 &
+    synthesis_pid=$!
+
+    # One precedence rule for both cases, as with the embedder: the kb reaches the
+    # bundled model the same way it would reach a remote one.
+    SYNTHESIS_ENDPOINT="http://127.0.0.1:$SYNTHESIS_PORT/v1"
+    export SYNTHESIS_ENDPOINT
+}
+
 
 set -e
 
@@ -249,6 +333,7 @@ if [ "$external_db" -eq 0 ]; then
     AIMEE_DB2_URL="$embedded_dsn" aimee-kb --bootstrap-vault-env
 
     start_embedder
+    start_synthesis
 
     # Not exec: the trap above has to outlive the kb so the cluster shuts down
     # cleanly. Forward the stop signal so the kb still gets its own shutdown.
@@ -307,4 +392,5 @@ if [ "$external_db" -eq 0 ]; then
 fi
 
 start_embedder
+start_synthesis
 exec aimee-kb "$@"

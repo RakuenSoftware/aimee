@@ -3,10 +3,11 @@
 #
 # NO EMBEDDER IS PRE-SELECTED, deliberately.
 #
-# The bundled model (bekko-a25m) is baked into this image but not loaded until something
-# selects it: the setup wizard writes `embedder_model` for the bundled embedder, or
-# `embedder_url` for an external one, and `aimee config deploy-env` passes that to
-# the container as EMBEDDER_MODEL / EMBEDDER_URL. Pre-selecting here would spend
+# The bundled model (bekko-a25m on aimee-kb / aimee-kb-llm, nomic-v2 on the -nomic
+# variants) is baked into this image but not loaded until something selects it: the
+# setup wizard writes `embedder_model` for the bundled embedder, or `embedder_url`
+# for an external one, and `aimee config deploy-env` passes that to the container
+# as EMBEDDER_MODEL / EMBEDDER_URL. Pre-selecting here would spend
 # half a gigabyte of resident model on every container that was never told to use it,
 # including one whose operator is about to choose an external GPU embedder.
 #
@@ -14,10 +15,10 @@
 # half-configured state. Selecting one later re-embeds, which the recorded serving
 # identity enforces.
 #
-# Synthesis resolves ONE endpoint, SYNTHESIS_ENDPOINT — remote, or loopback when a
-# *-llm image variant runs gemma-4 beside the kb. (This named two spellings that
-# could disagree.) LLM-dependent
-# passes fail closed if that is unavailable. Retrieval does not depend on it.
+# Synthesis resolves ONE endpoint, SYNTHESIS_ENDPOINT — a remote host, or loopback
+# when a *-llm image variant runs gemma-4 beside the kb. (This said "an external
+# endpoint (AIMEE_LLM_URL / LLM_ENDPOINT)": two spellings that could disagree.)
+# LLM-dependent passes fail closed when it is unset. Retrieval does not depend on it.
 
 learning:
   synthesize:

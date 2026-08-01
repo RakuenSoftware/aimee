@@ -16,6 +16,10 @@ services:
       # External DB2 credentials are streamed into Vault before `up`.
       # EXTERNAL aimee-llm plugin — set to the host running it, e.g. http://192.168.0.254:8742
       SYNTHESIS_ENDPOINT: ${SYNTHESIS_ENDPOINT:-}
+      # The bundled synthesis model, on a *-llm image variant: the entrypoint
+      # starts llama-server for it and points SYNTHESIS_ENDPOINT at loopback.
+      # Empty on a non-llm image, or when synthesis is remote/off.
+      SYNTHESIS_MODEL: ${SYNTHESIS_MODEL:-}
       EMBEDDER_DIMS: ${EMBEDDER_DIMS:-2560}
       AIMEE_KB_HTTP_BIND: "1"
     command: ["--http-port=8741"]
