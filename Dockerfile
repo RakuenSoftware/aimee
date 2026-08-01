@@ -110,9 +110,15 @@ RUN set -eux; \
         build-essential cmake git ca-certificates libcurl4-openssl-dev; \
     git clone --depth 1 --branch "$LLAMACPP_VERSION" \
         https://github.com/ggml-org/llama.cpp.git /tmp/llamacpp-src; \
+    # LLAMA_BUILD_EXAMPLES stays ON: at this tag the server IS an example
+    # (examples/server, target llama-server), so turning examples off deletes the
+    # target and cmake fails with "No rule to make target 'llama-server'". It costs
+    # nothing at build time because --target below builds only that binary's graph.
+    # A later llama.cpp moves the server to tools/ and adds LLAMA_BUILD_TOOLS; if
+    # LLAMACPP_VERSION crosses that, this flag needs revisiting.
     cmake -S /tmp/llamacpp-src -B /tmp/llamacpp-src/build \
         -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=ON \
-        -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=ON; \
+        -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=ON -DLLAMA_BUILD_SERVER=ON; \
     cmake --build /tmp/llamacpp-src/build --target llama-server -j"$(nproc)"; \
     mkdir -p /out; \
     cp "$(find /tmp/llamacpp-src/build -name llama-server -type f -perm -u+x | head -1)" /out/; \
