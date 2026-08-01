@@ -23,9 +23,26 @@ TEMPLATE = (
     'generic catch-all such as "other"/"unknown"/"misc". subject is the entity the '
     'fact is about (use "user" for the note\'s author when it is first-person). '
     "confidence is 0..1. Extract only durable, generalizable facts; skip transient "
-    "state, feelings, plans, and one-off events. If the note asserts no durable "
-    "fact, return an empty list. No prose, no markdown."
+    "state, feelings, plans, and one-off events. If the note RETRACTS or DENIES "
+    'something ("no longer", "did not", "never", "is not", "has left", '
+    '"was removed"), do NOT emit the negated fact - a retraction asserts a fact '
+    "is FALSE, so there is nothing durable to record; return an empty list. "
+    "If the note asserts no durable fact, return an empty list. No prose, no markdown."
 )
+
+# Bump when TEMPLATE changes. Results taken under different prompt versions are
+# NOT comparable: the prompt is an input to the system under test, so changing it
+# changes what is being measured. Every result file should record which version
+# produced it.
+#
+#   v1  original
+#   v2  explicit retraction/negation guidance. The v1 prompt named transient
+#       state, feelings, plans and one-off events as out of scope but said
+#       nothing about retractions, so "Ingrid is no longer on the renewals desk"
+#       produced a member_of triple — 51 spurious triples in the negation slice
+#       of the 1k small-corpus run, the graph-poisoning case that slice exists
+#       to catch.
+PROMPT_VERSION = "v2"
 
 # Production caps the completion at MF_LLM_OUT_CAP.
 MAX_NEW_TOKENS = 8192

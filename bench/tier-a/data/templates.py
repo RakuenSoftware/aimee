@@ -284,14 +284,37 @@ SALES = {
         {"text": "I picked up {company} this quarter.",
          "gold": [{"s": "user", "r": "owns_account", "o": "{company}"}]},
     ],
+    # A novel-predicate note must admit NO reasonable seed relation. The prompt
+    # tells the model to prefer a canonical predicate "when one reasonably
+    # applies" and to mint only "if NONE fits", so a note where a seed fits will
+    # never produce a minted predicate from a model that is obeying the prompt.
+    #
+    # The first version of this cell got that wrong: "X is the technical contact
+    # for Y" was labelled `technical_contact_for`, and E2B answered `works_for`
+    # (7x) and `has_role` (5x) — both defensible, both scored wrong, cell F1
+    # 0.000 across 40 gold triples. The model was right and the gold was wrong.
+    # For contrast, the hand-authored set scores E2B 0.571 here, because its
+    # novel predicates (drives, founded, mentors) have no seed equivalent at all.
+    #
+    # `alt` gives the spellings a labeller cannot arbitrate between: a minted
+    # predicate has no canonical form, so demanding exactly `renews_on` over
+    # `renewal_date` measures spelling luck rather than extraction.
     "novel_pred": [
-        {"text": "The {contract} renews on {renews_on}.",
-         "gold": [{"s": "{contract}", "r": "renews_on", "o": "{renews_on}"}]},
-        {"text": "{person} is the technical contact for {company}.",
-         "gold": [{"s": "{person}", "r": "technical_contact_for",
-                   "o": "{company}"}]},
-        {"text": "{company} is up for renewal on {renews_on}.",
-         "gold": [{"s": "{company}", "r": "renews_on", "o": "{renews_on}"}]},
+        {"text": "{person} drives a {product} van for the {company} run.",
+         "gold": [{"s": "{person}", "r": "drives", "o": "{product}"}],
+         "alt": [["operates", "uses"]]},
+        {"text": "{person} founded {company}.",
+         "gold": [{"s": "{person}", "r": "founded", "o": "{company}"}],
+         "alt": [["established", "started"]]},
+        {"text": "{person} mentors the junior staff at {company}.",
+         "gold": [{"s": "{person}", "r": "mentors", "o": "{company}"}],
+         "alt": [["coaches", "trains"]]},
+        {"text": "{person} sponsors the {team} budget.",
+         "gold": [{"s": "{person}", "r": "sponsors", "o": "{team}"}],
+         "alt": [["funds", "backs"]]},
+        {"text": "{person} audits the {policy} every quarter.",
+         "gold": [{"s": "{person}", "r": "audits", "o": "{policy}"}],
+         "alt": [["reviews", "inspects"]]},
     ],
     "multi_fact": [
         {"text": "{company} runs {product} out of {city}.",

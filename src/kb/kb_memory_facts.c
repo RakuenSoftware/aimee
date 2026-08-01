@@ -75,8 +75,11 @@
    "\"other\"/\"unknown\"/\"misc\". subject is the entity the fact is about "                      \
    "(use \"user\" for the note's author when it is first-person). "                                \
    "confidence is 0..1. Extract only durable, generalizable facts; skip transient "                \
-   "state, feelings, plans, and one-off events. If the note asserts no durable "                   \
-   "fact, return an empty list. No prose, no markdown."
+   "state, feelings, plans, and one-off events. If the note RETRACTS or DENIES "                   \
+   "something (\"no longer\", \"did not\", \"never\", \"is not\", \"has left\", "                  \
+   "\"was removed\"), do NOT emit the negated fact - a retraction asserts a fact "                 \
+   "is FALSE, so there is nothing durable to record; return an empty list. "                       \
+   "If the note asserts no durable fact, return an empty list. No prose, no markdown."
 
 /* Build the extraction system prompt, binding the model to the canonical relation
  * set (autonomous reconciliation, §7). Sourced from the seed ontology so it stays
@@ -257,10 +260,30 @@ static int mf_commit_facts(const char *llm_json, const char *note)
    /* Models often wrap the JSON in ```json ... ``` fences or add a sentence of
     * prose despite instructions. Parse the outermost {...} object so a fenced or
     * prefixed response still yields facts. */
+   /* A bare "[]" is a CORRECT abstention, not a malformed response. Small models
+    * write it instead of {"facts":[]} on notes that assert no durable fact —
+    * 297 of 1000 notes in the tier-A small-corpus run, of which 184 were notes
+    * whose gold is deliberately empty. Both spellings mean "nothing to commit",
+    * and both return 0 here, so the two are indistinguishable to the caller and
+    * to anyone reading a log. Report the abstention explicitly so a future
+    * "the model emits nothing" investigation can tell refusal from garbage. */
+   const char *p = llm_json;
+   while (*p && isspace((unsigned char)*p))
+      p++;
+   if (p[0] == '[' && p[1] == ']')
+   {
+      aimee_log(LOG_DEBUG, "kb.memory.facts",
+                "note yielded an explicit empty extraction ('[]')");
+      return 0;
+   }
    const char *start = strchr(llm_json, '{');
    const char *end = strrchr(llm_json, '}');
    if (!start || !end || end < start)
+   {
+      aimee_log(LOG_WARN, "kb.memory.facts",
+                "response contained no JSON object - nothing committed");
       return 0;
+   }
    size_t span = (size_t)(end - start) + 1;
    char *obj = malloc(span + 1);
    if (!obj)

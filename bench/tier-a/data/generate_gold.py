@@ -130,10 +130,28 @@ def synth_fields(kind, syn, rng):
 
 
 def render(tpl, fields):
+    """Render a template into (note, gold).
+
+    A template may carry `alt`: per-gold-triple lists of ALTERNATIVE RELATION
+    NAMES that express the same fact. score.py expects full alternative triples,
+    so they are expanded here against the same subject and object.
+
+    This exists for minted predicates, which have no canonical spelling. Gold
+    that demands exactly `renews_on` where a model says `renewal_date` measures
+    spelling luck, not extraction — and score.py counts an alternative as a true
+    positive rather than excusing it from the denominator.
+    """
     note = tpl["text"].format(**fields)
-    gold = [{"subject": g["s"].format(**fields),
+    gold = []
+    alts = tpl.get("alt") or []
+    for i, g in enumerate(tpl["gold"]):
+        t = {"subject": g["s"].format(**fields),
              "relation": g["r"].format(**fields),
-             "object": g["o"].format(**fields)} for g in tpl["gold"]]
+             "object": g["o"].format(**fields)}
+        if i < len(alts):
+            t["alt"] = [{"subject": t["subject"], "relation": r,
+                         "object": t["object"]} for r in alts[i]]
+        gold.append(t)
     return note, gold
 
 
