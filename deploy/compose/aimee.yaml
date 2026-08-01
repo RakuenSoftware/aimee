@@ -26,12 +26,20 @@ services:
       # disposable Compose helper; never persist them in Config.Env.
       # Synthesis only. The kb embeds in-container; there is no reranker.
       SYNTHESIS_ENDPOINT: ${SYNTHESIS_ENDPOINT:-}
+      # The bundled synthesis model on a *-llm image: the entrypoint fetches it and
+      # points SYNTHESIS_ENDPOINT at loopback. Blank elsewhere.
+      SYNTHESIS_MODEL: ${SYNTHESIS_MODEL:-}
+      # Bearer for a remote synthesis endpoint; blank for loopback or a keyless one.
+      SYNTHESIS_API_KEY: ${SYNTHESIS_API_KEY:-}
       # The wizard's embedder choice, and the endpoint for an external one. The kb
       # MUST receive both: `aimee config deploy-env` emits them, and without them
       # reaching the container the entrypoint sees no selection, starts nothing, and
       # the builtin serves forever — the wizard's embedder silently never runs.
       EMBEDDER_MODEL: ${EMBEDDER_MODEL:-}
       EMBEDDER_URL: ${EMBEDDER_URL:-}
+      # Bearer for an EXTERNAL embedder endpoint. Blank for the bundled model,
+      # which is reached on loopback and needs no credential.
+      EMBEDDER_API_KEY: ${EMBEDDER_API_KEY:-}
       # Embedding dim. Leave EMPTY so the kb uses the dimension of the embedder it
       # actually serves (the bundled bekko-a25m is 384). This carried the retired
       # aimee-llm CPU tier's 1024: with the bundled embedder the kb came up healthy,

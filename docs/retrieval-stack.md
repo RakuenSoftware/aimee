@@ -15,7 +15,7 @@ were used.
 
 One embedder identity and dimension applies to a deployment. The KB stores derived vectors in DB2
 and serves the model itself, from weights baked into its image. The bundled `bekko-a25m` is
-384-dimension; an external endpoint (`AIMEE_EMBEDDER_URL`) can serve a wider one.
+384-dimension; an external endpoint (`EMBEDDER_URL`) can serve a wider one.
 
 The embedder is selected in the wizard's Deploy topology step. Until one is selected the KB serves a
 builtin lexical embedder. Retrieval works, but it is keyword matching rather than vector search.
@@ -40,7 +40,7 @@ network. It is **384-dimensional**.
 | prefixes | none. Its card defines none, so its benchmark number carries into production unchanged |
 | vocab | 256k, multilingual |
 
-**Above 384 dimensions, run your own embedder.** Point `AIMEE_EMBEDDER_URL` (or the
+**Above 384 dimensions, run your own embedder.** Point `EMBEDDER_URL` (or the
 wizard's "External endpoint" option) at a GPU-served endpoint. That is the supported route
 to a wider or stronger embedder, and it is why the measurement winner is not bundled:
 `nomic-embed-text-v2-moe` scored 0.6075 against bekko's 0.5909, but it is 768-dim, ~6x

@@ -79,7 +79,7 @@ means the contract or branch exists but is not part of the integrated path yet.
 | Generic `/v1/rpc` | Named, versioned `/v1` routes. |
 | Combined appliance image | Managed or split container stack. |
 | Client-held agent keys | Server-sealed vault. |
-| `aimee-llm` inference container | Embedding runs inside the knowledge base from weights in its image; synthesis is an external endpoint set through `AIMEE_LLM_URL`. |
+| `aimee-llm` inference container | Embedding runs inside the knowledge base from weights in its image; synthesis is an external endpoint set through `SYNTHESIS_ENDPOINT`. |
 | KB socket autostart | Explicit KB `/v1` service. |
 
 Generated [commands](gen/cli-commands.md), [configuration](gen/configuration.md), and

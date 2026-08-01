@@ -49,9 +49,9 @@ them synchronously, and exits before the service is created.
 
 The KB embeds in-process from weights baked into its image, so embedding needs no second container
 and no model download. Select the embedder in the wizard's Deploy topology step, or set
-`embedding_model`; point `AIMEE_EMBEDDER_URL` at your own endpoint for a wider model.
+`embedding_model`; point `EMBEDDER_URL` at your own endpoint for a wider model.
 
-Synthesis is a single OpenAI-compatible endpoint at `AIMEE_LLM_URL`, defaulted empty. Run it
+Synthesis is a single OpenAI-compatible endpoint at `SYNTHESIS_ENDPOINT`, defaulted empty. Run it
 yourself with an `aimee-kb` image variant that bundles llama.cpp, or point at an external one. See [Choosing a synthesis model](SYNTHESIS_MODELS.md).
 
 The KB must report explicit degradation when a configured inference stage is unavailable. It cannot

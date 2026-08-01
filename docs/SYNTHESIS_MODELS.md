@@ -1,7 +1,7 @@
 # Choosing a synthesis model
 
 aimee makes every KB reasoning call — extraction, indexing, entity judgement,
-topic synthesis — through one endpoint, `AIMEE_LLM_URL`. This page is about what
+topic synthesis — through one endpoint, `SYNTHESIS_ENDPOINT`. This page is about what
 you put behind it.
 
 There used to be two answers to that question, a cheap model for the mechanical
@@ -14,9 +14,9 @@ distinction this page replaces.
 
 | You want | Do this | What you get |
 | --- | --- | --- |
-| **Simplest thing that works** | Point `AIMEE_LLM_URL` at an external OpenAI-compatible endpoint | Best quality, no local GPU or RAM cost, your notes leave the machine |
-| **Local, and quality matters most** | an `aimee-kb` image variant with llama.cpp bundled, `gemma-4-E4B-it` (default) | 0.82 F1 extraction, 7.46 GB of weights, 3.3 tok/s on 8 CPU threads |
-| **Local, and the box is small** | the same variant, configured for `gemma-4-E2B-it` | 0.69 F1 extraction, 4.61 GB of weights, 6.3 tok/s on 8 CPU threads |
+| **Simplest thing that works** | Point `SYNTHESIS_ENDPOINT` at an external OpenAI-compatible endpoint | Best quality, no local GPU or RAM cost, your notes leave the machine |
+| **Local, and quality matters most** | run `aimee-kb-llm` (or `aimee-kb-nomic-llm`) and select `gemma-4-E4B-it` | 0.82 F1 extraction, 7.46 GB of weights, 3.3 tok/s on 8 CPU threads |
+| **Local, and the box is small** | the same image, selecting `gemma-4-E2B-it` | 0.69 F1 extraction, 4.61 GB of weights, 6.3 tok/s on 8 CPU threads |
 
 Those weight sizes and throughputs are Q8_0, which is what was measured. The
 shipped default is Q4_K_M, which is roughly half the size and faster —
@@ -198,13 +198,30 @@ Two further warnings that are not about size:
   the lane that matches E4B's cited thinking-off score. The 0.646 figure is
   unsourced and has been dropped rather than reconciled.
 
+## Running one of these locally
+
+The two local rows need an image that ships llama.cpp: `aimee-kb-llm` (bekko-a25m
+embedder, 384-dim) or `aimee-kb-nomic-llm` (nomic-v2, 768-dim). The plain
+`aimee-kb` and `aimee-kb-nomic` images do not bundle it, and the setup wizard
+disables the local options there rather than offering a choice that cannot work.
+
+Select the model with `SYNTHESIS_MODEL` (or in the wizard). The container fetches
+the weights on first start and keeps them on the data volume, under
+`$AIMEE_HOME/models` — so an image upgrade does not refetch several gigabytes.
+Leave `SYNTHESIS_ENDPOINT` empty: the container starts llama-server itself and
+points synthesis at loopback.
+
+The embedder axis is a separate, one-way choice: the database records the vector
+width and refuses to start if it changes, so pick the `-nomic` variant up front if
+you want 768-dim vectors.
+
 ## Using an external model
 
-`AIMEE_LLM_URL` takes any OpenAI-compatible endpoint, hosted or self-run:
+`SYNTHESIS_ENDPOINT` takes any OpenAI-compatible endpoint, hosted or self-run:
 
 ```yaml
 environment:
-  AIMEE_LLM_URL: "https://your-endpoint.example/v1"
+  SYNTHESIS_ENDPOINT: "https://your-endpoint.example/v1"
 ```
 
 It defaults to empty, and that is deliberate rather than an oversight: the old
@@ -216,6 +233,5 @@ endpoint.
 Your notes are sent to whatever answers that URL. That is the trade the first row
 of the decision table is making.
 
-See [Local inference](LOCAL_INFERENCE.md) for how the endpoint fits the rest of
-the stack, and [KB inference backends](KB_LLM_BACKENDS.md) for the provider
-configuration surface.
+See [KB inference backends](KB_LLM_BACKENDS.md) for the provider configuration
+surface.

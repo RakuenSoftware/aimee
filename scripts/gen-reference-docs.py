@@ -118,13 +118,23 @@ CFG_KEY_DESC = {
     "verify_role": "Delegate role used for cross-verification.",
     "wfe_proposals_autoscan_enabled": "Automatically scan watched proposal directories; off requires explicit trigger.fire.",
 
-    "llm_embed_backend": "Deploy-time embedding backend: local or external.",
-    "llm_synth_backend": "Deploy-time synthesis backend: local, external, or off.",
-    "llm_synth_endpoint": "External synthesis endpoint used when the synth backend is external.",
-    "llm_synth_gpu": "Deploy-time GPU selector for the local synthesis backend.",
-    "llm_synth_host": "Deploy-time host selector for the local synthesis backend.",
-    "llm_synth_model": "Model label sent to the configured synthesis endpoint.",
-    "llm_synth_tier": "Deploy-time local synthesis tier: cpu, small, mid, or large.",
+    "aimee_with_llamacpp": "Whether THIS IMAGE bundles llama.cpp (\"1\" on the "
+    "aimee-kb-*-llm variants). Set by the Dockerfile, not by an operator: it is a fact "
+    "about the running image, and the setup wizard reads it to decide whether the local "
+    "synthesis models can be offered at all.",
+    "synthesis_endpoint": "The ONE synthesis endpoint, remote or loopback. Empty means "
+    "synthesis is off, which is supported - embedding, search, recall and indexing "
+    "never call it. On a *-llm image the container entrypoint sets this to loopback "
+    "itself after starting the bundled model.",
+    "synthesis_model": "Synthesis model. On a *-llm image this selects the bundled model "
+    "to fetch and serve (gemma-4-E2B-it or gemma-4-E4B-it); otherwise it is the model "
+    "label sent to the configured endpoint.",
+    "synthesis_api_key": "Bearer token for the synthesis endpoint (blank for a keyless "
+    "or loopback endpoint).",
+    "synthesis_thinking": "Let the synthesis model think before answering (default on). "
+    "It measured positive-to-neutral everywhere it was tried. Global rather than "
+    "per-stage, and the operator's call: turn it off only for a model that reasons past "
+    "its output budget without answering.",
 
     "kb_curator_cross_repo_graph_enabled": "Resolve and maintain cross-repository dependency edges.",
     "kb_curator_custom_stages": "JSON definitions that recompose vetted curator operations with bounded budgets.",
@@ -172,10 +182,20 @@ CFG_KEY_DESC = {
     "dogfood_inline_tagging": "Inline-tag dogfood events during the session.",
     "dogfood_log_dir": "Directory for dogfood logs.",
     "ecomode": "Reduce background compute (eco mode).",
-    "embedding_command": "Command that produces embeddings (overrides the endpoint).",
-    "embedding_dim": "Embedding vector dimension.",
-    "embedding_endpoint": "Embeddings provider endpoint URL.",
-    "embedding_model": "Embeddings model name.",
+    "embedder_command": "Command that produces embeddings (overrides the endpoint).",
+    "embedder_dims": "Embedding vector width. Leave unset for a bundled embedder - it "
+    "declares its own width and the kb derives it (pinned > recorded > probed). REQUIRED "
+    "for an external endpoint, whose width cannot be derived; valid to 4000, the DB2 "
+    "column ceiling. A ONE-WAY DOOR once anything is embedded: DB2 records the width and "
+    "refuses to start on drift.",
+    "embedder_url": "External embedder endpoint. A non-empty value IS the external "
+    "embedder; empty means the model baked into this image variant (bekko-a25m at 384, "
+    "or nomic-v2 at 768 on the -nomic images).",
+    "embedder_model": "Embedder identity. Written for a bundled model too, not just an "
+    "external one: it is the registry key pooling and prefixes resolve from, and the "
+    "value recorded against the corpus.",
+    "embedder_api_key": "Bearer token for an external embedder endpoint (blank if it "
+    "needs none).",
     "fidelity_check_enabled": "Run the answer-fidelity judge on terminal-text turns "
     "(default off; requires kb_evidence_emit_enabled + ingress_preinject_enabled).",
     "guardrail_mode": "Guardrail enforcement mode: approve (default; a tool call needs approval, so an unattended delegate is blocked), prompt, or deny.",
@@ -299,7 +319,7 @@ CFG_KEY_DESC = {
     "text + geometry feed the normal citation path (default off; without it a scanned PDF is "
     "ingested asset-only).",
     "ocr_command": "OCR sidecar endpoint/command for structured-PDF scanned-page recognition "
-    "(resolves like embedding_command; AIMEE_OCR_URL env fallback).",
+    "(resolves like embedder_command; AIMEE_OCR_URL env fallback).",
     "kb_mining_enabled": "Enable background KB mining.",
     "kb_mining_min_poll_s": "Minimum interval (s) between KB mining polls.",
     "kb_search_max_results": "Default max results for KB search.",

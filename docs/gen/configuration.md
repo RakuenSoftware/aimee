@@ -22,12 +22,13 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (85)
+## CLI-settable keys (91)
 
 The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys are still `aimee config set`-able but are filed into their own subsections below (and hidden from the Settings surface by default).
 
 | Key | Type | Description |
 |-----|------|-------------|
+| `aimee_with_llamacpp` | string | Whether THIS IMAGE bundles llama.cpp ("1" on the aimee-kb-*-llm variants). Set by the Dockerfile, not by an operator: it is a fact about the running image, and the setup wizard reads it to decide whether the local synthesis models can be offered at all. |
 | `audit_action_enabled` | bool | Publish governed tool-action audit rows (default on); disabling it creates an audit coverage gap. |
 | `audit_worm_enabled` | bool | Dual-write governed-action audit rows into the append-only, hash-chained WORM store alongside audit.log (default off). |
 | `autonomous` | bool | Run autonomously (auto-advance machine gates; human gates always park) vs interactive. |
@@ -51,10 +52,11 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `delegate_sandbox_learn_packages` | bool | Learned toolchain for delegate sandboxes (default on). aimee captures the apt packages a delegate installs inside its `--network none` sandbox, records them per project (git root), and pre-bakes the learned set into that project's next sandbox image build — augmenting a declared `.aimee/project.yaml` from+packages spec, or synthesizing one (FROM the resolved base + the learned packages) when none is declared. Best-effort: a learned build that fails falls back to the un-augmented image. The first delegate turn after a new package is learned pays a one-time image build. |
 | `delegate_sandbox_package_access` | string | Runtime package-access policy for a `--network none` delegate sandbox. aimee always performs and logs the fetch (the delegate holds no outside socket); this selects how much: `proxy` (default) proxies package-manager fetches to any host — egress-via-aimee, for out-of-the-box functionality; `off` no runtime proxy (build-time installs + learned pre-bake only); `gated` host-allowlisted registries, off-allowlist requires human approval; `governance` allowlist from a governance provider, off-allowlist refused. Only meaningful when `delegate_sandbox` is on. |
 | `delegate_sandbox_require_isolation` | bool | Fail-closed guard for the `--network none` delegate sandbox (default off; only meaningful when `delegate_sandbox` is on). aimee always passes `--network none`, but some runtimes ignore it and give the sandbox real egress, defeating the package-access proxy. After the container starts aimee asks the host daemon whether a network with an IP is attached and always logs an error on a breach; when this is set, sandboxing is mandatory — aimee refuses to run the delegate at all (rather than fall back to un-isolated in-process host execution) on any failure to isolate: a breach, an unverifiable probe, docker being unavailable, or a failed acquire. |
-| `embedding_command` | string | Command that produces embeddings (overrides the endpoint). |
-| `embedding_dim` | int | Embedding vector dimension. |
-| `embedding_endpoint` | string | Embeddings provider endpoint URL. |
-| `embedding_model` | string | Embeddings model name. |
+| `embedder_api_key` | string | Bearer token for an external embedder endpoint (blank if it needs none). |
+| `embedder_command` | string | Command that produces embeddings (overrides the endpoint). |
+| `embedder_dims` | int | Embedding vector width. Leave unset for a bundled embedder - it declares its own width and the kb derives it (pinned > recorded > probed). REQUIRED for an external endpoint, whose width cannot be derived; valid to 4000, the DB2 column ceiling. A ONE-WAY DOOR once anything is embedded: DB2 records the width and refuses to start on drift. |
+| `embedder_model` | string | Embedder identity. Written for a bundled model too, not just an external one: it is the registry key pooling and prefixes resolve from, and the value recorded against the corpus. |
+| `embedder_url` | string | External embedder endpoint. A non-empty value IS the external embedder; empty means the model baked into this image variant (bekko-a25m at 384, or nomic-v2 at 768 on the -nomic images). |
 | `fidelity_check_enabled` | bool | Run the answer-fidelity judge on terminal-text turns (default off; requires kb_evidence_emit_enabled + ingress_preinject_enabled). |
 | `gateway_pin_model` | bool | Gateway forces the proxied /v1/messages served model to the configured primary's model, overriding the client-requested model. Default off (the passthrough honors the client model); enable for single-model Anthropic-compatible shims. |
 | `gateway_prevent_subagents` | bool | Gateway strips subagent-spawning tools (Task/Agent/etc.) from proxied requests so the served model cannot spawn subagents. Default off. |
@@ -92,7 +94,7 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `memory_rerank_mode` | string | Reranker mode. |
 | `memory_rewrite_command` | string | External query-rewrite command. |
 | `memory_rewrite_enabled` | bool | Enable query rewriting for recall. |
-| `ocr_command` | string | OCR sidecar endpoint/command for structured-PDF scanned-page recognition (resolves like embedding_command; AIMEE_OCR_URL env fallback). |
+| `ocr_command` | string | OCR sidecar endpoint/command for structured-PDF scanned-page recognition (resolves like embedder_command; AIMEE_OCR_URL env fallback). |
 | `openai_endpoint` | string | OpenAI-compatible endpoint URL. |
 | `openai_key_cmd` | string | Command that prints the OpenAI API key. |
 | `openai_model` | string | OpenAI model name. |
@@ -102,6 +104,10 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `require_aimee_memory` | bool | Block agent writes to external file-based agent-memory stores (~/.claude/projects/<slug>/memory/...) and redirect durable memories into aimee's memory system via `aimee memory store` (default on). |
 | `require_session_worktree` | bool | Fail closed on mutating ops outside an aimee-managed worktree (session-isolation guard; default off). |
 | `subagent_ban_enabled` | bool | Prevent provider-native sub-agent tools when an aimee delegate is available, and install the matching client guardrails (default on). |
+| `synthesis_api_key` | string | Bearer token for the synthesis endpoint (blank for a keyless or loopback endpoint). |
+| `synthesis_endpoint` | string | The ONE synthesis endpoint, remote or loopback. Empty means synthesis is off, which is supported - embedding, search, recall and indexing never call it. On a *-llm image the container entrypoint sets this to loopback itself after starting the bundled model. |
+| `synthesis_model` | string | Synthesis model. On a *-llm image this selects the bundled model to fetch and serve (gemma-4-E2B-it or gemma-4-E4B-it); otherwise it is the model label sent to the configured endpoint. |
+| `synthesis_thinking` | bool | Let the synthesis model think before answering (default on). It measured positive-to-neutral everywhere it was tried. Global rather than per-stage, and the operator's call: turn it off only for a model that reasons past its output budget without answering. |
 | `tsr_command` | string | TSR sidecar endpoint/command for structured-PDF table recognition (resolves like embedding_command; AIMEE_TSR_URL env fallback). |
 | `typed_facts_enabled` | bool | Enable the typed-fact knowledge layer (master gate; default off). |
 | `verify_cmd` | string | Command run after a delegated fix to verify it. |
@@ -113,20 +119,6 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `virtual_context_enabled` | bool | Enable virtual-context assembly. |
 | `wfe_live_forge_enabled` | bool | Gate for the autonomous live forge (default-ON). When off, the forge provider is not registered and every forge op fails closed, so an autonomous run can never open or merge a real PR. Even on, each op re-checks this flag and the merge-target rail. |
 | `wfe_proposals_autoscan_enabled` | bool | Automatically scan watched proposal directories; off requires explicit trigger.fire. |
-
-### Deploy-time keys (7)
-
-Consumed once by `config_emit_deploy_env` to stand up the managed sibling services (`aimee config deploy-env`); not read at runtime. Set at deploy, not tuned day-to-day.
-
-| Key | Type | Description |
-|-----|------|-------------|
-| `llm_embed_backend` | string | Deploy-time embedding backend: local or external. |
-| `llm_synth_backend` | string | Deploy-time synthesis backend: local, external, or off. |
-| `llm_synth_endpoint` | string | External synthesis endpoint used when the synth backend is external. |
-| `llm_synth_gpu` | string | Deploy-time GPU selector for the local synthesis backend. |
-| `llm_synth_host` | string | Deploy-time host selector for the local synthesis backend. |
-| `llm_synth_model` | string | Model label sent to the configured synthesis endpoint. |
-| `llm_synth_tier` | string | Deploy-time local synthesis tier: cpu, small, mid, or large. |
 
 ### Advanced tuning keys (78)
 
@@ -293,7 +285,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 226 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
+The binaries read 220 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
 
 ### Paths & assets
 
@@ -395,7 +387,6 @@ The binaries read 226 `AIMEE_*` environment variables (scanned from `getenv()` i
 |----------|-------------|
 | `AIMEE_CODE_INDEX_SOURCE` | Source label recorded for code-index ingestion. |
 | `AIMEE_EMBEDDERS_FILE` | Path to the embedder registry the server reads for GET /v1/embedders (the setup wizard's embedder picker). Defaults to /opt/aimee/embedders.json, then scripts/embedders.json in a source checkout. The same file the in-container embedder reads, so one declaration drives the picker, the loading and the serving flags. |
-| `AIMEE_EMBEDDER_URL` | Embedder endpoint override (/embed, /embed_batch); takes precedence over AIMEE_LLM_URL for embedding. |
 | `AIMEE_KB_API_CA_BUNDLE` | CA bundle path for verifying the aimee-kb TLS certificate. |
 | `AIMEE_KB_API_URL` | aimee-kb HTTP API base URL. |
 | `AIMEE_KB_CACHE_TTL_S` | KB client cache TTL (seconds). |
@@ -432,8 +423,6 @@ The binaries read 226 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_KB_TOKEN_ROOT_CUSTODY_ID` | Custody identifier for the management token signing root. |
 | `AIMEE_KB_VAULT_OPERATOR_ENABLED` | Enable the dedicated KB vault-operator runtime. |
 | `AIMEE_KB_VAULT_ORCHESTRATOR_URL` | Operator-configured vault orchestrator endpoint. |
-| `AIMEE_LLM_MODEL` | Model label sent to AIMEE_LLM_URL's chat endpoint (single-model gateways ignore it). Default 'aimee-synth'. |
-| `AIMEE_LLM_URL` | Synthesis endpoint (every curator stage, at {url}/v1). No longer selects an embedder: the kb embeds in-container, and AIMEE_EMBEDDER_URL points at an external embedder. See docs/SYNTHESIS_MODELS.md for what to put behind it and docs/KB_LLM_BACKENDS.md for the provider surface. |
 | `AIMEE_OCR_URL` | Structured-PDF OCR sidecar endpoint. |
 | `AIMEE_SERVER_ID` | Registry identity used by the server mTLS heartbeat. |
 | `AIMEE_SERVER_TEAM_ID` | The team this server serves, from the same registry row as AIMEE_SERVER_ID. Required for per-user /v1 write authorization: unset, the server still starts and serves reads but denies every write with no_team_configured. |
@@ -450,7 +439,6 @@ The binaries read 226 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_DB2_POOL_SIZE` | DB2 connection-pool size override. |
 | `AIMEE_DB2_STATEMENT_TIMEOUT_MS` | Per-connection `statement_timeout` in ms. Defaults to the pool's stuck-lease ceiling (`DB2_POOL_HOLD_CEILING_MS`, 300000), because a statement must not outlive the duration that defines a lease as stuck — the pool can report such a lease but cannot reclaim it. The value must be canonical decimal digits with no sign, surrounding whitespace or leading zero. Exactly `0` disables the bound — a deliberate opt-out for genuinely long work — and every other spelling of zero (`00`, `+0`, `-0`, ` 0`) is treated as malformed. Anything malformed or out-of-range falls back to the default and never to unlimited, so no typo can silently remove the bound. |
 | `AIMEE_DIM_PROBE_BUDGET_MS` | Time budget for probing an embedder's output dimension. |
-| `AIMEE_EMBEDDING_DIM` | Embedding dimension (drives halfvec column sizing). |
 | `AIMEE_PGVEC_SLOW_QUERY_MS` | Slow-query log threshold (ms) for the pgvector transport. |
 
 ### Memory
@@ -595,9 +583,7 @@ The binaries read 226 `AIMEE_*` environment variables (scanned from `getenv()` i
 
 | Variable | Description |
 |----------|-------------|
-| `AIMEE_LLM_AUTH_REQUIRED` | Set to 1 on wizard-managed KBs so synthesis clients refuse to contact the LLM when its bearer service identity is missing. |
-| `AIMEE_LLM_AUTH_TOKEN` | First-boot transport for the bearer aimee-kb presents to the external synthesis endpoint. aimee-kb synchronously seals it into Vault, scrubs the environment, and cleanly re-execs before serving; wizard-managed deploys generate the 256-bit value in Vault. This is separate from user/server bearers. |
-| `AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE` | Explicit first-boot migration/adoption transport for an existing wizard-managed LLM credential. aimee-server seals it into Vault and scrubs the environment before normal startup. Ordinary inherited AIMEE_LLM_AUTH_TOKEN is ignored by managed credential creation so stale child-service state cannot win. Must be a 32..512 character RFC 6750 b64token. |
+| `AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE` | Explicit first-boot migration/adoption transport for an existing wizard-managed LLM credential. aimee-server seals it into Vault and scrubs the environment before normal startup. Ordinary inherited SYNTHESIS_API_KEY is ignored by managed credential creation so stale child-service state cannot win. Must be a 32..512 character RFC 6750 b64token. |
 | `AIMEE_OFFLINE_ALLOW_NO_SWAP_MLOCK_FALLBACK` | Internal managed-authority switch: still attempts mlockall first, but when an unprivileged container cannot raise RLIMIT_MEMLOCK, permits the offline one-shot to continue only if the kernel reports no active swap. Operator-run custody tools leave this unset and retain mandatory mlockall. |
 
 ### Undocumented (add to `ENV_DESC` in gen-reference-docs.py)
@@ -619,15 +605,16 @@ Standard and third-party environment variables aimee honors (scanned non-`AIMEE_
 | `GEMINI_API_KEY_AUTH_MECHANISM` | Selects the Gemini key auth mechanism. |
 | `GOOGLE_API_KEY` | Google API key fallback for Gemini (via `api_key_env`). |
 | `OPENAI_API_KEY` | OpenAI API key (default for OpenAI-family agents). |
+| `SYNTHESIS_API_KEY` | Bearer credential used by the generic llm-chat sidecar; prefer the vault or a secret command. |
 
 ### Provider endpoints
 
 | Variable | Description |
 |----------|-------------|
 | `LLAMA_HOST` | llama.cpp server host/URL. |
-| `LLM_ENDPOINT` | OpenAI-compatible base URL used by the generic llm-chat sidecar. |
-| `LLM_MODEL` | Model requested by the generic llm-chat sidecar. |
 | `OLLAMA_HOST` | Ollama server host/URL for local models. |
+| `SYNTHESIS_ENDPOINT` | OpenAI-compatible base URL used by the generic llm-chat sidecar. |
+| `SYNTHESIS_MODEL` | Model requested by the generic llm-chat sidecar. |
 
 ### Network / proxy
 
@@ -652,6 +639,10 @@ Standard and third-party environment variables aimee honors (scanned non-`AIMEE_
 | `CODEX_HOME` | Codex home directory (Codex-frontend integration). |
 | `CODEX_SANDBOX` | Codex sandbox mode. |
 | `CODEX_THREAD_ID` | Codex conversation/thread id. |
+
+### Undocumented (add to `EXT_DESC`/`EXT_OS_IGNORE` in gen-reference-docs.py)
+
+`EMBEDDER_DIMS`, `EMBEDDER_URL`, `SYNTHESIS_AUTH_REQUIRED`
 
 ## Workflow engine
 

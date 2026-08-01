@@ -12,10 +12,10 @@ doing so. Retrieval works, but it is not dense.
 candidates, their numbers and their caveats — is
 [Choosing a synthesis model](SYNTHESIS_MODELS.md).**
 
-To embed against something else, set `AIMEE_EMBEDDER_URL`. That takes precedence, and the bundled
+To embed against something else, set `EMBEDDER_URL`. That takes precedence, and the bundled
 model stays unloaded.
 
-**Synthesis is external-only.** `AIMEE_LLM_URL` has no default, so a deployment that wants synthesis
+**Synthesis is external-only.** `SYNTHESIS_ENDPOINT` has no default, so a deployment that wants synthesis
 supplies its own OpenAI-compatible endpoint. Unset, synthesis stages report degradation rather than
 inventing a result.
 
@@ -23,7 +23,7 @@ The `aimee-llm` container that previously served both roles is retired.
 
 | Consumer | Configuration received | Request surface |
 | --- | --- | --- |
-| `aimee-kb` | `AIMEE_LLM_URL` (synth only, no default), `AIMEE_LLM_AUTH_TOKEN`, `AIMEE_LLM_MODEL` (default `aimee-synth`). Embedding is in-container; `AIMEE_EMBEDDER_URL` overrides it with an external endpoint | `/v1/chat/completions` on the synth endpoint |
+| `aimee-kb` | `SYNTHESIS_ENDPOINT` (synth only, no default), `SYNTHESIS_API_KEY`, `AIMEE_LLM_MODEL` (default `aimee-synth`). Embedding is in-container; `EMBEDDER_URL` overrides it with an external endpoint | `/v1/chat/completions` on the synth endpoint |
 | legacy KB curator sidecars | `LLM_API_KEY` aliasing the same service bearer | the endpoint's OpenAI-compatible `/v1` surface |
 
 `AIMEE_LLM_AUTH_REQUIRED` defaults to `0`. Set it to `1` with the endpoint's bearer to stop clients
@@ -42,9 +42,9 @@ without embedding; it must not claim dense results.
 ## Configure
 
 Configure one embedding model identity and one dimension for the deployment. Leave
-`AIMEE_EMBEDDER_URL` unset to use the bundled model; set it to embed against your own endpoint.
+`EMBEDDER_URL` unset to use the bundled model; set it to embed against your own endpoint.
 
-For synthesis, set `AIMEE_LLM_URL` and, where the endpoint authenticates, `AIMEE_LLM_AUTH_TOKEN`.
+For synthesis, set `SYNTHESIS_ENDPOINT` and, where the endpoint authenticates, `SYNTHESIS_API_KEY`.
 
 Use [generated configuration](gen/configuration.md) for current names. Container environment values
 override file values where documented.

@@ -21,7 +21,7 @@ operations. Exact command and config tables are generated from source:
 - `aimee-kb` owns durable memory, documents, the code graph, retrieval, curation, PostgreSQL, and
   pgvector.
 - The KB embeds in-process from weights baked into its image. Synthesis is external-only: point
-  `AIMEE_LLM_URL` at an endpoint you run.
+  `SYNTHESIS_ENDPOINT` at an endpoint you run.
 - `aimee-runtime-web` serves the browser workspace.
 
 The server and KB each run a bounded shared-memory event bus. Governed actions, memory mutations,

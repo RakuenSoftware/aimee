@@ -29,6 +29,18 @@
 name: Publish images
 
 on:
+  # A PULL REQUEST BUILDS BUT NEVER PUSHES. The point is to prove the Dockerfile
+  # still builds — publishing is a merge-time act, so nothing unreviewed can land
+  # in the registry. Path-filtered so unrelated PRs do not pay for a multi-arch
+  # build of four images.
+  pull_request:
+    paths:
+      - "Dockerfile*"
+      - "deploy/**"
+      - "scripts/embedders.json"
+      - "src/**"
+      - "frontend/**"
+      - ".github/workflows/publish-images.yml"
   push:
     tags: ["v*"]
   workflow_dispatch:
@@ -110,6 +122,7 @@ jobs:
         run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
 
       - name: Log in to ghcr.io
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -142,14 +155,19 @@ jobs:
             AIMEE_VERSION=${{ needs.prep.outputs.version }}
             WITH_RUNTIME_WEB=1
             ${{ matrix.image.extra_args }}
-          outputs: type=image,name=ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }},push-by-digest=true,name-canonical=true,push=true
+          # push=false on a pull_request: build only, publish nothing.
+          outputs: type=image,name=ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
 
+      # Digests only exist when something was pushed, so both steps and the whole
+      # merge job below are skipped on a pull request.
       - name: Export digest
+        if: github.event_name != 'pull_request'
         run: |
           mkdir -p /tmp/digests
           echo "${{ steps.build.outputs.digest }}" > "/tmp/digests/${{ matrix.image.name }}-${{ matrix.platform.arch }}"
 
       - name: Upload digest
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: digest-${{ matrix.image.name }}-${{ matrix.platform.arch }}
@@ -160,6 +178,8 @@ jobs:
   # tag it (sha, semver/version, latest).
   merge:
     needs: [prep, build]
+    # Nothing to merge when nothing was pushed. A PR stops after the build.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

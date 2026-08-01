@@ -39,7 +39,7 @@ consumer even when no synthesized artifact exists.
 ## Providers and readiness
 
 The reasoning stages resolve a provider from `tier_b.*` config, or failing that from the deployment's
-single synthesis endpoint (`config_synth_chat_endpoint`, i.e. `AIMEE_LLM_URL`). They never fall back to
+single synthesis endpoint (`config_synth_chat_endpoint`, i.e. `SYNTHESIS_ENDPOINT`). They never fall back to
 `LLM_ENDPOINT`, which `kb_curator_provider_for_stage` reserves for the mechanical stages: that variable
 is the small-model interface, and letting a weak model serve the reasoning stages is the graph-poisoning
 case the stage split exists to prevent. Both stage families now resolve to one model in practice, because

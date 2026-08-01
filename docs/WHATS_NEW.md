@@ -168,7 +168,7 @@ See [Event bus](EVENT_BUS.md).
   if you need them.
 - `aimee migrate v2`, whose server operation had already been removed.
 - The combined appliance image and its compose file.
-- The `aimee-llm` container and the reranker. The KB embeds in-container; point `AIMEE_LLM_URL` at
+- The `aimee-llm` container and the reranker. The KB embeds in-container; point `SYNTHESIS_ENDPOINT` at
   your own endpoint for synthesis.
 - The legacy KB Unix-socket autostart path.
 - Client-held plaintext agent credentials and the session credential-push endpoint.
