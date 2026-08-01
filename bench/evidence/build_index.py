@@ -27,7 +27,14 @@ LANE_NOTES = {
     "cpu":           "llama-bench throughput only, no extraction",
     "diagnostics":   "cap and repetition-penalty variants",
     "sub1b":         "sub-1B ladder, thinking ON",
-    "challenger-254": "7900 XTX / Vulkan / Q6-Q5 — compare only within this lane",
+    # INVALID DEVICE, not just an incomparable one. These runs were taken while
+    # the 7900 XTX had NO DRIVER BOUND: llama.cpp enumerated only the Phoenix
+    # iGPU (8GB shared out of a 14GB host), so a ~19GB Q6 model was never
+    # resident on a discrete card at all. Accuracy may survive — the same GGUF
+    # answers the same wherever it runs — but every speed, fit and "does this
+    # architecture work" claim from this lane is void. The card was bound after a
+    # reboot on 2026-08-01; anything measured before that needs re-running.
+    "challenger-254": "MISMEASURED: ran on an 8GB iGPU, not the 7900 XTX — speed/fit claims void",
     "cpufit":        "declared CPU lane, model does not fit the card",
     "ple-control":   "transformers/bf16, PLE applied — compare against the GGUF lanes",
     "quant":         "Unsloth Dynamic quants, thinking ON, --no-mmproj — quality vs resident memory",

@@ -918,3 +918,46 @@ The general shape, and it is the counterpart to every other defect in this log:
 a safety mechanism with no notion of concurrency is itself a hazard. Every
 earlier defect here was a check that failed to fire. This was a check that fired
 when it should not have, and it was the most destructive of them.
+
+## Defect 30: the `.254` lane measured an integrated GPU for a week
+
+Every `challenger-254` run was taken on an **8GB Phoenix iGPU sharing a 14GB
+host**, not the 24GB 7900 XTX the lane notes claim. The card is physically
+present at `0000:6b:00.0` (Navi 31, `1002:744c`) and had **no driver bound**, so
+`llama-server --list-devices` enumerated exactly one device — the iGPU — and
+llama.cpp took it by default. A reboot on 2026-08-01 bound `amdgpu` and both
+devices appeared:
+
+    Vulkan0: AMD Radeon Graphics (RADV PHOENIX)   8170 MiB   <- what we were using
+    Vulkan1: AMD Radeon RX 7900 XTX (RADV NAVI31) 24560 MiB  <- what we thought
+
+### What this invalidates
+
+Two conclusions in this log are wrong and are retracted here rather than edited
+in place, because the reasoning is instructive:
+
+**"GLM-4.7-Flash does not work on this hardware."** Recorded on three symptoms:
+`????????` from a raw completion, 7943 reasoning tokens with no content, and
+0.68 tok/s for a 30B-A3B MoE "resident on a 24GB card". It was never resident on
+any card — a ~19GB Q6 model against 8GB of shared memory on a swapping host
+explains all three without any architecture bug. GLM subsequently ran clean on
+`.253` under CUDA at 10.7 tok/s and scored **F1 0.7801**, the best recall in the
+benchmark. The Vulkan/RADV theory was invented to explain a fit problem.
+
+**Magistral-Small-2509 "too slow to finish".** 19 minutes per note in `D` state
+is what thrashing looks like, not what the model costs.
+
+`gemma-4-12B-it.q6` at 0.8630 stays in the index because accuracy plausibly
+survives — the same GGUF answers the same wherever its tensors sit — but its
+speed and fit numbers are void.
+
+### The general lesson
+
+Every sweep records a `device.json`, which was supposed to prevent exactly this.
+It recorded the *requested* placement (`-ngl 99`) and the *absence of CPU-offload
+warnings*, and both were satisfied by an iGPU. Provenance that cannot distinguish
+two devices is not provenance.
+
+`sweep_quant.sh` now pins `--device` explicitly and records `device_used`
+alongside `device_requested`, because a host with more than one GPU will silently
+give you the wrong one and every number will look plausible.
