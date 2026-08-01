@@ -204,12 +204,30 @@ COPY --from=build /src/aimee-kb-resolver /usr/local/bin/aimee-kb-resolver
 COPY scripts/embedders.json /opt/aimee/embedders.json
 COPY scripts/embedder-server.py /opt/aimee/scripts/embedder-server.py
 
-# Bake the weights for every registered embedder — one ships — so a fresh container
-# embeds with no download and an air-gapped install works. Pinned to the registry's
-# revision: a floating ref would let a rebuild change the vector space silently.
+# Bake the weights for the ONE embedder this image variant serves, so a fresh
+# container embeds with no download and an air-gapped install works. Pinned to the
+# registry's revision: a floating ref would let a rebuild change the vector space
+# silently.
 #
-# A deployment that wants a wider embedder points EMBEDDER_URL at its own endpoint
-# rather than baking a second model in here.
+# AIMEE_EMBEDDER selects the registry entry. Four images come out of this file:
+#
+#   AIMEE_EMBEDDER            AIMEE_WITH_LLAMACPP   image
+#   bekko-a25m (384)          0                     aimee-kb
+#   bekko-a25m (384)          1                     aimee-kb-llm
+#   nomic-embed-text-v2-moe   0                     aimee-kb-nomic
+#   nomic-embed-text-v2-moe   1                     aimee-kb-nomic-llm
+#
+# The registry lists both models; only the selected one is fetched. Baking both
+# would put nomic's ~1.8GB into every image, which is why these are separate tags.
+#
+# THE EMBEDDER AXIS IS A ONE-WAY DOOR PER INSTALL. DB2 records the vector-column
+# width and refuses startup on drift, so an install embedded with bekko (384)
+# cannot be moved to a nomic image (768) without a full reindex. Do not offer this
+# as a runtime switch; it is a deployment-time choice with data consequences.
+#
+# A deployment that wants a different embedder again points EMBEDDER_URL at its own
+# endpoint rather than baking a third model in here.
+ARG AIMEE_EMBEDDER=bekko-a25m
 #
 # FETCH ONLY WHAT THE TORCH PATH LOADS. snapshot_download takes the whole repo by
 # default, and a repo may publish the same weights several times over: bekko ships an
@@ -226,11 +244,21 @@ ENV HF_HOME=/opt/aimee/models \
     HF_MODULES_CACHE=/var/lib/aimee/.cache/huggingface/modules \
     HF_HUB_OFFLINE=1
 RUN --mount=type=cache,target=/root/.cache/huggingface \
+    AIMEE_EMBEDDER="$AIMEE_EMBEDDER" \
     HF_HUB_OFFLINE=0 "$EMBEDDER_VENV/bin/python" - <<'PYBAKE'
-import json
+import json, os, sys
 from huggingface_hub import snapshot_download
 with open("/opt/aimee/embedders.json", encoding="utf-8") as handle:
     table = json.load(handle)["embedders"]
+
+# Bake exactly the selected entry. An unknown name is a BUILD failure, not a
+# silently-empty image: a container with no baked weights starts fine and then
+# cannot embed, which surfaces as a retrieval outage rather than a build error.
+selected = os.environ.get("AIMEE_EMBEDDER", "").strip()
+if selected not in table:
+    sys.exit(f"AIMEE_EMBEDDER={selected!r} is not in the registry. "
+             f"Known: {', '.join(sorted(table))}")
+table = {selected: table[selected]}
 SKIP = [
     "onnx/*", "openvino/*", "*.onnx", "*.onnx_data",   # alternate runtimes
     "*.bin", "*.h5", "*.msgpack", "*.tflite", "*.ckpt",  # duplicate/legacy formats
@@ -282,6 +310,46 @@ PYBAKE
 # Permission denied" on every start and re-walks what the cache existed to avoid.
 # a+rX: readable everywhere, traversable on directories, and no file gains +x.
 RUN chmod -R a+rX /opt/aimee/models
+
+# ---- bundled llama.cpp (the *-llm image variants) -----------------------------
+# AIMEE_WITH_LLAMACPP=1 puts llama-server in the image so synthesis can run beside
+# the kb on the same host. SYNTHESIS_ENDPOINT then points at loopback; there is no
+# separate variable for a bundled model.
+#
+# THIS MAKES US THE VENDOR. Until now the deployment ran upstream's own image and
+# inherited its CVE fixes and version bumps for free. Bundling means this pin is
+# the only thing deciding which llama.cpp a user runs, and it does not move on its
+# own. It needs deliberate bumping, and it is the one place to change.
+ARG AIMEE_WITH_LLAMACPP=0
+ARG LLAMACPP_VERSION=b4585
+ARG LLAMACPP_SHA256=""
+RUN set -eux; \
+    if [ "$AIMEE_WITH_LLAMACPP" = "1" ]; then \
+      arch="$(dpkg --print-architecture)"; \
+      case "$arch" in \
+        amd64) asset="llama-${LLAMACPP_VERSION}-bin-ubuntu-x64.zip" ;; \
+        arm64) asset="llama-${LLAMACPP_VERSION}-bin-ubuntu-arm64.zip" ;; \
+        *) echo "no llama.cpp release asset for $arch" >&2; exit 1 ;; \
+      esac; \
+      apt-get update && apt-get install -y --no-install-recommends unzip ca-certificates curl; \
+      curl -fsSL -o /tmp/llama.zip \
+        "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMACPP_VERSION}/${asset}"; \
+      if [ -n "$LLAMACPP_SHA256" ]; then \
+        echo "${LLAMACPP_SHA256}  /tmp/llama.zip" | sha256sum -c -; \
+      else \
+        echo "WARNING: LLAMACPP_SHA256 unset - release asset not verified" >&2; \
+      fi; \
+      unzip -j /tmp/llama.zip -d /opt/aimee/llama.cpp; \
+      chmod +x /opt/aimee/llama.cpp/llama-server; \
+      rm -f /tmp/llama.zip; \
+      apt-get purge -y unzip && apt-get autoremove -y; \
+      rm -rf /var/lib/apt/lists/*; \
+    fi
+# Recorded either way so the runtime can tell whether it has a local model runtime
+# without probing the filesystem. The wizard needs this: offering "run gemma-4
+# locally" on an image with no llama.cpp is an option that cannot work.
+ENV AIMEE_WITH_LLAMACPP=${AIMEE_WITH_LLAMACPP} \
+    AIMEE_LLAMACPP_VERSION=${LLAMACPP_VERSION}
 
 # Sidecar clients (the LLM access code the kb invokes via popen).
 COPY scripts/embed-remote.py scripts/llm-chat.py \
