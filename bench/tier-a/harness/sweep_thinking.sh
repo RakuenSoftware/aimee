@@ -54,7 +54,17 @@ for entry in "${MODELS[@]}"; do
   [ -s "$PRED" ] && { echo "SKIP $LABEL"; continue; }
   echo "=== SERVE $LABEL (thinking enabled) ==="
   # shellcheck disable=SC2086
-  $SERVER -hf "$REPO" --port "$PORT" -c 8192 --no-webui $EXTRA >"$LOG" 2>&1 &
+  # --no-mmproj: this was the ONLY sweep missing it, so every model in this
+  # ladder loaded its multimodal projector and gave up VRAM that could have held
+  # weights. --no-mmap: llama.cpp warns that CPU tensor overrides with mmap on
+  # fault through page cache per token, and gemma-4-26B-A4B was served with
+  # every expert on CPU under exactly that condition. It measured 13.55 t/s
+  # against gemma-4-12B's 57.76, and prompt processing at 84 tok/s on a 5080,
+  # both of which are setup faults reported as model cost.
+  #
+  # Accuracy is unaffected — the same GGUF yields the same tokens wherever its
+  # tensors sit — so the F1 results stand. The latency column does not.
+  $SERVER -hf "$REPO" --port "$PORT" -c 8192 --no-webui --no-mmproj --no-mmap $EXTRA >"$LOG" 2>&1 &
   SRV=$!
   ready=0
   for _ in $(seq 1 240); do
