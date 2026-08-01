@@ -51,12 +51,15 @@ hand edit of `aimee.yaml`, and an autonomous write all take effect the same way.
 send `SIGHUP`.
 
 The reload validates before it publishes. A file that does not parse or does not validate is
-**rejected and the running configuration is kept**, which the log says plainly:
+**rejected and the running configuration is kept**, which `$AIMEE_HOME/server.log` says plainly:
 
 ```text
-config: config file change: reloaded
-config: config file change: rejected (kept running config)
+2026-08-01T00:07:00Z INFO  config: config file change: reloaded
+2026-08-01T00:07:00Z WARN  config: config file change: rejected (kept running config)
 ```
+
+That file, not `docker logs`. The container's stdout carries the entrypoint and the browser service;
+the C server logs to `$AIMEE_HOME/server.log`.
 
 A rejected reload is not a failed start. The server keeps serving the last good configuration, so a
 bad edit degrades to "your change did nothing" rather than to an outage. Check the log if a change
