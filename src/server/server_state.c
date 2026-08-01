@@ -23,6 +23,7 @@
 #include "forge_credentials.h"
 #include "db1.h"
 #include "kb_client.h"
+#include "log.h" /* aimee_log — name the real KB failure in the server log */
 #include "compute_pool.h"
 #include "cJSON.h"
 #include "json_fluent.h"
@@ -122,10 +123,29 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (fact_count < 0)
    {
       kb_client_memory_scope_context_clear();
-      return server_send_error(conn,
-                               "knowledge service search index unavailable; server-side "
-                               "maintenance is required",
-                               NULL);
+      /* Report the failure that ACTUALLY happened. This used to answer every
+       * cause with "search index unavailable; server-side maintenance is
+       * required", which names the wrong owner: the common case is a caller
+       * whose scope did not resolve (a remote client with no active project),
+       * and the kb is healthy. That message sent three separate investigations
+       * at the kb — restarting it, matching its image, re-checking its mTLS
+       * trust — while nothing was wrong with it. The typed result carries the
+       * real dependency and retryability, and the sibling index route already
+       * reports it this way. */
+      kb_client_result_status_t status = kb_client_last_result_status();
+      const char *detail = active_context_missing
+                               ? "memory search found no active project to scope to; pass a "
+                                 "project or cwd, or ask for scope=all"
+                               : "memory search could not reach the knowledge service";
+      aimee_log(LOG_WARN, "memory.search", "find_facts failed: status=%s scope_missing=%d",
+                kb_client_result_status_name(status), active_context_missing);
+      char *json = kb_client_last_result_json(detail);
+      cJSON *err = json ? cJSON_Parse(json) : NULL;
+      free(json);
+      if (!err)
+         return server_send_error(conn, detail, NULL);
+      cJSON_AddBoolToObject(err, "active_context_missing", active_context_missing);
+      return send_and_free(conn, err);
    }
 
    /* Search conversation windows */

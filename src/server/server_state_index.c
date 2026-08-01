@@ -4,6 +4,7 @@
 #include "server.h"
 #include "aimee.h"
 #include "kb_client.h"
+#include "log.h" /* aimee_log — name the real KB failure in the server log */
 #include "workspace.h"
 #include "cJSON.h"
 #include "json_fluent.h"
@@ -66,8 +67,18 @@ int handle_index_find(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    term_hit_t hits[128];
    int count = kb_client_index_find_scoped(project, all_projects, identifier, hits, 128);
    if (count < 0)
-      return send_and_free(conn,
-                           kb_last_result_object("knowledge service symbol index unavailable"));
+   {
+      /* Same misattribution as the MCP twin: say which dependency failed, and
+       * leave a log line so a healthy kb is not the first thing suspected. */
+      aimee_log(LOG_WARN, "index.find",
+                "index_find_scoped failed: status=%s project=%s all_projects=%d",
+                kb_client_result_status_name(kb_client_last_result_status()),
+                project[0] ? project : "(none)", all_projects);
+      return send_and_free(
+          conn, kb_last_result_object("code index lookup failed; see result_status for whether the "
+                                      "knowledge service was unreachable, unauthorized, or the "
+                                      "scope did not resolve"));
+   }
 
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "result_status", count > 0 ? "ok" : "empty");

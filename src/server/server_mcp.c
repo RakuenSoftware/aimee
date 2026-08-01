@@ -12,6 +12,7 @@
 #include "db1.h"
 #include "util.h" /* is_safe_id */
 #include "kb_client.h"
+#include "log.h" /* aimee_log — name the real KB failure in the server log */
 #include "config.h"
 #include "dashboard.h"
 #include <aimee/protocols/mcp/mcp_tools.h>
@@ -1021,7 +1022,19 @@ cJSON *smcp_tool_find_symbol(cJSON *args)
    term_hit_t hits[20];
    int count = kb_client_index_find_scoped(project, all_projects, jid->valuestring, hits, 20);
    if (count < 0)
-      return kb_last_result_content("knowledge service symbol index unavailable");
+   {
+      /* Name the dependency that actually failed. "symbol index unavailable"
+       * reads as "the kb's index is broken" and sent an investigation at a
+       * healthy kb; a failed client-side auth or an unresolved scope produced
+       * the identical string with nothing in the log to correct it. */
+      aimee_log(LOG_WARN, "mcp.code_find",
+                "index_find_scoped failed: status=%s project=%s all_projects=%d",
+                kb_client_result_status_name(kb_client_last_result_status()),
+                project ? project : "(none)", all_projects);
+      return kb_last_result_content("code index lookup failed; see result_status for whether the "
+                                    "knowledge service was unreachable, unauthorized, or the "
+                                    "scope did not resolve");
+   }
    int matched = 0;
    for (int i = 0; i < count; i++)
       if (all_projects || !project || strcmp(hits[i].project, project) == 0)
