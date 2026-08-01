@@ -1,23 +1,38 @@
-# WFE Autonomy Runbook
+# Workflow autonomy runbook
 
-The WFE (Workflow Engine) autonomous lifecycle turns a written proposal into a
-merged change with no operator in the loop. When a proposal is submitted it is
-intake-scoped into a work item, planned, optionally reviewed at a roundtable
-gate, then implemented in slices, verified, and finally opened as a PR — all
-under the server-side `build` workflow. Human gates (e.g. the roundtable and
-the PR-open step) are the only points that may pause the run.
+Use this when an autonomous workflow stops or behaves unexpectedly.
 
-## Pipeline stages
+## Triage
 
-- proposal intake
-- plan
-- roundtable gate
-- implement (per-slice)
-- verify
-- PR open
+1. Open the work item in **Workflow Actions**.
+2. Record state, current node, park reason, workflow version, artifact hash, repository, and spend.
+3. Read the last lifecycle events and the first failed external attempt.
+4. Check agent admission, provider, worktree, verification, and forge health for that node.
+5. Repair the named condition and resume the same work item.
 
-## Where to look
+The default build opens a final PR; it does not merge the repository default branch automatically.
 
-For a live trace of any work item, read its server-pushed event stream via the
-canonical endpoint: `GET /v1/runs/{id}/events`. The same stream backs the
-Workflows tab in the webchat UI.
+## Never force past
+
+- a human gate;
+- a missing or changed artifact hash;
+- a failed or missing implementation commit;
+- a merge conflict;
+- non-green required CI;
+- a degraded panel without quorum;
+- a forge identity or branch-confinement failure.
+
+## Recovery
+
+The Go control plane persists transitions before dispatch. Restart is safe when the process is
+wedged: supervision stops both server peers, then startup reconciles reservations and active items.
+Inspect the item after restart before retrying manually.
+
+Repeated feedback or exhausted rounds parks by design. Narrow the request, fix the workflow, or make
+a human decision; raising every limit usually spends more without creating progress.
+
+## Evidence
+
+Keep the work-item ID, request IDs, lifecycle events, artifacts, provider attempt, verification log,
+and audit result. Tool and credential paths are audited through the event bus; trigger delivery is
+not yet an integrated bus consumer.

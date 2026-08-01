@@ -28,6 +28,11 @@ GEN = ROOT / "docs" / "gen"
 TIER_LABEL = {"CORE": "Core", "ADVANCED": "Advanced", "ADMIN": "Admin"}
 
 
+def normalize_markdown(text):
+    """Apply the mechanical project voice rules to source-derived prose."""
+    return text.replace(" — ", ": ").replace("—", "-")
+
+
 def _c_strings(blob):
     """Concatenate adjacent C string literals, unescaping \\n and \\t."""
     parts = re.findall(r'"((?:[^"\\]|\\.)*)"', blob)
@@ -103,6 +108,49 @@ CFG_TYPE = {"CFG_STRING": "string", "CFG_BOOL": "bool", "CFG_INT": "int", "CFG_F
 CFG_KEY_DESC = {
     "kb_pdf_tier": "Structured-PDF pipeline preset: off (plain pdftotext, default) | basic (ingest+vector) | full (all stages).",
     "kb_curator_tier": "KB curator pipeline preset: off | lite (core extract+index) | full (all stages, default).",
+
+    "audit_action_enabled": "Publish governed tool-action audit rows (default on); disabling it creates an audit coverage gap.",
+    "code_trust_actuation_enabled": "Use earned code-graph trust lessons only as an equal-score retrieval tiebreak (default off).",
+    "guardrails_semantic_mode": "Semantic guardrail mode: off, dry_run, advisory, or enforce.",
+    "kb_client_bearer_token": "Server-to-KB bearer token; secret, restart required.",
+    "kb_client_url": "Remote aimee-kb API base URL used by aimee-server; restart required.",
+    "kb_curator_extract_code_workers": "Parallel curator code-extraction workers, bounded to the synthesis service slot count.",
+    "kb_curator_extract_docs_workers": "Parallel curator document-extraction workers, bounded to the synthesis service slot count.",
+    "kb_evidence_embed_enabled": "Drain evidence-index operations into evidence vectors.",
+    "kb_mode": "Setup/deploy mode: local starts a KB, remote connects to kb_client_url.",
+    "wfe_proposals_autoscan_enabled": "Automatically scan watched proposal directories; off requires explicit trigger.fire.",
+
+    "llm_embed_backend": "Deploy-time embedding backend: local or external.",
+    "llm_embed_gpu": "Deploy-time GPU selector for the local embedding backend.",
+    "llm_embed_host": "Deploy-time host selector for the local embedding backend.",
+    "llm_embed_tier": "Deploy-time local embedding tier: cpu, small, mid, or large.",
+    "llm_rerank_backend": "Deploy-time reranking backend: local, external, or off.",
+    "llm_rerank_endpoint": "External reranking endpoint used when the rerank backend is external.",
+    "llm_rerank_gpu": "Deploy-time GPU selector for the local reranking backend.",
+    "llm_rerank_host": "Deploy-time host selector for the local reranking backend.",
+    "llm_rerank_tier": "Deploy-time local reranking tier.",
+    "llm_synth_backend": "Deploy-time synthesis backend: local, external, or off.",
+    "llm_synth_endpoint": "External synthesis endpoint used when the synth backend is external.",
+    "llm_synth_gpu": "Deploy-time GPU selector for the local synthesis backend.",
+    "llm_synth_host": "Deploy-time host selector for the local synthesis backend.",
+    "llm_synth_model": "Model label sent to the configured synthesis endpoint.",
+    "llm_synth_tier": "Deploy-time local synthesis tier: cpu, small, mid, or large.",
+
+    "kb_curator_cross_repo_graph_enabled": "Resolve and maintain cross-repository dependency edges.",
+    "kb_curator_custom_stages": "JSON definitions that recompose vetted curator operations with bounded budgets.",
+    "kb_curator_detect_contradictions_enabled": "Link claims that disagree on the same subject and attribute.",
+    "kb_curator_extract_code_enabled": "Extract typed curator artifacts from indexed code.",
+    "kb_curator_extract_docs_enabled": "Extract typed curator artifacts from documents.",
+    "kb_curator_index_claims_enabled": "Embed claim subject/attribute/value records.",
+    "kb_curator_index_code_unit_enabled": "Embed extracted code-unit artifacts.",
+    "kb_curator_index_narrative_enabled": "Embed summaries and synthesis narratives.",
+    "kb_curator_link_artifacts_enabled": "Link related document, entity, claim, and code artifacts.",
+    "kb_curator_projection_graph_enabled": "Publish the typed code projection graph for changed projects.",
+    "kb_curator_promote_entity_enabled": "Promote well-supported entities one step up the scope lattice.",
+    "kb_curator_resolve_entities_enabled": "Resolve proposed mentions against canonical entities.",
+    "kb_curator_stage_order": "Comma-separated curator stage order; invalid dependency order falls back safely.",
+    "kb_curator_synthesize_enabled": "Create evidence-backed topic synthesis with the configured reasoning tier.",
+    "kb_curator_user_presets": "JSON array of operator-defined curator stage presets.",
 
     "autonomous": "Run autonomously (auto-advance machine gates; human gates always park) vs interactive.",
     "economizer": "Context economizer tier: `off` (verbatim passthrough), `safe` (default; Anthropic prompt caching + lossless, freeze-guarded reduction), or `aggressive` (adds lossy compression + live OpenAI-side mutation; Anthropic context is never mutated). See docs/features/economizer.md.",
@@ -492,7 +540,7 @@ def render_config(fields, sections, flat):
     out.append("| Key | Type | Description |")
     out.append("|-----|------|-------------|")
     for key, typ in sorted(runtime):
-        out.append(f"| `{key}` | {typ} | {CFG_KEY_DESC.get(key, '—')} |")
+        out.append(f"| `{key}` | {typ} | {CFG_KEY_DESC.get(key, 'not documented')} |")
     out.append("")
     if undescribed:
         out.append("> **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): "
@@ -515,7 +563,7 @@ def render_config(fields, sections, flat):
             out.append("| Key | Type | Description |")
             out.append("|-----|------|-------------|")
             for key, typ in sorted(group):
-                out.append(f"| `{key}` | {typ} | {CFG_KEY_DESC.get(key, '—')} |")
+                out.append(f"| `{key}` | {typ} | {CFG_KEY_DESC.get(key, 'not documented')} |")
             out.append("")
 
     out.append(f"## Config-file sections ({len(sections)})")
@@ -599,9 +647,9 @@ ENV_DESC = {
     "AIMEE_WEBCHAT_EDITOR_IDLE_SECS": ("Server runtime", "Idle timeout in seconds before a per-webuser code-server editor is reaped. Default 1800 (30 min); positive values are clamped to [60, 604800]; 0 disables idle reaping; malformed/negative/overflow values fall back to the default. An actively-open editor is kept alive by the proxy keepalive, so it is not reaped mid-session."),
     "AIMEE_WEBCHAT_EDITOR_UID": ("Server runtime", "Dedicated service user the per-webuser code-server drops to (defence in depth; only honoured when aimee-server runs as root)."),
     "AIMEE_GITHUB_OAUTH_CLIENT_ID": ("Server runtime", "Client ID of a GitHub OAuth App for the webchat \"Sign in with GitHub\" button; populates the github.com git credential. Public. Overrides the built-in default baked in via oauth_defaults.h."),
-    "AIMEE_GITHUB_OAUTH_CLIENT_SECRET": ("Server runtime", "Client secret of the GitHub OAuth App. Enables the seamless web (redirect) sign-in; without it the button falls back to the device-code flow. Secret — set per deployment, never baked into an image."),
+    "AIMEE_GITHUB_OAUTH_CLIENT_SECRET": ("Server runtime", "Client secret of the GitHub OAuth App. Enables browser redirect sign-in; without it the button falls back to the device-code flow. Secret — set per deployment, never baked into an image."),
     "AIMEE_GITLAB_OAUTH_CLIENT_ID": ("Server runtime", "Client ID of a GitLab OAuth application (device flow enabled) for the webchat \"Sign in with GitLab\" button on gitlab.com. Public. Overrides the built-in default baked in via oauth_defaults.h."),
-    "AIMEE_DEPLOY_ENABLED": ("Server runtime", "Set to 1 to enable the server-orchestrated deploy: the setup wizard runs `docker compose up -d` for the managed sibling services (postgres + aimee-kb + aimee-llm) via a mounted Docker socket. Off unless the deploy compose sets it."),
+    "AIMEE_DEPLOY_ENABLED": ("Server runtime", "Set to 1 to enable the server-orchestrated deploy: the setup wizard runs `docker compose up -d` for the managed sibling services (aimee-kb + aimee-llm) via a mounted Docker socket. Off unless the deploy compose sets it."),
     "AIMEE_DEPLOY_COMPOSE_FILE": ("Server runtime", "Path to the managed compose file the server-orchestrated deploy runs (default /opt/aimee/deploy/aimee-managed.compose.yaml)."),
     "AIMEE_INGRESS_PROXY_SECRET": ("Server runtime", "Shared secret authenticating a trusted ingress proxy's identity headers."),
     "AIMEE_PARALLEL_MAX": ("Server runtime", "Maximum parallel agent fan-out."),
@@ -709,6 +757,64 @@ ENV_DESC = {
     # Diagnostics & misc
     "AIMEE_ANTIPATTERNS_BYPASS": ("Diagnostics & misc", "Bypass the guardrail antipattern checks."),
     "AIMEE_LOG_LEVEL": ("Diagnostics & misc", "Log level: `error` | `warn` | `info` | `debug`."),
+    "AIMEE_ALLOW_MAIN_CHECKOUT": ("Delegates & backends", "Allow an explicitly authorized delegate path to use the main checkout instead of a managed worktree."),
+    "AIMEE_API_BEARER_TOKEN": ("Server runtime", "Bearer token for the public server API listener; secret."),
+    "AIMEE_AUTONOMY_BASE": ("Workflow engine", "Integration branch used by autonomous workflow work; distinct from the repository default branch."),
+    "AIMEE_AUTONOMY_MAX_ACTIVE_PER_PRINCIPAL": ("Workflow engine", "Maximum active autonomous work items for one authenticated principal."),
+    "AIMEE_AUTONOMY_MAX_USD": ("Workflow engine", "Default USD ceiling for an autonomous work item; 0 disables this default ceiling."),
+    "AIMEE_AUTONOMY_SUBMIT_RATE_PER_MIN": ("Workflow engine", "Autonomous-submission rate limit per principal."),
+    "AIMEE_AUTONOMY_SUBMIT_WINDOW_SECS": ("Workflow engine", "Window used by the autonomous-submission rate limiter."),
+    "AIMEE_AUTONOMY_USD_PER_SEC": ("Workflow engine", "Fallback spend estimator for autonomous admission when exact provider cost is unavailable."),
+    "AIMEE_CI_WEBHOOK_SECRET": ("Workflow engine", "HMAC secret authenticating inbound CI webhook events."),
+    "AIMEE_CLIENT_TYPE": ("Client & session", "Calling client type used for integration-specific request shaping."),
+    "AIMEE_CODEX_REFRESH_SKEW": ("Delegates & backends", "Seconds before Codex OAuth expiry at which the server refreshes the token."),
+    "AIMEE_CODE_INDEX_SOURCE": ("Knowledge base (aimee-kb)", "Source label recorded for code-index ingestion."),
+    "AIMEE_DB2_EVAL_URL": ("Database & vectors", "Separate DB2 URL used by evaluation harnesses; never the production default."),
+    "AIMEE_DB2_POOL_SIZE": ("Database & vectors", "DB2 connection-pool size override."),
+    "AIMEE_DELEGATE_MAX_INFLIGHT": ("Delegates & backends", "Process-wide maximum number of admitted delegate attempts."),
+    "AIMEE_DELEGATE_SANDBOX": ("Delegates & backends", "Enable the configured delegate sandbox backend."),
+    "AIMEE_DIM_PROBE_BUDGET_MS": ("Database & vectors", "Time budget for probing an embedder's output dimension."),
+    "AIMEE_IR_PATH": ("Diagnostics & misc", "Diagnostic path for recording canonical request IR."),
+    "AIMEE_IR_RESP_PATH": ("Diagnostics & misc", "Diagnostic path for recording canonical response IR."),
+    "AIMEE_IR_SHADOW": ("Diagnostics & misc", "Run the canonical IR path in comparison/shadow mode."),
+    "AIMEE_IR_STREAM_RELAY": ("Diagnostics & misc", "Enable the canonical streaming-response relay."),
+    "AIMEE_KB_HARDENED": ("Knowledge base (aimee-kb)", "Require the hardened KB custody and transport posture at startup."),
+    "AIMEE_KB_OIDC_MAX_TOKEN_AGE": ("Knowledge base (aimee-kb)", "Maximum accepted age in seconds for a KB OIDC token."),
+    "AIMEE_MGMT_AUDIENCE": ("Server runtime", "Expected audience for management-plane identities."),
+    "AIMEE_MGMT_CAP": ("Server runtime", "Required management-plane capability claim."),
+    "AIMEE_MGMT_ISSUER": ("Server runtime", "Expected issuer for management-plane identities."),
+    "AIMEE_MGMT_JWKS": ("Server runtime", "JWKS source used to verify management-plane identities."),
+    "AIMEE_OCR_URL": ("Knowledge base (aimee-kb)", "Structured-PDF OCR sidecar endpoint."),
+    "AIMEE_ORCH_DELEGATES": ("Workflow engine", "Enable delegate resource use by the orchestration plane."),
+    "AIMEE_ORCH_WORKFLOWS": ("Workflow engine", "Enable workflow orchestration surfaces."),
+    "AIMEE_PANEL_SEAT_WAIT_SECS": ("Workflow engine", "Maximum wait for a roundtable seat to acquire an eligible agent."),
+    "AIMEE_PRIMARY_CLI_INGESTOR": ("Client & session", "Name of the primary CLI integration that owns session-ingest events."),
+    "AIMEE_PROJECT_ID": ("Client & session", "Explicit project identity for an integration request."),
+    "AIMEE_RUNTIME_DIR": ("Paths & assets", "Private runtime directory for sockets, temporary credentials, and process state."),
+    "AIMEE_SANDBOX_HOST_MOUNTS": ("Delegates & backends", "Operator allowlist of host mounts available to the sandbox backend."),
+    "AIMEE_STAGE_GOVERNANCE": ("Server runtime", "Enable the governance stage in the canonical request pipeline."),
+    "AIMEE_STAGE_MEMORY": ("Server runtime", "Enable the memory stage in the canonical request pipeline."),
+    "AIMEE_TLS_CLIENT_P12_PASS": ("TLS & networking", "Password for an explicitly provisioned client PKCS#12 bundle; secret."),
+    "AIMEE_TLS_CN": ("TLS & networking", "Common Name used when generating a local TLS certificate."),
+    "AIMEE_TLS_EXTRA_SAN": ("TLS & networking", "Additional subject-alternative names for a generated TLS certificate."),
+    "AIMEE_TSR_URL": ("Knowledge base (aimee-kb)", "Structured-PDF table-recognition sidecar endpoint."),
+    "AIMEE_VAULT_KMS_HELPER": ("Server runtime", "Executable implementing the configured external KMS wrap/unwrap contract."),
+    "AIMEE_VAULT_KMS_HWM_DOMAIN": ("Server runtime", "Domain separator for KMS high-water-mark signatures."),
+    "AIMEE_VAULT_KMS_HWM_PUBKEY": ("Server runtime", "Public key used to verify KMS high-water-mark records."),
+    "AIMEE_VAULT_KMS_KEY_ID": ("Server runtime", "External KMS key identifier used for vault wrapping."),
+    "AIMEE_VAULT_PKCS11_LABEL": ("Server runtime", "PKCS#11 object label used for vault custody."),
+    "AIMEE_VAULT_PKCS11_MODULE": ("Server runtime", "Path to the PKCS#11 provider module."),
+    "AIMEE_VAULT_PKCS11_PIN": ("Server runtime", "PKCS#11 user PIN; secret."),
+    "AIMEE_VAULT_PKCS11_SLOT": ("Server runtime", "PKCS#11 slot identifier used for vault custody."),
+    "AIMEE_VAULT_TPM2_BLOB_PATH": ("Server runtime", "Path to the sealed TPM 2 vault-key blob."),
+    "AIMEE_VAULT_TPM2_NV_INDEX": ("Server runtime", "TPM 2 NV index used for anti-rollback state."),
+    "AIMEE_VAULT_TPM2_TCTI": ("Server runtime", "TPM 2 TCTI selector."),
+    "AIMEE_WFE_ENGINE": ("Workflow engine", "Workflow runtime selector; current server images require `go`."),
+    "AIMEE_WFE_WORKTREE_GC_GRACE_SECS": ("Workflow engine", "Grace period before an unowned workflow worktree can be collected."),
+    "AIMEE_WORKFLOW_AUTONOMOUS_ROUTER": ("Workflow engine", "Enable automatic scheduling of admitted autonomous work items."),
+    "AIMEE_WORKFLOW_BRANCH": ("Workflow engine", "Explicit workflow feature branch for a compatibility or test runner."),
+    "AIMEE_WORKFLOW_ENFORCE_STAGE": ("Workflow engine", "Require runner requests to match the persisted workflow stage."),
+    "AIMEE_WORKFLOW_LEASE_TTL_SECS": ("Workflow engine", "Lifetime of a workflow execution lease before recovery may reclaim it."),
 }
 
 
@@ -814,6 +920,9 @@ EXT_DESC = {
     "CODEX_CWD": ("Codex / Claude integration", "Working directory reported by the Codex frontend."),
     "CODEX_THREAD_ID": ("Codex / Claude integration", "Codex conversation/thread id."),
     "CLAUDE_SESSION_ID": ("Codex / Claude integration", "Claude Code session id when aimee runs as its backend."),
+    "LLM_API_KEY": ("Provider credentials", "Bearer credential used by the generic llm-chat sidecar; prefer the vault or a secret command."),
+    "LLM_ENDPOINT": ("Provider endpoints", "OpenAI-compatible base URL used by the generic llm-chat sidecar."),
+    "LLM_MODEL": ("Provider endpoints", "Model requested by the generic llm-chat sidecar."),
 }
 
 
@@ -997,6 +1106,8 @@ AGENT_FIELD_DESC = {
     "api_key": "Inline API key (prefer `api_key_env` or the vault).",
     "api_key_env": "Env var name holding the agent's API key.",
     "access_token": "Static auth token for the endpoint.",
+    "refresh_token": "OAuth refresh token for the endpoint.",
+    "exp": "OAuth token expiry as a Unix timestamp.",
     "auth_cmd": "Command that prints an auth token.",
     "auth_type": "Auth scheme (bearer / oauth / none).",
     "credentials": "Credential block / reference.",
@@ -1025,6 +1136,8 @@ AGENT_FIELD_DESC = {
     "session_reuse": "Reuse a session across calls.",
     "cli_cmd": "CLI command for a cli-backend agent.",
     "cli_kind": "CLI agent kind (claude / codex / opencode).",
+    "is_server_hosted": "Whether the provider session is hosted by the aimee server.",
+    "primary_only": "Restrict this agent to primary sessions; do not use it for delegates.",
     "cli_idle_timeout_ms": "Idle timeout (ms) for a CLI agent.",
     "ssh_entry": "SSH entry point (ssh backend).",
     "ssh_key": "SSH key path (ssh backend).",
@@ -1146,7 +1259,10 @@ def main():
            + render_workflow(parse_block_catalog(), parse_engine_consts()).rstrip() + "\n\n"
            + render_config_files(parse_agent_fields()).rstrip() + "\n\n"
            + render_limitations())
-    targets = {GEN / "cli-commands.md": cli, GEN / "configuration.md": cfg}
+    targets = {
+        GEN / "cli-commands.md": normalize_markdown(cli),
+        GEN / "configuration.md": normalize_markdown(cfg),
+    }
 
     if check:
         stale = [p.name for p, want in targets.items()

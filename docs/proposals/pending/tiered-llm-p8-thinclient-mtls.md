@@ -41,7 +41,7 @@ revocation reuse the existing CA flow.
   and the server's own `cert.issue`/`cert.list`/`cert.revoke`
   (`server_auth.c:108-110`, `server_cert.c`). Per-client certs slot straight into
   this.
-- **`cert:CN` is already a first-class principal** — `src/headers/vault_principal.h`,
+- **`cert:CN` is already a first-class principal** — `src/modules/vault/vault_principal.h`,
   and the attested-transport gate already recognises `ATTEST_TLS_BEARER`
   (`server_http_identity.c:113-123`). mTLS adds a `cert:CN`-attested transport
   class that is *stronger* than bearer, so capability gating can grant it more.

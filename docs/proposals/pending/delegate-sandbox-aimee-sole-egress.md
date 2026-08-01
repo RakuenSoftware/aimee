@@ -95,7 +95,7 @@ whether the agent can see its own subject.
 
 | Already built | Where |
 |---|---|
-| Container lifecycle: create / start / exec / stop / rm, hibernate-on-exit | `src/server/delegate_backend_docker.c` (697 lines), **registered** at `server.c:2059` |
+| Container lifecycle: create / start / exec / stop / rm, hibernate-on-exit | `src/modules/delegates/delegate_backend_docker.c` (697 lines), **registered** at `server.c:2059` |
 | Workspace anchoring: `-v <workspace>:/workspace -w /workspace`, absolute paths and `..` rejected | same |
 | File ops through `docker exec` (read/write/list, b64-wrapped) | same |
 | The `/v1` Unix socket the sandbox talks to | `server_http.c` — always served, no TCP port needed |

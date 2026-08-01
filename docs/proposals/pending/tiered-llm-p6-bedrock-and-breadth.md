@@ -15,7 +15,7 @@ Bedrock as a first-class egress target: an org model with `provider: bedrock` ro
 ## §0 What already exists
 
 - **IR + backend adapters** — `src/headers/aimee_ir.h` abstracts wire shapes (`ANTHROPIC`, `OPENAI_CHAT`, `RESPONSES`, `GEMINI`); backends live in `aimee_backend_*.c`. Bedrock is **not one wire format**: `InvokeModel` takes a **model-family-specific** request/response body (Anthropic Messages, Amazon Titan/Nova, Meta Llama, Mistral, Cohere each differ), so only **Claude-on-Bedrock** maps cleanly onto the existing Anthropic IR shape — other families do **not**. Bedrock's **Converse/ConverseStream** API, by contrast, exposes **one normalized message+tool schema across all families**, which is the natural IR mapping target. So the message-model work is real for non-Claude models, not zero; the design (§2) makes Converse the primary path and gates native per-family `InvokeModel` adapters behind an explicit allowlist.
-- **Provider driver registry** — `src/server/delegate_driver.c`. Unknown providers fall back to the openai driver; Bedrock needs its own driver (SigV4) rather than the catch-all.
+- **Provider driver registry** — `src/modules/delegates/delegate_driver.c`. Unknown providers fall back to the openai driver; Bedrock needs its own driver (SigV4) rather than the catch-all.
 - **Pricing** — `token_tracker.c` static table plus DB1 `model_pricing`. Add Bedrock model prices so P3 attribution and P4 budgets cover Bedrock spend.
 
 ## §1 Bedrock driver + SigV4/STS auth

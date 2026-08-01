@@ -1,5 +1,7 @@
 # Persona-authored outputs and permission roles
 
+- **State:** proposed.
+
 ## Why
 
 Personas decide who *reviews*, not who *writes*. The prose a workflow run

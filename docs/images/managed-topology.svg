@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 620" role="img" aria-labelledby="title desc">
+  <title id="title">Managed aimee deployment topology</title>
+  <desc id="desc">The source tree stays on a developer machine. The thin client connects over HTTPS to a trusted Docker host, where aimee-server starts the knowledge and inference services.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2878d0"/>
+    </marker>
+    <style>
+      .title { font: 700 30px system-ui, sans-serif; fill: #172033; }
+      .section { font: 700 16px system-ui, sans-serif; fill: #526179; letter-spacing: .08em; }
+      .label { font: 700 22px system-ui, sans-serif; fill: #172033; }
+      .body { font: 16px system-ui, sans-serif; fill: #46546b; }
+      .note { font: 15px system-ui, sans-serif; fill: #526179; }
+      .flow { stroke: #2878d0; stroke-width: 4; fill: none; marker-end: url(#arrow); }
+      .control { stroke: #7a5bd0; stroke-width: 3; stroke-dasharray: 9 7; fill: none; marker-end: url(#arrow); }
+    </style>
+  </defs>
+  <rect width="1200" height="620" rx="24" fill="#f6f8fc"/>
+  <text x="60" y="64" class="title">Managed setup keeps source on the client</text>
+
+  <text x="60" y="120" class="section">DEVELOPER MACHINE</text>
+  <rect x="60" y="145" width="340" height="155" rx="18" fill="#ffffff" stroke="#8da1bd" stroke-width="2"/>
+  <text x="90" y="192" class="label">aimee thin client</text>
+  <text x="90" y="228" class="body">Hooks, MCP, ACP, CLI agents</text>
+  <text x="90" y="258" class="body">Reads and uploads the source tree</text>
+  <rect x="95" y="328" width="270" height="76" rx="14" fill="#e9f2ff" stroke="#77a9df" stroke-width="2"/>
+  <text x="130" y="360" class="label" style="font-size:19px">Project source tree</text>
+  <text x="130" y="386" class="body" style="font-size:14px">Never mounted by the remote host</text>
+  <path d="M230 300 L230 326" class="flow"/>
+
+  <text x="720" y="120" class="section">TRUSTED DOCKER HOST</text>
+  <rect x="690" y="145" width="450" height="155" rx="18" fill="#ffffff" stroke="#8da1bd" stroke-width="2"/>
+  <text x="720" y="192" class="label">aimee-server</text>
+  <text x="720" y="228" class="body">Policy, vault, browser, API, DB1</text>
+  <text x="720" y="258" class="body">Controls the managed Docker socket</text>
+
+  <rect x="555" y="36" width="250" height="68" rx="14" fill="#f1ecff" stroke="#9a82d8" stroke-width="2"/>
+  <text x="590" y="67" class="label" style="font-size:18px">Browser wizard</text>
+  <text x="590" y="91" class="body" style="font-size:14px">Records deploy decisions</text>
+  <path d="M760 104 C810 120 850 125 880 143" class="control"/>
+
+  <path d="M402 220 L685 220" class="flow"/>
+  <rect x="450" y="172" width="190" height="63" rx="12" fill="#f6f8fc"/>
+  <text x="472" y="198" class="body" style="font-weight:700">HTTPS + identity</text>
+  <text x="472" y="220" class="note">pinned TLS, then mTLS</text>
+
+  <path d="M915 302 L915 358" class="flow"/>
+  <text x="940" y="338" class="note">Docker socket</text>
+  <path d="M915 358 L710 414" class="flow"/>
+  <path d="M915 358 L1060 414" class="flow"/>
+
+  <rect x="545" y="420" width="330" height="118" rx="18" fill="#eaf8f0" stroke="#65ad81" stroke-width="2"/>
+  <text x="580" y="465" class="label">aimee-kb</text>
+  <text x="580" y="499" class="body">Knowledge + private PostgreSQL</text>
+  <text x="580" y="525" class="body" style="font-size:14px">pgvector and pgvectorscale</text>
+
+  <rect x="915" y="420" width="225" height="118" rx="18" fill="#fff3e8" stroke="#d8914e" stroke-width="2"/>
+  <text x="950" y="465" class="label">aimee-llm</text>
+  <text x="950" y="499" class="body">Embed, rerank,</text>
+  <text x="950" y="525" class="body">and synthesize</text>
+
+  <line x1="60" y1="574" x2="1140" y2="574" stroke="#d5ddeb" stroke-width="2"/>
+  <text x="60" y="603" class="note">Use the split stack when the server must not control Docker.</text>
+</svg>

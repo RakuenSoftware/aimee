@@ -1,306 +1,233 @@
-# Security Model
+# Security model
 
-## Overview
+aimee assumes models, prompts, retrieved text, tool arguments, repositories, MCP packages, and
+remote networks can all be hostile. Enforcement lives in the services and execution backends, not
+in a prompt asking a model to behave.
 
-This document describes the security model for `aimee`, including its trust boundaries, principals, attack surfaces, capability model, enforcement path, token handling, and known non-goals.
+## Guarantees
 
-aimee runs primarily as same-user, local-machine operation. Its strongest protections apply to local clients connecting to the local `aimee-server` over a Unix domain socket, where the server validates the caller's operating-system identity with `SO_PEERCRED`.
+- A thin client cannot open DB1 or DB2.
+- A server process cannot query DB2 directly; a KB process cannot query DB1.
+- Remote routes require an authenticated principal and declared capabilities.
+- Remote writes need both deployment posture and a per-user grant.
+- Tool calls pass schema, path, policy, worktree, and backend checks before execution.
+- Agent credentials are resolved inside the server and are not returned to workflows or delegates.
+- Migrated action paths enter one ordered event-bus audit seam.
+- The audit store detects deletion, reordering, modification, and checkpoint mismatch.
 
-The model distinguishes clearly between what is protected and what is not:
-
-- Protected:
-  - Separation between same-UID and different-UID local processes on the host
-  - Separation between authenticated and unauthenticated clients
-  - Restriction of delegated operations to explicitly granted capabilities
-  - Mediation of sensitive operations through server-side guardrails
-- Not fully protected:
-  - Compromise by processes already running as the same local user
-  - Full confidentiality or integrity of content sent to external delegate providers
-  - Browser access as a hardened Internet-facing security boundary
-  - Administrative isolation equivalent to a multi-tenant remote service
-
-## Trust Boundaries
-
-```mermaid
-flowchart TB
-  subgraph TZ[Trusted Zone: same-user local machine]
-    PA[Primary Agent\nClaude / Gemini / Codex]
-    CLI[aimee thin client]
-    SRV[aimee-server]
-    DB[DB1 local store]
-    DA[Delegate agents\nsub-agents via HTTP]
-
-    PA <--> |Unix socket\nSO_PEERCRED + auth token| SRV
-    CLI --> |hooks via stdin/stdout| PA
-    SRV --> |fork/exec| DA
-    SRV --> DB
-  end
-
-  subgraph STZ[Semi-Trusted Zone]
-    WEB[aimee-server webchat]
-    BROWSER[Browser]
-    WEB <--> |HTTPS + PAM\nself-signed TLS| BROWSER
-  end
-
-  subgraph UTZ[Untrusted Zone]
-    HTTP[Delegate agent HTTP client]
-    PROVIDERS[OpenAI / Anthropic / Gemini]
-    HTTP --> |HTTPS\nAPI key / OAuth| PROVIDERS
-  end
-```
-
-Boundary summary:
-
-- Trusted zone:
-  - Local same-user components on the same machine
-  - Trust is based largely on OS-level same-UID identity and local process assumptions
-- Semi-trusted zone:
-  - Browser-facing webchat path protected by HTTPS and PAM
-  - Useful for authenticated operation, but not treated as equivalent to the local Unix-socket boundary
-- Untrusted zone:
-  - External model providers and any network path used to reach them
-  - Requests may be authenticated, but remote systems are outside the local trust domain
+These guarantees do not make arbitrary native code safe and do not protect a host after full root
+compromise without an external witness.
 
 ## Principals
 
-| Principal | Identity | Trust Level |
-|-----------|----------|-------------|
-| Local user | `SO_PEERCRED` UID match | Full (same-user) |
-| Authenticated client | Capability token | Operational (no admin) |
-| Unauthenticated same-UID | `SO_PEERCRED` only | Read-only |
-| Different-UID local process | Different OS identity | Untrusted |
-| Browser user | PAM-authenticated session | Semi-trusted |
-| External delegate provider | API key or OAuth to remote service | Untrusted |
+Every remote or browser operation resolves to a principal:
 
-Principal distinctions:
+- a local Unix-socket user;
+- an enrolled thin client;
+- an OIDC or PAM user;
+- a browser session;
+- the supervised workflow peer;
+- a service identity;
+- an agent acting for one of the above.
 
-- Local user:
-  - A process connecting over the Unix socket with a matching UID is the most trusted operational principal in the system.
-- Authenticated client:
-  - A holder of a valid capability token can perform only the actions explicitly granted by that token.
-  - This principal is operational, not administrative.
-- Unauthenticated same-UID:
-  - Same-user identity alone may permit limited read-only behavior, but does not imply full access.
-- Different-UID local process:
-  - A different local OS user is not trusted merely for being on the same machine.
-- Browser user:
-  - PAM-backed browser access is authenticated, but the browser path is treated as less trusted than the Unix-socket path.
-- External delegate provider:
-  - External AI providers are required for some delegated operations but are outside the trusted computing base.
+Audit records keep the originating principal when work crosses a delegate, workflow, KB, or tool
+boundary. Falling back to a generic server identity is reserved for autonomous internal work that
+has no user principal.
 
-## Attack Surfaces
+## Trust boundaries
 
-The primary attack surfaces are:
+| Boundary | Enforcement |
+| --- | --- |
+| local client → server | filesystem ownership and Unix-socket permissions |
+| remote client → server | TLS, certificate pin, bearer or mTLS identity, route capabilities |
+| user → write route | authenticated user grant plus deployment write posture |
+| browser → web service | login, secure cookie, CSRF checks, principal propagation |
+| server → KB | service authentication, TLS where configured, typed `/v1` routes |
+| workflow → resource plane | direct supervised peer, kernel identity, narrow internal operations |
+| agent → workspace | assigned root, worktree, path normalization, write authority |
+| delegate → host | process or container isolation, resource limits, explicit mounts and egress |
+| service → provider | vault lookup, catalog, budget, rate, and egress policy |
+| module → event bus | admission, private rings, subscription authorization, bounded credits |
 
-1. Unix socket interface
-   - Local IPC endpoint to `aimee-server`
-   - Protected primarily by filesystem permissions, local host access, and `SO_PEERCRED`
-   - Main concern: unauthorized local access, confused-deputy behavior, or misuse by same-user processes
+The managed deployment mounts the host Docker socket in `aimee-server`. Anyone who controls that
+server can control the Docker host. Use the split stack when that is outside the intended trust
+boundary.
 
-2. Capability tokens
-   - Used to authorize operational actions
-   - Main concern: token theft, overbroad grants, replay within the valid lifetime, or incorrect scope enforcement
+## Remote access
 
-3. Browser webchat
-   - HTTPS endpoint with PAM-backed authentication and self-signed TLS
-   - Main concern: session misuse, local browser trust assumptions, and weaker guarantees than the Unix-socket channel
+`aimee remote set` pins the server certificate and rotates the bootstrap bearer. On Linux it also
+enrolls a client certificate. Verify the printed fingerprint out of band.
 
-4. Delegate execution path
-   - Server fork/exec of delegate agents and sub-agent orchestration
-   - Main concern: privilege misuse, unsafe parameter forwarding, or unintended expansion of allowed actions
+The remote write posture is a ceiling:
 
-5. Delegate HTTP client to external providers
-   - Outbound HTTPS to OpenAI, Anthropic, Gemini, or similar providers using API keys or OAuth
-   - Main concern: disclosure of prompts, metadata, or outputs to third parties; dependency on remote provider security and policy
+| Posture | Maximum remote authority |
+| --- | --- |
+| `off` | reads only |
+| `data` | memory, documents, and index ingestion for an authorized user |
+| `full` | data plus runner and workspace mutation for an authorized user |
 
-6. DB1-backed local state
-   - Local persistence used by the server
-   - Main concern: tampering by same-user processes, accidental over-retention, or unauthorized reads on a compromised host account
+A user's grant can only reduce that ceiling. It cannot raise it. Setting `remote_writes=full` grants
+nothing on its own.
 
-7. aimee-server `/v1` HTTP listener (optional, off by default)
-   - A loopback-only TCP endpoint (`http://127.0.0.1:<port>/v1`) turned on with `aimee api enable`; it exposes the OpenAI-compatible surface to local editors
-   - Bearer-authenticated, per-bearer rate-limited, and gated by token scope; a scoped token is denied with `403` when it requests an action outside its grant
-   - Main concern: bearer theft by a same-host process, overbroad token scope, or exposing the port past loopback through a misconfigured proxy
+Enrollment material in `remote.conf` is mode `0600`, opened without following symlinks. Do not copy
+one client's certificate to another machine. Revoke the old identity and enroll the replacement.
 
-8. aimee-kb (DB2) transport
-   - The knowledge store is reached over a same-host Unix socket, or over TLS to a shared host
-   - The Unix-socket path leans on the local OS boundary; the remote path requires TLS (mutual TLS where configured) plus a bearer or scope-bound token, and denies cross-scope access with `403`
-   - Main concern: weak transport configuration on the remote path, token theft, or scope confusion between projects and workspaces. See [PUBLIC_API.md](PUBLIC_API.md) for the full TLS and token model
+## Event bus
 
-These protections are scoped narrowly. They resist different-UID local misuse better than same-UID local compromise. If an attacker already controls the same local user account, many protections reduce to best-effort mediation rather than strong isolation.
+The bus is an intra-daemon trust boundary, not a network perimeter. The Linux host creates anonymous
+memory regions, admits a client over `SOCK_SEQPACKET`, then passes only that client's queue pair and
+the shared arena.
 
-## Capability Model
+- the control region is read-only;
+- a client cannot map or enumerate another client's rings;
+- observers receive only registered event kinds;
+- requests and replies are correlation-bound;
+- queues and arena leases are bounded;
+- client reap releases held references;
+- the full-stream tap is reserved for core audit and governance.
 
-Capabilities are the core authorization mechanism for operational actions. A client may identify as the same local user, but access to non-read-only actions still depends on possession of a valid capability token and successful guardrail checks.
+The arena assumes admitted native modules are trusted. It prevents accidental cross-client queue
+access; it is not hostile-code isolation. Run untrusted extensions out of process behind a narrower
+contract.
 
-```mermaid
-flowchart LR
-  P[Principal] --> I[Identity established]
-  I --> C{Capability token present and valid?}
-  C -- No --> RO[Same-UID read-only access only]
-  C -- Yes --> S[Scoped capabilities]
-  S --> A1[Allowed operational action]
-  S --> A2[Allowed delegated action]
-  S --> D[Denied if action outside scope]
+See [Event bus](EVENT_BUS.md).
+
+## Guardrails and tool policy
+
+Guardrails run before a tool or write reaches the backend. They cover:
+
+- secret and production paths;
+- writes outside the assigned worktree;
+- planning or read-only mode;
+- destructive or unsupported operations;
+- direct sub-agent launchers when delegates are required;
+- MCP package health and allowlists;
+- tool schema and capability requirements;
+- semantic risk and anti-pattern signals.
+
+A model cannot override a hard deny in prose. A soft warning may require explicit operator or
+workflow handling. Semantic guardrails produce a structured decision that is audited through the
+event bus.
+
+Path checks use canonical workspace roots. A symlink, `..`, alternate spelling, or client-local path
+must not escape the assigned authority.
+
+## Delegate isolation
+
+Write-capable delegates use isolated worktrees. Container delegates default to:
+
+- no network;
+- no provider or git credentials;
+- a narrow workspace mount;
+- bounded CPU, memory, process count, and lifetime;
+- an explicit base image and toolchain;
+- mediated package access.
+
+Custom images and packages expand the trusted computing base. Build them outside the agent's
+control, pin what you can, scan them, and keep the Docker socket out of the container.
+
+If the requested isolation cannot be applied, the default is to fail. An explicitly configured
+degraded path emits a sandbox degradation audit record.
+
+See [Delegate sandbox](DELEGATE_SANDBOX.md).
+
+## Credential custody
+
+The server vault is the source of truth for provider keys, OAuth tokens, git credentials, and other
+agent secrets. A turn resolves a credential only after principal, provider, agent, and policy checks.
+
+The vault supports local root-key custody and hardened backends such as TPM 2, PKCS#11, or KMS.
+Rotation and reseal operations have recovery records. Locking evicts the cached key; it does not
+rewrite every stored secret.
+
+Do not store secrets in:
+
+- `agents.json`;
+- workflow definitions or artifacts;
+- prompts, memory, or project documentation;
+- delegate container environments unless the policy explicitly grants that one credential;
+- client-side key files.
+
+Local CLI agents may use a login that remains on the thin client when execution runs there. The
+server sends commands over the authorized runner channel; it does not copy the login.
+
+Every vault access emits an audit event with a bounded secret fingerprint, never the secret.
+
+## MCP and package supply chain
+
+The MCP registry records installed servers and their package source. The OSV gate checks known
+vulnerabilities and can block an unhealthy package. Recheck before enabling a stale or changed
+server:
+
+```bash
+aimee mcp audit
+aimee mcp recheck <name>
 ```
 
-Capability properties preserved by this model:
+MCP tool arguments, outcomes, and completion state are audited. Installing an adapter into the
+server or KB does not grant it full database access; it receives the module and route contracts it
+declares.
 
-- Capabilities grant operations explicitly, not implicitly.
-- Holding a token does not make a client administrative.
-- Same-user identity and token possession are distinct signals.
-- Read-only behavior may be available to unauthenticated same-UID callers, but broader actions require a token.
-- Requests outside the token scope must be denied even if the caller is local and authenticated.
+## Browser and git
 
-What the capability model protects:
+Browser sessions are per user. Project selection is not authorization by itself; server routes
+recheck the principal.
 
-- Accidental or unauthorized use of operational APIs without an explicit grant
-- Lateral use of the server as a confused deputy for actions not covered by a token
-- Expansion from authenticated status to unrestricted access
+Git tokens and SSH keys live in the vault. SSH clones use a short-lived agent and a per-principal
+`known_hosts`. First contact uses trust on first use; later connections require the recorded host
+key. Verify a new host key through another channel when the repository is sensitive.
 
-What it does not protect:
+VS Code runs per user and is proxied through the authenticated browser service. It still has the
+authority of that user over the selected workspace.
 
-- Misuse by a same-user attacker who can steal or invoke a valid token
-- Actions that are intentionally within the granted token scope
-- Content confidentiality once data is intentionally sent to an external delegate provider
+See [Web git security](WEBCHAT_GIT_SECURITY.md).
 
-## Guardrail Enforcement
+## Audit
 
-Sensitive operations are mediated server-side. The enforcement chain combines transport identity, token validation, and action-level checks before work is executed.
+The WORM store is append-only and hash-chained. Checkpoints commit the current head. A seal exports
+a verifiable snapshot. Retrieval traces, provenance, fidelity, policy decisions, and action rows use
+the same verification surface.
 
-```mermaid
-flowchart TD
-  REQ[Client request] --> ID[Establish caller identity\nSO_PEERCRED or web auth]
-  ID --> TOK[Validate capability token]
-  TOK --> SCOPE[Check requested action against scope]
-  SCOPE --> RULES[Apply server-side guardrails]
-  RULES --> DECISION{Allowed?}
-  DECISION -- Yes --> EXEC[Execute local action or delegate]
-  DECISION -- No --> DENY[Deny request]
+```bash
+aimee audit verify
+aimee audit checkpoint
+aimee audit seal --help
 ```
 
-Enforcement expectations:
+The event-bus capture stream preserves accepted order and materializes large payloads. It is for
+inspection and observational replay; it never runs a captured tool call.
 
-- Identity is established first.
-- Capability validation happens before operational execution.
-- Scope checks are performed before local actions or delegation.
-- Guardrails are enforced on the server side, not delegated to clients.
-- Denial is the expected outcome when identity, token state, or requested capability does not satisfy policy.
+A local ledger cannot prove integrity against an attacker who controls the host, the process, and
+its keys. Use the out-of-process sealer and off-host witness/anchor for that threat. Alert on witness
+lag, anchor failure, WORM verification failure, bus drops, or an uncovered enforcement path.
 
-This model protects against clients claiming authority they do not have. It does not protect against arbitrary actions by a fully compromised same-user environment.
+## Data and privacy
 
-## Token Lifecycle
+Nothing phones home by default. Network calls happen for configured providers, git hosts, package
+sources, vulnerability checks, telemetry exporters, or other explicit integrations.
 
-Capability tokens are lifecycle-managed security artifacts on the active authorization boundary.
+Memory and document ingestion can retain sensitive source text. Scope the KB, configure retention,
+and avoid sending restricted evidence to an external reranker or synthesis provider. Memory audit
+uses fingerprints for keys that can contain personal data.
 
-Lifecycle stages:
+## Non-goals
 
-1. Issuance
-   - A token is created with explicit operational scope.
-   - The token represents a bounded authorization grant, not blanket trust.
+- protecting a host after root compromise without an external trust anchor;
+- treating an admitted native module as hostile code;
+- making provider terms permit unattended use;
+- preventing an authorized user from reading data their grant allows;
+- replacing repository review, backups, or normal host hardening;
+- claiming deterministic module execution from observational capture.
 
-2. Presentation
-   - The client presents the token when requesting protected actions.
-   - Presence of a token supplements, but does not replace, transport or session identity.
+## Operator checklist
 
-3. Validation
-   - The server verifies that the token is recognized, valid, and suitable for the requested operation.
-   - Invalid, missing, or insufficiently scoped tokens must result in denial.
-
-4. Use
-   - Actions are limited to the token's granted capabilities.
-   - Delegated work is still subject to server-side checks.
-
-5. Expiry or revocation
-   - A token should cease to authorize actions once expired or no longer accepted by the server.
-   - Expired or revoked tokens must not continue to permit operational access.
-
-Security implications:
-
-- Token secrecy matters because possession enables the granted operations.
-- Token scope matters because overbroad tokens enlarge the blast radius of theft or misuse.
-- Server-side validation matters because local identity alone is insufficient for broader operations.
-
-## Agent Credential Custody (thin client)
-
-Third-party agent/delegate API keys (and Codex/OAuth tokens) are sealed in the
-server's **credential vault**, encrypted at rest, and are the server's single,
-permanent credential store. The legacy client-held model (client keyring + a
-RAM-only per-session push) was retired.
-
-- **Storage of record is the server vault.** Keys are sealed under the server
-  principal, encrypted at rest; `aimee agent add … --key K` writes `K` into the
-  vault and **refuses plaintext storage**. The server's `agents.json` holds
-  definitions (endpoint, model, roles) only, never the key. Codex/OAuth tokens
-  are vaulted the same way (a legacy plaintext token is migrated and scrubbed on
-  first use).
-- **Autonomous unseal, no interactive unlock.** Each data-encryption key is
-  wrapped twice, once for an interactive principal and once under a server
-  master key (`.vault/.server-master.key`), so the server can decrypt a
-  credential on its own to run a turn without a human unlocking the vault.
-  Credentials are resolved per turn from the vault (the turn's attested
-  principal, falling back to the server principal).
-- **No client custody, no RAM keyring.** The client-held keyring
-  (`~/.config/aimee/agent-keys.json`) and the per-session push (`POST
-  /v1/session/credentials`) are gone; `aimee agent key import` migrates any
-  leftover client keys into the vault. Agents are configured **once on the
-  server** and shared across every client.
-- **Trade-off.** The server is now a durable secret store, so the protection
-  boundary is the server host and especially `.vault/.server-master.key` (the
-  root of the autonomous-unseal capability), restrict its file mode and host
-  access and threat-model the server host accordingly.
-- **Transport.** `agent add --key` sends the key over the same authenticated
-  `/v1` channel as other requests; on a plaintext-HTTP LAN deployment it is only
-  as confidential as that network. Use TLS / a trusted network for the server
-  endpoint.
-
-See [THIN_CLIENT.md](THIN_CLIENT.md) for operational details.
-
-## Local-CLI agent execution stays on the client
-
-A `--provider claude` agent runs the standard `claude` CLI in a tmux session,
-which executes where the binary and login live, the **client**, even when it
-is driven through a remote `aimee-server`. On a detached workspace the tmux
-session driver marshals its tmux commands over the runner reverse channel and the
-client runs them locally, with `claude` authenticating via the client's own login
-(`~/.claude`). (`claude -p` print mode is not used.)
-
-- No Claude credential is transmitted to or stored on the server; the server only
-  relays the prompt and reads back the captured session output.
-- The CLI runs against the client's working tree, under the client user's
-  identity, the server gains no new ability to execute binaries it does not have.
-- This keeps the server from being a place where third-party agent logins
-  accumulate (a `claude` CLI subscription login is not an API key and is not
-  vaulted; it stays on the client; see [DELEGATES.md](DELEGATES.md)). On a
-  plaintext-HTTP
-  LAN deployment, the prompt relayed to the server is only as confidential as
-  that network, use TLS / a trusted network for the server endpoint.
-- Claude run via the `claude` CLI login (not an API key) is **primary-only by
-  default**, see [DELEGATES.md](DELEGATES.md#claude-via-the-cli-is-primary-only-by-default)
-  for the account-risk rationale and the per-agent **Primary Agent Only**
-  (`primary_only`) flag that governs it.
-
-## Explicit Non-Goals
-
-This security model does not aim to provide:
-
-- Protection against a hostile process already running as the same local user with the ability to inspect local process state, files, or tokens
-- Internet-hardened exposure for the browser interface comparable to a public SaaS perimeter
-- End-to-end confidentiality from the local system to external AI providers once prompts or outputs are intentionally sent over delegate HTTP APIs
-- Strong multi-tenant isolation between mutually untrusted users on the same host beyond the documented local-user and token boundaries
-- Administrative privilege separation equivalent to a dedicated sandbox, VM, or MAC-enforced isolation layer
-
-These non-goals are intentional design constraints.
-
-## Audit History
-
-This document covers:
-
-- Trusted, semi-trusted, and untrusted zones
-- The principal classes and their trust levels
-- The Unix socket, browser, delegate, token, and DB1 local-state attack surfaces
-- Capability-scoped operational authorization
-- Server-side guardrail enforcement before execution
-- Token-based authorization as distinct from local transport identity
-
-No separate historical audit record exists yet. This section is the baseline for future audit updates.
+- change browser bootstrap credentials;
+- verify certificate fingerprints before enrollment;
+- keep remote writes at the lowest useful tier;
+- grant users individually and review grants regularly;
+- keep the Docker socket out of deployments that do not need managed launch;
+- use the vault, never plaintext config, for credentials;
+- keep delegate network off unless the task needs it;
+- run `aimee audit verify` and monitor bus drops;
+- back up DB1, DB2, workflow state, vault custody, TLS state, and audit anchors;
+- test revocation and restore procedures before an incident.

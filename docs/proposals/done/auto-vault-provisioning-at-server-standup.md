@@ -8,7 +8,7 @@
   criteria 1–4 met and unit-verified; criterion 5 (re-provision the live `.254`
   server) is deployment-time validation. WP-D (remote provisioning over native TLS)
   is an explicit optional follow-on, tracked by
-  [native-tls-thin-client-backends.md](../pending/native-tls-thin-client-backends.md).
+  [native-tls-thin-client-backends.md](./native-tls-thin-client-backends.md).
 - **Scope:** deterministic / server bootstrap + credential vault. Not an
   intelligence-surface proposal (no Architecture Charter role).
 - **Author:** JBailes, 2026-06-17.

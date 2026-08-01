@@ -1,5 +1,7 @@
 # Proposal: Remote-first session-start — deliver the full brief over /v1
 
+- **State:** proposed.
+
 ## Thesis
 
 Aimee runs as a **thin client against a remote aimee-server**, and that is the *only* topology we

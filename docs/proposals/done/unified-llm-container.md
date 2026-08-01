@@ -287,7 +287,7 @@ extraction task — see below):
 > drawn from the real ~/dev + ~/gow workspace** (every aimee-supported language),
 > scored on three uniform layers: a strict de-saturated schema rubric, a corpus-wide
 > valid-JSON rate, and a **blind Claude content judge**. Full data + harness in
-> [`benchmarks/results/synth/RESULTS.md`](../../benchmarks/results/synth/RESULTS.md).
+> [`benchmarks/results/synth/RESULTS.md`](../../../benchmarks/results/synth/RESULTS.md).
 >
 > Headline: under grammar enforcement **faithfulness is universal** — no model
 > hallucinates; the differentiators are **structure** and **reliability**. The old

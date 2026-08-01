@@ -27,13 +27,13 @@ the governed agent's process — `pre_tool_check` runs server-side for delegates
 MCP dispatch (`src/server/server.c:924`, `src/server/server_compute_async.c:206`),
 the gateway rewrites the primary's LLM traffic in aimee's own process
 (`src/gateway_policy.c`), workflow gates are engine-owned and HMAC-non-forgeable
-(`src/workflow/wfe_approval.c`), and a hash-chained, MAC-checkpointed WORM store
+(`src/modules/workflows/wfe_approval.c`), and a hash-chained, MAC-checkpointed WORM store
 exists and verifies (`src/modules/audit/audit_worm.c`, `src/modules/audit/audit_worm_chain.c`). What is missing
 is the last mile that turns "we log verdicts" into "we can attest verdicts":
 
 1. the tamper-evident chain is **default-off** (`audit_worm_enabled` has no
    initializer assignment → 0) while the default-on audit path (`audit.log`,
-   `audit_action_enabled = 1`, `src/config.c:818`) is **not chained**;
+   `audit_action_enabled = 1`, `src/modules/config/config.c:882`) is **not chained**;
 2. several live enforcers **never reach the chain at all** (attention guard,
    gateway policy, memory interception, integrity gate, native gate, vault log,
    trigger/forge ops each write their own side log or nothing);
@@ -110,7 +110,7 @@ enforcement points that decide allow/block but never write a chained row:
 | Integrity gate verdicts (`src/integrity_gate.c:247-315`) | returned struct only; caller decides | `ingest.integrity` rows at each wired call site (Part 2 wires the sites) with category + verdict + source class |
 | S2 native gate DENY / WOULD-DENY (`src/cmd_hooks.c:180-212`, `src/server/s2_native_gate_hook.c`) | `audit_log("s2-native-gate", …)` | route through `audit_event` like the other block sites |
 | Vault writes / capability grants (`src/server/server_vault.c`) | dedicated append-only file | dual-write `vault.write` / `vault.capability` rows (fingerprints only, per its existing redaction) |
-| Trigger fires + forge ops (`src/server/trigger_scheduler.c`, `src/server/wfe_live_forge.c:35-47`) | lifecycle events | `trigger.fire` / `forge.op` rows incl. the `forge_allowed()` rail decision — autonomous runs are default-on (`wfe_live_forge_enabled = 1`, `src/config.c:811`); their governed ops belong in the chain first |
+| Trigger fires + forge ops (`src/server/trigger_scheduler.c`, `src/server/wfe_live_forge.c:35-47`) | lifecycle events | `trigger.fire` / `forge.op` rows incl. the `forge_allowed()` rail decision; autonomous forge work is default-off (`wfe_live_forge_enabled = 0`, `src/modules/config/config.c:866`), and its governed ops belong in the chain when enabled |
 
 Plus the lint guard: mutation entry points in the audited domains must route
 through `audit_event`; a bypassing call site fails CI (per done proposal §4).

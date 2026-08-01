@@ -10,7 +10,7 @@
   [governance-decision-records-and-action-audit](../done/governance-decision-records-and-action-audit.md)
   proposal declared policy consolidation a non-goal *"until a concrete need
   appears."* The need has appeared: autonomous execution is now default-on
-  (`wfe_live_forge_enabled = 1`, operator ruling 2026-07-13, `src/config.c:811`;
+  (`wfe_live_forge_enabled = 0`, `src/modules/config/config.c:866`;
   triggers default `mode: "autonomous"`, `src/config_trigger.c:13`) while the
   defensive gates that should envelop it are default-off, shadow-mode, or wired
   into a single call site.
@@ -18,7 +18,7 @@
 ## Thesis
 
 aimee's individual controls are strong; its *posture* is incoherent. Verified
-defaults as of today (`src/config.c` initializer unless noted):
+defaults as of today (`src/modules/config/config.c` initializer unless noted):
 
 | Control | Default | The problem |
 | --- | --- | --- |
@@ -104,7 +104,7 @@ deterministic and fail-open in `observe`, fail-closed for REJECT in
 
 Today's `pre_tool_check` contract is `0=allow / 1=rewrite / 2=block`
 (`src/headers/guardrails.h:134`); human approval exists only as a workflow-graph
-node (`gate.human`, HMAC-signed, `src/workflow/wfe_approval.c:217-237`). The
+node (`gate.human`, HMAC-signed, `src/modules/workflows/wfe_approval.c:217-237`). The
 missing verdict is **park-for-approval on a rule match** — the triad every
 surveyed policy layer converged on (`allow / deny / require_approval`), and
 OWASP ASI09's control shape.

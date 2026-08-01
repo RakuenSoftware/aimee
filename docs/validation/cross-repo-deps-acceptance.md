@@ -1,7 +1,7 @@
 # Cross-repo dependency graph — acceptance validation
 
 Live validation procedure for the cross-repo dependency graph proposal
-([cross-repo-dependency-graph](../proposals/pending/cross-repo-dependency-graph.md),
+([cross-repo-dependency-graph](../proposals/done/cross-repo-dependency-graph.md),
 §9). The **enumerated negative suite + stratified positive strata** are validated
 in CI over the sqlite shim by
 [`tests/test_cross_repo_acceptance.c`](../../src/tests/test_cross_repo_acceptance.c)

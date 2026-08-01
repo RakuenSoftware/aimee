@@ -1,5 +1,7 @@
 # Rounds-to-resume — make compaction quality measurable
 
+- **State:** proposed.
+
 ## Why
 
 Aimee compacts every long session at 80% pressure (`src/headers/session_compact.h`),

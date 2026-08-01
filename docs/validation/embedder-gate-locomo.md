@@ -11,7 +11,7 @@
 
 A reproducible, **embedder-isolated** retrieval benchmark — a precursor to the
 full ship-floor gate in
-[unified-llm-container](../proposals/pending/unified-llm-container.md) (the
+[unified-llm-container](../proposals/done/unified-llm-container.md) (the
 `nDCG/MRR ≥ 95% of pplx baseline` acceptance gate). It screens a candidate
 embedder *in isolation* (no reranker, no fusion, no LLM) so an unviable model is
 caught before the heavier full-pipeline sweep
@@ -81,7 +81,7 @@ ties the 8B on Recall@10. Two more facts sharpen this:
 
 So nomic wins on **both** axes that matter for the default slot: quality **and**
 dimension. The proposal's all-Qwen3 embed ladder
-([unified-llm-container](../proposals/pending/unified-llm-container.md) §"model
+([unified-llm-container](../proposals/done/unified-llm-container.md) §"model
 registry") is dominated by a single 768-dim model on this benchmark; the default
 should be **nomic-embed-text-v1.5**, and the GPU tiers warrant re-examination
 (an 8B at 4096-dim that loses R@5 to a 768-dim model is a poor high tier here).

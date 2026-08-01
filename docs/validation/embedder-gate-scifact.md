@@ -105,7 +105,7 @@ to 2000 chars (one clean sequence per doc). Artifacts in
 
 8B is **not** auto-selected by VRAM: 4B already captures its quality at 1.6× smaller
 vectors and ~1.4× faster embed. See
-[unified-llm-container](../proposals/pending/unified-llm-container.md) for the
+[unified-llm-container](../proposals/done/unified-llm-container.md) for the
 truncation machinery (only the 8B opt-in needs it).
 
 ## Serving / harness gotchas

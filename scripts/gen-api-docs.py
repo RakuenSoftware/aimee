@@ -70,8 +70,13 @@ def render_responses(responses: dict) -> list[str]:
     for code in sorted(responses.keys(), key=str):
         body = responses[code] or {}
         desc = (body.get("description", "") or "").replace("\n", " ").strip()
-        lines.append(f"- `{code}` — {desc}")
+        lines.append(f"- `{code}`: {desc}")
     return lines
+
+
+def normalize_markdown(text: str) -> str:
+    """Apply the mechanical project voice rules to source-derived prose."""
+    return text.replace(" — ", ": ").replace("—", "-")
 
 
 def main() -> int:
@@ -84,7 +89,7 @@ def main() -> int:
     paths = spec.get("paths", {})
 
     out: list[str] = []
-    out.append(f"# {title} — v{version}")
+    out.append(f"# {title}: v{version}")
     out.append("")
     out.append(
         "> Auto-generated from `api/openapi-v1.yaml` by `scripts/gen-api-docs.py`. "
@@ -125,7 +130,7 @@ def main() -> int:
             out.append("")
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    text = "\n".join(out).rstrip("\n") + "\n"
+    text = normalize_markdown("\n".join(out).rstrip("\n") + "\n")
     # Idempotence: only write when changed (so `make docs-gen` is a no-op on main).
     if OUT.exists() and OUT.read_text(encoding="utf-8") == text:
         print(f"gen-api-docs: {OUT.relative_to(ROOT)} up to date (no-op)")

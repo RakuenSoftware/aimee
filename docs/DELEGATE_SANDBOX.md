@@ -1,186 +1,84 @@
-# Delegate Sandbox
+# Delegate sandbox
 
-When `delegate_sandbox` is enabled, a server-executed delegate — a coord job,
-a roundtable panelist, or an autonomy run, anything that gets its own worktree —
-runs its file and shell/script tools inside a Docker container instead of in
-aimee-server's own process. This page covers what that container can reach and
-how you pick the image it runs.
+Write-capable delegates run in an assigned worktree and, when configured, a container with no
+network or ambient credentials. The sandbox bounds damage after a model or dependency makes a bad
+decision; it does not make arbitrary host mounts safe.
 
-Turn it on with the `delegate_sandbox` config key (off by default); it needs a
-reachable Docker daemon. See the key's entry in the
-[configuration reference](gen/configuration.md).
+## Default container posture
 
-## The execution model
+- network disabled;
+- no Docker socket;
+- no provider, vault, git, or host SSH credentials;
+- workspace mounted at the declared root only;
+- read-only system filesystem where the runtime permits it;
+- bounded CPU, memory, process count, time, and output;
+- explicit image and toolchain;
+- cleanup and leaked-container reap.
 
-The sandbox container runs `--network none`. The delegate has no IP egress. Its
-only outward channel is the bound `aimee-http.sock` back to aimee-server.
+The agent's role and workflow still decide whether the worktree is writable. A container is not a
+write grant.
 
-Anything that needs the network or a credential — git, web search, package
-fetches — runs **server-side, on the delegate's behalf**, never inside the
-container. aimee performs those operations itself and hands the delegate the
-result over the bound socket. What stays inside the container is the delegate's
-own local work: reading and writing files in its worktree, and running build,
-test, and `verify` commands.
+## Source authority
 
-That has one consequence you have to plan for: **the toolchain must already be
-in the image.** A `--network none` container cannot install anything at run
-time. A Rust repo needs `cargo` baked in, a C repo needs `gcc`/`make`, a docs
-repo needs nothing. Because that toolchain is per-project, the image is resolved
-per delegate.
+The server resolves the workspace and canonical worktree before launch. Absolute paths are accepted
+only when they remain inside that root. Symlinks, `..`, alternate git worktree paths, and host mounts
+cannot expand authority.
 
-## How the image is chosen
+Container-bound worktrees are allowed outside the parent checkout when the managed worktree root
+owns them. Arbitrary sibling paths are not.
 
-At the point a delegate is bound to its container, aimee resolves an image from
-the delegate's working directory, **most specific first**:
+## Packages and network
 
-1. The repo's `<git-root>/.aimee/project.yaml` `sandbox:` block — the toolchain
-   travels with the code that needs it.
-2. A per-workspace `sandbox_image` override in `aimee.yaml`, for the workspace
-   whose root contains the delegate's directory (longest matching root wins).
-3. The global `delegate_sandbox_image` in `aimee.yaml`.
-4. The built-in default, `ubuntu:22.04`.
+Delegates do not reach public package registries directly. Package requests use a mediated proxy or
+prebuilt cache with allowlist, vulnerability, integrity, size, and audit policy.
 
-The first scope that yields a usable image wins. A `.aimee/project.yaml` spec
-that is declared but fails to build does **not** silently fall through to a
-lower scope's image with no signal — the build failure surfaces through Docker's
-own build logs.
+If a task needs network, grant the narrow destination and protocol. Do not switch the whole backend
+to host networking for one dependency.
 
-## The `.aimee/project.yaml` `sandbox:` block
+## Images
 
-The in-repo block is the primary, per-project control. It takes one of three
-forms.
+An operator may choose:
 
-### `image:` — use a pre-baked image as-is
+- the default delegate image;
+- a pinned custom image;
+- an image extended with an approved package set;
+- a reviewed Dockerfile built by the provisioning service;
+- a learned toolchain image produced from verified project requirements.
 
-```yaml
-sandbox:
-  image: ghcr.io/acme/ci-toolchain:2026-06
-```
+The agent does not receive the host Docker socket or permission to replace the policy wrapper.
+Record the final image digest with the job.
 
-aimee runs that image directly. No build step.
+## Credentials
 
-### `from:` + `packages:` — build a derived image
+No credential is mounted by default. When one tool needs one credential, grant it through that tool's
+contract and keep it out of the process environment where possible. The vault access is attributed
+and audited.
 
-```yaml
-sandbox:
-  from: ubuntu:22.04
-  packages: [gcc, make, python3]
-```
+Local CLI-provider logins stay on the thin client and do not enter the container.
 
-aimee generates a two-line Dockerfile — `FROM <base>` plus a single
-`apt-get install` layer — and builds it.
+## Isolation failure
 
-`packages:` is an **apt shortcut**: it works only on a Debian/Ubuntu base and
-installs *system* packages. That includes the language runtimes themselves —
-`nodejs`, `npm`, `python3`, `cargo`, `golang`. For a non-apt base (Alpine and
-the like), or to bake in ecosystem dependencies, use `dockerfile:` instead.
+Fail closed when the requested namespace, mount, network, or resource boundary cannot be created.
+An operator may configure a documented degraded mode for a trusted host; every degraded launch emits
+a sandbox audit event with the missing boundary.
 
-Package names are validated against `[A-Za-z0-9][A-Za-z0-9._+:-]*`. A name
-containing shell metacharacters is rejected and the spec does not build.
+Never silently fall back from container to host shell.
 
-### `dockerfile:` — build a project-provided Dockerfile
+## Lifecycle
 
-```yaml
-sandbox:
-  dockerfile: .aimee/sandbox.Dockerfile
-```
+1. admit role, principal, budget, and agent slot;
+2. resolve worktree and source authority;
+3. select and verify image/toolchain;
+4. construct mounts, limits, network, and package policy;
+5. launch and record backend identity;
+6. audit tool calls and completion;
+7. stop, collect bounded results, remove container;
+8. reap leaks after crashes or runtimes with weak filtering.
 
-The escape hatch: any base, any package manager, and — because a build has
-network access — ecosystem dependencies baked at build time.
+## Configure
 
-```dockerfile
-FROM node:22-slim
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-```
+Use [generated configuration](gen/configuration.md) for current sandbox, image, package, network,
+resource, and worktree fields. Deployment-specific images and credentials belong in secret-aware
+environment/configuration, not the repository.
 
-The path is resolved relative to the git root (or taken as-is if absolute).
-
-### Build and cache behavior
-
-For the `from:`+`packages:` and `dockerfile:` forms, aimee runs `docker build`
-with network available at build time and tags the result by the content hash of
-its Dockerfile: `aimee-sbx:<hash>`. The build happens **once** and is reused
-across turns and delegates; it only rebuilds when the spec changes. The delegate
-then **runs** that image `--network none`.
-
-## `aimee.yaml` scopes
-
-The operator-facing overrides in `aimee.yaml` accept the `image:` (pre-baked)
-form only — a bare image reference. They do not build from a spec; use
-`.aimee/project.yaml` for that.
-
-### Per-workspace override
-
-A workspace entry can be a bare path string or a `{path, ...}` object; add a
-`sandbox_image` field (an object entry — a bare string carries no override):
-
-```yaml
-workspaces:
-  - path: /srv/repos/backend
-    sandbox_image: ghcr.io/acme/rust-toolchain:1.81
-```
-
-The override applies to a delegate whose directory is at or under that
-workspace root. When roots nest, the longest matching root wins.
-
-### Global default
-
-A top-level key sets the default for every delegate not covered by a more
-specific scope:
-
-```yaml
-delegate_sandbox_image: ghcr.io/acme/base-toolchain:latest
-```
-
-## Worked example
-
-A C project that needs a compiler, `make`, and Python for a test harness — and
-nothing from the network at run time:
-
-`<repo>/.aimee/project.yaml`
-
-```yaml
-sandbox:
-  from: ubuntu:22.04
-  packages: [gcc, make, python3, python3-pytest]
-
-# (verify steps, env_check, etc. as documented in agent.md)
-verify:
-  steps:
-    - name: build
-      run: make
-    - name: test
-      run: python3 -m pytest
-```
-
-On the delegate's first turn aimee builds `FROM ubuntu:22.04` plus the four
-packages, tags it `aimee-sbx:<hash>`, and runs the delegate against it
-`--network none`. Later turns reuse the built image until the `sandbox:` block
-changes.
-
-## Installing dependencies: build time, not run time
-
-Because the running sandbox is `--network none`, install every toolchain and
-dependency at **build time**:
-
-- System tools and language runtimes → `packages:` (apt) or a `dockerfile:`.
-- Ecosystem dependencies (`npm ci`, `pip install -r requirements.txt`,
-  `cargo fetch`) → a `dockerfile:` `RUN` step, which has network during the
-  build.
-
-A config-selectable **runtime package-access policy**
-(`delegate_sandbox_package_access`) — which would let aimee proxy package-manager
-fetches on the delegate's behalf while the container itself stays network-none —
-is designed but **not yet shipped**. See the
-[proposal](proposals/pending/delegate-sandbox-image-customization.md) for the
-planned modes. Until it ships, bake what the delegate needs into the image.
-
-## See also
-
-- [`.aimee/project.yaml` conventions and `verify` steps](agent.md)
-- [Delegates: roster, routing, and economics](DELEGATES.md)
-- [Configuration reference](gen/configuration.md) — `delegate_sandbox`,
-  `delegate_sandbox_image`, and the workspaces `sandbox_image` key
-- [Design proposal](proposals/pending/delegate-sandbox-image-customization.md)
+See [Sandbox verification](DELEGATE_SANDBOX_VERIFY.md) before changing the posture.
