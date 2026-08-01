@@ -697,10 +697,10 @@ const config_field_t *config_field_lookup(const char *key)
     * 403 cases probe — all real config keys, so the route's OWN allowlist is
     * what those assertions exercise, not a lookup miss. */
    if (strncmp(key, "embedder_", 9) == 0 || strncmp(key, "synthesis_", 10) == 0 ||
-       strncmp(key, "llm_", 4) == 0 ||
-       strncmp(key, "kb_", 3) == 0 || strncmp(key, "css_", 4) == 0 ||
-       strcmp(key, "typed_facts_enabled") == 0 || strcmp(key, "ocr_command") == 0 ||
-       strcmp(key, "tsr_command") == 0 || strcmp(key, "db2_url") == 0)
+       strncmp(key, "llm_", 4) == 0 || strncmp(key, "kb_", 3) == 0 ||
+       strncmp(key, "css_", 4) == 0 || strcmp(key, "typed_facts_enabled") == 0 ||
+       strcmp(key, "ocr_command") == 0 || strcmp(key, "tsr_command") == 0 ||
+       strcmp(key, "db2_url") == 0)
       return &g_stub_field;
    return NULL;
 }

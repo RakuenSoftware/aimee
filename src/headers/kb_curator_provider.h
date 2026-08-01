@@ -37,7 +37,6 @@ extern "C"
       KB_CURATOR_STAGE_SYNTHESIZE_REFLECTION,
    } kb_curator_stage_t;
 
-
    /* Fill *out with the provider def for `stage`. Resolution per tier:
     *   1. tier config — Tier-A uses `provider.*`, Tier-B uses `tier_b.*`
     *      (never the Tier-A config; no weak fallback between config tiers);

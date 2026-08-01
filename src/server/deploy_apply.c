@@ -150,8 +150,7 @@ static int deploy_llm_token(char *out, size_t cap)
       while (n > 0 && (out[n - 1] == '\n' || out[n - 1] == '\r'))
          n--;
       out[n] = '\0';
-      if (!deploy_llm_token_valid(out) ||
-          vault_runtime_secret_set("SYNTHESIS_API_KEY", out) != 0)
+      if (!deploy_llm_token_valid(out) || vault_runtime_secret_set("SYNTHESIS_API_KEY", out) != 0)
       {
          runtime_secret_wipe(out, cap);
          return -1;

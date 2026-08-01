@@ -128,7 +128,8 @@ static void test_env_bridge(void)
    clear_llm_env();
    memset(&cfg, 0, sizeof(cfg));
    assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_EXTRACT_DOCS, &a) == 0);
-   printf("kb_curator_provider: one endpoint from env drives every stage ok" "\n");
+   printf("kb_curator_provider: one endpoint from env drives every stage ok"
+          "\n");
 }
 
 /* SYNTHESIS_ENDPOINT — the single "capable container" knob — drives BOTH tiers via

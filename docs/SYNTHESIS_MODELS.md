@@ -141,6 +141,23 @@ the task at all, and not enough to separate 0.95 from 0.97.
 **E4B is not a small resident.** Local synthesis costs real memory as well as
 real CPU, and extraction runs continuously. A busy knowledge base will feel it.
 
+**The bundled-model path is not yet exercised end to end.** The four images, the
+weight download, the llama-server invocation and the loopback handover were written
+and reviewed but never run: this change was developed without a container runtime.
+Treat the first `aimee-kb-llm` start as the thing that proves it, and read the
+container log rather than assuming silence means success.
+
+**The llama.cpp release asset is pinned but not checksummed.** `LLAMACPP_VERSION`
+fixes the version; `LLAMACPP_SHA256` is present and empty, so the build warns rather
+than verifying what it downloaded. Fill it in before treating a `*-llm` image as
+trusted.
+
+**The model-to-repo mapping is unverified.** `gemma-4-E2B-it` and `gemma-4-E4B-it`
+map to `ggml-org/gemma-4-E{2,4}B-it-GGUF:Q4_K_M`, taken from the benchmark
+harnesses. That those exact repos and that quantisation tag exist has not been
+confirmed against the Hub. A wrong name fails visibly at download rather than
+silently, but it fails.
+
 The full measurement record, including the defects found in the harness while
 producing these numbers, is in `bench/tier-a/MEASUREMENT_LOG.md`.
 

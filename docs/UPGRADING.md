@@ -167,6 +167,96 @@ Common refusal reasons are `absent`, `invalid`, `unknown_kid`, `wrong_team`,
 `no_team_configured`, `replay`, and `replay_unavailable`. Use the structured `403`, request ID, and
 server log. A grant for the wrong spelling is a grant for nobody.
 
+## The embedder and synthesis settings are renamed, with no aliases
+
+Every setting naming the embedder or the synthesis model changed name. There is no
+alias and no fallback: an old name is simply not read. A deployment that upgrades
+without editing its environment and `aimee.yaml` **keeps running and silently loses
+those settings** — the KB falls back to its builtin lexical embedder and synthesis
+goes idle. Nothing errors.
+
+| Old | New |
+| --- | --- |
+| `AIMEE_EMBEDDER_URL`, config `embedding_endpoint` | `EMBEDDER_URL` / `embedder_url` |
+| `AIMEE_EMBEDDING_DIM`, config `embedding_dim` | `EMBEDDER_DIMS` / `embedder_dims` |
+| config `embedding_model` | `EMBEDDER_MODEL` / `embedder_model` |
+| config `embedding_command` | `embedder_command` |
+| `AIMEE_LLM_URL`, `LLM_ENDPOINT`, config `llm_synth_endpoint` | `SYNTHESIS_ENDPOINT` / `synthesis_endpoint` |
+| `LLM_MODEL`, `AIMEE_LLM_MODEL`, config `llm_synth_model` | `SYNTHESIS_MODEL` / `synthesis_model` |
+| `AIMEE_LLM_AUTH_TOKEN`, `LLM_API_KEY` | `SYNTHESIS_API_KEY` / `synthesis_api_key` |
+| `AIMEE_LLM_AUTH_REQUIRED` | `SYNTHESIS_AUTH_REQUIRED` |
+
+**This applies to `aimee.yaml` as well as the environment.** The config file used
+the `embedding_*` spelling while the code had already moved on, so the file and the
+setting could disagree. They are one name now, which means the old file keys are
+dead: re-set them.
+
+Deleted outright, because the container they configured is retired and the
+`aimee-kb` image variant now encodes that choice: `llm_embed_backend`,
+`llm_synth_backend`, `llm_synth_host`, `llm_synth_gpu`, `llm_synth_tier`,
+`AIMEE_LLM_SYNTH_MODE`, `AIMEE_LLM_SYNTH_URL`, `AIMEE_LLM_SYNTH_TIER`. A config
+still carrying `kb.curator.tier_b.*` is not an error — the key is ignored and
+rewriting the file drops it.
+
+**Check after upgrading**: `aimee config get embedder_model` and
+`aimee config get synthesis_endpoint` return what you expect, and the KB's health
+does not report the builtin lexical embedder.
+
+## One synthesis role, and thinking is now a setting
+
+Tier-A and Tier-B are gone. Every curator stage resolves the same provider, because
+measurement did not support running a cheaper model on the mechanical stages. If you
+configured a second provider under `tier_b.*`, that provider is no longer used —
+move it to `provider.*` if it is the one you want.
+
+The split had a second effect that is worth knowing you no longer have: the
+reasoning stages deliberately REFUSED the environment endpoint, so a deployment
+configured only that way ran extraction and left synthesis idle. One endpoint under
+one name cannot do that.
+
+Thinking used to be implied by the stage — suppressed for the mechanical stages
+because a reasoning pass can consume the output budget and truncate the answer. It
+is now one global, user-settable switch, `synthesis_thinking`, **default on**. Turn
+it off only if you point synthesis at a model that reasons past its output cap
+without answering; `MF_LLM_OUT_CAP` bounds the damage either way.
+
+## Choosing an aimee-kb image is a one-way door
+
+There are four `aimee-kb` images now, on two axes:
+
+| | no llama.cpp | llama.cpp bundled |
+| --- | --- | --- |
+| bekko-a25m (384-dim) | `aimee-kb` | `aimee-kb-llm` |
+| nomic-v2 (768-dim) | `aimee-kb-nomic` | `aimee-kb-nomic-llm` |
+
+**The embedder axis cannot be changed after the KB has embedded anything.** DB2
+records the vector-column width and refuses to start on drift, so moving between a
+384-dim and a 768-dim image means re-embedding the whole corpus. Choose before you
+ingest. An external embedder (`EMBEDDER_URL`) shares the bekko images and may be any
+width up to 4000 — the DB2 column ceiling, not 4096.
+
+The llama.cpp axis is not one-way: it decides only whether synthesis can run on the
+same host. The setup wizard disables the local model options on an image without it
+rather than offering a choice that cannot work.
+
+Bundling llama.cpp means this project now pins it, rather than inheriting upstream's
+image and its CVE fixes. `LLAMACPP_VERSION` in the Dockerfile is the single pin and
+needs deliberate bumping.
+
+## Bundled synthesis weights live on the data volume
+
+Selecting `gemma-4-E2B-it` or `gemma-4-E4B-it` on a `*-llm` image makes the
+container fetch the weights on first start into `$AIMEE_HOME/models`, on the
+`aimee-kb-home` volume. They are not baked into the image, so an image upgrade does
+not refetch several gigabytes — and a volume wipe does.
+
+First start after selecting a model downloads roughly 4 GB and the KB reports
+synthesis unavailable until it finishes. That is deliberate: blocking startup on a
+multi-gigabyte download would take the whole knowledge base down with it.
+
+Leave `SYNTHESIS_ENDPOINT` empty for a bundled model. The container sets it to
+loopback itself; a value you write there points synthesis somewhere else.
+
 ## What is gone, and what replaces it
 
 - `aimee chat`

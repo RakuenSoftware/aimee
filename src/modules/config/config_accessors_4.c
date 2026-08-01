@@ -376,8 +376,8 @@ const char *config_workspaces(int index)
    buf[0] = 0;
    if (index < 0 || index >= (64))
       return buf;
-   config_field_read(offsetof(config_t, workspaces) + (size_t)index * sizeof(buf),
-                     sizeof(buf), buf);
+   config_field_read(offsetof(config_t, workspaces) + (size_t)index * sizeof(buf), sizeof(buf),
+                     buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
 }
@@ -460,8 +460,8 @@ const char *config_charter_values(int index)
    buf[0] = 0;
    if (index < 0 || index >= (CONFIG_CHARTER_MAX_ENTRIES))
       return buf;
-   config_field_read(offsetof(config_t, charter_values) + (size_t)index * sizeof(buf),
-                     sizeof(buf), buf);
+   config_field_read(offsetof(config_t, charter_values) + (size_t)index * sizeof(buf), sizeof(buf),
+                     buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
 }
@@ -484,7 +484,8 @@ const char *config_identity_working_profile_injection_fields(int index)
    buf[0] = 0;
    if (index < 0 || index >= (CONFIG_WORKING_PROFILE_ALLOW_MAX))
       return buf;
-   config_field_read(offsetof(config_t, identity_working_profile_injection_fields) + (size_t)index * sizeof(buf),
+   config_field_read(offsetof(config_t, identity_working_profile_injection_fields) +
+                         (size_t)index * sizeof(buf),
                      sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
@@ -508,8 +509,8 @@ const char *config_mcp_osv_allow(int index)
    buf[0] = 0;
    if (index < 0 || index >= (CONFIG_MCP_OSV_MAX_ALLOW))
       return buf;
-   config_field_read(offsetof(config_t, mcp_osv_allow) + (size_t)index * sizeof(buf),
-                     sizeof(buf), buf);
+   config_field_read(offsetof(config_t, mcp_osv_allow) + (size_t)index * sizeof(buf), sizeof(buf),
+                     buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
 }

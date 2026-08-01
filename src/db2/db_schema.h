@@ -87,7 +87,7 @@ extern "C"
     * pooling/prefix change is definitionally a different space. Returns 0
     * (recorded/match), -1 (mismatch / DB error, errbuf set). */
    int db2_embedder_serving_record_or_check(void *conn, const char *serving_id, char *errbuf,
-                                           size_t errlen);
+                                            size_t errlen);
 
    /* Apply the consolidated SQLite schema for DB2's libpq shim/test
     * compatibility path. Production DB2 remains Postgres-only. */

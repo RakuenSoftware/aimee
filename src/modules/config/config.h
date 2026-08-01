@@ -2043,7 +2043,7 @@ typedef struct config
     * aux_default_model: model override for the default provider (empty = agent default).
     * aux_default_max_tokens: token cap for aux calls; 0 = use agent default.
     * aux_tasks: per-task provider/model/token overrides. */
-#define CONFIG_AUX_MAX_TASKS     16
+#define CONFIG_AUX_MAX_TASKS 16
    int aux_enabled;
    char aux_default_provider[64];
    char aux_default_model[128];

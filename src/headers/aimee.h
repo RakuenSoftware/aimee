@@ -97,7 +97,7 @@
  * that dimension (see db2/schema.sql). 4000 is the pgvector halfvec INDEX ceiling
  * (inclusive) — native 4096 would be unindexable, so the 8b tier truncates to
  * 4000 in the embedding proxy (see unified-llm-container §"The 8B truncation"). */
-#define EMBED_MAX_DIM              4000
+#define EMBED_MAX_DIM 4000
 
 /* The embedding WIDTH is not declared here. It is a setting, so it lives in exactly
  * one place — config (config_embedder_dims_default / config_embedder_dims_effective,

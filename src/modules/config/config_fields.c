@@ -40,9 +40,8 @@ const config_field_t config_fields[] = {
      * why they had to be hand-plumbed through compose YAML as a second surface. */
     {"embedder_command", offsetof(config_t, embedder_command),
      sizeof(((config_t *)0)->embedder_command), 0, CFG_STRING},
-    {"embedder_model", offsetof(config_t, embedder_model),
-     sizeof(((config_t *)0)->embedder_model), 0, CFG_STRING, RELOAD_HOT, FGROUP_RUNTIME,
-     "EMBEDDER_MODEL"},
+    {"embedder_model", offsetof(config_t, embedder_model), sizeof(((config_t *)0)->embedder_model),
+     0, CFG_STRING, RELOAD_HOT, FGROUP_RUNTIME, "EMBEDDER_MODEL"},
     {"embedder_url", offsetof(config_t, embedder_url), sizeof(((config_t *)0)->embedder_url), 0,
      CFG_STRING, RELOAD_HOT, FGROUP_RUNTIME, "EMBEDDER_URL"},
     {"embedder_api_key", offsetof(config_t, embedder_api_key),

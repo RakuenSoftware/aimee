@@ -114,7 +114,7 @@ static int embedder_probe_run(int *out_dim, int budget_ms, char *err, size_t err
  * waited for readiness, so in practice the first read succeeds; the window only covers a
  * restart where no dim probe runs because the dim is already recorded. Exhausting it
  * leaves the guard inactive for this start rather than holding the kb down. */
-#define SERVING_PROBE_BUDGET_MS 60000
+#define SERVING_PROBE_BUDGET_MS   60000
 #define SERVING_PROBE_INTERVAL_MS 2000
 
 static int embedder_probe_serving_id(char *out, size_t out_len, char *err, size_t errlen)
