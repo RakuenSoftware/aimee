@@ -5,6 +5,9 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+
+extern char test_vault_server_codex_oauth[4096];
+void test_oauth_tokens_reset(void);
 #include <sqlite3.h>
 #include "aimee.h"
 #include "db.h"
@@ -12,6 +15,7 @@
 #include "db1.h"
 #include "agent.h"
 #include "agent_config.h"
+#include "runtime_secret.h"
 #include <aimee/delegates/delegate_role.h>
 #include "agent_tools.h"
 #include "anchor_snapshot.h"
@@ -155,15 +159,46 @@ static int tools_array_has_name(cJSON *tools, const char *expected)
 static void test_agent_expand_env(void)
 {
    char dst[128];
-   platform_setenv("AIMEE_TEST_ENV", "expanded");
+   assert(runtime_secret_store("AIMEE_TEST_ENV", "expanded") == 0);
    agent_expand_env("$AIMEE_TEST_ENV", dst, sizeof(dst));
    assert(strcmp(dst, "expanded") == 0);
    agent_expand_env("$AIMEE_NO_ENV", dst, sizeof(dst));
-   assert(strcmp(dst, "$AIMEE_NO_ENV") == 0);
+   assert(strcmp(dst, "") == 0);
    agent_expand_env("", dst, sizeof(dst));
    assert(strcmp(dst, "") == 0);
    agent_expand_env("plain string", dst, sizeof(dst));
    assert(strcmp(dst, "plain string") == 0);
+   runtime_secret_remove("AIMEE_TEST_ENV");
+}
+
+static void test_agent_save_never_serializes_literal_key(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.agent_count = 1;
+   snprintf(cfg.agents[0].name, sizeof(cfg.agents[0].name), "%s", "vault-only");
+   snprintf(cfg.agents[0].provider, sizeof(cfg.agents[0].provider), "%s", "openai");
+   snprintf(cfg.agents[0].api_key, sizeof(cfg.agents[0].api_key), "%s", "literal-must-not-land");
+   assert(agent_save_config(&cfg) == 0);
+
+   FILE *f = fopen(agent_config_path(), "rb");
+   assert(f != NULL);
+   char json[4096];
+   size_t n = fread(json, 1, sizeof(json) - 1, f);
+   fclose(f);
+   json[n] = '\0';
+   assert(strstr(json, "literal-must-not-land") == NULL);
+   assert(strstr(json, "\"api_key\"") == NULL);
+
+   snprintf(cfg.agents[0].api_key, sizeof(cfg.agents[0].api_key), "%s", "$FIRST_BOOT_KEY");
+   assert(agent_save_config(&cfg) == 0);
+   f = fopen(agent_config_path(), "rb");
+   assert(f != NULL);
+   n = fread(json, 1, sizeof(json) - 1, f);
+   fclose(f);
+   json[n] = '\0';
+   assert(strstr(json, "$FIRST_BOOT_KEY") != NULL);
+   assert(strstr(json, "literal-must-not-land") == NULL);
 }
 
 static void test_agent_has_role(void)
@@ -600,21 +635,9 @@ static void restore_env(const char *name, const char *value)
 
 static void test_provider_env_credentials_and_headers(void)
 {
-   char old_openrouter[256] = "";
-   char old_anthropic[256] = "";
-   char old_gemini[256] = "";
-   char old_google[256] = "";
    char old_gemini_mechanism[256] = "";
    const char *v;
 
-   if ((v = getenv("OPENROUTER_API_KEY")))
-      snprintf(old_openrouter, sizeof(old_openrouter), "%s", v);
-   if ((v = getenv("ANTHROPIC_API_KEY")))
-      snprintf(old_anthropic, sizeof(old_anthropic), "%s", v);
-   if ((v = getenv("GEMINI_API_KEY")))
-      snprintf(old_gemini, sizeof(old_gemini), "%s", v);
-   if ((v = getenv("GOOGLE_API_KEY")))
-      snprintf(old_google, sizeof(old_google), "%s", v);
    if ((v = getenv("GEMINI_API_KEY_AUTH_MECHANISM")))
       snprintf(old_gemini_mechanism, sizeof(old_gemini_mechanism), "%s", v);
 
@@ -625,10 +648,10 @@ static void test_provider_env_credentials_and_headers(void)
    memset(&ag, 0, sizeof(ag));
    snprintf(ag.provider, sizeof(ag.provider), "%s", "openrouter");
    snprintf(ag.auth_type, sizeof(ag.auth_type), "%s", "bearer");
-   unsetenv("OPENROUTER_API_KEY");
+   runtime_secret_remove("OPENROUTER_API_KEY");
    assert(agent_has_resolvable_credentials(&ag) == 0);
    assert(agent_is_available_for_routing(&ag) == 0);
-   setenv("OPENROUTER_API_KEY", "or-test-key", 1);
+   assert(runtime_secret_store("OPENROUTER_API_KEY", "or-test-key") == 0);
    assert(agent_has_resolvable_credentials(&ag) == 1);
    assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
    assert(strcmp(auth, "Authorization: Bearer or-test-key") == 0);
@@ -639,7 +662,7 @@ static void test_provider_env_credentials_and_headers(void)
    memset(&ag, 0, sizeof(ag));
    snprintf(ag.provider, sizeof(ag.provider), "%s", "anthropic");
    snprintf(ag.auth_type, sizeof(ag.auth_type), "%s", "api_key");
-   setenv("ANTHROPIC_API_KEY", "anth-test-key", 1);
+   assert(runtime_secret_store("ANTHROPIC_API_KEY", "anth-test-key") == 0);
    assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
    assert(strcmp(auth, "x-api-key: anth-test-key") == 0);
    agent_build_extra_headers(&ag, headers, sizeof(headers));
@@ -648,9 +671,9 @@ static void test_provider_env_credentials_and_headers(void)
    memset(&ag, 0, sizeof(ag));
    snprintf(ag.provider, sizeof(ag.provider), "%s", "gemini");
    snprintf(ag.auth_type, sizeof(ag.auth_type), "%s", "api_key");
-   unsetenv("GEMINI_API_KEY");
+   runtime_secret_remove("GEMINI_API_KEY");
    unsetenv("GEMINI_API_KEY_AUTH_MECHANISM");
-   setenv("GOOGLE_API_KEY", "google-test-key", 1);
+   assert(runtime_secret_store("GOOGLE_API_KEY", "google-test-key") == 0);
    assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
    assert(strcmp(auth, "x-goog-api-key: google-test-key") == 0);
 
@@ -658,10 +681,10 @@ static void test_provider_env_credentials_and_headers(void)
    assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
    assert(strcmp(auth, "Authorization: Bearer google-test-key") == 0);
 
-   restore_env("OPENROUTER_API_KEY", old_openrouter[0] ? old_openrouter : NULL);
-   restore_env("ANTHROPIC_API_KEY", old_anthropic[0] ? old_anthropic : NULL);
-   restore_env("GEMINI_API_KEY", old_gemini[0] ? old_gemini : NULL);
-   restore_env("GOOGLE_API_KEY", old_google[0] ? old_google : NULL);
+   runtime_secret_remove("OPENROUTER_API_KEY");
+   runtime_secret_remove("ANTHROPIC_API_KEY");
+   runtime_secret_remove("GEMINI_API_KEY");
+   runtime_secret_remove("GOOGLE_API_KEY");
    restore_env("GEMINI_API_KEY_AUTH_MECHANISM",
                old_gemini_mechanism[0] ? old_gemini_mechanism : NULL);
 }
@@ -691,15 +714,14 @@ static void test_codex_oauth_request_creds(void)
    assert(strstr(headers, "ChatGPT-Account-ID:") == NULL);
 }
 
-/* On-disk codex auth is resolved under AIMEE_HOME, not just $HOME. An appliance
- * runs the server with AIMEE_HOME set but no HOME, so <AIMEE_HOME>/.codex/auth.json
- * must be found or codex fails /v1 auth with a route-unresolved error even though
- * a valid token is on disk. (exp is unknown for a non-JWT token -> no refresh, so
- * this stays hermetic: no network.) The two sub-cases pin BOTH the new appliance
- * path (AIMEE_HOME set, no HOME) and the unchanged dev-box fallback (HOME set,
- * AIMEE_HOME unset), so the reordering never regresses the classic HOME lookup. */
-static void test_codex_oauth_reads_aimee_home(void)
+/* Server-side Codex auth is Vault-only. A legacy auth.json that survives outside
+ * the boot migration must never be used as a runtime fallback. */
+static void test_codex_oauth_reads_vault_only(void)
 {
+   const char *old_home = getenv("HOME");
+   char saved_home[600] = "";
+   if (old_home)
+      snprintf(saved_home, sizeof(saved_home), "%s", old_home);
    char dir[] = "/tmp/aimee-codex-home.XXXXXX";
    assert(platform_mkdtemp(dir) != NULL);
    char sub[512], authpath[600];
@@ -708,25 +730,10 @@ static void test_codex_oauth_reads_aimee_home(void)
    snprintf(authpath, sizeof(authpath), "%s/auth.json", sub);
    FILE *f = fopen(authpath, "wb");
    assert(f != NULL);
-   /* Distinctive token so a stray codex-auth.json elsewhere can't masquerade as a
-    * pass (a different token would fail the assert, not silently satisfy it). */
-   fputs("{\"tokens\":{\"access_token\":\"AH-ACCESS-3f9c1\",\"refresh_token\":\"AH-REFRESH\"}}", f);
+   fputs("{\"tokens\":{\"access_token\":\"DISK-MUST-NOT-WIN\",\"refresh_token\":\"DISK-REFRESH\"}}",
+         f);
    fclose(f);
-
-   /* Restore-vs-unset must key on NULL, not emptiness, so an original AIMEE_HOME=""
-    * (or HOME="") is restored to empty rather than being unset. */
-   const char *old_aimee_home = getenv("AIMEE_HOME");
-   const char *old_home = getenv("HOME");
-   const char *old_profile = getenv("AIMEE_PROFILE");
-   char sa[600] = "", sh[600] = "", sp[128] = "";
-   if (old_aimee_home)
-      snprintf(sa, sizeof(sa), "%s", old_aimee_home);
-   if (old_home)
-      snprintf(sh, sizeof(sh), "%s", old_home);
-   if (old_profile)
-      snprintf(sp, sizeof(sp), "%s", old_profile);
-   unsetenv("AIMEE_PROFILE"); /* keep aimee_home() == the raw home in both sub-cases */
-   agent_set_request_codex_creds(NULL, NULL); /* no per-turn token: force the on-disk path */
+   setenv("HOME", dir, 1);
 
    agent_t ag;
    char auth[512];
@@ -735,36 +742,28 @@ static void test_codex_oauth_reads_aimee_home(void)
    snprintf(ag.provider, sizeof(ag.provider), "%s", "codex");
    snprintf(ag.auth_type, sizeof(ag.auth_type), "%s", "codex-oauth");
 
-   /* (1) Appliance: AIMEE_HOME set, HOME cleared -> the new aimee_home() branch is
-    *     the ONLY thing that can find the token. */
-   setenv("AIMEE_HOME", dir, 1);
-   unsetenv("HOME");
+   test_oauth_tokens_reset();
+   snprintf(test_vault_server_codex_oauth, sizeof(test_vault_server_codex_oauth),
+            "{\"tokens\":{\"access_token\":\"VAULT-ACCESS-3f9c1\",\"refresh_token\":\"VAULT-"
+            "REFRESH\"}}");
    auth[0] = '\0';
    assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
-   assert(strstr(auth, "Bearer AH-ACCESS-3f9c1") != NULL);
+   assert(strstr(auth, "Bearer VAULT-ACCESS-3f9c1") != NULL);
+   assert(strstr(auth, "DISK-MUST-NOT-WIN") == NULL);
 
-   /* (2) Dev box: AIMEE_HOME unset, HOME set to the same dir -> the classic
-    *     fallback still resolves (aimee_home() collapses to HOME here). */
-   unsetenv("AIMEE_HOME");
-   setenv("HOME", dir, 1);
+   /* With Vault cleared, even an otherwise valid HOME credential is ignored. */
+   test_oauth_tokens_reset();
+   test_vault_server_codex_oauth[0] = '\0';
    auth[0] = '\0';
-   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
-   assert(strstr(auth, "Bearer AH-ACCESS-3f9c1") != NULL);
-
-   if (old_aimee_home)
-      setenv("AIMEE_HOME", sa, 1);
-   else
-      unsetenv("AIMEE_HOME");
+   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) != 0);
    if (old_home)
-      setenv("HOME", sh, 1);
+      setenv("HOME", saved_home, 1);
    else
       unsetenv("HOME");
-   if (old_profile)
-      setenv("AIMEE_PROFILE", sp, 1);
    unlink(authpath);
    rmdir(sub);
    rmdir(dir);
-   printf("  PASS: test_codex_oauth_reads_aimee_home\n");
+   printf("  PASS: test_codex_oauth_reads_vault_only\n");
 }
 
 /* WP-C.2c(3): the vault principal must ride along in the creds snapshot so a
@@ -1129,41 +1128,25 @@ static void test_provider_cli_shell_timeout_covers_prompt_write(void)
 
 static void test_codex_oauth_auth_resolution(void)
 {
-   const char *cfg_dir = config_default_dir();
-   assert(platform_mkdir_p(cfg_dir, 0700) == 0 || access(cfg_dir, F_OK) == 0);
-
-   char path[MAX_PATH_LEN];
-   snprintf(path, sizeof(path), "%s/codex-auth.json", cfg_dir);
-   FILE *f = fopen(path, "w");
-   assert(f != NULL);
-   fputs("{\"access_token\":\"codex-test-token\"}\n", f);
-   fclose(f);
-
    agent_t ag;
    memset(&ag, 0, sizeof(ag));
    snprintf(ag.auth_type, sizeof(ag.auth_type), "codex-oauth");
 
    char auth[MAX_API_KEY_LEN + 32];
+   test_oauth_tokens_reset();
+   snprintf(test_vault_server_codex_oauth, sizeof(test_vault_server_codex_oauth),
+            "{\"access_token\":\"codex-test-token\",\"refresh_token\":\"codex-refresh\"}");
    assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
    assert(strcmp(auth, "Authorization: Bearer codex-test-token") == 0);
 
-   assert(unlink(path) == 0);
-   const char *home = getenv("HOME");
-   assert(home != NULL && home[0]);
-
-   char codex_dir[MAX_PATH_LEN];
-   snprintf(codex_dir, sizeof(codex_dir), "%s/.codex", home);
-   assert(platform_mkdir_p(codex_dir, 0700) == 0 || access(codex_dir, F_OK) == 0);
-
-   char codex_path[MAX_PATH_LEN];
-   snprintf(codex_path, sizeof(codex_path), "%s/auth.json", codex_dir);
-   f = fopen(codex_path, "w");
-   assert(f != NULL);
-   fputs("{\"tokens\":{\"access_token\":\"codex-cli-token\"}}\n", f);
-   fclose(f);
-
+   test_oauth_tokens_reset();
+   snprintf(test_vault_server_codex_oauth, sizeof(test_vault_server_codex_oauth),
+            "{\"tokens\":{\"access_token\":\"codex-cli-token\",\"refresh_token\":\"codex-cli-"
+            "refresh\"}}");
    assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
    assert(strcmp(auth, "Authorization: Bearer codex-cli-token") == 0);
+   test_oauth_tokens_reset();
+   test_vault_server_codex_oauth[0] = '\0';
 }
 
 static void test_agent_is_exec_role(void)
@@ -2227,6 +2210,14 @@ static void test_parent_write_guard_blocks_parent_writes(void)
    stdout_item = cJSON_GetObjectItem(json, "stdout");
    ec = cJSON_GetObjectItem(json, "exit_code");
    assert(stdout_item && cJSON_IsString(stdout_item));
+   if (!strstr(stdout_item->valuestring, "local-bin-index-ok"))
+   {
+      cJSON *stderr_item = cJSON_GetObjectItem(json, "stderr");
+      fprintf(stderr, "local-bin resolution output: stdout=%s stderr=%s exit=%d\n",
+              stdout_item->valuestring,
+              stderr_item && cJSON_IsString(stderr_item) ? stderr_item->valuestring : "<missing>",
+              ec && cJSON_IsNumber(ec) ? ec->valueint : -999);
+   }
    assert(strstr(stdout_item->valuestring, "local-bin-index-ok") != NULL);
    assert(ec && ec->valueint == 0);
    cJSON_Delete(json);
@@ -3187,6 +3178,15 @@ static void test_agent_config_cache_detects_same_mtime_rewrite(void)
  * fopen("w") that a failed/interrupted write left at zero bytes. */
 static void test_agent_config_deletion_guard(void)
 {
+   const char *old_home = getenv("HOME");
+   const char *old_aimee_home = getenv("AIMEE_HOME");
+   char saved_home[MAX_PATH_LEN] = "";
+   char saved_aimee_home[MAX_PATH_LEN] = "";
+   if (old_home)
+      snprintf(saved_home, sizeof(saved_home), "%s", old_home);
+   if (old_aimee_home)
+      snprintf(saved_aimee_home, sizeof(saved_aimee_home), "%s", old_aimee_home);
+
    char home[MAX_PATH_LEN];
    snprintf(home, sizeof(home), "%s/aimee-guard-XXXXXX", platform_tmpdir());
    assert(platform_mkdtemp(home) != NULL);
@@ -3235,9 +3235,48 @@ static void test_agent_config_deletion_guard(void)
       assert(system(cmd) != 0);
    }
 
-   char rm[MAX_PATH_LEN + 16];
-   snprintf(rm, sizeof(rm), "rm -rf %s", home);
-   (void)system(rm);
+   /* (4) Removing the LAST agent empties the registry legitimately, and the guard
+    * must not refuse it. It looks identical to case (1) from inside the save, so
+    * the remove path declares itself; without that, deleting the only configured
+    * delegate failed with "could not save agents.json" and it could never be
+    * removed. Removing one of several was unaffected, which is why this hid. */
+   {
+      assert(agent_save_config(&cfg) == 0); /* 2 agents on disk */
+      agent_config_t one;
+      assert(agent_load_config(&one) == 0 && one.agent_count == 2);
+      one.agent_count = 1; /* drop beta, as handle_agent_remove does */
+      assert(agent_save_config(&one) == 0);
+
+      agent_config_t last;
+      assert(agent_load_config(&last) == 0 && last.agent_count == 1);
+      last.agent_count = 0;                                /* now drop the last one */
+      assert(agent_save_config(&last) != 0);               /* plain save still refuses */
+      assert(agent_save_config_after_removal(&last) == 0); /* the removal path may */
+
+      agent_config_t gone;
+      assert(agent_load_config(&gone) == 0 && gone.agent_count == 0);
+   }
+
+   /* (5) The exemption is scoped to removal: a zeroed cfg from any other caller is
+    * still refused over a populated file. */
+   {
+      assert(agent_save_config(&cfg) == 0);
+      agent_config_t zeroed;
+      memset(&zeroed, 0, sizeof(zeroed));
+      assert(agent_save_config(&zeroed) != 0);
+      agent_config_t after;
+      assert(agent_load_config(&after) == 0 && after.agent_count == 2);
+   }
+
+   if (old_home)
+      assert(platform_setenv("HOME", saved_home) == 0);
+   else
+      assert(platform_unsetenv("HOME") == 0);
+   if (old_aimee_home)
+      assert(platform_setenv("AIMEE_HOME", saved_aimee_home) == 0);
+   else
+      assert(platform_unsetenv("AIMEE_HOME") == 0);
+   platform_test_rmrf(home);
    printf("  PASS: agent_config_deletion_guard\n");
 }
 
@@ -3264,6 +3303,7 @@ int main(void)
    test_tool_surface_single_source();
    test_agent_name_valid();
    test_agent_expand_env();
+   test_agent_save_never_serializes_literal_key();
    test_agent_has_role();
    test_agent_supports_persona();
    test_agent_find();
@@ -3278,7 +3318,7 @@ int main(void)
    test_current_code_only_dispatch_blocks_stale_context_tools();
    test_provider_env_credentials_and_headers();
    test_codex_oauth_request_creds();
-   test_codex_oauth_reads_aimee_home();
+   test_codex_oauth_reads_vault_only();
    test_request_creds_snapshot_carries_vault_principal();
    test_agent_config_provider_cli_roundtrip();
    test_tools_enabled_capability_default();

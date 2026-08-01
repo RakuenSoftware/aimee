@@ -10,11 +10,15 @@
 #include "../db1/server_sessions.h"
 #include "kb_client.h" /* kb_health_t for the stub below */
 #include "agent_config.h"
+#include "config_fields.h" /* config_field_lookup / _set_value for the config_set stub */
 #include "agent_eval.h"
 #include "hud.h"
 #include "log.h"
 #include "server.h"
+#include "server_http.h"
 #include "toolset.h"
+#include "runtime_secret.h"
+#include "vault_config_bootstrap.h"
 #include "platform_ipc.h"
 #include "platform_process.h"
 
@@ -84,6 +88,12 @@ static session_state_t g_saved_state;
 static int g_session_state_save_calls = 0;
 static session_state_t g_pre_tool_state;
 static int g_pre_tool_seen_state = 0;
+static int g_config_stateful = 0;
+static int g_config_reload_calls = 0;
+static int g_config_secret_store_calls = 0;
+static int g_config_secret_store_configured = 0;
+static config_t g_config_disk;
+static config_t g_config_snapshot;
 
 static char *read_all(int fd)
 {
@@ -448,6 +458,18 @@ void session_brief_emit(FILE *out)
    if (out)
       fputs("STUB_BRIEF_CONTENT", out);
 }
+static int g_memory_scope_begin_calls = 0;
+static int g_memory_scope_clear_calls = 0;
+int server_memory_scope_begin(cJSON *req)
+{
+   (void)req;
+   g_memory_scope_begin_calls++;
+   return 0;
+}
+void kb_client_memory_scope_context_clear(void)
+{
+   g_memory_scope_clear_calls++;
+}
 /* memory.user_capture invokes db1_user_memory_upsert (db1/user_memory.c), not
  * linked here. Stub it so the dispatch table builds. */
 int db1_user_memory_upsert(const char *kind, const char *tier, const char *key, const char *content,
@@ -571,6 +593,16 @@ int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "memory.get");
 }
+
+int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "memory.delete");
+}
+
+int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "memory.supersede");
+}
 int handle_memory_read(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "memory.read");
@@ -692,6 +724,14 @@ int handle_kb_docs_push(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 int handle_kb_ingest_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "kb.ingest.status");
+}
+int handle_kb_reembed(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "kb.reembed");
+}
+int handle_memory_embed(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "memory.embed");
 }
 int handle_kb_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
@@ -829,6 +869,10 @@ int handle_primary_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 int handle_hosts_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "hosts.list");
+}
+int handle_embedders_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "embedders.list");
 }
 int handle_primary_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
@@ -1194,12 +1238,55 @@ char *shell_escape(const char *raw)
 
 int config_load(config_t *cfg)
 {
+   if (g_config_stateful)
+   {
+      *cfg = g_config_snapshot;
+      return 0;
+   }
    memset(cfg, 0, sizeof(*cfg));
+   return 0;
+}
+
+/* The config_load stub above always succeeds, so the probe the handlers now use
+ * in its place has to say so too -- otherwise config.show / config.get would
+ * report "failed to load config" against a config this suite considers loaded. */
+int config_present(void)
+{
+   return 1;
+}
+
+/* api.disable persists through this now instead of load_file/save here. The
+ * stateful mode's disk copy is what it would write, so mirror the port change
+ * onto it; non-stateful is a no-op success, matching the config_save stub. */
+int config_disable_api_http_listener(void)
+{
+   if (g_config_stateful)
+      g_config_disk.server_api_http_port = 0;
+   return 0;
+}
+
+/* The generated accessors read every field through this. Serve them out of the
+ * SAME in-memory config the config_load stub returns, so an accessor and a
+ * config_load observed in one test can never disagree. Non-stateful mode zeroes,
+ * matching the config_load stub above. */
+int config_field_read(size_t offset, size_t size, void *dst)
+{
+   if (!dst || size == 0)
+      return -1;
+   if (g_config_stateful)
+      memcpy(dst, (const char *)&g_config_snapshot + offset, size);
+   else
+      memset(dst, 0, size);
    return 0;
 }
 
 int config_load_file(config_t *cfg)
 {
+   if (g_config_stateful)
+   {
+      *cfg = g_config_disk;
+      return 0;
+   }
    memset(cfg, 0, sizeof(*cfg));
    return 0;
 }
@@ -1208,12 +1295,83 @@ int config_load_file(config_t *cfg)
  * and on SIGHUP; stub it here (this test doesn't link the real config.o). */
 int config_reload(void)
 {
+   if (g_config_stateful)
+   {
+      g_config_snapshot = g_config_disk;
+      g_config_reload_calls++;
+   }
+   return 0;
+}
+
+/* The provider endpoint writes through config_set now instead of mutating a
+ * config_t and calling config_save. Mirror what the real one does against this
+ * file's simulated state: patch the field on "disk" AND republish it to the
+ * snapshot, so a following config_load observes the write. */
+int config_set(const char *key, const char *value)
+{
+   const config_field_t *f = config_field_lookup(key);
+   if (!f || !value)
+      return -1;
+   if (g_config_stateful)
+   {
+      if (config_field_set_value(&g_config_disk, f, value) != 0)
+         return -1;
+      (void)config_field_set_value(&g_config_snapshot, f, value);
+   }
+   return 0;
+}
+
+/* Enrolled-bearer writes go through the config module now instead of mutating
+ * server_api_bearer_extra on a config_t. Mirror the config_save stub's model:
+ * apply to the simulated disk AND the snapshot, so a read-back sees the write.
+ * Note the config_save stub deliberately SCRUBS bearer state on the way to
+ * disk (credentials live in Vault, not the config file), so these do the same. */
+int config_server_api_bearer_extra_append(const char *token)
+{
+   if (!token || !token[0])
+      return -1;
+   if (!g_config_stateful)
+      return 0;
+   int slot = g_config_snapshot.server_api_bearer_extra_count;
+   if (slot < 0 || slot >= AIMEE_API_BEARER_EXTRA_MAX)
+      return -2;
+   snprintf(g_config_snapshot.server_api_bearer_extra[slot],
+            sizeof(g_config_snapshot.server_api_bearer_extra[0]), "%s", token);
+   g_config_snapshot.server_api_bearer_extra_count = slot + 1;
+   return slot;
+}
+
+int config_server_api_bearer_extra_clear(void)
+{
+   if (g_config_stateful)
+   {
+      memset(g_config_snapshot.server_api_bearer_extra, 0,
+             sizeof(g_config_snapshot.server_api_bearer_extra));
+      g_config_snapshot.server_api_bearer_extra_count = 0;
+   }
    return 0;
 }
 
 int config_save(const config_t *cfg)
 {
+   if (g_config_stateful)
+   {
+      g_config_disk = *cfg;
+      memset(g_config_disk.server_api_bearer_token, 0,
+             sizeof(g_config_disk.server_api_bearer_token));
+      memset(g_config_disk.server_api_bearer_extra, 0,
+             sizeof(g_config_disk.server_api_bearer_extra));
+      g_config_disk.server_api_bearer_extra_count = 0;
+   }
    (void)cfg;
+   return 0;
+}
+
+int config_secret_store(const char *name, const char *value)
+{
+   assert(name && strcmp(name, "AIMEE_KB_API_BEARER_TOKEN") == 0);
+   g_config_secret_store_calls++;
+   g_config_secret_store_configured = value && value[0] ? 1 : 0;
    return 0;
 }
 
@@ -1240,9 +1398,8 @@ const char *config_output_dir(void)
    return "/tmp";
 }
 
-const char *config_guardrail_mode(const config_t *cfg)
+const char *config_guardrail_mode(void)
 {
-   (void)cfg;
    return "off";
 }
 
@@ -1896,6 +2053,116 @@ static void test_conn_update_events_null_evloop(void)
    printf("test_conn_update_events_null_evloop: PASS\n");
 }
 
+/* Generic config RPCs may report whether a Vault record is configured, but
+ * must never return the credential or route its mutation through aimee.yaml. */
+static void test_config_secret_redaction_and_vault_write(void)
+{
+   server_ctx_t *ctx = calloc(1, sizeof(*ctx));
+   server_conn_t *conn = calloc(1, sizeof(*conn));
+   assert(ctx != NULL && conn != NULL);
+   conn->capabilities = CAP_SESSION_ADMIN;
+
+   memset(&g_config_snapshot, 0, sizeof(g_config_snapshot));
+   memset(&g_config_disk, 0, sizeof(g_config_disk));
+   snprintf(g_config_snapshot.kb_api_bearer_token, sizeof(g_config_snapshot.kb_api_bearer_token),
+            "%s", "never-echo-config-secret");
+   g_config_stateful = 1;
+   g_config_reload_calls = 0;
+   g_config_secret_store_calls = 0;
+   g_config_secret_store_configured = 0;
+
+   const char *get_req = "{\"method\":\"config.get\",\"key\":\"kb_api_bearer_token\"}";
+   cJSON *got = dispatch_json(ctx, conn, get_req, strlen(get_req));
+   cJSON *value = cJSON_GetObjectItemCaseSensitive(got, "value");
+   cJSON *secret = cJSON_GetObjectItemCaseSensitive(got, "secret");
+   assert(cJSON_IsBool(value) && cJSON_IsTrue(value));
+   assert(cJSON_IsBool(secret) && cJSON_IsTrue(secret));
+   char *serialized = cJSON_PrintUnformatted(got);
+   assert(serialized && strstr(serialized, "never-echo-config-secret") == NULL);
+   free(serialized);
+   cJSON_Delete(got);
+
+   const char *set_req = "{\"method\":\"config.set\",\"key\":\"kb_api_bearer_token\","
+                         "\"value\":\"never-echo-new-secret\"}";
+   cJSON *set = dispatch_json(ctx, conn, set_req, strlen(set_req));
+   assert(g_config_secret_store_calls == 1 && g_config_secret_store_configured == 1);
+   value = cJSON_GetObjectItemCaseSensitive(set, "value");
+   secret = cJSON_GetObjectItemCaseSensitive(set, "secret");
+   assert(cJSON_IsBool(value) && cJSON_IsTrue(value));
+   assert(cJSON_IsBool(secret) && cJSON_IsTrue(secret));
+   serialized = cJSON_PrintUnformatted(set);
+   assert(serialized && strstr(serialized, "never-echo-new-secret") == NULL);
+   free(serialized);
+   cJSON_Delete(set);
+   assert(g_config_reload_calls == 0);
+   assert(g_config_disk.kb_api_bearer_token[0] == '\0');
+
+   g_config_stateful = 0;
+   free(conn);
+   free(ctx);
+   printf("test_config_secret_redaction_and_vault_write: PASS\n");
+}
+
+/* Regression: the server's config_load() is an immutable live snapshot. API
+ * credential mutations must instead start from the latest disk image and
+ * republish it, or a second sequential enrollment starts from zero extras and
+ * silently replaces the first one. */
+static void test_api_enroll_preserves_sequential_bearers(void)
+{
+   server_ctx_t *ctx = calloc(1, sizeof(*ctx));
+   server_conn_t *conn = calloc(1, sizeof(*conn));
+   assert(ctx != NULL && conn != NULL);
+   conn->capabilities = CAP_SESSION_ADMIN;
+
+   memset(&g_config_disk, 0, sizeof(g_config_disk));
+   assert(vault_runtime_secret_set("AIMEE_API_BEARER_TOKEN", "primary-test-bearer") == 0);
+   g_config_snapshot = g_config_disk;
+   g_config_reload_calls = 0;
+   g_config_stateful = 1;
+   server_http_set_bearer_extra(NULL, 0);
+
+   const char *request = "{\"method\":\"api.enroll_bearer\"}";
+   cJSON *first = dispatch_json(ctx, conn, request, strlen(request));
+   assert(strcmp(cJSON_GetObjectItem(first, "status")->valuestring, "ok") == 0);
+   assert(cJSON_GetObjectItem(first, "enrolled_count")->valueint == 1);
+   char first_bearer[256];
+   snprintf(first_bearer, sizeof(first_bearer), "%s",
+            cJSON_GetObjectItem(first, "bearer_token")->valuestring);
+   cJSON_Delete(first);
+
+   cJSON *second = dispatch_json(ctx, conn, request, strlen(request));
+   assert(strcmp(cJSON_GetObjectItem(second, "status")->valuestring, "ok") == 0);
+   assert(cJSON_GetObjectItem(second, "enrolled_count")->valueint == 2);
+   char second_bearer[256];
+   snprintf(second_bearer, sizeof(second_bearer), "%s",
+            cJSON_GetObjectItem(second, "bearer_token")->valuestring);
+   cJSON_Delete(second);
+
+   assert(strcmp(first_bearer, second_bearer) != 0);
+   /* Enrolling touches VAULT only. config_save never persisted the enrolled set
+    * (config_load migrates any legacy value out and scrubs the fields), so the
+    * save+reload this used to do republished an unchanged config. No reload now. */
+   assert(g_config_reload_calls == 0);
+   assert(g_config_disk.server_api_bearer_token[0] == '\0');
+   assert(g_config_disk.server_api_bearer_extra_count == 0);
+   assert(g_config_snapshot.server_api_bearer_extra_count == 0);
+   char stored[256];
+   assert(runtime_secret_get("AIMEE_API_BEARER_TOKEN_EXTRA_0", stored, sizeof(stored)) == 1);
+   assert(strcmp(stored, first_bearer) == 0);
+   assert(runtime_secret_get("AIMEE_API_BEARER_TOKEN_EXTRA_1", stored, sizeof(stored)) == 1);
+   assert(strcmp(stored, second_bearer) == 0);
+   assert(server_http_enrolled_bearer_count() == 2);
+
+   server_http_set_bearer_extra(NULL, 0);
+   assert(vault_runtime_secret_delete("AIMEE_API_BEARER_TOKEN") == 0);
+   assert(vault_runtime_secret_delete("AIMEE_API_BEARER_TOKEN_EXTRA_0") == 0);
+   assert(vault_runtime_secret_delete("AIMEE_API_BEARER_TOKEN_EXTRA_1") == 0);
+   g_config_stateful = 0;
+   free(conn);
+   free(ctx);
+   printf("test_api_enroll_preserves_sequential_bearers: PASS\n");
+}
+
 /* session.brief_assemble (Proposal 1 Phase 1): the remote thin-client
  * SessionStart brief op. Asserts the response is the minimal versioned envelope
  * {schema_version:1, output} and that the assembled brief (here the stub's
@@ -1905,12 +2172,16 @@ static void test_session_brief_assemble(void)
    server_ctx_t *ctx = calloc(1, sizeof(*ctx));
    server_conn_t *conn = calloc(1, sizeof(*conn));
    assert(ctx != NULL && conn != NULL);
+   g_memory_scope_begin_calls = 0;
+   g_memory_scope_clear_calls = 0;
    const char *msg = "{\"method\":\"session.brief_assemble\"}";
    cJSON *json = dispatch_json(ctx, conn, msg, strlen(msg));
    cJSON *sv = cJSON_GetObjectItem(json, "schema_version");
    cJSON *out = cJSON_GetObjectItem(json, "output");
    assert(cJSON_IsNumber(sv) && sv->valueint == 1);
    assert(cJSON_IsString(out) && strstr(out->valuestring, "STUB_BRIEF_CONTENT") != NULL);
+   assert(g_memory_scope_begin_calls == 1);
+   assert(g_memory_scope_clear_calls == 1);
    cJSON_Delete(json);
    free(conn);
    free(ctx);
@@ -1922,6 +2193,8 @@ int main(void)
    test_invalid_json();
    test_session_brief_assemble();
    test_conn_update_events_null_evloop();
+   test_config_secret_redaction_and_vault_write();
+   test_api_enroll_preserves_sequential_bearers();
    test_missing_method();
    test_oversized_payload();
    test_large_delegate_payload_within_limit();

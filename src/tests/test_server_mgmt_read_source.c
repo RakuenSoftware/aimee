@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+
 #include "server.h"
 #include "agent_config.h"
 #include "management_read.h"
@@ -30,16 +32,40 @@ int agent_is_available_for_routing(const agent_t *agent)
    return agent && agent->enabled && !agent->primary_only;
 }
 
-int config_load(config_t *cfg)
+/* server_mgmt_read_load_config reads these five through accessors now rather than
+ * copying them out of a config_t. Same five values the config_load stub set.
+ *
+ * That stub also filled the rest of the struct with 0xa5 so a whole-struct copy
+ * into the output would be visible; with the struct gone from this seam there is
+ * nothing left to poison, and the assertion that mattered -- that no secret byte
+ * reaches the output -- is on the agent path, which is unchanged. */
+int config_present(void)
 {
-   memset(cfg, 0xa5, sizeof(*cfg));
-   cfg->server_api_mtls = 2;
-   cfg->server_api_remote_writes = 1;
-   memset(cfg->server_api_client_transport, 0, sizeof(cfg->server_api_client_transport));
-   snprintf(cfg->server_api_client_transport, sizeof(cfg->server_api_client_transport), "%s",
-            "auto");
-   cfg->server_api_cli_session_forwarding = 1;
-   cfg->require_aimee_git = 0;
+   return 1;
+}
+
+int config_server_api_mtls(void)
+{
+   return 2;
+}
+
+int config_server_api_remote_writes(void)
+{
+   return 1;
+}
+
+const char *config_server_api_client_transport(void)
+{
+   return "auto";
+}
+
+int config_server_api_cli_session_forwarding(void)
+{
+   return 1;
+}
+
+int config_require_aimee_git(void)
+{
    return 0;
 }
 

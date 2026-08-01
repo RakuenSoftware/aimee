@@ -26,13 +26,6 @@
 /* Server execution pool defaults */
 #define CONFIG_DEFAULT_BACKGROUND_THREADS 2
 #define CONFIG_DEFAULT_SESSION_THREADS    4
-/* The well-known /v1 bearer baked into the aimee-server image — a ONE-TIME
- * bootstrap, never a standing credential. While the live listener bearer still
- * equals this value the server refuses every TCP /v1 route except
- * POST /v1/api/rotate_bearer, so the pre-set token can only mint the strong
- * per-deployment bearer and never perform a real operation. Shared by the server
- * (enforcement) and the thin client (auto-enroll). */
-#define AIMEE_BOOTSTRAP_BEARER "aimee-local-dev"
 /* Raised from 2 -> 4 now that DB2 connections are bounded by the connection pool
  * (db2_connection_pool_size), not 1:1 with worker threads. */
 #define CONFIG_DEFAULT_KB_WORKER_THREADS 4
@@ -65,6 +58,15 @@
 /* Concurrency config: per-model and per-provider overrides */
 #define CONFIG_CONCURRENCY_KEY_LEN     128
 #define CONFIG_CONCURRENCY_MAX_ENTRIES 16
+
+/* Max additional bearers (beyond the primary) a deployment may accept at once. */
+/* Capacity of the ensemble reference arrays. Exported as a named constant so a
+ * consumer can check its own limit against config's WITHOUT naming config_t:
+ * delegate_ensemble.c used to assert on sizeof(((config_t *)0)->...), which made
+ * the struct's layout part of its interface just to catch dimension drift. */
+#define CONFIG_ENSEMBLE_MAX_REFS 32
+
+#define AIMEE_API_BEARER_EXTRA_MAX 7
 
 typedef struct
 {
@@ -210,6 +212,18 @@ typedef struct
    double value;
    config_disposition_source_t source;
 } config_disposition_t;
+
+/* One auxiliary-model task route. Named (it was an anonymous inline struct) so a
+ * caller can be handed one element without holding a config_t -- see
+ * config_aux_task_at. */
+#define CONFIG_AUX_TASK_NAME_LEN 64
+typedef struct
+{
+   char task[CONFIG_AUX_TASK_NAME_LEN];
+   char provider[64];
+   char model[128];
+   int max_tokens;
+} config_aux_task_t;
 
 /* Trigger rule (from trigger_rules YAML list) */
 #define TRIGGER_RULE_MAX_SOURCE   64
@@ -450,6 +464,11 @@ typedef struct config
     * system prompt so the external agent stops re-exploring the repo. Default
     * off; a per-request `x-aimee-preinject: 0` header also disables it. */
    int ingress_preinject_enabled;
+   /* Task-conditioned code packet rollout: off preserves the legacy preview,
+    * observe retrieves/audits without changing model-visible bytes, and on
+    * replaces the legacy preview with the bounded answerable packet. E4 ships
+    * observe; E6 owns any promotion to on. */
+   char code_context_mode[16];
    /* ingress-compression P5 (§2.3), default off: inject the <aimee-context>
     * envelope on the Anthropic-native /v1/messages passthrough (otherwise
     * parity-skipped to preserve the client's cached prefix). Separate from the
@@ -487,6 +506,27 @@ typedef struct config
     * worktree (.aimee/worktrees/...), forcing every mutating session into an
     * isolated worktree+branch off the default branch. Default 0 (off). */
    int require_session_worktree;
+   /* session_worktree_base: what a NEW primary session's branch+worktree is cut from.
+    * Resolution order: CONFIGURED -> remote DEFAULT -> main -> master.
+    *   "remote_default" (DEFAULT) — the remote's advertised default (origin/HEAD),
+    *                     fetched fresh; then main, then master.
+    *   "local_default"  — the local copy of the default branch; then main, then master.
+    *   "current"        — whatever the source checkout has checked out. Reachable ONLY
+    *                     by explicit opt-in, never as a fallback.
+    *   "<ref>"          — an explicit ref (e.g. "origin/main", a tag, a SHA); verified
+    *                     to exist, and an error if it does not.
+    * Each fallback prefers origin/<name> and accepts the local branch only when no
+    * remote-tracking ref exists, so a repo WITH a remote never starts from a stale local.
+    *
+    * The current branch is deliberately NOT in the chain. It used to be the last resort,
+    * which meant a new session was cut from whatever the shared checkout happened to be
+    * sitting on -- silently inheriting another session's unmerged work. main and master
+    * are dumb fallbacks, but they are stable.
+    *
+    * Env override: AIMEE_SESSION_WORKTREE_BASE. The attention guard independently
+    * refuses a worktree whose recorded base is neither the default branch nor a
+    * registered parent, so loosening this does not disable that check. */
+   char session_worktree_base[64];
    /* External-memory guard (default on): the PreToolUse attention-guard blocks
     * agent writes to external file-based agent-memory stores
     * (~/.claude/projects/<slug>/memory/...), redirecting durable memories into
@@ -772,18 +812,8 @@ typedef struct config
     *   negation lexical matching for negative facts. */
    int memory_negation_enabled;
 
-   /* Cross-encoder reranker: second-pass (query, candidate) scoring.
-    * memory_rerank_enabled: 0 = disabled (default), 1 = enabled.
-    * memory_rerank_command: external command for cross-encoder scores (stdin: JSON pairs,
-    *   stdout: JSON float array). Empty = disabled.
-    * memory_rerank_top_k: candidate pool size fed to cross-encoder (default 50).
-    * memory_rerank_mix: blend weight for cross-encoder vs hybrid (0.0–1.0, default 0.7).
-    * memory_query_expansion_mode: "lexical" (default) or "semantic" (embedding-based).
+   /* memory_query_expansion_mode: "lexical" (default) or "semantic" (embedding-based).
     * memory_query_expansion_k: number of near-neighbour terms to inject (default 5). */
-   int memory_rerank_enabled;
-   char memory_rerank_command[512];
-   int memory_rerank_top_k;
-   double memory_rerank_mix;
    char memory_query_expansion_mode[16];
    int memory_query_expansion_k;
 
@@ -1161,9 +1191,10 @@ typedef struct config
     * are unaffected until an operator writes the `modules:` block.
     * CONTRIBUTORS: do not resolve module enablement inline at a wire site. For legacy gateway-stage
     * modules, call config_module_enabled(cfg->module_X, <module env predicate>). For roundtable,
-    * call the owner-provided roundtable_module_enabled(cfg), which applies modules.roundtable,
-    * then AIMEE_MODULE_ROUNDTABLE, then the descriptor default. Keeping resolution behind one owner
-    * API leaves one place for a future FORCE tier. */
+    * call config_module_roundtable_enabled(), which applies modules.roundtable, then
+    * AIMEE_MODULE_ROUNDTABLE, then the descriptor default — and, per the config_t encapsulation
+    * rule, reads the env var HERE so the roundtable module holds neither a config_t nor a getenv.
+    * Keeping resolution behind one owner API leaves one place for a future FORCE tier. */
    int module_memory;
    int module_governance;
    int module_delegates;
@@ -1425,7 +1456,10 @@ typedef struct config
 
    /* aimee-kb public HTTP API (kb.api.*).
     * kb_api_http_port: TCP port for the /v1/... REST API (0 = disabled, default).
-    * kb_api_bearer_token: static bearer token for API auth (empty = no auth).
+    * kb_api_bearer_token: transient process-memory view of the Vault-backed API
+    * bearer (empty = no auth). It is never serialized to aimee.yaml. A
+    * first-boot/Kubernetes environment value is sealed before the listener starts
+    * and removed by a clean re-exec.
     *   May be self-describing for scoped access:
     *     scope:<kind>:<id>:<secret>   — only authorizes requests in that scope
     *                                     (e.g. scope:project:foo:s3cr3t); cross-
@@ -1434,22 +1468,22 @@ typedef struct config
    int kb_api_http_port;
    char kb_api_bearer_token[256];
 
-   /* telemetry.metrics_token (P9a): the scrape/ingest token for GET /v1/metrics +
-    * POST /v1/telemetry/metrics, stored as its SHA-256 HEX (64 lowercase hex
-    * chars) — never the plaintext token. The operator computes
-    * `printf %s <token> | sha256sum` and sets the hash here; kb compares the
-    * presented bearer's SHA-256 constant-time against it. Empty = no token (those
-    * routes are then org-admin only). A wrong/missing token is a 401 with no echo.
-    * One token covers both scrape (read) and ingest (write). */
+   /* telemetry.metrics_token (P9a): transient process-memory view of the
+    * Vault-backed SHA-256 verifier for GET /v1/metrics + POST
+    * /v1/telemetry/metrics. The digest is credential material and is never
+    * serialized outside Vault. Empty = no token (those routes are then
+    * org-admin only). One token covers both scrape (read) and ingest (write). */
    char telemetry_metrics_token[128];
 
    /* Remote aimee-kb client pointer (used when this host does NOT run a local
     * aimee-kb sidecar). When set, aimee-server exports these into its own
-    * environment at startup so the env-based kb_client transport
-    * (kb_client_v1_base_url / kb_client_v1_auth_header) reaches the remote kb.
+    * runtime cache so kb_client reaches the remote kb. The bearer is a transient
+    * process-memory view of the same Vault record as kb_api_bearer_token and is
+    * never serialized to aimee.yaml.
     * Distinct from kb_api_bearer_token above, which is the LOCAL kb server's
-    * inbound-auth token. The AIMEE_KB_API_URL / AIMEE_KB_API_BEARER_TOKEN env
-    * vars still take precedence over these when set. */
+    * inbound-auth token. AIMEE_KB_API_BEARER_TOKEN is accepted only as
+    * first-boot transport, then synchronously sealed and scrubbed before the
+    * long-lived process starts. */
    char kb_client_url[CONFIG_DB2_URL_LEN];
    char kb_client_bearer_token[256];
 
@@ -1463,23 +1497,18 @@ typedef struct config
     *              NOTHING is deployed locally (no kb, no llm).
     *   "local"  — run a local aimee-kb and deploy the per-role LLM backends below.
     *
-    * Each LLM role is external (forward to llm_<role>_endpoint), local (a baked
-    * llama-server at llm_<role>_tier on llm_<role>_host / _gpu — mapped to the
-    * plugin's AIMEE_LLM_<ROLE>_MODE/TIER env), or off (rerank/synth only). The
-    * embedder's external endpoint/model/dim reuse embedding_endpoint/model/dim;
-    * an unset embedding_dim (0) is derived from the embedder /health probe. */
+    * The EMBEDDER is served by the kb itself; llm_embed_backend only chooses between
+    * in-container ("local") and an operator endpoint ("external",
+    * embedding_endpoint). An unset embedding_dim (0) is derived from the selected
+    * model. SYNTH is external (llm_synth_endpoint), local at llm_synth_tier on
+    * llm_synth_host / _gpu, or off. */
    char kb_mode[16]; /* "" | "local" | "remote" */
 
-   char llm_embed_backend[16]; /* "" | "external" | "local" */
-   char llm_embed_host[128];
-   char llm_embed_gpu[64];
-   char llm_embed_tier[16]; /* cpu | small | mid | large */
+   /* "" | "local" (in-container, the default) | "external" (embedding_endpoint).
+    * There is no host/gpu/tier here any more: those placed the retired aimee-llm
+    * container, and the kb now serves the selected embedder itself. */
+   char llm_embed_backend[16];
 
-   char llm_rerank_backend[16]; /* "" | "external" | "local" | "off" */
-   char llm_rerank_host[128];
-   char llm_rerank_gpu[64];
-   char llm_rerank_tier[16];
-   char llm_rerank_endpoint[512];
 
    char llm_synth_backend[16]; /* "" | "external" | "local" | "off" */
    char llm_synth_host[128];
@@ -1515,6 +1544,23 @@ typedef struct config
    /* PEM bundle of the CA(s) that signed client certs. Empty => <config>/tls/client-ca.crt. */
    char server_api_mtls_client_ca[MAX_PATH_LEN];
    char server_api_bearer_token[256];
+   /* Additional bearers accepted alongside server_api_bearer_token.
+    *
+    * Enrolling a client used to be implemented AS rotating the single global
+    * bearer, so the second client to enrol silently evicted the first — every
+    * already-paired client started failing at the same instant with no way to
+    * tell that from a bad token. Pairing a new client is an additive operation
+    * and must not revoke anyone else's credential; rotation, which is the
+    * operation that SHOULD revoke, stays separate and explicit.
+    *
+    * Bounded so a compromised or looping enroller cannot grow the accepted set
+    * without limit — past the cap, enrolment fails closed rather than evicting. */
+   /* Keep the existing configured-token width: deployments may already have
+    * manually supplied bearer_tokens_extra values longer than the 64-hex
+    * tokens minted by the enrollment API. Truncating them on upgrade would
+    * silently revoke those clients. */
+   char server_api_bearer_extra[AIMEE_API_BEARER_EXTRA_MAX][256];
+   int server_api_bearer_extra_count;
    int server_api_rate_limit_per_min;
    /* server_api_max_event_streams: cap on concurrent SSE event streams
     * (/v1/sessions/{id}/events, /v1/chat/stream, /v1/runs/{id}/events), each of
@@ -1617,6 +1663,13 @@ typedef struct config
     *                          (0 → default 8) — the thin-log overfit guardrail.
     * kb_ranker_fit_benchmark: path to the recall-track fixture used as the
     *                          promotion gate (empty → benchmarks/rank/kb_hybrid/queries.json).
+    *                          THE DEFAULT IS A PLUMBING SMOKE FIXTURE, NOT A GATE: it
+    *                          holds 5 queries of 2-4 candidates, which is below the
+    *                          fitter's minimum (RANK_FIT_MIN_BENCH_QUERIES) and so
+    *                          refuses every promotion with reason
+    *                          "benchmark_underpowered". That refusal is deliberate —
+    *                          set this to a real held-out fixture before expecting
+    *                          any model to promote.
     * kb_ranker_fit_bench_k:   NDCG cutoff for the gate (0 → default 5).
     * kb_ranker_fit_objective: "pointwise" (default) or "pairwise" — the fitter
     *                          objective. Pairwise learns within-query ordering
@@ -1783,7 +1836,7 @@ typedef struct config
     *   through the drain path (kb_doc_refresh) are curated too.
     * kb_curator_extract_code_enabled:  default ON. 1 = queue extract_code_unit jobs.
     * kb_curator_extract_command[512]:  sidecar command (default: scripts/curator-extract.py).
-    * kb_curator_extract_max_tokens:    max_tokens per job stdin payload (default 2048).
+    * kb_curator_extract_max_tokens:    max_tokens per curator completion (default 512).
     * kb_curator_max_attempts:          max drain attempts per job before marking failed (default
     * 3).
     */
@@ -1964,18 +2017,11 @@ typedef struct config
     * aux_default_max_tokens: token cap for aux calls; 0 = use agent default.
     * aux_tasks: per-task provider/model/token overrides. */
 #define CONFIG_AUX_MAX_TASKS     16
-#define CONFIG_AUX_TASK_NAME_LEN 64
    int aux_enabled;
    char aux_default_provider[64];
    char aux_default_model[128];
    int aux_default_max_tokens;
-   struct
-   {
-      char task[CONFIG_AUX_TASK_NAME_LEN];
-      char provider[64];
-      char model[128];
-      int max_tokens;
-   } aux_tasks[CONFIG_AUX_MAX_TASKS];
+   config_aux_task_t aux_tasks[CONFIG_AUX_MAX_TASKS];
    int aux_task_count;
 
    /* Model metadata refresh (model_meta.*).
@@ -2016,13 +2062,13 @@ typedef struct config
    /* First dim = ENSEMBLE_MAX_REFS (delegate_ensemble.h); a _Static_assert in
     * delegate_ensemble.c enforces they stay in sync. config.h can't include that
     * header (it would cycle), so the literal is kept here. */
-   char ensemble_reference_models[32][128];
+   char ensemble_reference_models[CONFIG_ENSEMBLE_MAX_REFS][128];
    int ensemble_reference_count;
    /* Optional per-participant review persona, paired by index with
     * ensemble_reference_models. Empty entries fall back to the engine's diverse
     * default lineup. Width = PERSONA_NAME_MAX (persona.h); first dim =
     * ENSEMBLE_MAX_REFS. */
-   char ensemble_reference_personas[32][64];
+   char ensemble_reference_personas[CONFIG_ENSEMBLE_MAX_REFS][64];
    int ensemble_reference_persona_count;
    char ensemble_aggregator[128];
    int ensemble_min_successful;
@@ -2072,7 +2118,13 @@ typedef enum
    SCHEMA_INT,
    SCHEMA_BOOL,
    SCHEMA_ARRAY,
-   SCHEMA_OBJECT
+   SCHEMA_OBJECT,
+   /* A key kept in two shapes for backward compatibility: the current scalar
+    * form and a legacy object form the parser still honours. `cross_verify` is
+    * one — flat bool now, `{enabled, verify_cmd, role, prompt}` before — and
+    * test_config_cross_verify pins that the old form must keep working. A single
+    * declared type would make one of the two shapes a validation error. */
+   SCHEMA_BOOL_OR_OBJECT
 } schema_type_t;
 
 typedef struct
@@ -2105,6 +2157,15 @@ static inline int config_issue(const char *fmt, ...)
  * In strict mode, returns -1 on validation errors. */
 int config_load(config_t *cfg);
 
+/* Bounded enrolled-bearer operations owned by the config module. Callers get a
+ * coherent copy or append one token without naming or copying config_t. */
+int config_server_api_bearer_extra_snapshot(char out[][256], int max);
+/* There is deliberately NO write half. Enrolled bearers live in Vault, not the
+ * config file: config_save persists neither server_api_bearer_token nor
+ * server_api_bearer_extra, and config_load MIGRATES any legacy values out to
+ * Vault and scrubs them from the struct (config.c). Callers own those secrets
+ * through the vault API; the snapshot above is the read view. */
+
 /* Live config snapshot (live-config-reload P1a) — a double-buffer + seqlock holding the
  * current config for immediate, push-driven reload. config_t is a flat POD, so reads are a
  * lock-free struct copy. Additive in P1a: not yet wired into config_load or a push trigger.
@@ -2115,20 +2176,54 @@ int config_load(config_t *cfg);
  *                           content-hash token changed (self-reload no-op guard).
  *                           Returns 1 = published, 0 = no-op (unchanged), -1 = kept (bad). */
 void config_snapshot_init(const config_t *cfg);
+
+/* Load the config and publish it as the live snapshot in one step, without the
+ * caller ever holding a config_t. What the daemons actually want at startup. */
+int config_snapshot_seed(void);
+
+/* The accessor primitive: copy `size` bytes at `offset` out of the live config,
+ * preferring the pinned snapshot and heap-loading when none is live. Declared here
+ * so the module's own hand-written accessors can use it; the generated shards each
+ * carry their own local prototype. */
+int config_field_read(size_t offset, size_t size, void *dst);
+
+/* dispositions[index].source as a config_disposition_source_t value. Hand-written
+ * because the accessor generator skips typedef'd-enum struct members. */
+int config_disposition_source(int index);
 int config_snapshot_get(config_t *out);
+
 int config_reload(void);
 
 /* config_reload_if_changed — reload iff the config file changed on disk since the last call
  * (out-of-band write: CLI local config.set, manual edit, or autonomous config_save). Poll it
  * from the server's main-loop tick so a file change takes effect without a restart or SIGHUP.
  * First call reconciles unconditionally. Returns config_reload()'s 1/0/-1 on a change, else 0. */
+/* Non-zero when the config is readable. Replaces `config_load(&cfg) == 0` used
+ * purely as a validity probe -- note this is NOT "the file exists": a missing or
+ * unparsable file loads defaults and succeeds. See config.c for the full set of
+ * conditions that make it fail. */
+int config_present(void);
+
+/* Copy out the sandbox block whole (zeroed when the config cannot be read).
+ * See config_save.c for why this one is a struct rather than field accessors. */
+void config_sandbox(sandbox_config_t *out);
+
 int config_reload_if_changed(void);
 
 /* Re-applier registry (live-config-reload P3): a hook invoked after config_reload publishes a
- * new snapshot, receiving the OLD and NEW config so it can push bound state (env bridge, log
- * level, TLS, …) live when the section it owns changed. Register once at startup. Re-appliers
- * run under the reload writer lock: they must be quick and must NOT call config_reload. */
-typedef void (*config_reapplier_fn)(const config_t *old_cfg, const config_t *new_cfg);
+ * new snapshot, so it can push bound state (env bridge, log level, TLS, …) live.
+ *
+ * It used to receive the OLD and NEW config_t so a hook could diff its own section. No
+ * registered hook ever did -- both just re-read or invalidate -- and handing out two whole
+ * structs to be ignored is the leak this refactor exists to close. The hook now takes
+ * nothing: the snapshot is PUBLISHED BEFORE the re-appliers run (see config_reload), so an
+ * accessor called inside one already returns the new value. A future hook that genuinely
+ * needs the previous value should cache what it cares about on the way past rather than ask
+ * for the whole prior config.
+ *
+ * Register once at startup. Re-appliers run under the reload writer lock: they must be quick
+ * and must NOT call config_reload. */
+typedef void (*config_reapplier_fn)(void);
 void config_reload_register_reapplier(config_reapplier_fn fn);
 
 /* Live autonomy.* accessor (thread-safe) for wfe: for an AIMEE_AUTONOMY_* env NAME that maps
@@ -2137,10 +2232,47 @@ void config_reload_register_reapplier(config_reapplier_fn fn);
  * (e.g. MAX_TURNS) so the caller falls back to its own getenv default. Replaces the unsafe
  * setenv env-bridge for live reload: no cross-thread setenv, wfe reads the seqlock snapshot. */
 int config_autonomy_lookup(const char *env_name, long *out);
+
+/* Anti-pattern guardrail escape hatch. Deliberately env-only and NOT a config key, on the
+ * web_egress doctrine (src/posix/web_egress.c): a switch that DISABLES a guard must require
+ * touching the deployment, not the running config, because config.set is reachable from
+ * inside the running system. Config still owns the read, so no consumer calls getenv.
+ *
+ * Returns 1 only for an explicitly truthy AIMEE_ANTIPATTERNS_BYPASS (1/true/on/yes, any
+ * case). This is VALUE-checked, not presence-checked: the guard previously tested
+ * `!getenv(...)`, so `AIMEE_ANTIPATTERNS_BYPASS=0` disabled the anti-pattern check — the
+ * opposite of what setting 0 means. Unrecognized values fail CLOSED (guard stays on). */
+int config_antipatterns_bypass(void);
+
+/* Structured-PDF sidecar endpoints: the config key (tsr_command / ocr_command) if set, else
+ * the deployment env var (AIMEE_TSR_URL / AIMEE_OCR_URL), else "" meaning the feature is off.
+ * Config owns the precedence so no KB caller reads the environment. Returns a thread-local
+ * buffer valid until the next call to the SAME accessor on this thread; never NULL. */
+const char *config_tsr_endpoint(void);
+const char *config_ocr_endpoint(void);
+
+/* Effective roundtable-module activation: the modules.roundtable tristate resolved against
+ * AIMEE_MODULE_ROUNDTABLE via config_module_enabled. Config owns the env read (an invalid
+ * value warns and defaults off) so the roundtable module holds no config_t and no getenv. */
+int config_module_roundtable_enabled(void);
 /* Force a read from DISK, bypassing the live snapshot. Use for a read-modify-save that must
  * reflect the current on-disk file (e.g. config.set) so it never clobbers an external edit,
  * and internally by config_reload. Ordinary readers should use config_load. */
 int config_load_file(config_t *cfg);
+
+/* Credential fields are represented in config_t only for runtime compatibility;
+ * their writer is injected by the server/KB Vault bootstrap. With no writer
+ * installed, credential mutations fail closed instead of reaching aimee.yaml. */
+typedef int (*config_secret_writer_fn)(const char *name, const char *value);
+typedef int (*config_secret_present_fn)(const char *name);
+void config_secret_writer_set(config_secret_writer_fn writer);
+int config_secret_store(const char *name, const char *value);
+/* Seal credential values found in an older aimee.yaml through `writer`, then
+ * remove them from the file. `present` lets the credential store remain
+ * authoritative during an idempotent retry. Returns 1 when the file was
+ * scrubbed, 0 when it contained no credentials, and -1 on any failure. */
+int config_migrate_legacy_credentials(config_secret_writer_fn writer,
+                                      config_secret_present_fn present);
 
 /* Economizer policy. SAFE permits only deterministic, mechanically lossless
  * transforms of fresh local content. AGGRESSIVE additionally permits the
@@ -2153,6 +2285,11 @@ typedef enum
 } econ_mode_t;
 
 int econ_mode(const config_t *cfg);
+
+/* Live-config forms for callers outside the config module: same policy, read
+ * through accessors instead of a caller-held config_t. Prefer these. */
+int econ_mode_current(void);
+int econ_gateway_mutate_on_current(void);
 const char *econ_mode_name(int mode); /* "off"/"safe"/"aggressive" */
 int econ_mode_parse(const char *s);   /* mode, or -1 for unknown */
 
@@ -2196,6 +2333,8 @@ typedef struct
 } econ_preset_t;
 
 void econ_preset(const config_t *cfg, econ_preset_t *out);
+/* Live-config form; prefer this outside the config module. */
+void econ_preset_current(econ_preset_t *out);
 
 /* Resolve the effective operating mode (engineer/novel) for the running
  * process. Precedence: the AIMEE_MODE environment variable (the propagation
@@ -2223,10 +2362,67 @@ int config_save(const config_t *cfg);
  * Never serialises config_t — no whole-file rebuild, no parse/save drift. */
 int config_set(const char *key, const char *value);
 
+/* KB typed-facts group applied together; a negative argument leaves that field
+ * unchanged (promote_threshold ignores <= 0). */
+int config_set_typed_facts(int enabled, int auto_promote, int promote_threshold);
+
+/* Register a workspace. The cap, the duplicate check and the parallel arrays are
+ * config's business. 0 = added, -1 = save failed, -2 = already registered,
+ * -3 = table full. provider/remote/head may be NULL for the defaults. */
+int config_workspace_add(const char *path, const char *provider, const char *remote,
+                         const char *head);
+/* Remove by path, closing the gap. 0 = removed, -1 = save failed,
+ * -2 = not registered. */
+int config_workspace_remove(const char *path);
+
+/* Write the config file out, materialising declared defaults when it does not
+ * exist yet. Idempotent. */
+int config_persist_defaults(void);
+
+/* Disable the /v1 HTTP listener and persist. Reads the FILE, not the snapshot --
+ * see config_save.c for why this one cannot use the generated setter. */
+int config_disable_api_http_listener(void);
+
+/* The ensemble/roundtable settings a preset applies, as plain data this module
+ * owns. The caller fills it from whatever its own preset format is; config never
+ * learns that format, and this is one persisted write rather than ~16. Widths
+ * match the corresponding config fields exactly so a copy cannot truncate
+ * differently than the parser would. */
+#define CONFIG_RT_PRESET_MAX_SEATS 32
+typedef struct
+{
+   char models[CONFIG_RT_PRESET_MAX_SEATS][128];
+   char personas[CONFIG_RT_PRESET_MAX_SEATS][64];
+   int seat_count;
+   int min_successful;
+   double max_cost_usd;
+   int max_rounds;
+   int converge_threshold;
+   int deadline_ms;
+   char turns[16];             /* "" leaves the current value */
+   char pipeline_done_bar[40]; /* "" leaves the current value */
+   int pipeline_max_passes;
+   int pipeline_max_attempts_per_pass;
+   double pipeline_max_cost_usd;
+   double pipeline_max_total_cost_usd;
+   int pipeline_gate_ttl_h;
+   int pipeline_parked_releases_slot;
+   int pipeline_unknown_context_tokens;
+   char name[64]; /* recorded as roundtable.default */
+} config_roundtable_preset_t;
+
+/* Apply the whole group in one persisted write. Returns 0, -1 on failure. */
+int config_apply_roundtable_preset(const config_roundtable_preset_t *p);
+
 /* config_set_concurrency: surgically rewrite the `concurrency:` section of the config
  * YAML from cfg (preserving all other keys) and republish. The structured-write partner
  * to config_set, for the concurrency limits (nested object + per-model/provider arrays). */
 int config_set_concurrency(const config_t *cfg);
+
+/* Per-model concurrency, by name. The table layout and cap stay inside config.
+ * set: 0 / -1 failed / -2 table full. remove: 0 (absent is success). */
+int config_set_model_concurrency(const char *model, int limit);
+int config_remove_model_concurrency(const char *model);
 
 /* Default config directory: ~/.config/aimee/ */
 const char *config_default_dir(void);
@@ -2238,7 +2434,7 @@ const char *config_default_path(void);
 const char *config_output_dir(void);
 
 /* Effective guardrail mode (defaults to "approve"). */
-const char *config_guardrail_mode(const config_t *cfg);
+const char *config_guardrail_mode(void);
 
 /* 1 if `s` is a valid delegate_sandbox_package_access mode (proxy/off/gated/governance). */
 int config_sandbox_package_access_valid(const char *s);
@@ -2252,11 +2448,56 @@ int config_sandbox_package_access_valid(const char *s);
  * is the single point of truth -- do not re-inline the ternary at call sites. */
 const char *config_embedding_command(const config_t *cfg, const char *requested);
 
+/* As config_embedding_command, but the caller never holds a config_t. Prefer
+ * this: materialising the ~750 KB struct to read one string is what overflowed
+ * the stack in the memory-search path. Result is valid until the next call on
+ * this thread. */
+const char *config_embedding_command_current(const char *requested);
+
+/* The raw configured value, empty when unset — unlike the resolving form
+ * above, which never returns empty. */
+const char *config_embedding_command_field(void);
+
+/* Copy one element of a config array out. For callers that pass the whole
+ * element onward (scheduler callbacks, the cron executor) rather than reading a
+ * single member. The element types are shared domain types; config_t is not.
+ * Returns 0 on success, -1 on a bad index or unreadable config. */
+int config_cron_job_at(int index, cron_job_t *out);
+
+/* One LSP server entry, copied out. See config_cron_job_at. */
+int config_lsp_server_at(int index, config_lsp_server_t *out);
+
+/* One per-model concurrency override, copied out. See config_cron_job_at. */
+int config_concurrency_per_model_at(int index, config_concurrency_entry_t *out);
+
+/* One aux-task route, copied out. See config_cron_job_at. */
+int config_aux_task_at(int index, config_aux_task_t *out);
+int config_trigger_rule_at(int index, trigger_rule_t *out);
+int config_mcp_client_at(int index, config_mcp_client_t *out);
+
+/* Opaque boolean accessors — read one flag without naming config_t.
+ * Fail closed (0) when the config cannot be loaded. */
+int config_audit_worm_enabled(void);
+int config_bandit_live_decision_enabled(void);
+int config_css_style_graph_enabled(void);
+int config_delegate_graph_context_enabled(void);
+int config_drift_detect_shadow_enabled(void);
+int config_guardrails_blast_radius_advisory_enabled(void);
+int config_ingress_usage_accounting_enabled(void);
+int config_kb_pdf_vector_enabled(void);
+int config_memory_derive_facts_enabled(void);
+int config_memory_routing_enabled(void);
+int config_transport_kb_pool_enabled(void);
+int config_typed_facts_enabled(void);
+int config_wfe_live_forge_enabled(void);
+double config_memory_semantic_floor_scale(void);
+int config_ingress_audit_async(void);
+
 /* Disposition source labels for config reporting. */
 const char *config_disposition_source_name(config_disposition_source_t source);
 
 /* Conversation directories for the configured provider. */
-int config_conversation_dirs(const config_t *cfg, char dirs[][MAX_PATH_LEN], int max_dirs);
+int config_conversation_dirs(char dirs[][MAX_PATH_LEN], int max_dirs);
 
 /* Session ID for the current process. Reads CLAUDE_SESSION_ID from env,
  * falls back to a random UUID generated once per process. */
@@ -2275,5 +2516,9 @@ int session_id_override_active(void);
  * paths should call this at request entry to pick up rotations performed by
  * `aimee session-start` between requests. No-op when an override is active. */
 void session_id_refresh(void);
+
+/* Generated per-field accessors (src/gen_config_accessors.py). Callers outside
+ * the config module use these and never name config_t. */
+#include "config_accessors.h"
 
 #endif /* DEC_CONFIG_H */

@@ -2,7 +2,6 @@
 #ifndef DEC_COMPUTER_USE_H
 #define DEC_COMPUTER_USE_H 1
 
-#include "config.h"
 #include <stddef.h>
 
 #define COMPUTER_USE_MAX_ALLOWED_DOMAINS 16
@@ -24,7 +23,8 @@ typedef struct
    int allowed_domain_count;
 } computer_use_policy_t;
 
-void computer_use_policy_from_config(const config_t *cfg, computer_use_policy_t *out);
+/* Reads the live config through the config accessors; callers never hold a config_t. */
+void computer_use_policy_from_config(computer_use_policy_t *out);
 int computer_use_is_tool_name(const char *qualified_tool_name);
 int computer_use_classify(const computer_use_policy_t *policy, const char *qualified_tool_name,
                           const char *args_json, computer_use_decision_t *decision_out,

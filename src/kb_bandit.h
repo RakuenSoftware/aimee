@@ -4,7 +4,6 @@
 #ifndef DEC_KB_BANDIT_H
 #define DEC_KB_BANDIT_H 1
 
-#include "config.h"
 #include <stddef.h>
 
 #ifdef __cplusplus
@@ -30,7 +29,7 @@ extern "C"
     *                  may be NULL.
     * Returns index of selected arm on success, or -1 if disabled / error
     * (caller should fall back to arm 0). */
-   int kb_bandit_sample(const config_t *cfg, const char *decision_point, const char *context_json,
+   int kb_bandit_sample(const char *decision_point, const char *context_json,
                         const char (*arm_ids)[KB_BANDIT_MAX_ARM_ID], int n_arms,
                         char *decision_id_out);
 
@@ -40,7 +39,7 @@ extern "C"
     * arm_id:         arm that was actually applied (may differ from sampled).
     * reward:         normalized reward; [0,1] for Beta-Bernoulli.
     * Returns 0 on success, -1 on error. */
-   int kb_bandit_reward(const config_t *cfg, const char *decision_point, const char *decision_id,
+   int kb_bandit_reward(const char *decision_point, const char *decision_id,
                         const char *arm_id, double reward);
 
    /* Reward (v1) for the kb_memory_retrieval_limit decision: did the chosen

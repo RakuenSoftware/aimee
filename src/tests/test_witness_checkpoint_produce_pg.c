@@ -9,6 +9,7 @@
  */
 #include <assert.h>
 #include <openssl/crypto.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,6 +37,49 @@ static void append_record(void *conn, const char *sid)
    aimee_pg_finalize(st);
 }
 
+typedef struct
+{
+   int rc;
+   int schema_ok;
+   int tables_ok;
+} health_probe_result_t;
+
+static void *run_health_probe(void *arg)
+{
+   health_probe_result_t *result = arg;
+   int have_pg_trgm = 0;
+   result->rc = db2_health_probe(&result->schema_ok, &have_pg_trgm);
+   if (result->rc == 0 && result->schema_ok && have_pg_trgm)
+      result->rc = db2_kb_health_probe(&result->tables_ok);
+   db2_lease_release_idle();
+   return NULL;
+}
+
+static void assert_health_probe_uses_caller_connection(void *owner_conn)
+{
+   char err[256];
+   char state[6];
+   assert(aimee_pg_exec(owner_conn, "BEGIN", err, sizeof err) == 0);
+   assert(aimee_pg_exec_sqlstate(owner_conn, "SELECT * FROM missing_health_probe_relation", state,
+                                 err, sizeof err) != 0);
+   assert(strcmp(state, "42P01") == 0);
+
+   /* The owner's connection is deliberately transaction-aborted. A probe on a
+    * worker must still succeed through that worker's pool lease; using g_conn
+    * here deterministically fails and reproduces the daemon health/checkpoint
+    * cross-thread connection collision. */
+   health_probe_result_t result = {0};
+   pthread_t worker;
+   assert(pthread_create(&worker, NULL, run_health_probe, &result) == 0);
+   assert(pthread_join(worker, NULL) == 0);
+   assert(result.rc == 0);
+   assert(result.schema_ok == 1);
+   assert(result.tables_ok == 1);
+
+   assert(aimee_pg_exec(owner_conn, "ROLLBACK", err, sizeof err) == 0);
+   assert(aimee_pg_ping(owner_conn, err, sizeof err) == 0);
+}
+
 int main(void)
 {
    const char *url = getenv("AIMEE_TEST_PG_URL");
@@ -59,6 +103,8 @@ int main(void)
    }
    void *conn = db2_conn();
    assert(conn);
+
+   assert_health_probe_uses_caller_connection(conn);
 
    /* Two witness records so the checkpoint has a non-empty shard. */
    append_record(conn, "1");

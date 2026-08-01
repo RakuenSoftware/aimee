@@ -17,6 +17,7 @@
 #include "forge_app_token.h"
 
 #include "cJSON.h"
+#include "runtime_secret.h"
 #include "support/mock_agent_http.h"
 
 #include <assert.h>
@@ -239,7 +240,7 @@ static void test_mint_cache_refresh(void)
    char buf[256];
 
    setenv("AIMEE_FORGE_APP_ID", "123456", 1);
-   setenv("AIMEE_FORGE_APP_PRIVATE_KEY", TEST_PEM, 1);
+   assert(runtime_secret_store("AIMEE_FORGE_APP_PRIVATE_KEY", TEST_PEM) == 0);
    setenv("AIMEE_FORGE_APP_INSTALLATION_ID", "987", 1);
    setenv("AIMEE_FORGE_API_BASE", "http://mock.local", 1);
 
@@ -286,7 +287,7 @@ static void test_mint_cache_refresh(void)
 
    /* --- unconfigured path: APP_* unset -> fall back (return 0) --- */
    unsetenv("AIMEE_FORGE_APP_ID");
-   unsetenv("AIMEE_FORGE_APP_PRIVATE_KEY");
+   runtime_secret_remove("AIMEE_FORGE_APP_PRIVATE_KEY");
    unsetenv("AIMEE_FORGE_APP_INSTALLATION_ID");
    forge_app_token_reset_cache();
    assert(forge_app_token_get(buf, sizeof(buf)) == 0 &&
@@ -294,6 +295,7 @@ static void test_mint_cache_refresh(void)
 
    mock_agent_http_reset();
    unsetenv("AIMEE_FORGE_API_BASE");
+   runtime_secret_clear();
 }
 
 int main(void)

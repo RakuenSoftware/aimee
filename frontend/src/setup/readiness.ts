@@ -11,19 +11,19 @@
  * repos clone without it.
  *
  * MVP scope: readiness is inferred client-side from config values, whether the
- * active session has a project bound, and how many git hosts are connected. A
+ * the workspace's cloned-project count, and how many git hosts are connected. A
  * server-side GET /api/setup/state that can additionally ping DB2/the provider is
  * a documented follow-up. */
 
 import { FIELD_HELP } from '../pages/settingsHelp';
 
-export type StepId = 'provider' | 'knowledge_base' | 'embedding' | 'db2' | 'connection' | 'project';
+export type StepId = 'account' | 'provider' | 'knowledge_base' | 'embedding' | 'db2' | 'connection' | 'project';
 
 /* The config keys readiness inspects. Exported so a test can assert each one is a
  * real, documented config field (a key rename in settingsHelp.ts that we miss
  * would otherwise silently break a rule). `connection` reads from the git-host
- * count and `project` from the session bundle — neither has a config key, so both
- * are deliberately absent here. */
+ * count, `project` from GET /api/git/projects, and `account` from
+ * GET /api/setup/account — none has a config key, so they are absent here. */
 export const READINESS_KEYS = [
   'provider',
   'embedding_command',
@@ -53,14 +53,17 @@ function asStr(cfg: Record<string, unknown>, key: string): string {
   return String(v).trim();
 }
 
-/** Classify the setup steps. `hasProject` comes from the active session (the
- * config has no project field); `hostsConnected` is how many git hosts have a
- * stored credential (GET /api/git/credentials). When kb_mode is 'remote', the
- * local embedder + DB2 steps are satisfied by connecting the remote KB. */
+export interface ReadinessSignals {
+  accountReady: boolean;
+  projectCount: number;
+  hostsConnected?: number;
+}
+
+/** Classify the setup steps. Project readiness comes from the user's cloned
+ * project inventory, not whichever chat tab happens to be active. */
 export function computeReadiness(
   cfg: Record<string, unknown>,
-  hasProject: boolean,
-  hostsConnected = 0,
+  { accountReady, projectCount, hostsConnected = 0 }: ReadinessSignals,
 ): Readiness {
   const provider = asStr(cfg, 'provider');
   const remote = asStr(cfg, 'kb_mode') === 'remote';
@@ -75,6 +78,10 @@ export function computeReadiness(
   const db2 = asStr(cfg, 'db2_url');
 
   const steps: Record<StepId, StepStatus> = {
+    account: {
+      ok: accountReady,
+      detail: accountReady ? 'login secured' : 'replace the development login',
+    },
     provider: {
       ok: provider !== '',
       detail: provider !== '' ? `primary: ${provider}` : 'no primary provider set',
@@ -112,8 +119,10 @@ export function computeReadiness(
       optional: true,
     },
     project: {
-      ok: hasProject,
-      detail: hasProject ? 'project connected' : 'no project connected',
+      ok: projectCount > 0,
+      detail: projectCount > 0
+        ? `${projectCount} project${projectCount === 1 ? '' : 's'} cloned`
+        : 'no projects cloned',
     },
   };
 
@@ -134,10 +143,10 @@ export function stepsRemaining(r: Readiness): number {
  * first run still walks every step. */
 export function completedSteps(
   cfg: Record<string, unknown>,
-  hasProject: boolean,
-  hostsConnected = 0,
+  { accountReady, projectCount, hostsConnected = 0 }: ReadinessSignals,
 ): Set<StepId> {
   const done = new Set<StepId>();
+  if (accountReady) done.add('account');
   if (asStr(cfg, 'provider') !== '') done.add('provider');
 
   // The KB fork is complete once a mode was explicitly recorded ('' = never
@@ -161,7 +170,7 @@ export function completedSteps(
   if (asStr(cfg, 'db2_url') !== '' || embConfigured) done.add('db2');
 
   if (hostsConnected > 0) done.add('connection');
-  if (hasProject) done.add('project');
+  if (projectCount > 0) done.add('project');
   return done;
 }
 

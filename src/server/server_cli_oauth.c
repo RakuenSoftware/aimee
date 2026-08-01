@@ -15,6 +15,7 @@
 #include "vault_service.h" /* vault_service_set_server — OAuth token single source of truth */
 
 #include <ctype.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -93,6 +94,44 @@ static const char *home_dir(void)
    return (h && h[0]) ? h : "/var/lib/aimee";
 }
 
+/* OAuth CLIs insist on writing their login result below HOME/CODEX_HOME. Keep
+ * that vendor-controlled transport on the runtime tier, never AIMEE_HOME's
+ * persistent volume. The file is sealed into Vault and removed before login is
+ * reported complete. Container entrypoints provide AIMEE_RUNTIME_DIR=/run/aimee;
+ * standalone processes fall back to their per-user runtime directory. */
+static void oauth_runtime_home(cli_oauth_vendor_t v, char *out, size_t n)
+{
+   const char *base = getenv("AIMEE_OAUTH_RUNTIME_DIR");
+   if (base && base[0] == '/')
+   {
+      snprintf(out, n, "%s/%s", base, g_vendors[v].name);
+      return;
+   }
+   base = getenv("AIMEE_RUNTIME_DIR");
+   if (base && base[0] == '/')
+   {
+      snprintf(out, n, "%s/oauth-login/%s", base, g_vendors[v].name);
+      return;
+   }
+   base = getenv("XDG_RUNTIME_DIR");
+   if (base && base[0] == '/')
+   {
+      snprintf(out, n, "%s/aimee/oauth-login/%s", base, g_vendors[v].name);
+      return;
+   }
+   snprintf(out, n, "/tmp/aimee-runtime-%lu/oauth-login/%s", (unsigned long)getuid(),
+            g_vendors[v].name);
+}
+
+static int oauth_runtime_prepare(cli_oauth_vendor_t v)
+{
+   char home[512];
+   oauth_runtime_home(v, home, sizeof(home));
+   if (platform_mkdir_p(home, 0700) != 0 && access(home, F_OK) != 0)
+      return -1;
+   return chmod(home, 0700);
+}
+
 /* The vendor CLI's on-disk OAuth token file, relative to the vendor HOME. */
 static const char *oauth_token_relpath(cli_oauth_vendor_t v)
 {
@@ -132,6 +171,43 @@ static char *oauth_read_secret_file(const char *path)
    return buf;
 }
 
+/* Remove a legacy CLI credential after Vault has accepted it. The overwrite is
+ * defense in depth for ordinary filesystems; unlink is the authoritative step
+ * (copy-on-write media cannot promise physical overwrite). New login flows use
+ * this file only as a short-lived vendor transport and may never retain it as a
+ * fallback. */
+static int oauth_remove_secret_file(const char *path)
+{
+   int fd = open(path, O_WRONLY | O_CLOEXEC | O_NOFOLLOW);
+   if (fd < 0)
+      return errno == ENOENT ? 0 : -1;
+
+   int ok = 1;
+   struct stat st;
+   if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || lseek(fd, 0, SEEK_SET) < 0)
+      ok = 0;
+   char zeroes[4096] = {0};
+   off_t remaining = ok ? st.st_size : 0;
+   while (remaining > 0)
+   {
+      size_t want = remaining > (off_t)sizeof(zeroes) ? sizeof(zeroes) : (size_t)remaining;
+      ssize_t n = write(fd, zeroes, want);
+      if (n <= 0)
+      {
+         ok = 0;
+         break;
+      }
+      remaining -= n;
+   }
+   if (ok && (ftruncate(fd, 0) != 0 || fsync(fd) != 0))
+      ok = 0;
+   if (close(fd) != 0)
+      ok = 0;
+   if (!ok)
+      return -1;
+   return unlink(path) == 0 || errno == ENOENT ? 0 : -1;
+}
+
 /* claude's ~/.claude/.credentials.json records the token's absolute expiry as
  * "expiresAt":<epoch-ms>. A re-auth is only genuinely complete once a token with a
  * FUTURE expiry has been written: a pre-existing EXPIRED file left from an earlier
@@ -165,28 +241,39 @@ int cli_oauth_claude_token_is_fresh(const char *path)
  * source of truth, keyed (agent=<vendor>, cred="oauth") under the server principal
  * (server-KEK wrapped, no unlock). Delegate launches materialize it from here, so a
  * re-auth is reflected everywhere without depending on a HOME-resolved plaintext
- * file. Best-effort: on failure the login still succeeds and the plaintext file
- * remains as a fallback, but we log loudly since the vault is the intended store. */
-static void oauth_store_token_in_vault(cli_oauth_vendor_t v)
+ * file. Fail closed: authentication is not complete until Vault accepted the token
+ * and the vendor transport file has been scrubbed and removed. */
+static int oauth_store_token_in_vault(cli_oauth_vendor_t v)
 {
-   char path[600];
-   snprintf(path, sizeof(path), "%s/%s", home_dir(), oauth_token_relpath(v));
+   char login_home[512], path[600];
+   oauth_runtime_home(v, login_home, sizeof(login_home));
+   snprintf(path, sizeof(path), "%s/%s", login_home, oauth_token_relpath(v));
    char *secret = oauth_read_secret_file(path);
    if (!secret)
    {
       aimee_log(LOG_WARN, "cli.oauth", "%s: could not read token file to vault it: %s",
                 g_vendors[v].name, path);
-      return;
+      return -1;
    }
-   if (vault_service_set_server(g_vendors[v].name, "oauth", secret) == VAULT_OK)
-      aimee_log(LOG_INFO, "cli.oauth", "%s OAuth token stored in vault (single source of truth)",
-                g_vendors[v].name);
-   else
+   if (vault_service_set_server(g_vendors[v].name, "oauth", secret) != VAULT_OK)
+   {
       aimee_log(LOG_WARN, "cli.oauth",
-                "%s OAuth token vault store FAILED — falling back to plaintext file",
-                g_vendors[v].name);
+                "%s OAuth token Vault store failed; login remains incomplete", g_vendors[v].name);
+      memset(secret, 0, strlen(secret));
+      free(secret);
+      return -1;
+   }
    memset(secret, 0, strlen(secret));
    free(secret);
+   if (oauth_remove_secret_file(path) != 0)
+   {
+      aimee_log(LOG_WARN, "cli.oauth",
+                "%s OAuth transport file could not be removed; login remains incomplete",
+                g_vendors[v].name);
+      return -1;
+   }
+   aimee_log(LOG_INFO, "cli.oauth", "%s OAuth token sealed in Vault", g_vendors[v].name);
+   return 0;
 }
 
 /* Strong override of cli_session.c's weak materialize seam: read the vaulted
@@ -200,15 +287,17 @@ int cli_oauth_vault_materialize_get(const char *agent, char *out, size_t out_len
 }
 
 /* Build the explicit child environment for a vendor command: HOME + per-vendor
- * config dirs on the persistent volume, the npm prefix on PATH. Fills `buf`
+ * config dirs on the runtime tier, with only the non-secret npm installation on
+ * the persistent volume. Fills `buf`
  * (>= 7 slots) with "KEY=VALUE" strings stored in `store` (a flat char buffer)
  * and NUL-terminates `buf`. */
 static void build_env(cli_oauth_vendor_t v, char store[8][512], char *buf[9])
 {
-   const char *h = home_dir();
+   char h[512];
+   oauth_runtime_home(v, h, sizeof(h));
    snprintf(store[0], 512, "HOME=%s", h);
-   snprintf(store[1], 512, "NPM_CONFIG_PREFIX=%s/.npm-global", h);
-   snprintf(store[2], 512, "PATH=%s/.npm-global/bin:/usr/local/bin:/usr/bin:/bin", h);
+   snprintf(store[1], 512, "NPM_CONFIG_PREFIX=%s/.npm-global", home_dir());
+   snprintf(store[2], 512, "PATH=%s/.npm-global/bin:/usr/local/bin:/usr/bin:/bin", home_dir());
    snprintf(store[3], 512, "XDG_CONFIG_HOME=%s/.config", h);
    snprintf(store[4], 512, "CODEX_HOME=%s/.codex", h);
    /* A login that wants no pager/editor must not block; keep it headless. */
@@ -268,6 +357,11 @@ int cli_oauth_install(cli_oauth_vendor_t v, char *err, size_t errn)
    if (v != CLI_OAUTH_CLAUDE && v != CLI_OAUTH_CODEX)
    {
       snprintf(err, errn, "unsupported vendor");
+      return -1;
+   }
+   if (oauth_runtime_prepare(v) != 0)
+   {
+      snprintf(err, errn, "could not prepare the ephemeral %s login directory", g_vendors[v].name);
       return -1;
    }
    char store[8][512];
@@ -347,7 +441,9 @@ int cli_oauth_install(cli_oauth_vendor_t v, char *err, size_t errn)
 
 static void tmux_paths(cli_oauth_vendor_t v, char *sock, size_t sockn, char *sess, size_t sessn)
 {
-   snprintf(sock, sockn, "%s/.tmux/cli-oauth-%s.sock", home_dir(), g_vendors[v].name);
+   char login_home[512];
+   oauth_runtime_home(v, login_home, sizeof(login_home));
+   snprintf(sock, sockn, "%s/.tmux/cli-oauth-%s.sock", login_home, g_vendors[v].name);
    /* One in-flight session per vendor (the lock guarantees it); the socket dir is
     * 0700 so no other local user can attach. */
    snprintf(sess, sessn, "cli-oauth-%s", g_vendors[v].name);
@@ -477,13 +573,20 @@ int cli_oauth_start(cli_oauth_vendor_t v, cli_oauth_start_t *out, char *err, siz
       return -1;
    }
 
-   /* Per-vendor config + socket dirs, 0700. */
-   char cfgdir[512], tmuxdir[512];
-   snprintf(cfgdir, sizeof(cfgdir), "%s/%s", home_dir(),
+   /* Per-vendor runtime config + socket dirs, 0700. */
+   char login_home[512], cfgdir[512], tmuxdir[512];
+   oauth_runtime_home(v, login_home, sizeof(login_home));
+   if (oauth_runtime_prepare(v) != 0)
+   {
+      close(lock);
+      snprintf(err, errn, "could not prepare the ephemeral %s login directory", g_vendors[v].name);
+      return -1;
+   }
+   snprintf(cfgdir, sizeof(cfgdir), "%s/%s", login_home,
             v == CLI_OAUTH_CODEX ? ".codex" : ".claude");
    platform_mkdir_p(cfgdir, 0700);
    chmod(cfgdir, 0700);
-   snprintf(tmuxdir, sizeof(tmuxdir), "%s/.tmux", home_dir());
+   snprintf(tmuxdir, sizeof(tmuxdir), "%s/.tmux", login_home);
    platform_mkdir_p(tmuxdir, 0700);
    chmod(tmuxdir, 0700);
 
@@ -680,18 +783,25 @@ int cli_oauth_poll(cli_oauth_vendor_t v, const char *session, cli_oauth_state_t 
        * token to be UNEXPIRED: an old expired .credentials.json from a prior sign-in
        * is present from the first byte, so a bare existence check reports success
        * instantly against the dead token and never captures the fresh one. */
-      char tok[600];
-      snprintf(tok, sizeof(tok), "%s/.claude/.credentials.json", home_dir());
+      char login_home[512], tok[600];
+      oauth_runtime_home(v, login_home, sizeof(login_home));
+      snprintf(tok, sizeof(tok), "%s/.claude/.credentials.json", login_home);
       authed = cli_oauth_claude_token_is_fresh(tok);
    }
    if (authed)
    {
       /* Persist the token into the vault (single source of truth) before locking
        * down / tearing down: the delegate launch materializes it from the vault. */
-      oauth_store_token_in_vault(v);
+      if (oauth_store_token_in_vault(v) != 0)
+      {
+         snprintf(err, errn, "%s login completed but its credential could not be sealed in Vault",
+                  g_vendors[v].name);
+         return -1;
+      }
       /* Lock down the token files, then tear the session down. */
-      char tokdir[600];
-      snprintf(tokdir, sizeof(tokdir), "%s/%s", home_dir(),
+      char login_home[512], tokdir[600];
+      oauth_runtime_home(v, login_home, sizeof(login_home));
+      snprintf(tokdir, sizeof(tokdir), "%s/%s", login_home,
                v == CLI_OAUTH_CODEX ? ".codex" : ".claude");
       chmod(tokdir, 0700);
       tmux_kill(v, sock, sess);

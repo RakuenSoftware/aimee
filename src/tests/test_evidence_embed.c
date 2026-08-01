@@ -23,6 +23,7 @@
 
 #include "artifacts.h"
 #include "evidence_vectors.h"
+#include "embed_input_type.h" /* the memory_embed_text stub's polarity argument */
 #include "db2_test_shim.h"
 #include "../kb/kb_evidence_embed.h"
 
@@ -33,9 +34,11 @@ static int g_embed_dim = 384; /* dims to emit (set per test) */
 static int g_embed_calls;
 static char g_embed_last_text[4096];
 
-int memory_embed_text(const char *text, const char *command, float *out, int max_dim)
+int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
+                      float *out, int max_dim)
 {
    (void)command;
+   (void)input_type;
    g_embed_calls++;
    snprintf(g_embed_last_text, sizeof(g_embed_last_text), "%s", text ? text : "");
    int dim = g_embed_dim < max_dim ? g_embed_dim : max_dim;

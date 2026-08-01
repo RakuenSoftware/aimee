@@ -930,10 +930,8 @@ static char *td_write_file(cJSON *args, const char *name, const char *dispatch_c
           * this file's extension, fetch any new errors/warnings and append
           * them to the result. Capped at 6 entries so the context stays tight. */
          {
-            config_t lsp_cfg;
-            config_load(&lsp_cfg);
             char ws[MAX_PATH_LEN] = "";
-            if (workspace_active_root(&lsp_cfg, dispatch_cwd, ws, sizeof(ws)) != 0)
+            if (workspace_active_root(dispatch_cwd, ws, sizeof(ws)) != 0)
                snprintf(ws, sizeof(ws), "%s", dispatch_cwd);
             lsp_diag_t lsp_diags[6];
             int nlsp = lsp_manager_diagnostics(ws, p->valuestring, lsp_diags, 6);
@@ -1670,8 +1668,7 @@ static char *td_clarify_start(cJSON *args, const char *name, const char *dispatc
    }
    else
    {
-      config_t cfg;
-      if (config_load(&cfg) != 0 || db1_init(cfg.db1_path) != 0)
+      if (!config_present() || db1_init(config_db1_path()) != 0)
          result = safe_strdup("error: server storage unavailable");
       else
       {
@@ -1703,8 +1700,7 @@ static char *td_clarify_answer(cJSON *args, const char *name, const char *dispat
    }
    else
    {
-      config_t cfg;
-      if (config_load(&cfg) != 0 || db1_init(cfg.db1_path) != 0)
+      if (!config_present() || db1_init(config_db1_path()) != 0)
          result = safe_strdup("error: server storage unavailable");
       else
       {
@@ -1734,8 +1730,7 @@ static char *td_diagnose_start(cJSON *args, const char *name, const char *dispat
    }
    else
    {
-      config_t cfg;
-      if (config_load(&cfg) != 0 || db1_init(cfg.db1_path) != 0)
+      if (!config_present() || db1_init(config_db1_path()) != 0)
          result = safe_strdup("error: server storage unavailable");
       else
       {
@@ -1768,8 +1763,7 @@ static char *td_diagnose_observe(cJSON *args, const char *name, const char *disp
    }
    else
    {
-      config_t cfg;
-      if (config_load(&cfg) != 0 || db1_init(cfg.db1_path) != 0)
+      if (!config_present() || db1_init(config_db1_path()) != 0)
          result = safe_strdup("error: server storage unavailable");
       else
       {
@@ -1841,8 +1835,7 @@ static char *td_diagnose_evidence(cJSON *args, const char *name, const char *dis
                rank = DIAG_RANK_SPECULATION;
          }
          const char *src = (jsource && cJSON_IsString(jsource)) ? jsource->valuestring : "";
-         config_t cfg;
-         if (config_load(&cfg) != 0 || db1_init(cfg.db1_path) != 0)
+         if (!config_present() || db1_init(config_db1_path()) != 0)
             result = safe_strdup("error: server storage unavailable");
          else
          {
@@ -1875,8 +1868,7 @@ static char *td_diagnose_status(cJSON *args, const char *name, const char *dispa
    }
    else
    {
-      config_t cfg;
-      if (config_load(&cfg) != 0 || db1_init(cfg.db1_path) != 0)
+      if (!config_present() || db1_init(config_db1_path()) != 0)
          result = safe_strdup("error: server storage unavailable");
       else
       {
@@ -1898,6 +1890,19 @@ extern void retrieval_outcome_bridge_note(const char *surface, const char *event
                                           const int64_t *ids, const char *const *snippets, int n)
     __attribute__((weak));
 
+static const char *td_search_project(cJSON *args, const char *dispatch_cwd, char *resolved,
+                                     size_t resolved_cap)
+{
+   cJSON *project = cJSON_GetObjectItemCaseSensitive(args, "project");
+   if (cJSON_IsString(project) && project->valuestring[0])
+      return project->valuestring;
+   if (!dispatch_cwd || !dispatch_cwd[0])
+      return NULL;
+   return workspace_repo_identity(dispatch_cwd, resolved, resolved_cap, NULL, 0) == 0 && resolved[0]
+              ? resolved
+              : NULL;
+}
+
 static char *td_search_docs(cJSON *args, const char *name, const char *dispatch_cwd,
                             const char *dispatch_sid, int timeout_ms)
 {
@@ -1910,11 +1915,25 @@ static char *td_search_docs(cJSON *args, const char *name, const char *dispatch_
    }
    else
    {
-      config_t cfg;
-      config_load(&cfg);
       int max = (mx && cJSON_IsNumber(mx)) ? mx->valueint : 3;
-      char *envelope = kb_client_search_json(NULL, q->valuestring,
-                                             config_embedding_command(&cfg, NULL), max, NULL);
+      cJSON *jscope = cJSON_GetObjectItemCaseSensitive(args, "scope");
+      if (jscope && (!cJSON_IsString(jscope) || (strcmp(jscope->valuestring, "current") != 0 &&
+                                                 strcmp(jscope->valuestring, "all") != 0)))
+         return safe_strdup("error: scope must be 'current' or 'all'");
+      int all_projects = cJSON_IsString(jscope) && strcmp(jscope->valuestring, "all") == 0;
+      char resolved_project[MAX_PATH_LEN] = "";
+      const char *project =
+          td_search_project(args, dispatch_cwd, resolved_project, sizeof(resolved_project));
+      if (!all_projects && !project)
+         return safe_strdup(
+             "error: no active project determined from cwd; pass project or scope='all'");
+      /* Search with the kb's own embedder unless this server has an explicit
+       * override.  A resolved builtin here is 384-dimensional and can never
+       * query a remote kb corpus built with a production embedder. */
+      const char *ec = config_embedding_command_current(NULL);
+      const char *embedding_command = (ec && ec[0]) ? ec : NULL;
+      char *envelope = kb_client_search_json_scoped_ex(project, all_projects, q->valuestring,
+                                                       embedding_command, max, NULL, NULL);
       cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
       free(envelope);
 
@@ -1929,7 +1948,7 @@ static char *td_search_docs(cJSON *args, const char *name, const char *dispatch_
        * second search. Records the surfaced doc_ids + snippets so the next turn's
        * continuation/repair autolabel attributes a per-doc ranker outcome. The
        * bridge symbol is weak, so a delegate/lean binary simply skips this. */
-      if (cfg.learning_implicit_retrieval_outcome && retrieval_outcome_bridge_note &&
+      if (config_learning_implicit_retrieval_outcome() && retrieval_outcome_bridge_note &&
           cJSON_IsArray(hits))
       {
          int64_t ids[8];
@@ -2147,13 +2166,11 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
    }
 
    {
-      config_t cfg;
-      config_load(&cfg);
       /* DB1 backs session_state now. In production, aimee-server / CLI main
        * already called db1_init; this is idempotent. Keeping the call here
        * so delegate subprocesses that reach dispatch without going through
        * a main-opened DB1 still persist read-before-write tracking. */
-      db1_init(cfg.db1_path);
+      db1_init(config_db1_path());
 
       session_state_t state;
       session_state_load(&state, dispatch_sid);
@@ -2166,8 +2183,8 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       char *gr_input = guardrail_input_json(name, arguments_json);
 
       char msg[1024] = "";
-      int rc = pre_tool_check(name, gr_input, &state, config_guardrail_mode(&cfg), dispatch_cwd,
-                              msg, sizeof(msg));
+      int rc = pre_tool_check(name, gr_input, &state, config_guardrail_mode(), dispatch_cwd, msg,
+                              sizeof(msg));
 
       session_state_save(&state, dispatch_sid);
       free(gr_input);

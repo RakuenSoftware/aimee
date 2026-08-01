@@ -4,20 +4,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
-
-// writeServerToken drops the shared bearer token the proxy sends to aimee-server.
-func writeServerToken(t *testing.T, cfg *config) {
-	t.Helper()
-	if err := os.WriteFile(filepath.Join(filepath.Dir(cfg.socketPath), "server.token"),
-		[]byte("tok\n"), 0600); err != nil {
-		t.Fatalf("write server.token: %v", err)
-	}
-}
 
 // GET /api/git/org-repos forwards host+owner to /v1/workspace/org-repos with the
 // webuser identity, and relays the {provider, repos} enumeration.
@@ -33,7 +22,6 @@ func TestGitOrgReposProxy(t *testing.T) {
 			`{"name":"repo-a","clone_url":"https://github.com/RakuenSoftware/repo-a.git","ssh_url":"git@github.com:RakuenSoftware/repo-a.git","private":false}]}`))
 	})
 	cfg := startFakeV1(t, mux)
-	writeServerToken(t, cfg)
 	s := &server{cfg: cfg}
 
 	req := withUser(httptest.NewRequest(http.MethodGet,
@@ -62,7 +50,6 @@ func TestGitOrgReposRejectsMissingParams(t *testing.T) {
 		w.Write([]byte(`{}`))
 	})
 	cfg := startFakeV1(t, mux)
-	writeServerToken(t, cfg)
 	s := &server{cfg: cfg}
 
 	for _, q := range []string{"", "?host=github.com", "?owner=RakuenSoftware"} {
@@ -92,7 +79,6 @@ func TestGitCloneOrgProxy(t *testing.T) {
 			`{"name":"repo-b","ok":false,"project":null,"error":"already exists"}]}`))
 	})
 	cfg := startFakeV1(t, mux)
-	writeServerToken(t, cfg)
 	s := &server{cfg: cfg}
 
 	reqBody := `{"host":"github.com","owner":"RakuenSoftware","repos":[` +
@@ -127,7 +113,6 @@ func TestGitCloneOrgRejectsBadInput(t *testing.T) {
 		w.Write([]byte(`{"results":[]}`))
 	})
 	cfg := startFakeV1(t, mux)
-	writeServerToken(t, cfg)
 	s := &server{cfg: cfg}
 
 	// Empty repos.

@@ -61,17 +61,15 @@ int handle_trigger_fire(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)ctx;
 
    /* 1. Load config */
-   config_t cfg;
-   config_load(&cfg);
 
    /* 2. Auth check */
-   if (cfg.trigger_auth_token[0])
+   if (config_trigger_auth_token()[0])
    {
       cJSON *tok_item = cJSON_GetObjectItemCaseSensitive(req, "auth_token");
       if (!tok_item)
          tok_item = cJSON_GetObjectItemCaseSensitive(req, "token");
       const char *tok = (tok_item && cJSON_IsString(tok_item)) ? tok_item->valuestring : "";
-      if (strcmp(tok, cfg.trigger_auth_token) != 0)
+      if (strcmp(tok, config_trigger_auth_token()) != 0)
          return server_send_error(conn, "unauthorized", NULL);
    }
 

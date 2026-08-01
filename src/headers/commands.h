@@ -135,7 +135,7 @@ struct cJSON *onboard_build_report(app_ctx_t *ctx, int skip_setup);
 /* JSON accessors reused by MCP and dashboard surfaces. Caller owns
  * the returned cJSON object and must cJSON_Delete() it. */
 struct cJSON;
-struct cJSON *identity_charter_json(const config_t *cfg);
+struct cJSON *identity_charter_json(void);
 struct cJSON *identity_local_operator_json(void);
 struct cJSON *identity_working_profile_json(void);
 /* Pure snapshot diff. Caller owns both inputs and the returned

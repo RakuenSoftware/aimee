@@ -1,6 +1,7 @@
 /* test_gateway_telegram.c: unit tests for the Telegram platform adapter. */
 #include "gateway/platform_telegram.h"
 #include "gateway/gateway_platform.h"
+#include "runtime_secret.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -12,6 +13,7 @@
 static void test_check_config_fails_without_token(void)
 {
    unsetenv("AIMEE_GATEWAY_TELEGRAM_TOKEN");
+   runtime_secret_remove("AIMEE_GATEWAY_TELEGRAM_TOKEN");
    unsetenv("AIMEE_GATEWAY_TELEGRAM_ALLOWED_USERS");
 
    platform_adapter_t *a = telegram_adapter_get();
@@ -25,7 +27,7 @@ static void test_check_config_fails_without_token(void)
 
 static void test_check_config_fails_without_allowed_users(void)
 {
-   setenv("AIMEE_GATEWAY_TELEGRAM_TOKEN", "test-bot-token", 1);
+   assert(runtime_secret_store("AIMEE_GATEWAY_TELEGRAM_TOKEN", "test-bot-token") == 0);
    unsetenv("AIMEE_GATEWAY_TELEGRAM_ALLOWED_USERS");
 
    platform_adapter_t *a = telegram_adapter_get();
@@ -34,13 +36,13 @@ static void test_check_config_fails_without_allowed_users(void)
    int rc = a->check_config(a, err, sizeof(err));
    assert(rc == -1);
 
-   unsetenv("AIMEE_GATEWAY_TELEGRAM_TOKEN");
+   runtime_secret_remove("AIMEE_GATEWAY_TELEGRAM_TOKEN");
    PASS("check_config_fails_without_allowed_users");
 }
 
 static void test_check_config_passes_when_both_set(void)
 {
-   setenv("AIMEE_GATEWAY_TELEGRAM_TOKEN", "test-bot-token", 1);
+   assert(runtime_secret_store("AIMEE_GATEWAY_TELEGRAM_TOKEN", "test-bot-token") == 0);
    setenv("AIMEE_GATEWAY_TELEGRAM_ALLOWED_USERS", "111111,222222", 1);
 
    platform_adapter_t *a = telegram_adapter_get();
@@ -49,14 +51,14 @@ static void test_check_config_passes_when_both_set(void)
    int rc = a->check_config(a, err, sizeof(err));
    assert(rc == 0);
 
-   unsetenv("AIMEE_GATEWAY_TELEGRAM_TOKEN");
+   runtime_secret_remove("AIMEE_GATEWAY_TELEGRAM_TOKEN");
    unsetenv("AIMEE_GATEWAY_TELEGRAM_ALLOWED_USERS");
    PASS("check_config_passes_when_both_set");
 }
 
 static void test_authorize_user_allows_listed_user(void)
 {
-   setenv("AIMEE_GATEWAY_TELEGRAM_TOKEN", "tok", 1);
+   assert(runtime_secret_store("AIMEE_GATEWAY_TELEGRAM_TOKEN", "tok") == 0);
    setenv("AIMEE_GATEWAY_TELEGRAM_ALLOWED_USERS", "111111,222222,333333", 1);
 
    /* Run check_config first to populate internal state. */
@@ -67,14 +69,14 @@ static void test_authorize_user_allows_listed_user(void)
    int rc = a->authorize_user(a, "telegram", "chat1", "222222");
    assert(rc == 0);
 
-   unsetenv("AIMEE_GATEWAY_TELEGRAM_TOKEN");
+   runtime_secret_remove("AIMEE_GATEWAY_TELEGRAM_TOKEN");
    unsetenv("AIMEE_GATEWAY_TELEGRAM_ALLOWED_USERS");
    PASS("authorize_user_allows_listed_user");
 }
 
 static void test_authorize_user_denies_unlisted_user(void)
 {
-   setenv("AIMEE_GATEWAY_TELEGRAM_TOKEN", "tok", 1);
+   assert(runtime_secret_store("AIMEE_GATEWAY_TELEGRAM_TOKEN", "tok") == 0);
    setenv("AIMEE_GATEWAY_TELEGRAM_ALLOWED_USERS", "111111,222222", 1);
 
    platform_adapter_t *a = telegram_adapter_get();
@@ -84,14 +86,14 @@ static void test_authorize_user_denies_unlisted_user(void)
    int rc = a->authorize_user(a, "telegram", "chat1", "999999");
    assert(rc == -1);
 
-   unsetenv("AIMEE_GATEWAY_TELEGRAM_TOKEN");
+   runtime_secret_remove("AIMEE_GATEWAY_TELEGRAM_TOKEN");
    unsetenv("AIMEE_GATEWAY_TELEGRAM_ALLOWED_USERS");
    PASS("authorize_user_denies_unlisted_user");
 }
 
 static void test_authorize_user_denies_empty_allowlist(void)
 {
-   setenv("AIMEE_GATEWAY_TELEGRAM_TOKEN", "tok", 1);
+   assert(runtime_secret_store("AIMEE_GATEWAY_TELEGRAM_TOKEN", "tok") == 0);
    /* Set ALLOWED_USERS to a value so check_config passes, then clear it. */
    setenv("AIMEE_GATEWAY_TELEGRAM_ALLOWED_USERS", "dummy", 1);
    platform_adapter_t *a = telegram_adapter_get();
@@ -102,7 +104,7 @@ static void test_authorize_user_denies_empty_allowlist(void)
    int rc = a->authorize_user(a, "telegram", "chat1", "111111");
    assert(rc == -1);
 
-   unsetenv("AIMEE_GATEWAY_TELEGRAM_TOKEN");
+   runtime_secret_remove("AIMEE_GATEWAY_TELEGRAM_TOKEN");
    unsetenv("AIMEE_GATEWAY_TELEGRAM_ALLOWED_USERS");
    PASS("authorize_user_denies_empty_allowlist");
 }

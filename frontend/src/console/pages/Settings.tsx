@@ -3,7 +3,7 @@ import { apiGet, apiSend } from "../api";
 
 /* Settings page for the kb console: the config the KB OWNS.
  *
- * The kb runs the embedder, the reranker, and the synth tier, so those options
+ * The kb runs the embedder and the synth tier, so those options
  * are configured here rather than on aimee-server's Settings page — one owner
  * per option. The field list, its grouping, and which fields need a kb restart
  * all come from the backend (GET /v1/console/settings, KB_SETTINGS in
@@ -79,7 +79,7 @@ export default function Settings() {
   };
 
   // Preserve the backend's field order within each section, and the order the
-  // sections first appear in — that order is deliberate (Embedder, Reranker,
+  // sections first appear in — that order is deliberate (Embedder,
   // Synth, …) rather than alphabetical.
   const sections = useMemo(() => {
     const out: [string, Field[]][] = [];
@@ -97,7 +97,7 @@ export default function Settings() {
     <div style={{ padding: "18px 24px", maxWidth: 860, margin: "0 auto", fontFamily: "system-ui" }}>
       <h2 style={{ margin: "0 0 4px" }}>Settings</h2>
       <p style={{ color: "#777", fontSize: 13, margin: "0 0 18px" }}>
-        The options aimee-kb owns — the embedder, the reranker, the synth tier, and the knowledge
+        The options aimee-kb owns — the embedder, the synth tier, and the knowledge
         base itself. Changes persist to <code>aimee.yaml</code>; rows marked <em>restart</em> are
         bound when the kb starts and take effect on its next restart. Options aimee-server owns stay
         on its own Settings page.

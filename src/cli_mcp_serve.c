@@ -19,7 +19,7 @@
 
 #define MCP_LINE_MAX         65536
 #define MCP_PROTOCOL_VERSION "2024-11-05"
-#define MCP_VERSION          "0.2.0"
+#define MCP_VERSION          AIMEE_VERSION
 
 #define DEFAULT_TIMEOUT_MS  30000
 #define DELEGATE_TIMEOUT_MS 300000
@@ -242,8 +242,17 @@ static cJSON *forward_to_server(const char *tool, cJSON *args, int timeout_ms)
    cJSON *arguments = args ? cJSON_Duplicate(args, 1) : cJSON_CreateObject();
    if (!arguments)
       arguments = cJSON_CreateObject();
-   if (cwd[0] && cJSON_IsObject(arguments) && !cJSON_GetObjectItemCaseSensitive(arguments, "cwd"))
+   /* cwd is transport identity, not a value the model must invent. This makes
+    * ordinary no-override memory and code-intelligence calls local-first even
+    * when the long-running server has a different process cwd. The transport
+    * value is authoritative: a model-supplied cwd must not retarget an ordered
+    * read to another checkout. Explicit project/workspace selectors remain
+    * untouched. */
+   if (cwd[0] && cJSON_IsObject(arguments))
+   {
+      cJSON_DeleteItemFromObjectCaseSensitive(arguments, "cwd");
       cJSON_AddStringToObject(arguments, "cwd", cwd);
+   }
    cJSON_AddItemToObject(req, "arguments", arguments);
 
    cJSON *resp = server_request(req, timeout_ms);
@@ -321,7 +330,7 @@ static void handle_initialize(cJSON *id)
        "(e.g. get_help(\"work queue\")). The tools/list is a curated core set; the "
        "full catalog is larger — call find_tools(\"<keyword>\") to discover more "
        "tools and describe_tool(\"<name>\") for a tool's full input schema, then "
-       "call any discovered tool by name (it need not appear in tools/list). Do "
+       "call call_tool with that name and matching arguments. Do "
        "not use provider-native sub-agent tools such as spawn_agent or Agent; use "
        "the aimee delegate tool for delegated work.");
 

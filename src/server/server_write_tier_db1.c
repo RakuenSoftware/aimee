@@ -10,11 +10,11 @@
 #include "server.h" /* SERVER_REMOTE_WRITES_* */
 #include "server_identity_jti.h"
 #include "server_mgmt_jwks_cache.h"
+#include "server_runtime_identity.h"
 
-#include <errno.h>
 #include <openssl/crypto.h>
-#include <stdlib.h>
 #include <string.h>
+#include <unistd.h> /* access — startup preflight only */
 
 static const char *tier_text(kb_identity_tier_t tier)
 {
@@ -72,40 +72,38 @@ int server_write_tier_replay_db1(void *ctx, const server_identity_token_claims_t
 
 /* --- runtime bindings: environment + JWKS cache ------------------------- */
 
-/* Parse a positive team id. Anything else - unset, empty, non-numeric, zero,
- * negative, trailing junk - is "not configured" rather than a silent 0, because
- * a 0 team would compare unequal to every real team and deny with the wrong
- * reason. */
-static int env_team_id(int64_t *out)
-{
-   const char *raw = getenv("AIMEE_SERVER_TEAM_ID");
-   if (!raw || !raw[0])
-      return 0;
-   char *end = NULL;
-   errno = 0;
-   long long value = strtoll(raw, &end, 10);
-   if (errno || !end || *end || value <= 0)
-      return 0;
-   *out = (int64_t)value;
-   return 1;
-}
-
 int server_write_tier_team_configured(void)
 {
    int64_t team = 0;
-   return env_team_id(&team);
+   char server_id[128];
+   return server_runtime_identity_load(server_id, sizeof(server_id), &team) ==
+          SERVER_RUNTIME_IDENTITY_READY;
 }
 
 server_write_tier_config_state_t server_write_tier_config_state(void)
 {
    int64_t team = 0;
-   if (!env_team_id(&team))
+   char server_id[128];
+   server_runtime_identity_state_t state =
+       server_runtime_identity_load(server_id, sizeof(server_id), &team);
+   if (state == SERVER_RUNTIME_IDENTITY_NO_TEAM)
       return SERVER_WRITE_TIER_CONFIG_NO_TEAM;
-   const char *server_id = getenv("AIMEE_SERVER_ID");
-   if (!server_id || !server_id[0])
+   if (state == SERVER_RUNTIME_IDENTITY_NO_SERVER_ID)
       return SERVER_WRITE_TIER_CONFIG_NO_SERVER_ID;
    const char *bundle_path = getenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE");
    if (!bundle_path || !bundle_path[0])
+      return SERVER_WRITE_TIER_CONFIG_NO_TRUST_BUNDLE;
+   /* The variable being SET is not the input; the bundle being THERE is. The
+    * shipped standalone compose defaults this to a conventional path nothing
+    * mounts, so a deployment that never provisioned an authority reported READY
+    * while every KB-issued token was in fact denied — and the precise startup
+    * error naming this variable was suppressed in favour of a vague recurring
+    * "management JWKS authorization unavailable" warning.
+    *
+    * Readability only: this is a startup preflight answering "did the operator
+    * supply the inputs". Structural validation stays in build_config, which
+    * fails closed per request. Called once at startup, so the stat is free. */
+   if (access(bundle_path, R_OK) != 0)
       return SERVER_WRITE_TIER_CONFIG_NO_TRUST_BUNDLE;
    return SERVER_WRITE_TIER_CONFIG_READY;
 }
@@ -118,14 +116,15 @@ static int build_config(server_write_tier_config_t *config, char *jwks, size_t j
                         server_write_tier_outcome_t *outcome)
 {
    memset(config, 0, sizeof(*config));
-   if (!env_team_id(team))
+   char server_id[128];
+   if (server_runtime_identity_load(server_id, sizeof(server_id), team) !=
+       SERVER_RUNTIME_IDENTITY_READY)
    {
       *outcome = SERVER_WRITE_TIER_NO_TEAM_CONFIGURED;
       return 0;
    }
-   const char *server_id = getenv("AIMEE_SERVER_ID");
    const char *bundle_path = getenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE");
-   if (!server_id || !server_id[0] || !bundle_path || !bundle_path[0])
+   if (!bundle_path || !bundle_path[0])
    {
       *outcome = SERVER_WRITE_TIER_INVALID;
       return 0;

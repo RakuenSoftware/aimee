@@ -15,7 +15,6 @@ export const RESTART_KEYS = new Set<string>([
   // in src/config_fields.c. (embedding_endpoint/model/dim apply on the next turn.)
   "kb_mode", "kb_client_url", "kb_client_bearer_token",
   "llm_embed_backend", "llm_embed_host", "llm_embed_gpu", "llm_embed_tier",
-  "llm_rerank_backend", "llm_rerank_host", "llm_rerank_gpu", "llm_rerank_tier", "llm_rerank_endpoint",
   "llm_synth_backend", "llm_synth_host", "llm_synth_gpu", "llm_synth_tier", "llm_synth_endpoint",
   "llm_synth_model",
 ]);
@@ -44,7 +43,7 @@ export const RESTART_KEYS = new Set<string>([
  *  - default_persona: the Chat tab sets it per session and the Personas tab
  *    manages the roster; it already defaults to engineer.
  *
- *  - the embedder / reranker / synth tiers and the knowledge base proper: the kb
+ *  - the embedder / synth tiers and the knowledge base proper: the kb
  *    runs all of them, so they are configured in the kb console's Settings page.
  *    Split by which BINARY reads the key, not by prefix — kb_mode,
  *    kb_client_url, kb_client_bearer_token and kb_evidence_emit_enabled stay
@@ -84,7 +83,7 @@ export const OWNED_ELSEWHERE: Record<string, string> = {
   openai_key_cmd: "Agents tab",
   // Persona (Chat tab per session, Personas tab for the roster).
   default_persona: "Chat tab / Personas tab",
-  /* KB-owned: aimee-kb runs the embedder, the reranker, and the synth tier, so
+  /* KB-owned: aimee-kb runs the embedder and the synth tier, so
    * their model/endpoint/topology keys are configured in the kb console's own
    * Settings page (KB_SETTINGS in src/kb/http/kb_http_console.c is the source of
    * truth for this list). aimee-server still READS some of these — one owner is
@@ -97,11 +96,6 @@ export const OWNED_ELSEWHERE: Record<string, string> = {
   llm_embed_host: KB_CONSOLE_SETTINGS,
   llm_embed_gpu: KB_CONSOLE_SETTINGS,
   llm_embed_tier: KB_CONSOLE_SETTINGS,
-  llm_rerank_backend: KB_CONSOLE_SETTINGS,
-  llm_rerank_host: KB_CONSOLE_SETTINGS,
-  llm_rerank_gpu: KB_CONSOLE_SETTINGS,
-  llm_rerank_tier: KB_CONSOLE_SETTINGS,
-  llm_rerank_endpoint: KB_CONSOLE_SETTINGS,
   llm_synth_backend: KB_CONSOLE_SETTINGS,
   llm_synth_host: KB_CONSOLE_SETTINGS,
   llm_synth_gpu: KB_CONSOLE_SETTINGS,
@@ -141,7 +135,7 @@ export const SECTION_HELP: Record<string, string> = {
     "What aimee adds to a request and how it trims context to save tokens. Most are off by default.",
   "Audit & governance": "Logging of actions and the guardrails that gate risky ones.",
   "Agent behavior": "How autonomously aimee runs, per-turn limits, and fix verification.",
-  "Learning & intelligence": "Feedback-driven learning and the reranking knobs it feeds.",
+  "Learning & intelligence": "Feedback-driven learning and the knobs it feeds.",
   Other: "Options that don't fall under the sections above.",
 };
 
@@ -217,15 +211,10 @@ export const FIELD_HELP: Record<string, string> = {
     "Where the knowledge base runs: 'local' deploys an aimee-kb here; 'remote' connects to an existing one (see kb_client_url).",
   kb_client_url: "URL of an existing aimee-kb to connect to when kb_mode is 'remote'. Nothing is deployed locally.",
   kb_client_bearer_token: "Bearer token for the remote aimee-kb (kb_mode='remote'). Needs a restart.",
-  llm_embed_backend: "How the embedder is served: 'local' (on the shared aimee-llm container), 'external' (an endpoint), or 'off'.",
-  llm_embed_host: "Host that runs the local aimee-llm container serving the embedder.",
+  llm_embed_backend: "How the embedder is served: 'local' (inside the knowledge base, from weights in its image), 'external' (an endpoint), or 'off'.",
+  llm_embed_host: "Unused. The embedder runs inside the knowledge base, so there is no host to name.",
   llm_embed_gpu: "GPU index on the host for a local embedder; blank runs it on CPU.",
   llm_embed_tier: "Local embedder tier: cpu / small / mid / large (sizes the model to the card).",
-  llm_rerank_backend: "How the reranker is served: 'local', 'external', or 'off'.",
-  llm_rerank_host: "Host that runs the local reranker.",
-  llm_rerank_gpu: "GPU index on the host for a local reranker; blank runs it on CPU.",
-  llm_rerank_tier: "Local reranker tier: cpu / small / mid / large.",
-  llm_rerank_endpoint: "Endpoint URL for an external reranker.",
   llm_synth_backend: "How the synthesizer is served: 'local', 'external', or 'off'.",
   llm_synth_host: "Host that runs the local synthesizer.",
   llm_synth_gpu: "GPU index on the host for a local synthesizer; blank runs it on CPU.",
@@ -275,12 +264,7 @@ export const FIELD_HELP: Record<string, string> = {
   kb_mining_min_poll_s: "Fewest seconds between miner passes. Default 300.",
 
   // Memory — retrieval quality
-  memory_rerank_enabled:
-    "Second-pass scoring of retrieved memories with a cross-encoder for sharper ordering. Off by default; needs a rerank command set.",
-  memory_rerank_command:
-    "Command that scores (query, candidate) pairs for the reranker. Blank disables reranking even when it's switched on.",
   memory_rerank_mode: "Which reranking strategy runs on retrieved memories.",
-  memory_rerank_top_k: "How many candidates the reranker scores. Default 50.",
   memory_query_expansion_mode: "How queries are widened before search: lexical (default) or semantic.",
   memory_query_expansion_k: "How many extra related terms to add when widening a query. Default 5.",
   memory_coref_mode: "How pronouns and references in stored text are tied back to their subject. Blank leaves it off.",

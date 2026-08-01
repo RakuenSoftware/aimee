@@ -324,6 +324,14 @@ char *ingress_preinject_apply(const char *instructions, const char *envelope)
    (void)instructions;
    return envelope ? strdup(envelope) : NULL;
 }
+/* The economizer seam moved from config_load to econ_mode_current(). Mirror
+ * exactly what the config_load stub below produces (module_economizer = 1, so
+ * mode is authoritative) so these assertions are unchanged. */
+int econ_mode_current(void)
+{
+   return g_proof_gated ? ECON_MODE_SAFE : ECON_MODE_OFF;
+}
+
 /* messages_run_request_pipeline reads config for the P5 anthropic-inject opt-in;
  * these whitebox tests run with it off (zeroed). */
 int config_load(config_t *cfg)
@@ -966,5 +974,24 @@ int main(void)
    test_messages_stream_chatgpt_buffered_replays_responses();
    test_proof_gated_ingress_wire_parity();
    printf("anthropic_http: OK\n");
+   return 0;
+}
+
+/* anthropic_http.c now asks config_present() + per-field accessors instead of
+ * loading a config_t. These reproduce exactly what the config_load stub they
+ * replaced produced: config readable, modules unspecified (-1) so the env
+ * default decides, economizer on, and the P5 anthropic-inject opt-in off. */
+int config_present(void)
+{
+   return 1;
+}
+
+int config_module_governance(void)
+{
+   return -1;
+}
+
+int config_ingress_preinject_anthropic_enabled(void)
+{
    return 0;
 }

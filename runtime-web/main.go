@@ -10,7 +10,11 @@ import (
 )
 
 func main() {
-	// PAM helper subprocess: aimee-runtime-web __pam_auth <service> <username>
+	// PAMAuthenticate runs the credential check in a subprocess so a PAM abort or
+	// hang cannot take down the long-lived HTTP server — and that subprocess is
+	// THIS binary re-executed with __pam_auth. Without this dispatch the helper
+	// falls through to the flag parser and every login fails, so the check has to
+	// come before anything else touches os.Args.
 	if len(os.Args) > 1 && os.Args[1] == "__pam_auth" {
 		os.Exit(auth.RunPAMHelper(os.Args[2:]))
 	}

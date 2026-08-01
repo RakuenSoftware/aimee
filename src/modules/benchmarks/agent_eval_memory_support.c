@@ -982,9 +982,7 @@ int mem_eval_load_corpus(const char *corpus_path, mem_eval_case_t *cases, int ma
       }
 
       {
-         config_t embed_cfg;
-         config_load(&embed_cfg);
-         const char *embed_cmd = config_embedding_command(&embed_cfg, NULL);
+         const char *embed_cmd = config_embedding_command_current(NULL);
          if (memory_embed(m.id, embed_cmd) != 0)
          {
             fprintf(stderr, "mem_eval_load_corpus: memory_embed failed for fixture %s\n",
@@ -1258,10 +1256,9 @@ int mem_eval_open_temp_db(void)
     * configured). Without this, db2_embedding_dim()'s 1024 default disagrees with
     * the builtin embed and every vector insert fails. Mirrors bootstrap_db2's pin.
     * (The sqlite shim ignores vector dim, so this only bites the real-libpq store.) */
-   config_t dim_cfg;
-   config_load(&dim_cfg);
-   db2_set_embedding_dim(config_resolve_embedding_dim(&dim_cfg));
-   db2_set_embedding_dim_pinned(config_embedding_dim_is_pinned(&dim_cfg));
+   db2_set_embedding_dim_default(config_embedding_dim_default());
+   db2_set_embedding_dim(config_resolve_embedding_dim_current());
+   db2_set_embedding_dim_pinned(config_embedding_dim_pinned_current());
 
    if (db2_eval_open_temp_store() != 0)
    {

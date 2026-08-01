@@ -9,11 +9,24 @@
 #include "db1_internal.h"
 #include "server_write_tier_db1.h"
 
+#include "platform_test_util.h" /* platform_tmpdir */
+
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+static int g_managed_identity;
+
+int kb_client_mtls_managed_metadata(char *server_id, size_t cap, long long *team_id)
+{
+   if (!g_managed_identity)
+      return 0;
+   snprintf(server_id, cap, "wizard-managed-server");
+   *team_id = 23;
+   return 1;
+}
 
 static server_identity_token_claims_t claims(const char *jti, kb_identity_tier_t tier)
 {
@@ -43,9 +56,34 @@ int main(void)
    assert(server_write_tier_config_state() == SERVER_WRITE_TIER_CONFIG_NO_SERVER_ID);
    setenv("AIMEE_SERVER_ID", "managed-server", 1);
    assert(server_write_tier_config_state() == SERVER_WRITE_TIER_CONFIG_NO_TRUST_BUNDLE);
+
+   /* A path that does not exist is NOT a supplied input. The shipped standalone
+    * compose defaults this variable to a conventional location nothing mounts, so
+    * treating "set" as READY made a deployment with no authority report ready
+    * while every KB-issued token was denied. Only a readable bundle is READY. */
    setenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE", "/run/aimee/management/jwks-trust-bundle.json", 1);
+   assert(server_write_tier_config_state() == SERVER_WRITE_TIER_CONFIG_NO_TRUST_BUNDLE);
+
+   char bundle[512];
+   snprintf(bundle, sizeof(bundle), "%s/aimee-trust-XXXXXX", platform_tmpdir());
+   int bundle_fd = mkstemp(bundle);
+   assert(bundle_fd >= 0);
+   assert(write(bundle_fd, "{}", 2) == 2);
+   close(bundle_fd);
+   setenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE", bundle, 1);
    assert(server_write_tier_config_state() == SERVER_WRITE_TIER_CONFIG_READY);
    printf("ok: startup preflight identifies each missing Compose input\n");
+
+   unsetenv("AIMEE_SERVER_TEAM_ID");
+   unsetenv("AIMEE_SERVER_ID");
+   g_managed_identity = 1;
+   assert(server_write_tier_team_configured() == 1);
+   assert(server_write_tier_config_state() == SERVER_WRITE_TIER_CONFIG_READY);
+   setenv("AIMEE_SERVER_TEAM_ID", "7", 1);
+   assert(server_write_tier_config_state() == SERVER_WRITE_TIER_CONFIG_NO_SERVER_ID);
+   unsetenv("AIMEE_SERVER_TEAM_ID");
+   g_managed_identity = 0;
+   printf("ok: managed identity is a fallback and never fills a partial explicit packet\n");
 
    char path[] = "/tmp/aimee-write-tier-db1-XXXXXX";
    int fd = mkstemp(path);

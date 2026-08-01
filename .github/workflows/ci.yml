@@ -1,8 +1,14 @@
 name: CI
 
 on:
-  pull_request:
+  # Re-run the gate on each integration tip; PR checks alone only cover the
+  # merge preview that existed when the PR ran.
+  push:
     branches: [main, testing, feature/core-modularization]
+  pull_request:
+    branches: [main, testing, feature/core-modularization, 'aimee/feat/**']
+    # Slice sub-PRs target aimee/feat/<work-item-id>; include them so each slice
+    # must pass the same complete gate as the final feature PR.
     # `edited` re-runs the gate when a PR title/body is edited after open, so
     # attribution can't be added post-hoc without failing CI.
     types: [opened, synchronize, reopened, edited]
@@ -103,6 +109,8 @@ jobs:
         run: cd src && make lint
       - name: Check 3db tier dependencies
         run: ./scripts/check_tier_deps.sh
+      - name: Check managed authority packaging boundary
+        run: python3 scripts/check-managed-authority-packaging.py
 
   build:
     runs-on: ubuntu-latest
@@ -242,7 +250,29 @@ jobs:
           done
           echo "Postgres did not become ready in time"; docker logs aimee-pg || true; exit 1
       - name: Unit tests
-        run: cd src && make -j$(nproc) unit-tests build/obj/tests/p7-pkcs11-harness
+        run: |
+          # Runner image metadata is outside the repository's control. Install
+          # deterministic root-owned copies so the positive path exercises the
+          # production trust walk without depending on /usr/bin ownership/mode.
+          sudo install -d -o root -g root -m 0755 /run/aimee-test-helpers
+          for helper in cat env yes true; do
+            sudo install -o root -g root -m 0755 "$(type -P "$helper")" \
+              "/run/aimee-test-helpers/$helper"
+          done
+          sudo stat -Lc '%U:%G %a %n' /run/aimee-test-helpers \
+            /run/aimee-test-helpers/cat /run/aimee-test-helpers/env \
+            /run/aimee-test-helpers/yes /run/aimee-test-helpers/true
+          printf '%s\n' 'deterministic root-owned test fixture' | \
+            sudo tee /run/aimee-test-helpers/root-file >/dev/null
+          sudo chown root:root /run/aimee-test-helpers/root-file
+          sudo chmod 0644 /run/aimee-test-helpers/root-file
+          sudo stat -Lc '%U:%G %a %n' /run/aimee-test-helpers/root-file
+          export AIMEE_TEST_TRUSTED_CAT=/run/aimee-test-helpers/cat
+          export AIMEE_TEST_TRUSTED_ENV=/run/aimee-test-helpers/env
+          export AIMEE_TEST_TRUSTED_YES=/run/aimee-test-helpers/yes
+          export AIMEE_TEST_TRUSTED_TRUE=/run/aimee-test-helpers/true
+          export AIMEE_TEST_TRUSTED_ROOT_FILE=/run/aimee-test-helpers/root-file
+          cd src && make -j$(nproc) unit-tests build/obj/tests/p7-pkcs11-harness
 
   # The data-plane identity mint, end to end, against a live Postgres and a live
   # signed-HWM KMS helper.
@@ -665,22 +695,38 @@ jobs:
           #  (1) bare `choco install mingw` flakes ~50% on the Chocolatey CDN;
           #  (2) the choco package's gcc path changes between versions (v15.2.0
           #      moved it), so a hardcoded `...\mingw64\bin` breaks.
-          # Prefer the MSYS2 mingw64 toolchain pre-installed on the runner image
-          # (no network); otherwise choco-install with retries and *discover* the
-          # gcc.exe location instead of hardcoding it.
+          # Prefer a complete pre-installed MSYS2 toolchain (no network). Runner
+          # images have moved between mingw64 and ucrt64, so probe both. If neither
+          # is complete, use MSYS2's own package manager before falling back to
+          # Chocolatey; a Chocolatey outage must not be the only installation path.
           function Find-MingwBin {
-            if (Test-Path "C:\msys64\mingw64\bin\gcc.exe") { return "C:\msys64\mingw64\bin" }
+            foreach ($candidate in @("C:\msys64\ucrt64\bin", "C:\msys64\mingw64\bin")) {
+              if ((Test-Path "$candidate\gcc.exe") -and
+                  (Test-Path "$candidate\mingw32-make.exe")) { return $candidate }
+            }
             $g = Get-ChildItem -Path "C:\ProgramData\chocolatey\lib\mingw","C:\ProgramData\mingw64" `
                    -Recurse -Filter gcc.exe -ErrorAction SilentlyContinue |
                  Where-Object { $_.FullName -match 'mingw64' } | Select-Object -First 1
-            if ($g) { return (Split-Path $g.FullName) }
+            if ($g) {
+              $candidate = Split-Path $g.FullName
+              if (Test-Path "$candidate\mingw32-make.exe") { return $candidate }
+            }
             return $null
           }
           $bin = Find-MingwBin
+          $pacman = "C:\msys64\usr\bin\pacman.exe"
+          if (-not $bin -and (Test-Path $pacman)) {
+            for ($i = 0; $i -lt 3 -and -not $bin; $i++) {
+              & $pacman -Sy --noconfirm --needed `
+                mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-make
+              if ($LASTEXITCODE -ne 0) { Start-Sleep (15 * ($i + 1)) }
+              $bin = Find-MingwBin
+            }
+          }
           if (-not $bin) {
             for ($i = 0; $i -lt 3 -and -not $bin; $i++) {
               choco install mingw -y --no-progress
-              if ($LASTEXITCODE -ne 0) { Start-Sleep 15 }
+              if ($LASTEXITCODE -ne 0) { Start-Sleep (15 * ($i + 1)) }
               $bin = Find-MingwBin
             }
           }
@@ -729,11 +775,44 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install MinGW-w64
-        run: choco install mingw
-      - name: Add MinGW to PATH
-        shell: powershell
-        run: echo "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Set up MinGW-w64
+        shell: pwsh
+        run: |
+          function Find-MingwBin {
+            foreach ($candidate in @("C:\msys64\ucrt64\bin", "C:\msys64\mingw64\bin")) {
+              if ((Test-Path "$candidate\gcc.exe") -and
+                  (Test-Path "$candidate\mingw32-make.exe")) { return $candidate }
+            }
+            $g = Get-ChildItem -Path "C:\ProgramData\chocolatey\lib\mingw","C:\ProgramData\mingw64" `
+                   -Recurse -Filter gcc.exe -ErrorAction SilentlyContinue |
+                 Where-Object { $_.FullName -match 'mingw64' } | Select-Object -First 1
+            if ($g) {
+              $candidate = Split-Path $g.FullName
+              if (Test-Path "$candidate\mingw32-make.exe") { return $candidate }
+            }
+            return $null
+          }
+          $bin = Find-MingwBin
+          $pacman = "C:\msys64\usr\bin\pacman.exe"
+          if (-not $bin -and (Test-Path $pacman)) {
+            for ($i = 0; $i -lt 3 -and -not $bin; $i++) {
+              & $pacman -Sy --noconfirm --needed `
+                mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-make
+              if ($LASTEXITCODE -ne 0) { Start-Sleep (15 * ($i + 1)) }
+              $bin = Find-MingwBin
+            }
+          }
+          if (-not $bin) {
+            for ($i = 0; $i -lt 3 -and -not $bin; $i++) {
+              choco install mingw -y --no-progress
+              if ($LASTEXITCODE -ne 0) { Start-Sleep (15 * ($i + 1)) }
+              $bin = Find-MingwBin
+            }
+          }
+          if (-not $bin) { Write-Error "MinGW gcc.exe and mingw32-make.exe not found"; exit 1 }
+          Write-Host "Using MinGW at $bin"
+          & "$bin\gcc.exe" --version
+          echo "$bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       - name: Download SQLite amalgamation
         shell: powershell
         run: |

@@ -11,6 +11,7 @@
 #include "server.h"
 #include "server_http.h"
 #include "server_http_identity.h"
+#include "runtime_secret.h"
 #include <string.h>
 
 /* config.show: return every allowlisted field and its current value. */
@@ -18,9 +19,7 @@ int handle_config_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    (void)req;
-
-   config_t cfg;
-   if (config_load(&cfg) != 0)
+   if (!config_present())
       return server_send_error(conn, "config: could not load configuration", NULL);
 
    cJSON *obj = cJSON_CreateObject();
@@ -29,10 +28,13 @@ int handle_config_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * `config` map still carries EVERY key's value, so `aimee config show` and any
     * existing consumer are unchanged; a client that ignores `groups` sees all. */
    cJSON *groups = cJSON_CreateObject();
+   cJSON *secrets = cJSON_CreateObject();
    for (int i = 0; config_fields[i].key; i++)
    {
       cJSON_AddItemToObject(obj, config_fields[i].key,
-                            config_field_value_json(&cfg, &config_fields[i]));
+                            config_field_public_value_json_current(&config_fields[i]));
+      if (config_field_secret_name(&config_fields[i]))
+         cJSON_AddBoolToObject(secrets, config_fields[i].key, 1);
       if (config_fields[i].group != FGROUP_RUNTIME)
          cJSON_AddStringToObject(groups, config_fields[i].key,
                                  config_field_group_name(&config_fields[i]));
@@ -41,6 +43,7 @@ int handle_config_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *resp = jo_ok();
    cJSON_AddItemToObject(resp, "config", obj);
    cJSON_AddItemToObject(resp, "groups", groups);
+   cJSON_AddItemToObject(resp, "secrets", secrets);
    return server_send_ok(conn, resp);
 }
 
@@ -56,14 +59,13 @@ int handle_config_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    const config_field_t *f = config_field_lookup(key);
    if (!f)
       return server_send_error(conn, "config: unknown key", NULL);
-
-   config_t cfg;
-   if (config_load(&cfg) != 0)
+   if (!config_present())
       return server_send_error(conn, "config: could not load configuration", NULL);
 
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "key", key);
-   cJSON_AddItemToObject(resp, "value", config_field_value_json(&cfg, f));
+   cJSON_AddItemToObject(resp, "value", config_field_public_value_json_current(f));
+   cJSON_AddBoolToObject(resp, "secret", config_field_secret_name(f) ? 1 : 0);
    return server_send_ok(conn, resp);
 }
 
@@ -79,7 +81,7 @@ int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    /* Do not let the generic config surface bypass the roundtable preset API's
     * operator boundary (notably through roundtable.default). Local UDS callers
     * have full generic capabilities, but remain uid: principals; only the
-    * server.token-attested appliance administrator may alter this policy. */
+    * root-UDS-attested appliance administrator may alter this policy. */
    if (roundtable_policy_config_key(key) &&
        !route_roundtable_mutation_authorized(server_http_identity_principal()))
       return server_send_error(
@@ -109,17 +111,30 @@ int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!f)
       return server_send_error(conn, "config: unknown key", NULL);
 
-   /* Read from DISK (not the live snapshot) for the read-modify-save so a config.set never
-    * clobbers an external edit made to the file since the last reload (live-config-reload P1b). */
-   config_t cfg;
-   if (config_load_file(&cfg) != 0)
-      return server_send_error(conn, "config: could not load configuration", NULL);
+   const char *secret_name = config_field_secret_name(f);
+   if (secret_name)
+   {
+      int configured = value[0] ? 1 : 0;
+      int stored = config_secret_store(secret_name, value);
+      if (cJSON_IsString(jval) && jval->valuestring)
+         runtime_secret_wipe(jval->valuestring, strlen(jval->valuestring));
+      if (stored != 0)
+         return server_send_error(conn, "config: could not store credential in Vault", NULL);
+      cJSON *resp = jo_ok();
+      cJSON_AddStringToObject(resp, "key", key);
+      cJSON_AddBoolToObject(resp, "value", configured);
+      cJSON_AddBoolToObject(resp, "secret", 1);
+      cJSON_AddStringToObject(resp, "reload", config_field_reload_verdict(f));
+      cJSON_AddBoolToObject(resp, "applied_live", f->reload_class != RELOAD_RESTART);
+      return server_send_ok(conn, resp);
+   }
 
-   if (config_field_set_value(&cfg, f, value) != 0)
+   /* config_set patches the key in the DOCUMENT on disk (not the live snapshot),
+    * so a config.set never clobbers an external edit made to the file since the
+    * last reload (live-config-reload P1b), validates against the field
+    * descriptor, and republishes -- the three steps this did by hand. */
+   if (config_set(key, value) != 0)
       return server_send_error(conn, "config: invalid value for key", NULL);
-
-   if (config_save(&cfg) != 0)
-      return server_send_error(conn, "config: could not save configuration", NULL);
 
    /* Push the change into the live snapshot NOW so it takes effect immediately for every
     * config_load reader, instead of waiting for an mtime-cache miss (live-config-reload P1b). */
@@ -127,7 +142,8 @@ int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "key", key);
-   cJSON_AddItemToObject(resp, "value", config_field_value_json(&cfg, f));
+   cJSON_AddItemToObject(resp, "value", config_field_public_value_json_current(f));
+   cJSON_AddBoolToObject(resp, "secret", 0);
    /* Live/Restart verdict (live-config-reload P2): tell the caller whether the change is in
     * effect now or needs a restart, instead of leaving them to guess. */
    cJSON_AddStringToObject(resp, "reload", config_field_reload_verdict(f));

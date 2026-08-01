@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -209,6 +210,35 @@ func TestHTTPAgentClientOmitsProvidedTargetByDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review worktree"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHTTPAgentClientForwardsMaxTurnsCap(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/delegate/run":
+			var payload map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			if got := payload["max_turns_cap"]; got != float64(24) {
+				t.Errorf("max_turns_cap=%v payload=%v", got, payload)
+			}
+			if _, leaked := payload["MaxTurnsCap"]; leaked {
+				t.Errorf("Go-local field name leaked in payload: %v", payload)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": 1})
+		case "/v1/delegate/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "complete", "participant": "delegate-job:1"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review artifact", MaxTurnsCap: 24}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -732,6 +762,48 @@ func TestHTTPAgentClientExpiresUnassignedPendingJob(t *testing.T) {
 	}
 }
 
+func TestHTTPAgentClientExpiresRoutedPendingJob(t *testing.T) {
+	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	var cancellations atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/delegate/run":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": 23})
+		case "/v1/delegate/status":
+			// Routing records agent_name before a worker takes the lease. A
+			// pending row is therefore still unassigned even with this field set.
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "pending", "agent_name": "codex"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store,
+		PollEvery: time.Millisecond, PendingTimeout: MinDelegatePendingTimeout,
+		CancelUnassigned: func(context.Context, int, string, time.Duration) (bool, error) {
+			cancellations.Add(1)
+			return true, nil
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review",
+		Delegate: "codex", WorkItemID: "wi_routed_pending", Stage: "gate", ExecutionVersion: "v1"}
+	if _, err := client.Delegate(t.Context(), request); err == nil || !errors.Is(err, ErrDelegateUnassignedExpired) {
+		t.Fatalf("routed pending job did not expire as unassigned: %v", err)
+	}
+	if cancellations.Load() != 1 {
+		t.Fatalf("cancellations=%d, want 1", cancellations.Load())
+	}
+	if _, _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err == nil {
+		t.Fatal("expired routed pending job retained its durable mapping")
+	}
+}
+
 func TestHTTPAgentClientExpiresUnassignedRunningJob(t *testing.T) {
 	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
 	if err != nil {
@@ -1067,6 +1139,99 @@ func TestHTTPAgentClientRequiresAuthenticationOffLoopback(t *testing.T) {
 	}
 	if _, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: "https://resource-plane.example", Bearer: "token"}); err != nil {
 		t.Fatalf("authenticated remote agent service rejected: %v", err)
+	}
+}
+
+func TestHTTPAgentClientReroutesGroupSeatAfterAdmissionBackpressure(t *testing.T) {
+	var mu sync.Mutex
+	var vias []string
+	var launches atomic.Int32
+	transport := agentRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/v1/delegate/run":
+			var payload map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			via, _ := payload["via"].(string)
+			mu.Lock()
+			vias = append(vias, via)
+			mu.Unlock()
+			if launches.Add(1) == 1 {
+				return agentHTTPResponse(http.StatusServiceUnavailable, `{"error":"agent at capacity [aimee_err=concurrency_limit]"}`), nil
+			}
+			return agentHTTPResponse(http.StatusOK, `{"job_id":41,"participant":"seat-41"}`), nil
+		case "/v1/delegate/status":
+			return agentHTTPResponse(http.StatusOK, `{"job_status":"done","agent_name":"idle","result":"reviewed","cost_known":true}`), nil
+		default:
+			return agentHTTPResponse(http.StatusNotFound, `{}`), nil
+		}
+	})
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: "http://127.0.0.1", PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.client.Transport = transport
+	result, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Prompt: "review", Delegate: "busy", routeSelected: true})
+	if err != nil || result.Response != "reviewed" || result.Participant != "seat-41" {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(vias) != 2 || vias[0] != "busy" || vias[1] != "" {
+		t.Fatalf("capacity retry did not return the group seat to generic routing: %v", vias)
+	}
+}
+
+func TestHTTPAgentClientDoesNotRerouteOperatorPinAfterAdmissionBackpressure(t *testing.T) {
+	var launches atomic.Int32
+	transport := agentRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/v1/delegate/run" {
+			return agentHTTPResponse(http.StatusNotFound, `{}`), nil
+		}
+		launches.Add(1)
+		return agentHTTPResponse(http.StatusServiceUnavailable, `{"error":"agent at capacity [aimee_err=concurrency_limit]"}`), nil
+	})
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: "http://127.0.0.1", PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.client.Transport = transport
+	_, err = client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Prompt: "review", Delegate: "operator-pinned"})
+	if err == nil || !isCapacityBackpressure(err) || launches.Load() != 1 {
+		t.Fatalf("operator pin was rerouted: launches=%d err=%v", launches.Load(), err)
+	}
+}
+
+type agentRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f agentRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
+func agentHTTPResponse(status int, body string) *http.Response {
+	return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}
+}
+
+func TestDelegateRouteRetryPolicy(t *testing.T) {
+	capacity := errors.New("agent at capacity [aimee_err=concurrency_limit]")
+	terminal := fmt.Errorf("%w: provider failed", ErrDelegateTerminal)
+	tests := []struct {
+		name    string
+		request DelegateRequest
+		err     error
+		want    bool
+	}{
+		{name: "group capacity race", request: DelegateRequest{Delegate: "busy", routeSelected: true}, err: capacity, want: true},
+		{name: "group terminal failure", request: DelegateRequest{Delegate: "failed", routeSelected: true}, err: terminal, want: true},
+		{name: "operator pin", request: DelegateRequest{Delegate: "pinned"}, err: capacity},
+		{name: "participant continuation", request: DelegateRequest{Participant: "opaque"}, err: terminal},
+		{name: "ordinary transport failure", request: DelegateRequest{}, err: errors.New("connection reset")},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := delegateRouteRetryable(tc.request, tc.err); got != tc.want {
+				t.Fatalf("delegateRouteRetryable()=%v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

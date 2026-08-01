@@ -470,6 +470,7 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/db2/code_index_ops.c
     ${AIMEE_SRC_DIR}/db2/learning.c
     ${AIMEE_SRC_DIR}/db2/code_index.c
+    ${AIMEE_SRC_DIR}/db2/code_project_lifecycle.c
     ${AIMEE_SRC_DIR}/db2/css_graph.c
     ${AIMEE_SRC_DIR}/db2/typed_facts.c
     ${AIMEE_SRC_DIR}/db2/css_migration.c
@@ -834,6 +835,9 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_main.c
     ${AIMEE_SRC_DIR}/cli_agent_setup.c
     ${AIMEE_SRC_DIR}/cli_session_start.c
+    # cli_session_start renders the degraded-dependency notice from here; the
+    # CLI links it directly, so it must be listed in BOTH build systems.
+    ${AIMEE_SRC_DIR}/session_degraded_notice.c
     # Thin-client self-update (cli_main dispatch + cli_session_start drift notice
     # both call these; the CLI does not link aimee-cmd, so they build in here).
     ${AIMEE_SRC_DIR}/cmd_self_update.c
@@ -883,12 +887,14 @@ set(CLI_SRCS
 
 set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_main.c
+    ${AIMEE_SRC_DIR}/server/vault_bootstrap_privilege.c
     ${AIMEE_SRC_DIR}/server/server.c
     ${AIMEE_SRC_DIR}/server/s2_native_gate_hook.c
     ${AIMEE_SRC_DIR}/server_provider.c
     ${AIMEE_SRC_DIR}/server_insights.c
     ${AIMEE_SRC_DIR}/server_eval.c
     ${AIMEE_SRC_DIR}/server/server_api_status.c
+    server/server_error_kind.c
     ${AIMEE_SRC_DIR}/server/server_seed_config.c
     ${AIMEE_SRC_DIR}/server/server_auth.c
     ${AIMEE_SRC_DIR}/server/server_hooks.c
@@ -897,6 +903,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/presence.c
     ${AIMEE_SRC_DIR}/server/turn_registry.c
     ${AIMEE_SRC_DIR}/server/wfe_live_delegate.c
+    ${AIMEE_SRC_DIR}/server/wfe_http_proxy.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_scheduler.c
     ${AIMEE_SRC_DIR}/modules/vault/vault_principal.c
     ${AIMEE_SRC_DIR}/modules/vault/vault_crypto.c
@@ -1025,6 +1032,9 @@ set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_service.c
     ${AIMEE_SRC_DIR}/kb/kb_service_workers.c
     ${AIMEE_SRC_DIR}/kb/kb_ingest_workers.c
+    # kb_ingest_workers reconciles the webuser clone tree through
+    # ws_scope_webusers_base(); the kb target must link it.
+    ${AIMEE_SRC_DIR}/modules/workspace/workspace_scope.c
     ${AIMEE_SRC_DIR}/kb/kb_service_kb.c
     ${AIMEE_SRC_DIR}/kb/kb_identity_resolve.c
     ${AIMEE_SRC_DIR}/kb/kb_oidc_jwks_fleet.c
@@ -1069,6 +1079,9 @@ set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_management_cert_storage.c
     ${AIMEE_SRC_DIR}/kb/kb_management_cert_lifecycle.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http.c
+    # kb_http.c reads request bodies through these scanners; both build systems
+    # must compile them or the kb target links an undefined symbol.
+    ${AIMEE_SRC_DIR}/kb/http/kb_http_json.c
     ${AIMEE_SRC_DIR}/kb/http/kb_ingress.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_team.c
     ${AIMEE_SRC_DIR}/kb/http/kb_route_acl.c

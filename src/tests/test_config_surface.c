@@ -31,7 +31,8 @@ static const char *FIXTURE_A =
     "db1_path: ZZA_val\nguardrail_mode: ZZA_val\nprovider: ZZA_val\nopenai_endpoint: "
     "ZZA_val\nopenai_model: ZZA_val\nopenai_key_cmd: ZZA_val\nclaude_model: ZZA_val\ncodex_model: "
     "ZZA_val\nautonomous: true\nverify_enabled: true\nverify_cross_project: "
-    "true\ningress_preinject_enabled: true\ningress_preinject_anthropic_enabled: "
+    "true\ningress_preinject_enabled: true\ncode_context_mode: "
+    "on\ningress_preinject_anthropic_enabled: "
     "true\ningress_compress_enabled: "
     "true\ningress_cache_placement_enabled: true\ngateway_prevent_subagents: "
     "true\ncss_style_graph_enabled: "
@@ -42,8 +43,8 @@ static const char *FIXTURE_A =
     "ingress_max_raw_scans: 3\nembedding_command: ZZA_val\nembedding_model: "
     "ZZA_val\nembedding_endpoint: ZZA_val\nembedding_dim: 1\nmemory_rerank_mode: "
     "ZZA_val\nmemory_rewrite:\n  enabled: true\n  hyde: true\n  decompose: true\n  max_subqueries: "
-    "1\nmemory_negation:\n  enabled: true\nmemory_rerank:\n  enabled: true\n  top_k: 1\n  mix: "
-    "0.01\nmemory_query_expansion:\n  k: 1\nmemory_recall_lanes:\n  enabled: true\n  k_summary: "
+    "1\nmemory_negation:\n  enabled: true\n"
+    "memory_query_expansion:\n  k: 1\nmemory_recall_lanes:\n  enabled: true\n  k_summary: "
     "1\n  k_fact: 1\n  floor_summary: 3\n  floor_fact: 3\nmemory_window:\n  radius: 3\n  "
     "kb_neighbour_expand: true\nkb:\n  search_max_results: 1\n  api:\n    http_port: 3\n  "
     "background_ingest:\n    enabled: true\n    interval_hours: 3\n    watch_enabled: true\n    "
@@ -90,7 +91,8 @@ static const char *FIXTURE_B =
     "db1_path: ZZB_val\nguardrail_mode: ZZB_val\nprovider: ZZB_val\nopenai_endpoint: "
     "ZZB_val\nopenai_model: ZZB_val\nopenai_key_cmd: ZZB_val\nclaude_model: ZZB_val\ncodex_model: "
     "ZZB_val\nautonomous: false\nverify_enabled: false\nverify_cross_project: "
-    "false\ningress_preinject_enabled: false\ningress_preinject_anthropic_enabled: "
+    "false\ningress_preinject_enabled: false\ncode_context_mode: "
+    "off\ningress_preinject_anthropic_enabled: "
     "false\ningress_compress_enabled: "
     "false\ningress_cache_placement_enabled: false\ngateway_prevent_subagents: "
     "false\ncss_style_graph_enabled: "
@@ -101,8 +103,8 @@ static const char *FIXTURE_B =
     "ingress_max_raw_scans: 4096\nembedding_command: ZZB_val\nembedding_model: "
     "ZZB_val\nembedding_endpoint: ZZB_val\nembedding_dim: 4096\nmemory_rerank_mode: "
     "ZZB_val\nmemory_rewrite:\n  enabled: false\n  hyde: false\n  decompose: false\n  "
-    "max_subqueries: 4096\nmemory_negation:\n  enabled: false\nmemory_rerank:\n  enabled: false\n  "
-    "top_k: 4096\n  mix: 0.99\nmemory_query_expansion:\n  k: 4096\nmemory_recall_lanes:\n  "
+    "max_subqueries: 4096\nmemory_negation:\n  enabled: false\n"
+    "memory_query_expansion:\n  k: 4096\nmemory_recall_lanes:\n  "
     "enabled: false\n  k_summary: 4096\n  k_fact: 4096\n  floor_summary: 4096\n  floor_fact: "
     "4096\nmemory_window:\n  radius: 4096\n  kb_neighbour_expand: false\nkb:\n  "
     "search_max_results: 4096\n  api:\n    http_port: 4096\n  background_ingest:\n    enabled: "
@@ -178,6 +180,8 @@ int main(void)
    assert(cfgA.verify_enabled == 1 && cfgB.verify_enabled == 0);
    assert(cfgA.verify_cross_project == 1 && cfgB.verify_cross_project == 0);
    assert(cfgA.ingress_preinject_enabled == 1 && cfgB.ingress_preinject_enabled == 0);
+   assert(strcmp(cfgA.code_context_mode, "on") == 0);
+   assert(strcmp(cfgB.code_context_mode, "off") == 0);
    assert(cfgA.ingress_preinject_anthropic_enabled == 1 &&
           cfgB.ingress_preinject_anthropic_enabled == 0);
    assert(cfgA.ingress_compress_enabled == 1 && cfgB.ingress_compress_enabled == 0);
@@ -198,9 +202,6 @@ int main(void)
    assert(cfgA.memory_rewrite_decompose == 1 && cfgB.memory_rewrite_decompose == 0);
    assert(cfgA.memory_rewrite_max_subqueries != cfgB.memory_rewrite_max_subqueries);
    assert(cfgA.memory_negation_enabled == 1 && cfgB.memory_negation_enabled == 0);
-   assert(cfgA.memory_rerank_enabled == 1 && cfgB.memory_rerank_enabled == 0);
-   assert(cfgA.memory_rerank_top_k != cfgB.memory_rerank_top_k);
-   assert(cfgA.memory_rerank_mix != cfgB.memory_rerank_mix);
    assert(cfgA.memory_query_expansion_k != cfgB.memory_query_expansion_k);
    assert(cfgA.memory_recall_lanes_enabled == 1 && cfgB.memory_recall_lanes_enabled == 0);
    assert(cfgA.memory_recall_lanes_k_summary != cfgB.memory_recall_lanes_k_summary);

@@ -153,4 +153,29 @@ typedef struct
    int capped_count;   /* interpretive items capped at suggestion */
 } roundtable_result_t;
 
+/* The ensemble/roundtable settings ONE run needs, as plain data. Previously a
+ * config_t was threaded through the runtime as a value carrier -- mutated in
+ * memory to overlay a preset, never persisted. That made every panel function a
+ * config_t consumer for what is really a dozen scalars. Populate with
+ * ensemble_panel_from_config(), then overlay a preset if one is requested.
+ * Widths match the corresponding config fields exactly. */
+#define ENSEMBLE_PANEL_MAX_SEATS 32
+typedef struct
+{
+   char reference_models[ENSEMBLE_PANEL_MAX_SEATS][128];
+   char reference_personas[ENSEMBLE_PANEL_MAX_SEATS][64];
+   int reference_count;
+   int reference_persona_count;
+   char aggregator[128];
+   int min_successful;
+   double max_cost_usd;
+   int max_rounds;
+   int converge_threshold;
+   int deadline_ms;
+   int chair_synthesis;
+   int require_evidence;
+   int replay_verify_enabled;
+   char turns[16];
+} ensemble_panel_t;
+
 #endif /* AIMEE_ROUNDTABLE_TYPES_H */

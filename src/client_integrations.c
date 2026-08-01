@@ -1,5 +1,6 @@
 #include "client_constants.h"
 #include "client_integrations.h"
+#include "agent_code_capabilities.h"
 #include "aimee_home.h"
 #include "yaml.h"
 #include "platform_path.h"
@@ -84,33 +85,73 @@ static int write_text_file(const char *path, const char *content, mode_t mode)
    return 0;
 }
 
+/* Path to write into the user's GLOBAL client config (Claude Code hooks, MCP
+ * server command). Those files outlive whatever binary happens to be running,
+ * so the path must outlive it too.
+ *
+ * This used to return the running executable's own path whenever that binary was
+ * named `aimee`. Build a client in a throwaway worktree, run it once, and it
+ * rewrote ~/.claude/settings.json to point every hook at that worktree — then the
+ * worktree was deleted and EVERY hook in EVERY session began failing with
+ * "/bin/sh: 1: /home/.../aimee-<sha>/aimee: not found", in projects that had
+ * nothing to do with the build. A transient path must never be persisted into
+ * durable config.
+ *
+ * Split from the getenv/exe-path plumbing so the decision itself is testable:
+ * |installed| is the installed client (NULL/empty when absent) and |exe| is the
+ * running binary. Prefer the install; fall back to the running binary only when
+ * there is nothing installed to point at — the first-run bootstrap the exe path
+ * was there to serve. Returns 0 and fills |out| on success. */
+int client_integrations_pick_bin_path(const char *installed, const char *exe, char *out, size_t cap)
+{
+   if (!out || cap == 0)
+      return -1;
+   if (installed && installed[0])
+      return (size_t)snprintf(out, cap, "%s", installed) < cap ? 0 : -1;
+   if (exe && exe[0])
+      return (size_t)snprintf(out, cap, "%s", exe) < cap ? 0 : -1;
+   return -1;
+}
+
+/* The installed client, or NULL when there is none. */
+static const char *aimee_installed_bin_path(char *buf, size_t cap)
+{
+   const char *home = getenv("HOME");
+   if (!home || !home[0])
+      return NULL;
+   if ((size_t)snprintf(buf, cap, "%s/.local/bin/aimee", home) >= cap)
+      return NULL;
+   return access(buf, X_OK) == 0 ? buf : NULL;
+}
+
 static const char *resolved_aimee_bin_path(void)
 {
    static char path[MAX_PATH_LEN];
    if (path[0])
       return path;
 
-   if (platform_get_exe_path(path, sizeof(path)) == 0)
+   char installed_buf[MAX_PATH_LEN];
+   const char *installed = aimee_installed_bin_path(installed_buf, sizeof(installed_buf));
+
+   char exe[MAX_PATH_LEN] = "";
+   if (platform_get_exe_path(exe, sizeof(exe)) == 0)
    {
-      char *base = strrchr(path, '/');
-      base = base ? base + 1 : path;
-      if (strcmp(base, "aimee") == 0 || strcmp(base, "aimee.exe") == 0 ||
-          strcmp(base, "aimee-client") == 0 || strcmp(base, "aimee-client.exe") == 0)
-         return path;
+      char *base = strrchr(exe, '/');
+      base = base ? base + 1 : exe;
       if (strcmp(base, "aimee-server") == 0)
-      {
-         snprintf(base, sizeof(path) - (size_t)(base - path), "aimee");
-         return path;
-      }
-      if (strcmp(base, "aimee-server.exe") == 0)
-      {
-         snprintf(base, sizeof(path) - (size_t)(base - path), "aimee.exe");
-         return path;
-      }
+         snprintf(base, sizeof(exe) - (size_t)(base - exe), "aimee");
+      else if (strcmp(base, "aimee-server.exe") == 0)
+         snprintf(base, sizeof(exe) - (size_t)(base - exe), "aimee.exe");
+      else if (strcmp(base, "aimee") != 0 && strcmp(base, "aimee.exe") != 0 &&
+               strcmp(base, "aimee-client") != 0 && strcmp(base, "aimee-client.exe") != 0)
+         exe[0] = '\0'; /* not a client binary — not a usable fallback */
    }
 
-   path[0] = '\0';
+   if (client_integrations_pick_bin_path(installed, exe, path, sizeof(path)) == 0)
+      return path;
+
    const char *home = getenv("HOME");
+   path[0] = '\0';
    if (home)
       snprintf(path, sizeof(path), "%s/.local/bin/aimee", home);
    return path;
@@ -189,12 +230,20 @@ static const char *codex_skill_markdown(void)
           "\n"
           "- Prefer local file inspection first for nearby code.\n"
           "- Use `search_memory` for stored project facts or prior decisions.\n"
-          "- Use `find_symbol` when the local search surface is missing indexed context.\n"
-          "- Use `preview_blast_radius` before broad multi-file edits.\n"
+          "- Use `" AIMEE_CODE_TOOL_FIND_SYMBOL
+          "` when the local search surface is missing indexed context.\n"
+          "- Use `" AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS "` before broad multi-file edits.\n"
           "- Do not call provider-native sub-agent tools such as `spawn_agent`; use "
           "the aimee `delegate` MCP tool for every delegated or parallel sub-task.\n"
           "- Use `delegate` only for bounded sub-tasks that materially advance the "
           "current work.\n";
+}
+
+static const char *codex_code_exploration_prompt(void)
+{
+   return "Explore the codebase through aimee's tools (" AIMEE_CODE_TOOL_FIND_SYMBOL
+          ", " AIMEE_CODE_TOOL_AST_GREP_SEARCH ", " AIMEE_CODE_TOOL_INDEX
+          " command=" AIMEE_CODE_INDEX_COMMAND_HYBRID ") instead of raw grep/read";
 }
 
 static void ensure_codex_marketplace(const char *path)
@@ -702,8 +751,7 @@ static void ensure_codex_plugin_files(const char *home)
             "    \"termsOfServiceURL\": \"https://github.com/RakuenSoftware/aimee\",\n"
             "    \"defaultPrompt\": [\n"
             "      \"Search aimee memory before answering repo-specific questions\",\n"
-            "      \"Explore the codebase through aimee's tools (find_symbol, "
-            "ast_grep_search, search_graph) instead of raw grep/read\",\n"
+            "      \"%s\",\n"
             "      \"Preview the blast radius before editing multiple files\",\n"
             "      \"%s\",\n"
             "      \"Delegate bounded work through aimee delegate, not provider sub-agents\"\n"
@@ -712,7 +760,7 @@ static void ensure_codex_plugin_files(const char *home)
             "    \"screenshots\": []\n"
             "  }\n"
             "}\n",
-            AIMEE_VERSION, codex_delegate_policy_prompt());
+            AIMEE_VERSION, codex_code_exploration_prompt(), codex_delegate_policy_prompt());
 
    char compat_plugin_buf[4096];
    snprintf(compat_plugin_buf, sizeof(compat_plugin_buf),
@@ -748,8 +796,7 @@ static void ensure_codex_plugin_files(const char *home)
             "    \"termsOfServiceURL\": \"https://github.com/RakuenSoftware/aimee\",\n"
             "    \"defaultPrompt\": [\n"
             "      \"Search aimee memory before answering repo-specific questions\",\n"
-            "      \"Explore the codebase through aimee's tools (find_symbol, "
-            "ast_grep_search, search_graph) instead of raw grep/read\",\n"
+            "      \"%s\",\n"
             "      \"Preview the blast radius before editing multiple files\",\n"
             "      \"%s\",\n"
             "      \"Delegate bounded work through aimee delegate, not provider sub-agents\"\n"
@@ -758,7 +805,7 @@ static void ensure_codex_plugin_files(const char *home)
             "    \"screenshots\": []\n"
             "  }\n"
             "}\n",
-            AIMEE_VERSION, codex_delegate_policy_prompt());
+            AIMEE_VERSION, codex_code_exploration_prompt(), codex_delegate_policy_prompt());
 
    char mcp_buf[MAX_PATH_LEN + 256];
    format_mcp_json(mcp_buf, sizeof(mcp_buf), aimee_bin);
@@ -815,14 +862,16 @@ static cJSON *read_json_file(const char *path)
    return root;
 }
 
-static void ensure_claude_code_mcp(const char *settings_path)
+/* Merge Aimee into Claude Code's USER MCP registry (~/.claude.json).  Current
+ * Claude releases do not read mcpServers from ~/.claude/settings.json; that
+ * file is for settings/hooks.  Keeping the JSON merge separate from binary
+ * discovery makes the on-disk contract directly testable. */
+static void ensure_claude_code_mcp_entry(const char *config_path, const char *aimee_bin)
 {
-   const char *aimee_bin = resolved_aimee_bin_path();
-   struct stat st;
-   if (stat(aimee_bin, &st) != 0)
+   if (!config_path || !config_path[0] || !aimee_bin || !aimee_bin[0])
       return;
 
-   cJSON *root = read_json_file(settings_path);
+   cJSON *root = read_json_file(config_path);
    if (!cJSON_IsObject(root))
    {
       if (root)
@@ -839,7 +888,9 @@ static void ensure_claude_code_mcp(const char *settings_path)
       {
          cJSON *cmd = cJSON_GetObjectItemCaseSensitive(aimee, "command");
          cJSON *cmd_args = cJSON_GetObjectItemCaseSensitive(aimee, "args");
-         if (cJSON_IsString(cmd) && strcmp(cmd->valuestring, aimee_bin) == 0 &&
+         cJSON *type = cJSON_GetObjectItemCaseSensitive(aimee, "type");
+         if (cJSON_IsString(type) && strcmp(type->valuestring, "stdio") == 0 &&
+             cJSON_IsString(cmd) && strcmp(cmd->valuestring, aimee_bin) == 0 &&
              cJSON_IsArray(cmd_args) && cJSON_GetArraySize(cmd_args) == 1)
          {
             cJSON *arg0 = cJSON_GetArrayItem(cmd_args, 0);
@@ -866,8 +917,46 @@ static void ensure_claude_code_mcp(const char *settings_path)
       cJSON_DeleteItemFromObjectCaseSensitive(servers, "aimee");
 
    cJSON *aimee_server = create_aimee_mcp_server(aimee_bin);
+   cJSON_AddStringToObject(aimee_server, "type", "stdio");
    cJSON_AddItemToObject(servers, "aimee", aimee_server);
 
+   char *json = cJSON_Print(root);
+   if (json)
+   {
+      write_text_file(config_path, json, 0600);
+      free(json);
+   }
+   cJSON_Delete(root);
+}
+
+static void ensure_claude_code_mcp(const char *config_path)
+{
+   const char *aimee_bin = resolved_aimee_bin_path();
+   struct stat st;
+   if (stat(aimee_bin, &st) != 0)
+      return;
+   ensure_claude_code_mcp_entry(config_path, aimee_bin);
+}
+
+/* Remove only Aimee's obsolete settings.json registration after migrating it
+ * to ~/.claude.json.  Preserve unrelated keys and any other legacy entries. */
+static void remove_legacy_claude_settings_mcp(const char *settings_path)
+{
+   cJSON *root = read_json_file(settings_path);
+   if (!cJSON_IsObject(root))
+   {
+      cJSON_Delete(root);
+      return;
+   }
+   cJSON *servers = cJSON_GetObjectItemCaseSensitive(root, "mcpServers");
+   if (!cJSON_IsObject(servers) || !cJSON_GetObjectItemCaseSensitive(servers, "aimee"))
+   {
+      cJSON_Delete(root);
+      return;
+   }
+   cJSON_DeleteItemFromObjectCaseSensitive(servers, "aimee");
+   if (cJSON_GetArraySize(servers) == 0)
+      cJSON_DeleteItemFromObjectCaseSensitive(root, "mcpServers");
    char *json = cJSON_Print(root);
    if (json)
    {
@@ -1257,7 +1346,8 @@ static void ensure_claude_code_commands(const char *home)
    write_text_file(path,
                    "Preview the blast radius of a multi-file edit before making changes.\n"
                    "\n"
-                   "Use the aimee MCP tool `preview_blast_radius` for: $ARGUMENTS\n"
+                   "Use the aimee MCP tool `" AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS
+                   "` for: $ARGUMENTS\n"
                    "\n"
                    "This shows which files and symbols would be affected by the change,\n"
                    "helping you understand the impact before editing.\n",
@@ -1502,7 +1592,10 @@ static void ensure_claude_code_integration(const char *home)
 
    char settings_path[MAX_PATH_LEN];
    snprintf(settings_path, sizeof(settings_path), "%s/.claude/settings.json", home);
-   ensure_claude_code_mcp(settings_path);
+   char user_config_path[MAX_PATH_LEN];
+   snprintf(user_config_path, sizeof(user_config_path), "%s/.claude.json", home);
+   ensure_claude_code_mcp(user_config_path);
+   remove_legacy_claude_settings_mcp(settings_path);
    ensure_claude_code_hooks(settings_path);
    ensure_claude_code_env(settings_path);
    ensure_claude_code_commands(home);

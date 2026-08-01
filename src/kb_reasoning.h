@@ -45,7 +45,7 @@ extern "C"
     * scope_kind / scope_id: narrow the fact snapshot; NULL = all scopes
     * result_out:     populated on success; caller frees with kb_reasoning_result_free
     * Returns 0 on success, -1 if disabled or error. */
-   int kb_reasoning_query(const config_t *cfg, const char *query, const char *bindings_json,
+   int kb_reasoning_query(const char *query, const char *bindings_json,
                           const char *scope_kind, const char *scope_id,
                           kb_reasoning_result_t *result_out);
 
@@ -59,7 +59,7 @@ extern "C"
 
    /* Structural contradiction check for a proposed contradicts link.
     * Returns 1 if the Datalog check passes, 0 if it fails, -1 if disabled/error. */
-   int kb_reasoning_contradiction_check(const config_t *cfg, const char *artifact_a_id,
+   int kb_reasoning_contradiction_check(const char *artifact_a_id,
                                         const char *artifact_b_id);
 
    /* Seed the built-in ruleset-v1 record into DB2 reasoning_rulesets (idempotent). */
@@ -77,7 +77,7 @@ extern "C"
     * trigger_json: JSON trigger features (may be NULL).
     * scope_kind / scope_id: narrow to project or workspace (NULL = all).
     * Returns number of results written into out, or -1 on error. */
-   int kb_reasoning_case_recall(const config_t *cfg, const char *trigger_json,
+   int kb_reasoning_case_recall(const char *trigger_json,
                                 const char *scope_kind, const char *scope_id,
                                 kb_reasoning_case_result_t *out, int max_out);
 

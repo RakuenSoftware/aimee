@@ -35,11 +35,17 @@ extern "C"
     * or a non-init thread cannot acquire its own connection. The process-global
     * init connection is never shared across threads: libpq forbids concurrent
     * use of one PGconn. */
-   void *db2_conn(void);
+   void *(db2_conn)(void);
 
    /* Bracket a unit of work so the thread's pooled connection is returned to the
     * pool between units (refcounted; see lifecycle.h). */
-   void db2_lease_begin(void);
+   /* See db2.h: the db2_lease_begin macro records the caller's file:line. */
+   void db2_lease_begin_at(const char *site);
+#ifndef db2_lease_begin
+#define DB2_LEASE_STRINGIFY_(x) #x
+#define DB2_LEASE_SITE_(f, l)   f ":" DB2_LEASE_STRINGIFY_(l)
+#define db2_lease_begin()       db2_lease_begin_at(DB2_LEASE_SITE_(__FILE__, __LINE__))
+#endif
    void db2_lease_end(void);
    void db2_lease_release_idle(void);
 

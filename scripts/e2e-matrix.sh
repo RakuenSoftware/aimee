@@ -55,30 +55,28 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Models are fetched at runtime now (not baked), so CI uses the STUB embedder
-# (EMBEDDER_STUB=1): deterministic fixed-dim vectors, no multi-GB cold download.
-# It exercises the real kb -> embedder -> pgvector wiring at the deployment's
-# real dim (2560 here, matching the 4b default schema_embedding_dim — never the
-# retired 384). compose reads these via ${...}; exporting covers every topology.
-export EMBEDDER_STUB="${EMBEDDER_STUB:-1}"
-export EMBEDDER_STUB_DIM="${EMBEDDER_STUB_DIM:-2560}"
-export AIMEE_EMBEDDING_DIM="${AIMEE_EMBEDDING_DIM:-2560}"
-# Unified-llm topologies (T1 kb-only, T2 server+kb) now embed/rerank/synth against
-# the `aimee-llm` container instead of the torch `embedder`. CI builds the tiny
-# STUB image (no llama.cpp / GGUFs) and runs it in stub mode at the same dim, so
-# the kb -> gateway contract is exercised cheaply. (T3 standalone has no embedder.)
-# compose reads these via ${...}.
-export AIMEE_LLM_STUB="${AIMEE_LLM_STUB:-1}"
-export AIMEE_LLM_STUB_DIM="${AIMEE_LLM_STUB_DIM:-2560}"
-export AIMEE_LLM_DOCKERFILE="${AIMEE_LLM_DOCKERFILE:-Dockerfile.aimee-llm-stub}"
+# The kb embeds IN-CONTAINER now: bekko-a25m's weights are baked into the aimee-kb
+# image, so there is no service to start and nothing to download at runtime. That
+# removes the reason the old stub embedder existed — CI runs the real model.
+#
+# Select it explicitly. The shipped image pre-selects nothing (first boot leaves the
+# choice to the wizard and the builtin lexical embedder serves until then), so
+# without this the topologies would come up with no HTTP embedder and the round-trip
+# check would have nothing to probe.
+export EMBEDDER_MODEL="${EMBEDDER_MODEL:-bekko-a25m}"
+# AIMEE_EMBEDDING_DIM is deliberately NOT set: the config default (384) must match
+# what the selected model returns. Pinning a width here is how you get a schema
+# sized for one embedder and vectors from another — the dim guard would refuse
+# every insert, and CI would be testing a topology no user can deploy.
+unset AIMEE_EMBEDDING_DIM
 
-# COMPOSE_PROFILES: the `aimee-llm` service is now profile-gated (`llm`) — it only
-# starts when a page-2 role is local — so CI opts it in to exercise the kb->gateway
-# contract (with the stub image above). The separate `curator-llm` profile stays
-# OFF: the smoke tests don't exercise the curator and its multi-GB Gemma GGUF would
-# blow the runner's disk/time. Selecting only `llm` overrides the committed .env's
-# curator-llm default. T3 (standalone) has no aimee-llm service, so this is a no-op there.
-export COMPOSE_PROFILES="${COMPOSE_PROFILES:-llm}"
+# No optional profile: the only remaining ones are `legacy-embedder` (the retired
+# torch service, kept for rollback) and `curator-llm` (a multi-GB Gemma GGUF that
+# would blow the runner's disk). Empty also overrides anything in the committed .env.
+export COMPOSE_PROFILES="${COMPOSE_PROFILES:-}"
+# These topology smokes exercise the machine APIs, not browser authentication.
+# Disable webchat instead of inventing a credential fixture outside Vault.
+export AIMEE_RUNTIME_WEB_ENABLED="${AIMEE_RUNTIME_WEB_ENABLED:-0}"
 
 bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
 selected() { case ",$ONLY," in *",$1,"*) return 0 ;; *) return 1 ;; esac; }

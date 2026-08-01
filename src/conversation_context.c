@@ -27,10 +27,7 @@
 
 static int virtual_context_on(void)
 {
-   config_t cfg;
-   if (config_load(&cfg) != 0)
-      return 0;
-   return cfg.virtual_context_enabled;
+   return config_virtual_context_enabled();
 }
 
 /* Extract a JSON string field from a JSON object string. */
@@ -220,10 +217,10 @@ char *conv_ctx_assemble(const char *sid, const char *query, int budget_bytes)
    if (!sid || !sid[0])
       return NULL;
 
-   config_t cfg;
-   if (config_load(&cfg) == 0 && budget_bytes <= 0)
-      budget_bytes = cfg.virtual_context_assembly_budget > 0 ? cfg.virtual_context_assembly_budget
-                                                             : ASSEMBLE_DEFAULT_BUDGET;
+   if (budget_bytes <= 0)
+      budget_bytes = config_virtual_context_assembly_budget() > 0
+                         ? config_virtual_context_assembly_budget()
+                         : ASSEMBLE_DEFAULT_BUDGET;
    if (budget_bytes <= 0)
       budget_bytes = ASSEMBLE_DEFAULT_BUDGET;
 
@@ -283,9 +280,7 @@ cJSON *tool_session_context_search(cJSON *args)
    if (limit <= 0 || limit > 50)
       limit = 10;
 
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.virtual_context_enabled)
+   if (!config_virtual_context_enabled())
    {
       cJSON *r = cJSON_CreateObject();
       cJSON_AddBoolToObject(r, "ok", 0);
@@ -332,9 +327,7 @@ cJSON *tool_session_context_expand(cJSON *args)
    if (cJSON_IsNumber(jid))
       chain_id = (int64_t)jid->valuedouble;
 
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.virtual_context_enabled)
+   if (!config_virtual_context_enabled())
    {
       cJSON *r = cJSON_CreateObject();
       cJSON_AddBoolToObject(r, "ok", 0);
@@ -376,15 +369,12 @@ cJSON *tool_session_context_status(cJSON *args)
 {
    (void)args;
 
-   config_t cfg;
-   config_load(&cfg);
-
    const char *sid = session_id();
    cJSON *r = cJSON_CreateObject();
    cJSON_AddStringToObject(r, "session_id", sid ? sid : "");
-   cJSON_AddBoolToObject(r, "enabled", cfg.virtual_context_enabled ? 1 : 0);
+   cJSON_AddBoolToObject(r, "enabled", config_virtual_context_enabled() ? 1 : 0);
 
-   if (!cfg.virtual_context_enabled)
+   if (!config_virtual_context_enabled())
       return r;
 
    /* Flush any auto-flushable pending events first */

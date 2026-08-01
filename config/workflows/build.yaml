@@ -9,8 +9,8 @@
 #      freeze -> roundtable -> sub-PR -> GREEN CI -> merge into the feature branch)
 #   -> freeze + roundtable {acceptance: proposal completed? quality? missing tests?}  (loop)
 #   -> document + freeze + roundtable {documentation quality}  (loop) -> pushed to the feature branch
-#   -> PR (feature branch -> the repo's DEFAULT branch).  Opened, NOT merged: the workflow ends
-#      at the human-reviewed PR (review + merge happen out-of-band on the forge).
+#   -> draft PR (feature branch -> the repo's DEFAULT branch). Opened, never marked ready or merged:
+#      the workflow ends at the human handoff (review + merge happen out-of-band on the forge).
 #
 # The roundtable always sees the originating proposal alongside the artifact under
 # review (the engine supplies it from the run's proposal), so the plan gate, the
@@ -63,7 +63,7 @@ nodes:
     in:
       src: plan.out
     params:
-      roundtable: plan
+      roundtable: default
       panel:
         required:
           - security
@@ -77,7 +77,7 @@ nodes:
       # is re-authored -> gate again). The engine's default cap parked runs after
       # a handful of rounds; honest refinement loops need more headroom before
       # escalating to a human.
-      max_rounds: 24
+      max_rounds: 6
       focus: does this implementation plan fully satisfy the proposal/request?
     on_pass: split
     on_fail: plan
@@ -100,6 +100,9 @@ nodes:
       feature: feature.out
     params:
       workflow: slice
+      # A terminal child may justify one regenerated packet set, but a broken
+      # verifier or unsatisfiable packet must not manufacture 20 generations.
+      max_rounds: 3
     next: accept_freeze
     on_fail: split
   # Freeze the assembled feature branch for the acceptance review.
@@ -115,7 +118,7 @@ nodes:
     in:
       src: accept_freeze.out
     params:
-      roundtable: acceptance
+      roundtable: default
       panel:
         required:
           - security
@@ -149,7 +152,7 @@ nodes:
     in:
       src: doc_freeze.out
     params:
-      roundtable: documentation
+      roundtable: default
       panel:
         required:
           - architect
@@ -172,8 +175,8 @@ nodes:
       branch: document.out
     next: final_pr
   # Open the final PR: feature branch -> the repo's DEFAULT branch. Terminal: the
-  # workflow ends here. pr.open only OPENS the PR (base:trunk, never merged); a human
-  # reviews and merges it on the forge.
+  # workflow ends here. pr.open creates a DRAFT PR (base:trunk, never marked ready
+  # or merged); a human reviews, marks ready, and decides whether to merge on the forge.
   - id: final_pr
     block: pr.open
     in:

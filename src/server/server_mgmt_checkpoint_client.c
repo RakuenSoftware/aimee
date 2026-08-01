@@ -6,6 +6,7 @@
 #include "kb_mgmt_status.h"
 #include "kb_tls.h"
 #include "server_mgmt_status.h"
+#include "runtime_secret.h"
 
 #include <fcntl.h>
 #include <openssl/crypto.h>
@@ -308,7 +309,7 @@ int server_mgmt_checkpoint_client_start(const server_http_management_config_t *c
             decode_key(c->status_public_key, runtime.public_key) == 0 &&
             read_root_file(c->status_ca, runtime.ca, sizeof(runtime.ca)) == 0 &&
             read_root_file(c->status_client_cert, runtime.cert, sizeof(runtime.cert)) == 0 &&
-            read_root_file(c->status_client_key, runtime.key, sizeof(runtime.key)) == 0;
+            runtime_secret_get(c->status_client_key, runtime.key, sizeof(runtime.key));
    if (ok)
    {
       snprintf(runtime.endpoint, sizeof(runtime.endpoint), "%s", c->status_endpoint);

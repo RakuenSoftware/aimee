@@ -228,10 +228,8 @@ static void compute_update_coord_task(compute_ctx_t *cctx, cJSON *resp)
    }
    else if (strcmp(status_text, "preempted") == 0)
    {
-      config_t cfg;
-      config_load(&cfg);
       if (db1_coord_job_release_task_bounded_owned(cctx->coord_task_id, cctx->coord_claim_owner,
-                                                   cfg.concurrency_preempt_requeue_max) == 0)
+                                                   config_concurrency_preempt_requeue_max()) == 0)
       {
          server_coord_dispatcher_notify();
          return;
@@ -713,6 +711,7 @@ void delegate_worker(void *arg)
    cJSON *jbranch = cJSON_GetObjectItemCaseSensitive(req, "branch");
    cJSON *jtimeout = cJSON_GetObjectItemCaseSensitive(req, "timeout_ms");
    cJSON *jmaxturns = cJSON_GetObjectItemCaseSensitive(req, "max_turns");
+   cJSON *jmaxturnscap = cJSON_GetObjectItemCaseSensitive(req, "max_turns_cap");
    cJSON *jhandoff = cJSON_GetObjectItemCaseSensitive(req, "handoff_json");
    cJSON *jtools = cJSON_GetObjectItemCaseSensitive(req, "tools");
    cJSON *jprovided_target = cJSON_GetObjectItemCaseSensitive(req, "provided_target");
@@ -737,6 +736,9 @@ void delegate_worker(void *arg)
        (cJSON_IsString(jbranch) && jbranch->valuestring[0]) ? jbranch->valuestring : NULL;
    int timeout_ms = cJSON_IsNumber(jtimeout) ? (int)jtimeout->valuedouble : 0;
    int max_turns = cJSON_IsNumber(jmaxturns) ? (int)jmaxturns->valuedouble : -1;
+   int max_turns_cap = cJSON_IsNumber(jmaxturnscap) && jmaxturnscap->valuedouble > 0
+                           ? (int)jmaxturnscap->valuedouble
+                           : 0;
    int handoff_json = cJSON_IsTrue(jhandoff);
    /* Only the JSON boolean literal true opts out; absent, false, and malformed
     * values preserve automatic evidence grounding. */
@@ -768,6 +770,41 @@ void delegate_worker(void *arg)
    {
       delegation_compute_error(cctx, "delegate requires a 'persona' (e.g. engineer, qa, security, "
                                      "reviewer, architect)");
+      compute_ctx_free(cctx);
+      return;
+   }
+   /* The role must name a real role, and the persona a real persona. Both used to
+    * be taken on trust here, so `delegate bogusrole` and `--persona nosuchpersona`
+    * ran to completion: the unknown role fell back to a generic prompt with
+    * read-only tool defaults, and the missing persona file left the delegate with
+    * no identity or principles at all — in both cases returning a plausible answer
+    * to a caller who believed its request had been honoured. The CLI guards these
+    * locally, but the /v1 route reaches this worker directly and bypassed it, so
+    * the check belongs here, at the single boundary every builder crosses. */
+   {
+      const char *removed = delegate_role_removed_reason(role);
+      if (removed)
+      {
+         delegation_compute_error(cctx, removed);
+         compute_ctx_free(cctx);
+         return;
+      }
+   }
+   if (!delegate_role_known(cwd && cwd[0] ? cwd : NULL, role))
+   {
+      char rolemsg[192];
+      snprintf(rolemsg, sizeof(rolemsg),
+               "unknown delegate role '%s' (see 'aimee delegate --list-roles')", role);
+      delegation_compute_error(cctx, rolemsg);
+      compute_ctx_free(cctx);
+      return;
+   }
+   if (!persona_exists(cwd && cwd[0] ? cwd : NULL, persona_override))
+   {
+      char personamsg[192];
+      snprintf(personamsg, sizeof(personamsg), "unknown persona '%s' (see 'aimee persona list')",
+               persona_override);
+      delegation_compute_error(cctx, personamsg);
       compute_ctx_free(cctx);
       return;
    }
@@ -955,9 +992,7 @@ void delegate_worker(void *arg)
       if (!acp_command && tier_override < 0 && !(via_name && via_name[0]) &&
           !(provider_override && provider_override[0]) && !(model_override && model_override[0]))
       {
-         config_t dr_cfg;
-         config_load(&dr_cfg);
-         if (dr_cfg.bandit_live_decision_enabled)
+         if (config_bandit_live_decision_enabled())
          {
             static const char *const dr_arms[2] = {"cheapest", "premium"};
             if (kb_client_bandit_sample("delegate_routing", dr_arms, 2, dr_arm_id,
@@ -986,10 +1021,10 @@ void delegate_worker(void *arg)
       }
    }
 
-   config_t route_cfg;
-   config_load(&route_cfg);
+   agent_route_policy_t policy;
+   agent_route_policy_current(&policy);
    target_agent =
-       agent_route_with_caps_scoped(&acfg, role, &route_cfg, required_caps, min_context, scope);
+       agent_route_with_caps_scoped(&acfg, role, &policy, required_caps, min_context, scope);
    if (!target_agent)
    {
       char caps_buf[128];
@@ -1034,6 +1069,7 @@ void delegate_worker(void *arg)
       target_agent->timeout_ms =
           delegate_effective_timeout_ms(timeout_ms, target_agent->timeout_ms);
    delegate_apply_max_turns_policy(&acfg, role, max_turns);
+   delegate_apply_max_turns_cap(&acfg, role, max_turns_cap);
    if (cctx->background_job_id > 0 && target_agent)
       db1_agent_job_set_agent(cctx->background_job_id, target_agent->name);
    /* Resolve the credential (WP-C.1 vault-FIRST + WP-C.3 per-principal cooldown):
@@ -1069,10 +1105,8 @@ void delegate_worker(void *arg)
     * AIMEE_DELEGATE_DEPTH/AIMEE_PARENT_DELEGATION_ID as request fields. Stale
     * completed parents are ignored so a primary shell with leaked env does not
     * get misclassified as a live delegate. */
-   config_t cfg;
-   config_load(&cfg);
-   int max_depth = cfg.max_delegation_depth > 0 ? cfg.max_delegation_depth
-                                                : CONFIG_DEFAULT_MAX_DELEGATION_DEPTH;
+   int max_depth = config_max_delegation_depth() > 0 ? config_max_delegation_depth()
+                                                     : CONFIG_DEFAULT_MAX_DELEGATION_DEPTH;
    cJSON *jreq_depth = cJSON_GetObjectItemCaseSensitive(req, "delegation_depth");
    int req_parent_depth = 0;
    const char *request_parent = NULL;
@@ -1101,8 +1135,8 @@ void delegate_worker(void *arg)
     * delegate. Counting all first-level delegates for the whole operator
     * session exhausts long, deliberate delegate-heavy workflows; runaway risk
     * comes from sub-delegation fan-out below a root delegate. */
-   int max_spawns = cfg.max_delegation_spawns > 0 ? cfg.max_delegation_spawns
-                                                  : CONFIG_DEFAULT_MAX_DELEGATION_SPAWNS;
+   int max_spawns = config_max_delegation_spawns() > 0 ? config_max_delegation_spawns()
+                                                       : CONFIG_DEFAULT_MAX_DELEGATION_SPAWNS;
    const char *effective_sid = sid ? sid : session_id();
    int total_spawns = 0;
    char root_deleg_id[64] = "";
@@ -1786,12 +1820,11 @@ void delegate_worker(void *arg)
    if (dr_decision_id[0] && dr_arm_id[0])
    {
       double reward = rc == 0 ? 1.0 : 0.0;
-      config_t rcfg;
-      if (rc == 0 && config_load(&rcfg) == 0 && rcfg.cost_reward_enabled)
+      if (rc == 0 && config_cost_reward_enabled())
       {
          double dcost = db1_token_audit_cost_for_delegation(deleg_id);
-         reward = cost_shaped_reward(1, dcost, rcfg.cost_reward_lambda_pct,
-                                     rcfg.cost_reward_ref_usd_milli);
+         reward = cost_shaped_reward(1, dcost, config_cost_reward_lambda_pct(),
+                                     config_cost_reward_ref_usd_milli());
       }
       kb_client_bandit_close("delegate_routing", dr_decision_id, dr_arm_id, reward);
    }
@@ -2074,8 +2107,8 @@ int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 /* Resolve the one runtime panel contract shared by aggregate and roundtable.
  * A saved preset contributes its exact seats. Only the no-preset fallback is
  * synthesized, and that helper has a structural two-seat maximum. */
-static int prepare_roundtable_panel(cJSON *req, config_t *cfg, agent_config_t *acfg, char *err,
-                                    size_t err_n)
+static int prepare_roundtable_panel(cJSON *req, ensemble_panel_t *panel, agent_config_t *acfg,
+                                    char *err, size_t err_n)
 {
    cJSON *jrt = cJSON_GetObjectItemCaseSensitive(req, "roundtable");
    if (jrt && !cJSON_IsString(jrt))
@@ -2084,7 +2117,7 @@ static int prepare_roundtable_panel(cJSON *req, config_t *cfg, agent_config_t *a
       return -1;
    }
    const char *requested = cJSON_IsString(jrt) ? jrt->valuestring : NULL;
-   return ensemble_prepare_runtime_panel(requested, cfg, acfg, err, err_n);
+   return ensemble_prepare_runtime_panel(requested, panel, acfg, err, err_n);
 }
 
 /* Convene the ensemble panel from enabled registry agents when no explicit
@@ -2111,19 +2144,19 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
       return server_send_error(conn, errmsg, NULL);
    }
 
-   config_t cfg;
-   config_load(&cfg);
+   ensemble_panel_t panel;
+   ensemble_panel_from_config(&panel);
    agent_config_t acfg;
    memset(&acfg, 0, sizeof(acfg));
    if (agent_load_config(&acfg) != 0)
       return server_send_error(conn, "could not load agents.json", NULL);
    char pin_err[256] = "no enabled review agent is currently available";
-   if (prepare_roundtable_panel(req, &cfg, &acfg, pin_err, sizeof pin_err) != 0)
+   if (prepare_roundtable_panel(req, &panel, &acfg, pin_err, sizeof pin_err) != 0)
       return server_send_error(conn, pin_err, NULL);
    bind_request_session_creds(req);
 
    delegate_ensemble_result_t result;
-   int rc = delegate_ensemble_run(&acfg, &cfg, prompt, &result);
+   int rc = delegate_ensemble_run(&acfg, &panel, prompt, &result);
    if (rc != 0)
       return server_send_error(conn, "ensemble run failed (no enabled agents in agents.json?)",
                                NULL);

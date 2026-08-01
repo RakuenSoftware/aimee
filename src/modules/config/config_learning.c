@@ -429,7 +429,12 @@ void config_apply_bandit_settings(config_t *cfg, cJSON *root)
       cfg->bandit_ipw_weight_cap = item->valuedouble;
 
    item = cJSON_GetObjectItemCaseSensitive(b, "live_decision_enabled");
-   if (cJSON_IsBool(item) || cJSON_IsNumber(item))
+   /* cJSON_IsTrue for the bool form: a parsed `true` node carries its value in
+    * `type`, and leaves valueint at 0 -- so `bandit_live_decision_enabled: true`
+    * read back as FALSE. The numeric form still uses valueint. */
+   if (cJSON_IsBool(item))
+      cfg->bandit_live_decision_enabled = cJSON_IsTrue(item) ? 1 : 0;
+   else if (cJSON_IsNumber(item))
       cfg->bandit_live_decision_enabled = item->valueint;
 
    item = cJSON_GetObjectItemCaseSensitive(b, "exploration_window_seconds");
@@ -492,7 +497,12 @@ void config_apply_mdl_settings(config_t *cfg, cJSON *root)
       return;
 
    cJSON *item = cJSON_GetObjectItemCaseSensitive(s, "mdl_tiebreak_enabled");
-   if (cJSON_IsBool(item) || cJSON_IsNumber(item))
+   /* cJSON_IsTrue for the bool form: a parsed `true` node carries its value in
+    * `type`, and leaves valueint at 0 -- so `kb_mdl_tiebreak_enabled: true`
+    * read back as FALSE. The numeric form still uses valueint. */
+   if (cJSON_IsBool(item))
+      cfg->kb_mdl_tiebreak_enabled = cJSON_IsTrue(item) ? 1 : 0;
+   else if (cJSON_IsNumber(item))
       cfg->kb_mdl_tiebreak_enabled = item->valueint;
 
    item = cJSON_GetObjectItemCaseSensitive(s, "mdl_bump_drift_alert");
@@ -511,7 +521,12 @@ void config_apply_mdl_settings(config_t *cfg, cJSON *root)
    /* Shadow gate for idle-reflection synthesis (proposal §4): when on, the pass
     * scores and logs its winner but writes no durable candidate. Fail-closed. */
    item = cJSON_GetObjectItemCaseSensitive(s, "reflection_shadow");
-   if (cJSON_IsBool(item) || cJSON_IsNumber(item))
+   /* cJSON_IsTrue for the bool form: a parsed `true` node carries its value in
+    * `type`, and leaves valueint at 0 -- so `kb_reflection_synthesis_shadow: true`
+    * read back as FALSE. The numeric form still uses valueint. */
+   if (cJSON_IsBool(item))
+      cfg->kb_reflection_synthesis_shadow = cJSON_IsTrue(item) ? 1 : 0;
+   else if (cJSON_IsNumber(item))
       cfg->kb_reflection_synthesis_shadow = item->valueint;
 }
 

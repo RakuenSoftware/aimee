@@ -29,7 +29,7 @@ int vault_principal_name_sanitize(const char *name, char *out, size_t out_len)
 }
 
 attested_transport_t vault_principal_resolve(int is_tcp, int is_tls, long peer_uid,
-                                             const char *webuser, int webuser_token_ok,
+                                             const char *webuser, int webuser_attested,
                                              const char *cert_cn, char *out, size_t out_len)
 {
    if (out && out_len)
@@ -74,11 +74,11 @@ attested_transport_t vault_principal_resolve(int is_tcp, int is_tls, long peer_u
     * rather than gaining bearer-only server-write authority. */
    int tls_bearer = is_tcp && is_tls && !webuser_asserted;
 
-   /* A webuser assertion is honored ONLY under the server.token trust boundary
-    * (the secret only the webchat backend holds). Asserted WITHOUT a valid token
+   /* A webuser assertion is honored ONLY under the root-owned webchat UDS trust
+    * boundary. Asserted WITHOUT valid kernel attestation
     * it is a spoof: the principal is refused (empty), and the connection is
     * classified by its underlying transport — never granted a vault identity. */
-   if (webuser_asserted && webuser_token_ok)
+   if (webuser_asserted && webuser_attested)
    {
       /* Same sanitize-or-no-principal rule as the cert CN above. An unusable name
        * yields NO vault identity but KEEPS the ATTEST_WEBCHAT_TRUSTED

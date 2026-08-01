@@ -55,6 +55,37 @@ const char *delegate_role_removed_reason(const char *role)
    return NULL;
 }
 
+/* Roles with a built-in prompt template, plus `plan` (the planner alias target,
+ * whose prompt is assembled by the planner rather than a template). This is the
+ * identity of a role name, which is why it lives beside the alias table: the two
+ * must agree, and test_delegate_role asserts every alias resolves to a member.
+ *
+ * Kept as a positive list because the removed-role blacklist above only rejects
+ * six names. Any OTHER unknown name used to reach exactly the state that
+ * blacklist exists to prevent — no template (so a generic prompt), no write
+ * classification (so silently read-only), and no role eligibility an agent could
+ * actually declare. An operator's custom role is still honoured: those are
+ * template files, and delegate_role_known() accepts anything with one. */
+static const char *const g_known_roles[] = {"review",    "validate",   "diagnose",   "code",
+                                            "refactor",  "explain",    "draft",      "execute",
+                                            "summarize", "format",     "search",     "reason",
+                                            "plan",      "continuity", "beat-check", NULL};
+
+int delegate_role_known(const char *project_root, const char *role)
+{
+   if (!role || !role[0])
+      return 0;
+   const char *canonical = delegate_role_canonicalize(role);
+   for (int i = 0; g_known_roles[i]; i++)
+      if (strcmp(canonical, g_known_roles[i]) == 0)
+         return 1;
+   /* A project- or user-level template file defines a custom role. Check the
+    * name as given AND canonicalized so an alias to a custom role still works. */
+   char path[ROLE_TEMPLATE_PATH_MAX];
+   return role_template_path(project_root, canonical, path, sizeof(path)) == 0 ||
+          role_template_path(project_root, role, path, sizeof(path)) == 0;
+}
+
 const char *delegate_role_canonicalize(const char *role)
 {
    if (!role || !role[0])
@@ -168,5 +199,20 @@ void delegate_apply_max_turns_policy(agent_config_t *cfg, const char *role, int 
        * declared cap down to the role default. */
       if (cfg->agents[i].max_turns < 0)
          cfg->agents[i].max_turns = default_cap;
+   }
+}
+
+void delegate_apply_max_turns_cap(agent_config_t *cfg, const char *role, int cap)
+{
+   if (!cfg || !role || !role[0] || cap <= 0)
+      return;
+
+   const char *canonical_role = delegate_role_canonicalize(role);
+   for (int i = 0; i < cfg->agent_count; i++)
+   {
+      if (!delegate_agent_supports_role(&cfg->agents[i], canonical_role))
+         continue;
+      if (cfg->agents[i].max_turns <= 0 || cfg->agents[i].max_turns > cap)
+         cfg->agents[i].max_turns = cap;
    }
 }

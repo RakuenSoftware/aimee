@@ -148,6 +148,8 @@ static void test_store_single_use(void)
    assert(kb_enroll_store_issue(path, "project:X", tok, sizeof(tok)) == 0);
    assert(kb_enroll_store_issue(path, "global", tok2, sizeof(tok2)) == 0);
    assert(strcmp(tok, tok2) != 0);
+   struct stat lock_stat;
+   assert(stat(path, &lock_stat) == 0 && lock_stat.st_size == 0); /* verifier is Vault-only */
 
    /* consume the first: returns its scope, single-use (replay rejected). */
    assert(kb_enroll_store_consume(path, tok, scope, sizeof(scope)) == 1);
@@ -174,7 +176,22 @@ static void test_store_single_use(void)
    assert(kb_enroll_store_issue(path, "a\tb", bad, sizeof(bad)) == -1);
    assert(kb_enroll_store_issue(path, "a\nb", bad, sizeof(bad)) == -1);
 
+   /* Upgrade path: an existing hash registry is sealed and zero-truncated
+    * before its token remains redeemable from Vault. */
+   char legacy_path[256], legacy_hash[KB_ENROLL_HASH_HEX];
+   snprintf(legacy_path, sizeof(legacy_path), "/tmp/aimee_enroll_legacy_%d.txt", (int)getpid());
+   assert(kb_enroll_token_hash("legacy-token", legacy_hash, sizeof(legacy_hash)) == 0);
+   FILE *legacy = fopen(legacy_path, "wb");
+   assert(legacy != NULL);
+   fprintf(legacy, "%s\t0\tlegacy-scope\n", legacy_hash);
+   fclose(legacy);
+   assert(kb_enroll_store_migrate(legacy_path) == 0);
+   assert(stat(legacy_path, &lock_stat) == 0 && lock_stat.st_size == 0);
+   assert(kb_enroll_store_consume(legacy_path, "legacy-token", scope, sizeof(scope)) == 1);
+   assert(strcmp(scope, "legacy-scope") == 0);
+
    remove(path);
+   remove(legacy_path);
    printf("  store_single_use: ok\n");
 }
 
@@ -400,6 +417,10 @@ static void test_redeem_csr(void)
 
 int main(void)
 {
+   char vault_home[256];
+   snprintf(vault_home, sizeof(vault_home), "/tmp/aimee_kb_enroll_vault_%d", (int)getpid());
+   assert(mkdir(vault_home, 0700) == 0);
+   assert(setenv("AIMEE_HOME", vault_home, 1) == 0);
    printf("kb_enroll:\n");
    test_token_generate();
    test_token_hash();
@@ -411,6 +432,9 @@ int main(void)
    test_mint();
    test_redeem();
    test_redeem_csr();
+   char cleanup[320];
+   snprintf(cleanup, sizeof(cleanup), "rm -rf -- '%s'", vault_home);
+   assert(system(cleanup) == 0);
    printf("All kb_enroll tests passed.\n");
    return 0;
 }

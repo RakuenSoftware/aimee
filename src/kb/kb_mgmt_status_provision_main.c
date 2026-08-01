@@ -6,6 +6,8 @@
 #include "vault_custody_kms.h"
 #include "vault_internal.h"
 #include "vault_server_key.h"
+#include "vault_service.h"
+#include "vault_store.h"
 
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
@@ -400,7 +402,28 @@ int main(int argc, char **argv)
       return EXIT_HARDENING;
    }
 
-   const char *db_url = getenv("AIMEE_KB_STATUS_PROVISION_DSN");
+   char db_url_value[4097] = "";
+   const char *db_url_input = getenv("AIMEE_KB_STATUS_PROVISION_DSN");
+   if (db_url_input && db_url_input[0] &&
+       !vault_store_has_entry(VAULT_SERVER_PRINCIPAL, "environment",
+                              "AIMEE_KB_STATUS_PROVISION_DSN"))
+   {
+      if (vault_service_set_server("environment", "AIMEE_KB_STATUS_PROVISION_DSN", db_url_input) !=
+          VAULT_OK)
+      {
+         unsetenv("AIMEE_KB_STATUS_PROVISION_DSN");
+         fixed_error("configuration");
+         return EXIT_CONFIGURATION;
+      }
+   }
+   unsetenv("AIMEE_KB_STATUS_PROVISION_DSN");
+   if (vault_service_get_server_principal("environment", "AIMEE_KB_STATUS_PROVISION_DSN",
+                                          db_url_value, sizeof(db_url_value)) != VAULT_OK)
+   {
+      fixed_error("configuration");
+      return EXIT_CONFIGURATION;
+   }
+   const char *db_url = db_url_value;
    const char *helper = getenv("AIMEE_VAULT_KMS_HELPER");
    const char *custody_key_id = getenv("AIMEE_VAULT_KMS_KEY_ID");
    const char *hwm_public = getenv("AIMEE_VAULT_KMS_HWM_PUBKEY");

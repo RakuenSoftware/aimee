@@ -1,7 +1,7 @@
 /* Ordered wizard step definitions + small helpers. Pure data/logic (no DOM), so
  * the ordering and restart-key classification are unit-tested.
  *
- * The wizard forks on the knowledge-base choice (step 2): connecting to a REMOTE
+ * The wizard forks on the knowledge-base choice after the account and provider:
  * aimee-kb deploys nothing locally, so the deploy-topology + shared-store (DB2)
  * steps are hidden. A step's `showWhen` predicate decides whether it appears for
  * the current kb_mode; a step with no predicate always shows. The tail is always
@@ -25,19 +25,20 @@ export interface WizardStep {
   /** One-line "what you lose if you skip", shown for optional/hand-off steps. */
   skipNote?: string;
   /** A step whose body is a bespoke component rather than the generic key inputs:
-   * 'chooser' = primary chooser, 'kb' = knowledge-base fork, 'deploy' = deploy
+   * 'account' = replacement login, 'chooser' = primary chooser, 'kb' = knowledge-base fork, 'deploy' = deploy
    * topology (LLM placement), 'db2' = shared-store (bundled vs existing Postgres),
    * 'connection' = git-host auth, 'workspace' = org enumerate + bulk clone.
    * Rendered specially by SetupWizard. */
-  kind?: 'chooser' | 'kb' | 'deploy' | 'db2' | 'connection' | 'workspace';
+  kind?: 'account' | 'chooser' | 'kb' | 'deploy' | 'db2' | 'connection' | 'workspace';
   /** When present, the step is only shown for the kb modes it returns true for.
    * Absent ⇒ always shown. */
   showWhen?: (kbMode: WizardKbMode) => boolean;
 }
 
 export const WIZARD_STEPS: WizardStep[] = [
+  { id: 'account', title: 'Secure your account', keys: [], kind: 'account' },
   { id: 'provider', title: 'Primary provider', keys: [], kind: 'chooser' },
-  // Step 2 — the knowledge-base fork. Local deploys an aimee-kb here (needs the
+  // Knowledge-base fork. Local deploys an aimee-kb here (needs the
   // deploy-topology + DB2 steps below); remote connects to an existing one and
   // skips all local infra.
   { id: 'knowledge_base', title: 'Knowledge base', keys: [], kind: 'kb' },

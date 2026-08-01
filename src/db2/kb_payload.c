@@ -31,8 +31,10 @@ char *db2_kb_build_document_payload(int64_t doc_id)
       return NULL;
 
    static const char *sql =
-       "SELECT project, file_path, heading_path, line_start, line_end, file_hash, chunk_index"
-       " FROM kb_documents WHERE id = ?1";
+       "SELECT d.project, d.file_path, d.heading_path, d.line_start, d.line_end, d.file_hash,"
+       " d.chunk_index FROM kb_documents d JOIN projects p ON p.name=d.project"
+       " WHERE d.id = ?1 AND p.lifecycle_state='current'"
+       " AND d.generation=p.current_generation";
    char err[KBP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -85,12 +87,16 @@ int db2_kb_document_fetch(int64_t id, const char *project, db2_kb_document_row_t
     * resolve the rows pgvec_kb_search returns across all projects. A named
     * project still scopes the lookup. */
    int has_project = (project && project[0]);
-   const char *sql = has_project ? "SELECT id, file_path, file_hash, heading_path, line_start, "
-                                   "line_end, content, doc_kind"
-                                   " FROM kb_documents WHERE id = ?1 AND project = ?2"
-                                 : "SELECT id, file_path, file_hash, heading_path, line_start, "
-                                   "line_end, content, doc_kind"
-                                   " FROM kb_documents WHERE id = ?1";
+   const char *sql =
+       has_project
+           ? "SELECT d.id,d.project,d.file_path,d.file_hash,d.heading_path,d.line_start,d.line_end,"
+             "d.content,d.doc_kind FROM kb_documents d JOIN projects p ON p.name=d.project"
+             " WHERE d.id=?1 AND d.project=?2 AND p.lifecycle_state='current'"
+             " AND d.generation=p.current_generation"
+           : "SELECT d.id,d.project,d.file_path,d.file_hash,d.heading_path,d.line_start,d.line_end,"
+             "d.content,d.doc_kind FROM kb_documents d JOIN projects p ON p.name=d.project"
+             " WHERE d.id=?1 AND p.lifecycle_state='current'"
+             " AND d.generation=p.current_generation";
    char err[KBP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -102,16 +108,18 @@ int db2_kb_document_fetch(int64_t id, const char *project, db2_kb_document_row_t
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
       out->id = aimee_pg_column_int64(st, 0);
-      const char *fp = aimee_pg_column_text(st, 1);
-      const char *fh = aimee_pg_column_text(st, 2);
-      const char *hp = aimee_pg_column_text(st, 3);
-      const char *ct = aimee_pg_column_text(st, 6);
-      const char *dk = aimee_pg_column_text(st, 7);
+      const char *pj = aimee_pg_column_text(st, 1);
+      const char *fp = aimee_pg_column_text(st, 2);
+      const char *fh = aimee_pg_column_text(st, 3);
+      const char *hp = aimee_pg_column_text(st, 4);
+      const char *ct = aimee_pg_column_text(st, 7);
+      const char *dk = aimee_pg_column_text(st, 8);
+      snprintf(out->project, sizeof(out->project), "%s", pj ? pj : "");
       snprintf(out->file_path, sizeof(out->file_path), "%s", fp ? fp : "");
       snprintf(out->file_hash, sizeof(out->file_hash), "%s", fh ? fh : "");
       snprintf(out->heading_path, sizeof(out->heading_path), "%s", hp ? hp : "");
-      out->line_start = aimee_pg_column_int(st, 4);
-      out->line_end = aimee_pg_column_int(st, 5);
+      out->line_start = aimee_pg_column_int(st, 5);
+      out->line_end = aimee_pg_column_int(st, 6);
       snprintf(out->content, sizeof(out->content), "%s", ct ? ct : "");
       snprintf(out->doc_kind, sizeof(out->doc_kind), "%s", dk ? dk : "");
       hit = 1;
@@ -131,17 +139,19 @@ int db2_kb_documents_list_convention_candidates(db2_kb_convention_row_t *out, in
    /* doc_kind <> 'pdf': a PDF whose file_path happens to match a convention pattern
     * (e.g. docs/adr/0007.pdf) must not have its content pulled into agent-facing
     * conventions — PDF content stays behind the access-gated search_chunks tool. */
-   static const char *sql = "SELECT project, file_path, heading_path, content FROM kb_documents"
-                            " WHERE doc_kind <> 'pdf' AND ("
-                            "       file_path LIKE '%CONTRIBUTING%'"
-                            "    OR file_path LIKE '%AGENTS.md'"
-                            "    OR file_path LIKE '%STYLE%'"
-                            "    OR file_path LIKE '%CODING%'"
-                            "    OR file_path LIKE '%.aimee-rules%'"
-                            "    OR file_path LIKE '%.aimee/rules.md'"
-                            "    OR file_path LIKE '%.aimee/context.md'"
-                            "    OR file_path LIKE '%/adr/%')"
-                            " ORDER BY project, file_path, chunk_index"
+   static const char *sql = "SELECT d.project,d.file_path,d.heading_path,d.content"
+                            " FROM kb_documents d JOIN projects p ON p.name=d.project"
+                            " WHERE p.lifecycle_state='current'"
+                            " AND d.generation=p.current_generation AND d.doc_kind <> 'pdf' AND ("
+                            "       d.file_path LIKE '%CONTRIBUTING%'"
+                            "    OR d.file_path LIKE '%AGENTS.md'"
+                            "    OR d.file_path LIKE '%STYLE%'"
+                            "    OR d.file_path LIKE '%CODING%'"
+                            "    OR d.file_path LIKE '%.aimee-rules%'"
+                            "    OR d.file_path LIKE '%.aimee/rules.md'"
+                            "    OR d.file_path LIKE '%.aimee/context.md'"
+                            "    OR d.file_path LIKE '%/adr/%')"
+                            " ORDER BY d.project,d.file_path,d.chunk_index"
                             " LIMIT ?1";
    char err[KBP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -180,7 +190,9 @@ int db2_kb_documents_get_stored_hash(const char *project, const char *file_path,
       return -1;
 
    static const char *sql =
-       "SELECT file_hash FROM kb_documents WHERE project = ?1 AND file_path = ?2 LIMIT 1";
+       "SELECT d.file_hash FROM kb_documents d JOIN projects p ON p.name=d.project"
+       " WHERE d.project=?1 AND d.file_path=?2 AND p.lifecycle_state='current'"
+       " AND d.generation=p.current_generation LIMIT 1";
    char err[KBP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -212,11 +224,16 @@ int db2_kb_documents_hash_exists(const char *project, const char *file_hash, cha
    if (!conn)
       return -1;
 
-   static const char *sql = "SELECT file_path FROM kb_documents"
-                            " WHERE project = ?1 AND file_hash = ?2"
+   static const char *sql = "SELECT d.file_path FROM kb_documents d"
+                            " JOIN projects p ON p.name=d.project"
+                            " WHERE d.project=?1 AND d.file_hash=?2"
+                            " AND p.lifecycle_state='current' AND d.generation=p.current_generation"
                             " UNION"
-                            " SELECT file_path FROM kb_file_index"
-                            " WHERE project = ?1 AND file_hash = ?2"
+                            " SELECT k.file_path FROM kb_file_index k"
+                            " JOIN projects p2 ON p2.name=k.project"
+                            " WHERE k.project=?1 AND k.file_hash=?2"
+                            " AND p2.lifecycle_state='current'"
+                            " AND k.generation=p2.current_generation"
                             " LIMIT 1";
    char err[KBP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -249,11 +266,16 @@ int db2_kb_documents_hll_sources_for_hash(const char *project, const char *file_
    if (!conn)
       return -1;
 
-   static const char *sql = "SELECT file_path FROM kb_documents"
-                            " WHERE project = ?1 AND file_hash = ?2"
+   static const char *sql = "SELECT d.file_path FROM kb_documents d"
+                            " JOIN projects p ON p.name=d.project"
+                            " WHERE d.project=?1 AND d.file_hash=?2"
+                            " AND p.lifecycle_state='current' AND d.generation=p.current_generation"
                             " UNION"
-                            " SELECT file_path FROM kb_file_index"
-                            " WHERE project = ?1 AND file_hash = ?2";
+                            " SELECT k.file_path FROM kb_file_index k"
+                            " JOIN projects p2 ON p2.name=k.project"
+                            " WHERE k.project=?1 AND k.file_hash=?2"
+                            " AND p2.lifecycle_state='current'"
+                            " AND k.generation=p2.current_generation";
    char err[KBP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -278,6 +300,12 @@ int db2_kb_documents_hll_sources_for_hash(const char *project, const char *file_
 int db2_kb_documents_fts_search(const char *project, const char *query, int64_t *ids,
                                 double *scores, int max)
 {
+   return db2_kb_documents_fts_search_scoped(project, NULL, query, ids, scores, max);
+}
+
+int db2_kb_documents_fts_search_scoped(const char *project, const char *exclude_project,
+                                       const char *query, int64_t *ids, double *scores, int max)
+{
    if (!ids || !scores || max <= 0)
       return -1;
    if (!query || !query[0])
@@ -293,25 +321,76 @@ int db2_kb_documents_fts_search(const char *project, const char *query, int64_t 
     * semantic signal to arbitrate. websearch_to_tsquery handles quoted phrases /
     * operators, so quoted/identifier queries lean on exact term match. */
    const int filter_project = (project && project[0]) ? 1 : 0;
+   const int exclude = !filter_project && exclude_project && exclude_project[0];
    static const char *sql_proj =
-       "SELECT id, ts_rank(kb_fts_tsv, websearch_to_tsquery('simple', ?1)) AS r"
-       " FROM kb_documents"
-       " WHERE kb_fts_tsv @@ websearch_to_tsquery('simple', ?1) AND project = ?2"
+       "SELECT d.id,ts_rank(d.kb_fts_tsv,websearch_to_tsquery('simple',?1)) AS r"
+       " FROM kb_documents d JOIN projects p ON p.name=d.project"
+       " WHERE d.kb_fts_tsv @@ websearch_to_tsquery('simple',?1) AND d.project=?2"
+       " AND p.lifecycle_state='current' AND d.generation=p.current_generation"
        " ORDER BY r DESC LIMIT ?3";
    static const char *sql_all =
-       "SELECT id, ts_rank(kb_fts_tsv, websearch_to_tsquery('simple', ?1)) AS r"
-       " FROM kb_documents"
-       " WHERE kb_fts_tsv @@ websearch_to_tsquery('simple', ?1)"
+       "SELECT d.id,ts_rank(d.kb_fts_tsv,websearch_to_tsquery('simple',?1)) AS r"
+       " FROM kb_documents d JOIN projects p ON p.name=d.project"
+       " WHERE d.kb_fts_tsv @@ websearch_to_tsquery('simple',?1)"
+       " AND p.lifecycle_state='current' AND d.generation=p.current_generation"
        " ORDER BY r DESC LIMIT ?2";
+   static const char *sql_other =
+       "SELECT d.id,ts_rank(d.kb_fts_tsv,websearch_to_tsquery('simple',?1)) AS r"
+       " FROM kb_documents d JOIN projects p ON p.name=d.project"
+       " WHERE d.kb_fts_tsv @@ websearch_to_tsquery('simple',?1) AND d.project<>?2"
+       " AND p.lifecycle_state='current' AND d.generation=p.current_generation"
+       " ORDER BY r DESC LIMIT ?3";
+   static const char *shim_proj =
+       "SELECT d.id,1.0 AS r FROM kb_documents d JOIN projects p ON p.name=d.project"
+       " WHERE instr(lower(d.content||' '||d.heading_path),lower(?1))>0"
+       " AND d.project=?2 AND p.lifecycle_state='current'"
+       " AND d.generation=p.current_generation ORDER BY r DESC LIMIT ?3";
+   static const char *shim_all =
+       "SELECT d.id,1.0 AS r FROM kb_documents d JOIN projects p ON p.name=d.project"
+       " WHERE instr(lower(d.content||' '||d.heading_path),lower(?1))>0"
+       " AND p.lifecycle_state='current'"
+       " AND d.generation=p.current_generation ORDER BY r DESC LIMIT ?2";
+   static const char *shim_other =
+       "SELECT d.id,1.0 AS r FROM kb_documents d JOIN projects p ON p.name=d.project"
+       " WHERE instr(lower(d.content||' '||d.heading_path),lower(?1))>0"
+       " AND d.project<>?2 AND p.lifecycle_state='current'"
+       " AND d.generation=p.current_generation ORDER BY r DESC LIMIT ?3";
+   const char *selected = filter_project ? sql_proj : (exclude ? sql_other : sql_all);
+   char shim_query[256] = "";
+   const char *bound_query = query;
+   if (aimee_pg_is_shim())
+   {
+      selected = filter_project ? shim_proj : (exclude ? shim_other : shim_all);
+      /* The test shim has no PostgreSQL websearch_to_tsquery equivalent. Use
+       * its first lexical token as a coarse candidate gate; production keeps
+       * full phrase/operator semantics above. */
+      const char *p = query;
+      while (*p && !isalnum((unsigned char)*p) && *p != '_')
+         p++;
+      size_t n = 0;
+      while (p[n] && (isalnum((unsigned char)p[n]) || p[n] == '_' || p[n] == '-') &&
+             n + 1 < sizeof(shim_query))
+      {
+         shim_query[n] = p[n];
+         n++;
+      }
+      shim_query[n] = '\0';
+      if (shim_query[0])
+         bound_query = shim_query;
+   }
    char err[KBP_ERRBUF] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(conn, filter_project ? sql_proj : sql_all, err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, selected, err, sizeof(err));
    if (!st)
       return -1;
-   aimee_pg_bind_text(st, "?1", query);
+   aimee_pg_bind_text(st, "?1", bound_query);
    if (filter_project)
    {
       aimee_pg_bind_text(st, "?2", project);
+      aimee_pg_bind_int(st, "?3", max);
+   }
+   else if (exclude)
+   {
+      aimee_pg_bind_text(st, "?2", exclude_project);
       aimee_pg_bind_int(st, "?3", max);
    }
    else
@@ -375,14 +454,26 @@ int db2_curator_reenqueue_extract_all(void)
     * job, then re-arm every existing extract_doc job back to pending. */
    kbp_exec(conn, "INSERT INTO kb_async_jobs (kind, document_id, project, status)"
                   " SELECT 'extract_doc', d.id, d.project, 'pending' FROM kb_documents d"
+                  " JOIN projects p ON p.name=d.project"
                   " WHERE NOT EXISTS (SELECT 1 FROM kb_async_jobs j"
-                  "   WHERE j.kind = 'extract_doc' AND j.document_id = d.id)");
+                  "   WHERE j.kind = 'extract_doc' AND j.document_id = d.id)"
+                  " AND p.lifecycle_state='current' AND d.generation=p.current_generation");
    kbp_exec(conn, "UPDATE kb_async_jobs SET status = 'pending'"
-                  " WHERE kind = 'extract_doc' AND status <> 'pending'");
+                  " WHERE kind = 'extract_doc' AND status <> 'pending'"
+                  " AND EXISTS (SELECT 1 FROM kb_documents d"
+                  " JOIN projects p ON p.name=d.project"
+                  " WHERE d.id=kb_async_jobs.document_id"
+                  " AND p.lifecycle_state='current'"
+                  " AND d.generation=p.current_generation)");
 
    char err[KBP_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn, "SELECT COUNT(*) FROM kb_async_jobs WHERE kind = 'extract_doc'", err, sizeof(err));
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        "SELECT COUNT(*) FROM kb_async_jobs j WHERE kind = 'extract_doc'"
+                        " AND EXISTS (SELECT 1 FROM kb_documents d"
+                        " JOIN projects p ON p.name=d.project WHERE d.id=j.document_id"
+                        " AND p.lifecycle_state='current' AND d.generation=p.current_generation)",
+                        err, sizeof(err));
    if (!st)
       return 0;
    int n = 0;
@@ -401,7 +492,9 @@ int db2_kb_documents_list_chunk_ids_for_file(const char *project, const char *fi
    if (!conn)
       return 0;
 
-   static const char *sql = "SELECT id FROM kb_documents WHERE project = ?1 AND file_path = ?2";
+   static const char *sql = "SELECT d.id FROM kb_documents d JOIN projects p ON p.name=d.project"
+                            " WHERE d.project=?1 AND d.file_path=?2 AND p.lifecycle_state='current'"
+                            " AND d.generation=p.current_generation";
    char err[KBP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -501,7 +594,9 @@ void db2_kb_documents_delete_for_file(const char *project, const char *file_path
    if (!conn)
       return;
 
-   static const char *sql = "DELETE FROM kb_documents WHERE project = ?1 AND file_path = ?2";
+   static const char *sql = "DELETE FROM kb_documents WHERE project=?1 AND file_path=?2"
+                            " AND generation=(SELECT current_generation FROM projects"
+                            " WHERE name=?1 AND lifecycle_state='current')";
    char err[KBP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -533,9 +628,11 @@ int64_t db2_kb_documents_insert_chunk(const char *project, const char *file_path
 
    static const char *sql =
        "INSERT INTO kb_documents"
-       " (project, file_path, file_hash, chunk_index, heading_path, line_start, line_end,"
+       " (project, generation, file_path, file_hash, chunk_index, heading_path, line_start, "
+       "line_end,"
        "  content, token_count, updated_at)"
-       " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, pg_now_text())"
+       " VALUES (?1,(SELECT current_generation FROM projects"
+       " WHERE name=?1 AND lifecycle_state='current'),?2,?3,?4,?5,?6,?7,?8,?9,pg_now_text())"
        " RETURNING id";
    char err[KBP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -617,10 +714,13 @@ int64_t db2_kb_documents_insert_chunk_pdf(const char *project, const char *file_
 
    static const char *sql =
        "INSERT INTO kb_documents"
-       " (project, file_path, file_hash, chunk_index, heading_path, line_start, line_end,"
+       " (project, generation, file_path, file_hash, chunk_index, heading_path, line_start, "
+       "line_end,"
        "  content, token_count, doc_kind, chunk_strategy, page_start, page_end,"
        "  sensitivity_class, quarantine_state, updated_at)"
-       " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'pdf', ?10, ?11, ?12, ?13, ?14, pg_now_text())"
+       " VALUES (?1,(SELECT current_generation FROM projects"
+       " WHERE name=?1 AND lifecycle_state='current'),?2,?3,?4,?5,?6,?7,?8,?9,'pdf',"
+       " ?10,?11,?12,?13,?14,pg_now_text())"
        " RETURNING id";
    char err[KBP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -880,11 +980,14 @@ static int kbp_fetch_pdf_chunk(void *conn, const char *project, int64_t id, db2_
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn,
        has_project
-           ? "SELECT id, file_path, content, page_start, page_end, sensitivity_class FROM "
-             "kb_documents WHERE id = ?1 AND doc_kind = 'pdf' AND quarantine_state <> 'pending'"
-             " AND project = ?2"
-           : "SELECT id, file_path, content, page_start, page_end, sensitivity_class FROM "
-             "kb_documents WHERE id = ?1 AND doc_kind = 'pdf' AND quarantine_state <> 'pending'",
+           ? "SELECT d.id,d.file_path,d.content,d.page_start,d.page_end,d.sensitivity_class FROM "
+             "kb_documents d JOIN projects p ON p.name=d.project WHERE d.id=?1"
+             " AND d.doc_kind='pdf' AND d.quarantine_state<>'pending' AND d.project=?2"
+             " AND p.lifecycle_state='current' AND d.generation=p.current_generation"
+           : "SELECT d.id,d.file_path,d.content,d.page_start,d.page_end,d.sensitivity_class FROM "
+             "kb_documents d JOIN projects p ON p.name=d.project WHERE d.id=?1"
+             " AND d.doc_kind='pdf' AND d.quarantine_state<>'pending'"
+             " AND p.lifecycle_state='current' AND d.generation=p.current_generation",
        err, sizeof(err));
    if (!st)
       return 0;
@@ -925,16 +1028,16 @@ int db2_kb_pdf_search_chunks(const char *project, const char *query, int max,
 
    /* ---- Stage 1a: lexical candidates (the always-on, embedder-independent leg). ---- */
    const char *sql =
-       has_project ? "SELECT id, file_path, content, page_start, page_end, sensitivity_class"
-                     " FROM kb_documents"
-                     " WHERE doc_kind = 'pdf' AND quarantine_state <> 'pending' AND project = ?1"
-                     "   AND lower(content) LIKE ?2 ESCAPE '\\'"
-                     " ORDER BY id LIMIT ?3"
-                   : "SELECT id, file_path, content, page_start, page_end, sensitivity_class"
-                     " FROM kb_documents"
-                     " WHERE doc_kind = 'pdf' AND quarantine_state <> 'pending'"
-                     "   AND lower(content) LIKE ?1 ESCAPE '\\'"
-                     " ORDER BY id LIMIT ?2";
+       has_project ? "SELECT d.id,d.file_path,d.content,d.page_start,d.page_end,d.sensitivity_class"
+                     " FROM kb_documents d JOIN projects p ON p.name=d.project"
+                     " WHERE d.doc_kind='pdf' AND d.quarantine_state<>'pending' AND d.project=?1"
+                     " AND p.lifecycle_state='current' AND d.generation=p.current_generation"
+                     " AND lower(d.content) LIKE ?2 ESCAPE '\\' ORDER BY d.id LIMIT ?3"
+                   : "SELECT d.id,d.file_path,d.content,d.page_start,d.page_end,d.sensitivity_class"
+                     " FROM kb_documents d JOIN projects p ON p.name=d.project"
+                     " WHERE d.doc_kind='pdf' AND d.quarantine_state<>'pending'"
+                     " AND p.lifecycle_state='current' AND d.generation=p.current_generation"
+                     " AND lower(d.content) LIKE ?1 ESCAPE '\\' ORDER BY d.id LIMIT ?2";
    char err[KBP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -981,14 +1084,13 @@ int db2_kb_pdf_search_chunks(const char *project, const char *query, int max,
     * candidate→row resolution (defense in depth). Vector candidates whose chunk row is
     * gone are simply skipped — never dropped from a join that would also drop lexical
     * hits. */
-   config_t cfg;
-   if (n < max && config_load(&cfg) == 0 && cfg.kb_pdf_vector_enabled)
+   if (n < max && config_kb_pdf_vector_enabled())
    {
-      const char *embed_cmd = config_embedding_command(&cfg, NULL);
+      const char *embed_cmd = config_embedding_command_current(NULL);
       if (embed_cmd && embed_cmd[0])
       {
          float qvec[EMBED_MAX_DIM];
-         int dim = memory_embed_text(query, embed_cmd, qvec, EMBED_MAX_DIM);
+         int dim = memory_embed_text(query, embed_cmd, EMBED_INPUT_QUERY, qvec, EMBED_MAX_DIM);
          if (dim > 0)
          {
             /* Request enough candidates to fill the remaining result budget even after
@@ -1056,8 +1158,7 @@ int db2_kb_pdf_reembed_all(void)
     * kb_embeddings (auto-backfilled by the doc-embed drain), PDF vectors are only
     * (re)derived from these jobs. No-op when the PDF-vector capability is off, so a
     * reset never leaves embed_pdf jobs draining with nowhere to land. */
-   config_t cfg;
-   if (config_load(&cfg) != 0 || !cfg.kb_pdf_vector_enabled)
+   if (!config_kb_pdf_vector_enabled())
       return 0;
    void *conn = db2_conn();
    if (!conn)
@@ -1065,8 +1166,10 @@ int db2_kb_pdf_reembed_all(void)
    char err[KBP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn,
-       "SELECT id, project FROM kb_documents WHERE doc_kind = 'pdf' AND quarantine_state = ''", err,
-       sizeof(err));
+       "SELECT d.id,d.project FROM kb_documents d JOIN projects p ON p.name=d.project"
+       " WHERE d.doc_kind='pdf' AND d.quarantine_state='' AND p.lifecycle_state='current'"
+       " AND d.generation=p.current_generation",
+       err, sizeof(err));
    if (!st)
       return 0;
    int n = 0;
@@ -1141,6 +1244,8 @@ int db2_kb_table_cells_lookup(const char *project, const char *document_key, int
              " FROM kb_table_cells c JOIN kb_doc_regions r ON r.id = c.region_id"
              " JOIN kb_documents d ON d.id = r.chunk_id"
              " WHERE d.project = ?1 AND d.doc_kind = 'pdf' AND d.quarantine_state <> 'pending'"
+             "   AND d.generation=(SELECT current_generation FROM projects"
+             " WHERE name=d.project AND lifecycle_state='current')"
              "   AND d.file_path = ?2"
              " ORDER BY c.page_no, c.cell_row, c.cell_col LIMIT ?3"
            : "SELECT c.id, c.region_id, c.page_no, c.cell_row, c.cell_col, c.cell_text,"
@@ -1148,6 +1253,8 @@ int db2_kb_table_cells_lookup(const char *project, const char *document_key, int
              " FROM kb_table_cells c JOIN kb_doc_regions r ON r.id = c.region_id"
              " JOIN kb_documents d ON d.id = r.chunk_id"
              " WHERE d.project = ?1 AND d.doc_kind = 'pdf' AND d.quarantine_state <> 'pending'"
+             "   AND d.generation=(SELECT current_generation FROM projects"
+             " WHERE name=d.project AND lifecycle_state='current')"
              "   AND d.file_path = ?2 AND c.page_no = ?3"
              " ORDER BY c.cell_row, c.cell_col LIMIT ?4";
    char err[KBP_ERRBUF] = "";
@@ -1195,7 +1302,9 @@ void db2_kb_documents_set_tsr_state(const char *project, const char *file_path, 
    if (!conn || !project || !*project || !file_path || !*file_path)
       return;
    static const char *sql = "UPDATE kb_documents SET tsr_state = ?3"
-                            " WHERE project = ?1 AND file_path = ?2 AND doc_kind = 'pdf'";
+                            " WHERE project=?1 AND file_path=?2 AND doc_kind='pdf'"
+                            " AND generation=(SELECT current_generation FROM projects"
+                            " WHERE name=?1 AND lifecycle_state='current')";
    char err[KBP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -1219,7 +1328,9 @@ int db2_kb_pdf_tsr_state(const char *project, const char *document_key, char *ou
    /* Same ACL as lookup: only a readable (non-withheld) PDF doc yields a state. */
    static const char *sql = "SELECT tsr_state FROM kb_documents"
                             " WHERE project = ?1 AND file_path = ?2 AND doc_kind = 'pdf'"
-                            "   AND quarantine_state <> 'pending' LIMIT 1";
+                            "   AND quarantine_state <> 'pending'"
+                            " AND generation=(SELECT current_generation FROM projects"
+                            " WHERE name=?1 AND lifecycle_state='current') LIMIT 1";
    char err[KBP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -1237,33 +1348,37 @@ int db2_kb_pdf_tsr_state(const char *project, const char *document_key, char *ou
    return hit;
 }
 
-int db2_kb_doc_asset_insert(const char *document_key, int page_no, double x0, double y0, double x1,
-                            double y1, const char *kind, const char *caption,
+int db2_kb_doc_asset_insert(const char *project, const char *document_key, int page_no, double x0,
+                            double y0, double x1, double y1, const char *kind, const char *caption,
                             const char *content_type, const char *blob_ref,
                             const char *sensitivity_class)
 {
    void *conn = db2_conn();
-   if (!conn || !document_key || !*document_key || !blob_ref || !*blob_ref)
+   if (!conn || !project || !*project || !document_key || !*document_key || !blob_ref || !*blob_ref)
       return -1;
    static const char *sql =
-       "INSERT INTO kb_doc_assets (document_key, page_no, x0, y0, x1, y1, kind, caption,"
+       "INSERT INTO kb_doc_assets "
+       "(project,generation,document_key,page_no,x0,y0,x1,y1,kind,caption,"
        " content_type, blob_ref, sensitivity_class)"
-       " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) RETURNING id";
+       " VALUES (?1,(SELECT current_generation FROM projects"
+       " WHERE name=?1 AND lifecycle_state='current'),?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"
+       " RETURNING id";
    char err[KBP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return -1;
-   aimee_pg_bind_text(st, "?1", document_key);
-   aimee_pg_bind_int(st, "?2", page_no);
-   aimee_pg_bind_double(st, "?3", x0);
-   aimee_pg_bind_double(st, "?4", y0);
-   aimee_pg_bind_double(st, "?5", x1);
-   aimee_pg_bind_double(st, "?6", y1);
-   aimee_pg_bind_text(st, "?7", kind ? kind : "");
-   aimee_pg_bind_text(st, "?8", caption ? caption : "");
-   aimee_pg_bind_text(st, "?9", content_type ? content_type : "image/png");
-   aimee_pg_bind_text(st, "?10", blob_ref);
-   aimee_pg_bind_text(st, "?11", sensitivity_class ? sensitivity_class : "");
+   aimee_pg_bind_text(st, "?1", project);
+   aimee_pg_bind_text(st, "?2", document_key);
+   aimee_pg_bind_int(st, "?3", page_no);
+   aimee_pg_bind_double(st, "?4", x0);
+   aimee_pg_bind_double(st, "?5", y0);
+   aimee_pg_bind_double(st, "?6", x1);
+   aimee_pg_bind_double(st, "?7", y1);
+   aimee_pg_bind_text(st, "?8", kind ? kind : "");
+   aimee_pg_bind_text(st, "?9", caption ? caption : "");
+   aimee_pg_bind_text(st, "?10", content_type ? content_type : "image/png");
+   aimee_pg_bind_text(st, "?11", blob_ref);
+   aimee_pg_bind_text(st, "?12", sensitivity_class ? sensitivity_class : "");
    int64_t id = -1;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
       id = aimee_pg_column_int64(st, 0);
@@ -1289,6 +1404,10 @@ int db2_kb_doc_asset_open(const char *project, int64_t asset_id, char *blob_ref_
    static const char *sql = "SELECT a.blob_ref, a.content_type FROM kb_doc_assets a"
                             " JOIN kb_documents d ON d.file_path = a.document_key"
                             " WHERE a.id = ?2 AND d.project = ?1 AND d.doc_kind = 'pdf'"
+                            "   AND a.project = ?1"
+                            "   AND a.generation=d.generation"
+                            "   AND d.generation=(SELECT current_generation FROM projects"
+                            " WHERE name=d.project AND lifecycle_state='current')"
                             "   AND d.quarantine_state <> 'pending' LIMIT 1";
    char err[KBP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -1324,6 +1443,10 @@ int db2_kb_doc_assets_list(const char *project, const char *document_key, db2_kb
        " a.sensitivity_class FROM kb_doc_assets a"
        " JOIN kb_documents d ON d.file_path = a.document_key"
        " WHERE d.project = ?1 AND d.doc_kind = 'pdf' AND d.quarantine_state <> 'pending'"
+       "   AND a.project = ?1"
+       "   AND a.generation=d.generation"
+       "   AND d.generation=(SELECT current_generation FROM projects"
+       " WHERE name=d.project AND lifecycle_state='current')"
        "   AND d.file_path = ?2"
        " ORDER BY a.page_no, a.id LIMIT ?3";
    char err[KBP_ERRBUF] = "";
@@ -1365,9 +1488,13 @@ int db2_kb_doc_assets_delete_for_doc(const char *project, const char *document_k
    /* Scoped to this document's assets. Rows go now; the blobs are reclaimed by the
     * reconciliation sweep once no row references them (refcount-by-scan), so a shared/deduped
     * blob survives until its last referrer is gone. */
-   static const char *sql = "DELETE FROM kb_doc_assets WHERE document_key = ?2 AND document_key IN"
-                            " (SELECT file_path FROM kb_documents WHERE project = ?1"
-                            "    AND doc_kind = 'pdf') RETURNING id";
+   static const char *sql = "DELETE FROM kb_doc_assets WHERE project=?1 AND document_key=?2"
+                            " AND generation=(SELECT current_generation FROM projects"
+                            " WHERE name=?1 AND lifecycle_state='current')"
+                            " AND document_key IN (SELECT file_path FROM kb_documents"
+                            " WHERE project=?1 AND doc_kind='pdf'"
+                            " AND generation=(SELECT current_generation FROM projects"
+                            " WHERE name=?1 AND lifecycle_state='current')) RETURNING id";
    char err[KBP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -1465,6 +1592,8 @@ int db2_kb_pdf_quarantine_confirm(const char *project, const char *document_key)
    static const char *sql = "UPDATE kb_documents SET quarantine_state = ''"
                             " WHERE project = ?1 AND file_path = ?2 AND doc_kind = 'pdf'"
                             "   AND quarantine_state = 'pending'"
+                            " AND generation=(SELECT current_generation FROM projects"
+                            " WHERE name=?1 AND lifecycle_state='current')"
                             " RETURNING id";
    int n = kb_pdf_quarantine_apply(sql, project, document_key);
    if (n <= 0)
@@ -1475,8 +1604,7 @@ int db2_kb_pdf_quarantine_confirm(const char *project, const char *document_key)
     * class, so quarantine_state='' after confirm is exactly the just-confirmed
     * chunks) and enqueue an idempotent embed_pdf job per chunk when the capability
     * is on. Row-by-row so an arbitrarily large doc is fully covered. */
-   config_t cfg;
-   if (config_load(&cfg) != 0 || !cfg.kb_pdf_vector_enabled)
+   if (!config_kb_pdf_vector_enabled())
       return n;
    void *conn = db2_conn();
    if (!conn)
@@ -1485,7 +1613,9 @@ int db2_kb_pdf_quarantine_confirm(const char *project, const char *document_key)
    aimee_pg_stmt_t *st =
        aimee_pg_prepare(conn,
                         "SELECT id FROM kb_documents WHERE project = ?1 AND file_path = ?2"
-                        "   AND doc_kind = 'pdf' AND quarantine_state = ''",
+                        "   AND doc_kind='pdf' AND quarantine_state=''"
+                        " AND generation=(SELECT current_generation FROM projects"
+                        " WHERE name=?1 AND lifecycle_state='current')",
                         err, sizeof(err));
    if (!st)
       return n;
@@ -1513,6 +1643,8 @@ int db2_kb_pdf_quarantine_reject(const char *project, const char *document_key)
    static const char *sql = "DELETE FROM kb_documents"
                             " WHERE project = ?1 AND file_path = ?2 AND doc_kind = 'pdf'"
                             "   AND quarantine_state = 'pending'"
+                            " AND generation=(SELECT current_generation FROM projects"
+                            " WHERE name=?1 AND lifecycle_state='current')"
                             " RETURNING id";
    return kb_pdf_quarantine_apply(sql, project, document_key);
 }
@@ -1547,6 +1679,8 @@ int db2_kb_pdf_open_page(const char *project, const char *document_key, int page
        " FROM kb_doc_regions r JOIN kb_documents d ON d.id = r.chunk_id"
        " WHERE r.document_key = ?1 AND r.page_no = ?2 AND d.project = ?3"
        "   AND d.doc_kind = 'pdf' AND d.quarantine_state <> 'pending'"
+       " AND d.generation=(SELECT current_generation FROM projects"
+       " WHERE name=d.project AND lifecycle_state='current')"
        " ORDER BY r.line_index LIMIT ?4";
    char err[KBP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -1580,6 +1714,8 @@ int db2_kb_pdf_open_neighbors(const char *project, int64_t chunk_id, db2_kb_pdf_
        " FROM kb_documents c JOIN kb_documents n"
        "   ON (n.id = c.prev_chunk_id OR n.id = c.next_chunk_id)"
        " WHERE c.id = ?1 AND c.project = ?2 AND n.project = ?2"
+       "   AND c.generation=(SELECT current_generation FROM projects"
+       " WHERE name=c.project AND lifecycle_state='current') AND n.generation=c.generation"
        "   AND c.quarantine_state <> 'pending'" /* don't navigate FROM a quarantined chunk */
        "   AND n.doc_kind = 'pdf' AND n.quarantine_state <> 'pending'"
        " ORDER BY n.chunk_index LIMIT ?3";
@@ -1621,6 +1757,8 @@ int db2_kb_pdf_inspect_structure(const char *project, const char *document_key,
        "SELECT chunk_index, page_start, page_end, heading_path FROM kb_documents"
        " WHERE project = ?1 AND file_path = ?2 AND doc_kind = 'pdf'"
        "   AND quarantine_state <> 'pending'"
+       " AND generation=(SELECT current_generation FROM projects"
+       " WHERE name=?1 AND lifecycle_state='current')"
        " ORDER BY chunk_index LIMIT ?3";
    char err[KBP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));

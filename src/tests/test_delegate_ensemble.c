@@ -470,18 +470,18 @@ static int test_cancel_requested(void *ctx)
 
 /* --- test helpers --- */
 
-static config_t make_cfg(int enabled, int min_ok, double max_cost)
+static ensemble_panel_t make_cfg(int enabled, int min_ok, double max_cost)
 {
-   config_t cfg;
+   ensemble_panel_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    (void)enabled;
-   cfg.ensemble_min_successful = min_ok;
-   cfg.ensemble_max_cost_usd = max_cost;
-   cfg.ensemble_reference_count = 3;
-   snprintf(cfg.ensemble_reference_models[0], 128, "model-a");
-   snprintf(cfg.ensemble_reference_models[1], 128, "model-b");
-   snprintf(cfg.ensemble_reference_models[2], 128, "model-c");
-   snprintf(cfg.ensemble_aggregator, sizeof(cfg.ensemble_aggregator), "review");
+   cfg.min_successful = min_ok;
+   cfg.max_cost_usd = max_cost;
+   cfg.reference_count = 3;
+   snprintf(cfg.reference_models[0], 128, "model-a");
+   snprintf(cfg.reference_models[1], 128, "model-b");
+   snprintf(cfg.reference_models[2], 128, "model-c");
+   snprintf(cfg.aggregator, sizeof(cfg.aggregator), "review");
    return cfg;
 }
 
@@ -528,7 +528,7 @@ static void reset_modes(void)
 static void test_ensemble_basic(void)
 {
    reset_modes();
-   config_t cfg = make_cfg(1, 2, 10.0);
+   ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    delegate_ensemble_result_t result;
    int rc = delegate_ensemble_run(&acfg, &cfg, "what is 2+2?", &result);
@@ -547,7 +547,7 @@ static void test_ensemble_basic(void)
 static void test_ensemble_min_successful_degradation(void)
 {
    g_parallel_mode = 1; /* only first ref succeeds */
-   config_t cfg = make_cfg(1, 2, 10.0);
+   ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    delegate_ensemble_result_t result;
    int rc = delegate_ensemble_run(&acfg, &cfg, "hard question?", &result);
@@ -565,7 +565,7 @@ static void test_ensemble_cost_cap(void)
 {
    g_parallel_mode = 0;
    /* default: 3 refs * (50+50) tokens * $0.000015 = $0.0045 > $0.001 cap */
-   config_t cfg = make_cfg(1, 2, 0.001);
+   ensemble_panel_t cfg = make_cfg(1, 2, 0.001);
    agent_config_t acfg = make_acfg();
    delegate_ensemble_result_t result;
    int rc = delegate_ensemble_run(&acfg, &cfg, "expensive question", &result);
@@ -578,7 +578,7 @@ static void test_ensemble_cost_cap(void)
 static void test_ensemble_cost_uses_model_registry_prices(void)
 {
    reset_modes();
-   config_t cfg = make_cfg(1, 2, 10.0);
+   ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_priced_acfg();
    delegate_ensemble_result_t result;
    int rc = delegate_ensemble_run(&acfg, &cfg, "priced question", &result);
@@ -635,7 +635,7 @@ static void test_ensemble_routes_to_distinct_agents(void)
 {
    g_parallel_mode = 0;
    g_captured_count = 0;
-   config_t cfg = make_cfg(1, 2, 10.0);
+   ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    delegate_ensemble_result_t result;
    int rc = delegate_ensemble_run(&acfg, &cfg, "route check", &result);
@@ -660,7 +660,7 @@ static void test_ensemble_routes_to_distinct_agents(void)
 static void test_roundtable_large_task_no_size_degrade(void)
 {
    reset_modes();
-   config_t cfg = make_cfg(1, 2, 10.0);
+   ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    /* DRAFT mode isolates the SIZE path: the mock panel + aggregator succeed
     * cleanly (they return a fixed "synthesized answer"), so the only thing a large
@@ -696,7 +696,7 @@ static void test_roundtable_large_task_no_size_degrade(void)
 static void test_roundtable_parallel_basic(void)
 {
    reset_modes();
-   config_t cfg = make_cfg(1, 2, 10.0);
+   ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
@@ -730,7 +730,7 @@ static void test_roundtable_folds_cost_to_parent_session(void)
    reset_modes();
    g_cost_fold_calls = 0;
    g_cost_fold_total = 0.0;
-   config_t cfg = make_cfg(1, 2, 10.0);
+   ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
@@ -762,7 +762,7 @@ static void test_roundtable_folds_cost_to_parent_session(void)
 static void test_roundtable_sequential_uses_named_agents(void)
 {
    reset_modes();
-   config_t cfg = make_cfg(1, 2, 10.0);
+   ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
@@ -786,7 +786,7 @@ static void test_roundtable_degrades_on_min_success(void)
 {
    reset_modes();
    g_parallel_mode = 1;
-   config_t cfg = make_cfg(1, 2, 10.0);
+   ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
@@ -814,7 +814,7 @@ static void test_roundtable_optional_failure_is_reported_without_degrading(void)
 {
    reset_modes();
    g_parallel_mode = 9;
-   config_t cfg = make_cfg(1, 2, 10.0);
+   ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
@@ -838,7 +838,7 @@ static void test_roundtable_required_failure_degrades_even_with_optional_success
 {
    reset_modes();
    g_parallel_mode = 10;
-   config_t cfg = make_cfg(1, 2, 10.0);
+   ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
@@ -860,7 +860,7 @@ static void test_roundtable_required_malformed_review_degrades_when_repair_fails
    reset_modes();
    g_parallel_mode = 3;
    g_repair_mode = 2;
-   config_t cfg = make_cfg(1, 1, 10.0);
+   ensemble_panel_t cfg = make_cfg(1, 1, 10.0);
    agent_config_t acfg = make_acfg();
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
@@ -882,7 +882,7 @@ static void test_roundtable_required_malformed_review_degrades_when_repair_fails
 static void test_roundtable_rejects_required_prefix_larger_than_panel(void)
 {
    reset_modes();
-   config_t cfg = make_cfg(1, 2, 10.0);
+   ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
@@ -900,7 +900,7 @@ static void test_roundtable_rejects_required_prefix_larger_than_panel(void)
 static void test_roundtable_preflight_cap_warns_observed_cap_stops(void)
 {
    reset_modes();
-   config_t cfg = make_cfg(1, 2, 0.0001);
+   ensemble_panel_t cfg = make_cfg(1, 2, 0.0001);
    agent_config_t acfg = make_acfg();
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
@@ -921,7 +921,7 @@ static void test_roundtable_keep_best_not_last(void)
    reset_modes();
    g_aggregator_mode = 1;
    g_reason_mode = 1;
-   config_t cfg = make_cfg(1, 2, 10.0);
+   ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
@@ -943,7 +943,7 @@ static void test_roundtable_post_fanout_cap_keeps_prior_best(void)
    reset_modes();
    g_aggregator_mode = 1;
    g_reason_mode = 1;
-   config_t cfg = make_cfg(1, 2, 0.015);
+   ensemble_panel_t cfg = make_cfg(1, 2, 0.015);
    agent_config_t acfg = make_acfg();
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
@@ -965,7 +965,7 @@ static void test_roundtable_summarize_forward_sets_truncated(void)
 {
    reset_modes();
    g_aggregator_mode = 2;
-   config_t cfg = make_cfg(1, 2, 10.0);
+   ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
@@ -986,7 +986,7 @@ static void test_roundtable_review_saturation_converges(void)
 {
    reset_modes();
    g_parallel_mode = 2;
-   config_t cfg = make_cfg(1, 2, 10.0);
+   ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
@@ -1008,7 +1008,7 @@ static void test_roundtable_review_brief_and_items_return(void)
 {
    reset_modes();
    g_parallel_mode = 7;
-   config_t cfg = make_cfg(1, 2, 10.0);
+   ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    const char *questions[] = {"does auth hold?"};
    roundtable_opts_t opts;
@@ -1058,12 +1058,12 @@ static void test_panel_eligibility_excludes_client_claude(void)
    snprintf(acfg.agents[3].roles[0], sizeof(acfg.agents[3].roles[0]), "code");
    acfg.agents[3].role_count = 1;
 
-   config_t cfg;
+   ensemble_panel_t cfg;
    memset(&cfg, 0, sizeof(cfg));
-   assert(ensemble_panelist_eligible(&cfg, &acfg.agents[0]) == 1);
-   assert(ensemble_panelist_eligible(&cfg, &acfg.agents[1]) == 0);
-   assert(ensemble_panelist_eligible(&cfg, &acfg.agents[2]) == 1);
-   assert(ensemble_panelist_eligible(&cfg, &acfg.agents[3]) == 0);
+   assert(ensemble_panelist_eligible(&acfg.agents[0]) == 1);
+   assert(ensemble_panelist_eligible(&acfg.agents[1]) == 0);
+   assert(ensemble_panelist_eligible(&acfg.agents[2]) == 1);
+   assert(ensemble_panelist_eligible(&acfg.agents[3]) == 0);
 
    /* claude needs BOTH authorization (NOT primary_only) AND server-hosting to be
     * seated; neither alone is enough. Authorization is now the per-agent
@@ -1073,22 +1073,22 @@ static void test_panel_eligibility_excludes_client_claude(void)
    /* (a) authorized (primary_only=0) but client-only (not server-hosted) -> still
     * excluded */
    acfg.agents[1].primary_only = 0;
-   assert(ensemble_panelist_eligible(&cfg, &acfg.agents[1]) == 0);
+   assert(ensemble_panelist_eligible(&acfg.agents[1]) == 0);
 
    /* (b) server-hosted but NOT authorized (primary_only=1) -> still excluded (the
     * key invariant: a server-side OAuth setup is not authorization to act as a
     * panelist) */
    acfg.agents[1].is_server_hosted = 1;
    acfg.agents[1].primary_only = 1;
-   assert(ensemble_panelist_eligible(&cfg, &acfg.agents[1]) == 0);
+   assert(ensemble_panelist_eligible(&acfg.agents[1]) == 0);
 
    /* (c) authorized (primary_only=0) AND server-hosted -> seated */
    acfg.agents[1].primary_only = 0;
-   assert(ensemble_panelist_eligible(&cfg, &acfg.agents[1]) == 1);
+   assert(ensemble_panelist_eligible(&acfg.agents[1]) == 1);
 
    /* (d) disabled claude is never seated, even authorized + server-hosted */
    acfg.agents[1].enabled = 0;
-   assert(ensemble_panelist_eligible(&cfg, &acfg.agents[1]) == 0);
+   assert(ensemble_panelist_eligible(&acfg.agents[1]) == 0);
    printf("  test_panel_eligibility_excludes_client_claude: ok\n");
 }
 
@@ -1108,29 +1108,29 @@ static void test_panel_filter_drops_unauthorized_claude(void)
 
    /* A positive pin must name a configured eligible agent. Unauthorized and
     * ad-hoc names are both dropped, and the aggregator is repointed. */
-   config_t cfg;
+   ensemble_panel_t cfg;
    memset(&cfg, 0, sizeof(cfg));
-   cfg.ensemble_reference_count = 3;
-   snprintf(cfg.ensemble_reference_models[0], 128, "mistral");
-   snprintf(cfg.ensemble_reference_models[1], 128, "claude");
-   snprintf(cfg.ensemble_reference_models[2], 128, "adhoc-model"); /* not an agent -> dropped */
-   snprintf(cfg.ensemble_aggregator, sizeof(cfg.ensemble_aggregator), "claude");
+   cfg.reference_count = 3;
+   snprintf(cfg.reference_models[0], 128, "mistral");
+   snprintf(cfg.reference_models[1], 128, "claude");
+   snprintf(cfg.reference_models[2], 128, "adhoc-model"); /* not an agent -> dropped */
+   snprintf(cfg.aggregator, sizeof(cfg.aggregator), "claude");
    ensemble_filter_panel_authorization(&cfg, &acfg);
-   assert(cfg.ensemble_reference_count == 1);
-   assert(strcmp(cfg.ensemble_reference_models[0], "mistral") == 0);
-   assert(strcmp(cfg.ensemble_aggregator, "mistral") == 0); /* repointed off the dropped claude */
+   assert(cfg.reference_count == 1);
+   assert(strcmp(cfg.reference_models[0], "mistral") == 0);
+   assert(strcmp(cfg.aggregator, "mistral") == 0); /* repointed off the dropped claude */
 
    /* Authorized (primary_only=0) + server-hosted claude survives the
     * explicit-list filter. */
    acfg.agents[1].is_server_hosted = 1;
    acfg.agents[1].primary_only = 0;
-   config_t cfg2;
+   ensemble_panel_t cfg2;
    memset(&cfg2, 0, sizeof(cfg2));
-   cfg2.ensemble_reference_count = 2;
-   snprintf(cfg2.ensemble_reference_models[0], 128, "mistral");
-   snprintf(cfg2.ensemble_reference_models[1], 128, "claude");
+   cfg2.reference_count = 2;
+   snprintf(cfg2.reference_models[0], 128, "mistral");
+   snprintf(cfg2.reference_models[1], 128, "claude");
    ensemble_filter_panel_authorization(&cfg2, &acfg);
-   assert(cfg2.ensemble_reference_count == 2);
+   assert(cfg2.reference_count == 2);
    printf("  test_panel_filter_drops_unauthorized_claude: ok\n");
 }
 
@@ -1158,34 +1158,35 @@ static void test_panel_does_not_implicitly_exclude_primary(void)
    snprintf(acfg.agents[2].roles[0], sizeof(acfg.agents[2].roles[0]), "review");
    acfg.agents[2].role_count = 1;
 
-   config_t cfg;
+   ensemble_panel_t cfg;
    memset(&cfg, 0, sizeof(cfg));
-   /* claude is authorized by default (primary_only=0). */
-   snprintf(cfg.provider, sizeof(cfg.provider), "claude"); /* PRIMARY = claude */
+   /* claude is authorized by default (primary_only=0). The panel filter reads
+    * agent authorization, not the primary provider, so no config setup is needed. */
 
    /* per-agent predicate */
-   assert(ensemble_panelist_eligible(&cfg, &acfg.agents[0]) == 1); /* codex/openai — seated */
-   assert(ensemble_panelist_eligible(&cfg, &acfg.agents[1]) == 1);
-   assert(ensemble_panelist_eligible(&cfg, &acfg.agents[2]) == 1);
+   assert(ensemble_panelist_eligible(&acfg.agents[0]) == 1); /* codex/openai — seated */
+   assert(ensemble_panelist_eligible(&acfg.agents[1]) == 1);
+   assert(ensemble_panelist_eligible(&acfg.agents[2]) == 1);
 
    /* Explicit positive pins remain intact. */
-   cfg.ensemble_reference_count = 3;
-   snprintf(cfg.ensemble_reference_models[0], 128, "codex");
-   snprintf(cfg.ensemble_reference_models[1], 128, "claude");
-   snprintf(cfg.ensemble_reference_models[2], 128, "claude-api");
-   snprintf(cfg.ensemble_aggregator, sizeof(cfg.ensemble_aggregator), "claude");
+   cfg.reference_count = 3;
+   snprintf(cfg.reference_models[0], 128, "codex");
+   snprintf(cfg.reference_models[1], 128, "claude");
+   snprintf(cfg.reference_models[2], 128, "claude-api");
+   snprintf(cfg.aggregator, sizeof(cfg.aggregator), "claude");
    ensemble_filter_panel_authorization(&cfg, &acfg);
-   assert(cfg.ensemble_reference_count == 3);
-   assert(strcmp(cfg.ensemble_reference_models[0], "codex") == 0);
-   assert(strcmp(cfg.ensemble_aggregator, "claude") == 0);
+   assert(cfg.reference_count == 3);
+   assert(strcmp(cfg.reference_models[0], "codex") == 0);
+   assert(strcmp(cfg.aggregator, "claude") == 0);
 
    /* An unconfigured/direct panel is bounded to two diverse agents. */
-   config_t seed_cfg;
+   ensemble_panel_t seed_cfg;
    memset(&seed_cfg, 0, sizeof(seed_cfg));
-   snprintf(seed_cfg.provider, sizeof(seed_cfg.provider), "claude");
+   /* The implicit panel is built from agent availability, not the primary
+    * provider, so the panel needs no provider seed. */
    ensemble_fill_implicit_panel(&seed_cfg, &acfg);
-   assert(seed_cfg.ensemble_reference_count == 2);
-   assert(strcmp(seed_cfg.ensemble_reference_models[0], "codex") == 0);
+   assert(seed_cfg.reference_count == 2);
+   assert(strcmp(seed_cfg.reference_models[0], "codex") == 0);
 
    printf("  test_panel_does_not_implicitly_exclude_primary: ok\n");
 }
@@ -1201,15 +1202,15 @@ static void test_panel_filter_drops_unavailable(void)
    snprintf(acfg.agents[0].name, MAX_AGENT_NAME, "unkeyed");
    snprintf(acfg.agents[0].auth_type, sizeof(acfg.agents[0].auth_type), "bearer"); /* needs a key */
 
-   config_t cfg;
+   ensemble_panel_t cfg;
    memset(&cfg, 0, sizeof(cfg));
-   cfg.ensemble_reference_count = 2;
-   snprintf(cfg.ensemble_reference_models[0], 128, "unkeyed");     /* configured + no key -> drop */
-   snprintf(cfg.ensemble_reference_models[1], 128, "adhoc-model"); /* not an agent -> dropped */
-   snprintf(cfg.ensemble_aggregator, sizeof(cfg.ensemble_aggregator), "unkeyed");
+   cfg.reference_count = 2;
+   snprintf(cfg.reference_models[0], 128, "unkeyed");     /* configured + no key -> drop */
+   snprintf(cfg.reference_models[1], 128, "adhoc-model"); /* not an agent -> dropped */
+   snprintf(cfg.aggregator, sizeof(cfg.aggregator), "unkeyed");
    ensemble_filter_panel_availability(&cfg, &acfg);
-   assert(cfg.ensemble_reference_count == 0);
-   assert(cfg.ensemble_aggregator[0] == '\0');
+   assert(cfg.reference_count == 0);
+   assert(cfg.aggregator[0] == '\0');
    printf("  test_panel_filter_drops_unavailable: ok\n");
 }
 
@@ -1224,24 +1225,24 @@ static void test_specific_panel_pin_is_hard_requirement(void)
    acfg.agents[0].role_count = 1;
    snprintf(acfg.agents[0].auth_type, sizeof(acfg.agents[0].auth_type), "bearer");
 
-   config_t cfg;
+   ensemble_panel_t cfg;
    memset(&cfg, 0, sizeof(cfg));
-   cfg.ensemble_reference_count = 1;
-   snprintf(cfg.ensemble_reference_models[0], sizeof(cfg.ensemble_reference_models[0]), "unkeyed");
+   cfg.reference_count = 1;
+   snprintf(cfg.reference_models[0], sizeof(cfg.reference_models[0]), "unkeyed");
    char err[256];
    assert(ensemble_validate_panel_pins(&cfg, &acfg, err, sizeof(err)) == -1);
    assert(strstr(err, "required roundtable agent 'unkeyed'") != NULL);
 
-   snprintf(cfg.ensemble_reference_models[0], sizeof(cfg.ensemble_reference_models[0]), "$random");
+   snprintf(cfg.reference_models[0], sizeof(cfg.reference_models[0]), "$random");
    assert(ensemble_validate_panel_pins(&cfg, &acfg, err, sizeof(err)) == 0);
 
    /* Repeated concrete pins are distinct must-use invocation seats, but cannot
     * promise more simultaneous invocations than the agent itself permits. */
    snprintf(acfg.agents[0].auth_type, sizeof(acfg.agents[0].auth_type), "none");
    acfg.agents[0].max_parallel = 1;
-   cfg.ensemble_reference_count = 2;
-   snprintf(cfg.ensemble_reference_models[0], sizeof(cfg.ensemble_reference_models[0]), "unkeyed");
-   snprintf(cfg.ensemble_reference_models[1], sizeof(cfg.ensemble_reference_models[1]), "unkeyed");
+   cfg.reference_count = 2;
+   snprintf(cfg.reference_models[0], sizeof(cfg.reference_models[0]), "unkeyed");
+   snprintf(cfg.reference_models[1], sizeof(cfg.reference_models[1]), "unkeyed");
    assert(ensemble_validate_panel_pins(&cfg, &acfg, err, sizeof(err)) == -1);
    assert(strstr(err, "max_parallel") != NULL);
    printf("  test_specific_panel_pin_is_hard_requirement: ok\n");
@@ -1267,23 +1268,21 @@ static void test_implicit_panel_ignores_legacy_roster_and_caps_two(void)
    snprintf(minimax->roles[0], sizeof(minimax->roles[0]), "review");
    minimax->role_count = 1;
 
-   config_t cfg;
+   ensemble_panel_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    /* Legacy ensemble fields do not authorize a larger/direct panel. */
-   cfg.ensemble_reference_count = 1;
-   cfg.ensemble_reference_persona_count = 1;
-   snprintf(cfg.ensemble_reference_models[0], sizeof(cfg.ensemble_reference_models[0]),
-            "MiniMax-M3");
-   snprintf(cfg.ensemble_reference_personas[0], sizeof(cfg.ensemble_reference_personas[0]),
-            "security");
-   snprintf(cfg.ensemble_aggregator, sizeof(cfg.ensemble_aggregator), "MiniMax-M3");
+   cfg.reference_count = 1;
+   cfg.reference_persona_count = 1;
+   snprintf(cfg.reference_models[0], sizeof(cfg.reference_models[0]), "MiniMax-M3");
+   snprintf(cfg.reference_personas[0], sizeof(cfg.reference_personas[0]), "security");
+   snprintf(cfg.aggregator, sizeof(cfg.aggregator), "MiniMax-M3");
 
    ensemble_fill_implicit_panel(&cfg, &acfg);
 
-   assert(cfg.ensemble_reference_count == 2);
-   assert(strcmp(cfg.ensemble_reference_models[0], "codex") == 0);
-   assert(strcmp(cfg.ensemble_reference_models[1], "MiniMax-M3") == 0);
-   assert(strcmp(cfg.ensemble_aggregator, "codex") == 0);
+   assert(cfg.reference_count == 2);
+   assert(strcmp(cfg.reference_models[0], "codex") == 0);
+   assert(strcmp(cfg.reference_models[1], "MiniMax-M3") == 0);
+   assert(strcmp(cfg.aggregator, "codex") == 0);
 
    reset_modes();
    delegate_ensemble_result_t result;
@@ -1312,22 +1311,21 @@ static void test_configured_random_seats_fill_balanced_capacity(void)
       ag->role_count = 1;
    }
 
-   config_t cfg;
+   ensemble_panel_t cfg;
    memset(&cfg, 0, sizeof cfg);
-   cfg.ensemble_reference_count = 5;
-   cfg.ensemble_reference_persona_count = 5;
-   for (int i = 0; i < cfg.ensemble_reference_count; i++)
-      snprintf(cfg.ensemble_reference_models[i], sizeof cfg.ensemble_reference_models[i],
-               "$random");
+   cfg.reference_count = 5;
+   cfg.reference_persona_count = 5;
+   for (int i = 0; i < cfg.reference_count; i++)
+      snprintf(cfg.reference_models[i], sizeof cfg.reference_models[i], "$random");
 
    ensemble_resolve_random_seats(&cfg, &acfg);
 
-   assert(cfg.ensemble_reference_count == 5);
-   assert(strcmp(cfg.ensemble_reference_models[0], "codex") == 0);
-   assert(strcmp(cfg.ensemble_reference_models[1], "minimax") == 0);
-   assert(strcmp(cfg.ensemble_reference_models[2], "codex") == 0);
-   assert(strcmp(cfg.ensemble_reference_models[3], "minimax") == 0);
-   assert(strcmp(cfg.ensemble_reference_models[4], "codex") == 0);
+   assert(cfg.reference_count == 5);
+   assert(strcmp(cfg.reference_models[0], "codex") == 0);
+   assert(strcmp(cfg.reference_models[1], "minimax") == 0);
+   assert(strcmp(cfg.reference_models[2], "codex") == 0);
+   assert(strcmp(cfg.reference_models[3], "minimax") == 0);
+   assert(strcmp(cfg.reference_models[4], "codex") == 0);
    printf("  test_configured_random_seats_fill_balanced_capacity: ok\n");
 }
 
@@ -1349,12 +1347,12 @@ static void test_panel_prioritizes_distinct_providers(void)
       ag->role_count = 1;
    }
 
-   config_t cfg;
+   ensemble_panel_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    ensemble_fill_implicit_panel(&cfg, &acfg);
-   assert(cfg.ensemble_reference_count == 2);
-   assert(strcmp(cfg.ensemble_reference_models[0], "anthropic-a") == 0);
-   assert(strcmp(cfg.ensemble_reference_models[1], "codex") == 0);
+   assert(cfg.reference_count == 2);
+   assert(strcmp(cfg.reference_models[0], "anthropic-a") == 0);
+   assert(strcmp(cfg.reference_models[1], "codex") == 0);
    printf("  test_panel_prioritizes_distinct_providers: ok\n");
 }
 
@@ -1375,53 +1373,55 @@ static void test_panel_treats_providerless_agents_as_distinct(void)
    }
    snprintf(acfg.agents[2].provider, sizeof(acfg.agents[2].provider), "chatgpt");
 
-   config_t cfg;
+   ensemble_panel_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    ensemble_fill_implicit_panel(&cfg, &acfg);
-   assert(cfg.ensemble_reference_count == 2);
+   assert(cfg.reference_count == 2);
    /* An absent provider is scoped to the agent name, so unrelated legacy
     * agents are both represented during the provider-diversity pass. */
-   assert(strcmp(cfg.ensemble_reference_models[0], "legacy-a") == 0);
-   assert(strcmp(cfg.ensemble_reference_models[1], "legacy-b") == 0);
+   assert(strcmp(cfg.reference_models[0], "legacy-a") == 0);
+   assert(strcmp(cfg.reference_models[1], "legacy-b") == 0);
    printf("  test_panel_treats_providerless_agents_as_distinct: ok\n");
 }
 
 static void test_panel_persona_name_assignment(void)
 {
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.ensemble_reference_count = 6;
+   /* Drives the pure resolution table directly: panel_persona_name() now reads
+    * live config, so exercising it would mean writing a config file between
+    * every assertion. panel_persona_for_slot takes the two config-derived
+    * inputs as parameters, which is the same coverage with no I/O. */
+
    /* REVIEW mode: round-robin the diverse default lineup keyed on the model
     * index (stable, independent of any sequential shuffle). */
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 0), "original-request") == 0);
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 1), "security") == 0);
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 2), "architect") == 0);
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 3), "qa") == 0);
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 4), "reviewer") == 0);
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 5), "reviewer-constructive") == 0);
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 0, NULL, ""), "original-request") == 0);
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 1, NULL, ""), "security") == 0);
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 2, NULL, ""), "architect") == 0);
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 3, NULL, ""), "qa") == 0);
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 4, NULL, ""), "reviewer") == 0);
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 5, NULL, ""), "reviewer-constructive") ==
+          0);
+
    /* DRAFT authors every panelist as the configured default persona; an unset
     * default_persona falls back to the built-in `engineer`. */
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 0), "engineer") == 0);
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 4), "engineer") == 0);
-   snprintf(cfg.default_persona, sizeof(cfg.default_persona), "architect");
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 0), "architect") == 0);
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 4), "architect") == 0);
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_DRAFT, 0, NULL, ""), "engineer") == 0);
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_DRAFT, 4, NULL, ""), "engineer") == 0);
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_DRAFT, 0, NULL, "architect"), "architect") == 0);
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_DRAFT, 4, NULL, "architect"), "architect") == 0);
+
    /* the configured default persona does not disturb the REVIEW lineup */
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 0), "original-request") == 0);
-   cfg.default_persona[0] = '\0';
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 0, NULL, "architect"),
+                 "original-request") == 0);
+
    /* a configured persona pins to its model slot; an empty entry within the
     * configured range still falls back to the mode default */
-   cfg.ensemble_reference_persona_count = 2;
-   snprintf(cfg.ensemble_reference_personas[1], 64, "security");
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 1), "security") == 0); /* override */
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 0), "original-request") ==
-          0);                                                                 /* empty->dflt */
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 3), "qa") == 0); /* beyond->dflt */
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 1, "security", ""), "security") == 0);
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 0, "", ""), "original-request") == 0);
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_REVIEW, 3, NULL, ""), "qa") == 0);
+
    /* the per-slot override also binds in DRAFT; empty/beyond slots fall to engineer */
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 1), "security") == 0); /* override */
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 0), "engineer") == 0); /* empty->dflt */
-   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 3), "engineer") ==
-          0); /* beyond->dflt */
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_DRAFT, 1, "security", ""), "security") == 0);
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_DRAFT, 0, "", ""), "engineer") == 0);
+   assert(strcmp(panel_persona_for_slot(ROUNDTABLE_DRAFT, 3, NULL, ""), "engineer") == 0);
    printf("  test_panel_persona_name_assignment: ok\n");
 }
 
@@ -1430,8 +1430,8 @@ static void test_roundtable_review_assigns_personas(void)
    reset_modes();
    g_parallel_mode = 6; /* each review panelist returns {"items":[],"overall":"ok"} */
    memset(g_captured_personas, 0, sizeof(g_captured_personas));
-   config_t cfg = make_cfg(1, 2, 10.0); /* 3 reference models, no configured personas */
-   cfg.roundtable_require_evidence = 1;
+   ensemble_panel_t cfg = make_cfg(1, 2, 10.0); /* 3 reference models, no configured personas */
+   cfg.require_evidence = 1;
    agent_config_t acfg = make_acfg();
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
@@ -1468,8 +1468,8 @@ static void test_roundtable_no_tool_use_is_visible_degradation(void)
    reset_modes();
    g_parallel_mode = 6;
    g_suppress_successful_tool_calls = 1; /* provider called a tool, but it failed */
-   config_t cfg = make_cfg(1, 2, 10.0);
-   cfg.roundtable_require_evidence = 1;
+   ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
+   cfg.require_evidence = 1;
    agent_config_t acfg = make_acfg();
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
@@ -1493,8 +1493,8 @@ static void test_roundtable_failed_seat_is_incomplete_evidence_coverage(void)
 {
    reset_modes();
    g_parallel_mode = 10; /* first configured seat produces no response or tool evidence */
-   config_t cfg = make_cfg(1, 2, 10.0);
-   cfg.roundtable_require_evidence = 1;
+   ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
+   cfg.require_evidence = 1;
    agent_config_t acfg = make_acfg();
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
@@ -1579,7 +1579,7 @@ static void test_roundtable_aggregator_fallback_synthesizes(void)
    reset_modes();
    g_aggregator_mode = 3; /* primary aggregator returns empty; a fallback panelist synthesizes */
    g_aggregator_fallback_who[0] = '\0';
-   config_t cfg = make_cfg(1, 2, 10.0);
+   ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
@@ -1638,7 +1638,7 @@ static void test_roundtable_review_parses_fenced_json(void)
 {
    reset_modes();
    g_parallel_mode = 8; /* panelists return review JSON wrapped in a ```json fence + prose */
-   config_t cfg = make_cfg(1, 2, 10.0);
+   ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
@@ -1663,7 +1663,7 @@ static void test_roundtable_single_round_skips_scorer(void)
     * for a rounds:1 run and is skipped; multi-round still uses it. */
    reset_modes();
    g_parallel_mode = 5; /* panel returns valid review items */
-   config_t cfg = make_cfg(1, 2, 10.0);
+   ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
@@ -1683,7 +1683,7 @@ static void test_roundtable_single_round_skips_scorer(void)
    reset_modes();
    g_aggregator_mode = 1;
    g_reason_mode = 1;
-   config_t cfg2 = make_cfg(1, 2, 10.0);
+   ensemble_panel_t cfg2 = make_cfg(1, 2, 10.0);
    roundtable_opts_t opts2;
    memset(&opts2, 0, sizeof(opts2));
    opts2.mode = ROUNDTABLE_DRAFT;
@@ -1702,7 +1702,7 @@ static void test_roundtable_cost_capped_skips_question_pass(void)
 {
    reset_modes();
    g_parallel_mode = 7;
-   config_t cfg = make_cfg(1, 2, 0.001); /* tiny cap trips after round 1 */
+   ensemble_panel_t cfg = make_cfg(1, 2, 0.001); /* tiny cap trips after round 1 */
    agent_config_t acfg = make_acfg();
    const char *questions[] = {"does auth hold?"};
    roundtable_opts_t opts;
@@ -1731,7 +1731,7 @@ static void test_roundtable_partial_question_answers_report_gaps(void)
 {
    reset_modes();
    g_parallel_mode = 7;
-   config_t cfg = make_cfg(1, 2, 10.0);
+   ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    /* The reason mock answers only "does auth hold?"; the second question is left
     * unanswered. The engine must still return one entry per asked question and
@@ -1761,7 +1761,7 @@ static void test_roundtable_partial_question_answers_report_gaps(void)
 static void test_roundtable_draft_brief_questions_not_answered(void)
 {
    reset_modes();
-   config_t cfg = make_cfg(1, 2, 10.0);
+   ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    /* Questions are a review-mode concept. A draft run that happens to carry a
     * brief with questions must not trigger the reason-role question pass or
@@ -1791,7 +1791,7 @@ static void test_roundtable_review_summary_fallback_key_converges(void)
 {
    reset_modes();
    g_parallel_mode = 5;
-   config_t cfg = make_cfg(1, 2, 10.0);
+   ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
@@ -1813,7 +1813,7 @@ static void test_roundtable_review_clean_round_converges(void)
 {
    reset_modes();
    g_parallel_mode = 6;
-   config_t cfg = make_cfg(1, 2, 10.0);
+   ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
@@ -1836,7 +1836,7 @@ static void test_roundtable_malformed_review_json_counts_failed(void)
    reset_modes();
    g_parallel_mode = 3;
    g_repair_mode = 2;
-   config_t cfg = make_cfg(1, 3, 10.0);
+   ensemble_panel_t cfg = make_cfg(1, 3, 10.0);
    agent_config_t acfg = make_acfg();
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
@@ -1857,7 +1857,7 @@ static void test_roundtable_malformed_review_json_repair_counts_successful(void)
    reset_modes();
    g_parallel_mode = 3;
    g_repair_mode = 1;
-   config_t cfg = make_cfg(1, 3, 10.0);
+   ensemble_panel_t cfg = make_cfg(1, 3, 10.0);
    agent_config_t acfg = make_acfg();
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
@@ -1881,7 +1881,7 @@ static void test_roundtable_cancellation_stops(void)
 {
    reset_modes();
    g_cancel_after_checks = 0;
-   config_t cfg = make_cfg(1, 2, 10.0);
+   ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
@@ -1902,13 +1902,15 @@ static void test_roundtable_deadline_returns_best_so_far(void)
 {
    reset_modes();
    g_parallel_mode = 4;
-   config_t cfg = make_cfg(1, 2, 10.0);
+   ensemble_panel_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
    opts.mode = ROUNDTABLE_DRAFT;
    opts.turns = ROUNDTABLE_PARALLEL;
-   opts.max_rounds = 3;
+   /* One round exercises the post-panel deadline capture: there is no next
+    * loop-top check to set deadline_hit for us. */
+   opts.max_rounds = 1;
    opts.deadline_ms = 1;
    roundtable_result_t result;
    int rc = delegate_roundtable_run(&acfg, &cfg, "draft until deadline", &opts, &result);

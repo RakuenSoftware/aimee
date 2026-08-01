@@ -7,6 +7,7 @@
 #include "../headers/aimee.h" /* memory_t for header consumers */
 #include "db_postgres.h"
 #include "memory_query.h"
+#include "memory_scope_query.h"
 #include "db2_internal.h"
 
 #include <stddef.h>
@@ -916,29 +917,36 @@ int db2_memory_list_kv_section(db2_memory_section_t section, db2_memory_kv_row_t
    switch (section)
    {
    case DB2_MEM_SECTION_ACTIVE_TASKS:
-      sql = "SELECT key, content FROM memories"
-            " WHERE (tier = 'L1' OR tier = 'L2') AND kind = 'task'"
-            " ORDER BY updated_at DESC LIMIT ?1";
+      sql = "SELECT m.key, m.content FROM memories m"
+            " WHERE (m.tier = 'L1' OR m.tier = 'L2') AND m.kind = "
+            "'task'" DB2_MEMORY_SCOPE_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
+                "m.id") " DESC, m.updated_at DESC LIMIT ?1";
       break;
    case DB2_MEM_SECTION_RECENT_CONTEXT:
-      sql = "SELECT key, content FROM memories"
-            " WHERE tier = 'L1' AND kind = 'episode'"
-            " ORDER BY created_at DESC LIMIT ?1";
+      sql = "SELECT m.key, m.content FROM memories m"
+            " WHERE m.tier = 'L1' AND m.kind = 'episode'" DB2_MEMORY_SCOPE_FILTER_SQL(
+                "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, m.created_at DESC "
+                                                                       "LIMIT ?1";
       break;
    case DB2_MEM_SECTION_CONSTRAINTS:
-      sql = "SELECT key, content FROM memories"
-            " WHERE (tier = 'L2' OR tier = 'L3') AND (kind = 'decision' OR kind = 'policy')"
-            " ORDER BY confidence DESC LIMIT ?1";
+      sql = "SELECT m.key, m.content FROM memories m"
+            " WHERE (m.tier = 'L2' OR m.tier = 'L3')"
+            " AND (m.kind = 'decision' OR m.kind = 'policy')" DB2_MEMORY_SCOPE_FILTER_SQL(
+                "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, m.confidence DESC "
+                                                                       "LIMIT ?1";
       break;
    case DB2_MEM_SECTION_PROCEDURES:
-      sql = "SELECT key, content FROM memories"
-            " WHERE (tier = 'L1' OR tier = 'L2') AND kind = 'procedure'"
-            " ORDER BY confidence DESC, use_count DESC LIMIT ?1";
+      sql =
+          "SELECT m.key, m.content FROM memories m"
+          " WHERE (m.tier = 'L1' OR m.tier = 'L2') AND m.kind = "
+          "'procedure'" DB2_MEMORY_SCOPE_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
+              "m.id") " DESC, m.confidence DESC, m.use_count DESC LIMIT ?1";
       break;
    case DB2_MEM_SECTION_FAILURE_WARNINGS:
-      sql = "SELECT key, content FROM memories"
-            " WHERE tier = 'L3' AND kind = 'episode' AND confidence > 0.3"
-            " ORDER BY created_at DESC LIMIT ?1";
+      sql = "SELECT m.key, m.content FROM memories m"
+            " WHERE m.tier = 'L3' AND m.kind = 'episode' AND m.confidence > "
+            "0.3" DB2_MEMORY_SCOPE_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
+                "m.id") " DESC, m.created_at DESC LIMIT ?1";
       break;
    default:
       return 0;
@@ -948,6 +956,7 @@ int db2_memory_list_kv_section(db2_memory_section_t section, db2_memory_kv_row_t
    if (!st)
       return 0;
    aimee_pg_bind_int(st, "?1", max);
+   db2_memory_scope_bind_current(st);
    int n = 0;
    while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
@@ -969,15 +978,18 @@ int db2_memory_list_episode_cards(db2_memory_episode_card_row_t *rows, int max)
    if (!conn)
       return 0;
    int cap = max > 4 ? 4 : max;
-   static const char *sql = "SELECT m.content FROM memories m"
-                            " JOIN memory_units u ON u.memory_id = m.id"
-                            " WHERE u.is_episode_card = 1"
-                            " ORDER BY m.confidence DESC, m.id DESC LIMIT ?1";
+   static const char *sql =
+       "SELECT m.content FROM memories m"
+       " JOIN memory_units u ON u.memory_id = m.id"
+       " WHERE u.is_episode_card = 1" DB2_MEMORY_SCOPE_FILTER_SQL(
+           "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, m.confidence DESC, m.id "
+                                                                  "DESC LIMIT ?1";
    char err[MSF_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return 0;
    aimee_pg_bind_int(st, "?1", cap);
+   db2_memory_scope_bind_current(st);
    int n = 0;
    while (n < cap && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
@@ -996,15 +1008,18 @@ int db2_memory_list_global_constraints(db2_memory_kv_row_t *rows, int max)
    void *conn = db2_conn();
    if (!conn)
       return 0;
-   static const char *sql = "SELECT key, content FROM memories"
-                            " WHERE kind IN ('preference', 'policy')"
-                            " AND tier IN ('L1', 'L2', 'L3', 'L4')"
-                            " ORDER BY confidence DESC, use_count DESC LIMIT ?1";
+   static const char *sql =
+       "SELECT m.key, m.content FROM memories m"
+       " WHERE m.kind IN ('preference', 'policy')"
+       " AND m.tier IN ('L1', 'L2', 'L3', 'L4')" DB2_MEMORY_SCOPE_FILTER_SQL(
+           "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, m.confidence DESC, "
+                                                                  "m.use_count DESC LIMIT ?1";
    char err[MSF_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return 0;
    aimee_pg_bind_int(st, "?1", max);
+   db2_memory_scope_bind_current(st);
    int n = 0;
    while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
@@ -1161,13 +1176,15 @@ int db2_memory_list_key_facts_with_provenance(db2_memory_key_fact_row_t *rows, i
        " (SELECT p.action || ' during ' || p.session_id FROM memory_provenance p"
        "  WHERE p.memory_id = m.id ORDER BY p.created_at DESC LIMIT 1) AS provenance"
        " FROM memories m"
-       " WHERE m.tier IN ('L2', 'L3') AND (m.kind = 'fact' OR m.kind = 'preference')"
-       " ORDER BY m.confidence DESC, m.use_count DESC LIMIT ?1";
+       " WHERE m.tier IN ('L2', 'L3') AND (m.kind = 'fact' OR m.kind = "
+       "'preference')" DB2_MEMORY_SCOPE_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
+           "m.id") " DESC, m.confidence DESC, m.use_count DESC LIMIT ?1";
    char err[MSF_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return 0;
    aimee_pg_bind_int(st, "?1", max);
+   db2_memory_scope_bind_current(st);
    int n = 0;
    while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
@@ -1226,14 +1243,16 @@ int db2_memory_list_candidates(db2_memory_cand_filter_t filter, db2_memory_cand_
    switch (filter)
    {
    case DB2_MEM_CAND_PRIMARY:
-      sql = "SELECT id, tier, key, content, kind, confidence, use_count FROM memories"
-            " WHERE tier IN ('L1', 'L2', 'L3', 'L4', 'L5')"
-            " ORDER BY confidence DESC, use_count DESC LIMIT ?1";
+      sql = "SELECT m.id, m.tier, m.key, m.content, m.kind, m.confidence, m.use_count"
+            " FROM memories m WHERE m.tier IN ('L1', 'L2', 'L3', 'L4', "
+            "'L5')" DB2_MEMORY_SCOPE_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
+                "m.id") " DESC, m.confidence DESC, m.use_count DESC LIMIT ?1";
       break;
    case DB2_MEM_CAND_FALLBACK:
-      sql = "SELECT id, tier, key, content, kind, confidence, use_count FROM memories"
-            " WHERE tier IN ('L0', 'L1', 'L2', 'L4')"
-            " ORDER BY confidence DESC, use_count DESC LIMIT ?1";
+      sql = "SELECT m.id, m.tier, m.key, m.content, m.kind, m.confidence, m.use_count"
+            " FROM memories m WHERE m.tier IN ('L0', 'L1', 'L2', 'L4')" DB2_MEMORY_SCOPE_FILTER_SQL(
+                "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, m.confidence DESC, "
+                                                                       "m.use_count DESC LIMIT ?1";
       break;
    default:
       return 0;
@@ -1243,6 +1262,7 @@ int db2_memory_list_candidates(db2_memory_cand_filter_t filter, db2_memory_cand_
    if (!st)
       return 0;
    aimee_pg_bind_int(st, "?1", max);
+   db2_memory_scope_bind_current(st);
    int n = 0;
    while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
@@ -1362,33 +1382,40 @@ int db2_memory_list_recall_section(db2_memory_recall_section_t section, db2_memo
    switch (section)
    {
    case DB2_MEM_RECALL_IDENTITY:
-      sql = "SELECT id, tier, kind, key, content FROM memories"
-            " WHERE tier IN ('L2','L3','L4','L5')"
-            " AND kind = 'fact'"
-            " AND lifecycle_state != 'archived' AND lifecycle_state != 'superseded'"
-            " AND (key LIKE 'identity:%' OR key LIKE 'name:%' OR key LIKE 'role:%'"
-            "      OR key LIKE 'user:%' OR key LIKE 'self:%')"
-            " ORDER BY confidence DESC, evidence_strength DESC, id DESC LIMIT ?1";
+      sql = "SELECT m.id, m.tier, m.kind, m.key, m.content FROM memories m"
+            " WHERE m.tier IN ('L2','L3','L4','L5')"
+            " AND m.kind = 'fact'"
+            " AND m.lifecycle_state != 'archived' AND m.lifecycle_state != 'superseded'"
+            " AND (m.key LIKE 'identity:%' OR m.key LIKE 'name:%' OR m.key LIKE 'role:%'"
+            "      OR m.key LIKE 'user:%' OR m.key LIKE 'self:%')" DB2_MEMORY_SCOPE_FILTER_SQL(
+                "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, m.confidence DESC, "
+                                                                       "m.evidence_strength DESC, "
+                                                                       "m.id DESC LIMIT ?1";
       break;
    case DB2_MEM_RECALL_PREFERENCES:
-      sql = "SELECT id, tier, kind, key, content FROM memories"
-            " WHERE tier IN ('L2','L3','L4','L5')"
-            " AND kind = 'preference'"
-            " AND lifecycle_state != 'archived' AND lifecycle_state != 'superseded'"
-            " ORDER BY confidence DESC, observation_count DESC, id DESC LIMIT ?1";
+      sql =
+          "SELECT m.id, m.tier, m.kind, m.key, m.content FROM memories m"
+          " WHERE m.tier IN ('L2','L3','L4','L5')"
+          " AND m.kind = 'preference'"
+          " AND m.lifecycle_state != 'archived' AND m.lifecycle_state != "
+          "'superseded'" DB2_MEMORY_SCOPE_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
+              "m.id") " DESC, m.confidence DESC, m.observation_count DESC, m.id DESC LIMIT ?1";
       break;
    case DB2_MEM_RECALL_ACTIVE_CONTEXT:
-      sql = "SELECT id, tier, kind, key, content FROM memories"
-            " WHERE tier IN ('L1','L2','L3','L4')"
-            " AND kind IN ('fact','decision','policy','task')"
-            " AND lifecycle_state != 'archived' AND lifecycle_state != 'superseded'"
-            " AND COALESCE(last_used_at, updated_at) >= pg_now_text('-7 days')"
-            " ORDER BY COALESCE(last_used_at, updated_at) DESC, id DESC LIMIT ?1";
+      sql = "SELECT m.id, m.tier, m.kind, m.key, m.content FROM memories m"
+            " WHERE m.tier IN ('L1','L2','L3','L4')"
+            " AND m.kind IN ('fact','decision','policy','task')"
+            " AND m.lifecycle_state != 'archived' AND m.lifecycle_state != 'superseded'"
+            " AND COALESCE(m.last_used_at, m.updated_at) >= pg_now_text('-7 "
+            "days')" DB2_MEMORY_SCOPE_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
+                "m.id") " DESC, COALESCE(m.last_used_at, m.updated_at) DESC, m.id DESC LIMIT ?1";
       break;
    case DB2_MEM_RECALL_OPEN_COMMITMENTS:
-      sql = "SELECT id, tier, kind, key, content FROM memories"
-            " WHERE lifecycle_state = 'pending'"
-            " ORDER BY COALESCE(ttl_at, created_at) ASC, id ASC LIMIT ?1";
+      sql = "SELECT m.id, m.tier, m.kind, m.key, m.content FROM memories m"
+            " WHERE m.lifecycle_state = 'pending'" DB2_MEMORY_SCOPE_FILTER_SQL(
+                "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, COALESCE(m.ttl_at, "
+                                                                       "m.created_at) ASC, m.id "
+                                                                       "ASC LIMIT ?1";
       break;
    default:
       return 0;
@@ -1398,6 +1425,7 @@ int db2_memory_list_recall_section(db2_memory_recall_section_t section, db2_memo
    if (!st)
       return 0;
    aimee_pg_bind_int(st, "?1", max);
+   db2_memory_scope_bind_current(st);
    int n = 0;
    while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {

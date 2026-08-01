@@ -113,15 +113,16 @@ int kb_curator_index_code_unit_one(const kb_curator_extract_opts_t *opts)
       return 1;
    }
 
-   config_t cfg;
-   config_load(&cfg);
-   const char *embed_cmd = config_embedding_command(&cfg, NULL);
+   const char *embed_cmd = config_embedding_command_current(NULL);
    float intent_vec[CURATOR_CODE_UNIT_DIM];
    float sig_vec[CURATOR_CODE_UNIT_DIM];
    float body_vec[CURATOR_CODE_UNIT_DIM];
-   int d1 = memory_embed_text(intent_text, embed_cmd, intent_vec, CURATOR_CODE_UNIT_DIM);
-   int d2 = memory_embed_text(sig_text, embed_cmd, sig_vec, CURATOR_CODE_UNIT_DIM);
-   int d3 = memory_embed_text(body_text, embed_cmd, body_vec, CURATOR_CODE_UNIT_DIM);
+   int d1 = memory_embed_text(intent_text, embed_cmd, EMBED_INPUT_DOCUMENT, intent_vec,
+                              CURATOR_CODE_UNIT_DIM);
+   int d2 =
+       memory_embed_text(sig_text, embed_cmd, EMBED_INPUT_DOCUMENT, sig_vec, CURATOR_CODE_UNIT_DIM);
+   int d3 = memory_embed_text(body_text, embed_cmd, EMBED_INPUT_DOCUMENT, body_vec,
+                              CURATOR_CODE_UNIT_DIM);
 
    /* Job-row re-check + vector upsert + artifact commit in ONE transaction,
     * with the purge fence checked INSIDE it: a job claimed pre-purge can never

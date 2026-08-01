@@ -90,19 +90,45 @@ RUN mkdir -p "/pgvectorscale/usr/lib/postgresql/${PG_MAJOR}/lib" \
 # PostgreSQL 17 symbols the kb was linked against (PGDG's libpq 18 does).
 FROM debian:trixie-slim
 
-# python3 (stdlib only) runs the sidecar clients the kb popens: embed-remote.py
-# (-> embedder service), llm-chat.py + learning-synthesize.py + curator-extract.py
-# (-> LLM endpoint). No torch here — the model lives in the embedder service.
+# python3 runs the sidecar clients the kb popens (llm-chat.py,
+# learning-synthesize.py, curator-extract.py -> LLM endpoint) AND the in-container
+# embedder below, which needs pip to install torch.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
+        libgomp1 \
         libpq5 \
         libssl3 \
         libzstd1 \
         python3 \
+        python3-pip \
+        python3-venv \
         zlib1g \
     && rm -rf /var/lib/apt/lists/*
+
+# ---- the in-container embedder ------------------------------------------------
+# The kb embeds ITSELF now. There is no embedder sidecar and no aimee-llm hop on the
+# retrieval path: embedder-server.py runs on loopback inside this container with the
+# weights BAKED IN, so a fresh container embeds immediately with no model download and
+# no network at all.
+#
+# This deliberately reverses the split the unified-llm cutover introduced. That design
+# bought a model-less kb image at the cost of a second container, a supervisor role, a
+# gateway, an HTTP hop and a per-role env matrix — all to serve an embedder small enough
+# to bake. With the reranker gone (measured negative) the only thing left on that path
+# was embedding, so the container is retired and its per-model facts move back to the one
+# place that reads them: scripts/embedders.json.
+#
+# CPU-only torch: the CUDA wheels are ~2GB of accelerator runtime this image never uses.
+ENV EMBEDDER_VENV=/opt/aimee/embedder-venv
+RUN python3 -m venv "$EMBEDDER_VENV" \
+    && "$EMBEDDER_VENV/bin/pip" install --no-cache-dir --quiet \
+        --index-url https://download.pytorch.org/whl/cpu torch \
+    && "$EMBEDDER_VENV/bin/pip" install --no-cache-dir --quiet \
+        "sentence-transformers>=3.3" "transformers>=5.2" einops \
+    && find "$EMBEDDER_VENV" -name '__pycache__' -type d -prune -exec rm -rf {} + \
+    && rm -rf /root/.cache/pip
 
 # DB2 engine, from PGDG rather than Debian: trixie ships PostgreSQL 17 with
 # pgvector 0.8.0, and its pgvector hard-depends on postgresql-17-jit-llvm, which
@@ -149,9 +175,8 @@ ENV AIMEE_HOME=/var/lib/aimee
 # internal cluster. Operators can still set the variable to select an external DB2.
 # No baked embedder/LLM endpoint defaults. The kb runs NO model runtime; it calls
 # an external aimee-llm container (CPU/GPU) or endpoint. Point it with ONE of:
-#   AIMEE_LLM_URL       unified container -> embed + rerank + synth (one knob)
+#   AIMEE_LLM_URL       unified container -> embed + synth (one knob)
 #   AIMEE_EMBEDDER_URL  pin the embedder (/embed) independently
-#   AIMEE_RERANKER_URL  pin the reranker (/rerank) independently
 #   LLM_ENDPOINT        Tier-A synth only (small-model interface)
 # One of these is REQUIRED. The seeded default config selects the remote embedder
 # sidecar, so with no endpoint set the DB2 dim probe fails and db2_init refuses to
@@ -173,8 +198,93 @@ RUN useradd --system --home-dir /var/lib/aimee --create-home --shell /usr/sbin/n
 COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb
 COPY --from=build /src/aimee-kb-resolver /usr/local/bin/aimee-kb-resolver
 
-# Sidecar clients (the LLM/embedder access code the kb invokes via popen).
-COPY scripts/embed-remote.py scripts/rerank-remote.py scripts/llm-chat.py \
+# The embedder registry: every per-model fact that changes the vectors (pooling, width,
+# context, prefixes), keyed by model identity. Read by the in-container embedder to know
+# what to load and which prefixes to apply, and by the server for the wizard's picker.
+COPY scripts/embedders.json /opt/aimee/embedders.json
+COPY scripts/embedder-server.py /opt/aimee/scripts/embedder-server.py
+
+# Bake the weights for every registered embedder — one ships — so a fresh container
+# embeds with no download and an air-gapped install works. Pinned to the registry's
+# revision: a floating ref would let a rebuild change the vector space silently.
+#
+# A deployment that wants a wider embedder points AIMEE_EMBEDDER_URL at its own endpoint
+# rather than baking a second model in here.
+#
+# FETCH ONLY WHAT THE TORCH PATH LOADS. snapshot_download takes the whole repo by
+# default, and a repo may publish the same weights several times over: bekko ships an
+# onnx/ tree (nine variants, ~2.2GB) and an openvino/ tree next to its safetensors, none
+# of which sentence-transformers touches. Baking them cost 3.4GB of image for nothing.
+# Excluding the alternate runtimes and the legacy .bin duplicates keeps this to the
+# safetensors + tokenizer the loader actually reads.
+# The baked cache is READ-ONLY at runtime (built as root, served as `aimee`), but
+# trust_remote_code compiles the fetched modelling code into a writable module cache. It
+# defaults inside HF_HOME, which the non-root user cannot write — nomic then failed with
+# "Permission denied: /opt/aimee/models/modules". Point that one writable path at the
+# home volume and leave the weights immutable.
+ENV HF_HOME=/opt/aimee/models \
+    HF_MODULES_CACHE=/var/lib/aimee/.cache/huggingface/modules \
+    HF_HUB_OFFLINE=1
+RUN --mount=type=cache,target=/root/.cache/huggingface \
+    HF_HUB_OFFLINE=0 "$EMBEDDER_VENV/bin/python" - <<'PYBAKE'
+import json
+from huggingface_hub import snapshot_download
+with open("/opt/aimee/embedders.json", encoding="utf-8") as handle:
+    table = json.load(handle)["embedders"]
+SKIP = [
+    "onnx/*", "openvino/*", "*.onnx", "*.onnx_data",   # alternate runtimes
+    "*.bin", "*.h5", "*.msgpack", "*.tflite", "*.ckpt",  # duplicate/legacy formats
+    "*.gguf",                                          # not this runtime either
+]
+def code_repos(snapshot_dir):
+    """Repos holding this model's custom modelling code, from config.json auto_map.
+
+    A trust_remote_code model does not necessarily carry its own code — auto_map may point
+    every class at a SEPARATE repo. Downloading only the weights then leaves the loader
+    reaching for the Hub at first use, which fails closed under HF_HUB_OFFLINE, defeating
+    the point of baking. So follow the references.
+
+    The bundled embedder needs none of this (ModernBERT is native to transformers), but a
+    swapped-in model may, and the failure is a container that starts and cannot embed.
+    """
+    import os
+    out = set()
+    cfg = os.path.join(snapshot_dir, "config.json")
+    if not os.path.exists(cfg):
+        return out
+    with open(cfg, encoding="utf-8") as handle:
+        auto_map = (json.load(handle).get("auto_map") or {})
+    for target in auto_map.values():
+        if isinstance(target, str) and "--" in target:
+            out.add(target.split("--", 1)[0])
+        elif isinstance(target, (list, tuple)):
+            for item in target:
+                if isinstance(item, str) and "--" in item:
+                    out.add(item.split("--", 1)[0])
+    return out
+
+
+for name, spec in table.items():
+    repo, revision = spec["repo"], spec.get("revision") or "main"
+    print(f"baking {name}: {repo}@{revision}", flush=True)
+    local = snapshot_download(repo, revision=revision, ignore_patterns=SKIP)
+    # Code repos are referenced by name only — auto_map carries no revision — so these
+    # take the default branch. That is a looser pin than the weights get; a model whose
+    # code must be pinned needs its auto_map repo added to the registry explicitly.
+    for code_repo in sorted(code_repos(local)):
+        print(f"  + code: {code_repo}", flush=True)
+        snapshot_download(code_repo, allow_patterns=["*.py", "*.json", "*.txt"])
+PYBAKE
+
+# The bake runs as root and huggingface_hub writes its tree-cache metadata 0600, so
+# the `aimee` runtime user cannot read it. The weights themselves land world-readable,
+# so the model still loads — it just logs "Ignoring corrupted tree cache file …
+# Permission denied" on every start and re-walks what the cache existed to avoid.
+# a+rX: readable everywhere, traversable on directories, and no file gains +x.
+RUN chmod -R a+rX /opt/aimee/models
+
+# Sidecar clients (the LLM access code the kb invokes via popen).
+COPY scripts/embed-remote.py scripts/llm-chat.py \
      scripts/learning-synthesize.py scripts/curator-extract.py scripts/llm-rewrite.py \
      scripts/guardrails-semantic.py /opt/aimee/scripts/
 # Baked default config: selects the sidecar commands (endpoints come from env).

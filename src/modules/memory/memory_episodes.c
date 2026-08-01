@@ -103,7 +103,7 @@ int memory_episode_card_parse(const char *json, memory_episode_card_t *out)
  *
  * Steps:
  *   1. Collect up to 200 memories for |source_session| (content + id).
- *   2. Build a JSON payload and call cfg->memory_cognify_command.
+ *   2. Build a JSON payload and call memory.cognify.command.
  *   3. Parse the response as memory_episode_card_t.
  *   4. Store a synthetic memory (KIND_EPISODE) and a memory_unit with
  *      is_episode_card=1.
@@ -111,18 +111,18 @@ int memory_episode_card_parse(const char *json, memory_episode_card_t *out)
  *      memory.
  * Returns the memory_unit id on success, 0 on failure or if disabled.
  */
-int64_t memory_episode_card_generate(const char *source_session, const config_t *cfg)
+int64_t memory_episode_card_generate(const char *source_session)
 {
 #if defined(AIMEE_DB2_DISABLED)
    (void)source_session;
-   (void)cfg;
    return 0;
 #else
    if (!source_session || !source_session[0])
       return 0;
-   if (!cfg || !cfg->memory_episode_summaries_enabled)
+   if (!config_memory_episode_summaries_enabled())
       return 0;
-   if (!cfg->memory_cognify_command[0])
+   const char *cognify_command = config_memory_cognify_command();
+   if (!cognify_command || !cognify_command[0])
       return 0;
 
    /* Collect session memories */
@@ -163,8 +163,7 @@ int64_t memory_episode_card_generate(const char *source_session, const config_t 
 
    char *resp = NULL;
    size_t resp_len = 0;
-   int rc = platform_exec_pipe(cfg->memory_cognify_command, input_str, strlen(input_str), &resp,
-                               &resp_len);
+   int rc = platform_exec_pipe(cognify_command, input_str, strlen(input_str), &resp, &resp_len);
    free(input_str);
    if (rc != 0 || !resp || resp_len == 0)
    {

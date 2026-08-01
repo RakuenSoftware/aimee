@@ -284,11 +284,17 @@ char **forge_cred_build_env(const char *workspace_id, long now_epoch, char *cons
  * the App-token module (and its OpenSSL/HTTP deps). */
 static int (*g_app_token_configured)(void) = NULL;
 static int (*g_app_token_get)(char *, size_t) = NULL;
+static int (*g_static_token_get)(char *, size_t) = NULL;
 
 void forge_cred_register_app_token_provider(int (*configured)(void), int (*get)(char *, size_t))
 {
    g_app_token_configured = configured;
    g_app_token_get = get;
+}
+
+void forge_cred_register_static_token_provider(int (*get)(char *, size_t))
+{
+   g_static_token_get = get;
 }
 
 int forge_cred_server_identity(char *tok_out, size_t tok_cap, char *scope_out, size_t scope_cap)
@@ -319,11 +325,8 @@ int forge_cred_server_identity(char *tok_out, size_t tok_cap, char *scope_out, s
          tok_out[0] = '\0';
       return 0;
    }
-   const char *t = getenv("AIMEE_FORGE_TOKEN");
-   if (!t || !t[0])
+   if (!g_static_token_get || g_static_token_get(tok_out, tok_cap) != 1 || !tok_out || !tok_out[0])
       return 0;
-   if (tok_out && tok_cap)
-      snprintf(tok_out, tok_cap, "%s", t);
    const char *s = getenv("AIMEE_FORGE_SCOPE");
    if (scope_out && scope_cap)
       snprintf(scope_out, scope_cap, "%s", (s && s[0]) ? s : "workspace");

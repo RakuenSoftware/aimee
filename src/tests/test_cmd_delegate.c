@@ -473,6 +473,9 @@ static void test_provided_target_suppresses_cwd_bundle(void)
    assert(review != NULL);
    assert(strstr(review, "the diff to review") == review);
    assert(strstr(review, "Review Target & Exploration") != NULL);
+   assert(strstr(review, "is NOT proof that anything is absent") != NULL);
+   assert(strstr(review, "uncertainty may be a non-blocking suggestion, never a blocker") != NULL);
+   assert(strstr(review, "are always available") == NULL);
    assert(strstr(review, "explore_via_aimee") != NULL);
    assert(strstr(review, "code_search") != NULL);
    /* the wrong-tree cwd bundle must NOT be present */

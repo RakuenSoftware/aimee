@@ -21,6 +21,13 @@ static void reset_db(void)
    db2_test_shim_open();
 }
 
+/* The file-static config_t this suite used to share is gone. It existed because
+ * ten block-scoped ~750 KiB copies in this one long main() pushed GCC past the
+ * default 8 MiB stack and the optimized binary segfaulted before reaching the
+ * later cases. Every case now states its precondition through write_test_config()
+ * and the code under test reads it back via accessors, so no config_t is needed
+ * here at all — which is the outcome the encapsulation proposal is chasing. */
+
 static void write_test_config(const char *yaml)
 {
    char dir[256], path[320];
@@ -465,22 +472,17 @@ int main(void)
 
    /* --- memory_cognify_unit: disabled when cognify.enabled=false --- */
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      cfg.memory_cognify_enabled = 0;
+      write_test_config("memory:\n  cognify:\n    enabled: false\n");
       memory_cognify_result_t result;
-      int rc = memory_cognify_unit(1, "some text", &cfg, &result);
+      int rc = memory_cognify_unit(1, "some text", &result);
       assert(rc == -1);
    }
 
    /* --- memory_cognify_unit: disabled when command is empty --- */
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      cfg.memory_cognify_enabled = 1;
-      cfg.memory_cognify_command[0] = '\0';
+      write_test_config("memory:\n  cognify:\n    enabled: true\n");
       memory_cognify_result_t result;
-      int rc = memory_cognify_unit(1, "some text", &cfg, &result);
+      int rc = memory_cognify_unit(1, "some text", &result);
       assert(rc == -1);
    }
 
@@ -506,14 +508,14 @@ int main(void)
       fputs(fixture, fp);
       fclose(fp);
 
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      cfg.memory_cognify_enabled = 1;
-      snprintf(cfg.memory_cognify_command, sizeof(cfg.memory_cognify_command),
-               "cat > /dev/null; cat %s", path);
+      char yaml[512];
+      snprintf(yaml, sizeof(yaml),
+               "memory:\n  cognify:\n    enabled: true\n    command: \"cat > /dev/null; cat %s\"\n",
+               path);
+      write_test_config(yaml);
 
       memory_cognify_result_t result;
-      int rc = memory_cognify_unit(src.id, "user prefers terse replies", &cfg, &result);
+      int rc = memory_cognify_unit(src.id, "user prefers terse replies", &result);
       assert(rc == 0);
       assert(strcmp(result.memory_kind, "procedural") == 0);
 
@@ -560,14 +562,14 @@ int main(void)
       fputs(fixture, fp);
       fclose(fp);
 
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      cfg.memory_cognify_enabled = 1;
-      snprintf(cfg.memory_cognify_command, sizeof(cfg.memory_cognify_command),
-               "cat > /dev/null; cat %s", path);
+      char yaml[512];
+      snprintf(yaml, sizeof(yaml),
+               "memory:\n  cognify:\n    enabled: true\n    command: \"cat > /dev/null; cat %s\"\n",
+               path);
+      write_test_config(yaml);
 
       memory_cognify_result_t result;
-      assert(memory_cognify_unit(src.id, "server port is 5432", &cfg, &result) == 0);
+      assert(memory_cognify_unit(src.id, "server port is 5432", &result) == 0);
       assert(strcmp(result.memory_kind, "semantic") == 0);
 
       rule_t rule;
@@ -615,22 +617,22 @@ int main(void)
       assert(memory_episode_card_parse(json, &card) != 0);
    }
 
-   /* --- memory_episode_card_generate: disabled when episode_summaries_enabled=0 --- */
+   /* --- memory_episode_card_generate: disabled when episode_summaries_enabled=0 ---
+    *
+    * These two cases used to zero a local config_t to express "disabled". Now that
+    * the function reads live config, the precondition has to be written to the
+    * config file the test owns — otherwise the case silently reads whatever the
+    * developer's real aimee.yaml says and stops testing the disabled path. */
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      cfg.memory_episode_summaries_enabled = 0;
-      int64_t uid = memory_episode_card_generate("sess_test_disabled", &cfg);
+      write_test_config("memory:\n  episode_summaries:\n    enabled: false\n");
+      int64_t uid = memory_episode_card_generate("sess_test_disabled");
       assert(uid == 0);
    }
 
    /* --- memory_episode_card_generate: disabled when cognify command is empty --- */
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      cfg.memory_episode_summaries_enabled = 1;
-      cfg.memory_cognify_command[0] = '\0';
-      int64_t uid = memory_episode_card_generate("sess_test_nocmd", &cfg);
+      write_test_config("memory:\n  episode_summaries:\n    enabled: true\n");
+      int64_t uid = memory_episode_card_generate("sess_test_nocmd");
       assert(uid == 0);
    }
 
@@ -668,24 +670,20 @@ int main(void)
 
    /* --- memory_derive_facts: disabled path returns 0 --- */
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      cfg.memory_derive_facts_enabled = 0;
+      write_test_config("memory:\n  derive_facts:\n    enabled: false\n");
       memory_derived_facts_t dfacts;
       memset(&dfacts, 0, sizeof(dfacts));
       int64_t ids[1] = {1};
-      int n = memory_derive_facts("how many times?", ids, 1, &cfg, &dfacts);
+      int n = memory_derive_facts("how many times?", ids, 1, &dfacts);
       assert(n == 0);
    }
 
    /* --- memory_derive_facts: enabled but empty candidates returns 0 --- */
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      cfg.memory_derive_facts_enabled = 1;
+      write_test_config("memory:\n  derive_facts:\n    enabled: true\n");
       memory_derived_facts_t dfacts;
       memset(&dfacts, 0, sizeof(dfacts));
-      int n = memory_derive_facts("how many times?", NULL, 0, &cfg, &dfacts);
+      int n = memory_derive_facts("how many times?", NULL, 0, &dfacts);
       assert(n == 0);
    }
 
@@ -812,12 +810,10 @@ int main(void)
 
    /* --- memory_cognify_drain with cognifier disabled --- */
    {
-      /* When cognify_enabled=0, drain is a no-op but must not crash */
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      /* disabled: memory_cognify_enabled = 0 */
+      /* When cognify is disabled, drain is a no-op but must not crash */
+      write_test_config("memory:\n  cognify:\n    enabled: false\n");
       memory_cognify_queue_stats_t stats;
-      int rc = memory_cognify_drain(&cfg, 0, &stats);
+      int rc = memory_cognify_drain(0, &stats);
       assert(rc == 0);
       /* pending jobs remain because we can't actually run cognifier in tests */
    }
@@ -1921,12 +1917,25 @@ int main(void)
       assert(surfaced_total >= 1);
    }
 
-   /* --- scheduled maintenance: run/skip/dry-run/summary shape --- */
+   /* --- scheduled maintenance: run/skip/dry-run/summary shape ---
+    *
+    * These cases used to pass cfg == NULL, which the runner read as "every
+    * optional sub-pass off, default cadence". It reads live config now, so that
+    * precondition has to be written down instead of implied by a null pointer —
+    * otherwise the block inherits whatever the previous case last wrote. */
    {
       reset_db();
+      write_test_config("memory_maintenance:\n"
+                        "  summarize_enabled: false\n"
+                        "memory:\n"
+                        "  profile_cards:\n"
+                        "    enabled: false\n"
+                        "  improve:\n"
+                        "    dedupe_enabled: false\n"
+                        "    summarise_enabled: false\n");
 
       memory_maintenance_summary_t s1;
-      assert(memory_maintenance_run(NULL, 0, 0, 0, &s1) == 0);
+      assert(memory_maintenance_run(0, 0, 0, &s1) == 0);
       assert(s1.skipped == 0);
       assert(s1.dry_run == 0);
       assert(s1.modes_run != 0);
@@ -1934,13 +1943,13 @@ int main(void)
 
       /* Second immediate run: idle guard fires. */
       memory_maintenance_summary_t s2;
-      assert(memory_maintenance_run(NULL, 0, 0, 0, &s2) == 0);
+      assert(memory_maintenance_run(0, 0, 0, &s2) == 0);
       assert(s2.skipped == 1);
       assert(s2.promoted == 0 && s2.demoted == 0 && s2.expired == 0);
 
       /* Force bypasses the guard. */
       memory_maintenance_summary_t s3;
-      assert(memory_maintenance_run(NULL, 0, 1, 0, &s3) == 0);
+      assert(memory_maintenance_run(0, 1, 0, &s3) == 0);
       assert(s3.skipped == 0);
 
       /* Dry-run: no mutation even with a past-TTL pending row. */
@@ -1952,7 +1961,7 @@ int main(void)
                            " ttl_at = '2020-01-01 00:00:00' WHERE key = 'maint:pending'",
                            err, sizeof(err)) == 0);
       memory_maintenance_summary_t dry;
-      assert(memory_maintenance_run(NULL, MEMORY_MAINTENANCE_MODE_PRUNE, 1, 1, &dry) == 0);
+      assert(memory_maintenance_run(MEMORY_MAINTENANCE_MODE_PRUNE, 1, 1, &dry) == 0);
       assert(dry.dry_run == 1);
       assert(dry.lifecycle_archived == 0);
       memory_lifecycle_counts_t cts;
@@ -1961,7 +1970,7 @@ int main(void)
 
       /* Live prune commits and the row archives. */
       memory_maintenance_summary_t live;
-      assert(memory_maintenance_run(NULL, MEMORY_MAINTENANCE_MODE_PRUNE, 1, 0, &live) == 0);
+      assert(memory_maintenance_run(MEMORY_MAINTENANCE_MODE_PRUNE, 1, 0, &live) == 0);
       assert(live.lifecycle_archived >= 1);
       assert(memory_lifecycle_counts(&cts) == 0);
       assert(cts.archived >= 1);
@@ -1985,9 +1994,9 @@ int main(void)
       assert(runs_total >= 2);
       assert(skips_total >= 1);
 
-      config_t cfg_off;
-      memset(&cfg_off, 0, sizeof(cfg_off));
-      assert(memory_maintenance_maybe_run(&cfg_off, NULL) == 0);
+      /* maybe_run is gated on memory_maintenance.enabled; say so in config. */
+      write_test_config("memory_maintenance:\n  enabled: false\n");
+      assert(memory_maintenance_maybe_run(NULL) == 0);
    }
 
    db2_test_shim_close();

@@ -9,12 +9,13 @@
 
 #include "fidelity_check.h"
 
-int fidelity_check_eligible(const config_t *cfg)
+int fidelity_check_eligible(void)
 {
-   if (!cfg)
+   /* Fail closed when config cannot be read, as the old !cfg guard did. */
+   if (!config_present())
       return 0;
    /* Hard dependency chain (D11): the per-turn retrieval_event the judge binds
     * against exists only when evidence emission AND ingress pre-injection are on. */
-   return cfg->fidelity_check_enabled && cfg->kb_evidence_emit_enabled &&
-          cfg->ingress_preinject_enabled;
+   return config_fidelity_check_enabled() && config_kb_evidence_emit_enabled() &&
+          config_ingress_preinject_enabled();
 }

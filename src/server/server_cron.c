@@ -25,27 +25,29 @@
 
 static pthread_mutex_t g_cron_workdir_lock = PTHREAD_MUTEX_INITIALIZER;
 
-static void cron_sync_config_jobs(const config_t *cfg)
+static void cron_sync_config_jobs(void)
 {
-   if (!cfg)
-      return;
-   for (int i = 0; i < cfg->cron_job_count && i < CRON_JOBS_MAX; i++)
-      (void)db1_cron_job_upsert(&cfg->cron_jobs[i]);
+   int n = config_cron_job_count();
+   for (int i = 0; i < n && i < CRON_JOBS_MAX; i++)
+   {
+      cron_job_t job;
+      if (config_cron_job_at(i, &job) == 0)
+         (void)db1_cron_job_upsert(&job);
+   }
 }
 
-static int find_cron_job(const config_t *cfg, const char *id, cron_job_t *out)
+static int find_cron_job(const char *id, cron_job_t *out)
 {
    if (!id || !id[0] || !out)
       return -1;
-   if (cfg)
+   int n = config_cron_job_count();
+   for (int i = 0; i < n && i < CRON_JOBS_MAX; i++)
    {
-      for (int i = 0; i < cfg->cron_job_count && i < CRON_JOBS_MAX; i++)
+      cron_job_t job;
+      if (config_cron_job_at(i, &job) == 0 && strcmp(job.id, id) == 0)
       {
-         if (strcmp(cfg->cron_jobs[i].id, id) == 0)
-         {
-            *out = cfg->cron_jobs[i];
-            return 0;
-         }
+         *out = job;
+         return 0;
       }
    }
    return db1_cron_job_get(id, out);
@@ -395,9 +397,7 @@ int handle_cron_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    (void)req;
-   config_t cfg;
-   config_load(&cfg);
-   cron_sync_config_jobs(&cfg);
+   cron_sync_config_jobs();
 
    char *json = db1_cron_jobs_list_json();
    if (!json)
@@ -513,11 +513,9 @@ int handle_cron_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *jid = cJSON_GetObjectItemCaseSensitive(req, "job_id");
    if (!cJSON_IsString(jid) || !jid->valuestring[0])
       return server_send_error(conn, "job_id is required", NULL);
-   config_t cfg;
-   config_load(&cfg);
-   cron_sync_config_jobs(&cfg);
+   cron_sync_config_jobs();
    cron_job_t job_buf;
-   if (find_cron_job(&cfg, jid->valuestring, &job_buf) != 0)
+   if (find_cron_job(jid->valuestring, &job_buf) != 0)
       return server_send_error(conn, "cron job not found", NULL);
    const cron_job_t *job = &job_buf;
 
@@ -564,11 +562,9 @@ int handle_cron_run(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *jid = cJSON_GetObjectItemCaseSensitive(req, "job_id");
    if (!cJSON_IsString(jid) || !jid->valuestring[0])
       return server_send_error(conn, "job_id is required", NULL);
-   config_t cfg;
-   config_load(&cfg);
-   cron_sync_config_jobs(&cfg);
+   cron_sync_config_jobs();
    cron_job_t job_buf;
-   if (find_cron_job(&cfg, jid->valuestring, &job_buf) != 0)
+   if (find_cron_job(jid->valuestring, &job_buf) != 0)
       return server_send_error(conn, "cron job not found", NULL);
    const cron_job_t *job = &job_buf;
 

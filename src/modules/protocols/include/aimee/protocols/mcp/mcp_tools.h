@@ -36,10 +36,28 @@ const char *mcp_tool_profile_effective(const char *explicit_profile);
  * or "lean" keeps only the Tier-0 set. Returns the number of tools removed. */
 int mcp_filter_tools_for_profile(cJSON *tools, const char *profile);
 
-/* Append the find_tools / describe_tool discovery meta-tools to a tools list.
- * Called by mcp_build_tools_list so they are always present (and in the core
- * profile), keeping a lean presentation lossless. */
+/* Append the find_tools / describe_tool discovery meta-tools and the call_tool
+ * bridge to a tools list. Called by mcp_build_tools_list so they are always
+ * present (and in the core profile), keeping a lean presentation usable from
+ * schema-bound MCP hosts. */
 void mcp_add_discovery_tools(cJSON *tools);
+
+/* Case-insensitive discovery matcher shared by find_tools and its contract
+ * tests. Empty queries match every descriptor. */
+int mcp_tool_matches_query(const cJSON *tool, const char *query);
+
+/* Resolve agent-facing code-search scope from MCP arguments. `project` wins;
+ * otherwise cwd's basename is the active indexed project id. The scope helper
+ * returns 0 for current/default, 1 for all, and -1 for invalid input. */
+const char *mcp_code_project_from_args(cJSON *args);
+int mcp_code_scope_all(cJSON *args);
+
+/* Resolve call_tool({name,arguments}) to the named tool and its argument object.
+ * MCP hosts can only invoke schemas returned by tools/list, so this bridge is
+ * what makes tools found through find_tools genuinely callable under the lean
+ * presentation profile. Returns 1 (rewritten), 0 (not call_tool), or -1 (bad
+ * wrapper arguments / recursive target). The returned pointers borrow args. */
+int mcp_call_tool_demux(const char *tool, cJSON *args, const char **out_tool, cJSON **out_args);
 
 /* Append the P3 extended read-only tools (roadmap/task/index/memory-explain) to
  * a tools list. Definitions live in mcp_tools_extended.c; the matching content

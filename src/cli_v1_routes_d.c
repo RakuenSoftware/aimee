@@ -82,8 +82,8 @@ static const struct
     {"agent.add", pt_print_agent_add},
     {"agent.remove", pt_print_agent_remove},
     {"agent.enable", pt_print_agent_enable},
-    {"agent.roles", pt_print_agent_enable},
-    {"agent.personas", pt_print_agent_enable},
+    {"agent.roles", pt_print_agent_roles},
+    {"agent.personas", pt_print_agent_personas},
     {"agent.disable", pt_print_agent_disable},
     {"agent.probe", pt_print_agent_probe},
     {"mcp.audit", pt_print_mcp_audit},
@@ -131,6 +131,7 @@ static const struct
     {"kb.ingest", pt_print_kb_ingest},
     {"kb.docs.push", pt_print_kb_docs_push},
     {"kb.ingest.status", pt_print_kb_ingest_status},
+    {"kb.health", pt_print_kb_status},
     {"kb.status", pt_print_kb_status},
     {"workers", pt_print_workers},
     {"provider.list", pt_print_provider_list},
@@ -188,6 +189,22 @@ static int delegate_timeout_from_args(int argc, char **argv)
    rpc_opts_t opts;
    rpc_parse(argc, argv, bool_flags, &opts);
    return rpc_get_int(&opts, "timeout", 0);
+}
+
+/* `agent probe` is a diagnostic command, so its process status must agree with
+ * the result it prints.  A 2xx response only means the server completed the
+ * probe; it does not mean the provider was usable.  Prefer the execution probe
+ * when it ran because some hosted providers reject /models while accepting
+ * inference.  With --no-run, model availability is the strongest result we
+ * have. */
+static int agent_probe_response_is_failure(cJSON *resp)
+{
+   cJSON *execution_ok = cJSON_GetObjectItemCaseSensitive(resp, "execution_ok");
+   if (execution_ok)
+      return !cJSON_IsTrue(execution_ok);
+
+   cJSON *model_available = cJSON_GetObjectItemCaseSensitive(resp, "model_available");
+   return model_available && !cJSON_IsTrue(model_available);
 }
 
 static int write_delegate_output_file(const char *path, const char *text)
@@ -577,6 +594,7 @@ static const struct
     {"agent.stats", "GET", "/v1/agent/stats"},
     {"api.disable", "POST", "/v1/api/disable"},
     {"api.enable", "POST", "/v1/api/enable"},
+    {"api.enroll_bearer", "POST", "/v1/api/enroll_bearer"},
     {"api.rotate_bearer", "POST", "/v1/api/rotate_bearer"},
     {"api.status", "GET", "/v1/api/status"},
     {"attempt.list", "POST", "/v1/attempts/list"},
@@ -641,6 +659,7 @@ static const struct
     {"dogfood.review", "POST", "/v1/dogfood/review"},
     {"dogfood.tag", "POST", "/v1/dogfood/tag"},
     {"economizer.stats", "GET", "/v1/economizer/stats"},
+    {"embedders.list", "GET", "/v1/embedders"},
     {"episode.list", "GET", "/v1/episode/list"},
     {"eval.results", "GET", "/v1/eval/results"},
     {"evidence.fidelity_retrieval_event", "POST", "/v1/audit/fidelity"},
@@ -678,12 +697,14 @@ static const struct
     {"mcp.call", "POST", "/v1/mcp/call"},
     {"mcp.recheck", "POST", "/v1/mcp/recheck"},
     {"mcp.tools_list", "GET", "/v1/mcp/tools_list"},
+    {"memory.delete", "POST", "/v1/memory/delete"},
     {"memory.get", "POST", "/v1/memory/get"},
     {"memory.list", "POST", "/v1/memory/list"},
     {"memory.read", "GET", "/v1/memory/read"},
     {"memory.search", "POST", "/v1/memory/search"},
     {"memory.stats", "GET", "/v1/memory/stats"},
     {"memory.store", "POST", "/v1/memory/store"},
+    {"memory.supersede", "POST", "/v1/memory/supersede"},
     {"memory.user_capture", "POST", "/v1/memory/user_capture"},
     {"model.list", "GET", "/v1/model/list"},
     {"model.refresh", "POST", "/v1/model/refresh"},
@@ -769,8 +790,10 @@ static const struct
     {"kb.build", "POST", "/v1/kb/build"},
     {"kb.docs.push", "POST", "/v1/kb/docs/push"},
     {"kb.ingest", "POST", "/v1/kb/ingest"},
+    {"kb.reembed", "POST", "/v1/kb/reembed"},
     {"kb.update", "POST", "/v1/kb/update"},
     {"memory.benchmark", "POST", "/v1/memory/benchmark"},
+    {"memory.embed", "POST", "/v1/memory/embed"},
     {"roundtable.review", "POST", "/v1/roundtable/review"},
     {"rules.generate", "POST", "/v1/rules/generate"},
 };
@@ -817,6 +840,8 @@ const char *cli_v1_route_for_method(const char *method, const char **verb_out)
         * has one definition. Only the METHOD differs, so the marshaller can require a
         * subject — without that separation, `show` with no subject silently lists everything. */
        {"kb.grant.show", "POST", "/v1/grants/write-tier/list"},
+       {"kb.health", "GET", "/v1/kb/status"},
+       {"kb.ingest.status", "GET", "/v1/kb/ingest/status"},
        {"kb.status", "GET", "/v1/kb/status"},
        {"kb.curator", "GET", "/v1/kb/curator"},
        {"memory.recall", "POST", "/v1/memory/recall"},
@@ -996,6 +1021,119 @@ static cJSON *cli_v1_send(const char *remote, const char *bearer, const char *ve
    return resp;
 }
 
+static void cli_v1_print_json_response(cJSON *resp)
+{
+   char *str = cJSON_PrintUnformatted(resp);
+   if (str)
+   {
+      puts(str);
+      free(str);
+   }
+}
+
+static int cli_v1_response_is_error(cJSON *resp, int http_status)
+{
+   if (!resp)
+      return 0;
+   if (http_status >= 400)
+      return 1;
+   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+   if (cJSON_IsString(status) && strcmp(status->valuestring, "error") == 0)
+      return 1;
+   return cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(resp, "error"));
+}
+
+/* Extract the most specific cause carried by a terminal failed op-run. The
+ * returned pointer is owned by result/snapshot and remains valid until those
+ * objects are deleted. Kept separate so every error-envelope shape has a small
+ * regression-testable contract. */
+const char *cli_v1_run_failure_reason(cJSON *result, cJSON *snapshot)
+{
+   if (result)
+   {
+      cJSON *error = cJSON_GetObjectItemCaseSensitive(result, "error");
+      if (cJSON_IsString(error) && error->valuestring[0])
+         return error->valuestring;
+      if (cJSON_IsObject(error))
+      {
+         cJSON *message = cJSON_GetObjectItemCaseSensitive(error, "message");
+         if (cJSON_IsString(message) && message->valuestring[0])
+            return message->valuestring;
+      }
+
+      /* Dispatch handlers commonly return the ordinary error envelope
+       * {"status":"error","message":"..."}. The op-run worker correctly
+       * marks that as failed, so preserve the handler's useful cause. */
+      cJSON *result_status = cJSON_GetObjectItemCaseSensitive(result, "status");
+      cJSON *result_message = cJSON_GetObjectItemCaseSensitive(result, "message");
+      if (cJSON_IsString(result_status) && strcmp(result_status->valuestring, "error") == 0 &&
+          cJSON_IsString(result_message) && result_message->valuestring[0])
+         return result_message->valuestring;
+   }
+
+   if (snapshot)
+   {
+      cJSON *error = cJSON_GetObjectItemCaseSensitive(snapshot, "error");
+      if (cJSON_IsString(error) && error->valuestring[0])
+         return error->valuestring;
+      if (cJSON_IsObject(error))
+      {
+         cJSON *message = cJSON_GetObjectItemCaseSensitive(error, "message");
+         if (cJSON_IsString(message) && message->valuestring[0])
+            return message->valuestring;
+      }
+      cJSON *message = cJSON_GetObjectItemCaseSensitive(snapshot, "message");
+      if (cJSON_IsString(message) && message->valuestring[0])
+         return message->valuestring;
+   }
+   return NULL;
+}
+
+/* A terminal async run may carry far more than its error string. Roundtable
+ * failures, for example, retain per-seat failure categories and deadline state.
+ * Preserve an object result intact and add the dispatch error markers needed by
+ * cli_v1_forward; synthesize the legacy object envelope only when the run did
+ * not record a structured result. Takes ownership of result. May return NULL on
+ * allocation failure; cli_v1_forward rejects a NULL response before calling the
+ * response finisher. */
+static cJSON *cli_v1_failed_run_response(cJSON *result, cJSON *snapshot)
+{
+   const char *why = cli_v1_run_failure_reason(result, snapshot);
+   char msg[320];
+   if (why)
+      snprintf(msg, sizeof(msg), "%s", why);
+   else
+   {
+      cJSON *status = snapshot ? cJSON_GetObjectItemCaseSensitive(snapshot, "status") : NULL;
+      const char *status_name =
+          cJSON_IsString(status) && status->valuestring[0] ? status->valuestring : "failed";
+      snprintf(msg, sizeof(msg), "run %s with no result", status_name);
+   }
+
+   if (cJSON_IsObject(result))
+   {
+      cJSON *status = cJSON_GetObjectItemCaseSensitive(result, "status");
+      if (!cJSON_IsString(status) || strcmp(status->valuestring, "error") != 0)
+      {
+         cJSON_DeleteItemFromObjectCaseSensitive(result, "status");
+         cJSON_AddStringToObject(result, "status", "error");
+      }
+      if (!cJSON_GetObjectItemCaseSensitive(result, "message"))
+         cJSON_AddStringToObject(result, "message", msg);
+      return result;
+   }
+
+   cJSON *env = cJSON_CreateObject();
+   cJSON *err = env ? cJSON_AddObjectToObject(env, "error") : NULL;
+   if (err)
+   {
+      cJSON_AddStringToObject(err, "message", msg);
+      cJSON_AddStringToObject(err, "type", "run_failed");
+   }
+   cJSON_Delete(result);
+   return env;
+}
+
 /* cli_v1_run_and_poll: POST an async (rh_dispatch_op_async) route, then poll
  * GET /v1/runs/{id} until the run is terminal and return its `result` — the raw
  * dispatch payload, matching the synchronous dispatch response shape, so the
@@ -1054,55 +1192,9 @@ static cJSON *cli_v1_run_and_poll(const char *remote, const char *bearer, const 
              * with exit status 0 when the run had actually failed, hiding the failure
              * from humans and scripts alike. Surface it as an error envelope instead,
              * carrying whatever the run recorded. */
-            const char *why = NULL;
             /* A failed run usually carries its reason inside `result` (e.g.
              * {"result":{"error":"rpc produced no response"}}), so look there first. */
-            if (result)
-            {
-               cJSON *re = cJSON_GetObjectItemCaseSensitive(result, "error");
-               if (cJSON_IsString(re) && re->valuestring[0])
-                  why = re->valuestring;
-               else if (cJSON_IsObject(re))
-               {
-                  cJSON *rm = cJSON_GetObjectItemCaseSensitive(re, "message");
-                  if (cJSON_IsString(rm) && rm->valuestring[0])
-                     why = rm->valuestring;
-               }
-            }
-            cJSON *e = why ? NULL : cJSON_GetObjectItemCaseSensitive(snap, "error");
-            if (cJSON_IsString(e) && e->valuestring[0])
-               why = e->valuestring;
-            else if (cJSON_IsObject(e))
-            {
-               cJSON *m = cJSON_GetObjectItemCaseSensitive(e, "message");
-               if (cJSON_IsString(m) && m->valuestring[0])
-                  why = m->valuestring;
-            }
-            if (!why)
-            {
-               cJSON *m = cJSON_GetObjectItemCaseSensitive(snap, "message");
-               if (cJSON_IsString(m) && m->valuestring[0])
-                  why = m->valuestring;
-            }
-            char msg[320];
-            if (why)
-               snprintf(msg, sizeof(msg), "%s", why);
-            else
-               snprintf(msg, sizeof(msg), "run %s with no result", st->valuestring);
-            /* Emit the OBJECT envelope {"error":{"message":...}}, not the string
-             * form. cli_v1_forward only treats a top-level string "error" as a
-             * failure when http_status >= 400 (a 2xx may legitimately carry one —
-             * cron.run returns job stderr that way), and the async path reports
-             * http_status 0. The object form is unconditionally an error there, so
-             * this reaches the caller as a real failure with exit status 1. */
-            cJSON *env = cJSON_CreateObject();
-            cJSON *err = env ? cJSON_AddObjectToObject(env, "error") : NULL;
-            if (err)
-            {
-               cJSON_AddStringToObject(err, "message", msg);
-               cJSON_AddStringToObject(err, "type", "run_failed");
-            }
-            cJSON_Delete(result);
+            cJSON *env = cli_v1_failed_run_response(result, snap);
             cJSON_Delete(snap);
             return env;
          }
@@ -1125,6 +1217,48 @@ static cJSON *cli_v1_run_and_poll(const char *remote, const char *bearer, const 
  * only, so these helpers are no-ops on Windows (the reverse-channel serve path
  * still works there; client-push indexing does not). */
 #if defined(AIMEE_POSIX)
+
+/* Keep the thin-client push path aligned with the local/canonical scanners.
+ * Hidden-root projects are deliberately excluded from index reads and startup
+ * cleanup so temporary .aimee/.claude worktrees cannot pollute the shared code
+ * graph.  Accepting one here used to report a successful upload whose symbols
+ * were immediately invisible to list/find/callers. */
+static int cli_ws_root_has_hidden_component(const char *path)
+{
+   if (!path)
+      return 0;
+   const char *p = path;
+   while (*p == '/')
+      p++;
+   const char *start = p;
+   for (;;)
+   {
+      if (*p == '/' || *p == '\0')
+      {
+         if (p > start && start[0] == '.')
+            return 1;
+         if (*p == '\0')
+            return 0;
+         start = ++p;
+      }
+      else
+      {
+         p++;
+      }
+   }
+}
+
+static int cli_ws_reject_hidden_root(const char *abs_root)
+{
+   if (!cli_ws_root_has_hidden_component(abs_root))
+      return 0;
+   fprintf(stderr,
+           "aimee: refusing to index hidden root: %s\n"
+           "  Index the non-hidden canonical checkout instead. Temporary .aimee/.claude\n"
+           "  worktrees are intentionally excluded from the shared code index.\n",
+           abs_root);
+   return 1;
+}
 
 /* Pull the human-readable message out of an {"error":...} envelope (object or
  * string form); returns NULL when there is no error. */
@@ -1226,11 +1360,15 @@ static void ws_ingest_flush(ws_ingest_ctx_t *s)
    }
    else
    {
-      if (cli_ws_ingest_batch(s->remote, s->bearer, s->base, s->abs_root, s->batch) == 0)
+      int batch_no = s->batches + 1;
+      int batch_ok = cli_ws_ingest_batch(s->remote, s->bearer, s->base, s->abs_root, s->batch) == 0;
+      if (batch_ok)
          s->pushed += have;
       else
          s->failed += have;
       s->batches++;
+      fprintf(stderr, "index upload: batch %d %s (%d file%s; %d uploaded total)\n", batch_no,
+              batch_ok ? "complete" : "failed", have, have == 1 ? "" : "s", s->pushed);
    }
    s->batch = NULL;
    s->batch_bytes = 0;
@@ -1314,6 +1452,7 @@ static void ws_tree_ingest_cb(const char *repo_abs, void *ctx)
    const char *base = strrchr(repo_abs, '/');
    base = (base && base[1]) ? base + 1 : repo_abs;
    printf("indexing project: %s\n", base);
+   fflush(stdout);
    if (cli_ws_ingest_root(t->remote, t->bearer, repo_abs) != 0)
       t->rc = 1;
    t->count++;
@@ -1321,6 +1460,8 @@ static void ws_tree_ingest_cb(const char *repo_abs, void *ctx)
 
 static int cli_ws_ingest_tree(const char *remote, const char *bearer, const char *abs_root)
 {
+   if (cli_ws_reject_hidden_root(abs_root))
+      return 1;
    ws_tree_ctx_t t = {remote, bearer, 0, 0};
    code_collect_discover_repos(abs_root, ws_tree_ingest_cb, &t);
    if (t.count == 0)
@@ -1357,6 +1498,11 @@ int cli_workspace_add_remote(const char *path)
       fprintf(stderr, "aimee: workspace: cannot resolve path '%s' on this host\n", path);
       return 1;
    }
+   if (cli_ws_reject_hidden_root(abs))
+   {
+      free(abs);
+      return 1;
+   }
 
    char *remote = cli_v1_client_endpoint();
    char *bearer = cli_v1_client_bearer();
@@ -1389,6 +1535,7 @@ int cli_workspace_add_remote(const char *path)
    if (rresp)
       cJSON_Delete(rresp);
    printf("workspace registered: %s (detached)\n", abs);
+   fflush(stdout);
 
    int rc = cli_ws_ingest_tree(remote, bearer, abs);
    free(abs);
@@ -1573,6 +1720,158 @@ cJSON *cli_v1_dispatch(cJSON *req, int timeout_ms)
    return resp;
 }
 
+/* Finish one parsed /v1 response. Keeping ownership, classification, rendering,
+ * and exit-code selection in one helper gives the CLI a single user-visible
+ * contract and lets regression tests exercise the exact production path. resp is
+ * consumed on every return. */
+static int cli_v1_finish_response(const cli_v1_route_t *route, cJSON *resp, int http_status,
+                                  int effective_json_output, int fwd_argc, char **fwd_argv)
+{
+   if (!resp)
+   {
+      fprintf(stderr, "aimee: server returned an empty response\n");
+      return -1;
+   }
+
+   /* Protocol version mismatch -> fall back. */
+   cJSON *err = cJSON_GetObjectItemCaseSensitive(resp, "error");
+   if (cJSON_IsString(err) && strstr(err->valuestring, "protocol version"))
+   {
+      cJSON_Delete(resp);
+      return -1;
+   }
+
+   /* JSON mode is a machine contract on failures too. Preserve the complete
+    * server envelope before the text-mode branches extract and discard its
+    * message. This is especially important for roundtable.review: a parked
+    * degraded/deadline result carries participant_failures beside the error,
+    * and `--json` previously threw those diagnostics away. */
+   if (effective_json_output && cli_v1_response_is_error(resp, http_status))
+   {
+      cli_v1_print_json_response(resp);
+      cJSON_Delete(resp);
+      return 1;
+   }
+
+   /* Server-side error. */
+   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+   if (cJSON_IsString(status) && strcmp(status->valuestring, "error") == 0)
+   {
+      cJSON *msg = cJSON_GetObjectItemCaseSensitive(resp, "message");
+      if (cJSON_IsString(msg) && msg->valuestring[0])
+         fprintf(stderr, "aimee: %s\n", msg->valuestring);
+      cJSON_Delete(resp);
+      return 1;
+   }
+
+   /* REST error envelope: {"error":{"message":..,"type":..}}. The server emits
+    * this on any non-2xx -- e.g. 403 permission_error when a write is attempted
+    * over a read-only remote listener (aimee.api.remote_writes=off). It is NOT a
+    * {"status":"error"} body, so without this the success pretty-printers below
+    * would misreport a denied write as success (e.g. print "stored memory"). */
+   if (cJSON_IsObject(err))
+   {
+      cJSON *emsg = cJSON_GetObjectItemCaseSensitive(err, "message");
+      fprintf(stderr, "aimee: %s\n",
+              (cJSON_IsString(emsg) && emsg->valuestring[0]) ? emsg->valuestring
+                                                             : "request failed");
+      cJSON_Delete(resp);
+      return 1;
+   }
+   /* Any other non-2xx: never render it as success. Prefer a string error
+    * envelope {"error":"<msg>"} -- the shape server_http.c's err_json() emits
+    * (28+ routes: 502/503 backend-unavailable, "no such persona/agent", "attach
+    * refused", ...) -- over the generic HTTP line, which drops the real reason.
+    * Gated on http_status so a 2xx success that legitimately carries a top-level
+    * "error" string (e.g. cron.run returns {status:ok,...,error:"<job stderr>"})
+    * is NOT misreported as a failure. */
+   if (http_status >= 400)
+   {
+      if (cJSON_IsString(err) && err->valuestring[0])
+         fprintf(stderr, "aimee: %s\n", err->valuestring);
+      else
+         fprintf(stderr, "aimee: server returned HTTP %d for '%s'\n", http_status, route->method);
+      cJSON_Delete(resp);
+      return 1;
+   }
+
+   int exit_rc = 0;
+   if (strcmp(route->method, "init.run") == 0)
+   {
+      cJSON *knowledge = cJSON_GetObjectItemCaseSensitive(resp, "knowledge_ready");
+      if (!cJSON_IsTrue(knowledge))
+         exit_rc = 1;
+   }
+   else if (strcmp(route->method, "git.verify") == 0 && git_verify_response_is_failure(resp))
+   {
+      exit_rc = 1;
+   }
+   else if (strcmp(route->method, "agent.probe") == 0 && agent_probe_response_is_failure(resp))
+   {
+      exit_rc = 1;
+   }
+
+   if (!effective_json_output && strcmp(route->method, "delegate") == 0)
+   {
+      const char *output_path = delegate_output_path_from_args(fwd_argc, fwd_argv);
+      if (output_path && output_path[0])
+      {
+         cJSON *r = cJSON_GetObjectItemCaseSensitive(resp, "response");
+         if (!cJSON_IsString(r))
+         {
+            cJSON_Delete(resp);
+            fprintf(stderr, "aimee: delegate returned no response to write\n");
+            return 1;
+         }
+         if (write_delegate_output_file(output_path, r->valuestring) != 0)
+         {
+            cJSON_Delete(resp);
+            fprintf(stderr, "aimee: cannot write to --output path: %s\n", output_path);
+            return 1;
+         }
+         cJSON_Delete(resp);
+         fprintf(stderr, "%s\n", output_path);
+         return exit_rc;
+      }
+   }
+
+   if (effective_json_output)
+   {
+      if (route->extract)
+      {
+         /* Extract named array from response. */
+         cJSON *arr = cJSON_DetachItemFromObjectCaseSensitive(resp, route->extract);
+         if (arr)
+         {
+            char *str = cJSON_PrintUnformatted(arr);
+            if (str)
+            {
+               puts(str);
+               free(str);
+            }
+            cJSON_Delete(arr);
+         }
+         cJSON_Delete(resp);
+      }
+      else
+      {
+         /* Successful JSON responses keep their payload but omit the transport
+          * status marker. Error envelopes returned above are intentionally not
+          * stripped: status/error/message are part of their machine contract. */
+         cJSON_DeleteItemFromObjectCaseSensitive(resp, "status");
+         cli_v1_print_json_response(resp);
+         cJSON_Delete(resp);
+      }
+   }
+   else
+   {
+      print_text_output(route->method, resp);
+      cJSON_Delete(resp);
+   }
+
+   return exit_rc;
+}
+
 /* --- Main /v1 forward function --- */
 
 int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int json_output,
@@ -1722,128 +2021,6 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
       return -1;
    }
 
-   /* Protocol version mismatch → fall back */
-   cJSON *err = cJSON_GetObjectItemCaseSensitive(resp, "error");
-   if (cJSON_IsString(err) && strstr(err->valuestring, "protocol version"))
-   {
-      cJSON_Delete(resp);
-      return -1;
-   }
-
-   /* Server-side error */
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (cJSON_IsString(status) && strcmp(status->valuestring, "error") == 0)
-   {
-      cJSON *msg = cJSON_GetObjectItemCaseSensitive(resp, "message");
-      if (cJSON_IsString(msg) && msg->valuestring[0])
-         fprintf(stderr, "aimee: %s\n", msg->valuestring);
-      cJSON_Delete(resp);
-      return 1;
-   }
-
-   /* REST error envelope: {"error":{"message":..,"type":..}}. The server emits
-    * this on any non-2xx — e.g. 403 permission_error when a write is attempted
-    * over a read-only remote listener (aimee.api.remote_writes=off). It is NOT a
-    * {"status":"error"} body, so without this the success pretty-printers below
-    * would misreport a denied write as success (e.g. print "stored memory"). */
-   if (cJSON_IsObject(err))
-   {
-      cJSON *emsg = cJSON_GetObjectItemCaseSensitive(err, "message");
-      fprintf(stderr, "aimee: %s\n",
-              (cJSON_IsString(emsg) && emsg->valuestring[0]) ? emsg->valuestring
-                                                             : "request failed");
-      cJSON_Delete(resp);
-      return 1;
-   }
-   /* Any other non-2xx: never render it as success. Prefer a string error
-    * envelope {"error":"<msg>"} — the shape server_http.c's err_json() emits
-    * (28+ routes: 502/503 backend-unavailable, "no such persona/agent", "attach
-    * refused", ...) — over the generic HTTP line, which drops the real reason.
-    * Gated on http_status so a 2xx success that legitimately carries a top-level
-    * "error" string (e.g. cron.run returns {status:ok,...,error:"<job stderr>"})
-    * is NOT misreported as a failure. */
-   if (http_status >= 400)
-   {
-      if (cJSON_IsString(err) && err->valuestring[0])
-         fprintf(stderr, "aimee: %s\n", err->valuestring);
-      else
-         fprintf(stderr, "aimee: server returned HTTP %d for '%s'\n", http_status, route->method);
-      cJSON_Delete(resp);
-      return 1;
-   }
-
-   int exit_rc = 0;
-   if (strcmp(route->method, "init.run") == 0)
-   {
-      cJSON *knowledge = cJSON_GetObjectItemCaseSensitive(resp, "knowledge_ready");
-      if (!cJSON_IsTrue(knowledge))
-         exit_rc = 1;
-   }
-   else if (strcmp(route->method, "git.verify") == 0 && git_verify_response_is_failure(resp))
-   {
-      exit_rc = 1;
-   }
-
-   if (!effective_json_output && strcmp(route->method, "delegate") == 0)
-   {
-      const char *output_path = delegate_output_path_from_args(fwd_argc, fwd_argv);
-      if (output_path && output_path[0])
-      {
-         cJSON *r = cJSON_GetObjectItemCaseSensitive(resp, "response");
-         if (!cJSON_IsString(r))
-         {
-            cJSON_Delete(resp);
-            fprintf(stderr, "aimee: delegate returned no response to write\n");
-            return 1;
-         }
-         if (write_delegate_output_file(output_path, r->valuestring) != 0)
-         {
-            cJSON_Delete(resp);
-            fprintf(stderr, "aimee: cannot write to --output path: %s\n", output_path);
-            return 1;
-         }
-         cJSON_Delete(resp);
-         fprintf(stderr, "%s\n", output_path);
-         return exit_rc;
-      }
-   }
-
-   if (effective_json_output)
-   {
-      if (route->extract)
-      {
-         /* Extract named array from response */
-         cJSON *arr = cJSON_DetachItemFromObjectCaseSensitive(resp, route->extract);
-         if (arr)
-         {
-            char *str = cJSON_PrintUnformatted(arr);
-            if (str)
-            {
-               puts(str);
-               free(str);
-            }
-            cJSON_Delete(arr);
-         }
-         cJSON_Delete(resp);
-      }
-      else
-      {
-         /* Strip "status", print remaining object */
-         cJSON_DeleteItemFromObjectCaseSensitive(resp, "status");
-         char *str = cJSON_PrintUnformatted(resp);
-         if (str)
-         {
-            puts(str);
-            free(str);
-         }
-         cJSON_Delete(resp);
-      }
-   }
-   else
-   {
-      print_text_output(route->method, resp);
-      cJSON_Delete(resp);
-   }
-
-   return exit_rc;
+   return cli_v1_finish_response(route, resp, http_status, effective_json_output, fwd_argc,
+                                 fwd_argv);
 }

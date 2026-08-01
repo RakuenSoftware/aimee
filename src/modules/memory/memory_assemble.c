@@ -16,6 +16,7 @@
 #include "db2/entity_edges.h"
 #include "db2/memory_query.h"
 #include "db2/memory_relations.h"
+#include "db2/memory_scope_query.h"
 #include "db2/rules.h"
 #endif
 #include <ctype.h>
@@ -164,6 +165,16 @@ static int compare_scoped_section_item(const void *a, const void *b)
 static void memory_scope_labels_for_cwd(const char *workspace_hint, char *workspace_out,
                                         size_t workspace_len, char *project_out, size_t project_len)
 {
+   db2_memory_scope_context_t request_scope;
+   db2_memory_scope_context_get(&request_scope);
+   if (request_scope.active)
+   {
+      if (workspace_out && workspace_len > 0)
+         snprintf(workspace_out, workspace_len, "%s", request_scope.workspace);
+      if (project_out && project_len > 0)
+         snprintf(project_out, project_len, "%s", request_scope.project);
+      return;
+   }
    char cwd[MAX_PATH_LEN];
    const char *workspace = workspace_hint;
 
@@ -213,7 +224,7 @@ static void memory_scope_labels_for_cwd(const char *workspace_hint, char *worksp
    project_source_buf[0] = '\0';
    const char *project_source = NULL;
    if (cwd[0] &&
-       workspace_active_root(NULL, cwd, project_source_buf, sizeof(project_source_buf)) == 0 &&
+       workspace_active_root_from_cwd(cwd, project_source_buf, sizeof(project_source_buf)) == 0 &&
        project_source_buf[0])
    {
       project_source = project_source_buf;
@@ -809,11 +820,9 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
    /* 4. Sort by score descending (default) or score_per_token (budget mode) */
 
    /* Check whether token-budget assembly is enabled in config. */
-   config_t assemble_cfg;
-   config_load(&assemble_cfg);
-   int budget_mode = assemble_cfg.memory_context_budget_enabled;
-   int token_budget = assemble_cfg.memory_context_budget_tokens > 0
-                          ? assemble_cfg.memory_context_budget_tokens
+   int budget_mode = config_memory_context_budget_enabled();
+   int token_budget = config_memory_context_budget_tokens() > 0
+                          ? config_memory_context_budget_tokens()
                           : 2048; /* default budget */
 
    if (cand_count > 1)
@@ -824,13 +833,13 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
     * attempt a fallback before assembling context. */
    int low_confidence_flag = 0; /* 1 = inject LOW marker into context */
    int answerability_withheld = 0;
-   if (assemble_cfg.memory_failure_detection_enabled || assemble_cfg.memory_abstain_enabled)
+   if (config_memory_failure_detection_enabled() || config_memory_abstain_enabled())
    {
       double threshold =
-          assemble_cfg.memory_abstain_enabled
-              ? (assemble_cfg.memory_abstain_gate > 0.0 ? assemble_cfg.memory_abstain_gate : 0.40)
-              : (assemble_cfg.memory_failure_detection_threshold > 0.0
-                     ? assemble_cfg.memory_failure_detection_threshold
+          config_memory_abstain_enabled()
+              ? (config_memory_abstain_gate() > 0.0 ? config_memory_abstain_gate() : 0.40)
+              : (config_memory_failure_detection_threshold() > 0.0
+                     ? config_memory_failure_detection_threshold()
                      : 0.35);
 
       retrieval_confidence_t rconf;
@@ -891,14 +900,14 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
       if (rconf.below_threshold)
       {
          low_confidence_flag = 1;
-         answerability_withheld = assemble_cfg.memory_abstain_enabled ? 1 : 0;
+         answerability_withheld = config_memory_abstain_enabled() ? 1 : 0;
          /* Record the failure; after threshold crossings, the
           * directives subsystem auto-creates a retrieval_failure
           * directive so future turns can ask the user to fill the
           * gap instead of silently flailing. Gated by the directives
           * toggle (default on); manually-created directives still
           * surface when it is off. */
-         if (assemble_cfg.memory_directives_enabled)
+         if (config_memory_directives_enabled())
          {
             char norm_hint[256];
             normalize_key(task_hint, norm_hint, sizeof(norm_hint));
@@ -1039,9 +1048,7 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
     * and the feature is enabled.  Results are appended as a small JSON
     * block that the answer prompt is taught to consult. */
    {
-      config_t derive_cfg;
-      config_load(&derive_cfg);
-      if (derive_cfg.memory_derive_facts_enabled)
+      if (config_memory_derive_facts_enabled())
       {
          memory_query_shape_t dshape = memory_classify_deriver_shape(task_hint);
          if (dshape == MEM_SHAPE_QUANTITATIVE || dshape == MEM_SHAPE_TEMPORAL_INTERVAL)
@@ -1052,7 +1059,7 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
                cids[i] = candidates[i].id;
 
             memory_derived_facts_t dfacts;
-            int nfacts = memory_derive_facts(task_hint, cids, cand_count, &derive_cfg, &dfacts);
+            int nfacts = memory_derive_facts(task_hint, cids, cand_count, &dfacts);
             if (nfacts > 0)
             {
                char *json = memory_derived_facts_to_json(&dfacts);
@@ -1095,6 +1102,13 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
 
 static int append_entity_relationships(char *buf, int pos, int cap)
 {
+   db2_memory_scope_context_t request_scope;
+   db2_memory_scope_context_get(&request_scope);
+   /* Legacy entity_edges rows have no canonical memory_id and therefore no
+    * project visibility tag. Do not inject that unscoped graph into a scoped
+    * request; task-aware memory_relations below remain available and scoped. */
+   if (request_scope.active)
+      return pos;
    /* Entity relationships from graph (top distinct triples by weight). */
    {
       edge_t edges[10];
@@ -1217,9 +1231,11 @@ static void check_artifact_staleness(void)
 char *memory_assemble_context(const char *task_hint)
 {
    int cap = MAX_CONTEXT_TOTAL + 256;
+   db2_memory_scope_context_t request_scope;
+   db2_memory_scope_context_get(&request_scope);
 
    /* Check context cache */
-   if (!getenv("AIMEE_NO_CACHE"))
+   if (!request_scope.active && !getenv("AIMEE_NO_CACHE"))
    {
       char hash[32];
       cache_input_hash(hash, sizeof(hash));
@@ -1249,7 +1265,7 @@ char *memory_assemble_context(const char *task_hint)
    buf[pos] = '\0';
 
    /* Store in context cache */
-   if (!getenv("AIMEE_NO_CACHE"))
+   if (!request_scope.active && !getenv("AIMEE_NO_CACHE"))
    {
       char hash[32];
       cache_input_hash(hash, sizeof(hash));
@@ -1276,11 +1292,9 @@ char *memory_assemble_context_explain(const char *task_hint,
       *explain_count = 0;
 
    /* Load config to know budget settings */
-   config_t ecfg;
-   config_load(&ecfg);
-   int budget_mode = ecfg.memory_context_budget_enabled;
+   int budget_mode = config_memory_context_budget_enabled();
    int token_budget =
-       ecfg.memory_context_budget_tokens > 0 ? ecfg.memory_context_budget_tokens : 2048;
+       config_memory_context_budget_tokens() > 0 ? config_memory_context_budget_tokens() : 2048;
 
    if (metrics)
    {

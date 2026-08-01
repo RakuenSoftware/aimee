@@ -316,29 +316,31 @@ int handle_coord_job_cancel(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return server_send_ok(conn, resp);
 }
 
-static cJSON *aux_config_to_json(const config_t *cfg)
+static cJSON *aux_config_to_json(void)
 {
    cJSON *obj = cJSON_CreateObject();
-   if (!obj || !cfg)
+   if (!obj)
       return obj;
 
-   cJSON_AddBoolToObject(obj, "enabled", cfg->aux_enabled);
-   cJSON_AddStringToObject(obj, "default_provider",
-                           cfg->aux_default_provider[0] ? cfg->aux_default_provider : "");
-   cJSON_AddStringToObject(obj, "default_model",
-                           cfg->aux_default_model[0] ? cfg->aux_default_model : "");
-   cJSON_AddNumberToObject(obj, "default_max_tokens", cfg->aux_default_max_tokens);
+   cJSON_AddBoolToObject(obj, "enabled", config_aux_enabled());
+   cJSON_AddStringToObject(obj, "default_provider", config_aux_default_provider());
+   cJSON_AddStringToObject(obj, "default_model", config_aux_default_model());
+   cJSON_AddNumberToObject(obj, "default_max_tokens", config_aux_default_max_tokens());
 
    cJSON *tasks = cJSON_AddArrayToObject(obj, "tasks");
-   for (int i = 0; tasks && i < cfg->aux_task_count; i++)
+   int n = config_aux_task_count();
+   for (int i = 0; tasks && i < n && i < CONFIG_AUX_MAX_TASKS; i++)
    {
+      config_aux_task_t t;
+      if (config_aux_task_at(i, &t) != 0)
+         continue;
       cJSON *task = cJSON_CreateObject();
       if (!task)
          continue;
-      cJSON_AddStringToObject(task, "task", cfg->aux_tasks[i].task);
-      cJSON_AddStringToObject(task, "provider", cfg->aux_tasks[i].provider);
-      cJSON_AddStringToObject(task, "model", cfg->aux_tasks[i].model);
-      cJSON_AddNumberToObject(task, "max_tokens", cfg->aux_tasks[i].max_tokens);
+      cJSON_AddStringToObject(task, "task", t.task);
+      cJSON_AddStringToObject(task, "provider", t.provider);
+      cJSON_AddStringToObject(task, "model", t.model);
+      cJSON_AddNumberToObject(task, "max_tokens", t.max_tokens);
       cJSON_AddItemToArray(tasks, task);
    }
    return obj;
@@ -349,12 +351,11 @@ int handle_aux_config_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)ctx;
    (void)req;
 
-   config_t cfg;
-   if (config_load(&cfg) != 0)
+   if (!config_present())
       return server_send_error(conn, "aux config: could not load configuration", NULL);
 
    cJSON *resp = jo_ok();
-   cJSON_AddItemToObject(resp, "auxiliary", aux_config_to_json(&cfg));
+   cJSON_AddItemToObject(resp, "auxiliary", aux_config_to_json());
 
    return server_send_ok(conn, resp);
 }
@@ -374,16 +375,15 @@ int handle_aux_test(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (cJSON_IsNumber(jmax))
       max_tokens = jmax->valueint;
 
-   config_t cfg;
-   if (config_load(&cfg) != 0)
+   if (!config_present())
       return server_send_error(conn, "aux test: could not load configuration", NULL);
-   if (!cfg.aux_enabled)
+   if (!config_aux_enabled())
       return server_send_error(conn,
                                "aux routing is disabled (set auxiliary.enabled: true in "
                                "aimee.yaml)",
                                NULL);
 
-   char *result = aux_call(&cfg, jtask->valuestring, jprompt->valuestring, max_tokens);
+   char *result = aux_call(jtask->valuestring, jprompt->valuestring, max_tokens);
    if (!result)
       return server_send_error(conn, "aux_call failed", NULL);
 

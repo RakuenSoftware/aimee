@@ -377,16 +377,24 @@ int db1_agent_job_take_lease(int job_id, const char *owner)
       return -1;
 
    sqlite3_stmt *stmt = NULL;
+   /* RETURNING is the statement-local claim result. sqlite3_changes(db) is
+    * connection-global: on this process-wide FULLMUTEX connection, another
+    * worker can execute between sqlite3_step() and sqlite3_changes() and replace
+    * the count. Under concurrent panel admission that made a successful claimer
+    * report failure ("failed to take delegate job lease") even though its row
+    * was already running. Reading the returned row in the same sqlite3_step()
+    * makes the lease decision atomic and independent of unrelated writers. */
    static const char *sql = "UPDATE agent_jobs SET status = 'running', lease_owner = ?,"
                             " heartbeat_at = datetime('now'), updated_at = datetime('now')"
-                            " WHERE id = ? AND status = 'pending'";
+                            " WHERE id = ? AND status = 'pending' RETURNING id";
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
       return -1;
    sqlite3_bind_text(stmt, 1, owner ? owner : "", -1, SQLITE_TRANSIENT);
    sqlite3_bind_int(stmt, 2, job_id);
    int rc = sqlite3_step(stmt);
-   sqlite3_finalize(stmt);
-   return (rc == SQLITE_DONE && sqlite3_changes(db) > 0) ? 0 : -1;
+   int claimed = rc == SQLITE_ROW && sqlite3_column_int(stmt, 0) == job_id;
+   int final_rc = sqlite3_finalize(stmt);
+   return claimed && final_rc == SQLITE_OK ? 0 : -1;
 }
 
 void db1_agent_job_free(db1_agent_job_t *job)

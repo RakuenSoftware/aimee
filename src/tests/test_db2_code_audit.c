@@ -62,9 +62,17 @@ static const fake_clone_row_t fake_clones[] = {
     {"h4", "extraB", "src/extra2.c", "{\"line_count\":8}"},
 };
 
-void *db2_conn(void)
+void *(db2_conn)(void)
 {
    return (void *)0x1;
+}
+
+/* Real code reaches the pool through the db2_conn() macro, which expands to
+ * db2_conn_at(site) so a lazy acquire can be attributed. Route the stub. */
+void *db2_conn_at(const char *site)
+{
+   (void)site;
+   return (db2_conn)();
 }
 
 aimee_pg_stmt_t *aimee_pg_prepare(void *pg_conn, const char *sql, char *errbuf, size_t errlen)
@@ -79,7 +87,7 @@ aimee_pg_stmt_t *aimee_pg_prepare(void *pg_conn, const char *sql, char *errbuf, 
    st->limit = 1000000;
    if (strstr(sql, "FROM entity_edges"))
       st->kind = FAKE_STMT_EDGES;
-   else if (strstr(sql, "FROM code_embeddings a JOIN LATERAL"))
+   else if (strstr(sql, "FROM code_embeddings a JOIN projects"))
       st->kind = FAKE_STMT_NEAR_CLONES;
    else if (strstr(sql, "FROM code_embeddings"))
       st->kind = FAKE_STMT_CLONES;

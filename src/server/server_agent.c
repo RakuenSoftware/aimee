@@ -323,25 +323,7 @@ static int server_agent_set_model_concurrency(const char *model, int limit)
 {
    if (!model || !model[0] || limit <= 0)
       return 0;
-
-   config_t cfg;
-   if (config_load(&cfg) != 0)
-      return -1;
-   for (int i = 0; i < cfg.concurrency_per_model_count; i++)
-   {
-      if (strcmp(cfg.concurrency_per_model[i].key, model) == 0)
-      {
-         cfg.concurrency_per_model[i].limit = limit;
-         return config_set_concurrency(&cfg);
-      }
-   }
-   if (cfg.concurrency_per_model_count >= CONFIG_CONCURRENCY_MAX_ENTRIES)
-      return -1;
-   config_concurrency_entry_t *entry =
-       &cfg.concurrency_per_model[cfg.concurrency_per_model_count++];
-   snprintf(entry->key, sizeof(entry->key), "%s", model);
-   entry->limit = limit;
-   return config_set_concurrency(&cfg);
+   return config_set_model_concurrency(model, limit);
 }
 
 static int server_agent_model_still_configured(const agent_config_t *cfg, const char *model)
@@ -360,20 +342,7 @@ static int server_agent_clear_model_concurrency_if_unused(const agent_config_t *
    if (!model || !model[0] || server_agent_model_still_configured(agents, model))
       return 0;
 
-   config_t cfg;
-   if (config_load(&cfg) != 0)
-      return -1;
-   for (int i = 0; i < cfg.concurrency_per_model_count; i++)
-   {
-      if (strcmp(cfg.concurrency_per_model[i].key, model) != 0)
-         continue;
-      memmove(&cfg.concurrency_per_model[i], &cfg.concurrency_per_model[i + 1],
-              (size_t)(cfg.concurrency_per_model_count - i - 1) *
-                  sizeof(cfg.concurrency_per_model[0]));
-      cfg.concurrency_per_model_count--;
-      return config_set_concurrency(&cfg);
-   }
-   return 0;
+   return config_remove_model_concurrency(model);
 }
 
 static void server_agent_ensure_fallback(agent_config_t *cfg, const char *name)
@@ -404,6 +373,19 @@ static void server_agent_remove_fallback(agent_config_t *cfg, const char *name)
       cfg->fallback_count--;
       i--;
    }
+}
+
+/* Forward decl: the read-only variant below wraps this. */
+static cJSON *server_agent_to_json(const agent_t *ag);
+
+/* The agent record marked as a pure read, so a client can word its output as a
+ * report rather than a confirmation of a write. agent.roles / agent.personas
+ * serve both: with a csv they mutate, without one they only report. */
+static cJSON *server_agent_read_json(const agent_t *ag)
+{
+   cJSON *obj = server_agent_to_json(ag);
+   cJSON_AddBoolToObject(obj, "read_only", 1);
+   return obj;
 }
 
 static cJSON *server_agent_to_json(const agent_t *ag)
@@ -669,7 +651,8 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    char *argv[SERVER_AGENT_MAX_ARGS];
    int argc = server_agent_args(req, argv, (int)(sizeof(argv) / sizeof(argv[0])));
    if (argc < 3)
-      return server_send_error(conn, "usage: agent add <name> <endpoint> <model>", NULL);
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "usage: agent add <name> <endpoint> <model>", NULL);
 
    opt_parsed_t opts;
    opt_parse(argc - 3, argv + 3, bool_flags, &opts);
@@ -702,17 +685,18 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    ag->enabled = opt_has(&opts, "disabled") ? 0 : 1;
 
    /* A literal --key is a secret: vault it (encrypted at rest), never persist it
-    * in agents.json. A $VAR reference is not a secret — keep it as a reference
-    * that resolves from the environment at run time. */
+    * in agents.json. A $VAR reference contains only a Vault slot name; the
+    * environment value itself is accepted during first boot, sealed, scrubbed,
+    * and exposed at runtime only through the locked Vault cache. */
    const char *key = opt_get(&opts, "key");
    if (key && key[0])
    {
       if (key[0] == '$')
       {
-         /* An env reference is not a secret: store it UNEXPANDED so agents.json
-          * holds "$VAR", not the resolved value. agent_load_config expands it
-          * from the environment at run time. Expanding here would serialize the
-          * plaintext key to disk — the exact leak the literal branch avoids.
+         /* A slot reference is not a secret: store it UNEXPANDED so agents.json
+          * holds "$VAR", not the resolved value. agent_load_config resolves it
+          * from the Vault-backed runtime cache. Expanding here would serialize
+          * the plaintext key to disk — the exact leak the literal branch avoids.
           * api_key_disk is set explicitly too, so the on-disk form is correct
           * regardless of how the agent is re-saved later. */
          snprintf(ag->api_key, sizeof(ag->api_key), "%s", key);
@@ -999,7 +983,9 @@ int handle_agent_remove(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       snprintf(cfg.default_agent, sizeof(cfg.default_agent), "%s",
                cfg.agent_count > 0 ? cfg.agents[0].name : "");
 
-   if (agent_save_config(&cfg) != 0)
+   /* Removing the last delegate legitimately empties the registry, which the
+    * deletion guard would otherwise refuse. */
+   if (agent_save_config_after_removal(&cfg) != 0)
       return server_send_error(conn, "could not save agents.json", NULL);
    (void)server_agent_clear_model_concurrency_if_unused(&cfg, removed_model);
 
@@ -1067,8 +1053,8 @@ int handle_agent_disable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 /* Surgically update ONLY an agent's roles, preserving endpoint/model/provider/
  * auth/vault key (unlike agent.add, which resets the record). argv[0]=name,
- * optional argv[1]=comma-separated roles; omitting the roles resets to the full
- * default capable set. Fixes existing agents crippled to summarize/format/draft. */
+ * optional argv[1]=comma-separated roles, or `--reset` for the full default
+ * capable set. Omitting argv[1] REPORTS the current roles and writes nothing. */
 int handle_agent_roles(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -1084,11 +1070,19 @@ int handle_agent_roles(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!ag)
       return server_send_error(conn, "agent not found", NULL);
 
-   if (argc >= 2 && argv[1][0])
-      server_agent_set_roles_csv(ag, argv[1]);
-   else
+   /* No csv reports the current roles and writes NOTHING. It used to reset the
+    * agent to the default list, so `agent roles <name>` — which reads as a query,
+    * and was the ONLY way to ask what an agent's roles were — silently dropped
+    * every role outside that list, including the `all` wildcard. A reset is still
+    * available, but it now has to be asked for by name. */
+   if (argc < 2 || !argv[1][0])
+      return server_send_ok(conn, server_agent_read_json(ag));
+
+   if (strcmp(argv[1], "--reset") == 0)
       server_agent_set_roles_csv(
           ag, "code,review,explain,refactor,draft,execute,summarize,format,reason,search");
+   else
+      server_agent_set_roles_csv(ag, argv[1]);
 
    if (agent_save_config(&cfg) != 0)
       return server_send_error(conn, "could not save agents.json", NULL);
@@ -1100,8 +1094,8 @@ int handle_agent_roles(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 /* Surgically update ONLY an agent's personas (the delegate identities it may be
  * dispatched AS), preserving everything else. argv[0]=name, optional argv[1]=
- * comma-separated personas ("all" = every persona); omitting resets to ["all"].
- * Mirrors handle_agent_roles. */
+ * comma-separated personas ("all" = every persona), or `--reset` for ["all"].
+ * Omitting argv[1] REPORTS and writes nothing. Mirrors handle_agent_roles. */
 int handle_agent_personas(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -1117,10 +1111,14 @@ int handle_agent_personas(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!ag)
       return server_send_error(conn, "agent not found", NULL);
 
-   if (argc >= 2 && argv[1][0])
-      server_agent_set_personas_csv(ag, argv[1]);
-   else
+   /* No csv reports and writes nothing — see handle_agent_roles. */
+   if (argc < 2 || !argv[1][0])
+      return server_send_ok(conn, server_agent_read_json(ag));
+
+   if (strcmp(argv[1], "--reset") == 0)
       server_agent_set_personas_csv(ag, "all");
+   else
+      server_agent_set_personas_csv(ag, argv[1]);
 
    if (agent_save_config(&cfg) != 0)
       return server_send_error(conn, "could not save agents.json", NULL);
@@ -1249,7 +1247,8 @@ int handle_agent_probe(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    opt_parse(argc, argv, bool_flags, &opts);
    const char *name = opt_pos(&opts, 0);
    if (!name || !name[0])
-      return server_send_error(conn, "agent.probe requires name", NULL);
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT, "agent.probe requires name",
+                                    NULL);
 
    agent_config_t cfg;
    if (agent_load_config(&cfg) != 0)

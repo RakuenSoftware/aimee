@@ -131,8 +131,11 @@ int db2_code_index_ops_summary(int max_attempts, db2_code_index_ops_summary_t *o
 #define D7_DRIFT_FROM_WHERE                                                                        \
    " FROM code_embeddings ce"                                                                      \
    " JOIN projects p ON p.name = ce.project"                                                       \
-   " JOIN files f ON f.project_id = p.id AND f.path = ce.file_path"                                \
+   " JOIN files f ON f.project_id = p.id AND f.generation = ce.generation"                         \
+   "             AND f.path = ce.file_path"                                                        \
    " WHERE ce.file_path <> ''"                                                                     \
+   "   AND p.lifecycle_state = 'current'"                                                          \
+   "   AND ce.generation = p.current_generation"                                                   \
    "   AND ((ce.source_hash <> '' AND f.hash <> ce.source_hash)"                                   \
    "        OR (ce.source_hash = ''"                                                               \
    "            AND replace(replace(f.scanned_at, 'T', ' '), 'Z', '') > ce.updated_at))"
@@ -199,7 +202,8 @@ int db2_code_file_hash(const char *project, const char *file_path, char *out, in
       return -1;
    static const char *sql = "SELECT f.hash FROM files f"
                             " JOIN projects p ON p.id = f.project_id"
-                            " WHERE p.name = ?1 AND f.path = ?2 LIMIT 1";
+                            " WHERE p.name = ?1 AND p.lifecycle_state = 'current'"
+                            "   AND f.generation = p.current_generation AND f.path = ?2 LIMIT 1";
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)

@@ -17,12 +17,13 @@ Numbers are written to --out as JSON and printed.
 """
 import argparse
 import json
+import os
 import sys
 import time
 import urllib.request
 
 BASE = "http://192.168.1.254:8740"
-BEARER = "aimee-local-dev"
+BEARER = os.environ.get("AIMEE_API_BEARER_TOKEN", "")
 MODEL = "claude-sonnet-4-6"
 KEY_PREFIX = "bench_locomo_"
 MAP_FILE = "/tmp/bench_locomo_map.json"
@@ -164,6 +165,8 @@ def cmd_answers(args):
 
 
 def main():
+    if not BEARER:
+        raise SystemExit("AIMEE_API_BEARER_TOKEN is required")
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="cmd", required=True)
     pi = sub.add_parser("ingest"); pi.add_argument("--sample", type=int, default=0); pi.add_argument("--max-turns", type=int, default=0)

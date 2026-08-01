@@ -9,12 +9,12 @@ claims.
 | Area | Measures |
 | --- | --- |
 | memory | recall quality, contradiction, temporal and long-context behavior |
-| retrieval | lexical/dense/graph fusion, reranking, abstention, citation |
+| retrieval | lexical/dense/graph fusion, abstention, citation |
 | curator | extraction, typed artifacts, contradiction and queue throughput |
 | code graph | symbol/caller/blast-radius precision across repositories |
 | delegates | task success, tool use, cost, latency, and failure class |
 | guardrails | allow/deny quality and false positives |
-| inference | embed/rerank/synthesis quality, slots, memory, latency |
+| inference | embed/synthesis quality, slots, memory, latency |
 | event bus | dispatch overhead, flow control, capture, durability, shutdown |
 | provisioning | clean install, readiness, recovery, and upgrade |
 
@@ -69,3 +69,13 @@ prompt, judge, or retrieval budget. Reproduce the baseline in the same harness f
 
 Rebaseline only after an intentional contract, dependency, model, or hardware change. Preserve the
 old artifact, explain the delta, and make the acceptance decision reviewable.
+
+Code-intelligence matrix execution and resume semantics are documented in
+[`benchmarks/code-agent-effectiveness/README.md`](../benchmarks/code-agent-effectiveness/README.md).
+In particular, infrastructure failures are preserved but excluded from scoring, and
+named checkpoints are bound to one immutable run and plan to prevent result splicing.
+
+The E6 promotion harness is repository-owned and fail-closed. Its corpus, prompt fixture, raw result
+envelope, generated summary, and scorer are versioned together. Deterministic retrieval success
+alone cannot promote task context: missing or infrastructure-invalid paired agent cells are reported
+outside denominators and force `retain-observe`.

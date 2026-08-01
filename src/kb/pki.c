@@ -338,6 +338,52 @@ done:
    return rc;
 }
 
+int kb_pki_generate_csr(const char *subject_cn, char *csr_pem_out, size_t csr_cap,
+                        char *key_pem_out, size_t key_cap)
+{
+   if (csr_pem_out && csr_cap)
+      csr_pem_out[0] = '\0';
+   if (key_pem_out && key_cap)
+      key_pem_out[0] = '\0';
+   if (!subject_cn || !subject_cn[0] || strlen(subject_cn) > 255 || !csr_pem_out || csr_cap < 2 ||
+       !key_pem_out || key_cap < 2)
+      return -1;
+
+   int rc = -1;
+   EVP_PKEY *key = EVP_RSA_gen(2048);
+   X509_REQ *request = X509_REQ_new();
+   BIO *bio = NULL;
+   BUF_MEM *memory = NULL;
+   if (!key || !request || X509_REQ_set_version(request, 0L) != 1)
+      goto done;
+   X509_NAME *subject = X509_REQ_get_subject_name(request);
+   if (!subject ||
+       X509_NAME_add_entry_by_txt(subject, "CN", MBSTRING_ASC, (const unsigned char *)subject_cn,
+                                  -1, -1, 0) != 1 ||
+       X509_REQ_set_pubkey(request, key) != 1 || X509_REQ_sign(request, key, EVP_sha256()) <= 0)
+      goto done;
+   bio = BIO_new(BIO_s_mem());
+   if (!bio || PEM_write_bio_X509_REQ(bio, request) != 1 || BIO_get_mem_ptr(bio, &memory) <= 0 ||
+       !memory || memory->length + 1 > csr_cap || pem_from_key(key, key_pem_out, key_cap) != 0)
+      goto done;
+   memcpy(csr_pem_out, memory->data, memory->length);
+   csr_pem_out[memory->length] = '\0';
+   rc = 0;
+
+done:
+   if (rc != 0)
+   {
+      if (csr_pem_out && csr_cap)
+         csr_pem_out[0] = '\0';
+      if (key_pem_out && key_cap)
+         key_pem_out[0] = '\0';
+   }
+   BIO_free(bio);
+   X509_REQ_free(request);
+   EVP_PKEY_free(key);
+   return rc;
+}
+
 /* --- client cert issuance --- */
 
 int kb_pki_issue_client_cert(const kb_pki_ca_t *ca, const char *subject_cn, long valid_secs,

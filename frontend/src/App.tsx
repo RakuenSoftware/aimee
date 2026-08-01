@@ -18,6 +18,7 @@ import Editor from './pages/Editor';
 import { SessionProvider, useSessions } from './SessionContext';
 import TabTutorial from './components/TabTutorial';
 import SetupChip from './components/SetupChip';
+import HealthBanner from './components/HealthBanner';
 import SetupWizard from './components/SetupWizard';
 // Silent-by-default error boundary for optional chrome (setup chip, tab
 // tutorial, setup wizard): renders NOTHING on error so a broken overlay is
@@ -142,6 +143,10 @@ function LogoutButton() {
     e.preventDefault();
     localStorage.removeItem('aimee_chat_tabs');
     localStorage.removeItem('aimee_active_chat_tab');
+    localStorage.removeItem('aimee_sessions');
+    localStorage.removeItem('aimee_active_session');
+    localStorage.removeItem('aimee_server_sessions_authoritative_v1');
+    localStorage.removeItem('aimee_sessions_owner');
     localStorage.removeItem('aimee_proposal_draft');
     fetch('/logout', {
       method: 'POST',
@@ -218,6 +223,7 @@ export default function App() {
           <SilentBoundary><SetupChip /></SilentBoundary>
           <LogoutButton />
         </header>
+        <SilentBoundary><HealthBanner /></SilentBoundary>
         {/* Body: vertical tool nav (left) + content. */}
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
           <nav

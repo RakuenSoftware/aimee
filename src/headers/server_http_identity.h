@@ -12,7 +12,7 @@
  * functions carry it across that boundary, all on the one worker thread that
  * handles the connection synchronously up to compute_ctx creation:
  *   1. capture  — handle_conn records the attested transport + vault principal
- *      (SO_PEERCRED peer uid, or a server.token-gated `webuser:` assertion) into
+ *      (SO_PEERCRED peer uid, or a root-UDS-gated `webuser:` assertion) into
  *      thread-locals;
  *   2. apply    — loopback_rpc copies them onto the synthesized conn;
  *   3. clear    — handle_conn wipes them after the route so a reused worker
@@ -36,9 +36,8 @@
  *   fd      - the connection socket (SO_PEERCRED source for UDS).
  *   is_tcp  - 1 for the network listener, 0 for the local UDS socket.
  *   buf     - the raw HTTP request (read for the X-Aimee-Webuser / Authorization headers).
- * A webuser assertion is honored only when the request's Bearer matches the
- * server.token file (the secret the webchat backend holds), read from AIMEE_HOME
- * — NOT the configured TCP /v1 bearer, which is an independent secret. */
+ * A webuser assertion is honored only for the root-owned webchat peer over the
+ * Unix socket. TCP can never assert a webuser this way. */
 void server_http_identity_capture(int fd, int is_tcp, const char *buf);
 
 /* The captured vault principal for the in-flight request (empty if un-attested),
@@ -46,6 +45,10 @@ void server_http_identity_capture(int fd, int is_tcp, const char *buf);
  * a conn (e.g. the webchat-git /v1/workspace/clone route). Valid only between
  * capture and clear, i.e. during a route handler on the serving thread. */
 const char *server_http_identity_principal(void);
+
+/* Replace the transport-derived principal with a server-authoritative identity
+ * already bound to the verified client certificate. */
+void server_http_identity_override_principal(const char *principal);
 
 /* The in-flight request's inbound `aimee-session-id` header value and bearer token
  * (both "" when absent), for the economizer gateway-mutation session-key resolver.

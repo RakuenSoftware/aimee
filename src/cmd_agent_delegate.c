@@ -469,6 +469,12 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
 {
    (void)ctx;
 
+   /* Function-scoped: parsed from --scope below, and read again by the
+    * escalation-target lookup much later. It was declared inside the parse block,
+    * which does not reach that use -- an incomplete refactor that never surfaced
+    * because nothing compiles this file. */
+   agent_scope_t scope = AGENT_SCOPE_WHOLE_TASK; /* the documented default */
+
    if (argc < 1)
    {
       delegate_print_help();
@@ -515,16 +521,16 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
          fprintf(stderr, "error: aggregate requires a prompt\n");
          return;
       }
-      config_t cfg;
-      config_load(&cfg);
       agent_config_t acfg;
       if (agent_load_config(&acfg) != 0)
       {
          fprintf(stderr, "error: could not load agent config\n");
          return;
       }
+      ensemble_panel_t panel;
+      ensemble_panel_from_config(&panel);
       delegate_ensemble_result_t result;
-      if (delegate_ensemble_run(&acfg, &cfg, argv[1], &result) != 0)
+      if (delegate_ensemble_run(&acfg, &panel, argv[1], &result) != 0)
       {
          fprintf(stderr, "error: ensemble failed\n");
          return;
@@ -555,17 +561,15 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
    {
       const char *parent_env = getenv("AIMEE_PARENT_DELEGATION_ID");
       const char *depth_env = getenv("AIMEE_DELEGATE_DEPTH");
-      config_t dcfg;
-      config_load(&dcfg);
-      int known = db1_init(dcfg.db1_path) == 0;
+      int known = db1_init(config_db1_path()) == 0;
       int active = known ? db1_delegation_spawn_is_active(parent_env) : 0;
       if (delegate_chain_env_should_clear(depth_env, parent_env, known, active))
       {
          platform_setenv("AIMEE_PARENT_DELEGATION_ID", "");
          platform_setenv("AIMEE_DELEGATE_DEPTH", "");
       }
-      int max_depth = dcfg.max_delegation_depth > 0 ? dcfg.max_delegation_depth
-                                                    : CONFIG_DEFAULT_MAX_DELEGATION_DEPTH;
+      int max_depth = config_max_delegation_depth() > 0 ? config_max_delegation_depth()
+                                                        : CONFIG_DEFAULT_MAX_DELEGATION_DEPTH;
       char depth_err[256];
       if (delegate_check_chain_depth(max_depth, depth_err, sizeof(depth_err)) != 0)
       {
@@ -735,7 +739,6 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
        * whole_task: boundedness is opt-in, because under uncertainty we
        * over-select toward capability rather than risk a misplacement. */
       const char *scope_opt = opt_get(&opts, "scope");
-      agent_scope_t scope = AGENT_SCOPE_WHOLE_TASK; /* the documented default */
       if (scope_opt && scope_opt[0])
       {
          scope = agent_scope_from_string(scope_opt);
@@ -795,10 +798,8 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
    /* Fall back to tier-based prompt when no explicit prompt or role template */
    if (!sys_prompt)
    {
-      config_t delegate_cfg;
-      config_load(&delegate_cfg);
-      prompt_tier_t dtier = delegate_cfg.delegate_prompt_tier[0]
-                                ? prompt_tier_from_string(delegate_cfg.delegate_prompt_tier)
+      prompt_tier_t dtier = config_delegate_prompt_tier()[0]
+                                ? prompt_tier_from_string(config_delegate_prompt_tier())
                                 : PROMPT_MINIMAL;
       template_sys_prompt = prompt_build(dtier, cwd_for_template, NULL);
       if (template_sys_prompt)
@@ -806,11 +807,9 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
    }
    if (template_sys_prompt)
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      if (config_load(&cfg) == 0)
+      if (config_present())
       {
-         char *with_dispositions = prompt_apply_dispositions(template_sys_prompt, &cfg);
+         char *with_dispositions = prompt_apply_dispositions(template_sys_prompt);
          if (with_dispositions)
          {
             free(template_sys_prompt);
@@ -1825,12 +1824,10 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
    else if (rc == 0)
    {
       /* Auto-verify from app config: tool verifies delegate's changes */
-      config_t app_cfg;
-      config_load(&app_cfg);
-      if (app_cfg.cross_verify && app_cfg.verify_cmd[0])
+      if (config_cross_verify() && config_verify_cmd()[0])
       {
-         fprintf(stderr, "aimee: cross-verify: running %s\n", app_cfg.verify_cmd);
-         const char *cv_argv[] = {"/bin/sh", "-c", app_cfg.verify_cmd, NULL};
+         fprintf(stderr, "aimee: cross-verify: running %s\n", config_verify_cmd());
+         const char *cv_argv[] = {"/bin/sh", "-c", config_verify_cmd(), NULL};
          char *cv_out = NULL;
          int cv_rc = safe_exec_capture(cv_argv, &cv_out, AGENT_TOOL_OUTPUT_MAX);
          free(cv_out);
@@ -2002,9 +1999,6 @@ void cmd_verify(app_ctx_t *ctx, int argc, char **argv)
 {
    (void)ctx;
 
-   config_t cfg;
-   config_load(&cfg);
-
    if (argc >= 1 && strcmp(argv[0], "enable") == 0)
    {
       config_set("cross_verify", "true");
@@ -2023,10 +2017,11 @@ void cmd_verify(app_ctx_t *ctx, int argc, char **argv)
    {
       if (argc == 1)
       {
-         printf("cross_verify: %s\n", cfg.cross_verify ? "enabled" : "disabled");
-         printf("verify_cmd: %s\n", cfg.verify_cmd[0] ? cfg.verify_cmd : "(not set)");
-         printf("verify_role: %s\n", cfg.verify_role[0] ? cfg.verify_role : "review");
-         printf("verify_prompt: %s\n", cfg.verify_prompt[0] ? cfg.verify_prompt : "(default)");
+         printf("cross_verify: %s\n", config_cross_verify() ? "enabled" : "disabled");
+         printf("verify_cmd: %s\n", config_verify_cmd()[0] ? config_verify_cmd() : "(not set)");
+         printf("verify_role: %s\n", config_verify_role()[0] ? config_verify_role() : "review");
+         printf("verify_prompt: %s\n",
+                config_verify_prompt()[0] ? config_verify_prompt() : "(default)");
          return;
       }
       /* Configure: --verify-cmd, --role, --prompt */
@@ -2044,17 +2039,21 @@ void cmd_verify(app_ctx_t *ctx, int argc, char **argv)
    }
 
    /* Default: delegate verifies current changes */
-   if (!cfg.cross_verify)
+   if (!config_cross_verify())
    {
       fprintf(stderr, "cross-verification is disabled. Run: aimee verify enable\n");
       return;
    }
 
    /* Step 1: run verify_cmd if set (compilation/tests) */
-   if (cfg.verify_cmd[0])
+   /* Copied out: cmd_argv borrows it across safe_exec_capture, which is a whole
+    * subprocess round trip. */
+   char verify_cmd[CONFIG_COPY_MAX];
+   config_verify_cmd_copy(verify_cmd, sizeof(verify_cmd));
+   if (verify_cmd[0])
    {
-      fprintf(stderr, "aimee: running verify command: %s\n", cfg.verify_cmd);
-      const char *cmd_argv[] = {"/bin/sh", "-c", cfg.verify_cmd, NULL};
+      fprintf(stderr, "aimee: running verify command: %s\n", verify_cmd);
+      const char *cmd_argv[] = {"/bin/sh", "-c", verify_cmd, NULL};
       char *cmd_out = NULL;
       int cmd_rc = safe_exec_capture(cmd_argv, &cmd_out, AGENT_TOOL_OUTPUT_MAX);
       if (cmd_rc != 0)
@@ -2070,7 +2069,10 @@ void cmd_verify(app_ctx_t *ctx, int argc, char **argv)
    }
 
    /* Step 2: delegate a review to an agent */
-   const char *role = cfg.verify_role[0] ? cfg.verify_role : "review";
+   /* Same: both survive the git-diff subprocess below. */
+   char verify_role[CONFIG_COPY_MAX];
+   config_verify_role_copy(verify_role, sizeof(verify_role));
+   const char *role = verify_role[0] ? verify_role : "review";
 
    /* Build the review prompt: get the current staged + unstaged diff as context. */
    const char *diff_argv[] = {"git", "diff", "HEAD", NULL};
@@ -2078,11 +2080,12 @@ void cmd_verify(app_ctx_t *ctx, int argc, char **argv)
    safe_exec_capture(diff_argv, &diff_out, AGENT_TOOL_OUTPUT_MAX);
 
    char *review_prompt = NULL;
+   char verify_prompt[CONFIG_COPY_MAX];
+   config_verify_prompt_copy(verify_prompt, sizeof(verify_prompt));
    const char *base_prompt =
-       cfg.verify_prompt[0]
-           ? cfg.verify_prompt
-           : "Review these code changes for bugs, security issues, and correctness. "
-             "If everything looks good, say LGTM. If you find problems, list them.";
+       verify_prompt[0] ? verify_prompt
+                        : "Review these code changes for bugs, security issues, and correctness. "
+                          "If everything looks good, say LGTM. If you find problems, list them.";
 
    if (diff_out && diff_out[0])
    {

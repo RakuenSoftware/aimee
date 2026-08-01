@@ -27,36 +27,40 @@
 
 /* --- shared JSON helpers --- */
 
-static cJSON *charter_array_to_json(const char entries[][CONFIG_CHARTER_ENTRY_LEN], int count)
+/* Takes the section's indexed accessor rather than the array: the entries are no
+ * longer a block of memory the caller holds. Each entry is copied into the JSON
+ * string immediately, so the accessor's thread-local buffer is consumed before
+ * the next index overwrites it. */
+static cJSON *charter_array_to_json(const char *(*entry)(int), int count)
 {
    cJSON *arr = cJSON_CreateArray();
    if (!arr)
       return NULL;
    for (int i = 0; i < count; i++)
-      cJSON_AddItemToArray(arr, cJSON_CreateString(entries[i]));
+      cJSON_AddItemToArray(arr, cJSON_CreateString(entry(i)));
    return arr;
 }
 
-cJSON *identity_charter_json(const config_t *cfg)
+cJSON *identity_charter_json(void)
 {
    cJSON *out = cJSON_CreateObject();
    if (!out)
       return NULL;
    cJSON_AddItemToObject(
        out, "safety_axioms",
-       charter_array_to_json(cfg->charter_safety_axioms, cfg->charter_safety_axioms_count));
+       charter_array_to_json(config_charter_safety_axioms, config_charter_safety_axioms_count()));
+   cJSON_AddItemToObject(out, "hard_constraints",
+                         charter_array_to_json(config_charter_hard_constraints,
+                                               config_charter_hard_constraints_count()));
    cJSON_AddItemToObject(
-       out, "hard_constraints",
-       charter_array_to_json(cfg->charter_hard_constraints, cfg->charter_hard_constraints_count));
-   cJSON_AddItemToObject(out, "values",
-                         charter_array_to_json(cfg->charter_values, cfg->charter_values_count));
-   cJSON_AddItemToObject(
-       out, "tone_boundaries",
-       charter_array_to_json(cfg->charter_tone_boundaries, cfg->charter_tone_boundaries_count));
+       out, "values", charter_array_to_json(config_charter_values, config_charter_values_count()));
+   cJSON_AddItemToObject(out, "tone_boundaries",
+                         charter_array_to_json(config_charter_tone_boundaries,
+                                               config_charter_tone_boundaries_count()));
    cJSON_AddNumberToObject(out, "working_profile_drift_limit",
-                           cfg->charter_working_profile_drift_limit);
-   int total = cfg->charter_safety_axioms_count + cfg->charter_hard_constraints_count +
-               cfg->charter_values_count + cfg->charter_tone_boundaries_count;
+                           config_charter_working_profile_drift_limit());
+   int total = config_charter_safety_axioms_count() + config_charter_hard_constraints_count() +
+               config_charter_values_count() + config_charter_tone_boundaries_count();
    cJSON_AddNumberToObject(out, "total_entries", total);
    return out;
 }
@@ -114,48 +118,50 @@ cJSON *identity_local_operator_json(void)
 
 /* --- show subcommand --- */
 
-static void print_section(const char *label, const char entries[][CONFIG_CHARTER_ENTRY_LEN],
-                          int count)
+/* Same shape as charter_array_to_json: takes the indexed accessor, not the array.
+ * Each entry is printed before the next index overwrites the accessor's
+ * thread-local buffer. */
+static void print_section(const char *label, const char *(*entry)(int), int count)
 {
    if (count <= 0)
       return;
    printf("  %s:\n", label);
    for (int i = 0; i < count; i++)
-      printf("    - %s\n", entries[i]);
+      printf("    - %s\n", entry(i));
 }
 
 static void identity_show(app_ctx_t *ctx)
 {
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   if (config_load(&cfg) != 0)
+   if (!config_present())
       fatal("identity show: could not load config");
 
    if (ctx->json_output)
    {
       cJSON *obj = cJSON_CreateObject();
-      cJSON_AddItemToObject(obj, "charter", identity_charter_json(&cfg));
+      cJSON_AddItemToObject(obj, "charter", identity_charter_json());
       cJSON_AddItemToObject(obj, "local_operator", identity_local_operator_json());
       cJSON_AddItemToObject(obj, "working_profile", identity_working_profile_json());
       emit_json_ctx(obj, ctx->json_fields, ctx->response_profile);
       return;
    }
 
-   int total = cfg.charter_safety_axioms_count + cfg.charter_hard_constraints_count +
-               cfg.charter_values_count + cfg.charter_tone_boundaries_count;
+   int total = config_charter_safety_axioms_count() + config_charter_hard_constraints_count() +
+               config_charter_values_count() + config_charter_tone_boundaries_count();
    if (total == 0)
       printf("Charter: (none configured — add a `charter:` block to aimee.yaml)\n");
    else
    {
       printf("Charter (immutable, loaded from aimee.yaml):\n");
-      print_section("Safety axioms", cfg.charter_safety_axioms, cfg.charter_safety_axioms_count);
-      print_section("Hard constraints", cfg.charter_hard_constraints,
-                    cfg.charter_hard_constraints_count);
-      print_section("Values", cfg.charter_values, cfg.charter_values_count);
-      print_section("Tone boundaries", cfg.charter_tone_boundaries,
-                    cfg.charter_tone_boundaries_count);
-      if (cfg.charter_working_profile_drift_limit > 0)
-         printf("  Working-profile drift limit: %d\n", cfg.charter_working_profile_drift_limit);
+      print_section("Safety axioms", config_charter_safety_axioms,
+                    config_charter_safety_axioms_count());
+      print_section("Hard constraints", config_charter_hard_constraints,
+                    config_charter_hard_constraints_count());
+      print_section("Values", config_charter_values, config_charter_values_count());
+      print_section("Tone boundaries", config_charter_tone_boundaries,
+                    config_charter_tone_boundaries_count());
+      if (config_charter_working_profile_drift_limit() > 0)
+         printf("  Working-profile drift limit: %d\n",
+                config_charter_working_profile_drift_limit());
    }
 
    printf("\nLocal operator (machine-local credential mapping):\n");
@@ -250,9 +256,7 @@ static void identity_working_profile_observe(app_ctx_t *ctx, int argc, char **ar
 
 static void identity_working_profile(app_ctx_t *ctx, int argc, char **argv)
 {
-   config_t db1_cfg;
-   config_load(&db1_cfg);
-   if (db1_init(db1_cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
       fatal("identity working-profile: could not initialize DB1");
 
    if (argc < 1)
@@ -282,10 +286,6 @@ static void identity_working_profile(app_ctx_t *ctx, int argc, char **argv)
 
 cJSON *identity_snapshot_build(void)
 {
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   config_load(&cfg);
-
    cJSON *root = cJSON_CreateObject();
    if (!root)
       return NULL;
@@ -297,7 +297,7 @@ cJSON *identity_snapshot_build(void)
    strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%SZ", &tm_buf);
    cJSON_AddStringToObject(root, "snapshot_at", ts);
    cJSON_AddStringToObject(root, "version", AIMEE_VERSION);
-   cJSON_AddItemToObject(root, "charter", identity_charter_json(&cfg));
+   cJSON_AddItemToObject(root, "charter", identity_charter_json());
    cJSON_AddItemToObject(root, "local_operator", identity_local_operator_json());
    cJSON_AddItemToObject(root, "working_profile", identity_working_profile_json());
    return root;
@@ -315,10 +315,7 @@ static void identity_snapshot(app_ctx_t *ctx, int argc, char **argv)
    }
    if (platform_mkdir_p(out_dir, 0755) != 0)
       fatal("identity snapshot: could not create %s: %s", out_dir, strerror(errno));
-
-   config_t db1_cfg;
-   config_load(&db1_cfg);
-   if (db1_init(db1_cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
       fatal("identity snapshot: could not initialize DB1");
    cJSON *snap = identity_snapshot_build();
    if (!snap)

@@ -102,15 +102,13 @@ int kb_curator_index_claims_one(const kb_curator_extract_opts_t *opts)
       return 1;
    }
 
-   config_t cfg;
-   config_load(&cfg);
-   const char *embed_cmd = config_embedding_command(&cfg, NULL);
+   const char *embed_cmd = config_embedding_command_current(NULL);
    float subj_vec[CURATOR_CLAIM_DIM];
    float val_vec[CURATOR_CLAIM_DIM];
-   int d1 = memory_embed_text(subj_attr[0] ? subj_attr : value_text, embed_cmd, subj_vec,
-                              CURATOR_CLAIM_DIM);
-   int d2 = memory_embed_text(value_text[0] ? value_text : subj_attr, embed_cmd, val_vec,
-                              CURATOR_CLAIM_DIM);
+   int d1 = memory_embed_text(subj_attr[0] ? subj_attr : value_text, embed_cmd,
+                              EMBED_INPUT_DOCUMENT, subj_vec, CURATOR_CLAIM_DIM);
+   int d2 = memory_embed_text(value_text[0] ? value_text : subj_attr, embed_cmd,
+                              EMBED_INPUT_DOCUMENT, val_vec, CURATOR_CLAIM_DIM);
    if (d1 > 0 && d1 == d2)
    {
       int64_t pid = claim_point_id(id);

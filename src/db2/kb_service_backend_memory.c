@@ -17,6 +17,7 @@
 #include "memory_export.h"
 #include "memory_payload.h"
 #include "memory_query.h"
+#include "memory_scope_query.h"
 #include "session_briefing.h"
 #include "tasks.h"
 
@@ -71,7 +72,12 @@ cJSON *db2_kb_service_memory_find_facts_json(const char *query, int limit)
    }
 
    memory_t facts[64];
-   int n = memory_find_facts(query ? query : "", limit, facts, 64);
+   db2_memory_scope_context_t scope;
+   db2_memory_scope_context_get(&scope);
+   int n = scope.active
+               ? memory_find_facts_visible_ex(query ? query : "", scope.workspace, scope.project,
+                                              scope.include_all, limit, facts, 64)
+               : memory_find_facts(query ? query : "", limit, facts, 64);
    if (n < 0)
    {
       cJSON_AddStringToObject(resp, "status", "error");
@@ -249,10 +255,8 @@ static cJSON *kbs_memory_diagnostic_to_json(const memory_diagnostic_t *d)
    cJSON_AddNumberToObject(parts, "salience", d->parts.salience);
    cJSON_AddNumberToObject(parts, "surprise", d->parts.surprise);
    cJSON_AddNumberToObject(parts, "pagerank", d->parts.pagerank);
-   cJSON_AddNumberToObject(parts, "cross_encoder", d->parts.cross_encoder);
    cJSON_AddNumberToObject(parts, "hybrid_total", d->parts.hybrid_total);
    cJSON_AddNumberToObject(parts, "blended_total", d->parts.blended_total);
-   cJSON_AddNumberToObject(parts, "rerank_mix", d->parts.rerank_mix);
    cJSON_AddNumberToObject(parts, "total", d->parts.total);
    return j;
 }
@@ -881,11 +885,8 @@ cJSON *db2_kb_service_memory_maintenance_run_json(unsigned int modes, int force,
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   config_load(&cfg);
    memory_maintenance_summary_t summary;
-   memory_maintenance_run(&cfg, modes, force, dry_run, &summary);
+   memory_maintenance_run(modes, force, dry_run, &summary);
    cJSON *summary_j = memory_maintenance_summary_to_json(&summary);
    cJSON_AddStringToObject(resp, "status", "ok");
    if (summary_j)
@@ -926,10 +927,7 @@ cJSON *db2_kb_service_memory_episode_card_generate_json(const char *source_sessi
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   config_load(&cfg);
-   int64_t uid = memory_episode_card_generate(source_session ? source_session : "", &cfg);
+   int64_t uid = memory_episode_card_generate(source_session ? source_session : "");
    cJSON_AddStringToObject(resp, "status", uid > 0 ? "ok" : "error");
    cJSON_AddNumberToObject(resp, "memory_unit_id", (double)uid);
    if (uid <= 0)
@@ -1193,9 +1191,7 @@ cJSON *db2_kb_service_memory_insert_ex_json(const char *tier, const char *kind, 
     * synchronous fact work on the store hot path; the drain's pattern pass now
     * captures the high-precision triples the old inline call did. */
    {
-      config_t tf_cfg;
-      config_load(&tf_cfg);
-      if (tf_cfg.typed_facts_enabled && out.id > 0)
+      if (config_typed_facts_enabled() && out.id > 0)
          (void)db2_kb_async_enqueue("memory_facts", out.id, "memory");
    }
    cJSON *obj = kbs_memory_row_to_json(&out);
@@ -1271,9 +1267,7 @@ cJSON *db2_kb_service_memory_facts_json(const char *query)
    if (!resp)
       return NULL;
    char facts[2048] = "";
-   config_t cfg;
-   config_load(&cfg);
-   if (cfg.typed_facts_enabled && query && query[0])
+   if (config_typed_facts_enabled() && query && query[0])
       (void)db2_fact_recall_in_query(query, memory_pii_turn_requests_sensitive(query), facts,
                                      sizeof(facts));
    cJSON_AddStringToObject(resp, "status", "ok");

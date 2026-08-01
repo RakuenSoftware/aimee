@@ -5,6 +5,20 @@
  * the live smoke. */
 #include "server.h"
 #include "cJSON.h"
+#include "runtime_secret.h"
+
+/* server_api_status.o uses the production Vault facade. Keep this routing
+ * test hermetic while preserving its process-cache semantics. */
+int vault_runtime_secret_set(const char *name, const char *value)
+{
+   return runtime_secret_store(name, value);
+}
+
+int vault_runtime_secret_delete(const char *name)
+{
+   runtime_secret_remove(name);
+   return 0;
+}
 
 static int vault_stub(server_conn_t *conn)
 {
@@ -71,7 +85,12 @@ int handle_cert_issue(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return vault_stub(conn);
 }
 int handle_cert_sign(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{ (void)ctx; (void)conn; (void)req; return 0; }
+{
+   (void)ctx;
+   (void)conn;
+   (void)req;
+   return 0;
+}
 int handle_cert_revoke(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;

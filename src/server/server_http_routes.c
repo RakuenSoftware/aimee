@@ -38,8 +38,10 @@
 #include "server_mgmt_jwks_cache.h"
 #include "server_management_jti.h"
 #include "server_mgmt_audit.h"
+#include "server_runtime_identity.h"
 #include "kb_client_mtls.h"
 #include "server_workflow_api.h" /* W7: /v1/workflow read+author handlers */
+#include "wfe_http_proxy.h"      /* public workflow routes -> private Go control plane */
 #include "cJSON.h"
 #include "kb_client_grants.h"
 #include <arpa/inet.h>
@@ -257,6 +259,11 @@ static int management_apply(void *ctx, const server_mgmt_action_t *a)
               : 1;
 }
 
+static const char *management_server_id(char out[128])
+{
+   return server_runtime_server_id_load(out, 128) ? out : NULL;
+}
+
 static int rh_management_action(const route_req_t *rq, char *resp, int cap)
 {
    if (server_http_management_action_begin() != 0)
@@ -265,7 +272,8 @@ static int rh_management_action(const route_req_t *rq, char *resp, int cap)
       return 500;
    }
    const server_tls_peer_cert_t *peer = server_http_identity_peer_cert();
-   const char *target = getenv("AIMEE_SERVER_ID");
+   char target_buf[128];
+   const char *target = management_server_id(target_buf);
    const char *issuer = getenv("AIMEE_SERVER_MGMT_ISSUER");
    const char *local_fp = server_http_identity_local_fingerprint();
    const char *jwt = server_http_identity_bearer();
@@ -353,7 +361,8 @@ static int rh_management_challenge_purpose(const route_req_t *rq, char *resp, in
 {
    (void)rq;
    const server_tls_peer_cert_t *peer = server_http_identity_peer_cert();
-   const char *target = getenv("AIMEE_SERVER_ID");
+   char target_buf[128];
+   const char *target = management_server_id(target_buf);
    if (!peer || !peer->management_profile || strcmp(peer->cn, "p5-kb-management") != 0)
       return err_json(resp, cap, 401, "management client certificate required");
    if (!target || !target[0])
@@ -418,7 +427,8 @@ static int rh_management_health(const route_req_t *rq, char *resp, int cap)
 {
    (void)rq;
    const server_tls_peer_cert_t *peer = server_http_identity_peer_cert();
-   const char *target = getenv("AIMEE_SERVER_ID");
+   char target_buf[128];
+   const char *target = management_server_id(target_buf);
    const char *key_id = getenv("AIMEE_MGMT_STATUS_KEY_ID");
    const char *key_hex = getenv("AIMEE_MGMT_STATUS_PUBLIC_KEY");
    const char *local_fp = server_http_identity_local_fingerprint();
@@ -505,8 +515,30 @@ static int rh_dashboard_reminders(const route_req_t *rq, char *resp, int cap)
 }
 static int rh_kb_status(const route_req_t *rq, char *resp, int cap)
 {
-   (void)rq;
+   cJSON *body = rq->body ? cJSON_Parse(rq->body) : NULL;
+   cJSON *project = body ? cJSON_GetObjectItemCaseSensitive(body, "project") : NULL;
+   if (cJSON_IsString(project) && project->valuestring && project->valuestring[0])
+   {
+      char *json = kb_client_project_status_json(project->valuestring);
+      cJSON_Delete(body);
+      if (!json)
+         return err_json(resp, cap, 502, "kb project status unavailable");
+      snprintf(resp, (size_t)cap, "%s", json);
+      free(json);
+      return 200;
+   }
+   cJSON_Delete(body);
    return route_json_provider(g_kb_status_provider, resp, cap, "kb status");
+}
+static int rh_kb_ingest_status(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   char *json = kb_client_ingest_status_json();
+   if (!json)
+      return err_json(resp, cap, 502, "kb ingest status unavailable");
+   snprintf(resp, (size_t)cap, "%s", json);
+   free(json);
+   return 200;
 }
 /* Curator observability provider (§4). Kept here rather than in server_http.c
  * (which is at its line-count limit); routes.inc is part of the same TU. */
@@ -1769,6 +1801,7 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/dashboard/reminders", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ,
      rh_dashboard_reminders},
     {"GET", "/v1/kb/status", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_kb_status},
+    {"GET", "/v1/kb/ingest/status", NULL, RM_EXACT, NULL, CAP_INDEX_READ, rh_kb_ingest_status},
     /* Write-tier grant administration. UDS-only via v1_route_requires_uds, which refuses
      * these over TCP regardless of bearer, tier or capability; CAP_GRANT_ADMIN is defence in
      * depth. Not given an `op` twin, because there is no NDJSON socket method for grant
@@ -1799,6 +1832,8 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/memory/list", NULL, RM_EXACT, "memory.list", 0, rh_dispatch_op},
     {"GET", "/v1/memory/stats", NULL, RM_EXACT, "memory.stats", 0, rh_dispatch_op},
     {"POST", "/v1/memory/get", NULL, RM_EXACT, "memory.get", 0, rh_dispatch_op},
+    {"POST", "/v1/memory/delete", NULL, RM_EXACT, "memory.delete", 0, rh_dispatch_op},
+    {"POST", "/v1/memory/supersede", NULL, RM_EXACT, "memory.supersede", 0, rh_dispatch_op},
     {"GET", "/v1/memory/read", NULL, RM_EXACT, "memory.read", 0, rh_dispatch_op},
 
     /* Write families (hub-migration P1), dispatch-backed data-plane writes:
@@ -1835,6 +1870,7 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/skills", NULL, RM_EXACT, "skill.list", 0, rh_dispatch_op},
     {"POST", "/v1/skills/show", NULL, RM_EXACT, "skill.show", 0, rh_dispatch_op},
     {"GET", "/v1/hosts", NULL, RM_EXACT, "hosts.list", 0, rh_dispatch_op},
+    {"GET", "/v1/embedders", NULL, RM_EXACT, "embedders.list", 0, rh_dispatch_op},
 
     /* HUD status + trajectory export read families (hub-migration P1),
      * dispatch-backed; caps derived from the op (both CAP_SESSION_READ). */
@@ -1964,6 +2000,7 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/api/status", NULL, RM_EXACT, "api.status", 0, rh_dispatch_op},
     {"POST", "/v1/api/enable", NULL, RM_EXACT, "api.enable", 0, rh_dispatch_op},
     {"POST", "/v1/api/rotate_bearer", NULL, RM_EXACT, "api.rotate_bearer", 0, rh_dispatch_op},
+    {"POST", "/v1/api/enroll_bearer", NULL, RM_EXACT, "api.enroll_bearer", 0, rh_dispatch_op},
     {"POST", "/v1/api/disable", NULL, RM_EXACT, "api.disable", 0, rh_dispatch_op},
     /* dashboard/insights/identity/dogfood/lsp op-parity wave 4; read views are GET. */
     {"GET", "/v1/dashboard/all", NULL, RM_EXACT, "dashboard.all", 0, rh_dispatch_op},
@@ -2073,6 +2110,11 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/kb/ingest", NULL, RM_EXACT, "kb.ingest", 0, rh_dispatch_op_async},
     {"POST", "/v1/kb/update", NULL, RM_EXACT, "kb.update", 0, rh_dispatch_op_async},
     {"POST", "/v1/kb/docs/push", NULL, RM_EXACT, "kb.docs.push", 0, rh_dispatch_op_async},
+    /* Both rebuild vectors and can run for minutes on a real corpus, so they take
+     * the async lane like the rest: kb.reembed drops and recreates every derived
+     * vector table, memory.embed re-embeds the memory corpus after it. */
+    {"POST", "/v1/kb/reembed", NULL, RM_EXACT, "kb.reembed", 0, rh_dispatch_op_async},
+    {"POST", "/v1/memory/embed", NULL, RM_EXACT, "memory.embed", 0, rh_dispatch_op_async},
     {"POST", "/v1/graph/sync_code", NULL, RM_EXACT, "graph.sync_code", 0, rh_dispatch_op_async},
     {"POST", "/v1/index/scan", NULL, RM_EXACT, "index.scan", 0, rh_dispatch_op_async},
     {"POST", "/v1/index/ingest", NULL, RM_EXACT, "index.ingest", 0, rh_dispatch_op_async},
@@ -2417,7 +2459,8 @@ int v1_route_dispatch(const char *method, const char *path, const char *body, in
       return err_json(resp, resp_cap, 400, "bad request");
    if ((strcmp(path, "/v1/workflow") == 0 || strncmp(path, "/v1/workflow/", 13) == 0) ||
        strcmp(path, "/v1/trigger/fire") == 0 || strcmp(path, "/v1/dev/submit") == 0)
-      return err_json(resp, resp_cap, 410, "Go WFE control plane owns this endpoint");
+      return wfe_http_proxy_request(method, path, server_http_identity_query(), body, body_len,
+                                    server_http_identity_principal(), resp, resp_cap);
    char id[256];
    const http_route_t *e = route_match(method, path, id, sizeof(id));
    if (!e || !e->handler)

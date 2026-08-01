@@ -826,9 +826,8 @@ static int purge_reply_cleared(const char *json)
  * default 900s) so both ends agree on the staleness bound. */
 static int gp_fence_ttl_s(void)
 {
-   config_t cfg;
-   if (config_load(&cfg) == 0 && cfg.kb_purge_fence_ttl_s > 0)
-      return cfg.kb_purge_fence_ttl_s;
+   if (config_kb_purge_fence_ttl_s() > 0)
+      return config_kb_purge_fence_ttl_s();
    return 900;
 }
 

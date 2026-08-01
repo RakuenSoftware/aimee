@@ -108,7 +108,7 @@ int kb_evidence_embed_one(const char *embed_cmd)
    if (got == 0)
       return 0;
 
-   const char *model = config_embedding_command(NULL, embed_cmd);
+   const char *model = config_embedding_command_current(embed_cmd);
 
    db2_artifact_row_t row;
    if (db2_artifact_read(pend.artifact_id, &row, NULL, 0, NULL) != 0)
@@ -131,7 +131,7 @@ int kb_evidence_embed_one(const char *embed_cmd)
     * kb_curator_extract_code / kb_service_code_embed). No-op in a lease scope. */
    db2_lease_release_idle();
    float vec[EVIDENCE_EMBED_DIM];
-   int dim = memory_embed_text(content, model, vec, EVIDENCE_EMBED_DIM);
+   int dim = memory_embed_text(content, model, EMBED_INPUT_DOCUMENT, vec, EVIDENCE_EMBED_DIM);
    if (dim != EVIDENCE_EMBED_DIM)
    {
       char err[128];

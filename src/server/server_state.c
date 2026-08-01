@@ -6,6 +6,7 @@
 #include "gw_mutate_stats.h" /* gw_stat_to_json — gateway-mutation economizer counters */
 #include "tool_condense.h"   /* tool_condense_stats_snapshot — tool-output condense savings */
 #include "token_audit.h"     /* db1_token_audit_spend_breakdown — avoided-$ aggregate */
+#include "embedder_catalog.h"
 #include "server.h"
 #include "dashboard.h"
 #include "render.h"                   /* decision_to_json + db2_decision_log_list */
@@ -32,6 +33,7 @@
 #include "agent_config.h"   /* agent_load_config / agent_find */
 #include "hardware_probe.h" /* hardware_probe_list_local/remote — host GPU inventory */
 #include <errno.h>
+#include <math.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -46,6 +48,36 @@ int send_and_free(server_conn_t *conn, cJSON *resp)
 }
 
 /* --- Memory handlers --- */
+
+int server_memory_scope_begin(cJSON *req)
+{
+   const char *cwd = jo_str(req, "cwd", NULL);
+   const char *project_arg = jo_str(req, "project", NULL);
+   const char *workspace_arg = jo_str(req, "workspace", NULL);
+   const char *scope_arg = jo_str(req, "scope", NULL);
+   char project[MAX_PATH_LEN] = "";
+   char workspace[MAX_PATH_LEN] = "";
+   if (project_arg)
+      snprintf(project, sizeof(project), "%s", project_arg);
+   if (workspace_arg)
+      snprintf(workspace, sizeof(workspace), "%s", workspace_arg);
+   if ((!project[0] || !workspace[0]) && cwd && cwd[0])
+   {
+      char resolved_project[MAX_PATH_LEN] = "";
+      char resolved_workspace[MAX_PATH_LEN] = "";
+      if (workspace_repo_identity(cwd, resolved_project, sizeof(resolved_project),
+                                  resolved_workspace, sizeof(resolved_workspace)) == 0)
+      {
+         if (!project[0])
+            snprintf(project, sizeof(project), "%s", resolved_project);
+         if (!workspace[0])
+            snprintf(workspace, sizeof(workspace), "%s", resolved_workspace);
+      }
+   }
+   kb_client_memory_scope_context_set(workspace, project,
+                                      scope_arg && strcmp(scope_arg, "all") == 0);
+   return (!workspace[0] && !project[0]) ? 1 : 0;
+}
 
 int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
@@ -83,19 +115,23 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       qpos += snprintf(query_buf + qpos, sizeof(query_buf) - qpos, "%s", clusters[i]);
    }
 
+   int active_context_missing = server_memory_scope_begin(req);
    /* Search stored facts; graph-code fusion is always on for recall. */
    memory_t facts[32];
    int fact_count = kb_client_memory_find_facts_ex(query_buf, limit, facts, 32, "on");
    if (fact_count < 0)
+   {
+      kb_client_memory_scope_context_clear();
       return server_send_error(conn,
                                "knowledge service search index unavailable; server-side "
                                "maintenance is required",
                                NULL);
+   }
 
    /* Search conversation windows */
    search_result_t results[32];
    int found = kb_client_memory_search(clusters, count, limit, results, 32);
-
+   kb_client_memory_scope_context_clear();
    cJSON *farr = cJSON_CreateArray();
    for (int i = 0; i < fact_count; i++)
       cJSON_AddItemToArray(farr, memory_to_json(&facts[i]));
@@ -114,6 +150,7 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *resp = jo_ok();
    cJSON_AddItemToObject(resp, "facts", farr);
    cJSON_AddItemToObject(resp, "windows", warr);
+   jo_add_bool(resp, "active_context_missing", active_context_missing);
    return send_and_free(conn, resp);
 }
 
@@ -153,21 +190,25 @@ int handle_memory_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    const char *tier = jo_str(req, "tier", NULL);
    const char *kind = jo_str(req, "kind", NULL);
    int limit = jo_int(req, "limit", 20);
-
+   int active_context_missing = server_memory_scope_begin(req);
    memory_t results[64];
    int count = kb_client_memory_list(tier, kind, limit, results, 64);
    if (count < 0)
+   {
+      kb_client_memory_scope_context_clear();
       return server_send_error(conn,
                                "knowledge service unavailable; the memory store is unreachable "
                                "(server-side maintenance is required)",
                                NULL);
-
+   }
+   kb_client_memory_scope_context_clear();
    cJSON *arr = cJSON_CreateArray();
    for (int i = 0; i < count; i++)
       cJSON_AddItemToArray(arr, memory_to_json(&results[i]));
 
    cJSON *resp = jo_ok();
    cJSON_AddItemToObject(resp, "memories", arr);
+   jo_add_bool(resp, "active_context_missing", active_context_missing);
    return send_and_free(conn, resp);
 }
 
@@ -186,6 +227,110 @@ int handle_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *resp = jo_ok();
    cJSON_AddItemToObject(resp, "stats", stats ? stats : cJSON_CreateObject());
    return send_and_free(conn, resp);
+}
+
+/* cJSON stores numbers as doubles. Reject fractional and unrepresentable IDs
+ * instead of truncating them into a different memory's integer primary key. */
+static int memory_request_positive_id(cJSON *req, const char *field, int64_t *out)
+{
+   cJSON *item = cJSON_GetObjectItemCaseSensitive(req, field);
+   if (!cJSON_IsNumber(item) || !isfinite(item->valuedouble) || item->valuedouble <= 0.0 ||
+       item->valuedouble > 9007199254740991.0 || floor(item->valuedouble) != item->valuedouble)
+      return -1;
+   *out = (int64_t)item->valuedouble;
+   return 0;
+}
+
+/* Replace a memory with a corrected one, linking the two.
+ *
+ * This is the operation that should be reached for far more often than
+ * memory.delete, and it was equally unreachable over /v1: `aimee memory
+ * supersede` exists and works on the server host (cmd_memory.c), but the thin
+ * client routes through /v1 and there was no route, so a remote user could not
+ * say "this belief was replaced" — only store another one, or delete.
+ *
+ * That asymmetry matters because the store DEPENDS on the supersession chain.
+ * memory.list_superseded_keys and memory.fact_history walk it, so deleting a
+ * wrong memory instead of superseding it loses the answer to "why did it assert
+ * this in March" and destroys the negative examples effectiveness and
+ * evidence_strength are computed from. A corrected memory is signal; a deleted
+ * one is a hole.
+ *
+ * Same CAP_MEMORY_WRITE gate as store and delete. */
+int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+
+   int64_t old_id = 0;
+   cJSON *jnew = cJSON_GetObjectItemCaseSensitive(req, "new_content");
+   if (memory_request_positive_id(req, "old_id", &old_id) != 0)
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "memory.supersede requires a positive integer old_id", NULL);
+   if (!cJSON_IsString(jnew) || !jnew->valuestring[0])
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "memory.supersede requires non-empty new_content", NULL);
+
+   cJSON *jconf = cJSON_GetObjectItemCaseSensitive(req, "confidence");
+   if (jconf && (!cJSON_IsNumber(jconf) || !isfinite(jconf->valuedouble) ||
+                 jconf->valuedouble < 0.0 || jconf->valuedouble > 1.0))
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "memory.supersede confidence must be between 0 and 1", NULL);
+   double conf = cJSON_IsNumber(jconf) ? jconf->valuedouble : 1.0;
+   cJSON *jsid = cJSON_GetObjectItemCaseSensitive(req, "session_id");
+   if (jsid && !cJSON_IsString(jsid))
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "memory.supersede session_id must be a string", NULL);
+   const char *sid = cJSON_IsString(jsid) ? jsid->valuestring : "";
+
+   memory_t mem;
+   if (kb_client_memory_supersede(old_id, jnew->valuestring, conf, sid, &mem) != 0)
+      return server_send_error_kind(conn, SERVER_ERR_NOT_FOUND,
+                                    "no such memory, or the knowledge service refused", NULL);
+
+   cJSON *resp = jo_ok();
+   cJSON *mj = memory_to_json(&mem);
+   if (mj)
+   {
+      cJSON *child = mj->child;
+      while (child)
+      {
+         cJSON *next = child->next;
+         cJSON_DetachItemViaPointer(mj, child);
+         cJSON_AddItemToObject(resp, child->string, child);
+         child = next;
+      }
+      cJSON_Delete(mj);
+   }
+   return server_send_ok(conn, resp);
+}
+
+/* Remove one memory by id.
+ *
+ * The knowledge tier has always been able to do this: kb_service.c dispatches
+ * "memory.delete" to a handler that calls memory_delete(). Nothing above it ever
+ * exposed the capability, so the store was effectively write-once from every
+ * interface a user has — a memory stored by mistake (a secret, a typo, a test
+ * fixture written against a live deployment) could not be taken back.
+ *
+ * Gated on CAP_MEMORY_WRITE, so it follows the same write-tier grant rules as
+ * memory.store rather than inventing its own. */
+int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+
+   int64_t id = 0;
+   if (memory_request_positive_id(req, "id", &id) != 0)
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "memory.delete requires a positive integer id", NULL);
+
+   if (kb_client_memory_delete(id) != 0)
+      return server_send_error_kind(conn, SERVER_ERR_NOT_FOUND,
+                                    "no such memory, or the knowledge service refused", NULL);
+
+   cJSON *resp = jo_ok();
+   cJSON_AddNumberToObject(resp, "id", (double)id);
+   cJSON_AddBoolToObject(resp, "deleted", 1);
+   return server_send_ok(conn, resp);
 }
 
 int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -218,9 +363,17 @@ int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          cJSON_Delete(mj);
       }
    }
-   else
+   else if (rc > 0)
    {
       resp = jo_err("memory not found");
+   }
+   else
+   {
+      char *typed = kb_client_last_result_json("memory lookup failed");
+      resp = typed ? cJSON_Parse(typed) : NULL;
+      free(typed);
+      if (!resp)
+         resp = jo_err("knowledge service unavailable");
    }
    return send_and_free(conn, resp);
 }
@@ -228,11 +381,12 @@ int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 int handle_memory_read(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   (void)req;
-
+   int active_context_missing = server_memory_scope_begin(req);
    char *context = kb_client_memory_assemble_context(NULL);
+   kb_client_memory_scope_context_clear();
    cJSON *resp = jo_ok();
    jo_add_str(resp, "context", context ? context : "");
+   jo_add_bool(resp, "active_context_missing", active_context_missing);
    free(context);
    return send_and_free(conn, resp);
 }
@@ -263,135 +417,7 @@ int handle_index_scan(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, resp);
 }
 
-int handle_index_find(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   (void)ctx;
-
-   const char *identifier;
-   if (jo_need_str(req, "identifier", &identifier) < 0 || !identifier[0])
-      return server_send_error(conn, "missing identifier", NULL);
-
-   term_hit_t hits[128];
-   int count = kb_client_index_find(identifier, hits, 128);
-
-   cJSON *resp = jo_ok();
-   cJSON *arr = cJSON_AddArrayToObject(resp, "hits");
-   for (int i = 0; i < count; i++)
-   {
-      cJSON *h = cJSON_CreateObject();
-      jo_add_str(h, "project", hits[i].project);
-      jo_add_str(h, "file_path", hits[i].file_path);
-      cJSON_AddNumberToObject(h, "line", hits[i].line);
-      jo_add_str(h, "kind", hits[i].kind);
-      cJSON_AddItemToArray(arr, h);
-   }
-   return send_and_free(conn, resp);
-}
-
-int handle_index_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   (void)ctx;
-   (void)req;
-
-   project_info_t projects[128];
-   int count = kb_client_index_list(projects, 128);
-
-   cJSON *resp = jo_ok();
-   cJSON *arr = cJSON_AddArrayToObject(resp, "projects");
-   for (int i = 0; i < count; i++)
-   {
-      cJSON *p = cJSON_CreateObject();
-      jo_add_str(p, "name", projects[i].name);
-      jo_add_str(p, "root", projects[i].root);
-      jo_add_str(p, "scanned_at", projects[i].scanned_at);
-      cJSON_AddItemToArray(arr, p);
-   }
-   return send_and_free(conn, resp);
-}
-
-int handle_index_blast_radius(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   (void)ctx;
-
-   const char *project, *file_path;
-   if (jo_need_str(req, "project", &project) < 0 || jo_need_str(req, "file_path", &file_path) < 0)
-      return server_send_error(conn, "missing project or file_path", NULL);
-
-   blast_radius_t br;
-   int rc = kb_client_index_blast_radius(project, file_path, &br);
-
-   cJSON *resp;
-   if (rc == 0)
-   {
-      resp = jo_ok();
-      jo_add_str(resp, "file", br.file);
-
-      cJSON *deps = cJSON_CreateArray();
-      for (int i = 0; i < br.dependency_count; i++)
-         cJSON_AddItemToArray(deps, cJSON_CreateString(br.dependencies[i]));
-      cJSON_AddItemToObject(resp, "dependencies", deps);
-
-      cJSON *depts = cJSON_CreateArray();
-      for (int i = 0; i < br.dependent_count; i++)
-         cJSON_AddItemToArray(depts, cJSON_CreateString(br.dependents[i]));
-      cJSON_AddItemToObject(resp, "dependents", depts);
-   }
-   else
-   {
-      resp = jo_err("blast radius lookup failed (knowledge service unavailable)");
-   }
-   return send_and_free(conn, resp);
-}
-
-int handle_index_structure(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   (void)ctx;
-   const char *project, *file_path;
-   if (jo_need_str(req, "project", &project) < 0 || jo_need_str(req, "file_path", &file_path) < 0)
-      return server_send_error(conn, "missing project or file_path", NULL);
-   definition_t defs[256];
-   int count = kb_client_index_structure(project, file_path, defs, 256);
-   cJSON *resp = jo_ok();
-   cJSON *arr = cJSON_AddArrayToObject(resp, "definitions");
-   for (int i = 0; i < count; i++)
-   {
-      cJSON *d = cJSON_CreateObject();
-      jo_add_str(d, "name", defs[i].name);
-      jo_add_str(d, "kind", defs[i].kind);
-      cJSON_AddNumberToObject(d, "line", defs[i].line);
-      /* Span-propagation parity (#33): emit line_end like the KB/MCP routes do. */
-      if (defs[i].line_end)
-         cJSON_AddNumberToObject(d, "line_end", defs[i].line_end);
-      cJSON_AddItemToArray(arr, d);
-   }
-   return send_and_free(conn, resp);
-}
-
-int handle_index_find_callers(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   (void)ctx;
-
-   const char *symbol;
-   if (jo_need_str(req, "symbol", &symbol) < 0 || !symbol[0])
-      return server_send_error(conn, "missing symbol", NULL);
-   const char *project = jo_str(req, "project", NULL);
-
-   caller_hit_t hits[128];
-   int count = kb_client_index_find_callers(project, symbol, hits, 128);
-
-   cJSON *resp = jo_ok();
-   cJSON *arr = cJSON_AddArrayToObject(resp, "hits");
-   for (int i = 0; i < count; i++)
-   {
-      cJSON *h = cJSON_CreateObject();
-      jo_add_str(h, "project", hits[i].project);
-      jo_add_str(h, "file_path", hits[i].file_path);
-      jo_add_str(h, "caller", hits[i].caller);
-      cJSON_AddNumberToObject(h, "line", hits[i].line);
-      cJSON_AddItemToArray(arr, h);
-   }
-   return send_and_free(conn, resp);
-}
+/* Agent-facing code-index query handlers live in server_state_index.c. */
 
 /* --- Graph code-projection handlers --- */
 
@@ -483,13 +509,34 @@ int handle_kb_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)ctx;
 
    const char *query = jo_str(req, "query", "");
+   char project_buf[MAX_PATH_LEN] = "";
    const char *project = jo_str(req, "project", NULL);
+   const char *scope = jo_str(req, "scope", NULL);
+   if (scope && strcmp(scope, "current") != 0 && strcmp(scope, "all") != 0)
+      return server_send_error(conn, "kb.search scope must be current or all", NULL);
+   if (scope && strcmp(scope, "all") == 0)
+   {
+      if (!project || !project[0])
+      {
+         const char *cwd = jo_str(req, "cwd", NULL);
+         if (cwd && workspace_repo_identity(cwd, project_buf, sizeof(project_buf), NULL, 0) == 0)
+            project = project_buf;
+      }
+   }
+   else if (!project || !project[0])
+   {
+      const char *cwd = jo_str(req, "cwd", NULL);
+      if (!cwd || workspace_repo_identity(cwd, project_buf, sizeof(project_buf), NULL, 0) != 0)
+         return server_send_error(
+             conn, "scope_required: no active project; pass --scope all explicitly", NULL);
+      project = project_buf;
+   }
    int max_results = jo_int(req, "max_results", 10);
    const char *fusion_mode = jo_str(req, "fusion_mode", NULL);
    const char *embed_cmd = jo_str(req, "embedding_command", NULL);
 
-   char *json =
-       kb_client_search_json_ex(project, query, embed_cmd, max_results, "json", fusion_mode);
+   char *json = kb_client_search_json_scoped_ex(project, scope && strcmp(scope, "all") == 0, query,
+                                                embed_cmd, max_results, "json", fusion_mode);
    cJSON *resp = json ? cJSON_Parse(json) : NULL;
    free(json);
    if (!resp)
@@ -1138,6 +1185,26 @@ int handle_hosts_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, resp);
 }
 
+/* embedders.list — the embedders this deployment can offer, for the setup wizard's
+ * page-2 picker. Read-only. The shaping lives in embedder_catalog.c so it can be tested
+ * without linking the server; this is just transport. */
+int handle_embedders_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+
+   char *raw = embedder_registry_read();
+   const char *err = NULL;
+   cJSON *arr = embedder_catalog_build(raw, &err);
+   free(raw);
+   if (!arr)
+      return server_send_error(conn, err ? err : "embedder registry unavailable", NULL);
+
+   cJSON *resp = jo_ok();
+   cJSON_AddItemToObject(resp, "embedders", arr);
+   return send_and_free(conn, resp);
+}
+
 int handle_primary_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -1442,9 +1509,7 @@ int handle_workspace_context(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)ctx;
    (void)req;
 
-   config_t cfg;
-   config_load(&cfg);
-   char *context = workspace_build_context_from_config(&cfg);
+   char *context = workspace_build_context_from_config();
 
    cJSON *resp = jo_ok_kv("context", context ? context : "");
    free(context);
@@ -1480,9 +1545,6 @@ int handle_workspace_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    (void)req;
-   config_t cfg;
-   config_load(&cfg);
-
    /* Listing workspaces is a read of the registry; the kb call only enriches
     * each entry with its already-indexed project names. Probe liveness first so
     * a down kb degrades to empty project lists instead of blocking this RPC on a
@@ -1494,20 +1556,20 @@ int handle_workspace_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    cJSON *resp = jo_ok();
    cJSON *arr = cJSON_AddArrayToObject(resp, "workspaces");
-   for (int w = 0; w < cfg.workspace_count; w++)
+   for (int w = 0; w < config_workspace_count(); w++)
    {
       cJSON *ws_obj = cJSON_CreateObject();
-      jo_add_str(ws_obj, "path", cfg.workspaces[w]);
+      jo_add_str(ws_obj, "path", config_workspaces(w));
       jo_add_str(ws_obj, "provider",
-                 cfg.workspace_providers[w][0] ? cfg.workspace_providers[w] : "shared");
-      if (cfg.workspace_vcs_remote[w][0])
-         jo_add_str(ws_obj, "remote", cfg.workspace_vcs_remote[w]);
-      if (cfg.workspace_vcs_head[w][0])
-         jo_add_str(ws_obj, "head", cfg.workspace_vcs_head[w]);
+                 config_workspace_providers(w)[0] ? config_workspace_providers(w) : "shared");
+      if (config_workspace_vcs_remote(w)[0])
+         jo_add_str(ws_obj, "remote", config_workspace_vcs_remote(w));
+      if (config_workspace_vcs_head(w)[0])
+         jo_add_str(ws_obj, "head", config_workspace_vcs_head(w));
       cJSON *projs = cJSON_AddArrayToObject(ws_obj, "projects");
-      size_t ws_len = strlen(cfg.workspaces[w]);
+      size_t ws_len = strlen(config_workspaces(w));
       for (int p = 0; p < pcount; p++)
-         if (strncmp(all_projects[p].root, cfg.workspaces[w], ws_len) == 0 &&
+         if (strncmp(all_projects[p].root, config_workspaces(w), ws_len) == 0 &&
              (all_projects[p].root[ws_len] == '/' || all_projects[p].root[ws_len] == '\0'))
             cJSON_AddItemToArray(projs, cJSON_CreateString(all_projects[p].name));
       cJSON_AddItemToArray(arr, ws_obj);
@@ -1550,34 +1612,14 @@ int handle_workspace_remove(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    char abs[MAX_PATH_LEN];
    const char *target = realpath(argv[0], abs) ? abs : argv[0];
 
-   config_t cfg;
-   config_load(&cfg);
-   int found = -1;
-   for (int i = 0; i < cfg.workspace_count; i++)
-      if (strcmp(cfg.workspaces[i], target) == 0)
-      {
-         found = i;
-         break;
-      }
-   if (found < 0)
+   /* config_workspace_remove() compacts every parallel registry array in
+    * lockstep and saves; this handler used to open-code the shift and got it
+    * wrong (only workspaces[] moved, misaligning workspace_providers[] for
+    * every entry after the removed one). */
+   int rc = config_workspace_remove(target);
+   if (rc == -2)
       return server_send_error(conn, "workspace: not registered", NULL);
-
-   /* Compact every parallel registry array in lockstep so the provider + VCS
-    * metadata stay aligned with their path (previously only workspaces[] was
-    * shifted, which misaligned workspace_providers[] for entries after the
-    * removed one). */
-   for (int i = found; i < cfg.workspace_count - 1; i++)
-   {
-      snprintf(cfg.workspaces[i], MAX_PATH_LEN, "%s", cfg.workspaces[i + 1]);
-      snprintf(cfg.workspace_providers[i], sizeof(cfg.workspace_providers[i]), "%s",
-               cfg.workspace_providers[i + 1]);
-      snprintf(cfg.workspace_vcs_remote[i], sizeof(cfg.workspace_vcs_remote[i]), "%s",
-               cfg.workspace_vcs_remote[i + 1]);
-      snprintf(cfg.workspace_vcs_head[i], sizeof(cfg.workspace_vcs_head[i]), "%s",
-               cfg.workspace_vcs_head[i + 1]);
-   }
-   cfg.workspace_count--;
-   if (config_save(&cfg) != 0)
+   if (rc != 0)
       return server_send_error(conn, "workspace: failed to save config", NULL);
 
    /* Republish the live snapshot now instead of waiting for the server loop's
@@ -1802,11 +1844,10 @@ int handle_identity_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    (void)req;
-   config_t cfg;
-   if (config_load(&cfg) != 0)
+   if (!config_present())
       return server_send_error(conn, "identity show: could not load config", NULL);
    cJSON *resp = cJSON_CreateObject();
-   cJSON_AddItemToObject(resp, "charter", identity_charter_json(&cfg));
+   cJSON_AddItemToObject(resp, "charter", identity_charter_json());
    cJSON_AddItemToObject(resp, "local_operator", identity_local_operator_json());
    cJSON_AddItemToObject(resp, "working_profile", identity_working_profile_json());
    return send_and_free(conn, resp);
@@ -1853,10 +1894,7 @@ int handle_identity_snapshot(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    if (platform_mkdir_p(out_dir, 0755) != 0)
       return server_send_error(conn, "identity snapshot: could not create output directory", NULL);
-
-   config_t db1_cfg;
-   config_load(&db1_cfg);
-   if (db1_init(db1_cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
       return server_send_error(conn, "identity snapshot: could not initialize DB1", NULL);
 
    cJSON *snap = identity_snapshot_build();
@@ -2243,10 +2281,7 @@ int handle_dashboard_audit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    /* When the WORM store is enabled it is the tamper-evident source of truth for
     * the Logs view: read the indexed audit_event rows directly (superseding the
     * flat audit.log reader from #1092). Fall back to the file reader otherwise. */
-   config_t wcfg;
-   memset(&wcfg, 0, sizeof wcfg);
-   config_load(&wcfg);
-   if (wcfg.audit_worm_enabled)
+   if (config_audit_worm_enabled())
    {
       long wtotal = 0;
       cJSON *wpage = audit_worm_read_page(offset, limit, &wtotal);

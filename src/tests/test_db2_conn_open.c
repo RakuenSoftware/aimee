@@ -116,26 +116,47 @@ static void test_the_statement_bound_is_applied_to_the_connection(void)
    must(c != NULL, "a healthy connection is returned");
    must(fake.exec_calls == 1, "exactly one SET is issued");
 
-   char want[64];
-   snprintf(want, sizeof want, "SET statement_timeout = %d", DB2_POOL_HOLD_CEILING_MS);
-   must(strcmp(fake.last_sql, want) == 0, "the SET carries the pool's ceiling");
+   /* BOTH bounds ride the connection. statement_timeout alone leaves the case
+    * that actually wedged a kb — a transaction opened and then stalled before
+    * its next statement, invisible to a statement bound, holding its pool member
+    * for hours. Asserted against the pool ceiling rather than literals so moving
+    * the ceiling moves this too. */
+   char want[160];
+   snprintf(want, sizeof want,
+            "SET statement_timeout = %d; SET idle_in_transaction_session_timeout = %d",
+            DB2_POOL_HOLD_CEILING_MS, DB2_POOL_HOLD_CEILING_MS);
+   must(strcmp(fake.last_sql, want) == 0, "the SET carries both bounds at the pool's ceiling");
    /* And the connection it opened was the bounded string, not the caller's. */
    must(strstr(fake.last_conninfo, "connect_timeout=10") != NULL, "the conninfo was bounded");
    must(fake.finish_calls == 0, "a healthy connection is not closed");
    printf("  PASS: the statement bound is applied to the connection, at the pool ceiling\n");
 }
 
-/* An explicit 0 is the documented opt-out: no SET at all, connection returned. */
+/* An explicit 0 is the documented opt-out, and the two bounds opt out
+ * INDEPENDENTLY: disabling the statement bound is not a request to also run
+ * unbounded inside an idle transaction. Only opting out of both issues no SET. */
 static void test_an_explicit_zero_issues_no_set(void)
 {
    fake_reset();
    setenv("AIMEE_DB2_STATEMENT_TIMEOUT_MS", "0", 1);
+   setenv("AIMEE_DB2_IDLE_IN_TRANSACTION_TIMEOUT_MS", "0", 1);
    char err[256] = {0};
    void *c = aimee_pg_open("host=db", err, sizeof err);
-   unsetenv("AIMEE_DB2_STATEMENT_TIMEOUT_MS");
    must(c != NULL, "the connection is still returned");
-   must(fake.exec_calls == 0, "no SET is issued when the bound is opted out");
-   printf("  PASS: an explicit 0 issues no SET and still returns the connection\n");
+   must(fake.exec_calls == 0, "no SET is issued when both bounds are opted out");
+
+   /* Statement bound off, idle bound left alone: the idle SET still goes. */
+   fake_reset();
+   unsetenv("AIMEE_DB2_IDLE_IN_TRANSACTION_TIMEOUT_MS");
+   c = aimee_pg_open("host=db", err, sizeof err);
+   must(c != NULL, "the connection is still returned");
+   must(fake.exec_calls == 1, "the idle bound is still applied on its own");
+   must(strstr(fake.last_sql, "idle_in_transaction_session_timeout") != NULL,
+        "the surviving SET is the idle bound");
+   must(strstr(fake.last_sql, "statement_timeout") == NULL,
+        "the opted-out statement bound is not reinstated");
+   unsetenv("AIMEE_DB2_STATEMENT_TIMEOUT_MS");
+   printf("  PASS: the two bounds opt out independently\n");
 }
 
 /* THE POINT OF THIS FILE. If the bound cannot be set, the connection must be

@@ -15,6 +15,11 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 
+/* The HTTP client is also used by small standalone binaries that do not link
+ * the agent runtime. In the server this resolves to the parallel worker's
+ * thread-local cancellation flag; elsewhere the weak symbol is absent. */
+int agent_request_cancelled(void) __attribute__((weak));
+
 static SSL_CTX *s_ssl_ctx;
 
 void agent_http_init(void)
@@ -135,6 +140,28 @@ static int64_t conn_now_ns(void)
 static int conn_past_deadline(const http_conn_t *conn)
 {
    return conn->deadline_ns && conn_now_ns() > conn->deadline_ns;
+}
+
+static int conn_cancelled(void)
+{
+   return agent_request_cancelled && agent_request_cancelled();
+}
+
+/* A panel deadline is shorter than an individual provider timeout. Once a
+ * connection exists, poll blocking socket/TLS operations frequently enough for
+ * the parallel worker's cancellation flag to interrupt the provider call before
+ * pthread_join can extend the panel past its wall-clock budget. */
+#define HTTP_CANCEL_POLL_MS 100
+
+static void conn_enable_cancel_poll(http_conn_t *conn)
+{
+   if (!conn || conn->fd < 0 || !agent_request_cancelled)
+      return;
+   struct timeval tv;
+   tv.tv_sec = 0;
+   tv.tv_usec = HTTP_CANCEL_POLL_MS * 1000;
+   setsockopt(conn->fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+   setsockopt(conn->fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 }
 
 static int connect_with_timeout(const char *host, int port, int timeout_ms)
@@ -385,6 +412,8 @@ static int conn_open(http_conn_t *conn, const parsed_url_t *url, int timeout_ms)
       }
    }
 
+   conn_enable_cancel_poll(conn);
+
    if (url->use_ssl)
    {
       if (!s_ssl_ctx)
@@ -406,7 +435,23 @@ static int conn_open(http_conn_t *conn, const parsed_url_t *url, int timeout_ms)
       /* Enable hostname verification */
       SSL_set1_host(conn->ssl, url->host);
 
-      if (SSL_connect(conn->ssl) <= 0)
+      int connected = 0;
+      while (!conn_cancelled() && !conn_past_deadline(conn))
+      {
+         int rc = SSL_connect(conn->ssl);
+         if (rc == 1)
+         {
+            connected = 1;
+            break;
+         }
+         int ssl_err = SSL_get_error(conn->ssl, rc);
+         if (ssl_err == SSL_ERROR_WANT_READ || ssl_err == SSL_ERROR_WANT_WRITE ||
+             (ssl_err == SSL_ERROR_SYSCALL &&
+              (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)))
+            continue;
+         break;
+      }
+      if (!connected)
       {
          SSL_free(conn->ssl);
          close(conn->fd);
@@ -435,9 +480,29 @@ static void conn_close(http_conn_t *conn)
 
 static ssize_t conn_write(http_conn_t *conn, const void *buf, size_t len)
 {
-   if (conn->ssl)
-      return SSL_write(conn->ssl, buf, (int)len);
-   return send(conn->fd, buf, len, 0);
+   for (;;)
+   {
+      if (conn_cancelled() || conn_past_deadline(conn))
+         return -1;
+      if (conn->ssl)
+      {
+         ssize_t n = SSL_write(conn->ssl, buf, (int)len);
+         if (n > 0)
+            return n;
+         int err = SSL_get_error(conn->ssl, (int)n);
+         if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE ||
+             (err == SSL_ERROR_SYSCALL &&
+              (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)))
+            continue;
+         return -1;
+      }
+      ssize_t n = send(conn->fd, buf, len, 0);
+      if (n >= 0)
+         return n;
+      if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
+         continue;
+      return -1;
+   }
 }
 
 static ssize_t conn_read(http_conn_t *conn, void *buf, size_t len)
@@ -450,6 +515,8 @@ static ssize_t conn_read(http_conn_t *conn, void *buf, size_t len)
     * actually past. Only a real EOF or error ends the read early. */
    for (;;)
    {
+      if (conn_cancelled())
+         return -1;
       if (conn->ssl)
       {
          ssize_t n = SSL_read(conn->ssl, buf, (int)len);
@@ -462,7 +529,7 @@ static ssize_t conn_read(http_conn_t *conn, void *buf, size_t len)
              (err == SSL_ERROR_SYSCALL &&
               (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)))
          {
-            if (conn_past_deadline(conn))
+            if (conn_cancelled() || conn_past_deadline(conn))
                return -1;
             continue; /* SO_RCVTIMEO fired; peer is slow, not gone */
          }
@@ -471,8 +538,8 @@ static ssize_t conn_read(http_conn_t *conn, void *buf, size_t len)
       ssize_t n = recv(conn->fd, buf, len, 0);
       if (n >= 0)
          return n;
-      if (errno == EINTR ||
-          ((errno == EAGAIN || errno == EWOULDBLOCK) && !conn_past_deadline(conn)))
+      if (errno == EINTR || ((errno == EAGAIN || errno == EWOULDBLOCK) && !conn_cancelled() &&
+                             !conn_past_deadline(conn)))
          continue;
       return -1;
    }
@@ -1351,6 +1418,38 @@ int agent_http_put(const char *url, const char *auth_header, const char *body, c
       free(*response_buf);
       *response_buf = NULL;
       aimee_log(LOG_ERROR, "agent_http", "request failed");
+   }
+   return status;
+}
+
+int agent_http_patch(const char *url, const char *auth_header, const char *body,
+                     char **response_buf, int timeout_ms, const char *extra_headers)
+{
+   *response_buf = NULL;
+
+   parsed_url_t pu;
+   if (parse_url(url, &pu) < 0)
+      return -1;
+
+   http_conn_t conn;
+   if (conn_open(&conn, &pu, timeout_ms) < 0)
+      return -1;
+
+   if (send_request(&conn, "PATCH", &pu, "Content-Type: application/json", auth_header,
+                    extra_headers, "aimee/1.0", body, body ? strlen(body) : 0) < 0)
+   {
+      conn_close(&conn);
+      return -1;
+   }
+
+   size_t resp_len = 0;
+   int status = http_read_response(&conn, response_buf, &resp_len);
+   conn_close(&conn);
+   if (status < 0)
+   {
+      free(*response_buf);
+      *response_buf = NULL;
+      aimee_log(LOG_ERROR, "agent_http", "PATCH request failed");
    }
    return status;
 }

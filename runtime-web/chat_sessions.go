@@ -4,19 +4,17 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 )
 
 // Per-user chat-session persistence. A "session" here is one browser tab's
-// conversation: identified by the aimee-server conversation id (the same value
-// the SPA sends as aimee_session_id and aimee-server echoes back in the
-// "session" stream event). The conversation history itself lives on
-// aimee-server; this table is webchat's durable record of WHICH sessions belong
-// to WHICH logged-in user, so a user can reopen their browser after a crash and
-// restore every tab they had open. Rows are scoped by the authenticated
-// username so users only ever see and restore their own tabs.
+// conversation: identified by the stable id the SPA sends as aimee_session_id.
+// The provider-native id emitted by the "session" stream event is separate and
+// is persisted only as resume metadata. Rows are scoped by the authenticated
+// username so users only ever see and restore their own tabs and transcript.
 
 type ctxKey string
 
@@ -46,6 +44,24 @@ var chatSessionMigrations = []string{
 		last_active TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_chat_sessions_user ON chat_sessions(username, last_active DESC)`,
+	`CREATE TABLE IF NOT EXISTS chat_session_runtime (
+		session_id          TEXT PRIMARY KEY,
+		username            TEXT NOT NULL,
+		provider_session_id TEXT NOT NULL DEFAULT ''
+	)`,
+	`CREATE TABLE IF NOT EXISTS chat_session_messages (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		session_id TEXT NOT NULL,
+		username   TEXT NOT NULL,
+		role       TEXT NOT NULL,
+		text       TEXT NOT NULL,
+		created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_chat_session_messages
+		ON chat_session_messages(username, session_id, id)`,
+	`CREATE TABLE IF NOT EXISTS chat_session_schema_migrations (
+		version INTEGER PRIMARY KEY
+	)`,
 }
 
 func applyChatSessionMigrations(db *sql.DB) error {
@@ -54,16 +70,53 @@ func applyChatSessionMigrations(db *sql.DB) error {
 			return err
 		}
 	}
-	return nil
+	return migrateLegacyChatSessionRuntime(db)
+}
+
+// Version 1 upgrades rows written by the old webchat implementation. That
+// implementation replaced the stable browser id with the provider-emitted id
+// before inserting chat_sessions, so each pre-existing row id is trusted
+// provider resume metadata already captured by the server. Snapshot those rows
+// exactly once; rerunning this migration must never classify a newly-created
+// stable web id as a provider id.
+func migrateLegacyChatSessionRuntime(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var applied int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM chat_session_schema_migrations
+		WHERE version = 1`).Scan(&applied); err != nil {
+		return err
+	}
+	if applied == 0 {
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO chat_session_runtime
+			(session_id, username, provider_session_id)
+			SELECT id, username, id FROM chat_sessions`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT INTO chat_session_schema_migrations (version) VALUES (1)`); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // chatSession is the durable record of one tab's session for a user.
 type chatSession struct {
-	ID         string `json:"id"`
-	Title      string `json:"title"`
-	Cwd        string `json:"cwd,omitempty"`
-	CreatedAt  string `json:"created_at"`
-	LastActive string `json:"last_active"`
+	ID                string        `json:"id"`
+	Title             string        `json:"title"`
+	Cwd               string        `json:"cwd,omitempty"`
+	ProviderSessionID string        `json:"provider_session_id,omitempty"`
+	Messages          []chatMessage `json:"messages"`
+	CreatedAt         string        `json:"created_at"`
+	LastActive        string        `json:"last_active"`
+}
+
+type chatMessage struct {
+	Role string `json:"role"`
+	Text string `json:"text"`
 }
 
 const sessionTitleMaxLen = 80
@@ -104,6 +157,237 @@ func (s *server) touchChatSession(username, id, cwd, firstMessage string) error 
 	return err
 }
 
+// chatSessionOwned reports whether id exists and belongs to username. Session
+// ids are bearer-like handles at the aimee-server boundary, so webchat must bind
+// each handle to the authenticated account before it forwards a continuation.
+func (s *server) chatSessionOwned(username, id string) (owned, exists bool, err error) {
+	if s == nil || s.db == nil || username == "" || id == "" {
+		return false, false, nil
+	}
+	var owner string
+	err = s.db.QueryRow(`SELECT username FROM chat_sessions WHERE id = ?`, id).Scan(&owner)
+	switch err {
+	case nil:
+		return owner == username, true, nil
+	case sql.ErrNoRows:
+		return false, false, nil
+	default:
+		return false, false, err
+	}
+}
+
+// setChatSessionRuntime persists the provider-native thread/session id needed to
+// resume a restored chat on another computer. The stable web session id remains
+// the chat_sessions key; provider ids must never replace it.
+func (s *server) setChatSessionRuntime(username, id, providerSessionID string) error {
+	if s == nil || s.db == nil || username == "" || id == "" {
+		return nil
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO chat_session_runtime (session_id, username, provider_session_id)
+		SELECT ?, ?, ?
+		 WHERE EXISTS (SELECT 1 FROM chat_sessions WHERE id = ? AND username = ?)
+		ON CONFLICT(session_id) DO UPDATE SET
+			provider_session_id = CASE
+				WHEN excluded.provider_session_id != '' THEN excluded.provider_session_id
+				ELSE chat_session_runtime.provider_session_id END
+		WHERE chat_session_runtime.username = excluded.username`,
+		id, username, providerSessionID, id, username)
+	return err
+}
+
+// chatSessionProviderID returns resume metadata only when it is already bound
+// to the authenticated user's stable session. Provider-native ids are opaque
+// bearer-like handles, so callers must never substitute a value supplied by the
+// browser here.
+func (s *server) chatSessionProviderID(username, id string) (string, error) {
+	if s == nil || s.db == nil || username == "" || id == "" {
+		return "", nil
+	}
+	var providerSessionID string
+	err := s.db.QueryRow(`SELECT provider_session_id FROM chat_session_runtime
+		WHERE session_id = ? AND username = ?`, id, username).Scan(&providerSessionID)
+	switch err {
+	case nil:
+		return providerSessionID, nil
+	case sql.ErrNoRows:
+		return "", nil
+	default:
+		return "", err
+	}
+}
+
+// upsertChatSessionWithLegacyRuntime atomically creates/updates a stable target
+// row and moves a provider binding from an old provider-keyed row. The browser
+// supplies only the alias selector; the provider id itself comes from the
+// server's one-shot legacy migration and must equal that owned alias row.
+// Invalid aliases roll the whole operation back, so a rejected migration cannot
+// strand a ghost target session.
+func (s *server) upsertChatSessionWithLegacyRuntime(username, targetID, aliasID, title, cwd, now string) (bool, error) {
+	if s == nil || s.db == nil || username == "" || targetID == "" || aliasID == "" || targetID == aliasID {
+		return false, nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	var providerSessionID string
+	err = tx.QueryRow(`SELECT runtime.provider_session_id
+		FROM chat_sessions AS legacy
+		JOIN chat_session_runtime AS runtime
+		  ON runtime.session_id = legacy.id AND runtime.username = legacy.username
+		WHERE legacy.id = ? AND legacy.username = ?
+		  AND runtime.provider_session_id = legacy.id`, aliasID, username).Scan(&providerSessionID)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var targetOwner string
+	err = tx.QueryRow(`SELECT username FROM chat_sessions WHERE id = ?`, targetID).Scan(&targetOwner)
+	if err != nil && err != sql.ErrNoRows {
+		return false, err
+	}
+	if err == nil && targetOwner != username {
+		return false, nil
+	}
+	if _, err := tx.Exec(`INSERT INTO chat_sessions
+		(id, username, title, cwd, created_at, last_active)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			last_active = excluded.last_active,
+			cwd   = CASE WHEN excluded.cwd   != '' THEN excluded.cwd   ELSE chat_sessions.cwd   END,
+			title = CASE WHEN excluded.title != '' THEN excluded.title ELSE chat_sessions.title END
+		WHERE chat_sessions.username = excluded.username`,
+		targetID, username, title, cwd, now, now); err != nil {
+		return false, err
+	}
+	result, err := tx.Exec(`INSERT INTO chat_session_runtime
+		(session_id, username, provider_session_id)
+		SELECT ?, ?, ? WHERE EXISTS
+		(SELECT 1 FROM chat_sessions WHERE id = ? AND username = ?)
+		ON CONFLICT(session_id) DO UPDATE SET
+			provider_session_id = CASE
+				WHEN chat_session_runtime.provider_session_id = '' THEN excluded.provider_session_id
+				ELSE chat_session_runtime.provider_session_id END
+		WHERE chat_session_runtime.username = excluded.username`,
+		targetID, username, providerSessionID, targetID, username)
+	if err != nil {
+		return false, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if changed == 0 {
+		return false, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *server) appendChatMessage(username, id, role, text string) error {
+	if s == nil || s.db == nil || username == "" || id == "" || text == "" {
+		return nil
+	}
+	if role != "user" && role != "assistant" && role != "narration" {
+		return nil
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO chat_session_messages (session_id, username, role, text)
+		SELECT ?, ?, ?, ?
+		 WHERE EXISTS (SELECT 1 FROM chat_sessions WHERE id = ? AND username = ?)`,
+		id, username, role, text, id, username)
+	return err
+}
+
+const (
+	chatSessionSeedMaxMessages = 2000
+	chatSessionSeedMaxBytes    = 8 * 1024 * 1024
+)
+
+// seedChatMessages imports a legacy browser-only transcript once. Existing
+// server history always wins, which prevents a stale browser from overwriting a
+// conversation that another browser has advanced.
+func (s *server) seedChatMessages(username, id string, messages []chatMessage) error {
+	if s == nil || s.db == nil || username == "" || id == "" || len(messages) == 0 {
+		return nil
+	}
+	if len(messages) > chatSessionSeedMaxMessages {
+		return fmt.Errorf("too many messages")
+	}
+	total := 0
+	for _, msg := range messages {
+		if msg.Role != "user" && msg.Role != "assistant" && msg.Role != "narration" {
+			return fmt.Errorf("invalid message role")
+		}
+		total += len(msg.Text)
+		if total > chatSessionSeedMaxBytes {
+			return fmt.Errorf("transcript too large")
+		}
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var count int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM chat_session_messages
+		WHERE session_id = ? AND username = ?`, id, username).Scan(&count); err != nil {
+		return err
+	}
+	if count != 0 {
+		return tx.Commit()
+	}
+	stmt, err := tx.Prepare(`INSERT INTO chat_session_messages
+		(session_id, username, role, text)
+		SELECT ?, ?, ?, ? WHERE EXISTS
+		(SELECT 1 FROM chat_sessions WHERE id = ? AND username = ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, msg := range messages {
+		if msg.Text == "" {
+			continue
+		}
+		if _, err := stmt.Exec(id, username, msg.Role, msg.Text, id, username); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *server) loadChatSessionDetails(username string, cs *chatSession) error {
+	if s == nil || s.db == nil || cs == nil {
+		return nil
+	}
+	cs.Messages = []chatMessage{}
+	_ = s.db.QueryRow(`SELECT provider_session_id FROM chat_session_runtime
+		WHERE session_id = ? AND username = ?`, cs.ID, username).Scan(&cs.ProviderSessionID)
+	rows, err := s.db.Query(`SELECT role, text FROM (
+		SELECT id, role, text FROM chat_session_messages
+		 WHERE session_id = ? AND username = ? ORDER BY id DESC LIMIT ?
+	) ORDER BY id`, cs.ID, username, chatSessionSeedMaxMessages)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var msg chatMessage
+		if err := rows.Scan(&msg.Role, &msg.Text); err != nil {
+			return err
+		}
+		cs.Messages = append(cs.Messages, msg)
+	}
+	return rows.Err()
+}
+
 // getChatSession loads one session owned by the user, or (nil, nil) if absent.
 func (s *server) getChatSession(username, id string) (*chatSession, error) {
 	if s == nil || s.db == nil || username == "" || id == "" {
@@ -115,6 +399,9 @@ func (s *server) getChatSession(username, id string) (*chatSession, error) {
 	var cs chatSession
 	switch err := row.Scan(&cs.ID, &cs.Title, &cs.Cwd, &cs.CreatedAt, &cs.LastActive); err {
 	case nil:
+		if err := s.loadChatSessionDetails(username, &cs); err != nil {
+			return nil, err
+		}
 		return &cs, nil
 	case sql.ErrNoRows:
 		return nil, nil
@@ -144,7 +431,18 @@ func (s *server) listChatSessions(username string) ([]chatSession, error) {
 		}
 		out = append(out, cs)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	if err := rows.Close(); err != nil {
+		return out, err
+	}
+	for i := range out {
+		if err := s.loadChatSessionDetails(username, &out[i]); err != nil {
+			return out, err
+		}
+	}
+	return out, nil
 }
 
 // handleChatSessionsList (GET /api/chat/sessions) returns the authenticated
@@ -200,6 +498,8 @@ func (s *server) handleChatSessionGet(w http.ResponseWriter, r *http.Request) {
 		out["exists"] = true
 		out["title"] = cs.Title
 		out["cwd"] = cs.Cwd
+		out["provider_session_id"] = cs.ProviderSessionID
+		out["messages"] = cs.Messages
 		out["created_at"] = cs.CreatedAt
 		out["last_active"] = cs.LastActive
 	}
@@ -209,11 +509,13 @@ func (s *server) handleChatSessionGet(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleChatSessionUpsert(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	var req struct {
-		ID             string `json:"id"`
-		Sid            string `json:"sid"`
-		AimeeSessionID string `json:"aimee_session_id"`
-		Title          string `json:"title"`
-		Cwd            string `json:"cwd"`
+		ID             string         `json:"id"`
+		Sid            string         `json:"sid"`
+		AimeeSessionID string         `json:"aimee_session_id"`
+		Title          string         `json:"title"`
+		Cwd            string         `json:"cwd"`
+		LegacyAliasID  string         `json:"legacy_provider_alias_id"`
+		Messages       *[]chatMessage `json:"messages"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "bad request")
@@ -229,22 +531,54 @@ func (s *server) handleChatSessionUpsert(w http.ResponseWriter, r *http.Request)
 		writeJSONError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
+	owned, exists, err := s.chatSessionOwned(username, id)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "failed to verify session")
+		return
+	}
+	if exists && !owned {
+		writeJSONError(w, http.StatusConflict, "session id belongs to another user")
+		return
+	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	// Explicit upsert: unlike the send-path touch, an explicitly supplied title
 	// overwrites (this is the rename path). An empty title leaves any existing
 	// title untouched.
-	if _, err := s.db.Exec(`
-		INSERT INTO chat_sessions (id, username, title, cwd, created_at, last_active)
-		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET
-			last_active = excluded.last_active,
-			cwd   = CASE WHEN excluded.cwd   != '' THEN excluded.cwd   ELSE chat_sessions.cwd   END,
-			title = CASE WHEN excluded.title != '' THEN excluded.title ELSE chat_sessions.title END
-		WHERE chat_sessions.username = excluded.username`,
+	aliasID := strings.TrimSpace(req.LegacyAliasID)
+	if aliasID != "" {
+		transferred, err := s.upsertChatSessionWithLegacyRuntime(username, id, aliasID,
+			strings.TrimSpace(req.Title), req.Cwd, now)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to migrate session runtime")
+			return
+		}
+		if !transferred {
+			writeJSONError(w, http.StatusConflict, "legacy session alias is not owned by this user")
+			return
+		}
+	} else if _, err := s.db.Exec(`
+			INSERT INTO chat_sessions (id, username, title, cwd, created_at, last_active)
+			VALUES (?, ?, ?, ?, ?, ?)
+			ON CONFLICT(id) DO UPDATE SET
+				last_active = excluded.last_active,
+				cwd   = CASE WHEN excluded.cwd   != '' THEN excluded.cwd   ELSE chat_sessions.cwd   END,
+				title = CASE WHEN excluded.title != '' THEN excluded.title ELSE chat_sessions.title END
+			WHERE chat_sessions.username = excluded.username`,
 		id, username, strings.TrimSpace(req.Title), req.Cwd, now, now); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "failed to save session")
 		return
+	}
+	owned, _, err = s.chatSessionOwned(username, id)
+	if err != nil || !owned {
+		writeJSONError(w, http.StatusConflict, "session id belongs to another user")
+		return
+	}
+	if req.Messages != nil {
+		if err := s.seedChatMessages(username, id, *req.Messages); err != nil {
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
 	cs, err := s.getChatSession(username, id)
@@ -263,8 +597,20 @@ func (s *server) handleChatSessionDelete(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if s.db != nil {
-		if _, err := s.db.Exec(`DELETE FROM chat_sessions WHERE id = ? AND username = ?`,
-			sid, currentUser(r)); err != nil {
+		username := currentUser(r)
+		tx, err := s.db.Begin()
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to delete session")
+			return
+		}
+		defer tx.Rollback()
+		if _, err = tx.Exec(`DELETE FROM chat_session_messages WHERE session_id = ? AND username = ?`, sid, username); err == nil {
+			_, err = tx.Exec(`DELETE FROM chat_session_runtime WHERE session_id = ? AND username = ?`, sid, username)
+		}
+		if err == nil {
+			_, err = tx.Exec(`DELETE FROM chat_sessions WHERE id = ? AND username = ?`, sid, username)
+		}
+		if err != nil || tx.Commit() != nil {
 			writeJSONError(w, http.StatusInternalServerError, "failed to delete session")
 			return
 		}

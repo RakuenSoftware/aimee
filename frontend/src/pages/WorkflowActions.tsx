@@ -10,7 +10,7 @@ interface Item {
   workflow: string;
   version: string;
   stage: string;
-  state: string; // active | accepted | rejected | abandoned
+  state: string; // active | accepted | rejected | stopped | abandoned
   mode: string;
   pause_reason: string;
   repo: string;
@@ -124,18 +124,27 @@ async function sendAction<T>(url: string, method: "POST" | "DELETE"): Promise<{ 
   return { status: r.status, data };
 }
 
-const isTerminal = (s: string) => s === "accepted" || s === "rejected" || s === "abandoned";
+export const isTerminal = (s: string) =>
+  s === "accepted" || s === "rejected" || s === "stopped" || s === "abandoned";
+
+// The Go WFE API uses human_gate/manual while the retained C workflow surface
+// uses pending_human/operator_paused. The runtime UI fronts either engine, so
+// control visibility must understand both wire-compatible spellings.
+export const isHumanGatePause = (reason: string) => reason === "human_gate" || reason === "pending_human";
 
 // A human status label + tone from the row's state + pause_reason + stage. Derived
 // strictly from the documented enums — no invented "drafting" state.
 function statusOf(it: Item): { label: string; variant: BadgeVariant } {
   if (it.state === "accepted") return { label: "merged (accepted)", variant: "success" };
   if (it.state === "rejected") return { label: "rejected", variant: "error" };
+  if (it.state === "stopped") return { label: "stopped", variant: "neutral" };
   if (it.state === "abandoned") return { label: "abandoned", variant: "neutral" };
   // active:
   switch (it.pause_reason) {
+    case "manual":
     case "operator_paused":
       return { label: `paused · ${it.stage}`, variant: "warning" };
+    case "human_gate":
     case "pending_human":
       return { label: `awaiting approval · ${it.stage}`, variant: "warning" };
     case "ci_pending":
@@ -424,12 +433,12 @@ export default function WorkflowActions() {
     [selId, acting, refreshList, openProposal],
   );
 
-  const canDecide = !!detail && detail.pause_reason === "pending_human";
+  const canDecide = !!detail && isHumanGatePause(detail.pause_reason);
   // Which lifecycle controls apply to the current item.
   const term = !!detail && isTerminal(detail.state);
   const paused = !!detail && !term && !!detail.pause_reason;
   const canPause = !!detail && !term && !detail.pause_reason;
-  const canResume = paused && detail!.pause_reason !== "pending_human";
+  const canResume = paused && !isHumanGatePause(detail!.pause_reason);
   const canStop = !!detail && !term;
 
   return (

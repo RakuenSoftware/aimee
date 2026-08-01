@@ -62,8 +62,7 @@ static int skill_review_spawn_delegate(void *ctx, const char *role, const char *
  * config-free (mirrors coord_delegates_enabled in server_coord_dispatcher.c). */
 static int skill_review_delegates_enabled(void)
 {
-   config_t cfg;
-   int tri = (config_load(&cfg) == 0) ? cfg.module_delegates : -1;
+   int tri = config_present() ? config_module_delegates() : -1;
    return config_module_enabled(tri, gw_orch_delegates_enabled());
 }
 

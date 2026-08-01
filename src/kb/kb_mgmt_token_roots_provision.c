@@ -851,7 +851,7 @@ static kb_mgmt_roots_result_t publication_step(const kb_mgmt_roots_config_t *c,
    size_t att_len = 0;
    uint64_t live = 0;
    kb_mgmt_roots_result_t rc = hwm_read(c->publication_custody_key_id, &live, att, &att_len);
-   if (rc != KB_MGMT_ROOTS_FRESH || live != 1)
+   if (rc != KB_MGMT_ROOTS_FRESH || live < 1 || live > 2)
    {
       if (rc == KB_MGMT_ROOTS_FRESH)
          rc = KB_MGMT_ROOTS_INTEGRITY;
@@ -864,13 +864,18 @@ static kb_mgmt_roots_result_t publication_step(const kb_mgmt_roots_config_t *c,
           strcmp(p.helper, c->publication_helper) ||
           strcmp(p.verifier_domain, c->publication_verifier_domain) ||
           CRYPTO_memcmp(p.identity_digest, c->publication_identity_digest, 32) ||
-          p.hwm1_attestation_len != att_len || CRYPTO_memcmp(p.hwm1_attestation, att, att_len) ||
-          vault_hwm_verify(p.custody_key_id, 1, p.hwm1_attestation, p.hwm1_attestation_len))
+          !p.hwm1_attestation_len || p.hwm1_attestation_len > sizeof(p.hwm1_attestation) ||
+          vault_hwm_verify(p.custody_key_id, 1, p.hwm1_attestation, p.hwm1_attestation_len) ||
+          (live == 1 &&
+           (p.hwm1_attestation_len != att_len || CRYPTO_memcmp(p.hwm1_attestation, att, att_len))))
          rc = KB_MGMT_ROOTS_INTEGRITY;
    }
    else
    {
-      if (require_bound)
+      /* A bound root may legitimately be at HWM 2 after the publisher's
+       * irreversible CAS. An unbound root must still begin at 1: accepting 2
+       * there would attach a database record after an unaccounted private use. */
+      if (require_bound || live != 1)
       {
          rc = KB_MGMT_ROOTS_INTEGRITY;
          goto done;

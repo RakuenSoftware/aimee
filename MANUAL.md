@@ -20,7 +20,8 @@ operations. Exact command and config tables are generated from source:
 - `aimee-wfe` owns workflow definitions and lifecycle state.
 - `aimee-kb` owns durable memory, documents, the code graph, retrieval, curation, PostgreSQL, and
   pgvector.
-- `aimee-llm` serves embedding, reranking, and synthesis on CPU or GPU.
+- The KB embeds in-process from weights baked into its image. Synthesis is external-only: point
+  `AIMEE_LLM_URL` at an endpoint you run.
 - `aimee-runtime-web` serves the browser workspace.
 
 The server and KB each run a bounded shared-memory event bus. Governed actions, memory mutations,
@@ -67,7 +68,7 @@ aimee memory read
 
 The KB stores typed records with source, scope, confidence, freshness, and links to artifacts.
 Curation joins duplicates, records contradictions, and lets stale evidence decay. Recall mixes
-lexical, dense, graph, and recency signals, then may rerank or synthesize. A low-evidence query can
+lexical, dense, graph, and recency signals, then may synthesize. A low-evidence query can
 abstain instead of inventing an answer.
 
 Working memory is session scratch:
@@ -299,9 +300,11 @@ copied table in this manual.
 `aimee remote set` stores the target in `~/.config/aimee/remote.conf`. That file is private to the
 user and opened without following symlinks.
 
-The shared bearer authorizes reads. A remote write needs a short-lived KB-signed identity token and
-a grant for the exact `(server_id, team_id, subject)`. `data` covers memory, docs, and index
-ingestion. `full` also covers agent, delegate, runner, and workspace control.
+The shared bearer authorizes reads. The first wizard user's explicit `full` grant is bound to the
+mTLS certificate enrolled by `aimee remote set`; the bearer alone cannot exercise it. Additional
+users need a short-lived KB-signed identity token and a grant for the exact
+`(server_id, team_id, subject)`. `data` covers memory, docs, and index ingestion. `full` also covers
+agent, delegate, runner, and workspace control.
 
 The server must know `AIMEE_SERVER_ID`, `AIMEE_SERVER_TEAM_ID`, and the root-owned
 `AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE`. Grant changes are local-socket only:

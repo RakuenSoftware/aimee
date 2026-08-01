@@ -51,16 +51,16 @@ static cJSON *rewrite_messages(const char *system_prompt, const char *query)
    return msgs;
 }
 
-char *memory_rewrite_llm_inproc(const config_t *cfg, const char *system_prompt, const char *query)
+char *memory_rewrite_llm_inproc(const char *system_prompt, const char *query)
 {
-   provider_def_t def;
-   memset(&def, 0, sizeof(def));
+   provider_def_owned_t prov;
    /* The rewrite shares the typed-fact extractor's light tier. No provider
     * configured -> no in-process rewrite (caller falls back). */
-   if (!cfg || !kb_curator_provider_for_stage(cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, &def))
+   if (!kb_curator_provider_for_stage(KB_CURATOR_STAGE_EXTRACT_DOCS, &prov))
       return NULL;
-   if (def.max_tokens <= 0 || def.max_tokens > MEMORY_REWRITE_MAX_TOKENS)
-      def.max_tokens = MEMORY_REWRITE_MAX_TOKENS;
+   provider_def_t *def = &prov.def;
+   if (def->max_tokens <= 0 || def->max_tokens > MEMORY_REWRITE_MAX_TOKENS)
+      def->max_tokens = MEMORY_REWRITE_MAX_TOKENS;
 
    cJSON *msgs = rewrite_messages(system_prompt, query);
    if (!msgs)
@@ -69,7 +69,7 @@ char *memory_rewrite_llm_inproc(const config_t *cfg, const char *system_prompt, 
    provider_completion_t out;
    memset(&out, 0, sizeof(out));
    char err[256] = "";
-   int rc = provider_client_complete(&def, msgs, NULL, &out, err, sizeof(err));
+   int rc = provider_client_complete(def, msgs, NULL, &out, err, sizeof(err));
    cJSON_Delete(msgs);
    if (rc != 0)
    {

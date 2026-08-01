@@ -84,10 +84,8 @@ int policy_check_tool(const char *tool_name, const char *side_effect, const char
 {
    if (computer_use_is_tool_name(tool_name))
    {
-      config_t cfg;
-      config_load(&cfg);
       computer_use_policy_t cu_policy;
-      computer_use_policy_from_config(&cfg, &cu_policy);
+      computer_use_policy_from_config(&cu_policy);
       computer_use_decision_t decision;
       char cu_reason[256] = "";
       if (computer_use_classify(&cu_policy, tool_name, args_json, &decision, cu_reason,

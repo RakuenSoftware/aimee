@@ -9,10 +9,17 @@
 
 #define KB_CLIENT_ERR_POOL_EXHAUSTED (-2)
 
-/* 1 when AIMEE_KB_CONN holds an aimee:// connection string (a remote kb), else 0.
+/* 1 when Vault holds an AIMEE_KB_CONN aimee:// connection string (a remote kb), else 0.
  * The string supplies the stable endpoint + CA pin after its one-time token has
  * established an owner-only identity under AIMEE_HOME. */
 int kb_client_mtls_configured(void);
+
+/* Read the stable server/team binding from a wizard-installed version-2
+ * identity. Explicit AIMEE_SERVER_ID / AIMEE_SERVER_TEAM_ID settings remain
+ * authoritative at their call sites; these accessors are the managed fallback.
+ * Returns 1 when a complete ready identity was loaded, 0 when none is present. */
+int kb_client_mtls_managed_metadata(char *server_id_out, size_t server_id_cap,
+                                    long long *team_id_out);
 
 /* Perform a /v1 request to the configured remote kb over mTLS. Enrolls once on
  * first use (TOFU-pin the CA, redeem the token for a client cert). Returns the
@@ -20,6 +27,14 @@ int kb_client_mtls_configured(void);
  * method is "GET"/"POST"; body is NULL for GET. */
 char *kb_client_mtls_request(const char *method, const char *path, const char *body,
                              int *status_out);
+/* As above, but propagate the caller's operation timeout to the mTLS socket.
+ * This prevents the transport's 30-second default from truncating builds whose
+ * public operation contract allows several minutes. */
+char *kb_client_mtls_request_timeout(const char *method, const char *path, const char *body,
+                                     int timeout_ms, int *status_out);
+char *kb_client_mtls_request_timeout_with_type(const char *method, const char *path,
+                                               const char *body, const char *content_type,
+                                               int timeout_ms, int *status_out);
 
 /* Fetch the exact bounded P5-C2c signed envelope.  Only an authenticated 200
  * response on the fixed route is accepted; output is cleared on every error. */

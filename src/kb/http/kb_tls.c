@@ -464,6 +464,20 @@ kb_tls_client_conn_t *kb_tls_client_conn_open_session(const char *host, int port
    return client_conn_open_owned_ctx(host, port, ctx, session);
 }
 
+int kb_tls_client_conn_set_timeout(kb_tls_client_conn_t *conn, int timeout_ms)
+{
+   if (!conn || conn->fd < 0 || timeout_ms <= 0)
+      return -1;
+   struct timeval timeout = {
+       .tv_sec = timeout_ms / 1000,
+       .tv_usec = (timeout_ms % 1000) * 1000,
+   };
+   if (setsockopt(conn->fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) != 0 ||
+       setsockopt(conn->fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) != 0)
+      return -1;
+   return 0;
+}
+
 int kb_tls_client_conn_session_reused(const kb_tls_client_conn_t *conn)
 {
    return conn && conn->ssl ? SSL_session_reused(conn->ssl) : 0;
@@ -474,9 +488,11 @@ SSL_SESSION *kb_tls_client_conn_get1_session(const kb_tls_client_conn_t *conn)
    return conn && conn->ssl ? SSL_get1_session(conn->ssl) : NULL;
 }
 
-int kb_tls_client_conn_request(kb_tls_client_conn_t *conn, const char *method, const char *path,
-                               const char *body, const char *authorization, int close_after,
-                               char *resp_out, size_t resp_cap, int *status_out, int *reusable_out)
+int kb_tls_client_conn_request_with_type(kb_tls_client_conn_t *conn, const char *method,
+                                         const char *path, const char *body,
+                                         const char *authorization, const char *content_type,
+                                         int close_after, char *resp_out, size_t resp_cap,
+                                         int *status_out, int *reusable_out)
 {
    if (reusable_out)
       *reusable_out = 0;
@@ -487,8 +503,12 @@ int kb_tls_client_conn_request(kb_tls_client_conn_t *conn, const char *method, c
    int bodyless = strcmp(method, "GET") == 0 || strcmp(method, "HEAD") == 0;
    if (bodyless && blen != 0)
       return -1;
+   const char *type_header =
+       content_type && content_type[0] ? content_type : "Content-Type: application/json";
+   if (strchr(type_header, '\r') || strchr(type_header, '\n'))
+      return -1;
    size_t cap = strlen(method) + strlen(path) + strlen(conn->host) + blen +
-                (authorization ? strlen(authorization) : 0) + 192;
+                (authorization ? strlen(authorization) : 0) + strlen(type_header) + 192;
    char *req = malloc(cap);
    if (!req)
       return -1;
@@ -496,10 +516,10 @@ int kb_tls_client_conn_request(kb_tls_client_conn_t *conn, const char *method, c
                                 method, path, conn->host, authorization ? authorization : "",
                                 close_after ? "close" : "keep-alive")
                      : snprintf(req, cap,
-                                "%s %s HTTP/1.1\r\nHost: %s\r\n%sContent-Type: application/json\r\n"
+                                "%s %s HTTP/1.1\r\nHost: %s\r\n%s%s\r\n"
                                 "Content-Length: %zu\r\nConnection: %s\r\n\r\n%s",
-                                method, path, conn->host, authorization ? authorization : "", blen,
-                                close_after ? "close" : "keep-alive", b);
+                                method, path, conn->host, authorization ? authorization : "",
+                                type_header, blen, close_after ? "close" : "keep-alive", b);
    int rc =
        (rn > 0 && (size_t)rn < cap && ssl_write_all(conn->ssl, req, (size_t)rn) == 0)
            ? read_content_length_response(conn->ssl, resp_out, resp_cap, status_out, reusable_out)
@@ -508,6 +528,15 @@ int kb_tls_client_conn_request(kb_tls_client_conn_t *conn, const char *method, c
    if (close_after && reusable_out)
       *reusable_out = 0;
    return rc;
+}
+
+int kb_tls_client_conn_request(kb_tls_client_conn_t *conn, const char *method, const char *path,
+                               const char *body, const char *authorization, int close_after,
+                               char *resp_out, size_t resp_cap, int *status_out, int *reusable_out)
+{
+   return kb_tls_client_conn_request_with_type(conn, method, path, body, authorization, NULL,
+                                               close_after, resp_out, resp_cap, status_out,
+                                               reusable_out);
 }
 
 void kb_tls_client_conn_close(kb_tls_client_conn_t *conn)

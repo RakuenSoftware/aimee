@@ -41,8 +41,8 @@ static int team_is_enrolled(const server_write_tier_config_t *config, int64_t te
    return 0;
 }
 
-/* A server with no configured team authorizes nobody. That is a deployment
- * error, not a token error, and the two must not report identically. */
+/* A server with no configured team authorizes no KB-issued identity token.
+ * That is a deployment error, not a token error, and the two must not report identically. */
 static int server_has_no_team(const server_write_tier_config_t *config)
 {
    return !config->enrolled_teams || config->enrolled_team_count == 0;

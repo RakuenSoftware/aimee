@@ -54,12 +54,28 @@ static void db2_maybe_clear_sqlite_cache(sqlite3 *db)
 static void *g_conn = NULL;
 static char g_pg_url[512] = "";
 static pthread_mutex_t g_init_lock = PTHREAD_MUTEX_INITIALIZER;
-/* Embedding dimension for the DB2 halfvec columns (one embedder per deployment:
- * 1024 for pplx-0.6b, 2560 for pplx-4b). Set from the loaded config by the
- * server / aimee-kb startup via db2_set_embedding_dim() before db2_init(), so
- * this layer needs no config dependency. 0 = unset -> db2_embedding_dim()
- * reports the 1024 default (the default embedder is pplx-0.6b). */
+/* Embedding dimension for the DB2 halfvec columns (one embedder per deployment).
+ * Set from the loaded config by the server / aimee-kb startup via
+ * db2_set_embedding_dim() before db2_init(), so this layer needs no config
+ * dependency. 0 = unset, which lets the §2a precedence (pinned > recorded >
+ * probed > default) fall through to the injected default below. A deployment that
+ * predates an embedder change has its old dim RECORDED in
+ * kb_meta.schema_embedding_dim, and the recorded value outranks the default, so an
+ * existing corpus keeps working and is migrated deliberately via `aimee kb reembed`. */
 static int g_embed_dim = 0;
+
+/* The default width, INJECTED from config (config_embedding_dim_default) at the
+ * same startup site that sets g_embed_dim. This layer deliberately holds no
+ * literal of its own: the width is declared once, in config, and a copy here
+ * could disagree with the embedder that is actually running. 0 = never injected,
+ * which db2_embedding_dim() reports as 0 so callers fail loudly instead of
+ * sizing columns from a guess. */
+static int g_embed_dim_default = 0;
+
+void db2_set_embedding_dim_default(int dim)
+{
+   g_embed_dim_default = dim > 0 ? dim : 0;
+}
 
 /* §2a: whether the operator pinned the dim. When 0 (default) and nothing was
  * pinned, db2_init prefers a recorded kb_meta.schema_embedding_dim over the
@@ -87,7 +103,7 @@ void db2_init_unlock(void)
 
 int db2_embedding_dim(void)
 {
-   return g_embed_dim > 0 ? g_embed_dim : 1024;
+   return g_embed_dim > 0 ? g_embed_dim : g_embed_dim_default;
 }
 
 void db2_set_embedding_dim_pinned(int pinned)
@@ -135,8 +151,8 @@ int db2_probe_embedder_dim(int budget_ms, int *out)
  * insufficient: two different models can share a dim (pplx-embed and the default
  * Qwen3-Embedding-0.6B are BOTH 1024-d), so a same-dim swap would silently mix
  * incompatible vector spaces. These globals carry the configured embedder model
- * identity (repo@sha), the reranker identity + scoring contract, and the
- * compat-list of admitted transitions, set from config before db2_init like the
+ * identity (repo@sha) and the compat-list of admitted transitions, set from
+ * config before db2_init like the
  * dim above. INVARIANT: set at exactly the sites that call db2_set_embedding_dim()
  * — the serving config-load paths (cmd_core bootstrap_db2, kb_main, cmd_doctor);
  * the connectivity-probe path (bootstrap_db2_try_url) and tests deliberately set
@@ -145,8 +161,15 @@ int db2_probe_embedder_dim(int budget_ms, int *out)
  * has not yet adopted the unified container (the live torch embedder reports no
  * identity) is unaffected. */
 static char g_embedder_model_id[160] = "";
-static char g_reranker_model_id[160] = "";
-static char g_reranker_contract[96] = "";
+/* The serving endpoint's vector-space identity, probed (not configured) — see
+ * db2_set_embedder_serving_id. Empty leaves the guard a no-op. */
+static char g_embedder_serving_id[160] = "";
+static db2_embedder_serving_probe_fn g_embedder_serving_probe = NULL;
+
+void db2_set_embedder_serving_probe(db2_embedder_serving_probe_fn fn)
+{
+   g_embedder_serving_probe = fn;
+}
 static char g_embedding_compat[1024] = ""; /* CSV of "old_id->new_id" transitions */
 
 void db2_set_embedder_model_id(const char *model_id)
@@ -159,20 +182,15 @@ const char *db2_embedder_model_id(void)
    return g_embedder_model_id;
 }
 
-void db2_set_reranker_identity(const char *model_id, const char *contract)
+void db2_set_embedder_serving_id(const char *serving_id)
 {
-   snprintf(g_reranker_model_id, sizeof(g_reranker_model_id), "%s", model_id ? model_id : "");
-   snprintf(g_reranker_contract, sizeof(g_reranker_contract), "%s", contract ? contract : "");
+   snprintf(g_embedder_serving_id, sizeof(g_embedder_serving_id), "%s",
+            serving_id ? serving_id : "");
 }
 
-const char *db2_reranker_model_id(void)
+const char *db2_embedder_serving_id(void)
 {
-   return g_reranker_model_id;
-}
-
-const char *db2_reranker_contract(void)
-{
-   return g_reranker_contract;
+   return g_embedder_serving_id;
 }
 
 void db2_set_embedding_compat(const char *compat_csv)
@@ -303,6 +321,10 @@ typedef struct
 
 static int g_pool_size = 16; /* set via db2_set_pool_size before db2_init */
 static __thread int g_lease_depth = 0;
+/* Call site of the OUTERMOST db2_lease_begin on this thread, so a lease held
+ * past the pool's ceiling can be reported as the code that took it. Always a
+ * string literal from the macro in db2.h; never freed. */
+static __thread const char *g_lease_site = NULL;
 
 void db2_set_pool_size(int size)
 {
@@ -381,10 +403,11 @@ int db2_is_ephemeral(void)
    return v;
 }
 
-static int db2_query_flag(const char *sql, const char *param_name, const char *param_value)
+static int db2_query_flag(void *conn, const char *sql, const char *param_name,
+                          const char *param_value)
 {
    char errbuf[256] = "";
-   aimee_pg_stmt_t *stmt = aimee_pg_prepare(g_conn, sql, errbuf, sizeof(errbuf));
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(conn, sql, errbuf, sizeof(errbuf));
    if (!stmt)
       return -1;
 
@@ -507,6 +530,8 @@ static void *db2_thread_acquire(void)
    {
       conn = db2_pool_lease(0); /* bounded; NULL on exhaustion */
       pooled = (conn != NULL);
+      if (conn && g_lease_site)
+         db2_pool_note_lease_site(conn, g_lease_site);
    }
    if (!conn)
    {
@@ -549,7 +574,7 @@ static void *db2_thread_acquire(void)
    return conn;
 }
 
-void *db2_conn(void)
+void *db2_conn_at(const char *site)
 {
    pthread_once(&g_thread_conn_key_once, thread_conn_key_init);
    db2_thread_lease_t *L = (db2_thread_lease_t *)pthread_getspecific(g_thread_conn_key);
@@ -558,12 +583,26 @@ void *db2_conn(void)
    /* The db2_init() owner thread uses its dedicated g_conn directly. */
    if (!g_init_thread_set || pthread_equal(pthread_self(), g_init_thread))
       return g_conn;
+   /* Attribute a LAZY acquire (depth 0, outside any db2_lease_begin scope). That
+    * is the shape that leaks: a long-lived worker takes a connection here and
+    * never calls db2_lease_release_idle, pinning a pool member for its lifetime.
+    * Only db2_lease_begin used to record a site, so precisely this case reached
+    * the reaper "unattributed". Set only when no scope owns the thread, so an
+    * explicit begin keeps its own attribution. */
+   if (!g_lease_site && site)
+      g_lease_site = site;
    /* Every other thread leases from the pool (lazily; returned on thread exit
     * by the destructor, or sooner via db2_lease_end at a job boundary). */
    return db2_thread_acquire();
 }
 
-void db2_lease_begin(void)
+/* Kept for any translation unit that does not see the db2_conn() macro. */
+void *(db2_conn)(void)
+{
+   return db2_conn_at(NULL);
+}
+
+void db2_lease_begin_at(const char *site)
 {
    pthread_once(&g_thread_conn_key_once, thread_conn_key_init);
    /* The init thread is never pooled. */
@@ -571,6 +610,9 @@ void db2_lease_begin(void)
       return;
    if (g_lease_depth++ == 0)
    {
+      /* Outermost scope owns the attribution: a nested begin is served by the
+       * same connection, so the first caller is the one that must release it. */
+      g_lease_site = site;
       db2_thread_lease_t *L = (db2_thread_lease_t *)pthread_getspecific(g_thread_conn_key);
       if (!L || !L->conn)
          (void)db2_thread_acquire(); /* eager lease for the unit of work */
@@ -593,6 +635,7 @@ void db2_lease_end(void)
          L->conn = NULL;
          L->pooled = 0;
       }
+      g_lease_site = NULL;
    }
 }
 
@@ -618,6 +661,7 @@ void db2_lease_release_idle(void)
       L->conn = NULL;
       L->pooled = 0;
    }
+   g_lease_site = NULL;
 }
 
 void *db2_thread_conn_open(char *errbuf, size_t errlen)
@@ -899,14 +943,29 @@ int db2_init(const char *libpq_url)
    /* unified-llm-container §2: model-identity drift guard, applied here (where the
     * configured identity globals live) rather than in the lower db_schema layer.
     * Record/check the EMBEDDER model identity alongside the dim — closing the
-    * same-dim different-model footgun (two models can share a dim) — and record
-    * the reranker identity. Both no-op when the identity is unset (the legacy
-    * torch embedder reports none), so existing deployments are unaffected; they
-    * activate when the unified container supplies the identity via the setters. */
+    * same-dim different-model footgun (two models can share a dim). A no-op when
+    * the identity is unset (the legacy torch embedder reports none), so existing
+    * deployments are unaffected; it activates when the unified container supplies
+    * the identity via the setter. */
+   /* Ask for the serving identity here, not at startup: the embedder runs beside the kb
+    * and is not up yet when the kb boots. An unreachable probe leaves the identity empty,
+    * which makes the guard a no-op for this start rather than blocking the boot. */
+   if (!g_embedder_serving_id[0] && g_embedder_serving_probe)
+   {
+      char sid[160] = "";
+      char perr[192] = "";
+      if (g_embedder_serving_probe(sid, sizeof(sid), perr, sizeof(perr)) == 0)
+         db2_set_embedder_serving_id(sid);
+      else
+         fprintf(stderr,
+                 "aimee: embedder serving-identity probe failed (%s); vector-space "
+                 "guard inactive for this start\n",
+                 perr[0] ? perr : "unreachable");
+   }
    if (db2_embedding_model_record_or_check(conn, g_embedder_model_id, g_embedding_compat, errbuf,
                                            sizeof(errbuf)) != 0 ||
-       db2_reranker_model_record(conn, g_reranker_model_id, g_reranker_contract, errbuf,
-                                 sizeof(errbuf)) != 0)
+       db2_embedder_serving_record_or_check(conn, g_embedder_serving_id, errbuf, sizeof(errbuf)) !=
+           0)
    {
       fprintf(stderr, "aimee: db2_init: model-identity guard failed: %s\n", errbuf);
       aimee_pg_close(conn);
@@ -1005,13 +1064,19 @@ int db2_health_probe(int *schema_ok, int *have_pg_trgm)
    if (have_pg_trgm)
       *have_pg_trgm = 0;
 
-   if (!g_conn)
+   /* Health endpoints run on worker threads while the init thread performs
+    * periodic maintenance. Never bypass db2_conn() here: sharing g_conn with
+    * the checkpoint transaction lets concurrent libpq calls exchange results
+    * and can leave the owner connection transaction-aborted. */
+   void *conn = db2_conn();
+   if (!conn)
       return -1;
 
-   if (aimee_pg_exec(g_conn, "SELECT 1", errbuf, sizeof(errbuf)) != 0)
+   if (aimee_pg_exec(conn, "SELECT 1", errbuf, sizeof(errbuf)) != 0)
       return -1;
 
-   int schema_present = db2_query_flag("SELECT 1 FROM information_schema.tables "
+   int schema_present = db2_query_flag(conn,
+                                       "SELECT 1 FROM information_schema.tables "
                                        "WHERE table_schema = current_schema() AND table_name = :t",
                                        "t", "memories");
    if (schema_present < 0)
@@ -1029,7 +1094,7 @@ int db2_health_probe(int *schema_ok, int *have_pg_trgm)
       ext_present = 1;
    else
       ext_present =
-          db2_query_flag("SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm'", NULL, NULL);
+          db2_query_flag(conn, "SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm'", NULL, NULL);
    if (ext_present < 0)
       return -1;
    if (have_pg_trgm)
@@ -1042,12 +1107,15 @@ int db2_kb_health_probe(int *kb_tables_ok)
 {
    if (kb_tables_ok)
       *kb_tables_ok = 0;
-   if (!g_conn)
+   void *conn = db2_conn();
+   if (!conn)
       return -1;
-   int docs_ok = db2_query_flag("SELECT 1 FROM information_schema.tables "
+   int docs_ok = db2_query_flag(conn,
+                                "SELECT 1 FROM information_schema.tables "
                                 "WHERE table_schema = current_schema() AND table_name = :t",
                                 "t", "kb_documents");
-   int jobs_ok = db2_query_flag("SELECT 1 FROM information_schema.tables "
+   int jobs_ok = db2_query_flag(conn,
+                                "SELECT 1 FROM information_schema.tables "
                                 "WHERE table_schema = current_schema() AND table_name = :t",
                                 "t", "kb_async_jobs");
    if (docs_ok < 0 || jobs_ok < 0)
@@ -1073,7 +1141,8 @@ int db2_pg_stat_summary(int *active_conns, int *max_conns, int *is_replica,
    if (replica_lag_bytes)
       *replica_lag_bytes = -1;
 
-   if (!g_conn)
+   void *conn = db2_conn();
+   if (!conn)
       return -1;
 
    if (aimee_pg_is_shim())
@@ -1084,7 +1153,7 @@ int db2_pg_stat_summary(int *active_conns, int *max_conns, int *is_replica,
 
    if (active_conns)
    {
-      st = aimee_pg_prepare(g_conn,
+      st = aimee_pg_prepare(conn,
                             "SELECT count(*)::int FROM pg_stat_activity "
                             "WHERE datname = current_database()",
                             errbuf, sizeof(errbuf));
@@ -1098,7 +1167,7 @@ int db2_pg_stat_summary(int *active_conns, int *max_conns, int *is_replica,
 
    if (max_conns)
    {
-      st = aimee_pg_prepare(g_conn, "SELECT current_setting('max_connections')::int", errbuf,
+      st = aimee_pg_prepare(conn, "SELECT current_setting('max_connections')::int", errbuf,
                             sizeof(errbuf));
       if (st)
       {
@@ -1110,7 +1179,7 @@ int db2_pg_stat_summary(int *active_conns, int *max_conns, int *is_replica,
 
    if (is_replica)
    {
-      st = aimee_pg_prepare(g_conn, "SELECT pg_is_in_recovery()::int", errbuf, sizeof(errbuf));
+      st = aimee_pg_prepare(conn, "SELECT pg_is_in_recovery()::int", errbuf, sizeof(errbuf));
       if (st)
       {
          if (aimee_pg_step(st, errbuf, sizeof(errbuf)) == AIMEE_PG_ROW)
@@ -1124,7 +1193,7 @@ int db2_pg_stat_summary(int *active_conns, int *max_conns, int *is_replica,
    if (replica_lag_bytes && is_replica && *is_replica == 1)
    {
       st = aimee_pg_prepare(
-          g_conn,
+          conn,
           "SELECT COALESCE("
           "  pg_wal_lsn_diff(pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn()), 0)::bigint",
           errbuf, sizeof(errbuf));
@@ -1162,8 +1231,8 @@ void db2_shutdown(void)
    g_embedder_probe = NULL;
    g_dim_probe_budget_ms = 120000;
    g_embedder_model_id[0] = '\0';
-   g_reranker_model_id[0] = '\0';
-   g_reranker_contract[0] = '\0';
+   g_embedder_serving_id[0] = '\0';
+   g_embedder_serving_probe = NULL;
    g_embedding_compat[0] = '\0';
    pthread_mutex_unlock(&g_init_lock);
 }

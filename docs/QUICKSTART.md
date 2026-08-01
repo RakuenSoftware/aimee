@@ -5,44 +5,195 @@ Run the services on one machine. Install only the thin client where you write co
 ## 1. Start the managed server
 
 You need Docker with Compose v2. The managed server mounts the Docker socket so its browser wizard
-can start the KB and inference containers.
+can start the KB container.
 
 ```bash
 git clone https://github.com/RakuenSoftware/aimee.git
 cd aimee
 docker compose -f compose.server-managed.yaml up -d
+docker compose -f compose.server-managed.yaml logs aimee-server
 ```
 
-Open <https://localhost:8443> and sign in with:
+The server generates a dashboard login on first boot and prints it once, in that log:
 
 ```text
-user:     aimee
-password: aimee-local-dev
+[webchat] FIRST-BOOT DASHBOARD LOGIN (shown once, copy it now)
+[webchat]     username: aimee-0a901de6e2c3
+[webchat]     password: <64 hex characters>
 ```
 
-Run the setup wizard. Choose the primary agent, CPU or GPU inference, git accounts, and workspaces.
-The final **Deploy** step starts:
+Copy it before the log rotates. Only the username is kept on disk afterwards, so the password cannot
+be read back; if you lose it, reset that account's password inside the container or start again from
+an empty volume. To choose the credential yourself instead, seal it before the first `up`. Nothing
+is then generated and nothing is printed:
 
-- `aimee-kb`, including private PostgreSQL 18, pgvector, and pgvectorscale;
-- `aimee-llm`, with the selected inference tier.
+```bash
+export AIMEE_WEBCHAT_USER=admin
+read -rsp 'Initial webchat password: ' AIMEE_WEBCHAT_PASSWORD && echo
+export AIMEE_WEBCHAT_PASSWORD
+scripts/aimee-compose-vault-bootstrap.sh -f compose.server-managed.yaml server
+unset AIMEE_WEBCHAT_PASSWORD
+docker compose -f compose.server-managed.yaml up -d
+```
 
-Change `AIMEE_WEBCHAT_USER` and `AIMEE_WEBCHAT_PASSWORD` before exposing this host. The defaults are
-for local setup only.
+Any name works here, including one that is also a group in the image. First boot creates the account
+with `aimee-webchat` as its primary group, so `useradd` never tries to make a group of its own. The
+wizard's account step is stricter and refuses a name that is already a group
+([#2209](https://github.com/RakuenSoftware/aimee/issues/2209)), so the two disagree until that is
+settled. Sealing the pair here is the path that accepts either.
+
+Run the bootstrap script; do not simply export the variables and `up`. `compose.server-managed.yaml`
+deliberately keeps these two out of the server's `environment:` block, because anything listed there
+persists in the container's `Config.Env` for the life of the deployment and is readable from
+`docker inspect`. The script streams them into Vault through a one-shot container instead, so
+`docker compose up` on its own never sees them and would leave you with a generated login.
+
+Those variables are first-boot transport, not runtime configuration. On first boot the entrypoint
+reads that sealed pair and provisions it as a real local PAM account, then the appliance
+authenticates against PAM from the first login onward. There is no parallel credential store, and
+no password, verifier, session bearer, or TLS private key is written to the data volume or
+container logs.
+
+Open <https://localhost:8443> and sign in.
+
+![The aimee sign-in page](images/login.png)
+
+Signing in lands you in the chat view with **Set up this instance** already open at step 1 of 6. It
+is a dialog, not a separate page. Closing it does not lose your place: the **Setup** button in the
+header reopens it and shows how many steps are left.
+
+### Step 1: replace the temporary login
+
+![Step 1 of the setup wizard, secure your account](images/wizard-1-account.png)
+
+The generated login is temporary. This step creates the account you will keep, as a real local PAM
+account, and removes the plaintext of the temporary one. A deployment that sealed its own
+`AIMEE_WEBCHAT_USER` pair before first boot skips this step.
+
+Pick a username that is not already a group on the host. The image ships the usual Unix groups, so
+`operator`, `backup`, `staff`, `users`, `news`, `mail`, `proxy`, `adm` and `aimee` will fail here
+with a `useradd` error rather than a readable message
+([#2209](https://github.com/RakuenSoftware/aimee/issues/2209)).
+
+### Step 2: choose the primary provider
+
+![Step 2 of the setup wizard, primary provider](images/wizard-2-provider.png)
+
+An API key for Anthropic or OpenAI, or a Claude or Codex subscription seat signed in through the
+browser. The key is sealed into the server vault and never written to the data volume. You can
+change the primary later on the Agents tab.
+
+### Step 3: choose the knowledge base
+
+![Step 3 of the setup wizard, knowledge base](images/wizard-3-knowledge-base.png)
+
+Deploy one locally, or point at an existing `aimee-kb`. A local knowledge base is the default and
+needs nothing else installed.
+
+The remaining steps cover the model roles, optional git host connections, and workspaces. Nothing is
+placed on a host: the embedder runs inside the knowledge base, and synthesis is an endpoint you run
+or nothing at all. Steps 5 and 6 can both be skipped and set later.
+
+The final **Deploy** step starts `aimee-kb`, including private PostgreSQL 18, pgvector, and
+pgvectorscale. There is no inference container: the KB embeds in-process from weights baked into its
+image, and synthesis is external-only (see [Choosing an embedder](#choosing-an-embedder)).
+
+For a local managed KB, Deploy also runs two explicit one-shot jobs before it
+reports success:
+
+- an isolated authority bootstrap provisions the management-token and manifest
+  roots, publishes the signed generation-1 JWKS, and writes only the public
+  trust bundle into a root-owned volume mounted read-only by the server; and
+- the KB enrolls distinct server client/management certificates and writes the
+  resulting workload identity directly into the server's private volume.
+
+The offline provisioner and publisher are shipped in a separate image; they are
+not linked into or installed in the ordinary KB/server images. The default
+single-host authority is software-backed and appropriate to the local managed
+installation. Deployments requiring hardware custody should keep using an
+operator-managed authority/KMS and supply the explicit identity packet.
+The one-shot locks its address space when the runtime permits it. On an
+unprivileged container host that cannot raise `RLIMIT_MEMLOCK`, it proceeds only
+after verifying through `/proc/swaps` that the host has no active swap; otherwise
+Deploy fails closed.
+
+Deploy also claims the signed-in browser account as the first remote owner. It displays one
+`aimee remote set ...` command that provisions that user's bearer, mTLS certificate, and explicit
+`full` write grant. Keep that page open until you run the command in step 3.
+
+Complete the account step before exposing the host. A deployment that seals both
+`AIMEE_WEBCHAT_USER` and `AIMEE_WEBCHAT_PASSWORD` before the first `up` uses that pair and skips
+account replacement.
+Supply both or neither: a partial pair is treated as absent, and the server generates and logs a
+credential instead.
+
+The browser login is a **local PAM account**, not an aimee credential. First boot provisions the
+supplied (or generated) pair as a real system account in the `aimee-webchat` group and authenticates
+it through the `aimee` PAM service, the same stack SmoothNAS uses and the same one a KB means when
+`/v1/identity/auth-mode` reports `pam`. The plaintext first-boot value is removed once that account
+exists. Only accounts in that group are dashboard logins: the container's own system users are never
+accepted, and the dashboard cannot see or modify them.
+
+The Vault holds aimee's own secrets: the session key, TLS material, provider credentials. A host
+password is not one of those and is never sealed into it.
+
+When the appliance is connected to a KB that reports `oidc`, the identity provider owns accounts and
+the wizard's account step disappears; local account creation is refused. Dashboard login itself
+remains PAM in this release. The OIDC login flow arrives in 0.4.0.
+
+### Choosing an embedder
+
+The wizard's **Deploy topology** step records which embedder the KB uses. Choose one before Deploy.
+The bundled `bekko-a25m` (384-dimension) ships inside the KB image, so it needs no download and no
+second container. Point the KB at your own endpoint instead if you need a wider model.
+
+Nothing is selected on a fresh install, and an unselected KB is not broken. It falls back to a
+builtin lexical embedder and says so once, in the KB log:
+
+```text
+aimee-kb: no embedder selected; the bundled model stays unloaded (the builtin
+lexical embedder serves until the wizard selects one)
+```
+
+Retrieval still works in that state, but it is keyword matching, not vector search. If you skipped
+the step, set it from the server and re-run Deploy:
+
+```bash
+aimee config set embedding_model bekko-a25m
+```
+
+Confirm the model actually loaded rather than assuming it did:
+
+```bash
+docker compose -f compose.server-managed.yaml logs aimee-kb | grep -i embedder
+aimee kb status
+```
+
+A loaded embedder logs its dimension and serving identity:
+
+```text
+aimee-kb: starting bundled embedder (bekko-a25m) on :8760
+embedder-server: loaded hotchpotch/bekko-embedding-v1-a25m dim=384 threads=8 quant=fp32
+```
+
+Decide before you ingest. Changing the embedder later re-embeds everything already indexed, and
+changing to one of a different dimension rebuilds the vector schema as well. The wizard names which
+of the two a given switch costs.
 
 ### Choosing an image channel
 
 The stack runs the released `:latest` images by default. To run a tested-but-unreleased build, set
-`AIMEE_IMAGE_TAG` once — it moves the server, the KB and the LLM together:
+`AIMEE_IMAGE_TAG` once. It moves the server and the KB together:
 
 ```bash
 AIMEE_IMAGE_TAG=testing docker compose -f compose.server-managed.yaml up -d
 ```
 
 Set it for the wizard's **Deploy** step too, not just the server: the server re-runs Compose for the
-managed services, so the tag has to be in its environment or the KB and LLM fall back to `:latest`
-while the server runs `:testing`. The line above already does this. Mixing versions this way is a
-real failure mode, not a theoretical one — a KB and a server from different builds can disagree
-about the inference contract and leave the KB permanently unhealthy.
+managed services, so the tag has to be in its environment or the KB falls back to `:latest` while the
+server runs `:testing`. The line above already does this. Mixing versions this way is a real failure
+mode, not a theoretical one. A KB and a server from different builds can disagree about the
+contract between them and leave the KB permanently unhealthy.
 
 A single service can still be pinned individually (`AIMEE_KB_IMAGE=…`), and an explicit pin always
 wins over `AIMEE_IMAGE_TAG`.
@@ -64,22 +215,43 @@ The old combined image is gone.
 
 ## 2. Install the client
 
-Download the binary for your platform from the latest GitHub release.
+The client and server must use the same release channel. If step 1 used the default `:latest`
+images, download the client from the latest GitHub release as shown below.
 
-### Linux
+If step 1 used `AIMEE_IMAGE_TAG=testing`, the latest release client may not know routes added by the
+testing server. Build the Linux client from the same checkout instead, then continue at step 3:
 
 ```bash
-install -Dm755 aimee-linux-x86_64 ~/.local/bin/aimee
+make -C src -j4 ../aimee
+install -Dm755 aimee ~/.local/bin/aimee
 export PATH="$PATH:$HOME/.local/bin"
 aimee version
 ```
 
-Use `aimee-linux-arm64` on ARM64.
+The source build requires the development packages listed by `./install-deps.sh`. Do not pair an
+older release client with `:testing` images and treat missing-route or stale-version output as a
+server failure.
+
+### Linux
+
+```bash
+mkdir -p ~/.local/bin
+curl -fL https://github.com/RakuenSoftware/aimee/releases/latest/download/aimee-linux-x86_64 \
+  -o ~/.local/bin/aimee
+chmod 755 ~/.local/bin/aimee
+export PATH="$PATH:$HOME/.local/bin"
+aimee version
+```
+
+Use `aimee-linux-arm64` instead on ARM64.
 
 ### macOS
 
 ```bash
-install -m755 aimee-macos-universal ~/.local/bin/aimee
+mkdir -p ~/.local/bin
+curl -fL https://github.com/RakuenSoftware/aimee/releases/latest/download/aimee-macos-universal \
+  -o ~/.local/bin/aimee
+chmod 755 ~/.local/bin/aimee
 xattr -d com.apple.quarantine ~/.local/bin/aimee 2>/dev/null || true
 export PATH="$PATH:$HOME/.local/bin"
 aimee version
@@ -87,9 +259,18 @@ aimee version
 
 ### Windows
 
-Rename the download to `aimee.exe`, put it in a directory on `PATH`, then open a new PowerShell:
+In PowerShell, download the released client into a directory on your user `PATH`:
 
 ```powershell
+$bin = "$env:LOCALAPPDATA\aimee\bin"
+New-Item -ItemType Directory -Force $bin | Out-Null
+Invoke-WebRequest https://github.com/RakuenSoftware/aimee/releases/latest/download/aimee-windows-x86_64.exe -OutFile "$bin\aimee.exe"
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+$paths = @($userPath -split ';' | Where-Object { $_ })
+if ($bin -notin $paths) {
+  [Environment]::SetEnvironmentVariable("Path", (($paths + $bin) -join ';'), "User")
+}
+$env:Path = "$env:Path;$bin"
 aimee version
 ```
 
@@ -97,10 +278,10 @@ The client is DB-free. It does not need PostgreSQL, SQLite, the KB, or model lib
 
 ## 3. Enroll the client
 
-Use the server URL and the one-use bootstrap bearer:
+Copy the exact command shown by the wizard after **Deploy**. It looks like this:
 
 ```bash
-aimee remote set https://server.example:8743 aimee-local-dev
+aimee remote set https://server.example:8743 <wizard-bearer>
 aimee remote status
 ```
 
@@ -108,19 +289,27 @@ aimee remote status
 
 1. connects to the private server certificate;
 2. prints and stores its fingerprint;
-3. trades the bootstrap bearer for a deployment bearer;
-4. enrolls an individual mTLS certificate on Linux;
-5. writes private state to `~/.config/aimee/remote.conf`.
+3. on Linux, generates the client private key locally and submits only a signed CSR;
+4. enrolls an individual mTLS certificate and binds it to the wizard user;
+5. activates that certificate's explicit `full` grant;
+6. writes private state to `~/.config/aimee/remote.conf`.
 
 Verify the fingerprint against the server through a second channel. Do not accept an unexpected
-change. The bootstrap bearer stops authorizing ordinary routes after enrollment.
+change. The wizard bearer alone is read-only: write authority requires the matching enrolled
+certificate. Re-running Deploy as the same user is idempotent; a different user cannot replace the
+first owner.
 
-For a self-signed certificate during local setup, set `AIMEE_TLS_INSECURE=1` only for the enrollment
-command. The stored fingerprint is the trust anchor after that. Do not leave insecure TLS enabled.
+Automatic first-user certificate enrollment is currently Linux-only. macOS and Windows clients fail
+closed instead of silently receiving bearer-only write access; use a Linux client for this quickstart.
 
-macOS uses Secure Transport and Windows uses Schannel. Automatic CSR enrollment is currently the
-Linux path; configure the client certificate explicitly on the other platforms when the server
-requires mTLS.
+Self-signed local servers need no insecure-mode flag: `remote set` pins the leaf and reports its
+fingerprint for verification.
+
+The complete write-capable quickstart below currently requires the Linux client. macOS uses Secure
+Transport and Windows uses Schannel, but automatic CSR enrollment is not yet implemented on those
+two clients. They can connect while mTLS is optional, but remain read-only and will not connect once
+the server's enrolled-client roster promotes mTLS to required. Do not mistake a copied bearer for a
+client identity.
 
 ## 4. Verify the stack
 
@@ -130,10 +319,28 @@ aimee kb status    # detailed store, vector, ingest, and curator state
 aimee audit verify
 ```
 
-### Remote write setup
+### Verify first-user write access
 
-The rotated shared bearer authorizes reads only. Remote writes need a short-lived, KB-signed user
-identity and a grant keyed by `(server_id, team_id, subject)`. The server must also have these set:
+The Linux client enrolled in step 3 already has the first wizard user's certificate-bound `full`
+grant. No authority setup or server-side grant command is part of the single-user quickstart. Prove
+that the setup is durable before continuing:
+
+```bash
+aimee memory store quickstart "Enrollment works"
+aimee memory search "Enrollment works"
+```
+
+The bearer alone remains read-only, and changing the retired `aimee.api.remote_writes` setting does
+not grant access.
+
+### Additional users and authority-managed grants
+
+Skip this section for the first wizard user. The managed wizard now creates the
+default team, server workload identity, signed generation-1 JWKS, and public
+trust pin automatically. Larger or split installations can instead add
+PAM/OIDC users with short-lived, KB-signed identities and grants keyed by
+`(server_id, team_id, subject)`. An operator-managed version of that path
+requires:
 
 - `AIMEE_SERVER_ID`;
 - `AIMEE_SERVER_TEAM_ID`;
@@ -142,13 +349,14 @@ identity and a grant keyed by `(server_id, team_id, subject)`. The server must a
 - `AIMEE_KB_CONN`, the one-time `aimee://` enrollment string used to establish the server's mTLS
   identity with the KB.
 
-The shipped server Compose files pass these values through from `.env`, leave their identity
-values empty, and mount `${AIMEE_SERVER_MANAGEMENT_DIR:-./server-management}` read-only at
-`/run/aimee/management`. The empty configuration is deliberately read-only. It becomes
-write-capable only after the server is enrolled with the KB and the authority values are supplied.
-A local Unix-socket operator cannot be locked out.
+The shipped server Compose files pass explicit values through from `.env` when
+present. Without an explicit packet, the managed wizard uses its durable
+identity and read-only managed trust volumes. The explicit certificate-bound
+first wizard owner remains available for bootstrap administration, and a local
+Unix-socket operator cannot be locked out.
 
-A fresh embedded KB has no team. Create the first team locally without exposing an HTTP admin route:
+For a split/external authority, create the first team locally without exposing
+an HTTP admin route:
 
 ```bash
 KB_CONTAINER=$(docker ps --filter label=com.docker.compose.project=aimee \
@@ -180,8 +388,8 @@ docker compose -f compose.server-managed.yaml up -d --force-recreate aimee-serve
 The bundle is public verification material. In the shipped container it must be root-owned and
 readable by server UID 1000, so use `0644`; group/world write bits, symlinks, extra hard links, and a
 non-root owner are rejected. On successful enrollment the certificate and key are atomically saved
-at `$AIMEE_HOME/kb-client-identity.json` with mode `0600`. The one-time token is never saved, and
-the identity is revalidated against its CA pin after every process restart.
+at `$AIMEE_HOME/kb-client-identity.json` with mode `0600`. The one-time token is never saved, and the
+identity is revalidated against its CA pin after every process restart.
 
 Grant administration is local-socket only. Run it on the server, using the exact subject returned by
 the user's PAM or OIDC login:
@@ -194,16 +402,6 @@ aimee kb grant show --server <server-id> --team <team-id> --subject <subject>
 Use `data` for memory, document, and index writes. Use `full` only for users who also need agent,
 delegate, runner, or workspace-control operations. See [Upgrading](UPGRADING.md#restore-remote-writes)
 for subject forms, first-grant recovery, and refusal reasons.
-
-After the grant and user login, test a durable write and read:
-
-```bash
-aimee memory store quickstart "Enrollment works"
-aimee memory search "Enrollment works"
-```
-
-`aimee.api.remote_writes` is a retired global authorizer. It remains parsed for compatibility, but
-changing it does not make this write succeed.
 
 ## 5. Add a workspace
 
@@ -220,9 +418,8 @@ aimee index find main
 The client uploads content to the server and KB. The remote server never reads `/path/to/project`
 directly.
 
-Workspace registration itself is bearer-gated and can succeed without a grant. Its index upload
-cannot: without `data`, `workspace add` reports the registered workspace, then exits non-zero after
-ingesting zero files. Run the index commands after the grant.
+Workspace registration and index upload both work for the first wizard user after enrollment. An
+additional authority-managed user needs at least a `data` grant.
 
 > **Not available on the Windows thin client.** `workspace add` and `index scan` upload the working
 > tree over a POSIX-only path, so on Windows they refuse:
@@ -236,8 +433,9 @@ ingesting zero files. Run the index commands after the grant.
 > server through the setup wizard's *Workspaces & projects* step. The read side works normally on
 > Windows: `workspace list`, `index overview` and `index find` all query the server.
 
-Large repositories ingest in chunks. Use `aimee kb status` and `aimee kb ingest status` to follow
-the queue.
+Large repositories ingest in chunks. The client prints one progress line per uploaded batch. Use
+`aimee kb status` to inspect the queue. A channel-matched client also provides the dedicated
+`aimee kb ingest status` view.
 
 ## 6. Connect a coding tool
 
@@ -257,12 +455,15 @@ aimee mcp-serve
 The process inherits the enrolled remote target. It exposes memory, index, delegation, and other
 allowed tools while all state remains on the server.
 
-Use `aimee api status` for OpenAI- or Anthropic-compatible endpoint snippets. ACP editors use the
-ACP bridge. The removed `aimee chat` TUI is not part of current builds.
+Use `aimee api status` for OpenAI- or Anthropic-compatible endpoint snippets. The model API binds
+server loopback by design; when the coding tool runs on another machine, use the SSH tunnel printed
+by the command before pasting the local URL into the editor. ACP editors use the ACP bridge. The
+removed `aimee chat` TUI is not part of current builds.
 
 ## 7. Add delegates
 
-List the seeded roster:
+List the roster. A fresh install contains only the agent created in the wizard;
+add delegates explicitly when you want them:
 
 ```bash
 aimee agent list
@@ -271,11 +472,24 @@ aimee provider list --available
 
 Remote agent and delegate commands require a `full` grant, including `aimee agent list`.
 
+`ON` in the roster means configured, not authenticated. Before probing or delegating, make
+sure `provider list --available` shows a provider you intend to use. Local providers need their
+endpoint registered; API or OAuth credentials belong in the server vault, not `agents.json` or the
+project:
+
+```bash
+aimee vault unlock
+aimee vault set <agent> <credential-name> <secret>
+```
+
 Probe an agent before relying on it:
 
 ```bash
 aimee agent probe <name>
 ```
+
+A failed execution probe exits non-zero, even though the server successfully completed the
+diagnostic request.
 
 Run one task:
 
@@ -283,11 +497,11 @@ Run one task:
 aimee delegate review --persona reviewer "Review the current diff"
 ```
 
-Local API or OAuth credentials belong in the server vault, not `agents.json` or the project:
+Delegation is asynchronous. The command prints a job id; follow it to completion rather than
+treating `pending` as a successful review:
 
 ```bash
-aimee vault unlock
-aimee vault set <agent> <credential-name> <secret>
+aimee jobs status <job-id>
 ```
 
 See [Delegates](DELEGATES.md) for local endpoints, API providers, CLI agents, roles, and sandbox

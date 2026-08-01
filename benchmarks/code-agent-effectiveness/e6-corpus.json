@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "name": "agent-facing-code-intelligence-e6",
+  "retrieval_cases": [
+    {"id":"r01","layer":"discovery","expected":"answer"},
+    {"id":"r02","layer":"project-scope","expected":"answer"},
+    {"id":"r03","layer":"project-scope","expected":"answer"},
+    {"id":"r04","layer":"python-graph","expected":"answer"},
+    {"id":"r05","layer":"python-graph","expected":"answer"},
+    {"id":"r06","layer":"hybrid-context","expected":"answer"},
+    {"id":"r07","layer":"hybrid-context","expected":"answer"},
+    {"id":"r08","layer":"memory-local-first","expected":"answer"},
+    {"id":"r09","layer":"memory-local-first","expected":"answer"},
+    {"id":"r10","layer":"generation-freshness","expected":"answer"},
+    {"id":"r11","layer":"unrelated-global","expected":"abstain"},
+    {"id":"r12","layer":"substring-collision","expected":"abstain"},
+    {"id":"r13","layer":"detached-project","expected":"abstain"},
+    {"id":"r14","layer":"stale-generation","expected":"abstain"},
+    {"id":"r15","layer":"kb-unavailable","expected":"abstain"},
+    {"id":"r16","layer":"vector-only-low-confidence","expected":"abstain"}
+  ],
+  "coding_tasks": [
+    {"id":"c01","kind":"symbol-discovery"},
+    {"id":"c02","kind":"blast-radius"},
+    {"id":"c03","kind":"project-duplicate"},
+    {"id":"c04","kind":"python-import-repair"},
+    {"id":"c05","kind":"memory-abstention"},
+    {"id":"c06","kind":"generation-freshness"},
+    {"id":"c07","kind":"dependency-outage"},
+    {"id":"c08","kind":"bounded-context"}
+  ],
+  "arms": ["standard", "observe", "on", "ceiling"]
+}

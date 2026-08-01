@@ -23,6 +23,9 @@ aimee-forwarder
 /aimee-negation-eval
 /aimee-blast-radius-eval
 /aimee-runtime-web
+# `go build ./...` inside runtime-web/ drops the binary next to its source; it was
+# tracked for a while and rode along in unrelated commits.
+runtime-web/runtime-web
 /aimee-gateway
 src/build/
 src/*.a
@@ -178,3 +181,11 @@ scratchpad/
 # Local public verification roots mounted read-only by the server Compose files.
 # The directory is created by Docker on first use and must never be committed.
 /server-management/
+
+# Dogfood moment logs written by a test run. These are per-month jsonl files
+# under a directory the dogfood config names; a suite run drops them wherever it
+# is pointed. 26 got committed once, into directories whose names were
+# UNINITIALISED STACK MEMORY (the dogfood_log_moment_live bug), and the invalid
+# UTF-8 in those names broke the Docker build context for every e2e topology.
+# Ignore them by shape so a stray run cannot be swept up by `git add -A` again.
+**/[0-9][0-9][0-9][0-9]-[0-9][0-9].jsonl

@@ -11,6 +11,7 @@
 #include "platform_path.h"
 #include "platform_test_util.h"
 #include "provider_cli_adapter.h"
+#include "runtime_secret.h"
 
 static agent_t g_seen_agent;
 static char g_seen_system[256];
@@ -199,7 +200,7 @@ static void test_mistral_native_adapter_execution(void)
    agent.timeout_ms = 4321;
 
    reset_seen_agent();
-   setenv("MISTRAL_API_KEY", "unit-test-mistral-key", 1);
+   assert(runtime_secret_store("MISTRAL_API_KEY", "unit-test-mistral-key") == 0);
    agent_result_t out;
    assert(provider_cli_adapter_execute(mistral, &agent, ".", "sys", "user", &out) == 0);
    assert(out.success == 1);
@@ -218,7 +219,7 @@ static void test_mistral_native_adapter_execution(void)
    assert(g_seen_agent.max_tokens == 1234);
    assert(g_seen_agent.timeout_ms == 4321);
    free(out.response);
-   unsetenv("MISTRAL_API_KEY");
+   runtime_secret_remove("MISTRAL_API_KEY");
 }
 
 static void test_native_auth_cmd_uses_bearer_token_command(void)

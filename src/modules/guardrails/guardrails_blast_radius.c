@@ -93,9 +93,7 @@ void guardrails_blast_radius_advisory(const char *abs_path, char *msg_buf, size_
    if (!abs_path || !abs_path[0])
       return;
 
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.guardrails_blast_radius_advisory_enabled)
+   if (!config_guardrails_blast_radius_advisory_enabled())
       return;
 
    blast_radius_t br;

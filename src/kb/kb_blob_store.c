@@ -19,9 +19,8 @@ const char *kb_blob_store_root(char *out, size_t cap)
 {
    if (!out || cap == 0)
       return NULL;
-   config_t cfg;
-   if (config_load(&cfg) == 0 && cfg.kb_pdf_blob_dir[0])
-      snprintf(out, cap, "%s", cfg.kb_pdf_blob_dir);
+   if (config_present() && config_kb_pdf_blob_dir()[0])
+      snprintf(out, cap, "%s", config_kb_pdf_blob_dir());
    else
       snprintf(out, cap, "%s/kb-blobs", kb_default_config_dir());
    return out;

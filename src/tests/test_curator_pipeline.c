@@ -18,10 +18,11 @@
 #include "../kb_curator_serve.h"
 
 /* ── stubs: embedding + vector sinks (return "unavailable"/no-op) ─────────── */
-int memory_embed_text(const char *t, const char *c, float *o, int d)
+int memory_embed_text(const char *t, const char *c, embed_input_type_t it, float *o, int d)
 {
    (void)t;
    (void)c;
+   (void)it;
    (void)o;
    (void)d;
    return 0;
@@ -81,13 +82,16 @@ int main(void)
    sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
    assert(db != NULL);
 
+   seed(db, "INSERT INTO projects (name,root,workspace,scanned_at,current_generation)"
+            " VALUES ('projA','/repo/projA','/repo','now',2)");
    /* extract's output: a proposed entity mention + a proposed code_unit whose
     * domain_concepts name that entity, with the code_unit's source file cited. */
    seed(db, "INSERT INTO artifacts (id,kind,state,scope_kind,scope_id,payload) VALUES"
             " ('ent','entity','proposed','project','projA',"
             "'{\"name\":\"pgvector\",\"context\":\"vector store\"}'),"
             " ('cu','code_unit','proposed','project','projA',"
-            "'{\"summary\":\"hnsw search\",\"domain_concepts\":[\"pgvector\"]}')");
+            "'{\"summary\":\"hnsw search\",\"domain_concepts\":[\"pgvector\"],"
+            "\"generation\":2}')");
    seed(db, "INSERT INTO artifact_citations (artifact_id,source_kind,source_id)"
             " VALUES ('cu','kb_file','src/vec.c')");
 

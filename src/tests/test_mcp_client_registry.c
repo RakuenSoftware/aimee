@@ -9,6 +9,7 @@
 #include "mcp_osv_cache.h"
 #include "aimee/protocols/mcp/mcp_client_registry.h"
 #include "aimee/protocols/mcp/mcp_tools.h"
+#include "agent_code_capabilities.h"
 
 static const char *g_http_response;
 static int g_http_status = -1;
@@ -155,9 +156,22 @@ static void remove_package_manager_link(const char *dir, const char *path)
       rmdir(dir);
 }
 
+/* mcp_client_registry_boot reads config through accessors now instead of taking a
+ * config_t. This suite links the real config module, so each case publishes the
+ * config it built as the live snapshot -- the accessors then read exactly that, with
+ * no file I/O and no dependence on the machine's aimee.yaml. Same fields, same
+ * values, same assertions as when the struct was passed by hand. */
+static config_t cfg;
+
+/* Publish what this case just filled in. Call after the last cfg.* write and
+ * before booting the registry. */
+static void publish_cfg(void)
+{
+   config_snapshot_init(&cfg);
+}
+
 static void test_boot_and_lazy_tools(void)
 {
-   config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    cfg.mcp_client_count = 1;
    snprintf(cfg.mcp_clients[0].name, sizeof(cfg.mcp_clients[0].name), "%s", "mock");
@@ -167,7 +181,8 @@ static void test_boot_and_lazy_tools(void)
             mock_server_path());
    snprintf(cfg.mcp_clients[0].command[1], sizeof(cfg.mcp_clients[0].command[1]), "%s", "happy");
 
-   assert(mcp_client_registry_boot(&cfg, CONFIG_MCP_INSTALL_SERVER) == 1);
+   publish_cfg();
+   assert(mcp_client_registry_boot(CONFIG_MCP_INSTALL_SERVER) == 1);
    assert(mcp_client_registry_count() == 1);
    assert(strcmp(mcp_client_registry_name_at(0), "mock") == 0);
    assert(mcp_client_registry_get("mock") != NULL);
@@ -193,7 +208,6 @@ static void test_boot_and_lazy_tools(void)
  * install:server clients, a kb boots install:kb clients, never the other's. */
 static void test_install_target_filtering(void)
 {
-   config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    cfg.mcp_client_count = 2;
    /* client 0: server-hosted */
@@ -214,14 +228,16 @@ static void test_install_target_filtering(void)
    snprintf(cfg.mcp_clients[1].command[1], sizeof(cfg.mcp_clients[1].command[1]), "%s", "happy");
 
    /* Boot as the server: only the install:server plugin starts. */
-   assert(mcp_client_registry_boot(&cfg, CONFIG_MCP_INSTALL_SERVER) == 1);
+   publish_cfg();
+   assert(mcp_client_registry_boot(CONFIG_MCP_INSTALL_SERVER) == 1);
    assert(mcp_client_registry_count() == 1);
    assert(mcp_client_registry_get("srv") != NULL);
    assert(mcp_client_registry_get("shared") == NULL);
    mcp_client_registry_shutdown();
 
    /* Boot as the kb: only the install:kb plugin starts. */
-   assert(mcp_client_registry_boot(&cfg, CONFIG_MCP_INSTALL_KB) == 1);
+   publish_cfg();
+   assert(mcp_client_registry_boot(CONFIG_MCP_INSTALL_KB) == 1);
    assert(mcp_client_registry_count() == 1);
    assert(mcp_client_registry_get("shared") != NULL);
    assert(mcp_client_registry_get("srv") == NULL);
@@ -230,7 +246,6 @@ static void test_install_target_filtering(void)
 
 static void test_namespaced_tools_and_dispatch(void)
 {
-   config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    cfg.mcp_client_count = 1;
    snprintf(cfg.mcp_clients[0].name, sizeof(cfg.mcp_clients[0].name), "%s", "mock");
@@ -240,7 +255,8 @@ static void test_namespaced_tools_and_dispatch(void)
             mock_server_path());
    snprintf(cfg.mcp_clients[0].command[1], sizeof(cfg.mcp_clients[0].command[1]), "%s", "happy");
 
-   assert(mcp_client_registry_boot(&cfg, CONFIG_MCP_INSTALL_SERVER) == 1);
+   publish_cfg();
+   assert(mcp_client_registry_boot(CONFIG_MCP_INSTALL_SERVER) == 1);
 
    cJSON *remote_tools = mcp_client_registry_build_namespaced_tools(1000);
    assert(cJSON_IsArray(remote_tools));
@@ -278,6 +294,7 @@ static void test_namespaced_tools_and_dispatch(void)
    int saw_delegate_background_absent = 0;
    int saw_delegate_cwd = 0;
    int saw_delegate_status = 0;
+   int saw_roundtable_status = 0;
    int saw_job_family = 0;
    int saw_skill_manage = 0;
    int saw_skill_manage_cwd = 0;
@@ -289,6 +306,8 @@ static void test_namespaced_tools_and_dispatch(void)
          saw_namespaced = 1;
       if (cJSON_IsString(tool_name) && strcmp(tool_name->valuestring, "delegate_status") == 0)
          saw_delegate_status = 1;
+      if (cJSON_IsString(tool_name) && strcmp(tool_name->valuestring, "roundtable_status") == 0)
+         saw_roundtable_status = 1;
       /* job_start/job_status were collapsed into the `job` family (P4b); the
        * member description no longer appears standalone. Verify the family tool. */
       if (cJSON_IsString(tool_name) && strcmp(tool_name->valuestring, "job") == 0)
@@ -321,6 +340,7 @@ static void test_namespaced_tools_and_dispatch(void)
    assert(saw_delegate_background_absent);
    assert(saw_delegate_cwd);
    assert(saw_delegate_status);
+   assert(saw_roundtable_status);
    assert(saw_job_family);
    assert(saw_skill_manage);
    assert(saw_skill_manage_cwd);
@@ -331,7 +351,6 @@ static void test_namespaced_tools_and_dispatch(void)
 
 static void test_failed_client_does_not_abort_boot(void)
 {
-   config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    cfg.mcp_client_count = 2;
 
@@ -348,7 +367,8 @@ static void test_failed_client_does_not_abort_boot(void)
             mock_server_path());
    snprintf(cfg.mcp_clients[1].command[1], sizeof(cfg.mcp_clients[1].command[1]), "%s", "happy");
 
-   assert(mcp_client_registry_boot(&cfg, CONFIG_MCP_INSTALL_SERVER) == 1);
+   publish_cfg();
+   assert(mcp_client_registry_boot(CONFIG_MCP_INSTALL_SERVER) == 1);
    assert(mcp_client_registry_count() == 1);
    assert(mcp_client_registry_get("missing") == NULL);
    assert(mcp_client_registry_get("mock") != NULL);
@@ -361,8 +381,6 @@ static void test_osv_gate_blocks_malware(void)
    reset_osv_stub();
    g_http_status = 200;
    g_http_response = "{\"vulns\":[{\"id\":\"MAL-2026-1\"}]}";
-
-   config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    cfg.mcp_osv_enabled = 1;
    cfg.mcp_osv_enforce = 1;
@@ -375,7 +393,8 @@ static void test_osv_gate_blocks_malware(void)
    snprintf(cfg.mcp_clients[0].command[0], sizeof(cfg.mcp_clients[0].command[0]), "%s", "npx");
    snprintf(cfg.mcp_clients[0].command[1], sizeof(cfg.mcp_clients[0].command[1]), "%s", "bad-pkg");
 
-   assert(mcp_client_registry_boot(&cfg, CONFIG_MCP_INSTALL_SERVER) == 0);
+   publish_cfg();
+   assert(mcp_client_registry_boot(CONFIG_MCP_INSTALL_SERVER) == 0);
    assert(mcp_client_registry_count() == 0);
    assert(g_http_calls == 1);
    assert(strcmp(g_last_audit_verdict, "malware") == 0);
@@ -391,8 +410,6 @@ static void test_osv_gate_shadow_and_allowlist_allow(void)
    reset_osv_stub();
    g_http_status = 200;
    g_http_response = "{\"vulns\":[{\"id\":\"MAL-2026-2\"}]}";
-
-   config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    cfg.mcp_osv_enabled = 1;
    cfg.mcp_osv_enforce = 0;
@@ -404,7 +421,8 @@ static void test_osv_gate_shadow_and_allowlist_allow(void)
    cfg.mcp_clients[0].command_count = 2;
    snprintf(cfg.mcp_clients[0].command[0], sizeof(cfg.mcp_clients[0].command[0]), "%s", npx_path);
    snprintf(cfg.mcp_clients[0].command[1], sizeof(cfg.mcp_clients[0].command[1]), "%s", "bad-pkg");
-   assert(mcp_client_registry_boot(&cfg, CONFIG_MCP_INSTALL_SERVER) == 1);
+   publish_cfg();
+   assert(mcp_client_registry_boot(CONFIG_MCP_INSTALL_SERVER) == 1);
    assert(strcmp(g_last_audit_action, "shadow_block") == 0);
    mcp_client_registry_shutdown();
 
@@ -415,7 +433,8 @@ static void test_osv_gate_shadow_and_allowlist_allow(void)
    cfg.mcp_osv_enforce = 1;
    cfg.mcp_osv_allow_count = 1;
    snprintf(cfg.mcp_osv_allow[0], sizeof(cfg.mcp_osv_allow[0]), "%s", "npm:bad-pkg");
-   assert(mcp_client_registry_boot(&cfg, CONFIG_MCP_INSTALL_SERVER) == 1);
+   publish_cfg();
+   assert(mcp_client_registry_boot(CONFIG_MCP_INSTALL_SERVER) == 1);
    assert(g_http_calls == 0);
    assert(strcmp(g_last_audit_action, "allow_allowlisted") == 0);
    mcp_client_registry_shutdown();
@@ -428,8 +447,6 @@ static void test_osv_offline_cache_miss_allows(void)
    char dir[128], npx_path[160];
    make_package_manager_link(dir, sizeof(dir), npx_path, sizeof(npx_path));
    reset_osv_stub();
-
-   config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    cfg.mcp_osv_enabled = 1;
    cfg.mcp_osv_enforce = 1;
@@ -443,7 +460,8 @@ static void test_osv_offline_cache_miss_allows(void)
    snprintf(cfg.mcp_clients[0].command[0], sizeof(cfg.mcp_clients[0].command[0]), "%s", npx_path);
    snprintf(cfg.mcp_clients[0].command[1], sizeof(cfg.mcp_clients[0].command[1]), "%s", "pkg");
 
-   assert(mcp_client_registry_boot(&cfg, CONFIG_MCP_INSTALL_SERVER) == 1);
+   publish_cfg();
+   assert(mcp_client_registry_boot(CONFIG_MCP_INSTALL_SERVER) == 1);
    assert(g_http_calls == 0);
    assert(strcmp(g_last_audit_verdict, "unknown") == 0);
    assert(strcmp(g_last_audit_action, "allow") == 0);
@@ -455,13 +473,14 @@ static void test_osv_offline_cache_miss_allows(void)
  * built-in tool surface (name + sorted schema property keys + required), captured
  * via the DUMP_TOOLS path in test_mcp_client_registry.c. Regenerate after an
  * intentional tool change: DUMP_TOOLS=1 ./unit-test-mcp-client-registry 2>&1. */
-#define MCP_TOOLS_GOLDEN_COUNT 51
+#define MCP_TOOLS_GOLDEN_COUNT 54
 #define MCP_TOOLS_GOLDEN                                                                           \
    "ask_user {choices,question} req:question\n"                                                    \
    "ast_grep_search {lang,path,pattern} req:lang,pattern\n"                                        \
    "attempt {approach,command,filter,lesson,outcome,task_context} req:command\n"                   \
    "autopilot {action,job_id,pipeline_id,plan_depth,plan_id,task} req:action\n"                    \
    "background {action,command,cwd,id,tail_lines} req:action\n"                                    \
+   "call_tool {arguments,name} req:arguments,name\n"                                               \
    "clarify {answer,command,description,session_id} req:command\n"                                 \
    "dashboard_metrics {} req:\n"                                                                   \
    "delegate {branch,cwd,persona,prompt,role} req:persona,prompt,role\n"                           \
@@ -475,7 +494,7 @@ static void test_osv_offline_cache_miss_allows(void)
    "epistemic_directive "                                                                          \
    "{anchor_entity,anchor_file,cause,command,id,limit,note,priority,question,resolution_memory_"   \
    "id,state,suppress,topic,valid_until} req:command\n"                                            \
-   "find_symbol {identifier} req:identifier\n"                                                     \
+   "find_symbol {identifier,project,scope} req:identifier\n"                                       \
    "find_tools {limit,query} req:\n"                                                               \
    "get_help {topic} req:\n"                                                                       \
    "get_identity {} req:\n"                                                                        \
@@ -483,10 +502,11 @@ static void test_osv_offline_cache_miss_allows(void)
    "{action,async,auto,base,body,branch,command,count,depth,diff_stat,expected_head_sha,files,"    \
    "force,index,job_id,merge_method,message,mirror,mode,name,number,path,prune,rebase,ref,remote," \
    "source,staged,stat_only,state,title,url,wait} req:command\n"                                   \
-   "graph {command,entity,episode_key,limit,query} req:command\n"                                  \
+   "graph {command,cwd,entity,episode_key,limit,project,query,scope,workspace} req:command\n"      \
    "host {command,name} req:command\n"                                                             \
    "index "                                                                                        \
-   "{command,file_path,judge,line_end,line_start,max_results,node,paths,project,query,symbol} "    \
+   "{command,file_path,judge,line_end,line_start,max_results,node,paths,project,query,scope,"      \
+   "symbol} "                                                                                      \
    "req:command\n"                                                                                 \
    "job {command,job_id,max_concurrent,plan_id} req:command\n"                                     \
    "learning "                                                                                     \
@@ -495,9 +515,9 @@ static void test_osv_offline_cache_miss_allows(void)
    "list_curiosity_items {limit,state} req:\n"                                                     \
    "lsp {col,command,file,line,workspace} req:command\n"                                           \
    "memory "                                                                                       \
-   "{command,confidence,content,dry_run,force,handle,id,key,kind,memory_id,modes,query,reason,"    \
-   "tier,verb} req:command\n"                                                                      \
-   "memory_recall {limit_tokens,session_start,task_hint} req:\n"                                   \
+   "{command,confidence,content,cwd,dry_run,force,handle,id,key,kind,memory_id,modes,project,"     \
+   "query,reason,scope,tier,verb,workspace} req:command\n"                                         \
+   "memory_recall {cwd,limit_tokens,project,scope,session_start,task_hint,workspace} req:\n"       \
    "note {command,content,limit,query,tag,tags,title} req:command\n"                               \
    "payload_rewrite_status {} req:\n"                                                              \
    "pdf_inspect_structure {document_key,project} req:document_key,project\n"                       \
@@ -510,15 +530,18 @@ static void test_osv_offline_cache_miss_allows(void)
    "pipeline "                                                                                     \
    "{artifact,base_branch,brief,command,done_bar,head_branch,idea,operator_principal,"             \
    "pipeline_id,questions,reason,remote,repo_root,state,verdict,worktree_path} req:command\n"      \
+   "preview_blast_radius {paths,project,scope} req:paths\n"                                        \
    "prospective_memory "                                                                           \
    "{action_text,anchor_entity,anchor_file,command,id,limit,recurrence,state,trigger_text,valid_"  \
    "until} req:command\n"                                                                          \
-   "recall {block_type,command,limit,limit_tokens,query,since} req:command\n"                      \
+   "recall {block_type,command,cwd,limit,limit_tokens,project,query,scope,since,workspace} "       \
+   "req:command\n"                                                                                 \
    "roadmap {command,roadmap_id} req:command\n"                                                    \
    "roundtable_review {artifact_stage,brief,diff,original_request,roundtable,workdir} req:diff\n"  \
+   "roundtable_status {run_id} req:run_id\n"                                                       \
    "rules {command,reason,text} req:command\n"                                                     \
-   "search_docs {max_results,query} req:query\n"                                                   \
-   "search_memory {filter,query} req:query\n"                                                      \
+   "search_docs {cwd,max_results,project,query,scope} req:query\n"                                 \
+   "search_memory {cwd,filter,project,query,scope,workspace} req:query\n"                          \
    "send_message {target,text} req:target,text\n"                                                  \
    "session {around_message_id,chain_id,command,include_sources,limit,query,session_id,window} "   \
    "req:command\n"                                                                                 \
@@ -613,16 +636,31 @@ static int profile_core_has(const char *n, const char *const *set)
 static void test_tool_profile_filter(void)
 {
    /* Mirror of MCP_CORE_TOOLS in mcp_tool_profile.c — kept in sync intentionally.
-    * Includes the P2 discovery meta-tools find_tools/describe_tool. */
-   static const char *const core[] = {
-       "get_help",        "find_tools",    "describe_tool", "search_docs",
-       "search_memory",   "memory_recall", "get_identity",  "find_symbol",
-       "ast_grep_search", "git",           "delegate",      "roundtable_review",
-       "ask_user",        "send_message",  "note",          NULL};
+    * Includes the P2 discovery meta-tools and schema-bound dispatch bridge. */
+   static const char *const core[] = {"get_help",
+                                      "find_tools",
+                                      "describe_tool",
+                                      "call_tool",
+                                      "search_docs",
+                                      "search_memory",
+                                      "memory_recall",
+                                      "get_identity",
+                                      "find_symbol",
+                                      "ast_grep_search",
+                                      "preview_blast_radius",
+                                      "git",
+                                      "delegate",
+                                      "roundtable_review",
+                                      "roundtable_status",
+                                      "ask_user",
+                                      "send_message",
+                                      "note",
+                                      NULL};
    int expect = 0;
    for (int i = 0; core[i]; i++)
       expect++;
    assert(profile_core_has("find_tools", core) && profile_core_has("describe_tool", core));
+   assert(profile_core_has("call_tool", core));
 
    /* Control the env so the default is deterministic across CI runners. */
    unsetenv("AIMEE_MCP_TOOL_PROFILE");
@@ -662,6 +700,36 @@ static void test_tool_profile_filter(void)
    cJSON_Delete(t);
 }
 
+static void test_call_tool_demux(void)
+{
+   const char *target = NULL;
+   cJSON *target_args = NULL;
+   cJSON *wrapper = cJSON_CreateObject();
+   cJSON_AddStringToObject(wrapper, "name", "index");
+   cJSON *nested = cJSON_AddObjectToObject(wrapper, "arguments");
+   cJSON_AddStringToObject(nested, "command", "find_callers");
+   cJSON_AddStringToObject(nested, "symbol", "end_of_month");
+
+   assert(mcp_call_tool_demux("find_tools", wrapper, &target, &target_args) == 0);
+   assert(mcp_call_tool_demux("call_tool", wrapper, &target, &target_args) == 1);
+   assert(strcmp(target, "index") == 0);
+   assert(target_args == nested);
+   assert(strcmp(cJSON_GetObjectItemCaseSensitive(target_args, "symbol")->valuestring,
+                 "end_of_month") == 0);
+   cJSON_Delete(wrapper);
+
+   wrapper = cJSON_CreateObject();
+   cJSON_AddStringToObject(wrapper, "name", "call_tool");
+   cJSON_AddObjectToObject(wrapper, "arguments");
+   assert(mcp_call_tool_demux("call_tool", wrapper, &target, &target_args) == -1);
+   cJSON_Delete(wrapper);
+
+   wrapper = cJSON_CreateObject();
+   cJSON_AddStringToObject(wrapper, "name", "index");
+   assert(mcp_call_tool_demux("call_tool", wrapper, &target, &target_args) == -1);
+   cJSON_Delete(wrapper);
+}
+
 static int tools_have(cJSON *tools, const char *name)
 {
    cJSON *t = NULL;
@@ -672,6 +740,90 @@ static int tools_have(cJSON *tools, const char *name)
          return 1;
    }
    return 0;
+}
+
+static cJSON *tools_get(cJSON *tools, const char *name)
+{
+   cJSON *t = NULL;
+   cJSON_ArrayForEach(t, tools)
+   {
+      cJSON *n = cJSON_GetObjectItemCaseSensitive(t, "name");
+      if (cJSON_IsString(n) && strcmp(n->valuestring, name) == 0)
+         return t;
+   }
+   return NULL;
+}
+
+static int schema_has_property(cJSON *tool, const char *name)
+{
+   cJSON *schema = cJSON_GetObjectItemCaseSensitive(tool, "inputSchema");
+   cJSON *properties = cJSON_GetObjectItemCaseSensitive(schema, "properties");
+   return cJSON_GetObjectItemCaseSensitive(properties, name) != NULL;
+}
+
+static int schema_requires(cJSON *tool, const char *name)
+{
+   cJSON *schema = cJSON_GetObjectItemCaseSensitive(tool, "inputSchema");
+   cJSON *required = cJSON_GetObjectItemCaseSensitive(schema, "required");
+   cJSON *item = NULL;
+   cJSON_ArrayForEach(item, required) if (cJSON_IsString(item) &&
+                                          strcmp(item->valuestring, name) == 0) return 1;
+   return 0;
+}
+
+/* E1 contract: the words installed guidance gives an agent must map to a direct
+ * lean tool, and every code-navigation schema must admit active-project defaults
+ * plus an explicit cross-project escape hatch. */
+static void test_agent_code_intelligence_contracts(void)
+{
+   cJSON *collapsed = mcp_build_tools_list();
+   cJSON *flat = mcp_build_tools_list_flat();
+
+   cJSON *preview = tools_get(collapsed, AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS);
+   assert(preview != NULL);
+   cJSON *description = cJSON_GetObjectItemCaseSensitive(preview, "description");
+   assert(cJSON_IsString(description));
+   assert(strstr(description->valuestring, "blast radius") != NULL);
+   assert(strstr(description->valuestring, "Preview") != NULL);
+   assert(mcp_tool_matches_query(preview, AIMEE_CODE_DISCOVERY_BLAST_RADIUS));
+   assert(mcp_tool_matches_query(preview, "BLAST RADIUS"));
+   assert(mcp_tool_matches_query(preview, AIMEE_CODE_DISCOVERY_PREVIEW));
+   assert(!mcp_tool_matches_query(preview, "unrelated memory query"));
+   assert(schema_has_property(preview, "project"));
+   assert(schema_has_property(preview, "scope"));
+   assert(schema_has_property(preview, "paths"));
+   assert(!schema_requires(preview, "project"));
+   assert(schema_requires(preview, "paths"));
+
+   cJSON *symbol = tools_get(collapsed, AIMEE_CODE_TOOL_FIND_SYMBOL);
+   assert(symbol != NULL);
+   assert(schema_has_property(symbol, "identifier"));
+   assert(schema_has_property(symbol, "project"));
+   assert(schema_has_property(symbol, "scope"));
+
+   cJSON *callers = tools_get(flat, "index_find_callers");
+   assert(callers != NULL);
+   assert(schema_has_property(callers, "project"));
+   assert(schema_has_property(callers, "scope"));
+
+   cJSON *args = cJSON_Parse("{\"cwd\":\"/work/aimee\"}");
+   /* cwd is resolved to a stable identity at the server dispatch boundary;
+    * this helper deliberately refuses the old basename fallback. */
+   assert(mcp_code_project_from_args(args) == NULL);
+   assert(mcp_code_scope_all(args) == 0);
+   cJSON_AddStringToObject(args, "project", "explicit-project");
+   assert(strcmp(mcp_code_project_from_args(args), "explicit-project") == 0);
+   cJSON_AddStringToObject(args, "scope", "all");
+   assert(mcp_code_scope_all(args) == 1);
+   cJSON_ReplaceItemInObject(args, "scope", cJSON_CreateString(""));
+   assert(mcp_code_scope_all(args) == 0);
+   cJSON_ReplaceItemInObject(args, "scope", cJSON_CreateString("invalid"));
+   assert(mcp_code_scope_all(args) == -1);
+   cJSON_Delete(args);
+
+   cJSON_Delete(flat);
+   cJSON_Delete(collapsed);
+   printf("  PASS: agent_code_intelligence_contracts\n");
 }
 
 /* The flat list keeps family members; the collapsed one folds them away.
@@ -721,6 +873,8 @@ int main(void)
    printf("test_mcp_client_registry\n");
    test_tools_list_surface();
    test_tool_profile_filter();
+   test_call_tool_demux();
+   test_agent_code_intelligence_contracts();
    test_flat_list_keeps_family_members();
    test_boot_and_lazy_tools();
    test_install_target_filtering();

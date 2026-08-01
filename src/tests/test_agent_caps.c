@@ -12,11 +12,11 @@
 void test_agent_route_with_caps_honors_tools_enabled(void)
 {
    agent_config_t cfg;
-   config_t sys_cfg;
+   agent_route_policy_t sys_cfg;
 
    memset(&cfg, 0, sizeof(cfg));
    memset(&sys_cfg, 0, sizeof(sys_cfg));
-   sys_cfg.model_meta_capability_routing = 1;
+   sys_cfg.capability_routing = 1;
 
    cfg.agent_count = 2;
    strcpy(cfg.default_agent, "minimax");
@@ -50,11 +50,11 @@ void test_agent_route_with_caps_honors_tools_enabled(void)
 void test_agent_route_with_caps_honors_context_override(void)
 {
    agent_config_t cfg;
-   config_t sys_cfg;
+   agent_route_policy_t sys_cfg;
 
    memset(&cfg, 0, sizeof(cfg));
    memset(&sys_cfg, 0, sizeof(sys_cfg));
-   sys_cfg.model_meta_capability_routing = 1;
+   sys_cfg.capability_routing = 1;
 
    /* Two agents so the GATE has a real choice to make. Asserting NULL is no
     * longer the way to observe rejection: an unsatisfiable min_context now
@@ -497,11 +497,11 @@ void test_catalog_provider_explicit_round_trip(void)
 void test_unknown_context_window_does_not_pass_min_context(void)
 {
    agent_config_t cfg;
-   config_t sys_cfg;
+   agent_route_policy_t sys_cfg;
 
    memset(&cfg, 0, sizeof(cfg));
    memset(&sys_cfg, 0, sizeof(sys_cfg));
-   sys_cfg.model_meta_capability_routing = 1;
+   sys_cfg.capability_routing = 1;
 
    /* A known-good peer makes exclusion observable. Asserting NULL would no
     * longer work: an unknown window disqualifies the agent from CHEAP selection,
@@ -655,10 +655,10 @@ void test_primary_turn_reaches_default_above_min_tier(void)
 void test_primary_turn_default_must_still_satisfy_caps(void)
 {
    agent_config_t cfg;
-   config_t sys_cfg;
+   agent_route_policy_t sys_cfg;
    memset(&cfg, 0, sizeof(cfg));
    memset(&sys_cfg, 0, sizeof(sys_cfg));
-   sys_cfg.model_meta_capability_routing = 1;
+   sys_cfg.capability_routing = 1;
 
    cfg.agent_count = 2;
    strcpy(cfg.default_agent, "small_default");
@@ -767,10 +767,10 @@ void test_request_max_tokens_clamped_to_context_window(void)
 void test_capability_gate_escalates_instead_of_failing(void)
 {
    agent_config_t cfg;
-   config_t sys_cfg;
+   agent_route_policy_t sys_cfg;
    memset(&cfg, 0, sizeof(cfg));
    memset(&sys_cfg, 0, sizeof(sys_cfg));
-   sys_cfg.model_meta_capability_routing = 1;
+   sys_cfg.capability_routing = 1;
 
    cfg.agent_count = 2;
 
@@ -861,10 +861,10 @@ static int esc_health_down_all(const char *name)
 void test_escalation_respects_policy_and_health_gates(void)
 {
    agent_config_t cfg;
-   config_t sys_cfg;
+   agent_route_policy_t sys_cfg;
    memset(&cfg, 0, sizeof(cfg));
    memset(&sys_cfg, 0, sizeof(sys_cfg));
-   sys_cfg.model_meta_capability_routing = 1;
+   sys_cfg.capability_routing = 1;
 
    cfg.agent_count = 1;
    strcpy(cfg.default_agent, "only"); /* also exercises the fast path */
@@ -914,10 +914,10 @@ void test_escalation_respects_policy_and_health_gates(void)
 void test_no_escalation_when_capability_routing_disabled(void)
 {
    agent_config_t cfg;
-   config_t sys_cfg;
+   agent_route_policy_t sys_cfg;
    memset(&cfg, 0, sizeof(cfg));
    memset(&sys_cfg, 0, sizeof(sys_cfg));
-   sys_cfg.model_meta_capability_routing = 0; /* default */
+   sys_cfg.capability_routing = 0; /* default */
 
    cfg.agent_count = 1;
    strcpy(cfg.agents[0].name, "only");
@@ -945,11 +945,11 @@ void test_no_escalation_when_capability_routing_disabled(void)
 void test_capability_routing_flag_behaviour_diff(void)
 {
    agent_config_t cfg;
-   config_t off, on;
+   agent_route_policy_t off, on;
    memset(&cfg, 0, sizeof(cfg));
    memset(&off, 0, sizeof(off));
    memset(&on, 0, sizeof(on));
-   on.model_meta_capability_routing = 1;
+   on.capability_routing = 1;
 
    cfg.agent_count = 4;
    strcpy(cfg.default_agent, "claude");
@@ -1479,7 +1479,7 @@ void test_registration_prefix(void)
 void test_declared_roles_route_precisely(void)
 {
    agent_config_t cfg;
-   config_t sys_cfg;
+   agent_route_policy_t sys_cfg;
    memset(&cfg, 0, sizeof(cfg));
    memset(&sys_cfg, 0, sizeof(sys_cfg));
 
@@ -1545,10 +1545,10 @@ void test_declared_roles_route_precisely(void)
 void test_scope_ceiling_matches_work_to_capability(void)
 {
    agent_config_t cfg;
-   config_t sys_cfg;
+   agent_route_policy_t sys_cfg;
    memset(&cfg, 0, sizeof(cfg));
    memset(&sys_cfg, 0, sizeof(sys_cfg));
-   sys_cfg.model_meta_capability_routing = 1;
+   sys_cfg.capability_routing = 1;
 
    cfg.agent_count = 2;
 
@@ -1645,9 +1645,9 @@ void test_scope_ceiling_matches_work_to_capability(void)
     * bounded-only seat the moment an operator set capability_routing=false. */
    {
       cfg.agents[1].enabled = 1; /* re-enable after the KIND-trap assertions above */
-      config_t off_cfg;
+      agent_route_policy_t off_cfg;
       memset(&off_cfg, 0, sizeof(off_cfg));
-      off_cfg.model_meta_capability_routing = 0;
+      off_cfg.capability_routing = 0;
       assert(agent_route_with_caps_scoped(&cfg, "code", &off_cfg, 0, 0, AGENT_SCOPE_BOUNDED) ==
              &cfg.agents[0]);
       assert(agent_route_with_caps_scoped(&cfg, "code", &off_cfg, 0, 0, AGENT_SCOPE_WHOLE_TASK) ==
@@ -1667,10 +1667,10 @@ void test_scope_ceiling_matches_work_to_capability(void)
 void test_prefer_local_orders_but_never_bypasses(void)
 {
    agent_config_t cfg;
-   config_t sys_cfg;
+   agent_route_policy_t sys_cfg;
    memset(&cfg, 0, sizeof(cfg));
    memset(&sys_cfg, 0, sizeof(sys_cfg));
-   sys_cfg.model_meta_capability_routing = 1;
+   sys_cfg.capability_routing = 1;
 
    cfg.agent_count = 2;
 
@@ -1701,12 +1701,12 @@ void test_prefer_local_orders_but_never_bypasses(void)
    strcpy(cfg.agents[1].api_key, "k");
 
    /* Off: cheapest-first wins, so the paid remote seat takes bounded work. */
-   sys_cfg.prefer_local_agents = 0;
+   sys_cfg.prefer_local = 0;
    assert(agent_route_with_caps_scoped(&cfg, "code", &sys_cfg, 0, 0, AGENT_SCOPE_BOUNDED) ==
           &cfg.agents[1]);
 
    /* On: the local seat wins every time for work it can take. */
-   sys_cfg.prefer_local_agents = 1;
+   sys_cfg.prefer_local = 1;
    for (int i = 0; i < 6; i++)
       assert(agent_route_with_caps_scoped(&cfg, "code", &sys_cfg, 0, 0, AGENT_SCOPE_BOUNDED) ==
              &cfg.agents[0]);
@@ -1739,10 +1739,10 @@ static int route_test_degrade_all(const char *name)
 void test_prefer_healthy_over_degraded(void)
 {
    agent_config_t cfg;
-   config_t sys_cfg;
+   agent_route_policy_t sys_cfg;
    memset(&cfg, 0, sizeof(cfg));
    memset(&sys_cfg, 0, sizeof(sys_cfg));
-   sys_cfg.model_meta_capability_routing = 1;
+   sys_cfg.capability_routing = 1;
    cfg.agent_count = 2;
    /* Assert the precondition rather than relying on the NULL default: a prior
     * test that left a degraded filter registered would otherwise corrupt this. */

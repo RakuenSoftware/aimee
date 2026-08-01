@@ -463,7 +463,7 @@ void mem_scan(app_ctx_t *ctx, int argc, char **argv)
    (void)argc;
    (void)argv;
    char dirs[8][MAX_PATH_LEN];
-   int dir_count = config_conversation_dirs(&s_mem_cfg, dirs, 8);
+   int dir_count = config_conversation_dirs(dirs, 8);
    kb_client_memory_scan_conversations(dirs, dir_count);
    if (ctx->json_output)
       emit_ok_ctx(ctx->json_fields, ctx->response_profile);
@@ -533,7 +533,7 @@ void mem_drain(app_ctx_t *ctx, int argc, char **argv)
    opt_parsed_t opts;
    opt_parse(argc, argv, NULL, &opts);
    int timeout = opt_get_int(&opts, "timeout", 0);
-   const char *embed_cmd = config_embedding_command(&s_mem_cfg, NULL);
+   const char *embed_cmd = config_embedding_command_current(NULL);
 
    char *resp_json = kb_client_queue_drain_json(embed_cmd, timeout);
    cJSON *resp = resp_json ? cJSON_Parse(resp_json) : NULL;
@@ -576,8 +576,8 @@ void mem_drain(app_ctx_t *ctx, int argc, char **argv)
     * of running this from a DB-owning client or auxiliary process. */
    memory_cognify_queue_stats_t cog_stats;
    memset(&cog_stats, 0, sizeof(cog_stats));
-   if (s_mem_cfg.memory_cognify_enabled && s_mem_cfg.memory_cognify_command[0])
-      (void)memory_cognify_drain(&s_mem_cfg, timeout, &cog_stats);
+   if (config_memory_cognify_enabled() && config_memory_cognify_command()[0])
+      (void)memory_cognify_drain(timeout, &cog_stats);
 
    if (ctx->json_output)
    {
@@ -602,7 +602,7 @@ void mem_drain(app_ctx_t *ctx, int argc, char **argv)
 
    printf("Async memory queue drained: processed=%d pending=%d running=%d failed=%d\n",
           stats.processed, stats.pending, stats.running, stats.failed);
-   if (s_mem_cfg.memory_cognify_enabled)
+   if (config_memory_cognify_enabled())
       printf("Cognify queue: processed=%d pending=%d failed=%d retried=%d\n", cog_stats.processed,
              cog_stats.pending, cog_stats.failed, cog_stats.retried);
 }

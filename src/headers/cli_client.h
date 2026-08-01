@@ -210,7 +210,11 @@ int cli_v1_subcommands(const char *cmd, char *out, size_t cap);
 
 /* Forward a CLI command to the server over its /v1 HTTP surface.
  * Returns 0 on success, >0 on application error, -1 on transport/protocol
- * error (caller should fall back to in-process execution).
+ * error (caller should fall back to in-process execution). In JSON mode an
+ * application error prints the complete server envelope (including "status")
+ * to stdout and returns nonzero; successful JSON omits the top-level "status".
+ * Error JSON may retain the server's legacy string "error" alongside the
+ * normalized "message". Human mode prints the best available message to stderr.
  * argc/argv are the args AFTER the command name (e.g., for "aimee memory search foo",
  * argv = ["search", "foo"]). The route's skip_subcmd controls whether the first
  * arg is stripped before marshaling. */

@@ -474,7 +474,7 @@ static int chat_codex_effort_allowed(const char *effort)
 
 static void chat_stream_worker_codex(compute_ctx_t *cctx, const char *message,
                                      const char *thread_id, const char *cwd, const char *model,
-                                     const char *effort, const config_t *cfg)
+                                     const char *effort)
 {
    compute_pool_set_job(POOL_JOB_CHAT, "provider=codex thread=%s",
                         thread_id && thread_id[0] ? thread_id : "new");
@@ -487,22 +487,32 @@ static void chat_stream_worker_codex(compute_ctx_t *cctx, const char *message,
    creq.cwd = cwd && cwd[0] ? cwd : NULL;
    creq.system_prompt = system_prompt;
    creq.user_prompt = message;
-   const char *codex_model =
-       chat_model_passthrough_allowed(model) ? model : (cfg ? cfg->codex_model : "");
-   creq.model = codex_model && codex_model[0] ? codex_model : NULL;
+   /* Both are copied out: creq holds them across the blocking Codex stream
+    * below, far past the point an accessor's thread-local buffer is reclaimed. */
+   char codex_model_buf[CONFIG_COPY_MAX] = "";
+   char codex_effort_buf[CONFIG_COPY_MAX] = "";
+   if (chat_model_passthrough_allowed(model))
+      snprintf(codex_model_buf, sizeof(codex_model_buf), "%s", model);
+   else
+      config_codex_model_copy(codex_model_buf, sizeof(codex_model_buf));
+   creq.model = codex_model_buf[0] ? codex_model_buf : NULL;
+
    int codex_effort_explicit = chat_codex_effort_allowed(effort);
-   const char *codex_effort =
-       codex_effort_explicit ? effort : (cfg ? cfg->model_reasoning_effort : "");
+   if (codex_effort_explicit)
+      snprintf(codex_effort_buf, sizeof(codex_effort_buf), "%s", effort);
+   else
+      config_model_reasoning_effort_copy(codex_effort_buf, sizeof(codex_effort_buf));
+   const char *codex_effort = codex_effort_buf;
    /* §5: cap (only lower) the config-derived effort by turn complexity. An
     * explicit per-request override is left untouched. */
-   if (cfg && cfg->reasoning_cap_enabled && !codex_effort_explicit)
+   if (config_reasoning_cap_enabled() && !codex_effort_explicit)
    {
       int score = reasoning_complexity_score(1, message ? strlen(message) : 0, 1);
       codex_effort = reasoning_effort_capped(codex_effort, score);
    }
    creq.reasoning_effort = chat_codex_effort_allowed(codex_effort) ? codex_effort : NULL;
    creq.timeout_ms = -1;
-   creq.autonomous = cfg && cfg->autonomous;
+   creq.autonomous = config_autonomous();
 
    /* Release the compute budget slot before entering the blocking Codex
     * app-server stream. Codex may call back into aimee MCP tools, and those
@@ -536,20 +546,20 @@ static void chat_agent_add_default_roles(agent_t *ag)
       snprintf(ag->roles[ag->role_count++], sizeof(ag->roles[0]), "%s", roles[i]);
 }
 
-static void chat_agent_add_legacy_openai(agent_config_t *acfg, const config_t *cfg)
+static void chat_agent_add_legacy_openai(agent_config_t *acfg)
 {
-   if (!acfg || !cfg || acfg->agent_count >= MAX_AGENTS || agent_find(acfg, "openai"))
+   if (!acfg || acfg->agent_count >= MAX_AGENTS || agent_find(acfg, "openai"))
       return;
 
    agent_t *ag = &acfg->agents[acfg->agent_count++];
    memset(ag, 0, sizeof(*ag));
    snprintf(ag->name, sizeof(ag->name), "openai");
    snprintf(ag->endpoint, sizeof(ag->endpoint), "%s",
-            cfg->openai_endpoint[0] ? cfg->openai_endpoint : "https://api.openai.com/v1");
+            config_openai_endpoint()[0] ? config_openai_endpoint() : "https://api.openai.com/v1");
    snprintf(ag->model, sizeof(ag->model), "%s",
-            cfg->openai_model[0] ? cfg->openai_model : "gpt-4o");
-   if (cfg->openai_key_cmd[0])
-      snprintf(ag->auth_cmd, sizeof(ag->auth_cmd), "%s", cfg->openai_key_cmd);
+            config_openai_model()[0] ? config_openai_model() : "gpt-4o");
+   if (config_openai_key_cmd()[0])
+      snprintf(ag->auth_cmd, sizeof(ag->auth_cmd), "%s", config_openai_key_cmd());
    snprintf(ag->auth_type, sizeof(ag->auth_type), "bearer");
    snprintf(ag->provider, sizeof(ag->provider), "openai");
    ag->cost_tier = 1;
@@ -613,15 +623,14 @@ static void chat_agent_add_builtin_tmux_cli(agent_config_t *acfg, const char *na
       snprintf(acfg->default_agent, sizeof(acfg->default_agent), "%s", name);
 }
 
-static void chat_agent_add_builtin_provider(agent_config_t *acfg, const char *provider,
-                                            const config_t *cfg)
+static void chat_agent_add_builtin_provider(agent_config_t *acfg, const char *provider)
 {
    if (!provider)
       return;
-   const char *claude_model = cfg ? cfg->claude_model : "";
-   const char *codex_model = cfg ? cfg->codex_model : "";
+   const char *claude_model = config_claude_model();
+   const char *codex_model = config_codex_model();
    if (strcmp(provider, "openai") == 0)
-      chat_agent_add_legacy_openai(acfg, cfg);
+      chat_agent_add_legacy_openai(acfg);
    else if (strcmp(provider, "claude-code") == 0)
       chat_agent_add_builtin_tmux_cli(acfg, "claude-code", "claude-code", "claude", claude_model);
    else if (strcmp(provider, "claude") == 0 || strcmp(provider, "claude-oauth") == 0)
@@ -662,7 +671,7 @@ static int chat_agent_select_provider(agent_config_t *acfg, const char *provider
 
    /* Auto-use the configured primary even if the operator left it DISABLED. This
     * selector drives the PRIMARY chat path (`provider` is the configured primary
-    * — cfg.provider or a session-pinned primary), so a disabled agent that IS the
+    * — the configured provider or a session-pinned primary), so a disabled agent that IS the
     * configured primary must still serve the turn. Otherwise a disabled `claude`
     * both suppressed the built-in fallback (agent_find sees it regardless of
     * `enabled`) AND failed the enabled-only match above, surfacing the misleading
@@ -751,7 +760,7 @@ static int chat_cli_cancel_check(void *ud)
 
 static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, const char *cwd,
                                      const char *aimee_sid, const char *provider,
-                                     const char *model_override, const config_t *cfg)
+                                     const char *model_override)
 {
    compute_pool_set_job(POOL_JOB_CHAT, "provider=%s", provider && provider[0] ? provider : "agent");
 
@@ -760,7 +769,7 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
    agent_config_t acfg;
    if (agent_load_config(&acfg) != 0)
       memset(&acfg, 0, sizeof(acfg));
-   chat_agent_add_builtin_provider(&acfg, provider, cfg);
+   chat_agent_add_builtin_provider(&acfg, provider);
 
    char selected[MAX_AGENT_NAME];
    const char *lookup_provider = chat_provider_lookup_name(provider);
@@ -929,7 +938,7 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
 static void chat_stream_worker_primary_session(compute_ctx_t *cctx, const char *message,
                                                const char *provider_sid, const char *cwd,
                                                const char *aimee_sid, const char *provider,
-                                               const char *model_override, const config_t *cfg)
+                                               const char *model_override)
 {
    compute_pool_set_job(POOL_JOB_CHAT, "provider=%s session=%s",
                         provider && provider[0] ? provider : "agent",
@@ -940,7 +949,7 @@ static void chat_stream_worker_primary_session(compute_ctx_t *cctx, const char *
    agent_config_t acfg;
    if (agent_load_config(&acfg) != 0)
       memset(&acfg, 0, sizeof(acfg));
-   chat_agent_add_builtin_provider(&acfg, provider, cfg);
+   chat_agent_add_builtin_provider(&acfg, provider);
 
    char selected[MAX_AGENT_NAME];
    const char *lookup_provider = chat_provider_lookup_name(provider);
@@ -1066,12 +1075,12 @@ static int chat_provider_uses_codex_cli(const char *provider)
    return !agent_adapter_agent_is_direct(ag);
 }
 
-static int chat_provider_uses_primary_session(const char *provider, const config_t *cfg)
+static int chat_provider_uses_primary_session(const char *provider)
 {
    agent_config_t acfg;
    if (agent_load_config(&acfg) != 0)
       memset(&acfg, 0, sizeof(acfg));
-   chat_agent_add_builtin_provider(&acfg, provider, cfg);
+   chat_agent_add_builtin_provider(&acfg, provider);
 
    char selected[MAX_AGENT_NAME];
    const char *lookup_provider = chat_provider_lookup_name(provider);
@@ -1082,7 +1091,7 @@ static int chat_provider_uses_primary_session(const char *provider, const config
 }
 
 static void chat_stream_worker_codex_compact(compute_ctx_t *cctx, const char *thread_id,
-                                             const char *cwd, const config_t *cfg)
+                                             const char *cwd)
 {
    if (!thread_id || !thread_id[0])
    {
@@ -1098,7 +1107,7 @@ static void chat_stream_worker_codex_compact(compute_ctx_t *cctx, const char *th
    creq.thread_id = thread_id;
    creq.cwd = cwd && cwd[0] ? cwd : NULL;
    creq.timeout_ms = -1;
-   creq.autonomous = cfg && cfg->autonomous;
+   creq.autonomous = config_autonomous();
 
    compute_ctx_release_budget(cctx);
 
@@ -1124,8 +1133,7 @@ static void chat_stream_worker_codex_compact(compute_ctx_t *cctx, const char *th
 static void chat_stream_worker_primary_session_compact(compute_ctx_t *cctx,
                                                        const char *provider_sid,
                                                        const char *aimee_sid, const char *provider,
-                                                       const char *model_override,
-                                                       const config_t *cfg)
+                                                       const char *model_override)
 {
    compute_pool_set_job(POOL_JOB_CHAT, "provider=%s compact session=%s",
                         provider && provider[0] ? provider : "agent",
@@ -1134,7 +1142,7 @@ static void chat_stream_worker_primary_session_compact(compute_ctx_t *cctx,
    agent_config_t acfg;
    if (agent_load_config(&acfg) != 0)
       memset(&acfg, 0, sizeof(acfg));
-   chat_agent_add_builtin_provider(&acfg, provider, cfg);
+   chat_agent_add_builtin_provider(&acfg, provider);
 
    char selected[MAX_AGENT_NAME];
    const char *lookup_provider = chat_provider_lookup_name(provider);
@@ -1248,9 +1256,10 @@ void chat_stream_worker(void *arg)
     * OpenAI-compat path -- the primary `aimee chat` CLI execs the provider CLI,
     * which reaches the gateway, never this worker. See router_advise.c. */
 
-   config_t cfg;
-   config_load(&cfg);
-   const char *provider = cfg.provider[0] ? cfg.provider : "claude";
+   /* Copied out: `provider` is read repeatedly below and handed to workers. */
+   char provider_buf[CONFIG_COPY_MAX];
+   config_provider_copy(provider_buf, sizeof(provider_buf));
+   const char *provider = provider_buf[0] ? provider_buf : "claude";
    /* A session-pinned primary agent (set via POST /v1/sessions/<id>/primary)
     * overrides the global default provider for this session, so the active
     * primary can be switched at runtime without touching durable config. */
@@ -1262,10 +1271,10 @@ void chat_stream_worker(void *arg)
    {
       compute_ctx_release_budget(cctx);
       if (compact)
-         chat_stream_worker_codex_compact(cctx, provider_sid, cwd, &cfg);
+         chat_stream_worker_codex_compact(cctx, provider_sid, cwd);
       else
-         chat_stream_worker_codex(cctx, message, provider_sid, cwd, model_override, effort_override,
-                                  &cfg);
+         chat_stream_worker_codex(cctx, message, provider_sid, cwd, model_override,
+                                  effort_override);
       return;
    }
    /* Everything else — claude-oauth / codex-oauth / claude / claude-code (the
@@ -1275,14 +1284,14 @@ void chat_stream_worker(void *arg)
     * process cannot multiplex concurrent sessions into isolated persistent
     * panes, which is the whole point of a per-session tmux CLI session. */
    compute_ctx_release_budget(cctx);
-   if (chat_provider_uses_primary_session(provider, &cfg))
+   if (chat_provider_uses_primary_session(provider))
    {
       if (compact)
          chat_stream_worker_primary_session_compact(cctx, provider_sid, aimee_sid, provider,
-                                                    model_override, &cfg);
+                                                    model_override);
       else
          chat_stream_worker_primary_session(cctx, message, provider_sid, cwd, aimee_sid, provider,
-                                            model_override, &cfg);
+                                            model_override);
    }
    else if (compact)
    {
@@ -1290,6 +1299,6 @@ void chat_stream_worker(void *arg)
       compute_ctx_free(cctx);
    }
    else
-      chat_stream_worker_agent(cctx, message, cwd, aimee_sid, provider, model_override, &cfg);
+      chat_stream_worker_agent(cctx, message, cwd, aimee_sid, provider, model_override);
    return;
 }

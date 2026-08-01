@@ -680,7 +680,7 @@ static cJSON *marshal_provider_set(int argc, char **argv)
 
 static cJSON *marshal_provider_list(int argc, char **argv)
 {
-   static const char *bool_flags[] = {"available", "json", NULL};
+   static const char *bool_flags[] = {"available", "all", "json", NULL};
    rpc_opts_t opts;
    rpc_parse(argc, argv, bool_flags, &opts);
    cJSON *req = marshal_no_args("provider.list");
@@ -688,6 +688,8 @@ static cJSON *marshal_provider_list(int argc, char **argv)
       return NULL;
    if (rpc_get(&opts, "available"))
       cJSON_AddTrueToObject(req, "available_only");
+   if (rpc_get(&opts, "all"))
+      cJSON_AddTrueToObject(req, "all");
    if (rpc_get(&opts, "json"))
       cJSON_AddTrueToObject(req, "json");
    return req;
@@ -1206,6 +1208,7 @@ static const char *const MARSHAL_NO_ARGS[] = {
     "episode.list",
     "hud.status",
     "identity.show",
+    "kb.health",
     "kb.ingest.status",
     "mcp.audit",
     "memory.stats",
@@ -1274,12 +1277,17 @@ static const struct
     {"kb.build", marshal_kb_build},
     {"kb.docs.push", marshal_kb_docs_push},
     {"kb.ingest", marshal_kb_ingest},
+    {"kb.reembed", marshal_kb_reembed},
+    {"kb.health", marshal_kb_status},
     {"kb.search", marshal_kb_search},
     {"kb.status", marshal_kb_status},
     {"kb.update", marshal_kb_update},
     {"mcp.recheck", marshal_mcp_recheck},
+    {"memory.embed", marshal_memory_embed},
     {"memory.archive", marshal_memory_archive},
     {"memory.benchmark", marshal_memory_benchmark},
+    {"memory.delete", marshal_memory_delete},
+    {"memory.supersede", marshal_memory_supersede},
     {"memory.get", marshal_memory_get},
     {"memory.identity", marshal_memory_identity},
     {"memory.list", marshal_memory_list},

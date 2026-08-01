@@ -16,7 +16,7 @@
 # Env:
 #   AIMEE_BIN     path to the aimee client      (default: aimee on PATH)
 #   SERVER_URL    server base URL               (default http://localhost:8740)
-#   BEARER        server bearer token           (default aimee-local-dev)
+#   BEARER        server bearer token           (required for full mode)
 #   FORCE_MODE    full | selfcheck              (default: auto-detect by probing)
 #
 # Exit code: 0 = checks for the selected mode passed.
@@ -25,7 +25,7 @@ set -u
 
 AIMEE_BIN="${AIMEE_BIN:-aimee}"
 SERVER_URL="${SERVER_URL:-http://localhost:8740}"
-BEARER="${BEARER:-aimee-local-dev}"
+BEARER="${BEARER:-}"
 FORCE_MODE="${FORCE_MODE:-}"
 
 red()   { printf '\033[31m%s\033[0m\n' "$*"; }
@@ -44,8 +44,12 @@ bad()  { red   "  FAIL  $*"; FAIL=$((FAIL + 1)); }
 #  - AIMEE_SERVER_URL/_TOKEN: the cross-platform thin client (incl. Windows),
 #    which has no config_load and reads the URL straight from the environment.
 host_port="${SERVER_URL#http://}"; host_port="${host_port#https://}"; host_port="${host_port%/}"
+case "$SERVER_URL" in
+  https://*) endpoint_scheme=tls ;;
+  *)         endpoint_scheme=tcp ;;
+esac
 export AIMEE_API_CLIENT_TRANSPORT=http
-export AIMEE_API_ENDPOINT="tcp:${host_port}"
+export AIMEE_API_ENDPOINT="${endpoint_scheme}:${host_port}"
 export AIMEE_API_BEARER="${BEARER}"
 export AIMEE_SERVER_URL="${SERVER_URL}"
 export AIMEE_SERVER_TOKEN="${BEARER}"
@@ -65,11 +69,16 @@ fi
 # Decide mode: probe the server unless FORCE_MODE pins it.
 mode="$FORCE_MODE"
 if [[ -z "$mode" ]]; then
-  if curl -fsS --max-time 5 -H "Authorization: Bearer ${BEARER}" "${SERVER_URL}/v1/health" >/dev/null 2>&1; then
+  if [[ -n "$BEARER" ]] && curl -fsS --max-time 5 -H "Authorization: Bearer ${BEARER}" "${SERVER_URL}/v1/health" >/dev/null 2>&1; then
     mode="full"
   else
     mode="selfcheck"
   fi
+fi
+
+if [[ "$mode" == "full" && -z "$BEARER" ]]; then
+  red "BEARER is required for full mode"
+  exit 2
 fi
 
 if [[ "$mode" == "full" ]]; then

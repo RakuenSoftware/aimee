@@ -39,7 +39,7 @@ nodes:
     in:
       src: plan.out
     params:
-      roundtable: plan
+      roundtable: default
       quorum: 3
       max_rounds: 6
     on_pass: implement

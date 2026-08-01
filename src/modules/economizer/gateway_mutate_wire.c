@@ -47,11 +47,8 @@ void gw_mutate_ctx_free(gw_mutate_ctx_t *ctx)
 
 int gw_mutate_is_enabled(void)
 {
-   config_t cfg;
-   if (config_load(&cfg) != 0)
-      return 0;
    /* aggressive tier (P3): live-primary mutation needs enabled && aggressive && the lever. */
-   return econ_gateway_mutate_on(&cfg);
+   return econ_gateway_mutate_on_current();
 }
 
 int gw_mutate_upstream_ok(int upstream_is_anthropic)
@@ -76,13 +73,10 @@ void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
    if (!container || !key)
       return;
 
-   config_t cfg;
-   if (config_load(&cfg) != 0)
-      return;
-   if (!econ_gateway_mutate_on(&cfg))
+   if (!econ_gateway_mutate_on_current())
       return; /* dark unless the economizer tier is aggressive (OpenAI-family egress only) */
    econ_preset_t ep;
-   econ_preset(&cfg, &ep);
+   econ_preset_current(&ep);
    ctx->mutate_on = 1;
    ctx->ttl_ms = ep.gateway_session_disable_ttl_ms;
 
@@ -120,7 +114,7 @@ void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
    rc.gateway_seam = 1;
    rc.compress = 1; /* D3: compress-only at the gateway in v1 (fold deferred) */
    rc.measure_only = 0;
-   rc.fold.retained_msgs = cfg.fold_retained_msgs;
+   rc.fold.retained_msgs = config_fold_retained_msgs();
 
    reduce_result_t res;
    memset(&res, 0, sizeof(res));

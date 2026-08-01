@@ -5,6 +5,7 @@
 #define _GNU_SOURCE
 #endif
 #include "memory_core_internal.h"
+#include "db2/memory_scope_query.h"
 /* memory_core_search.c: split from memory_core.c into a real translation unit
  * (was memory_core_search.inc, textually included only to stay under the
  * line-check ceiling). Cross-TU declarations live in the module header. */
@@ -92,6 +93,14 @@ static int memory_search_impl(char **clusters, int cluster_count, int limit, sea
       limit = 20;
    if (limit > max)
       limit = max;
+
+   /* Legacy conversation windows have no project/workspace identity.  A
+    * current-scope request must not mistake those unscoped rows for local
+    * memory. Explicit all-project scope preserves the compatibility route. */
+   db2_memory_scope_context_t request_scope;
+   db2_memory_scope_context_get(&request_scope);
+   if (request_scope.active && !request_scope.include_all)
+      return 0;
 
    /* Parse cluster terms and load stopwords */
    char *all_terms[256];
@@ -408,9 +417,7 @@ int memory_collect_chunk_matches(const char *query, int limit, memory_t *out, in
    if (!scratch)
       return count;
    int cap = 64;
-   config_t cm_cfg;
-   config_load(&cm_cfg);
-   const char *embed_cmd = config_embedding_command(&cm_cfg, NULL);
+   const char *embed_cmd = config_embedding_command_current(NULL);
    int got = memory_collect_memory_matches_via_vector(query, embed_cmd, limit, scratch, cap);
    for (int i = 0; i < got && count < max; i++)
       count = memory_append_unique(out, count, max, &scratch[i]);
@@ -437,9 +444,7 @@ int memory_collect_unit_matches(const char *query, int limit, memory_t *out, int
    if (!scratch)
       return count;
    int cap = 64;
-   config_t mc_cfg;
-   config_load(&mc_cfg);
-   const char *embed_cmd = config_embedding_command(&mc_cfg, NULL);
+   const char *embed_cmd = config_embedding_command_current(NULL);
    int got = memory_collect_unit_matches_via_vector(query, embed_cmd, limit, scratch, cap);
    for (int i = 0; i < got && count < max; i++)
       count = memory_append_unique(out, count, max, &scratch[i]);
@@ -545,9 +550,9 @@ static int memory_semantic_dim_ok(int qdim)
  * active embedding dimension. Returns a multiplier applied to every floor. */
 static double memory_semantic_floor_scale(void)
 {
-   config_t fs_cfg;
-   if (config_load(&fs_cfg) == 0 && fs_cfg.memory_semantic_floor_scale > 0.0)
-      return fs_cfg.memory_semantic_floor_scale;
+   double configured = config_memory_semantic_floor_scale();
+   if (configured > 0.0)
+      return configured;
    int dim = db2_embedding_dim();
    if (dim <= 384)
       return 1.0; /* 384-d builtin: the floors are calibrated for this range */
@@ -904,8 +909,7 @@ int memory_query_plan(const char *query, int limit, int hard_cap, memory_query_p
    memset(out, 0, sizeof(*out));
    out->shape = memory_query_shape(query, norm_query);
    {
-      config_t cfg;
-      if (config_load(&cfg) == 0 && !cfg.memory_routing_enabled)
+      if (!config_memory_routing_enabled())
          out->route = MEM_ROUTE_HYBRID;
       else
          out->route = memory_query_route(query, norm_query, out->shape);

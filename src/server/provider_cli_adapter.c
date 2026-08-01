@@ -5,6 +5,7 @@
 #include "cJSON.h"
 #include "aimee_home.h"      /* aimee_home() — the delegate's /v1 socket path */
 #include "git_cred_inject.h" /* git_cred_forge_configured — no aimee route, no strip */
+#include "runtime_secret.h"
 #include "util.h"
 
 #include <errno.h>
@@ -60,62 +61,15 @@ void provider_cli_free_tokens(char **tokens, int count)
       free(tokens[i]);
 }
 
-static int provider_cli_read_vibe_dotenv(const char *name, char *dst, size_t dst_len)
-{
-   const char *home = getenv("HOME");
-   if (!name || !name[0] || !home || !home[0] || !dst || dst_len == 0)
-      return 0;
-
-   char path[MAX_PATH_LEN];
-   snprintf(path, sizeof(path), "%s/.vibe/.env", home);
-
-   FILE *f = fopen(path, "r");
-   if (!f)
-      return 0;
-
-   char line[MAX_API_KEY_LEN + 128];
-   size_t name_len = strlen(name);
-   int found = 0;
-   while (fgets(line, sizeof(line), f))
-   {
-      char *p = line;
-      if (strncmp(p, "export ", 7) == 0)
-         p += 7;
-      if (strncmp(p, name, name_len) != 0 || p[name_len] != '=')
-         continue;
-
-      char *val = p + name_len + 1;
-      size_t len = strlen(val);
-      while (len > 0 && (val[len - 1] == '\n' || val[len - 1] == '\r'))
-         val[--len] = '\0';
-      if (len >= 2 &&
-          ((val[0] == '"' && val[len - 1] == '"') || (val[0] == '\'' && val[len - 1] == '\'')))
-      {
-         val[len - 1] = '\0';
-         val++;
-      }
-      snprintf(dst, dst_len, "%s", val);
-      found = 1;
-      break;
-   }
-
-   fclose(f);
-   return found;
-}
-
 static int provider_cli_resolve_native_env_key(const char *name, char *dst, size_t dst_len)
 {
    if (!name || !name[0] || !dst || dst_len == 0)
       return 0;
-
-   const char *val = getenv(name);
-   if (val && val[0])
-   {
-      snprintf(dst, dst_len, "%s", val);
-      return 1;
-   }
-
-   return provider_cli_read_vibe_dotenv(name, dst, dst_len);
+   /* The name remains environment-shaped for provider compatibility, but the
+    * value was sealed during first boot and is available only through the
+    * process-local Vault cache. A ~/.vibe/.env fallback would reintroduce a
+    * plaintext credential file on aimee-server and is intentionally forbidden. */
+   return runtime_secret_get(name, dst, dst_len);
 }
 
 static void provider_cli_append_header(char *headers, size_t headers_len, const char *header)
@@ -192,14 +146,16 @@ int provider_cli_adapter_prepare_native_agent(const provider_cli_adapter_t *adap
             provider_cli_append_header(native_agent->extra_headers,
                                        sizeof(native_agent->extra_headers), header);
             snprintf(native_agent->auth_type, sizeof(native_agent->auth_type), "%s", "none");
+            runtime_secret_wipe(header, sizeof(header));
          }
+         runtime_secret_wipe(key, sizeof(key));
       }
       else if (!strstr(native_agent->extra_headers, "x-goog-api-key"))
       {
          if (errbuf && errbuf_len > 0)
             snprintf(errbuf, errbuf_len,
-                     "%s is not set; native %s adapter also checked GOOGLE_API_KEY and "
-                     "~/.vibe/.env",
+                     "%s is not present in Vault; native %s adapter also checked "
+                     "GOOGLE_API_KEY in Vault",
                      adapter->native_api_key_env ? adapter->native_api_key_env : "GEMINI_API_KEY",
                      adapter->cli_kind);
          return -1;
@@ -212,8 +168,7 @@ int provider_cli_adapter_prepare_native_agent(const provider_cli_adapter_t *adap
       if (!native_agent->api_key[0])
       {
          if (errbuf && errbuf_len > 0)
-            snprintf(errbuf, errbuf_len,
-                     "%s is not set; native %s adapter also checked ~/.vibe/.env",
+            snprintf(errbuf, errbuf_len, "%s is not present in Vault for native %s adapter",
                      adapter->native_api_key_env, adapter->cli_kind);
          return -1;
       }
@@ -431,9 +386,8 @@ int provider_cli_spawn_argv(const provider_cli_cfg_t *cfg, char *const argv[], i
     * has no credential, aimee's git cannot work either, so stripping would remove
     * the delegate's only route and leave it nothing — breakage dressed as policy.
     * No aimee route, no restriction. */
-   config_t spawn_cfg;
-   int strip_forge_creds = ((config_load(&spawn_cfg) != 0) || spawn_cfg.require_aimee_git) &&
-                           git_cred_forge_configured();
+   int strip_forge_creds =
+       (!config_present() || config_require_aimee_git()) && git_cred_forge_configured();
 
    /* Resolve the delegate's aimee endpoint before forking (aimee_home may read/
     * allocate). See delegate_child_export_aimee_endpoint. */

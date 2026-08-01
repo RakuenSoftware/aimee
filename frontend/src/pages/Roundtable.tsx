@@ -352,8 +352,14 @@ export default function Roundtable() {
                   fontWeight: p.active ? 700 : 400,
                 }}
               >
-                {p.name}
-                {p.active ? " ★" : ""}
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  {p.active && (
+                    <span aria-label="Default roundtable" title="Default roundtable" style={{ color: "#b26a00" }}>
+                      ★
+                    </span>
+                  )}
+                  <span>{p.name}</span>
+                </span>
               </Button>
             ))}
             <Button size="md" onClick={newPreset} style={{ borderStyle: "dashed" }} title="Create a new roundtable preset, prompting for its name.">
