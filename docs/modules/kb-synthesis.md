@@ -5,7 +5,9 @@
 `kb-synthesis` is an optional, default-off, heavyweight knowledge-curation module. It uses a capable LLM or
 substantial GPU to reason across already-ingested evidence, resolve higher-order relationships, and write
 cited narrative artifacts such as topic synthesis. It is not normal response-composition, required
-embedding/reranking, code indexing, basic memory recall, or the deterministic Tier-A ingest/index lane.
+embedding, code indexing, basic memory recall, or the deterministic ingest/index lane. There is
+no reranking role: the cross-encoder was measured out of the stack and `kb_ranker` (linear, in-process)
+took its place.
 
 ## Public contracts
 
@@ -36,18 +38,28 @@ consumer even when no synthesized artifact exists.
 
 ## Providers and readiness
 
-Tier-B stages require an explicitly configured capable provider through `tier_b.*` or a synthesis sidecar;
-`kb_curator_provider_for_stage` deliberately provides no Tier-A environment fallback. Readiness is idle,
-not degraded core, when disabled or unconfigured. It is ready only when storage, source evidence, provider,
-prompt/version policy, and bounded worker lane are all operational.
+The reasoning stages resolve a provider from `tier_b.*` config, or failing that from the deployment's
+single synthesis endpoint (`config_synth_chat_endpoint`, i.e. `AIMEE_LLM_URL`). They never fall back to
+`LLM_ENDPOINT`, which `kb_curator_provider_for_stage` reserves for the mechanical stages: that variable
+is the small-model interface, and letting a weak model serve the reasoning stages is the graph-poisoning
+case the stage split exists to prevent. Both stage families now resolve to one model in practice, because
+measurement did not support running a cheaper one on the mechanical stages — see
+[Choosing a synthesis model](../SYNTHESIS_MODELS.md).
+
+The `tier_b.*` config prefix and `AIMEE_KB_CURATOR_TIER_B_API_KEY` are the surviving spellings of the
+retired Tier-A/Tier-B split. They are load-bearing identifiers, so they are quoted here literally; the
+concept they name is just "synthesis" now.
+
+Readiness is idle, not degraded core, when disabled or unconfigured. It is ready only when storage,
+source evidence, provider, prompt/version policy, and bounded worker lane are all operational.
 
 ## Configuration and activation
 
-- `runtime_toggle.supported`: `false`; the target optional boundary is profile-gated at build/startup, not hot-toggled in a live process, and separation from Tier-A stages remains implementation work.
+- `runtime_toggle.supported`: `false`; the target optional boundary is profile-gated at build/startup, not hot-toggled in a live process, and separation from the mechanical ingest/index stages remains implementation work.
 
 The descriptor sets `enabled_by_default` to false. Current concrete gates include
 `kb.curator.synthesize.enabled`, command/provider settings, source count, worker scheduling, and related
-Tier-B stage controls. A future profile that excludes the physical module must hide this family from web
+reasoning-stage controls. A future profile that excludes the physical module must hide this family from web
 configuration and expose it only on the KB management GUI when the module is selected.
 
 ## Surfaces
@@ -74,7 +86,7 @@ bounded, linked, and accepted under artifact policy.
 ## Supported journeys
 
 When currently enabled, the curator selects an eligible high-centrality topic, gathers top-K linked evidence, sends
-a grounded `synthesize_topic` request to the capable Tier-B provider, validates the response, writes a
+a grounded `synthesize_topic` request to the synthesis provider, validates the response, writes a
 `synthesis` artifact, and links it about the topic and to its cited sources. Acceptance for the future
 optional profile requires ingest, embedding, reranking, code intelligence, memory search, and normal
 answers to remain operational when this module is omitted.
@@ -90,20 +102,20 @@ malformed output, provider failure, or artifact-write failure must not mark a to
 
 Operators use curator health, queue depth, stage/provider readiness, prompt/model version, worker logs,
 artifact/link queries, and `/v1/synthesize` results. Diagnostics must preserve decoded process/HTTP/database
-errors and distinguish Tier-B unavailable, no eligible evidence, parse rejection, and persistence failure;
+errors and distinguish synthesis provider unavailable, no eligible evidence, parse rejection, and persistence failure;
 core memory health must not fail merely because `kb-synthesis` is idle.
 
 ## Compatibility
 
 Curator route envelopes, stage names, artifact kinds/states, `about`/`cites` provenance, prompt versions,
 and provider-tier isolation are compatibility contracts. Moving files into
-`src/modules/kb-synthesis` must not pull Tier-A extraction, embedding, indexing, or core response assembly
+`src/modules/kb-synthesis` must not pull mechanical-stage extraction, embedding, indexing, or core response assembly
 with them, and stored artifacts require explicit migration if their schema or semantics change.
 
 ## Extension and removal
 
 Additional heavyweight reasoning passes belong here only when they consume established KB evidence,
 retain provenance, share provider/readiness policy, and have a real management journey and consumer.
-Self-only curator experiments should be deleted after liveness review. After the Tier-A/Tier-B split, the
+Self-only curator experiments should be deleted after liveness review. After the retired Tier-A/Tier-B split, the
 target module must be wholly omittable: exclusion must hide its `config`, routes, GUI, and workers while
 preserving all required memory journeys.

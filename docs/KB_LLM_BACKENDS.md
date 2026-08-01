@@ -8,6 +8,10 @@ container and no first-boot download. Select the model in the wizard's Deploy to
 `embedding_model`. Until one is selected the KB serves a builtin lexical embedder and logs that it is
 doing so. Retrieval works, but it is not dense.
 
+**Which model to put behind the synthesis endpoint — the measured
+candidates, their numbers and their caveats — is
+[Choosing a synthesis model](SYNTHESIS_MODELS.md).**
+
 To embed against something else, set `AIMEE_EMBEDDER_URL`. That takes precedence, and the bundled
 model stays unloaded.
 
@@ -79,4 +83,11 @@ Before enabling traffic:
 5. stop the backend and confirm honest degradation;
 6. restart it and confirm queued work resumes.
 
-See [Inference tiers](AIMEE_KB_SYNTH_TIERS.md).
+Step 5 is the one people skip. A backend that looks healthy under load and lies
+about it when it is down costs more than one that never started.
+
+Use [generated configuration](gen/configuration.md) for current names. Container
+environment values override file values where documented.
+
+See [Inference tiers](AIMEE_KB_SYNTH_TIERS.md) and
+[Choosing a synthesis model](SYNTHESIS_MODELS.md).
