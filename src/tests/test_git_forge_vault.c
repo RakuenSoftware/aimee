@@ -142,7 +142,6 @@ int main(void)
       assert(git_identity_resolve(repo, name, sizeof(name), email, sizeof(email)) == 1);
       assert(strcmp(name, "Sealed Operator") == 0);
       assert(strcmp(email, "sealed@example.test") == 0);
-
    }
 
    char clean[320];
