@@ -155,14 +155,16 @@ cJSON *handle_git_commit(cJSON *args)
     * whose commits carry two distinct authors, and the standing directive
     * forbids those. */
    char author_name[256] = "", author_email[256] = "";
-   int have_identity =
-       git_identity_get(author_name, sizeof(author_name), author_email, sizeof(author_email));
+   int have_identity = git_identity_resolve(NULL, author_name, sizeof(author_name), author_email,
+                                            sizeof(author_email));
    if (have_identity < 0)
       return mcp_text("error: could not read the git identity from the vault");
    if (have_identity == 0)
       return mcp_text("error: no git identity is configured, so this commit would have no author. "
-                      "Seal AIMEE_GIT_AUTHOR_NAME and AIMEE_GIT_AUTHOR_EMAIL into the vault at "
-                      "install time (both, or neither takes effect).");
+                      "Set one on this checkout with `git config user.name` and "
+                      "`git config user.email` (both, or neither takes effect), or seal "
+                      "AIMEE_GIT_AUTHOR_NAME and AIMEE_GIT_AUTHOR_EMAIL into the vault to apply "
+                      "one everywhere.");
 
    char *esc_msg = shell_escape(jmsg->valuestring);
    char *esc_name = shell_escape(author_name);

@@ -42,10 +42,10 @@ int git_forge_vault_server_token(char *out, size_t out_len);
  * vault. Supplied at installation as AIMEE_GIT_AUTHOR_NAME / _EMAIL and sealed by
  * the first-boot env bootstrap, like every other install-time secret.
  *
- * aimee cannot fall back to the machine's git config: git_ops.c points
- * GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM at /dev/null on purpose, so a commit
- * carries the identity aimee supplies or it carries none and fails. This is that
- * identity. */
+ * git_ops.c points GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM at /dev/null on
+ * purpose, so a commit carries the identity aimee supplies or it carries none
+ * and fails. This is that identity; git_identity_resolve below falls back to the
+ * checkout's own user.name/user.email when it is unset. */
 #define GIT_AUTHOR_NAME_CRED  "author_name"
 #define GIT_AUTHOR_EMAIL_CRED "author_email"
 
@@ -55,5 +55,28 @@ int git_forge_vault_server_token(char *out, size_t out_len);
  * identity is not an identity, so it reports 0 rather than committing as half a
  * person. */
 int git_identity_get(char *name_out, size_t name_len, char *email_out, size_t email_len);
+
+/* Resolve the commit identity for a checkout: the sealed vault identity above
+ * when present, otherwise the identity the OPERATOR has already configured for
+ * that repository (`user.name` / `user.email`).
+ *
+ * The vault seal is an install-time step, so requiring it as the only source
+ * stranded any already-running agent that reached a commit with a clean vault:
+ * it could only stop and ask a human to re-run installation. The operator's own
+ * git identity is not a persona aimee invented — it is the exact identity a
+ * plain `git commit` in that checkout would use — so preferring the seal and
+ * falling back to it keeps the "commit as the configured operator, or not at
+ * all" rule while letting the work proceed.
+ *
+ * Only `user.name` and `user.email` are read, and only as data to be passed
+ * back through `git -c`. That does not reintroduce what git_ops.c's
+ * GIT_CONFIG_GLOBAL/SYSTEM nulling exists to prevent: ambient config changing
+ * how git BEHAVES (insteadOf rewrites, hooks, credential helpers).
+ *
+ * Same 1/0/-1 contract as git_identity_get, and the same all-or-nothing rule:
+ * a name without an email is not an identity. |repo_dir| may be NULL to use the
+ * current directory. */
+int git_identity_resolve(const char *repo_dir, char *name_out, size_t name_len, char *email_out,
+                         size_t email_len);
 
 #endif /* GIT_FORGE_VAULT_H */

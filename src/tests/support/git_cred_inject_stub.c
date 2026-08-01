@@ -63,3 +63,13 @@ int git_identity_get(char *name_out, size_t name_len, char *email_out, size_t em
    snprintf(email_out, email_len, "%s", "operator@example.test");
    return 1;
 }
+
+int git_identity_resolve(const char *repo_dir, char *name_out, size_t name_len, char *email_out,
+                         size_t email_len);
+
+int git_identity_resolve(const char *repo_dir, char *name_out, size_t name_len, char *email_out,
+                         size_t email_len)
+{
+   (void)repo_dir; /* the stub always has a sealed identity, so no fallback runs */
+   return git_identity_get(name_out, name_len, email_out, email_len);
+}
