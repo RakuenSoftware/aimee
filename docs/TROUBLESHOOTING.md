@@ -80,10 +80,11 @@ unsandboxed shell there is a host-root escalation. Give the delegate a workspace
 
 ## A settings change seems to have been ignored
 
-Read the log before assuming the field needs a restart:
+Read the log before assuming the field needs a restart. The C server writes to a file, not to the
+container's stdout, so `docker logs` will not show this:
 
 ```bash
-docker logs <server> 2>&1 | grep '^config: config file change'
+docker exec <server> grep 'config file change' /var/lib/aimee/server.log | tail -3
 ```
 
 `rejected (kept running config)` means the file did not validate and the previous configuration is
