@@ -62,6 +62,7 @@ enforce, so this table cannot drift from what is scoreable.
 | promptfix | google_gemma-4-E4B-it | 70 | VALID | prompt correction |
 | promptfix | ibm-granite_granite-4.0-1b | 70 | VALID | prompt correction |
 | promptfix | ibm-granite_granite-4.1-3b | 70 | VALID | prompt correction |
+| small-corpus | E2B.UD-Q6_K_XL | 1000 | INVALID: incomplete (1000/70) |  |
 | sub1b | LFM2-350M-Extract | 70 | VALID | sub-1B ladder, thinking ON |
 | sub1b | LFM2.5-230M | 70 | VALID | sub-1B ladder, thinking ON |
 | sub1b | Qwen3-0.6B | 70 | VALID | sub-1B ladder, thinking ON |
