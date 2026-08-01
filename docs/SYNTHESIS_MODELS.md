@@ -171,11 +171,14 @@ number: that the tag still carries gemma-4 architecture support, that
 target lives (it moved from `examples/` to `tools/`, which changes the cmake
 flags).
 
-**The model-to-repo mapping is unverified.** `gemma-4-E2B-it` and `gemma-4-E4B-it`
-map to `ggml-org/gemma-4-E{2,4}B-it-GGUF:Q4_K_M`, taken from the benchmark
-harnesses. That those exact repos and that quantisation tag exist has not been
-confirmed against the Hub. A wrong name fails visibly at download rather than
-silently, but it fails.
+**The model-to-repo mapping is fixed at build time, not resolved at run time.**
+`gemma-4-E2B-it` and `gemma-4-E4B-it` map to
+`unsloth/gemma-4-E{2,4}B-it-UD-Q6_K_XL.gguf`, fetched by exact filename and
+checked against the digest above. An earlier draft resolved a quant *tag*
+(`:Q4_K_M`) at run time instead, which is worse than it sounds: that quantisation
+is not published in these repos at all, and llama.cpp falls back to another file
+when the named quant is absent — so it would not have failed, it would have
+served something else.
 
 The full measurement record, including the defects found in the harness while
 producing these numbers, is in `bench/tier-a/MEASUREMENT_LOG.md`.
