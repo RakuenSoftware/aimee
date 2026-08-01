@@ -62,7 +62,8 @@ enforce, so this table cannot drift from what is scoreable.
 | promptfix | google_gemma-4-E4B-it | 70 | VALID | prompt correction |
 | promptfix | ibm-granite_granite-4.0-1b | 70 | VALID | prompt correction |
 | promptfix | ibm-granite_granite-4.1-3b | 70 | VALID | prompt correction |
-| thinking | Qwen3.5-2B | 52 | INVALID: incomplete (52/70) | thinking ON, cap 8192 — CURRENT |
+| thinking | Qwen3.5-0.8B | 32 | INVALID: incomplete (32/70) | thinking ON, cap 8192 — CURRENT |
+| thinking | Qwen3.5-2B | 70 | VALID | thinking ON, cap 8192 — CURRENT |
 | thinking | Qwen3.6-27B | 70 | INVALID: errored x60 | thinking ON, cap 8192 — CURRENT |
 | thinking | Qwen3.6-35B-A3B | 70 | INVALID: errored x64 | thinking ON, cap 8192 — CURRENT |
 | thinking | gemma-4-12B-it | 70 | VALID | thinking ON, cap 8192 — CURRENT |
