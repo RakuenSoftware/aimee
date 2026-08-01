@@ -88,6 +88,44 @@ if [ -s "$OUT/$L.pred.jsonl" ]; then echo "SKIP $L"; else
   kill $SRV 2>/dev/null; wait $SRV 2>/dev/null; sleep 5
 fi
 
+# --- arm 3: llama.cpp, Q8_0, thinking ON ---
+# Arms 1 and 2 both landed near 0.57, well below the 0.6912 the thinking lane
+# recorded for this model on the same prompt. That gap crosses the thinking
+# variable, so it cannot be read off arms 1 and 2 alone: they answer the runtime
+# question and nothing else. This arm is identical to arm 2 except for
+# --thinking, which makes the thinking delta a one-variable comparison too.
+#
+# There is no transformers counterpart because run_hf.py has no thinking toggle
+# for gemma — its chat template is applied as-is. That asymmetry is itself worth
+# recording: every gemma number in results/gpu is thinking-OFF by construction,
+# not by choice.
+L=E2B.llamacpp.thinking
+if [ -s "$OUT/$L.pred.jsonl" ]; then echo "SKIP $L"; else
+  echo "=== $L (llama.cpp, Q8_0, thinking ON) ==="
+  LOG="$OUT/$L.server.log"
+  $SERVER -hf ggml-org/gemma-4-E2B-it-GGUF:Q8_0 --port "$PORT" -c 8192 \
+      --no-webui --no-mmproj -ngl 99 >"$LOG" 2>&1 &
+  SRV=$!
+  ready=0
+  for _ in $(seq 1 240); do
+    curl -sf "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && { ready=1; break; }
+    kill -0 $SRV 2>/dev/null || break
+    sleep 10
+  done
+  if [ "$ready" = 1 ]; then
+    if $PY harness/run_llamacpp.py --model "$L" --gold data/gold.jsonl \
+         --thinking --max-tokens $MAXTOK \
+         --out "$OUT/$L.pred.jsonl" --base-url "http://127.0.0.1:$PORT" >>"$LOG" 2>&1; then
+      score "$L"
+    else
+      echo "FAIL $L -> runner error"; rm -f "$OUT/$L.pred.jsonl"
+    fi
+  else
+    echo "FAIL $L -> server never healthy: $(tail -2 "$LOG" | tr '\n' ' ' | cut -c1-160)"
+  fi
+  kill $SRV 2>/dev/null; wait $SRV 2>/dev/null; sleep 5
+fi
+
 # --- the comparison the lane exists for ---
 $PY - <<'EOF'
 import json, os

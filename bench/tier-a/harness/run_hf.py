@@ -13,6 +13,46 @@ import time
 
 import prompt
 
+# gemma-4 emits its reasoning on a separate channel and then the answer. The
+# llama.cpp server splits those into reasoning_content and content for us; a raw
+# transformers decode is one stream, so the split has to happen here. It matters:
+# extract_json() takes the span from the first '{' to the LAST '}', mirroring
+# mf_commit_facts, and a reasoning block containing a brace would corrupt that
+# span and be scored as malformed model output.
+# The markers are ASYMMETRIC and that is easy to get wrong: `<|channel>thought`
+# OPENS the thought channel and `<channel|>` CLOSES it — the pipe moves from the
+# left of the word to the right. Splitting on the opener alone leaves the entire
+# chain-of-thought in the answer, and because that text quotes the schema
+# (`{"facts":`), extract_json's first-'{'-to-last-'}' span then runs from inside
+# the reasoning to the end of the real answer and fails to parse. Observed
+# directly: 375-token generations scoring parse_ok=False with reasoning_chars=0.
+THOUGHT_OPEN = "<|channel>"
+THOUGHT_CLOSE = "<channel|>"
+TURN_END = "<turn|>"
+
+
+def split_reasoning(text):
+    """Return (answer, reasoning), mirroring the llama.cpp server's split of
+    content from reasoning_content so both runtimes present the same thing to
+    the scorer. No close marker means no thought channel — the thinking-off
+    case — and the text passes through untouched."""
+    text = text or ""
+    cut = text.rfind(THOUGHT_CLOSE)
+    if cut == -1:
+        return text, ""
+    reasoning = text[:cut]
+    if reasoning.startswith(THOUGHT_OPEN):
+        reasoning = reasoning[len(THOUGHT_OPEN):]
+        # Remove the channel NAME, as a prefix. str.lstrip("thought") would strip
+        # any leading run of t/h/o/u/g/h/t characters, so a reasoning block that
+        # opened with "The note..." would lose letters off the front.
+        if reasoning.startswith("thought"):
+            reasoning = reasoning[len("thought"):]
+        reasoning = reasoning.lstrip()
+    answer = text[cut + len(THOUGHT_CLOSE):]
+    end = answer.find(TURN_END)
+    return (answer[:end] if end != -1 else answer), reasoning
+
 # torch and transformers are imported inside main(), not here, because
 # run_llamacpp.py imports CONF_FLOOR and extract_json from this module and needs
 # neither. At module scope they made the llama.cpp runner depend on a ~2GB GPU
@@ -75,15 +115,20 @@ def extract_json(text):
     return kept, True, True, malformed
 
 
-def build_inputs(tok, note, model_id, sys_prompt):
+def build_inputs(tok, note, model_id, sys_prompt, thinking=None):
     msgs = [
         {"role": "system", "content": sys_prompt},
         {"role": "user", "content": prompt.user_message(note)},
     ]
     kwargs = {}
-    # Qwen3 exposes thinking mode through the chat template; Tier-A disables it.
-    if "qwen3" in model_id.lower():
-        kwargs["enable_thinking"] = False
+    # Both families expose thinking through the chat template and both DEFAULT IT
+    # OFF, so leaving it unset is a choice, not a neutral position. gemma-4's
+    # template reads `enable_thinking | default(false)` and, when on, injects a
+    # `<|think|>` token into the first system turn. Production does not suppress
+    # thinking (kb_curator_provider.c:198), so the benchmark must be able to send
+    # it or it measures a configuration we do not ship.
+    if thinking is not None:
+        kwargs["enable_thinking"] = bool(thinking)
     try:
         return tok.apply_chat_template(msgs, add_generation_prompt=True,
                                        tokenize=False, **kwargs)
@@ -107,6 +152,14 @@ def main():
                     help="production cap is 8192; 512 is ample for this schema and "
                          "bounds a runaway small model. Truncation is recorded.")
     ap.add_argument("--dtype", default="bfloat16")
+    think = ap.add_mutually_exclusive_group()
+    think.add_argument("--thinking", dest="thinking", action="store_true",
+                       help="enable the chat template's thinking mode. Production "
+                            "does not suppress thinking, so this is the shipped "
+                            "configuration for gemma-4.")
+    think.add_argument("--no-thinking", dest="thinking", action="store_false",
+                       help="explicitly suppress thinking.")
+    ap.set_defaults(thinking=None)
     ap.add_argument("--no-kv-cache", action="store_true",
                     help="disable the KV cache. Needed for granite-4.0-350m, where "
                          "transformers selects a hybrid Mamba cache the non-hybrid "
@@ -165,7 +218,7 @@ def main():
 
     with open(args.out, "w") as fh:
         for r in rows:
-            text = build_inputs(tok, r["note"], args.model, sys_prompt)
+            text = build_inputs(tok, r["note"], args.model, sys_prompt, args.thinking)
             enc = tok(text, return_tensors="pt").to(model.device)
             gen_kwargs = dict(
                 max_new_tokens=args.max_new_tokens,
@@ -194,7 +247,10 @@ def main():
                 torch.cuda.synchronize()
             dt = (time.perf_counter() - t0) * 1000
             gen = out[0][enc["input_ids"].shape[1]:]
-            raw = tok.decode(gen, skip_special_tokens=True)
+            decoded = tok.decode(gen, skip_special_tokens=False)
+            raw, reasoning = split_reasoning(decoded)
+            raw = tok.decode(tok(raw, add_special_tokens=False)["input_ids"],
+                             skip_special_tokens=True)
             facts, ok, schema_ok, malformed = extract_json(raw)
             floored = [f for f in facts if f["confidence"] >= CONF_FLOOR]
             fh.write(json.dumps({
@@ -214,6 +270,13 @@ def main():
                 "truncated": int(gen.shape[0]) >= args.max_new_tokens,
                 "prompt_tokens": int(enc["input_ids"].shape[1]),
                 "quantization": "nf4" if args.load_4bit else args.dtype,
+                # Recorded for the same reason run_llamacpp.py records them: a
+                # thinking run that produced no reasoning did not have thinking
+                # on, and without this the only symptom is a score that quietly
+                # matches the thinking-off arm.
+                "thinking": args.thinking,
+                "reasoning_chars": len(reasoning),
+                "reasoning": reasoning[:1000],
             }, ensure_ascii=False) + "\n")
             fh.flush()
 
