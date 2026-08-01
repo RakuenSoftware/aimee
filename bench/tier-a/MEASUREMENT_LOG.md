@@ -877,3 +877,44 @@ architecture correctly, not that the model is bad at extraction. The
 discriminating run is GLM-4.7-Flash on .253 under CUDA with expert offload,
 which is queued. Until that lands, nothing at all is known about GLM's quality on
 this task.
+
+## Defect 29: the self-healing pass deleted a live run out from under it
+
+`verify_and_heal.sh` asks the scorer whether each prediction file is scoreable
+and deletes the ones it refuses, so the next sweep pass re-runs them. An
+**in-progress** run is incomplete by definition, so the scorer refuses it, so
+the heal loop deleted it — while the runner was still writing.
+
+The runner keeps its file descriptor. It went on writing to an unlinked inode,
+and every row would have vanished the moment it exited:
+
+```
+$ ls -l /proc/<pid>/fd
+... -> /opt/tierA/.../GLM-4.7-Flash.pred.jsonl (deleted)
+```
+
+Neither the sweep nor the runner reported anything. The only symptom was a
+prediction file that never appeared while a healthy server logged 11 tok/s.
+
+Cause: two chains both call `verify_and_heal` on `results/thinking`, and the
+orphans chain's call landed while phase 3's GLM run was 22 minutes into a
+~2.5-hour corpus. The heal pass was written as if it only ever ran between
+sweeps.
+
+Recovered rather than re-run: the fd was still open, so the data was reachable
+through `/proc/<pid>/fd` and a copier loop pulled it out while the run
+continued.
+
+Fixed: `verify_and_heal` refuses to touch any file a live process holds open,
+found by scanning `/proc/*/fd` (lsof is not installed on the bench containers).
+The check is on the file rather than on a process name or a lock, because the
+file is the thing that must not be deleted.
+
+Verified both directions on the host, not assumed: with a holder alive the file
+is reported `LIVE` and survives; with the holder gone the same file is healed
+and removed.
+
+The general shape, and it is the counterpart to every other defect in this log:
+a safety mechanism with no notion of concurrency is itself a hazard. Every
+earlier defect here was a check that failed to fire. This was a check that fired
+when it should not have, and it was the most destructive of them.
