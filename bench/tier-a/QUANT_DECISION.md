@@ -18,6 +18,7 @@ Strict F1 on the 69-note gold set. Paired 95% CI from `harness/bootstrap_ci.py`
 | E2B | UD-Q8_K_XL | 0.6763 | 47 | 25 | 20 |
 | E4B | UD-Q4_K_XL | 0.7200 | 45 | 13 | 22 |
 | E4B | UD-Q6_K_XL | 0.8062 | 52 | 10 | 15 |
+| E4B | UD-Q8_K_XL | 0.8217 | 53 |  9 | 14 |
 
 Q6 − Q4:
 
@@ -27,9 +28,30 @@ Q6 − Q4:
 | E2B | +0.0012 | [-0.0633, +0.0690] | indistinguishable |
 | pooled (138 notes) | +0.0431 | [-0.0080, +0.0984] | 94.6% in favour |
 
-The E4B result is the only comparison in this entire benchmark effort that
-cleared the significance bar. Everything else measured — runtime, thinking on a
-fixed prompt, quantisation at E2B — came back inside its own interval.
+## Where the curve stops: Q8 buys nothing
+
+| comparison | delta | 95% CI | verdict |
+| --- | ---: | --- | --- |
+| E4B Q8 - Q4 | +0.1017 | [+0.0263, +0.1917] | **significant** |
+| E4B Q8 - Q6 | +0.0155 | [+0.0000, +0.0396] | indistinguishable |
+
+The Q4->Q6 step is worth 0.086 F1 and the Q6->Q8 step is worth 0.016, with an
+interval whose lower bound sits on zero. Read that interval carefully: it never
+goes NEGATIVE, so Q8 is probably very slightly better than Q6 — just not by
+enough to measure, and not by enough to pay 0.45 GB of host RSS for. A step that
+is real but too small to price is the strongest available form of "stop here",
+and it is why Q6 is a sweet spot rather than a compromise.
+
+E2B's Q8 arm goes the OTHER way: 0.6763, below both its own Q4 and Q6, while
+E4B's Q8 is the highest arm measured anywhere in the lane. Same quant family,
+same host, same day, opposite sign. That is what noise looks like at a model
+size whose comparisons all sit inside their own intervals, and it is a reason to
+trust the E4B numbers rather than the E2B ones when the two disagree.
+
+Together, the E4B Q6-Q4 and Q8-Q4 results are the only comparisons in this entire
+benchmark effort that cleared the significance bar. Everything else measured —
+runtime, thinking on a fixed prompt, quantisation at E2B — came back inside its
+own interval.
 
 ## Memory, measured rather than inferred from file size
 
@@ -37,11 +59,18 @@ Peak VRAM from `/sys/class/drm/card0/device/mem_info_vram_used` (card0 is the
 XTX; card1 is the Phoenix iGPU and reads near zero), peak host RSS from
 `/proc/<pid>/status` `VmHWM`, both sampled every 10s alongside the run.
 
-| E2B quant | peak VRAM | peak host RSS | GGUF on disk |
-| --- | ---: | ---: | ---: |
-| UD-Q4_K_XL | 1.70 GB | 2.68 GB | 2.97 GB |
-| UD-Q6_K_XL | 2.30 GB | 3.86 GB | 4.39 GB |
-| UD-Q8_K_XL | 2.83 GB | 4.98 GB | 4.92 GB |
+| model | quant | peak VRAM | peak host RSS | GGUF on disk |
+| --- | --- | ---: | ---: | ---: |
+| E2B | UD-Q4_K_XL | 1.70 GB | 2.68 GB | 2.97 GB |
+| E2B | UD-Q6_K_XL | 2.30 GB | 3.86 GB | 4.39 GB |
+| E2B | UD-Q8_K_XL | 2.83 GB | 4.98 GB | 4.92 GB |
+| E4B | UD-Q4_K_XL | 3.36 GB | 4.16 GB | 4.77 GB |
+| E4B | UD-Q6_K_XL | 4.54 GB | 6.97 GB | 6.95 GB |
+| E4B | UD-Q8_K_XL | 5.71 GB | 7.42 GB | 8.11 GB |
+
+At E4B, Q6 costs 2.81 GB of host RSS over Q4 and buys a measured 0.086 F1. That
+is the one place in this benchmark where paying memory demonstrably buys quality.
+The next 0.45 GB, to Q8, buys 0.0155 F1 that the dataset cannot resolve.
 
 Resident is consistently BELOW the file size — mmap — so quoting a disk-size
 delta as a RAM saving overstates it. The KV cache at a fixed `-c` is identical
@@ -50,7 +79,9 @@ across quants and does not shrink with the quant.
 ## What is measured and what is judged
 
 MEASURED: Q6 beats Q4 at E4B by 0.086 F1, and that survives a paired bootstrap.
-E4B is the default model, so this alone settles the default.
+Q8 then adds only 0.0155 more, which does not. E4B is the default model, so
+those two together settle the default from both sides: Q4 is measurably worse,
+and Q8 is not measurably better.
 
 JUDGED: Q6 for E2B. Its own comparison is +0.0012 — the smallest gap between any
 two runs anywhere in this benchmark, and firmly undecidable at n=69. Three things
@@ -90,3 +121,14 @@ agreement figure, which more notes alone will not fix.
 - This lane is Vulkan/RADV on `.254`. Compare within it; the `.253` lanes are
   CUDA. Accuracy transfers (the same GGUF answers the same wherever it is
   served); speed does not.
+- All six arms are complete and clean: 70/70 rows each, zero truncations, zero
+  transport errors. The non-parsing rows (12 at E2B Q6, 6 at E2B Q8, 0 elsewhere)
+  are ALL notes whose gold is empty, where the model wrote a bare `[]` instead of
+  `{"facts":[]}`. Empty gold plus empty prediction contributes nothing to tp, fp
+  or fn, so those cost no F1 and the parse-rate column is a formatting tic rather
+  than a quality signal. It varies non-monotonically with the quant (0/12/6),
+  which is itself a sign of that.
+- Separately, and for the product rather than the benchmark: `mf_commit_facts`
+  treats a bare `[]` as a parse failure, so in production a CORRECT abstention is
+  indistinguishable in the logs from a malformed response. That is a diagnostics
+  defect, not a scoring one.
