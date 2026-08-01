@@ -10,6 +10,7 @@
 #include "aimee_home.h"
 #include "aimee_tls.h"
 #include "cJSON.h"
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -175,6 +176,51 @@ static void remote_ca_path(char *out, size_t out_sz)
    snprintf(out, out_sz, "%s/remote-ca.pem", aimee_home());
 }
 
+/* Move a refused client identity out of the active path, into
+ * <aimee_home>/tls/refused-<UTC stamp>/, and report that directory in |dir_out|.
+ * Never deletes: the certificate is the only record of what this client was
+ * previously paired to, and an operator reconstructing a re-provisioning needs
+ * it. Everything present moves, or the function fails: leaving part of a refused
+ * identity behind would keep failing the connection closed on partial material.
+ * Portable (no OpenSSL), so Windows can clear the same wedge even where minting a
+ * replacement is unavailable. Returns 0 on success. */
+static int remote_archive_client_cert(char *dir_out, size_t dir_n)
+{
+   char tls_dir[600];
+   snprintf(tls_dir, sizeof(tls_dir), "%s/tls", aimee_home());
+   time_t now = time(NULL);
+   struct tm utc;
+#ifdef _WIN32
+   struct tm *utcp = gmtime(&now); /* MinGW has no gmtime_r; this path is single-threaded */
+   if (!utcp)
+      return -1;
+   utc = *utcp;
+#else
+   if (!gmtime_r(&now, &utc))
+      return -1;
+#endif
+   char stamp[32];
+   if (strftime(stamp, sizeof(stamp), "%Y%m%dT%H%M%SZ", &utc) == 0)
+      return -1;
+   snprintf(dir_out, dir_n, "%s/refused-%s", tls_dir, stamp);
+   if (AIMEE_MKDIR(dir_out) != 0)
+      return -1;
+   static const char *const names[] = {"client.crt", "client.key"};
+   for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+   {
+      char from[1400], to[1400];
+      snprintf(from, sizeof(from), "%s/%s", tls_dir, names[i]);
+      snprintf(to, sizeof(to), "%s/%s", dir_out, names[i]);
+      /* A half-written identity (only one of the pair) is one of the states worth
+       * recovering from, so a missing file is success, not failure. Any other
+       * rename error is real: leaving part of a refused identity in the active
+       * path would keep failing the connection closed. */
+      if (rename(from, to) != 0 && errno != ENOENT)
+         return -1;
+   }
+   return 0;
+}
+
 #ifdef __linux__
 static int write_sync_file(const char *path, const char *data, size_t len, mode_t mode)
 {
@@ -327,35 +373,6 @@ done:
    return rc;
 }
 
-/* Move a refused client identity out of the active path, into
- * <aimee_home>/tls/refused-<UTC stamp>/, and report that directory in |dir_out|.
- * Never deletes: the certificate is the only record of what this client was
- * previously paired to, and an operator reconstructing a re-provisioning needs
- * it. Both files move or the function fails — a half-moved identity would leave
- * the connection path failing closed on partial material. Returns 0 on success. */
-static int remote_archive_client_cert(char *dir_out, size_t dir_n)
-{
-   char tls_dir[600];
-   snprintf(tls_dir, sizeof(tls_dir), "%s/tls", aimee_home());
-   time_t now = time(NULL);
-   struct tm utc;
-   char stamp[32];
-   if (!gmtime_r(&now, &utc) || strftime(stamp, sizeof(stamp), "%Y%m%dT%H%M%SZ", &utc) == 0)
-      return -1;
-   snprintf(dir_out, dir_n, "%s/refused-%s", tls_dir, stamp);
-   if (AIMEE_MKDIR(dir_out) != 0)
-      return -1;
-   static const char *const names[] = {"client.crt", "client.key"};
-   for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
-   {
-      char from[1400], to[1400];
-      snprintf(from, sizeof(from), "%s/%s", tls_dir, names[i]);
-      snprintf(to, sizeof(to), "%s/%s", dir_out, names[i]);
-      if (rename(from, to) != 0)
-         return -1;
-   }
-   return 0;
-}
 #else
 static int remote_enroll_client_cert(int quiet)
 {
@@ -363,12 +380,6 @@ static int remote_enroll_client_cert(int quiet)
    return -1;
 }
 
-static int remote_archive_client_cert(char *dir_out, size_t dir_n)
-{
-   if (dir_n)
-      dir_out[0] = '\0';
-   return -1;
-}
 #endif
 
 /* Probe GET /v1/health over the currently-active remote (verifying TLS). Returns
@@ -381,6 +392,34 @@ static int remote_health_ok(void)
    int ok = (body != NULL && st >= 200 && st < 500);
    free(body);
    return ok;
+}
+
+/* Is a client identity stored at all? Deliberately does NOT reuse the TLS
+ * backend's eligibility gate: that helper is declared in the shared header but
+ * defined only by the OpenSSL backend, so calling it here fails to link on macOS
+ * (Secure Transport) and Windows (Schannel). Duplicating the gate into each
+ * backend would fork a security-relevant check three ways, so ask the simpler
+ * portable question instead.
+ *
+ * PRESENCE, not validity, is what matters: a malformed, partial, or
+ * loose-permission identity is precisely what the probe below needs to test.
+ * Either file counts — a partial identity fails the connection closed just as a
+ * refused one does, and is equally worth recovering. */
+static int remote_client_cert_present(void)
+{
+   static const char *const names[] = {"client.crt", "client.key"};
+   for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+   {
+      char p[700];
+      snprintf(p, sizeof(p), "%s/tls/%s", aimee_home(), names[i]);
+      FILE *f = fopen(p, "rb"); /* fopen, not stat: portable without extra headers */
+      if (f)
+      {
+         fclose(f);
+         return 1;
+      }
+   }
+   return 0;
 }
 
 /* Re-probe with the stored mTLS identity suppressed, to tell two failures apart
@@ -400,8 +439,7 @@ static int remote_health_ok(void)
 static int remote_probe_without_client_cert(void)
 {
 #ifdef WITH_TLS
-   char crt[700], key[700];
-   if (aimee_tls_client_cert_eligible(aimee_home(), crt, sizeof(crt), key, sizeof(key)) == 0)
+   if (!remote_client_cert_present())
       return 0;
    aimee_tls_suppress_client_cert(1);
    aimee_client_suppress_conn_errors(1);
