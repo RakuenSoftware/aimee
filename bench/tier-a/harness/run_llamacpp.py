@@ -62,7 +62,17 @@ def main():
     # nothing said so until the scorer learned to refuse truncated rows.
     ap.add_argument("--max-tokens", type=int, default=8192,
                     help="matches MF_LLM_OUT_CAP in src/kb/kb_memory_facts.c")
-    ap.add_argument("--timeout", type=float, default=600)
+    # 600s was too low for any model that does not fit the card. gemma-4-31B
+    # timed out on 12 of 70 notes and Qwen3.6-27B on 60 of 70, both dense at Q8_0
+    # against a 16GB card, so llama.cpp served them from CPU at ~2 tok/s. Their
+    # median latencies were 276s and 600s: the bound was firing on the models it
+    # most needed not to fire on, and score.py correctly refused both runs after
+    # they had each consumed hours.
+    #
+    # 3600s is not a real limit, it is a hang detector. A note that takes an hour
+    # is a broken configuration, and the run should still be recorded rather than
+    # hanging the sweep forever.
+    ap.add_argument("--timeout", type=float, default=3600)
     ap.add_argument("--no-confidence", action="store_true",
                     help="ABLATION: drop the confidence field from the schema.")
     # Thinking has no default at all: it must be stated. It is worth +0.09 F1 to
