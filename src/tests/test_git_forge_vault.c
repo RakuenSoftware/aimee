@@ -102,6 +102,49 @@ int main(void)
    assert(git_forge_vault_sshkey(carol, out, sizeof(out)) == 0);
    assert(out[0] == '\0');
 
+   /* --- git_identity_resolve: the checkout's own identity is a valid source ---
+    * The sealed identity is an install-time step. Requiring it as the ONLY source
+    * stranded any running agent that reached a commit with a clean vault: it could
+    * only stop and ask a human to re-run installation. Fall back to the identity
+    * the operator already configured for the repository. */
+   {
+      char repo[320];
+      snprintf(repo, sizeof(repo), "%s/repo", home);
+      char cmd[900];
+      snprintf(cmd, sizeof(cmd), "mkdir -p %s && git -C %s init -q", repo, repo);
+      assert(system(cmd) == 0);
+
+      char name[256], email[256];
+      /* Nothing sealed, nothing configured on the checkout: still refuses, and
+       * still refuses to invent a persona. */
+      assert(git_identity_resolve(repo, name, sizeof(name), email, sizeof(email)) == 0);
+      assert(name[0] == '\0' && email[0] == '\0');
+
+      /* Half an identity is not an identity — same rule as the vault path. */
+      snprintf(cmd, sizeof(cmd), "git -C %s config user.name 'Repo Operator'", repo);
+      assert(system(cmd) == 0);
+      assert(git_identity_resolve(repo, name, sizeof(name), email, sizeof(email)) == 0);
+      assert(name[0] == '\0' && email[0] == '\0');
+
+      /* Both configured: resolves, and the work proceeds without a vault seal. */
+      snprintf(cmd, sizeof(cmd), "git -C %s config user.email 'repo@example.test'", repo);
+      assert(system(cmd) == 0);
+      assert(git_identity_resolve(repo, name, sizeof(name), email, sizeof(email)) == 1);
+      assert(strcmp(name, "Repo Operator") == 0);
+      assert(strcmp(email, "repo@example.test") == 0);
+
+      /* A sealed identity still WINS over the checkout's — the install-time
+       * identity is the authoritative one where it exists. */
+      assert(vault_service_set_server(GIT_FORGE_VAULT_AGENT, GIT_AUTHOR_NAME_CRED,
+                                      "Sealed Operator") == VAULT_OK);
+      assert(vault_service_set_server(GIT_FORGE_VAULT_AGENT, GIT_AUTHOR_EMAIL_CRED,
+                                      "sealed@example.test") == VAULT_OK);
+      assert(git_identity_resolve(repo, name, sizeof(name), email, sizeof(email)) == 1);
+      assert(strcmp(name, "Sealed Operator") == 0);
+      assert(strcmp(email, "sealed@example.test") == 0);
+
+   }
+
    char clean[320];
    snprintf(clean, sizeof(clean), "rm -rf %s", home);
    assert(system(clean) == 0);

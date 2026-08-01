@@ -233,11 +233,11 @@ static void wfe_commit_worktree_changes(const char *workdir)
     * GitHub attach a Co-authored-by trailer to the squash of every PR carrying
     * both authors, which the standing directive forbids. */
    char au_name[256] = "", au_email[256] = "";
-   if (git_identity_get(au_name, sizeof au_name, au_email, sizeof au_email) != 1)
+   if (git_identity_resolve(workdir, au_name, sizeof au_name, au_email, sizeof au_email) != 1)
    {
       aimee_log(LOG_WARN, "wfe-delegate",
-                "no git identity configured; refusing to commit in %s (seal "
-                "AIMEE_GIT_AUTHOR_NAME/_EMAIL at install)",
+                "no git identity configured; refusing to commit in %s (set user.name/user.email on "
+                "the checkout, or seal AIMEE_GIT_AUTHOR_NAME/_EMAIL at install)",
                 workdir);
       return;
    }
