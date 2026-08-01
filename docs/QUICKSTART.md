@@ -31,7 +31,8 @@ The final **Deploy** step starts one sibling:
 There is no inference container to start. The KB embeds from weights baked into its own image, so
 indexing begins as soon as the database initialises. Synthesis on this path is external only: supply
 an OpenAI-compatible endpoint, or leave it empty and the curator's synthesis stages stay idle while
-retrieval, ingestion and indexing carry on.
+retrieval, ingestion and indexing carry on. To run synthesis locally instead, or to decide which model
+to point it at, see [Choosing a synthesis model](SYNTHESIS_MODELS.md).
 
 For a local managed KB, Deploy also runs two explicit one-shot jobs before it
 reports success:

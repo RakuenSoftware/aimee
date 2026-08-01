@@ -5,11 +5,19 @@ aimee runs an embedder and a synthesis model. That is the whole taxonomy.
 | Role | What it does | Served by |
 | --- | --- | --- |
 | **Embedding** | vector search over memories, documents and code | baked into `aimee-kb`, or an external endpoint |
-| **Synthesis** | every LLM call the KB makes: extraction, indexing, entity judgement, topic synthesis | the optional `llm` compose service, or an external OpenAI-compatible endpoint |
+| **Synthesis** | every LLM call the KB makes: extraction, indexing, entity judgement, topic synthesis | an `aimee-kb` image variant with llama.cpp bundled, or an external OpenAI-compatible endpoint |
 
 Earlier versions of this document described four: embedding, reranking, a cheap
-Tier-A synthesis model and a capable Tier-B one. Three of those distinctions did
-not survive measurement, and the sections below say what replaced each.
+model for the mechanical stages and a capable one for the reasoning stages.
+Three of those distinctions did not survive measurement, and the sections below
+say what replaced each. The two synthesis roles were called Tier-A and Tier-B;
+they are now one role called synthesis, and that is the only name this
+documentation uses. A few configuration keys still carry the old names, and
+those are called out where they appear.
+
+**If you are choosing what to run**, go to [Choosing a synthesis
+model](SYNTHESIS_MODELS.md). It has the decision table, the measured numbers for
+each candidate, and the caveats. This page is about how the pieces fit together.
 
 ## There is no reranking model
 
@@ -26,30 +34,52 @@ you have to deploy.
 
 ## There is no cheap model for the mechanical stages
 
-Tier-A was pitched as extraction and indexing: mechanical work a small model
-could do, so a deployment could run the volume stages locally and pay for a
+The cheap stage was pitched as extraction and indexing: mechanical work a small
+model could do, so a deployment could run the volume stages locally and pay for a
 frontier model only on judgement. The curator still routes stages internally.
 They now resolve to one model.
 
-On a 69-note extraction set, gemma-4-E2B scores 0.691 strict F1 and E4B 0.828,
-both measured with thinking on.
-The larger models are being re-measured, so I am not quoting their numbers here
-yet. What the two I have show is a curve still climbing at E4B, on the task that
-was supposed to be the flat one. A model good enough for extraction is good
-enough for judgement, and a model too weak for judgement is too weak for
-extraction.
+The ladder is measured, and it does not flatten where the split needed it to.
+Strict F1 on a 69-note extraction set, all rows from the same lane with thinking
+on, so they are comparable to each other:
+
+| Model | F1 |
+| --- | ---: |
+| gemma-4-12B-it | 0.8472 |
+| gemma-4-26B-A4B-it | 0.8451 |
+| gemma-4-E4B-it | 0.8217 |
+| gemma-4-E2B-it | 0.6912 |
+| granite-4.1-3b | 0.6429 |
+| granite-4.0-1b | 0.5857 |
+| granite-4.0-h-1b | 0.5147 |
+| everything below 1B | ≤ 0.31 |
+
+The curve is flat from E4B upwards — 0.822, 0.847, 0.845 across a 3x parameter
+range — and steep below it, losing 0.13 F1 from E4B to E2B and another 0.18 from
+E2B to the 1B class. That is the shape that kills the split. All the loss is at
+the cheap end, which is exactly where the cheap tier was going to live. A model
+good enough for extraction is good enough for judgement, and a model too weak for
+judgement is too weak for extraction. That is why there is one role.
+
+The highest extraction score measured anywhere is 0.9197, from gemma-4-26B-A4B
+with thinking off. It is kept out of the table because the table is a
+thinking-on lane and mixing the two would hide the effect described next. The
+accuracy is comparable — the same GGUF produces the same answers wherever its
+tensors sit — but that lane's *speed* numbers are confounded by varying device
+placement (defect 15 in the measurement log).
+
+Thinking mode is not a free win and its sign depends on size: E4B gains 0.084 F1
+with thinking on and E2B 0.045, while gemma-4-26B-A4B loses 0.075. The
+`disable_thinking` flag that used to be sent on the mechanical stages is gone
+from `kb_curator_provider.c`; suppressing it was costing the small models the
+most, which is the opposite of what it was there for.
 
 The evidence and its defects are in `bench/tier-a/MEASUREMENT_LOG.md`. Read the
 "not fixed" section before leaning on any single figure: the gold set has one
 author, n is 69, and the scorer's normalisation rules were fitted against this
-data and are worth 6 to 13% of F1 on their own.
-
-**Unsettled:** the ladder above E4B is mid-rerun. An earlier sweep sent
-`disable_thinking` on the Tier-A stages, which cost E4B 0.09 F1 by itself (0.738
-with thinking suppressed, 0.828 without). That flag is gone from
-`kb_curator_provider.c` and every model is being re-run without it. Until that
-finishes I have one post-fix data point per size and will not extrapolate a
-ladder from it.
+data and are worth 6 to 13% of F1 on their own. Per-model numbers, the
+summarisation task, CPU throughput and the full caveat list are in [Choosing a
+synthesis model](SYNTHESIS_MODELS.md).
 
 ## Embedding ships bundled at 384 dimensions
 
@@ -77,9 +107,10 @@ any default would aim every deployment at a dead host.
 
 Two ways to fill it:
 
-- **Local.** Bring up the `curator-llm` compose profile. It runs upstream
-  `llama.cpp:server` against `ggml-org/gemma-4-E4B-it-GGUF:Q4_K_M`, fetched once
-  on first boot into a volume. `CURATOR_LLM_HF_REPO` overrides the model.
+- **Local.** Run an `aimee-kb` image variant with llama.cpp bundled. The weights
+  live on the KB's permanent volume and are fetched once, so an image upgrade
+  does not re-download them. See [Choosing a synthesis
+  model](SYNTHESIS_MODELS.md).
 - **External.** Any OpenAI-compatible endpoint, hosted or your own.
 
 The curator calls synthesis only from the background drain, so a model still
@@ -143,7 +174,7 @@ so background KB work cannot take every interactive slot.
 ```yaml
 environment:
   AIMEE_EMBEDDER_URL: ""      # empty: bundled bekko-a25m, 384-dim
-  AIMEE_LLM_URL: ""           # empty: no synthesis; fill it or run curator-llm
+  AIMEE_LLM_URL: ""           # empty: no synthesis; fill it or run a bundled-llama.cpp image
 ```
 
 Decide the embedder before you ingest anything, because changing it later means a

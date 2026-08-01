@@ -52,8 +52,8 @@ image. Point `AIMEE_EMBEDDER_URL` at an external endpoint to use something else,
 `EMBEDDER_MODEL` and `AIMEE_EMBEDDING_DIM` with it.
 
 Synthesis is a single OpenAI-compatible endpoint at `AIMEE_LLM_URL`, defaulted empty. Run it
-yourself with the `curator-llm` compose profile, or point at an external one. See
-[Local inference](LOCAL_INFERENCE.md).
+yourself with an `aimee-kb` image variant that bundles llama.cpp, or point at an external one. See
+[Local inference](LOCAL_INFERENCE.md) and [Choosing a synthesis model](SYNTHESIS_MODELS.md).
 
 The KB must report explicit degradation when a configured inference stage is unavailable. It cannot
 claim a dense or synthesized result after silently skipping that stage.

@@ -8,7 +8,9 @@ The `aimee-llm` gateway that used to sit between the KB and its models is
 retired. `AIMEE_LLM_URL` defaults empty rather than pointing at it, because a
 default aimed at a container nobody deploys any more fails at first use instead
 of at configuration time. Two roles, and how each is served, are in
-[Local inference](LOCAL_INFERENCE.md).
+[Local inference](LOCAL_INFERENCE.md). **Which model to put behind the synthesis
+endpoint — the measured candidates, their numbers and their caveats — is
+[Choosing a synthesis model](SYNTHESIS_MODELS.md).**
 
 ## Configuration the KB actually receives
 
@@ -89,4 +91,5 @@ about it when it is down costs more than one that never started.
 Use [generated configuration](gen/configuration.md) for current names. Container
 environment values override file values where documented.
 
-See [Local inference](LOCAL_INFERENCE.md).
+See [Local inference](LOCAL_INFERENCE.md) and
+[Choosing a synthesis model](SYNTHESIS_MODELS.md).

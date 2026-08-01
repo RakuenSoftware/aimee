@@ -691,7 +691,7 @@ ENV_DESC = {
     "AIMEE_WORKTREE_GC_DAYS": ("Server runtime", "Age threshold (days) for worktree GC."),
     "AIMEE_SOCK": ("Server runtime", "Sandbox helper socket path."),
     # Knowledge base
-    "AIMEE_LLM_URL": ("Knowledge base (aimee-kb)", "Synthesis endpoint (curator Tier-A + Tier-B at {url}/v1). No longer selects an embedder: the kb embeds in-container, and AIMEE_EMBEDDER_URL points at an external embedder. See docs/KB_LLM_BACKENDS.md."),
+    "AIMEE_LLM_URL": ("Knowledge base (aimee-kb)", "Synthesis endpoint (every curator stage, at {url}/v1). No longer selects an embedder: the kb embeds in-container, and AIMEE_EMBEDDER_URL points at an external embedder. See docs/SYNTHESIS_MODELS.md for what to put behind it and docs/KB_LLM_BACKENDS.md for the provider surface."),
     "AIMEE_LLM_AUTH_TOKEN": ("Managed KB and inference", "First-boot transport for the bearer service identity shared by aimee-kb and its aimee-llm gateway. aimee-kb synchronously seals it into Vault, scrubs the environment, and cleanly re-execs before serving; wizard-managed deploys generate the 256-bit value in Vault. This is separate from user/server bearers."),
     "AIMEE_LLM_AUTH_REQUIRED": ("Managed KB and inference", "Set to 1 on wizard-managed KBs so synthesis clients refuse to contact the LLM when its bearer service identity is missing."),
     "AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE": ("Managed KB and inference", "Explicit first-boot migration/adoption transport for an existing wizard-managed LLM credential. aimee-server seals it into Vault and scrubs the environment before normal startup. Ordinary inherited AIMEE_LLM_AUTH_TOKEN is ignored by managed credential creation so stale child-service state cannot win. Must be a 32..512 character RFC 6750 b64token."),
