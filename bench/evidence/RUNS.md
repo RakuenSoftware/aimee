@@ -75,6 +75,7 @@ enforce, so this table cannot drift from what is scoreable.
 | thinking | Qwen3.5-2B | 70 | VALID | thinking ON, cap 8192 — CURRENT |
 | thinking | Qwen3.6-27B | 70 | INVALID: errored x60 | thinking ON, cap 8192 — CURRENT |
 | thinking | Qwen3.6-35B-A3B | 70 | INVALID: errored x64 | thinking ON, cap 8192 — CURRENT |
+| thinking | gemma-3n-E4B-it | 70 | VALID | thinking ON, cap 8192 — CURRENT |
 | thinking | gemma-4-12B-it | 70 | VALID | thinking ON, cap 8192 — CURRENT |
 | thinking | gemma-4-26B-A4B-it | 70 | VALID | thinking ON, cap 8192 — CURRENT |
 | thinking | gemma-4-31B-it | 70 | INVALID: errored x12 | thinking ON, cap 8192 — CURRENT |
