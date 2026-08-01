@@ -66,12 +66,17 @@ done
 python3 bench/evidence/build_index.py >/dev/null 2>&1
 if ! git diff --quiet bench/ || [ -n "$(git ls-files -o --exclude-standard bench/)" ]; then
   git add -A bench/
+  # Commit ONLY bench/. A bare `git commit` takes the WHOLE index, not just what
+  # this script staged, so any change another session had staged got swept into a
+  # commit titled "bench: overnight results". That happened: a 59-line deletion of
+  # Dockerfile.embedder landed in 944811335 under a benchmark-results message.
+  # The pathspec makes the commit match its own subject line.
   git commit -q -m "bench: overnight results as of $(date -u +%Y-%m-%dT%H:%MZ)
 
 Pulled from both hosts and re-scored locally with the current scorer. Host-side
 score files are deliberately ignored: predictions are the raw artefact, scores
 are derived, and pulling derived scores previously reverted scorer fixes three
-times." && echo "committed $(date -u +%H:%MZ)"
+times." -- bench/ && echo "committed $(date -u +%H:%MZ)"
 else
   echo "no change $(date -u +%H:%MZ)"
 fi
