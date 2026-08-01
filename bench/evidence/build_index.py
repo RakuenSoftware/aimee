@@ -29,6 +29,7 @@ LANE_NOTES = {
     "sub1b":         "sub-1B ladder, thinking ON",
     "challenger-254": "7900 XTX / Vulkan / Q6-Q5 — compare only within this lane",
     "cpufit":        "declared CPU lane, model does not fit the card",
+    "ple-control":   "transformers/bf16, PLE applied — compare against the GGUF lanes",
 }
 
 

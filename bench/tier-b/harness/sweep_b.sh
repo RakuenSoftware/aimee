@@ -33,7 +33,20 @@
 # one, and a large one.
 #
 # Usage: sweep_b.sh [gpu|cpu|cpufit|sub1b]
-# Env:   TIMEOUT (per-request seconds, default 1800), THREADS, PORT, SERVER
+# Env:   TIMEOUT (per-request seconds, default 1800), MAXTOK, THREADS, PORT,
+#        SERVER
+#
+# MAXTOK exists for the same reason TIMEOUT does. run_b.py caps completions at
+# 4096 by default while the server is given -c 8192, so the harness stopped
+# generation less than halfway into the context it had allocated. Qwen3.5-0.8B
+# and gemma-3-270m-it hit that cap on all six topics, score_b.py correctly
+# refused both, and the result was two models with no Tier-B number at all —
+# recorded against a bound this file chose, not against anything they did.
+#
+# Raise it to distinguish the two cases that a fired cap conflates: a model that
+# is merely verbose, and one that will not terminate. 7168 is the most that fits
+# beside a ~650-token prompt inside -c 8192, so this stays a harness change with
+# no server change behind it.
 set -u
 cd "$(dirname "$0")/.."
 MODE=${1:-gpu}
@@ -74,7 +87,10 @@ case "$MODE" in
       "granite-4.0-h-1b|ibm-granite/granite-4.0-h-1b-GGUF:Q8_0|"
       "LFM2.5-230M|unsloth/LFM2.5-230M-GGUF:Q8_0|"
       "LFM2-350M-Extract|LiquidAI/LFM2-350M-Extract-GGUF:Q8_0|"
-      "SmolLM2-360M-Instruct|ggml-org/SmolLM2-360M-Instruct-Q8_0-GGUF:Q8_0|"
+      # ggml-org/SmolLM2-360M-Instruct-Q8_0-GGUF does not exist, so the server
+      # failed to load and this model was never measured on Tier-B at all. The
+      # Tier-A ladder hit the same entry and was corrected; this one was not.
+      "SmolLM2-360M-Instruct|HuggingFaceTB/SmolLM2-360M-Instruct-GGUF:Q8_0|"
       "gemma-3-270m-it|ggml-org/gemma-3-270m-GGUF:Q8_0|"
     )
     ;;
@@ -128,7 +144,7 @@ for entry in "${MODELS[@]}"; do
     # a bound that fires is not a model result: Qwen3.6-27B timed out on three of
     # six topics at the 1800s default and score_b.py now refuses such rows.
     if $PY harness/run_b.py --model "$LABEL" --topics data/topics.jsonl \
-         --timeout "${TIMEOUT:-1800}" \
+         --timeout "${TIMEOUT:-1800}" --max-tokens "${MAXTOK:-4096}" \
          --out "$PRED" --base-url "http://127.0.0.1:$PORT" >>"$LOG" 2>&1; then
       $PY harness/score_b.py --topics data/topics.jsonl --pred "$PRED" \
           --json-out "$OUT/$LABEL.score.json" >/dev/null 2>>"$LOG"

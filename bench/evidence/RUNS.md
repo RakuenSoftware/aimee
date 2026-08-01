@@ -89,7 +89,7 @@ enforce, so this table cannot drift from what is scoreable.
 
 | lane | model | rows | status | lane note |
 | --- | --- | ---: | --- | --- |
-| cpufit | Qwen3.6-27B | 4 | INVALID: incomplete (4/6) | declared CPU lane, model does not fit the card |
+| cpufit | Qwen3.6-27B | 5 | INVALID: incomplete (5/6) | declared CPU lane, model does not fit the card |
 | gpu | Qwen3.6-35B-A3B | 6 | VALID | thinking OFF (disable_thinking) — SUPERSEDED |
 | gpu | gemma-4-12B-it | 6 | VALID | thinking OFF (disable_thinking) — SUPERSEDED |
 | gpu | gemma-4-26B-A4B-it | 6 | VALID | thinking OFF (disable_thinking) — SUPERSEDED |
