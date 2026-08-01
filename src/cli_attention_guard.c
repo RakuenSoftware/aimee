@@ -1336,8 +1336,8 @@ static void attn_git_current_branch(const char *dir, char *out, size_t outlen)
 static int attn_git_ref_exists(const char *dir, const char *ref)
 {
    char cmd[2600];
-   snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse --verify --quiet '%s^{commit}' >/dev/null 2>&1",
-            dir, ref);
+   snprintf(cmd, sizeof(cmd),
+            "git -C '%s' rev-parse --verify --quiet '%s^{commit}' >/dev/null 2>&1", dir, ref);
    return system(cmd) == 0;
 }
 

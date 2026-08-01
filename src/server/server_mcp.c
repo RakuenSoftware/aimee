@@ -1817,7 +1817,8 @@ static void mcp_inject_active_project(cJSON *args)
    if (!cJSON_IsString(cwd) || !cwd->valuestring[0])
       return;
    char project[MAX_PATH_LEN] = "";
-   if (server_active_project_from_cwd(cwd->valuestring, project, sizeof(project)) == 0 && project[0])
+   if (server_active_project_from_cwd(cwd->valuestring, project, sizeof(project)) == 0 &&
+       project[0])
       cJSON_AddStringToObject(args, "project", project);
 }
 
