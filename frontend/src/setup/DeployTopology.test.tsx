@@ -105,6 +105,19 @@ describe('DeployTopology embedder picker', () => {
     expect(labels.some((l) => l.includes('384-dim') && l.includes('no prefixes'))).toBe(true);
   });
 
+  it('seeds the shipped local embedder when config names none', async () => {
+    // Regression: an unset embedder_model is not a working default. Without
+    // seeding, accepting the wizard's default writes nothing, the entrypoint
+    // starts no embedder, and the kb serves its builtin lexical embedder forever
+    // while reporting retrieval degraded — on an image built around a real one.
+    const { writes } = await renderPage({});
+    save();
+    await waitFor(() => expect(writes.some((w) => w.key === 'embedder_model')).toBe(true));
+    const v = writes.find((w) => w.key === 'embedder_model')?.value;
+    expect(v).toBeTruthy();
+    expect(['nomic-embed-text-v2-moe', 'bekko-a25m']).toContain(v);
+  });
+
   it('a first choice needs no confirmation (no corpus to invalidate)', async () => {
     const { writes } = await renderPage({});
     fireEvent.change(embedderSelect(), { target: { value: 'bekko-a25m' } });

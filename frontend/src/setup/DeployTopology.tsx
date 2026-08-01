@@ -103,7 +103,17 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
       const e = configToEmbedder(c);
       setEmbedRoute(e.kind);
       if (e.kind === 'bundled') {
-        setEmbedModel(e.model);
+        // An unset embedder_model is NOT "the deployment default" — there is no
+        // default downstream. buildDesiredConfig omits the key, deploy-env omits
+        // EMBEDDER_MODEL, and the kb entrypoint leaves the baked model unloaded and
+        // serves the builtin LEXICAL embedder forever: the instance comes up
+        // healthy, reports retrieval degraded, and never uses the embedder its image
+        // was built around. Seed the shipped local model so an operator who accepts
+        // the default gets a working one.
+        //
+        // embedModelSaved keeps the RAW saved value, so embedderChangeImpact still
+        // sees from:'' on a fresh install and charges nothing for this seeding.
+        setEmbedModel(e.model || emb.find((x) => x.local)?.id || '');
         setEmbedModelSaved(e.model);
       } else {
         setEmbedUrl(e.endpoint);
