@@ -29,7 +29,8 @@
 #include <string.h>
 #include <strings.h> /* strncasecmp */
 #include <time.h>
-#include <unistd.h> /* getcwd */
+#include <sys/stat.h> /* stat, S_ISDIR — telling a file target from a directory */
+#include <unistd.h>   /* getcwd */
 
 double attn_score(const attn_record_t *recs, int n, const char *path, long now_ts)
 {
@@ -1262,6 +1263,173 @@ static int attn_registry_branch_is_registered(const char *norm, const char *bran
    return 0;
 }
 
+/* Pure decision (testable): 1 = BLOCK, for a worktree under the managed root that has
+ * NO registry row.
+ *
+ * Blocking those outright was wrong. The registry is written by ONE launcher
+ * (workspace.c), while this guard's own refusal text names Claude Code's EnterWorktree
+ * as a sanctioned launcher too -- and that one writes no row. So every EnterWorktree
+ * session in an aimee repo was refused every mutating op, while sitting on a branch cut
+ * from the default branch: exactly what the rule wants to allow. Worse, there was no way
+ * out. Correcting it means writing settings, the binary, or aimee.yaml -- all outside a
+ * managed worktree, all refused by this same guard, including the documented
+ * `require_session_worktree: false` escape hatch, which lives in the very file it will
+ * not let you write.
+ *
+ * With no row to read, provenance comes from git rather than from trust. What the
+ * lineage rule actually exists to catch is a branch carrying another session's unmerged
+ * work (the incident: 115 commits behind default, ~18 of another agent's). That is
+ * decidable from commit topology: if this branch shares a commit with another registered
+ * session branch that the default branch does not already contain, it was cut from that
+ * session. `shares_foreign_session_history` carries that answer.
+ *
+ * Unlike an env var, this cannot simply be asserted -- an agent would have to rewrite
+ * history to defeat it, which is the property the registry was chosen for.
+ *
+ * `default_resolved` is 0 when the default branch could not be determined; there is then
+ * nothing to measure lineage against, so fail closed exactly as the registry path does. */
+int attn_unregistered_lineage_blocked(int default_resolved, int shares_foreign_session_history)
+{
+   if (!default_resolved)
+      return 1;
+   return shares_foreign_session_history ? 1 : 0;
+}
+
+/* The branch checked out in the worktree at `dir`, or "" when git cannot say. A detached
+ * HEAD reports "HEAD", normalized to "". Only needed on the no-registry-row path, which
+ * has no column 3 to read it from. */
+static void attn_git_current_branch(const char *dir, char *out, size_t outlen)
+{
+   if (out && outlen)
+      out[0] = '\0';
+   if (!dir || !dir[0] || !out || !outlen)
+      return;
+   char cmd[2400];
+   snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse --abbrev-ref HEAD 2>/dev/null", dir);
+   FILE *fp = popen(cmd, "r");
+   if (!fp)
+      return;
+   if (fgets(out, (int)outlen, fp))
+   {
+      size_t n = strlen(out);
+      while (n && (out[n - 1] == '\n' || out[n - 1] == '\r'))
+         out[--n] = '\0';
+   }
+   pclose(fp);
+   if (strcmp(out, "HEAD") == 0)
+      out[0] = '\0';
+}
+
+/* A ref that actually resolves for the default branch: the local branch when present,
+ * else origin/<branch>, since a fresh worktree often carries only the remote-tracking
+ * ref. 0 when neither resolves -- the caller treats that as unresolved and fails closed. */
+static int attn_git_default_ref(const char *dir, const char *defbr, char *out, size_t outlen)
+{
+   if (!dir || !dir[0] || !defbr || !defbr[0] || !out || !outlen)
+      return 0;
+   if (strchr(defbr, '\'') || strchr(defbr, '\n'))
+      return 0;
+   char remote[300];
+   snprintf(remote, sizeof(remote), "origin/%s", defbr);
+   const char *forms[2] = {defbr, remote};
+   for (int i = 0; i < 2; i++)
+   {
+      char cmd[2600];
+      snprintf(cmd, sizeof(cmd),
+               "git -C '%s' rev-parse --verify --quiet '%s^{commit}' >/dev/null 2>&1", dir,
+               forms[i]);
+      if (system(cmd) == 0)
+      {
+         snprintf(out, outlen, "%s", forms[i]);
+         return 1;
+      }
+   }
+   return 0;
+}
+
+/* 1 iff the worktree's HEAD shares unmerged history with a registered session branch
+ * other than its own -- i.e. it was cut from that session rather than from the default
+ * branch. For each registered branch S, the merge base of HEAD and S, when NOT already
+ * contained in the default branch, is a commit the two sessions share and the default
+ * branch lacks. That is the signature of the incident this rule exists for.
+ *
+ * A branch merely BEHIND the default branch shares no such commit and is allowed: being
+ * stale is not the same as being rooted somewhere it should not be. */
+static int attn_git_shares_foreign_session_history(const char *dir, const char *defref,
+                                                   const char *own)
+{
+   char probe[2048];
+   snprintf(probe, sizeof(probe), "%s", dir);
+   for (int depth = 0; depth < 40; depth++)
+   {
+      char reg[2200];
+      snprintf(reg, sizeof(reg), "%s/.aimee/worktrees/registry.tsv", probe);
+      char *buf = NULL;
+      if (attn_read_file(reg, &buf) && buf)
+      {
+         int shared = 0;
+         char *line = buf;
+         while (*line && !shared)
+         {
+            char *nl = strchr(line, '\n');
+            if (nl)
+               *nl = '\0';
+            char *t1 = strchr(line, '\t');
+            char *t2 = t1 ? strchr(t1 + 1, '\t') : NULL;
+            char *t3 = t2 ? strchr(t2 + 1, '\t') : NULL;
+            if (t2 && t3)
+            {
+               *t3 = '\0';
+               const char *sess = t2 + 1;
+               /* Registry branch names are launcher-generated, but treat them as data
+                * regardless: a name carrying a quote must never become shell syntax. */
+               if (sess[0] && (!own || !own[0] || strcmp(sess, own) != 0) &&
+                   !strchr(sess, '\'') && !strchr(sess, '\n'))
+               {
+                  char cmd[3200];
+                  snprintf(cmd, sizeof(cmd),
+                           "git -C '%s' rev-parse --verify --quiet '%s^{commit}' >/dev/null 2>&1 "
+                           "&& mb=$(git -C '%s' merge-base HEAD '%s' 2>/dev/null) "
+                           "&& [ -n \"$mb\" ] "
+                           "&& ! git -C '%s' merge-base --is-ancestor \"$mb\" '%s' 2>/dev/null",
+                           dir, sess, dir, sess, dir, defref);
+                  if (system(cmd) == 0)
+                     shared = 1;
+               }
+            }
+            if (!nl)
+               break;
+            line = nl + 1;
+         }
+         free(buf);
+         return shared;
+      }
+      char *slash = strrchr(probe, '/');
+      if (!slash || slash == probe)
+         break;
+      *slash = '\0';
+   }
+   return 0;
+}
+
+/* The directory to run git in for `target`, which may name a file (an Edit/Write target)
+ * or a directory (a Bash cwd). `git -C <file>` fails, and attn_resolve_default_branch
+ * then silently fell back to "main" -- so on a repo whose default is anything else, the
+ * refusal named the wrong branch AND compared the base against it. Observed on one repo
+ * in one minute: "('testing')" for a Bash op, "('main')" for an Edit. */
+static void attn_git_dir_for(const char *target, char *out, size_t outlen)
+{
+   if (!out || !outlen)
+      return;
+   snprintf(out, outlen, "%s", target ? target : "");
+   struct stat st;
+   if (out[0] && stat(out, &st) == 0 && S_ISDIR(st.st_mode))
+      return;
+   char *slash = strrchr(out, '/');
+   if (slash && slash != out)
+      *slash = '\0';
+}
+
 /* Pure decision for the session-isolation guard (testable in isolation).
  * Returns 1 to BLOCK: a mutating op (SOFT/HARD) whose effective target is NOT
  * inside an aimee-managed worktree. Read / raw-scan ops are never blocked here.
@@ -1377,8 +1545,11 @@ int handle_attention_guard(void)
       if (attn_path_in_managed_worktree(lin_target))
       {
          char base[256], own[256], defbr[256];
+         /* git needs a DIRECTORY: lin_target is the file for an Edit/Write. */
+         char gitdir[2048];
+         attn_git_dir_for(lin_target, gitdir, sizeof(gitdir));
          int reg_state = attn_registry_base_for(lin_target, base, sizeof(base), own, sizeof(own));
-         attn_resolve_default_branch(lin_target, defbr, sizeof(defbr));
+         attn_resolve_default_branch(gitdir, defbr, sizeof(defbr));
          int parent_registered = (base[0] && own[0] && strcmp(base, own) != 0)
                                      ? attn_registry_branch_is_registered(lin_target, base)
                                      : 0;
@@ -1388,23 +1559,47 @@ int handle_attention_guard(void)
           *   2 with an EMPTY base -> a row written by an older launcher, before the base
           *        column existed. Grandfathered: the launcher did create it, and blocking
           *        would break every in-flight session the moment this ships.
-          * Only 1 (a managed repo where this worktree was never registered) and 2-with-a-
-          * base actually enforce. */
-         int enforce = (reg_state == 1) || (reg_state == 2 && base[0]);
-         if (enforce && attn_session_branch_blocked(base, defbr, parent_registered))
+          *   1 -> a managed repo where this worktree was never registered. It is NOT
+          *        necessarily hand-rolled: only workspace.c writes rows, and Claude
+          *        Code's EnterWorktree (named as sanctioned in the refusal below) writes
+          *        none. Decide those on git topology instead -- see
+          *        attn_unregistered_lineage_blocked. */
+         if (reg_state == 1)
+         {
+            char defref[300], gitown[256];
+            attn_git_current_branch(gitdir, gitown, sizeof(gitown));
+            int resolved = attn_git_default_ref(gitdir, defbr, defref, sizeof(defref));
+            int foreign = resolved && attn_git_shares_foreign_session_history(gitdir, defref, gitown);
+            if (attn_unregistered_lineage_blocked(resolved, foreign))
+            {
+               fprintf(stderr,
+                       "aimee attention-guard: refusing a mutating op — the worktree at '%s' is on "
+                       "branch '%s', which has no launcher registry row and %s. A primary session "
+                       "must branch off the default branch ('%s'); a delegate off its parent. "
+                       "Recreate the session worktree with the launcher (Claude Code: "
+                       "EnterWorktree; aimee: launch `aimee`) instead of `git worktree add` by "
+                       "hand.\n",
+                       lin_target, gitown[0] ? gitown : "(unknown)",
+                       resolved ? "carries commits from another session's branch"
+                                : "could not be checked, because the default branch does not "
+                                  "resolve here",
+                       defbr[0] ? defbr : "(unresolved)");
+               cJSON_Delete(hook);
+               free(stdin_data);
+               return 2;
+            }
+         }
+         else if (reg_state == 2 && base[0] &&
+                  attn_session_branch_blocked(base, defbr, parent_registered))
          {
             fprintf(stderr,
                     "aimee attention-guard: refusing a mutating op — the worktree at '%s' is on "
                     "branch '%s' rooted at '%s', which is neither the default branch ('%s') nor a "
                     "registered parent session branch. A primary session must branch off the "
-                    "default branch; a delegate off its parent. %s Recreate the session worktree "
+                    "default branch; a delegate off its parent. Recreate the session worktree "
                     "with the launcher (Claude Code: EnterWorktree; aimee: launch `aimee`) instead "
                     "of `git worktree add` by hand.\n",
-                    lin_target, own[0] ? own : "(unknown)", base[0] ? base : "(unregistered)",
-                    defbr[0] ? defbr : "(unresolved)",
-                    base[0] ? ""
-                            : "No launcher registry row exists for it, so it was not created "
-                              "by the launcher.");
+                    lin_target, own[0] ? own : "(unknown)", base, defbr[0] ? defbr : "(unresolved)");
             cJSON_Delete(hook);
             free(stdin_data);
             return 2;

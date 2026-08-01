@@ -321,6 +321,25 @@ static void test_session_isolation_decision(void)
    /* ...but a registered parent is still a legitimate delegate. */
    assert(attn_session_branch_blocked("aimee/session/whatever", "", 1) == 0);
 
+   /* ---- no registry row (attn_unregistered_lineage_blocked) ----
+    * THE REGRESSION: rows are written only by workspace.c, but the refusal names Claude
+    * Code's EnterWorktree as sanctioned too, and that writes none. Every such session was
+    * refused every mutating op -- while correctly cut from the default branch. It was
+    * also unrecoverable: settings, the binary and aimee.yaml all live outside a managed
+    * worktree, so this same guard refused every route to switching it off. */
+
+   /* Clean lineage, no row -> ALLOWED. */
+   assert(attn_unregistered_lineage_blocked(1, 0) == 0);
+
+   /* Still blocked when it carries another session's unmerged work -- the incident the
+    * lineage rule was added for. Losing this would defeat the whole check. */
+   assert(attn_unregistered_lineage_blocked(1, 1) == 1);
+
+   /* Default branch unresolvable: nothing to measure against, so fail closed, matching
+    * attn_session_branch_blocked's behaviour with an empty default above. */
+   assert(attn_unregistered_lineage_blocked(0, 0) == 1);
+   assert(attn_unregistered_lineage_blocked(0, 1) == 1);
+
    /* ---- Bash reaching outside the worktree (attn_bash_escapes_worktree) ----
     * The observed bypass: cwd was a valid managed worktree, so the isolation check
     * passed, while the command cd'd to the shared checkout and wrote there. */
