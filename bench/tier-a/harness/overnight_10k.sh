@@ -40,22 +40,26 @@ ARMS_XTX="\
 
 start_server() {  # <host> <remote-ip> <port> <model> <kind>
   local host=$1 rip=$2 port=$3 model=$4 kind=$5
+  # CLEANUP IS A SEPARATE SSH CALL, and it matches on the MODEL PATH rather than
+  # the port. Both details are load-bearing. Killing in the same command that
+  # launches meant `pkill -f "port 8110"` matched the launching shell's own
+  # command line — which contains "port 8110" — so the launcher killed itself
+  # before starting anything, and both lanes sat at "loading" forever with no
+  # server running. MEASUREMENT_LOG.md records three earlier incidents of exactly
+  # this self-match; this was the fourth.
   if [ "$kind" = "pct" ]; then
-    ssh -o ConnectTimeout=20 root@"$host" "pct exec 140 -- bash -lc '
-      pkill -f \"port $port\" 2>/dev/null; sleep 3
-      nohup setsid /opt/llama.cpp/build-cuda/bin/llama-server -m $model \
-        --host 0.0.0.0 --port $port -c 8192 --no-webui --no-mmproj -ngl 99 \
-        >/dev/null 2>&1 </dev/null &'" >/dev/null 2>&1
+    ssh -o ConnectTimeout=20 root@"$host" \
+      "pct exec 140 -- pkill -f 'llama-server -m /opt/hf/'" >/dev/null 2>&1 || true
+    sleep 4
+    ssh -o ConnectTimeout=20 root@"$host" "pct exec 140 -- bash -lc 'nohup setsid /opt/llama.cpp/build-cuda/bin/llama-server -m $model --host 0.0.0.0 --port $port -c 8192 --no-webui --no-mmproj -ngl 99 >/dev/null 2>&1 </dev/null &'" >/dev/null 2>&1
   else
     # Vulkan1 is the discrete 7900 XTX. Vulkan0 is an 8GB Phoenix iGPU, and
     # llama.cpp takes the FIRST device by default — which is how this lane spent
     # a week measuring an integrated GPU (defect 30). The pin is load-bearing.
-    ssh -o ConnectTimeout=20 admin@"$host" "
-      pkill -f 'port $port' 2>/dev/null; sleep 3
-      HF_HOME=/mnt/media/tierbench/hf nohup setsid \
-      /mnt/media/tierbench/bin/llama-b10210/llama-server -m $model \
-        --host 0.0.0.0 --port $port -c 8192 --no-webui --no-mmproj -ngl 99 \
-        --device Vulkan1 >/dev/null 2>&1 </dev/null &" >/dev/null 2>&1
+    ssh -o ConnectTimeout=20 admin@"$host" \
+      "pkill -f 'llama-server -m /mnt/media/storage'" >/dev/null 2>&1 || true
+    sleep 4
+    ssh -o ConnectTimeout=20 admin@"$host" "HF_HOME=/mnt/media/tierbench/hf nohup setsid /mnt/media/tierbench/bin/llama-b10210/llama-server -m $model --host 0.0.0.0 --port $port -c 8192 --no-webui --no-mmproj -ngl 99 --device Vulkan1 >/dev/null 2>&1 </dev/null &" >/dev/null 2>&1
   fi
   local user=root; [ "$kind" = pct ] || user=admin
   for _ in $(seq 1 90); do
