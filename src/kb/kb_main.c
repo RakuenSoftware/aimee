@@ -767,6 +767,11 @@ static int kb_cmd_tenancy_init_db2(void)
    }
    db2_set_embedding_dim_default(config_embedding_dim_default());
    db2_set_embedding_dim(config_embedding_dim_current());
+   /* These commands read a deployment somebody else is running. Applying the
+    * schema from here races the daemon's own pass, and Postgres answers "tuple
+    * concurrently updated", which surfaced below as "DB2 not reachable" against a
+    * KB that was reachable and healthy. Verify instead. */
+   db2_set_schema_readonly(1);
    if (db2_init(db2_url) != 0)
    {
       fprintf(stderr, "aimee-kb: DB2 not reachable at %s\n", db2_url);

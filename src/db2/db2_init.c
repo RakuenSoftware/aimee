@@ -720,6 +720,13 @@ void db2_thread_conn_close(void)
    }
 }
 
+/* See db2_set_schema_readonly in lifecycle.h. */
+static int g_schema_readonly;
+void db2_set_schema_readonly(int on)
+{
+   g_schema_readonly = on ? 1 : 0;
+}
+
 int db2_is_initialized(void)
 {
    return g_conn ? 1 : 0;
@@ -818,7 +825,7 @@ int db2_init(const char *libpq_url)
     * applied by a separate migrate/owner step; here we VERIFY it (read-only) and
     * skip both the probe leg (which would write a fresh dim) and the apply. The
     * dev/owner path below is unchanged. */
-   int pre_provisioned = db2_hardening_enabled() && !aimee_pg_is_shim();
+   int pre_provisioned = (db2_hardening_enabled() || g_schema_readonly) && !aimee_pg_is_shim();
 
    /* §2b fresh-DB probe leg: unpinned + nothing recorded + a probe registered. The
     * advisory lock serialises racing kb starts; FAIL-FAST on any probe/lock/read
