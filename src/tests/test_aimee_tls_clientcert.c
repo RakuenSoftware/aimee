@@ -130,6 +130,39 @@ static void test_refuse_symlinked_key(void)
    unlink(tgt);
 }
 
+/* Suppression (used by `aimee remote set/trust` to test whether the server is
+ * refusing the stored identity) must NOT be implemented by weakening this pure
+ * gate. The flag belongs in the presentation path; if a later refactor moved it
+ * in here, every fail-closed answer above would silently become dependent on
+ * process state — so pin that the verdicts are identical with it set. */
+static void test_suppression_does_not_weaken_gate(void)
+{
+   char crt[600], key[600], p[700];
+   rm_material();
+   snprintf(p, sizeof(p), "%s/tls/client.crt", g_home);
+   write_file(p, 0600);
+   snprintf(p, sizeof(p), "%s/tls/client.key", g_home);
+   write_file(p, 0644); /* loose key — must stay refused regardless of the flag */
+
+   int before = aimee_tls_client_cert_eligible(g_home, crt, sizeof(crt), key, sizeof(key));
+   aimee_tls_suppress_client_cert(1);
+   int during = aimee_tls_client_cert_eligible(g_home, crt, sizeof(crt), key, sizeof(key));
+   aimee_tls_suppress_client_cert(0);
+   int after = aimee_tls_client_cert_eligible(g_home, crt, sizeof(crt), key, sizeof(key));
+
+   assert(before == -1);
+   assert(during == -1); /* still fail-closed */
+   assert(after == -1);
+
+   /* And the same for the eligible case: suppression changes nothing here. */
+   snprintf(p, sizeof(p), "%s/tls/client.key", g_home);
+   assert(chmod(p, 0600) == 0);
+   aimee_tls_suppress_client_cert(1);
+   assert(aimee_tls_client_cert_eligible(g_home, crt, sizeof(crt), key, sizeof(key)) == 1);
+   aimee_tls_suppress_client_cert(0);
+   rm_material();
+}
+
 /* Empty/NULL home -> 0 (a broken env must not crash or present anything). */
 static void test_bad_home_is_none(void)
 {
@@ -147,6 +180,7 @@ int main(void)
    test_refuse_group_readable_key();
    test_refuse_symlinked_key();
    test_partial_identity_is_refused();
+   test_suppression_does_not_weaken_gate();
    test_bad_home_is_none();
    rm_material();
    printf("aimee_tls_clientcert: all tests passed\n");
