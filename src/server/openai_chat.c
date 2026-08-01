@@ -133,6 +133,13 @@ static int dedup_eligible(char *key, size_t key_cap, const agent_t *ag, const ch
    return 1;
 }
 
+/* Defined below, after the gateway pipeline they depend on; the chat tool-relay
+ * branch in run_completion is their first caller. */
+static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *tools,
+                                  const char *system_prompt, int max_tokens, double temperature,
+                                  parsed_response_t *out);
+static int openai_governance_enabled(void);
+
 /* Shared body for both endpoints. chat != 0 selects the chat.completion shape
  * (and chat-request parse); otherwise the legacy text_completion shape. */
 static int run_completion(int chat, const char *body, char *resp, int cap)
@@ -202,6 +209,77 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
       openai_format_error_code(resp, cap, "server_error", "no agent configured",
                                AIMEE_ERR_NO_PRIMARY);
       return 503;
+   }
+
+   /* Tool relay: when the caller supplies `tools`, this endpoint must return the
+    * model's tool_calls for the CALLER to execute — the stateless half of the
+    * OpenAI contract that every agentic client depends on. Without it a client
+    * sees a provider that cannot call tools and refuses to run at all.
+    *
+    * This does NOT make the endpoint agentic: aimee still executes nothing and
+    * holds no loop state (that remains /v1/runs). agent_execute_messages is the
+    * same passthrough the /v1/responses ingress uses, so inbound tools go
+    * through the shared tool-policing stage rather than around it.
+    *
+    * Dedup is skipped here: its key does not cover `tools`, so a cached
+    * tool-free reply must never be replayed for a tool-bearing request. */
+   if (chat)
+   {
+      char *instructions = NULL;
+      cJSON *messages = NULL, *tools = NULL;
+      if (openai_split_chat_request(body, &instructions, &messages, &tools) == 0 && tools)
+      {
+         parsed_response_t parsed;
+         int trc = agent_execute_messages(
+             ag, messages, tools, instructions ? instructions : pi_env,
+             openai_request_int(body, "max_tokens", OPENAI_CHAT_MAX_TOKENS, 32768),
+             openai_request_double(body, "temperature", OPENAI_CHAT_TEMPERATURE, 2.0), &parsed);
+         free(instructions);
+         cJSON_Delete(messages);
+         cJSON_Delete(tools);
+         free(pi_env);
+         free(prompt);
+
+         if (trc != 0)
+         {
+            agent_free_parsed_response(&parsed);
+            openai_format_error(resp, cap, "upstream_error", "completion failed");
+            return 502;
+         }
+
+         if (agent_ingress_accounting_enabled())
+            agent_ingress_record_cost(ag->name, ag->model, model, parsed.stop_reason,
+                                      parsed.prompt_tokens, parsed.completion_tokens,
+                                      parsed.cache_write_tokens, parsed.cache_read_tokens,
+                                      "openai-ingress", NULL);
+
+         /* Same response-side policing the streaming path runs, so a denied
+          * subagent-spawning call cannot reach an external caller. */
+         if (parsed.is_tool_call && parsed.call_count > 0 && gateway_prevent_subagents_enabled())
+            (void)gw_response_run_governance(&parsed, openai_governance_enabled());
+
+         long tcreated = (long)time(NULL);
+         char tid[48];
+         snprintf(tid, sizeof(tid), "chatcmpl-%ld", tcreated);
+
+         int tlen;
+         if (parsed.is_tool_call && parsed.call_count > 0)
+            tlen = openai_format_chat_completion_tool_calls(tid, model, &parsed, tcreated, resp, cap);
+         else
+            tlen = openai_format_chat_completion(tid, model, parsed.content ? parsed.content : "",
+                                                 tcreated, parsed.prompt_tokens,
+                                                 parsed.completion_tokens, resp, cap);
+         agent_free_parsed_response(&parsed);
+         if (tlen < 0)
+         {
+            openai_format_error(resp, cap, "server_error", "response did not fit the buffer");
+            return 500;
+         }
+         return 200;
+      }
+      free(instructions);
+      cJSON_Delete(messages);
+      cJSON_Delete(tools);
    }
 
    /* §4 short-window dedup: serve a re-sent identical request (same account/source

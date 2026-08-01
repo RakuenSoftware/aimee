@@ -1,6 +1,7 @@
 /* test_openai_shape.c: unit tests for the OpenAI-compatible JSON shaping
  * helpers (pure — no sockets, no network, no agent execution). */
 #include "openai_shape.h"
+#include "agent_protocol.h" /* parsed_response_t — openai_shape.h only forward-declares it */
 #include "aimee_errors.h"
 #include "cJSON.h"
 #include <assert.h>
@@ -498,6 +499,135 @@ int main(void)
       free(instructions);
       cJSON_Delete((cJSON *)messages);
       cJSON_Delete((cJSON *)tools);
+   }
+
+   /* --- split a chat request into instructions / messages / tools ---
+    * The tool relay on /v1/chat/completions depends on this: an agentic client
+    * sends its own tools and executes the calls itself, so the loop only
+    * converges if assistant `tool_calls` and `role:"tool"` turns survive the
+    * round trip verbatim. */
+   {
+      char *instructions = NULL;
+      struct cJSON *messages = NULL, *tools = NULL;
+      int rc = openai_split_chat_request(
+          "{\"model\":\"aimee\",\"messages\":["
+          "{\"role\":\"system\",\"content\":\"be terse\"},"
+          "{\"role\":\"user\",\"content\":\"weather in Paris?\"},"
+          "{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"c1\","
+          "\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"arguments\":\"{}\"}}]},"
+          "{\"role\":\"tool\",\"tool_call_id\":\"c1\",\"content\":\"12C\"}],"
+          "\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"get_weather\"}},"
+          "{\"type\":\"web_search\"}]}",
+          &instructions, &messages, &tools);
+      assert(rc == 0);
+      /* leading system turn lifted out of band */
+      assert(instructions && strcmp(instructions, "be terse") == 0);
+      assert(cJSON_GetArraySize((cJSON *)messages) == 3);
+      /* the tool loop's two special turns round-trip untouched */
+      cJSON *m1 = cJSON_GetArrayItem((cJSON *)messages, 1);
+      assert(cJSON_GetObjectItem(m1, "tool_calls"));
+      cJSON *m2 = cJSON_GetArrayItem((cJSON *)messages, 2);
+      assert(strcmp(cJSON_GetObjectItem(m2, "role")->valuestring, "tool") == 0);
+      assert(strcmp(cJSON_GetObjectItem(m2, "tool_call_id")->valuestring, "c1") == 0);
+      /* only function tools survive */
+      assert(tools && cJSON_GetArraySize((cJSON *)tools) == 1);
+      free(instructions);
+      cJSON_Delete((cJSON *)messages);
+      cJSON_Delete((cJSON *)tools);
+   }
+
+   /* Absent (or wholly unsupported) tools must yield NULL, never `tools: []` —
+    * an empty array is a different request to a provider than no array. */
+   {
+      char *instructions = NULL;
+      struct cJSON *messages = NULL, *tools = NULL;
+      assert(openai_split_chat_request("{\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
+                                       &instructions, &messages, &tools) == 0);
+      assert(tools == NULL && instructions == NULL);
+      cJSON_Delete((cJSON *)messages);
+
+      assert(openai_split_chat_request("{\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],"
+                                       "\"tools\":[{\"type\":\"web_search\"}]}",
+                                       &instructions, &messages, &tools) == 0);
+      assert(tools == NULL);
+      cJSON_Delete((cJSON *)messages);
+
+      /* malformed and empty are rejected without handing back partial output */
+      messages = tools = NULL;
+      instructions = NULL;
+      assert(openai_split_chat_request("not json", &instructions, &messages, &tools) == -1);
+      assert(openai_split_chat_request("{\"messages\":[]}", &instructions, &messages, &tools) == -1);
+      assert(!instructions && !messages && !tools);
+   }
+
+   /* --- format a tool-call turn in chat.completion shape --- */
+   {
+      parsed_response_t p;
+      memset(&p, 0, sizeof(p));
+      p.is_tool_call = 1;
+      p.call_count = 2;
+      snprintf(p.calls[0].id, sizeof(p.calls[0].id), "call_a");
+      snprintf(p.calls[0].name, sizeof(p.calls[0].name), "get_weather");
+      p.calls[0].arguments = strdup("{\"city\":\"Paris\"}");
+      snprintf(p.calls[1].id, sizeof(p.calls[1].id), "call_b");
+      snprintf(p.calls[1].name, sizeof(p.calls[1].name), "get_time");
+      p.calls[1].arguments = NULL; /* must degrade to "{}", not null */
+      p.prompt_tokens = 10;
+      p.completion_tokens = 5;
+
+      int n = openai_format_chat_completion_tool_calls("chatcmpl-1", "aimee", &p, 1700000000, resp,
+                                                       (int)sizeof(resp));
+      assert(n > 0);
+      cJSON *root = cJSON_Parse(resp);
+      assert(root);
+      cJSON *choice = cJSON_GetArrayItem(cJSON_GetObjectItem(root, "choices"), 0);
+      /* the field agentic clients branch on before they will execute a tool */
+      assert(strcmp(cJSON_GetObjectItem(choice, "finish_reason")->valuestring, "tool_calls") == 0);
+      cJSON *msg = cJSON_GetObjectItem(choice, "message");
+      assert(cJSON_IsNull(cJSON_GetObjectItem(msg, "content")));
+      cJSON *tcs = cJSON_GetObjectItem(msg, "tool_calls");
+      assert(cJSON_GetArraySize(tcs) == 2);
+      cJSON *fn0 = cJSON_GetObjectItem(cJSON_GetArrayItem(tcs, 0), "function");
+      assert(strcmp(cJSON_GetObjectItem(fn0, "name")->valuestring, "get_weather") == 0);
+      /* `arguments` is a JSON *string* on the wire, not a nested object */
+      assert(cJSON_IsString(cJSON_GetObjectItem(fn0, "arguments")));
+      assert(strcmp(cJSON_GetObjectItem(fn0, "arguments")->valuestring, "{\"city\":\"Paris\"}") ==
+             0);
+      cJSON *fn1 = cJSON_GetObjectItem(cJSON_GetArrayItem(tcs, 1), "function");
+      assert(strcmp(cJSON_GetObjectItem(fn1, "arguments")->valuestring, "{}") == 0);
+      cJSON_Delete(root);
+      free(p.calls[0].arguments);
+   }
+
+   /* Prose emitted alongside the calls is preserved rather than discarded. */
+   {
+      parsed_response_t p;
+      memset(&p, 0, sizeof(p));
+      p.is_tool_call = 1;
+      p.call_count = 1;
+      p.content = (char *)"let me check";
+      snprintf(p.calls[0].id, sizeof(p.calls[0].id), "c1");
+      snprintf(p.calls[0].name, sizeof(p.calls[0].name), "f");
+      assert(openai_format_chat_completion_tool_calls("i", "aimee", &p, 1, resp,
+                                                      (int)sizeof(resp)) > 0);
+      cJSON *root = cJSON_Parse(resp);
+      cJSON *msg =
+          cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(root, "choices"), 0),
+                              "message");
+      assert(strcmp(cJSON_GetObjectItem(msg, "content")->valuestring, "let me check") == 0);
+      cJSON_Delete(root);
+   }
+
+   /* Nothing to report, or nowhere to put it, are both refusals. */
+   {
+      parsed_response_t p;
+      memset(&p, 0, sizeof(p));
+      assert(openai_format_chat_completion_tool_calls("i", "m", &p, 1, resp, (int)sizeof(resp)) ==
+             -1);
+      p.call_count = 1;
+      char tiny[8];
+      assert(openai_format_chat_completion_tool_calls("i", "m", &p, 1, tiny, (int)sizeof(tiny)) ==
+             -1);
    }
 
    printf("ok\n");

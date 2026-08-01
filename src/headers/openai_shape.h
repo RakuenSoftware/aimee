@@ -70,6 +70,26 @@ extern "C"
                                       char **instructions_out, struct cJSON **messages_out,
                                       struct cJSON **tools_out, int *stream_out);
 
+   /* Split an OpenAI chat-completions request into the three pieces the provider
+    * drivers take separately: leading system turn -> *instructions_out (NULL if
+    * absent; caller frees), remaining turns -> *messages_out verbatim (assistant
+    * `tool_calls` and `role:"tool"` results preserved, so a client-driven tool
+    * loop converges), and `function`-type tools -> *tools_out (NULL if none —
+    * never an empty array). Returns 0 on success, -1 on invalid JSON or an empty
+    * messages array. On success the caller cJSON_Delete()s both arrays. */
+   int openai_split_chat_request(const char *body, char **instructions_out,
+                                 struct cJSON **messages_out, struct cJSON **tools_out);
+
+   /* Build a chat.completion whose assistant turn carries tool_calls[] rather
+    * than content, with finish_reason "tool_calls" — the shape an agentic client
+    * (OpenCode, Codex, the OpenAI SDK) requires before it will execute a tool.
+    * `arguments` is emitted as a JSON string, per the wire contract. Returns
+    * bytes written (excluding NUL), or -1 if it does not fit or there are no
+    * calls to report. */
+   int openai_format_chat_completion_tool_calls(const char *id, const char *model,
+                                                const parsed_response_t *parsed, long created,
+                                                char *resp, int cap);
+
    /* Build an OpenAI Responses object into resp[cap]:
     * {"id":…,"object":"response","created_at":…,"model":…,"status":"completed",
     *  "output":[{"id":…,"type":"message","status":"completed","role":"assistant",
