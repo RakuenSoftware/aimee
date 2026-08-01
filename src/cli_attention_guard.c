@@ -1320,9 +1320,18 @@ static void attn_git_current_branch(const char *dir, char *out, size_t outlen)
       out[0] = '\0';
 }
 
-/* A ref that actually resolves for the default branch: the local branch when present,
- * else origin/<branch>, since a fresh worktree often carries only the remote-tracking
- * ref. 0 when neither resolves -- the caller treats that as unresolved and fails closed. */
+/* A ref that actually resolves for the default branch: origin/<branch> when present,
+ * else the local branch, since a fresh worktree often carries only the remote-tracking
+ * ref. 0 when neither resolves -- the caller treats that as unresolved and fails closed.
+ *
+ * The remote is preferred because this ref is the yardstick for lineage, and a local
+ * default branch goes stale the moment it is not pulled. On a box whose local `testing`
+ * sat 2542 commits behind origin/testing, every session branch cut from the CURRENT
+ * default shared a merge base the stale local ref did not contain, so
+ * attn_git_shares_foreign_session_history() flagged all of them and refused every
+ * mutating op -- including the write of the `require_session_worktree: false` hatch
+ * that is the documented way out. Measuring against the branch the sessions are
+ * actually cut from is what the rule means by "the default branch". */
 static int attn_git_default_ref(const char *dir, const char *defbr, char *out, size_t outlen)
 {
    if (!dir || !dir[0] || !defbr || !defbr[0] || !out || !outlen)
@@ -1331,7 +1340,7 @@ static int attn_git_default_ref(const char *dir, const char *defbr, char *out, s
       return 0;
    char remote[300];
    snprintf(remote, sizeof(remote), "origin/%s", defbr);
-   const char *forms[2] = {defbr, remote};
+   const char *forms[2] = {remote, defbr};
    for (int i = 0; i < 2; i++)
    {
       char cmd[2600];
