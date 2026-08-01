@@ -104,7 +104,15 @@ useradd() {
   # that here so group membership reflects what actually happened.
 }
 groupadd() { :; }
-chpasswd() { cat >/dev/null; printf 'chpasswd\n' >> "$cleared_users"; }
+chpasswd() {
+  # -e means the payload is a hash, not a plaintext password (the restore path).
+  if [[ ${1:-} == -e ]]; then
+    printf 'chpasswd -e %s\n' "$(cat)" >> "$cleared_users"
+  else
+    cat >/dev/null; printf 'chpasswd\n' >> "$cleared_users"
+  fi
+}
+userdel() { :; }
 
 # shellcheck source=../deploy/container/runtime-web-lib.sh
 source "$repo_dir/deploy/container/runtime-web-lib.sh"
@@ -226,6 +234,51 @@ upgrade_user=$(sed -n 's/.*username: //p' <<<"$upgrade_log" | tr -d ' ' | head -
 # The stale marker must go too: left behind, it tells the wizard setup is already
 # finished while the only working credential is the one just printed.
 [[ ! -e $WEBCHAT_BOOTSTRAP_REPLACED ]]
+
+# --- an upgrade must give the operator back THEIR account ---------------------
+#
+# Not being locked out is only half of it. The operator's projects are filed by
+# webuser NAME under /var/lib/aimee-workspaces/webusers/<name>, so handing them a
+# fresh generated login after an upgrade leaves the whole tree attached to a user
+# nobody signs in as — the same disconnect, by a different route. runtime-web
+# records the managed accounts and their verifiers; restore them instead.
+rm -rf "$AIMEE_HOME/webchat"; mkdir -p "$AIMEE_HOME/webchat"
+: > "$cleared_users"
+printf '%s\n' operator legacy aimee "$USER" > "$existing_users"   # the image's own users
+printf '' > "$group_members"                                       # group ships empty
+printf 'admin:$6$salt$operatorverifier\n' > "$AIMEE_HOME/webchat/identities"
+printf 'generated:aimee-000000000000\n' > "$WEBCHAT_BOOTSTRAP_USER"
+printf 'admin\n' > "$WEBCHAT_BOOTSTRAP_REPLACED"
+restore_log=$(webchat_provision_bootstrap_account 2>&1)
+# The operator's own account is back, with its own verifier...
+grep -Fq 'useradd' "$cleared_users"
+grep -Fq -- "-aG $WEBCHAT_LOGIN_GROUP admin" "$cleared_users"
+grep -Fq 'chpasswd -e admin:$6$salt$operatorverifier' "$cleared_users"
+grep -Fxq admin "$existing_users"
+# ...so no replacement credential is minted, and the marker naming them stands.
+! grep -Fq 'FIRST-BOOT DASHBOARD LOGIN' <<<"$restore_log"
+[[ -f $WEBCHAT_BOOTSTRAP_REPLACED ]]
+
+# An account that SURVIVED keeps its current password: the record can be older
+# than a password change made since, and restoring over it would roll that back.
+: > "$cleared_users"
+survivor_log=$(webchat_provision_bootstrap_account 2>&1)
+! grep -q 'chpasswd' "$cleared_users"
+! grep -q 'useradd' "$cleared_users"
+! grep -Fq 'FIRST-BOOT DASHBOARD LOGIN' <<<"$survivor_log"
+
+# A record naming a LOCKED verifier is not a login: restoring it would recreate
+# an account nobody can authenticate as, and then suppress minting a real one.
+rm -rf "$AIMEE_HOME/webchat"; mkdir -p "$AIMEE_HOME/webchat"
+: > "$cleared_users"
+printf '%s\n' operator legacy aimee "$USER" > "$existing_users"
+printf '' > "$group_members"
+printf 'retired:!$y$locked\n' > "$AIMEE_HOME/webchat/identities"
+locked_record_log=$(webchat_provision_bootstrap_account 2>&1)
+! grep -Fxq retired "$existing_users"
+grep -Fq 'FIRST-BOOT DASHBOARD LOGIN' <<<"$locked_record_log"
+
+rm -f "$AIMEE_HOME/webchat/identities"
 
 # --- a retired account is not a usable login ----------------------------------
 #
