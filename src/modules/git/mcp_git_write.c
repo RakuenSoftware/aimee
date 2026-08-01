@@ -7,6 +7,7 @@
 #include "mcp_git.h"
 #include "util.h"
 #include "branch_ownership.h"
+#include "git_forge_vault.h"
 #include <dirent.h>
 #include <sys/stat.h>
 #include <stdio.h>
@@ -145,11 +146,34 @@ cJSON *handle_git_commit(cJSON *args)
       free(out);
    }
 
-   /* Commit */
+   /* Commit AS THE CONFIGURED OPERATOR, or not at all.
+    *
+    * git_ops points GIT_CONFIG_GLOBAL/SYSTEM at /dev/null, so git has no ambient
+    * identity to fall back on here: aimee supplies one or the commit has no
+    * author. Refuse rather than invent a persona. A bot author is not free
+    * either, since GitHub adds a Co-authored-by trailer to the squash of any PR
+    * whose commits carry two distinct authors, and the standing directive
+    * forbids those. */
+   char author_name[256] = "", author_email[256] = "";
+   int have_identity =
+       git_identity_get(author_name, sizeof(author_name), author_email, sizeof(author_email));
+   if (have_identity < 0)
+      return mcp_text("error: could not read the git identity from the vault");
+   if (have_identity == 0)
+      return mcp_text("error: no git identity is configured, so this commit would have no author. "
+                      "Seal AIMEE_GIT_AUTHOR_NAME and AIMEE_GIT_AUTHOR_EMAIL into the vault at "
+                      "install time (both, or neither takes effect).");
+
    char *esc_msg = shell_escape(jmsg->valuestring);
+   char *esc_name = shell_escape(author_name);
+   char *esc_email = shell_escape(author_email);
    char commit_cmd[8192];
-   snprintf(commit_cmd, sizeof(commit_cmd), "git commit -m '%s' 2>&1", esc_msg);
+   snprintf(commit_cmd, sizeof(commit_cmd),
+            "git -c user.name='%s' -c user.email='%s' commit -m '%s' 2>&1", esc_name, esc_email,
+            esc_msg);
    free(esc_msg);
+   free(esc_name);
+   free(esc_email);
 
    int rc;
    char *out = mcp_git_run(commit_cmd, &rc);

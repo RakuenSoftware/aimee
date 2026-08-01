@@ -52,6 +52,10 @@ static int name_span_is_credential(const char *name, size_t len, int include_del
        (len == strlen("AIMEE_WEBCHAT_USER") && memcmp(name, "AIMEE_WEBCHAT_USER", len) == 0) ||
        (len == strlen("AIMEE_WEBCHAT_USERS") && memcmp(name, "AIMEE_WEBCHAT_USERS", len) == 0) ||
        (len == strlen("AIMEE_KB_CONN") && memcmp(name, "AIMEE_KB_CONN", len) == 0) ||
+       (len == strlen("AIMEE_GIT_AUTHOR_NAME") &&
+        memcmp(name, "AIMEE_GIT_AUTHOR_NAME", len) == 0) ||
+       (len == strlen("AIMEE_GIT_AUTHOR_EMAIL") &&
+        memcmp(name, "AIMEE_GIT_AUTHOR_EMAIL", len) == 0) ||
        (len == strlen("DATABASE_URL") && memcmp(name, "DATABASE_URL", len) == 0) ||
        (len == strlen("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE") &&
         memcmp(name, "AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE", len) == 0))
@@ -84,6 +88,16 @@ int vault_env_has_credential_environment(void)
          continue;
       size_t len = (size_t)(eq - *entry);
       if (!name_span_is_credential(*entry, len, 1))
+         continue;
+      /* The commit identity is SEALED like a credential but is not one: a name
+       * and an email are published in every commit this server makes. Leave them
+       * in the environment so the Go WFE, which the entrypoint starts as a
+       * sibling AFTER this scrub, can author its commits with them. The vault
+       * copy stays the store of record for the C paths. */
+      if ((len == strlen("AIMEE_GIT_AUTHOR_NAME") &&
+           memcmp(*entry, "AIMEE_GIT_AUTHOR_NAME", len) == 0) ||
+          (len == strlen("AIMEE_GIT_AUTHOR_EMAIL") &&
+           memcmp(*entry, "AIMEE_GIT_AUTHOR_EMAIL", len) == 0))
          continue;
       return len < ENV_NAME_MAX ? 1 : -1;
    }
@@ -350,6 +364,22 @@ static void slot_for_env(const char *name, const char **agent, const char **cred
    {
       *agent = "git";
       *cred = "forge_token";
+      return;
+   }
+   /* The commit identity lives beside the forge token: same agent, same
+    * first-boot transport. aimee cannot read the machine's git config (git_ops
+    * points GIT_CONFIG_GLOBAL/SYSTEM at /dev/null), so a commit uses this or it
+    * has no author at all. */
+   if (strcmp(name, "AIMEE_GIT_AUTHOR_NAME") == 0)
+   {
+      *agent = "git";
+      *cred = "author_name";
+      return;
+   }
+   if (strcmp(name, "AIMEE_GIT_AUTHOR_EMAIL") == 0)
+   {
+      *agent = "git";
+      *cred = "author_email";
       return;
    }
    *agent = ENV_AGENT;
