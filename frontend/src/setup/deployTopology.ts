@@ -92,12 +92,12 @@ export const SYNTHESIS_MODELS: SynthesisModelChoice[] = [
   {
     id: 'gemma-4-E4B-it',
     label: 'gemma-4-E4B-it (recommended)',
-    blurb: 'The better model. ~7.5 GB of weights, ~3.3 tok/s on 8 CPU threads.',
+    blurb: 'The better model. 7.46 GB of weights, ~3.3 tok/s on 8 CPU threads.',
   },
   {
     id: 'gemma-4-E2B-it',
     label: 'gemma-4-E2B-it (small box)',
-    blurb: 'Roughly half the memory and about twice the CPU speed, measurably weaker.',
+    blurb: '4.71 GB of weights. About twice the CPU speed, measurably weaker.',
   },
 ];
 

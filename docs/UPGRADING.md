@@ -250,8 +250,8 @@ container fetch the weights on first start into `$AIMEE_HOME/models`, on the
 `aimee-kb-home` volume. They are not baked into the image, so an image upgrade does
 not refetch several gigabytes — and a volume wipe does.
 
-First start after selecting a model downloads roughly 7.5 GB for E4B (4.6 GB for
-E2B, both Q8_0) and the KB reports
+First start after selecting a model downloads 7.46 GB for E4B (4.71 GB for E2B,
+both UD-Q6_K_XL) and the KB reports
 synthesis unavailable until it finishes. That is deliberate: blocking startup on a
 multi-gigabyte download would take the whole knowledge base down with it.
 

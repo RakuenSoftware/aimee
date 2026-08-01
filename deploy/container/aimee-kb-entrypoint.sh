@@ -97,7 +97,7 @@ start_embedder() {
 #                             embedding, search, recall and indexing never call it.
 #
 # WEIGHTS LIVE ON THE PERSISTENT VOLUME, NOT IN THE IMAGE. gemma-4-E4B is ~7.5GB
-# at the shipped Q8_0; baking that would roughly double the image
+# at the shipped UD-Q6_K_XL; baking that would roughly double the image
 # and re-download on every image bump. /var/lib/aimee is the aimee-kb-home volume,
 # so the weights survive image upgrades, rollbacks and rebuilds.
 #
@@ -116,15 +116,16 @@ synthesis_repo_for_model() {
     # silently become a 404 download that leaves synthesis quietly dead.
     #
     # THE QUANT IS EXPLICIT AND MUST EXIST IN THE REPO. llama.cpp's -hf defaults to
-    # Q4_K_M and, when that is absent, "falls back to the first file in the repo".
-    # These repos publish BF16, Q4_0 and Q8_0 — no Q4_K_M — so asking for it would
-    # have silently fetched whatever sorted first, which here includes a ~15GB BF16
-    # and the mmproj/mtp side files. Q8_0 is named because it is the quantisation
-    # docs/SYNTHESIS_MODELS.md actually measured, so the shipped configuration and
-    # the published numbers are the same thing.
+    # Q4_K_M and, when that is absent, falls back to another file in the repo — so a
+    # quant that is not published does not fail, it silently serves something else.
+    # UD-Q6_K_XL (Unsloth Dynamic) is published in these repos and is what we ship;
+    # llama.cpp matches the tag as "-<TAG>." against the filename, case-insensitively,
+    # so this resolves gemma-4-E{2,4}B-it-UD-Q6_K_XL.gguf and nothing adjacent.
+    #
+    # unsloth/, not ggml-org/: the UD quants only exist there.
     case "$1" in
-        gemma-4-E2B-it) echo "ggml-org/gemma-4-E2B-it-GGUF:Q8_0" ;;
-        gemma-4-E4B-it) echo "ggml-org/gemma-4-E4B-it-GGUF:Q8_0" ;;
+        gemma-4-E2B-it) echo "unsloth/gemma-4-E2B-it-GGUF:UD-Q6_K_XL" ;;
+        gemma-4-E4B-it) echo "unsloth/gemma-4-E4B-it-GGUF:UD-Q6_K_XL" ;;
         *) echo "" ;;
     esac
 }

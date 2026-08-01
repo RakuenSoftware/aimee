@@ -15,7 +15,7 @@ distinction this page replaces.
 | You want | Do this | What you get |
 | --- | --- | --- |
 | **Simplest thing that works** | Point `SYNTHESIS_ENDPOINT` at an external OpenAI-compatible endpoint | Best quality, no local GPU or RAM cost, your notes leave the machine |
-| **Local, and quality matters most** | run `aimee-kb-llm` (or `aimee-kb-nomic-llm`) and select `gemma-4-E4B-it` | 0.82 F1 extraction, 7.46 GB of weights, 3.3 tok/s on 8 CPU threads |
+| **Local, and quality matters most** | run `aimee-kb-llm` (or `aimee-kb-nomic-llm`) and select `gemma-4-E4B-it` | 0.82 F1 extraction (at Q8_0; ships UD-Q6_K_XL), 7.46 GB of weights, 3.3 tok/s on 8 CPU threads |
 | **Local, and the box is small** | the same image, selecting `gemma-4-E2B-it` | 0.69 F1 extraction, 4.61 GB of weights, 6.3 tok/s on 8 CPU threads |
 
 Those weight sizes and throughputs are Q8_0, which is what was measured. The
@@ -118,13 +118,17 @@ reported without a CI on this page, it has not been tested and should not be
 read as a ranking. Note that overlapping single-run CIs do *not* imply a
 difference is insignificant — the paired test is the one to read.
 
-**The quantisation now matches.** Every number above was measured at Q8_0, and
-Q8_0 is what the bundled path fetches, so the table describes the shipped
-configuration rather than an approximation of it. This was not true of an earlier
-draft, which named `Q4_K_M`: that quantisation is not published in these repos at
-all, and llama.cpp's `-hf` would have fallen back to "the first file in the repo"
-— a ~15 GB BF16, or one of the mmproj/mtp side files. The cost of matching is
-size: ~7.5 GB for E4B rather than ~4 GB.
+**The quantisation still does not match.** Every number above was measured at
+Q8_0. The bundled path ships `UD-Q6_K_XL` (Unsloth Dynamic Q6), which is a
+different quantisation, so expect the shipped configuration to differ from the
+table by an amount nobody has measured. It is close in size — 7.46 GB for E4B and
+4.71 GB for E2B, against 7.46 and 4.61 at Q8_0 — but size is not quality, and a
+dynamic quant distributes precision differently across layers rather than
+uniformly.
+
+An earlier draft named `Q4_K_M`, which is not published in these repos at all.
+That would not have failed: llama.cpp's `-hf` falls back to another file when the
+named quant is absent, so it would have silently served something else.
 
 **The gold set has one author and n is 69.** One person wrote and labelled the
 extraction set. There is no second annotator and no inter-rater agreement
@@ -232,8 +236,8 @@ disables the local options there rather than offering a choice that cannot work.
 Select the model with `SYNTHESIS_MODEL` (or in the wizard). The container fetches
 the weights on first start and keeps them on the data volume, under
 `$AIMEE_HOME/models` — so an image upgrade does not refetch several gigabytes.
-First start pulls ~7.5 GB for E4B (~4.6 GB for E2B) at Q8_0, the quantisation the
-numbers above were measured with.
+First start pulls 7.46 GB for E4B (4.71 GB for E2B) at UD-Q6_K_XL, from unsloth's
+GGUF repos — the UD quants are published there and not by ggml-org.
 Leave `SYNTHESIS_ENDPOINT` empty: the container starts llama-server itself and
 points synthesis at loopback.
 
