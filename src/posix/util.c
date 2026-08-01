@@ -64,6 +64,24 @@ int safe_exec_capture_cwd_env_fd_timeout(const char *const argv[], const char *c
       sigset_t empty;
       sigemptyset(&empty);
       sigprocmask(SIG_SETMASK, &empty, NULL);
+      /* Pin the working directory FIRST, before any dup2 below can renumber the
+       * fds it may name. Callers pass cwd as "/proc/self/fd/<n>" to pin a
+       * destination by descriptor rather than by an attacker-influencable path
+       * string (git_project_clone does exactly this). If <n> collides with
+       * target_fd -- or with STDOUT/STDERR -- the dup2 replaces that descriptor
+       * and the chdir then resolves to the WRONG object, or to a non-directory,
+       * and the child dies 127.
+       *
+       * That is not hypothetical: git_project_clone pins the clone destination
+       * this way and passes the credential memfd at GIT_CRED_TOKEN_TARGET_FD
+       * (21). Whenever the destination fd landed on 21 -- which depends on how
+       * many descriptors the server happens to hold, so it varies run to run --
+       * the clone failed with "git clone failed (rc=127)" while git itself was
+       * fine. Bulk-cloning an org hit it repeatedly and unpredictably.
+       *
+       * A failed chdir must NOT silently fall back to the parent cwd. */
+      if (cwd && cwd[0] && chdir(cwd) != 0)
+         _exit(127);
       /* redirect stdout/stderr to pipe, close stdin */
       close(pipefd[0]);
       dup2(pipefd[1], STDOUT_FILENO);
@@ -86,11 +104,6 @@ int safe_exec_capture_cwd_env_fd_timeout(const char *const argv[], const char *c
             _exit(127);
          }
       }
-      /* Pin the working directory before exec so the command runs in the caller's
-       * chosen dir (e.g. the work-item repo), not the engine's inherited cwd. A
-       * failed chdir must NOT silently fall back to the parent cwd. */
-      if (cwd && cwd[0] && chdir(cwd) != 0)
-         _exit(127);
       /* REPLACE (not augment) the child's environment when envp is given: assigning
        * environ makes execvp pass exactly envp, so ONLY envp's entries survive and
        * every inherited variable — including engine secrets (AIMEE_APPROVAL_KEY,
