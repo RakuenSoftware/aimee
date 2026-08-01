@@ -147,11 +147,19 @@ the task at all, and not enough to separate 0.95 from 0.97.
 **E4B is not a small resident.** Local synthesis costs real memory as well as
 real CPU, and extraction runs continuously. A busy knowledge base will feel it.
 
-**The bundled-model path is not yet exercised end to end.** The four images, the
-weight download, the llama-server invocation and the loopback handover were written
-and reviewed but never run: this change was developed without a container runtime.
-Treat the first `aimee-kb-llm` start as the thing that proves it, and read the
-container log rather than assuming silence means success.
+**The model is verified by digest, and a mirror is untrusted.** The build checks
+the fetched GGUF against Hugging Face's own sha256 and fails otherwise. That
+matters twice: it catches a truncated or half-written copy, which a length check
+cannot see (many downloaders preallocate the full size and fill it in, so a file
+can be exactly the right number of bytes and entirely wrong); and it makes
+`AIMEE_MODEL_MIRROR` safe to offer, since anyone able to write to a mirror could
+otherwise change which model your image runs.
+
+**`AIMEE_MODEL_MIRROR` builds from a local copy.** Point it at a base URL that
+serves the GGUF by filename and the build fetches from there instead of Hugging
+Face — for an air-gapped or bandwidth-limited build site, or to rebuild the whole
+matrix without pulling tens of gigabytes again. The digest check applies either
+way, so a mirror cannot quietly substitute a different file.
 
 **llama.cpp is compiled from a pinned tag, not downloaded.** Upstream publishes a
 Linux binary for x64 only, so a download-based install cannot produce the arm64

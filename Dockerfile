@@ -23,6 +23,12 @@ ARG AIMEE_WITH_LLAMACPP=0
 # The cost is image size and a model-per-tag matrix. That is the trade the
 # embedder already makes.
 ARG AIMEE_SYNTHESIS_MODEL=""
+# Optional mirror for the model file. Empty pulls from Hugging Face; set it to a
+# base URL that serves the GGUF by filename and the build fetches from there
+# instead. For an air-gapped or bandwidth-limited build site, and for rebuilding
+# the matrix without pulling ~24GB from the internet each time. The filename is
+# identical either way, so a mirror is just `cp` from a known-good copy.
+ARG AIMEE_MODEL_MIRROR=""
 # Pinned llama.cpp. This version is load-bearing in three ways, all checked
 # against the tag rather than assumed:
 #   - gemma-4 / gemma-3n architecture support (b4585 had NONE — it would have
@@ -156,22 +162,37 @@ RUN set -eux; \
         -exec cp -a {} /out/ ';' ; \
     rm -rf /tmp/llamacpp-src
 # The model, fetched ONCE here so the running container never downloads anything.
+#
+# THE SHA256 IS THE POINT, NOT A FORMALITY. It is Hugging Face's own digest for the
+# file (the LFS oid), and it is what makes AIMEE_MODEL_MIRROR safe to offer: a
+# mirror is an untrusted input, so anyone who can write to one could otherwise
+# change which model your image runs. It also catches the ordinary failure — a
+# truncated or half-written copy. A LENGTH check does not: plenty of downloaders
+# preallocate the full size and fill it in, so a file can be exactly the right
+# number of bytes and entirely wrong. A digest is the only check that sees that.
+#
+# Bumping the quant or the model means bumping these, from
+# https://huggingface.co/api/models/<repo>?blobs=true (siblings[].lfs.oid).
+#
 # -sS: silent, but still reports errors. Without it curl writes a progress meter on every
 # buffer flush, which is thousands of lines of noise in a non-tty build log.
 # An explicit repo+filename per model id: no quant-tag resolution at runtime, which
 # is what silently served the wrong file when a tag stopped matching. UD-Q6_K_XL
 # (Unsloth Dynamic Q6) is published only in unsloth's repos.
+ARG AIMEE_MODEL_MIRROR
 RUN set -eux; \
     case "$AIMEE_SYNTHESIS_MODEL" in \
-      gemma-4-E2B-it) repo=unsloth/gemma-4-E2B-it-GGUF; f=gemma-4-E2B-it-UD-Q6_K_XL.gguf ;; \
-      gemma-4-E4B-it) repo=unsloth/gemma-4-E4B-it-GGUF; f=gemma-4-E4B-it-UD-Q6_K_XL.gguf ;; \
+      gemma-4-E2B-it) repo=unsloth/gemma-4-E2B-it-GGUF; f=gemma-4-E2B-it-UD-Q6_K_XL.gguf; \
+        sha=ae15474bc78f68c6a44bd17cad32f672b9501d90c4a0eed2fceeb6878ed530c5 ;; \
+      gemma-4-E4B-it) repo=unsloth/gemma-4-E4B-it-GGUF; f=gemma-4-E4B-it-UD-Q6_K_XL.gguf; \
+        sha=17b9c459b28b420ce20d75bcfc329db4fac1343792a964c3ae2e2680ce768932 ;; \
       *) echo "AIMEE_SYNTHESIS_MODEL must be gemma-4-E2B-it or gemma-4-E4B-it (got '$AIMEE_SYNTHESIS_MODEL')" >&2; exit 1 ;; \
     esac; \
+    if [ -n "$AIMEE_MODEL_MIRROR" ]; then url="${AIMEE_MODEL_MIRROR%/}/${f}"; \
+    else url="https://huggingface.co/${repo}/resolve/main/${f}"; fi; \
     mkdir -p /out/model; \
-    curl -fL -sS --retry 5 --retry-delay 5 --retry-all-errors \
-        -o /out/model/synthesis.gguf \
-        "https://huggingface.co/${repo}/resolve/main/${f}"; \
-    test -s /out/model/synthesis.gguf; \
+    curl -fL -sS --retry 5 --retry-delay 5 --retry-all-errors -o /out/model/synthesis.gguf "$url"; \
+    echo "${sha}  /out/model/synthesis.gguf" | sha256sum -c - ; \
     echo "${AIMEE_SYNTHESIS_MODEL}" > /out/model/MODEL_ID
 
 # The non-llm variants copy an empty directory, so the COPY below stays
