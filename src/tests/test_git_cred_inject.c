@@ -14,6 +14,7 @@
 #define STR(x)  STR2(x)
 
 #include <assert.h>
+#include <fcntl.h> /* O_DIRECTORY — the fd-collision regression below */
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -176,6 +177,53 @@ int main(void)
       free(out);
       close(tfd);
       git_cred_inject_free_env(fe);
+   }
+
+   /* A cwd pinned by descriptor must survive the credential fd landing on the
+    * SAME descriptor number.
+    *
+    * git_project_clone pins the clone destination as "/proc/self/fd/<tmpfd>" so
+    * git never resolves an attacker-influencable path string, and passes the
+    * token memfd at GIT_CRED_TOKEN_TARGET_FD. The child used to dup2 the token
+    * onto that number BEFORE chdir'ing, so whenever tmpfd happened to be 21 the
+    * dup2 replaced the directory with the memfd, chdir failed on a non-directory,
+    * and the child exited 127 -- surfacing as "git clone failed (rc=127)" while
+    * git was never even reached. Which fd number the destination gets depends on
+    * how many descriptors the server holds, so it struck unpredictably; bulk
+    * cloning an org tripped it repeatedly.
+    *
+    * Force the collision rather than hoping for it: put the directory ON the
+    * target number. */
+   {
+      char tmpl[] = "/tmp/aimee_fdclash_XXXXXX";
+      assert(mkdtemp(tmpl));
+      int dirfd = open(tmpl, O_RDONLY | O_DIRECTORY);
+      assert(dirfd >= 0);
+      assert(dup2(dirfd, GIT_CRED_TOKEN_TARGET_FD) == GIT_CRED_TOKEN_TARGET_FD);
+      close(dirfd);
+
+      int tfd = -1;
+      char **fe = git_cred_inject_build_env_for_repo(alice, "https://github.com/o/r", NULL,
+                                                     "CLASH-SECRET", parent, &tfd);
+      assert(fe && tfd >= 0);
+      char cwd[64];
+      snprintf(cwd, sizeof(cwd), "/proc/self/fd/%d", GIT_CRED_TOKEN_TARGET_FD);
+
+      /* pwd -P: the child must land in the directory the fd named, and the token
+       * must still arrive on the target descriptor. */
+      const char *argv[] = {"/bin/sh", "-c",
+                            "pwd -P; cat /proc/self/fd/" STR(GIT_CRED_TOKEN_TARGET_FD), NULL};
+      char *out = NULL;
+      int rc = safe_exec_capture_cwd_env_fd_timeout(argv, cwd, fe, &out, 1 << 16, 10000, tfd,
+                                                    GIT_CRED_TOKEN_TARGET_FD);
+      assert(rc == 0 && out); /* was 127: chdir ran after the dup2 had clobbered it */
+      assert(strstr(out, tmpl) != NULL);
+      assert(strstr(out, "CLASH-SECRET") != NULL);
+      free(out);
+      close(tfd);
+      git_cred_inject_free_env(fe);
+      close(GIT_CRED_TOKEN_TARGET_FD);
+      rmdir(tmpl);
    }
 
    /* SSH integration (WP-C2): a vaulted SSH key adds SSH_AUTH_SOCK to the env
