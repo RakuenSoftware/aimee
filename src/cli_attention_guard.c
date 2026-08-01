@@ -1383,8 +1383,9 @@ static int attn_git_shares_foreign_session_history(const char *dir, const char *
                const char *sess = t2 + 1;
                /* Registry branch names are launcher-generated, but treat them as data
                 * regardless: a name carrying a quote must never become shell syntax. */
-               if (sess[0] && (!own || !own[0] || strcmp(sess, own) != 0) &&
-                   !strchr(sess, '\'') && !strchr(sess, '\n'))
+               int other = sess[0] && (!own || !own[0] || strcmp(sess, own) != 0);
+               int quotable = !strchr(sess, '\'') && !strchr(sess, '\n');
+               if (other && quotable)
                {
                   char cmd[3200];
                   snprintf(cmd, sizeof(cmd),
@@ -1569,7 +1570,8 @@ int handle_attention_guard(void)
             char defref[300], gitown[256];
             attn_git_current_branch(gitdir, gitown, sizeof(gitown));
             int resolved = attn_git_default_ref(gitdir, defbr, defref, sizeof(defref));
-            int foreign = resolved && attn_git_shares_foreign_session_history(gitdir, defref, gitown);
+            int foreign =
+                resolved && attn_git_shares_foreign_session_history(gitdir, defref, gitown);
             if (attn_unregistered_lineage_blocked(resolved, foreign))
             {
                fprintf(stderr,
@@ -1599,7 +1601,8 @@ int handle_attention_guard(void)
                     "default branch; a delegate off its parent. Recreate the session worktree "
                     "with the launcher (Claude Code: EnterWorktree; aimee: launch `aimee`) instead "
                     "of `git worktree add` by hand.\n",
-                    lin_target, own[0] ? own : "(unknown)", base, defbr[0] ? defbr : "(unresolved)");
+                    lin_target, own[0] ? own : "(unknown)", base,
+                    defbr[0] ? defbr : "(unresolved)");
             cJSON_Delete(hook);
             free(stdin_data);
             return 2;
