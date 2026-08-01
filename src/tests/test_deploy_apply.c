@@ -387,12 +387,13 @@ static void test_compose_file_default(void)
  * orchestrator in the list made a never-deployed box offer "Re-deploy". Labels
  * are abbreviated to the one key the filter reads. */
 #define PS_SERVER_ENTRY                                                                            \
-   "{\"Name\":\"aimee-aimee-server-1\",\"State\":\"running\",\"Labels\":\"com.docker.compose."      \
-   "project=aimee,com.docker.compose.project.config_files=/opt/aimee-src/compose.server-managed."   \
+   "{\"Name\":\"aimee-aimee-server-1\",\"State\":\"running\",\"Labels\":\"com.docker.compose."     \
+   "project=aimee,com.docker.compose.project.config_files=/opt/aimee-src/compose.server-managed."  \
    "yaml\"}"
 #define PS_KB_ENTRY                                                                                \
-   "{\"Name\":\"aimee-aimee-kb-1\",\"State\":\"running\",\"Labels\":\"com.docker.compose."          \
-   "project=aimee,com.docker.compose.project.config_files=/opt/aimee/deploy/aimee-managed.compose." \
+   "{\"Name\":\"aimee-aimee-kb-1\",\"State\":\"running\",\"Labels\":\"com.docker.compose."         \
+   "project=aimee,com.docker.compose.project.config_files=/opt/aimee/deploy/"                      \
+   "aimee-managed.compose."                                                                        \
    "yaml\"}"
 
 static const char *k_managed = "/opt/aimee/deploy/aimee-managed.compose.yaml";
