@@ -52,7 +52,8 @@ static int name_span_is_credential(const char *name, size_t len, int include_del
        (len == strlen("AIMEE_WEBCHAT_USER") && memcmp(name, "AIMEE_WEBCHAT_USER", len) == 0) ||
        (len == strlen("AIMEE_WEBCHAT_USERS") && memcmp(name, "AIMEE_WEBCHAT_USERS", len) == 0) ||
        (len == strlen("AIMEE_KB_CONN") && memcmp(name, "AIMEE_KB_CONN", len) == 0) ||
-       (len == strlen("AIMEE_GIT_AUTHOR_NAME") && memcmp(name, "AIMEE_GIT_AUTHOR_NAME", len) == 0) ||
+       (len == strlen("AIMEE_GIT_AUTHOR_NAME") &&
+        memcmp(name, "AIMEE_GIT_AUTHOR_NAME", len) == 0) ||
        (len == strlen("AIMEE_GIT_AUTHOR_EMAIL") &&
         memcmp(name, "AIMEE_GIT_AUTHOR_EMAIL", len) == 0) ||
        (len == strlen("DATABASE_URL") && memcmp(name, "DATABASE_URL", len) == 0) ||
