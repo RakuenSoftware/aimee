@@ -41,7 +41,10 @@ MODELS=(
   "granite-4.0-h-1b|ibm-granite/granite-4.0-h-1b-GGUF:Q8_0|"
   "LFM2.5-230M|unsloth/LFM2.5-230M-GGUF:Q8_0|"
   "LFM2-350M-Extract|LiquidAI/LFM2-350M-Extract-GGUF:Q8_0|"
-  "SmolLM2-360M-Instruct|ggml-org/SmolLM2-360M-Instruct-Q8_0-GGUF:Q8_0|"
+  # ggml-org/SmolLM2-360M-Instruct-Q8_0-GGUF does not exist; the server failed
+  # to load with `load_model: failed to load model, ''` on both sweep passes.
+  # HuggingFaceTB is the model's own publisher.
+  "SmolLM2-360M-Instruct|HuggingFaceTB/SmolLM2-360M-Instruct-GGUF:Q8_0|"
   "gemma-3-270m-it|ggml-org/gemma-3-270m-GGUF:Q8_0|"
 )
 
