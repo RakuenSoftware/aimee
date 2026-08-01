@@ -149,9 +149,13 @@ container log rather than assuming silence means success.
 
 **llama.cpp is compiled from a pinned tag, not downloaded.** Upstream publishes a
 Linux binary for x64 only, so a download-based install cannot produce the arm64
-images at all. `LLAMACPP_VERSION` is a git tag, which is what the build verifies —
-and it is the only thing deciding which llama.cpp a user runs, so it needs
-deliberate bumping for security fixes.
+images at all. `LLAMACPP_VERSION` is a git tag, which is what the build verifies — and it is the
+only thing deciding which llama.cpp a user runs, so it needs deliberate bumping
+for security fixes. Bumping it means re-checking three things, not just the
+number: that the tag still carries gemma-4 architecture support, that
+`--no-mmproj` and `LLAMA_ARG_MMPROJ_AUTO` still exist, and where the server
+target lives (it moved from `examples/` to `tools/`, which changes the cmake
+flags).
 
 **The model-to-repo mapping is unverified.** `gemma-4-E2B-it` and `gemma-4-E4B-it`
 map to `ggml-org/gemma-4-E{2,4}B-it-GGUF:Q4_K_M`, taken from the benchmark

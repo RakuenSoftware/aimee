@@ -9,7 +9,14 @@ ARG PG_MAJOR=18
 ARG PGVECTORSCALE_VERSION=0.9.0
 # Selects which llama.cpp stage the final image copies from (see llamacpp-* below).
 ARG AIMEE_WITH_LLAMACPP=0
-ARG LLAMACPP_VERSION=b4585
+# Pinned llama.cpp. This version is load-bearing in three ways, all checked
+# against the tag rather than assumed:
+#   - gemma-4 / gemma-3n architecture support (b4585 had NONE — it would have
+#     built and started and then failed to load the only models we offer)
+#   - --no-mmproj and LLAMA_ARG_MMPROJ_AUTO (neither existed in b4585)
+#   - the server target lives in tools/, which sets the cmake flags below
+# Bumping this needs all three re-checked, not just a version number changed.
+ARG LLAMACPP_VERSION=b10218
 
 FROM debian:trixie-slim AS build
 
@@ -102,6 +109,16 @@ RUN mkdir -p "/pgvectorscale/usr/lib/postgresql/${PG_MAJOR}/lib" \
 #
 # LLAMA_CURL=ON is required, not cosmetic: the entrypoint starts the server with
 # -hf, which fetches the model over HTTPS. Without it the server rejects -hf.
+#
+# LLAMA_BUILD_TOOLS=ON is what provides the server at this tag: it lives in
+# tools/server (target llama-server), not examples/. Building with tools off
+# deletes the target and cmake fails with "No rule to make target 'llama-server'".
+# Examples stay off — nothing here needs them. Both flags are version-sensitive:
+# an older llama.cpp had the server under examples/ instead.
+#
+# Every comment stays OUTSIDE the RUN. BuildKit does strip whole-line comments
+# inside a continuation, but a stray one that is not stripped comments out the
+# rest of the joined command, which fails as a puzzling no-op rather than loudly.
 FROM debian:trixie-slim AS llamacpp-1
 ARG LLAMACPP_VERSION
 RUN set -eux; \
@@ -110,15 +127,10 @@ RUN set -eux; \
         build-essential cmake git ca-certificates libcurl4-openssl-dev; \
     git clone --depth 1 --branch "$LLAMACPP_VERSION" \
         https://github.com/ggml-org/llama.cpp.git /tmp/llamacpp-src; \
-    # LLAMA_BUILD_EXAMPLES stays ON: at this tag the server IS an example
-    # (examples/server, target llama-server), so turning examples off deletes the
-    # target and cmake fails with "No rule to make target 'llama-server'". It costs
-    # nothing at build time because --target below builds only that binary's graph.
-    # A later llama.cpp moves the server to tools/ and adds LLAMA_BUILD_TOOLS; if
-    # LLAMACPP_VERSION crosses that, this flag needs revisiting.
     cmake -S /tmp/llamacpp-src -B /tmp/llamacpp-src/build \
         -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=ON \
-        -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=ON -DLLAMA_BUILD_SERVER=ON; \
+        -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF \
+        -DLLAMA_BUILD_TOOLS=ON -DLLAMA_BUILD_SERVER=ON; \
     cmake --build /tmp/llamacpp-src/build --target llama-server -j"$(nproc)"; \
     mkdir -p /out; \
     cp "$(find /tmp/llamacpp-src/build -name llama-server -type f -perm -u+x | head -1)" /out/; \
