@@ -92,7 +92,7 @@ static void test_tcp_gets_no_principal(void)
    printf("  PASS: test_tcp_gets_no_principal\n");
 }
 
-/* A webuser asserted WITH a valid server.token is honored as webuser:<name>,
+/* A webuser asserted over the root-owned UDS is honored as webuser:<name>,
  * regardless of the underlying transport (the webchat backend rides UDS). */
 static void test_webuser_with_token_honored(void)
 {

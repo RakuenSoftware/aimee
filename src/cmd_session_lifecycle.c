@@ -227,11 +227,10 @@ static char *build_session_context(const char *client_cwd)
     * engineer, so this is a no-op until the operator changes it). */
    if (strcmp(persona_name, "engineer") == 0)
    {
-      config_t persona_cfg;
-      if (config_load(&persona_cfg) == 0 && persona_cfg.default_persona[0] &&
-          strcmp(persona_cfg.default_persona, "engineer") != 0)
+      const char *configured = config_default_persona();
+      if (configured[0] && strcmp(configured, "engineer") != 0)
       {
-         snprintf(persona_name, sizeof(persona_name), "%s", persona_cfg.default_persona);
+         snprintf(persona_name, sizeof(persona_name), "%s", configured);
          mode = aimee_mode_from_string(persona_name);
       }
    }
@@ -239,6 +238,23 @@ static char *build_session_context(const char *client_cwd)
    persona_load(NULL, persona_name, &persona);
 
    session_context_resolve_cwd(client_cwd, scope_cwd, sizeof(scope_cwd));
+
+   /* Local SessionStart owns a concrete client cwd.  Carry its stable
+    * repository identity through every ordered memory reader used below.  The
+    * remote brief path passes NULL and establishes the same context at its
+    * server request boundary instead. */
+   int owns_memory_scope = 0;
+   if (client_cwd && client_cwd[0])
+   {
+      char memory_workspace[MAX_PATH_LEN] = "";
+      char memory_project[MAX_PATH_LEN] = "";
+      /* Exported by cmd_hooks_scope.c and declared in cmd_hooks_scope.h; use
+       * the same resolver as the existing hook/session paths below. */
+      hook_scope_labels_for_cwd(client_cwd, memory_workspace, sizeof(memory_workspace),
+                                memory_project, sizeof(memory_project));
+      kb_client_memory_scope_context_set(memory_workspace, memory_project, 0);
+      owns_memory_scope = 1;
+   }
 
    /* Principles and Aimee lookup hints lead the session context for primacy
     * bias, driven by the active persona. */
@@ -295,14 +311,11 @@ static char *build_session_context(const char *client_cwd)
 
    {
       char cwd[MAX_PATH_LEN];
-      config_t skill_cfg;
       char *skill_index = NULL;
-      config_load(&skill_cfg);
-      if (skill_cfg.skills_dispatch_enabled)
+      if (config_skills_dispatch_enabled())
       {
          snprintf(cwd, sizeof(cwd), "%s", scope_cwd);
-         skill_index =
-             session_briefing_render_skill_index(cwd, skill_cfg.skills_dispatch_max_index);
+         skill_index = session_briefing_render_skill_index(cwd, config_skills_dispatch_max_index());
       }
       if (skill_index && skill_index[0])
       {
@@ -341,14 +354,10 @@ static char *build_session_context(const char *client_cwd)
     * switch is off or nothing has been learned yet. The observer that fills it is
     * memory_recall_handler (per user turn). */
    {
-      config_t wp_cfg;
-      if (config_load(&wp_cfg) == 0)
-      {
-         char *wp = prompt_apply_working_profile("", &wp_cfg);
-         if (wp && wp[0])
-            ctx_appendf(buf, cap, &pos, "%s", wp);
-         free(wp);
-      }
+      char *wp = prompt_apply_working_profile("");
+      if (wp && wp[0])
+         ctx_appendf(buf, cap, &pos, "%s", wp);
+      free(wp);
    }
 
    /* Hierarchical local context: walk cwd up to project root and inject nearby
@@ -458,12 +467,10 @@ static char *build_session_context(const char *client_cwd)
    {
       if (scope_cwd[0])
       {
-         config_t app_cfg;
-         config_load(&app_cfg);
          char workspace_name[MAX_PATH_LEN];
          char project_name[MAX_PATH_LEN];
-         hook_scope_labels_for_cwd(&app_cfg, scope_cwd, workspace_name, sizeof(workspace_name),
-                                   project_name, sizeof(project_name));
+         hook_scope_labels_for_cwd(scope_cwd, workspace_name, sizeof(workspace_name), project_name,
+                                   sizeof(project_name));
 
          if ((project_name[0] || workspace_name[0]) && pos < cap - 512)
          {
@@ -542,12 +549,10 @@ static char *build_session_context(const char *client_cwd)
          char cwd[MAX_PATH_LEN];
          char workspace_name[MAX_PATH_LEN] = "";
          char project_name[MAX_PATH_LEN] = "";
-         config_t app_cfg;
-         config_load(&app_cfg);
          session_context_resolve_cwd(client_cwd, cwd, sizeof(cwd));
          if (cwd[0])
-            hook_scope_labels_for_cwd(&app_cfg, cwd, workspace_name, sizeof(workspace_name),
-                                      project_name, sizeof(project_name));
+            hook_scope_labels_for_cwd(cwd, workspace_name, sizeof(workspace_name), project_name,
+                                      sizeof(project_name));
          pos = session_append_scope_section(scope_rows, n_scope, buf, pos, cap, "# Shared Context",
                                             workspace_name[0] ? workspace_name : NULL,
                                             project_name[0] ? project_name : NULL, 1, 1, 5);
@@ -606,9 +611,7 @@ static char *build_session_context(const char *client_cwd)
    /* Workspace project descriptions and style guides */
    if (verbose)
    {
-      config_t ws_cfg;
-      config_load(&ws_cfg);
-      char *ws_ctx = workspace_build_context_from_config(&ws_cfg);
+      char *ws_ctx = workspace_build_context_from_config();
       if (ws_ctx && ws_ctx[0])
       {
          size_t ws_len = strlen(ws_ctx);
@@ -638,6 +641,8 @@ static char *build_session_context(const char *client_cwd)
    }
 
    persona_free(&persona);
+   if (owns_memory_scope)
+      kb_client_memory_scope_context_clear();
    buf[pos] = '\0';
    return buf;
 }
@@ -659,33 +664,33 @@ static int count_active_sessions(void)
 
 /* Return the configured stale-session threshold in seconds.
  * Defaults to CONFIG_DEFAULT_STALE_SESSION_SECS (14400 = 4 hours) when unset. */
-static int stale_session_threshold_secs(const config_t *cfg)
+static int stale_session_threshold_secs(void)
 {
-   return (cfg && cfg->worktree_stale_secs > 0) ? cfg->worktree_stale_secs
-                                                : CONFIG_DEFAULT_STALE_SESSION_SECS;
+   return config_worktree_stale_secs() > 0 ? config_worktree_stale_secs()
+                                           : CONFIG_DEFAULT_STALE_SESSION_SECS;
 }
 
 /* Remove sibling worktrees for a stale session.
  * Uses worktree_cleanup() which checks each workspace's git root for the
  * standard .aimee-<project>-<short_session> sibling directory. */
-static void remove_stale_worktrees(const config_t *cfg, const char *sid)
+static void remove_stale_worktrees(const char *sid)
 {
-   for (int i = 0; i < cfg->workspace_count; i++)
+   for (int i = 0; i < config_workspace_count(); i++)
    {
       char git_root[MAX_PATH_LEN];
-      if (git_repo_root(cfg->workspaces[i], git_root, sizeof(git_root)) == 0)
+      if (git_repo_root(config_workspaces(i), git_root, sizeof(git_root)) == 0)
          worktree_cleanup(git_root, sid, NULL);
    }
 }
 
 /* Prune stale sessions: fold their memories, run maintenance, clean up worktrees
  * and DB1 state rows. This replaces the explicit wrapup command for ended sessions. */
-void prune_stale_sessions(const config_t *cfg)
+void prune_stale_sessions(void)
 {
    int did_maintenance = 0;
 
    char stale_ids[64][DB1_SS_SID_LEN];
-   int n = db1_session_state_list_expired(stale_session_threshold_secs(cfg), stale_ids, 64);
+   int n = db1_session_state_list_expired(stale_session_threshold_secs(), stale_ids, 64);
    const char *cur = session_id();
 
    for (int i = 0; i < n; i++)
@@ -699,7 +704,7 @@ void prune_stale_sessions(const config_t *cfg)
       did_maintenance = 1;
 
       /* Remove worktrees for this session */
-      remove_stale_worktrees(cfg, stale_sid);
+      remove_stale_worktrees(stale_sid);
 
       /* Delete the stale state row + child tables from DB1 */
       db1_session_state_delete(stale_sid);
@@ -710,7 +715,7 @@ void prune_stale_sessions(const config_t *cfg)
    {
       /* Scan conversations */
       char dirs[8][MAX_PATH_LEN];
-      int dir_count = config_conversation_dirs(cfg, dirs, 8);
+      int dir_count = config_conversation_dirs(dirs, 8);
       kb_client_memory_scan_conversations(dirs, dir_count);
 
       /* Expire session directives */
@@ -742,13 +747,13 @@ void prune_stale_sessions(const config_t *cfg)
 
    /* Clean up expired server_sessions and their worktrees (DB1). */
    {
-      int threshold = stale_session_threshold_secs(cfg);
+      int threshold = stale_session_threshold_secs();
       char expired_ids[128][DB1_SS_ID_LEN];
       int n = db1_server_session_list_expired(threshold, expired_ids, 128);
       for (int i = 0; i < n; i++)
       {
          if (expired_ids[i][0])
-            remove_stale_worktrees(cfg, expired_ids[i]);
+            remove_stale_worktrees(expired_ids[i]);
       }
       (void)db1_server_session_delete_expired(threshold);
    }
@@ -826,9 +831,9 @@ typedef struct
 
 /* Startup-only DB1 integrity gate: quick-check and auto-recover, aborting the
  * hook if the database cannot be opened or is unrecoverable. */
-static void session_startup_db_check(const config_t *cfg)
+static void session_startup_db_check(void)
 {
-   int rc = db1_diag_quick_check_recover(cfg->db1_path);
+   int rc = db1_diag_quick_check_recover(config_db1_path());
    if (rc == -2)
       fatal("cannot open database");
    if (rc == -1)
@@ -842,34 +847,34 @@ static void session_startup_db_check(const config_t *cfg)
 
 /* Enforce the max-sessions cap: prune idle sessions when at the cap, then warn
  * (never refuse — a hook failure would block the user) if still over. */
-static void session_enforce_session_cap(const config_t *cfg)
+static void session_enforce_session_cap(void)
 {
-   if (cfg->max_sessions <= 0)
+   if (config_max_sessions() <= 0)
       return;
    int active = count_active_sessions();
-   if (active >= cfg->max_sessions)
+   if (active >= config_max_sessions())
    {
-      prune_stale_sessions(cfg);
+      prune_stale_sessions();
       active = count_active_sessions();
-      if (active >= cfg->max_sessions)
+      if (active >= config_max_sessions())
          fprintf(stderr,
                  "aimee: warning: %d active session(s) at cap (%d). "
                  "Run 'aimee session clean' to remove idle sessions.\n",
-                 active, cfg->max_sessions);
+                 active, config_max_sessions());
    }
 }
 
 /* Enforce the max-worktrees cap across configured workspaces plus the CWD repo:
  * prune when at the cap, recount, then warn if still over. */
-static void session_enforce_worktree_cap(const config_t *cfg)
+static void session_enforce_worktree_cap(void)
 {
-   if (cfg->max_worktrees <= 0)
+   if (config_max_worktrees() <= 0)
       return;
    int wt_total = 0;
-   for (int i = 0; i < cfg->workspace_count; i++)
+   for (int i = 0; i < config_workspace_count(); i++)
    {
       char gr[MAX_PATH_LEN];
-      if (git_repo_root(cfg->workspaces[i], gr, sizeof(gr)) == 0)
+      if (git_repo_root(config_workspaces(i), gr, sizeof(gr)) == 0)
          wt_total += count_active_worktrees_for_root(gr);
    }
    /* Also count CWD's repo if not already covered by configured workspaces */
@@ -879,10 +884,10 @@ static void session_enforce_worktree_cap(const config_t *cfg)
       if (getcwd(cwd, sizeof(cwd)) && git_repo_root(cwd, gr, sizeof(gr)) == 0)
       {
          int already = 0;
-         for (int i = 0; i < cfg->workspace_count; i++)
+         for (int i = 0; i < config_workspace_count(); i++)
          {
             char wgr[MAX_PATH_LEN];
-            if (git_repo_root(cfg->workspaces[i], wgr, sizeof(wgr)) == 0 && strcmp(wgr, gr) == 0)
+            if (git_repo_root(config_workspaces(i), wgr, sizeof(wgr)) == 0 && strcmp(wgr, gr) == 0)
             {
                already = 1;
                break;
@@ -892,42 +897,42 @@ static void session_enforce_worktree_cap(const config_t *cfg)
             wt_total += count_active_worktrees_for_root(gr);
       }
    }
-   if (wt_total >= cfg->max_worktrees)
+   if (wt_total >= config_max_worktrees())
    {
-      prune_stale_sessions(cfg);
+      prune_stale_sessions();
       /* Recount after pruning */
       wt_total = 0;
-      for (int i = 0; i < cfg->workspace_count; i++)
+      for (int i = 0; i < config_workspace_count(); i++)
       {
          char gr[MAX_PATH_LEN];
-         if (git_repo_root(cfg->workspaces[i], gr, sizeof(gr)) == 0)
+         if (git_repo_root(config_workspaces(i), gr, sizeof(gr)) == 0)
             wt_total += count_active_worktrees_for_root(gr);
       }
-      if (wt_total >= cfg->max_worktrees)
+      if (wt_total >= config_max_worktrees())
          fprintf(stderr,
                  "aimee: warning: %d active worktree(s) at cap (%d). "
                  "Run 'aimee session clean' to remove idle sessions and their worktrees.\n",
-                 wt_total, cfg->max_worktrees);
+                 wt_total, config_max_worktrees());
    }
 }
 
 /* Register sibling worktree mappings for configured workspaces and the client
  * CWD's git repo, deduplicating by git root and respecting MAX_WORKTREES. */
-static void session_register_worktrees(const config_t *cfg, const char *client_cwd, const char *sid,
+static void session_register_worktrees(const char *client_cwd, const char *sid,
                                        session_state_t *state)
 {
-   for (int i = 0; i < cfg->workspace_count && state->worktree_count < MAX_WORKTREES; i++)
+   for (int i = 0; i < config_workspace_count() && state->worktree_count < MAX_WORKTREES; i++)
    {
       struct stat ws_st;
-      if (stat(cfg->workspaces[i], &ws_st) != 0 || !S_ISDIR(ws_st.st_mode))
+      if (stat(config_workspaces(i), &ws_st) != 0 || !S_ISDIR(ws_st.st_mode))
       {
          LOG_WARN("workspace", "workspace '%s' does not exist, skipping worktree",
-                  cfg->workspaces[i]);
+                  config_workspaces(i));
          continue;
       }
 
       char gr[MAX_PATH_LEN];
-      if (git_repo_root(cfg->workspaces[i], gr, sizeof(gr)) == 0)
+      if (git_repo_root(config_workspaces(i), gr, sizeof(gr)) == 0)
       {
          /* Deduplicate by git_root */
          if (!session_worktree_is_registered(state, gr))
@@ -1258,19 +1263,6 @@ void session_start_emit(app_ctx_t *ctx, const char *hook_input, FILE *out)
    char client_cwd[MAX_PATH_LEN];
    session_start_parse_hook(hook_input, &is_startup, client_cwd, sizeof(client_cwd));
 
-   config_t cfg_buf;
-   config_t *cfgp;
-   if (ctx && ctx->cfg)
-   {
-      cfgp = ctx->cfg;
-   }
-   else
-   {
-      config_load(&cfg_buf);
-      cfgp = &cfg_buf;
-   }
-   config_t cfg = *cfgp;
-
    /* Corruption detection, cap enforcement, and stale-session pruning only
     * run on "startup". On resume/compact the DB was already checked at
     * startup, the session counts don't change mid-session, and the heavy
@@ -1279,9 +1271,9 @@ void session_start_emit(app_ctx_t *ctx, const char *hook_input, FILE *out)
     * otherwise — a major source of CPU storms. */
    if (is_startup)
    {
-      session_startup_db_check(&cfg);
-      session_enforce_session_cap(&cfg);
-      session_enforce_worktree_cap(&cfg);
+      session_startup_db_check();
+      session_enforce_session_cap();
+      session_enforce_worktree_cap();
    }
 
    /* Build session state: compute sibling worktree paths for workspaces.
@@ -1296,10 +1288,10 @@ void session_start_emit(app_ctx_t *ctx, const char *hook_input, FILE *out)
    state.hook_call_count = 0;
    state.orch_direct_edits = 0;
    state.orch_nudge_sent = 0;
-   snprintf(state.guardrail_mode, sizeof(state.guardrail_mode), "%s", config_guardrail_mode(&cfg));
+   snprintf(state.guardrail_mode, sizeof(state.guardrail_mode), "%s", config_guardrail_mode());
 
    /* Register sibling worktrees for configured workspaces and CWD's git repo. */
-   session_register_worktrees(&cfg, client_cwd, sid, &state);
+   session_register_worktrees(client_cwd, sid, &state);
 
    /* Prepare isolated sibling checkouts (startup only). */
    if (is_startup)
@@ -1421,19 +1413,11 @@ void cmd_launch(app_ctx_t *ctx, int argc, char **argv)
 
    /* Now emit a JSON metadata line with launch info for the client.
     * The client needs: provider, and the worktree path to chdir to. */
-   config_t cfg_local;
-   config_t *cfg_ptr = ctx->cfg;
-   if (!cfg_ptr)
-   {
-      config_load(&cfg_local);
-      cfg_ptr = &cfg_local;
-   }
-   config_t cfg = *cfg_ptr;
 
    /* Determine provider */
    const char *provider = "claude";
-   if (cfg.provider[0])
-      provider = cfg.provider;
+   if (config_provider()[0])
+      provider = config_provider();
 
    int use_builtin = 1;
 
@@ -1506,13 +1490,13 @@ void cmd_launch(app_ctx_t *ctx, int argc, char **argv)
    int launch_has_changelog = 0;
    {
       /* Ensure db1 is open for the wm_get lookup. Idempotent. */
-      db1_init(cfg.db1_path);
+      db1_init(config_db1_path());
       wm_entry_t wm_entry;
       if (db1_wm_get(session_id(), "session_changelog", &wm_entry) == 0)
          launch_has_changelog = 1;
    }
 
-   if (cfg.autonomous)
+   if (config_autonomous())
       fprintf(stderr,
               "aimee: warning: autonomous mode is active — aimee guardrails are the sole safety "
               "boundary\n");
@@ -1520,11 +1504,11 @@ void cmd_launch(app_ctx_t *ctx, int argc, char **argv)
    /* Emit launch metadata as a JSON line with a known prefix */
    cJSON *meta = cJSON_CreateObject();
    cJSON_AddStringToObject(meta, "provider", provider);
-   if (strcmp(provider, "claude") == 0 && cfg.claude_model[0])
-      cJSON_AddStringToObject(meta, "model", cfg.claude_model);
+   if (strcmp(provider, "claude") == 0 && config_claude_model()[0])
+      cJSON_AddStringToObject(meta, "model", config_claude_model());
    cJSON_AddBoolToObject(meta, "builtin", use_builtin);
    cJSON_AddStringToObject(meta, "session_id", session_id());
-   if (cfg.autonomous)
+   if (config_autonomous())
       cJSON_AddBoolToObject(meta, "autonomous", 1);
    if (target_dir[0])
       cJSON_AddStringToObject(meta, "worktree_cwd", target_dir);
@@ -1542,9 +1526,8 @@ void cmd_launch(app_ctx_t *ctx, int argc, char **argv)
 /* --- cmd_wrapup --- */
 
 /* Clean up worktrees for a session. Warns if unpushed commits exist. */
-static void cleanup_worktrees(const session_state_t *state, const config_t *cfg, const char *sid)
+static void cleanup_worktrees(const session_state_t *state, const char *sid)
 {
-   (void)cfg;
    if (state->worktree_count == 0)
       return;
 
@@ -1557,9 +1540,6 @@ void cmd_wrapup(app_ctx_t *ctx, int argc, char **argv)
    (void)argc;
    (void)argv;
 
-   config_t cfg;
-   config_load(&cfg);
-
    const char *sid = session_id();
 
    /* Load session state for worktree cleanup */
@@ -1567,7 +1547,7 @@ void cmd_wrapup(app_ctx_t *ctx, int argc, char **argv)
    session_state_load(&state, sid);
 
    /* Clean up worktrees */
-   cleanup_worktrees(&state, &cfg, sid);
+   cleanup_worktrees(&state, sid);
 
    /* Run eval-to-behavior feedback loop — every helper below routes
     * through aimee-kb (kb_client_*), which auto-spawns the daemon if
@@ -1624,7 +1604,7 @@ void cmd_wrapup(app_ctx_t *ctx, int argc, char **argv)
 
    /* Prune other stale sessions in background (non-blocking).
     * Done at exit so new session startup isn't impacted by old session cleanup. */
-   platform_hooks_background_cleanup(&cfg);
+   platform_hooks_background_cleanup();
 
    if (ctx->json_output)
       emit_ok_ctx(ctx->json_fields, ctx->response_profile);

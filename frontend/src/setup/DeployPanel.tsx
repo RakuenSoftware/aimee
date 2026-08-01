@@ -4,7 +4,7 @@ import { Button } from '@rakuensoftware/smoothgui';
 /* Setup-wizard summary panel — server-orchestrated deploy.
  *
  * When aimee-server runs with the Docker socket mounted (AIMEE_DEPLOY_ENABLED), it
- * can bring up the managed sibling services (aimee-kb + aimee-llm) from
+ * can bring up the managed sibling service (aimee-kb) from
  * the wizard config via `docker compose up -d`. This panel drives that from the
  * finish screen: it checks whether orchestration is available (GET
  * /api/deploy/status → 503 when disabled), shows the current service states, and
@@ -39,19 +39,48 @@ interface DeployStatus {
   ps: string;
 }
 
+interface Enrollment {
+  state: 'ready' | 'paired';
+  principal: string;
+  tier: 'full';
+  mtls: boolean;
+  tls_port: number;
+  bearer_token?: string;
+}
+
 export interface Svc {
   name: string;
   state: string;
+}
+
+export function serviceFailed(s: Svc): boolean {
+  return /\b(exited|dead|unhealthy|restarting)\b/i.test(s.state);
+}
+
+// Something is still coming up, so keep polling and show it as pending rather
+// than as done or failed.
+//
+// This used to match ONLY aimee-llm, because that container was the slow one. It
+// is retired, which would have left the predicate permanently false and stopped
+// the panel polling while aimee-kb was still starting. Match any service in a
+// starting state instead. "restarting" is excluded by serviceFailed, and the
+// word boundary keeps it from matching here in the first place.
+export function servicePending(s: Svc): boolean {
+  return /\b(starting|created|waiting)\b/i.test(s.state) && !serviceFailed(s);
 }
 
 /* docker compose ps --format json emits either a JSON array or newline-delimited
  * objects, depending on the compose version. Parse defensively; return [] when the
  * shape is unrecognized (the raw output stays available in the log). */
 export function parsePs(ps: string): Svc[] {
-  const pick = (o: Record<string, unknown>): Svc => ({
-    name: String(o.Name ?? o.Service ?? ''),
-    state: String(o.State ?? o.Status ?? ''),
-  });
+  const pick = (o: Record<string, unknown>): Svc => {
+    const state = String(o.State ?? o.Status ?? '');
+    const health = String(o.Health ?? '');
+    return {
+      name: String(o.Name ?? o.Service ?? ''),
+      state: health && !state.toLowerCase().includes(health.toLowerCase()) ? `${state} (${health})` : state,
+    };
+  };
   const trimmed = ps.trim();
   if (!trimmed) return [];
   try {
@@ -73,19 +102,27 @@ export function parsePs(ps: string): Svc[] {
   return out.filter((s) => s.name);
 }
 
+export function remoteSetCommand(hostname: string, port: number, bearer: string): string {
+  const host = hostname.includes(':') && !hostname.startsWith('[') ? `[${hostname}]` : hostname;
+  return `aimee remote set https://${host}:${port} ${bearer}`;
+}
+
 export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) {
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<DeployStatus | null>(null);
   const [applying, setApplying] = useState(false);
   const [err, setErr] = useState('');
+  const [enrollment, setEnrollment] = useState<Enrollment | null>(null);
+  const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const loadStatus = useCallback(async () => {
+  const loadStatus = useCallback(async (): Promise<DeployStatus | null> => {
     try {
       const r = await api('/api/deploy/status', { method: 'GET' });
       if (r.status === 503) {
-        setStatus({ enabled: false, running: false, last_exit: null, output: '', ps: '' });
-        return false;
+        const disabled = { enabled: false, running: false, last_exit: null, output: '', ps: '' };
+        setStatus(disabled);
+        return disabled;
       }
       const d = await r.json();
       if (r.ok) {
@@ -97,21 +134,26 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
           ps: String(d.ps ?? ''),
         };
         setStatus(s);
-        return s.running;
+        return s;
       }
     } catch {
       setStatus({ enabled: false, running: false, last_exit: null, output: '', ps: '' });
     }
-    return false;
+    return null;
   }, []);
 
-  // Poll while a deploy is running; stop once it settles.
+  // The worker stops after the LLM container starts, not after its model assets
+  // finish downloading. Keep monitoring a "starting" LLM without leaving the
+  // wizard in its blocking Deploying state, so a later container failure is
+  // surfaced while this finish screen remains open.
   const poll = useCallback(async () => {
-    const stillRunning = await loadStatus();
-    if (stillRunning) {
+    const current = await loadStatus();
+    if (current?.running) {
       timer.current = setTimeout(poll, 3000);
     } else {
       setApplying(false);
+      const services = parsePs(current?.ps ?? '');
+      if (services.some(servicePending)) timer.current = setTimeout(poll, 5000);
     }
   }, [loadStatus]);
 
@@ -121,10 +163,10 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
       return;
     }
     (async () => {
-      const running = await loadStatus();
+      const current = await loadStatus();
       setLoading(false);
-      if (running) {
-        setApplying(true);
+      if (current?.running || parsePs(current?.ps ?? '').some(servicePending)) {
+        setApplying(!!current?.running);
         timer.current = setTimeout(poll, 3000);
       }
     })();
@@ -134,6 +176,10 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
   }, [kbMode, loadStatus, poll]);
 
   async function deploy() {
+    if (timer.current) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
     setErr('');
     setApplying(true);
     try {
@@ -144,11 +190,30 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
         setApplying(false);
         return;
       }
+      if (d.enrollment?.state === 'ready' || d.enrollment?.state === 'paired') {
+        setEnrollment({
+          state: d.enrollment.state,
+          principal: String(d.enrollment.principal ?? ''),
+          tier: 'full',
+          mtls: !!d.enrollment.mtls,
+          tls_port: Number(d.enrollment.tls_port) || 8743,
+          bearer_token: d.enrollment.bearer_token ? String(d.enrollment.bearer_token) : undefined,
+        });
+      }
       await loadStatus();
       timer.current = setTimeout(poll, 3000);
     } catch {
       setErr('aimee-server unavailable');
       setApplying(false);
+    }
+  }
+
+  async function copyEnrollment(command: string) {
+    try {
+      await navigator.clipboard.writeText(command);
+      setCopied(true);
+    } catch {
+      setErr('Could not copy automatically; select the command below and copy it manually.');
     }
   }
 
@@ -168,8 +233,12 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
   }
 
   const svcs = parsePs(status.ps);
-  const settledOk = !status.running && status.last_exit === 0;
+  const failedSvcs = svcs.filter(serviceFailed);
+  const settledOk = !status.running && status.last_exit === 0 && failedSvcs.length === 0;
   const settledErr = !status.running && status.last_exit !== null && status.last_exit !== 0;
+  const enrollmentCommand = enrollment?.bearer_token
+    ? remoteSetCommand(window.location.hostname, enrollment.tls_port, enrollment.bearer_token)
+    : '';
 
   return (
     <div style={box}>
@@ -183,14 +252,14 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
         </Button>
       </div>
       <div style={{ fontSize: 12, color: '#556', lineHeight: 1.5, marginBottom: svcs.length ? 8 : 0 }}>
-        aimee-server brings up aimee-kb (including its database) + aimee-llm for you via Docker — no extra commands.
+        aimee-server brings up aimee-kb, including its database, for you via Docker. No extra commands.
       </div>
 
       {svcs.length > 0 && (
         <div style={{ display: 'grid', gap: 3, marginBottom: 8 }}>
           {svcs.map((s) => (
             <div key={s.name} style={{ display: 'flex', gap: 8, fontSize: 12.5 }}>
-              <span aria-hidden>{/running|up|healthy/i.test(s.state) ? '🟢' : '⚪'}</span>
+              <span aria-hidden>{serviceFailed(s) ? '🔴' : servicePending(s) ? '🟡' : /running|up|healthy/i.test(s.state) ? '🟢' : '⚪'}</span>
               <span style={{ fontFamily: 'monospace', minWidth: 130 }}>{s.name}</span>
               <span style={{ color: '#667' }}>{s.state}</span>
             </div>
@@ -198,10 +267,40 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
         </div>
       )}
 
-      {status.running && <div style={{ fontSize: 12, color: '#8a5a00' }}>⏳ Bringing services up (image pulls can take a few minutes)…</div>}
-      {settledOk && <div style={{ fontSize: 12, color: '#2c8f56' }}>✅ Stack is up.</div>}
+      {status.running && <div style={{ fontSize: 12, color: '#8a5a00' }}>⏳ Starting KB, then LLM (image pulls can take a few minutes)…</div>}
+      {settledOk && <div style={{ fontSize: 12, color: '#2c8f56' }}>
+        ✅ Stack containers are up. LLM model downloads may continue in the background.
+      </div>}
       {settledErr && <div style={{ fontSize: 12, color: '#c62828' }}>⛔ Deploy exited with code {status.last_exit}. See the log below.</div>}
+      {!settledErr && failedSvcs.length > 0 && <div style={{ fontSize: 12, color: '#c62828' }}>
+        ⛔ {failedSvcs.map((s) => s.name).join(', ')} failed after startup. Check its container logs.
+      </div>}
       {err && <div style={{ fontSize: 12, color: '#c62828' }}>{err}</div>}
+
+      {enrollment?.state === 'ready' && enrollmentCommand && (
+        <div style={{ ...pairing, marginTop: 9 }}>
+          <div style={{ fontWeight: 700, fontSize: 12.5 }}>Connect your client</div>
+          <div style={{ fontSize: 12, color: '#556', lineHeight: 1.45, marginTop: 3 }}>
+            Run this once on a Linux workstation. It pins the server, creates your private key
+            locally, enrolls mTLS, and activates full write access for{' '}
+            <code>{enrollment.principal}</code>.
+          </div>
+          <div style={{ display: 'flex', alignItems: 'start', gap: 7 }}>
+            <pre style={{ ...pre, flex: 1 }}>{enrollmentCommand}</pre>
+            <Button onClick={() => copyEnrollment(enrollmentCommand)}>
+              {copied ? 'Copied' : 'Copy command'}
+            </Button>
+          </div>
+          <div style={{ fontSize: 11.5, color: '#667', marginTop: 5 }}>
+            The bearer alone cannot write; the full grant is bound to the enrolled client certificate.
+          </div>
+        </div>
+      )}
+      {enrollment?.state === 'paired' && (
+        <div style={{ ...pairing, marginTop: 9, color: '#2c6f46' }}>
+          ✅ {enrollment.principal} already has an enrolled mTLS client with full write access.
+        </div>
+      )}
 
       {status.output.trim() && (
         <details style={{ marginTop: 6 }}>
@@ -219,4 +318,8 @@ const box: React.CSSProperties = {
 const pre: React.CSSProperties = {
   whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: '#eef1f6', borderRadius: 6,
   padding: '8px 10px', fontSize: 11.5, margin: '6px 0 0', maxHeight: 220, overflow: 'auto',
+};
+const pairing: React.CSSProperties = {
+  border: '1px solid #cbd8eb', borderRadius: 7, background: '#f1f6fd', padding: '8px 10px',
+  fontSize: 12,
 };

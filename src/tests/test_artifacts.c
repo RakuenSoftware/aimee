@@ -444,27 +444,41 @@ static void test_artifact_filter_facets(void)
    db2_artifact_row_t rows[16];
 
    /* status=done AND component=pgvector → only a (precision 1.0). */
-   int n = db2_artifact_filter_facets(0, "doc_summary", "done", NULL, "pgvector", rows, 16);
+   int n = db2_artifact_filter_facets(0, NULL, "doc_summary", "done", NULL, "pgvector", rows, 16);
    assert(n == 1);
    assert(strcmp(rows[0].id, a) == 0);
 
    /* component=pgvector alone, live only → a and c (not d, rejected). */
-   n = db2_artifact_filter_facets(0, NULL, NULL, NULL, "pgvector", rows, 16);
+   n = db2_artifact_filter_facets(0, NULL, NULL, NULL, NULL, "pgvector", rows, 16);
    assert(n == 2);
    for (int i = 0; i < n; i++)
       assert(strcmp(rows[i].id, d) != 0);
 
    /* priority=high → only a. */
-   n = db2_artifact_filter_facets(0, NULL, NULL, "high", NULL, rows, 16);
+   n = db2_artifact_filter_facets(0, NULL, NULL, NULL, "high", NULL, rows, 16);
    assert(n == 1 && strcmp(rows[0].id, a) == 0);
 
    /* kind filter excludes everything when it doesn't match. */
-   n = db2_artifact_filter_facets(0, "code_unit", "done", NULL, "pgvector", rows, 16);
+   n = db2_artifact_filter_facets(0, NULL, "code_unit", "done", NULL, "pgvector", rows, 16);
    assert(n == 0);
 
    /* No facets → all live doc_summary (a, b, c), not d. */
-   n = db2_artifact_filter_facets(0, "doc_summary", NULL, NULL, NULL, rows, 16);
+   n = db2_artifact_filter_facets(0, NULL, "doc_summary", NULL, NULL, NULL, rows, 16);
    assert(n == 3);
+
+   /* Project-local search never leaks an otherwise matching artifact from a
+    * different project; explicit all (NULL above) remains available. */
+   char other[37];
+   db2_artifact_gen_id(other, sizeof(other));
+   db2_artifact_write(other, "doc_summary", "committed", "project", "q", "", 0.9,
+                      "{\"status\":\"done\",\"components\":[\"pgvector\"]}");
+   n = db2_artifact_filter_facets(0, "p", "doc_summary", "done", NULL, "pgvector", rows, 16);
+   assert(n == 1 && strcmp(rows[0].id, a) == 0);
+   n = db2_artifact_filter_facets(0, "q", "doc_summary", "done", NULL, "pgvector", rows, 16);
+   assert(n == 1 && strcmp(rows[0].id, other) == 0);
+   n = db2_artifact_filter_facets_scoped(0, NULL, "p", "doc_summary", "done", NULL, "pgvector",
+                                         rows, 16);
+   assert(n == 1 && strcmp(rows[0].id, other) == 0);
 
    close_db();
    printf("  artifact_filter_facets: ok\n");
@@ -485,29 +499,47 @@ static void test_artifact_filter_facets_release(void)
                        "INSERT INTO release_docs (release_id, doc_id) VALUES (1,10);",
                        NULL, NULL, NULL) == SQLITE_OK);
 
-   char in_rel[37], out_rel[37];
+   char in_rel[37], out_rel[37], other_project[37];
    db2_artifact_gen_id(in_rel, sizeof(in_rel));
    db2_artifact_gen_id(out_rel, sizeof(out_rel));
+   db2_artifact_gen_id(other_project, sizeof(other_project));
    db2_artifact_write(in_rel, "doc_summary", "committed", "project", "p", "", 0.9,
                       "{\"status\":\"done\"}");
    db2_artifact_write(out_rel, "doc_summary", "committed", "project", "p", "", 0.9,
                       "{\"status\":\"done\"}");
+   db2_artifact_write(other_project, "doc_summary", "committed", "project", "q", "", 0.9,
+                      "{\"status\":\"done\"}");
    assert(db2_artifact_cite(in_rel, "kb_document", "10") == 0);  /* in release 1 */
    assert(db2_artifact_cite(out_rel, "kb_document", "20") == 0); /* not in release 1 */
+   assert(db2_artifact_cite(other_project, "kb_document", "10") == 0);
 
    db2_artifact_row_t rows[16];
 
    /* Bound to release 1 → only the artifact citing doc 10. */
-   int n = db2_artifact_filter_facets(1, "doc_summary", "done", NULL, NULL, rows, 16);
-   assert(n == 1);
-   assert(strcmp(rows[0].id, in_rel) == 0);
+   int n = db2_artifact_filter_facets(1, NULL, "doc_summary", "done", NULL, NULL, rows, 16);
+   assert(n == 2);
+   int saw_in_rel = 0, saw_other_project = 0;
+   for (int i = 0; i < n; i++)
+   {
+      saw_in_rel |= strcmp(rows[i].id, in_rel) == 0;
+      saw_other_project |= strcmp(rows[i].id, other_project) == 0;
+   }
+   assert(saw_in_rel && saw_other_project);
+
+   /* Combining release, kind, and project keeps each SQL binding independent. */
+   n = db2_artifact_filter_facets(1, "p", "doc_summary", "done", NULL, NULL, rows, 16);
+   assert(n == 1 && strcmp(rows[0].id, in_rel) == 0);
+   n = db2_artifact_filter_facets(1, "q", "doc_summary", "done", NULL, NULL, rows, 16);
+   assert(n == 1 && strcmp(rows[0].id, other_project) == 0);
+   n = db2_artifact_filter_facets(1, "p", "code_unit", "done", NULL, NULL, rows, 16);
+   assert(n == 0);
 
    /* Unbound (release_id <= 0) → both. */
-   n = db2_artifact_filter_facets(0, "doc_summary", "done", NULL, NULL, rows, 16);
-   assert(n == 2);
+   n = db2_artifact_filter_facets(0, NULL, "doc_summary", "done", NULL, NULL, rows, 16);
+   assert(n == 3);
 
    /* Bound to a release with no docs → nothing. */
-   n = db2_artifact_filter_facets(99, "doc_summary", "done", NULL, NULL, rows, 16);
+   n = db2_artifact_filter_facets(99, NULL, "doc_summary", "done", NULL, NULL, rows, 16);
    assert(n == 0);
 
    close_db();

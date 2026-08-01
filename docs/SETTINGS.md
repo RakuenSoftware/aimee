@@ -28,8 +28,42 @@ From highest to lowest:
 2. the active profile's `aimee.yaml` value;
 3. the descriptor default.
 
-Most runtime fields reload on the next request. Process topology, listeners, storage, custody, and
-some workflow controls need a restart. The generated reference marks those fields.
+## A change applies on the next turn unless it was bound at startup
+
+Almost every field is read per request, so a change is live as soon as the server picks it up. You do
+not need to restart to change a model, an endpoint, a budget, or a feature flag.
+
+Each field carries a reload class, declared beside it in `src/modules/config/config_fields.c`:
+
+| Class | What it means | Examples |
+| --- | --- | --- |
+| `RELOAD_HOT` | Read per request. Live immediately. This is the default, so a field that names no class is hot. | provider and model, `openai_endpoint`, `embedding_endpoint`, economizer and memory flags |
+| `RELOAD_REAPPLIABLE` | Bound state with a live re-applier. | fields being migrated out of the restart set |
+| `RELOAD_RESTART` | Bound once at startup, with no live re-applier. **Needs a restart.** | `db2_url` (the Postgres pool opens at startup), `kb_api_*` (the KB client initialises once), the deploy-topology record |
+
+22 fields are `RELOAD_RESTART` today. The Settings page and the setup wizard both mark them, and the
+generated reference lists them per field.
+
+### It picks up an edit you made outside the API
+
+The server polls for a changed config file on its main-loop tick, so a `config set` from the CLI, a
+hand edit of `aimee.yaml`, and an autonomous write all take effect the same way. You do not need to
+send `SIGHUP`.
+
+The reload validates before it publishes. A file that does not parse or does not validate is
+**rejected and the running configuration is kept**, which `$AIMEE_HOME/server.log` says plainly:
+
+```text
+2026-08-01T00:07:00Z INFO  config: config file change: reloaded
+2026-08-01T00:07:00Z WARN  config: config file change: rejected (kept running config)
+```
+
+That file, not `docker logs`. The container's stdout carries the entrypoint and the browser service;
+the C server logs to `$AIMEE_HOME/server.log`.
+
+A rejected reload is not a failed start. The server keeps serving the last good configuration, so a
+bad edit degrades to "your change did nothing" rather than to an outage. Check the log if a change
+seems to have been ignored, before assuming the field is a restart one.
 
 ## High-impact settings
 
@@ -50,12 +84,19 @@ economizer: safe   # off | safe | aggressive
 ```yaml
 aimee:
   api:
+    mtls: optional       # off | optional | required
     remote_writes: off   # off | data | full
 ```
 
-This legacy value is still parsed so old files load. It no longer authorizes user `/v1` writes;
-non-off values warn and feed `remote_writes.global_ignored`. Configure server identity trust and
-per-user grants instead. See [Security](SECURITY.md#remote-access).
+`remote_writes` is a legacy value retained so old files load. It no longer authorizes user `/v1`
+writes; non-off values warn and feed `remote_writes.global_ignored`. The first wizard user's grant
+is bound to its enrolled certificate, while additional users use server identity trust and per-user
+grants. See [Security](SECURITY.md#remote-access).
+
+The managed server image sets `AIMEE_API_MTLS=optional`, overriding older persisted configs so
+enrolled clients present their certificates. The durable presentation ramp promotes the listener
+to required after all active certificates have presented. Set the environment variable explicitly
+to `off` or `required` only when the deployment calls for it.
 
 ### Delegate isolation
 

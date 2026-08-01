@@ -1,0 +1,38 @@
+# Dedicated one-shot managed trust bootstrap. The final image contains the two
+# offline authority binaries and no ordinary KB/server runtime. It is invoked
+# only by the browser wizard after the private embedded PostgreSQL is healthy.
+FROM debian:trixie-slim AS build
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential ca-certificates libp11-kit-dev libpq-dev libssl-dev \
+        libzstd-dev pkg-config python3 zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY . .
+ARG AIMEE_VERSION=""
+RUN make -C src token-roots-provisioner-core jwks-publisher-core -j"$(nproc)" \
+        ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE_VERSION}
+
+FROM debian:trixie-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates coreutils libpq5 libssl3 libzstd1 openssl postgresql-client \
+        python3 util-linux zlib1g \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /src/aimee-kb-token-roots-provision /usr/local/bin/
+COPY --from=build /src/aimee-kb-jwks-publish /usr/local/bin/
+COPY scripts/managed_kms_helper.py /usr/libexec/aimee/managed-kms-helper.py
+COPY src/db2/schema_roles.sql src/db2/schema_grants.sql /usr/share/aimee/
+COPY deploy/container/aimee-managed-authority-bootstrap.sh /usr/local/bin/aimee-managed-authority-bootstrap
+RUN chmod 0755 /usr/local/bin/aimee-managed-authority-bootstrap \
+        /usr/libexec/aimee/managed-kms-helper.py \
+    && ! find /usr/local/bin /usr/libexec/aimee -type f \
+         \( -name 'aimee-kb' -o -name 'aimee-server' -o -name 'aimee' \
+            -o -name 'aimee-kb-token-authority' \) | grep .
+
+USER 0:0
+ENTRYPOINT ["/usr/local/bin/aimee-managed-authority-bootstrap"]

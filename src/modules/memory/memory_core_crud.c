@@ -378,10 +378,8 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
                         same_semantic_value ? "semantic profile dedupe" : "exact key match");
 
          {
-            config_t embed_cfg;
-            config_load(&embed_cfg);
-            platform_memory_background_embed(existing_id, embed_cfg.embedding_command[0]
-                                                              ? embed_cfg.embedding_command
+            platform_memory_background_embed(existing_id, config_embedding_command_field()[0]
+                                                              ? config_embedding_command_field()
                                                               : "builtin");
          }
 
@@ -456,9 +454,7 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
          add_provenance(dup_id, session_id, "merge", "trigram near-duplicate");
 
          {
-            config_t embed_cfg;
-            config_load(&embed_cfg);
-            platform_memory_background_embed(dup_id, config_embedding_command(&embed_cfg, NULL));
+            platform_memory_background_embed(dup_id, config_embedding_command_current(NULL));
          }
 
          if (out)
@@ -492,9 +488,7 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
 
       /* Auto-embed if embedding command is configured (background, non-fatal) */
       {
-         config_t embed_cfg;
-         config_load(&embed_cfg);
-         platform_memory_background_embed(new_id, config_embedding_command(&embed_cfg, NULL));
+         platform_memory_background_embed(new_id, config_embedding_command_current(NULL));
       }
 
       if (out)
@@ -551,8 +545,7 @@ int memory_list(const char *tier, const char *kind, int limit, memory_t *out, in
     * and explicit kind/tier queries still see them — only the un-filtered
     * listing path filters. */
    int hide_archived = 0;
-   config_t cfg;
-   if (config_load(&cfg) == 0 && cfg.memory_lifecycle_enabled && cfg.memory_lifecycle_hide_archived)
+   if (config_memory_lifecycle_enabled() && config_memory_lifecycle_hide_archived())
       hide_archived = 1;
    return db2_memory_list(tier, kind, hide_archived, limit, out, max);
 }

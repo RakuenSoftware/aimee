@@ -68,6 +68,17 @@ int server_mgmt_jwks_trust_bundle_load(const char *absolute_path, char *out, siz
       memset(out, 0, cap);
       return -1;
    }
+   /* Both offline export binaries use a terminal newline as stdout framing.
+    * A direct, documented `... --export-public > bundle.json` must therefore
+    * load as the canonical JSON bytes rather than fail because the framing byte
+    * was mistaken for signed content. Accept exactly one LF (or CRLF), while an
+    * extra newline/internal whitespace still fails the byte-exact parser. */
+   if (used && out[used - 1] == '\n')
+   {
+      used--;
+      if (used && out[used - 1] == '\r')
+         used--;
+   }
    out[used] = '\0';
    trust_t trust;
    if (trust_parse(out, used, &trust))

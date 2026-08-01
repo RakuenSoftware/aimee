@@ -205,16 +205,12 @@ int kb_curator_synthesize_one(const kb_curator_extract_opts_t *opts)
    void *conn = db2_conn();
    if (!conn)
       return 0;
-
-   config_t cfg;
-   config_load(&cfg);
    /* Run when enabled AND we have somewhere to send the work: a configured
     * Tier-B provider (§2) or the legacy sidecar command. */
-   provider_def_t synth_provider;
-   int have_provider =
-       kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &synth_provider);
-   if (!cfg.kb_curator_synthesize_enabled ||
-       (!cfg.kb_curator_synthesize_command[0] && !have_provider))
+   provider_def_owned_t synth_provider;
+   int have_provider = kb_curator_provider_for_stage(KB_CURATOR_STAGE_SYNTHESIZE, &synth_provider);
+   if (!config_kb_curator_synthesize_enabled() ||
+       (!config_kb_curator_synthesize_command()[0] && !have_provider))
       return 0;
 
    char ent_id[64] = "", scope_kind[64] = "", scope_id[128] = "";
@@ -239,8 +235,8 @@ int kb_curator_synthesize_one(const kb_curator_extract_opts_t *opts)
 
    cJSON *cites = cJSON_CreateArray();
    int n_sources = 0;
-   char *request = synth_build_request(conn, ent_id, topic_name, cfg.kb_curator_synthesize_k, cites,
-                                       &n_sources);
+   char *request = synth_build_request(conn, ent_id, topic_name, config_kb_curator_synthesize_k(),
+                                       cites, &n_sources);
    if (!request || n_sources == 0)
    {
       /* Nothing to synthesize from — skip (don't burn the sidecar on no input). */
@@ -249,16 +245,31 @@ int kb_curator_synthesize_one(const kb_curator_extract_opts_t *opts)
       return 0;
    }
 
+   /* The request is self-contained now. A model call can take minutes on the
+    * bundled CPU backend, so retaining this thread's DB2 pool member across it
+    * starves health/status traffic when other curator workers do the same. All
+    * writes below acquire their own lease lazily. */
+   db2_lease_release_idle();
+
    char serr[256];
-   char *response = kb_curator_llm_run(
-       &cfg, KB_CURATOR_STAGE_SYNTHESIZE, CURATOR_SYNTH_SYSTEM_PROMPT, request, NULL,
-       cfg.kb_curator_synthesize_command, CURATOR_SYNTH_OUTBUF, serr, sizeof(serr));
+   char *response = kb_curator_llm_run(KB_CURATOR_STAGE_SYNTHESIZE, CURATOR_SYNTH_SYSTEM_PROMPT,
+                                       request, NULL, config_kb_curator_synthesize_command(),
+                                       CURATOR_SYNTH_OUTBUF, serr, sizeof(serr));
    free(request);
    if (!response)
    {
       aimee_log(LOG_WARN, "kb.curator.synth", "synthesize sidecar failed for '%s' (%s)", topic_name,
                 serr);
       cJSON_Delete(cites);
+      /* Stop this pass when the shared provider is unavailable. Treating this
+       * as an empty queue lets later LLM stages hit the same open circuit. Arm
+       * the process-wide gate here as well: this legacy sidecar path does not
+       * pass through kb_curator_llm_run(), which normally records the outage. */
+      if (kb_curator_error_is_provider_unavailable(serr))
+      {
+         kb_curator_provider_backoff_note();
+         return -1;
+      }
       return 0;
    }
 

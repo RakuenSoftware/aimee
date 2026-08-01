@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, useToast } from '@rakuensoftware/smoothgui';
-import { useSessions } from '../SessionContext';
 import { loadConfig, saveConfigValue, type ConfigMap } from '../setup/configApi';
 import { visibleSteps, isRestartKey, helpFor, APPLIANCE_HIDDEN_STEPS, type WizardKbMode } from '../setup/wizardSteps';
 import { completedSteps, computeReadiness, type StepId } from '../setup/readiness';
+import { fetchAppliance, fetchHostCount, fetchProjectCount, fetchSetupAccountReady } from '../setup/setupSignals';
 import { setDismissed, notifySetupUpdated } from '../setup/setupState';
+import CreateAccount from '../setup/CreateAccount';
 import PrimaryChooser from '../setup/PrimaryChooser';
 import KnowledgeBase from '../setup/KnowledgeBase';
 import DeployTopology from '../setup/DeployTopology';
@@ -45,44 +46,8 @@ function coerce(key: string, raw: string, original: unknown): unknown {
   return raw;
 }
 
-function csrf(): string {
-  try {
-    if (typeof window !== 'undefined') return (window as { _csrf?: string })._csrf || '';
-  } catch {
-    /* ignore */
-  }
-  return '';
-}
-
-// How many git hosts have a stored credential (drives the optional connection
-// step's readiness). Network failure ⇒ 0; the step is optional so this never
-// blocks "ready".
-async function fetchHostCount(): Promise<number> {
-  try {
-    const r = await fetch('/api/git/credentials', { headers: { 'X-CSRF-Token': csrf() } });
-    const d = await r.json();
-    return r.ok && Array.isArray(d.hosts) ? d.hosts.length : 0;
-  } catch {
-    return 0;
-  }
-}
-
-// Whether this instance is the all-in-one appliance (KB + LLM + store baked in),
-// so the wizard hides the infra steps. Network failure ⇒ full wizard.
-async function fetchAppliance(): Promise<boolean> {
-  try {
-    const r = await fetch('/api/setup/appliance', { headers: { 'X-CSRF-Token': csrf() } });
-    const d = await r.json();
-    return r.ok && !!d.appliance;
-  } catch {
-    return false;
-  }
-}
-
 export default function SetupWizard({ open, onClose }: { open: boolean; onClose: () => void }) {
   const toast = useToast();
-  const { active } = useSessions();
-  const hasProject = !!active?.projectName;
 
   const [cfg, setCfg] = useState<ConfigMap>({});
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -91,6 +56,8 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
   const [pendingRestart, setPendingRestart] = useState<string[]>([]);
   const [showSummary, setShowSummary] = useState(false);
   const [hostsConnected, setHostsConnected] = useState(0);
+  const [projectCount, setProjectCount] = useState(0);
+  const [accountReady, setAccountReady] = useState(false);
   // The all-in-one appliance bakes the KB + LLM + store, so its wizard drops the
   // infra steps. Detected from a webchat signal (AIMEE_WIZARD_APPLIANCE).
   const [appliance, setAppliance] = useState(false);
@@ -121,9 +88,13 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
     setPendingRestart([]);
     setBooted(false);
     setDoneAtOpen(new Set());
-    Promise.all([loadConfig(), fetchHostCount(), fetchAppliance()]).then(([c, hosts, appl]) => {
+    Promise.all([
+      loadConfig(), fetchHostCount(), fetchProjectCount(), fetchSetupAccountReady(), fetchAppliance(),
+    ]).then(([c, hosts, projects, account, appl]) => {
       setCfg(c);
       setHostsConnected(hosts);
+      setProjectCount(projects);
+      setAccountReady(account);
       setAppliance(appl);
       const d: Record<string, string> = {};
       for (const s of visibleSteps(String(c.kb_mode) === 'remote' ? 'remote' : 'local')) {
@@ -133,12 +104,10 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
         }
       }
       setDraft(d);
-      const done = completedSteps(c, hasProject, hosts);
+      const done = completedSteps(c, { accountReady: account, projectCount: projects, hostsConnected: hosts });
       setDoneAtOpen(done);
       setBooted(true);
     });
-    // hasProject is read once at open: the done-set is a deliberate snapshot.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const close = useCallback(() => { onClose(); }, [onClose]);
@@ -152,8 +121,8 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
   }, [open, close]);
 
   const readiness = useMemo(
-    () => computeReadiness(cfg, hasProject, hostsConnected),
-    [cfg, hasProject, hostsConnected],
+    () => computeReadiness(cfg, { accountReady, projectCount, hostsConnected }),
+    [cfg, accountReady, projectCount, hostsConnected],
   );
 
   if (!open) return null;
@@ -169,6 +138,24 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
   async function handlePrimaryConfigured(provider: string) {
     const res = await saveConfigValue('provider', provider);
     setCfg((c) => ({ ...c, provider: res.ok ? res.value ?? provider : provider }));
+    notifySetupUpdated();
+    advance();
+  }
+
+  async function handleAccountCreated() {
+    setAccountReady(true);
+    // The replacement account has its own webuser-scoped workspace and git
+    // credentials. Re-read both under the new session cookie so readiness never
+    // carries the bootstrap user's inventory across the identity switch.
+    const [projects, hosts] = await Promise.all([fetchProjectCount(), fetchHostCount()]);
+    setProjectCount(projects);
+    setHostsConnected(hosts);
+    setDoneAtOpen((previous) => {
+      const next = new Set(previous);
+      if (projects === 0) next.delete('project');
+      if (hosts === 0) next.delete('connection');
+      return next;
+    });
     notifySetupUpdated();
     advance();
   }
@@ -307,7 +294,9 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
               {step.title}{step.optional ? <span style={{ color: '#9aa', fontWeight: 400, fontSize: 12 }}> · optional</span> : null}
             </div>
 
-            {step.kind === 'chooser' ? (
+            {step.kind === 'account' ? (
+              <CreateAccount onCreated={handleAccountCreated} />
+            ) : step.kind === 'chooser' ? (
               <PrimaryChooser onConfigured={handlePrimaryConfigured} />
             ) : step.kind === 'kb' ? (
               <KnowledgeBase onSaved={handleKbSaved} />
@@ -318,7 +307,7 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
             ) : step.kind === 'connection' ? (
               <ConnectHosts onDone={advance} onHostsChanged={setHostsConnected} />
             ) : step.kind === 'workspace' ? (
-              <ConnectWorkspace onDone={advance} />
+              <ConnectWorkspace onDone={advance} onProjectsChanged={setProjectCount} />
             ) : step.keys.length > 0 ? (
               <div style={{ display: 'grid', gap: 12, marginBottom: 16 }}>
                 {step.keys.map((key) => (
@@ -348,7 +337,7 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
                 {step.optional && <Button variant="default" onClick={advance}>Skip</Button>}
                 {step.keys.length > 0 ? (
                   <Button variant="primary" disabled={saving} onClick={saveStep}>{saving ? 'Saving…' : 'Save & continue'}</Button>
-                ) : step.kind === 'chooser' || step.kind === 'kb' || step.kind === 'deploy' || step.kind === 'db2' || step.kind === 'connection' || step.kind === 'workspace' ? (
+                ) : step.kind === 'account' || step.kind === 'chooser' || step.kind === 'kb' || step.kind === 'deploy' || step.kind === 'db2' || step.kind === 'connection' || step.kind === 'workspace' ? (
                   // Bespoke steps own their own primary action (they call advance()).
                   null
                 ) : (

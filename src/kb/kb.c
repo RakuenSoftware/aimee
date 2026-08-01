@@ -4,6 +4,7 @@
 #include "aimee.h"
 #if !defined(AIMEE_DB2_DISABLED)
 #include "db2/kb_payload.h"
+#include "db2/code_index.h"
 #include "db2/db_postgres.h"
 #include "db2/kb_service_backend.h"
 #include "db2/memory_query.h"
@@ -85,22 +86,28 @@ char *kb_search_json(const char *project, const char *query, const char *embeddi
    return safe_strdup("{\"error\":\"knowledge base storage is owned by aimee-kb\"}");
 }
 
+/* Storage-disabled alternative to the full implementation below. The outer
+ * AIMEE_DB2_DISABLED #if/#else makes the definitions mutually exclusive. */
+char *kb_search_json_scoped_ex(const char *preferred_project, int all_projects, const char *query,
+                               const char *embedding_cmd, int max_results,
+                               const char *fusion_mode_override)
+{
+   (void)all_projects;
+   (void)fusion_mode_override;
+   return kb_search_json(preferred_project, query, embedding_cmd, max_results);
+}
+
 void kb_resolve_project(const char *project, const char *root_path, char *out, size_t out_len)
 {
+   (void)root_path;
+   if (!out || out_len == 0)
+      return;
+   out[0] = '\0';
    if (project && project[0])
    {
       snprintf(out, out_len, "%s", project);
       return;
    }
-
-   char path[MAX_PATH_LEN];
-   if (root_path && root_path[0])
-      snprintf(path, sizeof(path), "%s", root_path);
-   else if (!getcwd(path, sizeof(path)))
-      path[0] = '\0';
-
-   const char *base = strrchr(path, '/');
-   snprintf(out, out_len, "%s", base ? base + 1 : path);
 }
 
 int kb_async_enabled(void)
@@ -594,7 +601,7 @@ int sync_vector_embedding(int64_t doc_id, const float *vec, int dim)
 
 const char *kb_effective_embedding_cmd(const char *embedding_cmd)
 {
-   return config_embedding_command(NULL, embedding_cmd);
+   return config_embedding_command_current(embedding_cmd);
 }
 
 /* pgvector owns vector bytes. This hook exists to keep the sync/async call
@@ -735,10 +742,7 @@ int kb_async_enabled(void)
          return 0;
    }
 
-   config_t cfg;
-   if (config_load(&cfg) == 0)
-      return cfg.memory_cognify_async_enabled ? 1 : 0;
-   return 0;
+   return (config_present() && config_memory_cognify_async_enabled()) ? 1 : 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1038,7 +1042,8 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
                                   sizeof(embed_text));
 
          float vec[EMBED_MAX_DIM];
-         int dim = memory_embed_text(embed_text, c->effective_cmd, vec, EMBED_MAX_DIM);
+         int dim = memory_embed_text(embed_text, c->effective_cmd, EMBED_INPUT_DOCUMENT, vec,
+                                     EMBED_MAX_DIM);
          if (dim > 0)
          {
             accept_generated_embedding(doc_id, vec, dim);
@@ -1099,6 +1104,12 @@ static int kb_build_or_update(const char *root_path, const char *project, const 
       LOG_WARN("kb_build", "purge fence active for project '%s': refusing ingest", project);
       return -1;
    }
+   /* Knowledge-only builds still participate in the same durable project
+    * identity/generation contract as code scans. This also makes direct `kb
+    * build` safe on a previously unseen checkout instead of writing unowned
+    * document rows with no active generation. */
+   if (!project || !project[0] || db2_code_index_project_upsert(project, root_path) < 0)
+      return -1;
    const char *effective_cmd = kb_effective_embedding_cmd(embedding_cmd);
 
    kb_stats_t stats;
@@ -1108,9 +1119,10 @@ static int kb_build_or_update(const char *root_path, const char *project, const 
    if (force_rebuild && project && project[0])
    {
       LOG_INFO("kb_build", "force rebuild: clearing project '%s' from DB2", project);
-      db2_kb_service_clear_project(project);
+      /* Vectors must be selected while their current document rows still exist. */
+      pgvec_kb_vector_delete_current_project(project);
+      db2_kb_service_clear_current_project(project);
       db2_sketch_minhash_signature_delete_project(project);
-      pgvec_kb_vector_delete_project(project);
    }
 
    /* Resolve include/exclude patterns */
@@ -1246,6 +1258,7 @@ int kb_update(const char *root_path, const char *project, const char *embedding_
 typedef struct
 {
    int64_t doc_id;
+   char project[256];
    char file_path[MAX_PATH_LEN];
    char file_hash[32];
    char heading_path[MAX_HEADING_LEN];
@@ -1273,6 +1286,7 @@ static int kb_fetch_doc_row(int64_t id, const char *project, kb_result_t *out)
    if (strcmp(row.doc_kind, "pdf") == 0)
       return 0;
    out->doc_id = row.id;
+   snprintf(out->project, sizeof(out->project), "%s", row.project);
    snprintf(out->file_path, sizeof(out->file_path), "%s", row.file_path);
    snprintf(out->file_hash, sizeof(out->file_hash), "%s", row.file_hash);
    snprintf(out->heading_path, sizeof(out->heading_path), "%s", row.heading_path);
@@ -1295,7 +1309,8 @@ static int kb_fetch_doc_row(int64_t id, const char *project, kb_result_t *out)
  * two legs were byte-for-byte identical and alpha_merge collapsed to the identity
  * (rrf/static_alpha/dynamic_alpha all produced the same ranking). With a real
  * lexical leg the two signals diverge and the fusion modes become meaningful. */
-static int lexical_search_fts(const char *project, const char *query, kb_result_t *out, int max)
+static int lexical_search_fts(const char *project, const char *exclude_project, const char *query,
+                              kb_result_t *out, int max)
 {
    if (!query || !query[0] || !out || max <= 0)
       return 0;
@@ -1305,7 +1320,8 @@ static int lexical_search_fts(const char *project, const char *query, kb_result_
    int cap = (int)(sizeof(ids) / sizeof(ids[0]));
    if (max * 2 < cap)
       cap = max * 2;
-   int n_hits = db2_kb_documents_fts_search(project, query, ids, scores, cap);
+   int n_hits =
+       db2_kb_documents_fts_search_scoped(project, exclude_project, query, ids, scores, cap);
    if (n_hits <= 0)
       return 0;
 
@@ -1323,15 +1339,16 @@ static int lexical_search_fts(const char *project, const char *query, kb_result_
 }
 
 /* Vector search uses pgvector as the only dense retrieval path. */
-static int vec_search(const char *project, const float *qvec, int qdim, kb_result_t *out, int max)
+static int vec_search(const char *project, const char *exclude_project, const float *qvec, int qdim,
+                      kb_result_t *out, int max)
 {
    if (qdim <= 0)
       return 0;
 
    int64_t ids[MAX_VEC_RESULTS * 2];
    double scores[MAX_VEC_RESULTS * 2];
-   int n_hits = pgvec_kb_vector_search_project(project, qvec, qdim, max * 2, ids, scores,
-                                               MAX_VEC_RESULTS * 2);
+   int n_hits = pgvec_kb_vector_search_scoped(project, exclude_project, qvec, qdim, max * 2, ids,
+                                              scores, MAX_VEC_RESULTS * 2);
    if (n_hits < 0)
       return -1;
    if (n_hits == 0)
@@ -1666,10 +1683,9 @@ static void kb_json_append_escaped(dstr_t *out, const char *s)
  * KB_DEFAULT_MAX_RESULTS. */
 static int kb_search_resolve_cap(int requested)
 {
-   config_t cfg;
    int cap = 50;
-   if (config_load(&cfg) == 0 && cfg.kb_search_max_results > 0)
-      cap = cfg.kb_search_max_results;
+   if (config_present() && config_kb_search_max_results() > 0)
+      cap = config_kb_search_max_results();
    if (requested <= 0)
       requested = KB_DEFAULT_MAX_RESULTS;
    if (requested > cap)
@@ -1680,7 +1696,8 @@ static int kb_search_resolve_cap(int requested)
 /* Hybrid retrieval: lexical + dense, fused by configured mode.
  * fusion_mode_override: overrides config when non-NULL/non-empty.
  * fusion_mode_out (buf>=32) and fusion_alpha_out receive the mode/alpha used. */
-static char *kb_search_gather(const char *project, const char *query, const char *embedding_cmd,
+static char *kb_search_gather(const char *project, const char *exclude_project, const char *query,
+                              const char *embedding_cmd, const float *query_vec, int query_dim,
                               int max_results, kb_result_t *merged, int *n_out,
                               const char *fusion_mode_override, char *fusion_mode_out,
                               double *fusion_alpha_out)
@@ -1714,8 +1731,7 @@ static char *kb_search_gather(const char *project, const char *query, const char
     * When no override is given and live bandit decisions are enabled, sample the
     * fusion strategy from the kb_fusion_mode decision point; the choice is
     * rewarded from this search's recall sufficiency at the success exit below. */
-   config_t fusion_cfg;
-   int fusion_cfg_ok = (config_load(&fusion_cfg) == 0);
+   int fusion_cfg_ok = (config_present());
    const char *fusion_mode;
    char fm_decision_id[KB_BANDIT_MAX_DECISION] = {0};
    char fm_arm_id[KB_BANDIT_MAX_ARM_ID] = {0};
@@ -1725,7 +1741,7 @@ static char *kb_search_gather(const char *project, const char *query, const char
       fusion_mode = fusion_mode_override;
    else
    {
-      if (fusion_cfg_ok && fusion_cfg.bandit_live_decision_enabled)
+      if (fusion_cfg_ok && config_bandit_live_decision_enabled())
       {
          fm_dp = kb_bandit_registry_get("kb_fusion_mode");
          if (fm_dp && fm_dp->n_arms > 0)
@@ -1733,8 +1749,7 @@ static char *kb_search_gather(const char *project, const char *query, const char
             char fm_arms[KB_BANDIT_MAX_ARMS][KB_BANDIT_MAX_ARM_ID];
             for (int i = 0; i < fm_dp->n_arms; i++)
                snprintf(fm_arms[i], KB_BANDIT_MAX_ARM_ID, "%s", fm_dp->arms[i]);
-            int a = kb_bandit_sample(&fusion_cfg, fm_dp->id, NULL, fm_arms, fm_dp->n_arms,
-                                     fm_decision_id);
+            int a = kb_bandit_sample(fm_dp->id, NULL, fm_arms, fm_dp->n_arms, fm_decision_id);
             if (a >= 0 && a < fm_dp->n_arms)
                snprintf(fm_arm_id, sizeof(fm_arm_id), "%s", fm_arms[a]);
             else
@@ -1746,8 +1761,8 @@ static char *kb_search_gather(const char *project, const char *query, const char
       else if (db2_bandit_promotion_get("kb_fusion_mode", fm_promo, sizeof(fm_promo)) == 0 &&
                fm_promo[0])
          fusion_mode = fm_promo; /* promoted default (operator locked it in) */
-      else if (fusion_cfg_ok && fusion_cfg.kb_fusion_mode[0])
-         fusion_mode = fusion_cfg.kb_fusion_mode;
+      else if (fusion_cfg_ok && config_kb_fusion_mode()[0])
+         fusion_mode = config_kb_fusion_mode();
       else
          fusion_mode = "rrf";
    }
@@ -1761,11 +1776,18 @@ static char *kb_search_gather(const char *project, const char *query, const char
       return safe_strdup("error: out of memory");
    }
 
-   int n_lex = lexical_search_fts(proj, query, lex_res, MAX_LEXICAL_RESULTS);
+   int n_lex = lexical_search_fts(proj, exclude_project, query, lex_res, MAX_LEXICAL_RESULTS);
 
    /* Dense search is mandatory; the lexical vector leg complements it. */
-   float qvec[EMBED_MAX_DIM];
-   int qdim = memory_embed_text(query, effective_cmd, qvec, EMBED_MAX_DIM);
+   float embedded_qvec[EMBED_MAX_DIM];
+   const float *qvec = query_vec;
+   int qdim = query_dim;
+   if (!qvec || qdim <= 0)
+   {
+      qdim =
+          memory_embed_text(query, effective_cmd, EMBED_INPUT_QUERY, embedded_qvec, EMBED_MAX_DIM);
+      qvec = embedded_qvec;
+   }
    if (qdim <= 0)
    {
       free(lex_res);
@@ -1774,7 +1796,7 @@ static char *kb_search_gather(const char *project, const char *query, const char
           "error: documentation query embedding failed; server-side embedding configuration is "
           "unavailable");
    }
-   int n_vec = vec_search(proj, qvec, qdim, vec_res, MAX_VEC_RESULTS);
+   int n_vec = vec_search(proj, exclude_project, qvec, qdim, vec_res, MAX_VEC_RESULTS);
    if (n_vec < 0)
    {
       free(lex_res);
@@ -1790,7 +1812,7 @@ static char *kb_search_gather(const char *project, const char *query, const char
    {
       if (strcmp(fusion_mode, "static_alpha") == 0)
       {
-         chosen_alpha = fusion_cfg_ok ? fusion_cfg.kb_fusion_static_alpha : 0.5;
+         chosen_alpha = fusion_cfg_ok ? config_kb_fusion_static_alpha() : 0.5;
          n_results = alpha_merge(lex_res, n_lex, vec_res, n_vec, merged, max_results, chosen_alpha);
       }
       else if (strcmp(fusion_mode, "dynamic_alpha") == 0)
@@ -1830,8 +1852,7 @@ static char *kb_search_gather(const char *project, const char *query, const char
 #if !defined(AIMEE_DB2_DISABLED)
    if (n_results > 0)
    {
-      config_t kb_cfg;
-      int cfg_ok = (config_load(&kb_cfg) == 0);
+      int cfg_ok = (config_present());
 
       sketch_count_min_t count_min;
       int have_count_min =
@@ -1861,7 +1882,7 @@ static char *kb_search_gather(const char *project, const char *query, const char
       }
 
       /* Apply linear ranker when enabled and a model is loaded. */
-      if (cfg_ok && kb_cfg.kb_ranker_enabled)
+      if (cfg_ok && config_kb_ranker_enabled())
       {
          int64_t ranked_ids[MAX_LEXICAL_RESULTS + MAX_VEC_RESULTS];
          double ranked_scores[MAX_LEXICAL_RESULTS + MAX_VEC_RESULTS];
@@ -1878,9 +1899,8 @@ static char *kb_search_gather(const char *project, const char *query, const char
          for (int i = 0; i < n_results; i++)
             ids[i] = merged[i].doc_id;
 
-         int n_ranked =
-             kb_ranker_rerank_with_sketch(&kb_cfg, ids, lex_s, dense_s, age_s, sketch_features,
-                                          n_results, ranked_ids, ranked_scores);
+         int n_ranked = kb_ranker_rerank_with_sketch(ids, lex_s, dense_s, age_s, sketch_features,
+                                                     n_results, ranked_ids, ranked_scores);
          if (n_ranked == n_results)
          {
             /* Re-order merged[] to match ranked order. */
@@ -1906,12 +1926,12 @@ static char *kb_search_gather(const char *project, const char *query, const char
       }
 
       /* Drift detection in shadow mode. */
-      if (cfg_ok && kb_cfg.drift_detect_shadow_enabled && n_results > 0)
+      if (n_results > 0) /* kb_detect_observe applies the shadow gate itself */
       {
          double sum = 0.0;
          for (int i = 0; i < n_results; i++)
             sum += merged[i].dense_score;
-         kb_detect_observe(&kb_cfg, sum / n_results, n_results);
+         kb_detect_observe(sum / n_results, n_results);
       }
    }
 #endif
@@ -1924,7 +1944,7 @@ static char *kb_search_gather(const char *project, const char *query, const char
    if (fm_dp && fm_decision_id[0] && fm_arm_id[0])
    {
       double reward = kb_bandit_recall_sufficiency_reward(n_results, max_results);
-      kb_bandit_reward(NULL, fm_dp->id, fm_decision_id, fm_arm_id, reward);
+      kb_bandit_reward(fm_dp->id, fm_decision_id, fm_arm_id, reward);
    }
    return NULL;
 }
@@ -1940,8 +1960,8 @@ char *kb_search(const char *project, const char *query, const char *embedding_cm
       return safe_strdup("error: out of memory");
 
    int n_results = 0;
-   char *err = kb_search_gather(project, query, embedding_cmd, max_results, merged, &n_results,
-                                NULL, NULL, NULL);
+   char *err = kb_search_gather(project, NULL, query, embedding_cmd, NULL, 0, max_results, merged,
+                                &n_results, NULL, NULL, NULL);
    if (err)
    {
       free(merged);
@@ -1995,8 +2015,8 @@ char *kb_search_json(const char *project, const char *query, const char *embeddi
    int n_results = 0;
    char fusion_mode[32];
    double fusion_alpha = 0.0;
-   char *err = kb_search_gather(project, query, embedding_cmd, max_results, merged, &n_results,
-                                NULL, fusion_mode, &fusion_alpha);
+   char *err = kb_search_gather(project, NULL, query, embedding_cmd, NULL, 0, max_results, merged,
+                                &n_results, NULL, fusion_mode, &fusion_alpha);
    if (err)
    {
       free(merged);
@@ -2028,7 +2048,9 @@ char *kb_search_json(const char *project, const char *query, const char *embeddi
    {
       if (i > 0)
          dstr_append_str(&out, ",");
-      dstr_append_str(&out, "{\"file_path\":\"");
+      dstr_append_str(&out, "{\"project\":\"");
+      kb_json_append_escaped(&out, merged[i].project);
+      dstr_append_str(&out, "\",\"file_path\":\"");
       kb_json_append_escaped(&out, merged[i].file_path);
       dstr_append_str(&out, "\",\"line_start\":");
       snprintf(num, sizeof(num), "%d", merged[i].line_start);
@@ -2074,8 +2096,8 @@ char *kb_search_json_ex(const char *project, const char *query, const char *embe
    int n_results = 0;
    char fusion_mode[32];
    double fusion_alpha = 0.0;
-   char *err = kb_search_gather(project, query, embedding_cmd, max_results, merged, &n_results,
-                                fusion_mode_override, fusion_mode, &fusion_alpha);
+   char *err = kb_search_gather(project, NULL, query, embedding_cmd, NULL, 0, max_results, merged,
+                                &n_results, fusion_mode_override, fusion_mode, &fusion_alpha);
    if (err)
    {
       free(merged);
@@ -2107,7 +2129,9 @@ char *kb_search_json_ex(const char *project, const char *query, const char *embe
    {
       if (i > 0)
          dstr_append_str(&out, ",");
-      dstr_append_str(&out, "{\"file_path\":\"");
+      dstr_append_str(&out, "{\"project\":\"");
+      kb_json_append_escaped(&out, merged[i].project);
+      dstr_append_str(&out, "\",\"file_path\":\"");
       kb_json_append_escaped(&out, merged[i].file_path);
       dstr_append_str(&out, "\",\"line_start\":");
       snprintf(num, sizeof(num), "%d", merged[i].line_start);
@@ -2137,24 +2161,144 @@ char *kb_search_json_ex(const char *project, const char *query, const char *embe
    return result;
 }
 
+/* Mixed-scope search is assembled from two independently bounded candidate
+ * buckets. The active project is retrieved first, before any global cap, and
+ * the second query excludes it at SQL/vector selection time. This prevents a
+ * globally stronger or merely larger corpus from crowding local evidence out
+ * of the returned head. */
+char *kb_search_json_scoped_ex(const char *preferred_project, int all_projects, const char *query,
+                               const char *embedding_cmd, int max_results,
+                               const char *fusion_mode_override)
+{
+   if (!all_projects || !preferred_project || !preferred_project[0])
+      return kb_search_json_ex(all_projects ? NULL : preferred_project, query, embedding_cmd,
+                               max_results, fusion_mode_override);
+   if (!db2_is_initialized())
+      return safe_strdup("{\"error\":\"db2 not initialized\"}");
+   max_results = kb_search_resolve_cap(max_results);
+
+   const int cap = MAX_LEXICAL_RESULTS + MAX_VEC_RESULTS;
+   kb_result_t *local = calloc((size_t)cap, sizeof(*local));
+   kb_result_t *tail = calloc((size_t)cap, sizeof(*tail));
+   kb_result_t *merged = calloc((size_t)max_results, sizeof(*merged));
+   if (!local || !tail || !merged)
+   {
+      free(local);
+      free(tail);
+      free(merged);
+      return safe_strdup("{\"error\":\"out of memory\"}");
+   }
+
+   float qvec[EMBED_MAX_DIM];
+   int qdim = memory_embed_text(query, kb_effective_embedding_cmd(embedding_cmd), EMBED_INPUT_QUERY,
+                                qvec, EMBED_MAX_DIM);
+   if (qdim <= 0)
+   {
+      free(local);
+      free(tail);
+      free(merged);
+      return safe_strdup(
+          "{\"error\":\"error: documentation query embedding failed; server-side embedding "
+          "configuration is unavailable\"}");
+   }
+
+   int n_local = 0, n_tail = 0;
+   char local_mode[32] = "rrf", tail_mode[32] = "rrf";
+   double local_alpha = 0.0, tail_alpha = 0.0;
+   char *err =
+       kb_search_gather(preferred_project, NULL, query, embedding_cmd, qvec, qdim, max_results,
+                        local, &n_local, fusion_mode_override, local_mode, &local_alpha);
+   if (!err)
+      err = kb_search_gather(NULL, preferred_project, query, embedding_cmd, qvec, qdim, max_results,
+                             tail, &n_tail, local_mode, tail_mode, &tail_alpha);
+   if (err)
+   {
+      dstr_t failure;
+      dstr_init(&failure);
+      dstr_append_str(&failure, "{\"error\":\"");
+      kb_json_append_escaped(&failure, err);
+      dstr_append_str(&failure, "\"}");
+      free(err);
+      free(local);
+      free(tail);
+      free(merged);
+      char *result = safe_strdup(failure.data ? failure.data : "{\"error\":\"unknown\"}");
+      dstr_free(&failure);
+      return result;
+   }
+
+   int n_results = 0;
+   for (int i = 0; i < n_local && n_results < max_results; i++)
+      merged[n_results++] = local[i];
+   for (int i = 0; i < n_tail && n_results < max_results; i++)
+      merged[n_results++] = tail[i];
+   free(local);
+   free(tail);
+
+   const char *fusion_mode = n_local > 0 ? local_mode : tail_mode;
+   double fusion_alpha = n_local > 0 ? local_alpha : tail_alpha;
+   dstr_t out;
+   dstr_init(&out);
+   char num[32];
+   dstr_append_str(&out, "{\"fusion_mode\":\"");
+   dstr_append_str(&out, fusion_mode);
+   dstr_append_str(&out, "\"");
+   if (strcmp(fusion_mode, "rrf") != 0)
+   {
+      dstr_append_str(&out, ",\"fusion_alpha\":");
+      snprintf(num, sizeof(num), "%.4f", fusion_alpha);
+      dstr_append_str(&out, num);
+   }
+   dstr_append_str(&out, ",\"results\":[");
+   for (int i = 0; i < n_results; i++)
+   {
+      if (i > 0)
+         dstr_append_str(&out, ",");
+      dstr_append_str(&out, "{\"project\":\"");
+      kb_json_append_escaped(&out, merged[i].project);
+      dstr_append_str(&out, "\",\"file_path\":\"");
+      kb_json_append_escaped(&out, merged[i].file_path);
+      dstr_append_str(&out, "\",\"line_start\":");
+      snprintf(num, sizeof(num), "%d", merged[i].line_start);
+      dstr_append_str(&out, num);
+      dstr_append_str(&out, ",\"line_end\":");
+      snprintf(num, sizeof(num), "%d", merged[i].line_end);
+      dstr_append_str(&out, num);
+      dstr_append_str(&out, ",\"heading_path\":\"");
+      kb_json_append_escaped(&out, merged[i].heading_path);
+      dstr_append_str(&out, "\",\"content\":\"");
+      kb_json_append_escaped(&out, merged[i].content);
+      dstr_append_str(&out, "\",\"score\":");
+      snprintf(num, sizeof(num), "%.6f", merged[i].score);
+      dstr_append_str(&out, num);
+      dstr_append_str(&out, ",\"doc_id\":");
+      snprintf(num, sizeof(num), "%lld", (long long)merged[i].doc_id);
+      dstr_append_str(&out, num);
+      dstr_append_str(&out, "}");
+   }
+   dstr_append_str(&out, "]}");
+
+   free(merged);
+   char *result = safe_strdup(out.data ? out.data : "{\"results\":[]}");
+   dstr_free(&out);
+   return result;
+}
+
 /* ------------------------------------------------------------------ */
 /* Utility                                                              */
 /* ------------------------------------------------------------------ */
 
 void kb_resolve_project(const char *project, const char *root_path, char *out, size_t out_len)
 {
+   (void)root_path;
+   if (!out || out_len == 0)
+      return;
+   out[0] = '\0';
    if (project && project[0])
    {
       snprintf(out, out_len, "%s", project);
       return;
    }
-   char path[MAX_PATH_LEN];
-   if (root_path && root_path[0])
-      snprintf(path, sizeof(path), "%s", root_path);
-   else if (!getcwd(path, sizeof(path)))
-      path[0] = '\0';
-   const char *base = strrchr(path, '/');
-   snprintf(out, out_len, "%s", base ? base + 1 : path);
 }
 
 #endif /* !AIMEE_DB2_DISABLED */

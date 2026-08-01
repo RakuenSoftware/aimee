@@ -58,6 +58,14 @@ boundary.
 `aimee remote set` pins the server certificate and rotates the bootstrap bearer. On Linux it also
 enrolls a client certificate. Verify the printed fingerprint out of band.
 
+After bootstrap, `aimee remote enroll` adds a bounded per-client bearer without invalidating
+existing clients. A bearer rotation is an explicit revoke-all: it replaces the primary and clears
+every additionally enrolled bearer in persisted and live state.
+
+When `AIMEE_API_BEARER_TOKEN` supplies the primary, rotate that deployment secret and restart
+instead of calling the API rotation route. A changed deployment primary revokes enrolled bearers;
+an unchanged primary preserves them across an ordinary restart.
+
 The shared bearer is read-only. Remote write authority comes from a short-lived, single-use,
 KB-signed identity token whose `(server, team, subject)` has a live grant. `data` permits memory,
 document, and index writes. `full` also permits agent, delegate, runner, and workspace control.
@@ -148,6 +156,14 @@ Do not store secrets in:
 - delegate container environments unless the policy explicitly grants that one credential;
 - client-side key files.
 
+Container environment variables are permitted only as first-boot transport.
+Run `scripts/aimee-compose-vault-bootstrap.sh` before `docker compose up`; it
+streams credential-shaped values into a disposable helper, seals them in the
+owning server or KB Vault, and removes the helper. Long-lived server and KB
+services must not declare credential-shaped environment keys, even when the
+value would be supplied through Compose interpolation. The build-integrity gate
+enforces this metadata boundary.
+
 Local CLI agents may use a login that remains on the thin client when execution runs there. The
 server sends commands over the authorized runner channel; it does not copy the login.
 
@@ -207,7 +223,7 @@ Nothing phones home by default. Network calls happen for configured providers, g
 sources, vulnerability checks, telemetry exporters, or other explicit integrations.
 
 Memory and document ingestion can retain sensitive source text. Scope the KB, configure retention,
-and avoid sending restricted evidence to an external reranker or synthesis provider. Memory audit
+and avoid sending restricted evidence to an external synthesis provider. Memory audit
 uses fingerprints for keys that can contain personal data.
 
 ## Non-goals

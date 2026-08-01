@@ -1,10 +1,12 @@
 #include "server_http.h"
 #include "server.h"
+#include "runtime_secret.h"
 
 #include <arpa/inet.h>
 #include <assert.h>
 #include <errno.h>
 #include <netinet/in.h>
+#include <openssl/crypto.h>
 #include <openssl/ssl.h>
 #include <signal.h>
 #include <stdio.h>
@@ -35,6 +37,18 @@ static void command(const char *cmd)
    assert(system(cmd) == 0);
 }
 
+static void seal_test_key(const char *name, const char *path)
+{
+   char pem[8192];
+   FILE *f = fopen(path, "rb");
+   assert(f);
+   size_t n = fread(pem, 1, sizeof(pem) - 1, f);
+   assert(!ferror(f) && feof(f) && fclose(f) == 0);
+   pem[n] = '\0';
+   assert(runtime_secret_store(name, pem) == 0);
+   OPENSSL_cleanse(pem, sizeof(pem));
+}
+
 static int reserve_port(int keep, int *fd_out)
 {
    int fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -62,7 +76,7 @@ static void set_management_env(int port, const char *cert, const char *key, cons
    assert(setenv("AIMEE_SERVER_MGMT_PORT", text, 1) == 0);
    assert(setenv("AIMEE_SERVER_MGMT_BIND", "127.0.0.1", 1) == 0);
    assert(setenv("AIMEE_SERVER_MGMT_TLS_CERT", cert, 1) == 0);
-   assert(setenv("AIMEE_SERVER_MGMT_TLS_KEY", key, 1) == 0);
+   seal_test_key("AIMEE_SERVER_MGMT_TLS_PRIVATE_KEY", key);
    assert(setenv("AIMEE_SERVER_MGMT_CLIENT_CA", ca, 1) == 0);
    assert(setenv("AIMEE_SERVER_ID", "p5-live-test", 1) == 0);
    assert(setenv("AIMEE_MGMT_STATUS_KEY_ID", "p5-live-key", 1) == 0);
@@ -75,7 +89,7 @@ static void set_management_env(int port, const char *cert, const char *key, cons
    assert(setenv("AIMEE_SERVER_MGMT_STATUS_LEAF_PIN",
                  "0000000000000000000000000000000000000000000000000000000000000000", 1) == 0);
    assert(setenv("AIMEE_SERVER_MGMT_STATUS_CLIENT_CERT", cert, 1) == 0);
-   assert(setenv("AIMEE_SERVER_MGMT_STATUS_CLIENT_KEY", key, 1) == 0);
+   seal_test_key("AIMEE_SERVER_MGMT_STATUS_CLIENT_PRIVATE_KEY", key);
 }
 
 static int response_status(const char *response)

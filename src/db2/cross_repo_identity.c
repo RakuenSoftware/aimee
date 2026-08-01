@@ -191,7 +191,8 @@ int db2_cross_repo_rebuild_identities(void)
            * for the host would mis-resolve directives, so exclude it (H0b flag). */
           "SELECT p.name, f.path, fc.content FROM file_contents fc "
           "JOIN files f ON f.id = fc.file_id JOIN projects p ON p.id = f.project_id "
-          "WHERE f.vendored = 0 AND (f.path LIKE '%go.mod' OR f.path LIKE '%Cargo.toml' "
+          "WHERE p.lifecycle_state='current' AND f.generation=p.current_generation "
+          "AND f.vendored = 0 AND (f.path LIKE '%go.mod' OR f.path LIKE '%Cargo.toml' "
           "OR f.path LIKE '%package.json' OR f.path LIKE '%pyproject.toml' "
           "OR f.path LIKE '%CMakeLists.txt' OR f.path LIKE '%.pc')",
           err, sizeof(err));

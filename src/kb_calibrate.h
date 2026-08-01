@@ -18,12 +18,12 @@ extern "C"
    /* Run one calibration pass over all (target_surface, kind, scope) triples
     * that have enough audit data.  Writes calibration_profile artifacts.
     * Returns the number of profiles written (>= 0) or -1 on fatal error. */
-   int kb_calibrate_run(const config_t *cfg);
+   int kb_calibrate_run(void);
 
    /* Sweep proposed drift_signal artifacts emitted by kb_detect and stamp
     * them reflected so the calibration loop knows they were acted on.
     * Returns the number of signals consumed (>= 0). */
-   int kb_calibrate_consume_drift_signals(const config_t *cfg);
+   int kb_calibrate_consume_drift_signals(void);
 
 #ifdef __cplusplus
 }

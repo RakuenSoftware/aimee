@@ -43,6 +43,175 @@ static void test_delegate_max_turns_marshaled(void)
    printf("  PASS: test_delegate_max_turns_marshaled\n");
 }
 
+static void test_json_error_envelopes_remain_structured(void)
+{
+   cJSON *deadline =
+       cJSON_Parse("{\"ok\":false,\"error\":\"panel deadline\",\"roundtable\":{"
+                   "\"participants_failed\":2,\"participant_failures\":[{\"seat\":1}]}}");
+   cJSON *dispatch = cJSON_Parse("{\"status\":\"error\",\"message\":\"queue full\"}");
+   cJSON *object_error =
+       cJSON_Parse("{\"error\":{\"message\":\"forbidden\",\"type\":\"permission_error\"}}");
+   cJSON *success = cJSON_Parse("{\"ok\":true,\"result\":{}}");
+   assert(deadline && dispatch && object_error && success);
+
+   assert(cli_v1_response_is_error(deadline, 503) == 1);
+   assert(cli_v1_response_is_error(dispatch, 200) == 1);
+   assert(cli_v1_response_is_error(object_error, 200) == 1);
+   assert(cli_v1_response_is_error(success, 200) == 0);
+
+   cJSON_Delete(deadline);
+   cJSON_Delete(dispatch);
+   cJSON_Delete(object_error);
+   cJSON_Delete(success);
+   printf("  PASS: test_json_error_envelopes_remain_structured\n");
+}
+
+/* Capture the exact post-transport production path, including ownership,
+ * stream selection, JSON shaping, and process return code. */
+static int finish_response_capture(const char *method, const char *json, int http_status,
+                                   int json_output, char *out, size_t out_cap, char *err,
+                                   size_t err_cap)
+{
+   cJSON *resp = cJSON_Parse(json);
+   assert(resp != NULL);
+   cli_v1_route_t route = {.method = method};
+
+   FILE *out_file = tmpfile(), *err_file = tmpfile();
+   assert(out_file != NULL && err_file != NULL);
+   int ofd = fileno(out_file), efd = fileno(err_file);
+   int old_out = dup(STDOUT_FILENO), old_err = dup(STDERR_FILENO);
+   assert(old_out >= 0 && old_err >= 0);
+   fflush(stdout);
+   fflush(stderr);
+   assert(dup2(ofd, STDOUT_FILENO) >= 0);
+   assert(dup2(efd, STDERR_FILENO) >= 0);
+
+   int rc = cli_v1_finish_response(&route, resp, http_status, json_output, 0, NULL);
+
+   fflush(stdout);
+   fflush(stderr);
+   assert(dup2(old_out, STDOUT_FILENO) >= 0);
+   assert(dup2(old_err, STDERR_FILENO) >= 0);
+   close(old_out);
+   close(old_err);
+
+   rewind(out_file);
+   size_t n = fread(out, 1, out_cap - 1, out_file);
+   out[n] = '\0';
+   rewind(err_file);
+   n = fread(err, 1, err_cap - 1, err_file);
+   err[n] = '\0';
+   fclose(out_file);
+   fclose(err_file);
+   return rc;
+}
+
+static void test_json_roundtable_failure_preserves_user_visible_envelope(void)
+{
+   char out[4096], err[2048];
+   int rc = finish_response_capture(
+       "roundtable.review",
+       "{\"status\":\"error\",\"error\":\"panel deadline\",\"message\":\"panel deadline\","
+       "\"roundtable\":{\"deadline_hit\":true,\"participant_failures\":[{\"seat\":1,"
+       "\"category\":\"deadline\"},{\"seat\":2,\"category\":\"deadline\"}]}}",
+       503, 1, out, sizeof(out), err, sizeof(err));
+
+   assert(rc == 1);
+   assert(err[0] == '\0');
+   cJSON *printed = cJSON_Parse(out);
+   assert(printed != NULL);
+   assert(strcmp(cJSON_GetObjectItem(printed, "status")->valuestring, "error") == 0);
+   cJSON *roundtable = cJSON_GetObjectItem(printed, "roundtable");
+   assert(cJSON_IsTrue(cJSON_GetObjectItem(roundtable, "deadline_hit")));
+   assert(cJSON_GetArraySize(cJSON_GetObjectItem(roundtable, "participant_failures")) == 2);
+   cJSON_Delete(printed);
+   printf("  PASS: test_json_roundtable_failure_preserves_user_visible_envelope\n");
+}
+
+static void test_human_roundtable_failure_uses_stderr(void)
+{
+   char out[2048], err[2048];
+   int rc = finish_response_capture(
+       "roundtable.review",
+       "{\"status\":\"error\",\"error\":\"panel deadline\",\"message\":\"panel deadline\","
+       "\"roundtable\":{\"deadline_hit\":true,\"participant_failures\":[{\"seat\":1}]}}",
+       503, 0, out, sizeof(out), err, sizeof(err));
+
+   assert(rc == 1);
+   assert(out[0] == '\0');
+   assert(strstr(err, "aimee: panel deadline") != NULL);
+   assert(strstr(err, "roundtable") == NULL);
+   printf("  PASS: test_human_roundtable_failure_uses_stderr\n");
+}
+
+static void test_success_with_string_error_remains_success(void)
+{
+   char out[2048], err[2048];
+   int rc = finish_response_capture(
+       "cron.run", "{\"status\":\"ok\",\"result\":\"completed\",\"error\":\"job stderr\"}", 200, 1,
+       out, sizeof(out), err, sizeof(err));
+
+   assert(rc == 0);
+   assert(err[0] == '\0');
+   cJSON *printed = cJSON_Parse(out);
+   assert(printed != NULL);
+   assert(cJSON_GetObjectItem(printed, "status") == NULL);
+   assert(strcmp(cJSON_GetObjectItem(printed, "error")->valuestring, "job stderr") == 0);
+   assert(strcmp(cJSON_GetObjectItem(printed, "result")->valuestring, "completed") == 0);
+   cJSON_Delete(printed);
+   printf("  PASS: test_success_with_string_error_remains_success\n");
+}
+
+static void test_failed_async_run_retains_structured_result(void)
+{
+   cJSON *snapshot = cJSON_Parse("{\"status\":\"failed\",\"message\":\"outer failure\"}");
+   cJSON *result = cJSON_Parse("{\"ok\":false,\"error\":\"panel deadline\",\"roundtable\":{"
+                               "\"deadline_hit\":true,\"participant_failures\":[{\"seat\":1,"
+                               "\"category\":\"deadline\"}]}}");
+   assert(snapshot && result);
+
+   cJSON *response = cli_v1_failed_run_response(result, snapshot);
+   assert(response == result);
+   assert(strcmp(cJSON_GetObjectItem(response, "status")->valuestring, "error") == 0);
+   assert(strcmp(cJSON_GetObjectItem(response, "message")->valuestring, "panel deadline") == 0);
+   cJSON *roundtable = cJSON_GetObjectItem(response, "roundtable");
+   assert(cJSON_IsTrue(cJSON_GetObjectItem(roundtable, "deadline_hit")));
+   assert(cJSON_GetArraySize(cJSON_GetObjectItem(roundtable, "participant_failures")) == 1);
+
+   cJSON_Delete(response);
+   cJSON_Delete(snapshot);
+   printf("  PASS: test_failed_async_run_retains_structured_result\n");
+}
+
+static void test_failed_async_run_synthesizes_legacy_envelope(void)
+{
+   cJSON *snapshot = cJSON_Parse("{\"status\":\"cancelled\"}");
+   cJSON *result = cJSON_CreateString("unstructured result");
+   assert(snapshot && result);
+
+   cJSON *response = cli_v1_failed_run_response(result, snapshot);
+   cJSON *error = cJSON_GetObjectItem(response, "error");
+   assert(cJSON_IsObject(error));
+   assert(strcmp(cJSON_GetObjectItem(error, "message")->valuestring,
+                 "run cancelled with no result") == 0);
+   assert(strcmp(cJSON_GetObjectItem(error, "type")->valuestring, "run_failed") == 0);
+
+   cJSON_Delete(response);
+   cJSON_Delete(snapshot);
+   printf("  PASS: test_failed_async_run_synthesizes_legacy_envelope\n");
+}
+
+static void test_remote_workspace_hidden_roots_are_rejected(void)
+{
+   assert(cli_ws_root_has_hidden_component("/repo/.aimee/worktrees/session/main") == 1);
+   assert(cli_ws_root_has_hidden_component("/repo/.claude/worktrees/session") == 1);
+   assert(cli_ws_root_has_hidden_component("/tmp/.fixture") == 1);
+   assert(cli_ws_root_has_hidden_component("/repo.v1/worktrees/session") == 0);
+   assert(cli_ws_root_has_hidden_component("/repo/src/.generated/file.c") == 1);
+   assert(cli_ws_root_has_hidden_component("/repo/src/generated/file.c") == 0);
+   printf("  PASS: test_remote_workspace_hidden_roots_are_rejected\n");
+}
+
 static void test_delegate_tools_named_toolset_marshaled(void)
 {
    char *argv[] = {"execute", "--tools", "readonly",
@@ -458,11 +627,12 @@ static void test_provider_routes_and_marshaling(void)
    assert(strcmp(route.method, "provider.quota") == 0);
    assert(route.skip_subcmd == 1);
 
-   char *list_argv[] = {"--available", "--json"};
-   cJSON *req = marshal_provider_list(2, list_argv);
+   char *list_argv[] = {"--available", "--all", "--json"};
+   cJSON *req = marshal_provider_list(3, list_argv);
    assert(req != NULL);
    assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "provider.list") == 0);
    assert(cJSON_IsTrue(cJSON_GetObjectItem(req, "available_only")));
+   assert(cJSON_IsTrue(cJSON_GetObjectItem(req, "all")));
    assert(cJSON_IsTrue(cJSON_GetObjectItem(req, "json")));
    cJSON_Delete(req);
 
@@ -564,6 +734,72 @@ static void test_memory_stats_route(void)
    printf("  PASS: test_memory_stats_route\n");
 }
 
+static void test_ordered_memory_commands_marshal_active_scope(void)
+{
+   char cwd[4096];
+   assert(getcwd(cwd, sizeof(cwd)) != NULL);
+
+   char *search_argv[] = {"needle",       "--project", "project-id", "--workspace",
+                          "workspace-id", "--scope",   "all"};
+   cJSON *req = marshal_memory_search(7, search_argv);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(req, "cwd")), cwd) == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(req, "project")), "project-id") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(req, "workspace")), "workspace-id") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(req, "scope")), "all") == 0);
+   cJSON_Delete(req);
+
+   char *scope_argv[] = {"--scope", "all"};
+   req = marshal_memory_list(2, scope_argv);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(req, "cwd")), cwd) == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(req, "scope")), "all") == 0);
+   cJSON_Delete(req);
+
+   req = marshal_memory_read(2, scope_argv);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(req, "cwd")), cwd) == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(req, "scope")), "all") == 0);
+   cJSON_Delete(req);
+
+   char *recall_argv[] = {"release task"};
+   req = marshal_memory_recall(1, recall_argv);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(req, "cwd")), cwd) == 0);
+   cJSON_Delete(req);
+
+   printf("  PASS: test_ordered_memory_commands_marshal_active_scope\n");
+}
+
+static void test_memory_delete_and_supersede_routes(void)
+{
+   cli_v1_route_t route;
+
+   char *delete_lookup[] = {"delete", "181"};
+   assert(cli_v1_lookup("memory", 2, delete_lookup, &route));
+   assert(strcmp(route.method, "memory.delete") == 0);
+   assert(route.skip_subcmd == 1);
+
+   cJSON *req = marshal_request(route.method, 1, delete_lookup + 1);
+   assert(req != NULL);
+   assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "memory.delete") == 0);
+   assert((long long)cJSON_GetObjectItem(req, "id")->valuedouble == 181);
+   cJSON_Delete(req);
+
+   char *supersede_lookup[] = {"supersede", "181", "corrected fact", "--confidence=0.75",
+                               "--session=release-e2e"};
+   assert(cli_v1_lookup("memory", 5, supersede_lookup, &route));
+   assert(strcmp(route.method, "memory.supersede") == 0);
+   assert(route.skip_subcmd == 1);
+
+   req = marshal_request(route.method, 4, supersede_lookup + 1);
+   assert(req != NULL);
+   assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "memory.supersede") == 0);
+   assert((long long)cJSON_GetObjectItem(req, "old_id")->valuedouble == 181);
+   assert(strcmp(cJSON_GetObjectItem(req, "new_content")->valuestring, "corrected fact") == 0);
+   assert(cJSON_GetObjectItem(req, "confidence")->valuedouble == 0.75);
+   assert(strcmp(cJSON_GetObjectItem(req, "session_id")->valuestring, "release-e2e") == 0);
+   cJSON_Delete(req);
+
+   printf("  PASS: test_memory_delete_and_supersede_routes\n");
+}
+
 static void test_server_status_route_lookup(void)
 {
    cli_v1_route_t route;
@@ -595,6 +831,27 @@ static void test_server_status_route_lookup(void)
    assert(strcmp(verb, "GET") == 0);
 
    printf("  PASS: test_server_status_route_lookup\n");
+}
+
+static void test_agent_probe_failure_controls_exit_status(void)
+{
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddBoolToObject(resp, "model_available", 0);
+   cJSON_AddBoolToObject(resp, "execution_ok", 0);
+   assert(agent_probe_response_is_failure(resp) == 1);
+   cJSON_ReplaceItemInObject(resp, "execution_ok", cJSON_CreateTrue());
+   /* A successful execution wins over a hosted provider's unavailable /models. */
+   assert(agent_probe_response_is_failure(resp) == 0);
+   cJSON_DeleteItemFromObject(resp, "execution_ok");
+   assert(agent_probe_response_is_failure(resp) == 1); /* --no-run model probe */
+   cJSON_ReplaceItemInObject(resp, "model_available", cJSON_CreateTrue());
+   assert(agent_probe_response_is_failure(resp) == 0);
+   cJSON_Delete(resp);
+
+   resp = cJSON_CreateObject();
+   assert(agent_probe_response_is_failure(resp) == 0); /* old server compatibility */
+   cJSON_Delete(resp);
+   printf("  PASS: test_agent_probe_failure_controls_exit_status\n");
 }
 
 static void test_kb_docs_push_route_and_marshal(void)
@@ -635,6 +892,33 @@ static void test_kb_docs_push_route_and_marshal(void)
    unlink(path2);
 
    printf("  PASS: test_kb_docs_push_route_and_marshal\n");
+}
+
+static void test_kb_remote_status_routes(void)
+{
+   cli_v1_route_t route;
+   const char *verb = NULL;
+
+   char *health_lookup[] = {"health"};
+   assert(cli_v1_lookup("kb", 1, health_lookup, &route));
+   assert(strcmp(route.method, "kb.health") == 0);
+   assert(strcmp(cli_v1_route_for_method(route.method, &verb), "/v1/kb/status") == 0);
+   assert(strcmp(verb, "GET") == 0);
+
+   char *ingest_lookup[] = {"ingest", "status"};
+   assert(cli_v1_lookup("kb", 2, ingest_lookup, &route));
+   assert(strcmp(route.method, "kb.ingest.status") == 0);
+   assert(strcmp(cli_v1_route_for_method(route.method, &verb), "/v1/kb/ingest/status") == 0);
+   assert(strcmp(verb, "GET") == 0);
+
+   char *status_lookup[] = {"status", "release-e2e"};
+   assert(cli_v1_lookup("kb", 2, status_lookup, &route));
+   cJSON *req = marshal_request(route.method, 1, status_lookup + 1);
+   assert(req != NULL);
+   assert(strcmp(cJSON_GetObjectItem(req, "project")->valuestring, "release-e2e") == 0);
+   cJSON_Delete(req);
+
+   printf("  PASS: test_kb_remote_status_routes\n");
 }
 
 static cJSON *mcp_text_response(const char *text)
@@ -788,7 +1072,67 @@ static void test_index_find_callers_json_flag_not_project(void)
    assert(strcmp(cJSON_GetObjectItem(req2, "project")->valuestring, "myproj") == 0);
    cJSON_Delete(req2);
 
+   /* Scope survives proxy marshalling and is never consumed as the optional
+    * project positional.  cwd lets the server resolve scope=current. */
+   char *argv3[] = {"helper_double", "--scope", "all", "--json"};
+   cJSON *req3 = marshal_index_find_callers(4, argv3);
+   assert(req3 != NULL);
+   assert(strcmp(cJSON_GetObjectItem(req3, "scope")->valuestring, "all") == 0);
+   assert(cJSON_GetObjectItem(req3, "project") == NULL);
+   assert(cJSON_IsString(cJSON_GetObjectItem(req3, "cwd")));
+   cJSON_Delete(req3);
+
    printf("  PASS: test_index_find_callers_json_flag_not_project\n");
+}
+
+static void test_index_current_project_proxy_context(void)
+{
+   char *find_argv[] = {"workspace_repo_identity", "--scope", "current", "--json"};
+   cJSON *find = marshal_index_find(4, find_argv);
+   assert(find != NULL);
+   assert(strcmp(cJSON_GetObjectItem(find, "identifier")->valuestring, "workspace_repo_identity") ==
+          0);
+   assert(strcmp(cJSON_GetObjectItem(find, "scope")->valuestring, "current") == 0);
+   assert(cJSON_IsString(cJSON_GetObjectItem(find, "cwd")));
+   cJSON_Delete(find);
+
+   char *file_argv[] = {"src/index.c", "--json"};
+   cJSON *structure = marshal_index_structure(2, file_argv);
+   assert(structure != NULL);
+   assert(strcmp(cJSON_GetObjectItem(structure, "file_path")->valuestring, "src/index.c") == 0);
+   assert(cJSON_GetObjectItem(structure, "project") == NULL);
+   assert(cJSON_IsString(cJSON_GetObjectItem(structure, "cwd")));
+   cJSON_Delete(structure);
+
+   char *legacy_argv[] = {"legacy-project", "src/index.c"};
+   cJSON *blast = marshal_index_blast_radius(2, legacy_argv);
+   assert(blast != NULL);
+   assert(strcmp(cJSON_GetObjectItem(blast, "project")->valuestring, "legacy-project") == 0);
+   assert(strcmp(cJSON_GetObjectItem(blast, "file_path")->valuestring, "src/index.c") == 0);
+   cJSON_Delete(blast);
+
+   printf("  PASS: test_index_current_project_proxy_context\n");
+}
+
+static void test_kb_search_proxy_context(void)
+{
+   char *current_argv[] = {"stable identity", "--scope", "current"};
+   cJSON *current = marshal_kb_search(3, current_argv);
+   assert(current != NULL);
+   assert(strcmp(cJSON_GetObjectItem(current, "method")->valuestring, "kb.search") == 0);
+   assert(strcmp(cJSON_GetObjectItem(current, "scope")->valuestring, "current") == 0);
+   assert(cJSON_IsString(cJSON_GetObjectItem(current, "cwd")));
+   assert(cJSON_GetObjectItem(current, "project") == NULL);
+   cJSON_Delete(current);
+
+   char *all_argv[] = {"stable identity", "--scope", "all"};
+   cJSON *all = marshal_kb_search(3, all_argv);
+   assert(all != NULL);
+   assert(strcmp(cJSON_GetObjectItem(all, "scope")->valuestring, "all") == 0);
+   assert(cJSON_GetObjectItem(all, "project") == NULL);
+   cJSON_Delete(all);
+
+   printf("  PASS: test_kb_search_proxy_context\n");
 }
 
 static void test_trigger_routes_lookup(void)
@@ -1655,6 +1999,13 @@ static void test_grant_show_shares_the_list_renderer(void)
 int main(void)
 {
    printf("test_cli_v1_delegate\n");
+   test_remote_workspace_hidden_roots_are_rejected();
+   test_json_error_envelopes_remain_structured();
+   test_json_roundtable_failure_preserves_user_visible_envelope();
+   test_human_roundtable_failure_uses_stderr();
+   test_success_with_string_error_remains_success();
+   test_failed_async_run_retains_structured_result();
+   test_failed_async_run_synthesizes_legacy_envelope();
    test_delegate_context_file_folded_into_prompt();
    test_delegate_max_turns_marshaled();
    test_delegate_tools_named_toolset_marshaled();
@@ -1677,8 +2028,12 @@ int main(void)
    test_model_routes_and_marshaling();
    test_memory_show_alias_route();
    test_memory_stats_route();
+   test_ordered_memory_commands_marshal_active_scope();
+   test_memory_delete_and_supersede_routes();
    test_server_status_route_lookup();
+   test_agent_probe_failure_controls_exit_status();
    test_kb_docs_push_route_and_marshal();
+   test_kb_remote_status_routes();
    test_git_verify_failure_detection();
    test_git_verify_marshaled_with_session_id();
    test_get_help_route_marshaled();
@@ -1696,6 +2051,8 @@ int main(void)
    test_grant_list_truncation_is_surfaced();
    test_grant_show_shares_the_list_renderer();
    test_index_find_callers_json_flag_not_project();
+   test_index_current_project_proxy_context();
+   test_kb_search_proxy_context();
    test_trigger_routes_lookup();
    test_dogfood_routes_and_marshaling();
    test_eval_routes_and_marshaling();

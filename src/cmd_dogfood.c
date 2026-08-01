@@ -41,9 +41,8 @@ static int outcome_is_valid(const char *s)
 
 static void resolve_log_dir(char *out, size_t cap)
 {
-   config_t cfg;
-   if (config_load(&cfg) == 0 && cfg.dogfood_log_dir[0])
-      snprintf(out, cap, "%s", cfg.dogfood_log_dir);
+   if (config_dogfood_log_dir()[0])
+      snprintf(out, cap, "%s", config_dogfood_log_dir());
    else
       snprintf(out, cap, "%s/dogfood", config_output_dir());
 }

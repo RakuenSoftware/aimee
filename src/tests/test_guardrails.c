@@ -496,7 +496,7 @@ static void test_worktree_detect_base_branch_active(void)
    (void)system(cmd);
 
    char branch[64];
-   worktree_detect_base_branch(tmpdir, branch, sizeof(branch));
+   assert(worktree_detect_base_branch(tmpdir, branch, sizeof(branch)) == 0);
    assert(strcmp(branch, "origin/main") == 0);
 
    snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmpdir);
@@ -505,8 +505,10 @@ static void test_worktree_detect_base_branch_active(void)
 
 static void test_worktree_detect_base_branch_local_default(void)
 {
-   /* With no remote default set, fall back to a local default branch (main),
-    * still in preference to the checked-out feature branch. */
+   /* No remote default set. The old behaviour fell back to the local "main"; that
+    * fallback is REMOVED -- a stale or unrelated local branch is exactly how a session
+    * inherited work it did not author. Default is now a hard failure, and the local
+    * branch is reachable only by explicitly opting in. */
    char tmpdir[] = "/tmp/test_wt_localdef_XXXXXX";
    if (mkdtemp(tmpdir) == NULL)
    {
@@ -531,8 +533,23 @@ static void test_worktree_detect_base_branch_local_default(void)
    (void)system(cmd);
 
    char branch[64];
-   worktree_detect_base_branch(tmpdir, branch, sizeof(branch));
+   /* No remote default -> the chain falls through to "main". Crucially NOT to the
+    * checked-out feat/test-branch: main is a dumb fallback but a stable one. */
+   unsetenv("AIMEE_SESSION_WORKTREE_BASE");
+   assert(worktree_detect_base_branch(tmpdir, branch, sizeof(branch)) == 0);
    assert(strcmp(branch, "main") == 0);
+
+   setenv("AIMEE_SESSION_WORKTREE_BASE", "local_default", 1);
+   assert(worktree_detect_base_branch(tmpdir, branch, sizeof(branch)) == 0);
+   assert(strcmp(branch, "main") == 0);
+
+   /* An explicit ref is honoured verbatim; a bogus one is refused rather than guessed. */
+   setenv("AIMEE_SESSION_WORKTREE_BASE", "main", 1);
+   assert(worktree_detect_base_branch(tmpdir, branch, sizeof(branch)) == 0);
+   assert(strcmp(branch, "main") == 0);
+   setenv("AIMEE_SESSION_WORKTREE_BASE", "no/such/ref", 1);
+   assert(worktree_detect_base_branch(tmpdir, branch, sizeof(branch)) == -1);
+   unsetenv("AIMEE_SESSION_WORKTREE_BASE");
 
    snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmpdir);
    (void)system(cmd);
@@ -540,11 +557,185 @@ static void test_worktree_detect_base_branch_local_default(void)
 
 static void test_worktree_detect_base_branch_fallback(void)
 {
-   /* Non-existent path: should fall back to "HEAD" */
+   /* Non-existent path: no remote default, no main, no master -> refuse. The old code
+    * fell back to "HEAD", i.e. whatever the caller happened to be sitting on. */
    char branch[64];
-   worktree_detect_base_branch("/tmp/__nonexistent_aimee_test_repo__", branch, sizeof(branch));
-   /* Any value is acceptable — just verify it doesn't crash and is non-empty */
-   assert(branch[0] != '\0');
+   unsetenv("AIMEE_SESSION_WORKTREE_BASE");
+   assert(worktree_detect_base_branch("/tmp/__nonexistent_aimee_test_repo__", branch,
+                                      sizeof(branch)) == -1);
+   assert(branch[0] == '\0');
+}
+
+/* Gap tests for the base-ref chain: configured -> remote default -> main -> master.
+ * The existing three tests cover "remote default wins over the checked-out branch",
+ * "no remote -> main", and "nothing -> refuse". These cover the rungs between. */
+
+static void wt_fixture_init(const char *dir)
+{
+   char cmd[512];
+   snprintf(cmd, sizeof(cmd), "git -C '%s' init -q 2>/dev/null", dir);
+   (void)system(cmd);
+   snprintf(cmd, sizeof(cmd), "git -C '%s' config user.email 'test@test.com' 2>/dev/null", dir);
+   (void)system(cmd);
+   snprintf(cmd, sizeof(cmd), "git -C '%s' config user.name 'Test' 2>/dev/null", dir);
+   (void)system(cmd);
+   snprintf(cmd, sizeof(cmd),
+            "touch '%s/x' && git -C '%s' add x && git -C '%s' commit -qm 'init' 2>/dev/null", dir,
+            dir, dir);
+   (void)system(cmd);
+}
+
+static void test_worktree_detect_base_branch_master_fallback(void)
+{
+   /* No remote default and no "main" -- the chain's last rung is "master". A repo
+    * predating the main rename must still resolve rather than refuse. */
+   char tmpdir[] = "/tmp/test_wt_master_XXXXXX";
+   if (mkdtemp(tmpdir) == NULL)
+   {
+      fprintf(stderr, "test_worktree_detect_base_branch_master_fallback: mkdtemp failed, "
+                      "skipping\n");
+      return;
+   }
+   wt_fixture_init(tmpdir);
+
+   char cmd[512];
+   snprintf(cmd, sizeof(cmd), "git -C '%s' branch -m master 2>/dev/null", tmpdir);
+   (void)system(cmd);
+   snprintf(cmd, sizeof(cmd), "git -C '%s' checkout -qb 'feat/x' 2>/dev/null", tmpdir);
+   (void)system(cmd);
+
+   char branch[64];
+   unsetenv("AIMEE_SESSION_WORKTREE_BASE");
+   assert(worktree_detect_base_branch(tmpdir, branch, sizeof(branch)) == 0);
+   assert(strcmp(branch, "master") == 0);
+
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmpdir);
+   (void)system(cmd);
+}
+
+static void test_worktree_detect_base_branch_main_precedes_master(void)
+{
+   /* Both main and master exist, no remote default. Order is main THEN master, so a
+    * repo carrying a legacy master branch alongside main must still pick main. */
+   char tmpdir[] = "/tmp/test_wt_bothdef_XXXXXX";
+   if (mkdtemp(tmpdir) == NULL)
+   {
+      fprintf(stderr, "test_worktree_detect_base_branch_main_precedes_master: mkdtemp failed, "
+                      "skipping\n");
+      return;
+   }
+   wt_fixture_init(tmpdir);
+
+   char cmd[512];
+   snprintf(cmd, sizeof(cmd), "git -C '%s' branch -m main 2>/dev/null", tmpdir);
+   (void)system(cmd);
+   snprintf(cmd, sizeof(cmd), "git -C '%s' branch master 2>/dev/null", tmpdir);
+   (void)system(cmd);
+   snprintf(cmd, sizeof(cmd), "git -C '%s' checkout -qb 'feat/x' 2>/dev/null", tmpdir);
+   (void)system(cmd);
+
+   char branch[64];
+   unsetenv("AIMEE_SESSION_WORKTREE_BASE");
+   assert(worktree_detect_base_branch(tmpdir, branch, sizeof(branch)) == 0);
+   assert(strcmp(branch, "main") == 0);
+
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmpdir);
+   (void)system(cmd);
+}
+
+static void test_worktree_detect_base_branch_configured_beats_remote(void)
+{
+   /* The configured value is rung ONE: it must win even when a remote default exists.
+    * The existing configured-value assertions run in a remote-less fixture, so they
+    * cannot distinguish "configured won" from "fell through to the same name". */
+   char tmpdir[] = "/tmp/test_wt_cfgwins_XXXXXX";
+   if (mkdtemp(tmpdir) == NULL)
+   {
+      fprintf(stderr, "test_worktree_detect_base_branch_configured_beats_remote: mkdtemp failed, "
+                      "skipping\n");
+      return;
+   }
+   wt_fixture_init(tmpdir);
+
+   char cmd[512];
+   snprintf(cmd, sizeof(cmd), "git -C '%s' branch -m main 2>/dev/null", tmpdir);
+   (void)system(cmd);
+   snprintf(cmd, sizeof(cmd), "git -C '%s' update-ref refs/remotes/origin/main HEAD 2>/dev/null",
+            tmpdir);
+   (void)system(cmd);
+   snprintf(
+       cmd, sizeof(cmd),
+       "git -C '%s' symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main 2>/dev/null",
+       tmpdir);
+   (void)system(cmd);
+   /* A branch that is neither the remote default nor a fallback name. */
+   snprintf(cmd, sizeof(cmd), "git -C '%s' branch release/v1 2>/dev/null", tmpdir);
+   (void)system(cmd);
+
+   char branch[64];
+   setenv("AIMEE_SESSION_WORKTREE_BASE", "release/v1", 1);
+   assert(worktree_detect_base_branch(tmpdir, branch, sizeof(branch)) == 0);
+   assert(strcmp(branch, "release/v1") == 0);
+
+   /* And with the override cleared the same repo resolves to the remote default --
+    * proving the assertion above measured the override, not the fixture. */
+   unsetenv("AIMEE_SESSION_WORKTREE_BASE");
+   assert(worktree_detect_base_branch(tmpdir, branch, sizeof(branch)) == 0);
+   assert(strcmp(branch, "origin/main") == 0);
+
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmpdir);
+   (void)system(cmd);
+}
+
+static void test_worktree_detect_base_branch_remote_preference_scope(void)
+{
+   /* "Local default DOES NOT MATTER. Only the remote default matters." That rule binds
+    * the DERIVED rungs -- the advertised default, then main, then master -- which all
+    * resolve through origin/<name> first, because a local branch of the same name may
+    * sit at a different commit and that is exactly how a session inherits unmerged work.
+    *
+    * An operator's explicit ref is deliberately NOT rewritten: they named a ref, and if
+    * they want the remote one they write "origin/main". This test pins both halves so
+    * the asymmetry is a decision on record rather than an accident. */
+   char tmpdir[] = "/tmp/test_wt_remotepref_XXXXXX";
+   if (mkdtemp(tmpdir) == NULL)
+   {
+      fprintf(stderr, "test_worktree_detect_base_branch_prefers_remote_ref: mkdtemp failed, "
+                      "skipping\n");
+      return;
+   }
+   wt_fixture_init(tmpdir);
+
+   char cmd[512];
+   snprintf(cmd, sizeof(cmd), "git -C '%s' branch -m main 2>/dev/null", tmpdir);
+   (void)system(cmd);
+   /* Advance local main one commit so it and origin/main differ. */
+   snprintf(cmd, sizeof(cmd), "git -C '%s' update-ref refs/remotes/origin/main HEAD 2>/dev/null",
+            tmpdir);
+   (void)system(cmd);
+   snprintf(cmd, sizeof(cmd),
+            "touch '%s/y' && git -C '%s' add y && git -C '%s' commit -qm 'local only' 2>/dev/null",
+            tmpdir, tmpdir, tmpdir);
+   (void)system(cmd);
+   snprintf(cmd, sizeof(cmd), "git -C '%s' checkout -qb 'feat/x' 2>/dev/null", tmpdir);
+   (void)system(cmd);
+
+   char branch[64];
+   /* Derived rung: no override, no advertised default -> falls to "main", and that
+    * candidate resolves to the remote-tracking ref even though a LOCAL main exists at
+    * a different commit. This is the assertion the isolation rule actually rests on. */
+   unsetenv("AIMEE_SESSION_WORKTREE_BASE");
+   assert(worktree_detect_base_branch(tmpdir, branch, sizeof(branch)) == 0);
+   assert(strcmp(branch, "origin/main") == 0);
+
+   /* Explicit rung: honoured verbatim, NOT rewritten to origin/main. */
+   setenv("AIMEE_SESSION_WORKTREE_BASE", "main", 1);
+   assert(worktree_detect_base_branch(tmpdir, branch, sizeof(branch)) == 0);
+   assert(strcmp(branch, "main") == 0);
+   unsetenv("AIMEE_SESSION_WORKTREE_BASE");
+
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmpdir);
+   (void)system(cmd);
 }
 
 /* --- session_isolation_target: catches the regression where concurrent
@@ -573,6 +764,25 @@ static void session_isolation_make_repo(char *tmpdir, size_t tmpdir_len)
    snprintf(cmd, sizeof(cmd),
             "touch '%s/x' && git -C '%s' add x && git -C '%s' commit -qm 'init' 2>/dev/null", repo,
             repo, repo);
+   (void)system(cmd);
+
+   /* Give the fixture a real origin with an advertised default branch. Session worktrees
+    * are cut from the REMOTE default by policy, so a remote-less fixture would exercise
+    * the refusal path rather than the normal one. */
+   snprintf(cmd, sizeof(cmd), "git -C '%s' branch -m main 2>/dev/null", repo);
+   (void)system(cmd);
+   /* --initial-branch so the bare repo's HEAD names a ref that will actually exist
+    * after the push; otherwise it points at a nonexistent "master" and
+    * `remote set-head -a` cannot determine the remote HEAD. */
+   snprintf(cmd, sizeof(cmd),
+            "git init -q --bare --initial-branch=main '%s/origin.git' 2>/dev/null", tmpdir);
+   (void)system(cmd);
+   snprintf(cmd, sizeof(cmd), "git -C '%s' remote add origin '%s/origin.git' 2>/dev/null", repo,
+            tmpdir);
+   (void)system(cmd);
+   snprintf(cmd, sizeof(cmd), "git -C '%s' push -q origin main 2>/dev/null", repo);
+   (void)system(cmd);
+   snprintf(cmd, sizeof(cmd), "git -C '%s' remote set-head origin -a >/dev/null 2>&1", repo);
    (void)system(cmd);
 }
 
@@ -989,20 +1199,17 @@ static void test_worktree_mapping_roundtrip(void)
    free(loaded);
 }
 
-static void test_app_ctx_cfg_pointer(void)
+/* app_ctx_t used to carry a config_t*, and this asserted it round-tripped. The
+ * field is gone -- commands read config through the module -- so what is left
+ * worth asserting is that the struct still zero-initialises cleanly, which is
+ * what every command handler relies on. */
+static void test_app_ctx_zero_init(void)
 {
-   /* Verify that app_ctx_t can carry a config pointer */
    app_ctx_t ctx;
    memset(&ctx, 0, sizeof(ctx));
-   assert(ctx.cfg == NULL);
-
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   snprintf(cfg.provider, sizeof(cfg.provider), "test-provider");
-   ctx.cfg = &cfg;
-
-   assert(ctx.cfg != NULL);
-   assert(strcmp(ctx.cfg->provider, "test-provider") == 0);
+   assert(ctx.json_output == 0);
+   assert(ctx.json_fields == NULL);
+   assert(ctx.response_profile == NULL);
 }
 
 static void test_malformed_tool_payloads(void)
@@ -1162,6 +1369,41 @@ static void test_anti_pattern_bypass_env(void)
    unsetenv("AIMEE_ANTIPATTERNS_BYPASS");
 
    guardrails_close_test_sqlite();
+}
+
+/* Regression: the bypass was gated on getenv() being non-NULL — PRESENCE, not value — so
+ * AIMEE_ANTIPATTERNS_BYPASS=0 (and =false) DISABLED the anti-pattern guard, the opposite of
+ * what setting 0 means. The escape hatch is documented as "=1"; every falsey and every
+ * unrecognized value must leave the guard armed (fail closed). */
+static void test_anti_pattern_bypass_env_falsey_still_blocks(void)
+{
+   static const char *const falsey[] = {"0", "false", "no", "off", "", "maybe"};
+   for (size_t i = 0; i < sizeof(falsey) / sizeof(falsey[0]); i++)
+   {
+      guardrails_open_test_sqlite();
+      clear_anti_patterns_for_test();
+
+      anti_pattern_t ap;
+      db2_anti_pattern_insert("rm -rf", "d", "test", "", 0.9, &ap);
+
+      session_state_t state;
+      memset(&state, 0, sizeof(state));
+      strcpy(state.guardrail_mode, MODE_APPROVE);
+      state.ap_hit_count = 1;
+      state.ap_hits[0].pattern_id = ap.id;
+      state.ap_hits[0].hits = AP_HIT_BLOCK_THRESHOLD;
+
+      setenv("AIMEE_ANTIPATTERNS_BYPASS", falsey[i], 1);
+      char msg[512] = "";
+      int rc = pre_tool_check("Bash", "{\"command\":\"rm -rf /tmp/xyz\"}", &state, MODE_APPROVE,
+                              "/tmp/.aimee/worktrees/test/main", msg, sizeof(msg));
+      unsetenv("AIMEE_ANTIPATTERNS_BYPASS");
+      /* Guard armed: the pre-seeded hit count is at the block threshold, so this blocks. */
+      assert(rc == 2);
+      assert(strstr(msg, "BLOCKED") != NULL);
+
+      guardrails_close_test_sqlite();
+   }
 }
 
 static void test_anti_pattern_no_match_no_warning(void)
@@ -3501,13 +3743,17 @@ int main(void)
    test_session_state_worktrees();
    test_session_state_save_load_roundtrip();
    test_worktree_mapping_roundtrip();
-   test_app_ctx_cfg_pointer();
+   test_app_ctx_zero_init();
    test_worktree_for_cwd();
    test_worktree_prefers_specific_git_root();
    test_worktree_sibling_path();
    test_worktree_detect_base_branch_active();
    test_worktree_detect_base_branch_local_default();
    test_worktree_detect_base_branch_fallback();
+   test_worktree_detect_base_branch_master_fallback();
+   test_worktree_detect_base_branch_main_precedes_master();
+   test_worktree_detect_base_branch_configured_beats_remote();
+   test_worktree_detect_base_branch_remote_preference_scope();
    test_session_isolation_creates_and_returns_worktree();
    test_session_isolation_sanitizes_malicious_sid();
    test_session_isolation_skips_when_already_in_same_session_worktree();
@@ -3521,6 +3767,7 @@ int main(void)
    test_anti_pattern_in_session_warning();
    test_anti_pattern_empty_description_falls_back_to_pattern();
    test_anti_pattern_bypass_env();
+   test_anti_pattern_bypass_env_falsey_still_blocks();
    test_anti_pattern_no_match_no_warning();
    test_known_subagent_tools_blocked();
    test_unknown_subagent_surface_blocked();

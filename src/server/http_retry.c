@@ -10,6 +10,8 @@
 #include <time.h>
 #include <unistd.h>
 
+int agent_request_cancelled(void) __attribute__((weak));
+
 /* Monotonic milliseconds for measuring how long a single attempt actually took
  * (used to distinguish a budget-consuming stall from a fast-fail before retry). */
 static int64_t retry_now_ms(void)
@@ -22,6 +24,27 @@ static int64_t retry_now_ms(void)
 /* Thread-local progress callback (see http_retry.h). Each connection/turn runs on
  * its own worker thread, so a thread-local matches the delegate run's lifetime. */
 static _Thread_local http_progress_cb_t g_progress_cb;
+
+static int retry_cancelled(void)
+{
+   return agent_request_cancelled && agent_request_cancelled();
+}
+
+static int retry_wait_ms(int delay_ms)
+{
+   while (delay_ms > 0)
+   {
+      if (retry_cancelled())
+         return -1;
+      int slice = delay_ms < 100 ? delay_ms : 100;
+      struct timespec nap = {slice / 1000, (long)(slice % 1000) * 1000000L};
+      while (nanosleep(&nap, &nap) != 0)
+         if (retry_cancelled())
+            return -1;
+      delay_ms -= slice;
+   }
+   return retry_cancelled() ? -1 : 0;
+}
 
 void http_set_progress_cb(http_progress_cb_t cb)
 {
@@ -127,13 +150,16 @@ int http_retry_post_context_bytes(const char *url, const char *auth_header, cons
 
    for (int attempt = 0; attempt < effective_max_attempts; attempt++)
    {
+      if (retry_cancelled())
+         break;
       /* Sleep before retry (not before first attempt) */
       if (attempt > 0)
       {
          int delay = http_backoff_ms(attempt - 1, base_ms, max_ms);
          aimee_log(LOG_INFO, "http_retry", "attempt %d/%d, retrying in %dms (status %d)...",
                    attempt + 1, effective_max_attempts, delay, http_status);
-         usleep((unsigned)(delay * 1000));
+         if (retry_wait_ms(delay) != 0)
+            break;
       }
 
       /* Free previous response if retrying */

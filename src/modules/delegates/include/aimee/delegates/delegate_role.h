@@ -38,6 +38,11 @@ int delegate_final_after_turns_for_role(const char *role);
  * budget before returning useful signal. */
 void delegate_apply_max_turns_policy(agent_config_t *cfg, const char *role, int max_turns);
 
+/* Apply a per-invocation safety ceiling without raising a stricter agent/role
+ * limit. Unlike an explicit max_turns override, this converts unlimited
+ * (-1/0) to `cap` and clamps only eligible agents above it. */
+void delegate_apply_max_turns_cap(agent_config_t *cfg, const char *role, int cap);
+
 /* Canonicalize a delegate role name.  Returns the canonical name if role is
  * a known alias (e.g. "implement" -> "code"), otherwise returns role unchanged.
  * Never returns NULL.  The returned pointer is either role itself or a string
@@ -50,6 +55,16 @@ const char *delegate_role_canonicalize(const char *role);
  * an arbitrary role string while its write classification, tool defaults and
  * built-in template no longer exist. */
 const char *delegate_role_removed_reason(const char *role);
+
+/* 1 when `role` (or its canonical alias) names a real delegate role: a built-in
+ * role, or one an operator defined with a project/user role template.
+ * `project_root` may be NULL to skip the project-level template lookup.
+ *
+ * Dispatch must refuse an unknown name rather than route it. An unrecognized
+ * role has no prompt template, no write classification and no agent that can
+ * declare it, so it runs as a read-only delegate with a generic prompt while the
+ * caller believes it asked for something specific. */
+int delegate_role_known(const char *project_root, const char *role);
 
 /* Returns 1 if role is a write-capable role (code or refactor, including
  * aliases).  Write roles are subject to no-op edit detection. */

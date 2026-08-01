@@ -42,21 +42,22 @@ void learning_implicit_detect_turn(const char *user_text)
 {
    if (!user_text || !user_text[0])
       return;
-   config_t cfg;
-   if (config_load(&cfg) != 0)
+   if (!config_present())
       return;
-   if (!cfg.learning_implicit_citation_repair && !cfg.learning_implicit_citation_continuation)
+   if (!config_learning_implicit_citation_repair() &&
+       !config_learning_implicit_citation_continuation())
       return;
 
    struct timespec t0, t1;
    clock_gettime(CLOCK_MONOTONIC, &t0);
 
    dogfood_autolabel_kind_t kind = dogfood_classify_next_turn(user_text);
-   if (kind == DOGFOOD_AUTOLABEL_REPAIR && cfg.learning_implicit_citation_repair)
+   if (kind == DOGFOOD_AUTOLABEL_REPAIR && config_learning_implicit_citation_repair())
       emit_implicit("citation_then_repair", "negative", "Implicit citation_then_repair signal",
                     "User turn classified as repair/correction after memory retrieval.", NULL, 0,
                     NULL, NULL);
-   else if (kind == DOGFOOD_AUTOLABEL_CONTINUATION && cfg.learning_implicit_citation_continuation)
+   else if (kind == DOGFOOD_AUTOLABEL_CONTINUATION &&
+            config_learning_implicit_citation_continuation())
       emit_implicit(
           "citation_then_continuation", "positive", "Implicit citation_then_continuation signal",
           "User turn classified as continuation after memory retrieval.", NULL, 0, NULL, NULL);
@@ -71,15 +72,14 @@ void learning_implicit_record_repeat_question(const char *session_id, const char
 {
    if (!session_id || !tool || !query_hash || !query_hash[0])
       return;
-   config_t full;
-   if (config_load(&full) != 0 || !full.learning_implicit_repeat_question)
+   if (!config_present() || !config_learning_implicit_repeat_question())
       return;
 
    struct timespec t0, t1;
    clock_gettime(CLOCK_MONOTONIC, &t0);
 
    dogfood_config_t dcfg;
-   dogfood_config_from(&full, &dcfg);
+   dogfood_config_current(&dcfg);
    if (dogfood_query_is_repeat(&dcfg, session_id, tool, query_hash))
       emit_implicit("repeat_question", "negative", "Implicit repeat_question signal",
                     "Same (session, tool, query_hash) already appeared this month.", tool, 0, NULL,
@@ -92,8 +92,7 @@ void learning_implicit_record_repeat_question(const char *session_id, const char
 
 void learning_implicit_record_correction(const char *target_key, int64_t target_memory_id)
 {
-   config_t cfg;
-   if (config_load(&cfg) != 0 || !cfg.learning_implicit_repeated_correction)
+   if (!config_present() || !config_learning_implicit_repeated_correction())
       return;
 
    struct timespec t0, t1;
@@ -113,8 +112,7 @@ void learning_implicit_record_workflow(const char *workspace, const char *signal
 {
    if (!workspace || !workspace[0] || !signal_type || !signal_type[0])
       return;
-   config_t cfg;
-   if (config_load(&cfg) != 0 || !cfg.learning_implicit_workflow_repetition)
+   if (!config_present() || !config_learning_implicit_workflow_repetition())
       return;
 
    struct timespec t0, t1;

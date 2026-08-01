@@ -191,12 +191,10 @@ cJSON *agent_build_request_openai(const agent_t *agent, cJSON *messages, cJSON *
 
    cJSON_AddNumberToObject(req, "max_tokens", agent_request_max_tokens(agent, max_tokens));
    if (agent_is_mistral_vibe_model(agent))
-   {
       cJSON_AddStringToObject(req, "reasoning_effort", "high");
-      cJSON_AddNumberToObject(req, "temperature", 1.0);
-   }
-   else
-      model_sampling_apply_openai(agent, req, temperature);
+   /* The temperature=1 this model requires now comes from the shared
+    * required-temperature table, so the other request builder gets it too. */
+   model_sampling_apply_openai(agent, req, temperature);
    if (agent_is_local_llama_compat(agent) && !agent_request_prefers_no_think_prompt(agent))
    {
       cJSON *kwargs = cJSON_AddObjectToObject(req, "chat_template_kwargs");
@@ -299,10 +297,9 @@ cJSON *agent_build_request_anthropic(const agent_t *agent, cJSON *messages, cJSO
     * non-tools path. Default-off so the flag-rollout program can flip it
     * deliberately. The cache_min_chars floor is applied to the stable prefix
     * inside the helper, not the whole prompt. */
-   config_t cfg;
-   int cache_marking = (config_load(&cfg) == 0 && cfg.cache_shaping_enabled) ? 1 : 0;
+   int cache_marking = (config_cache_shaping_enabled()) ? 1 : 0;
    agent_anthropic_set_system(req, system_prompt, cache_marking,
-                              cache_marking ? cfg.cache_min_chars : 0);
+                              cache_marking ? config_cache_min_chars() : 0);
 
    if (safe_messages)
       cJSON_AddItemToObject(req, "messages", safe_messages);

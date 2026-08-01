@@ -124,7 +124,7 @@ func (s *server) handleWorkflowConfigSet(w http.ResponseWriter, r *http.Request)
 	// Global run policy affects every user's autonomous work. The appliance's
 	// bootstrap administrator is the only web identity allowed to mutate it;
 	// per-user submission and lifecycle endpoints remain available to all users.
-	if currentUser(r) != "admin" {
+	if !s.isAdmin(r) {
 		writeJSONError(w, http.StatusForbidden, "administrator access required")
 		return
 	}

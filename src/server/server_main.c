@@ -9,6 +9,7 @@
 #include "forge_credentials.h"
 #include "git_host_cred.h"
 #include "git_host_resolve.h"
+#include "git_forge_vault.h"
 #include "git_ops.h"
 #include "guardrails.h"
 #include "workspace.h"
@@ -29,11 +30,16 @@
 #include <aimee/audit/audit_action.h>
 #include "platform_path.h"
 #include "platform_process.h"
+#include "platform_random.h"
 #include "shutdown_forensics.h"
 #include "headers/context_engine.h"
 #include "headers/server_cli_oauth.h"
 #include "vault_server_key.h"
-#include "vault_service.h"        /* VAULT_SERVER_PRINCIPAL (rotation target) */
+#include "vault_service.h"          /* VAULT_SERVER_PRINCIPAL (rotation target) */
+#include "vault_env_bootstrap.h"    /* first-boot credential env -> Vault */
+#include "vault_config_bootstrap.h" /* legacy config credential -> Vault */
+#include "vault_bootstrap_privilege.h"
+#include "runtime_secret.h"       /* wipe Vault-sourced runtime cache at exit */
 #include "vault_audit_bridge.h"   /* route vault credential-access events onto the audit bus */
 #include "sandbox_audit_bridge.h" /* route sandbox degraded-isolation events onto the audit bus */
 #include "memory_audit_bridge.h"  /* route server-side memory mutations onto the audit bus */
@@ -43,7 +49,6 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/stat.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -171,9 +176,27 @@ static int run_server(const char *socket_path, log_level_t log_level)
    memory_audit_bridge_install();  /* route server-side memory mutations onto the audit bus */
    tool_completion_audit_bridge_install(); /* route tool-dispatch outcomes onto the audit bus */
 
+   /* Credential env vars are deployment bootstrap transport (for example a
+    * Kubernetes Secret), never runtime storage. Seal and unset them before any
+    * config or subsystem can read the process environment. */
+   if (vault_env_bootstrap_init() < 0)
+   {
+      startup_notify(notify_fd, "error: credential Vault bootstrap failed\n");
+      audit_log_close();
+      return 1;
+   }
+   if (vault_config_bootstrap_init() < 0)
+   {
+      startup_notify(notify_fd, "error: credential config Vault migration failed\n");
+      audit_log_close();
+      return 1;
+   }
+   (void)atexit(runtime_secret_clear);
+
    /* Activate the GitHub App installation-token provider for the server's forge
     * identity. Inert unless AIMEE_FORGE_APP_* is set (see forge_app_token.c). */
    forge_cred_register_app_token_provider(forge_app_token_configured, forge_app_token_get);
+   forge_cred_register_static_token_provider(git_forge_vault_server_token);
 
    /* Wire the per-host git credential vault into the credential resolvers so git
     * clone/fetch/push/PR authenticate with the stored token for the repo's host
@@ -202,19 +225,41 @@ static int run_server(const char *socket_path, log_level_t log_level)
       }
    }
 
-   config_t cfg;
-   memset(&cfg, 0, sizeof cfg); /* clean padding so the snapshot token is stable */
-   if (config_load(&cfg) != 0)
+   if (!config_present())
    {
       startup_notify(notify_fd, "error: invalid configuration\n");
       aimee_log(LOG_ERROR, "config", "server startup rejected invalid configuration");
       audit_log_close();
       return 1;
    }
-   /* Seed the live config snapshot (live-config-reload P1b): from here, every config_load in
-    * the server returns this snapshot, and config_reload (on config.set / SIGHUP) republishes
+   /* An API bearer is a credential and therefore cannot live in the image or
+    * config. When an API listener is configured without an
+    * operator-supplied first-boot bearer, mint an unexposed random primary and
+    * seal it directly into Vault. The trusted local UI/socket can then issue an
+    * individual enrollment bearer; `aimee api enable` can reveal the primary to
+    * a local operator when a headless deployment explicitly needs it. */
+   if ((config_server_api_http_port() > 0 || config_server_api_tls_port() > 0) &&
+       !config_server_api_bearer_token()[0])
+   {
+      char primary[65] = "";
+      if (platform_random_hex(primary, 64) != 0 ||
+          vault_runtime_secret_set("AIMEE_API_BEARER_TOKEN", primary) != 0)
+      {
+         runtime_secret_wipe(primary, sizeof(primary));
+         startup_notify(notify_fd, "error: API primary bearer Vault bootstrap failed\n");
+         audit_log_close();
+         return 1;
+      }
+      runtime_secret_wipe(primary, sizeof(primary));
+      /* No need to write it back here: the seed below reloads, and config_load
+       * applies AIMEE_API_BEARER_TOKEN out of Vault, so the snapshot every reader
+       * below sees carries the freshly minted primary. */
+      aimee_log(LOG_INFO, "vault.env", "minted Vault-only API primary for configured listener");
+   }
+   /* Seed the live config snapshot (live-config-reload P1b): from here, every config read in
+    * the server comes from this snapshot, and config_reload (on config.set / SIGHUP) republishes
     * it so changes take effect immediately instead of on the next mtime-cache miss. */
-   config_snapshot_init(&cfg);
+   (void)config_snapshot_seed();
    kb_client_mtls_pool_register_reload();
    /* NOTE: the autonomy.* env bridge (autonomy_config_to_env) is intentionally NOT called —
     * wfe now reads autonomy.* LIVE from the config snapshot via config_autonomy_lookup (an
@@ -222,7 +267,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
     * restart and without an unsafe cross-thread setenv. */
 
    /* Surface the active fail-closed economizer mode at startup. */
-   aimee_log(LOG_INFO, "economizer", "mode=%s", econ_mode_name(econ_mode(&cfg)));
+   aimee_log(LOG_INFO, "economizer", "mode=%s", econ_mode_name(econ_mode_current()));
 
    /* Remote aimee-kb: when a kb_client_url is configured (this host uses a
     * remote kb rather than a local sidecar), export it into our own env so the
@@ -231,8 +276,8 @@ static int run_server(const char *socket_path, log_level_t log_level)
     * fallback. Pre-set env wins, so AIMEE_KB_API_URL still overrides config. */
    if (!(getenv("AIMEE_KB_API_URL") && getenv("AIMEE_KB_API_URL")[0]))
    {
-      if (cfg.kb_client_url[0])
-         platform_setenv("AIMEE_KB_API_URL", cfg.kb_client_url);
+      if (config_kb_client_url()[0])
+         platform_setenv("AIMEE_KB_API_URL", config_kb_client_url());
       else
       {
          /* Co-located default: with no remote kb_client_url and no explicit
@@ -242,14 +287,13 @@ static int run_server(const char *socket_path, log_level_t log_level)
           * Without this a source install's server has no kb URL at all and every
           * DB2-backed feature (memory/kb/rules) silently reports "unavailable". */
          char local_kb[64];
-         int kb_port = cfg.kb_api_http_port > 0 ? cfg.kb_api_http_port : 8741;
+         int kb_port = config_kb_api_http_port() > 0 ? config_kb_api_http_port() : 8741;
          snprintf(local_kb, sizeof(local_kb), "http://127.0.0.1:%d", kb_port);
          platform_setenv("AIMEE_KB_API_URL", local_kb);
       }
    }
-   if (cfg.kb_client_bearer_token[0] &&
-       !(getenv("AIMEE_KB_API_BEARER_TOKEN") && getenv("AIMEE_KB_API_BEARER_TOKEN")[0]))
-      platform_setenv("AIMEE_KB_API_BEARER_TOKEN", cfg.kb_client_bearer_token);
+   /* KB bearer credentials are consumed through runtime_secret. Never export a
+    * config value back into the process environment. */
 
    /* Result cache + invalidation subscriber: a short-TTL LRU of kb read results
     * (AIMEE_KB_CACHE_TTL_S; off by default) flushed on the kb's /v1/events push,
@@ -260,8 +304,8 @@ static int run_server(const char *socket_path, log_level_t log_level)
    /* Register the bundled context engine and set the active engine from config
     * (empty = default compactor). */
    context_engine_register_compactor();
-   if (cfg.context_engine[0])
-      context_engine_set_active(cfg.context_engine);
+   if (config_context_engine()[0])
+      context_engine_set_active(config_context_engine());
 
    /* Clear the cached audit_action/audit_worm gates on config reload so a live
     * config.set / SIGHUP toggles the audit + WORM dual-write without a restart. */
@@ -288,7 +332,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
       return 1;
    }
 
-   mcp_client_registry_boot(&cfg, CONFIG_MCP_INSTALL_SERVER); /* server-hosted plugins only */
+   mcp_client_registry_boot(CONFIG_MCP_INSTALL_SERVER); /* server-hosted plugins only */
    agent_http_init();
    presence_init(); /* unified-presence registry (attachments, turn locks, event ring) */
    presence_set_delivery_fn(presence_deliver_via_notify, NULL); /* outbound: ntfy/local */
@@ -303,11 +347,32 @@ static int run_server(const char *socket_path, log_level_t log_level)
    /* Inbound /v1 HTTP API (UDS always; optional localhost TCP + bearer when
     * aimee.api.{http_port,bearer_token} are configured). Best-effort: a bind
     * failure must not block the RPC server. */
-   server_http_set_max_event_streams(cfg.server_api_max_event_streams);
-   cli_session_pty_set_forwarding(cfg.server_api_cli_session_forwarding);
-   int http_start = server_http_start(
-       NULL, cfg.server_api_http_port, cfg.server_api_tls_port, cfg.server_api_bearer_token,
-       cfg.server_api_rate_limit_per_min, cfg.server_api_remote_writes);
+   server_http_set_max_event_streams(config_server_api_max_event_streams());
+   /* Publish the additionally-accepted bearers BEFORE the listener binds, so a
+    * client enrolled in a previous run authorizes on its very first request
+    * rather than getting a 401 until something else republished them. */
+   {
+      /* Copy each bearer out of the accessor's thread-local buffer: extra[] is an
+       * array of borrowed pointers handed to server_http_set_bearer_extra, and the
+       * next config_server_api_bearer_extra() call would overwrite the one buffer
+       * they would all be pointing at. */
+      char slots[AIMEE_API_BEARER_EXTRA_MAX][256];
+      const char *extra[AIMEE_API_BEARER_EXTRA_MAX];
+      int extra_count = config_server_api_bearer_extra_count();
+      if (extra_count > AIMEE_API_BEARER_EXTRA_MAX)
+         extra_count = AIMEE_API_BEARER_EXTRA_MAX;
+      for (int i = 0; i < extra_count; i++)
+      {
+         snprintf(slots[i], sizeof(slots[i]), "%s", config_server_api_bearer_extra(i));
+         extra[i] = slots[i];
+      }
+      server_http_set_bearer_extra(extra, extra_count);
+   }
+   cli_session_pty_set_forwarding(config_server_api_cli_session_forwarding());
+   int http_start =
+       server_http_start(NULL, config_server_api_http_port(), config_server_api_tls_port(),
+                         config_server_api_bearer_token(), config_server_api_rate_limit_per_min(),
+                         config_server_api_remote_writes());
    if (http_start == SERVER_HTTP_START_MGMT_FATAL)
    {
       char management_error[256];
@@ -329,9 +394,8 @@ static int run_server(const char *socket_path, log_level_t log_level)
    install_signal_handlers();
 
    g_ctx.running = 1;
-   const char *server_id = getenv("AIMEE_SERVER_ID");
-   if (server_kb_heartbeat_start(server_id) != 0)
-      LOG_WARN("server.kb", "AIMEE_SERVER_ID is required and must be valid for remote kb mTLS");
+   if (server_kb_heartbeat_start() != 0)
+      LOG_WARN("server.kb", "could not start the server registry heartbeat worker");
    (void)shutdown_forensics_record_unclean_exits();
    (void)shutdown_forensics_mark_started("server", g_ctx.start_time);
    startup_notify(notify_fd, "ok\n");
@@ -350,6 +414,100 @@ static int run_server(const char *socket_path, log_level_t log_level)
 
 int main(int argc, char **argv)
 {
+   /* The container entrypoint must scrub its own inherited environment after
+    * the short-lived Vault bootstrap returns. Emit names only, never values, so
+    * it does not need to pipe credential plaintext through env/sed. Reject a
+    * non-shell identifier rather than leave a credential the parent cannot
+    * safely unset. */
+   if (argc >= 2 && strcmp(argv[1], "--list-credential-env-names") == 0)
+      return vault_env_print_credential_names() == 0 ? 0 : 1;
+
+   /* The co-located root-UDS-attested web service consumes these labelled base64
+    * records through a pipe for authentication, signed sessions, and in-memory
+    * TLS setup. The helper is intentionally webchat-specific: there is no
+    * general CLI for printing server-principal Vault secrets. */
+   if (argc == 2 && strcmp(argv[1], "--webchat-vault-export") == 0)
+      return vault_env_print_webchat_bootstrap() == 0 ? 0 : 1;
+
+   if (argc == 2 && strcmp(argv[1], "--webchat-vault-check") == 0)
+      return vault_env_check_webchat_bootstrap() == 0 ? 0 : 1;
+
+   /* One-time migration/onboarding bridge. The credential travels on stdin,
+    * never argv or env, and the closed record-name allowlist is enforced by the
+    * Vault module. */
+   if (argc == 3 && strcmp(argv[1], "--webchat-vault-seal") == 0)
+      return vault_env_seal_webchat_record(argv[2]) == 0 ? 0 : 1;
+
+   /* Container/POD entrypoints use this short-lived process to consume
+    * first-boot credential inputs before launching any long-lived process. */
+   if (argc >= 2 && strcmp(argv[1], "--bootstrap-vault-env") == 0)
+   {
+      const char *drop_user = NULL;
+      if (vault_bootstrap_parse_args(argc, argv, &drop_user) != 0)
+      {
+         fprintf(stderr, "aimee-server: invalid Vault bootstrap arguments\n");
+         return 1;
+      }
+      if (vault_bootstrap_run_as(drop_user) != 0)
+      {
+         fprintf(stderr, "aimee-server: Vault bootstrap privilege drop failed\n");
+         return 1;
+      }
+      if (vault_env_bootstrap_init() < 0 || server_vault_bootstrap_prepare() < 0 ||
+          vault_config_bootstrap_init() < 0)
+         return 1;
+      runtime_secret_clear();
+      return 0;
+   }
+
+   /* Docker Compose bootstrap helper: credentials arrive on a pipe as
+    * NUL-delimited environment records, so no value is retained in container
+    * Config.Env. This process is one-shot and exits immediately after sealing. */
+   if (argc == 2 && strcmp(argv[1], "--bootstrap-vault-stdin") == 0)
+   {
+      if (vault_env_bootstrap_init() < 0 || server_vault_bootstrap_prepare() < 0 ||
+          vault_env_import_stream(stdin) < 0 || vault_env_bootstrap_init() < 0 ||
+          server_vault_bootstrap_prepare() < 0 || vault_config_bootstrap_init() < 0 ||
+          vault_env_has_credential_environment() != 0)
+      {
+         runtime_secret_clear();
+         return 1;
+      }
+      runtime_secret_clear();
+      return 0;
+   }
+
+   /* unsetenv() removes a credential from future lookups but cannot guarantee
+    * that Linux /proc/<pid>/environ stops exposing the original inherited
+    * bytes. A normal server invocation that inherited first-boot credentials
+    * is therefore a disposable bootstrap process: seal everything, verify the
+    * environment is clean, then replace this process image. The re-executed
+    * long-lived server inherits no credential variables and loads values back
+    * only through Vault's locked runtime cache. Container/Kubernetes startup
+    * uses the same process boundary in server-entrypoint.sh. */
+   {
+      int credential_env = vault_env_has_credential_environment();
+      if (credential_env < 0)
+      {
+         fprintf(stderr, "aimee-server: malformed credential environment name\n");
+         return 1;
+      }
+      if (credential_env > 0)
+      {
+         if (vault_env_bootstrap_init() < 0 || server_vault_bootstrap_prepare() < 0 ||
+             vault_config_bootstrap_init() < 0 || vault_env_has_credential_environment() != 0)
+         {
+            runtime_secret_clear();
+            fprintf(stderr, "aimee-server: first-boot credential Vault bootstrap failed\n");
+            return 1;
+         }
+         runtime_secret_clear();
+         execvp(argv[0], argv);
+         fprintf(stderr, "aimee-server: clean-environment re-exec failed: %s\n", strerror(errno));
+         return 1;
+      }
+   }
+
    /* Backwards compat: --run-command was the old server command-dispatch path.
     * Command work now needs typed server/kb RPCs and runs on the server's
     * in-process compute pool when it is long-running. */

@@ -16,6 +16,13 @@ extern "C"
    int db2_kb_audit_append(const char *actor_role, const char *actor_principal, const char *action,
                            const char *subject, const char *verdict, const char *detail);
 
+   /* Transaction-owned variant used when a destructive mutation and its audit
+    * row must commit atomically. |conn| must already be inside BEGIN; this
+    * function neither commits nor rolls back. */
+   int db2_kb_audit_append_in_txn(void *conn, const char *actor_role,
+                                  const char *actor_principal, const char *action,
+                                  const char *subject, const char *verdict, const char *detail);
+
    /* Recompute the whole chain (row_hash + prev linkage + gap-free seq). 0 if intact,
     * -1 on the first break (reason in err). */
    int db2_kb_audit_verify_chain(char *err, size_t errlen);

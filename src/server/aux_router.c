@@ -34,33 +34,39 @@ static void cooldown_set(int secs)
    pthread_mutex_unlock(&g_lock);
 }
 
-char *aux_call(const config_t *cfg, const char *task_name, const char *prompt, int max_tokens)
+char *aux_call(const char *task_name, const char *prompt, int max_tokens)
 {
-   if (!cfg || !cfg->aux_enabled)
+   if (!config_aux_enabled())
       return NULL;
    if (cooldown_active())
       return NULL;
 
-   /* Resolve provider and model from per-task config, fall back to defaults */
-   const char *provider = cfg->aux_default_provider[0] ? cfg->aux_default_provider : NULL;
-   const char *model = cfg->aux_default_model[0] ? cfg->aux_default_model : NULL;
-   int tok = (max_tokens > 0) ? max_tokens : cfg->aux_default_max_tokens;
+   /* Resolve provider and model from per-task config, falling back to defaults.
+    * Both are copied into local storage rather than pointed at: they are held
+    * across agent_load_config and the agent lookup below, well past the point an
+    * accessor's thread-local buffer would be reclaimed. */
+   char provider[64] = "";
+   char model[128] = "";
+   snprintf(provider, sizeof(provider), "%s", config_aux_default_provider());
+   snprintf(model, sizeof(model), "%s", config_aux_default_model());
+   int tok = (max_tokens > 0) ? max_tokens : config_aux_default_max_tokens();
 
-   for (int i = 0; i < cfg->aux_task_count; i++)
+   int n = config_aux_task_count();
+   for (int i = 0; i < n && i < CONFIG_AUX_MAX_TASKS; i++)
    {
-      if (strcmp(cfg->aux_tasks[i].task, task_name) == 0)
-      {
-         if (cfg->aux_tasks[i].provider[0])
-            provider = cfg->aux_tasks[i].provider;
-         if (cfg->aux_tasks[i].model[0])
-            model = cfg->aux_tasks[i].model;
-         if (cfg->aux_tasks[i].max_tokens > 0)
-            tok = cfg->aux_tasks[i].max_tokens;
-         break;
-      }
+      config_aux_task_t t;
+      if (config_aux_task_at(i, &t) != 0 || strcmp(t.task, task_name) != 0)
+         continue;
+      if (t.provider[0])
+         snprintf(provider, sizeof(provider), "%s", t.provider);
+      if (t.model[0])
+         snprintf(model, sizeof(model), "%s", t.model);
+      if (t.max_tokens > 0)
+         tok = t.max_tokens;
+      break;
    }
 
-   if (!provider || !provider[0])
+   if (!provider[0])
    {
       LOG_WARN("aux", "no provider configured for task '%s'; cooldown %ds", task_name,
                AUX_COOLDOWN_NOCONFIG_SECS);
@@ -87,7 +93,7 @@ char *aux_call(const config_t *cfg, const char *task_name, const char *prompt, i
 
    /* Clone so we can override model without touching shared state */
    agent_t local = *ag;
-   if (model && model[0])
+   if (model[0])
       snprintf(local.model, sizeof(local.model), "%s", model);
 
    agent_result_t res;
@@ -104,31 +110,35 @@ char *aux_call(const config_t *cfg, const char *task_name, const char *prompt, i
    return res.response;
 }
 
-void aux_config_show(const config_t *cfg)
+void aux_config_show(void)
 {
-   if (!cfg)
-      return;
-   printf("auxiliary.enabled:          %s\n", cfg->aux_enabled ? "true" : "false");
+   printf("auxiliary.enabled:          %s\n", config_aux_enabled() ? "true" : "false");
+   /* Each printf consumes its accessor's buffer before the next call, so these
+    * can read one at a time -- unlike the loop below, which needs three values
+    * from one element live at once and takes a copy. */
    printf("auxiliary.default_provider: %s\n",
-          cfg->aux_default_provider[0] ? cfg->aux_default_provider : "(none)");
+          config_aux_default_provider()[0] ? config_aux_default_provider() : "(none)");
    printf("auxiliary.default_model:    %s\n",
-          cfg->aux_default_model[0] ? cfg->aux_default_model : "(none)");
-   printf("auxiliary.default_max_tokens: %d\n", cfg->aux_default_max_tokens);
-   if (cfg->aux_task_count == 0)
+          config_aux_default_model()[0] ? config_aux_default_model() : "(none)");
+   printf("auxiliary.default_max_tokens: %d\n", config_aux_default_max_tokens());
+   int n = config_aux_task_count();
+   if (n == 0)
    {
       printf("(no per-task overrides)\n");
       return;
    }
    printf("\n%-30s  %-20s  %-40s  %s\n", "task", "provider", "model", "max_tokens");
    printf("%-30s  %-20s  %-40s  %s\n", "----", "--------", "-----", "----------");
-   for (int i = 0; i < cfg->aux_task_count; i++)
+   for (int i = 0; i < n && i < CONFIG_AUX_MAX_TASKS; i++)
    {
-      const char *prov = cfg->aux_tasks[i].provider[0] ? cfg->aux_tasks[i].provider : "(default)";
-      const char *mod = cfg->aux_tasks[i].model[0] ? cfg->aux_tasks[i].model : "(default)";
-      int mt = cfg->aux_tasks[i].max_tokens;
-      if (mt > 0)
-         printf("%-30s  %-20s  %-40s  %d\n", cfg->aux_tasks[i].task, prov, mod, mt);
+      config_aux_task_t t;
+      if (config_aux_task_at(i, &t) != 0)
+         continue;
+      const char *prov = t.provider[0] ? t.provider : "(default)";
+      const char *mod = t.model[0] ? t.model : "(default)";
+      if (t.max_tokens > 0)
+         printf("%-30s  %-20s  %-40s  %d\n", t.task, prov, mod, t.max_tokens);
       else
-         printf("%-30s  %-20s  %-40s  (default)\n", cfg->aux_tasks[i].task, prov, mod);
+         printf("%-30s  %-20s  %-40s  (default)\n", t.task, prov, mod);
    }
 }

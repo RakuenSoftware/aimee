@@ -28,6 +28,14 @@ int config_load(config_t *cfg)
    return 0;
 }
 
+/* Accessor stubs: the production seam moved from config_load to per-field
+ * accessors. Values match what this file's config_load stub produced, so the
+ * assertions below are unchanged. */
+int config_learning_implicit_retrieval_outcome(void)
+{
+   return g_flag;
+}
+
 /* ---- capture stub for the KB client record call ---- */
 static char last_surface[16];
 static char last_event[64];

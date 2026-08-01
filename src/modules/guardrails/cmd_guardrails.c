@@ -82,12 +82,9 @@ void cmd_guardrails(app_ctx_t *ctx, int argc, char **argv)
 
    only_advisory = show_all ? 0 : 1;
 
-   config_t cfg;
-   config_load(&cfg);
-
-   if (db1_init(cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
    {
-      fprintf(stderr, "guardrails: cannot open DB1 at %s\n", cfg.db1_path);
+      fprintf(stderr, "guardrails: cannot open DB1 at %s\n", config_db1_path());
       return;
    }
 

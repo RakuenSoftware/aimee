@@ -565,6 +565,38 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ModelsList' }
+  /embedders:
+    get:
+      summary: List the embedders this deployment can offer
+      description: >
+        Read from the embedder registry (scripts/embedders.json), not from a running
+        service: the setup wizard needs this list before anything is deployed. `local`
+        says whether the knowledge base can serve the model itself — one is bundled —
+        and an entry that cannot is selectable only against an external endpoint.
+        Every other field changes the vectors, so the picker shows them: a different
+        `dim` rebuilds the pgvector columns as well as re-embedding the corpus, and
+        `prefixed` marks a model whose card defines query/document prefixes.
+      responses:
+        "200":
+          description: The registry as a choosable list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  embedders:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        dim: { type: integer }
+                        context: { type: integer }
+                        pooling: { type: string }
+                        local: { type: boolean }
+                        prefixed: { type: boolean }
+
   /hosts:
     get:
       summary: Enumerate hosts and their live GPU inventory
@@ -1600,6 +1632,20 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /kb/ingest/status:
+    get:
+      summary: Knowledge-base ingest queue and worker status (proxied to aimee-kb)
+      responses:
+        "200":
+          description: Ingest queue, recent jobs, and worker slots
+          content:
+            application/json:
+              schema: { type: object }
+        "502":
+          description: Knowledge backend (aimee-kb) unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /kb/curator:
     get:
       summary: Curator LLM provider + queue status (proxied to aimee-kb)
@@ -2418,7 +2464,7 @@ paths:
       responses: { "200": { description: GC report, content: { application/json: { schema: { type: object } } } } }
   /vault/unlock:
     post:
-      summary: "Unlock the credential vault (uid root key over UDS, or webuser login password under server.token)"
+      summary: "Unlock the credential vault over a kernel-attested local or webchat UDS connection"
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Unlocked, content: { application/json: { schema: { type: object } } } } }
   /vault/rekey:
@@ -2758,6 +2804,17 @@ paths:
       summary: Mint and hot-swap a fresh /v1 bearer (trust-on-first-use enrollment; retires the bootstrap token)
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Rotated, content: { application/json: { schema: { type: object } } } } }
+  /api/enroll_bearer:
+    post:
+      summary: Mint an ADDITIONAL /v1 bearer for one more client, leaving existing bearers valid
+      description: >
+        Pairs a new client without revoking anyone else. Prefer this over
+        /api/rotate_bearer, which replaces the single primary bearer and so
+        invalidates every already-paired client at once. Fails closed when the
+        enrolled-bearer limit is reached rather than evicting an in-use
+        credential. Returns the new token once.
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Enrolled, content: { application/json: { schema: { type: object } } } } }
   /api/disable:
     post:
       summary: Disable the HTTP API
@@ -3155,6 +3212,25 @@ paths:
       summary: Update the knowledge base (async; poll GET /runs/{id})
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
+  /kb/reembed:
+    post:
+      summary: Reset and re-embed the vector store after a dimension change (async; poll GET /runs/{id})
+      description: >-
+        Drops and recreates every derived vector table at the configured
+        embedding dimension, then requeues the corpus. Gated by
+        kb.reembed_on_dim_change in aimee-kb's own config; without confirm it
+        returns a dry-run plan naming each table and row count.
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
+  /memory/embed:
+    post:
+      summary: (Re)generate memory embeddings (async; poll GET /runs/{id})
+      description: >-
+        Embeds a single memory (memory_id) or the whole corpus (all=true, which
+        requires a rollover version). Needed after a dimension change, which
+        drops memory vectors without requeueing them.
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
   /kb/docs/push:
     post:
       summary: Push document contents into the knowledge base (async; poll GET /runs/{id})
@@ -3319,6 +3395,77 @@ paths:
           content:
             application/json:
               schema: { type: object }
+  /memory/delete:
+    post:
+      summary: Delete a memory by id
+      description: >
+        Removes a memory permanently. Prefer /memory/supersede when a belief has
+        merely been replaced: the supersession chain is walked by
+        memory.list_superseded_keys and memory.fact_history, and deleting breaks
+        provenance and the negative examples effectiveness scoring relies on.
+        Delete is for content that should not exist at all — a credential, PII
+        under an erasure request, data written to the wrong store.
+        Requires the memory-write capability.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: integer, minimum: 1, maximum: 9007199254740991 }
+      responses:
+        "200":
+          description: Deletion result ({ id, deleted })
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Missing or non-positive id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "404":
+          description: No such memory, or the knowledge service refused
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /memory/supersede:
+    post:
+      summary: Replace a memory with a corrected one, linking the two
+      description: >
+        The preferred correction: the old memory is retained and linked to its
+        replacement, so provenance and retrieval history stay intact.
+        Requires the memory-write capability.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [old_id, new_content]
+              properties:
+                old_id: { type: integer, minimum: 1, maximum: 9007199254740991 }
+                new_content: { type: string }
+                confidence: { type: number, minimum: 0, maximum: 1 }
+                session_id: { type: string }
+      responses:
+        "200":
+          description: The superseding memory envelope
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Missing old_id or empty new_content
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "404":
+          description: No such memory, or the knowledge service refused
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /memory/get:
     post:
       summary: Get a memory by id
@@ -4743,7 +4890,7 @@ paths:
       description: >
         Clone `url` as a project under the authenticated `webuser:` principal's
         isolated workspace (`webusers/<name>/<project>`). The caller identity
-        comes from the server.token-gated `X-Aimee-Webuser` assertion, NOT the
+        comes from the root-UDS-attested `X-Aimee-Webuser` assertion, NOT the
         body, so a user can only clone into their own tree. The git credential is
         resolved per host (single-user server, many providers): an optional inline
         `token` (then persisted server-side, keyed by host) > the host's stored
@@ -5088,23 +5235,27 @@ paths:
                     - { type: string, maxLength: 89, pattern: '^aimee/wi/wi_[A-Za-z0-9_]+\.s[0-9a-f]{10}\.g[0-9]+\.[0-9]+$' }
                 base: { type: string }
                 title: { type: string, minLength: 1, maxLength: 256 }
+                body: { type: string, minLength: 1, maxLength: 60000 }
+                draft:
+                  type: boolean
+                  description: Must be true for final feature-to-trunk handoffs and false for slice PRs.
                 number: { type: integer, minimum: 1 }
               oneOf:
                 - required: [head]
                   properties: { op: { enum: [push] } }
                   not:
-                    anyOf: [{ required: [base] }, { required: [title] }, { required: [number] }]
-                - required: [head, base, title]
+                    anyOf: [{ required: [base] }, { required: [title] }, { required: [body] }, { required: [draft] }, { required: [number] }]
+                - required: [head, base, title, body, draft]
                   properties: { op: { enum: [open] } }
                   not: { required: [number] }
                 - required: [number]
                   properties: { op: { enum: [info, ci] } }
                   not:
-                    anyOf: [{ required: [head] }, { required: [base] }, { required: [title] }]
+                    anyOf: [{ required: [head] }, { required: [base] }, { required: [title] }, { required: [body] }, { required: [draft] }]
                 - required: [base, number]
                   properties: { op: { enum: [merge] } }
                   not:
-                    anyOf: [{ required: [head] }, { required: [title] }]
+                    anyOf: [{ required: [head] }, { required: [title] }, { required: [body] }, { required: [draft] }]
       responses:
         "200":
           description: Mechanical forge operation completed
@@ -5717,8 +5868,10 @@ paths:
       description: >
         Server-orchestrated deploy: run `docker compose up -d` for the managed
         services (aimee-kb + aimee-llm) the current wizard config selects,
-        on a background thread. Requires AIMEE_DEPLOY_ENABLED + a mounted Docker
-        socket. Capability: tool:execute.
+        on a background thread. Atomically claims the authenticated wizard user
+        as the first remote owner and returns that user's enrollment-only bearer;
+        CSR signing later binds its explicit full grant to mTLS. Requires
+        AIMEE_DEPLOY_ENABLED + a mounted Docker socket. Capability: tool:execute.
       responses:
         "200":
           description: Deploy started (or already running)
@@ -5729,6 +5882,18 @@ paths:
                 properties:
                   ok: { type: boolean }
                   status: { type: string, enum: [started, running] }
+                  enrollment:
+                    type: object
+                    required: [state, principal, tier, mtls, tls_port]
+                    properties:
+                      state: { type: string, enum: [ready, paired] }
+                      principal: { type: string, example: "webuser:aimee" }
+                      tier: { type: string, enum: [full] }
+                      mtls: { type: boolean }
+                      tls_port: { type: integer }
+                      bearer_token:
+                        type: string
+                        description: Present only while the first user's mTLS enrollment is pending.
         "403":
           description: Not a webchat user
           content:

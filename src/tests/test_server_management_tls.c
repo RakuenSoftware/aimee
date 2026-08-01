@@ -1,4 +1,6 @@
-#include "config.h"
+#include <stdint.h>
+
+#include "config_accessors.h"
 #include "log.h"
 #include "pki.h"
 #include "server_conn_io.h"
@@ -17,17 +19,25 @@
 
 /* Narrow link stubs: this test exercises only the dedicated context and exact
  * peer profile, never the generic config/roster path. */
+static int g_default_mtls_mode;
+static int g_server_cert_ensure_calls;
+static int g_client_ca_ensure_calls;
+
 const char *config_default_dir(void)
 {
    return "/nonexistent";
 }
-int config_load(config_t *cfg)
+int config_server_api_mtls(void)
 {
-   memset(cfg, 0, sizeof(*cfg));
-   return 0;
+   return g_default_mtls_mode;
+}
+const char *config_server_api_mtls_client_ca(void)
+{
+   return "/nonexistent/tls/client-ca.crt";
 }
 int pki_ca_ensure(void)
 {
+   g_client_ca_ensure_calls++;
    return -1;
 }
 int pki_is_revoked(const char *serial)
@@ -41,8 +51,15 @@ int pki_mtls_ramp_init(int mode)
 }
 int pki_ensure_self_signed_server_cert(const char *cert, const char *key)
 {
-   (void)cert;
-   (void)key;
+   assert(strcmp(cert, "/nonexistent/tls/server.crt") == 0);
+   assert(strcmp(key, "/nonexistent/tls/server.key") == 0);
+   g_server_cert_ensure_calls++;
+   return -1;
+}
+int pki_server_tls_key_load(char *out, size_t cap)
+{
+   if (out && cap)
+      out[0] = '\0';
    return -1;
 }
 void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
@@ -74,21 +91,39 @@ static void command(const char *cmd)
    assert(system(cmd) == 0);
 }
 
+static void read_text(const char *path, char *out, size_t cap)
+{
+   FILE *f = fopen(path, "rb");
+   assert(f && cap > 1);
+   size_t n = fread(out, 1, cap - 1, f);
+   assert(!ferror(f) && feof(f) && fclose(f) == 0);
+   out[n] = '\0';
+}
+
 typedef struct
 {
    int fd;
    int profile;
+   int management;
 } server_arg_t;
 
 static void *accept_one(void *opaque)
 {
    server_arg_t *arg = opaque;
-   SSL *ssl = server_tls_management_begin(arg->fd);
+   SSL *ssl = arg->management ? server_tls_management_begin(arg->fd) : server_tls_begin(arg->fd);
    if (ssl)
    {
-      server_tls_peer_cert_t peer;
-      assert(server_tls_peer_cert(ssl, &peer) == 1);
-      arg->profile = peer.management_profile;
+      if (arg->management)
+      {
+         server_tls_peer_cert_t peer;
+         assert(server_tls_peer_cert(ssl, &peer) == 1);
+         arg->profile = peer.management_profile;
+      }
+      else
+      {
+         char cn[257], serial[129];
+         arg->profile = server_tls_peer_identity(ssl, cn, sizeof(cn), serial, sizeof(serial));
+      }
       server_tls_end(arg->fd, ssl);
    }
    else
@@ -97,11 +132,11 @@ static void *accept_one(void *opaque)
    return NULL;
 }
 
-static int present(const char *ca, const char *cert, const char *key)
+static int present_on(const char *ca, const char *cert, const char *key, int management)
 {
    int sv[2];
    assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
-   server_arg_t arg = {.fd = sv[0], .profile = -1};
+   server_arg_t arg = {.fd = sv[0], .profile = -1, .management = management};
    pthread_t thread;
    assert(pthread_create(&thread, NULL, accept_one, &arg) == 0);
 
@@ -125,9 +160,29 @@ static int present(const char *ca, const char *cert, const char *key)
    return arg.profile;
 }
 
+static int present(const char *ca, const char *cert, const char *key)
+{
+   return present_on(ca, cert, key, 1);
+}
+
+static int present_main(const char *ca, const char *cert, const char *key)
+{
+   return present_on(ca, cert, key, 0);
+}
+
 int main(void)
 {
    signal(SIGPIPE, SIG_IGN);
+
+   /* Fresh wizard installs use optional mTLS so the first bearer-authenticated
+    * client can enroll its certificate. That mode must still provision the
+    * server identity certificate needed to bring up HTTPS. Fail at the stubbed
+    * client-CA step so this assertion stays independent of filesystem fixtures. */
+   g_default_mtls_mode = 1;
+   assert(server_tls_init_default() == -1);
+   assert(g_server_cert_ensure_calls == 1);
+   assert(g_client_ca_ensure_calls == 1);
+
    char dir[] = "/tmp/aimee-mgmt-tls-XXXXXX";
    assert(mkdtemp(dir));
    char ca[256], cakey[256], server[256], serverkey[256], client[256], clientkey[256], dual[256],
@@ -211,12 +266,23 @@ int main(void)
    assert(server_tls_management_init(linkpath, serverkey, ca) == -1);
    assert(server_tls_management_init(ca_server, ca_server_key, ca) == -1);
    assert(server_tls_management_init(server, ca_server_key, ca) == -1);
-   assert(server_tls_management_init(server, serverkey, ca) == 0);
-   assert(server_tls_management_init(server, serverkey, ca) == 0);
+   char server_key_pem[8192];
+   read_text(serverkey, server_key_pem, sizeof(server_key_pem));
+   assert(server_tls_management_init_vault(server, server_key_pem, ca) == 0);
+   assert(server_tls_management_init_vault(server, server_key_pem, ca) == 0);
+   OPENSSL_cleanse(server_key_pem, sizeof(server_key_pem));
    assert(present(ca, NULL, NULL) == -2);
    assert(present(ca, client, clientkey) == 1);
    assert(present(ca, dual, dualkey) == 0);
    assert(present(ca, ca_client, ca_client_key) != 1);
+
+   /* The ordinary listener keeps the TLS handshake cert-optional even after
+    * durable posture reaches required. HTTP authorization then admits only the
+    * exact enrollment routes for a cert-less peer. The dedicated management
+    * listener assertions above remain hard-required at the transport layer. */
+   assert(server_tls_init(server, serverkey, 2, ca) == 0);
+   assert(server_tls_mtls_mode() == 2);
+   assert(present_main(ca, NULL, NULL) == 0);
 
    snprintf(cmd, sizeof(cmd), "cp %s %s && printf '\\n' >> %s", ca, other_ca, other_ca);
    command(cmd);

@@ -585,25 +585,81 @@ func TestCancelUnassignedDelegateJobPredicateTruthTable(t *testing.T) {
 	if _, err := store.db.Exec(`UPDATE agent_jobs SET created_at=datetime('now','-2 hours'), heartbeat_at=CASE WHEN status='running' THEN datetime('now','-2 hours') ELSE '' END`); err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []int{41, 44, 45} {
+	for _, id := range []int{41, 42, 44, 45} {
 		cancelled, err := store.CancelUnassignedDelegateJob(t.Context(), id, "lease expired", time.Hour)
 		if err != nil || !cancelled {
 			t.Fatalf("cancel unassigned job %d: cancelled=%v err=%v", id, cancelled, err)
 		}
 	}
-	for _, id := range []int{42, 43, 46, 47, 48} {
+	for _, id := range []int{43, 46, 47, 48} {
 		cancelled, err := store.CancelUnassignedDelegateJob(t.Context(), id, "lease expired", time.Hour)
 		if err != nil || cancelled {
 			t.Fatalf("job %d assignment/terminal guard: cancelled=%v err=%v", id, cancelled, err)
 		}
 	}
-	for _, id := range []int{41, 44, 45} {
+	for _, id := range []int{41, 42, 44, 45} {
 		var status, reason string
 		if err := store.db.QueryRow(`SELECT status,cancel_reason FROM agent_jobs WHERE id=?`, id).Scan(&status, &reason); err != nil {
 			t.Fatal(err)
 		}
 		if status != "cancelled" || reason != "lease expired" {
 			t.Fatalf("job %d status=%q reason=%q", id, status, reason)
+		}
+	}
+}
+
+func TestCancelUnassignedDelegateJobRacesRoutedPendingWorker(t *testing.T) {
+	store := newTestStore(t)
+	_, err := store.db.Exec(`CREATE TABLE agent_jobs (
+		id INTEGER PRIMARY KEY, agent_name TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
+		heartbeat_at TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT '',
+		cancelled_at TEXT DEFAULT '', cancel_reason TEXT DEFAULT '', updated_at TEXT DEFAULT '')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id := 150; id < 200; id++ {
+		if _, err := store.db.Exec(`INSERT INTO agent_jobs(id,status,agent_name,heartbeat_at,created_at)
+			VALUES (?,'pending','codex','','2000-01-01 00:00:00')`, id); err != nil {
+			t.Fatal(err)
+		}
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		var cancelled bool
+		var cancelErr, leaseErr error
+		var leased int64
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			cancelled, cancelErr = store.CancelUnassignedDelegateJob(t.Context(), id, "lease expired", time.Hour)
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			result, err := store.db.ExecContext(t.Context(), `UPDATE agent_jobs
+				SET status='running', heartbeat_at=datetime('now') WHERE id=? AND status='pending'`, id)
+			leaseErr = err
+			if err == nil {
+				leased, leaseErr = result.RowsAffected()
+			}
+		}()
+		close(start)
+		wg.Wait()
+		if cancelErr != nil || leaseErr != nil {
+			t.Fatalf("iteration %d cancel_err=%v lease_err=%v", id, cancelErr, leaseErr)
+		}
+		if (cancelled && leased != 0) || (!cancelled && leased != 1) {
+			t.Fatalf("iteration %d cancelled=%v leased=%d", id, cancelled, leased)
+		}
+		var status, agent string
+		if err := store.db.QueryRow(`SELECT status,agent_name FROM agent_jobs WHERE id=?`, id).Scan(&status, &agent); err != nil {
+			t.Fatal(err)
+		}
+		if cancelled && (status != "cancelled" || agent != "codex") {
+			t.Fatalf("iteration %d cancelled final status=%q agent=%q", id, status, agent)
+		}
+		if !cancelled && (status != "running" || agent != "codex") {
+			t.Fatalf("iteration %d leased final status=%q agent=%q", id, status, agent)
 		}
 	}
 }

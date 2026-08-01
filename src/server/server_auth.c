@@ -22,6 +22,7 @@ const method_policy_t method_registry[] = {
     {"api.status", CAP_SESSION_READ, "public /v1 API status"},
     {"api.enable", CAP_SESSION_ADMIN, "enable public /v1 API listener"},
     {"api.rotate_bearer", CAP_SESSION_ADMIN, "rotate the public /v1 API bearer"},
+    {"api.enroll_bearer", CAP_SESSION_ADMIN, "add a /v1 API bearer without revoking existing ones"},
     {"api.disable", CAP_SESSION_ADMIN, "disable public /v1 API listener"},
     {"init.run", CAP_TOOL_EXECUTE, "initialize local stores"},
     {"launch.run", CAP_TOOL_EXECUTE, "launch session"},
@@ -39,6 +40,8 @@ const method_policy_t method_registry[] = {
     {"trajectory.batch", CAP_DELEGATE, "trajectory batch generation"},
     /* Memory (exact before prefix) */
     {"memory.store", CAP_MEMORY_WRITE, "store memory"},
+    {"memory.delete", CAP_MEMORY_WRITE, "delete a memory"},
+    {"memory.supersede", CAP_MEMORY_WRITE, "supersede a memory"},
     {"memory.user_capture", CAP_MEMORY_WRITE, "capture per-user memory"},
     {"memory.*", CAP_MEMORY_READ, "memory operation"},
     /* Index (prefix) */
@@ -72,6 +75,7 @@ const method_policy_t method_registry[] = {
     {"audit.seal", CAP_TOOL_EXECUTE, "WORM audit seal snapshot"},
     {"audit.snapshot", CAP_TOOL_EXECUTE, "WORM audit metric snapshot"},
     {"hosts.list", CAP_DASHBOARD_READ, "host + GPU inventory"},
+    {"embedders.list", CAP_DASHBOARD_READ, "selectable embedder inventory"},
     {"lsp.*", CAP_DASHBOARD_READ, "lsp status"},
     /* Workspace. Reads (context/get/list) are index:read; register/remove
      * mutate the instance-scoped registry and a detached client performs them
@@ -171,6 +175,8 @@ const method_policy_t method_registry[] = {
     {"kb.update", CAP_INDEX_ADMIN, "update knowledge base"},
     {"kb.docs.push", CAP_INDEX_ADMIN, "push documents into the knowledge base (ingest)"},
     {"kb.ingest.status", CAP_INDEX_READ, "knowledge-base ingest status (read)"},
+    {"kb.reembed", CAP_INDEX_ADMIN, "reset and re-embed the vector store (dim change)"},
+    {"memory.embed", CAP_INDEX_ADMIN, "(re)generate memory embeddings"},
     /* Code index/graph rebuilds (mutating) — distinct from the index.* reads. */
     {"index.scan", CAP_INDEX_ADMIN, "scan / re-index the codebase"},
     {"repo.trust", CAP_INDEX_ADMIN, "set per-repo cross-repo trust"},

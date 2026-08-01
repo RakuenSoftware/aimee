@@ -1,6 +1,7 @@
 /* kb_curator_custom.c: parse + validate composed (user-defined) curator stages.
  * See header. Deliberately dependency-light (cJSON + strings only) so it is
  * unit-testable with a mock base resolver. */
+#include <stdio.h> /* snprintf — was reaching this via config.h */
 #include "kb_curator_custom.h"
 
 #include <math.h>

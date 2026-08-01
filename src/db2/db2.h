@@ -32,7 +32,13 @@ extern "C"
     * (refcounted): nested begin/end pairs reuse the same lease. db2_conn()
     * returns the current lease (lazily leasing one if none is held). Outside any
     * begin/end, a lazily-leased connection is returned when the thread exits. */
-   void db2_lease_begin(void);
+   /* Take (or nest into) this thread's connection lease for a unit of work.
+    * The macro records the call site so a lease that is never ended is reported
+    * by the reaper as the code that took it rather than a pool member index. */
+   void db2_lease_begin_at(const char *site);
+#define DB2_LEASE_STRINGIFY_(x) #x
+#define DB2_LEASE_SITE_(f, l)   f ":" DB2_LEASE_STRINGIFY_(l)
+#define db2_lease_begin()       db2_lease_begin_at(DB2_LEASE_SITE_(__FILE__, __LINE__))
    void db2_lease_end(void);
    void db2_lease_release_idle(void);
 

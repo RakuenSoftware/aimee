@@ -1,0 +1,22 @@
+# Test-only overlay for scripts/validate-managed-kb-llm-compose.sh.
+# It isolates the managed stack from any live `aimee` network and mounts the
+# locally built KB plus current client scripts into a released KB image.
+networks:
+  aimee:
+    external: false
+    name: ${COMPOSE_PROJECT_NAME}-network
+
+# The production manifest shares the server's durable workspace volume by its
+# fixed external name. Validation does not launch a server and must not depend
+# on or mount production state, so this otherwise-empty read-only mount is a
+# disposable project-local volume.
+volumes:
+  aimee-server-workspaces:
+    external: false
+    name: ${COMPOSE_PROJECT_NAME}-server-workspaces
+
+services:
+  aimee-kb:
+    volumes:
+      - ${AIMEE_VALIDATION_ROOT:?set by validation script}/aimee-kb:/usr/local/bin/aimee-kb:ro
+      - ${AIMEE_VALIDATION_ROOT:?set by validation script}/scripts/embed-remote.py:/opt/aimee/scripts/embed-remote.py:ro

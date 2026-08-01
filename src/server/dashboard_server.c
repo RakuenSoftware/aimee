@@ -194,16 +194,14 @@ SERVER_DASHBOARD_FALLBACK char *api_dashboard_maintenance(void)
    cJSON_AddNumberToObject(metrics, "ms_avg", ms_avg);
    cJSON_AddNumberToObject(metrics, "ms_max", ms_max);
 
-   config_t cfg;
-   config_load(&cfg);
    cJSON *cfg_obj = cJSON_AddObjectToObject(obj, "config");
-   cJSON_AddBoolToObject(cfg_obj, "enabled", cfg.memory_maintenance_enabled ? 1 : 0);
-   int interval = cfg.memory_maintenance_interval_seconds > 0
-                      ? cfg.memory_maintenance_interval_seconds
+   cJSON_AddBoolToObject(cfg_obj, "enabled", config_memory_maintenance_enabled() ? 1 : 0);
+   int interval = config_memory_maintenance_interval_seconds() > 0
+                      ? config_memory_maintenance_interval_seconds()
                       : MEMORY_MAINTENANCE_DEFAULT_INTERVAL_SECS;
    cJSON_AddNumberToObject(cfg_obj, "interval_seconds", interval);
    cJSON_AddBoolToObject(cfg_obj, "summarize_enabled",
-                         cfg.memory_maintenance_summarize_enabled ? 1 : 0);
+                         config_memory_maintenance_summarize_enabled() ? 1 : 0);
 
    char *json = cJSON_PrintUnformatted(obj);
    cJSON_Delete(obj);
@@ -212,13 +210,10 @@ SERVER_DASHBOARD_FALLBACK char *api_dashboard_maintenance(void)
 
 SERVER_DASHBOARD_FALLBACK char *api_dashboard_identity(void)
 {
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   config_load(&cfg);
    cJSON *obj = cJSON_CreateObject();
    if (!obj)
       return strdup("{}");
-   cJSON_AddItemToObject(obj, "charter", identity_charter_json(&cfg));
+   cJSON_AddItemToObject(obj, "charter", identity_charter_json());
    cJSON_AddItemToObject(obj, "local_operator", identity_local_operator_json());
    cJSON_AddItemToObject(obj, "working_profile", identity_working_profile_json());
    char *json = cJSON_PrintUnformatted(obj);

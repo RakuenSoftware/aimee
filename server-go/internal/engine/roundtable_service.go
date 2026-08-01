@@ -97,5 +97,5 @@ func roundtableResult(feedback *wfe.ReviewFeedback, approved, converged bool, an
 	}
 	return &roundtablecfg.RunResult{Artifact: assembleRoundtableArtifact(feedback, approved), Feedback: feedback, Items: items,
 		Approved: approved, Converged: converged, Degraded: failed > 0, ParticipantsTotal: total,
-		ParticipantsFailed: failed, ParticipantsUsed: len(analysis.Reports), CostUSD: cost}
+		ParticipantsFailed: failed, ParticipantsUsed: len(analysis.Reports), ParticipantFailures: append([]roundtablecfg.ParticipantFailure(nil), analysis.Failures...), CostUSD: cost}
 }

@@ -1,4 +1,5 @@
 #include "kb_http_code.h"
+#include "kb_http_code_vector_status.h"
 #include "aimee.h"
 #include "config.h"
 #include "kb_curator_queue.h"
@@ -11,6 +12,8 @@
 #include "db2/lifecycle.h"
 #include "db2/memory_query.h"
 #include "db2/code_projection.h"
+#include "db2/code_project_lifecycle.h"
+#include "db2/code_index.h"
 #include "db2/pgvec_transport.h"
 #include "db2/entity_edges.h"     /* §6 memory-fusion leg: knowledge-graph edges */
 #include "db2/entity_nodes.h"     /* db2_entity_node_get -> file_path */
@@ -20,6 +23,7 @@
 #include "kb_rrf.h"
 #include "db2/lessons.h"        /* §3 actuation: earned-trust tie-break */
 #include "kb/lessons_reflect.h" /* reflect the ledger into per-node trust */
+#include "kb_reqctx.h"
 #include <time.h>
 #include "kb/kb_graph_analytics.h"
 #include "kb/kb_service_graph.h"
@@ -90,6 +94,162 @@ int code_qparam(const char *qs, const char *key, char *out, int outsz)
    return 0;
 }
 
+/* Resolve the code-query scope at the request boundary.  A caller must name a
+ * stable project, use a project-scoped credential, or explicitly request all.
+ * Missing context is never reinterpreted as an all-project query. */
+int code_request_project(const char *query_string, char *project, size_t project_cap, int allow_all,
+                         int *all_projects, char *out_buf, int out_cap)
+{
+   char scope[32] = "";
+   const char *verified_kind = NULL;
+   const char *verified_id = NULL;
+   int has_verified_scope = kb_reqctx_verified_scope(&verified_kind, &verified_id);
+   if (all_projects)
+      *all_projects = 0;
+   project[0] = '\0';
+   code_qparam(query_string, "project", project, (int)project_cap);
+   code_qparam(query_string, "scope", scope, sizeof(scope));
+   if (scope[0] && strcmp(scope, "current") != 0 && strcmp(scope, "all") != 0)
+   {
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":{\"type\":\"invalid_scope\",\"message\":\"scope must be current or "
+               "all\"}}");
+      return 400;
+   }
+   if (strcmp(scope, "all") == 0)
+   {
+      if (!allow_all)
+      {
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"error\":{\"type\":\"invalid_scope\",\"message\":\"this request requires "
+                  "one current project\"}}");
+         return 400;
+      }
+      if (has_verified_scope)
+      {
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"error\":{\"type\":\"forbidden\",\"message\":\"a scoped credential cannot "
+                  "request all projects\"}}");
+         return 403;
+      }
+      if (all_projects)
+         *all_projects = 1;
+      /* An unscoped owner may also send the resolved active project. It is a
+       * preference bucket for scope=all, not a filter: local results own the
+       * head and other projects extend the tail. A supplied generation still
+       * fences that preferred head bucket, so validate it before searching. */
+      if (project[0])
+         goto validate_generation;
+      return 0;
+   }
+   if (project[0])
+   {
+      if (has_verified_scope && strcmp(verified_kind, "project") == 0 &&
+          strcmp(project, verified_id) != 0)
+      {
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"error\":{\"type\":\"forbidden\",\"message\":\"project is outside the "
+                  "verified credential scope\"}}");
+         return 403;
+      }
+      goto validate_generation;
+   }
+   if (has_verified_scope && strcmp(verified_kind, "project") == 0)
+   {
+      snprintf(project, project_cap, "%s", verified_id);
+      goto validate_generation;
+   }
+   snprintf(out_buf, (size_t)out_cap,
+            "{\"error\":{\"type\":\"scope_required\",\"message\":\"no active project is available; "
+            "pass project or scope=all explicitly\"}}");
+   return 409;
+
+validate_generation:
+{
+   char generation_s[32] = "";
+   int has_generation =
+       code_qparam(query_string, "generation", generation_s, sizeof(generation_s)) &&
+       generation_s[0];
+   long long observed = 0;
+   if (has_generation)
+   {
+      char *end = NULL;
+      observed = strtoll(generation_s, &end, 10);
+      if (!end || *end || observed < 1)
+      {
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"error\":{\"type\":\"invalid_generation\",\"message\":\"generation must be "
+                  "a positive integer\"}}");
+         return 400;
+      }
+   }
+   int64_t current = 0;
+   int grc = db2_code_index_project_current_generation(project, &current);
+   if (grc == -2)
+   {
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":{\"type\":\"project_not_current\",\"message\":\"project is unknown or "
+               "detached\"}}");
+      return 404;
+   }
+   if (grc != 0)
+   {
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":{\"type\":\"index_unavailable\",\"message\":\"cannot verify project "
+               "generation\"}}");
+      return 503;
+   }
+   if (has_generation && (int64_t)observed != current)
+   {
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":{\"type\":\"stale_generation\",\"message\":\"observed generation is no "
+               "longer current\",\"current_generation\":%lld}}",
+               (long long)current);
+      return 409;
+   }
+}
+
+   return 0;
+}
+
+static int code_find_local_first(const char *project, int all_projects, const char *identifier,
+                                 term_hit_t *out, int max)
+{
+   if (!all_projects || !project || !project[0])
+      return all_projects ? canonical_index_find(identifier, out, max)
+                          : canonical_index_find_project(project, identifier, out, max);
+   int local = canonical_index_find_project(project, identifier, out, max);
+   if (local < 0 || local >= max)
+      return local;
+   int tail = canonical_index_find_excluding_project(project, identifier, out + local, max - local);
+   return tail < 0 ? -1 : local + tail;
+}
+
+static int code_search_local_first(const char *project, int all_projects, const char *query,
+                                   code_search_hit_t *out, int max, int enrich)
+{
+   if (!all_projects || !project || !project[0])
+      return canonical_index_code_search(query, all_projects ? NULL : project, out, max, enrich);
+   int local = canonical_index_code_search(query, project, out, max, enrich);
+   if (local < 0 || local >= max)
+      return local;
+   int tail = canonical_index_code_search_excluding_project(query, project, out + local,
+                                                            max - local, enrich);
+   return tail < 0 ? -1 : local + tail;
+}
+
+static int code_callers_local_first(const char *project, int all_projects, const char *symbol,
+                                    caller_hit_t *out, int max)
+{
+   if (!all_projects || !project || !project[0])
+      return canonical_index_find_callers(all_projects ? NULL : project, symbol, out, max);
+   int local = canonical_index_find_callers(project, symbol, out, max);
+   if (local < 0 || local >= max)
+      return local;
+   int tail =
+       canonical_index_find_callers_excluding_project(project, symbol, out + local, max - local);
+   return tail < 0 ? -1 : local + tail;
+}
 int handle_get_code_projects(const char *query_string, char *out_buf, int out_cap)
 {
    int max_r = 100;
@@ -156,7 +316,11 @@ int handle_get_code_find(const char *query_string, char *out_buf, int out_cap)
    char project_filter[256] = "";
    if (!code_qparam(query_string, "identifier", identifier, sizeof(identifier)) || !identifier[0])
       return code_scan_write_error(out_buf, out_cap, "missing identifier");
-   code_qparam(query_string, "project", project_filter, sizeof(project_filter));
+   int all_projects = 0;
+   int scope_status = code_request_project(query_string, project_filter, sizeof(project_filter), 1,
+                                           &all_projects, out_buf, out_cap);
+   if (scope_status)
+      return scope_status;
 
    int max_r = 20;
    char max_r_s[16] = "";
@@ -173,7 +337,7 @@ int handle_get_code_find(const char *query_string, char *out_buf, int out_cap)
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"oom\"}");
       return 500;
    }
-   int n = canonical_index_find(identifier, hits, max_r);
+   int n = code_find_local_first(project_filter, all_projects, identifier, hits, max_r);
    if (n < 0)
    {
       free(hits);
@@ -192,7 +356,7 @@ int handle_get_code_find(const char *query_string, char *out_buf, int out_cap)
    cJSON *arr = cJSON_AddArrayToObject(resp, "hits");
    for (int i = 0; arr && i < n; i++)
    {
-      if (project_filter[0] && strcmp(hits[i].project, project_filter) != 0)
+      if (!all_projects && project_filter[0] && strcmp(hits[i].project, project_filter) != 0)
          continue;
       cJSON *hit = cJSON_CreateObject();
       cJSON_AddStringToObject(hit, "project", hits[i].project);
@@ -223,8 +387,10 @@ int handle_get_code_blast_radius(const char *query_string, char *out_buf, int ou
 {
    char project[256] = "";
    char file_path[4096] = "";
-   if (!code_qparam(query_string, "project", project, sizeof(project)) || !project[0])
-      return code_scan_write_error(out_buf, out_cap, "missing project");
+   int scope_status =
+       code_request_project(query_string, project, sizeof(project), 0, NULL, out_buf, out_cap);
+   if (scope_status)
+      return scope_status;
    if (!code_qparam(query_string, "file_path", file_path, sizeof(file_path)) || !file_path[0])
       return code_scan_write_error(out_buf, out_cap, "missing file_path");
 
@@ -248,15 +414,7 @@ int handle_get_code_blast_radius(const char *query_string, char *out_buf, int ou
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"oom\"}");
       return 500;
    }
-   cJSON_AddStringToObject(resp, "file", br->file);
-   cJSON *dependents = cJSON_AddArrayToObject(resp, "dependents");
-   for (int i = 0; dependents && i < br->dependent_count; i++)
-      cJSON_AddItemToArray(dependents, cJSON_CreateString(br->dependents[i]));
-   cJSON_AddNumberToObject(resp, "dependent_count", br->dependent_count);
-   cJSON *dependencies = cJSON_AddArrayToObject(resp, "dependencies");
-   for (int i = 0; dependencies && i < br->dependency_count; i++)
-      cJSON_AddItemToArray(dependencies, cJSON_CreateString(br->dependencies[i]));
-   cJSON_AddNumberToObject(resp, "dependency_count", br->dependency_count);
+   code_blast_radius_json_fields(resp, br);
    char *json = cJSON_PrintUnformatted(resp);
    snprintf(out_buf, (size_t)out_cap, "%s", json ? json : "{\"file\":\"\"}");
    free(json);
@@ -277,8 +435,10 @@ int handle_get_code_structure(const char *query_string, char *out_buf, int out_c
 {
    char project[256] = "";
    char file_path[4096] = "";
-   if (!code_qparam(query_string, "project", project, sizeof(project)) || !project[0])
-      return code_scan_write_error(out_buf, out_cap, "missing project");
+   int scope_status =
+       code_request_project(query_string, project, sizeof(project), 0, NULL, out_buf, out_cap);
+   if (scope_status)
+      return scope_status;
    if (!code_qparam(query_string, "file_path", file_path, sizeof(file_path)) || !file_path[0])
       return code_scan_write_error(out_buf, out_cap, "missing file_path");
 
@@ -346,7 +506,11 @@ int handle_get_code_search(const char *query_string, char *out_buf, int out_cap)
    char project[256] = "";
    if (!code_qparam(query_string, "query", query, sizeof(query)) || !query[0])
       return code_scan_write_error(out_buf, out_cap, "missing query");
-   code_qparam(query_string, "project", project, sizeof(project));
+   int all_projects = 0;
+   int scope_status = code_request_project(query_string, project, sizeof(project), 1, &all_projects,
+                                           out_buf, out_cap);
+   if (scope_status)
+      return scope_status;
 
    int max_r = 20;
    char max_r_s[16] = "";
@@ -365,9 +529,8 @@ int handle_get_code_search(const char *query_string, char *out_buf, int out_cap)
    }
    /* Enrich matched-line spans only when ingress compression is enabled (the
     * lossy-fold consumer). Default-off keeps the query and JSON identical. */
-   config_t scfg;
-   int enrich = (config_load(&scfg) == 0 && scfg.ingress_compress_enabled) ? 1 : 0;
-   int n = canonical_index_code_search(query, project[0] ? project : NULL, hits, max_r, enrich);
+   int enrich = (config_present() && config_ingress_compress_enabled()) ? 1 : 0;
+   int n = code_search_local_first(project, all_projects, query, hits, max_r, enrich);
    if (n < 0)
    {
       free(hits);
@@ -422,7 +585,11 @@ int handle_get_code_callers(const char *query_string, char *out_buf, int out_cap
    char project[256] = "";
    if (!code_qparam(query_string, "symbol", symbol, sizeof(symbol)) || !symbol[0])
       return code_scan_write_error(out_buf, out_cap, "missing symbol");
-   code_qparam(query_string, "project", project, sizeof(project));
+   int all_projects = 0;
+   int scope_status = code_request_project(query_string, project, sizeof(project), 1, &all_projects,
+                                           out_buf, out_cap);
+   if (scope_status)
+      return scope_status;
 
    int max_r = 20;
    char max_r_s[16] = "";
@@ -439,7 +606,7 @@ int handle_get_code_callers(const char *query_string, char *out_buf, int out_cap
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"oom\"}");
       return 500;
    }
-   int n = canonical_index_find_callers(project[0] ? project : NULL, symbol, hits, max_r);
+   int n = code_callers_local_first(project, all_projects, symbol, hits, max_r);
    if (n < 0)
    {
       free(hits);
@@ -486,8 +653,10 @@ int handle_get_code_callers_route(const char *method, const char *query_string, 
 int handle_get_code_project_stats(const char *query_string, char *out_buf, int out_cap)
 {
    char project[256] = "";
-   if (!code_qparam(query_string, "project", project, sizeof(project)) || !project[0])
-      return code_scan_write_error(out_buf, out_cap, "missing project");
+   int scope_status =
+       code_request_project(query_string, project, sizeof(project), 0, NULL, out_buf, out_cap);
+   if (scope_status)
+      return scope_status;
 
    int files = 0;
    int defs = 0;
@@ -632,8 +801,10 @@ static int handle_get_code_cross_repo_review(const char *project, char *out_buf,
 int handle_get_code_cross_repo_deps(const char *query_string, char *out_buf, int out_cap)
 {
    char project[256] = "", dir_s[16] = "", tier_s[16] = "", status_s[16] = "", dry_s[8] = "";
-   if (!code_qparam(query_string, "project", project, sizeof(project)) || !project[0])
-      return code_scan_write_error(out_buf, out_cap, "missing project");
+   int scope_status =
+       code_request_project(query_string, project, sizeof(project), 0, NULL, out_buf, out_cap);
+   if (scope_status)
+      return scope_status;
    code_qparam(query_string, "direction", dir_s, sizeof(dir_s));
    code_qparam(query_string, "min_tier", tier_s, sizeof(tier_s));
    code_qparam(query_string, "status", status_s, sizeof(status_s));
@@ -778,6 +949,53 @@ int handle_get_code_cross_repo_deps_route(const char *method, const char *query_
 #define HYBRID_WHY_MAX    5
 #define HYBRID_TRUST_MAX  2000
 
+typedef struct
+{
+   char project[128];
+   char file_path[MAX_PATH_LEN];
+} hybrid_candidate_t;
+
+/* RRF's fixed-width id is an opaque key, not enough room for an arbitrary
+ * project plus MAX_PATH_LEN path. Intern the exact pair and fuse on its small
+ * array index so same-path files in different projects never collapse. */
+static int hybrid_candidate_intern(hybrid_candidate_t *candidates, int *count, int max,
+                                   const char *project, const char *file_path)
+{
+   if (!candidates || !count || !file_path || !file_path[0])
+      return -1;
+   const char *p = project ? project : "";
+   for (int i = 0; i < *count; i++)
+      if (strcmp(candidates[i].project, p) == 0 && strcmp(candidates[i].file_path, file_path) == 0)
+         return i;
+   if (*count >= max)
+      return -1;
+   int id = (*count)++;
+   snprintf(candidates[id].project, sizeof(candidates[id].project), "%s", p);
+   snprintf(candidates[id].file_path, sizeof(candidates[id].file_path), "%s", file_path);
+   return id;
+}
+
+static void hybrid_candidate_key(int id, char *out, size_t out_cap)
+{
+   snprintf(out, out_cap, "%04d", id);
+}
+
+static int hybrid_candidate_id(const char *key, int count)
+{
+   if (!key || !key[0])
+      return -1;
+   char *end = NULL;
+   long id = strtol(key, &end, 10);
+   return end && !*end && id >= 0 && id < count ? (int)id : -1;
+}
+
+static int hybrid_candidate_matches(const hybrid_candidate_t *candidate, const char *project,
+                                    const char *file_path)
+{
+   return candidate && file_path && strcmp(candidate->project, project ? project : "") == 0 &&
+          strcmp(candidate->file_path, file_path) == 0;
+}
+
 /* §3 actuation: reflect the project's retrieval-outcome ledger into an RRF trust
  * table keyed by node id (the same file-path id space the hybrid signals use).
  * Returns the number of trust entries (<= max), 0 if none/unavailable. Best-effort:
@@ -831,7 +1049,11 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
    if (!code_qparam(query_string, "query", query, sizeof(query)) || !query[0])
       return code_scan_write_error(out_buf, out_cap, "missing query");
    code_qparam(query_string, "symbol", symbol, sizeof(symbol));
-   code_qparam(query_string, "project", project, sizeof(project));
+   int all_projects = 0;
+   int scope_status = code_request_project(query_string, project, sizeof(project), 1, &all_projects,
+                                           out_buf, out_cap);
+   if (scope_status)
+      return scope_status;
    const char *proj = project[0] ? project : NULL;
 
    int max_r = 20;
@@ -859,8 +1081,9 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
    char(*vpaths)[256] = calloc(HYBRID_PER_SIGNAL, sizeof(*vpaths));
    double *vscores = calloc(HYBRID_PER_SIGNAL, sizeof(*vscores));
    kb_rrf_result_t *fused = calloc(HYBRID_PER_SIGNAL * 4, sizeof(*fused));
+   hybrid_candidate_t *candidates = calloc(HYBRID_PER_SIGNAL * 4, sizeof(*candidates));
    if (!chits || !ghits || !mems || !code_items || !graph_items || !vector_items || !memory_items ||
-       !vpaths || !vscores || !fused)
+       !vpaths || !vscores || !fused || !candidates)
    {
       free(chits);
       free(ghits);
@@ -872,52 +1095,64 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
       free(vpaths);
       free(vscores);
       free(fused);
+      free(candidates);
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"oom\"}");
       return 500;
    }
+   int candidate_count = 0;
 
-   /* Signal A — lexical code (key = file_path). No span enrichment here — hybrid
-    * ranking does not surface matched-line spans. */
-   int nc = canonical_index_code_search(query, proj, chits, HYBRID_PER_SIGNAL, 0);
+   /* Signal A — lexical code (key = stable project + file_path). No span
+    * enrichment here — hybrid ranking does not surface matched-line spans. */
+   int nc = code_search_local_first(project, all_projects, query, chits, HYBRID_PER_SIGNAL, 0);
    if (nc < 0)
       nc = 0;
+   int ncode = 0;
    for (int i = 0; i < nc; i++)
    {
-      snprintf(code_items[i].id, sizeof(code_items[i].id), "%s", chits[i].file_path);
-      code_items[i].structural_weight = 0;
+      int id = hybrid_candidate_intern(candidates, &candidate_count, HYBRID_PER_SIGNAL * 4,
+                                       chits[i].project, chits[i].file_path);
+      if (id < 0)
+         continue;
+      hybrid_candidate_key(id, code_items[ncode].id, sizeof(code_items[ncode].id));
+      code_items[ncode++].structural_weight = 0;
    }
 
-   /* Signal B — graph callers of `symbol` (key = file_path; structural edge).
+   /* Signal B — graph callers of `symbol` (key = project + file_path;
+    * structural edge).
     * Pass `proj` (NULL when absent) to match Signal A and the existing
     * /v1/code/callers route — canonical_index_find_callers takes its all-projects
     * SQL path on NULL, so both legs scope identically instead of one searching all
     * projects (NULL) while the other got "" (which is not the all-projects sentinel). */
    int ng = 0;
+   int ngraph = 0;
    if (symbol[0])
    {
-      ng = canonical_index_find_callers(proj, symbol, ghits, HYBRID_PER_SIGNAL);
+      ng = code_callers_local_first(project, all_projects, symbol, ghits, HYBRID_PER_SIGNAL);
       if (ng < 0)
          ng = 0;
       for (int i = 0; i < ng; i++)
       {
-         snprintf(graph_items[i].id, sizeof(graph_items[i].id), "%s", ghits[i].file_path);
-         graph_items[i].structural_weight = 1; /* a structural call edge */
+         int id = hybrid_candidate_intern(candidates, &candidate_count, HYBRID_PER_SIGNAL * 4,
+                                          ghits[i].project, ghits[i].file_path);
+         if (id < 0)
+            continue;
+         hybrid_candidate_key(id, graph_items[ngraph].id, sizeof(graph_items[ngraph].id));
+         graph_items[ngraph++].structural_weight = 1; /* a structural call edge */
       }
    }
 
    /* Per-signal RRF weights + rank constant are config-tunable (§5). */
-   config_t hcfg;
    double w_code = 1.0, w_graph = 1.0, w_vector = 1.0, w_memory = 1.0, rrf_k = KB_RRF_DEFAULT_K;
    int trust_on = 0; /* §3 actuation gate (default off) */
-   if (config_load(&hcfg) == 0)
+   if (config_present())
    {
-      w_code = hcfg.code_hybrid_weight_code;
-      w_graph = hcfg.code_hybrid_weight_graph;
-      w_vector = hcfg.code_hybrid_weight_vector;
-      w_memory = hcfg.code_hybrid_weight_memory;
-      if (hcfg.code_hybrid_rrf_k > 0)
-         rrf_k = hcfg.code_hybrid_rrf_k;
-      trust_on = hcfg.code_trust_actuation_enabled;
+      w_code = config_code_hybrid_weight_code();
+      w_graph = config_code_hybrid_weight_graph();
+      w_vector = config_code_hybrid_weight_vector();
+      w_memory = config_code_hybrid_weight_memory();
+      if (config_code_hybrid_rrf_k() > 0)
+         rrf_k = config_code_hybrid_rrf_k();
+      trust_on = config_code_trust_actuation_enabled();
    }
 
    /* Signal C — vector similarity (key = file_path; §5). Embed the query and
@@ -926,25 +1161,38 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
     * builtin vs a 2560-dim corpus) or a down/unconfigured embedder the leg is
     * simply empty and the route degrades to code+graph. w_vector<=0 disables it. */
    int nv = 0;
-   if (w_vector > 0.0)
+   int nvector = 0;
+   kb_code_vector_status_t vector_status = KB_CODE_VECTOR_STATUS_INITIALIZER;
+   /* The vector API returns paths without owning projects. It is therefore safe
+    * only with an active project, which is also the bucket queried here. */
+   if (w_vector > 0.0 && project[0])
    {
-      const char *embed_cmd = config_embedding_command(&hcfg, NULL);
+      const char *embed_cmd = config_embedding_command_current(NULL);
       float qvec[EMBED_MAX_DIM];
-      int qdim = memory_embed_text(query, embed_cmd, qvec, EMBED_MAX_DIM);
+      int qdim = memory_embed_text(query, embed_cmd, EMBED_INPUT_QUERY, qvec, EMBED_MAX_DIM);
       if (qdim > 0 && qdim == db2_embedding_dim())
       {
-         nv = pgvec_code_search_paths(proj, qvec, qdim, HYBRID_PER_SIGNAL, (char *)vpaths,
-                                      (int)sizeof(vpaths[0]), vscores, HYBRID_PER_SIGNAL);
+         int vector_rc =
+             pgvec_code_search_paths(proj, qvec, qdim, HYBRID_PER_SIGNAL, (char *)vpaths,
+                                     (int)sizeof(vpaths[0]), vscores, HYBRID_PER_SIGNAL);
+         nv = vector_rc;
          if (nv < 0)
             nv = 0;
          for (int i = 0; i < nv; i++)
          {
-            snprintf(vector_items[i].id, sizeof(vector_items[i].id), "%s", vpaths[i]);
-            vector_items[i].structural_weight = 0;
+            int id = hybrid_candidate_intern(candidates, &candidate_count, HYBRID_PER_SIGNAL * 4,
+                                             project, vpaths[i]);
+            if (id < 0)
+               continue;
+            hybrid_candidate_key(id, vector_items[nvector].id, sizeof(vector_items[nvector].id));
+            vector_items[nvector++].structural_weight = 0;
          }
+         kb_code_vector_status_store(&vector_status, vector_rc, nv);
       }
+      else
+         kb_code_vector_status_embed(&vector_status, embed_cmd, qdim, db2_embedding_dim(),
+                                     memory_embedder_last_result_unauthorized());
    }
-
    /* Signal D — cross-session memory / knowledge graph (§6 fusion). Symbol-anchored
     * like the graph leg: seed the symbol's entity node and walk its incident
     * knowledge-graph edges (built by the curator across sessions), resolving each
@@ -952,7 +1200,7 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
     * with the symbol — a signal a regenerated code-only snapshot can never hold.
     * w_memory<=0 disables it; absent a symbol or an entity graph it is simply empty. */
    int nmem = 0;
-   if (w_memory > 0.0 && symbol[0])
+   if (w_memory > 0.0 && symbol[0] && project[0])
    {
       char skey[GRAPH_ENDPOINT_MAX];
       db2_entity_edge_explain_t *eedges = calloc(HYBRID_PER_SIGNAL, sizeof(*eedges));
@@ -969,16 +1217,22 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
             db2_entity_node_t node;
             if (db2_entity_node_get(neighbor, &node) != 0 || !node.file_path[0])
                continue;
-            int dup = 0; /* keep the best-ranked row per file (edges arrive weight-desc) */
+            int id = hybrid_candidate_intern(candidates, &candidate_count, HYBRID_PER_SIGNAL * 4,
+                                             project, node.file_path);
+            if (id < 0)
+               continue;
+            char key[sizeof(memory_items[0].id)];
+            hybrid_candidate_key(id, key, sizeof(key));
+            int dup = 0; /* keep the best-ranked row per project/file pair */
             for (int j = 0; j < nmem; j++)
-               if (strcmp(memory_items[j].id, node.file_path) == 0)
+               if (strcmp(memory_items[j].id, key) == 0)
                {
                   dup = 1;
                   break;
                }
             if (dup)
                continue;
-            snprintf(memory_items[nmem].id, sizeof(memory_items[nmem].id), "%s", node.file_path);
+            snprintf(memory_items[nmem].id, sizeof(memory_items[nmem].id), "%s", key);
             memory_items[nmem].structural_weight = eedges[i].structural_weight;
             nmem++;
          }
@@ -987,9 +1241,9 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
    }
 
    kb_rrf_signal_t sigs[4] = {
-       {code_items, nc, w_code, "code"},
-       {graph_items, ng, w_graph, "graph"},
-       {vector_items, nv, w_vector, "vector"},
+       {code_items, ncode, w_code, "code"},
+       {graph_items, ngraph, w_graph, "graph"},
+       {vector_items, nvector, w_vector, "vector"},
        {memory_items, nmem, w_memory, "memory"},
    };
    /* §3 actuation (default off): apply the project's earned-trust lessons as an RRF
@@ -1002,17 +1256,50 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
    {
       trust = calloc(HYBRID_TRUST_MAX, sizeof(*trust));
       if (trust)
-         nt = hybrid_fetch_trust(project, trust, HYBRID_TRUST_MAX);
+      {
+         kb_rrf_trust_t *raw = calloc(HYBRID_TRUST_MAX, sizeof(*raw));
+         int nr = raw ? hybrid_fetch_trust(project, raw, HYBRID_TRUST_MAX) : 0;
+         for (int i = 0; i < nr && nt < HYBRID_TRUST_MAX; i++)
+            for (int j = 0; j < candidate_count; j++)
+               if (strcmp(candidates[j].project, project) == 0 &&
+                   strcmp(candidates[j].file_path, raw[i].id) == 0)
+               {
+                  hybrid_candidate_key(j, trust[nt].id, sizeof(trust[nt].id));
+                  trust[nt++].trust = raw[i].trust;
+                  break;
+               }
+         free(raw);
+      }
    }
    int nf = kb_rrf_fuse_trust(sigs, 4, rrf_k, trust, nt, fused, HYBRID_PER_SIGNAL * 4);
    free(trust);
    if (nf < 0)
       nf = 0;
+
+   /* RRF orders relevance within a scope bucket. For an explicit broad query,
+    * stable-partition the fused rows so the active-project bucket still owns
+    * the head before the caller's final result limit. */
+   if (all_projects && project[0] && nf > 1)
+   {
+      kb_rrf_result_t ordered[HYBRID_PER_SIGNAL * 4];
+      int pos = 0;
+      for (int pass = 0; pass < 2; pass++)
+         for (int i = 0; i < nf; i++)
+         {
+            int id = hybrid_candidate_id(fused[i].id, candidate_count);
+            int local = id >= 0 && strcmp(candidates[id].project, project) == 0;
+            if ((pass == 0 && local) || (pass == 1 && !local))
+               ordered[pos++] = fused[i];
+         }
+      memcpy(fused, ordered, (size_t)nf * sizeof(*fused));
+   }
    if (nf > max_r)
       nf = max_r;
 
    /* Memory "why" context (recorded reasoning, capped). */
-   int nm = db2_memory_find_facts_like(query, HYBRID_WHY_MAX, mems, HYBRID_PER_SIGNAL);
+   int nm = project[0] ? memory_find_facts_visible_ex(query, NULL, project, all_projects,
+                                                      HYBRID_WHY_MAX, mems, HYBRID_PER_SIGNAL)
+                       : db2_memory_find_facts_like(query, HYBRID_WHY_MAX, mems, HYBRID_PER_SIGNAL);
    if (nm < 0)
       nm = 0;
    if (nm > HYBRID_WHY_MAX)
@@ -1031,10 +1318,12 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
       free(vpaths);
       free(vscores);
       free(fused);
+      free(candidates);
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"oom\"}");
       return 500;
    }
    cJSON_AddStringToObject(resp, "status", "ok");
+   kb_code_vector_status_add_json(resp, &vector_status);
    cJSON_AddStringToObject(resp, "query", query);
    if (symbol[0])
       cJSON_AddStringToObject(resp, "symbol", symbol);
@@ -1044,18 +1333,24 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
    cJSON *results = cJSON_AddArrayToObject(resp, "results");
    for (int i = 0; results && i < nf; i++)
    {
-      const char *fp = fused[i].id;
+      int candidate_id = hybrid_candidate_id(fused[i].id, candidate_count);
+      if (candidate_id < 0)
+         continue;
+      const hybrid_candidate_t *candidate = &candidates[candidate_id];
+      const char *fp = candidate->file_path;
       cJSON *row = cJSON_CreateObject();
       if (!row)
          continue;
       cJSON_AddStringToObject(row, "file_path", fp);
+      if (candidate->project[0])
+         cJSON_AddStringToObject(row, "project", candidate->project);
       cJSON_AddNumberToObject(row, "score", fused[i].score);
       cJSON_AddNumberToObject(row, "signal_hits", fused[i].signal_hits);
       cJSON_AddNumberToObject(row, "structural_weight", fused[i].structural_weight);
       cJSON *which = cJSON_AddArrayToObject(row, "signals");
       /* Enrich + label from whichever source(s) carried this file. */
       for (int j = 0; j < nc; j++)
-         if (strcmp(chits[j].file_path, fp) == 0)
+         if (hybrid_candidate_matches(candidate, chits[j].project, chits[j].file_path))
          {
             if (which)
                cJSON_AddItemToArray(which, cJSON_CreateString("code"));
@@ -1065,7 +1360,7 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
             break;
          }
       for (int j = 0; j < ng; j++)
-         if (strcmp(ghits[j].file_path, fp) == 0)
+         if (hybrid_candidate_matches(candidate, ghits[j].project, ghits[j].file_path))
          {
             if (which)
                cJSON_AddItemToArray(which, cJSON_CreateString("graph"));
@@ -1074,7 +1369,7 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
             break;
          }
       for (int j = 0; j < nv; j++)
-         if (strcmp(vpaths[j], fp) == 0)
+         if (hybrid_candidate_matches(candidate, project, vpaths[j]))
          {
             if (which)
                cJSON_AddItemToArray(which, cJSON_CreateString("vector"));
@@ -1082,7 +1377,7 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
             break;
          }
       for (int j = 0; j < nmem; j++)
-         if (strcmp(memory_items[j].id, fp) == 0)
+         if (strcmp(memory_items[j].id, fused[i].id) == 0)
          {
             if (which)
                cJSON_AddItemToArray(which, cJSON_CreateString("memory"));
@@ -1136,6 +1431,7 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
    free(vpaths);
    free(vscores);
    free(fused);
+   free(candidates);
    return status;
 }
 
@@ -1159,8 +1455,10 @@ int handle_get_code_hybrid_route(const char *method, const char *query_string, c
 int handle_get_code_graph_hubs(const char *query_string, char *out_buf, int out_cap)
 {
    char project[256] = "";
-   if (!code_qparam(query_string, "project", project, sizeof(project)) || !project[0])
-      return code_scan_write_error(out_buf, out_cap, "missing project");
+   int scope_status =
+       code_request_project(query_string, project, sizeof(project), 0, NULL, out_buf, out_cap);
+   if (scope_status)
+      return scope_status;
 
    int max_r = 20;
    char mr[16] = "";
@@ -1279,8 +1577,10 @@ int handle_get_code_graph(const char *query_string, char *out_buf, int out_cap)
 {
    char project[256] = "";
    char node[512] = "";
-   if (!code_qparam(query_string, "project", project, sizeof(project)) || !project[0])
-      return code_scan_write_error(out_buf, out_cap, "missing project");
+   int scope_status =
+       code_request_project(query_string, project, sizeof(project), 0, NULL, out_buf, out_cap);
+   if (scope_status)
+      return scope_status;
    if (!code_qparam(query_string, "node", node, sizeof(node)) || !node[0])
       return code_scan_write_error(out_buf, out_cap, "missing node");
 
@@ -1473,8 +1773,10 @@ static void surprising_stats_add(const char *project, int dj, int dc)
 int handle_get_code_graph_surprising(const char *query_string, char *out_buf, int out_cap)
 {
    char project[256] = "";
-   if (!code_qparam(query_string, "project", project, sizeof(project)) || !project[0])
-      return code_scan_write_error(out_buf, out_cap, "missing project");
+   int scope_status =
+       code_request_project(query_string, project, sizeof(project), 0, NULL, out_buf, out_cap);
+   if (scope_status)
+      return scope_status;
 
    char tmp[32] = "";
    int max_r = 20;
@@ -1626,9 +1928,8 @@ int handle_get_code_graph_surprising(const char *query_string, char *out_buf, in
     * structural generator's precision (confirmed/judged); when NOT judging, suppress
     * the unjudged candidates if that sampled precision has fallen below the configured
     * floor — they'd be mostly false positives. Floor <= 0 (default) disables it. */
-   config_t scfg;
-   int have_cfg = (config_load(&scfg) == 0);
-   double precision_floor = have_cfg ? scfg.code_surprising_precision_floor : 0.0;
+   int have_cfg = config_present();
+   double precision_floor = have_cfg ? config_code_surprising_precision_floor() : 0.0;
    int stat_judged = 0, stat_confirmed = 0;
    surprising_stats_get(project, &stat_judged, &stat_confirmed);
    int suppressed = 0;
@@ -1654,8 +1955,11 @@ int handle_get_code_graph_surprising(const char *query_string, char *out_buf, in
       if (verdicts)
       {
          char jerr[256] = "";
-         int r = kb_surprising_judge(&scfg, scfg.kb_curator_judge_command, project, out, jn,
-                                     verdicts, jerr, sizeof(jerr));
+         /* Copied out: the command reaches the judge, which runs a sidecar or a
+          * provider round trip. */
+         char judge_cmd[CONFIG_COPY_MAX];
+         config_kb_curator_judge_command_copy(judge_cmd, sizeof(judge_cmd));
+         int r = kb_surprising_judge(judge_cmd, project, out, jn, verdicts, jerr, sizeof(jerr));
          if (r > 0)
          {
             judged_n = r;
@@ -1912,6 +2216,177 @@ int handle_post_code_scan_route(const char *method, const char *body, char *out_
    return handle_post_code_scan(body, out_buf, out_cap);
 }
 
+static int code_project_manifest_response(const char *operation, const code_project_manifest_t *m,
+                                          char *out_buf, int out_cap)
+{
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return code_scan_write_error(out_buf, out_cap, "out of memory");
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddStringToObject(resp, "operation", operation);
+   cJSON_AddStringToObject(resp, "project", m->project);
+   cJSON_AddNumberToObject(resp, "generation", (double)m->generation);
+   cJSON_AddStringToObject(resp, "mode", m->mode);
+   if (m->criteria[0])
+      cJSON_AddStringToObject(resp, "criteria", m->criteria);
+   cJSON_AddStringToObject(resp, "manifest_hash", m->manifest_hash);
+   cJSON_AddNumberToObject(resp, "total_rows", (double)m->total_rows);
+   cJSON *counts = cJSON_AddObjectToObject(resp, "counts");
+   for (int i = 0; counts && i < m->target_count; i++)
+      cJSON_AddNumberToObject(counts, m->targets[i].table, (double)m->targets[i].rows);
+   cJSON *fingerprints = cJSON_AddObjectToObject(resp, "target_fingerprints");
+   for (int i = 0; fingerprints && i < m->target_count; i++)
+      cJSON_AddStringToObject(fingerprints, m->targets[i].table, m->targets[i].fingerprint);
+   char *json = cJSON_PrintUnformatted(resp);
+   snprintf(out_buf, (size_t)out_cap, "%s", json ? json : "{\"error\":\"out of memory\"}");
+   free(json);
+   cJSON_Delete(resp);
+   return 200;
+}
+
+int handle_post_code_project_lifecycle_route(const char *method, const char *operation,
+                                             const char *body, char *out_buf, int out_cap,
+                                             int owner)
+{
+   if (strcmp(method, "POST") != 0)
+      return code_method_not_allowed(out_buf, out_cap);
+   if (!owner)
+   {
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"forbidden: index lifecycle requires the owner credential\"}");
+      return 403;
+   }
+   cJSON *root = cJSON_Parse(body ? body : "{}");
+   if (!root)
+      return code_scan_write_error(out_buf, out_cap, "invalid json");
+   const cJSON *jp = cJSON_GetObjectItemCaseSensitive(root, "project");
+   const cJSON *jh = cJSON_GetObjectItemCaseSensitive(root, "confirm_hash");
+   const cJSON *jr = cJSON_GetObjectItemCaseSensitive(root, "reason");
+   const cJSON *jd = cJSON_GetObjectItemCaseSensitive(root, "retention_days");
+   const char *project = cJSON_IsString(jp) ? jp->valuestring : "";
+   const char *hash = cJSON_IsString(jh) ? jh->valuestring : "";
+   const char *reason = cJSON_IsString(jr) ? jr->valuestring : "";
+   int retention_days = cJSON_IsNumber(jd) ? jd->valueint : 30;
+   if (!project[0])
+   {
+      cJSON_Delete(root);
+      return code_scan_write_error(out_buf, out_cap, "missing project");
+   }
+   if (strlen(project) >= sizeof(((code_project_manifest_t *)0)->project))
+   {
+      cJSON_Delete(root);
+      return code_scan_write_error(out_buf, out_cap, "project must be at most 255 characters");
+   }
+   if (retention_days < 0 || retention_days > 3650)
+   {
+      cJSON_Delete(root);
+      return code_scan_write_error(out_buf, out_cap, "retention_days must be 0..3650");
+   }
+   if (reason[0] && strlen(reason) > 512)
+   {
+      cJSON_Delete(root);
+      return code_scan_write_error(out_buf, out_cap, "reason must be at most 512 characters");
+   }
+
+   /* Audit attribution is derived only from the authenticated request context.
+    * Never accept a body-supplied principal: it is an assertion by the caller,
+    * not verified identity.  The owner gate above deliberately requires a real
+    * actor even for dry runs so auth-off deployments cannot anonymously operate
+    * lifecycle controls. */
+   char principal[576] = "";
+   const kb_principal_t *actor = kb_reqctx_actor();
+   if (!actor || kb_identity_key(actor, principal, sizeof(principal)) != 0)
+   {
+      cJSON_Delete(root);
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"forbidden: verified lifecycle principal required\"}");
+      return 403;
+   }
+
+   int rc;
+   code_project_manifest_t manifest;
+   memset(&manifest, 0, sizeof(manifest));
+   if (strcmp(operation, "detach") == 0)
+   {
+      int64_t generation = 0;
+      rc = db2_code_project_detach(project, principal, &generation);
+      if (rc == 0)
+      {
+         cJSON_Delete(root);
+         cJSON *resp = cJSON_CreateObject();
+         if (!resp)
+            return code_scan_write_error(out_buf, out_cap, "out of memory");
+         cJSON_AddStringToObject(resp, "status", "ok");
+         cJSON_AddStringToObject(resp, "operation", "detach");
+         cJSON_AddStringToObject(resp, "project", project);
+         cJSON_AddNumberToObject(resp, "generation", (double)generation);
+         cJSON_AddStringToObject(resp, "state", "detached");
+         char *json = cJSON_PrintUnformatted(resp);
+         snprintf(out_buf, (size_t)out_cap, "%s", json ? json : "{\"error\":\"out of memory\"}");
+         free(json);
+         cJSON_Delete(resp);
+         return 200;
+      }
+   }
+   else if (strcmp(operation, "purge") == 0)
+   {
+      if (hash[0] && !reason[0])
+      {
+         cJSON_Delete(root);
+         return code_scan_write_error(out_buf, out_cap, "confirmed purge requires reason");
+      }
+      rc = hash[0] ? db2_code_project_purge_confirm(project, hash, principal, reason, &manifest)
+                   : db2_code_project_purge_manifest(project, &manifest);
+      if (rc == 0)
+      {
+         cJSON_Delete(root);
+         return code_project_manifest_response(operation, &manifest, out_buf, out_cap);
+      }
+   }
+   else if (strcmp(operation, "gc") == 0)
+   {
+      if (hash[0] && !reason[0])
+      {
+         cJSON_Delete(root);
+         return code_scan_write_error(out_buf, out_cap, "confirmed gc requires reason");
+      }
+      rc = hash[0] ? db2_code_project_gc_confirm(project, retention_days, hash, principal, reason,
+                                                 &manifest)
+                   : db2_code_project_gc_manifest(project, retention_days, &manifest);
+      if (rc == 0)
+      {
+         cJSON_Delete(root);
+         return code_project_manifest_response(operation, &manifest, out_buf, out_cap);
+      }
+   }
+   else
+   {
+      cJSON_Delete(root);
+      return code_scan_write_error(out_buf, out_cap, "unknown lifecycle operation");
+   }
+   cJSON_Delete(root);
+   if (rc == CODE_PROJECT_LIFECYCLE_NOT_FOUND)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"project not found\"}");
+      return 404;
+   }
+   if (rc == CODE_PROJECT_LIFECYCLE_HASH_MISMATCH)
+   {
+      snprintf(
+          out_buf, (size_t)out_cap,
+          "{\"error\":\"manifest changed; run dry-run again\",\"code\":\"manifest_mismatch\"}");
+      return 409;
+   }
+   if (rc == CODE_PROJECT_LIFECYCLE_AUDIT_FAILED)
+   {
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"audit commit failed; mutation refused\",\"code\":\"audit_failed\"}");
+      return 503;
+   }
+   snprintf(out_buf, (size_t)out_cap, "{\"error\":\"index lifecycle operation failed\"}");
+   return 503;
+}
+
 /* S7: POST /v1/code/repo-trust {project, trust:"trusted"|"untrusted", actor?,
  * request_id?}. `owner` (caller holds the unscoped owner credential) is required:
  * a scoped token must not be able to flip trust. Applies the audited db2 trust
@@ -1976,11 +2451,10 @@ int handle_post_code_repo_trust(const char *body, char *out_buf, int out_cap, in
    int recomputed = -1; /* -1 = not attempted (no change); >=0 rows; -1 on a recompute error too */
    if (changed)
    {
-      config_t cfg;
-      if (config_load(&cfg) == 0)
-         recomputed = db2_cross_repo_recompute_blocked_symbols(cfg.kb_curator_cross_repo_k,
-                                                               cfg.kb_curator_cross_repo_m,
-                                                               cfg.kb_curator_cross_repo_len_min);
+      if (config_present())
+         recomputed = db2_cross_repo_recompute_blocked_symbols(
+             config_kb_curator_cross_repo_k(), config_kb_curator_cross_repo_m(),
+             config_kb_curator_cross_repo_len_min());
    }
 
    /* Build via cJSON so the (owner-supplied) project name is JSON-escaped rather

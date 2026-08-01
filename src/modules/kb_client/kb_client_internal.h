@@ -9,6 +9,11 @@
  * constructing arbitrary /v1 calls. */
 const char *kb_client_v1_base_url(void);
 char *kb_client_v1_post_json(const char *path, cJSON *body, int timeout_ms, int *status_out);
+/* As above, but returns the response body on a NON-2xx status instead of
+ * discarding it, so the caller can report what the knowledge service actually
+ * said rather than a synthesised status line. */
+char *kb_client_v1_post_json_keep_error(const char *path, cJSON *body, int timeout_ms,
+                                        int *status_out);
 char *kb_client_v1_post_body(const char *path, const char *body, int timeout_ms, int *status_out);
 char *kb_client_v1_post_body_with_type(const char *path, const char *body, const char *content_type,
                                        int timeout_ms, int *status_out);

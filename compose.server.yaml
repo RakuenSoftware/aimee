@@ -9,11 +9,11 @@
 #
 #   docker compose -f compose.server.yaml up --build
 #
-# Server /v1 on :8743 over native TLS (`aimee-local-dev` is bootstrap enrollment-only
-# and can call only bearer rotation; trust/pin the auto-provisioned certificate first);
+# Server /v1 on :8743 over native TLS; its API primary is Vault-only (optionally
+# inject AIMEE_API_BEARER_TOKEN on first boot when an operator-known value is needed);
 # kb /v1 is on :8741. The aimee-runtime-web
-# browser UI is on https://localhost:8443 (self-signed; log in as
-# AIMEE_WEBCHAT_USER / AIMEE_WEBCHAT_PASSWORD, default aimee / aimee-local-dev).
+# browser UI is on https://localhost:8443 (self-signed; set both
+# AIMEE_WEBCHAT_USER / AIMEE_WEBCHAT_PASSWORD as first-boot Vault inputs).
 # Enrollment and verified health commands: docs/QUICKSTART.md section 1.3.
 services:
   # LEGACY torch embedder — retired from the default topology by the unified-llm
@@ -68,25 +68,29 @@ services:
       stack: 67108864
     environment:
       AIMEE_HOME: /var/lib/aimee
-      # Empty by default: the KB image owns PostgreSQL + pgvector for a new
-      # install. Set AIMEE_DB2_URL explicitly only to keep/use an external DB2.
-      AIMEE_DB2_URL: ${AIMEE_DB2_URL:-}
+      # External DB2 credentials are streamed into the KB Vault by the
+      # disposable Compose helper; never persist them in Config.Env.
       # One knob: embed + rerank + synth (curator Tier-A & B at {url}/v1) via the
       # unified aimee-llm container. The kb runs no model. Override
       # AIMEE_EMBEDDER_URL / AIMEE_RERANKER_URL to pin a service elsewhere.
-      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-http://aimee-llm:8080}
+      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-}
+      # The wizard's embedder choice, and the endpoint for an external one. The kb
+      # MUST receive both: `aimee config deploy-env` emits them, and without them
+      # reaching the container the entrypoint sees no selection, starts nothing, and
+      # the builtin serves forever — the wizard's embedder silently never runs.
+      EMBEDDER_MODEL: ${EMBEDDER_MODEL:-}
+      AIMEE_EMBEDDER_URL: ${AIMEE_EMBEDDER_URL:-}
       # Embedding dim — empty = config default 1024 (CPU tier); set 2560 for GPU.
       AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
-      # Internal-only enrollment/JWKS lane; never published on the host.
-      AIMEE_KB_MTLS_HOST: 0.0.0.0
+      # Internal-only enrollment/JWKS lane; never published on the host. The
+      # listener always binds all interfaces; this value is the advertised DNS
+      # name placed in its server certificate and must match the client endpoint.
+      AIMEE_KB_MTLS_HOST: aimee-kb
       AIMEE_KB_MTLS_PORT: "8745"
     # aimee-kb serves /v1 over HTTP only; the legacy --socket transport was retired (#2747).
     command: ["--http-port=8741"]
     ports:
       - "127.0.0.1:8741:8741"
-    depends_on:
-      aimee-llm:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8741/v1/health"]
       interval: 10s
@@ -94,6 +98,9 @@ services:
       retries: 5
     volumes:
       - aimee-kb-home:/var/lib/aimee
+      # kb.build/update receive server workspace paths; mount the same durable
+      # workspace volume at the same path so those paths are actually readable.
+      - aimee-server-workspaces:/var/lib/aimee-workspaces:ro
 
   aimee-server:
     restart: unless-stopped
@@ -123,18 +130,13 @@ services:
       AIMEE_SERVER_ID: ${AIMEE_SERVER_ID:-}
       AIMEE_SERVER_TEAM_ID: ${AIMEE_SERVER_TEAM_ID:-}
       AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE: ${AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE:-/run/aimee/management/jwks-trust-bundle.json}
-      AIMEE_KB_CONN: ${AIMEE_KB_CONN:-}
+      # The one-time AIMEE_KB_CONN enrollment credential is streamed into Vault.
       AIMEE_SERVER_HTTP_BIND: "1"
       # Browser webchat (HTTPS on :8443). ON by default — it is a first-class
-      # surface, built into the image (no credentials needed). Set
-      # AIMEE_RUNTIME_WEB_ENABLED=0 to ship server-only. The entrypoint provisions the
-      # single login account below via PAM; change it (and use a real password)
-      # for anything beyond local dev. Leave USER/PASSWORD unset to serve the UI
-      # with no account (login page up, nobody can sign in until one is
-      # provisioned).
-      AIMEE_RUNTIME_WEB_ENABLED: "1"
-      AIMEE_WEBCHAT_USER: aimee
-      AIMEE_WEBCHAT_PASSWORD: aimee-local-dev
+      # surface whose binary is built into the image. Set
+      # AIMEE_RUNTIME_WEB_ENABLED=0 to ship server-only. Set both variables on
+      # first boot through scripts/aimee-compose-vault-bootstrap.sh.
+      AIMEE_RUNTIME_WEB_ENABLED: ${AIMEE_RUNTIME_WEB_ENABLED:-1}
       # "Sign in with OAuth" (webchat → git host). Set the GitHub client ID +
       # secret for the seamless web (redirect) sign-in — register the OAuth App's
       # callback URL as <this-origin>/api/git/oauth/github/callback. Omit the secret
@@ -142,15 +144,13 @@ services:
       # device flow (client ID only). AIMEE_OAUTH_REDIRECT_BASE overrides the
       # callback origin behind a reverse proxy.
       AIMEE_GITHUB_OAUTH_CLIENT_ID: ${AIMEE_GITHUB_OAUTH_CLIENT_ID:-}
-      AIMEE_GITHUB_OAUTH_CLIENT_SECRET: ${AIMEE_GITHUB_OAUTH_CLIENT_SECRET:-}
       AIMEE_GITLAB_OAUTH_CLIENT_ID: ${AIMEE_GITLAB_OAUTH_CLIENT_ID:-}
       AIMEE_OAUTH_REDIRECT_BASE: ${AIMEE_OAUTH_REDIRECT_BASE:-}
-      # Delegate-vault auto-provisioning (optional): seal delegate API keys into
-      # the server-principal vault at startup so delegates work with no manual
-      # `aimee vault set`. Env form (agent lowercased) or a mounted JSON file;
-      # non-destructive unless AIMEE_DELEGATE_SECRETS_OVERWRITE=1.
+      # Optional first-boot delegate-key transport. The short-lived bootstrap
+      # seals each value into Vault, scrubs the environment, and re-execs before
+      # the long-lived server starts. Mounted plaintext secret files are
+      # intentionally unsupported; use Kubernetes/Docker env injection here.
       # AIMEE_DELEGATE_KEY_MISTRAL: ${AIMEE_DELEGATE_KEY_MISTRAL:-}
-      # AIMEE_DELEGATE_SECRETS_FILE: /run/secrets/aimee-delegates.json
     ports:
       # Remote /v1 is served over native TLS on 8743 (the server refuses to expose
       # plaintext /v1 off-loopback). Plaintext 8740 stays bound to 127.0.0.1 inside
@@ -196,38 +196,6 @@ services:
       timeout: 5s
       retries: 5
       # Long: the cold first boot downloads the multi-GB GGUF before /health is OK.
-      start_period: 1200s
-
-  # Unified llama.cpp+Vulkan container — the kb's single LLM backend (embed +
-  # rerank + synth on :8080). DEFAULT (the unified-llm cutover; the legacy
-  # embedder/llm services moved behind profiles). One model-less image; the tier is
-  # chosen at runtime via AIMEE_LLM_TIER (unset ≡ cpu) and models download to the
-  # /models volume on first boot. GPU = AIMEE_LLM_TIER=small|mid|large +
-  # AIMEE_LLM_NGL=99 + /dev/dri (deploy/compose/aimee.gpu.yaml). Internal only — kb
-  # reaches it at aimee-llm:8080; auth-off (kb sends no bearer).
-  # CI/dev: AIMEE_LLM_DOCKERFILE=Dockerfile.aimee-llm-stub + AIMEE_LLM_STUB=1.
-  aimee-llm:
-    restart: unless-stopped
-    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:${AIMEE_IMAGE_TAG:-latest}}
-    build:
-      context: .
-      dockerfile: ${AIMEE_LLM_DOCKERFILE:-Dockerfile.aimee-llm}
-    environment:
-      AIMEE_LLM_PORT: "8080"
-      AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-0}
-      AIMEE_LLM_TIER: ${AIMEE_LLM_TIER:-cpu}
-      AIMEE_LLM_AUTH_TOKEN: ${AIMEE_LLM_AUTH_TOKEN:-}
-      AIMEE_LLM_STUB: ${AIMEE_LLM_STUB:-}
-      AIMEE_LLM_STUB_DIM: ${AIMEE_LLM_STUB_DIM:-}
-    volumes:
-      # Persist the downloaded per-tier GGUFs so restarts don't re-fetch.
-      - aimee-llm-models:/models
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      # Cold first boot downloads the tier's models; STUB mode skips it.
       start_period: 1200s
 
 volumes:

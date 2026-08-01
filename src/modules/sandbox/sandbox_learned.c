@@ -462,10 +462,7 @@ void sandbox_learned_observe(const char *cwd, const char *cmd)
    int n = sandbox_learned_parse_apt(cmd, pkgs, SBX_LEARN_MAX);
    if (n <= 0)
       return;
-
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.delegate_sandbox_learn_packages)
+   if (!config_delegate_sandbox_learn_packages())
       return;
 
    char git_root[MAX_PATH_LEN];

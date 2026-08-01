@@ -26,9 +26,10 @@
 #include <time.h>
 #include <unistd.h>
 
-#define CE_ERRBUF 256
-#define CE_DOCBUF 65536
-#define CE_OUTBUF (256 * 1024)
+#define CE_ERRBUF                256
+#define CE_DOCBUF                65536
+#define CE_OUTBUF                (256 * 1024)
+#define CE_EXTRACT_MAX_ARTIFACTS 5
 
 /* A job left in 'running' longer than this lease was orphaned (worker crash/
  * restart or a wedged sidecar). Mirrors the code-unit stage's lease; both sit
@@ -41,13 +42,14 @@
  * provider (§2b). The legacy python sidecar carried its own prompt; the in-process
  * provider needs one here. The request JSON's `role`/`prompt_version` select the
  * extraction shape (engineering doc vs novel story); keep this generic and let the
- * request drive specifics. Grammar-constrained output is a future enhancement
- * (kb_curator_llm_run does not yet pass a JSON schema). Tune against the model. */
+ * request drive specifics. The shared response schema caps the artifact array so
+ * the bundled CPU model can close valid JSON inside the curator token budget. */
 #define CE_SYSTEM_PROMPT                                                                           \
    "You are a knowledge-base extractor. Read the JSON request (a document chunk "                  \
    "with a `role` and `input.content`) and emit the requested entities, claims, "                  \
    "and relations grounded only in that content. Respond with a single JSON "                      \
-   "object matching the request's role. Do not invent facts."
+   "object matching the request's role. Emit at most five artifacts, prioritize "                  \
+   "the most important facts, and keep every string concise. Do not invent facts."
 
 /* Engineer-mode extract_doc contract: names the exact artifact kinds + payload
  * fields (claim => subject/attribute/value, matching index_claims) so the provider
@@ -70,9 +72,8 @@
    "behavior\",\"text\":<full claim as one sentence>}\n"                                           \
    "- \"entity\": {\"name\":<canonical name>,\"entity_kind\":\"component|system|concept|protocol|" \
    "data_store|tool\",\"context\":<short phrase>}\n"                                               \
-   "Emit a claim for each distinct factual assertion and an entity for each named "                \
-   "system/component/"                                                                             \
-   "concept."
+   "Emit at most five artifacts total: exactly one doc_summary, then the most important claims "   \
+   "and entities. Keep the summary under 60 words and every other string under 20 words."
 
 /* Build the extract envelope json-schema (caller frees). provider_client wraps it
  * as response_format:{json_schema:{schema:<this>,strict}}. */
@@ -89,6 +90,7 @@ static cJSON *ce_build_extract_schema(void)
    cJSON_AddItemToObject(status, "enum", cJSON_CreateStringArray(ok_only, 1));
    cJSON *arts = cJSON_AddObjectToObject(props, "artifacts");
    cJSON_AddStringToObject(arts, "type", "array");
+   cJSON_AddNumberToObject(arts, "maxItems", CE_EXTRACT_MAX_ARTIFACTS);
    cJSON *items = cJSON_AddObjectToObject(arts, "items");
    cJSON_AddStringToObject(items, "type", "object");
    cJSON *iprops = cJSON_AddObjectToObject(items, "properties");
@@ -103,6 +105,7 @@ typedef struct
 {
    int64_t job_id;
    int64_t document_id;
+   int64_t generation;
    char project[256];
    int attempts;
    char file_path[1024];
@@ -127,6 +130,11 @@ static int ce_claim_job(ce_job_t *out)
                             " WHERE id = ("
                             "   SELECT id FROM kb_async_jobs"
                             "   WHERE kind = 'extract_doc' AND status = 'pending'"
+                            "     AND EXISTS (SELECT 1 FROM kb_documents d"
+                            "       JOIN projects p ON p.name=d.project"
+                            "       WHERE d.id=kb_async_jobs.document_id"
+                            "         AND p.lifecycle_state='current'"
+                            "         AND d.generation=p.current_generation)"
                             /* Skip jobs still serving their retry backoff. '' is
                              * "never failed" and must always be claimable. */
                             "     AND (next_attempt_at = '' OR next_attempt_at <= ?1)"
@@ -166,8 +174,11 @@ static int ce_fetch_document(ce_job_t *job)
     * queue (the enqueue in kb_curator_queue.c already excludes doc_kind='pdf'). PDF content
     * must never become a searchable derived artifact outside the access-gated search_chunks
     * path — `doc_kind <> 'pdf'` here guarantees the extractor never reads it. */
-   static const char *sql = "SELECT file_path, heading_path, content"
-                            " FROM kb_documents WHERE id = ?1 AND doc_kind <> 'pdf'";
+   static const char *sql = "SELECT d.file_path,d.heading_path,d.content,d.generation"
+                            " FROM kb_documents d JOIN projects p ON p.name=d.project"
+                            " WHERE d.id=?1 AND d.doc_kind<>'pdf'"
+                            " AND p.lifecycle_state='current'"
+                            " AND d.generation=p.current_generation";
 
    char err[CE_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -192,6 +203,7 @@ static int ce_fetch_document(ce_job_t *job)
       text_trim_partial_utf8(job->heading_path);
       snprintf(job->content, sizeof(job->content), "%s", ct ? ct : "");
       text_trim_partial_utf8(job->content);
+      job->generation = aimee_pg_column_int64(st, 3);
       found = 1;
    }
    aimee_pg_finalize(st);
@@ -214,12 +226,66 @@ static void ce_mark_done(int64_t job_id)
    aimee_pg_finalize(st);
 }
 
-static void ce_mark_retry_or_fail(int64_t job_id, int attempts, int max_attempts,
-                                  const char *error_msg)
+/* Requeue WITHOUT spending an attempt: undo the increment ce_claim_job applied,
+ * and back off.
+ *
+ * A provider outage used to burn the whole budget in seconds. The upstream
+ * gateway opens a circuit breaker and then refuses everything for its cooldown,
+ * so three claims inside one cooldown drove a job straight to terminal 'failed'
+ * — permanent, unreviewed data loss from a condition that heals itself a minute
+ * later. Observed on a live deployment: every failed row sat at exactly
+ * attempts=3 with last_error "provider HTTP 503".
+ *
+ * The budget exists to stop a POISON JOB looping forever. An outage is not a
+ * poison job, and spending the budget on it protects nothing. The row stays
+ * 'pending' for as long as the provider is down; next_attempt_at bounds the
+ * retry load, and the operator sees the backlog in `aimee kb status`. */
+void kb_curator_mark_retry_provider_unavailable(int64_t job_id, int attempts, const char *error_msg)
 {
+   /* Arm the global gate even if the DB pool is the resource currently starved;
+    * otherwise a failed requeue lookup would let the next fresh row hammer the
+    * same open circuit immediately. The still-running row is reclaimed by the
+    * existing stale-lease path after restart/recovery. */
+   kb_curator_provider_backoff_note();
    void *conn = db2_conn();
    if (!conn)
       return;
+
+   char err[CE_ERRBUF] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        "UPDATE kb_async_jobs"
+                        " SET status = 'pending', last_error = ?1,"
+                        "     attempts = CASE WHEN attempts > 0 THEN attempts - 1 ELSE 0 END,"
+                        "     next_attempt_at = ?3, updated_at = pg_now_text()"
+                        " WHERE id = ?2",
+                        err, sizeof(err));
+   if (!st)
+      return;
+   char errbuf[512];
+   snprintf(errbuf, sizeof(errbuf), "%s", error_msg ? error_msg : "provider unavailable");
+   aimee_pg_bind_text(st, "?1", errbuf);
+   aimee_pg_bind_int64(st, "?2", job_id);
+   /* Back off on the attempt number we just gave back, so a long outage still
+    * lengthens the interval instead of hammering a breaker that is open. */
+   char next_at[32];
+   kb_curator_next_attempt_at(attempts > 0 ? attempts : 1, next_at, sizeof(next_at));
+   aimee_pg_bind_text(st, "?3", next_at);
+   (void)aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+}
+
+static int ce_mark_retry_or_fail(int64_t job_id, int attempts, int max_attempts,
+                                 const char *error_msg)
+{
+   if (kb_curator_error_is_provider_unavailable(error_msg))
+   {
+      kb_curator_mark_retry_provider_unavailable(job_id, attempts, error_msg);
+      return 1;
+   }
+   void *conn = db2_conn();
+   if (!conn)
+      return 0;
 
    const char *new_status = (attempts >= max_attempts) ? "failed" : "pending";
    char err[CE_ERRBUF] = "";
@@ -230,7 +296,7 @@ static void ce_mark_retry_or_fail(int64_t job_id, int attempts, int max_attempts
                                           " WHERE id = ?3",
                                           err, sizeof(err));
    if (!st)
-      return;
+      return 0;
    /* Back the retry off. A terminal 'failed' still gets a stamp — harmless, and
     * it keeps the column meaningful if the job is ever re-queued by hand. */
    char next_at[32];
@@ -243,6 +309,7 @@ static void ce_mark_retry_or_fail(int64_t job_id, int attempts, int max_attempts
    aimee_pg_bind_int64(st, "?3", job_id);
    (void)aimee_pg_step(st, err, sizeof(err));
    aimee_pg_finalize(st);
+   return 0;
 }
 
 /* Reclaim extract_doc jobs orphaned in 'running'. ce_claim_job only ever selects
@@ -405,6 +472,14 @@ static int ce_write_artifacts(const ce_job_t *job, cJSON *artifacts_arr)
          continue;
 
       double confidence = cJSON_IsNumber(conf_j) ? conf_j->valuedouble : 0.80;
+      if (cJSON_IsObject(payload_j))
+      {
+         cJSON *payload = (cJSON *)payload_j;
+         cJSON_DeleteItemFromObject(payload, "project");
+         cJSON_AddStringToObject(payload, "project", job->project);
+         cJSON_DeleteItemFromObject(payload, "generation");
+         cJSON_AddNumberToObject(payload, "generation", job->generation);
+      }
       char *payload_str = payload_j ? cJSON_PrintUnformatted(payload_j) : NULL;
 
       char id_buf[64];
@@ -467,6 +542,9 @@ static int ce_write_artifacts(const ce_job_t *job, cJSON *artifacts_arr)
 
 int kb_curator_extract_one(const kb_curator_extract_opts_t *opts)
 {
+   if (kb_curator_provider_backoff_active())
+      return 0;
+
    ce_job_t job;
    memset(&job, 0, sizeof(job));
 
@@ -475,7 +553,12 @@ int kb_curator_extract_one(const kb_curator_extract_opts_t *opts)
    ce_reclaim_stale_running(opts ? opts->max_attempts : 1);
 
    if (!ce_claim_job(&job))
+   {
+      /* A cooldown may have elapsed after this queue emptied. Do not carry its
+       * exponential history into an unrelated future outage. */
+      kb_curator_provider_backoff_recovered();
       return 0; /* queue empty */
+   }
 
    aimee_log(LOG_DEBUG, "kb.curator.extract",
              "claimed extract_doc job %lld for doc %lld project '%s'", (long long)job.job_id,
@@ -531,9 +614,6 @@ int kb_curator_extract_one(const kb_curator_extract_opts_t *opts)
    /* Route through the §2 dispatch: a configured Tier-A provider (incl. the
     * bundled-Gemma LLM_ENDPOINT env) runs in-process via provider_client; else
     * the resolved sidecar command. extract_docs is Tier-A. */
-   config_t cfg;
-   config_load(&cfg);
-
    aimee_log(LOG_INFO, "kb.curator.extract", "invoking curator LLM for doc %lld (cmd fallback: %s)",
              (long long)job.document_id, cmd);
 
@@ -546,8 +626,8 @@ int kb_curator_extract_one(const kb_curator_extract_opts_t *opts)
    const char *sys_prompt = novel_mode ? CE_SYSTEM_PROMPT : CE_EXTRACT_DOC_PROMPT;
    cJSON *extract_schema = ce_build_extract_schema();
    char *resp_str =
-       kb_curator_llm_run(&cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, sys_prompt, req_str, extract_schema,
-                          cmd, CE_OUTBUF, sidecar_err, sizeof(sidecar_err));
+       kb_curator_llm_run(KB_CURATOR_STAGE_EXTRACT_DOCS, sys_prompt, req_str, extract_schema, cmd,
+                          CE_OUTBUF, sidecar_err, sizeof(sidecar_err));
    cJSON_Delete(extract_schema);
    free(req_str);
 
@@ -555,9 +635,14 @@ int kb_curator_extract_one(const kb_curator_extract_opts_t *opts)
    {
       aimee_log(LOG_WARN, "kb.curator.extract", "sidecar failed for job %lld (attempt %d/%d): %s",
                 (long long)job.job_id, job.attempts, opts->max_attempts, sidecar_err);
-      ce_mark_retry_or_fail(job.job_id, job.attempts, opts->max_attempts, sidecar_err);
-      return 1;
+      int provider_down =
+          ce_mark_retry_or_fail(job.job_id, job.attempts, opts->max_attempts, sidecar_err);
+      if (!provider_down)
+         kb_curator_provider_backoff_recovered();
+      return provider_down ? -1 : 1;
    }
+
+   kb_curator_provider_backoff_recovered();
 
    cJSON *resp = cJSON_Parse(resp_str);
    free(resp_str);
@@ -578,9 +663,10 @@ int kb_curator_extract_one(const kb_curator_extract_opts_t *opts)
       const char *errmsg = cJSON_IsString(err_j) ? err_j->valuestring : "sidecar status != ok";
       aimee_log(LOG_WARN, "kb.curator.extract", "sidecar error for job %lld: %s",
                 (long long)job.job_id, errmsg);
-      ce_mark_retry_or_fail(job.job_id, job.attempts, opts->max_attempts, errmsg);
+      int provider_down =
+          ce_mark_retry_or_fail(job.job_id, job.attempts, opts->max_attempts, errmsg);
       cJSON_Delete(resp);
-      return 1;
+      return provider_down ? -1 : 1;
    }
 
    cJSON *artifacts = cJSON_GetObjectItemCaseSensitive(resp, "artifacts");

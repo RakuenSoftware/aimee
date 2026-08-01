@@ -15,9 +15,28 @@
 #include "aimee_home.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
+#include "runtime_secret.h"
 
 void config_kb_curator_defaults(config_t *cfg);
 int config_parse_kb_curator(config_t *cfg, const cJSON *root);
+
+static char migrated_db2[256];
+static char migrated_api_bearer[256];
+
+static int capture_migrated_secret(const char *name, const char *value)
+{
+   if (strcmp(name, "AIMEE_DB2_URL") == 0)
+      snprintf(migrated_db2, sizeof(migrated_db2), "%s", value);
+   else if (strcmp(name, "AIMEE_API_BEARER_TOKEN") == 0)
+      snprintf(migrated_api_bearer, sizeof(migrated_api_bearer), "%s", value);
+   return 0;
+}
+
+static int no_migrated_secret_present(const char *name)
+{
+   (void)name;
+   return 0;
+}
 
 /* kb_curator preset: the tier drives the 12 stage gates, an explicit per-stage
  * gate still overrides, and "off" disables everything. Pure (no file I/O). */
@@ -93,10 +112,46 @@ static void assert_disposition(const config_t *cfg, int index, const char *name,
    assert(cfg->dispositions[index].source == source);
 }
 
+/* A YAML `true` must read back as true. cJSON stores a parsed boolean in its
+ * `type` and leaves valueint at 0, so `x = item->valueint` on a bool node yields
+ * FALSE for `true`. Three intelligence.synthesize keys did exactly that; the
+ * worst was mdl_tiebreak_enabled, which defaults to 1, so writing `true` TURNED
+ * IT OFF. reflection_shadow is a fail-closed gate, so `true` failing to enable it
+ * meant durable writes an operator had asked to suppress. */
+static void test_bool_true_parses_as_true(void)
+{
+   config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+
+   cJSON *root = cJSON_CreateObject();
+   cJSON *intel = cJSON_AddObjectToObject(root, "intelligence");
+   cJSON *syn = cJSON_AddObjectToObject(intel, "synthesize");
+   cJSON_AddTrueToObject(syn, "mdl_tiebreak_enabled");
+   cJSON_AddTrueToObject(syn, "reflection_shadow");
+   config_apply_mdl_settings(&cfg, root);
+   assert(cfg.kb_mdl_tiebreak_enabled == 1);
+   assert(cfg.kb_reflection_synthesis_shadow == 1);
+   cJSON_Delete(root);
+
+   /* `false` must still be false, and the numeric form must still work. */
+   root = cJSON_CreateObject();
+   intel = cJSON_AddObjectToObject(root, "intelligence");
+   syn = cJSON_AddObjectToObject(intel, "synthesize");
+   cJSON_AddFalseToObject(syn, "mdl_tiebreak_enabled");
+   cJSON_AddNumberToObject(syn, "reflection_shadow", 1);
+   config_apply_mdl_settings(&cfg, root);
+   assert(cfg.kb_mdl_tiebreak_enabled == 0);
+   assert(cfg.kb_reflection_synthesis_shadow == 1);
+   cJSON_Delete(root);
+
+   printf("bool-true ");
+}
+
 int main(void)
 {
    printf("config: ");
    test_kb_curator_tier();
+   test_bool_true_parses_as_true();
 
    /* Use isolated temp HOME */
    char tmpdir[512];
@@ -114,7 +169,15 @@ int main(void)
       static config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
       config_load(&cfg);
-      assert(strcmp(cfg.provider, "claude") == 0);
+      /* A fresh install has NO primary provider. It used to default to "claude",
+       * which pre-populated a provider nobody chose: the chat path synthesized a
+       * claude tmux-CLI agent for it and PINNED the turn to that agent, so on a
+       * machine with no claude CLI every turn died with "no agent available for
+       * role 'code'" while the operator's own agents sat there ineligible — and
+       * completing the setup wizard did not help, because the wizard writes
+       * agents.json's default_agent and this pin overrode it. Empty means "not
+       * chosen", which lets default_agent decide. */
+      assert(cfg.provider[0] == '\0');
       /* Capability routing defaults ON: routing enforces the packet's required
        * capabilities and minimum context window. Pinned explicitly so flipping
        * it is a deliberate, reviewed change rather than an accident — with it
@@ -219,14 +282,16 @@ int main(void)
       /* Setup-wizard page-2 backend record (kb_mode + per-role llm_* fields). */
       snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
       snprintf(cfg.llm_embed_backend, sizeof(cfg.llm_embed_backend), "local");
-      snprintf(cfg.llm_embed_tier, sizeof(cfg.llm_embed_tier), "mid");
-      snprintf(cfg.llm_embed_gpu, sizeof(cfg.llm_embed_gpu), "0");
-      snprintf(cfg.llm_rerank_backend, sizeof(cfg.llm_rerank_backend), "off");
       snprintf(cfg.llm_synth_backend, sizeof(cfg.llm_synth_backend), "external");
       snprintf(cfg.llm_synth_endpoint, sizeof(cfg.llm_synth_endpoint), "https://api.example/v1");
       snprintf(cfg.llm_synth_model, sizeof(cfg.llm_synth_model), "gpt-5.5");
       cfg.server_api_http_port = 8910;
       snprintf(cfg.server_api_bearer_token, sizeof(cfg.server_api_bearer_token), "tok-api-xyz");
+      cfg.server_api_bearer_extra_count = 2;
+      snprintf(cfg.server_api_bearer_extra[0], sizeof(cfg.server_api_bearer_extra[0]),
+               "tok-client-one");
+      memset(cfg.server_api_bearer_extra[1], 'x', 180);
+      cfg.server_api_bearer_extra[1][180] = '\0';
       cfg.server_api_rate_limit_per_min = 60;
       cfg.server_api_max_event_streams = 512;
       snprintf(cfg.server_api_client_transport, sizeof(cfg.server_api_client_transport), "http");
@@ -457,11 +522,12 @@ int main(void)
                "--background-index");
       cfg.lsp_servers[0].extension_count = 1;
       snprintf(cfg.lsp_servers[0].extensions[0], sizeof(cfg.lsp_servers[0].extensions[0]), "c");
-      /* require_aimee_git (default ON) + delegate_sandbox (default OFF): both are
-       * enforcement dials, so a value that does not survive save+reload is a guard
-       * silently in the wrong state after every restart. */
+      /* require_aimee_git + delegate_sandbox (both default ON): enforcement dials, so a
+       * value that does not survive save+reload is a guard silently in the wrong state
+       * after every restart. Set each to its OPT-OUT — the direction config_save has to
+       * persist explicitly, and the direction that is unsafe to lose. */
       cfg.require_aimee_git = 0;
-      cfg.delegate_sandbox = 1;
+      cfg.delegate_sandbox = 0;
       cfg.subagent_ban_enabled = 0; /* default-ON dial: opt-out must survive save+reload */
       config_save(&cfg);
 
@@ -474,18 +540,19 @@ int main(void)
       assert(strcmp(cfg2.codex_model, "gpt-5.4") == 0);
       assert(strcmp(cfg2.model_reasoning_effort, "high") == 0);
       assert(strcmp(cfg2.memory_rerank_mode, "slow") == 0);
-      assert(strcmp(cfg2.kb_client_bearer_token, "tok-abc123") == 0);
+      /* Credential fields never round-trip through aimee.yaml. They are
+       * hydrated by the Vault bootstrap in production. */
+      assert(cfg2.kb_client_bearer_token[0] == '\0');
       /* Setup-wizard page-2 backend record survives save/load. */
       assert(strcmp(cfg2.kb_mode, "local") == 0);
       assert(strcmp(cfg2.llm_embed_backend, "local") == 0);
-      assert(strcmp(cfg2.llm_embed_tier, "mid") == 0);
-      assert(strcmp(cfg2.llm_embed_gpu, "0") == 0);
-      assert(strcmp(cfg2.llm_rerank_backend, "off") == 0);
       assert(strcmp(cfg2.llm_synth_backend, "external") == 0);
       assert(strcmp(cfg2.llm_synth_endpoint, "https://api.example/v1") == 0);
       assert(strcmp(cfg2.llm_synth_model, "gpt-5.5") == 0);
       assert(cfg2.server_api_http_port == 8910);
-      assert(strcmp(cfg2.server_api_bearer_token, "tok-api-xyz") == 0);
+      assert(cfg2.server_api_bearer_token[0] == '\0');
+      assert(cfg2.server_api_bearer_extra_count == 0);
+      assert(cfg2.server_api_bearer_extra[0][0] == '\0');
       assert(cfg2.server_api_rate_limit_per_min == 60);
       assert(cfg2.server_api_max_event_streams == 512);
       assert(strcmp(cfg2.server_api_client_transport, "http") == 0);
@@ -503,7 +570,7 @@ int main(void)
        * turn it off. Save-without-parse and parse-without-save are the same bug from
        * opposite ends; a round-trip is the only thing that catches either. */
       assert(cfg2.require_aimee_git == 0);
-      assert(cfg2.delegate_sandbox == 1);
+      assert(cfg2.delegate_sandbox == 0);
       /* Same save-without-parse / parse-without-save class as require_aimee_git:
        * subagent_ban_enabled is written only as the opt-out and must parse back. */
       assert(cfg2.subagent_ban_enabled == 0);
@@ -573,7 +640,7 @@ int main(void)
       assert(strcmp(cfg2.kb_curator_provider_model, "gemma-4-e4b") == 0);
       assert(strcmp(cfg2.kb_curator_tier_b_base_url, "https://api.big/v1") == 0);
       assert(strcmp(cfg2.kb_curator_tier_b_model, "big-32b") == 0);
-      assert(strcmp(cfg2.kb_curator_tier_b_api_key, "sk-secret") == 0);
+      assert(cfg2.kb_curator_tier_b_api_key[0] == '\0');
       assert(cfg2.kb_evidence_embed_enabled == 0);
       assert(cfg2.kb_curator_cross_repo_graph_enabled == 0);
       assert(cfg2.kb_curator_cross_repo_distinctiveness_v == 3);
@@ -627,7 +694,7 @@ int main(void)
       assert(cfg2.identity_working_profile_injection_fields_count == 1 &&
              strcmp(cfg2.identity_working_profile_injection_fields[0], "tone") == 0);
       /* regression: trigger/cron (arrays of nested structs) used to be dropped on save. */
-      assert(strcmp(cfg2.trigger_auth_token, "trig-tok") == 0 && cfg2.trigger_max_concurrent == 4);
+      assert(cfg2.trigger_auth_token[0] == '\0' && cfg2.trigger_max_concurrent == 4);
       assert(cfg2.trigger_rule_count == 1);
       assert(strcmp(cfg2.trigger_rules[0].source, "github-webhook") == 0);
       assert(strcmp(cfg2.trigger_rules[0].event, "push:main") == 0);
@@ -647,7 +714,7 @@ int main(void)
       assert(cfg2.cron_jobs[0].deliver_only_if_changed == 1);
       /* regression: niche scalar + auxiliary sections used to be dropped on save. */
       assert(strcmp(cfg2.proxy_url, "http://proxy:3128") == 0);
-      assert(strcmp(cfg2.proxy_token, "ptok") == 0);
+      assert(cfg2.proxy_token[0] == '\0');
       assert(cfg2.max_background_processes == 9);
       assert(cfg2.model_meta_refresh_minutes == 15 && cfg2.model_meta_capability_routing == 0);
       assert(strcmp(cfg2.search_backend, "searxng") == 0 && cfg2.search_max_results == 7);
@@ -824,10 +891,7 @@ int main(void)
 
    /* --- config_guardrail_mode --- */
    {
-      static config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      config_load(&cfg);
-      const char *mode = config_guardrail_mode(&cfg);
+      const char *mode = config_guardrail_mode();
       assert(mode != NULL);
       assert(strcmp(mode, "approve") == 0 || strcmp(mode, "prompt") == 0 ||
              strcmp(mode, "deny") == 0);
@@ -1703,7 +1767,7 @@ int main(void)
       assert(strcmp(cfg2.memory_pagerank_relations, "depends_on,fixes") == 0);
    }
 
-   /* --- memory_rerank: defaults --- */
+   /* --- memory_query_expansion: defaults, parse, and save/load round-trip --- */
    {
       char cpath[512];
       snprintf(cpath, sizeof(cpath), "%s/.config/aimee/aimee.yaml", tmpdir);
@@ -1714,68 +1778,27 @@ int main(void)
 
       static config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
-      int rc2 = config_load(&cfg);
-      assert(rc2 == 0);
-      /* Reranking (pipeline stage 3) is default-ON with the rerank-remote.py
-       * command; it degrades to plain hybrid ordering if the service is absent. */
-      assert(cfg.memory_rerank_enabled == 1);
-      assert(strcmp(cfg.memory_rerank_command, "python3 /opt/aimee/scripts/rerank-remote.py") == 0);
-      assert(cfg.memory_rerank_top_k == 0);
-      assert(cfg.memory_rerank_mix == 0.0);
+      assert(config_load(&cfg) == 0);
       assert(cfg.memory_query_expansion_mode[0] == '\0');
       assert(cfg.memory_query_expansion_k == 0);
-   }
 
-   /* --- memory_rerank: parsed from config --- */
-   {
-      char cpath[512];
-      snprintf(cpath, sizeof(cpath), "%s/.config/aimee/aimee.yaml", tmpdir);
-      FILE *f = fopen(cpath, "w");
+      f = fopen(cpath, "w");
       assert(f);
       fprintf(f, "provider: claude\n"
-                 "memory_rerank:\n"
-                 "  enabled: true\n"
-                 "  command: /usr/local/bin/cross-encoder\n"
-                 "  top_k: 50\n"
-                 "  mix: 0.7\n"
                  "memory_query_expansion:\n"
                  "  mode: semantic\n"
                  "  k: 5\n");
       fclose(f);
-
-      static config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
-      int rc2 = config_load(&cfg);
-      assert(rc2 == 0);
-      assert(cfg.memory_rerank_enabled == 1);
-      assert(strcmp(cfg.memory_rerank_command, "/usr/local/bin/cross-encoder") == 0);
-      assert(cfg.memory_rerank_top_k == 50);
-      assert(cfg.memory_rerank_mix >= 0.69 && cfg.memory_rerank_mix <= 0.71);
+      assert(config_load(&cfg) == 0);
       assert(strcmp(cfg.memory_query_expansion_mode, "semantic") == 0);
       assert(cfg.memory_query_expansion_k == 5);
-   }
 
-   /* --- memory_rerank: round-trip save/load --- */
-   {
-      static config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      config_load(&cfg);
-      cfg.memory_rerank_enabled = 1;
-      snprintf(cfg.memory_rerank_command, sizeof(cfg.memory_rerank_command), "/opt/ce/score.py");
-      cfg.memory_rerank_top_k = 30;
-      cfg.memory_rerank_mix = 0.6;
-      snprintf(cfg.memory_query_expansion_mode, sizeof(cfg.memory_query_expansion_mode),
-               "semantic");
       cfg.memory_query_expansion_k = 8;
       config_save(&cfg);
-
       static config_t cfg2;
       memset(&cfg2, 0, sizeof(cfg2));
       config_load(&cfg2);
-      assert(cfg2.memory_rerank_enabled == 1);
-      assert(strcmp(cfg2.memory_rerank_command, "/opt/ce/score.py") == 0);
-      assert(cfg2.memory_rerank_top_k == 30);
-      assert(cfg2.memory_rerank_mix >= 0.59 && cfg2.memory_rerank_mix <= 0.61);
       assert(strcmp(cfg2.memory_query_expansion_mode, "semantic") == 0);
       assert(cfg2.memory_query_expansion_k == 8);
    }
@@ -2035,6 +2058,36 @@ int main(void)
       unlink(cpath);
    }
 
+   /* Legacy credentials are handed to the injected Vault writer and removed
+    * from the file in the same migration. The config module owns its struct
+    * layout; the Vault adapter never reaches into config_t. */
+   {
+      char cpath[512];
+      snprintf(cpath, sizeof(cpath), "%s/.config/aimee/aimee.yaml", tmpdir);
+      FILE *f = fopen(cpath, "w");
+      assert(f);
+      fprintf(f, "db2_url: postgresql://legacy-user:legacy-pass@db/aimee\n");
+      fprintf(f, "aimee:\n  api:\n    bearer_token: legacy-test-bearer\n");
+      fclose(f);
+      memset(migrated_db2, 0, sizeof(migrated_db2));
+      memset(migrated_api_bearer, 0, sizeof(migrated_api_bearer));
+      assert(config_migrate_legacy_credentials(capture_migrated_secret,
+                                               no_migrated_secret_present) == 1);
+      assert(strcmp(migrated_db2, "postgresql://legacy-user:legacy-pass@db/aimee") == 0);
+      assert(strcmp(migrated_api_bearer, "legacy-test-bearer") == 0);
+      f = fopen(cpath, "r");
+      assert(f);
+      char persisted[8192];
+      size_t persisted_len = fread(persisted, 1, sizeof(persisted) - 1, f);
+      persisted[persisted_len] = '\0';
+      fclose(f);
+      assert(strstr(persisted, "legacy-pass") == NULL);
+      assert(strstr(persisted, "legacy-test-bearer") == NULL);
+      runtime_secret_wipe(migrated_db2, sizeof(migrated_db2));
+      runtime_secret_wipe(migrated_api_bearer, sizeof(migrated_api_bearer));
+      unlink(cpath);
+   }
+
    {
       static config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
@@ -2045,9 +2098,10 @@ int main(void)
 
       static config_t cfg2;
       memset(&cfg2, 0, sizeof(cfg2));
+      platform_setenv("AIMEE_NO_CACHE", "1");
+      assert(config_load_file(&cfg2) == 0);
       platform_unsetenv("AIMEE_NO_CACHE");
-      assert(config_load(&cfg2) == 0);
-      assert(strcmp(cfg2.db2_url, "postgres:///aimee_shared") == 0);
+      assert(cfg2.db2_url[0] == '\0');
       assert(cfg2.db2_pool_size == 16);
 
       char cpath[512];
@@ -2239,44 +2293,34 @@ int main(void)
          platform_unsetenv("AIMEE_MODE");
    }
 
-   /* --- AIMEE_DB2_URL env overrides a cached config-file db2_url ---
+   /* --- Vault-hydrated AIMEE_DB2_URL overrides a cached config-file db2_url ---
     * Regression for the kb IP-drift outage: when Postgres is recreated on a new
     * bridge IP the runtime injects the current address via AIMEE_DB2_URL, which
     * must win over the stale value persisted in aimee.yaml. */
    {
-      char *old = getenv("AIMEE_DB2_URL");
-      char *saved = old ? strdup(old) : NULL;
-
       config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
       snprintf(cfg.db2_url, sizeof(cfg.db2_url),
                "postgresql://aimee:aimee@10.0.0.9:5432/aimee_shared");
 
-      /* env set -> overrides the cached file value, returns 1 (applied) */
-      platform_setenv("AIMEE_DB2_URL", "postgresql://aimee:aimee@10.0.0.16:5432/aimee_shared");
+      /* Vault runtime value overrides the cached file value. */
+      assert(runtime_secret_store("AIMEE_DB2_URL",
+                                  "postgresql://aimee:aimee@10.0.0.16:5432/aimee_shared") == 0);
       assert(config_apply_db2_url_env_override(&cfg) == 1);
       assert(strcmp(cfg.db2_url, "postgresql://aimee:aimee@10.0.0.16:5432/aimee_shared") == 0);
 
-      /* env unset -> leaves the existing value untouched, returns 0 */
-      platform_unsetenv("AIMEE_DB2_URL");
+      runtime_secret_remove("AIMEE_DB2_URL");
       assert(config_apply_db2_url_env_override(&cfg) == 0);
       assert(strcmp(cfg.db2_url, "postgresql://aimee:aimee@10.0.0.16:5432/aimee_shared") == 0);
 
-      /* empty env -> treated as unset, returns 0 */
-      platform_setenv("AIMEE_DB2_URL", "");
+      /* No runtime credential leaves the existing value untouched. */
       assert(config_apply_db2_url_env_override(&cfg) == 0);
       assert(strcmp(cfg.db2_url, "postgresql://aimee:aimee@10.0.0.16:5432/aimee_shared") == 0);
 
       /* NULL cfg -> no crash, returns 0 */
       assert(config_apply_db2_url_env_override(NULL) == 0);
 
-      if (saved)
-      {
-         platform_setenv("AIMEE_DB2_URL", saved);
-         free(saved);
-      }
-      else
-         platform_unsetenv("AIMEE_DB2_URL");
+      runtime_secret_remove("AIMEE_DB2_URL");
    }
 
    /* learning.review.* config parser (idle-reflection scheduler knobs). */
@@ -2452,28 +2496,51 @@ int main(void)
       cJSON_Delete(root);
    }
 
-   /* AIMEE_API_BEARER_TOKEN env override (config_server_api.c): a deploy-supplied
-    * bearer wins over the config-file value and opts out of TOFU enrollment. */
+   /* Server API env overrides (config_server_api.c): deploy truth wins over an
+    * older persisted config. */
    {
       extern void config_parse_server_api(config_t * cfg, const cJSON *root);
       config_t c;
       memset(&c, 0, sizeof c);
       cJSON *root = cJSON_CreateObject(); /* no "api" block: env is the only source */
 
-      platform_setenv("AIMEE_API_BEARER_TOKEN", "env-strong-abc123");
+      assert(runtime_secret_store("AIMEE_API_BEARER_TOKEN", "env-strong-abc123") == 0);
       config_parse_server_api(&c, root);
       assert(strcmp(c.server_api_bearer_token, "env-strong-abc123") == 0);
 
+      /* An unchanged deployment primary preserves additive client credentials
+       * across restart. Changing it is an out-of-band revoke-all. */
+      c.server_api_bearer_extra_count = 1;
+      snprintf(c.server_api_bearer_extra[0], sizeof c.server_api_bearer_extra[0], "client-one");
+      config_parse_server_api(&c, root);
+      assert(c.server_api_bearer_extra_count == 1);
+      snprintf(c.server_api_bearer_token, sizeof c.server_api_bearer_token, "old-env-token");
+      config_parse_server_api(&c, root);
+      assert(c.server_api_bearer_extra_count == 0);
+      assert(c.server_api_bearer_extra[0][0] == '\0');
+
       /* Env overrides a pre-existing (e.g. seeded bootstrap) value too. */
-      snprintf(c.server_api_bearer_token, sizeof c.server_api_bearer_token, "aimee-local-dev");
+      snprintf(c.server_api_bearer_token, sizeof c.server_api_bearer_token,
+               "unit-test-legacy-primary");
       config_parse_server_api(&c, root);
       assert(strcmp(c.server_api_bearer_token, "env-strong-abc123") == 0);
 
       /* Without the env, the existing value is left untouched. */
-      platform_unsetenv("AIMEE_API_BEARER_TOKEN");
+      runtime_secret_remove("AIMEE_API_BEARER_TOKEN");
       snprintf(c.server_api_bearer_token, sizeof c.server_api_bearer_token, "file-value");
       config_parse_server_api(&c, root);
       assert(strcmp(c.server_api_bearer_token, "file-value") == 0);
+
+      platform_setenv("AIMEE_API_MTLS", "optional");
+      config_parse_server_api(&c, root);
+      assert(c.server_api_mtls == 1);
+      platform_setenv("AIMEE_API_MTLS", "required");
+      config_parse_server_api(&c, root);
+      assert(c.server_api_mtls == 2);
+      platform_setenv("AIMEE_API_MTLS", "off");
+      config_parse_server_api(&c, root);
+      assert(c.server_api_mtls == 0);
+      platform_unsetenv("AIMEE_API_MTLS");
 
       cJSON_Delete(root);
    }
@@ -2482,53 +2549,43 @@ int main(void)
    {
       char env[2048];
 
-      /* Local kb; embed local(mid), rerank off, synth external. */
+      /* Local kb; embed local(mid), synth external. */
       static config_t cfg;
+
+      /* Local kb, in-container embedder, external synth. There is no inference
+       * service to deploy any more, so the kb profile is the whole story and the
+       * embedder rides along as a MODEL CHOICE rather than a container placement. */
       memset(&cfg, 0, sizeof(cfg));
       snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
       snprintf(cfg.llm_embed_backend, sizeof(cfg.llm_embed_backend), "local");
-      snprintf(cfg.llm_embed_tier, sizeof(cfg.llm_embed_tier), "mid");
-      snprintf(cfg.llm_rerank_backend, sizeof(cfg.llm_rerank_backend), "off");
+      snprintf(cfg.embedding_model, sizeof(cfg.embedding_model), "bekko-a25m");
       snprintf(cfg.llm_synth_backend, sizeof(cfg.llm_synth_backend), "external");
       snprintf(cfg.llm_synth_endpoint, sizeof(cfg.llm_synth_endpoint), "https://api.x/v1");
       config_emit_deploy_env(&cfg, env, sizeof(env));
-      assert(strstr(env, "COMPOSE_PROFILES=kb,llm\n") != NULL);
-      assert(strstr(env, "AIMEE_LLM_EMBED_MODE=local\n") != NULL);
-      assert(strstr(env, "AIMEE_LLM_EMBED_TIER=mid\n") != NULL);
-      assert(strstr(env, "AIMEE_LLM_RERANK_MODE=off\n") != NULL);
+      assert(strstr(env, "COMPOSE_PROFILES=kb\n") != NULL);
+      assert(strstr(env, ",llm") == NULL); /* the retired container takes its profile */
+      assert(strstr(env, "EMBEDDER_MODEL=bekko-a25m\n") != NULL);
       assert(strstr(env, "AIMEE_LLM_SYNTH_MODE=external\n") != NULL);
-      assert(strstr(env, "AIMEE_LLM_SYNTH_URL=https://api.x/v1\n") != NULL);
-      assert(strstr(env, "AIMEE_LLM_URL=http://aimee-llm:8742\n") != NULL);
-      assert(strstr(env, "AIMEE_EMBEDDING_DIM") == NULL); /* local embed => unpinned/derived */
+      /* AIMEE_LLM_URL, the variable config_synth_chat_endpoint() honours — not
+       * AIMEE_LLM_SYNTH_URL, which was the retired gateway's own knob and which
+       * nothing reads, so emitting it left external synth configured but dead. */
+      assert(strstr(env, "AIMEE_LLM_URL=https://api.x/v1\n") != NULL);
+      assert(strstr(env, "AIMEE_LLM_SYNTH_URL") == NULL);
+      /* No embedder container to size, place or point at. */
+      assert(strstr(env, "AIMEE_LLM_EMBED_") == NULL);
+      assert(strstr(env, "AIMEE_EMBEDDING_DIM") == NULL); /* in-container => derived */
 
-      /* Local kb; all roles local at the CPU tier => the SAME "llm" profile as a
-       * GPU tier. There is one LLM service now: aimee-llm is model-less and
-       * downloads whichever tier the roles ask for, so the tier no longer picks a
-       * different image (there used to be a pre-baked aimee-llm-cpu on its own
-       * mutually exclusive "llm-cpu" profile). The per-role tier still rides
-       * along in the env. */
+      /* A local synth still names its tier: that role has not moved. */
       memset(&cfg, 0, sizeof(cfg));
       snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
       snprintf(cfg.llm_embed_backend, sizeof(cfg.llm_embed_backend), "local");
-      snprintf(cfg.llm_embed_tier, sizeof(cfg.llm_embed_tier), "cpu");
       snprintf(cfg.llm_synth_backend, sizeof(cfg.llm_synth_backend), "local");
       snprintf(cfg.llm_synth_tier, sizeof(cfg.llm_synth_tier), "cpu");
       config_emit_deploy_env(&cfg, env, sizeof(env));
-      assert(strstr(env, "COMPOSE_PROFILES=kb,llm\n") != NULL);
-      assert(strstr(env, "llm-cpu") == NULL); /* the second image is gone */
-      assert(strstr(env, "AIMEE_LLM_EMBED_TIER=cpu\n") != NULL);
+      assert(strstr(env, "COMPOSE_PROFILES=kb\n") != NULL);
       assert(strstr(env, "AIMEE_LLM_SYNTH_TIER=cpu\n") != NULL);
-      assert(strstr(env, "AIMEE_LLM_URL=http://aimee-llm:8742\n") != NULL);
 
-      /* A local role with an unset tier takes the same profile. */
-      memset(&cfg, 0, sizeof(cfg));
-      snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
-      snprintf(cfg.llm_synth_backend, sizeof(cfg.llm_synth_backend), "local");
-      config_emit_deploy_env(&cfg, env, sizeof(env));
-      assert(strstr(env, "COMPOSE_PROFILES=kb,llm\n") != NULL);
-      assert(strstr(env, "llm-cpu") == NULL);
-
-      /* Remote kb: connect out, deploy nothing (no profiles, no llm env). */
+      /* Remote kb: connect out, deploy nothing. */
       memset(&cfg, 0, sizeof(cfg));
       snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "remote");
       snprintf(cfg.kb_client_url, sizeof(cfg.kb_client_url), "https://kb.remote:4010");
@@ -2536,11 +2593,13 @@ int main(void)
       config_emit_deploy_env(&cfg, env, sizeof(env));
       assert(strstr(env, "COMPOSE_PROFILES=\n") != NULL);
       assert(strstr(env, "AIMEE_KB_API_URL=https://kb.remote:4010\n") != NULL);
-      assert(strstr(env, "AIMEE_KB_API_BEARER_TOKEN=tok-x\n") != NULL);
+      assert(strstr(env, "AIMEE_KB_API_BEARER_TOKEN=") == NULL);
       assert(strstr(env, "AIMEE_LLM_") == NULL);
+      assert(strstr(env, "EMBEDDER_MODEL") == NULL);
 
-      /* All external (local kb): kb profile only, no llm container, external embed
-       * with a pinned dim is emitted. */
+      /* An EXTERNAL embedder: the endpoint is passed as the embedder URL the kb's
+       * client reads, and a pinned dim comes along because nothing local can derive
+       * it from a model we do not serve. */
       memset(&cfg, 0, sizeof(cfg));
       snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
       snprintf(cfg.llm_embed_backend, sizeof(cfg.llm_embed_backend), "external");
@@ -2549,9 +2608,8 @@ int main(void)
       snprintf(cfg.llm_synth_backend, sizeof(cfg.llm_synth_backend), "external");
       snprintf(cfg.llm_synth_endpoint, sizeof(cfg.llm_synth_endpoint), "https://synth.x/v1");
       config_emit_deploy_env(&cfg, env, sizeof(env));
-      assert(strstr(env, "COMPOSE_PROFILES=kb\n") != NULL); /* no ,llm */
-      assert(strstr(env, "AIMEE_LLM_URL=") == NULL);
-      assert(strstr(env, "AIMEE_LLM_EMBED_URL=https://emb.x/v1\n") != NULL);
+      assert(strstr(env, "COMPOSE_PROFILES=kb\n") != NULL);
+      assert(strstr(env, "AIMEE_EMBEDDER_URL=https://emb.x/v1\n") != NULL);
       assert(strstr(env, "AIMEE_EMBEDDING_DIM=2560\n") != NULL);
    }
 

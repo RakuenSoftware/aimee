@@ -408,11 +408,10 @@ void agent_trace_log(int plan_id, int turn, const char *direction, const char *c
       if (!otel_initialized)
       {
          otel_initialized = 1;
-         config_t ocfg;
-         config_load(&ocfg);
-         if (ocfg.otel_endpoint[0])
-            otel_init(ocfg.otel_endpoint,
-                      ocfg.otel_service_name[0] ? ocfg.otel_service_name : "aimee", session_id());
+         if (config_otel_endpoint()[0])
+            otel_init(config_otel_endpoint(),
+                      config_otel_service_name()[0] ? config_otel_service_name() : "aimee",
+                      session_id());
       }
    }
 
@@ -860,15 +859,15 @@ char *agent_load_project_contract(const char *project_root)
 
 /* Build a compact_config_t from the application-level config_t.
  * Per-tool entries are stored as "tool_name=threshold" strings in config. */
-static void compact_cfg_from_app_config(const config_t *app, compact_config_t *out)
+static void compact_cfg_from_app_config(compact_config_t *out)
 {
    memset(out, 0, sizeof(*out));
-   out->enabled = app->compact_enabled;
-   out->threshold = app->compact_threshold;
-   out->head_bytes = app->compact_head_bytes;
-   out->tail_bytes = app->compact_tail_bytes;
+   out->enabled = config_compact_enabled();
+   out->threshold = config_compact_threshold();
+   out->head_bytes = config_compact_head_bytes();
+   out->tail_bytes = config_compact_tail_bytes();
 
-   int count = app->compact_per_tool_count;
+   int count = config_compact_per_tool_count();
    if (count > COMPACT_MAX_PER_TOOL)
       count = COMPACT_MAX_PER_TOOL;
 
@@ -876,7 +875,7 @@ static void compact_cfg_from_app_config(const config_t *app, compact_config_t *o
    {
       char tool[64];
       int thresh = 0;
-      if (sscanf(app->compact_per_tool[i], "%63[^=]=%d", tool, &thresh) == 2)
+      if (sscanf(config_compact_per_tool(i), "%63[^=]=%d", tool, &thresh) == 2)
       {
          snprintf(out->per_tool[i].tool, sizeof(out->per_tool[i].tool), "%s", tool);
          out->per_tool[i].threshold = thresh;
@@ -902,17 +901,16 @@ char *agent_compress_tool_result(const char *raw, size_t raw_len, const char *to
       return strdup("");
 
    /* Load application config and convert to compact_config_t */
-   config_t app_cfg;
    compact_config_t cfg;
-   int loaded = (config_load(&app_cfg) == 0);
+   int loaded = config_present();
    if (loaded)
-      compact_cfg_from_app_config(&app_cfg, &cfg);
+      compact_cfg_from_app_config(&cfg);
    else
       memset(&cfg, 0, sizeof(cfg)); /* use defaults on load failure */
 
    /* Per-result model-visible cap (operator-configurable, default 32768).
     * Resolved ONCE here so the closet budget and the hard cap below agree. */
-   size_t cap = agent_tool_output_cap_clamp(loaded ? app_cfg.tool_output_max_bytes : 0);
+   size_t cap = agent_tool_output_cap_clamp(loaded ? config_tool_output_max_bytes() : 0);
 
    /* Shrink via the single shared core. Size the buffer for the one strategy that
     * can exceed raw_len (a JSON structural summary of a tiny body); every other
@@ -937,7 +935,7 @@ char *agent_compress_tool_result(const char *raw, size_t raw_len, const char *to
     * Default-off; return-only wiring (no cross-turn persistence in P1). */
    char *closet = NULL;
    size_t closet_len = 0;
-   if (loaded && app_cfg.coord_closet_enabled && compacted)
+   if (loaded && config_coord_closet_enabled() && compacted)
    {
       coord_set_t set;
       coord_set_init(&set);
@@ -954,14 +952,20 @@ char *agent_compress_tool_result(const char *raw, size_t raw_len, const char *to
       int hard_room = (int)cap - 256;
       if (hard_room < 0)
          hard_room = 0; /* tiny operator cap: no room for a closet */
-      int cb = app_cfg.coord_closet_budget_bytes;
+      int cb = config_coord_closet_budget_bytes();
       if (cb > hard_room)
          cb = hard_room;
+      /* Copy the denylist out of the accessor's thread-local buffer: ccfg.denylist
+       * is a borrowed pointer read after coord_closet_render() runs, and any other
+       * config_coord_closet_denylist() call in between would move the ground under
+       * it. */
+      char denylist[CONFIG_COPY_MAX];
+      config_coord_closet_denylist_copy(denylist, sizeof(denylist));
       coord_closet_config_t ccfg = {
           .enabled = 1,
           .budget_bytes = cb,
-          .max_ratio_pct = app_cfg.coord_closet_max_ratio_pct,
-          .denylist = app_cfg.coord_closet_denylist[0] ? app_cfg.coord_closet_denylist : NULL,
+          .max_ratio_pct = config_coord_closet_max_ratio_pct(),
+          .denylist = denylist[0] ? denylist : NULL,
       };
       coord_evict_t why = COORD_EVICT_NONE;
       closet = coord_closet_render(&set, &ccfg, raw_len, &why);

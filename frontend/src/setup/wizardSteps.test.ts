@@ -7,17 +7,18 @@ import type { StepId } from './readiness';
 describe('WIZARD_STEPS structure', () => {
   it('covers every readiness StepId exactly once, in dependency order', () => {
     const ids = WIZARD_STEPS.map((s) => s.id);
-    expect(ids).toEqual<StepId[]>(['provider', 'knowledge_base', 'embedding', 'db2', 'connection', 'project']);
+    expect(ids).toEqual<StepId[]>(['account', 'provider', 'knowledge_base', 'embedding', 'db2', 'connection', 'project']);
     expect(new Set(ids).size).toBe(ids.length); // no dupes
   });
 
-  it('provider is the chooser and step 2 is the bespoke knowledge-base fork', () => {
+  it('account is first, provider is the chooser, and the KB fork follows', () => {
+    expect(WIZARD_STEPS[0].kind).toBe('account');
     const provider = WIZARD_STEPS.find((s) => s.id === 'provider')!;
     expect(provider.kind).toBe('chooser');
-    const step2 = WIZARD_STEPS[1];
-    expect(step2.id).toBe('knowledge_base');
-    expect(step2.kind).toBe('kb');
-    expect(step2.keys).toEqual([]);
+    const kb = WIZARD_STEPS[2];
+    expect(kb.id).toBe('knowledge_base');
+    expect(kb.kind).toBe('kb');
+    expect(kb.keys).toEqual([]);
   });
 
   it('deploy-topology + DB2 are local-only; the tail is connection → workspaces', () => {
@@ -46,15 +47,15 @@ describe('WIZARD_STEPS structure', () => {
   it('visibleSteps forks on kb_mode: remote hides deploy + db2', () => {
     const local = visibleSteps('local').map((s) => s.id);
     const remote = visibleSteps('remote').map((s) => s.id);
-    expect(local).toEqual(['provider', 'knowledge_base', 'embedding', 'db2', 'connection', 'project']);
-    expect(remote).toEqual(['provider', 'knowledge_base', 'connection', 'project']);
+    expect(local).toEqual(['account', 'provider', 'knowledge_base', 'embedding', 'db2', 'connection', 'project']);
+    expect(remote).toEqual(['account', 'provider', 'knowledge_base', 'connection', 'project']);
   });
 
   it('appliance mode hides the baked-infra steps (kb/deploy/db2)', () => {
     const applianceLocal = visibleSteps('local', true).map((s) => s.id);
-    expect(applianceLocal).toEqual(['provider', 'connection', 'project']);
+    expect(applianceLocal).toEqual(['account', 'provider', 'connection', 'project']);
     // Same regardless of kb mode — the appliance bakes it.
-    expect(visibleSteps('remote', true).map((s) => s.id)).toEqual(['provider', 'connection', 'project']);
+    expect(visibleSteps('remote', true).map((s) => s.id)).toEqual(['account', 'provider', 'connection', 'project']);
   });
 
   it('every keyed step references documented config keys', () => {

@@ -1,11 +1,11 @@
-/* config_server_api.c: parse the aimee-server public HTTP API config
+/* config_server_api.c: own the aimee-server public HTTP API config
  * (aimee.api.*) — the optional localhost TCP listener + bearer for the /v1
  * surface, plus per-client transport (socket|http|auto). Split out of
- * config.c to keep that file within the line budget. Parse-only (no save
- * round-trip), mirroring kb.api.* handling. */
+ * config.c to keep that file within the line budget. */
 #include "aimee.h"
 #include "config.h"
 #include "server.h" /* SERVER_REMOTE_WRITES_* */
+#include "runtime_secret.h"
 #include "cJSON.h"
 #include <stdlib.h>
 #include <string.h>
@@ -47,6 +47,25 @@ void config_parse_server_api(config_t *cfg, const cJSON *root)
          if (cJSON_IsString(item) && item->valuestring)
             strncpy(cfg->server_api_bearer_token, item->valuestring,
                     sizeof(cfg->server_api_bearer_token) - 1);
+
+         /* Additional accepted bearers. Pairing a new client must not revoke
+          * the credential every other client is already using. */
+         item = cJSON_GetObjectItemCaseSensitive(api, "bearer_tokens_extra");
+         if (cJSON_IsArray(item))
+         {
+            cfg->server_api_bearer_extra_count = 0;
+            cJSON *tok = NULL;
+            cJSON_ArrayForEach(tok, item)
+            {
+               if (cfg->server_api_bearer_extra_count >= AIMEE_API_BEARER_EXTRA_MAX)
+                  break;
+               if (!cJSON_IsString(tok) || !tok->valuestring || !tok->valuestring[0])
+                  continue;
+               snprintf(cfg->server_api_bearer_extra[cfg->server_api_bearer_extra_count],
+                        sizeof(cfg->server_api_bearer_extra[0]), "%s", tok->valuestring);
+               cfg->server_api_bearer_extra_count++;
+            }
+         }
 
          item = cJSON_GetObjectItemCaseSensitive(api, "rate_limit_per_min");
          if (cJSON_IsNumber(item))
@@ -97,16 +116,66 @@ void config_parse_server_api(config_t *cfg, const cJSON *root)
          cfg->server_api_remote_writes = SERVER_REMOTE_WRITES_OFF;
    }
 
-   /* AIMEE_API_BEARER_TOKEN pins the /v1 bearer from the environment (deploy
-    * truth), overriding the config-file value even when it is absent / read-only
-    * / reseeded — e.g. a containerized server fed the token from a secret store.
-    * Providing an explicit token also opts OUT of trust-on-first-use enrollment:
-    * the operator is managing the bearer, so the client's bootstrap rotation is
-    * moot (the seeded `aimee-local-dev` bootstrap is never in effect). */
-   const char *bearer_env = getenv("AIMEE_API_BEARER_TOKEN");
-   if (bearer_env && bearer_env[0])
+   /* AIMEE_API_MTLS = off|optional|required lets the container image request
+    * client certificates even when an older persisted aimee.yaml predates the
+    * mTLS setting.  This is deploy truth for the same reason as
+    * AIMEE_API_REMOTE_WRITES: image upgrades must not leave an enrolled client
+    * silently operating as bearer-only. */
+   const char *mtls_env = getenv("AIMEE_API_MTLS");
+   if (mtls_env && mtls_env[0])
    {
+      if (strcmp(mtls_env, "required") == 0)
+         cfg->server_api_mtls = 2;
+      else if (strcmp(mtls_env, "optional") == 0)
+         cfg->server_api_mtls = 1;
+      else if (strcmp(mtls_env, "off") == 0)
+         cfg->server_api_mtls = 0;
+   }
+
+   /* AIMEE_API_BEARER_TOKEN is read only from its hydrated first-boot Vault
+    * slot, overriding any legacy config-file value after migration. Providing
+    * an explicit token opts out of trust-on-first-use rotation because the
+    * operator is managing that primary credential. */
+   char bearer_env[sizeof(cfg->server_api_bearer_token)];
+   if (runtime_secret_get("AIMEE_API_BEARER_TOKEN", bearer_env, sizeof(bearer_env)))
+   {
+      /* Extras are credentials enrolled under the primary persisted beside
+       * them. A deployment-secret change is an out-of-band rotation and must
+       * revoke that old set; keeping it would make changing the secret fail to
+       * revoke the clients it was meant to replace. An unchanged env primary
+       * preserves enrollments across ordinary container restarts. */
+      if (!cfg->server_api_bearer_token[0] || strcmp(cfg->server_api_bearer_token, bearer_env) != 0)
+      {
+         memset(cfg->server_api_bearer_extra, 0, sizeof(cfg->server_api_bearer_extra));
+         cfg->server_api_bearer_extra_count = 0;
+      }
       strncpy(cfg->server_api_bearer_token, bearer_env, sizeof(cfg->server_api_bearer_token) - 1);
       cfg->server_api_bearer_token[sizeof(cfg->server_api_bearer_token) - 1] = '\0';
    }
+   runtime_secret_wipe(bearer_env, sizeof(bearer_env));
+}
+
+int config_server_api_bearer_extra_snapshot(char out[][256], int max)
+{
+   if (!out || max <= 0)
+      return 0;
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   if (config_load(cfg) != 0)
+   {
+      free(cfg);
+      return -1;
+   }
+   int count = cfg->server_api_bearer_extra_count;
+   if (count < 0)
+      count = 0;
+   if (count > AIMEE_API_BEARER_EXTRA_MAX)
+      count = AIMEE_API_BEARER_EXTRA_MAX;
+   if (count > max)
+      count = max;
+   for (int i = 0; i < count; i++)
+      snprintf(out[i], sizeof(out[i]), "%s", cfg->server_api_bearer_extra[i]);
+   free(cfg);
+   return count;
 }

@@ -294,18 +294,21 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
    char err[CE_ERRBUF] = "";
 
    /* Get project id. */
-   static const char *proj_sql = "SELECT id, root FROM projects WHERE name = ?1 LIMIT 1";
+   static const char *proj_sql = "SELECT id, root, current_generation FROM projects"
+                                 " WHERE name = ?1 AND lifecycle_state='current' LIMIT 1";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, proj_sql, err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", project);
    int64_t proj_id = -1;
+   int64_t generation = 0;
    char project_root[512] = "";
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
       proj_id = aimee_pg_column_int64(st, 0);
       const char *root = aimee_pg_column_text(st, 1);
       snprintf(project_root, sizeof(project_root), "%s", root ? root : "");
+      generation = aimee_pg_column_int64(st, 2);
    }
    aimee_pg_finalize(st);
    if (proj_id < 0)
@@ -334,11 +337,12 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
          sc_dim = 1024;
       static const char *sig_sql = "SELECT count(*), coalesce(md5(string_agg(id::text || ':' || "
                                    "hash, ',' ORDER BY id)), '') "
-                                   "FROM files WHERE project_id = ?1";
+                                   "FROM files WHERE project_id = ?1 AND generation = ?2";
       aimee_pg_stmt_t *sst = aimee_pg_prepare(conn, sig_sql, err, sizeof(err));
       if (sst)
       {
          aimee_pg_bind_int64(sst, "?1", proj_id);
+         aimee_pg_bind_int64(sst, "?2", generation);
          if (aimee_pg_step(sst, err, sizeof(err)) == AIMEE_PG_ROW)
          {
             int64_t fcount = aimee_pg_column_int64(sst, 0);
@@ -365,11 +369,13 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
    }
 
    /* Collect files to embed. */
-   static const char *files_sql = "SELECT id, path, hash FROM files WHERE project_id = ?1";
+   static const char *files_sql =
+       "SELECT id, path, hash FROM files WHERE project_id = ?1 AND generation = ?2";
    st = aimee_pg_prepare(conn, files_sql, err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_int64(st, "?1", proj_id);
+   aimee_pg_bind_int64(st, "?2", generation);
 
    typedef struct
    {
@@ -435,9 +441,7 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
     * dimension as the halfvec code_embeddings column. The earlier hardcoded
     * 384-dim deterministic hash never matched the 1024-d halfvec column, so every
     * upsert failed and no code vectors were ever stored. */
-   config_t ce_cfg;
-   config_load(&ce_cfg);
-   const char *embed_command = config_embedding_command(&ce_cfg, NULL);
+   const char *embed_command = config_embedding_command_current(NULL);
    int embed_dim = db2_embedding_dim();
    if (embed_dim <= 0 || embed_dim > CE_EMBED_MAX_DIM)
       embed_dim = 1024;
@@ -515,7 +519,7 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
        * (embed_command runs the 0.6B embedder; "builtin" falls back to a stable
        * deterministic vector when no embedder is configured, e.g. in tests). */
       float vec[CE_EMBED_MAX_DIM];
-      int dim = memory_embed_text(text, embed_command, vec, embed_dim);
+      int dim = memory_embed_text(text, embed_command, EMBED_INPUT_DOCUMENT, vec, embed_dim);
       if (dim != embed_dim)
       {
          db2_code_index_op_record(point_id, project, node_key, rows[i].path, 0,

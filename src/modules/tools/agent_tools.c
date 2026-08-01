@@ -58,10 +58,9 @@ static int bash_delegate_cancel_requested(void)
  * the cap can't change mid-loop. */
 size_t agent_tool_output_cap(void)
 {
-   config_t cfg;
-   if (config_load(&cfg) != 0)
+   if (!config_present())
       return (size_t)AGENT_TOOL_OUTPUT_MAX;
-   return agent_tool_output_cap_clamp(cfg.tool_output_max_bytes);
+   return agent_tool_output_cap_clamp(config_tool_output_max_bytes());
 }
 static void bash_kill_child_tree(pid_t pid)
 {
@@ -116,6 +115,20 @@ static void bash_prepare_child_path(void)
    char path_buf[8192];
    const char *old_path = getenv("PATH");
    snprintf(path_buf, sizeof(path_buf), "%s", old_path ? old_path : "");
+   /* Add fallbacks from lowest to highest priority because the helper prepends.
+    * Directories already present in the caller's PATH are never moved, so an
+    * explicit caller choice still wins. A user install must precede the image's
+    * /usr/local/bin fallback; otherwise container verification invokes the
+    * bundled client instead of $HOME/.local/bin/aimee. */
+   bash_prepend_path_dir(path_buf, sizeof(path_buf), "/usr/local/bin");
+   const char *home = getenv("HOME");
+   if (home && home[0])
+   {
+      char local_bin[MAX_PATH_LEN];
+      int hn = snprintf(local_bin, sizeof(local_bin), "%s/.local/bin", home);
+      if (hn > 0 && (size_t)hn < sizeof(local_bin))
+         bash_prepend_path_dir(path_buf, sizeof(path_buf), local_bin);
+   }
    char exe[MAX_PATH_LEN];
    ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
    if (n > 0)
@@ -128,15 +141,6 @@ static void bash_prepare_child_path(void)
          bash_prepend_path_dir(path_buf, sizeof(path_buf), exe);
       }
    }
-   const char *home = getenv("HOME");
-   if (home && home[0])
-   {
-      char local_bin[MAX_PATH_LEN];
-      int hn = snprintf(local_bin, sizeof(local_bin), "%s/.local/bin", home);
-      if (hn > 0 && (size_t)hn < sizeof(local_bin))
-         bash_prepend_path_dir(path_buf, sizeof(path_buf), local_bin);
-   }
-   bash_prepend_path_dir(path_buf, sizeof(path_buf), "/usr/local/bin");
    if (path_buf[0])
       setenv("PATH", path_buf, 1);
 }
@@ -682,14 +686,13 @@ static int lxc_cmd_safe(const char *cmd, const char *ro, const char *rw)
 }
 int64_t auto_snapshot_record(const char *path)
 {
-   config_t cfg;
-   if (config_load(&cfg) != 0 || !cfg.rewind_auto_snapshot)
+   if (!config_present() || !config_rewind_auto_snapshot())
       return 0;
    const char *sid = session_id();
    if (!sid || !sid[0])
       return 0;
 
-   if (db1_init(cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
       return 0;
 
    int64_t snap_id = agent_tools_get_snap_id();
@@ -798,11 +801,8 @@ char *tool_bash(const char *command, int timeout_ms)
    int stdout_pipe[2], stderr_pipe[2];
    if (pipe(stdout_pipe) != 0 || pipe(stderr_pipe) != 0)
       return safe_strdup("{\"stdout\":\"\",\"stderr\":\"pipe failed\",\"exit_code\":-1}");
-   config_t cfg;
    sandbox_config_t sbox_cfg;
-   memset(&sbox_cfg, 0, sizeof(sbox_cfg));
-   if (config_load(&cfg) == 0)
-      sbox_cfg = cfg.sandbox;
+   config_sandbox(&sbox_cfg);
    const char *guard_ro = agent_tools_parent_write_guard_root();
    const char *guard_rw = agent_tools_parent_write_guard_write_root();
    int guarded_parent = guard_ro && guard_ro[0];
@@ -860,7 +860,7 @@ char *tool_bash(const char *command, int timeout_ms)
          cwd[0] = '\0';
       if (cwd[0] && guard_rw && bash_path_under_root(cwd, guard_rw))
          workspace_ptr = cwd;
-      else if (cwd[0] && workspace_active_root(&cfg, cwd, workspace, sizeof(workspace)) == 0)
+      else if (cwd[0] && workspace_active_root(cwd, workspace, sizeof(workspace)) == 0)
          workspace_ptr = workspace;
       else if (cwd[0])
          workspace_ptr = cwd;
@@ -903,7 +903,7 @@ char *tool_bash(const char *command, int timeout_ms)
          snprintf(cwd, sizeof(cwd), "%s", src);
       else if (!getcwd(cwd, sizeof(cwd)))
          cwd[0] = '\0';
-      if (cwd[0] && workspace_active_root(&cfg, cwd, workspace, sizeof(workspace)) == 0)
+      if (cwd[0] && workspace_active_root(cwd, workspace, sizeof(workspace)) == 0)
          workspace_ptr = workspace;
       pid = sandbox_exec(&sbox_cfg, command, stdout_pipe[1], stderr_pipe[1], workspace_ptr);
       close(stdout_pipe[1]);

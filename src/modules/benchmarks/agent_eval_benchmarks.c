@@ -123,15 +123,14 @@ static void mem_eval_finalize_bucket_array(mem_eval_bucket_scores_t *buckets, in
 
 static int mem_eval_drain_async_queues(mem_eval_async_drain_totals_t *totals)
 {
-   config_t cfg;
-   if (config_load(&cfg) != 0)
+   if (!config_present())
       return -1;
 
-   int cognify_enabled = cfg.memory_cognify_enabled && cfg.memory_cognify_command[0];
-   if (!cfg.memory_cognify_async_enabled && !cognify_enabled)
+   int cognify_enabled = config_memory_cognify_enabled() && config_memory_cognify_command()[0];
+   if (!config_memory_cognify_async_enabled() && !cognify_enabled)
       return 0;
 
-   const char *embed_cmd = config_embedding_command(&cfg, NULL);
+   const char *embed_cmd = config_embedding_command_current(NULL);
    db2_kb_service_async_queue_stats_t queue_stats;
    memory_cognify_queue_stats_t cog_stats;
    memset(&queue_stats, 0, sizeof(queue_stats));
@@ -142,7 +141,7 @@ static int mem_eval_drain_async_queues(mem_eval_async_drain_totals_t *totals)
    if (db2_kb_service_async_queue_drain(embed_cmd, 0, pgvec_kb_vector_collection_name(),
                                         mem_eval_vector_upsert_document, NULL, &queue_stats) != 0)
       return -1;
-   if (cognify_enabled && memory_cognify_drain(&cfg, 0, &cog_stats) != 0)
+   if (cognify_enabled && memory_cognify_drain(0, &cog_stats) != 0)
       return -1;
    clock_gettime(CLOCK_MONOTONIC, &ts1);
 

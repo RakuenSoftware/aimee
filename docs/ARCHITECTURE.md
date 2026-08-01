@@ -16,7 +16,7 @@ flowchart LR
     F -->|typed resource calls| S
     S -->|typed /v1| K[aimee-kb]
     S -->|provider API| P[model providers]
-    K -->|embed / rerank / synth| L[aimee-llm]
+    K -->|synth, when configured| X[external LLM endpoint]
     S --> D1[(DB1 SQLite)]
     F --> WF[(workflow SQLite)]
     K --> D2[(DB2 PostgreSQL + pgvector)]
@@ -27,9 +27,8 @@ flowchart LR
 | `aimee` | CLI parsing, local hooks, MCP/ACP stdio, client filesystem access | databases, server policy, provider credentials |
 | `aimee-server` | sessions, DB1, agents, tools, policy, vault, provider calls, `/v1` resource plane | DB2, workflow lifecycle |
 | `aimee-wfe` | workflow definitions, scheduling, artifacts, retries, gates, worktrees, forge lifecycle | agent credentials, KB data, general chat |
-| `aimee-kb` | DB2, memory, documents, code graph, retrieval, curation | DB1, workflow state, model serving |
+| `aimee-kb` | DB2, memory, documents, code graph, retrieval, curation, the in-process embedder | DB1, workflow state, synthesis inference |
 | `aimee-runtime-web` | browser auth, session proxying, UI delivery | product databases and workflow decisions |
-| `aimee-llm` | embedding, reranking, synthesis inference | knowledge storage and curation policy |
 
 `aimee-server` and `aimee-wfe` run as supervised peers in the server image. If either exits, the
 container terminates both and fails. The C server returns `410 Gone` for retired workflow lifecycle
@@ -106,8 +105,8 @@ The DB1/DB2 boundary is compile-enforced:
 - thin clients link neither;
 - calls across the boundary use public typed APIs.
 
-The WORM hash primitive is the narrow exception shared by both stores. It contains hashing only—no
-database handles or queries—so both stores produce the same chain format.
+The WORM hash primitive is the narrow exception shared by both stores. It contains hashing only, with no
+database handles or queries, so both stores produce the same chain format.
 
 New KB containers run a private PostgreSQL 18 cluster when no external `AIMEE_DB2_URL` is set. It is
 still DB2, still owned by the KB, and still independently exportable.
@@ -142,7 +141,7 @@ The client opens no database and starts no daemon. Warm state stays in `aimee-se
 2. The server authorizes the principal and calls the KB's typed endpoint.
 3. The KB owns the transaction, lexical/dense indexes, and evidence.
 4. Mutations publish a PII-safe audit identity on the KB bus.
-5. Recall returns bounded evidence; optional rerank and synthesis go through `aimee-llm`.
+5. Recall returns bounded evidence; optional synthesis goes to the configured external endpoint.
 
 ### Delegate turn
 
@@ -189,8 +188,8 @@ See [Security](SECURITY.md).
 
 | Shape | Use | Tradeoff |
 | --- | --- | --- |
-| Managed server | One server container launches KB and inference from the browser | Needs the host Docker socket |
-| Split stack | Separate server, KB, and inference containers | More explicit; no server Docker control required |
+| Managed server | One server container launches the KB from the browser | Needs the host Docker socket |
+| Split stack | Separate server and KB containers | More explicit; no server Docker control required |
 | External DB2 | KB uses managed PostgreSQL | Operator owns backup, TLS, extensions, and latency |
 | Local source install | Development and debugging | Host owns dependencies and services |
 | Thin client | Normal developer machine | Needs a reachable server; keeps state off the client |

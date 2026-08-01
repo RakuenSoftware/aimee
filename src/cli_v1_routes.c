@@ -148,8 +148,11 @@ static const struct
     {"memory", "archive", "memory.archive", "memory.user_capture", NULL, 60000},
     {"memory", "list", "memory.list", NULL, "memories", 60000},
     {"memory", "get", "memory.get", NULL, NULL, 60000},
+    {"memory", "delete", "memory.delete", NULL, NULL, 60000},
+    {"memory", "supersede", "memory.supersede", NULL, NULL, 60000},
     {"memory", "show", "memory.get", NULL, NULL, 60000},
     {"memory", "read", "memory.read", NULL, NULL, 60000},
+    {"memory", "embed", "memory.embed", NULL, NULL, 900000},
     {"memory", "stats", "memory.stats", NULL, NULL, 60000},
     {"economizer", "stats", "economizer.stats", NULL, NULL, 60000},
     {"memory", "benchmark", "memory.benchmark", NULL, NULL, 600000},
@@ -221,6 +224,8 @@ static const struct
     {"kb", "grant show", "kb.grant.show", NULL, "grants", 30000},
     {"kb", "ingest", "kb.ingest", NULL, NULL, 30000},
     {"kb", "ingest status", "kb.ingest.status", NULL, NULL, 0},
+    {"kb", "reembed", "kb.reembed", NULL, NULL, 900000},
+    {"kb", "health", "kb.health", NULL, NULL, 0},
     {"kb", "status", "kb.status", NULL, NULL, 0},
     {"kb", "curator status", "kb.curator", NULL, NULL, 0},
     {"kb", "curator", "kb.curator", NULL, NULL, 0},
@@ -526,6 +531,24 @@ cJSON *marshal_curator_contradictions(int argc, char **argv)
    return req;
 }
 
+/* Every ordered memory command carries the thin client's identity to the
+ * server.  Explicit project/workspace values are useful for detached clients;
+ * cwd is the normal active-project source and is never resolved on the KB
+ * service host. */
+static void marshal_add_memory_scope(cJSON *req, const rpc_opts_t *opts)
+{
+   const char *v;
+   if ((v = rpc_get(opts, "project")))
+      cJSON_AddStringToObject(req, "project", v);
+   if ((v = rpc_get(opts, "workspace")))
+      cJSON_AddStringToObject(req, "workspace", v);
+   if ((v = rpc_get(opts, "scope")))
+      cJSON_AddStringToObject(req, "scope", v);
+   char cwd[4096];
+   if (getcwd(cwd, sizeof(cwd)))
+      cJSON_AddStringToObject(req, "cwd", cwd);
+}
+
 cJSON *marshal_memory_search(int argc, char **argv)
 {
    rpc_opts_t opts;
@@ -538,6 +561,7 @@ cJSON *marshal_memory_search(int argc, char **argv)
       cJSON_AddItemToArray(kw, cJSON_CreateString(opts.positional[i]));
    cJSON_AddItemToObject(req, "keywords", kw);
    cJSON_AddNumberToObject(req, "limit", rpc_get_int(&opts, "limit", 10));
+   marshal_add_memory_scope(req, &opts);
    return req;
 }
 
@@ -563,6 +587,7 @@ cJSON *marshal_memory_recall(int argc, char **argv)
    int lt = rpc_get_int(&opts, "limit-tokens", 0);
    if (lt > 0)
       cJSON_AddNumberToObject(req, "limit_tokens", lt);
+   marshal_add_memory_scope(req, &opts);
    return req;
 }
 
@@ -669,6 +694,7 @@ cJSON *marshal_memory_list(int argc, char **argv)
    if ((v = rpc_get(&opts, "kind")))
       cJSON_AddStringToObject(req, "kind", v);
    cJSON_AddNumberToObject(req, "limit", rpc_get_int(&opts, "limit", 20));
+   marshal_add_memory_scope(req, &opts);
    return req;
 }
 
@@ -680,11 +706,49 @@ cJSON *marshal_memory_get(int argc, char **argv)
    return req;
 }
 
+cJSON *marshal_memory_delete(int argc, char **argv)
+{
+   cJSON *req = marshal_no_args("memory.delete");
+   if (argc > 0)
+      cJSON_AddNumberToObject(req, "id", atoll(argv[0]));
+   return req;
+}
+
+/* `aimee memory supersede <old_id> <new_content> [--confidence=N] [--session=S]`
+ * — mirrors mem_supersede()'s argument shape so the thin client and the
+ * server-host command take the same thing. */
+cJSON *marshal_memory_supersede(int argc, char **argv)
+{
+   cJSON *req = marshal_no_args("memory.supersede");
+   int positional = 0;
+   for (int i = 0; i < argc; i++)
+   {
+      if (strncmp(argv[i], "--confidence=", 13) == 0)
+         cJSON_AddNumberToObject(req, "confidence", atof(argv[i] + 13));
+      else if (strncmp(argv[i], "--session=", 10) == 0)
+         cJSON_AddStringToObject(req, "session_id", argv[i] + 10);
+      else if (argv[i][0] == '-')
+         continue;
+      else if (positional == 0)
+      {
+         cJSON_AddNumberToObject(req, "old_id", atoll(argv[i]));
+         positional++;
+      }
+      else if (positional == 1)
+      {
+         cJSON_AddStringToObject(req, "new_content", argv[i]);
+         positional++;
+      }
+   }
+   return req;
+}
+
 cJSON *marshal_memory_read(int argc, char **argv)
 {
-   (void)argc;
-   (void)argv;
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, NULL, &opts);
    cJSON *req = marshal_no_args("memory.read");
+   marshal_add_memory_scope(req, &opts);
    return req;
 }
 
@@ -753,9 +817,19 @@ cJSON *marshal_index_scan(int argc, char **argv)
 
 cJSON *marshal_index_find(int argc, char **argv)
 {
+   static const char *bools[] = {"json", NULL};
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, bools, &opts);
+
    cJSON *req = marshal_no_args("index.find");
-   if (argc > 0)
-      cJSON_AddStringToObject(req, "identifier", argv[0]);
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "identifier", opts.positional[0]);
+   const char *scope = rpc_get(&opts, "scope");
+   if (scope)
+      cJSON_AddStringToObject(req, "scope", scope);
+   char cwd[4096];
+   if (getcwd(cwd, sizeof(cwd)))
+      cJSON_AddStringToObject(req, "cwd", cwd);
    return req;
 }
 
@@ -769,13 +843,22 @@ cJSON *marshal_index_list(int argc, char **argv)
 
 static cJSON *marshal_index_file_request(const char *method, int argc, char **argv)
 {
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "method", method);
-   cJSON_AddNumberToObject(req, "protocol_version", V1_PROTOCOL_VERSION);
-   if (argc > 0)
-      cJSON_AddStringToObject(req, "project", argv[0]);
-   if (argc > 1)
-      cJSON_AddStringToObject(req, "file_path", argv[1]);
+   static const char *bools[] = {"json", NULL};
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, bools, &opts);
+
+   cJSON *req = marshal_no_args(method);
+   if (opts.pos_count > 1)
+   {
+      /* Compatibility: the historic form was <project> <file>. */
+      cJSON_AddStringToObject(req, "project", opts.positional[0]);
+      cJSON_AddStringToObject(req, "file_path", opts.positional[1]);
+   }
+   else if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "file_path", opts.positional[0]);
+   char cwd[4096];
+   if (getcwd(cwd, sizeof(cwd)))
+      cJSON_AddStringToObject(req, "cwd", cwd);
    return req;
 }
 
@@ -805,6 +888,12 @@ cJSON *marshal_index_find_callers(int argc, char **argv)
       cJSON_AddStringToObject(req, "symbol", opts.positional[0]);
    if (opts.pos_count > 1)
       cJSON_AddStringToObject(req, "project", opts.positional[1]);
+   const char *scope = rpc_get(&opts, "scope");
+   if (scope)
+      cJSON_AddStringToObject(req, "scope", scope);
+   char cwd[4096];
+   if (getcwd(cwd, sizeof(cwd)))
+      cJSON_AddStringToObject(req, "cwd", cwd);
    return req;
 }
 
@@ -1227,6 +1316,11 @@ cJSON *marshal_kb_search(int argc, char **argv)
    const char *v;
    if ((v = rpc_get(&opts, "project")))
       cJSON_AddStringToObject(req, "project", v);
+   if ((v = rpc_get(&opts, "scope")))
+      cJSON_AddStringToObject(req, "scope", v);
+   char cwd[4096];
+   if (getcwd(cwd, sizeof(cwd)))
+      cJSON_AddStringToObject(req, "cwd", cwd);
    cJSON_AddNumberToObject(req, "max_results", rpc_get_int(&opts, "max", 10));
    if ((v = rpc_get(&opts, "fusion-mode")))
       cJSON_AddStringToObject(req, "fusion_mode", v);
@@ -1297,6 +1391,49 @@ cJSON *marshal_kb_ingest(int argc, char **argv)
    const char *v;
    if ((v = rpc_get(&opts, "embed")))
       cJSON_AddStringToObject(req, "embedding_command", v);
+   return req;
+}
+
+/* kb reembed [--confirm] [--force] [--dry-run] [--target-dim N] [--clear-maintenance]
+ * The kb keeps the gating; this only carries the operator's intent across. */
+cJSON *marshal_kb_reembed(int argc, char **argv)
+{
+   static const char *bool_flags[] = {"confirm", "force", "dry-run", "clear-maintenance", NULL};
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, bool_flags, &opts);
+
+   cJSON *req = marshal_no_args("kb.reembed");
+   if (rpc_get(&opts, "confirm"))
+      cJSON_AddTrueToObject(req, "confirm");
+   if (rpc_get(&opts, "force"))
+      cJSON_AddTrueToObject(req, "force");
+   if (rpc_get(&opts, "dry-run"))
+      cJSON_AddTrueToObject(req, "dry_run");
+   if (rpc_get(&opts, "clear-maintenance"))
+      cJSON_AddTrueToObject(req, "clear_maintenance");
+   const char *v;
+   if ((v = rpc_get(&opts, "target-dim")))
+      cJSON_AddNumberToObject(req, "target_dim", atoi(v));
+   return req;
+}
+
+/* memory embed --all | <id> — rebuild memory vectors, e.g. after a dim change
+ * drops them. Defaults to nothing so a bare invocation is rejected server-side
+ * rather than silently re-embedding an entire corpus. */
+cJSON *marshal_memory_embed(int argc, char **argv)
+{
+   static const char *bool_flags[] = {"all", NULL};
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, bool_flags, &opts);
+
+   cJSON *req = marshal_no_args("memory.embed");
+   if (rpc_get(&opts, "all"))
+      cJSON_AddTrueToObject(req, "all");
+   if (opts.pos_count >= 1)
+      cJSON_AddNumberToObject(req, "memory_id", atof(opts.positional[0]));
+   const char *v;
+   if ((v = rpc_get(&opts, "version")))
+      cJSON_AddStringToObject(req, "version", v);
    return req;
 }
 

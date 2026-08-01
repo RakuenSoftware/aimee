@@ -358,31 +358,186 @@ static void py_import_line(const char *line, int lineno, void *ctx)
 
    (void)lineno;
 
-   /* from . import ... or from .module import ... */
+   /* import app.dates [as dates], app.money */
+   if (strncmp(p, "import ", 7) == 0)
+   {
+      p += 7;
+      while (*p && *p != '#')
+      {
+         while (*p == ' ' || *p == '\t' || *p == ',')
+            p++;
+         const char *start = p;
+         while (isalnum((unsigned char)*p) || *p == '_' || *p == '.')
+            p++;
+         size_t len = (size_t)(p - start);
+         if (len > 0 && len < 512)
+         {
+            char buf[512];
+            memcpy(buf, start, len);
+            buf[len] = '\0';
+            ic->count = add_str(ic->out, ic->count, ic->max, buf);
+         }
+         while (*p && *p != ',' && *p != '#')
+            p++;
+      }
+      return;
+   }
+
+   /* Keep both the imported module and explicit module/member pair. The latter
+    * is what lets `from app import dates` resolve exactly to app/dates.py while
+    * the former keeps `from app.dates import symbol` attached to app.dates. */
    if (strncmp(p, "from ", 5) == 0)
    {
       p += 5;
       p = skip_ws(p);
-      if (*p == '.')
+      const char *module = p;
+      while (isalnum((unsigned char)*p) || *p == '_' || *p == '.')
+         p++;
+      size_t module_len = (size_t)(p - module);
+      p = skip_ws(p);
+      if (module_len > 0 && strncmp(p, "import ", 7) == 0)
       {
-         /* Relative import */
-         const char *start = p;
-         while (*p == '.')
-            p++;
-         /* Get module name if any */
-         char buf[512];
-         size_t len = 0;
-         while (isalnum((unsigned char)p[len]) || p[len] == '_' || p[len] == '.')
-            len++;
-         size_t total = (size_t)(p - start) + len;
-         if (total > 0 && total < sizeof(buf))
+         int module_has_name = 0;
+         for (size_t i = 0; i < module_len; i++)
+            if (isalnum((unsigned char)module[i]) || module[i] == '_')
+               module_has_name = 1;
+         if (module_has_name && module_len < 512)
          {
-            memcpy(buf, start, total);
-            buf[total] = '\0';
+            char buf[512];
+            memcpy(buf, module, module_len);
+            buf[module_len] = '\0';
             ic->count = add_str(ic->out, ic->count, ic->max, buf);
+         }
+
+         p += 7;
+         while (*p && *p != '#')
+         {
+            while (*p == ' ' || *p == '\t' || *p == ',' || *p == '(' || *p == ')')
+               p++;
+            const char *member = p;
+            while (isalnum((unsigned char)*p) || *p == '_')
+               p++;
+            size_t member_len = (size_t)(p - member);
+            if (member_len > 0 && !(member_len == 1 && member[0] == '*'))
+            {
+               char buf[512];
+               int needs_dot = module_len > 0 && module[module_len - 1] != '.';
+               if (module_len + (size_t)needs_dot + member_len < sizeof(buf))
+               {
+                  memcpy(buf, module, module_len);
+                  size_t off = module_len;
+                  if (needs_dot)
+                     buf[off++] = '.';
+                  memcpy(buf + off, member, member_len);
+                  buf[off + member_len] = '\0';
+                  ic->count = add_str(ic->out, ic->count, ic->max, buf);
+               }
+            }
+            while (*p && *p != ',' && *p != '#')
+               p++;
          }
       }
    }
+}
+
+static void slash_normalize(const char *in, char *out, size_t out_cap)
+{
+   if (!out || out_cap == 0)
+      return;
+   out[0] = '\0';
+   if (!in)
+      return;
+   while (in[0] == '.' && (in[1] == '/' || in[1] == '\\'))
+      in += 2;
+   size_t n = 0;
+   while (*in && n + 1 < out_cap)
+   {
+      char c = *in++;
+      out[n++] = c == '\\' ? '/' : c;
+   }
+   out[n] = '\0';
+}
+
+int code_path_import_identity(const char *path, char *out, size_t out_cap)
+{
+   if (!path || !out || out_cap == 0)
+      return -1;
+   char normalized[MAX_PATH_LEN];
+   slash_normalize(path, normalized, sizeof(normalized));
+   size_t len = strlen(normalized);
+   if (len > 3 && strcmp(normalized + len - 3, ".py") == 0)
+   {
+      normalized[len - 3] = '\0';
+      len -= 3;
+      if (len >= 9 && strcmp(normalized + len - 9, "/__init__") == 0)
+         normalized[len - 9] = '\0';
+      for (char *p = normalized; *p; p++)
+         if (*p == '/')
+            *p = '.';
+   }
+   snprintf(out, out_cap, "%s", normalized);
+   return out[0] ? 0 : -1;
+}
+
+int code_import_identity(const char *importer_path, const char *raw_import, char *out,
+                         size_t out_cap)
+{
+   if (!raw_import || !out || out_cap == 0)
+      return -1;
+   out[0] = '\0';
+   size_t importer_len = importer_path ? strlen(importer_path) : 0;
+   int python = importer_len > 3 && strcmp(importer_path + importer_len - 3, ".py") == 0;
+   if (!python || raw_import[0] != '.')
+   {
+      slash_normalize(raw_import, out, out_cap);
+      return out[0] ? 0 : -1;
+   }
+
+   char package[MAX_PATH_LEN];
+   slash_normalize(importer_path, package, sizeof(package));
+   char *slash = strrchr(package, '/');
+   if (slash)
+      *slash = '\0';
+   else
+      package[0] = '\0';
+   for (char *p = package; *p; p++)
+      if (*p == '/')
+         *p = '.';
+
+   size_t dots = 0;
+   while (raw_import[dots] == '.')
+      dots++;
+   for (size_t level = 1; level < dots && package[0]; level++)
+   {
+      char *last = strrchr(package, '.');
+      if (last)
+         *last = '\0';
+      else
+         package[0] = '\0';
+   }
+   const char *suffix = raw_import + dots;
+   if (package[0] && suffix[0])
+      snprintf(out, out_cap, "%s.%s", package, suffix);
+   else
+      snprintf(out, out_cap, "%s%s", package, suffix);
+   return out[0] ? 0 : -1;
+}
+
+int code_import_resolves_path(const char *importer_path, const char *raw_import,
+                              const char *target_path)
+{
+   if (!importer_path || !raw_import || !target_path)
+      return 0;
+   char import_id[MAX_PATH_LEN];
+   char target_id[MAX_PATH_LEN];
+   if (code_import_identity(importer_path, raw_import, import_id, sizeof(import_id)) != 0 ||
+       code_path_import_identity(target_path, target_id, sizeof(target_id)) != 0)
+      return 0;
+   if (strcmp(import_id, target_id) == 0)
+      return 1;
+   size_t target_len = strlen(target_id);
+   return target_len + 9 < sizeof(target_id) && strncmp(import_id, target_id, target_len) == 0 &&
+          strcmp(import_id + target_len, ".__init__") == 0;
 }
 
 static void py_export_line(const char *line, int lineno, void *ctx)

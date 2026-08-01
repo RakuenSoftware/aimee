@@ -21,11 +21,21 @@ int aimee_pg_is_shim(void)
 {
    return 1;
 }
-void *db2_conn(void)
+void *(db2_conn)(void)
 {
    return NULL;
 }
-void db2_lease_begin(void)
+
+/* Real code reaches the pool through the db2_conn() macro, which expands to
+ * db2_conn_at(site) so a lazy acquire can be attributed. Route the stub. */
+void *db2_conn_at(const char *site)
+{
+   (void)site;
+   return (db2_conn)();
+}
+/* The real symbol is db2_lease_begin_at; db2_lease_begin is a macro in db2.h
+ * that records the caller's file:line for stuck-lease attribution. */
+void db2_lease_begin_at(const char *site)
 {
 }
 void db2_lease_end(void)

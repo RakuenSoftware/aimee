@@ -31,16 +31,22 @@ int kb_curator_implements_json(const char *topic, char *out, size_t out_cap)
        " FROM artifacts cu"
        " JOIN artifact_links l ON l.from_id = cu.id AND l.kind = 'mentions'"
        " JOIN artifacts e ON e.id = l.to_id AND e.kind = 'entity'"
+       " JOIN projects p ON p.name=cu.scope_id"
        " LEFT JOIN artifact_citations fc"
        "   ON fc.artifact_id = cu.id AND fc.source_kind = 'kb_file'"
-       " WHERE cu.kind = 'code_unit'"
+       " WHERE cu.kind = 'code_unit' AND cu.scope_kind='project'"
+       "   AND p.lifecycle_state='current'"
+       "   AND CAST(cu.payload->>'generation' AS BIGINT)=p.current_generation"
        /* Match on the entity's name via the JSON operator, not a LIKE on the
         * raw payload: JSONB normalizes "name":"X" to "name": "X" (space after
         * the colon), so a no-space LIKE pattern never matches on Postgres. */
        "   AND (e.payload->>'name' = ?1"
        "        OR e.id IN (SELECT ec.artifact_id FROM artifact_citations ec"
        "                    JOIN kb_documents d ON CAST(d.id AS TEXT) = ec.source_id"
-       "                    WHERE ec.source_kind = 'kb_document' AND d.file_path LIKE ?2))"
+       "                    JOIN projects dp ON dp.name=d.project"
+       "                    WHERE ec.source_kind = 'kb_document' AND d.file_path LIKE ?2"
+       "                      AND dp.lifecycle_state='current'"
+       "                      AND d.generation=dp.current_generation))"
        " ORDER BY cu.id LIMIT 100";
    char docpat[300];
    snprintf(docpat, sizeof(docpat), "%%%s%%", topic);

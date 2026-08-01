@@ -78,7 +78,7 @@ static void test_judge_parses_verdicts(void)
    const char *cmd =
        "printf '{\"verdicts\":[{\"i\":0,\"surprising\":true,\"reason\":\"dup logic\"},"
        "{\"i\":1,\"surprising\":false,\"reason\":\"coincidental\"}]}'";
-   int judged = kb_surprising_judge(NULL, cmd, "p", links, 2, out, err, sizeof(err));
+   int judged = kb_surprising_judge(cmd, "p", links, 2, out, err, sizeof(err));
    assert(judged == 2);
    assert(out[0].judged == 1 && out[0].confirmed == 1);
    assert(strcmp(out[0].reason, "dup logic") == 0);
@@ -94,11 +94,9 @@ static void test_judge_error_paths(void)
    kb_graph_surprising_t links[1] = {mk_link("file:p:x", "file:p:y", 0.9, -1)};
    kb_surprising_verdict_t out[1];
    char err[256];
-   int r1 =
-       kb_surprising_judge(NULL, "printf 'not json at all'", "p", links, 1, out, err, sizeof(err));
+   int r1 = kb_surprising_judge("printf 'not json at all'", "p", links, 1, out, err, sizeof(err));
    assert(r1 == -1);
-   int r2 =
-       kb_surprising_judge(NULL, "printf '{\"other\":1}'", "p", links, 1, out, err, sizeof(err));
+   int r2 = kb_surprising_judge("printf '{\"other\":1}'", "p", links, 1, out, err, sizeof(err));
    assert(r2 == 0);
    assert(out[0].judged == 0); /* no verdict -> left unconfirmed */
    printf("  PASS: unparseable -> -1, no-verdicts -> 0 (unconfirmed)\n");
@@ -110,7 +108,7 @@ static void test_judge_skips_unresolved(void)
    kb_graph_surprising_t links[1] = {mk_link("file:p:unknown", "file:p:y", 0.9, -1)};
    kb_surprising_verdict_t out[1];
    char err[256];
-   int r = kb_surprising_judge(NULL, "printf '{\"verdicts\":[{\"i\":0,\"surprising\":true}]}'", "p",
+   int r = kb_surprising_judge("printf '{\"verdicts\":[{\"i\":0,\"surprising\":true}]}'", "p",
                                links, 1, out, err, sizeof(err));
    assert(r == 0); /* nothing judgeable -> no LLM call */
    assert(out[0].sent == 0 && out[0].judged == 0);
@@ -128,7 +126,7 @@ static void test_judge_rejects_unsent_verdict(void)
    /* link 0 is sent; link 1 is skipped (unknown). The model echoes BOTH i=0 and i=1. */
    const char *cmd = "printf '{\"verdicts\":[{\"i\":0,\"surprising\":true},"
                      "{\"i\":1,\"surprising\":true,\"reason\":\"fabricated\"}]}'";
-   int judged = kb_surprising_judge(NULL, cmd, "p", links, 2, out, err, sizeof(err));
+   int judged = kb_surprising_judge(cmd, "p", links, 2, out, err, sizeof(err));
    assert(judged == 1); /* only the sent pair is judged */
    assert(out[0].sent == 1 && out[0].judged == 1 && out[0].confirmed == 1);
    assert(out[1].sent == 0 && out[1].judged == 0); /* the unsent verdict was rejected */

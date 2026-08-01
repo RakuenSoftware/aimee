@@ -115,15 +115,14 @@ var methodRoutes = map[string]methodRoute{
 // rpcV1Call dispatches a unary RPC over aimee-server's first-class /v1 HTTP
 // routes (resolved from the request's method via methodRoutes) over the UDS.
 // rh_dispatch_op returns the dispatch envelope byte-for-byte, so the decoded
-// result is identical to the legacy NDJSON socket; the UDS is filesystem-trusted,
-// so no bearer is needed. An unmapped method or a genuine transport error falls
-// back to the NDJSON socket, so webchat still works against an older socket-only
-// server.
+// result matches the dispatch envelope; the root-owned UDS peer is
+// kernel-attested, so no shared bearer is needed. The retired NDJSON transport is
+// deliberately not a fallback because it required a persistent server.token.
 func (s *server) rpcV1Call(ctx context.Context, req map[string]any) (map[string]json.RawMessage, error) {
 	method, _ := req["method"].(string)
 	route, ok := methodRoutes[method]
 	if !ok {
-		return socketCallContext(ctx, s.cfg.socketPath, req)
+		return nil, fmt.Errorf("no /v1 route for method %q", method)
 	}
 
 	var body []byte
@@ -136,7 +135,7 @@ func (s *server) rpcV1Call(ctx context.Context, req map[string]any) (map[string]
 
 	st, data, err := s.v1Request(ctx, route.verb, route.path, body)
 	if err != nil {
-		return socketCallContext(ctx, s.cfg.socketPath, req)
+		return nil, err
 	}
 	var msg map[string]json.RawMessage
 	if len(data) > 0 {
@@ -295,7 +294,7 @@ func argsHaveLiteralKey(args []string) bool {
 // be sealed server-side. A plain UDS hop authenticates only as the (root) webchat
 // process — an empty, un-writable vault principal — so the seal is refused. That
 // one case is forwarded over the attested webuser channel (v1RequestWebuser:
-// server.token + X-Aimee-Webuser) so aimee-server classifies the caller as
+// root-owned UDS peer + X-Aimee-Webuser) so aimee-server classifies the caller as
 // webuser:<user>; when that principal holds the vault:write:server capability the
 // key lands in the SHARED server vault. The /v1 bearer never enters webchat. A
 // keyless add / $VAR reference needs no attested identity and takes the plain path.
@@ -343,7 +342,7 @@ func (s *server) handleAgentAdd(w http.ResponseWriter, r *http.Request) {
 	// Surface the server's dispatch error (e.g. the vault refusal) to the UI as
 	// {"error": ...}; the Agents page reads res.error.
 	if rerr := rpcError(msg); rerr != nil {
-		writeJSONError(w, http.StatusBadGateway, rerr.Error())
+		writeJSONError(w, rpcErrorStatus(rerr), rerr.Error())
 		return
 	}
 	if st != http.StatusOK {

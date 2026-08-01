@@ -141,7 +141,8 @@ static int link_concept_semantic(const char *code_id, const char *concept, const
    /* Keep the embedder's native dimension (matches resolve_entities: accept
     * whatever the model emits, then NN-search the runtime-dim entity vectors
     * with that same dim). */
-   int dim = memory_embed_text(concept, embed_cmd, vec, CURATOR_LINK_ENTITY_DIM);
+   int dim =
+       memory_embed_text(concept, embed_cmd, EMBED_INPUT_DOCUMENT, vec, CURATOR_LINK_ENTITY_DIM);
    if (dim <= 0)
       return 0;
 
@@ -168,9 +169,7 @@ int kb_curator_link_artifacts_one(const kb_curator_extract_opts_t *opts)
    if (!conn)
       return 0;
 
-   config_t cfg;
-   config_load(&cfg);
-   const char *embed_cmd = config_embedding_command(&cfg, NULL);
+   const char *embed_cmd = config_embedding_command_current(NULL);
 
    static const char *sql = "SELECT id, payload FROM artifacts"
                             " WHERE kind = 'code_unit' AND state = 'committed'"

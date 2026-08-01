@@ -112,12 +112,24 @@ extern "C"
    kb_tls_client_conn_t *kb_tls_client_conn_open_ctx(const char *host, int port, SSL_CTX *ctx);
    kb_tls_client_conn_t *kb_tls_client_conn_open_session(const char *host, int port, SSL_CTX *ctx,
                                                          SSL_SESSION *session);
+   /* Set the per-request socket I/O timeout on an open client connection. The
+    * default remains 30 seconds for callers that do not opt in; long-running
+    * relays (for example kb.build) must propagate their operation timeout. */
+   int kb_tls_client_conn_set_timeout(kb_tls_client_conn_t *conn, int timeout_ms);
    int kb_tls_client_conn_session_reused(const kb_tls_client_conn_t *conn);
    SSL_SESSION *kb_tls_client_conn_get1_session(const kb_tls_client_conn_t *conn);
    int kb_tls_client_conn_request(kb_tls_client_conn_t *conn, const char *method, const char *path,
                                   const char *body, const char *authorization, int close_after,
                                   char *resp_out, size_t resp_cap, int *status_out,
                                   int *reusable_out);
+   /* As above, but preserve an explicit caller-owned Content-Type header for
+    * non-JSON bodies such as documentation multipart uploads. NULL selects the
+    * existing application/json default. */
+   int kb_tls_client_conn_request_with_type(kb_tls_client_conn_t *conn, const char *method,
+                                            const char *path, const char *body,
+                                            const char *authorization, const char *content_type,
+                                            int close_after, char *resp_out, size_t resp_cap,
+                                            int *status_out, int *reusable_out);
    void kb_tls_client_conn_close(kb_tls_client_conn_t *conn);
 
    /* TOFU bootstrap: fetch the kb's CA certificate from GET /v1/enroll/ca and

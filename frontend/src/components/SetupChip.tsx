@@ -1,23 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSessions } from '../SessionContext';
 import { loadConfig, type ConfigMap } from '../setup/configApi';
 import { computeReadiness, stepsRemaining } from '../setup/readiness';
+import { fetchHostCount, fetchProjectCount, fetchSetupAccountReady } from '../setup/setupSignals';
 import { requestOpenWizard, isDismissed, SETUP_UPDATED_EVENT } from '../setup/setupState';
 
 /* Header chip: "Setup — N left". Reads GET /api/config once (and again whenever
  * the wizard reports a change or the window regains focus), computes readiness
- * against the active session's project, and shows how many required steps remain.
+ * against the cloned project inventory, and shows how many required steps remain.
  * Hidden entirely once ready. Clicking it opens the wizard. On first load, if the
  * instance is not ready and the wizard hasn't been dismissed, it auto-opens the
  * wizard once. All heavy lifting is in the tested setup/ modules. */
 
 export default function SetupChip() {
-  const { active } = useSessions();
-  const hasProject = !!active?.projectName;
   const [cfg, setCfg] = useState<ConfigMap | null>(null);
+  const [accountReady, setAccountReady] = useState(false);
+  const [projectCount, setProjectCount] = useState(0);
+  const [hostsConnected, setHostsConnected] = useState(0);
 
   const load = useCallback(() => {
-    loadConfig().then(setCfg);
+    Promise.all([loadConfig(), fetchSetupAccountReady(), fetchProjectCount(), fetchHostCount()])
+      .then(([config, account, projects, hosts]) => {
+        setCfg(config);
+        setAccountReady(account);
+        setProjectCount(projects);
+        setHostsConnected(hosts);
+      });
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -33,15 +40,12 @@ export default function SetupChip() {
   }, [load]);
 
   const readiness = useMemo(
-    () => (cfg ? computeReadiness(cfg, hasProject) : null),
-    [cfg, hasProject],
+    () => (cfg ? computeReadiness(cfg, { accountReady, projectCount, hostsConnected }) : null),
+    [cfg, accountReady, projectCount, hostsConnected],
   );
 
   // Auto-open the wizard once per page load when unconfigured and not dismissed.
   const autoOpened = useRef(false);
-  // Reset the once-per-session auto-open guard when the active session changes,
-  // so a freshly-selected unconfigured session can auto-open the wizard too.
-  useEffect(() => { autoOpened.current = false; }, [active?.id]);
   useEffect(() => {
     if (readiness && !readiness.ready && !isDismissed() && !autoOpened.current) {
       autoOpened.current = true;

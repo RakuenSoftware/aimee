@@ -60,10 +60,8 @@ int kb_curator_notify_send(const char *notify_socket, const char *source_kind,
 int kb_curator_notify_invalidation(const char *source_kind, const char *source_id,
                                    int artifacts_stale)
 {
-   config_t cfg;
-   config_load(&cfg);
-   return kb_curator_notify_send(cfg.kb_curator_invalidation_notify_socket, source_kind, source_id,
-                                 artifacts_stale);
+   return kb_curator_notify_send(config_kb_curator_invalidation_notify_socket(), source_kind,
+                                 source_id, artifacts_stale);
 }
 
 void kb_curator_invalidation_broadcast(const char *project, const char *file_path,

@@ -3,26 +3,19 @@
 # model per call. Kept separate from the kb image so torch/sentence-transformers
 # never bloat the slim kb runtime.
 #
-# Two coherent tiers, embedder paired with a matching-size reranker:
-#   default image (aimee-embedder):   pplx-embed-v1-0.6b (1024-dim) + ettin-reranker-400m
-#   heavy image   (aimee-embedder-4b): pplx-embed-v1-4b   (2560-dim) + ettin-reranker-1b
-# The 0.6b default is the low-latency tier (a 0.6b query embed is ~5x faster than
-# the 4b and the reranker dominates recall cost anyway); the 4b image is the
-# higher-fidelity alternate. Override either at build time:
+# Two tiers:
+#   default image (aimee-embedder):   pplx-embed-v1-0.6b (1024-dim)
+#   heavy image   (aimee-embedder-4b): pplx-embed-v1-4b   (2560-dim)
+# The 0.6b default is the low-latency tier (a 0.6b query embed is ~5x faster than the
+# 4b); the 4b image is the higher-fidelity alternate. Override at build time:
 #   --build-arg EMBEDDER_MODEL=<hf id>  (must match config embedding_dim + the
 #     schema vector(N) columns — pplx-embed-v1-0.6b is 1024, 4b is 2560)
-#   --build-arg RERANKER_MODEL=<hf id>  (the reranker emits a scalar score, so it
-#     has no dim constraint — size it to match the embedder for a coherent tier).
 FROM python:3.11-slim AS embedder
 
 ARG EMBEDDER_MODEL=perplexity-ai/pplx-embed-v1-0.6b
-# Cross-encoder reranker served from the same process (aimee's memory rerank
-# stage). Scores top-K (~50) pairs per query; the 400m pairs with the 0.6b embedder.
-ARG RERANKER_MODEL=cross-encoder/ettin-reranker-400m-v1
 ENV PIP_NO_CACHE_DIR=1 \
     HF_HOME=/opt/models \
     EMBEDDER_MODEL=${EMBEDDER_MODEL} \
-    RERANKER_MODEL=${RERANKER_MODEL} \
     EMBEDDER_PORT=8080
 
 RUN apt-get update \
@@ -30,20 +23,17 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # CPU-only torch keeps the image off the CUDA wheels. einops + a recent
-# sentence-transformers are needed for the Qwen3-based embedder. transformers>=5.2
-# is required by the Ettin (ModernBERT) cross-encoder reranker — older transformers
-# can't instantiate its tokenizer ("Unrecognized processing class") — so pin the
-# floor explicitly rather than rely on the transitive resolution.
+# sentence-transformers are needed for the Qwen3-based embedder.
 RUN pip install --index-url https://download.pytorch.org/whl/cpu torch \
     && pip install -U "sentence-transformers>=3.3" "transformers>=5.2" einops
 
-# Models are NOT baked into the image. Baking the multi-GB 4b embedder + 1b
-# reranker re-downloaded several GB into every release build (×2 arches) and made
+# The model is NOT baked into the image. Baking the multi-GB 4b embedder
+# re-downloaded several GB into every release build (×2 arches) and made
 # the published image multi-GB to push and to convert to an LXC template. Instead
-# embedder-server.py fetches EMBEDDER_MODEL + RERANKER_MODEL at startup, once,
+# embedder-server.py fetches EMBEDDER_MODEL at startup, once,
 # into HF_HOME (/opt/models — the persistent aimee-embedder-models volume), so a
 # restart/recreate/image-update reuses the cached weights and only `down -v`
-# re-downloads. Switching tier (…-0.6b / …-400m) or model is an env-var change,
+# re-downloads. Switching tier (…-0.6b / …-4b) or model is an env-var change,
 # no rebuild. During the cold first-boot fetch /health reports "loading" (503)
 # and /embed returns 503 — never a 0-vector against an unloaded model.
 

@@ -79,18 +79,32 @@ uint32_t server_http_effective_conn_caps(int is_tcp, const char *bearer, int rem
 {
    if (!is_tcp || mtls_mode <= 0)
       return server_http_conn_caps(is_tcp, bearer, remote_writes);
-   if (!mtls_authenticated && bearer && strcmp(bearer, AIMEE_BOOTSTRAP_BEARER) == 0)
-      return (CAPS_READ_ONLY & ~(uint32_t)CAP_CHAT) | CAP_SESSION_ADMIN;
    if (mtls_authenticated)
-      return CAPS_AUTHENTICATED;
+      /* `remote_writes` is the caller's verified per-user tier by this point,
+       * not the retired process-global switch. Preserve the ordinary mTLS
+       * authenticated floor for off/data, but a certificate-bound full grant
+       * must expose the same full capability set as any other verified full
+       * identity. Otherwise CAP_INDEX_ADMIN routes such as kb.build remain
+       * impossible even for the browser wizard's enrolled owner. */
+      return remote_writes >= SERVER_REMOTE_WRITES_FULL ? CAPS_ALL : CAPS_AUTHENTICATED;
    /* Optional-mode bearer fallback is deliberately weaker than a client cert:
     * query/session reads only, with no compute or mutation capability. */
    return CAPS_READ_ONLY & ~(uint32_t)CAP_CHAT;
 }
 
-int server_http_mtls_transport_allowed(int is_tcp, int mtls_mode, int mtls_authenticated)
+int server_http_mtls_transport_allowed(int is_tcp, int mtls_mode, int mtls_authenticated,
+                                       const char *method, const char *path)
 {
-   return !is_tcp || mtls_mode < 2 || mtls_authenticated;
+   if (!is_tcp || mtls_mode < 2 || mtls_authenticated)
+      return 1;
+   /* Required posture is enforced here instead of with
+    * SSL_VERIFY_FAIL_IF_NO_PEER_CERT so a new client can reach the enrollment
+    * handlers. These are transport exceptions only: the ordinary bearer,
+    * bootstrap, capability and single-use binding gates still run below. */
+   if (!method || !path || strcmp(method, "POST") != 0)
+      return 0;
+   return strcmp(path, "/v1/api/rotate_bearer") == 0 ||
+          strcmp(path, "/v1/api/enroll_bearer") == 0 || strcmp(path, "/v1/cert/sign") == 0;
 }
 
 /* Routes deliberately reachable over the TCP listener regardless of
@@ -104,7 +118,8 @@ static int v1_route_tcp_exempt(const char *method, const char *path)
    if (strcmp(path, "/v1/runner/poll") == 0 || strcmp(path, "/v1/runner/respond") == 0)
       return 1;
    if (strcmp(method, "POST") == 0 &&
-       (strcmp(path, "/v1/api/rotate_bearer") == 0 || strcmp(path, "/v1/cert/sign") == 0))
+       (strcmp(path, "/v1/api/rotate_bearer") == 0 || strcmp(path, "/v1/api/enroll_bearer") == 0 ||
+        strcmp(path, "/v1/cert/sign") == 0))
       return 1;
    if (strcmp(method, "POST") == 0 && strcmp(path, "/v1/workspaces") == 0) /* workspace.add */
       return 1;
@@ -203,6 +218,22 @@ uint64_t server_http_global_ignored_count(void)
    uint64_t value = g_remote_writes_global_ignored;
    pthread_mutex_unlock(&g_global_ignored_lock);
    return value;
+}
+
+int server_http_retired_global_would_allow(int fd, int is_tcp, const char *bearer,
+                                           int remote_writes, int mtls_mode, int mtls_authenticated,
+                                           const char *method, const char *path)
+{
+   (void)fd;
+   (void)mtls_mode;
+   (void)mtls_authenticated;
+   if (remote_writes == SERVER_REMOTE_WRITES_OFF)
+      return 0;
+   /* Reconstruct the retired switch itself, not the request's current mTLS-
+    * narrowed capability set. The old global authorizer derived both its caps
+    * and its route tier from remote_writes; using current effective caps makes
+    * the observability counter disappear in optional-mTLS bearer fallback. */
+   return server_http_route_allowed(is_tcp, bearer, method, path, remote_writes);
 }
 
 int server_http_resolve_write_tier(int is_tcp, const char *buf, const char *method,

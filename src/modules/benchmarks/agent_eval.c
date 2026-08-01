@@ -135,11 +135,10 @@ static void eval_store_result(const char *suite, const eval_task_t *task,
 static void eval_log_hard_negative(const char *suite_name, const eval_task_t *task,
                                    const agent_result_t *result)
 {
-   config_t cfg;
-   if (config_load(&cfg) != 0 || !cfg.memory_hard_negative_log[0])
+   if (!config_present() || !config_memory_hard_negative_log()[0])
       return;
 
-   FILE *fp = fopen(cfg.memory_hard_negative_log, "a");
+   FILE *fp = fopen(config_memory_hard_negative_log(), "a");
    if (!fp)
       return;
 

@@ -37,8 +37,9 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 
-#define KB_TLS_REQ_MAX          (64 * 1024 + 1)
 #define KB_TLS_HEADER_MAX       (64 * 1024)
+#define KB_TLS_BODY_MAX         (1024 * 1024)
+#define KB_TLS_REQ_MAX          (KB_TLS_HEADER_MAX + KB_TLS_BODY_MAX + 1)
 #define KB_TLS_REQUEST_LINE_MAX 8192
 #define KB_TLS_URI_MAX          4096
 #define KB_TLS_HEADER_COUNT_MAX 64
@@ -185,7 +186,7 @@ static int strict_request_read(SSL *ssl, char *buf, size_t cap, int *total_out, 
    int bodyless = !strcmp(method, "GET") || !strcmp(method, "HEAD");
    if ((bodyless && have_cl) || (!bodyless && !have_cl))
       return 400;
-   if (content_len > cap - header_len - 1)
+   if (content_len > KB_TLS_BODY_MAX || content_len > cap - header_len - 1)
       return 413;
    if (total > header_len + content_len)
       return 400;
@@ -479,13 +480,24 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
 
       /* Derive the caller's scope from the verified client certificate. A scoped
        * CN "<kind>:<id>" becomes a synthetic scoped credential the router enforces
-       * via verify-then-trust; "global"/owner (no ':') gets full access. */
+       * via verify-then-trust; "global"/owner (no ':') becomes an unscoped
+       * credential, which the router resolves to the owner actor.
+       *
+       * The unscoped half is load-bearing for the wizard's p5-server-client
+       * workload certificate. Leaving synth empty there let ordinary read routes
+       * through (they need no actor) but made every tenant/admin route fail 401,
+       * including the UDS-only `aimee kb grant set` bootstrap path. The certificate
+       * had already passed TLS verification and the primary enrollment lookup, so
+       * manufacture the same request-local verifier input for both scope shapes. */
       char cn[128] = "";
       char synth[160] = "", authhdr[180] = "";
       int have_cert = (kb_tls_peer_cn(ssl, cn, sizeof(cn)) == 0);
-      if (have_cert && strchr(cn, ':'))
+      if (have_cert)
       {
-         snprintf(synth, sizeof(synth), "scope:%s:m", cn);
+         if (strchr(cn, ':'))
+            snprintf(synth, sizeof(synth), "scope:%s:m", cn);
+         else
+            snprintf(synth, sizeof(synth), "mtls-owner");
          snprintf(authhdr, sizeof(authhdr), "Bearer %s", synth);
       }
 
@@ -660,11 +672,16 @@ static SSL_CTX *g_mtls_ctx = NULL;
 #define KB_MTLS_CONNECTIONS_MAX   64
 #define KB_MTLS_QUEUE_CAP         64
 #define KB_MTLS_WORKER_STACK_SIZE (16 * 1024 * 1024)
-/* Request routes load config_t on the worker stack. Keep ample headroom for
- * route-local state and TLS/libpq frames; live memory queries exhausted 4 MiB
- * once nested search and config frames were active concurrently. */
-_Static_assert(KB_MTLS_WORKER_STACK_SIZE >= sizeof(config_t) + 1024 * 1024,
-               "kb mTLS worker stack must accommodate config_t plus route headroom");
+/* Keep ample headroom for route-local state and TLS/libpq frames; live memory
+ * queries exhausted 4 MiB once nested search frames were active concurrently.
+ *
+ * This used to be asserted as sizeof(config_t) + 1 MiB, because routes loaded a
+ * whole ~750 KiB config_t onto this stack. They no longer do -- config is read a
+ * field at a time -- so the config term is gone and the floor is stated
+ * directly. The headroom is still needed for the nested-search case, which is
+ * what actually exhausted the old 4 MiB. */
+_Static_assert(KB_MTLS_WORKER_STACK_SIZE >= 8 * 1024 * 1024,
+               "kb mTLS worker stack must keep headroom for nested route + TLS/libpq frames");
 static pthread_t g_mtls_workers[KB_MTLS_CONNECTIONS_MAX];
 static int g_mtls_workers_started = 0;
 static int g_mtls_connection_limit = KB_MTLS_CONNECTIONS_MAX;

@@ -46,27 +46,6 @@ void config_parse_memory_negation_section(config_t *cfg, cJSON *root)
          cfg->memory_negation_enabled = cJSON_IsTrue(item) ? 1 : 0;
    }
 }
-void config_parse_memory_rerank_section(config_t *cfg, cJSON *root)
-{
-   cJSON *item = NULL;
-   cJSON *mem_rerank = cJSON_GetObjectItemCaseSensitive(root, "memory_rerank");
-   if (cJSON_IsObject(mem_rerank))
-   {
-      item = cJSON_GetObjectItemCaseSensitive(mem_rerank, "enabled");
-      if (cJSON_IsBool(item))
-         cfg->memory_rerank_enabled = cJSON_IsTrue(item);
-      item = cJSON_GetObjectItemCaseSensitive(mem_rerank, "command");
-      if (cJSON_IsString(item) && item->valuestring[0])
-         snprintf(cfg->memory_rerank_command, sizeof(cfg->memory_rerank_command), "%s",
-                  item->valuestring);
-      item = cJSON_GetObjectItemCaseSensitive(mem_rerank, "top_k");
-      if (cJSON_IsNumber(item) && item->valuedouble > 0)
-         cfg->memory_rerank_top_k = (int)item->valuedouble;
-      item = cJSON_GetObjectItemCaseSensitive(mem_rerank, "mix");
-      if (cJSON_IsNumber(item))
-         cfg->memory_rerank_mix = item->valuedouble;
-   }
-}
 void config_parse_memory_query_expansion_section(config_t *cfg, cJSON *root)
 {
    cJSON *item = NULL;
@@ -1520,8 +1499,8 @@ void config_parse_kb_section2(config_t *cfg, cJSON *root)
 {
    cJSON *item = NULL;
 
-   /* telemetry.metrics_token (P9a): the SHA-256 hex of the /v1/metrics +
-    * /v1/telemetry/metrics scrape/ingest token (never the plaintext). */
+   /* Legacy telemetry.metrics_token is parsed only for the boot migration. Its
+    * SHA-256 verifier is credential material and runtime custody is Vault-only. */
    cJSON *telemetry = cJSON_GetObjectItemCaseSensitive(root, "telemetry");
    if (cJSON_IsObject(telemetry))
    {

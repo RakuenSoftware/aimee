@@ -502,11 +502,8 @@ int kb_handle_dashboard_directives(int fd, cJSON *req)
 int kb_handle_maintenance_calibrate_promotions(int fd, cJSON *req)
 {
    (void)req;
-   config_t cfg;
-   config_load(&cfg);
-
-   int signals = kb_calibrate_consume_drift_signals(&cfg);
-   int n = kb_calibrate_run(&cfg);
+   int signals = kb_calibrate_consume_drift_signals();
+   int n = kb_calibrate_run();
 
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", n >= 0 ? "ok" : "error");
@@ -658,10 +655,7 @@ int kb_handle_ranker_record_outcome(int fd, cJSON *req)
 int kb_handle_maintenance_compute_demotions(int fd, cJSON *req)
 {
    (void)req;
-   config_t cfg;
-   config_load(&cfg);
-
-   int n = kb_demote_run(&cfg);
+   int n = kb_demote_run();
 
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", n >= 0 ? "ok" : "error");

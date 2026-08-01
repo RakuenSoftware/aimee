@@ -6,6 +6,7 @@
 #include "commands.h"
 #include "entity_edges.h"
 #include "platform_process.h"
+#include "config_database.h" /* config_embedding_dim_current — the one width declaration */
 #include "db2/vector_verify.h"
 #include "kb.h"
 #include "kb_client.h"
@@ -86,7 +87,7 @@ void mem_repair(app_ctx_t *ctx, int argc, char **argv)
    if (opts.pos_count > 0)
       single_id = atoll(opts.positional[0]);
 
-   const char *embed_cmd = config_embedding_command(&s_mem_cfg, NULL);
+   const char *embed_cmd = config_embedding_command_current(NULL);
    char *resp_json =
        kb_client_memory_repair_json(limit, failed_only, reset_stuck, single_id, embed_cmd);
    cJSON *resp = resp_json ? cJSON_Parse(resp_json) : NULL;
@@ -430,7 +431,7 @@ static void mem_verify_emit_json(const mem_verify_report_t *r, app_ctx_t *ctx, i
       cJSON_AddStringToObject(j, "r->server_version", r->server_version);
    cJSON *emb = cJSON_AddObjectToObject(j, "embedder");
    cJSON_AddNumberToObject(emb, "dim", r->embedder_dim);
-   cJSON_AddNumberToObject(emb, "expected_dim", 384);
+   cJSON_AddNumberToObject(emb, "expected_dim", config_embedding_dim_current());
    cJSON_AddBoolToObject(emb, "ok", r->embedder_dim_matches);
    cJSON *mem = cJSON_AddObjectToObject(j, "memory");
    cJSON_AddStringToObject(mem, "collection", r->mem_coll);
@@ -515,7 +516,7 @@ static void mem_verify_emit_text(const mem_verify_report_t *r, app_ctx_t *ctx, i
           r->stored_ver[0] ? r->stored_ver : "(none)", r->schema_match ? "match" : "MISMATCH");
    printf("  rebuild lock: %s\n", r->lock_held ? "HELD" : "free");
    printf("  payload indexes: memory_missing=%d r->kb_missing=%d\n", r->mem_missing, r->kb_missing);
-   printf("  embedder: dim=%d expected=384 (%s)\n", r->embedder_dim,
+   printf("  embedder: dim=%d expected=%d (%s)\n", r->embedder_dim, config_embedding_dim_current(),
           r->embedder_dim_matches ? "ok" : "MISMATCH");
 
    if (do_detail && r->ops_summary.failed_ops > 0)
@@ -575,7 +576,7 @@ void mem_verify(app_ctx_t *ctx, int argc, char **argv)
    int do_detail = opt_get_flag(&vopts, "detail");
    int do_timings = opt_get_flag(&vopts, "timings");
 
-   const char *embed_cmd = config_embedding_command(&s_mem_cfg, NULL);
+   const char *embed_cmd = config_embedding_command_current(NULL);
 
    char *verify_json = kb_client_memory_verify_json(do_detail, do_timings, embed_cmd);
    cJSON *resp = verify_json ? cJSON_Parse(verify_json) : NULL;
@@ -610,7 +611,7 @@ void mem_verify(app_ctx_t *ctx, int argc, char **argv)
       if (cJSON_IsNumber(d))
          embedder_dim = (int)d->valuedouble;
    }
-   int embedder_dim_matches = (embedder_dim == 384);
+   int embedder_dim_matches = (embedder_dim == config_embedding_dim_current());
 
    cJSON *mem_obj = cJSON_GetObjectItemCaseSensitive(resp, "memory");
    cJSON *kb_obj = cJSON_GetObjectItemCaseSensitive(resp, "kb");
@@ -850,13 +851,13 @@ void mem_profile(app_ctx_t *ctx, int argc, char **argv)
    opt_parsed_t opts;
    opt_parse(argc, argv, NULL, &opts);
    int do_refresh = opt_get_flag(&opts, "refresh");
-   int min_obs = opt_get_int(&opts, "min-obs", s_mem_cfg.memory_profile_cards_min_obs);
+   int min_obs = opt_get_int(&opts, "min-obs", config_memory_profile_cards_min_obs());
    if (min_obs <= 0)
       min_obs = 10;
 
    if (do_refresh)
    {
-      int stale_secs = s_mem_cfg.memory_profile_cards_stale_secs;
+      int stale_secs = config_memory_profile_cards_stale_secs();
       if (stale_secs <= 0)
          stale_secs = 86400;
       int refreshed = memory_profile_card_refresh(min_obs, stale_secs);
@@ -1029,10 +1030,7 @@ void mem_cognify(app_ctx_t *ctx, int argc, char **argv)
       return;
    }
 
-   /* Load config */
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.memory_cognify_enabled)
+   if (!config_memory_cognify_enabled())
    {
       fprintf(stderr,
               "error: cognification disabled (set memory.cognify.enabled=true in config)\n");
@@ -1040,7 +1038,7 @@ void mem_cognify(app_ctx_t *ctx, int argc, char **argv)
    }
 
    memory_cognify_result_t result;
-   int rc = memory_cognify_unit(unit_id, m.content, &cfg, &result);
+   int rc = memory_cognify_unit(unit_id, m.content, &result);
    if (rc != 0)
    {
       fprintf(stderr, "error: cognification failed for unit %lld\n", (long long)unit_id);
@@ -1113,15 +1111,13 @@ void mem_episode(app_ctx_t *ctx, int argc, char **argv)
 
    if (do_generate)
    {
-      config_t cfg;
-      config_load(&cfg);
-      if (!cfg.memory_episode_summaries_enabled)
+      if (!config_memory_episode_summaries_enabled())
       {
          fprintf(stderr, "error: episode summaries disabled"
                          " (set memory.episode_summaries.enabled=true in config)\n");
          return;
       }
-      int64_t uid = memory_episode_card_generate(session_id, &cfg);
+      int64_t uid = memory_episode_card_generate(session_id);
       if (uid <= 0)
       {
          fprintf(stderr, "error: episode card generation failed for session '%s'\n", session_id);

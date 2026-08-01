@@ -2,7 +2,7 @@
  *
  * Implements the token-layer of the PKCE flow:
  *   - JSON parsing of RFC 6749 §5.1 token responses
- *   - secret_store persistence keyed by MCP client name
+ *   - Vault persistence keyed by MCP client name
  *   - Token exchange (authorization_code grant)
  *   - Token refresh (refresh_token grant)
  *   - High-level oauth_token_get() with auto-refresh
@@ -18,6 +18,7 @@
 #include "cJSON.h"
 #include "log.h"
 #include "platform_process.h"
+#include <openssl/crypto.h>
 #include <time.h>
 #include <string.h>
 #include <stdio.h>
@@ -27,7 +28,9 @@
  * (VAULT_SERVER_PRINCIPAL, client_name, cred). The server decrypts them
  * autonomously to refresh/use them. Previously they were stored via db1/secrets,
  * which in a container falls back to a PLAINTEXT 0600 file — the leak this closes.
- * The legacy plaintext entries are migrated lazily on first read and scrubbed. */
+ * The legacy plaintext entries are migrated lazily on first read and scrubbed.
+ * A migration that cannot durably seal and remove its source fails closed: the
+ * server never uses a credential from the legacy backend. */
 #define OAUTH_VCRED_ACCESS  "oauth_access_token"
 #define OAUTH_VCRED_REFRESH "oauth_refresh_token"
 #define OAUTH_VCRED_EXPIRES "oauth_expires_at"
@@ -60,13 +63,18 @@ static int oauth_secret_load(const char *client_name, const char *vcred, const c
    snprintf(key, sizeof(key), db1_fmt, client_name);
    if (db1_secret_load(key, buf, len) == 0 && buf[0])
    {
-      /* Scrub the plaintext ONLY after a durable encrypted copy exists. If the
-       * vault write fails (e.g. no master key), keep the plaintext and retry the
-       * migration on the next read — never delete the only copy of the token. The
-       * value is valid either way, so we still return it to the caller. */
-      if (vault_service_set_server(client_name, vcred, buf) == VAULT_OK)
-         (void)db1_secret_remove(key);
-      return 0;
+      if (vault_service_set_server(client_name, vcred, buf) != VAULT_OK ||
+          db1_secret_remove(key) != 0)
+      {
+         OPENSSL_cleanse(buf, len);
+         return -1;
+      }
+      /* Re-read through the only supported authority. This also proves the
+       * durable Vault record is usable before the caller receives plaintext. */
+      OPENSSL_cleanse(buf, len);
+      return vault_service_get_server_principal(client_name, vcred, buf, len) == VAULT_OK && buf[0]
+                 ? 0
+                 : -1;
    }
    buf[0] = '\0';
    return -1;

@@ -114,6 +114,22 @@ static void print_agent_list(cJSON *resp)
              cJSON_IsString(model) ? model->valuestring : "",
              cJSON_IsString(endpoint) ? endpoint->valuestring : "",
              cJSON_IsTrue(tools) ? " [tools]" : "");
+      /* Roles decide what each agent may be dispatched for, and `aimee delegate
+       * --list-roles` is routed to this very method — so omitting them left that
+       * flag printing a roster with no roles in it, and left an operator no way
+       * to see the role set `agent roles` had just rewritten. */
+      cJSON *roles = cJSON_GetObjectItemCaseSensitive(ag, "roles");
+      if (cJSON_IsArray(roles) && cJSON_GetArraySize(roles) > 0)
+      {
+         printf("                 roles:");
+         cJSON *role;
+         cJSON_ArrayForEach(role, roles)
+         {
+            if (cJSON_IsString(role) && role->valuestring[0])
+               printf(" %s", role->valuestring);
+         }
+         printf("\n");
+      }
    }
 }
 
@@ -150,6 +166,34 @@ static void print_agent_remove(cJSON *resp)
 static void print_agent_enabled(cJSON *resp, int enabled)
 {
    printf("Delegate '%s' %s.\n", json_str(resp, "name"), enabled ? "enabled" : "disabled");
+}
+
+/* Report the string array the server stored under `key` (roles / personas).
+ * agent.roles and agent.personas are WRITES: with no csv the server resets the
+ * agent to its default set, so the operator must see the resulting list to know
+ * what was dropped. Both used to share the agent.enable printer, which named the
+ * wrong operation and showed none of it. */
+static void print_agent_string_list(cJSON *resp, const char *key, const char *label)
+{
+   /* Both commands report on a bare `<name>` and mutate with a csv, so the wording
+    * has to follow which one happened — "set to" on a read would claim a write
+    * that did not occur. */
+   int read_only = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(resp, "read_only"));
+   printf("Delegate '%s' %s%s:", json_str(resp, "name"), label, read_only ? "" : " set to");
+   cJSON *arr = cJSON_GetObjectItemCaseSensitive(resp, key);
+   int printed = 0;
+   cJSON *item = NULL;
+   cJSON_ArrayForEach(item, arr)
+   {
+      if (cJSON_IsString(item) && item->valuestring[0])
+      {
+         printf(" %s", item->valuestring);
+         printed++;
+      }
+   }
+   if (!printed)
+      printf(" (none)");
+   printf("\n");
 }
 
 static void print_agent_probe(cJSON *resp)
@@ -1243,6 +1287,14 @@ void pt_print_agent_disable(const char *method, cJSON *resp)
 {
    print_agent_enabled(resp, 0);
 }
+void pt_print_agent_roles(const char *method, cJSON *resp)
+{
+   print_agent_string_list(resp, "roles", "roles");
+}
+void pt_print_agent_personas(const char *method, cJSON *resp)
+{
+   print_agent_string_list(resp, "personas", "personas");
+}
 void pt_print_agent_probe(const char *method, cJSON *resp)
 {
    print_agent_probe(resp);
@@ -1630,17 +1682,57 @@ void pt_print_kb_ingest_status(const char *method, cJSON *resp)
       }
    }
 }
+/* Renders what kb_service_kb.c actually sends. Three fields used to be dropped
+ * on the floor, and each omission read as good news:
+ *
+ *   summary_status  the server's OWN degraded/maintenance verdict (vector down,
+ *                   re-embed stuck). Omitting it makes a degraded kb look fine.
+ *   queue           the real backlog. A kb with thousands pending and hundreds
+ *                   failed rendered as "Background ingest: 0 pending", because
+ *                   ingest_queue is a DIFFERENT queue that is legitimately 0.
+ *   vector          points live nested under it; the old code read a top-level
+ *                   "vector_points" this route has never emitted, so the line
+ *                   was dead and the store always looked empty.
+ *
+ * A status command that hides backlog and degradation is worse than no status
+ * command: it is consulted precisely when someone suspects trouble. */
 void pt_print_kb_status(const char *method, cJSON *resp)
 {
    cJSON *proj = cJSON_GetObjectItemCaseSensitive(resp, "project");
    cJSON *chunks = cJSON_GetObjectItemCaseSensitive(resp, "chunks");
-   cJSON *vpts = cJSON_GetObjectItemCaseSensitive(resp, "vector_points");
+   cJSON *summary = cJSON_GetObjectItemCaseSensitive(resp, "summary_status");
    if (cJSON_IsString(proj))
       printf("project: %s\n", proj->valuestring);
+   if (cJSON_IsString(summary))
+      printf("status:        %s\n", summary->valuestring);
    if (cJSON_IsNumber(chunks))
       printf("chunks:        %d\n", (int)chunks->valuedouble);
-   if (cJSON_IsNumber(vpts))
-      printf("vector points: %d\n", (int)vpts->valuedouble);
+
+   cJSON *vec = cJSON_GetObjectItemCaseSensitive(resp, "vector");
+   if (cJSON_IsObject(vec))
+   {
+      cJSON *kbp = cJSON_GetObjectItemCaseSensitive(vec, "kb_points");
+      cJSON *memp = cJSON_GetObjectItemCaseSensitive(vec, "memory_points");
+      if (cJSON_IsNumber(kbp) || cJSON_IsNumber(memp))
+         printf("vector points: %d kb, %d memory\n",
+                cJSON_IsNumber(kbp) ? (int)kbp->valuedouble : 0,
+                cJSON_IsNumber(memp) ? (int)memp->valuedouble : 0);
+   }
+
+   /* Printed whenever the server sent it, including all-zero: "0 failed" is a
+    * fact an operator wants confirmed, not an absence to be inferred. */
+   cJSON *q = cJSON_GetObjectItemCaseSensitive(resp, "queue");
+   if (cJSON_IsObject(q))
+   {
+      cJSON *qp = cJSON_GetObjectItemCaseSensitive(q, "pending");
+      cJSON *qr = cJSON_GetObjectItemCaseSensitive(q, "running");
+      cJSON *qf = cJSON_GetObjectItemCaseSensitive(q, "failed");
+      printf("Queue:     %d pending, %d running, %d failed\n",
+             cJSON_IsNumber(qp) ? (int)qp->valuedouble : 0,
+             cJSON_IsNumber(qr) ? (int)qr->valuedouble : 0,
+             cJSON_IsNumber(qf) ? (int)qf->valuedouble : 0);
+   }
+
    cJSON *iq = cJSON_GetObjectItemCaseSensitive(resp, "ingest_queue");
    if (cJSON_IsObject(iq))
    {
@@ -1963,6 +2055,19 @@ void pt_print_provider_list(const char *method, cJSON *resp)
    }
    else if (cJSON_IsArray(providers))
    {
+      /* An empty list is the normal state of a new install: nothing is
+       * configured until the operator configures it. Say that, rather than
+       * printing a bare header that reads like a broken query. */
+      if (cJSON_GetArraySize(providers) == 0)
+      {
+         if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(resp, "all")))
+            printf("no providers known\n");
+         else if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(resp, "available_only")))
+            printf("no providers available\n");
+         else
+            printf("no providers configured — `aimee provider list --all` shows what can be\n");
+         return;
+      }
       printf("%-20s  %-24s  %-10s  %s\n", "provider", "display", "auth", "status");
       cJSON *p;
       cJSON_ArrayForEach(p, providers)

@@ -2,6 +2,8 @@
 #include "server_mgmt_endpoint.h"
 #include "kb_mgmt_endpoint.h"
 #include "kb_mgmt_status.h"
+#include "server_runtime_identity.h"
+#include "runtime_secret.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -202,14 +204,16 @@ int server_http_management_config_from_env(server_http_management_config_t *out)
    static const char *const core_names[] = {
        "AIMEE_SERVER_MGMT_PORT",
        "AIMEE_SERVER_MGMT_TLS_CERT",
-       "AIMEE_SERVER_MGMT_TLS_KEY",
        "AIMEE_SERVER_MGMT_CLIENT_CA",
    };
    static const char *const checkpoint_names[] = {
-       "AIMEE_SERVER_MGMT_STATUS_ENDPOINT",   "AIMEE_SERVER_MGMT_STATUS_CA_FILE",
-       "AIMEE_SERVER_MGMT_STATUS_LEAF_PIN",   "AIMEE_SERVER_MGMT_STATUS_CLIENT_CERT",
-       "AIMEE_SERVER_MGMT_STATUS_CLIENT_KEY",
+       "AIMEE_SERVER_MGMT_STATUS_ENDPOINT",
+       "AIMEE_SERVER_MGMT_STATUS_CA_FILE",
+       "AIMEE_SERVER_MGMT_STATUS_LEAF_PIN",
+       "AIMEE_SERVER_MGMT_STATUS_CLIENT_CERT",
    };
+   static const char mgmt_key_name[] = "AIMEE_SERVER_MGMT_TLS_PRIVATE_KEY";
+   static const char checkpoint_key_name[] = "AIMEE_SERVER_MGMT_STATUS_CLIENT_PRIVATE_KEY";
    g_management_start_error = NULL;
    if (!out)
    {
@@ -217,6 +221,11 @@ int server_http_management_config_from_env(server_http_management_config_t *out)
       return -1;
    }
    memset(out, 0, sizeof(*out));
+   if (getenv("AIMEE_SERVER_MGMT_TLS_KEY") || getenv("AIMEE_SERVER_MGMT_STATUS_CLIENT_KEY"))
+   {
+      g_management_start_error = "management private-key file variables are forbidden";
+      return -1;
+   }
    size_t present = 0;
    for (size_t i = 0; i < sizeof(core_names) / sizeof(core_names[0]); i++)
    {
@@ -229,6 +238,8 @@ int server_http_management_config_from_env(server_http_management_config_t *out)
          present = sizeof(core_names) / sizeof(core_names[0]) + 1;
       }
    }
+   if (runtime_secret_has(mgmt_key_name))
+      present++;
    if (!present)
    {
       if (getenv("AIMEE_SERVER_MGMT_BIND"))
@@ -238,7 +249,7 @@ int server_http_management_config_from_env(server_http_management_config_t *out)
       }
       return 0;
    }
-   if (present != sizeof(core_names) / sizeof(core_names[0]))
+   if (present != sizeof(core_names) / sizeof(core_names[0]) + 1)
    {
       if (!g_management_start_error)
          for (size_t i = 0; i < sizeof(core_names) / sizeof(core_names[0]); i++)
@@ -247,6 +258,8 @@ int server_http_management_config_from_env(server_http_management_config_t *out)
                g_management_start_error = core_names[i];
                break;
             }
+      if (!g_management_start_error && !runtime_secret_has(mgmt_key_name))
+         g_management_start_error = mgmt_key_name;
       return -1;
    }
 
@@ -254,13 +267,14 @@ int server_http_management_config_from_env(server_http_management_config_t *out)
    const char *bind_text = bind_config ? bind_config : "127.0.0.1";
    const char *port_text = getenv(core_names[0]);
    const char *cert = getenv(core_names[1]);
-   const char *key = getenv(core_names[2]);
-   const char *client_ca = getenv(core_names[3]);
+   const char *client_ca = getenv(core_names[2]);
    char *end = NULL;
    errno = 0;
    unsigned long port =
        port_text && port_text[0] >= '1' && port_text[0] <= '9' ? strtoul(port_text, &end, 10) : 0;
-   const char *server_id = getenv("AIMEE_SERVER_ID");
+   char server_id_buf[128];
+   const char *server_id =
+       server_runtime_server_id_load(server_id_buf, sizeof(server_id_buf)) ? server_id_buf : NULL;
    const char *status_key_id = getenv("AIMEE_MGMT_STATUS_KEY_ID");
    const char *status_public = getenv("AIMEE_MGMT_STATUS_PUBLIC_KEY");
    const char *token_issuer = getenv("AIMEE_SERVER_MGMT_ISSUER");
@@ -269,11 +283,12 @@ int server_http_management_config_from_env(server_http_management_config_t *out)
    for (size_t i = 0; i < sizeof(checkpoint_names) / sizeof(checkpoint_names[0]); i++)
       if (getenv(checkpoint_names[i]) && getenv(checkpoint_names[i])[0])
          checkpoint_present++;
+   if (runtime_secret_has(checkpoint_key_name))
+      checkpoint_present++;
    const char *checkpoint_endpoint = getenv(checkpoint_names[0]);
    const char *checkpoint_ca = getenv(checkpoint_names[1]);
    const char *checkpoint_pin = getenv(checkpoint_names[2]);
    const char *checkpoint_cert = getenv(checkpoint_names[3]);
-   const char *checkpoint_key = getenv(checkpoint_names[4]);
    const char *checkpoint_secondary = getenv("AIMEE_SERVER_MGMT_STATUS_SECONDARY_LEAF_PIN");
    if (server_http_management_bind_addr(bind_text, &out->bind_addr))
       g_management_start_error = "AIMEE_SERVER_MGMT_BIND";
@@ -281,8 +296,6 @@ int server_http_management_config_from_env(server_http_management_config_t *out)
       g_management_start_error = "AIMEE_SERVER_MGMT_PORT";
    else if (!management_absolute_path(cert))
       g_management_start_error = "AIMEE_SERVER_MGMT_TLS_CERT";
-   else if (!management_absolute_path(key))
-      g_management_start_error = "AIMEE_SERVER_MGMT_TLS_KEY";
    else if (!management_absolute_path(client_ca))
       g_management_start_error = "AIMEE_SERVER_MGMT_CLIENT_CA";
    else if (!management_token(server_id, 127))
@@ -295,7 +308,7 @@ int server_http_management_config_from_env(server_http_management_config_t *out)
       g_management_start_error = "AIMEE_SERVER_MGMT_ISSUER";
    else if (!management_absolute_path(trust_bundle))
       g_management_start_error = "AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE";
-   else if (checkpoint_present != sizeof(checkpoint_names) / sizeof(checkpoint_names[0]))
+   else if (checkpoint_present != sizeof(checkpoint_names) / sizeof(checkpoint_names[0]) + 1)
       g_management_start_error = "management checkpoint packet";
    else if (kb_mgmt_endpoint_validate(checkpoint_endpoint) != 0)
       g_management_start_error = checkpoint_names[0];
@@ -305,8 +318,6 @@ int server_http_management_config_from_env(server_http_management_config_t *out)
       g_management_start_error = checkpoint_names[2];
    else if (!management_absolute_path(checkpoint_cert))
       g_management_start_error = checkpoint_names[3];
-   else if (!management_absolute_path(checkpoint_key))
-      g_management_start_error = checkpoint_names[4];
    else if (checkpoint_secondary && !management_lower_hex(checkpoint_secondary, 64))
       g_management_start_error = "AIMEE_SERVER_MGMT_STATUS_SECONDARY_LEAF_PIN";
    if (g_management_start_error)
@@ -318,7 +329,7 @@ int server_http_management_config_from_env(server_http_management_config_t *out)
    out->port = (int)port;
    snprintf(out->bind, sizeof(out->bind), "%s", bind_text);
    snprintf(out->cert, sizeof(out->cert), "%s", cert);
-   snprintf(out->key, sizeof(out->key), "%s", key);
+   snprintf(out->key, sizeof(out->key), "%s", mgmt_key_name);
    snprintf(out->client_ca, sizeof(out->client_ca), "%s", client_ca);
    snprintf(out->status_endpoint, sizeof(out->status_endpoint), "%s", checkpoint_endpoint);
    snprintf(out->status_ca, sizeof(out->status_ca), "%s", checkpoint_ca);
@@ -326,7 +337,7 @@ int server_http_management_config_from_env(server_http_management_config_t *out)
    snprintf(out->status_secondary_leaf_pin, sizeof(out->status_secondary_leaf_pin), "%s",
             checkpoint_secondary ? checkpoint_secondary : "");
    snprintf(out->status_client_cert, sizeof(out->status_client_cert), "%s", checkpoint_cert);
-   snprintf(out->status_client_key, sizeof(out->status_client_key), "%s", checkpoint_key);
+   snprintf(out->status_client_key, sizeof(out->status_client_key), "%s", checkpoint_key_name);
    snprintf(out->status_key_id, sizeof(out->status_key_id), "%s", status_key_id);
    snprintf(out->status_public_key, sizeof(out->status_public_key), "%s", status_public);
    return 0;
@@ -336,7 +347,7 @@ int server_http_management_checkpoint_files_valid(const server_http_management_c
 {
    if (!c || !c->enabled)
       return c ? 1 : 0;
-   const char *paths[] = {c->status_ca, c->status_client_cert, c->status_client_key};
+   const char *paths[] = {c->status_ca, c->status_client_cert};
    for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++)
    {
       struct stat st;

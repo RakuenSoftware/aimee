@@ -12,11 +12,11 @@ typedef struct script_rpc_server
    volatile int stop;
    pthread_t thread;
    int thread_started;
-   char socket_path[MAX_PATH_LEN];
-   char token[65];
    char stub_dir[MAX_PATH_LEN];
    int tool_calls;
    int policy_denials;
+   /* Retained in the result schema for compatibility; descriptor-authenticated
+    * RPC has no HMAC credential, so this remains zero. */
    int hmac_failures;
 } script_rpc_server_t;
 

@@ -29,10 +29,10 @@ static struct
 #define DRIFT_MIN_OBS     20   /* min observations before checking drift */
 #define DRIFT_COOLDOWN    50   /* min observations between consecutive signals */
 
-int kb_detect_observe(const config_t *cfg, double mean_dense_score, int n_candidates)
+int kb_detect_observe(double mean_dense_score, int n_candidates)
 {
    (void)n_candidates;
-   if (!cfg || !cfg->drift_detect_shadow_enabled)
+   if (!config_drift_detect_shadow_enabled())
       return 0;
    if (isnan(mean_dense_score))
       return 0;

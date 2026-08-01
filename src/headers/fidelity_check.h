@@ -21,7 +21,7 @@ extern "C"
     * absent evidence. This is enforced here, at the run site — not in
     * config_validate (which is per-key and only warns in non-strict mode). The
     * judge producer itself is a later, default-off increment. */
-   int fidelity_check_eligible(const config_t *cfg);
+   int fidelity_check_eligible(void);
 
 #ifdef __cplusplus
 }

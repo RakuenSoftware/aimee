@@ -14,7 +14,7 @@
 #include "server.h"
 #include "turn_registry.h"
 #include "server_http.h" /* server_http_api_status_report */
-#include "config.h"      /* config_t / config_load for api.status, api.enable */
+#include "config.h"      /* config_set / config_provider */
 #include <aimee/delegates/delegate_backend_docker.h>
 #include <aimee/delegates/delegate_backend_local.h>
 #include <aimee/delegates/delegate_backend_ssh.h>
@@ -38,6 +38,7 @@
 #include <aimee/delegates/delegate_credentials.h>
 #include "model_registry.h"
 #include "model_provider.h"
+#include "runtime_secret.h"
 #include "model_registry.h"
 #include "db1.h"
 #include "token_audit.h"
@@ -83,8 +84,7 @@ static int server_provider_has_credentials(const model_provider_t *p)
       return 0;
    for (int i = 0; p->env_vars[i]; i++)
    {
-      const char *val = getenv(p->env_vars[i]);
-      if (val && val[0])
+      if (runtime_secret_has(p->env_vars[i]))
          return 1;
    }
    return 0;
@@ -150,20 +150,53 @@ static cJSON *server_provider_json(const model_provider_t *p)
    return obj;
 }
 
+/* Has the OPERATOR configured this provider, as opposed to aimee merely knowing
+ * it exists? A credential or an explicit `provider set` is evidence of a
+ * deliberate choice. auth_type "none" alone (ollama, llama_native) is NOT:
+ * those need no key, so they would otherwise report configured on a machine
+ * where nothing is installed or running. That is the difference between this
+ * and server_provider_has_credentials(), which answers "usable right now". */
+static int server_provider_is_configured(const model_provider_t *p, const char *selected_provider)
+{
+   if (!p)
+      return 0;
+   if (selected_provider && selected_provider[0] && strcmp(p->name, selected_provider) == 0)
+      return 1;
+   if (!p->env_vars)
+      return 0;
+   for (int i = 0; p->env_vars[i]; i++)
+   {
+      if (runtime_secret_has(p->env_vars[i]))
+         return 1;
+   }
+   return 0;
+}
+
 int handle_provider_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    int available_only = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "available_only"));
+   int show_all = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "all"));
    int json_output = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "json"));
    model_provider_t *providers[64];
    int n = model_provider_list(providers, 64);
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddBoolToObject(resp, "json", json_output);
+   cJSON_AddBoolToObject(resp, "all", show_all);
+   cJSON_AddBoolToObject(resp, "available_only", available_only);
    cJSON *arr = cJSON_CreateArray();
    for (int i = 0; i < n; i++)
    {
       if (available_only && !server_provider_has_credentials(providers[i]))
+         continue;
+      /* Default is what the operator CONFIGURED. This returned the whole
+       * built-in catalogue — seven entries, every one "[no key]" — which the
+       * client renders as a registration table, so a brand-new install looked
+       * pre-populated with providers nobody had chosen. Nothing was installed;
+       * they were names aimee knows. `--all` still shows that catalogue. */
+      if (!show_all && !available_only &&
+          !server_provider_is_configured(providers[i], config_provider()))
          continue;
       cJSON_AddItemToArray(arr, server_provider_json(providers[i]));
    }
@@ -280,9 +313,7 @@ int handle_provider_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    (void)req;
-   config_t cfg;
-   config_load(&cfg);
-   const char *name = cfg.provider[0] ? cfg.provider : "claude";
+   const char *name = config_provider()[0] ? config_provider() : "claude";
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddStringToObject(resp, "provider", name);
@@ -318,14 +349,11 @@ int handle_provider_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                name);
       return server_send_error(conn, err, NULL);
    }
-   config_t cfg;
-   config_load(&cfg);
-   snprintf(cfg.provider, sizeof(cfg.provider), "%s", name);
-   if (config_save(&cfg) != 0)
+   if (config_set("provider", name) != 0)
       return server_send_error(conn, "failed to save config", NULL);
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddStringToObject(resp, "provider", cfg.provider);
+   cJSON_AddStringToObject(resp, "provider", name);
    int rc = server_send_response(conn, resp);
    cJSON_Delete(resp);
    return rc;

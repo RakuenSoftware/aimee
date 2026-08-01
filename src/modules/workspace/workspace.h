@@ -15,36 +15,43 @@ int workspace_discover_projects(const char *root, int max_depth, char projects[]
 /* Build session context from config workspaces + DB projects.
  * Reads describe files and style files for indexed projects.
  * Caller owns returned string. */
-char *workspace_build_context_from_config(const config_t *cfg);
+char *workspace_build_context_from_config(void);
 
 /* Resolve the active workspace root for a command running from cwd.
  * Prefers the current git/worktree top-level, then the most specific configured
  * workspace containing cwd, then cwd itself. Returns 0 on success. */
-int workspace_active_root(const config_t *cfg, const char *cwd, char *out, size_t out_len);
+int workspace_active_root(const char *cwd, char *out, size_t out_len);
 
-/* Resolve a path-independent repository identity for memory scoping.
+/* Same, but never consults the configured workspaces: git top-level, else cwd.
+ * Callers that resolve a PROJECT LABEL want this — letting a non-repository cwd
+ * inside a configured workspace fall back to that workspace would label it with
+ * the workspace directory's name, which is not its project. */
+int workspace_active_root_from_cwd(const char *cwd, char *out, size_t out_len);
+
+/* Resolve a path-independent project identity for code and memory scoping.
  *
  * For a git repo this yields the canonical remote identity rather than the
  * local checkout path, so two clones of the same repo on different machines
  * resolve to the same scope (the cross-environment recall bug otherwise):
  *   project_out   = canonical repo URL  (https://host/owner/repo) or
- *                   local:<repo-root> for a repo with no usable remote.
+ *                   local:<persisted-uuid> for a local-only project.
  *   workspace_out = the repo's org/namespace parent (https://host/owner) when
  *                   it has one, else the repo identity itself.
  * Either out pointer may be NULL. Returns 0 when a repo identity was resolved,
- * -1 otherwise (cwd is not inside a resolvable git repo) — callers then keep
- * their legacy path/basename labels. */
+ * For non-git directories, a generated UUID is persisted under .aimee and
+ * follows the directory when it moves. Returns -1 only when no durable
+ * identity can be read or created. */
 int workspace_repo_identity(const char *cwd, char *project_out, size_t project_len,
                             char *workspace_out, size_t workspace_len);
 
 /* Canonical index keys for a discovered repo root: the project name and its
  * workspace, used to key the shared db2 index (projects.name, kb_documents.project)
  * and the ingest queue. Prefers the repository identity (workspace_repo_identity)
- * so a repo indexed from any machine resolves to one project; falls back to the
- * directory basename and `fallback_workspace` for non-repo roots. Always writes
- * both outputs (never fails). */
-void workspace_repo_index_keys(const char *root, const char *fallback_workspace, char *name_out,
-                               size_t name_len, char *ws_out, size_t ws_len);
+ * so a repo indexed from any machine resolves to one project. Returns -1 and
+ * leaves both outputs empty when no durable identity can be read or persisted;
+ * callers must skip/refuse indexing rather than substitute a path basename. */
+int workspace_repo_index_keys(const char *root, const char *fallback_workspace, char *name_out,
+                              size_t name_len, char *ws_out, size_t ws_len);
 
 /* Resolve a proposal path: try path as is, then search docs/proposals/ subdirectories.
  * Returns newly allocated absolute path string, or NULL if not found. Caller frees. */
@@ -85,7 +92,7 @@ int worktree_apply_delegate_changes_checked(const char *delegate_wt, const char 
                                             char *parent_root, size_t parent_root_len, char *err,
                                             size_t err_len);
 void worktree_registry_record(const char *git_root, const char *wt_path, const char *branch,
-                              const char *sid, const char *work_name);
+                              const char *sid, const char *work_name, const char *base_branch);
 int worktree_find_branch_in_repo(const char *git_root, const char *branch, char *out_dir,
                                  size_t out_len);
 int worktree_find_branch_registered(const char *branch, char *out_dir, size_t out_len);
@@ -96,7 +103,10 @@ const char *worktree_for_cwd(const session_state_t *state, const char *cwd);
  * Prefers the repository's DEFAULT branch (origin/HEAD), then local
  * main/master/trunk, then the current HEAD as a last resort. Writes result
  * into buf (at most buf_len bytes including NUL). */
-void worktree_detect_base_branch(const char *git_root, char *buf, size_t buf_len);
+/* Resolve the base ref for a new session worktree: the REMOTE default branch (e.g.
+ * "origin/testing"). Returns 0 and fills buf, or -1 with buf empty when no remote default
+ * is resolvable -- callers must then refuse to create the worktree rather than guess. */
+int worktree_detect_base_branch(const char *git_root, char *buf, size_t buf_len);
 
 /* Count active aimee-managed worktrees for git_root. */
 int count_active_worktrees_for_root(const char *git_root);

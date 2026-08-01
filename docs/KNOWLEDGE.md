@@ -51,7 +51,6 @@ Recall can combine:
 - entity and relationship graph;
 - code graph;
 - scope, recency, confidence, and lifecycle state;
-- cross-encoder reranking;
 - optional synthesis.
 
 The result keeps the evidence needed to explain why it ranked. A query with weak support can abstain.
@@ -109,12 +108,15 @@ Memory mutations publish through the owning daemon's event bus. Agent-controlled
 fingerprinted before audit so a key cannot inject personal data or forged log lines. The source
 record itself remains subject to its KB scope and retention policy.
 
-External inference receives only the evidence allowed by the configured provider and egress policy.
-Run local inference when the corpus must not leave the deployment.
+Inference receives only the evidence allowed by the configured provider and egress policy.
+
+There is no inference container to run beside the KB any more. Embedding happens inside the KB from
+weights in its image, so the corpus never leaves the deployment to be embedded. Synthesis is an
+endpoint: point it at one you host yourself when the corpus must not leave.
 
 ## What exists now
 
 Scoped memory, typed facts, hybrid retrieval, curation, graph links, contradiction handling,
-evidence, and local inference are implemented. Connectors for every company data source and free-form
+evidence, and in-container embedding are implemented. Connectors for every company data source and free-form
 cross-domain synthesis are not automatic; they need an ingest connector, scope policy, and evidence
 contract.

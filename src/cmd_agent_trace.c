@@ -220,9 +220,7 @@ void cmd_trace(app_ctx_t *ctx, int argc, char **argv)
 
    if (argc < 1)
       fatal("usage: aimee trace list|show <turn>");
-   config_t db1_cfg;
-   config_load(&db1_cfg);
-   if (db1_init(db1_cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
       fatal("trace: could not initialize DB1");
 
    if (strcmp(argv[0], "list") == 0)
@@ -270,9 +268,7 @@ void cmd_jobs(app_ctx_t *ctx, int argc, char **argv)
 
    if (strcmp(argv[0], "list") == 0)
    {
-      config_t db1_cfg;
-      config_load(&db1_cfg);
-      if (db1_init(db1_cfg.db1_path) != 0)
+      if (db1_init(config_db1_path()) != 0)
          fatal("jobs list: could not initialize DB1");
       db1_agent_job_t jobs[20];
       int n = db1_agent_job_list_recent(jobs, 20, 0); /* list view omits prompt/result */
@@ -292,9 +288,7 @@ void cmd_jobs(app_ctx_t *ctx, int argc, char **argv)
    }
    else if ((strcmp(argv[0], "status") == 0 || strcmp(argv[0], "show") == 0) && argc >= 2)
    {
-      config_t db1_cfg;
-      config_load(&db1_cfg);
-      if (db1_init(db1_cfg.db1_path) != 0)
+      if (db1_init(config_db1_path()) != 0)
          fatal("jobs status: could not initialize DB1");
       int jid = atoi(argv[1]);
       db1_agent_job_t job;
@@ -322,9 +316,7 @@ void cmd_jobs(app_ctx_t *ctx, int argc, char **argv)
    }
    else if (strcmp(argv[0], "cancel") == 0 && argc >= 2)
    {
-      config_t db1_cfg;
-      config_load(&db1_cfg);
-      if (db1_init(db1_cfg.db1_path) != 0)
+      if (db1_init(config_db1_path()) != 0)
          fatal("jobs cancel: could not initialize DB1");
       int jid = atoi(argv[1]);
       db1_agent_job_update(jid, "cancelled", 0, NULL);

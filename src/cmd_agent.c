@@ -310,28 +310,8 @@ static int ag_set_model_concurrency(const char *model, int limit)
 {
    if (!model || !model[0] || limit <= 0)
       return 0;
-
-   config_t cfg;
-   if (config_load(&cfg) != 0)
-      return -1;
-
-   for (int i = 0; i < cfg.concurrency_per_model_count; i++)
-   {
-      if (strcmp(cfg.concurrency_per_model[i].key, model) == 0)
-      {
-         cfg.concurrency_per_model[i].limit = limit;
-         return config_set_concurrency(&cfg);
-      }
-   }
-
-   if (cfg.concurrency_per_model_count >= CONFIG_CONCURRENCY_MAX_ENTRIES)
-      return -1;
-
-   config_concurrency_entry_t *entry =
-       &cfg.concurrency_per_model[cfg.concurrency_per_model_count++];
-   snprintf(entry->key, sizeof(entry->key), "%s", model);
-   entry->limit = limit;
-   return config_set_concurrency(&cfg);
+   int rc = config_set_model_concurrency(model, limit);
+   return rc == -2 ? -1 : rc; /* table full kept as the caller's -1 */
 }
 
 static int ag_model_still_configured(const agent_config_t *cfg, const char *model)
@@ -349,22 +329,7 @@ static int ag_clear_model_concurrency_if_unused(const agent_config_t *agents, co
    if (!model || !model[0] || ag_model_still_configured(agents, model))
       return 0;
 
-   config_t cfg;
-   if (config_load(&cfg) != 0)
-      return -1;
-
-   for (int i = 0; i < cfg.concurrency_per_model_count; i++)
-   {
-      if (strcmp(cfg.concurrency_per_model[i].key, model) != 0)
-         continue;
-      memmove(&cfg.concurrency_per_model[i], &cfg.concurrency_per_model[i + 1],
-              (size_t)(cfg.concurrency_per_model_count - i - 1) *
-                  sizeof(cfg.concurrency_per_model[0]));
-      cfg.concurrency_per_model_count--;
-      return config_set_concurrency(&cfg);
-   }
-
-   return 0;
+   return config_remove_model_concurrency(model);
 }
 
 static void ag_ensure_fallback(agent_config_t *cfg, const char *name)
@@ -769,9 +734,7 @@ static void ag_parallel(app_ctx_t *ctx, int argc, char **argv)
 
 static void ag_stats(app_ctx_t *ctx, int argc, char **argv)
 {
-   config_t db1_cfg;
-   config_load(&db1_cfg);
-   if (db1_init(db1_cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
       fatal("agent stats: could not initialize DB1");
    const char *name = (argc >= 1) ? argv[0] : NULL;
    agent_stats_t stats[MAX_AGENTS];
@@ -894,17 +857,26 @@ static void ag_add(app_ctx_t *ctx, int argc, char **argv)
       else if (strcmp(argv[i], "--price-in") == 0 && i + 1 < argc)
       {
          if (!ag_parse_price(argv[++i], &ag->price_in_per_mtok))
-            return ag_price_usage("--price-in", argv[i]);
+         {
+            ag_price_usage("--price-in", argv[i]);
+            return;
+         }
       }
       else if (strcmp(argv[i], "--price-out") == 0 && i + 1 < argc)
       {
          if (!ag_parse_price(argv[++i], &ag->price_out_per_mtok))
-            return ag_price_usage("--price-out", argv[i]);
+         {
+            ag_price_usage("--price-out", argv[i]);
+            return;
+         }
       }
       else if (strcmp(argv[i], "--price-cached") == 0 && i + 1 < argc)
       {
          if (!ag_parse_price(argv[++i], &ag->price_cached_per_mtok))
-            return ag_price_usage("--price-cached", argv[i]);
+         {
+            ag_price_usage("--price-cached", argv[i]);
+            return;
+         }
       }
       else if (strcmp(argv[i], "--tools-enabled") == 0 || strcmp(argv[i], "--tools") == 0)
          ag->tools_enabled = 1;
@@ -993,20 +965,30 @@ static void ag_enable(app_ctx_t *ctx, int argc, char **argv)
 /* Surgically update ONLY an agent's roles, preserving endpoint/model/provider/
  * auth/vault key (unlike `agent add`, which resets the whole record). Fixes the
  * config regression where capable coding delegates were left with just
- * summarize/format/draft. Omit the csv to reset to the full default role set. */
+ * summarize/format/draft. Omit the csv to SHOW the roles; `--reset` restores the
+ * full default set. */
 static void ag_roles(app_ctx_t *ctx, int argc, char **argv)
 {
    (void)ctx;
    if (argc < 1)
-      fatal("usage: aimee agent roles <name> [role1,role2,...]  "
-            "(omit roles to reset to the full default set)");
+      fatal("usage: aimee agent roles <name> [role1,role2,... | --reset]  "
+            "(omit to show the current roles)");
    agent_t *ag = agent_find(&s_agent_cfg, argv[0]);
    if (!ag)
       fatal("agent '%s' not found", argv[0]);
-   if (argc >= 2 && argv[1] && argv[1][0])
-      ag_set_roles_csv(ag, argv[1]);
-   else
+   /* No csv shows the roles and writes nothing — see handle_agent_roles. */
+   if (argc < 2 || !argv[1] || !argv[1][0])
+   {
+      printf("Agent '%s' roles:", ag->name);
+      for (int i = 0; i < ag->role_count; i++)
+         printf(" %s", ag->roles[i]);
+      printf("\n");
+      return;
+   }
+   if (strcmp(argv[1], "--reset") == 0)
       ag_set_default_delegate_roles(ag);
+   else
+      ag_set_roles_csv(ag, argv[1]);
    agent_save_config(&s_agent_cfg);
    printf("Agent '%s' roles set to:", ag->name);
    for (int i = 0; i < ag->role_count; i++)
@@ -1323,7 +1305,7 @@ static const subcmd_t agent_subcmds[] = {
     {"remove", "Remove an agent", ag_remove},
     {"enable", "Enable a disabled agent", ag_enable},
     {"disable", "Disable an agent", ag_disable},
-    {"roles", "Set delegate roles (omit roles for the full default set)", ag_roles},
+    {"roles", "Show delegate roles, or set them (csv, or --reset for defaults)", ag_roles},
     {"setup", "Interactive agent setup wizard", ag_setup},
     {"token", "Refresh or show agent auth token", ag_token},
     {NULL, NULL, NULL},
@@ -1369,9 +1351,7 @@ void cmd_plans(app_ctx_t *ctx, int argc, char **argv)
 
    if (strcmp(argv[0], "list") == 0)
    {
-      config_t db1_cfg;
-      config_load(&db1_cfg);
-      if (db1_init(db1_cfg.db1_path) != 0)
+      if (db1_init(config_db1_path()) != 0)
          fatal("plans list: could not initialize DB1");
       plan_t plans[20];
       int count = db1_execution_plan_list(plans, 20);
@@ -1384,9 +1364,7 @@ void cmd_plans(app_ctx_t *ctx, int argc, char **argv)
    }
    else if (strcmp(argv[0], "show") == 0 && argc >= 2)
    {
-      config_t db1_cfg;
-      config_load(&db1_cfg);
-      if (db1_init(db1_cfg.db1_path) != 0)
+      if (db1_init(config_db1_path()) != 0)
          fatal("plans show: could not initialize DB1");
       int pid = atoi(argv[1]);
       plan_t plan;
@@ -1424,9 +1402,7 @@ void cmd_plans(app_ctx_t *ctx, int argc, char **argv)
    }
    else if (strcmp(argv[0], "verify") == 0 && argc >= 2)
    {
-      config_t db1_cfg;
-      config_load(&db1_cfg);
-      if (db1_init(db1_cfg.db1_path) != 0)
+      if (db1_init(config_db1_path()) != 0)
          fatal("plans verify: could not initialize DB1");
       int pid = atoi(argv[1]);
       plan_t plan;
@@ -1442,9 +1418,7 @@ void cmd_plans(app_ctx_t *ctx, int argc, char **argv)
    }
    else if (strcmp(argv[0], "replay") == 0 && argc >= 2)
    {
-      config_t db1_cfg;
-      config_load(&db1_cfg);
-      if (db1_init(db1_cfg.db1_path) != 0)
+      if (db1_init(config_db1_path()) != 0)
          fatal("plans replay: could not initialize DB1");
       int pid = atoi(argv[1]);
       plan_t plan;
@@ -1890,9 +1864,7 @@ void cmd_eval(app_ctx_t *ctx, int argc, char **argv)
          fatal("no agents configured");
 
       agent_http_init();
-      config_t db1_cfg;
-      config_load(&db1_cfg);
-      if (db1_init(db1_cfg.db1_path) != 0)
+      if (db1_init(config_db1_path()) != 0)
          fatal("eval run: could not initialize DB1");
       eval_result_t results[AGENT_MAX_EVAL_TASKS];
       int passes =
@@ -1920,9 +1892,7 @@ void cmd_eval(app_ctx_t *ctx, int argc, char **argv)
    }
    else if (strcmp(argv[0], "results") == 0)
    {
-      config_t db1_cfg;
-      config_load(&db1_cfg);
-      if (db1_init(db1_cfg.db1_path) != 0)
+      if (db1_init(config_db1_path()) != 0)
          fatal("eval results: could not initialize DB1");
       const char *suite_filter = (argc >= 2) ? argv[1] : NULL;
 

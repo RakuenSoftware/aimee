@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -80,6 +81,89 @@ func TestIntegrateFeatureBasePicksUpSiblingMerge(t *testing.T) {
 	}
 }
 
+// A slice freeze must review only that slice's delta over the latest feature
+// tip. Forge merges advance origin/aimee/feat/<parent>, not the stale local ref;
+// using the local ref makes later slice artifacts include every landed sibling
+// and causes strict scope review to reject unrelated prerequisite work as drift.
+func TestFreezeUsesMergedRemoteFeatureTip(t *testing.T) {
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin.git")
+	repo := filepath.Join(root, "repo")
+	gitRun(t, root, "init", "--bare", "-b", "trunk", origin)
+	gitRun(t, root, "clone", origin, repo)
+	if err := os.WriteFile(filepath.Join(repo, "README"), []byte("root\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "add", "README")
+	gitRun(t, repo, "commit", "-m", "init")
+	gitRun(t, repo, "push", "-u", "origin", "trunk")
+
+	feature := "aimee/feat/wi_parent"
+	gitRun(t, repo, "branch", feature)
+	gitRun(t, repo, "push", "origin", feature)
+
+	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	ctx := t.Context()
+	for _, in := range []db1.CreateWorkItem{
+		{ID: "wi_parent", Repo: repo, ProposalPath: "p", WorkflowName: "build", StartStage: "feature"},
+		{ID: "wi_child", Repo: repo, ProposalPath: "c", WorkflowName: "slice", StartStage: "freeze", ParentID: "wi_parent"},
+	} {
+		if err := store.CreateWorkItem(ctx, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manager, err := NewWorktreeManager(store, filepath.Join(root, "trees"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := store.WorkItem(ctx, "wi_child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workdir, _, err := manager.Ensure(ctx, child, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a sibling PR merging after this child worktree was created.
+	landed := filepath.Join(root, "landed")
+	gitRun(t, root, "clone", "-b", feature, origin, landed)
+	if err := os.WriteFile(filepath.Join(landed, "sibling.txt"), []byte("landed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, landed, "add", "sibling.txt")
+	gitRun(t, landed, "commit", "-m", "sibling")
+	gitRun(t, landed, "push", "origin", feature)
+	if park, err := integrateFeatureBase(ctx, workdir, "wi_parent"); err != nil || park != "" {
+		t.Fatalf("integrateFeatureBase: park=%q err=%v", park, err)
+	}
+
+	if err := os.WriteFile(filepath.Join(workdir, "child.txt"), []byte("child\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, workdir, "add", "child.txt")
+	gitRun(t, workdir, "commit", "-m", "child")
+
+	runner := &NativeRunner{db: store, worktrees: manager}
+	result, err := runner.freeze(ctx, StepRequest{WorkItem: child})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != StepAdvanced {
+		t.Fatalf("freeze status=%q detail=%q", result.Status, result.Detail)
+	}
+	if strings.Contains(result.Artifact, "sibling.txt") {
+		t.Fatalf("freeze leaked previously merged sibling work:\n%s", result.Artifact)
+	}
+	if !strings.Contains(result.Artifact, "child.txt") {
+		t.Fatalf("freeze omitted this slice's change:\n%s", result.Artifact)
+	}
+}
+
 func TestIntegrateFeatureBaseNoopWhenAlreadyCurrent(t *testing.T) {
 	repo, slicedir := setupSliceRepo(t)
 	_ = repo
@@ -149,6 +233,101 @@ func (a partialNoCommitAgents) DelegateGroup(_ context.Context, requests []Deleg
 		out[i] = DelegateGroupResult{Response: "partial"}
 	}
 	return out
+}
+
+type rejectDelegateAgents struct{ calls int }
+
+func (a *rejectDelegateAgents) Delegate(_ context.Context, _ DelegateRequest) (DelegateResult, error) {
+	a.calls++
+	return DelegateResult{}, errors.New("delegate must not run for an already-repaired reviewed tree")
+}
+
+func TestDocumentResumeRefreezesHumanRepairWithoutMeaninglessDelegateEdit(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "init", "-b", "trunk")
+	if err := os.WriteFile(filepath.Join(repo, "README"), []byte("base\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "add", "README")
+	gitRun(t, repo, "commit", "-m", "init")
+	gitRun(t, repo, "remote", "add", "origin", repo)
+	gitRun(t, repo, "update-ref", "refs/remotes/origin/trunk", "HEAD")
+	gitRun(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+
+	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	ctx := t.Context()
+	if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: "wi_root", Repo: repo,
+		ProposalPath: "p", WorkflowName: "build", StartStage: "document"}); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewWorktreeManager(store, filepath.Join(root, "trees"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, _ := store.WorkItem(ctx, "wi_root")
+	workdir, branch, err := manager.Ensure(ctx, item, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, "runbook.md"), []byte("reviewed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, workdir, "add", "runbook.md")
+	gitRun(t, workdir, "commit", "-m", "document")
+	reviewedDiff := gitRun(t, workdir, "--no-pager", "diff", "origin/trunk...HEAD")
+	reviewedHash := wfe.Hash([]byte(strings.TrimSpace(reviewedDiff)))
+
+	if err := os.WriteFile(filepath.Join(workdir, "runbook.md"), []byte("reviewed and human-repaired\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	item, _ = store.WorkItem(ctx, "wi_root")
+	item.ContentHash = reviewedHash
+	item.Worktree = workdir
+	agents := &rejectDelegateAgents{}
+	runner := &NativeRunner{agents: agents, worktrees: manager, db: store}
+	request := StepRequest{WorkItem: item, Node: wfe.Node{ID: "document"},
+		Feedback: &wfe.ReviewFeedback{ArtifactHash: reviewedHash}}
+	if _, err := runner.mutate(ctx, request, true); err == nil || agents.calls != 1 {
+		t.Fatalf("dirty repair bypassed delegate: calls=%d err=%v", agents.calls, err)
+	}
+
+	gitRun(t, workdir, "add", "runbook.md")
+	gitRun(t, workdir, "commit", "-m", "human repair")
+	agents.calls = 0
+	result, err := runner.mutate(ctx, StepRequest{WorkItem: item, Node: wfe.Node{ID: "document"},
+		Feedback: &wfe.ReviewFeedback{ArtifactHash: reviewedHash}}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agents.calls != 0 {
+		t.Fatalf("delegate calls=%d, want 0", agents.calls)
+	}
+	if result.Status != StepAdvanced || result.Artifact != branch ||
+		!strings.Contains(result.Detail, "re-freezing exact repair") {
+		t.Fatalf("result=%+v", result)
+	}
+	if head := strings.TrimSpace(gitRun(t, workdir, "rev-parse", "HEAD")); result.ContentHash != head {
+		t.Fatalf("content hash=%q, want repaired HEAD %q", result.ContentHash, head)
+	}
+
+	// Removing the entire reviewed diff is not a repair to re-freeze. The normal
+	// delegate path must handle it rather than letting freeze accept an empty root
+	// diff as a no-op without another roundtable review.
+	gitRun(t, workdir, "rm", "runbook.md")
+	gitRun(t, workdir, "commit", "-m", "remove reviewed document")
+	agents.calls = 0
+	if _, err := runner.mutate(ctx, StepRequest{WorkItem: item, Node: wfe.Node{ID: "document"},
+		Feedback: &wfe.ReviewFeedback{ArtifactHash: reviewedHash}}, true); err == nil || agents.calls != 1 {
+		t.Fatalf("empty repair bypassed delegate: calls=%d err=%v", agents.calls, err)
+	}
 }
 
 func TestPartialImplementWithNoCommitDoesNotAdvance(t *testing.T) {

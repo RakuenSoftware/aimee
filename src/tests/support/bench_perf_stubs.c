@@ -59,9 +59,19 @@ int skill_trigger_matches(const char *project_root, const char *name, const char
    return 0;
 }
 
-void gsem_apply_strictness_arm(config_t *cfg)
+double gsem_effective_warn_threshold(void)
 {
-   (void)cfg;
+   return 0.0;
+}
+
+double gsem_effective_prompt_threshold(void)
+{
+   return 0.0;
+}
+
+double gsem_effective_block_threshold(void)
+{
+   return 0.0;
 }
 
 void gsem_build_input(const char *tool_name, cJSON *input_json, const char *cwd,

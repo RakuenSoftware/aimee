@@ -2,7 +2,9 @@
  * Provider path is driven through the mocked agent_http_post; the sidecar
  * fallback path is the unchanged kb_curator_sidecar_run and not re-tested here. */
 #include "kb_curator_llm.h"
+#include "support/curator_config_stub.h"
 
+#include "cJSON.h"
 #include "config.h"
 #include "support/mock_agent_http.h"
 
@@ -61,29 +63,34 @@ static int err_handler(const char *url, const char *auth_header, const char *bod
  * returns the response content (here the synthesis JSON). */
 static void test_provider_path(void)
 {
+   kb_curator_provider_backoff_recovered();
    mock_agent_http_reset();
    mock_agent_http_set_post_handler(ok_handler);
    g_seen_timeout_ms = 0;
    g_post_calls = 0;
-
-   config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    snprintf(cfg.kb_curator_tier_b_base_url, sizeof(cfg.kb_curator_tier_b_base_url),
             "http://big/v1");
    snprintf(cfg.kb_curator_tier_b_model, sizeof(cfg.kb_curator_tier_b_model), "big-32b");
+   cfg.kb_curator_extract_max_tokens = 137;
 
    char err[256];
-   char *resp =
-       kb_curator_llm_run(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, "be-a-curator", "{\"topic\":\"t\"}",
-                          NULL, "" /* no fallback */, 16384, err, sizeof(err));
+   char *resp = kb_curator_llm_run(KB_CURATOR_STAGE_SYNTHESIZE, "be-a-curator", "{\"topic\":\"t\"}",
+                                   NULL, "" /* no fallback */, 16384, err, sizeof(err));
    assert(resp != NULL);
    assert(strcmp(resp, "{\"synthesis\":\"ok\"}") == 0);
    assert(strcmp(g_seen_url, "http://big/v1/chat/completions") == 0);
    assert(g_seen_timeout_ms == 300000);
    assert(g_post_calls == 1);
+   assert(!kb_curator_provider_backoff_active());
    /* system_prompt + request_json must reach the provider as message content. */
    assert(strstr(g_seen_body, "be-a-curator") != NULL);
    assert(strstr(g_seen_body, "\\\"topic\\\":\\\"t\\\"") != NULL || strstr(g_seen_body, "topic"));
+   cJSON *sent = cJSON_Parse(g_seen_body);
+   assert(sent != NULL);
+   cJSON *max_tokens = cJSON_GetObjectItemCaseSensitive(sent, "max_tokens");
+   assert(cJSON_IsNumber(max_tokens) && max_tokens->valueint == 137);
+   cJSON_Delete(sent);
    free(resp);
    mock_agent_http_reset();
    printf("kb_curator_llm: provider path (url + system + request in body) ok\n");
@@ -94,20 +101,22 @@ static void test_provider_path(void)
  * overlapping generations running on the bundled model). */
 static void test_provider_network_error_is_single_attempt(void)
 {
+   kb_curator_provider_backoff_recovered();
    mock_agent_http_reset();
    mock_agent_http_set_post_handler(network_error_handler);
    g_post_calls = 0;
-   config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    snprintf(cfg.kb_curator_tier_b_base_url, sizeof(cfg.kb_curator_tier_b_base_url),
             "http://big/v1");
    snprintf(cfg.kb_curator_tier_b_model, sizeof(cfg.kb_curator_tier_b_model), "big-32b");
 
    char err[256] = "";
-   char *resp = kb_curator_llm_run(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, "sys", "{}", NULL, "", 16384,
-                                   err, sizeof(err));
+   char *resp = kb_curator_llm_run(KB_CURATOR_STAGE_SYNTHESIZE, "sys", "{}", NULL, "", 16384, err,
+                                   sizeof(err));
    assert(resp == NULL);
    assert(g_post_calls == 1);
+   assert(kb_curator_provider_backoff_active());
+   kb_curator_provider_backoff_recovered();
    mock_agent_http_reset();
    printf("kb_curator_llm: network failure uses one durable-queue attempt ok\n");
 }
@@ -115,19 +124,20 @@ static void test_provider_network_error_is_single_attempt(void)
 /* Provider configured but the call fails -> NULL + reason, no crash/leak. */
 static void test_provider_error(void)
 {
+   kb_curator_provider_backoff_recovered();
    mock_agent_http_reset();
    mock_agent_http_set_post_handler(err_handler);
-   config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    snprintf(cfg.kb_curator_tier_b_base_url, sizeof(cfg.kb_curator_tier_b_base_url),
             "http://big/v1");
    snprintf(cfg.kb_curator_tier_b_model, sizeof(cfg.kb_curator_tier_b_model), "big-32b");
 
    char err[256] = "";
-   char *resp = kb_curator_llm_run(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, "sys", "{}", NULL, "", 16384,
-                                   err, sizeof(err));
+   char *resp = kb_curator_llm_run(KB_CURATOR_STAGE_SYNTHESIZE, "sys", "{}", NULL, "", 16384, err,
+                                   sizeof(err));
    assert(resp == NULL);
    assert(err[0] != '\0');
+   assert(!kb_curator_provider_backoff_active());
    mock_agent_http_reset();
    printf("kb_curator_llm: provider error -> NULL + reason ok\n");
 }
@@ -137,7 +147,6 @@ static void test_provider_error(void)
 static void test_idle_when_unconfigured(void)
 {
    mock_agent_http_reset();
-   config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    /* Only a Tier-A provider set; synthesize is Tier-B, so it must stay idle. */
    snprintf(cfg.kb_curator_provider_base_url, sizeof(cfg.kb_curator_provider_base_url),
@@ -145,8 +154,8 @@ static void test_idle_when_unconfigured(void)
    snprintf(cfg.kb_curator_provider_model, sizeof(cfg.kb_curator_provider_model), "small");
 
    char err[256] = "";
-   char *resp = kb_curator_llm_run(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, "sys", "{}", NULL, "", 16384,
-                                   err, sizeof(err));
+   char *resp = kb_curator_llm_run(KB_CURATOR_STAGE_SYNTHESIZE, "sys", "{}", NULL, "", 16384, err,
+                                   sizeof(err));
    assert(resp == NULL);
    assert(err[0] != '\0'); /* "no curator provider or command configured" */
    printf("kb_curator_llm: idle when tier unconfigured (no tier-A fallback) ok\n");

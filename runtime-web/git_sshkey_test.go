@@ -3,8 +3,6 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -26,10 +24,6 @@ func TestGitSSHKeyProxy(t *testing.T) {
 		w.Write([]byte(`{"ok":true}`))
 	})
 	cfg := startFakeV1(t, mux)
-	if err := os.WriteFile(filepath.Join(filepath.Dir(cfg.socketPath), "server.token"),
-		[]byte("sekret-token\n"), 0600); err != nil {
-		t.Fatalf("write server.token: %v", err)
-	}
 	s := &server{cfg: cfg}
 
 	const key = "-----BEGIN OPENSSH PRIVATE KEY-----\nABCDEF\n-----END OPENSSH PRIVATE KEY-----"
@@ -41,7 +35,7 @@ func TestGitSSHKeyProxy(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("POST sshkey: code=%d body=%q", rr.Code, rr.Body.String())
 	}
-	if gotMethod != http.MethodPost || gotWebuser != "alice" || gotAuth != "Bearer sekret-token" {
+	if gotMethod != http.MethodPost || gotWebuser != "alice" || gotAuth != "" {
 		t.Fatalf("forwarded method=%q webuser=%q auth=%q", gotMethod, gotWebuser, gotAuth)
 	}
 	if !strings.Contains(gotBody, "ABCDEF") {
@@ -71,10 +65,6 @@ func TestGitSSHKeyRejectsEmpty(t *testing.T) {
 		w.Write([]byte(`{"ok":true}`))
 	})
 	cfg := startFakeV1(t, mux)
-	if err := os.WriteFile(filepath.Join(filepath.Dir(cfg.socketPath), "server.token"),
-		[]byte("t\n"), 0600); err != nil {
-		t.Fatalf("write server.token: %v", err)
-	}
 	s := &server{cfg: cfg}
 
 	req := withUser(httptest.NewRequest(http.MethodPost, "/api/git/sshkey",

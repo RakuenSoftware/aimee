@@ -50,11 +50,9 @@ static int forge_workspace_for_cwd(const char *cwd, char *out, size_t outsz)
 {
    if (!cwd || !cwd[0])
       return -1;
-   config_t cfg;
-   config_load(&cfg);
-   for (int i = 0; i < cfg.workspace_count; i++)
+   for (int i = 0; i < config_workspace_count(); i++)
    {
-      const char *ws = cfg.workspaces[i];
+      const char *ws = config_workspaces(i);
       size_t len = ws ? strlen(ws) : 0;
       if (len == 0)
          continue;

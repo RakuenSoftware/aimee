@@ -5,6 +5,7 @@
 #define _GNU_SOURCE
 #endif
 #include "memory_core_internal.h"
+#include "db2/memory_scope_query.h"
 /* memory_core_search.c: split from memory_core.c into a real translation unit
  * (was memory_core_search.inc, textually included only to stay under the
  * line-check ceiling). Cross-TU declarations live in the module header. */
@@ -545,9 +546,7 @@ static double memory_scene_cluster_bonus(const memory_t *matches, int count, int
    if (!matches || count <= 1 || idx < 0 || idx >= count)
       return 0.0;
 
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.memory_scenes_enabled)
+   if (!config_memory_scenes_enabled())
       return 0.0;
 
    db2_memory_scene_membership_t memberships[16];
@@ -747,100 +746,6 @@ static double memory_phrase_bonus(const char *raw_query, const char *norm_query,
    return bonus;
 }
 
-/* Cross-encoder reranker: calls an external command with a JSON array of
- * [query, candidate_text] pairs on stdin; expects a JSON float array of scores on stdout.
- * Returns the number of scores populated in out_scores (≤ count).
- * On any failure (command missing, parse error, timeout) returns 0 so the caller
- * can fall back to hybrid ordering. */
-static int memory_cross_encoder_scores(const char *command, const char *query,
-                                       const memory_t *matches, int count, double *out_scores)
-{
-   if (!command || !command[0] || !query || !query[0] || !matches || count <= 0 || !out_scores)
-      return 0;
-
-   /* Build JSON input: [[query, text0], [query, text1], ...] */
-   cJSON *arr = cJSON_CreateArray();
-   if (!arr)
-      return 0;
-
-   for (int i = 0; i < count; i++)
-   {
-      /* Candidate text = "key: content" (same format used for embeddings) */
-      char cand[3072];
-      snprintf(cand, sizeof(cand), "%s: %s", matches[i].key, matches[i].content);
-
-      cJSON *pair = cJSON_CreateArray();
-      if (!pair)
-      {
-         cJSON_Delete(arr);
-         return 0;
-      }
-      cJSON_AddItemToArray(pair, cJSON_CreateString(query));
-      cJSON_AddItemToArray(pair, cJSON_CreateString(cand));
-      cJSON_AddItemToArray(arr, pair);
-   }
-
-   char *input_json = cJSON_PrintUnformatted(arr);
-   cJSON_Delete(arr);
-   if (!input_json)
-      return 0;
-
-   char *buf = NULL;
-   size_t buf_len = 0;
-   long long _rr_t0 = util_now_ms();
-   int rc = platform_exec_pipe(command, input_json, strlen(input_json), &buf, &buf_len);
-   s_rerank_ms += util_now_ms() - _rr_t0;
-   s_rerank_calls++;
-   free(input_json);
-   if (rc != 0)
-   {
-      aimee_log(LOG_WARN, "memory", "cross-encoder command failed (exit %d)", rc);
-      free(buf);
-      return 0;
-   }
-   if (!buf || buf_len == 0)
-   {
-      free(buf);
-      return 0;
-   }
-
-   cJSON *scores = cJSON_Parse(buf);
-   free(buf);
-   if (!scores || !cJSON_IsArray(scores))
-   {
-      cJSON_Delete(scores);
-      aimee_log(LOG_WARN, "memory", "cross-encoder returned invalid JSON; falling back");
-      return 0;
-   }
-
-   int n = 0;
-   cJSON *el;
-   cJSON_ArrayForEach(el, scores)
-   {
-      if (n >= count)
-         break;
-      out_scores[n++] = cJSON_IsNumber(el) ? el->valuedouble : 0.0;
-   }
-   cJSON_Delete(scores);
-   return n;
-}
-
-/* Return the effective cross-encoder command, or NULL if disabled.
- * AIMEE_MEMORY_RERANK_FORCE_OFF overrides config — used by the
- * benchmark harness' --compare-rerank mode to run the same corpus
- * twice and surface the delta. */
-static const char *memory_cross_encoder_command(const config_t *cfg)
-{
-   if (!cfg || !cfg->memory_rerank_enabled)
-      return NULL;
-   const char *force_off = getenv("AIMEE_MEMORY_RERANK_FORCE_OFF");
-   if (force_off && force_off[0] && force_off[0] != '0')
-      return NULL;
-   if (!cfg->memory_rerank_command[0])
-      return NULL;
-   return cfg->memory_rerank_command;
-}
-
 /* Count shared whitespace-delimited tokens between two token strings (as produced
  * by extract_negation_tokens, e.g. "not_disk not_written"). Used by the
  * negation-aware rerank to measure how strongly a candidate's negated concept
@@ -938,80 +843,14 @@ int memory_rerank_matches(const char *raw_query, memory_t *matches, int count, i
       scores[i] += rrf;
    }
 
-   /* Capture the pre-rerank hybrid score on every candidate so the explain
-    * surface can differentiate hybrid vs blended even for rows outside the
-    * cross-encoder top_k window. When the CE pass runs, it overwrites
-    * blended_total + rerank_mix for its window; rows beyond it keep a zero
-    * rerank_mix (which the explain serializer reads as "not reranked"). */
+   /* The explain surface reports the hybrid score as the final total: with the
+    * cross-encoder second pass gone there is nothing that can diverge from it. */
    for (int i = 0; i < count; i++)
    {
       parts[i].hybrid_total = scores[i];
       parts[i].blended_total = scores[i];
-      parts[i].rerank_mix = 0.0;
       matches[i].retrieval_score = scores[i];
       matches[i].hybrid_rank = 0;
-   }
-
-   /* Cross-encoder second pass: score top-K candidates with a local cross-encoder model
-    * (external command), then blend with the hybrid score.
-    * Falls back silently to hybrid ordering if the command is not configured or fails. */
-   config_t ce_cfg;
-   config_load(&ce_cfg);
-   const char *ce_cmd = memory_cross_encoder_command(&ce_cfg);
-   if (ce_cmd)
-   {
-      int top_k = ce_cfg.memory_rerank_top_k > 0 ? ce_cfg.memory_rerank_top_k : 50;
-      if (top_k > count)
-         top_k = count;
-      double mix = (ce_cfg.memory_rerank_mix > 0.0 && ce_cfg.memory_rerank_mix <= 1.0)
-                       ? ce_cfg.memory_rerank_mix
-                       : 0.7;
-
-      double ce_scores[128] = {0};
-      int ce_count = memory_cross_encoder_scores(ce_cmd, raw_query, matches, top_k, ce_scores);
-      if (ce_count == top_k)
-      {
-         /* Normalise cross-encoder scores to [0, 1] for blending */
-         double ce_min = ce_scores[0], ce_max = ce_scores[0];
-         for (int i = 1; i < ce_count; i++)
-         {
-            if (ce_scores[i] < ce_min)
-               ce_min = ce_scores[i];
-            if (ce_scores[i] > ce_max)
-               ce_max = ce_scores[i];
-         }
-         double ce_range = ce_max - ce_min;
-
-         /* Normalise hybrid scores for the same pool */
-         double h_min = scores[0], h_max = scores[0];
-         for (int i = 1; i < top_k; i++)
-         {
-            if (scores[i] < h_min)
-               h_min = scores[i];
-            if (scores[i] > h_max)
-               h_max = scores[i];
-         }
-         double h_range = h_max - h_min;
-
-         for (int i = 0; i < ce_count; i++)
-         {
-            double ce_norm = (ce_range > 0) ? (ce_scores[i] - ce_min) / ce_range : 0.5;
-            double h_norm = (h_range > 0) ? (scores[i] - h_min) / h_range : 0.5;
-            double blended = mix * ce_norm + (1.0 - mix) * h_norm;
-            parts[i].cross_encoder = ce_scores[i];
-            parts[i].hybrid_total = scores[i];
-            parts[i].rerank_mix = mix;
-            scores[i] = blended * 10.0; /* rescale to ~same magnitude as hybrid */
-            parts[i].blended_total = scores[i];
-         }
-      }
-      else if (ce_count > 0)
-      {
-         /* Partial result — warn and fall back */
-         aimee_log(LOG_WARN, "memory",
-                   "cross-encoder returned %d scores for %d candidates; using hybrid ordering",
-                   ce_count, top_k);
-      }
    }
 
    /* Contradiction-aware reranking: penalize older memories that contradict a
@@ -1055,9 +894,7 @@ int memory_rerank_matches(const char *raw_query, memory_t *matches, int count, i
     * libpq. Complements the FTS candidate-generation lane (memory_negation_fts_tsv)
     * which widens RECALL at scale; this fixes RANKING. */
    {
-      config_t neg_cfg;
-      if (config_load(&neg_cfg) == 0 && neg_cfg.memory_negation_enabled &&
-          memory_query_polarity(raw_query) == POLARITY_NEGATIVE)
+      if (config_memory_negation_enabled() && memory_query_polarity(raw_query) == POLARITY_NEGATIVE)
       {
          char qneg[1024];
          int qn = extract_negation_tokens(raw_query, qneg, sizeof(qneg));
@@ -1261,10 +1098,14 @@ int memory_find_facts_visible_lexical_fallback(const char *query, const char *wo
 
    int kept = 0;
    int scope_rank[64];
+   db2_memory_scope_context_t scope_context;
+   db2_memory_scope_context_get(&scope_context);
    for (int i = 0; i < count; i++)
    {
-      int rank = memory_scope_visibility_rank(scratch[i].id, workspace, project);
-      if (rank <= 0)
+      int rank = scope_context.active
+                     ? db2_memory_scope_context_rank(scratch[i].id)
+                     : memory_scope_visibility_rank(scratch[i].id, workspace, project);
+      if (rank <= 0 && !(scope_context.active && scope_context.include_all))
          continue;
       if (kept != i)
          scratch[kept] = scratch[i];
@@ -1337,9 +1178,7 @@ static int memory_collect_code_matches(const char *query, int fetch_limit, memor
    if (!scratch)
       return count;
    int cap = 64;
-   config_t code_cfg;
-   config_load(&code_cfg);
-   const char *embed_cmd = config_embedding_command(&code_cfg, NULL);
+   const char *embed_cmd = config_embedding_command_current(NULL);
    int got = memory_collect_memory_matches_via_vector(query, embed_cmd, fetch_limit, scratch, cap);
    for (int i = 0; i < got && count < max; i++)
       count = memory_append_unique(out, count, max, &scratch[i]);
@@ -1726,10 +1565,16 @@ int memory_collect_variant_candidates(const char *raw_query, const char *norm_va
     * Semantic mode augments BOTH the lexical query (for unit/memory matches)
     * AND the expanded_terms[][] buffer (for alias/entity/summary/chunk paths),
     * so the two retrieval legs see the same expansion footprint. */
-   config_t qe_cfg;
-   config_load(&qe_cfg);
-   const char *qe_mode =
-       qe_cfg.memory_query_expansion_mode[0] ? qe_cfg.memory_query_expansion_mode : "lexical";
+   /* Copied out: each is read again below, across other config reads. */
+   char expansion_mode[CONFIG_COPY_MAX];
+   char summary_kinds[CONFIG_COPY_MAX];
+   char fact_kinds[CONFIG_COPY_MAX];
+   config_memory_query_expansion_mode_copy(expansion_mode, sizeof(expansion_mode));
+   config_memory_recall_lanes_summary_kinds_copy(summary_kinds, sizeof(summary_kinds));
+   config_memory_recall_lanes_fact_kinds_copy(fact_kinds, sizeof(fact_kinds));
+   if (!config_present())
+      return count;
+   const char *qe_mode = expansion_mode[0] ? expansion_mode : "lexical";
    const int qe_semantic =
        (strcmp(qe_mode, "semantic") == 0 || strcmp(qe_mode, "hybrid") == 0) ? 1 : 0;
    const int qe_lexical =
@@ -1737,8 +1582,8 @@ int memory_collect_variant_candidates(const char *raw_query, const char *norm_va
 
    if (qe_semantic)
    {
-      const char *embed_cmd = config_embedding_command(&qe_cfg, NULL);
-      int k = qe_cfg.memory_query_expansion_k > 0 ? qe_cfg.memory_query_expansion_k : 5;
+      const char *embed_cmd = config_embedding_command_current(NULL);
+      int k = config_memory_query_expansion_k() > 0 ? config_memory_query_expansion_k() : 5;
       if (memory_expand_query_semantic(signal_query[0] ? signal_query : norm_variant, embed_cmd, k,
                                        expanded_signal, sizeof(expanded_signal)) < 0)
          return -1;
@@ -1760,8 +1605,8 @@ int memory_collect_variant_candidates(const char *raw_query, const char *norm_va
    }
    if (qe_semantic)
    {
-      const char *embed_cmd = config_embedding_command(&qe_cfg, NULL);
-      int k = qe_cfg.memory_query_expansion_k > 0 ? qe_cfg.memory_query_expansion_k : 5;
+      const char *embed_cmd = config_embedding_command_current(NULL);
+      int k = config_memory_query_expansion_k() > 0 ? config_memory_query_expansion_k() : 5;
       expanded_count =
           memory_expand_query_terms_semantic(signal_query[0] ? signal_query : norm_variant,
                                              embed_cmd, k, expanded_terms, expanded_count, 48);
@@ -1779,26 +1624,20 @@ int memory_collect_variant_candidates(const char *raw_query, const char *norm_va
       if (!lexical_scratch)
          return count;
       int lexical_cap = 64;
-      const char *lexical_embed_cmd = config_embedding_command(&qe_cfg, NULL);
-      config_t lanes_cfg;
-      config_load(&lanes_cfg);
-      if (lanes_cfg.memory_recall_lanes_enabled)
+      const char *lexical_embed_cmd = config_embedding_command_current(NULL);
+      if (config_memory_recall_lanes_enabled())
       {
          char sum_buf[16][16], fact_buf[16][16];
          const char *sum_ptrs[16], *fact_ptrs[16];
-         int n_sum = memory_parse_kinds_csv(lanes_cfg.memory_recall_lanes_summary_kinds[0]
-                                                ? lanes_cfg.memory_recall_lanes_summary_kinds
-                                                : "episode",
-                                            sum_buf, sum_ptrs, 16);
-         int n_fact = memory_parse_kinds_csv(lanes_cfg.memory_recall_lanes_fact_kinds[0]
-                                                 ? lanes_cfg.memory_recall_lanes_fact_kinds
-                                                 : "fact,preference",
+         int n_sum = memory_parse_kinds_csv(summary_kinds[0] ? summary_kinds : "episode", sum_buf,
+                                            sum_ptrs, 16);
+         int n_fact = memory_parse_kinds_csv(fact_kinds[0] ? fact_kinds : "fact,preference",
                                              fact_buf, fact_ptrs, 16);
-         int k_sum = lanes_cfg.memory_recall_lanes_k_summary > 0
-                         ? lanes_cfg.memory_recall_lanes_k_summary
+         int k_sum = config_memory_recall_lanes_k_summary() > 0
+                         ? config_memory_recall_lanes_k_summary()
                          : 40;
          int k_fact =
-             lanes_cfg.memory_recall_lanes_k_fact > 0 ? lanes_cfg.memory_recall_lanes_k_fact : 40;
+             config_memory_recall_lanes_k_fact() > 0 ? config_memory_recall_lanes_k_fact() : 40;
 
          /* Summary lane */
          int got_sum = memory_collect_memory_matches_via_vector_with_kinds(

@@ -13,6 +13,7 @@
 #include "yaml.h"
 #include <fcntl.h>
 #include <stdarg.h>
+#include <stddef.h> /* offsetof */
 #include <stdlib.h> /* getenv — AIMEE_EMBEDDER_URL default */
 #include <sys/stat.h>
 #include <unistd.h>
@@ -172,11 +173,9 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
       }
    }
 
-   /* proxy_url / proxy_token (top-level strings) */
+   /* proxy_url is non-secret. proxy_token lives only in Vault. */
    if (cfg->proxy_url[0])
       cJSON_AddStringToObject(root, "proxy_url", cfg->proxy_url);
-   if (cfg->proxy_token[0])
-      cJSON_AddStringToObject(root, "proxy_token", cfg->proxy_token);
 
    /* max_background_processes (top-level int; 0 = auto/unset) */
    if (cfg->max_background_processes > 0)
@@ -203,7 +202,7 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
 
    /* search.* (web-search backend config) */
    if (cfg->search_backend[0] || cfg->search_max_results > 0 || cfg->search_searxng_url[0] ||
-       cfg->search_tavily_api_key[0] || cfg->search_backends[0] || cfg->search_fetch_pages >= 0)
+       cfg->search_backends[0] || cfg->search_fetch_pages >= 0)
    {
       cJSON *sr = cJSON_AddObjectToObject(root, "search");
       if (sr)
@@ -214,8 +213,6 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
             cJSON_AddNumberToObject(sr, "max_results", cfg->search_max_results);
          if (cfg->search_searxng_url[0])
             cJSON_AddStringToObject(sr, "searxng_url", cfg->search_searxng_url);
-         if (cfg->search_tavily_api_key[0])
-            cJSON_AddStringToObject(sr, "tavily_api_key", cfg->search_tavily_api_key);
          if (cfg->search_backends[0])
             cJSON_AddStringToObject(sr, "backends", cfg->search_backends);
          if (cfg->search_fetch_pages >= 0)
@@ -374,12 +371,8 @@ int config_save(const config_t *cfg)
 
    if (cfg->db1_path[0] && strcmp(cfg->db1_path, config_save_default_db1_path()) != 0)
       cJSON_AddStringToObject(root, "db1_path", cfg->db1_path);
-   if (cfg->db2_url[0])
-      cJSON_AddStringToObject(root, "db2_url", cfg->db2_url);
    if (cfg->kb_client_url[0])
       cJSON_AddStringToObject(root, "kb_client_url", cfg->kb_client_url);
-   if (cfg->kb_client_bearer_token[0])
-      cJSON_AddStringToObject(root, "kb_client_bearer_token", cfg->kb_client_bearer_token);
 
    /* Setup-wizard page-2 backend record: save each non-empty string field from a
     * compact table (mirrors the parse table in config.c). */
@@ -391,14 +384,6 @@ int config_save(const config_t *cfg)
       } page2[] = {
           {"kb_mode", offsetof(config_t, kb_mode)},
           {"llm_embed_backend", offsetof(config_t, llm_embed_backend)},
-          {"llm_embed_host", offsetof(config_t, llm_embed_host)},
-          {"llm_embed_gpu", offsetof(config_t, llm_embed_gpu)},
-          {"llm_embed_tier", offsetof(config_t, llm_embed_tier)},
-          {"llm_rerank_backend", offsetof(config_t, llm_rerank_backend)},
-          {"llm_rerank_host", offsetof(config_t, llm_rerank_host)},
-          {"llm_rerank_gpu", offsetof(config_t, llm_rerank_gpu)},
-          {"llm_rerank_tier", offsetof(config_t, llm_rerank_tier)},
-          {"llm_rerank_endpoint", offsetof(config_t, llm_rerank_endpoint)},
           {"llm_synth_backend", offsetof(config_t, llm_synth_backend)},
           {"llm_synth_host", offsetof(config_t, llm_synth_host)},
           {"llm_synth_gpu", offsetof(config_t, llm_synth_gpu)},
@@ -485,18 +470,6 @@ int config_save(const config_t *cfg)
       cJSON_AddStringToObject(root, "memory_weight_profile", cfg->memory_weight_profile);
    if (cfg->memory_rerank_mode[0])
       cJSON_AddStringToObject(root, "memory_rerank_mode", cfg->memory_rerank_mode);
-   if (cfg->memory_rerank_enabled || cfg->memory_rerank_command[0] ||
-       cfg->memory_rerank_top_k > 0 || cfg->memory_rerank_mix != 0.0)
-   {
-      cJSON *mr = cJSON_AddObjectToObject(root, "memory_rerank");
-      cJSON_AddBoolToObject(mr, "enabled", cfg->memory_rerank_enabled);
-      if (cfg->memory_rerank_command[0])
-         cJSON_AddStringToObject(mr, "command", cfg->memory_rerank_command);
-      if (cfg->memory_rerank_top_k > 0)
-         cJSON_AddNumberToObject(mr, "top_k", cfg->memory_rerank_top_k);
-      if (cfg->memory_rerank_mix != 0.0)
-         cJSON_AddNumberToObject(mr, "mix", cfg->memory_rerank_mix);
-   }
    if (cfg->memory_query_expansion_mode[0] || cfg->memory_query_expansion_k > 0)
    {
       cJSON *qe = cJSON_AddObjectToObject(root, "memory_query_expansion");
@@ -555,15 +528,12 @@ int config_save(const config_t *cfg)
       cJSON_AddNumberToObject(csh, "min_chars", cfg->cache_min_chars);
    }
    /* usage_accounting + audit_async are default-on: persist only an opt-out of either. */
-   if (!cfg->ingress_usage_accounting_enabled || !cfg->ingress_audit_async ||
-       cfg->ingress_trusted_proxy_secret[0])
+   if (!cfg->ingress_usage_accounting_enabled || !cfg->ingress_audit_async)
    {
       cJSON *ing = cJSON_AddObjectToObject(root, "ingress");
       cJSON_AddBoolToObject(ing, "usage_accounting_enabled",
                             cfg->ingress_usage_accounting_enabled ? 1 : 0);
       cJSON_AddBoolToObject(ing, "audit_async", cfg->ingress_audit_async ? 1 : 0);
-      if (cfg->ingress_trusted_proxy_secret[0])
-         cJSON_AddStringToObject(ing, "trusted_proxy_secret", cfg->ingress_trusted_proxy_secret);
    }
    int gsem_mode = guardrails_semantic_mode_parse(cfg->guardrails_semantic_mode);
    if (gsem_mode != GSEM_MODE_OFF || cfg->guardrails_semantic_command[0] ||
@@ -897,6 +867,8 @@ int config_save(const config_t *cfg)
       cJSON_AddBoolToObject(root, "delegate_graph_context_enabled", 1);
    if (cfg->ingress_preinject_enabled)
       cJSON_AddBoolToObject(root, "ingress_preinject_enabled", 1);
+   if (strcmp(cfg->code_context_mode, "on") != 0)
+      cJSON_AddStringToObject(root, "code_context_mode", cfg->code_context_mode);
    if (cfg->ingress_preinject_anthropic_enabled)
       cJSON_AddBoolToObject(root, "ingress_preinject_anthropic_enabled", 1);
    if (cfg->ingress_compress_enabled)
@@ -928,8 +900,8 @@ int config_save(const config_t *cfg)
       cJSON_AddBoolToObject(root, "require_aimee_git", 0);
    if (!cfg->subagent_ban_enabled) /* default-on: persist only the opt-out */
       cJSON_AddBoolToObject(root, "subagent_ban_enabled", 0);
-   if (cfg->delegate_sandbox) /* default-off: persist only when enabled */
-      cJSON_AddBoolToObject(root, "delegate_sandbox", 1);
+   if (!cfg->delegate_sandbox) /* default-on: persist only the opt-out */
+      cJSON_AddBoolToObject(root, "delegate_sandbox", 0);
    if (cfg->delegate_sandbox_image[0])
       cJSON_AddStringToObject(root, "delegate_sandbox_image", cfg->delegate_sandbox_image);
    /* Persist only when non-default ("proxy"); absence means the default. */
@@ -1308,8 +1280,8 @@ int config_save(const config_t *cfg)
     * is not silently dropped on the next save. config_server_api.c parses
     * these back from the same nested mapping. */
    if (cfg->server_api_http_port > 0 || cfg->server_api_tls_port > 0 || cfg->server_api_mtls > 0 ||
-       cfg->server_api_mtls_client_ca[0] || cfg->server_api_bearer_token[0] ||
-       cfg->server_api_rate_limit_per_min > 0 || cfg->server_api_client_transport[0] ||
+       cfg->server_api_mtls_client_ca[0] || cfg->server_api_rate_limit_per_min > 0 ||
+       cfg->server_api_client_transport[0] ||
        cfg->server_api_remote_writes > SERVER_REMOTE_WRITES_OFF ||
        cfg->server_api_max_event_streams > 0 || cfg->server_api_cli_session_forwarding)
    {
@@ -1324,8 +1296,6 @@ int config_save(const config_t *cfg)
                                  cfg->server_api_mtls >= 2 ? "required" : "optional");
       if (cfg->server_api_mtls_client_ca[0])
          cJSON_AddStringToObject(api_obj, "mtls_client_ca", cfg->server_api_mtls_client_ca);
-      if (cfg->server_api_bearer_token[0])
-         cJSON_AddStringToObject(api_obj, "bearer_token", cfg->server_api_bearer_token);
       if (cfg->server_api_rate_limit_per_min > 0)
          cJSON_AddNumberToObject(api_obj, "rate_limit_per_min", cfg->server_api_rate_limit_per_min);
       if (cfg->server_api_max_event_streams > 0)
@@ -1401,47 +1371,62 @@ int config_save(const config_t *cfg)
 
 /* --- Guardrail mode --- */
 
-const char *config_guardrail_mode(const config_t *cfg)
+/* Defined in config.c; declared here the same way the generated accessor shards
+ * declare it, since it has no public header (it is a config-module internal). */
+int config_field_read(size_t offset, size_t size, void *dst);
+
+/* Reads the field directly rather than through a generated accessor: the
+ * generator skips a field whose accessor name is already taken, and this
+ * function occupies config_guardrail_mode. That is fine here — this IS the
+ * config module, which is the one place allowed to know config_t's shape. */
+const char *config_guardrail_mode(void)
 {
-   if (cfg->guardrail_mode[0])
-      return cfg->guardrail_mode;
-   return MODE_APPROVE;
+   static _Thread_local char buf[sizeof(((config_t *)0)->guardrail_mode)];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, guardrail_mode), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf[0] ? buf : MODE_APPROVE;
 }
 
 const char *config_embedding_command(const config_t *cfg, const char *requested)
 {
    if (requested && requested[0])
       return requested;
-   if (cfg && cfg->embedding_command[0])
-      return cfg->embedding_command;
-   /* No explicit command: if the deployment points us at an embedder service,
-    * embed against it in-process (memory_embed_text speaks http:// directly, no
-    * fork, no python). This makes a configured embedder the default with zero
-    * config and survives a config reseed -- the deploy stack exports
-    * AIMEE_EMBEDDER_URL / AIMEE_LLM_URL for the aimee-llm container. Only when
-    * nothing is configured do we fall back to the 384-dim builtin (correct for an
-    * unconfigured shim/test setup). */
+   /* This is the ONE place an embedder address is resolved. Precedence, and why:
+    *
+    * AIMEE_EMBEDDER_URL OUTRANKS the stored command, because the env var is how the
+    * RUNNING embedder announces itself. The shipped config pre-selects nothing (first
+    * boot leaves the choice to the wizard), and when the entrypoint does start the
+    * bundled in-container model it exports AIMEE_EMBEDDER_URL pointing at it — so the
+    * bundled model and an operator's external endpoint arrive by the same route and
+    * obey one rule. Checking config first would make the variable dead and let the kb
+    * embed locally while its schema was sized for the external endpoint.
+    *
+    * memory_embed_text speaks http:// directly, so this costs no fork and no python.
+    *
+    * Deliberately NOT falling back to AIMEE_LLM_URL: that knob is synthesis-only since
+    * the aimee-llm container was retired, and letting it select an embedder would point
+    * retrieval at a chat endpoint. */
    const char *env = getenv("AIMEE_EMBEDDER_URL");
    if (env && env[0])
       return env;
-   /* AIMEE_LLM_URL: the single unified-container knob also drives embedding (the
-    * same aimee-llm container serves /embed). AIMEE_EMBEDDER_URL takes precedence
-    * when an operator pins the embedder somewhere else. */
-   env = getenv("AIMEE_LLM_URL");
-   if (env && env[0])
-      return env;
+   if (cfg && cfg->embedding_command[0])
+      return cfg->embedding_command;
+   /* Nothing selected at all: the lexical builtin, which fills the deployment's
+    * configured width (config is the single place that is declared). Correct for a
+    * first boot before the wizard runs, and for an unconfigured shim/test setup. */
    return "builtin";
 }
 
 /* --- Conversation directories --- */
 
-int config_conversation_dirs(const config_t *cfg, char dirs[][MAX_PATH_LEN], int max_dirs)
+int config_conversation_dirs(char dirs[][MAX_PATH_LEN], int max_dirs)
 {
    const char *home = platform_home_dir();
    if (!home)
       home = "/tmp";
 
-   const char *provider = cfg->provider[0] ? cfg->provider : "claude";
+   const char *provider = config_provider()[0] ? config_provider() : "claude";
    int count = 0;
 
    if (strcmp(provider, "claude") == 0)
@@ -1604,6 +1589,14 @@ int config_set(const char *key, const char *value)
    const config_field_t *f = config_field_lookup(key);
    if (!f)
       return -1; /* unknown key */
+   const char *secret_name = config_field_secret_name(f);
+   if (secret_name)
+   {
+      /* Credential compatibility fields are process-memory views of Vault
+       * records, never YAML settings. The injected writer updates Vault and the
+       * locked runtime cache atomically; absent initialization fails closed. */
+      return config_secret_store(secret_name, value);
+   }
    cJSON *node = config_set_value_node(f, value);
    if (!node)
       return -1; /* invalid value for the field's type */
@@ -1637,7 +1630,289 @@ static int config_set_section(const char *key, void (*emit)(const config_t *, cJ
    return rc;
 }
 
+/* Apply the KB typed-facts group in ONE document write. Each parameter is
+ * "leave unchanged" when negative, so a caller can patch any subset. Grouped
+ * rather than three config_set calls because the console applies them as one
+ * request: three separate writes would be three reload publishes and could
+ * leave the layer half-configured if one failed. */
+int config_set_typed_facts(int enabled, int auto_promote, int promote_threshold)
+{
+   int rc = 0;
+   if (enabled >= 0)
+      rc = config_set("typed_facts_enabled", enabled ? "true" : "false");
+   if (rc == 0 && auto_promote >= 0)
+      rc = config_set("kb_typed_facts_auto_promote_enabled", auto_promote ? "true" : "false");
+   if (rc == 0 && promote_threshold > 0)
+   {
+      char buf[32];
+      snprintf(buf, sizeof(buf), "%d", promote_threshold);
+      rc = config_set("kb_typed_facts_promote_threshold", buf);
+   }
+   return rc;
+}
+
+/* Register a workspace. The caller supplies the data; the 64-entry cap, the
+ * duplicate check and the four parallel arrays are config's business, not a
+ * caller's. Returns 0 on success, -1 on save failure, -2 when `path` is already
+ * registered, -3 when the table is full. `provider`/`remote`/`head` may be NULL
+ * or "" for the defaults. */
+int config_workspace_add(const char *path, const char *provider, const char *remote,
+                         const char *head)
+{
+   if (!path || !path[0])
+      return -1;
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = -1;
+   if (config_load(cfg) == 0)
+   {
+      rc = 0;
+      for (int i = 0; i < cfg->workspace_count; i++)
+         if (strcmp(cfg->workspaces[i], path) == 0)
+            rc = -2;
+      int cap = (int)(sizeof(cfg->workspaces) / sizeof(cfg->workspaces[0]));
+      if (rc == 0 && cfg->workspace_count >= cap)
+         rc = -3;
+      if (rc == 0)
+      {
+         int idx = cfg->workspace_count++;
+         snprintf(cfg->workspaces[idx], sizeof(cfg->workspaces[idx]), "%s", path);
+         snprintf(cfg->workspace_providers[idx], sizeof(cfg->workspace_providers[idx]), "%s",
+                  (provider && strcmp(provider, "shared") != 0) ? provider : "");
+         snprintf(cfg->workspace_vcs_remote[idx], sizeof(cfg->workspace_vcs_remote[idx]), "%s",
+                  remote ? remote : "");
+         snprintf(cfg->workspace_vcs_head[idx], sizeof(cfg->workspace_vcs_head[idx]), "%s",
+                  head ? head : "");
+         rc = config_save(cfg);
+      }
+   }
+   free(cfg);
+   return rc;
+}
+
+/* Remove a workspace by path, closing the gap in the parallel arrays. Returns 0,
+ * -1 on save failure, -2 when the path is not registered. Counterpart to
+ * config_workspace_add: the array shuffle is config's business. */
+int config_workspace_remove(const char *path)
+{
+   if (!path || !path[0])
+      return -1;
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = -1;
+   if (config_load(cfg) == 0)
+   {
+      int found = -1;
+      for (int i = 0; i < cfg->workspace_count; i++)
+         if (strcmp(cfg->workspaces[i], path) == 0)
+         {
+            found = i;
+            break;
+         }
+      if (found < 0)
+         rc = -2;
+      else
+      {
+         for (int i = found; i < cfg->workspace_count - 1; i++)
+         {
+            snprintf(cfg->workspaces[i], sizeof(cfg->workspaces[i]), "%s", cfg->workspaces[i + 1]);
+            snprintf(cfg->workspace_providers[i], sizeof(cfg->workspace_providers[i]), "%s",
+                     cfg->workspace_providers[i + 1]);
+            snprintf(cfg->workspace_vcs_remote[i], sizeof(cfg->workspace_vcs_remote[i]), "%s",
+                     cfg->workspace_vcs_remote[i + 1]);
+            snprintf(cfg->workspace_vcs_head[i], sizeof(cfg->workspace_vcs_head[i]), "%s",
+                     cfg->workspace_vcs_head[i + 1]);
+         }
+         cfg->workspace_count--;
+         rc = config_save(cfg);
+      }
+   }
+   free(cfg);
+   return rc;
+}
+
+/* Disable the /v1 HTTP listener and persist, reading the FILE rather than the
+ * live snapshot.
+ *
+ * The generated config_set_server_api_http_port() would work everywhere else,
+ * but it goes through config_load, which in the SERVER returns the published
+ * snapshot. This runs inside aimee-server under the bearer-mutation lock, and
+ * writing back a snapshot would discard anything written to aimee.yaml since the
+ * last publish. Reading the file keeps the read-modify-write over the same thing
+ * config_save is about to overwrite. */
+int config_disable_api_http_listener(void)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load_file(cfg);
+   if (rc == 0)
+   {
+      cfg->server_api_http_port = 0;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+/* Materialise the config file: load (defaults when absent) and write it back.
+ * Idempotent, and the one thing `aimee init` / `aimee setup` actually wanted
+ * from their load-then-save round trip. */
+int config_persist_defaults(void)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+      rc = config_save(cfg);
+   free(cfg);
+   return rc;
+}
+
+int config_apply_roundtable_preset(const config_roundtable_preset_t *p)
+{
+   if (!p)
+      return -1;
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = -1;
+   /* From DISK, not the snapshot, so applying a preset never clobbers an
+    * external edit made since the last reload (matches config_set). */
+   if (config_load_file(cfg) == 0)
+   {
+      int n = p->seat_count;
+      if (n > CONFIG_RT_PRESET_MAX_SEATS)
+         n = CONFIG_RT_PRESET_MAX_SEATS;
+      for (int i = 0; i < n; i++)
+      {
+         snprintf(cfg->ensemble_reference_models[i], sizeof(cfg->ensemble_reference_models[i]),
+                  "%s", p->models[i]);
+         snprintf(cfg->ensemble_reference_personas[i], sizeof(cfg->ensemble_reference_personas[i]),
+                  "%s", p->personas[i]);
+      }
+      cfg->ensemble_reference_count = n;
+      cfg->ensemble_reference_persona_count = n;
+      cfg->ensemble_min_successful = p->min_successful;
+      cfg->ensemble_max_cost_usd = p->max_cost_usd;
+      cfg->roundtable_max_rounds = p->max_rounds;
+      cfg->roundtable_converge_threshold = p->converge_threshold;
+      cfg->roundtable_deadline_ms = p->deadline_ms;
+      if (p->turns[0])
+         snprintf(cfg->roundtable_turns, sizeof(cfg->roundtable_turns), "%s", p->turns);
+      if (p->pipeline_done_bar[0])
+         snprintf(cfg->roundtable_pipeline_done_bar, sizeof(cfg->roundtable_pipeline_done_bar),
+                  "%s", p->pipeline_done_bar);
+      cfg->roundtable_pipeline_max_passes = p->pipeline_max_passes;
+      cfg->roundtable_pipeline_max_attempts_per_pass = p->pipeline_max_attempts_per_pass;
+      cfg->roundtable_pipeline_max_cost_usd = p->pipeline_max_cost_usd;
+      cfg->roundtable_pipeline_max_total_cost_usd = p->pipeline_max_total_cost_usd;
+      cfg->roundtable_pipeline_gate_ttl_h = p->pipeline_gate_ttl_h;
+      cfg->roundtable_pipeline_parked_releases_slot = p->pipeline_parked_releases_slot;
+      cfg->roundtable_pipeline_unknown_context_tokens = p->pipeline_unknown_context_tokens;
+      snprintf(cfg->roundtable_default, sizeof(cfg->roundtable_default), "%s", p->name);
+      rc = config_save(cfg);
+      if (rc == 0)
+         (void)config_reload();
+   }
+   free(cfg);
+   return rc;
+}
+
+/* Upsert a per-model concurrency limit and persist the concurrency section.
+ * Returns 0, -1 on failure, -2 when the table is full. The table layout and its
+ * cap are config's business, not a caller's. */
+int config_set_model_concurrency(const char *model, int limit)
+{
+   if (!model || !model[0] || limit <= 0)
+      return -1;
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = -1;
+   if (config_load(cfg) == 0)
+   {
+      int found = -1;
+      for (int i = 0; i < cfg->concurrency_per_model_count; i++)
+         if (strcmp(cfg->concurrency_per_model[i].key, model) == 0)
+         {
+            found = i;
+            break;
+         }
+      if (found >= 0)
+         cfg->concurrency_per_model[found].limit = limit;
+      else if (cfg->concurrency_per_model_count >= CONFIG_CONCURRENCY_MAX_ENTRIES)
+         rc = -2;
+      else
+      {
+         config_concurrency_entry_t *e =
+             &cfg->concurrency_per_model[cfg->concurrency_per_model_count++];
+         snprintf(e->key, sizeof(e->key), "%s", model);
+         e->limit = limit;
+      }
+      if (rc != -2)
+         rc = config_set_concurrency(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+/* Drop a per-model concurrency entry, closing the gap. 0 = removed or absent. */
+int config_remove_model_concurrency(const char *model)
+{
+   if (!model || !model[0])
+      return -1;
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = -1;
+   if (config_load(cfg) == 0)
+   {
+      int found = -1;
+      for (int i = 0; i < cfg->concurrency_per_model_count; i++)
+         if (strcmp(cfg->concurrency_per_model[i].key, model) == 0)
+         {
+            found = i;
+            break;
+         }
+      if (found < 0)
+         rc = 0;
+      else
+      {
+         for (int i = found; i < cfg->concurrency_per_model_count - 1; i++)
+            cfg->concurrency_per_model[i] = cfg->concurrency_per_model[i + 1];
+         cfg->concurrency_per_model_count--;
+         rc = config_set_concurrency(cfg);
+      }
+   }
+   free(cfg);
+   return rc;
+}
+
 int config_set_concurrency(const config_t *cfg)
 {
    return config_set_section("concurrency", config_save_concurrency, cfg);
+}
+
+/* Copy out the sandbox block whole. The one place a caller legitimately wants a
+ * struct rather than a field: sandbox_config_t is a self-contained POD that
+ * sandbox_* consumes as a unit, so per-field accessors would just be reassembled
+ * at every call site. Leaves *out zeroed when the config cannot be read, which is
+ * the all-defaults-off shape callers already used on load failure. */
+void config_sandbox(sandbox_config_t *out)
+{
+   if (!out)
+      return;
+   memset(out, 0, sizeof(*out));
+   /* Read the LIVE config, like every generated accessor: config_field_read
+    * prefers the pinned snapshot and heap-loads only when none is live. Loading a
+    * whole config_t here instead made this the one read accessor that bypassed the
+    * snapshot -- so a delegated shell could be gated on file state the live
+    * snapshot had not adopted, and every such call paid a full config load on a
+    * hot path. Leaves *out zeroed when the config cannot be read, which is the
+    * all-defaults-off shape callers already relied on. */
+   config_field_read(offsetof(config_t, sandbox), sizeof(*out), out);
 }

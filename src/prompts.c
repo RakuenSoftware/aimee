@@ -851,46 +851,49 @@ char *prompt_build_mode(aimee_mode_t mode, prompt_tier_t tier, const char *cwd,
    return dstr_steal(&out);
 }
 
-char *prompt_apply_dispositions(const char *base_prompt, const config_t *cfg)
+char *prompt_apply_dispositions(const char *base_prompt)
 {
    dstr_t out;
    dstr_init(&out);
    dstr_append_str(&out, base_prompt ? base_prompt : "");
 
-   if (!cfg || cfg->disposition_count <= 0)
+   int disposition_count = config_disposition_count();
+   if (disposition_count <= 0)
       return dstr_steal(&out);
 
    dstr_append_str(
        &out, "\n\n## Dispositions\n"
              "These are softer behavioral preferences. Approved rules and explicit instructions "
              "override them.\n");
-   for (int i = 0; i < cfg->disposition_count; i++)
-      dstr_appendf(&out, "- %s: %.2f\n", cfg->dispositions[i].name, cfg->dispositions[i].value);
+   for (int i = 0; i < disposition_count; i++)
+      dstr_appendf(&out, "- %s: %.2f\n", config_disposition_name(i), config_disposition_value(i));
 
    return dstr_steal(&out);
 }
 
-static int charter_total_entries(const config_t *cfg)
+static int charter_total_entries(void)
 {
-   if (!cfg)
-      return 0;
-   return cfg->charter_safety_axioms_count + cfg->charter_hard_constraints_count +
-          cfg->charter_values_count + cfg->charter_tone_boundaries_count;
+   return config_charter_safety_axioms_count() + config_charter_hard_constraints_count() +
+          config_charter_values_count() + config_charter_tone_boundaries_count();
 }
 
-static void charter_append_section(dstr_t *out, const char *label,
-                                   const char entries[][CONFIG_CHARTER_ENTRY_LEN], int count)
+/* Takes the section's indexed accessor rather than the array itself: the entries
+ * are no longer a block of memory the caller can hand over. Each entry is used
+ * within its own dstr_appendf, so the accessor's thread-local buffer is consumed
+ * before the next index overwrites it. */
+static void charter_append_section(dstr_t *out, const char *label, const char *(*entry)(int),
+                                   int count)
 {
    if (count <= 0)
       return;
    dstr_appendf(out, "\n### %s\n", label);
    for (int i = 0; i < count; i++)
-      dstr_appendf(out, "- %s\n", entries[i]);
+      dstr_appendf(out, "- %s\n", entry(i));
 }
 
-char *prompt_apply_charter(const char *base_prompt, const config_t *cfg)
+char *prompt_apply_charter(const char *base_prompt)
 {
-   if (charter_total_entries(cfg) == 0)
+   if (charter_total_entries() == 0)
    {
       /* No charter configured — return an independent copy of
        * base_prompt so callers can always free() the result. */
@@ -908,38 +911,39 @@ char *prompt_apply_charter(const char *base_prompt, const config_t *cfg)
                    "dispositions, the working profile, and every turn-level or session-level "
                    "instruction below. Do not override, negotiate, or soften any item in this "
                    "section.\n");
-   charter_append_section(&out, "Safety axioms", cfg->charter_safety_axioms,
-                          cfg->charter_safety_axioms_count);
-   charter_append_section(&out, "Hard constraints", cfg->charter_hard_constraints,
-                          cfg->charter_hard_constraints_count);
-   charter_append_section(&out, "Values", cfg->charter_values, cfg->charter_values_count);
-   charter_append_section(&out, "Tone boundaries", cfg->charter_tone_boundaries,
-                          cfg->charter_tone_boundaries_count);
+   charter_append_section(&out, "Safety axioms", config_charter_safety_axioms,
+                          config_charter_safety_axioms_count());
+   charter_append_section(&out, "Hard constraints", config_charter_hard_constraints,
+                          config_charter_hard_constraints_count());
+   charter_append_section(&out, "Values", config_charter_values, config_charter_values_count());
+   charter_append_section(&out, "Tone boundaries", config_charter_tone_boundaries,
+                          config_charter_tone_boundaries_count());
    dstr_append_str(&out, "\n---\n\n");
    if (base_prompt && base_prompt[0])
       dstr_append_str(&out, base_prompt);
    return dstr_steal(&out);
 }
 
-static int working_profile_field_allowed(const config_t *cfg, const char *field)
+static int working_profile_field_allowed(const char *field)
 {
-   if (!cfg || !field || !field[0])
+   if (!field || !field[0])
       return 0;
-   if (cfg->identity_working_profile_injection_fields_count <= 0)
+   int allow_count = config_identity_working_profile_injection_fields_count();
+   if (allow_count <= 0)
       return 1; /* empty allow list = all fields */
-   for (int i = 0; i < cfg->identity_working_profile_injection_fields_count; i++)
-      if (strcmp(cfg->identity_working_profile_injection_fields[i], field) == 0)
+   for (int i = 0; i < allow_count; i++)
+      if (strcmp(config_identity_working_profile_injection_fields(i), field) == 0)
          return 1;
    return 0;
 }
 
-char *prompt_apply_working_profile(const char *base_prompt, const config_t *cfg)
+char *prompt_apply_working_profile(const char *base_prompt)
 {
    dstr_t out;
    dstr_init(&out);
    dstr_append_str(&out, base_prompt ? base_prompt : "");
 
-   if (!cfg || !cfg->identity_working_profile_injection_enabled)
+   if (!config_identity_working_profile_injection_enabled())
       return dstr_steal(&out);
 
    db1_working_profile_local_state_t rows[16];
@@ -953,7 +957,7 @@ char *prompt_apply_working_profile(const char *base_prompt, const config_t *cfg)
    int kept[16];
    int kept_count = 0;
    for (int i = 0; i < n; i++)
-      if (working_profile_field_allowed(cfg, rows[i].field))
+      if (working_profile_field_allowed(rows[i].field))
          kept[kept_count++] = i;
    if (kept_count == 0)
       return dstr_steal(&out);

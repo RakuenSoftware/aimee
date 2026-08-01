@@ -35,6 +35,9 @@ type DelegateRequest struct {
 	// MaxCostUSD is a positive per-call hard safety bound assigned by the
 	// workflow runner. The resource plane rejects or stops work that cannot fit.
 	MaxCostUSD float64
+	// MaxTurnsCap bounds a delegate without overriding a smaller role/agent cap.
+	// It is forwarded to the resource plane as max_turns_cap.
+	MaxTurnsCap int
 	// ReplayOnly forbids launching a replacement job when a lifecycle retry is
 	// consuming an already-billed durable result.
 	ReplayOnly bool
@@ -252,8 +255,7 @@ func (c *HTTPAgentClient) Delegate(ctx context.Context, request DelegateRequest)
 			result.CostUnknown = result.CostUnknown || costUnknown
 			return result, nil
 		}
-		if (request.Delegate != "" && !request.routeSelected) || request.Participant != "" ||
-			!errors.Is(err, ErrDelegateTerminal) ||
+		if !delegateRouteRetryable(request, err) ||
 			attempt+1 >= maxRouteAttempts || ctx.Err() != nil {
 			if execution != nil && execution.Dispatched && !execution.CostKnown {
 				return result, &DelegateExecutionError{Err: err, Dispatched: true, CostKnown: false, CostUSD: totalCost}
@@ -265,7 +267,9 @@ func (c *HTTPAgentClient) Delegate(ctx context.Context, request DelegateRequest)
 		}
 		// The request remains unpinned. A distinct durable key forces a fresh
 		// generic delegate admission, whose router can select another currently
-		// eligible agent. No failed agent is persisted as an exclusion.
+		// eligible agent. This includes admission backpressure: planDelegateGroup
+		// may race with live occupancy, and the admission rejection is the
+		// authoritative signal. No failed agent is persisted as an exclusion.
 		request.RetryTag = fmt.Sprintf("route-retry:%d", attempt+1)
 		request.Delegate = ""
 		request.routeSelected = false
@@ -278,6 +282,13 @@ func (c *HTTPAgentClient) Delegate(ctx context.Context, request DelegateRequest)
 	}
 }
 
+func delegateRouteRetryable(request DelegateRequest, err error) bool {
+	if err == nil || (request.Delegate != "" && !request.routeSelected) || request.Participant != "" {
+		return false
+	}
+	return errors.Is(err, ErrDelegateTerminal) || isCapacityBackpressure(err)
+}
+
 func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequest) (DelegateResult, error) {
 	if request.Role == "" || request.Persona == "" || request.Prompt == "" {
 		return DelegateResult{}, errors.New("delegate role, persona, and prompt are required")
@@ -285,6 +296,9 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 	payload := map[string]any{"role": request.Role, "persona": request.Persona, "prompt": request.Prompt, "cwd": request.Workdir, "tools": request.Tools}
 	if request.MaxCostUSD > 0 {
 		payload["max_cost_usd"] = request.MaxCostUSD
+	}
+	if request.MaxTurnsCap > 0 {
+		payload["max_turns_cap"] = request.MaxTurnsCap
 	}
 	if request.ProvidedTarget {
 		payload["provided_target"] = true
@@ -386,10 +400,12 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 			// when the status plane later fails so a retry cannot overlap the job.
 			return DelegateResult{}, delegateExecutionError(err, true, false, 0)
 		}
-		// Any nonterminal status without an assigned agent is not progress. The
-		// resource plane can mark a job running before admission assigns an agent,
-		// so status alone cannot end the unassigned lease.
-		assigned := strings.TrimSpace(status.Agent) != ""
+		// Any nonterminal status without a worker lease is not progress. The
+		// resource plane persists agent_name as soon as routing selects an agent,
+		// while the job is still pending; only its transition to running proves a
+		// worker actually started. Treating a routed pending job as assigned makes
+		// it immortal when capacity never admits it.
+		assigned := status.JobStatus == "running" && strings.TrimSpace(status.Agent) != ""
 		terminal := isTerminalDelegateStatus(status.JobStatus)
 		if !assigned && !terminal {
 			if unassignedSince.IsZero() {

@@ -83,7 +83,7 @@ int64_t kb_curator_entity_point_id(const char *artifact_id)
  * A judge error is treated as "not the same" (create), so a flaky sidecar can
  * only over-create, never collapse distinct entities. */
 static int resolve_try_match(const char *scope_kind, const char *scope_id, const float *vec,
-                             int dim, const char *name, const char *context, const config_t *cfg)
+                             int dim, const char *name, const char *context)
 {
    int64_t match_ids[1];
    double match_scores[1];
@@ -101,19 +101,22 @@ static int resolve_try_match(const char *scope_kind, const char *scope_id, const
    /* Judge the ambiguous band when there's somewhere to send it: a configured
     * Tier-B provider (§2) or the legacy judge sidecar command. The score check is
     * first so the provider lookup runs only for an actual ambiguous-band match. */
-   provider_def_t judge_provider;
+   /* Copied out: passed to kb_curator_judge_same_entity, which runs the sidecar
+    * or a provider round trip. */
+   char judge_command[CONFIG_COPY_MAX];
+   config_kb_curator_judge_command_copy(judge_command, sizeof(judge_command));
+   provider_def_owned_t judge_provider;
    if (match_scores[0] >= CURATOR_ENTITY_JUDGE_LOW &&
-       (cfg->kb_curator_judge_command[0] ||
-        kb_curator_provider_for_stage(cfg, KB_CURATOR_STAGE_JUDGE, &judge_provider)))
+       (judge_command[0] || kb_curator_provider_for_stage(KB_CURATOR_STAGE_JUDGE, &judge_provider)))
    {
       char cand_name[256];
       if (pgvec_curator_entity_lookup(match_ids[0], NULL, 0, cand_name, sizeof(cand_name)) == 1)
       {
          int same = 0;
          char jerr[256];
-         int jrc =
-             kb_curator_judge_same_entity(cfg, cfg->kb_curator_judge_command, name, context,
-                                          cand_name, match_scores[0], &same, jerr, sizeof(jerr));
+         db2_lease_release_idle();
+         int jrc = kb_curator_judge_same_entity(judge_command, name, context, cand_name,
+                                                match_scores[0], &same, jerr, sizeof(jerr));
          if (jrc == 0 && same)
          {
             aimee_log(LOG_INFO, "kb.curator.resolve",
@@ -123,8 +126,16 @@ static int resolve_try_match(const char *scope_kind, const char *scope_id, const
             return 1;
          }
          if (jrc != 0)
+         {
             aimee_log(LOG_WARN, "kb.curator.resolve",
                       "judge error for '%s' (%s); creating new entity", name, jerr);
+            /* A job-specific judge error remains fail-open-to-create, but a
+             * provider outage says nothing about entity identity. Leave the
+             * proposed artifact untouched and stop this pass for retry after
+             * the shared provider cooldown. */
+            if (kb_curator_error_is_provider_unavailable(jerr))
+               return -1;
+         }
       }
    }
    return 0;
@@ -168,6 +179,11 @@ int kb_curator_resolve_entities_one(const kb_curator_extract_opts_t *opts)
       return 0;
    }
 
+   /* The selected payload is self-contained. Embedding and an ambiguous-match
+    * judge can each take minutes, so do not retain the health/status pool member
+    * acquired for the SELECT across either remote call. */
+   db2_lease_release_idle();
+
    char name[256] = "", context[512] = "";
    cJSON *pj = payload ? cJSON_Parse(payload) : NULL;
    if (pj)
@@ -191,12 +207,10 @@ int kb_curator_resolve_entities_one(const kb_curator_extract_opts_t *opts)
 
    char embed_text[768];
    kb_curator_entity_embed_text(name, context, embed_text, sizeof(embed_text));
-
-   config_t cfg;
-   config_load(&cfg);
-   const char *embed_cmd = config_embedding_command(&cfg, NULL);
+   const char *embed_cmd = config_embedding_command_current(NULL);
    float vec[CURATOR_ENTITY_DIM];
-   int dim = memory_embed_text(embed_text, embed_cmd, vec, CURATOR_ENTITY_DIM);
+   int dim =
+       memory_embed_text(embed_text, embed_cmd, EMBED_INPUT_DOCUMENT, vec, CURATOR_ENTITY_DIM);
    if (dim > 0)
    {
       /* Resolve to an existing canonical entity in this scope, or — per the
@@ -205,22 +219,28 @@ int kb_curator_resolve_entities_one(const kb_curator_extract_opts_t *opts)
        * workspace/global entity resolves onto it instead of creating a
        * near-duplicate. The searches run before the upsert, so they only see
        * previously-committed entities. */
-      int merged = resolve_try_match(scope_kind, scope_id, vec, dim, name, context, &cfg);
-      if (!merged)
+      int merged = resolve_try_match(scope_kind, scope_id, vec, dim, name, context);
+      if (merged == 0)
       {
          void *conn = db2_conn();
          char ck[64], cid[128], wk[64], wid[128];
          snprintf(ck, sizeof(ck), "%s", scope_kind);
          snprintf(cid, sizeof(cid), "%s", scope_id);
-         while (!merged && conn &&
+         while (merged == 0 && conn &&
                 kb_curator_broaden_scope(conn, ck, cid, wk, sizeof(wk), wid, sizeof(wid)))
          {
-            merged = resolve_try_match(wk, wid, vec, dim, name, context, &cfg);
+            merged = resolve_try_match(wk, wid, vec, dim, name, context);
             snprintf(ck, sizeof(ck), "%s", wk);
             snprintf(cid, sizeof(cid), "%s", wid);
          }
       }
-      if (!merged)
+      if (merged < 0)
+      {
+         cJSON_Delete(pj);
+         free(payload);
+         return -1;
+      }
+      if (merged == 0)
       {
          int64_t pid = kb_curator_entity_point_id(id);
          if (pgvec_curator_entity_upsert(pid, vec, dim, scope_kind, scope_id, name, id,

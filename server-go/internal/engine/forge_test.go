@@ -74,6 +74,54 @@ func TestHTTPForgePushRejectsUnmanagedBranchAndMismatchedOrigin(t *testing.T) {
 	}
 }
 
+func TestHTTPForgeOpenCarriesCompleteDraftHandoff(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "forge.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	var request map[string]any
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"url":"https://github.com/acme/one/pull/7"}`))
+	})}
+	go server.Serve(listener)
+	defer server.Close()
+
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	worktree := filepath.Join(root, "worktree")
+	for _, dir := range []string{repo, worktree} {
+		if output, err := exec.Command("git", "init", dir).CombinedOutput(); err != nil {
+			t.Fatalf("git init %s: %v: %s", dir, err, output)
+		}
+		if output, err := exec.Command("git", "-C", dir, "remote", "add", "origin", "https://github.com/acme/one.git").CombinedOutput(); err != nil {
+			t.Fatalf("add repo origin: %v: %s", err, output)
+		}
+	}
+	forge, err := NewHTTPForge(HTTPForgeConfig{UnixSocket: socket})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := PullRequestSpec{Title: "Describe the completed feature", Body: "## Summary\n\nReview this.", Draft: true}
+	pr, err := forge.Open(t.Context(), repo, worktree, "aimee/feat/wi_example", "testing", spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pr.URL != "https://github.com/acme/one/pull/7" {
+		t.Fatalf("PR = %+v", pr)
+	}
+	for key, want := range map[string]any{"op": "open", "title": spec.Title, "body": spec.Body,
+		"draft": true, "head": "aimee/feat/wi_example", "base": "testing"} {
+		if request[key] != want {
+			t.Fatalf("request[%q] = %#v, want %#v; request=%#v", key, request[key], want, request)
+		}
+	}
+}
+
 func TestPullNumber(t *testing.T) {
 	for _, input := range []string{"42", "https://github.com/acme/repo/pull/42"} {
 		number, err := pullNumber(input)

@@ -6,6 +6,7 @@
 #include "agent_exec.h"
 #include "delivery_target.h"
 #include "log.h"
+#include "runtime_secret.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,6 +36,7 @@ static int ntfy_startup(platform_adapter_t *self, gateway_ctx_t *ctx)
 static void ntfy_shutdown(platform_adapter_t *self)
 {
    (void)self;
+   runtime_secret_wipe(ntfy_token, sizeof(ntfy_token));
 }
 
 static int ntfy_send_text(platform_adapter_t *self, const delivery_target_t *target,
@@ -220,7 +222,7 @@ static platform_adapter_t ntfy_adapter = {
 static int ntfy_init(void)
 {
    const char *env_url = getenv("AIMEE_GATEWAY_NTFY_BASE_URL");
-   const char *env_token = getenv("AIMEE_GATEWAY_NTFY_TOKEN");
+   char vault_token[sizeof(ntfy_token)] = "";
 
    if (env_url != NULL && env_url[0] != '\0')
    {
@@ -228,11 +230,12 @@ static int ntfy_init(void)
       ntfy_base_url[sizeof(ntfy_base_url) - 1] = '\0';
    }
 
-   if (env_token != NULL && env_token[0] != '\0')
+   if (runtime_secret_get("AIMEE_GATEWAY_NTFY_TOKEN", vault_token, sizeof(vault_token)))
    {
-      strncpy(ntfy_token, env_token, sizeof(ntfy_token) - 1);
+      strncpy(ntfy_token, vault_token, sizeof(ntfy_token) - 1);
       ntfy_token[sizeof(ntfy_token) - 1] = '\0';
    }
+   runtime_secret_wipe(vault_token, sizeof(vault_token));
 
    return gateway_platform_register(&ntfy_adapter);
 }

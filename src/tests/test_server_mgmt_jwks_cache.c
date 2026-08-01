@@ -5,6 +5,7 @@
 #include "server/server_mgmt_jwks_cache.h"
 
 #include <assert.h>
+#include <fcntl.h>
 #include <openssl/evp.h>
 #include <pthread.h>
 #include <sqlite3.h>
@@ -102,6 +103,18 @@ int main(void)
       assert(server_mgmt_jwks_trust_bundle_load(trust_path, loaded, sizeof(loaded), &loaded_n) ==
              0);
       assert(loaded_n == bundle_n && !memcmp(loaded, bundle, bundle_n));
+      /* The exporter writes one framing newline. A directly redirected export
+       * is the documented file shape and must load as the canonical JSON bytes. */
+      int append_fd = open(trust_path, O_WRONLY | O_APPEND | O_CLOEXEC);
+      assert(append_fd >= 0 && write(append_fd, "\n", 1) == 1 && close(append_fd) == 0);
+      assert(server_mgmt_jwks_trust_bundle_load(trust_path, loaded, sizeof(loaded), &loaded_n) ==
+             0);
+      assert(loaded_n == bundle_n && !memcmp(loaded, bundle, bundle_n));
+      append_fd = open(trust_path, O_WRONLY | O_APPEND | O_CLOEXEC);
+      assert(append_fd >= 0 && write(append_fd, "\n", 1) == 1 && close(append_fd) == 0);
+      assert(server_mgmt_jwks_trust_bundle_load(trust_path, loaded, sizeof(loaded), &loaded_n) !=
+             0);
+      assert(truncate(trust_path, (off_t)bundle_n) == 0);
       assert(chmod(trust_path, 0664) == 0);
       assert(server_mgmt_jwks_trust_bundle_load(trust_path, loaded, sizeof(loaded), &loaded_n) !=
              0);

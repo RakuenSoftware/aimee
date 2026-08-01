@@ -6,8 +6,8 @@
 docker compose -f compose.server-managed.yaml up -d
 ```
 
-The browser wizard launches the KB and inference containers. This requires the host Docker socket,
-which gives the server Docker-host authority.
+The browser wizard launches the KB container. This requires the host Docker socket, which gives the
+server Docker-host authority.
 
 Use it for a trusted single-host install where browser-managed setup matters more than that larger
 boundary.
@@ -23,7 +23,17 @@ the safer default when the server must not control Docker.
 
 ## External PostgreSQL
 
-Set `AIMEE_DB2_URL` for the KB. The operator owns:
+Use `AIMEE_DB2_URL` only as first-boot input, seal it into the KB Vault with a
+disposable container, then remove it before creating the long-lived service:
+
+```bash
+export AIMEE_DB2_URL='postgresql://...'
+./scripts/aimee-compose-vault-bootstrap.sh -f compose.yaml kb
+unset AIMEE_DB2_URL
+docker compose -f compose.yaml up -d
+```
+
+The operator owns:
 
 - PostgreSQL availability and backups;
 - TLS and service identity;
@@ -31,15 +41,21 @@ Set `AIMEE_DB2_URL` for the KB. The operator owns:
 - connection limits and latency;
 - migration and restore testing.
 
-Only `aimee-kb` receives DB2 credentials.
+No long-lived server or KB container stores DB2 credentials in `Config.Env`.
+The disposable `--rm` bootstrap streams first-boot values over stdin, seals
+them synchronously, and exits before the service is created.
 
 ## Inference
 
-`aimee-llm` serves embedding, reranking, and synthesis. Select a CPU or GPU tier with the deployment
-settings. GPU models live in a persistent model volume; the CPU offline image may bake its model.
+The KB embeds in-process from weights baked into its image, so embedding needs no second container
+and no model download. Select the embedder in the wizard's Deploy topology step, or set
+`embedding_model`; point `AIMEE_EMBEDDER_URL` at your own endpoint for a wider model.
+
+Synthesis is external-only. `AIMEE_LLM_URL` defaults empty, so a deployment that wants synthesis
+supplies its own endpoint.
 
 The KB must report explicit degradation when a configured inference stage is unavailable. It cannot
-claim a dense, reranked, or synthesized result after silently skipping that stage.
+claim a dense or synthesized result after silently skipping that stage.
 
 ## Network ports
 
@@ -79,7 +95,8 @@ named volumes.
 - grant remote users individually and review revoked rows;
 - use the split stack if the Docker socket is not required;
 - keep delegates networkless by default;
-- move provider, git, database, and witness secrets into their owning vault/secret manager;
+- stream first-boot provider, git, database, and witness secrets into their owning Vault, then
+  recreate/start long-lived services without credential environment mappings;
 - ship WORM evidence to an off-host witness when host compromise is in scope;
 - alert on failed health, audit verification, witness lag, bus drops, database pressure, and agent
   reaping.

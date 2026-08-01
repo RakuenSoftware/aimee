@@ -62,6 +62,30 @@ func TestDefaultVerifyCommandUsesGitVerifyKeyValueSyntax(t *testing.T) {
 	}
 }
 
+func TestCommandVerifierSerializesAcrossInstances(t *testing.T) {
+	lockPath := filepath.Join(t.TempDir(), "verify.lock")
+	first := CommandVerifier{LockFile: lockPath}
+	second := CommandVerifier{LockFile: lockPath}
+
+	releaseFirst, err := first.acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	if _, err := second.acquire(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		releaseFirst()
+		t.Fatalf("second verifier lock error = %v, want deadline exceeded", err)
+	}
+	releaseFirst()
+
+	releaseSecond, err := second.acquire(context.Background())
+	if err != nil {
+		t.Fatalf("lock was not released: %v", err)
+	}
+	releaseSecond()
+}
+
 type temporaryFailureAgents struct {
 	mu       sync.Mutex
 	requests []DelegateRequest
@@ -147,6 +171,12 @@ type recordingAgents struct {
 	requests       []DelegateRequest
 	reviewResponse string
 	draftResponses []string
+}
+
+type fixedResponseAgents struct{ response string }
+
+func (a fixedResponseAgents) Delegate(context.Context, DelegateRequest) (DelegateResult, error) {
+	return DelegateResult{Response: a.response}, nil
 }
 
 type scriptedReviewAgents struct {
@@ -415,7 +445,7 @@ func TestNativeRoundtableFailsClosedWhenReviewerEvaluatesWrongStage(t *testing.T
 			agents := &recordingAgents{reviewResponse: `{` + prefix + `"original_request_alignment":{"status":"aligned","summary":"looks related"},"verdict":"approve","findings":[]}`}
 			runner := &NativeRunner{agents: agents, roundtables: configuredTestRoundtable(t)}
 			feedback, approvals, voters, _, unreachable := runner.runPanelRound(context.Background(), StepRequest{}, []panelSeat{{persona: "qa"}}, "review", "hash", "plan", 1)
-			if unreachable != "" || approvals != 0 || voters != 1 || len(feedback.Findings) != 1 {
+			if unreachable != "" || approvals != 0 || voters != 0 || len(feedback.Findings) != 1 {
 				t.Fatalf("stage mismatch accounting: approvals=%d voters=%d unreachable=%q feedback=%+v", approvals, voters, unreachable, feedback)
 			}
 			finding := feedback.Findings[0]
@@ -457,7 +487,7 @@ func TestStageMismatchCannotBeOverriddenByAnotherApproval(t *testing.T) {
 	}}
 	runner := &NativeRunner{agents: agents, roundtables: configuredTestRoundtable(t)}
 	feedback, approvals, voters, _, unreachable := runner.runPanelRound(context.Background(), StepRequest{}, []panelSeat{{persona: "qa"}, {persona: "security"}}, "review", "hash", "plan", 1)
-	if unreachable != "" || approvals != 1 || voters != 2 || len(feedback.Findings) != 1 || !strings.HasSuffix(feedback.Findings[0].ID, "-artifact-stage") {
+	if unreachable != "" || approvals != 1 || voters != 1 || len(feedback.Findings) != 1 || !strings.HasSuffix(feedback.Findings[0].ID, "-artifact-stage") {
 		t.Fatalf("mixed-stage panel could approve: approvals=%d voters=%d unreachable=%q feedback=%+v", approvals, voters, unreachable, feedback)
 	}
 }
@@ -503,6 +533,14 @@ func TestConfiguredRoundtableHonorsMinimumWhenASeatIsUnavailable(t *testing.T) {
 			}
 			if result.Roundtable == nil || !result.Roundtable.Degraded || result.Roundtable.ParticipantsTotal != 2 || result.Roundtable.ParticipantsUsed != tc.wantUsed || result.Roundtable.ParticipantsFailed != tc.wantFailed {
 				t.Fatalf("degraded participation was not preserved: %+v", result.Roundtable)
+			}
+			if len(result.Roundtable.ParticipantFailures) != tc.wantFailed {
+				t.Fatalf("participant failure diagnostics=%+v, want %d", result.Roundtable.ParticipantFailures, tc.wantFailed)
+			}
+			for _, failure := range result.Roundtable.ParticipantFailures {
+				if failure.Seat < 1 || failure.Persona == "" || failure.Category == "" || failure.Detail == "" {
+					t.Fatalf("incomplete participant failure diagnostic: %+v", failure)
+				}
 			}
 		})
 	}
@@ -684,12 +722,40 @@ func TestRoundtableStageGuidanceCoversEverySupportedStage(t *testing.T) {
 	tests := map[string]string{
 		"intent":      "acceptance criteria faithfully capture",
 		"plan":        "goal-only restatement",
-		"frozen_diff": "Required edits that are absent",
+		"frozen_diff": "negative or unavailable lookup evidence",
 	}
 	for stage, marker := range tests {
 		if normalized, ok := normalizeRoundtableStage(stage); !ok || normalized != stage || !strings.Contains(roundtableStageGuidance(normalized), marker) {
 			t.Fatalf("stage %q lacks its guidance marker %q", stage, marker)
 		}
+	}
+}
+
+func TestRoundtableRepairPreservesNonBlockingApprovalFindings(t *testing.T) {
+	prompt := panelResponseRepairPrompt("run", "hash", "frozen_diff", "invalid")
+	if !strings.Contains(prompt, "may carry suggestion or nit findings") || !strings.Contains(prompt, `"verdict":"approve|changes|blocked"`) || strings.Contains(prompt, "approve only with an empty findings array") {
+		t.Fatalf("repair prompt contradicts the panel verdict contract: %s", prompt)
+	}
+}
+
+func TestPanelFailureCategoryPreservesActionableCause(t *testing.T) {
+	tests := []struct {
+		name      string
+		err       error
+		transport bool
+		want      string
+	}{
+		{name: "deadline", err: context.DeadlineExceeded, transport: true, want: "deadline"},
+		{name: "capacity", err: errors.New("[aimee_err=concurrency_limit]"), transport: true, want: "capacity_backpressure"},
+		{name: "terminal", err: fmt.Errorf("%w: failed", ErrDelegateTerminal), transport: true, want: "delegate_terminal"},
+		{name: "malformed", err: errors.New("invalid character"), want: "malformed_after_repair"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := panelFailureCategory(tc.err, tc.transport); got != tc.want {
+				t.Fatalf("panelFailureCategory()=%q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -771,7 +837,7 @@ func TestNativeRunnerUsesCompleteArtifactsAndOnlyPositiveUIPins(t *testing.T) {
 		if request.Role == "review" && (!strings.Contains(request.Prompt, requestMarker) || strings.Contains(request.Prompt, "\n\nPROPOSAL:\n") || strings.Contains(request.Prompt, "complete proposal")) {
 			t.Fatal("roundtable did not frame the source as the original request")
 		}
-		if request.Role == "review" && (!strings.Contains(request.Prompt, "ARTIFACT STAGE: frozen_diff") || !strings.Contains(request.Prompt, "Required edits that are absent") || !strings.Contains(request.Prompt, "substitute a different goal or deliverable")) {
+		if request.Role == "review" && (!strings.Contains(request.Prompt, "ARTIFACT STAGE: frozen_diff") || !strings.Contains(request.Prompt, "Required edits that are absent") || !strings.Contains(request.Prompt, "substitute a different goal or deliverable") || !strings.Contains(request.Prompt, "patch does not embed those logs or metadata")) {
 			t.Fatal("roundtable did not make original-request alignment stage-aware")
 		}
 		if request.Persona == "security" && request.Delegate == "kimi" {
@@ -809,6 +875,88 @@ func TestDirectRoundtableReviewReturnsAndVerifiesRunArtifactIdentity(t *testing.
 	for _, request := range agents.requests {
 		if !strings.Contains(request.Prompt, "DIRECT_ARTIFACT_MARKER") {
 			t.Fatalf("review request received another run's artifact: %+v", request)
+		}
+	}
+}
+
+func TestNativeRunnerSplitAcceptsManagedChangeIntentBinding(t *testing.T) {
+	runner := &NativeRunner{agents: fixedResponseAgents{response: `{"schema_version":1,"packets":[{"packet_id":"p1","summary":"implement feature","target_blocks":["implement"],"dependencies":[],"acceptance_criteria":["feature exists"]}]}`}}
+	intent := []byte(`{"schema_version":1,"status":"unconfirmed","summary":"implement feature","rationale":"proposal","acceptance_criteria":["feature exists"]}`)
+	result, err := runner.structured(context.Background(), StepRequest{
+		WorkItem: db1.WorkItem{Repo: "/repo"},
+		Inputs:   map[string]wfe.Artifact{"intent": {Type: "intent", Content: intent, Hash: wfe.Hash(intent)}},
+	}, "packets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != StepAdvanced || result.ArtifactType != "plan" {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestNativeRunnerSplitHonorsExplicitSingleSliceWithoutDelegating(t *testing.T) {
+	plan := "# Plan\n\nAdd the feature-branch trigger and change nothing else."
+	proposal := "# Proposal: run CI on slice sub-PRs\n\n- **State:** pending — single slice.\n\n## Recommendation\n\nAdd `aimee/feat/**` to the existing trigger."
+	runner := &NativeRunner{agents: noRosterAgents{}}
+	result, err := runner.structured(context.Background(), StepRequest{
+		WorkItem: db1.WorkItem{Repo: "/repo"},
+		Proposal: proposal,
+		Inputs: map[string]wfe.Artifact{"plan": {
+			Type: "plan", Content: []byte(plan), Hash: wfe.Hash([]byte(plan)),
+		}},
+	}, "packets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != StepAdvanced || result.ArtifactType != "plan" {
+		t.Fatalf("result=%+v", result)
+	}
+	var packetPlan struct {
+		Packets []struct {
+			PacketID        string `json:"packet_id"`
+			Summary         string `json:"summary"`
+			OriginalRequest string `json:"original_request"`
+			ApprovedPlan    string `json:"approved_plan"`
+		} `json:"packets"`
+	}
+	if err := json.Unmarshal([]byte(result.Artifact), &packetPlan); err != nil {
+		t.Fatal(err)
+	}
+	if len(packetPlan.Packets) != 1 {
+		t.Fatalf("single-slice request produced %d packets: %s", len(packetPlan.Packets), result.Artifact)
+	}
+	packet := packetPlan.Packets[0]
+	if packet.PacketID != "p1" || packet.Summary != "Run CI on slice sub-PRs" ||
+		packet.OriginalRequest != proposal || packet.ApprovedPlan != plan {
+		t.Fatalf("single packet lost authoritative scope: %+v", packet)
+	}
+}
+
+func TestNativeRunnerSplitPromptCarriesOriginalRequestAndRejectsFollowUpPackets(t *testing.T) {
+	agents := &recordingAgents{draftResponses: []string{`{"schema_version":1,"packets":[{"packet_id":"p1","summary":"implement the requested change","target_blocks":["implement"],"dependencies":[],"acceptance_criteria":["requested change exists"]}]}`}}
+	runner := &NativeRunner{agents: agents}
+	plan := []byte("# Plan\n\nImplement the requested change.")
+	_, err := runner.structured(context.Background(), StepRequest{
+		WorkItem: db1.WorkItem{Repo: "/repo"},
+		Proposal: "# Proposal\n\nImplement only the requested change.",
+		Inputs: map[string]wfe.Artifact{"plan": {
+			Type: "plan", Content: plan, Hash: wfe.Hash(plan),
+		}},
+	}, "packets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(agents.requests) != 1 {
+		t.Fatalf("delegate requests=%d, want 1", len(agents.requests))
+	}
+	prompt := agents.requests[0].Prompt
+	for _, required := range []string{
+		"ORIGINAL REQUEST", "Implement only the requested change.",
+		"APPROVED PLAN", "Only create packets for repository changes",
+		"post-adoption measurements", "acceptance checks are criteria, not packets",
+	} {
+		if !strings.Contains(prompt, required) {
+			t.Fatalf("split prompt omitted %q:\n%s", required, prompt)
 		}
 	}
 }
@@ -868,6 +1016,9 @@ func TestPanelCapacitySeatsHaveDistinctDurableJobKeys(t *testing.T) {
 		if !request.ProvidedTarget {
 			t.Fatalf("roundtable request did not declare its inline artifact: %+v", request)
 		}
+		if request.MaxTurnsCap != roundtableDelegateMaxTurnsCap {
+			t.Fatalf("roundtable request is not turn-bounded: %+v", request)
+		}
 		key := delegateJobKey(request)
 		if seen[key] {
 			t.Fatalf("capacity seats collapsed onto durable key %q: %+v", key, agents.requests)
@@ -894,7 +1045,7 @@ func TestPanelRepairsMalformedJSONOnSameParticipantOnce(t *testing.T) {
 	if repair.Participant != "opaque-seat-token" || repair.Delegate != "" {
 		t.Fatalf("repair did not preserve opaque participant without rerouting: %+v", repair)
 	}
-	if !repair.Tools || !repair.ProvidedTarget || repair.ArtifactStage != "plan" || !strings.HasSuffix(repair.DurableSlot, ":repair:1") {
+	if !repair.Tools || !repair.ProvidedTarget || repair.MaxTurnsCap != roundtableDelegateMaxTurnsCap || repair.ArtifactStage != "plan" || !strings.HasSuffix(repair.DurableSlot, ":repair:1") {
 		t.Fatalf("repair request did not preserve tool-capable transport as a bounded continuation: %+v", repair)
 	}
 	if !strings.Contains(repair.Prompt, "Preserve its analysis and findings") || !strings.Contains(repair.Prompt, "exactly one JSON object") {
@@ -1830,7 +1981,7 @@ func TestReviewersAreToldBlockedIsAboutTheRequestNotTheArtifact(t *testing.T) {
 type conflictForge struct{}
 
 func (conflictForge) Push(context.Context, string, string, string) error { return nil }
-func (conflictForge) Open(context.Context, string, string, string, string, string) (PullRequest, error) {
+func (conflictForge) Open(context.Context, string, string, string, string, PullRequestSpec) (PullRequest, error) {
 	return PullRequest{}, nil
 }
 func (conflictForge) CI(context.Context, string, string) (CIState, error) { return CIPassed, nil }
@@ -1843,12 +1994,41 @@ func (conflictForge) Merge(context.Context, string, string, string) error {
 type raceForge struct{}
 
 func (raceForge) Push(context.Context, string, string, string) error { return nil }
-func (raceForge) Open(context.Context, string, string, string, string, string) (PullRequest, error) {
+func (raceForge) Open(context.Context, string, string, string, string, PullRequestSpec) (PullRequest, error) {
 	return PullRequest{}, nil
 }
 func (raceForge) CI(context.Context, string, string) (CIState, error) { return CIPassed, nil }
 func (raceForge) Merge(context.Context, string, string, string) error {
 	return errors.New("forge resource 405: Base branch was modified. Review and try the merge again.")
+}
+
+// A final/root PR is a human handoff, never an autonomous workflow step. Keep
+// this guard independent of workflow YAML so no definition change can grant the
+// engine authority to merge into the repository base.
+func TestMergeStepRejectsRootFinalPR(t *testing.T) {
+	root := t.TempDir()
+	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: "wi_root", Repo: root,
+		ProposalPath: "p", WorkflowName: "build-e2e", WorkflowVersion: "v",
+		StartStage: "merge"}); err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.WorkItem(ctx, "wi_root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &NativeRunner{db: store, forge: conflictForge{}}
+	_, err = runner.merge(ctx, StepRequest{WorkItem: item,
+		Inputs: map[string]wfe.Artifact{"pr": {Type: "pr",
+			Content: []byte(`{"ref":"https://github.com/acme/repo/pull/42"}`)}}})
+	if err == nil || !strings.Contains(err.Error(), "only for a slice") {
+		t.Fatalf("root merge error = %v, want autonomous slice-only rejection", err)
+	}
 }
 
 // The merge step must distinguish a terminal content conflict from a winnable
@@ -1983,6 +2163,63 @@ func TestBranchHasWorkOverBaseSeesCommitsFromEarlierAttempts(t *testing.T) {
 	// An unresolvable base must stay strict rather than excuse an empty slice.
 	if branchHasWorkOverBase(ctx, repo, "wi_does_not_exist") {
 		t.Fatal("an unresolved base must not count as work")
+	}
+}
+
+func TestCommitChangesDropsCoreDumpAndRejectsGiantBlob(t *testing.T) {
+	repo := t.TempDir()
+	run := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return string(out)
+	}
+	run("init", "-b", "testing")
+	if err := os.WriteFile(filepath.Join(repo, "README"), []byte("seed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "README")
+	run("commit", "-m", "seed")
+
+	if err := os.WriteFile(filepath.Join(repo, "impl.txt"), []byte("done\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "core.12345"), []byte("crash"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := commitChanges(context.Background(), repo, "impl"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "core.12345")); !os.IsNotExist(err) {
+		t.Fatalf("core dump survived autonomous commit: %v", err)
+	}
+	if tracked := strings.TrimSpace(run("ls-files", "core.12345")); tracked != "" {
+		t.Fatalf("core dump was committed: %q", tracked)
+	}
+
+	giant := filepath.Join(repo, "giant.bin")
+	f, err := os.OpenFile(giant, os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(maxDirectGitBlobBytes + 1); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	err = commitChanges(context.Background(), repo, "giant")
+	if err == nil || !strings.Contains(err.Error(), "100 MiB") {
+		t.Fatalf("giant blob error = %v", err)
+	}
+	if _, statErr := os.Stat(giant); statErr != nil {
+		t.Fatalf("rejected blob should remain for diagnosis: %v", statErr)
 	}
 }
 

@@ -41,7 +41,7 @@ static cJSON *mem_rpc_unwrap(char *resp_json, const char *what)
 
 void mem_embed(app_ctx_t *ctx, int argc, char **argv)
 {
-   const char *embed_cmd = config_embedding_command(&s_mem_cfg, NULL);
+   const char *embed_cmd = config_embedding_command_current(NULL);
 
    int all = 0;
    int64_t single_id = 0;
@@ -65,7 +65,10 @@ void mem_embed(app_ctx_t *ctx, int argc, char **argv)
       return;
    }
 
-   const char *embed_ver = s_mem_cfg.embedding_model[0] ? s_mem_cfg.embedding_model : embed_cmd;
+   /* Copied out: held alongside embed_cmd through the work below. */
+   char embed_model[CONFIG_COPY_MAX];
+   config_embedding_model_copy(embed_model, sizeof(embed_model));
+   const char *embed_ver = embed_model[0] ? embed_model : embed_cmd;
    cJSON *resp = mem_rpc_unwrap(kb_client_memory_embed_json(1, 0, embed_ver, embed_cmd),
                                 "memory embed failed");
    int success = 0, fail = 0;
@@ -197,16 +200,14 @@ void mem_reembed(app_ctx_t *ctx, int argc, char **argv)
    }
 
    /* --start */
-   const char *embed_cmd = config_embedding_command(&s_mem_cfg, NULL);
+   const char *embed_cmd = config_embedding_command_current(NULL);
    char ver_buf[256];
    if (target_version)
       snprintf(ver_buf, sizeof(ver_buf), "%s", target_version);
    else
    {
-      config_t rcfg;
-      config_load(&rcfg);
-      if (rcfg.embedding_model[0])
-         snprintf(ver_buf, sizeof(ver_buf), "%s", rcfg.embedding_model);
+      if (config_embedding_model()[0])
+         snprintf(ver_buf, sizeof(ver_buf), "%s", config_embedding_model());
       else
          snprintf(ver_buf, sizeof(ver_buf), "%s", embed_cmd);
    }
@@ -267,15 +268,11 @@ cJSON *memory_score_parts_to_json(const memory_score_parts_t *parts)
    jo_add_num(j, "surprise", parts->surprise);
    jo_add_num(j, "pagerank", parts->pagerank);
    jo_add_num(j, "confidence", parts->confidence);
-   if (parts->cross_encoder != 0.0)
-      jo_add_num(j, "cross_encoder", parts->cross_encoder);
    if (parts->hybrid_total != 0.0 || parts->blended_total != 0.0)
    {
       jo_add_num(j, "hybrid_total", parts->hybrid_total);
       jo_add_num(j, "blended_total", parts->blended_total);
    }
-   if (parts->rerank_mix > 0.0)
-      jo_add_num(j, "rerank_mix", parts->rerank_mix);
    /* Phase 6 fusion score parts (provisional; only emitted when non-zero). */
    if (parts->graph_score != 0.0)
       jo_add_num(j, "graph_score", parts->graph_score);
@@ -380,22 +377,12 @@ void mem_diagnose(app_ctx_t *ctx, int argc, char **argv)
    for (int i = 0; i < count; i++)
    {
       printf("[%d] #%lld %s\n", i + 1, (long long)rows[i].memory.id, rows[i].memory.key);
-      if (rows[i].parts.cross_encoder != 0.0)
-         printf("    total=%.3f hybrid=%.3f cross_encoder=%.3f lexical=%.3f coverage=%.3f "
-                "entity=%.3f temporal=%.3f evidence=%.3f semantic=%.3f state=%.3f intent=%.3f "
-                "salience=%.3f surprise=%.3f pagerank=%.3f\n",
-                rows[i].parts.total, rows[i].parts.total - rows[i].parts.cross_encoder,
-                rows[i].parts.cross_encoder, rows[i].parts.lexical, rows[i].parts.coverage,
-                rows[i].parts.entity, rows[i].parts.temporal, rows[i].parts.evidence,
-                rows[i].parts.semantic, rows[i].parts.state, rows[i].parts.intent,
-                rows[i].parts.salience, rows[i].parts.surprise, rows[i].parts.pagerank);
-      else
-         printf("    total=%.3f lexical=%.3f coverage=%.3f entity=%.3f temporal=%.3f evidence=%.3f "
-                "semantic=%.3f state=%.3f intent=%.3f salience=%.3f surprise=%.3f pagerank=%.3f\n",
-                rows[i].parts.total, rows[i].parts.lexical, rows[i].parts.coverage,
-                rows[i].parts.entity, rows[i].parts.temporal, rows[i].parts.evidence,
-                rows[i].parts.semantic, rows[i].parts.state, rows[i].parts.intent,
-                rows[i].parts.salience, rows[i].parts.surprise, rows[i].parts.pagerank);
+      printf("    total=%.3f lexical=%.3f coverage=%.3f entity=%.3f temporal=%.3f evidence=%.3f "
+             "semantic=%.3f state=%.3f intent=%.3f salience=%.3f surprise=%.3f pagerank=%.3f\n",
+             rows[i].parts.total, rows[i].parts.lexical, rows[i].parts.coverage,
+             rows[i].parts.entity, rows[i].parts.temporal, rows[i].parts.evidence,
+             rows[i].parts.semantic, rows[i].parts.state, rows[i].parts.intent,
+             rows[i].parts.salience, rows[i].parts.surprise, rows[i].parts.pagerank);
       if (trace_graph)
          cmd_memory_print_graph_trace(rows[i].memory.key);
    }
@@ -539,14 +526,17 @@ typedef struct
  * call it, and parse the synthesis response.  Returns 0 on success. */
 static int reflect_call_synthesis_agent(const char *query, const memory_t *facts, int count,
                                         int conflict_a, int conflict_b, int nconflicts,
-                                        const config_t *cfg, reflect_synthesis_result_t *out)
+                                        reflect_synthesis_result_t *out)
 {
    (void)conflict_a;
    (void)conflict_b;
    memset(out, 0, sizeof(*out));
    out->confidence = 0.0;
 
-   if (!cfg || !cfg->memory_cognify_enabled || !cfg->memory_cognify_command[0])
+   /* Copied out: handed to platform_exec_pipe well below, past other reads. */
+   char cognify_command[CONFIG_COPY_MAX];
+   config_memory_cognify_command_copy(cognify_command, sizeof(cognify_command));
+   if (!config_memory_cognify_enabled() || !cognify_command[0])
       return -1;
 
    /* Build memories array */
@@ -592,8 +582,7 @@ static int reflect_call_synthesis_agent(const char *query, const memory_t *facts
 
    char *resp = NULL;
    size_t resp_len = 0;
-   int rc = platform_exec_pipe(cfg->memory_cognify_command, input_str, strlen(input_str), &resp,
-                               &resp_len);
+   int rc = platform_exec_pipe(cognify_command, input_str, strlen(input_str), &resp, &resp_len);
    free(input_str);
    if (rc != 0 || !resp || resp_len == 0)
    {
@@ -667,7 +656,7 @@ void mem_reflect(app_ctx_t *ctx, int argc, char **argv)
    if (scope_str == NULL)
    {
       /* Auto: use workspace/project from config if available, else NULL */
-      const char *workspace = (s_mem_cfg.workspace_count > 0) ? s_mem_cfg.workspaces[0] : NULL;
+      const char *workspace = (config_workspace_count() > 0) ? config_workspaces(0) : NULL;
       count = kb_client_memory_find_facts_visible(query, workspace, NULL, limit, facts,
                                                   REFLECT_MAX_RESULTS);
    }
@@ -720,13 +709,11 @@ void mem_reflect(app_ctx_t *ctx, int argc, char **argv)
    int have_synthesis = 0;
    if (want_synthesize)
    {
-      config_t syn_cfg;
-      if (config_load(&syn_cfg) == 0)
+      if (config_present())
       {
          int ca = nconflicts > 0 ? conflicts[0].a : -1;
          int cb = nconflicts > 0 ? conflicts[0].b : -1;
-         if (reflect_call_synthesis_agent(query, facts, count, ca, cb, nconflicts, &syn_cfg,
-                                          &synthesis) == 0)
+         if (reflect_call_synthesis_agent(query, facts, count, ca, cb, nconflicts, &synthesis) == 0)
          {
             have_synthesis = 1;
             /* If synthesis produced a rule proposal and --draft-rule was set but
@@ -1245,11 +1232,7 @@ void mem_calibrate(app_ctx_t *ctx, int argc, char **argv)
       memory_write_profile_file(write_path, &best);
       if (apply_config)
       {
-         config_t cfg;
-         if (config_load(&cfg) != 0)
-            fatal("failed to load config for apply-config");
-         snprintf(cfg.memory_weight_profile, sizeof(cfg.memory_weight_profile), "%s", write_path);
-         if (config_save(&cfg) != 0)
+         if (config_set_memory_weight_profile(write_path) != 0)
             fatal("failed to save config for apply-config");
       }
    }
@@ -1443,10 +1426,8 @@ static void mem_benchmark_resolve_weight_profile(int argc, char **argv, char *ac
          snprintf(active, active_len, "%s", env_profile);
       return;
    }
-
-   config_t cfg;
-   if (config_load(&cfg) == 0 && cfg.memory_weight_profile[0] && active && active_len > 0)
-      snprintf(active, active_len, "%s", cfg.memory_weight_profile);
+   if (config_present() && config_memory_weight_profile()[0] && active && active_len > 0)
+      snprintf(active, active_len, "%s", config_memory_weight_profile());
 }
 
 static void mem_benchmark_restore_weight_profile(const char *previous)
@@ -1614,7 +1595,6 @@ void mem_benchmark(app_ctx_t *ctx, int argc, char **argv)
       const char *corpus_path = opt_get(&opts, "corpus");
       const char *baseline_path = opt_get(&opts, "baseline");
       int update_baseline = opt_get_flag(&opts, "update-baseline");
-      int compare_rerank = opt_get_flag(&opts, "compare-rerank");
       if (!corpus_path)
          corpus_path = "tests/eval/memory_retrieval_corpus.json";
       if (!baseline_path)
@@ -1628,22 +1608,6 @@ void mem_benchmark(app_ctx_t *ctx, int argc, char **argv)
       mem_eval_scores_t scores;
       mem_eval_latency_t latency;
       mem_eval_run_with_latency(corpus_cases, n_corpus, &scores, &latency);
-
-      /* Per-stage delta: re-run with the cross-encoder force-disabled so
-       * operators can see the quality / latency contribution of rerank
-       * in isolation.  Other stages (hybrid retrieval, lexical + semantic
-       * expansion) remain enabled for both runs — rerank is the only
-       * toggle. */
-      mem_eval_scores_t scores_no_rerank;
-      mem_eval_latency_t latency_no_rerank;
-      int have_no_rerank = 0;
-      if (compare_rerank)
-      {
-         platform_setenv("AIMEE_MEMORY_RERANK_FORCE_OFF", "1");
-         mem_eval_run_with_latency(corpus_cases, n_corpus, &scores_no_rerank, &latency_no_rerank);
-         platform_setenv("AIMEE_MEMORY_RERANK_FORCE_OFF", "");
-         have_no_rerank = 1;
-      }
 
       mem_eval_close_temp_db();
 
@@ -1664,36 +1628,6 @@ void mem_benchmark(app_ctx_t *ctx, int argc, char **argv)
       snprintf(title, sizeof(title), "Memory Benchmark — corpus: %s", corpus_path);
       mem_print_eval_report(title, &scores, &latency);
       mem_benchmark_print_weight_profile(benchmark_weight_profile);
-      if (have_no_rerank)
-      {
-         char no_rerank_title[1024];
-         snprintf(no_rerank_title, sizeof(no_rerank_title),
-                  "Memory Benchmark — corpus (rerank OFF): %s", corpus_path);
-         mem_print_eval_report(no_rerank_title, &scores_no_rerank, &latency_no_rerank);
-         printf("\n# Per-stage delta (rerank on vs off)\n");
-         printf("  MRR       : %+0.4f  (on %.4f, off %.4f)\n", scores.mrr - scores_no_rerank.mrr,
-                scores.mrr, scores_no_rerank.mrr);
-         printf("  recall@5  : %+0.4f  (on %.4f, off %.4f)\n",
-                scores.recall_5 - scores_no_rerank.recall_5, scores.recall_5,
-                scores_no_rerank.recall_5);
-         printf("  recall@10 : %+0.4f  (on %.4f, off %.4f)\n",
-                scores.recall_10 - scores_no_rerank.recall_10, scores.recall_10,
-                scores_no_rerank.recall_10);
-         printf("  ndcg@5    : %+0.4f  (on %.4f, off %.4f)\n",
-                scores.ndcg_5 - scores_no_rerank.ndcg_5, scores.ndcg_5, scores_no_rerank.ndcg_5);
-         printf("  ndcg@10   : %+0.4f  (on %.4f, off %.4f)\n",
-                scores.ndcg_10 - scores_no_rerank.ndcg_10, scores.ndcg_10,
-                scores_no_rerank.ndcg_10);
-         printf("  p50_ms    : %+0.2f  (on %.2f, off %.2f)\n",
-                latency.p50_ms - latency_no_rerank.p50_ms, latency.p50_ms,
-                latency_no_rerank.p50_ms);
-         printf("  p95_ms    : %+0.2f  (on %.2f, off %.2f)\n",
-                latency.p95_ms - latency_no_rerank.p95_ms, latency.p95_ms,
-                latency_no_rerank.p95_ms);
-         printf("  p99_ms    : %+0.2f  (on %.2f, off %.2f)\n",
-                latency.p99_ms - latency_no_rerank.p99_ms, latency.p99_ms,
-                latency_no_rerank.p99_ms);
-      }
       if (update_baseline)
          printf("Baseline updated: %s\n", baseline_path);
       else

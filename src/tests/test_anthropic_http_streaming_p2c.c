@@ -357,6 +357,26 @@ int config_load(config_t *cfg)
    return 0;
 }
 
+/* Accessor stubs: the production seam moved from config_load to per-field
+ * accessors. These mirror what the stub above produced — prevent_subagents
+ * tracks g_prevent, pin_model was left zeroed — so assertions are unchanged. */
+int config_gateway_prevent_subagents(void)
+{
+   return g_prevent;
+}
+
+int config_gateway_pin_model(void)
+{
+   return 0;
+}
+
+/* Same migration for the economizer seam: the config_load stub above leaves the
+ * economizer zeroed, so the live-config form must report OFF. */
+int econ_mode_current(void)
+{
+   return ECON_MODE_OFF;
+}
+
 /* Minimal guardrails_canonical_tool_name stub: maps Task/Agent/spawn_agent to
  * "Subagent" (matches the production canonicalization used by
  * gateway_policy.c via the real guardrails_orchestrator.o). */
@@ -740,5 +760,24 @@ int main(void)
    test_streaming_openai_police_on_no_tool_use_passthrough();
    test_streaming_openai_policy_off_is_byte_neutral();
    printf("anthropic_http_streaming_p2c: OK\n");
+   return 0;
+}
+
+/* anthropic_http.c now asks config_present() + per-field accessors instead of
+ * loading a config_t. These reproduce exactly what the config_load stub they
+ * replaced produced: config readable, modules unspecified (-1) so the env
+ * default decides, economizer on, and the P5 anthropic-inject opt-in off. */
+int config_present(void)
+{
+   return 1;
+}
+
+int config_module_governance(void)
+{
+   return -1;
+}
+
+int config_ingress_preinject_anthropic_enabled(void)
+{
    return 0;
 }

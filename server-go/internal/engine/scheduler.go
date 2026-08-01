@@ -49,6 +49,10 @@ var schedulerTransientPauses = []transientPause{
 	{reason: "panel_unreachable", backoff: 60 * time.Second},
 	{reason: "roundtable_discussion", backoff: 60 * time.Second},
 	{reason: "roundtable_chairman", backoff: 60 * time.Second},
+	// A generated slice rechecks the durable state of its declared predecessors.
+	// This is scheduler-owned waiting, not an operator decision; once the prior
+	// slice merges and reaches accepted the dependent slice becomes runnable.
+	{reason: "dependency_pending", backoff: 30 * time.Second},
 }
 
 func (s *Scheduler) SetConcurrencySource(source func() int) {

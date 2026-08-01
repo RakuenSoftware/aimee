@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "config.h"
@@ -17,24 +18,36 @@ static void eq(const char *got, const char *want, const char *label)
    }
 }
 
+/* tool_condense_enabled reads live config now (via econ_preset_current). Publish
+ * the values through the config SNAPSHOT rather than a config file: writing YAML
+ * would drag the whole parse closure (config_sections, config_memory, yaml.o, ...)
+ * into what is deliberately a minimal-link test, whereas config_snapshot_init is
+ * the supported publish path and touches no disk. The tier resolution table is
+ * covered separately, without I/O, in test_config_economizer; what matters here
+ * is that the lever tracks econ_preset's command_filter. */
+static void publish_econ(int mode, int module_economizer)
+{
+   static config_t cfg;
+   memset(&cfg, 0, sizeof cfg);
+   cfg.economizer_mode = mode;
+   cfg.module_economizer = module_economizer;
+   config_snapshot_init(&cfg);
+}
+
 int main(void)
 {
    printf("tool-condense: ");
 
    /* ---- enable gate ---- */
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof cfg);
-      cfg.module_economizer = -1;               /* unspecified -> tier decides */
-      assert(tool_condense_enabled(&cfg) == 0); /* tier OFF (memset) -> off */
-      cfg.economizer_mode = ECON_MODE_SAFE;
-      assert(tool_condense_enabled(&cfg) == 0); /* SAFE is lossless only */
-      cfg.economizer_mode = ECON_MODE_OFF;      /* off tier kills the lever */
-      assert(tool_condense_enabled(&cfg) == 0);
-      cfg.economizer_mode = ECON_MODE_AGGRESSIVE;
-      cfg.module_economizer = 0; /* modules.economizer:false hard-kills it */
-      assert(tool_condense_enabled(&cfg) == 0);
-      assert(tool_condense_enabled(NULL) == 0);
+      publish_econ(ECON_MODE_OFF, -1);
+      assert(tool_condense_enabled() == 0); /* off tier -> lever off */
+      publish_econ(ECON_MODE_SAFE, -1);
+      assert(tool_condense_enabled() == 0); /* SAFE is lossless only */
+      publish_econ(ECON_MODE_AGGRESSIVE, -1);
+      assert(tool_condense_enabled() == 1); /* AGGRESSIVE turns the lever on */
+      publish_econ(ECON_MODE_AGGRESSIVE, 0);
+      assert(tool_condense_enabled() == 0); /* modules.economizer:false hard-kills it */
    }
 
    /* ---- tc_strip_noise: ANSI escapes removed ---- */
@@ -259,10 +272,9 @@ int main(void)
       memset(&cfg, 0, sizeof cfg);
       cfg.module_economizer = -1;
       cfg.economizer_mode = ECON_MODE_SAFE;
-      assert(tool_condense_apply(&cfg, "pytest -q", 0, "one test passed\n", "/tmp", NULL) == NULL);
+      assert(tool_condense_apply("pytest -q", 0, "one test passed\n", "/tmp", NULL) == NULL);
       cfg.economizer_mode = ECON_MODE_AGGRESSIVE;
-      char *condensed =
-          tool_condense_apply(&cfg, "pytest -q", 0, "one test passed\n", "/tmp", NULL);
+      char *condensed = tool_condense_apply("pytest -q", 0, "one test passed\n", "/tmp", NULL);
       free(condensed);
    }
 
