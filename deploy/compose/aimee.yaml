@@ -1,13 +1,12 @@
-# aimee split stack via docker-compose (aimee-llm + self-contained aimee-kb +
-# aimee-server). Runs on Docker or any Docker-API daemon (e.g. LXC2Docker).
+# aimee split stack via Docker Compose (self-contained aimee-kb + aimee-server).
+# Runs on Docker or any Docker-API daemon (for example, LXC2Docker).
 #
-#   docker compose -f deploy/compose/aimee.yaml up -d                 # CPU LLM
-#   docker compose -f deploy/compose/aimee.yaml -f deploy/compose/aimee.gpu.yaml up -d   # GPU LLM
+#   docker compose -f deploy/compose/aimee.yaml up -d
 #
-# The kb embeds in-container (bekko-a25m, baked into the image) and calls
-# SYNTHESIS_ENDPOINT only for synthesis; see docs/KB_LLM_BACKENDS.md and
-# docs/SYNTHESIS_MODELS.md. There is no reranking model — it was measured out of
-# the stack. Server /v1 on :8740, kb /v1 on :8741, webchat on :8443.
+# This single-KB profile declares no standalone inference service. Embedding and
+# synthesis are roles of the KB: the image runs them in this container, or the KB
+# points at remote endpoints. Server /v1 is on :8740, KB /v1 is on :8741, and the
+# browser is on :8443. See docs/KB_LLM_BACKENDS.md and docs/SYNTHESIS_MODELS.md.
 name: aimee
 services:
   aimee-kb:
@@ -24,10 +23,12 @@ services:
       AIMEE_WORKSPACES_DIR: /var/lib/aimee-workspaces
       # External DB2 credentials are streamed into the KB Vault by the
       # disposable Compose helper; never persist them in Config.Env.
-      # Synthesis only. The kb embeds in-container; there is no reranker.
+      # Remote synthesis endpoint for a deployment that places synthesis externally.
+      # Empty leaves synthesis off, which is supported. An INTERNAL placement needs
+      # no value here at all: a *-llm image bakes the model and the entrypoint points
+      # this at loopback itself.
       SYNTHESIS_ENDPOINT: ${SYNTHESIS_ENDPOINT:-}
-      # The bundled synthesis model on a *-llm image: the entrypoint fetches it and
-      # points SYNTHESIS_ENDPOINT at loopback. Blank elsewhere.
+      # Which model an internal placement runs. Set by the image, not usually by hand.
       SYNTHESIS_MODEL: ${SYNTHESIS_MODEL:-}
       # The wizard's embedder choice, and the endpoint for an external one. The kb
       # MUST receive both: `aimee config deploy-env` emits them, and without them
@@ -44,11 +45,10 @@ services:
       # know.
       EMBEDDER_DIMS: ${EMBEDDER_DIMS:-}
       AIMEE_KB_HTTP_BIND: "1"
-      # The curator synth sidecar (curator-extract.py) reads the same
-      # SYNTHESIS_ENDPOINT above. It used to need its own LLM_ENDPOINT, defaulted to
-      # a retired container this file never even defined, so every fresh deployment
-      # aimed the sidecar at a dead host while the kb used AIMEE_LLM_URL. One
-      # endpoint, one spelling.
+      # The curator adapter reads the same SYNTHESIS_ENDPOINT above. It used to need
+      # its own LLM_ENDPOINT, defaulted to a container this file never defined, so a
+      # fresh deployment aimed the adapter at a dead host while the KB used
+      # AIMEE_LLM_URL. One endpoint, one spelling.
     command: ["--http-port=8741"]
     ports:
       - "8741:8741"

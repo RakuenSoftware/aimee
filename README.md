@@ -40,9 +40,10 @@ docker compose -f compose.server-managed.yaml up -d
 docker compose -f compose.server-managed.yaml logs aimee-server
 ```
 
-The log prints a one-time dashboard login. Open <https://localhost:8443>, sign in, and the setup
-wizard covers the account, provider, knowledge base, and workspaces. Its last step starts `aimee-kb`
-with PostgreSQL 18, pgvector and pgvectorscale inside the container.
+The log prints a generated, one-time dashboard login. Open <https://localhost:8443>, sign in, and
+the setup wizard covers the account, provider, knowledge base, deployment, and workspaces. After the
+numbered steps, the summary can start `aimee-kb` with PostgreSQL 18, pgvector, and pgvectorscale
+inside the container.
 
 The managed compose file mounts the Docker socket, which gives aimee-server control of the host
 Docker daemon. Use the split stack if you do not want that.
@@ -57,7 +58,7 @@ Start at the [documentation index](docs/README.md).
 | Document | Use it for |
 |----------|------------|
 | [Quickstart](docs/QUICKSTART.md) | Install, enroll, verify. |
-| [What's new](docs/WHATS_NEW.md) | Everything 0.3.0 changed, and what it removed. |
+| [What's new](docs/WHATS_NEW.md) | Everything 0.3.1 changed, and what it removed. |
 | [Upgrading](docs/UPGRADING.md) | Move from v0.2.192. One-way, so read it first. |
 | [Manual](MANUAL.md) | Day-to-day use and operations. |
 | [Architecture](docs/ARCHITECTURE.md) | Processes, storage, trust, request flow. |

@@ -1032,7 +1032,7 @@ components:
           type: boolean
         displaced:
           type: object
-          description: Present when fence_replaced — the displaced owner's ids.
+          description: Present when fence_replaced. Contains the displaced owner's IDs.
           properties:
             generation:
               type: string
@@ -1041,7 +1041,7 @@ components:
         stores:
           type: object
           description: >
-            Per-store outcome, in fan-out order — a deleted-row count on
+            Per-store outcome in fan-out order. Each value is a deleted-row count on
             success (0 for primitives that report no count) or
             {"error": "..."} on failure.
           additionalProperties: true
@@ -1068,7 +1068,7 @@ components:
         fence:
           type: string
           description: >
-            Present when refreshed is false — the current fence as
+            Present when refreshed is false. Contains the current fence as
             "generation purge_id" (empty when no fence exists).
 
     MaintenancePurgeClearResponse:
@@ -1082,7 +1082,7 @@ components:
         fence:
           type: string
           description: >
-            Present when cleared is false — the current fence as
+            Present when cleared is false. Contains the current fence as
             "generation purge_id" (empty when no fence exists).
 
     PipelineStatusResponse:
@@ -1674,7 +1674,7 @@ paths:
         Sets a single pipeline config key and persists it to aimee.yaml; the
         curator picks it up on its next config load. The key must be a stage
         enable flag advertised by the live registry, or one of the pipeline's own
-        keys (stage order, user presets, custom stages) — anything else is 403, so
+        keys (stage order, user presets, custom stages). Anything else is 403, so
         this route cannot reach arbitrary config. Requires a console-admin
         credential.
       requestBody:
@@ -1727,8 +1727,8 @@ paths:
       operationId: getConsoleSettings
       summary: KB-owned configuration (console)
       description: |
-        Every config option aimee-kb owns — the embedder, the synth
-        tier, and the knowledge base itself — with its current value, section, and
+        Every config option aimee-kb owns, including the embedder, synthesis
+        tier, and knowledge base itself, with its current value, section, and
         whether it needs a kb restart. The split from aimee-server's own settings
         is by which binary reads the option (KB_SETTINGS in
         src/kb/http/kb_http_console.c). Requires a console-admin credential.
@@ -1768,7 +1768,7 @@ paths:
       summary: Set one KB-owned config option (console)
       description: |
         Sets a single KB-owned option and persists it to aimee.yaml. The key must
-        be one the kb owns — anything else (aimee-server's keys, db2_url, the
+        be one the KB owns. Anything else (aimee-server's keys, db2_url, the
         agent roster) is 403, so this route cannot reach arbitrary config. Options
         flagged `restart` take effect when aimee-kb next starts. Requires a
         console-admin credential.
@@ -1950,7 +1950,7 @@ paths:
       operationId: listEntitledModels
       summary: List the caller's entitled org models (P2a)
       description: >
-        Returns the org models the authenticated caller is entitled to use — the join
+        Returns the org models the authenticated caller is entitled to use. This is the join
         of the org model catalog with the caller's team entitlements, actor-bound to the
         verified principal (a caller can never see another principal's entitled models).
         Catalog-only: the surface carries provider/wire/endpoint/model_id/display_name
@@ -2011,7 +2011,7 @@ paths:
   /models/org/set:
     post:
       operationId: setOrgModel
-      summary: Alias of /models/org/add — upsert an org model catalog entry (org-admin, P2a)
+      summary: Upsert an org model catalog entry; alias of /models/org/add (org-admin, P2a)
       requestBody:
         required: true
         content:
@@ -2195,7 +2195,7 @@ paths:
         receives 403. A hard reduction of the limit below the current period's already
         committed (spend + reserved) is rejected as retroactive (409). limit_usd and
         soft_limit_usd are NUMERIC decimal strings (never floats). soft_limit_usd is a
-        config-only operator-signal threshold (P4a does not enforce it — a soft limit
+        config-only operator-signal threshold. P4a does not enforce it; a soft limit
         never refuses). BUDGET ONLY: the rate limiter is deferred to P4b; the
         reserve-before-dispatch enforcement rides with P2b.
       requestBody:
@@ -2235,7 +2235,7 @@ paths:
         Returns every configured cap for the team (optionally filtered to one project),
         each joined to its current UTC period counter: limit, spend, reserved, and
         remaining (= limit - spend - reserved). Authorization is enforced at the DB layer
-        inside a SECURITY DEFINER function — the caller must be an org-admin OR a lead of
+        inside a SECURITY DEFINER function. The caller must be an org-admin OR a lead of
         the requested team. All money fields are NUMERIC strings (never floats).
       parameters:
         - name: team
@@ -2287,7 +2287,7 @@ paths:
         fixed-window width and max_count the requests admitted per window (max_count = 0 is
         an always-deny). Org-admin gated at the DB layer and WORM-audited atomically with
         the mutation; a non-admin caller receives 403. The policy is authoritative and
-        never caller-supplied at enforcement time — the P2b egress path passes only the
+        never caller-supplied at enforcement time. The P2b egress path passes only the
         resolved identity to org_rate_check, which looks the policy up. RATE ONLY: the
         enforcement wiring at egress rides with P2b; the budget core is P4a.
       requestBody:
@@ -2324,7 +2324,7 @@ paths:
       summary: Show a keyed rate-limit policy (org-admin or team-lead, P4b)
       description: >
         Returns the rate policy for the exact (dim, scope) pair (0 or 1 row).
-        Authorization is enforced at the DB layer inside a SECURITY DEFINER function — the
+        Authorization is enforced at the DB layer inside a SECURITY DEFINER function. The
         caller must be an org-admin, OR (for dim=team) a lead of that team, OR (for
         dim=project) a lead of the team that owns the project. The global dims (model,
         cred_slot) and the "*" default are admin-only. Read-only.
@@ -2443,7 +2443,7 @@ paths:
   /scopes:
     get:
       operationId: listScopes
-      summary: Scope lattice — distinct scopes with cert counts (console)
+      summary: List distinct scopes and certificate counts in the scope lattice (console)
       responses:
         "200":
           description: Scope list
@@ -2484,7 +2484,7 @@ paths:
         "400":
           description: Bad request
         "409":
-          description: Conflict — an active decision already exists for this scope
+          description: Conflict because an active decision already exists for this scope
 
   /decisions/{id}:
     get:
@@ -3703,7 +3703,7 @@ paths:
         from every kb store the ingest path writes (chunks, file index,
         vectors, code embeddings, curator code-unit vectors, canonical index,
         code-unit jobs, pdf vectors, minhash), continuing past per-store
-        failures. The fence is NOT cleared here — call purge-finalize (or
+        failures. The fence is not cleared here. Call purge-finalize (or
         purge-cancel) once the caller's own deletion completed. Idempotent.
       requestBody:
         required: true

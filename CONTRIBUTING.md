@@ -40,12 +40,14 @@ Regenerate documentation after changing one of those sources. Do not hand-edit f
 
 ## Documentation
 
-Write short, direct prose. State what is true, the boundary, and the failure behavior. Put current
-usage in a guide and design history in a proposal. Do not copy command or configuration tables that
-can be generated.
+Follow [Documentation voice and maintenance](docs/WRITING.md). Write short, direct prose. State what
+is true, the boundary, and the failure behavior. Put current usage in a guide and design history in a
+proposal. Do not copy command or configuration tables that can be generated.
 
 Update [README.md](README.md), [What's new](docs/WHATS_NEW.md), and [status](docs/STATUS.md) when a
 change alters the product surface.
+
+Run `python3 scripts/check-docs.py` after changing maintained documentation.
 
 ## Pull requests
 

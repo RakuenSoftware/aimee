@@ -82,19 +82,19 @@ services:
       # per service. It is forwarded into the server's own environment because the
       # server re-runs compose for the managed services (deploy_apply.c copies
       # environ), so the tag has to survive that hop or the wizard's Deploy would
-      # silently fall back to :latest for the kb and llm while the server itself
-      # ran :testing — a split-version stack, which is how a kb with no `dim` in
+      # silently fall back to :latest for the kb while the server itself ran
+      # :testing — a split-version stack, which is how a kb with no `dim` in
       # /health got paired with a server that expected one.
       AIMEE_IMAGE_TAG: ${AIMEE_IMAGE_TAG:-latest}
-      # Passed through to the managed services when a role is placed local (tier,
-      # images). ONE LLM image serves every tier — it is model-less and downloads
-      # what the wizard selected — so there is no separate CPU image to override.
+      # The managed KB image contains any model role placed inside that KB.
+      # Remote role endpoints and credentials remain owned by the KB; there is no
+      # separate inference-service image to select here.
       AIMEE_KB_IMAGE: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:${AIMEE_IMAGE_TAG:-latest}}
       # Separate one-shot image containing the offline root provisioner and JWKS
       # publisher. These binaries never enter the ordinary KB/server images.
       AIMEE_AUTHORITY_BOOTSTRAP_IMAGE: ${AIMEE_AUTHORITY_BOOTSTRAP_IMAGE:-ghcr.io/rakuensoftware/aimee-authority-bootstrap:${AIMEE_IMAGE_TAG:-latest}}
-      # A managed-LLM adoption credential, when needed, uses the same disposable
-      # Vault bootstrap stream before this long-lived container is created.
+      # A remote model credential, when needed, uses the same disposable Vault
+      # bootstrap stream before this long-lived container is created.
       # "Sign in with OAuth" client IDs (public; see oauth_defaults.h). Set the
       # GitHub client ID + secret for the seamless "click → GitHub → back, logged
       # in" web flow (register the OAuth App's callback URL as

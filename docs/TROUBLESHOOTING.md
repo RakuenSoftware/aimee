@@ -22,7 +22,7 @@ For local use, check the Unix socket, service manager, server log, and config-di
 ## Reads work; writes fail
 
 Read the structured `403` first. For the first wizard user, confirm the Linux client completed mTLS
-enrollment with the exact command shown after Deploy; re-running Deploy as that same user is
+enrollment with the exact command shown after the summary's Deploy action; using Deploy again as that same user is
 idempotent and shows the pairing state. For an additional PAM/OIDC user, check `AIMEE_SERVER_ID`,
 `AIMEE_SERVER_TEAM_ID`, the management-JWKS trust bundle, exact subject spelling, grant tier, and
 identity-token refusal reason. `aimee.api.remote_writes` cannot fix either denial. Do not widen every
@@ -128,12 +128,13 @@ On a default install the answer is usually one row:
  memory_facts | no curator provider or command configured | 9
 ```
 
-That is not a fault. Synthesis is external-only in this release, so curator work has nowhere to run
-until you give it an endpoint, and each attempt is recorded as a failure rather than skipped. The
-count grows quietly and `kb status` never says the cause.
+That is not a storage fault. The selected KB has no ready synthesis role, so curator work has nowhere
+to run and each attempt is recorded as a failure rather than skipped. The count grows quietly and
+`kb status` does not name the cause.
 
-Configure a synthesis endpoint, or expect the count. `aimee kb status` shows the curator tiers as
-`configured: false` until you do. See [Inference tiers](AIMEE_KB_SYNTH_TIERS.md).
+Configure synthesis inside that KB container or point it at a remote endpoint supported by the
+profile. Otherwise expect the count. `aimee kb status` shows the curator tiers as
+`configured: false` until a role is ready. See [KB model tiers](AIMEE_KB_SYNTH_TIERS.md).
 
 ## Workflow parks
 

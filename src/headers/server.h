@@ -8,6 +8,7 @@
 #include "compute_pool.h"
 #include "platform_event.h"
 #include "provider_catalog.h"
+#include "index.h" /* project_info_t, for server_active_project_match */
 
 /* True when `name` is a provider the chat path can resolve: a built-in CLI
  * provider, a known adapter, or an agent in `acfg` (matched by name or by
@@ -509,6 +510,19 @@ int handle_get_help(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 /* Record the served-call verdict from a sub-handler that returned early (same
  * thread as handle_mcp_call). See server_mcp.c. */
 void server_mcp_served_outcome(const char *verdict, const char *reason);
+/* Resolve the caller's active project from the request `cwd`: the working tree
+ * first (co-located callers keep their durable repo identity), else the longest
+ * registered project root that covers the path. A remote thin client sends a
+ * path this process cannot stat, so the root match is the only answer available
+ * there. Returns 0 and fills `out` on success, -1 with `out` emptied otherwise —
+ * callers must then emit the typed `scope_required` error. See
+ * server_active_project.c. */
+int server_active_project_from_cwd(const char *cwd, char *out, size_t outlen);
+/* The root-matching half, split out so it is unit-testable without a live
+ * knowledge service. */
+int server_active_project_match(const char *cwd, const project_info_t *projects, int count,
+                                char *out, size_t outlen);
+
 int handle_toolset_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_toolset_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_toolset_resolve(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
