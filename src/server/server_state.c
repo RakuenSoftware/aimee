@@ -519,14 +519,14 @@ int handle_kb_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       if (!project || !project[0])
       {
          const char *cwd = jo_str(req, "cwd", NULL);
-         if (cwd && workspace_repo_identity(cwd, project_buf, sizeof(project_buf), NULL, 0) == 0)
+         if (cwd && server_active_project_from_cwd(cwd, project_buf, sizeof(project_buf)) == 0)
             project = project_buf;
       }
    }
    else if (!project || !project[0])
    {
       const char *cwd = jo_str(req, "cwd", NULL);
-      if (!cwd || workspace_repo_identity(cwd, project_buf, sizeof(project_buf), NULL, 0) != 0)
+      if (!cwd || server_active_project_from_cwd(cwd, project_buf, sizeof(project_buf)) != 0)
          return server_send_error(
              conn, "scope_required: no active project; pass --scope all explicitly", NULL);
       project = project_buf;

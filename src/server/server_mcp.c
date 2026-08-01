@@ -313,7 +313,9 @@ void mcp_memory_scope_begin(cJSON *args, int *active_context_missing)
       char resolved_workspace[MAX_PATH_LEN] = "";
       char resolved_project[MAX_PATH_LEN] = "";
       if (workspace_repo_identity(jcwd->valuestring, resolved_project, sizeof(resolved_project),
-                                  resolved_workspace, sizeof(resolved_workspace)) == 0)
+                                  resolved_workspace, sizeof(resolved_workspace)) == 0 ||
+          server_active_project_from_cwd(jcwd->valuestring, resolved_project,
+                                         sizeof(resolved_project)) == 0)
       {
          if (!workspace[0])
             snprintf(workspace, sizeof(workspace), "%s", resolved_workspace);
@@ -1815,7 +1817,7 @@ static void mcp_inject_active_project(cJSON *args)
    if (!cJSON_IsString(cwd) || !cwd->valuestring[0])
       return;
    char project[MAX_PATH_LEN] = "";
-   if (workspace_repo_identity(cwd->valuestring, project, sizeof(project), NULL, 0) == 0 &&
+   if (server_active_project_from_cwd(cwd->valuestring, project, sizeof(project)) == 0 &&
        project[0])
       cJSON_AddStringToObject(args, "project", project);
 }
