@@ -101,6 +101,7 @@ enforce, so this table cannot drift from what is scoreable.
 | sub1b | LFM2-350M-Extract | 6 | VALID | sub-1B ladder, thinking ON |
 | sub1b | LFM2.5-230M | 6 | VALID | sub-1B ladder, thinking ON |
 | sub1b | Qwen3-0.6B | 6 | VALID | sub-1B ladder, thinking ON |
+| sub1b | SmolLM2-360M-Instruct | 6 | VALID | sub-1B ladder, thinking ON |
 | sub1b | granite-4.0-350m | 6 | VALID | sub-1B ladder, thinking ON |
 | sub1b | granite-4.0-h-1b | 6 | VALID | sub-1B ladder, thinking ON |
 | sub1b | granite-4.0-h-350m | 6 | VALID | sub-1B ladder, thinking ON |
