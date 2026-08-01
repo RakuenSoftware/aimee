@@ -166,6 +166,39 @@ static void test_tcp_set_remote_with_token(void)
    PASS("tcp via set_remote, bearer token + body");
 }
 
+static void test_transport_label(void)
+{
+   /* No remote configured is the case that matters: with remote.conf absent the
+    * client silently uses the local socket and every command still answers --
+    * from a different aimee than the operator believes. The label makes that
+    * visible on the error path instead of leaving it to be discovered. */
+   aimee_client_set_remote(NULL, NULL);
+   unsetenv("AIMEE_SERVER_URL");
+   assert(strstr(aimee_client_transport_label(), "no remote server configured") != NULL);
+
+   aimee_client_set_remote("https://192.168.1.210:8743", NULL);
+   assert(strcmp(aimee_client_transport_label(), "https://192.168.1.210:8743") == 0);
+
+   /* Userinfo must never reach a terminal, a log, or a pasted bug report. */
+   aimee_client_set_remote("https://user:sup3rsecret@host:8743/v1", NULL);
+   assert(strstr(aimee_client_transport_label(), "sup3rsecret") == NULL);
+   assert(strcmp(aimee_client_transport_label(), "https://host:8743/v1") == 0);
+
+   /* Same stripping when the target comes from the environment. */
+   aimee_client_set_remote(NULL, NULL);
+   setenv("AIMEE_SERVER_URL", "https://tok:abc@env-host:1/", 1);
+   assert(strstr(aimee_client_transport_label(), "abc") == NULL);
+   assert(strstr(aimee_client_transport_label(), "env-host") != NULL);
+   unsetenv("AIMEE_SERVER_URL");
+
+   /* A value with no scheme is passed through rather than mangled. */
+   aimee_client_set_remote("no-scheme-host:8743", NULL);
+   assert(strcmp(aimee_client_transport_label(), "no-scheme-host:8743") == 0);
+
+   aimee_client_set_remote(NULL, NULL);
+   PASS("transport label names the target and strips credentials");
+}
+
 static void test_remote_active_reporting(void)
 {
    aimee_client_set_remote("http://example.test:8390", NULL);
@@ -398,6 +431,7 @@ int main(void)
    test_tcp_set_remote_with_token();
    test_gzip_roundtrip();
    test_remote_active_reporting();
+   test_transport_label();
    test_https_unreachable_null();
    test_cleartext_credential_guard();
 #ifdef WITH_TLS
