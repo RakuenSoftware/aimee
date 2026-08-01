@@ -13,6 +13,36 @@
 #include <string.h>
 #include <unistd.h>
 
+/* Injected config readers for git_identity_resolve_with. */
+static int reader_none(const char *key, char *out, size_t out_len, void *ud)
+{
+   (void)key;
+   (void)ud;
+   if (out && out_len)
+      out[0] = '\0';
+   return 0;
+}
+
+static int reader_both(const char *key, char *out, size_t out_len, void *ud)
+{
+   (void)ud;
+   snprintf(out, out_len, "%s",
+            strcmp(key, "user.name") == 0 ? "Runner Operator" : "runner@example.test");
+   return 1;
+}
+
+static int reader_name_only(const char *key, char *out, size_t out_len, void *ud)
+{
+   (void)ud;
+   if (strcmp(key, "user.name") != 0)
+   {
+      out[0] = '\0';
+      return 0;
+   }
+   snprintf(out, out_len, "Runner Operator");
+   return 1;
+}
+
 int main(void)
 {
    char home[256];
@@ -107,12 +137,23 @@ int main(void)
     * stranded any running agent that reached a commit with a clean vault: it could
     * only stop and ask a human to re-run installation. Fall back to the identity
     * the operator already configured for the repository. */
+   /* Needs a real git binary; the injected-reader cases below cover the same
+    * resolution policy without one, so skip rather than fail where git is
+    * absent (e.g. a minimal build image). */
+   if (system("git --version >/dev/null 2>&1") != 0)
+      printf("git_forge_vault: no git binary — skipping the on-disk config cases\n");
+   else
    {
       char repo[320];
       snprintf(repo, sizeof(repo), "%s/repo", home);
       char cmd[900];
       snprintf(cmd, sizeof(cmd), "mkdir -p %s && git -C %s init -q", repo, repo);
       assert(system(cmd) == 0);
+      /* Point HOME at the sandbox: the fallback also consults the operator's
+       * ordinary git identity, so a real ~/.gitconfig on the machine running
+       * these tests would otherwise satisfy the "nothing configured" cases and
+       * make the result depend on who runs them. */
+      setenv("HOME", home, 1);
 
       char name[256], email[256];
       /* Nothing sealed, nothing configured on the checkout: still refuses, and
@@ -142,6 +183,77 @@ int main(void)
       assert(git_identity_resolve(repo, name, sizeof(name), email, sizeof(email)) == 1);
       assert(strcmp(name, "Sealed Operator") == 0);
       assert(strcmp(email, "sealed@example.test") == 0);
+   }
+
+   /* --- git_identity_resolve_with: the CALLER supplies the lookup ---
+    * The MCP git tools do not run in the server process's working directory --
+    * a workspace provider decides where git runs -- so an in-process lookup
+    * consults a directory that is not the checkout and silently finds nothing.
+    * Those callers inject a reader that routes through the same runner they
+    * commit with. */
+   {
+      char name[256], email[256];
+      /* Unseal first, or the sealed identity above would answer instead of the
+       * injected reader and these would prove nothing. */
+      assert(vault_service_delete(VAULT_SERVER_PRINCIPAL, GIT_FORGE_VAULT_AGENT,
+                                  GIT_AUTHOR_NAME_CRED) == VAULT_OK);
+      assert(vault_service_delete(VAULT_SERVER_PRINCIPAL, GIT_FORGE_VAULT_AGENT,
+                                  GIT_AUTHOR_EMAIL_CRED) == VAULT_OK);
+
+      /* A reader that finds nothing: still refuses, still no invented author. */
+      assert(git_identity_resolve_with(NULL, reader_none, NULL, name, sizeof(name), email,
+                                       sizeof(email)) == 0);
+      assert(name[0] == '\0' && email[0] == '\0');
+
+      /* A reader that answers both: resolves from the caller's context. */
+      assert(git_identity_resolve_with(NULL, reader_both, NULL, name, sizeof(name), email,
+                                       sizeof(email)) == 1);
+      assert(strcmp(name, "Runner Operator") == 0);
+      assert(strcmp(email, "runner@example.test") == 0);
+
+      /* A reader that answers only the name: half an identity is not one. */
+      assert(git_identity_resolve_with(NULL, reader_name_only, NULL, name, sizeof(name), email,
+                                       sizeof(email)) == 0);
+      assert(name[0] == '\0' && email[0] == '\0');
+
+      /* No reader at all is a refusal, not a crash. */
+      assert(git_identity_resolve_with(NULL, NULL, NULL, name, sizeof(name), email,
+                                       sizeof(email)) == 0);
+
+      /* --- per-principal identity: users sharing a server commit as themselves ---
+       * Seal alice her own author identity, server-wrapped so it reads with no
+       * unlock, exactly like her forge token. */
+      assert(vault_service_set_server_wrap(alice, GIT_FORGE_VAULT_AGENT, GIT_AUTHOR_NAME_CRED,
+                                           "Alice A") == VAULT_OK);
+      assert(vault_service_set_server_wrap(alice, GIT_FORGE_VAULT_AGENT, GIT_AUTHOR_EMAIL_CRED,
+                                           "alice@example.test") == VAULT_OK);
+      vault_kek_cache_clear(); /* autonomous read: no cached user KEK */
+      assert(git_identity_resolve_with(alice, reader_both, NULL, name, sizeof(name), email,
+                                       sizeof(email)) == 1);
+      assert(strcmp(name, "Alice A") == 0);
+      assert(strcmp(email, "alice@example.test") == 0);
+
+      /* Isolation: bob has no identity of his own, so he must NOT get alice's —
+       * he falls through to the next tier. */
+      assert(git_identity_resolve_with(bob, reader_both, NULL, name, sizeof(name), email,
+                                       sizeof(email)) == 1);
+      assert(strcmp(name, "Runner Operator") == 0);
+      assert(strcmp(email, "runner@example.test") == 0);
+
+      /* Half a per-principal identity does not resolve, and does not borrow the
+       * next tier's email — it falls through whole. */
+      assert(vault_service_set_server_wrap(carol, GIT_FORGE_VAULT_AGENT, GIT_AUTHOR_NAME_CRED,
+                                           "Carol C") == VAULT_OK);
+      vault_kek_cache_clear();
+      assert(git_identity_resolve_with(carol, reader_both, NULL, name, sizeof(name), email,
+                                       sizeof(email)) == 1);
+      assert(strcmp(name, "Runner Operator") == 0);
+      assert(strcmp(email, "runner@example.test") == 0);
+
+      /* With nothing anywhere, a principal still refuses rather than inventing. */
+      assert(git_identity_resolve_with(bob, reader_none, NULL, name, sizeof(name), email,
+                                       sizeof(email)) == 0);
+      assert(name[0] == '\0' && email[0] == '\0');
    }
 
    char clean[320];

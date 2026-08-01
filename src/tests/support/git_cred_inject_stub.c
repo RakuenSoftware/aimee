@@ -73,3 +73,17 @@ int git_identity_resolve(const char *repo_dir, char *name_out, size_t name_len, 
    (void)repo_dir; /* the stub always has a sealed identity, so no fallback runs */
    return git_identity_get(name_out, name_len, email_out, email_len);
 }
+
+int git_identity_resolve_with(const char *principal,
+                              int (*read_cfg)(const char *, char *, size_t, void *), void *ud,
+                              char *name_out, size_t name_len, char *email_out, size_t email_len);
+
+int git_identity_resolve_with(const char *principal,
+                              int (*read_cfg)(const char *, char *, size_t, void *), void *ud,
+                              char *name_out, size_t name_len, char *email_out, size_t email_len)
+{
+   (void)principal;
+   (void)read_cfg;
+   (void)ud; /* the stub always has a sealed identity, so no fallback runs */
+   return git_identity_get(name_out, name_len, email_out, email_len);
+}
