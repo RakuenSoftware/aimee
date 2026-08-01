@@ -8,6 +8,7 @@
  * First native resource: GET /v1/rules — the active collaboration rules,
  * proxied from aimee-kb via kb_client. */
 #include "server_http.h"
+#include "server.h" /* server_active_project_from_cwd */
 #include "kb_client.h"
 #include "config.h"
 #include "working_profile.h" /* working_profile_autoobserve_from_feedback */
