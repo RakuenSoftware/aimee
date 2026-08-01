@@ -108,6 +108,33 @@ container, and every check after that silently tests the previous build. Assert 
 before drawing a conclusion. `aimee --version` reporting an older commit than your branch is normal
 for a docs-only change, because the image only rebuilds when image-affecting paths change.
 
+## `kb status` reports failed jobs and nothing says why
+
+```text
+Queue:     0 pending, 0 running, 9 failed
+```
+
+Ask the jobs, not the counter:
+
+```bash
+docker exec <kb> sh -c "/usr/lib/postgresql/18/bin/psql --host=/var/lib/aimee/run \
+  --dbname=aimee_shared --no-psqlrc -c \"select kind, left(last_error,80), count(*) \
+  from kb_async_jobs where status='failed' group by 1,2\""
+```
+
+On a default install the answer is usually one row:
+
+```text
+ memory_facts | no curator provider or command configured | 9
+```
+
+That is not a fault. Synthesis is external-only in this release, so curator work has nowhere to run
+until you give it an endpoint, and each attempt is recorded as a failure rather than skipped. The
+count grows quietly and `kb status` never says the cause.
+
+Configure a synthesis endpoint, or expect the count. `aimee kb status` shows the curator tiers as
+`configured: false` until you do. See [Inference tiers](AIMEE_KB_SYNTH_TIERS.md).
+
 ## Workflow parks
 
 Read the named park reason and latest artifact. Common causes are a human gate, no valid panel,
