@@ -18,7 +18,16 @@ CATEGORIES = {"first_person", "third_person", "multi_fact", "implicit", "negatio
 
 
 def main():
-    rows = [json.loads(l) for l in (ROOT / "data" / "gold.jsonl").read_text().splitlines() if l.strip()]
+    # Takes an optional path so candidate files can be checked BEFORE they are
+    # merged into gold.jsonl. It used to hard-code the gold path and ignore argv,
+    # which silently validated the committed set while reporting on a file the
+    # caller had passed — a pass that means nothing.
+    target = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "data" / "gold.jsonl"
+    if not target.exists():
+        print(f"no such gold file: {target}", file=sys.stderr)
+        raise SystemExit(2)
+    print(f"validating {target}")
+    rows = [json.loads(l) for l in target.read_text().splitlines() if l.strip()]
     errs = []
     ids = set()
     for r in rows:
