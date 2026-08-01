@@ -12,6 +12,17 @@ extern "C"
 #include <stdint.h>
 
    int db2_is_initialized(void);
+
+   /* Read-only schema mode for one-shot callers that do not own the schema.
+    *
+    * db2_init APPLIES the schema by default, which is right for the daemon that
+    * owns it and wrong for a CLI reading a running deployment: the DDL races the
+    * daemon's own pass and Postgres reports "tuple concurrently updated", which
+    * db2_init then reports as "DB2 not reachable" -- naming the wrong problem
+    * entirely. Set this before db2_init to VERIFY the schema instead, the same
+    * path AIMEE_KB_HARDENED already takes. Process-wide and off by default, so
+    * the daemon is unaffected. */
+   void db2_set_schema_readonly(int on);
    int db2_init(const char *libpq_url);
 
    /* Set the embedding dimension used to create the DB2 halfvec embedding
