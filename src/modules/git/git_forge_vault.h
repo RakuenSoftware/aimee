@@ -79,4 +79,30 @@ int git_identity_get(char *name_out, size_t name_len, char *email_out, size_t em
 int git_identity_resolve(const char *repo_dir, char *name_out, size_t name_len, char *email_out,
                          size_t email_len);
 
+/* Read one git config |key| into |out|; return 1 when a non-empty value was
+ * read, 0 otherwise. |ud| is the caller's context. */
+typedef int (*git_config_reader_fn)(const char *key, char *out, size_t out_len, void *ud);
+
+/* Full resolution, in precedence order:
+ *
+ *   1. |principal|'s OWN sealed identity, if a principal is given. Distinct
+ *      users sharing one server must commit as themselves, so a per-principal
+ *      identity wins — the same layering the forge token already uses
+ *      (per-webuser credential first, server's own identity second).
+ *   2. the server's sealed identity (the single-operator install case).
+ *   3. |read_cfg|, the caller-supplied config lookup.
+ *
+ * The config lookup must run WHERE THE COMMIT WILL RUN. A caller whose git
+ * commands go through a workspace provider (the MCP git tools) does NOT execute
+ * in the server process's own working directory, so resolving config in-process
+ * would consult a directory that is not the checkout — and silently find
+ * nothing. Such a caller passes a reader routed through the same runner it
+ * commits with; a caller holding a real on-disk path can use
+ * git_identity_resolve above. Pass NULL for either to skip that tier.
+ *
+ * Same 1/0/-1 contract, and every tier is all-or-nothing: a name without an
+ * email does not resolve, and does not borrow the next tier's email. */
+int git_identity_resolve_with(const char *principal, git_config_reader_fn read_cfg, void *ud,
+                              char *name_out, size_t name_len, char *email_out, size_t email_len);
+
 #endif /* GIT_FORGE_VAULT_H */

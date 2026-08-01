@@ -7,6 +7,7 @@
 #include "mcp_git.h"
 #include "util.h"
 #include "branch_ownership.h"
+#include "agent_config.h" /* agent_get_request_vault_principal */
 #include "git_forge_vault.h"
 #include <dirent.h>
 #include <sys/stat.h>
@@ -36,6 +37,34 @@ static cJSON *mcp_error(const char *fmt, const char *detail)
    char buf[1024];
    snprintf(buf, sizeof(buf), fmt, detail);
    return mcp_text(buf);
+}
+
+/* Read a git config value through mcp_git_run — the SAME runner the commit
+ * below uses. These tools do not execute in the server process's own working
+ * directory (a workspace provider decides where git runs, and a detached
+ * workspace runs it on the client entirely), so resolving config in-process
+ * would consult a directory that is not the checkout and silently find
+ * nothing. */
+static int mcp_git_config_reader(const char *key, char *out, size_t out_len, void *ud)
+{
+   (void)ud;
+   if (!out || !out_len)
+      return 0;
+   out[0] = '\0';
+
+   char cmd[256];
+   snprintf(cmd, sizeof(cmd), "git config --get %s 2>/dev/null", key);
+   int rc = 0;
+   char *got = mcp_git_run(cmd, &rc);
+   if (!got)
+      return 0;
+   if (rc == 0)
+   {
+      snprintf(out, out_len, "%s", got);
+      out[strcspn(out, "\r\n")] = '\0';
+   }
+   free(got);
+   return out[0] ? 1 : 0;
 }
 
 /* Return a standard error response for main branch protection.
@@ -155,8 +184,9 @@ cJSON *handle_git_commit(cJSON *args)
     * whose commits carry two distinct authors, and the standing directive
     * forbids those. */
    char author_name[256] = "", author_email[256] = "";
-   int have_identity = git_identity_resolve(NULL, author_name, sizeof(author_name), author_email,
-                                            sizeof(author_email));
+   int have_identity = git_identity_resolve_with(
+       agent_get_request_vault_principal(), mcp_git_config_reader, NULL, author_name,
+       sizeof(author_name), author_email, sizeof(author_email));
    if (have_identity < 0)
       return mcp_text("error: could not read the git identity from the vault");
    if (have_identity == 0)

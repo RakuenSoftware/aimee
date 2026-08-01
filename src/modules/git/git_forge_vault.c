@@ -71,10 +71,19 @@ int git_identity_get(char *name_out, size_t name_len, char *email_out, size_t em
 }
 
 /* Read one git config value for |repo_dir| into |out|. Returns 1 when a
- * non-empty value was read, 0 otherwise. The ambient config nulling matches
- * git_ops.c: only the checkout's own config is consulted, so this cannot pick
- * up a system/global setting that changes how git behaves. */
-static int read_git_config(const char *repo_dir, const char *key, char *out, size_t out_len)
+ * non-empty value was read, 0 otherwise.
+ *
+ * |scope| selects how much config git may consult: SCOPE_REPO nulls the ambient
+ * files the way git_ops.c does, so only the checkout's own .git/config answers;
+ * SCOPE_ANY uses git's normal resolution, which also reaches the operator's
+ * ~/.gitconfig. Only user.name/user.email are ever read through here, and only
+ * as data to hand back via `git -c` — so widening the scope cannot let ambient
+ * config change how git BEHAVES, which is what the nulling exists to prevent. */
+#define GIT_CFG_SCOPE_REPO 0
+#define GIT_CFG_SCOPE_ANY  1
+
+static int read_git_config(const char *repo_dir, const char *key, int scope, char *out,
+                           size_t out_len)
 {
    if (!out || !out_len)
       return 0;
@@ -84,9 +93,10 @@ static int read_git_config(const char *repo_dir, const char *key, char *out, siz
    if (!dir)
       return 0;
    char cmd[4608];
-   snprintf(cmd, sizeof(cmd),
-            "GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_GLOBAL=/dev/null "
-            "git -C '%s' config --get %s 2>/dev/null",
+   snprintf(cmd, sizeof(cmd), "%sgit -C '%s' config --get %s 2>/dev/null",
+            scope == GIT_CFG_SCOPE_REPO
+                ? "GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_GLOBAL=/dev/null "
+                : "",
             dir, key);
    free(dir);
 
@@ -104,17 +114,64 @@ static int read_git_config(const char *repo_dir, const char *key, char *out, siz
    return out[0] ? 1 : 0;
 }
 
-int git_identity_resolve(const char *repo_dir, char *name_out, size_t name_len, char *email_out,
-                         size_t email_len)
+/* Reader context for the in-process (popen) path: a checkout directory. */
+static int popen_config_reader(const char *key, char *out, size_t out_len, void *ud)
 {
+   const char *repo_dir = (const char *)ud;
+   /* The checkout's own config wins — a per-repo identity is a deliberate
+    * choice — then the operator's ordinary git identity, which is where most
+    * people actually have one. */
+   if (read_git_config(repo_dir, key, GIT_CFG_SCOPE_REPO, out, out_len))
+      return 1;
+   return read_git_config(repo_dir, key, GIT_CFG_SCOPE_ANY, out, out_len);
+}
+
+/* |principal|'s own sealed author identity (server-wrapped, so it reads with no
+ * user unlock — the same autonomous path the forge token uses). 1 when BOTH
+ * fields are present, 0 when absent or half-written, -1 on a fail-closed
+ * error. */
+static int principal_identity(const char *principal, char *name_out, size_t name_len,
+                              char *email_out, size_t email_len)
+{
+   int n = read_cred(principal, GIT_AUTHOR_NAME_CRED, name_out, name_len);
+   int e = read_cred(principal, GIT_AUTHOR_EMAIL_CRED, email_out, email_len);
+   if (n < 0 || e < 0)
+   {
+      name_out[0] = '\0';
+      email_out[0] = '\0';
+      return -1;
+   }
+   if (n == 1 && e == 1 && name_out[0] && email_out[0])
+      return 1;
+   name_out[0] = '\0';
+   email_out[0] = '\0';
+   return 0;
+}
+
+int git_identity_resolve_with(const char *principal, git_config_reader_fn read_cfg, void *ud,
+                              char *name_out, size_t name_len, char *email_out, size_t email_len)
+{
+   if (!name_out || !name_len || !email_out || !email_len)
+      return -1;
+
+   /* A user sharing this server commits as themselves, not as the server. */
+   if (principal && principal[0])
+   {
+      int prc = principal_identity(principal, name_out, name_len, email_out, email_len);
+      if (prc != 0)
+         return prc;
+   }
+
    int rc = git_identity_get(name_out, name_len, email_out, email_len);
    if (rc != 0)
-      return rc; /* sealed identity, or a fail-closed vault error */
+      return rc; /* server-sealed identity, or a fail-closed vault error */
+   if (!read_cfg)
+      return 0;
 
-   /* Vault is clean. Use the identity the operator already configured for this
-    * checkout rather than stopping to demand an install-time step. */
-   int have_name = read_git_config(repo_dir, "user.name", name_out, name_len);
-   int have_email = read_git_config(repo_dir, "user.email", email_out, email_len);
+   /* Vault is clean. Use the identity the operator already configured rather
+    * than stopping to demand an install-time step. */
+   int have_name = read_cfg("user.name", name_out, name_len, ud);
+   int have_email = read_cfg("user.email", email_out, email_len, ud);
    if (have_name && have_email)
       return 1;
 
@@ -122,4 +179,11 @@ int git_identity_resolve(const char *repo_dir, char *name_out, size_t name_len, 
    name_out[0] = '\0';
    email_out[0] = '\0';
    return 0;
+}
+
+int git_identity_resolve(const char *repo_dir, char *name_out, size_t name_len, char *email_out,
+                         size_t email_len)
+{
+   return git_identity_resolve_with(NULL, popen_config_reader, (void *)repo_dir, name_out, name_len,
+                                    email_out, email_len);
 }
