@@ -38,6 +38,8 @@ aimee_add_test(test_memory_provider test_memory_provider.c)
 aimee_add_test(test_harness_memory test_harness_memory.c)
 aimee_add_test(test_memory_redirect test_memory_redirect.c)
 aimee_add_test(test_roundtable_brief test_roundtable_brief.c)
+aimee_add_test(test_server_active_project test_server_active_project.c
+               ../server/server_active_project.c)
 aimee_add_test(test_harness_memory_scope test_harness_memory_scope.c)
 aimee_add_test(test_harness_memory_spill test_harness_memory_spill.c)
 aimee_add_test(test_harness_memory_audit test_harness_memory_audit.c)

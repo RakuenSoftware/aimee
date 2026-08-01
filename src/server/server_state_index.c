@@ -50,7 +50,7 @@ int handle_index_find(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       {
          const char *cwd = jo_str(req, "cwd", NULL);
          if (cwd)
-            (void)workspace_repo_identity(cwd, project, sizeof(project), NULL, 0);
+            (void)server_active_project_from_cwd(cwd, project, sizeof(project));
       }
    }
    else if (project_arg && project_arg[0])
@@ -58,7 +58,7 @@ int handle_index_find(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    else
    {
       const char *cwd = jo_str(req, "cwd", NULL);
-      if (!cwd || workspace_repo_identity(cwd, project, sizeof(project), NULL, 0) != 0)
+      if (!cwd || server_active_project_from_cwd(cwd, project, sizeof(project)) != 0)
          return server_send_error(
              conn, "scope_required: no active project; pass --scope all explicitly", NULL);
    }
