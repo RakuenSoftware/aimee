@@ -293,7 +293,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 228 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
+The binaries read 226 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
 
 ### Paths & assets
 
@@ -304,7 +304,6 @@ The binaries read 228 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_GUARDRAILS_PATH` | Path to the guardrails policy file. |
 | `AIMEE_HARNESS_MEMORY_SCOPES` | Path to the agent memory-surface registry config (default `<AIMEE_HOME>/harness_memory_scopes.conf`). Each `client:projects_root:memory_seg` line adds a new agent or overrides a built-in's paths for memory-write interception (writes are redirected into aimee's db1). |
 | `AIMEE_HOME` | Root of the per-user state/config store (config, DB1, `workflows/`, keys). Overrides the platform default. |
-| `AIMEE_INSTALL_PREFIX` | Install prefix used to locate bundled assets and plugins. |
 | `AIMEE_MODELS_DEV_SNAPSHOT` | Path to an offline models.dev catalog snapshot. |
 | `AIMEE_OAUTH_RUNTIME_DIR` | Private directory for transient OAuth callback/session state; it must not be used for durable credentials. |
 | `AIMEE_PACK_DIR` | Directory of memory profile packs. |
@@ -571,12 +570,6 @@ The binaries read 228 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_TLS_CN` | Common Name used when generating a local TLS certificate. |
 | `AIMEE_TLS_EXTRA_SAN` | Additional subject-alternative names for a generated TLS certificate. |
 | `AIMEE_TLS_INSECURE` | Disable TLS certificate verification (development only). |
-
-### Plugins
-
-| Variable | Description |
-|----------|-------------|
-| `AIMEE_ENABLE_PROJECT_PLUGINS` | Allow loading project-local plugins. |
 
 ### Diagnostics & misc
 
