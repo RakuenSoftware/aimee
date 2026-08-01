@@ -26,7 +26,7 @@ enforce, so this table cannot drift from what is scoreable.
 | ceiling | google_gemma-4-26B-A4B-it | 1 | INVALID: incomplete (1/70) | thinking OFF — SUPERSEDED |
 | ceiling | google_gemma-4-E4B-it.nf4 | 70 | VALID | thinking OFF — SUPERSEDED |
 | challenger-254 | GLM-4.7-Flash.q6 | 70 | INVALID: errored x70 | 7900 XTX / Vulkan / Q6-Q5 — compare only within this lane |
-| challenger-254 | Magistral-Small-2509.q6 | 9 | INVALID: incomplete (9/70) | 7900 XTX / Vulkan / Q6-Q5 — compare only within this lane |
+| challenger-254 | Magistral-Small-2509.q6 | 10 | INVALID: incomplete (10/70) | 7900 XTX / Vulkan / Q6-Q5 — compare only within this lane |
 | challenger-254 | gemma-4-12B-it.q6 | 70 | VALID | 7900 XTX / Vulkan / Q6-Q5 — compare only within this lane |
 | diagnostics | HuggingFaceTB_SmolLM2-360M-Instruct.cap2048 | 12 | INVALID: incomplete (12/70) | cap and repetition-penalty variants |
 | diagnostics | HuggingFaceTB_SmolLM2-360M-Instruct.cap512 | 12 | INVALID: incomplete (12/70) | cap and repetition-penalty variants |
@@ -65,11 +65,12 @@ enforce, so this table cannot drift from what is scoreable.
 | sub1b | LFM2-350M-Extract | 70 | VALID | sub-1B ladder, thinking ON |
 | sub1b | LFM2.5-230M | 70 | VALID | sub-1B ladder, thinking ON |
 | sub1b | Qwen3-0.6B | 70 | VALID | sub-1B ladder, thinking ON |
+| sub1b | SmolLM2-360M-Instruct | 70 | VALID | sub-1B ladder, thinking ON |
 | sub1b | gemma-3-270m-it | 70 | VALID | sub-1B ladder, thinking ON |
 | sub1b | granite-4.0-350m | 70 | VALID | sub-1B ladder, thinking ON |
 | sub1b | granite-4.0-h-1b | 70 | VALID | sub-1B ladder, thinking ON |
 | sub1b | granite-4.0-h-350m | 70 | VALID | sub-1B ladder, thinking ON |
-| thinking | GLM-4.7-Flash | 3 | INVALID: incomplete (3/70) | thinking ON, cap 8192 — CURRENT |
+| thinking | GLM-4.7-Flash | 69 | INVALID: incomplete (69/70) | thinking ON, cap 8192 — CURRENT |
 | thinking | Qwen3-1.7B | 70 | VALID | thinking ON, cap 8192 — CURRENT |
 | thinking | Qwen3.5-0.8B | 70 | VALID | thinking ON, cap 8192 — CURRENT |
 | thinking | Qwen3.5-2B | 70 | VALID | thinking ON, cap 8192 — CURRENT |
@@ -95,4 +96,10 @@ enforce, so this table cannot drift from what is scoreable.
 | gpu | gemma-4-E4B-it | 6 | VALID | thinking OFF (disable_thinking) — SUPERSEDED |
 | gpu | granite-4.0-1b | 6 | VALID | thinking OFF (disable_thinking) — SUPERSEDED |
 | gpu | granite-4.1-3b | 6 | VALID | thinking OFF (disable_thinking) — SUPERSEDED |
+| sub1b | LFM2-350M-Extract | 6 | VALID | sub-1B ladder, thinking ON |
+| sub1b | LFM2.5-230M | 6 | VALID | sub-1B ladder, thinking ON |
+| sub1b | Qwen3-0.6B | 6 | VALID | sub-1B ladder, thinking ON |
+| sub1b | granite-4.0-350m | 6 | VALID | sub-1B ladder, thinking ON |
+| sub1b | granite-4.0-h-1b | 6 | VALID | sub-1B ladder, thinking ON |
+| sub1b | granite-4.0-h-350m | 6 | VALID | sub-1B ladder, thinking ON |
 

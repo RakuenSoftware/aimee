@@ -1,0 +1,123 @@
+{
+  "model": "LFM2.5-230M",
+  "topics": 6,
+  "format_rate": 0.8333,
+  "coverage": 0.45,
+  "faithfulness": 1.0,
+  "invented_claims": 0,
+  "checked_claims": 19,
+  "median_words": 15,
+  "median_latency_ms": 45.5,
+  "by_category": {
+    "conflicting": {
+      "n": 1,
+      "coverage": 0.75,
+      "invented": 0
+    },
+    "distractor": {
+      "n": 1,
+      "coverage": 0.333,
+      "invented": 0
+    },
+    "factual": {
+      "n": 2,
+      "coverage": 0.625,
+      "invented": 0
+    },
+    "numeric": {
+      "n": 1,
+      "coverage": 0.0,
+      "invented": 0
+    },
+    "thin": {
+      "n": 1,
+      "coverage": 0.0,
+      "invented": 0
+    }
+  },
+  "per_topic": [
+    {
+      "id": "t01",
+      "category": "factual",
+      "format_ok": true,
+      "words": 27,
+      "coverage": 0.75,
+      "missed": [
+        "product is aimee"
+      ],
+      "checked_claims": 8,
+      "invented": [],
+      "latency_ms": 64.8
+    },
+    {
+      "id": "t02",
+      "category": "numeric",
+      "format_ok": true,
+      "words": 15,
+      "coverage": 0.0,
+      "missed": [
+        "IP address",
+        "RTX 5080 GPU",
+        "125 GB RAM",
+        "28 threads"
+      ],
+      "checked_claims": 3,
+      "invented": [],
+      "latency_ms": 35.9
+    },
+    {
+      "id": "t03",
+      "category": "conflicting",
+      "format_ok": true,
+      "words": 21,
+      "coverage": 0.75,
+      "missed": [
+        "infrastructure role"
+      ],
+      "checked_claims": 7,
+      "invented": [],
+      "latency_ms": 45.5
+    },
+    {
+      "id": "t04",
+      "category": "thin",
+      "format_ok": false,
+      "words": 0,
+      "coverage": 0.0,
+      "missed": [
+        "IP is 10.0.0.1"
+      ],
+      "checked_claims": 0,
+      "invented": [],
+      "latency_ms": 122.6
+    },
+    {
+      "id": "t05",
+      "category": "distractor",
+      "format_ok": true,
+      "words": 12,
+      "coverage": 0.333,
+      "missed": [
+        "decided by the security working group",
+        "seven year retention"
+      ],
+      "checked_claims": 0,
+      "invented": [],
+      "latency_ms": 27.9
+    },
+    {
+      "id": "t06",
+      "category": "factual",
+      "format_ok": true,
+      "words": 12,
+      "coverage": 0.5,
+      "missed": [
+        "17 seed relations",
+        "one call per note"
+      ],
+      "checked_claims": 1,
+      "invented": [],
+      "latency_ms": 40.2
+    }
+  ]
+}
