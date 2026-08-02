@@ -54,8 +54,8 @@ on, so they are comparable to each other:
 | granite-4.0-h-1b | 0.5147 |
 | everything below 1B | ≤ 0.31 |
 
-The curve is flat from E4B upwards — 0.822, 0.847, 0.845 across a 3x parameter
-range — and steep below it, losing 0.13 F1 from E4B to E2B and another 0.18 from
+The curve is flat from E4B upwards (0.822, 0.847, 0.845 across a 3x parameter
+range) and steep below it, losing 0.13 F1 from E4B to E2B and another 0.18 from
 E2B to the 1B class. That is the shape that kills the split. All the loss is at
 the cheap end, which is exactly where the cheap tier was going to live. A model
 good enough for extraction is good enough for judgement, and a model too weak for
@@ -64,8 +64,8 @@ judgement is too weak for extraction. That is why there is one role.
 The highest extraction score measured anywhere is 0.9197, from gemma-4-26B-A4B
 with thinking off. It is kept out of the table because the table is a
 thinking-on lane and mixing the two would hide the effect described next. The
-accuracy is comparable — the same GGUF produces the same answers wherever its
-tensors sit — but that lane's *speed* numbers are confounded by varying device
+accuracy is comparable, since the same GGUF produces the same answers wherever
+its tensors sit, but that lane's *speed* numbers are confounded by varying device
 placement (defect 15 in the measurement log).
 
 Thinking mode is not a free win and its sign depends on size: E4B gains 0.084 F1

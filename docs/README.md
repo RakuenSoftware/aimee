@@ -33,7 +33,7 @@ Start here:
 - [Personas](personas.md)
 - [Anchored editing](anchored-editing.md)
 - [Structured PDF ingestion](STRUCTURED_PDF.md)
-- [Choosing a synthesis model](SYNTHESIS_MODELS.md) — which model to run, measured
+- [Choosing a synthesis model](SYNTHESIS_MODELS.md): which model to run, measured
 - [KB inference](KB_LLM_BACKENDS.md), [local inference](LOCAL_INFERENCE.md) and [synthesis tiers](AIMEE_KB_SYNTH_TIERS.md)
 - [Embedder selection](embedder-sweep.md)
 - [CSS render sidecar](../deploy/css-render/README.md)
