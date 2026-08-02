@@ -3,21 +3,14 @@
 
 #include <stddef.h>
 
-/* git_forge_vault — the convention + autonomous accessor for a webchat user's
- * git credentials in the sealed per-principal vault (webchat-git WP-B).
+/* git_forge_vault — autonomous access to the environment's Git credentials.
  *
- * Credential INTAKE already exists end-to-end: a browser user stores a git
- * credential via webchat `/api/vault/credentials` (POST {agent,cred,secret}) →
- * `/v1/vault/set` → vault_service_set(`webuser:<name>`, agent, cred, secret),
- * which DUAL-wraps the secret under the user KEK and the server KEK. The browser
- * never holds or receives the secret.
+ * Credential intake stores under the server principal. The authenticated PAM
+ * principal authorizes and attributes the mutation but never selects a vault.
  *
  * This module pins the canonical (agent, cred) NAMES git uses, and reads them
- * back via the SERVER wrap — i.e. autonomously, with no client unlock / cached
- * user KEK — so credential injection (WP-C: GIT_ASKPASS + ssh-agent) and git
- * operations (WP-D/E) work for background clones and for code-server sessions
- * after the user's login KEK has expired. The credential stays isolated to the
- * owning `webuser:` principal's vault namespace. */
+ * back autonomously, with no client unlock, so credential injection and Git
+ * operations work for background clones and code-server sessions. */
 
 /* Canonical vault names. A git HTTPS token (PAT / forge App token / `gh` token)
  * and an SSH private key live under the "git" agent. */
@@ -25,7 +18,8 @@
 #define GIT_FORGE_TOKEN_CRED  "forge_token"
 #define GIT_FORGE_SSHKEY_CRED "ssh_key"
 
-/* Read `principal`'s git HTTPS token into out[out_len] via the server wrap.
+/* Read the environment's git HTTPS token into out[out_len]. `principal` is
+ * retained for actor-attribution/API compatibility and does not scope state.
  * Returns 1 if a token was written, 0 if none is stored (caller falls back to
  * ambient creds), -1 on a fail-closed crypto/IO error. `out` is empty on a
  * non-1 return. */
@@ -85,12 +79,8 @@ typedef int (*git_config_reader_fn)(const char *key, char *out, size_t out_len, 
 
 /* Full resolution, in precedence order:
  *
- *   1. |principal|'s OWN sealed identity, if a principal is given. Distinct
- *      users sharing one server must commit as themselves, so a per-principal
- *      identity wins — the same layering the forge token already uses
- *      (per-webuser credential first, server's own identity second).
- *   2. the server's sealed identity (the single-operator install case).
- *   3. |read_cfg|, the caller-supplied config lookup.
+ *   1. the server environment's sealed identity.
+ *   2. |read_cfg|, the caller-supplied config lookup.
  *
  * The config lookup must run WHERE THE COMMIT WILL RUN. A caller whose git
  * commands go through a workspace provider (the MCP git tools) does NOT execute
@@ -100,7 +90,8 @@ typedef int (*git_config_reader_fn)(const char *key, char *out, size_t out_len, 
  * commits with; a caller holding a real on-disk path can use
  * git_identity_resolve above. Pass NULL for either to skip that tier.
  *
- * Same 1/0/-1 contract, and every tier is all-or-nothing: a name without an
+ * `principal` is actor attribution only and does not select an identity. Same
+ * 1/0/-1 contract, and every tier is all-or-nothing: a name without an
  * email does not resolve, and does not borrow the next tier's email. */
 int git_identity_resolve_with(const char *principal, git_config_reader_fn read_cfg, void *ud,
                               char *name_out, size_t name_len, char *email_out, size_t email_len);

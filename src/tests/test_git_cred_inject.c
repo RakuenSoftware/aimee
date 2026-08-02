@@ -40,8 +40,34 @@ static const char *env_val(char *const *envp, const char *key, int *count)
    return found;
 }
 
+/* Read the token back out of the credential memfd, the way the askpass shim does
+ * (reopen /proc/self/fd/<n>, so the read always starts at offset 0). This is how
+ * a precedence assertion sees WHICH token was chosen now that no path puts one in
+ * the environment. */
+static int fd_token(int fd, char *out, size_t cap)
+{
+   out[0] = '\0';
+   if (fd < 0)
+      return 0;
+   char path[64];
+   snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
+   FILE *f = fopen(path, "r");
+   if (!f)
+      return 0;
+   if (!fgets(out, (int)cap, f))
+   {
+      fclose(f);
+      return 0;
+   }
+   fclose(f);
+   out[strcspn(out, "\n")] = '\0';
+   return out[0] != '\0';
+}
+
 int main(void)
 {
+   int fdX = -1;
+   char tokbuf[4096];
    char home[256];
    snprintf(home, sizeof(home), "/tmp/aimee-gci-test-%d", (int)getpid());
    char mk[320];
@@ -59,25 +85,30 @@ int main(void)
                            (char *)"HOME=/whatever", NULL};
 
    /* No vaulted token yet -> NULL (caller uses ambient creds). */
-   assert(git_cred_inject_build_env(alice, parent) == NULL);
+   assert(git_cred_inject_build_env_for_repo(alice, NULL, NULL, NULL, parent, &fdX) == NULL);
 
    /* Store alice's PAT in her sealed vault (the WP-B intake path). */
    const uint8_t apw[] = "alice-pw";
    assert(vault_service_unlock_password(alice, ATTEST_WEBCHAT_TRUSTED, apw, sizeof(apw) - 1, T0) ==
           VAULT_OK);
-   assert(vault_service_set(alice, GIT_FORGE_VAULT_AGENT, GIT_FORGE_TOKEN_CRED, "ghp_aliceSECRET",
-                            T0) == VAULT_OK);
+   assert(vault_service_set_server(GIT_FORGE_VAULT_AGENT, GIT_FORGE_TOKEN_CRED,
+                                   "ghp_aliceSECRET") == VAULT_OK);
 
    /* Simulate a background git op: clear the KEK cache so only the server wrap
     * can read it — the injected env must STILL carry alice's token. */
    vault_kek_cache_clear();
-   char **env = git_cred_inject_build_env(alice, parent);
+   char **env = git_cred_inject_build_env_for_repo(alice, NULL, NULL, NULL, parent, &fdX);
    assert(env != NULL);
 
+   /* FD MODE is the only mode: the env advertises the descriptor, never the
+    * secret, so the token is unreadable from /proc/<pid>/environ. */
    int n = 0;
-   const char *tok = env_val(env, "GH_TOKEN", &n);
-   assert(n == 1); /* exactly one GH_TOKEN — the inherited one was dropped */
-   assert(tok && strcmp(tok, "ghp_aliceSECRET") == 0);
+   assert(env_val(env, "GH_TOKEN", &n) == NULL && n == 0);
+   const char *fdv = env_val(env, "AIMEE_GIT_TOKEN_FD", &n);
+   assert(n == 1 && fdv && atoi(fdv) == GIT_CRED_TOKEN_TARGET_FD);
+   assert(fdX >= 0);
+   for (int i = 0; env[i]; i++)
+      assert(strstr(env[i], "ghp_aliceSECRET") == NULL);
 
    const char *askpass = env_val(env, "GIT_ASKPASS", &n);
    assert(n == 1 && askpass && askpass[0] == '/'); /* our shim, not the inherited */
@@ -92,11 +123,22 @@ int main(void)
 
    git_cred_inject_free_env(env);
 
-   /* Cross-principal: bob has no token -> NULL, never alice's. */
-   assert(git_cred_inject_build_env(bob, parent) == NULL);
+   /* Single-tenant: another actor resolves the same environment credential. */
+   char **benv = git_cred_inject_build_env_for_repo(bob, NULL, NULL, NULL, parent, &fdX);
+   assert(benv != NULL);
+   git_cred_inject_free_env(benv);
 
-   /* Empty / NULL principal -> NULL (no leak). */
-   assert(git_cred_inject_build_env("", parent) == NULL);
+   /* An empty principal is not a namespace miss any more: the credential belongs
+    * to the environment, so a caller with no actor (the workflow forge and the
+    * turn runner both pass NULL) resolves the same one. It is still delivered by
+    * fd, so "no actor" never means "token in the environment". */
+   int anon_fd = -1;
+   char **anon = git_cred_inject_build_env_for_repo("", NULL, NULL, NULL, parent, &anon_fd);
+   assert(anon != NULL && anon_fd >= 0);
+   for (int i = 0; anon[i]; i++)
+      assert(strncmp(anon[i], "GH_TOKEN=", 9) != 0);
+   close(anon_fd);
+   git_cred_inject_free_env(anon);
 
    /* --- vault-first precedence for a specific repo (the unified policy) --- */
    /* Wire the per-host vault seam and stash a token for a host that is NOT
@@ -106,36 +148,45 @@ int main(void)
 
    /* 1) A caller-supplied (inline/broker) token beats every vault source. */
    vault_kek_cache_clear();
+   int e1_fd = -1;
    char **e1 = git_cred_inject_build_env_for_repo(alice, "https://gitlab.example.com/x/y", NULL,
-                                                  "INLINE-WINS", parent, NULL);
-   assert(e1 && (tok = env_val(e1, "GH_TOKEN", &n)) && n == 1 && strcmp(tok, "INLINE-WINS") == 0);
+                                                  "INLINE-WINS", parent, &e1_fd);
+   assert(e1 && fd_token(e1_fd, tokbuf, sizeof(tokbuf)) && strcmp(tokbuf, "INLINE-WINS") == 0);
    git_cred_inject_free_env(e1);
+   if (e1_fd >= 0)
+      close(e1_fd);
 
    /* 2) The per-host vault token beats alice's own vaulted personal token. */
    vault_kek_cache_clear();
+   int e2_fd = -1;
    char **e2 = git_cred_inject_build_env_for_repo(alice, "https://gitlab.example.com/x/y", NULL,
-                                                  NULL, parent, NULL);
-   assert(e2 && (tok = env_val(e2, "GH_TOKEN", &n)) && n == 1 &&
-          strcmp(tok, "glpat-HOSTSECRET") == 0);
+                                                  NULL, parent, &e2_fd);
+   assert(e2 && fd_token(e2_fd, tokbuf, sizeof(tokbuf)) && strcmp(tokbuf, "glpat-HOSTSECRET") == 0);
    git_cred_inject_free_env(e2);
+   if (e2_fd >= 0)
+      close(e2_fd);
 
    /* 3) A host with no stored token falls back to alice's personal vault token. */
    vault_kek_cache_clear();
+   int e3_fd = -1;
    char **e3 = git_cred_inject_build_env_for_repo(alice, "https://no-token-host.example/x/y", NULL,
-                                                  NULL, parent, NULL);
-   assert(e3 && (tok = env_val(e3, "GH_TOKEN", &n)) && n == 1 &&
-          strcmp(tok, "ghp_aliceSECRET") == 0);
+                                                  NULL, parent, &e3_fd);
+   assert(e3 && fd_token(e3_fd, tokbuf, sizeof(tokbuf)) && strcmp(tokbuf, "ghp_aliceSECRET") == 0);
    git_cred_inject_free_env(e3);
+   if (e3_fd >= 0)
+      close(e3_fd);
 
    /* 4) Seam dormant (unregistered): the per-host step is skipped entirely, so
     * even a stored host token is not consulted — falls to the personal token. */
    git_host_resolve_register(NULL);
    vault_kek_cache_clear();
+   int e4_fd = -1;
    char **e4 = git_cred_inject_build_env_for_repo(alice, "https://gitlab.example.com/x/y", NULL,
-                                                  NULL, parent, NULL);
-   assert(e4 && (tok = env_val(e4, "GH_TOKEN", &n)) && n == 1 &&
-          strcmp(tok, "ghp_aliceSECRET") == 0);
+                                                  NULL, parent, &e4_fd);
+   assert(e4 && fd_token(e4_fd, tokbuf, sizeof(tokbuf)) && strcmp(tokbuf, "ghp_aliceSECRET") == 0);
    git_cred_inject_free_env(e4);
+   if (e4_fd >= 0)
+      close(e4_fd);
    git_host_resolve_register(git_host_cred_for_url);
 
    /* --- FD MODE (#3A): the HTTPS token rides an inherited memfd, never the env,
@@ -247,9 +298,9 @@ int main(void)
       const uint8_t apw2[] = "alice-pw";
       assert(vault_service_unlock_password(alice, ATTEST_WEBCHAT_TRUSTED, apw2, sizeof(apw2) - 1,
                                            T0) == VAULT_OK);
-      assert(vault_service_set(alice, GIT_FORGE_VAULT_AGENT, GIT_FORGE_SSHKEY_CRED, keybuf, T0) ==
+      assert(vault_service_set_server(GIT_FORGE_VAULT_AGENT, GIT_FORGE_SSHKEY_CRED, keybuf) ==
              VAULT_OK);
-      char **se = git_cred_inject_build_env(alice, parent);
+      char **se = git_cred_inject_build_env_for_repo(alice, NULL, NULL, NULL, parent, &fdX);
       assert(se != NULL);
       const char *sock = env_val(se, "SSH_AUTH_SOCK", &n);
       assert(n == 1 && sock && sock[0] == '/'); /* agent socket present */
@@ -261,8 +312,9 @@ int main(void)
       assert(n == 1 && sshcmd && strstr(sshcmd, "StrictHostKeyChecking=accept-new"));
       assert(strstr(sshcmd, "UserKnownHostsFile=") && strstr(sshcmd, "/known_hosts"));
       assert(strstr(sshcmd, rt)); /* the pinned path is inside THIS principal's runtime dir */
-      /* the HTTPS token is still injected alongside */
-      assert(env_val(se, "GH_TOKEN", &n) && n == 1);
+      /* the HTTPS token is still wired alongside — as a descriptor, never a value */
+      assert(env_val(se, "GH_TOKEN", &n) == NULL && n == 0);
+      assert(env_val(se, "AIMEE_GIT_TOKEN_FD", &n) && n == 1);
       git_cred_inject_free_env(se);
       git_ssh_agent_stop(alice);
       char rmrt[400];

@@ -278,6 +278,14 @@ jobs:
       - name: Build integrity
         run: cd src && make build-integrity
 
+      # The linker is what proves a capability is absent from what ships; a source
+      # grep only proves nothing calls it. These checks caught nothing by hand
+      # because they were only ever run by hand — see scripts/validate-aimee-artifacts.sh.
+      - name: Build the shipping set
+        run: cd src && make -j"$(nproc)" all
+      - name: Artifact integrity (removed capabilities stay removed)
+        run: bash scripts/validate-aimee-artifacts.sh
+
   unit-tests:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
@@ -698,6 +706,17 @@ jobs:
         run: cd src && make -j"$(nproc)" all
       - name: Revocation, CSRF and the startup warning, measured
         run: sudo -E bash scripts/run-authz-residual-live.sh postgres://aimee:aimee@127.0.0.1:5432/aimee_resid_ci
+
+      # The kb route tests call kb_http_route_ex() directly, which bypasses the
+      # socket, the HTTP parse and kb_verifier_authenticate(). They prove route
+      # logic and cannot prove the chain. This drives four separately-configured
+      # aimee-kb instances over HTTP with real bearers — owner, project-scoped,
+      # service and console-admin — and is the only check that would notice an
+      # authorization regression between the verifier and a route.
+      - name: Live scope confinement over the wire
+        env:
+          AIMEE_DB2_URL: postgresql://aimee:aimee@127.0.0.1:5432/aimee_resid_ci
+        run: bash scripts/validate-kb-authz-live.sh
       - name: Postgres logs on failure
         if: failure()
         run: docker logs aimee-resid-pg 2>&1 | tail -60

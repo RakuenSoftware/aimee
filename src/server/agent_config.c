@@ -740,29 +740,13 @@ int agent_request_cancelled(void)
    return g_request_cancel ? atomic_load(g_request_cancel) : 0;
 }
 
-/* Read a credential (codex token/account, etc.) for the in-flight turn from the
- * permanent vault: the turn's attested principal first, then the autonomous
- * server principal (the path that serves a thin-client TCP/TLS conn with no
- * per-user identity). Returns 1 + fills out on a hit, 0 on miss/locked/error so
- * the caller falls through to the remaining (legacy/env) tiers.
- *
- * Threat model for the server-principal fallback: the server vault holds the
- * operator's shared default keys, and aimee-server is a SINGLE-owner personal
- * agent (the server bearer already gates every /v1 op), so serving the server
- * key when the turn's principal has no entry is the intended "all agents work
- * for all connections" behavior, not a cross-tenant leak — a per-user
- * (webuser:/uid:) entry OVERRIDES it when present. Every request that reaches
- * here is already bearer-authenticated. */
+/* Read a credential for the one server environment. The in-flight principal is
+ * actor attribution only and must never select a model/provider credential. */
 static int agent_vault_get(const char *agent_name, const char *cred, char *out, size_t out_len)
 {
    if (!agent_name || !agent_name[0] || !out || out_len == 0)
       return 0;
    out[0] = '\0';
-   const char *principal = agent_get_request_vault_principal();
-   if (principal && principal[0] &&
-       vault_service_get(principal, agent_name, cred, out, out_len, time(NULL)) == VAULT_OK &&
-       out[0])
-      return 1;
    if (vault_service_get_server_principal(agent_name, cred, out, out_len) == VAULT_OK && out[0])
       return 1;
    out[0] = '\0';

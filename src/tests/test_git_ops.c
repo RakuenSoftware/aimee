@@ -50,7 +50,7 @@ int main(void)
 
    /* alice's project dir + a bare remote it tracks. */
    char proj[400], bare[400];
-   snprintf(proj, sizeof(proj), "%s/webusers/alice/proj", ws);
+   snprintf(proj, sizeof(proj), "%s/environment/proj", ws);
    snprintf(bare, sizeof(bare), "%s/remote.git", home);
    assert(run("git init -q --bare %s", bare) == 0);
    assert(run("mkdir -p %s && cd %s && git init -q -b main && git config user.email t@t && git "
@@ -115,8 +115,11 @@ int main(void)
    assert(git_ops_run("webuser:alice", "proj", "commit", "", 0, &out, err, sizeof(err)) == -1);
    assert(git_ops_run("webuser:alice", "../escape", "status", NULL, 0, &out, err, sizeof(err)) ==
           -1);
-   /* bob cannot touch alice's project (no such project in bob's scope) */
-   assert(git_ops_run("webuser:bob", "proj", "status", NULL, 0, &out, err, sizeof(err)) == -1);
+   /* Another actor reaches the same project: one environment, and PAM identity
+    * authorizes and attributes the request rather than selecting a tree. */
+   assert(git_ops_run("webuser:bob", "proj", "status", NULL, 0, &out, err, sizeof(err)) == 0);
+   free(out);
+   out = NULL;
 
    /* --- session worktree redirect (git_ops_session_dir wiring) --- */
    char dir[4096];

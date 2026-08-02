@@ -861,12 +861,12 @@ int rh_workspace_projects(const route_req_t *rq, char *resp, int cap)
    return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
 }
 
-/* POST /v1/workspace/projects/delete {ref, force?} — delete a cloned project
- * under the calling webchat user's scoped workspace (webchat project lifecycle
- * proposal, slice 2). The ONLY identity source is the attested X-Aimee-Webuser
- * principal; another webuser's ref is a plain 404. The last holder of a ref
- * triggers the fenced kb purge (503 abort without `force`); other holders keep
- * the shared knowledge (kb_status "retained"). Capability: tool:execute. */
+/* POST /v1/workspace/projects/delete {ref} — delete a cloned project from this
+ * environment (webchat project lifecycle proposal, slice 2). The ONLY identity
+ * source is the attested X-Aimee-Webuser principal; an unresolvable ref is a
+ * plain 404. The delete is LOCAL: the clone and this server's own state go, and
+ * aimee-kb — a separate multi-tenant service — is not called, so there is no
+ * purge outcome to report and nothing to force past. Capability: tool:execute. */
 int rh_workspace_projects_delete(const route_req_t *rq, char *resp, int cap)
 {
    if (!git_surface_enabled())
@@ -882,53 +882,24 @@ int rh_workspace_projects_delete(const route_req_t *rq, char *resp, int cap)
       return err_json(resp, cap, 400, "invalid JSON body");
    }
    const cJSON *jref = cJSON_GetObjectItemCaseSensitive(body, "ref");
-   const cJSON *jforce = cJSON_GetObjectItemCaseSensitive(body, "force");
    char ref[GIT_PROJECT_NAME_MAX];
    ref[0] = '\0';
    if (cJSON_IsString(jref) && jref->valuestring && strlen(jref->valuestring) < sizeof(ref))
       snprintf(ref, sizeof(ref), "%s", jref->valuestring);
-   int force = cJSON_IsBool(jforce) && cJSON_IsTrue(jforce);
    cJSON_Delete(body);
    if (!ref[0])
       return err_json(resp, cap, 400, "ref required");
 
-   git_project_delete_result_t res;
    char err[512];
-   int rc = git_project_delete(principal, ref, force, &res, err, sizeof(err));
+   int rc = git_project_delete(principal, ref, err, sizeof(err));
    if (rc == GP_ERR_NOT_FOUND)
-   {
-      free(res.kb_detail);
       return err_json(resp, cap, 404, "not found");
-   }
-   if (rc == GP_ERR_KB_UNAVAILABLE)
-   {
-      cJSON *out = cJSON_CreateObject();
-      cJSON_AddStringToObject(out, "error", err);
-      cJSON *kb = res.kb_detail ? cJSON_Parse(res.kb_detail) : NULL;
-      if (kb)
-         cJSON_AddItemToObject(out, "kb", kb);
-      free(res.kb_detail);
-      char *s = cJSON_PrintUnformatted(out);
-      int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
-      free(s);
-      cJSON_Delete(out);
-      return (n > 0 && n < cap) ? 503 : err_json(resp, cap, 503, "knowledge service unavailable");
-   }
    if (rc != 0)
-   {
-      free(res.kb_detail);
       return err_json(resp, cap, 400, err);
-   }
 
    cJSON *out = cJSON_CreateObject();
    cJSON_AddBoolToObject(out, "ok", 1);
    cJSON_AddStringToObject(out, "ref", ref);
-   cJSON_AddStringToObject(out, "kb_status", res.kb_status);
-   cJSON_AddStringToObject(out, "purge_id", res.purge_id);
-   cJSON *kb = res.kb_detail ? cJSON_Parse(res.kb_detail) : NULL;
-   if (kb)
-      cJSON_AddItemToObject(out, "kb", kb);
-   free(res.kb_detail);
    char *s = cJSON_PrintUnformatted(out);
    int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
    free(s);

@@ -1,7 +1,8 @@
-/* workspace_scope.c — per-webuser workspace isolation. See workspace_scope.h. */
+/* workspace_scope.c — single-environment workspace confinement. See header. */
 #include "workspace_scope.h"
 #include "aimee_home.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -9,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/file.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -136,22 +138,20 @@ static int principal_name(const char *principal, char *name, size_t cap)
    return 0;
 }
 
-/* Resolve the webusers base dir (parent of all per-user roots) into out[cap].
- * Mirrors workspace_mirror's AIMEE_WORKSPACES_DIR / <aimee_home>/workspaces
- * convention, with a /webusers leaf. Exposed as ws_scope_webusers_base for the
- * registry/lock module. */
-static int webusers_base(char *out, size_t cap)
+/* Resolve the deployment's workspace container. The shared environment root and
+ * the legacy webusers tree are siblings beneath it. */
+static int workspace_container(char *out, size_t cap)
 {
    const char *env = getenv("AIMEE_WORKSPACES_DIR");
    int n;
    if (env && env[0] == '/')
-      n = snprintf(out, cap, "%s/webusers", env);
+      n = snprintf(out, cap, "%s", env);
    else
    {
       const char *home = aimee_home();
       if (!home || !home[0])
          return -1;
-      n = snprintf(out, cap, "%s/workspaces/webusers", home);
+      n = snprintf(out, cap, "%s/workspaces", home);
    }
    if (n < 0 || (size_t)n >= cap)
    {
@@ -159,6 +159,135 @@ static int webusers_base(char *out, size_t cap)
       return -1;
    }
    return 0;
+}
+
+static unsigned legacy_hash(const char *s)
+{
+   unsigned h = 2166136261u;
+   for (const unsigned char *p = (const unsigned char *)(s ? s : ""); *p; p++)
+      h = (h ^ *p) * 16777619u;
+   return h;
+}
+
+/* Pick a collision-free, API-valid destination for legacy state. The common
+ * case keeps the original project/org name. A conflict is retained under an
+ * explicit legacy-<actor>-<name>-<hash> ref; nothing is overwritten. */
+static int legacy_destination(const char *root, const char *actor, const char *entry,
+                              const char *source, char *out, size_t cap, int *renamed)
+{
+   struct stat st;
+   if (ws_scope_name_valid(entry))
+   {
+      int n = snprintf(out, cap, "%s/%s", root, entry);
+      if (n > 0 && (size_t)n < cap && lstat(out, &st) != 0 && errno == ENOENT)
+      {
+         if (renamed)
+            *renamed = 0;
+         return 0;
+      }
+   }
+   const char *a = ws_scope_name_valid(actor) ? actor : "actor";
+   const char *e = ws_scope_name_valid(entry) ? entry : "state";
+   unsigned seed = legacy_hash(source);
+   for (unsigned i = 0; i < 1000; i++)
+   {
+      int n = snprintf(out, cap, "%s/legacy-%.12s-%.24s-%08x", root, a, e, seed + i);
+      if (n <= 0 || (size_t)n >= cap)
+         return -1;
+      if (lstat(out, &st) != 0 && errno == ENOENT)
+      {
+         if (renamed)
+            *renamed = 1;
+         return 0;
+      }
+   }
+   return -1;
+}
+
+/* Move every legacy <container>/webusers/<actor>/<entry> into the shared root.
+ * Top-level entries are moved whole, so arbitrary editor files and nested org
+ * layouts are preserved. A deployment lock makes the lazy migration safe when
+ * two server processes overlap during an upgrade. */
+static int migrate_legacy_webusers(const char *container, const char *root)
+{
+   char lockpath[PATH_MAX], legacy[PATH_MAX];
+   if (snprintf(lockpath, sizeof(lockpath), "%s/.single-tenant-migration.lock", container) >=
+           (int)sizeof(lockpath) ||
+       snprintf(legacy, sizeof(legacy), "%s/webusers", container) >= (int)sizeof(legacy))
+      return -1;
+   int lfd = open(lockpath, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
+   if (lfd < 0 || flock(lfd, LOCK_EX) != 0)
+   {
+      if (lfd >= 0)
+         close(lfd);
+      return -1;
+   }
+
+   DIR *users = opendir(legacy);
+   if (!users)
+   {
+      int ok = errno == ENOENT;
+      flock(lfd, LOCK_UN);
+      close(lfd);
+      return ok ? 0 : -1;
+   }
+
+   int failed = 0;
+   struct dirent *ue;
+   while ((ue = readdir(users)) != NULL)
+   {
+      if (strcmp(ue->d_name, ".") == 0 || strcmp(ue->d_name, "..") == 0 || ue->d_name[0] == '.')
+         continue; /* old .registry/.locks stay as inert migration metadata */
+      char userdir[PATH_MAX];
+      if (snprintf(userdir, sizeof(userdir), "%s/%s", legacy, ue->d_name) >= (int)sizeof(userdir))
+      {
+         failed = 1;
+         continue;
+      }
+      struct stat ust;
+      if (lstat(userdir, &ust) != 0 || !S_ISDIR(ust.st_mode))
+      {
+         failed = 1;
+         continue;
+      }
+      DIR *entries = opendir(userdir);
+      if (!entries)
+      {
+         failed = 1;
+         continue;
+      }
+      struct dirent *pe;
+      while ((pe = readdir(entries)) != NULL)
+      {
+         if (strcmp(pe->d_name, ".") == 0 || strcmp(pe->d_name, "..") == 0)
+            continue;
+         char src[PATH_MAX], dst[PATH_MAX];
+         if (snprintf(src, sizeof(src), "%s/%s", userdir, pe->d_name) >= (int)sizeof(src))
+         {
+            failed = 1;
+            continue;
+         }
+         int renamed = 0;
+         if (legacy_destination(root, ue->d_name, pe->d_name, src, dst, sizeof(dst), &renamed) !=
+                 0 ||
+             rename(src, dst) != 0)
+         {
+            fprintf(stderr, "aimee: legacy workspace migration failed for %s\n", src);
+            failed = 1;
+            continue;
+         }
+         if (renamed)
+            fprintf(stderr, "aimee: legacy workspace conflict retained as %s\n", dst);
+         else
+            fprintf(stderr, "aimee: migrated legacy workspace state to %s\n", dst);
+      }
+      closedir(entries);
+      (void)rmdir(userdir); /* only removes an empty, fully-migrated actor dir */
+   }
+   closedir(users);
+   flock(lfd, LOCK_UN);
+   close(lfd);
+   return failed ? -1 : 0;
 }
 
 /* mkdir -p each component of `path` with mode 0700 (idempotent). Returns 0 or
@@ -224,33 +353,37 @@ int ws_scope_openat2_available(void)
 #endif
 }
 
-int ws_scope_webusers_base(char *out, size_t cap)
+int ws_scope_environment_root(char *out, size_t cap)
 {
    if (!out || cap == 0)
       return -1;
-   return webusers_base(out, cap);
+   char container[PATH_MAX];
+   if (workspace_container(container, sizeof(container)) != 0 || mkdirs_0700(container) != 0)
+      return -1;
+   int n = snprintf(out, cap, "%s/environment", container);
+   if (n < 0 || (size_t)n >= cap)
+   {
+      out[0] = '\0';
+      return -1;
+   }
+   if (mkdirs_0700(out) != 0 || migrate_legacy_webusers(container, out) != 0)
+   {
+      out[0] = '\0';
+      return -1;
+   }
+   return 0;
 }
 
 int ws_scope_user_root(const char *principal, int create, char *out, size_t cap)
 {
    if (!out || cap == 0)
       return -1;
-   char name[WS_NAME_MAX + 1];
-   if (principal_name(principal, name, sizeof(name)) != 0)
+   char actor[WS_NAME_MAX + 1];
+   if (principal_name(principal, actor, sizeof(actor)) != 0)
       return -1;
-   char base[PATH_MAX];
-   if (webusers_base(base, sizeof(base)) != 0)
-      return -1;
-   int n = snprintf(out, cap, "%s/%s", base, name);
-   if (n < 0 || (size_t)n >= cap)
-   {
-      if (cap)
-         out[0] = '\0';
-      return -1;
-   }
-   if (create && mkdirs_0700(out) != 0)
-      return -1;
-   return 0;
+   (void)actor;
+   (void)create; /* shared root is materialized so legacy migration is atomic */
+   return ws_scope_environment_root(out, cap);
 }
 
 /* 1 iff `child` lies within `root` with a '/' boundary (or equals root). Both
@@ -348,7 +481,7 @@ int ws_scope_open_project(const char *principal, const char *project, int extra_
    int base = ws_scope_open_user_root(principal);
    if (base < 0)
       return -1;
-   /* base is pinned to the canonical per-principal root and every component is
+   /* base is pinned to the canonical environment root and every component is
     * opened individually with O_NOFOLLOW — a symlink planted at the org or the
     * project leaf is rejected, never followed, so the open cannot escape the
     * root and has no resolve-vs-use TOCTOU window. */

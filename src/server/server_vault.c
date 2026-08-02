@@ -4,6 +4,7 @@
  * the response. All policy + crypto lives below in vault_service. */
 #include "server.h" /* server_conn_t, server_send_*, handle_vault_* decls */
 #include "vault_service.h"
+#include "vault_store.h"      /* legacy actor-vault existence check */
 #include "vault_crypto.h"     /* VAULT_ROOT_KEY_LEN */
 #include "vault_capability.h" /* vault:write:server gate (D2c) */
 #include "log.h"              /* audit_log dedicated 0600 audit sink (D2/D2c) */
@@ -75,7 +76,10 @@ static int hex_decode(const char *hex, uint8_t *out, size_t n)
 int handle_vault_unlock(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   vault_status_t st;
+   vault_status_t st = VAULT_OK;
+   uint8_t legacy_salt[VAULT_SALT_LEN];
+   int has_legacy_vault = vault_store_salt_readonly(conn->vault_principal, legacy_salt) == 0;
+   OPENSSL_cleanse(legacy_salt, sizeof(legacy_salt));
 
    /* A webchat-asserted webuser principal unlocks with its login password
     * (scrypt KEK, WP-C.2); a kernel-attested uid: peer unlocks with its 32-byte
@@ -86,9 +90,10 @@ int handle_vault_unlock(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       cJSON *jpw = cJSON_GetObjectItemCaseSensitive(req, "password");
       if (!cJSON_IsString(jpw))
          return server_send_error(conn, "vault: missing password", NULL);
-      st = vault_service_unlock_password(conn->vault_principal, conn->attested_transport,
-                                         (const uint8_t *)jpw->valuestring,
-                                         strlen(jpw->valuestring), time(NULL));
+      if (has_legacy_vault)
+         st = vault_service_unlock_password(conn->vault_principal, conn->attested_transport,
+                                            (const uint8_t *)jpw->valuestring,
+                                            strlen(jpw->valuestring), time(NULL));
       /* Best-effort scrub of the request-body copy of the password. */
       OPENSSL_cleanse(jpw->valuestring, strlen(jpw->valuestring));
    }
@@ -100,8 +105,9 @@ int handle_vault_unlock(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       uint8_t root_key[VAULT_ROOT_KEY_LEN];
       if (hex_decode(jrk->valuestring, root_key, sizeof(root_key)) != 0)
          return server_send_error(conn, "vault: root_key_hex must be 64 hex chars", NULL);
-      st = vault_service_unlock(conn->vault_principal, conn->attested_transport, root_key,
-                                sizeof(root_key), time(NULL));
+      if (has_legacy_vault)
+         st = vault_service_unlock(conn->vault_principal, conn->attested_transport, root_key,
+                                   sizeof(root_key), time(NULL));
       OPENSSL_cleanse(root_key, sizeof(root_key));
    }
    if (st != VAULT_OK)
@@ -141,26 +147,11 @@ int handle_vault_rekey(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return server_send_ok(conn, resp);
 }
 
-/* POST /v1/vault/set — store a credential under the unlocked vault. */
+/* POST /v1/vault/set — compatibility alias for the shared environment vault.
+ * The caller remains the audited actor and must hold vault:write:server. */
 int handle_vault_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   (void)ctx;
-   cJSON *ja = cJSON_GetObjectItemCaseSensitive(req, "agent");
-   cJSON *jc = cJSON_GetObjectItemCaseSensitive(req, "cred");
-   cJSON *js = cJSON_GetObjectItemCaseSensitive(req, "secret");
-   if (!cJSON_IsString(ja) || !cJSON_IsString(jc) || !cJSON_IsString(js))
-      return server_send_error(conn, "vault: set requires agent, cred, secret", NULL);
-
-   vault_status_t st = vault_service_set(conn->vault_principal, ja->valuestring, jc->valuestring,
-                                         js->valuestring, time(NULL));
-   if (st != VAULT_OK)
-      return vault_send_status_error(conn, st);
-
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return server_send_error(conn, "vault: out of memory", NULL);
-   cJSON_AddStringToObject(resp, "status", "ok");
-   return server_send_ok(conn, resp);
+   return handle_vault_set_server(ctx, conn, req);
 }
 
 /* A non-secret fingerprint of a credential value for the audit line: the first 4
@@ -313,14 +304,14 @@ int handle_vault_capability(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return server_send_ok(conn, resp);
 }
 
-/* POST /v1/vault/list — names only, never secrets. */
+/* POST /v1/vault/list — shared environment names only, never secrets. */
 int handle_vault_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    (void)req;
    vault_store_entry_t entries[64];
    int count = 0;
-   vault_status_t st = vault_service_list(conn->vault_principal, entries,
+   vault_status_t st = vault_service_list(VAULT_SERVER_PRINCIPAL, entries,
                                           (int)(sizeof(entries) / sizeof(entries[0])), &count);
    if (st != VAULT_OK)
       return vault_send_status_error(conn, st);
@@ -342,7 +333,7 @@ int handle_vault_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return server_send_ok(conn, resp);
 }
 
-/* POST /v1/vault/delete — remove a credential. */
+/* POST /v1/vault/delete — remove a shared environment credential. */
 int handle_vault_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -351,10 +342,15 @@ int handle_vault_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!cJSON_IsString(ja) || !cJSON_IsString(jc))
       return server_send_error(conn, "vault: delete requires agent, cred", NULL);
 
+   if (!vault_capability_server_write_allowed(conn->attested_transport, conn->vault_principal))
+      return server_send_error(conn, "vault: shared credential delete requires vault:write:server",
+                               NULL);
    vault_status_t st =
-       vault_service_delete(conn->vault_principal, ja->valuestring, jc->valuestring);
+       vault_service_delete(VAULT_SERVER_PRINCIPAL, ja->valuestring, jc->valuestring);
    if (st != VAULT_OK)
       return vault_send_status_error(conn, st);
+   audit_log("VAULT_SERVER_DELETE", "by=%s agent=%s cred=%s", conn->vault_principal,
+             ja->valuestring, jc->valuestring);
 
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
@@ -363,7 +359,8 @@ int handle_vault_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return server_send_ok(conn, resp);
 }
 
-/* POST /v1/vault/lock — evict the cached KEK. */
+/* POST /v1/vault/lock — evict only a historical actor-vault KEK. The shared
+ * environment vault is server-keyed and remains available. */
 int handle_vault_lock(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;

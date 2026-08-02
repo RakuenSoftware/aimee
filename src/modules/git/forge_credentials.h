@@ -83,6 +83,12 @@ void forge_cred_free_env(char **envp);
  * by every git call site that injects a forge env (mcp_git, the mirror tier). */
 const char *forge_cred_askpass_shim(void);
 
+/* Absolute path to a helper that prints the session's git token on stdout, for
+ * a user who needs it for something other than git (the editor terminal no
+ * longer carries GH_TOKEN). Reads the same inherited descriptor the askpass
+ * does, so the secret never enters an environment block. NULL if unavailable. */
+const char *forge_cred_token_helper(void);
+
 /* --- Server-held forge identity (workspace-resource-plane §6) ----------------
  * A forge credential the SERVER itself holds, used for instance-held workspaces
  * when a filesystem-poor surface (e.g. telegram) drives a git op and supplies no

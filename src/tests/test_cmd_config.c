@@ -155,8 +155,10 @@ static void test_config_fields_helpers(void)
    assert(cJSON_IsBool(v) && cJSON_IsTrue(v));
    cJSON_Delete(v);
    assert(strcmp(config_field_secret_name(config_field_lookup("db2_url")), "AIMEE_DB2_URL") == 0);
+   /* aimee-server's OUTBOUND kb credential has its own key, so it can carry a
+    * scoped service token while aimee-kb keeps its own inbound one. */
    assert(strcmp(config_field_secret_name(config_field_lookup("kb_client_bearer_token")),
-                 "AIMEE_KB_API_BEARER_TOKEN") == 0);
+                 "AIMEE_KB_CLIENT_BEARER_TOKEN") == 0);
    assert(strcmp(config_field_secret_name(config_field_lookup("ingress_trusted_proxy_secret")),
                  "AIMEE_INGRESS_PROXY_SECRET") == 0);
    assert(strcmp(config_field_secret_name(config_field_lookup("telemetry.metrics_token")),

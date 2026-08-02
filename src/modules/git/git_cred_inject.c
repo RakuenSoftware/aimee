@@ -27,11 +27,14 @@ static int is_key(const char *entry, const char *key)
  * we manage dropped, plus GH_TOKEN/GIT_ASKPASS/GIT_TERMINAL_PROMPT (when a token
  * is given) and SSH_AUTH_SOCK + GIT_SSH_COMMAND (when a sock is given, so an SSH
  * remote uses the agent key with a non-interactive TOFU host-key policy).
- * Returns NULL on OOM. */
-/* token_fd_target >= 0 selects FD MODE: advertise AIMEE_GIT_TOKEN_FD=<target>
- * (the askpass reads the token from that inherited fd) and do NOT put the secret
- * in the env. token_fd_target < 0 is LEGACY ENV MODE: GH_TOKEN=<token>. In both
- * modes `token` non-empty means "a token exists" (so the askpass is wired). */
+ * Returns NULL on OOM.
+ *
+ * FD MODE ONLY: the env advertises AIMEE_GIT_TOKEN_FD=<token_fd_target> and the
+ * askpass reads the secret from that inherited fd. The token itself NEVER enters
+ * the environment — an env-borne credential is readable by anything that can see
+ * the process. `token` non-empty means "a token exists", so the askpass is wired;
+ * a caller with a token but no target fd is a programming error and is treated as
+ * having no token (fail closed) rather than falling back to the environment. */
 static char **build_env(char *const *parent, const char *token, const char *shim, const char *sock,
                         int token_fd_target)
 {
@@ -55,13 +58,10 @@ static char **build_env(char *const *parent, const char *token, const char *shim
       if (!out[o++])
          goto oom;
    }
-   if (token && token[0])
+   if (token && token[0] && token_fd_target >= 0)
    {
-      char buf[GIT_CRED_TOKEN_MAX + 16];
-      if (token_fd_target >= 0)
-         snprintf(buf, sizeof(buf), "AIMEE_GIT_TOKEN_FD=%d", token_fd_target);
-      else
-         snprintf(buf, sizeof(buf), "GH_TOKEN=%s", token);
+      char buf[64];
+      snprintf(buf, sizeof(buf), "AIMEE_GIT_TOKEN_FD=%d", token_fd_target);
       if (!(out[o++] = strdup(buf)))
          goto oom;
       if (shim && shim[0])
@@ -162,12 +162,12 @@ static int resolve_token(const char *principal, const char *remote_url, const ch
       return 1;
    out[0] = '\0';
 
-   /* 3. The principal's own vaulted personal forge token. */
-   if (principal && principal[0] && git_forge_vault_token(principal, out, cap) == 1 && out[0])
+   /* 3. The environment's vaulted forge token. */
+   if (git_forge_vault_token(principal, out, cap) == 1 && out[0])
       return 1;
    out[0] = '\0';
 
-   /* 4. The server's own git identity (App installation token / AIMEE_FORGE_TOKEN). */
+   /* 4. The server's forge-App identity (AIMEE_FORGE_TOKEN). */
    if (forge_cred_server_identity(out, cap, NULL, 0) == 1 && out[0])
       return 1;
    out[0] = '\0';
@@ -230,11 +230,6 @@ char **git_cred_inject_build_env_for_repo(const char *principal, const char *rem
    if (out_token_fd)
       *out_token_fd = token_fd;
    return envp;
-}
-
-char **git_cred_inject_build_env(const char *principal, char *const *parent_environ)
-{
-   return git_cred_inject_build_env_for_repo(principal, NULL, NULL, NULL, parent_environ, NULL);
 }
 
 int git_cred_inject_resolve_token(const char *principal, const char *remote_url,

@@ -1489,8 +1489,13 @@ typedef struct config
     * process-memory view of the same Vault record as kb_api_bearer_token and is
     * never serialized to aimee.yaml.
     * Distinct from kb_api_bearer_token above, which is the LOCAL kb server's
-    * inbound-auth token. AIMEE_KB_API_BEARER_TOKEN is accepted only as
-    * first-boot transport, then synchronously sealed and scrubbed before the
+    * inbound-auth token, and NO LONGER required to equal it: set
+    * AIMEE_KB_CLIENT_BEARER_TOKEN to a scoped `service` credential
+    * (scope:service:<name>:<secret>) so aimee-server reaches every project's
+    * data while remaining refused by aimee-kb's administrative routes. When it
+    * is unset, AIMEE_KB_API_BEARER_TOKEN is used as before — which makes
+    * aimee-server the install owner on aimee-kb. Either variable is accepted
+    * only as first-boot transport, then synchronously sealed and scrubbed before the
     * long-lived process starts. */
    char kb_client_url[CONFIG_DB2_URL_LEN];
    char kb_client_bearer_token[256];

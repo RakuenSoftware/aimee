@@ -10,26 +10,26 @@ import (
 	"time"
 )
 
-// Per-user chat-session persistence. A "session" here is one browser tab's
+// Deployment-wide chat-session persistence. A "session" here is one browser tab's
 // conversation: identified by the stable id the SPA sends as aimee_session_id.
 // The provider-native id emitted by the "session" stream event is separate and
-// is persisted only as resume metadata. Rows are scoped by the authenticated
-// username so users only ever see and restore their own tabs and transcript.
+// is persisted only as resume metadata. username columns are retained as actor
+// attribution for existing databases; they never scope visibility or ownership.
 
 type ctxKey string
 
 const ctxUsername ctxKey = "webchat_username"
 
-// currentUser returns the authenticated username injected by requireAuth, or ""
-// if the request was not authenticated (which the handlers treat as no session
-// ownership rather than an error).
+// currentUser returns the authenticated actor injected by requireAuth, or "" if
+// the request was not authenticated. It is authorization/audit identity, never
+// a state namespace.
 func currentUser(r *http.Request) string {
 	u, _ := r.Context().Value(ctxUsername).(string)
 	return u
 }
 
-// withUser returns a shallow copy of r carrying the resolved username, used by
-// requireAuth so downstream handlers can scope persistence to the user.
+// withUser returns a shallow copy of r carrying the resolved actor, used by
+// requireAuth for authorization and attribution.
 func withUser(r *http.Request, username string) *http.Request {
 	return r.WithContext(context.WithValue(r.Context(), ctxUsername, username))
 }
@@ -103,7 +103,7 @@ func migrateLegacyChatSessionRuntime(db *sql.DB) error {
 	return tx.Commit()
 }
 
-// chatSession is the durable record of one tab's session for a user.
+// chatSession is the durable record of one tab's session in this environment.
 type chatSession struct {
 	ID                string        `json:"id"`
 	Title             string        `json:"title"`
@@ -133,7 +133,7 @@ func deriveTitle(message string) string {
 	return title
 }
 
-// touchChatSession records (or refreshes) a user's session from the chat-send
+// touchChatSession records (or refreshes) an environment session from the chat-send
 // path. It is best-effort: a nil db, an empty user, or an empty id is a no-op,
 // and any DB error is returned for the caller to log without failing the chat.
 // The session's last_active is bumped; cwd is updated when provided; the title
@@ -151,24 +151,22 @@ func (s *server) touchChatSession(username, id, cwd, firstMessage string) error 
 		ON CONFLICT(id) DO UPDATE SET
 			last_active = excluded.last_active,
 			cwd   = CASE WHEN excluded.cwd != ''        THEN excluded.cwd   ELSE chat_sessions.cwd   END,
-			title = CASE WHEN chat_sessions.title = ''  THEN excluded.title ELSE chat_sessions.title END
-		WHERE chat_sessions.username = excluded.username`,
+			title = CASE WHEN chat_sessions.title = ''  THEN excluded.title ELSE chat_sessions.title END`,
 		id, username, title, cwd, now, now)
 	return err
 }
 
-// chatSessionOwned reports whether id exists and belongs to username. Session
-// ids are bearer-like handles at the aimee-server boundary, so webchat must bind
-// each handle to the authenticated account before it forwards a continuation.
+// chatSessionOwned reports whether id exists in this environment. The retained
+// username parameter is actor attribution/API compatibility, not ownership.
 func (s *server) chatSessionOwned(username, id string) (owned, exists bool, err error) {
 	if s == nil || s.db == nil || username == "" || id == "" {
 		return false, false, nil
 	}
-	var owner string
-	err = s.db.QueryRow(`SELECT username FROM chat_sessions WHERE id = ?`, id).Scan(&owner)
+	var one int
+	err = s.db.QueryRow(`SELECT 1 FROM chat_sessions WHERE id = ?`, id).Scan(&one)
 	switch err {
 	case nil:
-		return owner == username, true, nil
+		return true, true, nil
 	case sql.ErrNoRows:
 		return false, false, nil
 	default:
@@ -186,13 +184,12 @@ func (s *server) setChatSessionRuntime(username, id, providerSessionID string) e
 	_, err := s.db.Exec(`
 		INSERT INTO chat_session_runtime (session_id, username, provider_session_id)
 		SELECT ?, ?, ?
-		 WHERE EXISTS (SELECT 1 FROM chat_sessions WHERE id = ? AND username = ?)
+		 WHERE EXISTS (SELECT 1 FROM chat_sessions WHERE id = ?)
 		ON CONFLICT(session_id) DO UPDATE SET
 			provider_session_id = CASE
 				WHEN excluded.provider_session_id != '' THEN excluded.provider_session_id
-				ELSE chat_session_runtime.provider_session_id END
-		WHERE chat_session_runtime.username = excluded.username`,
-		id, username, providerSessionID, id, username)
+				ELSE chat_session_runtime.provider_session_id END`,
+		id, username, providerSessionID, id)
 	return err
 }
 
@@ -206,7 +203,7 @@ func (s *server) chatSessionProviderID(username, id string) (string, error) {
 	}
 	var providerSessionID string
 	err := s.db.QueryRow(`SELECT provider_session_id FROM chat_session_runtime
-		WHERE session_id = ? AND username = ?`, id, username).Scan(&providerSessionID)
+		WHERE session_id = ?`, id).Scan(&providerSessionID)
 	switch err {
 	case nil:
 		return providerSessionID, nil
@@ -236,22 +233,14 @@ func (s *server) upsertChatSessionWithLegacyRuntime(username, targetID, aliasID,
 	err = tx.QueryRow(`SELECT runtime.provider_session_id
 		FROM chat_sessions AS legacy
 		JOIN chat_session_runtime AS runtime
-		  ON runtime.session_id = legacy.id AND runtime.username = legacy.username
-		WHERE legacy.id = ? AND legacy.username = ?
-		  AND runtime.provider_session_id = legacy.id`, aliasID, username).Scan(&providerSessionID)
+		  ON runtime.session_id = legacy.id
+		WHERE legacy.id = ?
+		  AND runtime.provider_session_id = legacy.id`, aliasID).Scan(&providerSessionID)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
-	}
-	var targetOwner string
-	err = tx.QueryRow(`SELECT username FROM chat_sessions WHERE id = ?`, targetID).Scan(&targetOwner)
-	if err != nil && err != sql.ErrNoRows {
-		return false, err
-	}
-	if err == nil && targetOwner != username {
-		return false, nil
 	}
 	if _, err := tx.Exec(`INSERT INTO chat_sessions
 		(id, username, title, cwd, created_at, last_active)
@@ -259,21 +248,19 @@ func (s *server) upsertChatSessionWithLegacyRuntime(username, targetID, aliasID,
 		ON CONFLICT(id) DO UPDATE SET
 			last_active = excluded.last_active,
 			cwd   = CASE WHEN excluded.cwd   != '' THEN excluded.cwd   ELSE chat_sessions.cwd   END,
-			title = CASE WHEN excluded.title != '' THEN excluded.title ELSE chat_sessions.title END
-		WHERE chat_sessions.username = excluded.username`,
+			title = CASE WHEN excluded.title != '' THEN excluded.title ELSE chat_sessions.title END`,
 		targetID, username, title, cwd, now, now); err != nil {
 		return false, err
 	}
 	result, err := tx.Exec(`INSERT INTO chat_session_runtime
 		(session_id, username, provider_session_id)
 		SELECT ?, ?, ? WHERE EXISTS
-		(SELECT 1 FROM chat_sessions WHERE id = ? AND username = ?)
+		(SELECT 1 FROM chat_sessions WHERE id = ?)
 		ON CONFLICT(session_id) DO UPDATE SET
 			provider_session_id = CASE
 				WHEN chat_session_runtime.provider_session_id = '' THEN excluded.provider_session_id
-				ELSE chat_session_runtime.provider_session_id END
-		WHERE chat_session_runtime.username = excluded.username`,
-		targetID, username, providerSessionID, targetID, username)
+				ELSE chat_session_runtime.provider_session_id END`,
+		targetID, username, providerSessionID, targetID)
 	if err != nil {
 		return false, err
 	}
@@ -300,8 +287,8 @@ func (s *server) appendChatMessage(username, id, role, text string) error {
 	_, err := s.db.Exec(`
 		INSERT INTO chat_session_messages (session_id, username, role, text)
 		SELECT ?, ?, ?, ?
-		 WHERE EXISTS (SELECT 1 FROM chat_sessions WHERE id = ? AND username = ?)`,
-		id, username, role, text, id, username)
+		 WHERE EXISTS (SELECT 1 FROM chat_sessions WHERE id = ?)`,
+		id, username, role, text, id)
 	return err
 }
 
@@ -338,7 +325,7 @@ func (s *server) seedChatMessages(username, id string, messages []chatMessage) e
 	defer tx.Rollback()
 	var count int
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM chat_session_messages
-		WHERE session_id = ? AND username = ?`, id, username).Scan(&count); err != nil {
+		WHERE session_id = ?`, id).Scan(&count); err != nil {
 		return err
 	}
 	if count != 0 {
@@ -347,7 +334,7 @@ func (s *server) seedChatMessages(username, id string, messages []chatMessage) e
 	stmt, err := tx.Prepare(`INSERT INTO chat_session_messages
 		(session_id, username, role, text)
 		SELECT ?, ?, ?, ? WHERE EXISTS
-		(SELECT 1 FROM chat_sessions WHERE id = ? AND username = ?)`)
+		(SELECT 1 FROM chat_sessions WHERE id = ?)`)
 	if err != nil {
 		return err
 	}
@@ -356,7 +343,7 @@ func (s *server) seedChatMessages(username, id string, messages []chatMessage) e
 		if msg.Text == "" {
 			continue
 		}
-		if _, err := stmt.Exec(id, username, msg.Role, msg.Text, id, username); err != nil {
+		if _, err := stmt.Exec(id, username, msg.Role, msg.Text, id); err != nil {
 			return err
 		}
 	}
@@ -369,11 +356,11 @@ func (s *server) loadChatSessionDetails(username string, cs *chatSession) error 
 	}
 	cs.Messages = []chatMessage{}
 	_ = s.db.QueryRow(`SELECT provider_session_id FROM chat_session_runtime
-		WHERE session_id = ? AND username = ?`, cs.ID, username).Scan(&cs.ProviderSessionID)
+		WHERE session_id = ?`, cs.ID).Scan(&cs.ProviderSessionID)
 	rows, err := s.db.Query(`SELECT role, text FROM (
 		SELECT id, role, text FROM chat_session_messages
-		 WHERE session_id = ? AND username = ? ORDER BY id DESC LIMIT ?
-	) ORDER BY id`, cs.ID, username, chatSessionSeedMaxMessages)
+		 WHERE session_id = ? ORDER BY id DESC LIMIT ?
+	) ORDER BY id`, cs.ID, chatSessionSeedMaxMessages)
 	if err != nil {
 		return err
 	}
@@ -388,14 +375,14 @@ func (s *server) loadChatSessionDetails(username string, cs *chatSession) error 
 	return rows.Err()
 }
 
-// getChatSession loads one session owned by the user, or (nil, nil) if absent.
+// getChatSession loads one shared environment session, or (nil, nil) if absent.
 func (s *server) getChatSession(username, id string) (*chatSession, error) {
 	if s == nil || s.db == nil || username == "" || id == "" {
 		return nil, nil
 	}
 	row := s.db.QueryRow(
 		`SELECT id, title, cwd, created_at, last_active
-		   FROM chat_sessions WHERE id = ? AND username = ?`, id, username)
+		   FROM chat_sessions WHERE id = ?`, id)
 	var cs chatSession
 	switch err := row.Scan(&cs.ID, &cs.Title, &cs.Cwd, &cs.CreatedAt, &cs.LastActive); err {
 	case nil:
@@ -410,7 +397,7 @@ func (s *server) getChatSession(username, id string) (*chatSession, error) {
 	}
 }
 
-// listChatSessions returns the user's sessions, most-recently-active first.
+// listChatSessions returns the environment's sessions, most-recently-active first.
 func (s *server) listChatSessions(username string) ([]chatSession, error) {
 	out := []chatSession{}
 	if s == nil || s.db == nil || username == "" {
@@ -418,8 +405,8 @@ func (s *server) listChatSessions(username string) ([]chatSession, error) {
 	}
 	rows, err := s.db.Query(
 		`SELECT id, title, cwd, created_at, last_active
-		   FROM chat_sessions WHERE username = ?
-		  ORDER BY last_active DESC LIMIT 200`, username)
+		   FROM chat_sessions
+		  ORDER BY last_active DESC LIMIT 200`)
 	if err != nil {
 		return out, err
 	}
@@ -446,7 +433,7 @@ func (s *server) listChatSessions(username string) ([]chatSession, error) {
 }
 
 // handleChatSessionsList (GET /api/chat/sessions) returns the authenticated
-// user's persisted sessions so the SPA can restore every open tab after a
+// environment's persisted sessions so the SPA can restore every open tab after a
 // reload or a crash. Shape is a bare JSON array of session objects, newest
 // activity first. (Distinct from /api/chat/threads, which is the in-tab
 // conversation-branch surface.)
@@ -470,7 +457,7 @@ func (s *server) handleChatSessionsList(w http.ResponseWriter, r *http.Request) 
 //	                                      always applied (rename)
 //	DELETE /api/chat/session?sid=<id>  → forget a session (close a tab)
 //
-// All operations are scoped to the authenticated user.
+// All operations require an authenticated actor but address shared state.
 func (s *server) handleChatSession(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -536,10 +523,7 @@ func (s *server) handleChatSessionUpsert(w http.ResponseWriter, r *http.Request)
 		writeJSONError(w, http.StatusInternalServerError, "failed to verify session")
 		return
 	}
-	if exists && !owned {
-		writeJSONError(w, http.StatusConflict, "session id belongs to another user")
-		return
-	}
+	_ = exists
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	// Explicit upsert: unlike the send-path touch, an explicitly supplied title
@@ -554,7 +538,7 @@ func (s *server) handleChatSessionUpsert(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		if !transferred {
-			writeJSONError(w, http.StatusConflict, "legacy session alias is not owned by this user")
+			writeJSONError(w, http.StatusConflict, "legacy session alias is unavailable")
 			return
 		}
 	} else if _, err := s.db.Exec(`
@@ -563,15 +547,14 @@ func (s *server) handleChatSessionUpsert(w http.ResponseWriter, r *http.Request)
 			ON CONFLICT(id) DO UPDATE SET
 				last_active = excluded.last_active,
 				cwd   = CASE WHEN excluded.cwd   != '' THEN excluded.cwd   ELSE chat_sessions.cwd   END,
-				title = CASE WHEN excluded.title != '' THEN excluded.title ELSE chat_sessions.title END
-			WHERE chat_sessions.username = excluded.username`,
+				title = CASE WHEN excluded.title != '' THEN excluded.title ELSE chat_sessions.title END`,
 		id, username, strings.TrimSpace(req.Title), req.Cwd, now, now); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "failed to save session")
 		return
 	}
 	owned, _, err = s.chatSessionOwned(username, id)
 	if err != nil || !owned {
-		writeJSONError(w, http.StatusConflict, "session id belongs to another user")
+		writeJSONError(w, http.StatusConflict, "session id is unavailable")
 		return
 	}
 	if req.Messages != nil {
@@ -597,18 +580,17 @@ func (s *server) handleChatSessionDelete(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if s.db != nil {
-		username := currentUser(r)
 		tx, err := s.db.Begin()
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "failed to delete session")
 			return
 		}
 		defer tx.Rollback()
-		if _, err = tx.Exec(`DELETE FROM chat_session_messages WHERE session_id = ? AND username = ?`, sid, username); err == nil {
-			_, err = tx.Exec(`DELETE FROM chat_session_runtime WHERE session_id = ? AND username = ?`, sid, username)
+		if _, err = tx.Exec(`DELETE FROM chat_session_messages WHERE session_id = ?`, sid); err == nil {
+			_, err = tx.Exec(`DELETE FROM chat_session_runtime WHERE session_id = ?`, sid)
 		}
 		if err == nil {
-			_, err = tx.Exec(`DELETE FROM chat_sessions WHERE id = ? AND username = ?`, sid, username)
+			_, err = tx.Exec(`DELETE FROM chat_sessions WHERE id = ?`, sid)
 		}
 		if err != nil || tx.Commit() != nil {
 			writeJSONError(w, http.StatusInternalServerError, "failed to delete session")

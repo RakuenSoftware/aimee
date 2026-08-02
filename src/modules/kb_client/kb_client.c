@@ -771,116 +771,6 @@ static char *kb_error_json(const char *message)
    return json ? json : strdup("{\"status\":\"error\"}");
 }
 
-char *kb_client_repair_json(const char *path, const char *project, const char *embedding_command)
-{
-   if (!path || !path[0] || !project || !project[0])
-      return kb_error_json("repair requires path and project");
-
-   cJSON *req = cJSON_CreateObject();
-   if (!req)
-      return kb_error_json("out of memory");
-   cJSON_AddStringToObject(req, "path", path);
-   cJSON_AddStringToObject(req, "project", project);
-   if (embedding_command && embedding_command[0])
-      cJSON_AddStringToObject(req, "embedding_command", embedding_command);
-   int http_status = -1;
-   char *resp = kb_client_v1_post_json("/v1/maintenance/repair", req, KB_CLIENT_REPAIR_TIMEOUT_MS,
-                                       &http_status);
-   cJSON_Delete(req);
-   if (resp)
-      return resp;
-   if (http_status >= 100)
-   {
-      char msg[128];
-      snprintf(msg, sizeof(msg), "knowledge service /v1/maintenance/repair returned HTTP %d",
-               http_status);
-      return kb_error_json(msg);
-   }
-   return kb_error_json("knowledge service /v1/maintenance/repair did not respond");
-}
-
-char *kb_client_clear_json(const char *project)
-{
-   if (!project || !project[0])
-      return kb_error_json("clear requires project");
-
-   cJSON *req = cJSON_CreateObject();
-   if (!req)
-      return kb_error_json("out of memory");
-   cJSON_AddStringToObject(req, "project", project);
-   int http_status = -1;
-   char *resp = kb_client_v1_post_json("/v1/maintenance/clear", req, CLIENT_DEFAULT_TIMEOUT_MS,
-                                       &http_status);
-   cJSON_Delete(req);
-   if (resp)
-      return resp;
-   if (http_status >= 100)
-   {
-      char msg[128];
-      snprintf(msg, sizeof(msg), "knowledge service /v1/maintenance/clear returned HTTP %d",
-               http_status);
-      return kb_error_json(msg);
-   }
-   return kb_error_json("knowledge service /v1/maintenance/clear did not respond");
-}
-
-/* webchat-project-lifecycle slice 2: shared POST body/transport handling for
- * the /v1/maintenance/purge-* fence routes. `takeover` < 0 omits the field. */
-static char *kb_client_purge_post_json(const char *endpoint, const char *project,
-                                       const char *generation, const char *purge_id, int takeover)
-{
-   if (!project || !project[0] || !generation || !generation[0] || !purge_id || !purge_id[0])
-      return kb_error_json("purge requires project, generation and purge_id");
-
-   cJSON *req = cJSON_CreateObject();
-   if (!req)
-      return kb_error_json("out of memory");
-   cJSON_AddStringToObject(req, "project", project);
-   cJSON_AddStringToObject(req, "generation", generation);
-   cJSON_AddStringToObject(req, "purge_id", purge_id);
-   if (takeover > 0)
-      cJSON_AddTrueToObject(req, "takeover");
-
-   int http_status = -1;
-   char *resp = kb_client_v1_post_json(endpoint, req, CLIENT_DEFAULT_TIMEOUT_MS, &http_status);
-   cJSON_Delete(req);
-   if (resp)
-      return resp;
-   char msg[160];
-   if (http_status >= 100)
-      snprintf(msg, sizeof(msg), "knowledge service %s returned HTTP %d", endpoint, http_status);
-   else
-      snprintf(msg, sizeof(msg), "knowledge service %s did not respond", endpoint);
-   return kb_error_json(msg);
-}
-
-char *kb_client_purge_project_json(const char *project, const char *generation,
-                                   const char *purge_id, int takeover)
-{
-   return kb_client_purge_post_json("/v1/maintenance/purge-project", project, generation, purge_id,
-                                    takeover ? 1 : 0);
-}
-
-char *kb_client_purge_heartbeat_json(const char *project, const char *generation,
-                                     const char *purge_id)
-{
-   return kb_client_purge_post_json("/v1/maintenance/purge-heartbeat", project, generation,
-                                    purge_id, -1);
-}
-
-char *kb_client_purge_finalize_json(const char *project, const char *generation,
-                                    const char *purge_id)
-{
-   return kb_client_purge_post_json("/v1/maintenance/purge-finalize", project, generation, purge_id,
-                                    -1);
-}
-
-char *kb_client_purge_cancel_json(const char *project, const char *generation, const char *purge_id)
-{
-   return kb_client_purge_post_json("/v1/maintenance/purge-cancel", project, generation, purge_id,
-                                    -1);
-}
-
 /* Synchronous build/update now run entirely inside aimee-kb (which owns DB2
  * and the filesystem) via the /v1/code/{build,update} endpoints — no
  * server-side compute or chunk push. */
@@ -1597,11 +1487,43 @@ static int kb_plain_would_leak(const char *url)
 static const char *kb_client_v1_auth_header(char *buf, size_t buf_len)
 {
    /* The HTTP API can run without auth; include a bearer header only when the
-    * operator provides the matching client-side token. */
+    * operator provides the matching client-side token.
+    *
+    * AIMEE_KB_CLIENT_BEARER_TOKEN is what aimee-server PRESENTS, and is read
+    * first so it can be a scoped `service` credential. It falls back to
+    * AIMEE_KB_API_BEARER_TOKEN — aimee-kb's own inbound token — because that is
+    * what every existing deployment set, and reaching the kb matters more than
+    * the ideal credential shape. But see below: falling back means presenting
+    * the OWNER token, and that is worth saying out loud rather than inheriting
+    * silently. */
    char token[512];
-   if (!buf || buf_len == 0 ||
-       !runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", token, sizeof(token)))
+   if (!buf || buf_len == 0)
       return NULL;
+   int own = runtime_secret_get("AIMEE_KB_CLIENT_BEARER_TOKEN", token, sizeof(token));
+   if (!own && !runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", token, sizeof(token)))
+      return NULL;
+
+   /* An unscoped token IS the install owner on aimee-kb (kb_scope.h): it passes
+    * every administrative gate. aimee-server does not need that — it needs the
+    * data plane — so warn ONCE, naming the remedy, instead of running as owner
+    * without anyone noticing. Not fatal: refusing here would take an upgrading
+    * deployment offline over a configuration preference. */
+   if (strncmp(token, "scope:", 6) != 0)
+   {
+      static int warned = 0;
+      if (!warned)
+      {
+         warned = 1;
+         aimee_log(LOG_WARN, "kb_client",
+                   "presenting an UNSCOPED kb bearer: aimee-server is acting as the aimee-kb "
+                   "install owner and passes every administrative gate. Set "
+                   "AIMEE_KB_CLIENT_BEARER_TOKEN to a scoped service credential "
+                   "(scope:service:<name>:<secret>, minted by the owner) to hold only the "
+                   "data plane%s",
+                   own ? "." : "; currently inheriting AIMEE_KB_API_BEARER_TOKEN.");
+      }
+   }
+
    snprintf(buf, buf_len, "Authorization: Bearer %s", token);
    runtime_secret_wipe(token, sizeof(token));
    return buf;

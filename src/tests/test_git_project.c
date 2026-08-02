@@ -1,7 +1,9 @@
-/* test_git_project.c — WP-D: clone a repo as a project under a webuser's scoped
- * workspace. Uses a local file:// source repo (no network, no creds) created in
- * the test, so it exercises the real git clone + scope resolution + name
- * derivation + refusal paths deterministically. */
+/* test_git_project.c — WP-D: clone a repo as a project in the one workspace
+ * environment. Uses a local file:// source repo (no network, no creds) created
+ * in the test, so it exercises the real git clone + scope resolution + name
+ * derivation + refusal paths deterministically. Actors (alice/bob/carol) are
+ * PAM identities that authorize and attribute a request; they never select a
+ * tree, so they all resolve the same projects. */
 #include "git_project.h"
 #include "ws_registry.h"
 
@@ -55,7 +57,7 @@ int main(void)
    assert(git_project_clone("webuser:alice", url, NULL, NULL, NULL, path, sizeof(path), name,
                             sizeof(name), err, sizeof(err)) == 0);
    assert(strcmp(name, "srcrepo") == 0);
-   assert(strstr(path, "/webusers/alice/srcrepo") != NULL);
+   assert(strstr(path, "/environment/srcrepo") != NULL);
    struct stat st;
    char check[PATH_MAX + 32];
    snprintf(check, sizeof(check), "%s/.git", path);
@@ -72,13 +74,13 @@ int main(void)
    snprintf(url2, sizeof(url2), "file://%s/.git", src); /* trailing .git path form */
    assert(git_project_clone("webuser:alice", url, "myproj", NULL, NULL, path, sizeof(path), name,
                             sizeof(name), err, sizeof(err)) == 0);
-   assert(strcmp(name, "myproj") == 0 && strstr(path, "/alice/myproj"));
+   assert(strcmp(name, "myproj") == 0 && strstr(path, "/environment/myproj"));
    (void)url2;
 
-   /* cross-principal: bob clones into HIS scope, not alice's */
+   /* another actor clones into the SAME environment */
    assert(git_project_clone("webuser:bob", url, "shared", NULL, NULL, path, sizeof(path), name,
                             sizeof(name), err, sizeof(err)) == 0);
-   assert(strstr(path, "/webusers/bob/shared") != NULL);
+   assert(strstr(path, "/environment/shared") != NULL);
 
    /* refusals */
    assert(git_project_clone("uid:1000", url, "x", NULL, NULL, path, sizeof(path), name,
@@ -96,14 +98,15 @@ int main(void)
    assert(git_project_clone("webuser:alice", url, "orgproj", "acme", NULL, path, sizeof(path), name,
                             sizeof(name), err, sizeof(err)) == 0);
    assert(strcmp(name, "acme/orgproj") == 0);
-   assert(strstr(path, "/webusers/alice/acme/orgproj") != NULL);
+   assert(strstr(path, "/environment/acme/orgproj") != NULL);
    snprintf(check, sizeof(check), "%s/.aimee/remote", path);
    assert(stat(check, &st) == 0); /* credential-free sidecar published */
    /* same ref again -> exists -> conflict */
    assert(git_project_clone("webuser:alice", url, "orgproj", "acme", NULL, path, sizeof(path), name,
                             sizeof(name), err, sizeof(err)) == GP_ERR_CONFLICT);
-   /* same KEY, different remote (second source repo) -> registry 409, generic
-    * message (no other remote echoed) */
+   /* same KEY, different remote (second source repo). The ref already exists on
+    * disk, and that check fires before the registry one, so this is the
+    * existence conflict — the other remote is never echoed either way. */
    char src2[300], url3[400];
    snprintf(src2, sizeof(src2), "%s/srcrepo2", home);
    assert(run("mkdir -p %s && cd %s && git init -q && git config user.email t@t && git config "
@@ -112,12 +115,11 @@ int main(void)
    snprintf(url3, sizeof(url3), "file://%s", src2);
    assert(git_project_clone("webuser:bob", url3, "orgproj", "acme", NULL, path, sizeof(path), name,
                             sizeof(name), err, sizeof(err)) == GP_ERR_CONFLICT);
-   assert(strstr(err, "different remote") != NULL);
-   assert(strstr(err, "srcrepo") == NULL); /* the other remote is NOT disclosed */
-   /* same key + SAME remote from another webuser -> allowed (holder count 2) */
+   assert(strstr(err, "already exists") != NULL);
+   assert(strstr(err, "srcrepo") == NULL); /* no remote is disclosed */
+   /* same key + SAME remote from another actor -> still the one project */
    assert(git_project_clone("webuser:bob", url, "orgproj", "acme", NULL, path, sizeof(path), name,
-                            sizeof(name), err, sizeof(err)) == 0);
-   assert(strstr(path, "/webusers/bob/acme/orgproj") != NULL);
+                            sizeof(name), err, sizeof(err)) == GP_ERR_CONFLICT);
    /* flat/org namespace conflict: a flat project named like the org */
    assert(git_project_clone("webuser:alice", url3, "acme", NULL, NULL, path, sizeof(path), name,
                             sizeof(name), err,
@@ -138,24 +140,39 @@ int main(void)
    /* conflicts are distinguishable from validation failures (GP_ERR_CONFLICT) */
    assert(git_project_clone("webuser:alice", url, "orgproj", "acme", NULL, path, sizeof(path), name,
                             sizeof(name), err, sizeof(err)) == GP_ERR_CONFLICT);
-   /* registry resync honors `git remote set-url`: repoint alice's clone,
-    * then bob cloning the NEW remote at the same ref succeeds (stale registry
-    * self-heals under the lock) */
+   /* A published ref is a conflict for every actor, whichever remote they
+    * name and however the clone was later repointed with `git remote set-url`. */
    assert(git_project_clone("webuser:alice", url, "syncy", "acme", NULL, path, sizeof(path), name,
                             sizeof(name), err, sizeof(err)) == 0);
    assert(run("git -C %s remote set-url origin %s", path, url3) == 0);
    assert(git_project_clone("webuser:bob", url3, "syncy", "acme", NULL, path, sizeof(path), name,
-                            sizeof(name), err, sizeof(err)) == 0);
-   /* ...and the OTHER direction: cloning the now-STALE registry remote at the
-    * same ref must 409 after resync, not silently join divergent holders */
+                            sizeof(name), err, sizeof(err)) == GP_ERR_CONFLICT);
    assert(git_project_clone("webuser:carol", url, "syncy", "acme", NULL, path, sizeof(path), name,
                             sizeof(name), err, sizeof(err)) == GP_ERR_CONFLICT);
 
-   /* --- list: alice has srcrepo + myproj + acme/orgproj + Rakuen-Software/sanit
-    * + acme/syncy; bob has shared + acme/orgproj + acme/syncy --- */
+   /* A STALE entry — a ref registered with no published clone behind it, e.g. a
+    * crash between register and publish — must SELF-HEAL rather than block the
+    * ref forever. The resync drops an entry with no clone behind it, so the
+    * clone proceeds and rebinds the ref to its real remote. */
+   {
+      int lk = ws_reg_lock("stale"); /* mutations require the lifecycle lock */
+      assert(lk >= 0);
+      assert(ws_reg_register("stale", "https://example.invalid/other.git") == 0);
+      close(lk); /* release before the clone, which takes the same lock */
+   }
+   assert(git_project_clone("webuser:alice", url, "stale", NULL, NULL, path, sizeof(path), name,
+                            sizeof(name), err, sizeof(err)) == 0);
+   {
+      char healed[1024];
+      assert(ws_reg_lookup("stale", healed, sizeof(healed)) == 1);
+      assert(strstr(healed, "example.invalid") == NULL); /* rebound to the real remote */
+   }
+
+   /* --- list: one environment holds srcrepo, myproj, shared, acme/orgproj,
+    * Rakuen-Software/sanit, acme/syncy, stale — every actor sees all of them --- */
    char names[64][GIT_PROJECT_NAME_MAX];
    int an = git_project_list("webuser:alice", names, 64);
-   assert(an == 5);
+   assert(an == 7);
    int saw_src = 0, saw_my = 0, saw_org = 0, saw_sanit = 0;
    for (int i = 0; i < an; i++)
    {
@@ -170,190 +187,94 @@ int main(void)
    }
    assert(saw_src && saw_my && saw_org && saw_sanit);
    int bn = git_project_list("webuser:bob", names, 64);
-   assert(bn == 3); /* bob sees only his: shared + acme/orgproj + acme/syncy */
+   assert(bn == an); /* every actor sees the same environment */
    assert(git_project_list("uid:1000", names, 64) == -1);
-   /* a webuser with no clones lists zero, not an error */
-   assert(git_project_list("webuser:carol", names, 64) == 0);
+   assert(git_project_list("webuser:carol", names, 64) == an);
 
-   /* --- delete (slice 2). The kb purge wrappers are the kb_purge_stub: a
-    * transport failure by default (exercising the 503-abort path), success
-    * with AIMEE_TEST_KB_PURGE_MODE=ok. --- */
-   git_project_delete_result_t dres;
+   /* --- delete (slice 2). LOCAL: the clone and this server's own state go, and
+    * aimee-kb is never called — so there is no purge outcome, no fence, and no
+    * force. --- */
    char derr[512];
 
    /* refusals: bad ref / non-webuser */
-   assert(git_project_delete("webuser:alice", "../x", 0, &dres, derr, sizeof(derr)) == -1);
-   assert(git_project_delete("webuser:alice", "a/b/c", 0, &dres, derr, sizeof(derr)) == -1);
-   assert(git_project_delete("uid:1000", "srcrepo", 0, &dres, derr, sizeof(derr)) == -1);
-   /* cross-principal / nonexistent: plain not-found (no existence disclosure) */
-   assert(git_project_delete("webuser:carol", "srcrepo", 0, &dres, derr, sizeof(derr)) ==
+   assert(git_project_delete("webuser:alice", "../x", derr, sizeof(derr)) == -1);
+   assert(git_project_delete("webuser:alice", "a/b/c", derr, sizeof(derr)) == -1);
+   assert(git_project_delete("uid:1000", "srcrepo", derr, sizeof(derr)) == -1);
+   /* a ref that does not exist is a plain not-found */
+   assert(git_project_delete("webuser:carol", "nosuch", derr, sizeof(derr)) == GP_ERR_NOT_FOUND);
+
+   /* Any actor may delete any project in the environment, and the registry
+    * entry goes with it. */
+   char aorg[PATH_MAX], remo[1024];
+   snprintf(aorg, sizeof(aorg), "%s/environment/acme/orgproj", wsdir);
+   assert(stat(aorg, &st) == 0);
+   assert(git_project_delete("webuser:bob", "acme/orgproj", derr, sizeof(derr)) == 0);
+   assert(stat(aorg, &st) != 0);
+   assert(ws_reg_lookup("acme/orgproj", remo, sizeof(remo)) == 0);
+   /* the org dir survives while a sibling project still lives there */
+   snprintf(check, sizeof(check), "%s/environment/acme/syncy", wsdir);
+   assert(stat(check, &st) == 0);
+
+   /* deleting the same ref again is a plain not-found */
+   assert(git_project_delete("webuser:alice", "acme/orgproj", derr, sizeof(derr)) ==
           GP_ERR_NOT_FOUND);
-   assert(git_project_delete("webuser:bob", "srcrepo", 0, &dres, derr, sizeof(derr)) ==
-          GP_ERR_NOT_FOUND); /* alice's flat project is invisible to bob */
 
-   /* retained: alice deletes acme/orgproj while bob still holds it — the kb
-    * purge is never attempted (the stub would fail), alice's clone goes, bob's
-    * stays, the registry drops to one holder. */
-   char aorg[PATH_MAX], borg[PATH_MAX];
-   snprintf(aorg, sizeof(aorg), "%s/webusers/alice/acme/orgproj", wsdir);
-   snprintf(borg, sizeof(borg), "%s/webusers/bob/acme/orgproj", wsdir);
-   assert(git_project_delete("webuser:alice", "acme/orgproj", 0, &dres, derr, sizeof(derr)) == 0);
-   assert(strcmp(dres.kb_status, "retained") == 0);
-   assert(dres.purge_id[0] != '\0');
-   free(dres.kb_detail);
-   assert(stat(aorg, &st) != 0);                        /* alice's clone removed */
-   assert(stat(borg, &st) == 0 && S_ISDIR(st.st_mode)); /* bob's untouched */
-   char remo[1024];
-   int holders = 0;
-   assert(ws_reg_lookup("acme/orgproj", remo, sizeof(remo), &holders) == 1 && holders == 1);
-   /* alice's acme org dir was NOT pruned: acme/syncy still lives there */
-   snprintf(check, sizeof(check), "%s/webusers/alice/acme/syncy", wsdir);
+   snprintf(check, sizeof(check), "%s/environment/shared", wsdir);
    assert(stat(check, &st) == 0);
-
-   /* last holder + kb unreachable, no force -> 503 abort: nothing destroyed,
-    * the registry decrement rolled back. */
-   assert(git_project_delete("webuser:bob", "acme/orgproj", 0, &dres, derr, sizeof(derr)) ==
-          GP_ERR_KB_UNAVAILABLE);
-   assert(dres.kb_detail && strstr(dres.kb_detail, "error") != NULL);
-   free(dres.kb_detail);
-   assert(stat(borg, &st) == 0); /* clone intact */
-   assert(ws_reg_lookup("acme/orgproj", remo, sizeof(remo), &holders) == 1 &&
-          holders == 1); /* count restored */
-
-   /* force: the filesystem proceeds despite the unreachable kb; the response
-    * carries the kb error detail under kb_status "forced". */
-   assert(git_project_delete("webuser:bob", "acme/orgproj", 1, &dres, derr, sizeof(derr)) == 0);
-   assert(strcmp(dres.kb_status, "forced") == 0);
-   assert(dres.kb_detail && strstr(dres.kb_detail, "stub") != NULL);
-   free(dres.kb_detail);
-   assert(stat(borg, &st) != 0);                                             /* clone removed */
-   assert(ws_reg_lookup("acme/orgproj", remo, sizeof(remo), &holders) == 0); /* entry gone */
-
-   /* purged: sole holder + reachable kb (stub ok mode) -> full purge path
-    * (fence write, heartbeat, finalize) and the per-store detail. */
-   setenv("AIMEE_TEST_KB_PURGE_MODE", "ok", 1);
-   snprintf(check, sizeof(check), "%s/webusers/alice/myproj", wsdir);
-   assert(stat(check, &st) == 0);
-   assert(git_project_delete("webuser:alice", "myproj", 0, &dres, derr, sizeof(derr)) == 0);
-   assert(strcmp(dres.kb_status, "purged") == 0);
-   assert(dres.kb_detail && strstr(dres.kb_detail, "stub") != NULL); /* per-store map */
-   assert(dres.generation[0] != '\0');
-   free(dres.kb_detail);
-   assert(stat(check, &st) != 0);
-   unsetenv("AIMEE_TEST_KB_PURGE_MODE");
-
-   /* org prune: bob's last project under acme (syncy, retained — alice still
-    * holds it) removes the clone AND the now-empty org dir. */
-   assert(git_project_delete("webuser:bob", "acme/syncy", 0, &dres, derr, sizeof(derr)) == 0);
-   assert(strcmp(dres.kb_status, "retained") == 0);
-   free(dres.kb_detail);
-   snprintf(check, sizeof(check), "%s/webusers/bob/acme", wsdir);
-   assert(stat(check, &st) != 0); /* org dir pruned */
-   snprintf(check, sizeof(check), "%s/webusers/alice/acme/syncy", wsdir);
-   assert(stat(check, &st) == 0); /* alice's holder untouched */
-
-   /* the lister agrees: alice lost acme/orgproj + myproj, bob lost both acme
-    * projects (shared remains). */
-   assert(git_project_list("webuser:alice", names, 64) == 3);
-   assert(git_project_list("webuser:bob", names, 64) == 1);
-   assert(strcmp(names[0], "shared") == 0);
-
-   /* cancel mismatch: the purge reaches the kb but a store fails (fence
-    * written) and the cancel is a generation-mismatch no-op (cleared:false) —
-    * terminal purge-committed-unfinished: the holder count must NOT be
-    * restored and nothing filesystem is removed. */
-   setenv("AIMEE_TEST_KB_PURGE_MODE", "cancel-mismatch", 1);
-   snprintf(check, sizeof(check), "%s/webusers/bob/shared", wsdir);
-   assert(git_project_delete("webuser:bob", "shared", 0, &dres, derr, sizeof(derr)) ==
-          GP_ERR_KB_UNAVAILABLE);
-   assert(strstr(derr, "unfinished") != NULL);
-   free(dres.kb_detail);
-   assert(stat(check, &st) == 0);                                      /* clone intact */
-   assert(ws_reg_lookup("shared", remo, sizeof(remo), &holders) == 0); /* decrement KEPT */
-   /* re-running converges: the resync step rebuilds the holder from disk and
-    * a now-successful purge completes the delete. */
-   setenv("AIMEE_TEST_KB_PURGE_MODE", "ok", 1);
-   assert(git_project_delete("webuser:bob", "shared", 0, &dres, derr, sizeof(derr)) == 0);
-   assert(strcmp(dres.kb_status, "purged") == 0);
-   free(dres.kb_detail);
+   assert(git_project_delete("webuser:bob", "shared", derr, sizeof(derr)) == 0);
    assert(stat(check, &st) != 0);
 
-   /* local-index failure: aborts BEFORE any filesystem removal — the cancel
-    * confirms (cleared:true), the holder is re-registered, the clone stays. */
+   /* local-index failure aborts BEFORE any filesystem removal, and the registry
+    * entry is restored so a re-run converges. */
    setenv("AIMEE_TEST_CODE_INDEX_DELETE_FAIL", "1", 1);
-   snprintf(check, sizeof(check), "%s/webusers/alice/srcrepo", wsdir);
-   assert(git_project_delete("webuser:alice", "srcrepo", 0, &dres, derr, sizeof(derr)) ==
-          GP_ERR_KB_UNAVAILABLE);
+   snprintf(check, sizeof(check), "%s/environment/srcrepo", wsdir);
+   assert(git_project_delete("webuser:alice", "srcrepo", derr, sizeof(derr)) == -1);
    assert(strstr(derr, "code index") != NULL);
-   free(dres.kb_detail);
-   assert(stat(check, &st) == 0); /* clone intact */
-   assert(ws_reg_lookup("srcrepo", remo, sizeof(remo), &holders) == 1 &&
-          holders == 1); /* holder restored */
+   assert(stat(check, &st) == 0);                             /* clone intact */
+   assert(ws_reg_lookup("srcrepo", remo, sizeof(remo)) == 1); /* entry restored */
    unsetenv("AIMEE_TEST_CODE_INDEX_DELETE_FAIL");
-   assert(git_project_delete("webuser:alice", "srcrepo", 0, &dres, derr, sizeof(derr)) == 0);
-   assert(strcmp(dres.kb_status, "purged") == 0);
-   free(dres.kb_detail);
+   assert(git_project_delete("webuser:alice", "srcrepo", derr, sizeof(derr)) == 0);
+   assert(stat(check, &st) != 0);
+   assert(ws_reg_lookup("srcrepo", remo, sizeof(remo)) == 0);
+
+   snprintf(check, sizeof(check), "%s/environment/Rakuen-Software/sanit", wsdir);
+   assert(git_project_delete("webuser:alice", "Rakuen-Software/sanit", derr, sizeof(derr)) == 0);
+   assert(stat(check, &st) != 0);
+   snprintf(check, sizeof(check), "%s/environment/myproj", wsdir);
+   assert(git_project_delete("webuser:alice", "myproj", derr, sizeof(derr)) == 0);
+   assert(stat(check, &st) != 0);
+   snprintf(check, sizeof(check), "%s/environment/stale", wsdir);
+   assert(git_project_delete("webuser:alice", "stale", derr, sizeof(derr)) == 0);
    assert(stat(check, &st) != 0);
 
-   /* fence ownership lost (heartbeat refreshed:false — a takeover displaced
-    * this delete): the walk stops before removing anything; the fence and the
-    * registry decrement stay (the purge committed); a re-run converges. */
-   setenv("AIMEE_TEST_KB_PURGE_MODE", "hb-lost", 1);
-   snprintf(check, sizeof(check), "%s/webusers/alice/Rakuen-Software/sanit", wsdir);
-   assert(git_project_delete("webuser:alice", "Rakuen-Software/sanit", 0, &dres, derr,
-                             sizeof(derr)) == GP_ERR_KB_UNAVAILABLE);
-   assert(strstr(derr, "fence") != NULL);
-   free(dres.kb_detail);
-   assert(stat(check, &st) == 0); /* nothing removed */
-   assert(ws_reg_lookup("Rakuen-Software/sanit", remo, sizeof(remo), &holders) == 0);
-   setenv("AIMEE_TEST_KB_PURGE_MODE", "ok", 1);
-   assert(git_project_delete("webuser:alice", "Rakuen-Software/sanit", 0, &dres, derr,
-                             sizeof(derr)) == 0);
-   assert(strcmp(dres.kb_status, "purged") == 0);
-   free(dres.kb_detail);
-   assert(stat(check, &st) != 0);
-   unsetenv("AIMEE_TEST_KB_PURGE_MODE");
-
-   /* final tally: alice keeps only acme/syncy; bob has nothing left. */
+   /* final tally: only acme/syncy remains. */
    assert(git_project_list("webuser:alice", names, 64) == 1);
    assert(strcmp(names[0], "acme/syncy") == 0);
-   assert(git_project_list("webuser:bob", names, 64) == 0);
 
    /* --- rename-first tombstone: an interrupted walk is resumable --- */
-   setenv("AIMEE_TEST_KB_PURGE_MODE", "ok", 1);
-   /* simulate a crash right after the tombstone rename: the project sits at
-    * its ".deleting-<repo>" sibling and the crashed attempt's registry
-    * decrement persisted (resync re-derives from disk, where only the marker
-    * — invisible to it — remains). Re-running the delete must converge. */
+   /* Simulate a crash right after the tombstone rename: the project sits at its
+    * ".deleting-<repo>" sibling. Re-running the delete must converge. */
    char mpath[PATH_MAX];
-   snprintf(mpath, sizeof(mpath), "%s/webusers/alice/acme/.deleting-syncy", wsdir);
-   assert(run("mv %s/webusers/alice/acme/syncy %s", wsdir, mpath) == 0);
-   assert(git_project_delete("webuser:alice", "acme/syncy", 0, &dres, derr, sizeof(derr)) == 0);
-   assert(strcmp(dres.kb_status, "purged") == 0);
-   free(dres.kb_detail);
+   snprintf(mpath, sizeof(mpath), "%s/environment/acme/.deleting-syncy", wsdir);
+   assert(run("mv %s/environment/acme/syncy %s", wsdir, mpath) == 0);
+   assert(git_project_delete("webuser:alice", "acme/syncy", derr, sizeof(derr)) == 0);
    assert(stat(mpath, &st) != 0); /* marker tree fully gone */
-   snprintf(check, sizeof(check), "%s/webusers/alice/acme", wsdir);
+   snprintf(check, sizeof(check), "%s/environment/acme", wsdir);
    assert(stat(check, &st) != 0); /* org pruned */
-   assert(ws_reg_lookup("acme/syncy", remo, sizeof(remo), &holders) == 0);
+   assert(ws_reg_lookup("acme/syncy", remo, sizeof(remo)) == 0);
 
    /* a flat marker with content (the ref itself no longer exists anywhere)
     * also converges, and once converged the ref is a plain 404 again */
-   assert(run("mkdir -p %s/webusers/alice/.deleting-ghost/sub && "
-              "echo x > %s/webusers/alice/.deleting-ghost/sub/f",
+   assert(run("mkdir -p %s/environment/.deleting-ghost/sub && "
+              "echo x > %s/environment/.deleting-ghost/sub/f",
               wsdir, wsdir) == 0);
-   assert(git_project_delete("webuser:alice", "ghost", 0, &dres, derr, sizeof(derr)) == 0);
-   assert(strcmp(dres.kb_status, "purged") == 0);
-   free(dres.kb_detail);
-   snprintf(check, sizeof(check), "%s/webusers/alice/.deleting-ghost", wsdir);
+   assert(git_project_delete("webuser:alice", "ghost", derr, sizeof(derr)) == 0);
+   snprintf(check, sizeof(check), "%s/environment/.deleting-ghost", wsdir);
    assert(stat(check, &st) != 0);
-   assert(git_project_delete("webuser:alice", "ghost", 0, &dres, derr, sizeof(derr)) ==
-          GP_ERR_NOT_FOUND);
+   assert(git_project_delete("webuser:alice", "ghost", derr, sizeof(derr)) == GP_ERR_NOT_FOUND);
    /* never-existing refs (flat and org) still 404 — no marker, no project */
-   assert(git_project_delete("webuser:alice", "neverwas", 0, &dres, derr, sizeof(derr)) ==
-          GP_ERR_NOT_FOUND);
-   assert(git_project_delete("webuser:alice", "no/pe", 0, &dres, derr, sizeof(derr)) ==
-          GP_ERR_NOT_FOUND);
-   unsetenv("AIMEE_TEST_KB_PURGE_MODE");
+   assert(git_project_delete("webuser:alice", "neverwas", derr, sizeof(derr)) == GP_ERR_NOT_FOUND);
+   assert(git_project_delete("webuser:alice", "no/pe", derr, sizeof(derr)) == GP_ERR_NOT_FOUND);
    assert(git_project_list("webuser:alice", names, 64) == 0);
 
    assert(run("rm -rf %s", home) == 0);

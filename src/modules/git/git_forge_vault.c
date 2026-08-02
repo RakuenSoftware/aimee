@@ -1,5 +1,4 @@
-/* git_forge_vault.c — autonomous read of a webuser's git credentials from the
- * sealed vault (server wrap). See git_forge_vault.h. */
+/* git_forge_vault.c — autonomous read of environment Git credentials. */
 #include "git_forge_vault.h"
 #include "util.h" /* shell_escape */
 #include "vault_service.h"
@@ -15,8 +14,9 @@ static int read_cred(const char *principal, const char *cred, char *out, size_t 
 {
    if (out && out_len)
       out[0] = '\0';
+   (void)principal; /* actor attribution, never a credential namespace */
    vault_status_t st =
-       vault_service_get_server_wrap(principal, GIT_FORGE_VAULT_AGENT, cred, out, out_len);
+       vault_service_get_server_principal(GIT_FORGE_VAULT_AGENT, cred, out, out_len);
    if (st == VAULT_OK)
       return 1;
    if (st == VAULT_NO_ENTRY)
@@ -130,37 +130,13 @@ static int popen_config_reader(const char *key, char *out, size_t out_len, void 
  * user unlock — the same autonomous path the forge token uses). 1 when BOTH
  * fields are present, 0 when absent or half-written, -1 on a fail-closed
  * error. */
-static int principal_identity(const char *principal, char *name_out, size_t name_len,
-                              char *email_out, size_t email_len)
-{
-   int n = read_cred(principal, GIT_AUTHOR_NAME_CRED, name_out, name_len);
-   int e = read_cred(principal, GIT_AUTHOR_EMAIL_CRED, email_out, email_len);
-   if (n < 0 || e < 0)
-   {
-      name_out[0] = '\0';
-      email_out[0] = '\0';
-      return -1;
-   }
-   if (n == 1 && e == 1 && name_out[0] && email_out[0])
-      return 1;
-   name_out[0] = '\0';
-   email_out[0] = '\0';
-   return 0;
-}
-
 int git_identity_resolve_with(const char *principal, git_config_reader_fn read_cfg, void *ud,
                               char *name_out, size_t name_len, char *email_out, size_t email_len)
 {
    if (!name_out || !name_len || !email_out || !email_len)
       return -1;
 
-   /* A user sharing this server commits as themselves, not as the server. */
-   if (principal && principal[0])
-   {
-      int prc = principal_identity(principal, name_out, name_len, email_out, email_len);
-      if (prc != 0)
-         return prc;
-   }
+   (void)principal; /* all PAM actors commit as the configured environment */
 
    int rc = git_identity_get(name_out, name_len, email_out, email_len);
    if (rc != 0)

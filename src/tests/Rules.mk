@@ -307,6 +307,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-cli-kb-smoke \
                $(TESTPREFIX)/unit-test-kb-synthesis-identity \
                $(TESTPREFIX)/unit-test-workspace-scope \
+               $(TESTPREFIX)/unit-test-workspace-migration \
                $(TESTPREFIX)/unit-test-webuser-runtime \
                $(TESTPREFIX)/unit-test-workspace-runner-registry \
                $(TESTPREFIX)/unit-test-workspace-turn \
@@ -3593,6 +3594,12 @@ $(TESTPREFIX)/unit-test-workspace-scope: \
                       $(OBJDIR)/aimee_home.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
+$(TESTPREFIX)/unit-test-workspace-migration: \
+                      $(OBJDIR)/tests/test_workspace_migration.o \
+                      $(OBJDIR)/modules/workspace/workspace_scope.o \
+                      $(OBJDIR)/aimee_home.o
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+
 $(TESTPREFIX)/unit-test-workspace-runner-queue: \
                       $(OBJDIR)/tests/test_workspace_runner_queue.o \
                       $(OBJDIR)/modules/workspace/workspace_runner_queue.o \
@@ -4898,7 +4905,7 @@ $(TESTPREFIX)/unit-test-git-ops: $(OBJDIR)/tests/test_git_ops.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-git-project: $(OBJDIR)/tests/test_git_project.o \
-                              $(OBJDIR)/tests/support/kb_purge_stub.o \
+                              $(OBJDIR)/tests/support/gp_local_index_stub.o \
                               $(OBJDIR)/modules/git/git_project.o $(OBJDIR)/server/ws_registry.o $(OBJDIR)/modules/git/git_cred_inject.o $(OBJDIR)/modules/git/git_ssh_agent.o $(OBJDIR)/modules/webuser/webuser_runtime.o \
                               $(OBJDIR)/modules/git/git_forge_vault.o $(OBJDIR)/modules/git/git_host_cred.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/workspace/workspace_scope.o \
                               $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/util_url.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_fields.o $(OBJDIR)/modules/config/config_accessors_0.o $(OBJDIR)/modules/config/config_accessors_1.o $(OBJDIR)/modules/config/config_accessors_2.o $(OBJDIR)/modules/config/config_accessors_3.o $(OBJDIR)/modules/config/config_accessors_4.o $(OBJDIR)/modules/config/config_accessors_5.o $(OBJDIR)/modules/config/config_accessors_6.o $(OBJDIR)/modules/config/config_accessors_7.o $(OBJDIR)/aimee_home.o \
