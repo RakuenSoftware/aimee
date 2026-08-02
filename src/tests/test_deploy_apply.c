@@ -93,6 +93,39 @@ static int envp_key_count(char **envp, const char *key)
    return count;
 }
 
+/* The kb bearer must exist after a managed deploy: auth is enforced only when
+ * one is configured, so a deploy that mints nothing leaves the kb serving every
+ * privileged route unauthenticated. It must also be minted ONCE — a re-apply
+ * that rotated it would leave a running kb holding a bearer the server no
+ * longer sends. */
+static void test_managed_kb_bearer_minted_once(void)
+{
+   char tmp[] = "/tmp/aimee-deploy-kb-bearer-XXXXXX";
+   assert(mkdtemp(tmp) != NULL);
+   assert(setenv("AIMEE_HOME", tmp, 1) == 0);
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
+   unsetenv("AIMEE_KB_API_BEARER_TOKEN");
+
+   g_stub_random_hex = 'c';
+   char first[DEPLOY_KB_BEARER_HEX + 1] = "";
+   assert(deploy_kb_bearer(first, sizeof(first)) == 0);
+   assert(strlen(first) == DEPLOY_KB_BEARER_HEX);
+   for (size_t i = 0; i < DEPLOY_KB_BEARER_HEX; i++)
+      assert(first[i] == 'c');
+
+   /* Re-apply reads the sealed value instead of rotating it. */
+   g_stub_random_hex = 'd';
+   char second[DEPLOY_KB_BEARER_HEX + 1] = "";
+   assert(deploy_kb_bearer(second, sizeof(second)) == 0);
+   assert(strcmp(first, second) == 0);
+
+   /* A buffer too small to hold the credential is refused, never truncated. */
+   char tiny[8];
+   assert(deploy_kb_bearer(tiny, sizeof(tiny)) == -1);
+
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
+}
+
 static void test_managed_llm_service_credential(void)
 {
    char tmp[] = "/tmp/aimee-deploy-llm-token-XXXXXX";
@@ -448,6 +481,7 @@ int main(void)
 {
    printf("test_deploy_apply\n");
    test_managed_llm_service_credential();
+   test_managed_kb_bearer_minted_once();
    test_deploy_argv_is_orderable_and_has_no_remove_orphans();
    test_managed_kb_credential_bootstrap_is_stdin_only();
    test_managed_identity_bootstrap_runs_inside_kb_without_secret_argv();

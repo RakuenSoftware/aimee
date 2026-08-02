@@ -30,6 +30,7 @@ extern char **environ;
 #define DEPLOY_OUT_CAP         8192                    /* tail of compose output kept for the UI */
 #define DEPLOY_LLM_TOKEN_FILE  ".managed-kb-llm-token" /* legacy migration only */
 #define DEPLOY_LLM_TOKEN_HEX   64                      /* 256-bit opaque bearer */
+#define DEPLOY_KB_BEARER_HEX   64                      /* 256-bit opaque kb bearer */
 
 /* Background-deploy state (one at a time; the wizard drives a single stack). */
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -166,6 +167,38 @@ static int deploy_llm_token(char *out, size_t cap)
    if (platform_random_hex(proposed, DEPLOY_LLM_TOKEN_HEX) != 0)
       return -1;
    if (vault_runtime_secret_set("AIMEE_LLM_AUTH_TOKEN", proposed) != 0)
+   {
+      runtime_secret_wipe(proposed, sizeof(proposed));
+      return -1;
+   }
+   snprintf(out, cap, "%s", proposed);
+   runtime_secret_wipe(proposed, sizeof(proposed));
+   return 0;
+}
+
+/* The kb bearer, minted once and persisted on first deploy.
+ *
+ * Without this the kb serves every privileged route unauthenticated: auth is
+ * enforced only when a bearer is configured, and nothing configured one. Leaving
+ * that to a documented manual step means every new install ships open, so the
+ * wizard mints it here and seals it on both sides — the server's own Vault via
+ * vault_runtime_secret_set (the server sends this bearer), and the KB's Vault
+ * through the first-boot bootstrap below (the KB requires it).
+ *
+ * Mint-once: an already-sealed value is reused, so re-running a deploy does not
+ * rotate the credential out from under a running KB. */
+static int deploy_kb_bearer(char *out, size_t cap)
+{
+   if (!out || cap < DEPLOY_KB_BEARER_HEX + 1)
+      return -1;
+   out[0] = '\0';
+   if (runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", out, cap) && out[0])
+      return 0;
+
+   char proposed[DEPLOY_KB_BEARER_HEX + 1];
+   if (platform_random_hex(proposed, DEPLOY_KB_BEARER_HEX) != 0)
+      return -1;
+   if (vault_runtime_secret_set("AIMEE_KB_API_BEARER_TOKEN", proposed) != 0)
    {
       runtime_secret_wipe(proposed, sizeof(proposed));
       return -1;
@@ -654,19 +687,45 @@ static void *deploy_worker(void *arg)
       /* The server is already running this worker. Start KB next and LLM last.
        * Model downloads continue inside the LLM container after this deploy
        * finishes; KB initialization and CPU indexing do not wait for them. */
-      if (managed_kb && managed_llm)
+      /* Seal the KB's first-boot credentials. Runs whenever the KB is managed:
+       * the kb bearer must be sealed even on a deploy with no managed LLM, or
+       * the KB comes up serving every privileged route unauthenticated. The
+       * record is NUL-separated, matching the `env -0` the bootstrap reads. */
+      if (managed_kb)
       {
-         const char *token = deploy_env_value(envp, "AIMEE_LLM_AUTH_TOKEN");
-         char record[sizeof("AIMEE_LLM_AUTH_TOKEN=") + 512];
-         int record_len =
-             token ? snprintf(record, sizeof(record), "AIMEE_LLM_AUTH_TOKEN=%s", token) : -1;
+         char kb_bearer[DEPLOY_KB_BEARER_HEX + 1] = "";
+         int have_kb_bearer = deploy_kb_bearer(kb_bearer, sizeof(kb_bearer)) == 0;
+         const char *token = managed_llm ? deploy_env_value(envp, "AIMEE_LLM_AUTH_TOKEN") : NULL;
+
+         char record[1024];
+         size_t record_len = 0;
+         int record_ok = 1;
+         if (managed_llm)
+         {
+            int n = token ? snprintf(record, sizeof(record), "AIMEE_LLM_AUTH_TOKEN=%s", token) : -1;
+            if (n <= 0 || (size_t)n >= sizeof(record))
+               record_ok = 0;
+            else
+               record_len = (size_t)n + 1; /* keep the NUL: it separates entries */
+         }
+         if (record_ok && have_kb_bearer)
+         {
+            int n = snprintf(record + record_len, sizeof(record) - record_len,
+                             "AIMEE_KB_API_BEARER_TOKEN=%s", kb_bearer);
+            if (n <= 0 || (size_t)n >= sizeof(record) - record_len)
+               record_ok = 0;
+            else
+               record_len += (size_t)n + 1;
+         }
+         runtime_secret_wipe(kb_bearer, sizeof(kb_bearer));
+
          const char *bootstrap_argv[16];
          int bootstrap_code = -1;
          used = strlen(out);
-         if (record_len <= 0 || (size_t)record_len >= sizeof(record) ||
+         if (!record_ok || record_len == 0 || !have_kb_bearer ||
              deploy_kb_vault_bootstrap_argv(
                  file, bootstrap_argv, sizeof(bootstrap_argv) / sizeof(bootstrap_argv[0])) < 0 ||
-             run_capture_input(bootstrap_argv, envp, record, (size_t)record_len + 1, out + used,
+             run_capture_input(bootstrap_argv, envp, record, record_len, out + used,
                                sizeof(out) - used, &bootstrap_code) != 0 ||
              bootstrap_code != 0)
          {
@@ -674,7 +733,7 @@ static void *deploy_worker(void *arg)
             used = strlen(out);
             if (used < sizeof(out) - 1)
                snprintf(out + used, sizeof(out) - used,
-                        "deploy: failed to seal the managed LLM credential into the KB Vault\n");
+                        "deploy: failed to seal the KB first-boot credentials into the KB Vault\n");
          }
          memset(record, 0, sizeof(record));
       }
