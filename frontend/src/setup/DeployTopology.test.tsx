@@ -186,6 +186,9 @@ describe('DeployTopology synthesis picker', () => {
     // synthesis lived in the kb image. Absent, present or contradictory, they must not
     // change what is offerable.
     for (const cfg of [{}, { aimee_with_llamacpp: '0' }, { aimee_with_llamacpp: '1' }]) {
+      // Within one test the auto-cleanup between tests has not run yet, so each
+      // iteration would otherwise stack another copy of the page in the document.
+      cleanup();
       await renderPage(cfg);
       const values = Array.from(synthSelect().options).map((o) => o.value);
       expect(values).toContain('gemma-4-E2B-it');
