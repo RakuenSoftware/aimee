@@ -1204,3 +1204,76 @@ metric because that metric punishes predicate variance the product reconciles
 anyway. The honest summary is that thinking trades naming discipline and
 abstention for coverage, and whether that is worth it depends on which of those
 the KB values — which is a product question, not a benchmark one.
+
+## v6 at 1k: retractions reach the storage layer, and polarity does not leak
+
+First full run of the polarity prompt. gemma-4-E4B UD-Q4, 1001 notes of the v4
+small corpus, thinking on, 5080/CUDA.
+
+Scored in two halves, because the gold cannot judge the half it was written
+against: every retraction note is labelled EMPTY under the v1-v5 policy, so
+grading v6 against it naively charges a false positive for each retraction v6
+correctly emits. That number would be real and meaningless.
+
+**Ordinary extraction, negated facts removed, gold untouched:**
+
+| view | F1 | precision | recall |
+|---|---:|---:|---:|
+| strict | 0.5858 | 0.5983 | 0.5739 |
+| relation-agnostic | 0.8144 | 0.8318 | 0.7977 |
+
+In the same band as v5, so the polarity field did not disturb normal extraction.
+NOT a clean v5-vs-v6 comparison: this is gold_small and the v5 figure came from
+the first 955 of gold_large, which are different notes of different difficulty.
+A real comparison needs v5 re-run on this corpus.
+
+**Retraction quality, 132 negation notes:**
+
+| | count |
+|---|---:|
+| flagged with negated=true | 114 / 132 |
+| directly usable by `db2_fact_retract` | **91** |
+| invented / non-canonical relation | 23 |
+| empty object | 2 |
+
+"Usable" means a canonical relation AND a non-empty object, because `target`
+scopes the retraction and an empty one blanks every value of
+(source, relation). The 2 empty-object cases never reach the API: the malformed
+check in mf_commit_facts rejects them first, verified by line order rather than
+assumed.
+
+The 23 invented relations are `withdrew_from`, `partnered_with`,
+`did_not_renew` — and they are largely harmless for a reason worth noting.
+"Ashcombe Networks pulled out before signing" retracts a fact that was never
+asserted, so `db2_fact_retract` matches no edge and returns 0. A retraction of
+something that does not exist is a no-op, which is the right failure mode for a
+mechanism that deactivates data.
+
+**Polarity leak, the failure mode that would sink the design:**
+
+75 of 869 non-retraction notes emit a negated fact, and on inspection that is
+mostly correct rather than leakage:
+
+| | count |
+|---|---:|
+| contradicts a currently-true gold fact | **1** |
+| retracts some other value (an old path on a move) | 74 |
+| notes that ALSO emitted the correct replacement fact | 64 / 75 (85%) |
+
+One error in 869 notes. The rest are moves — "lib.rs is no longer in X but in
+Y" — where negating the old location is exactly right, and 85% of the time the
+model emits both halves: retract the old value, assert the new one. That is the
+change-of-state behaviour the KB has never been able to record.
+
+The single genuine error is instructive: "airflow-install.sh in ProxmoxVED is
+now called apache-airflow-install.sh" produced
+`(airflow-install.sh, also_known_as, apache-airflow-install.sh, negated)` —
+negating the rename the note asserts. A rename reads like a replacement, and
+`also_known_as` is symmetric, so there is no old value to retract.
+
+### What is not yet established
+
+The 1k run says models can produce the field correctly. It does not say the
+end-to-end path works: nothing here exercised `db2_fact_retract` from a real
+extraction against a live graph, so "an edge actually deactivates" remains
+unverified. The unit tests cover the API; the integration does not exist yet.
