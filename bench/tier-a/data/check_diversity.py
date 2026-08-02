@@ -53,6 +53,8 @@ def main():
     ap.add_argument("--baseline", help="hand-authored gold.jsonl for comparison")
     ap.add_argument("--max-template-share", type=float, default=0.35)
     ap.add_argument("--max-neardupe-rate", type=float, default=0.02)
+    ap.add_argument("--min-templates", type=int, default=3,
+                    help="minimum distinct templates per (domain, category) cell")
     ap.add_argument("--min-ttr-ratio", type=float, default=0.55,
                     help="corpus TTR / baseline TTR floor")
     args = ap.parse_args()
@@ -139,6 +141,21 @@ def main():
     passed &= gate(worst <= worst_allow, "template load",
                    f"worst cell {worst_cell} {worst:.0%} on one template "
                    f"(allowed {worst_allow:.0%})")
+
+    # DISTINCT TEMPLATE COUNT, checked separately from share. The share test
+    # cannot see total collapse: it derives the even share from the number of
+    # templates PRESENT, so a cell that has fallen to a single template gets
+    # even = 1/1 = 1.0 and passes at any share. Verified by injecting exactly
+    # that defect — the share gate stayed silent.
+    #
+    # This is a regression the size-aware tolerance introduced. The original flat
+    # 0.35 bar caught single-template cells for the wrong reason (100% > 35%);
+    # replacing it with a statistically sounder test removed the one case the
+    # gate most needed to catch.
+    thin = {cell: len(c) for cell, c in cells.items() if len(c) < args.min_templates}
+    passed &= gate(not thin, "template count",
+                   f"{len(thin)} cell(s) under {args.min_templates} distinct templates"
+                   + (f"  e.g. {sorted(thin.items())[:3]}" if thin else ""))
 
     # --- balance ------------------------------------------------------------
     def mix(sel, key):
