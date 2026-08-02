@@ -12,6 +12,7 @@
 #include "code_collect.h" /* code_collect_files + code_collect_discover_repos (thin-client push) */
 #if !defined(_WIN32) && !defined(_WIN64)
 #include "aimee_home.h"
+#include "workspace_scan_indexed.h" /* one verdict for "did this scan index anything" */
 #include <dirent.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -518,6 +519,14 @@ static void print_index_scan(cJSON *resp)
              files, unchanged);
    else
       printf("==> Scan complete: %d project(s), %d file(s) re-indexed\n", projects, files);
+
+   /* A scan that walked a project and indexed nothing is not a success worth
+    * reporting as one. It is what a caller sees when kb cannot read the tree —
+    * a path it does not share, or one owned by another uid — and the bare
+    * "Scan complete: 1 project(s), 0 file(s)" reads as done. `workspace add`
+    * already warns in exactly this case; this makes the two agree. */
+   if (projects > 0 && !workspace_scan_indexed(0, 0, inspected, files))
+      printf("    warning: nothing was indexed — %s\n", WORKSPACE_SCAN_EMPTY_REASON);
 }
 
 static void print_index_list(cJSON *resp)
@@ -2366,12 +2375,30 @@ void pt_print_grant_set(const char *method, cJSON *resp)
 
    if (was_revoked > 0)
       printf("a previous revocation for this subject was reinstated\n");
-   if (is_member == 0)
-      fprintf(stderr, "warning: the subject is not a member of this team; the grant has no "
-                      "effect until they join\n");
-   else if (is_member < 0)
-      fprintf(stderr, "warning: team membership was not reported; the grant has no effect "
-                      "unless the subject is a member\n");
+   /* Naming the remedy is the whole point of these two, exactly as it is for the
+    * write-tier 403. Without it the operator is told the grant they just made
+    * does nothing and is left to discover that membership is a separate command
+    * on a different binary — one that `aimee kb grant` does not offer and
+    * docs/UPGRADING.md's grant section does not mention. */
+   if (is_member != 1)
+   {
+      /* An older server does not echo these; fall back to placeholders rather
+       * than printing a command with empty arguments. */
+      cJSON *jteam = cJSON_GetObjectItemCaseSensitive(resp, "team_id");
+      const char *subject = json_str(resp, "subject");
+      char team[32] = "<team-id>";
+      if (cJSON_IsNumber(jteam))
+         snprintf(team, sizeof(team), "%lld", (long long)jteam->valuedouble);
+      if (!subject || !subject[0])
+         subject = "<subject>";
+      if (is_member == 0)
+         fprintf(stderr, "warning: the subject is not a member of this team; the grant has no "
+                         "effect until they join\n");
+      else
+         fprintf(stderr, "warning: team membership was not reported; the grant has no effect "
+                         "unless the subject is a member\n");
+      fprintf(stderr, "  join with: aimee-kb team add-member %s '%s'\n", team, subject);
+   }
 }
 
 void pt_print_grant_revoke(const char *method, cJSON *resp)
