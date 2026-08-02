@@ -3,10 +3,11 @@
 # testing branch can be deployed/validated (e.g. on .254) WITHOUT promoting to
 # main.
 #
-# Builds the split images and the isolated one-shot authority bootstrap so a managed
-# stack can pull a single coherent `:testing` channel. Synthesis is NOT here: it is
-# its own image on its own trigger (publish-llm.yml), rebuilt when the model changes
-# rather than when kb code does.
+# Builds the split images, ALL THREE kb embedder variants, and the isolated one-shot
+# authority bootstrap, so a managed stack can pull a single coherent `:testing`
+# channel whichever embedder the wizard selected. Synthesis is NOT here: it is its own
+# image on its own trigger (publish-llm.yml), rebuilt when the model changes rather
+# than when kb code does.
 # Versioned + `:latest` publishing of the full image set
 # stays owned by main (auto-release.yml -> publish-images.yml). Keeping testing on
 # a `:testing` tag — never a version number — avoids confusing a tested-but-
@@ -66,10 +67,20 @@ jobs:
         # beside the kb, rebuilt only when the model or the model list changes. The
         # weights stay baked — that property is why they were baked in the first
         # place — they are just baked into the image whose inputs are stable.
+        #
+        # ALL THREE EMBEDDER VARIANTS, not a subset. An earlier version of this matrix
+        # carried the bekko legs only, on the reasoning that nomic is a one-way choice
+        # this channel had never deployed. That reasoning was wrong: a variant absent
+        # from the channel cannot be deployed FROM the channel, so an operator who
+        # selects nomic on a :testing stack gets a manifest that does not exist. The
+        # deploy layer now picks the image from the embedder choice
+        # (AIMEE_KB_VARIANT), so every choice it can emit has to be publishable here.
         image:
           - { name: aimee-server,    dockerfile: Dockerfile.server }
           - { name: aimee-kb,        dockerfile: Dockerfile, args: "AIMEE_EMBEDDER=none" }
           - { name: aimee-kb-a25m,   dockerfile: Dockerfile, args: "AIMEE_EMBEDDER=bekko-a25m" }
+          - { name: aimee-kb-nomic,  dockerfile: Dockerfile,
+              args: "AIMEE_EMBEDDER=nomic-embed-text-v2-moe" }
           - { name: aimee-authority-bootstrap, dockerfile: Dockerfile.authority-bootstrap }
     steps:
       - uses: actions/checkout@v4
