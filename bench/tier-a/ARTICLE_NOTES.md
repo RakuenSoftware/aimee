@@ -401,6 +401,17 @@ redeems.
 
 ### The configurations, and what each costs
 
+MTP's speedup is model-dependent, which follows from what it exploits:
+
+| model | sequential | with MTP | ratio |
+|---|---:|---:|---:|
+| E4B UD-Q4_K_XL | 22.9 notes/min | 41.9 | **1.83x** |
+| E2B UD-Q4_K_XL | 27.0 notes/min | 43.0 | **1.59x** |
+
+Speculation reclaims idle compute, and a smaller model is less bandwidth-bound at
+batch=1, so there is less idle compute to reclaim. Quoting a single speedup
+figure for "MTP" would be wrong; it is a property of the model, not the feature.
+
 | config | speed | vs sequential | REPEATABLE |
 |---|---:|---:|---|
 | sequential | 1.00x (43.8 min/arm) | identical by definition | **yes** (4 confirmations) |
