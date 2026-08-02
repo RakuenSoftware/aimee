@@ -10,17 +10,11 @@
  * where nothing had been indexed at all. */
 
 #include "server_state_internal.h"
+#include "workspace_scan_indexed.h"
 
 int server_workspace_scan_indexed(int rc, int skipped, int inspected, int files)
 {
-   if (rc != 0 || skipped)
-      return 0;
-   /* `inspected` is the right test, not `files`: a project already indexed and
-    * unchanged legitimately reports files == 0 with inspected > 0, and calling
-    * that "not indexed" would be its own wrong answer. inspected == 0 means kb
-    * saw no files to consider. Older kb builds do not report inspected
-    * (documented as 0), so fall back to files rather than calling a working
-    * older kb broken. */
-   int visited = inspected > 0 ? inspected : files;
-   return visited > 0;
+   /* The rule itself lives in workspace_scan_indexed.h so the CLI reaches the
+    * same verdict without linking the server. */
+   return workspace_scan_indexed(rc, skipped, inspected, files);
 }

@@ -11,6 +11,7 @@
  * nothing anywhere reports a failure. */
 
 #include "server_state_internal.h"
+#include "workspace_scan_indexed.h"
 #include <assert.h>
 #include <stdio.h>
 
@@ -37,6 +38,22 @@ int main(void)
    assert(server_workspace_scan_indexed(-1, 0, 99, 99) == 0); /* rc wins over counts */
    assert(server_workspace_scan_indexed(0, 1, 0, 0) == 0);
    assert(server_workspace_scan_indexed(0, 1, 99, 99) == 0); /* skipped wins too */
+
+   /* `workspace add` and `index scan` must reach the SAME verdict about the same
+    * scan. They did not: add warned that kb had seen no files while scan printed
+    * a bare "Scan complete: 1 project(s), 0 file(s) re-indexed", so one broken
+    * state read as a failure through one command and a success through the
+    * other. The rule now lives in a shared header that both link; this pins that
+    * the server entry point is that rule and not a second copy of it. */
+   for (int rc = -1; rc <= 0; rc++)
+      for (int skipped = 0; skipped <= 1; skipped++)
+         for (int inspected = 0; inspected <= 3; inspected++)
+            for (int files = 0; files <= 3; files++)
+               assert(server_workspace_scan_indexed(rc, skipped, inspected, files) ==
+                      workspace_scan_indexed(rc, skipped, inspected, files));
+
+   /* The one sentence both surfaces show must actually say what to look at. */
+   assert(WORKSPACE_SCAN_EMPTY_REASON[0] != '\0');
 
    printf("workspace scan indexed: ok\n");
    return 0;
