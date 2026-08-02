@@ -96,6 +96,22 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      # FIRST BOOT IS SLOWER THAN retries*interval, so without this the kb is
+      # declared unhealthy while it is still coming up correctly. Postgres initdb
+      # and the extensions run once, and the embedder-bearing images then load
+      # their weights before /v1/health answers.
+      #
+      # That is not cosmetic: the authority/JWKS bootstrap has
+      # `depends_on: aimee-kb: service_healthy`, and Compose fails a dependency the
+      # moment it goes unhealthy rather than waiting. The whole deploy exited 1 with
+      # "dependency failed to start: container aimee-aimee-kb-1 is unhealthy" against
+      # a kb that was healthy a few seconds later. The embedderless image hid this by
+      # having nothing to load -- fixing which image gets deployed is what surfaced it.
+      #
+      # Failures inside the window do not count against `retries`, and a healthy
+      # answer during it marks the container healthy immediately, so a generous
+      # value costs nothing on a fast host.
+      start_period: 300s
     volumes:
       - aimee-managed-kb-home:/var/lib/aimee
       # compose.server-managed owns this volume under the fixed `aimee` project.

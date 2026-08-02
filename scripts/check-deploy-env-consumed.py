@@ -179,12 +179,83 @@ def kb_env_failures(root: Path, emitted: list[str]) -> list[str]:
     return failures
 
 
+# The Compose file that starts aimee-server itself, and the service within it. The
+# server re-runs Compose for the managed siblings and copies its own environ, so
+# anything set here is inherited by that child.
+SERVER_COMPOSE = "compose.server-managed.yaml"
+SERVER_SERVICE = "aimee-server"
+
+
+def server_env_shadow_failures(root: Path, emitted: list[str]) -> list[str]:
+    """The rule that catches an emitted key OVERRIDDEN before it can be read.
+
+    Consumed-somewhere is not enough, and neither is reaching the container. A key
+    can be emitted, plumbed, read — and still lose, because a DIFFERENT variable
+    forwarded into aimee-server's own environment already answers the question.
+
+    That is what AIMEE_KB_IMAGE did. compose.server-managed.yaml set
+
+        AIMEE_KB_IMAGE: ${AIMEE_KB_IMAGE:-...aimee-kb${AIMEE_KB_VARIANT:+-${AIMEE_KB_VARIANT}}:...}
+
+    and AIMEE_KB_VARIANT is decided INSIDE the server by config_emit_deploy_env, from
+    the saved wizard configuration. It is unset in the shell that brings the server
+    up, so this collapsed to a bare `aimee-kb:<tag>` and baked it into the server's
+    environment. deploy_apply copies environ, so the managed compose's own
+    variant-aware default was pre-empted by the explicit value and the wizard's
+    embedder choice could not change the image. Selecting bekko-a25m deployed the
+    embedderless kb, which serves lexical-only search and says so in one log line
+    nobody reads. Nothing failed: not the deploy, not the healthcheck, not `kb smoke`.
+
+    So: no variable forwarded to aimee-server may resolve a default that interpolates
+    a key the deploy layer emits. Forward it empty (`${KEY:-}`) and let the managed
+    Compose file, which runs with the emitted value in its environment, resolve it.
+    """
+    if yaml is None:
+        return ["PyYAML is required to validate the aimee-server service environment"]
+    path = root / SERVER_COMPOSE
+    if not path.exists():
+        return [f"{SERVER_COMPOSE} is missing — it starts the server that re-runs Compose"]
+    try:
+        model = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        return [f"{SERVER_COMPOSE}: invalid YAML ({exc.__class__.__name__})"]
+    service = ((model or {}).get("services") or {}).get(SERVER_SERVICE)
+    if not isinstance(service, dict):
+        return [f"{SERVER_COMPOSE}: no {SERVER_SERVICE} service"]
+    env = service.get("environment")
+    if not isinstance(env, dict):
+        return [f"{SERVER_COMPOSE}: {SERVER_SERVICE} has no mapping-form environment"]
+
+    failures: list[str] = []
+    for name, value in env.items():
+        if not isinstance(value, str):
+            continue
+        # Only the DEFAULT half can shadow: `${NAME:-<default>}`. A bare `${NAME}`
+        # forwards whatever the operator set and resolves nothing on its own.
+        default = re.match(r"^\$\{%s:-(.*)\}$" % re.escape(str(name)), value.strip())
+        if not default:
+            continue
+        for key in emitted:
+            if key == name:
+                continue
+            if re.search(r"\$\{?%s\b" % re.escape(key), default.group(1)):
+                failures.append(
+                    f"{SERVER_COMPOSE}: {SERVER_SERVICE} resolves a default for {name} "
+                    f"that reads {key}, which config_emit_deploy_env decides inside the "
+                    f"server and which is unset here — the default collapses and then "
+                    f"overrides the value the server computes. Forward it as "
+                    f"${{{name}:-}} and let the managed Compose file resolve it"
+                )
+    return failures
+
+
 def check(root: Path) -> list[str]:
     failures: list[str] = []
     keys = emitted_keys(root)
     if not keys:
         return ["found no EMITF keys — has the emitter moved?"]
     failures.extend(kb_env_failures(root, keys))
+    failures.extend(server_env_shadow_failures(root, keys))
     for key in keys:
         if consumers(root, key):
             continue

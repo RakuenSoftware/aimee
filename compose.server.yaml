@@ -63,6 +63,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      # First boot runs postgres initdb and, on the embedder-bearing images, loads
+      # the weights before /v1/health answers -- longer than retries*interval, so
+      # without this the kb reads as unhealthy while it is still starting normally.
+      # See deploy/container/aimee-managed.compose.yaml for what that broke.
+      start_period: 300s
     volumes:
       - aimee-kb-home:/var/lib/aimee
       # kb.build/update receive server workspace paths; mount the same durable
