@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #endif
 #include "kb_client.h"
+#include "cleartext_guard.h" /* the shared cleartext rule, also used by the thin client */
 #include "kb_client_cache.h"
 #include "kb_client_internal.h"
 #include "kb_client_mtls.h"
@@ -1549,6 +1550,50 @@ static char *kb_client_v1_url(const char *path)
    return url;
 }
 
+/* Refuse to put the kb bearer on the wire in cleartext.
+ *
+ * The plain-HTTP branches below are reached only when mTLS is not configured,
+ * which is legitimate for a loopback kb. It is not legitimate for a kb across a
+ * network: the bearer would travel unprotected, and the thin client already
+ * refuses exactly this shape. Apply the same rule here so the kb link cannot be
+ * the weak one.
+ *
+ * Returns 1 when the request must NOT be sent. A URL with no credential to leak,
+ * or an https:// URL, is allowed through unchanged. */
+static int kb_plain_would_leak(const char *url)
+{
+   if (!url)
+      return 0;
+   char token[512];
+   int have_token = runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", token, sizeof(token));
+   runtime_secret_wipe(token, sizeof(token));
+   if (!have_token)
+      return 0; /* nothing to leak */
+
+   int is_https = strncmp(url, "https://", 8) == 0;
+   const char *authority = strstr(url, "://");
+   authority = authority ? authority + 3 : url;
+   char host[256];
+   size_t n = strcspn(authority, "/");
+   if (n >= sizeof(host))
+      n = sizeof(host) - 1;
+   memcpy(host, authority, n);
+   host[n] = '\0';
+   char *colon = strrchr(host, ':');
+   if (colon && !strchr(host, ']'))
+      *colon = '\0';
+
+   if (!cleartext_would_leak(is_https, host, "x"))
+      return 0;
+   /* stderr rather than aimee_log: this file links into many focused unit-test
+    * binaries that do not carry the logging object. */
+   fprintf(stderr,
+           "kb_client: refusing to send the kb bearer in cleartext to non-loopback host '%s'; "
+           "use the mTLS endpoint or terminate TLS in front of the kb\n",
+           host);
+   return 1;
+}
+
 static const char *kb_client_v1_auth_header(char *buf, size_t buf_len)
 {
    /* The HTTP API can run without auth; include a bearer header only when the
@@ -1601,6 +1646,13 @@ static char *kb_client_v1_post_json_impl(const char *path, cJSON *body, int time
    }
 
    char *url = kb_client_v1_url(path);
+   if (url && kb_plain_would_leak(url))
+   {
+      free(url);
+      free(body_json);
+      kb_transport_complete(path, NULL, -1);
+      return NULL;
+   }
    if (url)
    {
       char auth[320];
@@ -1666,6 +1718,12 @@ char *kb_client_v1_post_body_with_type(const char *path, const char *body, const
    }
 
    char *url = kb_client_v1_url(path);
+   if (url && kb_plain_would_leak(url))
+   {
+      free(url);
+      kb_transport_complete(path, NULL, -1);
+      return NULL;
+   }
    if (url)
    {
       char auth[320];
@@ -1711,6 +1769,12 @@ char *kb_client_v1_get_json(const char *path, int timeout_ms, int *status_out)
    }
 
    char *url = kb_client_v1_url(path);
+   if (url && kb_plain_would_leak(url))
+   {
+      free(url);
+      kb_transport_complete(path, NULL, -1);
+      return NULL;
+   }
    if (url)
    {
       char auth[320];
