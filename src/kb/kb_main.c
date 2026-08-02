@@ -798,7 +798,9 @@ static int kb_cmd_managed_server_identity(int argc, char **argv)
    if (argc < 3 || strcmp(argv[2], "install") != 0)
    {
       fputs("Usage: aimee-kb managed-server-identity install --server-home=PATH "
-            "--host=HOST --port=N --endpoint=URL --uid=N\n",
+            "--host=HOST --port=N --endpoint=URL --uid=N [--force]\n"
+            "  --force  re-issue the client certificate even when a stored identity\n"
+            "           already matches this KB (repairs trust the KB no longer accepts)\n",
             stderr);
       return 1;
    }
@@ -826,6 +828,8 @@ static int kb_cmd_managed_server_identity(int argc, char **argv)
          if (kb_parse_unsigned(argv[i] + 6, (unsigned long long)(uid_t)-1, &owner) != 0)
             owner_seen = -1;
       }
+      else if (strcmp(argv[i], "--force") == 0 && !options.force)
+         options.force = 1;
       else
       {
          fprintf(stderr, "aimee-kb managed-server-identity: invalid or duplicate option: %s\n",

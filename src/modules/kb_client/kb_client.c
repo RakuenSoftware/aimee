@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #endif
 #include "kb_client.h"
+#include "cleartext_guard.h" /* the shared cleartext rule, also used by the thin client */
 #include "kb_client_cache.h"
 #include "kb_client_internal.h"
 #include "kb_client_mtls.h"
@@ -12,6 +13,7 @@
 #include "platform_path.h"
 #include "runtime_secret.h"
 #include "dependency_breaker.h"
+#include "log.h"
 #include "cJSON.h"
 #include <ctype.h>
 #include <errno.h>
@@ -61,6 +63,7 @@ static __declspec(thread) int64_t g_kb_last_current_generation;
 static __declspec(thread) int64_t g_kb_last_observed_dimension;
 static __declspec(thread) int64_t g_kb_last_current_dimension;
 static __declspec(thread) int64_t g_kb_last_retry_after_ms;
+static __declspec(thread) int g_kb_last_suppressed;
 #else
 static _Thread_local kb_client_result_status_t g_kb_last_result = KB_CLIENT_RESULT_UNAVAILABLE;
 static _Thread_local char g_kb_last_dependency[32] = "kb";
@@ -69,6 +72,9 @@ static _Thread_local int64_t g_kb_last_current_generation;
 static _Thread_local int64_t g_kb_last_observed_dimension;
 static _Thread_local int64_t g_kb_last_current_dimension;
 static _Thread_local int64_t g_kb_last_retry_after_ms;
+/* Set when the local breaker refused the call, so the typed error can say the
+ * KB was never contacted instead of blaming the operation the caller asked for. */
+static _Thread_local int g_kb_last_suppressed;
 #endif
 
 static int64_t kb_dependency_now_ms(void)
@@ -257,9 +263,19 @@ static int kb_transport_begin(int *status_out)
    g_kb_last_observed_dimension = 0;
    g_kb_last_current_dimension = 0;
    g_kb_last_retry_after_ms = 0;
+   g_kb_last_suppressed = 0;
+   int64_t now_ms = kb_dependency_now_ms();
    int64_t retry_after = 0;
-   if (dependency_breaker_allow(&g_kb_dependency, kb_dependency_now_ms(), &retry_after))
+   if (dependency_breaker_allow(&g_kb_dependency, now_ms, &retry_after))
       return 1;
+
+   /* Carry the breaker's own retry window into the typed error. Discarding it
+    * made every suppressed call report the synthetic base-delay floor that
+    * kb_typed_error_json() substitutes for a missing hint, so an operator could
+    * not tell a one-second wait from a thirty-second one — or even tell that the
+    * breaker, rather than the KB, produced the refusal. */
+   g_kb_last_retry_after_ms = retry_after;
+   g_kb_last_suppressed = 1;
    if (status_out)
       *status_out = 503;
    return 0;
@@ -291,6 +307,19 @@ static void kb_capture_result_metadata(const char *response)
    cJSON_Delete(root);
 }
 
+/* Report success, and log the close so an outage has a visible end as well as a
+ * visible start. Silent recovery left an operator unable to tell a healed
+ * dependency from one that simply had not been called again. */
+static void kb_transport_recovered(int64_t now_ms)
+{
+   dependency_breaker_snapshot_t before;
+   dependency_breaker_snapshot(&g_kb_dependency, now_ms, &before);
+   dependency_breaker_report_success(&g_kb_dependency, now_ms);
+   if (before.open)
+      LOG_INFO("server.kb", "knowledge service reachable again after %u open interval(s)",
+               before.open_count);
+}
+
 static void kb_transport_complete(const char *path, const char *response, int http_status)
 {
    int64_t now_ms = kb_dependency_now_ms();
@@ -300,7 +329,7 @@ static void kb_transport_complete(const char *path, const char *response, int ht
       kb_capture_result_metadata(response);
    if (http_status == 401 || http_status == 403)
    {
-      dependency_breaker_report_success(&g_kb_dependency, now_ms);
+      kb_transport_recovered(now_ms);
       g_kb_last_result = KB_CLIENT_RESULT_UNAUTHORIZED;
       return;
    }
@@ -310,7 +339,7 @@ static void kb_transport_complete(const char *path, const char *response, int ht
       /* The KB is reachable and truthfully reported one of its own optional
        * dependencies. Keep that typed outage from suppressing unrelated KB
        * operations through the transport breaker. */
-      dependency_breaker_report_success(&g_kb_dependency, now_ms);
+      kb_transport_recovered(now_ms);
       g_kb_last_result = classified;
       return;
    }
@@ -318,20 +347,37 @@ static void kb_transport_complete(const char *path, const char *response, int ht
    {
       /* A typed unavailable body means the KB answered but one of its own
        * dependencies did not; do not trip the KB transport breaker. */
-      dependency_breaker_report_success(&g_kb_dependency, now_ms);
+      kb_transport_recovered(now_ms);
       g_kb_last_result = classified;
       return;
    }
    if (http_status >= 400 && http_status < 500 && http_status != 408 && http_status != 425 &&
        http_status != 429)
    {
-      dependency_breaker_report_success(&g_kb_dependency, now_ms);
+      kb_transport_recovered(now_ms);
       g_kb_last_result = valid ? classified : KB_CLIENT_RESULT_UNAVAILABLE;
       return;
    }
+   /* This is the only branch that means the KB itself did not answer, and it was
+    * silent. A server that cannot open its mTLS connection reported exactly the
+    * same "<operation> unavailable" text as a healthy KB with an empty index, so
+    * nothing in the log distinguished a transport outage from a data problem.
+    * Log the transition into the open state — not every suppressed call — so a
+    * sustained outage costs one line per backoff window rather than one per
+    * request. */
+   dependency_breaker_snapshot_t before;
+   dependency_breaker_snapshot(&g_kb_dependency, now_ms, &before);
    dependency_breaker_report_failure(&g_kb_dependency, now_ms, DEPENDENCY_BREAKER_DEFAULT_THRESHOLD,
                                      DEPENDENCY_BREAKER_DEFAULT_BASE_MS,
                                      DEPENDENCY_BREAKER_DEFAULT_MAX_MS);
+   dependency_breaker_snapshot_t after;
+   dependency_breaker_snapshot(&g_kb_dependency, now_ms, &after);
+   if (after.open && !before.open)
+      LOG_WARN("server.kb",
+               "knowledge service unreachable (%s %s); suppressing calls for %lldms after %u "
+               "consecutive failure(s)",
+               http_status > 0 ? "http" : "transport", path && path[0] ? path : "(no path)",
+               (long long)after.retry_after_ms, after.failure_streak);
    g_kb_last_result = KB_CLIENT_RESULT_UNAVAILABLE;
 }
 
@@ -356,6 +402,11 @@ static char *kb_typed_error_json(kb_client_result_status_t status, const char *m
       if (retry_after_ms > DEPENDENCY_BREAKER_DEFAULT_MAX_MS)
          retry_after_ms = DEPENDENCY_BREAKER_DEFAULT_MAX_MS;
       cJSON_AddNumberToObject(obj, "retry_after_ms", (double)retry_after_ms);
+      /* Distinguish "we never called the KB" from "the KB answered unavailable".
+       * Both used to surface as the caller's own operation being unavailable,
+       * which sends an operator to the index when the fault is local. */
+      if (g_kb_last_suppressed)
+         cJSON_AddBoolToObject(obj, "circuit_open", 1);
    }
    if (status == KB_CLIENT_RESULT_STALE && g_kb_last_observed_generation > 0)
       cJSON_AddNumberToObject(obj, "observed_generation", (double)g_kb_last_observed_generation);
@@ -1499,6 +1550,50 @@ static char *kb_client_v1_url(const char *path)
    return url;
 }
 
+/* Refuse to put the kb bearer on the wire in cleartext.
+ *
+ * The plain-HTTP branches below are reached only when mTLS is not configured,
+ * which is legitimate for a loopback kb. It is not legitimate for a kb across a
+ * network: the bearer would travel unprotected, and the thin client already
+ * refuses exactly this shape. Apply the same rule here so the kb link cannot be
+ * the weak one.
+ *
+ * Returns 1 when the request must NOT be sent. A URL with no credential to leak,
+ * or an https:// URL, is allowed through unchanged. */
+static int kb_plain_would_leak(const char *url)
+{
+   if (!url)
+      return 0;
+   char token[512];
+   int have_token = runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", token, sizeof(token));
+   runtime_secret_wipe(token, sizeof(token));
+   if (!have_token)
+      return 0; /* nothing to leak */
+
+   int is_https = strncmp(url, "https://", 8) == 0;
+   const char *authority = strstr(url, "://");
+   authority = authority ? authority + 3 : url;
+   char host[256];
+   size_t n = strcspn(authority, "/");
+   if (n >= sizeof(host))
+      n = sizeof(host) - 1;
+   memcpy(host, authority, n);
+   host[n] = '\0';
+   char *colon = strrchr(host, ':');
+   if (colon && !strchr(host, ']'))
+      *colon = '\0';
+
+   if (!cleartext_would_leak(is_https, host, "x"))
+      return 0;
+   /* stderr rather than aimee_log: this file links into many focused unit-test
+    * binaries that do not carry the logging object. */
+   fprintf(stderr,
+           "kb_client: refusing to send the kb bearer in cleartext to non-loopback host '%s'; "
+           "use the mTLS endpoint or terminate TLS in front of the kb\n",
+           host);
+   return 1;
+}
+
 static const char *kb_client_v1_auth_header(char *buf, size_t buf_len)
 {
    /* The HTTP API can run without auth; include a bearer header only when the
@@ -1551,6 +1646,13 @@ static char *kb_client_v1_post_json_impl(const char *path, cJSON *body, int time
    }
 
    char *url = kb_client_v1_url(path);
+   if (url && kb_plain_would_leak(url))
+   {
+      free(url);
+      free(body_json);
+      kb_transport_complete(path, NULL, -1);
+      return NULL;
+   }
    if (url)
    {
       char auth[320];
@@ -1616,6 +1718,12 @@ char *kb_client_v1_post_body_with_type(const char *path, const char *body, const
    }
 
    char *url = kb_client_v1_url(path);
+   if (url && kb_plain_would_leak(url))
+   {
+      free(url);
+      kb_transport_complete(path, NULL, -1);
+      return NULL;
+   }
    if (url)
    {
       char auth[320];
@@ -1661,6 +1769,12 @@ char *kb_client_v1_get_json(const char *path, int timeout_ms, int *status_out)
    }
 
    char *url = kb_client_v1_url(path);
+   if (url && kb_plain_would_leak(url))
+   {
+      free(url);
+      kb_transport_complete(path, NULL, -1);
+      return NULL;
+   }
    if (url)
    {
       char auth[320];

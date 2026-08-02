@@ -6,6 +6,7 @@
  * identically on Linux, macOS, and Windows.
  */
 #include "aimee_client.h"
+#include "cleartext_guard.h" /* the shared cleartext rule, also used by kb_client */
 #include "http_content_encoding.h"
 #include "platform.h"
 #include "platform_net.h"
@@ -175,6 +176,36 @@ int aimee_client_has_remote(void)
       return 1;
    const char *env = getenv("AIMEE_SERVER_URL");
    return (env && *env) ? 1 : 0;
+}
+
+/* A short, credential-free description of where this process actually sends
+ * requests. Failures print it, because "no remote configured" is otherwise
+ * invisible: with remote.conf absent the client silently uses the local socket
+ * and every command still answers — from a DIFFERENT aimee than the operator
+ * believes they are talking to. A whole debugging session was spent
+ * instrumenting a remote server that the failing commands were never reaching.
+ *
+ * Any userinfo in the URL is stripped: a credential must not reach a terminal,
+ * a log, or a pasted bug report. */
+const char *aimee_client_transport_label(void)
+{
+   static char label[sizeof(g_remote_url) + 32];
+   const char *url = g_remote_url[0] ? g_remote_url : getenv("AIMEE_SERVER_URL");
+   if (!url || !*url)
+      return "local Unix socket (no remote server configured)";
+
+   const char *scheme_end = strstr(url, "://");
+   const char *authority = scheme_end ? scheme_end + 3 : url;
+   const char *at = strchr(authority, '@');
+   if (!at)
+   {
+      snprintf(label, sizeof(label), "%s", url);
+      return label;
+   }
+   /* Keep the scheme, drop everything up to and including the '@'. */
+   int scheme_len = scheme_end ? (int)(scheme_end + 3 - url) : 0;
+   snprintf(label, sizeof(label), "%.*s%s", scheme_len, url, at + 1);
+   return label;
 }
 
 int aimee_client_parse_flag(char **argv, int *i, int argc, const char **url, const char **token)
@@ -480,25 +511,13 @@ static char *read_response(int fd, aimee_tls_t *tls, size_t *out_len, int want_r
    return resp;
 }
 
-/* A non-loopback plaintext connection must never carry a credential. localhost,
- * 127.0.0.0/8, and ::1 are the only hosts where a cleartext bearer stays on the
- * machine; anything else would put it on the wire. */
-static int host_is_loopback(const char *host)
-{
-   if (!host || !host[0])
-      return 0;
-   if (strcmp(host, "localhost") == 0 || strcmp(host, "::1") == 0 || strcmp(host, "[::1]") == 0)
-      return 1;
-   return strncmp(host, "127.", 4) == 0; /* 127.0.0.0/8 */
-}
-
 /* Security guard (also exposed for tests): 1 when sending |token| to a server at
  * (|is_https|, |host|) would put the credential on the wire in cleartext — a
  * non-empty bearer over plaintext http:// to a non-loopback host. tcp_request
  * refuses such requests rather than leak the bearer. */
 int aimee_client_would_leak_cleartext(int is_https, const char *host, const char *token)
 {
-   return (token && *token && !is_https && !host_is_loopback(host)) ? 1 : 0;
+   return cleartext_would_leak(is_https, host, token);
 }
 
 static char *tcp_request(const char *url, const char *token, const char *method, const char *path,
