@@ -41,16 +41,16 @@ const config_field_t config_fields[] = {
     {"embedder_command", offsetof(config_t, embedder_command),
      sizeof(((config_t *)0)->embedder_command), 0, CFG_STRING},
     {"embedder_model", offsetof(config_t, embedder_model), sizeof(((config_t *)0)->embedder_model),
-     0, CFG_STRING, RELOAD_HOT, FGROUP_RUNTIME, "EMBEDDER_MODEL"},
+     0, CFG_STRING, RELOAD_HOT, FGROUP_RUNTIME},
     {"embedder_url", offsetof(config_t, embedder_url), sizeof(((config_t *)0)->embedder_url), 0,
-     CFG_STRING, RELOAD_HOT, FGROUP_RUNTIME, "EMBEDDER_URL"},
+     CFG_STRING, RELOAD_HOT, FGROUP_RUNTIME},
     {"embedder_api_key", offsetof(config_t, embedder_api_key),
      sizeof(((config_t *)0)->embedder_api_key), 0, CFG_STRING, RELOAD_HOT, FGROUP_RUNTIME,
      "EMBEDDER_API_KEY"},
     /* One-way door once anything is embedded: DB2 records the column width and
      * refuses startup on drift. 1..EMBED_MAX_DIM (4000, the DB2 ceiling). */
     {"embedder_dims", offsetof(config_t, embedder_dims), sizeof(((config_t *)0)->embedder_dims), 0,
-     CFG_INT, RELOAD_RESTART, FGROUP_RUNTIME, "EMBEDDER_DIMS"},
+     CFG_INT, RELOAD_RESTART, FGROUP_RUNTIME},
     /* Setup-wizard page 2: KB mode + per-role LLM backend record (see config.h).
      * All wizard-settable; the deploy layer reads them. RELOAD_RESTART because the
      * deploy topology (what containers run) only changes on a restart. */
@@ -65,13 +65,11 @@ const config_field_t config_fields[] = {
      * AIMEE_WITH_LLAMACPP in every variant. RELOAD_RESTART because it cannot change
      * without replacing the image. */
     {"aimee_with_llamacpp", offsetof(config_t, aimee_with_llamacpp),
-     sizeof(((config_t *)0)->aimee_with_llamacpp), 0, CFG_STRING, RELOAD_RESTART, FGROUP_RUNTIME,
-     "AIMEE_WITH_LLAMACPP"},
+     sizeof(((config_t *)0)->aimee_with_llamacpp), 0, CFG_STRING, RELOAD_RESTART, FGROUP_RUNTIME},
     /* Which model the image bakes. Also image-set: it cannot change without
      * pulling a different tag. */
     {"aimee_synthesis_model", offsetof(config_t, aimee_synthesis_model),
-     sizeof(((config_t *)0)->aimee_synthesis_model), 0, CFG_STRING, RELOAD_RESTART, FGROUP_RUNTIME,
-     "AIMEE_SYNTHESIS_MODEL"},
+     sizeof(((config_t *)0)->aimee_synthesis_model), 0, CFG_STRING, RELOAD_RESTART, FGROUP_RUNTIME},
     /* Synthesis. ONE endpoint: an aimee-kb *-llm image runs gemma-4 on the same
      * host as the kb, so a bundled model is reached at a 127.0.0.1 URL and needs no
      * second variable. Empty = synthesis off, which is supported.
@@ -80,17 +78,15 @@ const config_field_t config_fields[] = {
      * llm_synth_tier are GONE. They chose where to place the retired aimee-llm
      * container; the aimee-kb image variant now encodes that. */
     {"synthesis_endpoint", offsetof(config_t, synthesis_endpoint),
-     sizeof(((config_t *)0)->synthesis_endpoint), 0, CFG_STRING, RELOAD_RESTART, FGROUP_RUNTIME,
-     "SYNTHESIS_ENDPOINT"},
+     sizeof(((config_t *)0)->synthesis_endpoint), 0, CFG_STRING, RELOAD_RESTART, FGROUP_RUNTIME},
     {"synthesis_model", offsetof(config_t, synthesis_model),
-     sizeof(((config_t *)0)->synthesis_model), 0, CFG_STRING, RELOAD_HOT, FGROUP_RUNTIME,
-     "SYNTHESIS_MODEL"},
+     sizeof(((config_t *)0)->synthesis_model), 0, CFG_STRING, RELOAD_HOT, FGROUP_RUNTIME},
     {"synthesis_api_key", offsetof(config_t, synthesis_api_key),
      sizeof(((config_t *)0)->synthesis_api_key), 0, CFG_STRING, RELOAD_HOT, FGROUP_RUNTIME,
      "SYNTHESIS_API_KEY"},
     /* Global, not per-stage: one switch the operator owns. Default on. */
     {"synthesis_thinking", offsetof(config_t, synthesis_thinking), sizeof(int), 0, CFG_BOOL,
-     RELOAD_HOT, FGROUP_RUNTIME, "SYNTHESIS_THINKING"},
+     RELOAD_HOT, FGROUP_RUNTIME},
     {"memory_coref_mode", offsetof(config_t, memory_coref_mode),
      sizeof(((config_t *)0)->memory_coref_mode), 0, CFG_STRING},
     {"memory_coref_window", offsetof(config_t, memory_coref_window),
