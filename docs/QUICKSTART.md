@@ -105,15 +105,20 @@ Deploy one locally, or point at an existing `aimee-kb`. A local knowledge base i
 needs nothing else installed.
 
 For a local KB, the remaining steps place its embedder and optional synthesizer, choose the bundled
-or external shared store, connect an optional Git host, and add workspaces. A model role can run
-inside the KB container or use a remote endpoint where the selected profile offers that choice. A Git
-connection can be skipped because public repositories do not require one. You can continue without a
+or external shared store, connect an optional Git host, and add workspaces. The embedder runs inside
+the KB container; synthesis runs in its own sidecar or at a remote endpoint. A Git connection can be
+skipped because public repositories do not require one. You can continue without a
 workspace, but setup remains incomplete until at least one project exists.
 
 After the numbered steps, the summary shows a **Deploy the local stack** panel. Its **Deploy** action
-starts one `aimee-kb`, including private PostgreSQL 18, pgvector, and pgvectorscale. Its selected
-model roles run inside that container or at remote endpoints; there is no separate inference
-service. See [Choosing an embedder](#choosing-an-embedder) and
+starts one `aimee-kb`, including private PostgreSQL 18, pgvector, and pgvectorscale.
+
+**The embedder runs inside that container. Synthesis does not.** Embedding is served from weights
+baked into the KB image, so it needs no second container. If you selected a local synthesis model,
+Deploy also starts an `aimee-llm` sidecar beside the KB, and the KB reaches it over mutual TLS on the
+Compose network. Choose an external endpoint instead and no sidecar is deployed at all; choose neither
+and synthesis is simply off, which is a supported state. See
+[Choosing an embedder](#choosing-an-embedder), [Local synthesis](#local-synthesis) and
 [KB model backends](KB_LLM_BACKENDS.md).
 
 For a local managed KB, Deploy also runs two explicit one-shot jobs before it
@@ -163,8 +168,22 @@ available.
 ### Choosing an embedder
 
 The wizard's **Deploy topology** step records which embedder the KB uses. Choose one before Deploy.
-The bundled `bekko-a25m` (384-dimension) ships inside the KB image, so it needs no download and no
-second container. Point the KB at your own endpoint instead if you need a wider model.
+
+Which embedder a KB can run is a property of the image you pulled, because the weights are baked in:
+
+| image | embedder | size |
+| --- | --- | --- |
+| `aimee-kb` | none; set `EMBEDDER_URL` | 373 MB |
+| `aimee-kb-a25m` | `bekko-a25m`, 384-dimension | 1.95 GB |
+| `aimee-kb-nomic` | `nomic-embed-text-v2-moe`, 768-dimension | 3.34 GB |
+
+A bundled embedder needs no download and no second container. `aimee-kb` carries none at all, which
+is the right choice when you point `EMBEDDER_URL` at your own endpoint: it omits PyTorch and the
+weights rather than shipping code it never runs.
+
+**This choice does not survive a change of mind.** DB2 records the vector-column width and refuses to
+start when it drifts, so moving between 384 and 768 means re-embedding the whole corpus. Choose before
+you ingest anything.
 
 Nothing is selected on a fresh install, and an unselected KB is not broken. It falls back to a
 builtin lexical embedder and says so once, in the KB log:
@@ -178,7 +197,7 @@ Retrieval still works in that state, but it is keyword matching, not vector sear
 the step, set it from the server and re-run Deploy:
 
 ```bash
-aimee config set embedding_model bekko-a25m
+aimee config set embedder_model bekko-a25m
 ```
 
 Confirm the model actually loaded rather than assuming it did:
@@ -200,6 +219,48 @@ the choice does not perform the migration. A different dimension needs the guard
 reset; a same-dimension model, pooling, or prefix change needs a fresh DB2 and source re-ingestion
 because the current reset command deliberately no-ops when the dimensions match. Follow
 [Change the KB embedder](runbooks/change-embedder.md) before changing an active corpus.
+
+### Local synthesis
+
+Synthesis writes curation and summaries. Unlike the embedder it is not inside the KB container: it is
+its own image, `aimee-llm-e2b` or `aimee-llm-e4b`, deployed beside the KB when the wizard selects a
+local model. Which model it carries is a property of the tag, because the weights are baked in.
+
+| image | model | weights |
+| --- | --- | --- |
+| `aimee-llm-e2b` | gemma-4-E2B-it | 4.71 GB |
+| `aimee-llm-e4b` | gemma-4-E4B-it | 7.46 GB |
+
+E4B is the better model; E2B is roughly half the resident memory and about twice the CPU speed. See
+[Choosing a synthesis model](SYNTHESIS_MODELS.md) for the measurements behind that.
+
+Three states are all supported, and `off` is not an error: embedding, search, recall and indexing
+never call synthesis.
+
+- **local**: an `aimee-llm-*` sidecar, reached over mutual TLS
+- **external**: `SYNTHESIS_ENDPOINT` at any OpenAI-compatible endpoint
+- **off**: no synthesis
+
+**Unlike the embedder, this is not a one-way door.** The sidecar holds no data, so switching between
+E2B and E4B, adding synthesis to a running deployment, or removing it is a container swap with the KB
+left running.
+
+Confirm the sidecar actually came up, rather than assuming Deploy succeeded:
+
+```bash
+docker compose -f compose.server-managed.yaml logs aimee-llm | grep -iE 'synthesis|terminator'
+```
+
+A working sidecar logs both halves:
+
+```text
+aimee-llm: starting synthesis (gemma-4-E2B-it) on 127.0.0.1:8760
+aimee-llm: starting mTLS terminator on :8761 (client certificate required)
+```
+
+The mTLS identity is issued by the KB at startup, which is why the KB is deployed first. The sidecar
+refuses to start without it rather than serving unauthenticated, so "no identity" fails loudly at
+deploy instead of quietly at the first curation call.
 
 ### Choosing an image channel
 
