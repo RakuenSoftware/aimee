@@ -1102,3 +1102,34 @@ diligently it is written.
 `score.py` now refuses a run whose rows claim `thinking:true` while no row
 carries any reasoning, on the same footing as its existing refusal of truncated
 runs.
+
+## v5 on E2B: no measurable cost, one inert side effect
+
+v5 exists for E4B. E2B never suppressed its reasoning, so for E2B the change is
+all downside-risk and no upside, and shipping it on the assumption that a longer
+prompt is harmless would have been exactly the kind of untested step this log is
+full of. 401 notes sampled proportionally by category from the v4 mid corpus,
+both arms against the same server process, same notes, same seed:
+
+| arm | F1 | precision | recall | thought | fenced | median tokens |
+|---|---:|---:|---:|---:|---:|---:|
+| v4 | 0.5831 | 0.5797 | 0.5865 | 401/401 | 0 | 467 |
+| v5 | 0.5599 | 0.5511 | 0.5689 | 401/401 | 98 | 478 |
+
+The F1 gap is **not resolvable at this n** and is not claimed: paired bootstrap
+over 5000 replicates gives -0.0232 with a 95% CI of [-0.0515, +0.0057], which
+crosses zero. The point estimate is negative and the interval permits a real cost
+of up to five points, so this establishes "no measured harm", not "no harm".
+Resolving a 0.02 effect needs roughly four times the notes.
+
+E2B thought on 401/401 notes under BOTH prompts, which is the direct confirmation
+that defect 31 is E4B-only rather than something about the corpus or the harness.
+
+The one unambiguous change is fencing: 0 fenced answers under v4, 98 of 401 under
+v5. That is a deterministic behavioural difference, not noise, and it is inert —
+those 98 rows are 98/98 parse_ok and 98/98 schema_ok, and their facts-to-gold
+ratio (125/118) matches the unfenced rows (227/223). The production parser scans
+first-`{` to last-`}`, so a fence changes nothing downstream. Noted rather than
+fixed, because the alternative wordings that fence less on E2B are the ones that
+fail to restore thinking on E4B, and E4B's +0.084 is a measured effect while this
+is a cosmetic one.

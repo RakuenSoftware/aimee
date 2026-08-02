@@ -1,0 +1,22 @@
+401 notes, model=E2B.UD-Q4_K_XL, arms=['v4', 'v5']
+[v4] 1482 chars
+  v4: 50/401
+  v4: 100/401
+  v4: 150/401
+  v4: 200/401
+  v4: 250/401
+  v4: 300/401
+  v4: 350/401
+  v4: 400/401
+[v5] 1562 chars
+  v5: 50/401
+  v5: 100/401
+  v5: 150/401
+  v5: 200/401
+  v5: 250/401
+  v5: 300/401
+  v5: 350/401
+  v5: 400/401
+
+gold sample: ../results/v5-sanity/e2b/gold_sample.jsonl
+score each arm with score.py --gold ../results/v5-sanity/e2b/gold_sample.jsonl --pred ../results/v5-sanity/e2b/E2B.UD-Q4_K_XL.<version>.pred.jsonl
