@@ -251,8 +251,7 @@ static void synth_ssl_ctx_init(void)
  * is a normal state to pass through, not a permanent verdict. */
 static SSL_CTX *ssl_ctx_for(const parsed_url_t *url)
 {
-   if (!s_synth_host[0] || url->port != s_synth_port ||
-       strcasecmp(url->host, s_synth_host) != 0)
+   if (!s_synth_host[0] || url->port != s_synth_port || strcasecmp(url->host, s_synth_host) != 0)
       return s_ssl_ctx;
 
    pthread_mutex_lock(&s_synth_lock);
