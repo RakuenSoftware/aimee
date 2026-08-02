@@ -1759,7 +1759,8 @@ static int cli_v1_finish_response(const cli_v1_route_t *route, cJSON *resp, int 
    {
       cJSON *msg = cJSON_GetObjectItemCaseSensitive(resp, "message");
       if (cJSON_IsString(msg) && msg->valuestring[0])
-         fprintf(stderr, "aimee: %s\n", msg->valuestring);
+         fprintf(stderr, "aimee: %s\n  (via %s)\n", msg->valuestring,
+                 aimee_client_transport_label());
       cJSON_Delete(resp);
       return 1;
    }
@@ -1772,9 +1773,9 @@ static int cli_v1_finish_response(const cli_v1_route_t *route, cJSON *resp, int 
    if (cJSON_IsObject(err))
    {
       cJSON *emsg = cJSON_GetObjectItemCaseSensitive(err, "message");
-      fprintf(stderr, "aimee: %s\n",
-              (cJSON_IsString(emsg) && emsg->valuestring[0]) ? emsg->valuestring
-                                                             : "request failed");
+      fprintf(stderr, "aimee: %s\n  (via %s)\n",
+              (cJSON_IsString(emsg) && emsg->valuestring[0]) ? emsg->valuestring : "request failed",
+              aimee_client_transport_label());
       cJSON_Delete(resp);
       return 1;
    }
@@ -1788,9 +1789,11 @@ static int cli_v1_finish_response(const cli_v1_route_t *route, cJSON *resp, int 
    if (http_status >= 400)
    {
       if (cJSON_IsString(err) && err->valuestring[0])
-         fprintf(stderr, "aimee: %s\n", err->valuestring);
+         fprintf(stderr, "aimee: %s\n  (via %s)\n", err->valuestring,
+                 aimee_client_transport_label());
       else
-         fprintf(stderr, "aimee: server returned HTTP %d for '%s'\n", http_status, route->method);
+         fprintf(stderr, "aimee: server returned HTTP %d for '%s'\n  (via %s)\n", http_status,
+                 route->method, aimee_client_transport_label());
       cJSON_Delete(resp);
       return 1;
    }
