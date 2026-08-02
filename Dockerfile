@@ -174,6 +174,15 @@ RUN set -eux; \
 # Bumping the quant or the model means bumping these, from
 # https://huggingface.co/api/models/<repo>?blobs=true (siblings[].lfs.oid).
 #
+# RETRY LIKE THE PGDG KEY FETCH ABOVE, for the same reason. Baking the model moves
+# the Hugging Face dependency off the user's first run and onto our build, which is
+# the right trade — we control builds, users do not — but the build then has to
+# survive HF being slow or rate-limiting. A flat `--retry 5 --retry-delay 5` is a
+# ~25-second burst and it has already lost a CI leg to exit 22 while the same
+# commit built fine minutes later. Six attempts with growing backoff spans several
+# minutes instead, and -C - resumes a partial transfer rather than restarting
+# gigabytes. The digest below is what makes a resumed file safe to trust.
+#
 # -sS: silent, but still reports errors. Without it curl writes a progress meter on every
 # buffer flush, which is thousands of lines of noise in a non-tty build log.
 # An explicit repo+filename per model id: no quant-tag resolution at runtime, which
@@ -191,7 +200,12 @@ RUN set -eux; \
     if [ -n "$AIMEE_MODEL_MIRROR" ]; then url="${AIMEE_MODEL_MIRROR%/}/${f}"; \
     else url="https://huggingface.co/${repo}/resolve/main/${f}"; fi; \
     mkdir -p /out/model; \
-    curl -fL -sS --retry 5 --retry-delay 5 --retry-all-errors -o /out/model/synthesis.gguf "$url"; \
+    for a in 1 2 3 4 5 6; do \
+      curl -fL -sS --retry 3 --retry-delay 5 --retry-all-errors \
+           --connect-timeout 20 -C - -o /out/model/synthesis.gguf "$url" && break; \
+      echo "model fetch failed (attempt $a/6); backing off" >&2; \
+      sleep $((a * 20)); \
+    done; \
     echo "${sha}  /out/model/synthesis.gguf" | sha256sum -c - ; \
     echo "${AIMEE_SYNTHESIS_MODEL}" > /out/model/MODEL_ID
 
