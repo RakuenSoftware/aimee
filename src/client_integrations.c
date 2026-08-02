@@ -157,20 +157,50 @@ static const char *resolved_aimee_bin_path(void)
    return path;
 }
 
+/* The agent host spawns `aimee mcp-serve` itself, with an environment of its own
+ * choosing, and the generated config is the only place we can state what the
+ * server needs. Where AIMEE_HOME is what locates the config -- every
+ * containerised or managed-server install -- leaving it out means the server
+ * starts, cannot reach aimee-server, and answers tools/list with an EMPTY list.
+ * The agent is offered no tools at all and falls back to grep, which looks
+ * exactly like deciding the index was not worth calling. Measured on a
+ * container install: 18 tools with AIMEE_HOME present, 0 without it, whatever
+ * HOME is set to.
+ *
+ * Only when the operator set it explicitly: with AIMEE_HOME unset the default
+ * resolution already works, and pinning a value they never chose would freeze
+ * this machine's layout into a config that may be copied elsewhere. */
+static const char *explicit_aimee_home(void)
+{
+   const char *home = getenv("AIMEE_HOME");
+   return (home && *home) ? home : NULL;
+}
+
 static void format_mcp_json(char *buf, size_t cap, const char *aimee_bin)
 {
+   const char *aimee_home = explicit_aimee_home();
+   char env_block[MAX_PATH_LEN + 64];
+
    if (!buf || cap == 0)
       return;
+
+   env_block[0] = '\0';
+   /* This writer emits raw JSON, so refuse a value it cannot represent rather
+    * than produce a config that silently fails to parse. */
+   if (aimee_home && !strpbrk(aimee_home, "\"\\"))
+      snprintf(env_block, sizeof(env_block), ",\n      \"env\": { \"AIMEE_HOME\": \"%s\" }",
+               aimee_home);
+
    snprintf(buf, cap,
             "{\n"
             "  \"mcpServers\": {\n"
             "    \"aimee\": {\n"
             "      \"command\": \"%s\",\n"
-            "      \"args\": [\"mcp-serve\"]\n"
+            "      \"args\": [\"mcp-serve\"]%s\n"
             "    }\n"
             "  }\n"
             "}\n",
-            aimee_bin ? aimee_bin : "aimee");
+            aimee_bin ? aimee_bin : "aimee", env_block);
 }
 
 static cJSON *create_aimee_mcp_server(const char *aimee_bin)
@@ -182,6 +212,16 @@ static cJSON *create_aimee_mcp_server(const char *aimee_bin)
    cJSON *a = cJSON_CreateArray();
    cJSON_AddItemToArray(a, cJSON_CreateString("mcp-serve"));
    cJSON_AddItemToObject(aimee_server, "args", a);
+   const char *aimee_home = explicit_aimee_home();
+   if (aimee_home)
+   {
+      cJSON *env = cJSON_CreateObject();
+      if (env)
+      {
+         cJSON_AddStringToObject(env, "AIMEE_HOME", aimee_home);
+         cJSON_AddItemToObject(aimee_server, "env", env);
+      }
+   }
    return aimee_server;
 }
 
