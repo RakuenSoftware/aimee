@@ -60,7 +60,7 @@ const config_field_t config_fields[] = {
      CFG_STRING, RELOAD_RESTART},
     {"kb_client_bearer_token", offsetof(config_t, kb_client_bearer_token),
      sizeof(((config_t *)0)->kb_client_bearer_token), 0, CFG_STRING, RELOAD_RESTART, FGROUP_RUNTIME,
-     "AIMEE_KB_API_BEARER_TOKEN"},
+     "AIMEE_KB_CLIENT_BEARER_TOKEN"},
     /* A fact about the running image, not a preference: the Dockerfile sets
      * AIMEE_WITH_LLAMACPP in every variant. RELOAD_RESTART because it cannot change
      * without replacing the image. */

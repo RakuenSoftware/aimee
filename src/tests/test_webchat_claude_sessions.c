@@ -42,14 +42,22 @@ int main(void)
    assert(strcmp(out, "csidA2") == 0);
    assert(db1_webchat_claude_session_owned_by_other("webuser:alice", "tabB", "csidA") == 0);
 
-   /* Principal isolation: a different principal with the SAME tab name is a
-    * distinct binding, and may not adopt another principal's live session. */
+   /* The TAB is the key, not the actor: one environment, so the same tab seen
+    * by a different PAM actor is the same binding, not a second one. Rebinding
+    * it is a rebind, and both actors then read the same id. */
    assert(db1_webchat_claude_session_bind("webuser:bob", "tabA", "csidC") == 0);
    assert(db1_webchat_claude_session_get("webuser:bob", "tabA", out, sizeof(out)) == 0);
    assert(strcmp(out, "csidC") == 0);
    assert(db1_webchat_claude_session_get("webuser:alice", "tabA", out, sizeof(out)) == 0);
-   assert(strcmp(out, "csidA2") == 0);
+   assert(strcmp(out, "csidC") == 0);
+
+   /* The protection that matters is unchanged and is per TAB, not per actor: a
+    * tab may not adopt a Claude session another tab still holds, whichever actor
+    * asks. csidB belongs to tabB, so tabA cannot claim it — that is what stops
+    * two conversations merging at the model level. */
    assert(db1_webchat_claude_session_owned_by_other("webuser:bob", "tabA", "csidB") == 1);
+   assert(db1_webchat_claude_session_owned_by_other("webuser:alice", "tabA", "csidB") == 1);
+   assert(db1_webchat_claude_session_bind("webuser:bob", "tabA", "csidB") == -1);
 
    /* No per-tab identity -> get refuses (caller falls back to legacy behavior). */
    assert(db1_webchat_claude_session_get("webuser:alice", "", out, sizeof(out)) == -1);

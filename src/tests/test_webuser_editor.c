@@ -66,7 +66,8 @@ static void test_editor_env_leak(void)
 
    char userroot[400];
    snprintf(userroot, sizeof(userroot), "%s/ws/webusers/alice", home);
-   char **env = webuser_editor_build_env("webuser:alice", userroot);
+   int efd = -1;
+   char **env = webuser_editor_build_env("webuser:alice", userroot, &efd);
    assert(env != NULL);
 
    /* Curated base + pinned HOME. */

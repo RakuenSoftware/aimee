@@ -12,6 +12,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define VAULT_LEGACY_MIGRATE_MAX_ENTRIES 256
+#define VAULT_LEGACY_SECRET_MAX          (64 * 1024)
+
 const char *vault_status_str(vault_status_t s)
 {
    switch (s)
@@ -149,6 +152,61 @@ vault_status_t vault_service_set_server(const char *agent, const char *cred, con
    return st;
 }
 
+/* Import autonomous server-wrapped credentials from a historical actor vault.
+ * The shared server namespace is authoritative: an existing entry is never
+ * overwritten. Conflicting legacy values remain encrypted in their original
+ * vault and are logged for explicit operator resolution. */
+static void vault_service_migrate_legacy_principal(const char *principal)
+{
+   if (!principal || !principal[0] || strcmp(principal, VAULT_SERVER_PRINCIPAL) == 0)
+      return;
+   vault_store_entry_t entries[VAULT_LEGACY_MIGRATE_MAX_ENTRIES];
+   int n = vault_store_list(principal, entries, VAULT_LEGACY_MIGRATE_MAX_ENTRIES);
+   if (n < 0)
+   {
+      LOG_WARN("vault", "could not inventory legacy principal for shared-vault migration");
+      return;
+   }
+   if (n == VAULT_LEGACY_MIGRATE_MAX_ENTRIES)
+      LOG_WARN("vault", "legacy principal migration reached the credential inventory limit");
+
+   char *legacy = malloc(VAULT_LEGACY_SECRET_MAX);
+   char *shared = malloc(VAULT_LEGACY_SECRET_MAX);
+   if (!legacy || !shared)
+   {
+      free(legacy);
+      free(shared);
+      return;
+   }
+   for (int i = 0; i < n; i++)
+   {
+      vault_status_t ls = vault_service_get_server_wrap(
+          principal, entries[i].agent, entries[i].cred, legacy, VAULT_LEGACY_SECRET_MAX);
+      if (ls != VAULT_OK)
+         continue; /* old user-only entry: next successful unlock backfills it */
+      vault_status_t ss = vault_service_get_server_principal(entries[i].agent, entries[i].cred,
+                                                             shared, VAULT_LEGACY_SECRET_MAX);
+      if (ss == VAULT_NO_ENTRY)
+      {
+         if (vault_service_set_server(entries[i].agent, entries[i].cred, legacy) == VAULT_OK)
+            LOG_INFO("vault", "migrated legacy credential into shared environment vault");
+         else
+            LOG_WARN("vault", "failed to migrate legacy credential into shared vault");
+      }
+      else if (ss == VAULT_OK && strcmp(shared, legacy) != 0)
+         LOG_WARN("vault",
+                  "legacy credential conflicts with shared environment vault; shared value kept "
+                  "for agent=%s cred=%s",
+                  entries[i].agent, entries[i].cred);
+      OPENSSL_cleanse(legacy, VAULT_LEGACY_SECRET_MAX);
+      OPENSSL_cleanse(shared, VAULT_LEGACY_SECRET_MAX);
+   }
+   OPENSSL_cleanse(legacy, VAULT_LEGACY_SECRET_MAX);
+   OPENSSL_cleanse(shared, VAULT_LEGACY_SECRET_MAX);
+   free(legacy);
+   free(shared);
+}
+
 vault_status_t vault_service_set_server_wrap(const char *principal, const char *agent,
                                              const char *cred, const char *secret)
 {
@@ -206,7 +264,10 @@ vault_status_t vault_service_unlock(const char *principal, attested_transport_t 
     * wrap to any credentials written before dual-wrap so the server can decrypt
     * them autonomously. Best-effort — never fail the unlock on a backfill error. */
    if (st == VAULT_OK)
+   {
       vault_service_backfill_server_wraps(principal, kek);
+      vault_service_migrate_legacy_principal(principal);
+   }
 
    OPENSSL_cleanse(kek, sizeof(kek));
    OPENSSL_cleanse(salt, sizeof(salt));
@@ -244,12 +305,15 @@ vault_status_t vault_service_unlock_password(const char *principal, attested_tra
 
    /* WP-C.4 dual-access backfill (see vault_service_unlock). */
    if (st == VAULT_OK)
+   {
       vault_service_backfill_server_wraps(principal, kek);
+      vault_service_migrate_legacy_principal(principal);
+   }
 
    OPENSSL_cleanse(kek, sizeof(kek));
    OPENSSL_cleanse(salt, sizeof(salt));
    if (st == VAULT_OK)
-      LOG_INFO("vault", "webuser vault unlocked (scrypt)");
+      LOG_INFO("vault", "legacy actor vault unlocked and imported");
    return vaudit("vault.unlock", principal, "", "", transport, st);
 }
 
@@ -265,11 +329,11 @@ vault_status_t vault_service_rekey_password(const char *principal, attested_tran
    if (!old_password || old_len == 0 || !new_password || new_len == 0)
       return VAULT_ERR_BADARG;
 
-   /* Read-only: a rekey against a non-existent principal must fail closed, never
-    * materialize a vault an attacker could then own. */
+   /* Read-only compatibility path. No legacy actor vault means there is nothing
+    * to rekey; the shared environment vault is independent of PAM passwords. */
    uint8_t salt[VAULT_SALT_LEN];
    if (vault_store_salt_readonly(principal, salt) != 0)
-      return VAULT_ERR_CRYPTO;
+      return VAULT_OK;
 
    uint8_t old_kek[VAULT_KEK_LEN], new_kek[VAULT_KEK_LEN];
    vault_status_t st = VAULT_OK;
@@ -396,18 +460,12 @@ vault_status_t vault_service_inject_api_key(const char *principal, const char *a
    char *tmp = malloc(api_key_len);
    if (!tmp)
       return VAULT_ERR_IO;
-   /* Server-first (WP-C.4): the server wrap decrypts autonomously — no client
-    * unlock, survives restart. Fall back to the user-KEK path only for legacy
-    * creds not yet dual-wrapped (those get backfilled at the next user unlock). */
+   (void)principal;
+   (void)now_epoch;
+   /* One environment has one credential namespace. Actor identity is audit and
+    * authorization metadata and never selects a provider key. */
    vault_status_t st =
-       vault_service_get_server_wrap(principal, agent, VAULT_API_KEY_CRED, tmp, api_key_len);
-   if (st == VAULT_NO_ENTRY)
-      st = vault_service_get(principal, agent, VAULT_API_KEY_CRED, tmp, api_key_len, now_epoch);
-   /* Last: the server-owned vault (delegate creds pushed from a TCP thin client,
-    * which has no per-user principal). Only on a clean miss — a LOCKED user cred
-    * stays a hard error (D15), never silently downgraded to the server vault. */
-   if (st == VAULT_NO_ENTRY)
-      st = vault_service_get_server_principal(agent, VAULT_API_KEY_CRED, tmp, api_key_len);
+       vault_service_get_server_principal(agent, VAULT_API_KEY_CRED, tmp, api_key_len);
    if (st == VAULT_OK)
       snprintf(api_key, api_key_len, "%s", tmp); /* overwrite only on a real hit */
    OPENSSL_cleanse(tmp, api_key_len);

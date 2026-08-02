@@ -106,16 +106,24 @@ char *mcp_git_run(const char *cmd, int *exit_code)
          const char *pref = NULL;
          if (forge_cred_get(wsid, (long)time(NULL), tok, sizeof(tok)) == 0 && tok[0])
             pref = tok;
-         char **envp = git_cred_inject_build_env_for_repo(NULL, NULL, cwd, pref, environ, NULL);
+         int token_fd = -1;
+         char **envp =
+             git_cred_inject_build_env_for_repo(NULL, NULL, cwd, pref, environ, &token_fd);
          volatile char *p = (volatile char *)tok;
          for (size_t i = 0; i < sizeof(tok); i++)
             p[i] = 0;
          if (envp)
          {
-            char *out = run_cmd_env(cmd, envp, exit_code);
+            /* FD mode: the token rides an inherited memfd, never the environ. */
+            char *out = run_cmd_env_fd(cmd, envp, exit_code, token_fd,
+                                       token_fd >= 0 ? GIT_CRED_TOKEN_TARGET_FD : -1);
             git_cred_inject_free_env(envp);
+            if (token_fd >= 0)
+               close(token_fd);
             return out;
          }
+         if (token_fd >= 0)
+            close(token_fd);
       }
    }
    return exec_ws->exec_shell(exec_ws, cmd, exit_code);

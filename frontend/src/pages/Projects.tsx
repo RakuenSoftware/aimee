@@ -79,13 +79,11 @@ export default function Projects() {
   const [orgResults, setOrgResults] = useState<({ name: string; ok: boolean; error?: string | null } & CloneKbAnnotations)[]>([]);
   // Post-clone notices (org placement, kb indexing) for the single-repo form.
   const [cloneNotes, setCloneNotes] = useState<string[]>([]);
-  // Delete flow: the ref pending confirmation, the typed-ref gate, and whether
-  // the last attempt aborted on an unavailable knowledge service (503 → offer
-  // retry / explicit force, which itself needs a second click to confirm).
+  // Delete flow: the ref pending confirmation and the typed-ref gate. The
+  // delete is local to this environment — it removes the clone, and never
+  // touches aimee-kb — so there is no knowledge-service failure to force past.
   const [delRef, setDelRef] = useState('');
   const [delTyped, setDelTyped] = useState('');
-  const [delKbDown, setDelKbDown] = useState(false);
-  const [delForceArmed, setDelForceArmed] = useState(false);
   const [notice, setNotice] = useState('');
 
   const loadHosts = useCallback(async () => {
@@ -207,45 +205,31 @@ export default function Projects() {
   }
 
   function openDelete(ref: string) {
-    setDelRef(ref); setDelTyped(''); setDelKbDown(false); setDelForceArmed(false); setErr(''); setNotice('');
+    setDelRef(ref); setDelTyped(''); setErr(''); setNotice('');
   }
 
   function closeDelete() {
-    setDelRef(''); setDelTyped(''); setDelKbDown(false); setDelForceArmed(false);
+    setDelRef(''); setDelTyped('');
   }
 
-  async function deleteProject(force: boolean) {
+  async function deleteProject() {
     if (!delRef || delTyped !== delRef) return;
     setBusy(true); setErr(''); setNotice('');
     try {
       const r = await api('/api/git/projects/delete', {
         method: 'POST',
-        body: JSON.stringify(force ? { ref: delRef, force: true } : { ref: delRef }),
+        body: JSON.stringify({ ref: delRef }),
       });
       const d: ProjectDeleteResponse = await r.json().catch(() => ({}));
       if (r.ok) {
-        const kb = d.kb_status === 'retained'
-          ? 'knowledge retained — other users still hold this repo'
-          : d.kb_status === 'forced'
-            ? 'forced — knowledge orphaned until the knowledge service returns'
-            : 'knowledge purged';
-        setNotice(`Deleted ${delRef} — ${kb}.`);
+        setNotice(`Deleted ${delRef}.`);
         closeDelete();
         await loadProjects();
         notifySetupUpdated();
-      } else if (r.status === 503) {
-        // kb-first ordering aborted the delete: the clone is intact. Offer a
-        // retry, or an explicit force (second click) that leaves the knowledge
-        // orphaned until the service returns.
-        setDelKbDown(true); setDelForceArmed(false);
-        setErr(d.error || 'knowledge service unavailable — retry, or force delete');
       } else {
-        // A non-kb error must disarm any pending force confirmation — the
-        // armed state only ever applies to the 503 kb-down flow it came from.
-        setDelKbDown(false); setDelForceArmed(false);
         setErr(d.error || `delete failed (${r.status})`);
       }
-    } catch { setDelForceArmed(false); setErr('aimee-server unavailable'); } finally { setBusy(false); }
+    } catch { setErr('aimee-server unavailable'); } finally { setBusy(false); }
   }
 
   async function runOp(op: string, extra?: Record<string, unknown>): Promise<boolean> {
@@ -413,32 +397,17 @@ export default function Projects() {
                           display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <div style={{ fontSize: '13px', fontWeight: 600, color: '#c33' }}>Delete {delRef}?</div>
               <div style={{ fontSize: '12px', color: '#844' }}>
-                This removes the clone and all indexed knowledge. Type{' '}
+                This removes the clone from this server. Type{' '}
                 <code style={{ background: '#fee', padding: '1px 5px', borderRadius: '4px' }}>{delRef}</code> to confirm.
               </div>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
                 <input style={{ ...input, flex: 1, minWidth: '180px', fontFamily: 'monospace' }} placeholder={delRef}
                   value={delTyped} onChange={e => setDelTyped(e.target.value)} />
-                {!delKbDown && (
-                  <Button variant="danger" size="sm"
-                    disabled={busy || delTyped !== delRef} onClick={() => deleteProject(false)}
-                    title="Permanently delete the clone and all indexed knowledge for this project.">Delete</Button>
-                )}
+                <Button variant="danger" size="sm"
+                  disabled={busy || delTyped !== delRef} onClick={() => deleteProject()}
+                  title="Permanently delete this project's clone from this server.">Delete</Button>
                 <Button size="sm" disabled={busy} onClick={closeDelete}>Cancel</Button>
               </div>
-              {delKbDown && (
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-                  <Button size="sm" disabled={busy || delTyped !== delRef}
-                    title="Retry the delete now that the knowledge service may be back."
-                    onClick={() => deleteProject(false)}>Retry</Button>
-                  <Button variant="danger" size="sm" disabled={busy || delTyped !== delRef}
-                    onClick={() => { if (delForceArmed) deleteProject(true); else setDelForceArmed(true); }}>
-                    {delForceArmed
-                      ? 'Click again to confirm force delete'
-                      : 'Force delete (leaves knowledge orphaned until the knowledge service returns)'}
-                  </Button>
-                </div>
-              )}
             </div>
           )}
 

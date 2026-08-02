@@ -329,31 +329,27 @@ int main(void)
    assert(wf_api_events("no-such-item", 0, 200, buf, CAP) == 404);
    assert(wf_api_proposal("no-such-item", buf, CAP) == 404);
 
-   /* --- ownership: an INTERACTIVE work item submitted by another principal is not
-    * readable --- The test runs with an un-attested (empty) principal, so an
-    * interactive item whose submitter is set is owned by nobody-in-this-context:
-    * the per-item reads must 403 (the IDOR closure). (Autonomous runs are the
-    * deliberate exception — see the operator-visibility block below.) The
-    * owner-allowed path + pagination + proposal read-back are exercised live (a
-    * request carrying the matching webuser principal). */
+   /* --- one environment: a work item is the server's, not a PAM login's ---
+    * aimee-server is single-tenant, so an interactive item submitted under any
+    * actor is readable here; the submitter stays as attribution. Visibility is
+    * NOT authority: human-gate decisions remain separately CAP_WORKFLOW_ADMIN
+    * gated, which is what stops a reader driving someone else's proposal. */
    {
       assert(db1_work_item_create("wi_owned", "", "wi_owned.md", "build", "v1", "draft",
                                   "interactive") == 0);
       assert(db1_work_item_set_submitter("wi_owned", "webuser:someone-else") == 0);
       (void)db1_lifecycle_event_add("wi_owned", "draft", "create", "user", "", "", 0.0);
 
-      assert(wf_api_item("wi_owned", buf, CAP) == 403);
-      assert(wf_api_events("wi_owned", 0, 200, buf, CAP) == 403);
-      assert(wf_api_proposal("wi_owned", buf, CAP) == 403);
+      assert(wf_api_item("wi_owned", buf, CAP) == 200);
+      assert(wf_api_events("wi_owned", 0, 200, buf, CAP) == 200);
 
-      /* The owner-scoped list must not leak the non-owned item... */
+      /* The list shows it, and still carries the submitter for attribution. */
       assert(wf_api_items(buf, CAP) == 200);
       cJSON *o = parse_resp(buf);
       cJSON *items = cJSON_GetObjectItemCaseSensitive(o, "items");
-      assert(cJSON_IsArray(items) && cJSON_GetArraySize(items) == 0);
+      assert(cJSON_IsArray(items) && cJSON_GetArraySize(items) == 1);
       cJSON_Delete(o);
 
-      /* ...but the operator "all" view returns it, enriched with the new fields. */
       assert(wf_api_items_all(buf, CAP) == 200);
       o = parse_resp(buf);
       items = cJSON_GetObjectItemCaseSensitive(o, "items");

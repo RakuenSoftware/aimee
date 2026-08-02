@@ -22,16 +22,16 @@ int main(void)
    char base[256];
    snprintf(base, sizeof(base), "/dev/shm/aimee-wrt-test-%d", (int)getpid());
 
-   /* --- success path on tmpfs: 0700 per-user dir, isolated per principal --- */
+   /* --- success path on tmpfs: one 0700 environment dir, shared by actors --- */
    setenv("AIMEE_RUNTIME_DIR", base, 1);
    char a[512], b[512];
    assert(webuser_runtime_dir("webuser:alice", a, sizeof(a)) == 0);
    assert(webuser_runtime_dir("webuser:bob", b, sizeof(b)) == 0);
-   assert(strcmp(a, b) != 0);
+   assert(strcmp(a, b) == 0); /* one environment, not one dir per actor */
    struct stat st;
    assert(stat(a, &st) == 0 && S_ISDIR(st.st_mode) && (st.st_mode & 0777) == 0700);
-   assert(webuser_runtime_is_tmpfs(a) == 1); /* the per-user dir is on tmpfs */
-   assert(strstr(a, "/webusers/alice") != NULL);
+   assert(webuser_runtime_is_tmpfs(a) == 1); /* the environment dir is on tmpfs */
+   assert(strstr(a, "/environment") != NULL);
 
    /* non-webuser / malformed principals are refused; out is emptied on error */
    char x[512];
@@ -49,8 +49,7 @@ int main(void)
    webuser_runtime_cleanup("webuser:alice");
    assert(stat(a, &st) != 0); /* gone */
 
-   /* --- partial-failure: a too-small out buffer creates NOTHING (not even the
-    * shared /webusers parent) --- */
+   /* --- partial-failure: a too-small out buffer creates NOTHING --- */
    {
       char freshbase[256];
       snprintf(freshbase, sizeof(freshbase), "/dev/shm/aimee-wrt-cap-%d", (int)getpid());
@@ -58,8 +57,8 @@ int main(void)
       char tiny[8];
       assert(webuser_runtime_dir("webuser:alice", tiny, sizeof(tiny)) == -1);
       char parent[300];
-      snprintf(parent, sizeof(parent), "%s/webusers", freshbase);
-      assert(stat(parent, &st) != 0); /* parent must NOT exist */
+      snprintf(parent, sizeof(parent), "%s/environment", freshbase);
+      assert(stat(parent, &st) != 0); /* the environment dir must NOT exist */
       rmdir(freshbase);               /* base itself also not created on early cap failure */
       assert(stat(freshbase, &st) != 0);
       setenv("AIMEE_RUNTIME_DIR", base, 1); /* restore */
@@ -86,7 +85,7 @@ int main(void)
       assert(webuser_runtime_is_tmpfs(disk_base) == 0);                 /* base made, but disk */
       /* nothing under it should have been created */
       char inner[700];
-      snprintf(inner, sizeof(inner), "%s/webusers", disk_base);
+      snprintf(inner, sizeof(inner), "%s/environment", disk_base);
       assert(stat(inner, &st) != 0);
       rmdir(disk_base);
       printf("  (fail-closed negative case exercised on disk-backed cwd)\n");

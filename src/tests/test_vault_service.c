@@ -215,10 +215,14 @@ static void test_rekey_empty_and_missing_vault(void)
 {
    const uint8_t old_pw[] = "carol-old", new_pw[] = "carol-new", wrong[] = "carol-wrong";
 
-   /* (b) rekey of a principal with NO vault at all -> fail closed, creates nothing. */
+   /* (b) A principal with NO legacy vault has nothing to rekey: the environment
+    * vault is sealed under the server master KEK, not a PAM password, so a
+    * password change is a no-op rather than an error. The property that still
+    * matters is unchanged and asserted below — it must not MATERIALIZE a vault
+    * for a principal that has none. */
    assert(vault_service_rekey_password("webuser:nobody", ATTEST_WEBCHAT_TRUSTED, old_pw,
                                        sizeof(old_pw) - 1, new_pw, sizeof(new_pw) - 1,
-                                       T0) == VAULT_ERR_CRYPTO);
+                                       T0) == VAULT_OK);
    uint8_t salt[VAULT_SALT_LEN];
    assert(vault_store_salt_readonly("webuser:nobody", salt) == -1); /* no vault materialized */
 
@@ -259,7 +263,9 @@ static void test_server_inject_after_restart(void)
    uint8_t rk[VAULT_ROOT_KEY_LEN];
    root_key(rk, 7);
    assert(vault_service_unlock(p, ATTEST_UDS_PEERCRED, rk, sizeof(rk), T0) == VAULT_OK);
-   assert(vault_service_set(p, "claude", "api_key", "sk-autonomous", T0) == VAULT_OK);
+   /* The delegate use-path reads the ENVIRONMENT's key: one server, one API key.
+    * `principal` is carried for audit and does not scope the lookup. */
+   assert(vault_service_set_server("claude", "api_key", "sk-autonomous") == VAULT_OK);
 
    /* While unlocked, inject works. */
    char key[64] = "PRESET";
@@ -269,7 +275,11 @@ static void test_server_inject_after_restart(void)
    /* Simulate a restart: drop every cached user KEK -> the user vault is locked. */
    vault_kek_cache_clear();
    char out[64];
-   assert(vault_service_get(p, "claude", "api_key", out, sizeof(out), T0) == VAULT_ERR_LOCKED);
+   /* The per-user path yields NOTHING for it: the credential lives in the
+    * environment vault under the server master KEK, so a per-user get is not a
+    * second way to reach it. */
+   assert(vault_service_get(p, "claude", "api_key", out, sizeof(out), T0) != VAULT_OK);
+   assert(out[0] == '\0');
    /* Inject still succeeds via the server wrap with NO unlock. */
    char key2[64] = "PRESET";
    assert(vault_service_inject_api_key(p, "claude", key2, sizeof(key2), T0) == VAULT_OK);
@@ -346,6 +356,26 @@ static void capture_hook(const char *op, const char *principal, const char *agen
    r->status = status;
 }
 
+/* Unlocking a principal also runs the legacy->shared vault migration, which
+ * reads and writes through the audited server-principal helpers. Those records
+ * are real and are asserted on their own in test_server_principal_vault; here
+ * they are internal to unlock and would shift every positional expectation, so
+ * this drops them and leaves the client-facing sequence under test. */
+static void drop_migration_recs(void)
+{
+   int w = 0;
+   for (int r = 0; r < g_nrecs; r++)
+   {
+      if (strcmp(g_recs[r].op, "vault.get_server") == 0 ||
+          strcmp(g_recs[r].op, "vault.set_server") == 0)
+         continue;
+      if (w != r)
+         g_recs[w] = g_recs[r];
+      w++;
+   }
+   g_nrecs = w;
+}
+
 static void expect_rec(int i, const char *op, const char *principal, const char *agent,
                        const char *cred, attested_transport_t transport, vault_status_t status)
 {
@@ -399,7 +429,9 @@ static void test_audit_hook(void)
    /* wrong-transport unlock (a denial, transport recorded) */
    assert(vault_service_unlock(p, ATTEST_TCP_BEARER, rk, sizeof(rk), T0) == VAULT_ERR_TRANSPORT);
 
-   /* Every op above produced exactly one audit record, in order. */
+   /* Every CLIENT op above produced exactly one audit record, in order (unlock's
+    * internal legacy migration audits separately — see drop_migration_recs). */
+   drop_migration_recs();
    int i = 0;
    expect_rec(i++, "vault.set", p, "claude", "api_key", ATTEST_NONE, VAULT_ERR_LOCKED);
    expect_rec(i++, "vault.unlock", p, "", "", ATTEST_UDS_PEERCRED, VAULT_OK);

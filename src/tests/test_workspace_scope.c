@@ -1,7 +1,7 @@
-/* test_workspace_scope.c — per-webuser workspace isolation (WP-A).
+/* test_workspace_scope.c — single-environment workspace confinement.
  * Drives ws_scope_* against a real tmp AIMEE_WORKSPACES_DIR: name validation,
- * per-user root creation (0700), project resolution within the root, and the
- * security properties — cross-principal separation, '..'/'/' rejection, and
+ * shared root creation (0700), project resolution within the root, and the
+ * security properties — cross-actor equality, '..'/'/' rejection, and
  * symlink-escape rejection. */
 #include "workspace_scope.h"
 
@@ -44,7 +44,7 @@ int main(void)
    assert(ws_scope_user_root("webuser:alice", 0, tiny, 0) == -1);
    assert(ws_scope_user_root("webuser:alice", 0, NULL, 16) == -1);
 
-   /* --- user root: only webuser: principals, created 0700 --- */
+   /* --- environment root: authenticated webuser actors resolve identically --- */
    char rootA[PATH_MAX], rootB[PATH_MAX];
    assert(ws_scope_user_root("uid:1000", 1, rootA, sizeof(rootA)) == -1); /* not a webuser */
    assert(ws_scope_user_root("webuser:..", 1, rootA, sizeof(rootA)) == -1);
@@ -52,11 +52,11 @@ int main(void)
 
    assert(ws_scope_user_root("webuser:alice", 1, rootA, sizeof(rootA)) == 0);
    assert(ws_scope_user_root("webuser:bob", 1, rootB, sizeof(rootB)) == 0);
-   assert(strcmp(rootA, rootB) != 0);
+   assert(strcmp(rootA, rootB) == 0);
    struct stat st;
    assert(stat(rootA, &st) == 0 && S_ISDIR(st.st_mode));
    assert((st.st_mode & 0777) == 0700); /* private */
-   assert(strstr(rootA, "/webusers/alice") != NULL);
+   assert(strstr(rootA, "/environment") != NULL);
 
    /* --- project path: not-yet-existing clone target --- */
    char proj[PATH_MAX];
@@ -73,27 +73,27 @@ int main(void)
    assert(mkdir(real_proj, 0700) == 0);
    assert(ws_scope_project_path("webuser:alice", "myrepo", 1, proj, sizeof(proj)) == 0);
    assert(ws_scope_contains("webuser:alice", proj) == 1);
-   /* alice's project is NOT within bob's scope */
-   assert(ws_scope_contains("webuser:bob", proj) == 0);
+   /* Bob is another actor in the same workspace environment. */
+   assert(ws_scope_contains("webuser:bob", proj) == 1);
 
    /* --- symlink escape rejection --- */
-   /* alice/evil -> bob's root. must_exist resolution must reject it (realpath
-    * lands outside alice's canonical root). */
+   /* environment/evil -> a sibling outside the root. Resolution must reject it. */
    char evil[PATH_MAX], target[PATH_MAX];
    snprintf(evil, sizeof(evil), "%s/evil", rootA);
-   snprintf(target, sizeof(target), "%s", rootB);
+   snprintf(target, sizeof(target), "%s/outside", dir);
+   assert(mkdir(target, 0700) == 0);
    assert(symlink(target, evil) == 0);
    assert(ws_scope_project_path("webuser:alice", "evil", 1, proj, sizeof(proj)) == -1);
    /* a symlink also blocks a clone target of the same name (lstat detects it) */
    assert(ws_scope_project_path("webuser:alice", "evil", 0, proj, sizeof(proj)) == -1);
-   /* and ws_scope_contains on the symlink's resolved (bob) path is false for alice */
-   assert(ws_scope_contains("webuser:alice", rootB) == 0);
+   /* and the sibling target is outside the environment for every actor */
+   assert(ws_scope_contains("webuser:alice", target) == 0);
 
    /* --- prefix false-positive: a sibling dir sharing a name prefix with the
     * root must NOT count as "within" (/.../alice vs /.../alicex boundary) --- */
    {
       char sibling[PATH_MAX];
-      /* rootA ends in "/alice"; craft "/aliceX" sibling */
+      /* craft an environmentX sibling */
       snprintf(sibling, sizeof(sibling), "%sX", rootA);
       assert(mkdir(sibling, 0700) == 0);
       assert(ws_scope_contains("webuser:alice", sibling) == 0); /* not within */
@@ -205,7 +205,7 @@ int main(void)
    rmdir(real_proj);
    unlink(evil);
    rmdir(rootA);
-   rmdir(rootB);
+   rmdir(target);
 
    printf("workspace_scope: all tests passed\n");
    return 0;

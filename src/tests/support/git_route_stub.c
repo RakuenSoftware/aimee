@@ -39,19 +39,10 @@ int git_project_clone(const char *principal, const char *url, const char *name, 
    return -1;
 }
 
-int git_project_delete(const char *principal, const char *ref, int force,
-                       git_project_delete_result_t *res, char *err, size_t errlen)
+int git_project_delete(const char *principal, const char *ref, char *err, size_t errlen)
 {
    (void)principal;
    (void)ref;
-   (void)force;
-   if (res)
-   {
-      res->kb_status[0] = '\0';
-      res->purge_id[0] = '\0';
-      res->generation[0] = '\0';
-      res->kb_detail = NULL;
-   }
    if (err && errlen)
       snprintf(err, errlen, "stub");
    return -1;

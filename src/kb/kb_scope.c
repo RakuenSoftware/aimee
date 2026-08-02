@@ -67,6 +67,12 @@ int kb_scope_authorized(const char *token_kind, const char *token_id, const char
       return 1;
    if (!req_kind || !req_kind[0])
       return 1; /* request names no scope — nothing to deny against */
+   /* A service token spans the data plane: any project, any workspace. It is
+    * still scoped, so the administrative gates that refuse scoped credentials
+    * continue to refuse it — this widens data access, never privilege. Other
+    * kinds (user, console-admin, curator) are NOT reachable this way. */
+   if (strcmp(token_kind, KB_SCOPE_KIND_SERVICE) == 0)
+      return strcmp(req_kind, "project") == 0 || strcmp(req_kind, "workspace") == 0;
    if (strcmp(token_kind, req_kind) != 0)
       return 0;
    if (strcmp(token_id ? token_id : "", req_id ? req_id : "") != 0)
@@ -180,6 +186,28 @@ int kb_scope_request_target(const char *query_string, const char *body, char *ki
    if (jval(body, "scope_user", bid, sizeof(bid)) && bid[0])
    {
       copy_n(kind, kind_len, "user", 4);
+      copy_n(id, id_len, bid, strlen(bid));
+      return 1;
+   }
+   /* 5. body: project → kind=project. The POST routes (build, update, scan,
+    * ingest, maintenance) name their target project in the body, not the query
+    * string, so without this a scoped token reached any project simply by
+    * omitting a query it never had to send: the target resolved to "no scope
+    * named" and kb_scope_authorized allowed it. Checked last so an explicit
+    * scope_kind/scope_user still wins. */
+   if (jval(body, "project", bid, sizeof(bid)) && bid[0])
+   {
+      copy_n(kind, kind_len, "project", 7);
+      copy_n(id, id_len, bid, strlen(bid));
+      return 1;
+   }
+   /* 6. body: workspace → kind=workspace (POST /v1/ingest), same reasoning.
+    * NOTE this resolves a NAMED workspace only. Ingest treats an absent or
+    * "all" workspace as every discovered project, and that still names no
+    * scope here, so it is not denied by this layer — see the route. */
+   if (jval(body, "workspace", bid, sizeof(bid)) && bid[0] && strcmp(bid, "all") != 0)
+   {
+      copy_n(kind, kind_len, "workspace", 9);
       copy_n(id, id_len, bid, strlen(bid));
       return 1;
    }

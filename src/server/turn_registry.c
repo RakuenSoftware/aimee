@@ -89,19 +89,9 @@ turn_entry_t *turn_registry_publish(const char *session_id, const char *turn_id)
 
 int turn_registry_cancel(const char *session_id, const char *owner_principal)
 {
-   /* Authz (cross-principal protection) is decided OUTSIDE the registry lock —
-    * presence has its own lock and the leaf-mutex rule forbids holding g_lock
-    * across a presence call. */
-   if (owner_principal && owner_principal[0])
-   {
-      char owner[PRESENCE_OWNER_MAX];
-      if (!presence_session_owner(session_id, owner, sizeof(owner)) ||
-          strcmp(owner, owner_principal) != 0)
-      {
-         LOG_WARN("turn_registry", "refused cross-principal cancel of session %s", session_id);
-         return -1;
-      }
-   }
+   /* PAM identity is actor/audit metadata, not session ownership. Route-level
+    * authentication and capabilities decide whether the actor may cancel. */
+   (void)owner_principal;
    pthread_mutex_lock(&g_lock);
    turn_entry_t *e = find_locked(session_id);
    if (!e)

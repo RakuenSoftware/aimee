@@ -91,7 +91,8 @@ static int ws_mirror_git_runner(void *ctx, const char *const args[], char *out, 
    const char *pref = NULL;
    if (wsid && wsid[0] && forge_cred_get(wsid, (long)time(NULL), tok, sizeof(tok)) == 0 && tok[0])
       pref = tok;
-   char **envp = git_cred_inject_build_env_for_repo(NULL, remote, NULL, pref, environ, NULL);
+   int token_fd = -1;
+   char **envp = git_cred_inject_build_env_for_repo(NULL, remote, NULL, pref, environ, &token_fd);
    {
       volatile char *p = (volatile char *)tok;
       for (size_t i = 0; i < sizeof(tok); i++)
@@ -102,7 +103,11 @@ static int ws_mirror_git_runner(void *ctx, const char *const args[], char *out, 
    int rc;
    if (envp)
    {
-      rc = safe_exec_capture_env(argv, envp, &cap, out_cap ? out_cap : 4096);
+      /* FD mode: the token rides an inherited memfd placed at
+       * GIT_CRED_TOKEN_TARGET_FD, so it never lands in the child's environ. */
+      rc = safe_exec_capture_cwd_env_fd_timeout(argv, NULL, envp, &cap, out_cap ? out_cap : 4096, 0,
+                                                token_fd,
+                                                token_fd >= 0 ? GIT_CRED_TOKEN_TARGET_FD : -1);
       git_cred_inject_free_env(envp);
    }
    else
@@ -110,6 +115,8 @@ static int ws_mirror_git_runner(void *ctx, const char *const args[], char *out, 
       const workspace_provider_t *sh = workspace_provider_shared();
       rc = sh->exec(sh, argv, &cap, out_cap ? out_cap : 4096);
    }
+   if (token_fd >= 0)
+      close(token_fd);
    if (out && out_cap)
       snprintf(out, out_cap, "%s", cap ? cap : "");
    free(cap);
