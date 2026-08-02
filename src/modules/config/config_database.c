@@ -276,15 +276,26 @@ void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n)
    } while (0)
 
    const int remote_kb = strcmp(cfg->kb_mode, "remote") == 0;
+   /* Local synthesis is a MODEL WITH NO ENDPOINT, which is the contract the wizard
+    * writes (synthesisToConfig in deployTopology.ts): "bundled" sets synthesis_model
+    * and leaves synthesis_endpoint empty, "external" sets the endpoint, "off" sets
+    * neither. Read it here rather than adding a mode field the two could disagree
+    * about. */
+   const int local_synthesis = !remote_kb && cfg->synthesis_model[0] && !cfg->synthesis_endpoint[0];
 
-   /* COMPOSE_PROFILES: a remote kb deploys nothing; a local kb runs the "kb" service
-    * and that is all. There is no longer an inference service to gate a profile on —
-    * the kb embeds in-container from baked weights and the reranker is gone, so the
-    * "llm" profile has nothing behind it. Synthesis resolves an external endpoint,
-    * which is configuration rather than a deployed service. */
+   /* COMPOSE_PROFILES: a remote kb deploys nothing; a local kb runs "kb", and adds
+    * "llm" when synthesis runs on this host.
+    *
+    * The "llm" profile came back. It was dropped when the old aimee-llm container was
+    * retired, and deploy_apply.c kept its managed-inference mechanism alive against a
+    * stub profile precisely because synthesis was expected to become a managed service
+    * again. It has: aimee-llm-e{2,4}b carries llama.cpp and one baked GGUF beside the
+    * kb. Without this emission the service exists in Compose and nothing ever starts
+    * it, so a wizard selecting a local model produced a deployment with no synthesis
+    * and no error. */
    char profiles[64] = "";
    if (!remote_kb)
-      snprintf(profiles, sizeof(profiles), "kb");
+      snprintf(profiles, sizeof(profiles), local_synthesis ? "kb,llm" : "kb");
    EMITF("COMPOSE_PROFILES=%s\n", profiles);
 
    if (remote_kb)
@@ -298,6 +309,30 @@ void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n)
     * serves the selected model itself, so all the deploy layer passes on is WHICH model
     * (the wizard's choice, which the kb resolves from its registry) and, for an external
     * embedder, the endpoint to use instead. */
+   /* WHICH KB IMAGE. The embedder is baked, so the choice is an image, not just a
+    * setting: aimee-kb carries none, aimee-kb-a25m carries bekko, aimee-kb-nomic
+    * carries nomic. Emitting only EMBEDDER_MODEL told the kb to start a model whose
+    * weights its image might not contain.
+    *
+    * That was a live regression rather than a missing feature: `aimee-kb` used to mean
+    * "bekko baked in" and now means "no embedder", so an existing managed deployment
+    * pulling a new tag would be handed EMBEDDER_MODEL=bekko-a25m and an image with no
+    * bekko in it.
+    *
+    * Only the VARIANT is emitted; Compose composes the reference, so the registry and
+    * the tag stay in one place instead of being rebuilt in C. Empty means plain
+    * aimee-kb, which is also the right image for an external embedder: it carries
+    * neither PyTorch nor weights. */
+   const char *kb_variant = "";
+   if (!cfg->embedder_url[0])
+   {
+      if (strcmp(cfg->embedder_model, "bekko-a25m") == 0)
+         kb_variant = "a25m";
+      else if (strcmp(cfg->embedder_model, "nomic-embed-text-v2-moe") == 0)
+         kb_variant = "nomic";
+   }
+   EMITF("AIMEE_KB_VARIANT=%s\n", kb_variant);
+
    if (cfg->embedder_model[0])
       EMITF("EMBEDDER_MODEL=%s\n", cfg->embedder_model);
    /* A non-empty URL IS the external embedder — there is no separate backend
@@ -316,6 +351,30 @@ void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n)
       EMITF("SYNTHESIS_ENDPOINT=%s\n", cfg->synthesis_endpoint);
    if (cfg->synthesis_model[0])
       EMITF("SYNTHESIS_MODEL=%s\n", cfg->synthesis_model);
+
+   /* The sidecar hop. A bundled model leaves synthesis_endpoint empty by contract, so
+    * the endpoint has to be supplied here or the kb has a deployed sidecar it never
+    * calls -- synthesis "configured" and idle, which is the failure this whole design
+    * set out to remove.
+    *
+    * AIMEE_LLM_HOST is what makes the kb mint the mTLS identities at startup, and it
+    * doubles as the certificate's DNS name, so it must equal the Compose service name.
+    *
+    * The three TLS paths are inside the kb container, on the volume the kb writes and
+    * the sidecar reads. They are emitted ONLY for the local sidecar:
+    * SYNTHESIS_CA_FILE replaces the system trust store for that request, so setting
+    * them alongside an external https endpoint would reject a certificate that is
+    * perfectly valid. */
+   if (local_synthesis)
+   {
+      const char *variant = strstr(cfg->synthesis_model, "E2B") ? "e2b" : "e4b";
+      EMITF("AIMEE_LLM_VARIANT=%s\n", variant);
+      EMITF("AIMEE_LLM_HOST=aimee-llm\n");
+      EMITF("SYNTHESIS_ENDPOINT=https://aimee-llm:8761/v1\n");
+      EMITF("SYNTHESIS_CA_FILE=%s\n", "/var/lib/aimee/synthesis-tls/ca.pem");
+      EMITF("SYNTHESIS_CERT_FILE=%s\n", "/var/lib/aimee/synthesis-tls/client.pem");
+      EMITF("SYNTHESIS_KEY_FILE=%s\n", "/var/lib/aimee/synthesis-tls/client.key");
+   }
    /* embedder_api_key and synthesis_api_key are deliberately NOT emitted. A
     * credential in a long-lived service environment is exactly what
     * check-vault-only-container-env forbids: Config.Env persists, so anything
