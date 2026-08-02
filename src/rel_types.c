@@ -242,6 +242,124 @@ static const rel_type_def_t SEED_ONTOLOGY[] = {
      SENS_NORMAL,
      0,
      REL_STATUS_ACTIVE},
+    /* Commercial and deployment relations. Added because the ontology did not
+     * cover the domain and the gap was being filled by the model inventing a
+     * word for each one: measured over two 1k extraction runs, 22-24% of every
+     * extracted fact used a non-seed predicate, 89 distinct ones, and 23 of
+     * those recurred often enough for §7.2 auto-promotion (threshold 3) to make
+     * them active. That would have grown the ontology to ~40 relations, most of
+     * them near-synonyms — hosting facts alone split four ways across runs_on,
+     * has_hostname, operates and hosts.
+     *
+     * Seeding the relations the domain actually needs is the difference between
+     * the model landing on a shared predicate and the promoter admitting
+     * whichever synonym it happened to produce first. */
+    {"customer_of",
+     {NODE_ORG},
+     1,
+     {NODE_OTHER},
+     1,
+     0,
+     NULL,
+     CORR_SUPERSEDE,
+     "work",
+     SENS_NORMAL,
+     0,
+     REL_STATUS_ACTIVE},
+    {"subscription_tier",
+     {NODE_ORG},
+     1,
+     {NODE_SCALAR},
+     1,
+     0,
+     NULL,
+     /* Single-valued: a new tier replaces the old one rather than accumulating.
+      * Also listed in rel_type_is_functional(). */
+     CORR_SUPERSEDE,
+     "work",
+     SENS_NORMAL,
+     0,
+     REL_STATUS_ACTIVE},
+    {"owns_account",
+     {NODE_PERSON},
+     1,
+     {NODE_ORG},
+     1,
+     0,
+     NULL,
+     CORR_SUPERSEDE,
+     "work",
+     SENS_NORMAL,
+     0,
+     REL_STATUS_ACTIVE},
+    {"purchased",
+     {NODE_OTHER},
+     1,
+     {NODE_OTHER},
+     1,
+     0,
+     NULL,
+     /* Multi-valued: an acquisition is a historical event and a second purchase
+      * does not undo the first. Accumulation is governed by absence from
+      * rel_type_is_functional(), not by correction_behavior. */
+     CORR_SUPERSEDE,
+     "work",
+     SENS_NORMAL,
+     0,
+     REL_STATUS_ACTIVE},
+    {"founded",
+     {NODE_PERSON},
+     1,
+     {NODE_ORG},
+     1,
+     0,
+     NULL,
+     CORR_SUPERSEDE,
+     "work",
+     SENS_NORMAL,
+     0,
+     REL_STATUS_ACTIVE},
+    {"mentors",
+     {NODE_PERSON},
+     1,
+     {NODE_OTHER},
+     1,
+     0,
+     NULL,
+     CORR_SUPERSEDE,
+     "work",
+     SENS_NORMAL,
+     0,
+     REL_STATUS_ACTIVE},
+    /* DEPLOYMENT, and deliberately NOT folded onto has_hostname or onto "runs".
+     * "wol-realm runs on wol-realm-dev-9" says where a service is deployed;
+     * has_hostname says what a thing is called; "Northwind Foods runs Lantern
+     * Gateway" says who operates a business. Three different facts that read
+     * similarly, and conflating them is defect 33.
+     *
+     * The tail is a DEVICE, not ANY, because runs_on and has_hostname sit at
+     * different levels of the same chain:
+     *
+     *     service --runs_on--> host --has_hostname--> "wol-realm-dev-9"
+     *
+     * The object of runs_on is the host itself (named, as hosts always are, by
+     * its hostname); the object of has_hostname is the name. Typing the tail ANY
+     * would let a deployment point at a bare string and lose that distinction,
+     * which is the same conflation defect 33 is about. Head stays ANY: the thing
+     * deployed may be a service, a container or a job, and none of those are
+     * entity kinds the ontology models. */
+    {"runs_on",
+     {NODE_OTHER},
+     1,
+     {NODE_DEVICE},
+     1,
+     0,
+     NULL,
+     CORR_SUPERSEDE,
+     "network",
+     SENS_NORMAL,
+     0,
+     REL_STATUS_ACTIVE},
 };
 
 static const int SEED_COUNT = (int)(sizeof(SEED_ONTOLOGY) / sizeof(SEED_ONTOLOGY[0]));
@@ -316,6 +434,27 @@ static const struct
    const char *alias;
    const char *canonical;
 } SEED_ALIASES[] = {
+    /* Folds for the commercial/deployment seeds. Each one is a synonym the
+     * extractor actually produced over two 1k runs, not a guess. Deliberately
+     * NOT folded: "owns" (too generic outside this domain), "operates" and
+     * "runs" (those mean running a BUSINESS -- "Northwind Foods runs Lantern
+     * Gateway" -- not running ON a host), and "contributes_to" (contributing is
+     * not membership). Folding those would trade one wrong answer for another. */
+    {"has_tier", "subscription_tier"},
+    {"tier", "subscription_tier"},
+    {"subscription_level", "subscription_tier"},
+    {"plan_tier", "subscription_tier"},
+    {"account_owner", "owns_account"},
+    {"owns_account_for", "owns_account"},
+    {"is_customer_of", "customer_of"},
+    {"customer", "customer_of"},
+    {"acquired", "purchased"},
+    {"bought", "purchased"},
+    {"founder_of", "founded"},
+    {"mentor_of", "mentors"},
+    {"deployed_on", "runs_on"},
+    {"hosted_on", "runs_on"},
+    {"runs_at", "runs_on"},
     {"has_ip", "device_has_ip"},
     {"ip", "device_has_ip"},
     {"ip_address", "device_has_ip"},
@@ -419,6 +558,11 @@ int rel_type_is_functional(const char *rel_type)
    static const char *const functional[] = {
        "lives_in", "born_in",   "age",      "located_in",    "has_hostname",
        "spouse",   "works_for", "has_role", "device_has_ip",
+       /* One tier at a time: an upgrade replaces the previous tier rather than
+        * adding to it. runs_on is deliberately NOT here — a service can be
+        * deployed on several hosts at once — and neither are owns_account or
+        * customer_of, which accumulate by nature. */
+       "subscription_tier",
    };
    for (size_t i = 0; i < sizeof(functional) / sizeof(functional[0]); i++)
       if (strcmp(rel_type, functional[i]) == 0)

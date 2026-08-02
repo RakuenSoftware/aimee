@@ -43,12 +43,32 @@ TEMPLATE = (
     "the answer that follows must be the JSON object only, no prose, no markdown."
 )
 
-# Bump when TEMPLATE changes. Results taken under different prompt versions are
-# NOT comparable: the prompt is an input to the system under test, so changing it
-# changes what is being measured. Every result file should record which version
-# produced it.
+# Bump when the RENDERED prompt changes -- which is the TEMPLATE *or* the seed
+# relation list it interpolates. Results taken under different prompt versions
+# are NOT comparable: the prompt is an input to the system under test, so
+# changing it changes what is being measured. Every result file records which
+# version produced it.
+#
+# "Or the relation list" is not a technicality. v8 changed no template text at
+# all and still altered every request the model sees, because the ontology grew
+# from 17 relations to 24. A version that only tracked TEMPLATE would have called
+# those two runs comparable.
 #
 #   v1  original
+#   v8  the seed ontology gained customer_of, subscription_tier, owns_account,
+#       purchased, founded, mentors and runs_on (rel_types.c), so the canonical
+#       predicate list in the prompt went from 17 entries to 24. The template is
+#       byte-identical to v7.
+#
+#       Measured cause: 19% of the GOLD's own triples used predicates the
+#       ontology did not define, and 22-24% of what the model extracted did the
+#       same -- 89 distinct novel predicates over two 1k runs, 54 of them seen
+#       exactly once. Auto-promotion (threshold 3) would have admitted 23 of them
+#       as active relations, growing the ontology to ~40 mostly-synonymous
+#       entries; hosting facts alone were split four ways across runs_on,
+#       has_hostname, operates and hosts. Seeding the relations the domain needs
+#       is the difference between the model landing on a shared predicate and the
+#       promoter admitting whichever synonym appeared first.
 #   v7  a rename is not a retraction. v6 produced exactly one polarity error in
 #       869 non-retraction notes, and it was this: "airflow-install.sh in
 #       ProxmoxVED is now called apache-airflow-install.sh" gave
@@ -123,7 +143,7 @@ TEMPLATE = (
 #       produced a member_of triple — 51 spurious triples in the negation slice
 #       of the 1k small-corpus run, the graph-poisoning case that slice exists
 #       to catch.
-PROMPT_VERSION = "v7"
+PROMPT_VERSION = "v8"
 
 # Production caps the completion at MF_LLM_OUT_CAP.
 MAX_NEW_TOKENS = 8192
