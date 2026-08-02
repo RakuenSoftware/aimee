@@ -6,29 +6,19 @@
 #   aimee-authority-bootstrap (Dockerfile.authority-bootstrap) ghcr.io/<owner>/aimee-authority-bootstrap
 #   aimee-css-render (deploy/css-render/Dockerfile) ghcr.io/<owner>/aimee-css-render
 #
-# plus the aimee-kb matrix, all six from the SAME Dockerfile via build-args. Both
-# the embedder AND the synthesis model are baked, so which models a deployment runs
-# is a property of the tag it pulled — never a first-run download:
+# plus the aimee-kb images, all three from the SAME Dockerfile via one build-arg.
+# The embedder is the only axis, and it is baked, so which embedder a deployment runs
+# is a property of the tag it pulled and never a first-run download:
 #
-#   aimee-kb                  bekko-a25m (384)  no llama.cpp
-#   aimee-kb-llm-e2b          bekko-a25m (384)  llama.cpp + gemma-4-E2B-it
-#   aimee-kb-llm-e4b          bekko-a25m (384)  llama.cpp + gemma-4-E4B-it
-#   aimee-kb-nomic            nomic-v2   (768)  no llama.cpp
-#   aimee-kb-nomic-llm-e2b    nomic-v2   (768)  llama.cpp + gemma-4-E2B-it
-#   aimee-kb-nomic-llm-e4b    nomic-v2   (768)  llama.cpp + gemma-4-E4B-it
+#   aimee-kb        no embedder            EMBEDDER_URL required; ~373 MB
+#   aimee-kb-a25m   bekko-a25m (384)       ~1.95 GB
+#   aimee-kb-nomic  nomic-v2   (768)       ~3.34 GB
 #
-# The external-embedder deployment shares the bekko images and overrides
-# EMBEDDER_URL at runtime; there is no separate "external" image.
-#
-# Two more images exist only to be copied FROM, never run:
-#
-#   aimee-model-gemma-4-e2b-it:<quant>   the bundled GGUF, nothing else
-#   aimee-model-gemma-4-e4b-it:<quant>
-#
-# They carry the synthesis model so the four -llm tags on two architectures share
-# one registry layer instead of each downloading the same file from Hugging Face.
-# Built by the `models` job, which skips itself when the tag already exists, so a
-# publish that does not change the model or the quant fetches nothing.
+# SYNTHESIS IS NOT HERE. It used to be a second axis, doubling this to six tags and
+# rebuilding llama.cpp and a multi-gigabyte GGUF on every push that touched src/**.
+# It is its own image on its own trigger now (publish-llm.yml), rebuilt when the
+# model changes rather than when kb code does, and the aimee-model-* layers moved
+# there with it.
 #
 # Multi-arch (linux/amd64 + linux/arm64) via the canonical build-by-digest then
 # merge-manifest pattern, on native runners (no QEMU emulation of the C build).
@@ -77,24 +67,7 @@ permissions:
   contents: read
   packages: write
 
-env:
-  # The quantisation the bundled models ship at, and the tag of the aimee-model-*
-  # images. It IS the identity of those images: bumping the quant is a new tag, so
-  # the old one is never overwritten and a rollback keeps working. Changing this
-  # means changing the digests in scripts/fetch-synthesis-model.sh too.
-
 jobs:
-  # Publish the bundled synthesis models as their own images, once, so the kb
-  # builds can COPY --from them instead of each pulling the same GGUF out of
-  # Hugging Face. Four -llm tags x two architectures was eight downloads of the
-  # same two files per publish — about 49 GB fetched to produce ~12 GB of
-  # distinct bytes.
-  #
-  # SKIPPED WHEN THE TAG ALREADY EXISTS, which is the normal case: the models
-  # change only when the model or quant does, so a typical publish downloads
-  # nothing at all. Not on a pull request either — a PR must never push. A PR
-  # instead reads whatever the last merge published, and falls back to fetching
-  # inline if there is nothing there yet (see "Resolve the bundled model source").
   # Resolve the version once (from the call/dispatch input or the pushed tag) so
   # the build (binary embedding) and merge (image tags) jobs agree.
   prep:
