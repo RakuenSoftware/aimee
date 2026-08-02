@@ -34,7 +34,9 @@ TEMPLATE = (
     "predicate of your own such as not_member_of or removed_from. \"Kestrel Freight "
     'is no longer a customer" is {"subject":"Kestrel Freight","relation":'
     '"member_of","object":"customer","negated":true}. A note that MOVES '
-    "something gives both: the new fact, and the old one negated. For an ordinary "
+    "something gives both: the new fact, and the old one negated. A RENAME is NOT "
+    'a retraction: "A is now called B" means A and B are the same thing, so emit '
+    "also_known_as with negated FALSE. For an ordinary "
     'fact that is simply true, omit "negated" or set it false. '
     'If the note asserts no durable fact, return exactly {"facts":[]} - the '
     "wrapper object is ALWAYS required, never a bare []. Reason first if it helps; "
@@ -47,6 +49,16 @@ TEMPLATE = (
 # produced it.
 #
 #   v1  original
+#   v7  a rename is not a retraction. v6 produced exactly one polarity error in
+#       869 non-retraction notes, and it was this: "airflow-install.sh in
+#       ProxmoxVED is now called apache-airflow-install.sh" gave
+#       (airflow-install.sh, also_known_as, apache-airflow-install.sh, negated),
+#       negating the alias the note asserts. "Now called X" reads as a
+#       replacement, and the model retracted the old side of a relation that is
+#       SYMMETRIC and therefore has no old side. Fixed in the prompt rather than
+#       in code, because negating also_known_as is legitimate in general -- "X is
+#       no longer known as Y" is a real retraction -- so a blanket refusal on
+#       symmetric relations would trade one error for another.
 #   v6  a retraction is polarity on the ORIGINAL fact, not a discarded note.
 #       v1-v5 told the model a retraction "asserts a fact is FALSE, so there is
 #       nothing durable to record", and the gold for every negation note is
@@ -111,7 +123,7 @@ TEMPLATE = (
 #       produced a member_of triple — 51 spurious triples in the negation slice
 #       of the 1k small-corpus run, the graph-poisoning case that slice exists
 #       to catch.
-PROMPT_VERSION = "v6"
+PROMPT_VERSION = "v7"
 
 # Production caps the completion at MF_LLM_OUT_CAP.
 MAX_NEW_TOKENS = 8192

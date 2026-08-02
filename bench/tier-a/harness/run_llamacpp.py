@@ -23,6 +23,7 @@ import urllib.error
 import urllib.request
 
 import prompt
+import prompt_versions
 from run_hf import CONF_FLOOR, extract_json
 
 
@@ -75,6 +76,13 @@ def main():
     ap.add_argument("--timeout", type=float, default=3600)
     ap.add_argument("--no-confidence", action="store_true",
                     help="ABLATION: drop the confidence field from the schema.")
+    # Older prompts are DERIVED from the live template (see prompt_versions.py)
+    # rather than kept as second copies, so a comparison across versions cannot
+    # quietly diverge from what production sends.
+    ap.add_argument("--prompt-version", default="live",
+                    help="'live' (default, the shipped prompt) or an older version "
+                         "reconstructed by prompt_versions.py, e.g. v5. Recorded on "
+                         "every row.")
     # Thinking has no default at all: it must be stated. It is worth +0.09 F1 to
     # gemma-4-E4B and it is the single largest effect measured on this benchmark,
     # so a run that does not record which side of it was taken is not
@@ -91,8 +99,14 @@ def main():
     args = ap.parse_args()
 
     prompt.verify_against_source()
-    sys_prompt = (prompt.system_prompt_no_confidence() if args.no_confidence
-                  else prompt.system_prompt())
+    if args.no_confidence:
+        if args.prompt_version != "live":
+            raise SystemExit("--no-confidence is an ablation on the live prompt only")
+        sys_prompt = prompt.system_prompt_no_confidence()
+    else:
+        sys_prompt = prompt_versions.render(args.prompt_version)
+    version_label = (prompt.PROMPT_VERSION if args.prompt_version == "live"
+                     else args.prompt_version)
     rows = [json.loads(l) for l in open(args.gold) if l.strip()]
 
     with open(args.out, "w") as fh:
@@ -134,7 +148,7 @@ def main():
                 # not comparable, and until now the version was recorded nowhere
                 # in the output -- so telling a v4 file from a v5 one meant
                 # checking the commit date of the directory it sat in.
-                "prompt_version": prompt.PROMPT_VERSION,
+                "prompt_version": version_label,
                 "reasoning_chars": len(reasoning),
                 # A sample of the reasoning text, not just its length. Without
                 # it, "7943 reasoning tokens and no answer" cannot be told apart

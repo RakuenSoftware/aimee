@@ -112,7 +112,9 @@
    "predicate of your own such as not_member_of or removed_from. \"Kestrel Freight "               \
    "is no longer a customer\" is {\"subject\":\"Kestrel Freight\",\"relation\":"                   \
    "\"member_of\",\"object\":\"customer\",\"negated\":true}. A note that MOVES "                   \
-   "something gives both: the new fact, and the old one negated. For an ordinary "                 \
+   "something gives both: the new fact, and the old one negated. A RENAME is NOT "                 \
+   "a retraction: \"A is now called B\" means A and B are the same thing, so emit "                \
+   "also_known_as with negated FALSE. For an ordinary "                                            \
    "fact that is simply true, omit \"negated\" or set it false. "                                  \
    "If the note asserts no durable fact, return exactly {\"facts\":[]} - the "                     \
    "wrapper object is ALWAYS required, never a bare []. Reason first if it helps; "                 \
