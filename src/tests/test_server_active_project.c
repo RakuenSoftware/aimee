@@ -12,10 +12,16 @@
 int server_active_project_match(const char *cwd, const project_info_t *projects, int count,
                                 char *out, size_t outlen);
 
+int server_active_project_from_cwd(const char *cwd, char *out, size_t outlen);
+
 /* server_active_project.c's other half calls into the workspace and knowledge
- * modules, which are not in aimee-core. Stub them to the remote-topology answer
- * — the working tree is unreadable here and no projects are listed — so this
- * binary exercises the matcher alone. */
+ * modules, which are not in aimee-core. Drive both from here so the resolution
+ * order itself is testable: what the working tree claims, and what is actually
+ * indexed, are exactly the two inputs whose disagreement caused the bug. */
+static const char *g_identity;         /* NULL => the working tree cannot answer */
+static const project_info_t *g_listed; /* what kb_client_index_list reports */
+static int g_listed_count;             /* negative => the list is unavailable */
+
 int workspace_repo_identity(const char *cwd, char *project_out, size_t project_len,
                             char *workspace_out, size_t workspace_len)
 {
@@ -24,14 +30,20 @@ int workspace_repo_identity(const char *cwd, char *project_out, size_t project_l
    (void)workspace_len;
    if (project_out && project_len)
       project_out[0] = '\0';
-   return -1;
+   if (!g_identity)
+      return -1;
+   snprintf(project_out, project_len, "%s", g_identity);
+   return 0;
 }
 
 int kb_client_index_list(project_info_t *out, int max)
 {
-   (void)out;
-   (void)max;
-   return 0;
+   if (g_listed_count <= 0)
+      return g_listed_count;
+   int n = g_listed_count < max ? g_listed_count : max;
+   for (int i = 0; i < n; i++)
+      out[i] = g_listed[i];
+   return n;
 }
 
 static project_info_t mk(const char *name, const char *root)
@@ -109,6 +121,51 @@ int main(void)
       project_info_t projects[] = {mk("", "/srv/alpha")};
       assert(server_active_project_match("/srv/alpha", projects, 1, out, sizeof(out)) == -1);
       assert(out[0] == '\0');
+   }
+
+   /* ---- resolution order: the working tree vs what is actually indexed ----
+    *
+    * THE BUG: `index scan <name> <root>` names the project, while this
+    * resolution returns the repo's persisted identity — a UUID when the repo has
+    * no remote. Nothing makes those agree. A freshly scanned workspace resolved
+    * to the UUID, queried a project that does not exist, and answered
+    * "code index lookup failed", while the identical lookup with an explicit
+    * project name returned hits. */
+   {
+      project_info_t indexed[] = {mk("settle", "/srv/settle")};
+
+      /* An identity that names a real project still wins: it is the durable one,
+       * and it is what makes a repo resolve to the same project from any host. */
+      g_identity = "settle";
+      g_listed = indexed;
+      g_listed_count = 1;
+      assert(server_active_project_from_cwd("/srv/settle", out, sizeof(out)) == 0);
+      assert(strcmp(out, "settle") == 0);
+
+      /* THE REGRESSION TEST: the identity names nothing indexed, so fall through
+       * to the registered root rather than returning a project that cannot
+       * answer. */
+      g_identity = "3014e417-337b-444f-9aaf-432838cdcf82";
+      assert(server_active_project_from_cwd("/srv/settle/app", out, sizeof(out)) == 0);
+      assert(strcmp(out, "settle") == 0);
+
+      /* No identity at all (the remote-client case) still matches on root. */
+      g_identity = NULL;
+      assert(server_active_project_from_cwd("/srv/settle", out, sizeof(out)) == 0);
+      assert(strcmp(out, "settle") == 0);
+
+      /* Neither source can answer: refuse, so the caller emits scope_required. */
+      g_identity = NULL;
+      g_listed_count = 0;
+      assert(server_active_project_from_cwd("/srv/settle", out, sizeof(out)) == -1);
+      assert(out[0] == '\0');
+
+      /* The list is UNAVAILABLE rather than empty. An unverified identity is
+       * better than failing a lookup that worked before the check existed. */
+      g_identity = "settle";
+      g_listed_count = -1;
+      assert(server_active_project_from_cwd("/srv/settle", out, sizeof(out)) == 0);
+      assert(strcmp(out, "settle") == 0);
    }
 
    printf("test_server_active_project: all assertions passed\n");
