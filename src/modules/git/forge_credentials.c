@@ -360,22 +360,24 @@ const char *forge_cred_askpass_shim(void)
       path[0] = '\0';
       return NULL;
    }
-   /* Password source, in order: a token delivered over an inherited file
-    * descriptor (AIMEE_GIT_TOKEN_FD — re-readable via /proc/self/fd, so the
-    * secret never enters this process's environment or /proc/<pid>/environ),
-    * else the legacy GH_TOKEN env var (still used by the long-lived editor path
-    * until it migrates). The username is always the GitHub x-access-token. */
-   /* AIMEE_GIT_TOKEN_FD must be all-digits before it is used as a /proc/self/fd
-    * path component (defense-in-depth); a missing/non-numeric value, or a read
-    * that yields nothing, falls back to the legacy GH_TOKEN env var. cat reopens
-    * /proc/self/fd/<n>, so the memfd is read from offset 0 on every invocation. */
+   /* The ONLY password source is a token delivered over an inherited file
+    * descriptor (AIMEE_GIT_TOKEN_FD), re-readable via /proc/self/fd so the secret
+    * never enters this process's environment or /proc/<pid>/environ. There is no
+    * GH_TOKEN fallback: an env-borne token is readable by anything that can see
+    * the process, which is exactly what the fd path exists to prevent, and a
+    * fallback would silently reinstate it whenever the fd was missing.
+    *
+    * AIMEE_GIT_TOKEN_FD must be all-digits before it is used as a /proc/self/fd
+    * path component (defence in depth). Anything else yields no password, and git
+    * fails the auth rather than proceeding with a weaker source. cat reopens
+    * /proc/self/fd/<n>, so the memfd is read from offset 0 on every invocation —
+    * which is what lets one inherited fd serve a long-lived session. */
    fputs("#!/bin/sh\n"
          "case \"$1\" in\n"
          "*[Uu]sername*) echo x-access-token ;;\n"
          "*) case \"$AIMEE_GIT_TOKEN_FD\" in\n"
-         "     ''|*[!0-9]*) printf '%s\\n' \"$GH_TOKEN\" ;;\n"
-         "     *) cat \"/proc/self/fd/$AIMEE_GIT_TOKEN_FD\" 2>/dev/null "
-         "|| printf '%s\\n' \"$GH_TOKEN\" ;;\n"
+         "     ''|*[!0-9]*) ;;\n"
+         "     *) cat \"/proc/self/fd/$AIMEE_GIT_TOKEN_FD\" 2>/dev/null ;;\n"
          "   esac ;;\n"
          "esac\n",
          f);

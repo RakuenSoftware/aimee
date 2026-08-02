@@ -721,6 +721,12 @@ char *run_cmd(const char *cmd, int *exit_code)
 
 char *run_cmd_env(const char *cmd, char *const envp[], int *exit_code)
 {
+   return run_cmd_env_fd(cmd, envp, exit_code, -1, -1);
+}
+
+char *run_cmd_env_fd(const char *cmd, char *const envp[], int *exit_code, int pass_fd,
+                     int target_fd)
+{
    if (exit_code)
       *exit_code = -1;
    if (!cmd)
@@ -765,6 +771,16 @@ char *run_cmd_env(const char *cmd, char *const envp[], int *exit_code)
       dup2(pipefd[1], STDERR_FILENO);
       close(pipefd[0]);
       close(pipefd[1]);
+      /* Hand the child one inherited fd at a fixed number (the credential memfd
+       * the askpass reads). dup2 clears CLOEXEC on the copy, so it survives the
+       * exec; fail closed rather than run without it. */
+      if (pass_fd >= 0 && target_fd >= 0)
+      {
+         if (pass_fd != target_fd && dup2(pass_fd, target_fd) < 0)
+            _exit(127);
+         if (pass_fd != target_fd)
+            close(pass_fd);
+      }
       char *const argv[] = {(char *)"sh", (char *)"-c", (char *)shcmd, NULL};
       execve("/bin/sh", argv, envp ? envp : environ);
       _exit(127);

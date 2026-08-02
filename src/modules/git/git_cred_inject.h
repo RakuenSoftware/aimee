@@ -57,10 +57,6 @@ char **git_cred_inject_build_env_for_repo(const char *principal, const char *rem
                                           const char *repo_dir, const char *preferred_token,
                                           char *const *parent_environ, int *out_token_fd);
 
-/* Back-compat shim: build the env for `principal` with no repo context — webuser
- * vault → server identity → ssh-agent (no per-host token). Equivalent to
- * git_cred_inject_build_env_for_repo(principal, NULL, NULL, NULL, parent). */
-char **git_cred_inject_build_env(const char *principal, char *const *parent_environ);
 
 /* Resolve just the HTTPS token (no env assembly) under the SAME precedence as
  * the env builders above: preferred → per-host vault → principal vault → server

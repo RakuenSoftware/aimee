@@ -25,12 +25,6 @@ char **git_cred_inject_build_env_for_repo(const char *principal, const char *rem
    return NULL;
 }
 
-char **git_cred_inject_build_env(const char *principal, char *const *parent_environ)
-{
-   (void)principal;
-   (void)parent_environ;
-   return NULL;
-}
 
 void git_cred_inject_free_env(char **envp)
 {

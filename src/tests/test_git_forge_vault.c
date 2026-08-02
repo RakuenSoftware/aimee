@@ -67,10 +67,10 @@ int main(void)
    const uint8_t apw[] = "alice-login-pw";
    assert(vault_service_unlock_password(alice, ATTEST_WEBCHAT_TRUSTED, apw, sizeof(apw) - 1, T0) ==
           VAULT_OK);
-   assert(vault_service_set(alice, GIT_FORGE_VAULT_AGENT, GIT_FORGE_TOKEN_CRED, "ghp_alicePAT",
-                            T0) == VAULT_OK);
-   const char *akey = "-----BEGIN OPENSSH PRIVATE KEY-----\naliceKEY\n-----END-----";
-   assert(vault_service_set(alice, GIT_FORGE_VAULT_AGENT, GIT_FORGE_SSHKEY_CRED, akey, T0) ==
+   assert(vault_service_set_server(GIT_FORGE_VAULT_AGENT, GIT_FORGE_TOKEN_CRED, "ghp_alicePAT") ==
+          VAULT_OK);
+   const char *akey = "-----BEGIN OPENSSH PRIVATE KEY-----\nenvKEY\n-----END-----";
+   assert(vault_service_set_server(GIT_FORGE_VAULT_AGENT, GIT_FORGE_SSHKEY_CRED, akey) ==
           VAULT_OK);
 
    /* Readable while unlocked. */
@@ -81,30 +81,21 @@ int main(void)
     * vault is LOCKED — the server wrap must STILL read both creds. */
    vault_kek_cache_clear();
    assert(vault_service_get(alice, GIT_FORGE_VAULT_AGENT, GIT_FORGE_TOKEN_CRED, out, sizeof(out),
-                            T0) == VAULT_ERR_LOCKED);           /* user path is locked... */
+                            T0) != VAULT_OK);                   /* no per-user entry... */
    assert(git_forge_vault_token(alice, out, sizeof(out)) == 1); /* ...server wrap still reads */
    assert(strcmp(out, "ghp_alicePAT") == 0);
    assert(git_forge_vault_sshkey(alice, out, sizeof(out)) == 1);
    assert(strcmp(out, akey) == 0);
 
-   /* Cross-principal isolation: bob has no git token and cannot read alice's. */
-   assert(git_forge_vault_token(bob, out, sizeof(out)) == 0);
-   assert(out[0] == '\0');
-   const uint8_t bpw[] = "bob-login-pw";
-   assert(vault_service_unlock_password(bob, ATTEST_WEBCHAT_TRUSTED, bpw, sizeof(bpw) - 1, T0) ==
-          VAULT_OK);
-   assert(vault_service_set(bob, GIT_FORGE_VAULT_AGENT, GIT_FORGE_TOKEN_CRED, "ghp_bobPAT", T0) ==
-          VAULT_OK);
+   /* aimee-server is single-tenant: there is ONE git credential for the
+    * environment, and every actor resolves it. The PAM actor authenticates and
+    * is audited; it does not select a credential namespace. (Per-principal
+    * isolation belongs on aimee-kb, which serves many; see kb_scope.) */
    vault_kek_cache_clear();
    assert(git_forge_vault_token(bob, out, sizeof(out)) == 1);
-   assert(strcmp(out, "ghp_bobPAT") == 0);
-   /* alice still resolves to alice's token, never bob's. */
+   assert(strcmp(out, "ghp_alicePAT") == 0);
    assert(git_forge_vault_token(alice, out, sizeof(out)) == 1);
    assert(strcmp(out, "ghp_alicePAT") == 0);
-
-   /* An empty/un-attested principal is NO_ENTRY (0), never a leak. */
-   assert(git_forge_vault_token("", out, sizeof(out)) == 0);
-   assert(out[0] == '\0');
 
    /* SERVER-SEALED INTAKE (the /v1/git/sshkey write path): a webuser who has
     * NEVER unlocked can seal an SSH key with the server KEK alone — no cached user
@@ -112,23 +103,25 @@ int main(void)
    const char *carol = "webuser:carol";
    const char *ckey = "-----BEGIN OPENSSH PRIVATE KEY-----\ncarolKEY\n-----END-----";
    vault_kek_cache_clear(); /* prove no user KEK is cached for carol */
-   /* RED: the old per-user-KEK intake is LOCKED for a never-unlocked user (the 423
-    * this change removes). GREEN: the server-sealed intake below just works. */
+   /* RED: the per-user-KEK intake is LOCKED for a never-unlocked actor (the 423
+    * this removes). GREEN: the server-sealed intake just works. */
    assert(vault_service_set(carol, GIT_FORGE_VAULT_AGENT, GIT_FORGE_SSHKEY_CRED, ckey, T0) ==
           VAULT_ERR_LOCKED);
-   assert(vault_service_set_server_wrap(carol, GIT_FORGE_VAULT_AGENT, GIT_FORGE_SSHKEY_CRED,
-                                        ckey) == VAULT_OK);
+   assert(vault_service_set_server(GIT_FORGE_VAULT_AGENT, GIT_FORGE_SSHKEY_CRED, ckey) == VAULT_OK);
    vault_kek_cache_clear();
    assert(git_forge_vault_sshkey(carol, out, sizeof(out)) == 1);
    assert(strcmp(out, ckey) == 0);
-   /* The user-KEK path can't read a server-only entry carol never unlocked. */
+   /* The user-KEK path cannot read the environment entry: it is sealed under the
+    * server master KEK, so a stale per-user vault is not a second way in. */
    assert(vault_service_get(carol, GIT_FORGE_VAULT_AGENT, GIT_FORGE_SSHKEY_CRED, out, sizeof(out),
                             T0) != VAULT_OK);
-   /* Isolation holds: alice's own key is unaffected; carol never sees it. */
+   /* One environment, one key: sealing again replaced it, and every actor now
+    * reads the new one rather than a per-user copy. */
    assert(git_forge_vault_sshkey(alice, out, sizeof(out)) == 1);
-   assert(strcmp(out, akey) == 0);
+   assert(strcmp(out, ckey) == 0);
    /* Delete round-trips with no unlock too (DELETE /v1/git/sshkey). */
-   assert(vault_service_delete(carol, GIT_FORGE_VAULT_AGENT, GIT_FORGE_SSHKEY_CRED) == VAULT_OK);
+   assert(vault_service_delete(VAULT_SERVER_PRINCIPAL, GIT_FORGE_VAULT_AGENT,
+                               GIT_FORGE_SSHKEY_CRED) == VAULT_OK);
    assert(git_forge_vault_sshkey(carol, out, sizeof(out)) == 0);
    assert(out[0] == '\0');
 
@@ -220,9 +213,12 @@ int main(void)
       assert(git_identity_resolve_with(NULL, NULL, NULL, name, sizeof(name), email,
                                        sizeof(email)) == 0);
 
-      /* --- per-principal identity: users sharing a server commit as themselves ---
-       * Seal alice her own author identity, server-wrapped so it reads with no
-       * unlock, exactly like her forge token. */
+      /* --- identity is the ENVIRONMENT's, not the actor's ---
+       * aimee-server is single-tenant, so a commit is authored by the configured
+       * environment identity whoever triggered it. A per-actor identity sealed in
+       * the vault is NOT consulted: it would let the actor rewrite authorship,
+       * and there is only one actor to distinguish anyway. The actor is carried
+       * for audit, and the resolver falls through to its ordinary tiers. */
       assert(vault_service_set_server_wrap(alice, GIT_FORGE_VAULT_AGENT, GIT_AUTHOR_NAME_CRED,
                                            "Alice A") == VAULT_OK);
       assert(vault_service_set_server_wrap(alice, GIT_FORGE_VAULT_AGENT, GIT_AUTHOR_EMAIL_CRED,
@@ -230,27 +226,17 @@ int main(void)
       vault_kek_cache_clear(); /* autonomous read: no cached user KEK */
       assert(git_identity_resolve_with(alice, reader_both, NULL, name, sizeof(name), email,
                                        sizeof(email)) == 1);
-      assert(strcmp(name, "Alice A") == 0);
-      assert(strcmp(email, "alice@example.test") == 0);
+      assert(strcmp(name, "Runner Operator") == 0);
+      assert(strcmp(email, "runner@example.test") == 0);
 
-      /* Isolation: bob has no identity of his own, so he must NOT get alice's —
-       * he falls through to the next tier. */
+      /* Every actor resolves that same identity — including one with nothing of
+       * its own, which is now the only case there is. */
       assert(git_identity_resolve_with(bob, reader_both, NULL, name, sizeof(name), email,
                                        sizeof(email)) == 1);
       assert(strcmp(name, "Runner Operator") == 0);
       assert(strcmp(email, "runner@example.test") == 0);
 
-      /* Half a per-principal identity does not resolve, and does not borrow the
-       * next tier's email — it falls through whole. */
-      assert(vault_service_set_server_wrap(carol, GIT_FORGE_VAULT_AGENT, GIT_AUTHOR_NAME_CRED,
-                                           "Carol C") == VAULT_OK);
-      vault_kek_cache_clear();
-      assert(git_identity_resolve_with(carol, reader_both, NULL, name, sizeof(name), email,
-                                       sizeof(email)) == 1);
-      assert(strcmp(name, "Runner Operator") == 0);
-      assert(strcmp(email, "runner@example.test") == 0);
-
-      /* With nothing anywhere, a principal still refuses rather than inventing. */
+      /* With nothing anywhere, it still refuses rather than inventing one. */
       assert(git_identity_resolve_with(bob, reader_none, NULL, name, sizeof(name), email,
                                        sizeof(email)) == 0);
       assert(name[0] == '\0' && email[0] == '\0');

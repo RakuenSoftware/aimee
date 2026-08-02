@@ -71,9 +71,13 @@ int webuser_editor_available(void);
  * cannot read server secrets (AIMEE_DB2_URL, AIMEE_SERVER_TOKEN, provider keys).
  * Returns a malloc'd NULL-terminated array (free with webuser_editor_free_env),
  * or NULL on error. Exposed for the WP-K editor-env leak tests. */
-char **webuser_editor_build_env(const char *principal, const char *userroot);
+/* Build the editor's environment. FD MODE: any vaulted git token rides an
+ * inherited memfd returned in *out_token_fd (-1 when there is none), which the
+ * caller dup2s onto GIT_CRED_TOKEN_TARGET_FD in the child and then closes. The
+ * token never enters the returned environment. */
+char **webuser_editor_build_env(const char *principal, const char *userroot, int *out_token_fd);
 
-/* Free an envp from webuser_editor_build_env (zeroes any GH_TOKEN first). */
+/* Free an envp from webuser_editor_build_env. */
 void webuser_editor_free_env(char **envp);
 
 #endif /* WEBUSER_EDITOR_H */

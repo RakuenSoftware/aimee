@@ -196,8 +196,11 @@ void webuser_editor_free_env(char **envp)
    free(envp);
 }
 
-char **webuser_editor_build_env(const char *principal, const char *userroot)
+char **webuser_editor_build_env(const char *principal, const char *userroot,
+                                int *out_token_fd)
 {
+   if (out_token_fd)
+      *out_token_fd = -1;
    /* code-server gives the user an integrated terminal AND runs untrusted
     * extensions, so the child must NEVER inherit the server's full environment —
     * that would expose secrets like AIMEE_DB2_URL (DB password), AIMEE_SERVER_TOKEN,
@@ -217,11 +220,18 @@ char **webuser_editor_build_env(const char *principal, const char *userroot)
    snprintf(home_env, sizeof(home_env), "HOME=%s", userroot ? userroot : "/");
    char *mini[] = {path_env, lang_env, (char *)"TERM=xterm-256color", NULL};
 
-   /* git_cred_inject_build_env copies from the given base (dropping any inherited
-    * GH_TOKEN/SSH_AUTH_SOCK) and appends the vaulted git vars; pass the minimal
-    * base, never environ. Returns NULL when the user has no vaulted creds yet, in
-    * which case the minimal base alone is the editor's env. */
-   char **inner = git_cred_inject_build_env(principal, mini);
+   /* FD MODE, always: the token rides an inherited memfd and never enters the
+    * editor's environment, so it cannot be read out of /proc/<pid>/environ by an
+    * extension or anything the user runs in the integrated terminal. The askpass
+    * shim re-reads /proc/self/fd/<n> per invocation, and the caller dup2s the fd
+    * onto GIT_CRED_TOKEN_TARGET_FD in the child — which clears CLOEXEC, so every
+    * git the session later spawns inherits it for the editor's lifetime.
+    *
+    * Copies from the given base (dropping any inherited GH_TOKEN/SSH_AUTH_SOCK);
+    * pass the minimal base, never environ. NULL when the user has no vaulted
+    * creds yet, in which case the minimal base alone is the editor's env. */
+   char **inner = git_cred_inject_build_env_for_repo(principal, NULL, NULL, NULL, mini,
+                                                     out_token_fd);
    char *const *src = inner ? inner : mini;
    int sc = 0;
    while (src[sc])
@@ -255,11 +265,16 @@ char **webuser_editor_build_env(const char *principal, const char *userroot)
    if (!(out[o++] = strdup("GIT_CONFIG_VALUE_0=")))
       goto oom;
    out[o] = NULL;
-   git_cred_inject_free_env(inner); /* zeroes its GH_TOKEN; we kept our own copy */
+   git_cred_inject_free_env(inner);
    return out;
 oom:
    webuser_editor_free_env(out);
    git_cred_inject_free_env(inner);
+   if (out_token_fd && *out_token_fd >= 0)
+   {
+      close(*out_token_fd);
+      *out_token_fd = -1;
+   }
    return NULL;
 }
 
@@ -282,7 +297,8 @@ static pid_t spawn_code_server(const char *principal, const char *userroot, int 
    snprintf(data_dir, sizeof(data_dir), "%s/.aimee-editor/data", userroot);
    snprintf(ext_dir, sizeof(ext_dir), "%s/.aimee-editor/ext", userroot);
 
-   char **envp = webuser_editor_build_env(principal, userroot);
+   int token_fd = -1;
+   char **envp = webuser_editor_build_env(principal, userroot, &token_fd);
    if (!envp)
       return -1;
 
@@ -305,6 +321,8 @@ static pid_t spawn_code_server(const char *principal, const char *userroot, int 
    if (pid < 0)
    {
       webuser_editor_free_env(envp);
+      if (token_fd >= 0)
+         close(token_fd);
       return -1;
    }
    if (pid == 0)
@@ -333,11 +351,23 @@ static pid_t spawn_code_server(const char *principal, const char *userroot, int 
       }
       if (chdir(userroot) != 0)
          _exit(127);
+      /* Move the credential memfd onto the fd the askpass reads. dup2 clears
+       * CLOEXEC on the copy, so it survives this exec and every git the session
+       * spawns afterwards. Fail closed: without it the editor simply has no
+       * token, rather than falling back to putting one in the environment. */
+      if (token_fd >= 0 && token_fd != GIT_CRED_TOKEN_TARGET_FD)
+      {
+         if (dup2(token_fd, GIT_CRED_TOKEN_TARGET_FD) < 0)
+            _exit(127);
+         close(token_fd);
+      }
       execvpe(bin, (char *const *)argv, envp);
       _exit(127);
    }
 
-   webuser_editor_free_env(envp); /* zeroes GH_TOKEN; child kept its own COW copy */
+   webuser_editor_free_env(envp);
+   if (token_fd >= 0)
+      close(token_fd); /* the child holds its own dup */
    return pid;
 }
 
