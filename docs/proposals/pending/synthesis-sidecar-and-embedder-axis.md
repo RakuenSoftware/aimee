@@ -94,20 +94,48 @@ value — but presenting a certificate needs an `ssl.SSLContext` with
 `load_cert_chain`, plus the identity paths as table-declared settings, per #2242's
 one-name-per-setting rule. This is the real work on the client side.
 
-**PKI ownership, and the one real open question.** The KB already runs a CA:
-`kb_mtls_start()` calls `kb_pki_ca_load_or_create_custodied($data_dir/kb-ca)` and
-issues its own server cert from it. For this hop the KB is the *client*, so the
-sidecar must verify against the KB's CA — which means the KB has to issue the
-sidecar's server cert and publish the CA to it. That is a bootstrap ordering
-dependency the current stack does not have.
+**PKI ownership.** The KB already runs a CA: `kb_mtls_start()` calls
+`kb_pki_ca_load_or_create_custodied($data_dir/kb-ca)` and issues its own server cert
+from it. For this hop the KB is the *client*, so the sidecar must verify against the
+KB's CA — which means the KB issues the sidecar's server identity.
 
-### Bootstrap options
+### Bootstrap ordering
 
-| option | how | cost |
-| --- | --- | --- |
-| **A. KB provisions, sidecar waits** (recommended) | KB issues the sidecar's server cert + its own client cert into a shared volume; sidecar blocks on the files with an explicit log line | one ordering dependency, no new component; matches where the CA already lives |
-| B. `aimee-authority-bootstrap` one-shot | extend the existing one-shot provisioner to mint the pair before either starts | reuses a component built for exactly this; widens its remit |
-| C. Sidecar owns its own CA | KB enrols against it | inverts the existing trust direction for no gain |
+The deployment sequence is:
+
+1. deploy `aimee-server`
+2. run the wizard
+3. deploy and connect `aimee-kb`
+4. deploy and connect `aimee-llm` — **only if synthesis was selected in the wizard**
+
+This removes the problem rather than solving it. The sidecar is deployed *after* the
+KB is up and connected, so the CA already exists at the moment the identity is
+needed. There is no blocking wait, no files-appear race, and no need to widen
+`aimee-authority-bootstrap`'s remit: the ordering is a property of the wizard flow,
+not something compose has to be coerced into.
+
+Step 4 being conditional also matches the existing shape — the retired `aimee-llm`
+service was gated behind `profiles: ["llm"]`, and `COMPOSE_PROFILES` already selects
+the kb this way.
+
+What step 4 must do, and what does not exist yet: the KB mints a server cert for the
+sidecar's DNS identity (`aimee-llm`) plus a client cert for itself, and the deploy
+layer places that material where both containers can read their own half. The KB has
+`kb_pki_issue_server_cert()` for its *own* listener; issuing on behalf of a third
+party is new surface.
+
+### What this simplifies in the wizard
+
+`frontend/src/setup/deployTopology.ts` currently derives the synthesis choice from
+the kb tag — "decided by the tag you pulled (`aimee-kb-llm-e2b` vs `-e4b`)" — which
+is why #2242 had to disable the local-model options on an image that bakes none.
+
+Once synthesis is its own container that coupling goes away: any kb image can have
+synthesis added or removed afterwards, because the two are no longer the same
+artefact. `bundledSynthesisModel(cfg)` and the option-disabling logic that depends on
+it can go, and "off" stops being a property of the image you happened to pull. The
+three-way surface the wizard already presents — off, local, external — survives
+unchanged; only what "local" *means* changes, from a tag constraint to a service.
 
 A is recommended: the CA is already the KB's, and a sidecar that waits for its
 identity is a smaller change than a new provisioning path. B is the fallback if the
@@ -120,8 +148,9 @@ Dependency order, each independently reviewable:
 
 1. **`aimee-llm` image + publish workflow** — llama.cpp, baked model, stunnel,
    entrypoint, the two-way rebuild guard. No kb changes; nothing consumes it yet.
-2. **PKI provisioning** — whichever bootstrap option survives review, plus the
-   identity settings.
+2. **PKI provisioning** — the KB issues the sidecar's server identity and its own
+   client cert at step 4 of the deployment sequence, plus the identity settings. The
+   ordering is settled; how the material is transported is what this step designs.
 3. **Client-side mTLS** — `SSLContext`/`load_cert_chain` in the sidecar clients.
 4. **Compose wiring** — the service, and `SYNTHESIS_ENDPOINT` pointed at it.
 5. **kb retopology** — drop llama.cpp and the model stages; embedder axis becomes
@@ -146,7 +175,9 @@ Synthesis keeps working throughout: until step 4 the kb resolves whatever
   with no vector-space refusal.
 - Both smokes ran against the *published* `:testing` images, pulled from ghcr, not
   local builds.
-- llama-server's flag surface, from `--help` on the pinned binary (table above).
+- llama-server's flag surface, from `--help` on the pinned binary.
+- The deployment ordering, which is settled rather than inferred: server, wizard, kb,
+  then the sidecar only if synthesis was selected.
 - The `aimee-model-*` images already exist at `UD-Q6_K_XL`, so the weight layer is
   shared rather than refetched.
 
@@ -157,9 +188,13 @@ Synthesis keeps working throughout: until step 4 the kb resolves whatever
 - The no-embedder kb variant is asserted to be expressible by skipping the torch and
   weight stages; the conditional-stage idiom exists in the Dockerfile, but this
   specific variant has not been built.
-- Whether the managed-compose deploy path (`deploy_apply.c` re-running compose)
-  preserves the ordering option A needs is **unknown** and is the first thing step 2
-  must establish.
+- Issuing a certificate for a third party is new surface. `kb_pki_issue_server_cert()`
+  exists but is used for the KB's own listener; how the sidecar's identity is
+  requested, and how the deploy layer places each half where its container can read
+  it, is undesigned.
+- Whether the wizard's "deploy and connect" step can carry that material through
+  `deploy_apply.c` without a new mechanism is unknown. The ordering is settled; the
+  transport for the identity is not.
 - No measurement of synthesis throughput over the hop versus loopback. The extra
   cost is a TLS handshake per connection against a model that takes seconds per
   request, so it is expected to be noise — expected, not measured.
