@@ -1,0 +1,17 @@
+[16:00:38Z] restoring the ORIGINAL baseline config: -c 8192, no -np (default slots)
+  slots: 4
+[16:00:54Z] pass 1: 20 notes, strictly sequential
+[16:02:48Z] restoring the ORIGINAL baseline config: -c 8192, no -np (default slots)
+  slots: 4
+[16:03:04Z] pass 1: 20 notes, strictly sequential
+[16:03:52Z] pass 2: 20 notes, strictly sequential
+
+comparing 20 notes
+  banked sequential arm vs fresh pass 1: identical raw 20/20
+  banked sequential arm vs fresh pass 2: identical raw 14/20
+  fresh pass 1         vs fresh pass 2: identical raw 14/20
+
+CONTROL FAILS: the same config does not even reproduce itself.
+The 197-note figure says nothing about concurrency, and every paired
+comparison taken on this harness needs re-examining.
+[16:04:41Z] === CONTROL DONE ===

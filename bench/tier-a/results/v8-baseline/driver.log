@@ -1,0 +1,6 @@
+[14:56:13Z] === v8 baseline start; gold=/home/virant/dev/aimee/.aimee/worktrees/b94c9263-317c099512d045a7/main/bench/tier-a/data/corpora/v5/gold_small.jsonl expect=1001 ===
+[14:56:13Z] SERVE /opt/hf/e4b-q4.gguf
+[14:56:29Z] START E4B.UD-Q4_K_XL.v8
+[15:40:17Z] OK   E4B.UD-Q4_K_XL.v8 rows=1001 thinking=999/1001
+[15:40:17Z] SERVE /opt/hf/e2b-q4.gguf
+[15:40:33Z] START E2B.UD-Q4_K_XL.v8

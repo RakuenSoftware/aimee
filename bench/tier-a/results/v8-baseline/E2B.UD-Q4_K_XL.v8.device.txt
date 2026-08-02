@@ -1,0 +1,7 @@
+0, NVIDIA GeForce RTX 5080, 00000000:01:00.0
+1898799, /opt/llama.cpp/build-cuda/bin/llama-server, 2856 MiB
+--- speculative actually enabled:
+  slots: 32
+  speculative: False
+  spec types : None
+  n_ctx/slot : 3072

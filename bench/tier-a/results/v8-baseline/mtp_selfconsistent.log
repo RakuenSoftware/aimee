@@ -1,0 +1,10 @@
+[16:32:08Z] two MTP runs, fresh server each time
+[16:32:35Z]   run 1: speculative=True
+[16:35:25Z]   run 2: speculative=True
+
+MTP run 1 vs MTP run 2 (both fresh): 100/100 identical
+
+SELF-CONSISTENT. A ladder run entirely under MTP is internally
+comparable, so the 1.83x is usable -- those arms simply cannot be
+compared against the sequential arms already banked.
+[16:37:47Z] === DONE ===

@@ -1,0 +1,21 @@
+[16:13:34Z] serving via repo path: -hf unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL (no -md, so sidecar resolution stays on)
+[16:13:39Z] waiting for load (a first fetch can take a few minutes)
+[16:20:43Z] what the server resolved:
+    6.47.028.872 W load: special_eog_ids contains '<|tool_response>', removing '</s>' token from EOG list
+[16:20:43Z] is speculation actually ON?
+    slots      : 4
+    speculative: False
+    spec types : None
+[16:20:43Z] === DONE ===
+[16:21:30Z] serving: -hf unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL -hfd unsloth/gemma-4-E4B-it-GGUF (draft REPO set, no -md)
+[16:21:36Z] waiting for load (a first fetch can take a few minutes)
+[16:22:21Z] what the server resolved:
+    0.30.587.087 W srv    load_model: [spec] failed to measure draft model memory: failed to create llama_context from model
+    0.32.384.258 W load: special_eog_ids contains '<|tool_response>', removing '</s>' token from EOG list
+    0.33.330.186 I common_speculative_init_result: loading draft model '/opt/hf/hub/models--unsloth--gemma-4-E4B-it-GGUF/snapshots/bfc15c382204943c3a8fff0c750b94ae2364d7a3/mtp-gemma-4-E4B-it.gguf'
+    0.34.079.054 W load: special_eog_ids contains '<|tool_response>', removing '</s>' token from EOG list
+[16:22:22Z] is speculation actually ON?
+    slots      : 4
+    speculative: True
+    spec types : None
+[16:22:22Z] === DONE ===

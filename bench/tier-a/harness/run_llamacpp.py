@@ -18,7 +18,9 @@ against its transformers result — the same discipline the NF4 control used.
 
 import argparse
 import json
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 import urllib.error
 import urllib.request
 
@@ -79,6 +81,20 @@ def main():
     # Older prompts are DERIVED from the live template (see prompt_versions.py)
     # rather than kept as second copies, so a comparison across versions cannot
     # quietly diverge from what production sends.
+    # Parallel slots. llama-server serves several sequences at once and the
+    # weights are read ONCE per batch instead of once per sequence, so at batch=1
+    # the GPU is memory-bandwidth-bound and mostly idle on compute. Concurrency
+    # trades that idle compute for throughput.
+    #
+    # It is NOT free for a benchmark: batch composition changes the order of the
+    # matmuls, float addition is not associative, and greedy decoding turns a
+    # near-tie into a different token. An earlier 20-note check measured 1.83x
+    # with outputs changed on 3 notes. Whether that still holds is testable per
+    # model and quant -- see check_parallel_determinism.py -- so this defaults to
+    # 1 and must be asked for.
+    ap.add_argument("--concurrency", type=int, default=1,
+                    help="parallel in-flight requests (1 = strictly sequential, "
+                         "the only setting proven not to perturb outputs)")
     ap.add_argument("--prompt-version", default="live",
                     help="'live' (default, the shipped prompt) or an older version "
                          "reconstructed by prompt_versions.py, e.g. v5. Recorded on "
@@ -109,58 +125,82 @@ def main():
                      else args.prompt_version)
     rows = [json.loads(l) for l in open(args.gold) if l.strip()]
 
-    with open(args.out, "w") as fh:
-        for r in rows:
-            t0 = time.perf_counter()
-            try:
-                resp = complete(args.base_url, args.model, sys_prompt, r["note"],
-                                args.max_tokens, args.timeout, args.thinking)
-                msg = resp["choices"][0]["message"]
-                raw = msg.get("content") or ""
-                reasoning = msg.get("reasoning_content") or ""
-                usage = resp.get("usage") or {}
-                err = None
-            except (urllib.error.URLError, KeyError, TimeoutError, OSError) as e:
-                raw, usage, err, reasoning = "", {}, f"{type(e).__name__}: {e}", ""
-            dt = (time.perf_counter() - t0) * 1000
+    def run_one(r):
+        """One note -> one output row. Pure apart from the HTTP call, so several
+        can be in flight at once without sharing state."""
+        t0 = time.perf_counter()
+        try:
+            resp = complete(args.base_url, args.model, sys_prompt, r["note"],
+                            args.max_tokens, args.timeout, args.thinking)
+            msg = resp["choices"][0]["message"]
+            raw = msg.get("content") or ""
+            reasoning = msg.get("reasoning_content") or ""
+            usage = resp.get("usage") or {}
+            err = None
+        except (urllib.error.URLError, KeyError, TimeoutError, OSError) as e:
+            raw, usage, err, reasoning = "", {}, f"{type(e).__name__}: {e}", ""
+        dt = (time.perf_counter() - t0) * 1000
 
-            facts, ok, schema_ok, malformed = extract_json(raw)
-            floored = [f for f in facts if f["confidence"] >= CONF_FLOOR]
-            fh.write(json.dumps({
-                "id": r["id"],
-                "model": args.model,
-                "runtime": "llama.cpp",
-                "pred": floored,
-                "pred_nofloor": facts,
-                "parse_ok": ok,
-                "schema_ok": schema_ok,
-                "malformed_facts": malformed,
-                "dropped_by_conf_floor": len(facts) - len(floored),
-                "raw": raw[:4000],
-                "error": err,
-                "latency_ms": round(dt, 1),
-                "completion_tokens": usage.get("completion_tokens"),
-                "prompt_tokens": usage.get("prompt_tokens"),
-                "truncated": usage.get("completion_tokens") == args.max_tokens,
-                "thinking": bool(args.thinking),
-                # Which prompt produced this row. prompt.py's version note is
-                # explicit that results taken under different prompt versions are
-                # not comparable, and until now the version was recorded nowhere
-                # in the output -- so telling a v4 file from a v5 one meant
-                # checking the commit date of the directory it sat in.
-                "prompt_version": version_label,
-                "reasoning_chars": len(reasoning),
-                # A sample of the reasoning text, not just its length. Without
-                # it, "7943 reasoning tokens and no answer" cannot be told apart
-                # from "7943 tokens of '?' and no answer" — which is exactly the
-                # open question about GLM-4.7-Flash, whose raw /completion output
-                # is literal '?' characters. A length is not evidence about what
-                # a model produced.
-                "reasoning": reasoning[:2000],
-            }, ensure_ascii=False) + "\n")
+        facts, ok, schema_ok, malformed = extract_json(raw)
+        floored = [f for f in facts if f["confidence"] >= CONF_FLOOR]
+        return {
+            "id": r["id"],
+            "model": args.model,
+            "runtime": "llama.cpp",
+            "pred": floored,
+            "pred_nofloor": facts,
+            "parse_ok": ok,
+            "schema_ok": schema_ok,
+            "malformed_facts": malformed,
+            "dropped_by_conf_floor": len(facts) - len(floored),
+            "raw": raw[:4000],
+            "error": err,
+            "latency_ms": round(dt, 1),
+            "completion_tokens": usage.get("completion_tokens"),
+            "prompt_tokens": usage.get("prompt_tokens"),
+            "truncated": usage.get("completion_tokens") == args.max_tokens,
+            "thinking": bool(args.thinking),
+            # Which prompt produced this row. prompt.py's version note is explicit
+            # that results under different prompt versions are not comparable, and
+            # the version used to be recorded nowhere in the output.
+            "prompt_version": version_label,
+            # Recorded so a run's parallelism is visible in its own data rather
+            # than in whoever remembers how it was launched.
+            "concurrency": args.concurrency,
+            "reasoning_chars": len(reasoning),
+            # A sample of the reasoning text, not just its length: "7943 reasoning
+            # tokens and no answer" cannot be told from "7943 tokens of '?'".
+            "reasoning": reasoning[:2000],
+        }
+
+    # Rows are written IN GOLD ORDER regardless of completion order, and flushed
+    # as soon as their turn comes up. Order matters because paired scoring zips
+    # two files together, and incremental flushing matters because the driver
+    # decides an arm is complete by counting lines.
+    with open(args.out, "w") as fh:
+        pending, nxt = {}, 0
+        def drain():
+            nonlocal nxt
+            while nxt in pending:
+                row = pending.pop(nxt)
+                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+                if row["error"]:
+                    print(f"{row['id']}: {row['error']}", flush=True)
+                nxt += 1
             fh.flush()
-            if err:
-                print(f"{r['id']}: {err}", flush=True)
+
+        if args.concurrency <= 1:
+            for i, r in enumerate(rows):
+                pending[i] = run_one(r)
+                drain()
+        else:
+            with ThreadPoolExecutor(max_workers=args.concurrency) as ex:
+                # All notes are submitted up front, so max_workers of them are in
+                # flight at once; results are then collected in submission order.
+                futs = {ex.submit(run_one, r): i for i, r in enumerate(rows)}
+                for f, i in list(futs.items()):
+                    pending[i] = f.result()
+                    drain()
 
 
 if __name__ == "__main__":

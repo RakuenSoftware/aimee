@@ -1,0 +1,20 @@
+[16:05:33Z] pass 3: FRESH server restart, then 20 notes
+[16:06:36Z] pass 4: SAME server, no restart, same 20 notes again
+
+20 notes
+
+FRESH-START runs (should all agree if the cause is cache state):
+  banked arm (fresh start)           vs pass 1 (fresh)         20/20
+  banked arm (fresh start)           vs pass 3 (fresh)         20/20
+  pass 1 (fresh)                     vs pass 3 (fresh)         20/20
+
+WARM runs (ran against a server that had already served):
+  banked arm (fresh start)           vs pass 2 (warm)          14/20
+  pass 3 (fresh)                     vs pass 4 (warm)          14/20
+
+CONFIRMED: fresh-start runs are bit-identical; warm runs drift.
+The cause is SERVER CACHE STATE, not decoding and not concurrency.
+Every arm must start from a freshly restarted server -- which the
+sweep drivers already do, one restart per arm. The 32-slot comparison
+is still confounded: it changed BOTH concurrency and warmth.
+[16:07:24Z] === CACHE STATE TEST DONE ===

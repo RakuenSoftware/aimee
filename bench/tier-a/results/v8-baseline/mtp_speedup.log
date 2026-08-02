@@ -1,0 +1,20 @@
+[16:23:27Z] === plain: fresh server
+[16:23:44Z]   speculative=False
+[16:28:07Z]   100 notes in 263s
+[16:28:07Z] === mtp: fresh server
+[16:28:34Z]   speculative=True
+[16:30:58Z]   100 notes in 144s
+
+100 notes
+
+fidelity (raw completions, byte for byte):
+   banked arm vs plain (no MTP) : 100/100
+   banked arm vs MTP            : 74/100
+   plain      vs MTP            : 74/100
+
+throughput:
+   plain  263s   MTP  144s   speedup 1.83x
+
+VERDICT: MTP changed 26 note(s). Verification is not
+exact on this path, so it is not the free speedup it should be.
+[16:30:58Z] === DONE ===

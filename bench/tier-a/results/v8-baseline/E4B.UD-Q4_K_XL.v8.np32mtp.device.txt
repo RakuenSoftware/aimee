@@ -1,0 +1,6 @@
+0.01.035.212 W srv    load_model: [spec] failed to measure draft model memory: failed to create llama_context from model
+0.03.133.377 I common_speculative_init_result: loading draft model '/opt/hf/mtp-gemma-4-E4B-it-Q8_0.gguf'
+0.03.848.705 I srv    load_model: initializing, n_slots = 32, n_ctx_slot = 3072, kv_unified = 'false'
+--- vram:
+6246 MiB
+6256 MiB, 16303 MiB

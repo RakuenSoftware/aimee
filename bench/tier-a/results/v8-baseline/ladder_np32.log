@@ -1,0 +1,5 @@
+[15:51:39Z] waiting for the E4B Q4 np32 arm to finish
+[15:55:39Z] starting the ladder at 32 slots
+[15:55:39Z] SERVE /opt/hf/e2b-q4.gguf (-np 32, draft mtp-gemma-4-E2B-it-Q8_0.gguf)
+[15:55:56Z]   device recorded; speculative=False
+[15:55:56Z] START E2B.UD-Q4_K_XL.v8 (concurrency 32)
