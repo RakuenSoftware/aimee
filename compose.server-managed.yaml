@@ -86,10 +86,27 @@ services:
       # :testing — a split-version stack, which is how a kb with no `dim` in
       # /health got paired with a server that expected one.
       AIMEE_IMAGE_TAG: ${AIMEE_IMAGE_TAG:-latest}
-      # The managed KB image contains any model role placed inside that KB.
-      # Remote role endpoints and credentials remain owned by the KB; there is no
-      # separate inference-service image to select here.
-      AIMEE_KB_IMAGE: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb${AIMEE_KB_VARIANT:+-${AIMEE_KB_VARIANT}}:${AIMEE_IMAGE_TAG:-latest}}
+      # FORWARDED ONLY WHEN THE OPERATOR PINNED ONE. Resolving the default here
+      # instead — as this did — quietly disabled the wizard's embedder choice.
+      #
+      # AIMEE_KB_VARIANT is decided INSIDE the server, by config_emit_deploy_env,
+      # from the saved wizard configuration. It is unset in the shell that brings
+      # THIS file up, so resolving the default here collapsed to a bare
+      # `aimee-kb:<tag>` and baked that into the server's environment. deploy_apply
+      # copies environ, so the explicit AIMEE_KB_IMAGE then won over the variant the
+      # server had just computed, in the managed compose's own
+      # ${AIMEE_KB_IMAGE:-...aimee-kb${AIMEE_KB_VARIANT:+-...}} default.
+      #
+      # The result was silent and total: selecting bekko-a25m deployed the
+      # embedderless image, which logs "'bekko-a25m' selected but this image has no
+      # bundled embedder" and serves lexical-only search. Every gate passed --
+      # the deploy exits 0, the kb is healthy, `kb smoke` reports "vector store
+      # ready" -- because nothing here is broken except which image was chosen.
+      #
+      # Empty is correct for the unpinned case: the managed compose uses `:-`, which
+      # treats an empty value as absent and falls through to its own variant-aware
+      # default.
+      AIMEE_KB_IMAGE: ${AIMEE_KB_IMAGE:-}
       # Separate one-shot image containing the offline root provisioner and JWKS
       # publisher. These binaries never enter the ordinary KB/server images.
       AIMEE_AUTHORITY_BOOTSTRAP_IMAGE: ${AIMEE_AUTHORITY_BOOTSTRAP_IMAGE:-ghcr.io/rakuensoftware/aimee-authority-bootstrap:${AIMEE_IMAGE_TAG:-latest}}
