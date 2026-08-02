@@ -1,0 +1,113 @@
+{
+  "model": "Qwen3.6-27B",
+  "topics": 6,
+  "format_rate": 1.0,
+  "coverage": 1.0,
+  "faithfulness": 0.913,
+  "invented_claims": 4,
+  "checked_claims": 46,
+  "median_words": 62,
+  "median_latency_ms": 1571357.0,
+  "by_category": {
+    "conflicting": {
+      "n": 1,
+      "coverage": 1.0,
+      "invented": 0
+    },
+    "distractor": {
+      "n": 1,
+      "coverage": 1.0,
+      "invented": 1
+    },
+    "factual": {
+      "n": 2,
+      "coverage": 1.0,
+      "invented": 3
+    },
+    "numeric": {
+      "n": 1,
+      "coverage": 1.0,
+      "invented": 0
+    },
+    "thin": {
+      "n": 1,
+      "coverage": 1.0,
+      "invented": 0
+    }
+  },
+  "per_topic": [
+    {
+      "id": "t01",
+      "category": "factual",
+      "format_ok": true,
+      "words": 76,
+      "coverage": 1.0,
+      "missed": [],
+      "checked_claims": 14,
+      "invented": [
+        "internally"
+      ],
+      "latency_ms": 1744720.8
+    },
+    {
+      "id": "t02",
+      "category": "numeric",
+      "format_ok": true,
+      "words": 62,
+      "coverage": 1.0,
+      "missed": [],
+      "checked_claims": 17,
+      "invented": [],
+      "latency_ms": 1577612.1
+    },
+    {
+      "id": "t03",
+      "category": "conflicting",
+      "format_ok": true,
+      "words": 51,
+      "coverage": 1.0,
+      "missed": [],
+      "checked_claims": 7,
+      "invented": [],
+      "latency_ms": 1194018.8
+    },
+    {
+      "id": "t04",
+      "category": "thin",
+      "format_ok": true,
+      "words": 16,
+      "coverage": 1.0,
+      "missed": [],
+      "checked_claims": 1,
+      "invented": [],
+      "latency_ms": 1145228.0
+    },
+    {
+      "id": "t05",
+      "category": "distractor",
+      "format_ok": true,
+      "words": 41,
+      "coverage": 1.0,
+      "missed": [],
+      "checked_claims": 1,
+      "invented": [
+        "under"
+      ],
+      "latency_ms": 1359642.7
+    },
+    {
+      "id": "t06",
+      "category": "factual",
+      "format_ok": true,
+      "words": 97,
+      "coverage": 1.0,
+      "missed": [],
+      "checked_claims": 6,
+      "invented": [
+        "during",
+        "once"
+      ],
+      "latency_ms": 1571357.0
+    }
+  ]
+}

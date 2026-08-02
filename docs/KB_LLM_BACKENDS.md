@@ -49,7 +49,7 @@ Internal and remote implementations must both provide:
 - stable model identity and dimension where the role produces vectors;
 - timeouts and cancellation;
 - deterministic error classification;
-- batch behavior that preserves input order;
+- batch behaviour that preserves input order;
 - health and readiness separate from process liveness;
 - no silent fallback to a different model or KB.
 

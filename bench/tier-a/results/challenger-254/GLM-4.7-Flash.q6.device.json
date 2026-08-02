@@ -1,0 +1,1 @@
+{"model":"GLM-4.7-Flash.q6","host":"192.168.1.254","gpu":"7900XTX","backend":"vulkan","repo":"unsloth/GLM-4.7-Flash-GGUF:Q6_K","offload":"unknown","cpu_layer_warnings":0}

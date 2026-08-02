@@ -1,0 +1,115 @@
+{
+  "model": "Qwen3.6-35B-A3B",
+  "topics": 6,
+  "format_rate": 1.0,
+  "coverage": 1.0,
+  "faithfulness": 0.8936,
+  "invented_claims": 5,
+  "checked_claims": 47,
+  "median_words": 64,
+  "median_latency_ms": 399888.3,
+  "by_category": {
+    "conflicting": {
+      "n": 1,
+      "coverage": 1.0,
+      "invented": 0
+    },
+    "distractor": {
+      "n": 1,
+      "coverage": 1.0,
+      "invented": 1
+    },
+    "factual": {
+      "n": 2,
+      "coverage": 1.0,
+      "invented": 3
+    },
+    "numeric": {
+      "n": 1,
+      "coverage": 1.0,
+      "invented": 1
+    },
+    "thin": {
+      "n": 1,
+      "coverage": 1.0,
+      "invented": 0
+    }
+  },
+  "per_topic": [
+    {
+      "id": "t01",
+      "category": "factual",
+      "format_ok": true,
+      "words": 66,
+      "coverage": 1.0,
+      "missed": [],
+      "checked_claims": 15,
+      "invented": [
+        "specializing"
+      ],
+      "latency_ms": 416405.3
+    },
+    {
+      "id": "t02",
+      "category": "numeric",
+      "format_ok": true,
+      "words": 64,
+      "coverage": 1.0,
+      "missed": [],
+      "checked_claims": 17,
+      "invented": [
+        "optane-backed"
+      ],
+      "latency_ms": 390475.1
+    },
+    {
+      "id": "t03",
+      "category": "conflicting",
+      "format_ok": true,
+      "words": 54,
+      "coverage": 1.0,
+      "missed": [],
+      "checked_claims": 7,
+      "invented": [],
+      "latency_ms": 399888.3
+    },
+    {
+      "id": "t04",
+      "category": "thin",
+      "format_ok": true,
+      "words": 16,
+      "coverage": 1.0,
+      "missed": [],
+      "checked_claims": 2,
+      "invented": [],
+      "latency_ms": 341591.8
+    },
+    {
+      "id": "t05",
+      "category": "distractor",
+      "format_ok": true,
+      "words": 43,
+      "coverage": 1.0,
+      "missed": [],
+      "checked_claims": 1,
+      "invented": [
+        "classified"
+      ],
+      "latency_ms": 354513.2
+    },
+    {
+      "id": "t06",
+      "category": "factual",
+      "format_ok": true,
+      "words": 73,
+      "coverage": 1.0,
+      "missed": [],
+      "checked_claims": 5,
+      "invented": [
+        "during",
+        "once"
+      ],
+      "latency_ms": 605962.1
+    }
+  ]
+}

@@ -1,0 +1,129 @@
+{
+  "model": "LFM2-350M-Extract",
+  "topics": 6,
+  "format_rate": 1.0,
+  "coverage": 0.15,
+  "faithfulness": 1.0,
+  "invented_claims": 0,
+  "checked_claims": 5,
+  "median_words": 12,
+  "median_latency_ms": 723.1,
+  "by_category": {
+    "conflicting": {
+      "n": 1,
+      "coverage": 0.0,
+      "invented": 0
+    },
+    "distractor": {
+      "n": 1,
+      "coverage": 0.333,
+      "invented": 0
+    },
+    "factual": {
+      "n": 2,
+      "coverage": 0.25,
+      "invented": 0
+    },
+    "numeric": {
+      "n": 1,
+      "coverage": 0.0,
+      "invented": 0
+    },
+    "thin": {
+      "n": 1,
+      "coverage": 0.0,
+      "invented": 0
+    }
+  },
+  "per_topic": [
+    {
+      "id": "t01",
+      "category": "factual",
+      "format_ok": true,
+      "words": 18,
+      "coverage": 0.0,
+      "missed": [
+        "New Zealand / Auckland company",
+        "founded 2016",
+        "product is aimee",
+        "42 engineers"
+      ],
+      "checked_claims": 4,
+      "invented": [],
+      "latency_ms": 725.6
+    },
+    {
+      "id": "t02",
+      "category": "numeric",
+      "format_ok": true,
+      "words": 1,
+      "coverage": 0.0,
+      "missed": [
+        "IP address",
+        "RTX 5080 GPU",
+        "125 GB RAM",
+        "28 threads"
+      ],
+      "checked_claims": 0,
+      "invented": [],
+      "latency_ms": 723.1
+    },
+    {
+      "id": "t03",
+      "category": "conflicting",
+      "format_ok": true,
+      "words": 1,
+      "coverage": 0.0,
+      "missed": [
+        "works for Siemens",
+        "location is disputed between Berlin and Munich",
+        "Munich named",
+        "infrastructure role"
+      ],
+      "checked_claims": 0,
+      "invented": [],
+      "latency_ms": 698.5
+    },
+    {
+      "id": "t04",
+      "category": "thin",
+      "format_ok": true,
+      "words": 1,
+      "coverage": 0.0,
+      "missed": [
+        "IP is 10.0.0.1"
+      ],
+      "checked_claims": 0,
+      "invented": [],
+      "latency_ms": 189.9
+    },
+    {
+      "id": "t05",
+      "category": "distractor",
+      "format_ok": true,
+      "words": 12,
+      "coverage": 0.333,
+      "missed": [
+        "decided by the security working group",
+        "seven year retention"
+      ],
+      "checked_claims": 0,
+      "invented": [],
+      "latency_ms": 224.6
+    },
+    {
+      "id": "t06",
+      "category": "factual",
+      "format_ok": true,
+      "words": 12,
+      "coverage": 0.5,
+      "missed": [
+        "17 seed relations",
+        "one call per note"
+      ],
+      "checked_claims": 1,
+      "invented": [],
+      "latency_ms": 753.5
+    }
+  ]
+}

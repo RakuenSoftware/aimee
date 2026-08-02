@@ -1,0 +1,8 @@
+0.06.700.571 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.06.813.295 I srv          init: The UI is disabled
+0.06.813.299 I srv          init: Use --ui/--no-ui (or deprecated --webui/--no-webui) to enable/disable
+0.06.813.469 W srv  llama_server: -----------------
+0.06.813.471 W srv  llama_server: CORS is set to allow all origins ('*') and no API key is set
+0.06.813.471 W srv  llama_server: this can be a security risk (cross-origin attacks)
+0.06.813.472 W srv  llama_server: more info: https://github.com/ggml-org/llama.cpp/pull/25655
+0.06.813.472 W srv  llama_server: -----------------

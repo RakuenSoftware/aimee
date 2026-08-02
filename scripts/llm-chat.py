@@ -25,6 +25,15 @@ aimee's config) with CLI-flag overrides for one-off use.
   LLM_TIMEOUT      seconds, default 120
   LLM_RETRIES      default 2 (exponential backoff on 5xx / connection errors)
 
+  SYNTHESIS_CA_FILE    CA that the endpoint's certificate must chain to
+  SYNTHESIS_CERT_FILE  client certificate to present (mTLS)
+  SYNTHESIS_KEY_FILE   its private key
+
+  The three TLS variables are for the bundled synthesis sidecar, which requires a
+  client certificate: container-to-container traffic here is mTLS. They are set
+  together or not at all. Absent, an https endpoint is verified against the system
+  trust store exactly as before, so an external provider is unaffected.
+
 Stdlib only.  Runs on any Python 3.9+.
 """
 
@@ -33,6 +42,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import ssl
 import subprocess
 import sys
 import time
@@ -89,6 +99,44 @@ def _build_body(args: argparse.Namespace, prompt: str) -> dict[str, Any]:
     return body
 
 
+def _tls_context(url: str) -> ssl.SSLContext | None:
+    """Client-certificate context for the synthesis sidecar, or None.
+
+    Returns None for plain http and for https with no client identity configured,
+    which leaves urlopen's default behaviour (system trust store) untouched. That
+    matters: an external provider must keep working with no TLS settings at all.
+
+    Partial configuration is an ERROR rather than a silent downgrade. Two of three
+    set is always a mistake, and falling back to an anonymous connection would turn
+    it into a handshake the sidecar rejects for reasons that point nowhere near the
+    missing file.
+    """
+    if not url.lower().startswith("https:"):
+        return None
+    ca = os.environ.get("SYNTHESIS_CA_FILE", "").strip()
+    cert = os.environ.get("SYNTHESIS_CERT_FILE", "").strip()
+    key = os.environ.get("SYNTHESIS_KEY_FILE", "").strip()
+    if not (ca or cert or key):
+        return None
+    missing = [
+        name
+        for name, value in (
+            ("SYNTHESIS_CA_FILE", ca),
+            ("SYNTHESIS_CERT_FILE", cert),
+            ("SYNTHESIS_KEY_FILE", key),
+        )
+        if not value
+    ]
+    if missing:
+        raise SystemExit(
+            "llm-chat: incomplete mTLS configuration; missing " + ", ".join(missing) +
+            ". Set all three or none."
+        )
+    ctx = ssl.create_default_context(cafile=ca)
+    ctx.load_cert_chain(certfile=cert, keyfile=key)
+    return ctx
+
+
 def _post(url: str, body: dict[str, Any], api_key: str, timeout: int) -> urllib.request.addinfourl:
     headers = {"content-type": "application/json"}
     if api_key:
@@ -99,7 +147,7 @@ def _post(url: str, body: dict[str, Any], api_key: str, timeout: int) -> urllib.
         headers=headers,
         method="POST",
     )
-    return urllib.request.urlopen(req, timeout=timeout)
+    return urllib.request.urlopen(req, timeout=timeout, context=_tls_context(url))
 
 
 def _call_with_retries(args: argparse.Namespace, prompt: str) -> urllib.request.addinfourl:

@@ -15,8 +15,8 @@ distinction this page replaces.
 | You want | Do this | What you get |
 | --- | --- | --- |
 | **Simplest thing that works** | Point `SYNTHESIS_ENDPOINT` at an external OpenAI-compatible endpoint | Best quality, no local GPU or RAM cost, your notes leave the machine |
-| **Local, and quality matters most** | pull `aimee-kb-llm-e4b` (or `aimee-kb-nomic-llm-e4b`) | 0.82 F1 extraction, 7.46 GB of weights, 3.3 tok/s on 8 CPU threads |
-| **Local, and the box is small** | pull `aimee-kb-llm-e2b` (or `aimee-kb-nomic-llm-e2b`) | 0.69 F1 extraction, 4.71 GB of weights, 6.3 tok/s on 8 CPU threads |
+| **Local, and quality matters most** | deploy the `aimee-llm-e4b` sidecar | 0.82 F1 extraction, 7.46 GB of weights, 3.3 tok/s on 8 CPU threads |
+| **Local, and the box is small** | deploy the `aimee-llm-e2b` sidecar | 0.69 F1 extraction, 4.71 GB of weights, 6.3 tok/s on 8 CPU threads |
 
 The weight sizes are what the images actually carry: UD-Q6_K_XL, baked in. The F1
 and throughput numbers were measured at Q8_0, so read them as the shape of the
@@ -263,17 +263,22 @@ Two further warnings that are not about size:
 
 ## Running one of these locally
 
-**The model is part of the image.** You do not select it at runtime. You pull the
-tag that carries it, exactly as you do for the embedder:
+**The model is part of the image.** You do not select it at runtime. You deploy the sidecar tag that
+carries it, exactly as the embedder is a property of the kb tag:
 
-| image | embedder | synthesis |
-| --- | --- | --- |
-| `aimee-kb` | bekko-a25m (384) | none |
-| `aimee-kb-llm-e2b` | bekko-a25m (384) | gemma-4-E2B-it |
-| `aimee-kb-llm-e4b` | bekko-a25m (384) | gemma-4-E4B-it |
-| `aimee-kb-nomic` | nomic-v2 (768) | none |
-| `aimee-kb-nomic-llm-e2b` | nomic-v2 (768) | gemma-4-E2B-it |
-| `aimee-kb-nomic-llm-e4b` | nomic-v2 (768) | gemma-4-E4B-it |
+| image | model |
+| --- | --- |
+| `aimee-llm-e2b` | gemma-4-E2B-it |
+| `aimee-llm-e4b` | gemma-4-E4B-it |
+
+Synthesis used to be baked into the kb image, producing six kb tags across two axes. It is its own
+image now, deployed beside the kb, for a reason that had nothing to do with the models: llama.cpp and
+a multi-gigabyte GGUF were being rebuilt on every push that touched kb code, while their real inputs
+change on the order of never.
+
+It buys an operational property too. The sidecar holds no data, so moving between E2B and E4B, adding
+synthesis to a running deployment, or removing it, is a container swap with the kb left running. The
+embedder is still a one-way door; synthesis is not.
 
 Weights are baked at UD-Q6_K_XL (7.46 GB for E4B, 4.71 GB for E2B) from
 unsloth's GGUF repos, which is where the UD quants are published.
