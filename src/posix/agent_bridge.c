@@ -22,6 +22,35 @@ int agent_request_cancelled(void) __attribute__((weak));
 
 static SSL_CTX *s_ssl_ctx;
 
+/* THE SYNTHESIS SIDECAR IS THE ONE HOP THAT NEEDS A CLIENT CERTIFICATE.
+ *
+ * s_ssl_ctx verifies against the system trust store and presents nothing. That is
+ * right for every public provider and wrong for exactly one peer: aimee-llm, whose
+ * certificate is issued by the kb's own CA and whose stunnel terminator sets
+ * `verifyChain = yes` and therefore REQUIRES a client certificate.
+ *
+ * Without this the deploy layer's SYNTHESIS_CA_FILE / SYNTHESIS_CERT_FILE /
+ * SYNTHESIS_KEY_FILE were read by nothing at all. Every synthesis call left the kb
+ * with the default context, the sidecar's certificate chained to a CA the client had
+ * never heard of, and the handshake died with "tlsv1 alert unknown ca" -- surfacing
+ * to the operator as `provider HTTP -1` on a permanently failed curator job, and in
+ * the log as "TCP connect failed", which is what a connection that connected fine
+ * looks like from a caller that cannot tell a handshake from a connect.
+ *
+ * A SECOND CONTEXT, NOT A RELAXED FIRST ONE. Loading our CA into s_ssl_ctx would
+ * make a certificate the kb issued to itself acceptable for api.anthropic.com, and
+ * attaching the client certificate there would hand the kb's identity to every
+ * endpoint it talks to. So the identity is bound to the one host:port that
+ * SYNTHESIS_ENDPOINT names, and nothing else can reach it. */
+static SSL_CTX *s_synth_ssl_ctx;
+static char s_synth_host[256];
+static int s_synth_port;
+
+/* Defined below parse_url, which it needs; the signature keeps parsed_url_t out of
+ * the forward declaration. Called from agent_http_init, once, before any worker
+ * thread exists -- so no locking here or at the point of use. */
+static void synth_ssl_ctx_init(void);
+
 void agent_http_init(void)
 {
    /* Initialize proxy bootstrap before setting up the SSL context so that
@@ -45,6 +74,8 @@ void agent_http_init(void)
             aimee_log(LOG_DEBUG, "proxy", "loaded CA bundle: %s", pb->ca_bundle);
       }
    }
+
+   synth_ssl_ctx_init();
 }
 
 void agent_http_cleanup(void)
@@ -54,6 +85,13 @@ void agent_http_cleanup(void)
       SSL_CTX_free(s_ssl_ctx);
       s_ssl_ctx = NULL;
    }
+   if (s_synth_ssl_ctx)
+   {
+      SSL_CTX_free(s_synth_ssl_ctx);
+      s_synth_ssl_ctx = NULL;
+   }
+   s_synth_host[0] = '\0';
+   s_synth_port = 0;
 }
 
 #define HTTP_MAX_RESPONSE_SIZE (10 * 1024 * 1024) /* 10MB */
@@ -116,6 +154,78 @@ static int parse_url(const char *url, parsed_url_t *out)
       snprintf(out->path, sizeof(out->path), "/");
 
    return 0;
+}
+
+/* Build the synthesis-sidecar client context from the deploy layer's three files.
+ *
+ * All four inputs are required together. SYNTHESIS_ENDPOINT alone is the ordinary
+ * external-provider case (the operator points synthesis at a public endpoint with a
+ * public certificate), and the three files without it name no peer to trust, so both
+ * partial states correctly leave the default context in charge.
+ *
+ * FAIL LOUD, NOT QUIET. If the files are named but unusable this logs an error and
+ * leaves s_synth_ssl_ctx NULL, so the hop falls back to the default context and
+ * fails the handshake -- the same outcome as before, but now with a line that says
+ * which file could not be loaded instead of a bare "unknown ca" from OpenSSL. */
+static void synth_ssl_ctx_init(void)
+{
+   const char *endpoint = getenv("SYNTHESIS_ENDPOINT");
+   const char *ca = getenv("SYNTHESIS_CA_FILE");
+   const char *cert = getenv("SYNTHESIS_CERT_FILE");
+   const char *key = getenv("SYNTHESIS_KEY_FILE");
+   if (!endpoint || !endpoint[0] || !ca || !ca[0] || !cert || !cert[0] || !key || !key[0])
+      return;
+
+   parsed_url_t pu;
+   if (parse_url(endpoint, &pu) != 0 || !pu.use_ssl)
+   {
+      aimee_log(LOG_WARN, "synthesis_mtls",
+                "SYNTHESIS_ENDPOINT (%s) is not an https URL; the client identity in "
+                "SYNTHESIS_CERT_FILE will not be used",
+                endpoint);
+      return;
+   }
+
+   SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
+   if (!ctx)
+      return;
+   /* Deliberately NO SSL_CTX_set_default_verify_paths: on this hop our CA REPLACES
+    * the system store. A public CA has no business vouching for the sidecar, and
+    * accepting one would turn a private hop into a publicly impersonable one. */
+   if (SSL_CTX_load_verify_file(ctx, ca) != 1 ||
+       SSL_CTX_use_certificate_chain_file(ctx, cert) != 1 ||
+       SSL_CTX_use_PrivateKey_file(ctx, key, SSL_FILETYPE_PEM) != 1 ||
+       SSL_CTX_check_private_key(ctx) != 1)
+   {
+      char ebuf[256] = "";
+      unsigned long e = ERR_peek_last_error();
+      if (e)
+         ERR_error_string_n(e, ebuf, sizeof(ebuf));
+      aimee_log(LOG_ERROR, "synthesis_mtls",
+                "could not load the synthesis client identity (ca=%s cert=%s key=%s)%s%s", ca, cert,
+                key, ebuf[0] ? ": " : "", ebuf);
+      SSL_CTX_free(ctx);
+      return;
+   }
+   SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+   SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
+
+   s_synth_ssl_ctx = ctx;
+   snprintf(s_synth_host, sizeof(s_synth_host), "%s", pu.host);
+   s_synth_port = pu.port;
+   aimee_log(LOG_INFO, "synthesis_mtls", "client identity loaded for %s:%d", s_synth_host,
+             s_synth_port);
+}
+
+/* The sidecar identity is for the sidecar, and for nothing else. Host AND port must
+ * both match what SYNTHESIS_ENDPOINT named: matching on host alone would present the
+ * kb's client certificate to any other service that happens to share the name. */
+static SSL_CTX *ssl_ctx_for(const parsed_url_t *url)
+{
+   if (s_synth_ssl_ctx && s_synth_host[0] && url->port == s_synth_port &&
+       strcasecmp(url->host, s_synth_host) == 0)
+      return s_synth_ssl_ctx;
+   return s_ssl_ctx;
 }
 
 /* ---- Socket I/O with timeout ---- */
@@ -416,13 +526,14 @@ static int conn_open(http_conn_t *conn, const parsed_url_t *url, int timeout_ms)
 
    if (url->use_ssl)
    {
-      if (!s_ssl_ctx)
+      SSL_CTX *ctx = ssl_ctx_for(url);
+      if (!ctx)
       {
          close(conn->fd);
          conn->fd = -1;
          return -1;
       }
-      conn->ssl = SSL_new(s_ssl_ctx);
+      conn->ssl = SSL_new(ctx);
       if (!conn->ssl)
       {
          close(conn->fd);
@@ -453,6 +564,16 @@ static int conn_open(http_conn_t *conn, const parsed_url_t *url, int timeout_ms)
       }
       if (!connected)
       {
+         /* Name the handshake. The caller's only message is "TCP connect failed",
+          * which is actively misleading here: the TCP connect succeeded and TLS is
+          * what failed. Debugging the sidecar hop cost an hour to this one line --
+          * OpenSSL knew it was "tlsv1 alert unknown ca" the whole time. */
+         char ebuf[256] = "";
+         unsigned long e = ERR_peek_last_error();
+         if (e)
+            ERR_error_string_n(e, ebuf, sizeof(ebuf));
+         aimee_log(LOG_ERROR, "agent_http", "TLS handshake failed with %s:%d%s%s", url->host,
+                   url->port, ebuf[0] ? ": " : "", ebuf);
          SSL_free(conn->ssl);
          close(conn->fd);
          conn->fd = -1;

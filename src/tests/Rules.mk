@@ -306,6 +306,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-workspace-runner-queue \
                $(TESTPREFIX)/unit-test-cli-kb-smoke \
                $(TESTPREFIX)/unit-test-kb-synthesis-identity \
+               $(TESTPREFIX)/unit-test-synthesis-mtls-client \
                $(TESTPREFIX)/unit-test-workspace-scope \
                $(TESTPREFIX)/unit-test-workspace-migration \
                $(TESTPREFIX)/unit-test-webuser-runtime \
@@ -5671,6 +5672,21 @@ $(TESTPREFIX)/unit-test-subject-grammar: $(OBJDIR)/tests/test_subject_grammar.o 
 
 $(TESTPREFIX)/unit-test-kb-synthesis-identity: \
                      $(OBJDIR)/tests/test_kb_synthesis_identity.o \
+                     $(OBJDIR)/kb/kb_synthesis_identity.o \
+                     $(OBJDIR)/kb/pki.o \
+                     $(OBJDIR)/kb/modules/vault/vault_crypto.o \
+                     $(OBJDIR)/kb/modules/vault/vault_server_key.o \
+                     $(OBJDIR)/kb/modules/vault/vault_store.o $(OBJDIR)/kb/modules/vault/vault_kek_check.o \
+                     $(OBJDIR)/kb/modules/vault/vault_kek_cache.o \
+                     $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# The kb's own HTTP client against a peer that demands a client certificate. Links
+# the real agent_bridge, because the defect was in which SSL_CTX it chose.
+$(TESTPREFIX)/unit-test-synthesis-mtls-client: \
+                     $(OBJDIR)/tests/test_synthesis_mtls_client.o \
+                     $(OBJDIR)/posix/agent_bridge.o \
+                     $(OBJDIR)/proxy_bootstrap.o \
                      $(OBJDIR)/kb/kb_synthesis_identity.o \
                      $(OBJDIR)/kb/pki.o \
                      $(OBJDIR)/kb/modules/vault/vault_crypto.o \
