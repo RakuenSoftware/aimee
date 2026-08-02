@@ -137,6 +137,30 @@ it can go, and "off" stops being a property of the image you happened to pull. T
 three-way surface the wizard already presents — off, local, external — survives
 unchanged; only what "local" *means* changes, from a tag constraint to a service.
 
+### Synthesis becomes an in-place upgrade
+
+This is the capability the split unlocks, and it is worth more than the build-time
+saving that motivated it.
+
+Today, moving between E2B and E4B — or adding local synthesis to a running
+deployment — means pulling a different kb tag and recreating **the container that
+holds the database**. A multi-gigabyte swap of a data-bearing service, to change a
+model that has nothing to do with the data.
+
+As a sidecar it is a stateless container swap: pull `aimee-llm-e4b`, recreate one
+service, leave the kb running. Add synthesis to a deployment that never had it,
+downgrade to E2B on a box that turned out too small, or remove it and point
+`SYNTHESIS_ENDPOINT` at an external provider — none of it touches the kb or its
+volume. Both surfaces already exist to drive it: the wizard's Deploy step, and
+`/v1/deploy/apply` behind it.
+
+The asymmetry with the embedder is now the honest one, and worth stating plainly in
+the operator docs: **the embedder is a one-way door and synthesis is not.** DB2
+records the vector-column width and refuses to start on drift, so an embedder change
+means re-embedding the corpus. `docs/UPGRADING.md` already says the synthesis axis is
+not one-way; under this design that stops being a technicality about tags and becomes
+an operation someone can actually perform.
+
 A is recommended: the CA is already the KB's, and a sidecar that waits for its
 identity is a smaller change than a new provisioning path. B is the fallback if the
 ordering proves awkward under the managed-compose deploy path, which recreates
