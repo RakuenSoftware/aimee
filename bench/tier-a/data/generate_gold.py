@@ -144,19 +144,47 @@ def code_facts(inv, rng):
     return pools
 
 
-def synth_fields(kind, syn, rng):
-    """One row of business/sales fields, internally consistent by construction."""
-    person = rng.choice(syn["people"])
+def _by_employer(syn):
+    idx = {}
+    for p in syn["people"]:
+        idx.setdefault(p["employer"], []).append(p)
+    return idx
+
+
+def synth_fields(kind, syn, rng, emp_idx=None):
+    """One row of business/sales fields, internally consistent by construction.
+
+    PICK THE COMPANY FIRST, THEN SOMEONE WHO WORKS THERE. The previous version
+    drew a person and a company independently and carried a comment claiming the
+    employer was "never re-rolled" — but the guard was `kind == "company"` and
+    every caller passed "company", so the ternary always took the random-company
+    branch and the guard was dead code. The corpus then asserted 503 contradictory
+    functional facts: `Saskia Lindqvist works_for` resolved to three different
+    companies, because each note re-rolled the pair.
+
+    That matters beyond tidiness. The whole justification for synthetic entities
+    is a closed, self-consistent world; a corpus that contradicts itself is one a
+    real drain would be right to refuse, and it makes `works_for` untestable as a
+    functional relation.
+
+    Note the CODE domain legitimately contains repeated `located_in` for one
+    file — a file really can move twice — so consistency is enforced only where
+    the fact is functional by construction.
+    """
+    emp_idx = emp_idx if emp_idx is not None else _by_employer(syn)
     company = rng.choice(syn["companies"])
+    staff = emp_idx.get(company["name"])
+    person = rng.choice(staff) if staff else rng.choice(syn["people"])
+    if not staff:                      # nobody on the books there; follow the person
+        company = next((c for c in syn["companies"]
+                        if c["name"] == person["employer"]), company)
     contract = rng.choice(syn["contracts"])
     product = rng.choice(syn["products"])
     year = rng.randint(2024, 2027)
     return {
         "person": person["name"], "role": person["role"], "team": person["team"],
-        # Employer comes from the person record, never re-rolled, or a note and
-        # its neighbour could assert two different employers for one person.
-        "company": company["name"] if kind == "company" else person["employer"],
-        "city": company["city"] if kind == "company" else person["employer_city"],
+        "company": company["name"],
+        "city": company["city"],
         "tier": company["tier"], "product": product["name"],
         "contract": contract["name"], "renews_on": contract["renews_on"],
         "policy": rng.choice(["retention policy", "pricing sheet",
