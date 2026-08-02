@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include "aimee.h"
 #include "cJSON.h"
+#include "config_fields.h"
 #include "config_learning.h"
 #include "config_database.h"
 #include "config_sections.h"
@@ -2532,6 +2533,51 @@ int main(void)
       platform_unsetenv("AIMEE_API_MTLS");
 
       cJSON_Delete(root);
+   }
+
+   /* --- only credentials are Vault-backed --- */
+   {
+      /* A field with a secret_name is a process-memory view of a Vault record: it is
+       * NEVER serialized, config.show and config.get render it as a presence BOOLEAN,
+       * and config_set writes it to Vault instead of YAML.
+       *
+       * That is right for a credential and catastrophic for a setting. Eight ordinary
+       * fields were tagged this way -- embedder_model, embedder_url, embedder_dims,
+       * synthesis_endpoint, synthesis_model, synthesis_thinking, aimee_synthesis_model,
+       * aimee_with_llamacpp -- because the environment-variable name was written into
+       * the secret_name slot. The effect was that `aimee config set embedder_model
+       * bekko-a25m` reported "= true", `config get` returned false, and the value went
+       * into Vault where nothing reads it. A deployment could not select an embedder at
+       * all, and the KB logged "no embedder selected" whatever the operator did.
+       *
+       * secret_name is not an env-var binding and never was: nothing reads getenv()
+       * through it. The env vars are consumed by the container entrypoint and
+       * embedder-server.py, not by this table.
+       *
+       * So this asserts the classification directly. A model name, a dimension count
+       * and a boolean are not credentials. */
+      static const char *const not_secrets[] = {
+          "embedder_model",        "embedder_url",        "embedder_dims",
+          "synthesis_model",       "synthesis_endpoint",  "synthesis_thinking",
+          "aimee_synthesis_model", "aimee_with_llamacpp", NULL};
+      for (int i = 0; not_secrets[i]; i++)
+      {
+         const config_field_t *f = config_field_lookup(not_secrets[i]);
+         assert(f && "field must exist");
+         assert(config_field_secret_name(f) == NULL);
+      }
+
+      /* The real credentials stay Vault-backed. This half is what stops the fix above
+       * from being applied too broadly. */
+      static const char *const secrets[] = {"embedder_api_key", "synthesis_api_key",
+                                            "kb_api_bearer_token", "db2_url", NULL};
+      for (int i = 0; secrets[i]; i++)
+      {
+         const config_field_t *f = config_field_lookup(secrets[i]);
+         assert(f && "field must exist");
+         assert(config_field_secret_name(f) != NULL);
+      }
+      printf("  config_field secret classification: ok\n");
    }
 
    /* --- config_emit_deploy_env: page-2 record -> compose env --- */
