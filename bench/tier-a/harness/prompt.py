@@ -23,7 +23,10 @@ TEMPLATE = (
     'generic catch-all such as "other"/"unknown"/"misc". subject is the entity the '
     'fact is about (use "user" for the note\'s author when it is first-person). '
     "confidence is 0..1. Extract only durable, generalizable facts; skip transient "
-    "state, feelings, plans, and one-off events. If the note RETRACTS or DENIES "
+    "state, feelings, plans, and one-off events. BUT an event that ESTABLISHES a "
+    'durable state yields that state: "joined X" gives membership of X, "moved '
+    'to Y" gives location Y, "was promoted to Z" gives role Z. Record the '
+    "resulting state, not the event. If the note RETRACTS or DENIES "
     'something ("no longer", "did not", "never", "is not", "has left", '
     '"was removed"), do NOT emit the negated fact - a retraction asserts a fact '
     "is FALSE, so there is nothing durable to record. "
@@ -37,6 +40,16 @@ TEMPLATE = (
 # produced it.
 #
 #   v1  original
+#   v4  an event that establishes a durable state yields the state. v1-v3 said
+#       "skip transient state, feelings, plans, and one-off events" with no way
+#       to separate an event from the state it creates, so "Tara Tanaka joined
+#       the revenue committee last quarter" produced nothing. Measured on the
+#       10k v3 run: the model went silent on 57% of fact-bearing notes phrased as
+#       events against 5% phrased plainly — an 11x difference. 17% of
+#       fact-bearing notes are event-phrased, so roughly 650 real facts were lost
+#       to phrasing alone. This matters more in production than in the benchmark:
+#       "I joined Rakuen Software" is the most natural way a person records
+#       employment.
 #   v3  the empty case is spelled out as {"facts":[]}. v1 and v2 both said
 #       "return an empty list" while the schema above showed a wrapper object,
 #       and models did what the sentence said: E2B UD-Q6 wrote a bare [] on 297
@@ -50,7 +63,7 @@ TEMPLATE = (
 #       produced a member_of triple — 51 spurious triples in the negation slice
 #       of the 1k small-corpus run, the graph-poisoning case that slice exists
 #       to catch.
-PROMPT_VERSION = "v3"
+PROMPT_VERSION = "v4"
 
 # Production caps the completion at MF_LLM_OUT_CAP.
 MAX_NEW_TOKENS = 8192

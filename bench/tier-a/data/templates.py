@@ -272,11 +272,14 @@ BUSINESS = {
     "implicit": [
         {"text": "Sent the quarterly report to {person} at {company} again.",
          "gold": [{"s": "{person}", "r": "works_for", "o": "{company}"}]},
-        {"text": "Picked {person} up from the office in {city}.",
-         "gold": [{"s": "{person}", "r": "located_in", "o": "{city}"}]},
+        {"text": "{person} works out of the {city} office.",
+         "gold": [{"s": "{person}", "r": "located_in", "o": "{city}"}],
+         "alt": [["based_in", "lives_in"]]},
         {"text": "Copied {person} in, since they run the {team}.",
          "gold": [{"s": "{person}", "r": "member_of", "o": "{team}"}]},
-        {"text": "Booked the {city} room for the {company} review again.",
+        # Booking a room in a city does not place the COMPANY there — the room
+        # is in the city. An implicit fact must still follow from the sentence.
+        {"text": "Flew to {city} again for the {company} review.",
          "gold": [{"s": "{company}", "r": "located_in", "o": "{city}"}]},
         {"text": "Escalated to {person}, the {role}, as usual.",
          "gold": [{"s": "{person}", "r": "has_role", "o": "{role}"}]},
@@ -323,13 +326,15 @@ SALES = {
         {"text": "I own the {company} account now.",
          "gold": [{"s": "user", "r": "owns_account", "o": "{company}"}],
          "alt": [["manages_account", "account_owner_of"]]},
-        {"text": "I'm running point on the {company} renewal.",
+        # "running point on a renewal" is an ACTIVITY, not account ownership;
+        # the model stayed silent on 88 of these and was arguably right.
+        {"text": "The {company} account is mine to manage.",
          "gold": [{"s": "user", "r": "owns_account", "o": "{company}"}],
          "alt": [["manages_account", "account_owner_of"]]},
         {"text": "{company} is mine now that {person} has moved on.",
          "gold": [{"s": "user", "r": "owns_account", "o": "{company}"}],
          "alt": [["manages_account", "account_owner_of"]]},
-        {"text": "I picked up {company} this quarter.",
+        {"text": "I am the account owner for {company}.",
          "gold": [{"s": "user", "r": "owns_account", "o": "{company}"}],
          "alt": [["manages_account", "account_owner_of"]]},
     ],

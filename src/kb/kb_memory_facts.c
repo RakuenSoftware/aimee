@@ -75,7 +75,10 @@
    "\"other\"/\"unknown\"/\"misc\". subject is the entity the fact is about "                      \
    "(use \"user\" for the note's author when it is first-person). "                                \
    "confidence is 0..1. Extract only durable, generalizable facts; skip transient "                \
-   "state, feelings, plans, and one-off events. If the note RETRACTS or DENIES "                   \
+   "state, feelings, plans, and one-off events. BUT an event that ESTABLISHES a "                  \
+   "durable state yields that state: \"joined X\" gives membership of X, \"moved "                 \
+   "to Y\" gives location Y, \"was promoted to Z\" gives role Z. Record the "                      \
+   "resulting state, not the event. If the note RETRACTS or DENIES "                               \
    "something (\"no longer\", \"did not\", \"never\", \"is not\", \"has left\", "                  \
    "\"was removed\"), do NOT emit the negated fact - a retraction asserts a fact "                 \
    "is FALSE, so there is nothing durable to record. "                                             \
