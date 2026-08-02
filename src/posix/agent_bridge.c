@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <pthread.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 
@@ -45,6 +46,7 @@ static SSL_CTX *s_ssl_ctx;
 static SSL_CTX *s_synth_ssl_ctx;
 static char s_synth_host[256];
 static int s_synth_port;
+static pthread_mutex_t s_synth_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Defined below parse_url, which it needs; the signature keeps parsed_url_t out of
  * the forward declaration. Called from agent_http_init, once, before any worker
@@ -166,25 +168,25 @@ static int parse_url(const char *url, parsed_url_t *out)
  * FAIL LOUD, NOT QUIET. If the files are named but unusable this logs an error and
  * leaves s_synth_ssl_ctx NULL, so the hop falls back to the default context and
  * fails the handshake -- the same outcome as before, but now with a line that says
- * which file could not be loaded instead of a bare "unknown ca" from OpenSSL. */
-static void synth_ssl_ctx_init(void)
+ * which file could not be loaded instead of a bare "unknown ca" from OpenSSL.
+ *
+ * THE FILES DO NOT EXIST YET AT INIT, which is why the load is deferred to the
+ * first request rather than done here. In the kb, agent_http_init() runs during
+ * startup and kb_synthesis_identity_ensure() mints this material LATER in the same
+ * startup -- 81 seconds later on a first boot of CT 302, because Postgres has to
+ * come up in between. Loading eagerly read three files that did not exist, left the
+ * context NULL, and disabled synthesis for the life of the process; it only looked
+ * right when the container was restarted with the material already on disk.
+ *
+ * So init records WHERE the sidecar is, and the first request to that host:port
+ * loads the material. By then the kb has issued it. */
+static void synth_ssl_ctx_load_locked(void)
 {
-   const char *endpoint = getenv("SYNTHESIS_ENDPOINT");
    const char *ca = getenv("SYNTHESIS_CA_FILE");
    const char *cert = getenv("SYNTHESIS_CERT_FILE");
    const char *key = getenv("SYNTHESIS_KEY_FILE");
-   if (!endpoint || !endpoint[0] || !ca || !ca[0] || !cert || !cert[0] || !key || !key[0])
+   if (!ca || !cert || !key)
       return;
-
-   parsed_url_t pu;
-   if (parse_url(endpoint, &pu) != 0 || !pu.use_ssl)
-   {
-      aimee_log(LOG_WARN, "synthesis_mtls",
-                "SYNTHESIS_ENDPOINT (%s) is not an https URL; the client identity in "
-                "SYNTHESIS_CERT_FILE will not be used",
-                endpoint);
-      return;
-   }
 
    SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
    if (!ctx)
@@ -211,21 +213,58 @@ static void synth_ssl_ctx_init(void)
    SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
 
    s_synth_ssl_ctx = ctx;
-   snprintf(s_synth_host, sizeof(s_synth_host), "%s", pu.host);
-   s_synth_port = pu.port;
    aimee_log(LOG_INFO, "synthesis_mtls", "client identity loaded for %s:%d", s_synth_host,
              s_synth_port);
 }
 
+/* Record which peer the identity is for. The material itself is loaded on first use
+ * (see synth_ssl_ctx_load_locked): at this point in startup it does not exist yet. */
+static void synth_ssl_ctx_init(void)
+{
+   const char *endpoint = getenv("SYNTHESIS_ENDPOINT");
+   const char *ca = getenv("SYNTHESIS_CA_FILE");
+   const char *cert = getenv("SYNTHESIS_CERT_FILE");
+   const char *key = getenv("SYNTHESIS_KEY_FILE");
+   if (!endpoint || !endpoint[0] || !ca || !ca[0] || !cert || !cert[0] || !key || !key[0])
+      return;
+
+   parsed_url_t pu;
+   if (parse_url(endpoint, &pu) != 0 || !pu.use_ssl)
+   {
+      aimee_log(LOG_WARN, "synthesis_mtls",
+                "SYNTHESIS_ENDPOINT (%s) is not an https URL; the client identity in "
+                "SYNTHESIS_CERT_FILE will not be used",
+                endpoint);
+      return;
+   }
+   snprintf(s_synth_host, sizeof(s_synth_host), "%s", pu.host);
+   s_synth_port = pu.port;
+}
+
 /* The sidecar identity is for the sidecar, and for nothing else. Host AND port must
  * both match what SYNTHESIS_ENDPOINT named: matching on host alone would present the
- * kb's client certificate to any other service that happens to share the name. */
+ * kb's client certificate to any other service that happens to share the name.
+ *
+ * The load happens here, once, under a lock: worker threads call this concurrently,
+ * and the curator runs several. A failed load is retried on the next request rather
+ * than latched -- the material appears partway through startup, so "not there yet"
+ * is a normal state to pass through, not a permanent verdict. */
 static SSL_CTX *ssl_ctx_for(const parsed_url_t *url)
 {
-   if (s_synth_ssl_ctx && s_synth_host[0] && url->port == s_synth_port &&
-       strcasecmp(url->host, s_synth_host) == 0)
-      return s_synth_ssl_ctx;
-   return s_ssl_ctx;
+   if (!s_synth_host[0] || url->port != s_synth_port ||
+       strcasecmp(url->host, s_synth_host) != 0)
+      return s_ssl_ctx;
+
+   pthread_mutex_lock(&s_synth_lock);
+   if (!s_synth_ssl_ctx)
+      synth_ssl_ctx_load_locked();
+   SSL_CTX *ctx = s_synth_ssl_ctx;
+   pthread_mutex_unlock(&s_synth_lock);
+
+   /* No context means the material is unreadable, and the error above says which
+    * file. Falling back to the default context here would present no certificate
+    * and fail the handshake anyway, so return it and let the TLS error stand. */
+   return ctx ? ctx : s_ssl_ctx;
 }
 
 /* ---- Socket I/O with timeout ---- */
