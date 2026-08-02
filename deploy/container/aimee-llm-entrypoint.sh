@@ -76,10 +76,20 @@ connect = 127.0.0.1:$AIMEE_LLM_LOOPBACK_PORT
 cert = $CERT_FILE
 key = $KEY_FILE
 CAfile = $CA_FILE
-# 4 = "verify peer against the CA, and REQUIRE a certificate". Levels below this
-# accept an anonymous client, which would make the terminator ornamental.
+# verifyChain, and deliberately NOT verifyPeer.
+#
+# These are not two strengths of the same check. verifyChain verifies the client
+# certificate against the CA in CAfile, which is what this hop wants: the kb presents
+# an identity our CA issued. verifyPeer matches the presented certificate against a
+# local REPOSITORY of known peer certificates -- pinning, not CA verification -- and
+# setting both rejects a perfectly valid client with
+#   CERT: Certificate not found in local repository
+#   Rejected by CERT at depth=0: CN=aimee-kb-synthesis
+# which is what this configuration did until it was run against a real kb.
+#
+# verifyChain alone still REQUIRES a certificate: an anonymous client is refused with
+# "tlsv13 alert certificate required", so dropping verifyPeer does not weaken it.
 verifyChain = yes
-verifyPeer = yes
 sslVersionMin = TLSv1.3
 EOF
 
