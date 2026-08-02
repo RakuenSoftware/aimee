@@ -141,15 +141,25 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # The immutable tag names every input that changes the artefact, so "does this
-      # tag exist" IS "have these inputs already been built". :testing is a moving
-      # pointer at whichever of these is current.
+      # The immutable tag must name EVERY input that changes the artefact, or the skip
+      # becomes a trap. Keyed on the model, the quant and the llama.cpp version alone,
+      # a change to Dockerfile.llm or the entrypoint would find the tag already
+      # published, skip the build, and leave :testing pointing at the old image while
+      # the run reported success. That is precisely how the mTLS fix in this image
+      # would have failed to ship.
+      #
+      # So the sidecar's own sources are hashed into the tag. Content-addressed: a
+      # rebuild happens exactly when something that lands in the image changed, and
+      # never otherwise.
       - name: Has this exact build already been published?
         id: have
         env:
           FORCE: ${{ inputs.force }}
         run: |
-          pinned="ghcr.io/${OWNER}/${{ matrix.name }}:${MODEL_QUANT}-${LLAMACPP_VERSION}"
+          rev=$(cat Dockerfile.llm deploy/container/aimee-llm-entrypoint.sh \
+                | sha256sum | cut -c1-12)
+          pinned="ghcr.io/${OWNER}/${{ matrix.name }}:${MODEL_QUANT}-${LLAMACPP_VERSION}-${rev}"
+          echo "sidecar sources hash to $rev"
           echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
           if [ "${FORCE:-false}" = "true" ]; then
             echo "exists=false" >> "$GITHUB_OUTPUT"
