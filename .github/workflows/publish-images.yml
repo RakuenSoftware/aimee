@@ -20,6 +20,16 @@
 # The external-embedder deployment shares the bekko images and overrides
 # EMBEDDER_URL at runtime; there is no separate "external" image.
 #
+# Two more images exist only to be copied FROM, never run:
+#
+#   aimee-model-gemma-4-e2b-it:<quant>   the bundled GGUF, nothing else
+#   aimee-model-gemma-4-e4b-it:<quant>
+#
+# They carry the synthesis model so the four -llm tags on two architectures share
+# one registry layer instead of each downloading the same file from Hugging Face.
+# Built by the `models` job, which skips itself when the tag already exists, so a
+# publish that does not change the model or the quant fetches nothing.
+#
 # Multi-arch (linux/amd64 + linux/arm64) via the canonical build-by-digest then
 # merge-manifest pattern, on native runners (no QEMU emulation of the C build).
 #
@@ -67,7 +77,81 @@ permissions:
   contents: read
   packages: write
 
+env:
+  # The quantisation the bundled models ship at, and the tag of the aimee-model-*
+  # images. It IS the identity of those images: bumping the quant is a new tag, so
+  # the old one is never overwritten and a rollback keeps working. Changing this
+  # means changing the digests in scripts/fetch-synthesis-model.sh too.
+  MODEL_QUANT: UD-Q6_K_XL
+
 jobs:
+  # Publish the bundled synthesis models as their own images, once, so the kb
+  # builds can COPY --from them instead of each pulling the same GGUF out of
+  # Hugging Face. Four -llm tags x two architectures was eight downloads of the
+  # same two files per publish — about 49 GB fetched to produce ~12 GB of
+  # distinct bytes.
+  #
+  # SKIPPED WHEN THE TAG ALREADY EXISTS, which is the normal case: the models
+  # change only when the model or quant does, so a typical publish downloads
+  # nothing at all. Not on a pull request either — a PR must never push. A PR
+  # instead reads whatever the last merge published, and falls back to fetching
+  # inline if there is nothing there yet (see "Resolve the bundled model source").
+  models:
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        model: [gemma-4-E2B-it, gemma-4-E4B-it]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Normalize owner to lowercase
+        run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Is it already published?
+        id: have
+        env:
+          SYNTH: ${{ matrix.model }}
+        run: |
+          # A repository name must be lowercase; a TAG may not be, which is why
+          # only the name half is folded and MODEL_QUANT is left alone.
+          ref="ghcr.io/${OWNER}/aimee-model-${SYNTH,,}:${MODEL_QUANT}"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          if docker manifest inspect "$ref" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "$ref already published; skipping the Hugging Face fetch"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.have.outputs.exists != 'true'
+        uses: docker/setup-buildx-action@v3
+
+      # Both platforms in ONE build: the payload is architecture-independent and
+      # Dockerfile.model pins its fetch stage to BUILDPLATFORM, so this downloads
+      # the file once and both manifests reference the same layer.
+      - name: Build and push the model image
+        if: steps.have.outputs.exists != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.model
+          platforms: linux/amd64,linux/arm64
+          provenance: false
+          push: true
+          tags: ${{ steps.have.outputs.ref }}
+          build-args: |
+            AIMEE_SYNTHESIS_MODEL=${{ matrix.model }}
+
   # Resolve the version once (from the call/dispatch input or the pushed tag) so
   # the build (binary embedding) and merge (image tags) jobs agree.
   prep:
@@ -89,7 +173,10 @@ jobs:
 
   # Build each image for each arch on a native runner; push by digest only.
   build:
-    needs: prep
+    needs: [prep, models]
+    # `models` is skipped on a pull request, and a skipped dependency would
+    # otherwise skip this job too. Proceed as long as it did not FAIL.
+    if: ${{ !cancelled() && needs.prep.result == 'success' && needs.models.result != 'failure' }}
     strategy:
       fail-fast: false
       matrix:
@@ -101,15 +188,15 @@ jobs:
           # llama.cpp axis decides whether synthesis can run on the same host.
           - { name: aimee-kb,                  dockerfile: Dockerfile,
               extra_args: "AIMEE_EMBEDDER=bekko-a25m\nAIMEE_WITH_LLAMACPP=0" }
-          - { name: aimee-kb-llm-e2b,          dockerfile: Dockerfile,
+          - { name: aimee-kb-llm-e2b,          dockerfile: Dockerfile, synthesis: gemma-4-E2B-it,
               extra_args: "AIMEE_EMBEDDER=bekko-a25m\nAIMEE_WITH_LLAMACPP=1\nAIMEE_SYNTHESIS_MODEL=gemma-4-E2B-it" }
-          - { name: aimee-kb-llm-e4b,          dockerfile: Dockerfile,
+          - { name: aimee-kb-llm-e4b,          dockerfile: Dockerfile, synthesis: gemma-4-E4B-it,
               extra_args: "AIMEE_EMBEDDER=bekko-a25m\nAIMEE_WITH_LLAMACPP=1\nAIMEE_SYNTHESIS_MODEL=gemma-4-E4B-it" }
           - { name: aimee-kb-nomic,            dockerfile: Dockerfile,
               extra_args: "AIMEE_EMBEDDER=nomic-embed-text-v2-moe\nAIMEE_WITH_LLAMACPP=0" }
-          - { name: aimee-kb-nomic-llm-e2b,    dockerfile: Dockerfile,
+          - { name: aimee-kb-nomic-llm-e2b,    dockerfile: Dockerfile, synthesis: gemma-4-E2B-it,
               extra_args: "AIMEE_EMBEDDER=nomic-embed-text-v2-moe\nAIMEE_WITH_LLAMACPP=1\nAIMEE_SYNTHESIS_MODEL=gemma-4-E2B-it" }
-          - { name: aimee-kb-nomic-llm-e4b,    dockerfile: Dockerfile,
+          - { name: aimee-kb-nomic-llm-e4b,    dockerfile: Dockerfile, synthesis: gemma-4-E4B-it,
               extra_args: "AIMEE_EMBEDDER=nomic-embed-text-v2-moe\nAIMEE_WITH_LLAMACPP=1\nAIMEE_SYNTHESIS_MODEL=gemma-4-E4B-it" }
           - { name: aimee-authority-bootstrap, dockerfile: Dockerfile.authority-bootstrap }
           # #4-full render backend (headless-Chromium sidecar). Self-contained
@@ -128,13 +215,45 @@ jobs:
       - name: Normalize owner to lowercase
         run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
 
+      # Logging in on a pull request too, so the PR build can READ the prebuilt
+      # aimee-model-* layers instead of re-downloading gigabytes from Hugging
+      # Face. Logging in is not pushing: `push=` on the build step below is what
+      # decides that, and it stays false for a pull request. A fork's
+      # GITHUB_TOKEN is read-only regardless, and the probe below degrades to an
+      # inline fetch if the read is not permitted.
       - name: Log in to ghcr.io
-        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Prefer the published model layer; fall back to fetching it in the build.
+      # The fallback is what keeps this an optimisation rather than a dependency:
+      # bootstrapping a fresh registry, or a commit that bumps the quant before
+      # the matching model image exists, still builds instead of hard-failing.
+      - name: Resolve the bundled model source
+        id: model
+        env:
+          SYNTH: ${{ matrix.image.synthesis }}
+        run: |
+          if [ -z "$SYNTH" ]; then
+            echo "source=fetch"  >> "$GITHUB_OUTPUT"
+            echo "image=scratch" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Lowercase the name half only — see the models job for why.
+          ref="ghcr.io/${OWNER}/aimee-model-${SYNTH,,}:${MODEL_QUANT}"
+          if docker manifest inspect "$ref" >/dev/null 2>&1; then
+            echo "using prebuilt model layer $ref"
+            echo "source=image"  >> "$GITHUB_OUTPUT"
+            echo "image=$ref"    >> "$GITHUB_OUTPUT"
+          else
+            echo "$ref not available; falling back to an inline Hugging Face fetch"
+            echo "source=fetch"  >> "$GITHUB_OUTPUT"
+            echo "image=scratch" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -161,6 +280,8 @@ jobs:
           build-args: |
             AIMEE_VERSION=${{ needs.prep.outputs.version }}
             WITH_RUNTIME_WEB=1
+            AIMEE_MODEL_SOURCE=${{ steps.model.outputs.source }}
+            AIMEE_MODEL_IMAGE=${{ steps.model.outputs.image }}
             ${{ matrix.image.extra_args }}
           # push=false on a pull_request: build only, publish nothing.
           outputs: type=image,name=ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}

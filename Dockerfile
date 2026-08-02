@@ -29,6 +29,21 @@ ARG AIMEE_SYNTHESIS_MODEL=""
 # the matrix without pulling ~24GB from the internet each time. The filename is
 # identical either way, so a mirror is just `cp` from a known-good copy.
 ARG AIMEE_MODEL_MIRROR=""
+# Where the bundled model comes from: "image" copies it out of a prebuilt
+# aimee-model-* tag (see Dockerfile.model), "fetch" downloads it here.
+#
+# "image" is what CI uses, and it is the whole point of splitting the model out:
+# the four -llm tags x two architectures share one registry layer instead of
+# pulling the same two files from Hugging Face eight times per publish.
+#
+# "fetch" is kept as the fallback, NOT as dead code. It is what runs when the
+# model tag does not exist yet — bootstrapping the registry, or a commit that
+# bumps the quant before the new model image has been published. Without it that
+# situation is a hard build failure on a pull request, and the cache would have
+# become a dependency rather than an optimisation.
+ARG AIMEE_MODEL_SOURCE=fetch
+# Only read when AIMEE_MODEL_SOURCE=image.
+ARG AIMEE_MODEL_IMAGE=scratch
 # Pinned llama.cpp. This version is load-bearing in three ways, all checked
 # against the tag rather than assumed:
 #   - gemma-4 / gemma-3n architecture support (b4585 had NONE — it would have
@@ -116,6 +131,30 @@ RUN mkdir -p "/pgvectorscale/usr/lib/postgresql/${PG_MAJOR}/lib" \
     && cp "/usr/share/postgresql/${PG_MAJOR}/extension/vectorscale"* \
         "/pgvectorscale/usr/share/postgresql/${PG_MAJOR}/extension/"
 
+# --- where the bundled model comes from ---------------------------------------
+# Two stages with the same output shape (/model/synthesis.gguf + /model/MODEL_ID),
+# selected by AIMEE_MODEL_SOURCE. Only the selected one is in the build graph, so
+# the unselected one costs nothing — and neither is built at all for a
+# AIMEE_WITH_LLAMACPP=0 tag, which reaches llamacpp-0 instead.
+#
+# The digest table lives in scripts/fetch-synthesis-model.sh, shared with
+# Dockerfile.model, so the two paths cannot disagree about which bytes are right.
+FROM debian:trixie-slim AS modelsrc-fetch
+ARG AIMEE_SYNTHESIS_MODEL
+ARG AIMEE_MODEL_MIRROR
+ENV AIMEE_MODEL_MIRROR=${AIMEE_MODEL_MIRROR}
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+COPY scripts/fetch-synthesis-model.sh /usr/local/bin/fetch-synthesis-model.sh
+RUN sh /usr/local/bin/fetch-synthesis-model.sh "$AIMEE_SYNTHESIS_MODEL" /model
+
+# The prebuilt aimee-model-* tag. It is FROM scratch and already contains exactly
+# /model, so this stage is a rename and the layer comes straight from the registry.
+FROM ${AIMEE_MODEL_IMAGE} AS modelsrc-image
+
+FROM modelsrc-${AIMEE_MODEL_SOURCE} AS modelsrc
+
 # ---- llama.cpp, built from source (the *-llm image variants) -------------------
 # BUILT, NOT DOWNLOADED. Upstream publishes a Linux binary for x64 only — there is
 # no ubuntu-arm64 release asset, which a download-based install discovered the hard
@@ -161,53 +200,12 @@ RUN set -eux; \
     find /tmp/llamacpp-src/build \( -type f -o -type l \) -name '*.so*' \
         -exec cp -a {} /out/ ';' ; \
     rm -rf /tmp/llamacpp-src
-# The model, fetched ONCE here so the running container never downloads anything.
-#
-# THE SHA256 IS THE POINT, NOT A FORMALITY. It is Hugging Face's own digest for the
-# file (the LFS oid), and it is what makes AIMEE_MODEL_MIRROR safe to offer: a
-# mirror is an untrusted input, so anyone who can write to one could otherwise
-# change which model your image runs. It also catches the ordinary failure — a
-# truncated or half-written copy. A LENGTH check does not: plenty of downloaders
-# preallocate the full size and fill it in, so a file can be exactly the right
-# number of bytes and entirely wrong. A digest is the only check that sees that.
-#
-# Bumping the quant or the model means bumping these, from
-# https://huggingface.co/api/models/<repo>?blobs=true (siblings[].lfs.oid).
-#
-# RETRY LIKE THE PGDG KEY FETCH ABOVE, for the same reason. Baking the model moves
-# the Hugging Face dependency off the user's first run and onto our build, which is
-# the right trade — we control builds, users do not — but the build then has to
-# survive HF being slow or rate-limiting. A flat `--retry 5 --retry-delay 5` is a
-# ~25-second burst and it has already lost a CI leg to exit 22 while the same
-# commit built fine minutes later. Six attempts with growing backoff spans several
-# minutes instead, and -C - resumes a partial transfer rather than restarting
-# gigabytes. The digest below is what makes a resumed file safe to trust.
-#
-# -sS: silent, but still reports errors. Without it curl writes a progress meter on every
-# buffer flush, which is thousands of lines of noise in a non-tty build log.
-# An explicit repo+filename per model id: no quant-tag resolution at runtime, which
-# is what silently served the wrong file when a tag stopped matching. UD-Q6_K_XL
-# (Unsloth Dynamic Q6) is published only in unsloth's repos.
-ARG AIMEE_MODEL_MIRROR
-RUN set -eux; \
-    case "$AIMEE_SYNTHESIS_MODEL" in \
-      gemma-4-E2B-it) repo=unsloth/gemma-4-E2B-it-GGUF; f=gemma-4-E2B-it-UD-Q6_K_XL.gguf; \
-        sha=ae15474bc78f68c6a44bd17cad32f672b9501d90c4a0eed2fceeb6878ed530c5 ;; \
-      gemma-4-E4B-it) repo=unsloth/gemma-4-E4B-it-GGUF; f=gemma-4-E4B-it-UD-Q6_K_XL.gguf; \
-        sha=17b9c459b28b420ce20d75bcfc329db4fac1343792a964c3ae2e2680ce768932 ;; \
-      *) echo "AIMEE_SYNTHESIS_MODEL must be gemma-4-E2B-it or gemma-4-E4B-it (got '$AIMEE_SYNTHESIS_MODEL')" >&2; exit 1 ;; \
-    esac; \
-    if [ -n "$AIMEE_MODEL_MIRROR" ]; then url="${AIMEE_MODEL_MIRROR%/}/${f}"; \
-    else url="https://huggingface.co/${repo}/resolve/main/${f}"; fi; \
-    mkdir -p /out/model; \
-    for a in 1 2 3 4 5 6; do \
-      curl -fL -sS --retry 3 --retry-delay 5 --retry-all-errors \
-           --connect-timeout 20 -C - -o /out/model/synthesis.gguf "$url" && break; \
-      echo "model fetch failed (attempt $a/6); backing off" >&2; \
-      sleep $((a * 20)); \
-    done; \
-    echo "${sha}  /out/model/synthesis.gguf" | sha256sum -c - ; \
-    echo "${AIMEE_SYNTHESIS_MODEL}" > /out/model/MODEL_ID
+# The model, placed here so the running container never downloads anything. It
+# arrives from whichever modelsrc stage AIMEE_MODEL_SOURCE selected: a prebuilt
+# aimee-model-* layer in CI, a direct Hugging Face fetch as the fallback. Either
+# way it has already been verified against Hugging Face's own digest — the check
+# lives in scripts/fetch-synthesis-model.sh, next to the table it checks against.
+COPY --from=modelsrc /model /out/model
 
 # The non-llm variants copy an empty directory, so the COPY below stays
 # unconditional (Dockerfile has no conditional COPY) and costs them nothing.

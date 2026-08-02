@@ -161,6 +161,29 @@ Face — for an air-gapped or bandwidth-limited build site, or to rebuild the wh
 matrix without pulling tens of gigabytes again. The digest check applies either
 way, so a mirror cannot quietly substitute a different file.
 
+**The model is its own image, so it is downloaded once, not once per build.**
+Each model is published separately as `aimee-model-<model>:<quant>` (built by
+`Dockerfile.model`), and the aimee-kb builds copy the layer out of it. Without
+that, the four `-llm` tags on two architectures each fetched the same GGUF:
+eight downloads of the same two files per publish, roughly 49 GB pulled from
+Hugging Face to produce about 12 GB of distinct bytes. As a registry layer it is
+fetched from ghcr instead, and the registry stores one copy no matter how many
+tags reference it. Hugging Face is touched only when the model or the quant
+changes, because the quant *is* the tag: bumping it publishes a new tag rather
+than overwriting the old one, so a rollback still finds the model it was built
+with. The fetch stage in `Dockerfile.model` is pinned to `BUILDPLATFORM` because
+the payload is architecture-independent, so a two-platform build downloads once and
+both manifests point at the same layer.
+
+`AIMEE_MODEL_SOURCE=fetch` restores the old behaviour of downloading during the
+aimee-kb build. It is the fallback, not dead code: it is what runs when the model
+image does not exist yet: bootstrapping a fresh registry, or a commit that bumps
+the quant before the matching model image has been published. CI probes for the
+tag and picks the source per build, which keeps the cache an optimisation rather
+than a dependency. The digest table lives in
+`scripts/fetch-synthesis-model.sh` and is shared by both paths, so they cannot
+disagree about which bytes are correct.
+
 **llama.cpp is compiled from a pinned tag, not downloaded.** Upstream publishes a
 Linux binary for x64 only, so a download-based install cannot produce the arm64
 images at all. `LLAMACPP_VERSION` is a git tag, which is what the build verifies — and it is the
