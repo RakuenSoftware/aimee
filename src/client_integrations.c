@@ -228,11 +228,28 @@ static const char *codex_skill_markdown(void)
           "\n"
           "Use this plugin when Codex needs repository memory or aimee-specific helpers.\n"
           "\n"
-          "- Prefer local file inspection first for nearby code.\n"
+          /* This list used to open with "prefer local file inspection first for
+           * nearby code" and offer find_symbol only "when the local search
+           * surface is missing indexed context" — i.e. the index as a fallback
+           * after grep. Agents followed it exactly: measured over a four-task
+           * benchmark with a verified-healthy index, every cell read this file
+           * and then made ZERO index calls, resolving everything with three to
+           * four recursive greps. The instruction, not the tooling, was the
+           * reason. Lead with the questions the index answers better, and keep
+           * reading files for what reading files is actually for. */
+          "- Reading a file you already know the path of: just read it.\n"
+          "- Locating a definition, or finding every caller of something: use "
+          "`" AIMEE_CODE_TOOL_FIND_SYMBOL
+          "`. It answers from the index in one call, and it is exact where a "
+          "recursive text search is a guess that also matches comments, strings "
+          "and unrelated names.\n"
+          "- Before changing anything shared, or editing more than one file: use "
+          "`" AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS
+          "` to see what depends on it. A grep for the symbol will not tell you "
+          "what breaks.\n"
           "- Use `search_memory` for stored project facts or prior decisions.\n"
-          "- Use `" AIMEE_CODE_TOOL_FIND_SYMBOL
-          "` when the local search surface is missing indexed context.\n"
-          "- Use `" AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS "` before broad multi-file edits.\n"
+          "- Reach for a recursive grep when you need text that is not a code "
+          "symbol, or when the index has no answer.\n"
           "- Do not call provider-native sub-agent tools such as `spawn_agent`; use "
           "the aimee `delegate` MCP tool for every delegated or parallel sub-task.\n"
           "- Use `delegate` only for bounded sub-tasks that materially advance the "
