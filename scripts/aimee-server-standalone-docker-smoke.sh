@@ -93,7 +93,11 @@ trap cleanup EXIT
 
 if [[ "$DO_UP" == 1 ]]; then
   bold "==> Building + Vault-bootstrapping + starting standalone server ($COMPOSE_FILE)"
-  "${DC[@]}" build
+  if [[ "${AIMEE_E2E_SKIP_BUILD:-0}" != "1" ]]; then
+    "${DC[@]}" build
+  else
+    bold "==> Using prebuilt topology images (AIMEE_E2E_SKIP_BUILD=1)"
+  fi
   # Port-remap overrides do not affect the persistent Vault volume. Bootstrap
   # against the base file before creating the long-lived server container.
   bootstrap_compose="${COMPOSE_FILE%% *}"

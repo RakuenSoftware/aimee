@@ -276,7 +276,7 @@ jobs:
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev
       - name: Build integrity
-        run: cd src && make build-integrity
+        run: cd src && make -j"$(nproc)" build-integrity
 
       # The linker is what proves a capability is absent from what ships; a source
       # grep only proves nothing calls it. These checks caught nothing by hand
@@ -286,10 +286,19 @@ jobs:
       - name: Artifact integrity (removed capabilities stay removed)
         run: bash scripts/validate-aimee-artifacts.sh
 
-  unit-tests:
+  unit-test-shards:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    name: unit-tests (${{ matrix.label }}/2)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard_index: 0
+            label: 1
+          - shard_index: 1
+            label: 2
     # Live Postgres sidecar so unit-test-aimee-db and unit-test-memory-postgres
     # exercise the real libpq path (placeholder rewriter, FTS5→tsvector
     # translation, ON CONFLICT targets, schema apply) instead of skipping
@@ -297,8 +306,18 @@ jobs:
     # memories_code_fts trigram index (see src/schema/postgres.sql).
     env:
       AIMEE_TEST_PG_URL: postgres://aimee:aimee@localhost:5432/aimee_test
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_NOHASHDIR: "true"
     steps:
       - uses: actions/checkout@v4
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: unit-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-${{ hashFiles('src/Makefile', 'src/tests/Rules.mk') }}-${{ github.run_id }}
+          restore-keys: |
+            unit-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-${{ hashFiles('src/Makefile', 'src/tests/Rules.mk') }}-
+            unit-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-
       - name: Runner diagnostics
         run: |
           echo "::group::Runner environment"
@@ -335,7 +354,7 @@ jobs:
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make \
+          sudo apt-get install -y -q gcc make ccache \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev postgresql-client
       - name: Wait for Postgres
@@ -368,7 +387,46 @@ jobs:
           export AIMEE_TEST_TRUSTED_YES=/run/aimee-test-helpers/yes
           export AIMEE_TEST_TRUSTED_TRUE=/run/aimee-test-helpers/true
           export AIMEE_TEST_TRUSTED_ROOT_FILE=/run/aimee-test-helpers/root-file
-          cd src && make -j$(nproc) unit-tests build/obj/tests/p7-pkcs11-harness
+          ccache --max-size=750M
+          ccache --zero-stats
+          cd src
+          make -j"$(nproc)" CC="ccache gcc" \
+            GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 \
+            UNIT_TEST_SHARD_COUNT=2 \
+            UNIT_TEST_SHARD_INDEX=${{ matrix.shard_index }} \
+            UNIT_TEST_SKIP_P1=1 \
+            unit-tests
+          ccache --show-stats
+
+  # Stable protected context for the sharded suite. It remains named
+  # `unit-tests`, so branch protection needs no transition window, and it also
+  # makes the already-separate real-Postgres RLS gate part of that required
+  # result instead of running it redundantly in every unit build.
+  unit-tests:
+    needs: [change-scope, unit-test-shards, p1-rls-gate]
+    if: ${{ always() && !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm complete unit gate
+        env:
+          CHANGE_SCOPE_RESULT: ${{ needs.change-scope.result }}
+          DOCS_ONLY: ${{ needs.change-scope.outputs.docs_only }}
+          SHARDS_RESULT: ${{ needs.unit-test-shards.result }}
+          P1_RESULT: ${{ needs.p1-rls-gate.result }}
+        run: |
+          if [ "$CHANGE_SCOPE_RESULT" = success ] && [ "$DOCS_ONLY" = true ]; then
+            echo "Documentation-only change: unit shards and P1 gate skipped."
+            exit 0
+          fi
+          [ "$SHARDS_RESULT" = success ] || {
+            echo "Unit-test shard result: $SHARDS_RESULT" >&2
+            exit 1
+          }
+          [ "$P1_RESULT" = success ] || {
+            echo "P1 RLS gate result: $P1_RESULT" >&2
+            exit 1
+          }
+          echo "All unit-test shards and the P1 RLS gate passed."
 
   # The data-plane identity mint, end to end, against a live Postgres and a live
   # signed-HWM KMS helper.
@@ -1078,84 +1136,6 @@ jobs:
       - name: Memory retrieval eval (corpus + regression check)
         run: cd src && make -j$(nproc) memory-retrieval-eval-check
 
-  bench-check:
-    needs: change-scope
-    if: ${{ github.event_name == 'pull_request' && !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Runner diagnostics
-        run: |
-          echo "::group::Runner environment"
-          echo "ref: $GITHUB_REF  sha: $GITHUB_SHA  runner: $RUNNER_OS $RUNNER_ARCH"
-          uname -a
-          gcc --version 2>/dev/null || true
-          make --version 2>/dev/null | head -1 || true
-          df -h / | tail -1
-          echo "::endgroup::"
-      - name: Install dependencies
-        run: |
-          # GitHub runners preinstall third-party apt repos (e.g. packages.microsoft.com)
-          # that intermittently serve invalid/unsigned metadata and fail `apt-get update`
-          # hard — though none of our packages come from them. Drop them, then retry
-          # update with backoff so a transient mirror hiccup doesn't fail the job.
-          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make \
-            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
-            libpq-dev
-      - name: Build PR benchmark binary
-        run: |
-          if cd src && make -j$(nproc) tests/bench-perf; then
-            cp tests/bench-perf /tmp/bench-pr
-          else
-            echo "::warning::PR benchmark binary failed to build; benchmarks are informational."
-            touch /tmp/bench-skip
-          fi
-      - name: Build testing baseline binary
-        run: |
-          if [ -f /tmp/bench-skip ]; then
-            echo "Skipping baseline benchmark build because PR benchmark did not build."
-            exit 0
-          fi
-          BASE_REF="${{ github.base_ref }}"
-          if [ -z "$BASE_REF" ]; then
-            BASE_REF="origin/testing"
-          else
-            BASE_REF="origin/$BASE_REF"
-          fi
-          git worktree add /tmp/bench-baseline-wt "$BASE_REF"
-          cd /tmp/bench-baseline-wt/src
-          if make -j$(nproc) tests/bench-perf; then
-            cp tests/bench-perf /tmp/bench-baseline
-            echo "binary" > /tmp/bench-baseline-mode
-          else
-            echo "::warning::Base benchmark binary failed to build; using committed benchmark baseline."
-            cp "$GITHUB_WORKSPACE/benchmarks/baseline.json" /tmp/baseline.json
-            echo "static" > /tmp/bench-baseline-mode
-          fi
-          git -C /home/runner/work/aimee/aimee worktree remove /tmp/bench-baseline-wt --force
-      - name: Run same-machine regression report
-        run: |
-          if [ -f /tmp/bench-skip ]; then
-            echo "Skipping benchmark report because PR benchmark did not build."
-            exit 0
-          fi
-          if [ "$(cat /tmp/bench-baseline-mode)" = "binary" ]; then
-            if /tmp/bench-baseline --save /tmp/baseline.json; then
-              echo "Baseline measured from base branch on same machine. Running PR check..."
-            else
-              echo "::warning::Base benchmark binary failed at runtime; using committed benchmark baseline."
-              cp benchmarks/baseline.json /tmp/baseline.json
-            fi
-          else
-            echo "Using committed benchmark baseline because the base branch benchmark does not build."
-          fi
-          /tmp/bench-pr --check /tmp/baseline.json || \
-            echo "::warning::Benchmark regression detected; benchmarks are informational and do not gate PRs."
-
   # End-to-end deploy matrix: build the images and prove every Docker topology
   # (kb-only, server+kb split, server standalone) boots and serves a usable /v1
   # surface. See
@@ -1172,18 +1152,54 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        topology: [T1, T2, T3]
+        include:
+          - topology: T1
+            compose_file: compose.yaml
+            cache_set: |
+              aimee-kb.cache-from=type=gha,scope=e2e-T1-aimee-kb
+              aimee-kb.cache-to=type=gha,scope=e2e-T1-aimee-kb,mode=max
+              aimee-control-web.cache-from=type=gha,scope=e2e-T1-aimee-control-web
+              aimee-control-web.cache-to=type=gha,scope=e2e-T1-aimee-control-web,mode=max
+          - topology: T2
+            compose_file: compose.server.yaml
+            cache_set: |
+              aimee-kb.cache-from=type=gha,scope=e2e-T2-aimee-kb
+              aimee-kb.cache-to=type=gha,scope=e2e-T2-aimee-kb,mode=max
+              aimee-server.cache-from=type=gha,scope=e2e-T2-aimee-server
+              aimee-server.cache-to=type=gha,scope=e2e-T2-aimee-server,mode=max
+          - topology: T3
+            compose_file: compose.server-standalone.yaml
+            cache_set: |
+              aimee-server.cache-from=type=gha,scope=e2e-T3-aimee-server
+              aimee-server.cache-to=type=gha,scope=e2e-T3-aimee-server,mode=max
     name: e2e-docker (${{ matrix.topology }})
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
       - name: Runner diagnostics
         run: |
           docker version --format '{{.Server.Version}}'
           docker compose version
+          docker buildx version
           df -h / | tail -1
+      - name: Build topology images with persistent cache
+        uses: docker/bake-action@v7
+        with:
+          source: .
+          files: ${{ matrix.compose_file }}
+          load: true
+          # Each image gets a distinct scope. Sharing one wildcard scope lets
+          # parallel Bake targets overwrite each other's exported cache.
+          set: ${{ matrix.cache_set }}
       - name: Run Docker deploy topology ${{ matrix.topology }}
         # The aimee-server image builds webchat's SPA from its vendored
         # @rakuensoftware/smoothgui dependency — no npm token needed.
+        env:
+          # The Bake step loaded exactly the images named by the compose file.
+          # Keep the smoke scripts' local default intact while avoiding a second
+          # uncached `docker compose build` in CI.
+          AIMEE_E2E_SKIP_BUILD: "1"
         run: scripts/e2e-matrix.sh --only ${{ matrix.topology }}
       - name: Stack logs on failure
         if: failure()
