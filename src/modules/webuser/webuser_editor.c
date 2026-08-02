@@ -1,5 +1,5 @@
 #define _GNU_SOURCE 1
-/* webuser_editor.c — per-webuser code-server supervisor. See webuser_editor.h. */
+/* webuser_editor.c — single-environment code-server supervisor. See header. */
 #include "webuser_editor.h"
 
 #include "aimee.h"           /* MAX_PATH_LEN */
@@ -27,7 +27,8 @@
 
 extern char **environ;
 
-#define PRINCIPAL_MAX 256
+#define PRINCIPAL_MAX  256
+#define EDITOR_ENV_KEY "environment"
 
 typedef struct
 {
@@ -430,7 +431,7 @@ int webuser_editor_ensure(const char *principal, int *out_port, char *err, size_
    pthread_mutex_lock(&g_lock);
    sweep_dead_locked();
 
-   editor_t *e = find_locked(principal);
+   editor_t *e = find_locked(EDITOR_ENV_KEY);
    if (e && port_listening(e->port))
    {
       e->last_active = (long)time(NULL);
@@ -467,7 +468,7 @@ int webuser_editor_ensure(const char *principal, int *out_port, char *err, size_
       return -1;
    }
 
-   snprintf(slot->principal, sizeof(slot->principal), "%s", principal);
+   snprintf(slot->principal, sizeof(slot->principal), "%s", EDITOR_ENV_KEY);
    slot->pid = pid;
    slot->port = port;
    slot->last_active = (long)time(NULL);
@@ -491,7 +492,7 @@ int webuser_editor_ensure(const char *principal, int *out_port, char *err, size_
    if (!ready)
    {
       pthread_mutex_lock(&g_lock);
-      editor_t *cur = find_locked(principal);
+      editor_t *cur = find_locked(EDITOR_ENV_KEY);
       if (cur && cur->pid == pid)
          reap_locked(cur);
       else
@@ -514,7 +515,7 @@ void webuser_editor_touch(const char *principal)
    if (!principal)
       return;
    pthread_mutex_lock(&g_lock);
-   editor_t *e = find_locked(principal);
+   editor_t *e = find_locked(EDITOR_ENV_KEY);
    if (e)
       e->last_active = (long)time(NULL);
    pthread_mutex_unlock(&g_lock);
@@ -525,7 +526,7 @@ void webuser_editor_stop(const char *principal)
    if (!principal)
       return;
    pthread_mutex_lock(&g_lock);
-   editor_t *e = find_locked(principal);
+   editor_t *e = find_locked(EDITOR_ENV_KEY);
    if (e)
       reap_locked(e);
    pthread_mutex_unlock(&g_lock);

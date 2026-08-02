@@ -162,12 +162,12 @@ static int resolve_token(const char *principal, const char *remote_url, const ch
       return 1;
    out[0] = '\0';
 
-   /* 3. The principal's own vaulted personal forge token. */
-   if (principal && principal[0] && git_forge_vault_token(principal, out, cap) == 1 && out[0])
+   /* 3. The environment's vaulted forge token. */
+   if (git_forge_vault_token(principal, out, cap) == 1 && out[0])
       return 1;
    out[0] = '\0';
 
-   /* 4. The server's own git identity (App installation token / AIMEE_FORGE_TOKEN). */
+   /* 4. The server's forge-App identity (AIMEE_FORGE_TOKEN). */
    if (forge_cred_server_identity(out, cap, NULL, 0) == 1 && out[0])
       return 1;
    out[0] = '\0';

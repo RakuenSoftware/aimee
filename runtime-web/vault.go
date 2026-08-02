@@ -1,10 +1,10 @@
 package main
 
-// vault.go: WP-C.2c — webchat wiring for the per-user (`webuser:`) credential
-// vault. The browser holds nothing: the user re-presents their login password to
-// /api/vault/unlock, which the backend forwards to aimee-server with the
-// a kernel-attested UDS X-Aimee-Webuser assertion. aimee-server derives the
-// vault KEK (scrypt) and caches it per webuser. All vault calls go over the
+// vault.go — webchat wiring for the one environment credential vault. The
+// browser holds nothing. The PAM actor is forwarded over the kernel-attested
+// UDS boundary for authorization and audit, never as a credential namespace.
+// Unlock/password endpoints remain compatibility imports for historical actor
+// vaults. All vault calls go over the
 // local /v1 path (v1RequestWebuser) — NEVER the OpenAI proxy (proxyV1),
 // which strips Authorization.
 
@@ -135,7 +135,7 @@ func (s *server) vaultRelayList(w http.ResponseWriter, st int, data []byte, err 
 	w.Write(out)
 }
 
-// POST /api/vault/unlock {password} — derive + cache the user's vault KEK.
+// POST /api/vault/unlock {password} — import/unlock a historical actor vault.
 func (s *server) handleVaultUnlock(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -155,7 +155,7 @@ func (s *server) handleVaultUnlock(w http.ResponseWriter, r *http.Request) {
 	s.vaultRelayStatus(w, st, data, err)
 }
 
-// POST /api/vault/password {old_password,new_password} — re-key on password change.
+// POST /api/vault/password {old_password,new_password} — re-key a historical actor vault.
 func (s *server) handleVaultPassword(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")

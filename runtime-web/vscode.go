@@ -35,16 +35,18 @@ type editorPortEntry struct {
 	expiry time.Time
 }
 
-// editorPorts caches username -> {port, expiry} so we do not call ensure on every
+// editorPorts caches the one environment editor port so we do not call ensure on every
 // asset/WebSocket request. On a dial failure the entry is dropped and re-ensured.
 var editorPorts sync.Map
+
+const editorEnvironmentKey = "environment"
 
 // ensureEditorPort asks aimee-server to (idempotently) start the user's editor
 // and returns its loopback port. Cached for editorPortTTL. force bypasses the
 // cache (used after a dial failure, in case the editor was reaped/respawned).
 func (s *server) ensureEditorPort(ctx context.Context, username string, force bool) (int, int, error) {
 	if !force {
-		if v, ok := editorPorts.Load(username); ok {
+		if v, ok := editorPorts.Load(editorEnvironmentKey); ok {
 			e := v.(editorPortEntry)
 			if time.Now().Before(e.expiry) {
 				return e.port, http.StatusOK, nil
@@ -56,7 +58,7 @@ func (s *server) ensureEditorPort(ctx context.Context, username string, force bo
 		return 0, http.StatusServiceUnavailable, err
 	}
 	if st != http.StatusOK {
-		editorPorts.Delete(username)
+		editorPorts.Delete(editorEnvironmentKey)
 		return 0, st, nil
 	}
 	var up struct {
@@ -66,7 +68,7 @@ func (s *server) ensureEditorPort(ctx context.Context, username string, force bo
 	if json.Unmarshal(data, &up) != nil || up.Port <= 0 {
 		return 0, http.StatusBadGateway, nil
 	}
-	editorPorts.Store(username, editorPortEntry{port: up.Port, expiry: time.Now().Add(editorPortTTL)})
+	editorPorts.Store(editorEnvironmentKey, editorPortEntry{port: up.Port, expiry: time.Now().Add(editorPortTTL)})
 	return up.Port, http.StatusOK, nil
 }
 
@@ -173,8 +175,8 @@ func (s *server) proxyToEditor(w http.ResponseWriter, r *http.Request, username 
 			// The cached port may be stale (editor reaped). Evict ONLY if the cache
 			// still holds the failed port, so we never clobber a fresh port another
 			// goroutine just stored, then report a transient error.
-			if v, ok := editorPorts.Load(username); ok && v.(editorPortEntry).port == port {
-				editorPorts.Delete(username)
+			if v, ok := editorPorts.Load(editorEnvironmentKey); ok && v.(editorPortEntry).port == port {
+				editorPorts.Delete(editorEnvironmentKey)
 			}
 			rw.WriteHeader(http.StatusBadGateway)
 			_, _ = rw.Write([]byte("editor connection failed"))

@@ -3,14 +3,15 @@
 
 #include <stddef.h>
 
-/* webuser_editor — per-webuser code-server supervisor (webchat-git WP-I).
+/* webuser_editor — environment-wide code-server supervisor.
  *
  * aimee-server owns the editor lifecycle because it owns the workspace files AND
  * the sealed-vault credential-injection environment (WP-C/WP-C2). Each webuser
  * gets at most one code-server, bound to 127.0.0.1:<ephemeral-port>, rooted at
  * their scoped workspace (ws_scope_user_root), launched with the vault-backed
  * git env so the integrated terminal + Git view authenticate without ever
- * exposing a credential to the browser. webchat reverse-proxies the /vscode
+ * exposing a credential to the browser. All PAM actors reuse this one editor;
+ * webchat reverse-proxies the /vscode
  * path to the returned port (WP-J); the loopback port is never sent to the
  * browser.
  *
@@ -21,21 +22,22 @@
  * and runs each child hardened (no core dump, no new privs, detached session,
  * stdio to /dev/null). */
 
-#define WEBUSER_EDITOR_MAX 64 /* max concurrent per-user editors */
+#define WEBUSER_EDITOR_MAX 1 /* one editor for the one server environment */
 
-/* Ensure a live code-server for `principal` (must be "webuser:<name>"): spawn
+/* Ensure the live environment code-server for an authenticated `principal`
+ * (must be "webuser:<name>"): spawn
  * one if none is running, otherwise reuse the existing one and refresh its
  * activity timestamp. On success writes the loopback port to *out_port and
  * returns 1. Returns 0 when the editor feature is disabled or unavailable, or -1
  * on error (err filled, NUL-terminated). Thread-safe. */
 int webuser_editor_ensure(const char *principal, int *out_port, char *err, size_t errlen);
 
-/* Refresh the activity timestamp for `principal`'s editor so the idle reaper
+/* Refresh the shared editor activity timestamp so the idle reaper
  * leaves an in-use session alone. Called by the proxy on each request. No-op if
  * the principal has no running editor. Thread-safe. */
 void webuser_editor_touch(const char *principal);
 
-/* Stop and reap `principal`'s editor (e.g. on logout). No-op if none. */
+/* Stop and reap the shared editor. No-op if none. */
 void webuser_editor_stop(const char *principal);
 
 /* Kill every editor idle longer than idle_secs; returns the number reaped.
@@ -61,7 +63,7 @@ void webuser_editor_shutdown(void);
  * code-server binary is resolvable. Exposed for the route layer / tests. */
 int webuser_editor_available(void);
 
-/* Build the sanitized, fully-owned environment a webuser's code-server is
+/* Build the sanitized, fully-owned environment the server code-server is
  * launched with (webchat-git WP-K): a minimal curated base (PATH/LANG/TERM) +
  * HOME=<userroot> + the user's vault-backed git env (GH_TOKEN/GIT_ASKPASS/
  * SSH_AUTH_SOCK when present) + git's on-disk credential cache disabled. It NEVER
