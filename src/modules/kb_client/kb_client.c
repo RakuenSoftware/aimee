@@ -1487,11 +1487,43 @@ static int kb_plain_would_leak(const char *url)
 static const char *kb_client_v1_auth_header(char *buf, size_t buf_len)
 {
    /* The HTTP API can run without auth; include a bearer header only when the
-    * operator provides the matching client-side token. */
+    * operator provides the matching client-side token.
+    *
+    * AIMEE_KB_CLIENT_BEARER_TOKEN is what aimee-server PRESENTS, and is read
+    * first so it can be a scoped `service` credential. It falls back to
+    * AIMEE_KB_API_BEARER_TOKEN — aimee-kb's own inbound token — because that is
+    * what every existing deployment set, and reaching the kb matters more than
+    * the ideal credential shape. But see below: falling back means presenting
+    * the OWNER token, and that is worth saying out loud rather than inheriting
+    * silently. */
    char token[512];
-   if (!buf || buf_len == 0 ||
-       !runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", token, sizeof(token)))
+   if (!buf || buf_len == 0)
       return NULL;
+   int own = runtime_secret_get("AIMEE_KB_CLIENT_BEARER_TOKEN", token, sizeof(token));
+   if (!own && !runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", token, sizeof(token)))
+      return NULL;
+
+   /* An unscoped token IS the install owner on aimee-kb (kb_scope.h): it passes
+    * every administrative gate. aimee-server does not need that — it needs the
+    * data plane — so warn ONCE, naming the remedy, instead of running as owner
+    * without anyone noticing. Not fatal: refusing here would take an upgrading
+    * deployment offline over a configuration preference. */
+   if (strncmp(token, "scope:", 6) != 0)
+   {
+      static int warned = 0;
+      if (!warned)
+      {
+         warned = 1;
+         aimee_log(LOG_WARN, "kb_client",
+                   "presenting an UNSCOPED kb bearer: aimee-server is acting as the aimee-kb "
+                   "install owner and passes every administrative gate. Set "
+                   "AIMEE_KB_CLIENT_BEARER_TOKEN to a scoped service credential "
+                   "(scope:service:<name>:<secret>, minted by the owner) to hold only the "
+                   "data plane%s",
+                   own ? "." : "; currently inheriting AIMEE_KB_API_BEARER_TOKEN.");
+      }
+   }
+
    snprintf(buf, buf_len, "Authorization: Bearer %s", token);
    runtime_secret_wipe(token, sizeof(token));
    return buf;

@@ -841,6 +841,62 @@ static void test_status_uses_v1_api_when_configured(void)
    mock_agent_http_reset();
 }
 
+/* Which credential aimee-server PRESENTS to aimee-kb.
+ *
+ * AIMEE_KB_CLIENT_BEARER_TOKEN is the server's own outbound credential and wins,
+ * so it can be a scoped `service` token that holds only the data plane. It falls
+ * back to AIMEE_KB_API_BEARER_TOKEN — aimee-kb's inbound token — because that is
+ * what existing deployments set; without the fallback an upgrade would silently
+ * stop reaching the kb. The fallback means presenting the OWNER credential, which
+ * the client warns about; this pins the SELECTION, which is what decides
+ * authority. */
+static char g_seen_auth[512];
+static int auth_capture_handler(const char *url, const char *auth_header, const char *body,
+                                char **response_buf, int timeout_ms, const char *extra_headers)
+{
+   (void)url;
+   (void)body;
+   (void)timeout_ms;
+   (void)extra_headers;
+   snprintf(g_seen_auth, sizeof(g_seen_auth), "%s", auth_header ? auth_header : "");
+   if (response_buf)
+      *response_buf = strdup("{\"status\":\"ok\"}");
+   return 0;
+}
+
+static void test_client_bearer_selection(void)
+{
+   mock_agent_http_reset();
+   mock_agent_http_set_post_handler(auth_capture_handler);
+   assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010", 1) == 0);
+
+   /* Only the inbound token set: fall back to it, so an upgrade keeps working. */
+   runtime_secret_remove("AIMEE_KB_CLIENT_BEARER_TOKEN");
+   assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", "owner-secret") == 0);
+   g_seen_auth[0] = '\0';
+   free(kb_client_reconcile_json(1));
+   assert(strstr(g_seen_auth, "owner-secret") != NULL);
+
+   /* The server's own credential wins when set, so a scoped service token is
+    * what actually reaches the wire. */
+   assert(runtime_secret_store("AIMEE_KB_CLIENT_BEARER_TOKEN", "scope:service:aimee-server:svc") ==
+          0);
+   g_seen_auth[0] = '\0';
+   free(kb_client_reconcile_json(1));
+   assert(strstr(g_seen_auth, "scope:service:aimee-server:svc") != NULL);
+   assert(strstr(g_seen_auth, "owner-secret") == NULL);
+
+   /* Neither set: no Authorization header at all (the kb may run auth-off). */
+   runtime_secret_remove("AIMEE_KB_CLIENT_BEARER_TOKEN");
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
+   g_seen_auth[0] = '\0';
+   free(kb_client_reconcile_json(1));
+   assert(g_seen_auth[0] == '\0');
+
+   unsetenv("AIMEE_KB_API_URL");
+   mock_agent_http_reset();
+}
+
 static void test_maintenance_uses_v1_api_when_configured(void)
 {
    g_post_seen = 0;
@@ -1255,6 +1311,7 @@ int main(void)
    test_mtls_non_2xx_is_not_returned_as_valid_json();
    test_mtls_raw_post_preserves_content_type_and_status();
    test_index_scan_uses_v1_api_when_configured();
+   test_client_bearer_selection();
    printf("test_kb_client_search: ok\n");
    return 0;
 }
