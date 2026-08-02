@@ -1233,18 +1233,6 @@ void pt_print_index_deps(const char *method, cJSON *resp)
 {
    print_index_deps(resp);
 }
-void pt_print_repo_trust(const char *method, cJSON *resp)
-{
-   (void)method;
-   cJSON *changed = cJSON_GetObjectItemCaseSensitive(resp, "changed");
-   const char *prior = json_str(resp, "prior_trust");
-   const char *now = json_str(resp, "new_trust");
-   if (cJSON_IsBool(changed) && !cJSON_IsTrue(changed))
-      printf("repo %s: trust already %s (no change)\n", json_str(resp, "project"), now);
-   else
-      printf("repo %s: trust %s -> %s\n", json_str(resp, "project"), prior[0] ? prior : "(unset)",
-             now);
-}
 void pt_print_graph_sync_code(const char *method, cJSON *resp)
 {
    printf("graph sync-code: project=%s generation=%s edges=%s\n", json_str(resp, "project"),

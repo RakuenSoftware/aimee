@@ -662,7 +662,7 @@ static int kb_bootstrap_db2(int json_output)
 static int kb_cmd_enroll(int argc, char **argv)
 {
    const char *host = NULL;
-   const char *scope = "global";
+   const char *scope = NULL;
    int port = 0;
    for (int i = 2; i < argc; i++)
    {
@@ -678,13 +678,22 @@ static int kb_cmd_enroll(int argc, char **argv)
          return 1;
       }
    }
-   if (!host || !host[0] || port <= 0 || port > 65535)
+   if (!host || !host[0] || port <= 0 || port > 65535 || !scope || !scope[0])
    {
-      fprintf(stderr, "Usage: aimee-kb enroll --host=HOST --port=N [--scope=SCOPE]\n"
+      /* --scope is REQUIRED. It used to default to "global", which has no ':'
+       * and therefore mints an UNSCOPED certificate — the install owner, past
+       * every administrative gate. A credential that powerful should never be
+       * what you get for not passing a flag. */
+      fprintf(stderr, "Usage: aimee-kb enroll --host=HOST --port=N --scope=SCOPE\n"
                       "  Mints a single-use enrollment token and prints the aimee:// "
                       "connection string\n"
-                      "  for a client. HOST/PORT are the kb's externally reachable "
-                      "address. SCOPE defaults to 'global'.\n");
+                      "  for a client. HOST/PORT are the kb's externally reachable address.\n"
+                      "\n"
+                      "  SCOPE is required and decides how much the client may reach:\n"
+                      "    <kind>:<id>   a scoped client, e.g. project:acme or "
+                      "service:aimee-server\n"
+                      "    a bare word   NO scope: the install owner, past every "
+                      "administrative gate\n");
       return 1;
    }
 

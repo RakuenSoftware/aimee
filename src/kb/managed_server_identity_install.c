@@ -1,3 +1,4 @@
+#include "kb_scope.h" /* KB_SERVER_CLIENT_SCOPE */
 #include "managed_server_identity_install.h"
 
 #include "managed_server_identity.h"
@@ -94,7 +95,7 @@ static int pending_registry(const kb_principal_t *owner,
        .operation = identity->operation,
        .server_id = identity->server_id,
        .endpoint = identity->endpoint,
-       .client_cn = "p5-server-client",
+       .client_cn = KB_SERVER_CLIENT_SCOPE,
        .management_cn = "p5-server-management",
        .client_csr_digest = identity->client_csr_digest,
        .management_csr_digest = identity->management_csr_digest,

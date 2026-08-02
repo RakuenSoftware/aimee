@@ -148,12 +148,6 @@ int server_http_gzip_peek(void);
 /* PC2: CI webhook route handler (defined in server_ci_route.c). */
 int rh_dev_ci_event(const route_req_t *rq, char *resp, int cap);
 
-/* Write-tier grant administration (server/server_http_grant_routes.c). In their own TU
- * because the route table's file has a 2500-line ceiling. UDS-only — see
- * v1_route_requires_uds. */
-int rh_grant_set(const route_req_t *rq, char *resp, int cap);
-int rh_grant_revoke(const route_req_t *rq, char *resp, int cap);
-int rh_grant_list(const route_req_t *rq, char *resp, int cap);
 
 /* Workflow Actions lifecycle + project-file-browser route adapters + the shared
  * unsigned-long query-param helper — defined in server_http_config_routes.c

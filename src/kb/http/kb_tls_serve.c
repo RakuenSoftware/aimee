@@ -480,15 +480,19 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
 
       /* Derive the caller's scope from the verified client certificate. A scoped
        * CN "<kind>:<id>" becomes a synthetic scoped credential the router enforces
-       * via verify-then-trust; "global"/owner (no ':') becomes an unscoped
+       * via verify-then-trust; a bare word (no ':') becomes an unscoped
        * credential, which the router resolves to the owner actor.
        *
-       * The unscoped half is load-bearing for the wizard's p5-server-client
-       * workload certificate. Leaving synth empty there let ordinary read routes
-       * through (they need no actor) but made every tenant/admin route fail 401,
-       * including the UDS-only `aimee kb grant set` bootstrap path. The certificate
-       * had already passed TLS verification and the primary enrollment lookup, so
-       * manufacture the same request-local verifier input for both scope shapes. */
+       * aimee-server no longer relies on the unscoped half. Its CN is
+       * KB_SERVER_CLIENT_SCOPE, a `service` scope, so it arrives as a data-plane
+       * caller and every administrative gate refuses it. That was previously
+       * impossible because the server proxied two owner-only routes — write-tier
+       * grants and repo trust — and both have been removed.
+       *
+       * The unscoped half remains for an operator credential minted with a bare
+       * scope. Both shapes still manufacture the same request-local verifier
+       * input: the certificate has already passed TLS verification and the
+       * primary enrollment lookup by then. */
       char cn[128] = "";
       char synth[160] = "", authhdr[180] = "";
       int have_cert = (kb_tls_peer_cn(ssl, cn, sizeof(cn)) == 0);

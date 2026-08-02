@@ -64,7 +64,7 @@ VALUES('p5c2c-server','p5c2c-client','p5c2c-mgmt',9752201,'https://p5c2c.invalid
  'p5c2c-issuer','01',repeat('a',64));
 INSERT INTO kb_enrollments(scope,fingerprint,serial,state,expires_at,revoked_at,legacy,
  cert_issuer,cert_serial_norm,authority_id)
-VALUES('p5-server-client',repeat('a',64),'01','active','2999-01-01 00:00:00+00','',0,
+VALUES('service:aimee-server',repeat('a',64),'01','active','2999-01-01 00:00:00+00','',0,
  'p5c2c-issuer','01',repeat('a',32));
 UPDATE kb_vault_control SET sealed=false,maintenance_kind='',maintenance_id=''
  WHERE singleton=1;
@@ -111,7 +111,7 @@ DO $$ BEGIN
  EXCEPTION WHEN SQLSTATE '28000' THEN NULL;
  END;
 END $$;
-UPDATE kb_enrollments SET scope='p5-server-client' WHERE fingerprint=repeat('a',64);
+UPDATE kb_enrollments SET scope='service:aimee-server' WHERE fingerprint=repeat('a',64);
 
 UPDATE kb_enrollments SET expires_at='2000-01-01 00:00:00+00' WHERE fingerprint=repeat('a',64);
 DO $$ BEGIN
@@ -137,7 +137,7 @@ END $$;
 UPDATE kb_vault_control SET sealed=false,maintenance_kind='',maintenance_id='' WHERE singleton=1;
 
 UPDATE kb_enrollments SET revoked_at='2026-07-22',state='revoked'
- WHERE scope='p5-server-client' AND fingerprint=repeat('a',64);
+ WHERE scope='service:aimee-server' AND fingerprint=repeat('a',64);
 DO $$ BEGIN
  BEGIN
   PERFORM * FROM kb_management_jwks_runtime_fetch('p5c2c-issuer','01',repeat('a',64));

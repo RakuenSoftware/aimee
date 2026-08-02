@@ -271,7 +271,7 @@ VALUES('p7-jwks-reader','p7-jwks-reader-client','p7-jwks-reader-mgmt',970721,
  'https://p7-jwks-reader.invalid','active','p7-jwks-reader-issuer','01',repeat('c',64));
 INSERT INTO kb_enrollments(scope,fingerprint,serial,state,expires_at,revoked_at,legacy,
  cert_issuer,cert_serial_norm,authority_id)
-VALUES('p5-server-client',repeat('c',64),'01','active','2999-01-01 00:00:00+00','',0,
+VALUES('service:aimee-server',repeat('c',64),'01','active','2999-01-01 00:00:00+00','',0,
  'p7-jwks-reader-issuer','01',repeat('c',32));
 
 UPDATE kb_vault_control SET sealed=true,maintenance_kind='reseal',maintenance_id='op-guard'

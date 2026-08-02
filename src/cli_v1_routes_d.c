@@ -69,7 +69,6 @@ static const struct
     {"index.structure", pt_print_index_structure},
     {"index.find_callers", pt_print_index_find_callers},
     {"index.deps", pt_print_index_deps},
-    {"repo.trust", pt_print_repo_trust},
     {"graph.sync_code", pt_print_graph_sync_code},
     {"workspace.add", pt_print_workspace_add},
     {"workspace.list", pt_print_workspace_list},
@@ -721,7 +720,6 @@ static const struct
     {"provider.test", "POST", "/v1/provider/test"},
     {"ranker.export_view", "GET", "/v1/intelligence/ranker/export-view"},
     {"ranker.fit", "POST", "/v1/intelligence/ranker/fit"},
-    {"repo.trust", "POST", "/v1/repo/trust"},
     {"rules.delete", "POST", "/v1/rules/delete"},
     {"server.health", "GET", "/v1/server/health"},
     {"server.info", "GET", "/v1/server/info"},
@@ -833,13 +831,9 @@ const char *cli_v1_route_for_method(const char *method, const char **verb_out)
         * them; POST on all three because the thin client marshals flags into a body. The
         * server refuses these over TCP (v1_route_requires_uds), so a remote endpoint fails
         * there rather than here. */
-       {"kb.grant.set", "POST", "/v1/grants/write-tier/set"},
-       {"kb.grant.revoke", "POST", "/v1/grants/write-tier/revoke"},
-       {"kb.grant.list", "POST", "/v1/grants/write-tier/list"},
        /* Same route as list: `show` is that listing filtered to one subject, so the row shape
         * has one definition. Only the METHOD differs, so the marshaller can require a
         * subject — without that separation, `show` with no subject silently lists everything. */
-       {"kb.grant.show", "POST", "/v1/grants/write-tier/list"},
        {"kb.health", "GET", "/v1/kb/status"},
        {"kb.ingest.status", "GET", "/v1/kb/ingest/status"},
        {"kb.status", "GET", "/v1/kb/status"},

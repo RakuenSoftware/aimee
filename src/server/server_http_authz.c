@@ -128,31 +128,20 @@ static int v1_route_tcp_exempt(const char *method, const char *path)
    return 0;
 }
 
-/* Routes reachable ONLY over the local UDS listener — never over TCP, whatever the bearer
- * and whatever aimee.api.remote_writes says.
+/* No /v1 route is UDS-only any more.
  *
- * NOT to be confused with v1_route_is_local_only, whose name is historical and which
- * actually reports whether a route dispatches a data-write op. Nothing before this
- * expressed "local transport only": the tier gate below lets a TCP bearer with
- * remote_writes=full reach every privileged route, and server_http_conn_caps hands such a
- * caller CAPS_ALL, so no capability distinguishes UDS from a fully-trusted TCP peer.
- *
- * Write-tier grant administration needs that distinction. A remote caller reaching it would
- * already hold a write tier; if that were enough to administer grants, anyone with `full`
- * could widen their own access and the tier system would be decorative. Restricting this
- * surface costs nothing because it has no remote users — and it does NOT alter kb's own
- * rule, which still requires admin or team-lead authority. Two independent checks, and
- * neither is the whole thing.
- *
- * §7 of per-user-remote-writes-authz.md already makes the local UDS operator the
- * un-lockout-able root of trust; this is that operator's surface and no one else's. */
+ * The family this guarded — /v1/grants/write-tier — is gone: aimee-server no
+ * longer proxies write-tier grant administration. That is an operator action
+ * against aimee-kb, where the DB layer's admin-or-team-lead RLS check is the
+ * authority. Proxying it meant aimee-server needed an administrative identity on
+ * aimee-kb, which is precisely what a single-tenant data-plane service should
+ * not hold. Kept as a seam (returning 0) rather than deleted, so a future
+ * operator-only route has somewhere obvious to declare itself. */
 int v1_route_requires_uds(const char *method, const char *path)
 {
-   if (!method || !path)
-      return 0;
-   /* Prefix, so every current and future verb under the family inherits the restriction
-    * rather than each one needing to remember it. */
-   return strncmp(path, "/v1/grants/write-tier", 21) == 0;
+   (void)method;
+   (void)path;
+   return 0;
 }
 
 int server_http_route_allowed_caps(int is_tcp, uint32_t have, const char *method, const char *path,
