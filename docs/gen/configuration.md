@@ -616,7 +616,10 @@ Standard and third-party environment variables aimee honors (scanned non-`AIMEE_
 |----------|-------------|
 | `LLAMA_HOST` | llama.cpp server host/URL. |
 | `OLLAMA_HOST` | Ollama server host/URL for local models. |
+| `SYNTHESIS_CA_FILE` | CA that verifies the synthesis sidecar's certificate on the kb -> aimee-llm hop. REPLACES the system trust store for that endpoint, so set it only for a sidecar the kb's own CA issued. |
+| `SYNTHESIS_CERT_FILE` | Client certificate the kb presents to the synthesis sidecar, whose terminator requires one. Offered only to the host:port `SYNTHESIS_ENDPOINT` names. |
 | `SYNTHESIS_ENDPOINT` | OpenAI-compatible base URL used by the generic llm-chat sidecar. |
+| `SYNTHESIS_KEY_FILE` | Private key for `SYNTHESIS_CERT_FILE`. |
 | `SYNTHESIS_MODEL` | Model requested by the generic llm-chat sidecar. |
 
 ### Network / proxy
