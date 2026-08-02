@@ -38,28 +38,28 @@ CODE = {
     "governance": [
         # kind == "rename": the basename genuinely changed, so also_known_as holds.
         {"fact": "rename",
-         "text": "{old_base} was renamed to {new_base} in {repo}.",
+         "text": "In {repo}, {old_base} was renamed to {new_base}.",
          "gold": [{"s": "{old_base}", "r": "also_known_as", "o": "{new_base}"}]},
         {"fact": "rename",
-         "text": "In {repo} we now call {old_base} {new_base}.",
+         "text": "In {repo}, {old_base} is now called {new_base}.",
          "gold": [{"s": "{old_base}", "r": "also_known_as", "o": "{new_base}"}]},
         {"fact": "rename",
          "text": "{new_base} is the new name for {old_base}.",
          "gold": [{"s": "{old_base}", "r": "also_known_as", "o": "{new_base}"}]},
         {"fact": "version",
-         "text": "{new_ver} supersedes {old_ver} in {repo}.",
+         "text": "In {repo}, {new_ver} supersedes {old_ver}.",
          "gold": [{"s": "{new_ver}", "r": "supersedes", "o": "{old_ver}"}]},
         {"fact": "version",
-         "text": "{repo} moved from {old_ver} to {new_ver}.",
+         "text": "In {repo}, {new_ver} replaced {old_ver}.",
          "gold": [{"s": "{new_ver}", "r": "supersedes", "o": "{old_ver}"}]},
         {"fact": "version",
          "text": "We cut {new_ver} of {repo}, replacing {old_ver}.",
          "gold": [{"s": "{new_ver}", "r": "supersedes", "o": "{old_ver}"}]},
         {"fact": "version",
-         "text": "{repo} is on {new_ver} now; {old_ver} is retired.",
+         "text": "{new_ver} is current in {repo} now; {old_ver} is retired.",
          "gold": [{"s": "{new_ver}", "r": "supersedes", "o": "{old_ver}"}]},
         {"fact": "version",
-         "text": "{old_ver} of {repo} was superseded by {new_ver}.",
+         "text": "For {repo}, {new_ver} supersedes {old_ver}.",
          "gold": [{"s": "{new_ver}", "r": "supersedes", "o": "{old_ver}"}]},
     ],
     "third_person": [
@@ -68,17 +68,19 @@ CODE = {
         # was — the bug that 1,609 of 1,758 detected path changes would have
         # introduced if moves and renames were not separated.
         {"fact": "move",
-         "text": "{base} now lives in {new_dir} in {repo}.",
+         "text": "In {repo}, {base} now lives in {new_dir}.",
          "gold": [{"s": "{base}", "r": "located_in", "o": "{new_dir}"}]},
         {"fact": "move",
-         "text": "In {repo}, {base} sits under {new_dir} these days.",
+         "text": "In {repo} these days, {base} sits under {new_dir}.",
          "gold": [{"s": "{base}", "r": "located_in", "o": "{new_dir}"}]},
         {"fact": "authorship",
          "text": "{person} contributes to {repo}.",
-         "gold": [{"s": "{person}", "r": "member_of", "o": "{repo}"}]},
+         "gold": [{"s": "{person}", "r": "member_of", "o": "{repo}"}],
+         "alt": [["contributes_to", "contributor_to"]]},
         {"fact": "authorship",
-         "text": "{person} is one of the {repo} maintainers.",
-         "gold": [{"s": "{person}", "r": "member_of", "o": "{repo}"}]},
+         "text": "{person} is on the {repo} team.",
+         "gold": [{"s": "{person}", "r": "member_of", "o": "{repo}"}],
+         "alt": [["contributes_to", "contributor_to"]]},
     ],
     "multi_fact": [
         {"fact": "move",
@@ -89,7 +91,7 @@ CODE = {
          "gold": [{"s": "{person}", "r": "member_of", "o": "{repo}"},
                   {"s": "{person}", "r": "member_of", "o": "{repo2}"}]},
         {"fact": "move",
-         "text": "{base} moved from {old_dir} to {new_dir} in {repo}.",
+         "text": "In {repo}, {base} moved from {old_dir} to {new_dir}.",
          "gold": [{"s": "{base}", "r": "located_in", "o": "{new_dir}"}]},
         # More move-based shapes than authorship2 ones on purpose: the
         # authorship2 pool needs a person with >=3 commits in >=2 repos and is
@@ -100,10 +102,10 @@ CODE = {
          "text": "In {repo}, {base} was shifted out of {old_dir} into {new_dir}.",
          "gold": [{"s": "{base}", "r": "located_in", "o": "{new_dir}"}]},
         {"fact": "move",
-         "text": "{repo} keeps {base} in {new_dir} now, not {old_dir}.",
+         "text": "In {repo}, {base} is no longer in {old_dir} but in {new_dir}.",
          "gold": [{"s": "{base}", "r": "located_in", "o": "{new_dir}"}]},
         {"fact": "move",
-         "text": "We relocated {base} to {new_dir} in {repo}.",
+         "text": "In {repo}, we relocated {base} to {new_dir}.",
          "gold": [{"s": "{base}", "r": "located_in", "o": "{new_dir}"}]},
         {"fact": "authorship2",
          "text": "{person} works on both {repo} and {repo2}.",
@@ -118,7 +120,7 @@ CODE = {
          "gold": [{"s": "{old_base}", "r": "also_known_as", "o": "{new_base}"},
                   {"s": "{new_base}", "r": "located_in", "o": "{repo}"}]},
         {"fact": "rename",
-         "text": "{repo} renamed {old_base} to {new_base} last cycle.",
+         "text": "In {repo} last cycle, {old_base} was renamed to {new_base}.",
          "gold": [{"s": "{old_base}", "r": "also_known_as", "o": "{new_base}"},
                   {"s": "{new_base}", "r": "located_in", "o": "{repo}"}]},
         # `move` is the largest code pool by an order of magnitude (13,580 vs
@@ -132,7 +134,7 @@ CODE = {
          "text": "In {repo}, {base} was reorganised from {old_dir} into {new_dir}.",
          "gold": [{"s": "{base}", "r": "located_in", "o": "{new_dir}"}]},
         {"fact": "move",
-         "text": "{repo} keeps {base} under {new_dir} following the {old_dir} split.",
+         "text": "In {repo}, after the {old_dir} split, {base} lives under {new_dir}.",
          "gold": [{"s": "{base}", "r": "located_in", "o": "{new_dir}"}]},
     ],
     "negation": [
@@ -190,7 +192,7 @@ BUSINESS = {
     "first_person": [
         {"text": "I work for {company} now.",
          "gold": [{"s": "user", "r": "works_for", "o": "{company}"}]},
-        {"text": "I'm the {role} at {company}.",
+        {"text": "At {company}, I'm the {role}.",
          "gold": [{"s": "user", "r": "has_role", "o": "{role}"},
                   {"s": "user", "r": "works_for", "o": "{company}"}]},
         {"text": "Joined {company} as {role} this month.",
@@ -202,7 +204,7 @@ BUSINESS = {
     "third_person": [
         {"text": "{person} works for {company}.",
          "gold": [{"s": "{person}", "r": "works_for", "o": "{company}"}]},
-        {"text": "{person} is the {role} at {company}.",
+        {"text": "At {company}, {person} is the {role}.",
          "gold": [{"s": "{person}", "r": "has_role", "o": "{role}"},
                   {"s": "{person}", "r": "works_for", "o": "{company}"}]},
         {"text": "{company} is based in {city}.",
@@ -211,14 +213,14 @@ BUSINESS = {
          "gold": [{"s": "{person}", "r": "member_of", "o": "{team}"}]},
     ],
     "multi_fact": [
-        {"text": "{person} moved to the {team} at {company}.",
+        {"text": "At {company}, {person} moved to the {team}.",
          "gold": [{"s": "{person}", "r": "member_of", "o": "{team}"},
                   {"s": "{person}", "r": "works_for", "o": "{company}"}]},
         {"text": "{company} is in {city}; {person} is the {role} there.",
          "gold": [{"s": "{company}", "r": "located_in", "o": "{city}"},
                   {"s": "{person}", "r": "has_role", "o": "{role}"},
                   {"s": "{person}", "r": "works_for", "o": "{company}"}]},
-        {"text": "{person} is {role} at {company}, which is based in {city}.",
+        {"text": "{company} is based in {city}, and {person} is its {role}.",
          "gold": [{"s": "{person}", "r": "has_role", "o": "{role}"},
                   {"s": "{person}", "r": "works_for", "o": "{company}"},
                   {"s": "{company}", "r": "located_in", "o": "{city}"}]},
@@ -231,13 +233,13 @@ BUSINESS = {
         {"text": "The {policy} was decided by the {team}.",
          "gold": [{"s": "{policy}", "r": "decided_by", "o": "{team}"}]},
         {"text": "{team} owns the {policy}.",
-         "gold": [{"s": "{policy}", "r": "decided_by", "o": "{team}"}]},
+         "gold": [{"s": "{team}", "r": "owns", "o": "{policy}"}],
+         "alt": [["maintains", "responsible_for"]]},
         {"text": "{person} took the {policy} to the {team} for sign-off.",
          "gold": [{"s": "{policy}", "r": "decided_by", "o": "{team}"}]},
-        {"text": "The {company} exception to the {policy} was signed off by "
-                 "the {team}.",
+        {"text": "The {policy} was signed off by the {team}.",
          "gold": [{"s": "{policy}", "r": "decided_by", "o": "{team}"}]},
-        {"text": "{policy} changes go through {person} and the {team}.",
+        {"text": "The {policy} is set by the {team}.",
          "gold": [{"s": "{policy}", "r": "decided_by", "o": "{team}"}]},
         # The gold names both policies in full, so the note must too. An
         # earlier version said "the {prev_year} one" and asserted a gold entity
@@ -270,7 +272,7 @@ BUSINESS = {
     "implicit": [
         {"text": "Sent the quarterly report to {person} at {company} again.",
          "gold": [{"s": "{person}", "r": "works_for", "o": "{company}"}]},
-        {"text": "Picked {person} up from the {city} office.",
+        {"text": "Picked {person} up from the office in {city}.",
          "gold": [{"s": "{person}", "r": "located_in", "o": "{city}"}]},
         {"text": "Copied {person} in, since they run the {team}.",
          "gold": [{"s": "{person}", "r": "member_of", "o": "{team}"}]},
@@ -296,24 +298,40 @@ BUSINESS = {
     ],
 }
 
+# THE COUNTERPARTY TOKEN IS "user", NOT "us". The prompt documents exactly one
+# convention — 'use "user" for the note\'s author when it is first-person' — and
+# says nothing about "us". Gold that reads `Acme customer_of us` is therefore
+# unproducible: across 217 such notes in the v3 10k run the model emitted "us"
+# ZERO times, and said "user" instead. Every one was a guaranteed miss.
+#
+# check_diversity's groundedness gate could not catch it either, because it
+# SKIPS "user" and "us" as conventions rather than requiring them in the text.
+# A convention the prompt does not define is not a convention, it is a trap.
 SALES = {
     "third_person": [
         {"text": "{company} signed as a customer.",
-         "gold": [{"s": "{company}", "r": "customer_of", "o": "us"}]},
+         "gold": [{"s": "{company}", "r": "customer_of", "o": "user"}],
+         "alt": [["client_of", "is_customer_of"]]},
         {"text": "{company} is on the {tier} tier.",
-         "gold": [{"s": "{company}", "r": "subscription_tier", "o": "{tier}"}]},
+         "gold": [{"s": "{company}", "r": "subscription_tier", "o": "{tier}"}],
+         "alt": [["tier", "has_tier", "on_tier"]]},
         {"text": "{company} bought {product}.",
-         "gold": [{"s": "{company}", "r": "purchased", "o": "{product}"}]},
+         "gold": [{"s": "{company}", "r": "purchased", "o": "{product}"}],
+         "alt": [["bought", "uses", "licenses"]]},
     ],
     "first_person": [
         {"text": "I own the {company} account now.",
-         "gold": [{"s": "user", "r": "owns_account", "o": "{company}"}]},
+         "gold": [{"s": "user", "r": "owns_account", "o": "{company}"}],
+         "alt": [["manages_account", "account_owner_of"]]},
         {"text": "I'm running point on the {company} renewal.",
-         "gold": [{"s": "user", "r": "owns_account", "o": "{company}"}]},
+         "gold": [{"s": "user", "r": "owns_account", "o": "{company}"}],
+         "alt": [["manages_account", "account_owner_of"]]},
         {"text": "{company} is mine now that {person} has moved on.",
-         "gold": [{"s": "user", "r": "owns_account", "o": "{company}"}]},
+         "gold": [{"s": "user", "r": "owns_account", "o": "{company}"}],
+         "alt": [["manages_account", "account_owner_of"]]},
         {"text": "I picked up {company} this quarter.",
-         "gold": [{"s": "user", "r": "owns_account", "o": "{company}"}]},
+         "gold": [{"s": "user", "r": "owns_account", "o": "{company}"}],
+         "alt": [["manages_account", "account_owner_of"]]},
     ],
     # A novel-predicate note must admit NO reasonable seed relation. The prompt
     # tells the model to prefer a canonical predicate "when one reasonably
@@ -348,20 +366,26 @@ SALES = {
          "alt": [["reviews", "inspects"]]},
     ],
     "multi_fact": [
+        # "runs" is not "purchased" — a company can run software it did not buy.
+        # The minted predicate follows the sentence.
         {"text": "{company} runs {product} out of {city}.",
-         "gold": [{"s": "{company}", "r": "purchased", "o": "{product}"},
-                  {"s": "{company}", "r": "located_in", "o": "{city}"}]},
+         "gold": [{"s": "{company}", "r": "runs", "o": "{product}"},
+                  {"s": "{company}", "r": "located_in", "o": "{city}"}],
+         "alt": [["uses", "operates"], []]},
         {"text": "{person} is {role} at {company} and owns the {contract}.",
          "gold": [{"s": "{person}", "r": "has_role", "o": "{role}"},
                   {"s": "{person}", "r": "works_for", "o": "{company}"}]},
         {"text": "{company} is a customer, based in {city}, on the {tier} tier.",
-         "gold": [{"s": "{company}", "r": "customer_of", "o": "us"},
+         "gold": [{"s": "{company}", "r": "customer_of", "o": "user"},
                   {"s": "{company}", "r": "located_in", "o": "{city}"},
-                  {"s": "{company}", "r": "subscription_tier", "o": "{tier}"}]},
+                  {"s": "{company}", "r": "subscription_tier", "o": "{tier}"}],
+         "alt": [["client_of", "is_customer_of"], [],
+                 ["tier", "has_tier", "on_tier"]]},
         {"text": "{person} at {company} handles the {contract}, which renews on "
                  "{renews_on}.",
          "gold": [{"s": "{person}", "r": "works_for", "o": "{company}"},
-                  {"s": "{contract}", "r": "renews_on", "o": "{renews_on}"}]},
+                  {"s": "{contract}", "r": "renews_on", "o": "{renews_on}"}],
+         "alt": [[], ["renewal_date", "renews", "expires_on"]]},
     ],
     "negation": [
         {"text": "{company} did not renew this year.", "gold": []},
@@ -383,11 +407,13 @@ SALES = {
                  "this quarter.",
          "gold": [{"s": "{person}", "r": "works_for", "o": "{company}"}]},
         {"text": "Invoiced {company} for the {product} seats again.",
-         "gold": [{"s": "{company}", "r": "purchased", "o": "{product}"}]},
+         "gold": [{"s": "{company}", "r": "purchased", "o": "{product}"}],
+         "alt": [["bought", "uses", "licenses"]]},
         {"text": "{person} approved the {company} order, as usual.",
          "gold": [{"s": "{person}", "r": "works_for", "o": "{company}"}]},
         {"text": "Renewed {company} onto {tier} for another year.",
-         "gold": [{"s": "{company}", "r": "subscription_tier", "o": "{tier}"}]},
+         "gold": [{"s": "{company}", "r": "subscription_tier", "o": "{tier}"}],
+         "alt": [["tier", "has_tier", "on_tier"]]},
     ],
     # Every template here must be able to render MANY distinct notes. A shape
     # keyed only on {tier} can produce five, then caps out and hands its share to

@@ -176,13 +176,28 @@ static const rel_type_def_t SEED_ONTOLOGY[] = {
      * exemplar — a stale alias actively misleads, so a correction tombstones it
      * (suppress + supersede, still retained) rather than archiving it inert.
      * Tail is ANY (the alias label may be free-form). */
+    /* SYMMETRIC. If X is also known as Y then Y is also known as X — this is the
+     * identity relation, and an alias that only resolves in one direction is the
+     * one thing it must not be. It was declared asymmetric, so `A also_known_as
+     * B` and `B also_known_as A` were stored as two unrelated edges and a lookup
+     * on one alias could not surface the other. Measured on the tier-A 10k run:
+     * 50 extractions stated the pair in the opposite order and were counted
+     * wrong, which is how this surfaced.
+     *
+     * head_kinds must equal tail_kinds for a symmetric type — rel_types_validate
+     * FAILS the build otherwise — and the head was NODE_PERSON while the tail was
+     * NODE_OTHER. Aliases are not person-only in practice: the benchmark aliases
+     * files and versions, and kb_memory_facts coerces a rejected kind to
+     * head_kinds[0], so a person-only head silently retyped every file alias as a
+     * person. NODE_OTHER on both sides is both what symmetry requires and what
+     * the data already was. */
     {"also_known_as",
-     {NODE_PERSON},
+     {NODE_OTHER},
      1,
      {NODE_OTHER},
      1,
-     0,
-     NULL,
+     1,
+     "also_known_as",
      CORR_HARD_DELETE,
      "identity",
      SENS_NORMAL,

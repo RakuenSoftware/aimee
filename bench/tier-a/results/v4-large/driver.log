@@ -1,0 +1,3 @@
+[07:24:04Z] === overnight 10k start; gold=/home/virant/dev/aimee/.aimee/worktrees/b94c9263-317c099512d045a7/main/bench/tier-a/data/corpora/v4/gold_large.jsonl expect=10000 ===
+[07:24:04Z] START E4B.UD-Q4_K_XL on 192.168.1.253
+[07:24:04Z] START E2B.UD-Q4_K_XL on 192.168.1.254

@@ -178,6 +178,30 @@ SCORING_CONVERSES = {
     "superseded_by": "supersedes",
     "employs": "works_for",
     "works_for": "employs",
+    # Converses of MINTED predicates, which the ontology cannot declare because
+    # they are not seed types. Measured on the 10k run: 75 predictions stated
+    # `owner_of` with the arguments reversed against gold's `owns_account`, and
+    # 27 stated `owns` reversed against `decided_by`. Those are the same fact
+    # said the other way round, and scoring them wrong measures direction of
+    # phrasing rather than extraction.
+    #
+    # NOT added: supersedes reversed against itself. v2 superseding v1 is not v1
+    # superseding v2 — 29 predictions did exactly that and they are genuinely
+    # wrong. Symmetry is a property of specific predicates, not a blanket excuse
+    # for argument order.
+    "owns_account": "owner_of",
+    "owner_of": "owns_account",
+    "owns_account_of": "owns_account",
+    "manages_account": "account_managed_by",
+    "account_managed_by": "manages_account",
+    "owns": "owned_by",
+    "owned_by": "owns",
+    "customer_of": "supplies",
+    "supplies": "customer_of",
+    "member_of": "has_member",
+    "has_member": "member_of",
+    "located_in": "contains",
+    "contains": "located_in",
 }
 _EQUIV = {}
 for _grp in EQUIV_PREDICATES:
