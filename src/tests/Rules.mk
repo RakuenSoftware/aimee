@@ -97,6 +97,8 @@ TEST_MCP_CLIENT_OBJS = $(OBJDIR)/modules/protocols/mcp/mcp_client.o \
                        $(OBJDIR)/cJSON.o \
                        $(PLATFORM_BASIC_OBJS)
 
+PG_TEST_CORE_OBJS = $(filter-out $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o,$(TEST_CORE_OBJS))
+
 TEST_DATA_OBJS = $(TEST_CORE_OBJS) $(OBJDIR)/rel_types.o $(OBJDIR)/modules/memory/memory_fact_gate.o $(OBJDIR)/modules/memory/memory_extract_patterns.o $(OBJDIR)/db2/rel_types_store.o $(OBJDIR)/db2/entity_registry.o $(OBJDIR)/db2/fact_lifecycle.o $(OBJDIR)/db2/ontology_evolution.o $(OBJDIR)/db2/fact_ingest.o $(OBJDIR)/db2/fact_recall.o $(OBJDIR)/modules/memory/memory_pii_gate.o $(OBJDIR)/modules/learning/learning_router.o $(OBJDIR)/modules/learning/learning_implicit.o $(OBJDIR)/dogfood.o $(OBJDIR)/working_profile.o $(OBJDIR)/integrity_gate.o \
                  $(OBJDIR)/modules/memory/memory_core.o $(OBJDIR)/modules/memory/memory_core_crud.o $(OBJDIR)/modules/memory/memory_core_helpers.o $(OBJDIR)/modules/memory/memory_core_helpers_b.o $(OBJDIR)/modules/memory/memory_core_search.o $(OBJDIR)/modules/memory/memory_core_search_b.o $(OBJDIR)/modules/memory/memory_core_search_c.o $(OBJDIR)/modules/memory/memory_core_scope_embed.o $(OBJDIR)/modules/memory/memory_core_tiers.o $(OBJDIR)/db2/kb_payload.o $(OBJDIR)/db2/memory_lifecycle.o $(OBJDIR)/db2/memory_payload.o $(OBJDIR)/db2/memory_promotion.o $(OBJDIR)/db2/memory_query.o $(OBJDIR)/db2/memory_query_bookkeeping.o $(OBJDIR)/db2/memory_entity_graph.o $(OBJDIR)/db2/memory_score_fields.o $(OBJDIR)/db2/memory_scope_query.o $(OBJDIR)/db2/memory_scenes.o $(OBJDIR)/db2/memory_briefing.o $(OBJDIR)/db2/memory_health.o $(OBJDIR)/db2/memory_row_mapper_pg.o $(OBJDIR)/db2/memory_relations.o $(OBJDIR)/db2/memory_conflicts.o $(OBJDIR)/db2/vector_index_ops.o $(OBJDIR)/db2/code_index_ops.o $(OBJDIR)/tests/support/memory_embed_stub.o $(OBJDIR)/posix/memory.o \
                  $(OBJDIR)/modules/memory/memory_logic.o $(OBJDIR)/modules/memory/memory_effective.o $(OBJDIR)/modules/memory/memory_health.o $(OBJDIR)/modules/memory/memory_conflict.o $(OBJDIR)/modules/memory/memory_context.o $(OBJDIR)/modules/memory/memory_assemble.o $(OBJDIR)/modules/memory/memory_advanced.o $(OBJDIR)/modules/memory/memory_prospective.o $(OBJDIR)/modules/memory/memory_lifecycle.o $(OBJDIR)/modules/memory/memory_directives.o $(OBJDIR)/modules/memory/memory_maintenance.o $(OBJDIR)/modules/memory/memory_graph.o $(OBJDIR)/modules/memory/memory_graph_fusion.o $(OBJDIR)/modules/memory/memory_scan.o $(OBJDIR)/modules/memory/memory_improve.o $(OBJDIR)/modules/memory/memory_episodes.o \
@@ -1127,6 +1129,32 @@ $(TESTPREFIX)/unit-test-memory-facts-retract: $(OBJDIR)/tests/test_memory_facts_
                                        $(OBJDIR)/cJSON.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
+
+
+# OPT-IN: the retraction path against a live Postgres, not the sqlite shim.
+# Links db2/db_postgres.o (real libpq) INSTEAD of tests/aimee_pg_sqlite_shim.o,
+# so TEST_CORE_OBJS cannot be reused wholesale. Not in TEST_TARGETS: it needs a
+# server it cannot start, and a test that fails for want of infrastructure is a
+# broken CI job rather than a test. Run it with AIMEE_TEST_PG_URL set.
+$(TESTPREFIX)/int-test-memory-facts-retract-pg: $(OBJDIR)/tests/test_memory_facts_retract_pg.o \
+                                       $(OBJDIR)/db2/db_postgres.o \
+                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o \
+                                       $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/db2/rel_types_store.o \
+                                       $(OBJDIR)/db2/fact_lifecycle.o \
+                                       $(OBJDIR)/db2/entity_edges.o \
+                                       $(OBJDIR)/db2/entity_registry.o \
+                                       $(OBJDIR)/db2/ontology_evolution.o \
+                                       $(OBJDIR)/db2/typed_facts.o \
+                                       $(OBJDIR)/db2/fact_recall.o \
+                                       $(OBJDIR)/db2/fact_ingest.o \
+                                       $(OBJDIR)/modules/memory/memory_fact_gate.o \
+                                       $(OBJDIR)/modules/memory/memory_extract_patterns.o \
+                                       $(OBJDIR)/modules/memory/memory_pii_gate.o \
+                                       $(OBJDIR)/modules/memory/memory_episodes.o \
+                                       $(OBJDIR)/rel_types.o $(OBJDIR)/cJSON.o \
+                                       $(PG_TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpq
 
 $(TESTPREFIX)/unit-test-pgvec: $(OBJDIR)/tests/test_pgvec.o \
                     $(OBJDIR)/db2/pgvec_transport.o $(OBJDIR)/db2/memory_scope_query.o $(OBJDIR)/db2/memory_vectors.o $(OBJDIR)/db2/kb_vectors.o \
