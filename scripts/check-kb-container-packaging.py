@@ -226,8 +226,8 @@ def kb_publication_failures(text: str) -> list[str]:
             failures.append("aimee-kb must load DB2 credentials from Vault, not Config.Env")
         if environment.get("SYNTHESIS_ENDPOINT") != "${SYNTHESIS_ENDPOINT:-}":
             failures.append(
-                "aimee-kb SYNTHESIS_ENDPOINT must have an empty default (synth only; the "
-                "aimee-llm container is retired)"
+                "aimee-kb SYNTHESIS_ENDPOINT must have an empty default: synthesis is "
+                "optional, and whatever selects a provider supplies the endpoint"
             )
     depends_on = service.get("depends_on")
     if isinstance(depends_on, dict) and "postgres" in depends_on:
@@ -395,10 +395,49 @@ def managed_kb_llm_contract_failures(text: str) -> list[str]:
     kb = services.get("aimee-kb") if isinstance(services, dict) else None
     if not isinstance(kb, dict):
         return ["managed Compose must contain the aimee-kb service"]
-    if isinstance(services, dict) and "aimee-llm" in services:
-        return ["aimee-llm is retired; managed Compose must not deploy it"]
-
     failures: list[str] = []
+
+    # aimee-llm is allowed again, but only in the shape that makes it safe to
+    # deploy. The old one was retired for coupling synthesis to the kb image and
+    # for carrying the embedder role; each check below is one of those ways back.
+    llm = services.get("aimee-llm") if isinstance(services, dict) else None
+    if isinstance(llm, dict):
+        if llm.get("profiles") != ["llm"]:
+            failures.append(
+                "aimee-llm must be gated behind the 'llm' profile; an ungated "
+                "sidecar deploys on every managed stack, including those using an "
+                "external synthesis provider or none"
+            )
+        llm_env = llm.get("environment")
+        if isinstance(llm_env, dict) and any(k.startswith("EMBEDDER") for k in llm_env):
+            failures.append(
+                "aimee-llm must not carry an embedder role; the kb embeds "
+                "in-container and a second embedder is the topology that was retired"
+            )
+        volumes = llm.get("volumes")
+        if not (
+            isinstance(volumes, list)
+            and any(
+                isinstance(v, str) and "synthesis-tls" in v and v.endswith(":ro")
+                for v in volumes
+            )
+        ):
+            failures.append(
+                "aimee-llm must mount the synthesis identity READ-ONLY; it presents "
+                "that material and never issues any"
+            )
+        llm_dep = llm.get("depends_on")
+        healthy = (
+            isinstance(llm_dep, dict)
+            and isinstance(llm_dep.get("aimee-kb"), dict)
+            and llm_dep["aimee-kb"].get("condition") == "service_healthy"
+        )
+        if not healthy:
+            failures.append(
+                "aimee-llm must depend on aimee-kb being service_healthy: the kb "
+                "mints the mTLS identity the sidecar refuses to start without"
+            )
+
     kb_env = kb.get("environment")
     if not isinstance(kb_env, dict):
         return ["managed KB environment must use mapping form"]
@@ -746,18 +785,23 @@ def plant_test() -> int:
                 )
                 return 1
 
-        # aimee-llm is retired: neither a service definition nor a leftover depends_on
-        # edge may creep back into managed Compose. Both are planted because the
-        # service check returns early, so it would otherwise mask the edge check.
+        # The sidecar may exist, but not ungated and not without the kb ordering it
+        # depends on. Planting a bare service definition exercises both.
         managed_text = read(root / "deploy/container/aimee-managed.compose.yaml")
-        planted_service = managed_text + (
-            "  aimee-llm:\n    image: ghcr.io/example/aimee-llm:latest\n"
-        )
-        if "aimee-llm is retired; managed Compose must not deploy it" not in (
-            managed_kb_llm_contract_failures(planted_service)
-        ):
+        planted_service = managed_text.replace(
+            "  aimee-llm:\n    profiles: [\"llm\"]\n",
+            "  aimee-llm-ungated:\n",
+        ) + ("  aimee-llm:\n    image: ghcr.io/example/aimee-llm:latest\n")
+        planted_failures = managed_kb_llm_contract_failures(planted_service)
+        if not any("gated behind the 'llm' profile" in f for f in planted_failures):
             print(
-                "kb-container-packaging plant: missed resurrected aimee-llm service",
+                "kb-container-packaging plant: missed an ungated aimee-llm sidecar",
+                file=sys.stderr,
+            )
+            return 1
+        if not any("service_healthy" in f for f in planted_failures):
+            print(
+                "kb-container-packaging plant: missed an aimee-llm with no kb ordering",
                 file=sys.stderr,
             )
             return 1
