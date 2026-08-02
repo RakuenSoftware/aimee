@@ -42,8 +42,22 @@ static void test_build_basic(void)
    assert(!cJSON_GetObjectItemCaseSensitive(req, "temperature"));
    assert(!cJSON_GetObjectItemCaseSensitive(req, "max_tokens"));
    assert(!cJSON_GetObjectItemCaseSensitive(req, "response_format"));
-   /* disable_thinking defaults off => no chat_template_kwargs. */
-   assert(!cJSON_GetObjectItemCaseSensitive(req, "chat_template_kwargs"));
+   /* disable_thinking defaults off => enable_thinking:TRUE, sent explicitly.
+    *
+    * This assertion used to require the field to be ABSENT, which is what the
+    * builder did and is the bug: gemma-4's chat template resolves
+    * `enable_thinking | default(false)`, so an absent field means thinking OFF.
+    * Removing the blanket suppression therefore changed nothing and every
+    * synthesis call ran with reasoning disabled. "We no longer suppress it" and
+    * "we enable it" are different states and only one of them was implemented.
+    *
+    * The test encoded the broken behaviour, so it passed throughout. Asserting
+    * the flag in BOTH directions is the point: a default that depends on each
+    * template's own default is not a default we control, and it can change under
+    * us on a GGUF re-upload. */
+   cJSON *ctk0 = cJSON_GetObjectItemCaseSensitive(req, "chat_template_kwargs");
+   assert(cJSON_IsObject(ctk0));
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(ctk0, "enable_thinking")));
 
    cJSON_Delete(req);
    cJSON_Delete(msgs);

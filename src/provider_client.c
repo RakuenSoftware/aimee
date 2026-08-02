@@ -43,15 +43,32 @@ struct cJSON *provider_client_build_openai(const provider_def_t *def, struct cJS
    if (def->max_tokens > 0)
       cJSON_AddNumberToObject(req, "max_tokens", def->max_tokens);
 
-   /* Skip the model's reasoning pass for mechanical stages (see provider_def_t
-    * .disable_thinking). Sent as the jinja chat-template kwarg understood by
-    * llama.cpp (--jinja) / vLLM; other endpoints ignore the extra field. */
-   if (def->disable_thinking)
+   /* Thinking is ON unless a provider deliberately disables it, and the kwarg is
+    * sent in BOTH directions. Sent as the jinja chat-template kwarg understood by
+    * llama.cpp (--jinja) / vLLM; other endpoints ignore the extra field.
+    *
+    * This used to send the field only when disable_thinking was set, which reads
+    * like "we no longer suppress thinking" and means "we never enable it":
+    * gemma-4's chat template resolves `enable_thinking | default(false)`, so an
+    * ABSENT field is false. Removing the blanket suppression therefore changed
+    * nothing, and every synthesis call has been running thinking-off.
+    *
+    * The numbers usually cited for this (+0.12 F1 at E2B, +0.084 at E4B, quoted in
+    * kb_curator_provider.c) come from a 70-note sweep and do NOT reproduce: paired
+    * over 955 notes the strict-F1 delta at E4B is +0.010, CI [-0.020, +0.040].
+    * The effect that does hold is coverage — relation-agnostic recall 0.712 ->
+    * 0.828 at flat precision — traded against abstention (0.907 -> 0.870). See
+    * MEASUREMENT_LOG.md defect 32. Either way the mechanism was dropped and the
+    * enabling was never added, so this path has never done what it claims.
+    *
+    * Being explicit in both directions also removes the dependence on each
+    * template's default, which differs by model family and can change under us on
+    * a GGUF re-upload. */
    {
       cJSON *ctk = cJSON_CreateObject();
       if (ctk)
       {
-         cJSON_AddBoolToObject(ctk, "enable_thinking", 0);
+         cJSON_AddBoolToObject(ctk, "enable_thinking", def->disable_thinking ? 0 : 1);
          cJSON_AddItemToObject(req, "chat_template_kwargs", ctk);
       }
    }
