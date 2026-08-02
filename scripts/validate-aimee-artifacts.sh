@@ -5,7 +5,9 @@
 # is not in the artifact. The release link strips symbols (-s), so symbol checks
 # go through the unstripped objects, and behavioural strings through the binary.
 set -uo pipefail
-ROOT=/opt/aimee/tree
+# Repo root: derived from this script's own location so it runs in CI, in a
+# container, or from any checkout. AIMEE_ROOT overrides.
+ROOT="${AIMEE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 cd "$ROOT/src" || exit 90
 
 PASS=0; FAIL=0
@@ -33,11 +35,26 @@ ck "no GP_ERR_KB_UNAVAILABLE symbol" "$([ "${hits:-0}" -eq 0 ] && echo 1 || echo
 echo ""
 echo "=== behavioural strings in the shipped binaries ==="
 
+# `strings BINARY | grep -q` is WRONG here: grep -q exits at the first match, the
+# still-writing strings takes SIGPIPE, and `set -o pipefail` turns that success
+# into a pipeline failure. Whether it bites depends on where the string sits in
+# the binary, so the check passes or fails at random. Dump each binary's strings
+# ONCE to a file and search that — deterministic, and faster for many needles.
+STRINGS_CACHE="$(mktemp -d)"
+trap 'rm -rf "$STRINGS_CACHE"' EXIT
+
+bin_strings() { # bin_strings BINARY -> path to its cached strings
+  local key
+  key="$STRINGS_CACHE/$(printf '%s' "$1" | tr -c 'A-Za-z0-9' '_')"
+  [ -f "$key" ] || strings "$1" > "$key" 2>/dev/null || : > "$key"
+  printf '%s' "$key"
+}
+
 need() { # need BINARY NEEDLE LABEL
-  if strings "$1" 2>/dev/null | grep -qF -- "$2"; then ck "$3" 1; else ck "$3" 0 "string absent from $1"; fi
+  if grep -qF -- "$2" "$(bin_strings "$1")"; then ck "$3" 1; else ck "$3" 0 "string absent from $1"; fi
 }
 absent() { # absent BINARY NEEDLE LABEL
-  if strings "$1" 2>/dev/null | grep -qF -- "$2"; then ck "$3" 0 "string STILL PRESENT in $1"; else ck "$3" 1; fi
+  if grep -qF -- "$2" "$(bin_strings "$1")"; then ck "$3" 0 "string STILL PRESENT in $1"; else ck "$3" 1; fi
 }
 
 need   "$ROOT/aimee-kb" "requires the owner credential"        "aimee-kb: owner-required refusal present"

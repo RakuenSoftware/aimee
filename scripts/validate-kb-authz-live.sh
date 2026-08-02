@@ -11,8 +11,12 @@
 # hence one instance per credential shape.
 set -uo pipefail
 
-SRC=/opt/aimee/tree
-KB=$SRC/aimee-kb
+# Repo root: derived from this script's own location so it runs in CI, in a
+# container, or from any checkout. AIMEE_ROOT / AIMEE_KB_BIN override.
+SRC="${AIMEE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+KB="${AIMEE_KB_BIN:-$SRC/aimee-kb}"
+WORK="${TMPDIR:-/tmp}/aimee-authz-live"
+mkdir -p "$WORK"
 PORT=8741
 BASE="http://127.0.0.1:$PORT"
 PASS=0; FAIL=0; SKIP=0
@@ -35,7 +39,9 @@ expect() { # expect NAME WANT_CODE GOT_TSV [NEEDLE]
   local name="$1" want="$2" tsv="$3" needle="${4-}"
   local got body; got=${tsv%%$'\t'*}; body=${tsv#*$'\t'}
   if [ "$got" != "$want" ]; then fail "$name" "want=$want got=$got body=$body"; return; fi
-  if [ -n "$needle" ] && ! printf '%s' "$body" | grep -qF -- "$needle"; then
+  # A here-string, not a pipe: `... | grep -q` exits at the first match and can
+  # SIGPIPE the writer, which `set -o pipefail` would report as a failure.
+  if [ -n "$needle" ] && ! grep -qF -- "$needle" <<<"$body"; then
     fail "$name" "status ok ($got) but body lacked '$needle': $body"; return
   fi
   pass "$name"
@@ -50,11 +56,11 @@ expect_not() { # expect_not NAME NOT_CODE GOT_TSV
 
 start_kb() { # start_kb CONFIGURED_TOKEN
   stop_kb
-  export AIMEE_HOME=/opt/aimee/home
+  export AIMEE_HOME="$WORK/home"
   # Fresh vault state per credential shape, else the first sealed bearer sticks.
   rm -rf "$AIMEE_HOME"
   export AIMEE_KB_API_BEARER_TOKEN="$1"
-  export AIMEE_DB2_URL="postgresql://aimee:aimee@127.0.0.1/aimee_kb"
+  export AIMEE_DB2_URL="${AIMEE_DB2_URL:-postgresql://aimee:aimee@127.0.0.1/aimee_kb}"
   mkdir -p "$AIMEE_HOME"
   cat > "$AIMEE_HOME/aimee.yaml" <<YAML
 kb:
@@ -68,8 +74,8 @@ YAML
   # authenticated request 401, including the owner's.
   "$KB" --bootstrap-vault-env > "$AIMEE_HOME/bootstrap.log" 2>&1
   echo "  (bootstrap-vault-env rc=$?)"
-  nohup "$KB" >/opt/aimee/kb.log 2>&1 &
-  echo $! > /opt/aimee/kb.pid
+  nohup "$KB" > "$WORK/kb.log" 2>&1 &
+  echo $! > "$WORK/kb.pid"
   for _ in $(seq 1 60); do
     curl -s -m 2 "$BASE/v1/health" >/dev/null 2>&1 && return 0
     sleep 1
@@ -78,8 +84,8 @@ YAML
 }
 
 stop_kb() {
-  [ -f /opt/aimee/kb.pid ] && kill "$(cat /opt/aimee/kb.pid)" 2>/dev/null
-  rm -f /opt/aimee/kb.pid
+  [ -f "$WORK/kb.pid" ] && kill "$(cat "$WORK/kb.pid")" 2>/dev/null
+  rm -f "$WORK/kb.pid"
   sleep 1
 }
 
