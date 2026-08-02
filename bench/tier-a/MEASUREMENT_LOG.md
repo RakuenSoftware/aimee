@@ -1435,3 +1435,35 @@ The fix is ontology coverage, not more aliases after the fact: the recurring,
 semantically distinct relations this domain needs (customer relationship,
 subscription tier, account ownership, deployment) should be seeded, so the model
 lands on them instead of inventing a word and the promoter admitting it.
+
+## Polarity holds on a second model
+
+The retraction design was adopted on E4B alone, which is one model's habits. E2B
+is the right second opinion: it never had the thinking defect and behaves
+differently on retractions. Both arms, v7, 1001 notes of gold_small, same server,
+scored against the 17-relation ontology they actually ran under (the ontology
+grew to 24 afterwards, so judging them by the new list would credit relations
+the model was never shown).
+
+| | flagged / 132 | usable by db2_fact_retract | polarity errors / 869 |
+|---|---:|---:|---:|
+| E4B | 115 | 92 | **0** |
+| E2B | 85 | **85** | **1** |
+
+"Usable" is a canonical relation AND a non-empty object — what the API can
+consume without a human deciding what was meant.
+
+The two models fail differently and both fail safely. E4B flags more retractions
+and spends 23 of them on invented predicates; E2B flags fewer and **every single
+one it flags is directly usable**. Higher recall with lower naming precision
+against lower recall with perfect naming precision — worth knowing before
+choosing a synthesis model for this task, and not visible in an F1 column.
+
+One polarity error across 1738 non-retraction notes on two models. The failure
+mode that would have sunk the design — polarity leaking onto ordinary facts —
+did not appear at a rate that matters.
+
+Both numbers should improve under the 24-relation ontology, since runs_on,
+owns_account and customer_of are now canonical and were among the invented
+predicates counted against E4B here. That is a prediction, not a measurement:
+these runs predate the change.
