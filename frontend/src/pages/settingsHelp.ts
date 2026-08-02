@@ -208,7 +208,7 @@ export const FIELD_HELP: Record<string, string> = {
   synthesis_model: "Synthesis model. On an image with llama.cpp bundled this picks the local model to run (gemma-4-E2B-it or gemma-4-E4B-it); otherwise it is the model name sent to the endpoint.",
   synthesis_api_key: "Bearer token for the synthesis endpoint. Blank for a keyless or local endpoint.",
   synthesis_thinking: "Let the synthesis model think before answering. On by default — it measured positive-to-neutral everywhere. Turn it off only if your model reasons past its output budget without answering.",
-  aimee_with_llamacpp: "Whether this image bundles llama.cpp. Set by the image, not by you — it decides whether a local synthesis model can be offered at all.",
+  aimee_with_llamacpp: "Retired. It recorded whether the kb image bundled llama.cpp, which decided whether local synthesis could be offered. Synthesis is its own sidecar image now, so the kb image no longer constrains the choice and nothing reads this.",
 
   delegate_graph_context_enabled:
     "Prepend the callers and dependencies of the files a delegate task mentions to its prompt. Advisory, off by default.",

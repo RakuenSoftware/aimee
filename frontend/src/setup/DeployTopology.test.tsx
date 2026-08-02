@@ -169,38 +169,31 @@ describe('DeployTopology synthesis picker', () => {
     return select as HTMLSelectElement;
   }
 
-  it('offers off, external and THE ONE MODEL THIS IMAGE BAKES', async () => {
-    // The model is in the image, so there is no menu of models to pick from — the
-    // tag decided it, exactly like the embedder.
-    await renderPage({ aimee_with_llamacpp: '1', aimee_synthesis_model: 'gemma-4-E4B-it' });
-    const values = Array.from(synthSelect().options).map((o) => o.value);
-    expect(values).toEqual(expect.arrayContaining(['off', 'external', 'gemma-4-E4B-it']));
-    // The model this image does NOT carry must not be offered.
-    expect(values).not.toContain('gemma-4-E2B-it');
-  });
-
-  it('offers the e2b model on an e2b image', async () => {
-    await renderPage({ aimee_with_llamacpp: '1', aimee_synthesis_model: 'gemma-4-E2B-it' });
-    const values = Array.from(synthSelect().options).map((o) => o.value);
-    expect(values).toContain('gemma-4-E2B-it');
-    expect(values).not.toContain('gemma-4-E4B-it');
-  });
-
-  it('offers no local option at all when the image bakes no model', async () => {
-    // Offering a choice that cannot work is worse than not offering it: the failure
-    // would only show up later as synthesis silently never starting.
+  it('offers off, external and BOTH models, whatever the kb image is', async () => {
+    // Synthesis is its own sidecar now (aimee-llm-e2b / aimee-llm-e4b) deployed beside
+    // the kb, so the kb tag has no bearing on the choice. These assertions were the
+    // inverse of this: the page offered only the model the kb image baked, and hid the
+    // local option entirely when it baked none.
     await renderPage({});
     const values = Array.from(synthSelect().options).map((o) => o.value);
-    expect(values).toEqual(expect.arrayContaining(['off', 'external']));
-    expect(values.some((v) => v.startsWith('gemma-'))).toBe(false);
-    expect(screen.getByText(/bundles no synthesis model/i)).toBeTruthy();
+    expect(values).toEqual(
+      expect.arrayContaining(['off', 'external', 'gemma-4-E2B-it', 'gemma-4-E4B-it']),
+    );
   });
 
-  it('offers no local option when llama.cpp is present but no model is', async () => {
-    // Half-built image: the binary without its weights cannot serve anything.
-    await renderPage({ aimee_with_llamacpp: '1' });
-    const values = Array.from(synthSelect().options).map((o) => o.value);
-    expect(values.some((v) => v.startsWith('gemma-'))).toBe(false);
+  it('does not gate the local options on kb image properties', async () => {
+    // aimee_with_llamacpp and aimee_synthesis_model described the OLD topology, where
+    // synthesis lived in the kb image. Absent, present or contradictory, they must not
+    // change what is offerable.
+    for (const cfg of [{}, { aimee_with_llamacpp: '0' }, { aimee_with_llamacpp: '1' }]) {
+      // Within one test the auto-cleanup between tests has not run yet, so each
+      // iteration would otherwise stack another copy of the page in the document.
+      cleanup();
+      await renderPage(cfg);
+      const values = Array.from(synthSelect().options).map((o) => o.value);
+      expect(values).toContain('gemma-4-E2B-it');
+      expect(values).toContain('gemma-4-E4B-it');
+    }
   });
 
   it('off is presented as supported, and writes no endpoint', async () => {
@@ -214,9 +207,7 @@ describe('DeployTopology synthesis picker', () => {
 
   it('a bundled model writes the model and NOT a loopback endpoint', async () => {
     // The entrypoint owns the port; writing 127.0.0.1 here would hardcode it.
-    const { writes } = await renderPage({
-      aimee_with_llamacpp: '1', aimee_synthesis_model: 'gemma-4-E4B-it',
-    });
+    const { writes } = await renderPage({});
     fireEvent.change(synthSelect(), { target: { value: 'gemma-4-E4B-it' } });
     save();
     await waitFor(() => expect(writes.some((w) => w.key === 'synthesis_model')).toBe(true));
