@@ -7,8 +7,6 @@ import {
   configToSynthesis,
   embedderChangeImpact,
   embedderToConfig,
-  imageHasLlamaCpp,
-  imageSynthesisModel,
   synthesisToConfig,
   type DeploySelection,
   type EmbedderChoice,
@@ -158,20 +156,6 @@ describe('embedderChangeImpact', () => {
   });
 });
 
-describe('imageHasLlamaCpp', () => {
-  it('is true only when the image says so', () => {
-    expect(imageHasLlamaCpp({ aimee_with_llamacpp: '1' })).toBe(true);
-    expect(imageHasLlamaCpp({ aimee_with_llamacpp: 'true' })).toBe(true);
-    expect(imageHasLlamaCpp({ aimee_with_llamacpp: '0' })).toBe(false);
-  });
-
-  it('an absent key reads as NOT available', () => {
-    // Better to point an operator at an external endpoint that works than at a local
-    // model that never loads.
-    expect(imageHasLlamaCpp({})).toBe(false);
-  });
-});
-
 describe('buildDesiredConfig', () => {
   const local = (over: Partial<DeploySelection> = {}): DeploySelection => ({
     kbMode: 'local',
@@ -227,16 +211,37 @@ describe('SYNTHESIS_MODELS', () => {
   });
 });
 
-describe('imageSynthesisModel', () => {
-  it('reports the model the image bakes', () => {
-    expect(imageSynthesisModel({ aimee_synthesis_model: 'gemma-4-E4B-it' }))
-      .toBe('gemma-4-E4B-it');
+});
+
+describe('the choices the wizard may offer', () => {
+  it('offers both synthesis models regardless of the kb image', () => {
+    // Each model is its own sidecar (aimee-llm-e2b / aimee-llm-e4b) deployed beside the
+    // kb, so the kb tag has no bearing on whether local synthesis can run. This was
+    // previously gated on what the kb image baked, which is why imageHasLlamaCpp and
+    // imageSynthesisModel existed and why they are gone.
+    expect(SYNTHESIS_MODELS.map((m) => m.id).sort())
+      .toEqual(['gemma-4-E2B-it', 'gemma-4-E4B-it']);
   });
 
-  it('is empty when the image bakes none', () => {
-    // Absent reads as "no local model", so the UI offers none rather than a
-    // selection the container cannot honour.
-    expect(imageSynthesisModel({})).toBe('');
-    expect(imageSynthesisModel({ aimee_synthesis_model: '  ' })).toBe('');
+  it('has no embedder selection that means "no embedder"', () => {
+    // Retrieval does not work without one, so the type admits only a bundled model or
+    // an external endpoint. The plain aimee-kb image carries no weights and serves the
+    // external case; it is not a way to run without an embedder.
+    const bundled = embedderToConfig({ kind: 'bundled', model: 'bekko-a25m' });
+    expect(bundled.embedder_model).toBe('bekko-a25m');
+    expect(bundled.embedder_url).toBe('');
+
+    const external = embedderToConfig({
+      kind: 'external', endpoint: 'https://emb.x/v1', apiKey: 'k', dims: '768',
+    });
+    expect(external.embedder_url).toBe('https://emb.x/v1');
+    expect(external.embedder_model).toBe('');
+  });
+
+  it('synthesis off writes no endpoint and no model', () => {
+    // Off IS supported, unlike an absent embedder.
+    const off = synthesisToConfig({ kind: 'off' });
+    expect(off.synthesis_endpoint).toBe('');
+    expect(off.synthesis_model).toBe('');
   });
 });

@@ -67,7 +67,11 @@ export function embedderChangeImpact(
 /** How the embedder is served.
  *
  *   bundled  — the model baked into this image variant (bekko-a25m at 384 on
- *              aimee-kb / aimee-kb-llm, nomic-v2 at 768 on the -nomic variants).
+ *              aimee-kb-a25m, nomic-v2 at 768 on aimee-kb-nomic).
+ *
+ * THERE IS NO 'none'. Retrieval does not work without an embedder, so the choice is a
+ * bundled model or an external endpoint. The plain aimee-kb image carries no weights
+ * and exists for the external case; it is not a way to run without one.
  *   external — an operator-run endpoint. Its width cannot be derived, so `dims`
  *              is required; anything up to EMBED_MAX_DIM (4000, the DB2 column
  *              ceiling) is valid. */
@@ -77,10 +81,16 @@ export type EmbedderSelection =
 
 // --- the synthesis choice ------------------------------------------------
 
-/** Human copy for a model an image may bake. NOT a menu: the image carries one
- * model and this only describes whichever it is. Numbers are extraction F1 on the
- * 69-note gold set at Q8_0 (docs/SYNTHESIS_MODELS.md); the images ship UD-Q6_K_XL,
- * a different quantisation, so they are indicative rather than exact. */
+/** The synthesis models that can be deployed. THIS IS A MENU NOW.
+ *
+ * It used to describe whichever single model the kb image happened to bake, because
+ * synthesis lived inside that image. It does not any more: each model is its own
+ * sidecar (aimee-llm-e2b / aimee-llm-e4b) deployed beside the kb, so both are always
+ * offerable and the kb tag has no bearing on the choice.
+ *
+ * Quality numbers are extraction F1 on the 69-note gold set measured at Q8_0
+ * (docs/SYNTHESIS_MODELS.md), so they are indicative of the gap between the two rather
+ * than exact for the shipped quantisations. */
 export interface SynthesisModelChoice {
   id: string;
   label: string;
@@ -91,32 +101,22 @@ export const SYNTHESIS_MODELS: SynthesisModelChoice[] = [
   {
     id: 'gemma-4-E4B-it',
     label: 'gemma-4-E4B-it',
-    blurb: 'The better model. 7.46 GB baked into this image, ~3.3 tok/s on 8 CPU threads.',
+    blurb: 'The better model. 7.46 GB at UD-Q6_K_XL, deployed as the aimee-llm-e4b sidecar.',
   },
   {
     id: 'gemma-4-E2B-it',
     label: 'gemma-4-E2B-it',
-    blurb: '4.71 GB baked into this image. About twice the CPU speed, measurably weaker.',
+    blurb: '2.97 GB at UD-Q4_K_XL, deployed as aimee-llm-e2b. Faster, measurably weaker.',
   },
 ];
-
-/** The synthesis model THIS IMAGE bakes, or '' when it bakes none.
- *
- * Like the embedder, this is decided by the tag you pulled (aimee-kb-llm-e2b vs
- * -e4b) rather than at runtime, because the weights are in the image. The wizard
- * reports it instead of offering a choice it cannot honour. */
-export function imageSynthesisModel(cfg: Record<string, unknown>): string {
-  const v = cfg['aimee_synthesis_model'];
-  return v == null ? '' : String(v).trim();
-}
 
 /** How synthesis is served.
  *
  *   off      — no synthesis. A SUPPORTED state, not an error: embedding, search,
  *              recall and indexing never call this endpoint.
- *   bundled  — gemma-4 running beside the kb, which needs an image variant that
- *              ships llama.cpp. The entrypoint fetches the weights onto the
- *              persistent volume on first start and serves them at loopback.
+ *   bundled  — gemma-4 running beside the kb as an aimee-llm-e{2,4}b sidecar, reached
+ *              over mutual TLS. The weights are baked into that image; nothing is
+ *              downloaded at deploy or at run time.
  *   external — any OpenAI-compatible endpoint. Best quality, no local GPU or RAM
  *              cost, and your notes leave the machine. */
 export type SynthesisSelection =
@@ -245,15 +245,3 @@ export function configToSynthesis(cfg: Record<string, unknown>): SynthesisSelect
   return { kind: 'off' };
 }
 
-/** Whether this running image ships llama.cpp, i.e. whether the bundled synthesis
- * options can work at all. The image records AIMEE_WITH_LLAMACPP as ENV in every
- * variant precisely so this is observable rather than guessed: offering "run
- * gemma-4 locally" on an image without llama.cpp is an option that cannot work,
- * and the failure would appear later as synthesis silently never starting.
- *
- * Unknown (key absent) is treated as NOT available: better to point an operator at
- * an external endpoint that works than at a local model that never loads. */
-export function imageHasLlamaCpp(cfg: Record<string, unknown>): boolean {
-  const v = str(cfg, 'aimee_with_llamacpp').trim();
-  return v === '1' || v.toLowerCase() === 'true';
-}
