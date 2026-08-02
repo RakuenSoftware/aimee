@@ -15,11 +15,12 @@ distinction this page replaces.
 | You want | Do this | What you get |
 | --- | --- | --- |
 | **Simplest thing that works** | Point `SYNTHESIS_ENDPOINT` at an external OpenAI-compatible endpoint | Best quality, no local GPU or RAM cost, your notes leave the machine |
-| **Local, and quality matters most** | pull `aimee-kb-llm-e4b` (or `aimee-kb-nomic-llm-e4b`) | 0.82 F1 extraction (at Q8_0; ships UD-Q6_K_XL), 7.46 GB of weights, 3.3 tok/s on 8 CPU threads |
-| **Local, and the box is small** | pull `aimee-kb-llm-e2b` (or `aimee-kb-nomic-llm-e2b`) | 0.69 F1 extraction, 4.61 GB of weights, 6.3 tok/s on 8 CPU threads |
+| **Local, and quality matters most** | pull `aimee-kb-llm-e4b` (or `aimee-kb-nomic-llm-e4b`) | 0.82 F1 extraction, 7.46 GB of weights, 3.3 tok/s on 8 CPU threads |
+| **Local, and the box is small** | pull `aimee-kb-llm-e2b` (or `aimee-kb-nomic-llm-e2b`) | 0.69 F1 extraction, 4.71 GB of weights, 6.3 tok/s on 8 CPU threads |
 
-Those weight sizes and throughputs are Q8_0, which is what was measured. The
-shipped default is Q4_K_M, which is roughly half the size and faster —
+The weight sizes are what the images actually carry: UD-Q6_K_XL, baked in. The F1
+and throughput numbers were measured at Q8_0, so read them as the shape of the
+gap between the two models rather than as a prediction of what you will see —
 see [the caveats](#caveats-you-should-read-before-leaning-on-any-of-this).
 Resident memory is larger than the weights by the KV cache for your configured
 context, which is a deployment setting rather than a property of the model.

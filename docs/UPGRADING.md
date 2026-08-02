@@ -244,20 +244,21 @@ Bundling llama.cpp means this project now pins it, rather than inheriting upstre
 image and its CVE fixes. `LLAMACPP_VERSION` in the Dockerfile is the single pin and
 needs deliberate bumping.
 
-## Bundled synthesis weights live on the data volume
+## Bundled synthesis weights are baked into the image
 
-Selecting `gemma-4-E2B-it` or `gemma-4-E4B-it` on a `*-llm` image makes the
-container fetch the weights on first start into `$AIMEE_HOME/models`, on the
-`aimee-kb-home` volume. They are not baked into the image, so an image upgrade does
-not refetch several gigabytes — and a volume wipe does.
+The weights ship inside the `*-llm` images at UD-Q6_K_XL — 7.46 GB for E4B, 4.71 GB
+for E2B. The container downloads nothing at any point: an image either has its model
+or it does not, and `docker pull` is the one download, with the registry's retry and
+resume behind it.
 
-First start after selecting a model downloads 7.46 GB for E4B (4.71 GB for E2B,
-both UD-Q6_K_XL) and the KB reports
-synthesis unavailable until it finishes. That is deliberate: blocking startup on a
-multi-gigabyte download would take the whole knowledge base down with it.
+Budget for that in the image pull and in disk, not in a first-start delay. A `*-llm`
+image is several gigabytes larger than the plain one, and an image upgrade re-pulls
+the layer carrying the weights. Nothing lands on `$AIMEE_HOME`, so a volume wipe does
+not cost you the model.
 
-Leave `SYNTHESIS_ENDPOINT` empty for a bundled model. The container sets it to
-loopback itself; a value you write there points synthesis somewhere else.
+Leave `SYNTHESIS_ENDPOINT` empty for a bundled model. The container starts
+llama-server against the baked file and points synthesis at loopback itself; a value
+you write there points synthesis somewhere else and the bundled model is not loaded.
 
 ## What is gone, and what replaces it
 
