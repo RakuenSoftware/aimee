@@ -2622,9 +2622,11 @@ int main(void)
       assert(strstr(env, "SYNTHESIS_ENDPOINT") == NULL);
       assert(strstr(env, "SYNTHESIS_MODEL") == NULL);
       assert(strstr(env, "AIMEE_LLM_HOST") == NULL);
-      /* No embedder selected either: the plain aimee-kb image is correct, and it is
-       * the one that carries neither PyTorch nor weights. */
-      assert(strstr(env, "AIMEE_KB_VARIANT=\n") != NULL);
+      /* NOTHING SELECTED MUST NOT YIELD THE EMBEDDERLESS IMAGE. aimee-kb carries no
+       * weights, so that combination cannot embed and cannot be repaired by setting a
+       * key -- it needs a different image. a25m is what `aimee-kb` meant before the
+       * axis was split, so an unconfigured deployment keeps what it already had. */
+      assert(strstr(env, "AIMEE_KB_VARIANT=a25m\n") != NULL);
 
       /* A BUNDLED model is a DEPLOYED SIDECAR, not a loopback endpoint. It used to be
        * in-process in the kb; it is aimee-llm-e{2,4}b beside the kb now, reached over
@@ -2680,6 +2682,8 @@ int main(void)
       snprintf(cfg.synthesis_api_key, sizeof(cfg.synthesis_api_key), "syn-key");
       config_emit_deploy_env(&cfg, env, sizeof(env));
       assert(strstr(env, "COMPOSE_PROFILES=kb\n") != NULL);
+      /* An external endpoint is the ONE case the embedderless image is right for. */
+      assert(strstr(env, "AIMEE_KB_VARIANT=\n") != NULL);
       assert(strstr(env, "EMBEDDER_URL=https://emb.x/v1\n") != NULL);
       /* Credentials are NEVER emitted into a long-lived service environment:
        * Config.Env persists and shows up in `docker inspect`. They are sealed into
