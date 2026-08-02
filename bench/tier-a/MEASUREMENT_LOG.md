@@ -1040,3 +1040,32 @@ downstream of the flag. The **v4 10k E4B figure of 0.5947 is a thinking-off
 number** and is not comparable to any E2B figure, which was thinking-on. E4B's
 arms need re-running under v5 before any model-to-model claim in this benchmark
 holds. E2B's numbers are unaffected.
+
+## The benchmark was fast because it was broken
+
+Worth separating from defect 31, because it is the part that would have made
+anyone suspicious if they had been looking at the right number.
+
+The v4 10k E4B arm finished in about 34 minutes. That was taken as a fact about
+the hardware. It was a fact about the prompt:
+
+| | v4 10k E4B, as banked | same card, thinking on |
+|---|---:|---:|
+| median completion tokens | **27** | ~390 |
+| median latency | **214 ms** | ~1790 ms |
+| notes that emitted reasoning | **0 / 10000** | 20 / 20 |
+| throughput | 280 notes/min | 27 notes/min |
+
+Same 5080, same CUDA build, same quant, same corpus. The only difference is
+whether the model was allowed to think. A model emitting 27 tokens is not fast,
+it is not working, and the ~10x throughput was the single loudest symptom
+available for a week — sitting in the driver log the whole time, read as good
+news.
+
+The practical consequence is that the honest cost of the v5 pair is 12-16 hours
+rather than the ~1 hour the v4 timings implied. The old figure was never
+achievable with reasoning on; it was the cost of a benchmark that had turned the
+model's reasoning off.
+
+There is a general form of this worth keeping: a performance number that improves
+for no reason you designed is evidence about correctness, not about performance.
