@@ -27,7 +27,7 @@ the corresponding active capability.
 
 ## Providers and readiness
 
-Current providers are the Go service under `webchat`, the React SPA under `frontend/src`, legacy
+Current providers are the Go service under `runtime-web`, the React SPA under `frontend/src`, legacy
 `dashboard.c`/`dashboard_kb.c`, server dashboard routes, container entrypoint wiring, and systemd support.
 Readiness must separate module selection, startup enablement, asset availability, listener/auth/session
 health, Runtime transport reachability, and per-page capabilities. A running `aimee-runtime` does not
@@ -39,13 +39,14 @@ imply a running GUI.
 
 When `runtime.web.enabled` is false, no GUI process/listener, assets, web routes, background work, or
 module metrics may start. CLI, environment, config-file, MCP/ACP, and non-web API operation remain.
-Current containers use `AIMEE_WEBCHAT_ENABLED` and `WITH_WEBCHAT`, while ordinary `make all` builds
-`aimee-webchat`; those are legacy lifecycle/build seams awaiting descriptor-driven unification.
+Current containers use `AIMEE_WEBCHAT_ENABLED` and the `WITH_RUNTIME_WEB` image build argument,
+while ordinary `make all` builds `aimee-runtime-web`. The `AIMEE_WEBCHAT_*` configuration names are
+compatibility seams that remain during descriptor-driven unification.
 Configuration pages expose only active settings with a real production consumer.
 
 ## Surfaces
 
-Current surfaces include `aimee-webchat`, the SPA `App`, Chat, Dashboard, Projects, Agents, Settings,
+Current surfaces include `aimee-runtime-web`, the SPA `App`, Chat, Dashboard, Projects, Agents, Settings,
 Graph, Logs, Workflows, Roundtable, Pipeline, and Editor pages, plus `/api/*` web adapters. The dashboard
 is a Runtime GUI route, not the legacy `aimee dashboard` standalone listener in the target contract.
 Provider-specific Git OAuth controls are Git-provider settings, not OIDC governance.
@@ -73,7 +74,7 @@ and non-web APIs without a web process.
 
 ## Tests and failure behavior
 
-Current coverage spans `webchat` Go tests, frontend Dashboard/setup/tutorial tests, server HTTP/dashboard
+Current coverage spans `runtime-web` Go tests, frontend Dashboard/setup/tutorial tests, server HTTP/dashboard
 tests, trusted-web principal/vault tests, and container/build integrity. Future profile tests must prove
 default-on behavior, independent disable/omission, dashboard co-lifecycle, no disabled residue, headless
 journeys, truthful settings, and object/symbol absence. Authentication, transport, asset, or page-provider
@@ -88,8 +89,9 @@ starting, ready, degraded, unavailable, and failed.
 
 ## Compatibility
 
-`aimee-server`, `aimee-webchat`, `AIMEE_WEBCHAT_*`, `WITH_WEBCHAT`, legacy dashboard commands/routes, and
-current web package/asset names require bounded compatibility records during the `aimee-runtime` rename.
+`aimee-server`, `aimee-runtime-web`, `AIMEE_WEBCHAT_*`, `WITH_RUNTIME_WEB`, legacy dashboard
+commands/routes, and current web package/asset names require bounded compatibility records during the
+`aimee-runtime` rename.
 Legacy web aliases are module-owned and unavailable when this module is disabled or omitted; core never
 serves a compatibility dashboard.
 
@@ -99,4 +101,4 @@ New pages are capability consumers and must disappear with their inactive owner;
 parallel scheduler, policy engine, data store, or config schema. `webchat`, `frontend/src`, legacy
 dashboard code, server web routes, and packaging/service wiring are `relocate` candidates. Duplicate
 routes, settings, auth helpers, and self-tested-only pages require supported-journey and production-read
-evidence before consolidation or removal.
+evidence before consolidation or removal. The physical Go provider already lives under `runtime-web/`.

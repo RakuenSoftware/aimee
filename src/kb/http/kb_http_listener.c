@@ -195,6 +195,23 @@ int kb_http_start(int port, const char *bearer_token)
    setsockopt(g_listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
    const char *b = getenv("AIMEE_KB_HTTP_BIND");
    in_addr_t baddr = (b && b[0]) ? INADDR_ANY : INADDR_LOOPBACK;
+
+   /* Auth is only enforced when a bearer is configured (kb_http.c's gate is
+    * `if (bearer_token && bearer_token[0])`). With none, the kb answers every
+    * route unauthenticated — which is a reasonable default for the loopback-only
+    * bind above, and is NOT reasonable once this socket is reachable off-host.
+    *
+    * Observed on a real deployment: `POST /v1/actions/memory.find_facts` with no
+    * credentials at all returned 200 with stored memory, to anything that could
+    * route to the container. Fail closed instead: a non-loopback bind requires a
+    * bearer. The mTLS listener is unaffected — it authenticates by certificate. */
+   if (baddr == INADDR_ANY && !g_bearer_token[0])
+      LOG_ERROR("kb_http",
+                "binding 0.0.0.0:%d with NO bearer configured: this socket serves privileged "
+                "routes unauthenticated to anything that can reach it. Seal a kb bearer "
+                "(AIMEE_KB_API_BEARER_TOKEN, first-boot -> Vault), or unset AIMEE_KB_HTTP_BIND to "
+                "keep the plain listener on loopback.",
+                port);
    struct sockaddr_in sa;
    memset(&sa, 0, sizeof(sa));
    sa.sin_family = AF_INET;

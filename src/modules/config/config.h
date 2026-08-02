@@ -213,6 +213,18 @@ typedef struct
    config_disposition_source_t source;
 } config_disposition_t;
 
+/* One auxiliary-model task route. Named (it was an anonymous inline struct) so a
+ * caller can be handed one element without holding a config_t -- see
+ * config_aux_task_at. */
+#define CONFIG_AUX_TASK_NAME_LEN 64
+typedef struct
+{
+   char task[CONFIG_AUX_TASK_NAME_LEN];
+   char provider[64];
+   char model[128];
+   int max_tokens;
+} config_aux_task_t;
+
 /* Trigger rule (from trigger_rules YAML list) */
 #define TRIGGER_RULE_MAX_SOURCE   64
 #define TRIGGER_RULE_MAX_EVENT    256
@@ -1179,9 +1191,10 @@ typedef struct config
     * are unaffected until an operator writes the `modules:` block.
     * CONTRIBUTORS: do not resolve module enablement inline at a wire site. For legacy gateway-stage
     * modules, call config_module_enabled(cfg->module_X, <module env predicate>). For roundtable,
-    * call the owner-provided roundtable_module_enabled(cfg), which applies modules.roundtable,
-    * then AIMEE_MODULE_ROUNDTABLE, then the descriptor default. Keeping resolution behind one owner
-    * API leaves one place for a future FORCE tier. */
+    * call config_module_roundtable_enabled(), which applies modules.roundtable, then
+    * AIMEE_MODULE_ROUNDTABLE, then the descriptor default — and, per the config_t encapsulation
+    * rule, reads the env var HERE so the roundtable module holds neither a config_t nor a getenv.
+    * Keeping resolution behind one owner API leaves one place for a future FORCE tier. */
    int module_memory;
    int module_governance;
    int module_delegates;
@@ -2004,18 +2017,11 @@ typedef struct config
     * aux_default_max_tokens: token cap for aux calls; 0 = use agent default.
     * aux_tasks: per-task provider/model/token overrides. */
 #define CONFIG_AUX_MAX_TASKS     16
-#define CONFIG_AUX_TASK_NAME_LEN 64
    int aux_enabled;
    char aux_default_provider[64];
    char aux_default_model[128];
    int aux_default_max_tokens;
-   struct
-   {
-      char task[CONFIG_AUX_TASK_NAME_LEN];
-      char provider[64];
-      char model[128];
-      int max_tokens;
-   } aux_tasks[CONFIG_AUX_MAX_TASKS];
+   config_aux_task_t aux_tasks[CONFIG_AUX_MAX_TASKS];
    int aux_task_count;
 
    /* Model metadata refresh (model_meta.*).
@@ -2112,7 +2118,13 @@ typedef enum
    SCHEMA_INT,
    SCHEMA_BOOL,
    SCHEMA_ARRAY,
-   SCHEMA_OBJECT
+   SCHEMA_OBJECT,
+   /* A key kept in two shapes for backward compatibility: the current scalar
+    * form and a legacy object form the parser still honours. `cross_verify` is
+    * one — flat bool now, `{enabled, verify_cmd, role, prompt}` before — and
+    * test_config_cross_verify pins that the old form must keep working. A single
+    * declared type would make one of the two shapes a validation error. */
+   SCHEMA_BOOL_OR_OBJECT
 } schema_type_t;
 
 typedef struct
@@ -2148,6 +2160,11 @@ int config_load(config_t *cfg);
 /* Bounded enrolled-bearer operations owned by the config module. Callers get a
  * coherent copy or append one token without naming or copying config_t. */
 int config_server_api_bearer_extra_snapshot(char out[][256], int max);
+/* There is deliberately NO write half. Enrolled bearers live in Vault, not the
+ * config file: config_save persists neither server_api_bearer_token nor
+ * server_api_bearer_extra, and config_load MIGRATES any legacy values out to
+ * Vault and scrubs them from the struct (config.c). Callers own those secrets
+ * through the vault API; the snapshot above is the read view. */
 
 /* Live config snapshot (live-config-reload P1a) — a double-buffer + seqlock holding the
  * current config for immediate, push-driven reload. config_t is a flat POD, so reads are a
@@ -2159,20 +2176,54 @@ int config_server_api_bearer_extra_snapshot(char out[][256], int max);
  *                           content-hash token changed (self-reload no-op guard).
  *                           Returns 1 = published, 0 = no-op (unchanged), -1 = kept (bad). */
 void config_snapshot_init(const config_t *cfg);
+
+/* Load the config and publish it as the live snapshot in one step, without the
+ * caller ever holding a config_t. What the daemons actually want at startup. */
+int config_snapshot_seed(void);
+
+/* The accessor primitive: copy `size` bytes at `offset` out of the live config,
+ * preferring the pinned snapshot and heap-loading when none is live. Declared here
+ * so the module's own hand-written accessors can use it; the generated shards each
+ * carry their own local prototype. */
+int config_field_read(size_t offset, size_t size, void *dst);
+
+/* dispositions[index].source as a config_disposition_source_t value. Hand-written
+ * because the accessor generator skips typedef'd-enum struct members. */
+int config_disposition_source(int index);
 int config_snapshot_get(config_t *out);
+
 int config_reload(void);
 
 /* config_reload_if_changed — reload iff the config file changed on disk since the last call
  * (out-of-band write: CLI local config.set, manual edit, or autonomous config_save). Poll it
  * from the server's main-loop tick so a file change takes effect without a restart or SIGHUP.
  * First call reconciles unconditionally. Returns config_reload()'s 1/0/-1 on a change, else 0. */
+/* Non-zero when the config is readable. Replaces `config_load(&cfg) == 0` used
+ * purely as a validity probe -- note this is NOT "the file exists": a missing or
+ * unparsable file loads defaults and succeeds. See config.c for the full set of
+ * conditions that make it fail. */
+int config_present(void);
+
+/* Copy out the sandbox block whole (zeroed when the config cannot be read).
+ * See config_save.c for why this one is a struct rather than field accessors. */
+void config_sandbox(sandbox_config_t *out);
+
 int config_reload_if_changed(void);
 
 /* Re-applier registry (live-config-reload P3): a hook invoked after config_reload publishes a
- * new snapshot, receiving the OLD and NEW config so it can push bound state (env bridge, log
- * level, TLS, …) live when the section it owns changed. Register once at startup. Re-appliers
- * run under the reload writer lock: they must be quick and must NOT call config_reload. */
-typedef void (*config_reapplier_fn)(const config_t *old_cfg, const config_t *new_cfg);
+ * new snapshot, so it can push bound state (env bridge, log level, TLS, …) live.
+ *
+ * It used to receive the OLD and NEW config_t so a hook could diff its own section. No
+ * registered hook ever did -- both just re-read or invalidate -- and handing out two whole
+ * structs to be ignored is the leak this refactor exists to close. The hook now takes
+ * nothing: the snapshot is PUBLISHED BEFORE the re-appliers run (see config_reload), so an
+ * accessor called inside one already returns the new value. A future hook that genuinely
+ * needs the previous value should cache what it cares about on the way past rather than ask
+ * for the whole prior config.
+ *
+ * Register once at startup. Re-appliers run under the reload writer lock: they must be quick
+ * and must NOT call config_reload. */
+typedef void (*config_reapplier_fn)(void);
 void config_reload_register_reapplier(config_reapplier_fn fn);
 
 /* Live autonomy.* accessor (thread-safe) for wfe: for an AIMEE_AUTONOMY_* env NAME that maps
@@ -2181,6 +2232,29 @@ void config_reload_register_reapplier(config_reapplier_fn fn);
  * (e.g. MAX_TURNS) so the caller falls back to its own getenv default. Replaces the unsafe
  * setenv env-bridge for live reload: no cross-thread setenv, wfe reads the seqlock snapshot. */
 int config_autonomy_lookup(const char *env_name, long *out);
+
+/* Anti-pattern guardrail escape hatch. Deliberately env-only and NOT a config key, on the
+ * web_egress doctrine (src/posix/web_egress.c): a switch that DISABLES a guard must require
+ * touching the deployment, not the running config, because config.set is reachable from
+ * inside the running system. Config still owns the read, so no consumer calls getenv.
+ *
+ * Returns 1 only for an explicitly truthy AIMEE_ANTIPATTERNS_BYPASS (1/true/on/yes, any
+ * case). This is VALUE-checked, not presence-checked: the guard previously tested
+ * `!getenv(...)`, so `AIMEE_ANTIPATTERNS_BYPASS=0` disabled the anti-pattern check — the
+ * opposite of what setting 0 means. Unrecognized values fail CLOSED (guard stays on). */
+int config_antipatterns_bypass(void);
+
+/* Structured-PDF sidecar endpoints: the config key (tsr_command / ocr_command) if set, else
+ * the deployment env var (AIMEE_TSR_URL / AIMEE_OCR_URL), else "" meaning the feature is off.
+ * Config owns the precedence so no KB caller reads the environment. Returns a thread-local
+ * buffer valid until the next call to the SAME accessor on this thread; never NULL. */
+const char *config_tsr_endpoint(void);
+const char *config_ocr_endpoint(void);
+
+/* Effective roundtable-module activation: the modules.roundtable tristate resolved against
+ * AIMEE_MODULE_ROUNDTABLE via config_module_enabled. Config owns the env read (an invalid
+ * value warns and defaults off) so the roundtable module holds no config_t and no getenv. */
+int config_module_roundtable_enabled(void);
 /* Force a read from DISK, bypassing the live snapshot. Use for a read-modify-save that must
  * reflect the current on-disk file (e.g. config.set) so it never clobbers an external edit,
  * and internally by config_reload. Ordinary readers should use config_load. */
@@ -2211,6 +2285,11 @@ typedef enum
 } econ_mode_t;
 
 int econ_mode(const config_t *cfg);
+
+/* Live-config forms for callers outside the config module: same policy, read
+ * through accessors instead of a caller-held config_t. Prefer these. */
+int econ_mode_current(void);
+int econ_gateway_mutate_on_current(void);
 const char *econ_mode_name(int mode); /* "off"/"safe"/"aggressive" */
 int econ_mode_parse(const char *s);   /* mode, or -1 for unknown */
 
@@ -2254,6 +2333,8 @@ typedef struct
 } econ_preset_t;
 
 void econ_preset(const config_t *cfg, econ_preset_t *out);
+/* Live-config form; prefer this outside the config module. */
+void econ_preset_current(econ_preset_t *out);
 
 /* Resolve the effective operating mode (engineer/novel) for the running
  * process. Precedence: the AIMEE_MODE environment variable (the propagation
@@ -2281,10 +2362,67 @@ int config_save(const config_t *cfg);
  * Never serialises config_t — no whole-file rebuild, no parse/save drift. */
 int config_set(const char *key, const char *value);
 
+/* KB typed-facts group applied together; a negative argument leaves that field
+ * unchanged (promote_threshold ignores <= 0). */
+int config_set_typed_facts(int enabled, int auto_promote, int promote_threshold);
+
+/* Register a workspace. The cap, the duplicate check and the parallel arrays are
+ * config's business. 0 = added, -1 = save failed, -2 = already registered,
+ * -3 = table full. provider/remote/head may be NULL for the defaults. */
+int config_workspace_add(const char *path, const char *provider, const char *remote,
+                         const char *head);
+/* Remove by path, closing the gap. 0 = removed, -1 = save failed,
+ * -2 = not registered. */
+int config_workspace_remove(const char *path);
+
+/* Write the config file out, materialising declared defaults when it does not
+ * exist yet. Idempotent. */
+int config_persist_defaults(void);
+
+/* Disable the /v1 HTTP listener and persist. Reads the FILE, not the snapshot --
+ * see config_save.c for why this one cannot use the generated setter. */
+int config_disable_api_http_listener(void);
+
+/* The ensemble/roundtable settings a preset applies, as plain data this module
+ * owns. The caller fills it from whatever its own preset format is; config never
+ * learns that format, and this is one persisted write rather than ~16. Widths
+ * match the corresponding config fields exactly so a copy cannot truncate
+ * differently than the parser would. */
+#define CONFIG_RT_PRESET_MAX_SEATS 32
+typedef struct
+{
+   char models[CONFIG_RT_PRESET_MAX_SEATS][128];
+   char personas[CONFIG_RT_PRESET_MAX_SEATS][64];
+   int seat_count;
+   int min_successful;
+   double max_cost_usd;
+   int max_rounds;
+   int converge_threshold;
+   int deadline_ms;
+   char turns[16];             /* "" leaves the current value */
+   char pipeline_done_bar[40]; /* "" leaves the current value */
+   int pipeline_max_passes;
+   int pipeline_max_attempts_per_pass;
+   double pipeline_max_cost_usd;
+   double pipeline_max_total_cost_usd;
+   int pipeline_gate_ttl_h;
+   int pipeline_parked_releases_slot;
+   int pipeline_unknown_context_tokens;
+   char name[64]; /* recorded as roundtable.default */
+} config_roundtable_preset_t;
+
+/* Apply the whole group in one persisted write. Returns 0, -1 on failure. */
+int config_apply_roundtable_preset(const config_roundtable_preset_t *p);
+
 /* config_set_concurrency: surgically rewrite the `concurrency:` section of the config
  * YAML from cfg (preserving all other keys) and republish. The structured-write partner
  * to config_set, for the concurrency limits (nested object + per-model/provider arrays). */
 int config_set_concurrency(const config_t *cfg);
+
+/* Per-model concurrency, by name. The table layout and cap stay inside config.
+ * set: 0 / -1 failed / -2 table full. remove: 0 (absent is success). */
+int config_set_model_concurrency(const char *model, int limit);
+int config_remove_model_concurrency(const char *model);
 
 /* Default config directory: ~/.config/aimee/ */
 const char *config_default_dir(void);
@@ -2296,7 +2434,7 @@ const char *config_default_path(void);
 const char *config_output_dir(void);
 
 /* Effective guardrail mode (defaults to "approve"). */
-const char *config_guardrail_mode(const config_t *cfg);
+const char *config_guardrail_mode(void);
 
 /* 1 if `s` is a valid delegate_sandbox_package_access mode (proxy/off/gated/governance). */
 int config_sandbox_package_access_valid(const char *s);
@@ -2325,6 +2463,15 @@ const char *config_embedding_command_field(void);
  * single member. The element types are shared domain types; config_t is not.
  * Returns 0 on success, -1 on a bad index or unreadable config. */
 int config_cron_job_at(int index, cron_job_t *out);
+
+/* One LSP server entry, copied out. See config_cron_job_at. */
+int config_lsp_server_at(int index, config_lsp_server_t *out);
+
+/* One per-model concurrency override, copied out. See config_cron_job_at. */
+int config_concurrency_per_model_at(int index, config_concurrency_entry_t *out);
+
+/* One aux-task route, copied out. See config_cron_job_at. */
+int config_aux_task_at(int index, config_aux_task_t *out);
 int config_trigger_rule_at(int index, trigger_rule_t *out);
 int config_mcp_client_at(int index, config_mcp_client_t *out);
 
@@ -2350,7 +2497,7 @@ int config_ingress_audit_async(void);
 const char *config_disposition_source_name(config_disposition_source_t source);
 
 /* Conversation directories for the configured provider. */
-int config_conversation_dirs(const config_t *cfg, char dirs[][MAX_PATH_LEN], int max_dirs);
+int config_conversation_dirs(char dirs[][MAX_PATH_LEN], int max_dirs);
 
 /* Session ID for the current process. Reads CLAUDE_SESSION_ID from env,
  * falls back to a random UUID generated once per process. */

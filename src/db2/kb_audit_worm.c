@@ -25,9 +25,6 @@ int db2_kb_audit_worm_enabled(void)
 {
    if (g_kb_worm_enabled < 0)
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof cfg);
-      config_load(&cfg);
       g_kb_worm_enabled = config_audit_worm_enabled() ? 1 : 0;
    }
    return g_kb_worm_enabled;

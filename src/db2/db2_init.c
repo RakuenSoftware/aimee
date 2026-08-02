@@ -574,7 +574,7 @@ static void *db2_thread_acquire(void)
    return conn;
 }
 
-void *db2_conn(void)
+void *db2_conn_at(const char *site)
 {
    pthread_once(&g_thread_conn_key_once, thread_conn_key_init);
    db2_thread_lease_t *L = (db2_thread_lease_t *)pthread_getspecific(g_thread_conn_key);
@@ -583,9 +583,23 @@ void *db2_conn(void)
    /* The db2_init() owner thread uses its dedicated g_conn directly. */
    if (!g_init_thread_set || pthread_equal(pthread_self(), g_init_thread))
       return g_conn;
+   /* Attribute a LAZY acquire (depth 0, outside any db2_lease_begin scope). That
+    * is the shape that leaks: a long-lived worker takes a connection here and
+    * never calls db2_lease_release_idle, pinning a pool member for its lifetime.
+    * Only db2_lease_begin used to record a site, so precisely this case reached
+    * the reaper "unattributed". Set only when no scope owns the thread, so an
+    * explicit begin keeps its own attribution. */
+   if (!g_lease_site && site)
+      g_lease_site = site;
    /* Every other thread leases from the pool (lazily; returned on thread exit
     * by the destructor, or sooner via db2_lease_end at a job boundary). */
    return db2_thread_acquire();
+}
+
+/* Kept for any translation unit that does not see the db2_conn() macro. */
+void *(db2_conn)(void)
+{
+   return db2_conn_at(NULL);
 }
 
 void db2_lease_begin_at(const char *site)
@@ -621,6 +635,7 @@ void db2_lease_end(void)
          L->conn = NULL;
          L->pooled = 0;
       }
+      g_lease_site = NULL;
    }
 }
 
@@ -646,6 +661,7 @@ void db2_lease_release_idle(void)
       L->conn = NULL;
       L->pooled = 0;
    }
+   g_lease_site = NULL;
 }
 
 void *db2_thread_conn_open(char *errbuf, size_t errlen)
@@ -702,6 +718,13 @@ void db2_thread_conn_close(void)
       L->conn = NULL;
       L->pooled = 0;
    }
+}
+
+/* See db2_set_schema_readonly in lifecycle.h. */
+static int g_schema_readonly;
+void db2_set_schema_readonly(int on)
+{
+   g_schema_readonly = on ? 1 : 0;
 }
 
 int db2_is_initialized(void)
@@ -802,7 +825,7 @@ int db2_init(const char *libpq_url)
     * applied by a separate migrate/owner step; here we VERIFY it (read-only) and
     * skip both the probe leg (which would write a fresh dim) and the apply. The
     * dev/owner path below is unchanged. */
-   int pre_provisioned = db2_hardening_enabled() && !aimee_pg_is_shim();
+   int pre_provisioned = (db2_hardening_enabled() || g_schema_readonly) && !aimee_pg_is_shim();
 
    /* §2b fresh-DB probe leg: unpinned + nothing recorded + a probe registered. The
     * advisory lock serialises racing kb starts; FAIL-FAST on any probe/lock/read

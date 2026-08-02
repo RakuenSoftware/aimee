@@ -2,6 +2,7 @@
 #include "computer_use.h"
 
 #include "cJSON.h"
+#include "config_accessors.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -50,7 +51,7 @@ int computer_use_is_tool_name(const char *qualified_tool_name)
           strncmp(qualified_tool_name, "computer-use:", 13) == 0;
 }
 
-void computer_use_policy_from_config(const config_t *cfg, computer_use_policy_t *out)
+void computer_use_policy_from_config(computer_use_policy_t *out)
 {
    if (!out)
       return;
@@ -59,21 +60,21 @@ void computer_use_policy_from_config(const config_t *cfg, computer_use_policy_t 
    out->redact_sensitive_screenshots = 1;
    snprintf(out->allowed_domains[0], sizeof(out->allowed_domains[0]), "%s", "localhost");
    out->allowed_domain_count = 1;
-   if (!cfg)
-      return;
-   out->enabled = cfg->computer_use_enabled;
-   if (cfg->computer_use_default_navigation[0])
-      snprintf(out->default_navigation, sizeof(out->default_navigation), "%s",
-               cfg->computer_use_default_navigation);
-   out->redact_sensitive_screenshots = cfg->computer_use_redact_sensitive_screenshots;
-   if (cfg->computer_use_allowed_domain_count > 0)
+
+   out->enabled = config_computer_use_enabled();
+   const char *nav = config_computer_use_default_navigation();
+   if (nav && nav[0])
+      snprintf(out->default_navigation, sizeof(out->default_navigation), "%s", nav);
+   out->redact_sensitive_screenshots = config_computer_use_redact_sensitive_screenshots();
+   int domain_count = config_computer_use_allowed_domain_count();
+   if (domain_count > 0)
    {
-      out->allowed_domain_count = cfg->computer_use_allowed_domain_count;
+      out->allowed_domain_count = domain_count;
       if (out->allowed_domain_count > COMPUTER_USE_MAX_ALLOWED_DOMAINS)
          out->allowed_domain_count = COMPUTER_USE_MAX_ALLOWED_DOMAINS;
       for (int i = 0; i < out->allowed_domain_count; i++)
          snprintf(out->allowed_domains[i], sizeof(out->allowed_domains[i]), "%s",
-                  cfg->computer_use_allowed_domains[i]);
+                  config_computer_use_allowed_domains(i));
    }
 }
 

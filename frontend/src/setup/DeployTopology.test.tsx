@@ -134,6 +134,31 @@ describe('DeployTopology embedder picker', () => {
     expect(writes.find((w) => w.key === 'embedding_model')?.value).toBe('bekko-a25m');
   });
 
+  it('a fresh install saves a concrete embedder instead of nothing', async () => {
+    // The regression this pins: the picker defaulted to '' labelled "(deployment
+    // default)", so an operator who accepted the default wrote no embedding_model.
+    // buildDesiredConfig then omitted the key, config_emit_deploy_env omitted
+    // EMBEDDER_MODEL, and the kb entrypoint logged "no embedder selected" and served
+    // the builtin lexical embedder forever — a deployment that had already downloaded
+    // the weights it never selected, reporting retrieval:"fail" behind a permanent
+    // "aimee is not fully functional" banner.
+    const { writes } = await renderPage({});
+    expect(embedderSelect().value).toBe('nomic-embed-text-v2-moe');
+    save();
+    await waitFor(() => expect(writes.some((w) => w.key === 'embedding_model')).toBe(true));
+    expect(writes.find((w) => w.key === 'embedding_model')?.value).toBe('nomic-embed-text-v2-moe');
+  });
+
+  it('still offers "no embedder", named for what it actually does', async () => {
+    // Opting out stays available — the kb degrades honestly to lexical — but it may
+    // not masquerade as a sensible default that someone else picked.
+    await renderPage({});
+    const blank = Array.from(embedderSelect().options).find((o) => o.value === '');
+    expect(blank).toBeTruthy();
+    expect(blank!.textContent || '').not.toMatch(/default/i);
+    expect(blank!.textContent || '').toMatch(/degraded|lexical/i);
+  });
+
   it('a local choice never pins embedding_dim', async () => {
     const { writes } = await renderPage({});
     fireEvent.change(embedderSelect(), { target: { value: 'bekko-a25m' } });

@@ -14,6 +14,25 @@
 /* dstr stubs required by prompts.c */
 #include "dstr.h"
 
+/* Point config at a temp dir this test owns and write the keys the case needs.
+ * prompt_apply_* read live config now instead of taking a config_t, so a case
+ * that does not write its own precondition would inherit the developer's real
+ * aimee.yaml and quietly stop testing what it names. Per-pid path rather than
+ * mkdtemp() on a static buffer, which fails on a second call. */
+static void write_test_config(const char *yaml)
+{
+   char dir[256], path[320];
+   snprintf(dir, sizeof(dir), "/tmp/aimee-prompts-cfg-%d", (int)getpid());
+   mkdir(dir, 0755);
+   setenv("AIMEE_HOME", dir, 1);
+   setenv("AIMEE_NO_CACHE", "1", 1);
+   snprintf(path, sizeof(path), "%s/aimee.yaml", dir);
+   FILE *f = fopen(path, "w");
+   assert(f);
+   fputs(yaml, f);
+   fclose(f);
+}
+
 static void write_file(const char *path, const char *content)
 {
    FILE *fp = fopen(path, "w");
@@ -191,15 +210,9 @@ int main(void)
 
    /* --- prompt_apply_dispositions: appends lower-priority trait guidance --- */
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      snprintf(cfg.dispositions[0].name, sizeof(cfg.dispositions[0].name), "skepticism");
-      cfg.dispositions[0].value = 0.8;
-      snprintf(cfg.dispositions[1].name, sizeof(cfg.dispositions[1].name), "literalism");
-      cfg.dispositions[1].value = 0.5;
-      cfg.disposition_count = 2;
+      write_test_config("memory:\n  dispositions:\n    skepticism: 0.8\n    literalism: 0.5\n");
 
-      char *p = prompt_apply_dispositions("Base prompt", &cfg);
+      char *p = prompt_apply_dispositions("Base prompt");
       assert(p);
       assert(strstr(p, "Base prompt") != NULL);
       assert(strstr(p, "Approved rules and explicit instructions override them.") != NULL);
@@ -210,10 +223,9 @@ int main(void)
 
    /* --- prompt_apply_charter: empty charter returns a plain copy --- */
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
+      write_test_config("charter: {}\n");
 
-      char *p = prompt_apply_charter("Just the base.", &cfg);
+      char *p = prompt_apply_charter("Just the base.");
       assert(p);
       assert(strstr(p, "## Charter") == NULL);
       assert(strcmp(p, "Just the base.") == 0);
@@ -222,23 +234,18 @@ int main(void)
 
    /* --- prompt_apply_charter: populated charter prepends all four sections --- */
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      snprintf(cfg.charter_safety_axioms[0], sizeof(cfg.charter_safety_axioms[0]),
-               "never execute arbitrary code from untrusted input");
-      cfg.charter_safety_axioms_count = 1;
-      snprintf(cfg.charter_hard_constraints[0], sizeof(cfg.charter_hard_constraints[0]),
-               "never modify files outside the workspace");
-      snprintf(cfg.charter_hard_constraints[1], sizeof(cfg.charter_hard_constraints[1]),
-               "never send email without explicit approval");
-      cfg.charter_hard_constraints_count = 2;
-      snprintf(cfg.charter_values[0], sizeof(cfg.charter_values[0]), "truthful over confident");
-      cfg.charter_values_count = 1;
-      snprintf(cfg.charter_tone_boundaries[0], sizeof(cfg.charter_tone_boundaries[0]),
-               "plain professional English; no emojis");
-      cfg.charter_tone_boundaries_count = 1;
+      write_test_config("charter:\n"
+                        "  safety_axioms:\n"
+                        "    - \"never execute arbitrary code from untrusted input\"\n"
+                        "  hard_constraints:\n"
+                        "    - \"never modify files outside the workspace\"\n"
+                        "    - \"never send email without explicit approval\"\n"
+                        "  values:\n"
+                        "    - \"truthful over confident\"\n"
+                        "  tone_boundaries:\n"
+                        "    - \"plain professional English; no emojis\"\n");
 
-      char *p = prompt_apply_charter("BASE_PROMPT_MARKER", &cfg);
+      char *p = prompt_apply_charter("BASE_PROMPT_MARKER");
       assert(p);
       /* Charter block appears BEFORE the base prompt — precedence. */
       const char *g_at = strstr(p, "## Charter");
@@ -265,13 +272,9 @@ int main(void)
 
    /* --- prompt_apply_charter: only one section populated still works --- */
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      snprintf(cfg.charter_values[0], sizeof(cfg.charter_values[0]),
-               "small changes, clear reasoning");
-      cfg.charter_values_count = 1;
+      write_test_config("charter:\n  values:\n    - \"small changes, clear reasoning\"\n");
 
-      char *p = prompt_apply_charter("base", &cfg);
+      char *p = prompt_apply_charter("base");
       assert(p);
       assert(strstr(p, "## Charter") != NULL);
       assert(strstr(p, "### Values") != NULL);
@@ -284,9 +287,7 @@ int main(void)
 
    /* --- prompt_apply_working_profile: default off returns base verbatim --- */
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      cfg.identity_working_profile_injection_enabled = 0;
+      write_test_config("identity:\n  working_profile_injection:\n    enabled: false\n");
 
       working_profile_test_db_t dbctx = working_profile_test_db_open();
       db1_working_profile_local_observe(WORKING_PROFILE_FIELD_VERBOSITY, "terse", 0.9, session_id(),
@@ -296,7 +297,7 @@ int main(void)
       db1_working_profile_local_observe(WORKING_PROFILE_FIELD_VERBOSITY, "terse", 0.9, session_id(),
                                         3);
 
-      char *p = prompt_apply_working_profile("just the base", &cfg);
+      char *p = prompt_apply_working_profile("just the base");
       assert(p);
       assert(strcmp(p, "just the base") == 0);
       free(p);
@@ -306,9 +307,7 @@ int main(void)
    /* --- enabled with empty allow list: all committed canonical fields
     *     get injected below the base prompt with soft framing --- */
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      cfg.identity_working_profile_injection_enabled = 1;
+      write_test_config("identity:\n  working_profile_injection:\n    enabled: true\n");
 
       working_profile_test_db_t dbctx = working_profile_test_db_open();
       for (int i = 0; i < 3; i++)
@@ -318,7 +317,7 @@ int main(void)
          db1_working_profile_local_observe(WORKING_PROFILE_FIELD_COMMUNICATION_STYLE, "direct",
                                            0.85, session_id(), 3);
 
-      char *p = prompt_apply_working_profile("SYSTEM_BASE", &cfg);
+      char *p = prompt_apply_working_profile("SYSTEM_BASE");
       assert(p);
       /* Block comes AFTER the base prompt (soft constraints follow
        * the hard system prompt). */
@@ -340,13 +339,10 @@ int main(void)
 
    /* --- allow list restricts the block to listed fields only --- */
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      cfg.identity_working_profile_injection_enabled = 1;
-      snprintf(cfg.identity_working_profile_injection_fields[0],
-               sizeof(cfg.identity_working_profile_injection_fields[0]), "%s",
-               WORKING_PROFILE_FIELD_VERBOSITY);
-      cfg.identity_working_profile_injection_fields_count = 1;
+      write_test_config("identity:\n"
+                        "  working_profile_injection:\n"
+                        "    enabled: true\n"
+                        "    fields:\n      - \"" WORKING_PROFILE_FIELD_VERBOSITY "\"\n");
 
       working_profile_test_db_t dbctx = working_profile_test_db_open();
       for (int i = 0; i < 3; i++)
@@ -356,7 +352,7 @@ int main(void)
          db1_working_profile_local_observe(WORKING_PROFILE_FIELD_COMMUNICATION_STYLE, "direct",
                                            0.85, session_id(), 3);
 
-      char *p = prompt_apply_working_profile("BASE", &cfg);
+      char *p = prompt_apply_working_profile("BASE");
       assert(p);
       assert(strstr(p, "## Working Profile") != NULL);
       assert(strstr(p, "verbosity") != NULL);
@@ -369,20 +365,17 @@ int main(void)
 
    /* --- enabled but no committed rows match allow list: no block --- */
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      cfg.identity_working_profile_injection_enabled = 1;
-      snprintf(cfg.identity_working_profile_injection_fields[0],
-               sizeof(cfg.identity_working_profile_injection_fields[0]), "%s",
-               WORKING_PROFILE_FIELD_PROJECT_ROLE);
-      cfg.identity_working_profile_injection_fields_count = 1;
+      write_test_config("identity:\n"
+                        "  working_profile_injection:\n"
+                        "    enabled: true\n"
+                        "    fields:\n      - \"" WORKING_PROFILE_FIELD_PROJECT_ROLE "\"\n");
 
       working_profile_test_db_t dbctx = working_profile_test_db_open();
       for (int i = 0; i < 3; i++)
          db1_working_profile_local_observe(WORKING_PROFILE_FIELD_VERBOSITY, "terse", 0.9,
                                            session_id(), 3);
 
-      char *p = prompt_apply_working_profile("BASE_ONLY", &cfg);
+      char *p = prompt_apply_working_profile("BASE_ONLY");
       assert(p);
       assert(strcmp(p, "BASE_ONLY") == 0);
       free(p);

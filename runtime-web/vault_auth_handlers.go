@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -108,7 +109,9 @@ func (s *server) handleAuthPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(req.NewPassword) < setupAccountMinPassword || strings.ContainsAny(req.NewPassword, "\x00\r\n") {
-		authError(w, http.StatusBadRequest, "new password must be at least 8 characters and contain no line breaks", "auth.new_password_invalid")
+		authError(w, http.StatusBadRequest,
+			fmt.Sprintf("new password must be at least %d characters and contain no line breaks",
+				setupAccountMinPassword), "auth.new_password_invalid")
 		return
 	}
 	if err := s.identity.UpdatePassword(currentUser(r), req.CurrentPassword, req.NewPassword); err != nil {

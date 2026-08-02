@@ -238,6 +238,41 @@ static void test_surface_list_discovers_audit_tuples(void)
    printf("  surface_list_discovers_audit_tuples: ok\n");
 }
 
+/* kb_calibrate_run reads config through accessors now. This suite links the real
+ * config module, so the two cases that drive it write an aimee.yaml under an
+ * isolated AIMEE_HOME rather than handing over a struct -- the values are the
+ * ones those cases always set, and the round-trip is asserted so a key that
+ * silently stopped parsing cannot turn these into tests of the defaults.
+ *
+ * (test_config_defaults below still builds a config_t by hand and calls
+ * config_apply_calibration_settings directly. That is testing the PARSER, which
+ * legitimately takes a struct, and is left alone.) */
+static char g_cal_home[256];
+
+static void cal_isolate_home(void)
+{
+   snprintf(g_cal_home, sizeof(g_cal_home), "/tmp/aimee-test-calibration-XXXXXX");
+   assert(mkdtemp(g_cal_home) != NULL);
+   assert(setenv("AIMEE_HOME", g_cal_home, 1) == 0);
+   assert(setenv("AIMEE_NO_CACHE", "1", 1) == 0);
+}
+
+static void cal_write_config(int enabled, int buckets, int conformal_window)
+{
+   char path[512];
+   snprintf(path, sizeof(path), "%s/aimee.yaml", config_default_dir());
+   FILE *fp = fopen(path, "w");
+   assert(fp != NULL);
+   fprintf(fp, "calibration:\n");
+   fprintf(fp, "  enabled: %s\n", enabled ? "true" : "false");
+   fprintf(fp, "  buckets: %d\n", buckets);
+   fprintf(fp, "  conformal_window: %d\n", conformal_window);
+   fclose(fp);
+   assert(config_calibration_enabled() == enabled);
+   assert(config_calibration_buckets() == buckets);
+   assert(config_calibration_conformal_window() == conformal_window);
+}
+
 /* ---- 6. calibration config defaults ---- */
 static void test_config_defaults(void)
 {
@@ -319,14 +354,9 @@ static void test_kb_calibrate_run_high_bucket(void)
                           (i % 4 == 0) ? "rejected" : "accepted");
    }
 
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   config_apply_calibration_settings(&cfg, NULL);
-   cfg.calibration_enabled = 1;
-   cfg.calibration_buckets = 10;
-   cfg.calibration_conformal_window = 500;
+   cal_write_config(1, 10, 500);
 
-   int written = kb_calibrate_run(&cfg);
+   int written = kb_calibrate_run();
    assert(written == 1);
 
    char buf[256];
@@ -352,14 +382,9 @@ static void test_kb_calibrate_run_discovers_dynamic_surface(void)
                           "accepted");
    }
 
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   config_apply_calibration_settings(&cfg, NULL);
-   cfg.calibration_enabled = 1;
-   cfg.calibration_buckets = 10;
-   cfg.calibration_conformal_window = 500;
+   cal_write_config(1, 10, 500);
 
-   int written = kb_calibrate_run(&cfg);
+   int written = kb_calibrate_run();
    assert(written == 1);
 
    char buf[256];
@@ -458,6 +483,7 @@ static void test_calibration_sidecar_fixture(void)
 int main(void)
 {
    printf("calibration:\n");
+   cal_isolate_home();
 
    test_profile_write();
    test_profile_read();

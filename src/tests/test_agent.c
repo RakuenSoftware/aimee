@@ -3235,6 +3235,39 @@ static void test_agent_config_deletion_guard(void)
       assert(system(cmd) != 0);
    }
 
+   /* (4) Removing the LAST agent empties the registry legitimately, and the guard
+    * must not refuse it. It looks identical to case (1) from inside the save, so
+    * the remove path declares itself; without that, deleting the only configured
+    * delegate failed with "could not save agents.json" and it could never be
+    * removed. Removing one of several was unaffected, which is why this hid. */
+   {
+      assert(agent_save_config(&cfg) == 0); /* 2 agents on disk */
+      agent_config_t one;
+      assert(agent_load_config(&one) == 0 && one.agent_count == 2);
+      one.agent_count = 1; /* drop beta, as handle_agent_remove does */
+      assert(agent_save_config(&one) == 0);
+
+      agent_config_t last;
+      assert(agent_load_config(&last) == 0 && last.agent_count == 1);
+      last.agent_count = 0;                                /* now drop the last one */
+      assert(agent_save_config(&last) != 0);               /* plain save still refuses */
+      assert(agent_save_config_after_removal(&last) == 0); /* the removal path may */
+
+      agent_config_t gone;
+      assert(agent_load_config(&gone) == 0 && gone.agent_count == 0);
+   }
+
+   /* (5) The exemption is scoped to removal: a zeroed cfg from any other caller is
+    * still refused over a populated file. */
+   {
+      assert(agent_save_config(&cfg) == 0);
+      agent_config_t zeroed;
+      memset(&zeroed, 0, sizeof(zeroed));
+      assert(agent_save_config(&zeroed) != 0);
+      agent_config_t after;
+      assert(agent_load_config(&after) == 0 && after.agent_count == 2);
+   }
+
    if (old_home)
       assert(platform_setenv("HOME", saved_home) == 0);
    else

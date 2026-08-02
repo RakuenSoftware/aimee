@@ -14,9 +14,9 @@ flowchart LR
     W -->|authenticated /v1| S
     W -->|workflow API| F[aimee-wfe]
     F -->|typed resource calls| S
-    S -->|typed /v1| K[aimee-kb]
+    S -->|typed /v1| K[aimee-kb, one-KB profile]
     S -->|provider API| P[model providers]
-    K -->|synth| L[synthesis endpoint]
+    K -->|remote model role, when configured| X[model endpoint]
     S --> D1[(DB1 SQLite)]
     F --> WF[(workflow SQLite)]
     K --> D2[(DB2 PostgreSQL + pgvector)]
@@ -27,9 +27,8 @@ flowchart LR
 | `aimee` | CLI parsing, local hooks, MCP/ACP stdio, client filesystem access | databases, server policy, provider credentials |
 | `aimee-server` | sessions, DB1, agents, tools, policy, vault, provider calls, `/v1` resource plane | DB2, workflow lifecycle |
 | `aimee-wfe` | workflow definitions, scheduling, artifacts, retries, gates, worktrees, forge lifecycle | agent credentials, KB data, general chat |
-| `aimee-kb` | DB2, memory, documents, code graph, retrieval, curation, the bundled embedder | DB1, workflow state, synthesis serving |
+| `aimee-kb` | DB2, memory, documents, code graph, retrieval, curation, and its internal or remote model-role placements | DB1, workflow state, another KB's corpus |
 | `aimee-runtime-web` | browser auth, session proxying, UI delivery | product databases and workflow decisions |
-| synthesis endpoint | synthesis inference, wherever it runs | knowledge storage and curation policy |
 
 `aimee-server` and `aimee-wfe` run as supervised peers in the server image. If either exits, the
 container terminates both and fails. The C server returns `410 Gone` for retired workflow lifecycle
@@ -37,6 +36,10 @@ routes; there is one workflow writer.
 
 The browser, KB console, and optional ambient gateway are clients. They do not bypass the service
 that owns the data they display.
+
+The diagram shows the current one-KB profile. The target topology has several KB containers. The
+server selects one by corpus, authority, and capability before any embedding or synthesis role runs.
+See [KB fleet and model placement](KB_FLEET.md).
 
 ## Two transports
 
@@ -142,7 +145,8 @@ The client opens no database and starts no daemon. Warm state stays in `aimee-se
 2. The server authorizes the principal and calls the KB's typed endpoint.
 3. The KB owns the transaction, lexical/dense indexes, and evidence.
 4. Mutations publish a PII-safe audit identity on the KB bus.
-5. Recall returns bounded evidence; optional synthesis goes through the configured `AIMEE_LLM_URL`.
+5. Recall returns bounded evidence; optional synthesis runs inside the selected KB container or at
+   that KB's configured remote endpoint.
 
 ### Delegate turn
 
@@ -189,8 +193,9 @@ See [Security](SECURITY.md).
 
 | Shape | Use | Tradeoff |
 | --- | --- | --- |
-| Managed server | One server container launches KB and inference from the browser | Needs the host Docker socket |
-| Split stack | Separate server, KB, and inference containers | More explicit; no server Docker control required |
+| Managed server | One server container launches one KB profile from the browser | Needs the host Docker socket |
+| Split stack | Separate server and one KB profile | More explicit; no server Docker control required |
+| KB fleet | Several capability-declaring KB containers | Target routing path; not integrated in this checkout |
 | External DB2 | KB uses managed PostgreSQL | Operator owns backup, TLS, extensions, and latency |
 | Local source install | Development and debugging | Host owns dependencies and services |
 | Thin client | Normal developer machine | Needs a reachable server; keeps state off the client |

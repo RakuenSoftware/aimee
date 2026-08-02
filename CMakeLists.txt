@@ -935,6 +935,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_state_audit.c
     ${AIMEE_SRC_DIR}/server/server_css_query.c
     ${AIMEE_SRC_DIR}/server/server_state_index.c
+    ${AIMEE_SRC_DIR}/server/server_active_project.c
     ${AIMEE_SRC_DIR}/server/server_delegate_monitor.c
     ${AIMEE_SRC_DIR}/server/server_coord_dispatcher.c
     ${AIMEE_SRC_DIR}/server/server_agent.c

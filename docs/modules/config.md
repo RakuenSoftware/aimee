@@ -100,7 +100,7 @@ when no live server snapshot exists.
 The descriptor's four direct tests are `test_config.c` (the config core), `test_config_surface.c` (a
 characterization net auto-derived from `config.c`'s parse surface), `test_config_snapshot.c` (the live
 snapshot double-buffer/seqlock in `config.c`, including a concurrent torn-read stress), and
-`test_config_economizer.c` (config's resolution of the `economizer: off|safe|aggressive` setting: a
+`test_config_economizer.c` (config's resolution of the `economizer: off|safe|aggressive` setting, a
 `config_fields`/`config.c` concern, not the economizer module; it links the core object bundle and no
 economizer object). Adjacent tests such as `test_cmd_config.c` and frontend setup/settings tests
 exercise the cmd and UI layers and are not claimed here. Of the four, `test_config.c` is registered

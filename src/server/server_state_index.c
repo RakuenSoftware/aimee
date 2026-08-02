@@ -4,6 +4,7 @@
 #include "server.h"
 #include "aimee.h"
 #include "kb_client.h"
+#include "log.h" /* aimee_log — name the real KB failure in the server log */
 #include "workspace.h"
 #include "cJSON.h"
 #include "json_fluent.h"
@@ -50,7 +51,7 @@ int handle_index_find(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       {
          const char *cwd = jo_str(req, "cwd", NULL);
          if (cwd)
-            (void)workspace_repo_identity(cwd, project, sizeof(project), NULL, 0);
+            (void)server_active_project_from_cwd(cwd, project, sizeof(project));
       }
    }
    else if (project_arg && project_arg[0])
@@ -58,7 +59,7 @@ int handle_index_find(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    else
    {
       const char *cwd = jo_str(req, "cwd", NULL);
-      if (!cwd || workspace_repo_identity(cwd, project, sizeof(project), NULL, 0) != 0)
+      if (!cwd || server_active_project_from_cwd(cwd, project, sizeof(project)) != 0)
          return server_send_error(
              conn, "scope_required: no active project; pass --scope all explicitly", NULL);
    }
@@ -66,8 +67,18 @@ int handle_index_find(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    term_hit_t hits[128];
    int count = kb_client_index_find_scoped(project, all_projects, identifier, hits, 128);
    if (count < 0)
-      return send_and_free(conn,
-                           kb_last_result_object("knowledge service symbol index unavailable"));
+   {
+      /* Same misattribution as the MCP twin: say which dependency failed, and
+       * leave a log line so a healthy kb is not the first thing suspected. */
+      aimee_log(LOG_WARN, "index.find",
+                "index_find_scoped failed: status=%s project=%s all_projects=%d",
+                kb_client_result_status_name(kb_client_last_result_status()),
+                project[0] ? project : "(none)", all_projects);
+      return send_and_free(
+          conn, kb_last_result_object("code index lookup failed; see result_status for whether the "
+                                      "knowledge service was unreachable, unauthorized, or the "
+                                      "scope did not resolve"));
+   }
 
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "result_status", count > 0 ? "ok" : "empty");
@@ -121,7 +132,7 @@ int handle_index_blast_radius(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    if (!project || !project[0])
    {
       const char *cwd = jo_str(req, "cwd", NULL);
-      if (!cwd || workspace_repo_identity(cwd, project_buf, sizeof(project_buf), NULL, 0) != 0)
+      if (!cwd || server_active_project_from_cwd(cwd, project_buf, sizeof(project_buf)) != 0)
          return server_send_error(conn, "scope_required: no active project", NULL);
       project = project_buf;
    }
@@ -162,7 +173,7 @@ int handle_index_structure(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!project || !project[0])
    {
       const char *cwd = jo_str(req, "cwd", NULL);
-      if (!cwd || workspace_repo_identity(cwd, project_buf, sizeof(project_buf), NULL, 0) != 0)
+      if (!cwd || server_active_project_from_cwd(cwd, project_buf, sizeof(project_buf)) != 0)
          return server_send_error(conn, "scope_required: no active project", NULL);
       project = project_buf;
    }
@@ -205,14 +216,14 @@ int handle_index_find_callers(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
       if (!project || !project[0])
       {
          const char *cwd = jo_str(req, "cwd", NULL);
-         if (cwd && workspace_repo_identity(cwd, project_buf, sizeof(project_buf), NULL, 0) == 0)
+         if (cwd && server_active_project_from_cwd(cwd, project_buf, sizeof(project_buf)) == 0)
             project = project_buf;
       }
    }
    else if (!project || !project[0])
    {
       const char *cwd = jo_str(req, "cwd", NULL);
-      if (!cwd || workspace_repo_identity(cwd, project_buf, sizeof(project_buf), NULL, 0) != 0)
+      if (!cwd || server_active_project_from_cwd(cwd, project_buf, sizeof(project_buf)) != 0)
          return server_send_error(
              conn, "scope_required: no active project; pass --scope all explicitly", NULL);
       project = project_buf;

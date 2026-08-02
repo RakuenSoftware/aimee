@@ -1,768 +1,12 @@
 {
   "_note": "Ratchet baseline for check-config-encapsulation.py. config_t is a secret of the config module; these are the sites that still materialise it. Counts may only DECREASE. Migrate a file to config accessors, then rerun with --update-baseline.",
   "files": {
-    "src/cmd_agent.c": {
-      "decls": 2,
-      "loads": 2
-    },
-    "src/cmd_agent_delegate.c": {
-      "decls": 5,
-      "loads": 5
-    },
-    "src/cmd_core.c": {
-      "decls": 9,
-      "loads": 7
-    },
-    "src/cmd_data.c": {
-      "decls": 10,
-      "loads": 8
-    },
-    "src/cmd_doctor.c": {
-      "decls": 9,
-      "loads": 2
-    },
-    "src/cmd_dogfood.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/cmd_hooks.c": {
-      "decls": 2,
-      "loads": 2
-    },
-    "src/cmd_identity.c": {
-      "decls": 3,
-      "loads": 2
-    },
-    "src/cmd_infra.c": {
-      "decls": 7,
-      "loads": 5
-    },
-    "src/cmd_kb.c": {
-      "decls": 4,
-      "loads": 4
-    },
-    "src/cmd_memory.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/cmd_memory_embed.c": {
-      "decls": 5,
-      "loads": 4
-    },
-    "src/cmd_memory_internal.h": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/cmd_memory_vector.c": {
-      "decls": 2,
-      "loads": 2
-    },
-    "src/cmd_provider.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/cmd_run.c": {
-      "decls": 2,
-      "loads": 2
-    },
-    "src/cmd_session_lifecycle.c": {
-      "decls": 16,
-      "loads": 6
-    },
-    "src/conversation_context.c": {
-      "decls": 5,
-      "loads": 5
-    },
-    "src/dashboard.c": {
-      "decls": 2,
-      "loads": 2
-    },
-    "src/db2/canonical_index.c": {
-      "decls": 2,
-      "loads": 2
-    },
-    "src/db2/kb_audit_worm.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/db2/kb_service_backend_memory.c": {
-      "decls": 2,
-      "loads": 2
-    },
-    "src/dogfood.c": {
-      "decls": 8,
-      "loads": 6
-    },
-    "src/headers/agent_config.h": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/headers/aimee.h": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/headers/aux_router.h": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/headers/cmd_hooks_platform.h": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/headers/commands.h": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/headers/computer_use.h": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/headers/fidelity_check.h": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/headers/kb_curator_provider.h": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/headers/kb_ocr_sidecar.h": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/headers/kb_tsr_sidecar.h": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/headers/memory.h": {
-      "decls": 7,
-      "loads": 0
-    },
-    "src/headers/prompts.h": {
-      "decls": 4,
-      "loads": 0
-    },
-    "src/index.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/kb/http/kb_http.c": {
-      "decls": 6,
-      "loads": 6
-    },
-    "src/kb/http/kb_http_code.c": {
-      "decls": 4,
-      "loads": 4
-    },
-    "src/kb/http/kb_http_console.c": {
-      "decls": 7,
-      "loads": 6
-    },
-    "src/kb/http/kb_http_ingest.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/kb/http/kb_tls_serve.c": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/kb/kb.c": {
-      "decls": 4,
-      "loads": 4
-    },
-    "src/kb/kb_bandit.c": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/kb/kb_blob_store.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/kb/kb_calibrate.c": {
-      "decls": 3,
-      "loads": 0
-    },
-    "src/kb/kb_demote.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/kb/kb_detect.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/kb/kb_doc_pdf.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/kb/kb_ingest_workers.c": {
-      "decls": 5,
-      "loads": 7
-    },
-    "src/kb/kb_intel_payload.c": {
-      "decls": 4,
-      "loads": 4
-    },
-    "src/kb/kb_main.c": {
-      "decls": 5,
-      "loads": 3
-    },
-    "src/kb/kb_memory_facts.c": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/kb/kb_memory_facts.h": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/kb/kb_mining.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/kb/kb_ocr_sidecar.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/kb/kb_planner.c": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/kb/kb_ranker.c": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/kb/kb_ranker_fit.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/kb/kb_reasoning.c": {
-      "decls": 3,
-      "loads": 0
-    },
-    "src/kb/kb_reflection.c": {
-      "decls": 5,
-      "loads": 3
-    },
-    "src/kb/kb_service.c": {
-      "decls": 4,
-      "loads": 4
-    },
-    "src/kb/kb_service_agent.c": {
-      "decls": 2,
-      "loads": 2
-    },
-    "src/kb/kb_service_artifacts.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/kb/kb_service_code_embed.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/kb/kb_service_kb.c": {
-      "decls": 5,
-      "loads": 3
-    },
-    "src/kb/kb_service_memory.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/kb/kb_service_workers.c": {
-      "decls": 3,
-      "loads": 4
-    },
-    "src/kb/kb_surprising_judge.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/kb/kb_surprising_judge.h": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/kb/kb_tsr_sidecar.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/kb/memory_rewrite_llm.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/kb_bandit.h": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/kb_calibrate.h": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/kb_curator_provider.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/kb_demote.h": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/kb_detect.h": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/kb_planner.h": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/kb_ranker.h": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/kb_ranker_fit.h": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/kb_reasoning.h": {
-      "decls": 3,
-      "loads": 0
-    },
-    "src/modules/benchmarks/agent_eval.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/modules/benchmarks/agent_eval_benchmarks.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/modules/benchmarks/agent_eval_memory_support.c": {
-      "decls": 2,
-      "loads": 2
-    },
-    "src/modules/css/css_render_cmd.c": {
-      "decls": 2,
-      "loads": 2
-    },
-    "src/modules/delegates/delegate_sandbox_image.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/modules/delegates/include/aimee/delegates/panel_provider.h": {
-      "decls": 4,
-      "loads": 0
-    },
-    "src/modules/delegates/include/aimee/delegates/panel_roster.h": {
-      "decls": 5,
-      "loads": 0
-    },
-    "src/modules/delegates/panel_provider.c": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/modules/delegates/panel_roster.c": {
-      "decls": 5,
-      "loads": 0
-    },
-    "src/modules/economizer/gateway_mutate_wire.c": {
-      "decls": 2,
-      "loads": 2
-    },
-    "src/modules/economizer/tool_condense.c": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/modules/economizer/tool_condense.h": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/modules/execution-policy/execution_policy.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/modules/git/git_verify_ops.c": {
-      "decls": 2,
-      "loads": 2
-    },
-    "src/modules/guardrails/guardrails_action_audit.c": {
-      "decls": 4,
-      "loads": 2
-    },
-    "src/modules/guardrails/guardrails_orchestrator.c": {
-      "decls": 7,
-      "loads": 7
-    },
-    "src/modules/kb-synthesis/kb_curator_drain.c": {
-      "decls": 12,
-      "loads": 11
-    },
-    "src/modules/kb-synthesis/kb_curator_extract.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/modules/kb-synthesis/kb_curator_index_claims.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/modules/kb-synthesis/kb_curator_index_code_unit.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/modules/kb-synthesis/kb_curator_index_narrative.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/modules/kb-synthesis/kb_curator_judge.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/modules/kb-synthesis/kb_curator_judge.h": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/modules/kb-synthesis/kb_curator_link_artifacts.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/modules/kb-synthesis/kb_curator_llm.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/modules/kb-synthesis/kb_curator_llm.h": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/modules/kb-synthesis/kb_curator_resolve_entities.c": {
-      "decls": 2,
-      "loads": 1
-    },
-    "src/modules/kb-synthesis/kb_curator_synthesize.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/modules/kb_client/kb_client_mtls.c": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/modules/learning/learning_implicit.c": {
-      "decls": 4,
-      "loads": 4
-    },
-    "src/modules/learning/learning_router.c": {
-      "decls": 4,
-      "loads": 4
-    },
-    "src/modules/lsp/lsp_manager.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/modules/memory/memory_advanced.c": {
-      "decls": 2,
-      "loads": 2
-    },
-    "src/modules/memory/memory_assemble.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/modules/memory/memory_context.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/modules/memory/memory_core.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/modules/memory/memory_core_crud.c": {
-      "decls": 3,
-      "loads": 3
-    },
-    "src/modules/memory/memory_core_helpers.c": {
-      "decls": 13,
-      "loads": 9
-    },
-    "src/modules/memory/memory_core_helpers_b.c": {
-      "decls": 2,
-      "loads": 2
-    },
-    "src/modules/memory/memory_core_internal.h": {
-      "decls": 5,
-      "loads": 1
-    },
-    "src/modules/memory/memory_core_search_b.c": {
-      "decls": 3,
-      "loads": 2
-    },
-    "src/modules/memory/memory_core_search_c.c": {
-      "decls": 6,
-      "loads": 2
-    },
-    "src/modules/memory/memory_episodes.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/modules/memory/memory_improve.c": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/modules/memory/memory_logic.c": {
-      "decls": 2,
-      "loads": 2
-    },
-    "src/modules/memory/memory_maintenance.c": {
-      "decls": 6,
-      "loads": 0
-    },
-    "src/modules/memory/memory_rewrite_llm.h": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/modules/protocols/include/aimee/protocols/mcp/mcp_client_registry.h": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/modules/protocols/mcp/mcp_client_registry.c": {
-      "decls": 4,
-      "loads": 0
-    },
-    "src/modules/roundtable/delegate_ensemble.c": {
-      "decls": 18,
-      "loads": 0
-    },
-    "src/modules/roundtable/delegate_ensemble.h": {
-      "decls": 10,
-      "loads": 0
-    },
-    "src/modules/roundtable/roundtable_activation.c": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/modules/roundtable/roundtable_activation.h": {
-      "decls": 3,
-      "loads": 0
-    },
-    "src/modules/roundtable/roundtable_preset.c": {
-      "decls": 4,
-      "loads": 2
-    },
-    "src/modules/roundtable/roundtable_preset.h": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/modules/roundtable/roundtable_provider.c": {
-      "decls": 3,
-      "loads": 0
-    },
-    "src/modules/routing/routing.c": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/modules/tools/agent_tools.c": {
-      "decls": 3,
-      "loads": 3
-    },
-    "src/modules/tools/agent_tools_dispatch.c": {
-      "decls": 9,
-      "loads": 9
-    },
-    "src/modules/vault/vault_custody_tpm2.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/modules/workflows/wfe_live_panel.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/modules/workspace/workspace.c": {
-      "decls": 3,
-      "loads": 1
-    },
-    "src/modules/workspace/workspace.h": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/modules/workspace/workspace_turn.c": {
-      "decls": 4,
-      "loads": 4
-    },
-    "src/payload_rewrite.c": {
-      "decls": 3,
-      "loads": 3
-    },
-    "src/posix/agent_runtime.c": {
-      "decls": 3,
-      "loads": 3
-    },
-    "src/posix/cmd_hooks.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/posix/server_compute.c": {
-      "decls": 9,
-      "loads": 1
-    },
-    "src/prompts.c": {
-      "decls": 5,
-      "loads": 0
-    },
-    "src/server/agent_policy.c": {
-      "decls": 2,
-      "loads": 2
-    },
-    "src/server/agent_route.c": {
-      "decls": 3,
-      "loads": 0
-    },
-    "src/server/agent_runtime.c": {
-      "decls": 8,
-      "loads": 8
-    },
-    "src/server/agent_tools.c": {
-      "decls": 2,
-      "loads": 2
-    },
-    "src/server/aimee_ir_serve.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/server/anthropic_http.c": {
-      "decls": 4,
-      "loads": 4
-    },
-    "src/server/aux_router.c": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/server/computer_use.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/server/dashboard_server.c": {
-      "decls": 2,
-      "loads": 2
-    },
-    "src/server/deploy_apply.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/server/fidelity_check.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/server/openai_chat.c": {
-      "decls": 5,
-      "loads": 5
-    },
-    "src/server/provider_cli_adapter.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/server/s2_native_gate_hook.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/server/server.c": {
-      "decls": 7,
-      "loads": 7
-    },
-    "src/server/server_agent.c": {
-      "decls": 2,
-      "loads": 2
-    },
-    "src/server/server_api.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/server/server_api_status.c": {
-      "decls": 6,
-      "loads": 3
-    },
-    "src/server/server_compute.c": {
-      "decls": 5,
-      "loads": 4
-    },
-    "src/server/server_compute_async.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/server/server_config.c": {
-      "decls": 3,
-      "loads": 3
-    },
-    "src/server/server_coord_dispatcher.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/server/server_cron.c": {
-      "decls": 5,
-      "loads": 3
-    },
-    "src/server/server_http_reqctx.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/server/server_jobs_aux.c": {
-      "decls": 3,
-      "loads": 2
-    },
-    "src/server/server_main.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/server/server_mcp.c": {
-      "decls": 2,
-      "loads": 2
-    },
-    "src/server/server_mgmt_read_source.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/server/server_pipeline.c": {
-      "decls": 7,
-      "loads": 7
-    },
-    "src/server/server_runner_endpoints.c": {
-      "decls": 3,
-      "loads": 3
-    },
-    "src/server/server_skill_jobs.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/server/server_state.c": {
-      "decls": 5,
-      "loads": 5
-    },
-    "src/server/server_sweep.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/server/server_trigger.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/server/server_workflow_api.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/server/web_search.c": {
-      "decls": 2,
-      "loads": 1
-    },
-    "src/server/wfe_roundtable_proxy.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/server_provider.c": {
-      "decls": 3,
-      "loads": 3
-    },
     "src/tests/fuzz_corpus/seed.c": {
       "decls": 4,
       "loads": 0
     },
     "src/tests/support/ir_ingress_stubs.c": {
       "decls": 2,
-      "loads": 0
-    },
-    "src/tests/support/ir_seam_memory_stub.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/tests/test_agent_caps.c": {
-      "decls": 13,
       "loads": 0
     },
     "src/tests/test_agent_max_turns.c": {
@@ -782,7 +26,7 @@
       "loads": 1
     },
     "src/tests/test_bandit.c": {
-      "decls": 3,
+      "decls": 1,
       "loads": 0
     },
     "src/tests/test_bus_config_autonomy.c": {
@@ -790,7 +34,7 @@
       "loads": 0
     },
     "src/tests/test_calibration.c": {
-      "decls": 4,
+      "decls": 2,
       "loads": 0
     },
     "src/tests/test_cmd_config.c": {
@@ -807,7 +51,7 @@
     },
     "src/tests/test_config.c": {
       "decls": 101,
-      "loads": 85
+      "loads": 84
     },
     "src/tests/test_config_accessors.c": {
       "decls": 1,
@@ -834,7 +78,7 @@
       "loads": 2
     },
     "src/tests/test_config_snapshot.c": {
-      "decls": 18,
+      "decls": 16,
       "loads": 4
     },
     "src/tests/test_config_snapshot_race.c": {
@@ -861,18 +105,6 @@
       "decls": 1,
       "loads": 0
     },
-    "src/tests/test_curator_resolve_entities.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/tests/test_curiosity.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/tests/test_delegate_ensemble.c": {
-      "decls": 50,
-      "loads": 0
-    },
     "src/tests/test_delegate_sandbox_image.c": {
       "decls": 3,
       "loads": 3
@@ -881,16 +113,8 @@
       "decls": 1,
       "loads": 0
     },
-    "src/tests/test_deploy_apply.c": {
-      "decls": 2,
-      "loads": 1
-    },
     "src/tests/test_features.c": {
       "decls": 4,
-      "loads": 0
-    },
-    "src/tests/test_fidelity_check.c": {
-      "decls": 1,
       "loads": 0
     },
     "src/tests/test_gateway_p4_delegate.c": {
@@ -902,12 +126,8 @@
       "loads": 1
     },
     "src/tests/test_guardrails.c": {
-      "decls": 2,
-      "loads": 1
-    },
-    "src/tests/test_guardrails_computer_use.c": {
       "decls": 1,
-      "loads": 0
+      "loads": 1
     },
     "src/tests/test_gw_stage_memory.c": {
       "decls": 1,
@@ -917,20 +137,12 @@
       "decls": 2,
       "loads": 1
     },
-    "src/tests/test_kb_curator_llm.c": {
-      "decls": 4,
-      "loads": 0
-    },
-    "src/tests/test_kb_curator_provider.c": {
-      "decls": 5,
-      "loads": 0
-    },
     "src/tests/test_kb_http_ingest.c": {
-      "decls": 1,
+      "decls": 2,
       "loads": 1
     },
     "src/tests/test_kb_http_routes.c": {
-      "decls": 11,
+      "decls": 8,
       "loads": 1
     },
     "src/tests/test_kb_maintenance.c": {
@@ -941,20 +153,12 @@
       "decls": 1,
       "loads": 0
     },
-    "src/tests/test_kb_reflection.c": {
-      "decls": 7,
-      "loads": 0
-    },
     "src/tests/test_mcp_client_registry.c": {
-      "decls": 7,
+      "decls": 1,
       "loads": 0
     },
     "src/tests/test_memory.c": {
-      "decls": 5,
-      "loads": 0
-    },
-    "src/tests/test_memory_advanced.c": {
-      "decls": 2,
+      "decls": 1,
       "loads": 0
     },
     "src/tests/test_memory_lanes.c": {
@@ -965,20 +169,12 @@
       "decls": 1,
       "loads": 1
     },
-    "src/tests/test_panel_provider.c": {
-      "decls": 4,
-      "loads": 0
-    },
     "src/tests/test_payload_rewrite.c": {
       "decls": 3,
       "loads": 3
     },
     "src/tests/test_planner.c": {
-      "decls": 4,
-      "loads": 0
-    },
-    "src/tests/test_prompts.c": {
-      "decls": 8,
+      "decls": 2,
       "loads": 0
     },
     "src/tests/test_ranker_fit.c": {
@@ -986,32 +182,20 @@
       "loads": 0
     },
     "src/tests/test_reasoning.c": {
-      "decls": 4,
+      "decls": 2,
       "loads": 0
     },
     "src/tests/test_retrieval_outcome_bridge.c": {
       "decls": 1,
       "loads": 1
     },
-    "src/tests/test_roundtable_preset.c": {
-      "decls": 3,
-      "loads": 2
-    },
-    "src/tests/test_server_compute.c": {
-      "decls": 2,
-      "loads": 0
-    },
     "src/tests/test_server_dispatch.c": {
-      "decls": 7,
+      "decls": 6,
       "loads": 2
     },
     "src/tests/test_server_jobs_aux.c": {
-      "decls": 3,
-      "loads": 1
-    },
-    "src/tests/test_server_mgmt_read_source.c": {
       "decls": 1,
-      "loads": 1
+      "loads": 0
     },
     "src/tests/test_token_audit_load.c": {
       "decls": 1,
@@ -1033,26 +217,14 @@
       "decls": 1,
       "loads": 1
     },
-    "src/tests/test_workspace.c": {
-      "decls": 2,
-      "loads": 0
-    },
     "src/tests/test_workspace_turn.c": {
       "decls": 4,
       "loads": 5
-    },
-    "src/windows/cmd_hooks.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/workflow_learn.c": {
-      "decls": 1,
-      "loads": 1
     }
   },
   "totals": {
-    "decls": 922,
-    "files": 262,
-    "loads": 470
+    "decls": 242,
+    "files": 55,
+    "loads": 149
   }
 }

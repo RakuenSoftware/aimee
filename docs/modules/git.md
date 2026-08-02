@@ -105,11 +105,11 @@ The descriptor's fourteen direct tests are `test_forge_credentials.c`, `test_git
 `test_git_forge_vault.c`, `test_git_host_resolve.c`, `test_git_ops.c`, `test_git_pr_ci_grade.c`,
 `test_git_project.c`, `test_git_ssh_agent.c`, `test_git_verify_contract.c`, `test_git_verify_select.c`,
 `test_mcp_git.c`, and the three CTest-only `test_git_oauth_device.c`, `test_git_oauth_gh.c`, and
-`test_git_org_repos.c` is registered in `src/tests/CMakeLists.txt` but not built by a Make `unit-test-*`
+`test_git_org_repos.c`. It is registered in `src/tests/CMakeLists.txt` but not built by a Make `unit-test-*`
 target, so recorded as `make: false, ctest: true`, the inverse of the usual pattern. Two adjacent
 tests are not claimed: `test_forge_app_token.c` exercises the root-level `src/forge_app_token.c`, not a
 git-module source, and `test_forge_credentials_live.c` is the `forge-cred-live` integration harness
-that needs a running forge. It is supplementary coverage of `forge_credentials.c`, which already has a unit
+that needs a running forge. It provides supplementary coverage of `forge_credentials.c`, which already has a unit
 test. Together with guardrail Git tests and integration tool calls they cover current behavior.
 Missing repository, denied mutation, dirty/conflicting state, invalid ref/path, failed
 signature/redaction, absent credential, forge error, or failed verify step must return typed failure;

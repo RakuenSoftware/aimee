@@ -20,8 +20,8 @@ tests, and this document; it sets `ownership_complete: true`. All eleven headers
 `private_headers` because they live at the module root rather than under
 `src/modules/workspace/include/aimee/workspace/`, the layout the header-layout checker treats as
 private; `workspace_provider.h` is the provider dispatch interface and has no paired source, while
-`cli_workspace_serve.c` has no paired header. Three sources (`workspace_provider_container.c`,
-`workspace_provider_detached.c`, and `workspace_runner_queue.c`) have no external includer but are
+`cli_workspace_serve.c` has no paired header. Three sources, `workspace_provider_container.c`,
+`workspace_provider_detached.c`, and `workspace_runner_queue.c`, have no external includer but are
 live module-internal units: the container and detached providers are selected through
 `workspace_provider.h` by `workspace_turn.c` and `cli_workspace_serve.c`, and the runner queue is
 consumed through `workspace_runner_registry.h`. Make compiles all eleven sources; CMake compiles the

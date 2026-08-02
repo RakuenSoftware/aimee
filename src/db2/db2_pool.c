@@ -321,6 +321,9 @@ int db2_pool_reaper_sweep(void)
 {
    int stuck = 0, live = 0, waiters = 0;
    char reason[256] = "";
+   /* Who held the first stuck member, so the fatal line names a code location
+    * instead of only a count. */
+   const char *first_site = NULL;
    pthread_mutex_lock(&g_mtx);
    int64_t now = mono_ms();
    for (int i = 0; i < g_size; i++)
@@ -332,6 +335,8 @@ int db2_pool_reaper_sweep(void)
       {
          stuck++;
          g_stuck++;
+         if (!first_site)
+            first_site = g_members[i].site;
          POOL_LOG("member %d leased %lldms (> %lldms ceiling) by %s — missed lease_end?", i,
                   (long long)(now - g_members[i].lease_ms), (long long)g_hold_ceiling_ms,
                   g_members[i].site ? g_members[i].site : "unattributed");
@@ -360,8 +365,9 @@ int db2_pool_reaper_sweep(void)
       g_starved_sweeps++;
       snprintf(reason, sizeof(reason),
                "all %d pool members stuck past the %lldms ceiling with %d waiter(s) for %d "
-               "consecutive sweeps — lease leak, unrecoverable in-process",
-               g_size, (long long)g_hold_ceiling_ms, waiters, g_starved_sweeps);
+               "consecutive sweeps — lease leak, unrecoverable in-process; first holder: %s",
+               g_size, (long long)g_hold_ceiling_ms, waiters, g_starved_sweeps,
+               first_site ? first_site : "unattributed");
    }
    else
       g_starved_sweeps = 0;

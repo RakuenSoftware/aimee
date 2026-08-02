@@ -239,6 +239,17 @@ static SSL_CTX *tls_build_ctx(const char *cert_path, const char *key_path, int m
    /* Advertise HTTP/1.1 over ALPN so ALPN-strict clients (e.g. Codex) don't
     * fall back to HTTP/2 on this HTTP/1.1-only server. */
    SSL_CTX_set_alpn_select_cb(ctx, alpn_select_cb, NULL);
+   /* Session resumption REQUIRES this once client certs are in play (below).
+    * OpenSSL refuses to resume a session carrying a peer certificate unless the
+    * server's session id context matches the one the session was created under;
+    * with none set it fails SSL_R_SESSION_ID_CONTEXT_UNINITIALIZED and sends an
+    * internal_error alert instead of completing the handshake. Server-side
+    * caching and TLS 1.3 tickets are both on by default here, so leaving this
+    * unset broke exactly the resuming half of a client's connections. Set it
+    * unconditionally: mTLS can be ramped on at runtime, and a stable value is
+    * correct for a non-mTLS context too. */
+   static const unsigned char sid_ctx[] = "aimee-server";
+   SSL_CTX_set_session_id_context(ctx, sid_ctx, sizeof(sid_ctx) - 1);
    int key_ok = 0;
    if (key_path && key_path[0])
       key_ok = SSL_CTX_use_PrivateKey_file(ctx, key_path, SSL_FILETYPE_PEM) == 1;

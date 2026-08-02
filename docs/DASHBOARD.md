@@ -8,10 +8,11 @@ service, the same stack the KB's `/v1/identity/login/pam` uses. Accounts outside
 never dashboard logins, so the container's own system users cannot sign in. An unavailable PAM stack
 is reported as such rather than as a wrong password.
 
-Which flow applies follows the connected KB's `/v1/identity/auth-mode`. Under `oidc` the identity
-provider owns accounts and local account management is refused; the wizard's account step disappears.
-Dashboard login itself remains PAM in this release, with the OIDC flow arriving in 0.4.0. Any failure
-to reach the KB resolves to PAM, which is the mode with a local answer.
+Which account-management flow applies follows the connected KB's `/v1/identity/auth-mode`. Under
+`oidc` the identity provider owns accounts, local account management is refused, and the wizard's
+account step disappears. Dashboard login itself remains PAM in this release. Do not configure an
+OIDC-only identity deployment until browser OIDC login is available. Any failure to reach the KB
+resolves to PAM, which is the mode with a local answer.
 
 ## Pages
 
@@ -45,13 +46,14 @@ raw YAML editor. See [Settings](SETTINGS.md).
 
 ## Managed deploy
 
-The setup wizard can start KB and inference containers when the server has the Docker socket. That
+The setup wizard can start the KB container when the server has the Docker socket. That
 is Docker-host authority. Use the split stack when the browser must not control deployment.
 
 ## Security
 
 Browser requests need login, secure cookies, CSRF checks for mutation, and principal propagation.
-The proxy uses deny-by-default route families. Credentials stay in the server vault.
+The proxy uses deny-by-default route families. Provider and Git credentials stay in the server vault;
+dashboard passwords belong to local PAM, with a root-only verifier persisted for container recovery.
 
 See [Web git security](WEBCHAT_GIT_SECURITY.md), [Workflow Actions](WORKFLOW_ACTIONS.md), and
 [VS Code](VSCODE.md).

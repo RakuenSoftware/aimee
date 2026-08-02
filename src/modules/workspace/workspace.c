@@ -129,7 +129,12 @@ int workspace_discover_projects(const char *root, int max_depth, char projects[]
    return count;
 }
 
-int workspace_active_root(const config_t *cfg, const char *cwd, char *out, size_t out_len)
+/* Shared body. consult_workspaces selects the policy the old `cfg`/NULL argument
+ * used to encode: NULL meant "resolve from cwd alone", which two callers relied
+ * on deliberately so a non-repository cwd inside a configured workspace could not
+ * inherit that workspace's directory name as its project label. */
+static int workspace_active_root_impl(int consult_workspaces, const char *cwd, char *out,
+                                      size_t out_len)
 {
    if (!out || out_len == 0)
       return -1;
@@ -158,13 +163,14 @@ int workspace_active_root(const config_t *cfg, const char *cwd, char *out, size_
       char resolved_cwd[MAX_PATH_LEN];
       const char *cwd_abs = realpath(cwd, resolved_cwd) ? resolved_cwd : cwd;
 
-      if (cfg)
+      if (consult_workspaces)
       {
          int best = -1;
          size_t best_len = 0;
-         for (int i = 0; i < cfg->workspace_count; i++)
+         int workspace_count = config_workspace_count();
+         for (int i = 0; i < workspace_count; i++)
          {
-            const char *ws = cfg->workspaces[i];
+            const char *ws = config_workspaces(i);
             size_t ws_len = strlen(ws);
             if (ws_len == 0)
                continue;
@@ -180,7 +186,7 @@ int workspace_active_root(const config_t *cfg, const char *cwd, char *out, size_
          }
          if (best >= 0)
          {
-            snprintf(out, out_len, "%s", cfg->workspaces[best]);
+            snprintf(out, out_len, "%s", config_workspaces(best));
             return 0;
          }
       }
@@ -189,13 +195,23 @@ int workspace_active_root(const config_t *cfg, const char *cwd, char *out, size_
       return 0;
    }
 
-   if (cfg && cfg->workspace_count > 0 && cfg->workspaces[0][0])
+   if (consult_workspaces && config_workspace_count() > 0 && config_workspaces(0)[0])
    {
-      snprintf(out, out_len, "%s", cfg->workspaces[0]);
+      snprintf(out, out_len, "%s", config_workspaces(0));
       return 0;
    }
 
    return -1;
+}
+
+int workspace_active_root(const char *cwd, char *out, size_t out_len)
+{
+   return workspace_active_root_impl(1, cwd, out, out_len);
+}
+
+int workspace_active_root_from_cwd(const char *cwd, char *out, size_t out_len)
+{
+   return workspace_active_root_impl(0, cwd, out, out_len);
 }
 
 static int workspace_identity_value_ok(const char *id)
@@ -552,10 +568,9 @@ static const char *skip_frontmatter(const char *content)
 }
 #endif
 
-char *workspace_build_context_from_config(const config_t *cfg)
+char *workspace_build_context_from_config(void)
 {
 #ifdef AIMEE_DB1_DISABLED
-   (void)cfg;
    return NULL;
 #else
    size_t bufsize = 64 * 1024;
@@ -581,9 +596,10 @@ char *workspace_build_context_from_config(const config_t *cfg)
    int pcount = kb_client_index_list(projects, 256);
 
    /* Group projects by workspace and emit context */
-   for (int w = 0; w < cfg->workspace_count; w++)
+   int workspace_count = config_workspace_count();
+   for (int w = 0; w < workspace_count; w++)
    {
-      const char *ws_root = cfg->workspaces[w];
+      const char *ws_root = config_workspaces(w);
       size_t ws_len = strlen(ws_root);
 
       /* Find projects belonging to this workspace */
@@ -647,10 +663,12 @@ char *workspace_build_context_from_config(const config_t *cfg)
    for (int p = 0; p < pcount; p++)
    {
       int found_ws = 0;
-      for (int w = 0; w < cfg->workspace_count; w++)
+      int ws_n = config_workspace_count();
+      for (int w = 0; w < ws_n; w++)
       {
-         size_t ws_len = strlen(cfg->workspaces[w]);
-         if (strncmp(projects[p].root, cfg->workspaces[w], ws_len) == 0 &&
+         const char *ws = config_workspaces(w);
+         size_t ws_len = strlen(ws);
+         if (strncmp(projects[p].root, ws, ws_len) == 0 &&
              (projects[p].root[ws_len] == '/' || projects[p].root[ws_len] == '\0'))
          {
             found_ws = 1;
@@ -697,16 +715,13 @@ char *resolve_proposal_path(const char *proposal)
       return realpath(proposal, NULL);
 
    /* 2. Try from config workspaces */
-   config_t cfg;
-   if (config_load(&cfg) == 0)
+   int workspace_count = config_workspace_count();
+   for (int w = 0; w < workspace_count; w++)
    {
-      for (int w = 0; w < cfg.workspace_count; w++)
-      {
-         char path[MAX_PATH_LEN];
-         snprintf(path, sizeof(path), "%s/%s", cfg.workspaces[w], proposal);
-         if (access(path, R_OK) == 0)
-            return realpath(path, NULL);
-      }
+      char path[MAX_PATH_LEN];
+      snprintf(path, sizeof(path), "%s/%s", config_workspaces(w), proposal);
+      if (access(path, R_OK) == 0)
+         return realpath(path, NULL);
    }
 
    /* 3. Search docs/proposals/ subdirectories for the filename */
@@ -728,9 +743,9 @@ char *resolve_proposal_path(const char *proposal)
          return realpath(search_path, NULL);
 
       /* Relative to each workspace root */
-      for (int w = 0; w < cfg.workspace_count; w++)
+      for (int w = 0; w < workspace_count; w++)
       {
-         snprintf(search_path, sizeof(search_path), "%s/docs/proposals/%s/%s", cfg.workspaces[w],
+         snprintf(search_path, sizeof(search_path), "%s/docs/proposals/%s/%s", config_workspaces(w),
                   subdirs[i], filename);
          if (access(search_path, R_OK) == 0)
             return realpath(search_path, NULL);

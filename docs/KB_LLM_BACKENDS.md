@@ -1,95 +1,86 @@
-# The KB runs one model and calls one endpoint
+# KB model backends
 
-`aimee-kb` serves the bundled embedder from inside its own container. Everything
-else it needs from a model, it asks an OpenAI-compatible endpoint for over HTTP.
-There is one such endpoint, `AIMEE_LLM_URL`, and it is synthesis only.
+Embedding and synthesis are `aimee-kb` capabilities. There is no `aimee-llm` service and no
+standalone inference tier for the server to call.
 
-The `aimee-llm` gateway that used to sit between the KB and its models is
-retired. `AIMEE_LLM_URL` defaults empty rather than pointing at it, because a
-default aimed at a container nobody deploys any more fails at first use instead
-of at configuration time. Two roles, and how each is served, are in
-[Local inference](LOCAL_INFERENCE.md). **Which model to put behind the synthesis
-endpoint — the measured candidates, their numbers and their caveats — is
-[Choosing a synthesis model](SYNTHESIS_MODELS.md).**
+## Place each role
 
-## Configuration the KB actually receives
+Each KB configures the roles independently:
 
-| Variable | Role | Default |
-| --- | --- | --- |
-| `AIMEE_EMBEDDER_URL` | embedding, external | empty: the in-container model serves |
-| `EMBEDDER_MODEL` | embedder identity | empty: bundled `bekko-a25m` |
-| `AIMEE_EMBEDDING_DIM` | vector width | empty: 384, the bundled model's output |
-| `AIMEE_LLM_URL` | synthesis | empty: synthesis stages stay idle |
-| `AIMEE_LLM_MODEL` | synthesis model name | `aimee-synth` |
-| `AIMEE_LLM_AUTH_TOKEN` | bearer for the synthesis endpoint | none |
-| `AIMEE_LLM_AUTH_REQUIRED` | refuse a keyless synthesis request | `0` |
+| Role | Internal | Remote | Off |
+| --- | --- | --- | --- |
+| embedding | Run the selected embedder inside the KB container. | Call the configured embedding endpoint. | Dense retrieval is unavailable; lexical retrieval may continue. |
+| synthesis | Run the selected synthesizer inside the KB container. | Call the configured synthesis endpoint. | Curator and answer-synthesis stages report degradation. |
 
-`aimee config deploy-env` emits these, and the container has to receive them. A
-wizard that selects an external embedder but whose choice never reaches the KB
-leaves the builtin serving forever, silently, which is why the emission is
-tested rather than assumed.
+A KB can host either role, both roles, or neither. Available internal models depend on the KB image
+and deployment profile. A remote role uses an explicit endpoint and credential owned by that KB.
 
-With `AIMEE_LLM_AUTH_REQUIRED=1` and no token resolvable from the Vault,
-`kb_curator_provider_for_stage` returns no provider and the stage stays idle. It
-does not fall back to a keyless request. An external-only topology defaults the
-flag to `0` so an intentionally keyless endpoint is not broken by a rule written
-for a local one; an operator can still set it to `1` alongside the external
-endpoint's bearer.
+The current configuration descriptors call internal placement `local`:
 
-To adopt an existing local gateway, set `AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE`.
-Inherited `AIMEE_LLM_AUTH_TOKEN` is deliberately ignored during managed
-credential creation, so stale child-service state cannot win. The override must
-be a 32 to 512 character RFC 6750 b64token or setup fails closed.
+- `llm_embed_backend`: `local` or `external`;
+- `llm_synth_backend`: `local`, `external`, or `off`;
+- `embedding_model` and `embedding_dim`: embedding identity and width;
+- `embedding_endpoint` and `llm_synth_endpoint`: remote role endpoints.
 
-## Two operations, and only one of them is required
+Use the [generated configuration reference](gen/configuration.md) for the exact fields exposed by
+this checkout. Container environment values override file values only where that reference says
+they do.
+
+## Multiple KBs
+
+Model placement is per KB, not global to the server. A fleet can include, for example, a KB with an
+internal embedder, another with an internal synthesizer, and a KB that calls remote endpoints for
+both roles. Routing must first select a KB with the correct corpus and authority, then verify that it
+has the required role. It must not route to a model independently of the KB.
+
+The current managed and split profiles deploy one KB. See [KB fleet and model placement](KB_FLEET.md)
+for the target routing contract and current implementation boundary.
+
+## Role contracts
 
 | Operation | Used for | Required |
 | --- | --- | --- |
-| embed / batch embed | dense memory, docs, code, evidence | for dense retrieval |
-| chat / synthesis | curator extraction, summaries, answer synthesis | optional per pipeline |
+| embed and batch embed | dense memory, documents, code, and evidence | required for dense retrieval |
+| chat and synthesis | curator extraction, summaries, and answer synthesis | optional by pipeline |
 
-A stage reports degradation when its operation is unavailable. Lexical retrieval
-still works without embedding. It must not claim dense results while doing so.
-
-## Changing the embedder means re-embedding
-
-The model output width and the DB2 vector-column width must match. The KB records
-the schema dimension and refuses startup on drift.
-
-Another model at the same width still needs a controlled re-embed, because the
-vectors mean something different. A different width also needs the derived vector
-tables rebuilt. See [Retrieval stack](retrieval-stack.md).
-
-## What a custom backend has to provide
+Internal and remote implementations must both provide:
 
 - bounded request and response bodies;
-- stable model identity and dimension;
+- stable model identity and dimension where the role produces vectors;
 - timeouts and cancellation;
 - deterministic error classification;
 - batch behaviour that preserves input order;
 - health and readiness separate from process liveness;
-- no silent fallback to a different model.
+- no silent fallback to a different model or KB.
 
-The last one is the expensive failure. A backend that quietly serves a different
-model produces vectors that are wrong in a way no dimension guard catches.
+A stage reports degradation when its selected role is unavailable. It must not claim a dense or
+synthesized result after skipping the role.
 
-Keep credentials and provider endpoints in the owning deployment, not in KB
-documents or workflow artifacts.
+## Vector identity
 
-## Validate before enabling traffic
+The embedding output and DB2 vector-column dimension must match. The KB records the model and serving
+identity, including pooling and prefixes, and refuses a mismatched vector space.
 
-1. probe health and model identity;
-2. embed a fixed string and verify the dimension;
+Changing width requires the guarded derived-table reset. A same-width model, pooling, or prefix
+change still changes the vector space and currently needs a fresh DB2 plus source re-ingestion. See
+[Change the KB embedder](runbooks/change-embedder.md).
+
+## Credentials and egress
+
+An internal role stays inside its KB container. A remote role crosses the KB's egress boundary, so
+its endpoint, credential, budget, and allowlist belong to that KB's deployment and vault. Do not put
+them in documents, workflow artifacts, or server-side model shortcuts.
+
+## Validate a KB role
+
+Before routing traffic to a KB:
+
+1. probe the KB and the selected role;
+2. verify the declared model identity and, for embedding, the dimension;
 3. run a batch and verify order and count;
-4. run one structured curator response through its schema;
-5. stop the backend and confirm honest degradation;
-6. restart it and confirm queued work resumes.
+4. run one structured synthesis result through its schema when synthesis is enabled;
+5. make the role unavailable and confirm honest degradation;
+6. restart the KB and confirm its recorded identity still matches.
 
-Step 5 is the one people skip. A backend that looks healthy under load and lies
-about it when it is down costs more than one that never started.
-
-Use [generated configuration](gen/configuration.md) for current names. Container
-environment values override file values where documented.
-
-See [Local inference](LOCAL_INFERENCE.md) and
-[Choosing a synthesis model](SYNTHESIS_MODELS.md).
+See [Inference tiers](AIMEE_KB_SYNTH_TIERS.md) for internal model sizing and
+[Retrieval stack](retrieval-stack.md) for vector-space rules.

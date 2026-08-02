@@ -19,16 +19,6 @@
  * base64 request body well under that so a pathological image can't balloon the request. */
 #define KB_OCR_MAX_IMAGE_BYTES (32 * 1024 * 1024)
 
-const char *kb_ocr_endpoint(const config_t *cfg)
-{
-   if (cfg && cfg->ocr_command[0])
-      return cfg->ocr_command;
-   const char *env = getenv("AIMEE_OCR_URL");
-   if (env && env[0])
-      return env;
-   return "";
-}
-
 void kb_ocr_free_lines(kb_ocr_line_t *lines, int n)
 {
    (void)n;

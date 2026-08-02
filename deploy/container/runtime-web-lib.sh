@@ -7,6 +7,10 @@ WEBCHAT_SPA="${AIMEE_WEBCHAT_SPA:-/usr/local/share/aimee-runtime-web/index.html}
 WEBCHAT_BOOTSTRAP_REPLACED="${WEBCHAT_HOME}/webchat/bootstrap-replaced"
 WEBCHAT_BOOTSTRAP_USER="${WEBCHAT_HOME}/webchat/bootstrap-user"
 WEBCHAT_BOOTSTRAP_CREDENTIALS="${WEBCHAT_HOME}/webchat/bootstrap-credentials"
+# "<user>:<shadow verifier>" per line, written by runtime-web after every account
+# mutation so the logins survive the container being replaced. Must match
+# identityRecordPath() in runtime-web/identity_persist.go.
+WEBCHAT_IDENTITIES="${WEBCHAT_HOME}/webchat/identities"
 WEBCHAT_LEGACY_TLS_KEY="${WEBCHAT_HOME}/webchat.key"
 # Dashboard logins are local PAM accounts, scoped to this group so runtime-web
 # can only see and manage the logins it provisioned — never the container's own
@@ -174,8 +178,84 @@ webchat_provision_login() {
 # Never fatal, for the reason spelled out in webchat_generate_bootstrap_login:
 # the entrypoint calls this unguarded under `set -eu`, so a failure here would
 # take the container down instead of leaving it up without a browser login.
+# The operator-supplied first-boot pair, from wherever it survived to here.
+#
+# PAM owns user control; env vars only PRE-SEED it on first boot. Reading the
+# environment alone found nothing on either supported path: the entrypoint
+# scrubs the credential env names into Vault before provisioning runs, and the
+# managed compose deliberately never places them in the long-lived container's
+# environment at all. Both paths leave the values in the Vault records the
+# bootstrap seals, so recover them from there when the environment is empty.
+#
+# That is TRANSPORT, not a second identity store: the PAM account created from
+# these is the source of truth from the first login onward, which is the whole
+# point of webchat_provision_login above.
+webchat_read_seeded_credentials() {
+    wc_seed_user="${AIMEE_WEBCHAT_USER:-}"
+    wc_seed_pass="${AIMEE_WEBCHAT_PASSWORD:-}"
+    [ -n "$wc_seed_user" ] && [ -n "$wc_seed_pass" ] && return 0
+    _ws_export=$(runuser -u aimee -- aimee-server --webchat-vault-export 2>/dev/null) || return 1
+    wc_seed_user=$(printf '%s\n' "$_ws_export" | awk -F'\t' '$1=="user"{print $2}' |
+        base64 -d 2>/dev/null) || wc_seed_user=""
+    wc_seed_pass=$(printf '%s\n' "$_ws_export" | awk -F'\t' '$1=="password"{print $2}' |
+        base64 -d 2>/dev/null) || wc_seed_pass=""
+    _ws_export=""
+    [ -n "$wc_seed_user" ] && [ -n "$wc_seed_pass" ]
+}
+
+# Recreate the managed logins recorded by a previous container.
+#
+# PAM identities live in the container's writable layer, so replacing the image
+# destroys them, while $AIMEE_HOME survives -- including the operator's projects,
+# which are filed by webuser NAME. Minting a fresh generated login stops the
+# lockout but not this: a new random name leaves the whole project tree attached
+# to a user nobody signs in as. runtime-web records the managed accounts and
+# their shadow verifiers after every mutation (identity_persist.go); restore them
+# here, before anything decides a new login is needed.
+#
+# Only accounts that are actually MISSING are touched. An account that survived
+# keeps its current password: the record can be older than a password change the
+# operator made since, and restoring over it would silently roll that back.
+webchat_restore_identities() {
+    [ -f "$WEBCHAT_IDENTITIES" ] || return 0
+    _wc_restored=0
+    while IFS=: read -r _wc_u _wc_h; do
+        [ -n "$_wc_u" ] && [ -n "$_wc_h" ] || continue
+        # Mirror usableShadowHash() in identity_persist.go. A locked or disabled
+        # verifier is not a login: restoring it would recreate an account nobody
+        # can authenticate as, and its group membership would then suppress
+        # minting a real one -- the lockout, rebuilt from the record.
+        case "$_wc_h" in
+            '!'* | '*'*) continue ;;
+        esac
+        getent passwd "$_wc_u" >/dev/null 2>&1 && continue
+        if ! useradd --create-home --shell /usr/sbin/nologin "$_wc_u" >/dev/null 2>&1; then
+            webchat_log "WARNING: could not restore the login '$_wc_u'"
+            continue
+        fi
+        # -e: the field is already a hash, not a plaintext password.
+        if ! printf '%s:%s\n' "$_wc_u" "$_wc_h" | chpasswd -e >/dev/null 2>&1; then
+            webchat_log "WARNING: could not restore the verifier for '$_wc_u'"
+            userdel -r "$_wc_u" >/dev/null 2>&1 || true
+            continue
+        fi
+        usermod -aG "$WEBCHAT_LOGIN_GROUP" "$_wc_u" >/dev/null 2>&1 || true
+        _wc_restored=$((_wc_restored + 1))
+    done < "$WEBCHAT_IDENTITIES"
+    [ "$_wc_restored" -gt 0 ] && webchat_log "restored $_wc_restored dashboard login(s) after a container replacement"
+    _wc_u="" _wc_h="" _wc_restored=""
+    return 0
+}
+
 webchat_provision_bootstrap_account() {
-    webchat_provision_login "${AIMEE_WEBCHAT_USER:-}" "${AIMEE_WEBCHAT_PASSWORD:-}" || true
+    # Before anything asks whether a login is needed: put back the ones this
+    # appliance already had. Without this an upgrade hands the operator a new
+    # generated account while their projects stay filed under the old name.
+    webchat_restore_identities
+    if webchat_read_seeded_credentials; then
+        webchat_provision_login "$wc_seed_user" "$wc_seed_pass" || true
+    fi
+    wc_seed_user="" wc_seed_pass=""
     if webchat_read_generated_credentials; then
         webchat_provision_login "$wc_generated_user" "$wc_generated_pass" || true
     fi
@@ -183,18 +263,59 @@ webchat_provision_bootstrap_account() {
     return 0
 }
 
+# 0 when at least one member of the managed login group is an account a human can
+# ACTUALLY sign in with: present in passwd, and holding a usable password hash.
+#
+# Membership alone does not mean that. Retiring the bootstrap account through the
+# wizard locks its shadow entry ("!$y...") and leaves the name in the group, so a
+# group with members can describe an account nobody can authenticate as.
+webchat_has_usable_login() {
+    _wc_members=$(getent group "$WEBCHAT_LOGIN_GROUP" 2>/dev/null | cut -d: -f4 | tr ',' ' ')
+    for _wc_u in $_wc_members; do
+        [ -n "$_wc_u" ] || continue
+        getent passwd "$_wc_u" >/dev/null 2>&1 || continue
+        _wc_h=$(getent shadow "$_wc_u" 2>/dev/null | cut -d: -f2)
+        # Empty, "!"-locked, or "*"-disabled are all unusable for PAM auth.
+        case "$_wc_h" in
+            '' | '!'* | '*'*) continue ;;
+        esac
+        _wc_members="" _wc_u="" _wc_h=""
+        return 0
+    done
+    _wc_members="" _wc_u="" _wc_h=""
+    return 1
+}
+
 # 1 when this appliance still has no way for a human to sign in.
 #
-# An explicit pair wins and needs nothing generated. Otherwise: a marker from an
-# earlier boot, a completed wizard replacement, or any live member of the managed
-# group all mean a login already exists — regenerating then would change the
-# password out from under the operator on every restart and spam the log with
-# credentials that are not the working one.
+# An explicit pair wins and needs nothing generated. Otherwise the question is
+# answered by what EXISTS, not by what a marker remembers.
+#
+# The markers used to answer it, and that locked operators out of upgraded
+# appliances. PAM identities live in the container's writable layer -- /etc/passwd
+# and /etc/shadow are on no volume -- while the markers live in $AIMEE_HOME, which
+# is. So `docker compose up --force-recreate` onto a new image destroyed every
+# account and kept the markers that say one exists, leaving the appliance with no
+# login and no way to mint another. Reproduced on a running appliance: after an
+# ordinary image upgrade the volume still recorded webchat/bootstrap-replaced =
+# the operator's name while the container held exactly one uid>=1000 account, the
+# service account. Nothing in the Vault could restore it either; only session_hmac
+# and tls_key survive there, no account or hash.
+#
+# Regenerating still must not fire while a working login exists -- that would
+# change the password out from under the operator on every restart -- which is
+# what webchat_has_usable_login establishes.
 webchat_bootstrap_login_needed() {
-    [ -n "${AIMEE_WEBCHAT_USER:-}" ] && [ -n "${AIMEE_WEBCHAT_PASSWORD:-}" ] && return 1
-    [ -f "$WEBCHAT_BOOTSTRAP_USER" ] && return 1
-    [ -f "$WEBCHAT_BOOTSTRAP_REPLACED" ] && return 1
-    [ -n "$(getent group "$WEBCHAT_LOGIN_GROUP" 2>/dev/null | cut -d: -f4)" ] && return 1
+    # Same source as provisioning: an operator-supplied pair that reached us via
+    # the Vault transport must suppress generation just as an environment one
+    # does, or the appliance prints a random credential the operator never asked
+    # for beside the account they did.
+    if webchat_read_seeded_credentials; then
+        wc_seed_user="" wc_seed_pass=""
+        return 1
+    fi
+    wc_seed_user="" wc_seed_pass=""
+    webchat_has_usable_login && return 1
     return 0
 }
 
@@ -237,6 +358,11 @@ webchat_generate_bootstrap_login() {
         return 0
     fi
     mkdir -p "$(dirname "$WEBCHAT_BOOTSTRAP_USER")" 2>/dev/null || true
+    # Reaching here means no usable login existed, so any surviving marker is
+    # stale -- it names an account this container no longer has. Left in place,
+    # bootstrap-replaced would tell the wizard setup is already finished while the
+    # only working credential is the one being printed below.
+    rm -f "$WEBCHAT_BOOTSTRAP_REPLACED" 2>/dev/null || true
     printf 'generated:%s\n' "$_gen_user" > "$WEBCHAT_BOOTSTRAP_USER" 2>/dev/null || {
         webchat_log "ERROR: could not record the generated first-boot login"
         _gen_user="" _gen_pass=""

@@ -41,7 +41,7 @@ static cJSON *build_messages(const char *system_prompt, const char *request_json
    return msgs;
 }
 
-char *kb_curator_llm_run(const config_t *cfg, kb_curator_stage_t stage, const char *system_prompt,
+char *kb_curator_llm_run(kb_curator_stage_t stage, const char *system_prompt,
                          const char *request_json, cJSON *json_schema, const char *fallback_command,
                          int out_cap, char *errbuf, size_t errlen)
 {
@@ -49,9 +49,10 @@ char *kb_curator_llm_run(const config_t *cfg, kb_curator_stage_t stage, const ch
       errbuf[0] = '\0';
 
    /* 1. Configured provider for this stage's tier (§2a). */
-   provider_def_t def;
-   if (cfg && kb_curator_provider_for_stage(cfg, stage, &def))
+   provider_def_owned_t prov;
+   if (kb_curator_provider_for_stage(stage, &prov))
    {
+      provider_def_t *def = &prov.def;
       /* The durable curator contract already carries one operator-controlled
        * output budget (kb.curator.extract_max_tokens), and the legacy sidecar
        * receives it in each job payload.  Apply the same budget to the direct
@@ -59,17 +60,17 @@ char *kb_curator_llm_run(const config_t *cfg, kb_curator_stage_t stage, const ch
        * generation to its single CPU synth slot: the curator times out after
        * five minutes while llama-server keeps the slot occupied, starving
        * subsequent curator and interactive requests. */
-      if (def.max_tokens <= 0 && cfg->kb_curator_extract_max_tokens > 0)
-         def.max_tokens = cfg->kb_curator_extract_max_tokens;
+      if (def->max_tokens <= 0 && config_kb_curator_extract_max_tokens() > 0)
+         def->max_tokens = config_kb_curator_extract_max_tokens();
       /* Curator work is already retried by its durable job queue. Keep one
        * provider attempt bounded by the same five-minute ceiling as the legacy
        * sidecar instead of nesting the provider client's three retries. The old
        * 120s default was shorter than a normal constrained extraction on the
        * bundled CPU model and created overlapping abandoned generations. */
-      if (def.timeout_ms <= 0)
-         def.timeout_ms = KB_CURATOR_PROVIDER_TIMEOUT_MS;
-      if (def.max_attempts <= 0)
-         def.max_attempts = 1;
+      if (def->timeout_ms <= 0)
+         def->timeout_ms = KB_CURATOR_PROVIDER_TIMEOUT_MS;
+      if (def->max_attempts <= 0)
+         def->max_attempts = 1;
       cJSON *msgs = build_messages(system_prompt, request_json);
       if (!msgs)
       {
@@ -80,7 +81,7 @@ char *kb_curator_llm_run(const config_t *cfg, kb_curator_stage_t stage, const ch
       /* provider_client_complete zeroes out on entry, but zero-init here too so
        * provider_completion_free is unconditionally safe regardless of the callee. */
       provider_completion_t out = {0};
-      int rc = provider_client_complete(&def, msgs, json_schema, &out, errbuf, errlen);
+      int rc = provider_client_complete(def, msgs, json_schema, &out, errbuf, errlen);
       cJSON_Delete(msgs);
       if (rc != 0)
       {

@@ -17,6 +17,7 @@
  * functionality. Registration alone runs nothing — a run only begins when intake
  * creates a work item and the autonomy driver advances it. */
 #include "aimee.h"
+#include "git_forge_vault.h"
 
 #include "wfe_live_delegate.h"
 
@@ -225,10 +226,29 @@ static void wfe_commit_worktree_changes(const char *workdir)
    free(run_cmd(cmd, &rc));
    if (rc == 0)
       return; /* nothing staged: a genuine no-op or an already-committing delegate */
+   /* Commit as the installed operator identity, never a wfe persona. The identity
+    * is sealed at installation (git/author_name + git/author_email); a deployment
+    * without it would produce a commit with no author, which git refuses, so this
+    * refuses first and says what to configure. The old aimee-wfe author also made
+    * GitHub attach a Co-authored-by trailer to the squash of every PR carrying
+    * both authors, which the standing directive forbids. */
+   char au_name[256] = "", au_email[256] = "";
+   if (git_identity_resolve(workdir, au_name, sizeof au_name, au_email, sizeof au_email) != 1)
+   {
+      aimee_log(LOG_WARN, "wfe-delegate",
+                "no git identity configured; refusing to commit in %s (set user.name/user.email on "
+                "the checkout, or seal AIMEE_GIT_AUTHOR_NAME/_EMAIL at install)",
+                workdir);
+      return;
+   }
+   char *qn = shell_escape(au_name);
+   char *qe = shell_escape(au_email);
    snprintf(cmd, sizeof cmd,
-            "git -C '%s' -c user.name='aimee-wfe' -c user.email='wfe@aimee.local' commit -q "
+            "git -C '%s' -c user.name='%s' -c user.email='%s' commit -q "
             "-m 'wfe: apply implement changes' 2>&1",
-            workdir);
+            workdir, qn ? qn : "", qe ? qe : "");
+   free(qn);
+   free(qe);
    char *out = run_cmd(cmd, &rc);
    if (rc != 0)
       aimee_log(LOG_WARN, "wfe-delegate", "implement commit failed in %s: %s", workdir,

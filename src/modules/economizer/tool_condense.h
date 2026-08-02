@@ -17,7 +17,7 @@
 #define TOOL_CONDENSE_CEILING (2 * 1024 * 1024)
 
 /* Retained compatibility gate. Always false; live condensation is disconnected. */
-int tool_condense_enabled(const config_t *cfg);
+int tool_condense_enabled(void);
 
 /* ---- command recognition (Slice 2) ---- */
 
@@ -75,7 +75,7 @@ typedef struct
  * unchanged (unrecognized / no gain / a filter or spill failure -> fail-open). `stats`
  * (optional) is filled for the ledger. `spill_dir` NULL disables spilling (then a
  * successful condense that would need a spill instead passes through — never lossy). */
-char *tool_condense_apply(const config_t *cfg, const char *cmdline, int exit_code, const char *raw,
+char *tool_condense_apply(const char *cmdline, int exit_code, const char *raw,
                           const char *spill_dir, tc_stats_t *stats);
 
 /* Recovery contract (P2): resolve a spill `ref` (as emitted in a condensed pointer) to its

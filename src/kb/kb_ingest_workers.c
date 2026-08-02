@@ -138,9 +138,7 @@ static int kbiw_enqueue_webusers(char (*projects)[MAX_PATH_LEN])
 
 static void kbiw_enqueue_all(kb_service_ctx_t *ctx)
 {
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.kb_bg_ingest_enabled || !db2_is_initialized())
+   if (!config_kb_bg_ingest_enabled() || !db2_is_initialized())
       return;
 
    char(*projects)[MAX_PATH_LEN] = calloc(MAX_DISCOVERED_PROJECTS, MAX_PATH_LEN);
@@ -148,8 +146,8 @@ static void kbiw_enqueue_all(kb_service_ctx_t *ctx)
       return;
 
    int total = 0;
-   for (int w = 0; w < cfg.workspace_count; w++)
-      total += kbiw_enqueue_under(cfg.workspaces[w], cfg.workspaces[w], projects);
+   for (int w = 0; w < config_workspace_count(); w++)
+      total += kbiw_enqueue_under(config_workspaces(w), config_workspaces(w), projects);
 
    total += kbiw_enqueue_webusers(projects);
    free(projects);
@@ -182,10 +180,7 @@ static void kbiw_process_job(const db2_kb_ingest_job_t *job)
       kb_background_clear("ingest");
       return;
    }
-
-   config_t cfg;
-   config_load(&cfg);
-   const char *embed_cmd = config_embedding_command(&cfg, NULL);
+   const char *embed_cmd = config_embedding_command_current(NULL);
 
    kb_stats_t stats;
    memset(&stats, 0, sizeof(stats));
@@ -309,9 +304,7 @@ static void *kbiw_timer_thread(void *arg)
 
    for (;;)
    {
-      config_t cfg;
-      config_load(&cfg);
-      int interval_secs = cfg.kb_bg_ingest_interval_hours * 3600;
+      int interval_secs = config_kb_bg_ingest_interval_hours() * 3600;
       if (interval_secs <= 0)
          interval_secs = 6 * 3600;
 
@@ -328,9 +321,7 @@ static void *kbiw_timer_thread(void *arg)
       }
       if (ctx->ingest_stop)
          return NULL;
-
-      config_load(&cfg);
-      if (cfg.kb_bg_ingest_enabled)
+      if (config_kb_bg_ingest_enabled())
          kbiw_enqueue_all(ctx);
    }
 }
@@ -352,10 +343,6 @@ static void *kbiw_watch_thread(void *arg)
       aimee_log(LOG_WARN, "kb.ingest.watch", "inotify_init1 failed");
       return NULL;
    }
-
-   config_t cfg;
-   config_load(&cfg);
-
    /* Heap-allocate the watch table: at 512 * (2 * MAX_PATH_LEN + ...) bytes it
     * is ~4.2 MB, which overflows the default 8 MB pthread stack and segfaults
     * this thread at startup. Keep it off the stack. */
@@ -382,9 +369,10 @@ static void *kbiw_watch_thread(void *arg)
       return NULL;
    }
 
-   for (int w = 0; w < cfg.workspace_count && nwatches < 512; w++)
+   for (int w = 0; w < config_workspace_count() && nwatches < 512; w++)
    {
-      int n = workspace_discover_projects(cfg.workspaces[w], 3, projects, MAX_DISCOVERED_PROJECTS);
+      int n =
+          workspace_discover_projects(config_workspaces(w), 3, projects, MAX_DISCOVERED_PROJECTS);
       for (int i = 0; i < n && nwatches < 512; i++)
       {
          int wd = inotify_add_watch(ifd, projects[i],
@@ -393,7 +381,7 @@ static void *kbiw_watch_thread(void *arg)
             continue;
          watches[nwatches].wd = wd;
          snprintf(watches[nwatches].root, MAX_PATH_LEN, "%s", projects[i]);
-         snprintf(watches[nwatches].workspace, MAX_PATH_LEN, "%s", cfg.workspaces[w]);
+         snprintf(watches[nwatches].workspace, MAX_PATH_LEN, "%s", config_workspaces(w));
          watches[nwatches].last_queued = 0;
          nwatches++;
       }
@@ -411,9 +399,7 @@ static void *kbiw_watch_thread(void *arg)
       ssize_t n = read(ifd, evbuf, sizeof(evbuf));
       if (n <= 0)
          continue;
-
-      config_load(&cfg);
-      int debounce = cfg.kb_bg_watch_debounce_secs;
+      int debounce = config_kb_bg_watch_debounce_secs();
       time_t now = time(NULL);
 
       for (char *p = evbuf; p < evbuf + n;)
@@ -469,10 +455,7 @@ void kb_ingest_workers_start(kb_service_ctx_t *ctx)
    ctx->ingest_count = 0;
    ctx->ingest_timer_active = 0;
    ctx->bg_watch_active = 0;
-
-   config_t cfg;
-   config_load(&cfg);
-   int cap = cfg.kb_worker_count;
+   int cap = config_kb_worker_count();
    if (cap < 0)
       cap = 0;
    if (cap > KB_WORKER_MAX)
@@ -497,13 +480,13 @@ void kb_ingest_workers_start(kb_service_ctx_t *ctx)
    if (ctx->ingest_count == 0)
       return;
 
-   if (cfg.kb_bg_ingest_enabled)
+   if (config_kb_bg_ingest_enabled())
    {
       if (pthread_create(&ctx->ingest_timer_thread, NULL, kbiw_timer_thread, ctx) == 0)
          ctx->ingest_timer_active = 1;
    }
 
-   if (cfg.kb_bg_watch_enabled)
+   if (config_kb_bg_watch_enabled())
    {
       if (pthread_create(&ctx->bg_watch_thread, NULL, kbiw_watch_thread, ctx) == 0)
          ctx->bg_watch_active = 1;

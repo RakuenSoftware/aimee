@@ -23,25 +23,14 @@ static inline void memory_autofree_impl(void *p)
 }
 #define MEMORY_AUTOFREE __attribute__((cleanup(memory_autofree_impl)))
 
-/* config_t is intentionally feature-rich and currently around 750 KiB. Memory
- * retrieval is a deep call chain in which several stages read configuration;
- * automatic config_t copies at each stage can cumulatively exhaust the default
- * 8 MiB thread stack. Keep those snapshots on the heap and let MEMORY_AUTOFREE
- * handle every early return. A strict-validation error returns no snapshot;
- * callers then skip optional features or apply their explicit hard-coded
- * fallback. */
-static inline config_t *memory_config_load_heap(void)
-{
-   config_t *cfg = malloc(sizeof(*cfg));
-   if (!cfg)
-      return NULL;
-   if (config_load(cfg) != 0)
-   {
-      free(cfg);
-      return NULL;
-   }
-   return cfg;
-}
+/* memory_config_load_heap() lived here because config_t is ~750 KiB and memory
+ * retrieval is a deep chain where several stages read config -- stacking
+ * automatic copies exhausted the 8 MiB thread stack, so the snapshots went on
+ * the heap with MEMORY_AUTOFREE to cover every early return.
+ *
+ * The accessors make the whole problem go away: a stage reads the field it
+ * wants, not the struct, so there is nothing to copy and nothing to free.
+ * Removed rather than converted. */
 
 /* memory_core real-branch shared types (moved from memory_core.c #else) */
 typedef enum
@@ -200,10 +189,10 @@ void memory_alias_join_tokens(char *buf, size_t buf_len, char tokens[][64], int 
 void memory_coref_audit_record(int64_t memory_id, const char *session_id, const char *outcome,
                                const char *entity, const char *mode, double confidence);
 int memory_coref_has_pronoun(const char *content);
-int memory_coref_llm_resolve(int64_t memory_id, const char *content, const char *session_buf,
-                             const config_t *cfg);
-const char *memory_coref_mode_effective(const config_t *cfg);
-int memory_coref_window_effective(const config_t *cfg);
+int memory_coref_llm_resolve(int64_t memory_id, const char *content,
+                             const char *session_buf);
+const char *memory_coref_mode_effective(void);
+int memory_coref_window_effective(void);
 void memory_entity_insert(int64_t memory_id, const char *entity, const char *role, double weight);
 int memory_extract_named_entities(const char *text, char names[][128], int max_names);
 void memory_format_date(char *buf, size_t buf_len, int year, int month, int day);

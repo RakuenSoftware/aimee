@@ -39,11 +39,13 @@ current behavior lives in product guides and generated references.
 - appliance state recovery runbooks;
 - config descriptor and route descriptor completion;
 - repeatable restore, scale, and failure-injection gates;
-- honest health for every optional inference or sidecar dependency.
+- honest health for every optional KB model role or sidecar dependency.
 
 ## 6. Knowledge breadth
 
 - organization data connectors with scope and provenance;
+- fleet registration and routing across multiple KBs by corpus, authority, and capabilities;
+- per-KB internal or remote embedder and synthesizer placement, with no separate inference service;
 - curator extraction quality and benchmark cadence;
 - retrieval fusion selection and evidence contracts;
 - better code-graph architecture surfaces;

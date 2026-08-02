@@ -85,10 +85,12 @@ if [ "$#" -gt 0 ]; then
 fi
 if [ "$vault_bootstrapped" -eq 0 ] || [ "$had_credential_env" -eq 1 ]; then
     # Migrate any legacy browser credential files only after first-boot env
-    # values have been sealed and scrubbed. The new web service authenticates
-    # against fixed Vault records and never materializes a PAM verifier. Force
-    # a clean process image whenever this invocation inherited credentials,
-    # even if an external caller supplied the internal marker.
+    # values have been sealed and scrubbed. The sealed pair is first-boot
+    # transport: webchat_provision_bootstrap_account reads it back out and
+    # provisions a real PAM account, which is the only thing authentication
+    # consults thereafter. Force a clean process image whenever this invocation
+    # inherited credentials, even if an external caller supplied the internal
+    # marker.
     webchat_prepare
     exec /usr/bin/tini -- aimee-server-entrypoint --aimee-internal-vault-bootstrapped
 fi
@@ -308,6 +310,44 @@ for _dsock in /var/run/docker.sock /run/docker.sock; do
     break
 done
 
+# Delegate sandbox host-path translation.
+#
+# aimee-server drives a SIBLING docker daemon through the socket above, so a bind
+# SOURCE like /var/lib/aimee/<workspace> — which exists in THIS container — does
+# not exist on the daemon's host. Docker then creates it empty rather than
+# failing, and the delegate gets a sandbox whose workspace mount is an empty
+# directory: its worktree is simply not there, so every file tool answers
+# "cannot open" for files that plainly exist.
+#
+# docker_translate_host_source() already handles this, but only when
+# AIMEE_SANDBOX_HOST_MOUNTS names the mapping. The plugin deploys set it from
+# their own bind mounts; the COMPOSE deploys never did, which is why the managed
+# topology could not run a tool-using delegate at all.
+#
+# Derive it from this container's own mounts instead of hardcoding a path: the
+# volume host paths depend on docker's data-root and the compose project name,
+# neither of which belongs in an image. Skip entries whose source equals its
+# destination (a plain host bind such as the docker socket needs no translation).
+# Any failure leaves the variable unset, which is exactly the previous behaviour.
+if [ -z "${AIMEE_SANDBOX_HOST_MOUNTS:-}" ] && [ -S "${_dsock:-/var/run/docker.sock}" ]; then
+    _self=$(hostname 2>/dev/null || true)
+    if [ -n "$_self" ]; then
+        _map=$(docker inspect "$_self" \
+                   --format '{{range .Mounts}}{{.Destination}}={{.Source}}{{println}}{{end}}' \
+                   2>/dev/null |
+               awk -F= 'NF == 2 && $1 != $2 && $1 ~ /^\// && $2 ~ /^\// {
+                            printf "%s%s=%s", sep, $1, $2; sep = ","
+                        }')
+        if [ -n "$_map" ]; then
+            export AIMEE_SANDBOX_HOST_MOUNTS="$_map"
+            log "delegate sandbox: derived host-path map from own mounts ($_map)"
+        else
+            log "delegate sandbox: could not derive a host-path map; delegate workspace mounts may be empty if this daemon is a sibling"
+        fi
+    fi
+    unset _self _map 2>/dev/null || true
+fi
+
 log "starting aimee-server (socket=$SERVER_SOCK) as user aimee"
 rm -f "$AIMEE_HOME/aimee-http.sock" "$AIMEE_WFE_HTTP_SOCKET"
 runuser -u aimee -- sh -c 'set -eu; ulimit -c 0 2>/dev/null || true; exec aimee-server --socket="$1"' sh "$SERVER_SOCK" &
@@ -328,7 +368,18 @@ if [ "$AIMEE_WFE_ENGINE" = go ]; then
         sleep 0.1
     done
     if ! kill -0 "$server_pid" 2>/dev/null || [ ! -S "$AIMEE_HOME/aimee-http.sock" ]; then
-        log "fatal: C agent resource plane did not become ready"
+        # Say which of the two it was and how long we waited. These fail for very
+        # different reasons -- a dead process means the server exited (its own log
+        # says why), while a live process with no socket means startup is blocked
+        # before it listens, typically on a dependency such as an unresponsive kb.
+        # The bare message sent me looking at the wrong one for some time.
+        if kill -0 "$server_pid" 2>/dev/null; then
+            log "fatal: aimee-server is running but never created $AIMEE_HOME/aimee-http.sock after $((_wait / 10))s"
+            log "  startup is blocked before the listener; check $AIMEE_HOME/server.log for the last"
+            log "  step reached, and whether a dependency (e.g. aimee-kb) is reachable"
+        else
+            log "fatal: aimee-server exited during startup after $((_wait / 10))s; see $AIMEE_HOME/server.log"
+        fi
         shutdown
         exit 1
     fi

@@ -16,8 +16,8 @@ execution loop; similarly named local routers remain with those owning modules.
 `src/server/agent_config.c`; the routing contract is declared in the shared `src/headers/agent_config.h`,
 which this module implements while the config/auth half of `agent_config.c` stays in the server and is
 reached through the same header (the arrangement by which `memory` owns its contract while DB1/DB2
-implement storage). The routing block is self-contained: its statics are module-local and no config
-function calls the routing functions, so `routing.c` has no module-private header. Delegate-specific
+implement storage). The routing block is self-contained: its statics are module-local, and no config
+function calls the routing functions. Therefore, `routing.c` has no module-private header. Delegate-specific
 route overrides and preflight remain in `src/modules/delegates/delegate_routing.c` (the delegates
 module, a routing sibling, calls the same `agent_config.h` role predicates). Advisory
 `router_advise.c` remains workflow-owned and is outside this module despite its filename.

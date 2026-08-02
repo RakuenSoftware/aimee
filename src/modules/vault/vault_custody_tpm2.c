@@ -295,28 +295,32 @@ static int ensure_ready(tpm2_ctx_t *ctx)
    if (ctx->init_done)
       return 0;
 
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   (void)config_load(cfg); /* config_set_defaults runs first, so fields are populated */
+   /* Copied out: each is compared and then read again as the fallback arm of a
+    * ternary, across other config reads. Accessors return declared defaults when
+    * config cannot be read, which is what the old (void)config_load relied on. */
+   char cfg_tcti[CONFIG_COPY_MAX];
+   char cfg_blob_path[CONFIG_COPY_MAX];
+   char cfg_nv_index[CONFIG_COPY_MAX];
+   config_vault_tpm2_tcti_copy(cfg_tcti, sizeof(cfg_tcti));
+   config_vault_tpm2_blob_path_copy(cfg_blob_path, sizeof(cfg_blob_path));
+   config_vault_tpm2_nv_index_copy(cfg_nv_index, sizeof(cfg_nv_index));
 
    const char *env_tcti = getenv("AIMEE_VAULT_TPM2_TCTI");
    const char *tcti = (env_tcti && env_tcti[0])        ? env_tcti
-                      : (cfg->vault_tpm2_tcti[0] != 0) ? cfg->vault_tpm2_tcti
+                      : (cfg_tcti[0] != 0)              ? cfg_tcti
                                                        : CONFIG_DEFAULT_VAULT_TPM2_TCTI;
    snprintf(ctx->tcti_conf, sizeof(ctx->tcti_conf), "%s", tcti);
 
    const char *env_blob = getenv("AIMEE_VAULT_TPM2_BLOB_PATH");
    if (env_blob && env_blob[0])
       snprintf(ctx->blob_path, sizeof(ctx->blob_path), "%s", env_blob);
-   else if (cfg->vault_tpm2_blob_path[0])
-      snprintf(ctx->blob_path, sizeof(ctx->blob_path), "%s", cfg->vault_tpm2_blob_path);
+   else if (cfg_blob_path[0])
+      snprintf(ctx->blob_path, sizeof(ctx->blob_path), "%s", cfg_blob_path);
    else
    {
       const char *base = config_default_dir();
       if (!base || !base[0])
       {
-         free(cfg);
          return -1;
       }
       snprintf(ctx->blob_path, sizeof(ctx->blob_path), "%s/vault/tpm2-kek.blob", base);
@@ -327,17 +331,15 @@ static int ensure_ready(tpm2_ctx_t *ctx)
     * (0x01500001) and decimal round-trip; a bad/zero value fails closed. */
    const char *env_nv = getenv("AIMEE_VAULT_TPM2_NV_INDEX");
    const char *nvs = (env_nv && env_nv[0])                ? env_nv
-                     : (cfg->vault_tpm2_nv_index[0] != 0) ? cfg->vault_tpm2_nv_index
+                     : (cfg_nv_index[0] != 0)              ? cfg_nv_index
                                                           : CONFIG_DEFAULT_VAULT_TPM2_NV_INDEX;
    char *nv_end = NULL;
    unsigned long nv_val = strtoul(nvs, &nv_end, 0);
    if (!nv_end || *nv_end != '\0' || nv_val == 0 || nv_val > 0xFFFFFFFFUL)
    {
-      free(cfg);
       return -1;
    }
    ctx->nv_index = (TPMI_RH_NV_INDEX)nv_val;
-   free(cfg);
 
    TSS2_RC rc = Tss2_TctiLdr_Initialize(ctx->tcti_conf, &ctx->tcti);
    if (rc != TSS2_RC_SUCCESS || !ctx->tcti)

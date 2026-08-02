@@ -18,10 +18,10 @@ operations. Exact command and config tables are generated from source:
 - `aimee-server` owns sessions, DB1, agents, tools, policy, credentials, provider calls, and the
   public resource API.
 - `aimee-wfe` owns workflow definitions and lifecycle state.
-- `aimee-kb` owns durable memory, documents, the code graph, retrieval, curation, PostgreSQL,
-  pgvector, and the bundled embedder.
-- Synthesis is an OpenAI-compatible endpoint the KB calls (`AIMEE_LLM_URL`). It runs wherever you
-  put it. There is no longer an `aimee-llm` container.
+- `aimee-kb` owns durable memory, documents, the code graph, retrieval, curation, PostgreSQL, and
+  pgvector.
+- Each KB owns its embedding and synthesis placements. A role can run inside that KB container or
+  use a remote endpoint; there is no separate inference service.
 - `aimee-runtime-web` serves the browser workspace.
 
 The server and KB each run a bounded shared-memory event bus. Governed actions, memory mutations,
@@ -33,15 +33,17 @@ one ordered audit tap. See [Event bus](docs/EVENT_BUS.md).
 After the services are running, enroll the client and check every boundary:
 
 ```bash
-aimee remote set https://host:8743 <bootstrap-bearer>
+aimee remote set https://host:8743 <wizard-bearer>
 aimee remote status
 aimee status
 aimee kb status
 aimee audit verify
 ```
 
-Confirm the server certificate fingerprint out of band. The bootstrap bearer is for enrollment,
-not daily use. The first successful enrollment rotates it and records the client identity.
+Copy the command from the setup summary, then confirm the server certificate fingerprint out of
+band. `remote set` stores the bearer, pins the server certificate, and on Linux enrolls a client
+mTLS certificate. It does not rotate the bearer. Use `aimee remote enroll` when you need a separate
+bearer for an additional client without invalidating existing clients.
 
 Register a workspace from the machine that holds the files:
 

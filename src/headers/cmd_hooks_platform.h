@@ -16,10 +16,10 @@ void platform_hooks_background_reindex(char idx_names[][128], char idx_roots[][M
                                        char idx_heads[][64], int idx_count);
 
 /* Defined in cmd_hooks.c; called by platform_hooks_background_cleanup. */
-void prune_stale_sessions(const config_t *cfg);
+void prune_stale_sessions(void);
 
 /* Fork a background child (POSIX) or run synchronously (Windows) to prune
  * stale sessions using cfg->db1_path. */
-void platform_hooks_background_cleanup(const config_t *cfg);
+void platform_hooks_background_cleanup(void);
 
 #endif /* DEC_CMD_HOOKS_PLATFORM_H */

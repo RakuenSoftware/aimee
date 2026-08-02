@@ -14,7 +14,7 @@
 #include "db2_test_shim.h"
 #include "kb_curator_synthesize.h"
 
-void *db2_conn(void);
+void *(db2_conn)(void);
 
 static void seed(sqlite3 *db, const char *sql)
 {

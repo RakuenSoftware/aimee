@@ -7,7 +7,7 @@ runbook is for the operator who configures the retaining consumer, holds the tru
 anchor, responds to an integrity alert, and understands exactly what the release
 gate does and does not promise.
 
-## 0. What the witness chain claims, and what it does not
+## 0. Know what the witness chain claims
 
 **Claims.** Every witnessed event (a `vault.key_use` audit append, a reseal event,
 a D3b open event) commits its evidence row **atomically, in the same transaction as
@@ -18,9 +18,9 @@ the shard heads under an Ed25519 root. Tampering is **detectable**:
 - **Locally-inconsistent** tampering (an edited row whose stored hash no longer
   matches, a regressed shard sequence, a corrupt checkpoint signature) is caught
   **unconditionally** by the local cross-check and continuous verification.
-- **Coherent** rewrite or rollback, where the attacker rewrote the rows, the shard
-  heads, and re-signed consistently, is caught **only by comparison against a copy
-  retained off-host** (this runbook's offline verifier), because by construction the
+- **Coherent rewrite or rollback:** when the attacker rewrites the rows and shard heads, then signs
+  them consistently, detection requires comparison against a copy retained off-host (this runbook's
+  offline verifier), because by construction the
   local store is then self-consistent.
 
 **Does NOT claim.** It does not claim any downstream consumer retained anything, it
@@ -32,7 +32,7 @@ breadth of external copies, not the local chain.
 > **Conditional-coverage statement (ship this to operators verbatim).** Detection of
 > a coherent rewrite rests entirely on retained off-host copies. With a single
 > consumer, coverage is exactly what that consumer retained. With several consumers,
-> coverage is the **intersection** of what each retained over the incident window:
+> coverage is the **intersection** of what each retained over the incident window;
 > a gap no consumer covered is a gap in detection. Retention is the operator's
 > responsibility; aimee-kb cannot tell "no consumer configured" from "consumer down"
 > and does not pretend to.
@@ -83,27 +83,27 @@ retained stream, out of band. Because nothing rotates the server KEK yet, the an
 is stable for the life of the KEK; a checkpoint naming any other `key_id` is a
 foreign/restored database or tampering (see §4).
 
-## 3. Verify a retained copy during an incident: `aimee-witness-verify`
+## 3. Verify a retained copy with `aimee-witness-verify`
 
-Runs **entirely off captured bytes** (no aimee-kb, no database, no network) from a
+Run it **entirely from captured bytes**, with no `aimee-kb`, database, or network, from a
 host the attacker did not control. This is the detection-by-comparison tool.
 
 ```
 aimee-witness-verify <stream-file> <anchor-file>
 ```
 
-- `<stream-file>` is the concatenated emitted frames. Decode the `b64=` fields from
+- **`<stream-file>`:** the concatenated emitted frames. Decode the `b64=` fields from
   the retained log lines and concatenate them in log order:
   `grep -oE 'b64=[A-Za-z0-9+/=]+' kb.log | sed 's/^b64=//' | while read b; do printf '%s' "$b" | base64 -d; done > stream.bin`
-- `<anchor-file>` is the anchor lines from §2 (blank lines and `#` comments ignored).
+- **`<anchor-file>`:** the anchor lines from §2 (blank lines and `#` comments ignored).
 
-Exit codes: **0** verified (continuity may be `unproven`, a work item, reported, not
+Exit codes: **0** verified (continuity may be `unproven`, which is a reported work item, not
 a failure); **1** tampering detected (broken chain, bad/unknown/revoked signature,
 bad proof, a fork, a malformed frame); **2** usage/IO error.
 
 The report lines break down record chains, checkpoint signatures, leaf-snapshot
 root-rebuilds, and continuity. A `continuity: UNPROVEN` result means a checkpoint's
-predecessor does not link, indistinguishable from bytes alone from a suppressed
+predecessor does not link. From bytes alone, this is indistinguishable from a suppressed
 intermediate checkpoint. **Do not conclude "clean" on UNPROVEN**: compare the
 cross-gap leaf sets against another retained copy to decide fork vs. gap.
 
@@ -119,10 +119,10 @@ gate) egress continue, but the alert must be actioned.
 
 | log line | meaning | action |
 |---|---|---|
-| `INTEGRITY: checkpoint refused ... head_log_mismatch` | a shard head diverged from its evidence log; the producer refused to sign over it | a local inconsistency; investigate the shard immediately; the latest signed root is stale until resolved |
+| `INTEGRITY: checkpoint refused ... head_log_mismatch` | a shard head diverged from its evidence log; the producer refused to sign over it | a local inconsistency; investigate the shard immediately because the latest signed root is stale until resolved |
 | `INTEGRITY: retained checkpoints failed verification (... bad_signature / unknown_key / continuity_broken ...)` | continuous verification found a bad signature, a foreign key, or an impossible chain | treat as tampering or a restored foreign DB; verify against retained copies (§3) |
 | `checkpoint continuity UNPROVEN over the retained window` | a predecessor does not link (gap or fork) | operator work item; compare cross-gap leaves against a retained copy |
-| `INTEGRITY: witness record digest parity failed; emission halted` | a stored row and its canonical encoding disagree; emission stopped at that record | the store is corrupt or the encoder drifted; do not trust emitted bytes past this point; investigate before resuming |
+| `INTEGRITY: witness record digest parity failed; emission halted` | a stored row and its canonical encoding disagree; emission stopped at that record | the store is corrupt or the encoder drifted; do not trust emitted bytes past this point, and investigate before resuming |
 | `evidence emission sink rejected a frame; backlog will retry` | the log/OTLP path is full or failing | fix the collector; the durable store is unaffected, the backlog gauge shows the lag |
 
 A **key-holding kb refuses to start** (`kb_witness_boot_check`) when it holds a
@@ -132,7 +132,7 @@ serve. The error names the offending `signer_key_id`.
 
 ## 5. The P2b egress release gate
 
-On a **key-holding kb** (a real, unsealed custody anchor: TPM2/PKCS#11/KMS; never
+On a **key-holding KB** with a real, unsealed TPM2, PKCS#11, or KMS custody anchor (never
 `file`/`mock`), production egress is allowed only when **every** term holds, each
 fail-closed:
 
@@ -143,8 +143,8 @@ fail-closed:
    (900 s, well above the 60 s checkpoint cadence);
 5. continuous verification's last result was clean.
 
-Any term failing → egress returns `503 egress unavailable`. A **dev / file-custody /
-mock** kb has no live keys, so the gate is always closed there. This is expected,
+If any term fails, egress returns `503 egress unavailable`. A **dev / file-custody /
+mock** KB has no live keys, so the gate is always closed there. This is expected,
 not a fault. A kb whose checkpoint chain has **stalled** (term 4) or whose last
 verification was dirty or unproven (term 5) closes egress until healthy; check the
 `kb.witness` log and the `aimee_org_witness_checkpoint_age_seconds` gauge.

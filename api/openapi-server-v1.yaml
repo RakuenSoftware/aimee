@@ -571,8 +571,8 @@ paths:
       description: >
         Read from the embedder registry (scripts/embedders.json), not from a running
         service: the setup wizard needs this list before anything is deployed. `local`
-        says whether the knowledge base can serve the model itself — one is bundled —
-        and an entry that cannot is selectable only against an external endpoint.
+        says whether the current KB image can run the model internally. One is bundled
+        in that image. An entry it cannot run is selectable only as a remote role.
         Every other field changes the vectors, so the picker shows them: a different
         `dim` rebuilds the pgvector columns as well as re-embedding the corpus, and
         `prefixed` marks a model whose card defines query/document prefixes.
@@ -907,7 +907,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
     delete:
-      summary: Delete a run — auto-abandons an active run first, then removes its rows and proposal file (owner or operator)
+      summary: Delete a run after auto-abandoning it, then remove its rows and proposal file (owner or operator)
       parameters:
         - name: id
           in: path
@@ -1114,7 +1114,7 @@ paths:
           description: Could not create the work item
   /dev/ci-event:
     post:
-      summary: CI outcome webhook — record a PR's CI result for its autonomous run and resume the scheduler (HMAC-signed; no capability, fail-closed if the secret is unset)
+      summary: Record a PR's CI result and resume its autonomous scheduler (HMAC-signed; no capability, fail-closed if the secret is unset)
       requestBody:
         required: true
         content:
@@ -1146,7 +1146,7 @@ paths:
           description: Webhook disabled (AIMEE_CI_WEBHOOK_SECRET unset)
   /dev/sweep:
     post:
-      summary: Deepening sweep (analysis-only) — propose duplication-across-call-sites seams, re-ground each against the live code index, and return a ranked report. Files nothing.
+      summary: Propose and rank cross-call-site duplication seams (analysis-only; files nothing)
       requestBody:
         required: false
         content:
@@ -1473,8 +1473,8 @@ paths:
       responses:
         "200":
           description: >-
-            Grants, plus `truncated` when the answer is partial — from this server's ceiling
-            or aimee-kb's. A partial list read as complete understates who can write.
+            Grants, plus `truncated` when this server's or aimee-kb's ceiling makes the
+            answer partial. A partial list read as complete understates who can write.
           content:
             application/json:
               schema:
@@ -1553,7 +1553,7 @@ paths:
                     type: boolean
                     description: >-
                       False when the subject is not on the team. The grant is created anyway
-                      and is inert until they are — a warning, not a refusal.
+                      and is inert until they join. This is a warning, not a refusal.
         "400":
           description: Missing or unusable field, or a non-integer team_id
           content:
@@ -1574,8 +1574,8 @@ paths:
       summary: Revoke a per-user write-tier grant
       description: >-
         LOCAL UDS ONLY (see /grants/write-tier/list). Idempotent, so a retry after a timeout
-        succeeds. Takes effect immediately for MINTING — aimee-kb re-reads the grant when it
-        mints — but a token already issued remains usable for up to its 300s lifetime, once.
+        succeeds. It takes effect immediately for minting because aimee-kb re-reads the grant
+        for each token. A token already issued remains usable once during its 300s lifetime.
       requestBody:
         required: true
         content:
@@ -1590,8 +1590,8 @@ paths:
       responses:
         "200":
           description: >-
-            Revoked. `found` is false when no grant existed at all — likely a typo'd subject,
-            and distinct from one already revoked, where the intent was already satisfied.
+            Revoked. `found` is false when no grant existed, which may indicate a misspelled
+            subject. This differs from an already revoked grant, where the intent was satisfied.
           content:
             application/json:
               schema:
@@ -2000,7 +2000,7 @@ paths:
                 dry_run:
                   type: boolean
                   description: >-
-                    Offline candidate inspection — emit every band down to LOW plus
+                    Offline candidate inspection. Emit every band down to LOW plus
                     inline AMBIGUOUS candidates, writing nothing (acceptance #4).
       responses:
         "200":
@@ -2865,7 +2865,7 @@ paths:
         all-rows figure (kept for backwards compatibility), while the spend object
         breaks cost down by usage_kind so realized provider-reported spend is
         separated from estimated, avoided (dedup-skipped), and partial (aborted)
-        rows. spend.total is the billable figure and is REALIZED ONLY — estimated,
+        rows. spend.total is the billable figure and includes REALIZED rows only. Estimated,
         avoided, and partial are reported individually but excluded from the total.
       responses:
         "200":
@@ -2893,7 +2893,7 @@ paths:
                       estimated: { type: number, description: No provider usage; aimee-estimated. Not in total. }
                       avoided: { type: number, description: Dedup-skipped; not counted as spend. }
                       partial: { type: number, description: Aborted mid-stream; not counted as spend. }
-                      total: { type: number, description: Billable total — realized only (excludes estimated/avoided/partial). }
+                      total: { type: number, description: Billable realized total. Excludes estimated, avoided, and partial rows. }
                   models:
                     type: array
                     items:
@@ -3212,6 +3212,25 @@ paths:
       summary: Update the knowledge base (async; poll GET /runs/{id})
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
+  /kb/reembed:
+    post:
+      summary: Reset and re-embed the vector store after a dimension change (async; poll GET /runs/{id})
+      description: >-
+        Drops and recreates every derived vector table at the configured
+        embedding dimension, then requeues the corpus. Gated by
+        kb.reembed_on_dim_change in aimee-kb's own config; without confirm it
+        returns a dry-run plan naming each table and row count.
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
+  /memory/embed:
+    post:
+      summary: (Re)generate memory embeddings (async; poll GET /runs/{id})
+      description: >-
+        Embeds a single memory (memory_id) or the whole corpus (all=true, which
+        requires a rollover version). Needed after a dimension change, which
+        drops memory vectors without requeueing them.
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
   /kb/docs/push:
     post:
       summary: Push document contents into the knowledge base (async; poll GET /runs/{id})
@@ -3384,8 +3403,8 @@ paths:
         merely been replaced: the supersession chain is walked by
         memory.list_superseded_keys and memory.fact_history, and deleting breaks
         provenance and the negative examples effectiveness scoring relies on.
-        Delete is for content that should not exist at all — a credential, PII
-        under an erasure request, data written to the wrong store.
+        Delete is for content that should not exist at all, such as a credential, PII
+        under an erasure request, or data written to the wrong store.
         Requires the memory-write capability.
       requestBody:
         required: true
@@ -4194,7 +4213,7 @@ paths:
         aimee's configured primary model. A stateless wire-format proxy: the
         request's system/messages/tools are translated to the primary
         provider's format and the reply is translated back to Anthropic shape
-        — aimee's agent loop, memory, and toolset are NOT involved. With
+        without involving aimee's agent loop, memory, or toolset. With
         `stream: true` the response is the Anthropic typed-event SSE sequence
         (message_start … message_stop). Requires CAP_CHAT.
       requestBody:
@@ -4768,7 +4787,7 @@ paths:
     get:
       summary: Workspace handle manifest
       description: >
-        The manifest for one workspace handle — provider, root, existence and
+        The manifest for one workspace handle: provider, root, existence, and
         VCS state. `id` is the percent-encoded absolute workspace path.
         Capability: index:read.
       parameters:
@@ -4829,8 +4848,8 @@ paths:
       description: >
         A filesystem-rich client hands the hub a short-lived, scoped forge token
         (GitHub/GitLab App installation token, fine-grained PAT, or
-        `gh auth token`) for this workspace. The hub holds it in memory only —
-        never written to disk or logged — injects it into the git/gh exec
+        `gh auth token`) for this workspace. The hub holds it in memory only and never
+        writes it to disk or logs it. The hub injects it into the git/gh exec
         environment (GH_TOKEN + a GIT_ASKPASS shim), and revokes it when the
         workspace closes. `id` is the percent-encoded absolute workspace path.
         Capability: tool:execute.
@@ -5111,8 +5130,8 @@ paths:
         knowledge service is unreachable or a store fails, the delete aborts
         with 503 and nothing is destroyed unless `force` is true, in which
         case the filesystem proceeds and the response carries the full
-        per-store detail (`kb_status` "forced"). Every attempt — including
-        aborts — writes structured webuser_project_delete_audit_v1 lines
+        per-store detail (`kb_status` "forced"). Every attempt, including an
+        abort, writes structured webuser_project_delete_audit_v1 lines
         sharing the echoed `purge_id`. Capability: tool:execute.
       requestBody:
         required: true
@@ -5146,9 +5165,10 @@ paths:
                     type: string
                     enum: [purged, retained, forced]
                     description: >
-                      purged — last holder, all knowledge stores cleared;
-                      retained — other holders keep the shared knowledge;
-                      forced — filesystem removed despite a kb failure.
+                      `purged` means the last holder was removed and all knowledge
+                      stores were cleared. `retained` means other holders keep the
+                      shared knowledge. `forced` means the filesystem was removed
+                      despite a KB failure.
                   purge_id:
                     type: string
                     description: >
@@ -5180,7 +5200,7 @@ paths:
             Knowledge service unavailable or a store failed (without force):
             nothing was removed; the body's `kb` member carries the detail. A
             failed purge-cancel is reported here too ("purge committed but
-            unfinished") — re-running the delete converges.
+            unfinished"). Re-running the delete converges.
           content:
             application/json:
               schema:
@@ -5382,8 +5402,8 @@ paths:
       description: >
         The git hosts (github.com, gitea.*, ...) for which aimee-server holds an
         access token. Single-user server: credentials are keyed by host, not by
-        user, and stored in the server vault. Tokens are NEVER returned — only the
-        host names. Identity is the attested `webuser:` principal. Capability:
+        user, and stored in the server vault. Tokens are never returned. The response
+        contains only host names. Identity is the attested `webuser:` principal. Capability:
         tool:execute.
       responses:
         "200":
@@ -5504,7 +5524,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
         "423":
-          description: Vault is locked — unlock it, then retry
+          description: Vault is locked. Unlock it, then retry.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -5636,7 +5656,7 @@ paths:
     post:
       summary: Begin the GitHub web (authorization-code) sign-in
       description: >
-        Seamless redirect sign-in: stash a CSRF state and return the GitHub
+        Redirect sign-in: stash a CSRF state and return the GitHub
         authorize URL for the browser to navigate to. Needs a client ID + secret
         (the secret enables this flow; without it, use the device flow). The caller
         supplies redirect_uri (its public callback origin). Capability: tool:execute.
@@ -5848,7 +5868,7 @@ paths:
       summary: Bring up the managed sibling services
       description: >
         Server-orchestrated deploy: run `docker compose up -d` for the managed
-        services (aimee-kb + aimee-llm) the current wizard config selects,
+        one-KB profile the current wizard config selects,
         on a background thread. Atomically claims the authenticated wizard user
         as the first remote owner and returns that user's enrollment-only bearer;
         CSR signing later binds its explicit full grant to mTLS. Requires

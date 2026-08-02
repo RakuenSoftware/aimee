@@ -30,6 +30,8 @@ means the contract or branch exists but is not part of the integrated path yet.
 | Client-side content push | Done | Remote clients upload bytes; server paths never name client files. |
 | Structured PDF evidence | Gated | Coordinates are the base; vectors, tables, assets, and OCR have separate gates. |
 | Autonomous curation | Done | Extract, dedupe, contradict, decay, reflect, and promote through bounded workers. |
+| Multi-KB fleet routing | Next | The design selects a KB by corpus, authority, and capabilities; current managed and split profiles configure one KB URL. |
+| Per-KB internal or remote model roles | In progress | Configuration records embedding and synthesis placement; profile support is still converging. There is no standalone inference service. |
 
 ## Agents and workflows
 
@@ -53,7 +55,6 @@ means the contract or branch exists but is not part of the integrated path yet.
 | OpenAI, Anthropic, Gemini, Mistral, Bedrock, local endpoints | Done | Availability still depends on credentials and provider capability. |
 | Provider catalogs and model registry | Done | Context, output, price, capability, quota, and deprecation metadata. |
 | Context economizer | Done | Folding, cache alignment, and tool-output condensation are independently configurable. |
-| Local inference service | Done | CPU/GPU tiers serve embedding and synthesis outside the KB process. |
 
 ## Security and operations
 
@@ -66,8 +67,8 @@ means the contract or branch exists but is not part of the integrated path yet.
 | External witness and anchor | Gated | Needed for evidence against a compromised host. |
 | Org budgets and rate limits | Done | Catalog, admission, spend, and quota surfaces. |
 | Browser workspace | Done | Chat, projects, agents, workflows, graph, logs, settings, and VS Code. |
-| Managed container deploy | Done | Browser can launch KB and inference through the mounted Docker socket. |
-| Split deploy | Done | Server, KB, and inference can run without Docker-socket delegation. |
+| Managed container deploy | Done | Browser can launch the current one-KB profile through the mounted Docker socket. |
+| Split deploy | Done | Server and KB can run without Docker-socket delegation. |
 | Native thin clients | Done | Linux, macOS, and Windows; no database linkage. |
 
 ## Removed
@@ -80,6 +81,7 @@ means the contract or branch exists but is not part of the integrated path yet.
 | Generic `/v1/rpc` | Named, versioned `/v1` routes. |
 | Combined appliance image | Managed or split container stack. |
 | Client-held agent keys | Server-sealed vault. |
+| `aimee-llm` inference container | Embedding and synthesis are per-KB roles, internal to that KB container or remote. No replacement inference service exists. |
 | KB socket autostart | Explicit KB `/v1` service. |
 
 Generated [commands](gen/cli-commands.md), [configuration](gen/configuration.md), and

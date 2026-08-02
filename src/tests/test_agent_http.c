@@ -348,6 +348,42 @@ static void test_openai_provider_fixed_temperature_fallback(void)
    printf("openai_provider_fixed_temperature_fallback OK\n");
 }
 
+/* A model that accepts exactly one temperature must get that value even when
+ * the caller asked for another. kimi-k3 names no wire provider in agents.json,
+ * so the constraint has to resolve off the catalog vendor; sending the caller's
+ * temperature instead failed every delegate with HTTP 400 "invalid temperature:
+ * only 1 is allowed for this model". */
+static void test_openai_required_temperature_overrides_caller(void)
+{
+   agent_t agent;
+   memset(&agent, 0, sizeof(agent));
+   snprintf(agent.catalog_provider, sizeof(agent.catalog_provider), "moonshotai");
+   snprintf(agent.model, sizeof(agent.model), "k3-256k");
+   assert(model_sampling_required_temperature(&agent) == 1.0);
+
+   cJSON *messages = cJSON_CreateArray();
+   cJSON *req = agent_build_request_openai(&agent, messages, NULL, 1024, 0.2);
+   assert(req != NULL);
+   assert(cJSON_GetObjectItem(req, "temperature")->valuedouble == 1.0);
+   cJSON_Delete(req);
+   cJSON_Delete(messages);
+
+   /* An unconstrained model still honours the caller. */
+   agent_t other;
+   memset(&other, 0, sizeof(other));
+   snprintf(other.provider, sizeof(other.provider), "openai");
+   snprintf(other.model, sizeof(other.model), "unknown-local-model");
+   assert(model_sampling_required_temperature(&other) < 0);
+
+   messages = cJSON_CreateArray();
+   req = agent_build_request_openai(&other, messages, NULL, 1024, 0.2);
+   assert(req != NULL);
+   assert(cJSON_GetObjectItem(req, "temperature")->valuedouble == 0.2);
+   cJSON_Delete(req);
+   cJSON_Delete(messages);
+   printf("openai_required_temperature_overrides_caller OK\n");
+}
+
 static void test_agent_config_recommended_sampling_roundtrip(void)
 {
    char tmpdir[512];
@@ -1054,6 +1090,7 @@ int main(void)
    test_openai_sampling_opt_out_unchanged();
    test_openai_sampling_unknown_opt_in_unchanged();
    test_openai_provider_fixed_temperature_fallback();
+   test_openai_required_temperature_overrides_caller();
    test_agent_config_recommended_sampling_roundtrip();
    test_parse_response_openai_sanitizes_invalid_tool_arguments();
    test_parse_response_captures_provider_model();

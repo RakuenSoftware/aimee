@@ -34,7 +34,7 @@ static void test_grounded(void)
    fact_norm_text("The KB server has hostname aimee-kb and IP 10.20.0.15.", note, sizeof(note));
 
    assert(fact_grounded("KB server", note) == 1);
-   assert(fact_grounded("kb_server", note) == 1);  /* snake_case meets "KB server" */
+   assert(fact_grounded("kb_server", note) == 1); /* snake_case meets "KB server" */
    assert(fact_grounded("aimee-kb", note) == 1);
    assert(fact_grounded("10.20.0.15", note) == 1);
    /* An entity the note never mentions is exactly what this gate is for. */

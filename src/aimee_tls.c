@@ -71,8 +71,21 @@ int aimee_tls_client_cert_eligible(const char *home, char *crt, size_t crt_n, ch
  * mutual TLS, when both files exist. Absent => plain client TLS (the server may
  * not require a client cert). Once either identity file is configured, unsafe
  * permissions, malformed PEM, or a key mismatch fail the connection closed. */
+/* Process-local; see aimee_tls_suppress_client_cert in aimee_tls.h. */
+static int g_suppress_client_cert = 0;
+
+void aimee_tls_suppress_client_cert(int on)
+{
+   g_suppress_client_cert = on ? 1 : 0;
+}
+
 static int aimee_tls_present_client_cert(SSL_CTX *ctx)
 {
+   /* Checked ahead of the eligibility gate on purpose: the caller is probing
+    * whether the STORED identity is what the server refuses, so a refused-but-
+    * present cert must not fail the probe closed before it can be tested. */
+   if (g_suppress_client_cert)
+      return 0;
    char crt[600], key[600];
    int eligible = aimee_tls_client_cert_eligible(aimee_home(), crt, sizeof(crt), key, sizeof(key));
    if (eligible == 0)

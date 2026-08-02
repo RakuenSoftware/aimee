@@ -44,22 +44,23 @@ static uint32_t fnv1a32(const char *s)
    return h;
 }
 
-void dogfood_config_from(const void *cfg_void, dogfood_config_t *out)
+/* Resolve the dogfood settings from the live config. Replaces
+ * dogfood_config_from(const config_t *, ...), which every caller reached by
+ * loading a whole config_t and immediately projecting seven fields out of it. */
+void dogfood_config_current(dogfood_config_t *out)
 {
    if (!out)
       return;
    memset(out, 0, sizeof(*out));
-   if (!cfg_void)
-      return;
-   const config_t *cfg = (const config_t *)cfg_void;
-   out->enabled = cfg->dogfood_enabled;
-   out->commit_raw = cfg->dogfood_commit_raw;
-   out->inline_tagging = cfg->dogfood_inline_tagging;
-   out->autolabel_repair = cfg->dogfood_autolabel_repair;
-   out->autolabel_continuation = cfg->dogfood_autolabel_continuation;
-   out->autolabel_repeat_question = cfg->dogfood_autolabel_repeat_question;
-   if (cfg->dogfood_log_dir[0])
-      snprintf(out->log_dir, sizeof(out->log_dir), "%s", cfg->dogfood_log_dir);
+   out->enabled = config_dogfood_enabled();
+   out->commit_raw = config_dogfood_commit_raw();
+   out->inline_tagging = config_dogfood_inline_tagging();
+   out->autolabel_repair = config_dogfood_autolabel_repair();
+   out->autolabel_continuation = config_dogfood_autolabel_continuation();
+   out->autolabel_repeat_question = config_dogfood_autolabel_repeat_question();
+   const char *dir = config_dogfood_log_dir();
+   if (dir[0])
+      snprintf(out->log_dir, sizeof(out->log_dir), "%s", dir);
    else
       snprintf(out->log_dir, sizeof(out->log_dir), "%s/dogfood", config_output_dir());
 }
@@ -92,11 +93,8 @@ char *dogfood_inline_hint_json(const dogfood_config_t *cfg, const char *record_i
 void dogfood_log_moment_live(const char *tool, const char *query, const int64_t *retrieved_ids,
                              int retrieved_count, const char *notes)
 {
-   config_t cfg;
-   if (config_load(&cfg) != 0)
-      return;
    dogfood_config_t dcfg;
-   dogfood_config_from(&cfg, &dcfg);
+   dogfood_config_current(&dcfg);
    dogfood_log_moment(&dcfg, tool, query, retrieved_ids, retrieved_count, notes);
 }
 
@@ -308,11 +306,8 @@ void dogfood_log_moment_with_id(const dogfood_config_t *cfg, const char *tool, c
 void dogfood_log_moment_tagged(const char *tool, const char *query, const int64_t *retrieved_ids,
                                int retrieved_count, const dogfood_label_t *label)
 {
-   config_t cfg;
-   if (config_load(&cfg) != 0)
-      return;
    dogfood_config_t dcfg;
-   dogfood_config_from(&cfg, &dcfg);
+   dogfood_config_current(&dcfg);
    dogfood_log_moment_impl(&dcfg, tool, query, retrieved_ids, retrieved_count, NULL, label, NULL,
                            0);
 }
@@ -882,13 +877,7 @@ int dogfood_autolabel_apply(const dogfood_config_t *cfg_in, const char *record_i
    const dogfood_config_t *cfg = cfg_in;
    if (!cfg)
    {
-      config_t full;
-      if (config_load(&full) != 0)
-      {
-         g_failures++;
-         return -1;
-      }
-      dogfood_config_from(&full, &live);
+      dogfood_config_current(&live);
       cfg = &live;
    }
    if (!cfg->enabled || !cfg->log_dir[0])
@@ -977,11 +966,8 @@ void dogfood_autolabel_next_turn_live(const char *text)
 {
    if (!g_last_record_id[0])
       return;
-   config_t full;
-   if (config_load(&full) != 0)
-      return;
    dogfood_config_t cfg;
-   dogfood_config_from(&full, &cfg);
+   dogfood_config_current(&cfg);
    if (!cfg.enabled)
       return;
    if (!cfg.autolabel_repair && !cfg.autolabel_continuation)
@@ -1063,13 +1049,7 @@ int dogfood_label_record(const dogfood_config_t *cfg_in, const char *record_id,
    const dogfood_config_t *cfg = cfg_in;
    if (!cfg)
    {
-      config_t full;
-      if (config_load(&full) != 0)
-      {
-         g_failures++;
-         return -1;
-      }
-      dogfood_config_from(&full, &live);
+      dogfood_config_current(&live);
       cfg = &live;
    }
    if (!cfg->enabled || !cfg->log_dir[0])
@@ -1143,9 +1123,10 @@ cJSON *dogfood_build_report_for_month(const char *dir_override, const char *mont
       snprintf(dir, sizeof(dir), "%s", dir_override);
    else
    {
-      config_t cfg;
-      if (config_load(&cfg) == 0 && cfg.dogfood_log_dir[0])
-         snprintf(dir, sizeof(dir), "%s", cfg.dogfood_log_dir);
+      char log_dir[CONFIG_COPY_MAX];
+      config_dogfood_log_dir_copy(log_dir, sizeof(log_dir));
+      if (log_dir[0])
+         snprintf(dir, sizeof(dir), "%s", log_dir);
       else
          snprintf(dir, sizeof(dir), "%s/dogfood", config_output_dir());
    }

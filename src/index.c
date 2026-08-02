@@ -822,10 +822,8 @@ int index_scan_project(const char *name, const char *root, int force)
    /* CSS migration assistant (WP-C): the style-graph write path is opt-in. Read
     * the flag once per scan; off by default, the indexer keeps only the legacy
     * lexical CSS class-name scan (file_exports). */
-   config_t scan_cfg;
-   int cfg_ok = (config_load(&scan_cfg) == 0);
-   int css_graph_on = cfg_ok && scan_cfg.css_style_graph_enabled;
-   int cochange_on = cfg_ok && scan_cfg.code_cochange_git_enabled;
+   int css_graph_on = config_css_style_graph_enabled();
+   int cochange_on = config_code_cochange_git_enabled();
 
    build_exclusion_list_t build_exclusions = {0};
    collect_build_exclusions(abs_root, &build_exclusions);

@@ -3,11 +3,14 @@
  *
  * The page places two LLM roles (embedder / synthesizer) and picks
  * the knowledge-base mode. Every value it persists goes through the SAME page-2
- * config record the backend shipped in p1–p2b (kb_mode + per-role llm_* keys),
- * which `aimee config deploy-env` already translates to compose env. All local
- * roles share ONE aimee-llm container; the tier tokens cpu/small/mid/large are
- * exactly the valid AIMEE_LLM_TIER values, and backend local|external|off maps
- * to AIMEE_LLM_<ROLE>_MODE. See deploy/compose + src/config_database.c. */
+ * config record the backend shipped in p1-p2b (kb_mode + per-role llm_* keys),
+ * which `aimee config deploy-env` already translates to compose env.
+ *
+ * NOTHING IS PLACED ON A CONTAINER OF OURS ANY MORE. aimee-llm is retired, so
+ * there is no host to choose and no tier to size: the embedder runs inside the
+ * knowledge base from baked-in weights, and synthesis is an endpoint someone
+ * else runs, or off. backend local|external|off still maps to
+ * AIMEE_LLM_<ROLE>_MODE. See deploy/compose + src/config_database.c. */
 
 export type Role = 'embed' | 'synth';
 
@@ -21,9 +24,10 @@ export const ROLES: { role: Role; label: string; blurb: string }[] = [
 export type Tier = 'cpu' | 'small' | 'mid' | 'large';
 export const GPU_TIERS: Tier[] = ['small', 'mid', 'large'];
 
-/** How a role is served. `local` runs on the shared aimee-llm container at a
- * tier on a chosen host+GPU; `external` points at an existing endpoint; `off`
- * disables the role. */
+/** How a role is served. `local` now means only the embedder inside the
+ * knowledge base: the aimee-llm container it used to describe is retired, and
+ * the tier/host/gpu fields it carries are written empty. `external` points at an
+ * existing endpoint; `off` disables the role. */
 export type Placement =
   | { backend: 'local'; tier: Tier; host: string; gpu: string }
   | { backend: 'external'; endpoint: string }
@@ -100,14 +104,13 @@ export interface RoleKeys {
   endpoint: string;
 }
 
-/** Whether this role's runtime offers the operator a placement choice IN THIS BUILD.
+/** Whether a role can be placed on a host we run. Only `embed` was ever bundled;
+ * `synth` kept host/gpu/tier keys because it ran on the aimee-llm container.
  *
- * Not a law about the role — a statement about what ships. Today the embedder runs as a
- * CPU process inside the kb container, so there is exactly one place it can be and no
- * tier or GPU to choose; synth runs in its own container and does have a placement. If a
- * GPU-served embedder arrives, this flips for `embed` and its llm_embed_host/_gpu/_tier
- * keys come back with it — predicate and schema move together, which is why they read
- * from the same place. */
+ * That container is retired, so no local option is OFFERED for synth any more
+ * (see placementOptions). The keys stay in the config contract and are written
+ * empty, so this still reports true for synth: deleting them is a schema change
+ * with its own migration, not part of removing the container. */
 export function rolePlaceable(role: Role): boolean {
   return role !== 'embed';
 }
@@ -222,6 +225,14 @@ export function configToPlacement(cfg: Record<string, unknown>, role: Role): Pla
     // here would be inventing a placement for something that has none.
     return { backend: 'local', tier: '' as Tier, host: '', gpu: '' };
   }
+  if (role === 'synth') {
+    // A stored local synth placement names the retired aimee-llm container, and an
+    // unset one used to default to local cpu. Neither can be served now, and the
+    // picker offers no local option, so report it as off rather than selecting a
+    // backend that will never start. An operator who wants synthesis gives an
+    // endpoint.
+    return { backend: 'off' };
+  }
   const tier = str(cfg, k.tier) as Tier;
   return {
     backend: 'local',
@@ -266,10 +277,10 @@ export interface PlacementOption {
  * can actually be given. deployTopology.test.ts asserts exactly that for every role, so
  * adding a GPU embedder means adding an entry here and the guard keeps holding. */
 export function placementOptions(host: HostInfo | undefined, role?: Role): PlacementOption[] {
-  if (role && !rolePlaceable(role)) {
+  if (role === 'embed') {
     // Two ways to embed, and neither is a placement of one of our containers: the kb
     // serves the bundled model itself, or an operator points it at their own endpoint.
-    // The external option is the supported route above the bundled model's width — a
+    // The external option is the supported route above the bundled model's width: a
     // wider or stronger embedder means someone else's GPU, not a tier of ours.
     return [
       {
@@ -278,6 +289,15 @@ export function placementOptions(host: HostInfo | undefined, role?: Role): Place
         placement: { backend: 'local', tier: '' as Tier, host: '', gpu: '' },
       },
       { id: 'external', label: 'External endpoint', placement: { backend: 'external', endpoint: '' } },
+    ];
+  }
+  if (role === 'synth') {
+    // Synthesis has no local option: the container that used to serve it is gone,
+    // and the knowledge base does not run a model. Offering a tier here would ask
+    // an operator to place something that will never be started.
+    return [
+      { id: 'external', label: 'External endpoint', placement: { backend: 'external', endpoint: '' } },
+      { id: 'off', label: 'Off (disabled)', placement: { backend: 'off' } },
     ];
   }
   const opts: PlacementOption[] = [

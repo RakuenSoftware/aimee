@@ -196,14 +196,11 @@ static void tool_execute_worker(void *arg)
       run_cmd_set_cwd(use_cwd);
 
    /* Guardrail pre-check */
-   config_t cfg;
-   config_load(&cfg);
-
    session_state_t state;
    session_state_load(&state, sid);
 
    char msg[1024] = "";
-   int rc = pre_tool_check(tool, args, &state, config_guardrail_mode(&cfg), cwd, msg, sizeof(msg));
+   int rc = pre_tool_check(tool, args, &state, config_guardrail_mode(), cwd, msg, sizeof(msg));
    session_state_save(&state, sid);
 
    if (rc != 0)

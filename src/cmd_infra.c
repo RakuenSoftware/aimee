@@ -125,9 +125,10 @@ static cJSON *git_sub_commit(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
                "Output ONLY the message, no quotes or prefix.",
                diff_text);
 
-      /* Try aux router first (cheap local model when configured) */
-      if (ctx->cfg)
-         msg = aux_call(ctx->cfg, "commit_message", prompt, 128);
+      /* Try aux router first (cheap local model when configured). aux_call reads
+       * auxiliary.* itself and returns NULL when it is off, so the old
+       * "does the CLI context carry a config" guard no longer decides anything. */
+      msg = aux_call("commit_message", prompt, 128);
 
       /* Fall back to cheapest configured agent */
       if (!msg)
@@ -789,9 +790,7 @@ static void session_subcmd_list(app_ctx_t *ctx, int argc, char **argv)
    (void)argv;
 
    {
-      config_t cfg;
-      config_load(&cfg);
-      db1_init(cfg.db1_path);
+      db1_init(config_db1_path());
    }
 
    db1_session_state_summary_t rows[128];
@@ -845,19 +844,10 @@ static void session_subcmd_clean(app_ctx_t *ctx, int argc, char **argv)
          dry_run = 1;
    }
 
-   config_t cfg_buf;
-   config_t *cfgp = ctx->cfg;
-   if (!cfgp)
-   {
-      config_load(&cfg_buf);
-      cfgp = &cfg_buf;
-   }
-   config_t cfg = *cfgp;
+   int threshold = (config_worktree_stale_secs() > 0) ? config_worktree_stale_secs()
+                                                      : CONFIG_DEFAULT_STALE_SESSION_SECS;
 
-   int threshold =
-       (cfg.worktree_stale_secs > 0) ? cfg.worktree_stale_secs : CONFIG_DEFAULT_STALE_SESSION_SECS;
-
-   db1_init(cfg.db1_path);
+   db1_init(config_db1_path());
 
    db1_session_state_summary_t rows[256];
    int total = db1_session_state_list(rows, 256);
@@ -886,10 +876,10 @@ static void session_subcmd_clean(app_ctx_t *ctx, int argc, char **argv)
       else
       {
          /* Remove sibling worktrees for this session */
-         for (int j = 0; j < cfg.workspace_count; j++)
+         for (int j = 0; j < config_workspace_count(); j++)
          {
             char git_root[MAX_PATH_LEN];
-            if (git_repo_root(cfg.workspaces[j], git_root, sizeof(git_root)) == 0)
+            if (git_repo_root(config_workspaces(j), git_root, sizeof(git_root)) == 0)
                worktree_cleanup(git_root, sid, NULL);
          }
          db1_session_state_delete(sid);
@@ -1162,26 +1152,22 @@ static void repo_name_from_url(const char *url, char *out, size_t outlen)
  * Shared by both the plain-path and --repo flows. Returns project count or -1. */
 static int register_and_index(app_ctx_t *ctx, const char *abs_path)
 {
-   config_t cfg;
-   config_load(&cfg);
-
-   for (int i = 0; i < cfg.workspace_count; i++)
+   int add_rc = config_workspace_add(abs_path, NULL, NULL, NULL);
+   if (add_rc == -2)
    {
-      if (strcmp(cfg.workspaces[i], abs_path) == 0)
-      {
-         fprintf(stderr, "workspace: already registered: %s\n", abs_path);
-         return -1;
-      }
+      fprintf(stderr, "workspace: already registered: %s\n", abs_path);
+      return -1;
    }
-
-   if (cfg.workspace_count >= 64)
+   if (add_rc == -3)
    {
       fprintf(stderr, "workspace: maximum workspace count reached (64)\n");
       return -1;
    }
-
-   snprintf(cfg.workspaces[cfg.workspace_count++], MAX_PATH_LEN, "%s", abs_path);
-   config_save(&cfg);
+   if (add_rc != 0)
+   {
+      fprintf(stderr, "workspace: failed to save config\n");
+      return -1;
+   }
 
    char projects[MAX_DISCOVERED_PROJECTS][MAX_PATH_LEN];
    int count = workspace_discover_projects(abs_path, MAX_WORKSPACE_DEPTH, projects,
@@ -1332,10 +1318,7 @@ static void workspace_cmd_list(app_ctx_t *ctx, int argc, char **argv)
    (void)argc;
    (void)argv;
 
-   config_t cfg;
-   config_load(&cfg);
-
-   if (cfg.workspace_count == 0)
+   if (config_workspace_count() == 0)
    {
       fprintf(stderr, "No workspaces configured. Use 'aimee workspace add <path>' to add one.\n");
       return;
@@ -1349,15 +1332,15 @@ static void workspace_cmd_list(app_ctx_t *ctx, int argc, char **argv)
    if (ctx->json_output)
    {
       cJSON *arr = cJSON_CreateArray();
-      for (int w = 0; w < cfg.workspace_count; w++)
+      for (int w = 0; w < config_workspace_count(); w++)
       {
          cJSON *ws_obj = cJSON_CreateObject();
-         cJSON_AddStringToObject(ws_obj, "path", cfg.workspaces[w]);
+         cJSON_AddStringToObject(ws_obj, "path", config_workspaces(w));
          cJSON *projs = cJSON_AddArrayToObject(ws_obj, "projects");
-         size_t ws_len = strlen(cfg.workspaces[w]);
+         size_t ws_len = strlen(config_workspaces(w));
          for (int p = 0; p < pcount; p++)
          {
-            if (strncmp(all_projects[p].root, cfg.workspaces[w], ws_len) == 0 &&
+            if (strncmp(all_projects[p].root, config_workspaces(w), ws_len) == 0 &&
                 (all_projects[p].root[ws_len] == '/' || all_projects[p].root[ws_len] == '\0'))
             {
                cJSON_AddItemToArray(projs, cJSON_CreateString(all_projects[p].name));
@@ -1369,13 +1352,13 @@ static void workspace_cmd_list(app_ctx_t *ctx, int argc, char **argv)
    }
    else
    {
-      for (int w = 0; w < cfg.workspace_count; w++)
+      for (int w = 0; w < config_workspace_count(); w++)
       {
-         fprintf(stderr, "%s\n", cfg.workspaces[w]);
-         size_t ws_len = strlen(cfg.workspaces[w]);
+         fprintf(stderr, "%s\n", config_workspaces(w));
+         size_t ws_len = strlen(config_workspaces(w));
          for (int p = 0; p < pcount; p++)
          {
-            if (strncmp(all_projects[p].root, cfg.workspaces[w], ws_len) == 0 &&
+            if (strncmp(all_projects[p].root, config_workspaces(w), ws_len) == 0 &&
                 (all_projects[p].root[ws_len] == '/' || all_projects[p].root[ws_len] == '\0'))
             {
                fprintf(stderr, "  %s\n", all_projects[p].name);
@@ -1393,36 +1376,23 @@ static void workspace_cmd_remove(app_ctx_t *ctx, int argc, char **argv)
       return;
    }
 
-   config_t cfg;
-   config_load(&cfg);
-
    /* Try to match by path (absolute or as provided) */
    char abs[MAX_PATH_LEN];
    const char *target = argv[0];
    if (realpath(argv[0], abs))
       target = abs;
 
-   int found = -1;
-   for (int i = 0; i < cfg.workspace_count; i++)
-   {
-      if (strcmp(cfg.workspaces[i], target) == 0)
-      {
-         found = i;
-         break;
-      }
-   }
-
-   if (found < 0)
+   int rm_rc = config_workspace_remove(target);
+   if (rm_rc == -2)
    {
       fprintf(stderr, "workspace: not found: %s\n", argv[0]);
       return;
    }
-
-   /* Shift remaining entries down */
-   for (int i = found; i < cfg.workspace_count - 1; i++)
-      snprintf(cfg.workspaces[i], MAX_PATH_LEN, "%s", cfg.workspaces[i + 1]);
-   cfg.workspace_count--;
-   config_save(&cfg);
+   if (rm_rc != 0)
+   {
+      fprintf(stderr, "workspace: failed to save config\n");
+      return;
+   }
 
    if (ctx->json_output)
       emit_ok_ctx(ctx->json_fields, ctx->response_profile);

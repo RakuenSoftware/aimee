@@ -13,7 +13,7 @@
 #include "db2_test_shim.h"
 #include "kb_curator_promote.h"
 
-void *db2_conn(void);
+void *(db2_conn)(void);
 
 static void test_scope_lattice(void)
 {

@@ -1199,20 +1199,17 @@ static void test_worktree_mapping_roundtrip(void)
    free(loaded);
 }
 
-static void test_app_ctx_cfg_pointer(void)
+/* app_ctx_t used to carry a config_t*, and this asserted it round-tripped. The
+ * field is gone -- commands read config through the module -- so what is left
+ * worth asserting is that the struct still zero-initialises cleanly, which is
+ * what every command handler relies on. */
+static void test_app_ctx_zero_init(void)
 {
-   /* Verify that app_ctx_t can carry a config pointer */
    app_ctx_t ctx;
    memset(&ctx, 0, sizeof(ctx));
-   assert(ctx.cfg == NULL);
-
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   snprintf(cfg.provider, sizeof(cfg.provider), "test-provider");
-   ctx.cfg = &cfg;
-
-   assert(ctx.cfg != NULL);
-   assert(strcmp(ctx.cfg->provider, "test-provider") == 0);
+   assert(ctx.json_output == 0);
+   assert(ctx.json_fields == NULL);
+   assert(ctx.response_profile == NULL);
 }
 
 static void test_malformed_tool_payloads(void)
@@ -1372,6 +1369,41 @@ static void test_anti_pattern_bypass_env(void)
    unsetenv("AIMEE_ANTIPATTERNS_BYPASS");
 
    guardrails_close_test_sqlite();
+}
+
+/* Regression: the bypass was gated on getenv() being non-NULL — PRESENCE, not value — so
+ * AIMEE_ANTIPATTERNS_BYPASS=0 (and =false) DISABLED the anti-pattern guard, the opposite of
+ * what setting 0 means. The escape hatch is documented as "=1"; every falsey and every
+ * unrecognized value must leave the guard armed (fail closed). */
+static void test_anti_pattern_bypass_env_falsey_still_blocks(void)
+{
+   static const char *const falsey[] = {"0", "false", "no", "off", "", "maybe"};
+   for (size_t i = 0; i < sizeof(falsey) / sizeof(falsey[0]); i++)
+   {
+      guardrails_open_test_sqlite();
+      clear_anti_patterns_for_test();
+
+      anti_pattern_t ap;
+      db2_anti_pattern_insert("rm -rf", "d", "test", "", 0.9, &ap);
+
+      session_state_t state;
+      memset(&state, 0, sizeof(state));
+      strcpy(state.guardrail_mode, MODE_APPROVE);
+      state.ap_hit_count = 1;
+      state.ap_hits[0].pattern_id = ap.id;
+      state.ap_hits[0].hits = AP_HIT_BLOCK_THRESHOLD;
+
+      setenv("AIMEE_ANTIPATTERNS_BYPASS", falsey[i], 1);
+      char msg[512] = "";
+      int rc = pre_tool_check("Bash", "{\"command\":\"rm -rf /tmp/xyz\"}", &state, MODE_APPROVE,
+                              "/tmp/.aimee/worktrees/test/main", msg, sizeof(msg));
+      unsetenv("AIMEE_ANTIPATTERNS_BYPASS");
+      /* Guard armed: the pre-seeded hit count is at the block threshold, so this blocks. */
+      assert(rc == 2);
+      assert(strstr(msg, "BLOCKED") != NULL);
+
+      guardrails_close_test_sqlite();
+   }
 }
 
 static void test_anti_pattern_no_match_no_warning(void)
@@ -3711,7 +3743,7 @@ int main(void)
    test_session_state_worktrees();
    test_session_state_save_load_roundtrip();
    test_worktree_mapping_roundtrip();
-   test_app_ctx_cfg_pointer();
+   test_app_ctx_zero_init();
    test_worktree_for_cwd();
    test_worktree_prefers_specific_git_root();
    test_worktree_sibling_path();
@@ -3735,6 +3767,7 @@ int main(void)
    test_anti_pattern_in_session_warning();
    test_anti_pattern_empty_description_falls_back_to_pattern();
    test_anti_pattern_bypass_env();
+   test_anti_pattern_bypass_env_falsey_still_blocks();
    test_anti_pattern_no_match_no_warning();
    test_known_subagent_tools_blocked();
    test_unknown_subagent_surface_blocked();

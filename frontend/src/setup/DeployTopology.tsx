@@ -22,7 +22,8 @@ import {
  * roles (embedder / synthesizer) onto the page-2 config record (per-role
  * llm_* keys), which `aimee config deploy-env` translates to the compose stack.
  * Every write goes through the existing /api/config/set allowlist (no new backend).
- * All local roles share ONE aimee-llm container on the chosen host.
+ * Nothing is placed on a container of ours: aimee-llm is retired, the embedder is
+ * bundled into the knowledge base, and synthesis is external or off.
  *
  * The knowledge-base local/remote choice lives in the preceding KnowledgeBase step;
  * this step is only shown for kb_mode='local', so it no longer renders the KB fork.
@@ -109,8 +110,19 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
       if (!alive) return;
       setCfg(c);
       setHosts(h);
-      setEmbedModel(String(c.embedding_model ?? ''));
-      setEmbedModelSaved(String(c.embedding_model ?? ''));
+      // An unset embedding_model is NOT "the deployment default" — there is no
+      // default downstream. buildDesiredConfig omits the key, config_emit_deploy_env
+      // omits EMBEDDER_MODEL, and the kb entrypoint leaves the bundled model
+      // unloaded and serves the builtin lexical embedder forever. The instance then
+      // reports retrieval:"fail" and shows a permanent degraded banner, having
+      // downloaded the weights it never selected. Seed the shipped local model so
+      // the operator who accepts the default gets a working embedder.
+      //
+      // embedModelSaved keeps the RAW saved value, so embedderChangeImpact still
+      // sees from:'' on a fresh install and correctly charges nothing for this.
+      const savedModel = String(c.embedding_model ?? '');
+      setEmbedModel(savedModel || emb.find((e) => e.local)?.id || '');
+      setEmbedModelSaved(savedModel);
       setEmbedDim(c.embedding_dim == null ? '' : String(c.embedding_dim));
 
       // Seed the host from any local role that names one, else the local host.
@@ -258,21 +270,10 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
   return (
     <div style={{ display: 'grid', gap: 16, marginBottom: 8 }}>
       <section style={{ display: 'grid', gap: 10 }}>
-        <div style={sectionTitle}>LLM placement</div>
-        <Field label="Host for the local LLM container">
-          <select style={input} value={hostName} onChange={(e) => setHostName(e.target.value)}>
-            {hosts.map((h) => (
-              <option key={h.name} value={h.name}>
-                {h.name} ({h.kind}){h.gpus.length ? ` · ${h.gpus.length} GPU${h.gpus.length > 1 ? 's' : ''}` : ' · CPU only'}
-              </option>
-            ))}
-          </select>
-        </Field>
-        {host?.error && (
-          <div style={{ fontSize: 11.5, color: '#a33' }}>Probe error on {host.name}: {host.error} — CPU still available.</div>
-        )}
+        <div style={sectionTitle}>Model roles</div>
         <div style={{ fontSize: 11.5, color: '#778', marginTop: -2 }}>
-          All GPU/CPU-placed roles run on one aimee-llm container on this host.
+          Nothing is placed on a host here. The embedder runs inside the knowledge base from weights
+          in its image, and synthesis is an endpoint you run, or off.
         </div>
 
         {ROLES.map(({ role, label, blurb }) => {
@@ -311,7 +312,10 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
                     <>
                       <select style={input} value={embedModel}
                         onChange={(e) => { setEmbedModel(e.target.value); setConfirmText(''); }}>
-                        <option value="">(deployment default)</option>
+                        {/* Named for what it DOES. "(deployment default)" read as
+                            "someone sensible chose for me" and delivered no embedder
+                            at all — semantic search silently degraded to lexical. */}
+                        <option value="">(none — lexical only, search degraded)</option>
                         {localEmbedders.map((e) => (
                           <option key={e.id} value={e.id}>
                             {e.id} — {e.dim}-dim, {e.context} ctx{e.prefixed ? '' : ', no prefixes'}
@@ -372,11 +376,3 @@ const input: React.CSSProperties = {
   width: '100%', boxSizing: 'border-box', padding: '7px 9px', borderRadius: 6,
   border: '1px solid #ccd', fontSize: 13, fontFamily: 'ui-monospace, monospace',
 };
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label style={{ display: 'block' }}>
-      <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 3 }}>{label}</div>
-      {children}
-    </label>
-  );
-}

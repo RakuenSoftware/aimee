@@ -193,7 +193,7 @@ RUN apt-get update \
 COPY --from=wfe-build /usr/local/go/ /usr/local/go/
 
 # Docker CLI + compose plugin (static client binaries — no daemon). Lets
-# aimee-server orchestrate the managed sibling services (aimee-kb + aimee-llm)
+# aimee-server orchestrate the managed sibling service (aimee-kb)
 # with `docker compose up -d` against a mounted host Docker socket, so
 # the setup wizard can bring the stack up itself (server-orchestrated deploy). This
 # is inert unless the deploy compose mounts /var/run/docker.sock and sets

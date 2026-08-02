@@ -152,6 +152,7 @@ static const struct
     {"memory", "supersede", "memory.supersede", NULL, NULL, 60000},
     {"memory", "show", "memory.get", NULL, NULL, 60000},
     {"memory", "read", "memory.read", NULL, NULL, 60000},
+    {"memory", "embed", "memory.embed", NULL, NULL, 900000},
     {"memory", "stats", "memory.stats", NULL, NULL, 60000},
     {"economizer", "stats", "economizer.stats", NULL, NULL, 60000},
     {"memory", "benchmark", "memory.benchmark", NULL, NULL, 600000},
@@ -223,6 +224,7 @@ static const struct
     {"kb", "grant show", "kb.grant.show", NULL, "grants", 30000},
     {"kb", "ingest", "kb.ingest", NULL, NULL, 30000},
     {"kb", "ingest status", "kb.ingest.status", NULL, NULL, 0},
+    {"kb", "reembed", "kb.reembed", NULL, NULL, 900000},
     {"kb", "health", "kb.health", NULL, NULL, 0},
     {"kb", "status", "kb.status", NULL, NULL, 0},
     {"kb", "curator status", "kb.curator", NULL, NULL, 0},
@@ -1389,6 +1391,49 @@ cJSON *marshal_kb_ingest(int argc, char **argv)
    const char *v;
    if ((v = rpc_get(&opts, "embed")))
       cJSON_AddStringToObject(req, "embedding_command", v);
+   return req;
+}
+
+/* kb reembed [--confirm] [--force] [--dry-run] [--target-dim N] [--clear-maintenance]
+ * The kb keeps the gating; this only carries the operator's intent across. */
+cJSON *marshal_kb_reembed(int argc, char **argv)
+{
+   static const char *bool_flags[] = {"confirm", "force", "dry-run", "clear-maintenance", NULL};
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, bool_flags, &opts);
+
+   cJSON *req = marshal_no_args("kb.reembed");
+   if (rpc_get(&opts, "confirm"))
+      cJSON_AddTrueToObject(req, "confirm");
+   if (rpc_get(&opts, "force"))
+      cJSON_AddTrueToObject(req, "force");
+   if (rpc_get(&opts, "dry-run"))
+      cJSON_AddTrueToObject(req, "dry_run");
+   if (rpc_get(&opts, "clear-maintenance"))
+      cJSON_AddTrueToObject(req, "clear_maintenance");
+   const char *v;
+   if ((v = rpc_get(&opts, "target-dim")))
+      cJSON_AddNumberToObject(req, "target_dim", atoi(v));
+   return req;
+}
+
+/* memory embed --all | <id> — rebuild memory vectors, e.g. after a dim change
+ * drops them. Defaults to nothing so a bare invocation is rejected server-side
+ * rather than silently re-embedding an entire corpus. */
+cJSON *marshal_memory_embed(int argc, char **argv)
+{
+   static const char *bool_flags[] = {"all", NULL};
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, bool_flags, &opts);
+
+   cJSON *req = marshal_no_args("memory.embed");
+   if (rpc_get(&opts, "all"))
+      cJSON_AddTrueToObject(req, "all");
+   if (opts.pos_count >= 1)
+      cJSON_AddNumberToObject(req, "memory_id", atof(opts.positional[0]));
+   const char *v;
+   if ((v = rpc_get(&opts, "version")))
+      cJSON_AddStringToObject(req, "version", v);
    return req;
 }
 

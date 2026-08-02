@@ -145,8 +145,9 @@ typedef enum
    SEV_BLOCK
 } severity_t;
 
-/* Forward declarations */
-typedef struct config config_t;
+/* No forward declaration of config_t here any more. It existed so app_ctx_t
+ * could carry a config_t*; that field is gone, and nothing else in this header
+ * needs the type. Callers that genuinely need config ask the config module. */
 
 /* Application context (replaces globals, passed through command handlers).
  *
@@ -158,7 +159,9 @@ typedef struct
    int json_output;
    const char *json_fields;
    const char *response_profile;
-   config_t *cfg; /* pre-loaded config (NULL if not available) */
+   /* No config here. It used to carry a pre-loaded config_t so commands could
+    * avoid re-reading; every command now asks the config module for the field it
+    * wants, so the pointer had no readers left. */
 } app_ctx_t;
 
 /* Command registry: each command is a {name, help, handler, tier} entry. */

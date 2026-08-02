@@ -191,12 +191,10 @@ cJSON *agent_build_request_openai(const agent_t *agent, cJSON *messages, cJSON *
 
    cJSON_AddNumberToObject(req, "max_tokens", agent_request_max_tokens(agent, max_tokens));
    if (agent_is_mistral_vibe_model(agent))
-   {
       cJSON_AddStringToObject(req, "reasoning_effort", "high");
-      cJSON_AddNumberToObject(req, "temperature", 1.0);
-   }
-   else
-      model_sampling_apply_openai(agent, req, temperature);
+   /* The temperature=1 this model requires now comes from the shared
+    * required-temperature table, so the other request builder gets it too. */
+   model_sampling_apply_openai(agent, req, temperature);
    if (agent_is_local_llama_compat(agent) && !agent_request_prefers_no_think_prompt(agent))
    {
       cJSON *kwargs = cJSON_AddObjectToObject(req, "chat_template_kwargs");

@@ -7,6 +7,8 @@
 #include "mcp_git.h"
 #include "util.h"
 #include "branch_ownership.h"
+#include "agent_config.h" /* agent_get_request_vault_principal */
+#include "git_forge_vault.h"
 #include <dirent.h>
 #include <sys/stat.h>
 #include <stdio.h>
@@ -35,6 +37,34 @@ static cJSON *mcp_error(const char *fmt, const char *detail)
    char buf[1024];
    snprintf(buf, sizeof(buf), fmt, detail);
    return mcp_text(buf);
+}
+
+/* Read a git config value through mcp_git_run — the SAME runner the commit
+ * below uses. These tools do not execute in the server process's own working
+ * directory (a workspace provider decides where git runs, and a detached
+ * workspace runs it on the client entirely), so resolving config in-process
+ * would consult a directory that is not the checkout and silently find
+ * nothing. */
+static int mcp_git_config_reader(const char *key, char *out, size_t out_len, void *ud)
+{
+   (void)ud;
+   if (!out || !out_len)
+      return 0;
+   out[0] = '\0';
+
+   char cmd[256];
+   snprintf(cmd, sizeof(cmd), "git config --get %s 2>/dev/null", key);
+   int rc = 0;
+   char *got = mcp_git_run(cmd, &rc);
+   if (!got)
+      return 0;
+   if (rc == 0)
+   {
+      snprintf(out, out_len, "%s", got);
+      out[strcspn(out, "\r\n")] = '\0';
+   }
+   free(got);
+   return out[0] ? 1 : 0;
 }
 
 /* Return a standard error response for main branch protection.
@@ -145,11 +175,37 @@ cJSON *handle_git_commit(cJSON *args)
       free(out);
    }
 
-   /* Commit */
+   /* Commit AS THE CONFIGURED OPERATOR, or not at all.
+    *
+    * git_ops points GIT_CONFIG_GLOBAL/SYSTEM at /dev/null, so git has no ambient
+    * identity to fall back on here: aimee supplies one or the commit has no
+    * author. Refuse rather than invent a persona. A bot author is not free
+    * either, since GitHub adds a Co-authored-by trailer to the squash of any PR
+    * whose commits carry two distinct authors, and the standing directive
+    * forbids those. */
+   char author_name[256] = "", author_email[256] = "";
+   int have_identity = git_identity_resolve_with(
+       agent_get_request_vault_principal(), mcp_git_config_reader, NULL, author_name,
+       sizeof(author_name), author_email, sizeof(author_email));
+   if (have_identity < 0)
+      return mcp_text("error: could not read the git identity from the vault");
+   if (have_identity == 0)
+      return mcp_text("error: no git identity is configured, so this commit would have no author. "
+                      "Set one on this checkout with `git config user.name` and "
+                      "`git config user.email` (both, or neither takes effect), or seal "
+                      "AIMEE_GIT_AUTHOR_NAME and AIMEE_GIT_AUTHOR_EMAIL into the vault to apply "
+                      "one everywhere.");
+
    char *esc_msg = shell_escape(jmsg->valuestring);
+   char *esc_name = shell_escape(author_name);
+   char *esc_email = shell_escape(author_email);
    char commit_cmd[8192];
-   snprintf(commit_cmd, sizeof(commit_cmd), "git commit -m '%s' 2>&1", esc_msg);
+   snprintf(commit_cmd, sizeof(commit_cmd),
+            "git -c user.name='%s' -c user.email='%s' commit -m '%s' 2>&1", esc_name, esc_email,
+            esc_msg);
    free(esc_msg);
+   free(esc_name);
+   free(esc_email);
 
    int rc;
    char *out = mcp_git_run(commit_cmd, &rc);

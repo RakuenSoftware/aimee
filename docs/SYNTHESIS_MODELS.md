@@ -51,13 +51,19 @@ against each other:
 | *gemma-4-12B-it (reference)* | *0.8472* | *0.792* | *0.910* | *95.7%* | *10,381 ms* |
 | *gemma-4-26B-A4B-it (reference)* | *0.8451* | *0.800* | *0.896* | *95.7%* | *44,714 ms* |
 
-The two reference rows show what you give up by staying local and small, and the
-answer is less than you might expect: E4B is within 0.026 F1 of a 12B model and
-within 0.023 of a 26B one. Neither reference model is an install candidate on a
-16 GB card or a CPU-only box, and neither is worth their latency here.
+The two reference rows show what you give up by staying local and small, and on
+this set the answer is: **nothing we can measure.** E4B's F1 sits 0.026 below the
+12B and 0.023 below the 26B, and neither gap is resolvable here — see
+[what these numbers can and cannot separate](#what-these-numbers-can-and-cannot-separate).
+Read those three rows as tied, not as E4B trailing slightly. Neither reference
+model is an install candidate on a 16 GB card or a CPU-only box, and neither is
+worth its latency here.
 
-Where E4B does lose is recall — 0.791 against 0.910 for the 12B. It finds fewer
-of the facts that are there. It does not invent more.
+Recall is the one place a difference is large enough to be worth stating:
+0.791 for E4B against 0.910 for the 12B, a gap of 0.119. That is at the very
+edge of what this set separates, so treat it as a direction to check on your own
+data rather than a measured quantity: E4B appears to find fewer of the facts
+that are there. It does not invent more — precision runs the other way.
 
 E4B's low latency is not straightforwardly a speed win: it abstains on 91% of
 the notes that have nothing to extract and emits 25 tokens at the median, where
@@ -96,6 +102,17 @@ The shipped default is `Q4_K_M`, which is roughly half the size and
 faster, and which we did not measure for quality. Expect the shipped
 configuration to be somewhat worse than the table says, by an amount we have not
 quantified.
+
+### What these numbers can and cannot separate
+
+**At n = 69, this set resolves about 0.12 F1 between two models, and about 0.03
+between two servings of the same model.** Any gap smaller than that is noise
+wearing four decimal places. The table is printed to four places because that is
+what the scorer emits, not because the fourth place means anything.
+
+Concretely: E4B versus the 12B and 26B references (gaps of 0.026 and 0.023) is
+**not** a measured difference, and no ranking should be built on it. E4B versus
+E2B (0.130) and E4B versus anything below 1B (0.31 and worse) are.
 
 **The gold set has one author and n is 69.** One person wrote and labelled the
 extraction set. There is no second annotator and no inter-rater agreement

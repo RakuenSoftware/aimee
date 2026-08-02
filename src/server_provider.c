@@ -14,7 +14,7 @@
 #include "server.h"
 #include "turn_registry.h"
 #include "server_http.h" /* server_http_api_status_report */
-#include "config.h"      /* config_t / config_load for api.status, api.enable */
+#include "config.h"      /* config_set / config_provider */
 #include <aimee/delegates/delegate_backend_docker.h>
 #include <aimee/delegates/delegate_backend_local.h>
 #include <aimee/delegates/delegate_backend_ssh.h>
@@ -180,8 +180,6 @@ int handle_provider_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    int json_output = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "json"));
    model_provider_t *providers[64];
    int n = model_provider_list(providers, 64);
-   config_t cfg = {0};
-   (void)config_load(&cfg);
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddBoolToObject(resp, "json", json_output);
@@ -198,7 +196,7 @@ int handle_provider_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
        * pre-populated with providers nobody had chosen. Nothing was installed;
        * they were names aimee knows. `--all` still shows that catalogue. */
       if (!show_all && !available_only &&
-          !server_provider_is_configured(providers[i], cfg.provider))
+          !server_provider_is_configured(providers[i], config_provider()))
          continue;
       cJSON_AddItemToArray(arr, server_provider_json(providers[i]));
    }
@@ -315,9 +313,7 @@ int handle_provider_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    (void)req;
-   config_t cfg;
-   config_load(&cfg);
-   const char *name = cfg.provider[0] ? cfg.provider : "claude";
+   const char *name = config_provider()[0] ? config_provider() : "claude";
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddStringToObject(resp, "provider", name);
@@ -353,14 +349,11 @@ int handle_provider_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                name);
       return server_send_error(conn, err, NULL);
    }
-   config_t cfg;
-   config_load(&cfg);
-   snprintf(cfg.provider, sizeof(cfg.provider), "%s", name);
-   if (config_save(&cfg) != 0)
+   if (config_set("provider", name) != 0)
       return server_send_error(conn, "failed to save config", NULL);
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddStringToObject(resp, "provider", cfg.provider);
+   cJSON_AddStringToObject(resp, "provider", name);
    int rc = server_send_response(conn, resp);
    cJSON_Delete(resp);
    return rc;

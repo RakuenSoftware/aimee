@@ -160,13 +160,11 @@ int handle_post_docs(const char *body, int body_len, char *out_buf, int out_cap)
     * spoofed/corrupt header cannot sneak in an untagged document. The upload MUST also carry
     * a valid sensitivity_class. Every reject is a 4xx with NO rows written. */
    {
-      config_t cfg;
-      config_load(&cfg);
       size_t fn_len = strlen(filename);
       int ext_pdf = fn_len >= 4 && filename[fn_len - 4] == '.' &&
                     (filename[fn_len - 3] | 0x20) == 'p' && (filename[fn_len - 2] | 0x20) == 'd' &&
                     (filename[fn_len - 1] | 0x20) == 'f';
-      if (cfg.kb_pdf_ingest_enabled && ext_pdf)
+      if (config_kb_pdf_ingest_enabled() && ext_pdf)
       {
          int magic_pdf = file_len >= 5 && memcmp(file_content, "%PDF-", 5) == 0;
          if (!magic_pdf)
@@ -224,9 +222,9 @@ int handle_post_docs(const char *body, int body_len, char *out_buf, int out_cap)
           * geometry through the SAME path (citations work identically); text_layer='ocr'.
           * Without OCR the doc stays text-less and is reported asset-only below — NOT silently
           * accepted as if text-indexed. */
-         if (st.regions == 0 && cfg.kb_pdf_ocr_enabled)
+         if (st.regions == 0 && config_kb_pdf_ocr_enabled())
          {
-            const char *ocr_ep = kb_ocr_endpoint(&cfg);
+            const char *ocr_ep = config_ocr_endpoint();
             if (ocr_ep[0])
             {
                int orc = kb_doc_pdf_ingest_ocr(scope, filename, content_hash, sclass,
@@ -248,7 +246,7 @@ int handle_post_docs(const char *body, int body_len, char *out_buf, int out_cap)
           * pdftoppm just yields no assets. Crops are read-time ACL-gated like regions, so even
           * a restricted (pending) doc's crops are safe to render now (withheld until confirm). */
          int assets = 0;
-         if (cfg.kb_pdf_assets_enabled)
+         if (config_kb_pdf_assets_enabled())
             assets = kb_doc_pdf_render_assets(scope, filename, sclass,
                                               (const unsigned char *)file_content, file_len);
          /* Surface an asset-only ingest (scanned PDF, no text recovered) so an operator is never

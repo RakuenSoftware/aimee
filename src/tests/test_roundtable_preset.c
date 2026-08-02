@@ -137,14 +137,14 @@ int main(void)
 
    /* Runtime resolution uses an explicit preset exactly, otherwise the saved
     * default. It never invents or expands seats. */
-   config_t runtime;
+   ensemble_panel_t runtime;
    memset(&runtime, 0, sizeof runtime);
    char resolved[RT_PRESET_NAME_MAX], rerr[128];
    assert(roundtable_preset_resolve_runtime("deep-review", &runtime, resolved, sizeof resolved,
                                             rerr, sizeof rerr) == 1);
    assert(strcmp(resolved, "deep-review") == 0);
-   assert(runtime.ensemble_reference_count == 3);
-   assert(strcmp(runtime.ensemble_reference_models[2], "glm") == 0);
+   assert(runtime.reference_count == 3);
+   assert(strcmp(runtime.reference_models[2], "glm") == 0);
    assert(roundtable_preset_resolve_runtime("missing", &runtime, resolved, sizeof resolved, rerr,
                                             sizeof rerr) == -1);
 
@@ -155,33 +155,28 @@ int main(void)
    assert(roundtable_preset_resolve_runtime(NULL, &runtime, resolved, sizeof resolved, rerr,
                                             sizeof rerr) == 1);
    assert(strcmp(resolved, "default") == 0);
-   assert(runtime.ensemble_reference_count == 3);
+   assert(runtime.reference_count == 3);
 
    /* apply_to_config mirrors the preset onto the live config_t */
-   config_t legacy_cfg;
-   assert(config_load(&legacy_cfg) == 0);
-   snprintf(legacy_cfg.ensemble_aggregator, sizeof legacy_cfg.ensemble_aggregator, "c-only");
-   assert(config_save(&legacy_cfg) == 0);
+   assert(config_set_ensemble_aggregator("c-only") == 0);
    char aerr[128];
    assert(roundtable_preset_apply_to_config("deep-review", aerr, sizeof(aerr)) == 0);
-   config_t cfg;
-   assert(config_load(&cfg) == 0);
-   assert(cfg.ensemble_reference_count == 3);
-   assert(cfg.ensemble_reference_persona_count == 3);
-   assert(strcmp(cfg.ensemble_reference_models[0], "codex") == 0);
-   assert(strcmp(cfg.ensemble_reference_personas[0], "reviewer") == 0);
-   assert(strcmp(cfg.ensemble_reference_models[1], "gpu-mid") == 0);
-   assert(strcmp(cfg.ensemble_reference_personas[1], "security") == 0);
+   assert(config_ensemble_reference_count() == 3);
+   assert(config_ensemble_reference_persona_count() == 3);
+   assert(strcmp(config_ensemble_reference_models(0), "codex") == 0);
+   assert(strcmp(config_ensemble_reference_personas(0), "reviewer") == 0);
+   assert(strcmp(config_ensemble_reference_models(1), "gpu-mid") == 0);
+   assert(strcmp(config_ensemble_reference_personas(1), "security") == 0);
    /* Applying a Go roundtable preset must not silently mutate the separate C
     * compatibility route while that route still exists. */
-   assert(strcmp(cfg.ensemble_aggregator, "c-only") == 0);
-   assert(cfg.ensemble_min_successful == 2);
-   assert(cfg.roundtable_max_rounds == 3);
-   assert(cfg.roundtable_converge_threshold == 2);
-   assert(cfg.roundtable_deadline_ms == 600000);
-   assert(strcmp(cfg.roundtable_turns, "parallel") == 0);
-   assert(cfg.roundtable_pipeline_gate_ttl_h == 24);
-   assert(strcmp(cfg.roundtable_default, "deep-review") == 0);
+   assert(strcmp(config_ensemble_aggregator(), "c-only") == 0);
+   assert(config_ensemble_min_successful() == 2);
+   assert(config_roundtable_max_rounds() == 3);
+   assert(config_roundtable_converge_threshold() == 2);
+   assert(config_roundtable_deadline_ms() == 600000);
+   assert(strcmp(config_roundtable_turns(), "parallel") == 0);
+   assert(config_roundtable_pipeline_gate_ttl_h() == 24);
+   assert(strcmp(config_roundtable_default(), "deep-review") == 0);
 
    /* delete removes the file */
    assert(roundtable_preset_delete("deep-review") == 0);

@@ -10,6 +10,11 @@ typedef struct
    int port;
    const char *endpoint;
    uid_t owner;
+   /* Re-issue the client certificate even when a stored identity already
+    * matches this KB. Without it the installer reuses whatever is on disk and
+    * reports readiness, so an identity the KB no longer accepts — a rotated CA,
+    * a revoked or expired cert, a lost registry row — has no supported repair. */
+   int force;
 } kb_managed_server_identity_install_options_t;
 
 /* Install or resume the wizard-managed server's durable mTLS identity. DB2 must

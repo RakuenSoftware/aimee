@@ -716,24 +716,29 @@ static int parse_engine_list(const char *spec, char names[][32], int max)
  * malloc'd error string the caller frees. An engine whose credential is missing
  * is an error for that engine only -- with fanout it is skipped and the others
  * still answer. */
-static char *run_engine(const char *engine, const char *query, int max_results, const config_t *cfg,
+static char *run_engine(const char *engine, const char *query, int max_results,
                         web_search_result_t *results, int *count)
 {
    *count = 0;
    char *block = NULL;
    if (strcmp(engine, "tavily") == 0)
    {
-      if (!cfg->search_tavily_api_key[0])
+      /* Copied out: handed to backend_tavily, which makes an HTTP round trip. */
+      char key[CONFIG_COPY_MAX];
+      config_search_tavily_api_key_copy(key, sizeof(key));
+      if (!key[0])
          return safe_strdup("error: web_search: tavily backend requires search.tavily_api_key in "
                             "config");
-      block = backend_tavily(query, max_results, cfg->search_tavily_api_key, results, count);
+      block = backend_tavily(query, max_results, key, results, count);
    }
    else if (strcmp(engine, "searxng") == 0)
    {
-      if (!cfg->search_searxng_url[0])
+      char url[CONFIG_COPY_MAX];
+      config_search_searxng_url_copy(url, sizeof(url));
+      if (!url[0])
          return safe_strdup("error: web_search: searxng backend requires search.searxng_url in "
                             "config");
-      block = backend_searxng(query, max_results, cfg->search_searxng_url, results, count);
+      block = backend_searxng(query, max_results, url, results, count);
    }
    else
    {
@@ -762,20 +767,16 @@ char *web_search_ex(const char *query, int max_results, int fetch_pages, const c
       max_results = 5;
    if (max_results > WEB_SEARCH_MAX_RESULTS)
       max_results = WEB_SEARCH_MAX_RESULTS;
-
-   config_t cfg;
-   config_load(&cfg);
-
    if (fetch_pages == WEB_SEARCH_FETCH_PAGES_UNSET)
-      fetch_pages =
-          (cfg.search_fetch_pages >= 0) ? cfg.search_fetch_pages : WEB_SEARCH_FETCH_PAGES_DEFAULT;
+      fetch_pages = (config_search_fetch_pages() >= 0) ? config_search_fetch_pages()
+                                                       : WEB_SEARCH_FETCH_PAGES_DEFAULT;
 
    char engines[WEB_SEARCH_MAX_ENGINES][32];
-   int nengines = parse_engine_list(cfg.search_backends, engines, WEB_SEARCH_MAX_ENGINES);
+   int nengines = parse_engine_list(config_search_backends(), engines, WEB_SEARCH_MAX_ENGINES);
    if (nengines == 0)
    {
       snprintf(engines[0], sizeof(engines[0]), "%s",
-               cfg.search_backend[0] ? cfg.search_backend : "duckduckgo");
+               config_search_backend()[0] ? config_search_backend() : "duckduckgo");
       nengines = 1;
    }
 
@@ -793,7 +794,7 @@ char *web_search_ex(const char *query, int max_results, int fetch_pages, const c
       if (!web_search_breaker_allow(engines[i]))
          continue;
       attempted++;
-      char *err = run_engine(engines[i], query, max_results, &cfg, per[i], &counts[i]);
+      char *err = run_engine(engines[i], query, max_results, per[i], &counts[i]);
       /* An empty result set counts as failure: a scraper that has decided you
        * are a bot answers 200 with nothing, so status alone would call that
        * healthy forever. */

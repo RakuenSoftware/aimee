@@ -3,7 +3,9 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"os/user"
 	"sort"
 
 	"github.com/RakuenSoftware/smoothgui/auth"
@@ -44,6 +46,27 @@ type pamAccounts struct {
 	authenticate func(service, username, password string) error
 	setPassword  func(username, password string) error
 	lock         func(username string) error
+	// Record the managed accounts after every mutation so they can be restored
+	// into a replaced container — see identity_persist.go. A seam because it
+	// reads /etc/shadow, which a unit test has no business doing.
+	persist func()
+}
+
+// aimeeHome is where the appliance's persistent state lives. The entrypoint
+// exports AIMEE_HOME; the default matches WEBCHAT_HOME in runtime-web-lib.sh.
+func aimeeHome() string {
+	if h := os.Getenv("AIMEE_HOME"); h != "" {
+		return h
+	}
+	return "/var/lib/aimee"
+}
+
+// recordIdentities snapshots the managed group. Best-effort: an account
+// operation must not fail because the record could not be written.
+func (p *pamAccounts) recordIdentities() {
+	if p.persist != nil {
+		p.persist()
+	}
 }
 
 func newPAMAccounts(service, group string) (*pamAccounts, error) {
@@ -54,13 +77,21 @@ func newPAMAccounts(service, group string) (*pamAccounts, error) {
 	if err := users.EnsureGroup(); err != nil {
 		return nil, fmt.Errorf("managed login group: %w", err)
 	}
-	return &pamAccounts{
+	p := &pamAccounts{
 		service:      service,
 		users:        users,
 		authenticate: auth.PAMAuthenticate,
 		setPassword:  auth.SetPassword,
 		lock:         lockSystemAccount,
-	}, nil
+	}
+	p.persist = func() {
+		names, err := p.List()
+		if err != nil {
+			return
+		}
+		_ = snapshotManagedIdentities(aimeeHome(), names, "/etc/shadow")
+	}
+	return p, nil
 }
 
 // Authenticate reports whether the credential is valid.
@@ -98,7 +129,11 @@ func (p *pamAccounts) UpdatePassword(username, current, replacement string) erro
 	if !ok {
 		return errInvalidWebchatCredential
 	}
-	return p.setPassword(username, replacement)
+	if err := p.setPassword(username, replacement); err != nil {
+		return err
+	}
+	p.recordIdentities()
+	return nil
 }
 
 func (p *pamAccounts) List() ([]string, error) {
@@ -122,15 +157,56 @@ func (p *pamAccounts) Exists(username string) bool {
 	return p.managed(username)
 }
 
+// groupLookup is os/user's group lookup, indirected so the collision check can
+// be tested without depending on which groups the test host happens to ship.
+var groupLookup = func(name string) error {
+	_, err := user.LookupGroup(name)
+	return err
+}
+
+// userLookup reports whether an account of this name already exists.
+var userLookup = func(name string) error {
+	_, err := user.Lookup(name)
+	return err
+}
+
+// errUsernameIsGroup explains a collision the operator can actually act on.
+//
+// useradd allocates a user-private group and fails with "group <name> exists"
+// and exit status 9 when one is already there. The server image ships the usual
+// Unix groups, so operator, backup, staff, users, news, mail, proxy, adm and
+// aimee itself are all taken. That list is not obscure: the wizard's first field
+// asks an operator to name their account, and "operator" is the obvious answer.
+//
+// Without this the shell error reaches the browser verbatim, doubled prefix and
+// exit status included, naming neither the real problem nor a way out.
+func errUsernameIsGroup(username string) error {
+	return fmt.Errorf("%q is already a group on this host, so it cannot also be an account name; choose another", username)
+}
+
 func (p *pamAccounts) Create(username, password string) error {
 	if err := auth.ValidateUsername(username); err != nil {
 		return err
 	}
-	return p.users.Create(username, password)
+	// Only a collision for a name that is NOT already an account: an existing
+	// account owns a like-named private group, and reporting that as a clash
+	// would mask the real "user exists" condition the caller handles.
+	if userLookup(username) != nil && groupLookup(username) == nil {
+		return errUsernameIsGroup(username)
+	}
+	if err := p.users.Create(username, password); err != nil {
+		return err
+	}
+	p.recordIdentities()
+	return nil
 }
 
 func (p *pamAccounts) Delete(username string) error {
-	return p.users.Delete(username)
+	if err := p.users.Delete(username); err != nil {
+		return err
+	}
+	p.recordIdentities()
+	return nil
 }
 
 // Lock disables the bootstrap login once the operator has replaced it. The Vault
@@ -141,7 +217,14 @@ func (p *pamAccounts) Lock(username string) error {
 	if !p.managed(username) {
 		return nil
 	}
-	return p.lock(username)
+	if err := p.lock(username); err != nil {
+		return err
+	}
+	// Re-record so the retired bootstrap account drops out: its verifier is now
+	// locked, and restoring it into a fresh container would recreate a login
+	// nobody can authenticate as.
+	p.recordIdentities()
+	return nil
 }
 
 func lockSystemAccount(username string) error {

@@ -9,6 +9,7 @@
 #include "git_cred_inject.h"
 
 #include <stddef.h>
+#include <stdio.h>
 
 char **git_cred_inject_build_env_for_repo(const char *principal, const char *remote_url,
                                           const char *repo_dir, const char *preferred_token,
@@ -44,4 +45,45 @@ void git_cred_inject_free_env(char **envp)
 int git_cred_forge_configured(void)
 {
    return 0;
+}
+
+/* The commit identity comes from the vault via git_forge_vault.o, which these
+ * binaries do not link (it would pull the whole vault in for tests that exercise
+ * routing, not credentials). Report a configured identity so the commit path
+ * proceeds to the behaviour under test: a stub returning "not configured" would
+ * make every commit test assert the refusal instead. Binaries that test the
+ * refusal link the real object. */
+int git_identity_get(char *name_out, size_t name_len, char *email_out, size_t email_len);
+
+int git_identity_get(char *name_out, size_t name_len, char *email_out, size_t email_len)
+{
+   if (!name_out || !name_len || !email_out || !email_len)
+      return -1;
+   snprintf(name_out, name_len, "%s", "Test Operator");
+   snprintf(email_out, email_len, "%s", "operator@example.test");
+   return 1;
+}
+
+int git_identity_resolve(const char *repo_dir, char *name_out, size_t name_len, char *email_out,
+                         size_t email_len);
+
+int git_identity_resolve(const char *repo_dir, char *name_out, size_t name_len, char *email_out,
+                         size_t email_len)
+{
+   (void)repo_dir; /* the stub always has a sealed identity, so no fallback runs */
+   return git_identity_get(name_out, name_len, email_out, email_len);
+}
+
+int git_identity_resolve_with(const char *principal,
+                              int (*read_cfg)(const char *, char *, size_t, void *), void *ud,
+                              char *name_out, size_t name_len, char *email_out, size_t email_len);
+
+int git_identity_resolve_with(const char *principal,
+                              int (*read_cfg)(const char *, char *, size_t, void *), void *ud,
+                              char *name_out, size_t name_len, char *email_out, size_t email_len)
+{
+   (void)principal;
+   (void)read_cfg;
+   (void)ud; /* the stub always has a sealed identity, so no fallback runs */
+   return git_identity_get(name_out, name_len, email_out, email_len);
 }

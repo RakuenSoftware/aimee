@@ -108,12 +108,14 @@ Memory mutations publish through the owning daemon's event bus. Agent-controlled
 fingerprinted before audit so a key cannot inject personal data or forged log lines. The source
 record itself remains subject to its KB scope and retention policy.
 
-External inference receives only the evidence allowed by the configured provider and egress policy.
-Run local inference when the corpus must not leave the deployment.
+Model roles receive only the evidence allowed by the selected KB's provider and egress policy.
+Embedding and synthesis can run inside that KB container or at its configured remote endpoint. Use
+internal placement when the corpus must not cross the container boundary. There is no standalone
+inference service beside the KB.
 
 ## What exists now
 
 Scoped memory, typed facts, hybrid retrieval, curation, graph links, contradiction handling,
-evidence, and local inference are implemented. Connectors for every company data source and free-form
-cross-domain synthesis are not automatic; they need an ingest connector, scope policy, and evidence
-contract.
+evidence, and the current single-KB model path are implemented. Multi-KB routing, connectors for
+every company data source, and free-form cross-domain synthesis are not automatic; they need an
+integrated routing or ingest path, scope policy, and evidence contract.

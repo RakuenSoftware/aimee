@@ -12,6 +12,17 @@ extern "C"
 #include <stdint.h>
 
    int db2_is_initialized(void);
+
+   /* Read-only schema mode for one-shot callers that do not own the schema.
+    *
+    * db2_init APPLIES the schema by default, which is right for the daemon that
+    * owns it and wrong for a CLI reading a running deployment: the DDL races the
+    * daemon's own pass and Postgres reports "tuple concurrently updated", which
+    * db2_init then reports as "DB2 not reachable" -- naming the wrong problem
+    * entirely. Set this before db2_init to VERIFY the schema instead, the same
+    * path AIMEE_KB_HARDENED already takes. Process-wide and off by default, so
+    * the daemon is unaffected. */
+   void db2_set_schema_readonly(int on);
    int db2_init(const char *libpq_url);
 
    /* Set the embedding dimension used to create the DB2 halfvec embedding
@@ -31,6 +42,16 @@ extern "C"
    /* The effective width: the pinned dim when set, else the injected default.
     * 0 means neither was supplied — treat as an error, never as a default. */
    int db2_embedding_dim(void);
+
+   /* How many vector upserts have been refused for disagreeing with that width,
+    * and the last width actually offered.
+    *
+    * A wrong AIMEE_EMBEDDING_DIM is otherwise invisible: the kb starts, reports
+    * healthy, accepts writes, and refuses every upsert with a per-row WARN, so a
+    * deployment can store zero vectors indefinitely while looking fine. Health
+    * publishes this so the condition is legible without reading kb logs. */
+   long long db2_embedding_dim_refused_count(void);
+   int db2_embedding_dim_last_offered(void);
 
    /* embedder-runtime-fetch-autodim §2a: mark whether the operator pinned the dim
     * (see config_embedding_dim_is_pinned). Call beside db2_set_embedding_dim,
@@ -161,6 +182,21 @@ extern "C"
 #define DB2_LEASE_SITE_(f, l)   f ":" DB2_LEASE_STRINGIFY_(l)
 #define db2_lease_begin()       db2_lease_begin_at(DB2_LEASE_SITE_(__FILE__, __LINE__))
 #endif
+
+   /* db2_conn() with the caller's file:line, so a LAZY acquire (outside any
+    * db2_lease_begin scope) can be attributed too.
+    *
+    * That is the leak the reaper most needs to name: a long-lived worker that
+    * takes a connection via db2_conn() at depth 0 and never calls
+    * db2_lease_release_idle pins a pool member for its whole lifetime. Only
+    * db2_lease_begin recorded a site, so exactly this case logged as
+    * "unattributed" -- a prod kb sat with all 16 members held ~15h and the
+    * reaper could not say by whom. The site is stored only when a connection is
+    * actually acquired, not on every call. */
+   void *db2_conn_at(const char *site);
+#ifndef db2_conn
+#define db2_conn() db2_conn_at(DB2_LEASE_SITE_(__FILE__, __LINE__))
+#endif
    void db2_lease_end(void);
 
    int db2_fork_conn_url(char *out, size_t cap);
@@ -172,7 +208,7 @@ extern "C"
     * aimee_pg_* primitives directly. Production callers should prefer
     * the typed db2_* domain functions; this is exposed for KB-owned
     * migration tooling that copies arbitrary tables row-by-row. */
-   void *db2_conn(void);
+   void *(db2_conn)(void); /* parenthesised: the db2_conn() macro must not expand here */
 
    /* Postgres-native diagnostics for `aimee doctor`. Each out parameter
     * is set to -1 on probe failure; returns 0 when the connection is

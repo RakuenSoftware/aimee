@@ -15,8 +15,7 @@
 
 int verify_enabled_global(void)
 {
-   config_t cfg;
-   return (config_load(&cfg) == 0) ? cfg.verify_enabled : 0;
+   return config_present() ? config_verify_enabled() : 0;
 }
 
 /* See git_verify.h for the contract. Compares the canonical main-repo root of
@@ -25,8 +24,7 @@ int verify_enabled_global(void)
  * session_state_load are both cheap relative to a push/PR. */
 int verify_project_in_scope(const char *target_repo_root)
 {
-   config_t cfg;
-   if (config_load(&cfg) == 0 && cfg.verify_cross_project)
+   if (config_present() && config_verify_cross_project())
       return 1;
 
    session_state_t state;

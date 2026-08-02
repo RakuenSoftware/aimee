@@ -686,13 +686,14 @@ static int agent_satisfies_required_caps(const agent_t *ag, unsigned required_ca
 }
 
 /* Route to the cheapest capable agent, filtering by required capability flags and minimum context
- * window when sys_cfg->model_meta_capability_routing is enabled.  Falls back to plain agent_route
+ * window when sys_cfg->capability_routing is enabled.  Falls back to plain agent_route
  * when capability routing is disabled. */
 static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *role,
-                                            const config_t *sys_cfg, unsigned required_caps,
-                                            int min_context, agent_scope_t scope)
+                                            const agent_route_policy_t *sys_cfg,
+                                            unsigned required_caps, int min_context,
+                                            agent_scope_t scope)
 {
-   if (!sys_cfg || !sys_cfg->model_meta_capability_routing)
+   if (!sys_cfg || !sys_cfg->capability_routing)
    {
       /* A scope ceiling is CONFIGURATION eligibility, not model-metadata
        * capability routing: it must bind whether or not capability routing is
@@ -734,7 +735,7 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
     * delegates first". Decide up front whether any ELIGIBLE seat is local, and if
     * so treat non-local seats as out of contention for the whole selection. */
    int locals_only = 0;
-   if (sys_cfg && sys_cfg->prefer_local_agents)
+   if (sys_cfg && sys_cfg->prefer_local)
    {
       for (int i = 0; i < cfg->agent_count; i++)
       {
@@ -994,15 +995,24 @@ agent_t *agent_route_escalation_target(agent_config_t *cfg, const char *role, in
    return best;
 }
 
-agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role, const config_t *sys_cfg,
-                               unsigned required_caps, int min_context)
+agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role,
+                               const agent_route_policy_t *sys_cfg, unsigned required_caps,
+                               int min_context)
 {
    return agent_route_with_caps_scoped(cfg, role, sys_cfg, required_caps, min_context,
                                        AGENT_SCOPE_UNSET);
 }
 
+void agent_route_policy_current(agent_route_policy_t *out)
+{
+   if (!out)
+      return;
+   out->capability_routing = config_model_meta_capability_routing();
+   out->prefer_local = config_prefer_local_agents();
+}
+
 agent_t *agent_route_with_caps_scoped(agent_config_t *cfg, const char *role,
-                                      const config_t *sys_cfg, unsigned required_caps,
+                                      const agent_route_policy_t *sys_cfg, unsigned required_caps,
                                       int min_context, agent_scope_t scope)
 {
    agent_t *r = agent_route_with_caps_inner(cfg, role, sys_cfg, required_caps, min_context, scope);
@@ -1010,13 +1020,12 @@ agent_t *agent_route_with_caps_scoped(agent_config_t *cfg, const char *role,
     * best-effort: if no model satisfies them, relax them and route on the hard
     * caps (tools) + min_context rather than returning no route at all. Mirrors
     * delegate_filter_route_capabilities so both routing gates agree. */
-   if (!r && sys_cfg && sys_cfg->model_meta_capability_routing &&
-       (required_caps & MODEL_CAP_MODALITY_SOFT))
+   if (!r && sys_cfg && sys_cfg->capability_routing && (required_caps & MODEL_CAP_MODALITY_SOFT))
       r = agent_route_with_caps_inner(cfg, role, sys_cfg, required_caps & ~MODEL_CAP_MODALITY_SOFT,
                                       min_context, scope);
    /* Still nothing: escalate rather than report no route. Only reachable with
     * capability routing ON, so plain cost-tier routing is unaffected. */
-   if (!r && sys_cfg && sys_cfg->model_meta_capability_routing)
+   if (!r && sys_cfg && sys_cfg->capability_routing)
    {
       r = agent_route_escalate(cfg, role, required_caps & ~MODEL_CAP_MODALITY_SOFT, scope);
       if (r)

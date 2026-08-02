@@ -224,7 +224,7 @@ static void memory_scope_labels_for_cwd(const char *workspace_hint, char *worksp
    project_source_buf[0] = '\0';
    const char *project_source = NULL;
    if (cwd[0] &&
-       workspace_active_root(NULL, cwd, project_source_buf, sizeof(project_source_buf)) == 0 &&
+       workspace_active_root_from_cwd(cwd, project_source_buf, sizeof(project_source_buf)) == 0 &&
        project_source_buf[0])
    {
       project_source = project_source_buf;
@@ -1048,9 +1048,7 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
     * and the feature is enabled.  Results are appended as a small JSON
     * block that the answer prompt is taught to consult. */
    {
-      config_t derive_cfg;
-      config_load(&derive_cfg);
-      if (derive_cfg.memory_derive_facts_enabled)
+      if (config_memory_derive_facts_enabled())
       {
          memory_query_shape_t dshape = memory_classify_deriver_shape(task_hint);
          if (dshape == MEM_SHAPE_QUANTITATIVE || dshape == MEM_SHAPE_TEMPORAL_INTERVAL)
@@ -1061,7 +1059,7 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
                cids[i] = candidates[i].id;
 
             memory_derived_facts_t dfacts;
-            int nfacts = memory_derive_facts(task_hint, cids, cand_count, &derive_cfg, &dfacts);
+            int nfacts = memory_derive_facts(task_hint, cids, cand_count, &dfacts);
             if (nfacts > 0)
             {
                char *json = memory_derived_facts_to_json(&dfacts);

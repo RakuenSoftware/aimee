@@ -4,6 +4,7 @@
 #include "deploy_apply.h"
 
 #include "aimee_home.h"      /* one-shot legacy credential migration path */
+#include "cJSON.h"           /* scope `docker compose ps` to the managed services */
 #include "config.h"          /* config_t, config_load */
 #include "config_database.h" /* config_emit_deploy_env */
 #include "platform_random.h" /* 256-bit managed kb -> llm bearer */
@@ -236,15 +237,14 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
       *managed_kb_out = 0;
    if (managed_identity_out)
       *managed_identity_out = 0;
-   config_t cfg;
-   if (config_load(&cfg) < 0)
+   if (!config_present())
    {
       if (err && err_cap)
          snprintf(err, err_cap, "could not load the saved wizard configuration");
       return NULL;
    }
    char env[2048];
-   config_emit_deploy_env(&cfg, env, sizeof(env));
+   config_emit_deploy_env_current(env, sizeof(env));
 
    char llm_token[513] = "";
    /* Currently always 0: config_emit_deploy_env stopped emitting the "llm" profile when
@@ -809,6 +809,98 @@ void deploy_apply_state(int *running, int *last_exit, char *out, size_t out_cap)
    pthread_mutex_unlock(&g_lock);
 }
 
+/* Keep only the containers the MANAGED compose file defines.
+ *
+ * `docker compose -f <managed file> ps` does NOT scope to the services in that
+ * file — it scopes to COMPOSE_PROJECT_NAME. aimee-server is started from
+ * compose.server-managed.yaml under the same project "aimee", so an unfiltered
+ * `ps` reports the orchestrator alongside the services it manages. This is the
+ * same project-vs-file blind spot documented for --remove-orphans above; there it
+ * deleted the server, here it merely made a never-deployed install look deployed:
+ * the wizard counts the returned services to label its button, so a clean box
+ * offered "Re-deploy" for a knowledge base that did not exist yet.
+ *
+ * Filtering by the compose `project.config_files` label — rather than by passing
+ * service names to `ps` — is what keeps this correct: every managed service sits
+ * behind a profile (kb, identity-bootstrap, authority-bootstrap), so enumerating
+ * them with `config --services` returns nothing unless the matching profiles are
+ * active, and a profile-gated name passed to `ps` is an error rather than an
+ * empty result. The label is present on every container regardless of profile.
+ *
+ * Emits a JSON array (a shape parse_ps already accepts). On any parse failure the
+ * input is left untouched: a wrong service list is worse than an unfiltered one. */
+static void deploy_filter_managed_ps(char *ps, size_t ps_cap, const char *file)
+{
+   const char *trimmed = ps;
+   while (*trimmed == ' ' || *trimmed == '\n' || *trimmed == '\r' || *trimmed == '\t')
+      trimmed++;
+   if (!*trimmed)
+      return;
+
+   char want[600];
+   snprintf(want, sizeof(want), "com.docker.compose.project.config_files=%s", file);
+
+   cJSON *keep = cJSON_CreateArray();
+   if (!keep)
+      return;
+
+   /* compose emits either a JSON array or newline-delimited objects. */
+   int recognized = 0;
+   cJSON *arr = cJSON_Parse(trimmed);
+   if (arr && cJSON_IsArray(arr))
+   {
+      recognized = 1;
+      cJSON *it = NULL;
+      cJSON_ArrayForEach(it, arr)
+      {
+         const cJSON *l = cJSON_GetObjectItemCaseSensitive(it, "Labels");
+         if (cJSON_IsString(l) && l->valuestring && strstr(l->valuestring, want))
+            cJSON_AddItemToArray(keep, cJSON_Duplicate(it, 1));
+      }
+   }
+   else
+   {
+      char *copy = strdup(trimmed);
+      if (copy)
+      {
+         /* Recognized only once a line actually parses. Marking the shape valid
+          * up front turns unparseable output into an empty array — reporting a
+          * torn-down stack for one this code simply could not read. */
+         for (char *p = copy; p && *p;)
+         {
+            char *nl = strchr(p, '\n');
+            if (nl)
+               *nl = '\0';
+            if (*p)
+            {
+               cJSON *o = cJSON_Parse(p);
+               if (o)
+               {
+                  recognized = 1;
+                  const cJSON *l = cJSON_GetObjectItemCaseSensitive(o, "Labels");
+                  if (cJSON_IsString(l) && l->valuestring && strstr(l->valuestring, want))
+                     cJSON_AddItemToArray(keep, cJSON_Duplicate(o, 1));
+                  cJSON_Delete(o);
+               }
+            }
+            p = nl ? nl + 1 : NULL;
+         }
+         free(copy);
+      }
+   }
+   cJSON_Delete(arr);
+
+   if (recognized)
+   {
+      char *s = cJSON_PrintUnformatted(keep);
+      /* Only replace when the result fits; a truncated array would not parse. */
+      if (s && strlen(s) < ps_cap)
+         snprintf(ps, ps_cap, "%s", s);
+      free(s);
+   }
+   cJSON_Delete(keep);
+}
+
 int deploy_apply_status(char *out, size_t out_cap, int *exit_code)
 {
    char file[512];
@@ -819,5 +911,7 @@ int deploy_apply_status(char *out, size_t out_cap, int *exit_code)
    char **envp = build_deploy_envp(NULL, 0, NULL, NULL, NULL);
    int rc = run_capture(argv, envp, out, out_cap, exit_code);
    free_envp(envp);
+   if (rc == 0 && exit_code && *exit_code == 0)
+      deploy_filter_managed_ps(out, out_cap, file);
    return rc;
 }

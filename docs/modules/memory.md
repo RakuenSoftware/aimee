@@ -23,8 +23,8 @@ tests, and this document; it sets `ownership_complete: true`. All twelve headers
 five carry no paired source (`memory_assemble_util.h`, `memory_core_internal.h`, `memory_ontology.h`,
 `memory_platform.h`, `memory_rewrite_llm.h`), the highest unpaired count in the module graph. Make
 compiles all thirty-two sources; CMake compiles nineteen, omitting the memory-core CRUD, search, tiers
-and scope family, extraction, the fact and PII gates, graph fusion, and the gateway stage: the
-server/kb-side units, the same intentional thin-client boundary recorded for the earlier modules.
+and scope family, extraction, the fact and PII gates, graph fusion, and the gateway stage. These
+server/KB-side units follow the same intentional thin-client boundary recorded for the earlier modules.
 `docs/validation/core-modularization-slice-56.md` records the declaration audit and
 `docs/validation/core-modularization-slice-57.md` the completeness audit; the two were split so the
 latch reviews declarations merged on their own first. Adding a new module-local source or module-root

@@ -448,13 +448,13 @@ static int agent_satisfies_required_caps(const agent_t *ag, unsigned required_ca
 }
 
 /* Route to the cheapest capable agent, filtering by required capability flags and minimum context
- * window when sys_cfg->model_meta_capability_routing is enabled.  Falls back to plain agent_route
+ * window when sys_cfg->capability_routing is enabled.  Falls back to plain agent_route
  * when capability routing is disabled. */
 static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *role,
-                                            const config_t *sys_cfg, unsigned required_caps,
+                                            const agent_route_policy_t *sys_cfg, unsigned required_caps,
                                             int min_context)
 {
-   if (!sys_cfg || !sys_cfg->model_meta_capability_routing)
+   if (!sys_cfg || !sys_cfg->capability_routing)
       return agent_route(cfg, role);
 
    int min_tier = -1;
@@ -514,7 +514,7 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
    return agent_pick_random(candidates, count);
 }
 
-agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role, const config_t *sys_cfg,
+agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role, const agent_route_policy_t *sys_cfg,
                                unsigned required_caps, int min_context)
 {
    agent_t *r = agent_route_with_caps_inner(cfg, role, sys_cfg, required_caps, min_context);
@@ -522,7 +522,7 @@ agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role, const conf
     * best-effort: if no model satisfies them, relax them and route on the hard
     * caps (tools) + min_context rather than returning no route at all. Mirrors
     * delegate_filter_route_capabilities so both routing gates agree. */
-   if (!r && sys_cfg && sys_cfg->model_meta_capability_routing &&
+   if (!r && sys_cfg && sys_cfg->capability_routing &&
        (required_caps & MODEL_CAP_MODALITY_SOFT))
       r = agent_route_with_caps_inner(cfg, role, sys_cfg, required_caps & ~MODEL_CAP_MODALITY_SOFT,
                                       min_context);

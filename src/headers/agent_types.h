@@ -4,6 +4,10 @@
 #include <pthread.h>
 #include <sys/types.h>
 
+/* MAX_PATH_LEN. Previously reached only transitively via config.h; this header must not
+ * depend on a caller including the config module first. */
+#include "client_constants.h"
+
 /* Forward declaration for cJSON (used by plan API). */
 struct cJSON;
 

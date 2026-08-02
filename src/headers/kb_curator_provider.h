@@ -57,13 +57,13 @@ extern "C"
     * Returns 1 when configured (out filled; base_url non-empty), 0 when idle
     * (out zeroed — the stage must not run).
     *
-    * Lifetime: out->base_url/model/api_key alias strings owned elsewhere — either
-    * inside *cfg (config path) or the process environment (env path). Keep *cfg
-    * alive and don't mutate the environment (setenv/putenv) while using *out; the
-    * def is a borrowed view, not a copy. out->api_key is NULL when no key applies
-    * (keyless local endpoint); provider_client treats NULL as "no bearer". */
-   int kb_curator_provider_for_stage(const config_t *cfg, kb_curator_stage_t stage,
-                                     provider_def_t *out);
+    * Lifetime: *out OWNS its strings (see provider_def_owned_t) — nothing external
+    * has to be kept alive, and mutating the environment afterwards cannot change
+    * what was resolved. Pass &out->def wherever a provider_def_t is wanted, and do
+    * not copy the struct by value (def would still point into the original).
+    * out->def.api_key is NULL when no key applies (keyless local endpoint);
+    * provider_client treats NULL as "no bearer". */
+   int kb_curator_provider_for_stage(kb_curator_stage_t stage, provider_def_owned_t *out);
 
    /* True when an error means the configured provider would not serve work now
     * (as opposed to rejecting one malformed job). Recognizes both the direct

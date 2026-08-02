@@ -35,8 +35,8 @@ public-surface audit is recorded in `docs/validation/core-modularization-slice-3
 rather than linking `gateway_policy.c`.
 
 Gateway main, context, pairing, session-key, and channel/session code remains under `src/gateway` and
-awaits a caller and lifecycle audit. That directory is the `aimee-gateway` delivery binary (delivery
-routing, Telegram/ntfy/webhook platforms, pairing, STT and TTS) and is a distinct ownership surface
+awaits a caller and lifecycle audit. That directory contains the `aimee-gateway` delivery binary,
+delivery routing, Telegram/ntfy/webhook platforms, pairing, STT, and TTS. It is a distinct ownership surface
 from this module despite the shared gateway name; `GATEWAY_SRCS` in `src/Makefile` refers to it, not
 to `src/modules/gateway`. The gateway-mutation family remains owned by economizer under
 `src/modules/economizer/gateway_mutate*.c`. Optional delivery implementations (`platform_*`,

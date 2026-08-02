@@ -120,10 +120,14 @@ static void _context_hash(const char *s, char *out, size_t out_len)
    snprintf(out, out_len, "%08lx", h & 0xffffffffUL);
 }
 
-int kb_bandit_sample(const config_t *cfg, const char *decision_point, const char *context_json,
+int kb_bandit_sample(const char *decision_point, const char *context_json,
                      const char (*arm_ids)[KB_BANDIT_MAX_ARM_ID], int n_arms, char *decision_id_out)
 {
-   if (!cfg || !cfg->bandit_optimize_command[0])
+   /* Copied, not held: a string accessor's thread-local buffer is only valid until the
+    * next call to the SAME accessor, and this value is used far below. */
+   char optimize_command[1024];
+   snprintf(optimize_command, sizeof(optimize_command), "%s", config_bandit_optimize_command());
+   if (!optimize_command[0])
       return -1;
    if (!decision_point || !arm_ids || n_arms <= 0)
       return -1;
@@ -132,8 +136,8 @@ int kb_bandit_sample(const config_t *cfg, const char *decision_point, const char
     * already at or above the configured budget. Below a minimum sample count
     * the Gate stands down (the per-decision random draw still provides
     * exploration on cold-start). */
-   double budget = cfg->bandit_exploration_fraction;
-   int window_seconds = cfg->bandit_exploration_window_seconds;
+   double budget = config_bandit_exploration_fraction();
+   int window_seconds = config_bandit_exploration_window_seconds();
    if (window_seconds <= 0)
       window_seconds = 7 * 24 * 3600;
 
@@ -195,7 +199,7 @@ int kb_bandit_sample(const config_t *cfg, const char *decision_point, const char
    /* Call sidecar. */
    char *out = NULL;
    size_t out_len = 0;
-   platform_exec_pipe(cfg->bandit_optimize_command, req_str, strlen(req_str), &out, &out_len);
+   platform_exec_pipe(optimize_command, req_str, strlen(req_str), &out, &out_len);
    free(req_str);
 
    if (!out)
@@ -252,10 +256,9 @@ int kb_bandit_sample(const config_t *cfg, const char *decision_point, const char
 
 /* ---- reward feedback ---- */
 
-int kb_bandit_reward(const config_t *cfg, const char *decision_point, const char *decision_id,
-                     const char *arm_id, double reward)
+int kb_bandit_reward(const char *decision_point, const char *decision_id, const char *arm_id,
+                     double reward)
 {
-   (void)cfg;
    if (!decision_point || !decision_id || !arm_id)
       return -1;
 

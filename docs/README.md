@@ -14,9 +14,13 @@ Start here:
 | find a command | [Generated command reference](gen/cli-commands.md) |
 | operate delegates and workflows | [Delegates](DELEGATES.md), [sandbox](DELEGATE_SANDBOX.md), and [workflows](WORKFLOWS.md) |
 | understand memory and retrieval | [Knowledge](KNOWLEDGE.md), [curator](CURATOR_PIPELINE.md), and [retrieval](retrieval-stack.md) |
+| understand KB scaling and model placement | [KB fleet and model placement](KB_FLEET.md) |
 | check support or feature state | [Compatibility](COMPATIBILITY.md) and [status](STATUS.md) |
 | diagnose a failure | [Troubleshooting](TROUBLESHOOTING.md) |
-| upgrade from the last release | [What's new](WHATS_NEW.md) |
+| upgrade from the last release | [What's new](WHATS_NEW.md) and [upgrading](UPGRADING.md) |
+| cut a release | [Releasing](RELEASING.md) |
+| write or review documentation | [Documentation voice and maintenance](WRITING.md) |
+| set budgets, rate limits, or a model catalog | [Teams, budgets, and rate limits](ORG_GOVERNANCE.md) |
 | work on aimee itself | [Technical reference](../src/README.md) and [owners](../OWNERS.md) |
 
 ## Product guides
@@ -43,6 +47,7 @@ Start here:
 - [Web git security](WEBCHAT_GIT_SECURITY.md)
 - [Sandbox verification](DELEGATE_SANDBOX_VERIFY.md)
 - [Benchmarks](BENCHMARKS.md)
+- [Change the KB embedder](runbooks/change-embedder.md)
 - [Vault key rotation](runbooks/vault-master-key-rotation.md)
 - [Witness evidence and egress gate](runbooks/witness-evidence-and-egress-gate.md)
 - [Workflow autonomy](wfe-autonomy-runbook.md)

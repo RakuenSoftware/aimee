@@ -241,6 +241,16 @@ static void test_failure_retains_go_roundtable_diagnostics(void)
    platform_test_rmrf(home);
 }
 
+/* wfe_roundtable_proxy builds a runtime panel now instead of loading a config_t.
+ * This target links neither delegate_ensemble.o nor the ensemble runtime, and the
+ * proxy only reads panel.deadline_ms, so a zeroed panel matches what the previous
+ * zero-initialised config_t produced here. */
+void ensemble_panel_from_config(ensemble_panel_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+}
+
 int main(void)
 {
    printf("wfe_roundtable_proxy: ");

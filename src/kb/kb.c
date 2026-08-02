@@ -601,7 +601,7 @@ int sync_vector_embedding(int64_t doc_id, const float *vec, int dim)
 
 const char *kb_effective_embedding_cmd(const char *embedding_cmd)
 {
-   return config_embedding_command(NULL, embedding_cmd);
+   return config_embedding_command_current(embedding_cmd);
 }
 
 /* pgvector owns vector bytes. This hook exists to keep the sync/async call
@@ -742,10 +742,7 @@ int kb_async_enabled(void)
          return 0;
    }
 
-   config_t cfg;
-   if (config_load(&cfg) == 0)
-      return cfg.memory_cognify_async_enabled ? 1 : 0;
-   return 0;
+   return (config_present() && config_memory_cognify_async_enabled()) ? 1 : 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1686,10 +1683,9 @@ static void kb_json_append_escaped(dstr_t *out, const char *s)
  * KB_DEFAULT_MAX_RESULTS. */
 static int kb_search_resolve_cap(int requested)
 {
-   config_t cfg;
    int cap = 50;
-   if (config_load(&cfg) == 0 && cfg.kb_search_max_results > 0)
-      cap = cfg.kb_search_max_results;
+   if (config_present() && config_kb_search_max_results() > 0)
+      cap = config_kb_search_max_results();
    if (requested <= 0)
       requested = KB_DEFAULT_MAX_RESULTS;
    if (requested > cap)
@@ -1735,8 +1731,7 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
     * When no override is given and live bandit decisions are enabled, sample the
     * fusion strategy from the kb_fusion_mode decision point; the choice is
     * rewarded from this search's recall sufficiency at the success exit below. */
-   config_t fusion_cfg;
-   int fusion_cfg_ok = (config_load(&fusion_cfg) == 0);
+   int fusion_cfg_ok = (config_present());
    const char *fusion_mode;
    char fm_decision_id[KB_BANDIT_MAX_DECISION] = {0};
    char fm_arm_id[KB_BANDIT_MAX_ARM_ID] = {0};
@@ -1746,7 +1741,7 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
       fusion_mode = fusion_mode_override;
    else
    {
-      if (fusion_cfg_ok && fusion_cfg.bandit_live_decision_enabled)
+      if (fusion_cfg_ok && config_bandit_live_decision_enabled())
       {
          fm_dp = kb_bandit_registry_get("kb_fusion_mode");
          if (fm_dp && fm_dp->n_arms > 0)
@@ -1754,8 +1749,7 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
             char fm_arms[KB_BANDIT_MAX_ARMS][KB_BANDIT_MAX_ARM_ID];
             for (int i = 0; i < fm_dp->n_arms; i++)
                snprintf(fm_arms[i], KB_BANDIT_MAX_ARM_ID, "%s", fm_dp->arms[i]);
-            int a = kb_bandit_sample(&fusion_cfg, fm_dp->id, NULL, fm_arms, fm_dp->n_arms,
-                                     fm_decision_id);
+            int a = kb_bandit_sample(fm_dp->id, NULL, fm_arms, fm_dp->n_arms, fm_decision_id);
             if (a >= 0 && a < fm_dp->n_arms)
                snprintf(fm_arm_id, sizeof(fm_arm_id), "%s", fm_arms[a]);
             else
@@ -1767,8 +1761,8 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
       else if (db2_bandit_promotion_get("kb_fusion_mode", fm_promo, sizeof(fm_promo)) == 0 &&
                fm_promo[0])
          fusion_mode = fm_promo; /* promoted default (operator locked it in) */
-      else if (fusion_cfg_ok && fusion_cfg.kb_fusion_mode[0])
-         fusion_mode = fusion_cfg.kb_fusion_mode;
+      else if (fusion_cfg_ok && config_kb_fusion_mode()[0])
+         fusion_mode = config_kb_fusion_mode();
       else
          fusion_mode = "rrf";
    }
@@ -1818,7 +1812,7 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
    {
       if (strcmp(fusion_mode, "static_alpha") == 0)
       {
-         chosen_alpha = fusion_cfg_ok ? fusion_cfg.kb_fusion_static_alpha : 0.5;
+         chosen_alpha = fusion_cfg_ok ? config_kb_fusion_static_alpha() : 0.5;
          n_results = alpha_merge(lex_res, n_lex, vec_res, n_vec, merged, max_results, chosen_alpha);
       }
       else if (strcmp(fusion_mode, "dynamic_alpha") == 0)
@@ -1858,8 +1852,7 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
 #if !defined(AIMEE_DB2_DISABLED)
    if (n_results > 0)
    {
-      config_t kb_cfg;
-      int cfg_ok = (config_load(&kb_cfg) == 0);
+      int cfg_ok = (config_present());
 
       sketch_count_min_t count_min;
       int have_count_min =
@@ -1889,7 +1882,7 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
       }
 
       /* Apply linear ranker when enabled and a model is loaded. */
-      if (cfg_ok && kb_cfg.kb_ranker_enabled)
+      if (cfg_ok && config_kb_ranker_enabled())
       {
          int64_t ranked_ids[MAX_LEXICAL_RESULTS + MAX_VEC_RESULTS];
          double ranked_scores[MAX_LEXICAL_RESULTS + MAX_VEC_RESULTS];
@@ -1906,9 +1899,8 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
          for (int i = 0; i < n_results; i++)
             ids[i] = merged[i].doc_id;
 
-         int n_ranked =
-             kb_ranker_rerank_with_sketch(&kb_cfg, ids, lex_s, dense_s, age_s, sketch_features,
-                                          n_results, ranked_ids, ranked_scores);
+         int n_ranked = kb_ranker_rerank_with_sketch(ids, lex_s, dense_s, age_s, sketch_features,
+                                                     n_results, ranked_ids, ranked_scores);
          if (n_ranked == n_results)
          {
             /* Re-order merged[] to match ranked order. */
@@ -1934,12 +1926,12 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
       }
 
       /* Drift detection in shadow mode. */
-      if (cfg_ok && kb_cfg.drift_detect_shadow_enabled && n_results > 0)
+      if (n_results > 0) /* kb_detect_observe applies the shadow gate itself */
       {
          double sum = 0.0;
          for (int i = 0; i < n_results; i++)
             sum += merged[i].dense_score;
-         kb_detect_observe(&kb_cfg, sum / n_results, n_results);
+         kb_detect_observe(sum / n_results, n_results);
       }
    }
 #endif
@@ -1952,7 +1944,7 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
    if (fm_dp && fm_decision_id[0] && fm_arm_id[0])
    {
       double reward = kb_bandit_recall_sufficiency_reward(n_results, max_results);
-      kb_bandit_reward(NULL, fm_dp->id, fm_decision_id, fm_arm_id, reward);
+      kb_bandit_reward(fm_dp->id, fm_decision_id, fm_arm_id, reward);
    }
    return NULL;
 }

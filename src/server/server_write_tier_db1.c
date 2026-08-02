@@ -14,6 +14,7 @@
 
 #include <openssl/crypto.h>
 #include <string.h>
+#include <unistd.h> /* access — startup preflight only */
 
 static const char *tier_text(kb_identity_tier_t tier)
 {
@@ -91,6 +92,18 @@ server_write_tier_config_state_t server_write_tier_config_state(void)
       return SERVER_WRITE_TIER_CONFIG_NO_SERVER_ID;
    const char *bundle_path = getenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE");
    if (!bundle_path || !bundle_path[0])
+      return SERVER_WRITE_TIER_CONFIG_NO_TRUST_BUNDLE;
+   /* The variable being SET is not the input; the bundle being THERE is. The
+    * shipped standalone compose defaults this to a conventional path nothing
+    * mounts, so a deployment that never provisioned an authority reported READY
+    * while every KB-issued token was in fact denied — and the precise startup
+    * error naming this variable was suppressed in favour of a vague recurring
+    * "management JWKS authorization unavailable" warning.
+    *
+    * Readability only: this is a startup preflight answering "did the operator
+    * supply the inputs". Structural validation stays in build_config, which
+    * fails closed per request. Called once at startup, so the stat is free. */
+   if (access(bundle_path, R_OK) != 0)
       return SERVER_WRITE_TIER_CONFIG_NO_TRUST_BUNDLE;
    return SERVER_WRITE_TIER_CONFIG_READY;
 }

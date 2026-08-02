@@ -234,11 +234,19 @@ int rh_workspace_clone_org(const route_req_t *rq, char *resp, int cap)
       return err_json(resp, cap, 400, "too many repos (max 100 per request)");
    }
 
-   /* The org: the request's `owner` field — the wizard already knows which
-    * org it is bulk-cloning (this was previously parsed and dropped). Every
-    * repo in the batch lands under it. */
+   /* The org the operator was BROWSING, used only as a fallback. It is not the
+    * owner of every repo in the batch: enumerating an account returns repos it
+    * merely has access to, so a games-on-whales repo can arrive in a batch the
+    * wizard labelled JBailes. Filing all of them under the browsed owner put 15
+    * repos in the wrong org directory on a real appliance —
+    * webusers/admin/JBailes/discowolf whose remote is games-on-whales/discowolf,
+    * a repo JBailes does not own at all. The Projects page groups by that
+    * directory, so it then reported the wrong org for those repos and the org it
+    * was browsing looked as though the clone had never happened.
+    *
+    * Each repo's real owner is in its own clone_url; derive it per repo below. */
    const cJSON *jowner = cJSON_GetObjectItemCaseSensitive(body, "owner");
-   const char *owner =
+   const char *browsed_owner =
        (cJSON_IsString(jowner) && jowner->valuestring[0]) ? jowner->valuestring : NULL;
 
    cJSON *out = cJSON_CreateObject();
@@ -258,8 +266,16 @@ int rh_workspace_clone_org(const route_req_t *rq, char *resp, int cap)
        * also name a real remote, so one crafted clone_url cannot smuggle a
        * local path in through the bulk route. */
       int remote_ok = util_url_is_remote(url);
+      /* This repo's own owner, from its own URL. Falls back to the browsed owner
+       * only when the URL yields no single-segment owner (a GitLab subgroup),
+       * which is the case git_project_clone flattens by design. */
+      char repo_org[GIT_PROJECT_NAME_MAX];
+      int multi = 0;
+      const char *org = browsed_owner;
+      if (remote_ok && git_project_derive_org(url, repo_org, sizeof(repo_org), &multi) == 0)
+         org = repo_org;
       /* token=NULL → the host's stored credential (or server identity) is used. */
-      int rc = remote_ok ? git_project_clone(principal, url, name, owner, NULL, dest, sizeof(dest),
+      int rc = remote_ok ? git_project_clone(principal, url, name, org, NULL, dest, sizeof(dest),
                                              pname, sizeof(pname), err, sizeof(err))
                          : -1;
       if (rc == 0)

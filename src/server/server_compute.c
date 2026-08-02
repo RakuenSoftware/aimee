@@ -228,10 +228,8 @@ static void compute_update_coord_task(compute_ctx_t *cctx, cJSON *resp)
    }
    else if (strcmp(status_text, "preempted") == 0)
    {
-      config_t cfg;
-      config_load(&cfg);
       if (db1_coord_job_release_task_bounded_owned(cctx->coord_task_id, cctx->coord_claim_owner,
-                                                   cfg.concurrency_preempt_requeue_max) == 0)
+                                                   config_concurrency_preempt_requeue_max()) == 0)
       {
          server_coord_dispatcher_notify();
          return;
@@ -1023,10 +1021,10 @@ void delegate_worker(void *arg)
       }
    }
 
-   config_t route_cfg;
-   config_load(&route_cfg);
+   agent_route_policy_t policy;
+   agent_route_policy_current(&policy);
    target_agent =
-       agent_route_with_caps_scoped(&acfg, role, &route_cfg, required_caps, min_context, scope);
+       agent_route_with_caps_scoped(&acfg, role, &policy, required_caps, min_context, scope);
    if (!target_agent)
    {
       char caps_buf[128];
@@ -1107,10 +1105,8 @@ void delegate_worker(void *arg)
     * AIMEE_DELEGATE_DEPTH/AIMEE_PARENT_DELEGATION_ID as request fields. Stale
     * completed parents are ignored so a primary shell with leaked env does not
     * get misclassified as a live delegate. */
-   config_t cfg;
-   config_load(&cfg);
-   int max_depth = cfg.max_delegation_depth > 0 ? cfg.max_delegation_depth
-                                                : CONFIG_DEFAULT_MAX_DELEGATION_DEPTH;
+   int max_depth = config_max_delegation_depth() > 0 ? config_max_delegation_depth()
+                                                     : CONFIG_DEFAULT_MAX_DELEGATION_DEPTH;
    cJSON *jreq_depth = cJSON_GetObjectItemCaseSensitive(req, "delegation_depth");
    int req_parent_depth = 0;
    const char *request_parent = NULL;
@@ -1139,8 +1135,8 @@ void delegate_worker(void *arg)
     * delegate. Counting all first-level delegates for the whole operator
     * session exhausts long, deliberate delegate-heavy workflows; runaway risk
     * comes from sub-delegation fan-out below a root delegate. */
-   int max_spawns = cfg.max_delegation_spawns > 0 ? cfg.max_delegation_spawns
-                                                  : CONFIG_DEFAULT_MAX_DELEGATION_SPAWNS;
+   int max_spawns = config_max_delegation_spawns() > 0 ? config_max_delegation_spawns()
+                                                       : CONFIG_DEFAULT_MAX_DELEGATION_SPAWNS;
    const char *effective_sid = sid ? sid : session_id();
    int total_spawns = 0;
    char root_deleg_id[64] = "";
@@ -2111,8 +2107,8 @@ int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 /* Resolve the one runtime panel contract shared by aggregate and roundtable.
  * A saved preset contributes its exact seats. Only the no-preset fallback is
  * synthesized, and that helper has a structural two-seat maximum. */
-static int prepare_roundtable_panel(cJSON *req, config_t *cfg, agent_config_t *acfg, char *err,
-                                    size_t err_n)
+static int prepare_roundtable_panel(cJSON *req, ensemble_panel_t *panel, agent_config_t *acfg,
+                                    char *err, size_t err_n)
 {
    cJSON *jrt = cJSON_GetObjectItemCaseSensitive(req, "roundtable");
    if (jrt && !cJSON_IsString(jrt))
@@ -2121,7 +2117,7 @@ static int prepare_roundtable_panel(cJSON *req, config_t *cfg, agent_config_t *a
       return -1;
    }
    const char *requested = cJSON_IsString(jrt) ? jrt->valuestring : NULL;
-   return ensemble_prepare_runtime_panel(requested, cfg, acfg, err, err_n);
+   return ensemble_prepare_runtime_panel(requested, panel, acfg, err, err_n);
 }
 
 /* Convene the ensemble panel from enabled registry agents when no explicit
@@ -2148,19 +2144,19 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
       return server_send_error(conn, errmsg, NULL);
    }
 
-   config_t cfg;
-   config_load(&cfg);
+   ensemble_panel_t panel;
+   ensemble_panel_from_config(&panel);
    agent_config_t acfg;
    memset(&acfg, 0, sizeof(acfg));
    if (agent_load_config(&acfg) != 0)
       return server_send_error(conn, "could not load agents.json", NULL);
    char pin_err[256] = "no enabled review agent is currently available";
-   if (prepare_roundtable_panel(req, &cfg, &acfg, pin_err, sizeof pin_err) != 0)
+   if (prepare_roundtable_panel(req, &panel, &acfg, pin_err, sizeof pin_err) != 0)
       return server_send_error(conn, pin_err, NULL);
    bind_request_session_creds(req);
 
    delegate_ensemble_result_t result;
-   int rc = delegate_ensemble_run(&acfg, &cfg, prompt, &result);
+   int rc = delegate_ensemble_run(&acfg, &panel, prompt, &result);
    if (rc != 0)
       return server_send_error(conn, "ensemble run failed (no enabled agents in agents.json?)",
                                NULL);

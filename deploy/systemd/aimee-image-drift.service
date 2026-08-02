@@ -1,0 +1,11 @@
+[Unit]
+Description=Warn when aimee containers drift off the published image channel
+Documentation=https://github.com/RakuenSoftware/aimee
+
+[Service]
+Type=oneshot
+# Non-zero means drift. Treat it as success for the unit so the timer keeps
+# running and the journal carries a standing record, rather than one alert that
+# scrolls away and a unit stuck in "failed".
+SuccessExitStatus=0 1
+ExecStart=/usr/local/bin/check-deployed-image.sh

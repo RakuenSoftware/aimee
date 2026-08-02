@@ -31,7 +31,7 @@ typedef struct
  * number of pairs the LLM judged (0 if no Tier-B provider/sidecar is configured — all
  * left judged=0), or -1 on a hard error (request build / unparseable response). Never
  * reorders or drops links; the route decides how to present unconfirmed ones. */
-int kb_surprising_judge(const config_t *cfg, const char *judge_cmd, const char *project,
+int kb_surprising_judge(const char *judge_cmd, const char *project,
                         const kb_graph_surprising_t *links, int n, kb_surprising_verdict_t *out,
                         char *errbuf, size_t errlen);
 

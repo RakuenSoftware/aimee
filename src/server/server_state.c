@@ -23,6 +23,7 @@
 #include "forge_credentials.h"
 #include "db1.h"
 #include "kb_client.h"
+#include "log.h" /* aimee_log — name the real KB failure in the server log */
 #include "compute_pool.h"
 #include "cJSON.h"
 #include "json_fluent.h"
@@ -122,10 +123,29 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (fact_count < 0)
    {
       kb_client_memory_scope_context_clear();
-      return server_send_error(conn,
-                               "knowledge service search index unavailable; server-side "
-                               "maintenance is required",
-                               NULL);
+      /* Report the failure that ACTUALLY happened. This used to answer every
+       * cause with "search index unavailable; server-side maintenance is
+       * required", which names the wrong owner: the common case is a caller
+       * whose scope did not resolve (a remote client with no active project),
+       * and the kb is healthy. That message sent three separate investigations
+       * at the kb — restarting it, matching its image, re-checking its mTLS
+       * trust — while nothing was wrong with it. The typed result carries the
+       * real dependency and retryability, and the sibling index route already
+       * reports it this way. */
+      kb_client_result_status_t status = kb_client_last_result_status();
+      const char *detail = active_context_missing
+                               ? "memory search found no active project to scope to; pass a "
+                                 "project or cwd, or ask for scope=all"
+                               : "memory search could not reach the knowledge service";
+      aimee_log(LOG_WARN, "memory.search", "find_facts failed: status=%s scope_missing=%d",
+                kb_client_result_status_name(status), active_context_missing);
+      char *json = kb_client_last_result_json(detail);
+      cJSON *err = json ? cJSON_Parse(json) : NULL;
+      free(json);
+      if (!err)
+         return server_send_error(conn, detail, NULL);
+      cJSON_AddBoolToObject(err, "active_context_missing", active_context_missing);
+      return send_and_free(conn, err);
    }
 
    /* Search conversation windows */
@@ -519,14 +539,14 @@ int handle_kb_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       if (!project || !project[0])
       {
          const char *cwd = jo_str(req, "cwd", NULL);
-         if (cwd && workspace_repo_identity(cwd, project_buf, sizeof(project_buf), NULL, 0) == 0)
+         if (cwd && server_active_project_from_cwd(cwd, project_buf, sizeof(project_buf)) == 0)
             project = project_buf;
       }
    }
    else if (!project || !project[0])
    {
       const char *cwd = jo_str(req, "cwd", NULL);
-      if (!cwd || workspace_repo_identity(cwd, project_buf, sizeof(project_buf), NULL, 0) != 0)
+      if (!cwd || server_active_project_from_cwd(cwd, project_buf, sizeof(project_buf)) != 0)
          return server_send_error(
              conn, "scope_required: no active project; pass --scope all explicitly", NULL);
       project = project_buf;
@@ -1509,9 +1529,7 @@ int handle_workspace_context(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)ctx;
    (void)req;
 
-   config_t cfg;
-   config_load(&cfg);
-   char *context = workspace_build_context_from_config(&cfg);
+   char *context = workspace_build_context_from_config();
 
    cJSON *resp = jo_ok_kv("context", context ? context : "");
    free(context);
@@ -1547,9 +1565,6 @@ int handle_workspace_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    (void)req;
-   config_t cfg;
-   config_load(&cfg);
-
    /* Listing workspaces is a read of the registry; the kb call only enriches
     * each entry with its already-indexed project names. Probe liveness first so
     * a down kb degrades to empty project lists instead of blocking this RPC on a
@@ -1561,20 +1576,20 @@ int handle_workspace_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    cJSON *resp = jo_ok();
    cJSON *arr = cJSON_AddArrayToObject(resp, "workspaces");
-   for (int w = 0; w < cfg.workspace_count; w++)
+   for (int w = 0; w < config_workspace_count(); w++)
    {
       cJSON *ws_obj = cJSON_CreateObject();
-      jo_add_str(ws_obj, "path", cfg.workspaces[w]);
+      jo_add_str(ws_obj, "path", config_workspaces(w));
       jo_add_str(ws_obj, "provider",
-                 cfg.workspace_providers[w][0] ? cfg.workspace_providers[w] : "shared");
-      if (cfg.workspace_vcs_remote[w][0])
-         jo_add_str(ws_obj, "remote", cfg.workspace_vcs_remote[w]);
-      if (cfg.workspace_vcs_head[w][0])
-         jo_add_str(ws_obj, "head", cfg.workspace_vcs_head[w]);
+                 config_workspace_providers(w)[0] ? config_workspace_providers(w) : "shared");
+      if (config_workspace_vcs_remote(w)[0])
+         jo_add_str(ws_obj, "remote", config_workspace_vcs_remote(w));
+      if (config_workspace_vcs_head(w)[0])
+         jo_add_str(ws_obj, "head", config_workspace_vcs_head(w));
       cJSON *projs = cJSON_AddArrayToObject(ws_obj, "projects");
-      size_t ws_len = strlen(cfg.workspaces[w]);
+      size_t ws_len = strlen(config_workspaces(w));
       for (int p = 0; p < pcount; p++)
-         if (strncmp(all_projects[p].root, cfg.workspaces[w], ws_len) == 0 &&
+         if (strncmp(all_projects[p].root, config_workspaces(w), ws_len) == 0 &&
              (all_projects[p].root[ws_len] == '/' || all_projects[p].root[ws_len] == '\0'))
             cJSON_AddItemToArray(projs, cJSON_CreateString(all_projects[p].name));
       cJSON_AddItemToArray(arr, ws_obj);
@@ -1617,34 +1632,14 @@ int handle_workspace_remove(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    char abs[MAX_PATH_LEN];
    const char *target = realpath(argv[0], abs) ? abs : argv[0];
 
-   config_t cfg;
-   config_load(&cfg);
-   int found = -1;
-   for (int i = 0; i < cfg.workspace_count; i++)
-      if (strcmp(cfg.workspaces[i], target) == 0)
-      {
-         found = i;
-         break;
-      }
-   if (found < 0)
+   /* config_workspace_remove() compacts every parallel registry array in
+    * lockstep and saves; this handler used to open-code the shift and got it
+    * wrong (only workspaces[] moved, misaligning workspace_providers[] for
+    * every entry after the removed one). */
+   int rc = config_workspace_remove(target);
+   if (rc == -2)
       return server_send_error(conn, "workspace: not registered", NULL);
-
-   /* Compact every parallel registry array in lockstep so the provider + VCS
-    * metadata stay aligned with their path (previously only workspaces[] was
-    * shifted, which misaligned workspace_providers[] for entries after the
-    * removed one). */
-   for (int i = found; i < cfg.workspace_count - 1; i++)
-   {
-      snprintf(cfg.workspaces[i], MAX_PATH_LEN, "%s", cfg.workspaces[i + 1]);
-      snprintf(cfg.workspace_providers[i], sizeof(cfg.workspace_providers[i]), "%s",
-               cfg.workspace_providers[i + 1]);
-      snprintf(cfg.workspace_vcs_remote[i], sizeof(cfg.workspace_vcs_remote[i]), "%s",
-               cfg.workspace_vcs_remote[i + 1]);
-      snprintf(cfg.workspace_vcs_head[i], sizeof(cfg.workspace_vcs_head[i]), "%s",
-               cfg.workspace_vcs_head[i + 1]);
-   }
-   cfg.workspace_count--;
-   if (config_save(&cfg) != 0)
+   if (rc != 0)
       return server_send_error(conn, "workspace: failed to save config", NULL);
 
    /* Republish the live snapshot now instead of waiting for the server loop's
@@ -1869,11 +1864,10 @@ int handle_identity_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    (void)req;
-   config_t cfg;
-   if (config_load(&cfg) != 0)
+   if (!config_present())
       return server_send_error(conn, "identity show: could not load config", NULL);
    cJSON *resp = cJSON_CreateObject();
-   cJSON_AddItemToObject(resp, "charter", identity_charter_json(&cfg));
+   cJSON_AddItemToObject(resp, "charter", identity_charter_json());
    cJSON_AddItemToObject(resp, "local_operator", identity_local_operator_json());
    cJSON_AddItemToObject(resp, "working_profile", identity_working_profile_json());
    return send_and_free(conn, resp);
@@ -2307,10 +2301,7 @@ int handle_dashboard_audit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    /* When the WORM store is enabled it is the tamper-evident source of truth for
     * the Logs view: read the indexed audit_event rows directly (superseding the
     * flat audit.log reader from #1092). Fall back to the file reader otherwise. */
-   config_t wcfg;
-   memset(&wcfg, 0, sizeof wcfg);
-   config_load(&wcfg);
-   if (wcfg.audit_worm_enabled)
+   if (config_audit_worm_enabled())
    {
       long wtotal = 0;
       cJSON *wpage = audit_worm_read_page(offset, limit, &wtotal);

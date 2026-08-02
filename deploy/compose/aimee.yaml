@@ -1,13 +1,12 @@
-# aimee split stack via docker-compose (aimee-llm + self-contained aimee-kb +
-# aimee-server). Runs on Docker or any Docker-API daemon (e.g. LXC2Docker).
+# aimee split stack via Docker Compose (self-contained aimee-kb + aimee-server).
+# Runs on Docker or any Docker-API daemon (for example, LXC2Docker).
 #
-#   docker compose -f deploy/compose/aimee.yaml up -d                 # CPU LLM
-#   docker compose -f deploy/compose/aimee.yaml -f deploy/compose/aimee.gpu.yaml up -d   # GPU LLM
+#   docker compose -f deploy/compose/aimee.yaml up -d
 #
-# The kb embeds in-container (bekko-a25m, baked into the image) and calls
-# AIMEE_LLM_URL only for synthesis; see docs/KB_LLM_BACKENDS.md and
-# docs/SYNTHESIS_MODELS.md. There is no reranking model — it was measured out of
-# the stack. Server /v1 on :8740, kb /v1 on :8741, webchat on :8443.
+# This single-KB profile declares no standalone inference service. Embedding and
+# synthesis are roles of the KB: the selected profile runs them in this container
+# or points the KB at remote endpoints. Server /v1 is on :8740,
+# KB /v1 is on :8741, and the browser is on :8443.
 name: aimee
 services:
   aimee-kb:
@@ -24,7 +23,9 @@ services:
       AIMEE_WORKSPACES_DIR: /var/lib/aimee-workspaces
       # External DB2 credentials are streamed into the KB Vault by the
       # disposable Compose helper; never persist them in Config.Env.
-      # Synthesis only. The kb embeds in-container; there is no reranker.
+      # Remote synthesis endpoint for a profile that places synthesis externally.
+      # Empty leaves that remote placement unavailable; an internal placement is
+      # configured as a KB role rather than as another Compose service.
       AIMEE_LLM_URL: ${AIMEE_LLM_URL:-}
       # The wizard's embedder choice, and the endpoint for an external one. The kb
       # MUST receive both: `aimee config deploy-env` emits them, and without them
@@ -32,13 +33,18 @@ services:
       # the builtin serves forever — the wizard's embedder silently never runs.
       EMBEDDER_MODEL: ${EMBEDDER_MODEL:-}
       AIMEE_EMBEDDER_URL: ${AIMEE_EMBEDDER_URL:-}
-      # Embedding dim — CPU tier default 1024; the GPU override sets 2560.
-      AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-1024}
+      # Embedding dim. Leave EMPTY so the kb uses the dimension of the embedder it
+      # actually serves (the bundled bekko-a25m is 384). This carried the retired
+      # aimee-llm CPU tier's 1024: with the bundled embedder the kb came up healthy,
+      # accepted writes, and then refused every vector upsert with
+      # "dim mismatch: got 384, expected 1024" — dense retrieval silently dead.
+      # Set it ONLY for an external AIMEE_EMBEDDER_URL, whose width the kb cannot
+      # know.
+      AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
       AIMEE_KB_HTTP_BIND: "1"
-      # The curator synth sidecar (curator-extract.py) reads LLM_ENDPOINT, NOT
-      # AIMEE_LLM_URL — without it the sidecar exits 256 and code-unit synthesis
-      # never drains. Point it at the same aimee-llm gateway (/v1).
-      LLM_ENDPOINT: ${LLM_ENDPOINT:-http://aimee-llm:8742/v1}
+      # The curator adapter reads LLM_ENDPOINT rather than AIMEE_LLM_URL. Set it
+      # only when this KB uses a remote synthesis placement.
+      LLM_ENDPOINT: ${LLM_ENDPOINT:-}
       LLM_MODEL: ${LLM_MODEL:-aimee-synth}
     command: ["--http-port=8741"]
     ports:
