@@ -1,0 +1,22 @@
+[16:52:31Z] MTP + 32 slots, two fresh runs
+    model : gemma-4-E4B-it-UD-Q4_K_XL.gguf
+    slots : 32
+    speculative: True | n_ctx/slot: 3072
+[16:54:09Z]   run 1: 100 notes in 71s
+    model : gemma-4-E4B-it-UD-Q4_K_XL.gguf
+    slots : 32
+    speculative: True | n_ctx/slot: 3072
+[16:55:37Z]   run 2: 100 notes in 61s
+
+100 notes, MTP + 32 slots
+
+  run 1 vs run 2, raw completions : 63/100
+  run 1 vs run 2, extracted facts : 75/100
+  run 1 vs banked SEQUENTIAL arm  : 64/100  (expected to differ)
+
+  wall: [71, 61] s   sequential equivalent 265 s   speedup 4.34x
+
+NOT REPEATABLE: 25 note(s) extract different facts between two
+runs of the SAME configuration. Unusable at any speed -- two arms would
+disagree for reasons that have nothing to do with their quant.
+[16:55:37Z] === DONE ===

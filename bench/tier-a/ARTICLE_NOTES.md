@@ -363,13 +363,50 @@ under MTP is internally comparable across both model families. The 1.83x is
 usable; those arms simply cannot be compared against the sequential arms already
 banked.
 
-### The three configurations, and what each costs
+### 32 slots + MTP: does not stack, and is not repeatable
 
-| config | speed | vs sequential | self-consistent |
+Tested because the expectation was that they would compound. Both parts of that
+turned out false, measured on 100 notes, fresh server each run:
+
+| config | speedup |
+|---|---:|
+| MTP alone | 1.83x |
+| 32 slots alone | 4.54x |
+| **32 slots + MTP** | **4.34x** |
+
+No stacking -- the combination is marginally SLOWER than slots alone. They spend
+the same resource: at batch=1 the GPU is bandwidth-bound with compute idle, and
+both speculation and batching exist to fill that idle compute. Once 32 sequences
+are in flight there is nothing left for drafting to claim, so verification is
+pure added work.
+
+More importantly it fails the only test that matters for a benchmark:
+
+| comparison | identical |
+|---|---:|
+| run 1 vs run 2, raw completions | 63/100 |
+| run 1 vs run 2, extracted facts | **75/100** |
+
+**25 notes extract different facts between two runs of the SAME configuration.**
+Wall time varied too (71 s vs 61 s), which is the mechanism: with 32 requests in
+flight, batch composition depends on arrival and scheduling timing, and that is
+not reproducible. MTP alone is 100/100 precisely because its batch shapes are
+fixed by the draft length rather than by when requests happen to arrive.
+
+This reframes the whole parallelism question. The requirement was never identity
+with a sequential run -- it was repeatability. MTP perturbs outputs relative to
+sequential and is still usable, because it perturbs them the SAME WAY every time.
+Concurrency perturbs them differently every time, which no amount of speed
+redeems.
+
+### The configurations, and what each costs
+
+| config | speed | vs sequential | REPEATABLE |
 |---|---:|---:|---|
-| sequential | 1.00x (43.8 min/arm) | identical by definition | yes, 4 confirmations |
-| MTP | 1.83x (~24 min/arm) | 74/100 | **yes, 100/100** |
-| 32 slots | 4.54x (~9.6 min/arm) | 804/1001 | untested |
+| sequential | 1.00x (43.8 min/arm) | identical by definition | **yes** (4 confirmations) |
+| **MTP** | **1.83x (~24 min/arm)** | 74/100 | **yes** (100/100, E4B and E2B) |
+| 32 slots | 4.54x (~9.6 min/arm) | 804/1001 | **no** |
+| 32 slots + MTP | 4.34x | 64/100 | **no** (75/100 against itself) |
 
 The decision is not "fast or accurate". It is: comparisons WITHIN a
 configuration are sound; comparisons ACROSS configurations are not. Whatever is
