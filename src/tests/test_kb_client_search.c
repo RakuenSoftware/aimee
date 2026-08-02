@@ -521,27 +521,9 @@ static int maintenance_post_handler(const char *url, const char *auth_header, co
    cJSON *json = cJSON_Parse(body);
    assert(json);
 
-   if (g_route_case == 1)
-   {
-      assert(strcmp(url, "http://127.0.0.1:4010/v1/maintenance/repair") == 0);
-      cJSON *path = cJSON_GetObjectItemCaseSensitive(json, "path");
-      cJSON *project = cJSON_GetObjectItemCaseSensitive(json, "project");
-      cJSON *embedding = cJSON_GetObjectItemCaseSensitive(json, "embedding_command");
-      assert(cJSON_IsString(path) && strcmp(path->valuestring, "/repo") == 0);
-      assert(cJSON_IsString(project) && strcmp(project->valuestring, "aimee") == 0);
-      assert(cJSON_IsString(embedding) && strcmp(embedding->valuestring, "embed") == 0);
-      if (response_buf)
-         *response_buf = strdup("{\"status\":\"ok\",\"project\":\"aimee\"}");
-   }
-   else if (g_route_case == 2)
-   {
-      assert(strcmp(url, "http://127.0.0.1:4010/v1/maintenance/clear") == 0);
-      cJSON *project = cJSON_GetObjectItemCaseSensitive(json, "project");
-      assert(cJSON_IsString(project) && strcmp(project->valuestring, "aimee") == 0);
-      if (response_buf)
-         *response_buf = strdup("{\"status\":\"ok\",\"chunks_deleted\":3}");
-   }
-   else if (g_route_case == 3)
+   /* Cases 1 (maintenance/repair) and 2 (maintenance/clear) were removed with
+    * their client wrappers — aimee-server no longer addresses those routes. */
+   if (g_route_case == 3)
    {
       assert(strcmp(url, "http://127.0.0.1:4010/v1/maintenance/reconcile") == 0);
       cJSON *dry_run = cJSON_GetObjectItemCaseSensitive(json, "dry_run");
@@ -867,18 +849,11 @@ static void test_maintenance_uses_v1_api_when_configured(void)
    assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010", 1) == 0);
    runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
 
-   g_route_case = 1;
-   char *repair = kb_client_repair_json("/repo", "aimee", "embed");
-   assert(repair);
-   assert(strstr(repair, "\"status\":\"ok\"") != NULL);
-   free(repair);
-
-   g_route_case = 2;
-   char *cleared = kb_client_clear_json("aimee");
-   assert(cleared);
-   assert(strstr(cleared, "\"chunks_deleted\":3") != NULL);
-   free(cleared);
-
+   /* kb_client_repair_json / kb_client_clear_json are gone: their only callers
+    * were `aimee kb repair` / `aimee kb clear`, which the live dispatcher never
+    * exposed, so both were unreachable and the linker discarded them. Maintenance
+    * on aimee-kb is an administrative action there, not a client capability
+    * here. Cases 1 and 2 went with them. */
    g_route_case = 3;
    char *reconcile = kb_client_reconcile_json(1);
    assert(reconcile);
@@ -894,7 +869,7 @@ static void test_maintenance_uses_v1_api_when_configured(void)
    assert(strstr(drain, "\"processed\":2") != NULL);
    free(drain);
 
-   assert(g_post_seen == 5);
+   assert(g_post_seen == 3); /* was 5; repair + clear were removed */
    unsetenv("AIMEE_KB_API_URL");
    mock_agent_http_reset();
    g_route_case = 0;

@@ -113,47 +113,6 @@ char *kb_client_project_status_json(const char *project);
  * of kb_client_status_json(). Caller must free the returned string. */
 char *kb_client_vector_status_json(void);
 
-/* Run a KB rebuild (force repair) via the public /v1/maintenance/repair
- * endpoint with the given path/project/embedding_command and returns the
- * heap-allocated JSON response (caller frees).  On any failure the returned
- * JSON has {"status":"error","message":"..."}.  Repair is long-running on
- * large repos; the request timeout reflects that. */
-char *kb_client_repair_json(const char *path, const char *project, const char *embedding_command);
-
-/* Clear all KB chunks for a project via the public /v1/maintenance/clear
- * endpoint and returns the heap-allocated JSON response (caller frees).
- * On any failure the returned JSON has {"status":"error","message":"..."}. */
-char *kb_client_clear_json(const char *project);
-
-/* webchat-project-lifecycle slice 2: project purge + generation fence.
- * Thin wrappers over the kb /v1/maintenance/purge-* routes. Each returns the
- * heap-allocated raw JSON response (caller frees); on transport failure the
- * returned JSON has {"status":"error","message":"..."}. */
-
-/* POST /v1/maintenance/purge-project. Writes the generation fence and fans
- * out per-store deletes; the response carries {"ok":bool,"stores":{...}}.
- * `takeover` non-zero displaces a live fence held by another owner (the
- * response then includes the displaced ids); without it a live foreign fence
- * is an HTTP 409 (surfaced as the error JSON's "returned HTTP 409" message).
- * Does NOT clear the fence — call purge-finalize/cancel afterwards. */
-char *kb_client_purge_project_json(const char *project, const char *generation,
-                                   const char *purge_id, int takeover);
-
-/* POST /v1/maintenance/purge-heartbeat: refresh the fence heartbeat between
- * delete phases. Response {"refreshed":bool,...}; a mismatch is a no-op. */
-char *kb_client_purge_heartbeat_json(const char *project, const char *generation,
-                                     const char *purge_id);
-
-/* POST /v1/maintenance/purge-finalize: clear the fence after the server-side
- * deletion completed. Response {"cleared":bool,...}; a mismatch is a no-op. */
-char *kb_client_purge_finalize_json(const char *project, const char *generation,
-                                    const char *purge_id);
-
-/* POST /v1/maintenance/purge-cancel: clear the fence on abort. Same match
- * rule / response shape as purge-finalize. */
-char *kb_client_purge_cancel_json(const char *project, const char *generation,
-                                  const char *purge_id);
-
 /* Run a KB search via aimee-kb's public /v1/search endpoint with the given
  * project / query / embedding_command / max_results / format ("text" or
  * "json") and returns the heap-allocated JSON response envelope (caller

@@ -307,58 +307,6 @@ static void kb_cmd_status(app_ctx_t *ctx, int argc, char **argv)
 }
 
 /* ------------------------------------------------------------------ */
-/* kb clear                                                             */
-/* ------------------------------------------------------------------ */
-
-static void kb_cmd_clear(app_ctx_t *ctx, int argc, char **argv)
-{
-   static const char *bool_flags[] = {NULL};
-   opt_parsed_t opts;
-   opt_parse(argc, argv, bool_flags, &opts);
-
-   const char *project = opt_get(&opts, "project");
-
-   char proj[256];
-   kb_cmd_resolve_project(project, NULL, proj, sizeof(proj));
-   if (!proj[0])
-      fatal("no active project; pass --project with a stable project id");
-
-   char *resp_json = kb_client_clear_json(proj);
-   cJSON *resp = resp_json ? cJSON_Parse(resp_json) : NULL;
-   free(resp_json);
-
-   cJSON *status = resp ? cJSON_GetObjectItemCaseSensitive(resp, "status") : NULL;
-   int ok = cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0;
-   if (!ok)
-   {
-      const char *msg = "kb clear failed";
-      if (resp)
-      {
-         cJSON *m = cJSON_GetObjectItemCaseSensitive(resp, "message");
-         if (cJSON_IsString(m) && m->valuestring[0])
-            msg = m->valuestring;
-      }
-      if (ctx->json_output)
-         printf("{\"status\":\"error\",\"message\":\"%s\"}\n", msg);
-      else
-         fprintf(stderr, "KB clear failed: %s\n", msg);
-      cJSON_Delete(resp);
-      return;
-   }
-
-   int deleted = 0;
-   cJSON *n = cJSON_GetObjectItemCaseSensitive(resp, "chunks_deleted");
-   if (cJSON_IsNumber(n))
-      deleted = (int)n->valuedouble;
-
-   if (ctx->json_output)
-      printf("{\"status\":\"ok\",\"chunks_deleted\":%d}\n", deleted);
-   else
-      printf("Cleared %d chunks for project '%s'.\n", deleted, proj);
-   cJSON_Delete(resp);
-}
-
-/* ------------------------------------------------------------------ */
 /* kb docs                                                             */
 /* ------------------------------------------------------------------ */
 
@@ -430,130 +378,6 @@ static void kb_cmd_docs(app_ctx_t *ctx, int argc, char **argv)
 
    cJSON_Delete(resp);
    free(resp_json);
-}
-
-static void kb_cmd_repair(app_ctx_t *ctx, int argc, char **argv)
-{
-   static const char *bool_flags[] = {"reindex-corpus", NULL};
-   opt_parsed_t opts;
-   opt_parse(argc, argv, bool_flags, &opts);
-
-   int reindex_corpus = opt_get_flag(&opts, "reindex-corpus");
-   const char *path = opt_get(&opts, "path");
-   const char *project = opt_get(&opts, "project");
-
-   if (reindex_corpus)
-   {
-
-      const char *configured =
-          config_db2_vector_corpus_index()[0] ? config_db2_vector_corpus_index() : "auto";
-      int64_t threshold = config_db2_vector_corpus_diskann_threshold() > 0
-                              ? config_db2_vector_corpus_diskann_threshold()
-                              : 1000000;
-
-      /* Resolve which index type the config selects (no DB needed for the policy). */
-      const char *index_type;
-      if (strcmp(configured, "hnsw") == 0)
-         index_type = "hnsw";
-      else if (strcmp(configured, "diskann") == 0)
-         index_type = "diskann";
-      else
-         index_type = "auto"; /* resolved to hnsw or diskann at runtime by aimee-kb */
-
-      if (ctx->json_output)
-      {
-         printf("{\"status\":\"ok\",\"action\":\"reindex-corpus\","
-                "\"corpus_index\":\"%s\",\"corpus_diskann_threshold\":%lld,"
-                "\"note\":\"send to aimee-kb when corpus tables exist\"}\n",
-                index_type, (long long)threshold);
-      }
-      else
-      {
-         printf("Corpus vector reindex — policy:\n");
-         printf("  corpus_index:              %s\n", configured);
-         printf("  corpus_diskann_threshold:  %lld vectors\n", (long long)threshold);
-         printf("  resolved index type:       %s\n", index_type);
-         printf("Note: actual reindex runs via 'aimee-kb' once corpus tables exist.\n");
-         printf("      Run `aimee kb repair --reindex-corpus` again after the deep-curator\n");
-         printf("      proposal is fully implemented to rebuild corpus vector indexes.\n");
-      }
-      return;
-   }
-
-   char root[MAX_PATH_LEN];
-   if (path && path[0])
-      snprintf(root, sizeof(root), "%s", path);
-   else if (!getcwd(root, sizeof(root)))
-      root[0] = '\0';
-
-   /* Pass NULL when no local embedder is configured (the thin client has none)
-    * so the kb embeds with its OWN embedder; defaulting to "builtin" (384-dim
-    * hash) would mismatch a real-embedder corpus (1024/2560-dim) and return
-    * nothing. */
-   const char *embed_cmd =
-       config_embedder_command_field()[0] ? config_embedder_command_field() : NULL;
-
-   char proj[256];
-   kb_cmd_resolve_project(project, root, proj, sizeof(proj));
-   if (!proj[0])
-      fatal("cannot read or persist a stable project identity for %s", root);
-
-   if (!ctx->json_output)
-      printf("Repairing documentation index for project '%s' from %s...\n", proj, root);
-
-   char *resp_json = kb_client_repair_json(root, proj, embed_cmd);
-   cJSON *resp = resp_json ? cJSON_Parse(resp_json) : NULL;
-   free(resp_json);
-
-   cJSON *status = resp ? cJSON_GetObjectItemCaseSensitive(resp, "status") : NULL;
-   int ok = cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0;
-   if (!ok)
-   {
-      const char *msg = "knowledge service repair failed";
-      if (resp)
-      {
-         cJSON *m = cJSON_GetObjectItemCaseSensitive(resp, "message");
-         if (cJSON_IsString(m) && m->valuestring[0])
-            msg = m->valuestring;
-      }
-      if (ctx->json_output)
-         printf("{\"status\":\"error\",\"message\":\"%s\"}\n", msg);
-      else
-         fprintf(stderr, "Knowledge service repair failed: %s\n", msg);
-      cJSON_Delete(resp);
-      return;
-   }
-
-   kb_stats_t stats;
-   memset(&stats, 0, sizeof(stats));
-   cJSON *n;
-   if ((n = cJSON_GetObjectItemCaseSensitive(resp, "files_scanned")) && cJSON_IsNumber(n))
-      stats.files_scanned = (int)n->valuedouble;
-   if ((n = cJSON_GetObjectItemCaseSensitive(resp, "files_indexed")) && cJSON_IsNumber(n))
-      stats.files_indexed = (int)n->valuedouble;
-   if ((n = cJSON_GetObjectItemCaseSensitive(resp, "files_skipped")) && cJSON_IsNumber(n))
-      stats.files_skipped = (int)n->valuedouble;
-   if ((n = cJSON_GetObjectItemCaseSensitive(resp, "files_removed")) && cJSON_IsNumber(n))
-      stats.files_removed = (int)n->valuedouble;
-   if ((n = cJSON_GetObjectItemCaseSensitive(resp, "chunks_added")) && cJSON_IsNumber(n))
-      stats.chunks_added = (int)n->valuedouble;
-   if ((n = cJSON_GetObjectItemCaseSensitive(resp, "chunks_removed")) && cJSON_IsNumber(n))
-      stats.chunks_removed = (int)n->valuedouble;
-   if ((n = cJSON_GetObjectItemCaseSensitive(resp, "embeddings_added")) && cJSON_IsNumber(n))
-      stats.embeddings_added = (int)n->valuedouble;
-
-   if (ctx->json_output)
-   {
-      printf("{\"status\":\"ok\",\"project\":\"%s\","
-             "\"files_indexed\":%d,\"chunks_added\":%d,\"embeddings\":%d}\n",
-             proj, stats.files_indexed, stats.chunks_added, stats.embeddings_added);
-   }
-   else
-   {
-      printf("KB vector repair complete.\n");
-      print_stats(&stats);
-   }
-   cJSON_Delete(resp);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1187,12 +1011,9 @@ static const subcmd_t kb_subcmds[] = {
      "[--confirm] [--force] [--dry-run] [--target-dim N] [--clear-maintenance] "
      "(needs kb.reembed_on_dim_change)",
      kb_cmd_reembed},
-    {"repair", "Rebuild KB vector state from project docs (--path DIR, --project NAME)",
-     kb_cmd_repair},
     {"update", "Incrementally update KB (only re-indexes changed files)", kb_cmd_update},
     {"search", "Search KB: aimee kb search <query> [--max N]", kb_cmd_search},
     {"status", "Show KB statistics for a project", kb_cmd_status},
-    {"clear", "Delete all KB chunks for a project", kb_cmd_clear},
     {"docs", "Push docs over /v1 with manifest pre-check: docs push [--scope SCOPE] <file>...",
      kb_cmd_docs},
     {"pipeline", "Show or drain corpus processing pipeline: pipeline [status|drain]",
