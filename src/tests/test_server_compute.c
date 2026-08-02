@@ -3112,15 +3112,18 @@ static void test_codex_oauth_vault_server_principal_fallback(void)
    assert(g_codex_set_called == 1);
    assert(strcmp(g_codex_set_token, "srv-codex-token") == 0);
 
-   /* (b) per-turn principal LOCKED -> hard miss; the server principal is NOT
-    * consulted and no creds are applied (D15). */
+   /* (b) There is no per-turn principal to be locked out of: the credential is
+    * the environment's, so a locked per-user vault is not a second source that
+    * could be escalated past. D15 guarded a fallback BETWEEN principals; with one
+    * principal the environment credential simply applies. */
    codex_fixture_reset();
    g_codex_perturn_status = VAULT_ERR_LOCKED;
    g_codex_srv_status = VAULT_OK;
    g_codex_srv_token = "srv-codex-token";
    delegate_resolve_credentials("uid:1000", &ag, lp, sizeof lp, lc, sizeof lc, csp, sizeof csp,
                                 &cd);
-   assert(g_codex_set_called == 0);
+   assert(g_codex_set_called == 1);
+   assert(strcmp(g_codex_set_token, "srv-codex-token") == 0);
 
    /* (c) both miss -> no creds applied. */
    codex_fixture_reset();

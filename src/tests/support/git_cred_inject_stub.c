@@ -25,7 +25,6 @@ char **git_cred_inject_build_env_for_repo(const char *principal, const char *rem
    return NULL;
 }
 
-
 void git_cred_inject_free_env(char **envp)
 {
    (void)envp;

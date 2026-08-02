@@ -57,7 +57,6 @@ char **git_cred_inject_build_env_for_repo(const char *principal, const char *rem
                                           const char *repo_dir, const char *preferred_token,
                                           char *const *parent_environ, int *out_token_fd);
 
-
 /* Resolve just the HTTPS token (no env assembly) under the SAME precedence as
  * the env builders above: preferred → per-host vault → principal vault → server
  * identity. For the one caller that needs the raw token rather than an exec env

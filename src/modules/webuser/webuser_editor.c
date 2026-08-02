@@ -196,8 +196,7 @@ void webuser_editor_free_env(char **envp)
    free(envp);
 }
 
-char **webuser_editor_build_env(const char *principal, const char *userroot,
-                                int *out_token_fd)
+char **webuser_editor_build_env(const char *principal, const char *userroot, int *out_token_fd)
 {
    if (out_token_fd)
       *out_token_fd = -1;
@@ -230,8 +229,8 @@ char **webuser_editor_build_env(const char *principal, const char *userroot,
     * Copies from the given base (dropping any inherited GH_TOKEN/SSH_AUTH_SOCK);
     * pass the minimal base, never environ. NULL when the user has no vaulted
     * creds yet, in which case the minimal base alone is the editor's env. */
-   char **inner = git_cred_inject_build_env_for_repo(principal, NULL, NULL, NULL, mini,
-                                                     out_token_fd);
+   char **inner =
+       git_cred_inject_build_env_for_repo(principal, NULL, NULL, NULL, mini, out_token_fd);
    char *const *src = inner ? inner : mini;
    int sc = 0;
    while (src[sc])

@@ -151,8 +151,7 @@ int main(void)
    int e1_fd = -1;
    char **e1 = git_cred_inject_build_env_for_repo(alice, "https://gitlab.example.com/x/y", NULL,
                                                   "INLINE-WINS", parent, &e1_fd);
-   assert(e1 && fd_token(e1_fd, tokbuf, sizeof(tokbuf)) &&
-          strcmp(tokbuf, "INLINE-WINS") == 0);
+   assert(e1 && fd_token(e1_fd, tokbuf, sizeof(tokbuf)) && strcmp(tokbuf, "INLINE-WINS") == 0);
    git_cred_inject_free_env(e1);
    if (e1_fd >= 0)
       close(e1_fd);
@@ -162,8 +161,7 @@ int main(void)
    int e2_fd = -1;
    char **e2 = git_cred_inject_build_env_for_repo(alice, "https://gitlab.example.com/x/y", NULL,
                                                   NULL, parent, &e2_fd);
-   assert(e2 && fd_token(e2_fd, tokbuf, sizeof(tokbuf)) &&
-          strcmp(tokbuf, "glpat-HOSTSECRET") == 0);
+   assert(e2 && fd_token(e2_fd, tokbuf, sizeof(tokbuf)) && strcmp(tokbuf, "glpat-HOSTSECRET") == 0);
    git_cred_inject_free_env(e2);
    if (e2_fd >= 0)
       close(e2_fd);
@@ -173,8 +171,7 @@ int main(void)
    int e3_fd = -1;
    char **e3 = git_cred_inject_build_env_for_repo(alice, "https://no-token-host.example/x/y", NULL,
                                                   NULL, parent, &e3_fd);
-   assert(e3 && fd_token(e3_fd, tokbuf, sizeof(tokbuf)) &&
-          strcmp(tokbuf, "ghp_aliceSECRET") == 0);
+   assert(e3 && fd_token(e3_fd, tokbuf, sizeof(tokbuf)) && strcmp(tokbuf, "ghp_aliceSECRET") == 0);
    git_cred_inject_free_env(e3);
    if (e3_fd >= 0)
       close(e3_fd);
@@ -186,8 +183,7 @@ int main(void)
    int e4_fd = -1;
    char **e4 = git_cred_inject_build_env_for_repo(alice, "https://gitlab.example.com/x/y", NULL,
                                                   NULL, parent, &e4_fd);
-   assert(e4 && fd_token(e4_fd, tokbuf, sizeof(tokbuf)) &&
-          strcmp(tokbuf, "ghp_aliceSECRET") == 0);
+   assert(e4 && fd_token(e4_fd, tokbuf, sizeof(tokbuf)) && strcmp(tokbuf, "ghp_aliceSECRET") == 0);
    git_cred_inject_free_env(e4);
    if (e4_fd >= 0)
       close(e4_fd);

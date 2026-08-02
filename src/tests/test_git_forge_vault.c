@@ -70,8 +70,7 @@ int main(void)
    assert(vault_service_set_server(GIT_FORGE_VAULT_AGENT, GIT_FORGE_TOKEN_CRED, "ghp_alicePAT") ==
           VAULT_OK);
    const char *akey = "-----BEGIN OPENSSH PRIVATE KEY-----\nenvKEY\n-----END-----";
-   assert(vault_service_set_server(GIT_FORGE_VAULT_AGENT, GIT_FORGE_SSHKEY_CRED, akey) ==
-          VAULT_OK);
+   assert(vault_service_set_server(GIT_FORGE_VAULT_AGENT, GIT_FORGE_SSHKEY_CRED, akey) == VAULT_OK);
 
    /* Readable while unlocked. */
    assert(git_forge_vault_token(alice, out, sizeof(out)) == 1);
