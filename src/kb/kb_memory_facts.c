@@ -63,8 +63,27 @@
  * gate already treats as durable, so an extracted fact commits ACTIVE and
  * recallable instead of being stranded as a provisional Class-C edge. When no
  * seed relation fits, the model emits its own concise predicate (never a generic
- * catch-all), which stays a distinguishable provisional candidate for §7.2. */
-#define MF_SYSTEM_PROMPT_TMPL                                                                      \
+ * catch-all), which stays a distinguishable provisional candidate for §7.2.
+ *
+ * The closing sentence grants reasoning explicitly, and that phrasing is load
+ * bearing. It used to read "No prose, no markdown.", which gemma-4-E4B applies to
+ * its own thought channel and not merely to its answer: reasoning drops to zero on
+ * every note, silently, with valid JSON still coming back. Thinking is worth
+ * +0.084 F1 to E4B on the tier-A set, so the prompt was quietly discarding the
+ * single largest effect measured on this task.
+ *
+ * Rescoping the constraint to the answer ("the answer itself must be a JSON object
+ * only") does NOT fix it — still 0/20 — so the model is not drawing that
+ * distinction and the exemption has to be stated outright. Deleting the sentence
+ * restores thinking but costs the guardrail: 14 of 20 answers come back fenced in
+ * ```json. Granting reasoning and constraining the answer keeps both, and fences
+ * least of the three (0 of 20).
+ *
+ * Measured on gemma-4-E4B under two independent builds — Unsloth UD-Q4_K_XL and
+ * the stock ggml-org Q8_0, which ship different chat templates — so this is a
+ * property of the model rather than of one vendor's quantisation. E2B never had
+ * the behaviour at all. See bench/tier-a/harness/probe_thinking_prompt.py. */
+#define MF_SYSTEM_PROMPT_TMPL                                                                \
    "You extract durable facts from a single remembered note. Return ONLY a JSON "                  \
    "object: {\"facts\":[{\"subject\":\"\",\"relation\":\"\",\"object\":\"\","                      \
    "\"confidence\":0.0}]}. Each fact is a stable subject-relation-object triple "                  \
@@ -83,7 +102,8 @@
    "\"was removed\"), do NOT emit the negated fact - a retraction asserts a fact "                 \
    "is FALSE, so there is nothing durable to record. "                                             \
    "If the note asserts no durable fact, return exactly {\"facts\":[]} - the "                     \
-   "wrapper object is ALWAYS required, never a bare []. No prose, no markdown."
+   "wrapper object is ALWAYS required, never a bare []. Reason first if it helps; "                 \
+   "the answer that follows must be the JSON object only, no prose, no markdown."
 
 /* Build the extraction system prompt, binding the model to the canonical relation
  * set (autonomous reconciliation, §7). Sourced from the seed ontology so it stays

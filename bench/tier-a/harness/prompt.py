@@ -31,7 +31,8 @@ TEMPLATE = (
     '"was removed"), do NOT emit the negated fact - a retraction asserts a fact '
     "is FALSE, so there is nothing durable to record. "
     'If the note asserts no durable fact, return exactly {"facts":[]} - the '
-    "wrapper object is ALWAYS required, never a bare []. No prose, no markdown."
+    "wrapper object is ALWAYS required, never a bare []. Reason first if it helps; "
+    "the answer that follows must be the JSON object only, no prose, no markdown."
 )
 
 # Bump when TEMPLATE changes. Results taken under different prompt versions are
@@ -40,6 +41,25 @@ TEMPLATE = (
 # produced it.
 #
 #   v1  original
+#   v5  reasoning is granted explicitly instead of being forbidden by implication.
+#       v1-v4 closed with "No prose, no markdown.", which gemma-4-E4B extends to
+#       its own thought channel: 0 reasoning chars on 20/20 notes, against 20/20
+#       that think once the sentence grants it. Nothing fails when this happens —
+#       the JSON is valid and scores 0.59 — so it went unnoticed while costing
+#       E4B the +0.084 F1 that thinking is worth on this set.
+#
+#       Two variants were rejected on measurement, not taste. Rescoping the
+#       constraint to the answer ("the answer itself must be a JSON object only")
+#       still gives 0/20: the model does not treat its reasoning as separate from
+#       its answer, so the exemption has to be explicit. Deleting the sentence
+#       outright restores thinking but returns fenced ```json on 14 of 20 — the
+#       clause was doing real work, and only the production parser's first-{ /
+#       last-} scan hid it. The shipped wording thinks 20/20 and fences 0/20.
+#
+#       Confirmed on two independent builds with DIFFERENT chat templates —
+#       unsloth UD-Q4_K_XL (sha 74a88f94..., 18807B) and the stock ggml-org Q8_0
+#       (sha 603a42db..., 18566B) — so it is the model, not a vendor repack.
+#       Reproduce with probe_thinking_prompt.py.
 #   v4  an event that establishes a durable state yields the state. v1-v3 said
 #       "skip transient state, feelings, plans, and one-off events" with no way
 #       to separate an event from the state it creates, so "Tara Tanaka joined
@@ -63,7 +83,7 @@ TEMPLATE = (
 #       produced a member_of triple — 51 spurious triples in the negation slice
 #       of the 1k small-corpus run, the graph-poisoning case that slice exists
 #       to catch.
-PROMPT_VERSION = "v4"
+PROMPT_VERSION = "v5"
 
 # Production caps the completion at MF_LLM_OUT_CAP.
 MAX_NEW_TOKENS = 8192

@@ -961,3 +961,82 @@ two devices is not provenance.
 `sweep_quant.sh` now pins `--device` explicitly and records `device_used`
 alongside `device_requested`, because a host with more than one GPU will silently
 give you the wrong one and every number will look plausible.
+
+## Defect 31: one sentence in the prompt turned E4B's reasoning off
+
+gemma-4-E4B emitted **zero** reasoning tokens on every note of the v4 10k run.
+Not truncated, not disabled by a flag: the prompt asked for it to stop.
+
+The trigger is the closing sentence, `No prose, no markdown.` E4B applies it to
+its own thought channel as well as to its answer. Bisected on the shipped prompt,
+20 notes, greedy, thinking requested:
+
+| system prompt | thinks | median reasoning |
+|---|---:|---:|
+| v4, unmodified | 0/20 | 0 |
+| v4 minus `No prose, no markdown.` | 20/20 | 1222 |
+| v4 minus `Return ONLY a JSON object:` | 0/20 | 0 |
+
+Everything upstream was fine and was checked rather than assumed: E2B and E4B
+ship byte-identical chat templates (same SHA, same five `enable_thinking`
+branches), and `run_llamacpp.py` was sending `chat_template_kwargs.enable_thinking`
+correctly all along. No config bug, no bad quant, no broken template.
+
+### Why it survived a week of benchmarking
+
+Nothing fails. The output is valid bare JSON, parses clean, and scores 0.5947.
+There is no error, no warning, and no truncation — the only symptom is a number
+that is lower than it should be, which is indistinguishable from the model simply
+being worse. It is also scale-dependent: **E2B does not have the behaviour**, so
+the two arms of the same sweep disagreed for a reason that looked like model
+size. Thinking is worth +0.084 F1 to E4B on this set, the single largest effect
+measured here, and the prompt was discarding it silently.
+
+### The fix is not deletion
+
+Deleting the sentence restores thinking and costs the guardrail it was there for:
+**14 of 20** answers come back fenced in ```json. The production parser scans
+first-`{` to last-`}` (`kb_memory_facts.c:283`) so nothing breaks downstream,
+which is precisely why the regression would not have been noticed either.
+
+Rescoping the constraint to the answer does **not** work. `The answer itself must
+be a JSON object only, with no prose or markdown around it` still gives **0/20**:
+the model is not drawing a distinction between its answer and its reasoning, so
+the exemption has to be granted outright rather than implied.
+
+v5 ships the grant, measured on both builds:
+
+| variant | UD-Q4_K_XL thinks / fenced | ggml-org Q8_0 thinks / fenced |
+|---|---:|---:|
+| v4 control | 0/20 / 0 | 0/20 / 0 |
+| answer-only rescope | 0/20 / 0 | 0/20 / 0 |
+| drop the sentence | 20/20 / 16 | 20/20 / 14 |
+| **v5 `Reason first if it helps;`** | **20/20 / 2** | **20/20 / 0** |
+
+### It is the model, not Unsloth's repack
+
+Worth stating because it was the obvious objection and it was tested rather than
+argued: every E4B number in this benchmark had been taken on an Unsloth Dynamic
+quant, so "the UD quant broke thinking" was a live alternative. It is wrong twice
+over. The UD build thinks freely under the other variants, so nothing was baked
+out of it; and the stock `ggml-org/gemma-4-E4B-it-Q8_0` conversion — different
+quantisation **and** a different chat template (sha `603a42db…`, 18566B, against
+unsloth's `74a88f94…`, 18807B) — reproduces the suppression exactly, 0/20.
+
+The template difference is its own caution. E2B and E4B matched byte-for-byte
+*within* Unsloth, which is what made "same template" feel safe; across vendors the
+same model does not ship the same template. Comparing templates only inside one
+vendor's repo answers a narrower question than it appears to.
+
+Reproduce: `harness/probe_thinking_prompt.py`, which now also measures whatever
+tail the shipped prompt currently carries, so the live prompt is re-tested rather
+than trusted.
+
+### What this invalidates
+
+Every E4B result in this log was taken with reasoning off while the run recorded
+`thinking: true`, because the flag was sent and honoured — the prompt overrode it
+downstream of the flag. The **v4 10k E4B figure of 0.5947 is a thinking-off
+number** and is not comparable to any E2B figure, which was thinking-on. E4B's
+arms need re-running under v5 before any model-to-model claim in this benchmark
+holds. E2B's numbers are unaffected.
