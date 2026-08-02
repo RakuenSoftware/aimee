@@ -86,14 +86,43 @@ int server_active_project_from_cwd(const char *cwd, char *out, size_t outlen)
    if (!cwd || !cwd[0] || !out || outlen == 0)
       return -1;
 
-   /* Co-located caller: the working tree is readable here, so keep the durable
-    * repo identity exactly as before. */
-   if (workspace_repo_identity(cwd, out, outlen, NULL, 0) == 0 && out[0])
-      return 0;
-   out[0] = '\0';
+   /* Co-located caller: the working tree is readable here, so prefer the durable
+    * repo identity. */
+   char identity[MAX_PATH_LEN] = "";
+   int have_identity =
+       workspace_repo_identity(cwd, identity, sizeof(identity), NULL, 0) == 0 && identity[0];
 
    project_info_t projects[128];
    int count = kb_client_index_list(projects, (int)(sizeof(projects) / sizeof(projects[0])));
+
+   /* An identity is only useful if it NAMES SOMETHING INDEXED. `index scan <name>
+    * <root>` lets a caller name the project, while this resolution returns the
+    * repo's persisted identity — a UUID for a repo with no remote. The two need
+    * not agree, and when they disagree every cwd-scoped query silently addressed
+    * a project that does not exist: a freshly scanned workspace answered
+    * "code index lookup failed" while the same lookup with an explicit project
+    * name returned hits. Verify before trusting it, and otherwise fall back to
+    * the registered root, which by construction names a real project. */
+   if (have_identity && count > 0)
+   {
+      for (int i = 0; i < count; i++)
+      {
+         if (strcmp(projects[i].name, identity) != 0)
+            continue;
+         snprintf(out, outlen, "%s", identity);
+         return 0;
+      }
+   }
+   else if (have_identity && count < 0)
+   {
+      /* The project list is unavailable, so the identity cannot be checked.
+       * Returning it unverified preserves the previous behaviour for a
+       * co-located caller rather than failing a lookup that used to work. */
+      snprintf(out, outlen, "%s", identity);
+      return 0;
+   }
+
+   out[0] = '\0';
    if (count <= 0)
       return -1;
    return server_active_project_match(cwd, projects, count, out, outlen);
