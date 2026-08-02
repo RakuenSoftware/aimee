@@ -68,9 +68,16 @@
  * The closing sentence grants reasoning explicitly, and that phrasing is load
  * bearing. It used to read "No prose, no markdown.", which gemma-4-E4B applies to
  * its own thought channel and not merely to its answer: reasoning drops to zero on
- * every note, silently, with valid JSON still coming back. Thinking is worth
- * +0.084 F1 to E4B on the tier-A set, so the prompt was quietly discarding the
- * single largest effect measured on this task.
+ * every note, silently, with valid JSON still coming back.
+ *
+ * What that costs is smaller than it was once reported. The widely-quoted "+0.084
+ * F1 from thinking" came from a 70-note sweep with no interval on it. Paired over
+ * 955 notes of the 10k corpus the strict-F1 delta is +0.010, CI [-0.020, +0.040] —
+ * indistinguishable. The gain is real but shows up elsewhere: scored on entity
+ * pairs rather than exact predicate names, recall goes 0.712 -> 0.828 at flat
+ * precision, because a reasoning model finds more facts AND names them more
+ * variably, and strict scoring charges that variance twice. Abstention gets worse
+ * (0.907 -> 0.870). See MEASUREMENT_LOG.md defect 32.
  *
  * Rescoping the constraint to the answer ("the answer itself must be a JSON object
  * only") does NOT fix it — still 0/20 — so the model is not drawing that
@@ -86,7 +93,8 @@
 #define MF_SYSTEM_PROMPT_TMPL                                                                \
    "You extract durable facts from a single remembered note. Return ONLY a JSON "                  \
    "object: {\"facts\":[{\"subject\":\"\",\"relation\":\"\",\"object\":\"\","                      \
-   "\"confidence\":0.0}]}. Each fact is a stable subject-relation-object triple "                  \
+   "\"confidence\":0.0,\"negated\":false}]}. Each fact is a stable "                               \
+   "subject-relation-object triple "                                                               \
    "grounded strictly in the note. For relation, choose the single nearest fit "                   \
    "from these canonical predicates when one reasonably applies: %s. If NONE fits, "               \
    "emit a concise snake_case predicate of your own (e.g. drives, founded, "                       \
@@ -99,8 +107,13 @@
    "to Y\" gives location Y, \"was promoted to Z\" gives role Z. Record the "                      \
    "resulting state, not the event. If the note RETRACTS or DENIES "                               \
    "something (\"no longer\", \"did not\", \"never\", \"is not\", \"has left\", "                  \
-   "\"was removed\"), do NOT emit the negated fact - a retraction asserts a fact "                 \
-   "is FALSE, so there is nothing durable to record. "                                             \
+   "\"was removed\"), emit the ORIGINAL fact it retracts with \"negated\":true - "                 \
+   "use the same canonical relation the positive fact would use, NEVER a negative "                \
+   "predicate of your own such as not_member_of or removed_from. \"Kestrel Freight "               \
+   "is no longer a customer\" is {\"subject\":\"Kestrel Freight\",\"relation\":"                   \
+   "\"member_of\",\"object\":\"customer\",\"negated\":true}. A note that MOVES "                   \
+   "something gives both: the new fact, and the old one negated. For an ordinary "                 \
+   "fact that is simply true, omit \"negated\" or set it false. "                                  \
    "If the note asserts no durable fact, return exactly {\"facts\":[]} - the "                     \
    "wrapper object is ALWAYS required, never a bare []. Reason first if it helps; "                 \
    "the answer that follows must be the JSON object only, no prose, no markdown."

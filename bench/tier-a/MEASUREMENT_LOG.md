@@ -1133,3 +1133,74 @@ first-`{` to last-`}`, so a fence changes nothing downstream. Noted rather than
 fixed, because the alternative wordings that fence less on E2B are the ones that
 fail to restore thinking on E4B, and E4B's +0.084 is a measured effect while this
 is a cosmetic one.
+
+## Defect 32: the +0.084 that justified everything was an n=70 result
+
+The v5 prompt change, the provider_client fix, and the decision to re-run the
+whole E4B ladder all rest on one number: "thinking is worth +0.084 F1 to
+gemma-4-E4B". It is quoted in `kb_curator_provider.c`, in `provider_client.c`,
+and in the v5 commit message.
+
+Its provenance is `results/thinking/gemma-4-E4B-it.score.json`: F1 0.8217 from
+**53 true positives against 67 gold triples**, roughly 70 notes. The comparison
+run scored 0.738. Nobody put an interval on either.
+
+The v5 10k run was stopped at 955 notes, which is enough to check it. Same model,
+same quant, same card, same corpus, paired on the same notes:
+
+| | strict F1 | precision | recall | tp | fp | fn |
+|---|---:|---:|---:|---:|---:|---:|
+| v4, thinking suppressed | 0.5990 | 0.6607 | 0.5478 | 481 | 247 | 397 |
+| v5, thinking restored | 0.6093 | 0.6175 | 0.6014 | 528 | 327 | 350 |
+
+**+0.0103, 95% CI [-0.0201, +0.0404], INDISTINGUISHABLE** over 5000 paired
+bootstrap replicates on 878 gold triples — thirteen times the evidence behind the
+original claim.
+
+The two are not strictly the same measurement: the old sweep used the 70-note
+gold set, which is much easier (F1 ~0.82 against ~0.60 here), and the effect may
+genuinely differ by corpus. But +0.084 cannot be quoted as a measured constant in
+production comments on that basis, and it has been.
+
+### The effect is real, and strict F1 is the wrong instrument for it
+
+Stopping there would repeat the mistake in the other direction. The error audit
+says v5's 93 extra false positives are mostly not errors:
+
+| | FP | predicate_variant | partial_overlap | symmetric | genuinely spurious | FN |
+|---|---:|---:|---:|---:|---:|---:|
+| v5 | 312 | 130 | 116 | 11 | 54 | 331 |
+| v4 | 219 | 89 | 99 | 1 | 30 | 394 |
+
+About 68 of the 93 are reconcilable by `rel_type_canonicalize()` and the entity
+graph — the mechanisms production already runs — and 24 are genuinely spurious.
+Meanwhile v5 recovers 63 gold facts v4 missed.
+
+Scored on entity pairs, ignoring predicate naming:
+
+| | relation-agnostic F1 | precision | recall |
+|---|---:|---:|---:|
+| v4 | 0.7783 | 0.8585 | 0.7118 |
+| v5 | **0.8390** | 0.8503 | **0.8280** |
+
+Recall +0.116 at flat precision. Thinking finds materially more real facts; it
+also names them more variably, and strict scoring charges that variance twice —
+once as a false positive and once as a false negative. No CI on this one: the
+bootstrap tool scores strict only, so +0.061 is a point estimate.
+
+Fabrication is 0.0 on both arms, 0 ungrounded triples out of 855 predicted, so
+the extra volume is not invention.
+
+The cost is abstention: 0.9067 -> 0.8700 on empty-gold notes, 28 -> 40 spurious
+triples. A model that reasons is less willing to say nothing, which is the same
+effect the negation slice shows.
+
+### What to take from it
+
+Two claims were being made at once and only one survives. "Thinking is worth
++0.084 strict F1" does not reproduce. "Thinking materially improves extraction"
+does, at +0.116 recall on entity pairs, and it was invisible in the headline
+metric because that metric punishes predicate variance the product reconciles
+anyway. The honest summary is that thinking trades naming discipline and
+abstention for coverage, and whether that is worth it depends on which of those
+the KB values — which is a product question, not a benchmark one.

@@ -15,8 +15,9 @@ REPO = pathlib.Path(__file__).resolve().parents[3]
 # Verbatim from MF_SYSTEM_PROMPT_TMPL; %s is the canonical relation list.
 TEMPLATE = (
     "You extract durable facts from a single remembered note. Return ONLY a JSON "
-    'object: {"facts":[{"subject":"","relation":"","object":"","confidence":0.0}]}. '
-    "Each fact is a stable subject-relation-object triple grounded strictly in the "
+    'object: {"facts":[{"subject":"","relation":"","object":"","confidence":0.0,'
+    '"negated":false}]}. Each fact is a stable '
+    "subject-relation-object triple grounded strictly in the "
     "note. For relation, choose the single nearest fit from these canonical "
     "predicates when one reasonably applies: %s. If NONE fits, emit a concise "
     "snake_case predicate of your own (e.g. drives, founded, mentors) — NEVER a "
@@ -28,8 +29,13 @@ TEMPLATE = (
     'to Y" gives location Y, "was promoted to Z" gives role Z. Record the '
     "resulting state, not the event. If the note RETRACTS or DENIES "
     'something ("no longer", "did not", "never", "is not", "has left", '
-    '"was removed"), do NOT emit the negated fact - a retraction asserts a fact '
-    "is FALSE, so there is nothing durable to record. "
+    '"was removed"), emit the ORIGINAL fact it retracts with "negated":true - '
+    "use the same canonical relation the positive fact would use, NEVER a negative "
+    "predicate of your own such as not_member_of or removed_from. \"Kestrel Freight "
+    'is no longer a customer" is {"subject":"Kestrel Freight","relation":'
+    '"member_of","object":"customer","negated":true}. A note that MOVES '
+    "something gives both: the new fact, and the old one negated. For an ordinary "
+    'fact that is simply true, omit "negated" or set it false. '
     'If the note asserts no durable fact, return exactly {"facts":[]} - the '
     "wrapper object is ALWAYS required, never a bare []. Reason first if it helps; "
     "the answer that follows must be the JSON object only, no prose, no markdown."
@@ -41,12 +47,34 @@ TEMPLATE = (
 # produced it.
 #
 #   v1  original
+#   v6  a retraction is polarity on the ORIGINAL fact, not a discarded note.
+#       v1-v5 told the model a retraction "asserts a fact is FALSE, so there is
+#       nothing durable to record", and the gold for every negation note is
+#       empty. That is a policy and it is lossy: member_of is multi-valued
+#       (rel_types.c), so nothing supersedes it, and "Kestrel Freight member_of
+#       customer" stays ACTIVE however many notes say it is over.
+#
+#       The storage layer could always do this. db2_fact_retract() has bitemporal
+#       supersede semantics, an immutable-edge refusal and a §4/§5 authority
+#       guard, and fact_ingest.c calls it -- but only from the pattern extractor,
+#       and only for first-person user attributes. The LLM path, which is where
+#       every third-party fact arrives, had no way to reach it.
+#
+#       Polarity rides on the original fact rather than a not_* predicate because
+#       db2_fact_retract takes (source, relation, target) and `target` scopes the
+#       retraction to that specific edge; a bare not_located_in names nothing the
+#       graph knows. Measured on E4B before adopting it: 45/45 genuine retractions
+#       flagged, 39 on a canonical relation, 0 false polarity on 60 ordinary
+#       notes. Moves emit both halves correctly paired. See probe_polarity.py.
 #   v5  reasoning is granted explicitly instead of being forbidden by implication.
 #       v1-v4 closed with "No prose, no markdown.", which gemma-4-E4B extends to
 #       its own thought channel: 0 reasoning chars on 20/20 notes, against 20/20
 #       that think once the sentence grants it. Nothing fails when this happens —
-#       the JSON is valid and scores 0.59 — so it went unnoticed while costing
-#       E4B the +0.084 F1 that thinking is worth on this set.
+#       the JSON is valid and scores 0.59 — so it went unnoticed. NOTE: the
+#       "+0.084 F1 from thinking" that justified this came from a 70-note sweep
+#       and does not reproduce; paired over 955 notes the strict delta is +0.010,
+#       CI [-0.020,+0.040]. The gain is in coverage (relation-agnostic recall
+#       0.712 -> 0.828) and costs abstention. See MEASUREMENT_LOG.md defect 32.
 #
 #       Two variants were rejected on measurement, not taste. Rescoping the
 #       constraint to the answer ("the answer itself must be a JSON object only")
@@ -83,7 +111,7 @@ TEMPLATE = (
 #       produced a member_of triple — 51 spurious triples in the negation slice
 #       of the 1k small-corpus run, the graph-poisoning case that slice exists
 #       to catch.
-PROMPT_VERSION = "v5"
+PROMPT_VERSION = "v6"
 
 # Production caps the completion at MF_LLM_OUT_CAP.
 MAX_NEW_TOKENS = 8192
