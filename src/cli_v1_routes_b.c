@@ -1303,7 +1303,6 @@ static const struct
     {"provider.list", marshal_provider_list},
     {"provider.models", marshal_provider_models},
     {"provider.set", marshal_provider_set},
-    {"repo.trust", marshal_repo_trust},
     {"rules.delete", marshal_rules_delete},
     {"session.attach", marshal_session_attach},
     {"session.brief", marshal_session_brief},

@@ -167,7 +167,6 @@ static const struct
     {"index", "structure", "index.structure", NULL, NULL, 0},
     {"index", "callers", "index.find_callers", NULL, NULL, 0},
     {"index", "deps", "index.deps", NULL, NULL, 0},
-    {"repo", "trust", "repo.trust", NULL, NULL, 0},
     {"workspace", "add", "workspace.add", NULL, NULL, 300000},
     {"workspace", "list", "workspace.list", NULL, NULL, 0},
     {"workspace", "get", "workspace.get", NULL, NULL, 0},
@@ -917,28 +916,6 @@ cJSON *marshal_index_deps(int argc, char **argv)
       cJSON_AddStringToObject(req, "direction", "in");
    if (rpc_get(&opts, "dry-run"))
       cJSON_AddBoolToObject(req, "dry_run", 1);
-   return req;
-}
-
-/* Marshal `aimee repo trust <project> <trusted|untrusted> [--actor NAME]` (§0).
- * actor defaults to $USER so the audit records who ran it (caller-asserted under
- * the owner credential; single-tenant P1). The server validates the trust enum. */
-cJSON *marshal_repo_trust(int argc, char **argv)
-{
-   static const char *bools[] = {NULL};
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, bools, &opts);
-
-   cJSON *req = marshal_no_args("repo.trust");
-   if (opts.pos_count > 0)
-      cJSON_AddStringToObject(req, "project", opts.positional[0]);
-   if (opts.pos_count > 1)
-      cJSON_AddStringToObject(req, "trust", opts.positional[1]);
-   const char *actor = rpc_get(&opts, "actor");
-   if (!actor || !actor[0])
-      actor = getenv("USER");
-   if (actor && actor[0])
-      cJSON_AddStringToObject(req, "actor", actor);
    return req;
 }
 

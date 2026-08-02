@@ -8301,7 +8301,7 @@ BEGIN
   END IF;
   INSERT INTO kb_enrollments(scope,fingerprint,serial,state,expires_at,legacy,cert_issuer,
     cert_serial_norm,authority_id) VALUES
-    ('p5-server-client',p_client_fp,p_client_serial,'active',pg_now_text('+90 days'),0,
+    ('service:aimee-server',p_client_fp,p_client_serial,'active',pg_now_text('+90 days'),0,
       p_client_issuer,p_client_serial,substr(p_client_fp,1,32)),
     ('p5-server-management',p_mgmt_fp,p_mgmt_serial,'active',pg_now_text('+90 days'),0,
       p_mgmt_issuer,p_mgmt_serial,substr(p_mgmt_fp,1,32));
@@ -8326,7 +8326,7 @@ BEGIN
   UPDATE kb_server_registry r SET health=p_health,version=p_version,last_seen=now(),updated_at=now()
    WHERE r.server_id=p_server_id AND r.status='active' AND r.client_issuer=p_issuer
      AND r.client_serial_norm=p_serial AND r.client_fingerprint=p_fingerprint
-     AND EXISTS (SELECT 1 FROM kb_enrollments e WHERE e.scope='p5-server-client'
+     AND EXISTS (SELECT 1 FROM kb_enrollments e WHERE e.scope='service:aimee-server'
        AND e.cert_issuer=p_issuer AND e.cert_serial_norm=p_serial AND e.fingerprint=p_fingerprint
        AND e.state='active' AND e.revoked_at='');
   GET DIAGNOSTICS n=ROW_COUNT;
@@ -8434,7 +8434,7 @@ BEGIN
     RAISE EXCEPTION 'invalid management checkpoint input' USING ERRCODE='22023';
   END IF;
   SELECT r.* INTO server_row FROM public.kb_server_registry r
-   JOIN public.kb_enrollments e ON e.scope='p5-server-client'
+   JOIN public.kb_enrollments e ON e.scope='service:aimee-server'
     AND e.cert_issuer=r.client_issuer AND e.cert_serial_norm=r.client_serial_norm
     AND e.fingerprint=r.client_fingerprint
    WHERE r.server_id=p_target_server AND r.status='active'
@@ -10021,7 +10021,7 @@ BEGIN
     RAISE EXCEPTION 'management JWKS fetch: invalid certificate identity' USING ERRCODE='22023';
   END IF;
   SELECT pg_catalog.count(*) INTO n FROM public.kb_server_registry r
-   JOIN public.kb_enrollments e ON e.scope='p5-server-client'
+   JOIN public.kb_enrollments e ON e.scope='service:aimee-server'
     AND e.cert_issuer=r.client_issuer AND e.cert_serial_norm=r.client_serial_norm
     AND e.fingerprint=r.client_fingerprint
    WHERE r.status='active' AND r.client_issuer=p_issuer AND r.client_serial_norm=p_serial

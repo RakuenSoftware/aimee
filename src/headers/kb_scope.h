@@ -50,10 +50,18 @@ extern "C"
  * matched by the kb_enrollments / kb_server_registry SQL. Two literals drifting
  * apart would silently unregister a live server.
  *
- * NOTE it currently has no ':', which at the mTLS seam means UNSCOPED — i.e. the
- * install owner (see kb_tls_serve.c and kb_scope_authorized). Narrowing it to a
- * `service` scope is a schema-visible change and is made separately. */
-#define KB_SERVER_CLIENT_SCOPE "p5-server-client"
+ * It is a `service` scope, so at the mTLS seam the certificate CN yields
+ * scope:service:aimee-server and the router treats the server as a data-plane
+ * caller: any project or workspace, refused by every administrative gate. It
+ * used to be the bare word "p5-server-client", which has no ':' and therefore
+ * made the certificate UNSCOPED — the install owner, past every gate. Nothing
+ * required that breadth; two proxied owner-only routes did (write-tier grants
+ * and repo trust), and both are gone.
+ *
+ * kb_enrollments rows and the SQL that matches them carry this string, so
+ * changing it is schema-visible: a certificate issued under the old CN no longer
+ * matches and its server must re-enrol. */
+#define KB_SERVER_CLIENT_SCOPE "service:aimee-server"
 
    /* Authorization decision. A token scoped (token_kind:token_id) may access a
     * resource scoped (req_kind:req_id) iff:
