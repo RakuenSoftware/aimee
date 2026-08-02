@@ -329,6 +329,7 @@ static int mf_commit_facts(const char *llm_json, const char *note)
    fact_norm_text(note, note_norm, sizeof(note_norm));
 
    int committed = 0;
+   int retracted = 0;
    int ungrounded = 0;
    int malformed = 0;
    cJSON *f = NULL;
@@ -340,10 +341,15 @@ static int mf_commit_facts(const char *llm_json, const char *note)
       const cJSON *rel_j = cJSON_GetObjectItemCaseSensitive(f, "relation");
       const cJSON *obj_j = cJSON_GetObjectItemCaseSensitive(f, "object");
       const cJSON *conf_j = cJSON_GetObjectItemCaseSensitive(f, "confidence");
+      const cJSON *neg_j = cJSON_GetObjectItemCaseSensitive(f, "negated");
       const char *subject = cJSON_IsString(subj_j) ? subj_j->valuestring : "";
       const char *raw_relation = cJSON_IsString(rel_j) ? rel_j->valuestring : "";
       const char *object = cJSON_IsString(obj_j) ? obj_j->valuestring : "";
       double conf = cJSON_IsNumber(conf_j) ? conf_j->valuedouble : 0.0;
+      /* Polarity on the ORIGINAL fact, rather than a negative predicate of the
+       * model's own invention. An absent field is false, so a model that never
+       * emits it behaves exactly as before. */
+      int negated = cJSON_IsTrue(neg_j);
 
       if (!subject[0] || !raw_relation[0] || !object[0])
       {
@@ -387,6 +393,34 @@ static int mf_commit_facts(const char *llm_json, const char *note)
          if (!rel_type_kind_allowed(sdef, 0, obj_kind) && sdef->tail_kind_count > 0)
             obj_kind = sdef->tail_kinds[0];
       }
+      /* A retraction deactivates the edge it names instead of asserting a new
+       * one. Routed to the same API the pattern extractor already uses
+       * (fact_ingest.c), which is where the bitemporal supersede semantics, the
+       * immutable-edge refusal and the §4/§5 authority guard live — a
+       * MODEL-authority retraction cannot touch a user-stated Class-A edge.
+       *
+       * Passing `object` matters and is the reason polarity rides on the
+       * original fact rather than on a not_* predicate: the header is explicit
+       * that `target` scopes the retraction to the specific
+       * {source, relation, target} edge, where NULL retracts every current value
+       * of (source, relation). A model that says "no longer in
+       * drivers/staging/comedi" should not blank the file's location outright.
+       *
+       * Until now nothing on the LLM path could reach this. "I no longer work at
+       * X" was handled by memory_pattern_is_retraction() for first-person user
+       * attributes, and everything else -- every third-party fact, which is most
+       * of them -- was dropped on the floor by a prompt that told the model a
+       * retraction had nothing durable to record. */
+      if (negated)
+      {
+         int n = db2_fact_retract(subject, relation, object, FACT_AUTHORITY_MODEL);
+         if (n > 0)
+            retracted += n;
+         else if (n == FACT_RETRACT_IMMUTABLE)
+            aimee_log(LOG_INFO, "kb.memory.facts",
+                      "retraction refused as immutable: %s %s %s", subject, relation, object);
+         continue;
+      }
       fact_gate_verdict_t v =
           db2_fact_commit(subject, subj_kind, relation, object, obj_kind, FACT_AUTHORITY_MODEL, 1);
       if (v == FACT_GATE_ACCEPT || v == FACT_GATE_NOVEL)
@@ -396,10 +430,15 @@ static int mf_commit_facts(const char *llm_json, const char *note)
     * the job still reports success — that combination once looked exactly like
     * "the model cannot extract". Say so instead of committing silently. */
    if (ungrounded > 0 || malformed > 0)
-      aimee_log(committed == 0 ? LOG_WARN : LOG_INFO, "kb.memory.facts",
+      aimee_log(committed == 0 && retracted == 0 ? LOG_WARN : LOG_INFO, "kb.memory.facts",
                 "dropped %d ungrounded + %d malformed fact(s), committed %d%s",
                 ungrounded, malformed, committed,
-                committed == 0 ? " - NOTHING committed for this note" : "");
+                committed == 0 && retracted == 0 ? " - NOTHING committed for this note" : "");
+   /* Retractions are reported separately: a note that only deactivates edges
+    * commits nothing, and without this it is indistinguishable from a note the
+    * extractor failed on. */
+   if (retracted > 0)
+      aimee_log(LOG_INFO, "kb.memory.facts", "retracted %d edge(s) for this note", retracted);
    cJSON_Delete(root);
    return committed;
 }
