@@ -3,6 +3,8 @@
 #include "../headers/aimee.h"
 #include "../db2/entity_registry.h"
 #include "../db2/db2_test_shim.h"
+#include "../db2/db2_internal.h" /* db2_conn */
+#include "../db2/db_postgres.h" /* aimee_pg_* (migration test) */
 #include "memory_ontology.h"
 #include <assert.h>
 #include <stdio.h>
@@ -21,6 +23,44 @@ static void test_normalize(void)
    assert(out[0] == '\0');
    entity_name_normalize("", out, sizeof(out));
    assert(out[0] == '\0');
+   /* The folds that were missing, and that the tier-A scorer had applied all
+    * along -- so extraction measured cleaner in the benchmark than the graph it
+    * produced actually was. Each of these used to be a SEPARATE entity node,
+    * making every fact about one invisible to a query about another. */
+   entity_name_normalize("kb_server", out, sizeof(out));
+   assert(strcmp(out, "kb server") == 0);
+   entity_name_normalize("kb-server", out, sizeof(out));
+   assert(strcmp(out, "kb server") == 0);
+   entity_name_normalize("KB server", out, sizeof(out));
+   assert(strcmp(out, "kb server") == 0);
+   entity_name_normalize("the Sunshine team", out, sizeof(out));
+   assert(strcmp(out, "sunshine") == 0);
+   entity_name_normalize("sunshine_team", out, sizeof(out));
+   assert(strcmp(out, "sunshine") == 0);
+   entity_name_normalize("Sunshine", out, sizeof(out));
+   assert(strcmp(out, "sunshine") == 0);
+   entity_name_normalize("Dr. Okafor", out, sizeof(out));
+   assert(strcmp(out, "okafor") == 0);
+   entity_name_normalize("Wellington.", out, sizeof(out));
+   assert(strcmp(out, "wellington") == 0);
+
+   /* And the folds it must NOT do. A missed fold leaves two nodes and an alias
+    * can join them later; a WRONG fold welds two real entities together and
+    * leaves no evidence to undo it from, so these matter more than the ones
+    * above. Product names carry these words inside them. */
+   entity_name_normalize("Girder Gateway van", out, sizeof(out));
+   assert(strcmp(out, "girder gateway van") == 0);
+   entity_name_normalize("Ingot Router", out, sizeof(out));
+   assert(strcmp(out, "ingot router") == 0);
+   entity_name_normalize("192.168.1.254", out, sizeof(out)); /* internal dots kept */
+   assert(strcmp(out, "192.168.1.254") == 0);
+   entity_name_normalize("example.com", out, sizeof(out));
+   assert(strcmp(out, "example.com") == 0);
+   /* Never strip a name away entirely. */
+   entity_name_normalize("Team", out, sizeof(out));
+   assert(strcmp(out, "team") == 0);
+   entity_name_normalize("The", out, sizeof(out));
+   assert(strcmp(out, "the") == 0);
    printf("  PASS: test_normalize\n");
 }
 
@@ -35,6 +75,13 @@ int main(void)
    assert(db2_entity_register_named("DevBox", NODE_DEVICE) == cid); /* idempotent */
    assert(db2_entity_resolve("devbox") == cid);                     /* normalized */
    assert(db2_entity_resolve("  DEVBOX ") == cid);
+   /* End to end: the three spellings of one client reach ONE node. */
+   int64_t sun = db2_entity_register_named("Sunshine", NODE_ORG);
+   assert(sun > 0);
+   assert(db2_entity_register_named("Sunshine team", NODE_ORG) == sun);
+   assert(db2_entity_register_named("sunshine_team", NODE_ORG) == sun);
+   assert(db2_entity_register_named("the Sunshine Team", NODE_ORG) == sun);
+   assert(db2_entity_resolve("SUNSHINE") == sun);
    assert(db2_entity_kind(cid) == NODE_DEVICE);
 
    /* a second alias for the same entity resolves to the same canonical id */
@@ -125,7 +172,39 @@ int main(void)
    assert(db2_entity_unmerge(mxy) == 0);
    assert(db2_entity_resolve("xenon box") == x);
 
+   /* Migration: rows written before the normaliser learned its folds carry old
+    * keys. Simulated by binding under an old-style key directly, then re-keying.
+    * Without this pass the new folds are worse than the old behaviour -- the
+    * lookup misses the stored row and mints a SECOND entity. */
+   {
+      int64_t legacy = db2_entity_register(NODE_ORG, ENTITY_STATUS_ACTIVE);
+      assert(legacy > 0);
+      char err[256] = "";
+      aimee_pg_stmt_t *ins = aimee_pg_prepare(
+          db2_conn(),
+          "INSERT INTO entity_aliases (name, name_norm, canonical_id, is_preferred)"
+          " VALUES (?1, ?2, ?3, 1)",
+          err, sizeof(err));
+      assert(ins);
+      aimee_pg_bind_text(ins, "?1", "Halden_Freight");
+      aimee_pg_bind_text(ins, "?2", "halden_freight"); /* OLD normaliser output */
+      aimee_pg_bind_int64(ins, "?3", legacy);
+      assert(aimee_pg_step(ins, err, sizeof(err)) != AIMEE_PG_ERR);
+      aimee_pg_finalize(ins);
+
+      /* Before the re-key the modern lookup cannot see it. */
+      assert(db2_entity_resolve("Halden Freight") == 0);
+      assert(db2_entity_renormalize_aliases() >= 1);
+      /* After, all three spellings reach the row that already existed. */
+      assert(db2_entity_resolve("Halden Freight") == legacy);
+      assert(db2_entity_resolve("halden-freight") == legacy);
+      assert(db2_entity_register_named("Halden Freight", NODE_ORG) == legacy);
+      /* Idempotent: a second pass finds nothing to do. */
+      assert(db2_entity_renormalize_aliases() == 0);
+      printf("  PASS: legacy alias keys re-normalise instead of duplicating\n");
+   }
    db2_test_shim_close();
+
    printf("entity_registry: all tests passed\n");
    return 0;
 }

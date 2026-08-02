@@ -6,6 +6,7 @@
 #include "css_render_cmd.h"
 #include "db2/code_index.h"
 #include "db2/db2.h"
+#include "db2/entity_registry.h" /* db2_entity_renormalize_aliases */
 #include "kb_witness_cadence.h"
 #include "managed_server_identity_install.h"
 #include "kb_auth_oidc.h"
@@ -782,6 +783,23 @@ static int kb_cmd_tenancy_init_db2(void)
       fprintf(stderr, "aimee-kb: DB2 not reachable at %s\n", cfg.db2_url);
       return -1;
    }
+   /* Re-key entity aliases under the current normaliser, once per database.
+    * entity_name_normalize() gained folds (separators, articles, honorifics,
+    * trailing organisational descriptors) that older rows were not keyed with,
+    * and until they are recomputed the new folds are WORSE than the old
+    * behaviour: a lookup for "kb_server" normalises to "kb server", misses the
+    * stored row, and mints a second entity for a name the registry already
+    * holds.
+    *
+    * Deliberately here rather than in db2_init: db2_init is the connection open,
+    * a data migration is not its job, and putting it there would add an
+    * entity_registry dependency to all 62 targets that link db2_init.o. Failure
+    * is not fatal — the KB still serves, with the duplicate-name behaviour it
+    * had before — so it warns and continues. */
+   if (db2_entity_renormalize_aliases() < 0)
+      fprintf(stderr, "aimee-kb: entity alias re-normalisation failed; names differing only by "
+                      "separators or a trailing descriptor may resolve to separate entities "
+                      "until it succeeds\n");
    return 0;
 }
 

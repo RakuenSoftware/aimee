@@ -24,9 +24,24 @@ extern "C"
 #define ENTITY_STATUS_PROVISIONAL "provisional"
 #define ENTITY_STATUS_MERGED      "merged"
 
-   /* Normalize a display name for matching: lower-cased, leading/trailing
-    * whitespace trimmed, internal whitespace runs collapsed to one space.
-    * Punctuation is preserved (so "192.168.1.254" stays intact). NUL-terminated. */
+   /* Normalize a display name for matching, so the same entity referred to
+    * different ways reaches one node. NUL-terminated.
+    *
+    *   case              "Sunshine"        -> "sunshine"
+    *   _ - / separators  "kb_server"       -> "kb server"     (also kb-server)
+    *   edge punctuation  "Wellington."     -> "wellington"
+    *   leading article   "the Sunshine"    -> "sunshine"
+    *   honorific         "Dr. Okafor"      -> "okafor"
+    *   org descriptor    "Sunshine team"   -> "sunshine"      (trailing only)
+    *
+    * Internal dots survive, so 192.168.1.254 and example.com stay intact, and a
+    * name is never stripped to nothing (an entity called "A" or "Team" keeps it).
+    *
+    * This used to be case + whitespace only, which filed "Sunshine",
+    * "Sunshine team" and "sunshine_team" as three separate entities -- every
+    * fact about one invisible to a query about another. The tier-A scorer had
+    * applied these folds for months, so extraction measured cleaner in the
+    * benchmark than the graph it produced actually was. */
    void entity_name_normalize(const char *in, char *out, size_t out_len);
 
    /* Create a fresh registry row of `kind` and `status` (use ENTITY_STATUS_*),
@@ -51,6 +66,15 @@ extern "C"
 
    /* The entity's kind, or -1 if canonical_id is unknown. */
    int db2_entity_kind(int64_t canonical_id);
+
+   /* Recompute every stored alias key with the CURRENT entity_name_normalize and
+    * merge the entities that turn out to be the same. Rows written before the
+    * normaliser learned its folds carry old keys, and leaving them is worse than
+    * the old behaviour: a lookup for "kb_server" now normalises to "kb server",
+    * misses the stored row, and creates a SECOND entity for a name already
+    * known. Guarded by a kb_meta marker so it runs once per database, and
+    * idempotent regardless. Returns rows changed + entities merged, or -1. */
+   int db2_entity_renormalize_aliases(void);
 
    /* Mark `from_id` as merged into `into_id`: sets status='merged' + merged_into so
     * db2_entity_resolve transparently follows it (one hop). A P2 primitive that

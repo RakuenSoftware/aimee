@@ -7,36 +7,130 @@
 
 #include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
-#define ER_ERRBUF 256
+#define ER_ERRBUF  256
+#define ER_NAME_MAX 256
+
+/* Articles and honorifics are surface, not identity. "the Sunshine team" and
+ * "Sunshine team" are one team; "Dr. Okafor" and "Okafor" are one person. Kept
+ * as sorted-ish literal tables rather than a general stemmer because the set is
+ * closed and the cost of a wrong fold is a merged entity. */
+static int en_is_article(const char *t)
+{
+   return strcmp(t, "the") == 0 || strcmp(t, "a") == 0 || strcmp(t, "an") == 0;
+}
+
+/* Trailing ORGANISATIONAL descriptors: what someone calls the thing, not the
+ * thing's name. "Sunshine", "Sunshine team" and "sunshine_team" are one client,
+ * and filing them as three nodes is how a KB forgets what it was told.
+ *
+ * The list is deliberately narrow and the omissions are the point. "van",
+ * "gateway", "router", "server", "box" and "project" are NOT here: "Girder
+ * Gateway van" and "Ingot Router" carry those words INSIDE the product name, so
+ * stripping them would merge distinct entities. The asymmetry drives the
+ * caution -- a missed fold leaves two nodes and is recoverable by binding an
+ * alias later, while a wrong fold silently welds two real entities together and
+ * there is no evidence left to undo it from. */
+static int en_is_org_descriptor(const char *t)
+{
+   static const char *const D[] = {"team",     "group",        "crew",     "squad",
+                                   "dept",     "department",   "division", "account",
+                                   "client",   "customer",     "contract", "org",
+                                   "orgs",     "organisation", "organization"};
+   for (size_t i = 0; i < sizeof(D) / sizeof(D[0]); i++)
+      if (strcmp(t, D[i]) == 0)
+         return 1;
+   return 0;
+}
+
+static int en_is_honorific(const char *t)
+{
+   static const char *const H[] = {"dr",   "mr",        "mrs", "ms",  "miss",
+                                   "prof", "professor", "sir", "rev"};
+   for (size_t i = 0; i < sizeof(H) / sizeof(H[0]); i++)
+      if (strcmp(t, H[i]) == 0)
+         return 1;
+   return 0;
+}
 
 void entity_name_normalize(const char *in, char *out, size_t out_len)
 {
    if (!out || out_len == 0)
       return;
+   out[0] = '\0';
+   if (!in)
+      return;
+
+   /* Pass 1: casefold, and treat _ - / as word separators so "kb_server",
+    * "kb-server" and "KB server" reach one node. This is the fold that was
+    * missing: the benchmark's scorer has always applied it, which is why
+    * extraction looked cleaner there than the graph actually was. */
+   char buf[512];
    size_t o = 0;
-   int pending_space = 0;
-   int started = 0;
-   for (const char *p = in ? in : ""; *p && o + 1 < out_len; p++)
+   int pending_space = 0, started = 0;
+   for (const char *p = in; *p && o + 1 < sizeof(buf); p++)
    {
       unsigned char c = (unsigned char)*p;
-      if (isspace(c))
+      if (isspace(c) || c == '_' || c == '-' || c == '/')
       {
          if (started)
-            pending_space = 1; /* collapse; emit lazily before next real char */
+            pending_space = 1;
          continue;
       }
-      if (pending_space && o + 1 < out_len)
+      if (pending_space && o + 1 < sizeof(buf))
       {
-         out[o++] = ' ';
+         buf[o++] = ' ';
          pending_space = 0;
       }
-      if (o + 1 < out_len)
-         out[o++] = (char)tolower(c);
+      buf[o++] = (char)tolower(c);
       started = 1;
    }
-   out[o] = '\0';
+   buf[o] = '\0';
+
+   /* Pass 2: per token, strip edge punctuation and TRAILING dots only, so a
+    * sentence-final "Wellington." meets "Wellington" while 192.168.1.254 and
+    * example.com keep their internal dots. */
+   char *tok[64];
+   int ntok = 0;
+   for (char *t = strtok(buf, " "); t && ntok < 64; t = strtok(NULL, " "))
+   {
+      size_t len = strlen(t);
+      while (len && strchr(",;:!?()[]{}\"'", t[len - 1]))
+         t[--len] = '\0';
+      while (len && t[len - 1] == '.')
+         t[--len] = '\0';
+      size_t lead = 0;
+      while (t[lead] && strchr(",;:!?()[]{}\"'", t[lead]))
+         lead++;
+      if (t[lead])
+         tok[ntok++] = t + lead;
+   }
+
+   /* Pass 3: drop leading articles/honorifics, but never everything -- an entity
+    * legitimately named "A" must not normalise to the empty string and then
+    * match every other empty name. */
+   int first = 0;
+   while (ntok - first > 1 && (en_is_article(tok[first]) || en_is_honorific(tok[first])))
+      first++;
+   /* And a trailing organisational descriptor, same "never strip to nothing"
+    * rule: a team genuinely named "Team" keeps its name. */
+   while (ntok - first > 1 && en_is_org_descriptor(tok[ntok - 1]))
+      ntok--;
+
+   size_t w = 0;
+   for (int i = first; i < ntok; i++)
+   {
+      size_t len = strlen(tok[i]);
+      if (w && w + 1 < out_len)
+         out[w++] = ' ';
+      if (w + len >= out_len)
+         len = out_len - w - 1;
+      memcpy(out + w, tok[i], len);
+      w += len;
+   }
+   out[w] = '\0';
 }
 
 int64_t db2_entity_register(int kind, const char *status)
@@ -508,4 +602,125 @@ int db2_entity_conflict_count(const char *status)
       c = aimee_pg_column_int(st, 0);
    aimee_pg_finalize(st);
    return c;
+}
+
+/* ── One-time re-normalisation of stored alias keys ──────────────────────────
+ * entity_name_normalize() gained folds (separators, articles, honorifics,
+ * trailing organisational descriptors) that earlier releases did not apply, so
+ * rows written before this carry a name_norm computed the old way. Left alone
+ * that is WORSE than the old behaviour rather than better: a lookup for
+ * "kb_server" now normalises to "kb server", misses the stored "kb_server" row,
+ * and creates a second entity for a name the registry already knew.
+ *
+ * So the stored keys are recomputed from the display name, once. Where two rows
+ * now normalise the same way they were always the same entity and are merged
+ * (db2_entity_merge, which resolve() follows) rather than one being dropped --
+ * the edges pointing at the loser must keep resolving.
+ *
+ * Guarded by a kb_meta marker so it runs once per database. Idempotent anyway:
+ * a second pass recomputes the same values and finds no collisions. */
+int db2_entity_renormalize_aliases(void)
+{
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char err[ER_ERRBUF] = "";
+
+   aimee_pg_stmt_t *chk = aimee_pg_prepare(
+       conn, "SELECT value FROM kb_meta WHERE key = 'entity_alias_norm_version'", err, sizeof(err));
+   if (chk)
+   {
+      int done = (aimee_pg_step(chk, err, sizeof(err)) == AIMEE_PG_ROW);
+      aimee_pg_finalize(chk);
+      if (done)
+         return 0;
+   }
+
+   aimee_pg_stmt_t *sel = aimee_pg_prepare(
+       conn, "SELECT id, name, name_norm, canonical_id FROM entity_aliases ORDER BY id ASC", err,
+       sizeof(err));
+   if (!sel)
+      return -1;
+
+   struct
+   {
+      int64_t id, cid;
+      char name[ER_NAME_MAX];
+      char norm[ER_NAME_MAX];
+   } *rows = NULL;
+   size_t n = 0, cap = 0;
+   while (aimee_pg_step(sel, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      if (n == cap)
+      {
+         size_t ncap = cap ? cap * 2 : 256;
+         void *g = realloc(rows, ncap * sizeof(*rows));
+         if (!g)
+         {
+            free(rows);
+            aimee_pg_finalize(sel);
+            return -1;
+         }
+         rows = g;
+         cap = ncap;
+      }
+      rows[n].id = aimee_pg_column_int64(sel, 0);
+      snprintf(rows[n].name, sizeof(rows[n].name), "%s", aimee_pg_column_text(sel, 1));
+      snprintf(rows[n].norm, sizeof(rows[n].norm), "%s", aimee_pg_column_text(sel, 2));
+      rows[n].cid = aimee_pg_column_int64(sel, 3);
+      n++;
+   }
+   aimee_pg_finalize(sel);
+
+   int changed = 0, merged = 0;
+   for (size_t i = 0; i < n; i++)
+   {
+      char fresh[ER_NAME_MAX];
+      entity_name_normalize(rows[i].name, fresh, sizeof(fresh));
+      if (!fresh[0] || strcmp(fresh, rows[i].norm) == 0)
+         continue;
+
+      /* Does the new key already belong to someone? Then these were one entity
+       * all along and the two registry rows are merged. */
+      int64_t owner = db2_entity_resolve(fresh);
+      if (owner > 0 && owner != rows[i].cid)
+      {
+         if (db2_entity_merge(rows[i].cid, owner) > 0)
+            merged++;
+         aimee_pg_stmt_t *d =
+             aimee_pg_prepare(conn, "DELETE FROM entity_aliases WHERE id = ?1", err, sizeof(err));
+         if (d)
+         {
+            aimee_pg_bind_int64(d, "?1", rows[i].id);
+            (void)aimee_pg_step(d, err, sizeof(err));
+            aimee_pg_finalize(d);
+         }
+         continue;
+      }
+      aimee_pg_stmt_t *u = aimee_pg_prepare(
+          conn, "UPDATE entity_aliases SET name_norm = ?2 WHERE id = ?1", err, sizeof(err));
+      if (!u)
+         continue;
+      aimee_pg_bind_int64(u, "?1", rows[i].id);
+      aimee_pg_bind_text(u, "?2", fresh);
+      if (aimee_pg_step(u, err, sizeof(err)) != AIMEE_PG_ERR)
+         changed++;
+      aimee_pg_finalize(u);
+   }
+   free(rows);
+
+   aimee_pg_stmt_t *mark = aimee_pg_prepare(
+       conn,
+       "INSERT INTO kb_meta (key, value) VALUES ('entity_alias_norm_version', '2')"
+       " ON CONFLICT (key) DO UPDATE SET value = '2'",
+       err, sizeof(err));
+   if (mark)
+   {
+      (void)aimee_pg_step(mark, err, sizeof(err));
+      aimee_pg_finalize(mark);
+   }
+   if (changed || merged)
+      fprintf(stderr, "aimee: entity aliases re-normalised: %d rekeyed, %d entities merged\n",
+              changed, merged);
+   return changed + merged;
 }
