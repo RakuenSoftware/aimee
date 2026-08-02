@@ -179,9 +179,18 @@ CODE = {
          "text": "{service} has hostname {host} and IP {ip}.",
          "gold": [{"s": "{service}", "r": "has_hostname", "o": "{host}"},
                   {"s": "{service}", "r": "device_has_ip", "o": "{ip}"}]},
+        # "runs on" is DEPLOYMENT, not naming, and labelling it has_hostname was
+        # a defect (33). Split by phrasing across two 1k runs, gemma-4-E4B is
+        # 23/23 correct on the "has hostname" wording above and 0/28 on this one
+        # — it answers runs_on, which is what the sentence says. The template was
+        # manufacturing 28 false negatives and 23 false positives per run and
+        # penalising exactly the models that read it correctly.
+        #
+        # The comment three lines up warns against manufacturing naming-choice
+        # traps. This was one, in the same block.
         {"fact": "host",
          "text": "{service} runs on {host}.",
-         "gold": [{"s": "{service}", "r": "has_hostname", "o": "{host}"}]},
+         "gold": [{"s": "{service}", "r": "runs_on", "o": "{host}"}]},
     ],
 }
 

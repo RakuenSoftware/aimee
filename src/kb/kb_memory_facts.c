@@ -391,13 +391,32 @@ static int mf_commit_facts(const char *llm_json, const char *note)
       rel_type_canonicalize(raw_relation, relation_buf, sizeof(relation_buf));
       const char *relation = relation_buf[0] ? relation_buf : raw_relation;
 
-      /* The extractor supplies no node kinds, so guess: subject via
-       * mf_subject_kind, object OTHER (unknown). But the kind gate REJECTS a
-       * seed relation whose endpoint kind mismatches its ontology def (e.g.
-       * works_for wants tail=ORG) — a wrong guess silently drops every such
-       * fact. For a known seed relation, take the endpoint kinds the relation
-       * itself implies (its def's canonical kinds) whenever the guess is not
-       * already allowed; novel relations keep the guess (not kind-checked). */
+      /* Endpoint kinds are ADOPTED FROM THE RELATION, not validated against it.
+       *
+       * Say that plainly because the shape of the code invites the opposite
+       * reading. The extractor returns no kinds, so the object starts as
+       * NODE_OTHER — "nobody told me" — and 14 of the 17 seed relations do not
+       * list NODE_OTHER as an allowed tail, so the branch below rewrites it on
+       * EVERY extraction. FACT_GATE_REJECT_KIND is therefore unreachable for
+       * objects on this path: the gate cannot refuse a mistyped object, it
+       * relabels it.
+       *
+       * That is deliberate and it stays. Without it a seed relation drops every
+       * fact it extracts, which is the bug this replaced. What is NOT true is
+       * that the kinds are checked, and the previous comment implied they were.
+       *
+       * Inference was considered and measured rather than assumed: across 1333
+       * seed-relation triples from two 1k runs, the only tail a text rule can
+       * confidently judge is device_has_ip, and all 96 of those objects are
+       * valid IPs. A text-based kind check would have caught zero mistyped
+       * objects, so it would be cost without benefit. The mistyped triples that
+       * DO occur ("member_of enterprise", "has_role <contract>") are wrong in a
+       * way no kind rule can see — the object is a plausible string of the
+       * declared kind.
+       *
+       * The stored kinds are inert: nothing reads entity_edges.subject_kind or
+       * .object_kind back, for gating or recall. If that changes, this is where
+       * the fabricated value comes from. */
       memory_node_kind_t subj_kind = mf_subject_kind(subject);
       memory_node_kind_t obj_kind = NODE_OTHER;
       const rel_type_def_t *sdef = rel_types_seed_lookup(relation);
