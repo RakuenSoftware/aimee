@@ -1271,9 +1271,33 @@ now called apache-airflow-install.sh" produced
 negating the rename the note asserts. A rename reads like a replacement, and
 `also_known_as` is symmetric, so there is no old value to retract.
 
-### What is not yet established
+### The end-to-end path, now verified
 
-The 1k run says models can produce the field correctly. It does not say the
-end-to-end path works: nothing here exercised `db2_fact_retract` from a real
-extraction against a live graph, so "an edge actually deactivates" remains
-unverified. The unit tests cover the API; the integration does not exist yet.
+The 1k run said models can produce the field. It did not say the path works,
+and that gap was the important one: `db2_fact_retract` has been complete and
+tested since P3 while nothing called it, which is precisely what testing an API
+and a prompt separately hides.
+
+`test_memory_facts_retract.c` drives `mf_commit_facts` on a raw model response
+— through JSON parsing, the grounding gate and relation canonicalisation — and
+asserts against the stored graph rather than a return value:
+
+- a negated fact deactivates the edge and commits nothing (a retraction
+  legitimately reports 0 assertions; the effect is in the graph)
+- it hits only the NAMED edge: two live `member_of` values, one retracted, the
+  other survives. This is the assertion that justifies putting polarity on the
+  original fact — an empty `target` means every current value of
+  (source, relation), so dropping `object` would take both
+- a move commits the new value and retracts the old without cancelling out
+- absent or false polarity commits exactly as before
+- an UNGROUNDED retraction is refused, because the grounding gate runs before
+  the polarity branch. Retraction is destructive and "delete an edge for
+  someone the note never mentions" is the worst thing this path could do
+- an EMPTY object cannot blank a whole relation
+
+Verified red before green: with `if (negated)` forced false the first case
+fails. The full unit-tests suite passes with it added.
+
+What remains unverified is the deployed path — no live KB has run a retraction
+end to end, only the sqlite shim — and the 1 polarity error per 869 notes is
+measured on one model and one corpus.
