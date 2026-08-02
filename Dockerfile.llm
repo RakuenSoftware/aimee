@@ -50,6 +50,12 @@ FROM ${AIMEE_MODEL_IMAGE} AS modelsrc-image
 FROM modelsrc-${AIMEE_MODEL_SOURCE} AS modelsrc
 
 # ---- llama.cpp, built from source ----------------------------------------------
+# LLAMA_CURL=OFF, unlike the kb build this was lifted from. curl is only there so
+# llama-server can fetch a model at runtime, and this container must never do that:
+# the GGUF is baked, and the whole point is that an image either has its model or it
+# does not. Leaving it on also drags libcurl into a runtime stage that needs nothing
+# else from it.
+#
 # BUILT, NOT DOWNLOADED. Upstream publishes a Linux binary for x64 only, so a
 # download-based install cannot produce the arm64 half of the matrix at all.
 # Compiling from a pinned tag gives both arches one code path, and a git tag is
@@ -69,7 +75,7 @@ RUN set -eux; \
     git clone --depth 1 --branch "$LLAMACPP_VERSION" \
         https://github.com/ggml-org/llama.cpp.git /tmp/llamacpp-src; \
     cmake -S /tmp/llamacpp-src -B /tmp/llamacpp-src/build \
-        -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=ON \
+        -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=OFF \
         -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF \
         -DLLAMA_BUILD_TOOLS=ON -DLLAMA_BUILD_SERVER=ON; \
     cmake --build /tmp/llamacpp-src/build --target llama-server -j"$(nproc)"; \
@@ -93,9 +99,14 @@ ARG LLAMACPP_VERSION
 # llama-server itself cannot do this. The pinned b10218 offers --api-key and
 # --ssl-cert-file but has no client-certificate or CA verification flag at all,
 # which is unremarkable: terminating mTLS is not an inference server's job.
+# libgomp1 is llama-server's OpenMP runtime. It is NOT optional and it is easy to
+# miss: the kb image carried it incidentally through postgres and torch, so lifting
+# this build into a slim image produced a binary that linked fine and died at exec
+# with "libgomp.so.1: cannot open shared object file". The --version check below is
+# what turned that into a build failure instead of a first-synthesis one.
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends stunnel4 ca-certificates; \
+    apt-get install -y --no-install-recommends stunnel4 ca-certificates libgomp1; \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=llamacpp /out/ /opt/aimee/llama.cpp/
