@@ -346,10 +346,22 @@ be waved away at 26% of notes.
 about "client-side batching". Possibly coincidence; possibly that measurement was
 also a batch-shape change and was recorded under the wrong name.
 
-**But it is self-consistent.** Two MTP runs, fresh server each: **100/100
-identical**. So the perturbation is systematic rather than random, and a ladder
-run entirely under MTP is internally comparable. The 1.83x is usable; those arms
-simply cannot be compared against the sequential arms already banked.
+**But it is self-consistent, on both models.** Two MTP runs, fresh server each:
+
+| model | run 1 vs run 2 |
+|---|---:|
+| E4B UD-Q4_K_XL | **100/100** |
+| E2B UD-Q4_K_XL | **100/100** |
+
+E2B was checked rather than assumed -- `/props` confirmed
+`gemma-4-E2B-it-UD-Q4_K_XL.gguf` was actually loaded (median latency 1345 ms
+against E4B's 2548 ms), because `--model` is only a label and a stale server
+would have silently produced E4B twice and a meaningless pass.
+
+So the perturbation is systematic rather than random, and a ladder run entirely
+under MTP is internally comparable across both model families. The 1.83x is
+usable; those arms simply cannot be compared against the sequential arms already
+banked.
 
 ### The three configurations, and what each costs
 

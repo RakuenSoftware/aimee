@@ -20,8 +20,8 @@ OUT=${OUT:?set OUT}
 GOLD=${GOLD:?set GOLD}
 N=${N:-100}
 HOST=192.168.1.253; RIP=192.168.0.5; PORT=8116
-REPO=unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL
-DRAFT=unsloth/gemma-4-E4B-it-GGUF
+REPO=${REPO:-unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL}
+DRAFT=${DRAFT:-unsloth/gemma-4-E4B-it-GGUF}
 say() { echo "[$(date -u +%H:%M:%SZ)] $*" | tee -a "$OUT/mtp_selfconsistent.log"; }
 
 head -n "$N" "$GOLD" > "$OUT/.sc_slice.jsonl"
@@ -42,14 +42,14 @@ import json,sys; d=json.load(sys.stdin); print((d[0] if d else {}).get('speculat
   say "  run $1: speculative=$spec"
   python3 harness/run_llamacpp.py --model "E4B.mtp$1" --gold "$OUT/.sc_slice.jsonl" \
     --thinking --max-tokens 8192 --concurrency 1 \
-    --out "$OUT/mtp_sc$1.pred.jsonl" --base-url "http://$RIP:$PORT" >/dev/null 2>&1
+    --out "$OUT/mtp_sc${TAG:-e4b}$1.pred.jsonl" --base-url "http://$RIP:$PORT" >/dev/null 2>&1
 }
 
 say "two MTP runs, fresh server each time"
 run_once 1
 run_once 2
 
-python3 - "$OUT/mtp_sc1.pred.jsonl" "$OUT/mtp_sc2.pred.jsonl" <<'PY' | tee -a "$OUT/mtp_selfconsistent.log"
+python3 - "$OUT/mtp_sc${TAG:-e4b}1.pred.jsonl" "$OUT/mtp_sc${TAG:-e4b}2.pred.jsonl" <<'PY' | tee -a "$OUT/mtp_selfconsistent.log"
 import json,sys
 def L(p): return {json.loads(l)["id"]: json.loads(l) for l in open(p)}
 a,b = L(sys.argv[1]), L(sys.argv[2])

@@ -8,3 +8,13 @@ SELF-CONSISTENT. A ladder run entirely under MTP is internally
 comparable, so the 1.83x is usable -- those arms simply cannot be
 compared against the sequential arms already banked.
 [16:37:47Z] === DONE ===
+[16:38:59Z] two MTP runs, fresh server each time
+[16:42:08Z]   run 1: speculative=True
+[16:44:58Z]   run 2: speculative=True
+
+MTP run 1 vs MTP run 2 (both fresh): 100/100 identical
+
+SELF-CONSISTENT. A ladder run entirely under MTP is internally
+comparable, so the 1.83x is usable -- those arms simply cannot be
+compared against the sequential arms already banked.
+[16:47:19Z] === DONE ===
