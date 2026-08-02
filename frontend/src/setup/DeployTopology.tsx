@@ -316,6 +316,7 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
           )}
           {synthRoute !== 'off' && synthRoute !== 'external' && (
             <div style={{ fontSize: 11, color: '#889', marginTop: 6 }}>
+              {SYNTHESIS_MODELS.find((m) => m.id === synthRoute)?.blurb}{' '}
               Deployed as a sidecar beside the kb and reached over mutual TLS. Its weights are
               baked into that image, so nothing is downloaded at deploy or at run time. Switching
               between the two models later is a container swap; the corpus is untouched.
@@ -330,11 +331,6 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
               <div style={{ fontSize: 11, color: '#889' }}>
                 Your notes are sent to whatever answers this URL.
               </div>
-            </div>
-          )}
-          {synthRoute !== 'off' && synthRoute !== 'external' && (
-            <div style={{ fontSize: 11, color: '#889', marginTop: 6 }}>
-              {bakedInfo?.blurb} It starts with the container and downloads nothing.
             </div>
           )}
         </div>

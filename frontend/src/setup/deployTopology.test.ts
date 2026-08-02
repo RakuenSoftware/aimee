@@ -211,8 +211,6 @@ describe('SYNTHESIS_MODELS', () => {
   });
 });
 
-});
-
 describe('the choices the wizard may offer', () => {
   it('offers both synthesis models regardless of the kb image', () => {
     // Each model is its own sidecar (aimee-llm-e2b / aimee-llm-e4b) deployed beside the
