@@ -10,9 +10,11 @@
 #include "util.h"         /* safe_exec_capture (workspace.mirror-sync ships the client diff) */
 #include "aimee_client.h" /* aimee_client_request: transport-agnostic /v1 client (Windows path) */
 #include "code_collect.h" /* code_collect_files + code_collect_discover_repos (thin-client push) */
+/* Platform-independent, and used by print_index_scan which builds everywhere —
+ * so it must sit OUTSIDE the POSIX-only preamble below. */
+#include "workspace_scan_indexed.h" /* one verdict for "did this scan index anything" */
 #if !defined(_WIN32) && !defined(_WIN64)
 #include "aimee_home.h"
-#include "workspace_scan_indexed.h" /* one verdict for "did this scan index anything" */
 #include <dirent.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
