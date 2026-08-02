@@ -92,7 +92,9 @@ static void *server_thread(void *arg)
    return NULL;
 }
 
-static pthread_t start_server(void)
+/* Bind and pick the port WITHOUT serving yet: the ordering case below has to know
+ * the endpoint (and so the port) before any certificate exists. */
+static void bind_listener(void)
 {
    /* DUAL-STACK, and that is load-bearing. The client connects to the NAME
     * "localhost" -- it has to, because the server certificate's SAN is DNS:localhost
@@ -117,10 +119,19 @@ static pthread_t start_server(void)
    socklen_t len = sizeof(sa);
    assert(getsockname(g_listen_fd, (struct sockaddr *)&sa, &len) == 0);
    g_port = ntohs(sa.sin6_port);
+}
 
+static pthread_t spawn_server(void)
+{
    pthread_t t;
    assert(pthread_create(&t, NULL, server_thread, NULL) == 0);
    return t;
+}
+
+static pthread_t start_server(void)
+{
+   bind_listener();
+   return spawn_server();
 }
 
 static void set_identity_env(int port)
@@ -151,21 +162,32 @@ int main(void)
    snprintf(g_home, sizeof(g_home), "/tmp/aimee-synth-mtls-%d", (int)getpid());
    assert(mkdir(g_home, 0700) == 0);
 
-   /* The SAME issuer the kb uses in production. A hand-rolled CA here could drift
-    * from what kb_synthesis_identity_ensure actually emits -- and the last two bugs
-    * on this hop were both about material, not about protocol. */
-   assert(kb_synthesis_identity_ensure(g_home, "localhost") == 0);
    snprintf(g_dir, sizeof(g_dir), "%s/synthesis-tls", g_home);
 
-   /* 1. The identity is configured: the request must get through. */
-   pthread_t t = start_server();
+   /* 1. THE MATERIAL APPEARS AFTER agent_http_init(), which is the deployment's
+    *    actual order and not a contrived one. In the kb, agent_http_init() runs
+    *    during startup and kb_synthesis_identity_ensure() mints these files later in
+    *    the same startup -- 81 seconds later on a first boot, with Postgres coming up
+    *    in between. An eager load read three absent files, gave up, and disabled
+    *    synthesis for the life of the process; it looked fine on every restart
+    *    afterwards, because by then the material was on disk.
+    *
+    *    So: configure the endpoint, initialise, and only THEN issue the identity. */
+   bind_listener();
    set_identity_env(g_port);
    agent_http_init();
+
+   /* The SAME issuer the kb uses in production. A hand-rolled CA here could drift
+    * from what kb_synthesis_identity_ensure actually emits -- and the bugs on this
+    * hop have all been about material and ordering, not about protocol. */
+   assert(kb_synthesis_identity_ensure(g_home, "localhost") == 0);
+
+   pthread_t t = spawn_server();
    int status = post_once();
    pthread_join(t, NULL);
    close(g_listen_fd);
    if (status != 200)
-      fprintf(stderr, "with the client identity configured, expected 200, got %d\n", status);
+      fprintf(stderr, "identity issued after init: expected 200, got %d\n", status);
    assert(status == 200);
    agent_http_cleanup();
 
