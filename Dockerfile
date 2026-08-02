@@ -129,7 +129,16 @@ RUN apt-get update \
 #
 # A conditional RUN body rather than a conditional stage. The weights land in the
 # final image either way; there is nothing to select between, only work to skip.
-ARG AIMEE_EMBEDDER
+# The default matches the one on the bake ARG below, and it is NOT optional: `set -u`
+# aborts on an unset variable, so declaring this bare made every build that does not
+# pass --build-arg AIMEE_EMBEDDER fail with
+#   /bin/sh: 1: AIMEE_EMBEDDER: parameter not set
+# The publish workflows always pass it; compose builds (and the e2e-docker tests that
+# use them) do not, which is why building locally never reproduced it.
+#
+# bekko rather than `none`, so a build with no build-arg behaves exactly as it did
+# before this change. `none` is opt-in.
+ARG AIMEE_EMBEDDER=bekko-a25m
 ENV EMBEDDER_VENV=/opt/aimee/embedder-venv
 RUN set -eux; \
     if [ "$AIMEE_EMBEDDER" = "none" ]; then \
