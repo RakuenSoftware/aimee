@@ -1156,6 +1156,28 @@ $(TESTPREFIX)/int-test-memory-facts-retract-pg: $(OBJDIR)/tests/test_memory_fact
                                        $(PG_TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpq
 
+# OPT-IN: the alias re-key migration against a live Postgres. It MERGES
+# entities and runs unattended at kb startup, so the shim test is not enough.
+$(TESTPREFIX)/int-test-entity-renorm-pg: $(OBJDIR)/tests/test_entity_renorm_pg.o \
+                                       $(OBJDIR)/db2/db_postgres.o \
+                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o \
+                                       $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/db2/rel_types_store.o \
+                                       $(OBJDIR)/db2/fact_lifecycle.o \
+                                       $(OBJDIR)/db2/entity_edges.o \
+                                       $(OBJDIR)/db2/entity_registry.o \
+                                       $(OBJDIR)/db2/ontology_evolution.o \
+                                       $(OBJDIR)/db2/typed_facts.o \
+                                       $(OBJDIR)/db2/fact_recall.o \
+                                       $(OBJDIR)/db2/fact_ingest.o \
+                                       $(OBJDIR)/modules/memory/memory_fact_gate.o \
+                                       $(OBJDIR)/modules/memory/memory_extract_patterns.o \
+                                       $(OBJDIR)/modules/memory/memory_pii_gate.o \
+                                       $(OBJDIR)/modules/memory/memory_episodes.o \
+                                       $(OBJDIR)/rel_types.o $(OBJDIR)/cJSON.o \
+                                       $(PG_TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpq
+
 $(TESTPREFIX)/unit-test-pgvec: $(OBJDIR)/tests/test_pgvec.o \
                     $(OBJDIR)/db2/pgvec_transport.o $(OBJDIR)/db2/memory_scope_query.o $(OBJDIR)/db2/memory_vectors.o $(OBJDIR)/db2/kb_vectors.o \
                     $(OBJDIR)/db2/vector_status.o $(OBJDIR)/db2/pgvec_verify.o $(OBJDIR)/db2/pgvec_kb_service.o \

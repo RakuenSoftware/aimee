@@ -687,6 +687,46 @@ int db2_entity_renormalize_aliases(void)
       {
          if (db2_entity_merge(rows[i].cid, owner) > 0)
             merged++;
+         /* Merging the REGISTRY is not enough. entity_edges stores endpoints as
+          * text and the recall path matches them literally --
+          * db2_fact_recall_block and db2_fact_current_count both do
+          * "WHERE source = ?" with no canonicalisation -- so a fact written
+          * under the losing display name stays filed under a name nothing
+          * resolves to any more: present in the table, invisible to every query.
+          * Caught by the Postgres integration test; the shim test could not
+          * produce a legacy edge and passed while this was broken.
+          *
+          * Rows that would collide with an existing edge under the surviving
+          * name are dropped first, because (source, relation, target) is unique
+          * and UPDATE has no ON CONFLICT. Dropping is right rather than lossy:
+          * the surviving row asserts the identical triple. */
+         char keep[ER_NAME_MAX] = "";
+         char names[1][128];
+         if (db2_entity_aliases_for(owner, names, 1) == 1 && names[0][0])
+            snprintf(keep, sizeof(keep), "%s", names[0]);
+         if (keep[0] && strcmp(keep, rows[i].name) != 0)
+         {
+            static const char *const fixups[] = {
+                "DELETE FROM entity_edges e WHERE e.source = ?1 AND EXISTS ("
+                "  SELECT 1 FROM entity_edges f WHERE f.source = ?2"
+                "    AND f.relation = e.relation AND f.target = e.target)",
+                "UPDATE entity_edges SET source = ?2 WHERE source = ?1",
+                "DELETE FROM entity_edges e WHERE e.target = ?1 AND EXISTS ("
+                "  SELECT 1 FROM entity_edges f WHERE f.target = ?2"
+                "    AND f.relation = e.relation AND f.source = e.source)",
+                "UPDATE entity_edges SET target = ?2 WHERE target = ?1",
+            };
+            for (size_t q = 0; q < sizeof(fixups) / sizeof(fixups[0]); q++)
+            {
+               aimee_pg_stmt_t *fx = aimee_pg_prepare(conn, fixups[q], err, sizeof(err));
+               if (!fx)
+                  continue;
+               aimee_pg_bind_text(fx, "?1", rows[i].name);
+               aimee_pg_bind_text(fx, "?2", keep);
+               (void)aimee_pg_step(fx, err, sizeof(err));
+               aimee_pg_finalize(fx);
+            }
+         }
          aimee_pg_stmt_t *d =
              aimee_pg_prepare(conn, "DELETE FROM entity_aliases WHERE id = ?1", err, sizeof(err));
          if (d)
