@@ -112,8 +112,8 @@ static void test_thinking_is_one_global_operator_switch(void)
    snprintf(cfg.kb_curator_provider_model, sizeof(cfg.kb_curator_provider_model), "gemma-4-e4b");
 
    const kb_curator_stage_t stages[] = {KB_CURATOR_STAGE_EXTRACT_DOCS,
-                                        KB_CURATOR_STAGE_EXTRACT_CODE,
-                                        KB_CURATOR_STAGE_JUDGE, KB_CURATOR_STAGE_SYNTHESIZE};
+                                        KB_CURATOR_STAGE_EXTRACT_CODE, KB_CURATOR_STAGE_JUDGE,
+                                        KB_CURATOR_STAGE_SYNTHESIZE};
 
    /* On (the shipped default): no stage suppresses thinking. */
    cfg.synthesis_thinking = 1;
