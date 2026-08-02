@@ -222,32 +222,48 @@ without answering; `MF_LLM_OUT_CAP` bounds the damage either way.
 
 ## Choosing an aimee-kb image is a one-way door
 
-There are six `aimee-kb` images now. BOTH models are baked, so which embedder and
-which synthesis model a deployment runs is decided by the tag it pulls:
+There are three `aimee-kb` images, on one axis: the embedder. Its weights are baked,
+so which embedder a deployment runs is decided by the tag it pulls:
 
-| | no synthesis | + gemma-4-E2B-it | + gemma-4-E4B-it |
-| --- | --- | --- | --- |
-| bekko-a25m (384-dim) | `aimee-kb` | `aimee-kb-llm-e2b` | `aimee-kb-llm-e4b` |
-| nomic-v2 (768-dim) | `aimee-kb-nomic` | `aimee-kb-nomic-llm-e2b` | `aimee-kb-nomic-llm-e4b` |
+| image | embedder | size |
+| --- | --- | --- |
+| `aimee-kb` | none; `EMBEDDER_URL` required | 373 MB |
+| `aimee-kb-a25m` | bekko-a25m, 384-dim | 1.95 GB |
+| `aimee-kb-nomic` | nomic-v2, 768-dim | 3.34 GB |
 
 **The embedder axis cannot be changed after the KB has embedded anything.** DB2
 records the vector-column width and refuses to start on drift, so moving between a
 384-dim and a 768-dim image means re-embedding the whole corpus. Choose before you
-ingest. An external embedder (`EMBEDDER_URL`) shares the bekko images and may be any
-width up to 4000, the DB2 column ceiling, not 4096.
+ingest. An external embedder (`EMBEDDER_URL`) may be any width up to 4000, the DB2
+column ceiling, not 4096, and the `aimee-kb` tag exists for exactly that case: it
+carries neither PyTorch nor weights.
 
-The llama.cpp axis is not one-way: it decides only whether synthesis can run on the
-same host. The setup wizard disables the local model options on an image without it
-rather than offering a choice that cannot work.
+**Synthesis is no longer an axis here.** It was, which is why earlier drafts of this
+page described six tags. It is now its own image deployed beside the kb, so the
+matrix collapsed to the embedder alone:
 
-Bundling llama.cpp means this project now pins it, rather than inheriting upstream's
-image and its CVE fixes. `LLAMACPP_VERSION` in the Dockerfile is the single pin and
-needs deliberate bumping.
+| image | model |
+| --- | --- |
+| `aimee-llm-e2b` | gemma-4-E2B-it |
+| `aimee-llm-e4b` | gemma-4-E4B-it |
+
+If you are upgrading from an `aimee-kb-llm-*` or `aimee-kb-nomic-llm-*` tag, those no
+longer exist. Pull the matching embedder-only kb image and deploy the sidecar beside
+it: `aimee-kb-llm-e4b` becomes `aimee-kb-a25m` plus `aimee-llm-e4b`. The kb reaches
+the sidecar over mutual TLS, using an identity the kb itself issues at startup, so
+deploy the kb first.
+
+Unlike the embedder, the synthesis choice is reversible: the sidecar holds no data, so
+switching models or removing it entirely leaves the corpus untouched.
+
+Bundling llama.cpp means this project pins it, rather than inheriting upstream's image
+and its CVE fixes. `LLAMACPP_VERSION` in `Dockerfile.llm` is the single pin and needs
+deliberate bumping.
 
 ## Bundled synthesis weights are baked into the image
 
-The weights ship inside the `*-llm` images at UD-Q6_K_XL: 7.46 GB for E4B, 4.71 GB
-for E2B. The container downloads nothing at any point: an image either has its model
+The weights ship inside the `aimee-llm-*` images at UD-Q6_K_XL: 7.46 GB for E4B,
+4.71 GB for E2B. The container downloads nothing at any point: an image either has its model
 or it does not, and `docker pull` is the one download, with the registry's retry and
 resume behind it.
 

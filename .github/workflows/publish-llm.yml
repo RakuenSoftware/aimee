@@ -25,13 +25,21 @@ on:
       - "Dockerfile.llm"
       - "deploy/container/aimee-llm-entrypoint.sh"
       - "scripts/fetch-synthesis-model.sh"
+      - "Dockerfile.model"
       - ".github/workflows/publish-llm.yml"
+  # DELIBERATELY NARROWER THAN THE PUSH TRIGGER: no workflow file here.
+  #
+  # A PR build never pushes, so the skip-if-published check cannot engage on one --
+  # the tag it looks for only ever appears at merge. Every triggered PR therefore
+  # pays a full build, and these are the slow ones. Editing this workflow is not a
+  # change to the image, so it must not cost two of them; the push trigger below
+  # still re-evaluates on merge, where the content hash decides.
   pull_request:
     paths:
       - "Dockerfile.llm"
       - "deploy/container/aimee-llm-entrypoint.sh"
       - "scripts/fetch-synthesis-model.sh"
-      - ".github/workflows/publish-llm.yml"
+      - "Dockerfile.model"
   workflow_dispatch:
     inputs:
       force:
@@ -56,7 +64,69 @@ env:
   LLAMACPP_VERSION: b10218
 
 jobs:
+  # The weights, as their own image, so the two sidecars copy a registry layer
+  # instead of pulling ~7.5 GB from Hugging Face per build. It lived in the kb
+  # pipelines until synthesis moved out of the kb image; nothing there consumed it
+  # any more, and a model layer belongs with the thing that bakes it.
+  #
+  # BOTH PLATFORMS even though the sidecar publishes amd64 only: the payload is
+  # architecture-independent, and an amd64-only model tag would make a later
+  # multi-arch build skip it and find nothing to copy for arm64.
+  models:
+    strategy:
+      fail-fast: false
+      matrix:
+        model: [gemma-4-E2B-it, gemma-4-E4B-it]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Normalize owner to lowercase
+        run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Is it already published?
+        id: have
+        env:
+          SYNTH: ${{ matrix.model }}
+        run: |
+          # A repository name must be lowercase; a TAG may not be, which is why
+          # only the name half is folded and MODEL_QUANT is left alone.
+          ref="ghcr.io/${OWNER}/aimee-model-${SYNTH,,}:${MODEL_QUANT}"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          if docker manifest inspect "$ref" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "$ref already published; skipping the Hugging Face fetch"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.have.outputs.exists != 'true'
+        uses: docker/setup-buildx-action@v3
+
+      # Never on a pull request: publishing is a merge-time act.
+      - name: Build and push the model image
+        if: steps.have.outputs.exists != 'true' && github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.model
+          platforms: linux/amd64,linux/arm64
+          provenance: false
+          push: true
+          tags: ${{ steps.have.outputs.ref }}
+          build-args: |
+            AIMEE_SYNTHESIS_MODEL=${{ matrix.model }}
+
   build:
+    needs: models
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -77,15 +147,25 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # The immutable tag names every input that changes the artefact, so "does this
-      # tag exist" IS "have these inputs already been built". :testing is a moving
-      # pointer at whichever of these is current.
+      # The immutable tag must name EVERY input that changes the artefact, or the skip
+      # becomes a trap. Keyed on the model, the quant and the llama.cpp version alone,
+      # a change to Dockerfile.llm or the entrypoint would find the tag already
+      # published, skip the build, and leave :testing pointing at the old image while
+      # the run reported success. That is precisely how the mTLS fix in this image
+      # would have failed to ship.
+      #
+      # So the sidecar's own sources are hashed into the tag. Content-addressed: a
+      # rebuild happens exactly when something that lands in the image changed, and
+      # never otherwise.
       - name: Has this exact build already been published?
         id: have
         env:
           FORCE: ${{ inputs.force }}
         run: |
-          pinned="ghcr.io/${OWNER}/${{ matrix.name }}:${MODEL_QUANT}-${LLAMACPP_VERSION}"
+          rev=$(cat Dockerfile.llm deploy/container/aimee-llm-entrypoint.sh \
+                | sha256sum | cut -c1-12)
+          pinned="ghcr.io/${OWNER}/${{ matrix.name }}:${MODEL_QUANT}-${LLAMACPP_VERSION}-${rev}"
+          echo "sidecar sources hash to $rev"
           echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
           if [ "${FORCE:-false}" = "true" ]; then
             echo "exists=false" >> "$GITHUB_OUTPUT"

@@ -3,9 +3,10 @@
 # testing branch can be deployed/validated (e.g. on .254) WITHOUT promoting to
 # main.
 #
-# Builds the split images, the isolated one-shot authority bootstrap, and the two
-# bekko `-llm` variants that carry bundled synthesis, so a managed stack can pull a
-# single coherent `:testing` channel — including one that runs synthesis locally.
+# Builds the split images and the isolated one-shot authority bootstrap so a managed
+# stack can pull a single coherent `:testing` channel. Synthesis is NOT here: it is
+# its own image on its own trigger (publish-llm.yml), rebuilt when the model changes
+# rather than when kb code does.
 # Versioned + `:latest` publishing of the full image set
 # stays owned by main (auto-release.yml -> publish-images.yml). Keeping testing on
 # a `:testing` tag — never a version number — avoids confusing a tested-but-
@@ -32,8 +33,6 @@ on:
       - "Dockerfile"
       - "Dockerfile.server"
       - "Dockerfile.authority-bootstrap"
-      # Carries the bundled synthesis weights the -llm legs copy from.
-      - "Dockerfile.model"
       - ".github/workflows/publish-testing.yml"
   workflow_dispatch:
 
@@ -45,74 +44,7 @@ permissions:
   contents: read
   packages: write
 
-env:
-  # The quant the -llm images bake, and the TAG of the aimee-model-* images that
-  # carry it. Must match publish-images.yml: both channels share those model
-  # images, and a mismatch here silently re-downloads from Hugging Face.
-  MODEL_QUANT: UD-Q6_K_XL
-
 jobs:
-  # The bundled synthesis weights, as their own image, so the -llm legs below copy
-  # a registry layer instead of pulling ~7.5GB from Hugging Face on every push to
-  # testing. Skips itself when the tag already exists, so a push that changes
-  # neither the model nor the quant fetches nothing.
-  #
-  # BOTH PLATFORMS, even though this channel publishes amd64 only. The payload is
-  # architecture-independent, and if testing published an amd64-only model tag then
-  # the release pipeline's "is it already published?" check would skip it and the
-  # arm64 half of the release matrix would have no model layer to copy.
-  models:
-    strategy:
-      fail-fast: false
-      matrix:
-        model: [gemma-4-E2B-it, gemma-4-E4B-it]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Normalize owner to lowercase
-        run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
-
-      - name: Log in to ghcr.io
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Is it already published?
-        id: have
-        env:
-          SYNTH: ${{ matrix.model }}
-        run: |
-          # A repository name must be lowercase; a TAG may not be, which is why
-          # only the name half is folded and MODEL_QUANT is left alone.
-          ref="ghcr.io/${OWNER}/aimee-model-${SYNTH,,}:${MODEL_QUANT}"
-          echo "ref=$ref" >> "$GITHUB_OUTPUT"
-          if docker manifest inspect "$ref" >/dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "$ref already published; skipping the Hugging Face fetch"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Set up Docker Buildx
-        if: steps.have.outputs.exists != 'true'
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push the model image
-        if: steps.have.outputs.exists != 'true'
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile.model
-          platforms: linux/amd64,linux/arm64
-          provenance: false
-          push: true
-          tags: ${{ steps.have.outputs.ref }}
-          build-args: |
-            AIMEE_SYNTHESIS_MODEL=${{ matrix.model }}
-
   build:
     runs-on: ubuntu-latest
     strategy:
@@ -136,7 +68,8 @@ jobs:
         # place — they are just baked into the image whose inputs are stable.
         image:
           - { name: aimee-server,    dockerfile: Dockerfile.server }
-          - { name: aimee-kb,        dockerfile: Dockerfile }
+          - { name: aimee-kb,        dockerfile: Dockerfile, args: "AIMEE_EMBEDDER=none" }
+          - { name: aimee-kb-a25m,   dockerfile: Dockerfile, args: "AIMEE_EMBEDDER=bekko-a25m" }
           - { name: aimee-authority-bootstrap, dockerfile: Dockerfile.authority-bootstrap }
     steps:
       - uses: actions/checkout@v4
@@ -158,28 +91,6 @@ jobs:
       # the build copies a registry layer. The fetch fallback is kept for the same
       # reason publish-images keeps it: it makes the model image an optimisation
       # rather than a dependency, so a quant bump still builds.
-      - name: Resolve the bundled model source
-        id: model
-        env:
-          SYNTH: ${{ matrix.image.synthesis }}
-        run: |
-          if [ -z "$SYNTH" ]; then
-            echo "source=fetch"  >> "$GITHUB_OUTPUT"
-            echo "image=scratch" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # Lowercase the name half only — see the models job for why.
-          ref="ghcr.io/${OWNER}/aimee-model-${SYNTH,,}:${MODEL_QUANT}"
-          if docker manifest inspect "$ref" >/dev/null 2>&1; then
-            echo "using prebuilt model layer $ref"
-            echo "source=image"  >> "$GITHUB_OUTPUT"
-            echo "image=$ref"    >> "$GITHUB_OUTPUT"
-          else
-            echo "$ref not available; falling back to an inline Hugging Face fetch"
-            echo "source=fetch"  >> "$GITHUB_OUTPUT"
-            echo "image=scratch" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -205,9 +116,7 @@ jobs:
           build-args: |
             AIMEE_VERSION=testing-${{ env.SHA7 }}
             WITH_RUNTIME_WEB=1
-            AIMEE_SYNTHESIS_MODEL=${{ matrix.image.synthesis }}
-            AIMEE_MODEL_SOURCE=${{ steps.model.outputs.source }}
-            AIMEE_MODEL_IMAGE=${{ steps.model.outputs.image }}
+            ${{ matrix.image.args }}
             ${{ matrix.image.args }}
           tags: |
             ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }}:testing
