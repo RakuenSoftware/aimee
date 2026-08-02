@@ -62,47 +62,39 @@ path filter alone is one careless edit away from being wrong:
 
 Point 2 is what makes the guarantee robust rather than aspirational.
 
-## The hop must be mTLS
+## The hop is mTLS, like every other container hop
 
-Moving llama-server off loopback is a security regression unless the hop is
-authenticated. The first boot of `aimee-kb-llm-e2b:testing` logged:
+mTLS is the standard for container-to-container communication in this project.
+`server → kb` already works this way: `kb_mtls_start()` binds a listener whose
+context is built from the KB's own CA. A new inter-container hop follows the same
+standard, and needs no argument from a threat model to justify it.
 
-```
-llama_server: CORS is set to allow all origins ('*') and no API key is set
-llama_server: this can be a security risk (cross-origin attacks)
-```
+That settles *what*. The only design content is *which component terminates it*, and
+llama-server is not a candidate — the pinned `b10218` binary offers `--api-key` and
+`--ssl-cert-file`/`--ssl-key-file`, with no client-cert or CA verification flag. That
+is unremarkable; terminating mTLS is not an inference server's job. It means the
+sidecar looks like every other mTLS endpoint here: the terminator owns the
+network-facing listener, and the thing it protects sits behind it.
 
-Contained inside the kb container. An unauthenticated inference endpoint the moment
-it moves onto a shared network — which would cut directly against #2248 (refuse
-cleartext bearers) and #2250 (close the unauthenticated plain listener).
+**Terminator: `stunnel` from the distro, not new code.** A hand-rolled TLS listener
+would take on the burden this repo already names for llama.cpp — "THIS MAKES US THE
+VENDOR... `LLAMACPP_VERSION` is now the only thing deciding which llama.cpp a user
+runs, and it does not move on its own" — for a component whose failure mode is
+silent exposure. `stunnel` from apt inherits Debian's CVE fixes instead.
 
-**llama-server cannot do mTLS.** Verified against the pinned `b10218` binary:
+llama-server binds `127.0.0.1` inside the sidecar. That is not defence in depth so
+much as arithmetic: loopback in the container's own network namespace is unreachable
+from any other container, so stunnel is the only path in. `--api-key` costs nothing
+and is worth setting, but it is not what makes the endpoint safe.
 
-| flag | present |
-| --- | --- |
-| `--api-key`, `--api-key-file` | yes |
-| `--ssl-key-file`, `--ssl-cert-file` | yes — server-side TLS |
-| client-cert / CA verification | **none** |
-
-So mTLS requires a terminator in front of it. Three consequences:
-
-**1. Terminator: `stunnel` from the distro, not new code.** TLS termination with
-client-cert verification is security-critical, and this repo already notes the cost
-of vendoring llama.cpp — "THIS MAKES US THE VENDOR... `LLAMACPP_VERSION` is now the
-only thing deciding which llama.cpp a user runs, and it does not move on its own".
-A hand-rolled TLS listener takes on that same burden for a component where the
-failure mode is silent exposure. `stunnel` from apt inherits Debian's CVE fixes.
-llama-server stays bound to `127.0.0.1` with `--api-key` as defence in depth, so it
-is never reachable directly even if the terminator is misconfigured.
-
-**2. The caller needs client-cert support it does not have.** `scripts/llm-chat.py`
+**The caller needs client-cert support it does not have.** `scripts/llm-chat.py`
 calls `urllib.request.urlopen` with no TLS context. It already handles
 `SYNTHESIS_API_KEY` as a bearer, including a `cmd:` form that shells out for the
 value — but presenting a certificate needs an `ssl.SSLContext` with
 `load_cert_chain`, plus the identity paths as table-declared settings, per #2242's
-one-name-per-setting rule.
+one-name-per-setting rule. This is the real work on the client side.
 
-**3. PKI ownership, and the one real open question.** The KB already runs a CA:
+**PKI ownership, and the one real open question.** The KB already runs a CA:
 `kb_mtls_start()` calls `kb_pki_ca_load_or_create_custodied($data_dir/kb-ca)` and
 issues its own server cert from it. For this hop the KB is the *client*, so the
 sidecar must verify against the KB's CA — which means the KB has to issue the
