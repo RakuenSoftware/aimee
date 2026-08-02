@@ -257,6 +257,24 @@ def match_note(preds, golds, lenient, ignore_relation=False):
     from "found it and labelled the edge differently". The two failures have
     completely different fixes: the first needs a better model, the second is
     what the rel_types reconciliation gate already exists to absorb.
+
+    GREEDY IS NOT OPTIMAL IN GENERAL, and that is a measured limitation rather
+    than an assumption. If one prediction can satisfy two DIFFERENT gold triples
+    in a note, greedy may consume it on the first and starve the second, scoring
+    1 where maximum bipartite matching scores 2. Constructed case: gold
+    `purchased` carrying alt `licenses`, alongside a second gold `licenses`, with
+    both predicted — greedy returns tp=1, optimal returns tp=2.
+
+    Checked against an augmenting-path implementation over the whole 10k v3 run:
+    greedy 4118 true positives, optimal 4118, differing on ZERO notes. The
+    pathological shape needs a prediction matching multiple DISTINCT gold triples
+    in one note, and the alternates here cannot create it — an alt varies the
+    relation while holding subject and object, so it collides with its own gold
+    triple rather than with a sibling.
+
+    Kept greedy because it is simple and changes nothing on this corpus. If a
+    future corpus adds alternates that overlap ACROSS gold triples within a note,
+    re-measure before trusting this.
     """
     used, tp = set(), 0
     for g in golds:
