@@ -68,6 +68,63 @@ static void test_kind_allowed(void)
    printf("  PASS: test_kind_allowed\n");
 }
 
+static void test_canonicalize_aliases(void)
+{
+   char out[REL_TYPE_NAME_MAX];
+
+   /* The case that motivated this: a model writes has_ip for a relation we
+    * already model, and without folding it the gate stages a provisional
+    * rel_type on a Class-C edge instead of committing Class B. */
+   rel_type_canonicalize("has_ip", out, sizeof(out));
+   assert(strcmp(out, "device_has_ip") == 0);
+   rel_type_canonicalize("hasIP", out, sizeof(out)); /* normalized, then folded */
+   assert(strcmp(out, "device_has_ip") == 0);
+   rel_type_canonicalize("hostname", out, sizeof(out));
+   assert(strcmp(out, "has_hostname") == 0);
+   rel_type_canonicalize("Works At", out, sizeof(out));
+   assert(strcmp(out, "works_for") == 0);
+   rel_type_canonicalize("married_to", out, sizeof(out));
+   assert(strcmp(out, "spouse") == 0);
+
+   /* A real seed type is already canonical and must never be rewritten. */
+   rel_type_canonicalize("device_has_ip", out, sizeof(out));
+   assert(strcmp(out, "device_has_ip") == 0);
+   rel_type_canonicalize("knows", out, sizeof(out));
+   assert(strcmp(out, "knows") == 0);
+
+   /* Genuinely new predicates pass through normalized. Folding these would
+    * destroy information: founded is not member_of, mentors is not knows. */
+   rel_type_canonicalize("founded", out, sizeof(out));
+   assert(strcmp(out, "founded") == 0);
+   rel_type_canonicalize("mentors", out, sizeof(out));
+   assert(strcmp(out, "mentors") == 0);
+   rel_type_canonicalize("drives", out, sizeof(out));
+   assert(strcmp(out, "drives") == 0);
+
+   rel_type_canonicalize("", out, sizeof(out));
+   assert(out[0] == '\0');
+   rel_type_canonicalize(NULL, out, sizeof(out));
+   assert(out[0] == '\0');
+
+   /* Every alias resolves to a seed type, and folding is idempotent. */
+   assert(rel_types_alias_count() > 0);
+   for (int i = 0; i < rel_types_alias_count(); i++)
+   {
+      const char *canon = NULL;
+      const char *alias = rel_types_alias_at(i, &canon);
+      assert(alias && canon);
+      assert(rel_types_seed_lookup(canon) != NULL);
+      rel_type_canonicalize(alias, out, sizeof(out));
+      assert(strcmp(out, canon) == 0);
+      char twice[REL_TYPE_NAME_MAX];
+      rel_type_canonicalize(out, twice, sizeof(twice));
+      assert(strcmp(twice, out) == 0);
+   }
+   assert(rel_types_alias_at(-1, NULL) == NULL);
+   assert(rel_types_alias_at(rel_types_alias_count(), NULL) == NULL);
+   printf("  PASS: test_canonicalize_aliases\n");
+}
+
 static void test_functional_classification(void)
 {
    /* Single-valued: a new object supersedes the prior (commit-time §4 correction). */
@@ -113,6 +170,7 @@ int main(void)
    test_normalize();
    test_seed_lookup_case_insensitive();
    test_kind_allowed();
+   test_canonicalize_aliases();
    test_functional_classification();
    test_enum_text();
    test_governance_rel_types();

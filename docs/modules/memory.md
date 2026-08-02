@@ -46,6 +46,10 @@ dimension; semantic ranking additionally requires the reranking path selected by
 Lexical fallbacks may preserve a degraded lookup journey, but they do not make a deployment compliant
 with the required embedding-and-reranking capability boundary.
 
+Reranking here is `kb_ranker`, a linear in-process stage over lexical, dense and recency features. It
+is not a model role and needs no endpoint: the cross-encoder reranker was measured out of the stack.
+Embedding is the only model this module requires. See [Local inference](../LOCAL_INFERENCE.md).
+
 ## Configuration and activation
 
 - `runtime_toggle.supported`: `false`; memory is required and cannot be removed from a running profile.

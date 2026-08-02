@@ -377,6 +377,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-delegate-patch-coordinator \
                $(TESTPREFIX)/unit-test-delegate-ensemble \
                $(TESTPREFIX)/unit-test-rel-types \
+               $(TESTPREFIX)/unit-test-memory-facts-grounding \
                $(TESTPREFIX)/unit-test-memory-fact-gate \
                $(TESTPREFIX)/unit-test-memory-embed-dim-guard \
                $(TESTPREFIX)/unit-test-memory-embed-http-auth \
@@ -1068,7 +1069,7 @@ $(TESTPREFIX)/unit-test-curator-queue: \
                                        $(OBJDIR)/tests/test_curator_queue.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_queue.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_extract.o \
-                                       $(OBJDIR)/kb/kb_memory_facts.o \
+                                       $(OBJDIR)/kb/kb_memory_facts.o $(OBJDIR)/kb/fact_grounding.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_sidecar.o \
                                        $(OBJDIR)/kb_curator_provider.o $(OBJDIR)/modules/config/config_database.o \
@@ -3984,6 +3985,10 @@ $(TESTPREFIX)/unit-test-reasoning-cap: $(OBJDIR)/tests/test_reasoning_cap.o \
 # typed-fact P1: pure ontology + write-gate (no DB), so a minimal link.
 $(TESTPREFIX)/unit-test-rel-types: $(OBJDIR)/tests/test_rel_types.o \
                                $(OBJDIR)/rel_types.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+# Grounding gate: pure text check, no DB, so a minimal link like rel_types.
+$(TESTPREFIX)/unit-test-memory-facts-grounding: $(OBJDIR)/tests/test_memory_facts_grounding.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-memory-fact-gate: $(OBJDIR)/tests/test_memory_fact_gate.o \

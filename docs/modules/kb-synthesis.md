@@ -7,7 +7,7 @@ substantial GPU to reason across already-ingested evidence, resolve higher-order
 cited narrative artifacts such as topic synthesis. It is not normal response-composition, required
 embedding, code indexing, basic memory recall, or the deterministic ingest/index lane. There is
 no reranking role: the cross-encoder was measured out of the stack and `kb_ranker` (linear, in-process)
-took its place.
+took its place. See [Local inference](../LOCAL_INFERENCE.md).
 
 ## Public contracts
 
@@ -87,7 +87,7 @@ bounded, linked, and accepted under artifact policy.
 When currently enabled, the curator selects an eligible high-centrality topic, gathers top-K linked evidence, sends
 a grounded `synthesize_topic` request to the synthesis provider, validates the response, writes a
 `synthesis` artifact, and links it about the topic and to its cited sources. Acceptance for the future
-optional profile requires ingest, embedding, reranking, code intelligence, memory search, and normal
+optional profile requires ingest, embedding, ranking, code intelligence, memory search, and normal
 answers to remain operational when this module is omitted.
 
 ## Tests and failure behavior
