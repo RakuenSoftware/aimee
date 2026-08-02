@@ -1,0 +1,11 @@
+[16:59:48Z] SERVE E2B.UD-Q4_K_XL  (unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL)
+[17:00:26Z]   loaded=gemma-4-E2B-it-UD-Q4_K_XL.gguf speculative=True
+[17:00:26Z] START E2B.UD-Q4_K_XL
+[17:24:37Z] OK   E2B.UD-Q4_K_XL rows=1001 wall=24m11s strictF1=0.6114
+[17:24:37Z] SERVE E2B.UD-Q6_K_XL  (unsloth/gemma-4-E2B-it-GGUF:UD-Q6_K_XL)
+[17:25:14Z]   loaded=gemma-4-E2B-it-UD-Q6_K_XL.gguf speculative=True
+[17:25:14Z] START E2B.UD-Q6_K_XL
+[17:51:40Z] OK   E2B.UD-Q6_K_XL rows=1001 wall=26m25s strictF1=0.6179
+[17:51:40Z] SERVE E4B.UD-Q4_K_XL  (unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL)
+[17:52:17Z]   loaded=gemma-4-E4B-it-UD-Q4_K_XL.gguf speculative=True
+[17:52:17Z] START E4B.UD-Q4_K_XL
