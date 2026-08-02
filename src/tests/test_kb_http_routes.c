@@ -10,6 +10,7 @@
 #include "config.h"
 #include "cJSON.h"
 #include "kb_http.h"
+#include "kb_scope.h"
 #include "td_search_render.h"       /* consumer side of the /v1/search contract test */
 #include "kb/kb_surprising_judge.h" /* §4 judge stub seam (kb_surprising_verdict_t) */
 #include "db2/lifecycle.h"          /* §2c: db2_reembed_* / db2_dim_change_reset stub types */
@@ -5295,6 +5296,190 @@ static void test_drain_error(void)
    g_drain_rc = 0;
 }
 
+/* Every /v1/maintenance/ route is destructive and owner-gated, so the tests that
+ * exercise the mechanics below must first authenticate as the owner: an unscoped
+ * credential whose presented value matches the configured one. */
+#define OWNER_AUTH "Bearer owner-secret"
+#define OWNER_TOK  "owner-secret"
+
+/* The gate itself: a scoped service bearer — what an aimee-server carries — must
+ * never reach a maintenance route, and auth-off must not fall open either. Both
+ * are checked on every route in the family, because the gate is by prefix and a
+ * per-route regression would otherwise hide behind its neighbours. */
+
+/* A scoped credential must not reach another project's data, including on the
+ * POST routes that name their target in the body rather than the query string.
+ * These read/write a project's index, so a bypass here is cross-tenant. */
+static void test_scoped_token_cannot_cross_project_via_body(void)
+{
+   const char *scoped_auth = "Bearer scope:project:proj-alpha:secret";
+   const char *scoped_tok = "scope:project:proj-alpha:secret";
+   static const struct
+   {
+      const char *path;
+      const char *foreign;
+      const char *own;
+   } cases[] = {
+       {"/v1/code/build", "{\"path\":\"/tmp/kb\",\"project\":\"proj-beta\"}",
+        "{\"path\":\"/tmp/kb\",\"project\":\"proj-alpha\"}"},
+       {"/v1/code/update", "{\"path\":\"/tmp/kb\",\"project\":\"proj-beta\"}",
+        "{\"path\":\"/tmp/kb\",\"project\":\"proj-alpha\"}"},
+       {"/v1/code/scan", "{\"project\":\"proj-beta\",\"root_path\":\"/tmp/repo\"}",
+        "{\"project\":\"proj-alpha\",\"root_path\":\"/tmp/repo\"}"},
+   };
+   char buf[2048];
+   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+   {
+      /* Another project, named only in the body and with no query string —
+       * the shape that used to resolve to "no scope named" and be allowed. */
+      int s = kb_http_route_ex("POST", cases[i].path, NULL, scoped_auth, scoped_tok,
+                               cases[i].foreign, (int)strlen(cases[i].foreign), buf, sizeof(buf));
+      assert(s == 403);
+      assert(strstr(buf, "cannot access project:proj-beta") != NULL);
+
+      /* The credential's own project is unaffected. */
+      s = kb_http_route_ex("POST", cases[i].path, NULL, scoped_auth, scoped_tok, cases[i].own,
+                           (int)strlen(cases[i].own), buf, sizeof(buf));
+      assert(s != 403);
+   }
+}
+
+/* POST /v1/ingest with no workspace (or "all") targets every project in every
+ * configured workspace, and with force:true that CLEARS each one's vectors, kb
+ * rows and file index before re-queueing. Naming no workspace also names no
+ * scope, so the generic layer cannot deny it — the route must. */
+static void test_scoped_token_cannot_ingest_all_projects(void)
+{
+   const char *scoped_auth = "Bearer scope:project:proj-alpha:secret";
+   const char *scoped_tok = "scope:project:proj-alpha:secret";
+   char buf[1024];
+
+   static const char *const all_bodies[] = {
+       "{}",                      /* workspace absent */
+       "{\"workspace\":\"all\"}", /* explicit all */
+       "{\"force\":true}",        /* the destructive shape */
+       "{\"workspace\":\"all\",\"force\":true}",
+   };
+   for (size_t i = 0; i < sizeof(all_bodies) / sizeof(all_bodies[0]); i++)
+   {
+      int s = kb_http_route_ex("POST", "/v1/ingest", NULL, scoped_auth, scoped_tok, all_bodies[i],
+                               (int)strlen(all_bodies[i]), buf, sizeof(buf));
+      assert(s == 403);
+      assert(strstr(buf, "cannot ingest all projects") != NULL);
+   }
+
+   /* A named workspace still goes through the ordinary scope check rather than
+    * this one, and the owner is not restricted at all. */
+   const char *named = "{\"workspace\":\"ws-a\"}";
+   int s = kb_http_route_ex("POST", "/v1/ingest", NULL, OWNER_AUTH, OWNER_TOK, named,
+                            (int)strlen(named), buf, sizeof(buf));
+   assert(s != 403);
+   s = kb_http_route_ex("POST", "/v1/ingest", NULL, OWNER_AUTH, OWNER_TOK, "{\"force\":true}", 15,
+                        buf, sizeof(buf));
+   assert(s != 403); /* the owner may still ingest everything */
+}
+
+/* A `service` credential is aimee-server's data-plane identity: it reaches any
+ * project and may ingest the whole deployment, because indexing everything is
+ * the job it exists for. What it must NOT gain is privilege — it is still a
+ * scoped token, so every administrative gate keeps refusing it. That asymmetry
+ * is the entire point of issuing one, so both halves are pinned here. */
+static void test_service_scope_is_data_plane_not_admin(void)
+{
+   const char *svc_auth = "Bearer scope:service:aimee-server:secret";
+   const char *svc_tok = "scope:service:aimee-server:secret";
+   char buf[2048];
+
+   /* MAY: any project, named in the body — the shape a project-scoped token is
+    * refused for. */
+   const char *other = "{\"path\":\"/tmp/kb\",\"project\":\"proj-beta\"}";
+   int s = kb_http_route_ex("POST", "/v1/code/build", NULL, svc_auth, svc_tok, other,
+                            (int)strlen(other), buf, sizeof(buf));
+   assert(s != 403);
+
+   /* MAY: ingest every project (workspace absent, and the destructive force
+    * shape) — routine work for the indexer. */
+   s = kb_http_route_ex("POST", "/v1/ingest", NULL, svc_auth, svc_tok, "{}", 2, buf, sizeof(buf));
+   assert(s != 403);
+   s = kb_http_route_ex("POST", "/v1/ingest", NULL, svc_auth, svc_tok, "{\"force\":true}", 15, buf,
+                        sizeof(buf));
+   assert(s != 403);
+
+   /* MUST NOT: any maintenance route. This is the boundary that makes a service
+    * credential worth issuing instead of the owner token. */
+   static const char *const admin_routes[] = {
+       "/v1/maintenance/repair",          "/v1/maintenance/reconcile",
+       "/v1/maintenance/clear",           "/v1/maintenance/purge-project",
+       "/v1/maintenance/purge-heartbeat", "/v1/maintenance/purge-finalize",
+       "/v1/maintenance/purge-cancel",
+   };
+   const char *body = "{\"project\":\"proj-alpha\",\"path\":\"/tmp/kb\","
+                      "\"generation\":\"g1\",\"purge_id\":\"p1\"}";
+   for (size_t i = 0; i < sizeof(admin_routes) / sizeof(admin_routes[0]); i++)
+   {
+      s = kb_http_route_ex("POST", admin_routes[i], NULL, svc_auth, svc_tok, body,
+                           (int)strlen(body), buf, sizeof(buf));
+      assert(s == 403);
+      assert(strstr(buf, "owner credential") != NULL);
+   }
+
+   /* MUST NOT: widen into non-data-plane scopes. A service token spans projects
+    * and workspaces only — never another kind's resources. */
+   assert(kb_scope_authorized("service", "aimee-server", "project", "anything") == 1);
+   assert(kb_scope_authorized("service", "aimee-server", "workspace", "anything") == 1);
+   assert(kb_scope_authorized("service", "aimee-server", "user", "someone") == 0);
+   assert(kb_scope_authorized("service", "aimee-server", "console-admin", "x") == 0);
+   assert(kb_scope_authorized("service", "aimee-server", "curator", "x") == 0);
+
+   /* MUST NOT: be minted by the console — only the owner issues one. */
+   const char *mint = "{\"host\":\"h\",\"port\":1,\"scope\":\"service:aimee-server\"}";
+   s = kb_http_route_ex("POST", "/v1/enroll", NULL, "Bearer scope:console-admin:c:secret",
+                        "scope:console-admin:c:secret", mint, (int)strlen(mint), buf, sizeof(buf));
+   assert(s == 403);
+}
+
+static void test_maintenance_routes_are_owner_gated(void)
+{
+   static const char *const routes[] = {
+       "/v1/maintenance/repair",          "/v1/maintenance/reconcile",
+       "/v1/maintenance/clear",           "/v1/maintenance/purge-project",
+       "/v1/maintenance/purge-heartbeat", "/v1/maintenance/purge-finalize",
+       "/v1/maintenance/purge-cancel",
+   };
+   const char *body = "{\"project\":\"proj-alpha\",\"path\":\"/tmp/kb\","
+                      "\"generation\":\"g1\",\"purge_id\":\"p1\"}";
+   char buf[1024];
+   for (size_t i = 0; i < sizeof(routes) / sizeof(routes[0]); i++)
+   {
+      /* A project-scoped service credential is authenticated but not admin. */
+      int s = kb_http_route_ex("POST", routes[i], NULL, "Bearer scope:project:proj-alpha:secret",
+                               "scope:project:proj-alpha:secret", body, (int)strlen(body), buf,
+                               sizeof(buf));
+      assert(s == 403);
+      assert(strstr(buf, "owner credential") != NULL);
+
+      /* Auth-off manufactures no actor, so it is refused rather than open. */
+      s = kb_http_route_ex("POST", routes[i], NULL, NULL, NULL, body, (int)strlen(body), buf,
+                           sizeof(buf));
+      assert(s == 403);
+      assert(strstr(buf, "owner credential") != NULL);
+
+      /* The owner is not refused — it gets past the gate into the handler,
+       * whatever that handler then decides about the request itself. */
+      s = kb_http_route_ex("POST", routes[i], NULL, OWNER_AUTH, OWNER_TOK, body, (int)strlen(body),
+                           buf, sizeof(buf));
+      assert(s != 403);
+   }
+
+   /* The gate is POST-shaped like the routes it guards, but it is keyed on the
+    * path prefix, so an unknown maintenance verb is refused too rather than
+    * falling through to a 404 that confirms the route does not exist. */
+   int s = kb_http_route_ex(
+       "POST", "/v1/maintenance/not-a-real-route", NULL, "Bearer scope:project:proj-alpha:secret",
+       "scope:project:proj-alpha:secret", body, (int)strlen(body), buf, sizeof(buf));
+   assert(s == 403);
+}
+
 static void test_maintenance_repair_ok(void)
 {
    char buf[1024];
@@ -5303,7 +5488,7 @@ static void test_maintenance_repair_ok(void)
    g_kb_build_rc = 0;
    const char *body =
        "{\"path\":\"/tmp/kb\",\"project\":\"proj-alpha\",\"embedding_command\":\"embed-a\"}";
-   int s = kb_http_route_ex("POST", "/v1/maintenance/repair", NULL, NULL, NULL, body,
+   int s = kb_http_route_ex("POST", "/v1/maintenance/repair", NULL, OWNER_AUTH, OWNER_TOK, body,
                             (int)strlen(body), buf, sizeof(buf));
    assert(s == 200);
    assert(strcmp(g_kb_build_path, "/tmp/kb") == 0);
@@ -5317,7 +5502,7 @@ static void test_maintenance_repair_ok(void)
 static void test_maintenance_repair_missing_project(void)
 {
    char buf[256];
-   int s = kb_http_route_ex("POST", "/v1/maintenance/repair", NULL, NULL, NULL,
+   int s = kb_http_route_ex("POST", "/v1/maintenance/repair", NULL, OWNER_AUTH, OWNER_TOK,
                             "{\"path\":\"/tmp/kb\"}", 18, buf, sizeof(buf));
    assert(s == 400);
    assert(strstr(buf, "missing project") != NULL);
@@ -5327,7 +5512,7 @@ static void test_maintenance_reconcile_ok(void)
 {
    char buf[512];
    g_reconcile_rc = 0;
-   int s = kb_http_route_ex("POST", "/v1/maintenance/reconcile", NULL, NULL, NULL,
+   int s = kb_http_route_ex("POST", "/v1/maintenance/reconcile", NULL, OWNER_AUTH, OWNER_TOK,
                             "{\"dry_run\":true}", 16, buf, sizeof(buf));
    assert(s == 200);
    assert(g_reconcile_dry_run == 1);
@@ -5340,7 +5525,7 @@ static void test_maintenance_clear_ok(void)
 {
    char buf[512];
    g_clear_deleted = 12;
-   int s = kb_http_route_ex("POST", "/v1/maintenance/clear", NULL, NULL, NULL,
+   int s = kb_http_route_ex("POST", "/v1/maintenance/clear", NULL, OWNER_AUTH, OWNER_TOK,
                             "{\"project\":\"proj-alpha\"}", 24, buf, sizeof(buf));
    assert(s == 200);
    assert(strcmp(g_clear_project, "proj-alpha") == 0);
@@ -5351,7 +5536,7 @@ static void test_maintenance_clear_error(void)
 {
    char buf[256];
    g_clear_deleted = -1;
-   int s = kb_http_route_ex("POST", "/v1/maintenance/clear", NULL, NULL, NULL,
+   int s = kb_http_route_ex("POST", "/v1/maintenance/clear", NULL, OWNER_AUTH, OWNER_TOK,
                             "{\"project\":\"proj-alpha\"}", 24, buf, sizeof(buf));
    assert(s == 500);
    assert(strstr(buf, "kb clear failed") != NULL);
@@ -5375,7 +5560,7 @@ static void test_purge_project_writes_fence(void)
    g_clear_deleted = 12;
    char buf[2048];
    int s =
-       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, NULL, NULL,
+       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, OWNER_AUTH, OWNER_TOK,
                         "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
                         -1, buf, sizeof(buf));
    assert(s == 200);
@@ -5409,7 +5594,7 @@ static void test_purge_project_live_fence_409(void)
    g_fence_live = 1;
    char buf[1024];
    int s =
-       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, NULL, NULL,
+       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, OWNER_AUTH, OWNER_TOK,
                         "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
                         -1, buf, sizeof(buf));
    assert(s == 409);
@@ -5427,7 +5612,7 @@ static void test_purge_project_takeover_displaces(void)
    assert(db2_kb_purge_fence_write("proj-alpha", "g0", "p0") == 0);
    g_fence_live = 1;
    char buf[2048];
-   int s = kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, NULL, NULL,
+   int s = kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, OWNER_AUTH, OWNER_TOK,
                             "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":"
                             "\"p1\",\"takeover\":true}",
                             -1, buf, sizeof(buf));
@@ -5446,7 +5631,7 @@ static void test_purge_project_stale_fence_replaced(void)
    g_fence_live = 0; /* stale heartbeat: no takeover needed */
    char buf[2048];
    int s =
-       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, NULL, NULL,
+       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, OWNER_AUTH, OWNER_TOK,
                         "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
                         -1, buf, sizeof(buf));
    assert(s == 200);
@@ -5460,7 +5645,7 @@ static void test_purge_project_store_error_continues(void)
    g_purge_canonical_rc = -1; /* one store fails: fan-out continues, ok:false */
    char buf[2048];
    int s =
-       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, NULL, NULL,
+       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, OWNER_AUTH, OWNER_TOK,
                         "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
                         -1, buf, sizeof(buf));
    assert(s == 200);
@@ -5477,12 +5662,12 @@ static void test_purge_project_bad_request(void)
    purge_fence_reset();
    char buf[512];
    int s =
-       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, NULL, NULL,
+       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, OWNER_AUTH, OWNER_TOK,
                         "{\"project\":\"proj-alpha\",\"purge_id\":\"p1\"}", -1, buf, sizeof(buf));
    assert(s == 400);
    assert(strstr(buf, "generation") != NULL);
    /* Space-carrying tokens would corrupt the space-separated fence value. */
-   s = kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, NULL, NULL,
+   s = kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, OWNER_AUTH, OWNER_TOK,
                         "{\"project\":\"proj-alpha\",\"generation\":\"g 1\",\"purge_id\":\"p1\"}",
                         -1, buf, sizeof(buf));
    assert(s == 400);
@@ -5495,14 +5680,14 @@ static void test_purge_heartbeat_match_and_mismatch(void)
    assert(db2_kb_purge_fence_write("proj-alpha", "g1", "p1") == 0);
    char buf[1024];
    int s =
-       kb_http_route_ex("POST", "/v1/maintenance/purge-heartbeat", NULL, NULL, NULL,
+       kb_http_route_ex("POST", "/v1/maintenance/purge-heartbeat", NULL, OWNER_AUTH, OWNER_TOK,
                         "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
                         -1, buf, sizeof(buf));
    assert(s == 200);
    assert(strstr(buf, "\"refreshed\":true") != NULL);
    assert(g_fence_heartbeats == 1);
    /* Displaced owner: mismatch no-ops and echoes the current fence. */
-   s = kb_http_route_ex("POST", "/v1/maintenance/purge-heartbeat", NULL, NULL, NULL,
+   s = kb_http_route_ex("POST", "/v1/maintenance/purge-heartbeat", NULL, OWNER_AUTH, OWNER_TOK,
                         "{\"project\":\"proj-alpha\",\"generation\":\"g0\",\"purge_id\":\"p0\"}",
                         -1, buf, sizeof(buf));
    assert(s == 200);
@@ -5517,7 +5702,7 @@ static void test_purge_finalize_mismatch_noop(void)
    assert(db2_kb_purge_fence_write("proj-alpha", "g1", "p1") == 0);
    char buf[1024];
    int s =
-       kb_http_route_ex("POST", "/v1/maintenance/purge-finalize", NULL, NULL, NULL,
+       kb_http_route_ex("POST", "/v1/maintenance/purge-finalize", NULL, OWNER_AUTH, OWNER_TOK,
                         "{\"project\":\"proj-alpha\",\"generation\":\"g0\",\"purge_id\":\"p1\"}",
                         -1, buf, sizeof(buf));
    assert(s == 200);
@@ -5532,7 +5717,7 @@ static void test_purge_finalize_match_clears(void)
    assert(db2_kb_purge_fence_write("proj-alpha", "g1", "p1") == 0);
    char buf[1024];
    int s =
-       kb_http_route_ex("POST", "/v1/maintenance/purge-finalize", NULL, NULL, NULL,
+       kb_http_route_ex("POST", "/v1/maintenance/purge-finalize", NULL, OWNER_AUTH, OWNER_TOK,
                         "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
                         -1, buf, sizeof(buf));
    assert(s == 200);
@@ -5546,14 +5731,14 @@ static void test_purge_cancel_match_clears(void)
    assert(db2_kb_purge_fence_write("proj-alpha", "g1", "p1") == 0);
    char buf[1024];
    int s =
-       kb_http_route_ex("POST", "/v1/maintenance/purge-cancel", NULL, NULL, NULL,
+       kb_http_route_ex("POST", "/v1/maintenance/purge-cancel", NULL, OWNER_AUTH, OWNER_TOK,
                         "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
                         -1, buf, sizeof(buf));
    assert(s == 200);
    assert(strstr(buf, "\"cleared\":true") != NULL);
    assert(g_fence_present == 0);
    /* Idempotent: a second cancel is a mismatch/absent no-op. */
-   s = kb_http_route_ex("POST", "/v1/maintenance/purge-cancel", NULL, NULL, NULL,
+   s = kb_http_route_ex("POST", "/v1/maintenance/purge-cancel", NULL, OWNER_AUTH, OWNER_TOK,
                         "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
                         -1, buf, sizeof(buf));
    assert(s == 200);
@@ -6436,6 +6621,10 @@ int main(void)
    test_drain_ok();
    test_drain_default_embedding_command();
    test_drain_error();
+   test_scoped_token_cannot_cross_project_via_body();
+   test_scoped_token_cannot_ingest_all_projects();
+   test_service_scope_is_data_plane_not_admin();
+   test_maintenance_routes_are_owner_gated();
    test_maintenance_repair_ok();
    test_maintenance_repair_missing_project();
    test_maintenance_reconcile_ok();

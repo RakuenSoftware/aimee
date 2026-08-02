@@ -23,4 +23,20 @@
  * query string already stripped (a single trailing slash is tolerated). */
 int kb_route_acl_console_admin_allows(const char *method, const char *path);
 
+/* 1 iff `path` is in the /v1/maintenance family, which the dispatch gates on the
+ * owner credential as a whole.
+ *
+ * Every route there is destructive: purge fans out deletes across nine stores,
+ * clear drops a project's chunks, repair rewrites the index, reconcile prunes
+ * orphans. Matching by PREFIX rather than enumerating routes is deliberate — a
+ * maintenance route added later is refused until someone opens it, instead of
+ * shipping open. A scoped service bearer (an aimee-server's, say) must not be
+ * able to purge a project out of the knowledge store.
+ *
+ * The caller pairs this with the same rule the /v1/code/project lifecycle routes
+ * use: a real authenticated actor AND an unscoped credential. That refuses in
+ * auth-off mode too (no actor is manufactured there) — a destructive maintenance
+ * op fails closed rather than inheriting "everything open". */
+int kb_route_acl_is_maintenance(const char *path);
+
 #endif /* KB_ROUTE_ACL_H */

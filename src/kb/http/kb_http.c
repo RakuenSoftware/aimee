@@ -855,6 +855,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          int privileged = !colon /* owner / full-access */ ||
                           (kindlen == 13 && strncmp(scope, "console-admin", 13) == 0) ||
                           (kindlen == 7 && strncmp(scope, "curator", 7) == 0) ||
+                          (kindlen == 7 && strncmp(scope, "service", 7) == 0) ||
                           (kindlen == 5 && strncmp(scope, "owner", 5) == 0);
          if (privileged)
          {
@@ -1727,6 +1728,21 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       int force = kb_http_json_bool(body, "force", 0);
       int use_all = !workspace[0] || strcmp(workspace, "all") == 0;
 
+      /* An absent or "all" workspace names NO scope, so the scope layer above
+       * has nothing to deny against — and with force:true this clears the
+       * vectors, kb rows and file index of every project in every configured
+       * workspace. A scoped credential must not reach that: same rule as
+       * "a scoped credential cannot search all projects" on /v1/search.
+       * A `service` credential MAY: indexing the whole deployment is the job it
+       * exists for, and it is still refused every administrative route. */
+      if (use_all && vr.scope_kind[0] && strcmp(vr.scope_kind, KB_SCOPE_KIND_SERVICE) != 0)
+      {
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"error\":\"forbidden: a scoped credential cannot ingest all projects; "
+                  "name a workspace\"}");
+         return 403;
+      }
+
       char(*projects)[MAX_PATH_LEN] = calloc(MAX_DISCOVERED_PROJECTS, MAX_PATH_LEN);
       if (!projects)
       {
@@ -1929,6 +1945,10 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
                stats.done, stats.failed, stats.total);
       return 200;
    }
+   /* Destructive as a family; see kb_route_acl.h for why this is by prefix. */
+   if (kb_route_acl_is_maintenance(path) && !(kb_reqctx_actor() != NULL && !vr.scope_kind[0]))
+      return kb_http_owner_required(out_buf, out_cap, "knowledge maintenance");
+
    /* POST /v1/maintenance/repair */
    if (strcmp(path, "/v1/maintenance/repair") == 0)
    {

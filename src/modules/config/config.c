@@ -59,9 +59,13 @@ int config_migrate_legacy_credentials(config_secret_writer_fn writer,
    if (!writer || config_load_file(&cfg) != 0)
       return -1;
 
-   /* These two historical fields represented the same effective credential.
-    * Refuse to choose between conflicting plaintext values unless Vault already
-    * has the authoritative value, in which case both copies are safe to scrub. */
+   /* These two fields were historically ONE credential, so a legacy file with
+    * conflicting plaintext values is ambiguous: refuse rather than guess, unless
+    * Vault already holds the authoritative value (both copies then safe to
+    * scrub). They are no longer required to match going forward — aimee-server
+    * may carry its own scoped `service` token under
+    * AIMEE_KB_CLIENT_BEARER_TOKEN — but this migration only knows how to move
+    * the single legacy value. */
    if (cfg.kb_api_bearer_token[0] && cfg.kb_client_bearer_token[0] &&
        strcmp(cfg.kb_api_bearer_token, cfg.kb_client_bearer_token) != 0 &&
        (!present || !present("AIMEE_KB_API_BEARER_TOKEN")))
@@ -1074,7 +1078,13 @@ static void config_apply_runtime_secrets(config_t *cfg)
    APPLY_RUNTIME_SECRET("AIMEE_INGRESS_PROXY_SECRET", ingress_trusted_proxy_secret);
    APPLY_RUNTIME_SECRET("AIMEE_KB_API_BEARER_TOKEN", kb_api_bearer_token);
    APPLY_RUNTIME_SECRET("AIMEE_TELEMETRY_METRICS_TOKEN", telemetry_metrics_token);
+   /* What aimee-server PRESENTS to aimee-kb, which is no longer required to be
+    * aimee-kb's own inbound token: its own record lets it carry a scoped
+    * `service` credential while aimee-kb keeps an unscoped owner token. The
+    * shared key is still read as a FALLBACK so an existing deployment that only
+    * ever set AIMEE_KB_API_BEARER_TOKEN keeps working unchanged. */
    APPLY_RUNTIME_SECRET("AIMEE_KB_API_BEARER_TOKEN", kb_client_bearer_token);
+   APPLY_RUNTIME_SECRET("AIMEE_KB_CLIENT_BEARER_TOKEN", kb_client_bearer_token);
    APPLY_RUNTIME_SECRET("AIMEE_TRIGGER_AUTH_TOKEN", trigger_auth_token);
    APPLY_RUNTIME_SECRET("AIMEE_KB_CURATOR_PROVIDER_API_KEY", kb_curator_provider_api_key);
    APPLY_RUNTIME_SECRET("AIMEE_API_BEARER_TOKEN", server_api_bearer_token);
