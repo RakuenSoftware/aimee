@@ -67,6 +67,40 @@ def emitted_keys(root: Path) -> list[str]:
     return sorted(set(re.findall(r'EMITF\("([A-Z_][A-Z0-9_]*)=', text)))
 
 
+# Emitted keys whose only legitimate reader IS a Compose file, with the reason. An
+# image tag is chosen by Compose interpolation; there is no process to read it.
+# Everything else needs a reader in code, see code_consumers().
+COMPOSE_ONLY_KEYS = {
+    "AIMEE_KB_VARIANT": "selects the aimee-kb image tag; consumed by Compose interpolation.",
+    "AIMEE_LLM_VARIANT": "selects the aimee-llm image tag; consumed by Compose interpolation.",
+}
+
+# Extensions that hold something that RUNS. A Compose file is plumbing: it can hand a
+# variable to a container and prove nothing about anybody reading it.
+CODE_GLOBS = ("*.c", "*.h", "*.sh", "*.py")
+
+
+def code_consumers(root: Path, key: str) -> list[str]:
+    """Where key is read by code that runs, as opposed to YAML that forwards it.
+
+    THE DISTINCTION IS NOT PEDANTIC. SYNTHESIS_CA_FILE, SYNTHESIS_CERT_FILE and
+    SYNTHESIS_KEY_FILE were emitted by the deploy layer, listed in the aimee-kb
+    service environment, and delivered to the container -- and no line of C ever
+    called getenv on any of them. This check passed the whole time, because a
+    `${SYNTHESIS_CA_FILE:-}` in a Compose file matched its "is it consumed" regex.
+
+    What that bought: every synthesis call from the kb used the default TLS context,
+    the sidecar's certificate chained to a CA the client did not know, and the
+    handshake failed with "tlsv1 alert unknown ca". The operator saw a curator job
+    stuck at `provider HTTP -1`. The mTLS hop had a passing end-to-end test the whole
+    time -- it drove curl with the certificates, never the kb's own client.
+
+    So: forwarding is not consumption, and only a reader in something executable
+    counts.
+    """
+    return _search(root, key, CODE_GLOBS)
+
+
 def consumers(root: Path, key: str) -> list[str]:
     """Where key is READ. Setting it is not consuming it.
 
@@ -75,6 +109,10 @@ def consumers(root: Path, key: str) -> list[str]:
     are deliberately NOT matched: the whole point is that emitting a value is not the
     same as anything using it.
     """
+    return _search(root, key, ("*.c", "*.h", "*.sh", "*.py", "*.yaml", "*.yml"))
+
+
+def _search(root: Path, key: str, globs: tuple[str, ...]) -> list[str]:
     reads = [
         re.compile(r'getenv\s*\(\s*"%s"' % re.escape(key)),
         re.compile(r'runtime_secret_get\s*\(\s*"%s"' % re.escape(key)),
@@ -83,7 +121,7 @@ def consumers(root: Path, key: str) -> list[str]:
     ]
     hits: list[str] = []
     emitter_rel = EMITTER.as_posix()
-    for path in tracked(root, "*.c", "*.h", "*.sh", "*.py", "*.yaml", "*.yml"):
+    for path in tracked(root, *globs):
         rel = path.as_posix()
         if rel == emitter_rel or rel.endswith("src/tests/test_config.c"):
             continue
@@ -257,16 +295,25 @@ def check(root: Path) -> list[str]:
     failures.extend(kb_env_failures(root, keys))
     failures.extend(server_env_shadow_failures(root, keys))
     for key in keys:
-        if consumers(root, key):
+        if key in PENDING_CONSUMERS or key in COMPOSE_ONLY_KEYS:
             continue
-        if key in PENDING_CONSUMERS:
+        if not consumers(root, key):
+            failures.append(
+                f"{key} is emitted by config_emit_deploy_env but nothing reads it — a "
+                f"setting the user configures that silently does nothing. Consume it "
+                f"(for the kb, add it to the aimee-kb service environment in the "
+                f"shipped Compose files) or record it in PENDING_CONSUMERS with a reason"
+            )
             continue
-        failures.append(
-            f"{key} is emitted by config_emit_deploy_env but nothing reads it — a "
-            f"setting the user configures that silently does nothing. Consume it "
-            f"(for the kb, add it to the aimee-kb service environment in the "
-            f"shipped Compose files) or record it in PENDING_CONSUMERS with a reason"
-        )
+        if not code_consumers(root, key):
+            failures.append(
+                f"{key} is emitted and forwarded by a Compose file, but no code reads "
+                f"it — getenv/runtime_secret_get in C, or $VAR in a shell script. "
+                f"Handing a variable to a container proves nothing about anybody using "
+                f"it: this is exactly how SYNTHESIS_CA_FILE reached the kb and was "
+                f"ignored, leaving every synthesis call to fail the TLS handshake. "
+                f"Read it, or record it in COMPOSE_ONLY_KEYS with a reason"
+            )
     return failures
 
 

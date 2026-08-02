@@ -1118,6 +1118,9 @@ EXT_DESC = {
     "SYNTHESIS_API_KEY": ("Provider credentials", "Bearer credential used by the generic llm-chat sidecar; prefer the vault or a secret command."),
     "SYNTHESIS_ENDPOINT": ("Provider endpoints", "OpenAI-compatible base URL used by the generic llm-chat sidecar."),
     "SYNTHESIS_MODEL": ("Provider endpoints", "Model requested by the generic llm-chat sidecar."),
+    "SYNTHESIS_CA_FILE": ("Provider endpoints", "CA that verifies the synthesis sidecar's certificate on the kb -> aimee-llm hop. REPLACES the system trust store for that endpoint, so set it only for a sidecar the kb's own CA issued."),
+    "SYNTHESIS_CERT_FILE": ("Provider endpoints", "Client certificate the kb presents to the synthesis sidecar, whose terminator requires one. Offered only to the host:port `SYNTHESIS_ENDPOINT` names."),
+    "SYNTHESIS_KEY_FILE": ("Provider endpoints", "Private key for `SYNTHESIS_CERT_FILE`."),
 }
 
 
