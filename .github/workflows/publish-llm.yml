@@ -27,13 +27,19 @@ on:
       - "scripts/fetch-synthesis-model.sh"
       - "Dockerfile.model"
       - ".github/workflows/publish-llm.yml"
+  # DELIBERATELY NARROWER THAN THE PUSH TRIGGER: no workflow file here.
+  #
+  # A PR build never pushes, so the skip-if-published check cannot engage on one --
+  # the tag it looks for only ever appears at merge. Every triggered PR therefore
+  # pays a full build, and these are the slow ones. Editing this workflow is not a
+  # change to the image, so it must not cost two of them; the push trigger below
+  # still re-evaluates on merge, where the content hash decides.
   pull_request:
     paths:
       - "Dockerfile.llm"
       - "deploy/container/aimee-llm-entrypoint.sh"
       - "scripts/fetch-synthesis-model.sh"
       - "Dockerfile.model"
-      - ".github/workflows/publish-llm.yml"
   workflow_dispatch:
     inputs:
       force:
