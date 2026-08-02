@@ -1057,10 +1057,18 @@ the hardware. It was a fact about the prompt:
 | throughput | 280 notes/min | 27 notes/min |
 
 Same 5080, same CUDA build, same quant, same corpus. The only difference is
-whether the model was allowed to think. A model emitting 27 tokens is not fast,
-it is not working, and the ~10x throughput was the single loudest symptom
-available for a week — sitting in the driver log the whole time, read as good
-news.
+whether the model was allowed to think.
+
+**The token count is not the tell, and reading it as one is a mistake.** 27
+tokens is the correct size for this answer: `{"facts":[]}` is 5 tokens and one
+triple is about 30, so the distribution (p10 5, median 27, p90 49, 3475 notes
+returning no facts at a median of 5) is exactly what a healthy extractor emits.
+`parse_ok` was 10000/10000 and nothing was truncated. The answer channel was
+never unhealthy — only the reasoning channel was, and the answer channel is the
+one every tool here looks at.
+
+The throughput gap is a consequence of the defect, not evidence that would have
+found it.
 
 The practical consequence is that the honest cost of the v5 pair is 12-16 hours
 rather than the ~1 hour the v4 timings implied. The old figure was never
@@ -1069,3 +1077,28 @@ model's reasoning off.
 
 There is a general form of this worth keeping: a performance number that improves
 for no reason you designed is evidence about correctness, not about performance.
+
+### The evidence that WAS there, and why nothing fired
+
+Every one of the 10000 rows carried these two fields side by side:
+
+```json
+{"thinking": true, "reasoning_chars": 0, "parse_ok": true, "truncated": false}
+```
+
+A row that asserts thinking was requested and reasoning was empty is
+self-contradictory, and the contradiction was written ten thousand times without
+anything objecting. `reasoning_chars` was added during the GLM triage — where
+the question was whether 7943 reasoning tokens contained anything real — and then
+never read again. `score.py` does not mention the field, and neither does
+`summarize.py`. It was write-only telemetry.
+
+So the honest answer to "how was this scored at all" is that the scorer scores
+triples against gold and has no notion of how they were produced. A run with
+reasoning off is, to it, a slightly worse run. Recording a signal is not the same
+as checking it, and a field that nothing consumes will not save you no matter how
+diligently it is written.
+
+`score.py` now refuses a run whose rows claim `thinking:true` while no row
+carries any reasoning, on the same footing as its existing refusal of truncated
+runs.

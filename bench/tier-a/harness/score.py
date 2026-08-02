@@ -451,6 +451,11 @@ def main():
                     help="ignore alternative renderings entirely: both endpoints "
                          "must match the labelled entity exactly. The strictest "
                          "reading available.")
+    ap.add_argument("--allow-thinking-off", action="store_true",
+                    help="score a run that recorded thinking:true but produced no "
+                         "reasoning on any row. Only for re-deriving the score of a "
+                         "known-suppressed historical run (see defect 31); it is "
+                         "not a valid measurement of the model.")
     ap.add_argument("--no-alias", action="store_true",
                     help="skip rel_type_canonicalize() alias folding. Production "
                          "folds, so this only exists to measure what aliasing buys.")
@@ -513,6 +518,38 @@ def main():
             f"with a cap at least that high. Scoring them charges the model for a "
             f"bound I chose, and an empty response is indistinguishable from "
             f"abstention once it reaches the scorer.")
+    # Refuse a run that asked for reasoning and did not get any.
+    #
+    # This is the FOURTH instance of the defect the two blocks above describe, and
+    # the comment there names it exactly: "It recorded the field. Nothing read it."
+    # run_llamacpp.py has written `reasoning_chars` on every row since the GLM
+    # triage. Nothing has ever read it. So the v4 10k E4B run wrote
+    #
+    #     {"thinking": true, "reasoning_chars": 0}
+    #
+    # ten thousand times -- a row contradicting itself -- and scored 0.5947 without
+    # complaint, because the scorer compares triples to gold and has no notion of
+    # how they were produced. gemma-4-E4B was suppressing its own reasoning in
+    # response to the prompt's "No prose, no markdown." (defect 31), which costs it
+    # 0.084 F1 and is invisible in every other field: valid JSON, clean parse,
+    # nothing truncated, no error.
+    #
+    # Fires only when the rows CLAIM thinking. A --no-thinking ablation records
+    # thinking:false and passes, which is the correct distinction: the fault is not
+    # "no reasoning", it is "asked for reasoning, recorded none, reported anyway".
+    want = [r for r in pred_rows if r.get("thinking")]
+    if want and not any((r.get("reasoning_chars") or 0) > 0 for r in want):
+        if not args.allow_thinking_off:
+            raise SystemExit(
+                f"harness-blocked predictions: {args.pred} has {len(want)} rows "
+                f"with thinking:true and not one with any reasoning. The run asked "
+                f"for reasoning and the model emitted none, so this scores a "
+                f"configuration nobody chose -- see defect 31. Re-run it, or pass "
+                f"--allow-thinking-off if you are deliberately scoring a "
+                f"known-suppressed run for the record.")
+        print(f"WARNING: {args.pred} recorded thinking:true with zero reasoning on "
+              f"all {len(want)} rows; scoring anyway at your request.")
+
     # The default scoring view is the gate the product actually applies.
     #
     # It used to be 'pred', the MF_CONF_FLOOR view, and that stayed the default
