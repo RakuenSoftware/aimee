@@ -5,7 +5,7 @@ INSERT INTO kb_team(name) VALUES('p5c3-team');
 INSERT INTO kb_enrollments(scope,fingerprint,serial,state,expires_at,legacy,cert_issuer,
                            cert_serial_norm,authority_id)
 VALUES
- ('p5-server-client',repeat('e',64),'02','active',(now()+interval '1 day')::text,0,
+ ('service:aimee-server',repeat('e',64),'02','active',(now()+interval '1 day')::text,0,
   '/CN=p5c3-server-ca','02',repeat('e',32)),
  ('p5-kb-management',repeat('a',64),'01','active',(now()+interval '1 day')::text,0,
   '/CN=p5c3-kb-ca','01',repeat('a',32));
