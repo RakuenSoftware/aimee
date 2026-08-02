@@ -4,11 +4,12 @@
 set -eu
 
 usage() {
-    printf 'usage: %s -f COMPOSE_FILE {server|kb|all}\n' "$0" >&2
+    printf 'usage: %s [-p PROJECT] -f COMPOSE_FILE {server|kb|all}\n' "$0" >&2
     exit 2
 }
 
 compose_file=
+project=
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -f|--file)
@@ -20,6 +21,11 @@ while [ "$#" -gt 0 ]; do
             shift
             break
             ;;
+        -p|--project)
+            [ "$#" -ge 2 ] || usage
+            project=$2
+            shift 2
+            ;;
         -*) usage ;;
         *) break ;;
     esac
@@ -28,11 +34,50 @@ done
 [ "$#" -eq 1 ] || usage
 target=$1
 
+# Seal into the project the deployment ACTUALLY uses.
+#
+# `docker compose -f FILE` derives the project name from the directory holding
+# FILE, not from where the operator runs the stack. A deployment brought up as
+# project "aimee" from a file under deploy/container/ is project "container"
+# here — so the credential is sealed into an orphan volume the long-lived
+# service never reads, and this script still prints "Vault bootstrap complete".
+# That happened: a kb was left with no bearer after a seal that reported success.
+#
+# If a project is already running this compose file, use it. Otherwise fall back
+# to compose's own default, which is correct for a first install (the stack is
+# started the same way straight after). An explicit -p always wins, and
+# COMPOSE_PROJECT_NAME is honoured by compose itself.
+if [ -z "$project" ] && [ -z "${COMPOSE_PROJECT_NAME:-}" ]; then
+    running=$(docker compose -f "$compose_file" ls --format json 2>/dev/null \
+        | tr ',' '\n' | sed -n 's/.*"Name":"\([^"]*\)".*/\1/p' | sort -u)
+    count=$(printf '%s' "$running" | grep -c . || true)
+    if [ "$count" -gt 1 ]; then
+        printf 'error: several compose projects use %s:\n%s\nre-run with -p PROJECT.\n' \
+            "$compose_file" "$running" >&2
+        exit 2
+    fi
+    [ "$count" -eq 1 ] && project=$running
+fi
+
 compose() {
-    docker compose -f "$compose_file" "$@"
+    if [ -n "$project" ]; then
+        docker compose -p "$project" -f "$compose_file" "$@"
+    else
+        docker compose -f "$compose_file" "$@"
+    fi
+}
+
+announce_project() {
+    if [ -n "$project" ]; then
+        printf 'Sealing into compose project %s (verify: docker compose -p %s ps).\n' \
+            "$project" "$project"
+    else
+        printf '%s\n' 'Sealing into the default compose project for this file (no running project found).'
+    fi
 }
 
 bootstrap_server() {
+    announce_project
     printf '%s\n' 'Sealing server first-boot credentials into Vault (values are not logged or stored in container metadata).'
     env -0 | compose run --rm --no-deps -T \
         --entrypoint /usr/sbin/runuser aimee-server \
@@ -40,6 +85,7 @@ bootstrap_server() {
 }
 
 bootstrap_kb() {
+    announce_project
     printf '%s\n' 'Sealing KB first-boot credentials into Vault (values are not logged or stored in container metadata).'
     env -0 | compose run --rm --no-deps -T \
         --entrypoint /usr/local/bin/aimee-kb aimee-kb \

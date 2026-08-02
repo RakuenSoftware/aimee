@@ -641,6 +641,22 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
     * "scope:<kind>:<id>:<secret>") and yields the verified scope. Per verify-then-trust, the
     * cross-scope check uses that verified scope, never the caller's. `vr` is function-scoped so
     * owner-only routes (e.g. /v1/enroll) tell an unscoped owner credential from a scoped one. */
+   /* The container healthcheck must keep working once a bearer is sealed. It is
+    * a LOOPBACK GET of /v1/health with no query string, from inside the
+    * container, and presents no credential — it cannot, since the bearer lives
+    * in the Vault.
+    *
+    * The exemption is deliberately three conditions, not one. /v1/health also
+    * answers ?status=1&project=<p>, whose scope is enforced against the CLIENT
+    * CERTIFICATE, so a cross-scope query must still be refused (test_mtls_serve);
+    * and a wrong bearer on /v1/health must still be 401 for any non-local caller
+    * (test_scope_token_secret_auth). An unknown peer is not local, so a direct
+    * router call — every unit test, and the mTLS listener — is never exempt. */
+   int local_liveness_probe = (strcmp(method, "GET") == 0 || strcmp(method, "HEAD") == 0) &&
+                              strcmp(path, "/v1/health") == 0 &&
+                              (!query_string || !query_string[0]) &&
+                              kb_login_throttle_peer_is_loopback();
+
    kb_verify_result_t vr;
    memset(&vr, 0, sizeof(vr));
    /* Reset any prior request's actor on this worker thread; a request that fails
@@ -650,7 +666,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
    /* No owner actor is manufactured in auth-off mode: the tenancy mutation routes
     * require a real authenticated principal, so an auth-off deployment cannot make
     * anonymous admin writes. */
-   if (bearer_token && bearer_token[0])
+   if (!local_liveness_probe && bearer_token && bearer_token[0])
    {
       const char *presented =
           (auth_header && strncmp(auth_header, "Bearer ", 7) == 0) ? auth_header + 7 : "";
