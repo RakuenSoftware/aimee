@@ -17,6 +17,11 @@
 # Neither shows up in `docker ps`, which reports the tag rather than the digest.
 # This compares what is RUNNING against what the registry currently publishes.
 #
+# The expected repository is read from the running container, NOT built from the
+# service name: the aimee-kb service legitimately runs any of the six published kb
+# repositories, whichever AIMEE_KB_IMAGE selected. What is checked is the tag (this
+# host is on this channel) and the digest (it has what the registry currently serves).
+#
 # Usage: check-deployed-image.sh [service...]      (default: aimee-server aimee-kb)
 #   AIMEE_IMAGE_TAG   channel to check against (default: testing)
 #   AIMEE_IMAGE_REPO  registry prefix           (default: ghcr.io/rakuensoftware)
@@ -40,20 +45,45 @@ for svc in "${SERVICES[@]}"; do
    fi
 
    image=$(docker inspect "$container" --format '{{.Config.Image}}' 2>/dev/null)
-   want="${REPO}/${svc}:${TAG}"
 
    # A pin to anything that is not the published repo is drift by definition:
    # the host can no longer receive a published build at all.
    case "$image" in
       "${REPO}/"*) ;;
       *)
-         echo "check-deployed-image: ${svc}: PINNED to '${image}', not '${want}'"
+         echo "check-deployed-image: ${svc}: PINNED to '${image}', which is not under ${REPO}/"
          echo "  this host cannot pull published builds while pinned; remove"
          echo "  AIMEE_SERVER_IMAGE (or equivalent) from the compose .env"
          rc=1
          continue
          ;;
    esac
+
+   # The image REPOSITORY is not derivable from the service name. One service name
+   # maps to several published repositories: the aimee-kb service runs whichever of
+   # aimee-kb / aimee-kb-llm-e2b / aimee-kb-llm-e4b / aimee-kb-nomic* the operator
+   # selected via AIMEE_KB_IMAGE, all equally on-channel. Building the expected
+   # reference as "${REPO}/${svc}:${TAG}" reported a host running
+   # aimee-kb-llm-e4b:testing as drifted every 15 minutes — against a repository it
+   # was never supposed to be running.
+   #
+   # So the reference the container actually runs IS the expected reference, and what
+   # gets verified is the two things that constitute drift: that it names this
+   # channel's tag, and that the running layers match what the registry serves for it.
+   want="$image"
+   # Tag as it appears AFTER the last '/', so a registry host carrying a port
+   # (localhost:5000/x) is not mistaken for a tag.
+   case "${image##*/}" in
+      *:*) got_tag="${image##*:}" ;;
+      *)   got_tag="" ;;
+   esac
+   if [ "$got_tag" != "$TAG" ]; then
+      echo "check-deployed-image: ${svc}: OFF-CHANNEL — running '${image}',"
+      echo "  whose tag is '${got_tag:-<none>}' rather than '${TAG}'. A digest pin or a"
+      echo "  stale tag here means published ${TAG} builds never reach this host."
+      rc=1
+      continue
+   fi
 
    running=$(docker inspect "$container" --format '{{.Image}}' 2>/dev/null)
    # RepoDigests is what the registry served; empty means a local build.
