@@ -323,14 +323,29 @@ void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n)
     * the tag stay in one place instead of being rebuilt in C. Empty means plain
     * aimee-kb, which is also the right image for an external embedder: it carries
     * neither PyTorch nor weights. */
-   const char *kb_variant = "";
-   if (!cfg->embedder_url[0])
-   {
-      if (strcmp(cfg->embedder_model, "bekko-a25m") == 0)
-         kb_variant = "a25m";
-      else if (strcmp(cfg->embedder_model, "nomic-embed-text-v2-moe") == 0)
-         kb_variant = "nomic";
-   }
+   /* THE EMPTY VARIANT MEANS "DELIBERATELY EXTERNAL", NEVER "NOTHING CHOSEN".
+    *
+    * aimee-kb carries no embedder at all, which is right when EMBEDDER_URL points
+    * somewhere and wrong in every other case: a deployment with no model AND no URL
+    * cannot embed, and cannot be repaired by setting a config key, because the weights
+    * are not in the image. It needs a different image.
+    *
+    * So an unselected embedder resolves to a25m rather than to nothing. That is not a
+    * new default, it is the OLD one: `aimee-kb` meant "bekko baked in" until #2261
+    * split the axis, so this is what an existing deployment already had. Resolving it
+    * to the embedderless image instead would take working deployments to lexical-only
+    * on their next pull, silently.
+    *
+    * The wizard is being changed to require an explicit choice (external, a25m or
+    * nomic). This is the other half of that: the deploy layer must not be able to
+    * produce an embedderless deployment even if something upstream forgets to ask. */
+   const char *kb_variant;
+   if (cfg->embedder_url[0])
+      kb_variant = ""; /* external endpoint: the image with no weights is correct */
+   else if (strcmp(cfg->embedder_model, "nomic-embed-text-v2-moe") == 0)
+      kb_variant = "nomic";
+   else
+      kb_variant = "a25m"; /* selected bekko, or nothing selected yet */
    EMITF("AIMEE_KB_VARIANT=%s\n", kb_variant);
 
    if (cfg->embedder_model[0])
