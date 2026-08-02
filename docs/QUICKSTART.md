@@ -173,13 +173,19 @@ Which embedder a KB can run is a property of the image you pulled, because the w
 
 | image | embedder | size |
 | --- | --- | --- |
-| `aimee-kb` | none; set `EMBEDDER_URL` | 373 MB |
 | `aimee-kb-a25m` | `bekko-a25m`, 384-dimension | 1.95 GB |
 | `aimee-kb-nomic` | `nomic-embed-text-v2-moe`, 768-dimension | 3.34 GB |
+| `aimee-kb` | none baked; for an external `EMBEDDER_URL` | 373 MB |
 
-A bundled embedder needs no download and no second container. `aimee-kb` carries none at all, which
-is the right choice when you point `EMBEDDER_URL` at your own endpoint: it omits PyTorch and the
-weights rather than shipping code it never runs.
+**An embedder is not optional.** Retrieval does not work without one, so the choice is
+between a bundled model and an external endpoint, never "neither". `aimee-kb` exists
+for the external case: it omits PyTorch and the weights rather than shipping code it
+will never run. It is not a way to run without an embedder.
+
+Synthesis is different and genuinely optional: local, external, or off. Off is a
+supported state because embedding, search, recall and indexing never call it.
+
+A bundled embedder needs no download and no second container.
 
 **This choice does not survive a change of mind.** DB2 records the vector-column width and refuses to
 start when it drifts, so moving between 384 and 768 means re-embedding the whole corpus. Choose before
