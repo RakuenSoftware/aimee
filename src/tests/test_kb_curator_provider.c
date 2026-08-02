@@ -59,6 +59,9 @@ static void test_provider_resolves(void)
             "http://curator:8080/v1");
    snprintf(cfg.kb_curator_provider_model, sizeof(cfg.kb_curator_provider_model), "gemma-4-e4b");
    /* no api_key -> keyless */
+   /* The stub zeroes cfg, so it must opt in to the shipped default explicitly:
+    * synthesis_thinking is "true" in the config defaults table. */
+   cfg.synthesis_thinking = 1;
 
    provider_def_owned_t def;
    assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_EXTRACT_DOCS, &def) == 1);
@@ -66,12 +69,11 @@ static void test_provider_resolves(void)
    assert(strcmp(def.def.model, "gemma-4-e4b") == 0);
    assert(def.def.api_key == NULL); /* empty key => no bearer */
    assert(def.def.wire == PROVIDER_WIRE_OPENAI_CHAT);
-   /* Nothing about the stage suppresses thinking any more — the flag tracks the
-    * operator switch alone, and this fixture zeroes cfg, so synthesis_thinking is
-    * off here and the flag follows it. (Product default is on; suppressing it
-    * measured a 0.09 F1 loss for gemma-4-E4B by degrading output-contract
-    * adherence — see the note in kb_curator_provider_for_stage.) */
-   assert(def.def.disable_thinking == 1);
+   /* Nothing about the stage suppresses thinking any more: the flag tracks the
+    * operator switch alone, and on the default it is off. Suppressing it measured
+    * a 0.09 F1 loss for gemma-4-E4B by degrading output-contract adherence — see
+    * the note in kb_curator_provider_for_stage. */
+   assert(def.def.disable_thinking == 0);
 
    /* Tier-B still idle (no weak fallback to the Tier-A default). */
    /* A reasoning stage takes the SAME provider. It used to stay idle here, because
@@ -96,6 +98,42 @@ static void test_stage_families_share_one_provider(void)
    assert(strcmp(a.def.base_url, b.def.base_url) == 0);
    assert(strcmp(a.def.model, b.def.model) == 0);
    printf("kb_curator_provider: mechanical and reasoning stages share one provider ok\n");
+}
+
+/* Thinking is one global switch the operator owns, shipped on (synthesis_thinking
+ * defaults to "true"). Nothing about the stage may influence it: an earlier design
+ * suppressed thinking for the mechanical stages, which measured worse. Both states
+ * are pinned here because only the operator may turn it off. */
+static void test_thinking_is_one_global_operator_switch(void)
+{
+   memset(&cfg, 0, sizeof(cfg));
+   snprintf(cfg.kb_curator_provider_base_url, sizeof(cfg.kb_curator_provider_base_url),
+            "http://curator:8080/v1");
+   snprintf(cfg.kb_curator_provider_model, sizeof(cfg.kb_curator_provider_model), "gemma-4-e4b");
+
+   const kb_curator_stage_t stages[] = {KB_CURATOR_STAGE_EXTRACT_DOCS,
+                                        KB_CURATOR_STAGE_EXTRACT_CODE,
+                                        KB_CURATOR_STAGE_JUDGE, KB_CURATOR_STAGE_SYNTHESIZE};
+
+   /* On (the shipped default): no stage suppresses thinking. */
+   cfg.synthesis_thinking = 1;
+   for (size_t i = 0; i < sizeof(stages) / sizeof(stages[0]); i++)
+   {
+      provider_def_owned_t def;
+      assert(kb_curator_provider_for_stage(stages[i], &def) == 1);
+      assert(def.def.disable_thinking == 0);
+   }
+
+   /* Off: the operator's choice reaches every stage, mechanical and reasoning alike. */
+   cfg.synthesis_thinking = 0;
+   for (size_t i = 0; i < sizeof(stages) / sizeof(stages[0]); i++)
+   {
+      provider_def_owned_t def;
+      assert(kb_curator_provider_for_stage(stages[i], &def) == 1);
+      assert(def.def.disable_thinking == 1);
+   }
+
+   printf("kb_curator_provider: thinking is one global operator switch, on by default ok\n");
 }
 
 /* SYNTHESIS_ENDPOINT is ingested into config and drives EVERY stage. It used to be
@@ -232,6 +270,7 @@ int main(void)
    test_unconfigured_idle();
    test_provider_resolves();
    test_stage_families_share_one_provider();
+   test_thinking_is_one_global_operator_switch();
    test_env_bridge();
    test_aimee_llm_url();
    printf("kb_curator_provider: all tests passed\n");
