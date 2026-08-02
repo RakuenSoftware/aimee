@@ -121,7 +121,7 @@ TEST_DATA_OBJS = $(TEST_CORE_OBJS) $(OBJDIR)/rel_types.o $(OBJDIR)/modules/memor
 # linking both would produce duplicate-symbol errors.
 TEST_DATA_OBJS_MOCK = $(TEST_DATA_OBJS) $(OBJDIR)/tests/support/mock_agent_http.o
 
-TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPREFIX)/unit-test-harness-memory $(TESTPREFIX)/unit-test-memory-redirect $(TESTPREFIX)/unit-test-harness-memory-scope $(TESTPREFIX)/unit-test-harness-memory-spill $(TESTPREFIX)/unit-test-harness-memory-audit $(TESTPREFIX)/unit-test-roundtable-brief $(TESTPREFIX)/unit-test-db2 $(TESTPREFIX)/unit-test-pg-prepare-classification $(TESTPREFIX)/unit-test-schema-subst $(TESTPREFIX)/unit-test-code-index-ops $(TESTPREFIX)/unit-test-code-project-lifecycle $(TESTPREFIX)/unit-test-curator-version $(TESTPREFIX)/unit-test-curator-invalidate $(TESTPREFIX)/unit-test-curator-notify $(TESTPREFIX)/unit-test-skill-review $(TESTPREFIX)/unit-test-curator-queue $(TESTPREFIX)/unit-test-curator-pipeline-sched $(TESTPREFIX)/unit-test-curator-custom-stages $(TESTPREFIX)/unit-test-pgvec $(TESTPREFIX)/unit-test-rules $(TESTPREFIX)/unit-test-delegate-sandbox-image $(TESTPREFIX)/unit-test-sandbox-learned $(TESTPREFIX)/unit-test-sandbox-pkg-proxy \
+TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPREFIX)/unit-test-harness-memory $(TESTPREFIX)/unit-test-memory-redirect $(TESTPREFIX)/unit-test-harness-memory-scope $(TESTPREFIX)/unit-test-harness-memory-spill $(TESTPREFIX)/unit-test-harness-memory-audit $(TESTPREFIX)/unit-test-roundtable-brief $(TESTPREFIX)/unit-test-db2 $(TESTPREFIX)/unit-test-pg-prepare-classification $(TESTPREFIX)/unit-test-schema-subst $(TESTPREFIX)/unit-test-code-index-ops $(TESTPREFIX)/unit-test-code-project-lifecycle $(TESTPREFIX)/unit-test-curator-version $(TESTPREFIX)/unit-test-curator-invalidate $(TESTPREFIX)/unit-test-curator-notify $(TESTPREFIX)/unit-test-skill-review $(TESTPREFIX)/unit-test-curator-queue $(TESTPREFIX)/unit-test-memory-facts-retract $(TESTPREFIX)/unit-test-curator-pipeline-sched $(TESTPREFIX)/unit-test-curator-custom-stages $(TESTPREFIX)/unit-test-pgvec $(TESTPREFIX)/unit-test-rules $(TESTPREFIX)/unit-test-delegate-sandbox-image $(TESTPREFIX)/unit-test-sandbox-learned $(TESTPREFIX)/unit-test-sandbox-pkg-proxy \
                $(TESTPREFIX)/unit-test-guardrails $(TESTPREFIX)/unit-test-session-degraded-notice $(TESTPREFIX)/unit-test-kb-http-json $(TESTPREFIX)/unit-test-memory $(TESTPREFIX)/unit-test-tasks \
                $(TESTPREFIX)/unit-test-cmd-hooks-scope \
                $(TESTPREFIX)/unit-test-agent $(TESTPREFIX)/unit-test-agent-repair $(TESTPREFIX)/unit-test-agent-apikey $(TESTPREFIX)/unit-test-script-runner $(TESTPREFIX)/unit-test-provider-cli-adapter $(TESTPREFIX)/unit-test-cli-acp $(TESTPREFIX)/unit-test-acp-server $(TESTPREFIX)/unit-test-toolset-thread-scope $(TESTPREFIX)/unit-test-workspace-provider-container $(TESTPREFIX)/unit-test-mcp-native-surface $(TESTPREFIX)/unit-test-mcp-native-dispatch $(TESTPREFIX)/unit-test-extractors \
@@ -1083,6 +1083,47 @@ $(TESTPREFIX)/unit-test-curator-queue: \
                                        $(OBJDIR)/kb/kb_mdl.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
                                        $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/cJSON.o \
+                                       $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
+
+
+# typed-fact retraction from the extractor: a negated fact deactivates the edge
+# it names. Includes kb_memory_facts.c (mf_commit_facts is static), so that
+# object is deliberately absent from the link line below.
+$(TESTPREFIX)/unit-test-memory-facts-retract: $(OBJDIR)/tests/test_memory_facts_retract.o  \
+                                        \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_queue.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_extract.o \
+                                                                              $(OBJDIR)/kb/fact_grounding.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_sidecar.o \
+                                       $(OBJDIR)/kb_curator_provider.o $(OBJDIR)/modules/config/config_database.o \
+                                       $(OBJDIR)/provider_client.o \
+                                       $(OBJDIR)/tests/support/mock_agent_http.o \
+                                       $(OBJDIR)/db2/typed_facts.o \
+                                       $(OBJDIR)/db2/rel_types_store.o \
+                                       $(OBJDIR)/db2/fact_recall.o \
+                                       $(OBJDIR)/db2/fact_ingest.o \
+                                       $(OBJDIR)/db2/fact_lifecycle.o \
+                                       $(OBJDIR)/db2/entity_edges.o \
+                                       $(OBJDIR)/db2/entity_registry.o \
+                                       $(OBJDIR)/db2/ontology_evolution.o \
+                                       $(OBJDIR)/db2/memory_query.o \
+                                       $(OBJDIR)/db2/memory_row_mapper_pg.o \
+                                       $(OBJDIR)/modules/memory/memory_extract_patterns.o \
+                                       $(OBJDIR)/modules/memory/memory_fact_gate.o \
+                                       $(OBJDIR)/modules/memory/memory_pii_gate.o \
+                                       $(OBJDIR)/rel_types.o \
+                                       $(OBJDIR)/index.o $(OBJDIR)/cochange.o \
+                                       $(OBJDIR)/db2/code_index.o \
+                                       $(OBJDIR)/db2/kb_payload.o \
+                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
+                                       $(OBJDIR)/db2/feature_rows.o \
+                                       $(OBJDIR)/kb/kb_mdl.o \
+                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
+                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/modules/memory/memory_episodes.o \
                                        $(OBJDIR)/cJSON.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
