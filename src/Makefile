@@ -1916,6 +1916,7 @@ deploy-env-consumed-check:
 
 sidecar-clients-check:
 	@python3 ../scripts/check-sidecar-clients.py
+	@python3 ../scripts/test-llm-chat-mtls.py
 
 # The drift check drives a 15-minute timer on a production host, so its verdicts
 # are worth a test. It named the expected repository after the SERVICE, which made
