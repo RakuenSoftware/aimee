@@ -1346,3 +1346,92 @@ Two limits, stated rather than smoothed: the relation-agnostic delta has NO
 interval — bootstrap_ci.py scores strict only — so -0.0191 is a point estimate.
 And v5 -> v7 bundles the polarity change with the rename sentence, so nothing
 here attributes the gain to either alone.
+
+## Mining two runs for dataset and system defects
+
+Two full runs of the same 1001 notes under different prompts (v5, v7) give a
+test the single-run analyses could not: when two DIFFERENT prompts independently
+produce the same triple the gold rejects, the gold is the likely defect. That is
+how defect 7 was found, with models standing in for prompts. 191 such triples.
+
+### Defect 33: the corpus phrases a hostname fact as "runs on"
+
+28 of the 51 `has_hostname` gold triples come from notes worded "X runs on Y".
+The remaining 23 say "has hostname". Split by phrasing, the model's behaviour is
+not ambiguous:
+
+| note phrasing | n | model emits has_hostname | model emits runs_on |
+|---|---:|---:|---:|
+| "X has hostname Y" | 23 | **23/23** | 0 |
+| "X runs on Y" | 28 | **0/28** | 23 |
+
+Identical in both runs. The model is perfect when the note says hostname and
+scores zero when it says runs on, because "runs on" is a deployment relation and
+"has hostname" is a naming one. They are different facts and the corpus
+conflates them — the generator derives hostnames from service names and then
+phrases some of them as deployment.
+
+Cost: 28 false negatives and 23 false positives per run from one template, about
+3% of the gold, and it penalises exactly the models that read the sentence
+correctly.
+
+Fix is in the corpus, not the prompt: phrase the note the way the labelled
+relation reads, or label these as a deployment relation. Not applied here
+because regenerating the corpus invalidates every run taken against it.
+
+### Defect 34: the object-kind gate cannot fire on the LLM path
+
+`mf_commit_facts` sets `obj_kind = NODE_OTHER` unconditionally — the extractor
+supplies no kinds — and then coerces it to the relation's declared type whenever
+OTHER is not allowed:
+
+    if (!rel_type_kind_allowed(sdef, 0, obj_kind) && sdef->tail_kind_count > 0)
+       obj_kind = sdef->tail_kinds[0];
+
+**14 of the 17 seed relations do not allow NODE_OTHER as a tail**, so for those
+the object kind is overwritten on every single extraction and
+FACT_GATE_REJECT_KIND can never fire on an object. The gate is structurally dead
+on this path.
+
+It was added for a good reason — a wrong kind guess silently dropped facts — but
+the effect is that a mistyped object is not rejected, it is relabelled. "Oakhaven
+Publishing member_of enterprise" stamps `enterprise` as an ORG; "Rosa Ostrowski
+has_role redgrave contract" stamps a contract as a SCALAR. The entity registry
+accumulates wrong kinds, and those kinds gate future writes.
+
+The distinction the code is missing is between "this object is of kind OTHER" and
+"nobody told me the kind". Both are NODE_OTHER today. An explicit unknown would
+let the gate defer rather than coerce.
+
+### Defect 35: the ontology does not cover the domain, and auto-promotion papers over it
+
+19% of the GOLD's own triples (167 of 880, across 12 predicates) use relations
+the seed ontology does not define — `owns_account` (39), `subscription_tier`
+(39), `customer_of` (26), `purchased` (17), `runs` (8), `audits` (6). So the
+benchmark requires the model to invent a predicate and then grades it on guessing
+the same invented word. The gold is not even self-consistent about it: both
+`owns` and `owns_account` appear.
+
+The model's side matches: 22-24% of extracted facts use a non-seed predicate,
+89 distinct novel predicates across the two runs, 54 of them seen exactly once.
+
+These facts are NOT stranded — a NOVEL verdict still writes the edge, and
+`db2_fact_recall_block` filters on `superseded_at`/`suppressed`, not on class or
+rel_type status, so they are recallable. The cost is fragmentation. The same
+relationship arrives under several names:
+
+| family | facts | split across |
+|---|---:|---|
+| hosting/deployment | 112 | runs_on 45, has_hostname 46, operates 16, hosts 5 |
+| ownership | 89 | owns 59, acquired 30 |
+| membership | 396 | works_for 205, member_of 167, contributes_to 24 |
+
+Auto-promotion (threshold 3) then makes this permanent: **23 of the 89 novel
+predicates recur often enough to be promoted to active**, which would grow the
+active ontology from 17 to ~40 relations, most of them near-synonyms of each
+other. A recall for "which host does X run on" has to know four spellings.
+
+The fix is ontology coverage, not more aliases after the fact: the recurring,
+semantically distinct relations this domain needs (customer relationship,
+subscription tier, account ownership, deployment) should be seeded, so the model
+lands on them instead of inventing a word and the promoter admitting it.
