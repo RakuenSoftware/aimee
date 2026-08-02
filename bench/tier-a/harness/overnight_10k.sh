@@ -48,25 +48,25 @@ start_server() {  # <host> <remote-ip> <port> <model> <kind>
   # server running. MEASUREMENT_LOG.md records three earlier incidents of exactly
   # this self-match; this was the fourth.
   if [ "$kind" = "pct" ]; then
-    ssh -o ConnectTimeout=20 root@"$host" \
+    ssh -n -o ConnectTimeout=20 root@"$host" \
       "pct exec 140 -- pkill -f 'llama-server -m /opt/hf/'" >/dev/null 2>&1 || true
     sleep 4
-    ssh -o ConnectTimeout=20 root@"$host" "pct exec 140 -- bash -lc 'nohup setsid /opt/llama.cpp/build-cuda/bin/llama-server -m $model --host 0.0.0.0 --port $port -c 8192 --no-webui --no-mmproj -ngl 99 >/dev/null 2>&1 </dev/null &'" >/dev/null 2>&1
+    ssh -n -o ConnectTimeout=20 root@"$host" "pct exec 140 -- bash -lc 'nohup setsid /opt/llama.cpp/build-cuda/bin/llama-server -m $model --host 0.0.0.0 --port $port -c 8192 --no-webui --no-mmproj -ngl 99 >/dev/null 2>&1 </dev/null &'" >/dev/null 2>&1
   else
     # Vulkan1 is the discrete 7900 XTX. Vulkan0 is an 8GB Phoenix iGPU, and
     # llama.cpp takes the FIRST device by default — which is how this lane spent
     # a week measuring an integrated GPU (defect 30). The pin is load-bearing.
-    ssh -o ConnectTimeout=20 admin@"$host" \
+    ssh -n -o ConnectTimeout=20 admin@"$host" \
       "pkill -f 'llama-server -m /mnt/media/storage'" >/dev/null 2>&1 || true
     sleep 4
-    ssh -o ConnectTimeout=20 admin@"$host" "HF_HOME=/mnt/media/tierbench/hf nohup setsid /mnt/media/tierbench/bin/llama-b10210/llama-server -m $model --host 0.0.0.0 --port $port -c 8192 --no-webui --no-mmproj -ngl 99 --device Vulkan1 >/dev/null 2>&1 </dev/null &" >/dev/null 2>&1
+    ssh -n -o ConnectTimeout=20 admin@"$host" "HF_HOME=/mnt/media/tierbench/hf nohup setsid /mnt/media/tierbench/bin/llama-b10210/llama-server -m $model --host 0.0.0.0 --port $port -c 8192 --no-webui --no-mmproj -ngl 99 --device Vulkan1 >/dev/null 2>&1 </dev/null &" >/dev/null 2>&1
   fi
   local user=root; [ "$kind" = pct ] || user=admin
   for _ in $(seq 1 90); do
     if [ "$kind" = pct ]; then
-      ssh -o ConnectTimeout=10 root@"$host" "curl -sf --max-time 5 http://$rip:$port/health" >/dev/null 2>&1 && return 0
+      ssh -n -o ConnectTimeout=10 root@"$host" "curl -sf --max-time 5 http://$rip:$port/health" >/dev/null 2>&1 && return 0
     else
-      ssh -o ConnectTimeout=10 admin@"$host" "curl -sf --max-time 5 http://127.0.0.1:$port/health" >/dev/null 2>&1 && return 0
+      ssh -n -o ConnectTimeout=10 admin@"$host" "curl -sf --max-time 5 http://127.0.0.1:$port/health" >/dev/null 2>&1 && return 0
     fi
     sleep 10
   done
@@ -87,6 +87,10 @@ tunnel() {  # <host> <remote-ip> <port> <user>
 }
 
 run_lane() {  # <arm-list> <kind> <user>
+  # Every ssh here uses -n. Without it ssh reads the while-loop's stdin, which is
+  # the arm list itself: the first ssh swallowed the remaining two lines, each
+  # lane ran exactly ONE arm, and the driver reported "LANE DONE" as though it
+  # had finished all three.
   local arms=$1 kind=$2 user=$3
   while IFS='|' read -r host port rip model label; do
     [ -n "${label:-}" ] || continue
