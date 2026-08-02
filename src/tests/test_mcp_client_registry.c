@@ -845,6 +845,38 @@ static void test_get_help_topics_exist(void)
    cJSON_Delete(tools);
 }
 
+/* Some callers must not be able to hand work to a second agent: an evaluation
+ * harness measuring one agent, or any run where a delegated sub-agent's tokens
+ * and edits would be attributed to the caller. The multi-agent tools are the
+ * only way to do that, so a profile has to be able to withhold them. Note the
+ * filter fails OPEN on an unknown profile, so "solo" must be handled explicitly
+ * or a typo would silently grant delegation instead of removing it. */
+static void test_solo_profile_withholds_multi_agent_tools(void)
+{
+   static const char *const multi[] = {"delegate", "delegate_status", "roundtable_review",
+                                       "roundtable_status", NULL};
+   static const char *const kept[] = {
+       "get_help", "find_symbol", "search_memory", "preview_blast_radius", "call_tool", NULL};
+
+   cJSON *tools = mcp_build_tools_list_flat();
+   for (int i = 0; multi[i]; i++)
+      assert(tools_get(tools, multi[i]) != NULL); /* present before filtering */
+
+   assert(mcp_filter_tools_for_profile(tools, "solo") > 0);
+   for (int i = 0; multi[i]; i++)
+      assert(tools_get(tools, multi[i]) == NULL);
+   for (int i = 0; kept[i]; i++)
+      assert(tools_get(tools, kept[i]) != NULL);
+   cJSON_Delete(tools);
+
+   /* "core" still ships delegation: solo is opt-in, not a quiet default. */
+   cJSON *core_tools = mcp_build_tools_list_flat();
+   mcp_filter_tools_for_profile(core_tools, "core");
+   assert(tools_get(core_tools, "delegate") != NULL);
+   assert(tools_get(core_tools, "delegate_status") != NULL);
+   cJSON_Delete(core_tools);
+}
+
 static void test_agent_code_intelligence_contracts(void)
 {
    cJSON *collapsed = mcp_build_tools_list();
@@ -963,6 +995,7 @@ int main(void)
    test_tool_profile_filter();
    test_call_tool_demux();
    test_get_help_topics_exist();
+   test_solo_profile_withholds_multi_agent_tools();
    test_agent_code_intelligence_contracts();
    test_flat_list_keeps_family_members();
    test_boot_and_lazy_tools();

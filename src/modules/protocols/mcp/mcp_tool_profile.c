@@ -50,6 +50,14 @@ static const char *const MCP_CORE_TOOLS[] = {
     NULL,
 };
 
+/* Tools that hand work to a SECOND agent. Their cost, tool calls and edits land
+ * outside the caller's transcript, so any measurement of "what did this agent
+ * do" stops being attributable the moment one is used. The "solo" profile
+ * withholds them; nothing else does. */
+static const char *const MCP_MULTI_AGENT_TOOLS[] = {
+    "delegate", "delegate_status", "roundtable_review", "roundtable_status", NULL,
+};
+
 static int mcp_name_in_set(const char *name, const char *const *set)
 {
    for (int i = 0; set[i]; i++)
@@ -259,8 +267,12 @@ int mcp_filter_tools_for_profile(cJSON *tools, const char *profile)
       return 0;
    profile = mcp_tool_profile_effective(profile);
    /* "full" presents everything; an unknown profile fails OPEN to the full set so
-    * a typo never silently hides tools. "core"/"lean" keep only the Tier-0 set. */
-   if (strcmp(profile, "core") != 0 && strcmp(profile, "lean") != 0)
+    * a typo never silently hides tools. "core"/"lean" keep only the Tier-0 set.
+    * "solo" is core minus the tools that hand work to another agent -- it must be
+    * matched explicitly here, because failing open would grant delegation to a
+    * caller that asked for the opposite. */
+   int solo = strcmp(profile, "solo") == 0;
+   if (!solo && strcmp(profile, "core") != 0 && strcmp(profile, "lean") != 0)
       return 0;
 
    int removed = 0;
@@ -268,7 +280,9 @@ int mcp_filter_tools_for_profile(cJSON *tools, const char *profile)
    {
       cJSON *tool = cJSON_GetArrayItem(tools, i);
       cJSON *nm = cJSON_GetObjectItemCaseSensitive(tool, "name");
-      if (!cJSON_IsString(nm) || !mcp_name_in_set(nm->valuestring, MCP_CORE_TOOLS))
+      int keep = cJSON_IsString(nm) && mcp_name_in_set(nm->valuestring, MCP_CORE_TOOLS) &&
+                 !(solo && mcp_name_in_set(nm->valuestring, MCP_MULTI_AGENT_TOOLS));
+      if (!keep)
       {
          cJSON_DeleteItemFromArray(tools, i);
          removed++;
