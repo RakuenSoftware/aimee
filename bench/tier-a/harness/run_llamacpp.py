@@ -129,6 +129,12 @@ def main():
                 "prompt_tokens": usage.get("prompt_tokens"),
                 "truncated": usage.get("completion_tokens") == args.max_tokens,
                 "thinking": bool(args.thinking),
+                # Which prompt produced this row. prompt.py's version note is
+                # explicit that results taken under different prompt versions are
+                # not comparable, and until now the version was recorded nowhere
+                # in the output -- so telling a v4 file from a v5 one meant
+                # checking the commit date of the directory it sat in.
+                "prompt_version": prompt.PROMPT_VERSION,
                 "reasoning_chars": len(reasoning),
                 # A sample of the reasoning text, not just its length. Without
                 # it, "7943 reasoning tokens and no answer" cannot be told apart
