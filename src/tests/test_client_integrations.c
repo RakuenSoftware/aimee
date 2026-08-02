@@ -112,6 +112,79 @@ static void test_mcp_config_uses_resolved_command(void)
    cJSON_Delete(server);
 }
 
+/* The agent host spawns `aimee mcp-serve` itself, with an environment of its
+ * own choosing. When AIMEE_HOME is where the config actually lives -- any
+ * containerised or managed-server install -- and the generated config does not
+ * carry it, the server starts, cannot reach aimee-server, and answers
+ * tools/list with an EMPTY LIST. The agent is then silently offered no tools at
+ * all and falls back to grep, which is indistinguishable from deciding the
+ * index was not worth calling. Measured: 18 tools with AIMEE_HOME, 0 without,
+ * regardless of HOME. */
+/* The solo profile withholds the delegate tools. Guidance that still tells the
+ * agent to delegate would point at a tool it cannot see, and would undermine the
+ * one guarantee the profile exists to give: that no second agent touches the
+ * work. */
+static void test_solo_profile_guidance_forbids_delegation(void)
+{
+   const char *prompt = NULL;
+
+   setenv("AIMEE_MCP_TOOL_PROFILE", "solo", 1);
+   prompt = codex_delegate_policy_prompt();
+   assert(strstr(prompt, "do this work yourself") != NULL);
+   assert(strstr(prompt, "use the aimee delegate MCP tool") == NULL);
+
+   /* The skill is what the agent actually reads: it must not name a tool the
+    * profile withheld. */
+   {
+      const char *skill = codex_skill_markdown_effective();
+      assert(strstr(skill, "`delegate` MCP tool") == NULL);
+      assert(strstr(skill, "Do all of this work yourself") != NULL);
+      /* the rest of the skill survives */
+      assert(strstr(skill, AIMEE_CODE_TOOL_FIND_SYMBOL) != NULL);
+   }
+
+   /* The default still routes parallel work through delegate. */
+   setenv("AIMEE_MCP_TOOL_PROFILE", "core", 1);
+   prompt = codex_delegate_policy_prompt();
+   assert(strstr(prompt, "use the aimee delegate MCP tool") != NULL);
+   assert(strstr(codex_skill_markdown_effective(), "`delegate` MCP tool") != NULL);
+
+   unsetenv("AIMEE_MCP_TOOL_PROFILE");
+}
+
+static void test_mcp_config_carries_aimee_home(void)
+{
+   char buf[1024];
+   cJSON *server = NULL;
+   cJSON *env = NULL;
+   cJSON *home = NULL;
+
+   setenv("AIMEE_HOME", "/var/lib/aimee-home", 1);
+
+   format_mcp_json(buf, sizeof(buf), "/tmp/aimee-bin");
+   assert(strstr(buf, "\"env\"") != NULL);
+   assert(strstr(buf, "\"AIMEE_HOME\": \"/var/lib/aimee-home\"") != NULL);
+
+   server = create_aimee_mcp_server("/tmp/aimee-bin");
+   assert(cJSON_IsObject(server));
+   env = cJSON_GetObjectItemCaseSensitive(server, "env");
+   assert(cJSON_IsObject(env));
+   home = cJSON_GetObjectItemCaseSensitive(env, "AIMEE_HOME");
+   assert(cJSON_IsString(home));
+   assert(strcmp(home->valuestring, "/var/lib/aimee-home") == 0);
+   cJSON_Delete(server);
+
+   /* Unset means the default resolution already works; pinning a value the
+    * operator never chose would be worse than saying nothing. */
+   unsetenv("AIMEE_HOME");
+   format_mcp_json(buf, sizeof(buf), "/tmp/aimee-bin");
+   assert(strstr(buf, "AIMEE_HOME") == NULL);
+
+   server = create_aimee_mcp_server("/tmp/aimee-bin");
+   assert(cJSON_GetObjectItemCaseSensitive(server, "env") == NULL);
+   cJSON_Delete(server);
+}
+
 /* 1 if hooks[event] has an entry whose command contains `needle`. */
 static int hook_event_has_cmd(cJSON *hooks, const char *event, const char *needle)
 {
@@ -1197,6 +1270,8 @@ int main(void)
    test_build_aimee_plugin_entry();
    test_codex_delegate_policy_is_explicit();
    test_mcp_config_uses_resolved_command();
+   test_solo_profile_guidance_forbids_delegation();
+   test_mcp_config_carries_aimee_home();
    test_read_json_file_missing();
    test_read_json_file_valid();
    test_read_json_file_invalid();

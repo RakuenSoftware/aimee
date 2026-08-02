@@ -650,6 +650,7 @@ static void test_tool_profile_filter(void)
                                       "preview_blast_radius",
                                       "git",
                                       "delegate",
+                                      "delegate_status",
                                       "roundtable_review",
                                       "roundtable_status",
                                       "ask_user",
@@ -661,6 +662,33 @@ static void test_tool_profile_filter(void)
       expect++;
    assert(profile_core_has("find_tools", core) && profile_core_has("describe_tool", core));
    assert(profile_core_has("call_tool", core));
+
+   /* An asynchronous tool whose poller is NOT core costs the agent a
+    * find_tools -> describe_tool -> call_tool detour before it can read the
+    * result of a call it was told to make. Measured on a real cell: five of
+    * fourteen tool calls went on reaching delegate_status. roundtable_review
+    * already ships roundtable_status for exactly this reason; delegate must
+    * ship delegate_status on the same grounds. */
+   assert(profile_core_has("roundtable_status", core));
+   assert(profile_core_has("delegate_status", core));
+   {
+      cJSON *listed = mcp_build_tools_list();
+      int found_delegate = 0, found_status = 0;
+      cJSON *entry = NULL;
+      cJSON_ArrayForEach(entry, listed)
+      {
+         cJSON *nm = cJSON_GetObjectItemCaseSensitive(entry, "name");
+         if (!cJSON_IsString(nm))
+            continue;
+         if (strcmp(nm->valuestring, "delegate") == 0)
+            found_delegate = 1;
+         if (strcmp(nm->valuestring, "delegate_status") == 0)
+            found_status = 1;
+      }
+      assert(found_delegate);
+      assert(found_status);
+      cJSON_Delete(listed);
+   }
 
    /* Control the env so the default is deterministic across CI runners. */
    unsetenv("AIMEE_MCP_TOOL_PROFILE");
@@ -774,6 +802,81 @@ static int schema_requires(cJSON *tool, const char *name)
 /* E1 contract: the words installed guidance gives an agent must map to a direct
  * lean tool, and every code-navigation schema must admit active-project defaults
  * plus an explicit cross-project escape hatch. */
+/* get_help's description names its topics so the model reads them from
+ * tools/list instead of spending a call on the index. That is only safe while
+ * every name is a real section, so check them against the document itself. */
+static void test_get_help_topics_exist(void)
+{
+   static const char *const topics[] = {
+       "MCP Tools",    "Delegate",    "Memory CLI",  "Code Index",  "Verification",
+       "Build & Test", "PR Workflow", "Conventions", "Diagnostics", NULL};
+   cJSON *tools = mcp_build_tools_list_flat();
+   cJSON *help = tools_get(tools, "get_help");
+   assert(help != NULL);
+   cJSON *desc = cJSON_GetObjectItemCaseSensitive(help, "description");
+   assert(cJSON_IsString(desc));
+
+   /* Every advertised topic must appear in the description ... */
+   for (int i = 0; topics[i]; i++)
+      assert(strstr(desc->valuestring, topics[i]) != NULL);
+
+   /* ... and the description must not send the agent to fetch the index first,
+    * which is the round trip this change removes. */
+   assert(strstr(desc->valuestring, "CALL THIS TOOL FIRST") == NULL);
+
+   /* ... and every topic must be a real "## " section of the document the help
+    * data is generated from (src/Makefile: agent_help_data.h <- ../docs/agent.md). */
+   FILE *fh = fopen("docs/agent.md", "re");
+   if (!fh)
+      fh = fopen("../docs/agent.md", "re");
+   assert(fh != NULL);
+   {
+      char buf[16384];
+      size_t got = fread(buf, 1, sizeof(buf) - 1, fh);
+      buf[got] = '\0';
+      fclose(fh);
+      for (int i = 0; topics[i]; i++)
+      {
+         char heading[128];
+         snprintf(heading, sizeof(heading), "## %s", topics[i]);
+         assert(strstr(buf, heading) != NULL);
+      }
+   }
+   cJSON_Delete(tools);
+}
+
+/* Some callers must not be able to hand work to a second agent: an evaluation
+ * harness measuring one agent, or any run where a delegated sub-agent's tokens
+ * and edits would be attributed to the caller. The multi-agent tools are the
+ * only way to do that, so a profile has to be able to withhold them. Note the
+ * filter fails OPEN on an unknown profile, so "solo" must be handled explicitly
+ * or a typo would silently grant delegation instead of removing it. */
+static void test_solo_profile_withholds_multi_agent_tools(void)
+{
+   static const char *const multi[] = {"delegate", "delegate_status", "roundtable_review",
+                                       "roundtable_status", NULL};
+   static const char *const kept[] = {
+       "get_help", "find_symbol", "search_memory", "preview_blast_radius", "call_tool", NULL};
+
+   cJSON *tools = mcp_build_tools_list_flat();
+   for (int i = 0; multi[i]; i++)
+      assert(tools_get(tools, multi[i]) != NULL); /* present before filtering */
+
+   assert(mcp_filter_tools_for_profile(tools, "solo") > 0);
+   for (int i = 0; multi[i]; i++)
+      assert(tools_get(tools, multi[i]) == NULL);
+   for (int i = 0; kept[i]; i++)
+      assert(tools_get(tools, kept[i]) != NULL);
+   cJSON_Delete(tools);
+
+   /* "core" still ships delegation: solo is opt-in, not a quiet default. */
+   cJSON *core_tools = mcp_build_tools_list_flat();
+   mcp_filter_tools_for_profile(core_tools, "core");
+   assert(tools_get(core_tools, "delegate") != NULL);
+   assert(tools_get(core_tools, "delegate_status") != NULL);
+   cJSON_Delete(core_tools);
+}
+
 static void test_agent_code_intelligence_contracts(void)
 {
    cJSON *collapsed = mcp_build_tools_list();
@@ -789,6 +892,23 @@ static void test_agent_code_intelligence_contracts(void)
    assert(mcp_tool_matches_query(preview, "BLAST RADIUS"));
    assert(mcp_tool_matches_query(preview, AIMEE_CODE_DISCOVERY_PREVIEW));
    assert(!mcp_tool_matches_query(preview, "unrelated memory query"));
+
+   /* An agent searching for a tool types the words, not the identifier. A whole
+    * -string substring test cannot match "delegate status" against a tool named
+    * delegate_status, so the search returned nothing for a tool that exists and
+    * the agent fell back to dumping the entire catalogue. Match on words, with
+    * separators treated alike. */
+   {
+      cJSON *flat_list = mcp_build_tools_list_flat();
+      cJSON *status = tools_get(flat_list, "delegate_status");
+      assert(status != NULL);
+      assert(mcp_tool_matches_query(status, "delegate status"));
+      assert(mcp_tool_matches_query(status, "delegate_status"));
+      assert(mcp_tool_matches_query(status, "STATUS delegate"));
+      /* Every word still has to appear: this must not become a fuzzy OR. */
+      assert(!mcp_tool_matches_query(status, "delegate vault rotation"));
+      cJSON_Delete(flat_list);
+   }
    assert(schema_has_property(preview, "project"));
    assert(schema_has_property(preview, "scope"));
    assert(schema_has_property(preview, "paths"));
@@ -874,6 +994,8 @@ int main(void)
    test_tools_list_surface();
    test_tool_profile_filter();
    test_call_tool_demux();
+   test_get_help_topics_exist();
+   test_solo_profile_withholds_multi_agent_tools();
    test_agent_code_intelligence_contracts();
    test_flat_list_keeps_family_members();
    test_boot_and_lazy_tools();
