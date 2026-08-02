@@ -27,6 +27,7 @@
 #include "kb_http.h"
 #include "aimee/protocols/mcp/mcp_client_registry.h" /* host install:kb MCP plugins */
 #include "kb_tls.h"
+#include "kb_synthesis_identity.h"
 #include "kb_paths.h"
 #include "kb_service.h"
 #include "log.h"
@@ -2344,6 +2345,23 @@ int main(int argc, char **argv)
     * configured. Each plugin is OSV-scanned at startup (same gate as the server
     * path; see kb_mcp_osv_stub.c). Torn down after kb_http_stop() below. */
    (void)mcp_client_registry_boot(CONFIG_MCP_INSTALL_KB);
+
+   /* Synthesis sidecar identities. Issued here because the deployment order is
+    * server, wizard, kb, then the sidecar: minting at kb startup means the material
+    * exists before anything can ask for it, with no extra route and no ordering to
+    * coordinate. Idempotent, and only when a sidecar host is configured -- an
+    * external or absent synthesis provider needs none of this. */
+   {
+      const char *llm_host = getenv("AIMEE_LLM_HOST");
+      if (llm_host && llm_host[0])
+      {
+         if (kb_synthesis_identity_ensure(kb_default_config_dir(), llm_host) != 0)
+            LOG_WARN("kb_synthesis_identity",
+                     "could not provision synthesis mTLS identities for %s; the sidecar "
+                     "will refuse to start until this succeeds",
+                     llm_host);
+      }
+   }
 
    /* Optional distributed-mode mTLS listener (every request presents a CA-issued
     * client cert; scope comes from the cert). Enabled by AIMEE_KB_MTLS_PORT. */

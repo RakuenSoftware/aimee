@@ -304,6 +304,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-workspace-mirror \
                $(TESTPREFIX)/unit-test-workspace-provider-detached \
                $(TESTPREFIX)/unit-test-workspace-runner-queue \
+               $(TESTPREFIX)/unit-test-kb-synthesis-identity \
                $(TESTPREFIX)/unit-test-workspace-scope \
                $(TESTPREFIX)/unit-test-webuser-runtime \
                $(TESTPREFIX)/unit-test-workspace-runner-registry \
@@ -5648,6 +5649,17 @@ $(TESTPREFIX)/unit-test-subject-grammar: $(OBJDIR)/tests/test_subject_grammar.o 
                      $(OBJDIR)/kb/kb_mgmt_token_authority.o \
                      $(OBJDIR)/kb/kb_mgmt_token_public.o \
                      $(OBJDIR)/kb/kb_identity_token.o \
+                     $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-kb-synthesis-identity: \
+                     $(OBJDIR)/tests/test_kb_synthesis_identity.o \
+                     $(OBJDIR)/kb/kb_synthesis_identity.o \
+                     $(OBJDIR)/kb/pki.o \
+                     $(OBJDIR)/kb/modules/vault/vault_crypto.o \
+                     $(OBJDIR)/kb/modules/vault/vault_server_key.o \
+                     $(OBJDIR)/kb/modules/vault/vault_store.o $(OBJDIR)/kb/modules/vault/vault_kek_check.o \
+                     $(OBJDIR)/kb/modules/vault/vault_kek_cache.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
