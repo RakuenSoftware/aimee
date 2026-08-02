@@ -1,6 +1,7 @@
 /* kb_login_throttle.c — see kb_login_throttle.h. */
 
 #include "kb_login_throttle.h"
+#include "cleartext_guard.h" /* one shared definition of "loopback" */
 
 #include <pthread.h>
 #include <stdint.h>
@@ -266,6 +267,14 @@ static const char *peer_or_unknown(void)
 void kb_login_throttle_set_peer(const char *peer_ip)
 {
    snprintf(g_peer_ip, sizeof(g_peer_ip), "%s", peer_ip ? peer_ip : "");
+}
+
+int kb_login_throttle_peer_is_loopback(void)
+{
+   /* Same loopback rule the credential guards use, so "local" means one thing
+    * across the codebase. An empty peer is NOT local: a caller we could not
+    * identify must not get the local exemption. */
+   return g_peer_ip[0] ? cleartext_host_is_loopback(g_peer_ip) : 0;
 }
 
 /* A negative clock is not a real time; treat it as the epoch rather than letting

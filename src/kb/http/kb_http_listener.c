@@ -4,6 +4,8 @@
 #include "db2/db2.h"
 #include "kb/kb_login_throttle.h"
 #include "log.h"
+#include <sys/stat.h>
+#include "kb_paths.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -178,6 +180,63 @@ static void *listener_thread(void *arg)
    return NULL;
 }
 
+/* Marker recording that this deployment has had a kb bearer. Written the first
+ * time one is present; its existence turns a later missing bearer from a
+ * warning into a refusal. Best-effort: if it cannot be written we degrade to
+ * warning rather than refusing to serve. */
+static void bearer_marker_path(char *out, size_t n)
+{
+   snprintf(out, n, "%s/kb-bearer-sealed", kb_default_config_dir());
+}
+
+/* Warn while this deployment has never been sealed; refuse once it has.
+ * Returns 0 to continue binding, -1 to refuse. */
+static int enforce_bearer_ratchet(int port)
+{
+   char marker[MAX_PATH_LEN];
+   bearer_marker_path(marker, sizeof(marker));
+
+   if (g_bearer_token[0])
+   {
+      /* Sealed. Record it so a later boot without a bearer is a hard failure. */
+      struct stat st;
+      if (stat(marker, &st) != 0)
+      {
+         int fd = open(marker, O_WRONLY | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
+         if (fd >= 0)
+         {
+            close(fd);
+            LOG_INFO("kb_http",
+                     "kb bearer present; recorded %s — a later boot without a bearer "
+                     "will now refuse to bind a non-loopback plain listener",
+                     marker);
+         }
+      }
+      return 0;
+   }
+
+   struct stat st;
+   if (stat(marker, &st) == 0)
+   {
+      LOG_ERROR("kb_http",
+                "refusing to bind 0.0.0.0:%d: this deployment was sealed with a kb bearer (%s "
+                "exists) but none is configured now, so every privileged route would answer "
+                "unauthenticated. Re-seal AIMEE_KB_API_BEARER_TOKEN through the first-boot Vault "
+                "bootstrap, or remove that marker to deliberately return to an unauthenticated "
+                "listener.",
+                port, marker);
+      return -1;
+   }
+
+   LOG_ERROR("kb_http",
+             "binding 0.0.0.0:%d with NO bearer configured: this socket serves privileged routes "
+             "unauthenticated to anything that can reach it. Seal a kb bearer "
+             "(AIMEE_KB_API_BEARER_TOKEN, through the first-boot Vault bootstrap), or unset "
+             "AIMEE_KB_HTTP_BIND to keep the plain listener on loopback.",
+             port);
+   return 0;
+}
+
 int kb_http_start(int port, const char *bearer_token)
 {
    if (port <= 0)
@@ -205,13 +264,25 @@ int kb_http_start(int port, const char *bearer_token)
     * credentials at all returned 200 with stored memory, to anything that could
     * route to the container. Fail closed instead: a non-loopback bind requires a
     * bearer. The mTLS listener is unaffected — it authenticates by certificate. */
-   if (baddr == INADDR_ANY && !g_bearer_token[0])
-      LOG_ERROR("kb_http",
-                "binding 0.0.0.0:%d with NO bearer configured: this socket serves privileged "
-                "routes unauthenticated to anything that can reach it. Seal a kb bearer "
-                "(AIMEE_KB_API_BEARER_TOKEN, first-boot -> Vault), or unset AIMEE_KB_HTTP_BIND to "
-                "keep the plain listener on loopback.",
-                port);
+   /* Auth is enforced only when a bearer is configured (kb_http.c gates on a
+    * non-empty bearer). With none, this socket answers every route
+    * unauthenticated — fine for the loopback default, not fine once it is
+    * reachable off-host.
+    *
+    * Ratchet rather than a flat refusal. A flat refusal would break every
+    * deployment that has not been sealed yet, which today is all of them; a flat
+    * warning would let a sealed deployment silently lose its bearer and reopen
+    * the hole. So: warn while a deployment has never been sealed, and refuse
+    * once it has. The marker is written the first time a bearer is present, and
+    * lives beside the rest of the kb's state so it persists exactly as long as
+    * the vault it corresponds to. */
+   if (baddr == INADDR_ANY && enforce_bearer_ratchet(port) != 0)
+   {
+      close(g_listen_fd);
+      g_listen_fd = -1;
+      return -1;
+   }
+
    struct sockaddr_in sa;
    memset(&sa, 0, sizeof(sa));
    sa.sin_family = AF_INET;
