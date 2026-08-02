@@ -29,22 +29,28 @@ KEY_FILE="${AIMEE_LLM_KEY_FILE:-$IDENTITY_DIR/server.key}"
 : "${AIMEE_LLM_LOOPBACK_PORT:=8760}"
 : "${AIMEE_LLM_CTX:=8192}"
 
-MODEL_DIR=/opt/aimee/llama.cpp/model
-MODEL="$MODEL_DIR/synthesis.gguf"
 LLAMA=/opt/aimee/llama.cpp/llama-server
+: "${LLAMA_CACHE:=/opt/aimee/llama.cpp/cache}"
+export LLAMA_CACHE
+TABLE=/usr/local/bin/synthesis-model-table.sh
 
 log() { echo "aimee-llm: $*" >&2; }
 
-if [ ! -s "$MODEL" ]; then
-    log "no model at $MODEL. This image is built with one baked in, so an empty"
-    log "path means the image is broken rather than unconfigured."
+# The model is addressed REPO-SHAPED even though it is baked, because that is the only
+# form that engages MTP: -hfd names the same repo and llama.cpp loads mtp-<model>.gguf
+# as the speculative draft. The file-path form (-md) does not engage it.
+#
+# --offline is what makes that safe. llama.cpp documents it as "forces use of cache,
+# prevents network access", so resolution is satisfied entirely from the cache baked
+# into this image. A user never downloads a model, and cannot.
+if [ ! -x "$LLAMA" ] || [ ! -d "$LLAMA_CACHE" ]; then
+    log "no llama-server or no baked cache at $LLAMA_CACHE. Both are built into this"
+    log "image, so their absence means the image is broken rather than unconfigured."
     exit 1
 fi
 
-if [ -z "${AIMEE_SYNTHESIS_MODEL:-}" ] && [ -r "$MODEL_DIR/MODEL_ID" ]; then
-    AIMEE_SYNTHESIS_MODEL="$(cat "$MODEL_DIR/MODEL_ID")"
-    export AIMEE_SYNTHESIS_MODEL
-fi
+REPO="$(sh "$TABLE" repo "${AIMEE_SYNTHESIS_MODEL:?AIMEE_SYNTHESIS_MODEL is baked into this image}")"
+QUANT="$(sh "$TABLE" quant "$AIMEE_SYNTHESIS_MODEL")"
 
 # Fail closed, and say which piece is missing. Starting llama-server anyway and
 # leaving the terminator down would put a working inference server behind nothing,
@@ -104,10 +110,48 @@ log "starting synthesis (${AIMEE_SYNTHESIS_MODEL:-unknown}) on 127.0.0.1:$AIMEE_
 # production loaded a vision projector for a text-only task that cannot use it. Only
 # the text GGUF is baked here, so there is nothing to load -- the flag keeps it that
 # way if a future image bakes one.
+#
+# -hfd names the SAME repo as -hf, which is what makes llama.cpp load
+# mtp-<model>.gguf as its speculative draft. Both resolve from the baked cache because
+# of --offline; neither reaches the network.
 LLAMA_ARG_MMPROJ_AUTO=false \
-    "$LLAMA" -m "$MODEL" --host 127.0.0.1 --port "$AIMEE_LLM_LOOPBACK_PORT" \
+    "$LLAMA" -hf "$REPO:$QUANT" -hfd "$REPO" --offline \
+             --host 127.0.0.1 --port "$AIMEE_LLM_LOOPBACK_PORT" \
              -c "$AIMEE_LLM_CTX" --no-webui --no-mmproj >&2 &
 llama_pid=$!
+
+# ASSERT MTP ACTUALLY ENGAGED, before anything is served.
+#
+# This is the one failure in this container with no symptom. A missing identity refuses
+# to start; a dead llama-server exits; MTP that quietly did not engage serves correct
+# answers 1.6-1.8x slower, and nothing anywhere says so. The only way to notice is to
+# measure tokens/sec against a baseline nobody has.
+#
+# /slots reports .speculative per slot, which is llama.cpp's own answer to "is the
+# draft model in play". Refusing to serve without it is consistent with the rest of
+# this entrypoint: a sidecar that cannot do its job says so at deploy.
+spec=""
+for _ in $(seq 1 120); do
+    if curl -sf -m 4 "http://127.0.0.1:$AIMEE_LLM_LOOPBACK_PORT/health" >/dev/null 2>&1; then
+        spec="$(curl -s -m 4 "http://127.0.0.1:$AIMEE_LLM_LOOPBACK_PORT/slots" 2>/dev/null \
+                | tr ',' '\n' | grep -m1 '"speculative"' | grep -c 'true' || true)"
+        break
+    fi
+    kill -0 "$llama_pid" 2>/dev/null || break
+    sleep 5
+done
+
+if [ "${spec:-0}" != "1" ]; then
+    log "refusing to serve: multi-token prediction did not engage."
+    log "This image bakes mtp-${AIMEE_SYNTHESIS_MODEL}.gguf and passes -hfd so"
+    log "llama.cpp loads it as a speculative draft. Without it synthesis is correct"
+    log "and roughly 1.6-1.8x slower, with nothing else to indicate why -- so this"
+    log "fails at deploy rather than silently costing throughput forever."
+    "$LLAMA" --version >&2 2>&1 || true
+    cleanup
+    exit 1
+fi
+log "multi-token prediction engaged (slots report speculative=true)"
 
 log "starting mTLS terminator on :$AIMEE_LLM_PORT (client certificate required)"
 stunnel "$STUNNEL_CONF" >&2 &
