@@ -105,6 +105,11 @@ int rh_grant_set(const route_req_t *rq, char *resp, int cap)
    kb_client_grant_change_t change;
    kb_client_grant_result_t rc = kb_client_grant_set(jsrv->valuestring, team_id, jsub->valuestring,
                                                      jtier->valuestring, "owner", &change);
+   /* The response echoes the subject, so copy it out before the body that owns
+    * that string is freed. Reading jsub after the delete is a use-after-free
+    * that presents as an empty echo, not a crash. */
+   char subject[256];
+   snprintf(subject, sizeof(subject), "%s", jsub->valuestring);
    cJSON_Delete(body);
    if (rc != KB_CLIENT_GRANT_OK)
       return grant_status(rc, resp, cap);
@@ -115,6 +120,12 @@ int rh_grant_set(const route_req_t *rq, char *resp, int cap)
    if (change.had_previous)
       cJSON_AddStringToObject(out, "previous_tier", change.previous_tier);
    cJSON_AddBoolToObject(out, "is_member", change.is_member);
+   /* Echo what this grant was for. is_member=false means the grant does nothing
+    * until the subject joins, and the remedy is a command on another binary that
+    * needs exactly these two values; without them the client can only gesture at
+    * it. Additive — an older client ignores them. */
+   cJSON_AddNumberToObject(out, "team_id", (double)team_id);
+   cJSON_AddStringToObject(out, "subject", subject);
    char *text = cJSON_PrintUnformatted(out);
    int n = text ? snprintf(resp, (size_t)cap, "%s", text) : -1;
    free(text);

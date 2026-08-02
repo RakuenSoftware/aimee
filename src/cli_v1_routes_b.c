@@ -1586,6 +1586,20 @@ void print_server_health(cJSON *resp)
    {
       const char *kbs = json_str(kb, "status");
       printf("aimee-kb: %s\n", (kbs && kbs[0]) ? kbs : "unknown");
+      /* An open transport breaker refuses every call locally, so the kb can be
+       * "ok" here while nothing works. Print it before the detail lines: this is
+       * the line that explains an index that answers "unavailable" on a server
+       * whose kb looks healthy. */
+      if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(kb, "queries_suppressed")))
+      {
+         cJSON *retry = cJSON_GetObjectItemCaseSensitive(kb, "retry_after_ms");
+         printf("  QUERIES SUPPRESSED: the transport breaker is open, so kb calls are being\n");
+         printf("  refused locally without reaching the kb%s.\n",
+                cJSON_IsNumber(retry) && retry->valuedouble > 0 ? "" : " (retrying shortly)");
+         if (cJSON_IsNumber(retry) && retry->valuedouble > 0)
+            printf("  next retry in %lldms; see the server log for the cause.\n",
+                   (long long)retry->valuedouble);
+      }
       if (kbs && strcmp(kbs, "ok") == 0)
       {
          cJSON *vec = cJSON_GetObjectItemCaseSensitive(kb, "vectors");

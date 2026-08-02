@@ -705,6 +705,17 @@ int kb_client_health(kb_health_t *out)
    return -1;
 }
 
+/* server.health also reports the kb transport breaker, so an operator can see
+ * that calls are being refused locally while the kb itself looks fine. Same
+ * reasoning as above: report a closed breaker without linking the kb client. */
+void kb_client_dependency_health(kb_client_dependency_health_t *out)
+{
+   if (!out)
+      return;
+   memset(out, 0, sizeof(*out));
+   snprintf(out->state, sizeof(out->state), "closed");
+}
+
 int handle_kb_build(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "kb.build");
