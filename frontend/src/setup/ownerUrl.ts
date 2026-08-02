@@ -66,15 +66,12 @@ export interface CloneKbAnnotations {
   kb_reason?: string;
 }
 
-/** POST /api/git/projects/delete response. 200 carries `kb_status`
- * ("purged" | "retained" | "forced") + `purge_id`; 503 (kb unavailable —
- * retry or force) and 400/404 carry `error`. `kb` is the per-store detail. */
+/** POST /api/git/projects/delete response. The delete is local to this
+ * environment and never calls aimee-kb, so there is no purge outcome to
+ * report: 200 carries `ok` + `ref`, and 400/404 carry `error`. */
 export interface ProjectDeleteResponse {
   ok?: boolean;
   ref?: string;
-  kb_status?: 'purged' | 'retained' | 'forced';
-  purge_id?: string;
-  kb?: Record<string, unknown>;
   error?: string;
 }
 
