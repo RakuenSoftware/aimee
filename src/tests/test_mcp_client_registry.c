@@ -802,6 +802,49 @@ static int schema_requires(cJSON *tool, const char *name)
 /* E1 contract: the words installed guidance gives an agent must map to a direct
  * lean tool, and every code-navigation schema must admit active-project defaults
  * plus an explicit cross-project escape hatch. */
+/* get_help's description names its topics so the model reads them from
+ * tools/list instead of spending a call on the index. That is only safe while
+ * every name is a real section, so check them against the document itself. */
+static void test_get_help_topics_exist(void)
+{
+   static const char *const topics[] = {
+       "MCP Tools",    "Delegate",    "Memory CLI",  "Code Index",  "Verification",
+       "Build & Test", "PR Workflow", "Conventions", "Diagnostics", NULL};
+   cJSON *tools = mcp_build_tools_list_flat();
+   cJSON *help = tools_get(tools, "get_help");
+   assert(help != NULL);
+   cJSON *desc = cJSON_GetObjectItemCaseSensitive(help, "description");
+   assert(cJSON_IsString(desc));
+
+   /* Every advertised topic must appear in the description ... */
+   for (int i = 0; topics[i]; i++)
+      assert(strstr(desc->valuestring, topics[i]) != NULL);
+
+   /* ... and the description must not send the agent to fetch the index first,
+    * which is the round trip this change removes. */
+   assert(strstr(desc->valuestring, "CALL THIS TOOL FIRST") == NULL);
+
+   /* ... and every topic must be a real "## " section of the document the help
+    * data is generated from (src/Makefile: agent_help_data.h <- ../docs/agent.md). */
+   FILE *fh = fopen("docs/agent.md", "re");
+   if (!fh)
+      fh = fopen("../docs/agent.md", "re");
+   assert(fh != NULL);
+   {
+      char buf[16384];
+      size_t got = fread(buf, 1, sizeof(buf) - 1, fh);
+      buf[got] = '\0';
+      fclose(fh);
+      for (int i = 0; topics[i]; i++)
+      {
+         char heading[128];
+         snprintf(heading, sizeof(heading), "## %s", topics[i]);
+         assert(strstr(buf, heading) != NULL);
+      }
+   }
+   cJSON_Delete(tools);
+}
+
 static void test_agent_code_intelligence_contracts(void)
 {
    cJSON *collapsed = mcp_build_tools_list();
@@ -919,6 +962,7 @@ int main(void)
    test_tools_list_surface();
    test_tool_profile_filter();
    test_call_tool_demux();
+   test_get_help_topics_exist();
    test_agent_code_intelligence_contracts();
    test_flat_list_keeps_family_members();
    test_boot_and_lazy_tools();

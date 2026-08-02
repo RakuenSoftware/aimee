@@ -100,10 +100,17 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(
           tools,
           mcp_tool_new("get_help",
-                       "CALL THIS TOOL FIRST at the start of every session before doing any work. "
-                       "With no args, returns a compact topic index. Pass a topic name to get "
-                       "details for that section only (e.g. 'work queue', 'mcp tools', "
-                       "'delegate', 'memory', 'build', 'conventions').",
+                       /* Naming the topics here costs nothing: tools/list is already in
+                        * the model's context at startup. Telling it to "call this first"
+                        * for an index it could have read spends a round trip to learn a
+                        * list of nine words. Measured on a real cell, the bare index call
+                        * was one of seven discovery calls out of fourteen total.
+                        * test_get_help_topics_exist asserts every topic named below is a
+                        * real section, so this cannot drift from the document. */
+                       "Aimee reference. Topics: MCP Tools, Delegate, Memory CLI, Code Index, "
+                       "Verification, Build & Test, PR Workflow, Conventions, Diagnostics. "
+                       "Pass one of those names for that section. Omit the topic only if you "
+                       "want the index itself.",
                        s));
    }
    mcp_add_skill_tools(tools);
