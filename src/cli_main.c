@@ -2,6 +2,7 @@
 #include "aimee_home.h"
 #include "aimee_client.h"
 #include "cli_remote.h"
+#include "cli_kb_smoke.h"
 #include "cli_client.h"
 #include "cli_agent_keys.h"
 #include "cli_session_start.h"
@@ -1827,6 +1828,12 @@ int main(int argc, char **argv)
    if (strcmp(cmd, "roles") == 0)
       return cmd_roles_client_run(sub_argc, sub_argv, json_output);
 #endif
+
+   /* `kb smoke` aggregates several /v1 calls and summarises them, so it runs on the
+    * client: the question is whether a working kb is reachable FROM HERE, and a
+    * server-side method would answer that from inside the thing under test. */
+   if (strcmp(cmd, "kb") == 0 && sub_argc >= 1 && strcmp(sub_argv[0], "smoke") == 0)
+      return cli_kb_smoke(sub_argc - 1, sub_argv + 1, json_output);
 
    if (strcmp(cmd, "session") == 0 && sub_argc >= 1 && strcmp(sub_argv[0], "brief") == 0)
       return client_session_brief(sub_argc - 1, sub_argv + 1);

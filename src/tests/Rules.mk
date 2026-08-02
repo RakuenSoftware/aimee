@@ -304,6 +304,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-workspace-mirror \
                $(TESTPREFIX)/unit-test-workspace-provider-detached \
                $(TESTPREFIX)/unit-test-workspace-runner-queue \
+               $(TESTPREFIX)/unit-test-cli-kb-smoke \
                $(TESTPREFIX)/unit-test-kb-synthesis-identity \
                $(TESTPREFIX)/unit-test-workspace-scope \
                $(TESTPREFIX)/unit-test-webuser-runtime \
@@ -3578,6 +3579,12 @@ $(TESTPREFIX)/unit-test-webuser-runtime: \
                       $(OBJDIR)/modules/webuser/webuser_runtime.o \
                       $(OBJDIR)/modules/workspace/workspace_scope.o \
                       $(OBJDIR)/aimee_home.o
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-cli-kb-smoke: \
+                      $(OBJDIR)/tests/test_cli_kb_smoke.o \
+                      $(OBJDIR)/cli_kb_smoke.o \
+                      $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-workspace-scope: \

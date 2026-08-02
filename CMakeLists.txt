@@ -859,6 +859,7 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_css.c
     ${AIMEE_SRC_DIR}/cli_chat_stream.c
     ${AIMEE_SRC_DIR}/cli_client.c
+    ${AIMEE_SRC_DIR}/cli_kb_smoke.c
     ${AIMEE_SRC_DIR}/cli_v1_routes.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_d.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_c.c
