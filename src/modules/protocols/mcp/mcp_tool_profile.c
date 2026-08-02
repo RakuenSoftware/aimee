@@ -35,6 +35,13 @@ static const char *const MCP_CORE_TOOLS[] = {
     AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS, /* direct adoption-critical code intel */
     "git", /* all git/gh ops via one multiplexed tool (command=...) */
     "delegate",
+    /* An MCP delegate call returns a job_id and runs in the background, so its
+     * poller is not optional: without delegate_status in the floor, an agent
+     * that follows our own instruction to delegate cannot read the result
+     * without a find_tools -> describe_tool -> call_tool detour. Measured on a
+     * real cell, five of fourteen tool calls went on exactly that. This is the
+     * same reasoning that already puts roundtable_status here. */
+    "delegate_status",
     "roundtable_review", /* multi-agent */
     "roundtable_status", /* poll asynchronous roundtable_review */
     "ask_user",
@@ -150,14 +157,56 @@ static int mcp_ci_contains(const char *haystack, const char *needle)
    return 0;
 }
 
+/* '_' and '-' separate words in tool names; a searcher types spaces. */
+static int mcp_query_sep(char c)
+{
+   return c == ' ' || c == '\t' || c == '_' || c == '-';
+}
+
 int mcp_tool_matches_query(const cJSON *tool, const char *query)
 {
    if (!tool)
       return 0;
+   if (!query || !query[0])
+      return 1;
+
    const cJSON *name = cJSON_GetObjectItemCaseSensitive(tool, "name");
    const cJSON *description = cJSON_GetObjectItemCaseSensitive(tool, "description");
-   return mcp_ci_contains(cJSON_IsString(name) ? name->valuestring : NULL, query) ||
-          mcp_ci_contains(cJSON_IsString(description) ? description->valuestring : NULL, query);
+   const char *name_s = cJSON_IsString(name) ? name->valuestring : NULL;
+   const char *desc_s = cJSON_IsString(description) ? description->valuestring : NULL;
+
+   /* Whole-query match first: preserves phrase searches like "blast radius"
+    * hitting a description verbatim. */
+   if (mcp_ci_contains(name_s, query) || mcp_ci_contains(desc_s, query))
+      return 1;
+
+   /* Otherwise every word of the query must appear somewhere. An agent looking
+    * for delegate_status types "delegate status", and a whole-string test finds
+    * nothing -- it then dumps the entire catalogue to find one tool. Requiring
+    * ALL words keeps this a narrowing search rather than a fuzzy OR. */
+   const char *word = query;
+   while (*word)
+   {
+      while (*word && mcp_query_sep(*word))
+         word++;
+      if (!*word)
+         break;
+      const char *end = word;
+      while (*end && !mcp_query_sep(*end))
+         end++;
+
+      size_t len = (size_t)(end - word);
+      char token[128];
+      if (len == 0 || len >= sizeof(token))
+         return 0;
+      memcpy(token, word, len);
+      token[len] = '\0';
+
+      if (!mcp_ci_contains(name_s, token) && !mcp_ci_contains(desc_s, token))
+         return 0;
+      word = end;
+   }
+   return 1;
 }
 
 const char *mcp_code_project_from_args(cJSON *args)

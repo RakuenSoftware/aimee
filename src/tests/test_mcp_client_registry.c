@@ -650,6 +650,7 @@ static void test_tool_profile_filter(void)
                                       "preview_blast_radius",
                                       "git",
                                       "delegate",
+                                      "delegate_status",
                                       "roundtable_review",
                                       "roundtable_status",
                                       "ask_user",
@@ -661,6 +662,33 @@ static void test_tool_profile_filter(void)
       expect++;
    assert(profile_core_has("find_tools", core) && profile_core_has("describe_tool", core));
    assert(profile_core_has("call_tool", core));
+
+   /* An asynchronous tool whose poller is NOT core costs the agent a
+    * find_tools -> describe_tool -> call_tool detour before it can read the
+    * result of a call it was told to make. Measured on a real cell: five of
+    * fourteen tool calls went on reaching delegate_status. roundtable_review
+    * already ships roundtable_status for exactly this reason; delegate must
+    * ship delegate_status on the same grounds. */
+   assert(profile_core_has("roundtable_status", core));
+   assert(profile_core_has("delegate_status", core));
+   {
+      cJSON *listed = mcp_build_tools_list();
+      int found_delegate = 0, found_status = 0;
+      cJSON *entry = NULL;
+      cJSON_ArrayForEach(entry, listed)
+      {
+         cJSON *nm = cJSON_GetObjectItemCaseSensitive(entry, "name");
+         if (!cJSON_IsString(nm))
+            continue;
+         if (strcmp(nm->valuestring, "delegate") == 0)
+            found_delegate = 1;
+         if (strcmp(nm->valuestring, "delegate_status") == 0)
+            found_status = 1;
+      }
+      assert(found_delegate);
+      assert(found_status);
+      cJSON_Delete(listed);
+   }
 
    /* Control the env so the default is deterministic across CI runners. */
    unsetenv("AIMEE_MCP_TOOL_PROFILE");
@@ -789,6 +817,23 @@ static void test_agent_code_intelligence_contracts(void)
    assert(mcp_tool_matches_query(preview, "BLAST RADIUS"));
    assert(mcp_tool_matches_query(preview, AIMEE_CODE_DISCOVERY_PREVIEW));
    assert(!mcp_tool_matches_query(preview, "unrelated memory query"));
+
+   /* An agent searching for a tool types the words, not the identifier. A whole
+    * -string substring test cannot match "delegate status" against a tool named
+    * delegate_status, so the search returned nothing for a tool that exists and
+    * the agent fell back to dumping the entire catalogue. Match on words, with
+    * separators treated alike. */
+   {
+      cJSON *flat_list = mcp_build_tools_list_flat();
+      cJSON *status = tools_get(flat_list, "delegate_status");
+      assert(status != NULL);
+      assert(mcp_tool_matches_query(status, "delegate status"));
+      assert(mcp_tool_matches_query(status, "delegate_status"));
+      assert(mcp_tool_matches_query(status, "STATUS delegate"));
+      /* Every word still has to appear: this must not become a fuzzy OR. */
+      assert(!mcp_tool_matches_query(status, "delegate vault rotation"));
+      cJSON_Delete(flat_list);
+   }
    assert(schema_has_property(preview, "project"));
    assert(schema_has_property(preview, "scope"));
    assert(schema_has_property(preview, "paths"));
