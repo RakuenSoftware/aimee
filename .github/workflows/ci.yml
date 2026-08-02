@@ -717,6 +717,16 @@ jobs:
         env:
           AIMEE_DB2_URL: postgresql://aimee:aimee@127.0.0.1:5432/aimee_resid_ci
         run: bash scripts/validate-kb-authz-live.sh
+      # The check above drives BEARER tokens. Production does not use one:
+      # aimee-server presents a client certificate and the mTLS seam synthesises
+      # a credential from its CN, which nothing else exercises. This enrols for
+      # real (mint -> CSR -> /v1/enroll/redeem) and then makes genuine mTLS
+      # requests, asserting both that the scoped service CN is refused on owner
+      # routes and that the old colon-free CN would have been allowed.
+      - name: Live mTLS certificate scope
+        env:
+          AIMEE_DB2_URL: postgresql://aimee:aimee@127.0.0.1:5432/aimee_resid_ci
+        run: bash scripts/validate-kb-mtls-scope-live.sh
       - name: Postgres logs on failure
         if: failure()
         run: docker logs aimee-resid-pg 2>&1 | tail -60
