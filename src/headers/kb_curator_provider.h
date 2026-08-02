@@ -30,21 +30,27 @@ extern "C"
       KB_CURATOR_STAGE_DETECT_CONTRADICTIONS,
       KB_CURATOR_STAGE_SYNTHESIZE,
       KB_CURATOR_STAGE_PROMOTE_ENTITY,
-      /* Idle-time reflection synthesis (kb_reflection.c). A distinct Tier-B stage
-       * from SYNTHESIZE so its provider resolution, and any future calibration /
-       * bandit telemetry, stay isolated from the curator entity-synthesis stream
-       * (which writes a different artifact kind on a different surface). */
+      /* Idle-time reflection synthesis (kb_reflection.c). Distinct from SYNTHESIZE
+       * so any future calibration / bandit telemetry stays isolated from the
+       * curator entity-synthesis stream (which writes a different artifact kind on
+       * a different surface). */
       KB_CURATOR_STAGE_SYNTHESIZE_REFLECTION,
    } kb_curator_stage_t;
 
-   /* Fill *out with the provider def for `stage`. Resolution per tier:
-    *   1. tier config — Tier-A uses `provider.*`, Tier-B uses `tier_b.*`
-    *      (never the Tier-A config; no weak fallback between config tiers);
-    *   2. else, for TIER-A ONLY, the curator env SYNTHESIS_ENDPOINT/LLM_MODEL/
-    *      LLM_API_KEY (the bundled-model deployment — Gemma 3n E4B is a Tier-A
-    *      model, so it must not serve the reasoning stages);
-    *   3. else idle. Tier-B has NO env fallback: it needs a capable provider via
-    *      tier_b.* config, or it stays idle.
+   /* Fill *out with the provider def for `stage`. Resolution, the same for every
+    * stage:
+    *   1. `provider.*` config;
+    *   2. else the configured synthesis endpoint (SYNTHESIS_ENDPOINT, ingested by
+    *      config and normalized in config_synth_chat_endpoint_current());
+    *   3. else idle.
+    *
+    * `stage` NO LONGER SELECTS A PROVIDER. It used to: `provider.*` served the
+    * mechanical stages and `tier_b.*` the reasoning ones, which could not fall back
+    * to the mechanical provider because a weak model on the reasoning stages
+    * poisons the graph. There is one synthesis provider now, so every stage
+    * resolves identically and the parameter is kept only so callers still say which
+    * stage they are, for logging and future per-stage policy.
+    *
     * Returns 1 when configured (out filled; base_url non-empty), 0 when idle
     * (out zeroed — the stage must not run).
     *

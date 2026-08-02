@@ -433,8 +433,8 @@ int config_parse_kb_curator(config_t *cfg, const cJSON *root)
       snprintf(cfg->kb_curator_synthesize_command, sizeof(cfg->kb_curator_synthesize_command), "%s",
                synth_command->valuestring);
 
-   /* Curator LLM providers (§2): default/Tier-A under "provider", reasoning
-    * stages under "tier_b". */
+   /* The curator's synthesis provider (§2), under "provider". One provider for
+    * every stage: the second one under "tier_b" went with the tiers. */
    parse_curator_provider(curator, "provider", cfg->kb_curator_provider_base_url,
                           sizeof(cfg->kb_curator_provider_base_url), cfg->kb_curator_provider_model,
                           sizeof(cfg->kb_curator_provider_model), cfg->kb_curator_provider_api_key,

@@ -114,26 +114,26 @@ int kb_curator_provider_for_stage(kb_curator_stage_t stage, provider_def_owned_t
    snprintf(out->model, sizeof(out->model), "%s", config_kb_curator_provider_model());
    snprintf(out->api_key, sizeof(out->api_key), "%s", config_kb_curator_provider_api_key());
 
-   /* Env fallback when a tier has no config provider, in precedence order:
+   /* Fallback when no config provider is set: the configured SYNTHESIS endpoint,
+    * resolved by config — one field (llm_synth_endpoint) with the
+    * SYNTHESIS_ENDPOINT override applied inside
+    * config_synth_chat_endpoint_current(), never here. It no longer names a
+    * co-deployed container: aimee-llm is retired and the kb embeds in-container,
+    * so this is synthesis-only and external-only, reached through that endpoint's
+    * OpenAI chat API.
     *
-    *  1. The configured SYNTHESIS endpoint, resolved by config — one field
-    *     (llm_synth_endpoint) with the SYNTHESIS_ENDPOINT override applied inside
-    *     config_synth_chat_endpoint_current(), never here. It no longer names a
-    *     co-deployed container: aimee-llm is retired and the kb embeds in-container,
-    *     so this is synthesis-only and external-only, and it drives BOTH tiers via
-    *     that endpoint's OpenAI chat API. It is the only fallback Tier-B accepts —
-    *     see (2).
+    * The URL is normalized (trailing slashes, /v1 suffix) in that one resolver, so
+    * this file cannot disagree with any other caller about what an operator's
+    * value means.
     *
-    *     The URL is normalized (trailing slashes, /v1 suffix) in that one resolver,
-    *     so this file cannot disagree with any other caller about what an operator's
-    *     value means.
-    *  2. SYNTHESIS_ENDPOINT — TIER-A ONLY. It is the small-model interface (the
-    *     zero-config CPU sibling points Tier-A here); letting a small model serve
-    *     the reasoning stages is the weak-model-poisons-the-graph case the tier
-    *     split guards against, so Tier-B never falls back to it.
+    * There was a second, tier-dependent fallback here: the mechanical stages could
+    * also read the endpoint straight from the environment while the reasoning
+    * stages were forbidden to, on the theory that a small model serving the
+    * reasoning stages poisons the graph. There are no tiers to distinguish now, and
+    * config ingests SYNTHESIS_ENDPOINT itself, so one path serves every stage.
     *
-    * A config provider for the tier (checked above) still wins. Whole-provider
-    * fallback: base+model+key move as a unit. */
+    * A config provider (checked above) still wins. Whole-provider fallback:
+    * base+model+key move as a unit. */
    if (!out->base_url[0])
    {
       if (config_synth_chat_endpoint_current(out->base_url, sizeof(out->base_url)))
@@ -157,14 +157,7 @@ int kb_curator_provider_for_stage(kb_curator_stage_t stage, provider_def_owned_t
       }
       else
       {
-         /* No configured endpoint — the stage stays idle, which is supported.
-          *
-          * A TIER-A-ONLY branch used to sit here reading the endpoint straight from
-          * the environment. It was a second path to the same endpoint that only the
-          * mechanical stages could take, so a deployment configured that way ran
-          * extraction and left the reasoning stages idle. config now ingests
-          * SYNTHESIS_ENDPOINT, so the branch above already sees it and every stage
-          * resolves identically. */
+         /* No configured endpoint — the stage stays idle, which is supported. */
          memset(out, 0, sizeof(*out));
          return 0;
       }

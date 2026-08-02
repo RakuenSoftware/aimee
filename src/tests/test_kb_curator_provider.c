@@ -44,12 +44,12 @@ static void test_unconfigured_idle(void)
 {
    memset(&cfg, 0, sizeof(cfg)); /* all providers empty */
    provider_def_owned_t def;
-   /* Tier-A unconfigured -> idle. */
+   /* A mechanical stage, unconfigured -> idle. */
    assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_EXTRACT_DOCS, &def) == 0);
    assert(def.def.base_url == NULL);
-   /* Tier-B unconfigured -> idle. */
+   /* A reasoning stage, unconfigured -> idle. */
    assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_JUDGE, &def) == 0);
-   printf("kb_curator_provider: unconfigured tiers idle ok\n");
+   printf("kb_curator_provider: an unconfigured provider leaves every stage idle ok\n");
 }
 
 static void test_provider_resolves(void)
@@ -132,9 +132,8 @@ static void test_env_bridge(void)
           "\n");
 }
 
-/* SYNTHESIS_ENDPOINT — the single "capable container" knob — drives BOTH tiers via
- * {SYNTHESIS_ENDPOINT}/v1, deriving the chat endpoint + a default model. It
- * is the only env fallback Tier-B accepts. A config provider still wins. */
+/* SYNTHESIS_ENDPOINT drives every stage via {SYNTHESIS_ENDPOINT}/v1, deriving the
+ * chat endpoint + a default model. A config provider still wins. */
 static void test_aimee_llm_url(void)
 {
    clear_llm_env();
@@ -190,7 +189,7 @@ static void test_aimee_llm_url(void)
    memset(&cfg, 0, sizeof(cfg));
    snprintf(cfg.synthesis_endpoint, sizeof(cfg.synthesis_endpoint), "http://synth.internal:9100");
 
-   /* The configured field alone resolves both tiers — no env var involved. */
+   /* The configured field alone resolves every stage — no env var involved. */
    assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_EXTRACT_DOCS, &a) == 1);
    assert(strcmp(a.def.base_url, "http://synth.internal:9100/v1") == 0);
    assert(kb_curator_provider_for_stage(KB_CURATOR_STAGE_SYNTHESIZE, &b) == 1);
@@ -218,7 +217,7 @@ static void test_aimee_llm_url(void)
    printf("kb_curator_provider: synth endpoint resolves from config ok\n");
 
    clear_llm_env();
-   printf("kb_curator_provider: SYNTHESIS_ENDPOINT drives both tiers ok\n");
+   printf("kb_curator_provider: SYNTHESIS_ENDPOINT drives every stage ok\n");
 }
 
 int main(void)

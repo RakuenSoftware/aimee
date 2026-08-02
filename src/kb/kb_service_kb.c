@@ -253,28 +253,35 @@ char *kb_service_ingest_status_json(void)
    return json;
 }
 
-/* Add a per-tier provider sub-object {configured, base_url, model} (no api_key). */
-static void kb_health_add_curator_tier(cJSON *curator, const char *key, kb_curator_stage_t stage)
+/* The synthesis provider sub-object {configured, base_url, model} (no api_key). */
+static void kb_health_add_curator_provider(cJSON *curator)
 {
-   cJSON *t = cJSON_AddObjectToObject(curator, key);
+   cJSON *t = cJSON_AddObjectToObject(curator, "synthesis");
    if (!t)
       return;
    provider_def_owned_t def;
-   int configured = kb_curator_provider_for_stage(stage, &def);
+   /* Any stage resolves the same provider now, so the stage passed here is not a
+    * choice — it only has to be a real one. */
+   int configured = kb_curator_provider_for_stage(KB_CURATOR_STAGE_EXTRACT_DOCS, &def);
    cJSON_AddBoolToObject(t, "configured", configured);
    cJSON_AddStringToObject(t, "base_url", configured && def.def.base_url ? def.def.base_url : "");
    cJSON_AddStringToObject(t, "model", configured && def.def.model ? def.def.model : "");
 }
 
-/* Curator observability block for /v1/health (§4): which tiers have a provider
- * (Tier-A extract/index, Tier-B reason/judge) and the curator queue depth. */
+/* Curator observability block for /v1/health (§4): the synthesis provider and the
+ * curator queue depth.
+ *
+ * ONE provider, not two. This used to report "tier_a" and "tier_b" separately,
+ * from when extract/index ran on a small model and reason/judge on a capable one.
+ * There are no tiers any more — every stage resolves the same provider — so the
+ * two keys had become the same values under two names, which reads as a
+ * configuration an operator could change and cannot. */
 static void kb_health_add_curator(cJSON *resp, kb_curator_queue_counts_t *out_counts)
 {
    cJSON *curator = cJSON_AddObjectToObject(resp, "curator");
    if (!curator)
       return;
-   kb_health_add_curator_tier(curator, "tier_a", KB_CURATOR_STAGE_EXTRACT_DOCS);
-   kb_health_add_curator_tier(curator, "tier_b", KB_CURATOR_STAGE_JUDGE);
+   kb_health_add_curator_provider(curator);
 
    kb_curator_queue_counts_t qc;
    kb_curator_queue_counts(&qc);
