@@ -210,6 +210,17 @@ ENV AIMEE_HOME=/var/lib/aimee
 ENV AIMEE_KB_HTTP_BIND=1
 
 RUN useradd --system --home-dir /var/lib/aimee --create-home --shell /usr/sbin/nologin aimee
+# The synthesis identity directory must exist IN THE IMAGE, owned by the runtime
+# user, because the sidecar deployment mounts a named volume over this path.
+#
+# Docker initialises an empty named volume from whatever the image has at the mount
+# point, ownership included -- but if the path does not exist in the image it creates
+# the volume root-owned, and the kb (which runs as `aimee`) cannot write into it. That
+# is not theoretical: booting this produced
+#   kb_synthesis_identity: cannot create .../synthesis-tls/server.pem: Permission denied
+# and the sidecar then refuses to start, because it has no identity to present. The
+# unit test missed it by creating the directory as the same user it then wrote as.
+RUN install -d -o aimee -g aimee -m 0700 /var/lib/aimee/synthesis-tls
 COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb
 COPY --from=build /src/aimee-kb-resolver /usr/local/bin/aimee-kb-resolver
 
