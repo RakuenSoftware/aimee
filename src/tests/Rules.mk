@@ -689,7 +689,37 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-token-authority-ipc
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-jwks-publication
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-mgmt-jwks-cache
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-offline-hardening
-unit-tests: p1-rls-gate-check $(BINARY) $(TEST_TARGETS)
+
+# CI can split the suite across independent runners without changing the local
+# contract: the defaults still build and execute every test in one invocation.
+# Round-robin selection keeps adjacent families from piling into one shard and
+# preserves process isolation -- every selected target is still the same binary
+# used by the full suite.
+UNIT_TEST_SHARD_COUNT ?= 1
+UNIT_TEST_SHARD_INDEX ?= 0
+UNIT_TEST_SKIP_P1 ?= 0
+ifeq ($(UNIT_TEST_SHARD_COUNT),1)
+UNIT_TEST_TARGETS := $(TEST_TARGETS)
+else
+UNIT_TEST_TARGETS := $(shell printf '%s\n' $(TEST_TARGETS) | \
+	awk -v count='$(UNIT_TEST_SHARD_COUNT)' -v shard='$(UNIT_TEST_SHARD_INDEX)' \
+	    'count > 0 && shard >= 0 && shard < count && slot == shard { print } \
+	     { slot = slot + 1; slot %= count }')
+endif
+
+ifeq ($(UNIT_TEST_SKIP_P1),1)
+UNIT_TEST_P1_PREREQ :=
+else
+UNIT_TEST_P1_PREREQ := p1-rls-gate-check
+endif
+
+unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) $(UNIT_TEST_TARGETS)
+	@if ! printf '%s:%s\n' "$(UNIT_TEST_SHARD_COUNT)" "$(UNIT_TEST_SHARD_INDEX)" | \
+	     awk -F: '$$1 ~ /^[0-9]+$$/ && $$2 ~ /^[0-9]+$$/ && $$1 > 0 && $$2 < $$1 { ok=1 } END { exit !ok }'; then \
+	  echo "invalid unit-test shard $(UNIT_TEST_SHARD_INDEX)/$(UNIT_TEST_SHARD_COUNT)" >&2; \
+	  exit 2; \
+	fi
+	@echo "Unit-test shard $(UNIT_TEST_SHARD_INDEX)/$(UNIT_TEST_SHARD_COUNT): $(words $(UNIT_TEST_TARGETS)) binaries"
 	@# Point the run's HOME at a throwaway dir so a test that does NOT isolate its
 	@# own environment defaults to $$th/.config/aimee, never the developer's real
 	@# ~/.config/aimee — the dir a running aimee-server reads agents.json, config
@@ -729,7 +759,7 @@ unit-tests: p1-rls-gate-check $(BINARY) $(TEST_TARGETS)
 	export AIMEE_TEST_FAILURE_DIR="$$th"; \
 	jobs="$(TEST_RUN_JOBS)"; \
 	if [ "$$jobs" -le 1 ]; then \
-	  for t in $(TEST_TARGETS); do \
+	  for t in $(UNIT_TEST_TARGETS); do \
 	    log="$$(mktemp /tmp/aimee-test-run.XXXXXX)"; \
 	    echo "  $$t"; \
 	    "./$$t" >"$$log" 2>&1; \
@@ -739,7 +769,7 @@ unit-tests: p1-rls-gate-check $(BINARY) $(TEST_TARGETS)
 	    [ "$$rc" -eq 0 ] || exit "$$rc"; \
 	  done; \
 	else \
-	  if ! printf '%s\0' $(TEST_TARGETS) | \
+	  if ! printf '%s\0' $(UNIT_TEST_TARGETS) | \
 	    xargs -0 -n1 -P "$$jobs" sh -c 't="$$1"; log="$$(mktemp /tmp/aimee-test-run.XXXXXX)"; echo "  $$t"; "./$$t" >"$$log" 2>&1; rc="$$?"; cat "$$log"; rm -f "$$log"; if [ "$$rc" -ne 0 ]; then echo "FAILED: $$t" >&2; printf "FAILED: %s\\n" "$$t" >"$$AIMEE_TEST_FAILURE_DIR/failure.$$$$"; fi; exit "$$rc"' _; then \
 	    echo "Unit test failures:" >&2; \
 	    cat "$$th"/failure.* 2>/dev/null >&2 || true; \

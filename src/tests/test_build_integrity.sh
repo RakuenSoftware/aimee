@@ -485,20 +485,57 @@ else
     fail "config.o without platform_random.o in: $bad_targets"
 fi
 
-# 6. Every .PHONY target has a corresponding rule (catches missing targets)
-phony_targets=$(grep '^\.PHONY:' Makefile tests/Rules.mk 2>/dev/null | \
-    sed 's/^.*\.PHONY://' | tr ' ' '\n' | sort -u | grep -v '^$')
-missing_rules=""
-for target in $phony_targets; do
-    # make -n (dry run) exits non-zero if the target has no rule
-    if ! make -n "$target" >/dev/null 2>&1; then
-        missing_rules="$missing_rules $target"
-    fi
-done
+# 6. Parse the Make database once, then verify every literal .PHONY declaration
+# has a rule in the source. The previous implementation started a fresh
+# `make -n` for every phony target; reparsing this large graph 100+ times took
+# more than two minutes in CI. GNU make returns 1 from -q when the default goal
+# is merely out of date, while 2 means the database itself could not be parsed.
+make_db_rc=0
+make -qp >/dev/null 2>&1 || make_db_rc=$?
+if [ "$make_db_rc" -gt 1 ]; then
+    fail "Make database parses cleanly"
+else
+    pass "Make database parses cleanly"
+fi
+
+# Join continuations once so multi-line .PHONY declarations and target rules
+# can be compared by one awk process. This deliberately checks the source rule,
+# not the database's synthetic target: declaring `.PHONY: missing` causes GNU
+# make to manufacture a target named `missing`, which made `make -n missing`
+# report success even when no corresponding rule existed.
+missing_rules=$(
+    {
+        sed ':a; /\\$/ { N; s/\\\n/ /; ba }' Makefile
+        sed ':a; /\\$/ { N; s/\\\n/ /; ba }' tests/Rules.mk
+    } | awk '
+        /^\.PHONY:[[:space:]]/ {
+            line = $0
+            sub(/^\.PHONY:[[:space:]]*/, "", line)
+            count = split(line, names, /[[:space:]]+/)
+            for (i = 1; i <= count; i++)
+                if (names[i] != "")
+                    phony[names[i]] = 1
+            next
+        }
+        /^[^#[:space:]][^=]*:/ {
+            line = $0
+            sub(/:.*/, "", line)
+            count = split(line, names, /[[:space:]]+/)
+            for (i = 1; i <= count; i++)
+                if (names[i] != "")
+                    rules[names[i]] = 1
+        }
+        END {
+            for (target in phony)
+                if (!(target in rules))
+                    print target
+        }
+    ' | sort | tr '\n' ' '
+)
 if [ -z "$missing_rules" ]; then
     pass "all .PHONY targets have rules"
 else
-    fail ".PHONY targets with no rule:$missing_rules"
+    fail ".PHONY targets with no rule: $missing_rules"
 fi
 
 # 7. Scripts don't reference non-existent make targets
