@@ -654,7 +654,7 @@ static int kb_bootstrap_db2(int json_output)
    return ok ? 0 : 1;
 }
 
-/* `aimee-kb enroll --host H --port N [--scope S]` — mint a one-time enrollment:
+/* `aimee-kb enroll --host H --port N --scope S` — mint a one-time enrollment:
  * persist/reuse the internal CA, issue a single-use token, and print the
  * `aimee://` connection string an operator hands to a client. The CA + token
  * store live under the kb config dir, so the running server can later redeem the
@@ -1735,8 +1735,10 @@ int main(int argc, char **argv)
       {
          static const char *usage =
              "Usage: aimee-kb [options]\n"
-             "       aimee-kb enroll --host=HOST --port=N [--scope=SCOPE]\n"
-             "                       Mint a one-time enrollment connection string for a client\n"
+             "       aimee-kb enroll --host=HOST --port=N --scope=SCOPE\n"
+             "                       Mint a one-time enrollment connection string for a client.\n"
+             "                       SCOPE is required: '<kind>:<id>' scopes the client, a bare\n"
+             "                       word mints the install owner.\n"
              "       aimee-kb vault status [--json]\n"
              "       aimee-kb vault start --request-id=<32-lowercase-hex> "
              "[--secret-stdin] [--json]\n"
