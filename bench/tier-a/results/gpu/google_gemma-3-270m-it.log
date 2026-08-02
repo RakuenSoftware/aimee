@@ -1,0 +1,182 @@
+Traceback (most recent call last):
+  File "/opt/bench/lib/python3.13/site-packages/huggingface_hub/utils/_http.py", line 795, in hf_raise_for_status
+    response.raise_for_status()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/bench/lib/python3.13/site-packages/httpx/_models.py", line 829, in raise_for_status
+    raise HTTPStatusError(message, request=request, response=self)
+httpx.HTTPStatusError: Client error '401 Unauthorized' for url 'https://huggingface.co/google/gemma-3-270m-it/resolve/main/config.json'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/opt/bench/lib/python3.13/site-packages/transformers/utils/hub.py", line 437, in cached_files
+    hf_hub_download(
+    ~~~~~~~~~~~~~~~^
+        path_or_repo_id,
+        ^^^^^^^^^^^^^^^^
+    ...<10 lines>...
+        tqdm_class=tqdm_class,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/bench/lib/python3.13/site-packages/huggingface_hub/utils/_validators.py", line 88, in _inner_fn
+    return fn(*args, **kwargs)
+  File "/opt/bench/lib/python3.13/site-packages/huggingface_hub/file_download.py", line 1019, in hf_hub_download
+    return _hf_hub_download_to_cache_dir(
+        # Destination
+    ...<15 lines>...
+        dry_run=dry_run,
+    )
+  File "/opt/bench/lib/python3.13/site-packages/huggingface_hub/file_download.py", line 1166, in _hf_hub_download_to_cache_dir
+    _raise_on_head_call_error(head_call_error, force_download, local_files_only)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/bench/lib/python3.13/site-packages/huggingface_hub/file_download.py", line 1876, in _raise_on_head_call_error
+    raise head_call_error
+  File "/opt/bench/lib/python3.13/site-packages/huggingface_hub/file_download.py", line 1713, in _get_metadata_or_catch_error
+    metadata = get_hf_file_metadata(
+        url=url,
+    ...<4 lines>...
+        retry_on_errors=retry_on_errors,
+    )
+  File "/opt/bench/lib/python3.13/site-packages/huggingface_hub/utils/_validators.py", line 88, in _inner_fn
+    return fn(*args, **kwargs)
+  File "/opt/bench/lib/python3.13/site-packages/huggingface_hub/file_download.py", line 1621, in get_hf_file_metadata
+    response = _httpx_follow_relative_redirects_with_backoff(
+        method="HEAD", url=url, headers=hf_headers, timeout=timeout, retry_on_errors=retry_on_errors
+    )
+  File "/opt/bench/lib/python3.13/site-packages/huggingface_hub/utils/_http.py", line 726, in _httpx_follow_relative_redirects_with_backoff
+    hf_raise_for_status(response)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "/opt/bench/lib/python3.13/site-packages/huggingface_hub/utils/_http.py", line 821, in hf_raise_for_status
+    raise _format(GatedRepoError, message, response, repo_type=repo_type, repo_id=repo_id) from e
+huggingface_hub.errors.GatedRepoError: 401 Client Error. (Request ID: Root=1-6a6bd255-387dab743891d21a7a4afe35;487be47f-dd2d-4baf-938c-01e5247d1319)
+
+Cannot access gated repo for url https://huggingface.co/google/gemma-3-270m-it/resolve/main/config.json.
+Access to model google/gemma-3-270m-it is restricted. You must have access to it and be authenticated to access it. Please log in.
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/opt/bench/lib/python3.13/site-packages/transformers/models/auto/tokenization_auto.py", line 747, in from_pretrained
+    config = AutoConfig.from_pretrained(
+        pretrained_model_name_or_path, trust_remote_code=trust_remote_code, **kwargs
+    )
+  File "/opt/bench/lib/python3.13/site-packages/transformers/models/auto/configuration_auto.py", line 376, in from_pretrained
+    config_dict, unused_kwargs = PreTrainedConfig.get_config_dict(pretrained_model_name_or_path, **kwargs)
+                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/bench/lib/python3.13/site-packages/transformers/configuration_utils.py", line 721, in get_config_dict
+    config_dict, kwargs = cls._get_config_dict(pretrained_model_name_or_path, **kwargs)
+                          ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/bench/lib/python3.13/site-packages/transformers/configuration_utils.py", line 776, in _get_config_dict
+    resolved_config_file = cached_file(
+        pretrained_model_name_or_path,
+    ...<9 lines>...
+        _commit_hash=commit_hash,
+    )
+  File "/opt/bench/lib/python3.13/site-packages/transformers/utils/hub.py", line 293, in cached_file
+    file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+  File "/opt/bench/lib/python3.13/site-packages/transformers/utils/hub.py", line 503, in cached_files
+    raise OSError(
+    ...<2 lines>...
+    ) from e
+OSError: You are trying to access a gated repo.
+Make sure to have access to it at https://huggingface.co/google/gemma-3-270m-it.
+401 Client Error. (Request ID: Root=1-6a6bd255-387dab743891d21a7a4afe35;487be47f-dd2d-4baf-938c-01e5247d1319)
+
+Cannot access gated repo for url https://huggingface.co/google/gemma-3-270m-it/resolve/main/config.json.
+Access to model google/gemma-3-270m-it is restricted. You must have access to it and be authenticated to access it. Please log in.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/opt/bench/lib/python3.13/site-packages/huggingface_hub/utils/_http.py", line 795, in hf_raise_for_status
+    response.raise_for_status()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/bench/lib/python3.13/site-packages/httpx/_models.py", line 829, in raise_for_status
+    raise HTTPStatusError(message, request=request, response=self)
+httpx.HTTPStatusError: Client error '401 Unauthorized' for url 'https://huggingface.co/google/gemma-3-270m-it/resolve/main/config.json'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/opt/bench/lib/python3.13/site-packages/transformers/utils/hub.py", line 437, in cached_files
+    hf_hub_download(
+    ~~~~~~~~~~~~~~~^
+        path_or_repo_id,
+        ^^^^^^^^^^^^^^^^
+    ...<10 lines>...
+        tqdm_class=tqdm_class,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/bench/lib/python3.13/site-packages/huggingface_hub/utils/_validators.py", line 88, in _inner_fn
+    return fn(*args, **kwargs)
+  File "/opt/bench/lib/python3.13/site-packages/huggingface_hub/file_download.py", line 1019, in hf_hub_download
+    return _hf_hub_download_to_cache_dir(
+        # Destination
+    ...<15 lines>...
+        dry_run=dry_run,
+    )
+  File "/opt/bench/lib/python3.13/site-packages/huggingface_hub/file_download.py", line 1166, in _hf_hub_download_to_cache_dir
+    _raise_on_head_call_error(head_call_error, force_download, local_files_only)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/bench/lib/python3.13/site-packages/huggingface_hub/file_download.py", line 1876, in _raise_on_head_call_error
+    raise head_call_error
+  File "/opt/bench/lib/python3.13/site-packages/huggingface_hub/file_download.py", line 1713, in _get_metadata_or_catch_error
+    metadata = get_hf_file_metadata(
+        url=url,
+    ...<4 lines>...
+        retry_on_errors=retry_on_errors,
+    )
+  File "/opt/bench/lib/python3.13/site-packages/huggingface_hub/utils/_validators.py", line 88, in _inner_fn
+    return fn(*args, **kwargs)
+  File "/opt/bench/lib/python3.13/site-packages/huggingface_hub/file_download.py", line 1621, in get_hf_file_metadata
+    response = _httpx_follow_relative_redirects_with_backoff(
+        method="HEAD", url=url, headers=hf_headers, timeout=timeout, retry_on_errors=retry_on_errors
+    )
+  File "/opt/bench/lib/python3.13/site-packages/huggingface_hub/utils/_http.py", line 726, in _httpx_follow_relative_redirects_with_backoff
+    hf_raise_for_status(response)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "/opt/bench/lib/python3.13/site-packages/huggingface_hub/utils/_http.py", line 821, in hf_raise_for_status
+    raise _format(GatedRepoError, message, response, repo_type=repo_type, repo_id=repo_id) from e
+huggingface_hub.errors.GatedRepoError: 401 Client Error. (Request ID: Root=1-6a6bd255-3cd69bb357a2a6d227baf98e;760124fa-6665-4bba-9fd0-786a109aacd8)
+
+Cannot access gated repo for url https://huggingface.co/google/gemma-3-270m-it/resolve/main/config.json.
+Access to model google/gemma-3-270m-it is restricted. You must have access to it and be authenticated to access it. Please log in.
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/opt/tierA/bench/tier-a/harness/run_hf.py", line 171, in <module>
+    main()
+    ~~~~^^
+  File "/opt/tierA/bench/tier-a/harness/run_hf.py", line 114, in main
+    tok = AutoTokenizer.from_pretrained(args.model)
+  File "/opt/bench/lib/python3.13/site-packages/transformers/models/auto/tokenization_auto.py", line 751, in from_pretrained
+    config = PreTrainedConfig.from_pretrained(pretrained_model_name_or_path, **kwargs)
+  File "/opt/bench/lib/python3.13/site-packages/transformers/configuration_utils.py", line 680, in from_pretrained
+    config_dict, kwargs = cls.get_config_dict(pretrained_model_name_or_path, **kwargs)
+                          ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/bench/lib/python3.13/site-packages/transformers/configuration_utils.py", line 721, in get_config_dict
+    config_dict, kwargs = cls._get_config_dict(pretrained_model_name_or_path, **kwargs)
+                          ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/bench/lib/python3.13/site-packages/transformers/configuration_utils.py", line 776, in _get_config_dict
+    resolved_config_file = cached_file(
+        pretrained_model_name_or_path,
+    ...<9 lines>...
+        _commit_hash=commit_hash,
+    )
+  File "/opt/bench/lib/python3.13/site-packages/transformers/utils/hub.py", line 293, in cached_file
+    file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+  File "/opt/bench/lib/python3.13/site-packages/transformers/utils/hub.py", line 503, in cached_files
+    raise OSError(
+    ...<2 lines>...
+    ) from e
+OSError: You are trying to access a gated repo.
+Make sure to have access to it at https://huggingface.co/google/gemma-3-270m-it.
+401 Client Error. (Request ID: Root=1-6a6bd255-3cd69bb357a2a6d227baf98e;760124fa-6665-4bba-9fd0-786a109aacd8)
+
+Cannot access gated repo for url https://huggingface.co/google/gemma-3-270m-it/resolve/main/config.json.
+Access to model google/gemma-3-270m-it is restricted. You must have access to it and be authenticated to access it. Please log in.

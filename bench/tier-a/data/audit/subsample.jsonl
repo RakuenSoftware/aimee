@@ -1,0 +1,199 @@
+{"id": "g006585", "domain": "sales", "category": "implicit", "note": "Nolan Yilmaz approved the Ironbridge Optics order, as usual.", "gold": []}
+{"id": "g007914", "domain": "code", "category": "third_person", "note": "DankXylese is one of the moonlight-qt maintainers.", "gold": []}
+{"id": "g009534", "domain": "business", "category": "third_person", "note": "Rune Petrov works for Ironbridge Foods.", "gold": []}
+{"id": "g007748", "domain": "code", "category": "third_person", "note": "In aimee, memory_episodes.c sits under src/modules/memory these days.", "gold": []}
+{"id": "g003686", "domain": "sales", "category": "implicit", "note": "Sent the renewal paperwork to Anton Yilmaz at Quarrymill Marine again this quarter.", "gold": []}
+{"id": "g007139", "domain": "code", "category": "infra", "note": "ProxmoxVED has hostname proxmoxved-build-5 and IP 10.29.35.177.", "gold": []}
+{"id": "g004126", "domain": "sales", "category": "third_person", "note": "Northwind Logistics bought Orrery Ledger.", "gold": []}
+{"id": "g009746", "domain": "sales", "category": "transient", "note": "The call with Nightingale Systems went really well.", "gold": []}
+{"id": "g004981", "domain": "sales", "category": "multi_fact", "note": "Anton Gallagher at Juniper Systems handles the Dunmore contract, which renews on 16 November.", "gold": []}
+{"id": "g004825", "domain": "code", "category": "governance", "note": "We cut testing-2026.0518.1658-b9ad653 of smoothnas, replacing testing-2026.0518.1558-24a2be5.", "gold": []}
+{"id": "g001857", "domain": "business", "category": "negation", "note": "We never went ahead with the Brightwater Diagnostics partnership.", "gold": []}
+{"id": "g004423", "domain": "business", "category": "third_person", "note": "Rune Moreau works for Vanbrugh Energy.", "gold": []}
+{"id": "g004179", "domain": "business", "category": "negation", "note": "We never went ahead with the Redgrave Energy partnership.", "gold": []}
+{"id": "g002545", "domain": "business", "category": "transient", "note": "Long call with Bea Nakamura today, pretty draining.", "gold": []}
+{"id": "g008253", "domain": "code", "category": "third_person", "note": "Michelle Bergeron contributes to moonlight-qt.", "gold": []}
+{"id": "g000344", "domain": "sales", "category": "negation", "note": "Marrowfield Marine pulled out before signing.", "gold": []}
+{"id": "g009610", "domain": "business", "category": "transient", "note": "Busy week, mostly Hollowell Interactive firefighting.", "gold": []}
+{"id": "g007462", "domain": "code", "category": "third_person", "note": "uuid.h now lives in sunshine in Sunshine.", "gold": []}
+{"id": "g001045", "domain": "business", "category": "transient", "note": "Marrowfield Textiles rescheduled again, third time.", "gold": []}
+{"id": "g005515", "domain": "sales", "category": "multi_fact", "note": "Juniper Systems is a customer, based in Ljubljana, on the government tier.", "gold": []}
+{"id": "g001039", "domain": "business", "category": "transient", "note": "Ashcombe Chemicals rescheduled again, third time.", "gold": []}
+{"id": "g005153", "domain": "sales", "category": "novel_pred", "note": "Nolan Quintero drives a Girder Console van for the Marrowfield Foods run.", "gold": []}
+{"id": "g003026", "domain": "sales", "category": "novel_pred", "note": "Hana Petrov founded Dunmore Aviation.", "gold": []}
+{"id": "g004048", "domain": "sales", "category": "third_person", "note": "Nightingale Energy signed as a customer.", "gold": []}
+{"id": "g009419", "domain": "business", "category": "transient", "note": "Busy week, mostly Nightingale Foods firefighting.", "gold": []}
+{"id": "g009094", "domain": "sales", "category": "multi_fact", "note": "Nightingale Surveying runs Keel Archive out of Dundee.", "gold": []}
+{"id": "g007313", "domain": "business", "category": "transient", "note": "Long call with Lars Nyberg today, pretty draining.", "gold": []}
+{"id": "g005087", "domain": "sales", "category": "transient", "note": "Esme Lombardi sounded keen on the phone.", "gold": []}
+{"id": "g003818", "domain": "code", "category": "negation", "note": "unifi-os-vm.sh is gone from ProxmoxVED now.", "gold": []}
+{"id": "g007523", "domain": "business", "category": "multi_fact", "note": "Stefan Fenwick moved to the customer success at Fairweather Chemicals.", "gold": []}
+{"id": "g003746", "domain": "sales", "category": "ambiguous", "note": "One of the Halden Freight stakeholders pushed back.", "gold": []}
+{"id": "g006087", "domain": "code", "category": "third_person", "note": "wanetty is one of the ProxmoxVED maintainers.", "gold": []}
+{"id": "g003283", "domain": "business", "category": "implicit", "note": "Sent the quarterly report to Saskia Castellanos at Pinehurst Analytics again.", "gold": []}
+{"id": "g005191", "domain": "business", "category": "first_person", "note": "I work for Corvo Textiles now.", "gold": []}
+{"id": "g005342", "domain": "business", "category": "first_person", "note": "Joined Quarrymill Marine as technical contact this month.", "gold": []}
+{"id": "g005129", "domain": "sales", "category": "transient", "note": "The call with Westmere Robotics went really well.", "gold": []}
+{"id": "g001328", "domain": "sales", "category": "novel_pred", "note": "Ulrich Gallagher drives a Sextant Archive van for the Dunmore Optics run.", "gold": []}
+{"id": "g000242", "domain": "code", "category": "multi_fact", "note": "kelshadra_lore_area_plan.md moved from lore/proposed/area_plans to defunct/areas/lore/proposed/area_plans in wol-lore.", "gold": []}
+{"id": "g001480", "domain": "code", "category": "multi_fact", "note": "We relocated devuan.json to json/bak in ProxmoxVED.", "gold": []}
+{"id": "g009958", "domain": "code", "category": "multi_fact", "note": "We relocated SDL_vulkan.h to libs/mac/Frameworks/SDL2.framework/Versions/A/Headers in moonlight-qt.", "gold": []}
+{"id": "g005337", "domain": "business", "category": "negation", "note": "We never went ahead with the Redgrave Surveying partnership.", "gold": []}
+{"id": "g003444", "domain": "business", "category": "multi_fact", "note": "Brightwater Marine is in Bergen; Bram Lombardi is the procurement lead there.", "gold": []}
+{"id": "g001661", "domain": "business", "category": "ambiguous", "note": "She's moving off Halden Diagnostics to the other team.", "gold": []}
+{"id": "g000423", "domain": "code", "category": "multi_fact", "note": "camelcx maintains wolf and also has commits in wolf-1.", "gold": []}
+{"id": "g009238", "domain": "business", "category": "negation", "note": "We never went ahead with the Marrowfield Instruments partnership.", "gold": []}
+{"id": "g005251", "domain": "sales", "category": "transient", "note": "Aisha Gallagher sounded keen on the phone.", "gold": []}
+{"id": "g007539", "domain": "business", "category": "third_person", "note": "Dario Blackwood works for Cormorant Logistics.", "gold": []}
+{"id": "g004174", "domain": "sales", "category": "ambiguous", "note": "Their biggest Vilnius account churned last month.", "gold": []}
+{"id": "g001521", "domain": "sales", "category": "transient", "note": "Hoping to get Grimsby Publishing over the line this quarter.", "gold": []}
+{"id": "g004329", "domain": "code", "category": "governance", "note": "auto-update-app-headers.yml.bak is the new name for auto-update-app-headers.yml.", "gold": []}
+{"id": "g001356", "domain": "code", "category": "negation", "note": "We dropped SDL_keycode.h from moonlight-qt entirely.", "gold": []}
+{"id": "g006693", "domain": "code", "category": "governance", "note": "smoothnas moved from testing-2026.0529.1232-5438b3c to v0.0.124.", "gold": []}
+{"id": "g000264", "domain": "business", "category": "transient", "note": "Still waiting on Otto Marchetti to come back to me.", "gold": []}
+{"id": "g000077", "domain": "business", "category": "negation", "note": "Pinehurst Surveying isn't a customer any more.", "gold": []}
+{"id": "g009832", "domain": "code", "category": "negation", "note": "We dropped gluetun.sh from ProxmoxVED entirely.", "gold": []}
+{"id": "g002089", "domain": "sales", "category": "implicit", "note": "Renewed Corvo Textiles onto enterprise for another year.", "gold": []}
+{"id": "g004742", "domain": "code", "category": "third_person", "note": "solid.frag now lives in src/backend/renderer/gles/shaders/implicit in smithay.", "gold": []}
+{"id": "g003195", "domain": "business", "category": "governance", "note": "The pricing sheet was decided by the security working group.", "gold": []}
+{"id": "g006420", "domain": "business", "category": "transient", "note": "Uplands Marine seem happy at the moment.", "gold": []}
+{"id": "g009411", "domain": "business", "category": "implicit", "note": "Booked the Cork room for the Everline Materials review again.", "gold": []}
+{"id": "g003789", "domain": "sales", "category": "first_person", "note": "Hollowell Materials is mine now that Mira Moreau has moved on.", "gold": []}
+{"id": "g002678", "domain": "business", "category": "transient", "note": "Need to send Dario Moreau the deck before Thursday.", "gold": []}
+{"id": "g006055", "domain": "code", "category": "multi_fact", "note": "rocroad_lore.md used to be in lore; it is under lore/geography now.", "gold": []}
+{"id": "g001653", "domain": "business", "category": "ambiguous", "note": "One of Leila Dvorak's reports is picking it up.", "gold": []}
+{"id": "g009225", "domain": "business", "category": "third_person", "note": "Camille Brennan works for Oakhaven Optics.", "gold": []}
+{"id": "g004403", "domain": "sales", "category": "third_person", "note": "Juniper Marine bought Fathom Ledger.", "gold": []}
+{"id": "g009004", "domain": "business", "category": "third_person", "note": "Cormorant Logistics is based in Valencia.", "gold": []}
+{"id": "g002724", "domain": "code", "category": "multi_fact", "note": "wolf-1 keeps wl_drm.rs in src/core/rust/gst-wayland-display/src/wayland/protocols now, not src/rust/gst-wayland-display/src/wayland/protocols.", "gold": []}
+{"id": "g000353", "domain": "business", "category": "multi_fact", "note": "Aldridge Interactive is in Cork; Nolan Bauer is the operations manager there.", "gold": []}
+{"id": "g001894", "domain": "sales", "category": "first_person", "note": "I'm running point on the Cranfield Systems renewal.", "gold": []}
+{"id": "g004997", "domain": "sales", "category": "ambiguous", "note": "One of the Nightingale Chemicals stakeholders pushed back.", "gold": []}
+{"id": "g001988", "domain": "sales", "category": "negation", "note": "Ironbridge Networks pulled out before signing.", "gold": []}
+{"id": "g004140", "domain": "sales", "category": "transient", "note": "Grimsby Instruments might close by Friday if legal moves fast.", "gold": []}
+{"id": "g005066", "domain": "sales", "category": "multi_fact", "note": "Halden Bioscience is a customer, based in Helsinki, on the professional tier.", "gold": []}
+{"id": "g004074", "domain": "code", "category": "negation", "note": "test_transfer.py is gone from ponytail-reanalysis now.", "gold": []}
+{"id": "g007473", "domain": "business", "category": "governance", "note": "The Cranfield Systems exception to the data processing agreement was signed off by the steering group.", "gold": []}
+{"id": "g005373", "domain": "business", "category": "transient", "note": "Need to send Nadia Nakamura the deck before Thursday.", "gold": []}
+{"id": "g001554", "domain": "sales", "category": "multi_fact", "note": "Pinehurst Freight is a customer, based in Bilbao, on the enterprise tier.", "gold": []}
+{"id": "g003757", "domain": "sales", "category": "transient", "note": "Belmont Robotics might close by Friday if legal moves fast.", "gold": []}
+{"id": "g004380", "domain": "business", "category": "ambiguous", "note": "The bigger of the two Vilnius accounts churned.", "gold": []}
+{"id": "g005110", "domain": "business", "category": "governance", "note": "The Ashcombe Freight exception to the discount schedule was signed off by the retrieval team.", "gold": []}
+{"id": "g007425", "domain": "business", "category": "multi_fact", "note": "Katya Ximenes is head of platform at Yarrow Networks, which is based in Bratislava.", "gold": []}
+{"id": "g003340", "domain": "sales", "category": "ambiguous", "note": "They want Ember Gateway but not for every team.", "gold": []}
+{"id": "g003137", "domain": "sales", "category": "transient", "note": "Anton Halvorsen sounded keen on the phone.", "gold": []}
+{"id": "g004576", "domain": "sales", "category": "negation", "note": "Aldridge Instruments did not renew this year.", "gold": []}
+{"id": "g007938", "domain": "business", "category": "ambiguous", "note": "Their lead on the Quarrymill Optics work left last month.", "gold": []}
+{"id": "g005265", "domain": "code", "category": "negation", "note": "doc_metadata_response.py is gone from aimee now.", "gold": []}
+{"id": "g002236", "domain": "business", "category": "transient", "note": "Ashcombe Bioscience seem happy at the moment.", "gold": []}
+{"id": "g008640", "domain": "sales", "category": "ambiguous", "note": "They want Junction Suite but not for every team.", "gold": []}
+{"id": "g007898", "domain": "code", "category": "multi_fact", "note": "saltglass_reach_lore_area_plan.md used to be in defunct/areas/lore/proposed/area_plans; it is under defunct/geography/area_plans now.", "gold": []}
+{"id": "g003908", "domain": "business", "category": "implicit", "note": "Picked Tomas Carrington up from the Lyon office.", "gold": []}
+{"id": "g001755", "domain": "business", "category": "third_person", "note": "Camille Nakamura is the support engineer at Corvo Bioscience.", "gold": []}
+{"id": "g005538", "domain": "code", "category": "multi_fact", "note": "In aimee, vault_capability.h was shifted out of src/headers into src/modules/vault.", "gold": []}
+{"id": "g008900", "domain": "code", "category": "third_person", "note": "In ProxmoxVED, tools.func.bak sits under bak/core_bak these days.", "gold": []}
+{"id": "g004241", "domain": "code", "category": "multi_fact", "note": "In aimee, git_verify_config.c was shifted out of src into src/modules/git.", "gold": []}
+{"id": "g007115", "domain": "sales", "category": "novel_pred", "note": "Yusuf Rasmussen founded Nightingale Analytics.", "gold": []}
+{"id": "g008160", "domain": "sales", "category": "multi_fact", "note": "Aldridge Analytics is a customer, based in Bologna, on the enterprise tier.", "gold": []}
+{"id": "g001155", "domain": "sales", "category": "third_person", "note": "Pinehurst Analytics bought Delta Archive.", "gold": []}
+{"id": "g002055", "domain": "business", "category": "first_person", "note": "Joined Brightwater Diagnostics as regional director this month.", "gold": []}
+{"id": "g004393", "domain": "code", "category": "multi_fact", "note": "In inputtino, common.rs was shifted out of bindings/rust/src into bindings/rust/inputtino/src.", "gold": []}
+{"id": "g002685", "domain": "sales", "category": "first_person", "note": "I picked up Kestrel Bioscience this quarter.", "gold": []}
+{"id": "g000530", "domain": "business", "category": "implicit", "note": "Picked Bea Dvorak up from the Gdansk office.", "gold": []}
+{"id": "g006466", "domain": "business", "category": "multi_fact", "note": "Priya Ueda moved to the field engineering at Grimsby Instruments.", "gold": []}
+{"id": "g000519", "domain": "sales", "category": "negation", "note": "Corvo Networks did not renew this year.", "gold": []}
+{"id": "g007984", "domain": "sales", "category": "implicit", "note": "Renewed Thornbury Surveying onto professional for another year.", "gold": []}
+{"id": "g008392", "domain": "business", "category": "first_person", "note": "I'm the finance lead at Fairweather Diagnostics.", "gold": []}
+{"id": "g003882", "domain": "code", "category": "infra", "note": "twitch-plays-wolf has hostname twitch-plays-wolf-prod-2 and IP 10.28.95.36.", "gold": []}
+{"id": "g000168", "domain": "code", "category": "multi_fact", "note": "gow keeps es_systems.xml in images/es-de/configs/es now, not images/emulationstationde/configs/es.", "gold": []}
+{"id": "g007323", "domain": "sales", "category": "negation", "note": "Nightingale Robotics did not renew this year.", "gold": []}
+{"id": "g004444", "domain": "sales", "category": "multi_fact", "note": "Aisha Bauer is procurement lead at Yarrow Freight and owns the Dunmore contract.", "gold": []}
+{"id": "g004720", "domain": "sales", "category": "novel_pred", "note": "Aisha Yilmaz sponsors the security working group budget.", "gold": []}
+{"id": "g001666", "domain": "sales", "category": "first_person", "note": "Ashcombe Publishing is mine now that Bea Bauer has moved on.", "gold": []}
+{"id": "g006486", "domain": "code", "category": "governance", "note": "itsmng.sh was renamed to itsm-ng.sh in ProxmoxVED.", "gold": []}
+{"id": "g009044", "domain": "sales", "category": "novel_pred", "note": "Aisha Bauer sponsors the field engineering budget.", "gold": []}
+{"id": "g008983", "domain": "sales", "category": "novel_pred", "note": "Sofia Kristensen audits the data processing agreement every quarter.", "gold": []}
+{"id": "g002201", "domain": "code", "category": "third_person", "note": "In wolf-1, input.rs sits under gst-wayland-display/src/comp these days.", "gold": []}
+{"id": "g001951", "domain": "sales", "category": "multi_fact", "note": "Anton Jankowski at Corvo Publishing handles the Cranfield contract, which renews on 23 February.", "gold": []}
+{"id": "g007300", "domain": "business", "category": "governance", "note": "architecture board owns the discount schedule.", "gold": []}
+{"id": "g009028", "domain": "business", "category": "ambiguous", "note": "Someone at Oakhaven Textiles raised it, did not catch who.", "gold": []}
+{"id": "g001394", "domain": "business", "category": "implicit", "note": "Copied Renata Ueda in, since they run the pricing working group.", "gold": []}
+{"id": "g008422", "domain": "business", "category": "first_person", "note": "Joined Redgrave Foods as support engineer this month.", "gold": []}
+{"id": "g001751", "domain": "sales", "category": "transient", "note": "The call with Dunmore Robotics went really well.", "gold": []}
+{"id": "g002227", "domain": "sales", "category": "third_person", "note": "Grimsby Foods signed as a customer.", "gold": []}
+{"id": "g001686", "domain": "sales", "category": "transient", "note": "Kestrel Surveying might close by Friday if legal moves fast.", "gold": []}
+{"id": "g003513", "domain": "sales", "category": "third_person", "note": "Stonebridge Marine is on the government tier.", "gold": []}
+{"id": "g004129", "domain": "code", "category": "third_person", "note": "wfe_advance.h now lives in src/modules/workflows in aimee.", "gold": []}
+{"id": "g006401", "domain": "business", "category": "ambiguous", "note": "The Westmere Networks side has a new owner, name unclear.", "gold": []}
+{"id": "g008424", "domain": "sales", "category": "first_person", "note": "I picked up Brightwater Energy this quarter.", "gold": []}
+{"id": "g009855", "domain": "business", "category": "first_person", "note": "I work for Ashcombe Networks now.", "gold": []}
+{"id": "g006926", "domain": "business", "category": "governance", "note": "The Vanbrugh Diagnostics exception to the discount schedule was signed off by the architecture board.", "gold": []}
+{"id": "g004336", "domain": "sales", "category": "multi_fact", "note": "Wren Ostrowski is operations manager at Corvo Bioscience and owns the Nightingale contract.", "gold": []}
+{"id": "g006191", "domain": "sales", "category": "transient", "note": "The call with Corvo Logistics went really well.", "gold": []}
+{"id": "g004440", "domain": "business", "category": "negation", "note": "Ulrich Yilmaz is no longer on the field engineering.", "gold": []}
+{"id": "g005844", "domain": "sales", "category": "implicit", "note": "Renewed Ashcombe Publishing onto enterprise for another year.", "gold": []}
+{"id": "g007702", "domain": "code", "category": "third_person", "note": "ABeltramo contributes to moonlight-qt.", "gold": []}
+{"id": "g004591", "domain": "sales", "category": "transient", "note": "Northwind Logistics might close by Friday if legal moves fast.", "gold": []}
+{"id": "g005503", "domain": "sales", "category": "implicit", "note": "Sent the renewal paperwork to Yusuf Blackwood at Pinehurst Surveying again this quarter.", "gold": []}
+{"id": "g007082", "domain": "business", "category": "transient", "note": "Need to send Emil Halvorsen the deck before Thursday.", "gold": []}
+{"id": "g003297", "domain": "code", "category": "negation", "note": "We dropped DocsManifestRequestDocsInner.md from aimee entirely.", "gold": []}
+{"id": "g001251", "domain": "business", "category": "implicit", "note": "Escalated to Stefan Yilmaz, the commercial lead, as usual.", "gold": []}
+{"id": "g002401", "domain": "sales", "category": "negation", "note": "We lost the Quarrymill Marine deal.", "gold": []}
+{"id": "g005826", "domain": "sales", "category": "first_person", "note": "I'm running point on the Brightwater Materials renewal.", "gold": []}
+{"id": "g009045", "domain": "code", "category": "governance", "note": "mod.rs is the new name for keyboard.rs.", "gold": []}
+{"id": "g004953", "domain": "business", "category": "implicit", "note": "Picked Renata Aaltonen up from the Bratislava office.", "gold": []}
+{"id": "g003300", "domain": "sales", "category": "third_person", "note": "Juniper Energy bought Beacon Router.", "gold": []}
+{"id": "g006872", "domain": "business", "category": "third_person", "note": "Ingrid Ueda joined the field engineering last quarter.", "gold": []}
+{"id": "g004770", "domain": "business", "category": "transient", "note": "Need to send Ingrid Ibrahim the deck before Thursday.", "gold": []}
+{"id": "g006928", "domain": "sales", "category": "transient", "note": "Cranfield Networks might close by Friday if legal moves fast.", "gold": []}
+{"id": "g003910", "domain": "code", "category": "negation", "note": "alpine-redlib was deleted from ProxmoxVED.", "gold": []}
+{"id": "g008050", "domain": "sales", "category": "multi_fact", "note": "Corvo Aviation runs Keel Archive out of Lyon.", "gold": []}
+{"id": "g004969", "domain": "sales", "category": "implicit", "note": "Farid Lombardi approved the Marrowfield Chemicals order, as usual.", "gold": []}
+{"id": "g009391", "domain": "code", "category": "third_person", "note": "diadatp is one of the Sunshine maintainers.", "gold": []}
+{"id": "g003532", "domain": "code", "category": "infra", "note": "unraid-module-builder runs on unraid-module-builder-prod-3.", "gold": []}
+{"id": "g008771", "domain": "business", "category": "first_person", "note": "I sit on the customer success.", "gold": []}
+{"id": "g003572", "domain": "business", "category": "first_person", "note": "Joined Kestrel Materials as principal engineer this month.", "gold": []}
+{"id": "g000997", "domain": "business", "category": "multi_fact", "note": "Stonebridge Freight is in Brno; Tomas Nakamura is the procurement lead there.", "gold": []}
+{"id": "g000074", "domain": "business", "category": "negation", "note": "Grimsby Instruments isn't a customer any more.", "gold": []}
+{"id": "g001146", "domain": "business", "category": "transient", "note": "Might restructure the customer success in the new year.", "gold": []}
+{"id": "g000664", "domain": "code", "category": "infra", "note": "games-on-whales.github.io has hostname games-on-whales.github.io-prod-9 and IP 10.51.181.115.", "gold": []}
+{"id": "g003369", "domain": "sales", "category": "ambiguous", "note": "One of the Oakhaven Freight stakeholders pushed back.", "gold": []}
+{"id": "g009497", "domain": "code", "category": "multi_fact", "note": "In aimee, acp_server.c was shifted out of src into src/modules/protocols/acp.", "gold": []}
+{"id": "g007406", "domain": "business", "category": "negation", "note": "Vanbrugh Freight isn't a customer any more.", "gold": []}
+{"id": "g008992", "domain": "business", "category": "transient", "note": "Busy week, mostly Ashcombe Surveying firefighting.", "gold": []}
+{"id": "g002373", "domain": "sales", "category": "negation", "note": "Westmere Publishing did not renew this year.", "gold": []}
+{"id": "g008206", "domain": "business", "category": "transient", "note": "Owe Pavel Lindqvist a proper answer on that.", "gold": []}
+{"id": "g008881", "domain": "sales", "category": "transient", "note": "The call with Kestrel Aviation went really well.", "gold": []}
+{"id": "g001599", "domain": "sales", "category": "first_person", "note": "I'm running point on the Stonebridge Publishing renewal.", "gold": []}
+{"id": "g000210", "domain": "code", "category": "governance", "note": "Profile.cs.uid is the new name for User.cs.uid.", "gold": []}
+{"id": "g006030", "domain": "code", "category": "third_person", "note": "video.hpp now lives in src/moonlight-server/gst-plugin in wolf-1.", "gold": []}
+{"id": "g005853", "domain": "business", "category": "multi_fact", "note": "Priya Fenwick moved to the steering group at Nightingale Foods.", "gold": []}
+{"id": "g009765", "domain": "sales", "category": "first_person", "note": "Thornbury Robotics is mine now that Cato Marchetti has moved on.", "gold": []}
+{"id": "g002888", "domain": "business", "category": "first_person", "note": "I'm the operations manager at Redgrave Freight.", "gold": []}
+{"id": "g005128", "domain": "sales", "category": "implicit", "note": "Invoiced Oakhaven Optics for the Pylon Archive seats again.", "gold": []}
+{"id": "g003236", "domain": "code", "category": "transient", "note": "Spent the afternoon staring at smoothiso CI logs.", "gold": []}
+{"id": "g007593", "domain": "code", "category": "negation", "note": "We dropped CodeStructureResponse.cpp from aimee entirely.", "gold": []}
+{"id": "g000459", "domain": "business", "category": "implicit", "note": "Sent the quarterly report to Xenia Gallagher at Hollowell Foods again.", "gold": []}
+{"id": "g008823", "domain": "sales", "category": "third_person", "note": "Cranfield Systems signed as a customer.", "gold": []}
+{"id": "g009105", "domain": "business", "category": "governance", "note": "escalation policy changes go through Priya Fenwick and the steering group.", "gold": []}
+{"id": "g003165", "domain": "business", "category": "multi_fact", "note": "Pinehurst Surveying is in Ljubljana; Marta Ibrahim is the operations manager there.", "gold": []}
+{"id": "g007708", "domain": "sales", "category": "third_person", "note": "Uplands Optics is on the professional tier.", "gold": []}
+{"id": "g008222", "domain": "sales", "category": "negation", "note": "Everline Diagnostics pulled out before signing.", "gold": []}
+{"id": "g007767", "domain": "business", "category": "third_person", "note": "Orla Marchetti joined the field engineering last quarter.", "gold": []}
+{"id": "g008853", "domain": "code", "category": "governance", "note": "smoothnas moved from testing-2026.0517.0836-db2c06a to v0.0.76.", "gold": []}
+{"id": "g005976", "domain": "sales", "category": "transient", "note": "The call with Cormorant Textiles went really well.", "gold": []}
+{"id": "g001354", "domain": "sales", "category": "implicit", "note": "Invoiced Fairweather Interactive for the Lantern Gateway seats again.", "gold": []}
+{"id": "g003546", "domain": "code", "category": "governance", "note": "smoothnas moved from v0.0.8 to testing-2026.0503.1941-d2f8263.", "gold": []}
+{"id": "g000597", "domain": "code", "category": "governance", "note": "testing-2026.0514.0848-ccf4f5c supersedes v0.0.61 in smoothnas.", "gold": []}
+{"id": "g001571", "domain": "business", "category": "third_person", "note": "Saskia Eriksen is the head of platform at Redgrave Freight.", "gold": []}
+{"id": "g008440", "domain": "code", "category": "multi_fact", "note": "learning-to-rank-weight-fitting.md moved from docs/proposals/pending to docs/proposals/done in aimee.", "gold": []}
+{"id": "g005916", "domain": "code", "category": "third_person", "note": "Francesco Vattiato is one of the ProxmoxVED maintainers.", "gold": []}
+{"id": "g001023", "domain": "code", "category": "transient", "note": "Might pick the rakuen-blog refactor back up next week.", "gold": []}
+{"id": "g008008", "domain": "sales", "category": "first_person", "note": "Vanbrugh Logistics is mine now that Yusuf Ashford has moved on.", "gold": []}
+{"id": "g004896", "domain": "business", "category": "multi_fact", "note": "Oakhaven Optics is in Trieste; Leila Moreau is the account manager there.", "gold": []}
+{"id": "g000443", "domain": "business", "category": "first_person", "note": "I work for Thornbury Energy now.", "gold": []}
+{"id": "g009108", "domain": "business", "category": "multi_fact", "note": "Pavel Vasquez is head of platform at Everline Materials, which is based in Cork.", "gold": []}
+{"id": "g003912", "domain": "code", "category": "multi_fact", "note": "audio.hpp used to be in src/audio/audio; it is under src/core/src/core now.", "gold": []}
+{"id": "g001771", "domain": "sales", "category": "novel_pred", "note": "Quinn Lombardi sponsors the security working group budget.", "gold": []}
+{"id": "g009793", "domain": "sales", "category": "first_person", "note": "I picked up Corvo Publishing this quarter.", "gold": []}
+{"id": "g008009", "domain": "business", "category": "implicit", "note": "Picked Klaus Ostrowski up from the Graz office.", "gold": []}

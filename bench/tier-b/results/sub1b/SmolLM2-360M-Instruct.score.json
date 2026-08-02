@@ -1,0 +1,125 @@
+{
+  "model": "SmolLM2-360M-Instruct",
+  "topics": 6,
+  "format_rate": 0.8333,
+  "coverage": 0.3,
+  "faithfulness": 1.0,
+  "invented_claims": 0,
+  "checked_claims": 13,
+  "median_words": 13,
+  "median_latency_ms": 93.4,
+  "by_category": {
+    "conflicting": {
+      "n": 1,
+      "coverage": 0.5,
+      "invented": 0
+    },
+    "distractor": {
+      "n": 1,
+      "coverage": 0.0,
+      "invented": 0
+    },
+    "factual": {
+      "n": 2,
+      "coverage": 0.375,
+      "invented": 0
+    },
+    "numeric": {
+      "n": 1,
+      "coverage": 0.0,
+      "invented": 0
+    },
+    "thin": {
+      "n": 1,
+      "coverage": 1.0,
+      "invented": 0
+    }
+  },
+  "per_topic": [
+    {
+      "id": "t01",
+      "category": "factual",
+      "format_ok": true,
+      "words": 20,
+      "coverage": 0.5,
+      "missed": [
+        "product is aimee",
+        "42 engineers"
+      ],
+      "checked_claims": 6,
+      "invented": [],
+      "latency_ms": 90.6
+    },
+    {
+      "id": "t02",
+      "category": "numeric",
+      "format_ok": false,
+      "words": 0,
+      "coverage": 0.0,
+      "missed": [
+        "IP address",
+        "RTX 5080 GPU",
+        "125 GB RAM",
+        "28 threads"
+      ],
+      "checked_claims": 0,
+      "invented": [],
+      "latency_ms": 180.2
+    },
+    {
+      "id": "t03",
+      "category": "conflicting",
+      "format_ok": true,
+      "words": 10,
+      "coverage": 0.5,
+      "missed": [
+        "Munich named",
+        "infrastructure role"
+      ],
+      "checked_claims": 3,
+      "invented": [],
+      "latency_ms": 59.1
+    },
+    {
+      "id": "t04",
+      "category": "thin",
+      "format_ok": true,
+      "words": 3,
+      "coverage": 1.0,
+      "missed": [],
+      "checked_claims": 1,
+      "invented": [],
+      "latency_ms": 51.8
+    },
+    {
+      "id": "t05",
+      "category": "distractor",
+      "format_ok": true,
+      "words": 52,
+      "coverage": 0.0,
+      "missed": [
+        "decided by the security working group",
+        "seven year retention",
+        "scoped to audit records"
+      ],
+      "checked_claims": 2,
+      "invented": [],
+      "latency_ms": 123.0
+    },
+    {
+      "id": "t06",
+      "category": "factual",
+      "format_ok": true,
+      "words": 13,
+      "coverage": 0.25,
+      "missed": [
+        "17 seed relations",
+        "one call per note",
+        "gated before commit"
+      ],
+      "checked_claims": 1,
+      "invented": [],
+      "latency_ms": 93.4
+    }
+  ]
+}

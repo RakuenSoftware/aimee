@@ -1,0 +1,115 @@
+{
+  "model": "granite-4.0-h-350m",
+  "topics": 6,
+  "format_rate": 0.8333,
+  "coverage": 0.7,
+  "faithfulness": 1.0,
+  "invented_claims": 0,
+  "checked_claims": 33,
+  "median_words": 53,
+  "median_latency_ms": 241.6,
+  "by_category": {
+    "conflicting": {
+      "n": 1,
+      "coverage": 0.0,
+      "invented": 0
+    },
+    "distractor": {
+      "n": 1,
+      "coverage": 1.0,
+      "invented": 0
+    },
+    "factual": {
+      "n": 2,
+      "coverage": 0.75,
+      "invented": 0
+    },
+    "numeric": {
+      "n": 1,
+      "coverage": 1.0,
+      "invented": 0
+    },
+    "thin": {
+      "n": 1,
+      "coverage": 1.0,
+      "invented": 0
+    }
+  },
+  "per_topic": [
+    {
+      "id": "t01",
+      "category": "factual",
+      "format_ok": true,
+      "words": 50,
+      "coverage": 0.75,
+      "missed": [
+        "founded 2016"
+      ],
+      "checked_claims": 11,
+      "invented": [],
+      "latency_ms": 400.3
+    },
+    {
+      "id": "t02",
+      "category": "numeric",
+      "format_ok": true,
+      "words": 53,
+      "coverage": 1.0,
+      "missed": [],
+      "checked_claims": 16,
+      "invented": [],
+      "latency_ms": 241.6
+    },
+    {
+      "id": "t03",
+      "category": "conflicting",
+      "format_ok": false,
+      "words": 0,
+      "coverage": 0.0,
+      "missed": [
+        "works for Siemens",
+        "location is disputed between Berlin and Munich",
+        "Munich named",
+        "infrastructure role"
+      ],
+      "checked_claims": 0,
+      "invented": [],
+      "latency_ms": 145.2
+    },
+    {
+      "id": "t04",
+      "category": "thin",
+      "format_ok": true,
+      "words": 16,
+      "coverage": 1.0,
+      "missed": [],
+      "checked_claims": 1,
+      "invented": [],
+      "latency_ms": 135.1
+    },
+    {
+      "id": "t05",
+      "category": "distractor",
+      "format_ok": true,
+      "words": 56,
+      "coverage": 1.0,
+      "missed": [],
+      "checked_claims": 2,
+      "invented": [],
+      "latency_ms": 214.1
+    },
+    {
+      "id": "t06",
+      "category": "factual",
+      "format_ok": true,
+      "words": 69,
+      "coverage": 0.75,
+      "missed": [
+        "gated before commit"
+      ],
+      "checked_claims": 3,
+      "invented": [],
+      "latency_ms": 270.6
+    }
+  ]
+}

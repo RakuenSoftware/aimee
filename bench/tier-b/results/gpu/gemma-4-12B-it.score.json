@@ -1,0 +1,110 @@
+{
+  "model": "gemma-4-12B-it",
+  "topics": 6,
+  "format_rate": 1.0,
+  "coverage": 0.95,
+  "faithfulness": 0.975,
+  "invented_claims": 1,
+  "checked_claims": 40,
+  "median_words": 57,
+  "median_latency_ms": 10670.8,
+  "by_category": {
+    "conflicting": {
+      "n": 1,
+      "coverage": 0.75,
+      "invented": 0
+    },
+    "distractor": {
+      "n": 1,
+      "coverage": 1.0,
+      "invented": 0
+    },
+    "factual": {
+      "n": 2,
+      "coverage": 1.0,
+      "invented": 1
+    },
+    "numeric": {
+      "n": 1,
+      "coverage": 1.0,
+      "invented": 0
+    },
+    "thin": {
+      "n": 1,
+      "coverage": 1.0,
+      "invented": 0
+    }
+  },
+  "per_topic": [
+    {
+      "id": "t01",
+      "category": "factual",
+      "format_ok": true,
+      "words": 76,
+      "coverage": 1.0,
+      "missed": [],
+      "checked_claims": 12,
+      "invented": [],
+      "latency_ms": 10670.8
+    },
+    {
+      "id": "t02",
+      "category": "numeric",
+      "format_ok": true,
+      "words": 57,
+      "coverage": 1.0,
+      "missed": [],
+      "checked_claims": 17,
+      "invented": [],
+      "latency_ms": 12142.9
+    },
+    {
+      "id": "t03",
+      "category": "conflicting",
+      "format_ok": true,
+      "words": 41,
+      "coverage": 0.75,
+      "missed": [
+        "location is disputed between Berlin and Munich"
+      ],
+      "checked_claims": 6,
+      "invented": [],
+      "latency_ms": 10048.4
+    },
+    {
+      "id": "t04",
+      "category": "thin",
+      "format_ok": true,
+      "words": 19,
+      "coverage": 1.0,
+      "missed": [],
+      "checked_claims": 1,
+      "invented": [],
+      "latency_ms": 4898.3
+    },
+    {
+      "id": "t05",
+      "category": "distractor",
+      "format_ok": true,
+      "words": 42,
+      "coverage": 1.0,
+      "missed": [],
+      "checked_claims": 0,
+      "invented": [],
+      "latency_ms": 7533.4
+    },
+    {
+      "id": "t06",
+      "category": "factual",
+      "format_ok": true,
+      "words": 68,
+      "coverage": 1.0,
+      "missed": [],
+      "checked_claims": 4,
+      "invented": [
+        "during"
+      ],
+      "latency_ms": 19815.5
+    }
+  ]
+}

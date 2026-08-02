@@ -1098,6 +1098,7 @@ set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/http/kb_http_reflections.c
     ${AIMEE_SRC_DIR}/kb/kb_ingest_normalize.c
     ${AIMEE_SRC_DIR}/kb/kb_memory_embed.c
+    ${AIMEE_SRC_DIR}/kb/fact_grounding.c
 )
 set(KB_DATA_SRCS
     ${AIMEE_SRC_DIR}/modules/memory/memory_core.c

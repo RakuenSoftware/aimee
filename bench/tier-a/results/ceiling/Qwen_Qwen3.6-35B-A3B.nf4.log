@@ -1,0 +1,120 @@
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Fetching 26 files:   0%|          | 0/26 [00:00<?, ?it/s]Fetching 26 files: 100%|██████████| 26/26 [00:00<00:00, 3160.10it/s]
+[transformers] The fast path is not available because one of the required library is not installed. Falling back to torch implementation. To install follow https://github.com/fla-org/flash-linear-attention#installation and https://github.com/Dao-AILab/causal-conv1d
+Loading weights:   0%|          | 0/693 [00:00<?, ?it/s]Loading weights:   0%|          | 2/693 [00:00<01:30,  7.61it/s]Loading weights:   2%|▏         | 13/693 [00:00<00:22, 30.51it/s]Loading weights:   2%|▏         | 17/693 [00:00<00:27, 24.50it/s]Loading weights:   4%|▍         | 31/693 [00:00<00:14, 45.54it/s]Loading weights:   5%|▌         | 37/693 [00:01<00:17, 38.01it/s]Loading weights:   7%|▋         | 49/693 [00:01<00:12, 49.89it/s]Loading weights:   8%|▊         | 55/693 [00:01<00:16, 39.61it/s]Loading weights:   9%|▊         | 60/693 [00:01<00:22, 28.47it/s]Loading weights:  12%|█▏        | 82/693 [00:02<00:11, 51.80it/s]Loading weights:  13%|█▎        | 89/693 [00:02<00:14, 43.09it/s]Loading weights:  14%|█▍        | 100/693 [00:02<00:12, 47.14it/s]Loading weights:  15%|█▌        | 106/693 [00:02<00:15, 37.99it/s]Loading weights:  16%|█▋        | 113/693 [00:02<00:13, 41.49it/s]Loading weights:  17%|█▋        | 118/693 [00:03<00:20, 28.11it/s]Loading weights:  18%|█▊        | 122/693 [00:03<00:20, 28.54it/s]Loading weights:  19%|█▉        | 130/693 [00:03<00:15, 35.64it/s]Loading weights:  19%|█▉        | 135/693 [00:03<00:15, 35.09it/s]Loading weights:  20%|██        | 140/693 [00:03<00:20, 26.38it/s]Loading weights:  21%|██        | 147/693 [00:04<00:17, 31.98it/s]Loading weights:  22%|██▏       | 151/693 [00:04<00:18, 29.91it/s]Loading weights:  24%|██▍       | 165/693 [00:04<00:11, 46.34it/s]Loading weights:  25%|██▍       | 171/693 [00:04<00:11, 43.94it/s]Loading weights:  26%|██▋       | 183/693 [00:04<00:11, 43.50it/s]Loading weights:  27%|██▋       | 188/693 [00:04<00:11, 43.65it/s]Loading weights:  28%|██▊       | 193/693 [00:05<00:12, 38.69it/s]Loading weights:  30%|██▉       | 206/693 [00:05<00:09, 52.35it/s]Loading weights:  31%|███       | 212/693 [00:05<00:10, 44.26it/s]Loading weights:  31%|███▏      | 217/693 [00:05<00:13, 34.11it/s]Loading weights:  32%|███▏      | 221/693 [00:05<00:14, 33.31it/s]Loading weights:  32%|███▏      | 225/693 [00:06<00:13, 34.05it/s]Loading weights:  34%|███▍      | 234/693 [00:06<00:10, 42.59it/s]Loading weights:  34%|███▍      | 239/693 [00:06<00:11, 39.49it/s]Loading weights:  36%|███▋      | 252/693 [00:06<00:08, 53.82it/s]Loading weights:  37%|███▋      | 258/693 [00:06<00:09, 45.66it/s]Loading weights:  39%|███▉      | 269/693 [00:06<00:07, 58.83it/s]Loading weights:  40%|███▉      | 276/693 [00:06<00:07, 56.97it/s]Loading weights:  41%|████      | 283/693 [00:07<00:08, 48.92it/s]Loading weights:  42%|████▏     | 289/693 [00:07<00:10, 40.01it/s]Loading weights:  44%|████▎     | 303/693 [00:07<00:08, 47.05it/s]Loading weights:  44%|████▍     | 308/693 [00:07<00:09, 40.99it/s]Loading weights:  46%|████▋     | 321/693 [00:07<00:07, 52.85it/s]Loading weights:  47%|████▋     | 327/693 [00:08<00:07, 49.91it/s]Loading weights:  49%|████▉     | 343/693 [00:08<00:04, 70.44it/s]Loading weights:  51%|█████     | 351/693 [00:08<00:06, 53.87it/s]Loading weights:  52%|█████▏    | 358/693 [00:08<00:08, 39.40it/s]Loading weights:  54%|█████▎    | 372/693 [00:08<00:06, 50.18it/s]Loading weights:  55%|█████▍    | 379/693 [00:09<00:06, 45.62it/s]Loading weights:  56%|█████▌    | 385/693 [00:09<00:06, 46.98it/s]Loading weights:  56%|█████▋    | 391/693 [00:09<00:07, 41.55it/s]Loading weights:  57%|█████▋    | 397/693 [00:09<00:06, 43.47it/s]Loading weights:  60%|█████▉    | 413/693 [00:09<00:04, 57.93it/s]Loading weights:  61%|██████    | 420/693 [00:09<00:05, 53.83it/s]Loading weights:  61%|██████▏   | 426/693 [00:10<00:06, 40.97it/s]Loading weights:  64%|██████▎   | 441/693 [00:10<00:04, 56.37it/s]Loading weights:  65%|██████▍   | 448/693 [00:10<00:04, 53.63it/s]Loading weights:  66%|██████▌   | 459/693 [00:10<00:04, 49.95it/s]Loading weights:  67%|██████▋   | 465/693 [00:10<00:05, 44.20it/s]Loading weights:  69%|██████▊   | 476/693 [00:10<00:03, 55.78it/s]Loading weights:  70%|██████▉   | 483/693 [00:11<00:03, 54.27it/s]Loading weights:  71%|███████   | 490/693 [00:11<00:04, 40.97it/s]Loading weights:  71%|███████▏  | 495/693 [00:11<00:06, 31.02it/s]Loading weights:  74%|███████▎  | 510/693 [00:11<00:04, 41.92it/s]Loading weights:  74%|███████▍  | 515/693 [00:12<00:04, 35.75it/s]Loading weights:  75%|███████▌  | 520/693 [00:12<00:05, 33.02it/s]Loading weights:  76%|███████▌  | 528/693 [00:12<00:05, 32.77it/s]Loading weights:  77%|███████▋  | 532/693 [00:12<00:06, 26.42it/s]Loading weights:  79%|███████▊  | 545/693 [00:13<00:03, 41.62it/s]Loading weights:  80%|███████▉  | 551/693 [00:13<00:03, 41.04it/s]Loading weights:  80%|████████  | 557/693 [00:13<00:03, 37.54it/s]Loading weights:  81%|████████  | 562/693 [00:13<00:03, 32.77it/s]Loading weights:  82%|████████▏ | 566/693 [00:13<00:03, 33.20it/s]Loading weights:  84%|████████▎ | 579/693 [00:13<00:02, 39.79it/s]Loading weights:  84%|████████▍ | 584/693 [00:14<00:03, 34.06it/s]Loading weights:  86%|████████▌ | 595/693 [00:14<00:02, 44.71it/s]Loading weights:  87%|████████▋ | 601/693 [00:14<00:02, 32.73it/s]Loading weights:  87%|████████▋ | 606/693 [00:14<00:02, 33.94it/s]Loading weights:  89%|████████▊ | 614/693 [00:14<00:01, 39.69it/s]Loading weights:  89%|████████▉ | 620/693 [00:15<00:01, 37.76it/s]Loading weights:  90%|█████████ | 625/693 [00:15<00:01, 34.82it/s]Loading weights:  91%|█████████ | 630/693 [00:15<00:02, 28.82it/s]Loading weights:  91%|█████████▏| 634/693 [00:15<00:02, 26.90it/s]Loading weights:  94%|█████████▎| 648/693 [00:15<00:01, 38.82it/s]Loading weights:  94%|█████████▍| 652/693 [00:16<00:01, 29.60it/s]Loading weights:  96%|█████████▌| 666/693 [00:16<00:00, 41.09it/s]Loading weights:  97%|█████████▋| 671/693 [00:16<00:00, 36.36it/s]Loading weights:  97%|█████████▋| 675/693 [00:16<00:00, 35.89it/s]Loading weights:  99%|█████████▊| 684/693 [00:16<00:00, 45.95it/s]Loading weights: 100%|█████████▉| 690/693 [00:16<00:00, 45.01it/s]Loading weights: 100%|██████████| 693/693 [00:17<00:00, 40.27it/s]
+Traceback (most recent call last):
+  File "/opt/tierA/bench/tier-a/harness/run_hf.py", line 215, in <module>
+    main()
+    ~~~~^^
+  File "/opt/tierA/bench/tier-a/harness/run_hf.py", line 147, in main
+    model = AutoModelForCausalLM.from_pretrained(args.model, **load_kwargs)
+  File "/opt/bench/lib/python3.13/site-packages/transformers/models/auto/auto_factory.py", line 402, in from_pretrained
+    return model_class.from_pretrained(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        pretrained_model_name_or_path, *model_args, config=config, **hub_kwargs, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/bench/lib/python3.13/site-packages/transformers/modeling_utils.py", line 4476, in from_pretrained
+    accelerate_dispatch(model, hf_quantizer, device_map, offload_folder, disk_offload_index, offload_buffers)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/bench/lib/python3.13/site-packages/transformers/integrations/accelerate.py", line 400, in accelerate_dispatch
+    dispatch_model(model, **device_map_kwargs)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/bench/lib/python3.13/site-packages/accelerate/big_modeling.py", line 432, in dispatch_model
+    attach_align_device_hook_on_blocks(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        model,
+        ^^^^^^
+    ...<6 lines>...
+        tied_params_map=tied_params_map,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/bench/lib/python3.13/site-packages/accelerate/hooks.py", line 707, in attach_align_device_hook_on_blocks
+    attach_align_device_hook_on_blocks(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        child,
+        ^^^^^^
+    ...<7 lines>...
+        tied_params_map=tied_params_map,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/bench/lib/python3.13/site-packages/accelerate/hooks.py", line 707, in attach_align_device_hook_on_blocks
+    attach_align_device_hook_on_blocks(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        child,
+        ^^^^^^
+    ...<7 lines>...
+        tied_params_map=tied_params_map,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/bench/lib/python3.13/site-packages/accelerate/hooks.py", line 707, in attach_align_device_hook_on_blocks
+    attach_align_device_hook_on_blocks(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        child,
+        ^^^^^^
+    ...<7 lines>...
+        tied_params_map=tied_params_map,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/bench/lib/python3.13/site-packages/accelerate/hooks.py", line 689, in attach_align_device_hook_on_blocks
+    attach_execution_device_hook(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        module,
+        ^^^^^^^
+    ...<3 lines>...
+        tied_params_map=tied_params_map,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/bench/lib/python3.13/site-packages/accelerate/hooks.py", line 482, in attach_execution_device_hook
+    attach_execution_device_hook(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        child,
+        ^^^^^^
+    ...<3 lines>...
+        tied_params_map=tied_params_map,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/bench/lib/python3.13/site-packages/accelerate/hooks.py", line 471, in attach_execution_device_hook
+    if not hasattr(module, "_hf_hook") and len(module.state_dict()) > 0:
+                                               ~~~~~~~~~~~~~~~~~^^
+  File "/opt/bench/lib/python3.13/site-packages/torch/nn/modules/module.py", line 2270, in state_dict
+    module.state_dict(
+    ~~~~~~~~~~~~~~~~~^
+        destination=destination,
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+        prefix=prefix + name + ".",
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        keep_vars=keep_vars,
+        ^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/bench/lib/python3.13/site-packages/torch/nn/modules/module.py", line 2270, in state_dict
+    module.state_dict(
+    ~~~~~~~~~~~~~~~~~^
+        destination=destination,
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+        prefix=prefix + name + ".",
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        keep_vars=keep_vars,
+        ^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/bench/lib/python3.13/site-packages/torch/nn/modules/module.py", line 2267, in state_dict
+    self._save_to_state_dict(destination, prefix, keep_vars)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/bench/lib/python3.13/site-packages/bitsandbytes/nn/modules.py", line 606, in _save_to_state_dict
+    for k, v in self.weight.quant_state.as_dict(packed=True).items():
+                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/opt/bench/lib/python3.13/site-packages/bitsandbytes/functional.py", line 565, in as_dict
+    "nested_offset": self.offset.item(),
+                     ~~~~~~~~~~~~~~~~^^
+  File "/opt/bench/lib/python3.13/site-packages/torch/_meta_registrations.py", line 8086, in meta_local_scalar_dense
+    raise RuntimeError("Tensor.item() cannot be called on meta tensors")
+RuntimeError: Tensor.item() cannot be called on meta tensors

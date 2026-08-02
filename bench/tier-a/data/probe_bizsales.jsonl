@@ -1,0 +1,15 @@
+{"id": "bz01", "category": "third_person", "note": "Acme Freight signed as a customer in March.", "gold": [{"subject": "Acme Freight", "relation": "customer_of", "object": "us"}]}
+{"id": "bz02", "category": "first_person", "note": "I own the Northwind account now that Priya has moved teams.", "gold": [{"subject": "user", "relation": "owns_account", "object": "Northwind"}]}
+{"id": "bz03", "category": "multi_fact", "note": "Marta runs sales at Corvo Labs out of their Wellington office.", "gold": [{"subject": "Marta", "relation": "has_role", "object": "sales"}, {"subject": "Marta", "relation": "works_for", "object": "Corvo Labs"}, {"subject": "Corvo Labs", "relation": "located_in", "object": "Wellington"}]}
+{"id": "bz04", "category": "novel_pred", "note": "The Halden contract renews on 1 October each year.", "gold": [{"subject": "Halden contract", "relation": "renews_on", "object": "1 October"}]}
+{"id": "bz05", "category": "governance", "note": "Discount approval above 20% was decided by the revenue committee.", "gold": [{"subject": "discount approval above 20%", "relation": "decided_by", "object": "revenue committee"}]}
+{"id": "bz06", "category": "governance", "note": "The 2026 pricing sheet supersedes the 2025 one.", "gold": [{"subject": "2026 pricing sheet", "relation": "supersedes", "object": "2025 pricing sheet"}]}
+{"id": "bz07", "category": "negation", "note": "Acme did not renew this year, so they're off the books.", "gold": []}
+{"id": "bz08", "category": "negation", "note": "Priya is no longer on the pricing working group.", "gold": []}
+{"id": "bz09", "category": "transient", "note": "Halden might close by Friday if legal moves fast.", "gold": []}
+{"id": "bz10", "category": "transient", "note": "The call with Northwind went really well, felt very positive.", "gold": []}
+{"id": "bz11", "category": "implicit", "note": "Sent the renewal paperwork to Marta at Corvo Labs again this quarter.", "gold": [{"subject": "Marta", "relation": "works_for", "object": "Corvo Labs"}]}
+{"id": "bz12", "category": "ambiguous", "note": "Their biggest account churned last month.", "gold": []}
+{"id": "bz13", "category": "infra", "note": "The billing service runs on billing-prod-1 at 10.30.0.8.", "gold": [{"subject": "billing service", "relation": "has_hostname", "object": "billing-prod-1"}, {"subject": "billing service", "relation": "device_has_ip", "object": "10.30.0.8"}]}
+{"id": "bz14", "category": "multi_fact", "note": "Halden Logistics is a customer, based in Oslo, and Ingrid is their technical contact.", "gold": [{"subject": "Halden Logistics", "relation": "customer_of", "object": "us"}, {"subject": "Halden Logistics", "relation": "located_in", "object": "Oslo"}, {"subject": "Ingrid", "relation": "technical_contact_for", "object": "Halden Logistics"}]}
+{"id": "bz15", "category": "third_person", "note": "Northwind is on the enterprise tier.", "gold": [{"subject": "Northwind", "relation": "subscription_tier", "object": "enterprise"}]}
