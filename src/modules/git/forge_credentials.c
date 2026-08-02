@@ -343,6 +343,55 @@ char **forge_cred_build_server_env(char *const *parent_environ, const char *askp
    return envp;
 }
 
+/* A user-facing companion to the askpass shim.
+ *
+ * Removing GH_TOKEN from the editor environment closed a real leak — anything
+ * that could see the process could read the secret out of /proc/<pid>/environ —
+ * but it also took away the only way a user could reach their own token from the
+ * integrated terminal for something other than git (a curl against the forge
+ * API, a release script). Telling people to `cat /proc/self/fd/$AIMEE_GIT_TOKEN_FD`
+ * is a worse answer than shipping the one line that does it.
+ *
+ * This prints the token on stdout and nothing else, so `TOKEN=$(aimee-git-token)`
+ * works. The secret still lives only in the descriptor and in the memory of
+ * whatever asked for it — never in an environment block. Returns the absolute
+ * path, or NULL. */
+const char *forge_cred_token_helper(void)
+{
+   static char path[4096];
+   static int tried = 0;
+   if (tried)
+      return path[0] ? path : NULL;
+   tried = 1;
+   const char *dir = config_default_dir();
+   if (!dir || !dir[0])
+      return NULL;
+   snprintf(path, sizeof(path), "%s/aimee-git-token", dir);
+   FILE *f = fopen(path, "w");
+   if (!f)
+   {
+      path[0] = '\0';
+      return NULL;
+   }
+   /* Same all-digits guard as the askpass: the value is used as a /proc/self/fd
+    * path component. No descriptor means no token and a non-zero exit, so a
+    * script fails loudly instead of silently using an empty string. */
+   fputs("#!/bin/sh\n"
+         "case \"$AIMEE_GIT_TOKEN_FD\" in\n"
+         "  ''|*[!0-9]*)\n"
+         "    echo \"aimee-git-token: no credential in this session\" >&2\n"
+         "    exit 1 ;;\n"
+         "esac\n"
+         "cat \"/proc/self/fd/$AIMEE_GIT_TOKEN_FD\" 2>/dev/null || {\n"
+         "  echo \"aimee-git-token: credential descriptor is unreadable\" >&2\n"
+         "  exit 1\n"
+         "}\n",
+         f);
+   fclose(f);
+   chmod(path, 0700);
+   return path;
+}
+
 const char *forge_cred_askpass_shim(void)
 {
    static char path[4096];

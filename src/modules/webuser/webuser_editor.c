@@ -2,9 +2,10 @@
 /* webuser_editor.c — single-environment code-server supervisor. See header. */
 #include "webuser_editor.h"
 
-#include "aimee.h"           /* MAX_PATH_LEN */
-#include "git_cred_inject.h" /* git_cred_inject_build_env/free_env (vault git env) */
-#include "workspace_scope.h" /* ws_scope_user_root, ws_scope_name_valid */
+#include "aimee.h"             /* MAX_PATH_LEN */
+#include "forge_credentials.h" /* forge_cred_token_helper */
+#include "git_cred_inject.h"   /* git_cred_inject_build_env/free_env (vault git env) */
+#include "workspace_scope.h"   /* ws_scope_user_root, ws_scope_name_valid */
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -236,8 +237,9 @@ char **webuser_editor_build_env(const char *principal, const char *userroot, int
    while (src[sc])
       sc++;
 
-   /* sc inherited + HOME + 3 (GIT_CONFIG_* credential.helper disable) + NULL. */
-   char **out = calloc((size_t)sc + 5, sizeof(char *));
+   /* sc inherited + HOME + 3 (GIT_CONFIG_* credential.helper disable)
+    * + AIMEE_GIT_TOKEN_CMD + NULL. */
+   char **out = calloc((size_t)sc + 6, sizeof(char *));
    if (!out)
    {
       git_cred_inject_free_env(inner);
@@ -263,6 +265,21 @@ char **webuser_editor_build_env(const char *principal, const char *userroot, int
       goto oom;
    if (!(out[o++] = strdup("GIT_CONFIG_VALUE_0=")))
       goto oom;
+   /* Git authenticates through GIT_ASKPASS without the user doing anything. For
+    * everything else a terminal might need the token for — a curl against the
+    * forge API, a release script — point at the helper that prints it, since the
+    * environment deliberately no longer carries GH_TOKEN. */
+   if (inner)
+   {
+      const char *tokcmd = forge_cred_token_helper();
+      if (tokcmd && tokcmd[0])
+      {
+         char tc[MAX_PATH_LEN + 32];
+         snprintf(tc, sizeof(tc), "AIMEE_GIT_TOKEN_CMD=%s", tokcmd);
+         if (!(out[o++] = strdup(tc)))
+            goto oom;
+      }
+   }
    out[o] = NULL;
    git_cred_inject_free_env(inner);
    return out;
