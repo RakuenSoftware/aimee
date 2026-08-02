@@ -1,0 +1,4 @@
+[17:18:15Z] === XTX (Vulkan1), llama-b10210, E4B UD-Q4, no MTP, 60 notes, 2 passes each
+[17:18:15Z] A. slot count alone
+[17:40:51Z]   np32_conc1 pass 1: never healthy
+[17:40:51Z] B. concurrency sweep

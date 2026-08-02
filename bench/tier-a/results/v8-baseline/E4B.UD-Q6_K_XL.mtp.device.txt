@@ -1,0 +1,5 @@
+model_loaded: gemma-4-E4B-it-UD-Q6_K_XL.gguf
+total_slots : 4
+speculative : True
+0, NVIDIA GeForce RTX 5080
+4994 MiB

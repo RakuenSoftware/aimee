@@ -471,3 +471,50 @@ The most expensive single lesson: **n=70 with no interval became a constant
 quoted in three source files.** The second: **testing an API and testing a prompt
 separately is how a missing connection between them stays invisible** —
 `db2_fact_retract` was complete, tested, and unreachable for months.
+
+## 15. Quant: the evidence is the replication, not any single interval
+
+Corpus v5, 1001 notes, prompt v8, all arms under MTP at concurrency 1, same card,
+one variable:
+
+| | strict F1 | rel-agnostic | abstention | spurious |
+|---|---:|---:|---:|---:|
+| E2B Q4 | 0.6114 | **0.7728** | **0.689** | **101** |
+| E2B Q6 | **0.6179** | 0.7676 | 0.661 | 112 |
+| E4B Q4 | 0.6189 | 0.7421 | 0.556 | 146 |
+| E4B Q6 | **0.6339** | **0.7556** | **0.578** | **139** |
+
+Paired bootstrap, 5000 replicates:
+
+| pair | delta | 95% CI |
+|---|---:|---|
+| E2B Q6 − Q4 | +0.0065 | [−0.0145, +0.0272] |
+| E4B Q6 − Q4 | +0.0150 | [−0.0040, +0.0333] |
+
+Both intervals cross zero, and reading either run in isolation would call them
+indistinguishable. That reading is wrong, and it is worth being precise about
+why, because it is a general trap.
+
+**This is the 8th data point and the 5th corpus showing Q4 -> Q6 improving E2B,
+always in the same direction.** Eight independent replications agreeing on sign
+is roughly p = 0.008 by a sign test alone -- stronger evidence than any single
+1001-note interval, and invisible to an analysis that only ever looks at one run.
+A per-run CI answers "could this run have come out the other way"; it does not
+answer "does this effect exist", which is what replication answers.
+
+The corollary matters for how this benchmark is used: chasing significance
+within one corpus is the wrong instrument for effects of this size. Running the
+same comparison on a new corpus and checking the SIGN is cheaper and more
+informative than growing n.
+
+### The decision that follows
+
+- **E2B: Q4.** The gain is real and consistent but small, and it costs ~1.4 GiB
+  against Q6 (2.97 vs 4.39 on disk). On the E2B side that trade is not worth it.
+- **E4B: Q6.** Roughly 2.3x the delta, and unlike E2B both metrics agree --
+  strict AND relation-agnostic favour Q6, with better abstention and fewer
+  spurious triples. E2B's two views point in opposite directions, which is what
+  a genuinely marginal effect looks like.
+
+Q4 E2B + Q6 E4B is the pairing: the memory saved on the small model is spent
+where the same quant step buys more than twice as much.
