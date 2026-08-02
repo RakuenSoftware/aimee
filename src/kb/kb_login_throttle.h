@@ -54,6 +54,13 @@ extern "C"
     * single shared bucket rather than as "no limit". */
    void kb_login_throttle_set_peer(const char *peer_ip);
 
+   /* 1 when the peer for the request being served is loopback, 0 otherwise
+    * (including when no peer was recorded — an unknown peer is never treated as
+    * local). The plain listener records the peer for every accepted connection;
+    * callers that reach the router directly, and the mTLS listener, leave it
+    * unset and are therefore never considered local. */
+   int kb_login_throttle_peer_is_loopback(void);
+
    /* May this attempt proceed? Returns 0 to allow, or a POSITIVE Retry-After in
     * seconds to refuse. Checks the peer budget and the username budget and
     * returns the longer wait of the two. Purely a query — it records nothing, so

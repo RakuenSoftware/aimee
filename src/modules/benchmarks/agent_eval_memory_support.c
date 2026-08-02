@@ -982,7 +982,7 @@ int mem_eval_load_corpus(const char *corpus_path, mem_eval_case_t *cases, int ma
       }
 
       {
-         const char *embed_cmd = config_embedding_command_current(NULL);
+         const char *embed_cmd = config_embedder_command_current(NULL);
          if (memory_embed(m.id, embed_cmd) != 0)
          {
             fprintf(stderr, "mem_eval_load_corpus: memory_embed failed for fixture %s\n",
@@ -1252,13 +1252,13 @@ int mem_eval_open_temp_db(void)
 {
    /* Pin the embedding dim BEFORE the temp store applies its schema: the scratch
     * store's vector columns are sized by db2_embedding_dim(), and the corpus is
-    * embedded via config_embedding_command (builtin => 384-dim when no embedder is
+    * embedded via config_embedder_command (builtin => 384-dim when no embedder is
     * configured). Without this, db2_embedding_dim()'s 1024 default disagrees with
     * the builtin embed and every vector insert fails. Mirrors bootstrap_db2's pin.
     * (The sqlite shim ignores vector dim, so this only bites the real-libpq store.) */
-   db2_set_embedding_dim_default(config_embedding_dim_default());
-   db2_set_embedding_dim(config_resolve_embedding_dim_current());
-   db2_set_embedding_dim_pinned(config_embedding_dim_pinned_current());
+   db2_set_embedding_dim_default(config_embedder_dims_default());
+   db2_set_embedding_dim(config_resolve_embedder_dims_current());
+   db2_set_embedding_dim_pinned(config_embedder_dims_pinned_current());
 
    if (db2_eval_open_temp_store() != 0)
    {

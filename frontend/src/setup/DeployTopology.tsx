@@ -1,36 +1,36 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button, useToast } from '@rakuensoftware/smoothgui';
 import { loadConfig, saveConfigValue, type ConfigMap } from './configApi';
 import { isRestartKey } from './wizardSteps';
 import {
-  ROLES,
-  embedderChangeImpact,
-  rolePlaceable,
-  type EmbedderChoice,
-  type Tier,
-  type Role,
-  type Placement,
-  type HostInfo,
-  placementOptions,
-  placementOptionId,
-  configToPlacement,
-  synthIsTierAOnly,
+  SYNTHESIS_MODELS,
   buildDesiredConfig,
+  configToEmbedder,
+  configToSynthesis,
+  embedderChangeImpact,
+  imageHasLlamaCpp,
+  imageSynthesisModel,
+  type EmbedderChoice,
+  type EmbedderSelection,
+  type SynthesisSelection,
 } from './deployTopology';
 
-/* Wizard — Deploy topology (local knowledge base only). Places the three LLM
- * roles (embedder / synthesizer) onto the page-2 config record (per-role
- * llm_* keys), which `aimee config deploy-env` translates to the compose stack.
- * Every write goes through the existing /api/config/set allowlist (no new backend).
- * Nothing is placed on a container of ours: aimee-llm is retired, the embedder is
- * bundled into the knowledge base, and synthesis is external or off.
+/* Wizard — Deploy topology (local knowledge base only). Two choices: which
+ * EMBEDDER turns text into vectors, and which SYNTHESIS model writes curation and
+ * summaries. Every write goes through the existing /api/config/set allowlist (no
+ * new backend).
+ *
+ * There is no host or GPU picker any more. Those placed the retired aimee-llm
+ * container; the aimee-kb image variant now decides which embedder is baked in and
+ * whether llama.cpp ships alongside, so placement is a deployment-time fact rather
+ * than a wizard question.
  *
  * The knowledge-base local/remote choice lives in the preceding KnowledgeBase step;
- * this step is only shown for kb_mode='local', so it no longer renders the KB fork.
+ * this step is only shown for kb_mode='local'.
  *
- * Self-contained like PrimaryChooser: it loads config + GET /api/hosts, guards
- * every save (Toast + stay put on failure), and reports the restart-class keys it
- * changed so the wizard can list them on its summary. */
+ * Self-contained like PrimaryChooser: it loads config, guards every save (Toast +
+ * stay put on failure), and reports the restart-class keys it changed so the
+ * wizard can list them on its summary. */
 
 function csrf(): string {
   try {
@@ -41,23 +41,13 @@ function csrf(): string {
   return '';
 }
 
-async function fetchHosts(fetchImpl?: typeof fetch): Promise<HostInfo[]> {
-  const f = fetchImpl ?? fetch;
-  try {
-    const r = await f('/api/hosts', { headers: { 'X-CSRF-Token': csrf() } });
-    const d = (await r.json()) as { hosts?: HostInfo[] };
-    return Array.isArray(d.hosts) ? d.hosts : [];
-  } catch {
-    return [];
-  }
-}
-
 async function fetchEmbedders(fetchImpl?: typeof fetch): Promise<EmbedderChoice[]> {
   const f = fetchImpl ?? fetch;
   try {
     const r = await f('/api/embedders', { headers: { 'X-CSRF-Token': csrf() } });
+    if (!r.ok) return [];
     const d = (await r.json()) as { embedders?: EmbedderChoice[] };
-    return Array.isArray(d.embedders) ? d.embedders : [];
+    return d.embedders ?? [];
   } catch {
     // A deployment whose server predates the endpoint still gets the free-text field;
     // it just does not get a picker.
@@ -73,78 +63,73 @@ export interface DeployTopologyProps {
   fetchImpl?: typeof fetch;
 }
 
-interface RoleUi {
-  optionId: string; // from placementOptions(host): 'cpu' | 'gpu:<i>' | 'external'
-  endpoint: string; // external endpoint text
-}
+/** The embedder picker's two routes: a model this image bakes, or someone else's
+ * endpoint. */
+type EmbedderRoute = 'bundled' | 'external';
+/** The synthesis picker's options, flattened for a <select>: 'off', 'external',
+ * or a bundled model id. */
+type SynthRoute = string;
 
 export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyProps) {
   const toast = useToast();
   const [cfg, setCfg] = useState<ConfigMap>({});
-  const [hosts, setHosts] = useState<HostInfo[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const [hostName, setHostName] = useState('');
-  const [roleUi, setRoleUi] = useState<Record<Role, RoleUi>>({
-    embed: { optionId: 'cpu', endpoint: '' },
-    synth: { optionId: 'cpu', endpoint: '' },
-  });
-  const [embedModel, setEmbedModel] = useState('');
-  const [embedDim, setEmbedDim] = useState('');
   const [embedders, setEmbedders] = useState<EmbedderChoice[]>([]);
+  const [embedRoute, setEmbedRoute] = useState<EmbedderRoute>('bundled');
+  const [embedModel, setEmbedModel] = useState('');
+  const [embedUrl, setEmbedUrl] = useState('');
+  const [embedKey, setEmbedKey] = useState('');
+  const [embedDims, setEmbedDims] = useState('');
   /** The embedder already recorded in config. Empty on a fresh install, which is what
    * makes the first choice free and every later change a confirmed one. */
   const [embedModelSaved, setEmbedModelSaved] = useState('');
   const [confirmText, setConfirmText] = useState('');
 
-  // Load config + host inventory once on mount.
+  const [synthRoute, setSynthRoute] = useState<SynthRoute>('off');
+  const [synthUrl, setSynthUrl] = useState('');
+  const [synthKey, setSynthKey] = useState('');
+
   useEffect(() => {
     let alive = true;
     (async () => {
-      const [c, h, emb] = await Promise.all([
-        loadConfig({ fetchImpl }), fetchHosts(fetchImpl), fetchEmbedders(fetchImpl),
-      ]);
-      setEmbedders(emb);
+      const [c, emb] = await Promise.all([loadConfig({ fetchImpl }), fetchEmbedders(fetchImpl)]);
       if (!alive) return;
+      setEmbedders(emb);
       setCfg(c);
-      setHosts(h);
-      // An unset embedding_model is NOT "the deployment default" — there is no
-      // default downstream. buildDesiredConfig omits the key, config_emit_deploy_env
-      // omits EMBEDDER_MODEL, and the kb entrypoint leaves the bundled model
-      // unloaded and serves the builtin lexical embedder forever. The instance then
-      // reports retrieval:"fail" and shows a permanent degraded banner, having
-      // downloaded the weights it never selected. Seed the shipped local model so
-      // the operator who accepts the default gets a working embedder.
-      //
-      // embedModelSaved keeps the RAW saved value, so embedderChangeImpact still
-      // sees from:'' on a fresh install and correctly charges nothing for this.
-      const savedModel = String(c.embedding_model ?? '');
-      setEmbedModel(savedModel || emb.find((e) => e.local)?.id || '');
-      setEmbedModelSaved(savedModel);
-      setEmbedDim(c.embedding_dim == null ? '' : String(c.embedding_dim));
 
-      // Seed the host from any local role that names one, else the local host.
-      // Fall back to an AVAILABLE host if the recorded one is no longer in the
-      // inventory — otherwise `host` is undefined and every local role silently
-      // resolves to CPU, so a Save would downgrade saved GPU placements.
-      const localOrFirst = h.find((x) => x.kind === 'local')?.name || h[0]?.name || '';
-      const recorded =
-        String(c.llm_embed_host ?? '') ||
-        String(c.llm_synth_host ?? '');
-      const seededHost = recorded && h.some((x) => x.name === recorded) ? recorded : localOrFirst;
-      setHostName(seededHost);
-
-      const ui = {} as Record<Role, RoleUi>;
-      for (const { role } of ROLES) {
-        const p = configToPlacement(c, role);
-        ui[role] = {
-          optionId: placementOptionId(p),
-          endpoint: p.backend === 'external' ? p.endpoint : '',
-        };
+      const e = configToEmbedder(c);
+      setEmbedRoute(e.kind);
+      if (e.kind === 'bundled') {
+        // An unset embedder_model is NOT "the deployment default" — there is no
+        // default downstream. buildDesiredConfig omits the key, deploy-env omits
+        // EMBEDDER_MODEL, and the kb entrypoint leaves the baked model unloaded and
+        // serves the builtin LEXICAL embedder forever: the instance comes up
+        // healthy, reports retrieval degraded, and never uses the embedder its image
+        // was built around. Seed the shipped local model so an operator who accepts
+        // the default gets a working one.
+        //
+        // embedModelSaved keeps the RAW saved value, so embedderChangeImpact still
+        // sees from:'' on a fresh install and charges nothing for this seeding.
+        setEmbedModel(e.model || emb.find((x) => x.local)?.id || '');
+        setEmbedModelSaved(e.model);
+      } else {
+        setEmbedUrl(e.endpoint);
+        setEmbedKey(e.apiKey);
+        setEmbedDims(e.dims);
+        setEmbedModelSaved('');
       }
-      setRoleUi(ui);
+
+      const s = configToSynthesis(c);
+      if (s.kind === 'off') setSynthRoute('off');
+      else if (s.kind === 'external') {
+        setSynthRoute('external');
+        setSynthUrl(s.endpoint);
+        setSynthKey(s.apiKey);
+      } else setSynthRoute(s.model);
+
       setLoaded(true);
     })();
     return () => {
@@ -152,60 +137,40 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
     };
   }, [fetchImpl]);
 
-  const host = useMemo(() => hosts.find((h) => h.name === hostName), [hosts, hostName]);
-  // Placement options for the roles that HAVE a placement. The embedder is asked for by
-  // model, not by location, so it never reads this list.
-  const options = useMemo(() => placementOptions(host, 'synth'), [host]);
-  // The embedder's two routes: bundled in the kb, or an operator's own endpoint.
-  const embedOptions = useMemo(() => placementOptions(host, 'embed'), [host]);
+  /** Only models this image can serve are offered as bundled; the rest are reachable
+   * only at an external endpoint, and offering them here would produce a container
+   * that refuses to boot. */
+  const localEmbedders = useMemo(() => embedders.filter((e) => e.local), [embedders]);
+  const hasLlama = useMemo(() => imageHasLlamaCpp(cfg), [cfg]);
+  /** The one model this image bakes, if any. Not a choice — see imageSynthesisModel. */
+  const bakedModel = useMemo(() => imageSynthesisModel(cfg), [cfg]);
+  const bakedInfo = useMemo(
+    () => SYNTHESIS_MODELS.find((m) => m.id === bakedModel),
+    [bakedModel],
+  );
+  const canRunLocal = hasLlama && bakedModel !== '';
 
-  // Resolve a role's UI selection to a concrete Placement (host-aware).
-  const resolvePlacement = useCallback(
-    (role: Role): Placement => {
-      const ui = roleUi[role];
-      // The embedder is bundled or external; there is no tier or host either way.
-      if (!rolePlaceable(role)) {
-        return ui.optionId === 'external'
-          ? { backend: 'external', endpoint: ui.endpoint.trim() }
-          : { backend: 'local', tier: '' as Tier, host: '', gpu: '' };
-      }
-      if (ui.optionId === 'external') return { backend: 'external', endpoint: ui.endpoint.trim() };
-      const opt = options.find((o) => o.id === ui.optionId) ?? options[0];
-      return opt.placement;
-    },
-    [roleUi, options],
+  const embedder: EmbedderSelection = useMemo(
+    () =>
+      embedRoute === 'external'
+        ? { kind: 'external', endpoint: embedUrl, apiKey: embedKey, dims: embedDims }
+        : { kind: 'bundled', model: embedModel },
+    [embedRoute, embedUrl, embedKey, embedDims, embedModel],
   );
 
-  /** Only models this deployment can host are offered for a local placement; the rest
-   * are reachable only at an external endpoint, and offering them here would produce a
-   * container that refuses to boot. */
-  const localEmbedders = useMemo(() => embedders.filter((e) => e.local), [embedders]);
+  const synthesis: SynthesisSelection = useMemo(() => {
+    if (synthRoute === 'off') return { kind: 'off' };
+    if (synthRoute === 'external') return { kind: 'external', endpoint: synthUrl, apiKey: synthKey };
+    return { kind: 'bundled', model: synthRoute };
+  }, [synthRoute, synthUrl, synthKey]);
+
   const impact = useMemo(
-    () => embedderChangeImpact(embedModelSaved, embedModel, embedders),
-    [embedModelSaved, embedModel, embedders],
+    () =>
+      embedderChangeImpact(embedModelSaved, embedRoute === 'bundled' ? embedModel : '', embedders),
+    [embedModelSaved, embedRoute, embedModel, embedders],
   );
   const needsConfirm = impact !== 'none';
   const confirmed = confirmText.trim().toUpperCase() === 'RE-EMBED';
-
-  const setRole = (role: Role, patch: Partial<RoleUi>) =>
-    setRoleUi((p) => ({ ...p, [role]: { ...p[role], ...patch } }));
-
-  // When the host changes, a previously chosen GPU may not exist — fall back to CPU.
-  useEffect(() => {
-    if (!loaded) return;
-    setRoleUi((prev) => {
-      let changed = false;
-      const next = { ...prev };
-      for (const { role } of ROLES) {
-        const id = prev[role].optionId;
-        if (id !== 'external' && !options.some((o) => o.id === id)) {
-          next[role] = { ...prev[role], optionId: 'cpu' };
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
-  }, [options, loaded]);
 
   async function save() {
     // Changing the embedder on a kb that already recorded one invalidates every stored
@@ -219,19 +184,23 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
       );
       return;
     }
+    if (embedRoute === 'external' && embedDims.trim() === '') {
+      setError(
+        'An external embedder needs its dimension: the kb sizes the vector columns from it and cannot derive the width of an endpoint it does not serve.',
+      );
+      return;
+    }
     setSaving(true);
     setError('');
 
-    // Build the full desired {key: value} map for the current selection. This step
-    // is local-only, so kb_mode is fixed to 'local' (the KnowledgeBase step already
-    // recorded the choice; re-asserting it is idempotent).
+    // This step is local-only, so kb_mode is fixed to 'local' (the KnowledgeBase step
+    // already recorded the choice; re-asserting it is idempotent).
     const desired = buildDesiredConfig({
       kbMode: 'local',
       kbUrl: '',
       kbBearer: '',
-      placements: { embed: resolvePlacement('embed'), synth: resolvePlacement('synth') },
-      embedModel,
-      embedDim,
+      embedder,
+      synthesis,
     });
 
     // Persist only what changed (mirrors SetupWizard.saveStep); abort + Toast on
@@ -241,7 +210,7 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
     for (const [key, value] of Object.entries(desired)) {
       const original = cfg[key] == null ? '' : String(cfg[key]);
       if (value === original) continue;
-      const coerced: unknown = key === 'embedding_dim' ? (value === '' ? '' : Number(value)) : value;
+      const coerced: unknown = key === 'embedder_dims' ? (value === '' ? '' : Number(value)) : value;
       // fetchImpl is threaded here too, not just on the load path: without it the save
       // path reaches the global fetch and cannot be exercised in a test, which is how the
       // embedder confirm gate went unverified.
@@ -264,86 +233,124 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
   }
 
   if (!loaded) {
-    return <div style={{ fontSize: 13, color: '#667', padding: '8px 0' }}>Loading hosts…</div>;
+    return <div style={{ fontSize: 13, color: '#667', padding: '8px 0' }}>Loading…</div>;
   }
 
   return (
     <div style={{ display: 'grid', gap: 16, marginBottom: 8 }}>
       <section style={{ display: 'grid', gap: 10 }}>
-        <div style={sectionTitle}>Model roles</div>
-        <div style={{ fontSize: 11.5, color: '#778', marginTop: -2 }}>
-          Nothing is placed on a host here. The embedder runs inside the knowledge base from weights
-          in its image, and synthesis is an endpoint you run, or off.
-        </div>
+        <div style={sectionTitle}>Embedder</div>
+        <div style={roleCard}>
+          <div style={{ fontSize: 11.5, color: '#778', marginBottom: 4 }}>
+            Turns text into vectors. Runs inside the knowledge base unless you point it elsewhere.
+          </div>
+          <select
+            style={input}
+            aria-label="embedder"
+            value={embedRoute === 'external' ? 'external' : embedModel}
+            onChange={(e) => {
+              const v = e.target.value;
+              setConfirmText('');
+              if (v === 'external') setEmbedRoute('external');
+              else {
+                setEmbedRoute('bundled');
+                setEmbedModel(v);
+              }
+            }}
+          >
+            <option value="">(deployment default)</option>
+            {localEmbedders.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.id} — {e.dim}-dim, {e.context} ctx{e.prefixed ? '' : ', no prefixes'}
+              </option>
+            ))}
+            <option value="external">External endpoint</option>
+          </select>
 
-        {ROLES.map(({ role, label, blurb }) => {
-          const ui = roleUi[role];
-          const p = resolvePlacement(role);
-          const tierA = synthIsTierAOnly(role, p);
-          return (
-            <div key={role} style={roleCard}>
-              <div style={{ fontSize: 13.5, fontWeight: 700 }}>{label}</div>
-              <div style={{ fontSize: 11.5, color: '#778', marginBottom: 4 }}>{blurb}</div>
-              <select style={input} value={ui.optionId} onChange={(e) => setRole(role, { optionId: e.target.value })}>
-                {(rolePlaceable(role) ? options : embedOptions).map((o) => (
-                  <option key={o.id} value={o.id}>{o.label}</option>
-                ))}
-              </select>
-              {ui.optionId === 'external' && (
-                <input style={{ ...input, marginTop: 6 }} value={ui.endpoint}
-                  onChange={(e) => setRole(role, { endpoint: e.target.value })}
-                  placeholder={role === 'embed' ? 'https://embedder.example' : 'https://llm.example/v1'} />
-              )}
-              {role === 'embed' && ui.optionId === 'external' && (
-                <div style={{ display: 'grid', gap: 6, marginTop: 6 }}>
-                  <input style={input} value={embedModel} onChange={(e) => setEmbedModel(e.target.value)}
-                    placeholder="model name (for the record)" />
-                  <input style={input} value={embedDim} onChange={(e) => setEmbedDim(e.target.value)}
-                    placeholder="embedding dimension (required)" inputMode="numeric" />
-                  <div style={{ fontSize: 11, color: '#889' }}>
-                    Required: the kb cannot derive the width of an endpoint it does not serve, and
-                    it sizes the vector columns from this.
-                  </div>
-                </div>
-              )}
-              {role === 'embed' && ui.optionId !== 'external' && (
-                <div style={{ display: 'grid', gap: 4, marginTop: 6 }}>
-                  {localEmbedders.length > 0 ? (
-                    <>
-                      <select style={input} value={embedModel}
-                        onChange={(e) => { setEmbedModel(e.target.value); setConfirmText(''); }}>
-                        {/* Named for what it DOES. "(deployment default)" read as
-                            "someone sensible chose for me" and delivered no embedder
-                            at all — semantic search silently degraded to lexical. */}
-                        <option value="">(none — lexical only, search degraded)</option>
-                        {localEmbedders.map((e) => (
-                          <option key={e.id} value={e.id}>
-                            {e.id} — {e.dim}-dim, {e.context} ctx{e.prefixed ? '' : ', no prefixes'}
-                          </option>
-                        ))}
-                      </select>
-                      <div style={{ fontSize: 11, color: '#889' }}>
-                        Dimension comes from the selected model; the kb derives it at runtime.
-                      </div>
-                    </>
-                  ) : (
-                    <div style={{ fontSize: 11, color: '#889' }}>Dimension auto-detected from the tier at runtime.</div>
-                  )}
-                </div>
-              )}
-              {tierA && (
-                <div style={{ fontSize: 11, color: '#8a5a00', marginTop: 4 }}>CPU runs the Tier-A synth model only.</div>
-              )}
+          {/* The one-way door, stated at the point of choice rather than in a tooltip. */}
+          <div style={{ fontSize: 11, color: '#8a5a00', marginTop: 6 }}>
+            This choice is effectively permanent for this install: the database records the
+            vector width and refuses to start if it changes. Moving between a 384-dim and a
+            768-dim embedder later means re-embedding everything.
+          </div>
+
+          {embedRoute === 'external' && (
+            <div style={{ display: 'grid', gap: 6, marginTop: 6 }}>
+              <input style={input} value={embedUrl} onChange={(e) => setEmbedUrl(e.target.value)}
+                placeholder="https://embedder.example" aria-label="embedder endpoint" />
+              <input style={input} value={embedKey} onChange={(e) => setEmbedKey(e.target.value)}
+                placeholder="API key (blank if the endpoint needs none)" aria-label="embedder api key" />
+              <input style={input} value={embedDims} onChange={(e) => setEmbedDims(e.target.value)}
+                placeholder="embedding dimension (required)" inputMode="numeric" aria-label="embedder dimension" />
+              <div style={{ fontSize: 11, color: '#889' }}>
+                Required: the kb cannot derive the width of an endpoint it does not serve, and it
+                sizes the vector columns from this. Up to 4000.
+              </div>
             </div>
-          );
-        })}
+          )}
+          {embedRoute === 'bundled' && (
+            <div style={{ fontSize: 11, color: '#889', marginTop: 6 }}>
+              Dimension comes from the selected model; the kb derives it at runtime.
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section style={{ display: 'grid', gap: 10 }}>
+        <div style={sectionTitle}>Synthesis</div>
+        <div style={roleCard}>
+          <div style={{ fontSize: 11.5, color: '#778', marginBottom: 4 }}>
+            Writes the knowledge base’s curation and summaries. Search, recall and indexing work
+            without it.
+          </div>
+          <select style={input} aria-label="synthesis" value={synthRoute}
+            onChange={(e) => setSynthRoute(e.target.value)}>
+            <option value="off">None — synthesis off</option>
+            <option value="external">External endpoint</option>
+            {canRunLocal && (
+              <option value={bakedModel}>
+                {bakedInfo?.label ?? bakedModel} — bundled in this image
+              </option>
+            )}
+          </select>
+
+          {!canRunLocal && (
+            <div style={{ fontSize: 11, color: '#8a5a00', marginTop: 6 }}>
+              This image bundles no synthesis model, so it cannot run one locally. The model is
+              part of the image, like the embedder: pull an <code>aimee-kb-llm-e2b</code> or
+              {' '}<code>-e4b</code> tag (or the <code>-nomic-</code> equivalents) to get one, or
+              point synthesis at an external endpoint.
+            </div>
+          )}
+          {synthRoute === 'off' && (
+            <div style={{ fontSize: 11, color: '#889', marginTop: 6 }}>
+              Supported, not a gap: embedding, search, recall and indexing never call this.
+            </div>
+          )}
+          {synthRoute === 'external' && (
+            <div style={{ display: 'grid', gap: 6, marginTop: 6 }}>
+              <input style={input} value={synthUrl} onChange={(e) => setSynthUrl(e.target.value)}
+                placeholder="https://llm.example/v1" aria-label="synthesis endpoint" />
+              <input style={input} value={synthKey} onChange={(e) => setSynthKey(e.target.value)}
+                placeholder="API key (blank if the endpoint needs none)" aria-label="synthesis api key" />
+              <div style={{ fontSize: 11, color: '#889' }}>
+                Your notes are sent to whatever answers this URL.
+              </div>
+            </div>
+          )}
+          {synthRoute !== 'off' && synthRoute !== 'external' && (
+            <div style={{ fontSize: 11, color: '#889', marginTop: 6 }}>
+              {bakedInfo?.blurb} It starts with the container and downloads nothing.
+            </div>
+          )}
+        </div>
       </section>
 
       {needsConfirm && (
         <div style={{ fontSize: 12.5, color: '#8a5a00', background: '#fff8e6', border: '1px solid #f0dca8', borderRadius: 6, padding: '8px 10px', display: 'grid', gap: 6 }}>
           <div>
             <strong>Changing the embedder invalidates the existing corpus.</strong>{' '}
-            {embedModelSaved || '(none)'} → {embedModel || '(none)'}.{' '}
+            {embedModelSaved || '(none)'} → {(embedRoute === 'bundled' ? embedModel : '') || '(none)'}.{' '}
             {impact === 'reembed+schema'
               ? 'The widths differ, so the vector columns are rebuilt and everything is re-embedded.'
               : 'Pooling and prefixes define the vector space, so everything is re-embedded.'}{' '}

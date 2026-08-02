@@ -16,7 +16,7 @@ Response (stdout):
     {"version": 1, "status": "ok", "synthesis": "<prose synthesis>"}
   or {"version": 1, "status": "error", "error": "..."}
 
-Env: LLM_ENDPOINT, LLM_MODEL, LLM_API_KEY, LLM_MAX_TOKENS, LLM_TIMEOUT (same as
+Env: SYNTHESIS_ENDPOINT, SYNTHESIS_MODEL, SYNTHESIS_API_KEY, LLM_MAX_TOKENS, LLM_TIMEOUT (same as
 llm-chat.py). CURATOR_LLM_STUB_FILE short-circuits the model with file contents
 for deterministic CI. Exit codes: 0 on success, 1 on any error.
 """
@@ -37,7 +37,11 @@ CURATOR_LLM_TIMEOUT_MAX = 285
 def resolve_llm_endpoint(env) -> tuple[str, str | None]:
     """OpenAI-compatible base URL for the sidecar, or an error to report.
 
-    LLM_ENDPOINT wins when set; otherwise derive it from AIMEE_LLM_URL, the one
+    SYNTHESIS_ENDPOINT is the one endpoint the kb is configured with, and it is the
+    BASE url — this appends /v1 itself. It used to read LLM_ENDPOINT first and fall
+    back to AIMEE_LLM_URL: two spellings of one endpoint, so the sidecar and the kb
+    could be pointed at different hosts, and setting only one split them silently.
+    The rest of this note describes the one
     endpoint the kb is actually configured with (the container sets it, and the
     Dockerfile's own comment says "endpoints come from env").
 
@@ -49,13 +53,9 @@ def resolve_llm_endpoint(env) -> tuple[str, str | None]:
     address. embed-remote.py already removed its equivalent fallback for the
     same reason. Fail closed instead.
     """
-    endpoint = env.get("LLM_ENDPOINT", "").strip()
-    if endpoint:
-        return endpoint, None
-    base = env.get("AIMEE_LLM_URL", "").strip().rstrip("/")
+    base = env.get("SYNTHESIS_ENDPOINT", "").strip().rstrip("/")
     if not base:
-        return "", ("no LLM endpoint configured: set AIMEE_LLM_URL (preferred) "
-                    "or LLM_ENDPOINT for the curator sidecar")
+        return "", "no synthesis endpoint configured: set SYNTHESIS_ENDPOINT"
     return (base if base.endswith("/v1") else base + "/v1"), None
 
 
@@ -126,8 +126,8 @@ def call_llm(prompt: str, max_tokens: int) -> tuple:
     endpoint, endpoint_err = resolve_llm_endpoint(env)
     if endpoint_err:
         return None, endpoint_err
-    env["LLM_ENDPOINT"] = endpoint
-    env.setdefault("LLM_MODEL", "qwen3")
+    env["SYNTHESIS_ENDPOINT"] = endpoint
+    env.setdefault("SYNTHESIS_MODEL", "qwen3")
 
     timeout_s = min(
         max(int(env.get("LLM_TIMEOUT", str(CURATOR_LLM_TIMEOUT_DEFAULT))), 1),

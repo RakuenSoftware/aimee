@@ -591,19 +591,14 @@ typedef struct
 
 static const kb_setting_t KB_SETTINGS[] = {
     /* Embedder — the kb embeds and searches; aimee-server only reads the value. */
-    {"embedding_command", "Embedder", 0},
-    {"embedding_model", "Embedder", 0},
-    {"embedding_dim", "Embedder", 0},
-    {"embedding_endpoint", "Embedder", 0},
-    {"llm_embed_backend", "Embedder", 1},
+    {"embedder_command", "Embedder", 0},
+    {"embedder_model", "Embedder", 0},
+    {"embedder_dims", "Embedder", 0},
+    {"embedder_url", "Embedder", 0},
     /* Reranker. */
     /* Synth tier. */
-    {"llm_synth_backend", "Synth", 1},
-    {"llm_synth_host", "Synth", 1},
-    {"llm_synth_gpu", "Synth", 1},
-    {"llm_synth_tier", "Synth", 1},
-    {"llm_synth_endpoint", "Synth", 1},
-    {"llm_synth_model", "Synth", 1},
+    {"synthesis_endpoint", "Synth", 1},
+    {"synthesis_model", "Synth", 1},
     /* Knowledge base proper (all read inside the kb binary). */
     {"kb_search_max_results", "Knowledge base", 0},
     {"kb_fusion_mode", "Knowledge base", 0},

@@ -18,6 +18,13 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
+int config_cross_verify(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, cross_verify), sizeof(v), &v);
+   return v;
+}
+
 int config_retry_max_attempts(void)
 {
    int v = 0;
@@ -669,6 +676,13 @@ int config_kb_api_http_port(void)
    return v;
 }
 
+int config_synthesis_thinking(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, synthesis_thinking), sizeof(v), &v);
+   return v;
+}
+
 int config_server_api_http_port(void)
 {
    int v = 0;
@@ -981,26 +995,5 @@ int config_kb_bg_watch_enabled(void)
 {
    int v = 0;
    config_field_read(offsetof(config_t, kb_bg_watch_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_bg_watch_debounce_secs(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_bg_watch_debounce_secs), sizeof(v), &v);
-   return v;
-}
-
-double config_code_hybrid_weight_code(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, code_hybrid_weight_code), sizeof(v), &v);
-   return v;
-}
-
-double config_code_hybrid_weight_graph(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, code_hybrid_weight_graph), sizeof(v), &v);
    return v;
 }

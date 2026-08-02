@@ -1,7 +1,7 @@
 # Choosing a synthesis model
 
 aimee makes every KB reasoning call — extraction, indexing, entity judgement,
-topic synthesis — through one endpoint, `AIMEE_LLM_URL`. This page is about what
+topic synthesis — through one endpoint, `SYNTHESIS_ENDPOINT`. This page is about what
 you put behind it.
 
 There used to be two answers to that question, a cheap model for the mechanical
@@ -14,12 +14,13 @@ distinction this page replaces.
 
 | You want | Do this | What you get |
 | --- | --- | --- |
-| **Simplest thing that works** | Point `AIMEE_LLM_URL` at an external OpenAI-compatible endpoint | Best quality, no local GPU or RAM cost, your notes leave the machine |
-| **Local, and quality matters most** | an `aimee-kb` image variant with llama.cpp bundled, `gemma-4-E4B-it` (default) | 0.82 F1 extraction, 7.46 GB of weights, 3.3 tok/s on 8 CPU threads |
-| **Local, and the box is small** | the same variant, configured for `gemma-4-E2B-it` | 0.69 F1 extraction, 4.61 GB of weights, 6.3 tok/s on 8 CPU threads |
+| **Simplest thing that works** | Point `SYNTHESIS_ENDPOINT` at an external OpenAI-compatible endpoint | Best quality, no local GPU or RAM cost, your notes leave the machine |
+| **Local, and quality matters most** | pull `aimee-kb-llm-e4b` (or `aimee-kb-nomic-llm-e4b`) | 0.82 F1 extraction, 7.46 GB of weights, 3.3 tok/s on 8 CPU threads |
+| **Local, and the box is small** | pull `aimee-kb-llm-e2b` (or `aimee-kb-nomic-llm-e2b`) | 0.69 F1 extraction, 4.71 GB of weights, 6.3 tok/s on 8 CPU threads |
 
-Those weight sizes and throughputs are Q8_0, which is what was measured. The
-shipped default is Q4_K_M, which is roughly half the size and faster —
+The weight sizes are what the images actually carry: UD-Q6_K_XL, baked in. The F1
+and throughput numbers were measured at Q8_0, so read them as the shape of the
+gap between the two models rather than as a prediction of what you will see —
 see [the caveats](#caveats-you-should-read-before-leaning-on-any-of-this).
 Resident memory is larger than the weights by the KV cache for your configured
 context, which is a deployment setting rather than a property of the model.
@@ -51,19 +52,31 @@ against each other:
 | *gemma-4-12B-it (reference)* | *0.8472* | *0.792* | *0.910* | *95.7%* | *10,381 ms* |
 | *gemma-4-26B-A4B-it (reference)* | *0.8451* | *0.800* | *0.896* | *95.7%* | *44,714 ms* |
 
-The two reference rows show what you give up by staying local and small, and on
-this set the answer is: **nothing we can measure.** E4B's F1 sits 0.026 below the
-12B and 0.023 below the 26B, and neither gap is resolvable here — see
-[what these numbers can and cannot separate](#what-these-numbers-can-and-cannot-separate).
-Read those three rows as tied, not as E4B trailing slightly. Neither reference
-model is an install candidate on a 16 GB card or a CPU-only box, and neither is
-worth its latency here.
+**Only one comparison in that table is resolved by this data.** A paired
+bootstrap over the same 69 notes (5,000 replicates, `harness/bootstrap_ci.py`)
+gives:
 
-Recall is the one place a difference is large enough to be worth stating:
-0.791 for E4B against 0.910 for the 12B, a gap of 0.119. That is at the very
-edge of what this set separates, so treat it as a direction to check on your own
-data rather than a measured quantity: E4B appears to find fewer of the facts
-that are there. It does not invent more — precision runs the other way.
+| Comparison | Δ F1 | 95% CI | |
+| --- | ---: | --- | --- |
+| E2B − E4B | −0.1305 | [−0.2469, −0.0151] | real |
+| 12B − E4B | +0.0255 | [−0.0632, +0.1133] | not resolved |
+| 26B − E4B | +0.0234 | [−0.0620, +0.1135] | not resolved |
+
+So E4B genuinely beats E2B. But **this set cannot separate E4B from either
+reference model** — both intervals span zero. Earlier drafts of this page read
+those gaps as "E4B is within 0.026 F1 of a 12B", which states a closeness the
+data does not measure. The defensible claim is stronger and simpler: on a
+69-note extraction set, a 7.5B model is not distinguishable from a 12B or a 26B
+one. That is partly a statement about the models and partly about the set —
+67 gold triples means one triple is worth about 0.01 F1, so a 0.02 gap is two
+facts.
+
+Neither reference model is an install candidate on a 16 GB card or a CPU-only
+box, and neither is worth their latency here.
+
+The recall column looks like E4B's weak point — 0.791 against 0.910 for the 12B.
+Treat that as unmeasured rather than as a finding: the aggregate F1 difference is
+not resolved, and the per-component split was not bootstrapped at all.
 
 E4B's low latency is not straightforwardly a speed win: it abstains on 91% of
 the notes that have nothing to extract and emits 25 tokens at the median, where
@@ -97,22 +110,26 @@ end-to-end timings.
 
 ## Caveats you should read before leaning on any of this
 
-**The quantisation does not match.** Every number above was measured at Q8_0.
-The shipped default is `Q4_K_M`, which is roughly half the size and
-faster, and which we did not measure for quality. Expect the shipped
-configuration to be somewhat worse than the table says, by an amount we have not
-quantified.
+**Most differences on this page are too small for the set to resolve.** With 67
+gold triples over 69 scored notes, one triple is worth about 0.01 F1. Every
+comparison that matters has been run through a paired bootstrap
+(`bench/tier-a/harness/bootstrap_ci.py`, 5,000 replicates, fixed seed, importing
+`score.py`'s own matching so it cannot drift from the scorer). Where a delta is
+reported without a CI on this page, it has not been tested and should not be
+read as a ranking. Note that overlapping single-run CIs do *not* imply a
+difference is insignificant — the paired test is the one to read.
 
-### What these numbers can and cannot separate
+**The quantisation still does not match.** Every number above was measured at
+Q8_0. The bundled path ships `UD-Q6_K_XL` (Unsloth Dynamic Q6), which is a
+different quantisation, so expect the shipped configuration to differ from the
+table by an amount nobody has measured. It is close in size — 7.46 GB for E4B and
+4.71 GB for E2B, against 7.46 and 4.61 at Q8_0 — but size is not quality, and a
+dynamic quant distributes precision differently across layers rather than
+uniformly.
 
-**At n = 69, this set resolves about 0.12 F1 between two models, and about 0.03
-between two servings of the same model.** Any gap smaller than that is noise
-wearing four decimal places. The table is printed to four places because that is
-what the scorer emits, not because the fourth place means anything.
-
-Concretely: E4B versus the 12B and 26B references (gaps of 0.026 and 0.023) is
-**not** a measured difference, and no ranking should be built on it. E4B versus
-E2B (0.130) and E4B versus anything below 1B (0.31 and worse) are.
+An earlier draft named `Q4_K_M`, which is not published in these repos at all.
+That would not have failed: llama.cpp's `-hf` falls back to another file when the
+named quant is absent, so it would have silently served something else.
 
 **The gold set has one author and n is 69.** One person wrote and labelled the
 extraction set. There is no second annotator and no inter-rater agreement
@@ -130,6 +147,62 @@ the task at all, and not enough to separate 0.95 from 0.97.
 
 **E4B is not a small resident.** Local synthesis costs real memory as well as
 real CPU, and extraction runs continuously. A busy knowledge base will feel it.
+
+**The model is verified by digest, and a mirror is untrusted.** The build checks
+the fetched GGUF against Hugging Face's own sha256 and fails otherwise. That
+matters twice: it catches a truncated or half-written copy, which a length check
+cannot see (many downloaders preallocate the full size and fill it in, so a file
+can be exactly the right number of bytes and entirely wrong); and it makes
+`AIMEE_MODEL_MIRROR` safe to offer, since anyone able to write to a mirror could
+otherwise change which model your image runs.
+
+**`AIMEE_MODEL_MIRROR` builds from a local copy.** Point it at a base URL that
+serves the GGUF by filename and the build fetches from there instead of Hugging
+Face — for an air-gapped or bandwidth-limited build site, or to rebuild the whole
+matrix without pulling tens of gigabytes again. The digest check applies either
+way, so a mirror cannot quietly substitute a different file.
+
+**The model is its own image, so it is downloaded once, not once per build.**
+Each model is published separately as `aimee-model-<model>:<quant>` (built by
+`Dockerfile.model`), and the aimee-kb builds copy the layer out of it. Without
+that, the four `-llm` tags on two architectures each fetched the same GGUF:
+eight downloads of the same two files per publish, roughly 49 GB pulled from
+Hugging Face to produce about 12 GB of distinct bytes. As a registry layer it is
+fetched from ghcr instead, and the registry stores one copy no matter how many
+tags reference it. Hugging Face is touched only when the model or the quant
+changes, because the quant *is* the tag: bumping it publishes a new tag rather
+than overwriting the old one, so a rollback still finds the model it was built
+with. The fetch stage in `Dockerfile.model` is pinned to `BUILDPLATFORM` because
+the payload is architecture-independent, so a two-platform build downloads once and
+both manifests point at the same layer.
+
+`AIMEE_MODEL_SOURCE=fetch` restores the old behaviour of downloading during the
+aimee-kb build. It is the fallback, not dead code: it is what runs when the model
+image does not exist yet: bootstrapping a fresh registry, or a commit that bumps
+the quant before the matching model image has been published. CI probes for the
+tag and picks the source per build, which keeps the cache an optimisation rather
+than a dependency. The digest table lives in
+`scripts/fetch-synthesis-model.sh` and is shared by both paths, so they cannot
+disagree about which bytes are correct.
+
+**llama.cpp is compiled from a pinned tag, not downloaded.** Upstream publishes a
+Linux binary for x64 only, so a download-based install cannot produce the arm64
+images at all. `LLAMACPP_VERSION` is a git tag, which is what the build verifies — and it is the
+only thing deciding which llama.cpp a user runs, so it needs deliberate bumping
+for security fixes. Bumping it means re-checking three things, not just the
+number: that the tag still carries gemma-4 architecture support, that
+`--no-mmproj` and `LLAMA_ARG_MMPROJ_AUTO` still exist, and where the server
+target lives (it moved from `examples/` to `tools/`, which changes the cmake
+flags).
+
+**The model-to-repo mapping is fixed at build time, not resolved at run time.**
+`gemma-4-E2B-it` and `gemma-4-E4B-it` map to
+`unsloth/gemma-4-E{2,4}B-it-UD-Q6_K_XL.gguf`, fetched by exact filename and
+checked against the digest above. An earlier draft resolved a quant *tag*
+(`:Q4_K_M`) at run time instead, which is worse than it sounds: that quantisation
+is not published in these repos at all, and llama.cpp falls back to another file
+when the named quant is absent — so it would not have failed, it would have
+served something else.
 
 The full measurement record, including the defects found in the harness while
 producing these numbers, is in `bench/tier-a/MEASUREMENT_LOG.md`.
@@ -151,6 +224,12 @@ cheap model could carry the mechanical stages. It cannot. Extraction F1, same
 | SmolLM2-360M-Instruct | 0.0000 | Omits the required output wrapper entirely |
 | gemma-3-270m-it | 0.0000 | Never terminates; hits the cap on every note |
 
+This conclusion is resolved: the best of them, `granite-4.0-h-1b`, is −0.3070 F1
+against E4B, 95% CI [−0.4461, −0.1633]. The *ordering within the table* is not —
+the gaps between adjacent rows below 0.3 are a few triples wide and this set
+cannot rank them. Read the table as "none of these can do the task", not as a
+league.
+
 Two further warnings that are not about size:
 
 - **Qwen3.5-0.8B and Qwen3.5-2B are unusable here regardless of their general
@@ -158,21 +237,74 @@ Two further warnings that are not about size:
   completion tokens at the median against an 8,192 cap, and 0% valid JSON for
   the 0.8B. aimee bounds synthesis output at `MF_LLM_OUT_CAP` (8192), so this is
   a deployment failure, not a benchmark artefact.
-- **Thinking mode helps small models and hurts large ones.** E4B gains 0.084 F1
-  with thinking on (0.738 → 0.822) and E2B gains 0.045 (0.646 → 0.691). The 26B
-  model loses 0.075 (0.920 → 0.845). aimee no longer suppresses thinking, which
-  is the right default for the models on this page; if you point synthesis at a
-  large external model, prefer it with thinking off. These on/off pairs come
+- **Thinking mode helps E4B and hurts the 26B.** Paired bootstrap, same 69
+  notes, 5,000 replicates:
+
+  | Model | Δ F1 from thinking | 95% CI | |
+  | --- | ---: | --- | --- |
+  | E4B | +0.0840 | [+0.0094, +0.1712] | real |
+  | 26B | −0.0746 | [−0.1595, −0.0048] | real |
+  | E2B | +0.0812 | [−0.0337, +0.2091] | not resolved |
+
+  Both resolved deltas sit close to their interval edge, so read them as "the
+  sign is right", not as a magnitude. E2B's gain is the same size as E4B's and
+  still fails to resolve, because E2B is noisier on this set. aimee no longer
+  suppresses thinking, which the E4B result supports; if you point synthesis at
+  a large external model, prefer it with thinking off. These on/off pairs come
   from different lanes, which is sound for accuracy — the same GGUF answers the
   same wherever it is served — but the latencies are not comparable across them.
 
+  One number in this bullet's previous version could not be reproduced: it cited
+  E2B thinking-off at 0.646, and no committed prediction file scores that. The
+  four E2B lanes score 0.6099 (`ablation-conf`), 0.5793 (`gpu`), 0.5255
+  (`promptfix`) and 0.6912 (`thinking`). The table above uses `ablation-conf`,
+  the lane that matches E4B's cited thinking-off score. The 0.646 figure is
+  unsourced and has been dropped rather than reconciled.
+
+## Running one of these locally
+
+**The model is part of the image.** You do not select it at runtime — you pull the
+tag that carries it, exactly as you do for the embedder:
+
+| image | embedder | synthesis |
+| --- | --- | --- |
+| `aimee-kb` | bekko-a25m (384) | none |
+| `aimee-kb-llm-e2b` | bekko-a25m (384) | gemma-4-E2B-it |
+| `aimee-kb-llm-e4b` | bekko-a25m (384) | gemma-4-E4B-it |
+| `aimee-kb-nomic` | nomic-v2 (768) | none |
+| `aimee-kb-nomic-llm-e2b` | nomic-v2 (768) | gemma-4-E2B-it |
+| `aimee-kb-nomic-llm-e4b` | nomic-v2 (768) | gemma-4-E4B-it |
+
+Weights are baked at UD-Q6_K_XL — 7.46 GB for E4B, 4.71 GB for E2B — from
+unsloth's GGUF repos, which is where the UD quants are published.
+
+**The container downloads nothing.** An earlier design fetched the weights on
+first start and cached them on the data volume. That is a support burden: a
+first-run download fails on a rate limit, behind a proxy, on a flaky link, or on
+an air-gapped host, and it can silently serve the wrong file if a quant tag stops
+resolving. Every one of those reaches you as "synthesis never started", long after
+the deploy looked fine. `docker pull` is the one download, with the registry's
+retry and resume behind it, and an image either has its model or it does not.
+
+The cost is image size and more tags. That is the same trade the embedder already
+makes, and the reason it was made there first.
+
+Leave `SYNTHESIS_ENDPOINT` empty on these images: the container starts
+llama-server against the baked file and points synthesis at loopback. Setting it
+overrides that and uses the remote endpoint instead.
+
+The embedder axis is still the one-way choice: the database records the vector
+width and refuses to start if it changes, so pick `-nomic` up front if you want
+768-dim vectors. The synthesis axis is not one-way — you can move between an
+`-e2b` and an `-e4b` tag freely.
+
 ## Using an external model
 
-`AIMEE_LLM_URL` takes any OpenAI-compatible endpoint, hosted or self-run:
+`SYNTHESIS_ENDPOINT` takes any OpenAI-compatible endpoint, hosted or self-run:
 
 ```yaml
 environment:
-  AIMEE_LLM_URL: "https://your-endpoint.example/v1"
+  SYNTHESIS_ENDPOINT: "https://your-endpoint.example/v1"
 ```
 
 It defaults to empty, and that is deliberate rather than an oversight: the old
@@ -184,6 +316,5 @@ endpoint.
 Your notes are sent to whatever answers that URL. That is the trade the first row
 of the decision table is making.
 
-See [Local inference](LOCAL_INFERENCE.md) for how the endpoint fits the rest of
-the stack, and [KB inference backends](KB_LLM_BACKENDS.md) for the provider
-configuration surface.
+See [KB inference backends](KB_LLM_BACKENDS.md) for the provider configuration
+surface.

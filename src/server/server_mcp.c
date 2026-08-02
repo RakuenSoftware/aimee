@@ -1084,7 +1084,7 @@ cJSON *smcp_tool_search_docs(cJSON *args)
    /* The kb owns the corpus and its embedder.  Only override that embedder when
     * the operator explicitly configured a command on this server; resolving an
     * unset value to the 384-dim builtin can mismatch a remote kb's corpus. */
-   const char *embedding_command = config_embedding_command_field();
+   const char *embedding_command = config_embedder_command_field();
    /* "builtin" is also the resolver's fallback value on a thin server. It is
     * not evidence that the remote corpus was built with the 384-dim shim, so
     * leave selection to the KB just as we do for an empty field. */

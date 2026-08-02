@@ -7,6 +7,51 @@
 # Global build args, declared before the first FROM so every stage can use them.
 ARG PG_MAJOR=18
 ARG PGVECTORSCALE_VERSION=0.9.0
+# Selects which llama.cpp stage the final image copies from (see llamacpp-* below).
+ARG AIMEE_WITH_LLAMACPP=0
+# Which synthesis model is BAKED into a *-llm image: gemma-4-E2B-it or
+# gemma-4-E4B-it. Empty on the non-llm variants.
+#
+# BAKED, NOT FETCHED AT RUNTIME. This mirrors the embedder decision below for the
+# same reason: a first-run download is a support burden. It fails on a rate limit,
+# behind a proxy, on a flaky link, on an air-gapped host, or silently serves the
+# wrong file when a quant tag stops resolving — and every one of those surfaces to
+# the operator as "synthesis never started", long after deploy. An image either
+# has its model or it does not, and `docker pull` is the one download, with the
+# registry's own retry and resume behind it.
+#
+# The cost is image size and a model-per-tag matrix. That is the trade the
+# embedder already makes.
+ARG AIMEE_SYNTHESIS_MODEL=""
+# Optional mirror for the model file. Empty pulls from Hugging Face; set it to a
+# base URL that serves the GGUF by filename and the build fetches from there
+# instead. For an air-gapped or bandwidth-limited build site, and for rebuilding
+# the matrix without pulling ~24GB from the internet each time. The filename is
+# identical either way, so a mirror is just `cp` from a known-good copy.
+ARG AIMEE_MODEL_MIRROR=""
+# Where the bundled model comes from: "image" copies it out of a prebuilt
+# aimee-model-* tag (see Dockerfile.model), "fetch" downloads it here.
+#
+# "image" is what CI uses, and it is the whole point of splitting the model out:
+# the four -llm tags x two architectures share one registry layer instead of
+# pulling the same two files from Hugging Face eight times per publish.
+#
+# "fetch" is kept as the fallback, NOT as dead code. It is what runs when the
+# model tag does not exist yet — bootstrapping the registry, or a commit that
+# bumps the quant before the new model image has been published. Without it that
+# situation is a hard build failure on a pull request, and the cache would have
+# become a dependency rather than an optimisation.
+ARG AIMEE_MODEL_SOURCE=fetch
+# Only read when AIMEE_MODEL_SOURCE=image.
+ARG AIMEE_MODEL_IMAGE=scratch
+# Pinned llama.cpp. This version is load-bearing in three ways, all checked
+# against the tag rather than assumed:
+#   - gemma-4 / gemma-3n architecture support (b4585 had NONE — it would have
+#     built and started and then failed to load the only models we offer)
+#   - --no-mmproj and LLAMA_ARG_MMPROJ_AUTO (neither existed in b4585)
+#   - the server target lives in tools/, which sets the cmake flags below
+# Bumping this needs all three re-checked, not just a version number changed.
+ARG LLAMACPP_VERSION=b10218
 
 FROM debian:trixie-slim AS build
 
@@ -85,6 +130,90 @@ RUN mkdir -p "/pgvectorscale/usr/lib/postgresql/${PG_MAJOR}/lib" \
         "/pgvectorscale/usr/lib/postgresql/${PG_MAJOR}/lib/" \
     && cp "/usr/share/postgresql/${PG_MAJOR}/extension/vectorscale"* \
         "/pgvectorscale/usr/share/postgresql/${PG_MAJOR}/extension/"
+
+# --- where the bundled model comes from ---------------------------------------
+# Two stages with the same output shape (/model/synthesis.gguf + /model/MODEL_ID),
+# selected by AIMEE_MODEL_SOURCE. Only the selected one is in the build graph, so
+# the unselected one costs nothing — and neither is built at all for a
+# AIMEE_WITH_LLAMACPP=0 tag, which reaches llamacpp-0 instead.
+#
+# The digest table lives in scripts/fetch-synthesis-model.sh, shared with
+# Dockerfile.model, so the two paths cannot disagree about which bytes are right.
+FROM debian:trixie-slim AS modelsrc-fetch
+ARG AIMEE_SYNTHESIS_MODEL
+ARG AIMEE_MODEL_MIRROR
+ENV AIMEE_MODEL_MIRROR=${AIMEE_MODEL_MIRROR}
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+COPY scripts/fetch-synthesis-model.sh /usr/local/bin/fetch-synthesis-model.sh
+RUN sh /usr/local/bin/fetch-synthesis-model.sh "$AIMEE_SYNTHESIS_MODEL" /model
+
+# The prebuilt aimee-model-* tag. It is FROM scratch and already contains exactly
+# /model, so this stage is a rename and the layer comes straight from the registry.
+FROM ${AIMEE_MODEL_IMAGE} AS modelsrc-image
+
+FROM modelsrc-${AIMEE_MODEL_SOURCE} AS modelsrc
+
+# ---- llama.cpp, built from source (the *-llm image variants) -------------------
+# BUILT, NOT DOWNLOADED. Upstream publishes a Linux binary for x64 only — there is
+# no ubuntu-arm64 release asset, which a download-based install discovered the hard
+# way when the arm64 half of this matrix 404'd. Compiling from a pinned tag gives
+# both arches one code path, and a git tag is verifiable in a way an unchecksummed
+# release zip is not.
+#
+# THIS MAKES US THE VENDOR. Until now the deployment ran upstream's own image and
+# inherited its CVE fixes for free. LLAMACPP_VERSION is now the only thing deciding
+# which llama.cpp a user runs, and it does not move on its own.
+#
+# The .so copy takes SYMLINKS as well as regular files, with cp -a. The loader
+# resolves by SONAME — libllama-common.so.0 — which is a symlink to the versioned
+# file, so a `-type f` copy took the real file and left the name the binary
+# actually asks for behind. That failed as "cannot open shared object file" at
+# first run; the --version check in the final stage is what surfaced it at build.
+#
+# LLAMA_BUILD_TOOLS=ON is what provides the server at this tag: it lives in
+# tools/server (target llama-server), not examples/. Building with tools off
+# deletes the target and cmake fails with "No rule to make target 'llama-server'".
+# Examples stay off — nothing here needs them. Both flags are version-sensitive:
+# an older llama.cpp had the server under examples/ instead.
+#
+# Every comment stays OUTSIDE the RUN. BuildKit does strip whole-line comments
+# inside a continuation, but a stray one that is not stripped comments out the
+# rest of the joined command, which fails as a puzzling no-op rather than loudly.
+FROM debian:trixie-slim AS llamacpp-1
+ARG LLAMACPP_VERSION
+ARG AIMEE_SYNTHESIS_MODEL
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        build-essential cmake git ca-certificates curl libcurl4-openssl-dev; \
+    git clone --depth 1 --branch "$LLAMACPP_VERSION" \
+        https://github.com/ggml-org/llama.cpp.git /tmp/llamacpp-src; \
+    cmake -S /tmp/llamacpp-src -B /tmp/llamacpp-src/build \
+        -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=ON \
+        -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF \
+        -DLLAMA_BUILD_TOOLS=ON -DLLAMA_BUILD_SERVER=ON; \
+    cmake --build /tmp/llamacpp-src/build --target llama-server -j"$(nproc)"; \
+    mkdir -p /out; \
+    cp "$(find /tmp/llamacpp-src/build -name llama-server -type f -perm -u+x | head -1)" /out/; \
+    find /tmp/llamacpp-src/build \( -type f -o -type l \) -name '*.so*' \
+        -exec cp -a {} /out/ ';' ; \
+    rm -rf /tmp/llamacpp-src
+# The model, placed here so the running container never downloads anything. It
+# arrives from whichever modelsrc stage AIMEE_MODEL_SOURCE selected: a prebuilt
+# aimee-model-* layer in CI, a direct Hugging Face fetch as the fallback. Either
+# way it has already been verified against Hugging Face's own digest — the check
+# lives in scripts/fetch-synthesis-model.sh, next to the table it checks against.
+COPY --from=modelsrc /model /out/model
+
+# The non-llm variants copy an empty directory, so the COPY below stays
+# unconditional (Dockerfile has no conditional COPY) and costs them nothing.
+FROM debian:trixie-slim AS llamacpp-0
+RUN mkdir -p /out
+
+# Resolved from the global ARG: llamacpp-0 or llamacpp-1.
+FROM llamacpp-${AIMEE_WITH_LLAMACPP} AS llamacpp
 
 # Runtime must match the build stage: libpq5 here has to provide at least the
 # PostgreSQL 17 symbols the kb was linked against (PGDG's libpq 18 does).
@@ -175,9 +304,9 @@ ENV AIMEE_HOME=/var/lib/aimee
 # internal cluster. Operators can still set the variable to select an external DB2.
 # No baked embedder/LLM endpoint defaults. The kb runs NO model runtime; it calls
 # an external aimee-llm container (CPU/GPU) or endpoint. Point it with ONE of:
-#   AIMEE_LLM_URL       unified container -> embed + synth (one knob)
-#   AIMEE_EMBEDDER_URL  pin the embedder (/embed) independently
-#   LLM_ENDPOINT        Tier-A synth only (small-model interface)
+#   SYNTHESIS_ENDPOINT       unified container -> embed + synth (one knob)
+#   EMBEDDER_URL  pin the embedder (/embed) independently
+#   SYNTHESIS_ENDPOINT        Tier-A synth only (small-model interface)
 # One of these is REQUIRED. The seeded default config selects the remote embedder
 # sidecar, so with no endpoint set the DB2 dim probe fails and db2_init refuses to
 # initialise rather than record a wrong vector width (db2_init.c) -- the kb then
@@ -188,7 +317,7 @@ ENV AIMEE_HOME=/var/lib/aimee
 # only when no embed command is configured at all, and the baked config always
 # configures one. The deploy unit (compose / smoothnas plugin) sets these and
 # brings up a default CPU aimee-llm sibling, which is why this is invisible there. (Old combined leftovers
-# AIMEE_EMBEDDER_URL=embedder:8080 / LLM_ENDPOINT=llm:8080 were removed: on a
+# EMBEDDER_URL=embedder:8080 / SYNTHESIS_ENDPOINT=llm:8080 were removed: on a
 # split deploy they silently pointed at non-existent services.)
 # Bind the /v1 HTTP API on 0.0.0.0 (not the 127.0.0.1 default), so the published
 # port and container-IP access reach it from outside the container.
@@ -204,12 +333,30 @@ COPY --from=build /src/aimee-kb-resolver /usr/local/bin/aimee-kb-resolver
 COPY scripts/embedders.json /opt/aimee/embedders.json
 COPY scripts/embedder-server.py /opt/aimee/scripts/embedder-server.py
 
-# Bake the weights for every registered embedder — one ships — so a fresh container
-# embeds with no download and an air-gapped install works. Pinned to the registry's
-# revision: a floating ref would let a rebuild change the vector space silently.
+# Bake the weights for the ONE embedder this image variant serves, so a fresh
+# container embeds with no download and an air-gapped install works. Pinned to the
+# registry's revision: a floating ref would let a rebuild change the vector space
+# silently.
 #
-# A deployment that wants a wider embedder points AIMEE_EMBEDDER_URL at its own endpoint
-# rather than baking a second model in here.
+# AIMEE_EMBEDDER selects the registry entry. Four images come out of this file:
+#
+#   AIMEE_EMBEDDER            AIMEE_WITH_LLAMACPP   image
+#   bekko-a25m (384)          0                     aimee-kb
+#   bekko-a25m (384)          1                     aimee-kb-llm
+#   nomic-embed-text-v2-moe   0                     aimee-kb-nomic
+#   nomic-embed-text-v2-moe   1                     aimee-kb-nomic-llm
+#
+# The registry lists both models; only the selected one is fetched. Baking both
+# would put nomic's ~1.8GB into every image, which is why these are separate tags.
+#
+# THE EMBEDDER AXIS IS A ONE-WAY DOOR PER INSTALL. DB2 records the vector-column
+# width and refuses startup on drift, so an install embedded with bekko (384)
+# cannot be moved to a nomic image (768) without a full reindex. Do not offer this
+# as a runtime switch; it is a deployment-time choice with data consequences.
+#
+# A deployment that wants a different embedder again points EMBEDDER_URL at its own
+# endpoint rather than baking a third model in here.
+ARG AIMEE_EMBEDDER=bekko-a25m
 #
 # FETCH ONLY WHAT THE TORCH PATH LOADS. snapshot_download takes the whole repo by
 # default, and a repo may publish the same weights several times over: bekko ships an
@@ -226,11 +373,21 @@ ENV HF_HOME=/opt/aimee/models \
     HF_MODULES_CACHE=/var/lib/aimee/.cache/huggingface/modules \
     HF_HUB_OFFLINE=1
 RUN --mount=type=cache,target=/root/.cache/huggingface \
+    AIMEE_EMBEDDER="$AIMEE_EMBEDDER" \
     HF_HUB_OFFLINE=0 "$EMBEDDER_VENV/bin/python" - <<'PYBAKE'
-import json
+import json, os, sys
 from huggingface_hub import snapshot_download
 with open("/opt/aimee/embedders.json", encoding="utf-8") as handle:
     table = json.load(handle)["embedders"]
+
+# Bake exactly the selected entry. An unknown name is a BUILD failure, not a
+# silently-empty image: a container with no baked weights starts fine and then
+# cannot embed, which surfaces as a retrieval outage rather than a build error.
+selected = os.environ.get("AIMEE_EMBEDDER", "").strip()
+if selected not in table:
+    sys.exit(f"AIMEE_EMBEDDER={selected!r} is not in the registry. "
+             f"Known: {', '.join(sorted(table))}")
+table = {selected: table[selected]}
 SKIP = [
     "onnx/*", "openvino/*", "*.onnx", "*.onnx_data",   # alternate runtimes
     "*.bin", "*.h5", "*.msgpack", "*.tflite", "*.ckpt",  # duplicate/legacy formats
@@ -282,6 +439,40 @@ PYBAKE
 # Permission denied" on every start and re-walks what the cache existed to avoid.
 # a+rX: readable everywhere, traversable on directories, and no file gains +x.
 RUN chmod -R a+rX /opt/aimee/models
+
+# ---- bundled llama.cpp + its model --------------------------------------------
+# Built and fetched in the llamacpp stage above; that stage is EMPTY on the non-llm
+# variants, so this COPY is unconditional and costs them nothing.
+#
+# The model is IN THE IMAGE. SYNTHESIS_ENDPOINT points at loopback when llama.cpp
+# is present, and the running container downloads nothing.
+ARG AIMEE_WITH_LLAMACPP
+ARG LLAMACPP_VERSION
+ARG AIMEE_SYNTHESIS_MODEL
+COPY --from=llamacpp /out/ /opt/aimee/llama.cpp/
+# The shared objects ship beside the binary, which is not a default search path.
+#
+# NO trailing ${LD_LIBRARY_PATH}. Nothing sets it earlier in this image, so
+# appending it expanded to a trailing colon — and an EMPTY entry in
+# LD_LIBRARY_PATH means "search the current working directory", which would let a
+# stray .so wherever the process happens to be running take precedence over the
+# real one. BuildKit flagged it as UndefinedVar; the warning was pointing at a
+# genuine loader hazard rather than at untidiness.
+ENV LD_LIBRARY_PATH=/opt/aimee/llama.cpp
+# Prove BOTH halves in THIS image before shipping it. A server that cannot resolve
+# its own .so files, or a model file that did not survive the copy, otherwise fails
+# at first synthesis — which is exactly the class of "it deployed fine and does
+# nothing" this baking is meant to remove.
+RUN set -eux; \
+    if [ "$AIMEE_WITH_LLAMACPP" = "1" ]; then \
+      chmod +x /opt/aimee/llama.cpp/llama-server; \
+      /opt/aimee/llama.cpp/llama-server --version; \
+      test -s /opt/aimee/llama.cpp/model/synthesis.gguf; \
+      test "$(cat /opt/aimee/llama.cpp/model/MODEL_ID)" = "$AIMEE_SYNTHESIS_MODEL"; \
+    fi
+ENV AIMEE_WITH_LLAMACPP=${AIMEE_WITH_LLAMACPP} \
+    AIMEE_LLAMACPP_VERSION=${LLAMACPP_VERSION} \
+    AIMEE_SYNTHESIS_MODEL=${AIMEE_SYNTHESIS_MODEL}
 
 # Sidecar clients (the LLM access code the kb invokes via popen).
 COPY scripts/embed-remote.py scripts/llm-chat.py \

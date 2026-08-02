@@ -459,8 +459,26 @@ int cmd_self_update(int argc, char **argv)
          return 1;
       }
       printf("client v%s, server reports '%s'\n", vnum(AIMEE_VERSION), vnum(target));
-      printf("The server reports a non-semver (dev/branch) version, so drift cannot be "
-             "compared. Target a specific release with `aimee self-update --version vX.Y.Z`.\n");
+      printf("The server reports a non-semver (dev/branch) version, so there is no release "
+             "to fetch.\n");
+      /* "drift cannot be compared" was true only of ORDERING. Whether the two
+       * agree is the question an operator actually has, and it is answerable:
+       * identical build strings mean they match. Leaving it unanswered is how a
+       * client silently ran four days behind its server and lost a route the
+       * server had already gained -- the failure looked like a server bug. */
+      const char *cnum = vnum(AIMEE_VERSION);
+      const char *snum = vnum(target);
+      if (strcmp(cnum, snum) == 0)
+         printf("Client and server are the same build; nothing to do.\n");
+      else
+      {
+         printf("Client and server are DIFFERENT builds, so this client may be missing "
+                "routes the server already has.\n");
+         printf("On a dev/branch deployment the client ships inside the server image, so "
+                "align it from there rather than from a release:\n");
+         printf("  docker cp <server-container>:/usr/local/bin/aimee ~/.local/bin/aimee\n");
+         printf("Or target a specific release with `aimee self-update --version vX.Y.Z`.\n");
+      }
       return 0;
    }
 

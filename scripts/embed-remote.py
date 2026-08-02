@@ -16,16 +16,16 @@ Contract (platform_exec_pipe in src/memory_core_scope_embed.inc):
   exit 0 on success; non-zero on error (C caller logs a warning and skips)
 
 Config (env), in precedence order:
-  AIMEE_EMBEDDER_URL  base URL of the embedder service (pins the embedder)
-  AIMEE_LLM_URL       DEPRECATED for embedding: synthesis-only since the aimee-llm
+  EMBEDDER_URL  base URL of the embedder service (pins the embedder)
+  SYNTHESIS_ENDPOINT       DEPRECATED for embedding: synthesis-only since the aimee-llm
                       container was retired. Still read as a last resort so an older
-                      deployment keeps working, but AIMEE_EMBEDDER_URL is the knob (
-                      embed + synth); used when AIMEE_EMBEDDER_URL is unset
-  AIMEE_LLM_AUTH_TOKEN bearer service identity for authenticated gateways
-  AIMEE_LLM_AUTH_REQUIRED=1 refuse requests when that identity is missing
+                      deployment keeps working, but EMBEDDER_URL is the knob (
+                      embed + synth); used when EMBEDDER_URL is unset
+  SYNTHESIS_API_KEY bearer service identity for authenticated gateways
+  SYNTHESIS_AUTH_REQUIRED=1 refuse requests when that identity is missing
   (unset)             no embedder configured; reported immediately so the caller
                       can use its builtin path. Pin the legacy compose service
-                      with AIMEE_EMBEDDER_URL=http://embedder:8080 if wanted.
+                      with EMBEDDER_URL=http://embedder:8080 if wanted.
 
 Usage:
   embedding_command: "python3 /opt/aimee/scripts/embed-remote.py"
@@ -40,28 +40,28 @@ import urllib.request
 # No implicit legacy fallback. This used to default to http://embedder:8080, the
 # old combined-compose service name, which resolves nowhere on a split deploy or a
 # bare `docker run` -- so an unconfigured kb retried a host that cannot exist and
-# never reported healthy. The Dockerfile removed the matching AIMEE_EMBEDDER_URL /
-# LLM_ENDPOINT env defaults for exactly that reason; this fallback survived it.
+# never reported healthy. The Dockerfile removed the matching EMBEDDER_URL /
+# SYNTHESIS_ENDPOINT env defaults for exactly that reason; this fallback survived it.
 # Unset now means "no embedder configured", reported immediately so the caller can
 # take its builtin path. The legacy service is still reachable by setting
-# AIMEE_EMBEDDER_URL=http://embedder:8080 explicitly, as compose.yaml documents.
+# EMBEDDER_URL=http://embedder:8080 explicitly, as compose.yaml documents.
 ENDPOINT = (
-    os.environ.get("AIMEE_EMBEDDER_URL") or os.environ.get("AIMEE_LLM_URL") or ""
+    os.environ.get("EMBEDDER_URL") or os.environ.get("SYNTHESIS_ENDPOINT") or ""
 ).rstrip("/")
 
 NO_ENDPOINT_MESSAGE = (
     "embed-remote: no embedder configured "
-    "(set AIMEE_LLM_URL, or AIMEE_EMBEDDER_URL to pin one)\n"
+    "(set SYNTHESIS_ENDPOINT, or EMBEDDER_URL to pin one)\n"
 )
 TIMEOUT = int(os.environ.get("AIMEE_EMBEDDER_TIMEOUT", "30"))
-AUTH_TOKEN = os.environ.get("AIMEE_LLM_AUTH_TOKEN", "")
-AUTH_REQUIRED = os.environ.get("AIMEE_LLM_AUTH_REQUIRED", "") == "1"
+AUTH_TOKEN = os.environ.get("SYNTHESIS_API_KEY", "")
+AUTH_REQUIRED = os.environ.get("SYNTHESIS_AUTH_REQUIRED", "") == "1"
 
 
 def _auth_ready() -> bool:
     if AUTH_REQUIRED and not AUTH_TOKEN:
         sys.stderr.write(
-            "embed-remote: AIMEE_LLM_AUTH_REQUIRED=1 but AIMEE_LLM_AUTH_TOKEN is empty\n"
+            "embed-remote: SYNTHESIS_AUTH_REQUIRED=1 but SYNTHESIS_API_KEY is empty\n"
         )
         return False
     return True

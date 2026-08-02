@@ -124,7 +124,7 @@ static void kb_cmd_update(app_ctx_t *ctx, int argc, char **argv)
     * hash) would mismatch a real-embedder corpus (1024/2560-dim) and return
     * nothing. */
    const char *embed_cmd =
-       config_embedding_command_field()[0] ? config_embedding_command_field() : NULL;
+       config_embedder_command_field()[0] ? config_embedder_command_field() : NULL;
 
    char proj[256];
    kb_cmd_resolve_project(project, root, proj, sizeof(proj));
@@ -206,7 +206,7 @@ static void kb_cmd_search(app_ctx_t *ctx, int argc, char **argv)
     * hash) would mismatch a real-embedder corpus (1024/2560-dim) and return
     * nothing. */
    const char *embed_cmd =
-       config_embedding_command_field()[0] ? config_embedding_command_field() : NULL;
+       config_embedder_command_field()[0] ? config_embedder_command_field() : NULL;
 
    char proj[256];
    kb_cmd_resolve_project(project, NULL, proj, sizeof(proj));
@@ -491,7 +491,7 @@ static void kb_cmd_repair(app_ctx_t *ctx, int argc, char **argv)
     * hash) would mismatch a real-embedder corpus (1024/2560-dim) and return
     * nothing. */
    const char *embed_cmd =
-       config_embedding_command_field()[0] ? config_embedding_command_field() : NULL;
+       config_embedder_command_field()[0] ? config_embedder_command_field() : NULL;
 
    char proj[256];
    kb_cmd_resolve_project(project, root, proj, sizeof(proj));
@@ -922,17 +922,17 @@ static void kb_cmd_pipeline(app_ctx_t *ctx, int argc, char **argv)
 /* kb curator status — read the curator block from /v1/health (§4)     */
 /* ------------------------------------------------------------------ */
 
-static void kb_curator_print_tier(const char *label, cJSON *tier)
+static void kb_curator_print_provider(const char *label, cJSON *prov)
 {
-   int configured = tier && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(tier, "configured"));
+   int configured = prov && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(prov, "configured"));
    if (!configured)
    {
-      printf("  %-8s idle (no provider configured)\n", label);
+      printf("  %-10s idle (no provider configured)\n", label);
       return;
    }
-   cJSON *base = cJSON_GetObjectItemCaseSensitive(tier, "base_url");
-   cJSON *model = cJSON_GetObjectItemCaseSensitive(tier, "model");
-   printf("  %-8s %s  (%s)\n", label,
+   cJSON *base = cJSON_GetObjectItemCaseSensitive(prov, "base_url");
+   cJSON *model = cJSON_GetObjectItemCaseSensitive(prov, "model");
+   printf("  %-10s %s  (%s)\n", label,
           cJSON_IsString(model) && model->valuestring[0] ? model->valuestring : "(model unset)",
           cJSON_IsString(base) ? base->valuestring : "");
 }
@@ -989,8 +989,7 @@ static void kb_cmd_curator(app_ctx_t *ctx, int argc, char **argv)
    }
 
    printf("Curator\n");
-   kb_curator_print_tier("tier-A:", cJSON_GetObjectItemCaseSensitive(cur, "tier_a"));
-   kb_curator_print_tier("tier-B:", cJSON_GetObjectItemCaseSensitive(cur, "tier_b"));
+   kb_curator_print_provider("synthesis:", cJSON_GetObjectItemCaseSensitive(cur, "synthesis"));
    cJSON *q = cJSON_GetObjectItemCaseSensitive(cur, "queue");
    if (q)
       printf("  queue:   extract %d pending / %d done; code_unit %d pending / %d done\n",

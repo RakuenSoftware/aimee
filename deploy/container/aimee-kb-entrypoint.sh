@@ -29,17 +29,17 @@
 # SELECTED. Half a gigabyte of resident model is not something to spend on a kb that was
 # never told to embed with it, and on the wizard path the selection always exists before
 # this container is deployed (`aimee config deploy-env` emits EMBEDDER_MODEL for the
-# bundled embedder, or AIMEE_EMBEDDER_URL for an external one).
+# bundled embedder, or EMBEDDER_URL for an external one).
 #
 # Selection, in precedence order:
-#   AIMEE_EMBEDDER_URL set  -> an external embedder; start nothing.
+#   EMBEDDER_URL set  -> an external embedder; start nothing.
 #   EMBEDDER_MODEL set      -> the bundled embedder; start it.
 #   embedding_model in cfg  -> same, for a hand-run container.
 #   none of the above       -> start nothing. The kb falls back to its builtin lexical
 #                              embedder, which needs no model and no port, so an
 #                              unconfigured container is idle rather than half-configured.
 #
-# When it DOES start, the loopback URL is exported as AIMEE_EMBEDDER_URL. That makes the
+# When it DOES start, the loopback URL is exported as EMBEDDER_URL. That makes the
 # bundled embedder just "an embedder at a URL" and reuses one precedence rule for both
 # cases, instead of a second mechanism that can disagree with the first.
 #
@@ -55,8 +55,8 @@ read_cfg_embedding_model() {
 }
 
 start_embedder() {
-    if [ -n "${AIMEE_EMBEDDER_URL:-}" ]; then
-        echo "aimee-kb: external embedder configured ($AIMEE_EMBEDDER_URL); bundled model not loaded" >&2
+    if [ -n "${EMBEDDER_URL:-}" ]; then
+        echo "aimee-kb: external embedder configured ($EMBEDDER_URL); bundled model not loaded" >&2
         return 0
     fi
     if [ -z "${EMBEDDER_MODEL:-}" ]; then
@@ -79,13 +79,73 @@ start_embedder() {
     export EMBEDDER_PORT
     # One precedence rule for both cases: the kb reaches the bundled embedder the same way
     # it would reach an external one.
-    AIMEE_EMBEDDER_URL="http://127.0.0.1:$EMBEDDER_PORT"
-    export AIMEE_EMBEDDER_URL
+    EMBEDDER_URL="http://127.0.0.1:$EMBEDDER_PORT"
+    export EMBEDDER_URL
     echo "aimee-kb: starting bundled embedder ($EMBEDDER_MODEL) on :$EMBEDDER_PORT" >&2
     "$venv/bin/python" "$server" >&2 &
     embedder_pid=$!
 }
 
+# ---- bundled synthesis (the *-llm image variants) ---------------------------
+# Same shape as the embedder above, and deliberately so: selection resolves to a
+# URL, and the kb then reaches a bundled model exactly as it reaches a remote one.
+#
+#   SYNTHESIS_ENDPOINT set -> a remote endpoint; start nothing.
+#   this image has a model -> serve it, and export SYNTHESIS_ENDPOINT at loopback.
+#   neither                -> start nothing. Synthesis is OFF, which is supported:
+#                             embedding, search, recall and indexing never call it.
+#
+# THE MODEL IS IN THE IMAGE, AND THIS NEVER DOWNLOADS. Which model is a property of
+# the tag (aimee-kb-llm-e2b vs -e4b), the same way the embedder is. A runtime fetch
+# was the earlier design and it is a support burden: it fails on a rate limit,
+# behind a proxy, on a flaky link, on an air-gapped host, or silently serves the
+# wrong file when a quant tag stops resolving — and all of those reach the operator
+# as "synthesis never started", long after deploy. `docker pull` is the one
+# download, with the registry's retry and resume behind it.
+#
+# Nothing here reads AIMEE_HOME for weights any more: no HF_HOME, no cache, no
+# partial-download state to reason about.
+SYNTHESIS_MODEL_DIR=/opt/aimee/llama.cpp/model
+
+start_synthesis() {
+    if [ -n "${SYNTHESIS_ENDPOINT:-}" ]; then
+        echo "aimee-kb: remote synthesis configured ($SYNTHESIS_ENDPOINT); bundled model not loaded" >&2
+        return 0
+    fi
+
+    llama=/opt/aimee/llama.cpp/llama-server
+    model="$SYNTHESIS_MODEL_DIR/synthesis.gguf"
+    if [ ! -x "$llama" ] || [ ! -s "$model" ]; then
+        echo "aimee-kb: this image has no bundled synthesis model; synthesis is off" \
+             "(embedding, search, recall and indexing are unaffected). Use an" \
+             "aimee-kb-*-llm-e2b/-e4b image, or set SYNTHESIS_ENDPOINT." >&2
+        return 0
+    fi
+
+    # The image records which model it carries; the kb reports it and the wizard
+    # shows it. Never guessed from the filename.
+    if [ -z "${SYNTHESIS_MODEL:-}" ] && [ -r "$SYNTHESIS_MODEL_DIR/MODEL_ID" ]; then
+        SYNTHESIS_MODEL="$(cat "$SYNTHESIS_MODEL_DIR/MODEL_ID")"
+        export SYNTHESIS_MODEL
+    fi
+
+    : "${SYNTHESIS_PORT:=8761}"
+    export SYNTHESIS_PORT
+    echo "aimee-kb: starting bundled synthesis (${SYNTHESIS_MODEL:-unknown}) on :$SYNTHESIS_PORT" >&2
+    # --no-mmproj: every benchmark run passed it and the shipped service never did,
+    # so production loaded a vision/audio projector for a text-only task that cannot
+    # use it. Only the text GGUF is baked, so there is no projector to load here —
+    # the flag keeps it that way if a future image bakes one.
+    LLAMA_ARG_MMPROJ_AUTO=false \
+        "$llama" -m "$model" --host 127.0.0.1 --port "$SYNTHESIS_PORT" \
+                 -c 8192 --no-webui --no-mmproj >&2 &
+    synthesis_pid=$!
+
+    # One precedence rule for both cases, as with the embedder: the kb reaches the
+    # bundled model the same way it would reach a remote one.
+    SYNTHESIS_ENDPOINT="http://127.0.0.1:$SYNTHESIS_PORT/v1"
+    export SYNTHESIS_ENDPOINT
+}
 
 set -e
 
@@ -249,6 +309,7 @@ if [ "$external_db" -eq 0 ]; then
     AIMEE_DB2_URL="$embedded_dsn" aimee-kb --bootstrap-vault-env
 
     start_embedder
+    start_synthesis
 
     # Not exec: the trap above has to outlive the kb so the cluster shuts down
     # cleanly. Forward the stop signal so the kb still gets its own shutdown.
@@ -307,4 +368,5 @@ if [ "$external_db" -eq 0 ]; then
 fi
 
 start_embedder
+start_synthesis
 exec aimee-kb "$@"

@@ -187,7 +187,7 @@ static void test_fusion_surfaces_bridged_memory(void)
 
    config_t cfg;
    config_load(&cfg);
-   const char *embed = cfg.embedding_command[0] ? cfg.embedding_command : "builtin";
+   const char *embed = cfg.embedder_command[0] ? cfg.embedder_command : "builtin";
 
    /* Base hit: lexically/semantically matches the query. */
    memory_t base;

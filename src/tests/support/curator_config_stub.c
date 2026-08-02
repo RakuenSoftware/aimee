@@ -19,24 +19,14 @@ const char *config_kb_curator_provider_api_key(void)
    return cfg.kb_curator_provider_api_key;
 }
 
-const char *config_kb_curator_tier_b_base_url(void)
+const char *config_synthesis_endpoint(void)
 {
-   return cfg.kb_curator_tier_b_base_url;
+   return cfg.synthesis_endpoint;
 }
 
-const char *config_kb_curator_tier_b_model(void)
+int config_synthesis_thinking(void)
 {
-   return cfg.kb_curator_tier_b_model;
-}
-
-const char *config_kb_curator_tier_b_api_key(void)
-{
-   return cfg.kb_curator_tier_b_api_key;
-}
-
-const char *config_llm_synth_endpoint(void)
-{
-   return cfg.llm_synth_endpoint;
+   return cfg.synthesis_thinking;
 }
 
 int config_kb_curator_extract_max_tokens(void)

@@ -710,7 +710,7 @@ static int kb_run_fusion_probe(const char *query)
     * block) unless the pgvector memory collection exists, so ensure it. */
    if (pgvec_memory_vector_collection_exists() <= 0)
    {
-      int dim = config_embedding_dim() > 0 ? config_embedding_dim() : 1024;
+      int dim = config_embedder_dims() > 0 ? config_embedder_dims() : 1024;
       (void)pgvec_memory_vector_collection_recreate(dim);
    }
 
@@ -765,8 +765,8 @@ static int kb_cmd_tenancy_init_db2(void)
       fprintf(stderr, "aimee-kb: db2_url not configured (set AIMEE_DB2_URL or run `aimee init`)\n");
       return -1;
    }
-   db2_set_embedding_dim_default(config_embedding_dim_default());
-   db2_set_embedding_dim(config_embedding_dim_current());
+   db2_set_embedding_dim_default(config_embedder_dims_default());
+   db2_set_embedding_dim(config_embedder_dims_current());
    /* These commands read a deployment somebody else is running. Applying the
     * schema from here races the daemon's own pass, and Postgres answers "tuple
     * concurrently updated", which surfaced below as "DB2 not reachable" against a
@@ -1655,7 +1655,7 @@ int main(int argc, char **argv)
     * only thing that knows where the value lives and how it is spelled. */
    if (argc == 2 && strcmp(argv[1], "--print-embedding-model") == 0)
    {
-      const char *model = config_embedding_model();
+      const char *model = config_embedder_model();
       if (!model || !model[0])
          return 1; /* nothing selected — the caller starts no embedder */
       printf("%s\n", model);
@@ -1664,7 +1664,7 @@ int main(int argc, char **argv)
    if (argc == 2 && strcmp(argv[1], "--vault-llm-auth-configured") == 0)
    {
       char token[513];
-      int present = runtime_secret_get("AIMEE_LLM_AUTH_TOKEN", token, sizeof(token));
+      int present = runtime_secret_get("SYNTHESIS_API_KEY", token, sizeof(token));
       runtime_secret_wipe(token, sizeof(token));
       return present ? 0 : 1;
    }
@@ -1821,21 +1821,21 @@ int main(int argc, char **argv)
 
    /* aimee-kb owns DB2; tell the DB2 layer the deployment's embedding dimension
     * (one embedder: 1024 pplx-0.6b / 2560 pplx-4b) before any db2_init() so the
-    * halfvec embedding columns are created at the right size. AIMEE_EMBEDDING_DIM
+    * halfvec embedding columns are created at the right size. EMBEDDER_DIMS
     * overrides the configured value (containerized deploys without a writable
     * aimee.yaml). */
-   db2_set_embedding_dim_default(config_embedding_dim_default());
-   db2_set_embedding_dim(config_resolve_embedding_dim_current());
-   db2_set_embedding_dim_pinned(config_embedding_dim_pinned_current());
+   db2_set_embedding_dim_default(config_embedder_dims_default());
+   db2_set_embedding_dim(config_resolve_embedder_dims_current());
+   db2_set_embedding_dim_pinned(config_embedder_dims_pinned_current());
    /* unified-llm-container §2: activate the model-identity drift guard (the kb applies
     * the schema, so this is the load-bearing site). Empty embedding_model => no-op. */
-   db2_set_embedder_model_id(config_embedding_model());
+   db2_set_embedder_model_id(config_embedder_model());
    /* §2b: on a FRESH DB with no pin, let db2_init derive the dim from the running
     * embedder's /health instead of the default — but only when a REAL remote embed
     * command is configured (the lexical "builtin" has no /health and a fixed dim,
     * so probing it would never succeed and would stall the retry loop). */
    {
-      const char *embed_cmd = config_embedding_command_current(NULL);
+      const char *embed_cmd = config_embedder_command_current(NULL);
       if (embed_cmd && strcmp(embed_cmd, "builtin") != 0)
          embedder_probe_register(embed_cmd);
    }

@@ -9,7 +9,7 @@
  * (was memory_core_scope_embed.inc, textually included only to stay under the
  * line-check ceiling). Cross-TU declarations live in the module header. */
 #include "aimee.h"
-#include "config_database.h" /* config_embedding_dim_current — the one width declaration */
+#include "config_database.h" /* config_embedder_dims_current — the one width declaration */
 #include "memory_context_internal.h"
 #include "memory_rewrite_llm.h" /* weak in-process rewrite seam (KB build only) */
 #include <math.h>
@@ -378,7 +378,7 @@ static int memory_embed_text_builtin(const char *text, float *out, int max_dim)
     * same columns the schema was sized for. Take that width from config — the one
     * place it is declared — rather than repeating a number here, which is how the
     * builtin and the schema could end up disagreeing. */
-   int width = config_embedding_dim_current();
+   int width = config_embedder_dims_current();
    int dim = max_dim < width ? max_dim : width;
    for (int i = 0; i < dim; i++)
       out[i] = 0.0f;

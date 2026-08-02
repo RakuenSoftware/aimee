@@ -42,7 +42,7 @@ embedder. `bekko-a25m` is **384-dimensional**.
 | vocab | 256k, multilingual |
 
 **For an embedder not included in the selected KB image, use a remote role.** Point
-`AIMEE_EMBEDDER_URL` (or the wizard's "External endpoint" option) at a GPU-served endpoint. That is
+`EMBEDDER_URL` (or the wizard's "External endpoint" option) at a GPU-served endpoint. That is
 the current profile's route to a wider or stronger embedder, and it is why the measurement winner is
 not bundled:
 `nomic-embed-text-v2-moe` scored 0.6075 against bekko's 0.5909, but it is 768-dim, ~6x

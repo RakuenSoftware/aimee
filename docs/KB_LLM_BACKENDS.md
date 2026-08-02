@@ -19,8 +19,8 @@ The current configuration descriptors call internal placement `local`:
 
 - `llm_embed_backend`: `local` or `external`;
 - `llm_synth_backend`: `local`, `external`, or `off`;
-- `embedding_model` and `embedding_dim`: embedding identity and width;
-- `embedding_endpoint` and `llm_synth_endpoint`: remote role endpoints.
+- `embedder_model` and `embedder_dims`: embedding identity and width;
+- `embedder_url` and `llm_synth_endpoint`: remote role endpoints.
 
 Use the [generated configuration reference](gen/configuration.md) for the exact fields exposed by
 this checkout. Container environment values override file values only where that reference says

@@ -38,17 +38,16 @@ consumer even when no synthesized artifact exists.
 
 ## Providers and readiness
 
-The reasoning stages resolve a provider from `tier_b.*` config, or failing that from the deployment's
-single synthesis endpoint (`config_synth_chat_endpoint`, i.e. `AIMEE_LLM_URL`). They never fall back to
-`LLM_ENDPOINT`, which `kb_curator_provider_for_stage` reserves for the mechanical stages: that variable
-is the small-model interface, and letting a weak model serve the reasoning stages is the graph-poisoning
-case the stage split exists to prevent. Both stage families now resolve to one model in practice, because
-measurement did not support running a cheaper one on the mechanical stages — see
-[Choosing a synthesis model](../SYNTHESIS_MODELS.md).
+Every stage resolves the same provider: `provider.*` config, or failing that the deployment's single
+synthesis endpoint (`config_synth_chat_endpoint`, i.e. `SYNTHESIS_ENDPOINT`), or idle.
 
-The `tier_b.*` config prefix and `AIMEE_KB_CURATOR_TIER_B_API_KEY` are the surviving spellings of the
-retired Tier-A/Tier-B split. They are load-bearing identifiers, so they are quoted here literally; the
-concept they name is just "synthesis" now.
+There used to be two. The reasoning stages read a `tier_b.*` provider and were forbidden from falling
+back to the mechanical stages' one, because letting a weak model serve the reasoning stages is the
+graph-poisoning case the split existed to prevent. Measurement did not support running a cheaper model on
+the mechanical stages, so both families resolved to the same model in practice and the split was removed:
+`tier_b.*`, `AIMEE_KB_CURATOR_TIER_B_API_KEY` and the `tier_a`/`tier_b` blocks in `/v1/health` are all
+gone, replaced by one `synthesis` block. See [Choosing a synthesis model](../SYNTHESIS_MODELS.md), and
+[Upgrading](../UPGRADING.md) for the key mapping.
 
 Readiness is idle, not degraded core, when disabled or unconfigured. It is ready only when storage,
 source evidence, provider, prompt/version policy, and bounded worker lane are all operational.

@@ -11,7 +11,7 @@ retiring the aimee-llm container:
                         container. The entrypoint saw no selection, started nothing,
                         and the builtin lexical embedder served forever. The headline
                         feature of the cutover, dead end to end.
-  * AIMEE_EMBEDDER_URL  same: an external embedder could be configured and would
+  * EMBEDDER_URL  same: an external embedder could be configured and would
                         never be used.
   * AIMEE_LLM_SYNTH_URL emitted for an external synth endpoint, read by nobody — it
                         had been the retired gateway's own knob.
@@ -43,15 +43,10 @@ EMITTER = Path("src/modules/config/config_database.c")
 # Emitted keys with no consumer yet, and why that is currently acceptable. Removing
 # an entry from here is the goal; adding one needs a reason that names the work.
 PENDING_CONSUMERS = {
-    "AIMEE_LLM_SYNTH_MODE": (
-        "local-synth selection. The aimee-llm container that consumed this is "
-        "retired and no local synth backend has replaced it yet, so nothing reads "
-        "it. Wire up or drop with the synth work."
-    ),
-    "AIMEE_LLM_SYNTH_TIER": (
-        "local-synth tier (cpu/gpu). Same as AIMEE_LLM_SYNTH_MODE: the consumer was "
-        "the retired gateway. Wire up or drop with the synth work."
-    ),
+    # AIMEE_LLM_SYNTH_MODE and AIMEE_LLM_SYNTH_TIER were listed here as awaiting a
+    # consumer after the aimee-llm gateway was retired. They are now DELETED rather
+    # than pending: the emitter no longer writes them, and a bundled model is
+    # selected by SYNTHESIS_MODEL on a *-llm image, which the kb entrypoint reads.
     # COMPOSE_PROFILES is read by docker compose itself, not by this repo.
     "COMPOSE_PROFILES": "consumed by docker compose, not by any file in this tree.",
 }

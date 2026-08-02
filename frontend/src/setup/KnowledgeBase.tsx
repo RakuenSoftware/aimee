@@ -58,20 +58,17 @@ export default function KnowledgeBase({ onSaved, fetchImpl }: KnowledgeBaseProps
 
     // Remote writes kb_mode + the client url/token; local writes just kb_mode
     // (the deploy-topology + DB2 steps handle the rest). Reuse buildDesiredConfig's
-    // remote branch so the key mapping stays single-sourced; for local, only
-    // kb_mode is relevant here. Placement fields are irrelevant to the kb_* keys.
+    // remote branch so the key mapping stays single-sourced. The embedder and
+    // synthesis selections are irrelevant to the kb_* keys — the remote branch
+    // returns before reading them — so they are passed at their inert defaults.
     const desired: Record<string, string> =
       kbMode === 'remote'
         ? buildDesiredConfig({
             kbMode: 'remote',
             kbUrl,
             kbBearer,
-            placements: {
-              embed: { backend: 'off' },
-              synth: { backend: 'off' },
-            },
-            embedModel: '',
-            embedDim: '',
+            embedder: { kind: 'bundled', model: '' },
+            synthesis: { kind: 'off' },
           })
         : { kb_mode: 'local' };
 

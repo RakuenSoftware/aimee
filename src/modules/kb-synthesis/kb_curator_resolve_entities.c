@@ -207,7 +207,7 @@ int kb_curator_resolve_entities_one(const kb_curator_extract_opts_t *opts)
 
    char embed_text[768];
    kb_curator_entity_embed_text(name, context, embed_text, sizeof(embed_text));
-   const char *embed_cmd = config_embedding_command_current(NULL);
+   const char *embed_cmd = config_embedder_command_current(NULL);
    float vec[CURATOR_ENTITY_DIM];
    int dim =
        memory_embed_text(embed_text, embed_cmd, EMBED_INPUT_DOCUMENT, vec, CURATOR_ENTITY_DIM);

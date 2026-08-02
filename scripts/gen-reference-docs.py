@@ -118,13 +118,23 @@ CFG_KEY_DESC = {
     "verify_role": "Delegate role used for cross-verification.",
     "wfe_proposals_autoscan_enabled": "Automatically scan watched proposal directories; off requires explicit trigger.fire.",
 
-    "llm_embed_backend": "Deploy-time embedding backend: local or external.",
-    "llm_synth_backend": "Deploy-time synthesis backend: local, external, or off.",
-    "llm_synth_endpoint": "External synthesis endpoint used when the synth backend is external.",
-    "llm_synth_gpu": "Deploy-time GPU selector for the local synthesis backend.",
-    "llm_synth_host": "Deploy-time host selector for the local synthesis backend.",
-    "llm_synth_model": "Model label sent to the configured synthesis endpoint.",
-    "llm_synth_tier": "Deploy-time local synthesis tier: cpu, small, mid, or large.",
+    "aimee_with_llamacpp": "Whether THIS IMAGE bundles llama.cpp (\"1\" on the "
+    "aimee-kb-*-llm variants). Set by the Dockerfile, not by an operator: it is a fact "
+    "about the running image, and the setup wizard reads it to decide whether the local "
+    "synthesis models can be offered at all.",
+    "synthesis_endpoint": "The ONE synthesis endpoint, remote or loopback. Empty means "
+    "synthesis is off, which is supported - embedding, search, recall and indexing "
+    "never call it. On a *-llm image the container entrypoint sets this to loopback "
+    "itself after starting the bundled model.",
+    "synthesis_model": "Synthesis model. On a *-llm image this selects the bundled model "
+    "to fetch and serve (gemma-4-E2B-it or gemma-4-E4B-it); otherwise it is the model "
+    "label sent to the configured endpoint.",
+    "synthesis_api_key": "Bearer token for the synthesis endpoint (blank for a keyless "
+    "or loopback endpoint).",
+    "synthesis_thinking": "Let the synthesis model think before answering (default on). "
+    "It measured positive-to-neutral everywhere it was tried. Global rather than "
+    "per-stage, and the operator's call: turn it off only for a model that reasons past "
+    "its output budget without answering.",
 
     "kb_curator_cross_repo_graph_enabled": "Resolve and maintain cross-repository dependency edges.",
     "kb_curator_custom_stages": "JSON definitions that recompose vetted curator operations with bounded budgets.",
@@ -172,10 +182,20 @@ CFG_KEY_DESC = {
     "dogfood_inline_tagging": "Inline-tag dogfood events during the session.",
     "dogfood_log_dir": "Directory for dogfood logs.",
     "ecomode": "Reduce background compute (eco mode).",
-    "embedding_command": "Command that produces embeddings (overrides the endpoint).",
-    "embedding_dim": "Embedding vector dimension.",
-    "embedding_endpoint": "Embeddings provider endpoint URL.",
-    "embedding_model": "Embeddings model name.",
+    "embedder_command": "Command that produces embeddings (overrides the endpoint).",
+    "embedder_dims": "Embedding vector width. Leave unset for a bundled embedder - it "
+    "declares its own width and the kb derives it (pinned > recorded > probed). REQUIRED "
+    "for an external endpoint, whose width cannot be derived; valid to 4000, the DB2 "
+    "column ceiling. A ONE-WAY DOOR once anything is embedded: DB2 records the width and "
+    "refuses to start on drift.",
+    "embedder_url": "External embedder endpoint. A non-empty value IS the external "
+    "embedder; empty means the model baked into this image variant (bekko-a25m at 384, "
+    "or nomic-v2 at 768 on the -nomic images).",
+    "embedder_model": "Embedder identity. Written for a bundled model too, not just an "
+    "external one: it is the registry key pooling and prefixes resolve from, and the "
+    "value recorded against the corpus.",
+    "embedder_api_key": "Bearer token for an external embedder endpoint (blank if it "
+    "needs none).",
     "fidelity_check_enabled": "Run the answer-fidelity judge on terminal-text turns "
     "(default off; requires kb_evidence_emit_enabled + ingress_preinject_enabled).",
     "guardrail_mode": "Guardrail enforcement mode: approve (default; a tool call needs approval, so an unattended delegate is blocked), prompt, or deny.",
@@ -299,7 +319,7 @@ CFG_KEY_DESC = {
     "text + geometry feed the normal citation path (default off; without it a scanned PDF is "
     "ingested asset-only).",
     "ocr_command": "OCR sidecar endpoint/command for structured-PDF scanned-page recognition "
-    "(resolves like embedding_command; AIMEE_OCR_URL env fallback).",
+    "(resolves like embedder_command; AIMEE_OCR_URL env fallback).",
     "kb_mining_enabled": "Enable background KB mining.",
     "kb_mining_min_poll_s": "Minimum interval (s) between KB mining polls.",
     "kb_search_max_results": "Default max results for KB search.",
@@ -705,16 +725,16 @@ ENV_DESC = {
     "AIMEE_WORKTREE_GC_DAYS": ("Server runtime", "Age threshold (days) for worktree GC."),
     "AIMEE_SOCK": ("Server runtime", "Sandbox helper socket path."),
     # Knowledge base
-    "AIMEE_LLM_URL": ("Knowledge base (aimee-kb)", "Synthesis endpoint (every curator stage, at {url}/v1). No longer selects an embedder: the kb embeds in-container, and AIMEE_EMBEDDER_URL points at an external embedder. See docs/SYNTHESIS_MODELS.md for what to put behind it and docs/KB_LLM_BACKENDS.md for the provider surface."),
-    "AIMEE_LLM_AUTH_TOKEN": ("Managed KB and inference", "First-boot transport for the bearer aimee-kb presents to the external synthesis endpoint. aimee-kb synchronously seals it into Vault, scrubs the environment, and cleanly re-execs before serving; wizard-managed deploys generate the 256-bit value in Vault. This is separate from user/server bearers."),
-    "AIMEE_LLM_AUTH_REQUIRED": ("Managed KB and inference", "Set to 1 on wizard-managed KBs so synthesis clients refuse to contact the LLM when its bearer service identity is missing."),
-    "AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE": ("Managed KB and inference", "Explicit first-boot migration/adoption transport for an existing wizard-managed LLM credential. aimee-server seals it into Vault and scrubs the environment before normal startup. Ordinary inherited AIMEE_LLM_AUTH_TOKEN is ignored by managed credential creation so stale child-service state cannot win. Must be a 32..512 character RFC 6750 b64token."),
+    "SYNTHESIS_ENDPOINT": ("Knowledge base (aimee-kb)", "Synthesis endpoint (every curator stage, at {url}/v1). No longer selects an embedder: the kb embeds in-container, and EMBEDDER_URL points at an external embedder. See docs/SYNTHESIS_MODELS.md for what to put behind it and docs/KB_LLM_BACKENDS.md for the provider surface."),
+    "SYNTHESIS_API_KEY": ("Managed KB and inference", "First-boot transport for the bearer aimee-kb presents to the external synthesis endpoint. aimee-kb synchronously seals it into Vault, scrubs the environment, and cleanly re-execs before serving; wizard-managed deploys generate the 256-bit value in Vault. This is separate from user/server bearers."),
+    "SYNTHESIS_AUTH_REQUIRED": ("Managed KB and inference", "Set to 1 on wizard-managed KBs so synthesis clients refuse to contact the LLM when its bearer service identity is missing."),
+    "AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE": ("Managed KB and inference", "Explicit first-boot migration/adoption transport for an existing wizard-managed LLM credential. aimee-server seals it into Vault and scrubs the environment before normal startup. Ordinary inherited SYNTHESIS_API_KEY is ignored by managed credential creation so stale child-service state cannot win. Must be a 32..512 character RFC 6750 b64token."),
     "AIMEE_OFFLINE_ALLOW_NO_SWAP_MLOCK_FALLBACK": (
         "Managed KB and inference",
         "Internal managed-authority switch: still attempts mlockall first, but when an unprivileged container cannot raise RLIMIT_MEMLOCK, permits the offline one-shot to continue only if the kernel reports no active swap. Operator-run custody tools leave this unset and retain mandatory mlockall.",
     ),
-    "AIMEE_LLM_MODEL": ("Knowledge base (aimee-kb)", "Model label sent to AIMEE_LLM_URL's chat endpoint (single-model gateways ignore it). Default 'aimee-synth'."),
-    "AIMEE_EMBEDDER_URL": ("Knowledge base (aimee-kb)", "Embedder endpoint override (/embed, /embed_batch); takes precedence over AIMEE_LLM_URL for embedding."),
+    "SYNTHESIS_MODEL": ("Knowledge base (aimee-kb)", "Model label sent to SYNTHESIS_ENDPOINT's chat endpoint (single-model gateways ignore it). Default 'aimee-synth'."),
+    "EMBEDDER_URL": ("Knowledge base (aimee-kb)", "Embedder endpoint override (/embed, /embed_batch); takes precedence over SYNTHESIS_ENDPOINT for embedding."),
     "AIMEE_KB_API_URL": ("Knowledge base (aimee-kb)", "aimee-kb HTTP API base URL."),
     "AIMEE_KB_API_BEARER_TOKEN": ("Knowledge base (aimee-kb)", "First-boot transport for the aimee-kb API bearer token. Server and KB bootstrap paths seal it into Vault and remove it from the environment before long-lived service startup."),
     "AIMEE_KB_API_CA_BUNDLE": ("Knowledge base (aimee-kb)", "CA bundle path for verifying the aimee-kb TLS certificate."),
@@ -795,7 +815,7 @@ ENV_DESC = {
         "`AIMEE_DB2_STATEMENT_TIMEOUT_MS`; exactly `0` opts out, independently of the "
         "statement bound.",
     ),
-    "AIMEE_EMBEDDING_DIM": ("Database & vectors", "Embedding dimension (drives halfvec column sizing)."),
+    "EMBEDDER_DIMS": ("Database & vectors", "Embedding dimension (drives halfvec column sizing)."),
     "AIMEE_PGVEC_SLOW_QUERY_MS": ("Database & vectors", "Slow-query log threshold (ms) for the pgvector transport."),
     # Memory
     "AIMEE_MEMORY_CITATIONS_MODE": ("Memory", "Citation rendering mode for memory recall."),
@@ -1095,9 +1115,9 @@ EXT_DESC = {
     "CODEX_CWD": ("Codex / Claude integration", "Working directory reported by the Codex frontend."),
     "CODEX_THREAD_ID": ("Codex / Claude integration", "Codex conversation/thread id."),
     "CLAUDE_SESSION_ID": ("Codex / Claude integration", "Claude Code session id when aimee runs as its backend."),
-    "LLM_API_KEY": ("Provider credentials", "Bearer credential used by the generic llm-chat sidecar; prefer the vault or a secret command."),
-    "LLM_ENDPOINT": ("Provider endpoints", "OpenAI-compatible base URL used by the generic llm-chat sidecar."),
-    "LLM_MODEL": ("Provider endpoints", "Model requested by the generic llm-chat sidecar."),
+    "SYNTHESIS_API_KEY": ("Provider credentials", "Bearer credential used by the generic llm-chat sidecar; prefer the vault or a secret command."),
+    "SYNTHESIS_ENDPOINT": ("Provider endpoints", "OpenAI-compatible base URL used by the generic llm-chat sidecar."),
+    "SYNTHESIS_MODEL": ("Provider endpoints", "Model requested by the generic llm-chat sidecar."),
 }
 
 

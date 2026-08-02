@@ -2,6 +2,7 @@
  * (was server_runner_endpoints.inc, textually included only to stay under the
  * line-check ceiling). Cross-TU declarations live in the module header. */
 #include "server_state_internal.h"
+#include "workspace_scan_indexed.h"
 #include "aimee.h"
 #include "server.h"
 #include "dashboard.h"
@@ -247,10 +248,7 @@ int handle_workspace_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          if (rc != 0 || res.skipped)
             jo_add_str(p, "reason", res.reason[0] ? res.reason : "knowledge service unavailable");
          else
-            jo_add_str(p, "reason",
-                       "knowledge service saw no files at that path — it may not be able to "
-                       "read it (aimee-kb runs in its own container and does not share the "
-                       "server's filesystem)");
+            jo_add_str(p, "reason", WORKSPACE_SCAN_EMPTY_REASON);
       }
       cJSON_AddItemToArray(arr, p);
    }

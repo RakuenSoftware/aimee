@@ -652,6 +652,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-kb-mgmt-token \
                $(TESTPREFIX)/unit-test-kb-identity-token \
                $(TESTPREFIX)/unit-test-workspace-scan-indexed \
+               $(TESTPREFIX)/unit-test-server-active-project \
                $(TESTPREFIX)/unit-test-kb-login-throttle \
                $(TESTPREFIX)/unit-test-server-identity-token \
                $(TESTPREFIX)/unit-test-server-write-tier-db1 \
@@ -2149,6 +2150,12 @@ $(TESTPREFIX)/unit-test-kb-mgmt-token: $(OBJDIR)/tests/test_kb_mgmt_token.o \
 
 $(TESTPREFIX)/unit-test-workspace-scan-indexed: $(OBJDIR)/tests/test_workspace_scan_indexed.o \
                                             $(OBJDIR)/server/server_workspace_scan.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+# Resolution order only: the workspace and kb calls are driven from the test, so
+# this links the one TU under test and nothing else.
+$(TESTPREFIX)/unit-test-server-active-project: $(OBJDIR)/tests/test_server_active_project.o \
+                                            $(OBJDIR)/server/server_active_project.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-kb-login-throttle: $(OBJDIR)/tests/test_kb_login_throttle.o \

@@ -1086,7 +1086,7 @@ int db2_kb_pdf_search_chunks(const char *project, const char *query, int max,
     * hits. */
    if (n < max && config_kb_pdf_vector_enabled())
    {
-      const char *embed_cmd = config_embedding_command_current(NULL);
+      const char *embed_cmd = config_embedder_command_current(NULL);
       if (embed_cmd && embed_cmd[0])
       {
          float qvec[EMBED_MAX_DIM];

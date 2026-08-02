@@ -50,7 +50,7 @@
 #include <sys/resource.h>
 #endif
 
-/* Fallback kb_embeddings dimension when config.embedding_dim is unset; the
+/* Fallback kb_embeddings dimension when config.embedder_dims is unset; the
  * default embedder is pplx-embed-v1-4b (2560-dim). Advisory only — the real
  * column dimension comes from the schema (see kbiw_process_job). */
 #define KB_DEFAULT_DIM 2560
@@ -180,7 +180,7 @@ static void kbiw_process_job(const db2_kb_ingest_job_t *job)
       kb_background_clear("ingest");
       return;
    }
-   const char *embed_cmd = config_embedding_command_current(NULL);
+   const char *embed_cmd = config_embedder_command_current(NULL);
 
    kb_stats_t stats;
    memset(&stats, 0, sizeof(stats));

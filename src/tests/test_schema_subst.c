@@ -127,7 +127,7 @@ static void test_default_dim(void)
 
 /* dim <= 0 means the deployment's width never reached this layer. That is an error,
  * NOT a fallback: this layer declares no width (config does — see
- * config_embedding_dim_effective), and inventing one here would size a corpus for
+ * config_embedder_dims_effective), and inventing one here would size a corpus for
  * an embedder that is not the one running. That exact substitution is how a kb
  * ended up with 1024-wide columns while the bundled model returned 384. */
 static void test_unset_is_refused(void)

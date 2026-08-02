@@ -92,9 +92,6 @@ void config_kb_curator_defaults(config_t *cfg)
    cfg->kb_curator_provider_base_url[0] = '\0';
    cfg->kb_curator_provider_model[0] = '\0';
    cfg->kb_curator_provider_api_key[0] = '\0';
-   cfg->kb_curator_tier_b_base_url[0] = '\0';
-   cfg->kb_curator_tier_b_model[0] = '\0';
-   cfg->kb_curator_tier_b_api_key[0] = '\0';
    cfg->kb_evidence_embed_enabled = 1;
    cfg->kb_evidence_embed_batch = 32;
    /* Cross-repo dependency graph — initial calibration (re-tuned vs S8 fixtures).
@@ -436,16 +433,12 @@ int config_parse_kb_curator(config_t *cfg, const cJSON *root)
       snprintf(cfg->kb_curator_synthesize_command, sizeof(cfg->kb_curator_synthesize_command), "%s",
                synth_command->valuestring);
 
-   /* Curator LLM providers (§2): default/Tier-A under "provider", reasoning
-    * stages under "tier_b". */
+   /* The curator's synthesis provider (§2), under "provider". One provider for
+    * every stage: the second one under "tier_b" went with the tiers. */
    parse_curator_provider(curator, "provider", cfg->kb_curator_provider_base_url,
                           sizeof(cfg->kb_curator_provider_base_url), cfg->kb_curator_provider_model,
                           sizeof(cfg->kb_curator_provider_model), cfg->kb_curator_provider_api_key,
                           sizeof(cfg->kb_curator_provider_api_key));
-   parse_curator_provider(curator, "tier_b", cfg->kb_curator_tier_b_base_url,
-                          sizeof(cfg->kb_curator_tier_b_base_url), cfg->kb_curator_tier_b_model,
-                          sizeof(cfg->kb_curator_tier_b_model), cfg->kb_curator_tier_b_api_key,
-                          sizeof(cfg->kb_curator_tier_b_api_key));
 
    const cJSON *max_tokens = cJSON_GetObjectItemCaseSensitive(curator, "extract_max_tokens");
    if (max_tokens)
@@ -543,8 +536,7 @@ void config_save_kb_curator(const config_t *cfg, cJSON *root)
        cfg->kb_curator_judge_command[0] || cfg->kb_curator_synthesize_command[0] ||
        cfg->kb_curator_extract_max_tokens != 512 || cfg->kb_curator_max_attempts != 3 ||
        cfg->kb_curator_synthesize_k != 8 || cfg->kb_curator_promote_min_sources != 3 ||
-       cfg->kb_curator_provider_base_url[0] || cfg->kb_curator_provider_model[0] ||
-       cfg->kb_curator_tier_b_base_url[0] || cfg->kb_curator_tier_b_model[0];
+       cfg->kb_curator_provider_base_url[0] || cfg->kb_curator_provider_model[0];
    int cross_repo_nondefault =
        !cfg->kb_curator_cross_repo_graph_enabled ||
        cfg->kb_curator_cross_repo_distinctiveness_v != 1 || cfg->kb_curator_cross_repo_k != 5 ||
@@ -671,8 +663,6 @@ void config_save_kb_curator(const config_t *cfg, cJSON *root)
             cJSON_AddNumberToObject(cur, "max_attempts", cfg->kb_curator_max_attempts);
          kb_curator_save_provider(cur, "provider", cfg->kb_curator_provider_base_url,
                                   cfg->kb_curator_provider_model, "");
-         kb_curator_save_provider(cur, "tier_b", cfg->kb_curator_tier_b_base_url,
-                                  cfg->kb_curator_tier_b_model, "");
       }
    }
 

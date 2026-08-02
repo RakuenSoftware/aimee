@@ -18,10 +18,8 @@ typedef struct
    char kb_curator_provider_base_url[256];
    char kb_curator_provider_model[128];
    char kb_curator_provider_api_key[256];
-   char kb_curator_tier_b_base_url[256];
-   char kb_curator_tier_b_model[128];
-   char kb_curator_tier_b_api_key[256];
-   char llm_synth_endpoint[512];
+   char synthesis_endpoint[512];
+   int synthesis_thinking;
    int kb_curator_extract_max_tokens;
 } curator_config_stub_t;
 
