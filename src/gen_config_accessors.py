@@ -58,7 +58,6 @@ SECRET_FIELDS = {
     "server_api_bearer_token": "AIMEE_API_BEARER_TOKEN",
     "trigger_auth_token": "AIMEE_TRIGGER_AUTH_TOKEN",
     "kb_curator_provider_api_key": "AIMEE_KB_CURATOR_PROVIDER_API_KEY",
-    "kb_curator_tier_b_api_key": "AIMEE_KB_CURATOR_TIER_B_API_KEY",
 }
 
 

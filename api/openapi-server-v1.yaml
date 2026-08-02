@@ -1651,7 +1651,7 @@ paths:
       summary: Curator LLM provider + queue status (proxied to aimee-kb)
       responses:
         "200":
-          description: Curator observability block (tier_a/tier_b providers + queue depth)
+          description: Curator observability block (synthesis provider + queue depth)
           content:
             application/json:
               schema: { type: object }

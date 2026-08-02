@@ -64,7 +64,7 @@ static pthread_mutex_t g_init_lock = PTHREAD_MUTEX_INITIALIZER;
  * existing corpus keeps working and is migrated deliberately via `aimee kb reembed`. */
 static int g_embed_dim = 0;
 
-/* The default width, INJECTED from config (config_embedding_dim_default) at the
+/* The default width, INJECTED from config (config_embedder_dims_default) at the
  * same startup site that sets g_embed_dim. This layer deliberately holds no
  * literal of its own: the width is declared once, in config, and a copy here
  * could disagree with the embedder that is actually running. 0 = never injected,

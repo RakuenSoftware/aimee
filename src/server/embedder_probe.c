@@ -33,7 +33,7 @@ static int probe_once(void)
    if (!g_embed_cmd[0])
       return -1;
    /* An http(s):// "command" is the in-process embed transport (the combined /
-    * unified-container deployments export AIMEE_LLM_URL and set no sidecar
+    * unified-container deployments export SYNTHESIS_ENDPOINT and set no sidecar
     * command) — there is nothing to exec, and popen would fork
     * `sh -c "http://... --dim"` forever. Probe by embedding a short text and
     * taking the vector's length: transport-exact, and independent of whether
@@ -114,7 +114,7 @@ static int embedder_probe_run(int *out_dim, int budget_ms, char *err, size_t err
  * waited for readiness, so in practice the first read succeeds; the window only covers a
  * restart where no dim probe runs because the dim is already recorded. Exhausting it
  * leaves the guard inactive for this start rather than holding the kb down. */
-#define SERVING_PROBE_BUDGET_MS 60000
+#define SERVING_PROBE_BUDGET_MS   60000
 #define SERVING_PROBE_INTERVAL_MS 2000
 
 static int embedder_probe_serving_id(char *out, size_t out_len, char *err, size_t errlen)

@@ -1930,7 +1930,7 @@ static char *td_search_docs(cJSON *args, const char *name, const char *dispatch_
       /* Search with the kb's own embedder unless this server has an explicit
        * override.  A resolved builtin here is 384-dimensional and can never
        * query a remote kb corpus built with a production embedder. */
-      const char *ec = config_embedding_command_current(NULL);
+      const char *ec = config_embedder_command_current(NULL);
       const char *embedding_command = (ec && ec[0]) ? ec : NULL;
       char *envelope = kb_client_search_json_scoped_ex(project, all_projects, q->valuestring,
                                                        embedding_command, max, NULL, NULL);

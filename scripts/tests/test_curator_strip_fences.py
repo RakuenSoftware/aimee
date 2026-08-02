@@ -102,7 +102,7 @@ class CuratorTimeoutTest(unittest.TestCase):
 
     def _assert_one_bounded_attempt(self, module):
         completed = SimpleNamespace(returncode=0, stdout='{"status":"ok"}\n', stderr="")
-        with mock.patch.dict(os.environ, {"LLM_ENDPOINT": "http://llm.test/v1", "LLM_RETRIES": "9"}, clear=True):
+        with mock.patch.dict(os.environ, {"SYNTHESIS_ENDPOINT": "http://llm.test/v1", "LLM_RETRIES": "9"}, clear=True):
             with mock.patch.object(module.subprocess, "run", return_value=completed) as run:
                 output, error = module.call_llm("prompt", 128)
         self.assertIsNone(error)
@@ -122,7 +122,7 @@ class CuratorTimeoutTest(unittest.TestCase):
         completed = SimpleNamespace(returncode=0, stdout="ok\n", stderr="")
         with mock.patch.dict(
             os.environ,
-            {"LLM_ENDPOINT": "http://llm.test/v1", "LLM_TIMEOUT": "60"},
+            {"SYNTHESIS_ENDPOINT": "http://llm.test/v1", "LLM_TIMEOUT": "60"},
             clear=True,
         ):
             with mock.patch.object(self.extract.subprocess, "run", return_value=completed) as run:

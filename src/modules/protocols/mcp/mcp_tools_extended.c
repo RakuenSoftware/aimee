@@ -150,7 +150,7 @@ void mcp_add_extended_tools(cJSON *tools)
    /* ── Memory grounding: explain a retrieval + provenance/history ───────────── */
    t = ext_tool(tools, "memory_explain_match",
                 "Explain WHY a memory matches a query: the per-signal score breakdown "
-                "(lexical / semantic / entity / graph / cross-encoder / …).");
+                "(lexical / semantic / entity / graph / recency / …).");
    ext_prop(t, "query", "string", "The query to score the memory against.");
    ext_prop(t, "memory_id", "integer", "Id of the memory to explain (e.g. from search_memory).");
    ext_require(t, "query");

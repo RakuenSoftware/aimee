@@ -108,12 +108,12 @@ services:
           set to 1 and redeploy; this switch contains no credential material.
       # Optional: point the kb synthesis / curator passes at an OpenAI-compatible
       # endpoint. Blank = disabled.
-      - key: LLM_ENDPOINT
+      - key: SYNTHESIS_ENDPOINT
         type: string
         label: LLM endpoint (optional)
         default: ""
         description: Optional OpenAI-compatible endpoint for kb synthesis/curator.
-      - key: LLM_MODEL
+      - key: SYNTHESIS_MODEL
         type: string
         label: LLM model (optional)
         default: ""

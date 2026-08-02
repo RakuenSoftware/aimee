@@ -4,7 +4,7 @@
  * Runs in a background pthread; disabled when port == 0. */
 #include "aimee.h"
 #include "config.h"
-#include "config_database.h" /* §2c: config_resolve_embedding_dim / is_pinned */
+#include "config_database.h" /* §2c: config_resolve_embedder_dims / is_pinned */
 #include "db2_pool.h"        /* db2_pool_stats — health reports pool starvation */
 #include "lifecycle.h"       /* §2c: db2_dim_change_reset / db2_probe_embedder_dim */
 #include "kb_curator_queue.h"
@@ -1109,13 +1109,13 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       int target = kb_http_json_int(body, "target_dim", 0);
       if (target <= 0)
       {
-         if (config_embedding_dim_pinned_current())
-            target = config_resolve_embedding_dim_current();
+         if (config_embedder_dims_pinned_current())
+            target = config_resolve_embedder_dims_current();
          else if (db2_probe_embedder_dim(8000, &target) != 0 || target <= 0)
          {
             snprintf(out_buf, (size_t)out_cap,
                      "{\"error\":\"could not determine the target dim from the embedder; pass "
-                     "target_dim, pin AIMEE_EMBEDDING_DIM, or ensure the embedder /health is "
+                     "target_dim, pin EMBEDDER_DIMS, or ensure the embedder /health is "
                      "reachable\"}");
             return 503;
          }
@@ -1212,14 +1212,14 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       /* Embed the query with the SAME embedder as the corpus. Passing NULL
        * here falls back to "builtin", so a corpus produced by the managed LLM
        * would be queried with a 384-dimensional hash vector. Resolve the full
-       * deployment default (explicit command, AIMEE_EMBEDDER_URL, or
-       * AIMEE_LLM_URL), not just the raw config field. */
+       * deployment default (explicit command, EMBEDDER_URL, or
+       * SYNTHESIS_ENDPOINT), not just the raw config field. */
       char embed_cmd[256] = "";
       kb_http_json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
       if (!embed_cmd[0])
       {
          if (config_present())
-            snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedding_command_current(NULL));
+            snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedder_command_current(NULL));
       }
       char *raw =
           kb_search_json_scoped_ex(project, all_projects, query, embed_cmd[0] ? embed_cmd : NULL,
@@ -1571,7 +1571,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       (void)kb_http_json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
       if (!embed_cmd[0])
       {
-         snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedding_command_current(NULL));
+         snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedder_command_current(NULL));
       }
       int force = kb_http_json_bool(body, "force", 0);
 
@@ -1660,7 +1660,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       (void)kb_http_json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
       if (!embed_cmd[0])
       {
-         snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedding_command_current(NULL));
+         snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedder_command_current(NULL));
       }
 
       if (!db2_is_initialized())
@@ -1907,7 +1907,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       (void)kb_http_json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
       if (!embed_cmd[0])
       {
-         snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedding_command_current(NULL));
+         snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedder_command_current(NULL));
       }
       int timeout = kb_http_json_int(body, "timeout", 0);
       if (timeout < 0)
@@ -1953,7 +1953,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       (void)kb_http_json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
       if (!embed_cmd[0])
       {
-         snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedding_command_current(NULL));
+         snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedder_command_current(NULL));
       }
       int kb_embed_dim = db2_embedding_dim();
       if (kb_embed_dim <= 0 || kb_embed_dim > EMBED_MAX_DIM)

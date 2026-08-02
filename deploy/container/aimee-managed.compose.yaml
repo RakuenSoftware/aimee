@@ -12,8 +12,8 @@
 # NO INFERENCE SERVICE. aimee-llm is retired: the kb embeds in-container from
 # weights baked into its image (bekko-a25m, 384-dim), so embedding needs no
 # sibling container and no download. A deployment that needs a wider embedder
-# points AIMEE_EMBEDDER_URL at an external endpoint instead. Synthesis is the
-# only remaining LLM role and it is external-only for now (AIMEE_LLM_URL,
+# points EMBEDDER_URL at an external endpoint instead. Synthesis is the
+# only remaining LLM role and it is external-only for now (SYNTHESIS_ENDPOINT,
 # defaulted empty) — a local synth tier is the next piece of work.
 #
 # Every service joins the EXTERNAL `aimee` network that aimee-server is also on, so
@@ -42,24 +42,24 @@ services:
       # inference container to fall back on, so this is empty unless an operator
       # points it at an endpoint they run. Embedding does not use it: the kb embeds
       # in-process from weights baked into its image.
-      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-}
+      SYNTHESIS_ENDPOINT: ${SYNTHESIS_ENDPOINT:-}
       # The wizard's embedder choice, and the endpoint for an external one. The kb
       # MUST receive both: `aimee config deploy-env` emits them, and without them
       # reaching the container the entrypoint sees no selection, starts nothing, and
       # the builtin serves forever — the wizard's embedder silently never runs.
       EMBEDDER_MODEL: ${EMBEDDER_MODEL:-}
-      AIMEE_EMBEDDER_URL: ${AIMEE_EMBEDDER_URL:-}
+      EMBEDDER_URL: ${EMBEDDER_URL:-}
       # Managed setup streams the LLM bearer into the KB Vault through a
       # disposable --rm helper before this long-lived container is created.
       # Managed clients must never downgrade to keyless requests if credential
       # injection is broken. Standalone/external deployments remain compatible
       # unless they opt into this invariant themselves.
-      AIMEE_LLM_AUTH_REQUIRED: ${AIMEE_LLM_AUTH_REQUIRED:-0}
-      # Curator access resolves the same AIMEE_LLM_AUTH_TOKEN from Vault.
+      SYNTHESIS_AUTH_REQUIRED: ${SYNTHESIS_AUTH_REQUIRED:-0}
+      # Curator access resolves the same SYNTHESIS_API_KEY from Vault.
       # One stable model label is shared with the unified gateway. The gateway is
       # single-deployment/multi-role, so callers do not select arbitrary models.
-      AIMEE_LLM_MODEL: ${AIMEE_LLM_MODEL:-aimee-synth}
-      AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
+      SYNTHESIS_MODEL: ${SYNTHESIS_MODEL:-aimee-synth}
+      EMBEDDER_DIMS: ${EMBEDDER_DIMS:-}
       # Internal-only mTLS lane used for server enrollment and signed management
       # JWKS refresh. It is reachable on the Compose network, not published. The
       # value is the certificate DNS identity; the listener still binds all

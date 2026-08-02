@@ -59,8 +59,9 @@ static int err_handler(const char *url, const char *auth_header, const char *bod
    return 400; /* non-retryable client error -> provider_client fails fast */
 }
 
-/* A Tier-B provider is configured -> dispatch routes to provider_client and
- * returns the response content (here the synthesis JSON). */
+/* A provider is configured -> dispatch routes to provider_client and returns the
+ * response content (here the synthesis JSON). This used to seed tier_b.* because
+ * SYNTHESIZE was a reasoning stage; one provider serves every stage now. */
 static void test_provider_path(void)
 {
    kb_curator_provider_backoff_recovered();
@@ -69,10 +70,10 @@ static void test_provider_path(void)
    g_seen_timeout_ms = 0;
    g_post_calls = 0;
    memset(&cfg, 0, sizeof(cfg));
-   snprintf(cfg.kb_curator_tier_b_base_url, sizeof(cfg.kb_curator_tier_b_base_url),
-            "http://big/v1");
-   snprintf(cfg.kb_curator_tier_b_model, sizeof(cfg.kb_curator_tier_b_model), "big-32b");
    cfg.kb_curator_extract_max_tokens = 137;
+   snprintf(cfg.kb_curator_provider_base_url, sizeof(cfg.kb_curator_provider_base_url),
+            "http://big/v1");
+   snprintf(cfg.kb_curator_provider_model, sizeof(cfg.kb_curator_provider_model), "big-32b");
 
    char err[256];
    char *resp = kb_curator_llm_run(KB_CURATOR_STAGE_SYNTHESIZE, "be-a-curator", "{\"topic\":\"t\"}",
@@ -106,9 +107,11 @@ static void test_provider_network_error_is_single_attempt(void)
    mock_agent_http_set_post_handler(network_error_handler);
    g_post_calls = 0;
    memset(&cfg, 0, sizeof(cfg));
-   snprintf(cfg.kb_curator_tier_b_base_url, sizeof(cfg.kb_curator_tier_b_base_url),
+   /* Configure the provider explicitly. This used to resolve through ambient env
+    * left set by an earlier case, which only worked by test ordering. */
+   snprintf(cfg.kb_curator_provider_base_url, sizeof(cfg.kb_curator_provider_base_url),
             "http://big/v1");
-   snprintf(cfg.kb_curator_tier_b_model, sizeof(cfg.kb_curator_tier_b_model), "big-32b");
+   snprintf(cfg.kb_curator_provider_model, sizeof(cfg.kb_curator_provider_model), "big-32b");
 
    char err[256] = "";
    char *resp = kb_curator_llm_run(KB_CURATOR_STAGE_SYNTHESIZE, "sys", "{}", NULL, "", 16384, err,
@@ -128,9 +131,6 @@ static void test_provider_error(void)
    mock_agent_http_reset();
    mock_agent_http_set_post_handler(err_handler);
    memset(&cfg, 0, sizeof(cfg));
-   snprintf(cfg.kb_curator_tier_b_base_url, sizeof(cfg.kb_curator_tier_b_base_url),
-            "http://big/v1");
-   snprintf(cfg.kb_curator_tier_b_model, sizeof(cfg.kb_curator_tier_b_model), "big-32b");
 
    char err[256] = "";
    char *resp = kb_curator_llm_run(KB_CURATOR_STAGE_SYNTHESIZE, "sys", "{}", NULL, "", 16384, err,
@@ -163,11 +163,11 @@ static void test_idle_when_unconfigured(void)
 
 int main(void)
 {
-   /* The resolver falls back to LLM_ENDPOINT env; clear it so the idle-path test
+   /* The resolver falls back to SYNTHESIS_ENDPOINT env; clear it so the idle-path test
     * is deterministic regardless of the ambient/CI environment. */
-   unsetenv("LLM_ENDPOINT");
-   unsetenv("LLM_MODEL");
-   unsetenv("LLM_API_KEY");
+   unsetenv("SYNTHESIS_ENDPOINT");
+   unsetenv("SYNTHESIS_MODEL");
+   unsetenv("SYNTHESIS_API_KEY");
    test_provider_path();
    test_provider_error();
    test_provider_network_error_is_single_attempt();

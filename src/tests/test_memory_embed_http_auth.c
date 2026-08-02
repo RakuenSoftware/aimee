@@ -44,8 +44,8 @@ int main(void)
    mock_agent_http_reset();
    mock_agent_http_set_post_handler(post_ok);
 
-   setenv("AIMEE_LLM_AUTH_REQUIRED", "1", 1);
-   assert(runtime_secret_store("AIMEE_LLM_AUTH_TOKEN", "kb-service-token") == 0);
+   setenv("SYNTHESIS_AUTH_REQUIRED", "1", 1);
+   assert(runtime_secret_store("SYNTHESIS_API_KEY", "kb-service-token") == 0);
    assert(memory_embed_http_post("http://aimee-llm:8742/", "/embed", "probe", &resp) == 0);
    assert(resp && strcmp(resp, "[1.0]") == 0);
    free(resp);
@@ -61,7 +61,7 @@ int main(void)
    mock_agent_http_set_post_handler(post_ok);
 
    /* A managed KB never issues an unauthenticated request. */
-   runtime_secret_remove("AIMEE_LLM_AUTH_TOKEN");
+   runtime_secret_remove("SYNTHESIS_API_KEY");
    resp = NULL;
    assert(memory_embed_http_post("http://aimee-llm:8742", "/embed", "probe", &resp) == -1);
    assert(resp == NULL);
@@ -71,12 +71,12 @@ int main(void)
    char oversized[700];
    memset(oversized, 'a', sizeof(oversized) - 1);
    oversized[sizeof(oversized) - 1] = '\0';
-   assert(runtime_secret_store("AIMEE_LLM_AUTH_TOKEN", oversized) == 0);
+   assert(runtime_secret_store("SYNTHESIS_API_KEY", oversized) == 0);
    assert(memory_embed_http_post("http://aimee-llm:8742", "/embed", "probe", &resp) == -1);
    assert(s_posts == 1);
 
-   unsetenv("AIMEE_LLM_AUTH_REQUIRED");
-   runtime_secret_remove("AIMEE_LLM_AUTH_TOKEN");
+   unsetenv("SYNTHESIS_AUTH_REQUIRED");
+   runtime_secret_remove("SYNTHESIS_API_KEY");
    mock_agent_http_reset();
    puts("memory-embed-http-auth: bearer propagated; managed missing/oversized token denied");
    return 0;

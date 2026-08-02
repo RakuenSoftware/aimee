@@ -40,8 +40,8 @@ static const char *FIXTURE_A =
     "ingress_preinject_assembly_budget: 1\n"
     "code_span_max_lines: 7\n"
     "tool_output_max_bytes: 4096\n"
-    "ingress_max_raw_scans: 3\nembedding_command: ZZA_val\nembedding_model: "
-    "ZZA_val\nembedding_endpoint: ZZA_val\nembedding_dim: 1\nmemory_rerank_mode: "
+    "ingress_max_raw_scans: 3\nembedder_command: ZZA_val\nembedder_model: "
+    "ZZA_val\nembedder_url: ZZA_val\nembedder_dims: 1\nmemory_rerank_mode: "
     "ZZA_val\nmemory_rewrite:\n  enabled: true\n  hyde: true\n  decompose: true\n  max_subqueries: "
     "1\nmemory_negation:\n  enabled: true\n"
     "memory_query_expansion:\n  k: 1\nmemory_recall_lanes:\n  enabled: true\n  k_summary: "
@@ -100,8 +100,8 @@ static const char *FIXTURE_B =
     "ingress_preinject_assembly_budget: 4096\n"
     "code_span_max_lines: 4096\n"
     "tool_output_max_bytes: 8192\n"
-    "ingress_max_raw_scans: 4096\nembedding_command: ZZB_val\nembedding_model: "
-    "ZZB_val\nembedding_endpoint: ZZB_val\nembedding_dim: 4096\nmemory_rerank_mode: "
+    "ingress_max_raw_scans: 4096\nembedder_command: ZZB_val\nembedder_model: "
+    "ZZB_val\nembedder_url: ZZB_val\nembedder_dims: 4096\nmemory_rerank_mode: "
     "ZZB_val\nmemory_rewrite:\n  enabled: false\n  hyde: false\n  decompose: false\n  "
     "max_subqueries: 4096\nmemory_negation:\n  enabled: false\n"
     "memory_query_expansion:\n  k: 4096\nmemory_recall_lanes:\n  "
@@ -192,10 +192,10 @@ int main(void)
    assert(cfgA.code_span_max_lines != cfgB.code_span_max_lines);
    assert(cfgA.tool_output_max_bytes != cfgB.tool_output_max_bytes);
    assert(cfgA.ingress_max_raw_scans != cfgB.ingress_max_raw_scans);
-   assert(strcmp(cfgA.embedding_command, cfgB.embedding_command) != 0);
-   assert(strcmp(cfgA.embedding_model, cfgB.embedding_model) != 0);
-   assert(strcmp(cfgA.embedding_endpoint, cfgB.embedding_endpoint) != 0);
-   assert(cfgA.embedding_dim != cfgB.embedding_dim);
+   assert(strcmp(cfgA.embedder_command, cfgB.embedder_command) != 0);
+   assert(strcmp(cfgA.embedder_model, cfgB.embedder_model) != 0);
+   assert(strcmp(cfgA.embedder_url, cfgB.embedder_url) != 0);
+   assert(cfgA.embedder_dims != cfgB.embedder_dims);
    assert(strcmp(cfgA.memory_rerank_mode, cfgB.memory_rerank_mode) != 0);
    assert(cfgA.memory_rewrite_enabled == 1 && cfgB.memory_rewrite_enabled == 0);
    assert(cfgA.memory_rewrite_hyde == 1 && cfgB.memory_rewrite_hyde == 0);

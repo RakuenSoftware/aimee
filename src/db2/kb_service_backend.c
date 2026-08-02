@@ -595,7 +595,7 @@ int db2_kb_service_async_queue_drain(const char *embedding_cmd, int timeout_secs
                                      void *vector_upsert_ctx,
                                      db2_kb_service_async_queue_stats_t *out)
 {
-   const char *effective_cmd = config_embedding_command_current(embedding_cmd);
+   const char *effective_cmd = config_embedder_command_current(embedding_cmd);
    int processed = 0;
 
    time_t started = time(NULL);

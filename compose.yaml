@@ -1,43 +1,4 @@
 services:
-  # LEGACY torch embedder, retired from the default topology: the kb embeds
-  # in-container now (bekko-a25m, weights baked into the aimee-kb image), so
-  # there is no embedding service to run. Kept behind a profile for rollback /
-  # comparison: `docker compose --profile legacy-embedder up` (and point the kb
-  # back with AIMEE_EMBEDDER_URL=http://embedder:8080).
-  embedder:
-    restart: unless-stopped
-    profiles: ["legacy-embedder"]
-    # Published image (pushed to ghcr on every merge to main); override
-    # AIMEE_EMBEDDER_IMAGE to pin a version or use a fork/registry.
-    image: ${AIMEE_EMBEDDER_IMAGE:-ghcr.io/rakuensoftware/aimee-embedder:${AIMEE_IMAGE_TAG:-latest}}
-    build:
-      context: .
-      dockerfile: Dockerfile.embedder
-      args:
-        EMBEDDER_MODEL: ${EMBEDDER_MODEL:-perplexity-ai/pplx-embed-v1-0.6b}
-        RERANKER_MODEL: ${RERANKER_MODEL:-cross-encoder/ettin-reranker-400m-v1}
-    # Tier is a RUNTIME choice now: the models are fetched at startup into the
-    # volume (not baked), so EMBEDDER_MODEL / RERANKER_MODEL select the tier with
-    # no rebuild. Light tier: EMBEDDER_MODEL=...-0.6b, RERANKER_MODEL=...-400m-v1,
-    # AIMEE_EMBEDDING_DIM=1024 on the kb (the 4b is 2560).
-    environment:
-      EMBEDDER_MODEL: ${EMBEDDER_MODEL:-perplexity-ai/pplx-embed-v1-0.6b}
-      RERANKER_MODEL: ${RERANKER_MODEL:-cross-encoder/ettin-reranker-400m-v1}
-      # CI stub embedder (off in prod): e2e sets these to serve fixed-dim
-      # vectors with no model download. EMBEDDER_STUB_DIM matches the schema dim.
-      EMBEDDER_STUB: ${EMBEDDER_STUB:-}
-      EMBEDDER_STUB_DIM: ${EMBEDDER_STUB_DIM:-}
-    volumes:
-      - aimee-embedder-models:/opt/models
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      # Long: a cold first boot downloads the model (minutes for the 4b) before
-      # /health returns 200; the volume makes every later boot fast.
-      start_period: 900s
-
   aimee-kb:
     restart: unless-stopped
     # Published image (pushed to ghcr on every merge to main); override
@@ -58,19 +19,23 @@ services:
       # SYNTH ONLY (curator Tier-A & B, at {url}/v1) and deliberately defaulted
       # empty: the aimee-llm container is retired, so any default would point
       # every deploy at a dead host. Embedding does not read this — set
-      # AIMEE_EMBEDDER_URL to embed against an external endpoint instead of
+      # EMBEDDER_URL to embed against an external endpoint instead of
       # the bundled in-container model.
-      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-}
+      SYNTHESIS_ENDPOINT: ${SYNTHESIS_ENDPOINT:-}
+      # The bundled synthesis model, on a *-llm image variant: the entrypoint
+      # starts llama-server for it and points SYNTHESIS_ENDPOINT at loopback.
+      # Empty on a non-llm image, or when synthesis is remote/off.
+      SYNTHESIS_MODEL: ${SYNTHESIS_MODEL:-}
       # The wizard's embedder choice, and the endpoint for an external one. The kb
       # MUST receive both: `aimee config deploy-env` emits them, and without them
       # reaching the container the entrypoint sees no selection, starts nothing, and
       # the builtin serves forever — the wizard's embedder silently never runs.
       EMBEDDER_MODEL: ${EMBEDDER_MODEL:-}
-      AIMEE_EMBEDDER_URL: ${AIMEE_EMBEDDER_URL:-}
+      EMBEDDER_URL: ${EMBEDDER_URL:-}
       # Embedding dim — empty = config default 384 (bundled bekko-a25m). Only set
       # it for an external embedder of a different width; changing it against a
       # populated kb forces a re-embed, and the dim guard will refuse until you do.
-      AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
+      EMBEDDER_DIMS: ${EMBEDDER_DIMS:-}
     # aimee-kb serves /v1 over HTTP only; the legacy --socket transport was retired (#2747).
     command: ["--http-port=8741"]
     ports:
@@ -121,38 +86,7 @@ services:
       # The operator supplies the console-admin credential (mode 0600).
       - ${CONTROL_WEB_CRED_FILE:-./console.cred}:/run/control-web/console.cred:ro
 
-  # Bundled local LLM for the synthesis / curator passes — llama.cpp's
-  # llama-server (OpenAI-compatible API at /v1). On by default; Gemma 3n E4B
-  # (GGUF Q4) is fetched once from HuggingFace at first boot and cached in the
-  # volume (the multi-GB download is why start_period is long). The curator calls
-  # it only from the background drain, so a warming model never blocks ingest.
-  # BYO: point LLM_ENDPOINT at your own endpoint and skip this service
-  # (`docker compose up --scale llm=0`). Override LLAMA_ARG_HF_REPO for a
-  # different/smaller GGUF.
-  llm:
-    restart: unless-stopped
-    image: ghcr.io/ggml-org/llama.cpp:server
-    profiles: ["curator-llm"]
-    environment:
-      LLAMA_ARG_HF_REPO: ${CURATOR_LLM_HF_REPO:-ggml-org/gemma-4-E4B-it-GGUF:Q4_K_M}
-      LLAMA_ARG_HOST: 0.0.0.0
-      LLAMA_ARG_PORT: "8080"
-      LLAMA_ARG_ENDPOINT_HEALTH: "1"
-    volumes:
-      - aimee-llm-models:/root/.cache/llama.cpp
-    ports:
-      - "8080:8080"
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      # Long: the cold first boot downloads the multi-GB GGUF before /health is OK.
-      start_period: 1200s
-
 volumes:
   aimee-kb-home:
   aimee-server-workspaces:
   control-web-home:
-  aimee-embedder-models:
-  aimee-llm-models:

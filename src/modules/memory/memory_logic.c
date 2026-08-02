@@ -414,8 +414,8 @@ void embed_unembedded_l2(void)
 #if defined(AIMEE_DB2_DISABLED)
    return;
 #else
-   const char *embed_command = config_embedding_command_current(NULL);
-   const char *embed_ver = config_embedding_model()[0] ? config_embedding_model() : embed_command;
+   const char *embed_command = config_embedder_command_current(NULL);
+   const char *embed_ver = config_embedder_model()[0] ? config_embedder_model() : embed_command;
 
    int64_t ids[50];
    int count =

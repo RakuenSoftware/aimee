@@ -387,10 +387,10 @@ int memory_fetch_row_by_unit_id(int64_t unit_id, memory_t *out)
 
 const char *memory_effective_embedding_cmd(const char *command)
 {
-   /* Single policy point: config_embedding_command_current (config_save.c). The caller
+   /* Single policy point: config_embedder_command_current (config_save.c). The caller
     * has already resolved config -> command upstream, so pass it as the request
     * override; this keeps memory_core consistent with the kb-side resolution. */
-   return config_embedding_command_current(command);
+   return config_embedder_command_current(command);
 }
 
 /* Per-recall query-embedding memo.
@@ -447,8 +447,8 @@ int memory_embed_http_post_status(const char *base, const char *path, const char
    char auth[640] = "";
    char token[512] = "";
    const char *auth_header = NULL;
-   int have_token = runtime_secret_get("AIMEE_LLM_AUTH_TOKEN", token, sizeof(token));
-   const char *auth_required = getenv("AIMEE_LLM_AUTH_REQUIRED");
+   int have_token = runtime_secret_get("SYNTHESIS_API_KEY", token, sizeof(token));
+   const char *auth_required = getenv("SYNTHESIS_AUTH_REQUIRED");
    if (status_out)
       *status_out = -1;
    if (auth_required && strcmp(auth_required, "1") == 0 && !have_token)
@@ -532,7 +532,7 @@ int memory_embed_serving_id(const char *command, char *out, size_t out_len)
    if (!memory_embed_command_is_http(command))
    {
       /* A SIDECAR command (the shipped container's embed-remote.py) owns endpoint
-       * resolution — AIMEE_EMBEDDER_URL over AIMEE_LLM_URL, plus the bearer — so ask it
+       * resolution — EMBEDDER_URL over SYNTHESIS_ENDPOINT, plus the bearer — so ask it
        * rather than re-deriving that precedence here and getting it subtly different.
        * This is the default deployment shape: without it the guard would be inactive in
        * exactly the configuration everything ships with. Mirrors the `--dim` probe. */
@@ -558,8 +558,8 @@ int memory_embed_serving_id(const char *command, char *out, size_t out_len)
    memory_embed_http_url(command, "/health", url, sizeof(url));
    char auth[640];
    const char *auth_header = NULL;
-   const char *token = getenv("AIMEE_LLM_AUTH_TOKEN");
-   const char *auth_required = getenv("AIMEE_LLM_AUTH_REQUIRED");
+   const char *token = getenv("SYNTHESIS_API_KEY");
+   const char *auth_required = getenv("SYNTHESIS_AUTH_REQUIRED");
    if (auth_required && strcmp(auth_required, "1") == 0 && (!token || !token[0]))
       return -1;
    if (token && token[0])
@@ -860,7 +860,7 @@ void memory_refresh_unit_embeddings(int64_t memory_id)
 {
    if (memory_id <= 0)
       return;
-   const char *embed_command = config_embedding_command_current(NULL);
+   const char *embed_command = config_embedder_command_current(NULL);
 
    db2_memory_unit_row_t units[64];
    int unit_max = (int)(sizeof(units) / sizeof(units[0]));

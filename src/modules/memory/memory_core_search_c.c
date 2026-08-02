@@ -119,7 +119,7 @@ int memory_generate_candidates(const char *query, const char *norm_query,
    if (source_stats_count)
       *source_stats_count = 0;
 
-   const char *embed_cmd = config_embedding_command_current(NULL);
+   const char *embed_cmd = config_embedder_command_current(NULL);
    int variant_fetch_limit = fetch_limit;
    int semantic_fetch_limit = fetch_limit;
    if (plan && plan->route == MEM_ROUTE_HYBRID)
@@ -233,7 +233,7 @@ int memory_generate_candidates(const char *query, const char *norm_query,
              * complement (and the sole negation lane on the shim). Recovers
              * negatives phrased differently from the query that the literal FTS
              * match misses. */
-            const char *embed_cmd = config_embedding_command_current(NULL);
+            const char *embed_cmd = config_embedder_command_current(NULL);
             int got = memory_collect_memory_matches_via_vector(neg_q, embed_cmd, fetch_limit,
                                                                scratch, cap);
             for (int s = 0; s < got && count < max; s++)
@@ -534,10 +534,10 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
     * internally consistent and avoids repeated large heap allocations. */
    /* The RESOLVED embedder command (request > config > env > builtin), copied
     * out: prewarm holds it across the batched embedder call, and
-    * config_embedding_command_current returns a thread-local. CONFIG_COPY_MAX
+    * config_embedder_command_current returns a thread-local. CONFIG_COPY_MAX
     * cannot truncate any config string. */
    char embed_command[CONFIG_COPY_MAX];
-   snprintf(embed_command, sizeof(embed_command), "%s", config_embedding_command_current(NULL));
+   snprintf(embed_command, sizeof(embed_command), "%s", config_embedder_command_current(NULL));
 
    /* Fresh query-embedding memo for this recall: every lane / HyDE pass /
     * sub-query below embeds via memory_embed_text_runtime, which reuses vectors
@@ -1167,7 +1167,7 @@ int memory_diagnose_scoped(const char *query, const char *scope_type, const char
    if (count > max)
       count = max;
 
-   const char *embed_cmd = config_embedding_command_current(NULL);
+   const char *embed_cmd = config_embedder_command_current(NULL);
    int64_t semantic_ids[128];
    double semantic_scores[128];
    int semantic_hit_count = 0;
@@ -1230,7 +1230,7 @@ int memory_explain_match(const char *query, int64_t memory_id, memory_diagnostic
    if (memory_get(memory_id, &mem) != 0)
       return -1;
 
-   const char *embed_cmd = config_embedding_command_current(NULL);
+   const char *embed_cmd = config_embedder_command_current(NULL);
    int64_t semantic_ids[128];
    double semantic_scores[128];
    int semantic_hit_count = 0;

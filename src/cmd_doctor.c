@@ -68,13 +68,13 @@ static doctor_db2_session_t check_database(check_result_t *r)
       session.ready = 1;
    }
    /* §2a: resolve the dim + pin the same way cmd_core/kb_main do — via
-    * config_resolve_embedding_dim (so doctor now honors AIMEE_EMBEDDING_DIM too,
+    * config_resolve_embedder_dims (so doctor now honors EMBEDDER_DIMS too,
     * intentionally uniform) plus the pin flag, so an unpinned doctor run derives
     * the recorded dim rather than refusing on the 1024 default. A genuine
     * pin/recorded mismatch still surfaces via #337's record_or_check guard. */
-   else if ((db2_set_embedding_dim(config_embedding_dim_current()),
-             db2_set_embedding_dim_pinned(config_embedding_dim_pinned_current()),
-             db2_set_embedder_model_id(config_embedding_model()), /* unified-llm §2 drift guard */
+   else if ((db2_set_embedding_dim(config_embedder_dims_current()),
+             db2_set_embedding_dim_pinned(config_embedder_dims_pinned_current()),
+             db2_set_embedder_model_id(config_embedder_model()), /* unified-llm §2 drift guard */
              db2_init(config_db2_url())) == 0)
    {
       session.ready = 1;
