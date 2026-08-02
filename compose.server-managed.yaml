@@ -89,7 +89,7 @@ services:
       # The managed KB image contains any model role placed inside that KB.
       # Remote role endpoints and credentials remain owned by the KB; there is no
       # separate inference-service image to select here.
-      AIMEE_KB_IMAGE: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:${AIMEE_IMAGE_TAG:-latest}}
+      AIMEE_KB_IMAGE: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb${AIMEE_KB_VARIANT:+-${AIMEE_KB_VARIANT}}:${AIMEE_IMAGE_TAG:-latest}}
       # Separate one-shot image containing the offline root provisioner and JWKS
       # publisher. These binaries never enter the ordinary KB/server images.
       AIMEE_AUTHORITY_BOOTSTRAP_IMAGE: ${AIMEE_AUTHORITY_BOOTSTRAP_IMAGE:-ghcr.io/rakuensoftware/aimee-authority-bootstrap:${AIMEE_IMAGE_TAG:-latest}}

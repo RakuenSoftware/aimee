@@ -2550,11 +2550,20 @@ int main(void)
       snprintf(cfg.synthesis_endpoint, sizeof(cfg.synthesis_endpoint), "https://api.x/v1");
       config_emit_deploy_env(&cfg, env, sizeof(env));
       assert(strstr(env, "COMPOSE_PROFILES=kb\n") != NULL);
-      assert(strstr(env, ",llm") == NULL); /* the retired container takes its profile */
+      /* An EXTERNAL endpoint deploys no sidecar: nothing local serves synthesis. */
+      assert(strstr(env, ",llm") == NULL);
       assert(strstr(env, "EMBEDDER_MODEL=bekko-a25m\n") != NULL);
+      /* The embedder is BAKED, so the choice picks an image, not just a setting.
+       * Emitting the model alone told the kb to start weights its image might not
+       * contain -- and `aimee-kb` changed meaning from "bekko" to "no embedder", so
+       * that combination was a live regression rather than a missing feature. */
+      assert(strstr(env, "AIMEE_KB_VARIANT=a25m\n") != NULL);
       assert(strstr(env, "SYNTHESIS_ENDPOINT=https://api.x/v1\n") != NULL);
-      /* Every retired spelling stays gone. */
-      assert(strstr(env, "AIMEE_LLM_") == NULL);
+      /* No sidecar, so no client identity: SYNTHESIS_CA_FILE REPLACES the system trust
+       * store, and pointing it at our CA while the endpoint is external would reject a
+       * perfectly valid certificate. */
+      assert(strstr(env, "SYNTHESIS_CA_FILE") == NULL);
+      assert(strstr(env, "AIMEE_LLM_HOST") == NULL);
       assert(strstr(env, "EMBEDDER_DIMS") == NULL); /* in-container => derived */
       assert(strstr(env, "EMBEDDER_URL") == NULL);  /* no URL => the bundled model */
 
@@ -2566,13 +2575,40 @@ int main(void)
       assert(strstr(env, "COMPOSE_PROFILES=kb\n") != NULL);
       assert(strstr(env, "SYNTHESIS_ENDPOINT") == NULL);
       assert(strstr(env, "SYNTHESIS_MODEL") == NULL);
+      assert(strstr(env, "AIMEE_LLM_HOST") == NULL);
+      /* No embedder selected either: the plain aimee-kb image is correct, and it is
+       * the one that carries neither PyTorch nor weights. */
+      assert(strstr(env, "AIMEE_KB_VARIANT=\n") != NULL);
 
-      /* A BUNDLED model is just a loopback endpoint plus a model name. */
+      /* A BUNDLED model is a DEPLOYED SIDECAR, not a loopback endpoint. It used to be
+       * in-process in the kb; it is aimee-llm-e{2,4}b beside the kb now, reached over
+       * mTLS. Every line below is load-bearing: without the profile the service exists
+       * in Compose and nothing starts it, without AIMEE_LLM_HOST the kb never mints the
+       * identity the sidecar refuses to start without, and without the endpoint the kb
+       * has a running sidecar it never calls. Each failure is silent. */
       memset(&cfg, 0, sizeof(cfg));
       snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
+      snprintf(cfg.embedder_model, sizeof(cfg.embedder_model), "nomic-embed-text-v2-moe");
       snprintf(cfg.synthesis_model, sizeof(cfg.synthesis_model), "gemma-4-E4B-it");
       config_emit_deploy_env(&cfg, env, sizeof(env));
       assert(strstr(env, "SYNTHESIS_MODEL=gemma-4-E4B-it\n") != NULL);
+      assert(strstr(env, "COMPOSE_PROFILES=kb,llm\n") != NULL);
+      assert(strstr(env, "AIMEE_LLM_VARIANT=e4b\n") != NULL);
+      assert(strstr(env, "AIMEE_LLM_HOST=aimee-llm\n") != NULL);
+      assert(strstr(env, "SYNTHESIS_ENDPOINT=https://aimee-llm:8761/v1\n") != NULL);
+      assert(strstr(env, "SYNTHESIS_CA_FILE=/var/lib/aimee/synthesis-tls/ca.pem\n") != NULL);
+      assert(strstr(env, "SYNTHESIS_CERT_FILE=/var/lib/aimee/synthesis-tls/client.pem\n") != NULL);
+      assert(strstr(env, "SYNTHESIS_KEY_FILE=/var/lib/aimee/synthesis-tls/client.key\n") != NULL);
+      /* The embedder axis is independent of the synthesis axis now. */
+      assert(strstr(env, "AIMEE_KB_VARIANT=nomic\n") != NULL);
+
+      /* E2B selects the other sidecar tag. */
+      memset(&cfg, 0, sizeof(cfg));
+      snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
+      snprintf(cfg.synthesis_model, sizeof(cfg.synthesis_model), "gemma-4-E2B-it");
+      config_emit_deploy_env(&cfg, env, sizeof(env));
+      assert(strstr(env, "AIMEE_LLM_VARIANT=e2b\n") != NULL);
+      assert(strstr(env, "COMPOSE_PROFILES=kb,llm\n") != NULL);
 
       /* Remote kb: connect out, deploy nothing. */
       memset(&cfg, 0, sizeof(cfg));
