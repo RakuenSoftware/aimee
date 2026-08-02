@@ -1,3 +1,4 @@
+#include "kb_scope.h" /* KB_SERVER_CLIENT_SCOPE */
 #include "managed_server_identity.h"
 
 #include "cJSON.h"
@@ -107,7 +108,7 @@ int kb_managed_server_identity_generate(const kb_pki_ca_t *ca, const char *host,
    memset(out, 0, sizeof(*out));
    char suffix[33];
    if (platform_random_hex(suffix, 32) || platform_random_hex(out->operation, 32) ||
-       kb_pki_generate_csr("p5-server-client", out->client_csr, sizeof(out->client_csr),
+       kb_pki_generate_csr(KB_SERVER_CLIENT_SCOPE, out->client_csr, sizeof(out->client_csr),
                            out->client_key, sizeof(out->client_key)) ||
        kb_pki_generate_csr("p5-server-management", out->management_csr, sizeof(out->management_csr),
                            out->management_key, sizeof(out->management_key)) ||
@@ -134,7 +135,7 @@ int kb_managed_server_identity_issue(const kb_pki_ca_t *ca, kb_managed_server_id
    if (!ca || !identity || strcmp(identity->state, "pending") ||
        !kb_managed_server_identity_validate(identity))
       return -1;
-   if (kb_pki_sign_server_role_csrs(ca, identity->client_csr, "p5-server-client",
+   if (kb_pki_sign_server_role_csrs(ca, identity->client_csr, KB_SERVER_CLIENT_SCOPE,
                                     identity->management_csr, "p5-server-management",
                                     60L * 60 * 24 * 90, identity->client_cert,
                                     sizeof(identity->client_cert), identity->management_cert,

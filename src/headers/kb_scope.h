@@ -43,6 +43,18 @@ extern "C"
 /* The scope kind carried by a companion service's data-plane bearer. */
 #define KB_SCOPE_KIND_SERVICE "service"
 
+/* The scope an aimee-server's OUTBOUND identity to aimee-kb carries — the one
+ * credential it uses to reach the data plane. Defined once because it is minted
+ * by two different provisioning paths (the managed installer signs a CSR against
+ * the kb's CA; a distributed server redeems an aimee:// enrolment token) and
+ * matched by the kb_enrollments / kb_server_registry SQL. Two literals drifting
+ * apart would silently unregister a live server.
+ *
+ * NOTE it currently has no ':', which at the mTLS seam means UNSCOPED — i.e. the
+ * install owner (see kb_tls_serve.c and kb_scope_authorized). Narrowing it to a
+ * `service` scope is a schema-visible change and is made separately. */
+#define KB_SERVER_CLIENT_SCOPE "p5-server-client"
+
    /* Authorization decision. A token scoped (token_kind:token_id) may access a
     * resource scoped (req_kind:req_id) iff:
     *   - the token is unscoped (token_kind empty) — admin, full access; or
