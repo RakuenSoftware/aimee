@@ -114,7 +114,6 @@ jobs:
             AIMEE_SYNTHESIS_MODEL=${{ matrix.model }}
 
   build:
-    needs: models
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -124,23 +123,21 @@ jobs:
         # Cache scopes match publish-images so testing reuses the release layer
         # cache and never restarts the LTO C build from scratch.
         #
-        # The -llm legs are what a deployment pulls to run synthesis on its own
-        # box. WITHOUT THEM THIS CHANNEL CANNOT DEPLOY SYNTHESIS AT ALL: the six
-        # image matrix landed in publish-images.yml, which fires on `v*` tags and
-        # dispatch, so `aimee-kb-llm-e4b:testing` had no trigger that would ever
-        # create it while :testing is what the managed stack pulls.
+        # NO -llm LEGS HERE, and that is the point. An image carrying llama.cpp and
+        # multi-gigabyte weights must not be rebuilt because kb code changed, and
+        # every leg in this matrix rebuilds on every push that touches src/**. The
+        # two -llm kb variants published from here cost a full kb rebuild each —
+        # under a separate cache scope, so the LTO C build, postgres, pgvectorscale
+        # and torch were all built three times per push for one code change.
         #
-        # The bekko legs only. The nomic axis is a different embedder and a
-        # one-way choice for a populated database; publishing it here would double
-        # the build for a variant this channel has never deployed.
+        # Bundled synthesis moves to its own aimee-llm-e{2,4}b image, deployed
+        # beside the kb, rebuilt only when the model or the model list changes. The
+        # weights stay baked — that property is why they were baked in the first
+        # place — they are just baked into the image whose inputs are stable.
         image:
           - { name: aimee-server,    dockerfile: Dockerfile.server }
           - { name: aimee-kb,        dockerfile: Dockerfile }
           - { name: aimee-authority-bootstrap, dockerfile: Dockerfile.authority-bootstrap }
-          - { name: aimee-kb-llm-e2b, dockerfile: Dockerfile, synthesis: gemma-4-E2B-it,
-              args: "AIMEE_WITH_LLAMACPP=1" }
-          - { name: aimee-kb-llm-e4b, dockerfile: Dockerfile, synthesis: gemma-4-E4B-it,
-              args: "AIMEE_WITH_LLAMACPP=1" }
     steps:
       - uses: actions/checkout@v4
 
