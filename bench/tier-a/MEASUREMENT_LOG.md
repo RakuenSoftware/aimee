@@ -1301,3 +1301,48 @@ fails. The full unit-tests suite passes with it added.
 What remains unverified is the deployed path — no live KB has run a retraction
 end to end, only the sqlite shim — and the 1 polarity error per 869 notes is
 measured on one model and one corpus.
+
+## v5 vs v7 on one corpus: the first unconfounded prompt comparison
+
+Every earlier prompt comparison here was confounded by the corpus. v5's numbers
+came from a slice of gold_large and v6's from gold_small — different notes of
+different difficulty — so the gap between them said as much about the corpus as
+about the prompt, and the honest thing was to refuse to compare them. Both arms
+were re-run on the same 1001 notes, same server process, same quant, same
+session, one variable.
+
+**A correction to the first attempt.** Scoring v7 with its negated facts stripped
+(the gold has no notion of them) flatters it: on a retraction note v5's spurious
+positive counts as a false positive while v7's retraction is simply removed. That
+is the "let the policy decide the answer" error inverted. Excluding retraction
+notes from BOTH arms is the apples-to-apples version, and the result survives it:
+
+| view | v5 | v7 | delta |
+|---|---:|---:|---:|
+| strict F1 | 0.5856 | **0.6102** | **+0.0246** |
+| lenient F1 | 0.6158 | 0.6381 | +0.0223 |
+| relation-agnostic F1 | 0.8393 | 0.8202 | **-0.0191** |
+
+869 non-retraction notes, paired bootstrap over 5000 replicates:
+**+0.0246, 95% CI [+0.0050, +0.0452], significant.** The first prompt delta in
+this whole effort with an interval that excludes zero.
+
+Abstention improves 0.8758 -> 0.8913 and spurious triples fall 42 -> 35.
+Fabrication is 0.0 on both.
+
+### The two views disagree, and that is the finding
+
+Strict rises while relation-agnostic falls. Those measure different things:
+strict charges predicate naming variance twice, relation-agnostic ignores naming
+and asks only whether the right entity pair was found. So v7 names predicates
+more canonically and finds slightly fewer pairs — it trades a little coverage for
+naming discipline and better abstention.
+
+That is a plausible consequence of the change: v6/v7 tell the model to use "the
+same canonical relation the positive fact would use" and name two predicates
+explicitly, which is naming guidance whether or not the note is a retraction.
+
+Two limits, stated rather than smoothed: the relation-agnostic delta has NO
+interval — bootstrap_ci.py scores strict only — so -0.0191 is a point estimate.
+And v5 -> v7 bundles the polarity change with the rename sentence, so nothing
+here attributes the gain to either alone.

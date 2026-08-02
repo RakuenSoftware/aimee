@@ -1,0 +1,8 @@
+[12:42:53Z] === v5/v7 1k sweep start; gold=/home/virant/dev/aimee/.aimee/worktrees/b94c9263-317c099512d045a7/main/bench/tier-a/data/corpora/v4/gold_small.jsonl expect=1001 ===
+[12:42:53Z] SERVE /opt/hf/e4b-q4.gguf
+[12:43:09Z] START E4B.UD-Q4_K_XL.v5 (prompt=v5)
+[13:19:49Z] OK   E4B.UD-Q4_K_XL.v5 rows=1001 thinking=985/1001
+[13:19:49Z] START E4B.UD-Q4_K_XL.v7 (prompt=live)
+[14:02:06Z] OK   E4B.UD-Q4_K_XL.v7 rows=1001 thinking=1000/1001
+[14:02:06Z] SERVE /opt/hf/e2b-q4.gguf
+[14:02:22Z] START E2B.UD-Q4_K_XL.v7 (prompt=live)
