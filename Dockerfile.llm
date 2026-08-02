@@ -104,9 +104,13 @@ ARG LLAMACPP_VERSION
 # this build into a slim image produced a binary that linked fine and died at exec
 # with "libgomp.so.1: cannot open shared object file". The --version check below is
 # what turned that into a build failure instead of a first-synthesis one.
+# curl is the healthcheck client, not a model fetcher. LLAMA_CURL=OFF above is about
+# llama-server LINKING libcurl so it can download weights at runtime, which this image
+# must never do; probing loopback to answer "am I able to serve yet" is a different
+# job and needs a client of some kind.
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends stunnel4 ca-certificates libgomp1; \
+    apt-get install -y --no-install-recommends stunnel4 ca-certificates libgomp1 curl; \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=llamacpp /out/ /opt/aimee/llama.cpp/
@@ -141,5 +145,16 @@ ENV AIMEE_SYNTHESIS_MODEL=${AIMEE_SYNTHESIS_MODEL} \
 # Only the mTLS port. llama-server binds loopback inside this container and is
 # unreachable from outside it by construction, so the terminator is the only way in.
 EXPOSE 8761
+
+# READY MEANS LLAMA-SERVER CAN ANSWER, not that the terminator is listening. Those are
+# seconds apart: the entrypoint starts llama-server in the background and stunnel
+# immediately after, so the port accepts connections while the model is still loading
+# and the hop returns 503. Probing loopback is what distinguishes them.
+#
+# start-period covers the model load, which is the slow part and scales with the
+# weights: E4B is ~7.5 GB and a cold page cache makes it slower still. Failures during
+# that window do not count against retries.
+HEALTHCHECK --interval=15s --timeout=5s --start-period=180s --retries=3 \
+    CMD curl -fsS -m 4 "http://127.0.0.1:${AIMEE_LLM_LOOPBACK_PORT}/health" || exit 1
 
 ENTRYPOINT ["/usr/local/bin/aimee-llm-entrypoint.sh"]
