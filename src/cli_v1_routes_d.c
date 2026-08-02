@@ -833,13 +833,9 @@ const char *cli_v1_route_for_method(const char *method, const char **verb_out)
         * them; POST on all three because the thin client marshals flags into a body. The
         * server refuses these over TCP (v1_route_requires_uds), so a remote endpoint fails
         * there rather than here. */
-       {"kb.grant.set", "POST", "/v1/grants/write-tier/set"},
-       {"kb.grant.revoke", "POST", "/v1/grants/write-tier/revoke"},
-       {"kb.grant.list", "POST", "/v1/grants/write-tier/list"},
        /* Same route as list: `show` is that listing filtered to one subject, so the row shape
         * has one definition. Only the METHOD differs, so the marshaller can require a
         * subject — without that separation, `show` with no subject silently lists everything. */
-       {"kb.grant.show", "POST", "/v1/grants/write-tier/list"},
        {"kb.health", "GET", "/v1/kb/status"},
        {"kb.ingest.status", "GET", "/v1/kb/ingest/status"},
        {"kb.status", "GET", "/v1/kb/status"},

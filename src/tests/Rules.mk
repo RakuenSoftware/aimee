@@ -512,8 +512,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-collab-rules \
                $(TESTPREFIX)/unit-test-oauth-pkce \
                $(TESTPREFIX)/unit-test-subject-grammar \
-               $(TESTPREFIX)/unit-test-grant-composed \
-               $(TESTPREFIX)/unit-test-kb-client-grants \
                $(TESTPREFIX)/unit-test-kb-http-grants \
                $(TESTPREFIX)/unit-test-kb-oidc-login \
                $(TESTPREFIX)/unit-test-kb-oidc-login-store \
@@ -5153,8 +5151,7 @@ $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                            $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_bearer_auth.o $(OBJDIR)/server/server_http_keepalive.o $(OBJDIR)/server/server_http_management.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/wfe_http_proxy.o \
                      $(OBJDIR)/server/server_runtime_identity.o \
-                     $(OBJDIR)/server/server_http_grant_routes.o \
-                     $(OBJDIR)/modules/kb_client/kb_client_grants.o $(OBJDIR)/server/server_http_mgmt_read_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/server/server_http_authz.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/tests/support/workflow_api_stub.o $(OBJDIR)/tests/support/router_advise_stub.o $(OBJDIR)/modules/vault/vault_principal.o $(OBJDIR)/server/presence.o \
+                     $(OBJDIR)/server/server_http_mgmt_read_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/server/server_http_authz.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/tests/support/workflow_api_stub.o $(OBJDIR)/tests/support/router_advise_stub.o $(OBJDIR)/modules/vault/vault_principal.o $(OBJDIR)/server/presence.o \
                            $(OBJDIR)/server/server_mgmt_status.o $(OBJDIR)/server/server_mgmt_endpoint.o $(OBJDIR)/shared/management_read.o $(OBJDIR)/server/server_mgmt_read_endpoint.o $(OBJDIR)/server/server_mgmt_read_source.o $(OBJDIR)/server/server_mgmt_audit.o $(OBJDIR)/server/server_mgmt_token.o $(OBJDIR)/kb/kb_mgmt_status.o $(OBJDIR)/kb/kb_mgmt_endpoint.o \
                            $(OBJDIR)/server/cli_session_pty.o $(OBJDIR)/server/cli_session.o $(OBJDIR)/posix/workspace_provider.o \
                            $(OBJDIR)/modules/workspace/workspace_runner_registry.o $(OBJDIR)/modules/workspace/workspace_runner_queue.o \
@@ -5604,35 +5601,6 @@ $(TESTPREFIX)/unit-test-kb-oidc-login-flow: $(OBJDIR)/tests/test_kb_oidc_login_f
                      $(OBJDIR)/kb/kb_identity.o \
                      $(OBJDIR)/server/oauth_pkce.o \
                      $(OBJDIR)/util.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
-	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
-
-# The vault and the IdP's network call are stubbed IN THE TEST TU (see the file):
-# linking the real ones would mean standing up a vault and a TLS client to test a
-# routing decision, and kb_oidc_token_exchange_post lives in its own translation
-# unit precisely so a caller can link the codec without dragging in TLS.
-# The grant commands through the SHIPPING routing boundary: real marshalling, real
-# method->path resolution, the real UDS gate, real server handlers. Only kb_client is
-# stubbed. Added because a review found a defect no layer-local test could see — `show`
-# sharing a method with `list` and therefore issuing an unfiltered listing.
-# Deliberately does NOT link server_http_routes.o: the route table references every handler
-# in the server and would drag the whole binary in. The one link that leaves uncovered — the
-# table's path -> handler row — is covered by server-api-conformance-check and the committed
-# route descriptor, both of which read that table. Everything else in the chain is real.
-$(TESTPREFIX)/unit-test-grant-composed: $(OBJDIR)/tests/test_grant_composed.o \
-                     $(OBJDIR)/server/server_http_grant_routes.o \
-                     $(OBJDIR)/server/server_http_authz.o \
-                     $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o \
-                     $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o \
-                     $(OBJDIR)/posix/util.o \
-                     $(OBJDIR)/util.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o $(OBJDIR)/log.o
-	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
-
-# The HTTP transport is stubbed IN THE TEST TU. What this pins is how the client
-# INTERPRETS kb's answers — where an operator gets misled, since each outcome implies a
-# different next action.
-$(TESTPREFIX)/unit-test-kb-client-grants: $(OBJDIR)/tests/test_kb_client_grants.o \
-                     $(OBJDIR)/modules/kb_client/kb_client_grants.o \
-                     $(OBJDIR)/util.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o $(OBJDIR)/log.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 # The db2 seam is stubbed IN THE TEST TU: it needs Postgres, and its own behaviour is

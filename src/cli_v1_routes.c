@@ -215,13 +215,9 @@ static const struct
     {"kb", "docs push", "kb.docs.push", NULL, NULL, 900000},
     /* Grant administration. `show` maps to the same method as `list` — it is that listing
      * filtered to one subject, so there is one row shape and one route. */
-    {"kb", "grant set", "kb.grant.set", NULL, NULL, 30000},
-    {"kb", "grant revoke", "kb.grant.revoke", NULL, NULL, 30000},
-    {"kb", "grant list", "kb.grant.list", NULL, "grants", 30000},
     /* A DISTINCT method from `list`, resolving to the same route. Sharing the method would
      * leave the marshaller unable to require --subject, and `show` with no subject would
      * silently list everything. */
-    {"kb", "grant show", "kb.grant.show", NULL, "grants", 30000},
     {"kb", "ingest", "kb.ingest", NULL, NULL, 30000},
     {"kb", "ingest status", "kb.ingest.status", NULL, NULL, 0},
     {"kb", "reembed", "kb.reembed", NULL, NULL, 900000},
