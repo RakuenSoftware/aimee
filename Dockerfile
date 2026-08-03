@@ -35,6 +35,19 @@ ARG AIMEE_VERSION=""
 RUN sh scripts/fetch-treesitter.sh \
     && make -C src ../aimee-kb -j"$(nproc)" AIMEE_TREESITTER=1 ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE_VERSION}
 
+RUN python3 scripts/export_c_repositories.py --runtime-bundle /module-runtime \
+    && mkdir -p /module-runtime/bin \
+    && for source in /module-runtime/src/*.c; do \
+         binary="${source##*/}"; binary="${binary%.c}"; \
+         cc -std=c11 -O2 -Wall -Wextra -Werror -Isrc/core/event_bus/include \
+           "$source" \
+           src/core/event_bus/bus_attach.c src/core/event_bus/bus_client.c \
+           src/core/event_bus/bus_endpoint.c src/core/event_bus/bus_region.c \
+           src/core/event_bus/bus_ring.c src/core/event_bus/bus_wire.c \
+           src/core/event_bus/module_protocol.c \
+           -o "/module-runtime/bin/$binary"; \
+       done
+
 # pgvectorscale (StreamingDiskANN). Always built: it adds ~1 MB to the image, and
 # the kb already decides at RUNTIME whether to use it -- pgvec_vectorscale_available()
 # probes pg_extension and falls back to HNSW with a warning when it is absent
@@ -232,6 +245,9 @@ RUN useradd --system --home-dir /var/lib/aimee --create-home --shell /usr/sbin/n
 RUN install -d -o aimee -g aimee -m 0700 /var/lib/aimee/synthesis-tls
 COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb
 COPY --from=build /src/aimee-kb-resolver /usr/local/bin/aimee-kb-resolver
+COPY --from=build /module-runtime/bin/ /usr/local/libexec/aimee-modules/
+COPY --from=build /module-runtime/grants/kb/ /opt/aimee/module-grants/kb/
+COPY --from=build /module-runtime/kb.modules /opt/aimee/module-grants/kb.modules
 
 # The embedder registry: every per-model fact that changes the vectors (pooling, width,
 # context, prefixes), keyed by model identity. Read by the in-container embedder to know
@@ -385,8 +401,10 @@ COPY scripts/embed-remote.py scripts/llm-chat.py \
 # the entrypoint seeds it into $AIMEE_HOME/.config/aimee on first start.
 COPY deploy/container/aimee.yaml /opt/aimee/defaults/aimee.yaml
 COPY deploy/container/aimee-kb-entrypoint.sh /usr/local/bin/aimee-kb-entrypoint.sh
+COPY deploy/container/module-supervisor.sh /usr/local/bin/module-supervisor.sh
 COPY deploy/container/aimee-kb-db-export.sh /usr/local/bin/aimee-kb-db-export
-RUN chmod +x /usr/local/bin/aimee-kb-entrypoint.sh /usr/local/bin/aimee-kb-db-export
+RUN chmod +x /usr/local/bin/aimee-kb-entrypoint.sh /usr/local/bin/aimee-kb-db-export \
+    /usr/local/bin/module-supervisor.sh
 
 USER aimee
 WORKDIR /var/lib/aimee

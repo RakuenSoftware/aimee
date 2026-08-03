@@ -40,6 +40,22 @@ ARG AIMEE_VERSION=""
 # own credentials, which is the opposite of the intent.
 RUN make -C src ../aimee-server ../aimee ../aimee-forwarder -j"$(nproc)" ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE_VERSION}
 
+# Build the independently supervised same-container module adapters from the
+# canonical contract. They link only the extracted event-bus client/protocol;
+# no feature source is linked into the adapter boundary.
+RUN python3 scripts/export_c_repositories.py --runtime-bundle /module-runtime \
+    && mkdir -p /module-runtime/bin \
+    && for source in /module-runtime/src/*.c; do \
+         binary="${source##*/}"; binary="${binary%.c}"; \
+         cc -std=c11 -O2 -Wall -Wextra -Werror -Isrc/core/event_bus/include \
+           "$source" \
+           src/core/event_bus/bus_attach.c src/core/event_bus/bus_client.c \
+           src/core/event_bus/bus_endpoint.c src/core/event_bus/bus_region.c \
+           src/core/event_bus/bus_ring.c src/core/event_bus/bus_wire.c \
+           src/core/event_bus/module_protocol.c \
+           -o "/module-runtime/bin/$binary"; \
+       done
+
 # --- webchat frontend: build the React SPA into a single index.html ---
 # vite-plugin-singlefile inlines all JS/CSS, so the runtime image ships one file.
 FROM node:20-bookworm AS frontend-build
@@ -298,6 +314,9 @@ RUN useradd --uid 1000 --user-group --home-dir /var/lib/aimee --create-home --sh
 # when no named volume is mounted; operators can bind/name it for backups.
 VOLUME /var/lib/aimee-workspaces /mnt/media/cores
 COPY --from=build /src/aimee-server /usr/local/bin/aimee-server
+COPY --from=build /module-runtime/bin/ /usr/local/libexec/aimee-modules/
+COPY --from=build /module-runtime/grants/server/ /opt/aimee/module-grants/server/
+COPY --from=build /module-runtime/server.modules /opt/aimee/module-grants/server.modules
 COPY --from=wfe-build /out/aimee-wfe /usr/local/bin/aimee-wfe
 # Static TCP<->UDS bridge; aimee-server docker-cp's it into a proxy-mode delegate sandbox.
 COPY --from=build /src/aimee-forwarder /usr/local/bin/aimee-forwarder
@@ -329,10 +348,12 @@ RUN if command -v code-server >/dev/null 2>&1; then echo "aimee: code-server bun
 COPY deploy/container/pam.d-aimee /etc/pam.d/aimee
 COPY deploy/container/runtime-web-lib.sh /usr/local/bin/runtime-web-lib.sh
 COPY deploy/container/plane-supervisor.sh /usr/local/bin/plane-supervisor.sh
+COPY deploy/container/module-supervisor.sh /usr/local/bin/module-supervisor.sh
 COPY deploy/container/core-storage.sh /usr/local/bin/core-storage.sh
 COPY deploy/container/server-entrypoint.sh /usr/local/bin/aimee-server-entrypoint
 RUN chmod +x /usr/local/bin/aimee-server-entrypoint \
-    /usr/local/bin/core-storage.sh /usr/local/bin/plane-supervisor.sh
+    /usr/local/bin/core-storage.sh /usr/local/bin/plane-supervisor.sh \
+    /usr/local/bin/module-supervisor.sh
 
 # Baked default config (enables the inbound /v1 HTTP listener: port + bearer).
 # Kept OUTSIDE $AIMEE_HOME so a bind-mounted (empty) volume can't shadow it; the
