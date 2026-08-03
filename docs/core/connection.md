@@ -43,6 +43,6 @@ The event bus is deliberately separate. It is not a network transport and is
 not linked into the thin client.
 
 The independently installable package is versioned by `src/core/VERSION` and
-exports CMake targets under `aimee::`. Consumers require `0.1.0` exactly. The
+exports CMake targets under `aimee::`. Consumers require that version exactly. The
 monorepo can consume an installed copy with `-DAIMEE_USE_INSTALLED_CORE=ON` or
 `AIMEE_CORE_PREFIX=/absolute/prefix`; both paths reject a version mismatch.

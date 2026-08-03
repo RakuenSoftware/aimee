@@ -1361,7 +1361,9 @@ if(AIMEE_LEAN)
     endif()
 endif()
 
-set(AIMEE_CORE_REQUIRED_VERSION "0.1.0" CACHE STRING "Pinned aimee-core package version")
+file(STRINGS "${AIMEE_SRC_DIR}/core/VERSION" AIMEE_CORE_SOURCE_VERSION LIMIT_COUNT 1)
+set(AIMEE_CORE_REQUIRED_VERSION "${AIMEE_CORE_SOURCE_VERSION}" CACHE STRING
+    "Pinned aimee-core package version")
 option(AIMEE_USE_INSTALLED_CORE "Use a versioned installed aimee-core package" OFF)
 if(AIMEE_USE_INSTALLED_CORE)
     find_package(aimee-core ${AIMEE_CORE_REQUIRED_VERSION} EXACT CONFIG REQUIRED)
@@ -1395,6 +1397,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         ${AIMEE_SRC_DIR}/core/event_bus/bus_client.c
         ${AIMEE_SRC_DIR}/core/event_bus/bus_endpoint.c
         ${AIMEE_SRC_DIR}/core/event_bus/bus_host.c
+        ${AIMEE_SRC_DIR}/core/event_bus/module_client.c
+        ${AIMEE_SRC_DIR}/core/event_bus/module_protocol.c
+        ${AIMEE_SRC_DIR}/core/event_bus/module_runtime.c
         ${AIMEE_SRC_DIR}/core/event_bus/bus_region.c
         ${AIMEE_SRC_DIR}/core/event_bus/bus_region_host.c
         ${AIMEE_SRC_DIR}/core/event_bus/bus_ring.c

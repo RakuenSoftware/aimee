@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -135,6 +136,15 @@ def export_core(output_root: Path, timestamp: str) -> dict[str, object]:
     shutil.copy2(ROOT / "LICENSE", repository / "LICENSE")
     shutil.copy2(ROOT / "NOTICE", repository / "NOTICE")
     version = CORE_VERSION_FILE.read_text(encoding="utf-8").strip()
+    for example in ("connection-client", "event-bus-module"):
+        cmake_file = repository / "examples" / example / "CMakeLists.txt"
+        cmake_text = cmake_file.read_text(encoding="utf-8")
+        cmake_text = re.sub(
+            r"find_package\(aimee-core [^) ]+ EXACT CONFIG REQUIRED\)",
+            f"find_package(aimee-core {version} EXACT CONFIG REQUIRED)",
+            cmake_text,
+        )
+        write_text(cmake_file, cmake_text)
     write_text(
         repository / "README.md",
         f"""# Aimee C core
@@ -505,6 +515,12 @@ def refresh_lock_from_repositories(repository_root: Path) -> int:
         entry["version"] = version
         entry["ref"] = f"v{version}"
         entry["commit"] = head
+        if repository_id == "aimee-core-c":
+            entry["source_sha256"] = digest_files(core_files())
+        else:
+            descriptor = load_json(ROOT / f"src/modules/{repository_id}/module.yaml")
+            owned = module_owned_files(repository_id, descriptor)
+            entry["source_sha256"] = digest_files([ROOT / relative for relative in owned])
     LOCK.write_text(json.dumps(lock, indent=2) + "\n", encoding="utf-8")
     return len(entries)
 

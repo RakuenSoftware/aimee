@@ -10,7 +10,7 @@ python3 scripts/export_c_repositories.py \
 The command refuses to overwrite an existing output directory. It creates one
 `aimee-core-c` Git repository and one `aimee-module-<id>` Git repository for
 every required and optional canonical module. Each repository receives an
-`origin` URL under `RakuenSoftware`, an initial `v0.1.0` tag, and an exact commit
+`origin` URL under `RakuenSoftware`, a tag matching `src/core/VERSION`, and an exact commit
 pin. It does not push or create remote repositories.
 
 The core repository is a standalone installable CMake package. Every module

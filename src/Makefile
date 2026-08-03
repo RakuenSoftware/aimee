@@ -391,7 +391,7 @@ DATA_OBJS = $(DATA_SRCS:%.c=$(OBJDIR)/%.o)
 # Every networked C product links libaimee-core-connection. The event bus is a
 # separate local shared-memory facility linked only by aimee-server and
 # aimee-kb; it never provides transport between machines.
-export AIMEE_CORE_REQUIRED_VERSION := 0.1.0
+export AIMEE_CORE_REQUIRED_VERSION := $(strip $(shell sed -n '1p' core/VERSION))
 AIMEE_CORE_PREFIX ?=
 ifneq ($(strip $(AIMEE_CORE_PREFIX)),)
 AIMEE_CORE_INSTALLED_VERSION := $(strip $(shell sed -n '1p' "$(AIMEE_CORE_PREFIX)/lib/cmake/aimee-core/VERSION" 2>/dev/null))

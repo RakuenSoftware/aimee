@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
-project(aimee_core_c VERSION 0.2.0 LANGUAGES C)
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" AIMEE_CORE_VERSION LIMIT_COUNT 1)
+project(aimee_core_c VERSION ${AIMEE_CORE_VERSION} LANGUAGES C)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
