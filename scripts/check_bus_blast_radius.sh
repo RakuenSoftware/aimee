@@ -45,7 +45,7 @@ require_target_libraries KB 1
 # check below cannot see.
 while IFS= read -r hit; do
    case "$hit" in
-   *'CORE_EVENT_BUS_LIB ='*|*'$(CORE_EVENT_BUS_LIB):'*|*'$(SERVER):'*|*'$(KB):'*) continue ;;
+   *'CORE_EVENT_BUS_LIB ='*|*'CORE_EVENT_BUS_LIB :='*|*'$(CORE_EVENT_BUS_LIB):'*|*'$(SERVER):'*|*'$(KB):'*) continue ;;
    esac
    printf 'FAIL: event-bus archive referenced outside server/KB graph: %s\n' "$hit" >&2
    fail=1
@@ -54,7 +54,7 @@ done < <(grep -n 'CORE_EVENT_BUS_LIB' src/Makefile | grep -vE '^[0-9]+:[[:space:
 # The bus implementation must enter shipping links only through its archive.
 while IFS= read -r hit; do
    case "$hit" in
-   *'CORE_EVENT_BUS_SRCS ='*|*'CORE_EVENT_BUS_OBJS ='*|*'$(OBJDIR)/core/event_bus/%.o:'*|*'$(OBJDIR)/modules/audit/obs_bus.o:'*|*'$(OBJDIR)/modules/audit/audit_replay.o:'*) continue ;;
+   *'C_FLAGS = '*' -Icore/event_bus/include'*|*'CORE_EVENT_BUS_SRCS ='*|*'CORE_EVENT_BUS_OBJS ='*|*'$(OBJDIR)/core/event_bus/%.o:'*|*'$(OBJDIR)/modules/audit/obs_bus.o:'*|*'$(OBJDIR)/modules/audit/audit_replay.o:'*) continue ;;
    esac
    printf 'FAIL: direct core/event_bus build reference outside event-bus archive: %s\n' "$hit" >&2
    fail=1
@@ -72,7 +72,7 @@ fi
 while IFS= read -r hit; do
    file="${hit%%:*}"
    case "$file" in
-   src/core/event_bus/*|src/modules/audit/obs_bus.c|src/modules/audit/audit_replay.c|src/tests/test_bus_*|src/tests/bus_conformance_host.c|src/tests/bus_bench.c) continue ;;
+   src/core/event_bus/*|src/modules/audit/obs_bus.c|src/modules/audit/audit_replay.c|src/tests/test_bus_*|src/tests/test_module_runtime.c|src/tests/bus_conformance_host.c|src/tests/bus_bench.c) continue ;;
    esac
    printf 'FAIL: bus header escaped local bus/adapter boundary: %s\n' "$hit" >&2
    fail=1
@@ -102,7 +102,7 @@ check_archive() {
 check_archive src/build/obj/libaimee-core-connection.a \
    '^(auth|control|endpoint|http1|socket|tls_openssl|native_tls_(identity|path|openssl|securetransport|schannel))\.o$' connection
 check_archive src/build/obj/libaimee-core-event-bus.a \
-   '^bus_(attach|wire|ring|region|region_host|arena|route|runtime|host|client|capture|endpoint)\.o$' event-bus
+   '^(bus_(attach|wire|ring|region|region_host|arena|route|runtime|host|client|capture|endpoint)|module_(client|protocol|runtime))\.o$' event-bus
 
 # The separately packaged module-side archive must remain a client. In
 # particular it cannot create memfds, admit peers, or route events.
