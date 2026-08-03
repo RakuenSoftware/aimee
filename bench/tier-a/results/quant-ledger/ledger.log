@@ -40,3 +40,14 @@
 [12:47:54Z]   committed v3small.E4B.UD-Q4_K_XL
 [12:47:54Z] --- v3small.E4B.UD-Q6_K_XL  (1001 notes, 2 procs)
 [13:08:11Z] OK   v3small.E4B.UD-Q6_K_XL strictF1=0.5815
+[13:08:11Z]   committed v3small.E4B.UD-Q6_K_XL
+[13:08:11Z] === ledger: every pair that now has BOTH halves under one config
+  gold70    E2B  Q4=0.6714 Q6=0.6569  delta=-0.0145  -
+  gold70    E4B  Q4=0.7083 Q6=0.7660  delta=+0.0577  +
+  v3small   E2B  Q4=0.5530 Q6=0.5832  delta=+0.0302  +
+  v3small   E4B  Q4=0.5770 Q6=0.5815  delta=+0.0045  +
+  v5small   E2B  Q4=0.6138 Q6=0.6138  delta=+0.0000  -
+  v5small   E4B  Q4=0.6202 Q6=0.6396  delta=+0.0194  +
+
+  4/6 pairs positive, from THIS run alone
+[13:08:11Z] === REBUILD COMPLETE ===

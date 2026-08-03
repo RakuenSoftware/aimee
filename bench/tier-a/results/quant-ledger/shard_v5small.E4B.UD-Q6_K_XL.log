@@ -1,0 +1,6 @@
+[11:23:02Z] sizing: starting one server to measure resident VRAM
+[11:23:33Z]   one instance uses 4942 MiB of 16303 MiB
+[11:23:33Z]   -> running 2 processes
+[11:24:04Z]   all 2 servers up; VRAM now 9879 MiB
+[11:24:04Z] START v5small.E4B.UD-Q6_K_XL across 2 shards
+[11:42:00Z] DONE v5small.E4B.UD-Q6_K_XL rows=1001/1001 wall=17m55s procs=2
