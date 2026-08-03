@@ -39,6 +39,14 @@ extern "C"
     * verified mTLS client cert. */
    SSL *server_conn_io_get_ssl(int fd);
 
+   /* accept() a connection with close-on-exec already set. Every accepted
+    * connection MUST come through here: a child process that inherits a client's
+    * socket keeps it open after the server closes its own copy, and the client
+    * reads the response until EOF — so an inherited fd hangs that client for the
+    * child's entire lifetime, not just leaks a descriptor. Returns the fd, or -1
+    * with errno set (same contract as accept()). */
+   int server_conn_accept(int listen_fd);
+
 #ifdef __cplusplus
 }
 #endif
