@@ -48,6 +48,33 @@ const char *cli_ensure_server_for_method(const char *method)
    return cli_ensure_server();
 }
 
+/* Per-session worktree bootstrap. The real one shells out to git; here it is
+ * stubbed so the test can drive both outcomes (isolated / not applicable) and
+ * assert what `initialize` does with each. g_worktree_to_return == NULL means
+ * "not applicable" (isolation off, already inside a worktree, not a repo). */
+static const char *g_worktree_to_return;
+static char g_worktree_sid[128];
+static int g_worktree_ensure_calls;
+
+int client_session_worktree_ensure(const char *sid, char *out, size_t cap)
+{
+   g_worktree_ensure_calls++;
+   snprintf(g_worktree_sid, sizeof(g_worktree_sid), "%s", sid ? sid : "");
+   if (!g_worktree_to_return)
+   {
+      if (out && cap)
+         out[0] = '\0';
+      return -1;
+   }
+   snprintf(out, cap, "%s", g_worktree_to_return);
+   return 0;
+}
+
+int platform_getppid(void)
+{
+   return 4242;
+}
+
 /* Reverse-channel helpers live in cli_workspace_serve.c, which this unit test
  * does not link; stub them so cli_mcp_serve.o resolves. */
 int cli_workspace_reverse_channel_start(void)
@@ -666,6 +693,10 @@ static void test_resources_read_unknown_uri(void)
 static void test_initialize(void)
 {
    g_reverse_channel_starts = 0;
+   /* No worktree available (isolation off / already isolated / not a repo):
+    * initialize must still serve normally, with the plain instructions. */
+   g_worktree_to_return = NULL;
+   g_worktree_ensure_calls = 0;
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "jsonrpc", "2.0");
    cJSON_AddNumberToObject(req, "id", 10);
@@ -701,10 +732,69 @@ static void test_initialize(void)
    assert(strstr(instructions->valuestring, "get_help") != NULL);
    assert(strstr(instructions->valuestring, "spawn_agent") != NULL);
    assert(strstr(instructions->valuestring, "delegate tool") != NULL);
+   assert(strstr(instructions->valuestring, "isolated checkout") == NULL);
+   assert(g_worktree_ensure_calls == 1);
    assert(g_reverse_channel_starts == 0);
 
    cJSON_Delete(resp);
    cJSON_Delete(req);
+}
+
+/* An MCP-hosted session has no SessionStart hook, so `initialize` is where it
+ * gets isolated: the proxy must ENTER the prepared worktree (it is the process
+ * aimee's file/exec tools resolve paths in) and tell the caller where its work
+ * will land. */
+static void test_initialize_enters_session_worktree(void)
+{
+   char origin_cwd[4096];
+   assert(getcwd(origin_cwd, sizeof(origin_cwd)));
+
+   char wt[4096];
+   const char *tmp = getenv("TMPDIR");
+   snprintf(wt, sizeof(wt), "%s/aimee-mcp-init-wt-%d", (tmp && tmp[0]) ? tmp : "/tmp", (int)getpid());
+   char mk[4200];
+   snprintf(mk, sizeof(mk), "rm -rf '%s' && mkdir -p '%s'", wt, wt);
+   assert(system(mk) == 0);
+
+   g_worktree_to_return = wt;
+   g_worktree_ensure_calls = 0;
+   g_worktree_sid[0] = '\0';
+
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "jsonrpc", "2.0");
+   cJSON_AddNumberToObject(req, "id", 11);
+   cJSON_AddStringToObject(req, "method", "initialize");
+   cJSON_AddObjectToObject(req, "params");
+
+   cJSON *resp = capture_response(req);
+   cJSON *result = cJSON_GetObjectItemCaseSensitive(resp, "result");
+   assert(cJSON_IsObject(result));
+
+   /* It asked for a worktree, keyed by a non-empty session id. */
+   assert(g_worktree_ensure_calls == 1);
+   assert(g_worktree_sid[0] != '\0');
+
+   /* It entered it — this process's cwd IS what the file/exec tools use. */
+   char now[4096];
+   assert(getcwd(now, sizeof(now)));
+   char real_wt[4096], real_now[4096];
+   assert(realpath(wt, real_wt) && realpath(now, real_now));
+   assert(strcmp(real_wt, real_now) == 0);
+
+   /* And it told the caller, without dropping the base instructions. */
+   cJSON *instructions = cJSON_GetObjectItemCaseSensitive(result, "instructions");
+   assert(cJSON_IsString(instructions));
+   assert(strstr(instructions->valuestring, "get_help") != NULL);
+   assert(strstr(instructions->valuestring, "isolated checkout") != NULL);
+   assert(strstr(instructions->valuestring, wt) != NULL);
+
+   cJSON_Delete(resp);
+   cJSON_Delete(req);
+
+   assert(chdir(origin_cwd) == 0);
+   snprintf(mk, sizeof(mk), "rm -rf '%s'", wt);
+   (void)system(mk);
+   g_worktree_to_return = NULL;
 }
 
 static void test_tools_list(void)
@@ -1133,6 +1223,7 @@ int main(void)
    test_resources_read_memory_by_id();
    test_resources_read_unknown_uri();
    test_initialize();
+   test_initialize_enters_session_worktree();
    test_tools_list();
    test_tools_list_preserves_server_error();
    test_remote_discovery_retries_are_safe();

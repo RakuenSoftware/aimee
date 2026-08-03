@@ -8,6 +8,7 @@
 #include "cli_client.h"
 #include "cli_mcp_serve.h"
 #include "client_constants.h"
+#include "client_session_worktree.h"
 #include "platform_path.h"
 #include "cJSON.h"
 #include <ctype.h>
@@ -296,6 +297,45 @@ static void add_prompt_message(cJSON *messages, const char *role, const char *te
 
 /* --- Local protocol handlers --- */
 
+/* Place this MCP session on its own branch + worktree, and ENTER it.
+ *
+ * An MCP-hosted agent has no SessionStart hook, so nothing else would isolate
+ * it: it would drive aimee's file/exec tools straight against the shared
+ * checkout. Unlike a hook — which cannot chdir its host — this proxy IS the
+ * process those tools resolve their paths in, so it can complete the handoff
+ * itself by chdir'ing into the worktree.
+ *
+ * Runs once, at `initialize`, before any tool traffic. Writes the entered path
+ * into out[cap] and returns 1; returns 0 when no worktree was entered (isolation
+ * disabled, already inside one, not a git repo, or creation failed — in which
+ * case client_session_worktree_ensure has already explained itself on stderr,
+ * which the MCP host surfaces as server log output). Never fatal: a session that
+ * cannot be isolated still serves read-only tools, and the attention guard
+ * remains the backstop that refuses its writes. */
+static int mcp_enter_session_worktree(char *out, size_t cap)
+{
+   const char *sid = client_session_id();
+   /* No host-provided id (no AIMEE_SESSION_ID, no session-ppid file): key off
+    * this proxy's parent instead, so each MCP host process still gets its own
+    * worktree and re-resolving during the process's life stays stable. */
+   char fallback[64];
+   if (!sid || !sid[0])
+   {
+      snprintf(fallback, sizeof(fallback), "mcp-ppid-%d", (int)platform_getppid());
+      sid = fallback;
+   }
+
+   if (client_session_worktree_ensure(sid, out, cap) != 0)
+      return 0;
+   if (chdir(out) != 0)
+   {
+      fprintf(stderr, "aimee: prepared session worktree %s but could not enter it\n", out);
+      return 0;
+   }
+   fprintf(stderr, "aimee: MCP session isolated in %s\n", out);
+   return 1;
+}
+
 static void handle_initialize(cJSON *id)
 {
    cJSON *result = cJSON_CreateObject();
@@ -322,8 +362,7 @@ static void handle_initialize(cJSON *id)
    cJSON_AddStringToObject(info, "version", MCP_VERSION);
    cJSON_AddItemToObject(result, "serverInfo", info);
 
-   cJSON_AddStringToObject(
-       result, "instructions",
+   static const char *const base_instructions =
        "When you are unsure how aimee works — work queue, delegation, memory, git, "
        "build, conventions — call get_help() before trying anything else. It "
        "returns the authoritative topic index. Pass a topic name for details "
@@ -332,7 +371,24 @@ static void handle_initialize(cJSON *id)
        "tools and describe_tool(\"<name>\") for a tool's full input schema, then "
        "call call_tool with that name and matching arguments. Do "
        "not use provider-native sub-agent tools such as spawn_agent or Agent; use "
-       "the aimee delegate tool for delegated work.");
+       "the aimee delegate tool for delegated work.";
+
+   /* Isolate before serving any tool call, and tell the caller where its work
+    * will land — the host's own idea of the cwd is now stale for aimee's tools. */
+   char wt[4200];
+   if (mcp_enter_session_worktree(wt, sizeof(wt)))
+   {
+      char instructions[8192];
+      snprintf(instructions, sizeof(instructions),
+               "%s\n\nThis session has its own isolated checkout — a branch cut from the "
+               "repository's default branch, in a dedicated worktree at %s. aimee's file and "
+               "shell tools already run there; use RELATIVE paths, or absolute paths under that "
+               "root. Do not edit the shared checkout.",
+               base_instructions, wt);
+      cJSON_AddStringToObject(result, "instructions", instructions);
+   }
+   else
+      cJSON_AddStringToObject(result, "instructions", base_instructions);
 
    mcp_respond(id, result);
 }

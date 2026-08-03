@@ -855,6 +855,10 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/harness_memory_audit.c
     ${AIMEE_SRC_DIR}/harness_memory_spill.c
     ${AIMEE_SRC_DIR}/cli_attention_guard.c
+    # Per-session branch+worktree bootstrap, shared by the SessionStart hook
+    # (cli_session_start.c) and the MCP proxy (cli_mcp_serve.c). The client links
+    # no workspace.o, so this is its own git-subprocess implementation.
+    ${AIMEE_SRC_DIR}/client_session_worktree.c
     ${AIMEE_SRC_DIR}/cli_code_audit.c
     ${AIMEE_SRC_DIR}/cli_css.c
     ${AIMEE_SRC_DIR}/cli_chat_stream.c
