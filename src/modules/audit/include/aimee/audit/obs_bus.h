@@ -15,8 +15,8 @@
  * therefore an ENQUEUE-overhead ceiling plus a DURABILITY invariant (every
  * accepted event reaches its sink exactly once), not a request/reply round-trip.
  *
- * Lifecycle (single process — bus host + consumer live in the server):
- *   obs_bus_start()  once at server startup, after audit_ensure_key / log_init.
+ * Lifecycle (single process — each trusted daemon owns one host + consumer):
+ *   obs_bus_start()  once at daemon startup, after its sinks are configured.
  *   obs_bus_emit(..) from any thread, per governed tool call (publish).
  *   obs_bus_stop()   once at shutdown: stops emitting, DRAINS the remaining
  *                      events, joins the consumer, tears the bus down. The drain
@@ -47,6 +47,19 @@ extern "C"
  * Shared so writers and the replay reader (audit_replay.c) agree on them. */
 #define OBS_BUS_KIND_ACTION    3000
 #define OBS_BUS_KIND_GUARDRAIL 3001
+
+   /* Optional daemon-owned sink for the server-only guardrail event kind. The
+    * shared runtime always carries ACTION events; aimee-server installs this
+    * callback for its DB1 guardrail store, while aimee-kb deliberately leaves it
+    * unset and therefore has no DB1 link edge. The callback is invoked on the
+    * consumer thread and returns 0 only after the event is durably accepted by
+    * its sink. */
+   typedef int (*obs_bus_guardrail_sink_fn)(const guardrail_event_t *event, void *ctx);
+
+   /* Configure the optional guardrail sink before the bus starts. Passing NULL
+    * selects the action-only profile used by aimee-kb. Reconfiguration while the
+    * bus is running is refused with -1; otherwise returns 0. */
+   int obs_bus_set_guardrail_sink(obs_bus_guardrail_sink_fn sink, void *ctx);
 
    /* Bring the audit bus up: create the in-process host, attach the producer and
     * the consumer, subscribe the consumer to the audit-row kind, and spawn the

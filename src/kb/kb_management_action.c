@@ -3,6 +3,7 @@
 #include "cJSON.h"
 #include "json_wire.h"
 #include "kb_mgmt_client.h"
+#include <aimee/core/connection/auth.h>
 
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
@@ -411,9 +412,14 @@ kb_management_action_execute(const kb_management_action_request_t *r,
       result = journal_local_failure(r, d, &intent);
       goto done;
    }
-   n = snprintf(headers, sizeof(headers),
-                "Authorization: Bearer %s\r\nX-Aimee-Management-Status: %s\r\n", token_out.jwt,
-                staple);
+   char authorization[KB_MGMT_TOKEN_WIRE_MAX + 8] = "";
+   if (aimee_core_bearer_value(authorization, sizeof(authorization), token_out.jwt) != 0)
+   {
+      result = journal_local_failure(r, d, &intent);
+      goto done;
+   }
+   n = snprintf(headers, sizeof(headers), "Authorization: %s\r\nX-Aimee-Management-Status: %s\r\n",
+                authorization, staple);
    if (n < 0 || (size_t)n >= sizeof(headers))
    {
       result = journal_local_failure(r, d, &intent);

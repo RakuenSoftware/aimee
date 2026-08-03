@@ -346,12 +346,9 @@ not only at tree level. A tree-level-only gate would let a regression between sl
 bus into a shipping binary and still pass every per-slice gate. *(Per-PR enforcement added in revision
 3.)*
 
-The check is auditable rather than magic: it asserts that no `bus_*.o` object appears in the link line
-of `aimee`, `aimee-server`, `aimee-kb`, `aimee-gateway`, or `aimee-runtime-web` — by inspecting the
-`SRCS`/`OBJS` variables those targets are built from in `src/Makefile` and their `CMakeLists.txt`
-target sources — and that `src/modules/bus/` is referenced only by the bus test targets.
+That pre-shipping rule is retained here as history. The current shipping boundary is below.
 
-### D7 — revision 4: the invariant transitions when step 3 lands
+### D7 — revision 5: one shared local-bus library for both daemons
 
 The rule above ("the bus links into **no** shipping binary") held for the whole twelve-slice feature
 tree. **Delivery step 3 — the first real module migration onto the bus — deliberately ends it.** The
@@ -360,26 +357,19 @@ the file writer directly; it publishes the row over the bus via `modules/audit/o
 consumer thread drains it to the ledger. This is an all-or-nothing migration — there is no flagged
 parallel direct path — so the bus becomes load-bearing for one real, off-critical-path operation.
 
-The blast-radius invariant therefore **narrows from "no shipping binary" to "exactly one, only via
-audit":**
+The blast-radius invariant is now the product link graph:
 
-- **Source.** Only `src/modules/bus/*` and `src/modules/audit/obs_bus.c` may include a bus header.
-- **Objects.** Only the trusted server daemons — `aimee-server` and `aimee-kb` — link the bus, each
-  through the single `BUS_SHIP_OBJS` group named on its link line; `src/Makefile` may name
-  `modules/bus` only in the `BUS_SHIP` source list and the two per-object `-Imodules/bus` compile
-  rules. `aimee-server` carries the audit / guardrail / vault / sandbox / server-side-memory events;
-  `aimee-kb` runs its own bus to record the authoritative memory-mutation events at the store
-  (`memory_core_crud`), which is why it links `BUS_SHIP_OBJS` plus a tiny stub for the guardrail sink
-  it never drives (`kb/kb_obs_bus_stub.c`).
-- **Every other shipping binary — the thin-client `aimee`, the gateway, runtime-web — stays bus-free.**
+- **Source.** Only `src/core/event_bus/*` and `src/modules/audit/obs_bus.c` may include a bus header.
+- **Library.** All bus implementation objects enter `libaimee-core-event-bus.a`; no shipping target names
+  individual bus objects.
+- **Consumers.** `aimee-server` and `aimee-kb` both link that same archive and host independent local
+  buses for modules in their own containers.
+- **Non-consumers.** The thin client does not link the bus. The bus never carries traffic between
+  machines; the shared connection library owns that traffic.
 
-`scripts/check_bus_blast_radius.sh` was revised to enforce exactly this: layer 1 permits the confined
-`src/Makefile` references and requires `BUS_SHIP_OBJS` to be consumed only by `$(SERVER)` or `$(KB)`;
-layer 3 allowlists `obs_bus.c`; layer 4 exempts `aimee-server` and `aimee-kb` (they carry the bus on
-purpose) and holds every other binary to zero bus symbols. **Honest limit:** shipping binaries are stripped (`-s`) with
-LTO, so `nm` sees no static symbols in them — layer 4 is a best-effort backstop for unstripped/CI
-builds, and the load-bearing guarantee is the source/build-text layers, which are complete by
-construction.
+The daemon-owned observability runtime and storage sinks remain outside the archive. In particular,
+the server installs its DB1 guardrail sink through `server/obs_bus_adapter.c`; the KB needs no fake
+DB1 stub. `scripts/check_bus_blast_radius.sh` enforces the library membership and consumer graph.
 
 **Durability note.** The old direct write `fflush`'d each row, so it was durable the instant it
 returned. The bus path is asynchronous: the producer publishes and returns, and the consumer writes
@@ -401,7 +391,7 @@ would test the C code twice and prove nothing about the spec.
 
 `scripts/check_bus_single_host.sh` enforces the corollary that there is exactly one host: `bus_host_create`
 is defined in exactly one translation unit; `memfd_create` is called from no file outside
-`src/modules/bus/bus_host.c`; no Go file in `server-go/bus` creates regions or accepts attaches; and
+`src/core/event_bus/bus_region_host.c`; no Go file in `server-go/bus` creates regions or accepts attaches; and
 **no test in `server-go/bus` regenerates or shadows the slice-1 vectors**. The last clause matters
 because the first three catch only a new violating *file* — they would not catch a future drift in the
 C host's frame bytes being papered over by a Go-local vector override. Slice 1's vectors are the single

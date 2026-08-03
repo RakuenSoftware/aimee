@@ -6,6 +6,7 @@
 #include "aimee.h"          /* MAX_PATH_LEN */
 #include "pki.h"            /* pki_ca_ensure, pki_is_revoked */
 #include "log.h"
+#include <aimee/core/connection/tls_openssl.h>
 
 #include <openssl/bn.h>
 #include <openssl/err.h>
@@ -227,7 +228,7 @@ static int ctx_use_private_key_pem(SSL_CTX *ctx, const char *pem)
 static SSL_CTX *tls_build_ctx(const char *cert_path, const char *key_path, int mtls_mode,
                               const char *client_ca_path)
 {
-   SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
+   SSL_CTX *ctx = aimee_core_tls_server_context();
    if (!ctx)
    {
       aimee_log(LOG_WARN, "server.tls", "SSL_CTX_new failed");
@@ -235,7 +236,6 @@ static SSL_CTX *tls_build_ctx(const char *cert_path, const char *key_path, int m
    }
    /* Modern floor; no client-cert verification (plain server TLS — the bearer is
     * the caller's authentication, the TLS is the channel). */
-   SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
    /* Advertise HTTP/1.1 over ALPN so ALPN-strict clients (e.g. Codex) don't
     * fall back to HTTP/2 on this HTTP/1.1-only server. */
    SSL_CTX_set_alpn_select_cb(ctx, alpn_select_cb, NULL);
@@ -250,19 +250,20 @@ static SSL_CTX *tls_build_ctx(const char *cert_path, const char *key_path, int m
     * correct for a non-mTLS context too. */
    static const unsigned char sid_ctx[] = "aimee-server";
    SSL_CTX_set_session_id_context(ctx, sid_ctx, sizeof(sid_ctx) - 1);
-   int key_ok = 0;
+   int identity_ok = 0;
    if (key_path && key_path[0])
-      key_ok = SSL_CTX_use_PrivateKey_file(ctx, key_path, SSL_FILETYPE_PEM) == 1;
+      identity_ok = aimee_core_tls_use_identity_files(ctx, cert_path, key_path) == 0;
    else
    {
       char key_pem[4096] = "";
-      key_ok = pki_server_tls_key_load(key_pem, sizeof(key_pem)) == 0 &&
-               ctx_use_private_key_pem(ctx, key_pem) == 0;
+      int key_ok = pki_server_tls_key_load(key_pem, sizeof(key_pem)) == 0 &&
+                   ctx_use_private_key_pem(ctx, key_pem) == 0;
       OPENSSL_cleanse(key_pem, sizeof(key_pem));
+      identity_ok = key_ok && SSL_CTX_use_certificate_chain_file(ctx, cert_path) == 1 &&
+                    SSL_CTX_check_private_key(ctx) == 1;
    }
 
-   if (SSL_CTX_use_certificate_chain_file(ctx, cert_path) != 1 || !key_ok ||
-       SSL_CTX_check_private_key(ctx) != 1)
+   if (!identity_ok)
    {
       aimee_log(LOG_WARN, "server.tls", "failed to load TLS cert/Vault key (%s): %s", cert_path,
                 ERR_error_string(ERR_get_error(), NULL));
@@ -284,7 +285,7 @@ static SSL_CTX *tls_build_ctx(const char *cert_path, const char *key_path, int m
          snprintf(ca, sizeof(ca), "%s", client_ca_path);
       else
          snprintf(ca, sizeof(ca), "%s/tls/client-ca.crt", config_default_dir());
-      if (SSL_CTX_load_verify_locations(ctx, ca, NULL) != 1)
+      if (aimee_core_tls_trust_file(ctx, ca) != 0)
       {
          aimee_log(LOG_WARN, "server.tls",
                    "mtls enabled but client CA %s not loadable: %s — refusing TLS context", ca,
@@ -415,7 +416,7 @@ static int end_entity_key_usage(X509 *cert, int exact_digital_signature)
 static SSL_CTX *management_build_ctx(const captured_pem_t *cert, const captured_pem_t *key,
                                      const captured_pem_t *ca)
 {
-   SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
+   SSL_CTX *ctx = aimee_core_tls_server_context();
    if (!ctx)
       return NULL;
    long options = SSL_OP_NO_TICKET | SSL_OP_NO_COMPRESSION;
@@ -432,8 +433,7 @@ static SSL_CTX *management_build_ctx(const captured_pem_t *cert, const captured_
    SSL_CTX_set_max_early_data(ctx, 0);
 #endif
    SSL_CTX_set_alpn_select_cb(ctx, alpn_select_cb, NULL);
-   if (SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION) != 1 ||
-       X509_VERIFY_PARAM_set_purpose(SSL_CTX_get0_param(ctx), X509_PURPOSE_SSL_CLIENT) != 1 ||
+   if (X509_VERIFY_PARAM_set_purpose(SSL_CTX_get0_param(ctx), X509_PURPOSE_SSL_CLIENT) != 1 ||
        ctx_use_captured_ca(ctx, ca) != 0 || ctx_use_captured_chain(ctx, cert) != 0 ||
        ctx_use_captured_key(ctx, key) != 0 || SSL_CTX_check_private_key(ctx) != 1 ||
        !exact_cert_eku(SSL_CTX_get0_certificate(ctx), NID_server_auth) ||

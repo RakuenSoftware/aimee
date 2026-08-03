@@ -1,7 +1,12 @@
-# Event-bus module
+# Core C event bus
 
 **Owner:** runtime core
-**Paths:** `src/modules/bus/`, `server-go/bus/`
+**Paths:** `src/core/event_bus/`, `server-go/bus/`
+
+`libaimee-core-event-bus.a` is the single POSIX implementation consumed by
+`aimee-server` and `aimee-kb`. Each daemon hosts an independent local bus for
+the modules in its own container. The thin client does not link it, and the bus
+never carries server-to-KB or thinclient-to-server traffic.
 
 ## Owns
 
@@ -12,6 +17,7 @@
 - publish, subscribe, request/reply, cancellation, and typed absence;
 - host sequence, observer routing, and full-stream tap;
 - capture format and observational replay;
+- local `SOCK_SEQPACKET` module attachment and descriptor grant;
 - C/Go vectors and conformance.
 
 ## Does not own
@@ -32,6 +38,20 @@ per kind. Arena references use generation and holder checks and are released on 
 or reap.
 
 The tap is the only core full-stream observer. Ordinary clients receive only authorized kinds.
+
+Public headers live under `src/core/event_bus/include/aimee/core/event_bus`.
+`bus_attach.h` is shared attach wire state, so an external module client does
+not include the host implementation. `bus_endpoint.h` creates the local attach
+socket; after `bus_client_attach_as` completes, the socket is no longer the data
+path and the module uses only its mappings. Admission and event-kind grants are
+daemon policy injected into the core host.
+
+External module repositories consume the host-free
+`aimee-core-event-bus-client` target. The server or KB module launcher owns the
+listener lifecycle and authenticates the process before translating its opaque
+principal into attach policy; the core does not expose an unauthenticated
+default socket. The host applies the attach hook and all kind grants atomically
+before it passes any shared-memory descriptors.
 
 ## Required checks
 

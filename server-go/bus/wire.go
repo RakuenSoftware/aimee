@@ -5,7 +5,7 @@
 // committed vectors (src/tests/fixtures/bus/wire_vectors.tsv). Agreement between
 // them is evidence about the wire, not a codec agreeing with itself.
 //
-// This file is the frame codec. Its byte layout must match src/modules/bus/
+// This file is the frame codec. Its byte layout must match src/core/event_bus/
 // bus_wire.c exactly; the vectors are what enforce that, not this comment.
 //
 // No cgo: the package is pure Go, per suite invariant 12 (no cgo boundary). A Go

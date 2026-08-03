@@ -2,10 +2,16 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "bus_client.h"
-#include "bus_ring.h"
+#include <aimee/core/event_bus/bus_client.h>
+#include <aimee/core/event_bus/bus_ring.h>
 
 bus_client_result_t bus_client_attach(int sock, bus_client_t *c)
+{
+   return bus_client_attach_as(sock, c, 0, 0);
+}
+
+bus_client_result_t bus_client_attach_as(int sock, bus_client_t *c, uint32_t principal_class,
+                                         uint32_t principal_ref)
 {
    if (!c || sock < 0)
       return BUS_CLIENT_ERR_ARG;
@@ -16,6 +22,8 @@ bus_client_result_t bus_client_attach(int sock, bus_client_t *c)
    req.magic = BUS_ATTACH_REQ_MAGIC;
    req.wire_version_min = BUS_WIRE_VERSION;
    req.wire_version_max = BUS_WIRE_VERSION;
+   req.principal_class = principal_class;
+   req.principal_ref = principal_ref;
    if (bus_fd_send(sock, &req, sizeof req, NULL, 0) != 0)
       return BUS_CLIENT_ERR_OS;
 

@@ -1,15 +1,17 @@
 /* aimee_client.c: transport-agnostic client to aimee-server's /v1 HTTP API.
  *
  * See headers/aimee_client.h for the contract. This file contains no socket
- * headers — the TCP path goes through platform_net (posix/ + windows/), and the
- * local UDS path delegates to http_uds_request (POSIX only). It therefore builds
+ * headers — the TCP path goes through libaimee-core-connection, and the local UDS
+ * path delegates to http_uds_request (POSIX only). It therefore builds
  * identically on Linux, macOS, and Windows.
  */
 #include "aimee_client.h"
-#include "cleartext_guard.h" /* the shared cleartext rule, also used by kb_client */
+#include <aimee/core/connection/auth.h>
+#include <aimee/core/connection/endpoint.h>
+#include <aimee/core/connection/http1.h>
+#include <aimee/core/connection/socket.h>
 #include "http_content_encoding.h"
 #include "platform.h"
-#include "platform_net.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -261,59 +263,6 @@ static int resolve_remote(char *url_out, size_t url_sz, char *tok_out, size_t to
    return 0;
 }
 
-/* Parse "http[s]://host[:port]" (or bare "host[:port]"). Fills host and port
- * (decimal string); *is_https set to 1 for https. Returns 0 on success. */
-static int parse_url(const char *url, char *host, size_t host_sz, char *port, size_t port_sz,
-                     int *is_https)
-{
-   *is_https = 0;
-   const char *p = url;
-   if (strncmp(p, "https://", 8) == 0)
-   {
-      *is_https = 1;
-      p += 8;
-   }
-   else if (strncmp(p, "http://", 7) == 0)
-   {
-      p += 7;
-   }
-
-   /* host part ends at ':', '/', or end-of-string */
-   const char *colon = NULL;
-   const char *slash = NULL;
-   for (const char *q = p; *q; q++)
-   {
-      if (*q == ':' && !colon && !slash)
-         colon = q;
-      else if (*q == '/')
-      {
-         slash = q;
-         break;
-      }
-   }
-   const char *host_end = colon ? colon : (slash ? slash : p + strlen(p));
-   size_t hlen = (size_t)(host_end - p);
-   if (hlen == 0 || hlen >= host_sz)
-      return -1;
-   memcpy(host, p, hlen);
-   host[hlen] = '\0';
-
-   if (colon)
-   {
-      const char *pe = slash ? slash : colon + 1 + strlen(colon + 1);
-      size_t plen = (size_t)(pe - (colon + 1));
-      if (plen == 0 || plen >= port_sz)
-         return -1;
-      memcpy(port, colon + 1, plen);
-      port[plen] = '\0';
-   }
-   else
-   {
-      snprintf(port, port_sz, "%s", *is_https ? "443" : "80");
-   }
-   return 0;
-}
-
 /* Read a full HTTP response (Connection: close) from |fd| into a heap buffer.
  * Returns the buffer (caller frees) and sets *out_len, or NULL on alloc error. */
 /* Transport I/O over either a plain socket (tls == NULL) or a TLS session. */
@@ -324,7 +273,7 @@ static int io_write_all(int fd, aimee_tls_t *tls, const void *buf, size_t len)
       return aimee_tls_write_all(tls, buf, len);
 #endif
    (void)tls;
-   return platform_net_send_all(fd, buf, len);
+   return aimee_core_socket_write_all(fd, buf, len);
 }
 
 static long io_read(int fd, aimee_tls_t *tls, void *buf, size_t len)
@@ -334,7 +283,19 @@ static long io_read(int fd, aimee_tls_t *tls, void *buf, size_t len)
       return aimee_tls_read(tls, buf, len);
 #endif
    (void)tls;
-   return platform_net_recv(fd, buf, len);
+   return aimee_core_socket_read(fd, buf, len);
+}
+
+typedef struct
+{
+   int fd;
+   aimee_tls_t *tls;
+} client_http_io_t;
+
+static long client_http_read(void *context, void *buffer, size_t length)
+{
+   client_http_io_t *io = context;
+   return io_read(io->fd, io->tls, buffer, length);
 }
 
 static void client_keepalive_close(void)
@@ -345,7 +306,7 @@ static void client_keepalive_close(void)
    if (g_keepalive_tls)
       aimee_tls_free(g_keepalive_tls);
 #endif
-   platform_net_close(g_keepalive_fd);
+   aimee_core_socket_close(g_keepalive_fd);
    g_keepalive_fd = -1;
    g_keepalive_tls = NULL;
    g_keepalive_host[0] = '\0';
@@ -355,160 +316,22 @@ static void client_keepalive_close(void)
    g_keepalive_requests = 0;
 }
 
-static int response_content_length(const char *response, size_t header_len, size_t *length_out)
-{
-   static const char name[] = "content-length:";
-   static const char transfer_encoding[] = "transfer-encoding:";
-   int found = 0;
-   for (size_t i = 0; i + sizeof(name) - 1 < header_len; i++)
-   {
-      if (i != 0 && response[i - 1] != '\n')
-         continue;
-      if (i + sizeof(transfer_encoding) - 1 < header_len &&
-          ascii_equal_ci(response + i, transfer_encoding, sizeof(transfer_encoding) - 1))
-         return -1;
-      if (!ascii_equal_ci(response + i, name, sizeof(name) - 1))
-         continue;
-      if (found++)
-         return -1;
-      const char *value = response + i + sizeof(name) - 1;
-      const char *end = memchr(value, '\r', header_len - (size_t)(value - response));
-      if (!end)
-         return -1;
-      while (value < end && (*value == ' ' || *value == '\t'))
-         value++;
-      if (value == end)
-         return -1;
-      size_t n = 0;
-      for (const char *p = value; p < end; p++)
-      {
-         if (*p < '0' || *p > '9' || n > ((1u << 20) - (size_t)(*p - '0')) / 10)
-            return -1;
-         n = n * 10 + (size_t)(*p - '0');
-      }
-      *length_out = n;
-   }
-   return found == 1 ? 0 : -1;
-}
-
-static int response_connection_close(const char *response, size_t header_len)
-{
-   static const char name[] = "connection:";
-   for (size_t i = 0; i + sizeof(name) - 1 < header_len; i++)
-      if ((i == 0 || response[i - 1] == '\n') &&
-          ascii_equal_ci(response + i, name, sizeof(name) - 1))
-      {
-         const char *value = response + i + sizeof(name) - 1;
-         const char *end = memchr(value, '\r', header_len - (size_t)(value - response));
-         if (!end)
-            return 1;
-         while (value < end)
-         {
-            while (value < end && (*value == ' ' || *value == '\t' || *value == ','))
-               value++;
-            const char *item_end = value;
-            while (item_end < end && *item_end != ',')
-               item_end++;
-            const char *trim = item_end;
-            while (trim > value && (trim[-1] == ' ' || trim[-1] == '\t'))
-               trim--;
-            if ((size_t)(trim - value) == 5 && ascii_equal_ci(value, "close", 5))
-               return 1;
-            value = item_end < end ? item_end + 1 : end;
-         }
-      }
-   return 0;
-}
-
 static char *read_response(int fd, aimee_tls_t *tls, size_t *out_len, int want_reuse,
                            int *reusable_out)
 {
-   const size_t max_response = 64u * 1024u + (1u << 20);
    if (reusable_out)
       *reusable_out = 0;
-   size_t cap = 8192, len = 0;
-   size_t expected = 0;
-   int framed = 0;
-   char *resp = malloc(cap);
-   if (!resp)
+   client_http_io_t transport = {.fd = fd, .tls = tls};
+   aimee_core_http1_io_t io = {.context = &transport, .read = client_http_read};
+   aimee_core_http1_response_t response;
+   if (aimee_core_http1_response_read(&io, 64u * 1024u, 64u * 1024u + (1u << 20), want_reuse,
+                                      &response) != 0)
       return NULL;
-   for (;;)
-   {
-      size_t chunk = framed ? expected - len : 4096;
-      if (framed && len == expected)
-         break;
-      if (len >= max_response)
-      {
-         free(resp);
-         return NULL;
-      }
-      if (chunk > max_response - len)
-         chunk = max_response - len;
-      if (len + chunk + 1 > cap)
-      {
-         size_t grown_cap = cap;
-         while (len + chunk + 1 > grown_cap)
-            grown_cap *= 2;
-         cap = grown_cap;
-         char *grown = realloc(resp, cap);
-         if (!grown)
-         {
-            free(resp);
-            return NULL;
-         }
-         resp = grown;
-      }
-      long n = io_read(fd, tls, resp + len, chunk);
-      if (n <= 0)
-         break;
-      len += (size_t)n;
-      resp[len] = '\0';
-      if (!framed)
-      {
-         char *body = strstr(resp, "\r\n\r\n");
-         if (body)
-         {
-            size_t header_len = (size_t)(body + 4 - resp), body_len = 0;
-            if (header_len > 64u * 1024u ||
-                response_content_length(resp, header_len, &body_len) != 0)
-            {
-               if (want_reuse)
-               {
-                  free(resp);
-                  return NULL;
-               }
-               continue;
-            }
-            expected = header_len + body_len;
-            if (len > expected)
-            {
-               free(resp);
-               return NULL;
-            }
-            framed = 1;
-         }
-         else if (len >= 64u * 1024u)
-         {
-            free(resp);
-            return NULL;
-         }
-      }
-   }
-   if (framed && len != expected)
-   {
-      free(resp);
-      return NULL;
-   }
-   resp[len] = '\0';
    if (reusable_out)
-   {
-      char *body = strstr(resp, "\r\n\r\n");
-      size_t header_len = body ? (size_t)(body + 4 - resp) : len;
-      *reusable_out = want_reuse && framed && !response_connection_close(resp, header_len);
-   }
+      *reusable_out = want_reuse && response.has_content_length && !response.connection_close;
    if (out_len)
-      *out_len = len;
-   return resp;
+      *out_len = response.length;
+   return response.data;
 }
 
 /* Security guard (also exposed for tests): 1 when sending |token| to a server at
@@ -517,19 +340,21 @@ static char *read_response(int fd, aimee_tls_t *tls, size_t *out_len, int want_r
  * refuses such requests rather than leak the bearer. */
 int aimee_client_would_leak_cleartext(int is_https, const char *host, const char *token)
 {
-   return cleartext_would_leak(is_https, host, token);
+   return aimee_core_would_leak_credential(is_https, host, token);
 }
 
 static char *tcp_request(const char *url, const char *token, const char *method, const char *path,
                          const char *body, int *status_out)
 {
-   char host[256], port[16];
-   int is_https = 0;
-   if (parse_url(url, host, sizeof(host), port, sizeof(port), &is_https) != 0)
+   aimee_core_endpoint_t endpoint;
+   if (aimee_core_endpoint_parse(url, &endpoint) != 0)
    {
       fprintf(stderr, "aimee: invalid server URL: %s\n", url);
       return NULL;
    }
+   const char *host = endpoint.host;
+   const char *port = endpoint.port;
+   int is_https = endpoint.secure;
 
    /* Fail closed: never transmit a bearer credential in cleartext to a
     * non-loopback host. A plaintext http:// connection to a remote server would
@@ -569,7 +394,7 @@ static char *tcp_request(const char *url, const char *token, const char *method,
       tls = g_keepalive_tls;
    else
    {
-      fd = platform_net_connect(host, port, 10000);
+      fd = aimee_core_socket_connect(host, port, 10000);
       if (fd < 0)
          return NULL;
 #ifdef WITH_TLS
@@ -584,7 +409,7 @@ static char *tcp_request(const char *url, const char *token, const char *method,
                        "pinned cert was rotated). Run `aimee remote trust` to (re)pin this "
                        "server's certificate.\n",
                        host);
-            platform_net_close(fd);
+            aimee_core_socket_close(fd);
             return NULL;
          }
       }
@@ -621,13 +446,18 @@ static char *tcp_request(const char *url, const char *token, const char *method,
    int hlen;
    const char *accept_encoding = gzip_enabled ? "Accept-Encoding: gzip\r\n" : "";
    const char *content_encoding = compressed ? "Content-Encoding: gzip\r\n" : "";
-   if (token && *token)
+   char authorization[sizeof(g_remote_token) + 16] = "";
+   int invalid_authorization =
+       token && *token && aimee_core_bearer_value(authorization, sizeof(authorization), token) != 0;
+   if (invalid_authorization)
+      hlen = -1;
+   else if (authorization[0])
       hlen = snprintf(head, sizeof(head),
-                      "%s %s HTTP/1.1\r\nHost: %s\r\nAuthorization: Bearer %s\r\n"
+                      "%s %s HTTP/1.1\r\nHost: %s\r\nAuthorization: %s\r\n"
                       "Content-Type: application/json\r\n%s%sContent-Length: %zu\r\n"
                       "Connection: %s\r\n\r\n",
-                      method, path, host, token, accept_encoding, content_encoding, wire_len,
-                      keepalive ? "keep-alive" : "close");
+                      method, path, host, authorization, accept_encoding, content_encoding,
+                      wire_len, keepalive ? "keep-alive" : "close");
    else
       hlen = snprintf(head, sizeof(head),
                       "%s %s HTTP/1.1\r\nHost: %s\r\nContent-Type: application/json\r\n"
@@ -645,7 +475,7 @@ static char *tcp_request(const char *url, const char *token, const char *method,
          if (tls)
             aimee_tls_free(tls);
 #endif
-         platform_net_close(fd);
+         aimee_core_socket_close(fd);
       }
       return NULL;
    }
@@ -662,7 +492,7 @@ static char *tcp_request(const char *url, const char *token, const char *method,
          if (tls)
             aimee_tls_free(tls);
 #endif
-         platform_net_close(fd);
+         aimee_core_socket_close(fd);
       }
       return NULL;
    }
@@ -684,7 +514,7 @@ static char *tcp_request(const char *url, const char *token, const char *method,
       if (tls)
          aimee_tls_free(tls);
 #endif
-      platform_net_close(fd);
+      aimee_core_socket_close(fd);
    }
    if (!resp)
       return NULL;
@@ -729,14 +559,13 @@ int aimee_client_remote_active_scheme(char *desc_out, unsigned long desc_sz, int
    char url[512], tok[256];
    if (!resolve_remote(url, sizeof(url), tok, sizeof(tok)))
       return 0;
-   char host[256], port[16];
-   int is_https = 0;
-   if (parse_url(url, host, sizeof(host), port, sizeof(port), &is_https) == 0)
+   aimee_core_endpoint_t endpoint;
+   if (aimee_core_endpoint_parse(url, &endpoint) == 0)
    {
       if (desc_out && desc_sz)
-         snprintf(desc_out, desc_sz, "%s:%s", host, port);
+         snprintf(desc_out, desc_sz, "%s:%s", endpoint.host, endpoint.port);
       if (is_https_out)
-         *is_https_out = is_https;
+         *is_https_out = endpoint.secure;
    }
    else if (desc_out && desc_sz)
       snprintf(desc_out, desc_sz, "%s", url);
@@ -787,12 +616,11 @@ int aimee_client_fetch_cert(const char *url, char **pem_out, char *fp_out, unsig
       fp_out[0] = '\0';
    if (!url || !*url || !pem_out)
       return -1;
-   char host[256], port[16];
-   int is_https = 0;
-   if (parse_url(url, host, sizeof(host), port, sizeof(port), &is_https) != 0 || !is_https)
+   aimee_core_endpoint_t endpoint;
+   if (aimee_core_endpoint_parse(url, &endpoint) != 0 || !endpoint.secure)
       return -1; /* only https:// servers present a cert to pin */
 #ifdef WITH_TLS
-   return aimee_tls_fetch_peer_cert(host, port, pem_out, fp_out, (size_t)fp_n);
+   return aimee_tls_fetch_peer_cert(endpoint.host, endpoint.port, pem_out, fp_out, (size_t)fp_n);
 #else
    return -1; /* no TLS in this build */
 #endif

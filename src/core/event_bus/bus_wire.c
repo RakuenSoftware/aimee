@@ -23,7 +23,7 @@
  */
 #include <string.h>
 
-#include "bus_wire.h"
+#include <aimee/core/event_bus/bus_wire.h>
 
 #define OFF_MAGIC          0
 #define OFF_HDR_FLAGS      4

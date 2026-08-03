@@ -70,6 +70,8 @@ set(AIMEE_DELEGATES_INCLUDE_DIR
     "${AIMEE_SRC_DIR}/modules/delegates/include")
 set(AIMEE_PROTOCOLS_INCLUDE_DIR
     "${AIMEE_SRC_DIR}/modules/protocols/include")
+set(AIMEE_CORE_CONNECTION_INCLUDE_DIR
+    "${AIMEE_SRC_DIR}/core/connection/include")
 
 # The core-modularization layout keeps each module's public headers under
 # modules/<m>/include/aimee/<m>/. The Makefile adds these as -Imodules/<m>/include;
@@ -83,6 +85,7 @@ include_directories(
     ${AIMEE_TRANSLATION_INCLUDE_DIR}
     ${AIMEE_DELEGATES_INCLUDE_DIR}
     ${AIMEE_PROTOCOLS_INCLUDE_DIR}
+    ${AIMEE_CORE_CONNECTION_INCLUDE_DIR}
     "${AIMEE_SRC_DIR}/modules/skills/include")
 
 # LTO / IPO: must be set BEFORE any target is declared so the setting takes
@@ -1353,6 +1356,39 @@ if(AIMEE_LEAN)
     endif()
 endif()
 
+add_library(aimee-core-connection STATIC
+    ${AIMEE_SRC_DIR}/core/connection/auth.c
+    ${AIMEE_SRC_DIR}/core/connection/control.c
+    ${AIMEE_SRC_DIR}/core/connection/endpoint.c
+    ${AIMEE_SRC_DIR}/core/connection/http1.c
+    ${AIMEE_SRC_DIR}/core/connection/socket.c
+)
+target_include_directories(aimee-core-connection PUBLIC ${AIMEE_CORE_CONNECTION_INCLUDE_DIR})
+target_compile_options(aimee-core-connection PRIVATE ${AIMEE_COMMON_WARNINGS})
+if(WIN32)
+    target_compile_definitions(aimee-core-connection PRIVATE _WIN32_WINNT=0x0A00)
+    target_link_libraries(aimee-core-connection PUBLIC ws2_32)
+endif()
+
+if(UNIX)
+    add_library(aimee-core-event-bus STATIC
+        ${AIMEE_SRC_DIR}/core/event_bus/bus_attach.c
+        ${AIMEE_SRC_DIR}/core/event_bus/bus_arena.c
+        ${AIMEE_SRC_DIR}/core/event_bus/bus_capture.c
+        ${AIMEE_SRC_DIR}/core/event_bus/bus_client.c
+        ${AIMEE_SRC_DIR}/core/event_bus/bus_endpoint.c
+        ${AIMEE_SRC_DIR}/core/event_bus/bus_host.c
+        ${AIMEE_SRC_DIR}/core/event_bus/bus_region.c
+        ${AIMEE_SRC_DIR}/core/event_bus/bus_region_host.c
+        ${AIMEE_SRC_DIR}/core/event_bus/bus_ring.c
+        ${AIMEE_SRC_DIR}/core/event_bus/bus_route.c
+        ${AIMEE_SRC_DIR}/core/event_bus/bus_wire.c
+    )
+    target_include_directories(aimee-core-event-bus PUBLIC
+        ${AIMEE_SRC_DIR}/core/event_bus/include)
+    target_compile_options(aimee-core-event-bus PRIVATE ${AIMEE_COMMON_WARNINGS})
+endif()
+
 add_executable(aimee
     ${CLI_SRCS}
     ${CLIENT_SUPPORT_SRCS}
@@ -1382,6 +1418,7 @@ add_executable(aimee
 )
 target_include_directories(aimee PRIVATE ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/config ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance  ${AIMEE_SRC_DIR}/modules/workflows   ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/modules/git ${AIMEE_SRC_DIR}/modules/workspace ${AIMEE_SRC_DIR}/modules/guardrails ${AIMEE_SRC_DIR}/modules/roundtable  ${AIMEE_SRC_DIR}/modules/kb_client ${AIMEE_SRC_DIR}/modules/agent_eval ${AIMEE_SRC_DIR}/modules/learning ${AIMEE_SRC_DIR}/modules/roadmap ${AIMEE_SRC_DIR}/modules/sandbox ${AIMEE_SRC_DIR}/modules/lsp ${AIMEE_SRC_DIR}/modules/skill ${AIMEE_SRC_DIR}/modules/css ${AIMEE_SRC_DIR}/modules/webuser ${AIMEE_SRC_DIR}/pipeline ${AIMEE_SRC_DIR}/vendor/headers ${AIMEE_SRC_DIR}/db1 ${AIMEE_SRC_DIR}/db2)
 target_compile_options(aimee PRIVATE ${AIMEE_COMMON_WARNINGS})
+target_link_libraries(aimee PRIVATE aimee-core-connection)
 find_package(ZLIB QUIET)
 if(ZLIB_FOUND)
     target_sources(aimee PRIVATE ${AIMEE_SRC_DIR}/http_content_encoding.c)
@@ -1431,6 +1468,9 @@ if(WITH_TLS)
     else()
         # Linux/other POSIX: OpenSSL.
         find_package(OpenSSL REQUIRED)
+        target_sources(aimee-core-connection PRIVATE
+            ${AIMEE_SRC_DIR}/core/connection/tls_openssl.c)
+        target_link_libraries(aimee-core-connection PUBLIC OpenSSL::SSL OpenSSL::Crypto)
         target_sources(aimee PRIVATE ${AIMEE_SRC_DIR}/aimee_tls.c)
         target_link_libraries(aimee PRIVATE OpenSSL::SSL OpenSSL::Crypto)
     endif()

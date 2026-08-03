@@ -18,10 +18,10 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include "bus_capture.h"
-#include "bus_client.h"
-#include "bus_host.h"
-#include "bus_wire.h"
+#include <aimee/core/event_bus/bus_capture.h>
+#include <aimee/core/event_bus/bus_client.h>
+#include <aimee/core/event_bus/bus_host.h>
+#include <aimee/core/event_bus/bus_wire.h>
 
 static void must(int cond, const char *what)
 {

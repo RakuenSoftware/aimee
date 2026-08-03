@@ -9,7 +9,7 @@
  * client cannot enumerate its peers.
  *
  * Admission is gated by an injected decision function (`bus_admit_fn`). Who is
- * admitted — identity, attestation, execution-policy — is owned by
+ * admitted — peer identity, attestation, execution-policy — is owned by
  * module-runtime and is NOT decided here; this slice owns the mechanism (the
  * SOCK_SEQPACKET handshake, slot allocation, SCM_RIGHTS fd grant, heartbeat
  * reaping) and calls the seam. A refused attach is handed a typed reason and no
@@ -23,54 +23,10 @@
 
 #include <stdint.h>
 
-#include "bus_arena.h"
-#include "bus_region.h"
-#include "bus_wire.h"
-
-#define BUS_ATTACH_REQ_MAGIC   0x51524241u /* "ABRQ" */
-#define BUS_ATTACH_REPLY_MAGIC 0x50524241u /* "ABRP" */
-
-/* Outcome of an attach attempt, carried in the reply and returned by admission. */
-typedef enum
-{
-   BUS_ATTACH_OK = 0,
-   BUS_ATTACH_DENIED_POLICY,  /* admission decision said no */
-   BUS_ATTACH_DENIED_VERSION, /* no common wire version */
-   BUS_ATTACH_DENIED_NOSLOT,  /* the host is full */
-   BUS_ATTACH_PROTOCOL        /* the request was malformed */
-} bus_attach_status_t;
-
-/* A client's attach request. principal_class/ref are an opaque identity hint the
- * bus passes to admission unchanged; the bus assigns no meaning to them. */
-typedef struct
-{
-   uint32_t magic;
-   uint16_t wire_version_min;
-   uint16_t wire_version_max;
-   uint32_t principal_class;
-   uint32_t principal_ref;
-} bus_attach_request_t;
-
-/* The host's reply. On OK it is accompanied by exactly three descriptors
- * (control, arena, this client's queue pair) over SCM_RIGHTS; on any denial it
- * carries no descriptors. */
-typedef struct
-{
-   uint32_t magic;
-   uint32_t status; /* bus_attach_status_t */
-   uint32_t handle_id;
-   uint32_t wire_version;
-   uint32_t slot_size;
-   uint32_t inline_budget;
-   uint32_t queue_capacity;
-   uint32_t reserved;
-   uint64_t arena_size;
-   uint64_t host_epoch;
-} bus_attach_reply_t;
-
-/* The admission seam. Returns BUS_ATTACH_OK to admit, or a denial reason. It
- * decides identity/policy only; the host owns slot allocation and fd granting. */
-typedef bus_attach_status_t (*bus_admit_fn)(void *ctx, const bus_attach_request_t *req);
+#include <aimee/core/event_bus/bus_attach.h>
+#include <aimee/core/event_bus/bus_arena.h>
+#include <aimee/core/event_bus/bus_region_host.h>
+#include <aimee/core/event_bus/bus_wire.h>
 
 /* A directory slot — host-private. A client never sees this or any other slot. */
 #define BUS_HOST_MAX_KINDS   256
@@ -158,7 +114,7 @@ typedef struct
    uint64_t arena_size;
 } bus_host_config_t;
 
-typedef struct
+typedef struct bus_host
 {
    bus_region_t control_region; /* host RW mapping */
    int control_fd;
@@ -171,6 +127,9 @@ typedef struct
    bus_host_config_t cfg;
    bus_admit_fn admit;
    void *admit_ctx;
+   bus_attach_status_t (*attach_hook)(void *ctx, struct bus_host *host, uint32_t slot,
+                                      const bus_attach_request_t *request);
+   void *attach_hook_ctx;
 
    bus_slot_t *slots;
    uint32_t admitted;
@@ -193,7 +152,9 @@ typedef enum
 } bus_host_result_t;
 
 /* Create a host: control + arena regions and the arena allocator, an empty
- * directory of cfg.max_slots. admit may be NULL (admits everyone) for tests. */
+ * directory of cfg.max_slots. The admission callback receives the attach fd so
+ * daemon policy can authenticate its OS peer. admit may be NULL for trusted
+ * in-process socketpairs and tests; an external listener must provide one. */
 bus_host_result_t bus_host_create(bus_host_t *h, const bus_host_config_t *cfg, bus_admit_fn admit,
                                   void *admit_ctx);
 
@@ -207,6 +168,18 @@ void bus_host_destroy(bus_host_t *h);
  * admitted, BUS_HOST_ERR_REFUSED when it was cleanly denied (reply sent), or an
  * error if the handshake itself failed. */
 bus_host_result_t bus_host_serve_attach(bus_host_t *h, int conn_fd);
+bus_host_result_t bus_host_serve_attach_ex(bus_host_t *h, int conn_fd, uint32_t *slot_out);
+
+/* Install the daemon-owned capability binder. Admission authenticates the
+ * request before allocation; this hook runs after a slot exists but before its
+ * descriptors are granted, and may subscribe/serve only the kinds authorized
+ * for that module identity. A non-OK result rolls the slot back and grants no
+ * descriptors. */
+void bus_host_set_attach_hook(bus_host_t *h,
+                              bus_attach_status_t (*hook)(void *ctx, bus_host_t *host,
+                                                          uint32_t slot,
+                                                          const bus_attach_request_t *request),
+                              void *ctx);
 
 /* Reap slots whose client heartbeat has not advanced within stale_ns. Releases
  * the slot's arena leases (producer and consumer), unmaps and closes its
@@ -245,15 +218,5 @@ bus_host_result_t bus_host_set_kind_policy(bus_host_t *h, uint32_t event_kind,
  * Returns the number of events processed. Inline payloads only in this slice;
  * arena-payload delivery is a separate slice-4/6 integration. */
 uint32_t bus_host_pump(bus_host_t *h);
-
-/* ---- fd-passing helpers (shared with the C client, slice 8) ---- */
-
-/* Send `n` (0..3) descriptors plus `len` bytes of `payload` over a SOCK_SEQPACKET
- * socket in one message. Returns 0 or -1 (errno). */
-int bus_fd_send(int sock, const void *payload, size_t len, const int *fds, int n);
-
-/* Receive one message: up to `max_fds` descriptors into `fds` (count in *n_out)
- * and up to `len` payload bytes. Returns the payload byte count, or -1 (errno). */
-long bus_fd_recv(int sock, void *payload, size_t len, int *fds, int max_fds, int *n_out);
 
 #endif /* AIMEE_BUS_HOST_H */

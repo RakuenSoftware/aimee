@@ -1,7 +1,8 @@
 /* aimee_tls.c: OpenSSL TLS client wrapper (WITH_TLS builds only). */
 #include "aimee_tls.h"
 #include "aimee_home.h"
-#include "platform_net.h"
+#include <aimee/core/connection/socket.h>
+#include <aimee/core/connection/tls_openssl.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/pem.h>
@@ -92,13 +93,8 @@ static int aimee_tls_present_client_cert(SSL_CTX *ctx)
       return 0;
    if (eligible < 0)
       return -1;
-   if (SSL_CTX_use_certificate_chain_file(ctx, crt) != 1 ||
-       SSL_CTX_use_PrivateKey_file(ctx, key, SSL_FILETYPE_PEM) != 1 ||
-       SSL_CTX_check_private_key(ctx) != 1)
-   {
-      ERR_clear_error();
+   if (aimee_core_tls_use_identity_files(ctx, crt, key) != 0)
       return -1;
-   }
    return 0;
 }
 
@@ -149,10 +145,9 @@ static int pin_leaf_verify_cb(int preverify_ok, X509_STORE_CTX *xctx)
 
 aimee_tls_t *aimee_tls_connect(int fd, const char *host)
 {
-   SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
+   SSL_CTX *ctx = aimee_core_tls_client_context();
    if (!ctx)
       return NULL;
-   SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
 
    int insecure = tls_insecure();
    X509 *pinned = NULL;
@@ -169,7 +164,7 @@ aimee_tls_t *aimee_tls_connect(int fd, const char *host)
           * pin_leaf_verify_cb (exact leaf match); hostname/SAN is not consulted
           * in pinned mode — see the callback's rationale. */
          pinned = pinned_cert_load(pin);
-         if (!pinned || SSL_CTX_load_verify_locations(ctx, pin, NULL) != 1)
+         if (!pinned || aimee_core_tls_trust_file(ctx, pin) != 0)
          {
             if (pinned)
                X509_free(pinned);
@@ -196,7 +191,7 @@ aimee_tls_t *aimee_tls_connect(int fd, const char *host)
       return NULL;
    }
 
-   SSL *ssl = SSL_new(ctx);
+   SSL *ssl = aimee_core_tls_client_session_new(ctx, fd, host, !insecure && !pinned);
    if (!ssl)
    {
       if (pinned)
@@ -204,35 +199,9 @@ aimee_tls_t *aimee_tls_connect(int fd, const char *host)
       SSL_CTX_free(ctx);
       return NULL;
    }
-   SSL_set_fd(ssl, fd);
    if (pinned)
       SSL_set_app_data(ssl, pinned); /* consumed by pin_leaf_verify_cb */
-   if (host && *host)
-   {
-      SSL_set_tlsext_host_name(ssl, host); /* SNI */
-      if (!insecure && !pinned)
-      {
-         X509_VERIFY_PARAM *param = SSL_get0_param(ssl);
-         X509_VERIFY_PARAM_set_hostflags(param, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
-         /* An IP-literal host (e.g. a private server reached by address) must be
-          * matched against the cert's IP-address SANs: set1_host only matches DNS
-          * names/CN, so an IP would otherwise fail the name check even with a
-          * valid cert. set1_ip_asc returns 1 only for a real IP literal;
-          * fall back to DNS-name matching for actual hostnames. If neither arms
-          * the name check, fail CLOSED — verifying the chain but not the identity
-          * would accept any otherwise-valid cert. (Pinned mode skips this: the
-          * exact-leaf pin IS the identity.) */
-         if (X509_VERIFY_PARAM_set1_ip_asc(param, host) != 1 &&
-             X509_VERIFY_PARAM_set1_host(param, host, 0) != 1)
-         {
-            SSL_free(ssl);
-            SSL_CTX_free(ctx);
-            return NULL;
-         }
-      }
-   }
-
-   int connected = (SSL_connect(ssl) == 1);
+   int connected = aimee_core_tls_handshake_client(ssl) == 0;
    if (pinned)
    {
       SSL_set_app_data(ssl, NULL); /* the handshake (and its verify) is done */
@@ -267,32 +236,29 @@ int aimee_tls_fetch_peer_cert(const char *host, const char *port, char **pem_out
    if (!host || !*host || !port || !*port || !pem_out)
       return -1;
 
-   int fd = platform_net_connect(host, port, 10000);
+   int fd = aimee_core_socket_connect(host, port, 10000);
    if (fd < 0)
       return -1;
 
-   SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
+   SSL_CTX *ctx = aimee_core_tls_client_context();
    if (!ctx)
    {
-      platform_net_close(fd);
+      aimee_core_socket_close(fd);
       return -1;
    }
-   SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
    /* Deliberately NO verification: we are FETCHING the cert to show its
     * fingerprint and pin it (trust-on-first-use), not trusting it yet. The
     * caller is expected to surface the fingerprint for out-of-band check. */
-   SSL *ssl = SSL_new(ctx);
+   SSL *ssl = aimee_core_tls_client_session_new(ctx, fd, host, 0);
    if (!ssl)
    {
       SSL_CTX_free(ctx);
-      platform_net_close(fd);
+      aimee_core_socket_close(fd);
       return -1;
    }
-   SSL_set_fd(ssl, fd);
-   SSL_set_tlsext_host_name(ssl, host); /* SNI — many servers select a cert by it */
 
    int rc = -1;
-   if (SSL_connect(ssl) == 1)
+   if (aimee_core_tls_handshake_client(ssl) == 0)
    {
       X509 *cert = SSL_get1_peer_certificate(ssl);
       if (cert)
@@ -330,30 +296,20 @@ int aimee_tls_fetch_peer_cert(const char *host, const char *port, char **pem_out
          X509_free(cert);
       }
    }
-   SSL_free(ssl);
+   aimee_core_tls_session_free(ssl);
    SSL_CTX_free(ctx);
-   platform_net_close(fd); /* SSL_set_fd does not take ownership of the fd */
+   aimee_core_socket_close(fd); /* SSL_set_fd does not take ownership of the fd */
    return rc;
 }
 
 int aimee_tls_write_all(aimee_tls_t *t, const void *buf, size_t len)
 {
-   const char *p = (const char *)buf;
-   size_t off = 0;
-   while (off < len)
-   {
-      int n = SSL_write(t->ssl, p + off, (int)(len - off));
-      if (n <= 0)
-         return -1;
-      off += (size_t)n;
-   }
-   return 0;
+   return t ? aimee_core_tls_write_all(t->ssl, buf, len) : -1;
 }
 
 long aimee_tls_read(aimee_tls_t *t, void *buf, size_t len)
 {
-   int n = SSL_read(t->ssl, buf, (int)len);
-   return n < 0 ? -1 : (long)n;
+   return t ? aimee_core_tls_read(t->ssl, buf, len) : -1;
 }
 
 void aimee_tls_free(aimee_tls_t *t)
@@ -362,8 +318,7 @@ void aimee_tls_free(aimee_tls_t *t)
       return;
    if (t->ssl)
    {
-      SSL_shutdown(t->ssl);
-      SSL_free(t->ssl);
+      aimee_core_tls_session_free(t->ssl);
    }
    if (t->ctx)
       SSL_CTX_free(t->ctx);

@@ -38,7 +38,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "bus_ring.h"
+#include <aimee/core/event_bus/bus_ring.h>
 
 #define BUS_CONTROL_MAGIC 0x4c544342u /* "BCTL" */
 #define BUS_QPAIR_MAGIC   0x52504251u /* "QPBR" */
@@ -128,11 +128,6 @@ typedef struct
 
 /* ---- region lifecycle ---- */
 
-/* Create an anonymous memfd of at least `size` bytes (rounded up to a page) and
- * return it *unmapped*. The name is advisory (memfd names are not a namespace).
- * The fd is close-on-exec; the caller owns it. */
-bus_region_result_t bus_region_create(const char *name, size_t size, bus_region_t *out);
-
 /* Map an existing region fd. writable selects PROT_READ vs PROT_READ|PROT_WRITE:
  * a client maps the control region read-only, its own queue pair and the arena
  * read/write. */
@@ -144,8 +139,6 @@ void bus_region_unmap(bus_region_t *r);
 /* ---- control region ---- */
 
 size_t bus_control_bytes(void);
-bus_region_result_t bus_control_init(bus_region_t *r, uint32_t slot_size, uint32_t inline_budget,
-                                     uint32_t queue_capacity, uint64_t arena_size);
 /* Validate a mapped control region and return a pointer to its header. */
 bus_region_result_t bus_control_attach(const bus_region_t *r, bus_control_t **out);
 
@@ -153,24 +146,19 @@ bus_region_result_t bus_control_attach(const bus_region_t *r, bus_control_t **ou
  * restarted and every handle and mapping is stale. */
 uint64_t bus_control_epoch(const bus_control_t *c);
 int bus_control_epoch_changed(const bus_control_t *c, uint64_t attached_epoch);
-void bus_control_bump_epoch(bus_control_t *c);
-void bus_control_heartbeat(bus_control_t *c, uint64_t now);
 
 /* ---- queue-pair region ---- */
 
 size_t bus_qpair_bytes(uint32_t slot_size, uint32_t capacity);
-bus_region_result_t bus_qpair_init(bus_region_t *r, uint32_t slot_size, uint32_t capacity);
 /* Validate a mapped queue-pair region and resolve both ring handles. */
 bus_region_result_t bus_qpair_attach(const bus_region_t *r, bus_qpair_t *out);
 
 /* ---- arena region ---- */
 
 size_t bus_arena_region_bytes(uint64_t arena_size);
-bus_region_result_t bus_arena_region_init(bus_region_t *r, uint64_t arena_size);
 /* Validate a mapped arena region; returns the usable arena base and size. The
  * allocator over this space is slice 4. */
-bus_region_result_t bus_arena_region_attach(const bus_region_t *r, uint8_t **base,
-                                            uint64_t *size);
+bus_region_result_t bus_arena_region_attach(const bus_region_t *r, uint8_t **base, uint64_t *size);
 
 const char *bus_region_result_name(bus_region_result_t r);
 

@@ -22,7 +22,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "bus_host.h" /* bus_tap_fn, bus_frame_t */
+#include <aimee/core/event_bus/bus_host.h> /* bus_tap_fn, bus_frame_t */
 
 /* File header, 64 bytes. All integers little-endian. magic is the 8 ASCII bytes
  * "AIMEECAP". */

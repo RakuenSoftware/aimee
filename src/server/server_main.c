@@ -44,6 +44,7 @@
 #include "sandbox_audit_bridge.h" /* route sandbox degraded-isolation events onto the audit bus */
 #include "memory_audit_bridge.h"  /* route server-side memory mutations onto the audit bus */
 #include "tool_completion_audit_bridge.h" /* route tool-dispatch outcomes onto the audit bus */
+#include "obs_bus_adapter.h"              /* bind shared bus events to server-owned durable sinks */
 #include <aimee/audit/audit_replay.h> /* --audit-replay: inspect a governed-action capture file */
 #include <signal.h>
 #include <errno.h>
@@ -170,6 +171,8 @@ static int run_server(const char *socket_path, log_level_t log_level)
    /* Initialize logging */
    log_init(log_level);
    audit_log_open();
+   if (server_obs_bus_configure() != 0)
+      LOG_WARN("obs_bus", "shared event bus was already started before server sink configuration");
    audit_ensure_key();             /* provision the per-action audit key (best-effort) */
    vault_audit_bridge_install();   /* route vault credential-access events onto the audit bus */
    sandbox_audit_bridge_install(); /* route sandbox degraded-isolation events onto the audit bus */

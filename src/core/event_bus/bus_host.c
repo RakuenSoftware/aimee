@@ -12,119 +12,12 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include "bus_host.h"
-#include "bus_ring.h"
+#include <aimee/core/event_bus/bus_host.h>
+#include <aimee/core/event_bus/bus_ring.h>
 
 /* The wire version this host speaks; tracks BUS_WIRE_VERSION (v2 added the arena
  * lease reference — generation + payload_ref-as-lease-id — for arena routing). */
 #define BUS_HOST_WIRE_VERSION 2
-
-/* ------------------------------------------------------------------ */
-/* fd passing                                                          */
-
-int bus_fd_send(int sock, const void *payload, size_t len, const int *fds, int n)
-{
-   if (n < 0 || n > 3)
-   {
-      errno = EINVAL;
-      return -1;
-   }
-
-   struct iovec iov = {.iov_base = (void *)payload, .iov_len = len};
-   union
-   {
-      struct cmsghdr align;
-      char buf[CMSG_SPACE(sizeof(int) * 3)];
-   } cbuf;
-   memset(&cbuf, 0, sizeof cbuf);
-
-   struct msghdr msg;
-   memset(&msg, 0, sizeof msg);
-   msg.msg_iov = &iov;
-   msg.msg_iovlen = 1;
-
-   if (n > 0)
-   {
-      msg.msg_control = cbuf.buf;
-      msg.msg_controllen = CMSG_SPACE(sizeof(int) * n);
-      struct cmsghdr *c = CMSG_FIRSTHDR(&msg);
-      c->cmsg_level = SOL_SOCKET;
-      c->cmsg_type = SCM_RIGHTS;
-      c->cmsg_len = CMSG_LEN(sizeof(int) * n);
-      memcpy(CMSG_DATA(c), fds, sizeof(int) * n);
-   }
-
-   ssize_t r;
-   do
-   {
-      r = sendmsg(sock, &msg, 0);
-   } while (r < 0 && errno == EINTR);
-   return r < 0 ? -1 : 0;
-}
-
-long bus_fd_recv(int sock, void *payload, size_t len, int *fds, int max_fds, int *n_out)
-{
-   if (max_fds < 0 || max_fds > 3)
-   {
-      errno = EINVAL;
-      return -1;
-   }
-   if (n_out)
-      *n_out = 0;
-
-   struct iovec iov = {.iov_base = payload, .iov_len = len};
-   union
-   {
-      struct cmsghdr align;
-      char buf[CMSG_SPACE(sizeof(int) * 3)];
-   } cbuf;
-   memset(&cbuf, 0, sizeof cbuf);
-
-   struct msghdr msg;
-   memset(&msg, 0, sizeof msg);
-   msg.msg_iov = &iov;
-   msg.msg_iovlen = 1;
-   msg.msg_control = cbuf.buf;
-   msg.msg_controllen = sizeof cbuf.buf;
-
-   ssize_t r;
-   do
-   {
-      r = recvmsg(sock, &msg, MSG_CMSG_CLOEXEC);
-   } while (r < 0 && errno == EINTR);
-   if (r < 0)
-      return -1;
-
-   /* Collect any descriptors. A message carrying more than we allow, or a
-    * truncated control buffer, is a protocol violation — close whatever came so
-    * a rejected attach cannot leak a live descriptor into this process. */
-   int got = 0;
-   for (struct cmsghdr *c = CMSG_FIRSTHDR(&msg); c; c = CMSG_NXTHDR(&msg, c))
-   {
-      if (c->cmsg_level == SOL_SOCKET && c->cmsg_type == SCM_RIGHTS)
-      {
-         int count = (int)((c->cmsg_len - CMSG_LEN(0)) / sizeof(int));
-         const int *in = (const int *)CMSG_DATA(c);
-         for (int i = 0; i < count; i++)
-         {
-            if (got < max_fds && !(msg.msg_flags & MSG_CTRUNC))
-               fds[got++] = in[i];
-            else
-               close(in[i]);
-         }
-      }
-   }
-   if (msg.msg_flags & MSG_CTRUNC)
-   {
-      for (int i = 0; i < got; i++)
-         close(fds[i]);
-      errno = EPROTO;
-      return -1;
-   }
-   if (n_out)
-      *n_out = got;
-   return r;
-}
 
 /* ------------------------------------------------------------------ */
 /* lifecycle                                                           */
@@ -256,6 +149,13 @@ static bus_host_result_t deny(int conn_fd, bus_attach_status_t status)
 
 bus_host_result_t bus_host_serve_attach(bus_host_t *h, int conn_fd)
 {
+   return bus_host_serve_attach_ex(h, conn_fd, NULL);
+}
+
+bus_host_result_t bus_host_serve_attach_ex(bus_host_t *h, int conn_fd, uint32_t *slot_out)
+{
+   if (slot_out)
+      *slot_out = UINT32_MAX;
    if (!h || conn_fd < 0)
       return BUS_HOST_ERR_ARG;
 
@@ -277,7 +177,7 @@ bus_host_result_t bus_host_serve_attach(bus_host_t *h, int conn_fd)
     * injected (tests). */
    if (h->admit)
    {
-      bus_attach_status_t d = h->admit(h->admit_ctx, &req);
+      bus_attach_status_t d = h->admit(h->admit_ctx, conn_fd, &req);
       if (d != BUS_ATTACH_OK)
          return deny(conn_fd, d);
    }
@@ -314,6 +214,16 @@ bus_host_result_t bus_host_serve_attach(bus_host_t *h, int conn_fd)
    s->last_heartbeat = 0;
    s->heartbeat_at = 0;
    h->admitted++;
+
+   if (h->attach_hook)
+   {
+      bus_attach_status_t hook_status = h->attach_hook(h->attach_hook_ctx, h, idx, &req);
+      if (hook_status != BUS_ATTACH_OK)
+      {
+         slot_release(h, idx);
+         return deny(conn_fd, hook_status);
+      }
+   }
 
    /* Grant: the reply plus exactly three descriptors — control (the client will
     * map it read-only), arena, and this client's own queue pair. No other
@@ -355,6 +265,8 @@ bus_host_result_t bus_host_serve_attach(bus_host_t *h, int conn_fd)
       slot_release(h, idx);
       return BUS_HOST_ERR_OS;
    }
+   if (slot_out)
+      *slot_out = idx;
    return BUS_HOST_OK;
 }
 
@@ -406,6 +318,18 @@ void bus_host_bump_epoch(bus_host_t *h)
 uint32_t bus_host_admitted(const bus_host_t *h)
 {
    return h ? h->admitted : 0;
+}
+
+void bus_host_set_attach_hook(bus_host_t *h,
+                              bus_attach_status_t (*hook)(void *ctx, bus_host_t *host,
+                                                          uint32_t slot,
+                                                          const bus_attach_request_t *request),
+                              void *ctx)
+{
+   if (!h)
+      return;
+   h->attach_hook = hook;
+   h->attach_hook_ctx = hook ? ctx : NULL;
 }
 
 const char *bus_host_result_name(bus_host_result_t r)

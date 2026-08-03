@@ -2,8 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "bus_capture.h"
-#include "bus_wire.h"
+#include <aimee/core/event_bus/bus_capture.h>
+#include <aimee/core/event_bus/bus_wire.h>
 
 /* ---- CRC-32C (Castagnoli), the record checksum named by D10 ---- */
 

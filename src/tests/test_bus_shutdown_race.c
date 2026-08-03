@@ -20,6 +20,7 @@
 
 #include <aimee/audit/obs_bus.h>
 #include "db1/db1.h"
+#include "server/obs_bus_adapter.h"
 
 #define NTHREADS 4
 
@@ -53,6 +54,7 @@ int main(void)
    }
    setenv("AIMEE_HOME", home, 1);
    assert(db1_init(":memory:") == 0);
+   assert(server_obs_bus_configure() == 0);
    assert(obs_bus_start() == 0);
 
    pthread_t th[NTHREADS];

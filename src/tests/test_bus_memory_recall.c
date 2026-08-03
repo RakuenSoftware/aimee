@@ -22,10 +22,10 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "bus_client.h"
-#include "bus_host.h"
-#include "bus_ring.h"
-#include "bus_wire.h"
+#include <aimee/core/event_bus/bus_client.h>
+#include <aimee/core/event_bus/bus_host.h>
+#include <aimee/core/event_bus/bus_ring.h>
+#include <aimee/core/event_bus/bus_wire.h>
 #include "db1/db1.h"
 #include "db1/user_memory.h"
 

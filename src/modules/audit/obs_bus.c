@@ -23,10 +23,10 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "bus_capture.h"
-#include "bus_client.h"
-#include "bus_host.h"
-#include "bus_region.h" /* bus_control_epoch */
+#include <aimee/core/event_bus/bus_capture.h>
+#include <aimee/core/event_bus/bus_client.h>
+#include <aimee/core/event_bus/bus_host.h>
+#include <aimee/core/event_bus/bus_region.h> /* bus_control_epoch */
 #include "config.h"     /* config_default_dir */
 #include "log.h"
 #include "wfe_def.h" /* wfe_sha256_raw — obs_bus_key_fingerprint */
@@ -78,6 +78,15 @@ static struct
 /* Guards start/stop transitions and the started/terminated fields. Separate from
  * g.pub_lock (which serializes producers) and never held across a producer wait. */
 static pthread_mutex_t start_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/* Service-owned sinks live outside `g` because start_locked() resets the bus
+ * runtime. Configuration is immutable while the bus is running, guarded by
+ * start_lock, so the consumer may read it without another lock. */
+static struct
+{
+   obs_bus_guardrail_sink_fn guardrail;
+   void *guardrail_ctx;
+} sinks;
 
 /* ---------------------------------------------------------- wire form ---- */
 
@@ -195,7 +204,9 @@ static uint32_t serialize_guardrail(uint8_t *buf, uint32_t cap, const guardrail_
    return off + 4;
 }
 
-/* Deserialize a guardrail event and write it to db1. Returns 1 if written. */
+/* Deserialize a guardrail event and hand it to the daemon-owned sink. The
+ * shared bus has no DB1 dependency: aimee-server installs that adapter, while
+ * aimee-kb never subscribes to this kind. Returns 1 if written. */
 static int write_guardrail(const uint8_t *p, uint32_t len)
 {
    guardrail_event_t e;
@@ -226,11 +237,7 @@ static int write_guardrail(const uint8_t *p, uint32_t len)
    int32_t dry;
    memcpy(&dry, p + off, 4);
    e.dry_run = dry;
-   /* db1_guardrail_event_insert wraps the write in db1's transaction gate, so it
-    * is safe to call from this consumer thread and isolated from other threads'
-    * transactions on the shared connection. A failed insert is a visible drop,
-    * not a silent success. */
-   if (db1_guardrail_event_insert(&e) != 0)
+   if (!sinks.guardrail || sinks.guardrail(&e, sinks.guardrail_ctx) != 0)
    {
       atomic_fetch_add_explicit(&g.dropped, 1, memory_order_relaxed);
       return 0;
@@ -485,7 +492,8 @@ static int start_locked(void)
       return -1;
    }
    bus_host_subscribe(&g.host, g.consumer.reply.handle_id, KIND_AUDIT_ACTION);
-   bus_host_subscribe(&g.host, g.consumer.reply.handle_id, KIND_GUARDRAIL_EVENT);
+   if (sinks.guardrail)
+      bus_host_subscribe(&g.host, g.consumer.reply.handle_id, KIND_GUARDRAIL_EVENT);
 
    /* Register the capture tap BEFORE the consumer thread starts pumping, so the
     * first routed event onward is recorded. */
@@ -514,6 +522,20 @@ int obs_bus_start(void)
    int rc = g.started ? 0 : start_locked();
    pthread_mutex_unlock(&start_lock);
    return rc;
+}
+
+int obs_bus_set_guardrail_sink(obs_bus_guardrail_sink_fn sink, void *ctx)
+{
+   pthread_mutex_lock(&start_lock);
+   if (g.started)
+   {
+      pthread_mutex_unlock(&start_lock);
+      return -1;
+   }
+   sinks.guardrail = sink;
+   sinks.guardrail_ctx = sink ? ctx : NULL;
+   pthread_mutex_unlock(&start_lock);
+   return 0;
 }
 
 /* Lazy start on first emit, so obs_bus_emit is a drop-in for the old direct
@@ -632,6 +654,11 @@ void obs_bus_emit_guardrail(const guardrail_event_t *e)
 {
    if (!e)
       return;
+   if (!sinks.guardrail)
+   {
+      aimee_log(LOG_WARN, "obs_bus", "guardrail event has no configured daemon sink; not recorded");
+      return;
+   }
    if (!enter_emit())
    {
       aimee_log(LOG_WARN, "obs_bus", "audit bus unavailable; guardrail event not recorded");

@@ -14,6 +14,7 @@
 #include "guardrail_events.h"
 #include "guardrails_semantic.h"
 #include "platform_test_util.h"
+#include "server/obs_bus_adapter.h"
 
 /* ── gsem_policy ──────────────────────────────────────────────────────────── */
 
@@ -247,6 +248,7 @@ static void test_gsem_record(const char *path)
 {
    platform_test_remove_sqlite(path);
    assert(db1_init(path) == 0);
+   assert(server_obs_bus_configure() == 0);
    /* gsem_record publishes over the event bus now; give the bus a writable home
     * for its capture stream so it does not litter the real config dir. */
    char home[] = "/tmp/aimee-gsemrec-XXXXXX";

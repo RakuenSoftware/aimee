@@ -43,7 +43,7 @@ not a one-slice fallback — see D1's gate section for what it re-opens and re-r
 ## Where the code lives
 
 ```
-src/modules/bus/          bus_wire.{c,h}    frame encode/decode
+src/core/event_bus/          bus_wire.{c,h}    frame encode/decode
                           bus_ring.{c,h}    SPSC ring primitive
                           bus_region.{c,h}  region layout: control, queue-pair, arena
                           bus_arena.{c,h}   lease allocator
@@ -57,8 +57,8 @@ scripts/check_bus_*.sh    mechanical gates
 bench/bus_baseline.json   committed perf baseline artifact
 ```
 
-`src/modules/bus/` follows the existing module convention: flat source list in `src/Makefile`,
-mirrored in `CMakeLists.txt`, `-Imodules/bus` on the include path, tests registered in
+`src/core/event_bus/` follows the existing module convention: flat source list in `src/Makefile`,
+mirrored in `CMakeLists.txt`, `-Icore/event_bus/include` on the include path, tests registered in
 `src/tests/Rules.mk` and `src/tests/CMakeLists.txt`.
 
 ## Slices

@@ -23,6 +23,7 @@
 #include "vault_config_bootstrap.h"
 #include "server.h"
 #include "server_http.h"
+#include <aimee/core/connection/auth.h>
 
 /* Additional bearers accepted alongside the primary. HTTP connections and
  * dispatch-backed routes run on detached connection workers, so authorization,
@@ -365,9 +366,7 @@ int server_http_authorize_multi(int is_tcp, const char *bearer_cfg, const char *
    if (!have_bearer)
       return 503; /* extra tokens cannot paper over a missing primary */
 
-   const char *presented_bearer = NULL;
-   if (auth_header && strncmp(auth_header, "Bearer ", 7) == 0 && auth_header[7])
-      presented_bearer = auth_header + 7;
+   const char *presented_bearer = aimee_core_bearer_token(auth_header);
 
    int authorized = presented_bearer ? server_ct_equal(presented_bearer, bearer_cfg) : 0;
    if (api_key_header && api_key_header[0])

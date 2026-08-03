@@ -18,7 +18,7 @@
  */
 #include <string.h>
 
-#include "bus_ring.h"
+#include <aimee/core/event_bus/bus_ring.h>
 
 /* Bound the geometry so a corrupt or hostile header cannot ask for an
  * allocation that overflows the size computation below. */
@@ -39,8 +39,7 @@ size_t bus_ring_bytes(uint32_t slot_size, uint32_t capacity)
 {
    if (slot_size == 0 || slot_size > BUS_RING_MAX_SLOT_SIZE)
       return 0;
-   if (!is_pow2(capacity) || capacity < BUS_RING_MIN_CAPACITY ||
-       capacity > BUS_RING_MAX_CAPACITY)
+   if (!is_pow2(capacity) || capacity < BUS_RING_MIN_CAPACITY || capacity > BUS_RING_MAX_CAPACITY)
       return 0;
 
    size_t slots = (size_t)slot_size * (size_t)capacity;
@@ -117,8 +116,7 @@ bus_ring_result_t bus_ring_attach(void *mem, size_t memsz, bus_ring_t *out)
    /* Everything below judges those locals. The header is a claim; a header
     * describing a larger ring than was mapped would otherwise turn into reads
     * past the end of the mapping. */
-   if (!is_pow2(capacity) || capacity < BUS_RING_MIN_CAPACITY ||
-       capacity > BUS_RING_MAX_CAPACITY)
+   if (!is_pow2(capacity) || capacity < BUS_RING_MIN_CAPACITY || capacity > BUS_RING_MAX_CAPACITY)
       return BUS_RING_ERR_GEOMETRY;
    if (slot_size == 0 || slot_size > BUS_RING_MAX_SLOT_SIZE)
       return BUS_RING_ERR_GEOMETRY;

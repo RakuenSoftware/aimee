@@ -4,11 +4,12 @@
 #include "kb_mgmt_client.h"
 #include "kb_mgmt_endpoint.h"
 #include "kb_tls.h"
+#include <aimee/core/connection/control.h>
+#include <aimee/core/connection/socket.h>
+#include <aimee/core/connection/tls_openssl.h>
 #include <openssl/crypto.h>
 #include <ctype.h>
-#include <errno.h>
 #include <limits.h>
-#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -150,11 +151,10 @@ void kb_mgmt_client_session_close(kb_mgmt_client_session_t *s)
       return;
    if (s->ssl)
    {
-      SSL_shutdown(s->ssl);
-      SSL_free(s->ssl);
+      aimee_core_tls_session_free(s->ssl);
    }
    if (s->fd >= 0)
-      close(s->fd);
+      aimee_core_socket_close(s->fd);
    SSL_CTX_free(s->ctx);
    memset(s, 0, sizeof(*s));
    s->fd = -1;
@@ -162,28 +162,18 @@ void kb_mgmt_client_session_close(kb_mgmt_client_session_t *s)
 
 static uint64_t monotonic_ms(void)
 {
-   struct timespec ts;
-   return clock_gettime(CLOCK_MONOTONIC, &ts) == 0
-              ? (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000
-              : UINT64_MAX;
+   int64_t now = aimee_core_now_ns();
+   return now < 0 ? UINT64_MAX : (uint64_t)now / 1000000U;
 }
 
-static int wait_ssl(SSL *ssl, int result, uint64_t deadline)
+static int control_from_deadline_ms(uint64_t deadline, aimee_core_control_t *control)
 {
-   int error = SSL_get_error(ssl, result);
-   short events = error == SSL_ERROR_WANT_READ    ? POLLIN
-                  : error == SSL_ERROR_WANT_WRITE ? POLLOUT
-                                                  : 0;
-   uint64_t now = monotonic_ms();
-   if (!events || now >= deadline)
+   if (!control || deadline > (uint64_t)INT64_MAX / 1000000U)
       return -1;
-   uint64_t left = deadline - now;
-   struct pollfd p = {.fd = SSL_get_fd(ssl), .events = events};
-   int rc;
-   do
-      rc = poll(&p, 1, left > INT_MAX ? INT_MAX : (int)left);
-   while (rc < 0 && errno == EINTR && monotonic_ms() < deadline);
-   return rc > 0 && (p.revents & events) ? 0 : -1;
+   return aimee_core_control_init(control, (int64_t)deadline * 1000000LL, 0, NULL, NULL) ==
+                  AIMEE_CORE_OK
+              ? 0
+              : -1;
 }
 
 int kb_mgmt_client_session_open_deadline(kb_mgmt_client_session_t *s, const char *endpoint,
@@ -200,14 +190,13 @@ int kb_mgmt_client_session_open_deadline(kb_mgmt_client_session_t *s, const char
        (s->fd = kb_mgmt_endpoint_connect_deadline(&s->endpoint, deadline, trusted)) < 0 ||
        !(s->ssl = SSL_new(s->ctx)))
       goto fail;
-   SSL_set_fd(s->ssl, s->fd);
-   if (SSL_set_tlsext_host_name(s->ssl, s->endpoint.host) != 1 ||
-       SSL_set1_host(s->ssl, s->endpoint.host) != 1)
+   if (SSL_set_fd(s->ssl, s->fd) != 1 ||
+       aimee_core_tls_configure_client_session(s->ssl, s->endpoint.host, 1) != 0)
       goto fail;
-   int connect_rc;
-   while ((connect_rc = SSL_connect(s->ssl)) != 1)
-      if (wait_ssl(s->ssl, connect_rc, deadline))
-         goto fail;
+   aimee_core_control_t control;
+   if (control_from_deadline_ms(deadline, &control) != 0 ||
+       aimee_core_tls_handshake_client_controlled(s->ssl, &control) != AIMEE_CORE_OK)
+      goto fail;
    if (monotonic_ms() >= deadline || SSL_get_verify_result(s->ssl) != X509_V_OK)
       goto fail;
    if (expected_issuer || expected_serial || expected_fp)
@@ -275,22 +264,16 @@ static int session_request_deadline(kb_mgmt_client_session_t *s, const char *met
    int rc = -1;
    if (n <= 0 || (size_t)n >= req_cap || (strict_action && (size_t)n >= 8192U))
       goto done;
+   aimee_core_control_t control;
+   if (control_from_deadline_ms(deadline, &control) != 0)
+      goto done;
    size_t sent = 0;
-   while (sent < (size_t)n)
-   {
-      int wr = SSL_write(s->ssl, req + sent, n - (int)sent);
-      if (wr <= 0)
-      {
-         if (wait_ssl(s->ssl, wr, deadline) == 0)
-            continue;
-         goto done;
-      }
-      sent += (size_t)wr;
-      if (bytes_sent)
-         *bytes_sent = sent;
-      if (monotonic_ms() >= deadline)
-         goto done;
-   }
+   aimee_core_result_t write_result =
+       aimee_core_tls_write_all_controlled(s->ssl, req, (size_t)n, &control, &sent);
+   if (bytes_sent)
+      *bytes_sent = sent;
+   if (write_result != AIMEE_CORE_OK)
+      goto done;
    size_t raw_cap = cap + 8192, total = 0, content_length = SIZE_MAX;
    int reusable = 0;
    char *raw = malloc(raw_cap);
@@ -298,14 +281,12 @@ static int session_request_deadline(kb_mgmt_client_session_t *s, const char *met
       goto done;
    while (total < raw_cap - 1)
    {
-      int rd = SSL_read(s->ssl, raw + total, (int)(raw_cap - 1 - total));
-      if (rd <= 0)
-      {
-         if (wait_ssl(s->ssl, rd, deadline) == 0)
-            continue;
+      size_t received = 0;
+      aimee_core_result_t read_result = aimee_core_tls_read_controlled(
+          s->ssl, raw + total, raw_cap - 1 - total, &control, &received);
+      if (read_result != AIMEE_CORE_OK)
          break;
-      }
-      total += (size_t)rd;
+      total += received;
       raw[total] = '\0';
       char *end = strstr(raw, "\r\n\r\n");
       if (end && content_length == SIZE_MAX)

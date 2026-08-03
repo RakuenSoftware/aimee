@@ -15,7 +15,7 @@
  */
 #include <string.h>
 
-#include "bus_arena.h"
+#include <aimee/core/event_bus/bus_arena.h>
 
 static void arena_lock(const bus_arena_t *a)
 {

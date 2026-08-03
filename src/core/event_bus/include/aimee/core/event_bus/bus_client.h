@@ -21,9 +21,9 @@
 
 #include <stdint.h>
 
-#include "bus_host.h" /* attach request/reply wire + fd helpers */
-#include "bus_region.h"
-#include "bus_wire.h"
+#include <aimee/core/event_bus/bus_attach.h>
+#include <aimee/core/event_bus/bus_region.h>
+#include <aimee/core/event_bus/bus_wire.h>
 
 typedef enum
 {
@@ -61,6 +61,8 @@ typedef struct
 /* Attach over a connected SOCK_SEQPACKET socket. On OK the client is mapped and
  * ready; on BUS_CLIENT_DENIED the reason is in c->attach_status. */
 bus_client_result_t bus_client_attach(int sock, bus_client_t *c);
+bus_client_result_t bus_client_attach_as(int sock, bus_client_t *c, uint32_t principal_class,
+                                         uint32_t principal_ref);
 
 /* Unmap and forget. Does not close the attach socket (the caller owns it). */
 void bus_client_detach(bus_client_t *c);

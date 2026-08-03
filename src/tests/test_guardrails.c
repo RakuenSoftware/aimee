@@ -12,6 +12,7 @@
 #include "db1.h"
 #include "db2.h"
 #include "db2_test_shim.h"
+#include "server/obs_bus_adapter.h"
 #include "workspace.h"
 #include "workspace_turn.h" /* workspace_turn_set_container_bound_for_test */
 #include "platform_test_util.h"
@@ -3722,6 +3723,7 @@ int main(void)
    snprintf(db_path, sizeof(db_path), "/tmp/test-guardrails-db1-%d.sqlite", (int)getpid());
    unlink(db_path);
    assert(db1_init(db_path) == 0);
+   assert(server_obs_bus_configure() == 0);
    /* anti_patterns is DB2 (Postgres). */
 
    test_classify_sensitive();
@@ -3823,6 +3825,7 @@ int main(void)
    test_workflow_parse_test_command();
    test_workflow_parse_active_branch();
    test_workflow_parse_negative();
+   obs_bus_stop();
    db1_shutdown();
    unlink(db_path);
    if (old_home)

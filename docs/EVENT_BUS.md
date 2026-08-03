@@ -105,8 +105,10 @@ The control region is read-only. Every admitted client maps only its queue pair 
 arena; it cannot enumerate or map another client's rings. The arena is cooperative isolation for
 trusted native modules, not a sandbox for hostile code.
 
-The bus is intra-daemon. Traffic between `aimee-server`, `aimee-kb`, browsers, thin clients, and
-providers still uses the authenticated `/v1` network surfaces.
+The bus is intra-daemon. `aimee-server` and `aimee-kb` each host their own bus from the same
+`libaimee-core-event-bus.a`; the thin client does not link it. Traffic between `aimee-server`, `aimee-kb`,
+browsers, thin clients, and providers uses the authenticated `/v1` network surfaces through the
+shared connection layer.
 
 ## Adding a consumer
 
@@ -123,5 +125,5 @@ Keep the contract small:
 Use `bus_client_publish` for inline events. Use the arena only when a real payload can exceed the
 inline budget.
 
-Code lives under `src/modules/bus/`. The public C client is `bus_client.h`; the pure-Go client is
+Code lives under `src/core/event_bus/`. The public C client is `bus_client.h`; the pure-Go client is
 under `server-go/bus/`. The source headers hold the wire and arena invariants.
