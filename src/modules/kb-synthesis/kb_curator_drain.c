@@ -860,8 +860,12 @@ static void *drain_thread_main(void *arg)
       memset(&opts, 0, sizeof(opts));
       snprintf(opts.extract_command, sizeof(opts.extract_command), "%s",
                config_kb_curator_extract_command());
-      opts.max_tokens =
-          config_kb_curator_extract_max_tokens() > 0 ? config_kb_curator_extract_max_tokens() : 512;
+      /* 4096, matching the config default: this fallback reintroduced the exact
+       * truncation bug it looks harmless next to -- 512 is below the tokens a
+       * reasoning model spends before it emits any content. */
+      opts.max_tokens = config_kb_curator_extract_max_tokens() > 0
+                            ? config_kb_curator_extract_max_tokens()
+                            : 4096;
       opts.max_attempts =
           config_kb_curator_max_attempts() > 0 ? config_kb_curator_max_attempts() : 3;
 
@@ -942,8 +946,12 @@ static void *kb_curator_code_worker_main(void *arg)
       memset(&opts, 0, sizeof(opts));
       snprintf(opts.extract_command, sizeof(opts.extract_command), "%s",
                config_kb_curator_extract_command());
-      opts.max_tokens =
-          config_kb_curator_extract_max_tokens() > 0 ? config_kb_curator_extract_max_tokens() : 512;
+      /* 4096, matching the config default: this fallback reintroduced the exact
+       * truncation bug it looks harmless next to -- 512 is below the tokens a
+       * reasoning model spends before it emits any content. */
+      opts.max_tokens = config_kb_curator_extract_max_tokens() > 0
+                            ? config_kb_curator_extract_max_tokens()
+                            : 4096;
       opts.max_attempts =
           config_kb_curator_max_attempts() > 0 ? config_kb_curator_max_attempts() : 3;
 
@@ -981,8 +989,12 @@ static void *kb_curator_doc_worker_main(void *arg)
       memset(&opts, 0, sizeof(opts));
       snprintf(opts.extract_command, sizeof(opts.extract_command), "%s",
                config_kb_curator_extract_command());
-      opts.max_tokens =
-          config_kb_curator_extract_max_tokens() > 0 ? config_kb_curator_extract_max_tokens() : 512;
+      /* 4096, matching the config default: this fallback reintroduced the exact
+       * truncation bug it looks harmless next to -- 512 is below the tokens a
+       * reasoning model spends before it emits any content. */
+      opts.max_tokens = config_kb_curator_extract_max_tokens() > 0
+                            ? config_kb_curator_extract_max_tokens()
+                            : 4096;
       opts.max_attempts =
           config_kb_curator_max_attempts() > 0 ? config_kb_curator_max_attempts() : 3;
 
@@ -1009,8 +1021,12 @@ static void *kb_curator_index_lane_main(void *arg)
       memset(&opts, 0, sizeof(opts));
       snprintf(opts.extract_command, sizeof(opts.extract_command), "%s",
                config_kb_curator_extract_command());
-      opts.max_tokens =
-          config_kb_curator_extract_max_tokens() > 0 ? config_kb_curator_extract_max_tokens() : 512;
+      /* 4096, matching the config default: this fallback reintroduced the exact
+       * truncation bug it looks harmless next to -- 512 is below the tokens a
+       * reasoning model spends before it emits any content. */
+      opts.max_tokens = config_kb_curator_extract_max_tokens() > 0
+                            ? config_kb_curator_extract_max_tokens()
+                            : 4096;
       opts.max_attempts =
           config_kb_curator_max_attempts() > 0 ? config_kb_curator_max_attempts() : 3;
 
