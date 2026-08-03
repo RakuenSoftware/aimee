@@ -1,0 +1,46 @@
+[21:03:30Z] sizing: starting one server to measure resident VRAM
+[21:43:51Z] FAIL: first server never healthy
+[05:25:35Z] sizing: starting one server to measure resident VRAM
+[05:26:06Z]   one instance uses 2082 MiB of 16303 MiB
+[05:26:06Z]   -> running 4 processes
+[05:27:40Z]   all 4 servers up; VRAM now 8314 MiB
+[05:27:40Z] START E2B.UD-Q4_K_XL.10k across 4 shards
+[06:15:29Z] sizing: starting one server to measure resident VRAM
+[06:16:00Z]   one instance uses 2082 MiB of 16303 MiB
+[06:16:00Z]   -> running 4 processes
+[06:17:33Z]   all 4 servers up; VRAM now 8314 MiB
+[06:17:33Z] START E2B.UD-Q4_K_XL.10k across 4 shards
+[06:17:33Z] FAIL E2B.UD-Q4_K_XL.10k: contaminated merge, discarding
+[06:19:56Z] sizing: starting one server to measure resident VRAM
+[06:20:28Z]   one instance uses 2082 MiB of 16303 MiB
+[06:20:28Z]   -> running 4 processes
+[06:22:02Z]   all 4 servers up; VRAM now 8314 MiB
+[06:22:02Z] START E2B.UD-Q4_K_XL.10k across 4 shards
+[06:29:24Z] DONE E2B.UD-Q4_K_XL.10k rows=10000/10000 wall=7m22s procs=4
+[10:41:19Z] sizing: starting one server to measure resident VRAM
+[10:43:36Z]   one instance uses  MiB of 24560 MiB
+[10:43:36Z]   -> running 4 processes
+[10:44:25Z]   all 4 servers up; VRAM now  MiB
+[10:44:25Z] START E2B.UD-Q4_K_XL.10k across 4 shards
+[12:46:37Z] FAIL E2B.UD-Q4_K_XL.10k: 1644 errored rows (16%), discarding
+[13:10:53Z] sizing: starting one server to measure resident VRAM
+[13:11:09Z]   one instance uses  MiB of 24560 MiB
+[13:11:09Z]   -> running 4 processes
+[13:11:59Z]   all 4 servers up; VRAM now  MiB
+[13:11:59Z] START E2B.UD-Q4_K_XL.10k across 4 shards
+[14:41:55Z] sizing: starting one server to measure resident VRAM
+[14:42:12Z]   one instance uses  MiB of 24560 MiB
+[14:42:12Z]   -> running 3 processes
+[14:42:45Z]   all 3 servers up; VRAM now  MiB
+[14:42:45Z] START E2B.UD-Q4_K_XL.10k across 3 shards
+[15:45:10Z] sizing: starting one server to measure resident VRAM
+[15:45:42Z]   one instance uses  MiB of 24560 MiB
+[15:45:42Z]   -> running 3 processes, cache-ram 512 MiB each
+[15:46:14Z]   all 3 servers up; VRAM now  MiB
+[15:46:14Z] START E2B.UD-Q4_K_XL.10k across 3 shards
+[16:02:59Z] sizing: starting one server to measure resident VRAM
+[16:03:15Z]   one instance uses  MiB of 24560 MiB
+[16:03:15Z]   -> running 3 processes, cache-ram 1024 MiB each
+[16:03:48Z]   all 3 servers up; VRAM now  MiB
+[16:03:48Z] START E2B.UD-Q4_K_XL.10k across 3 shards
+[18:30:00Z] DONE E2B.UD-Q4_K_XL.10k rows=10000/10000 wall=146m11s procs=3 retries=0

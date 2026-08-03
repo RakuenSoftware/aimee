@@ -1,0 +1,22 @@
+[07:03:48Z] === XTX-only finish: 4 arms, 10000 notes each
+[07:03:48Z] --- E4B.UD-Q8_K_XL.10k  nproc=3  port=8300
+[10:41:13Z] OK   E4B.UD-Q8_K_XL.10k strictF1=0.6321
+[10:41:13Z] --- E2B.UD-Q4_K_XL.10k  nproc=4  port=8400
+[12:46:37Z] FAIL E2B.UD-Q4_K_XL.10k (rc=1) -- continuing to next arm
+[12:46:37Z] --- E2B.UD-Q6_K_XL.10k  nproc=4  port=8400
+[13:10:48Z] === XTX-only finish: 4 arms, 10000 notes each
+[13:10:48Z] SKIP E4B.UD-Q8_K_XL.10k (banked)
+[13:10:48Z] --- E2B.UD-Q4_K_XL.10k  nproc=4  port=8400
+[14:41:50Z] === XTX-only finish: 4 arms, 10000 notes each
+[14:41:50Z] SKIP E4B.UD-Q8_K_XL.10k (banked)
+[14:41:50Z] --- E2B.UD-Q4_K_XL.10k  nproc=3  port=8400
+[15:45:05Z] === XTX-only finish: 4 arms, 10000 notes each
+[15:45:05Z] SKIP E4B.UD-Q8_K_XL.10k (banked)
+[15:45:05Z] --- E2B.UD-Q4_K_XL.10k  nproc=3  port=8400
+[16:02:54Z] === XTX-only finish: 4 arms, 10000 notes each
+[16:02:54Z] SKIP E4B.UD-Q8_K_XL.10k (banked)
+[16:02:54Z] --- E2B.UD-Q4_K_XL.10k  nproc=3  port=8400
+[18:30:07Z] OK   E2B.UD-Q4_K_XL.10k strictF1=0.6246
+[18:30:07Z] --- E2B.UD-Q6_K_XL.10k  nproc=3  port=8400
+[21:19:24Z] OK   E2B.UD-Q6_K_XL.10k strictF1=0.6344
+[21:19:24Z] --- E2B.UD-Q8_K_XL.10k  nproc=3  port=8400

@@ -1,0 +1,22 @@
+[21:43:57Z] sizing: starting one server to measure resident VRAM
+[22:24:18Z] FAIL: first server never healthy
+[06:17:39Z] sizing: starting one server to measure resident VRAM
+[06:18:11Z]   one instance uses 2698 MiB of 16303 MiB
+[06:18:11Z]   -> running 4 processes
+[06:29:35Z] sizing: starting one server to measure resident VRAM
+[06:30:07Z]   one instance uses 2698 MiB of 16303 MiB
+[06:30:07Z]   -> running 4 processes
+[06:31:40Z]   all 4 servers up; VRAM now 10778 MiB
+[06:31:40Z] START E2B.UD-Q6_K_XL.10k across 4 shards
+[12:46:42Z] sizing: starting one server to measure resident VRAM
+[12:47:14Z]   one instance uses  MiB of 24560 MiB
+[12:47:14Z]   -> running 4 processes
+[12:48:03Z]   all 4 servers up; VRAM now  MiB
+[12:48:04Z] START E2B.UD-Q6_K_XL.10k across 4 shards
+[13:07:45Z] FAIL E2B.UD-Q6_K_XL.10k: merge rejected (see above), discarding
+[18:30:12Z] sizing: starting one server to measure resident VRAM
+[18:30:29Z]   one instance uses  MiB of 24560 MiB
+[18:30:29Z]   -> running 3 processes, cache-ram 1024 MiB each
+[18:31:02Z]   all 3 servers up; VRAM now  MiB
+[18:31:02Z] START E2B.UD-Q6_K_XL.10k across 3 shards
+[21:19:17Z] DONE E2B.UD-Q6_K_XL.10k rows=10000/10000 wall=168m15s procs=3 retries=0
