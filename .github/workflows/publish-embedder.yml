@@ -1,0 +1,187 @@
+# Publish the aimee-embedder sidecars.
+#
+# TWO IMAGES, ONE MODEL EACH. There is no third image for "no embedder" -- that
+# deployment runs no embedder container and the server points EMBEDDER_URL at whatever
+# the operator provides. An image whose purpose is to not be used would be a tag to
+# maintain, a build to pay for, and a thing to get wrong.
+#
+# THIS MUST NOT REBUILD BECAUSE KB CODE CHANGED, which is the whole reason the embedder
+# left the kb image. Baked in, it put CPU torch and a gigabyte of weights into every kb
+# tag -- including the ones deployed against an external embedder -- and, worse, sat
+# behind the compiled binary in the layer order, so every C change re-downloaded the
+# weights. Four fetches per publish, and Hugging Face answered 429.
+#
+# The guarantee is enforced twice, exactly as publish-llm.yml does it, because a path
+# filter is one careless edit away from being wrong:
+#
+#   1. A narrow trigger: only the files that determine these images.
+#   2. A skip-if-already-published check keyed on a hash of those same files, so even a
+#      broad or accidental trigger costs one `docker manifest inspect` and stops.
+#
+# (2) is what makes it robust rather than aspirational: correctness does not depend on
+# the path list staying right.
+name: Publish aimee-embedder
+
+on:
+  push:
+    branches: [testing]
+    paths:
+      - "Dockerfile.embedder"
+      - "deploy/container/aimee-embedder-entrypoint.sh"
+      - "scripts/bake-embedder.py"
+      - "scripts/embedder-server.py"
+      - "scripts/embedders.json"
+      - ".github/workflows/publish-embedder.yml"
+  # DELIBERATELY NARROWER THAN THE PUSH TRIGGER: no workflow file here. A PR build never
+  # pushes, so the skip check cannot engage on one -- the tag it looks for only appears
+  # at merge -- and every triggered PR therefore pays a full build. Editing this workflow
+  # is not a change to the image, so it must not cost two of them.
+  pull_request:
+    paths:
+      - "Dockerfile.embedder"
+      - "deploy/container/aimee-embedder-entrypoint.sh"
+      - "scripts/bake-embedder.py"
+      - "scripts/embedder-server.py"
+      - "scripts/embedders.json"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Rebuild even when the tag already exists'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: publish-embedder-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: aimee-embedder-a25m, model: bekko-a25m }
+          - { name: aimee-embedder-nomic, model: nomic-embed-text-v2-moe }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Normalize owner to lowercase
+        run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The immutable tag must name EVERY input that changes the artefact, or the skip
+      # becomes a trap. Keyed on the model name alone, a change to Dockerfile.embedder,
+      # the entrypoint, the bake script or the registry would find the tag published,
+      # skip the build, and leave :testing on the old image while the run reported
+      # success. publish-llm.yml records that this is exactly how the mTLS fix in the
+      # synthesis sidecar would have failed to ship.
+      #
+      # So the sources are hashed into the tag: content-addressed, rebuilding exactly
+      # when something that lands in the image changed and never otherwise. The
+      # registry revision is included because it carries the pooling, prefixes and
+      # dim -- a prefix change rewrites every vector while leaving the model name and
+      # the width alone, which is the drift embedder-server.py's serving_id exists to
+      # make detectable.
+      - name: Has this exact build already been published?
+        id: have
+        env:
+          FORCE: ${{ inputs.force }}
+        run: |
+          rev=$(cat Dockerfile.embedder \
+                    deploy/container/aimee-embedder-entrypoint.sh \
+                    scripts/bake-embedder.py \
+                    scripts/embedder-server.py \
+                    scripts/embedders.json | sha256sum | cut -c1-12)
+          pinned="ghcr.io/${OWNER}/${{ matrix.name }}:${rev}"
+          echo "embedder sources hash to $rev"
+          echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
+          if [ "${FORCE:-false}" = "true" ]; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "forced rebuild requested; ignoring any published $pinned"
+            exit 0
+          fi
+          if docker manifest inspect "$pinned" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "$pinned already published; nothing to build"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.have.outputs.exists != 'true'
+        uses: docker/setup-buildx-action@v3
+
+      # A PULL REQUEST BUILDS BUT NEVER PUSHES: publishing is a merge-time act. The PR
+      # still proves the image builds AND that its model loads offline at the declared
+      # width, because Dockerfile.embedder asserts both in its final stage -- so a
+      # weightless or mis-sized image fails here rather than at first search.
+      - name: Build ${{ matrix.name }}
+        if: steps.have.outputs.exists != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.embedder
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          provenance: false
+          cache-from: type=gha,scope=${{ matrix.name }}-amd64
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}-amd64
+          build-args: |
+            AIMEE_EMBEDDER=${{ matrix.model }}
+          tags: |
+            ${{ steps.have.outputs.pinned }}
+            ghcr.io/${{ env.OWNER }}/${{ matrix.name }}:testing
+
+      # The hop test on the image that was just built. It mints its own CA, so it needs
+      # no kb: it proves the sidecar refuses to start without an identity, requires a
+      # client certificate, and actually embeds at the width the registry declares.
+      #
+      # On a pull request the image is loaded locally rather than pushed, so this runs
+      # against the local tag; on a push the same digest has just been published.
+      - name: Load ${{ matrix.name }} locally for the hop test
+        if: steps.have.outputs.exists != 'true' && github.event_name == 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.embedder
+          platforms: linux/amd64
+          load: true
+          provenance: false
+          cache-from: type=gha,scope=${{ matrix.name }}-amd64
+          build-args: |
+            AIMEE_EMBEDDER=${{ matrix.model }}
+          tags: ${{ matrix.name }}:cihop
+
+      - name: mTLS hop test
+        if: steps.have.outputs.exists != 'true'
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            img="${{ matrix.name }}:cihop"
+          else
+            img="${{ steps.have.outputs.pinned }}"
+            docker pull -q "$img"
+          fi
+          dim=$(python3 -c "import json;print(json.load(open('scripts/embedders.json'))['embedders']['${{ matrix.model }}']['dim'])")
+          bash scripts/test-embedder-mtls-hop.sh "$img" "$dim"
+
+      - name: Report
+        run: |
+          if [ "${{ steps.have.outputs.exists }}" = "true" ]; then
+            echo "skipped: ${{ steps.have.outputs.pinned }} already published"
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "built ${{ matrix.name }} (pull request: not pushed)"
+          else
+            echo "published ${{ steps.have.outputs.pinned }} and :testing"
+          fi
