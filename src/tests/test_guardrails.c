@@ -466,7 +466,8 @@ static void test_worktree_sibling_path(void)
     * DIFFERENT worktrees. Sharing one is how concurrent sessions overwrote
     * each other. */
    char other[MAX_PATH_LEN];
-   rc = worktree_sibling_path("/root/dev/aimee", "fadc648f-1234-5678-b", NULL, other, sizeof(other));
+   rc =
+       worktree_sibling_path("/root/dev/aimee", "fadc648f-1234-5678-b", NULL, other, sizeof(other));
    assert(rc == 0);
    snprintf(expect, sizeof(expect), "/root/dev/aimee/.aimee/worktrees/%s/main", key);
    assert(strcmp(other, expect) != 0);

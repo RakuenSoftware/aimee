@@ -758,7 +758,8 @@ static void test_initialize_enters_session_worktree(void)
 
    char wt[4096];
    const char *tmp = getenv("TMPDIR");
-   snprintf(wt, sizeof(wt), "%s/aimee-mcp-init-wt-%d", (tmp && tmp[0]) ? tmp : "/tmp", (int)getpid());
+   snprintf(wt, sizeof(wt), "%s/aimee-mcp-init-wt-%d", (tmp && tmp[0]) ? tmp : "/tmp",
+            (int)getpid());
    char mk[4200];
    snprintf(mk, sizeof(mk), "rm -rf '%s' && mkdir -p '%s'", wt, wt);
    assert(system(mk) == 0);
@@ -1228,7 +1229,8 @@ static void test_session_id_is_shared_not_invented(void)
 {
    char home[512];
    const char *tmp = getenv("TMPDIR");
-   snprintf(home, sizeof(home), "%s/aimee-mcp-sid-%d", (tmp && tmp[0]) ? tmp : "/tmp", (int)getpid());
+   snprintf(home, sizeof(home), "%s/aimee-mcp-sid-%d", (tmp && tmp[0]) ? tmp : "/tmp",
+            (int)getpid());
    char cmd[600];
    snprintf(cmd, sizeof(cmd), "rm -rf '%s' && mkdir -p '%s'", home, home);
    assert(system(cmd) == 0);

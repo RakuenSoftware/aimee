@@ -107,8 +107,8 @@ static int csw_ref_exists(const char *git_root, const char *ref)
       return 0;
    char spec[192];
    snprintf(spec, sizeof spec, "%s^{commit}", ref);
-   const char *const argv[] = {"git", "-C", git_root, "rev-parse", "--verify", "--quiet", spec,
-                               NULL};
+   const char *const argv[] = {"git",      "-C",      git_root, "rev-parse",
+                               "--verify", "--quiet", spec,     NULL};
    return csw_git(argv, NULL, 0) == 0;
 }
 
@@ -170,8 +170,7 @@ int client_session_worktree_base(const char *git_root, char *buf, size_t cap)
       /* Explicit opt-in only, for offline/detached workflows that accept
        * inheriting the source checkout's branch. Never reached as a fallback. */
       char cur[192];
-      const char *const argv[] = {"git",          "-C",   git_root, "rev-parse",
-                                  "--abbrev-ref", "HEAD", NULL};
+      const char *const argv[] = {"git", "-C", git_root, "rev-parse", "--abbrev-ref", "HEAD", NULL};
       if (csw_git(argv, cur, sizeof cur) == 0 && cur[0] && strcmp(cur, "HEAD") != 0)
       {
          snprintf(buf, cap, "%s", cur);
@@ -195,8 +194,8 @@ int client_session_worktree_base(const char *git_root, char *buf, size_t cap)
    {
       /* origin/HEAD is unset on repos whose remote was added after clone. Repair
        * once, then re-read. Best-effort: offline, this simply stays unset. */
-      const char *const set_argv[] = {"git", "-C", git_root, "remote", "set-head", "origin", "-a",
-                                      NULL};
+      const char *const set_argv[] = {"git",      "-C",     git_root, "remote",
+                                      "set-head", "origin", "-a",     NULL};
       (void)csw_git(set_argv, NULL, 0);
       csw_remote_default(git_root, def, sizeof def);
    }
@@ -255,7 +254,8 @@ static void csw_reclaim_legacy(const char *git_root, const char *sid, const char
    fprintf(stderr, "aimee: reclaimed pre-rekey worktree %s\n", old_path);
 
    char old_branch[160];
-   if (snprintf(old_branch, sizeof old_branch, "aimee/session/%s", old_key) < (int)sizeof old_branch)
+   if (snprintf(old_branch, sizeof old_branch, "aimee/session/%s", old_key) <
+       (int)sizeof old_branch)
    {
       const char *const br_argv[] = {"git", "-C", git_root, "branch", "-d", old_branch, NULL};
       (void)csw_git(br_argv, NULL, 0); /* -d, not -D: keeps an unmerged branch */
@@ -336,8 +336,8 @@ int client_session_worktree_ensure(const char *sid, char *out, size_t cap)
          /* The session branch may already exist with no worktree attached (a
           * prior worktree was force-removed while still ahead). Reattach it so
           * the session still gets isolation instead of sharing the checkout. */
-         const char *const attach_argv[] = {"git", "-C",     git_root, "worktree",
-                                            "add", wt,       branch,   NULL};
+         const char *const attach_argv[] = {"git", "-C", git_root, "worktree",
+                                            "add", wt,   branch,   NULL};
          (void)csw_git(attach_argv, NULL, 0);
       }
    }

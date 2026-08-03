@@ -193,10 +193,9 @@ static int client_session_id_ensure(char *out, size_t cap)
    if (platform_random_bytes(rnd, sizeof(rnd)) != 0)
       return -1;
    char id[64];
-   snprintf(id, sizeof(id),
-            "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x", rnd[0], rnd[1],
-            rnd[2], rnd[3], rnd[4], rnd[5], rnd[6], rnd[7], rnd[8], rnd[9], rnd[10], rnd[11],
-            rnd[12], rnd[13], rnd[14], rnd[15]);
+   snprintf(id, sizeof(id), "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+            rnd[0], rnd[1], rnd[2], rnd[3], rnd[4], rnd[5], rnd[6], rnd[7], rnd[8], rnd[9], rnd[10],
+            rnd[11], rnd[12], rnd[13], rnd[14], rnd[15]);
 
    int fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0644);
    if (fd >= 0)

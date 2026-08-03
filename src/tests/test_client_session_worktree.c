@@ -309,8 +309,8 @@ static void test_ensure_reclaims_pre_rekey_worktree(void)
    snprintf(parent, sizeof parent, "%s/.aimee/worktrees/%s", clone, old_key);
    assert(stat(parent, &st) != 0);
    char branch[256];
-   capture(branch, sizeof branch, "git -C '%s' rev-parse --verify --quiet 'aimee/session/%s'", clone,
-           old_key);
+   capture(branch, sizeof branch, "git -C '%s' rev-parse --verify --quiet 'aimee/session/%s'",
+           clone, old_key);
    assert(branch[0] == '\0');
 
    assert(chdir(cwd_before) == 0);

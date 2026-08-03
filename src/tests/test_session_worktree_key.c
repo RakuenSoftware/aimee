@@ -63,8 +63,8 @@ static void test_key_is_path_safe(void)
    /* Session ids can arrive in a request body (webchat git panel, editors) and
     * are spliced straight into a path and a branch name. */
    const char *hostile[] = {
-       "../../etc/passwd", "..", "/absolute/path", "a/b/c", "-rf", "--upload-pack=evil",
-       "id with spaces",   "quote'inject",        "semi;colon",
+       "../../etc/passwd", "..",           "/absolute/path", "a/b/c", "-rf", "--upload-pack=evil",
+       "id with spaces",   "quote'inject", "semi;colon",
    };
    for (size_t i = 0; i < sizeof(hostile) / sizeof(hostile[0]); i++)
    {
