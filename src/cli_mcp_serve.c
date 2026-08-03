@@ -488,12 +488,27 @@ static void handle_initialize(cJSON *id)
    if (mcp_enter_session_worktree(wt, sizeof(wt)))
    {
       char instructions[8192];
+      /* Two tool surfaces, two working directories, and only one of them moved.
+       * This proxy chdir'd itself, so AIMEE's tools resolve relative paths inside
+       * the worktree -- but the MCP host's own shell/edit tools are a different
+       * process tree that never moved, so a relative path from those still lands
+       * in the shared checkout, which the next sentence forbids. Saying "use
+       * relative paths" without that distinction is wrong for whichever surface
+       * the agent happens to reach for. Measured: an agent told this spent nine
+       * calls locating the worktree and prefixed every later shell command with
+       * an absolute cd -- it had to derive the rule the text should have given
+       * it. Name the split, and give the absolute root for the host's tools. */
       snprintf(instructions, sizeof(instructions),
                "%s\n\nThis session has its own isolated checkout — a branch cut from the "
-               "repository's default branch, in a dedicated worktree at %s. aimee's file and "
-               "shell tools already run there; use RELATIVE paths, or absolute paths under that "
-               "root. Do not edit the shared checkout.",
-               base_instructions, wt);
+               "repository's default branch, in a dedicated worktree at %s. Work there, and do "
+               "not edit the shared checkout.\n"
+               "- aimee's OWN file and shell tools already run in that worktree: relative paths "
+               "are correct for them.\n"
+               "- YOUR host's shell and edit tools do NOT: they still run in the directory this "
+               "session started in. For those, use absolute paths under %s (or cd there first), "
+               "or your edits will land in the shared checkout and be lost from this session's "
+               "branch.",
+               base_instructions, wt, wt);
       cJSON_AddStringToObject(result, "instructions", instructions);
    }
    else

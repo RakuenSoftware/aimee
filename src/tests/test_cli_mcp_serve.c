@@ -815,6 +815,23 @@ static void test_initialize_enters_session_worktree(void)
    assert(strstr(instructions->valuestring, "isolated checkout") != NULL);
    assert(strstr(instructions->valuestring, wt) != NULL);
 
+   /* TWO TOOL SURFACES, ONE OF WHICH MOVED.
+    *
+    * This proxy chdir'd itself, so aimee's tools are inside the worktree -- but
+    * the MCP host's own shell/edit tools never moved, so a relative path from
+    * those lands in the shared checkout the same text forbids editing. The
+    * earlier wording said "use RELATIVE paths" without naming the split; an
+    * agent given it spent nine calls locating the worktree and then prefixed
+    * every shell command with an absolute cd. Pin that both surfaces are named
+    * and that the host's tools are told to use the absolute root. */
+   assert(strstr(instructions->valuestring, "aimee's OWN file and shell tools") != NULL);
+   assert(strstr(instructions->valuestring, "host's shell and edit tools do NOT") != NULL);
+   /* The worktree path must appear for the host's tools too, not once in prose. */
+   {
+      const char *first = strstr(instructions->valuestring, wt);
+      assert(first && strstr(first + 1, wt) != NULL);
+   }
+
    cJSON_Delete(resp);
    cJSON_Delete(req);
 

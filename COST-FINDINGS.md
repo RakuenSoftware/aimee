@@ -1,0 +1,407 @@
+# Cost and turn count — the aimee arm
+
+Evidence for the article. Numbered findings, in the order they were established.
+Each states what was measured, on what, and what it does *not* support.
+
+Run context: 8 tasks × 4 arms (baseline / ponytail-instructions / ponytail-addon /
+aimee), r1 only, disjoint lanes across CT 401/402/403 on `192.168.1.252`,
+`codex exec --ephemeral --json`, `gpt-5.6-sol`, medium reasoning,
+`agents.enabled=false`. **All 8 tasks complete in all 4 arms.**
+
+---
+
+## Finding 1 — The headline ratio was a token count, not a cost
+
+Every "aimee costs 4.4×" figure produced before 2026-08-03 was a **raw
+input-token ratio**. It charges cache hits at the full input rate. It is not a
+cost, and it should not be published as one.
+
+Cache hit rates here are 83–96% in every arm. On `am_e1af40a0f5`:
+
+| arm | total in | cached | uncached | hit rate |
+|---|---|---|---|---|
+| baseline | 441,735 | 367,872 | 73,863 | 83.3% |
+| aimee | 1,928,655 | 1,828,608 | 100,047 | 94.8% |
+
+Raw-token ratio: **4.37×**. Uncached-token ratio: **1.35×**. The gap between
+those two numbers is entirely cache accounting.
+
+The harness never made this mistake — `codex_matrix_runner.py:744` already prices
+cached input at 10% — but the analysis on top of it did, for several sessions.
+
+## Finding 2 — The harness credit unit is exactly $0.04
+
+`gpt-5.6-sol` published rates, effective 2026-07-30: **$5.00/MTok input,
+$30.00/MTok output, cached input at 10% of input ($0.50/MTok)**.
+
+The harness's `credit_rate_per_million` is `{uncached: 125, cached: 12.5, output:
+750}`. Divide through:
+
+```
+5.00 / 125  = 0.04
+0.50 / 12.5 = 0.04
+30.00 / 750 = 0.04
+```
+
+All three agree, so **1 credit = $0.04** and USD is a clean rescaling of credits,
+not a reweighting. The harness was built on the real Sol card even though it
+records `usd_cost_available: False`.
+
+**Do not use `benchmarks/coding/cost_savings.py` `DEFAULT_PRICE` for this work.**
+That card ($1.25 in / $10.00 out) is self-described as an assumption for pricing
+*free local models* at frontier-equivalent rates, it predates 5.6, and it carries
+no cached tier at all — disqualifying when >90% of these tokens are cache hits.
+It was used for one iteration of this analysis and understated dollars 4×.
+
+## Finding 3 — Priced properly, aimee is 1.11x baseline
+
+All 8 tasks, all 4 arms, at $0.04/credit:
+
+| arm | USD | vs baseline |
+|---|---|---|
+| baseline | $14.218 | 1.00x |
+| **ponytail-instructions** | **$13.044** | **0.92x** |
+| ponytail-addon | $14.607 | 1.03x |
+| **aimee** | $15.729 | **1.11x** |
+
+Per task, aimee is cheaper than baseline on **four of eight**:
+
+| task | base | p-instr | p-addon | aimee | aimee vs base |
+|---|---|---|---|---|---|
+| am_e1af40a0f5 | $0.662 | $1.242 | $0.987 | $1.729 | 2.61x |
+| am_1f0f1ab528 | $0.661 | $1.234 | $0.984 | $1.090 | 1.65x |
+| am_12b43fa38e | $1.750 | $2.487 | $1.681 | $2.829 | 1.62x |
+| am_b84c9294aa | $4.061 | $2.625 | $4.015 | $4.606 | 1.13x |
+| am_270b3483d5 | $1.260 | $0.880 | $1.403 | $1.097 | 0.87x |
+| am_1e7cb3da16 | $1.632 | $1.172 | $2.091 | $1.412 | 0.87x |
+| am_e4c4afa194 | $1.159 | $0.858 | $0.788 | $0.971 | 0.84x |
+| am_312e901904 | $3.033 | $2.546 | $2.657 | $1.996 | 0.66x |
+
+Note ponytail-instructions comes in **below** baseline over the full set -- the
+only arm that does.
+
+Earlier drafts of this file recorded 1.28x (6 cells) and 1.10x (7 cells). The
+figure moved with every added cell, which is itself the caveat: at n=8 with one
+replicate, the aggregate is not stable to a single task.
+
+## Finding 4 — aimee already wins on bytes and on uncached input
+
+Two measurements that cut against the "aimee is expensive" framing. Credit totals
+here are over the **first six** cells (Finding 3's table before `am_312e901904`
+landed); the ordering they establish is unchanged by the seventh:
+
+- **aimee's uncached input is the lowest of all four arms** — 65.0 credits against
+  baseline's 69.8 and ponytail-addon's 77.8. On the tokens billed at full rate,
+  aimee is the cheapest arm in the study.
+- **aimee moves the fewest tool-output bytes.** On `am_e1af40a0f5`: aimee 74,457
+  characters against baseline 123,647, ponytail-instructions 199,955,
+  ponytail-addon 234,090.
+
+The retrieval work (`index` in the core tool floor, hybrid over recursive grep,
+span over whole-file reads) did what it was built to do. The byte war is won, and
+it did not move the bill.
+
+## Finding 5 — All of aimee's overhead is turn count
+
+Every dollar of aimee's excess sits in cached input (122.8 cr vs baseline's 79.4)
+and output (40.2 vs 28.9), over the first six cells. Cached input is turns ×
+prefix: across all seven, 259 calls against baseline's 113.
+
+On `am_e1af40a0f5`, 47 calls vs 9. Per call, aimee is *cheaper* than baseline
+(41.0k input-tokens vs 49.1k) because its context carries less. It simply takes
+five times as many turns.
+
+**Turn count is the entire remaining cost story.** Output volume is not the lever;
+it was, and it has been taken.
+
+## Finding 6 — Cost ratio is ~0.5 x call ratio
+
+**A "fixed exploration floor" was claimed here on 7 cells and the 8th refuted
+it.** `am_b84c9294aa` took 58 aimee calls against baseline's 28 -- above the 19-58
+band that had looked like a ceiling -- and its cost ratio (1.13x) does not sit
+where task difficulty predicts. Sorting by baseline effort is NOT monotone.
+
+Sorting by **call ratio** is:
+
+| task | base calls | aimee calls | call ratio | cost ratio | cost/call ratio |
+|---|---|---|---|---|---|
+| am_312e901904 | 31 | 38 | 1.2x | 0.66x | 0.55 |
+| am_270b3483d5 | 15 | 19 | 1.3x | 0.87x | 0.67 |
+| am_e4c4afa194 | 13 | 19 | 1.5x | 0.84x | 0.56 |
+| am_1e7cb3da16 | 19 | 37 | 1.9x | 0.87x | 0.46 |
+| am_b84c9294aa | 28 | 58 | 2.1x | 1.13x | 0.54 |
+| am_12b43fa38e | 17 | 58 | 3.4x | 1.62x | 0.48 |
+| am_1f0f1ab528 | 9 | 41 | 4.6x | 1.65x | 0.36 |
+| am_e1af40a0f5 | 9 | 47 | 5.2x | 2.61x | 0.50 |
+
+**cost_ratio ~= 0.5 x call_ratio**, holding from 1.2x to 5.2x -- a factor-of-four
+range -- with the multiplier between 0.36 and 0.67 and no trend in it.
+
+The 0.5 is the per-call discount from Finding 4: aimee's context carries less, so
+each call is cheaper, so N x the calls costs about N/2 x the money.
+
+**The actionable form: halve aimee's call count and you roughly halve its cost
+ratio.** aimee does have a floor -- it never drops below ~19 calls even when
+baseline uses 9 -- but it is not a ceiling, and difficulty does not predict it.
+What predicts cost is simply how many calls aimee takes.
+
+## Finding 7 — The guidance traded bytes for turns
+
+This is self-inflicted and is the most useful finding in the set.
+
+The skill text was rewritten to steer reads to `index command=span` and searches
+to `index command=hybrid`. Both are bounded and both cut bytes. But `span` reads
+**one range per call**, and the shell form it displaced batched several reads into
+a single command.
+
+Call-mix on `am_e1af40a0f5`:
+
+- **baseline: 16 `sed` reads inside 9 calls.** One call is
+  `git status && sed … && sed … && sed … && sed …`. Another does four more.
+- **aimee: 7 `sed` reads across 22 calls**, plus 25 MCP calls. Almost no chaining.
+
+Of aimee's 22 shell calls, roughly nine bought nothing:
+
+| # | call | output |
+|---|---|---|
+| 1 | `sed -n '1,240p' …/plugins/cache/local/aimee/…` — reading its own SKILL.md | 2,714 ch |
+| 5, 8 | searches returning nothing | 0 ch |
+| 6, 16 | searches returning a single path | 35 ch |
+| 3, 20 | lone `git status --short` | 0 / 89 ch |
+| 21 | lone `git diff --check` | 0 ch |
+| 19 | lone `unlink /tmp/…` | 0 ch |
+
+Baseline folded its `git status` and `git diff --check` into commands it was
+already running. aimee spent a turn on each.
+
+Anatomy of the 47 calls on `am_e1af40a0f5`, the worst cell:
+
+- **11 `span` calls, one range each.** `src/config.c` alone is read at :1-120,
+  :205-245, :850-1035, :1030-1175 and :1585-1625 in five separate round trips.
+- **5 consecutive `find_symbol` calls**, one symbol each.
+- **14 consecutive MCP calls before any shell work** (calls 4-17), then 9 more
+  (19-27) -- a long chain of single-purpose probes.
+- **9 shell calls that bought nothing** (table above).
+
+~16 of 47 calls are inherently batchable and ~9 are waste. Removing both lands
+near 25 calls, which on the observed call-to-cost relationship is roughly
+1.3-1.4x rather than 2.61x. **Projection, not a measurement.**
+
+**Fixes landed** (all red-before-green verified):
+- `code_span_get` accepts a `spans` array — `[{file_path, line_start, line_end}, …]`
+  — returning every range in one call; schema advertises it, tools-list golden
+  regenerated.
+- Skill gains: put independent commands in ONE call joined with `&&`; batch reads;
+  fold `git status` / `git diff --check` / cleanup into a command already running;
+  use `spans` for more than one range; do not read the plugin cache.
+
+**Not yet measured.** These were built after the r5 suite launched. Effect size is
+unknown and must not be asserted until a matched re-run exists.
+
+## Finding 8 — The output price barely matters; the cached rate does; task
+selection dominates both
+
+Sweeping the two parameters we were unsure of, holding input at 1.0 (it scales
+dollars but cancels in the ratio):
+
+| box | tasks | aimee vs baseline, across the whole sweep |
+|---|---|---|
+| CT401 | am_1f0f1ab528, am_e1af40a0f5 | 1.82× – 3.30× |
+| CT402 | am_12b43fa38e, am_e4c4afa194 | 1.19× – 1.59× |
+| CT403 | am_1e7cb3da16, am_270b3483d5 | 0.86× – 0.90× |
+
+- Output multiple from 4× to 15× moves any ratio by **≤0.05×**. Not knowing the
+  output rate costs nothing.
+- The cached discount swings CT401 from 1.82× to 3.30×. It is the one parameter
+  worth pinning down, and it is now pinned (Finding 2).
+- **The same aimee build reads 2.24× on one task pair and 0.87× on another at one
+  fixed card.** Per-task variance is larger than the entire pricing uncertainty.
+
+This is the strongest caveat in the set: "what does aimee cost" is not answerable
+from 6 tasks at one replicate, whatever the rate card.
+
+## Finding 9 — A bullet added on intuition, measured at zero
+
+The skill carried "Do not repeat a search you have already run." Measuring
+duplicate searches across all arms afterwards: **0–1% of work**. It bought
+nothing and occupied skill budget.
+
+Removed, and the test now asserts it stays *absent* so it is not reintroduced on
+the same intuition. Guidance added without a measurement should be treated as
+unproven regardless of how obvious it sounds.
+
+---
+
+## Finding 10 — read_symbol exists, fuses the two-call pattern, and is unreachable
+
+The agent's commonest read shape is two calls: `find_symbol` to get a range,
+then `span` to read it. `read_symbol` already does both server-side --
+*"Fetch just a symbol's definition span (anchored, editable) instead of reading
+the whole enclosing file"* (`server/agent_tools.c`).
+
+It has **no MCP presence at all**: not in `tools/list`, not in the extended
+catalog, not reachable through `find_tools`/`call_tool`. A Codex agent cannot
+call it by any path.
+
+This is the same shape as the `index` finding -- the right tool existed and was
+never offered, so the agent paid for the long way round. Worth stating plainly
+in the article: twice now, the measured "agent behaves inefficiently" turned out
+to be "the efficient tool was not on the menu."
+
+**Not fixed, deliberately.** Batched `find_symbol` + batched `spans` resolves N
+symbols in 2 calls, where N `read_symbol` calls would cost N. Exposing it would
+be the worse fix for the case that actually occurs.
+
+## Finding 11 — THE BLOCKER: aimee's work is invisible to the grader when hooks are on
+
+**Two consecutive runs of `am_e1af40a0f5` scored 0 LOC and failed. The agent had
+done the work correctly both times.**
+
+- run A: `src/config.c`, `src/config_internal.h`, `src/config_save.c` — 16 insertions
+- run B: same three files — 29 insertions
+
+Both patches sat in the cell's session worktree. The harness diffs the **cell
+root**, which is clean, so `patch.diff` is 0 bytes and `hidden_ok` false. A full
+re-run in this state would have scored aimee **0/8** and read as catastrophic
+regression, with every patch real and one directory down.
+
+**Every cost figure measured in this state is void**, including the
+"2.61x -> 1.95x" improvement reported for batching: that run produced no graded
+patch, so it was cheap partly because it skipped the edit/verify cycle.
+
+### What is and is not established
+
+Established: the r5 results (Findings 1-9) predate hook deployment and are
+unaffected. The regression appeared only after `hooks pre` was registered.
+
+NOT established: what creates the worktree. It could not be reproduced in
+isolation — `mcp-serve`, `hooks pre` (PreToolUse and SessionStart payloads) and
+`workspace add` were each driven directly in a throwaway git repo, with
+`AIMEE_HOME` pointed at the same config, with and without `AIMEE_SESSION_ID`, and
+none created one. In the cell it appears in the **same second the cell directory
+is created** — during harness setup, before the agent runs. The corpora do not
+ship a stale registry. `require_session_worktree: false` is set and verified
+present, and the standalone probe honours it; the cell does not.
+
+**Root cause open.** The benchmark is unblocked by `require_aimee_git: false`
+(the deny message's own documented opt-out), which removes the only thing that
+changed between the valid r5 runs and the 0-LOC ones. That is a workaround, not a
+fix, and it disables the git redirect that was under test.
+
+### Why this matters beyond the benchmark
+
+An MCP client hands aimee a checkout and expects edits in it. aimee relocates
+them to a branch in a worktree the caller never learns about from any tool
+result. For a benchmark that is a scored zero; for a user it is "the model said
+it fixed it and my repo is unchanged."
+
+A related defect WAS root-caused and fixed: the `initialize` instructions said
+"use RELATIVE paths" for a worktree only *aimee's* tools had moved into. The MCP
+host's own shell never moved, so relative paths from it land in the shared
+checkout the same text forbids editing. An agent given that spent nine calls
+locating the worktree, then prefixed every shell command with an absolute cd. The
+text now names both surfaces separately.
+
+## Finding 12 — no task in the current eight is an aimee-only win
+
+Pass matrix, all four arms, r5:
+
+| task | baseline | p-instr | p-addon | aimee |
+|---|---|---|---|---|
+| am_1f0f1ab528 | PASS | PASS | PASS | PASS |
+| am_312e901904 | PASS | PASS | PASS | PASS |
+| am_e4c4afa194 | PASS | PASS | PASS | PASS |
+| am_270b3483d5 | fail | fail | **PASS** | **PASS** |
+| am_12b43fa38e | fail | fail | fail | fail |
+| am_b84c9294aa | fail | fail | fail | fail |
+| am_1e7cb3da16 | fail | fail | fail | fail |
+| am_e1af40a0f5 | PASS | PASS | PASS | (void, Finding 11) |
+
+The closest differentiator is `am_270b3483d5`: aimee and ponytail-addon pass,
+plain codex and ponytail-instructions fail. Real, and NOT aimee-only.
+
+## Finding 13 — two candidate tasks built, selected for structure not outcome
+
+Tasks derive from real fix commits (`am_` + first 10 hex of the SHA), so adding
+one is reproducible: corpus checkout at the commit's PARENT, upstream test files
+injected at grade time, the non-test diff as reference patch, and a ticket to the
+same standard as the others (observed failure plus diagnosis, no file names).
+
+**`am_edb3594485`** — already had a hidden test and reference patch and no
+ticket; ticket written, now running. Chosen because SYMPTOM and CAUSE are in
+different files with no shared literal: the operator-visible warning is emitted
+in `src/posix/agent_runtime.c`, the defect is in `src/server/agent_bridge.c`
+(streamed `function_call` items collected then discarded). Grepping the message
+lands in the file that PRINTS it, not the file that must change.
+
+**`am_4aec72896d`** — built tonight from `4aec72896d24`, "close-on-exec accepted
+sockets". Chosen because the fix requires recognising the SAME defect class in a
+second, independent service: aimee-kb's mTLS listener had it, its plaintext
+sibling was already correct. Symptom (`aimee workspace add` hanging 28 minutes)
+is remote from cause (fd inheritance across fork). Its upstream commit also adds
+the make rule for its test binary, so the graded test APPENDS that rule rather
+than substituting the file. **Not yet validated red→green.**
+
+Selection was on structure — cause/symptom distance, second-site discovery —
+decided before any arm ran. Whether either separates the arms is open, and a task
+selected because aimee wins would measure what aimee is FOR, not that it is
+better. The article must state the selection rule either way.
+
+## Methodology traps hit in this work
+
+Record these; several produced wrong published numbers first.
+
+1. **Template staleness voided an entire A/B series.** `prepare_templates()` gated
+   on `provenance.json` merely existing, so templates built at 09:50 were served
+   to every later cell despite four CLI installs. The A/B guidance results
+   (72.8 → 39.8 → 29.6 credits) are **void**. The harness had been emitting
+   `"aimee version moved after preparation"` for hours; it was dismissed as noise.
+   Fix compares `pinned.get("client_sha256")` against the installed binary.
+   *Verify the stack under test before trusting any delta.*
+
+2. **Mismatched task sets across arms.** Two aimee cells were still in flight and
+   recorded zero usage. Dropping them from aimee alone while leaving them in
+   baseline compared different task sets and produced a fake 0.62×. A task must be
+   dropped from **every** arm or none.
+
+3. **In-flight cells look like broken cells.** `am_312e901904` showed 5 calls and
+   0 tokens, then 28 calls and 0 tokens. Usage lands at completion. Check call
+   count movement before calling a cell broken.
+
+4. **`am_12b43fa38e`'s ticket was truncated mid-enumeration** (165 chars, ending on
+   a colon that promised two bugs and named neither). Every arm found the right
+   files and failed the graded test — a spec gap, not a capability gap. Repaired to
+   633 chars from the reference patch, at the same level of detail as the other
+   seven tickets. **Cells run before and after the repair are not comparable, in
+   any arm.**
+
+5. **A re-measurement that silently returned the OLD numbers.** `run_cell()`
+   skips any cell whose `complete.json` exists at the current artifact schema and
+   reports `{"status": "skipped"}`. A re-run launched without `--force` therefore
+   completed in seconds and printed a per-arm summary block that looks exactly
+   like a fresh result (`credits: 120.35`) but is the aggregate of the PRIOR
+   cells. Always pass `--force` when re-measuring, and confirm the raw
+   transcript's mtime moved before reading any number from it.
+
+6. **`pgrep -f <pattern>` matches the watcher that contains the pattern.** A
+   background `until ! pgrep -f codex_matrix_runner` loop matches its own command
+   line and never exits, making a finished run look like a running one for
+   45 minutes. Use a bracket class (`pgrep -af "[c]odex_matrix_runner"`). Also
+   note `pgrep` without `-f` matches only the process NAME -- for `python3
+   codex_matrix_runner.py` that is `python3`, so `pgrep -c codex` returns 0 and
+   means nothing.
+
+7. **Instrumentation bug, unresolved.** `seq.py` reads tool output from
+   `aggregated_output` / `output`, which is absent on `mcp_tool_call` items, so it
+   reports 0 characters for every MCP call. An earlier script measuring
+   `len(json.dumps(item))` found mean 2,545 chars, max 12,201. **Do not cite MCP
+   result sizes from the call-sequence dump.**
+
+## Caveats for anything published from this
+
+- 6 of 8 tasks, **one replicate**, no confidence intervals. Per-task spread is
+  2.61× to 0.84×.
+- Control arms are from an earlier run than the aimee arm. Valid because controls
+  do not exercise aimee, but it is not a simultaneous comparison.
+- USD rests on the published Sol card; credits and all ratios are card-independent.
+- Finding 7's fixes are **built and unit-tested, not yet benchmarked**.

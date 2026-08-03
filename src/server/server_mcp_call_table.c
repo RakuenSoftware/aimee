@@ -1167,6 +1167,10 @@ static cJSON *mcph_index_hybrid(struct mcp_call *c)
    return code_graph_passthrough(json, status, "index_hybrid");
 }
 
+/* Defined with the span handler below; investigate reads bounded windows through
+ * the same containment-checked resolver rather than duplicating the walk. */
+static int code_span_resolve_root(const char *project, char *out, size_t out_len);
+
 /* index command=investigate -- the bounded task packet (/v1/code/context).
  *
  * This existed as a route and a client call, wired ONLY as automatic
