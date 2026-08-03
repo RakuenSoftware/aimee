@@ -16,6 +16,8 @@
 #
 # Order is the operator's: the E2B Q4-vs-Q6 pair first, because that is the
 # decision waiting on evidence.
+# CT 140 is SHARED. Never `pkill -f llama-server` here: it kills every
+# server in the container, including other sessions'. Kill by port.
 set -u
 cd "$(dirname "$0")/.." || exit 1
 GOLD=${GOLD:?set GOLD}
@@ -40,7 +42,7 @@ while IFS='|' read -r label repo draft; do
   if [ -s "$pred" ] && [ "$(wc -l < "$pred")" -ge "$EXPECT" ]; then say "SKIP $label"; continue; fi
 
   say "SERVE $label  ($repo)"
-  ssh -n -o ConnectTimeout=20 root@"$HOST" "pct exec 140 -- pkill -f llama-server" >/dev/null 2>&1 || true
+  ssh -n -o ConnectTimeout=20 root@"$HOST" "pct exec 140 -- bash -lc 'for p in $(seq 8100 8420); do pkill -f \"port $p \" 2>/dev/null; done; true'" >/dev/null 2>&1 || true
   sleep 5
   ssh -n -o ConnectTimeout=25 root@"$HOST" \
     "pct exec 140 -- bash -lc 'HF_HOME=/opt/hf nohup setsid /opt/llama.cpp/build-cuda/bin/llama-server -hf $repo -hfd $draft --host 0.0.0.0 --port $PORT -c 8192 --no-webui --no-mmproj -ngl 99 > /opt/tierA/ladder-$label.log 2>&1 </dev/null &'" >/dev/null 2>&1

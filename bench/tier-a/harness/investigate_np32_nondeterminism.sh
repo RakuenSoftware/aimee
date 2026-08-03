@@ -19,6 +19,8 @@
 #
 # Each config runs the SAME notes twice from a FRESH server and is judged only on
 # whether it agrees with ITSELF. Identity with sequential is not the question.
+# CT 140 is SHARED. Never `pkill -f llama-server` here: it kills every
+# server in the container, including other sessions'. Kill by port.
 set -u
 cd "$(dirname "$0")/.." || exit 1
 GOLD=${GOLD:?set GOLD}
@@ -34,7 +36,7 @@ head -n "$N" "$GOLD" > "$OUT/.rc_slice.jsonl"
 trial() {
   local label="$1" flags="$2" conc="$3"
   for pass in 1 2; do
-    ssh -n -o ConnectTimeout=20 root@"$HOST" "pct exec 140 -- pkill -f llama-server" >/dev/null 2>&1 || true
+    ssh -n -o ConnectTimeout=20 root@"$HOST" "pct exec 140 -- bash -lc 'for p in $(seq 8100 8420); do pkill -f \"port $p \" 2>/dev/null; done; true'" >/dev/null 2>&1 || true
     sleep 5
     ssh -n -o ConnectTimeout=25 root@"$HOST" \
       "pct exec 140 -- bash -lc 'HF_HOME=/opt/hf nohup setsid /opt/llama.cpp/build-cuda/bin/llama-server -hf $REPO --host 0.0.0.0 --port $PORT $flags --no-webui --no-mmproj -ngl 99 >/dev/null 2>&1 </dev/null &'" >/dev/null 2>&1

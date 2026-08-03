@@ -30,11 +30,27 @@ OUT=${OUT:?set OUT}
 N=${N:-60}
 REPEATS=${REPEATS:-3}
 HOST=admin@192.168.1.254
-IP=192.168.1.254
+IP=127.0.0.1   # reached through the ssh forward below
 BIN=/mnt/media/tierbench/bin/llama-b10210/llama-server
 PORT=8120
 REPO=unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL
 DRAFT=unsloth/gemma-4-E4B-it-GGUF
+
+# .254 firewalls its serving ports off-host: ssh is reachable, 8119/8120 are not,
+# and the earlier sweep failed every trial because the health check curled the LAN
+# address from this machine. Forward the port instead, the way overnight_10k.sh
+# already does for this host.
+tunnel() {
+  pkill -f "ssh -N -L $PORT:" 2>/dev/null; sleep 1
+  setsid nohup ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 \
+    -L "$PORT:127.0.0.1:$PORT" "$HOST" >/dev/null 2>&1 </dev/null &
+  for _ in $(seq 1 15); do
+    curl -sf --max-time 4 "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && return 0
+    sleep 2
+  done
+  return 1
+}
+
 say() { echo "[$(date -u +%H:%M:%SZ)] $*" | tee -a "$OUT/mtp_matrix_xtx.log"; }
 
 say "waiting for the XTX determinism sweep to finish"
@@ -57,7 +73,8 @@ cell() {
       "HF_HOME=/mnt/media/tierbench/hf nohup setsid $BIN -hf $REPO $spec_arg --host 0.0.0.0 --port $PORT -c $ctx -np $slots --device Vulkan1 --no-webui --no-mmproj -ngl 99 > /tmp/mx-$label-$r.log 2>&1 </dev/null &" >/dev/null 2>&1
     local ok=0
     for _ in $(seq 1 120); do
-      curl -sf --max-time 5 "http://$IP:$PORT/health" >/dev/null 2>&1 && { ok=1; break; }
+      ssh -n -o ConnectTimeout=10 "$HOST" "curl -sf --max-time 5 http://127.0.0.1:$PORT/health" >/dev/null 2>&1 \
+        && { tunnel && ok=1; break; }
       sleep 15
     done
     [ "$ok" = 1 ] || { say "  $label r$r: never healthy"; continue; }

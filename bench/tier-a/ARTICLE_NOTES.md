@@ -518,3 +518,65 @@ informative than growing n.
 
 Q4 E2B + Q6 E4B is the pairing: the memory saved on the small model is spent
 where the same quant step buys more than twice as much.
+
+---
+
+## 16. The measurement that never ran
+
+The sharded runner auto-sizes its process count by starting one server and
+reading resident VRAM. On the 5080 it does. On the XTX it never has: the host
+drives the card through Vulkan and has no ROCm tooling installed, so
+
+    ssh admin@192.168.1.254 rocm-smi --showmeminfo vram
+    bash: rocm-smi: command not found
+
+Every XTX arm logged the result faithfully and nobody read it:
+
+    [21:04:01Z]   one instance uses  MiB of 24560 MiB
+    [21:04:01Z]   -> running 3 processes
+
+`uses  MiB` -- an empty string where a number belongs, in every arm, all night.
+The `2>/dev/null` on the probe swallowed the error, the empty value failed the
+`-gt 0` test, and the script took its silent fallback. The shard counts in the
+sizing script's output were reported as measured and were nothing of the kind.
+
+Worth writing about because the failure is not the missing tool. It is that the
+script had a fallback for "could not measure" and used it without ever making
+the operator confront it, so a guess wore a measurement's clothes for an entire
+night of runs. The number happened to be survivable. The next one might not be.
+
+Fix applied: probe guarded by `command -v`, and the fallback now says the shard
+count is a guess in the words "This arm's shard count is a GUESS."
+
+## 17. Two sessions, one GPU, mutual assured destruction
+
+Every arm in the sharded harness opened with
+
+    pct exec 140 -- pkill -f llama-server
+
+CT 140 turned out to be shared. Another session was serving
+`gemma-4-E4B-it-UD-Q6_K_XL` on port 8099 throughout, and each of our arms killed
+it on startup. Symmetrically, our E2B Q4 arm died mid-run and produced a
+10,000-row prediction file in which 9,725 rows were transport errors -- the row
+count said complete, and only the errored-row gate caught it.
+
+The bug is `-f llama-server` matching on process name in a namespace we do not
+own. Killing by port touches only what we started. Both scripts now do.
+
+This is the concrete version of an abstract benchmarking rule: an exclusive
+resource you did not verify is exclusive is a shared resource. Nothing in the
+harness asserted the GPU was ours, and nothing detected that it wasn't -- the
+evidence arrived as an unexplained collapse in an unrelated arm.
+
+## 18. What the 10k ladder actually cost
+
+Banked clean, corpus v5, 10,000 notes, 3 isolated MTP servers each:
+
+| arm | strict F1 | wall |
+|---|---:|---:|
+| E4B UD-Q4_K_XL | 0.6324 | 172m |
+| E4B UD-Q6_K_XL | 0.6450 | 164m |
+
+The Q6 > Q4 direction on E4B holds at 10k, now the 9th replication of that sign.
+Remaining arms (E4B Q8, E2B Q4/Q6/Q8) re-run on the XTX alone after the
+container was surrendered.

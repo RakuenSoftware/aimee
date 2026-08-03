@@ -32,10 +32,26 @@ GOLD=${GOLD:?set GOLD}
 OUT=${OUT:?set OUT}
 N=${N:-60}
 HOST=admin@192.168.1.254
-IP=192.168.1.254
+IP=127.0.0.1   # reached through the ssh forward below
 BIN=/mnt/media/tierbench/bin/llama-b10210/llama-server
 MODEL=/mnt/media/storage/models/gguf/gemma-4-E4B-it-UD-Q4_K_XL.gguf
 PORT=8119
+
+# .254 firewalls its serving ports off-host: ssh is reachable, 8119/8120 are not,
+# and the earlier sweep failed every trial because the health check curled the LAN
+# address from this machine. Forward the port instead, the way overnight_10k.sh
+# already does for this host.
+tunnel() {
+  pkill -f "ssh -N -L $PORT:" 2>/dev/null; sleep 1
+  setsid nohup ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 \
+    -L "$PORT:127.0.0.1:$PORT" "$HOST" >/dev/null 2>&1 </dev/null &
+  for _ in $(seq 1 15); do
+    curl -sf --max-time 4 "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && return 0
+    sleep 2
+  done
+  return 1
+}
+
 say() { echo "[$(date -u +%H:%M:%SZ)] $*" | tee -a "$OUT/np32_xtx.log"; }
 
 head -n "$N" "$GOLD" > "$OUT/.xtx_slice.jsonl"
@@ -50,7 +66,8 @@ trial() {
       "HF_HOME=/mnt/media/tierbench/hf nohup setsid $BIN -m $MODEL --host 0.0.0.0 --port $PORT $flags --device Vulkan1 --no-webui --no-mmproj -ngl 99 > /tmp/xtx-$label-$pass.log 2>&1 </dev/null &" >/dev/null 2>&1
     local ok=0
     for _ in $(seq 1 90); do
-      curl -sf --max-time 5 "http://$IP:$PORT/health" >/dev/null 2>&1 && { ok=1; break; }
+      ssh -n -o ConnectTimeout=10 "$HOST" "curl -sf --max-time 5 http://127.0.0.1:$PORT/health" >/dev/null 2>&1 \
+        && { tunnel && ok=1; break; }
       sleep 10
     done
     if [ "$ok" != 1 ]; then say "  $label pass $pass: never healthy"; return; fi
