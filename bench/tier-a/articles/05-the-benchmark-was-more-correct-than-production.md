@@ -8,12 +8,20 @@ We built a benchmark to rank extraction models. It ranked them. It also turned
 out to encode a specification of how a knowledge graph should behave, and that
 specification disagreed with the system we were actually running.
 
-Every disagreement we chased, the benchmark was right and production was wrong.
+On most of the disagreements we chased, the benchmark was right and production
+was wrong.
 
 That is not a happy accident. A benchmark's scorer has to decide when two answers
 mean the same thing, and those decisions are a design document nobody thinks to
 review. Ours had been accumulating good decisions for months while the production
 path had not.
+
+One section below breaks the pattern, and it is the one worth reading closely.
+On the ontology, both sides were wrong in different directions: production
+defined too few relations, and the gold set was not self-consistent either,
+using `owns` and `owns_account` for the same meaning. "The benchmark is the
+better specification" is a useful prior, not a rule, and the way you find out
+which case you are in is by diffing them.
 
 ## Three names for one entity
 
