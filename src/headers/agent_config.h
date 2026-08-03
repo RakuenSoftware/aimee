@@ -22,6 +22,12 @@ int agent_save_config_after_removal(const agent_config_t *cfg);
  * (over-long or non-identifier) names out of agents.json and the model list.
  * Returns 1 if valid, 0 otherwise. */
 int agent_name_valid(const char *name);
+
+/* Reject an endpoint that is really a mis-parsed flag (leading '-'). `agent add`'s
+ * first three arguments are positional, so a flag in the endpoint slot used to be
+ * stored as the address and only surfaced at `agent probe`. Narrow on purpose: a
+ * scheme requirement would reject host:port forms this command has always taken. */
+int agent_endpoint_valid(const char *endpoint);
 const char *agent_config_path(void);
 agent_t *agent_route(agent_config_t *cfg, const char *role);
 agent_t *agent_route_at_tier(agent_config_t *cfg, const char *role, int tier);
@@ -39,8 +45,8 @@ typedef struct
 void agent_route_policy_current(agent_route_policy_t *out);
 
 agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role,
-                               const agent_route_policy_t *sys_cfg,
-                               unsigned required_caps, int min_context);
+                               const agent_route_policy_t *sys_cfg, unsigned required_caps,
+                               int min_context);
 
 /* Same, but for a packet of a declared SCOPE. An agent whose max_scope ceiling is
  * below the packet's scope is excluded, and unlike min_context that exclusion is
