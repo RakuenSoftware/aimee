@@ -100,9 +100,9 @@ check_archive() {
 }
 
 check_archive src/build/obj/libaimee-core-connection.a \
-   '^(auth|control|endpoint|http1|socket|tls_openssl)\.o$' connection
+   '^(auth|control|endpoint|http1|socket|tls_openssl|native_tls_(identity|path|openssl|securetransport|schannel))\.o$' connection
 check_archive src/build/obj/libaimee-core-event-bus.a \
-   '^bus_(attach|wire|ring|region|region_host|arena|route|host|client|capture|endpoint)\.o$' event-bus
+   '^bus_(attach|wire|ring|region|region_host|arena|route|runtime|host|client|capture|endpoint)\.o$' event-bus
 
 # The separately packaged module-side archive must remain a client. In
 # particular it cannot create memfds, admit peers, or route events.

@@ -23,8 +23,10 @@ The public headers live under `src/core/connection/include/aimee/core/connection
 - `tls_openssl.h` owns the OpenSSL client/server context floor and in-memory PEM
   identity/trust loading used by Linux builds, plus client SNI/name
   verification, handshake, complete writes, reads, and session teardown.
-  Platform-native macOS/Windows thin-client backends remain behind
-  `aimee_tls.h`; their TCP and HTTP framing still use this connection library.
+- `native_tls.h` owns the common native client API, profile-aware certificate
+  path resolution, client identity validation, and its platform backends:
+  OpenSSL on Linux, Secure Transport on macOS, and Schannel on Windows.
+  `aimee_tls.h` is now only a source-compatibility include for this core API.
 
 The server-to-KB mTLS client, server-to-KB invalidation WebSocket, ordinary
 thin-client API client, POSIX thin-client HTTP path, and Windows thin-client
@@ -39,3 +41,8 @@ library; they are not transport implementations.
 
 The event bus is deliberately separate. It is not a network transport and is
 not linked into the thin client.
+
+The independently installable package is versioned by `src/core/VERSION` and
+exports CMake targets under `aimee::`. Consumers require `0.1.0` exactly. The
+monorepo can consume an installed copy with `-DAIMEE_USE_INSTALLED_CORE=ON` or
+`AIMEE_CORE_PREFIX=/absolute/prefix`; both paths reject a version mismatch.

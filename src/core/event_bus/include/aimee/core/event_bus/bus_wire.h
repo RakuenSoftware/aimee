@@ -69,6 +69,7 @@
 #define BUS_KIND_OVERFLOW          5u
 #define BUS_KIND_PRODUCER_REAPED   6u
 #define BUS_KIND_EPOCH_CHANGE      7u
+#define BUS_KIND_CAPABILITY_DENIED 8u
 #define BUS_KIND_MODULE_BASE       256u
 
 /* Decoded frame. Field order here follows the wire layout so the two read
@@ -85,7 +86,7 @@ typedef struct
    uint64_t logical_ts;  /* ordering across sources without wall-clock trust */
    uint64_t payload_ref; /* INLINE: in-slot offset. ARENA (v2): the lease id. */
    uint32_t payload_len;
-   uint32_t src_handle; /* set by the client */
+   uint32_t src_handle; /* overwritten by the host from the admitted slot */
    uint32_t dst_handle; /* set by the host on routing */
    uint32_t generation; /* v2: ARENA lease generation (0 otherwise) — gates read/release */
 } bus_frame_t;

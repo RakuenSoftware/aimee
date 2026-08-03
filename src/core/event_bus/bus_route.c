@@ -119,6 +119,36 @@ bus_host_result_t bus_host_serve_kind(bus_host_t *h, uint32_t slot, uint32_t eve
    return BUS_HOST_OK;
 }
 
+bus_host_result_t bus_host_enforce_grants(bus_host_t *h, uint32_t slot)
+{
+   if (!h || slot >= h->cfg.max_slots || !h->slots[slot].in_use)
+      return BUS_HOST_ERR_ARG;
+   h->slots[slot].enforce_grants = 1;
+   return BUS_HOST_OK;
+}
+
+bus_host_result_t bus_host_grant_outbound(bus_host_t *h, uint32_t slot, uint32_t event_kind,
+                                          uint8_t patterns)
+{
+   if (!h || slot >= h->cfg.max_slots || !h->slots[slot].in_use ||
+       (patterns & ~(BUS_GRANT_NOTIFY | BUS_GRANT_REQUEST)) != 0 || patterns == 0 ||
+       event_kind < BUS_KIND_MODULE_BASE)
+      return BUS_HOST_ERR_ARG;
+   bus_slot_t *s = &h->slots[slot];
+   for (uint32_t i = 0; i < s->grant_count; i++)
+      if (s->grants[i].kind == event_kind)
+      {
+         s->grants[i].patterns |= patterns;
+         return BUS_HOST_OK;
+      }
+   if (s->grant_count >= BUS_HOST_MAX_GRANTS)
+      return BUS_HOST_ERR_ARG;
+   s->grants[s->grant_count].kind = event_kind;
+   s->grants[s->grant_count].patterns = patterns;
+   s->grant_count++;
+   return BUS_HOST_OK;
+}
+
 bus_host_result_t bus_host_set_kind_policy(bus_host_t *h, uint32_t event_kind,
                                            bus_kind_policy_t policy)
 {
@@ -254,6 +284,23 @@ static bus_pending_t *pending_find(bus_host_t *h, uint64_t corr)
 }
 
 /* ---- routing ---- */
+
+static int slot_allows_fresh(const bus_slot_t *slot, const bus_frame_t *frame)
+{
+   if (!slot->enforce_grants)
+      return 1;
+   uint8_t wanted = 0;
+   if (frame->hdr_flags & BUS_F_NOTIFICATION)
+      wanted = BUS_GRANT_NOTIFY;
+   else if (frame->hdr_flags & BUS_F_REQUEST)
+      wanted = BUS_GRANT_REQUEST;
+   else
+      return 1; /* replies/cancels are bound to a pending request below */
+   for (uint32_t i = 0; i < slot->grant_count; i++)
+      if (slot->grants[i].kind == frame->event_kind && (slot->grants[i].patterns & wanted))
+         return 1;
+   return 0;
+}
 
 /* Route a notification to observers. Returns 1 if fully resolved (may commit the
  * source), 0 if a BLOCK-policy destination was full and the event must stay at
@@ -631,6 +678,19 @@ uint32_t bus_host_pump(bus_host_t *h)
             continue;
          }
 
+         /* A client-supplied src/principal is never authority. Stamp both from
+          * the admitted slot, then reject an undeclared fresh output before it
+          * reaches the governance tap or any observer. */
+         f.src_handle = s;
+         f.principal_ref = slot->principal_ref;
+         if (!slot_allows_fresh(slot, &f))
+         {
+            slot->dropped++;
+            emit_control(h, (int)s, BUS_KIND_CAPABILITY_DENIED, f.correlation_id, NULL, 0);
+            bus_ring_consume_commit(&slot->qpair.outbound);
+            continue;
+         }
+
          const uint8_t *inl = NULL;
          if ((f.hdr_flags & BUS_F_INLINE) && f.payload_len > 0 &&
              (uint64_t)f.payload_ref + f.payload_len <= h->cfg.slot_size)
@@ -641,13 +701,11 @@ uint32_t bus_host_pump(bus_host_t *h)
          {
             /* Same head event as last pump: reuse its seq, do not re-tap. */
             f.seq = slot->blocked_seq;
-            f.src_handle = s;
             done = route_fresh(h, s, &f, inl, slot->blocked_delivered, 0);
          }
          else
          {
             f.seq = ++h->seq;
-            f.src_handle = s;
             if (h->tap)
             {
                const uint8_t *tap_payload = inl;

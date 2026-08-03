@@ -19,9 +19,9 @@
  *   - the opaque handle owns the TLS state; aimee_tls_free does NOT close the fd.
  */
 #define __STDC_WANT_LIB_EXT1__ 1 /* expose memset_s for a non-elidable key wipe */
-#include "aimee_tls.h"
-#include "aimee_home.h"
-#include "platform_net.h"
+#include <aimee/core/connection/native_tls.h>
+#include <aimee/core/connection/socket.h>
+#include "native_tls_internal.h"
 
 #include <CommonCrypto/CommonDigest.h>
 #include <CoreFoundation/CoreFoundation.h>
@@ -115,7 +115,7 @@ static OSStatus st_write(SSLConnectionRef conn, const void *data, size_t *len)
 static CFArrayRef securetransport_load_client_identity(SecKeychainRef *out_kc)
 {
    *out_kc = NULL;
-   const char *home = aimee_home();
+   const char *home = aimee_core_native_tls_home();
    if (!home || !*home)
       return NULL;
    char path[700];
@@ -221,7 +221,7 @@ static CFArrayRef securetransport_load_client_identity(SecKeychainRef *out_kc)
  * else 0. Mirrors pinned_ca_path() in the OpenSSL backend (aimee_tls.c). */
 static int pinned_ca_path(char *out, size_t n)
 {
-   const char *home = aimee_home();
+   const char *home = aimee_core_native_tls_home();
    if (!home || !*home || !out || n == 0)
       return 0;
    snprintf(out, n, "%s/remote-ca.pem", home);
@@ -613,14 +613,14 @@ int aimee_tls_fetch_peer_cert(const char *host, const char *port, char **pem_out
    if (!host || !*host || !port || !*port || !pem_out)
       return -1;
 
-   int fd = platform_net_connect(host, port, 10000);
+   int fd = aimee_core_socket_connect(host, port, 10000);
    if (fd < 0)
       return -1;
 
    SSLContextRef ctx = SSLCreateContext(NULL, kSSLClientSide, kSSLStreamType);
    if (!ctx)
    {
-      platform_net_close(fd);
+      aimee_core_socket_close(fd);
       return -1;
    }
 
@@ -679,7 +679,7 @@ int aimee_tls_fetch_peer_cert(const char *host, const char *port, char **pem_out
    }
 
    CFRelease(ctx);
-   platform_net_close(fd); /* the SSLConnectionRef does not own the fd */
+   aimee_core_socket_close(fd); /* the SSLConnectionRef does not own the fd */
    return rc;
 }
 

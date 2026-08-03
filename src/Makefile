@@ -391,20 +391,43 @@ DATA_OBJS = $(DATA_SRCS:%.c=$(OBJDIR)/%.o)
 # Every networked C product links libaimee-core-connection. The event bus is a
 # separate local shared-memory facility linked only by aimee-server and
 # aimee-kb; it never provides transport between machines.
+export AIMEE_CORE_REQUIRED_VERSION := 0.1.0
+AIMEE_CORE_PREFIX ?=
+ifneq ($(strip $(AIMEE_CORE_PREFIX)),)
+AIMEE_CORE_INSTALLED_VERSION := $(strip $(shell sed -n '1p' "$(AIMEE_CORE_PREFIX)/lib/cmake/aimee-core/VERSION" 2>/dev/null))
+ifneq ($(AIMEE_CORE_INSTALLED_VERSION),$(AIMEE_CORE_REQUIRED_VERSION))
+$(error AIMEE_CORE_PREFIX has version '$(AIMEE_CORE_INSTALLED_VERSION)', expected '$(AIMEE_CORE_REQUIRED_VERSION)')
+endif
+C_FLAGS += -I$(AIMEE_CORE_PREFIX)/include
+CORE_CONNECTION_SRCS =
+CORE_CONNECTION_OBJS =
+CORE_CONNECTION_LIB = $(AIMEE_CORE_PREFIX)/lib/libaimee-core-connection.a
+CORE_EVENT_BUS_SRCS =
+CORE_EVENT_BUS_OBJS =
+CORE_EVENT_BUS_LIB = $(AIMEE_CORE_PREFIX)/lib/libaimee-core-event-bus.a
+else
 CORE_CONNECTION_SRCS = core/connection/auth.c core/connection/control.c \
                   core/connection/endpoint.c core/connection/http1.c \
                   core/connection/socket.c
 ifneq ($(OS),Windows_NT)
 CORE_CONNECTION_SRCS += core/connection/tls_openssl.c
 endif
+ifeq ($(WITH_TLS),1)
+CORE_CONNECTION_SRCS += core/connection/native_tls_identity.c core/connection/native_tls_path.c
+ifeq ($(OS),Windows_NT)
+CORE_CONNECTION_SRCS += core/connection/native_tls_schannel.c
+else ifeq ($(shell uname -s),Darwin)
+CORE_CONNECTION_SRCS += core/connection/native_tls_securetransport.c
+else
+CORE_CONNECTION_SRCS += core/connection/native_tls_openssl.c
+endif
+endif
 CORE_CONNECTION_OBJS = $(CORE_CONNECTION_SRCS:%.c=$(OBJDIR)/%.o)
 CORE_CONNECTION_LIB = $(OBJDIR)/libaimee-core-connection.a
 
-CORE_EVENT_BUS_SRCS = core/event_bus/bus_attach.c core/event_bus/bus_wire.c core/event_bus/bus_ring.c core/event_bus/bus_region.c core/event_bus/bus_region_host.c core/event_bus/bus_arena.c core/event_bus/bus_route.c core/event_bus/bus_host.c core/event_bus/bus_client.c core/event_bus/bus_capture.c core/event_bus/bus_endpoint.c
+CORE_EVENT_BUS_SRCS = core/event_bus/bus_attach.c core/event_bus/bus_wire.c core/event_bus/bus_ring.c core/event_bus/bus_region.c core/event_bus/bus_region_host.c core/event_bus/bus_arena.c core/event_bus/bus_route.c core/event_bus/bus_runtime.c core/event_bus/bus_host.c core/event_bus/bus_client.c core/event_bus/bus_capture.c core/event_bus/bus_endpoint.c
 CORE_EVENT_BUS_OBJS = $(CORE_EVENT_BUS_SRCS:%.c=$(OBJDIR)/%.o)
 CORE_EVENT_BUS_LIB = $(OBJDIR)/libaimee-core-event-bus.a
-OBS_BUS_RUNTIME_OBJ = $(OBJDIR)/modules/audit/obs_bus.o
-AUDIT_REPLAY_OBJ = $(OBJDIR)/modules/audit/audit_replay.o
 
 $(CORE_CONNECTION_LIB): $(CORE_CONNECTION_OBJS)
 	@mkdir -p $(dir $@)
@@ -413,6 +436,9 @@ $(CORE_CONNECTION_LIB): $(CORE_CONNECTION_OBJS)
 $(CORE_EVENT_BUS_LIB): $(CORE_EVENT_BUS_OBJS)
 	@mkdir -p $(dir $@)
 	$(AR) rcs $@ $^
+endif
+OBS_BUS_RUNTIME_OBJ = $(OBJDIR)/modules/audit/obs_bus.o
+AUDIT_REPLAY_OBJ = $(OBJDIR)/modules/audit/audit_replay.o
 
 $(OBJDIR)/core/event_bus/%.o: C_FLAGS += -Icore/event_bus/include
 $(OBJDIR)/modules/audit/obs_bus.o: C_FLAGS += -Icore/event_bus/include
@@ -458,12 +484,6 @@ cmd-srcs-compile-check: $(CMD_OBJS) $(ORPHAN_OBJS)
 
 # --- Pure client (aimee) ---
 CLI_SRCS = cli_kb_smoke.c cli_v1_routes.c cli_v1_routes_d.c cli_v1_routes_c.c cli_v1_routes_b.c cli_main.c cli_agent_setup.c cli_session_start.c session_degraded_notice.c cmd_self_update.c self_update_util.c harness_memory_common.c harness_memory_scope.c harness_memory_audit.c harness_memory_spill.c cli_attention_guard.c cli_code_audit.c cli_css.c cli_chat_stream.c cli_client.c cli_launch.c cli_mcp_serve.c cli_profile.c client_integrations.c modules/delegates/delegate_plan.c cmd_profile.c cmd_manuscript.c cmd_optimize.c cli_persona.c cli_roles.c manuscript.c http_uds_client.c aimee_client.c cli_remote.c modules/protocols/acp/acp_server.c modules/workspace/cli_workspace_serve.c cli_agent_keys.c cmd_workflow.c
-ifeq ($(WITH_TLS),1)
-CLI_SRCS += aimee_tls.c
-TLS_OBJS = $(OBJDIR)/aimee_tls.o
-else
-TLS_OBJS =
-endif
 CLI_SRCS += http_content_encoding.c
 CLI_OBJS = $(CLI_SRCS:%.c=$(OBJDIR)/%.o)
 CLIENT_PLATFORM_OBJS = $(filter %/platform_ipc.o %/platform_net.o %/platform_path.o %/platform_process.o %/history.o %/cli_client.o %/cli_main.o,$(PLATFORM_OBJS))

@@ -31,6 +31,19 @@
 /* A directory slot — host-private. A client never sees this or any other slot. */
 #define BUS_HOST_MAX_KINDS   256
 #define BUS_HOST_MAX_PENDING 1024
+#define BUS_HOST_MAX_GRANTS  256
+
+/* Outbound patterns authorized for an externally admitted slot. Replies and
+ * cancellation are authorized from the host's pending-correlation table; only
+ * fresh notifications and requests need manifest grants. */
+#define BUS_GRANT_NOTIFY 0x01u
+#define BUS_GRANT_REQUEST 0x02u
+
+typedef struct
+{
+   uint32_t kind;
+   uint8_t patterns;
+} bus_slot_grant_t;
 
 /* The governance/audit tap: invoked once per event, after seq stamping and
  * before any routing decision (D6). It is the single full-stream observer; a
@@ -48,6 +61,9 @@ typedef struct
    uint64_t last_heartbeat;   /* last client_heartbeat value the host observed */
    uint64_t heartbeat_at;     /* host clock when it last advanced */
    uint64_t dropped;          /* malformed/undeliverable events, counted not silent */
+   int enforce_grants;        /* external slot: fail closed on undeclared output */
+   uint32_t grant_count;
+   bus_slot_grant_t grants[BUS_HOST_MAX_GRANTS];
 
    /* Block-policy backpressure: a destination-full event is left at this
     * producer's outbound ring head (uncommitted) and retried next pump. It is
@@ -158,6 +174,10 @@ typedef enum
 bus_host_result_t bus_host_create(bus_host_t *h, const bus_host_config_t *cfg, bus_admit_fn admit,
                                   void *admit_ctx);
 
+/* Install or replace admission policy before accepting external clients. The
+ * trusted in-process bootstrap attaches before this seam is installed. */
+void bus_host_set_admission(bus_host_t *h, bus_admit_fn admit, void *admit_ctx);
+
 /* Tear down: unmap and close every region and slot. */
 void bus_host_destroy(bus_host_t *h);
 
@@ -206,6 +226,14 @@ bus_host_result_t bus_host_subscribe(bus_host_t *h, uint32_t slot, uint32_t even
 /* Register `slot` as the single server for `event_kind` (its requests). A second
  * server for the same kind is refused. */
 bus_host_result_t bus_host_serve_kind(bus_host_t *h, uint32_t slot, uint32_t event_kind);
+
+/* Mark an admitted slot as manifest-governed, then grant the fresh outbound
+ * patterns it declared. A governed slot with no matching grant cannot inject
+ * that notification/request kind. Trusted in-process socketpair clients remain
+ * unrestricted unless explicitly marked. */
+bus_host_result_t bus_host_enforce_grants(bus_host_t *h, uint32_t slot);
+bus_host_result_t bus_host_grant_outbound(bus_host_t *h, uint32_t slot, uint32_t event_kind,
+                                          uint8_t patterns);
 
 /* Set a kind's overflow policy. Default is BUS_KIND_BLOCK. */
 bus_host_result_t bus_host_set_kind_policy(bus_host_t *h, uint32_t event_kind,

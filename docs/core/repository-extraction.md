@@ -1,0 +1,28 @@
+# C core and module repository extraction
+
+The independently maintained source boundary is materialized with:
+
+```sh
+python3 scripts/export_c_repositories.py \
+  --output-root /home/virant/dev/aimee-module-repositories
+```
+
+The command refuses to overwrite an existing output directory. It creates one
+`aimee-core-c` Git repository and one `aimee-module-<id>` Git repository for
+every required and optional canonical module. Each repository receives an
+`origin` URL under `RakuenSoftware`, an initial `v0.1.0` tag, and an exact commit
+pin. It does not push or create remote repositories.
+
+The core repository is a standalone installable CMake package. Every module
+repository preserves its descriptor-owned sources, headers, tests, and docs,
+and builds a separate Linux process against only the host-free event-bus client
+target. Its generated grant is executable/UID/principal-bound and starts with no
+event capabilities; capabilities are added only with the corresponding stable
+event schema.
+
+`dependencies/aimee-repositories.lock.json` records repository URLs, semantic
+versions, exact commits, stable principal identities, and source digests.
+`python3 scripts/check_c_repository_lock.py` fails when a vendored core/module
+mirror drifts from its external repository pin. The vendored mirrors remain in
+the main repository during behavioral migration so existing builds do not
+silently switch implementations.

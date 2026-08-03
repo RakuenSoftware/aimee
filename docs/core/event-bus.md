@@ -47,11 +47,22 @@ path and the module uses only its mappings. Admission and event-kind grants are
 daemon policy injected into the core host.
 
 External module repositories consume the host-free
-`aimee-core-event-bus-client` target. The server or KB module launcher owns the
-listener lifecycle and authenticates the process before translating its opaque
-principal into attach policy; the core does not expose an unauthenticated
-default socket. The host applies the attach hook and all kind grants atomically
-before it passes any shared-memory descriptors.
+`aimee-core-event-bus-client` target. The shared runtime in `bus_runtime.c`
+owns the listener, peer admission, heartbeat, and reap lifecycle. Server and KB
+configure separate endpoints at `<config>/<daemon>-module-bus.sock` and separate
+policies at `<config>/modules.d/<daemon>`; the environment can override those
+with `AIMEE_MODULE_BUS_SOCKET` and `AIMEE_MODULE_POLICY_DIR`.
+
+Every strict `*.grant` policy binds one principal class/reference to an exact
+absolute executable (resolved and compared with Linux `SO_PEERCRED` and
+`/proc/<pid>/exe`), an expected UID, and explicit publish, subscribe, request,
+and serve kind lists. The host installs all grants before returning mappings,
+overwrites client-claimed source/principal fields, and returns a typed
+capability-denied event when a module attempts undeclared fresh output.
+
+The attach socket is mode `0600` and used only for the descriptor handshake.
+All event traffic remains in the daemon's local shared mappings; there is no
+server-to-KB bus and no cross-machine shared memory.
 
 ## Required checks
 

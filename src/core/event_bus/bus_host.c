@@ -104,6 +104,14 @@ fail:
    return BUS_HOST_ERR_REGION;
 }
 
+void bus_host_set_admission(bus_host_t *h, bus_admit_fn admit, void *admit_ctx)
+{
+   if (!h)
+      return;
+   h->admit = admit;
+   h->admit_ctx = admit ? admit_ctx : NULL;
+}
+
 void bus_host_destroy(bus_host_t *h)
 {
    if (!h)

@@ -22,10 +22,10 @@ option(WITH_PAM "Enable PAM authentication support" ON)
 option(WITH_LIBSECRET "Enable libsecret integration" ON)
 option(WITH_UI "Enable embedded dashboard UI" OFF)
 option(WITH_TLS "Enable in-client TLS for https:// remote aimee-servers" ON)
-# TLS backend by platform (all behind the same 4-function aimee_tls.h interface):
-#   Linux   -> OpenSSL    (aimee_tls.c)
-#   macOS   -> Secure Transport (aimee_tls_securetransport.c) — universal-safe, Keychain trust
-#   Windows -> Schannel/SSPI    (aimee_tls_schannel.c)        — no OpenSSL, Windows cert store
+# Native TLS backends are part of aimee-core-connection:
+#   Linux   -> OpenSSL
+#   macOS   -> Secure Transport
+#   Windows -> Schannel/SSPI
 # Each uses the OS trust store, so the single-binary thin client needs no bundled
 # CA bundle and no external TLS library.
 option(AIMEE_LEAN "Lean build profile: size-optimized, no UI" OFF)
@@ -1356,6 +1356,18 @@ if(AIMEE_LEAN)
     endif()
 endif()
 
+set(AIMEE_CORE_REQUIRED_VERSION "0.1.0" CACHE STRING "Pinned aimee-core package version")
+option(AIMEE_USE_INSTALLED_CORE "Use a versioned installed aimee-core package" OFF)
+if(AIMEE_USE_INSTALLED_CORE)
+    find_package(aimee-core ${AIMEE_CORE_REQUIRED_VERSION} EXACT CONFIG REQUIRED)
+    if(WITH_TLS AND NOT AIMEE_CORE_NATIVE_TLS_ENABLED)
+        message(FATAL_ERROR "The pinned installed aimee-core package has native TLS disabled")
+    endif()
+    add_library(aimee-core-connection ALIAS aimee::aimee-core-connection)
+    if(TARGET aimee::aimee-core-event-bus)
+        add_library(aimee-core-event-bus ALIAS aimee::aimee-core-event-bus)
+    endif()
+else()
 add_library(aimee-core-connection STATIC
     ${AIMEE_SRC_DIR}/core/connection/auth.c
     ${AIMEE_SRC_DIR}/core/connection/control.c
@@ -1370,7 +1382,7 @@ if(WIN32)
     target_link_libraries(aimee-core-connection PUBLIC ws2_32)
 endif()
 
-if(UNIX)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_library(aimee-core-event-bus STATIC
         ${AIMEE_SRC_DIR}/core/event_bus/bus_attach.c
         ${AIMEE_SRC_DIR}/core/event_bus/bus_arena.c
@@ -1382,11 +1394,14 @@ if(UNIX)
         ${AIMEE_SRC_DIR}/core/event_bus/bus_region_host.c
         ${AIMEE_SRC_DIR}/core/event_bus/bus_ring.c
         ${AIMEE_SRC_DIR}/core/event_bus/bus_route.c
+        ${AIMEE_SRC_DIR}/core/event_bus/bus_runtime.c
         ${AIMEE_SRC_DIR}/core/event_bus/bus_wire.c
     )
     target_include_directories(aimee-core-event-bus PUBLIC
         ${AIMEE_SRC_DIR}/core/event_bus/include)
     target_compile_options(aimee-core-event-bus PRIVATE ${AIMEE_COMMON_WARNINGS})
+    target_link_libraries(aimee-core-event-bus PUBLIC Threads::Threads)
+endif()
 endif()
 
 add_executable(aimee
@@ -1446,33 +1461,41 @@ if(WIN32)
 endif()
 if(WITH_TLS)
     target_compile_definitions(aimee PRIVATE WITH_TLS)
+endif()
+if(WITH_TLS AND NOT AIMEE_USE_INSTALLED_CORE)
+    target_sources(aimee-core-connection PRIVATE
+        ${AIMEE_SRC_DIR}/core/connection/native_tls_identity.c
+        ${AIMEE_SRC_DIR}/core/connection/native_tls_path.c)
     if(APPLE)
         # macOS: Secure Transport (system frameworks; universal-binary safe; Keychain
         # trust). Deprecated since 10.15 -> silence the deprecation warning for THIS
         # TU only (the build is -Werror); never globally.
-        target_sources(aimee PRIVATE ${AIMEE_SRC_DIR}/aimee_tls_securetransport.c)
-        set_source_files_properties(${AIMEE_SRC_DIR}/aimee_tls_securetransport.c
+        target_sources(aimee-core-connection PRIVATE
+            ${AIMEE_SRC_DIR}/core/connection/native_tls_securetransport.c)
+        set_source_files_properties(
+            ${AIMEE_SRC_DIR}/core/connection/native_tls_securetransport.c
             PROPERTIES COMPILE_OPTIONS "-Wno-deprecated-declarations")
         find_library(SECURITY_FRAMEWORK Security REQUIRED)
         find_library(COREFOUNDATION_FRAMEWORK CoreFoundation REQUIRED)
-        target_link_libraries(aimee PRIVATE ${SECURITY_FRAMEWORK} ${COREFOUNDATION_FRAMEWORK})
+        target_link_libraries(aimee-core-connection PUBLIC
+            ${SECURITY_FRAMEWORK} ${COREFOUNDATION_FRAMEWORK})
     elseif(WIN32)
         # Windows: Schannel/SSPI (no OpenSSL; Windows certificate store). ncrypt
         # supplies CNG (NCryptImportKey) for mTLS client-key import. Pin
         # _WIN32_WINNT>=0x0A00 at the build level too (the schannel TU also sets
         # it before any include) so the CNG/CERT_NCRYPT_KEY_SPEC symbols are
         # exposed regardless of header include order.
-        target_sources(aimee PRIVATE ${AIMEE_SRC_DIR}/aimee_tls_schannel.c)
-        target_compile_definitions(aimee PRIVATE _WIN32_WINNT=0x0A00)
-        target_link_libraries(aimee PRIVATE secur32 crypt32 ncrypt)
+        target_sources(aimee-core-connection PRIVATE
+            ${AIMEE_SRC_DIR}/core/connection/native_tls_schannel.c)
+        target_compile_definitions(aimee-core-connection PRIVATE _WIN32_WINNT=0x0A00)
+        target_link_libraries(aimee-core-connection PUBLIC secur32 crypt32 ncrypt)
     else()
         # Linux/other POSIX: OpenSSL.
         find_package(OpenSSL REQUIRED)
         target_sources(aimee-core-connection PRIVATE
-            ${AIMEE_SRC_DIR}/core/connection/tls_openssl.c)
+            ${AIMEE_SRC_DIR}/core/connection/tls_openssl.c
+            ${AIMEE_SRC_DIR}/core/connection/native_tls_openssl.c)
         target_link_libraries(aimee-core-connection PUBLIC OpenSSL::SSL OpenSSL::Crypto)
-        target_sources(aimee PRIVATE ${AIMEE_SRC_DIR}/aimee_tls.c)
-        target_link_libraries(aimee PRIVATE OpenSSL::SSL OpenSSL::Crypto)
     endif()
 endif()
 

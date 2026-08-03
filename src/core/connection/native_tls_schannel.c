@@ -23,9 +23,9 @@
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0A00
 #endif
-#include "aimee_tls.h"
-#include "aimee_home.h"
-#include "platform_net.h"
+#include <aimee/core/connection/native_tls.h>
+#include <aimee/core/connection/socket.h>
+#include "native_tls_internal.h"
 
 #include <windows.h>
 #include <schannel.h>
@@ -147,7 +147,7 @@ static int pem_to_der(const unsigned char *pem, DWORD pem_len, unsigned char **d
  * without disabling verification (AIMEE_TLS_INSECURE). */
 static int pinned_ca_path(char *out, size_t n)
 {
-   const char *home = aimee_home();
+   const char *home = aimee_core_native_tls_home();
    if (!home || !*home || !out || n == 0)
       return 0;
    snprintf(out, n, "%s/remote-ca.pem", home);
@@ -440,7 +440,7 @@ static int schannel_load_client_identity(aimee_tls_t *t)
 {
    if (g_suppress_client_cert)
       return 0; /* diagnostic probe: answer as if no identity were configured */
-   const char *home = aimee_home();
+   const char *home = aimee_core_native_tls_home();
    if (!home || !*home)
       return 0;
    char crt[600], key[600];
@@ -817,14 +817,14 @@ int aimee_tls_fetch_peer_cert(const char *host, const char *port, char **pem_out
    if (!host || !*host || !port || !*port || !pem_out)
       return -1;
 
-   int fd = platform_net_connect(host, port, 10000);
+   int fd = aimee_core_socket_connect(host, port, 10000);
    if (fd < 0)
       return -1;
 
    aimee_tls_t *t = calloc(1, sizeof(*t));
    if (!t)
    {
-      platform_net_close(fd);
+      aimee_core_socket_close(fd);
       return -1;
    }
    t->fd = fd;
@@ -884,7 +884,7 @@ int aimee_tls_fetch_peer_cert(const char *host, const char *port, char **pem_out
    }
 
    aimee_tls_free(t);      /* tears down ctx/cred/host; does NOT close the fd */
-   platform_net_close(fd); /* we opened it, so we close it */
+   aimee_core_socket_close(fd); /* we opened it, so we close it */
 
    if (rc != 0)
    {

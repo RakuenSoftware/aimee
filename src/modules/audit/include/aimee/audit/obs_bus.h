@@ -61,6 +61,14 @@ extern "C"
     * bus is running is refused with -1; otherwise returns 0. */
    int obs_bus_set_guardrail_sink(obs_bus_guardrail_sink_fn sink, void *ctx);
 
+   /* Configure the daemon's authenticated local module endpoint before start.
+    * `socket_path` and `policy_dir` must be absolute. The policy directory holds
+    * one strict *.grant manifest per installed executable. Both server and KB
+    * call this shared entry point; each hosts its own independent bus. */
+   int obs_bus_configure_module_runtime(const char *socket_path, const char *policy_dir);
+   int obs_bus_configure_daemon_module_runtime(const char *daemon_name,
+                                               const char *config_directory);
+
    /* Bring the audit bus up: create the in-process host, attach the producer and
     * the consumer, subscribe the consumer to the audit-row kind, and spawn the
     * consumer thread. Idempotent: a second call while running is a no-op that
