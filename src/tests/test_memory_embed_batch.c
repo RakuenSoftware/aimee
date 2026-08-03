@@ -17,7 +17,7 @@
 int memory_embed_texts(const char *const *texts, int n, const char *command,
                        embed_input_type_t input_type, float *out, int dim);
 
-#define DIM 3
+#define DIM   3
 #define NTEXT 4
 
 static int s_posts;

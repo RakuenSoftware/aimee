@@ -68,8 +68,8 @@ typedef struct
  * owns the dependency breaker and the per-row error record — so a batch failure
  * degrades to the old behaviour rather than losing rows. */
 static int ce_flush_batch(ce_pending_t *pend, int n, const char **texts, float *vecs,
-                          const ce_file_row_t *rows, const char *project,
-                          const char *embed_command, int embed_dim, int *batch_num)
+                          const ce_file_row_t *rows, const char *project, const char *embed_command,
+                          int embed_dim, int *batch_num)
 {
    if (n <= 0)
       return 0;
@@ -90,8 +90,8 @@ static int ce_flush_batch(ce_pending_t *pend, int n, const char **texts, float *
       {
          const ce_file_row_t *r = &rows[pend[i].row_idx];
          float *slot = vecs + (size_t)i * (size_t)embed_dim;
-         int dim = memory_embed_text(pend[i].text, embed_command, EMBED_INPUT_DOCUMENT, slot,
-                                     embed_dim);
+         int dim =
+             memory_embed_text(pend[i].text, embed_command, EMBED_INPUT_DOCUMENT, slot, embed_dim);
          if (dim != embed_dim)
          {
             db2_code_index_op_record(pend[i].point_id, project, pend[i].node_key, r->path, 0,
@@ -510,7 +510,8 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
       if (row_count >= row_cap)
       {
          row_cap *= 2;
-         ce_file_row_t *tmp = (ce_file_row_t *)realloc(rows, (size_t)row_cap * sizeof(ce_file_row_t));
+         ce_file_row_t *tmp =
+             (ce_file_row_t *)realloc(rows, (size_t)row_cap * sizeof(ce_file_row_t));
          if (!tmp)
             break;
          rows = tmp;
@@ -661,16 +662,16 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
 
       if (pending == cap)
       {
-         embedded += ce_flush_batch(pend, pending, texts, vecs, rows, project,
-                                    embed_command, embed_dim, &batch_num);
+         embedded += ce_flush_batch(pend, pending, texts, vecs, rows, project, embed_command,
+                                    embed_dim, &batch_num);
          pending = 0;
       }
    }
 
    if (pending > 0)
    {
-      embedded += ce_flush_batch(pend, pending, texts, vecs, rows, project,
-                                 embed_command, embed_dim, &batch_num);
+      embedded += ce_flush_batch(pend, pending, texts, vecs, rows, project, embed_command,
+                                 embed_dim, &batch_num);
       pending = 0;
    }
 
