@@ -125,6 +125,15 @@ static void test_codex_delegate_policy_is_explicit(void)
    assert(strstr(skill, "head -n") != NULL);
    assert(strstr(skill, "Do not repeat a search") != NULL);
    assert(strstr(code_prompt, "Cap what any search prints") != NULL);
+
+   /* THE SKILL MUST ANSWER "find this phrase", because that is the question the
+    * agent had no aimee answer for and resolved with a recursive shell search --
+    * 87 of them across the benchmark's aimee cells, 2.4 MB of output, one large
+    * enough to hit the client's 1 MB truncation. find_symbol covers symbol names
+    * only; index command=hybrid covers the rest and is bounded by max_results. */
+   assert(strstr(skill, AIMEE_CODE_TOOL_INDEX) != NULL);
+   assert(strstr(skill, AIMEE_CODE_INDEX_COMMAND_HYBRID) != NULL);
+   assert(strstr(skill, "PHRASE rather than a symbol") != NULL);
 }
 
 static void test_mcp_config_uses_resolved_command(void)

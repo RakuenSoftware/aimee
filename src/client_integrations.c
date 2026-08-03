@@ -322,6 +322,13 @@ static const char *codex_skill_markdown(void)
           "`" AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS
           "` to see what depends on it. A grep for the symbol will not tell you "
           "what breaks.\n"
+          "- Looking for a PHRASE rather than a symbol -- an error string, a config "
+          "key, a concept like \"config cache\" or \"pool lease\": use `" AIMEE_CODE_TOOL_INDEX
+          "` with command=" AIMEE_CODE_INDEX_COMMAND_HYBRID
+          " and a query. It fuses lexical and semantic retrieval over the index and "
+          "returns a bounded, ranked result set (max_results, default 20), where a "
+          "recursive search returns every line that matched in whatever order the "
+          "filesystem walk found them.\n"
           "- Use `search_memory` for stored project facts or prior decisions.\n"
           "- Reading a file the index has already pointed you at: just read it, "
           "and read the range you need rather than the whole file.\n"

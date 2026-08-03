@@ -648,6 +648,7 @@ static void test_tool_profile_filter(void)
                                       "find_symbol",
                                       "ast_grep_search",
                                       "preview_blast_radius",
+                                      "index",
                                       "git",
                                       "delegate",
                                       "delegate_status",
@@ -670,6 +671,14 @@ static void test_tool_profile_filter(void)
     * already ships roundtable_status for exactly this reason; delegate must
     * ship delegate_status on the same grounds. */
    assert(profile_core_has("roundtable_status", core));
+
+   /* The retrieval an agent reaches for when the question is NOT a symbol name.
+    * Withholding `index` did not reduce retrieval; it moved it to a recursive
+    * shell search, because that was one visible call while index_hybrid cost a
+    * find_tools -> describe_tool -> call_tool detour. Measured across the
+    * benchmark's aimee cells: 87 shell searches emitting 2.4 MB, one large
+    * enough to hit the client's 1 MB output truncation. */
+   assert(profile_core_has("index", core));
    assert(profile_core_has("delegate_status", core));
    {
       cJSON *listed = mcp_build_tools_list();

@@ -33,6 +33,21 @@ static const char *const MCP_CORE_TOOLS[] = {
     AIMEE_CODE_TOOL_FIND_SYMBOL,
     AIMEE_CODE_TOOL_AST_GREP_SEARCH,
     AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS, /* direct adoption-critical code intel */
+    /* SAME REASONING AS delegate_status BELOW, AND THE SAME MEASUREMENT.
+     *
+     * `index` multiplexes the retrieval an agent needs when the question is not a
+     * symbol name: command=hybrid (lexical + dense, bounded by max_results,
+     * default 20), plus structure, find_callers, blast_radius and span. Leaving it
+     * out of the floor did not make agents use less retrieval -- it made them use
+     * a recursive text search instead, because that is one visible call while
+     * hybrid cost find_tools -> describe_tool -> call_tool.
+     *
+     * Measured across the benchmark's aimee cells: 87 shell searches emitting
+     * 2.4 MB, 49 of them wide alternations, one large enough to hit the client's
+     * 1 MB truncation. index_hybrid answers that class of question with a capped,
+     * ranked result set and was reachable the whole time -- just never in one
+     * call. A tool the agent cannot afford to reach is a tool it does not have. */
+    AIMEE_CODE_TOOL_INDEX,
     "git", /* all git/gh ops via one multiplexed tool (command=...) */
     "delegate",
     /* An MCP delegate call returns a job_id and runs in the background, so its
