@@ -42,7 +42,12 @@ mkdir -p "$OUT"
 say() { echo "[$(date -u +%H:%M:%SZ)] $*" | tee -a "$OUT/noise.log"; }
 
 run_one() {  # $1 label  $2 nproc
-  local label="$1" n="$2" pred="$OUT/$label.pred.jsonl"
+  # Separate statements: under `set -u`, a variable declared earlier in the
+  # SAME `local` is not yet visible, so `local a="$1" p="$OUT/$a"` aborts with
+  # "a: unbound variable". That killed this script one line into its first arm.
+  local label="$1"
+  local n="$2"
+  local pred="$OUT/$label.pred.jsonl"
   if [ -s "$pred" ] && [ "$(wc -l < "$pred")" -ge "$(wc -l < "$GOLD")" ]; then say "SKIP $label"; return 0; fi
   say "--- $label ($n proc)"
   GOLD="$GOLD" OUT="$OUT" LABEL="$label" REPO="$REPO" DRAFT="$DRAFT" \

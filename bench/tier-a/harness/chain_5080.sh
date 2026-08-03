@@ -26,3 +26,10 @@ mkdir -p results/quant-ledger && touch results/quant-ledger/.rebuilt
 say "starting quant ledger rebuild"
 bash harness/rebuild_quant_ledger.sh
 say "chain complete"
+
+# The noise floor died on its first line (a `local` + `set -u` bug) and the
+# chain read that as "finished". It is re-queued here, AFTER the ledger, so the
+# two never share the card.
+say "starting noise floor"
+bash harness/noise_floor.sh
+say "noise floor complete"
