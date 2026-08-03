@@ -17,12 +17,12 @@ void test_oauth_tokens_reset(void);
 #include "agent_config.h"
 #include "runtime_secret.h"
 #include <aimee/delegates/delegate_role.h>
-#include "agent_tools.h"
+#include <aimee/tools/agent_tools.h>
 #include "anchor_snapshot.h"
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
-#include "workspace_provider.h"
+#include "modules/workspace/workspace_provider.h"
 #include "agent_adapter.h"
 #include "provider_cli_adapter.h"
 #include "agent_protocol.h"

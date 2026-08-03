@@ -1,8 +1,8 @@
 /* test_git_ssh_agent.c — WP-C2: a webuser's vaulted SSH key is loaded into a
  * per-user in-memory ssh-agent via a memfd, never touching disk; git/ssh reach
  * it via SSH_AUTH_SOCK. Skips gracefully if openssh tooling is unavailable. */
-#include "git_ssh_agent.h"
-#include "git_forge_vault.h"
+#include "modules/git/git_ssh_agent.h"
+#include "modules/git/git_forge_vault.h"
 #include "vault_kek_cache.h"
 #include "vault_service.h"
 

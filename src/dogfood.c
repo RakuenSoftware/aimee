@@ -5,7 +5,7 @@
 
 #include "aimee.h"
 #include "dogfood.h"
-#include "learning_implicit.h"
+#include "modules/learning/learning_implicit.h"
 #include "platform_path.h"
 #include "report_enrichment.h"
 #include "cJSON.h"

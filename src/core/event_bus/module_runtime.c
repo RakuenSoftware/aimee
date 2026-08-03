@@ -33,6 +33,17 @@ typedef struct
    aimee_module_status_t status;
 } module_work_t;
 
+typedef struct
+{
+   int in_use;
+   uint32_t event_kind;
+   uint64_t correlation_id;
+   aimee_module_message_t message;
+   uint8_t *body;
+   uint32_t body_len;
+   uint32_t body_capacity;
+} module_assembly_t;
+
 static volatile sig_atomic_t process_running = 1;
 
 static uint64_t monotonic_now_ns(void)
@@ -90,6 +101,8 @@ static void *run_handler(void *argument)
       work->status = AIMEE_MODULE_STATUS_INTERNAL;
       work->response_len = 0;
    }
+   else if (work->status != AIMEE_MODULE_STATUS_OK)
+      work->response_len = 0;
    if (atomic_load_explicit(&work->cancelled, memory_order_acquire))
    {
       work->status = AIMEE_MODULE_STATUS_CANCELLED;
@@ -112,27 +125,57 @@ static void reply_result(bus_client_t *client, uint32_t kind, uint64_t correlati
                          uint32_t stage_id, uint64_t trace_id, aimee_module_status_t status,
                          const uint8_t *body, uint32_t body_len)
 {
-   size_t total = (size_t)AIMEE_MODULE_MESSAGE_HEADER_LEN + body_len;
-   if (total > client->reply.inline_budget)
+   if (body_len > AIMEE_MODULE_MESSAGE_MAX_BODY ||
+       (body_len > 0 && !body) || status != AIMEE_MODULE_STATUS_OK)
    {
-      status = AIMEE_MODULE_STATUS_INTERNAL;
+      if (body_len > AIMEE_MODULE_MESSAGE_MAX_BODY || (body_len > 0 && !body))
+         status = AIMEE_MODULE_STATUS_INTERNAL;
       body = NULL;
       body_len = 0;
-      total = AIMEE_MODULE_MESSAGE_HEADER_LEN;
    }
-   uint8_t *payload = malloc(total);
+   if (client->reply.inline_budget <= AIMEE_MODULE_MESSAGE_HEADER_LEN)
+      return;
+   uint32_t chunk_capacity = client->reply.inline_budget - AIMEE_MODULE_MESSAGE_HEADER_LEN;
+   uint8_t *payload = malloc(client->reply.inline_budget);
    if (!payload)
       return;
-   aimee_module_message_t reply = {.operation = AIMEE_MODULE_OP_RESULT,
-                                   .status = (uint16_t)status,
-                                   .stage_id = stage_id ? stage_id : 1u,
-                                   .body_len = body_len,
-                                   .trace_id = trace_id};
-   if (aimee_module_message_encode(&reply, payload, total) != 0)
+   uint32_t offset = 0;
+   int first = 1;
+   const struct timespec retry = {.tv_sec = 0, .tv_nsec = 1000000};
+   while (first || offset < body_len)
    {
-      if (body_len)
-         memcpy(payload + AIMEE_MODULE_MESSAGE_HEADER_LEN, body, body_len);
-      (void)bus_client_reply(client, kind, correlation, payload, (uint32_t)total);
+      first = 0;
+      uint32_t remaining = body_len - offset;
+      uint32_t part = remaining < chunk_capacity ? remaining : chunk_capacity;
+      int more = remaining > part;
+      size_t total = (size_t)AIMEE_MODULE_MESSAGE_HEADER_LEN + part;
+      aimee_module_message_t reply = {.operation = AIMEE_MODULE_OP_RESULT,
+                                      .status = (uint16_t)status,
+                                      .stage_id = stage_id ? stage_id : 1u,
+                                      .body_len = part,
+                                      .trace_id = trace_id};
+      if (aimee_module_message_encode(&reply, payload, total) == 0)
+         break;
+      if (part)
+         memcpy(payload + AIMEE_MODULE_MESSAGE_HEADER_LEN, body + offset, part);
+      for (;;)
+      {
+         bus_client_result_t sent = bus_client_reply_fragment(
+             client, kind, correlation, payload, (uint32_t)total, more);
+         if (sent == BUS_CLIENT_OK)
+            break;
+         if (sent != BUS_CLIENT_WOULD_BLOCK || !process_running ||
+             bus_client_epoch_changed(client))
+         {
+            free(payload);
+            return;
+         }
+         uint64_t now = monotonic_now_ns();
+         if (now)
+            bus_client_heartbeat(client, now);
+         nanosleep(&retry, NULL);
+      }
+      offset += part;
    }
    free(payload);
 }
@@ -151,6 +194,60 @@ static module_work_t *free_work(module_work_t *work)
       if (!work[i].in_use)
          return &work[i];
    return NULL;
+}
+
+static module_assembly_t *find_assembly(module_assembly_t *assembly, uint64_t correlation)
+{
+   for (size_t i = 0; i < MODULE_MAX_INFLIGHT; ++i)
+      if (assembly[i].in_use && assembly[i].correlation_id == correlation)
+         return &assembly[i];
+   return NULL;
+}
+
+static module_assembly_t *free_assembly_slot(module_assembly_t *assembly)
+{
+   for (size_t i = 0; i < MODULE_MAX_INFLIGHT; ++i)
+      if (!assembly[i].in_use)
+         return &assembly[i];
+   return NULL;
+}
+
+static void discard_assembly(module_assembly_t *assembly)
+{
+   if (!assembly)
+      return;
+   free(assembly->body);
+   memset(assembly, 0, sizeof(*assembly));
+}
+
+static int append_assembly(module_assembly_t *assembly, const uint8_t *body, uint32_t body_len)
+{
+   if (body_len == 0)
+      return 0;
+   if (!body || assembly->body_len > AIMEE_MODULE_MESSAGE_MAX_BODY - body_len)
+      return -1;
+   uint32_t needed = assembly->body_len + body_len;
+   if (needed > assembly->body_capacity)
+   {
+      uint32_t capacity = assembly->body_capacity ? assembly->body_capacity : 4096u;
+      while (capacity < needed)
+      {
+         if (capacity > AIMEE_MODULE_MESSAGE_MAX_BODY / 2u)
+         {
+            capacity = AIMEE_MODULE_MESSAGE_MAX_BODY;
+            break;
+         }
+         capacity *= 2u;
+      }
+      uint8_t *grown = realloc(assembly->body, capacity);
+      if (!grown)
+         return -1;
+      assembly->body = grown;
+      assembly->body_capacity = capacity;
+   }
+   memcpy(assembly->body + assembly->body_len, body, body_len);
+   assembly->body_len = needed;
+   return 0;
 }
 
 static void reap_work(bus_client_t *client, module_work_t *work)
@@ -186,27 +283,71 @@ static void stop_work(module_work_t *work)
 }
 
 static void start_request(bus_client_t *client, const aimee_module_process_config_t *config,
-                          module_work_t *work, const bus_event_t *event, uint64_t now)
+                          module_work_t *work, module_assembly_t *assemblies,
+                          const bus_event_t *event, uint64_t now)
 {
    uint32_t expected_stage = stage_for_kind(config, event->frame.event_kind);
    aimee_module_message_t request;
    aimee_module_message_result_t decoded =
        aimee_module_message_decode(event->payload, event->payload_len, &request);
+   module_assembly_t *assembly = find_assembly(assemblies, event->frame.correlation_id);
    if (expected_stage == 0 || decoded != AIMEE_MODULE_MESSAGE_OK ||
-       request.operation != AIMEE_MODULE_OP_INVOKE || request.stage_id != expected_stage)
+       request.operation != AIMEE_MODULE_OP_INVOKE || request.stage_id != expected_stage ||
+       find_work(work, event->frame.correlation_id) != NULL ||
+       (assembly && (assembly->event_kind != event->frame.event_kind ||
+                     assembly->message.stage_id != request.stage_id ||
+                     assembly->message.deadline_ns != request.deadline_ns ||
+                     assembly->message.trace_id != request.trace_id)))
    {
+      discard_assembly(assembly);
       reply_result(client, event->frame.event_kind, event->frame.correlation_id, expected_stage, 0,
                    AIMEE_MODULE_STATUS_INVALID_REQUEST, NULL, 0);
       return;
    }
+
+   if (!assembly)
+   {
+      assembly = free_assembly_slot(assemblies);
+      if (!assembly)
+      {
+         reply_result(client, event->frame.event_kind, event->frame.correlation_id, expected_stage,
+                      request.trace_id, AIMEE_MODULE_STATUS_INTERNAL, NULL, 0);
+         return;
+      }
+      memset(assembly, 0, sizeof(*assembly));
+      assembly->in_use = 1;
+      assembly->event_kind = event->frame.event_kind;
+      assembly->correlation_id = event->frame.correlation_id;
+      assembly->message = request;
+   }
+   if (append_assembly(assembly, event->payload + AIMEE_MODULE_MESSAGE_HEADER_LEN,
+                       request.body_len) != 0)
+   {
+      uint64_t trace_id = request.trace_id;
+      discard_assembly(assembly);
+      reply_result(client, event->frame.event_kind, event->frame.correlation_id, expected_stage,
+                   trace_id, AIMEE_MODULE_STATUS_INTERNAL, NULL, 0);
+      return;
+   }
+   if (event->frame.hdr_flags & BUS_F_MORE)
+      return;
+
+   /* The final fragment transfers the complete body to one worker. */
+   uint8_t *request_body = assembly->body;
+   uint32_t request_len = assembly->body_len;
+   assembly->body = NULL;
+   discard_assembly(assembly);
+
    if (now != 0 && aimee_module_deadline_expired(request.deadline_ns, now))
    {
+      free(request_body);
       reply_result(client, event->frame.event_kind, event->frame.correlation_id, expected_stage,
                    request.trace_id, AIMEE_MODULE_STATUS_DEADLINE_EXCEEDED, NULL, 0);
       return;
    }
    if (!config->handler)
    {
+      free(request_body);
       reply_result(client, event->frame.event_kind, event->frame.correlation_id, expected_stage,
                    request.trace_id, AIMEE_MODULE_STATUS_CAPABILITY_ABSENT, NULL, 0);
       return;
@@ -215,28 +356,16 @@ static void start_request(bus_client_t *client, const aimee_module_process_confi
    module_work_t *item = free_work(work);
    if (!item)
    {
+      free(request_body);
       reply_result(client, event->frame.event_kind, event->frame.correlation_id, expected_stage,
                    request.trace_id, AIMEE_MODULE_STATUS_INTERNAL, NULL, 0);
       return;
    }
-   memset(item, 0, sizeof *item);
-   uint32_t response_capacity = client->reply.inline_budget > AIMEE_MODULE_MESSAGE_HEADER_LEN
-                                    ? client->reply.inline_budget - AIMEE_MODULE_MESSAGE_HEADER_LEN
-                                    : 0;
-   if (request.body_len)
-   {
-      item->request_body = malloc(request.body_len);
-      if (!item->request_body)
-         goto allocation_failed;
-      memcpy(item->request_body, event->payload + AIMEE_MODULE_MESSAGE_HEADER_LEN,
-             request.body_len);
-   }
-   if (response_capacity)
-   {
-      item->response_body = malloc(response_capacity);
-      if (!item->response_body)
-         goto allocation_failed;
-   }
+   memset(item, 0, sizeof(*item));
+   item->request_body = request_body;
+   item->response_body = malloc(AIMEE_MODULE_MESSAGE_MAX_BODY);
+   if (!item->response_body)
+      goto allocation_failed;
    item->in_use = 1;
    atomic_init(&item->cancelled, 0);
    atomic_init(&item->done, 0);
@@ -248,8 +377,8 @@ static void start_request(bus_client_t *client, const aimee_module_process_confi
    item->invocation.runtime_state = item;
    item->handler = config->handler;
    item->user_data = config->user_data;
-   item->request_len = request.body_len;
-   item->response_capacity = response_capacity;
+   item->request_len = request_len;
+   item->response_capacity = AIMEE_MODULE_MESSAGE_MAX_BODY;
    if (pthread_create(&item->thread, NULL, run_handler, item) == 0)
       return;
 
@@ -257,7 +386,7 @@ static void start_request(bus_client_t *client, const aimee_module_process_confi
 allocation_failed:
    free(item->request_body);
    free(item->response_body);
-   memset(item, 0, sizeof *item);
+   memset(item, 0, sizeof(*item));
    reply_result(client, event->frame.event_kind, event->frame.correlation_id, expected_stage,
                 request.trace_id, AIMEE_MODULE_STATUS_INTERNAL, NULL, 0);
 }
@@ -300,6 +429,8 @@ int aimee_module_process_run(const aimee_module_process_config_t *config)
 
    module_work_t work[MODULE_MAX_INFLIGHT];
    memset(work, 0, sizeof work);
+   module_assembly_t assemblies[MODULE_MAX_INFLIGHT];
+   memset(assemblies, 0, sizeof assemblies);
    while (process_running && !bus_client_epoch_changed(&client))
    {
       uint64_t now = monotonic_now_ns();
@@ -316,15 +447,18 @@ int aimee_module_process_run(const aimee_module_process_config_t *config)
          module_work_t *item = find_work(work, event.frame.correlation_id);
          if (item)
             atomic_store_explicit(&item->cancelled, 1, memory_order_release);
+         discard_assembly(find_assembly(assemblies, event.frame.correlation_id));
       }
       else if (result == BUS_CLIENT_OK && (event.frame.hdr_flags & BUS_F_REQUEST))
       {
-         start_request(&client, config, work, &event, now);
+         start_request(&client, config, work, assemblies, &event, now);
       }
       const struct timespec idle = {.tv_sec = 0, .tv_nsec = 1000000};
       nanosleep(&idle, NULL);
    }
    stop_work(work);
+   for (size_t i = 0; i < MODULE_MAX_INFLIGHT; ++i)
+      discard_assembly(&assemblies[i]);
    bus_client_detach(&client);
    return 0;
 }

@@ -3,7 +3,7 @@
  * line-check ceiling). Cross-TU declarations live in the module header. */
 #include "server_mcp_internal.h"
 #include "server.h"
-#include "agent_tools.h" /* the native surface this table registers into */
+#include <aimee/tools/agent_tools.h> /* the native surface this table registers into */
 #include "toolset.h"     /* toolset_register_native_tool */
 #include "aimee.h"
 #include "json_fluent.h" /* jo_ok */
@@ -18,9 +18,9 @@
 #include "config.h"
 #include "dashboard.h"
 #include "aimee/protocols/mcp/mcp_tools.h"
-#include "mcp_git.h"
-#include "git_verify.h"
-#include "workspace_turn.h"
+#include "modules/git/mcp_git.h"
+#include "modules/git/git_verify.h"
+#include "modules/workspace/workspace_turn.h"
 #include "notes.h"
 #include "agent_coord.h"
 #include "agent_tasks.h"

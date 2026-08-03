@@ -9,10 +9,10 @@
  * dispatch or tool implementations here; they belong in src/modules/tools/. */
 #include "aimee.h"
 #include "util.h"
-#include "agent_tools.h"
+#include <aimee/tools/agent_tools.h>
 #include "agent_exec.h"
-#include "workspace.h"
-#include "workspace_provider.h"
+#include <aimee/workspace/workspace.h>
+#include "modules/workspace/workspace_provider.h"
 #include "computer_use.h"
 #include "config.h"
 #include "diff.h"

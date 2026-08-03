@@ -9,8 +9,9 @@
 #endif
 #include "cJSON.h"
 #include "integrity.h"
-#include "learning.h"
+#include <aimee/learning/learning.h>
 #include "log.h"
+#include <aimee/learning/module_api.h>
 #include <time.h>
 
 #define LEARNING_DEFAULT_TTL_DAYS             7
@@ -28,6 +29,31 @@ static double g_learning_ingest_ms_max = 0.0;
 static int64_t g_learning_detection_calls = 0;
 static double g_learning_detection_ms_sum = 0.0;
 static double g_learning_detection_ms_max = 0.0;
+static learning_signal_classifier_fn g_signal_classifier;
+
+void learning_router_register_signal_classifier(learning_signal_classifier_fn classifier)
+{
+   g_signal_classifier = classifier;
+}
+
+#if !defined(AIMEE_DB2_DISABLED)
+static int learning_classify_signal(const char *signal, uint32_t *mask)
+{
+   if (g_signal_classifier)
+      return g_signal_classifier(signal, mask);
+   *mask = 0;
+   if (strcmp(signal, "thumb_up") == 0 || strcmp(signal, "thumb_down") == 0)
+      *mask = AIMEE_LEARNING_SINK_RERANKER;
+   else if (strcmp(signal, "correction") == 0)
+      *mask = AIMEE_LEARNING_SINK_RERANKER | AIMEE_LEARNING_SINK_SUPERSEDE |
+              AIMEE_LEARNING_SINK_RULE;
+   else if (strcmp(signal, "preference_statement") == 0 || strcmp(signal, "mark_rule") == 0)
+      *mask = AIMEE_LEARNING_SINK_RULE;
+   else if (strcmp(signal, "workflow_repetition") == 0)
+      *mask = AIMEE_LEARNING_SINK_WORKFLOW;
+   return 0;
+}
+#endif
 
 #if !defined(AIMEE_DB2_DISABLED)
 static void learning_ingest_record_ms(double ms)
@@ -437,6 +463,9 @@ int learning_router_record_signal(const learning_signal_input_t *raw_input,
    clock_gettime(CLOCK_MONOTONIC, &t0);
 
    learning_signal_input_t input = *raw_input;
+   uint32_t sink_mask = 0;
+   if (learning_classify_signal(input.signal_type, &sink_mask) != 0)
+      return -1;
    learning_dispatch_clear(out);
    learning_fill_target_key(&input);
    db2_learning_proposals_archive_expired();
@@ -449,35 +478,36 @@ int learning_router_record_signal(const learning_signal_input_t *raw_input,
 
    learning_log_dogfood(&input);
 
-   if (strcmp(input.signal_type, "thumb_up") == 0 || strcmp(input.signal_type, "thumb_down") == 0)
+   if (sink_mask & AIMEE_LEARNING_SINK_RERANKER)
    {
       char action[512];
-      if (learning_make_reranker_action(strcmp(input.signal_type, "thumb_up") == 0,
+      int has_target = input.target_memory_id > 0 ||
+                       (input.evidence_refs_json && input.evidence_refs_json[0]);
+      if ((strcmp(input.signal_type, "correction") != 0 || has_target) &&
+          learning_make_reranker_action(strcmp(input.signal_type, "thumb_up") == 0,
                                         input.target_memory_id, input.evidence_refs_json, action,
                                         sizeof(action)) == 0)
          learning_queue_sink(signal_id, "reranker", input.target_key, input.target_memory_id,
                              action, input.evidence_refs_json, 0, out);
    }
-   else if (strcmp(input.signal_type, "correction") == 0)
+   if (sink_mask & AIMEE_LEARNING_SINK_SUPERSEDE)
    {
       char action[2048];
-      if ((input.target_memory_id > 0 ||
-           (input.evidence_refs_json && input.evidence_refs_json[0])) &&
-          learning_make_reranker_action(0, input.target_memory_id, input.evidence_refs_json, action,
-                                        sizeof(action)) == 0)
-         learning_queue_sink(signal_id, "reranker", input.target_key, input.target_memory_id,
-                             action, input.evidence_refs_json, 0, out);
-
       if (input.target_memory_id > 0 && input.correction_text[0] &&
           learning_make_supersede_action(input.target_memory_id, input.correction_text, action,
                                          sizeof(action)) == 0)
          learning_queue_sink(signal_id, "supersede", input.target_key, input.target_memory_id,
                              action, input.evidence_refs_json, 0, out);
 
-      if (input.correction_text[0] || input.title[0] || input.description[0])
+   }
+   if (sink_mask & AIMEE_LEARNING_SINK_RULE)
+   {
+      char action[2048];
+      char rule_text[COLLAB_RULE_TEXT_LEN + 1];
+      char reason[COLLAB_RULE_REASON_LEN + 1];
+      if (strcmp(input.signal_type, "correction") == 0 &&
+          (input.correction_text[0] || input.title[0] || input.description[0]))
       {
-         char rule_text[COLLAB_RULE_TEXT_LEN + 1];
-         char reason[COLLAB_RULE_REASON_LEN + 1];
          if (input.target_key[0] && input.correction_text[0])
             snprintf(rule_text, sizeof(rule_text), "For %s, use %s", input.target_key,
                      input.correction_text);
@@ -492,26 +522,23 @@ int learning_router_record_signal(const learning_signal_input_t *raw_input,
             learning_queue_sink(signal_id, "rule", input.target_key, input.target_memory_id, action,
                                 input.evidence_refs_json, 0, out);
       }
+      else if (strcmp(input.signal_type, "preference_statement") == 0 ||
+               strcmp(input.signal_type, "mark_rule") == 0)
+      {
+         snprintf(rule_text, sizeof(rule_text), "%s",
+                  input.description[0] ? input.description : input.title);
+         snprintf(reason, sizeof(reason), "%s",
+                  strcmp(input.signal_type, "mark_rule") == 0 ? "Explicit rule capture"
+                                                              : "Explicit user preference");
+         if (learning_make_rule_action(rule_text, reason, action, sizeof(action)) == 0)
+            learning_queue_sink(
+                signal_id, "rule", input.target_key, input.target_memory_id, action,
+                input.evidence_refs_json,
+                input.high_confidence || strcmp(input.signal_type, "mark_rule") == 0, out);
+      }
    }
-   else if (strcmp(input.signal_type, "preference_statement") == 0 ||
-            strcmp(input.signal_type, "mark_rule") == 0)
-   {
-      char action[2048];
-      char rule_text[COLLAB_RULE_TEXT_LEN + 1];
-      char reason[COLLAB_RULE_REASON_LEN + 1];
-      snprintf(rule_text, sizeof(rule_text), "%s",
-               input.description[0] ? input.description : input.title);
-      snprintf(reason, sizeof(reason), "%s",
-               strcmp(input.signal_type, "mark_rule") == 0 ? "Explicit rule capture"
-                                                           : "Explicit user preference");
-      if (learning_make_rule_action(rule_text, reason, action, sizeof(action)) == 0)
-         learning_queue_sink(signal_id, "rule", input.target_key, input.target_memory_id, action,
-                             input.evidence_refs_json,
-                             input.high_confidence || strcmp(input.signal_type, "mark_rule") == 0,
-                             out);
-   }
-   else if (strcmp(input.signal_type, "workflow_repetition") == 0 && input.workflow_project[0] &&
-            input.workflow_signal_type[0] && input.description[0])
+   if ((sink_mask & AIMEE_LEARNING_SINK_WORKFLOW) && input.workflow_project[0] &&
+       input.workflow_signal_type[0] && input.description[0])
    {
       char action[1024];
       if (learning_make_workflow_action(input.workflow_project, input.workflow_signal_type,

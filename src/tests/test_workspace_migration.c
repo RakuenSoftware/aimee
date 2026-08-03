@@ -11,7 +11,7 @@
  * Note the migration does NOT promise WHICH colliding actor keeps the plain
  * name (it follows readdir order); it promises only that neither is lost and
  * that the renamed one is logged. The assertions below reflect that. */
-#include "workspace_scope.h"
+#include "modules/workspace/workspace_scope.h"
 
 #include <assert.h>
 #include <dirent.h>

@@ -17,7 +17,7 @@
 #include "kind_lifecycle.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include "../db2/db2_internal.h"
 #include "../db2/lifecycle.h" /* db2_set_embedding_dim (embedder-aware semantic recall) */
 #include "../db2/entity_edges.h"

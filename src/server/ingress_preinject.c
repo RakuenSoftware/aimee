@@ -208,6 +208,13 @@ static long ingress_elapsed_ms(const struct timespec *start, const struct timesp
           (long)(end->tv_nsec - start->tv_nsec) / 1000000L;
 }
 
+static ingress_confidence_provider_fn g_confidence_provider;
+
+void ingress_preinject_register_confidence_provider(ingress_confidence_provider_fn provider)
+{
+   g_confidence_provider = provider;
+}
+
 /* A stable, non-reversible fingerprint of the turn query (FNV-1a 64-bit, hex).
  * Recorded on the retrieval_event instead of the raw prompt so the audit row
  * correlates turns (same query → same fingerprint) without persisting user
@@ -226,13 +233,11 @@ static void ingress_query_fingerprint(const char *q, char *out, size_t len)
 
 const char *ingress_preinject_confidence(double top_score)
 {
-   /* Thresholds chosen so a clear top hit is "high", a plausible-but-thin match
-    * is "medium", and a weak match is "low". Clamped to the documented tiers. */
-   if (top_score >= 0.66)
-      return "high";
-   if (top_score >= 0.33)
-      return "medium";
-   return "low";
+   const char *confidence = NULL;
+   if (!g_confidence_provider || g_confidence_provider(top_score, &confidence) != 0 ||
+       !confidence)
+      return "low";
+   return confidence;
 }
 
 char *ingress_preinject_format_envelope(const char *context_block, const char *confidence)

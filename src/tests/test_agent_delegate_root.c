@@ -8,8 +8,8 @@
 
 #include "db1.h"
 #include "agent_tasks.h"
-#include "agent_tools.h"
-#include "workspace_provider.h"
+#include <aimee/tools/agent_tools.h>
+#include "modules/workspace/workspace_provider.h"
 #include "cJSON.h"
 #include "platform_path.h"
 #include "platform_test_util.h"

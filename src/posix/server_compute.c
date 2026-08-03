@@ -5,7 +5,7 @@
 #include "primary_cli_ingestor.h" /* S2 binding: enforce-before-send on the tmux CLI TUI turn */
 #include "agent_config.h"
 #include "agent_exec.h"
-#include "agent_tools.h"   /* agent_tools_set_tool_event_cb — stream tool events */
+#include <aimee/tools/agent_tools.h>   /* agent_tools_set_tool_event_cb — stream tool events */
 #include "router_advise.h" /* S1 advisory request->workflow router hook */
 #include "cli_codex.h"
 #include "cli_session.h" /* cli_session_set_stream_cb — incremental tmux CLI streaming */
@@ -14,8 +14,8 @@
 #include "webchat_live.h" /* db1_webchat_live_set — mirror the live turn for browser polling */
 #include "log.h"
 #include "primary_session_adapter.h"
-#include "workspace.h" /* session_isolation_target — per-session worktree redirect */
-#include "workspace_provider.h"
+#include <aimee/workspace/workspace.h> /* session_isolation_target — per-session worktree redirect */
+#include "modules/workspace/workspace_provider.h"
 
 /* Defined in agent_runtime_tmux.c (no shared header; agent_runtime.c forward-
  * declares it the same way). Drives the standard CLI agent over a tmux session,
@@ -30,7 +30,7 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
 #include "util.h"
 #include "presence.h"
 #include "turn_registry.h"
-#include "workspace_turn.h"
+#include "modules/workspace/workspace_turn.h"
 #include "cJSON.h"
 #include "token_tracker.h"
 #include "reasoning_cap.h"

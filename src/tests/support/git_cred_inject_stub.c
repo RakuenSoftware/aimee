@@ -6,7 +6,7 @@
  * these tests want. Binaries that need the real behaviour
  * (unit-test-git-cred-inject / -git-ops / -git-project) link the real object and
  * must NOT also link this TU. */
-#include "git_cred_inject.h"
+#include "modules/git/git_cred_inject.h"
 
 #include <stddef.h>
 #include <stdio.h>

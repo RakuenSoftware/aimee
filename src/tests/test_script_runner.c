@@ -1,5 +1,5 @@
 #include "aimee.h"
-#include "agent_tools.h"
+#include <aimee/tools/agent_tools.h>
 #include "cJSON.h"
 #include "log.h"
 #include <assert.h>

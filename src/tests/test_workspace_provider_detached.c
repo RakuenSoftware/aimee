@@ -2,7 +2,7 @@
  * op to a JSON request and parse the runner's JSON response back into the
  * provider contract — binary-safe (base64), via a pluggable transport. A mock
  * transport stands in for the client-side runner. */
-#include "workspace_provider_detached.h"
+#include "modules/workspace/workspace_provider_detached.h"
 #include "cJSON.h"
 
 #include <assert.h>

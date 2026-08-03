@@ -7,7 +7,7 @@
 #include "json_fluent.h"
 #include "presence.h"
 #include "turn_registry.h"
-#include "git_verify.h"
+#include "modules/git/git_verify.h"
 #include "kb_client.h"
 #include <ctype.h>
 #include <dirent.h>

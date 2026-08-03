@@ -18,7 +18,7 @@
 #include "guardrails.h" /* git_repo_root, is_aimee_worktree_path */
 #include "log.h"
 #include "util.h"      /* run_cmd, run_cmd_set_cwd */
-#include "workspace.h" /* worktree_* helpers */
+#include <aimee/workspace/workspace.h> /* worktree_* helpers */
 #include "cJSON.h"
 #include <errno.h>
 #include <stdio.h>

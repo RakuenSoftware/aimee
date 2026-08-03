@@ -7,14 +7,14 @@
 #include "db2/memory_relations.h"
 #include "db2/rules.h"
 #endif
-#include "learning_evidence.h"
+#include "modules/learning/learning_evidence.h"
 #include "memory.h"
 #include "memory_context_internal.h"
 #include "memory_ontology.h"
 #include "cJSON.h"
 #include "log.h"
 #include "platform_process.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include "kb.h"
 #include <ctype.h>
 #include <limits.h>

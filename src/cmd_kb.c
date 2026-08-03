@@ -9,7 +9,7 @@
 #include "config.h"
 #include "memory.h"
 #include "headers/curator_profile.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

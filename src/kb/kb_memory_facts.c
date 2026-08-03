@@ -19,7 +19,7 @@
 #include "fact_grounding.h"
 #include "rel_types.h"       /* seed ontology: rel_types_seed_* (extractor constraint, §7) */
 #include "memory.h"          /* memory_t */
-#include "memory_ontology.h" /* NODE_* */
+#include "modules/memory/memory_ontology.h" /* NODE_* */
 
 #include <ctype.h>
 #include <stdio.h>

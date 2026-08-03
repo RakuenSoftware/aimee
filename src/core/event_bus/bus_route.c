@@ -119,6 +119,20 @@ bus_host_result_t bus_host_serve_kind(bus_host_t *h, uint32_t slot, uint32_t eve
    return BUS_HOST_OK;
 }
 
+int bus_host_kind_has_server(const bus_host_t *h, uint32_t event_kind)
+{
+   if (!h || !h->slots)
+      return 0;
+   for (uint32_t i = 0; i < BUS_HOST_MAX_KINDS; ++i)
+   {
+      const bus_kind_t *kind = &h->kinds[i];
+      if (!kind->in_use || kind->kind != event_kind || kind->server == KIND_SERVER_NONE)
+         continue;
+      return (uint32_t)kind->server < h->cfg.max_slots && h->slots[kind->server].in_use;
+   }
+   return 0;
+}
+
 bus_host_result_t bus_host_enforce_grants(bus_host_t *h, uint32_t slot)
 {
    if (!h || slot >= h->cfg.max_slots || !h->slots[slot].in_use)
@@ -259,7 +273,8 @@ void bus_route_forget_slot(bus_host_t *h, uint32_t slot)
 
 /* ---- pending request table ---- */
 
-static bus_pending_t *pending_add(bus_host_t *h, uint64_t corr, uint32_t requester, uint32_t server)
+static bus_pending_t *pending_add(bus_host_t *h, uint64_t corr, uint32_t requester,
+                                  uint32_t server, int request_open)
 {
    for (uint32_t i = 0; i < BUS_HOST_MAX_PENDING; i++)
    {
@@ -269,6 +284,7 @@ static bus_pending_t *pending_add(bus_host_t *h, uint64_t corr, uint32_t request
          h->pending[i].correlation_id = corr;
          h->pending[i].requester = requester;
          h->pending[i].server = server;
+         h->pending[i].request_open = request_open;
          return &h->pending[i];
       }
    }
@@ -281,6 +297,25 @@ static bus_pending_t *pending_find(bus_host_t *h, uint64_t corr)
       if (h->pending[i].in_use && h->pending[i].correlation_id == corr)
          return &h->pending[i];
    return NULL;
+}
+
+/* Register a new request or advance the only legal continuation: the same
+ * requester/server pair after a fragment explicitly marked MORE. Correlation
+ * reuse while a complete request is awaiting its reply is rejected. */
+static bus_pending_t *pending_request(bus_host_t *h, const bus_frame_t *frame,
+                                      uint32_t requester, uint32_t server)
+{
+   bus_pending_t *pending = pending_find(h, frame->correlation_id);
+   if (pending)
+   {
+      if (pending->requester != requester || pending->server != server ||
+          !pending->request_open)
+         return NULL;
+      pending->request_open = (frame->hdr_flags & BUS_F_MORE) != 0;
+      return pending;
+   }
+   return pending_add(h, frame->correlation_id, requester, server,
+                      (frame->hdr_flags & BUS_F_MORE) != 0);
 }
 
 /* ---- routing ---- */
@@ -468,7 +503,7 @@ static int route_arena_request(bus_host_t *h, uint32_t src, bus_frame_t *f, uint
          emit_control(h, (int)src, BUS_KIND_CAPABILITY_ABSENT, f->correlation_id, NULL, 0);
          return 1;
       }
-      if (!pending_add(h, f->correlation_id, src, (uint32_t)k->server))
+      if (!pending_request(h, f, src, (uint32_t)k->server))
       {
          bus_arena_publish(&h->arena, lease, NULL, 0); /* reclaim: no room to track it */
          emit_control(h, (int)src, BUS_KIND_CAPABILITY_ABSENT, f->correlation_id, NULL, 0);
@@ -526,7 +561,7 @@ static int route_arena_reply(bus_host_t *h, uint32_t src, bus_frame_t *f, uint64
          return 1;
       }
       bus_pending_t *p = pending_find(h, f->correlation_id);
-      if (!p || p->server != src || !h->slots[p->requester].in_use)
+      if (!p || p->server != src || p->request_open || !h->slots[p->requester].in_use)
       {
          /* No matching request, a forged reply, or the requester departed: nothing
           * to deliver. Reclaim the lease; retire a real-but-undeliverable pending. */
@@ -610,7 +645,7 @@ static int route_fresh(bus_host_t *h, uint32_t src, bus_frame_t *f, const uint8_
          }
          return 0; /* block: retry next pump */
       }
-      if (!pending_add(h, f->correlation_id, src, (uint32_t)k->server))
+      if (!pending_request(h, f, src, (uint32_t)k->server))
       {
          emit_control(h, (int)src, BUS_KIND_CAPABILITY_ABSENT, f->correlation_id, NULL, 0);
          return 1;
@@ -622,7 +657,7 @@ static int route_fresh(bus_host_t *h, uint32_t src, bus_frame_t *f, const uint8_
    if (f->hdr_flags & BUS_F_REPLY)
    {
       bus_pending_t *p = pending_find(h, f->correlation_id);
-      if (!p || p->server != src)
+      if (!p || p->server != src || p->request_open)
          return 1; /* no matching request, or a forged reply; drop */
       uint32_t requester = p->requester;
       if (!h->slots[requester].in_use)
@@ -633,7 +668,8 @@ static int route_fresh(bus_host_t *h, uint32_t src, bus_frame_t *f, const uint8_
       bus_slot_t *d = &h->slots[requester];
       if (!has_room(d, 0))
          return 0; /* block until the requester has room; keep the pending entry */
-      p->in_use = 0;
+      if (!(f->hdr_flags & BUS_F_MORE))
+         p->in_use = 0;
       put(h, d, f, inl);
       return 1;
    }
@@ -641,11 +677,18 @@ static int route_fresh(bus_host_t *h, uint32_t src, bus_frame_t *f, const uint8_
    if (f->hdr_flags & BUS_F_CANCEL)
    {
       bus_pending_t *p = pending_find(h, f->correlation_id);
-      if (p && p->requester == src && h->slots[p->server].in_use)
+      if (p && p->requester == src)
       {
-         bus_slot_t *d = &h->slots[p->server];
-         if (has_room(d, 0))
-            put(h, d, f, inl); /* best-effort */
+         if (h->slots[p->server].in_use)
+         {
+            bus_slot_t *d = &h->slots[p->server];
+            if (has_room(d, 0))
+               put(h, d, f, inl); /* best-effort */
+         }
+         /* The requester has abandoned the call and never waits for a terminal
+          * reply. Retire the correlation now, including a partially assembled
+          * fragmented request, so cancellation cannot exhaust the pending table. */
+         p->in_use = 0;
       }
       return 1;
    }

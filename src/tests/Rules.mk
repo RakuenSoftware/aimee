@@ -705,6 +705,33 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-jwks-publication
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-mgmt-jwks-cache
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-offline-hardening
 TEST_TARGETS += $(TESTPREFIX)/unit-test-communication
+TEST_TARGETS += $(TESTPREFIX)/unit-test-process-module-handlers
+
+MODULE_HANDLER_TEST_OBJS = \
+   $(OBJDIR)/tests/module_handlers/memory.o \
+   $(OBJDIR)/tests/module_handlers/learning.o \
+   $(OBJDIR)/tests/module_handlers/delegates.o \
+   $(OBJDIR)/tests/module_handlers/tools.o \
+   $(OBJDIR)/tests/module_handlers/workspace.o \
+   $(OBJDIR)/tests/module_handlers/git.o \
+   $(OBJDIR)/tests/module_handlers/skills.o
+
+define module_handler_test_object
+$(OBJDIR)/tests/module_handlers/$(1).o: modules/$(2)/module_adapter.c
+	@mkdir -p $$(dir $$@)
+	$$(CC) $$(TEST_C_FLAGS) -Daimee_module_handler=aimee_$(1)_module_handler -c -o $$@ $$<
+endef
+$(eval $(call module_handler_test_object,memory,memory))
+$(eval $(call module_handler_test_object,learning,learning))
+$(eval $(call module_handler_test_object,delegates,delegates))
+$(eval $(call module_handler_test_object,tools,tools))
+$(eval $(call module_handler_test_object,workspace,workspace))
+$(eval $(call module_handler_test_object,git,git))
+$(eval $(call module_handler_test_object,skills,skills))
+
+$(TESTPREFIX)/unit-test-process-module-handlers: \
+   $(OBJDIR)/tests/test_process_module_handlers.o $(MODULE_HANDLER_TEST_OBJS)
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
 
 # The shared connection archive is the only implementation of endpoint,
 # credential, and OpenSSL mTLS primitives. Tests may link it through L_CORE,
@@ -1749,7 +1776,7 @@ $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o 
                       $(OBJDIR)/modules/memory/memory_redirect.o $(OBJDIR)/harness_memory_scope.o $(OBJDIR)/harness_memory_audit.o \
                       $(OBJDIR)/tests/support/delegate_child_env_export_stub.o \
 	                                $(OBJDIR)/server/server_config.o $(OBJDIR)/modules/config/config_fields.o $(OBJDIR)/modules/config/config_accessors_0.o $(OBJDIR)/modules/config/config_accessors_1.o $(OBJDIR)/modules/config/config_accessors_2.o $(OBJDIR)/modules/config/config_accessors_3.o $(OBJDIR)/modules/config/config_accessors_4.o $(OBJDIR)/modules/config/config_accessors_5.o $(OBJDIR)/modules/config/config_accessors_6.o $(OBJDIR)/modules/config/config_accessors_7.o \
-	                                $(OBJDIR)/server/modules/skills/skill_review.o $(OBJDIR)/tests/support/skill_jobs_stub.o \
+	                                $(OBJDIR)/tests/support/skill_jobs_stub.o \
 	                                $(OBJDIR)/server/server_hooks.o $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_bearer_auth.o $(OBJDIR)/server/server_http_management.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/server_http_mgmt_read_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/server/server_http_authz.o $(OBJDIR)/modules/vault/vault_principal.o \
 	                                $(OBJDIR)/tests/support/workflow_api_stub.o \
 	                                $(OBJDIR)/tests/support/vault_handlers_stub.o \
@@ -3996,7 +4023,7 @@ $(TESTPREFIX)/unit-test-skill: $(OBJDIR)/tests/test_skill.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # test_skill_review.c existed but was never registered, so it never ran: it
-# covers skill_review_should_fire() (live at server/server.c) and the
+# covers the repository-owned review predicate directly and the
 # skill_body_poison_check() prompt-injection gate reached via
 # skill_manage_create(). Untested security checks are how they rot.
 $(TESTPREFIX)/unit-test-skill-review: $(OBJDIR)/tests/test_skill_review.o \
@@ -4230,7 +4257,8 @@ $(TESTPREFIX)/unit-test-request-context: $(OBJDIR)/tests/test_request_context.o 
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-response-dedup: $(OBJDIR)/tests/test_response_dedup.o \
-                               $(OBJDIR)/server/response_dedup.o
+                               $(OBJDIR)/server/response_dedup.o \
+                               $(OBJDIR)/modules/response-composition/module_adapter.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-anthropic-shape: $(OBJDIR)/tests/test_anthropic_shape.o \

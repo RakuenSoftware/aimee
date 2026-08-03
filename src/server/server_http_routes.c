@@ -10,8 +10,8 @@
 #include "server.h"         /* CAP_* / CAPS_* capability bits, server_capability_for_method */
 #include "server_conn_io.h" /* transport-aware fd I/O (native-TLS phase 1) */
 #include "server_tls.h"     /* native TLS termination (phase 1b) */
-#include "workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
-#include "forge_credentials.h"         /* forge_cred_install for the /v1 token-install route */
+#include "modules/workspace/workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
+#include "modules/git/forge_credentials.h"         /* forge_cred_install for the /v1 token-install route */
 #include <time.h>
 #include "persona.h"
 #include "role_templates.h"
@@ -68,15 +68,15 @@ __attribute__((weak)) int server_agent_management_set_enabled(const char *name, 
 }
 /* Route-handler deps used below but not needed by server_http.c's own body
  * (kept here, not in server_http.c, to respect its 2000-line limit). */
-#include "git_forge_vault.h" /* GIT_FORGE_VAULT_AGENT/SSHKEY_CRED — per-webuser ssh-key vault */
-#include "git_host_cred.h"   /* per-host git credential store for /v1/git/credentials */
-#include "git_ops.h"         /* git_ops_run for /v1/workspace/git (WP-E) */
-#include "git_ssh_agent.h"   /* git_ssh_agent_stop — drop live key handles on revoke */
+#include "modules/git/git_forge_vault.h" /* GIT_FORGE_VAULT_AGENT/SSHKEY_CRED — per-webuser ssh-key vault */
+#include "modules/git/git_host_cred.h"   /* per-host git credential store for /v1/git/credentials */
+#include <aimee/git/git_ops.h>         /* git_ops_run for /v1/workspace/git (WP-E) */
+#include "modules/git/git_ssh_agent.h"   /* git_ssh_agent_stop — drop live key handles on revoke */
 #include "vault_service.h"   /* vault_service_set/delete for the per-webuser ssh-key route */
-#include "git_project.h"     /* git_project_clone for /v1/workspace/clone (WP-D) */
-#include "git_org_repos.h"   /* git_org_repos_list for /v1/workspace/org-repos */
+#include "modules/git/git_project.h"     /* git_project_clone for /v1/workspace/clone (WP-D) */
+#include "modules/git/git_org_repos.h"   /* git_org_repos_list for /v1/workspace/org-repos */
 #include "webuser_editor.h"  /* webuser_editor_ensure for /v1/workspace/editor (WP-I) */
-#include "workspace_scope.h" /* ws_scope_user_root — project workspace root */
+#include "modules/workspace/workspace_scope.h" /* ws_scope_user_root — project workspace root */
 #include "webchat_live.h"    /* db1_webchat_live_get — the browser's live-turn poll */
 #include "index.h"           /* index_scan_project after a webuser clone (WP-D) */
 #include "kb_client.h"       /* kb_client_index_scan — push webuser clones into aimee-kb */

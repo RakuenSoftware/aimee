@@ -7,7 +7,7 @@
 #include "lifecycle.h"
 #include "log.h"
 #include "memory.h"               /* memory_embed_text — in-process HTTP probe */
-#include "memory_core_internal.h" /* memory_embed_command_is_http */
+#include "modules/memory/memory_core_internal.h" /* memory_embed_command_is_http */
 
 #include <stdio.h>
 #include <stdlib.h>

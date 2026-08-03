@@ -2,7 +2,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
-#include "memory_provider.h"
+#include "modules/memory/memory_provider.h"
 
 int main(void)
 {

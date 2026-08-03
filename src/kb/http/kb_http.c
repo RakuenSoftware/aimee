@@ -60,7 +60,7 @@
 #include "kb_intel_payload.h"
 #include "kb/kb_login_throttle.h"
 #include "log.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include "cJSON.h"
 #include "kb_http_json.h"
 #include <aimee/core/connection/auth.h>

@@ -19,7 +19,7 @@ const (
 	// WireMagic is "BUS0" little-endian.
 	WireMagic uint32 = 0x30535542
 	// WireVersion is the encoding version this build speaks.
-	WireVersion uint16 = 2
+	WireVersion uint16 = 3
 	// HdrLen is the fixed frame header size, frozen by the vectors.
 	HdrLen = 64
 	// MaxPayload bounds a single event's payload.
@@ -35,10 +35,11 @@ const (
 	FReply        uint16 = 0x0010
 	FCancel       uint16 = 0x0020
 	FControl      uint16 = 0x0040
+	FMore         uint16 = 0x0080
 
 	fPlacementMask = FInline | FArena
 	fPatternMask   = FNotification | FRequest | FReply | FCancel
-	fKnownMask     = fPlacementMask | fPatternMask | FControl
+	fKnownMask     = fPlacementMask | fPatternMask | FControl | FMore
 )
 
 // Reserved event kinds; module kinds start at KindModuleBase.
@@ -134,6 +135,12 @@ func (f *Frame) Validate() Result {
 		}
 		if f.PayloadRef != 0 {
 			return ErrPayloadLen
+		}
+	}
+	if f.HdrFlags&FMore != 0 {
+		pattern := f.HdrFlags & fPatternMask
+		if (pattern != FRequest && pattern != FReply) || placement != FInline || f.PayloadLen == 0 {
+			return ErrFlags
 		}
 	}
 	// generation is an ARENA-only field (v2); non-arena frames must carry 0.

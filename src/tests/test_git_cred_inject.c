@@ -1,11 +1,11 @@
 /* test_git_cred_inject.c — WP-C: a webchat user's git op gets their vaulted
  * forge token injected into the git child env (GH_TOKEN + GIT_ASKPASS), sourced
  * autonomously from the sealed vault, with any inherited GH_TOKEN dropped. */
-#include "git_cred_inject.h"
-#include "git_forge_vault.h"
-#include "git_host_cred.h"
-#include "git_host_resolve.h"
-#include "git_ssh_agent.h"
+#include "modules/git/git_cred_inject.h"
+#include "modules/git/git_forge_vault.h"
+#include "modules/git/git_host_cred.h"
+#include "modules/git/git_host_resolve.h"
+#include "modules/git/git_ssh_agent.h"
 #include "util.h" /* safe_exec_capture_cwd_env_fd_timeout — fd-mode invariant test */
 #include "vault_kek_cache.h"
 #include "vault_service.h"

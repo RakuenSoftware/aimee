@@ -1,9 +1,9 @@
 /* git_ops.c — per-project git operations for webchat users. See git_ops.h. */
-#include "git_ops.h"
+#include <aimee/git/git_ops.h>
 #include "git_cred_inject.h" /* git_cred_inject_build_env / _free_env */
 #include "git_pr_api.h"      /* git_pr_create_via_api — in-process REST open-PR */
 #include "util.h"            /* safe_exec_capture_cwd_env_timeout */
-#include "workspace_scope.h" /* ws_scope_project_path */
+#include "modules/workspace/workspace_scope.h" /* ws_scope_project_path */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -242,6 +242,23 @@ static int resolve_session_dir(const char *principal, const char *project, const
    return 0;
 }
 
+static git_ops_classifier_fn g_classifier;
+
+void git_ops_register_classifier(git_ops_classifier_fn classifier)
+{
+   g_classifier = classifier;
+}
+
+static int classify_operation(const char *op, aimee_git_classification_t *out)
+{
+   if (!op || !out)
+      return -1;
+   if (g_classifier)
+      return g_classifier(op, out);
+   memset(out, 0, sizeof(*out));
+   return 0;
+}
+
 int git_ops_session_dir(const char *principal, const char *project, const char *session_id,
                         char *out, size_t out_len, char *err, size_t errlen)
 {
@@ -287,12 +304,20 @@ int git_ops_run_session(const char *principal, const char *project, const char *
       return -1;
    }
 
+   aimee_git_classification_t classification;
+   if (classify_operation(op, &classification) != 0 ||
+       classification.operation == AIMEE_GIT_OP_UNSUPPORTED)
+   {
+      snprintf(err, errlen, "unsupported op");
+      return -1;
+   }
+
    char dir[GO_PATH_MAX];
    if (resolve_session_dir(principal, project, session_id, dir, sizeof(dir), err, errlen) != 0)
       return -1;
 
    /* --- commit is two steps (stage all, then commit with the message) --- */
-   if (strcmp(op, "commit") == 0)
+   if (classification.operation == AIMEE_GIT_OP_COMMIT)
    {
       if (!text_arg || !text_arg[0] || strlen(text_arg) > 4000)
       {
@@ -338,7 +363,7 @@ int git_ops_run_session(const char *principal, const char *project, const char *
     * Like every git_ops op this is the webuser acting on their OWN connected repo
     * (no agent branch-ownership/verify gate), confined by the principal-scoped
     * project resolution + route caps + AIMEE_WEBCHAT_GIT. GitHub origins only. */
-   if (strcmp(op, "pr") == 0)
+   if (classification.operation == AIMEE_GIT_OP_PR)
    {
       if (text_arg && strlen(text_arg) > 256)
       {
@@ -355,17 +380,17 @@ int git_ops_run_session(const char *principal, const char *project, const char *
 
    /* --- single-command ops: build argv + cred requirement --- */
    const char *argv[8] = {0};
-   int needs_cred = 0;
+   int needs_cred = classification.needs_credentials;
    char nbuf[16];
 
-   if (strcmp(op, "status") == 0)
+   if (classification.operation == AIMEE_GIT_OP_STATUS)
    {
       argv[0] = "git";
       argv[1] = "status";
       argv[2] = "--porcelain=v1";
       argv[3] = "-b";
    }
-   else if (strcmp(op, "log") == 0)
+   else if (classification.operation == AIMEE_GIT_OP_LOG)
    {
       int n = (num_arg > 0) ? num_arg : GO_LOG_DEFAULT;
       if (n > GO_LOG_MAX)
@@ -377,39 +402,36 @@ int git_ops_run_session(const char *principal, const char *project, const char *
       argv[3] = "-n";
       argv[4] = nbuf;
    }
-   else if (strcmp(op, "diff") == 0)
+   else if (classification.operation == AIMEE_GIT_OP_DIFF)
    {
       argv[0] = "git";
       argv[1] = "diff";
    }
-   else if (strcmp(op, "branch") == 0)
+   else if (classification.operation == AIMEE_GIT_OP_BRANCH)
    {
       argv[0] = "git";
       argv[1] = "branch";
       argv[2] = "--list";
       argv[3] = "--no-color";
    }
-   else if (strcmp(op, "fetch") == 0)
+   else if (classification.operation == AIMEE_GIT_OP_FETCH)
    {
       argv[0] = "git";
       argv[1] = "fetch";
       argv[2] = "--prune";
-      needs_cred = 1;
    }
-   else if (strcmp(op, "pull") == 0)
+   else if (classification.operation == AIMEE_GIT_OP_PULL)
    {
       argv[0] = "git";
       argv[1] = "pull";
       argv[2] = "--ff-only";
-      needs_cred = 1;
    }
-   else if (strcmp(op, "push") == 0)
+   else if (classification.operation == AIMEE_GIT_OP_PUSH)
    {
       argv[0] = "git";
       argv[1] = "push";
-      needs_cred = 1;
    }
-   else if (strcmp(op, "checkout") == 0)
+   else if (classification.operation == AIMEE_GIT_OP_CHECKOUT)
    {
       if (!ref_name_valid(text_arg))
       {

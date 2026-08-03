@@ -1,4 +1,5 @@
 #include <aimee/delegates/delegate_role.h>
+#include <aimee/delegates/module_api.h>
 #include "role_templates.h" /* role_template_max_turns (per-role cap) */
 
 #include <string.h>
@@ -20,6 +21,13 @@ static const struct
     {"classify-score", "reason"}, {"planner", "plan"},
     {"planning", "plan"},         {NULL, NULL},
 };
+
+static delegate_role_canonicalizer_fn g_canonicalizer;
+
+void delegate_role_register_canonicalizer(delegate_role_canonicalizer_fn canonicalizer)
+{
+   g_canonicalizer = canonicalizer;
+}
 
 static int delegate_agent_supports_role(const agent_t *agent, const char *role)
 {
@@ -90,6 +98,13 @@ const char *delegate_role_canonicalize(const char *role)
 {
    if (!role || !role[0])
       return role;
+   if (g_canonicalizer)
+   {
+      static _Thread_local char canonical[AIMEE_DELEGATES_ROLE_MAX + 1];
+      if (g_canonicalizer(role, canonical, sizeof(canonical)) == 0)
+         return canonical;
+      return ""; /* required module failed: unknown role paths fail closed */
+   }
    for (int i = 0; g_role_aliases[i].alias; i++)
    {
       if (strcmp(role, g_role_aliases[i].alias) == 0)

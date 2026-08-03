@@ -22,6 +22,7 @@
 #define TEST_STAGE 1U
 #define MODULE_REF 7U
 #define CALLER_REF 90U
+#define LARGE_BODY (128U * 1024U + 37U)
 
 typedef struct
 {
@@ -184,6 +185,25 @@ int main(void)
           AIMEE_MODULE_CALL_OK);
    assert(body_len == 11 && memcmp(body, "real-result", 11) == 0);
 
+   uint8_t *large_request = malloc(LARGE_BODY);
+   uint8_t *large_response = malloc(LARGE_BODY);
+   assert(large_request != NULL && large_response != NULL);
+   for (uint32_t i = 0; i < LARGE_BODY; ++i)
+      large_request[i] = (uint8_t)((i * 131U + 17U) & 0xffU);
+   assert(aimee_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1007, 0,
+                                   large_request, LARGE_BODY, large_response, LARGE_BODY,
+                                   &body_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(body_len == LARGE_BODY && memcmp(large_request, large_response, LARGE_BODY) == 0);
+
+   /* A too-small destination still drains every response fragment and reports
+    * the complete response length, leaving the next correlation usable. */
+   assert(aimee_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1008, 0,
+                                   large_request, LARGE_BODY, body, sizeof body, &body_len, NULL,
+                                   NULL) == AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE);
+   assert(body_len == LARGE_BODY);
+   free(large_response);
+   free(large_request);
+
    assert(aimee_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1002, 1, "late", 4,
                                    body, sizeof body, &body_len, NULL, NULL) ==
           AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);
@@ -224,6 +244,6 @@ int main(void)
    bus_host_destroy(&host);
    pthread_mutex_destroy(&host_lock);
    assert(rmdir(directory) == 0);
-   puts("module runtime: core dispatch, deadline, and cancellation passed");
+   puts("module runtime: dispatch, fragmented payloads, deadline, and cancellation passed");
    return 0;
 }

@@ -10,7 +10,7 @@
 #include "db1.h"
 #include "db2.h"
 #include "db2_test_shim.h"
-#include "memory_ontology.h"
+#include "modules/memory/memory_ontology.h"
 #include "../db2/bandit.h"
 #include "../db2/db2_internal.h"
 #include "../db2/db_postgres.h"

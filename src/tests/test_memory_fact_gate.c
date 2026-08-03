@@ -1,6 +1,6 @@
 /* test_memory_fact_gate.c: the typed-fact write gate's pure type validation
  * (typed-fact §1 / P1). */
-#include "memory_fact_gate.h"
+#include "modules/memory/memory_fact_gate.h"
 #include <assert.h>
 #include <stdio.h>
 

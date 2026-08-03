@@ -9,7 +9,7 @@
 #include "aimee.h"
 #include "cmd_memory_internal.h"
 #include "commands.h"
-#include "memory_profile_pack.h"
+#include "modules/memory/memory_profile_pack.h"
 #include "cJSON.h"
 #include "json_fluent.h"
 

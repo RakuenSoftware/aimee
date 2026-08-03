@@ -22,10 +22,14 @@
     "src/modules/workspace/workspace_runner_queue.c",
     "src/modules/workspace/workspace_runner_registry.c",
     "src/modules/workspace/workspace_scope.c",
-    "src/modules/workspace/workspace_turn.c"
+    "src/modules/workspace/workspace_turn.c",
+    "src/modules/workspace/module_adapter.c"
+  ],
+  "public_headers": [
+    "src/modules/workspace/include/aimee/workspace/module_api.h",
+    "src/modules/workspace/include/aimee/workspace/workspace.h"
   ],
   "private_headers": [
-    "src/modules/workspace/workspace.h",
     "src/modules/workspace/workspace_handle.h",
     "src/modules/workspace/workspace_manifest.h",
     "src/modules/workspace/workspace_mirror.h",

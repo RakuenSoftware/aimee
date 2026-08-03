@@ -10,7 +10,7 @@
 #include "config.h"
 #include "fact_ingest.h"     /* db2_typed_fact_ingress (typed-fact §4/§6/§7 ingress) */
 #include "fact_recall.h"     /* db2_fact_recall_in_query (read-only §7 recall) */
-#include "memory_pii_gate.h" /* memory_pii_turn_requests_sensitive */
+#include "modules/memory/memory_pii_gate.h" /* memory_pii_turn_requests_sensitive */
 #include "kb_payload.h"      /* db2_kb_async_enqueue (background memory_facts job) */
 #include "decision_log.h"
 #include "memory.h"

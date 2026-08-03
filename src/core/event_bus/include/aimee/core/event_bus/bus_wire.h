@@ -34,8 +34,12 @@
  * the lease id (not an arena offset — the offset is the lease table's business,
  * retrieved via bus_arena_read_ptr(lease_id, generation)). HDR_LEN is unchanged;
  * a NON-arena v2 frame is byte-identical to v1 (generation is 0, the reserved
- * bytes were already 0), so only arena-frame vectors change. */
-#define BUS_WIRE_VERSION 2
+ * bytes were already 0), so only arena-frame vectors change.
+ *
+ * v3 adds BUS_F_MORE for ordered fragments of one correlated request or reply.
+ * The fixed layout is unchanged; the host keeps the correlation pending until
+ * the final fragment (the first frame without BUS_F_MORE) is delivered. */
+#define BUS_WIRE_VERSION 3
 
 /* Frozen by the vectors. Every frame is exactly this many bytes. */
 #define BUS_WIRE_HDR_LEN 64
@@ -53,10 +57,12 @@
 #define BUS_F_REPLY        0x0010u /* correlated; answers a request */
 #define BUS_F_CANCEL       0x0020u /* correlated; cancels an outstanding request */
 #define BUS_F_CONTROL      0x0040u /* control-class (D6): never shed, reserved credit */
+#define BUS_F_MORE         0x0080u /* more inline request/reply fragments follow */
 
 #define BUS_F_PLACEMENT_MASK (BUS_F_INLINE | BUS_F_ARENA)
 #define BUS_F_PATTERN_MASK   (BUS_F_NOTIFICATION | BUS_F_REQUEST | BUS_F_REPLY | BUS_F_CANCEL)
-#define BUS_F_KNOWN_MASK     (BUS_F_PLACEMENT_MASK | BUS_F_PATTERN_MASK | BUS_F_CONTROL)
+#define BUS_F_KNOWN_MASK \
+   (BUS_F_PLACEMENT_MASK | BUS_F_PATTERN_MASK | BUS_F_CONTROL | BUS_F_MORE)
 
 /* Reserved event kinds. Kinds below BUS_KIND_MODULE_BASE are the bus's own;
  * the event-contract schema allocates everything at or above it. Keeping the

@@ -13,10 +13,10 @@
 #include "db2.h"
 #include "db2_test_shim.h"
 #include "server/obs_bus_adapter.h"
-#include "workspace.h"
-#include "workspace_turn.h" /* workspace_turn_set_container_bound_for_test */
+#include <aimee/workspace/workspace.h>
+#include "modules/workspace/workspace_turn.h" /* workspace_turn_set_container_bound_for_test */
 #include "platform_test_util.h"
-#include "git_verify.h"
+#include "modules/git/git_verify.h"
 
 /* Per-case in-memory DB2 backing for test bodies that round-trip
  * memory-subsystem state. The shim helper owns the sqlite handle and

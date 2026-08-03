@@ -2,6 +2,10 @@
 #define GIT_OPS_H 1
 
 #include <stddef.h>
+#include <aimee/git/module_api.h>
+
+typedef int (*git_ops_classifier_fn)(const char *op, aimee_git_classification_t *classification);
+void git_ops_register_classifier(git_ops_classifier_fn classifier);
 
 /* git_ops — run a git operation on a webchat user's project (webchat-git WP-E).
  * The project dir is resolved + validated by workspace_scope (must already

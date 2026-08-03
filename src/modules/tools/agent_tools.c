@@ -1,6 +1,6 @@
 #include "aimee.h"
 #include "util.h"
-#include "agent_tools.h"
+#include <aimee/tools/agent_tools.h>
 #include "aimee_home.h"
 #include <aimee/delegates/delegate_ephemeral_ws.h>
 #include "economizer.h"
@@ -20,9 +20,9 @@
 #include "aimee/protocols/mcp/mcp_client_registry.h"
 #include <aimee/core/connection/socket.h>
 #include <aimee/core/connection/tls_openssl.h>
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include "sandbox_learned.h"
-#include "workspace_provider.h"
+#include "modules/workspace/workspace_provider.h"
 #include "diff.h"
 #include "anchor_snapshot.h"
 #include "dstr.h"

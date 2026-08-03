@@ -12,7 +12,7 @@
 #include "log.h"
 #include "util.h"            /* safe_exec_capture_env */
 #include "util_url.h"        /* util_url_normalize / util_url_is_ssh */
-#include "workspace_scope.h" /* ws_scope_* */
+#include "modules/workspace/workspace_scope.h" /* ws_scope_* */
 #include "ws_registry.h"     /* lifecycle lock + key registry */
 
 #include <dirent.h>

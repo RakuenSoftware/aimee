@@ -111,62 +111,90 @@ aimee_module_call_result_t aimee_module_client_call(
 
    pthread_mutex_lock(&client->lock);
    aimee_module_call_result_t result = AIMEE_MODULE_CALL_TRANSPORT;
-   size_t payload_len = (size_t)AIMEE_MODULE_MESSAGE_HEADER_LEN + request_len;
-   if (payload_len > client->bus->reply.inline_budget)
+   if (client->bus->reply.inline_budget <= AIMEE_MODULE_MESSAGE_HEADER_LEN)
    {
-      result = AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+      result = AIMEE_MODULE_CALL_TRANSPORT;
       goto done;
    }
-   uint8_t *payload = malloc(payload_len);
+   uint32_t chunk_capacity =
+       client->bus->reply.inline_budget - AIMEE_MODULE_MESSAGE_HEADER_LEN;
+   uint8_t *payload = malloc(client->bus->reply.inline_budget);
    if (!payload)
    {
       result = AIMEE_MODULE_CALL_INTERNAL;
       goto done;
    }
    const uint64_t correlation = next_correlation(client);
-   aimee_module_message_t request = {.operation = AIMEE_MODULE_OP_INVOKE,
-                                     .stage_id = stage_id,
-                                     .body_len = request_len,
-                                     .deadline_ns = deadline_ns,
-                                     .trace_id = trace_id};
-   if (aimee_module_message_encode(&request, payload, payload_len) == 0)
-   {
-      free(payload);
-      result = AIMEE_MODULE_CALL_INVALID_ARGUMENT;
-      goto done;
-   }
-   if (request_len)
-      memcpy(payload + AIMEE_MODULE_MESSAGE_HEADER_LEN, request_body, request_len);
-
    const struct timespec idle = {.tv_sec = 0, .tv_nsec = 1000000};
-   for (;;)
+   uint32_t request_offset = 0;
+   int first_fragment = 1;
+   int request_started = 0;
+   while (first_fragment || request_offset < request_len)
    {
-      bus_client_result_t sent =
-          bus_client_request(client->bus, event_kind, correlation, payload, (uint32_t)payload_len);
-      if (sent == BUS_CLIENT_OK)
-         break;
-      if (sent != BUS_CLIENT_WOULD_BLOCK)
-      {
-         free(payload);
-         result = AIMEE_MODULE_CALL_TRANSPORT;
-         goto done;
-      }
+      first_fragment = 0;
       if (cancelled_now(cancelled, cancel_context))
       {
          free(payload);
+         if (request_started)
+            cancel_request(client->bus, event_kind, correlation);
          result = AIMEE_MODULE_CALL_CANCELLED;
          goto done;
       }
       if (deadline_now(deadline_ns))
       {
          free(payload);
+         if (request_started)
+            cancel_request(client->bus, event_kind, correlation);
          result = AIMEE_MODULE_CALL_DEADLINE_EXCEEDED;
          goto done;
       }
-      nanosleep(&idle, NULL);
+      uint32_t remaining = request_len - request_offset;
+      uint32_t part = remaining < chunk_capacity ? remaining : chunk_capacity;
+      int more = remaining > part;
+      size_t payload_len = (size_t)AIMEE_MODULE_MESSAGE_HEADER_LEN + part;
+      aimee_module_message_t request = {.operation = AIMEE_MODULE_OP_INVOKE,
+                                        .stage_id = stage_id,
+                                        .body_len = part,
+                                        .deadline_ns = deadline_ns,
+                                        .trace_id = trace_id};
+      if (aimee_module_message_encode(&request, payload, payload_len) == 0)
+      {
+         free(payload);
+         result = AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+         goto done;
+      }
+      if (part)
+         memcpy(payload + AIMEE_MODULE_MESSAGE_HEADER_LEN,
+                (const uint8_t *)request_body + request_offset, part);
+      for (;;)
+      {
+         bus_client_result_t sent = bus_client_request_fragment(
+             client->bus, event_kind, correlation, payload, (uint32_t)payload_len, more);
+         if (sent == BUS_CLIENT_OK)
+         {
+            request_started = 1;
+            break;
+         }
+         if (sent != BUS_CLIENT_WOULD_BLOCK)
+         {
+            free(payload);
+            if (request_started)
+               cancel_request(client->bus, event_kind, correlation);
+            result = AIMEE_MODULE_CALL_TRANSPORT;
+            goto done;
+         }
+         if (cancelled_now(cancelled, cancel_context) || deadline_now(deadline_ns))
+            break;
+         nanosleep(&idle, NULL);
+      }
+      if (cancelled_now(cancelled, cancel_context) || deadline_now(deadline_ns))
+         continue; /* the top of the loop sends cancellation and returns */
+      request_offset += part;
    }
    free(payload);
 
+   uint32_t response_total = 0;
+   int response_too_large = 0;
    for (;;)
    {
       if (cancelled_now(cancelled, cancel_context))
@@ -226,17 +254,32 @@ aimee_module_call_result_t aimee_module_client_call(
          result = AIMEE_MODULE_CALL_PROTOCOL;
          goto done;
       }
-      *response_len = reply.body_len;
       result = status_result(reply.status);
       if (result != AIMEE_MODULE_CALL_OK)
-         goto done;
-      if (reply.body_len > response_capacity)
       {
-         result = AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE;
+         if ((event.frame.hdr_flags & BUS_F_MORE) || reply.body_len != 0 || response_total != 0)
+            result = AIMEE_MODULE_CALL_PROTOCOL;
          goto done;
       }
+      if (response_total > AIMEE_MODULE_MESSAGE_MAX_BODY - reply.body_len)
+      {
+         result = AIMEE_MODULE_CALL_PROTOCOL;
+         goto done;
+      }
+      uint32_t next_total = response_total + reply.body_len;
       if (reply.body_len)
-         memcpy(response_body, event.payload + AIMEE_MODULE_MESSAGE_HEADER_LEN, reply.body_len);
+      {
+         if (next_total <= response_capacity)
+            memcpy((uint8_t *)response_body + response_total,
+                   event.payload + AIMEE_MODULE_MESSAGE_HEADER_LEN, reply.body_len);
+         else
+            response_too_large = 1;
+      }
+      response_total = next_total;
+      *response_len = response_total;
+      if (event.frame.hdr_flags & BUS_F_MORE)
+         continue;
+      result = response_too_large ? AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE : AIMEE_MODULE_CALL_OK;
       goto done;
    }
 

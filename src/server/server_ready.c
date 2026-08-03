@@ -13,6 +13,7 @@
  *          on demand, this runs on a timer, and a periodic write probe would
  *          make the readiness endpoint its own source of load.
  *   kb   — kb_client_health(). One HTTP call to aimee-kb, off the request path.
+ *   modules — required same-container process modules attached to the local bus.
  *
  * The retrieval contract additionally requires the KB schema/vector collection
  * and embedder advertised by KB health, plus a non-open E5a transport breaker.
@@ -35,6 +36,16 @@
 #include "kb_client.h"
 #include "db1.h"
 #include "log.h"
+#include <aimee/audit/obs_bus.h>
+#include <aimee/delegates/module_api.h>
+#include <aimee/git/module_api.h>
+#include <aimee/learning/module_api.h>
+#include <aimee/memory/module_api.h>
+#include <aimee/response-composition/module_api.h>
+#include <aimee/routing/module_api.h>
+#include <aimee/skills/module_api.h>
+#include <aimee/tools/module_api.h>
+#include <aimee/workspace/module_api.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <errno.h>
@@ -55,7 +66,9 @@ typedef struct
    dep_state_t db1;
    dep_state_t kb;
    dep_state_t retrieval;
+   dep_state_t modules;
    char failed_boundary[32];
+   char missing_module[32];
    char breaker_state[16];
    long long retry_after_ms;
    long long last_success_query_ms;
@@ -184,6 +197,31 @@ void server_ready_sample_now(void)
                                                                 : "";
    snprintf(s.failed_boundary, sizeof(s.failed_boundary), "%s", failed);
 
+   static const struct
+   {
+      uint32_t kind;
+      const char *name;
+   } required_modules[] = {
+       {AIMEE_MEMORY_EVENT_RERANK, "memory"},
+       {AIMEE_LEARNING_EVENT_OBSERVE, "learning"},
+       {AIMEE_ROUTING_EVENT_KIND, "routing"},
+       {AIMEE_DELEGATES_EVENT_INVOKE, "delegates"},
+       {AIMEE_TOOLS_EVENT_DISPATCH, "tools"},
+       {AIMEE_WORKSPACE_EVENT_ACCESS, "workspace"},
+       {AIMEE_GIT_EVENT_OPERATION, "git"},
+       {AIMEE_SKILLS_EVENT_CONTEXT, "skills"},
+       {AIMEE_RESPONSE_EVENT_COMPOSE, "response-composition"},
+   };
+   s.modules = DEP_OK;
+   for (size_t i = 0; i < sizeof(required_modules) / sizeof(required_modules[0]); ++i)
+   {
+      if (obs_bus_module_available(required_modules[i].kind))
+         continue;
+      s.modules = DEP_FAIL;
+      snprintf(s.missing_module, sizeof(s.missing_module), "%s", required_modules[i].name);
+      break;
+   }
+
    s.sampled_at = (long)time(NULL);
 
    pthread_mutex_lock(&g_ready_mtx);
@@ -214,6 +252,9 @@ int server_ready_render(int db1_ok, int kb_ok, const server_ready_diagnostics_t 
    int retrieval_ok = diagnostics ? diagnostics->retrieval_ok : -1;
    dep_state_t retrieval =
        (retrieval_ok > 0) ? DEP_OK : (retrieval_ok == 0 ? DEP_FAIL : DEP_UNKNOWN);
+   int modules_ok = diagnostics ? diagnostics->modules_ok : -1;
+   dep_state_t modules =
+       (modules_ok > 0) ? DEP_OK : (modules_ok == 0 ? DEP_FAIL : DEP_UNKNOWN);
 
    long age = (sampled_at > 0) ? (now - sampled_at) : -1;
 
@@ -226,9 +267,10 @@ int server_ready_render(int db1_ok, int kb_ok, const server_ready_diagnostics_t 
       db1 = DEP_UNKNOWN;
       kb = DEP_UNKNOWN;
       retrieval = DEP_UNKNOWN;
+      modules = DEP_UNKNOWN;
    }
 
-   int ready = (db1 == DEP_OK && kb == DEP_OK && retrieval == DEP_OK);
+   int ready = (db1 == DEP_OK && kb == DEP_OK && retrieval == DEP_OK && modules == DEP_OK);
    const char *status = ready ? "ok" : (stale ? "unknown" : "degraded");
 
    if (stale && (sampled_at <= 0 || age < 0))
@@ -236,31 +278,39 @@ int server_ready_render(int db1_ok, int kb_ok, const server_ready_diagnostics_t 
                "{\"ready\":false,\"status\":\"unknown\",\"service\":\"aimee-server\","
                "\"sampled_at\":null,\"age_seconds\":null,"
                "\"dependencies\":{\"db1\":\"unknown\",\"kb\":\"unknown\","
-               "\"retrieval\":\"unknown\"},\"diagnostics\":{\"breaker_state\":\"unknown\","
+               "\"retrieval\":\"unknown\",\"modules\":\"unknown\"},"
+               "\"diagnostics\":{\"breaker_state\":\"unknown\","
                "\"failed_boundary\":\"unknown\",\"retry_after_ms\":0,"
-               "\"last_success_query_ms\":0,\"last_ingest_at\":\"\"}}");
+               "\"last_success_query_ms\":0,\"last_ingest_at\":\"\","
+               "\"missing_module\":\"unknown\"}}");
    else
    {
       char escaped_boundary[64];
       char escaped_breaker[64];
       char escaped_ingest[256];
+      char escaped_module[64];
       json_escape(diagnostics ? diagnostics->failed_boundary : NULL, escaped_boundary,
                   sizeof(escaped_boundary));
       json_escape(diagnostics ? diagnostics->breaker_state : NULL, escaped_breaker,
                   sizeof(escaped_breaker));
       json_escape(diagnostics ? diagnostics->last_ingest_at : NULL, escaped_ingest,
                   sizeof(escaped_ingest));
+      json_escape(diagnostics ? diagnostics->missing_module : NULL, escaped_module,
+                  sizeof(escaped_module));
       snprintf(resp, (size_t)cap,
                "{\"ready\":%s,\"status\":\"%s\",\"service\":\"aimee-server\","
                "\"sampled_at\":%ld,\"age_seconds\":%ld,"
-               "\"dependencies\":{\"db1\":\"%s\",\"kb\":\"%s\",\"retrieval\":\"%s\"},"
+               "\"dependencies\":{\"db1\":\"%s\",\"kb\":\"%s\",\"retrieval\":\"%s\","
+               "\"modules\":\"%s\"},"
                "\"diagnostics\":{\"failed_boundary\":\"%s\",\"breaker_state\":\"%s\","
                "\"retry_after_ms\":%lld,"
-               "\"last_success_query_ms\":%lld,\"last_ingest_at\":\"%s\"}}",
+               "\"last_success_query_ms\":%lld,\"last_ingest_at\":\"%s\","
+               "\"missing_module\":\"%s\"}}",
                ready ? "true" : "false", status, sampled_at, age, dep_name(db1), dep_name(kb),
-               dep_name(retrieval), escaped_boundary, escaped_breaker,
+               dep_name(retrieval), dep_name(modules), escaped_boundary, escaped_breaker,
                diagnostics ? diagnostics->retry_after_ms : 0,
-               diagnostics ? diagnostics->last_success_query_ms : 0, escaped_ingest);
+               diagnostics ? diagnostics->last_success_query_ms : 0, escaped_ingest,
+               escaped_module);
    }
 
    return ready ? 200 : 503;
@@ -277,7 +327,9 @@ static int ready_provider(char *resp, int cap)
    int kb_ok = (s.kb == DEP_UNKNOWN) ? -1 : (s.kb == DEP_OK);
    server_ready_diagnostics_t diagnostics = {
        .retrieval_ok = (s.retrieval == DEP_UNKNOWN) ? -1 : (s.retrieval == DEP_OK),
+       .modules_ok = (s.modules == DEP_UNKNOWN) ? -1 : (s.modules == DEP_OK),
        .failed_boundary = s.failed_boundary,
+       .missing_module = s.missing_module,
        .breaker_state = s.breaker_state,
        .retry_after_ms = s.retry_after_ms,
        .last_success_query_ms = s.last_success_query_ms,

@@ -626,6 +626,20 @@ aimee_module_call_result_t obs_bus_module_call(
    return result;
 }
 
+int obs_bus_module_available(uint32_t event_kind)
+{
+   int available = 0;
+   pthread_mutex_lock(&start_lock);
+   if (g.started && atomic_load_explicit(&g.accepting_calls, memory_order_acquire))
+   {
+      pthread_mutex_lock(&g.host_lock);
+      available = bus_host_kind_has_server(&g.host, event_kind);
+      pthread_mutex_unlock(&g.host_lock);
+   }
+   pthread_mutex_unlock(&start_lock);
+   return available;
+}
+
 int obs_bus_set_guardrail_sink(obs_bus_guardrail_sink_fn sink, void *ctx)
 {
    pthread_mutex_lock(&start_lock);

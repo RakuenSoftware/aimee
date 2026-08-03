@@ -1,7 +1,7 @@
 /* kb_memory_embed.c: KB-local memory embedding hook. */
 #include "aimee.h"
 #include "memory.h"
-#include "memory_platform.h"
+#include "modules/memory/memory_platform.h"
 
 int platform_memory_background_embed_set_suppressed(int suppressed)
 {

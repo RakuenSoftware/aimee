@@ -8,6 +8,9 @@
 
 #include <stdint.h>
 
+typedef int (*learning_signal_classifier_fn)(const char *signal_type, uint32_t *sink_mask);
+void learning_router_register_signal_classifier(learning_signal_classifier_fn classifier);
+
 #define LEARNING_MAX_PROPOSAL_IDS 8
 
 typedef struct

@@ -87,10 +87,16 @@ bus_client_result_t bus_client_publish_arena(bus_client_t *c, uint32_t kind, uin
  * the same correlation; poll for it. */
 bus_client_result_t bus_client_request(bus_client_t *c, uint32_t kind, uint64_t correlation,
                                        const void *payload, uint32_t len);
+bus_client_result_t bus_client_request_fragment(bus_client_t *c, uint32_t kind,
+                                                uint64_t correlation, const void *payload,
+                                                uint32_t len, int more);
 
 /* Reply to a request (a serving module). */
 bus_client_result_t bus_client_reply(bus_client_t *c, uint32_t kind, uint64_t correlation,
                                      const void *payload, uint32_t len);
+bus_client_result_t bus_client_reply_fragment(bus_client_t *c, uint32_t kind,
+                                              uint64_t correlation, const void *payload,
+                                              uint32_t len, int more);
 
 /* Cancel an outstanding request. */
 bus_client_result_t bus_client_cancel(bus_client_t *c, uint32_t kind, uint64_t correlation);

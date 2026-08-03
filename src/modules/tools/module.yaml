@@ -18,10 +18,14 @@
     "src/modules/tools/agent_tools.c",
     "src/modules/tools/agent_tools_anchored.c",
     "src/modules/tools/agent_tools_completion.c",
-    "src/modules/tools/agent_tools_dispatch.c"
+    "src/modules/tools/agent_tools_dispatch.c",
+    "src/modules/tools/module_adapter.c"
+  ],
+  "public_headers": [
+    "src/modules/tools/include/aimee/tools/agent_tools.h",
+    "src/modules/tools/include/aimee/tools/module_api.h"
   ],
   "private_headers": [
-    "src/modules/tools/agent_tools.h",
     "src/modules/tools/agent_tools_internal.h"
   ],
   "tests": [

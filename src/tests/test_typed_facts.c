@@ -10,8 +10,8 @@
 #include "../db2/fact_recall.h"     /* db2_fact_recall_block */
 #include "../db2/fact_lifecycle.h"  /* FACT_AUTHORITY_MODEL */
 #include "../db2/rel_types_store.h" /* db2_fact_commit */
-#include "memory_fact_gate.h"       /* FACT_GATE_NOVEL */
-#include "memory_ontology.h"        /* NODE_PERSON, NODE_OTHER */
+#include "modules/memory/memory_fact_gate.h"       /* FACT_GATE_NOVEL */
+#include "modules/memory/memory_ontology.h"        /* NODE_PERSON, NODE_OTHER */
 
 int main(void)
 {

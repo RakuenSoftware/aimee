@@ -115,6 +115,19 @@ bus_wire_result_t bus_wire_validate(const bus_frame_t *f)
          return BUS_WIRE_ERR_PAYLOAD_LEN;
    }
 
+   /* Fragmentation is deliberately limited to correlated inline traffic. An
+    * arena lease already carries a large payload as one reference, while a
+    * notification/cancel has no reply lifecycle in which to retain assembly
+    * state. A MORE fragment must carry bytes so a producer cannot create an
+    * unbounded stream of empty progress markers. */
+   if (f->hdr_flags & BUS_F_MORE)
+   {
+      unsigned pattern = (unsigned)(f->hdr_flags & BUS_F_PATTERN_MASK);
+      if ((pattern != BUS_F_REQUEST && pattern != BUS_F_REPLY) ||
+          placement != BUS_F_INLINE || f->payload_len == 0)
+         return BUS_WIRE_ERR_FLAGS;
+   }
+
    /* generation is an ARENA-only field (v2): it gates the lease read/release.
     * Any non-arena frame must carry 0 (the bytes were reserved-zero in v1). */
    if (!(f->hdr_flags & BUS_F_ARENA) && f->generation != 0)

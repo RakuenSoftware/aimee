@@ -2,7 +2,7 @@
  * §3 / AC #5). The drift classifier is pure; the mirror-lifecycle + drift
  * helpers are exercised through a MOCK git runner (no real git), so the test is
  * hermetic. The point of AC #5: drift is detected and SURFACED, never merged. */
-#include "workspace_mirror.h"
+#include "modules/workspace/workspace_mirror.h"
 
 #include <assert.h>
 #include <stdio.h>

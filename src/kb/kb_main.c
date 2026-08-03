@@ -37,7 +37,7 @@
 #include "util.h"
 #include "cJSON.h"
 #include "memory.h"
-#include "memory_graph_fusion.h"
+#include "modules/memory/memory_graph_fusion.h"
 #include "db2/memory_vectors.h"
 #include "db2/rel_types_store.h" /* db2_rel_types_ensure_seed (typed-fact ontology) */
 #include "db2/vault_pg.h"        /* vault_pg_backend + vault_store_set_backend (kb vault bind) */

@@ -1,7 +1,7 @@
 /* test_workspace_provider.c: the `shared` resource provider must be a faithful,
  * byte-for-byte stand-in for direct filesystem access (the workspace-resource-
  * plane Phase-1 parity contract). */
-#include "workspace_provider.h"
+#include "modules/workspace/workspace_provider.h"
 
 #include <assert.h>
 #include <glob.h>

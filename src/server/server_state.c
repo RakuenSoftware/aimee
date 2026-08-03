@@ -15,12 +15,12 @@
 #include "server_http_identity.h"     /* server_http_identity_query — audit pagination params */
 #include "lsp.h"
 #include "platform_path.h"
-#include "workspace.h"
-#include "workspace_mirror.h"
-#include "workspace_provider.h"
-#include "workspace_handle.h"
-#include "workspace_runner_registry.h"
-#include "forge_credentials.h"
+#include <aimee/workspace/workspace.h>
+#include "modules/workspace/workspace_mirror.h"
+#include "modules/workspace/workspace_provider.h"
+#include "modules/workspace/workspace_handle.h"
+#include "modules/workspace/workspace_runner_registry.h"
+#include "modules/git/forge_credentials.h"
 #include "db1.h"
 #include "kb_client.h"
 #include "log.h" /* aimee_log — name the real KB failure in the server log */

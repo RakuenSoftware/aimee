@@ -8,7 +8,7 @@
 #include "aimee.h"
 #include "cJSON.h"
 #include "kb_client.h"
-#include "learning_implicit.h"
+#include "modules/learning/learning_implicit.h"
 #include "log.h"
 #include <ctype.h>
 #include <string.h>

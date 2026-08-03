@@ -42,7 +42,11 @@
     "src/modules/memory/memory_prospective.c",
     "src/modules/memory/memory_provider.c",
     "src/modules/memory/memory_redirect.c",
-    "src/modules/memory/memory_scan.c"
+    "src/modules/memory/memory_scan.c",
+    "src/modules/memory/module_adapter.c"
+  ],
+  "public_headers": [
+    "src/modules/memory/include/aimee/memory/module_api.h"
   ],
   "private_headers": [
     "src/modules/memory/gw_stage_memory.h",

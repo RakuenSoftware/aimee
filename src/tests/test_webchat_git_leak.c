@@ -3,8 +3,8 @@
  * A git credential a webchat user stores must live ONLY inside the encrypted
  * vault — its plaintext must appear in NO file on disk — yet still be available
  * in-memory to the credential-injection env. Plus the cross-principal denial. */
-#include "git_cred_inject.h"
-#include "git_forge_vault.h"
+#include "modules/git/git_cred_inject.h"
+#include "modules/git/git_forge_vault.h"
 #include "vault_kek_cache.h"
 #include "vault_service.h"
 

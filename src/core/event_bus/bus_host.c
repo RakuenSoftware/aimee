@@ -15,9 +15,8 @@
 #include <aimee/core/event_bus/bus_host.h>
 #include <aimee/core/event_bus/bus_ring.h>
 
-/* The wire version this host speaks; tracks BUS_WIRE_VERSION (v2 added the arena
- * lease reference — generation + payload_ref-as-lease-id — for arena routing). */
-#define BUS_HOST_WIRE_VERSION 2
+/* Attach negotiation and frame validation must advertise the same version. */
+#define BUS_HOST_WIRE_VERSION BUS_WIRE_VERSION
 
 /* ------------------------------------------------------------------ */
 /* lifecycle                                                           */

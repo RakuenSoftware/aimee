@@ -174,17 +174,37 @@ bus_client_result_t bus_client_publish_arena(bus_client_t *c, uint32_t kind, uin
 bus_client_result_t bus_client_request(bus_client_t *c, uint32_t kind, uint64_t correlation,
                                        const void *payload, uint32_t len)
 {
+   return bus_client_request_fragment(c, kind, correlation, payload, len, 0);
+}
+
+bus_client_result_t bus_client_request_fragment(bus_client_t *c, uint32_t kind,
+                                                uint64_t correlation, const void *payload,
+                                                uint32_t len, int more)
+{
    if (correlation == 0)
       return BUS_CLIENT_ERR_ARG; /* a correlated pattern needs a nonzero id */
-   return emit(c, BUS_F_REQUEST, kind, correlation, payload, len);
+   if (more && len == 0)
+      return BUS_CLIENT_ERR_ARG;
+   return emit(c, (uint16_t)(BUS_F_REQUEST | (more ? BUS_F_MORE : 0)), kind, correlation,
+               payload, len);
 }
 
 bus_client_result_t bus_client_reply(bus_client_t *c, uint32_t kind, uint64_t correlation,
                                      const void *payload, uint32_t len)
 {
+   return bus_client_reply_fragment(c, kind, correlation, payload, len, 0);
+}
+
+bus_client_result_t bus_client_reply_fragment(bus_client_t *c, uint32_t kind,
+                                              uint64_t correlation, const void *payload,
+                                              uint32_t len, int more)
+{
    if (correlation == 0)
       return BUS_CLIENT_ERR_ARG;
-   return emit(c, BUS_F_REPLY, kind, correlation, payload, len);
+   if (more && len == 0)
+      return BUS_CLIENT_ERR_ARG;
+   return emit(c, (uint16_t)(BUS_F_REPLY | (more ? BUS_F_MORE : 0)), kind, correlation,
+               payload, len);
 }
 
 bus_client_result_t bus_client_cancel(bus_client_t *c, uint32_t kind, uint64_t correlation)

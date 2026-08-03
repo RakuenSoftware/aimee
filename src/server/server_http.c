@@ -20,8 +20,8 @@
 #include "runtime_secret.h" /* Vault-sourced management private keys */
 #include "server_mgmt_checkpoint_client.h"
 #include "pki.h"                       /* P8a per-request durable cert revocation/expiry re-check */
-#include "workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
-#include "forge_credentials.h"         /* forge_cred_install for the /v1 token-install route */
+#include "modules/workspace/workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
+#include "modules/git/forge_credentials.h"         /* forge_cred_install for the /v1 token-install route */
 #include <time.h>
 #include "persona.h"
 #include "role_templates.h"

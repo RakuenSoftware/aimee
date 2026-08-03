@@ -116,6 +116,7 @@ typedef struct
 typedef struct
 {
    int in_use;
+   int request_open;
    uint64_t correlation_id;
    uint32_t requester;
    uint32_t server;
@@ -226,6 +227,7 @@ bus_host_result_t bus_host_subscribe(bus_host_t *h, uint32_t slot, uint32_t even
 /* Register `slot` as the single server for `event_kind` (its requests). A second
  * server for the same kind is refused. */
 bus_host_result_t bus_host_serve_kind(bus_host_t *h, uint32_t slot, uint32_t event_kind);
+int bus_host_kind_has_server(const bus_host_t *h, uint32_t event_kind);
 
 /* Mark an admitted slot as manifest-governed, then grant the fresh outbound
  * patterns it declared. A governed slot with no matching grant cannot inject

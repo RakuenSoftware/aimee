@@ -25,7 +25,7 @@
 #include "kb_service.h"
 #include "kb_service_kb.h"
 #include "log.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 
 #include <stdio.h>
 #include <stdlib.h>

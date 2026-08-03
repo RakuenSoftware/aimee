@@ -89,6 +89,11 @@ extern "C"
        uint32_t response_capacity, uint32_t *response_len, aimee_module_cancelled_fn cancelled,
        void *cancel_context);
 
+   /* Return nonzero only while a live local process is attached and registered
+    * to serve event_kind. Intended for daemon readiness sampling; no network I/O
+    * is performed. */
+   int obs_bus_module_available(uint32_t event_kind);
+
    /* Publish one governed-action audit row. Same field contract as
     * audit_action_log — the fields are serialized and published; the consumer
     * thread performs the real append. Safe to call from multiple threads

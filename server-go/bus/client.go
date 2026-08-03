@@ -226,18 +226,44 @@ func (c *Client) Publish(kind uint32, payload []byte) error {
 
 // Request sends a correlated request; the reply arrives later via Poll.
 func (c *Client) Request(kind uint32, correlation uint64, payload []byte) error {
+	return c.RequestFragment(kind, correlation, payload, false)
+}
+
+// RequestFragment sends one ordered request fragment. More keeps the
+// correlation in the request-assembly state until a final fragment arrives.
+func (c *Client) RequestFragment(kind uint32, correlation uint64, payload []byte, more bool) error {
 	if correlation == 0 {
 		return ErrProtocol
 	}
-	return c.emit(FRequest, kind, correlation, payload)
+	flags := uint16(FRequest)
+	if more {
+		if len(payload) == 0 {
+			return ErrProtocol
+		}
+		flags |= FMore
+	}
+	return c.emit(flags, kind, correlation, payload)
 }
 
 // Reply answers a request (a serving module).
 func (c *Client) Reply(kind uint32, correlation uint64, payload []byte) error {
+	return c.ReplyFragment(kind, correlation, payload, false)
+}
+
+// ReplyFragment sends one ordered reply fragment. More keeps the correlation
+// pending for another reply fragment.
+func (c *Client) ReplyFragment(kind uint32, correlation uint64, payload []byte, more bool) error {
 	if correlation == 0 {
 		return ErrProtocol
 	}
-	return c.emit(FReply, kind, correlation, payload)
+	flags := uint16(FReply)
+	if more {
+		if len(payload) == 0 {
+			return ErrProtocol
+		}
+		flags |= FMore
+	}
+	return c.emit(flags, kind, correlation, payload)
 }
 
 // Cancel cancels an outstanding request.

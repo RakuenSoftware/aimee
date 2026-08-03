@@ -1,7 +1,9 @@
 /* Versioned payload envelope for core <-> process-module calls.
  *
  * The event-bus frame carries routing, correlation, and cancellation.  This
- * envelope describes the operation inside the inline payload.  It deliberately
+ * envelope describes the operation inside each inline payload. Bodies larger
+ * than the negotiated inline budget use ordered BUS_F_MORE fragments under one
+ * correlation. It deliberately
  * contains no pointers, native structs, or host-endian fields, so C, Go, and
  * future module SDKs can implement the same contract independently.
  */
@@ -14,7 +16,7 @@
 #define AIMEE_MODULE_MESSAGE_MAGIC 0x444f4d41u /* "AMOD", little-endian */
 #define AIMEE_MODULE_MESSAGE_VERSION 1u
 #define AIMEE_MODULE_MESSAGE_HEADER_LEN 40u
-#define AIMEE_MODULE_MESSAGE_MAX_BODY (1024u * 1024u)
+#define AIMEE_MODULE_MESSAGE_MAX_BODY (16u * 1024u * 1024u)
 
 typedef enum
 {

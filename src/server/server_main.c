@@ -1,18 +1,18 @@
 /* server_main.c: aimee-server entry point -- socket lifecycle, signal handling */
 #include "aimee.h"
-#include "agent_tools.h"
+#include <aimee/tools/agent_tools.h>
 #include "cli_client.h"
 #include "commands.h"
 #include "config.h"
 #include "config_sections.h"
 #include "forge_app_token.h"
-#include "forge_credentials.h"
-#include "git_host_cred.h"
-#include "git_host_resolve.h"
-#include "git_forge_vault.h"
-#include "git_ops.h"
+#include "modules/git/forge_credentials.h"
+#include "modules/git/git_host_cred.h"
+#include "modules/git/git_host_resolve.h"
+#include "modules/git/git_forge_vault.h"
+#include <aimee/git/git_ops.h>
 #include "guardrails.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include "kb_client_cache.h"
 #include "kb_client_mtls.h"
 #include "kb_client_ws.h"
@@ -46,6 +46,7 @@
 #include "tool_completion_audit_bridge.h" /* route tool-dispatch outcomes onto the audit bus */
 #include "obs_bus_adapter.h"              /* bind shared bus events to server-owned durable sinks */
 #include "module_routing_adapter.h"       /* route selection through the local routing process */
+#include "module_stage_adapters.h"        /* process-owned stage decisions */
 #include <aimee/audit/obs_bus.h>
 #include <aimee/audit/audit_replay.h> /* --audit-replay: inspect a governed-action capture file */
 #include <signal.h>
@@ -337,6 +338,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
       return 1;
    }
    server_module_routing_configure();
+   server_module_stage_adapters_configure();
 
    /* Initialize server first — creates the Unix socket so clients can connect
     * (and queue in the listen backlog) while HTTP/SSL initializes. */

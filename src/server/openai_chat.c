@@ -19,11 +19,11 @@
 #include "openai_shape.h"
 #include "ingress_preinject.h"
 #include <aimee/gateway/gateway_pipeline.h> /* gw_request_t + gw_pipeline_run_request — shared seam */
-#include "gw_stage_memory.h"                /* gw_stage_memory + gw_memory_system_prompt (P3) */
+#include "modules/memory/gw_stage_memory.h"                /* gw_stage_memory + gw_memory_system_prompt (P3) */
 #include "gw_stage_registry.h"              /* Slice 7: config-driven stage catalog */
 #include "gw_stage_governance.h"            /* response seam Slice 2: togglable governance */
 #include "dogfood.h"                        /* dogfood_autolabel_next_turn_live */
-#include "learning_implicit.h"              /* learning_implicit_detect_turn */
+#include "modules/learning/learning_implicit.h"              /* learning_implicit_detect_turn */
 #include "retrieval_outcome_bridge.h"       /* retrieval_outcome_bridge_on_autolabel */
 #include "openai_responses_store.h"         /* previous_response_id continuation store */
 #include "openai_runs_store.h"              /* GET /v1/runs/{id} record store */
@@ -39,7 +39,7 @@
 #include "gateway_mutate_wire.h"
 #include "server_http_identity.h"
 #include "cJSON.h"
-#include "agent_tools.h" /* agent_tools_set_tool_event_cb — /v1/runs tool events */
+#include <aimee/tools/agent_tools.h> /* agent_tools_set_tool_event_cb — /v1/runs tool events */
 #include "agent_types.h"
 #include <aimee/gateway/gateway_policy.h> /* gateway_policy_apply_request — tool-policing stage */
 #include "router_advise.h"                /* gw_stage_router — the request->workflow seam */

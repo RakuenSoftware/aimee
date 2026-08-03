@@ -3,9 +3,9 @@
 #include "webuser_editor.h"
 
 #include "aimee.h"             /* MAX_PATH_LEN */
-#include "forge_credentials.h" /* forge_cred_token_helper */
-#include "git_cred_inject.h"   /* git_cred_inject_build_env/free_env (vault git env) */
-#include "workspace_scope.h"   /* ws_scope_user_root, ws_scope_name_valid */
+#include "modules/git/forge_credentials.h" /* forge_cred_token_helper */
+#include "modules/git/git_cred_inject.h"   /* git_cred_inject_build_env/free_env (vault git env) */
+#include "modules/workspace/workspace_scope.h"   /* ws_scope_user_root, ws_scope_name_valid */
 
 #include <arpa/inet.h>
 #include <errno.h>

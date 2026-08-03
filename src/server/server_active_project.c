@@ -18,7 +18,7 @@
 #include "aimee.h"
 #include "index.h"
 #include "kb_client.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 
 #include <stdio.h>
 #include <string.h>

@@ -1,7 +1,7 @@
 /* workspace.c: directory-based workspace discovery and context generation */
 #include "aimee.h"
 #include "log.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include "config_accessors.h"
 #include "index.h"
 #include "kb_client.h"
