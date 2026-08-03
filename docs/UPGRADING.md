@@ -235,11 +235,31 @@ so which embedder a deployment runs is decided by the tag it pulls:
 | `aimee-kb-nomic` | nomic-v2, 768-dim | 3.34 GB |
 
 **The embedder axis cannot be changed after the KB has embedded anything.** DB2
-records the vector-column width and refuses to start on drift, so moving between a
-384-dim and a 768-dim image means re-embedding the whole corpus. Choose before you
-ingest. An external embedder (`EMBEDDER_URL`) may be any width up to 4000, the DB2
-column ceiling, not 4096, and the `aimee-kb` tag exists for exactly that case: it
-carries neither PyTorch nor weights.
+records the vector-column width and refuses to start when the embedder cannot produce
+it, so moving between a 384-dim and a 768-dim image means re-embedding the whole
+corpus. Choose before you ingest. An external embedder (`EMBEDDER_URL`) may be any
+width up to 4000, the DB2 column ceiling, not 4096, and the `aimee-kb` tag exists for
+exactly that case: it carries neither PyTorch nor weights.
+
+**A v0.2 corpus is usually neither 384 nor 768.** The 0.2 default was 1024, so a
+corpus carried across on its existing `AIMEE_DB2_URL` matches no bundled image. The KB
+refuses to start and says so:
+
+```text
+aimee: db2_init: embedder serves 384-dimension vectors but this corpus is recorded at
+1024. Every write would be refused by the vector columns.
+```
+
+Check before you upgrade, so this is a decision rather than a surprise:
+
+```bash
+psql "$AIMEE_DB2_URL" -tAc \
+  "select value from kb_meta where key='schema_embedding_dim'"
+```
+
+Two ways forward, and they are not equivalent: point `EMBEDDER_URL` at an embedder of
+the recorded width and keep the corpus, or re-embed at a bundled width and lose nothing
+but the time. Follow [Change the KB embedder](runbooks/change-embedder.md).
 
 **Synthesis is no longer an axis here.** It was, which is why earlier drafts of this
 page described six tags. It is now its own image deployed beside the kb, so the
