@@ -100,6 +100,7 @@ include_directories(
     "${AIMEE_SRC_DIR}/modules/roundtable/include"
     "${AIMEE_SRC_DIR}/modules/benchmarks/include"
     "${AIMEE_SRC_DIR}/modules/governance/include"
+    "${AIMEE_SRC_DIR}/modules/workflows/include"
     # MODULES THAT KEEP THEIR HEADERS FLAT, beside their sources, rather than
     # under an include/ subdir. src/Makefile has carried -I for every one of
     # these all along; CMake had only the include/-style modules, so the

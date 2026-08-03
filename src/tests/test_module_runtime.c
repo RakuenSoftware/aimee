@@ -17,6 +17,7 @@
 #include <aimee/routing/module_api.h>
 #include <aimee/skills/module_api.h>
 #include <aimee/tools/module_api.h>
+#include <aimee/workflows/module_api.h>
 #include <aimee/workspace/module_api.h>
 
 #include <assert.h>
@@ -161,6 +162,8 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
       *kind = AIMEE_RESPONSE_EVENT_COMPOSE, *principal_ref = 15;
    else if (strcmp(name, "governance") == 0)
       *kind = AIMEE_GOVERNANCE_EVENT_EVALUATE, *principal_ref = 19;
+   else if (strcmp(name, "workflows") == 0)
+      *kind = AIMEE_WORKFLOWS_EVENT_ADVANCE, *principal_ref = 20;
    else if (strcmp(name, "roundtable") == 0)
       *kind = AIMEE_ROUNDTABLE_EVENT_DELIBERATE, *principal_ref = 21;
    else if (strcmp(name, "benchmarks") == 0)
@@ -309,6 +312,19 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(decision.keep_mask == 1 && decision.drop_count == 2);
       assert(strcmp(decision.stop_reason, "max_tokens") == 0);
    }
+   else if (strcmp(name, "workflows") == 0)
+   {
+      aimee_workflows_advance_outcome_t outcome = AIMEE_WORKFLOWS_ADVANCE_BADARGS;
+      assert(aimee_workflows_request_encode("wi_1", "wi_1", "understand", "split",
+                                            "accepted", 1, "nonce_1", "nonce_1", request,
+                                            sizeof(request)) == 0);
+      request_len = AIMEE_WORKFLOWS_REQUEST_LEN;
+      assert(aimee_module_client_call(client, kind, AIMEE_WORKFLOWS_STAGE_ADVANCE, 2010, 0,
+                                      request, request_len, response, sizeof(response), &response_len,
+                                      NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(aimee_workflows_response_decode(response, response_len, &outcome) == 0);
+      assert(outcome == AIMEE_WORKFLOWS_ADVANCE_REPLAY);
+   }
    else if (strcmp(name, "roundtable") == 0)
    {
       aimee_roundtable_verify_action_t action = AIMEE_ROUNDTABLE_VERIFY_REJECT;
@@ -316,7 +332,7 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(aimee_roundtable_request_encode(AIMEE_ROUNDTABLE_REPLAY_MATCH, 1, "blocking",
                                              request, sizeof(request)) == 0);
       request_len = AIMEE_ROUNDTABLE_REQUEST_LEN;
-      assert(aimee_module_client_call(client, kind, AIMEE_ROUNDTABLE_STAGE_DELIBERATE, 2010, 0,
+      assert(aimee_module_client_call(client, kind, AIMEE_ROUNDTABLE_STAGE_DELIBERATE, 2011, 0,
                                       request, request_len, response, sizeof(response), &response_len,
                                       NULL, NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_roundtable_response_decode(response, response_len, &action, severity,
@@ -332,7 +348,7 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(aimee_benchmarks_request_encode(retrieved, 3, relevant, 1, 3, request,
                                              sizeof(request)) == 0);
       request_len = AIMEE_BENCHMARKS_REQUEST_LEN;
-      assert(aimee_module_client_call(client, kind, AIMEE_BENCHMARKS_STAGE_RUN, 2011, 0, request,
+      assert(aimee_module_client_call(client, kind, AIMEE_BENCHMARKS_STAGE_RUN, 2012, 0, request,
                                       request_len, response, sizeof(response), &response_len, NULL,
                                       NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_benchmarks_response_decode(response, response_len, &scores) == 0);

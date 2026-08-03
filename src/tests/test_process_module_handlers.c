@@ -14,6 +14,7 @@
 #include <aimee/roundtable/module_api.h>
 #include <aimee/skills/module_api.h>
 #include <aimee/tools/module_api.h>
+#include <aimee/workflows/module_api.h>
 #include <aimee/workspace/module_api.h>
 
 #define DECLARE_HANDLER(name)                                                                      \
@@ -28,6 +29,7 @@ DECLARE_HANDLER(aimee_workspace_module_handler);
 DECLARE_HANDLER(aimee_git_module_handler);
 DECLARE_HANDLER(aimee_skills_module_handler);
 DECLARE_HANDLER(aimee_governance_module_handler);
+DECLARE_HANDLER(aimee_workflows_module_handler);
 DECLARE_HANDLER(aimee_roundtable_module_handler);
 DECLARE_HANDLER(aimee_benchmarks_module_handler);
 
@@ -209,6 +211,53 @@ static void test_governance(void)
    }
 }
 
+static void test_workflows(void)
+{
+   static const struct
+   {
+      const char *bound;
+      const char *work_item;
+      const char *observed;
+      const char *actual_stage;
+      const char *actual_state;
+      int have_nonce;
+      const char *nonce;
+      const char *last_nonce;
+      aimee_workflows_advance_outcome_t outcome;
+   } cases[] = {
+       {"wi_1", "wi_1", "understand", "understand", "active", 0, "", "",
+        AIMEE_WORKFLOWS_ADVANCE_OK},
+       {"", "wi_1", "understand", "understand", "active", 0, "", "",
+        AIMEE_WORKFLOWS_ADVANCE_UNBOUND},
+       {"wi_2", "wi_1", "understand", "understand", "active", 0, "", "",
+        AIMEE_WORKFLOWS_ADVANCE_UNBOUND},
+       {"wi_1", "wi_1", "understand", "split", "active", 0, "", "",
+        AIMEE_WORKFLOWS_ADVANCE_STALE},
+       {"wi_1", "wi_1", "understand", "understand", "accepted", 0, "", "",
+        AIMEE_WORKFLOWS_ADVANCE_TERMINAL},
+       {"wi_1", "", "understand", "understand", "active", 0, "", "",
+        AIMEE_WORKFLOWS_ADVANCE_BADARGS},
+       {"wi_1", "wi_1", "understand", "split", "accepted", 1, "nonce_1", "nonce_1",
+        AIMEE_WORKFLOWS_ADVANCE_REPLAY},
+   };
+   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)
+   {
+      uint8_t request[AIMEE_WORKFLOWS_REQUEST_LEN], response[AIMEE_WORKFLOWS_RESPONSE_LEN];
+      uint32_t response_len = 0;
+      aimee_workflows_advance_outcome_t outcome;
+      aimee_module_invocation_t invocation = {.stage_id = AIMEE_WORKFLOWS_STAGE_ADVANCE};
+      assert(aimee_workflows_request_encode(
+                 cases[i].bound, cases[i].work_item, cases[i].observed, cases[i].actual_stage,
+                 cases[i].actual_state, cases[i].have_nonce, cases[i].nonce, cases[i].last_nonce,
+                 request, sizeof(request)) == 0);
+      assert(aimee_workflows_module_handler(&invocation, request, sizeof(request), response,
+                                            sizeof(response), &response_len,
+                                            NULL) == AIMEE_MODULE_STATUS_OK);
+      assert(aimee_workflows_response_decode(response, response_len, &outcome) == 0);
+      assert(outcome == cases[i].outcome);
+   }
+}
+
 static void test_roundtable(void)
 {
    static const struct
@@ -299,6 +348,7 @@ int main(void)
    test_git();
    test_skills();
    test_governance();
+   test_workflows();
    test_roundtable();
    test_benchmarks();
    puts("process module handlers: PASS");

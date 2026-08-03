@@ -22,6 +22,7 @@ func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
 		{"skills", 14, []uint32{7681}},
 		{"response-composition", 15, []uint32{7937}},
 		{"governance", 19, []uint32{8961}},
+		{"workflows", 20, []uint32{9217}},
 		{"roundtable", 21, []uint32{9473}},
 		{"benchmarks", 25, []uint32{10497}},
 	}
@@ -41,7 +42,7 @@ func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
 }
 
 func TestModuleRegistryRejectsUnknownAndBadArguments(t *testing.T) {
-	if _, ok := moduleConfig("aimee-module-workflows"); ok {
+	if _, ok := moduleConfig("aimee-module-kb-synthesis"); ok {
 		t.Fatal("C module appeared in Go registry")
 	}
 	if err := run(context.Background(), []string{"aimee-module-routing"}); !errors.Is(err, errUsage) {
