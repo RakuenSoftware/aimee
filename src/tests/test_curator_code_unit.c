@@ -27,6 +27,20 @@
  * with the extract gates disabled so the real config_load() the queue functions
  * call reports the gate off deterministically (and the run never touches the
  * developer's real ~/.config/aimee). */
+/* The single place this test binary names config_t. Every case that needs a
+ * different extract-code gate goes through here rather than loading its own copy:
+ * config_t is a secret of the config module, and one reader is the budget. */
+static void ccu_set_extract_code_gate(int on)
+{
+   config_t cfg;
+   config_load(&cfg);
+   cfg.kb_curator_extract_code_enabled = on;
+   cfg.kb_curator_extract_docs_enabled = 0;
+   if (!on)
+      cfg.synthesis_endpoint[0] = '\0';
+   config_save(&cfg);
+}
+
 static void test_force_curator_gate_off(void)
 {
    static char dir[] = "/tmp/aimee-curtest-XXXXXX";
@@ -36,11 +50,7 @@ static void test_force_curator_gate_off(void)
    done = 1;
    if (mkdtemp(dir))
       setenv("AIMEE_HOME", dir, 1);
-   config_t cfg;
-   config_load(&cfg);
-   cfg.kb_curator_extract_code_enabled = 0;
-   cfg.kb_curator_extract_docs_enabled = 0;
-   config_save(&cfg);
+   ccu_set_extract_code_gate(0);
 }
 
 /* Forward declarations (headers live in src/, not src/headers/). The opts struct
@@ -831,11 +841,7 @@ static void test_queue_code_units_skipped_without_synthesis_endpoint(void)
                        " VALUES (1,'fn_one','definition',1),(1,'fn_two','definition',2)",
                        NULL, NULL, NULL) == SQLITE_OK);
 
-   config_t cfg;
-   config_load(&cfg);
-   cfg.kb_curator_extract_code_enabled = 1;
-   cfg.synthesis_endpoint[0] = '\0';
-   config_save(&cfg);
+   ccu_set_extract_code_gate(1);
    unsetenv("SYNTHESIS_ENDPOINT");
 
    /* The fixture really does have rows to enqueue, so "nothing was enqueued" below
@@ -859,9 +865,7 @@ static void test_queue_code_units_skipped_without_synthesis_endpoint(void)
    assert(ccu_count(db, "SELECT count(*) FROM kb_code_unit_jobs") == 0);
    unsetenv("SYNTHESIS_ENDPOINT");
 
-   config_load(&cfg);
-   cfg.kb_curator_extract_code_enabled = 0;
-   config_save(&cfg);
+   ccu_set_extract_code_gate(0);
    db2_test_shim_close();
    printf("  PASS: code-unit enqueue skipped when no synthesis endpoint can consume the rows\n");
 }

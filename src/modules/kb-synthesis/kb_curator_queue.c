@@ -12,7 +12,7 @@
 #include "aimee.h"
 #include "config.h"
 #include "config_database.h" /* config_synth_chat_endpoint_current — the one resolver */
-#include "index.h" /* index_list_projects, project_info_t */
+#include "index.h"           /* index_list_projects, project_info_t */
 #include "log.h"
 #include "db2/kb_payload.h"
 #include "db2/db2_internal.h"
