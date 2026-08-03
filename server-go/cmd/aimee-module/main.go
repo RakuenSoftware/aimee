@@ -22,6 +22,7 @@ import (
 	responsecomposition "github.com/JBailes/aimee/server-go/modules/response-composition"
 	"github.com/JBailes/aimee/server-go/modules/roundtable"
 	"github.com/JBailes/aimee/server-go/modules/routing"
+	runtimeweb "github.com/JBailes/aimee/server-go/modules/runtime-web"
 	"github.com/JBailes/aimee/server-go/modules/skills"
 	moduletools "github.com/JBailes/aimee/server-go/modules/tools"
 	"github.com/JBailes/aimee/server-go/modules/workflows"
@@ -105,6 +106,11 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 		config.PrincipalRef = 22
 		config.Stages = []bus.ModuleStage{{EventKind: kbsynthesis.EventGrounding, StageID: kbsynthesis.StageGrounding}}
 		config.Handler = kbsynthesis.Handle
+	case "runtime-web":
+		config.ModuleName = name
+		config.PrincipalRef = 23
+		config.Stages = []bus.ModuleStage{{EventKind: runtimeweb.EventClassify, StageID: runtimeweb.StageClassify}}
+		config.Handler = runtimeweb.Handle
 	case "benchmarks":
 		config.ModuleName = name
 		config.PrincipalRef = 25

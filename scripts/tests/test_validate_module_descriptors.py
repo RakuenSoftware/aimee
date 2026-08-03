@@ -339,6 +339,13 @@ class DescriptorTests(unittest.TestCase):
             ("kb-synthesis", "go_sources", "server-go/modules/kb-synthesis/kb_synthesis.go"),
             ("kb-synthesis", "go_tests",
              "server-go/modules/kb-synthesis/kb_synthesis_test.go"),
+            ("runtime-web", "sources", "src/modules/runtime-web/module_adapter.c"),
+            ("runtime-web", "go_sources",
+             "server-go/modules/runtime-web/policy/status.go"),
+            ("runtime-web", "go_sources",
+             "server-go/modules/runtime-web/runtime_web.go"),
+            ("runtime-web", "go_tests",
+             "server-go/modules/runtime-web/runtime_web_test.go"),
         )
         for identifier, field, relative in cases:
             tmp = self.production_repo()
@@ -357,7 +364,7 @@ class DescriptorTests(unittest.TestCase):
             finally:
                 tmp.cleanup()
 
-        for identifier in ("benchmarks", "tools", "routing", "execution-policy", "kb-synthesis", "roundtable", "protocols", "ir", "translation", "skills",
+        for identifier in ("benchmarks", "tools", "routing", "execution-policy", "kb-synthesis", "runtime-web", "roundtable", "protocols", "ir", "translation", "skills",
                            "audit", "module-runtime", "gateway", "governance",
                            "learning", "workspace", "vault", "config", "git", "delegates",
                            "workflows", "memory"):
@@ -401,7 +408,6 @@ class DescriptorTests(unittest.TestCase):
         """An unmigrated module must not satisfy the latch vacuously."""
         empty = (
             "control-web",
-            "runtime-web",
         )
         for identifier in empty:
             tmp = self.production_repo()
@@ -462,7 +468,7 @@ class DescriptorTests(unittest.TestCase):
         self.assertTrue(latched, "no latched descriptor found; the guard would be untested")
 
     def test_complete_ownership_requires_canonical_doc(self) -> None:
-        for identifier in ("benchmarks", "tools", "routing", "execution-policy", "kb-synthesis", "roundtable", "ir", "translation", "skills", "audit",
+        for identifier in ("benchmarks", "tools", "routing", "execution-policy", "kb-synthesis", "runtime-web", "roundtable", "ir", "translation", "skills", "audit",
                            "module-runtime", "gateway", "governance", "learning",
                            "workspace", "vault", "config", "git", "delegates", "workflows",
                            "memory"):

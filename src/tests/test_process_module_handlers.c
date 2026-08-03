@@ -13,6 +13,7 @@
 #include <aimee/learning/module_api.h>
 #include <aimee/memory/module_api.h>
 #include <aimee/roundtable/module_api.h>
+#include <aimee/runtime-web/module_api.h>
 #include <aimee/skills/module_api.h>
 #include <aimee/tools/module_api.h>
 #include <aimee/workflows/module_api.h>
@@ -33,6 +34,7 @@ DECLARE_HANDLER(aimee_governance_module_handler);
 DECLARE_HANDLER(aimee_workflows_module_handler);
 DECLARE_HANDLER(aimee_roundtable_module_handler);
 DECLARE_HANDLER(aimee_kb_synthesis_module_handler);
+DECLARE_HANDLER(aimee_runtime_web_module_handler);
 DECLARE_HANDLER(aimee_benchmarks_module_handler);
 
 int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation)
@@ -348,6 +350,31 @@ static void test_kb_synthesis(void)
    }
 }
 
+static void test_runtime_web(void)
+{
+   static const struct
+   {
+      const char *kind;
+      uint32_t status;
+   } cases[] = {
+       {"invalid_argument", 400u}, {"not_found", 404u}, {"permission_denied", 403u},
+       {"unavailable", 503u},      {"", 502u},          {"unknown", 502u},
+   };
+   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)
+   {
+      uint8_t request[AIMEE_RUNTIME_WEB_REQUEST_LEN];
+      uint8_t response[AIMEE_RUNTIME_WEB_RESPONSE_LEN];
+      uint32_t response_len = 0, status = 0;
+      aimee_module_invocation_t invocation = {.stage_id = AIMEE_RUNTIME_WEB_STAGE_CLASSIFY};
+      assert(aimee_runtime_web_request_encode(cases[i].kind, request, sizeof(request)) == 0);
+      assert(aimee_runtime_web_module_handler(&invocation, request, sizeof(request), response,
+                                              sizeof(response), &response_len,
+                                              NULL) == AIMEE_MODULE_STATUS_OK);
+      assert(aimee_runtime_web_response_decode(response, response_len, &status) == 0);
+      assert(status == cases[i].status);
+   }
+}
+
 static void test_benchmarks(void)
 {
    static const int64_t perfect_retrieved[] = {11, 22, 33};
@@ -403,6 +430,7 @@ int main(void)
    test_workflows();
    test_roundtable();
    test_kb_synthesis();
+   test_runtime_web();
    test_benchmarks();
    puts("process module handlers: PASS");
    return 0;

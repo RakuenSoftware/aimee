@@ -722,6 +722,7 @@ MODULE_HANDLER_TEST_OBJS = \
    $(OBJDIR)/tests/module_handlers/workflows.o \
    $(OBJDIR)/tests/module_handlers/roundtable.o \
    $(OBJDIR)/tests/module_handlers/kb_synthesis.o \
+   $(OBJDIR)/tests/module_handlers/runtime_web.o \
    $(OBJDIR)/tests/module_handlers/benchmarks.o
 
 define module_handler_test_object
@@ -740,6 +741,7 @@ $(eval $(call module_handler_test_object,governance,governance))
 $(eval $(call module_handler_test_object,workflows,workflows))
 $(eval $(call module_handler_test_object,roundtable,roundtable))
 $(eval $(call module_handler_test_object,kb_synthesis,kb-synthesis))
+$(eval $(call module_handler_test_object,runtime_web,runtime-web))
 $(eval $(call module_handler_test_object,benchmarks,benchmarks))
 
 $(TESTPREFIX)/unit-test-process-module-handlers: \

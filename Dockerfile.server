@@ -103,6 +103,8 @@ RUN apt-get update \
         pkg-config \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src/runtime-web
+COPY server-go/go.mod server-go/go.sum /src/server-go/
+COPY server-go/modules/runtime-web/policy/ /src/server-go/modules/runtime-web/policy/
 COPY runtime-web/go.mod runtime-web/go.sum ./
 RUN go mod download
 COPY runtime-web/ ./
