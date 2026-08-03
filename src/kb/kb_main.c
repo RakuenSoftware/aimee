@@ -27,7 +27,7 @@
 #include "kb_http.h"
 #include "aimee/protocols/mcp/mcp_client_registry.h" /* host install:kb MCP plugins */
 #include "kb_tls.h"
-#include "kb_synthesis_identity.h"
+#include "kb_sidecar_identity.h"
 #include "kb_paths.h"
 #include "kb_service.h"
 #include "log.h"

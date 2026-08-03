@@ -23,7 +23,7 @@
  *      the sidecar, and is not offered to every host the kb talks to)
  */
 #include "agent_exec.h"
-#include "kb_synthesis_identity.h"
+#include "kb_sidecar_identity.h"
 
 #include <arpa/inet.h>
 #include <assert.h>

@@ -5683,7 +5683,7 @@ $(TESTPREFIX)/unit-test-subject-grammar: $(OBJDIR)/tests/test_subject_grammar.o 
 
 $(TESTPREFIX)/unit-test-kb-synthesis-identity: \
                      $(OBJDIR)/tests/test_kb_synthesis_identity.o \
-                     $(OBJDIR)/kb/kb_synthesis_identity.o \
+                     $(OBJDIR)/kb/kb_sidecar_identity.o \
                      $(OBJDIR)/kb/pki.o \
                      $(OBJDIR)/kb/modules/vault/vault_crypto.o \
                      $(OBJDIR)/kb/modules/vault/vault_server_key.o \
@@ -5698,7 +5698,7 @@ $(TESTPREFIX)/unit-test-synthesis-mtls-client: \
                      $(OBJDIR)/tests/test_synthesis_mtls_client.o \
                      $(OBJDIR)/posix/agent_bridge.o \
                      $(OBJDIR)/proxy_bootstrap.o \
-                     $(OBJDIR)/kb/kb_synthesis_identity.o \
+                     $(OBJDIR)/kb/kb_sidecar_identity.o \
                      $(OBJDIR)/kb/pki.o \
                      $(OBJDIR)/kb/modules/vault/vault_crypto.o \
                      $(OBJDIR)/kb/modules/vault/vault_server_key.o \

@@ -10,7 +10,7 @@
  *     containers restarted;
  *   - both halves verify against the SAME CA, which is the entire point.
  */
-#include "kb_synthesis_identity.h"
+#include "kb_sidecar_identity.h"
 #include "kb_pki.h"
 #include <assert.h>
 #include <stdio.h>
