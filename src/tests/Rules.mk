@@ -256,6 +256,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-bus-capture \
                $(TESTPREFIX)/unit-test-guardrails-blast-radius \
                $(TESTPREFIX)/unit-test-code-collect \
+               $(TESTPREFIX)/unit-test-server-conn-accept \
                $(TESTPREFIX)/unit-test-server-compute \
                $(TESTPREFIX)/unit-test-server-memory-benchmark \
                $(TESTPREFIX)/unit-test-server-jobs-aux \
@@ -3326,6 +3327,12 @@ $(TESTPREFIX)/unit-test-guardrails-blast-radius: $(OBJDIR)/tests/test_guardrails
 # the real collector against throwaway git repos materialized under TMPDIR.
 $(TESTPREFIX)/unit-test-code-collect: $(OBJDIR)/tests/test_code_collect.o \
                                       $(OBJDIR)/code_collect.o $(OBJDIR)/cJSON.o $(PLATFORM_BASIC_OBJS)
+	$(TESTLINK) -o $@ $^ $(L_CORE)
+
+# Accepted-connection fds must be close-on-exec: an inherited fd keeps the
+# client blocked in read() until the child exits (see server_conn_io.c).
+$(TESTPREFIX)/unit-test-server-conn-accept: $(OBJDIR)/tests/test_server_conn_accept.o \
+                                           $(OBJDIR)/server/server_conn_io.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_CORE)
 
 # §2 tree-sitter front-end test — opt-in only (links the fetched runtime + grammar).
