@@ -56,7 +56,25 @@ read_cfg_embedding_model() {
     aimee-kb --print-embedding-model 2>/dev/null || true
 }
 
+# Is this container starting the KB SERVICE, or running a one-shot subcommand?
+#
+# The service is started with flags only (`--http-port=8741`, the image CMD). A one-shot
+# passes a bare subcommand first — `managed-server-identity install ...` is the managed
+# deploy's server-enrolment job, which runs this same image against the kb's volume and
+# never serves a query. Requiring an embedder of those jobs failed server identity
+# enrolment on every clean install, which is a deploy that half-succeeded: the kb was up
+# and the server could not talk to it.
+kb_is_serving() {
+    case "${1:-}" in
+    "" | -*) return 0 ;;
+    *) return 1 ;;
+    esac
+}
+
 start_embedder() {
+    if ! kb_is_serving "$@"; then
+        return 0
+    fi
     if [ -n "${EMBEDDER_URL:-}" ]; then
         echo "aimee-kb: external embedder configured ($EMBEDDER_URL); bundled model not loaded" >&2
         return 0
@@ -104,6 +122,11 @@ start_embedder() {
 #
 # The mTLS material for the sidecar hop is issued by the kb at startup, not here;
 # see kb_synthesis_identity.c.
+
+# Sourcing stops here: everything above is definitions, everything below starts a
+# container. tests/test_kb_entrypoint.sh uses this to exercise the embedder gate without
+# a PostgreSQL cluster, a Vault, or an image.
+[ -n "${AIMEE_KB_ENTRYPOINT_SOURCE_ONLY:-}" ] && return 0
 
 set -e
 
@@ -224,7 +247,7 @@ if [ "$external_db" -eq 0 ]; then
     if "$PGBIN/pg_isready" --host="$PGSOCK" --quiet 2>/dev/null; then
         echo "aimee-kb: PostgreSQL already running on $PGSOCK; using it instead of" \
              "starting a second cluster" >&2
-        start_embedder
+        start_embedder "$@"
         run_kb_with_modules "$@"
         exit $?
     fi
@@ -318,7 +341,7 @@ if [ "$external_db" -eq 0 ]; then
     fi
     AIMEE_DB2_URL="$embedded_dsn" aimee-kb --bootstrap-vault-env
 
-    start_embedder
+    start_embedder "$@"
     start_modules
 
     # Not exec: the trap above has to outlive the kb so the cluster shuts down
@@ -377,6 +400,6 @@ if [ "$external_db" -eq 0 ]; then
     exit "$rc"
 fi
 
-start_embedder
+start_embedder "$@"
 run_kb_with_modules "$@"
 exit $?
