@@ -1,0 +1,6 @@
+[19:44:25Z] sizing: starting one server to measure resident VRAM
+[19:44:41Z]   one instance uses 1986 MiB of 16303 MiB
+[19:44:41Z]   -> running 3 processes, cache-ram 1024 MiB each
+[19:45:13Z]   all 3 servers up; VRAM now 5948 MiB
+[19:45:13Z] START granite-4.0-1b.10k across 3 shards
+[20:01:11Z] DONE granite-4.0-1b.10k rows=10000/10000 wall=15m58s procs=3 retries=0

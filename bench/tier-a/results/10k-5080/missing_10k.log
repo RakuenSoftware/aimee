@@ -1,0 +1,7 @@
+[19:44:19Z] === missing 10k arms on the 5080: 3 models, 10000 notes each, nproc=3, no MTP
+[19:44:19Z] --- granite-4.0-1b.10k  unsloth/granite-4.0-1b-GGUF:UD-Q4_K_XL  nproc=3  port=8600
+[19:53:37Z] === gemma-3n chained: waiting for the 5080 to release
+[20:01:17Z] OK   granite-4.0-1b.10k strictF1=scorer-refused wall=16m
+[20:01:17Z] --- granite-4.1-3b.10k  unsloth/granite-4.1-3b-GGUF:UD-Q4_K_XL  nproc=3  port=8600
+[20:22:44Z] OK   granite-4.1-3b.10k strictF1=scorer-refused wall=21m
+[20:22:44Z] --- Qwen3-1.7B.10k  unsloth/Qwen3-1.7B-GGUF:UD-Q4_K_XL  nproc=3  port=8600
