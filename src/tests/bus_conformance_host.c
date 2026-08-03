@@ -31,8 +31,8 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "bus_client.h"
-#include "bus_host.h"
+#include <aimee/core/event_bus/bus_client.h>
+#include <aimee/core/event_bus/bus_host.h>
 
 #define KIND_NOTIFY     1000
 #define KIND_ACK        1001

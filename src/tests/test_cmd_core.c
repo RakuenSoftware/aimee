@@ -9,7 +9,7 @@
 #include <fcntl.h>
 #include "aimee.h"
 #include "commands.h"
-#include "mcp_git.h"
+#include "modules/git/mcp_git.h"
 #include "cJSON.h"
 #include "platform_test_util.h"
 

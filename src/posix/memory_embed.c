@@ -3,7 +3,7 @@
  * Split from posix/memory.c so memory unit tests can link the gates
  * without dragging in the kb_client RPC chain. */
 #include "aimee.h"
-#include "memory_platform.h"
+#include "modules/memory/memory_platform.h"
 #include "kb_client.h"
 #include <stdlib.h>
 #include <sys/wait.h>

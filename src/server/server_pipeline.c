@@ -13,7 +13,7 @@
 #include "config.h"
 #include "json_fluent.h"
 #include "log.h"
-#include "mcp_git.h"
+#include "modules/git/mcp_git.h"
 #include "openai_runs_store.h"
 #include "roundtable_pipeline.h"
 #include "roundtable_pipeline_chunk.h"

@@ -18,8 +18,8 @@
 #include "decision_log.h"
 #include "entity_edges.h"
 #include "db2_learning.h"
-#include "learning_evidence.h" /* learning_evidence_write_event — session_summary emission */
-#include "learning_implicit.h"
+#include "modules/learning/learning_evidence.h" /* learning_evidence_write_event — session_summary emission */
+#include "modules/learning/learning_implicit.h"
 #include "memory.h"
 #include "feedback.h"
 #include "rules.h"

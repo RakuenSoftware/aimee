@@ -10,10 +10,10 @@
 #include "git_cred_inject.h" /* git_cred_inject_build_env_for_repo / _free_env */
 #include "git_host_cred.h"   /* per-host token store (single-user, many hosts) */
 #include "log.h"
-#include "util.h"            /* safe_exec_capture_env */
-#include "util_url.h"        /* util_url_normalize / util_url_is_ssh */
-#include "workspace_scope.h" /* ws_scope_* */
-#include "ws_registry.h"     /* lifecycle lock + key registry */
+#include "util.h"                              /* safe_exec_capture_env */
+#include "util_url.h"                          /* util_url_normalize / util_url_is_ssh */
+#include "modules/workspace/workspace_scope.h" /* ws_scope_* */
+#include "ws_registry.h"                       /* lifecycle lock + key registry */
 
 #include <dirent.h>
 #include <errno.h>

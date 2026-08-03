@@ -1,7 +1,7 @@
 /* windows/memory.c: Windows memory stubs; regex is unavailable, so gates are permissive. */
 #include "aimee.h"
 #include "memory.h"
-#include "memory_platform.h"
+#include "modules/memory/memory_platform.h"
 #include <io.h>
 
 int gate_check_sensitive(const char *content, char *redacted, size_t redacted_cap)

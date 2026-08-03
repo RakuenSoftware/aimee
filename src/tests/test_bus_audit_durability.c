@@ -65,6 +65,16 @@ int main(void)
       return 1;
    }
 
+   /* The same daemon-owned host also carries synchronous process-module RPC.
+    * With no memory module attached, the real core caller must receive the
+    * bus's typed capability_absent response (never a fake successful echo). */
+   char module_response[16];
+   uint32_t module_response_len = 0;
+   assert(obs_bus_module_call(5889, 1, 1, now_ns() + 1000000000ULL, "probe", 5, module_response,
+                              sizeof module_response, &module_response_len, NULL,
+                              NULL) == AIMEE_MODULE_CALL_CAPABILITY_ABSENT);
+   assert(module_response_len == 0);
+
    /* Emit N rows over the bus, each with a distinct task id (0..N-1) so the
     * read-back can prove exactly-once with no reliance on ordering. */
    uint64_t *emit_ns = malloc(N * sizeof *emit_ns);

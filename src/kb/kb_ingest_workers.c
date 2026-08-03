@@ -22,8 +22,8 @@
 #include "kb_ingest_workers.h"
 #include "kb_service.h"
 #include "log.h"
-#include "workspace.h"
-#include "workspace_scope.h"
+#include <aimee/workspace/workspace.h>
+#include "modules/workspace/workspace_scope.h"
 
 #include "db2/db2.h" /* db2_lease_release_idle */
 #include "db2/canonical_index.h"

@@ -9,11 +9,11 @@
 #include "server.h"         /* CAP_* / CAPS_* capability bits, server_capability_for_method */
 #include "server_conn_io.h" /* transport-aware fd I/O (native-TLS phase 1) */
 #include "server_tls.h"     /* native TLS termination (phase 1b) */
-#include "workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
-#include "forge_credentials.h"         /* forge_cred_install for the /v1 token-install route */
-#include "git_oauth_device.h"          /* GitLab/Gitea device-flow (relocated route handlers) */
-#include "git_oauth_github.h"   /* GitHub device + web (redirect) flow (relocated handlers) */
-#include "git_oauth_gh.h"       /* zero-config GitHub sign-in via the bundled gh CLI */
+#include "modules/workspace/workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
+#include "modules/git/forge_credentials.h" /* forge_cred_install for the /v1 token-install route */
+#include "modules/git/git_oauth_device.h"  /* GitLab/Gitea device-flow (relocated route handlers) */
+#include "modules/git/git_oauth_github.h" /* GitHub device + web (redirect) flow (relocated handlers) */
+#include "modules/git/git_oauth_gh.h"     /* zero-config GitHub sign-in via the bundled gh CLI */
 #include "deploy_apply.h"       /* server-orchestrated container deploy (relocated handlers) */
 #include "shutdown_forensics.h" /* authenticated remote shutdown diagnostics */
 #include <limits.h>

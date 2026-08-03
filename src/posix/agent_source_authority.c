@@ -1,5 +1,5 @@
 #include "aimee.h"
-#include "agent_tools.h"
+#include <aimee/tools/agent_tools.h>
 #include "agent_source_authority.h"
 #include "kb_client.h"
 #include "platform_process.h"

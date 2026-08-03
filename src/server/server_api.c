@@ -14,7 +14,7 @@
 #include "working_profile.h" /* working_profile_autoobserve_from_feedback */
 #include "agent_config.h"
 #include "agent_types.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include "cJSON.h"
 #include <stdio.h>
 #include <stdlib.h>

@@ -3,7 +3,7 @@
 #include "aimee.h"
 #include "headers/cmd_hooks_scope.h"
 #include "config_accessors.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include "cJSON.h"
 #include <ctype.h>
 #include <stdlib.h>

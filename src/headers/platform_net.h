@@ -5,9 +5,8 @@
  * connect/send/recv/close over a TCP stream, identified by an int descriptor
  * (on Windows the SOCKET is cast through intptr_t, mirroring platform_ipc).
  *
- * This is the only place outside the OS folders that the thin client's remote
- * transport touches the network: aimee_client.c is socket-header-free and
- * builds identically on every platform by going through these calls.
+ * Compatibility facade for older call sites. The implementation now lives in
+ * libaimee-core-connection's public aimee/core/connection/socket.h API.
  */
 #ifndef DEC_PLATFORM_NET_H
 #define DEC_PLATFORM_NET_H 1

@@ -70,10 +70,19 @@ type Event struct {
 // Attach performs the handshake over a connected SOCK_SEQPACKET socket, receives
 // the three descriptors, and maps the regions. The socket is not closed here.
 func Attach(sock int) (*Client, error) {
+	return AttachAs(sock, 0, 0)
+}
+
+// AttachAs performs an authenticated module attach. The host treats class and
+// ref as claims only: its admission policy also binds them to SO_PEERCRED and
+// the canonical executable path before granting event capabilities.
+func AttachAs(sock int, principalClass uint32, principalRef uint32) (*Client, error) {
 	var req [attachReqBytes]byte
 	binary.LittleEndian.PutUint32(req[0:], attachReqMagic)
 	binary.LittleEndian.PutUint16(req[4:], WireVersion) // min
 	binary.LittleEndian.PutUint16(req[6:], WireVersion) // max
+	binary.LittleEndian.PutUint32(req[8:], principalClass)
+	binary.LittleEndian.PutUint32(req[12:], principalRef)
 	if err := unix.Sendmsg(sock, req[:], nil, nil, 0); err != nil {
 		return nil, err
 	}
@@ -217,18 +226,44 @@ func (c *Client) Publish(kind uint32, payload []byte) error {
 
 // Request sends a correlated request; the reply arrives later via Poll.
 func (c *Client) Request(kind uint32, correlation uint64, payload []byte) error {
+	return c.RequestFragment(kind, correlation, payload, false)
+}
+
+// RequestFragment sends one ordered request fragment. More keeps the
+// correlation in the request-assembly state until a final fragment arrives.
+func (c *Client) RequestFragment(kind uint32, correlation uint64, payload []byte, more bool) error {
 	if correlation == 0 {
 		return ErrProtocol
 	}
-	return c.emit(FRequest, kind, correlation, payload)
+	flags := uint16(FRequest)
+	if more {
+		if len(payload) == 0 {
+			return ErrProtocol
+		}
+		flags |= FMore
+	}
+	return c.emit(flags, kind, correlation, payload)
 }
 
 // Reply answers a request (a serving module).
 func (c *Client) Reply(kind uint32, correlation uint64, payload []byte) error {
+	return c.ReplyFragment(kind, correlation, payload, false)
+}
+
+// ReplyFragment sends one ordered reply fragment. More keeps the correlation
+// pending for another reply fragment.
+func (c *Client) ReplyFragment(kind uint32, correlation uint64, payload []byte, more bool) error {
 	if correlation == 0 {
 		return ErrProtocol
 	}
-	return c.emit(FReply, kind, correlation, payload)
+	flags := uint16(FReply)
+	if more {
+		if len(payload) == 0 {
+			return ErrProtocol
+		}
+		flags |= FMore
+	}
+	return c.emit(flags, kind, correlation, payload)
 }
 
 // Cancel cancels an outstanding request.

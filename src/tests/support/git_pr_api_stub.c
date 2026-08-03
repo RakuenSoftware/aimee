@@ -3,7 +3,7 @@
  * only op routing, not real PR creation — so they need not pull in the HTTP
  * client / TLS stack. The real object (server/git_pr_api.o) is linked by binaries
  * that need real behaviour and must NOT also link this TU. */
-#include "git_pr_api.h"
+#include "modules/git/git_pr_api.h"
 
 #include <stddef.h>
 #include <stdio.h>

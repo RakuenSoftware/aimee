@@ -7,7 +7,7 @@
  * PROCESS-GLOBAL and NULL-by-default, like the vault/sandbox audit hooks: the
  * server installs one bridge at startup and it fires on every dispatch thread. */
 #include "config.h" /* MAX_PATH_LEN, transitively needed by agent_types.h (header-only) */
-#include "agent_tools.h"
+#include <aimee/tools/agent_tools.h>
 
 /* Installation MUST complete-before any worker thread starts (the server installs
  * the bridge in run_server, before the accept loop — the same happens-before the

@@ -142,6 +142,8 @@ jobs:
         run: |
           python3 -I -S scripts/validate_module_descriptors.py \
             --check-schema src/modules
+      - name: Validate core/process carving, placement, and event contracts
+        run: python3 -I -S scripts/validate_module_process_contracts.py
       - name: Test descriptor failure modes and taxonomy convergence
         run: python3 -I scripts/tests/test_validate_module_descriptors.py -v
       - name: Enforce canonical module public-header layout

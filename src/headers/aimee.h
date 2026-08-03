@@ -192,7 +192,7 @@ void now_utc(char *buf, size_t len);
 #include "util.h"
 #include "rules.h"
 #include "context_discover.h"
-#include "learning.h"
+#include <aimee/learning/learning.h>
 #include "feedback.h"
 #include "guardrails.h"
 #include "index.h"

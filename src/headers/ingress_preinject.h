@@ -84,6 +84,8 @@ char *ingress_render_block(const ingress_entry_t *entries, int count, size_t env
 /* Map a recall relevance score in [0,1] to a confidence tier string
  * ("high" | "medium" | "low"). Pure; thresholds documented in the .c. */
 const char *ingress_preinject_confidence(double top_score);
+typedef int (*ingress_confidence_provider_fn)(double top_score, const char **confidence);
+void ingress_preinject_register_confidence_provider(ingress_confidence_provider_fn provider);
 
 /* Format code-search hits into a `recommended (code):` block — one
  * `  - <file>` line per hit, each followed by a trimmed single-line snippet.

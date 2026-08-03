@@ -20,7 +20,7 @@
 #include "evidence_vectors.h"
 #include "embed_input_type.h" /* the memory_embed_text stub's polarity argument */
 #include "db2_test_shim.h"
-#include "learning_bundle.h"
+#include "modules/learning/learning_bundle.h"
 
 /* Stub embedder: query vector is the unit basis e0 = [1,0,0,...]. Cosine with a
  * stored [v0,v1,0,...] is then v0 / sqrt(v0^2 + v1^2), so we can hand-pick the

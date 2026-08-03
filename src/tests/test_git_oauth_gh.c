@@ -3,7 +3,7 @@
  * exec/vault externals are stubbed for linking only; these tests never invoke
  * them). */
 
-#include "git_oauth_gh.h"
+#include "modules/git/git_oauth_gh.h"
 
 #include <assert.h>
 #include <stddef.h>

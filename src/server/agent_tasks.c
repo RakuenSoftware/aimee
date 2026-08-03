@@ -2,7 +2,7 @@
 #include "aimee.h"
 #include "agent_tasks.h"
 #include "agent_exec.h"
-#include "agent_tools.h"
+#include <aimee/tools/agent_tools.h>
 #include "cJSON.h"
 #include "agent_config.h"
 #include "db1.h"

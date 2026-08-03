@@ -9,14 +9,14 @@
 #include "platform_path.h"
 #include "agent_exec.h"
 #include "agent_config.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include "commands.h"
 #include "dashboard.h"
 #include "memory.h"
 #include "cJSON.h"
 #include "dstr.h"
-#include "mcp_git.h"
-#include "git_verify.h"
+#include "modules/git/mcp_git.h"
+#include "modules/git/git_verify.h"
 #include "config_fields.h"
 #include "config_database.h" /* config_emit_deploy_env — page-2 compose env */
 #include "runtime_secret.h"

@@ -9,28 +9,11 @@
  * token cannot be recovered byte-by-byte through response-timing. */
 #include "kb_verifier.h"
 #include "kb_scope.h"
+#include <aimee/core/connection/auth.h>
 
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
-
-/* Constant-time compare of two NUL-terminated strings. Does not short-circuit
- * on the first mismatch and folds the length difference into the accumulator so
- * timing leaks neither the secret length nor how far a guess matched. */
-static int ct_streq(const char *a, const char *b)
-{
-   size_t alen = a ? strlen(a) : 0;
-   size_t blen = b ? strlen(b) : 0;
-   size_t n = alen > blen ? alen : blen;
-   unsigned char diff = (unsigned char)(alen ^ blen);
-   for (size_t i = 0; i < n; i++)
-   {
-      unsigned char x = i < alen ? (unsigned char)a[i] : 0;
-      unsigned char y = i < blen ? (unsigned char)b[i] : 0;
-      diff |= (unsigned char)(x ^ y);
-   }
-   return diff == 0;
-}
 
 /* --- built-in kb-token verifier --- */
 
@@ -49,8 +32,8 @@ int kb_verifier_kbtoken(const char *presented, const char *configured, kb_verify
 
    /* Accept the full configured token, or — for a scoped token — its secret
     * part. Constant-time, and the OR is not short-circuited on the secret. */
-   int full_match = ct_streq(presented, configured);
-   int secret_match = (tsecret[0] != '\0') & ct_streq(presented, tsecret);
+   int full_match = aimee_core_credential_equal(presented, configured);
+   int secret_match = (tsecret[0] != '\0') & aimee_core_credential_equal(presented, tsecret);
    if (!(full_match | secret_match))
       return 0;
 

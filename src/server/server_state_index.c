@@ -5,7 +5,7 @@
 #include "aimee.h"
 #include "kb_client.h"
 #include "log.h" /* aimee_log — name the real KB failure in the server log */
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include "cJSON.h"
 #include "json_fluent.h"
 

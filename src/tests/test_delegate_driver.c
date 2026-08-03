@@ -4,7 +4,7 @@
 #include "aimee.h"
 #include <aimee/delegates/delegate_driver.h>
 #include "agent_types.h"
-#include "agent_tools.h"
+#include <aimee/tools/agent_tools.h>
 #include "cJSON.h"
 
 static void test_registry_init(void)

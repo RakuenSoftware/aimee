@@ -17,13 +17,13 @@
  * functionality. Registration alone runs nothing — a run only begins when intake
  * creates a work item and the autonomy driver advances it. */
 #include "aimee.h"
-#include "git_forge_vault.h"
+#include "modules/git/git_forge_vault.h"
 
 #include "wfe_live_delegate.h"
 
 #include "agent_config.h"
 #include "agent_exec.h"
-#include "agent_tools.h"
+#include <aimee/tools/agent_tools.h>
 #include "agent_types.h"
 #include "cJSON.h"
 #include "coord_jobs.h"
@@ -33,7 +33,7 @@
 #include "sandbox_learned.h" /* learn verify's apt installs -> pre-bake next image */
 #include "persona.h"
 #include "provider_catalog.h"
-#include "git_verify.h"
+#include "modules/git/git_verify.h"
 #include "log.h"
 #include "util.h"
 #include "wfe_approval.h"

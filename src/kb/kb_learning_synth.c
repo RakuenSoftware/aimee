@@ -10,7 +10,7 @@
 #include "cJSON.h"
 #include "db2/artifacts.h"
 #include "db2/learning_synth_ops.h"
-#include "learning_bundle.h"
+#include "modules/learning/learning_bundle.h"
 #include "log.h"
 #include "platform_process.h" /* platform_exec_pipe */
 

@@ -3,7 +3,7 @@
 #include "../headers/aimee.h"
 #include "../db2/entity_registry.h"
 #include "../db2/db2_test_shim.h"
-#include "memory_ontology.h"
+#include "modules/memory/memory_ontology.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

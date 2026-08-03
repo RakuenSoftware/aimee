@@ -171,6 +171,10 @@ this spec. This spec defines only the framing.
   typed `capability_absent` reply rather than dropping the request.
 - **cancel** — a requester may cancel an outstanding `correlation_id`; delivery of cancel is
   best-effort and idempotent.
+- **fragmentation** — wire version 3 sets `BUS_F_MORE` on every non-final inline fragment of one
+  correlated request or reply. Fragments remain ordered under the correlation ID; the first frame
+  without `BUS_F_MORE` completes the message. The host does not close or reuse the pending route
+  while either side is fragmented, and cancel retires the partial stream.
 
 ## Attach and admission handshake
 
@@ -216,15 +220,16 @@ declares its supported version range at attach; the host accepts the highest com
 the attach with a typed reason. Within a major version, fields may be added only in reserved space and
 ignored by older readers; a layout-incompatible change bumps `layout_version` and requires re-attach.
 
-## Payloads and zero-copy (open design point)
+## Payloads and zero-copy
 
 Small payloads inline in the ring slot (a copy, but cheap). Payloads above the inline budget go to the
 shared **arena** and are referenced by `(offset, len)`. Zero-copy across a process boundary needs an
 ownership/lifetime discipline: v0's baseline is **host-mediated arena leases** — the producer requests
 an arena region, fills it, publishes the ref; the consumer reads and releases; the host tracks the
-lease and reclaims on release or on client reap. Whether to allow direct producer→consumer zero-copy
-without a copy through the host, and how to bound arena fragmentation and huge/streamed payloads, are
-**open** and must be settled with the conformance vectors before v1.
+lease and reclaims on release or on client reap. Arena allocation remains limited to trusted
+co-located publishers. Module processes instead use the wire-v3 ordered fragmentation contract for
+requests and replies, with a 16 MiB assembled-message limit and endpoint reassembly. Direct
+producer→consumer arena allocation across that process boundary remains outside this contract.
 
 ## Security
 

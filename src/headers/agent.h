@@ -19,6 +19,6 @@
 #include "agent_tasks.h"
 #include "agent_eval.h"
 #include "agent_coord.h"
-#include "agent_tools.h"
+#include <aimee/tools/agent_tools.h>
 
 #endif /* DEC_AGENT_H */

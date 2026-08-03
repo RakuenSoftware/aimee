@@ -3,12 +3,12 @@
  * Owns SQL for the explicit-signal-capture / proposal-gate pipeline
  * documented in docs/proposals/done/learning-signals-router-phase-*.
  * The learning_signal_input_t / learning_proposal_t types live in
- * modules/learning/learning.h (the ensemble-learning types); callers
+ * aimee/learning/learning.h (the ensemble-learning types); callers
  * include "learning.h" before this. */
 #ifndef DEC_DB2_LEARNING_H
 #define DEC_DB2_LEARNING_H 1
 
-#include "../modules/learning/learning.h"
+#include <aimee/learning/learning.h>
 
 #include <stdint.h>
 

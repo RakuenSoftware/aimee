@@ -23,7 +23,7 @@
 #define DEC_REL_TYPES_H 1
 
 #include <stddef.h>
-#include "memory_ontology.h"
+#include "modules/memory/memory_ontology.h"
 
 #ifdef __cplusplus
 extern "C"

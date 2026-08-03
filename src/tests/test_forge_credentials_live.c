@@ -10,7 +10,7 @@
  * so `make unit-tests` / verify (no forge) never depend on it. Run live via
  * `make forge-cred-integration`. */
 #define _GNU_SOURCE
-#include "forge_credentials.h"
+#include "modules/git/forge_credentials.h"
 
 #include <assert.h>
 #include <stdio.h>

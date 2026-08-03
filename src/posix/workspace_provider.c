@@ -5,7 +5,7 @@
  *
  * Every primitive here is a thin wrapper over a single libc call, so a
  * co-located deployment pays nothing for going through the interface. */
-#include "workspace_provider.h"
+#include "modules/workspace/workspace_provider.h"
 
 #include <errno.h>
 #include <fcntl.h>

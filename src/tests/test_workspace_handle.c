@@ -1,6 +1,6 @@
 /* test_workspace_handle.c: the /v1 workspace manifest builder shapes the
  * handle response (workspace-resource-plane §1). */
-#include "workspace_handle.h"
+#include "modules/workspace/workspace_handle.h"
 #include "cJSON.h"
 
 #include <assert.h>

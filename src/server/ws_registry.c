@@ -1,10 +1,10 @@
 /* ws_registry.c — deployment-global project-key registry + lifecycle lock.
  * See ws_registry.h and docs/proposals/pending/webchat-project-lifecycle.md. */
 #include "ws_registry.h"
-#include "git_project.h" /* git_project_canonical_remote — git config is authoritative */
+#include "modules/git/git_project.h" /* git_project_canonical_remote — git config is authoritative */
 #include "log.h"
 #include "util.h" /* safe_exec_capture_cwd_env_fd_timeout */
-#include "workspace_scope.h"
+#include "modules/workspace/workspace_scope.h"
 
 #include <dirent.h>
 #include <errno.h>

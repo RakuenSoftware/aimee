@@ -4,7 +4,7 @@
  * derivation + refusal paths deterministically. Actors (alice/bob/carol) are
  * PAM identities that authorize and attribute a request; they never select a
  * tree, so they all resolve the same projects. */
-#include "git_project.h"
+#include "modules/git/git_project.h"
 #include "ws_registry.h"
 
 #include <assert.h>

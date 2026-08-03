@@ -160,6 +160,41 @@ if [ ! -f "$cfg" ] && [ -f "$default" ]; then
     cp "$default" "$cfg"
 fi
 
+export AIMEE_MODULE_BUS_SOCKET="${AIMEE_MODULE_BUS_SOCKET:-$AIMEE_HOME/kb-module-bus.sock}"
+MODULE_MANIFEST="${AIMEE_MODULE_MANIFEST:-/opt/aimee/module-grants/kb.modules}"
+module_supervisor_pid=""
+
+start_modules() {
+    mkdir -p "$AIMEE_HOME/modules.d/kb"
+    for module_grant in /opt/aimee/module-grants/kb/*.grant; do
+        [ -f "$module_grant" ] || continue
+        grant_target="$AIMEE_HOME/modules.d/kb/$(basename "$module_grant")"
+        [ -e "$grant_target" ] || cp "$module_grant" "$grant_target"
+    done
+    chmod 0700 "$AIMEE_HOME/modules.d" "$AIMEE_HOME/modules.d/kb" 2>/dev/null || true
+    chmod 0600 "$AIMEE_HOME/modules.d/kb/"*.grant 2>/dev/null || true
+    module-supervisor.sh kb "$AIMEE_MODULE_BUS_SOCKET" "$MODULE_MANIFEST" &
+    module_supervisor_pid=$!
+}
+
+stop_modules() {
+    [ -n "$module_supervisor_pid" ] || return 0
+    kill "$module_supervisor_pid" 2>/dev/null || true
+    wait "$module_supervisor_pid" 2>/dev/null || true
+    module_supervisor_pid=""
+}
+
+run_kb_with_modules() {
+    start_modules
+    aimee-kb "$@" &
+    kb=$!
+    trap 'kill -TERM "$kb" 2>/dev/null || true; stop_modules' HUP INT TERM
+    rc=0
+    wait "$kb" || rc=$?
+    stop_modules
+    return "$rc"
+}
+
 # 3. Embedded DB2, only when the operator configured no external server.
 if [ "$external_db" -eq 0 ]; then
     PGMAJOR="${AIMEE_DB2_PG_MAJOR:-18}"
@@ -184,7 +219,8 @@ if [ "$external_db" -eq 0 ]; then
         echo "aimee-kb: PostgreSQL already running on $PGSOCK; using it instead of" \
              "starting a second cluster" >&2
         start_embedder
-        exec aimee-kb "$@"
+        run_kb_with_modules "$@"
+        exit $?
     fi
 
     # PostgreSQL refuses to run as root, unconditionally. The image declares
@@ -205,6 +241,21 @@ if [ "$external_db" -eq 0 ]; then
         "$PGBIN/initdb" --pgdata="$PGDATA" --auth-local=trust --encoding=UTF8 >/dev/null
     fi
 
+    # pg_ctl --wait gives up after 60s by default. That is far less than crash
+    # recovery needs on a large cluster: an unclean stop (the runtime SIGKILLing
+    # postgres, or `docker rm -f` on the kb, neither of which lets the EXIT trap
+    # below run) makes the next start fsync the whole data directory before it
+    # will accept connections. Past 60s pg_ctl returns failure, the entrypoint
+    # exits, `restart: unless-stopped` starts the container again, and recovery
+    # replays FROM SCRATCH -- a livelock that never converges, because each
+    # attempt is killed at the same deadline it could never have met. Observed
+    # as an endless "server did not start in time" loop on a 27k-vector corpus.
+    #
+    # Wait long enough for recovery to finish instead. This only ever delays the
+    # unhealthy case: a cleanly-stopped cluster still starts in seconds, so the
+    # value is a ceiling, not a cost.
+    export PGCTLTIMEOUT="${AIMEE_DB2_PGCTLTIMEOUT:-1800}"
+
     # No TCP listener: DB2 is reachable only over the socket inside this
     # container. An operator who wants it exposed runs an external server.
     "$PGBIN/pg_ctl" --pgdata="$PGDATA" --wait --silent \
@@ -219,7 +270,8 @@ if [ "$external_db" -eq 0 ]; then
 
     # Stop the cluster cleanly when the container stops. Without this the runtime
     # SIGKILLs postgres once the kb exits and every start replays WAL recovery.
-    trap '"$PGBIN/pg_ctl" --pgdata="$PGDATA" --mode=fast --wait --silent stop || true' EXIT HUP INT TERM
+    trap 'stop_modules; "$PGBIN/pg_ctl" --pgdata="$PGDATA" --mode=fast --wait --silent stop || true' EXIT
+    trap 'stop_modules; "$PGBIN/pg_ctl" --pgdata="$PGDATA" --mode=fast --wait --silent stop || true' HUP INT TERM
 
     if ! "$PGBIN/psql" --host="$PGSOCK" --dbname=postgres --no-psqlrc --quiet \
         --tuples-only --command="SELECT 1 FROM pg_database WHERE datname='$DB'" | grep -q 1; then
@@ -261,12 +313,13 @@ if [ "$external_db" -eq 0 ]; then
     AIMEE_DB2_URL="$embedded_dsn" aimee-kb --bootstrap-vault-env
 
     start_embedder
+    start_modules
 
     # Not exec: the trap above has to outlive the kb so the cluster shuts down
     # cleanly. Forward the stop signal so the kb still gets its own shutdown.
     aimee-kb "$@" &
     kb=$!
-    trap 'kill -TERM "$kb" 2>/dev/null || true' HUP INT TERM
+    trap 'kill -TERM "$kb" 2>/dev/null || true; stop_modules' HUP INT TERM
 
     # POSIX sh has no portable wait -n. Monitor both children, including Linux
     # zombies: kill -0 still succeeds for a dead-but-unreaped postmaster, which
@@ -319,4 +372,5 @@ if [ "$external_db" -eq 0 ]; then
 fi
 
 start_embedder
-exec aimee-kb "$@"
+run_kb_with_modules "$@"
+exit $?

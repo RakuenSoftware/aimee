@@ -5,7 +5,7 @@
 #include "dstr.h"
 #include "guardrails.h"
 #include "kb_doc_hash.h"
-#include "workspace_provider.h"
+#include "modules/workspace/workspace_provider.h"
 #include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>

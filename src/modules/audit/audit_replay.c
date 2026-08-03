@@ -15,7 +15,7 @@
 #include <unistd.h>
 
 #include <aimee/audit/obs_bus.h> /* OBS_BUS_KIND_ACTION */
-#include "bus_capture.h"
+#include <aimee/core/event_bus/bus_capture.h>
 #include "cJSON.h"
 
 #define AB_CAP_PREFIX "audit-bus-capture-"

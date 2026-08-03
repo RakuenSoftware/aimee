@@ -15,8 +15,8 @@
  * therefore an ENQUEUE-overhead ceiling plus a DURABILITY invariant (every
  * accepted event reaches its sink exactly once), not a request/reply round-trip.
  *
- * Lifecycle (single process — bus host + consumer live in the server):
- *   obs_bus_start()  once at server startup, after audit_ensure_key / log_init.
+ * Lifecycle (single process — each trusted daemon owns one host + consumer):
+ *   obs_bus_start()  once at daemon startup, after its sinks are configured.
  *   obs_bus_emit(..) from any thread, per governed tool call (publish).
  *   obs_bus_stop()   once at shutdown: stops emitting, DRAINS the remaining
  *                      events, joins the consumer, tears the bus down. The drain
@@ -31,6 +31,8 @@
 
 #include <stddef.h> /* size_t */
 #include <stdint.h>
+
+#include <aimee/core/event_bus/module_client.h>
 
 #include "guardrail_events.h" /* guardrail_event_t — a second event kind on this bus */
 
@@ -48,11 +50,49 @@ extern "C"
 #define OBS_BUS_KIND_ACTION    3000
 #define OBS_BUS_KIND_GUARDRAIL 3001
 
+   /* Optional daemon-owned sink for the server-only guardrail event kind. The
+    * shared runtime always carries ACTION events; aimee-server installs this
+    * callback for its DB1 guardrail store, while aimee-kb deliberately leaves it
+    * unset and therefore has no DB1 link edge. The callback is invoked on the
+    * consumer thread and returns 0 only after the event is durably accepted by
+    * its sink. */
+   typedef int (*obs_bus_guardrail_sink_fn)(const guardrail_event_t *event, void *ctx);
+
+   /* Configure the optional guardrail sink before the bus starts. Passing NULL
+    * selects the action-only profile used by aimee-kb. Reconfiguration while the
+    * bus is running is refused with -1; otherwise returns 0. */
+   int obs_bus_set_guardrail_sink(obs_bus_guardrail_sink_fn sink, void *ctx);
+
+   /* Configure the daemon's authenticated local module endpoint before start.
+    * `socket_path` and `policy_dir` must be absolute. The policy directory holds
+    * one strict *.grant manifest per installed executable. Both server and KB
+    * call this shared entry point; each hosts its own independent bus. */
+   int obs_bus_configure_module_runtime(const char *socket_path, const char *policy_dir);
+   int obs_bus_configure_daemon_module_runtime(const char *daemon_name,
+                                               const char *config_directory);
+
    /* Bring the audit bus up: create the in-process host, attach the producer and
     * the consumer, subscribe the consumer to the audit-row kind, and spawn the
     * consumer thread. Idempotent: a second call while running is a no-op that
     * returns 0. Returns 0 on success, -1 if the bus could not be created. */
    int obs_bus_start(void);
+
+   /* Invoke a separately shipped process module on this daemon's local bus.
+    * This is the shared server/KB bridge into the core module client: AMOD
+    * framing, correlation, monotonic deadline enforcement, cancellation, and
+    * response validation remain in aimee-core-c. The optional cancellation
+    * callback is also combined with daemon shutdown, so stop cannot strand a
+    * caller. */
+   aimee_module_call_result_t obs_bus_module_call(
+       uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
+       const void *request_body, uint32_t request_len, void *response_body,
+       uint32_t response_capacity, uint32_t *response_len, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
+   /* Return nonzero only while a live local process is attached and registered
+    * to serve event_kind. Intended for daemon readiness sampling; no network I/O
+    * is performed. */
+   int obs_bus_module_available(uint32_t event_kind);
 
    /* Publish one governed-action audit row. Same field contract as
     * audit_action_log — the fields are serialized and published; the consumer

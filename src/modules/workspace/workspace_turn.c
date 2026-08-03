@@ -5,8 +5,8 @@
 #include "workspace_turn.h"
 #include "aimee_home.h" /* aimee_home — authorize aimee's own managed worktrees */
 #include "config.h"
-#include "forge_credentials.h"
-#include "git_cred_inject.h"
+#include "modules/git/forge_credentials.h"
+#include "modules/git/git_cred_inject.h"
 #include "log.h"
 #include "platform_path.h"
 #include "util.h"

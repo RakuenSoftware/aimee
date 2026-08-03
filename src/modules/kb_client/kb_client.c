@@ -2,7 +2,8 @@
 #define _GNU_SOURCE
 #endif
 #include "kb_client.h"
-#include "cleartext_guard.h" /* the shared cleartext rule, also used by the thin client */
+#include <aimee/core/connection/auth.h>
+#include <aimee/core/connection/endpoint.h>
 #include "kb_client_cache.h"
 #include "kb_client_internal.h"
 #include "kb_client_mtls.h"
@@ -1460,27 +1461,20 @@ static int kb_plain_would_leak(const char *url)
    if (!have_token)
       return 0; /* nothing to leak */
 
-   int is_https = strncmp(url, "https://", 8) == 0;
-   const char *authority = strstr(url, "://");
-   authority = authority ? authority + 3 : url;
-   char host[256];
-   size_t n = strcspn(authority, "/");
-   if (n >= sizeof(host))
-      n = sizeof(host) - 1;
-   memcpy(host, authority, n);
-   host[n] = '\0';
-   char *colon = strrchr(host, ':');
-   if (colon && !strchr(host, ']'))
-      *colon = '\0';
-
-   if (!cleartext_would_leak(is_https, host, "x"))
+   aimee_core_endpoint_t endpoint;
+   if (aimee_core_endpoint_parse(url, &endpoint) != 0)
+   {
+      fprintf(stderr, "kb_client: refusing to send the kb bearer to invalid endpoint '%s'\n", url);
+      return 1;
+   }
+   if (!aimee_core_would_leak_credential(endpoint.secure, endpoint.host, "x"))
       return 0;
    /* stderr rather than aimee_log: this file links into many focused unit-test
     * binaries that do not carry the logging object. */
    fprintf(stderr,
            "kb_client: refusing to send the kb bearer in cleartext to non-loopback host '%s'; "
            "use the mTLS endpoint or terminate TLS in front of the kb\n",
-           host);
+           endpoint.host);
    return 1;
 }
 
@@ -1524,7 +1518,13 @@ static const char *kb_client_v1_auth_header(char *buf, size_t buf_len)
       }
    }
 
-   snprintf(buf, buf_len, "Authorization: Bearer %s", token);
+   char value[512];
+   if (aimee_core_bearer_value(value, sizeof(value), token) != 0)
+   {
+      runtime_secret_wipe(token, sizeof(token));
+      return NULL;
+   }
+   snprintf(buf, buf_len, "Authorization: %s", value);
    runtime_secret_wipe(token, sizeof(token));
    return buf;
 }

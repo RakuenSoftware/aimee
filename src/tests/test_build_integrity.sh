@@ -215,6 +215,41 @@ else
 fi
 rm -rf "$kb_shared_dir"
 
+# pg_ctl --wait defaults to a 60s deadline, and crash recovery after an unclean
+# stop routinely exceeds it: fsyncing the data directory alone measured 65s on a
+# 27k-vector corpus. Timing out makes the entrypoint exit, `restart:
+# unless-stopped` start the container again, and recovery replay FROM SCRATCH --
+# a livelock where every attempt is killed at a deadline it could never meet.
+# Assert the timeout is raised, and raised BEFORE the start it has to govern.
+kb_pgctltimeout_line=$(grep -nE '^[[:space:]]+export PGCTLTIMEOUT=' \
+    ../deploy/container/aimee-kb-entrypoint.sh | head -1 | cut -d: -f1)
+kb_pgctl_start_line=$(grep -nF '"$PGBIN/pg_ctl" --pgdata="$PGDATA" --wait --silent' \
+    ../deploy/container/aimee-kb-entrypoint.sh | head -1 | cut -d: -f1)
+kb_pgctltimeout_default=$(sed -n 's/.*export PGCTLTIMEOUT="\${AIMEE_DB2_PGCTLTIMEOUT:-\([0-9]*\)}".*/\1/p' \
+    ../deploy/container/aimee-kb-entrypoint.sh | head -1)
+if [ -n "$kb_pgctltimeout_line" ] && [ -n "$kb_pgctl_start_line" ] &&
+    [ -n "$kb_pgctltimeout_default" ] &&
+    [ "$kb_pgctltimeout_line" -lt "$kb_pgctl_start_line" ] &&
+    [ "$kb_pgctltimeout_default" -gt 60 ]; then
+    pass "KB entrypoint waits past pg_ctl's 60s default so crash recovery can finish"
+else
+    fail "KB entrypoint must export PGCTLTIMEOUT>60 before starting the cluster (export=$kb_pgctltimeout_line, start=$kb_pgctl_start_line, default=$kb_pgctltimeout_default)"
+fi
+
+# The export path starts the same cluster in a stopped container, so it is
+# exposed to the identical recovery wait -- and an export timing out aborts with
+# the data intact but unread.
+kb_export_timeout_line=$(grep -nE '^[[:space:]]+export PGCTLTIMEOUT=' \
+    ../deploy/container/aimee-kb-db-export.sh | head -1 | cut -d: -f1)
+kb_export_start_line=$(grep -nF '"$PGBIN/pg_ctl" --pgdata="$PGDATA" --wait --silent' \
+    ../deploy/container/aimee-kb-db-export.sh | head -1 | cut -d: -f1)
+if [ -n "$kb_export_timeout_line" ] && [ -n "$kb_export_start_line" ] &&
+    [ "$kb_export_timeout_line" -lt "$kb_export_start_line" ]; then
+    pass "KB db-export waits past pg_ctl's 60s default before reading the cluster"
+else
+    fail "KB db-export must export PGCTLTIMEOUT before starting the cluster (export=$kb_export_timeout_line, start=$kb_export_start_line)"
+fi
+
 # The server image intentionally supervises multiple long-lived planes, so it
 # still needs a PID-1 subreaper. It must not start tini until after first-boot
 # credentials have been sealed and unset: an earlier tini permanently retains
@@ -303,6 +338,15 @@ if grep -qF '[ -d "$AIMEE_HOME/workflows" ] && chown -R aimee:aimee "$AIMEE_HOME
     pass "server entrypoint makes the workflow registry writable by the Go WFE"
 else
     fail "server entrypoint leaves the workflow registry root-owned"
+fi
+
+if grep -qF 'chown aimee:aimee "$AIMEE_HOME/modules.d"' \
+        ../deploy/container/server-entrypoint.sh &&
+   grep -qF 'chmod 0700 "$AIMEE_HOME/modules.d" "$AIMEE_HOME/modules.d/server"' \
+        ../deploy/container/server-entrypoint.sh; then
+    pass "server entrypoint keeps the private module policy traversable by the daemon"
+else
+    fail "server entrypoint leaves the private module policy inaccessible to the daemon"
 fi
 
 # Upgraded persistent volumes can spend tens of seconds recovering WAL state
@@ -729,11 +773,11 @@ cmake_boundary_failures=""
 for target_block in client webchat; do
     block_var="cmake_${target_block}_links"
     block="${!block_var}"
-    if echo "$block" | grep -Eq 'aimee-(cmd|git|agent|data|core)|SQLite::SQLite3|LIBPQ|libpq'; then
+    if echo "$block" | grep -Eq 'aimee-(cmd|git|agent|data|core)([[:space:]]|[)]|$)|SQLite::SQLite3|LIBPQ|libpq'; then
         cmake_boundary_failures="$cmake_boundary_failures aimee-$target_block"
     fi
 done
-if echo "$cmake_server_links" | grep -Eq 'aimee-(cmd|git|agent|data|core)|LIBPQ|libpq'; then
+if echo "$cmake_server_links" | grep -Eq 'aimee-(cmd|git|agent|data|core)([[:space:]]|[)]|$)|LIBPQ|libpq'; then
     cmake_boundary_failures="$cmake_boundary_failures aimee-server"
 fi
 if [ -z "$cmake_boundary_failures" ]; then

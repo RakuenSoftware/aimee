@@ -9,9 +9,11 @@
 #include "kb_client_ws.h"
 #include "log.h"
 #include "runtime_secret.h"
+#include <aimee/core/connection/auth.h>
+#include <aimee/core/connection/endpoint.h>
+#include <aimee/core/connection/socket.h>
+#include <aimee/core/connection/tls_openssl.h>
 
-#include <errno.h>
-#include <netdb.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -33,8 +35,7 @@ static void conn_close(ws_conn_t *c)
 {
    if (c->ssl)
    {
-      SSL_shutdown(c->ssl);
-      SSL_free(c->ssl);
+      aimee_core_tls_session_free(c->ssl);
       c->ssl = NULL;
    }
    if (c->ctx)
@@ -44,19 +45,22 @@ static void conn_close(ws_conn_t *c)
    }
    if (c->fd >= 0)
    {
-      close(c->fd);
+      aimee_core_socket_close(c->fd);
       c->fd = -1;
    }
 }
 
-static int conn_write(ws_conn_t *c, const char *buf, int len)
+static int conn_write_all(ws_conn_t *c, const char *buf, size_t len)
 {
-   return c->ssl ? SSL_write(c->ssl, buf, len) : (int)write(c->fd, buf, (size_t)len);
+   return c->ssl ? aimee_core_tls_write_all(c->ssl, buf, len)
+                 : aimee_core_socket_write_all(c->fd, buf, len);
 }
 
 static int conn_read(ws_conn_t *c, void *buf, int len)
 {
-   return c->ssl ? SSL_read(c->ssl, buf, len) : (int)read(c->fd, buf, (size_t)len);
+   long result = c->ssl ? aimee_core_tls_read(c->ssl, buf, (size_t)len)
+                        : aimee_core_socket_read(c->fd, buf, (size_t)len);
+   return result > INT32_MAX ? -1 : (int)result;
 }
 
 static int read_n(ws_conn_t *c, unsigned char *buf, size_t n)
@@ -72,81 +76,27 @@ static int read_n(ws_conn_t *c, unsigned char *buf, size_t n)
    return 1;
 }
 
-/* Parse scheme://host[:port] (ignores any path). Returns 0 on success. */
-static int parse_url(const char *url, int *is_tls, char *host, size_t host_cap, int *port)
-{
-   if (!url)
-      return -1;
-   *is_tls = 0;
-   const char *p = url;
-   if (strncmp(p, "https://", 8) == 0)
-   {
-      *is_tls = 1;
-      *port = 443;
-      p += 8;
-   }
-   else if (strncmp(p, "http://", 7) == 0)
-   {
-      *port = 80;
-      p += 7;
-   }
-   else
-      return -1;
-   const char *end = p;
-   while (*end && *end != '/' && *end != ':')
-      end++;
-   size_t hlen = (size_t)(end - p);
-   if (hlen == 0 || hlen >= host_cap)
-      return -1;
-   memcpy(host, p, hlen);
-   host[hlen] = '\0';
-   if (*end == ':')
-      *port = atoi(end + 1);
-   return *port > 0 ? 0 : -1;
-}
-
-static int tcp_connect(const char *host, int port)
-{
-   char ports[16];
-   snprintf(ports, sizeof(ports), "%d", port);
-   struct addrinfo hints, *res = NULL;
-   memset(&hints, 0, sizeof(hints));
-   hints.ai_family = AF_UNSPEC;
-   hints.ai_socktype = SOCK_STREAM;
-   if (getaddrinfo(host, ports, &hints, &res) != 0 || !res)
-      return -1;
-   int fd = -1;
-   for (struct addrinfo *ai = res; ai; ai = ai->ai_next)
-   {
-      fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
-      if (fd < 0)
-         continue;
-      if (connect(fd, ai->ai_addr, ai->ai_addrlen) == 0)
-         break;
-      close(fd);
-      fd = -1;
-   }
-   freeaddrinfo(res);
-   return fd;
-}
-
 /* Open + WS-handshake GET /v1/events. Returns 0 on success (conn filled). */
 static int ws_open(const char *base_url, ws_conn_t *c)
 {
    memset(c, 0, sizeof(*c));
    c->fd = -1;
-   int is_tls, port;
-   char host[256];
-   if (parse_url(base_url, &is_tls, host, sizeof(host), &port) != 0)
+   aimee_core_endpoint_t endpoint;
+   if (aimee_core_endpoint_parse(base_url, &endpoint) != 0)
       return -1;
+   int port = atoi(endpoint.port);
+   if (port <= 0 || port > 65535)
+      return -1;
+   const char *host = endpoint.host;
+   int is_tls = endpoint.secure;
 
-   c->fd = tcp_connect(host, port);
+   c->fd = aimee_core_socket_connect(host, endpoint.port, 10000);
    if (c->fd < 0)
       return -1;
 
    if (is_tls)
    {
-      c->ctx = SSL_CTX_new(TLS_client_method());
+      c->ctx = aimee_core_tls_client_context();
       if (!c->ctx)
       {
          conn_close(c);
@@ -154,20 +104,20 @@ static int ws_open(const char *base_url, ws_conn_t *c)
       }
       SSL_CTX_set_default_verify_paths(c->ctx);
       SSL_CTX_set_verify(c->ctx, SSL_VERIFY_PEER, NULL);
-      SSL_CTX_set_min_proto_version(c->ctx, TLS1_2_VERSION);
       const char *ca = getenv("AIMEE_KB_API_CA_BUNDLE");
-      if (ca && ca[0])
-         SSL_CTX_load_verify_file(c->ctx, ca);
-      c->ssl = SSL_new(c->ctx);
+      if (ca && ca[0] && aimee_core_tls_trust_file(c->ctx, ca) != 0)
+      {
+         conn_close(c);
+         return -1;
+      }
+      c->ssl = aimee_core_tls_client_session_new(c->ctx, c->fd, host, 1);
       if (!c->ssl)
       {
          conn_close(c);
          return -1;
       }
-      SSL_set_fd(c->ssl, c->fd);
-      SSL_set_tlsext_host_name(c->ssl, host);
-      X509_VERIFY_PARAM_set1_host(SSL_get0_param(c->ssl), host, 0);
-      if (SSL_connect(c->ssl) != 1 || SSL_get_verify_result(c->ssl) != X509_V_OK)
+      if (aimee_core_tls_handshake_client(c->ssl) != 0 ||
+          SSL_get_verify_result(c->ssl) != X509_V_OK)
       {
          conn_close(c);
          return -1;
@@ -186,15 +136,28 @@ static int ws_open(const char *base_url, ws_conn_t *c)
 
    char tok[512] = "";
    (void)runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", tok, sizeof(tok));
+   if (aimee_core_would_leak_credential(is_tls, host, tok))
+   {
+      runtime_secret_wipe(tok, sizeof(tok));
+      conn_close(c);
+      return -1;
+   }
+   char authorization[sizeof(tok) + 16] = "";
+   if (tok[0] && aimee_core_bearer_value(authorization, sizeof(authorization), tok) != 0)
+   {
+      runtime_secret_wipe(tok, sizeof(tok));
+      conn_close(c);
+      return -1;
+   }
    char req[768];
    int rn = snprintf(req, sizeof(req),
                      "GET /v1/events HTTP/1.1\r\nHost: %s:%d\r\n"
                      "Upgrade: websocket\r\nConnection: Upgrade\r\n"
                      "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n%s%s%s\r\n",
-                     host, port, key, tok[0] ? "Authorization: Bearer " : "", tok[0] ? tok : "",
-                     tok[0] ? "\r\n" : "");
+                     host, port, key, authorization[0] ? "Authorization: " : "", authorization,
+                     authorization[0] ? "\r\n" : "");
    runtime_secret_wipe(tok, sizeof(tok));
-   if (conn_write(c, req, rn) != rn)
+   if (rn <= 0 || (size_t)rn >= sizeof(req) || conn_write_all(c, req, (size_t)rn) != 0)
    {
       runtime_secret_wipe(req, sizeof(req));
       conn_close(c);

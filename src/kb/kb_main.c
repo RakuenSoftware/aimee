@@ -37,7 +37,7 @@
 #include "util.h"
 #include "cJSON.h"
 #include "memory.h"
-#include "memory_graph_fusion.h"
+#include "modules/memory/memory_graph_fusion.h"
 #include "db2/memory_vectors.h"
 #include "db2/rel_types_store.h" /* db2_rel_types_ensure_seed (typed-fact ontology) */
 #include "db2/vault_pg.h"        /* vault_pg_backend + vault_store_set_backend (kb vault bind) */
@@ -53,7 +53,8 @@
 #include "vault_config_bootstrap.h" /* legacy config credential -> Vault */
 #include "runtime_secret.h"         /* wipe Vault-sourced runtime cache at exit */
 #include "kb_memory_audit_bridge.h" /* record memory mutations on aimee-kb's own obs bus */
-#include "log.h"                    /* audit_log_open — KB memory-audit ledger */
+#include <aimee/audit/obs_bus.h>
+#include "log.h" /* audit_log_open — KB memory-audit ledger */
 #include <signal.h>
 #include <errno.h>
 #include <stdint.h>
@@ -1796,6 +1797,13 @@ int main(int argc, char **argv)
     * observability bus at the store (every caller). Open the KB audit ledger so
     * the bus consumer can persist the rows, then install the store-side hook. */
    audit_log_open();
+   if (obs_bus_configure_daemon_module_runtime("kb", kb_default_config_dir()) != 0)
+   {
+      fputs("aimee-kb: invalid module-bus path configuration\n", stderr);
+      audit_log_close();
+      agent_http_cleanup();
+      return 1;
+   }
    kb_memory_audit_bridge_install();
 
    /* P7-D3a is an all-or-none service-manager contract. The listener fd and
@@ -2331,6 +2339,22 @@ int main(int argc, char **argv)
       agent_http_cleanup();
       return 1;
    }
+   if (obs_bus_start() != 0)
+   {
+      fputs("aimee-kb: module bus failed to start\n", stderr);
+      kb_management_runtime_stop();
+      kb_service_shutdown(&g_ctx);
+      kb_vault_operator_service_stop(vault_operator_service);
+      vault_operator_service = NULL;
+      kb_vault_operator_components_destroy(&vault_operator_components);
+      if (vault_operator_runtime_opened)
+         db2_vault_operator_runtime_close(&vault_operator_runtime);
+      db2_shutdown();
+      kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
+      audit_log_close();
+      agent_http_cleanup();
+      return 1;
+   }
    if (kb_http_start(http_port, config_kb_api_bearer_token()) != 0)
    {
       /* Another instance owns the port; yield gracefully with success so
@@ -2347,6 +2371,8 @@ int main(int argc, char **argv)
          db2_vault_operator_runtime_close(&vault_operator_runtime);
       db2_shutdown();
       kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
+      obs_bus_stop();
+      audit_log_close();
       agent_http_cleanup();
       return 0;
    }
@@ -2455,6 +2481,7 @@ int main(int argc, char **argv)
    kb_mtls_stop();
    kb_http_stop();
    mcp_client_registry_shutdown(); /* stop kb-hosted MCP plugins (install: kb) */
+   obs_bus_stop();
    kb_management_runtime_stop();
    kb_service_shutdown(&g_ctx);
    kb_vault_operator_service_stop(vault_operator_service);
@@ -2466,6 +2493,7 @@ int main(int argc, char **argv)
    embedder_probe_unregister(); /* §2b: deregister the probe before db2_shutdown */
    db2_shutdown();
    kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
+   audit_log_close();
    agent_http_cleanup();
    return rc == 0 ? 0 : 1;
 }

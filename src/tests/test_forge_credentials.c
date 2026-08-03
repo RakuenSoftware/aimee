@@ -2,7 +2,7 @@
  * (workspace-resource-plane §4): install/get, TTL expiry, scope lattice,
  * revoke-zeroes-and-drops, and the exec-env injection (token rides the child
  * environment, never the command line / disk). */
-#include "forge_credentials.h"
+#include "modules/git/forge_credentials.h"
 
 #include <assert.h>
 #include <stdio.h>

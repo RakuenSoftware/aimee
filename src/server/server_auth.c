@@ -6,6 +6,7 @@
 #include "platform_process.h"
 #include "cJSON.h"
 #include "json_fluent.h" /* jo_ok */
+#include <aimee/core/connection/auth.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -266,17 +267,7 @@ const method_policy_t *server_policy_for_method(const char *method)
 
 int server_ct_equal(const char *a, const char *b)
 {
-   size_t alen = a ? strlen(a) : 0;
-   size_t blen = b ? strlen(b) : 0;
-   size_t len = alen > blen ? alen : blen;
-   unsigned char diff = (alen != blen) ? 1 : 0;
-   for (size_t i = 0; i < len; i++)
-   {
-      unsigned char x = i < alen ? (unsigned char)a[i] : 0;
-      unsigned char y = i < blen ? (unsigned char)b[i] : 0;
-      diff |= x ^ y;
-   }
-   return diff == 0;
+   return aimee_core_credential_equal(a, b);
 }
 
 /* server_session.c: server-side session management handlers */

@@ -8,7 +8,7 @@
 #include "cJSON.h"
 #include "log.h"
 #include "platform_process.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include "kb.h"
 #include "db1_optional.h"
 #if !defined(AIMEE_DB2_DISABLED)

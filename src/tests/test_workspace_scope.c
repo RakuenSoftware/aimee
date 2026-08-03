@@ -3,7 +3,7 @@
  * shared root creation (0700), project resolution within the root, and the
  * security properties — cross-actor equality, '..'/'/' rejection, and
  * symlink-escape rejection. */
-#include "workspace_scope.h"
+#include "modules/workspace/workspace_scope.h"
 
 #include <assert.h>
 #include <limits.h>

@@ -2,7 +2,7 @@
 #include "aimee.h"
 #include <aimee/delegates/delegate_driver.h>
 #include "agent_protocol.h"
-#include "agent_tools.h"
+#include <aimee/tools/agent_tools.h>
 #include <string.h>
 
 #if defined(__GNUC__) || defined(__clang__)

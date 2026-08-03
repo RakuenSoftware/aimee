@@ -1,6 +1,6 @@
 #include "aimee.h"
 #include "util.h"
-#include "agent_tools.h"
+#include <aimee/tools/agent_tools.h>
 #include "aimee_home.h"
 #include <aimee/delegates/delegate_ephemeral_ws.h>
 #include "economizer.h"
@@ -18,9 +18,11 @@
 #include "kb.h"
 #include "kb_client.h"
 #include "aimee/protocols/mcp/mcp_client_registry.h"
-#include "workspace.h"
+#include <aimee/core/connection/socket.h>
+#include <aimee/core/connection/tls_openssl.h>
+#include <aimee/workspace/workspace.h>
 #include "sandbox_learned.h"
-#include "workspace_provider.h"
+#include "modules/workspace/workspace_provider.h"
 #include "diff.h"
 #include "anchor_snapshot.h"
 #include "dstr.h"
@@ -1535,81 +1537,37 @@ static int http_head_status(const char *url)
    char port_str[16];
    snprintf(port_str, sizeof(port_str), "%d", port);
 
-   struct addrinfo hints = {0}, *res = NULL;
-   hints.ai_family = AF_UNSPEC;
-   hints.ai_socktype = SOCK_STREAM;
-   if (getaddrinfo(host, port_str, &hints, &res) != 0 || !res)
-      return -1;
-
-   int fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-   if (fd < 0)
+   int fd = aimee_core_socket_connect(host, port_str, 5000);
+   if (fd < 0 || aimee_core_socket_set_timeouts(fd, 10000, 10000) != 0)
    {
-      freeaddrinfo(res);
+      aimee_core_socket_close(fd);
       return -1;
    }
-
-   int flags = fcntl(fd, F_GETFL, 0);
-   fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-
-   int rc = connect(fd, res->ai_addr, res->ai_addrlen);
-   freeaddrinfo(res);
-
-   if (rc < 0 && errno != EINPROGRESS)
-   {
-      close(fd);
-      return -1;
-   }
-   if (rc < 0)
-   {
-      struct pollfd pfd = {fd, POLLOUT, 0};
-      if (poll(&pfd, 1, 5000) <= 0)
-      {
-         close(fd);
-         return -1;
-      }
-      int err = 0;
-      socklen_t errlen = sizeof(err);
-      getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &errlen);
-      if (err)
-      {
-         close(fd);
-         return -1;
-      }
-   }
-   fcntl(fd, F_SETFL, flags);
-
-   /* Set 10s overall timeout */
-   struct timeval tv = {10, 0};
-   setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-   setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
    SSL *ssl = NULL;
    if (use_ssl)
    {
       /* Re-use the global SSL_CTX from agent_http_init() via a local context */
-      SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
+      SSL_CTX *ctx = aimee_core_tls_client_context();
       if (!ctx)
       {
-         close(fd);
+         aimee_core_socket_close(fd);
          return -1;
       }
       SSL_CTX_set_default_verify_paths(ctx);
       SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
 
-      ssl = SSL_new(ctx);
+      ssl = aimee_core_tls_client_session_new(ctx, fd, host, 1);
       SSL_CTX_free(ctx); /* SSL holds a ref */
       if (!ssl)
       {
-         close(fd);
+         aimee_core_socket_close(fd);
          return -1;
       }
-      SSL_set_fd(ssl, fd);
-      SSL_set_tlsext_host_name(ssl, host);
-      SSL_set1_host(ssl, host);
-      if (SSL_connect(ssl) <= 0)
+      if (aimee_core_tls_handshake_client(ssl) != 0)
       {
          SSL_free(ssl);
-         close(fd);
+         aimee_core_socket_close(fd);
          return -1;
       }
    }
@@ -1621,19 +1579,20 @@ static int http_head_status(const char *url)
 
    if (ssl)
    {
-      if (SSL_write(ssl, req, reqlen) <= 0)
+      if (reqlen <= 0 || (size_t)reqlen >= sizeof(req) ||
+          aimee_core_tls_write_all(ssl, req, (size_t)reqlen) != 0)
       {
-         SSL_shutdown(ssl);
-         SSL_free(ssl);
-         close(fd);
+         aimee_core_tls_session_free(ssl);
+         aimee_core_socket_close(fd);
          return -1;
       }
    }
    else
    {
-      if (send(fd, req, (size_t)reqlen, 0) <= 0)
+      if (reqlen <= 0 || (size_t)reqlen >= sizeof(req) ||
+          aimee_core_socket_write_all(fd, req, (size_t)reqlen) != 0)
       {
-         close(fd);
+         aimee_core_socket_close(fd);
          return -1;
       }
    }
@@ -1645,9 +1604,9 @@ static int http_head_status(const char *url)
    {
       int n;
       if (ssl)
-         n = SSL_read(ssl, resp + rlen, (int)sizeof(resp) - 1 - rlen);
+         n = (int)aimee_core_tls_read(ssl, resp + rlen, sizeof(resp) - 1 - (size_t)rlen);
       else
-         n = (int)recv(fd, resp + rlen, sizeof(resp) - 1 - (size_t)rlen, 0);
+         n = (int)aimee_core_socket_read(fd, resp + rlen, sizeof(resp) - 1 - (size_t)rlen);
       if (n <= 0)
          break;
       rlen += n;
@@ -1658,10 +1617,9 @@ static int http_head_status(const char *url)
 
    if (ssl)
    {
-      SSL_shutdown(ssl);
-      SSL_free(ssl);
+      aimee_core_tls_session_free(ssl);
    }
-   close(fd);
+   aimee_core_socket_close(fd);
 
    /* Parse "HTTP/1.x NNN" */
    if (rlen < 12 || (strncmp(resp, "HTTP/1.0", 8) != 0 && strncmp(resp, "HTTP/1.1", 8) != 0))
