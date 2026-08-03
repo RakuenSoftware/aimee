@@ -145,6 +145,31 @@ static void check_embeddings(smoke_t *s, cJSON *h)
    }
 }
 
+/* An embedder of the wrong width cannot store a single vector, and the rest of health
+ * reads perfectly normal while that is true.
+ *
+ * Measured: booting the nomic kb image (768) over a store recorded at 384 left this
+ * command reporting 5 passed, 0 failed. The kb was up, the vector store was "ready",
+ * search "answered" (with nothing, forever), and no check looked at the one field that
+ * said the embedder and the store disagreed.
+ *
+ * The kb publishes it in `warnings` now, so read them rather than adding a second
+ * opinion here: the kb knows both widths and this command does not. Any warning is
+ * surfaced, because a warning the kb bothered to raise and nothing prints is the shape
+ * of every bug this command exists to catch. */
+static void check_warnings(smoke_t *s, cJSON *h)
+{
+   cJSON *w = h ? cJSON_GetObjectItemCaseSensitive(h, "warnings") : NULL;
+   if (!cJSON_IsArray(w) || cJSON_GetArraySize(w) == 0)
+      return;
+   cJSON *first = cJSON_GetArrayItem(w, 0);
+   char detail[256];
+   int n = cJSON_GetArraySize(w);
+   snprintf(detail, sizeof(detail), "%s%s", cJSON_IsString(first) ? first->valuestring : "warning",
+            n > 1 ? " (and more)" : "");
+   report(s, "kb reports no warnings", 0, 0, detail);
+}
+
 /* The check that earns this command its keep. A queue where everything has failed
  * reports `status: ok` everywhere else, because the kb is up and answering: the
  * failures are in work it already gave up on. Nothing else surfaces it. */
@@ -222,6 +247,7 @@ cJSON *cli_kb_smoke_eval_health(cJSON *health, int *passed, int *failed, int *sk
          check_vectors(&s, health);
          check_embeddings(&s, health);
          check_queue(&s, health);
+         check_warnings(&s, health);
       }
    }
 
