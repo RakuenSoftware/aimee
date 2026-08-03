@@ -25,7 +25,17 @@ GOLD=${GOLD:?set GOLD}
 OUT=${OUT:?set OUT}
 LABEL=${LABEL:?set LABEL}
 REPO=${REPO:?set REPO}          # hf repo:quant
-DRAFT=${DRAFT:?set DRAFT}       # hf draft repo (same repo) for MTP
+# hf draft repo (same repo) for MTP. Set DRAFT="" to run WITHOUT speculation.
+#
+# That is not a performance switch, it is a comparability one. MTP drafts exist
+# only for gemma-4 in this model field -- granite-4.0-1b, granite-4.1-3b,
+# gemma-3n-E4B and Qwen3-1.7B publish no mtp-*.gguf at all. Running the gemma
+# arms with speculation and the rest without would make the draft head a variable
+# ACROSS THE MODELS BEING RANKED, and MTP moves 26 of 100 notes relative to a
+# sequential run. Any cross-model sweep therefore runs with DRAFT="" for all
+# models or MTP for all models; it cannot mix.
+DRAFT=${DRAFT-}
+if [ -n "$DRAFT" ]; then DRAFT_ARG="-hfd $DRAFT"; else DRAFT_ARG=""; fi
 CARD=${CARD:?set CARD to 5080 or xtx}
 NPROC=${NPROC:-0}               # 0 = auto-size from measured VRAM
 BASE_PORT=${BASE_PORT:-8200}
@@ -145,10 +155,10 @@ start_one() {  # $1 = port
   local p=$1
   if [ "$CARD" = 5080 ]; then
     ssh -n -o ConnectTimeout=25 $HOST \
-      "pct exec 140 -- bash -lc 'HF_HOME=$HFH nohup setsid $BIN -hf $REPO -hfd $DRAFT --host 0.0.0.0 --port $p -c 8192 -np 1 --cache-ram $CACHE_RAM_MIB --no-webui --no-mmproj -ngl 99 >/opt/tierA/shard-$LABEL-$p.log 2>&1 </dev/null &'" >/dev/null 2>&1
+      "pct exec 140 -- bash -lc 'HF_HOME=$HFH nohup setsid $BIN -hf $REPO $DRAFT_ARG --host 0.0.0.0 --port $p -c 8192 -np 1 --cache-ram $CACHE_RAM_MIB --no-webui --no-mmproj -ngl 99 >/opt/tierA/shard-$LABEL-$p.log 2>&1 </dev/null &'" >/dev/null 2>&1
   else
     ssh -n -o ConnectTimeout=25 $HOST \
-      "HF_HOME=$HFH nohup setsid $BIN -hf $REPO -hfd $DRAFT --host 0.0.0.0 --port $p -c 8192 -np 1 $DEV --cache-ram $CACHE_RAM_MIB --no-webui --no-mmproj -ngl 99 >/tmp/shard-$LABEL-$p.log 2>&1 </dev/null &" >/dev/null 2>&1
+      "HF_HOME=$HFH nohup setsid $BIN -hf $REPO $DRAFT_ARG --host 0.0.0.0 --port $p -c 8192 -np 1 $DEV --cache-ram $CACHE_RAM_MIB --no-webui --no-mmproj -ngl 99 >/tmp/shard-$LABEL-$p.log 2>&1 </dev/null &" >/dev/null 2>&1
   fi
   # Health must be checked at the address the server actually listens on. On the
   # 5080 the server runs INSIDE CT 140 (192.168.0.5); curling 127.0.0.1 on the
