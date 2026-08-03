@@ -1579,6 +1579,21 @@ static int config_write_doc(cJSON *root)
    return 0;
 }
 
+/* The embedder names an image can actually serve. Empty embedder_url means the
+ * weights BAKED INTO the image variant, so the name has to be one of them; a
+ * non-empty URL means an operator-run endpoint whose model may be called anything
+ * (see config.h's embedder_model comment).
+ *
+ * Unvalidated, a typo produced a deployment that looked configured and searched
+ * lexically forever: config_emit_deploy_env maps any unrecognised name to the a25m
+ * variant, so the image arrives WITH bekko weights and EMBEDDER_MODEL=<typo>, the
+ * entrypoint finds no match, logs "'<typo>' selected but this image has no bundled
+ * embedder" once, and starts nothing. Everything downstream reports healthy. */
+static int embedder_model_is_bundled(const char *v)
+{
+   return v && (strcmp(v, "bekko-a25m") == 0 || strcmp(v, "nomic-embed-text-v2-moe") == 0);
+}
+
 int config_set(const char *key, const char *value)
 {
    if (!key || !value)
@@ -1586,6 +1601,27 @@ int config_set(const char *key, const char *value)
    const config_field_t *f = config_field_lookup(key);
    if (!f)
       return -1; /* unknown key */
+
+   /* Refused rather than warned: the failure it prevents is silent and permanent
+    * once a corpus has been embedded at the wrong width, and re-running the command
+    * in the other order costs nothing. Clearing the field is allowed -- that is how
+    * an operator moves to an external embedder. */
+   if (strcmp(key, "embedder_model") == 0 && value[0] && !embedder_model_is_bundled(value))
+   {
+      char url[512] = "";
+      config_embedder_url_copy(url, sizeof(url));
+      if (!url[0])
+      {
+         fprintf(stderr,
+                 "config: '%s' is not an embedder this image bakes (bekko-a25m or "
+                 "nomic-embed-text-v2-moe).\n"
+                 "  A name the image does not carry deploys with no embedder running and "
+                 "searches lexically, reporting healthy throughout.\n"
+                 "  If this is an external endpoint's model name, set embedder_url first.\n",
+                 value);
+         return -1;
+      }
+   }
    const char *secret_name = config_field_secret_name(f);
    if (secret_name)
    {

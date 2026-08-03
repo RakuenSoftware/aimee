@@ -2567,6 +2567,36 @@ int main(void)
          assert(config_field_secret_name(f) == NULL);
       }
 
+      /* --- an embedder the image cannot serve is refused --- */
+      /* config_set writes YAML, so this needs a home of its own; the block that owns
+       * AIMEE_HOME above has already restored the ambient one by here. */
+      {
+         char home[256];
+         snprintf(home, sizeof(home), "/tmp/aimee-cfgset-%d", (int)getpid());
+         mkdir(home, 0700);
+         platform_setenv("AIMEE_HOME", home);
+
+         /* The two names the images bake are accepted. */
+         assert(config_set("embedder_model", "bekko-a25m") == 0);
+         assert(config_set("embedder_model", "nomic-embed-text-v2-moe") == 0);
+
+         /* A typo is NOT, while no external endpoint is configured. Unrefused, it
+          * deployed the a25m image with EMBEDDER_MODEL=<typo>, started no embedder,
+          * and searched lexically while every health surface said ok. */
+         assert(config_set("embedder_model", "bekko-a25") != 0);
+         assert(config_set("embedder_model", "not-a-model") != 0);
+
+         /* With an external endpoint the name belongs to that endpoint and any value
+          * is legitimate -- this is the half a blanket allowlist would have broken. */
+         assert(config_set("embedder_url", "https://embed.example/v1") == 0);
+         assert(config_set("embedder_model", "text-embedding-3-small") == 0);
+
+         /* Clearing stays allowed: it is how an operator hands the role over. */
+         assert(config_set("embedder_model", "") == 0);
+
+         platform_unsetenv("AIMEE_HOME");
+      }
+
       /* The real credentials stay Vault-backed. This half is what stops the fix above
        * from being applied too broadly. */
       static const char *const secrets[] = {"embedder_api_key", "synthesis_api_key",

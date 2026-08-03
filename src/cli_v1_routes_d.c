@@ -167,7 +167,31 @@ static void print_text_output(const char *method, cJSON *resp)
          return;
       }
    if (strncmp(method, "skill.", 6) == 0)
+   {
       pt_print_skill_group(method, resp);
+      return;
+   }
+
+   /* NO PRINTER: SHOW THE PAYLOAD, DO NOT SHOW NOTHING.
+    *
+    * 50 of the 181 dispatchable methods reach here. Falling through in silence made
+    * each of them exit 0 having printed nothing at all, which reads as "it worked and
+    * there was nothing to say" and is indistinguishable from it. `aimee vault list`
+    * returned 348 bytes of vault entries over /v1 and printed zero of them; `aimee kb
+    * curator status` and `aimee economizer stats` did the same the moment their
+    * marshallers were added.
+    *
+    * Printing the JSON is never worse than printing nothing. It cannot break a script
+    * that parses this output either, because there was no output to parse -- the only
+    * thing a caller could have depended on is emptiness, and emptiness was the bug.
+    * A method that deserves prose gets an entry in pt_print_table; this is the floor,
+    * not the target. */
+   char *raw = cJSON_PrintUnformatted(resp);
+   if (raw)
+   {
+      puts(raw);
+      free(raw);
+   }
 }
 
 static const char *delegate_output_path_from_args(int argc, char **argv)
