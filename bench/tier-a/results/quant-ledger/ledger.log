@@ -19,3 +19,6 @@
 [10:19:05Z]   committed gold70.E4B.UD-Q8_K_XL
 [10:19:05Z] --- v5small.E2B.UD-Q4_K_XL  (1001 notes, 3 procs)
 [10:39:39Z] OK   v5small.E2B.UD-Q4_K_XL strictF1=0.6138
+[10:39:39Z]   committed v5small.E2B.UD-Q4_K_XL
+[10:39:39Z] --- v5small.E2B.UD-Q6_K_XL  (1001 notes, 3 procs)
+[11:02:37Z] OK   v5small.E2B.UD-Q6_K_XL strictF1=0.6138
