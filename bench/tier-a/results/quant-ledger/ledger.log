@@ -1,0 +1,5 @@
+[08:43:34Z] === quant ledger rebuild on the 5080
+[08:43:34Z] --- gold70.E2B.UD-Q4_K_XL  (70 notes, 3 procs)
+[08:46:28Z] OK   gold70.E2B.UD-Q4_K_XL strictF1=0.6714
+[08:46:48Z]   WARNING: could not commit gold70.E2B.UD-Q4_K_XL -- COMMIT IT BY HAND
+[08:46:48Z] --- gold70.E2B.UD-Q6_K_XL  (70 notes, 3 procs)
