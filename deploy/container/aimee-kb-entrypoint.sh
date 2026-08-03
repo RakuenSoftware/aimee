@@ -56,16 +56,29 @@ read_cfg_embedding_model() {
     aimee-kb --print-embedding-model 2>/dev/null || true
 }
 
-# Is this container starting the KB SERVICE, or running a one-shot subcommand?
+# Is this container starting the KB SERVICE, or running a one-shot that exits?
 #
-# The service is started with flags only (`--http-port=8741`, the image CMD). A one-shot
-# passes a bare subcommand first — `managed-server-identity install ...` is the managed
-# deploy's server-enrolment job, which runs this same image against the kb's volume and
-# never serves a query. Requiring an embedder of those jobs failed server identity
-# enrolment on every clean install, which is a deploy that half-succeeded: the kb was up
-# and the server could not talk to it.
+# Only a serving container needs an embedder. Two kinds of invocation do not:
+#
+#   1. A bare subcommand first — `managed-server-identity install ...` is the managed
+#      deploy's server-enrolment job, which runs this image against the kb's volume and
+#      never serves a query. Requiring an embedder of it failed server identity
+#      enrolment on every clean install: the kb came up and the server could not talk
+#      to it.
+#   2. An informational flag that aimee-kb answers at argv[1] and exits — `--help`,
+#      `--version`, and the vault/config one-shots the entrypoint itself invokes.
+#      Classifying every `-*` as serving refused `docker run <image> --help` on a fresh
+#      install, which is the first thing someone types to check the image is alive, and
+#      the moment they are least likely to have configured an embedder.
+#
+# The flag list mirrors aimee-kb's own argv[1] handling in kb_main.c. If a one-shot flag
+# is added there it belongs here too; the cost of missing one is a refusal to print
+# help, not a kb serving without an embedder.
 kb_is_serving() {
     case "${1:-}" in
+    --help | -h | --version | -v | --print-embedding-model | --bootstrap-vault-env | \
+        --bootstrap-vault-stdin | --list-credential-env-names)
+        return 1 ;;
     "" | -*) return 0 ;;
     *) return 1 ;;
     esac

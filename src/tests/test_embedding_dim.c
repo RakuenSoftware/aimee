@@ -262,6 +262,30 @@ int main(void)
    assert(db2_embedder_serving_record_or_check(conn, "builtin/lexical-v1", err, sizeof err) == 0);
    assert(aimee_pg_exec(conn, "DELETE FROM memory_embeddings", err, sizeof err) == 0);
 
+   /* An UNREADABLE vector table is not an absent one. Emptiness is only proof when every
+    * listed table was either shown absent or actually read; a table that exists but
+    * cannot be queried must block adoption, or one broken table beside one empty table
+    * reports a corpus as provably empty and the placeholder yields over real vectors.
+    *
+    * Renaming kb_embeddings away and leaving a VIEW that cannot be selected reproduces
+    * "it is there, and I cannot read it" without needing a permissions system. */
+   err[0] = '\0';
+   assert(aimee_pg_exec(conn, "DELETE FROM kb_meta WHERE key = 'schema_embedder_serving_id'", err,
+                        sizeof err) == 0);
+   assert(db2_embedder_serving_record_or_check(conn, "builtin/lexical-v1", err, sizeof err) == 0);
+   assert(aimee_pg_exec(conn, "ALTER TABLE kb_embeddings RENAME TO kb_embeddings_hidden", err,
+                        sizeof err) == 0);
+   assert(aimee_pg_exec(conn, "CREATE VIEW kb_embeddings AS SELECT * FROM missing_relation_xyz",
+                        err, sizeof err) == 0);
+   err[0] = '\0';
+   assert(db2_embedder_serving_record_or_check(conn, "bekko-a25m/abcd", err, sizeof err) == -1);
+   /* and the placeholder still stands */
+   err[0] = '\0';
+   assert(aimee_pg_exec(conn, "DROP VIEW kb_embeddings", err, sizeof err) == 0);
+   assert(aimee_pg_exec(conn, "ALTER TABLE kb_embeddings_hidden RENAME TO kb_embeddings", err,
+                        sizeof err) == 0);
+   assert(db2_embedder_serving_record_or_check(conn, "builtin/lexical-v1", err, sizeof err) == 0);
+
    /* NULL conn -> -1. */
    assert(db2_embedding_model_record_or_check(NULL, "x", NULL, err, sizeof err) == -1);
 
