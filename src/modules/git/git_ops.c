@@ -1,8 +1,8 @@
 /* git_ops.c — per-project git operations for webchat users. See git_ops.h. */
 #include <aimee/git/git_ops.h>
-#include "git_cred_inject.h" /* git_cred_inject_build_env / _free_env */
-#include "git_pr_api.h"      /* git_pr_create_via_api — in-process REST open-PR */
-#include "util.h"            /* safe_exec_capture_cwd_env_timeout */
+#include "git_cred_inject.h"                   /* git_cred_inject_build_env / _free_env */
+#include "git_pr_api.h"                        /* git_pr_create_via_api — in-process REST open-PR */
+#include "util.h"                              /* safe_exec_capture_cwd_env_timeout */
 #include "modules/workspace/workspace_scope.h" /* ws_scope_project_path */
 
 #include <stdio.h>

@@ -45,8 +45,8 @@ static int learning_classify_signal(const char *signal, uint32_t *mask)
    if (strcmp(signal, "thumb_up") == 0 || strcmp(signal, "thumb_down") == 0)
       *mask = AIMEE_LEARNING_SINK_RERANKER;
    else if (strcmp(signal, "correction") == 0)
-      *mask = AIMEE_LEARNING_SINK_RERANKER | AIMEE_LEARNING_SINK_SUPERSEDE |
-              AIMEE_LEARNING_SINK_RULE;
+      *mask =
+          AIMEE_LEARNING_SINK_RERANKER | AIMEE_LEARNING_SINK_SUPERSEDE | AIMEE_LEARNING_SINK_RULE;
    else if (strcmp(signal, "preference_statement") == 0 || strcmp(signal, "mark_rule") == 0)
       *mask = AIMEE_LEARNING_SINK_RULE;
    else if (strcmp(signal, "workflow_repetition") == 0)
@@ -481,8 +481,8 @@ int learning_router_record_signal(const learning_signal_input_t *raw_input,
    if (sink_mask & AIMEE_LEARNING_SINK_RERANKER)
    {
       char action[512];
-      int has_target = input.target_memory_id > 0 ||
-                       (input.evidence_refs_json && input.evidence_refs_json[0]);
+      int has_target =
+          input.target_memory_id > 0 || (input.evidence_refs_json && input.evidence_refs_json[0]);
       if ((strcmp(input.signal_type, "correction") != 0 || has_target) &&
           learning_make_reranker_action(strcmp(input.signal_type, "thumb_up") == 0,
                                         input.target_memory_id, input.evidence_refs_json, action,
@@ -498,7 +498,6 @@ int learning_router_record_signal(const learning_signal_input_t *raw_input,
                                          sizeof(action)) == 0)
          learning_queue_sink(signal_id, "supersede", input.target_key, input.target_memory_id,
                              action, input.evidence_refs_json, 0, out);
-
    }
    if (sink_mask & AIMEE_LEARNING_SINK_RULE)
    {

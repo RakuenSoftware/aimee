@@ -498,8 +498,7 @@ static int g_route_selector_randomized;
 static uint32_t g_route_selector_count;
 static uint32_t g_route_selector_pick;
 
-static int test_route_selector(int randomized, uint32_t candidate_count,
-                               uint32_t *selected_index)
+static int test_route_selector(int randomized, uint32_t candidate_count, uint32_t *selected_index)
 {
    g_route_selector_randomized = randomized;
    g_route_selector_count = candidate_count;

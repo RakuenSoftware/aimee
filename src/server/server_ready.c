@@ -253,8 +253,7 @@ int server_ready_render(int db1_ok, int kb_ok, const server_ready_diagnostics_t 
    dep_state_t retrieval =
        (retrieval_ok > 0) ? DEP_OK : (retrieval_ok == 0 ? DEP_FAIL : DEP_UNKNOWN);
    int modules_ok = diagnostics ? diagnostics->modules_ok : -1;
-   dep_state_t modules =
-       (modules_ok > 0) ? DEP_OK : (modules_ok == 0 ? DEP_FAIL : DEP_UNKNOWN);
+   dep_state_t modules = (modules_ok > 0) ? DEP_OK : (modules_ok == 0 ? DEP_FAIL : DEP_UNKNOWN);
 
    long age = (sampled_at > 0) ? (now - sampled_at) : -1;
 

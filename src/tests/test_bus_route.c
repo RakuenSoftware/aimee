@@ -246,8 +246,7 @@ static void test_fragmented_request_reply(void)
    client_t req, server;
    attach(&h, 1, &req);
    attach(&h, 2, &server);
-   must(bus_host_serve_kind(&h, server.reply.handle_id, KIND_A) == BUS_HOST_OK,
-        "server serves A");
+   must(bus_host_serve_kind(&h, server.reply.handle_id, KIND_A) == BUS_HOST_OK, "server serves A");
    must(bus_host_kind_has_server(&h, KIND_A), "kind reports an attached server");
 
    const uint64_t corr = 0xF12A6;
@@ -272,13 +271,11 @@ static void test_fragmented_request_reply(void)
 
    emit(&server, BUS_F_REPLY | BUS_F_MORE, KIND_A, corr, 4, 0x20);
    must(bus_host_pump(&h) == 1, "first reply fragment routed");
-   must(recv_event(&req, &f, buf, sizeof buf) == 1 && (f.hdr_flags & BUS_F_MORE) &&
-            buf[0] == 0x20,
+   must(recv_event(&req, &f, buf, sizeof buf) == 1 && (f.hdr_flags & BUS_F_MORE) && buf[0] == 0x20,
         "requester got first reply fragment");
    emit(&server, BUS_F_REPLY, KIND_A, corr, 4, 0x21);
    must(bus_host_pump(&h) == 1, "final reply fragment routed");
-   must(recv_event(&req, &f, buf, sizeof buf) == 1 && !(f.hdr_flags & BUS_F_MORE) &&
-            buf[0] == 0x21,
+   must(recv_event(&req, &f, buf, sizeof buf) == 1 && !(f.hdr_flags & BUS_F_MORE) && buf[0] == 0x21,
         "requester got final reply fragment");
 
    /* Cancellation retires an unfinished request, allowing its correlation to
@@ -297,8 +294,7 @@ static void test_fragmented_request_reply(void)
         "reused correlation starts a fresh request");
    emit(&server, BUS_F_REPLY, KIND_A, cancelled, 4, 0x32);
    must(bus_host_pump(&h) == 1, "fresh request answered");
-   must(recv_event(&req, &f, buf, sizeof buf) == 1 && buf[0] == 0x32,
-        "fresh reply delivered");
+   must(recv_event(&req, &f, buf, sizeof buf) == 1 && buf[0] == 0x32, "fresh reply delivered");
 
    detach(&req);
    detach(&server);

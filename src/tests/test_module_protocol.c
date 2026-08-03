@@ -22,15 +22,13 @@ int main(void)
                                    .trace_id = 42};
    uint8_t bytes[AIMEE_MODULE_MESSAGE_HEADER_LEN + 3];
    memset(bytes, 0, sizeof bytes);
-   must(aimee_module_message_encode(&input, bytes, sizeof bytes) ==
-            AIMEE_MODULE_MESSAGE_HEADER_LEN,
+   must(aimee_module_message_encode(&input, bytes, sizeof bytes) == AIMEE_MODULE_MESSAGE_HEADER_LEN,
         "encode invoke");
    memcpy(bytes + AIMEE_MODULE_MESSAGE_HEADER_LEN, "abc", 3);
 
    aimee_module_message_t output;
    memset(&output, 0xa5, sizeof output);
-   must(aimee_module_message_decode(bytes, sizeof bytes, &output) ==
-            AIMEE_MODULE_MESSAGE_OK,
+   must(aimee_module_message_decode(bytes, sizeof bytes, &output) == AIMEE_MODULE_MESSAGE_OK,
         "decode invoke");
    must(output.operation == input.operation && output.stage_id == input.stage_id &&
             output.body_len == input.body_len && output.deadline_ns == input.deadline_ns &&
@@ -53,8 +51,7 @@ int main(void)
    input.operation = AIMEE_MODULE_OP_RESULT;
    input.status = AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
    input.body_len = 0;
-   must(aimee_module_message_encode(&input, bytes, sizeof bytes) ==
-            AIMEE_MODULE_MESSAGE_HEADER_LEN,
+   must(aimee_module_message_encode(&input, bytes, sizeof bytes) == AIMEE_MODULE_MESSAGE_HEADER_LEN,
         "encode typed capability absence");
    puts("test_module_protocol: ok");
    return 0;

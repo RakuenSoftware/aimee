@@ -19,14 +19,14 @@
 #include "openai_shape.h"
 #include "ingress_preinject.h"
 #include <aimee/gateway/gateway_pipeline.h> /* gw_request_t + gw_pipeline_run_request — shared seam */
-#include "modules/memory/gw_stage_memory.h"                /* gw_stage_memory + gw_memory_system_prompt (P3) */
-#include "gw_stage_registry.h"              /* Slice 7: config-driven stage catalog */
-#include "gw_stage_governance.h"            /* response seam Slice 2: togglable governance */
-#include "dogfood.h"                        /* dogfood_autolabel_next_turn_live */
-#include "modules/learning/learning_implicit.h"              /* learning_implicit_detect_turn */
-#include "retrieval_outcome_bridge.h"       /* retrieval_outcome_bridge_on_autolabel */
-#include "openai_responses_store.h"         /* previous_response_id continuation store */
-#include "openai_runs_store.h"              /* GET /v1/runs/{id} record store */
+#include "modules/memory/gw_stage_memory.h"     /* gw_stage_memory + gw_memory_system_prompt (P3) */
+#include "gw_stage_registry.h"                  /* Slice 7: config-driven stage catalog */
+#include "gw_stage_governance.h"                /* response seam Slice 2: togglable governance */
+#include "dogfood.h"                            /* dogfood_autolabel_next_turn_live */
+#include "modules/learning/learning_implicit.h" /* learning_implicit_detect_turn */
+#include "retrieval_outcome_bridge.h"           /* retrieval_outcome_bridge_on_autolabel */
+#include "openai_responses_store.h"             /* previous_response_id continuation store */
+#include "openai_runs_store.h"                  /* GET /v1/runs/{id} record store */
 #include "aimee.h" /* EMBED_MAX_DIM, MAX_PATH_LEN (used by agent_types.h below) */
 #include "aimee_errors.h"
 #include "config.h" /* config_t, config_load */

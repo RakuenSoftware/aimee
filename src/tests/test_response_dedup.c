@@ -9,10 +9,11 @@
 
 #define PASS(name) printf("  %s: ok\n", name)
 
-extern aimee_module_status_t aimee_module_handler(
-    const aimee_module_invocation_t *invocation, const uint8_t *request_body,
-    uint32_t request_len, uint8_t *response_body, uint32_t response_capacity,
-    uint32_t *response_len, void *user_data);
+extern aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
+                                                  const uint8_t *request_body, uint32_t request_len,
+                                                  uint8_t *response_body,
+                                                  uint32_t response_capacity,
+                                                  uint32_t *response_len, void *user_data);
 
 int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation)
 {
@@ -22,11 +23,16 @@ int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocatio
 
 static int module_key_provider(const response_dedup_key_inputs_t *in, char *out, size_t out_cap)
 {
-   aimee_response_key_input_t module_input = {
-       .principal = in->principal, .source = in->source, .provider = in->provider,
-       .model = in->model, .endpoint = in->endpoint, .idempotency_key = in->idempotency_key,
-       .body = in->body, .context = in->context, .behavior_flags = in->behavior_flags,
-       .stream = in->stream};
+   aimee_response_key_input_t module_input = {.principal = in->principal,
+                                              .source = in->source,
+                                              .provider = in->provider,
+                                              .model = in->model,
+                                              .endpoint = in->endpoint,
+                                              .idempotency_key = in->idempotency_key,
+                                              .body = in->body,
+                                              .context = in->context,
+                                              .behavior_flags = in->behavior_flags,
+                                              .stream = in->stream};
    size_t request_len = aimee_response_request_size(&module_input);
    uint8_t *request = malloc(request_len);
    uint8_t response[AIMEE_RESPONSE_KEY_MAX + 4u];
@@ -38,8 +44,8 @@ static int module_key_provider(const response_dedup_key_inputs_t *in, char *out,
       return -1;
    }
    aimee_module_status_t status =
-       aimee_module_handler(&invocation, request, (uint32_t)request_len, response,
-                            sizeof(response), &response_len, NULL);
+       aimee_module_handler(&invocation, request, (uint32_t)request_len, response, sizeof(response),
+                            &response_len, NULL);
    free(request);
    return status == AIMEE_MODULE_STATUS_OK
               ? aimee_response_response_decode(response, response_len, out, out_cap)

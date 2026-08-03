@@ -273,8 +273,8 @@ void bus_route_forget_slot(bus_host_t *h, uint32_t slot)
 
 /* ---- pending request table ---- */
 
-static bus_pending_t *pending_add(bus_host_t *h, uint64_t corr, uint32_t requester,
-                                  uint32_t server, int request_open)
+static bus_pending_t *pending_add(bus_host_t *h, uint64_t corr, uint32_t requester, uint32_t server,
+                                  int request_open)
 {
    for (uint32_t i = 0; i < BUS_HOST_MAX_PENDING; i++)
    {
@@ -302,14 +302,13 @@ static bus_pending_t *pending_find(bus_host_t *h, uint64_t corr)
 /* Register a new request or advance the only legal continuation: the same
  * requester/server pair after a fragment explicitly marked MORE. Correlation
  * reuse while a complete request is awaiting its reply is rejected. */
-static bus_pending_t *pending_request(bus_host_t *h, const bus_frame_t *frame,
-                                      uint32_t requester, uint32_t server)
+static bus_pending_t *pending_request(bus_host_t *h, const bus_frame_t *frame, uint32_t requester,
+                                      uint32_t server)
 {
    bus_pending_t *pending = pending_find(h, frame->correlation_id);
    if (pending)
    {
-      if (pending->requester != requester || pending->server != server ||
-          !pending->request_open)
+      if (pending->requester != requester || pending->server != server || !pending->request_open)
          return NULL;
       pending->request_open = (frame->hdr_flags & BUS_F_MORE) != 0;
       return pending;

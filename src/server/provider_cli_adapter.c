@@ -3,7 +3,7 @@
 
 #include "aimee.h"
 #include "cJSON.h"
-#include "aimee_home.h"      /* aimee_home() — the delegate's /v1 socket path */
+#include "aimee_home.h"                  /* aimee_home() — the delegate's /v1 socket path */
 #include "modules/git/git_cred_inject.h" /* git_cred_forge_configured — no aimee route, no strip */
 #include "runtime_secret.h"
 #include "util.h"

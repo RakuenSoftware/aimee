@@ -12,9 +12,9 @@
 #include <aimee/tools/module_api.h>
 #include <aimee/workspace/module_api.h>
 
-#define DECLARE_HANDLER(name)                                                                    \
-   extern aimee_module_status_t name(const aimee_module_invocation_t *, const uint8_t *,          \
-                                      uint32_t, uint8_t *, uint32_t, uint32_t *, void *)
+#define DECLARE_HANDLER(name)                                                                      \
+   extern aimee_module_status_t name(const aimee_module_invocation_t *, const uint8_t *, uint32_t, \
+                                     uint8_t *, uint32_t, uint32_t *, void *)
 
 DECLARE_HANDLER(aimee_memory_module_handler);
 DECLARE_HANDLER(aimee_learning_module_handler);
@@ -34,9 +34,8 @@ static void test_memory(void)
 {
    const int64_t scores[] = {0, 329999, 330000, 659999, 660000};
    const aimee_memory_confidence_t expected[] = {
-       AIMEE_MEMORY_CONFIDENCE_LOW, AIMEE_MEMORY_CONFIDENCE_LOW,
-       AIMEE_MEMORY_CONFIDENCE_MEDIUM, AIMEE_MEMORY_CONFIDENCE_MEDIUM,
-       AIMEE_MEMORY_CONFIDENCE_HIGH};
+       AIMEE_MEMORY_CONFIDENCE_LOW, AIMEE_MEMORY_CONFIDENCE_LOW, AIMEE_MEMORY_CONFIDENCE_MEDIUM,
+       AIMEE_MEMORY_CONFIDENCE_MEDIUM, AIMEE_MEMORY_CONFIDENCE_HIGH};
    for (size_t i = 0; i < sizeof(scores) / sizeof(scores[0]); ++i)
    {
       uint8_t request[AIMEE_MEMORY_REQUEST_LEN], response[AIMEE_MEMORY_RESPONSE_LEN];
@@ -45,8 +44,8 @@ static void test_memory(void)
       aimee_memory_confidence_t result;
       assert(aimee_memory_request_encode(scores[i], request, sizeof(request)) == 0);
       assert(aimee_memory_module_handler(&invocation, request, sizeof(request), response,
-                                         sizeof(response), &response_len, NULL) ==
-             AIMEE_MODULE_STATUS_OK);
+                                         sizeof(response), &response_len,
+                                         NULL) == AIMEE_MODULE_STATUS_OK);
       assert(aimee_memory_response_decode(response, response_len, &result) == 0);
       assert(result == expected[i]);
    }
@@ -59,8 +58,8 @@ static uint32_t learning_mask(const char *signal)
    aimee_module_invocation_t invocation = {.stage_id = AIMEE_LEARNING_STAGE_OBSERVE};
    assert(aimee_learning_request_encode(signal, request, sizeof(request)) == 0);
    assert(aimee_learning_module_handler(&invocation, request, sizeof(request), response,
-                                        sizeof(response), &response_len, NULL) ==
-          AIMEE_MODULE_STATUS_OK);
+                                        sizeof(response), &response_len,
+                                        NULL) == AIMEE_MODULE_STATUS_OK);
    assert(aimee_learning_response_decode(response, response_len, &mask) == 0);
    return mask;
 }
@@ -68,9 +67,9 @@ static uint32_t learning_mask(const char *signal)
 static void test_learning(void)
 {
    assert(learning_mask("thumb_up") == AIMEE_LEARNING_SINK_RERANKER);
-   assert(learning_mask("correction") == (AIMEE_LEARNING_SINK_RERANKER |
-                                           AIMEE_LEARNING_SINK_SUPERSEDE |
-                                           AIMEE_LEARNING_SINK_RULE));
+   assert(
+       learning_mask("correction") ==
+       (AIMEE_LEARNING_SINK_RERANKER | AIMEE_LEARNING_SINK_SUPERSEDE | AIMEE_LEARNING_SINK_RULE));
    assert(learning_mask("workflow_repetition") == AIMEE_LEARNING_SINK_WORKFLOW);
    assert(learning_mask("unknown") == 0);
 }
@@ -82,12 +81,12 @@ static void test_delegates(void)
    char role[AIMEE_DELEGATES_ROLE_MAX + 1];
    aimee_module_invocation_t invocation = {.stage_id = AIMEE_DELEGATES_STAGE_INVOKE};
    assert(aimee_delegates_message_encode(AIMEE_DELEGATES_REQUEST_MAGIC, "implement", request,
-                                          sizeof(request)) == 0);
+                                         sizeof(request)) == 0);
    assert(aimee_delegates_module_handler(&invocation, request, sizeof(request), response,
-                                         sizeof(response), &response_len, NULL) ==
-          AIMEE_MODULE_STATUS_OK);
+                                         sizeof(response), &response_len,
+                                         NULL) == AIMEE_MODULE_STATUS_OK);
    assert(aimee_delegates_message_decode(response, response_len, AIMEE_DELEGATES_RESPONSE_MAGIC,
-                                          role, sizeof(role)) == 0);
+                                         role, sizeof(role)) == 0);
    assert(strcmp(role, "code") == 0);
 }
 
@@ -99,8 +98,8 @@ static aimee_tool_class_t tool_class(const char *name)
    aimee_module_invocation_t invocation = {.stage_id = AIMEE_TOOLS_STAGE_DISPATCH};
    assert(aimee_tools_request_encode(name, request, sizeof(request)) == 0);
    assert(aimee_tools_module_handler(&invocation, request, sizeof(request), response,
-                                    sizeof(response), &response_len, NULL) ==
-          AIMEE_MODULE_STATUS_OK);
+                                     sizeof(response), &response_len,
+                                     NULL) == AIMEE_MODULE_STATUS_OK);
    assert(aimee_tools_response_decode(response, response_len, &result) == 0);
    return result;
 }
@@ -127,8 +126,8 @@ static void test_workspace(void)
    assert(aimee_workspace_request_encode(max_ref, strlen(max_ref), request, sizeof(request)) == 0);
    assert(aimee_workspace_get_u16(request + 6) == AIMEE_WORKSPACE_REF_MAX);
    assert(aimee_workspace_module_handler(&invocation, request, sizeof(request), response,
-                                         sizeof(response), &response_len, NULL) ==
-          AIMEE_MODULE_STATUS_OK);
+                                         sizeof(response), &response_len,
+                                         NULL) == AIMEE_MODULE_STATUS_OK);
    assert(aimee_workspace_response_decode(response, response_len, &allowed) == 0 && allowed);
 }
 
@@ -140,8 +139,8 @@ static void test_git(void)
    aimee_module_invocation_t invocation = {.stage_id = AIMEE_GIT_STAGE_OPERATION};
    assert(aimee_git_request_encode("push", request, sizeof(request)) == 0);
    assert(aimee_git_module_handler(&invocation, request, sizeof(request), response,
-                                   sizeof(response), &response_len, NULL) ==
-          AIMEE_MODULE_STATUS_OK);
+                                   sizeof(response), &response_len,
+                                   NULL) == AIMEE_MODULE_STATUS_OK);
    assert(aimee_git_response_decode(response, response_len, &result) == 0);
    assert(result.operation == AIMEE_GIT_OP_PUSH && result.needs_credentials);
 }
@@ -154,8 +153,8 @@ static void test_skills(void)
    aimee_module_invocation_t invocation = {.stage_id = AIMEE_SKILLS_STAGE_CONTEXT};
    assert(aimee_skills_request_encode(12, 6, request, sizeof(request)) == 0);
    assert(aimee_skills_module_handler(&invocation, request, sizeof(request), response,
-                                      sizeof(response), &response_len, NULL) ==
-          AIMEE_MODULE_STATUS_OK);
+                                      sizeof(response), &response_len,
+                                      NULL) == AIMEE_MODULE_STATUS_OK);
    assert(aimee_skills_response_decode(response, response_len, &fire) == 0 && fire);
 }
 

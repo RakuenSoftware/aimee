@@ -70,8 +70,8 @@ int main(void)
     * bus's typed capability_absent response (never a fake successful echo). */
    char module_response[16];
    uint32_t module_response_len = 0;
-   assert(obs_bus_module_call(5889, 1, 1, now_ns() + 1000000000ULL, "probe", 5,
-                              module_response, sizeof module_response, &module_response_len, NULL,
+   assert(obs_bus_module_call(5889, 1, 1, now_ns() + 1000000000ULL, "probe", 5, module_response,
+                              sizeof module_response, &module_response_len, NULL,
                               NULL) == AIMEE_MODULE_CALL_CAPABILITY_ABSENT);
    assert(module_response_len == 0);
 

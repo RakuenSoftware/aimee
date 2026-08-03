@@ -125,8 +125,8 @@ static void reply_result(bus_client_t *client, uint32_t kind, uint64_t correlati
                          uint32_t stage_id, uint64_t trace_id, aimee_module_status_t status,
                          const uint8_t *body, uint32_t body_len)
 {
-   if (body_len > AIMEE_MODULE_MESSAGE_MAX_BODY ||
-       (body_len > 0 && !body) || status != AIMEE_MODULE_STATUS_OK)
+   if (body_len > AIMEE_MODULE_MESSAGE_MAX_BODY || (body_len > 0 && !body) ||
+       status != AIMEE_MODULE_STATUS_OK)
    {
       if (body_len > AIMEE_MODULE_MESSAGE_MAX_BODY || (body_len > 0 && !body))
          status = AIMEE_MODULE_STATUS_INTERNAL;
@@ -160,12 +160,11 @@ static void reply_result(bus_client_t *client, uint32_t kind, uint64_t correlati
          memcpy(payload + AIMEE_MODULE_MESSAGE_HEADER_LEN, body + offset, part);
       for (;;)
       {
-         bus_client_result_t sent = bus_client_reply_fragment(
-             client, kind, correlation, payload, (uint32_t)total, more);
+         bus_client_result_t sent =
+             bus_client_reply_fragment(client, kind, correlation, payload, (uint32_t)total, more);
          if (sent == BUS_CLIENT_OK)
             break;
-         if (sent != BUS_CLIENT_WOULD_BLOCK || !process_running ||
-             bus_client_epoch_changed(client))
+         if (sent != BUS_CLIENT_WOULD_BLOCK || !process_running || bus_client_epoch_changed(client))
          {
             free(payload);
             return;

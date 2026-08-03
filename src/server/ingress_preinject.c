@@ -234,8 +234,7 @@ static void ingress_query_fingerprint(const char *q, char *out, size_t len)
 const char *ingress_preinject_confidence(double top_score)
 {
    const char *confidence = NULL;
-   if (!g_confidence_provider || g_confidence_provider(top_score, &confidence) != 0 ||
-       !confidence)
+   if (!g_confidence_provider || g_confidence_provider(top_score, &confidence) != 0 || !confidence)
       return "low";
    return confidence;
 }

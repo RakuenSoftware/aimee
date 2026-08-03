@@ -6,9 +6,11 @@
 #include <aimee/core/event_bus/module_runtime.h>
 #include <aimee/routing/module_api.h>
 
-extern aimee_module_status_t aimee_module_handler(
-    const aimee_module_invocation_t *invocation, const uint8_t *request_body, uint32_t request_len,
-    uint8_t *response_body, uint32_t response_capacity, uint32_t *response_len, void *user_data);
+extern aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
+                                                  const uint8_t *request_body, uint32_t request_len,
+                                                  uint8_t *response_body,
+                                                  uint32_t response_capacity,
+                                                  uint32_t *response_len, void *user_data);
 
 static int test_cancelled;
 
@@ -22,7 +24,7 @@ int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocatio
 }
 
 static aimee_module_status_t select_route(aimee_routing_select_mode_t mode, uint32_t count,
-                                           uint64_t trace_id, uint32_t *selected)
+                                          uint64_t trace_id, uint32_t *selected)
 {
    uint8_t request[AIMEE_ROUTING_REQUEST_LEN];
    uint8_t response[AIMEE_ROUTING_RESPONSE_LEN];
@@ -32,9 +34,8 @@ static aimee_module_status_t select_route(aimee_routing_select_mode_t mode, uint
        .trace_id = trace_id,
    };
    assert(aimee_routing_request_encode(mode, count, request, sizeof(request)) == 0);
-   aimee_module_status_t status =
-       aimee_module_handler(&invocation, request, sizeof(request), response, sizeof(response),
-                            &response_len, NULL);
+   aimee_module_status_t status = aimee_module_handler(
+       &invocation, request, sizeof(request), response, sizeof(response), &response_len, NULL);
    if (status == AIMEE_MODULE_STATUS_OK)
       assert(aimee_routing_response_decode(response, response_len, count, selected) == 0);
    return status;

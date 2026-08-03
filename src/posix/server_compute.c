@@ -5,8 +5,8 @@
 #include "primary_cli_ingestor.h" /* S2 binding: enforce-before-send on the tmux CLI TUI turn */
 #include "agent_config.h"
 #include "agent_exec.h"
-#include <aimee/tools/agent_tools.h>   /* agent_tools_set_tool_event_cb — stream tool events */
-#include "router_advise.h" /* S1 advisory request->workflow router hook */
+#include <aimee/tools/agent_tools.h> /* agent_tools_set_tool_event_cb — stream tool events */
+#include "router_advise.h"           /* S1 advisory request->workflow router hook */
 #include "cli_codex.h"
 #include "cli_session.h" /* cli_session_set_stream_cb — incremental tmux CLI streaming */
 #include "config.h"

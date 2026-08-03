@@ -738,11 +738,11 @@ cmake_boundary_failures=""
 for target_block in client webchat; do
     block_var="cmake_${target_block}_links"
     block="${!block_var}"
-    if echo "$block" | grep -Eq 'aimee-(cmd|git|agent|data|core)|SQLite::SQLite3|LIBPQ|libpq'; then
+    if echo "$block" | grep -Eq 'aimee-(cmd|git|agent|data|core)([[:space:]]|[)]|$)|SQLite::SQLite3|LIBPQ|libpq'; then
         cmake_boundary_failures="$cmake_boundary_failures aimee-$target_block"
     fi
 done
-if echo "$cmake_server_links" | grep -Eq 'aimee-(cmd|git|agent|data|core)|LIBPQ|libpq'; then
+if echo "$cmake_server_links" | grep -Eq 'aimee-(cmd|git|agent|data|core)([[:space:]]|[)]|$)|LIBPQ|libpq'; then
     cmake_boundary_failures="$cmake_boundary_failures aimee-server"
 fi
 if [ -z "$cmake_boundary_failures" ]; then

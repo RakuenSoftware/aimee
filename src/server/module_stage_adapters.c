@@ -49,9 +49,9 @@ static int call_module(uint32_t event_kind, uint32_t stage_id, const void *reque
    uint64_t trace = atomic_fetch_add_explicit(&next_trace, 1, memory_order_relaxed);
    if (trace == 0)
       trace = atomic_fetch_add_explicit(&next_trace, 1, memory_order_relaxed);
-   return obs_bus_module_call(event_kind, stage_id, trace, now + MODULE_STAGE_DEADLINE_NS,
-                              request, request_len, response, response_capacity, response_len,
-                              NULL, NULL) == AIMEE_MODULE_CALL_OK
+   return obs_bus_module_call(event_kind, stage_id, trace, now + MODULE_STAGE_DEADLINE_NS, request,
+                              request_len, response, response_capacity, response_len, NULL,
+                              NULL) == AIMEE_MODULE_CALL_OK
               ? 0
               : -1;
 }
@@ -68,8 +68,8 @@ static int memory_confidence(double score, const char **confidence)
    uint32_t response_len = 0;
    aimee_memory_confidence_t result;
    if (aimee_memory_request_encode(micros, request, sizeof(request)) != 0 ||
-       call_module(AIMEE_MEMORY_EVENT_RERANK, AIMEE_MEMORY_STAGE_RERANK, request,
-                   sizeof(request), response, sizeof(response), &response_len) != 0 ||
+       call_module(AIMEE_MEMORY_EVENT_RERANK, AIMEE_MEMORY_STAGE_RERANK, request, sizeof(request),
+                   response, sizeof(response), &response_len) != 0 ||
        aimee_memory_response_decode(response, response_len, &result) != 0)
       return -1;
    *confidence = result == AIMEE_MEMORY_CONFIDENCE_HIGH     ? "high"
@@ -83,9 +83,8 @@ static int learning_classify(const char *signal, uint32_t *sink_mask)
    uint8_t request[AIMEE_LEARNING_REQUEST_LEN], response[AIMEE_LEARNING_RESPONSE_LEN];
    uint32_t response_len = 0;
    return aimee_learning_request_encode(signal, request, sizeof(request)) == 0 &&
-                  call_module(AIMEE_LEARNING_EVENT_OBSERVE, AIMEE_LEARNING_STAGE_OBSERVE,
-                              request, sizeof(request), response, sizeof(response),
-                              &response_len) == 0
+                  call_module(AIMEE_LEARNING_EVENT_OBSERVE, AIMEE_LEARNING_STAGE_OBSERVE, request,
+                              sizeof(request), response, sizeof(response), &response_len) == 0
               ? aimee_learning_response_decode(response, response_len, sink_mask)
               : -1;
 }
@@ -95,12 +94,11 @@ static int delegate_canonicalize(const char *role, char *out, size_t out_cap)
    uint8_t request[AIMEE_DELEGATES_MESSAGE_LEN], response[AIMEE_DELEGATES_MESSAGE_LEN];
    uint32_t response_len = 0;
    return aimee_delegates_message_encode(AIMEE_DELEGATES_REQUEST_MAGIC, role, request,
-                                          sizeof(request)) == 0 &&
-                  call_module(AIMEE_DELEGATES_EVENT_INVOKE, AIMEE_DELEGATES_STAGE_INVOKE,
-                              request, sizeof(request), response, sizeof(response),
-                              &response_len) == 0
+                                         sizeof(request)) == 0 &&
+                  call_module(AIMEE_DELEGATES_EVENT_INVOKE, AIMEE_DELEGATES_STAGE_INVOKE, request,
+                              sizeof(request), response, sizeof(response), &response_len) == 0
               ? aimee_delegates_message_decode(response, response_len,
-                                                AIMEE_DELEGATES_RESPONSE_MAGIC, out, out_cap)
+                                               AIMEE_DELEGATES_RESPONSE_MAGIC, out, out_cap)
               : -1;
 }
 
@@ -110,8 +108,8 @@ static int tool_classify(const char *name, int *classification)
    uint32_t response_len = 0;
    aimee_tool_class_t result;
    if (!classification || aimee_tools_request_encode(name, request, sizeof(request)) != 0 ||
-       call_module(AIMEE_TOOLS_EVENT_DISPATCH, AIMEE_TOOLS_STAGE_DISPATCH, request,
-                   sizeof(request), response, sizeof(response), &response_len) != 0 ||
+       call_module(AIMEE_TOOLS_EVENT_DISPATCH, AIMEE_TOOLS_STAGE_DISPATCH, request, sizeof(request),
+                   response, sizeof(response), &response_len) != 0 ||
        aimee_tools_response_decode(response, response_len, &result) != 0)
       return -1;
    *classification = (int)result;
@@ -123,9 +121,8 @@ static int workspace_validate(const char *ref, size_t ref_len, int *allowed)
    uint8_t request[AIMEE_WORKSPACE_REQUEST_LEN], response[AIMEE_WORKSPACE_RESPONSE_LEN];
    uint32_t response_len = 0;
    return aimee_workspace_request_encode(ref, ref_len, request, sizeof(request)) == 0 &&
-                  call_module(AIMEE_WORKSPACE_EVENT_ACCESS, AIMEE_WORKSPACE_STAGE_ACCESS,
-                              request, sizeof(request), response, sizeof(response),
-                              &response_len) == 0
+                  call_module(AIMEE_WORKSPACE_EVENT_ACCESS, AIMEE_WORKSPACE_STAGE_ACCESS, request,
+                              sizeof(request), response, sizeof(response), &response_len) == 0
               ? aimee_workspace_response_decode(response, response_len, allowed)
               : -1;
 }
@@ -156,11 +153,16 @@ static int response_key(const response_dedup_key_inputs_t *in, char *out, size_t
 {
    if (!in || !out || out_cap == 0)
       return -1;
-   aimee_response_key_input_t module_input = {
-       .principal = in->principal, .source = in->source, .provider = in->provider,
-       .model = in->model, .endpoint = in->endpoint, .idempotency_key = in->idempotency_key,
-       .body = in->body, .context = in->context, .behavior_flags = in->behavior_flags,
-       .stream = in->stream};
+   aimee_response_key_input_t module_input = {.principal = in->principal,
+                                              .source = in->source,
+                                              .provider = in->provider,
+                                              .model = in->model,
+                                              .endpoint = in->endpoint,
+                                              .idempotency_key = in->idempotency_key,
+                                              .body = in->body,
+                                              .context = in->context,
+                                              .behavior_flags = in->behavior_flags,
+                                              .stream = in->stream};
    size_t request_len = aimee_response_request_size(&module_input);
    if (!request_len || request_len > AIMEE_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
       return -1;
@@ -169,12 +171,12 @@ static int response_key(const response_dedup_key_inputs_t *in, char *out, size_t
    uint32_t response_len = 0;
    if (!request)
       return -1;
-   int rc = aimee_response_request_encode(&module_input, request, request_len) == 0 &&
-                    call_module(AIMEE_RESPONSE_EVENT_COMPOSE, AIMEE_RESPONSE_STAGE_COMPOSE,
-                                request, (uint32_t)request_len, response, sizeof(response),
-                                &response_len) == 0
-                ? aimee_response_response_decode(response, response_len, out, out_cap)
-                : -1;
+   int rc =
+       aimee_response_request_encode(&module_input, request, request_len) == 0 &&
+               call_module(AIMEE_RESPONSE_EVENT_COMPOSE, AIMEE_RESPONSE_STAGE_COMPOSE, request,
+                           (uint32_t)request_len, response, sizeof(response), &response_len) == 0
+           ? aimee_response_response_decode(response, response_len, out, out_cap)
+           : -1;
    free(request);
    return rc;
 }

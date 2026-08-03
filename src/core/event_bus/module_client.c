@@ -91,11 +91,12 @@ static void cancel_request(bus_client_t *bus, uint32_t event_kind, uint64_t corr
    }
 }
 
-aimee_module_call_result_t aimee_module_client_call(
-    aimee_module_client_t *client, uint32_t event_kind, uint32_t stage_id, uint64_t trace_id,
-    uint64_t deadline_ns, const void *request_body, uint32_t request_len, void *response_body,
-    uint32_t response_capacity, uint32_t *response_len, aimee_module_cancelled_fn cancelled,
-    void *cancel_context)
+aimee_module_call_result_t
+aimee_module_client_call(aimee_module_client_t *client, uint32_t event_kind, uint32_t stage_id,
+                         uint64_t trace_id, uint64_t deadline_ns, const void *request_body,
+                         uint32_t request_len, void *response_body, uint32_t response_capacity,
+                         uint32_t *response_len, aimee_module_cancelled_fn cancelled,
+                         void *cancel_context)
 {
    if (response_len)
       *response_len = 0;
@@ -116,8 +117,7 @@ aimee_module_call_result_t aimee_module_client_call(
       result = AIMEE_MODULE_CALL_TRANSPORT;
       goto done;
    }
-   uint32_t chunk_capacity =
-       client->bus->reply.inline_budget - AIMEE_MODULE_MESSAGE_HEADER_LEN;
+   uint32_t chunk_capacity = client->bus->reply.inline_budget - AIMEE_MODULE_MESSAGE_HEADER_LEN;
    uint8_t *payload = malloc(client->bus->reply.inline_budget);
    if (!payload)
    {
@@ -290,9 +290,9 @@ done:
 
 const char *aimee_module_call_result_name(aimee_module_call_result_t result)
 {
-   static const char *const names[] = {"OK",          "CAPABILITY_ABSENT", "CAPABILITY_DENIED",
-                                      "CANCELLED",   "DEADLINE_EXCEEDED", "INVALID_REQUEST",
-                                      "INTERNAL",    "RESPONSE_TOO_LARGE", "TRANSPORT",
-                                      "PROTOCOL",    "INVALID_ARGUMENT"};
+   static const char *const names[] = {"OK",        "CAPABILITY_ABSENT",  "CAPABILITY_DENIED",
+                                       "CANCELLED", "DEADLINE_EXCEEDED",  "INVALID_REQUEST",
+                                       "INTERNAL",  "RESPONSE_TOO_LARGE", "TRANSPORT",
+                                       "PROTOCOL",  "INVALID_ARGUMENT"};
    return (unsigned)result < sizeof(names) / sizeof(names[0]) ? names[result] : "UNKNOWN";
 }

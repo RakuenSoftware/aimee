@@ -43,8 +43,7 @@ static uint64_t get_u64(const uint8_t *p)
 
 static aimee_module_message_result_t validate(const aimee_module_message_t *message)
 {
-   if (message->operation != AIMEE_MODULE_OP_INVOKE &&
-       message->operation != AIMEE_MODULE_OP_RESULT)
+   if (message->operation != AIMEE_MODULE_OP_INVOKE && message->operation != AIMEE_MODULE_OP_RESULT)
       return AIMEE_MODULE_MESSAGE_ERR_OPERATION;
    if (message->status > AIMEE_MODULE_STATUS_INTERNAL)
       return AIMEE_MODULE_MESSAGE_ERR_STATUS;
@@ -79,8 +78,7 @@ size_t aimee_module_message_encode(const aimee_module_message_t *message, uint8_
    return AIMEE_MODULE_MESSAGE_HEADER_LEN;
 }
 
-aimee_module_message_result_t aimee_module_message_decode(const uint8_t *input,
-                                                          size_t input_len,
+aimee_module_message_result_t aimee_module_message_decode(const uint8_t *input, size_t input_len,
                                                           aimee_module_message_t *message)
 {
    if (!input || !message || input_len < AIMEE_MODULE_MESSAGE_HEADER_LEN)
@@ -117,9 +115,8 @@ int aimee_module_deadline_expired(uint64_t deadline_ns, uint64_t now_ns)
 
 const char *aimee_module_message_result_name(aimee_module_message_result_t result)
 {
-   static const char *const names[] = {"OK",          "ERR_SHORT",     "ERR_MAGIC",
-                                      "ERR_VERSION", "ERR_HEADER",    "ERR_OPERATION",
-                                      "ERR_STATUS",  "ERR_STAGE",     "ERR_FLAGS",
-                                      "ERR_BODY"};
+   static const char *const names[] = {"OK",         "ERR_SHORT",     "ERR_MAGIC",  "ERR_VERSION",
+                                       "ERR_HEADER", "ERR_OPERATION", "ERR_STATUS", "ERR_STAGE",
+                                       "ERR_FLAGS",  "ERR_BODY"};
    return (unsigned)result < sizeof names / sizeof names[0] ? names[result] : "ERR_UNKNOWN";
 }

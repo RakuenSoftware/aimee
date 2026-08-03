@@ -4,7 +4,7 @@
 #include "server_mcp_internal.h"
 #include "server.h"
 #include <aimee/tools/agent_tools.h> /* the native surface this table registers into */
-#include "toolset.h"     /* toolset_register_native_tool */
+#include "toolset.h"                 /* toolset_register_native_tool */
 #include "aimee.h"
 #include "json_fluent.h" /* jo_ok */
 #include "dstr.h"

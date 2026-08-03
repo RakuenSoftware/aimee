@@ -15,10 +15,10 @@
 #include "server_mcp_internal.h" /* mcp_tool_register_native_surface */
 #include "kb_client.h"           /* request-local memory scope context */
 
-#include <aimee/tools/agent_tools.h>     /* agent_tools_set_git_write_provider / _set_shell_git_gate */
+#include <aimee/tools/agent_tools.h> /* agent_tools_set_git_write_provider / _set_shell_git_gate */
 #include "modules/git/git_cred_inject.h" /* git_cred_forge_configured — no aimee route, no restriction */
-#include "modules/git/mcp_git.h"         /* mcp_git_run_tool — the native surface's git-write impl */
-#include "wfe_native_gate.h" /* wfe_shell_invokes_git — the shell-git classifier */
+#include "modules/git/mcp_git.h" /* mcp_git_run_tool — the native surface's git-write impl */
+#include "wfe_native_gate.h"     /* wfe_shell_invokes_git — the shell-git classifier */
 #include "turn_registry.h"
 #include "server_http.h"
 #include "server_tls.h" /* server_http_api_status_report */
@@ -28,7 +28,7 @@
 #include "config.h" /* config accessors for api.status, api.enable */
 #include <aimee/delegates/delegate_backend_docker.h>
 #include "modules/workspace/workspace_provider.h" /* the shared provider: probe docker for the sandbox posture */
-#include "modules/workspace/workspace_turn.h"     /* the ONE workspace bound, shared with the delegate turn */
+#include "modules/workspace/workspace_turn.h" /* the ONE workspace bound, shared with the delegate turn */
 #include <aimee/delegates/delegate_backend_local.h>
 #include <aimee/delegates/delegate_backend_ssh.h>
 #include "server_delegate_monitor.h"
@@ -58,7 +58,7 @@
 #include "dashboard.h"
 #include "log.h"
 #include "modules/workspace/workspace_scope.h" /* ws_scope_openat2_available — webuser surface gate */
-#include "ws_registry.h"     /* ws_reg_rebuild at startup */
+#include "ws_registry.h"                       /* ws_reg_rebuild at startup */
 #include "hud.h"
 #include "platform_event.h"
 #include "platform_ipc.h"
@@ -1077,8 +1077,7 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    /* Skill review nudge: every N tool hooks, fire a background review delegate. */
    int skill_review_fire = 0;
    if (config_skills_review_enabled() && rc != 2 &&
-       server_module_skill_should_fire(state.hook_call_count,
-                                       config_skills_review_nudge_interval(),
+       server_module_skill_should_fire(state.hook_call_count, config_skills_review_nudge_interval(),
                                        &skill_review_fire) == 0 &&
        skill_review_fire)
       server_compute_skill_review_async(ctx, sid);

@@ -45,16 +45,11 @@ static int fake_classifier(const char *op, aimee_git_classification_t *out)
       const char *name;
       aimee_git_operation_t operation;
       int needs_credentials;
-   } rows[] = {{"status", AIMEE_GIT_OP_STATUS, 0},
-               {"log", AIMEE_GIT_OP_LOG, 0},
-               {"diff", AIMEE_GIT_OP_DIFF, 0},
-               {"branch", AIMEE_GIT_OP_BRANCH, 0},
-               {"fetch", AIMEE_GIT_OP_FETCH, 1},
-               {"pull", AIMEE_GIT_OP_PULL, 1},
-               {"push", AIMEE_GIT_OP_PUSH, 1},
-               {"checkout", AIMEE_GIT_OP_CHECKOUT, 0},
-               {"commit", AIMEE_GIT_OP_COMMIT, 0},
-               {"pr", AIMEE_GIT_OP_PR, 1}};
+   } rows[] = {{"status", AIMEE_GIT_OP_STATUS, 0}, {"log", AIMEE_GIT_OP_LOG, 0},
+               {"diff", AIMEE_GIT_OP_DIFF, 0},     {"branch", AIMEE_GIT_OP_BRANCH, 0},
+               {"fetch", AIMEE_GIT_OP_FETCH, 1},   {"pull", AIMEE_GIT_OP_PULL, 1},
+               {"push", AIMEE_GIT_OP_PUSH, 1},     {"checkout", AIMEE_GIT_OP_CHECKOUT, 0},
+               {"commit", AIMEE_GIT_OP_COMMIT, 0}, {"pr", AIMEE_GIT_OP_PR, 1}};
    if (!op || !out)
       return -1;
    memset(out, 0, sizeof(*out));

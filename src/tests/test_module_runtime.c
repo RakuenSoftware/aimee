@@ -181,8 +181,8 @@ int main(void)
    char body[64];
    uint32_t body_len = 0;
    assert(aimee_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1001, 0, "real-result",
-                                   11, body, sizeof body, &body_len, NULL, NULL) ==
-          AIMEE_MODULE_CALL_OK);
+                                   11, body, sizeof body, &body_len, NULL,
+                                   NULL) == AIMEE_MODULE_CALL_OK);
    assert(body_len == 11 && memcmp(body, "real-result", 11) == 0);
 
    uint8_t *large_request = malloc(LARGE_BODY);
@@ -190,23 +190,23 @@ int main(void)
    assert(large_request != NULL && large_response != NULL);
    for (uint32_t i = 0; i < LARGE_BODY; ++i)
       large_request[i] = (uint8_t)((i * 131U + 17U) & 0xffU);
-   assert(aimee_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1007, 0,
-                                   large_request, LARGE_BODY, large_response, LARGE_BODY,
-                                   &body_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(aimee_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1007, 0, large_request,
+                                   LARGE_BODY, large_response, LARGE_BODY, &body_len, NULL,
+                                   NULL) == AIMEE_MODULE_CALL_OK);
    assert(body_len == LARGE_BODY && memcmp(large_request, large_response, LARGE_BODY) == 0);
 
    /* A too-small destination still drains every response fragment and reports
     * the complete response length, leaving the next correlation usable. */
-   assert(aimee_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1008, 0,
-                                   large_request, LARGE_BODY, body, sizeof body, &body_len, NULL,
+   assert(aimee_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1008, 0, large_request,
+                                   LARGE_BODY, body, sizeof body, &body_len, NULL,
                                    NULL) == AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE);
    assert(body_len == LARGE_BODY);
    free(large_response);
    free(large_request);
 
-   assert(aimee_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1002, 1, "late", 4,
-                                   body, sizeof body, &body_len, NULL, NULL) ==
-          AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);
+   assert(aimee_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1002, 1, "late", 4, body,
+                                   sizeof body, &body_len, NULL,
+                                   NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);
    assert(body_len == 0);
 
    atomic_int cancel;
@@ -214,24 +214,23 @@ int main(void)
    pthread_t cancel_thread;
    assert(pthread_create(&cancel_thread, NULL, cancel_soon, &cancel) == 0);
    assert(aimee_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1003, 0, "cancel", 6,
-                                   body, sizeof body, &body_len, cancellation_flag, &cancel) ==
-          AIMEE_MODULE_CALL_CANCELLED);
+                                   body, sizeof body, &body_len, cancellation_flag,
+                                   &cancel) == AIMEE_MODULE_CALL_CANCELLED);
    assert(pthread_join(cancel_thread, NULL) == 0 && body_len == 0);
 
    /* The cancelled handler's terminal reply may arrive after call() returned.
     * A subsequent call must drain that stale correlation and still complete. */
-   assert(aimee_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1004, 0, "after", 5,
-                                   body, sizeof body, &body_len, NULL, NULL) ==
-          AIMEE_MODULE_CALL_OK);
+   assert(aimee_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1004, 0, "after", 5, body,
+                                   sizeof body, &body_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(body_len == 5 && memcmp(body, "after", 5) == 0);
 
    assert(aimee_module_client_call(&module_client, EMPTY_KIND, 2, 1005, 0, NULL, 0, body,
-                                   sizeof body, &body_len, NULL, NULL) ==
-          AIMEE_MODULE_CALL_CAPABILITY_ABSENT);
+                                   sizeof body, &body_len, NULL,
+                                   NULL) == AIMEE_MODULE_CALL_CAPABILITY_ABSENT);
 
    assert(aimee_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1006, 0, "toolarge", 8,
-                                   body, 3, &body_len, NULL, NULL) ==
-          AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE);
+                                   body, 3, &body_len, NULL,
+                                   NULL) == AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE);
    assert(body_len == 8);
 
    aimee_module_client_destroy(&module_client);

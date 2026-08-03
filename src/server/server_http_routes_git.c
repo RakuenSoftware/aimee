@@ -15,19 +15,19 @@
 #include "config.h" /* MAX_PATH_LEN */
 #include "log.h"
 #include "modules/git/git_forge_vault.h" /* GIT_FORGE_VAULT_AGENT/SSHKEY_CRED — per-webuser ssh-key vault */
-#include "modules/git/git_host_cred.h"   /* per-host git credential store for /v1/git/credentials */
+#include "modules/git/git_host_cred.h" /* per-host git credential store for /v1/git/credentials */
 #include <aimee/git/git_ops.h>         /* git_ops_run for /v1/workspace/git (WP-E) */
-#include "modules/git/git_pr_api.h"      /* narrow in-process forge operations for Go WFE */
-#include "modules/git/git_org_repos.h"   /* git_org_repos_list for /v1/workspace/org-repos */
-#include "modules/git/git_project.h"     /* git_project_clone/_delete for /v1/workspace/clone + delete */
-#include "modules/git/git_ssh_agent.h"   /* git_ssh_agent_stop — drop live key handles on revoke */
-#include "index.h"           /* index_scan_project after a webuser clone (WP-D) */
-#include "kb_client.h"       /* kb_client_index_scan — push webuser clones into aimee-kb */
-#include "vault_service.h"   /* vault_service_set/delete for the per-webuser ssh-key route */
-#include "webuser_editor.h"  /* webuser_editor_ensure for /v1/workspace/editor (WP-I) */
+#include "modules/git/git_pr_api.h"    /* narrow in-process forge operations for Go WFE */
+#include "modules/git/git_org_repos.h" /* git_org_repos_list for /v1/workspace/org-repos */
+#include "modules/git/git_project.h" /* git_project_clone/_delete for /v1/workspace/clone + delete */
+#include "modules/git/git_ssh_agent.h" /* git_ssh_agent_stop — drop live key handles on revoke */
+#include "index.h"                     /* index_scan_project after a webuser clone (WP-D) */
+#include "kb_client.h"      /* kb_client_index_scan — push webuser clones into aimee-kb */
+#include "vault_service.h"  /* vault_service_set/delete for the per-webuser ssh-key route */
+#include "webuser_editor.h" /* webuser_editor_ensure for /v1/workspace/editor (WP-I) */
 #include "modules/workspace/workspace_scope.h" /* ws_scope_user_root — project workspace root */
-#include "util.h"            /* bounded argv execution for structural worktree checks */
-#include "util_url.h"        /* util_url_is_remote — reject file:// / local-path clone urls */
+#include "util.h"     /* bounded argv execution for structural worktree checks */
+#include "util_url.h" /* util_url_is_remote — reject file:// / local-path clone urls */
 #include <ctype.h>
 #include <pthread.h>
 #include <stdio.h>
