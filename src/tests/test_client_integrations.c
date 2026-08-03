@@ -123,7 +123,12 @@ static void test_codex_delegate_policy_is_explicit(void)
     * plain codex capped all five of its searches unprompted. */
    assert(strstr(skill, "Cap what a search prints") != NULL);
    assert(strstr(skill, "head -n") != NULL);
-   assert(strstr(skill, "Do not repeat a search") != NULL);
+   /* The "do not repeat a search" bullet was REMOVED, deliberately. It was added
+    * on intuition and never measured; measuring it afterwards showed duplicate
+    * searches account for 0-1% of work across every arm, so it bought nothing and
+    * spent skill budget that batching guidance now uses. Assert it stays gone, so
+    * it is not reintroduced on the same intuition. */
+   assert(strstr(skill, "Do not repeat a search") == NULL);
    assert(strstr(code_prompt, "Cap what any search prints") != NULL);
 
    /* THE SKILL MUST ANSWER "find this phrase", because that is the question the
@@ -143,6 +148,19 @@ static void test_codex_delegate_policy_is_explicit(void)
    assert(strstr(skill, "read the RANGE") != NULL);
    assert(strstr(skill, "make -s") != NULL);
 
+   /* TURN COUNT IS THE BILL, NOT BYTES.
+    *
+    * On a cell where all four arms passed, aimee moved the FEWEST tool-output
+    * characters of any arm (74k vs baseline's 124k) and still paid 4.4x the
+    * tokens: 47 tool calls against baseline's 9. Per call it was cheaper (41.0k
+    * input-tokens vs 49.1k) -- it just took five times as many. Baseline chained
+    * (16 sed reads inside 9 calls, up to five ranges per command); aimee spread 7
+    * reads across 22 calls. Pin the batching rules, and pin that the agent is
+    * told not to spend a call re-reading the skill it is already being shown. */
+   assert(strstr(skill, "ONE call, joined with `&&`") != NULL);
+   assert(strstr(skill, "spans") != NULL);
+   assert(strstr(skill, "Do not read this file") != NULL);
+
    /* THE GUARD EXISTED AND WAS NEVER WIRED FOR CODEX.
     *
     * `aimee hooks` implements the PreToolUse contract and require_aimee_git is ON
@@ -155,7 +173,11 @@ static void test_codex_delegate_policy_is_explicit(void)
    {
       const char *hooks = codex_hooks_json("/usr/local/bin/aimee");
       assert(strstr(hooks, "\"PreToolUse\"") != NULL);
-      assert(strstr(hooks, "/usr/local/bin/aimee hooks") != NULL);
+      /* MUST be `hooks pre`, not `hooks`. Bare `hooks` exits with "hooks requires
+       * 'pre' or 'post'" and codex allows the tool -- a hook that is installed,
+       * declared, well-formed, and enforces nothing. The first version of this
+       * assertion pinned exactly that defect by matching the prefix. */
+      assert(strstr(hooks, "/usr/local/bin/aimee hooks pre") != NULL);
       cJSON *parsed = cJSON_Parse(hooks);
       assert(parsed != NULL); /* codex refuses a malformed hooks file outright */
       cJSON_Delete(parsed);

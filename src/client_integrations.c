@@ -330,6 +330,9 @@ static const char *codex_skill_markdown(void)
           "recursive search returns every line that matched in whatever order the "
           "filesystem walk found them.\n"
           "- Use `search_memory` for stored project facts or prior decisions.\n"
+          "- Do not read this file, or anything else under the plugin cache. You "
+          "are already reading it; spending a call to fetch it again tells you "
+          "nothing new.\n"
           /* Reading is the largest remaining category. Measured on one cell:
            * 15 reads carrying 660k tokens, 17.7% of that run's whole input --
            * more than search, build and git. `sed -n '1,280p'` is a guess at a
@@ -364,8 +367,25 @@ static const char *codex_skill_markdown(void)
           "and prefer a narrow pattern over a wide alternation: an uncapped "
           "recursive search can return tens of thousands of characters, and every "
           "one of them is re-sent on every later turn of this session.\n"
-          "- Do not repeat a search you have already run. If you need the same "
-          "answer again, it is already above you in this conversation.\n"
+          /* The dominant remaining cost, and it is not bytes. Measured on one
+           * cell where all four arms passed: aimee moved the FEWEST tool-output
+           * characters of any arm (74k against baseline's 124k) and still paid
+           * 4.4x the tokens, because it took 47 tool calls against baseline's 9.
+           * Per call it was cheaper (41.0k input-tokens vs 49.1k); it simply took
+           * five times as many. Plain codex chained aggressively -- 16 `sed`
+           * reads inside 9 calls, up to five ranges joined with `&&` in a single
+           * command -- where aimee spread 7 reads across 22 calls. A round trip
+           * re-sends the whole conversation prefix, so an extra call costs far
+           * more than an extra command on a line that was already being sent. */
+          "- Put independent commands in ONE call, joined with `&&`. Every extra "
+          "round trip re-sends this entire conversation, so four reads chained "
+          "into one command cost a fraction of four separate calls. Batch your "
+          "reads, and fold `git status` / `git diff --check` / a cleanup into the "
+          "command you were already running rather than spending a turn on each.\n"
+          "- The same applies to spans: `" AIMEE_CODE_TOOL_INDEX
+          "` with command=span takes a `spans` array -- "
+          "[{file_path, line_start, line_end}, ...] -- and returns every range in "
+          "one call. Use it whenever you want more than one range.\n"
           "- Do not call provider-native sub-agent tools such as `spawn_agent`; use "
           "the aimee `delegate` MCP tool for every delegated or parallel sub-task.\n"
           "- Use `delegate` only for bounded sub-tasks that materially advance the "
@@ -428,7 +448,10 @@ static const char *codex_hooks_json(const char *aimee_bin)
             "        \"hooks\": [\n"
             "          {\n"
             "            \"type\": \"command\",\n"
-            "            \"command\": \"%s hooks\",\n"
+            /* `hooks` alone exits with "hooks requires 'pre' or 'post'" and codex then
+             * allows the tool. The subcommand is the whole difference between a
+             * registered hook and an enforcing one. */
+            "            \"command\": \"%s hooks pre\",\n"
             "            \"timeout\": 10\n"
             "          }\n"
             "        ]\n"

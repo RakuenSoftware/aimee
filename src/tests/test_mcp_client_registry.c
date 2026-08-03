@@ -506,7 +506,7 @@ static void test_osv_offline_cache_miss_allows(void)
    "host {command,name} req:command\n"                                                             \
    "index "                                                                                        \
    "{command,file_path,judge,line_end,line_start,max_results,node,paths,project,query,scope,"      \
-   "symbol} "                                                                                      \
+   "spans,symbol} "                                                                                \
    "req:command\n"                                                                                 \
    "job {command,job_id,max_concurrent,plan_id} req:command\n"                                     \
    "learning "                                                                                     \

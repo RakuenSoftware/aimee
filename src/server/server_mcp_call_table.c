@@ -1260,14 +1260,75 @@ static cJSON *mcph_pdf_open_asset(struct mcp_call *c)
  * line range through the active workspace provider (code_span_read does the B4
  * path-safety + slicing). Bounds the line args via pdf_arg_pos_int so an
  * out-of-range double can't UB-cast. */
+/* Resolve a project's indexed root once. Split out so a batched call pays the
+ * project-list walk a single time instead of per span. */
+static int code_span_resolve_root(const char *project, char *out, size_t out_len)
+{
+   const int max_projs = 256;
+   project_info_t *projs = calloc((size_t)max_projs, sizeof(*projs));
+   if (!projs)
+      return -1;
+   int np = kb_client_index_list(projs, max_projs);
+   if (np < 0)
+   {
+      free(projs);
+      return -1;
+   }
+   out[0] = '\0';
+   for (int i = 0; i < np; i++)
+      if (strcmp(projs[i].name, project) == 0 && projs[i].root[0])
+      {
+         snprintf(out, out_len, "%s", projs[i].root);
+         break;
+      }
+   free(projs);
+   return out[0] ? 0 : -1;
+}
+
 static cJSON *mcph_code_span_get(struct mcp_call *c)
 {
    cJSON *jp = cJSON_GetObjectItemCaseSensitive(c->jargs, "project");
    cJSON *jf = cJSON_GetObjectItemCaseSensitive(c->jargs, "file_path");
    if (!cJSON_IsString(jp) || !jp->valuestring[0])
       return text_content("error: code_span_get requires 'project'");
+
+   /* BATCH FORM: spans:[{file_path,line_start,line_end}, ...].
+    *
+    * One range per call made this the most expensive way to read a file. Reading
+    * six ranges cost six round trips, where the shell form it replaced batched
+    * them into one command -- and a round trip is not cheap: the whole
+    * conversation prefix is re-sent every time. Measured on one cell, 82 tool
+    * calls against a ~12k fixed prefix is ~1M tokens of a 1.18M total, so turns,
+    * not bytes, are the bill. Accepting a list lets the caller pay once. */
+   cJSON *jspans = cJSON_GetObjectItemCaseSensitive(c->jargs, "spans");
+   if (cJSON_IsArray(jspans) && cJSON_GetArraySize(jspans) > 0)
+   {
+      char root[MAX_PATH_LEN] = "";
+      if (code_span_resolve_root(jp->valuestring, root, sizeof(root)) != 0)
+         return text_content("error: unknown project (no indexed root)");
+      int max_lines = config_code_span_max_lines() > 0 ? config_code_span_max_lines() : 400;
+      cJSON *out = cJSON_CreateArray();
+      if (!out)
+         return text_content("error: out of memory");
+      cJSON *sp;
+      cJSON_ArrayForEach(sp, jspans)
+      {
+         cJSON *sf = cJSON_GetObjectItemCaseSensitive(sp, "file_path");
+         if (!cJSON_IsString(sf) || !sf->valuestring[0])
+            continue; /* skip the malformed entry; the rest of the batch still answers */
+         long long bls = 0, ble = 0;
+         int b_start = pdf_arg_pos_int(sp, "line_start", 2000000000.0, &bls) ? (int)bls : 1;
+         int b_end = pdf_arg_pos_int(sp, "line_end", 2000000000.0, &ble) ? (int)ble : b_start;
+         cJSON *one =
+             code_span_read(jp->valuestring, root, sf->valuestring, b_start, b_end, max_lines);
+         if (one)
+            cJSON_AddItemToArray(out, one);
+      }
+      return json_result_content(out);
+   }
+
    if (!cJSON_IsString(jf) || !jf->valuestring[0])
-      return text_content("error: code_span_get requires 'file_path'");
+      return text_content("error: code_span_get requires 'file_path' or 'spans'");
 
    long long ls = 0, le = 0;
    int line_start = pdf_arg_pos_int(c->jargs, "line_start", 2000000000.0, &ls) ? (int)ls : 1;

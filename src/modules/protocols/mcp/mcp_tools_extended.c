@@ -94,8 +94,12 @@ void mcp_add_extended_tools(cJSON *tools)
    ext_prop(t, "line_start", "integer", "First line to read (1-based; default 1).");
    ext_prop(t, "line_end", "integer",
             "Last line to read (1-based, inclusive; default line_start).");
+   ext_prop(t, "spans", "array",
+            "Read several ranges in ONE call: [{\"file_path\":..., \"line_start\":..., "
+            "\"line_end\":...}, ...]. Prefer this whenever you want more than one range -- a "
+            "round trip costs far more than the extra range. Replaces file_path/line_start/"
+            "line_end when present; returns one span object per entry, in order.");
    ext_require(t, "project");
-   ext_require(t, "file_path");
 
    t = ext_tool(tools, "index_blast_radius",
                 "Impact analysis for one file: the files that depend on it (dependents) and the "
