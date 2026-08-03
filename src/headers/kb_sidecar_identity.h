@@ -20,4 +20,9 @@ int kb_sidecar_identity_ensure(const char *data_dir, const char *subdir,
 /* The synthesis hop: kb -> aimee-llm, material in $data_dir/synthesis-tls. */
 int kb_synthesis_identity_ensure(const char *data_dir, const char *sidecar_host);
 
+/* The embedder hop: kb -> aimee-embedder-{a25m,nomic}, material in
+ * $data_dir/embedder-tls. Independent of the synthesis hop by design; see the
+ * comment on the definition. */
+int kb_embedder_identity_ensure(const char *data_dir, const char *sidecar_host);
+
 #endif /* KB_SIDECAR_IDENTITY_H */

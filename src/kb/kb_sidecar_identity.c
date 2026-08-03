@@ -165,3 +165,14 @@ int kb_synthesis_identity_ensure(const char *data_dir, const char *sidecar_host)
 {
    return kb_sidecar_identity_ensure(data_dir, "synthesis-tls", sidecar_host, "aimee-kb-synthesis");
 }
+
+/* The embedder hop. A SEPARATE directory and a separate client subject from
+ * synthesis, rather than one shared "the kb's sidecars" identity. The two hops are
+ * independently deployable: an install can run a bundled embedder against an
+ * external synthesis provider, or the reverse, or neither. Sharing material would
+ * mean provisioning one hop implicitly provisions the other, and revoking one would
+ * silently break both. */
+int kb_embedder_identity_ensure(const char *data_dir, const char *sidecar_host)
+{
+   return kb_sidecar_identity_ensure(data_dir, "embedder-tls", sidecar_host, "aimee-kb-embedder");
+}

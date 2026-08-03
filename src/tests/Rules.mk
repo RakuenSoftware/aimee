@@ -305,7 +305,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-workspace-provider-detached \
                $(TESTPREFIX)/unit-test-workspace-runner-queue \
                $(TESTPREFIX)/unit-test-cli-kb-smoke \
-               $(TESTPREFIX)/unit-test-kb-synthesis-identity \
+               $(TESTPREFIX)/unit-test-kb-sidecar-identity \
                $(TESTPREFIX)/unit-test-synthesis-mtls-client \
                $(TESTPREFIX)/unit-test-workspace-scope \
                $(TESTPREFIX)/unit-test-workspace-migration \
@@ -5681,8 +5681,8 @@ $(TESTPREFIX)/unit-test-subject-grammar: $(OBJDIR)/tests/test_subject_grammar.o 
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-kb-synthesis-identity: \
-                     $(OBJDIR)/tests/test_kb_synthesis_identity.o \
+$(TESTPREFIX)/unit-test-kb-sidecar-identity: \
+                     $(OBJDIR)/tests/test_kb_sidecar_identity.o \
                      $(OBJDIR)/kb/kb_sidecar_identity.o \
                      $(OBJDIR)/kb/pki.o \
                      $(OBJDIR)/kb/modules/vault/vault_crypto.o \

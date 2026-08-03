@@ -2367,10 +2367,26 @@ int main(int argc, char **argv)
       if (llm_host && llm_host[0])
       {
          if (kb_synthesis_identity_ensure(kb_default_config_dir(), llm_host) != 0)
-            LOG_WARN("kb_synthesis_identity",
+            LOG_WARN("kb_sidecar_identity",
                      "could not provision synthesis mTLS identities for %s; the sidecar "
                      "will refuse to start until this succeeds",
                      llm_host);
+      }
+   }
+
+   /* Embedder sidecar identities, on the same terms and for the same reason. Keyed on
+    * its own env var rather than on EMBEDDER_MODEL: the model name says WHAT to embed
+    * with, which is equally satisfied by an external endpoint over plain HTTPS, while
+    * this says a sidecar container exists on the aimee network to issue for. */
+   {
+      const char *embedder_host = getenv("AIMEE_EMBEDDER_HOST");
+      if (embedder_host && embedder_host[0])
+      {
+         if (kb_embedder_identity_ensure(kb_default_config_dir(), embedder_host) != 0)
+            LOG_WARN("kb_sidecar_identity",
+                     "could not provision embedder mTLS identities for %s; the sidecar "
+                     "will refuse to start until this succeeds",
+                     embedder_host);
       }
    }
 
