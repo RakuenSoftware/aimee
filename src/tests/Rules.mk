@@ -3334,6 +3334,8 @@ $(TESTPREFIX)/unit-test-code-collect: $(OBJDIR)/tests/test_code_collect.o \
 # row-at-a-time cost a WAL fsync each and made `index scan` exceed its deadline.
 $(TESTPREFIX)/unit-test-curator-enqueue-batching: $(OBJDIR)/tests/test_curator_enqueue_batching.o \
                                                   $(OBJDIR)/modules/kb-synthesis/kb_curator_queue.o $(PLATFORM_BASIC_OBJS)
+	$(TESTLINK) -o $@ $^ $(L_CORE)
+
 # Accepted-connection fds must be close-on-exec: an inherited fd keeps the
 # client blocked in read() until the child exits (see server_conn_io.c).
 $(TESTPREFIX)/unit-test-server-conn-accept: $(OBJDIR)/tests/test_server_conn_accept.o \
