@@ -730,5 +730,5 @@ const char *config_embedder_command(const config_t *cfg, const char *requested)
       return requested;
    if (cfg && cfg->embedder_command[0])
       return cfg->embedder_command;
-   return "builtin";
+   return MEMORY_EMBED_TEST_FIXTURE;
 }

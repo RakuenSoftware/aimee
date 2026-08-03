@@ -1554,7 +1554,8 @@ void cmd_eval(app_ctx_t *ctx, int argc, char **argv)
 
       /* Try corpus-based eval first. */
       static mem_eval_case_t corpus_cases[MEM_CORPUS_MAX_CASES];
-      int n_corpus = mem_eval_load_corpus(corpus_path, corpus_cases, MEM_CORPUS_MAX_CASES);
+      int n_corpus = mem_eval_load_corpus(corpus_path, config_embedder_command_current(NULL), corpus_cases,
+                                        MEM_CORPUS_MAX_CASES);
 
       if (n_corpus > 0)
       {

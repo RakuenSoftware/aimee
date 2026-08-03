@@ -898,10 +898,17 @@ int mem_eval_load_benchmark_agent_config(agent_config_t *cfg)
    return 0;
 }
 
-int mem_eval_load_corpus(const char *corpus_path, mem_eval_case_t *cases, int max_cases)
+int mem_eval_load_corpus(const char *corpus_path, const char *embed_cmd, mem_eval_case_t *cases,
+                         int max_cases)
 {
    if (!corpus_path || !cases || max_cases <= 0)
       return -1;
+   if (!embed_cmd || !embed_cmd[0])
+   {
+      fprintf(stderr, "mem_eval_load_corpus: no embedder configured; a retrieval benchmark "
+                      "cannot embed its corpus\n");
+      return -1;
+   }
 
    char *raw = slurp_file_eval(corpus_path);
    if (!raw)
@@ -982,7 +989,6 @@ int mem_eval_load_corpus(const char *corpus_path, mem_eval_case_t *cases, int ma
       }
 
       {
-         const char *embed_cmd = config_embedder_command_current(NULL);
          if (memory_embed(m.id, embed_cmd) != 0)
          {
             fprintf(stderr, "mem_eval_load_corpus: memory_embed failed for fixture %s\n",
@@ -1252,9 +1258,9 @@ int mem_eval_open_temp_db(void)
 {
    /* Pin the embedding dim BEFORE the temp store applies its schema: the scratch
     * store's vector columns are sized by db2_embedding_dim(), and the corpus is
-    * embedded via config_embedder_command (builtin => 384-dim when no embedder is
-    * configured). Without this, db2_embedding_dim()'s 1024 default disagrees with
-    * the builtin embed and every vector insert fails. Mirrors bootstrap_db2's pin.
+    * embedded with the caller's embedder. Without this, db2_embedding_dim()'s 1024
+    * default can disagree with the embedder's width and every vector insert fails.
+    * Mirrors bootstrap_db2's pin.
     * (The sqlite shim ignores vector dim, so this only bites the real-libpq store.) */
    db2_set_embedding_dim_default(config_embedder_dims_default());
    db2_set_embedding_dim(config_resolve_embedder_dims_current());

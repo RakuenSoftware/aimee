@@ -740,9 +740,10 @@ int db2_embedding_model_record_or_check(void *conn, const char *model_id, const 
    return -1;
 }
 
-/* The identity the builtin lexical embedder reports (memory_embed_serving_id). It is
- * a placeholder: the kb serves it only until an embedder is actually selected. */
-#define BUILTIN_LEXICAL_SERVING_ID "builtin/lexical-v1"
+/* The identity the retired builtin lexical embedder recorded. Nothing serves it any
+ * more — a kb with no embedder now refuses to start — but corpora created before it
+ * was removed still carry it in kb_meta, so the value has to outlive the code. */
+#define RETIRED_LEXICAL_SERVING_ID "builtin/lexical-v1"
 
 /* The tables that hold derived vectors. Every one is rebuildable from source kept
  * elsewhere, which is why db2_reembed.c may drop them; here the same set answers a
@@ -808,18 +809,19 @@ static int corpus_has_vectors(void *conn)
  *     the drift it could not have detected is the operator's to resolve (the cutover
  *     runbook says re-embed).
  *   - recorded == serving_id -> match.
- *   - recorded is the builtin lexical placeholder AND nothing has been embedded ->
- *     adopt the new identity. The placeholder serves a kb whose embedder has not been
- *     chosen yet, so the first Deploy records it before the wizard's choice can reach
- *     the container. With no vectors written there is no space to mix, and refusing
- *     here stranded a brand-new empty kb: the documented recovery is `aimee kb
- *     reembed`, which is gated behind a setting inside the kb's own container.
- *     The emptiness must be PROVEN — an unreadable corpus is treated as non-empty.
+ *   - recorded is the RETIRED lexical identity AND nothing has been embedded -> adopt
+ *     the new identity. Those corpora exist because an unconfigured kb used to serve a
+ *     builtin lexical embedder, which recorded itself as the vector space on first
+ *     init whether or not anything was ever embedded. The embedder is gone, but the
+ *     kb_meta rows are not, and without this every such deployment would refuse to
+ *     start the moment it was given the embedder it now requires. With no vectors
+ *     written there is no space to mix. Emptiness must be PROVEN — an unreadable
+ *     corpus is treated as non-empty.
  *   - recorded != serving_id -> REFUSE. There is no compat list: unlike a model swap,
  *     where cosine agreement can be measured and admitted, a pooling or prefix change
- *     is definitionally a different space. This still covers the lexical corpus that
- *     HAS vectors, which is the transition nothing else can see: the builtin is
- *     384-dim and so is the bundled model, so the dim guard stays silent.
+ *     is definitionally a different space. A lexical corpus that HAS vectors is still
+ *     refused: the builtin was 384-dim and so is the bundled model, so the dim guard
+ *     cannot see that transition and this is the only thing that can.
  */
 int db2_embedder_serving_record_or_check(void *conn, const char *serving_id, char *errbuf,
                                          size_t errlen)
@@ -847,7 +849,7 @@ int db2_embedder_serving_record_or_check(void *conn, const char *serving_id, cha
       return 0;
    }
 
-   if (strcmp(recorded, BUILTIN_LEXICAL_SERVING_ID) == 0 && corpus_has_vectors(conn) == 0)
+   if (strcmp(recorded, RETIRED_LEXICAL_SERVING_ID) == 0 && corpus_has_vectors(conn) == 0)
    {
       if (kb_meta_set(conn, "schema_embedder_serving_id", serving_id) != 0)
       {

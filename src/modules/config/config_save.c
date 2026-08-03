@@ -1409,10 +1409,16 @@ const char *config_embedder_command(const config_t *cfg, const char *requested)
       return env;
    if (cfg && cfg->embedder_command[0])
       return cfg->embedder_command;
-   /* Nothing selected at all: the lexical builtin, which fills the deployment's
-    * configured width (config is the single place that is declared). Correct for a
-    * first boot before the wizard runs, and for an unconfigured shim/test setup. */
-   return "builtin";
+   /* Nothing selected at all. The honest answer is the empty string, and callers read
+    * it as "no embedder": memory_embed_text embeds nothing, the kb refuses to start,
+    * and a deploy is rejected before a container runs.
+    *
+    * This used to return "builtin", naming a lexical feature hash that served whenever
+    * nothing was configured. Returning a name for it now would be worse than the
+    * fallback ever was: nothing implements it, so the string would reach the sidecar
+    * exec path, fork `/bin/sh -c builtin` for every embed call, fail, and charge the
+    * dependency breaker for an endpoint that was never configured. */
+   return "";
 }
 
 /* --- Conversation directories --- */

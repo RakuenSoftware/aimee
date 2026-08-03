@@ -103,11 +103,13 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
       if (e.kind === 'bundled') {
         // An unset embedder_model is NOT "the deployment default" — there is no
         // default downstream. buildDesiredConfig omits the key, deploy-env omits
-        // EMBEDDER_MODEL, and the kb entrypoint leaves the baked model unloaded and
-        // serves the builtin LEXICAL embedder forever: the instance comes up
-        // healthy, reports retrieval degraded, and never uses the embedder its image
-        // was built around. Seed the shipped local model so an operator who accepts
-        // the default gets a working one.
+        // EMBEDDER_MODEL, and the kb refuses to start without one, so the deploy is
+        // rejected before anything runs. Seed the shipped local model so an operator
+        // who accepts the default gets a working one rather than that refusal.
+        //
+        // (It used to be worse: the kb served a builtin lexical embedder instead, so
+        // the instance came up healthy and answered every search with keyword
+        // matching, never using the embedder its image was built around.)
         //
         // embedModelSaved keeps the RAW saved value, so embedderChangeImpact still
         // sees from:'' on a fresh install and charges nothing for this seeding.
@@ -147,6 +149,14 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
         : { kind: 'bundled', model: embedModel },
     [embedRoute, embedUrl, embedKey, embedDims, embedModel],
   );
+
+  /* The kb refuses to start without an embedder, and a deploy with none is rejected
+   * before any container runs. Saving an incomplete choice only defers that refusal to
+   * a later step, so the step will not complete until the selection is a usable one. */
+  const embedderChosen =
+    embedRoute === 'bundled'
+      ? embedModel.trim() !== ''
+      : embedUrl.trim() !== '' && embedDims.trim() !== '';
 
   const synthesis: SynthesisSelection = useMemo(() => {
     if (synthRoute === 'off') return { kind: 'off' };
@@ -356,8 +366,16 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
         </div>
       )}
 
+      {!embedderChosen && (
+        <div style={{ fontSize: 12.5, color: '#a33' }}>
+          {embedRoute === 'bundled'
+            ? 'Choose an embedder. This image bakes none, so use an external endpoint.'
+            : 'An external embedder needs both an endpoint and its dimension.'}
+        </div>
+      )}
+
       <div>
-        <Button variant="primary" disabled={saving} onClick={save}>
+        <Button variant="primary" disabled={saving || !embedderChosen} onClick={save}>
           {saving ? 'Saving…' : 'Save & continue'}
         </Button>
       </div>

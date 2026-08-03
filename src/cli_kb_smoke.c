@@ -123,10 +123,8 @@ static void check_vectors(smoke_t *s, cJSON *h)
    report(s, "vector store ready", ok, 0, detail);
 }
 
-/* Zero embeddings is not a failure: "external embedder only" is supported, and the
- * builtin lexical embedder serves until one is selected. It is reported because a
- * deployment that MEANT to embed looks identical from outside, which is how a box
- * ends up serving lexical-only search behind a healthy banner. */
+/* Zero embeddings is not a failure: a kb that has ingested nothing yet has none. It is
+ * reported because a deployment that MEANT to embed looks identical from outside. */
 static void check_embeddings(smoke_t *s, cJSON *h)
 {
    if (!h)

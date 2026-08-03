@@ -87,11 +87,12 @@ extern "C"
     * pooling/prefix change is definitionally a different space. Returns 0
     * (recorded/match), -1 (mismatch / DB error, errbuf set).
     *
-    * One exception: a corpus still recorded against the builtin lexical placeholder,
-    * with no vectors written, adopts the incoming identity. The placeholder is what a
-    * kb serves before an embedder has been chosen, so the first deploy records it
-    * whether or not anything is ever embedded; refusing there locked an empty kb out
-    * of the choice it had not made yet. Emptiness must be proven. */
+    * One exception: a corpus recorded against the RETIRED builtin lexical embedder,
+    * with no vectors written, adopts the incoming identity. That embedder served when
+    * none was configured and recorded itself on first init whether or not anything was
+    * ever embedded. It is gone — a kb with no embedder now refuses to start — but the
+    * kb_meta rows it left behind are not, and without this every such deployment would
+    * refuse to start once given the embedder it now requires. Emptiness must be proven. */
    int db2_embedder_serving_record_or_check(void *conn, const char *serving_id, char *errbuf,
                                             size_t errlen);
 

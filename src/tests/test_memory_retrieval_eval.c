@@ -132,7 +132,7 @@ static void test_corpus_load_minimal(void)
 
    char *path = write_temp_corpus(corpus_json);
    mem_eval_case_t cases[16];
-   int n = mem_eval_load_corpus(path, cases, 16);
+   int n = mem_eval_load_corpus(path, MEMORY_EMBED_TEST_FIXTURE, cases, 16);
 
    assert(n == 1);
    assert(cases[0].n_expected == 1);
@@ -187,7 +187,7 @@ static void test_fusion_surfaces_bridged_memory(void)
 
    config_t cfg;
    config_load(&cfg);
-   const char *embed = cfg.embedder_command[0] ? cfg.embedder_command : "builtin";
+   const char *embed = cfg.embedder_command[0] ? cfg.embedder_command : MEMORY_EMBED_TEST_FIXTURE;
 
    /* Base hit: lexically/semantically matches the query. */
    memory_t base;
@@ -260,7 +260,7 @@ static void test_corpus_load_multi_expected(void)
 
    char *path = write_temp_corpus(corpus_json);
    mem_eval_case_t cases[16];
-   int n = mem_eval_load_corpus(path, cases, 16);
+   int n = mem_eval_load_corpus(path, MEMORY_EMBED_TEST_FIXTURE, cases, 16);
 
    assert(n == 1);
    assert(cases[0].n_expected == 2);
@@ -289,7 +289,7 @@ static void test_corpus_load_populates_local_embeddings(void)
 
    char *path = write_temp_corpus(corpus_json);
    mem_eval_case_t cases[16];
-   int n = mem_eval_load_corpus(path, cases, 16);
+   int n = mem_eval_load_corpus(path, MEMORY_EMBED_TEST_FIXTURE, cases, 16);
    assert(n == 1);
 
    mem_eval_close_temp_db();
@@ -301,7 +301,7 @@ static void test_corpus_load_invalid_json(void)
 {
    char *path = write_temp_corpus("{not valid json");
    mem_eval_case_t cases[16];
-   int n = mem_eval_load_corpus(path, cases, 16);
+   int n = mem_eval_load_corpus(path, MEMORY_EMBED_TEST_FIXTURE, cases, 16);
    assert(n == -1);
    platform_test_remove_sqlite(path);
    free(path);
@@ -310,7 +310,7 @@ static void test_corpus_load_invalid_json(void)
 static void test_corpus_load_missing_file(void)
 {
    mem_eval_case_t cases[16];
-   int n = mem_eval_load_corpus("/tmp/does_not_exist_xyzzy.json", cases, 16);
+   int n = mem_eval_load_corpus("/tmp/does_not_exist_xyzzy.json", MEMORY_EMBED_TEST_FIXTURE, cases, 16);
    assert(n == -1);
 }
 
@@ -331,7 +331,7 @@ static void test_corpus_load_unknown_fid(void)
 
    char *path = write_temp_corpus(corpus_json);
    mem_eval_case_t cases[16];
-   int n = mem_eval_load_corpus(path, cases, 16);
+   int n = mem_eval_load_corpus(path, MEMORY_EMBED_TEST_FIXTURE, cases, 16);
    /* Case has no resolvable expected IDs, so it should be dropped → 0 cases loaded */
    assert(n <= 0);
    mem_eval_close_temp_db();
@@ -358,7 +358,7 @@ static void test_mem_eval_run_finds_exact_match(void)
 
    char *path = write_temp_corpus(corpus_json);
    mem_eval_case_t cases[16];
-   int n = mem_eval_load_corpus(path, cases, 16);
+   int n = mem_eval_load_corpus(path, MEMORY_EMBED_TEST_FIXTURE, cases, 16);
    assert(n == 1);
 
    mem_eval_scores_t scores;
@@ -502,7 +502,7 @@ static void test_multi_hop_recall(void)
 
    char *path = write_temp_corpus(corpus_json);
    mem_eval_case_t cases[16];
-   int n = mem_eval_load_corpus(path, cases, 16);
+   int n = mem_eval_load_corpus(path, MEMORY_EMBED_TEST_FIXTURE, cases, 16);
    assert(n == 1);
 
    /* Seed graph edges to link the three fixtures. In production these would
@@ -535,7 +535,7 @@ static int run_corpus_regression(const char *corpus_path, const char *baseline_p
    }
 
    static mem_eval_case_t cases[MEM_CORPUS_MAX_CASES];
-   int n_cases = mem_eval_load_corpus(corpus_path, cases, MEM_CORPUS_MAX_CASES);
+   int n_cases = mem_eval_load_corpus(corpus_path, MEMORY_EMBED_TEST_FIXTURE, cases, MEM_CORPUS_MAX_CASES);
    if (n_cases <= 0)
    {
       fprintf(stderr, "FAIL: memory retrieval corpus failed for %s\n", corpus_path);

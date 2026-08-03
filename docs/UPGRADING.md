@@ -169,10 +169,14 @@ server log. A grant for the wrong spelling is a grant for nobody.
 ## The embedder and synthesis settings are renamed, with no aliases
 
 Every setting naming the embedder or the synthesis model changed name. There is no
-alias and no fallback: an old name is simply not read. A deployment that upgrades
-without editing its environment and `aimee.yaml` **keeps running and silently loses
-those settings**: the KB falls back to its builtin lexical embedder and synthesis
-goes idle. Nothing errors.
+alias: an old name is simply not read. A deployment that upgrades without editing its
+environment and `aimee.yaml` therefore reads as having no embedder configured, and
+**the KB refuses to start** rather than coming up without one. Synthesis goes idle,
+which is a supported state and does not stop anything.
+
+Earlier builds in this cycle did fall back to a builtin lexical embedder here, so the
+KB came up healthy and answered searches with keyword matching while the renamed
+settings sat unread. That fallback is gone precisely because nothing errored.
 
 | Old | New |
 | --- | --- |
@@ -197,9 +201,9 @@ Deleted outright, because the container they configured is retired and the
 still carrying `kb.curator.tier_b.*` is not an error: the key is ignored and
 rewriting the file drops it.
 
-**Check after upgrading**: `aimee config get embedder_model` and
-`aimee config get synthesis_endpoint` return what you expect, and the KB's health
-does not report the builtin lexical embedder.
+**Check before upgrading**: `aimee config get embedder_model` returns the embedder you
+mean to keep, under its new name. If it is empty, the KB will not start. Afterwards,
+`aimee config get synthesis_endpoint` should also return what you expect.
 
 ## One synthesis role, and thinking is now a setting
 

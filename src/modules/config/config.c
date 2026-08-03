@@ -2376,7 +2376,7 @@ const char *config_embedder_command_current(const char *requested)
    static _Thread_local char cached[512];
    config_t *cfg = calloc(1, sizeof(*cfg));
    if (!cfg)
-      return "builtin"; /* allocation failure must not fabricate an embedder */
+      return ""; /* allocation failure must not fabricate an embedder */
    config_load(cfg);
    snprintf(cached, sizeof(cached), "%s", config_embedder_command(cfg, NULL));
    free(cfg);

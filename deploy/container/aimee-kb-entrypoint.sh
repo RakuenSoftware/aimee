@@ -35,21 +35,23 @@
 #   EMBEDDER_URL set  -> an external embedder; start nothing.
 #   EMBEDDER_MODEL set      -> the bundled embedder; start it.
 #   embedding_model in cfg  -> same, for a hand-run container.
-#   none of the above       -> start nothing. The kb falls back to its builtin lexical
-#                              embedder, which needs no model and no port, so an
-#                              unconfigured container is idle rather than half-configured.
+#   none of the above       -> REFUSE TO START.
 #
 # When it DOES start, the loopback URL is exported as EMBEDDER_URL. That makes the
 # bundled embedder just "an embedder at a URL" and reuses one precedence rule for both
 # cases, instead of a second mechanism that can disagree with the first.
 #
-# Starting is best-effort: the kb degrades honestly when embedding is unavailable, whereas
-# an entrypoint that refuses takes the whole knowledge base down with it.
+# Refusing is the point. There used to be a builtin lexical embedder behind this, so an
+# unconfigured container came up healthy and answered every search with keyword matching
+# — a deployment could run for weeks believing it had vector retrieval. It also claimed
+# the corpus: db2 recorded the fallback as the vector space, so choosing a real embedder
+# later was a space change the guard refused, and the kb never started again. A kb with
+# no embedder cannot do the one thing it exists for, and saying so at startup is cheaper
+# than discovering it from bad answers.
 # Ask the binary, never the file. This used to parse aimee.yaml with a sed regex, which
 # hardcoded the config paths and assumed a top-level `embedding_model:` key — a second
 # reader of a setting config owns. It worked only because config_save happens to write
-# the key at root, and it failed SILENTLY: an unparsed key reads as "nothing selected",
-# so the builtin serves forever and nothing says why.
+# the key at root, and it failed SILENTLY: an unparsed key reads as "nothing selected".
 read_cfg_embedding_model() {
     aimee-kb --print-embedding-model 2>/dev/null || true
 }
@@ -63,17 +65,21 @@ start_embedder() {
         EMBEDDER_MODEL="$(read_cfg_embedding_model)"
     fi
     if [ -z "$EMBEDDER_MODEL" ]; then
-        echo "aimee-kb: no embedder selected; the bundled model stays unloaded (the builtin" \
-             "lexical embedder serves until the wizard selects one)" >&2
-        return 0
+        echo "aimee-kb: no embedder selected, and there is no fallback. Retrieval needs one." >&2
+        echo "aimee-kb:   pick a bundled model:  aimee config set embedder_model bekko-a25m" >&2
+        echo "aimee-kb:   or point at your own:  EMBEDDER_URL=http://<host>:<port>" >&2
+        echo "aimee-kb: then re-run Deploy. Refusing to start." >&2
+        exit 1
     fi
     export EMBEDDER_MODEL
 
     venv="${EMBEDDER_VENV:-/opt/aimee/embedder-venv}"
     server=/opt/aimee/scripts/embedder-server.py
     if [ ! -x "$venv/bin/python" ] || [ ! -f "$server" ]; then
-        echo "aimee-kb: '$EMBEDDER_MODEL' selected but this image has no bundled embedder" >&2
-        return 0
+        echo "aimee-kb: '$EMBEDDER_MODEL' selected but this image has no bundled embedder." >&2
+        echo "aimee-kb: the aimee-kb image carries no weights — use aimee-kb-a25m or" >&2
+        echo "aimee-kb: aimee-kb-nomic, or set EMBEDDER_URL. Refusing to start." >&2
+        exit 1
     fi
     : "${EMBEDDER_PORT:=8760}"
     export EMBEDDER_PORT

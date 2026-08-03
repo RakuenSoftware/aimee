@@ -208,7 +208,7 @@ static void test_build_empty_dir(void)
 
    open_test_db();
    kb_stats_t stats;
-   int rc = kb_build(tmpdir, "test_empty", NULL, 1, &stats);
+   int rc = kb_build(tmpdir, "test_empty", MEMORY_EMBED_TEST_FIXTURE, 1, &stats);
    assert(rc == 0);
    assert(stats.files_scanned == 0);
    assert(stats.files_indexed == 0);
@@ -242,14 +242,14 @@ static void test_build_single_file(void)
 
    open_test_db();
    kb_stats_t stats;
-   int rc = kb_build(tmpdir, "test_single", NULL, 1, &stats);
+   int rc = kb_build(tmpdir, "test_single", MEMORY_EMBED_TEST_FIXTURE, 1, &stats);
    assert(rc == 0);
    assert(stats.files_scanned >= 1);
    assert(stats.files_indexed >= 1);
    assert(stats.chunks_added >= 1);
 
    /* Search for something that should be in the index */
-   char *result = kb_search("test_single", "installation", NULL, 3);
+   char *result = kb_search("test_single", "installation", MEMORY_EMBED_TEST_FIXTURE, 3);
    assert(result != NULL);
    /* Should find the Installation section */
    assert(strstr(result, "README.md") != NULL || strcmp(result, "No results found.") != 0);
@@ -277,7 +277,7 @@ static void test_build_sanitizes_malformed_utf8(void)
 
    open_test_db();
    kb_stats_t stats;
-   assert(kb_build(tmpdir, "test_utf8", NULL, 1, &stats) == 0);
+   assert(kb_build(tmpdir, "test_utf8", MEMORY_EMBED_TEST_FIXTURE, 1, &stats) == 0);
    assert(stats.files_indexed == 1);
    assert(stats.chunks_added > 0);
 
@@ -286,7 +286,7 @@ static void test_build_sanitizes_malformed_utf8(void)
    assert(strcmp(stored, "# Legacy\n\nA ?quoted? CP-1252 phrase.\n") == 0);
    free(stored);
 
-   char *result = kb_search_json("test_utf8", "quoted phrase", NULL, 3);
+   char *result = kb_search_json("test_utf8", "quoted phrase", MEMORY_EMBED_TEST_FIXTURE, 3);
    assert(result != NULL);
    assert(strstr(result, "?quoted? CP-1252 phrase") != NULL);
    free(result);
@@ -328,7 +328,7 @@ static void test_build_incremental_update(void)
    kb_stats_t stats;
 
    /* First build */
-   int rc = kb_build(tmpdir, "test_incr", NULL, 1, &stats);
+   int rc = kb_build(tmpdir, "test_incr", MEMORY_EMBED_TEST_FIXTURE, 1, &stats);
    assert(rc == 0);
    int chunks_first = stats.chunks_added;
    assert(chunks_first > 0);
@@ -369,7 +369,7 @@ static void test_bloom_dedupe_skips_duplicate_content(void)
 
    open_test_db();
    kb_stats_t stats;
-   int rc = kb_build(tmpdir, "test_bloom_dup", NULL, 0, &stats);
+   int rc = kb_build(tmpdir, "test_bloom_dup", MEMORY_EMBED_TEST_FIXTURE, 0, &stats);
    assert(rc == 0);
    assert(stats.files_indexed == 2);
    assert(stats.chunks_added > 0);
@@ -408,7 +408,7 @@ static void test_minhash_shadow_signatures_persist(void)
 
    open_test_db();
    kb_stats_t stats;
-   int rc = kb_build(tmpdir, "test_lsh_shadow", NULL, 0, &stats);
+   int rc = kb_build(tmpdir, "test_lsh_shadow", MEMORY_EMBED_TEST_FIXTURE, 0, &stats);
    assert(rc == 0);
    assert(stats.files_indexed == 1);
 
@@ -480,7 +480,7 @@ static void test_async_embedding_queue_and_drain(void)
    platform_setenv("AIMEE_MEMORY_COGNIFY_ASYNC_ENABLED", "1");
 
    kb_stats_t stats;
-   int rc = kb_build(tmpdir, "test_async", "builtin", 1, &stats);
+   int rc = kb_build(tmpdir, "test_async", MEMORY_EMBED_TEST_FIXTURE, 1, &stats);
    assert(rc == 0);
    assert(stats.chunks_added > 0);
    assert(stats.embeddings_added == 0);
@@ -498,7 +498,7 @@ static void test_async_embedding_queue_and_drain(void)
    assert(aimee_pg_column_int(vc_st, 0) == 0);
    aimee_pg_finalize(vc_st);
 
-   assert(db2_kb_service_async_queue_drain("builtin", 5, pgvec_kb_vector_collection_name(),
+   assert(db2_kb_service_async_queue_drain(MEMORY_EMBED_TEST_FIXTURE, 5, pgvec_kb_vector_collection_name(),
                                            test_kb_vector_upsert_document, NULL, &qstats) == 0);
    assert(qstats.pending == 0);
    assert(qstats.running == 0);
@@ -565,7 +565,7 @@ static void test_build_sync_embeddings_and_vectors(void)
    platform_setenv("AIMEE_MEMORY_COGNIFY_ASYNC_ENABLED", "0");
 
    kb_stats_t stats;
-   int rc = kb_build(tmpdir, "test_syncembed", "builtin", 1, &stats);
+   int rc = kb_build(tmpdir, "test_syncembed", MEMORY_EMBED_TEST_FIXTURE, 1, &stats);
    assert(rc == 0);
    assert(stats.files_indexed == 1);
    assert(stats.chunks_added > 0);
@@ -600,7 +600,7 @@ static void test_build_vector_batch_flush(void)
    platform_setenv("AIMEE_VECTOR_KB_BATCH_SIZE", "2");
 
    kb_stats_t stats;
-   int rc = kb_build(tmpdir, "test_batch", "builtin", 1, &stats);
+   int rc = kb_build(tmpdir, "test_batch", MEMORY_EMBED_TEST_FIXTURE, 1, &stats);
    assert(rc == 0);
    assert(stats.embeddings_added == stats.chunks_added);
    /* With batch size 2 and >2 chunks the loop flushes mid-stream and again at
@@ -634,7 +634,7 @@ static void test_build_multi_file_counts(void)
 
    open_test_db();
    kb_stats_t stats;
-   int rc = kb_build(tmpdir, "test_multi", NULL, 1, &stats);
+   int rc = kb_build(tmpdir, "test_multi", MEMORY_EMBED_TEST_FIXTURE, 1, &stats);
    assert(rc == 0);
    assert(stats.files_scanned == 3);
    assert(stats.files_indexed == 3);
@@ -643,7 +643,7 @@ static void test_build_multi_file_counts(void)
 
    /* Force rebuild re-indexes everything (clears the project first; no skips). */
    kb_stats_t s2;
-   rc = kb_build(tmpdir, "test_multi", NULL, 1, &s2);
+   rc = kb_build(tmpdir, "test_multi", MEMORY_EMBED_TEST_FIXTURE, 1, &s2);
    assert(rc == 0);
    assert(s2.files_indexed == 3);
    assert(s2.files_skipped == 0);
@@ -656,7 +656,7 @@ static void test_build_multi_file_counts(void)
 static void test_search_empty_kb(void)
 {
    open_test_db();
-   char *result = kb_search("no_such_project", "anything", NULL, 3);
+   char *result = kb_search("no_such_project", "anything", MEMORY_EMBED_TEST_FIXTURE, 3);
    assert(result != NULL);
    assert(strcmp(result, "No results found.") == 0);
    free(result);
@@ -681,11 +681,11 @@ static void test_search_finds_content(void)
 
    open_test_db();
    kb_stats_t stats;
-   kb_build(tmpdir, "test_search", NULL, 1, &stats);
+   kb_build(tmpdir, "test_search", MEMORY_EMBED_TEST_FIXTURE, 1, &stats);
    assert(stats.chunks_added > 0);
 
    /* Search for authentication info */
-   char *result = kb_search("test_search", "authentication bearer token", NULL, 3);
+   char *result = kb_search("test_search", "authentication bearer token", MEMORY_EMBED_TEST_FIXTURE, 3);
    assert(result != NULL);
    /* Result should reference the file */
    assert(strstr(result, "api.md") != NULL);
@@ -709,7 +709,7 @@ static void test_search_requires_query_embedding(void)
 
    open_test_db();
    kb_stats_t stats;
-   kb_build(tmpdir, "test_embedfail", NULL, 1, &stats);
+   kb_build(tmpdir, "test_embedfail", MEMORY_EMBED_TEST_FIXTURE, 1, &stats);
    assert(stats.chunks_added > 0);
 
    char *result =
@@ -727,7 +727,7 @@ static void test_search_requires_query_embedding(void)
 static void test_search_json_empty(void)
 {
    open_test_db();
-   char *result = kb_search_json("no_such_project", "anything", NULL, 3);
+   char *result = kb_search_json("no_such_project", "anything", MEMORY_EMBED_TEST_FIXTURE, 3);
    assert(result != NULL);
    /* Empty result set must be valid JSON with a results array and fusion_mode field. */
    assert(strstr(result, "\"results\":[]") != NULL);
@@ -751,10 +751,10 @@ static void test_search_json_structured(void)
 
    open_test_db();
    kb_stats_t stats;
-   kb_build(tmpdir, "test_jsearch", NULL, 1, &stats);
+   kb_build(tmpdir, "test_jsearch", MEMORY_EMBED_TEST_FIXTURE, 1, &stats);
    assert(stats.chunks_added > 0);
 
-   char *result = kb_search_json("test_jsearch", "bearer token authentication", NULL, 3);
+   char *result = kb_search_json("test_jsearch", "bearer token authentication", MEMORY_EMBED_TEST_FIXTURE, 3);
    assert(result != NULL);
    /* Must be structured JSON with separate typed fields, not the legacy
     * single-string format. */
@@ -788,11 +788,12 @@ static void test_search_json_scope_all_keeps_active_project_first(void)
    write_file(other_path, "# Other\n\nshared local-first retrieval evidence with extra terms\n");
 
    open_test_db();
-   assert(kb_build(local_dir, "proj-local", NULL, 1, NULL) == 0);
-   assert(kb_build(other_dir, "proj-other", NULL, 1, NULL) == 0);
+   assert(kb_build(local_dir, "proj-local", MEMORY_EMBED_TEST_FIXTURE, 1, NULL) == 0);
+   assert(kb_build(other_dir, "proj-other", MEMORY_EMBED_TEST_FIXTURE, 1, NULL) == 0);
 
    char *result =
-       kb_search_json_scoped_ex("proj-local", 1, "shared local-first retrieval", NULL, 2, "rrf");
+       kb_search_json_scoped_ex("proj-local", 1, "shared local-first retrieval",
+                                MEMORY_EMBED_TEST_FIXTURE, 2, "rrf");
    assert(result);
    const char *local = strstr(result, "\"project\":\"proj-local\"");
    const char *other = strstr(result, "\"project\":\"proj-other\"");
@@ -800,7 +801,8 @@ static void test_search_json_scope_all_keeps_active_project_first(void)
    free(result);
 
    result =
-       kb_search_json_scoped_ex("proj-local", 1, "shared local-first retrieval", NULL, 1, "rrf");
+       kb_search_json_scoped_ex("proj-local", 1, "shared local-first retrieval",
+                                MEMORY_EMBED_TEST_FIXTURE, 1, "rrf");
    assert(result);
    assert(strstr(result, "\"project\":\"proj-local\"") != NULL);
    assert(strstr(result, "\"project\":\"proj-other\"") == NULL);
@@ -842,10 +844,10 @@ static void test_search_max_cap_above_legacy_limit(void)
 
    open_test_db();
    kb_stats_t stats;
-   kb_build(tmpdir, "test_cap", NULL, 1, &stats);
+   kb_build(tmpdir, "test_cap", MEMORY_EMBED_TEST_FIXTURE, 1, &stats);
    assert(stats.chunks_added >= 10);
 
-   char *result = kb_search_json("test_cap", "section behaviour discusses", NULL, 20);
+   char *result = kb_search_json("test_cap", "section behaviour discusses", MEMORY_EMBED_TEST_FIXTURE, 20);
    assert(result != NULL);
    /* Count '"file_path":' occurrences; must be > 8 to prove the cap lifted. */
    int hits = 0;
@@ -876,14 +878,14 @@ static void test_clear(void)
 
    open_test_db();
    kb_stats_t stats;
-   kb_build(tmpdir, "test_clear", NULL, 1, &stats);
+   kb_build(tmpdir, "test_clear", MEMORY_EMBED_TEST_FIXTURE, 1, &stats);
    assert(stats.chunks_added > 0);
 
    int deleted = db2_kb_service_clear_project("test_clear");
    assert(deleted > 0);
 
    /* Search should now return nothing */
-   char *result = kb_search("test_clear", "notes", NULL, 3);
+   char *result = kb_search("test_clear", "notes", MEMORY_EMBED_TEST_FIXTURE, 3);
    assert(result != NULL);
    assert(strcmp(result, "No results found.") == 0);
    free(result);
@@ -931,8 +933,8 @@ static void test_purge_fence_blocks_ingest(void)
    /* Writers refuse to start an ingest for a fenced project; another key is
     * unaffected. */
    kb_stats_t stats;
-   assert(kb_build(tmpdir, "fence_proj", NULL, 0, &stats) == -1);
-   assert(kb_build(other_tmpdir, "other_proj", NULL, 0, &stats) == 0);
+   assert(kb_build(tmpdir, "fence_proj", MEMORY_EMBED_TEST_FIXTURE, 0, &stats) == -1);
+   assert(kb_build(other_tmpdir, "other_proj", MEMORY_EMBED_TEST_FIXTURE, 0, &stats) == 0);
 
    /* Heartbeat: displaced ids no-op, matching ids refresh. */
    assert(db2_kb_purge_fence_heartbeat("fence_proj", "gen-0", "pid-1") == 0);
@@ -987,7 +989,7 @@ static void test_purge_fence_blocks_ingest(void)
    assert(db2_kb_purge_fence_read("fence_proj", NULL, 0, NULL, 0, NULL) == 0);
 
    /* Unfenced: the ingest goes through again. */
-   assert(kb_build(tmpdir, "fence_proj", NULL, 0, &stats) == 0);
+   assert(kb_build(tmpdir, "fence_proj", MEMORY_EMBED_TEST_FIXTURE, 0, &stats) == 0);
 
    close_test_db();
    unlink(fpath);
@@ -1016,12 +1018,12 @@ static void test_project_isolation(void)
    write_file(fp2, "# Beta Project\n\nThis is about beta features.\n");
 
    open_test_db();
-   kb_build(tmpdir1, "proj_alpha", NULL, 1, NULL);
-   kb_build(tmpdir2, "proj_beta", NULL, 1, NULL);
+   kb_build(tmpdir1, "proj_alpha", MEMORY_EMBED_TEST_FIXTURE, 1, NULL);
+   kb_build(tmpdir2, "proj_beta", MEMORY_EMBED_TEST_FIXTURE, 1, NULL);
 
    /* Searching proj_alpha should not return beta content */
-   char *r1 = kb_search("proj_alpha", "beta", NULL, 3);
-   char *r2 = kb_search("proj_beta", "alpha", NULL, 3);
+   char *r1 = kb_search("proj_alpha", "beta", MEMORY_EMBED_TEST_FIXTURE, 3);
+   char *r2 = kb_search("proj_beta", "alpha", MEMORY_EMBED_TEST_FIXTURE, 3);
    assert(r1 != NULL);
    assert(r2 != NULL);
    /* These searches should not match (different project namespaces) */
@@ -1033,7 +1035,7 @@ static void test_project_isolation(void)
 
    /* Clear one project, verify other is unaffected */
    db2_kb_service_clear_project("proj_alpha");
-   char *r3 = kb_search("proj_beta", "beta features", NULL, 3);
+   char *r3 = kb_search("proj_beta", "beta features", MEMORY_EMBED_TEST_FIXTURE, 3);
    assert(r3 != NULL);
    /* proj_beta should still have results */
    free(r3);
@@ -1060,7 +1062,7 @@ static void test_status_format(void)
    write_file(fpath, "# Hello\n\nSome content.\n");
 
    open_test_db();
-   kb_build(tmpdir, "status_test", NULL, 1, NULL);
+   kb_build(tmpdir, "status_test", MEMORY_EMBED_TEST_FIXTURE, 1, NULL);
 
    db2_kb_service_project_status_t status;
    assert(db2_kb_service_collect_project_status("status_test", &status) == 0);
@@ -1106,7 +1108,7 @@ static void test_excludes_node_modules(void)
 
    open_test_db();
    kb_stats_t stats;
-   kb_build(tmpdir, "test_excl", NULL, 1, &stats);
+   kb_build(tmpdir, "test_excl", MEMORY_EMBED_TEST_FIXTURE, 1, &stats);
 
    /* Should only have indexed the normal file */
    assert(stats.files_scanned == 1);

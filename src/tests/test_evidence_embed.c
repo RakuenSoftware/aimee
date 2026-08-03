@@ -79,7 +79,7 @@ static void test_embed_success(void)
 
    assert(db2_evidence_ops_count("pending") == 1);
 
-   int n = kb_evidence_embed_drain(8, "builtin");
+   int n = kb_evidence_embed_drain(8, MEMORY_EMBED_TEST_FIXTURE);
    assert(n == 1);
 
    /* Embedder saw the extracted "content", not the raw payload. */
@@ -102,7 +102,7 @@ static void test_embed_wrong_dim(void)
    char id[64];
    seed_evidence(id, sizeof(id), "{\"content\":\"short\"}");
 
-   int n = kb_evidence_embed_drain(8, "builtin");
+   int n = kb_evidence_embed_drain(8, MEMORY_EMBED_TEST_FIXTURE);
    assert(n == 1); /* op was handled (marked failed) */
 
    assert(db2_evidence_ops_count("ok") == 0);
@@ -129,13 +129,13 @@ static void test_embed_drain_batch(void)
    }
    assert(db2_evidence_ops_count("pending") == 5);
 
-   int n = kb_evidence_embed_drain(32, "builtin");
+   int n = kb_evidence_embed_drain(32, MEMORY_EMBED_TEST_FIXTURE);
    assert(n == 5);
    assert(db2_evidence_ops_count("ok") == 5);
    assert(db2_evidence_ops_count("pending") == 0);
 
    /* Empty queue: drain reports zero work, not an error. */
-   assert(kb_evidence_embed_drain(32, "builtin") == 0);
+   assert(kb_evidence_embed_drain(32, MEMORY_EMBED_TEST_FIXTURE) == 0);
 
    printf("  test_embed_drain_batch: PASS\n");
 }
