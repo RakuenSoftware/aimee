@@ -87,12 +87,12 @@ void config_kb_curator_defaults(config_t *cfg)
    /* SIZED FOR A MODEL THAT THINKS BEFORE IT ANSWERS, which 512 was not.
     *
     * 512 came from a 2-4 tokens/s bundled synth with no reasoning pass, chosen to
-    * stay inside the five-minute provider deadline. The bundled synth is now gemma-4
-    * E2B/E4B, which reasons before emitting content: on the shipped extract prompt it
-    * spent ~290 tokens reasoning and then had the JSON envelope cut off mid-object at
-    * exactly 512. cJSON_Parse failed, the job was marked "sidecar returned non-JSON",
-    * and it retried into permanent failure -- every extract_doc job, every time, on
-    * the default configuration.
+    * stay inside the provider deadline of the day, then five minutes -- see
+    * KB_CURATOR_PROVIDER_TIMEOUT_MS, which E4B's measured rate has since moved. The bundled synth
+    * is now gemma-4 E2B/E4B, which reasons before emitting content: on the shipped extract prompt
+    * it spent ~290 tokens reasoning and then had the JSON envelope cut off mid-object at exactly
+    * 512. cJSON_Parse failed, the job was marked "sidecar returned non-JSON", and it retried into
+    * permanent failure -- every extract_doc job, every time, on the default configuration.
     *
     * 4096 IS THE SAME NUMBER bench/tier-a ALREADY ARRIVED AT, and arriving at it a
     * second time by a shorter route is the whole argument for the comment. Its
