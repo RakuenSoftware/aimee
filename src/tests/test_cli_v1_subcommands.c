@@ -284,6 +284,40 @@ static void test_run_failure_reports_dispatch_message(void)
    printf("  async run preserves dispatch error message\n");
 }
 
+/* A gated method must not reach the wire without consent, and an ungated one must be
+ * untouched. The gate is client-side because the server has no terminal to ask at, so
+ * this is the layer testable without one: with no --confirm and no tty, cli_v1_forward
+ * must refuse before it marshals anything.
+ *
+ * `aimee workspace remove <path>` used to drop the registration on the spot, with no
+ * prompt and no mention that the indexed corpus stays searchable afterwards. */
+static void test_gated_method_refuses_without_confirmation(void)
+{
+   /* stdin under the test runner is not a terminal, which is exactly the
+    * non-interactive case the gate must refuse rather than assume consent for. */
+   assert(!isatty(STDIN_FILENO));
+
+   cli_v1_route_t route;
+   char *argv_remove[] = {"remove", "some-workspace"};
+   assert(cli_v1_lookup("workspace", 2, argv_remove, &route) == 1);
+   assert(strcmp(route.method, "workspace.remove") == 0);
+   /* 2 = refused before dispatch. A 0 here would mean it was sent. */
+   assert(cli_v1_forward(NULL, &route, 0, NULL, NULL, 2, argv_remove) == 2);
+
+   /* --confirm gets past the gate; it then fails on transport, which is a different
+    * and later failure than the refusal above. */
+   char *argv_confirm[] = {"remove", "some-workspace", "--confirm"};
+   assert(cli_v1_lookup("workspace", 3, argv_confirm, &route) == 1);
+   assert(cli_v1_forward(NULL, &route, 0, NULL, NULL, 3, argv_confirm) != 2);
+
+   /* An ungated sibling is unaffected: no prompt, no refusal. */
+   char *argv_list[] = {"list"};
+   assert(cli_v1_lookup("workspace", 1, argv_list, &route) == 1);
+   assert(cli_v1_forward(NULL, &route, 0, NULL, NULL, 1, argv_list) != 2);
+
+   printf("  workspace remove refuses without --confirm on a non-tty\n");
+}
+
 int main(void)
 {
    printf("test_cli_v1_subcommands\n");
@@ -298,6 +332,7 @@ int main(void)
    test_agent_roles_printer_read_is_not_reported_as_a_write();
    test_agent_personas_printer_reports_personas();
    test_run_failure_reports_dispatch_message();
+   test_gated_method_refuses_without_confirmation();
    printf("test_cli_v1_subcommands: all passed\n");
    return 0;
 }
