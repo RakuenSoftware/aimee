@@ -50,6 +50,23 @@ static const char *PAYLOAD_VECTOR_DOWN =
 
 static int failures = 0;
 
+/* THE MEASURED PAYLOAD from booting the nomic kb image (768) over a store recorded at
+ * 384. Every field an operator would look at reads normal -- the kb is up, the vector
+ * store is ready with points in it, the queue is clean -- and the deployment cannot
+ * store a single vector. The only thing that says so is `warnings`, which nothing read
+ * until this check existed. */
+static const char *const PAYLOAD_WIDTH_MISMATCH =
+    "{\"summary_status\":\"ok\",\"available\":true,\"project\":\"p\","
+    "\"files\":2,\"chunks\":2,\"embeddings\":2,"
+    "\"queue\":{\"pending\":0,\"running\":0,\"done\":3,\"failed\":0,\"total\":3},"
+    "\"vector\":{\"available\":true,\"backend\":\"pgvector\","
+    "\"kb_collection_ready\":true,\"memory_collection_ready\":true,"
+    "\"kb_points\":2,\"memory_points\":63,\"status\":\"ok\"},"
+    "\"warnings\":[\"embedder width mismatch: configured embedder is 768-wide, this "
+    "store was embedded at 384. Nothing can be embedded until the corpus is rebuilt at "
+    "the new width (`aimee kb reembed`); existing vectors are unreadable by this "
+    "embedder.\"]}";
+
 static const char *outcome_of(cJSON *rows, const char *check)
 {
    cJSON *row = NULL;
@@ -104,6 +121,23 @@ int main(void)
    expect(rows, "corpus is embedded", "skip");
    /* The one thing genuinely wrong here, and the only thing that should fail. */
    expect(rows, "ingest queue healthy", "fail");
+   if (f != 1)
+   {
+      printf("  FAIL  failed count: expected 1, got %d\n", f);
+      failures++;
+   }
+   cJSON_Delete(rows);
+
+   printf("width mismatch: everything green except the warning\n");
+   rows = eval(PAYLOAD_WIDTH_MISMATCH, &p, &f, &s);
+   /* Each of these passing is the point: none of them can see the problem. */
+   expect(rows, "kb is reachable", "pass");
+   expect(rows, "vector store ready", "pass");
+   expect(rows, "corpus is embedded", "pass");
+   expect(rows, "ingest queue healthy", "pass");
+   /* And this is the only check that catches it. Before it existed this payload
+    * reported 5 passed, 0 failed on a kb that could not embed. */
+   expect(rows, "kb reports no warnings", "fail");
    if (f != 1)
    {
       printf("  FAIL  failed count: expected 1, got %d\n", f);
