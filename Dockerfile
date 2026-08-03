@@ -69,9 +69,31 @@ ENV CARGO_HOME=/usr/local/cargo
 ENV PATH=/usr/local/cargo/bin:$PATH
 # cargo-pgrx must match the pgrx the crate depends on, so it is read from the
 # checkout's Cargo.toml rather than pinned separately here.
-RUN curl -fsS https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable \
-    && git clone --depth 1 --branch "${PGVECTORSCALE_VERSION}" \
-        https://github.com/timescale/pgvectorscale.git /src/pgvectorscale \
+# BOTH FETCHES RETRY, for the same reason the pgdg key above does. This clone failed
+# a build with
+#   fatal: unable to access 'https://github.com/timescale/pgvectorscale.git/':
+#   The requested URL returned error: 503
+# during a forge wobble that also took fetch-treesitter.sh and the Hugging Face
+# weights fetch. Those two were given backoff first and this one was missed, so the
+# next build simply failed one line earlier -- an unretried fetch is a coin flip
+# wherever it sits.
+#
+# --depth 1 --branch is a tag, so a retry fetches the same commit; and cargo pgrx
+# below verifies the build. A retry cannot land different sources than a first-attempt
+# success would have.
+RUN for a in 1 2 3 4 5; do \
+        curl -fsS --connect-timeout 10 --max-time 300 https://sh.rustup.rs \
+          | sh -s -- -y --profile minimal --default-toolchain stable && break; \
+        echo "rustup fetch failed (attempt $a/5); backing off"; sleep $((a * 5)); \
+      done \
+    && test -x "$CARGO_HOME/bin/cargo" \
+    && for a in 1 2 3 4 5; do \
+         git clone --depth 1 --branch "${PGVECTORSCALE_VERSION}" \
+           https://github.com/timescale/pgvectorscale.git /src/pgvectorscale && break; \
+         echo "pgvectorscale clone failed (attempt $a/5); backing off"; \
+         rm -rf /src/pgvectorscale; sleep $((a * 5)); \
+       done \
+    && test -d /src/pgvectorscale/pgvectorscale \
     && cd /src/pgvectorscale/pgvectorscale \
     && pgrx_version="$(awk -F'"' '/^pgrx[[:space:]]*=/{print $2; exit}' Cargo.toml)" \
     && echo "building pgvectorscale ${PGVECTORSCALE_VERSION} against pgrx ${pgrx_version}" \
