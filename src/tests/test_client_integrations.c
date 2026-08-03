@@ -89,6 +89,31 @@ static void test_codex_delegate_policy_is_explicit(void)
    assert(strstr(code_prompt, AIMEE_CODE_TOOL_INDEX) != NULL);
    assert(strstr(code_prompt, AIMEE_CODE_INDEX_COMMAND_HYBRID) != NULL);
    assert(strstr(code_prompt, "search_graph") == NULL);
+
+   /* THE GUIDANCE MUST BE SUBSTITUTIVE, AND IT MUST BOUND EXPLORATION.
+    *
+    * Both properties have already regressed once each, and neither failure looked
+    * like a bug in the tooling:
+    *
+    *  - Offering the index as a FALLBACK after grep produced ZERO index calls
+    *    across a four-task benchmark on a verified-healthy index.
+    *  - Naming what the index is for without saying what to stop doing produced
+    *    an ADDITIVE agent: it used the index AND ran the full shell survey, 1.5
+    *    to 2.4x the commands of plain codex, for up to 4.4x the cost. Command
+    *    output is re-sent every later turn, so cost grows with the square of the
+    *    command count and the survey dominates.
+    *
+    * Pin both properties as text, because that is where they live. */
+   assert(strstr(code_prompt, "instead of raw grep/read") != NULL);
+   assert(strstr(code_prompt, "Do not survey the repository") != NULL);
+
+   /* The index replaces the search rather than confirming it. */
+   assert(strstr(skill, "REPLACES that search") != NULL);
+   /* No orienting by enumeration -- that is the expensive half. */
+   assert(strstr(skill, "Start from the index, not from a survey") != NULL);
+   assert(strstr(skill, "Never run it over the whole tree") != NULL);
+   /* The v1 phrasing that caused the zero-index-call run must not come back. */
+   assert(strstr(skill, "prefer local file inspection first") == NULL);
 }
 
 static void test_mcp_config_uses_resolved_command(void)

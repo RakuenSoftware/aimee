@@ -456,16 +456,31 @@ static void handle_initialize(cJSON *id)
    cJSON_AddStringToObject(info, "version", MCP_VERSION);
    cJSON_AddItemToObject(result, "serverInfo", info);
 
+   /* EVERY TOOL IN tools/list IS DIRECTLY CALLABLE. SAY SO FIRST.
+    *
+    * This text used to open with "call get_help() before trying anything else"
+    * and then describe find_tools -> describe_tool -> call_tool as the way to
+    * reach tools. Agents read that as the normal path and spent their tool budget
+    * on the protocol rather than the work. Measured twice now: once at five of
+    * fourteen calls, and again on a benchmark cell that made two find_tools, two
+    * describe_tool and two call_tool calls and NOT ONE direct find_symbol -- while
+    * find_symbol was in the advertised list the whole time, one call away.
+    *
+    * Discovery is for what is NOT in the list. Leading with it taxes every session
+    * to buy something almost none of them need. */
    static const char *const base_instructions =
-       "When you are unsure how aimee works — work queue, delegation, memory, git, "
-       "build, conventions — call get_help() before trying anything else. It "
-       "returns the authoritative topic index. Pass a topic name for details "
-       "(e.g. get_help(\"work queue\")). The tools/list is a curated core set; the "
-       "full catalog is larger — call find_tools(\"<keyword>\") to discover more "
-       "tools and describe_tool(\"<name>\") for a tool's full input schema, then "
-       "call call_tool with that name and matching arguments. Do "
-       "not use provider-native sub-agent tools such as spawn_agent or Agent; use "
-       "the aimee delegate tool for delegated work.";
+       "The tools in tools/list are directly callable — call them directly, by "
+       "name, with their arguments. Do not route a listed tool through call_tool, "
+       "and do not look one up before using it. find_symbol, "
+       "preview_blast_radius, search_docs and search_memory are listed: use them "
+       "as your first move on repository questions rather than after a shell "
+       "search. Only when you need a tool that is NOT listed: find_tools("
+       "\"<keyword>\") to locate it, describe_tool(\"<name>\") for its schema, "
+       "then call_tool with that name and matching arguments. get_help(\"<topic>\") "
+       "explains how aimee itself works — work queue, delegation, memory, git, "
+       "build, conventions — when you are unsure; it is not a required first step. "
+       "Do not use provider-native sub-agent tools such as spawn_agent or Agent; "
+       "use the aimee delegate tool for delegated work.";
 
    /* Isolate before serving any tool call, and tell the caller where its work
     * will land — the host's own idea of the cwd is now stale for aimee's tools. */

@@ -1292,6 +1292,19 @@ token-roots-provisioner-isolation-check:
 
 token-roots-provisioner-core: token-roots-provisioner-isolation-check $(KB_TOKEN_ROOTS_PROVISIONER)
 
+# THESE LINK THE CORE ARCHIVE THROUGH L_KB BUT ARE NOT IN THE PRODUCT LIST.
+#
+# $(BINARY)/$(SERVER)/$(GATEWAY) name $(CORE_CONNECTION_LIB) as a real
+# prerequisite, and tests get it from `$(TEST_TARGETS): | $(CORE_CONNECTION_LIB)`
+# in tests/Rules.mk. These auxiliary drivers got neither, so on a clean tree they
+# reached the link step before the archive existed and died with
+# "cannot find build/obj/libaimee-core-connection.a" -- which is what kept
+# identity-mint-e2e, oidc-login-live and vault-pkcs11-token red.
+#
+# Order-only: the archive must EXIST first, but relinking it should not force
+# these to relink.
+$(KB_TOKEN_ROOTS_PROVISIONER) $(KB_JWKS_PUBLISHER) ../oidc-login-live: | $(CORE_CONNECTION_LIB)
+
 $(KB_TOKEN_ROOTS_PROVISIONER): $(TOKEN_ROOTS_PROVISIONER_OBJS) \
                                $(TOKEN_ROOTS_PROVISIONER_VAULT_OBJS) \
                                $(STATUS_PROVISIONER_PLATFORM_OBJS) \
