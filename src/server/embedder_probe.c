@@ -6,7 +6,7 @@
 #include "aimee.h" /* EMBED_MAX_DIM + memory.h prerequisites */
 #include "lifecycle.h"
 #include "log.h"
-#include "memory.h"               /* memory_embed_text — in-process HTTP probe */
+#include "memory.h"                              /* memory_embed_text — in-process HTTP probe */
 #include "modules/memory/memory_core_internal.h" /* memory_embed_command_is_http */
 
 #include <stdio.h>

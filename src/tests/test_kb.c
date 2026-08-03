@@ -498,7 +498,8 @@ static void test_async_embedding_queue_and_drain(void)
    assert(aimee_pg_column_int(vc_st, 0) == 0);
    aimee_pg_finalize(vc_st);
 
-   assert(db2_kb_service_async_queue_drain(MEMORY_EMBED_TEST_FIXTURE, 5, pgvec_kb_vector_collection_name(),
+   assert(db2_kb_service_async_queue_drain(MEMORY_EMBED_TEST_FIXTURE, 5,
+                                           pgvec_kb_vector_collection_name(),
                                            test_kb_vector_upsert_document, NULL, &qstats) == 0);
    assert(qstats.pending == 0);
    assert(qstats.running == 0);
@@ -685,7 +686,8 @@ static void test_search_finds_content(void)
    assert(stats.chunks_added > 0);
 
    /* Search for authentication info */
-   char *result = kb_search("test_search", "authentication bearer token", MEMORY_EMBED_TEST_FIXTURE, 3);
+   char *result =
+       kb_search("test_search", "authentication bearer token", MEMORY_EMBED_TEST_FIXTURE, 3);
    assert(result != NULL);
    /* Result should reference the file */
    assert(strstr(result, "api.md") != NULL);
@@ -754,7 +756,8 @@ static void test_search_json_structured(void)
    kb_build(tmpdir, "test_jsearch", MEMORY_EMBED_TEST_FIXTURE, 1, &stats);
    assert(stats.chunks_added > 0);
 
-   char *result = kb_search_json("test_jsearch", "bearer token authentication", MEMORY_EMBED_TEST_FIXTURE, 3);
+   char *result =
+       kb_search_json("test_jsearch", "bearer token authentication", MEMORY_EMBED_TEST_FIXTURE, 3);
    assert(result != NULL);
    /* Must be structured JSON with separate typed fields, not the legacy
     * single-string format. */
@@ -791,18 +794,16 @@ static void test_search_json_scope_all_keeps_active_project_first(void)
    assert(kb_build(local_dir, "proj-local", MEMORY_EMBED_TEST_FIXTURE, 1, NULL) == 0);
    assert(kb_build(other_dir, "proj-other", MEMORY_EMBED_TEST_FIXTURE, 1, NULL) == 0);
 
-   char *result =
-       kb_search_json_scoped_ex("proj-local", 1, "shared local-first retrieval",
-                                MEMORY_EMBED_TEST_FIXTURE, 2, "rrf");
+   char *result = kb_search_json_scoped_ex("proj-local", 1, "shared local-first retrieval",
+                                           MEMORY_EMBED_TEST_FIXTURE, 2, "rrf");
    assert(result);
    const char *local = strstr(result, "\"project\":\"proj-local\"");
    const char *other = strstr(result, "\"project\":\"proj-other\"");
    assert(local && other && local < other);
    free(result);
 
-   result =
-       kb_search_json_scoped_ex("proj-local", 1, "shared local-first retrieval",
-                                MEMORY_EMBED_TEST_FIXTURE, 1, "rrf");
+   result = kb_search_json_scoped_ex("proj-local", 1, "shared local-first retrieval",
+                                     MEMORY_EMBED_TEST_FIXTURE, 1, "rrf");
    assert(result);
    assert(strstr(result, "\"project\":\"proj-local\"") != NULL);
    assert(strstr(result, "\"project\":\"proj-other\"") == NULL);
@@ -847,7 +848,8 @@ static void test_search_max_cap_above_legacy_limit(void)
    kb_build(tmpdir, "test_cap", MEMORY_EMBED_TEST_FIXTURE, 1, &stats);
    assert(stats.chunks_added >= 10);
 
-   char *result = kb_search_json("test_cap", "section behaviour discusses", MEMORY_EMBED_TEST_FIXTURE, 20);
+   char *result =
+       kb_search_json("test_cap", "section behaviour discusses", MEMORY_EMBED_TEST_FIXTURE, 20);
    assert(result != NULL);
    /* Count '"file_path":' occurrences; must be > 8 to prove the cap lifted. */
    int hits = 0;

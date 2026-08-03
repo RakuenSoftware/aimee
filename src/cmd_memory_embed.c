@@ -1601,8 +1601,8 @@ void mem_benchmark(app_ctx_t *ctx, int argc, char **argv)
          baseline_path = "tests/eval/memory_retrieval_baseline.json";
 
       mem_eval_case_t corpus_cases[MEM_CORPUS_MAX_CASES];
-      int n_corpus = mem_eval_load_corpus(corpus_path, config_embedder_command_current(NULL), corpus_cases,
-                                        MEM_CORPUS_MAX_CASES);
+      int n_corpus = mem_eval_load_corpus(corpus_path, config_embedder_command_current(NULL),
+                                          corpus_cases, MEM_CORPUS_MAX_CASES);
       if (n_corpus <= 0)
          fatal("memory benchmark corpus failed for %s", corpus_path);
 

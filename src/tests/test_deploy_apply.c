@@ -62,8 +62,8 @@ static const char *g_stub_embedder_url = "";
 void config_emit_deploy_env_current(char *buf, size_t n)
 {
    if (buf && n)
-      snprintf(buf, n, "COMPOSE_PROFILES=%s\nEMBEDDER_MODEL=%s\nEMBEDDER_URL=%s\n",
-               g_stub_profiles, g_stub_embedder_model, g_stub_embedder_url);
+      snprintf(buf, n, "COMPOSE_PROFILES=%s\nEMBEDDER_MODEL=%s\nEMBEDDER_URL=%s\n", g_stub_profiles,
+               g_stub_embedder_model, g_stub_embedder_url);
 }
 
 /* Keyless Vault double: persistence semantics are exercised through the same

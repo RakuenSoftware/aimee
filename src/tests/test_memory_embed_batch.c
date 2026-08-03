@@ -8,6 +8,8 @@
  * detail. */
 #include "support/mock_agent_http.h"
 #include "embed_input_type.h"
+#include "aimee.h"  /* KIND_COUNT, required by memory.h */
+#include "memory.h" /* MEMORY_EMBED_TEST_FIXTURE */
 
 #include <assert.h>
 #include <stdio.h>
@@ -147,7 +149,8 @@ int main(void)
     * caller is sent to the per-text path that computes the same vectors. */
    mock_agent_http_set_post_handler(post_batch_ok);
    s_posts = 0;
-   assert(memory_embed_texts(texts, NTEXT, MEMORY_EMBED_TEST_FIXTURE, EMBED_INPUT_DOCUMENT, out, DIM) == 0);
+   assert(memory_embed_texts(texts, NTEXT, MEMORY_EMBED_TEST_FIXTURE, EMBED_INPUT_DOCUMENT, out,
+                             DIM) == 0);
    assert(s_posts == 0);
 
    /* Degenerate inputs never reach the embedder. */

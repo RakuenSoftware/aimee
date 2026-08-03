@@ -310,7 +310,8 @@ static void test_corpus_load_invalid_json(void)
 static void test_corpus_load_missing_file(void)
 {
    mem_eval_case_t cases[16];
-   int n = mem_eval_load_corpus("/tmp/does_not_exist_xyzzy.json", MEMORY_EMBED_TEST_FIXTURE, cases, 16);
+   int n =
+       mem_eval_load_corpus("/tmp/does_not_exist_xyzzy.json", MEMORY_EMBED_TEST_FIXTURE, cases, 16);
    assert(n == -1);
 }
 
@@ -535,7 +536,8 @@ static int run_corpus_regression(const char *corpus_path, const char *baseline_p
    }
 
    static mem_eval_case_t cases[MEM_CORPUS_MAX_CASES];
-   int n_cases = mem_eval_load_corpus(corpus_path, MEMORY_EMBED_TEST_FIXTURE, cases, MEM_CORPUS_MAX_CASES);
+   int n_cases =
+       mem_eval_load_corpus(corpus_path, MEMORY_EMBED_TEST_FIXTURE, cases, MEM_CORPUS_MAX_CASES);
    if (n_cases <= 0)
    {
       fprintf(stderr, "FAIL: memory retrieval corpus failed for %s\n", corpus_path);
