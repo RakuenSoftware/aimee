@@ -1871,6 +1871,84 @@ static int cli_v1_finish_response(const cli_v1_route_t *route, cJSON *resp, int 
 
 /* --- Main /v1 forward function --- */
 
+/* Methods that must not be dispatched until the operator has said yes.
+ *
+ * A LIST RATHER THAN A COLUMN in rpc_routes: that table is built with positional
+ * initializers and -Werror=missing-field-initializers, so a seventh field would mean
+ * editing every one of its ~200 rows to add ", 0". The gate is worth more than the
+ * adjacency.
+ *
+ * workspace.remove is here because it silently succeeded. Adding another destructive
+ * method is one line, and cli_v1_confirm_or_refuse's caveat text is where anything
+ * surprising about it belongs. */
+static const char *const CLI_V1_CONFIRM_METHODS[] = {
+    "workspace.remove",
+    NULL,
+};
+
+/* Ask before doing something the operator cannot undo from the CLI.
+ *
+ * CLIENT-SIDE, because the server has no terminal to ask at: by the time a request
+ * reaches /v1 the only options left are to do it or refuse it.
+ *
+ * Two ways through, mirroring `aimee kb reembed`, which is the existing precedent for
+ * a gated mutation: --confirm (or --yes) for a script, or typing y at a prompt. With
+ * neither a flag nor a terminal there is nobody to ask, so it refuses -- a cron job
+ * that removes a workspace should have to say so.
+ *
+ * Returns 1 to proceed, 0 to abort. */
+static int cli_v1_confirm_or_refuse(const char *method, int argc, char **argv)
+{
+   int gated = 0;
+   for (size_t i = 0; CLI_V1_CONFIRM_METHODS[i] && !gated; i++)
+      gated = strcmp(method, CLI_V1_CONFIRM_METHODS[i]) == 0;
+   if (!gated)
+      return 1;
+
+   static const char *bool_flags[] = {"confirm", "yes", "json", NULL};
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, bool_flags, &opts);
+   if (rpc_get(&opts, "confirm") || rpc_get(&opts, "yes"))
+      return 1;
+
+   /* The first positional is the thing being acted on, when there is one. */
+   const char *target = NULL;
+   for (int i = 0; i < argc; i++)
+      if (argv[i] && argv[i][0] != '-')
+      {
+         target = argv[i];
+         break;
+      }
+
+   /* Say what it does AND what it does not. `workspace remove` drops the
+    * registration and leaves the indexed corpus searchable, which is the part an
+    * operator is most likely to get wrong -- and did, in testing. */
+   const char *caveat = strcmp(method, "workspace.remove") == 0
+                            ? "  The indexed corpus is NOT deleted: documents stay in the "
+                              "knowledge base and stay searchable.\n"
+                            : "";
+
+   if (!isatty(STDIN_FILENO))
+   {
+      fprintf(stderr,
+              "aimee: %s needs confirmation and stdin is not a terminal.\n%s"
+              "  Re-run with --confirm.\n",
+              method, caveat);
+      return 0;
+   }
+
+   fprintf(stderr, "%s", caveat);
+   fprintf(stderr, "%s%s%s: proceed? [y/N] ", method, target ? " " : "", target ? target : "");
+   fflush(stderr);
+   char line[16] = "";
+   if (!fgets(line, sizeof(line), stdin) || (line[0] != 'y' && line[0] != 'Y'))
+   {
+      fprintf(stderr, "Aborted.\n");
+      return 0;
+   }
+   return 1;
+}
+
 int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int json_output,
                    const char *json_fields, const char *response_profile, int argc, char **argv)
 {
@@ -1889,6 +1967,9 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
       fwd_argc--;
       fwd_argv++;
    }
+   if (!cli_v1_confirm_or_refuse(route->method, fwd_argc, fwd_argv))
+      return 2;
+
    int effective_json_output = json_output || cli_v1_args_request_json(fwd_argc, fwd_argv);
 
    cJSON *req = marshal_request(route->method, fwd_argc, fwd_argv);
