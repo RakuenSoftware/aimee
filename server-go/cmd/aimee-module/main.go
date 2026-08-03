@@ -15,6 +15,7 @@ import (
 	"github.com/JBailes/aimee/server-go/modules/benchmarks"
 	"github.com/JBailes/aimee/server-go/modules/delegates"
 	modulegit "github.com/JBailes/aimee/server-go/modules/git"
+	"github.com/JBailes/aimee/server-go/modules/governance"
 	"github.com/JBailes/aimee/server-go/modules/learning"
 	"github.com/JBailes/aimee/server-go/modules/memory"
 	responsecomposition "github.com/JBailes/aimee/server-go/modules/response-composition"
@@ -82,6 +83,11 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 		config.PrincipalRef = 15
 		config.Stages = []bus.ModuleStage{{EventKind: responsecomposition.EventKind, StageID: responsecomposition.StageCompose}}
 		config.Handler = responsecomposition.Handle
+	case "governance":
+		config.ModuleName = name
+		config.PrincipalRef = 19
+		config.Stages = []bus.ModuleStage{{EventKind: governance.EventEvaluate, StageID: governance.StageEvaluate}}
+		config.Handler = governance.Handle
 	case "roundtable":
 		config.ModuleName = name
 		config.PrincipalRef = 21

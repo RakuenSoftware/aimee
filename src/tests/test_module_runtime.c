@@ -9,6 +9,7 @@
 #include <aimee/benchmarks/module_api.h>
 #include <aimee/delegates/module_api.h>
 #include <aimee/git/module_api.h>
+#include <aimee/governance/module_api.h>
 #include <aimee/learning/module_api.h>
 #include <aimee/memory/module_api.h>
 #include <aimee/response-composition/module_api.h>
@@ -158,6 +159,8 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
       *kind = AIMEE_SKILLS_EVENT_CONTEXT, *principal_ref = 14;
    else if (strcmp(name, "response-composition") == 0)
       *kind = AIMEE_RESPONSE_EVENT_COMPOSE, *principal_ref = 15;
+   else if (strcmp(name, "governance") == 0)
+      *kind = AIMEE_GOVERNANCE_EVENT_EVALUATE, *principal_ref = 19;
    else if (strcmp(name, "roundtable") == 0)
       *kind = AIMEE_ROUNDTABLE_EVENT_DELIBERATE, *principal_ref = 21;
    else if (strcmp(name, "benchmarks") == 0)
@@ -292,6 +295,20 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(aimee_response_response_decode(response, response_len, key, sizeof(key)) == 0);
       assert(strcmp(key, "uid:1|45fd46a03cb4a28da3227155fec20a71") == 0);
    }
+   else if (strcmp(name, "governance") == 0)
+   {
+      static const char *tools[] = {"read_file", "spawn_agent", "Task"};
+      aimee_governance_decision_t decision;
+      assert(aimee_governance_request_encode(1, tools, 3, "max_tokens", request,
+                                             sizeof(request)) == 0);
+      request_len = AIMEE_GOVERNANCE_REQUEST_LEN;
+      assert(aimee_module_client_call(client, kind, AIMEE_GOVERNANCE_STAGE_EVALUATE, 2009, 0,
+                                      request, request_len, response, sizeof(response), &response_len,
+                                      NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(aimee_governance_response_decode(response, response_len, 3, &decision) == 0);
+      assert(decision.keep_mask == 1 && decision.drop_count == 2);
+      assert(strcmp(decision.stop_reason, "max_tokens") == 0);
+   }
    else if (strcmp(name, "roundtable") == 0)
    {
       aimee_roundtable_verify_action_t action = AIMEE_ROUNDTABLE_VERIFY_REJECT;
@@ -299,7 +316,7 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(aimee_roundtable_request_encode(AIMEE_ROUNDTABLE_REPLAY_MATCH, 1, "blocking",
                                              request, sizeof(request)) == 0);
       request_len = AIMEE_ROUNDTABLE_REQUEST_LEN;
-      assert(aimee_module_client_call(client, kind, AIMEE_ROUNDTABLE_STAGE_DELIBERATE, 2009, 0,
+      assert(aimee_module_client_call(client, kind, AIMEE_ROUNDTABLE_STAGE_DELIBERATE, 2010, 0,
                                       request, request_len, response, sizeof(response), &response_len,
                                       NULL, NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_roundtable_response_decode(response, response_len, &action, severity,
@@ -315,7 +332,7 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(aimee_benchmarks_request_encode(retrieved, 3, relevant, 1, 3, request,
                                              sizeof(request)) == 0);
       request_len = AIMEE_BENCHMARKS_REQUEST_LEN;
-      assert(aimee_module_client_call(client, kind, AIMEE_BENCHMARKS_STAGE_RUN, 2010, 0, request,
+      assert(aimee_module_client_call(client, kind, AIMEE_BENCHMARKS_STAGE_RUN, 2011, 0, request,
                                       request_len, response, sizeof(response), &response_len, NULL,
                                       NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_benchmarks_response_decode(response, response_len, &scores) == 0);

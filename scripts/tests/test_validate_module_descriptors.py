@@ -329,6 +329,9 @@ class DescriptorTests(unittest.TestCase):
             ("benchmarks", "sources", "src/modules/benchmarks/module_adapter.c"),
             ("benchmarks", "go_sources", "server-go/modules/benchmarks/benchmarks.go"),
             ("benchmarks", "go_tests", "server-go/modules/benchmarks/benchmarks_test.go"),
+            ("governance", "sources", "src/modules/governance/module_adapter.c"),
+            ("governance", "go_sources", "server-go/modules/governance/governance.go"),
+            ("governance", "go_tests", "server-go/modules/governance/governance_test.go"),
         )
         for identifier, field, relative in cases:
             tmp = self.production_repo()

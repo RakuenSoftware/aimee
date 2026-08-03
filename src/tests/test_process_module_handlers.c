@@ -8,6 +8,7 @@
 #include <aimee/benchmarks/module_api.h>
 #include <aimee/delegates/module_api.h>
 #include <aimee/git/module_api.h>
+#include <aimee/governance/module_api.h>
 #include <aimee/learning/module_api.h>
 #include <aimee/memory/module_api.h>
 #include <aimee/roundtable/module_api.h>
@@ -26,6 +27,7 @@ DECLARE_HANDLER(aimee_tools_module_handler);
 DECLARE_HANDLER(aimee_workspace_module_handler);
 DECLARE_HANDLER(aimee_git_module_handler);
 DECLARE_HANDLER(aimee_skills_module_handler);
+DECLARE_HANDLER(aimee_governance_module_handler);
 DECLARE_HANDLER(aimee_roundtable_module_handler);
 DECLARE_HANDLER(aimee_benchmarks_module_handler);
 
@@ -163,6 +165,50 @@ static void test_skills(void)
    assert(aimee_skills_response_decode(response, response_len, &fire) == 0 && fire);
 }
 
+static void test_governance(void)
+{
+   static const char *inactive_tools[] = {"Agent", "read_file"};
+   static const char *denied_tools[] = {"spawn_agent", "Task"};
+   static const char *partial_tools[] = {"read_file", "RemoteTrigger", "write_file"};
+   static const char *derived_tools[] = {"Agent", "bash"};
+   static const char *allowed_tools[] = {"agent", "delegate"};
+   static const struct
+   {
+      int active;
+      const char *const *tools;
+      uint32_t tool_count;
+      const char *stop_reason;
+      uint32_t keep_mask;
+      uint32_t drop_count;
+      const char *final_reason;
+   } cases[] = {
+       {0, inactive_tools, 2, "", 3, 0, ""},
+       {1, NULL, 0, "", 0, 0, ""},
+       {1, denied_tools, 2, "tool_use", 0, 2, "end_turn"},
+       {1, partial_tools, 3, "max_tokens", 5, 1, "max_tokens"},
+       {1, derived_tools, 2, "", 2, 1, "tool_use"},
+       {1, allowed_tools, 2, "refusal", 3, 0, "refusal"},
+   };
+   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)
+   {
+      uint8_t request[AIMEE_GOVERNANCE_REQUEST_LEN], response[AIMEE_GOVERNANCE_RESPONSE_LEN];
+      uint32_t response_len = 0;
+      aimee_governance_decision_t decision;
+      aimee_module_invocation_t invocation = {.stage_id = AIMEE_GOVERNANCE_STAGE_EVALUATE};
+      assert(aimee_governance_request_encode(cases[i].active, cases[i].tools,
+                                             cases[i].tool_count, cases[i].stop_reason, request,
+                                             sizeof(request)) == 0);
+      assert(aimee_governance_module_handler(&invocation, request, sizeof(request), response,
+                                             sizeof(response), &response_len,
+                                             NULL) == AIMEE_MODULE_STATUS_OK);
+      assert(aimee_governance_response_decode(response, response_len, cases[i].tool_count,
+                                              &decision) == 0);
+      assert(decision.keep_mask == cases[i].keep_mask);
+      assert(decision.drop_count == cases[i].drop_count);
+      assert(strcmp(decision.stop_reason, cases[i].final_reason) == 0);
+   }
+}
+
 static void test_roundtable(void)
 {
    static const struct
@@ -252,6 +298,7 @@ int main(void)
    test_workspace();
    test_git();
    test_skills();
+   test_governance();
    test_roundtable();
    test_benchmarks();
    puts("process module handlers: PASS");

@@ -42,7 +42,7 @@
     {"id": "vault", "execution": "core", "placements": ["server", "kb"]},
     {"id": "execution-policy", "execution": "core", "placements": ["server", "kb"]},
     {"id": "audit", "execution": "core", "placements": ["server", "kb"]},
-    {"id": "governance", "execution": "process", "runtime": "c", "principal_ref": 19, "placements": ["server"], "stages": [
+    {"id": "governance", "execution": "process", "runtime": "go", "principal_ref": 19, "placements": ["server"], "stages": [
       {"id": 1, "name": "governance-evaluation", "event_kind": 8961}
     ]},
     {"id": "workflows", "execution": "process", "runtime": "c", "principal_ref": 20, "placements": ["server"], "stages": [

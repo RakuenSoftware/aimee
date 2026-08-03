@@ -718,6 +718,7 @@ MODULE_HANDLER_TEST_OBJS = \
    $(OBJDIR)/tests/module_handlers/workspace.o \
    $(OBJDIR)/tests/module_handlers/git.o \
    $(OBJDIR)/tests/module_handlers/skills.o \
+   $(OBJDIR)/tests/module_handlers/governance.o \
    $(OBJDIR)/tests/module_handlers/roundtable.o \
    $(OBJDIR)/tests/module_handlers/benchmarks.o
 
@@ -733,6 +734,7 @@ $(eval $(call module_handler_test_object,tools,tools))
 $(eval $(call module_handler_test_object,workspace,workspace))
 $(eval $(call module_handler_test_object,git,git))
 $(eval $(call module_handler_test_object,skills,skills))
+$(eval $(call module_handler_test_object,governance,governance))
 $(eval $(call module_handler_test_object,roundtable,roundtable))
 $(eval $(call module_handler_test_object,benchmarks,benchmarks))
 
