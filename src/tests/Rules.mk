@@ -721,6 +721,7 @@ MODULE_HANDLER_TEST_OBJS = \
    $(OBJDIR)/tests/module_handlers/governance.o \
    $(OBJDIR)/tests/module_handlers/workflows.o \
    $(OBJDIR)/tests/module_handlers/roundtable.o \
+   $(OBJDIR)/tests/module_handlers/kb_synthesis.o \
    $(OBJDIR)/tests/module_handlers/benchmarks.o
 
 define module_handler_test_object
@@ -738,10 +739,12 @@ $(eval $(call module_handler_test_object,skills,skills))
 $(eval $(call module_handler_test_object,governance,governance))
 $(eval $(call module_handler_test_object,workflows,workflows))
 $(eval $(call module_handler_test_object,roundtable,roundtable))
+$(eval $(call module_handler_test_object,kb_synthesis,kb-synthesis))
 $(eval $(call module_handler_test_object,benchmarks,benchmarks))
 
 $(TESTPREFIX)/unit-test-process-module-handlers: \
-   $(OBJDIR)/tests/test_process_module_handlers.o $(MODULE_HANDLER_TEST_OBJS)
+   $(OBJDIR)/tests/test_process_module_handlers.o $(MODULE_HANDLER_TEST_OBJS) \
+   $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_grounding.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
 # The shared connection archive is the only implementation of endpoint,

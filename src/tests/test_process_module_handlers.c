@@ -9,6 +9,7 @@
 #include <aimee/delegates/module_api.h>
 #include <aimee/git/module_api.h>
 #include <aimee/governance/module_api.h>
+#include <aimee/kb-synthesis/module_api.h>
 #include <aimee/learning/module_api.h>
 #include <aimee/memory/module_api.h>
 #include <aimee/roundtable/module_api.h>
@@ -31,6 +32,7 @@ DECLARE_HANDLER(aimee_skills_module_handler);
 DECLARE_HANDLER(aimee_governance_module_handler);
 DECLARE_HANDLER(aimee_workflows_module_handler);
 DECLARE_HANDLER(aimee_roundtable_module_handler);
+DECLARE_HANDLER(aimee_kb_synthesis_module_handler);
 DECLARE_HANDLER(aimee_benchmarks_module_handler);
 
 int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation)
@@ -296,6 +298,56 @@ static void test_roundtable(void)
    }
 }
 
+static void test_kb_synthesis(void)
+{
+   static const char *none_string[] = {"No Side Effects"};
+   static const char *none_array[] = {"none", "n/a"};
+   static const char *honest_string[] = {"writes to disk"};
+   static const char *mixed_array[] = {"none", "network"};
+   static const char *write_callees[] = {"strlen", "write"};
+   static const char *socket_callees[] = {"socket"};
+   static const char *ordered_callees[] = {"strlen", "PQexec", "write"};
+   static const char *clean_callees[] = {"strlen", "memcpy"};
+   static const char *case_callees[] = {"Write", "pqexec"};
+   static const struct
+   {
+      aimee_kb_synthesis_claim_kind_t kind;
+      const char *const *claims;
+      uint32_t claim_count;
+      const char *const *callees;
+      uint32_t callee_count;
+      int contradicts;
+      const char *reason;
+   } cases[] = {
+       {AIMEE_KB_SYNTHESIS_CLAIM_NONE, NULL, 0, write_callees, 2, 1, "write"},
+       {AIMEE_KB_SYNTHESIS_CLAIM_STRING, none_string, 1, socket_callees, 1, 1, "socket"},
+       {AIMEE_KB_SYNTHESIS_CLAIM_STRING_ARRAY, none_array, 2, ordered_callees, 3, 1,
+        "PQexec"},
+       {AIMEE_KB_SYNTHESIS_CLAIM_STRING_ARRAY, NULL, 0, clean_callees, 2, 0, ""},
+       {AIMEE_KB_SYNTHESIS_CLAIM_STRING, honest_string, 1, write_callees, 2, 0, ""},
+       {AIMEE_KB_SYNTHESIS_CLAIM_STRING_ARRAY, mixed_array, 2, socket_callees, 1, 0, ""},
+       {AIMEE_KB_SYNTHESIS_CLAIM_NONSTRING, NULL, 0, write_callees, 2, 0, ""},
+       {AIMEE_KB_SYNTHESIS_CLAIM_NONE, NULL, 0, case_callees, 2, 0, ""},
+   };
+   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)
+   {
+      uint8_t request[AIMEE_KB_SYNTHESIS_REQUEST_LEN];
+      uint8_t response[AIMEE_KB_SYNTHESIS_RESPONSE_LEN];
+      uint32_t response_len = 0;
+      aimee_kb_synthesis_grounding_decision_t decision;
+      aimee_module_invocation_t invocation = {.stage_id = AIMEE_KB_SYNTHESIS_STAGE_GROUNDING};
+      assert(aimee_kb_synthesis_request_encode(
+                 cases[i].kind, cases[i].claims, cases[i].claim_count, cases[i].callees,
+                 cases[i].callee_count, request, sizeof(request)) == 0);
+      assert(aimee_kb_synthesis_module_handler(&invocation, request, sizeof(request), response,
+                                               sizeof(response), &response_len,
+                                               NULL) == AIMEE_MODULE_STATUS_OK);
+      assert(aimee_kb_synthesis_response_decode(response, response_len, &decision) == 0);
+      assert(decision.contradicts == cases[i].contradicts);
+      assert(strcmp(decision.reason, cases[i].reason) == 0);
+   }
+}
+
 static void test_benchmarks(void)
 {
    static const int64_t perfect_retrieved[] = {11, 22, 33};
@@ -350,6 +402,7 @@ int main(void)
    test_governance();
    test_workflows();
    test_roundtable();
+   test_kb_synthesis();
    test_benchmarks();
    puts("process module handlers: PASS");
    return 0;

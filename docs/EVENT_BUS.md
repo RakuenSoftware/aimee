@@ -31,9 +31,10 @@ That buys us:
 
 The last item is an extension surface, not a claim that every subsystem has moved already.
 
-Seven production C-to-Go process batches now cover `memory`, `learning`,
+Eight production C-to-Go process batches now cover `memory`, `learning`,
 `routing`, `delegates`, `tools`, `workspace`, `git`, `skills`,
-`response-composition`, `governance`, `workflows`, `roundtable`, and `benchmarks`.
+`response-composition`, `governance`, `workflows`, `roundtable`, `kb-synthesis`,
+and `benchmarks`.
 Each keeps its existing event kind and AMOD body contract, but the supervisor now
 starts an authenticated Go process for that identity. C adapters remain as parity
 fixtures; the bounded memory rerank, response-composition key, roundtable
@@ -42,7 +43,9 @@ storage-heavy or daemon orchestration code has all moved to Go. Governance moves
 the bounded response tool-policy decision; parsed-response mutation and its
 broader identity/OIDC plane remain in their current C owners. Workflows moves
 only the pure advance admission classification; the Go WFE remains the sole
-lifecycle, persistence, scheduling, and transition owner.
+lifecycle, persistence, scheduling, and transition owner. KB synthesis moves
+only the deterministic code-unit grounding gate; curator queues, model calls,
+storage, linking, promotion, and scheduling remain in their current owners.
 
 ## What is on it now
 

@@ -16,6 +16,7 @@ import (
 	"github.com/JBailes/aimee/server-go/modules/delegates"
 	modulegit "github.com/JBailes/aimee/server-go/modules/git"
 	"github.com/JBailes/aimee/server-go/modules/governance"
+	kbsynthesis "github.com/JBailes/aimee/server-go/modules/kb-synthesis"
 	"github.com/JBailes/aimee/server-go/modules/learning"
 	"github.com/JBailes/aimee/server-go/modules/memory"
 	responsecomposition "github.com/JBailes/aimee/server-go/modules/response-composition"
@@ -99,6 +100,11 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 		config.PrincipalRef = 21
 		config.Stages = []bus.ModuleStage{{EventKind: roundtable.EventDeliberate, StageID: roundtable.StageDeliberate}}
 		config.Handler = roundtable.Handle
+	case "kb-synthesis":
+		config.ModuleName = name
+		config.PrincipalRef = 22
+		config.Stages = []bus.ModuleStage{{EventKind: kbsynthesis.EventGrounding, StageID: kbsynthesis.StageGrounding}}
+		config.Handler = kbsynthesis.Handle
 	case "benchmarks":
 		config.ModuleName = name
 		config.PrincipalRef = 25

@@ -335,6 +335,10 @@ class DescriptorTests(unittest.TestCase):
             ("workflows", "sources", "src/modules/workflows/module_adapter.c"),
             ("workflows", "go_sources", "server-go/modules/workflows/workflows.go"),
             ("workflows", "go_tests", "server-go/modules/workflows/workflows_test.go"),
+            ("kb-synthesis", "sources", "src/modules/kb-synthesis/module_adapter.c"),
+            ("kb-synthesis", "go_sources", "server-go/modules/kb-synthesis/kb_synthesis.go"),
+            ("kb-synthesis", "go_tests",
+             "server-go/modules/kb-synthesis/kb_synthesis_test.go"),
         )
         for identifier, field, relative in cases:
             tmp = self.production_repo()

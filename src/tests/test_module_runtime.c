@@ -10,6 +10,7 @@
 #include <aimee/delegates/module_api.h>
 #include <aimee/git/module_api.h>
 #include <aimee/governance/module_api.h>
+#include <aimee/kb-synthesis/module_api.h>
 #include <aimee/learning/module_api.h>
 #include <aimee/memory/module_api.h>
 #include <aimee/response-composition/module_api.h>
@@ -166,6 +167,8 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
       *kind = AIMEE_WORKFLOWS_EVENT_ADVANCE, *principal_ref = 20;
    else if (strcmp(name, "roundtable") == 0)
       *kind = AIMEE_ROUNDTABLE_EVENT_DELIBERATE, *principal_ref = 21;
+   else if (strcmp(name, "kb-synthesis") == 0)
+      *kind = AIMEE_KB_SYNTHESIS_EVENT_GROUNDING, *principal_ref = 22;
    else if (strcmp(name, "benchmarks") == 0)
       *kind = AIMEE_BENCHMARKS_EVENT_RUN, *principal_ref = 25;
    else
@@ -178,7 +181,7 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
 static void smoke_production_module(aimee_module_client_t *client, const char *name,
                                     uint32_t kind)
 {
-   uint8_t request[1024] = {0};
+   uint8_t request[AIMEE_KB_SYNTHESIS_REQUEST_LEN] = {0};
    uint8_t response[1024] = {0};
    uint32_t request_len = 0, response_len = 0;
    if (strcmp(name, "memory") == 0)
@@ -339,6 +342,19 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
                                               sizeof(severity)) == 0);
       assert(action == AIMEE_ROUNDTABLE_VERIFY_KEEP && strcmp(severity, "blocking") == 0);
    }
+   else if (strcmp(name, "kb-synthesis") == 0)
+   {
+      static const char *callees[] = {"strlen", "PQexec", "write"};
+      aimee_kb_synthesis_grounding_decision_t decision;
+      assert(aimee_kb_synthesis_request_encode(AIMEE_KB_SYNTHESIS_CLAIM_NONE, NULL, 0,
+                                                callees, 3, request, sizeof(request)) == 0);
+      request_len = AIMEE_KB_SYNTHESIS_REQUEST_LEN;
+      assert(aimee_module_client_call(client, kind, AIMEE_KB_SYNTHESIS_STAGE_GROUNDING, 2012, 0,
+                                      request, request_len, response, sizeof(response), &response_len,
+                                      NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(aimee_kb_synthesis_response_decode(response, response_len, &decision) == 0);
+      assert(decision.contradicts && strcmp(decision.reason, "PQexec") == 0);
+   }
    else
    {
       assert(strcmp(name, "benchmarks") == 0);
@@ -348,7 +364,7 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(aimee_benchmarks_request_encode(retrieved, 3, relevant, 1, 3, request,
                                              sizeof(request)) == 0);
       request_len = AIMEE_BENCHMARKS_REQUEST_LEN;
-      assert(aimee_module_client_call(client, kind, AIMEE_BENCHMARKS_STAGE_RUN, 2012, 0, request,
+      assert(aimee_module_client_call(client, kind, AIMEE_BENCHMARKS_STAGE_RUN, 2013, 0, request,
                                       request_len, response, sizeof(response), &response_len, NULL,
                                       NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_benchmarks_response_decode(response, response_len, &scores) == 0);

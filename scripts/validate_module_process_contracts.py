@@ -22,7 +22,8 @@ PROCESS_REQUIRED = {
 }
 GO_PROCESSES = {
     "memory", "learning", "routing", "delegates", "tools", "workspace", "git",
-    "skills", "response-composition", "governance", "workflows", "roundtable", "benchmarks",
+    "skills", "response-composition", "governance", "workflows", "roundtable", "kb-synthesis",
+    "benchmarks",
 }
 STAGE_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 
