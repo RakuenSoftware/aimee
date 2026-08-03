@@ -132,6 +132,81 @@ static int ce_flush_batch(ce_pending_t *pend, int n, const char **texts, float *
       }
    }
    return ok;
+/* The project's content signature at |generation|: file count, the ACTIVE embedding
+ * dimension, and a digest over every file id:hash. Recorded by a pass that embedded
+ * the whole file set, and compared on the next pass to skip an unchanged project.
+ *
+ * The dimension is part of it on purpose: the same files at a different width are
+ * different vectors, so a dim change must invalidate the signature rather than read
+ * as "already embedded". */
+static void ce_project_signature(void *conn, int64_t proj_id, int64_t generation, char *out,
+                                 size_t out_len)
+{
+   if (!out || out_len == 0)
+      return;
+   out[0] = '\0';
+   if (!conn)
+      return;
+   int sc_dim = db2_embedding_dim();
+   if (sc_dim <= 0 || sc_dim > CE_EMBED_MAX_DIM)
+      sc_dim = 1024;
+   char err[CE_ERRBUF] = "";
+   static const char *sig_sql = "SELECT count(*), coalesce(md5(string_agg(id::text || ':' || "
+                                "hash, ',' ORDER BY id)), '') "
+                                "FROM files WHERE project_id = ?1 AND generation = ?2";
+   aimee_pg_stmt_t *sst = aimee_pg_prepare(conn, sig_sql, err, sizeof(err));
+   if (!sst)
+      return;
+   aimee_pg_bind_int64(sst, "?1", proj_id);
+   aimee_pg_bind_int64(sst, "?2", generation);
+   if (aimee_pg_step(sst, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      int64_t fcount = aimee_pg_column_int64(sst, 0);
+      const char *fhash = aimee_pg_column_text(sst, 1);
+      snprintf(out, out_len, "%lld:%d:%s", (long long)fcount, sc_dim, fhash ? fhash : "");
+   }
+   aimee_pg_finalize(sst);
+}
+
+int kb_code_embed_project_fully_embedded(const char *project)
+{
+   if (!project || !project[0])
+      return 0;
+   void *conn = db2_conn();
+   if (!conn)
+      return 0;
+
+   char err[CE_ERRBUF] = "";
+   static const char *proj_sql = "SELECT id, current_generation FROM projects"
+                                 " WHERE name = ?1 AND lifecycle_state='current' LIMIT 1";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, proj_sql, err, sizeof(err));
+   if (!st)
+      return 0;
+   aimee_pg_bind_text(st, "?1", project);
+   int64_t proj_id = -1;
+   int64_t generation = 0;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      proj_id = aimee_pg_column_int64(st, 0);
+      generation = aimee_pg_column_int64(st, 1);
+   }
+   aimee_pg_finalize(st);
+   /* Not indexed is not embedded. An unknown project answers 0 rather than
+    * "vacuously complete", which would let curation start on nothing. */
+   if (proj_id < 0)
+      return 0;
+
+   char sig_now[160] = "";
+   ce_project_signature(conn, proj_id, generation, sig_now, sizeof(sig_now));
+   if (!sig_now[0])
+      return 0;
+
+   char sig_key[320];
+   snprintf(sig_key, sizeof(sig_key), "code_embed_sig:%s", project);
+   char stored[160] = "";
+   if (db2_kb_runtime_state_get(sig_key, stored, sizeof(stored)) != 0)
+      return 0;
+   return stored[0] && strcmp(stored, sig_now) == 0;
 }
 
 static unsigned long long ce_fnv1a_update(unsigned long long h, unsigned char c)
@@ -435,26 +510,7 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
    char sig_now[160] = "";
    if (!paths && !dry_run && strcmp(out->scope, "changed_files") == 0)
    {
-      int sc_dim = db2_embedding_dim();
-      if (sc_dim <= 0 || sc_dim > CE_EMBED_MAX_DIM)
-         sc_dim = 1024;
-      static const char *sig_sql = "SELECT count(*), coalesce(md5(string_agg(id::text || ':' || "
-                                   "hash, ',' ORDER BY id)), '') "
-                                   "FROM files WHERE project_id = ?1 AND generation = ?2";
-      aimee_pg_stmt_t *sst = aimee_pg_prepare(conn, sig_sql, err, sizeof(err));
-      if (sst)
-      {
-         aimee_pg_bind_int64(sst, "?1", proj_id);
-         aimee_pg_bind_int64(sst, "?2", generation);
-         if (aimee_pg_step(sst, err, sizeof(err)) == AIMEE_PG_ROW)
-         {
-            int64_t fcount = aimee_pg_column_int64(sst, 0);
-            const char *fhash = aimee_pg_column_text(sst, 1);
-            snprintf(sig_now, sizeof(sig_now), "%lld:%d:%s", (long long)fcount, sc_dim,
-                     fhash ? fhash : "");
-         }
-         aimee_pg_finalize(sst);
-      }
+      ce_project_signature(conn, proj_id, generation, sig_now, sizeof(sig_now));
       if (sig_now[0])
       {
          char sig_key[320];
