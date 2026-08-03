@@ -262,8 +262,8 @@ deliberate bumping.
 
 ## Bundled synthesis weights are baked into the image
 
-The weights ship inside the `aimee-llm-*` images at UD-Q6_K_XL: 7.46 GB for E4B,
-4.71 GB for E2B. The container downloads nothing at any point: an image either has its model
+The weights ship inside the `aimee-llm-*` images, at a quant chosen per model:
+7.46 GB for E4B at UD-Q6_K_XL, 2.97 GB for E2B at UD-Q4_K_XL. The container downloads nothing at any point: an image either has its model
 or it does not, and `docker pull` is the one download, with the registry's retry and
 resume behind it.
 
