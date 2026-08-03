@@ -234,8 +234,8 @@ local model. Which model it carries is a property of the tag, because the weight
 
 | image | model | weights |
 | --- | --- | --- |
-| `aimee-llm-e2b` | gemma-4-E2B-it | 4.71 GB |
-| `aimee-llm-e4b` | gemma-4-E4B-it | 7.46 GB |
+| `aimee-llm-e2b` | gemma-4-E2B-it | 2.97 GB (UD-Q4_K_XL) |
+| `aimee-llm-e4b` | gemma-4-E4B-it | 7.46 GB (UD-Q6_K_XL) |
 
 E4B is the better model; E2B is roughly half the resident memory and about twice the CPU speed. See
 [Choosing a synthesis model](SYNTHESIS_MODELS.md) for the measurements behind that.

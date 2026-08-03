@@ -1,8 +1,21 @@
-# Quantisation: Q6 is the default for gemma-4 E2B and E4B
+# Quantisation: Q6 for E4B (measured), Q4 for E2B (superseded call)
 
 Decision of 2026-08-01. Records the evidence, the part of it that is a
 measurement, and the part that is a judgement, so a later reader can tell them
 apart.
+
+> **SUPERSEDED IN PART, 2026-08-03.** The shipped images are E4B at UD-Q6_K_XL and
+> **E2B at UD-Q4_K_XL** — see `scripts/synthesis-model-table.sh`, which is the source
+> of truth. The E4B half of this document still stands and is the measured half. The
+> E2B half recommended Q6 as an explicitly JUDGED call on a directional prior, and
+> the operator has since taken Q4 for E2B instead: the gap is undecidable at n=69
+> (+0.0012, CI [-0.063, +0.069]), and on the small box E2B exists to serve, Q4 costs
+> 1.70 GB VRAM / 2.68 GB RSS against 2.30 / 3.86 for Q6.
+>
+> Nothing measured here changed. What changed is which way an undecidable tie was
+> broken, and the reasoning below is left intact so the two calls can be compared
+> rather than one quietly overwritten. "What would change this" still applies: the
+> E2B half needs a larger gold set, not more runs.
 
 ## The measurement
 
