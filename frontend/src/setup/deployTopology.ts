@@ -106,7 +106,7 @@ export const SYNTHESIS_MODELS: SynthesisModelChoice[] = [
   {
     id: 'gemma-4-E2B-it',
     label: 'gemma-4-E2B-it',
-    blurb: '2.97 GB at UD-Q4_K_XL, deployed as aimee-llm-e2b. Faster, measurably weaker.',
+    blurb: '2.97 GB at UD-Q4_K_XL, deployed as aimee-llm-e2b. Faster, and weaker at extraction (0.72 F1 against 0.81).',
   },
 ];
 

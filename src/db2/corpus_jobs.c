@@ -383,6 +383,18 @@ int db2_corpus_pipeline_status(db2_corpus_pipeline_stats_t *out)
          out->complete += count;
    }
    aimee_pg_finalize(st);
+
+   /* Cumulative skipped transitions, from the event log rather than the job row:
+    * the job row only knows where a document got to, not how much of the journey
+    * was a no-op. See db2_corpus_pipeline_stats_t.skipped. */
+   st = aimee_pg_prepare(conn, "SELECT COUNT(*) FROM corpus_stage_events WHERE outcome = 'skipped'",
+                         err, sizeof(err));
+   if (st)
+   {
+      if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+         out->skipped = aimee_pg_column_int(st, 0);
+      aimee_pg_finalize(st);
+   }
    return 0;
 }
 
@@ -462,6 +474,7 @@ static int corpus_run_stage_handler(int64_t doc_id, const char *next_stage, char
 int db2_corpus_pipeline_drain(int limit, db2_corpus_pipeline_stats_t *out)
 {
    int processed = 0;
+   int skipped = 0;
    int max_steps = limit > 0 ? limit : 10000;
 
    while (processed < max_steps)
@@ -502,11 +515,19 @@ int db2_corpus_pipeline_drain(int limit, db2_corpus_pipeline_stats_t *out)
       if (db2_corpus_job_advance(doc_id, hrc > 0 ? "skipped" : "advanced", detail) != 0)
          return -1;
       processed++;
+      if (hrc > 0)
+         skipped++;
    }
 
    if (out && db2_corpus_pipeline_status(out) != 0)
       return -1;
    if (out)
+   {
       out->processed = processed;
+      /* This drain's own skips, which is what the caller asked about. The cumulative
+       * figure from db2_corpus_pipeline_status would answer a different question and
+       * would make a fresh drain of an already-skipped corpus look busy. */
+      out->skipped = skipped;
+   }
    return 0;
 }

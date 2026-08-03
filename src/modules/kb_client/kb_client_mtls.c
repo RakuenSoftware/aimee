@@ -652,7 +652,20 @@ char *kb_client_mtls_request_timeout_with_type(const char *method, const char *p
       kb_tls_client_conn_close(conn);
       if (status_out)
          *status_out = status;
-      char *out = (rc == 0 && status >= 200 && status < 300) ? strdup(resp) : NULL;
+      /* THE BODY IS RETURNED ON A NON-2xx TOO, and *status_out is how the caller
+       * tells them apart -- every caller already checks it first and frees on
+       * failure. Dropping it here made kb_client_v1_post_json_keep_error's whole
+       * purpose unreachable on this transport: the kb writes careful refusals, and
+       * on a managed appliance (server -> kb over mTLS on 8745) the operator got a
+       * generic fallback instead of any of them.
+       *
+       * `aimee kb reembed` is the case that exposed it. The kb answers 403 with
+       * "kb.reembed_on_dim_change is disabled; set 'kb: reembed_on_dim_change: true'
+       * in aimee-kb's own $AIMEE_HOME/aimee.yaml and restart it (this gate is read by
+       * aimee-kb, not by aimee-server, so `aimee config set` does not reach it)" --
+       * which names the file, the key and the trap. The operator saw "knowledge
+       * service reembed failed". */
+      char *out = (rc == 0) ? strdup(resp) : NULL;
       free(resp);
       return out;
    }
@@ -675,7 +688,8 @@ char *kb_client_mtls_request_timeout_with_type(const char *method, const char *p
    pool_return(entry, rc == 0 && reusable);
    if (status_out)
       *status_out = status;
-   char *out = (rc == 0 && status >= 200 && status < 300) ? strdup(resp) : NULL;
+   /* Body preserved on non-2xx as above; *status_out distinguishes. */
+   char *out = (rc == 0) ? strdup(resp) : NULL;
    free(resp);
    return out;
 }
