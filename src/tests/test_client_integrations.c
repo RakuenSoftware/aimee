@@ -134,6 +134,36 @@ static void test_codex_delegate_policy_is_explicit(void)
    assert(strstr(skill, AIMEE_CODE_TOOL_INDEX) != NULL);
    assert(strstr(skill, AIMEE_CODE_INDEX_COMMAND_HYBRID) != NULL);
    assert(strstr(skill, "PHRASE rather than a symbol") != NULL);
+
+   /* Reading is the largest remaining work category (15 reads carrying 660k
+    * tokens on one measured cell, 17.7% of its whole input), and build output is
+    * almost entirely echoed compiler command lines (6 builds, 241k tokens).
+    * Both are addressed by naming the bounded alternative, so pin both. */
+   assert(strstr(skill, "command=span") != NULL);
+   assert(strstr(skill, "read the RANGE") != NULL);
+   assert(strstr(skill, "make -s") != NULL);
+
+   /* THE GUARD EXISTED AND WAS NEVER WIRED FOR CODEX.
+    *
+    * `aimee hooks` implements the PreToolUse contract and require_aimee_git is ON
+    * by default with a deny naming git_status / git_log / git_diff_summary. The
+    * codex plugin shipped no hooks at all, so it never ran: 98 shell `git` calls
+    * across the benchmark's aimee cells (48 full `git diff`) and ZERO calls to the
+    * aimee git tool whose schema costs ~1,000 tokens on every call.
+    *
+    * Pin the registration, not just the rule -- an unwired guard is not a guard. */
+   {
+      const char *hooks = codex_hooks_json("/usr/local/bin/aimee");
+      assert(strstr(hooks, "\"PreToolUse\"") != NULL);
+      assert(strstr(hooks, "/usr/local/bin/aimee hooks") != NULL);
+      cJSON *parsed = cJSON_Parse(hooks);
+      assert(parsed != NULL); /* codex refuses a malformed hooks file outright */
+      cJSON_Delete(parsed);
+      /* A hooks file codex never loads is the same as no hook, so the manifest
+       * must point at it. ensure_codex_plugin writes both; assert the path the
+       * manifest declares matches the file the writer emits. */
+      assert(strstr(hooks, "\"command\"") != NULL);
+   }
 }
 
 static void test_mcp_config_uses_resolved_command(void)

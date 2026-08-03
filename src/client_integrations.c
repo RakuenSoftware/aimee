@@ -330,8 +330,24 @@ static const char *codex_skill_markdown(void)
           "recursive search returns every line that matched in whatever order the "
           "filesystem walk found them.\n"
           "- Use `search_memory` for stored project facts or prior decisions.\n"
-          "- Reading a file the index has already pointed you at: just read it, "
-          "and read the range you need rather than the whole file.\n"
+          /* Reading is the largest remaining category. Measured on one cell:
+           * 15 reads carrying 660k tokens, 17.7% of that run's whole input --
+           * more than search, build and git. `sed -n '1,280p'` is a guess at a
+           * range; span is the range the index already knows. */
+          "- Reading a file the index has already pointed you at: read the RANGE, "
+          "never the whole file. `" AIMEE_CODE_TOOL_INDEX
+          "` with command=span and file_path + line_start/line_end returns exactly "
+          "that slice; use it when you know the lines, and a plain read only when "
+          "you do not.\n"
+          /* Build output is almost entirely echoed compiler command lines: each
+           * one repeats the full -I/-D flag set, hundreds of characters, per
+           * translation unit. Measured on one cell: 6 builds carrying 241k
+           * tokens for a handful of real diagnostics. */
+          "- Building or running tests: silence the command echo (`make -s`, or "
+          "redirect stdout and keep stderr) and build only the target you need. "
+          "A default `make` echoes every compiler invocation with its whole flag "
+          "set, which is thousands of characters per file and tells you nothing "
+          "the diagnostics do not.\n"
           "- Recursive grep is for text that is not a code symbol, or for when the "
           "index has no answer. Scope it to a path when you use it. Never run it "
           "over the whole tree to find out what the tree contains.\n"
@@ -384,6 +400,44 @@ static const char *codex_skill_markdown_effective(void)
    if (n < 0 || (size_t)n >= sizeof(solo_buf))
       return base;
    return solo_buf;
+}
+
+/* The codex PreToolUse registration. aimee already HAS the guard -- `aimee hooks`
+ * implements the full wire contract (permissionDecision / permissionDecisionReason,
+ * and updatedInput where the client supports it), and require_aimee_git is ON by
+ * default with a deny that names git_status / git_log / git_diff_summary and the
+ * rest. It simply never ran under codex, because this plugin shipped no hooks at
+ * all: only .mcp.json and the skill.
+ *
+ * Measured consequence across the benchmark's aimee cells: 98 shell `git`
+ * invocations (48 of them full `git diff`) and ZERO calls to the aimee git tool --
+ * whose schema we pay ~1,000 tokens for on every single call. The rule was written,
+ * defaulted on, and left unwired.
+ *
+ * Codex does not honour updatedInput on PreToolUse, so the guard's codex path
+ * denies with an instruction to retry through the tool. That costs one turn and
+ * redirects the remaining ones. */
+static const char *codex_hooks_json(const char *aimee_bin)
+{
+   static char buf[1024];
+   snprintf(buf, sizeof(buf),
+            "{\n"
+            "  \"hooks\": {\n"
+            "    \"PreToolUse\": [\n"
+            "      {\n"
+            "        \"hooks\": [\n"
+            "          {\n"
+            "            \"type\": \"command\",\n"
+            "            \"command\": \"%s hooks\",\n"
+            "            \"timeout\": 10\n"
+            "          }\n"
+            "        ]\n"
+            "      }\n"
+            "    ]\n"
+            "  }\n"
+            "}\n",
+            aimee_bin && aimee_bin[0] ? aimee_bin : "aimee");
+   return buf;
 }
 
 static const char *codex_code_exploration_prompt(void)
@@ -860,6 +914,14 @@ static void ensure_codex_plugin_files(const char *home)
             "%s/.agents/plugins/plugins/aimee/skills/.codex-plugin/plugin.json", home);
    snprintf(installed_compat_plugin_json, sizeof(installed_compat_plugin_json),
             "%s/.codex/plugins/cache/local/aimee/skills/.codex-plugin/plugin.json", home);
+   char hooks_json[MAX_PATH_LEN];
+   char marketplace_hooks_json[MAX_PATH_LEN];
+   char installed_hooks_json[MAX_PATH_LEN];
+   snprintf(hooks_json, sizeof(hooks_json), "%s/plugins/aimee/hooks/codex-hooks.json", home);
+   snprintf(marketplace_hooks_json, sizeof(marketplace_hooks_json),
+            "%s/.agents/plugins/plugins/aimee/hooks/codex-hooks.json", home);
+   snprintf(installed_hooks_json, sizeof(installed_hooks_json),
+            "%s/.codex/plugins/cache/local/aimee/hooks/codex-hooks.json", home);
    snprintf(skill_md, sizeof(skill_md), "%s/plugins/aimee/skills/aimee/SKILL.md", home);
    snprintf(marketplace_skill_md, sizeof(marketplace_skill_md),
             "%s/.agents/plugins/plugins/aimee/skills/aimee/SKILL.md", home);
@@ -892,6 +954,7 @@ static void ensure_codex_plugin_files(const char *home)
             "  \"keywords\": [\"memory\", \"mcp\", \"coding\", \"search\", \"delegation\"],\n"
             "  \"skills\": \"./skills/\",\n"
             "  \"mcpServers\": \"./.mcp.json\",\n"
+            "  \"hooks\": \"./hooks/codex-hooks.json\",\n"
             "  \"interface\": {\n"
             "    \"displayName\": \"aimee\",\n"
             "    \"shortDescription\": \"Memory, search, and delegation for Codex\",\n"
@@ -980,6 +1043,10 @@ static void ensure_codex_plugin_files(const char *home)
    write_text_file(compat_mcp_json, mcp_buf, 0644);
    write_text_file(marketplace_compat_mcp_json, mcp_buf, 0644);
    write_text_file(installed_compat_mcp_json, mcp_buf, 0644);
+   const char *hooks_buf = codex_hooks_json(aimee_bin);
+   write_text_file(hooks_json, hooks_buf, 0644);
+   write_text_file(marketplace_hooks_json, hooks_buf, 0644);
+   write_text_file(installed_hooks_json, hooks_buf, 0644);
    write_text_file(skill_md, skill_buf, 0644);
    write_text_file(marketplace_skill_md, skill_buf, 0644);
    write_text_file(installed_skill_md, skill_buf, 0644);

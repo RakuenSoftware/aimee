@@ -1570,6 +1570,19 @@ else
     fail "curation must be enqueued after embedding, not during scan (scan=$scan_enqueues, embed=$embed_enqueues, gated=$embed_gated)"
 fi
 
+# A hook aimee never registers is not a guard. `aimee hooks` implements the
+# PreToolUse contract and require_aimee_git is ON by default, but the codex plugin
+# shipped no hooks file at all -- so across the benchmark's aimee cells the agent
+# made 98 shell `git` calls and zero calls to the aimee git tool. The manifest
+# entry and the emitted file must both exist, and must name the same path.
+hooks_decl=$(grep -c 'hooks/codex-hooks.json' ../src/client_integrations.c 2>/dev/null || true)
+hooks_cmd=$(grep -c '%s hooks' ../src/client_integrations.c 2>/dev/null || true)
+if [ "${hooks_decl:-0}" -ge 2 ] && [ "${hooks_cmd:-0}" -ge 1 ]; then
+    pass "codex plugin registers a PreToolUse hook and emits the file it declares"
+else
+    fail "codex plugin must declare hooks/codex-hooks.json in the manifest AND write it (decl=$hooks_decl cmd=$hooks_cmd)"
+fi
+
 if [ "$FAIL" = "0" ]; then
     if [ "$MODE" = "--build-variants" ]; then
         echo "All build variant checks passed."
