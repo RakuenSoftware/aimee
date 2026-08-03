@@ -35,78 +35,58 @@ ARG AIMEE_VERSION=""
 RUN sh scripts/fetch-treesitter.sh \
     && make -C src ../aimee-kb -j"$(nproc)" AIMEE_TREESITTER=1 ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE_VERSION}
 
-# pgvectorscale (StreamingDiskANN). Always built: it adds ~1 MB to the image, and
-# the kb already decides at RUNTIME whether to use it -- pgvec_vectorscale_available()
+# pgvectorscale (StreamingDiskANN). Always installed: it adds ~1 MB to the image,
+# and the kb already decides at RUNTIME whether to use it -- pgvec_vectorscale_available()
 # probes pg_extension and falls back to HNSW with a warning when it is absent
 # (src/db2/pgvec_transport.c). Gating it at build time would defeat that and make
 # the index type a property of which image you happened to pull.
 #
-# The Rust toolchain and pgrx live only in this stage; the runtime image receives
-# the built extension files and none of the build chain. CI caches this layer
-# (cache-from/to type=gha,mode=max), so it recompiles only when the pins below move.
+# Upstream ships the built extension as a .deb per (version, pg major, arch), so
+# this stage FETCHES it rather than compiling it. It used to build the crate from
+# source with rustup + cargo-pgrx, which cost ~7 min of Rust compilation on the
+# critical path of every CI shard -- for a ~1 MB artifact pinned to two ARGs and
+# with no dependency on this repo's source at all. The old comment here claimed CI
+# cached the layer; it never did (the buildx GHA cache was thrashing its quota and
+# restored nothing), so the compile ran in full on every single run.
 FROM debian:trixie-slim AS pgvectorscale-build
 ARG PG_MAJOR
 ARG PGVECTORSCALE_VERSION
-# Same retry as the runtime stage: one transient TLS reset here fails the build.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
-    && install -d /usr/share/postgresql-common/pgdg \
-    && for a in 1 2 3 4 5; do \
-         curl -fsS --connect-timeout 10 --max-time 60 \
-           -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-           https://www.postgresql.org/media/keys/ACCC4CF8.asc && break; \
-         echo "pgdg key fetch failed (attempt $a/5); backing off"; sleep $((a * 5)); \
-       done \
-    && test -s /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] http://apt.postgresql.org/pub/repos/apt trixie-pgdg main" \
-        > /etc/apt/sources.list.d/pgdg.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-        build-essential clang git pkg-config libssl-dev \
-        "postgresql-${PG_MAJOR}" "postgresql-server-dev-${PG_MAJOR}" \
-    && rm -rf /var/lib/apt/lists/*
-ENV CARGO_HOME=/usr/local/cargo
-ENV PATH=/usr/local/cargo/bin:$PATH
-# cargo-pgrx must match the pgrx the crate depends on, so it is read from the
-# checkout's Cargo.toml rather than pinned separately here.
-# BOTH FETCHES RETRY, for the same reason the pgdg key above does. This clone failed
-# a build with
-#   fatal: unable to access 'https://github.com/timescale/pgvectorscale.git/':
-#   The requested URL returned error: 503
-# during a forge wobble that also took fetch-treesitter.sh and the Hugging Face
-# weights fetch. Those two were given backoff first and this one was missed, so the
-# next build simply failed one line earlier -- an unretried fetch is a coin flip
+# TARGETARCH is supplied by buildx and is exactly the token upstream uses in the
+# asset name (amd64 / arm64).
+ARG TARGETARCH
+# Digests are per-arch and must move with PGVECTORSCALE_VERSION above. A release
+# asset is mutable in a way a git tag build was not, so it is pinned by content.
+ARG PGVECTORSCALE_SHA256_amd64=7a5450b81a7403ca20ff5e5a2f81aa13c81795ddd1fdfe9b986c42c48b12ed67
+ARG PGVECTORSCALE_SHA256_arm64=8d0916df999f082ceb3d019bdfa72f5df395c31b152f7906de59e429ee11edc7
+# Same retry as everywhere else in this file: an unretried fetch is a coin flip
 # wherever it sits.
-#
-# --depth 1 --branch is a tag, so a retry fetches the same commit; and cargo pgrx
-# below verifies the build. A retry cannot land different sources than a first-attempt
-# success would have.
-RUN for a in 1 2 3 4 5; do \
-        curl -fsS --connect-timeout 10 --max-time 300 https://sh.rustup.rs \
-          | sh -s -- -y --profile minimal --default-toolchain stable && break; \
-        echo "rustup fetch failed (attempt $a/5); backing off"; sleep $((a * 5)); \
-      done \
-    && test -x "$CARGO_HOME/bin/cargo" \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl unzip \
+    && rm -rf /var/lib/apt/lists/* \
+    && zip="pgvectorscale-${PGVECTORSCALE_VERSION}-pg${PG_MAJOR}-${TARGETARCH}.zip" \
+    && case "$TARGETARCH" in \
+         amd64) want="$PGVECTORSCALE_SHA256_amd64" ;; \
+         arm64) want="$PGVECTORSCALE_SHA256_arm64" ;; \
+         *) echo "pgvectorscale: no pinned digest for arch '$TARGETARCH'" >&2; exit 1 ;; \
+       esac \
     && for a in 1 2 3 4 5; do \
-         git clone --depth 1 --branch "${PGVECTORSCALE_VERSION}" \
-           https://github.com/timescale/pgvectorscale.git /src/pgvectorscale && break; \
-         echo "pgvectorscale clone failed (attempt $a/5); backing off"; \
-         rm -rf /src/pgvectorscale; sleep $((a * 5)); \
+         curl -fsSL --connect-timeout 10 --max-time 300 -o "/tmp/$zip" \
+           "https://github.com/timescale/pgvectorscale/releases/download/${PGVECTORSCALE_VERSION}/${zip}" \
+           && break; \
+         echo "pgvectorscale asset fetch failed (attempt $a/5); backing off"; \
+         rm -f "/tmp/$zip"; sleep $((a * 5)); \
        done \
-    && test -d /src/pgvectorscale/pgvectorscale \
-    && cd /src/pgvectorscale/pgvectorscale \
-    && pgrx_version="$(awk -F'"' '/^pgrx[[:space:]]*=/{print $2; exit}' Cargo.toml)" \
-    && echo "building pgvectorscale ${PGVECTORSCALE_VERSION} against pgrx ${pgrx_version}" \
-    && cargo install --locked cargo-pgrx --version "${pgrx_version}" \
-    && cargo pgrx init "--pg${PG_MAJOR}=/usr/lib/postgresql/${PG_MAJOR}/bin/pg_config" \
-    && cargo pgrx install --release --pg-config "/usr/lib/postgresql/${PG_MAJOR}/bin/pg_config"
-# Collect only the installed extension artifacts, at the paths the runtime uses.
-RUN mkdir -p "/pgvectorscale/usr/lib/postgresql/${PG_MAJOR}/lib" \
-        "/pgvectorscale/usr/share/postgresql/${PG_MAJOR}/extension" \
-    && cp "/usr/lib/postgresql/${PG_MAJOR}/lib/vectorscale"*.so \
-        "/pgvectorscale/usr/lib/postgresql/${PG_MAJOR}/lib/" \
-    && cp "/usr/share/postgresql/${PG_MAJOR}/extension/vectorscale"* \
-        "/pgvectorscale/usr/share/postgresql/${PG_MAJOR}/extension/"
+    && echo "${want}  /tmp/${zip}" | sha256sum -c - \
+    && unzip -j "/tmp/$zip" -d /tmp/pgvs \
+    && deb="$(find /tmp/pgvs -name '*.deb' ! -name '*dbgsym*' -print -quit)" \
+    && test -n "$deb" \
+    && echo "installing pgvectorscale ${PGVECTORSCALE_VERSION} (pg${PG_MAJOR}/${TARGETARCH}) from ${deb##*/}" \
+    && dpkg-deb -x "$deb" /pgvectorscale \
+    && rm -rf /pgvectorscale/usr/share/doc "/tmp/$zip" /tmp/pgvs
+# Fail here rather than shipping a kb that silently falls back to HNSW: the .deb
+# lays the files down at the paths the runtime reads, so assert they arrived.
+RUN test -n "$(find "/pgvectorscale/usr/lib/postgresql/${PG_MAJOR}/lib" -name 'vectorscale*.so' -print -quit)" \
+    && test -s "/pgvectorscale/usr/share/postgresql/${PG_MAJOR}/extension/vectorscale.control"
 
 # Runtime must match the build stage: libpq5 here has to provide at least the
 # PostgreSQL 17 symbols the kb was linked against (PGDG's libpq 18 does).
