@@ -2177,21 +2177,12 @@ int handle_post_code_scan(const char *body, char *out_buf, int out_cap)
       return 503;
    }
 
-   /* CURATION IS NOT ENQUEUED HERE ANY MORE.
-    *
-    * The pipeline order is indexed -> embedded -> curated, and this point is only
-    * "indexed". Enqueuing here handed the curator a project whose vectors did not
-    * exist yet, so curation and embedding raced on every scan.
-    *
-    * It was also expensive in the worst possible place: this is the synchronous
-    * path of /v1/code/scan and the enqueue inserts one row per symbol. Measured on
-    * a 4,018-file corpus, ~173,000 rows and ~215s added to a request the client
-    * times out at 300s.
-    *
-    * The enqueue now belongs to the embed stage, which runs it for a project only
-    * once that project is fully embedded (see stage_embed_code). Nothing is lost
-    * for a thin-client push either: the embed sweep visits every project by name,
-    * not by filesystem path. */
+   /* Curation is not enqueued here. The pipeline is indexed -> embedded -> curated,
+    * and this point is only indexed; the old call raced curation against vectors
+    * that did not exist yet. It also inserted one row per symbol synchronously:
+    * ~173,000 rows and ~215s for 4,018 files against a 300s client timeout.
+    * stage_embed_code now enqueues after full project embedding. Thin-client pushes
+    * remain covered because the embed sweep visits projects by name, not path. */
 
    /* Record the scanned default-branch SHA so the next !force scan can no-op when the
     * branch hasn't moved (sha_now is set only on the local-scan path that resolved it). */
