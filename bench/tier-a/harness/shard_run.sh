@@ -50,17 +50,53 @@ SHARD_DIR="$OUT/.shards-$LABEL"
 say() { echo "[$(date -u +%H:%M:%SZ)] $*" | tee -a "$OUT/shard_$LABEL.log"; }
 
 kill_servers() {
-  # ONLY our ports. `pkill -f llama-server` kills every server in a shared
-  # container: CT 140 hosts another session on port 8099, and a blanket kill
-  # destroys their work exactly as theirs destroyed our E2B Q4 arm.
-  local lo=$BASE_PORT hi=$((BASE_PORT+7)) cmd=""
-  for prt in $(seq $lo $hi); do cmd="$cmd pkill -f 'port $prt ' 2>/dev/null;"; done
-  if [ "$CARD" = 5080 ]; then
-    ssh -n -o ConnectTimeout=20 $HOST "pct exec 140 -- bash -lc \"$cmd true\"" >/dev/null 2>&1 || true
-  else
-    ssh -n -o ConnectTimeout=20 $HOST "bash -lc \"$cmd true\"" >/dev/null 2>&1 || true
-  fi
+  # Kill by LISTENING SOCKET, never by command line.
+  #
+  # Two bugs live here, both already paid for.
+  #
+  # `pkill -f llama-server` kills every server in the container. CT 140 is
+  # shared; that killed another session's work all night and ours in return.
+  #
+  # The fix for that, `pkill -f "port $p "`, is ALSO broken: the shell running
+  # the pkill has "port 8400 " in its own command line, so pkill matches itself
+  # and the kill sequence dies before reaching the server. Measured: a stale
+  # E4B server survived on 8400, a new E2B server failed to bind, the health
+  # check passed against the SURVIVOR, and shard 0 of an "E2B" arm was answered
+  # by E4B. The merge check did not catch it because it compares the --model
+  # LABEL, which every shard shares, not the model actually loaded.
+  #
+  # ss resolves the pid from the socket. Nothing matches on text.
+  #
+  # Sent over stdin as a heredoc rather than as a quoted argument. The script
+  # contains both single and double quotes, and nesting them through
+  # ssh -> pct exec -> bash -c silently mangles the result; a heredoc has no
+  # quoting to get wrong. (Note: no -n on ssh, stdin is the script.)
+  local lo=$BASE_PORT hi=$((BASE_PORT+7)) remote
+  if [ "$CARD" = 5080 ]; then remote="pct exec 140 -- bash -s"; else remote="bash -s"; fi
+  ssh -o ConnectTimeout=20 "$HOST" "$remote" >/dev/null 2>&1 <<EOF || true
+for p in \$(seq $lo $hi); do
+  pid=\$(ss -ltnpH "sport = :\$p" 2>/dev/null | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2)
+  [ -n "\$pid" ] && kill -9 "\$pid" 2>/dev/null
+done
+true
+EOF
   sleep 5
+}
+
+verify_model() {  # $1 = port. Confirm the server there loaded the quant we asked for.
+  # A health check proves something is listening, not that it is the right
+  # model. A stale server on a port we failed to claim answers /health happily
+  # and silently substitutes its own weights for an entire arm.
+  local p=$1 want_fam want_q loaded
+  want_fam=$(echo "$REPO" | grep -oE 'E[24]B')
+  want_q=$(echo "$REPO"   | grep -oE 'UD-Q[0-9]_K_XL')
+  loaded=$(ssh -n -o ConnectTimeout=15 $HOST "curl -sf --max-time 8 http://$EP:$p/props" 2>/dev/null \
+           | python3 -c "import json,sys;print((json.load(sys.stdin).get('model_path') or '').split('/')[-1])" 2>/dev/null)
+  if [ -z "$loaded" ]; then say "  FAIL: port $p served no /props"; return 1; fi
+  case "$loaded" in
+    *"$want_fam"*"$want_q"*) return 0 ;;
+    *) say "  FAIL: port $p loaded '$loaded', expected $want_fam / $want_q"; return 1 ;;
+  esac
 }
 
 start_one() {  # $1 = port
@@ -116,6 +152,7 @@ kill_servers
 say "sizing: starting one server to measure resident VRAM"
 start_one "$BASE_PORT" || { say "FAIL: first server never healthy"; exit 1; }
 tunnel_one "$BASE_PORT" || { say "FAIL: tunnel"; exit 1; }
+verify_model "$BASE_PORT" || { say "FAIL $LABEL: wrong model on $BASE_PORT"; exit 1; }
 PER=$(vram_used)
 say "  one instance uses ${PER} MiB of ${TOTAL} MiB"
 
@@ -138,6 +175,7 @@ for i in $(seq 1 $((NPROC-1))); do
   p=$((BASE_PORT+i))
   start_one "$p" || { say "FAIL: server on $p never healthy"; exit 1; }
   tunnel_one "$p" || { say "FAIL: tunnel $p"; exit 1; }
+  verify_model "$p" || { say "FAIL $LABEL: wrong model on $p, refusing to run"; exit 1; }
 done
 say "  all $NPROC servers up; VRAM now $(vram_used) MiB"
 
