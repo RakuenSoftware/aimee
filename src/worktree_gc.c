@@ -306,33 +306,23 @@ int worktree_gc_apply(const char *git_root, const worktree_gc_candidate_t *cands
          continue;
       }
 
-      /* Parse the candidate path back into (sid, work_name) so we can
-       * call the existing cleanup primitive. Path shape:
-       *   <git_root>/.aimee/worktrees/<sid>/<work_name>
-       * `worktree_cleanup` itself refuses to remove a worktree with
-       * uncommitted changes or unpushed commits, so passing through it
-       * is safe even if our scan-time check raced the operator. */
+      /* Remove BY PATH. The scan walks directories, so what sits between
+       *   <git_root>/.aimee/worktrees/<key>/<work_name>
+       * is already a KEY, not a session id. Feeding it back through
+       * worktree_cleanup() re-derived a key FROM a key: harmless while the key
+       * was a 16-char truncation (truncating 16 chars is a no-op), silently
+       * wrong once it became a hash — GC would target a path that does not
+       * exist and quietly remove nothing. worktree_cleanup_path still refuses
+       * to remove a worktree with uncommitted changes or unpushed commits, so
+       * this stays safe if the scan-time check raced the operator. */
       const char *base = c->path + strlen(git_root);
       if (*base == '/')
          base++;
       const char *prefix = ".aimee/worktrees/";
       if (strncmp(base, prefix, strlen(prefix)) != 0)
          continue;
-      const char *sid_start = base + strlen(prefix);
-      const char *sep = strchr(sid_start, '/');
-      if (!sep)
-         continue;
-      char sid[64];
-      size_t sid_len = (size_t)(sep - sid_start);
-      if (sid_len == 0 || sid_len >= sizeof(sid))
-         continue;
-      memcpy(sid, sid_start, sid_len);
-      sid[sid_len] = '\0';
-      const char *work_name = sep + 1;
-      if (!work_name[0])
-         continue;
 
-      worktree_cleanup(git_root, sid, work_name);
+      worktree_cleanup_path(git_root, c->path);
       /* worktree_cleanup logs its own outcome; assume success only if
        * the directory is gone afterwards. */
       struct stat st;

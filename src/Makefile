@@ -378,7 +378,7 @@ endif
 DATA_SRCS = code_match.c rel_types.c modules/memory/memory_fact_gate.c modules/memory/memory_extract_patterns.c modules/memory/memory_pii_gate.c modules/memory/memory_core.c modules/memory/memory_logic.c modules/memory/memory_effective.c modules/memory/memory_health.c modules/memory/memory_conflict.c modules/memory/memory_context.c modules/memory/memory_assemble.c modules/memory/memory_advanced.c modules/memory/memory_prospective.c modules/memory/memory_lifecycle.c modules/memory/memory_directives.c modules/memory/memory_maintenance.c modules/memory/memory_graph.c modules/memory/memory_graph_fusion.c modules/memory/memory_scan.c modules/memory/memory_improve.c modules/memory/memory_episodes.c \
             index.c cochange.c extractors.c extractors_extra.c extractors_new_langs.c code_treesitter.c modules/css/css_analyze.c modules/css/css_oracle.c modules/css/css_render_oracle.c modules/css/css_render_cmd.c \
             context_discover.c tasks.c modules/learning/learning_router.c modules/learning/learning_implicit.c dogfood.c working_profile.c modules/guardrails/guardrails.c modules/guardrails/guardrails_orchestrator.c modules/guardrails/guardrails_action_audit.c modules/guardrails/guardrails_tdd.c workflow_learn.c session_state.c session_briefing.c file_safety.c branch_ownership.c integrity_gate.c conversation_context.c payload_rewrite.c modules/guardrails/guardrails_semantic.c modules/guardrails/guardrails_blast_radius.c modules/gateway/gateway_policy.c modules/gateway/gateway_pipeline.c modules/gateway/gateway_delegate.c \
-            modules/workspace/workspace.c worktree_gc.c modules/workspace/workspace_manifest.c modules/workspace/workspace_handle.c server/agent_config.c server/agent_route.c agent_tier_lint.c cmd_describe.c \
+            modules/workspace/workspace.c session_worktree_key.c worktree_gc.c modules/workspace/workspace_manifest.c modules/workspace/workspace_handle.c server/agent_config.c server/agent_route.c agent_tier_lint.c cmd_describe.c \
             history.c role_templates.c modules/skills/skill.c modules/skills/skill_rollback.c modules/skills/skill_review.c modules/skills/skill_curator.c conversation.c \
             trajectory_export.c trajectory_batch.c \
             modules/memory/memory_profile_pack.c wiki_render.c \
@@ -439,7 +439,7 @@ cmd-srcs-compile-check: $(CMD_OBJS) $(ORPHAN_OBJS)
 	@echo "cmd-srcs-compile-check: ok ($(words $(CMD_SRCS)) cmd + $(words $(ORPHAN_SRCS)) orphan file(s))"
 
 # --- Pure client (aimee) ---
-CLI_SRCS = cli_kb_smoke.c cli_v1_routes.c cli_v1_routes_d.c cli_v1_routes_c.c cli_v1_routes_b.c cli_main.c cli_agent_setup.c cli_session_start.c session_degraded_notice.c cmd_self_update.c self_update_util.c harness_memory_common.c harness_memory_scope.c harness_memory_audit.c harness_memory_spill.c cli_attention_guard.c cli_code_audit.c cli_css.c cli_chat_stream.c cli_client.c cli_launch.c cli_mcp_serve.c cli_profile.c client_integrations.c modules/delegates/delegate_plan.c cmd_profile.c cmd_manuscript.c cmd_optimize.c cli_persona.c cli_roles.c manuscript.c http_uds_client.c aimee_client.c cli_remote.c modules/protocols/acp/acp_server.c modules/workspace/cli_workspace_serve.c cli_agent_keys.c cmd_workflow.c
+CLI_SRCS = cli_kb_smoke.c cli_v1_routes.c cli_v1_routes_d.c cli_v1_routes_c.c cli_v1_routes_b.c cli_main.c cli_agent_setup.c cli_session_start.c session_degraded_notice.c cmd_self_update.c self_update_util.c harness_memory_common.c harness_memory_scope.c harness_memory_audit.c harness_memory_spill.c cli_attention_guard.c client_session_worktree.c session_worktree_key.c cli_code_audit.c cli_css.c cli_chat_stream.c cli_client.c cli_launch.c cli_mcp_serve.c cli_profile.c client_integrations.c modules/delegates/delegate_plan.c cmd_profile.c cmd_manuscript.c cmd_optimize.c cli_persona.c cli_roles.c manuscript.c http_uds_client.c aimee_client.c cli_remote.c modules/protocols/acp/acp_server.c modules/workspace/cli_workspace_serve.c cli_agent_keys.c cmd_workflow.c
 ifeq ($(WITH_TLS),1)
 CLI_SRCS += aimee_tls.c
 TLS_OBJS = $(OBJDIR)/aimee_tls.o
@@ -448,7 +448,7 @@ TLS_OBJS =
 endif
 CLI_SRCS += http_content_encoding.c
 CLI_OBJS = $(CLI_SRCS:%.c=$(OBJDIR)/%.o)
-CLIENT_PLATFORM_OBJS = $(filter %/platform_ipc.o %/platform_net.o %/platform_path.o %/platform_process.o %/history.o %/cli_client.o %/cli_main.o,$(PLATFORM_OBJS))
+CLIENT_PLATFORM_OBJS = $(filter %/platform_ipc.o %/platform_net.o %/platform_path.o %/platform_process.o %/platform_random.o %/history.o %/cli_client.o %/cli_main.o,$(PLATFORM_OBJS))
 # Detached-workspace runner: the serve loop executes file/exec ops locally, so
 # the thin client links the runner + shared provider + exec helpers (compiled
 # with full flags; --gc-sections trims the unused remainder). util.o supplies

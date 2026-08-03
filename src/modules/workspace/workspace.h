@@ -83,6 +83,15 @@ int worktree_create_sibling_from_anchor(const char *git_root, const char *sid,
 void worktree_apply_anchor_wip(const char *anchor_dir, const char *wt_path);
 int worktree_create_sibling_on_branch(const char *git_root, const char *sid, const char *work_name,
                                       const char *branch, const char *anchor_dir);
+/* Remove the worktree AT wt_path when clean; keep + warn when it holds
+ * uncommitted changes or unpushed commits. For callers that already have a
+ * path and must not re-derive one from a key. */
+void worktree_cleanup_path(const char *git_root, const char *wt_path);
+
+/* Remove this session's worktree under the PREVIOUS (truncating) key, if one is
+ * stranded there and is clean. No-op when both derivations agree. */
+void worktree_reclaim_legacy(const char *git_root, const char *sid, const char *work_name);
+
 void worktree_cleanup(const char *git_root, const char *sid, const char *work_name);
 int worktree_apply_changes_to_parent(const char *src_wt, const char *dst_wt);
 int worktree_apply_delegate_changes_to_parent(const char *delegate_wt, const char *parent_wt,

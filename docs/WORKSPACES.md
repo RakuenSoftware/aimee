@@ -71,6 +71,38 @@ should contain only knowledge appropriate for every member.
 Sessions and delegates do not write directly into a shared base checkout when isolation is required.
 The server or workflow plane creates a managed worktree and branch on first write.
 
+A new session gets its own branch and its own worktree at session start, not on first write. This
+covers a Claude Code session through the SessionStart hook and an MCP session through
+`aimee mcp-serve`. Both land at `<repo>/.aimee/worktrees/<key>/main` on branch
+`aimee/session/<key>`.
+
+The branch is cut from the repository's default branch, never from whatever branch the shared
+checkout happens to have checked out. `session_worktree_base` selects the base; the default resolves
+`origin/HEAD`. When no default can be resolved, session start fails and says so rather than guessing
+a base, because guessing put new sessions on another session's work. Fix the remote with
+`git remote set-head origin -a`, or set an explicit ref.
+
+`<key>` is derived from the whole session id, so two sessions never share a worktree or a branch. It
+was previously the first 16 characters of the id, which collided for ids built on a shared prefix and
+let concurrent sessions overwrite each other in one checkout.
+
+An MCP session enters its worktree itself, so aimee's file and shell tools already run there. A hook
+cannot change its host's directory, so a Claude Code session is told the path and enters it with
+`EnterWorktree`.
+
+A delegate does not get a session worktree. A write-capable delegate gets a copy of its parent's
+branch and current working tree, so it starts from what the parent has now rather than from the
+parent's last commit.
+
+### Worktrees created before the key changed
+
+A session that predates the key change owns a worktree under the old key. Session start reclaims it
+once the new one is in place: the old worktree, its branch, and the emptied parent directory are
+removed.
+
+A stranded worktree holding uncommitted or unpushed work is kept, and the path is reported. Recover
+that work by hand. Reclaim never removes a worktree that still holds changes.
+
 Remote workspace control needs a full user grant. Index and document uploads need data. Workspace
 registration can succeed with the read bearer, but its automatic ingest exits non-zero until the
 user has data authority.

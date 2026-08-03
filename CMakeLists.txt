@@ -296,6 +296,8 @@ if(WIN32)
         ${AIMEE_SRC_DIR}/windows/platform_net.c
         ${AIMEE_SRC_DIR}/windows/platform_path.c
         ${AIMEE_SRC_DIR}/windows/platform_process.c
+        # cli_mcp_serve mints the session id when none is published yet.
+        ${AIMEE_SRC_DIR}/windows/platform_random.c
         ${AIMEE_SRC_DIR}/windows/history.c
         ${AIMEE_SRC_DIR}/windows/cli_client.c
         ${AIMEE_SRC_DIR}/windows/cli_main.c
@@ -321,6 +323,8 @@ elseif(APPLE)
         ${AIMEE_SRC_DIR}/posix/platform_process.c
         ${AIMEE_SRC_DIR}/posix/platform_net.c
         ${AIMEE_SRC_DIR}/mac/platform_process.c
+        # cli_mcp_serve mints the session id when none is published yet.
+        ${AIMEE_SRC_DIR}/posix/platform_random.c
         ${AIMEE_SRC_DIR}/posix/history.c
         ${AIMEE_SRC_DIR}/posix/cli_client.c
         ${AIMEE_SRC_DIR}/posix/cli_main.c
@@ -342,6 +346,8 @@ else()
         ${AIMEE_SRC_DIR}/posix/platform_process.c
         ${AIMEE_SRC_DIR}/posix/platform_net.c
         ${AIMEE_SRC_DIR}/linux/platform_process.c
+        # cli_mcp_serve mints the session id when none is published yet.
+        ${AIMEE_SRC_DIR}/posix/platform_random.c
         ${AIMEE_SRC_DIR}/posix/history.c
         ${AIMEE_SRC_DIR}/posix/cli_client.c
         ${AIMEE_SRC_DIR}/posix/cli_main.c
@@ -635,6 +641,8 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/payload_rewrite.c
     ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_semantic.c
     ${AIMEE_SRC_DIR}/modules/workspace/workspace.c
+    # THE session worktree/branch key, shared with the thin client.
+    ${AIMEE_SRC_DIR}/session_worktree_key.c
     ${AIMEE_SRC_DIR}/worktree_gc.c
     ${AIMEE_SRC_DIR}/modules/workspace/workspace_manifest.c
     ${AIMEE_SRC_DIR}/server/agent_config.c
@@ -855,6 +863,13 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/harness_memory_audit.c
     ${AIMEE_SRC_DIR}/harness_memory_spill.c
     ${AIMEE_SRC_DIR}/cli_attention_guard.c
+    # Per-session branch+worktree bootstrap, shared by the SessionStart hook
+    # (cli_session_start.c) and the MCP proxy (cli_mcp_serve.c). The client links
+    # no workspace.o, so this is its own git-subprocess implementation.
+    ${AIMEE_SRC_DIR}/client_session_worktree.c
+    # THE session worktree/branch key. Shared with aimee-core so the client and
+    # the server agree on where a session's worktree is.
+    ${AIMEE_SRC_DIR}/session_worktree_key.c
     ${AIMEE_SRC_DIR}/cli_code_audit.c
     ${AIMEE_SRC_DIR}/cli_css.c
     ${AIMEE_SRC_DIR}/cli_chat_stream.c
