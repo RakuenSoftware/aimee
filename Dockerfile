@@ -69,9 +69,31 @@ ENV CARGO_HOME=/usr/local/cargo
 ENV PATH=/usr/local/cargo/bin:$PATH
 # cargo-pgrx must match the pgrx the crate depends on, so it is read from the
 # checkout's Cargo.toml rather than pinned separately here.
-RUN curl -fsS https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable \
-    && git clone --depth 1 --branch "${PGVECTORSCALE_VERSION}" \
-        https://github.com/timescale/pgvectorscale.git /src/pgvectorscale \
+# BOTH FETCHES RETRY, for the same reason the pgdg key above does. This clone failed
+# a build with
+#   fatal: unable to access 'https://github.com/timescale/pgvectorscale.git/':
+#   The requested URL returned error: 503
+# during a forge wobble that also took fetch-treesitter.sh and the Hugging Face
+# weights fetch. Those two were given backoff first and this one was missed, so the
+# next build simply failed one line earlier -- an unretried fetch is a coin flip
+# wherever it sits.
+#
+# --depth 1 --branch is a tag, so a retry fetches the same commit; and cargo pgrx
+# below verifies the build. A retry cannot land different sources than a first-attempt
+# success would have.
+RUN for a in 1 2 3 4 5; do \
+        curl -fsS --connect-timeout 10 --max-time 300 https://sh.rustup.rs \
+          | sh -s -- -y --profile minimal --default-toolchain stable && break; \
+        echo "rustup fetch failed (attempt $a/5); backing off"; sleep $((a * 5)); \
+      done \
+    && test -x "$CARGO_HOME/bin/cargo" \
+    && for a in 1 2 3 4 5; do \
+         git clone --depth 1 --branch "${PGVECTORSCALE_VERSION}" \
+           https://github.com/timescale/pgvectorscale.git /src/pgvectorscale && break; \
+         echo "pgvectorscale clone failed (attempt $a/5); backing off"; \
+         rm -rf /src/pgvectorscale; sleep $((a * 5)); \
+       done \
+    && test -d /src/pgvectorscale/pgvectorscale \
     && cd /src/pgvectorscale/pgvectorscale \
     && pgrx_version="$(awk -F'"' '/^pgrx[[:space:]]*=/{print $2; exit}' Cargo.toml)" \
     && echo "building pgvectorscale ${PGVECTORSCALE_VERSION} against pgrx ${pgrx_version}" \
@@ -230,8 +252,8 @@ RUN useradd --system --home-dir /var/lib/aimee --create-home --shell /usr/sbin/n
 # and the sidecar then refuses to start, because it has no identity to present. The
 # unit test missed it by creating the directory as the same user it then wrote as.
 RUN install -d -o aimee -g aimee -m 0700 /var/lib/aimee/synthesis-tls
-COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb
-COPY --from=build /src/aimee-kb-resolver /usr/local/bin/aimee-kb-resolver
+# The kb binaries are copied in AFTER the model bake, near the end of this file.
+# Deliberately: see the comment there.
 
 # The embedder registry: every per-model fact that changes the vectors (pooling, width,
 # context, prefixes), keyed by model identity. Read by the in-container embedder to know
@@ -298,10 +320,43 @@ RUN --mount=type=cache,target=/root/.cache/huggingface \
     fi; \
     AIMEE_EMBEDDER="$AIMEE_EMBEDDER" \
     HF_HUB_OFFLINE=0 "$BAKE" - <<'PYBAKE'
-import json, os, sys
+import json, os, sys, time
 from huggingface_hub import snapshot_download
 with open("/opt/aimee/embedders.json", encoding="utf-8") as handle:
     table = json.load(handle)["embedders"]
+
+
+def fetch(repo, **kw):
+    """snapshot_download with backoff, because the Hub rate-limits and this build
+    cannot make progress without it.
+
+    A bare snapshot_download turns any 429 or 5xx into a failed image build. That is
+    not hypothetical: three separate builds died on
+    "429 Too Many Requests for url .../hotchpotch/bekko-embedding-v1-a25m" inside one
+    evening, once on the publish lane and twice on e2e, simply because several image
+    variants were built in parallel and each fetches the same weights.
+
+    Retried statuses only. A bad revision or a repo that does not exist fails on the
+    first attempt as it should -- waiting sixty seconds to repeat a permanent error
+    just moves the failure further from its cause. Same shape as the apt-get update
+    loops elsewhere in this file, for the same reason.
+    """
+    delay = 15
+    for attempt in range(1, 6):
+        try:
+            return snapshot_download(repo, **kw)
+        except Exception as exc:  # noqa: BLE001 - the Hub raises several types for this
+            text = f"{type(exc).__name__}: {exc}"
+            transient = any(s in text for s in ("429", "5xx", "500", "502", "503", "504",
+                                                "Too Many Requests", "ReadTimeout",
+                                                "ConnectionError", "IncompleteRead"))
+            if not transient or attempt == 5:
+                raise
+            print(f"  hub fetch of {repo} failed ({text[:120]}); "
+                  f"retry {attempt}/4 in {delay}s", flush=True)
+            time.sleep(delay)
+            delay *= 2
+    raise AssertionError("unreachable")
 
 # Bake exactly the selected entry. An unknown name is a BUILD failure, not a
 # silently-empty image: a container with no baked weights starts fine and then
@@ -347,13 +402,13 @@ def code_repos(snapshot_dir):
 for name, spec in table.items():
     repo, revision = spec["repo"], spec.get("revision") or "main"
     print(f"baking {name}: {repo}@{revision}", flush=True)
-    local = snapshot_download(repo, revision=revision, ignore_patterns=SKIP)
+    local = fetch(repo, revision=revision, ignore_patterns=SKIP)
     # Code repos are referenced by name only — auto_map carries no revision — so these
     # take the default branch. That is a looser pin than the weights get; a model whose
     # code must be pinned needs its auto_map repo added to the registry explicitly.
     for code_repo in sorted(code_repos(local)):
         print(f"  + code: {code_repo}", flush=True)
-        snapshot_download(code_repo, allow_patterns=["*.py", "*.json", "*.txt"])
+        fetch(code_repo, allow_patterns=["*.py", "*.json", "*.txt"])
 PYBAKE
 
 # The bake runs as root and huggingface_hub writes its tree-cache metadata 0600, so
@@ -364,6 +419,30 @@ PYBAKE
 # The directory does not exist on AIMEE_EMBEDDER=none, and chmod -R on a missing
 # path is an error rather than a no-op.
 RUN if [ -d /opt/aimee/models ]; then chmod -R a+rX /opt/aimee/models; fi
+
+# THE COMPILED BINARY COMES IN AFTER THE MODEL, and the order is the point.
+#
+# These two lines used to sit ~130 lines above, before the bake. Docker invalidates
+# every layer after a changed one, so any C change changed the binary, which
+# invalidated the bake, which re-downloaded the weights from Hugging Face. On a
+# publish that is four downloads of the same files (two baked variants x two
+# architectures) for a change that touched neither the model nor the registry -- and
+# it is what got these builds answered with
+#   429 Too Many Requests for url .../hotchpotch/bekko-embedding-v1-a25m
+#
+# The --mount=type=cache on the bake does not prevent this. A BuildKit cache mount is
+# local to the builder, and cache-from/to type=gha carries LAYERS, not cache mounts, so
+# a fresh GitHub runner always begins with an empty one. The LAYER cache is what can
+# help, and it only can while this layer's inputs exclude the source tree.
+#
+# So the bake's inputs are now the venv, scripts/embedders.json and AIMEE_EMBEDDER,
+# none of which move when C code moves. Moving these COPY lines back up, or adding
+# anything source-dependent above the bake, silently restores the download.
+#
+# Nothing between the bake and here executes the binary, which is what makes the move
+# safe: the entrypoint script, USER, HEALTHCHECK and ENTRYPOINT all follow.
+COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb
+COPY --from=build /src/aimee-kb-resolver /usr/local/bin/aimee-kb-resolver
 
 # NO BUNDLED SYNTHESIS. llama.cpp and its GGUF used to be baked here, which coupled a
 # multi-gigabyte, near-static artefact to the image rebuilt on every kb code change:
