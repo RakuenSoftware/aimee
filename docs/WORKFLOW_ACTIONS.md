@@ -10,8 +10,8 @@ run.
 
 1. Select **+ New proposal**.
 2. Enter a title and proposal body, then choose a saved workflow.
-3. Enter the repository checkout path visible to the server. Although the current field says
-   optional, the Go submit endpoint rejects a blank repository.
+3. Choose a managed repository or enter a custom checkout path visible to the server. The form
+   requires this before it sends the proposal.
 4. Optionally use **Draft with a delegate** or **Load from project**. Both show a preview before
    replacing the proposal body.
 5. Select **Submit**. The page opens the new run and begins polling it.
@@ -80,14 +80,25 @@ integration branch.
 
 The **Triggers** panel shows what can file a run automatically.
 
-- Config-origin trigger rules can be added, edited, saved, and removed there.
+- The appliance administrator can select **+ New trigger** and choose a managed repository (or
+  enter a custom server-visible checkout path), a saved workflow, the repository-relative
+  Markdown directory to watch, and an optional branch/ref, run mode, and per-run spend cap.
+- New and edited rules stay as browser drafts until **Save trigger** succeeds. The form validates
+  repository confinement and Git-ref safety before changing the shared registry, and a concurrent
+  edit reloads the current registry instead of overwriting it.
+- Non-administrators can inspect active triggers but do not see mutation controls. A malformed
+  on-disk registry is reported and held read-only so the browser cannot erase rules it failed to
+  parse.
 - A trigger originating from a saved workflow's `trigger.watch-dir` start node is read-only in this
   panel. Edit that node in **Edit Workflows** to change or disarm it.
-- The current Go scanner executes `watch-dir` and `proposals` sources. Other displayed source names
-  are not executed by this scanner.
+- The current Go scanner creates `watch-dir` rules; `proposals` remains a compatibility spelling for
+  existing configuration. Other source names are not offered by the browser because this scanner
+  cannot execute them.
 
 A watch rule needs a server-visible workspace, a saved workflow, a repository-relative proposal
 directory, and an optional git ref. Leaving the ref blank resolves the refreshed remote default ref.
+The browser offers valid saved workflows and repositories already managed for the signed-in
+administrator, while retaining a custom path option. The shared registry is limited to 32 rules.
 The mode and optional spend cap are stored with the admitted run, but mode alone is not an approval
 barrier in the current scheduler. Put `gate.human` in the graph when a person must decide.
 

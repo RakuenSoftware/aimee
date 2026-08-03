@@ -3,6 +3,8 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -14,6 +16,64 @@ func TestWorkflowGlobalConfigRequiresAdministrator(t *testing.T) {
 	s.handleWorkflowConfigSet(rr, req)
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("status=%d, want 403", rr.Code)
+	}
+}
+
+func TestWorkflowTriggersReadCarriesWebuserIdentity(t *testing.T) {
+	var gotMethod, gotUser string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/workflow/triggers", func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotUser = r.Header.Get("X-Aimee-Webuser")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"editable":true,"triggers":[]}`))
+	})
+	s := &server{cfg: startFakeV1(t, mux)}
+	req := withUser(httptest.NewRequest(http.MethodGet, "/api/workflow/triggers", nil), "admin")
+	rr := httptest.NewRecorder()
+	s.handleWorkflowTriggers(rr, req)
+	if rr.Code != http.StatusOK || gotMethod != http.MethodGet || gotUser != "admin" {
+		t.Fatalf("code=%d method=%q user=%q body=%s", rr.Code, gotMethod, gotUser, rr.Body.String())
+	}
+}
+
+func TestWorkflowPolicyMapsReplacementAdministratorToControlPlaneCapability(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "webchat"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "webchat", "bootstrap-replaced"), []byte("virant\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var calls []string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/workflow/triggers", func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+":"+r.Header.Get("X-Aimee-Webuser"))
+		_, _ = w.Write([]byte(`{"editable":true,"triggers":[]}`))
+	})
+	mux.HandleFunc("/v1/workflow/config/set", func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+":"+r.Header.Get("X-Aimee-Webuser"))
+		_, _ = w.Write([]byte(`{"ok":true,"key":"trigger_rules"}`))
+	})
+	cfg := startFakeV1(t, mux)
+	cfg.dbPath = filepath.Join(root, "webchat.db")
+	s := &server{cfg: cfg}
+
+	read := withUser(httptest.NewRequest(http.MethodGet, "/api/workflow/triggers", nil), "virant")
+	readRecorder := httptest.NewRecorder()
+	s.handleWorkflowTriggers(readRecorder, read)
+	write := withUser(httptest.NewRequest(http.MethodPost, "/api/workflow/config/set",
+		strings.NewReader(`{"key":"trigger_rules","value":[],"previous_version":"v1"}`)), "virant")
+	writeRecorder := httptest.NewRecorder()
+	s.handleWorkflowConfigSet(writeRecorder, write)
+
+	if readRecorder.Code != http.StatusOK || writeRecorder.Code != http.StatusOK {
+		t.Fatalf("read=%d %s write=%d %s", readRecorder.Code, readRecorder.Body.String(), writeRecorder.Code, writeRecorder.Body.String())
+	}
+	want := []string{"GET:admin", "POST:admin"}
+	if len(calls) != len(want) || calls[0] != want[0] || calls[1] != want[1] {
+		t.Fatalf("control-plane calls=%v, want %v", calls, want)
 	}
 }
 
