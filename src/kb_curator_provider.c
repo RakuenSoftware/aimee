@@ -36,6 +36,13 @@ int kb_curator_error_is_provider_unavailable(const char *error_msg)
     * merely says "timed out" still consumes its normal attempt budget. */
    int bundled_transport_timeout =
        strstr(error_msg, "request to ") != NULL && strstr(error_msg, "timed out") != NULL;
+   /* An unconfigured endpoint is the most global condition there is: no row can
+    * ever succeed until an operator acts, so spending a per-row attempt budget on
+    * it is pure waste. Left unmatched, this burned 14,705 sidecar invocations in
+    * one run — a python process forked per symbol, three attempts each, ~51% CPU
+    * held for hours, starving the box the queue was meant to serve. It is not a
+    * poisonous row: the very next row fails identically. */
+   int endpoint_unconfigured = strstr(error_msg, "no synthesis endpoint configured") != NULL;
    return strstr(error_msg, "provider HTTP 503") != NULL ||
           strstr(error_msg, "provider HTTP 429") != NULL ||
           strstr(error_msg, "provider HTTP -1") != NULL ||
@@ -43,7 +50,8 @@ int kb_curator_error_is_provider_unavailable(const char *error_msg)
           strstr(error_msg, "HTTP 429 from") != NULL ||
           strstr(error_msg, "\"code\": \"provider_unavailable\"") != NULL ||
           strstr(error_msg, "\"code\":\"provider_unavailable\"") != NULL ||
-          strstr(error_msg, "upstream circuit is open") != NULL || bundled_transport_timeout;
+          strstr(error_msg, "upstream circuit is open") != NULL || bundled_transport_timeout ||
+          endpoint_unconfigured;
 }
 
 int kb_curator_provider_backoff_active(void)
