@@ -576,7 +576,55 @@ Banked clean, corpus v5, 10,000 notes, 3 isolated MTP servers each:
 |---|---:|---:|
 | E4B UD-Q4_K_XL | 0.6324 | 172m |
 | E4B UD-Q6_K_XL | 0.6450 | 164m |
+| E4B UD-Q8_K_XL | 0.6321 | — |
 
 The Q6 > Q4 direction on E4B holds at 10k, now the 9th replication of that sign.
-Remaining arms (E4B Q8, E2B Q4/Q6/Q8) re-run on the XTX alone after the
-container was surrendered.
+E4B Q8 completed later on the XTX: 10,000 rows, zero errored rows, strict F1
+0.6321 -- **0.0129 below Q6 and 0.0003 below Q4**. The ladder is not monotonic in
+bit width on this task. One run on one corpus; by finding 15's own argument that
+is an observation, not a result, until a second corpus reproduces the sign.
+
+Remaining arms (E2B Q4/Q6/Q8) re-run on the XTX alone after the container was
+surrendered. E2B Q4 was ~2,400/10,000 at 2026-08-03T13:40Z.
+
+## 19. The noise floor is zero, and the number that motivated the question was contamination
+
+`harness/noise_floor.sh` was written to settle a threat to finding 15: the same
+E2B UD-Q4_K_XL arm appeared to have scored 0.6114 on one server and **0.6213** on
+three. A 0.0099 swing on an unchanged measurement would have been larger than
+both quant effects the campaign was chasing, and would have meant the
+"8 replications, same sign" argument was reading noise.
+
+The 0.6213 does not exist. It came from the quant ledger *before* the shared
+`.shards` contamination was found -- quarantined in `1125ea2aa`, rebuilt in
+`cc7f09fee`. The rebuilt ledger arm scores 0.6138. The premise in the script's
+own header is stale and should be read as a record of what we believed, not of
+what was measured.
+
+What the experiment did establish, on three independent runs of that arm:
+
+| pair | raw completions identical |
+|---|---:|
+| ledger_3srv vs shard3_run1 | 1001/1001 |
+| ledger_3srv vs shard3_run2 | 1001/1001 |
+| shard3_run1 vs shard3_run2 | 1001/1001 |
+| each of the three vs v8base_1srv | 645/1001 |
+
+Strict F1 was 0.6138 on all three isolated runs and 0.6114 on the single-server
+run. So:
+
+- **Run-to-run noise within a configuration is zero**, not small. Three runs,
+  days apart, across server restarts, byte-identical on every note. Finding 15's
+  sign test is not counting noise.
+- **The one-vs-three-server difference is real and fixed**: 0.0024 F1, and the
+  *same* 356 notes move every time. That is a bias, not a variance, and sample
+  size does not touch it. Arms compared to each other must share a process count.
+- Hypothesis A in the script header ("same config twice") is answered. The
+  single-server arms (`single_run1`, `single_run2`) are still worth running for
+  hypothesis B -- whether one server reproduces *itself* -- which nothing here
+  has tested.
+
+Method: `results/noise-floor/`, compared against
+`results/quant-ledger/v5small.E2B.UD-Q4_K_XL.pred.jsonl` and
+`results/v8-baseline/E2B.UD-Q4_K_XL.mtp.pred.jsonl`, keyed by note id on the
+`raw` field. All four files are 1001 rows.

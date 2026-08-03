@@ -1,7 +1,8 @@
 # The confidence interval said no and the effect was real anyway
 
 DRAFT. The 1001-note numbers below are final. The 10,000-note replication is
-partially complete: two arms banked, four still running. Open items at the end.
+partially complete: the three E4B arms are banked, the three E2B arms are still
+running. Open items at the end.
 
 We wanted a small question answered. Given a fixed VRAM budget for a local fact
 extractor, is it better to run Q4 and keep the memory, or pay about 1.4 GiB for
@@ -61,6 +62,23 @@ looks at one run cannot see it at all.
 
 The E4B step has since replicated a 9th time at 10,000 notes, again positive.
 
+There is an obvious objection to a sign test, and it is the one that would sink
+this argument if it held: if a single run is mostly noise, then eight agreeing
+signs might reflect a stable quirk of the setup rather than an effect. We
+measured that instead of assuming it. Three independent runs of one arm in the
+identical configuration, spread over days with server restarts between them,
+produced **byte-identical completions on all 1001 notes** in every pairwise
+comparison, and the same strict F1 to four decimal places, 0.6138, each time.
+Re-running an arm does not move it at all, so a sign is
+not a coin flip on run-to-run variation, and the signs above are not counting
+noise.
+
+What that does not license is comparing across configurations. The same arm at
+one server instead of three scores 0.6114 rather than 0.6138 — 0.0024 of pure
+configuration, on a question where the effects of interest are 0.0065 and 0.0150.
+Every arm in the ladder is therefore held at three processes, and the two figures
+in the paired table above are only comparable because of it.
+
 ## The trap, stated plainly
 
 A per-run interval answers **could this run have come out the other way**.
@@ -108,6 +126,33 @@ single reported F1 would have hidden this completely: it would have shown E2B Q6
 ahead by 0.0065 and said nothing about the fact that the same predictions look
 worse under a slightly different lens.
 
+## The ladder has a knee, and it points down
+
+The E4B ladder is now complete at 10,000 notes, every arm three-process, clean,
+zero errored rows:
+
+| arm | strict F1 at 10k |
+|---|---:|
+| E4B Q4 | 0.6324 |
+| E4B Q6 | 0.6450 |
+| E4B Q8 | 0.6321 |
+
+Q4 to Q6 is +0.0126, the same direction as all nine earlier observations. Q6 to
+Q8 is **-0.0129**, and Q8 lands 0.0003 *below* Q4 — two more bits per weight, a
+larger file, and nothing to show for it.
+
+The obvious reading is that quantisation error is not the only thing moving here
+and more precision is not monotonically better. We are not going to assert that
+from one run per arm, and the reason is the whole point of this article: a single
+10,000-note measurement of a 0.013 effect is exactly the kind of result that
+looks solid and replicates badly. It is reproducible — re-running an arm returns
+the identical bytes — but reproducible is not the same as general, and the sign
+test needs a second corpus, not a bigger one.
+
+What we will say now: **if you were planning to spend disk on Q8, measure it
+first.** The step that paid on this task was Q4 to Q6, and the step above it gave
+the gain straight back.
+
 ## The decision we made
 
 - **E2B runs Q4.** The gain is real and consistent in sign, and it is also
@@ -127,16 +172,19 @@ we were never going to get at this budget.
 
 ## What still needs measuring
 
-1. **Finish the 10,000-note ladder.** E4B Q4 (0.6324) and E4B Q6 (0.6450) are
-   banked and confirm the E4B direction a 9th time. E4B Q8 and all three E2B
-   arms are still running. Until E2B Q4 and Q6 land at 10k, the E2B decision
-   rests on 1000-note runs only.
+1. **Finish the 10,000-note ladder.** E4B is complete: Q4 0.6324, Q6 0.6450,
+   Q8 0.6321. The Q4-to-Q6 step confirms the E4B direction a 9th time. All three
+   E2B arms are still running; Q4 is roughly a quarter of the way through at the
+   time of writing. Until E2B Q4 and Q6 land at 10k, the E2B decision rests on
+   1000-note runs only.
 2. **Test independence properly.** Generate a corpus with a different pipeline
    and a different generator model, then re-run the E2B pair. If the sign holds
    there, the shared-lineage caveat above weakens considerably. If it flips, the
    caveat was the whole story.
-3. **Q8 on both families.** Currently unmeasured at 10k. If Q6 to Q8 is flat
-   while Q4 to Q6 is not, the curve has a knee worth reporting.
+3. **Replicate the Q8 regression, or withdraw it.** E4B Q8 came in 0.0129 below
+   Q6 and level with Q4 at 10k. That is one run on one corpus, which by this
+   article's own argument settles nothing. Run the same ladder on a second
+   corpus and record the sign. E2B Q8 is unmeasured at 10k entirely.
 4. **Report intervals and sign counts side by side** in the results tables. We
    drew the wrong conclusion from this data once before catching it, and the
    table format was part of why.

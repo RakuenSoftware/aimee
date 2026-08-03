@@ -155,6 +155,15 @@ configuration to agree with some other configuration it is not using.
 | MTP | 1.83x | 74/100 | yes, 100/100 on both models |
 | 32 slots | 4.54x | 804/1001 | no |
 | 32 slots and MTP | 4.34x | 64/100 | no, 75/100 against itself |
+| 3 isolated processes, MTP | not on matched hardware | not measured | yes, 1001/1001 |
+
+The bottom row is the configuration this benchmark actually runs, and it is the
+clearest case of the rule. Its "matches sequential" cell is empty on purpose: we
+never ran plain sequential at 1001 notes, so the comparison does not exist. What
+we do have is the same arm at **one** MTP server against **three**, which holds
+the model, quant, prompt and MTP setting fixed and varies only the process count
+— 645 of 1001. That is the cleaner measurement anyway, and it is the subject of
+the next section.
 
 The quant deltas we are chasing are around 0.01 F1. The configuration noise in
 those bottom two rows moves 20 to 26 percent of notes. Mixing configurations
@@ -172,8 +181,38 @@ changes nothing arithmetic.
 |---|---:|
 | 32 slots in one process | 44/60 |
 | 2 isolated processes | 60/60 |
+| 3 isolated processes, full corpus | 1001/1001, three ways |
 
-Sixty out of sixty with the card saturated. So the production configuration is N
+The last row is the one that settles it. **Three** independent runs of the same
+three-process arm, on the same 1001 notes and the same card, spread over days
+with server restarts between them, produced byte-identical raw completions on
+every single note in all three pairwise comparisons, and the same strict F1 to
+four decimal places, 0.6138, every time. Sixty out of sixty was suggestive. Three
+runs agreeing on a thousand and one notes out of a thousand and one is the
+property itself.
+
+The three-way check matters more than a second run would have. Two identical runs
+can happen because something is cached or copied; a third, launched from a
+different script on a different day, is much harder to explain that way.
+
+And in the same breath it earns the article's title. That arm agrees with itself
+perfectly and does **not** agree with the one-server run of the same model, same
+quant, same prompt and same MTP setting — the process count is the only thing
+that differs. 645 of 1001 raw completions match, and strict F1 lands at 0.6114
+against 0.6138. All three isolated runs disagree with the one-server run on the
+identical 645, which is itself the point: the difference is a fixed property of
+the configuration, not something that wanders between runs. Isolation reproduces itself exactly while differing from a
+one-server run of the identical arm by 0.0024 F1. Repeatable, not identical,
+measured on the full corpus rather than argued from 60 notes.
+
+That 0.0024 deserves its own warning, because it is the same size as the effects
+this benchmark chases. A quant step we care about is worth roughly 0.0065 to
+0.015 F1. Switching between one server and three moves the score by 0.0024 while
+changing nothing about the model. Comparing an arm run at one process against an
+arm run at three is therefore not a clean comparison, and no amount of sample
+size fixes it — it is a bias, not a variance.
+
+So the production configuration is N
 single-slot servers, each with its own draft head, corpus split round-robin
 between them. Round-robin rather than in blocks, because the corpus is ordered by
 domain and a contiguous split would hand one shard every negation note and

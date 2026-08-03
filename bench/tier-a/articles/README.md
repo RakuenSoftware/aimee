@@ -27,9 +27,16 @@ stable ids and note text, so predictions can be re-scored across the two. Nothin
 can be rebuilt from source. Article 5 covers this.
 
 **Configurations are not interchangeable across arms.** Multi-token prediction
-moves 26 of 100 notes relative to a sequential run, and 32 parallel slots move 25
-of 100 relative to *themselves*. Any comparison in this series is valid only
-within one configuration. Article 3 covers this.
+moves 26 of 100 notes relative to a sequential run; 32 parallel slots move 25 of
+100 relative to *themselves*; and running the identical arm on one server rather
+than three moves 356 of 1001 notes and 0.0024 strict F1. Any comparison in this
+series is valid only within one configuration. Article 3 covers this.
+
+**Within one configuration, repetition is exact.** Three independent runs of the
+same three-process arm, spread over days across server restarts, returned
+byte-identical completions on all 1001 notes in every pairwise comparison, and
+the same strict F1 to four decimal places. Run-to-run noise is not a limit on
+anything in this series; configuration differences are. Article 3 covers this.
 
 **Article 1's rankings predate the corpus and prompt fixes.** Every number in it
 was measured before the reasoning-suppression fix, the ontology expansion and the
@@ -51,8 +58,10 @@ figures measured on different cards are never divided.
 Consolidated from the five articles, in rough order of what would change a
 conclusion.
 
-1. Finish the 10,000-note quant ladder. Four arms of six are outstanding
-   (articles 1, 2).
+1. Finish the 10,000-note quant ladder. The three E4B arms are banked (Q4 0.6324,
+   Q6 0.6450, Q8 0.6321); the three E2B arms are outstanding (articles 1, 2).
+   Q8's regression below Q6 needs a second corpus before it can be stated as a
+   finding rather than an observation.
 2. Re-run the top models on corpus v5. Article 1's table predates it (article 1).
 3. Intervals on relation-agnostic F1. The bootstrap tool scores strict only, so
    the recall figure that carried the thinking decision has none (article 4).
