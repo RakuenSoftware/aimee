@@ -43,19 +43,23 @@ v5small|data/corpora/v5/gold_small.jsonl|Q4 Q6|3|2
 v3small|data/corpora/v3/gold_small.jsonl|Q4 Q6|3|2"
 
 commit_arm() {  # $1 label
+  # Paths are relative to CWD, which is bench/tier-a because this script cd'd
+  # there. Prefixing "bench/tier-a/" made every path bench/tier-a/bench/tier-a/*
+  # and git add failed silently on the first arm. A commit step that cannot
+  # commit is the exact defect this script was written to fix.
   local f="$OUT/$1.pred.jsonl" s="$OUT/$1.score.json"
-  [ -s "$f" ] || return 0
+  if [ ! -s "$f" ]; then say "  WARNING: no prediction file for $1, nothing to commit"; return 0; fi
+  local err
   for _ in 1 2 3 4 5; do
-    if git add -f "bench/tier-a/$f" "bench/tier-a/$s" "bench/tier-a/$OUT/ledger.log" 2>/dev/null \
-       && git commit -q -m "bench(quant-ledger): $1
+    err=$(git add -f "$f" "$s" "$OUT/ledger.log" 2>&1 \
+          && git commit -q -m "bench(quant-ledger): $1
 
 Committed by rebuild_quant_ledger.sh the moment the arm finished, because the
-predecessor of this run was written up and never committed at all." 2>/dev/null; then
-      say "  committed $1"; return 0
-    fi
+predecessor of this run was written up and never committed at all." 2>&1)
+    if [ $? -eq 0 ]; then say "  committed $1"; return 0; fi
     sleep 4   # another process holds index.lock
   done
-  say "  WARNING: could not commit $1 -- COMMIT IT BY HAND"
+  say "  WARNING: could not commit $1 -- COMMIT BY HAND. git said: $err"
 }
 
 say "=== quant ledger rebuild on the 5080"
