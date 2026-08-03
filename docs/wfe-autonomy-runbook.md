@@ -10,9 +10,10 @@ Use this when an autonomous workflow stops or behaves unexpectedly.
 4. Check agent admission, provider, worktree, verification, and forge health for that node.
 5. Repair the named condition and resume the same work item.
 
-The default build opens a draft final PR; it does not mark the PR ready or merge the repository
-default branch automatically. The draft must have a proposal-derived title and include the original
-request, approved plan, diff summary, slice PRs, completed gates, and human-review boundary.
+The default build opens a draft final PR against the branch checked out when the repository was
+admitted. That integration lane can differ from the forge default. The workflow does not mark the PR
+ready or merge it automatically. The draft must have a proposal-derived title and include the
+original request, approved plan, diff summary, slice PRs, completed gates, and human-review boundary.
 
 If a final PR is non-draft, has a work-item ID for a title, lacks that review context, or was merged
 without the explicit human handoff, treat the run as failed even when its lifecycle row says

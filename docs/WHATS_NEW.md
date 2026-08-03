@@ -92,6 +92,12 @@ See [Event bus](EVENT_BUS.md).
 - Model context and output limits come from the registry. Retry preserves the tool contract.
 - Write-capable delegates get isolated worktrees. Container delegates default to no network, no
   credentials, bounded processes, and an explicit toolchain.
+- Every new session gets its own branch and worktree at session start, cut from the repository's
+  default branch. This now covers MCP sessions, which previously ran against the shared checkout.
+- Session worktree keys are derived from the whole session id. They were the first 16 characters,
+  which collided for ids built on a shared prefix and let concurrent sessions overwrite each other in
+  one checkout. Existing worktrees move to the new key on next session start; a clean one is
+  reclaimed automatically, and one holding uncommitted or unpushed work is kept and reported.
 - Package installation goes through a mediated cache and policy gate. Custom delegate images,
   package sets, and Dockerfiles are supported without giving the agent the Docker socket.
 - Local CLI agents execute on the thin client when the workspace is remote. Their login and working

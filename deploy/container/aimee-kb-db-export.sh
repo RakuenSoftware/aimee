@@ -63,6 +63,11 @@ started_here=0
 # still positive, but PostgreSQL logs a misleading FATAL for every probe because
 # that database intentionally does not exist.
 if ! "$PGBIN/pg_isready" --host="$PGSOCK" --dbname=postgres --quiet 2>/dev/null; then
+    # An export is the likeliest thing to be pointed at a cluster that was last
+    # stopped uncleanly, and pg_ctl's 60s default is shorter than the resulting
+    # crash recovery. Timing out here aborts the export with the data intact but
+    # unread; wait for recovery instead. See aimee-kb-entrypoint.sh.
+    export PGCTLTIMEOUT="${AIMEE_DB2_PGCTLTIMEOUT:-1800}"
     "$PGBIN/pg_ctl" --pgdata="$PGDATA" --wait --silent \
         --options="-c listen_addresses='' -c unix_socket_directories=$PGSOCK" start
     started_here=1

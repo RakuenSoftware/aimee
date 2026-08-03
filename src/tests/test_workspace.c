@@ -26,6 +26,7 @@ static void write_test_config(const char *yaml)
 }
 #include <aimee/workspace/workspace.h>
 #include "worktree_gc.h"
+#include "session_worktree_key.h"
 #include "platform_test_util.h"
 
 static void remove_tree(const char *path)
@@ -86,6 +87,19 @@ static int branch_exists(const char *repo, const char *name)
    snprintf(cmd, sizeof(cmd),
             "git -C '%s' rev-parse --verify --quiet 'refs/heads/%s' >/dev/null 2>&1", repo, name);
    return system(cmd) == 0;
+}
+
+/* Existence checks for the rekey/reclaim cases below. */
+static int dir_exists(const char *path)
+{
+   struct stat st;
+   return path && stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+static int file_exists(const char *path)
+{
+   struct stat st;
+   return path && stat(path, &st) == 0 && S_ISREG(st.st_mode);
 }
 
 static int file_contains(const char *path, const char *needle)
@@ -637,26 +651,95 @@ int main(void)
       for (int i = 0; i < 8; i++) /* lowercase hex */
          assert((a[i] >= '0' && a[i] <= '9') || (a[i] >= 'a' && a[i] <= 'f'));
 
-      /* Agreement across the dispatch/compute split: dispatch keys the worktree
-       * on session_id(), compute on the delegation id; for one delegation those
-       * resolve to the same id, so the work-names must match. Drift PAST the
-       * session-key width is tolerated — two sids that share the first
-       * WORKTREE_SID_KEY_LEN (16) chars collapse to one worktree. */
+      /* Ids that differ ONLY past the old 16-char key width must now stay
+       * distinct. This used to assert the opposite — the two collapsed onto one
+       * work-name, hence one worktree and one branch, and concurrent delegations
+       * silently overwrote each other. "aimee-task-" alone spends 11 of the 16
+       * characters, so shared-prefix ids were the norm, not a corner case. */
       assert(worktree_delegate_work_name("aimee-task-abcdef0123456789", b, sizeof(b)) == 0);
       assert(worktree_delegate_work_name("aimee-task-abcdef0123456789-retry", c, sizeof(c)) == 0);
-      assert(strcmp(b, c) == 0);
+      assert(strcmp(b, c) != 0);
 
-      /* Sids that diverge WITHIN the first 16 chars stay distinct — unrelated
-       * delegations never collapse onto one worktree. */
+      /* Sids diverging within the first 16 chars were always distinct; still are. */
       char d[32] = "";
       assert(worktree_delegate_work_name("aimee-task-ffffffff00000000", d, sizeof(d)) == 0);
       assert(strcmp(b, d) != 0);
+
+      /* Agreement across the dispatch/compute split still holds: dispatch keys
+       * on session_id(), compute on the delegation id, and for ONE delegation
+       * those are the same string — so they still derive the same work-name. */
+      char e[32] = "", f[32] = "";
+      assert(worktree_delegate_work_name("deleg-42-abcdef0123456789", e, sizeof(e)) == 0);
+      assert(worktree_delegate_work_name("deleg-42-abcdef0123456789", f, sizeof(f)) == 0);
+      assert(strcmp(e, f) == 0);
 
       /* arg guards */
       assert(worktree_delegate_work_name(NULL, a, sizeof(a)) == -1);
       assert(worktree_delegate_work_name("x", NULL, 32) == -1);
       char tiny[4];
       assert(worktree_delegate_work_name("x", tiny, sizeof(tiny)) == -1);
+   }
+
+   /* --- worktree_reclaim_legacy: the key derivation changed (16-char
+    *     truncation -> hash of the full id), so a session that spans the change
+    *     owns a worktree under the OLD key. It is recycled automatically when
+    *     clean, and KEPT when it holds work. --- */
+   {
+      char repo[512], cmd[2048], path[640], old_wt[640];
+      snprintf(repo, sizeof(repo), "%s/rekey-repo", tmpdir);
+      init_real_git_repo(repo);
+      snprintf(path, sizeof(path), "%s/base.txt", repo);
+      write_text_file(path, "base\n");
+      snprintf(cmd, sizeof(cmd),
+               "git -C '%s' add -A && git -C '%s' commit -q -m base && git -C '%s' branch -M main",
+               repo, repo, repo);
+      assert(system(cmd) == 0);
+
+      /* An id whose old key ("aimee-task-abcd") differs from its new key. */
+      const char *sid = "aimee-task-abcdef0123456789";
+      char old_key[SESSION_WORKTREE_KEY_MAX], new_key[SESSION_WORKTREE_KEY_MAX];
+      session_worktree_key_legacy(sid, old_key, sizeof(old_key));
+      session_worktree_key(sid, new_key, sizeof(new_key));
+      assert(strcmp(old_key, new_key) != 0);
+
+      /* Seed the pre-rekey worktree exactly as the old code left it. */
+      snprintf(old_wt, sizeof(old_wt), "%s/.aimee/worktrees/%s/main", repo, old_key);
+      snprintf(cmd, sizeof(cmd), "git -C '%s' worktree add -q -b 'aimee/session/%s' '%s' main",
+               repo, old_key, old_wt);
+      assert(system(cmd) == 0);
+      assert(dir_exists(old_wt));
+
+      /* Clean -> reclaimed, and the husk directory goes with it. */
+      worktree_reclaim_legacy(repo, sid, NULL);
+      assert(!dir_exists(old_wt));
+      char husk[640];
+      snprintf(husk, sizeof(husk), "%s/.aimee/worktrees/%s", repo, old_key);
+      assert(!dir_exists(husk));
+
+      /* Dirty -> kept. Recycling must never destroy work. */
+      const char *sid2 = "aimee-task-fedcba9876543210";
+      char old_key2[SESSION_WORKTREE_KEY_MAX], old_wt2[640];
+      session_worktree_key_legacy(sid2, old_key2, sizeof(old_key2));
+      snprintf(old_wt2, sizeof(old_wt2), "%s/.aimee/worktrees/%s/main", repo, old_key2);
+      snprintf(cmd, sizeof(cmd), "git -C '%s' worktree add -q -b 'aimee/session/%s' '%s' main",
+               repo, old_key2, old_wt2);
+      assert(system(cmd) == 0);
+      snprintf(path, sizeof(path), "%s/wip.txt", old_wt2);
+      write_text_file(path, "unsaved work\n");
+
+      worktree_reclaim_legacy(repo, sid2, NULL);
+      assert(dir_exists(old_wt2));
+      assert(file_exists(path));
+
+      /* A session whose two derivations agree has no legacy worktree to
+       * reclaim — the "old" path IS the live one, and must not be removed. */
+      char live_wt[640];
+      snprintf(live_wt, sizeof(live_wt), "%s/.aimee/worktrees/%s/main", repo, new_key);
+      snprintf(cmd, sizeof(cmd), "git -C '%s' worktree add -q -b 'aimee/session/%s' '%s' main",
+               repo, new_key, live_wt);
+      assert(system(cmd) == 0);
+      worktree_reclaim_legacy(repo, sid, NULL); /* old key no longer on disk */
+      assert(dir_exists(live_wt));
    }
 
    /* --- worktree GC deletes the branch of a merged worktree it removes, but

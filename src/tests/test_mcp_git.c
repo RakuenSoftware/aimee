@@ -9,6 +9,7 @@
 #include <sqlite3.h>
 #include "aimee.h"
 #include "modules/git/mcp_git.h"
+#include "session_worktree_key.h"
 #include "modules/workspace/workspace_provider.h"
 #include "modules/git/git_verify.h"
 #include "cJSON.h"
@@ -187,8 +188,12 @@ static void test_mcp_chdir_repairs_stale_delegate_tracked_cwd(void)
 
    char session_main[MAX_PATH_LEN];
    char stale_delegate[MAX_PATH_LEN];
-   snprintf(session_main, sizeof(session_main), "%s/.aimee/worktrees/102ee97d-session/main",
-            g_tmpdir);
+   /* Derive the key rather than hard-coding it. The session key is a hash of the
+    * full id now, not its first 16 characters — a literal path here silently
+    * stopped matching what the resolver computes. */
+   char skey[SESSION_WORKTREE_KEY_MAX];
+   session_worktree_key("102ee97d-session", skey, sizeof(skey));
+   snprintf(session_main, sizeof(session_main), "%s/.aimee/worktrees/%s/main", g_tmpdir, skey);
    snprintf(stale_delegate, sizeof(stale_delegate), "%s/.aimee/worktrees/deleg-24/37368447",
             g_tmpdir);
 
@@ -295,8 +300,10 @@ static void test_mcp_chdir_keeps_explicit_managed_worktree_despite_stale_session
 
    char active_worktree[MAX_PATH_LEN];
    char stale_worktree[MAX_PATH_LEN];
-   snprintf(active_worktree, sizeof(active_worktree), "%s/.aimee/worktrees/102ee97d-session/main",
-            g_tmpdir);
+   char akey[SESSION_WORKTREE_KEY_MAX];
+   session_worktree_key("102ee97d-session", akey, sizeof(akey));
+   snprintf(active_worktree, sizeof(active_worktree), "%s/.aimee/worktrees/%s/main", g_tmpdir,
+            akey);
    snprintf(stale_worktree, sizeof(stale_worktree), "%s/.aimee/worktrees/6ab82f0e-session/main",
             g_tmpdir);
    init_nested_git_repo(active_worktree, "active");

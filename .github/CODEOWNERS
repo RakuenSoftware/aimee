@@ -1,0 +1,8 @@
+# Release controls always require the project owner's review.
+/.github/CODEOWNERS @JBailes
+/.github/workflows/auto-release.yml @JBailes
+/.github/workflows/main-merge-approval.yml @JBailes
+/.github/workflows/publish-images.yml @JBailes
+/.github/workflows/release-thin-client.yml @JBailes
+/.github/workflows/release-policy.yml @JBailes
+/scripts/check-release-policy.sh @JBailes

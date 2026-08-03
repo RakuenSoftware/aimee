@@ -2,6 +2,7 @@
 #include "aimee.h"
 #include "log.h"
 #include <aimee/workspace/workspace.h>
+#include "session_worktree_key.h"
 #include "config_accessors.h"
 #include "index.h"
 #include "kb_client.h"
@@ -758,40 +759,25 @@ char *resolve_proposal_path(const char *proposal)
 /* --- Worktree Lifecycle --- */
 #include <unistd.h>
 
-/* Number of leading session-id characters used to key per-session worktree
- * paths and branch names. Widened from 8: an 8-hex prefix is only 32 bits of
- * entropy, so two independent sessions could draw the same key, land on the
- * same worktree directory / session branch, and end up sharing a checkout.
- * 16 chars lifts a well-minted id to 64 bits. Session ids shorter than this
- * (legacy 8-hex launch ids) map to themselves, so worktrees created before the
- * change keep their existing path. */
-#define WORKTREE_SID_KEY_LEN 16
+/* Worktree/branch key derivation now lives in session_worktree_key.c, shared
+ * with the thin client so both sides agree on where a session's worktree is.
+ *
+ * It replaced a 16-leading-character truncation. Truncation collided: ids minted
+ * on a shared prefix ("aimee-task-..." spends 11 of the 16) mapped to one key,
+ * hence one worktree and one branch, and concurrent writers overwrote each
+ * other. The key now hashes the FULL id. See session_worktree_key.h. */
+#define WORKTREE_SID_KEY_LEN (SESSION_WORKTREE_KEY_MAX - 1)
 
-/* Derive the stable worktree key from a session id: its first
- * WORKTREE_SID_KEY_LEN characters. All worktree path/branch derivations route
- * through here so every call site agrees on the same key. out must hold at
- * least WORKTREE_SID_KEY_LEN + 1 bytes. */
 static void worktree_session_key(const char *sid, char *out, size_t cap)
 {
-   if (!out || cap == 0)
-      return;
-   out[0] = '\0';
-   if (!sid)
-      return;
-   /* Sanitize to a path-safe token: the session id can come from an untrusted
-    * request (the webchat git panel / editor pass it in the body), and it is
-    * spliced into the worktree path/branch below — an unsanitized "../.." would
-    * escape the worktrees dir. Keep only [A-Za-z0-9_-]; map anything else to '_'.
-    * Server-minted ids (UUID/hex) are unaffected, so existing keys stay stable. */
-   size_t n = 0;
-   for (size_t i = 0; sid[i] && n < (size_t)WORKTREE_SID_KEY_LEN && n + 1 < cap; i++)
-   {
-      char c = sid[i];
-      int ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-               c == '_' || c == '-';
-      out[n++] = ok ? c : '_';
-   }
-   out[n] = '\0';
+   session_worktree_key(sid, out, cap);
+}
+
+/* The worktree this session owned under the PREVIOUS (truncating) key, if any.
+ * Used only to reclaim it — never to place new work. */
+static void worktree_session_key_old(const char *sid, char *out, size_t cap)
+{
+   session_worktree_key_legacy(sid, out, cap);
 }
 
 /* Compute the expected aimee-managed worktree path for a git repo and session.
@@ -1428,6 +1414,9 @@ static int worktree_create_sibling_at_ref(const char *git_root, const char *sid,
       fprintf(stderr, "aimee: created worktree at %s\n", wt_path);
       free(out);
       worktree_registry_record(git_root, wt_path, branch_name, sid, work_name, base_branch);
+      /* This session may still own a worktree under the pre-rekey key; take it
+       * back now rather than stranding it on disk. */
+      worktree_reclaim_legacy(git_root, sid, work_name);
 
       /* Register branch ownership so other sessions can't write to it.
        * Use the main repo root (git_root), not the worktree path. */
@@ -1662,15 +1651,17 @@ int worktree_create_sibling_on_branch(const char *git_root, const char *sid, con
    return worktree_create_sibling_from_anchor(git_root, sid, work_name, anchor_dir);
 }
 
-/* Clean up a session's worktree. Removes if clean, warns if dirty.
- * If work_name is non-NULL, targets the work-specific worktree. */
-void worktree_cleanup(const char *git_root, const char *sid, const char *work_name)
+/* Remove the worktree AT wt_path if it is clean; warn and keep it if it holds
+ * uncommitted changes or unpushed commits. Never destroys work.
+ *
+ * Takes the path rather than (sid, work_name) for the callers that already HAVE
+ * a path and must not re-derive one: the GC recovers a key from a directory
+ * name, and legacy reclaim targets a worktree under the OLD key. Re-deriving in
+ * those cases silently pointed at the wrong (or a non-existent) directory once
+ * the key stopped being a plain truncation. */
+void worktree_cleanup_path(const char *git_root, const char *wt_path)
 {
-   if (!git_root || !sid)
-      return;
-
-   char wt_path[MAX_PATH_LEN];
-   if (worktree_sibling_path(git_root, sid, work_name, wt_path, sizeof(wt_path)) != 0)
+   if (!git_root || !wt_path || !wt_path[0])
       return;
 
    struct stat st;
@@ -1714,6 +1705,64 @@ void worktree_cleanup(const char *git_root, const char *sid, const char *work_na
    else
       fprintf(stderr, "aimee: failed to remove worktree %s: %s\n", wt_path, out ? out : "unknown");
    free(out);
+}
+
+/* Clean up a session's worktree. Removes if clean, warns if dirty.
+ * If work_name is non-NULL, targets the work-specific worktree. */
+void worktree_cleanup(const char *git_root, const char *sid, const char *work_name)
+{
+   if (!git_root || !sid)
+      return;
+   char wt_path[MAX_PATH_LEN];
+   if (worktree_sibling_path(git_root, sid, work_name, wt_path, sizeof(wt_path)) != 0)
+      return;
+   worktree_cleanup_path(git_root, wt_path);
+}
+
+/* Reclaim the worktree this session owned under the PREVIOUS (truncating) key.
+ *
+ * The key derivation changed to stop two sessions colliding on one worktree, so
+ * a session that outlived the change would otherwise strand its old worktree and
+ * branch on disk forever. Runs right after the current-key worktree is in place,
+ * and only removes a CLEAN one — a stranded worktree holding real work is kept
+ * and reported, for an operator to reconcile. */
+void worktree_reclaim_legacy(const char *git_root, const char *sid, const char *work_name)
+{
+   if (!git_root || !sid || !sid[0])
+      return;
+
+   char old_key[SESSION_WORKTREE_KEY_MAX];
+   char new_key[SESSION_WORKTREE_KEY_MAX];
+   worktree_session_key_old(sid, old_key, sizeof(old_key));
+   worktree_session_key(sid, new_key, sizeof(new_key));
+   /* Same key under both derivations (short ids map to themselves) -> the
+    * "legacy" path IS the live one. Removing it would delete the session's
+    * own worktree. */
+   if (!old_key[0] || strcmp(old_key, new_key) == 0)
+      return;
+
+   char old_path[MAX_PATH_LEN];
+   int n = snprintf(old_path, sizeof(old_path), "%s/.aimee/worktrees/%s/%s", git_root, old_key,
+                    (work_name && work_name[0]) ? work_name : "main");
+   if (n < 0 || (size_t)n >= sizeof(old_path))
+      return;
+
+   struct stat st;
+   if (stat(old_path, &st) != 0 || !S_ISDIR(st.st_mode))
+      return; /* nothing stranded */
+
+   LOG_INFO("workspace", "reclaiming pre-rekey worktree '%s' for session '%s'", old_path, sid);
+   worktree_cleanup_path(git_root, old_path);
+
+   /* Drop the now-empty <old_key>/ parent so the worktrees dir does not
+    * accumulate husks. rmdir only succeeds when it is genuinely empty. */
+   if (stat(old_path, &st) != 0)
+   {
+      char parent[MAX_PATH_LEN];
+      if (snprintf(parent, sizeof(parent), "%s/.aimee/worktrees/%s", git_root, old_key) <
+          (int)sizeof(parent))
+         (void)rmdir(parent);
+   }
 }
 
 static char *worktree_status_porcelain(const char *wt_path)
