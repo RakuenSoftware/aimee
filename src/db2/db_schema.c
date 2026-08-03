@@ -767,30 +767,67 @@ const char *const DB2_DERIVED_VECTOR_TABLES[] = {"kb_embeddings",
 /* Does any vector table hold a row?
  *
  * Returns 1 (has vectors), 0 (provably empty), or -1 (could not tell). Callers must
- * treat -1 as "has vectors": an unprovable corpus is not an empty one. A table that
- * does not exist holds nothing, so a failed prepare is skipped rather than fatal —
- * this runs during init, where the schema may be partly applied. */
+ * treat -1 as "has vectors": an unprovable corpus is not an empty one. */
+
+/* Does `table` exist? 1 yes, 0 no, -1 could not ask. Asked explicitly rather than
+ * inferred from a failed read: "the table is absent" and "the table is there but I
+ * cannot read it" are opposite answers to the emptiness question, and a failed prepare
+ * cannot tell them apart. Treating both as absence let one unreadable table plus one
+ * empty table report a corpus as provably empty. */
+static int corpus_table_exists(void *conn, const char *table)
+{
+   char err[256] = "";
+   /* Views count as existing. Postgres's to_regclass resolves them, so the shim has to
+    * as well or the two backends disagree about what "absent" means — and the answer
+    * that matters is "is there something under this name I would have to read", not
+    * "is it specifically a table". */
+   const char *sql = aimee_pg_is_shim()
+                         ? "SELECT name FROM sqlite_master WHERE type IN ('table','view') "
+                           "AND name=?1"
+                         : "SELECT to_regclass(?1)";
+   aimee_pg_stmt_t *probe = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!probe)
+      return -1;
+   if (aimee_pg_bind_text(probe, "?1", table) != 0)
+   {
+      aimee_pg_finalize(probe);
+      return -1;
+   }
+   int exists = 0;
+   if (aimee_pg_step(probe, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      const char *resolved = aimee_pg_column_text(probe, 0);
+      exists = resolved && resolved[0];
+   }
+   aimee_pg_finalize(probe);
+   return exists;
+}
+
 static int corpus_has_vectors(void *conn)
 {
-   int checked = 0;
    for (int i = 0; DB2_DERIVED_VECTOR_TABLES[i]; i++)
    {
+      int exists = corpus_table_exists(conn, DB2_DERIVED_VECTOR_TABLES[i]);
+      if (exists < 0)
+         return -1; /* could not even ask whether it is there */
+      if (!exists)
+         continue; /* absent, and absence IS proof that it holds nothing */
+
       char err[256] = "";
       char sql[160];
       snprintf(sql, sizeof(sql), "SELECT 1 FROM %s LIMIT 1", DB2_DERIVED_VECTOR_TABLES[i]);
       aimee_pg_stmt_t *q = aimee_pg_prepare(conn, sql, err, sizeof(err));
       if (!q)
-         continue; /* absent table -> nothing embedded in it */
+         return -1; /* it exists and we cannot read it: never call that empty */
       aimee_pg_step_t step = aimee_pg_step(q, err, sizeof(err));
       aimee_pg_finalize(q);
       if (step == AIMEE_PG_ROW)
          return 1;
       if (step != AIMEE_PG_DONE)
-         return -1; /* a live table we could not read: do not claim it is empty */
-      checked++;
+         return -1;
    }
-   /* No vector table readable at all is not proof of emptiness. */
-   return checked > 0 ? 0 : -1;
+   /* Every table was either provably absent or read and found empty. */
+   return 0;
 }
 
 /* Record/check the embedder's VECTOR-SPACE identity (the gateway's /health

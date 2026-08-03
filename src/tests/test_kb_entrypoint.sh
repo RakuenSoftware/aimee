@@ -29,6 +29,14 @@ export AIMEE_KB_ENTRYPOINT_SOURCE_ONLY
 echo "kb_is_serving: flags mean serve, a bare word means one-shot"
 kb_is_serving            && ok "no args -> serving"            || bad "no args should serve"
 kb_is_serving --http-port=8741 && ok "--http-port -> serving"  || bad "flag should serve"
+
+# Informational flags are one-shots: aimee-kb answers them at argv[1] and exits. Treating
+# every -* as serving refused `docker run <image> --help` on a fresh install, which is
+# both the first thing someone types and the moment they least likely have an embedder.
+for f in --help -h --version -v --print-embedding-model --bootstrap-vault-env \
+         --bootstrap-vault-stdin --list-credential-env-names; do
+    if kb_is_serving "$f"; then bad "$f must NOT count as serving"; else ok "$f -> one-shot"; fi
+done
 if kb_is_serving managed-server-identity install --uid=1000; then
     bad "a bare subcommand must NOT count as serving"
 else
@@ -58,6 +66,16 @@ case "$out" in
 *EMBEDDER_URL*) ok "message names the external fix" ;;
 *) bad "message does not name EMBEDDER_URL" ;;
 esac
+
+# Informational flags must reach the binary, not the refusal.
+for f in --help --version --print-embedding-model; do
+    out=$( (start_embedder "$f") 2>&1 ) && rc=0 || rc=$?
+    if [ "$rc" -eq 0 ]; then ok "$f with no embedder proceeds"; else bad "$f refused (rc=$rc)"; fi
+    case "$out" in
+    *"no embedder selected"*) bad "$f printed the serving refusal" ;;
+    *) ok "$f prints no refusal" ;;
+    esac
+done
 
 # The one-shot path must be untouched by the same missing configuration.
 out=$( (start_embedder managed-server-identity install --server-home=/x) 2>&1 ) && rc=0 || rc=$?

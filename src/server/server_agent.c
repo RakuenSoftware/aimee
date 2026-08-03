@@ -531,9 +531,14 @@ int handle_agent_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                                   "no agents are configured yet: choose a provider in the setup "
                                   "wizard, or run `aimee provider list --available`",
                                   NULL);
+      /* The file is there and the load still failed: unreadable, malformed, or
+       * truncated. Deliberately no strerror() — reaching here means access() SUCCEEDED,
+       * so errno carries nothing about this failure and printing it invents a cause. */
       char msg[512];
-      snprintf(msg, sizeof(msg), "agent configuration at %s could not be read (%s)",
-               path ? path : "?", strerror(errno));
+      snprintf(msg, sizeof(msg),
+               "agent configuration at %s exists but could not be loaded; "
+               "check that it is readable and valid JSON",
+               path ? path : "?");
       return server_send_error(conn, msg, NULL);
    }
    cJSON *resp = jo_ok();
