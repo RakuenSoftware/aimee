@@ -1,0 +1,15 @@
+im05: RemoteDisconnected: Remote end closed connection without response
+ng01: URLError: <urlopen error [Errno 111] Connection refused>
+ng04: URLError: <urlopen error [Errno 111] Connection refused>
+tr01: URLError: <urlopen error [Errno 111] Connection refused>
+tr04: URLError: <urlopen error [Errno 111] Connection refused>
+tr07: URLError: <urlopen error [Errno 111] Connection refused>
+tr10: URLError: <urlopen error [Errno 111] Connection refused>
+am01: URLError: <urlopen error [Errno 111] Connection refused>
+am04: URLError: <urlopen error [Errno 111] Connection refused>
+nv02: URLError: <urlopen error [Errno 111] Connection refused>
+nv05: URLError: <urlopen error [Errno 111] Connection refused>
+in02: URLError: <urlopen error [Errno 111] Connection refused>
+in05: URLError: <urlopen error [Errno 111] Connection refused>
+gv02: URLError: <urlopen error [Errno 111] Connection refused>
+gv05: URLError: <urlopen error [Errno 111] Connection refused>

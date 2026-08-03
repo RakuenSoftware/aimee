@@ -1,0 +1,6 @@
+[09:37:36Z] sizing: starting one server to measure resident VRAM
+[09:38:07Z]   one instance uses 8044 MiB of 16303 MiB
+[09:38:07Z]   -> running 2 processes
+[09:38:08Z]   all 2 servers up; VRAM now 8044 MiB
+[09:38:08Z] START v5small.E4B.UD-Q4_K_XL across 2 shards
+[09:54:24Z] FAIL v5small.E4B.UD-Q4_K_XL: 114 errored rows (11%), discarding
