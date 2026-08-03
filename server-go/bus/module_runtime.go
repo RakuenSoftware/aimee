@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	moduleMaxInFlight = 16
-	moduleIdle        = time.Millisecond
+	moduleMaxInFlight  = 16
+	moduleIdle         = time.Millisecond
+	moduleConnectRetry = 100 * time.Millisecond
 )
 
 var (
@@ -121,16 +122,33 @@ func validateModuleConfig(config ModuleProcessConfig) (map[uint32]uint32, error)
 	return stages, nil
 }
 
-func connectModule(config ModuleProcessConfig) (*Client, error) {
-	fd, err := unix.Socket(unix.AF_UNIX, unix.SOCK_SEQPACKET|unix.SOCK_CLOEXEC, 0)
-	if err != nil {
-		return nil, err
+func connectModule(ctx context.Context, config ModuleProcessConfig) (*Client, error) {
+	for {
+		fd, err := unix.Socket(unix.AF_UNIX, unix.SOCK_SEQPACKET|unix.SOCK_CLOEXEC, 0)
+		if err != nil {
+			return nil, err
+		}
+		err = unix.Connect(fd, &unix.SockaddrUnix{Name: config.SocketPath})
+		if err == nil {
+			client, attachErr := AttachAs(fd, config.PrincipalClass, config.PrincipalRef)
+			unix.Close(fd)
+			return client, attachErr
+		}
+		unix.Close(fd)
+		// A daemon restart can leave its old socket pathname in place until the
+		// new host replaces it. The supervisor sees a socket and launches us in
+		// that window; wait for the replacement listener instead of reporting a
+		// spurious module crash. Missing sockets and policy errors still fail
+		// immediately so configuration mistakes remain visible.
+		if !errors.Is(err, unix.ECONNREFUSED) {
+			return nil, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(moduleConnectRetry):
+		}
 	}
-	defer unix.Close(fd)
-	if err := unix.Connect(fd, &unix.SockaddrUnix{Name: config.SocketPath}); err != nil {
-		return nil, err
-	}
-	return AttachAs(fd, config.PrincipalClass, config.PrincipalRef)
 }
 
 // RunModuleProcess attaches to a daemon's local bus and serves until ctx is
@@ -141,8 +159,14 @@ func RunModuleProcess(ctx context.Context, config ModuleProcessConfig) error {
 	if err != nil {
 		return err
 	}
-	client, err := connectModule(config)
+	if ctx == nil {
+		return ErrModuleConfig
+	}
+	client, err := connectModule(ctx, config)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
 		return fmt.Errorf("%w: %s attach: %v", ErrModuleRuntime, config.ModuleName, err)
 	}
 	defer client.Detach()

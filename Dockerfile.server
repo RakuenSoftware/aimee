@@ -50,7 +50,10 @@ ARG AIMEE_VERSION=""
 # `aimee hooks pre` is the PreToolUse guard. Without the binary in the image a
 # delegate has no aimee tools and no guard can run — it gets a bare shell and its
 # own credentials, which is the opposite of the intent.
-RUN make -C src ../aimee-server ../aimee ../aimee-forwarder -j"$(nproc)" ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE_VERSION}
+RUN build_version="$AIMEE_VERSION" \
+    && if [ -z "$build_version" ]; then build_version=$(cat src/core/VERSION); fi \
+    && make -C src ../aimee-server ../aimee ../aimee-forwarder -j"$(nproc)" \
+         GIT_VERSION="v$build_version"
 
 # Build the independently supervised same-container module adapters from the
 # canonical contract. C processes link only the extracted event-bus client;
@@ -58,6 +61,7 @@ RUN make -C src ../aimee-server ../aimee ../aimee-forwarder -j"$(nproc)" ${AIMEE
 RUN python3 scripts/export_c_repositories.py --runtime-bundle /module-runtime \
     && mkdir -p /module-runtime/bin \
     && for source in /module-runtime/src/*.c; do \
+         [ -e "$source" ] || continue; \
          binary="${source##*/}"; binary="${binary%.c}"; \
          cc -std=c11 -O2 -Wall -Wextra -Werror -Isrc/core/event_bus/include \
            -Isrc/modules/memory/include -Isrc/modules/learning/include \

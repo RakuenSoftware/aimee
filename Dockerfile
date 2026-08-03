@@ -41,11 +41,15 @@ ARG AIMEE_VERSION=""
 # build stage), then build the kb with AIMEE_TREESITTER=1 (real-AST C/C++ class/
 # method extraction). See docs/proposals/pending/cpp-class-method-extraction.md.
 RUN sh scripts/fetch-treesitter.sh \
-    && make -C src ../aimee-kb -j"$(nproc)" AIMEE_TREESITTER=1 ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE_VERSION}
+    && build_version="$AIMEE_VERSION" \
+    && if [ -z "$build_version" ]; then build_version=$(cat src/core/VERSION); fi \
+    && make -C src ../aimee-kb -j"$(nproc)" AIMEE_TREESITTER=1 \
+         GIT_VERSION="v$build_version"
 
 RUN python3 scripts/export_c_repositories.py --runtime-bundle /module-runtime \
     && mkdir -p /module-runtime/bin \
     && for source in /module-runtime/src/*.c; do \
+         [ -e "$source" ] || continue; \
          binary="${source##*/}"; binary="${binary%.c}"; \
          cc -std=c11 -O2 -Wall -Wextra -Werror -Isrc/core/event_bus/include \
            -Isrc/modules/memory/include -Isrc/modules/learning/include \

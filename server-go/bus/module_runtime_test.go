@@ -3,9 +3,12 @@ package bus
 import (
 	"bytes"
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 type fakeModuleBus struct {
@@ -185,6 +188,35 @@ func TestGoModuleRuntimeConfigAndBodyLimitMatchC(t *testing.T) {
 		Stages: []ModuleStage{{EventKind: 1, StageID: 1}, {EventKind: 1, StageID: 2}}})
 	if err == nil {
 		t.Fatal("accepted duplicate event kind")
+	}
+}
+
+func TestConnectModuleWaitsOutStaleSocket(t *testing.T) {
+	path := t.TempDir() + "/stale.sock"
+	fd, err := unix.Socket(unix.AF_UNIX, unix.SOCK_SEQPACKET|unix.SOCK_CLOEXEC, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := unix.Bind(fd, &unix.SockaddrUnix{Name: path}); err != nil {
+		unix.Close(fd)
+		t.Fatal(err)
+	}
+	unix.Close(fd) // Leave a pathname with no listener, as a restarted host can.
+
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	_, err = connectModule(ctx, ModuleProcessConfig{SocketPath: path})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("stale socket attach = %v, want context deadline", err)
+	}
+}
+
+func TestConnectModuleDoesNotHideMissingSocket(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := connectModule(ctx, ModuleProcessConfig{SocketPath: t.TempDir() + "/missing.sock"})
+	if !errors.Is(err, unix.ENOENT) {
+		t.Fatalf("missing socket attach = %v, want ENOENT", err)
 	}
 }
 
