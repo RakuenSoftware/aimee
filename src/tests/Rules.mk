@@ -1189,6 +1189,17 @@ $(TESTPREFIX)/unit-test-cli-v1-delegate: $(OBJDIR)/tests/test_cli_v1_delegate.o 
                                   $(OBJDIR)/codex_auth.o $(OBJDIR)/posix/platform_path.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
+# The test INCLUDES cli_v1_routes_b.c to reach a static marshaller, so that
+# object must not also be linked here or every symbol in it is duplicate.
+TEST_TARGETS += $(TESTPREFIX)/unit-test-workspace-add-noscan
+$(TESTPREFIX)/unit-test-workspace-add-noscan: $(OBJDIR)/tests/test_workspace_add_noscan.o \
+                                  $(OBJDIR)/cli_v1_routes.o \
+                                  $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o \
+                                  $(OBJDIR)/cli_client.o $(OBJDIR)/posix/cli_client.o \
+                                  $(OBJDIR)/aimee_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o \
+                                  $(OBJDIR)/aimee_home.o $(OBJDIR)/cJSON.o $(PLATFORM_BASIC_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 $(TESTPREFIX)/unit-test-cli-v1-subcommands: $(OBJDIR)/tests/test_cli_v1_subcommands.o \
                                   $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o \
                                   $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o \

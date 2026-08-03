@@ -199,8 +199,18 @@ int handle_workspace_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * background ingest timer reconciles the workspace registry and indexes every
     * discovered project on its own. We only kick an eager scan here when kb is
     * already live, so a down kb never blocks this RPC on a 15s autostart — the
-    * background worker picks the projects up once the service is available. */
-   int kb_live = kb_client_is_live();
+    * background worker picks the projects up once the service is available.
+    *
+    * The eager scan is a convenience, and on a large tree it is an expensive one:
+    * it walks every discovered project before this RPC answers, so registering a
+    * 4,000-file repository takes minutes and a caller with a timeout gives up on
+    * a registration that already succeeded. `scan: false` registers and returns,
+    * leaving the projects to the background ingest timer that would have
+    * reconciled them anyway. Default stays true: an interactive
+    * `aimee workspace add` should still say whether the index is populated. */
+   const cJSON *scan_req = cJSON_GetObjectItemCaseSensitive(req, "scan");
+   int eager_scan = cJSON_IsBool(scan_req) ? cJSON_IsTrue(scan_req) : 1;
+   int kb_live = eager_scan && kb_client_is_live();
    cJSON *resp = jo_ok();
    jo_add_str(resp, "path", abs);
    cJSON *arr = cJSON_AddArrayToObject(resp, "projects");
@@ -216,7 +226,12 @@ int handle_workspace_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       if (!kb_live)
       {
          cJSON_AddBoolToObject(p, "indexed", 0);
-         jo_add_str(p, "reason", "knowledge service offline — queued for background ingest");
+         /* Say which of the two it was. Reporting "knowledge service offline"
+          * for a scan the caller asked us to skip would be a false diagnosis of
+          * a healthy kb. */
+         jo_add_str(p, "reason",
+                    eager_scan ? "knowledge service offline — queued for background ingest"
+                               : "scan not requested — queued for background ingest");
          cJSON_AddItemToArray(arr, p);
          continue;
       }
