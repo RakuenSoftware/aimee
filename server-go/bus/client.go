@@ -70,10 +70,19 @@ type Event struct {
 // Attach performs the handshake over a connected SOCK_SEQPACKET socket, receives
 // the three descriptors, and maps the regions. The socket is not closed here.
 func Attach(sock int) (*Client, error) {
+	return AttachAs(sock, 0, 0)
+}
+
+// AttachAs performs an authenticated module attach. The host treats class and
+// ref as claims only: its admission policy also binds them to SO_PEERCRED and
+// the canonical executable path before granting event capabilities.
+func AttachAs(sock int, principalClass uint32, principalRef uint32) (*Client, error) {
 	var req [attachReqBytes]byte
 	binary.LittleEndian.PutUint32(req[0:], attachReqMagic)
 	binary.LittleEndian.PutUint16(req[4:], WireVersion) // min
 	binary.LittleEndian.PutUint16(req[6:], WireVersion) // max
+	binary.LittleEndian.PutUint32(req[8:], principalClass)
+	binary.LittleEndian.PutUint32(req[12:], principalRef)
 	if err := unix.Sendmsg(sock, req[:], nil, nil, 0); err != nil {
 		return nil, err
 	}

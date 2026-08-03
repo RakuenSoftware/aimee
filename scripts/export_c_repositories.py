@@ -19,6 +19,8 @@ import shutil
 import subprocess
 import sys
 
+import validate_module_process_contracts as process_contracts
+
 
 ROOT = Path(__file__).resolve().parent.parent
 INVENTORY = ROOT / "tests/baselines/modules/canonical-inventory.yaml"
@@ -199,10 +201,15 @@ def module_owned_files(module_id: str, descriptor: dict[str, object]) -> list[st
     return result
 
 
-def module_main(module_id: str, principal_ref: int) -> str:
+def module_main(module_id: str, principal_ref: int, stages: list[dict[str, object]]) -> str:
+    cases = "\n".join(
+        f"   case {stage['event_kind']}u: return {stage['id']}u;"
+        for stage in stages
+    )
     return f"""#define _POSIX_C_SOURCE 200809L
 #include <aimee/core/event_bus/bus_client.h>
 #include <aimee/core/event_bus/bus_endpoint.h>
+#include <aimee/core/event_bus/module_protocol.h>
 
 #include <signal.h>
 #include <stdint.h>
@@ -215,6 +222,36 @@ static void stop(int signal_number)
 {{
    (void)signal_number;
    running = 0;
+}}
+
+static uint64_t now_ns(void)
+{{
+   struct timespec now;
+   if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+      return 0;
+   return (uint64_t)now.tv_sec * 1000000000ULL + (uint64_t)now.tv_nsec;
+}}
+
+static uint32_t stage_for_kind(uint32_t kind)
+{{
+   switch (kind)
+   {{
+{cases}
+   default: return 0;
+   }}
+}}
+
+static void reply_status(bus_client_t *client, const bus_event_t *event, uint32_t stage_id,
+                         uint16_t status, uint64_t trace_id)
+{{
+   uint8_t payload[AIMEE_MODULE_MESSAGE_HEADER_LEN];
+   aimee_module_message_t reply = {{.operation = AIMEE_MODULE_OP_RESULT,
+                                    .status = status,
+                                    .stage_id = stage_id ? stage_id : 1,
+                                    .trace_id = trace_id}};
+   if (aimee_module_message_encode(&reply, payload, sizeof payload) != 0)
+      (void)bus_client_reply(client, event->frame.event_kind,
+                             event->frame.correlation_id, payload, sizeof payload);
 }}
 
 int main(int argc, char **argv)
@@ -239,16 +276,32 @@ int main(int argc, char **argv)
    bus_endpoint_close(&socket_fd);
    while (running && !bus_client_epoch_changed(&client))
    {{
-      struct timespec now;
-      if (clock_gettime(CLOCK_MONOTONIC, &now) == 0)
-         bus_client_heartbeat(&client, (uint64_t)now.tv_sec * 1000000000ULL + now.tv_nsec);
+      uint64_t now = now_ns();
+      if (now != 0)
+         bus_client_heartbeat(&client, now);
       bus_event_t event;
       bus_client_result_t result = bus_client_poll(&client, &event);
       if (result == BUS_CLIENT_EPOCH)
          break;
       if (result == BUS_CLIENT_OK && (event.frame.hdr_flags & BUS_F_REQUEST))
-         (void)bus_client_reply(&client, event.frame.event_kind, event.frame.correlation_id,
-                                event.payload, event.payload_len);
+      {{
+         uint32_t expected_stage = stage_for_kind(event.frame.event_kind);
+         aimee_module_message_t request;
+         aimee_module_message_result_t decoded = aimee_module_message_decode(
+             event.payload, event.payload_len, &request);
+         if (expected_stage == 0 || decoded != AIMEE_MODULE_MESSAGE_OK ||
+             request.operation != AIMEE_MODULE_OP_INVOKE || request.stage_id != expected_stage)
+            reply_status(&client, &event, expected_stage, AIMEE_MODULE_STATUS_INVALID_REQUEST, 0);
+         else if (aimee_module_deadline_expired(request.deadline_ns, now))
+            reply_status(&client, &event, expected_stage,
+                         AIMEE_MODULE_STATUS_DEADLINE_EXCEEDED, request.trace_id);
+         else
+            /* The repository process is deliberately fail-closed until its owned
+             * implementation replaces this generated boundary adapter. Echoing a
+             * request would falsely claim the feature stage executed. */
+            reply_status(&client, &event, expected_stage,
+                         AIMEE_MODULE_STATUS_CAPABILITY_ABSENT, request.trace_id);
+      }}
       const struct timespec idle = {{.tv_sec = 0, .tv_nsec = 1000000}};
       nanosleep(&idle, NULL);
    }}
@@ -262,7 +315,7 @@ def export_module(
     output_root: Path,
     module_id: str,
     classification: str,
-    principal_ref: int,
+    contract: dict[str, object],
     timestamp: str,
 ) -> dict[str, object]:
     descriptor_path = ROOT / f"src/modules/{module_id}/module.yaml"
@@ -275,11 +328,17 @@ def export_module(
     for relative in owned:
         copy_file(relative, repository)
     shutil.copy2(ROOT / "LICENSE", repository / "LICENSE")
-    write_text(repository / "runtime/main.c", module_main(module_id, principal_ref))
     binary = f"aimee-module-{module_id}"
-    write_text(
-        repository / "grants/module.grant.in",
-        f"""version=1
+    execution = contract["execution"]
+    if execution == "process":
+        principal_ref = contract["principal_ref"]
+        stages = contract["stages"]
+        assert isinstance(principal_ref, int) and isinstance(stages, list)
+        serve = ",".join(str(stage["event_kind"]) for stage in stages)
+        write_text(repository / "runtime/main.c", module_main(module_id, principal_ref, stages))
+        write_text(
+            repository / "grants/module.grant.in",
+            f"""version=1
 principal_class={PRINCIPAL_CLASS}
 principal_ref={principal_ref}
 uid=self
@@ -287,12 +346,12 @@ executable=@CMAKE_INSTALL_FULL_BINDIR@/{binary}
 publish=
 subscribe=
 request=
-serve=
+serve={serve}
 """,
-    )
-    write_text(
-        repository / "CMakeLists.txt",
-        f"""cmake_minimum_required(VERSION 3.16)
+        )
+        write_text(
+            repository / "CMakeLists.txt",
+            f"""cmake_minimum_required(VERSION 3.16)
 project(aimee_module_{module_id.replace('-', '_')} VERSION 0.1.0 LANGUAGES C)
 
 include(GNUInstallDirs)
@@ -308,21 +367,76 @@ install(TARGETS {binary} RUNTIME DESTINATION ${{CMAKE_INSTALL_BINDIR}})
 install(FILES ${{CMAKE_CURRENT_BINARY_DIR}}/{module_id}.grant
         DESTINATION ${{CMAKE_INSTALL_DATADIR}}/aimee/module-grants)
 """,
-    )
+        )
+        runtime_text = f"""It builds `{binary}` as a separate process for the
+{', '.join(contract['placements'])} bus. Its generated grant serves exactly the
+declared stage event kinds. The boundary adapter returns typed
+`capability_absent` until the owned implementation is ported behind it; it never
+echoes a request or reports false success.
+
+The daemon admits the process only when its installed absolute executable path,
+UID, principal class, principal reference, and event-kind grants match the
+installed `.grant` file. Copy that generated grant into each declared daemon
+policy directory under `modules.d`.
+"""
+    else:
+        write_text(
+            repository / "CMakeLists.txt",
+            f"""cmake_minimum_required(VERSION 3.16)
+project(aimee_module_{module_id.replace('-', '_')} VERSION 0.1.0 LANGUAGES NONE)
+include(GNUInstallDirs)
+install(DIRECTORY src/ DESTINATION ${{CMAKE_INSTALL_DATADIR}}/aimee/sources/{module_id}/src)
+install(DIRECTORY docs/ DESTINATION ${{CMAKE_INSTALL_DATADIR}}/aimee/sources/{module_id}/docs)
+""",
+        )
+        runtime_text = """This component executes inside the trusted C core. It
+does not receive a bus principal, a process shim, or a grant. The repository is
+the independently versioned source owner consumed by the server/KB core build.
+"""
+    if execution == "process":
+        workflow = f"""name: module
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: RakuenSoftware/aimee-core-c
+          ref: v0.1.0
+          path: _aimee-core
+      - run: cmake -S _aimee-core -B _core-build -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build _core-build --parallel 2
+      - run: cmake --install _core-build --prefix "$PWD/_prefix"
+      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$PWD/_prefix"
+      - run: cmake --build build --parallel 2
+      - run: test -x build/{binary}
+"""
+    else:
+        workflow = """name: source-package
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m json.tool SOURCE_MANIFEST.json >/dev/null
+      - run: cmake -S . -B build -DCMAKE_INSTALL_PREFIX="$PWD/_prefix"
+      - run: cmake --install build
+"""
+    write_text(repository / ".github/workflows/ci.yml", workflow)
     write_text(
         repository / "README.md",
         f"""# Aimee module: {module_id}
 
-This is the independent `{module_id}` source-ownership repository.  It pins
-`aimee-core` `0.1.0` exactly and builds `{binary}` as a separate process which
-attaches to either an aimee-server or aimee-kb local shared-memory bus.
+This is the independent `{module_id}` source-ownership repository.
 
-The daemon admits the process only when its installed absolute executable path,
-UID, principal class, principal reference, and event-kind grants match the
-installed `.grant` file.  Copy that generated grant into the daemon's
-`modules.d/server` or `modules.d/kb` policy directory.  Populate the four empty
-event lists only as the module's event contracts are externalized; an empty list
-allows lifecycle attachment and heartbeat but no event injection.
+{runtime_text}
 
 The descriptor-owned production sources, headers, tests, and documentation are
 preserved at their canonical paths so their migration history remains auditable.
@@ -333,25 +447,82 @@ preserved at their canonical paths so their migration history remains auditable.
         "schema_version": 1,
         "module": module_id,
         "classification": classification,
-        "principal_class": PRINCIPAL_CLASS,
-        "principal_ref": principal_ref,
+        "execution": execution,
+        "placements": contract["placements"],
+        "principal_class": PRINCIPAL_CLASS if execution == "process" else None,
+        "principal_ref": contract.get("principal_ref"),
+        "stages": contract.get("stages", []),
         "source_sha256": digest_files(source_paths),
         "owned_files": owned,
     }
     write_text(repository / "SOURCE_MANIFEST.json", json.dumps(manifest, indent=2) + "\n")
     remote = f"{REMOTE_ROOT}/aimee-module-{module_id}.git"
     commit = initialize_repository(repository, remote, timestamp)
-    return {
+    pin = {
         "id": module_id,
         "classification": classification,
         "repository": remote,
         "ref": "v0.1.0",
         "version": "0.1.0",
         "commit": commit,
-        "principal_class": PRINCIPAL_CLASS,
-        "principal_ref": principal_ref,
+        "execution": execution,
+        "placements": contract["placements"],
         "source_sha256": manifest["source_sha256"],
     }
+    if execution == "process":
+        pin["principal_class"] = PRINCIPAL_CLASS
+        pin["principal_ref"] = contract["principal_ref"]
+        pin["serve"] = [stage["event_kind"] for stage in contract["stages"]]
+    return pin
+
+
+def export_runtime_bundle(output_root: Path) -> int:
+    """Emit build inputs and admission policy without creating Git repositories."""
+    if output_root.exists():
+        raise ExportError(f"refusing to overwrite existing output root: {output_root}")
+    output_root.mkdir(parents=True)
+    inventory = load_json(INVENTORY)
+    required = set(inventory.get("required", []))
+    contracts = process_contracts.validate()
+    placement_rows: dict[str, list[str]] = {"server": [], "kb": []}
+    count = 0
+    for module_id, contract in contracts.items():
+        if contract["execution"] != "process":
+            continue
+        descriptor = load_json(ROOT / f"src/modules/{module_id}/module.yaml")
+        enabled = module_id in required or descriptor.get("enabled_by_default") is True
+        principal_ref = contract["principal_ref"]
+        stages = contract["stages"]
+        assert isinstance(principal_ref, int) and isinstance(stages, list)
+        binary = f"aimee-module-{module_id}"
+        write_text(output_root / "src" / f"{binary}.c", module_main(module_id, principal_ref, stages))
+        serve = ",".join(str(stage["event_kind"]) for stage in stages)
+        grant = f"""version=1
+principal_class={PRINCIPAL_CLASS}
+principal_ref={principal_ref}
+uid=self
+executable=/usr/local/libexec/aimee-modules/{binary}
+publish=
+subscribe=
+request=
+serve={serve}
+"""
+        for placement in contract["placements"]:
+            write_text(output_root / "grants" / placement / f"{module_id}.grant", grant)
+            if enabled:
+                placement_rows[placement].append(f"{module_id}\t/usr/local/libexec/aimee-modules/{binary}")
+        count += 1
+    for placement, rows in placement_rows.items():
+        write_text(output_root / f"{placement}.modules", "\n".join(rows) + "\n")
+    write_text(
+        output_root / "MANIFEST.json",
+        json.dumps(
+            {"schema_version": 1, "contracts": str(process_contracts.CONTRACTS.relative_to(ROOT)),
+             "process_count": count, "placements": placement_rows},
+            indent=2,
+        ) + "\n",
+    )
+    return count
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -362,13 +533,22 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=ROOT.parent / "aimee-module-repositories",
         help="new directory which will contain the independent repositories",
     )
+    parser.add_argument(
+        "--runtime-bundle",
+        type=Path,
+        help="emit process sources, placement manifests, and grants instead of Git repositories",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
-    output_root = args.output_root.resolve()
+    output_root = (args.runtime_bundle or args.output_root).resolve()
     try:
+        if args.runtime_bundle is not None:
+            count = export_runtime_bundle(output_root)
+            print(f"export_c_repositories: wrote {count} process adapters to {output_root}")
+            return 0
         if output_root.exists():
             raise ExportError(f"refusing to overwrite existing output root: {output_root}")
         output_root.mkdir(parents=True)
@@ -378,6 +558,7 @@ def main(argv: list[str] | None = None) -> int:
         if not isinstance(required, list) or not isinstance(optional, list):
             raise ExportError(f"{INVENTORY}: required/optional must be arrays")
         timestamp = source_timestamp()
+        contracts = process_contracts.validate()
         lock: dict[str, object] = {
             "schema_version": 1,
             "core": export_core(output_root, timestamp),
@@ -387,11 +568,11 @@ def main(argv: list[str] | None = None) -> int:
         ordered = [(item, "required") for item in required] + [
             (item, "optional") for item in optional
         ]
-        for principal_ref, (module_id, classification) in enumerate(ordered, start=1):
+        for module_id, classification in ordered:
             if not isinstance(module_id, str):
                 raise ExportError(f"{INVENTORY}: module id must be a string")
             modules.append(
-                export_module(output_root, module_id, classification, principal_ref, timestamp)
+                export_module(output_root, module_id, classification, contracts[module_id], timestamp)
             )
         lock["modules"] = modules
         LOCK.parent.mkdir(parents=True, exist_ok=True)

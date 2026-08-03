@@ -61,6 +61,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         event_bus/bus_attach.c
         event_bus/bus_client.c
         event_bus/bus_endpoint.c
+        event_bus/module_protocol.c
         event_bus/bus_region.c
         event_bus/bus_ring.c
         event_bus/bus_wire.c
@@ -77,6 +78,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         event_bus/bus_client.c
         event_bus/bus_endpoint.c
         event_bus/bus_host.c
+        event_bus/module_protocol.c
         event_bus/bus_region.c
         event_bus/bus_region_host.c
         event_bus/bus_ring.c

@@ -253,6 +253,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-kb-graph-analytics $(TESTPREFIX)/unit-test-lessons-cite-tracker $(TESTPREFIX)/unit-test-lessons-reflect $(TESTPREFIX)/unit-test-lessons-actuate $(TESTPREFIX)/unit-test-lessons-session-capture $(TESTPREFIX)/unit-test-kb-doc-hash \
                $(TESTPREFIX)/unit-test-prompt-sanitizer \
                $(TESTPREFIX)/unit-test-bus-wire \
+               $(TESTPREFIX)/unit-test-module-protocol \
                $(TESTPREFIX)/unit-test-bus-ring \
                $(TESTPREFIX)/unit-test-bus-region \
                $(TESTPREFIX)/unit-test-bus-arena \
@@ -2847,6 +2848,11 @@ $(TESTPREFIX)/unit-test-bus-wire: $(OBJDIR)/tests/test_bus_wire.o \
                                   $(OBJDIR)/core/event_bus/bus_wire.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
 
+$(OBJDIR)/tests/test_module_protocol.o: C_FLAGS += -Icore/event_bus/include
+$(TESTPREFIX)/unit-test-module-protocol: $(OBJDIR)/tests/test_module_protocol.o \
+                                         $(OBJDIR)/core/event_bus/module_protocol.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
+
 # Event-bus SPSC ring (feature tree slice 2). Pure: no DB, no shared memory —
 # the ring lives in caller-supplied memory, which is what lets it land before
 # the region layout is settled.
@@ -3369,6 +3375,10 @@ unit-test-bus-ring: $(TESTPREFIX)/unit-test-bus-ring
 
 .PHONY: unit-test-bus-wire
 unit-test-bus-wire: $(TESTPREFIX)/unit-test-bus-wire
+	$<
+
+.PHONY: unit-test-module-protocol
+unit-test-module-protocol: $(TESTPREFIX)/unit-test-module-protocol
 	$<
 
 # Render-boundary prompt sanitizer (graph-feedback §4 / P0). Pure: no DB.

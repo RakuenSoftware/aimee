@@ -47,6 +47,7 @@ def main() -> int:
         if set(by_id) != set(expected_ids):
             return fail("module pin set differs from canonical inventory")
         required = set(inventory.get("required", []))
+        contracts = exporter.process_contracts.validate()
         for principal_ref, module_id in enumerate(expected_ids, start=1):
             item = by_id[module_id]
             classification = "required" if module_id in required else "optional"
@@ -56,8 +57,17 @@ def main() -> int:
                 return fail(f"{module_id}: unexpected repository")
             if item.get("version") != "0.1.0" or item.get("ref") != "v0.1.0":
                 return fail(f"{module_id}: version is not pinned to v0.1.0")
-            if item.get("principal_class") != exporter.PRINCIPAL_CLASS or item.get("principal_ref") != principal_ref:
-                return fail(f"{module_id}: principal identity mismatch")
+            contract = contracts[module_id]
+            if item.get("execution") != contract["execution"] or item.get("placements") != contract["placements"]:
+                return fail(f"{module_id}: execution/placement mismatch")
+            if contract["execution"] == "process":
+                expected_serve = [stage["event_kind"] for stage in contract["stages"]]
+                if (item.get("principal_class") != exporter.PRINCIPAL_CLASS or
+                        item.get("principal_ref") != principal_ref or
+                        item.get("serve") != expected_serve):
+                    return fail(f"{module_id}: process identity/grant mismatch")
+            elif any(key in item for key in ("principal_class", "principal_ref", "serve")):
+                return fail(f"{module_id}: core component has process identity")
             if not isinstance(item.get("commit"), str) or not COMMIT.fullmatch(item["commit"]):
                 return fail(f"{module_id}: commit is not an exact SHA-1")
             descriptor = exporter.load_json(ROOT / f"src/modules/{module_id}/module.yaml")

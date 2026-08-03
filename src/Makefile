@@ -399,12 +399,12 @@ ifneq ($(AIMEE_CORE_INSTALLED_VERSION),$(AIMEE_CORE_REQUIRED_VERSION))
 $(error AIMEE_CORE_PREFIX has version '$(AIMEE_CORE_INSTALLED_VERSION)', expected '$(AIMEE_CORE_REQUIRED_VERSION)')
 endif
 C_FLAGS += -I$(AIMEE_CORE_PREFIX)/include
-CORE_CONNECTION_SRCS =
-CORE_CONNECTION_OBJS =
-CORE_CONNECTION_LIB = $(AIMEE_CORE_PREFIX)/lib/libaimee-core-connection.a
-CORE_EVENT_BUS_SRCS =
-CORE_EVENT_BUS_OBJS =
-CORE_EVENT_BUS_LIB = $(AIMEE_CORE_PREFIX)/lib/libaimee-core-event-bus.a
+CORE_CONNECTION_SRCS :=
+CORE_CONNECTION_OBJS :=
+CORE_CONNECTION_LIB := $(AIMEE_CORE_PREFIX)/lib/libaimee-core-connection.a
+CORE_EVENT_BUS_SRCS :=
+CORE_EVENT_BUS_OBJS :=
+CORE_EVENT_BUS_LIB := $(AIMEE_CORE_PREFIX)/lib/libaimee-core-event-bus.a
 else
 CORE_CONNECTION_SRCS = core/connection/auth.c core/connection/control.c \
                   core/connection/endpoint.c core/connection/http1.c \
@@ -425,7 +425,7 @@ endif
 CORE_CONNECTION_OBJS = $(CORE_CONNECTION_SRCS:%.c=$(OBJDIR)/%.o)
 CORE_CONNECTION_LIB = $(OBJDIR)/libaimee-core-connection.a
 
-CORE_EVENT_BUS_SRCS = core/event_bus/bus_attach.c core/event_bus/bus_wire.c core/event_bus/bus_ring.c core/event_bus/bus_region.c core/event_bus/bus_region_host.c core/event_bus/bus_arena.c core/event_bus/bus_route.c core/event_bus/bus_runtime.c core/event_bus/bus_host.c core/event_bus/bus_client.c core/event_bus/bus_capture.c core/event_bus/bus_endpoint.c
+CORE_EVENT_BUS_SRCS = core/event_bus/bus_attach.c core/event_bus/bus_wire.c core/event_bus/module_protocol.c core/event_bus/bus_ring.c core/event_bus/bus_region.c core/event_bus/bus_region_host.c core/event_bus/bus_arena.c core/event_bus/bus_route.c core/event_bus/bus_runtime.c core/event_bus/bus_host.c core/event_bus/bus_client.c core/event_bus/bus_capture.c core/event_bus/bus_endpoint.c
 CORE_EVENT_BUS_OBJS = $(CORE_EVENT_BUS_SRCS:%.c=$(OBJDIR)/%.o)
 CORE_EVENT_BUS_LIB = $(OBJDIR)/libaimee-core-event-bus.a
 

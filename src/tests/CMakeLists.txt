@@ -138,6 +138,9 @@ aimee_add_test(test_bus_wire test_bus_wire.c ../core/event_bus/bus_wire.c)
 target_include_directories(test_bus_wire PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
 target_compile_definitions(test_bus_wire PRIVATE
   BUS_VECTOR_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bus")
+aimee_add_test(test_module_protocol test_module_protocol.c ../core/event_bus/module_protocol.c)
+target_include_directories(test_module_protocol PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
 aimee_add_test(test_bus_ring test_bus_ring.c ../core/event_bus/bus_ring.c)
 target_include_directories(test_bus_ring PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
 find_package(Threads REQUIRED)

@@ -17,6 +17,7 @@
   "sources": [
     "src/modules/tools/agent_tools.c",
     "src/modules/tools/agent_tools_anchored.c",
+    "src/modules/tools/agent_tools_completion.c",
     "src/modules/tools/agent_tools_dispatch.c"
   ],
   "private_headers": [
