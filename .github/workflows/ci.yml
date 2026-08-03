@@ -32,6 +32,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       docs_only: ${{ steps.classify.outputs.docs_only }}
+      # Separate from docs_only on purpose: see the documentation step below.
+      docs_changed: ${{ steps.classify.outputs.docs_changed }}
     steps:
       - uses: actions/checkout@v4
         if: github.event_name == 'pull_request'
@@ -48,21 +50,25 @@ jobs:
           # Protected-branch pushes and manual runs always receive the full gate.
           if [ "$EVENT_NAME" != pull_request ]; then
             echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            echo "docs_changed=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           # This allowlist is intentionally narrow. Anything executable,
           # generated from executable sources, or operational takes the full path.
           docs_only=true
+          docs_changed=false
           file_count=0
           while IFS= read -r -d '' path; do
             file_count=$((file_count + 1))
             case "$path" in
               README.md|CONTRIBUTING.md|MANUAL.md|OWNERS.md|docs/*.md|docs/images/*|docs/gen/*.json)
+                docs_changed=true
                 ;;
               */README.md)
                 case "$path" in
                   control-web/*|data/*|deploy/*|editors/*|runtime-web/*|scripts/*|server-go/*|src/*)
+                    docs_changed=true
                     ;;
                   *)
                     docs_only=false
@@ -81,6 +87,7 @@ jobs:
             docs_only=false
           fi
           echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
+          echo "docs_changed=$docs_changed" >> "$GITHUB_OUTPUT"
           echo "docs_only=$docs_only ($file_count changed file(s))"
 
   no-coauthor-trailers:
@@ -187,10 +194,30 @@ jobs:
       - name: Check managed authority packaging boundary
         if: needs.change-scope.outputs.docs_only != 'true'
         run: python3 scripts/check-managed-authority-packaging.py
+      # Runs unconditionally: it costs no network and no build, and the thing it guards
+      # is the gating logic itself, which is exactly the part a conditional step cannot
+      # be trusted to check.
+      - name: Test the CI change classifier
+        run: python3 -I scripts/tests/test_ci_change_scope.py
+
+      # docs_CHANGED, not docs_only. Gated on docs_only, this never ran for a pull
+      # request that touched documentation AND anything else -- which is most of them,
+      # and is how six em-dash violations reached testing in #2280: that PR edited
+      # docs/SYNTHESIS_MODELS.md plus one frontend file, so it was not docs-only, this
+      # step was skipped, lint reported success, and the violation then failed every
+      # branch cut from testing afterwards. The next docs-only PR ran the check and
+      # inherited someone else's failure, which is the worst way to find out.
+      #
+      # docs-gen-check and `git diff --check` stay on docs_only: the first needs a build
+      # and the second is about whitespace in the diff, and both already run in the full
+      # gate that a non-docs-only PR takes.
       - name: Check documentation
+        if: needs.change-scope.outputs.docs_changed == 'true'
+        run: python3 scripts/check-docs.py
+
+      - name: Check generated docs and diff hygiene
         if: needs.change-scope.outputs.docs_only == 'true'
         run: |
-          python3 scripts/check-docs.py
           make -C src docs-gen-check
           git diff --check
 
@@ -1153,25 +1180,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Bake targets built by each compose file. The cache scope is keyed by
+          # IMAGE, not by topology: T1 and T2 build aimee-kb from the same
+          # Dockerfile, and T2 and T3 build aimee-server from the same
+          # Dockerfile.server. Per-topology scopes stored those identical layers
+          # twice and denied each shard the other's work.
           - topology: T1
             compose_file: compose.yaml
-            cache_set: |
-              aimee-kb.cache-from=type=gha,scope=e2e-T1-aimee-kb
-              aimee-kb.cache-to=type=gha,scope=e2e-T1-aimee-kb,mode=max
-              aimee-control-web.cache-from=type=gha,scope=e2e-T1-aimee-control-web
-              aimee-control-web.cache-to=type=gha,scope=e2e-T1-aimee-control-web,mode=max
+            images: aimee-kb aimee-control-web
           - topology: T2
             compose_file: compose.server.yaml
-            cache_set: |
-              aimee-kb.cache-from=type=gha,scope=e2e-T2-aimee-kb
-              aimee-kb.cache-to=type=gha,scope=e2e-T2-aimee-kb,mode=max
-              aimee-server.cache-from=type=gha,scope=e2e-T2-aimee-server
-              aimee-server.cache-to=type=gha,scope=e2e-T2-aimee-server,mode=max
+            images: aimee-kb aimee-server
           - topology: T3
             compose_file: compose.server-standalone.yaml
-            cache_set: |
-              aimee-server.cache-from=type=gha,scope=e2e-T3-aimee-server
-              aimee-server.cache-to=type=gha,scope=e2e-T3-aimee-server,mode=max
+            images: aimee-server
     name: e2e-docker (${{ matrix.topology }})
     steps:
       - uses: actions/checkout@v4
@@ -1183,15 +1205,41 @@ jobs:
           docker compose version
           docker buildx version
           df -h / | tail -1
+      # A GitHub Actions cache is readable only by the ref that wrote it and by
+      # that ref's base branch. Cache written from a PR run therefore lands under
+      # refs/pull/N/merge, where NO other run can ever read it — while still
+      # counting against the repo's 10 GB quota and evicting the shared
+      # refs/heads/testing entries by LRU. That is what happened here: 9.5 GB of
+      # unreadable PR blobs pushed the repo to 14 GB, every e2e image build
+      # missed cache completely, and each shard rebuilt postgres, rust, the
+      # python venv and the C tree from scratch (12-18 min a shard).
+      #
+      # So: every run READS the shared per-image scope, only pushes to the
+      # default branch WRITE it. That also drops the mode=max export (~7 min a
+      # shard) from the PR path entirely.
+      - name: Resolve bake cache flags
+        id: cache_flags
+        env:
+          IMAGES: ${{ matrix.images }}
+          WRITE_CACHE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/testing' }}
+        run: |
+          {
+            echo 'set<<CACHE_FLAGS_EOF'
+            for img in $IMAGES; do
+              echo "${img}.cache-from=type=gha,scope=e2e-${img}"
+              if [ "$WRITE_CACHE" = "true" ]; then
+                echo "${img}.cache-to=type=gha,scope=e2e-${img},mode=max"
+              fi
+            done
+            echo CACHE_FLAGS_EOF
+          } >> "$GITHUB_OUTPUT"
       - name: Build topology images with persistent cache
         uses: docker/bake-action@v7
         with:
           source: .
           files: ${{ matrix.compose_file }}
           load: true
-          # Each image gets a distinct scope. Sharing one wildcard scope lets
-          # parallel Bake targets overwrite each other's exported cache.
-          set: ${{ matrix.cache_set }}
+          set: ${{ steps.cache_flags.outputs.set }}
       - name: Run Docker deploy topology ${{ matrix.topology }}
         # The aimee-server image builds webchat's SPA from its vendored
         # @rakuensoftware/smoothgui dependency — no npm token needed.
