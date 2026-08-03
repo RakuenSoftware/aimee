@@ -181,8 +181,9 @@ changes nothing arithmetic.
 | 32 slots in one process | 44/60 |
 | 2 isolated processes | 60/60 |
 | 3 isolated processes, full corpus | 1001/1001, three ways |
+| 1 process, full corpus | 1001/1001 |
 
-The last row is the one that settles it. **Three** independent runs of the same
+The last two rows settle it. **Three** independent runs of the same
 three-process arm, on the same 1001 notes and the same card, spread over days
 with server restarts between them, produced byte-identical raw completions on
 every single note in all three pairwise comparisons, and the same strict F1 to
@@ -208,17 +209,31 @@ F1. Changing nothing but the number of server processes moves the score by
 0.0105. Comparing an arm run at one process against an arm run at three is
 therefore not a comparison at all, and sample size does not help.
 
-One caution on that number, because we nearly published a worse version of it.
-Our first single-server reference was an older banked arm scoring 0.6114, which
-made for a tidy 0.0024 gap. Its device record says `total_slots : 4`. It was
-never a single-slot run at all — it belongs with the multi-slot configurations
-above, where a shared forward pass makes results non-reproducible by
-construction, and it is not comparable to anything in this section. The 0.6033
-figure is the honest one because `-np 1` is asserted in the harness on both
-sides. Whether the one-process configuration reproduces *itself* is a separate
-question, and a second single-server run is in flight to answer it. Until it
-lands, read 0.0105 as the distance between two configurations rather than as a
-settled constant.
+And the one-process configuration is not the sloppy one. Run it twice and it is
+also byte-identical, 1001/1001, at 0.6033 both times. Neither configuration
+drifts. They simply disagree with each other, permanently, by more than any
+effect this benchmark was built to detect.
+
+That is the whole finding in one line: **every configuration here reproduces
+itself exactly, and no two configurations agree.** Determinism is not a property
+you have or lack. It is a property of a configuration, and it says nothing about
+whether two configurations can be compared.
+
+One caution, because we nearly published a worse version of this. Our first
+single-server reference was an older banked arm scoring 0.6114, which made for a
+tidy 0.0024 gap. Its device record says `total_slots : 4`. It was never a
+single-slot run at all — it belongs with the multi-slot configurations above,
+where a shared forward pass makes results non-reproducible by construction, and
+it is not comparable to anything in this section. It even looks respectable from
+the outside: it sits between the two honest numbers and moves 645 of 1001 notes
+against one and 688 against the other, which is exactly the profile of a third
+configuration nobody labelled as one. The 0.6033 figure is the honest
+counterpart because `-np 1` is asserted in the harness on both sides.
+
+The operational form of that: **a run's slot count is part of its identity.**
+Ours was recorded in a `device.txt` next to the predictions and read by nobody
+until a number disagreed. That is finding 3's defect class again — a recorded
+signal that nothing consumes.
 
 So the production configuration is N
 single-slot servers, each with its own draft head, corpus split round-robin

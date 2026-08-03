@@ -6,11 +6,25 @@
 # servers: our E2B Q4 arm died with 9725 transport errors, and our own
 # container-wide pkill was doing the same to them. Their server is left running.
 #
-# Shard counts are pinned per FAMILY, not measured per arm. E4B Q4 and Q6 are
-# already banked at 3 processes, so E4B Q8 runs at 3 or it is not comparable to
-# them. No E2B arm has completed, so E2B is free to choose -- 4, which fits with
-# room to spare, because an arm that OOMs at hour two costs more than the fourth
-# process saves.
+# Shard counts are pinned at 3 for EVERY arm, and this is not a tuning knob.
+#
+# It was 4 for the E2B arms, on the reasoning that E4B was already banked at 3
+# and no E2B arm had finished, so E2B was "free to choose". Both halves of that
+# were wrong.
+#
+# 1. Process count changes the answer. Measured 2026-08-03 on the same corpus:
+#    one process against three moves 349 of 1001 notes and 0.0105 strict F1.
+#    That is larger than either quant effect this ladder exists to resolve, so
+#    an E2B ladder at 4 could never have been compared to the E4B ladder at 3.
+#    No arm is ever free to choose its process count; the campaign chooses once.
+#
+# 2. "Fits with room to spare" was a VRAM argument, and the binding limit here
+#    is system RAM. Four servers at ~6.8 GB RSS on a 30 GB host left ~3 GB free
+#    and the kernel killed a server twice mid-arm, silently -- the logs just
+#    stop. Three fits with the room the old comment claimed.
+#
+# The abandoned 4-process attempt is quarantined under
+# results/10k-sharded/quarantine/ with its own note.
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
@@ -23,17 +37,21 @@ say() { echo "[$(date -u +%H:%M:%SZ)] $*" | tee -a "$OUT/finish_xtx.log"; }
 # label|repo|nproc|base_port
 ARMS="\
 E4B.UD-Q8_K_XL.10k|unsloth/gemma-4-E4B-it-GGUF:UD-Q8_K_XL|3|8300
-E2B.UD-Q4_K_XL.10k|unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL|4|8400
-E2B.UD-Q6_K_XL.10k|unsloth/gemma-4-E2B-it-GGUF:UD-Q6_K_XL|4|8400
-E2B.UD-Q8_K_XL.10k|unsloth/gemma-4-E2B-it-GGUF:UD-Q8_K_XL|4|8400"
+E2B.UD-Q4_K_XL.10k|unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL|3|8400
+E2B.UD-Q6_K_XL.10k|unsloth/gemma-4-E2B-it-GGUF:UD-Q6_K_XL|3|8400
+E2B.UD-Q8_K_XL.10k|unsloth/gemma-4-E2B-it-GGUF:UD-Q8_K_XL|3|8400"
 
 say "=== XTX-only finish: 4 arms, $EXPECT notes each"
 while IFS='|' read -r label repo nproc port; do
   [ -n "${label:-}" ] || continue
   pred="$OUT/$label.pred.jsonl"
   if [ -s "$pred" ] && [ "$(wc -l < "$pred")" -ge "$EXPECT" ]; then say "SKIP $label (banked)"; continue; fi
-  # A previous attempt's rejected output must not be mistaken for a fresh start.
-  rm -f "$pred.errored"
+  # A previous attempt's rejected output must not be mistaken for a fresh start,
+  # but it is still raw output and deleting it loses the only record of how the
+  # attempt failed. Move it aside with a timestamp instead.
+  if [ -e "$pred.errored" ]; then
+    mv "$pred.errored" "$pred.errored.$(date -u +%Y%m%dT%H%M%SZ)"
+  fi
 
   say "--- $label  nproc=$nproc  port=$port"
   GOLD="$GOLD" OUT="$OUT" LABEL="$label" REPO="$repo" \
