@@ -235,22 +235,109 @@ if len(c) > 1:
 if c and next(iter(c)) != sys.argv[2]:
     sys.exit(f"WRONG MODEL: {sys.argv[1]} holds {dict(c)}, expected {sys.argv[2]}")
 PY
-if [ $? -ne 0 ]; then say "FAIL $LABEL: merge rejected (see above), discarding"; rm -f "$OUT/$LABEL.pred.jsonl"; exit 1; fi
+if [ $? -ne 0 ]; then say "FAIL $LABEL: merge rejected (see above), discarding"; rm -f "$OUT/$LABEL.pred.jsonl"; kill_servers; exit 1; fi
+
 # Row count is not completion. An arm whose servers died mid-run still produces a
 # row per note, each carrying a transport error, and this reported rows=10000/10000
 # and "OK" for a file that was 97% connection failures. score.py caught it; the
 # driver should not have needed rescuing.
-errs=$(python3 -c "
-import json
-print(sum(1 for l in open('$OUT/$LABEL.pred.jsonl') if json.loads(l).get('error')))" 2>/dev/null || echo 0)
-if [ "${errs:-0}" -gt 0 ]; then
-  pct=$(( errs * 100 / $(wc -l < "$OUT/$LABEL.pred.jsonl") ))
-  say "FAIL $LABEL: $errs errored rows (${pct}%), discarding"
-  mv "$OUT/$LABEL.pred.jsonl" "$OUT/$LABEL.pred.jsonl.errored"
-  exit 1
-fi
+#
+# This used to discard the whole arm on a single errored row. That is the wrong
+# trade at 10,000 notes: one dropped tunnel late in a four-hour arm threw away
+# every clean row with it. Measured 2026-08-03, E2B Q4 10k -- the shard-3 server
+# died, six notes errored, and the other 9,994 were about to be binned.
+#
+# So: re-run the errored notes against the servers that are still up, then judge
+# what is left. The retry is legitimate rather than a fudge because this exact
+# configuration reproduces itself byte-for-byte (finding 19: three runs of one
+# arm, 1001/1001 identical), so a note re-answered here is the answer the clean
+# run would have produced. What is NOT legitimate is quietly keeping an errored
+# row, which is why anything still failing after the retry passes kills the arm.
+errored_ids() {  # $1 = pred file -> ids on stdout
+  python3 -c "
+import json,sys
+for l in open(sys.argv[1]):
+    r=json.loads(l)
+    if r.get('error'): print(r['id'])" "$1" 2>/dev/null
+}
+
+RETRY_PASSES=${RETRY_PASSES:-2}
+pass=0
+while :; do
+  bad=$(errored_ids "$OUT/$LABEL.pred.jsonl")
+  nbad=$(printf '%s' "$bad" | grep -c . || true)
+  [ "${nbad:-0}" -eq 0 ] && break
+
+  if [ "$pass" -ge "$RETRY_PASSES" ]; then
+    pct=$(( nbad * 100 / $(wc -l < "$OUT/$LABEL.pred.jsonl") ))
+    say "FAIL $LABEL: $nbad rows still errored (${pct}%) after $pass retry pass(es), discarding"
+    say "  still failing: $(printf '%s' "$bad" | tr '\n' ' ')"
+    mv "$OUT/$LABEL.pred.jsonl" "$OUT/$LABEL.pred.jsonl.errored"
+    kill_servers
+    exit 1
+  fi
+  pass=$((pass+1))
+  say "  $nbad errored row(s), retry pass $pass: $(printf '%s' "$bad" | tr '\n' ' ')"
+
+  # Re-run only those notes, on BASE_PORT. Health is checked first: the usual
+  # cause of an errored row is that the server behind it died, and retrying into
+  # a dead port just burns the retry budget.
+  if ! ssh -n -o ConnectTimeout=10 $HOST "curl -sf --max-time 8 http://$EP:$BASE_PORT/health" >/dev/null 2>&1; then
+    say "  FAIL: $BASE_PORT is not healthy, cannot retry"
+    mv "$OUT/$LABEL.pred.jsonl" "$OUT/$LABEL.pred.jsonl.errored"
+    kill_servers
+    exit 1
+  fi
+  verify_model "$BASE_PORT" || { say "FAIL $LABEL: wrong model on $BASE_PORT at retry"; \
+    mv "$OUT/$LABEL.pred.jsonl" "$OUT/$LABEL.pred.jsonl.errored"; kill_servers; exit 1; }
+
+  printf '%s\n' "$bad" | grep . > "$SHARD_DIR/retry$pass.ids"
+  python3 - "$GOLD" "$SHARD_DIR/retry$pass.ids" "$SHARD_DIR/retry$pass.gold.jsonl" <<'PY'
+import json,sys
+gold, idfile, out = sys.argv[1], sys.argv[2], sys.argv[3]
+want={l.strip() for l in open(idfile) if l.strip()}
+with open(out,"w") as fh:
+    for line in open(gold):
+        if json.loads(line)["id"] in want: fh.write(line)
+PY
+  python3 harness/run_llamacpp.py --model "$LABEL" --gold "$SHARD_DIR/retry$pass.gold.jsonl" \
+    --thinking --max-tokens 8192 --concurrency 1 \
+    --out "$SHARD_DIR/retry$pass.out.jsonl" --base-url "http://$EP:$BASE_PORT" \
+    >>"$OUT/shard_$LABEL.run.log" 2>&1
+
+  # Splice the repaired rows in, preserving gold order. Only rows that came back
+  # WITHOUT an error replace anything; a retry that failed again leaves the
+  # original errored row in place so the loop can count it and give up.
+  python3 - "$OUT/$LABEL.pred.jsonl" "$SHARD_DIR/retry$pass.out.jsonl" <<'PY'
+import json,sys,os
+pred, retry = sys.argv[1], sys.argv[2]
+fixed={}
+if os.path.exists(retry):
+    for l in open(retry):
+        r=json.loads(l)
+        if not r.get("error"): fixed[r["id"]]=l
+if fixed:
+    lines=[]
+    for l in open(pred):
+        r=json.loads(l)
+        lines.append(fixed.get(r["id"], l) if r.get("error") else l)
+    with open(pred,"w") as fh: fh.writelines(lines)
+print(f"spliced {len(fixed)} repaired row(s)")
+PY
+done
+
+# Completion is a comparison, not a printout. got and exp were computed here and
+# reported in the DONE line for weeks without ever being compared, so a merge
+# that silently dropped rows -- the merge above counts them and says so -- still
+# exited 0 and banked a short arm.
 got=$(wc -l < "$OUT/$LABEL.pred.jsonl")
 exp=$(wc -l < "$GOLD")
-say "DONE $LABEL rows=$got/$exp wall=$(( (t1-t0)/60 ))m$(( (t1-t0)%60 ))s procs=$NPROC"
+if [ "$got" -ne "$exp" ]; then
+  say "FAIL $LABEL: incomplete arm, rows=$got/$exp, discarding"
+  mv "$OUT/$LABEL.pred.jsonl" "$OUT/$LABEL.pred.jsonl.incomplete"
+  kill_servers
+  exit 1
+fi
+say "DONE $LABEL rows=$got/$exp wall=$(( (t1-t0)/60 ))m$(( (t1-t0)%60 ))s procs=$NPROC retries=$pass"
 rm -rf "$SHARD_DIR"
 kill_servers
