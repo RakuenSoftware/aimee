@@ -5287,6 +5287,9 @@ P11KIT_HARNESS_CFLAGS := -DWITH_PKCS11 $(shell pkg-config --cflags p11-kit-1 2>/
 $(OBJDIR)/tests/vault_custody_pkcs11_hsm.o: modules/vault/vault_custody_pkcs11.c
 	@mkdir -p $(dir $@)
 	$(CC) -c $(C_FLAGS) $(P11KIT_HARNESS_CFLAGS) -o $@ $<
+# Appended to TEST_TARGETS below the blanket order-only rule (or not at all), so
+# it never inherited the core-archive dependency it links through TEST_L_FLAGS.
+$(TESTPREFIX)/p7-pkcs11-harness: | $(CORE_CONNECTION_LIB)
 $(TESTPREFIX)/p7-pkcs11-harness: $(OBJDIR)/tests/test_vault_custody_pkcs11.o \
                               $(OBJDIR)/tests/vault_custody_pkcs11_hsm.o \
                               $(OBJDIR)/modules/vault/vault_crypto.o \
