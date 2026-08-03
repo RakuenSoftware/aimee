@@ -1153,25 +1153,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Bake targets built by each compose file. The cache scope is keyed by
+          # IMAGE, not by topology: T1 and T2 build aimee-kb from the same
+          # Dockerfile, and T2 and T3 build aimee-server from the same
+          # Dockerfile.server. Per-topology scopes stored those identical layers
+          # twice and denied each shard the other's work.
           - topology: T1
             compose_file: compose.yaml
-            cache_set: |
-              aimee-kb.cache-from=type=gha,scope=e2e-T1-aimee-kb
-              aimee-kb.cache-to=type=gha,scope=e2e-T1-aimee-kb,mode=max
-              aimee-control-web.cache-from=type=gha,scope=e2e-T1-aimee-control-web
-              aimee-control-web.cache-to=type=gha,scope=e2e-T1-aimee-control-web,mode=max
+            images: aimee-kb aimee-control-web
           - topology: T2
             compose_file: compose.server.yaml
-            cache_set: |
-              aimee-kb.cache-from=type=gha,scope=e2e-T2-aimee-kb
-              aimee-kb.cache-to=type=gha,scope=e2e-T2-aimee-kb,mode=max
-              aimee-server.cache-from=type=gha,scope=e2e-T2-aimee-server
-              aimee-server.cache-to=type=gha,scope=e2e-T2-aimee-server,mode=max
+            images: aimee-kb aimee-server
           - topology: T3
             compose_file: compose.server-standalone.yaml
-            cache_set: |
-              aimee-server.cache-from=type=gha,scope=e2e-T3-aimee-server
-              aimee-server.cache-to=type=gha,scope=e2e-T3-aimee-server,mode=max
+            images: aimee-server
     name: e2e-docker (${{ matrix.topology }})
     steps:
       - uses: actions/checkout@v4
@@ -1183,15 +1178,41 @@ jobs:
           docker compose version
           docker buildx version
           df -h / | tail -1
+      # A GitHub Actions cache is readable only by the ref that wrote it and by
+      # that ref's base branch. Cache written from a PR run therefore lands under
+      # refs/pull/N/merge, where NO other run can ever read it — while still
+      # counting against the repo's 10 GB quota and evicting the shared
+      # refs/heads/testing entries by LRU. That is what happened here: 9.5 GB of
+      # unreadable PR blobs pushed the repo to 14 GB, every e2e image build
+      # missed cache completely, and each shard rebuilt postgres, rust, the
+      # python venv and the C tree from scratch (12-18 min a shard).
+      #
+      # So: every run READS the shared per-image scope, only pushes to the
+      # default branch WRITE it. That also drops the mode=max export (~7 min a
+      # shard) from the PR path entirely.
+      - name: Resolve bake cache flags
+        id: cache_flags
+        env:
+          IMAGES: ${{ matrix.images }}
+          WRITE_CACHE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/testing' }}
+        run: |
+          {
+            echo 'set<<CACHE_FLAGS_EOF'
+            for img in $IMAGES; do
+              echo "${img}.cache-from=type=gha,scope=e2e-${img}"
+              if [ "$WRITE_CACHE" = "true" ]; then
+                echo "${img}.cache-to=type=gha,scope=e2e-${img},mode=max"
+              fi
+            done
+            echo CACHE_FLAGS_EOF
+          } >> "$GITHUB_OUTPUT"
       - name: Build topology images with persistent cache
         uses: docker/bake-action@v7
         with:
           source: .
           files: ${{ matrix.compose_file }}
           load: true
-          # Each image gets a distinct scope. Sharing one wildcard scope lets
-          # parallel Bake targets overwrite each other's exported cache.
-          set: ${{ matrix.cache_set }}
+          set: ${{ steps.cache_flags.outputs.set }}
       - name: Run Docker deploy topology ${{ matrix.topology }}
         # The aimee-server image builds webchat's SPA from its vendored
         # @rakuensoftware/smoothgui dependency — no npm token needed.
