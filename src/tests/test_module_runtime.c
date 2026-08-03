@@ -36,12 +36,12 @@
 #include <time.h>
 #include <unistd.h>
 
-#define TEST_KIND  5889U
-#define EMPTY_KIND 5890U
-#define TEST_STAGE 1U
-#define MODULE_REF 7U
-#define CALLER_REF 90U
-#define LARGE_BODY (128U * 1024U + 37U)
+#define TEST_KIND            5889U
+#define EMPTY_KIND           5890U
+#define TEST_STAGE           1U
+#define MODULE_REF           7U
+#define CALLER_REF           90U
+#define LARGE_BODY           (128U * 1024U + 37U)
 #define PRODUCTION_STAGE_MAX 5U
 
 typedef struct
@@ -184,8 +184,7 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
    return 0;
 }
 
-static void smoke_production_module(aimee_module_client_t *client, const char *name,
-                                    uint32_t kind)
+static void smoke_production_module(aimee_module_client_t *client, const char *name, uint32_t kind)
 {
    uint8_t request[AIMEE_KB_SYNTHESIS_REQUEST_LEN] = {0};
    uint8_t response[1024] = {0};
@@ -217,7 +216,7 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
    {
       uint32_t selected = UINT32_MAX;
       assert(aimee_routing_request_encode(AIMEE_ROUTING_SELECT_BALANCED, 3, request,
-                                           sizeof(request)) == 0);
+                                          sizeof(request)) == 0);
       request_len = AIMEE_ROUTING_REQUEST_LEN;
       assert(aimee_module_client_call(client, kind, 1, 2002, 0, request, request_len, response,
                                       sizeof(response), &response_len, NULL,
@@ -229,14 +228,13 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
    {
       char role[AIMEE_DELEGATES_ROLE_MAX + 1u];
       assert(aimee_delegates_message_encode(AIMEE_DELEGATES_REQUEST_MAGIC, "implement", request,
-                                             sizeof(request)) == 0);
+                                            sizeof(request)) == 0);
       request_len = AIMEE_DELEGATES_MESSAGE_LEN;
       assert(aimee_module_client_call(client, kind, 1, 2003, 0, request, request_len, response,
                                       sizeof(response), &response_len, NULL,
                                       NULL) == AIMEE_MODULE_CALL_OK);
-      assert(aimee_delegates_message_decode(response, response_len,
-                                             AIMEE_DELEGATES_RESPONSE_MAGIC, role,
-                                             sizeof(role)) == 0);
+      assert(aimee_delegates_message_decode(response, response_len, AIMEE_DELEGATES_RESPONSE_MAGIC,
+                                            role, sizeof(role)) == 0);
       assert(strcmp(role, "code") == 0);
    }
    else if (strcmp(name, "tools") == 0)
@@ -255,7 +253,7 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       int allowed = 0;
       const char reference[] = "owner/repo";
       assert(aimee_workspace_request_encode(reference, strlen(reference), request,
-                                             sizeof(request)) == 0);
+                                            sizeof(request)) == 0);
       request_len = AIMEE_WORKSPACE_REQUEST_LEN;
       assert(aimee_module_client_call(client, kind, 1, 2005, 0, request, request_len, response,
                                       sizeof(response), &response_len, NULL,
@@ -285,17 +283,16 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
    }
    else if (strcmp(name, "response-composition") == 0)
    {
-      const aimee_response_key_input_t input = {
-          .principal = "uid:1",
-          .source = "openai-ingress",
-          .provider = "openai",
-          .model = "gpt-4o",
-          .endpoint = "/v1/chat/completions",
-          .idempotency_key = "idem-a",
-          .body = "{\"x\":1}",
-          .context = "ctx",
-          .behavior_flags = "cs0 rc0",
-          .stream = 0};
+      const aimee_response_key_input_t input = {.principal = "uid:1",
+                                                .source = "openai-ingress",
+                                                .provider = "openai",
+                                                .model = "gpt-4o",
+                                                .endpoint = "/v1/chat/completions",
+                                                .idempotency_key = "idem-a",
+                                                .body = "{\"x\":1}",
+                                                .context = "ctx",
+                                                .behavior_flags = "cs0 rc0",
+                                                .stream = 0};
       size_t encoded_len = aimee_response_request_size(&input);
       char key[AIMEE_RESPONSE_KEY_MAX + 1u];
       assert(encoded_len > 0 && encoded_len <= sizeof(request) && encoded_len <= UINT32_MAX);
@@ -311,12 +308,12 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
    {
       static const char *tools[] = {"read_file", "spawn_agent", "Task"};
       aimee_governance_decision_t decision;
-      assert(aimee_governance_request_encode(1, tools, 3, "max_tokens", request,
-                                             sizeof(request)) == 0);
+      assert(aimee_governance_request_encode(1, tools, 3, "max_tokens", request, sizeof(request)) ==
+             0);
       request_len = AIMEE_GOVERNANCE_REQUEST_LEN;
       assert(aimee_module_client_call(client, kind, AIMEE_GOVERNANCE_STAGE_EVALUATE, 2009, 0,
-                                      request, request_len, response, sizeof(response), &response_len,
-                                      NULL, NULL) == AIMEE_MODULE_CALL_OK);
+                                      request, request_len, response, sizeof(response),
+                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_governance_response_decode(response, response_len, 3, &decision) == 0);
       assert(decision.keep_mask == 1 && decision.drop_count == 2);
       assert(strcmp(decision.stop_reason, "max_tokens") == 0);
@@ -324,13 +321,12 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
    else if (strcmp(name, "workflows") == 0)
    {
       aimee_workflows_advance_outcome_t outcome = AIMEE_WORKFLOWS_ADVANCE_BADARGS;
-      assert(aimee_workflows_request_encode("wi_1", "wi_1", "understand", "split",
-                                            "accepted", 1, "nonce_1", "nonce_1", request,
-                                            sizeof(request)) == 0);
+      assert(aimee_workflows_request_encode("wi_1", "wi_1", "understand", "split", "accepted", 1,
+                                            "nonce_1", "nonce_1", request, sizeof(request)) == 0);
       request_len = AIMEE_WORKFLOWS_REQUEST_LEN;
-      assert(aimee_module_client_call(client, kind, AIMEE_WORKFLOWS_STAGE_ADVANCE, 2010, 0,
-                                      request, request_len, response, sizeof(response), &response_len,
-                                      NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(aimee_module_client_call(client, kind, AIMEE_WORKFLOWS_STAGE_ADVANCE, 2010, 0, request,
+                                      request_len, response, sizeof(response), &response_len, NULL,
+                                      NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_workflows_response_decode(response, response_len, &outcome) == 0);
       assert(outcome == AIMEE_WORKFLOWS_ADVANCE_REPLAY);
    }
@@ -338,12 +334,12 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
    {
       aimee_roundtable_verify_action_t action = AIMEE_ROUNDTABLE_VERIFY_REJECT;
       char severity[AIMEE_ROUNDTABLE_SEVERITY_MAX + 1u];
-      assert(aimee_roundtable_request_encode(AIMEE_ROUNDTABLE_REPLAY_MATCH, 1, "blocking",
-                                             request, sizeof(request)) == 0);
+      assert(aimee_roundtable_request_encode(AIMEE_ROUNDTABLE_REPLAY_MATCH, 1, "blocking", request,
+                                             sizeof(request)) == 0);
       request_len = AIMEE_ROUNDTABLE_REQUEST_LEN;
       assert(aimee_module_client_call(client, kind, AIMEE_ROUNDTABLE_STAGE_DELIBERATE, 2011, 0,
-                                      request, request_len, response, sizeof(response), &response_len,
-                                      NULL, NULL) == AIMEE_MODULE_CALL_OK);
+                                      request, request_len, response, sizeof(response),
+                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_roundtable_response_decode(response, response_len, &action, severity,
                                               sizeof(severity)) == 0);
       assert(action == AIMEE_ROUNDTABLE_VERIFY_KEEP && strcmp(severity, "blocking") == 0);
@@ -352,12 +348,12 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
    {
       static const char *callees[] = {"strlen", "PQexec", "write"};
       aimee_kb_synthesis_grounding_decision_t decision;
-      assert(aimee_kb_synthesis_request_encode(AIMEE_KB_SYNTHESIS_CLAIM_NONE, NULL, 0,
-                                                callees, 3, request, sizeof(request)) == 0);
+      assert(aimee_kb_synthesis_request_encode(AIMEE_KB_SYNTHESIS_CLAIM_NONE, NULL, 0, callees, 3,
+                                               request, sizeof(request)) == 0);
       request_len = AIMEE_KB_SYNTHESIS_REQUEST_LEN;
       assert(aimee_module_client_call(client, kind, AIMEE_KB_SYNTHESIS_STAGE_GROUNDING, 2012, 0,
-                                      request, request_len, response, sizeof(response), &response_len,
-                                      NULL, NULL) == AIMEE_MODULE_CALL_OK);
+                                      request, request_len, response, sizeof(response),
+                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_kb_synthesis_response_decode(response, response_len, &decision) == 0);
       assert(decision.contradicts && strcmp(decision.reason, "PQexec") == 0);
    }
@@ -367,8 +363,8 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(aimee_runtime_web_request_encode("permission_denied", request, sizeof(request)) == 0);
       request_len = AIMEE_RUNTIME_WEB_REQUEST_LEN;
       assert(aimee_module_client_call(client, kind, AIMEE_RUNTIME_WEB_STAGE_CLASSIFY, 2013, 0,
-                                      request, request_len, response, sizeof(response), &response_len,
-                                      NULL, NULL) == AIMEE_MODULE_CALL_OK);
+                                      request, request_len, response, sizeof(response),
+                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_runtime_web_response_decode(response, response_len, &status) == 0);
       assert(status == 403u);
    }
@@ -380,8 +376,8 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
                                               sizeof(request)) == 0);
       request_len = AIMEE_CONTROL_WEB_REQUEST_LEN;
       assert(aimee_module_client_call(client, kind, AIMEE_CONTROL_WEB_STAGE_AUTHORIZE, 2014, 0,
-                                      request, request_len, response, sizeof(response), &response_len,
-                                      NULL, NULL) == AIMEE_MODULE_CALL_OK);
+                                      request, request_len, response, sizeof(response),
+                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_control_web_response_decode(response, response_len, &allowed) == 0 && allowed);
    }
    else
@@ -576,7 +572,8 @@ finish:
    if (argc == 3)
       printf("module runtime (%s): C caller/Go handler wire parity passed\n", argv[2]);
    else
-      printf("module runtime (%s): dispatch, fragmented payloads, deadline, and cancellation passed\n",
-             argc == 2 ? "Go process" : "C process");
+      printf(
+          "module runtime (%s): dispatch, fragmented payloads, deadline, and cancellation passed\n",
+          argc == 2 ? "Go process" : "C process");
    return 0;
 }

@@ -203,9 +203,8 @@ static void test_governance(void)
       uint32_t response_len = 0;
       aimee_governance_decision_t decision;
       aimee_module_invocation_t invocation = {.stage_id = AIMEE_GOVERNANCE_STAGE_EVALUATE};
-      assert(aimee_governance_request_encode(cases[i].active, cases[i].tools,
-                                             cases[i].tool_count, cases[i].stop_reason, request,
-                                             sizeof(request)) == 0);
+      assert(aimee_governance_request_encode(cases[i].active, cases[i].tools, cases[i].tool_count,
+                                             cases[i].stop_reason, request, sizeof(request)) == 0);
       assert(aimee_governance_module_handler(&invocation, request, sizeof(request), response,
                                              sizeof(response), &response_len,
                                              NULL) == AIMEE_MODULE_STATUS_OK);
@@ -237,8 +236,7 @@ static void test_workflows(void)
         AIMEE_WORKFLOWS_ADVANCE_UNBOUND},
        {"wi_2", "wi_1", "understand", "understand", "active", 0, "", "",
         AIMEE_WORKFLOWS_ADVANCE_UNBOUND},
-       {"wi_1", "wi_1", "understand", "split", "active", 0, "", "",
-        AIMEE_WORKFLOWS_ADVANCE_STALE},
+       {"wi_1", "wi_1", "understand", "split", "active", 0, "", "", AIMEE_WORKFLOWS_ADVANCE_STALE},
        {"wi_1", "wi_1", "understand", "understand", "accepted", 0, "", "",
         AIMEE_WORKFLOWS_ADVANCE_TERMINAL},
        {"wi_1", "", "understand", "understand", "active", 0, "", "",
@@ -252,10 +250,10 @@ static void test_workflows(void)
       uint32_t response_len = 0;
       aimee_workflows_advance_outcome_t outcome;
       aimee_module_invocation_t invocation = {.stage_id = AIMEE_WORKFLOWS_STAGE_ADVANCE};
-      assert(aimee_workflows_request_encode(
-                 cases[i].bound, cases[i].work_item, cases[i].observed, cases[i].actual_stage,
-                 cases[i].actual_state, cases[i].have_nonce, cases[i].nonce, cases[i].last_nonce,
-                 request, sizeof(request)) == 0);
+      assert(aimee_workflows_request_encode(cases[i].bound, cases[i].work_item, cases[i].observed,
+                                            cases[i].actual_stage, cases[i].actual_state,
+                                            cases[i].have_nonce, cases[i].nonce,
+                                            cases[i].last_nonce, request, sizeof(request)) == 0);
       assert(aimee_workflows_module_handler(&invocation, request, sizeof(request), response,
                                             sizeof(response), &response_len,
                                             NULL) == AIMEE_MODULE_STATUS_OK);
@@ -276,8 +274,8 @@ static void test_roundtable(void)
    } cases[] = {
        {AIMEE_ROUNDTABLE_REPLAY_CONTRADICTED, 1, "blocking", AIMEE_ROUNDTABLE_VERIFY_REJECT, ""},
        {AIMEE_ROUNDTABLE_REPLAY_VACUOUS, 1, "blocking", AIMEE_ROUNDTABLE_VERIFY_REJECT, ""},
-       {AIMEE_ROUNDTABLE_REPLAY_INDEX_UNAVAILABLE, 1, "blocking",
-        AIMEE_ROUNDTABLE_VERIFY_DEGRADE, "blocking"},
+       {AIMEE_ROUNDTABLE_REPLAY_INDEX_UNAVAILABLE, 1, "blocking", AIMEE_ROUNDTABLE_VERIFY_DEGRADE,
+        "blocking"},
        {AIMEE_ROUNDTABLE_REPLAY_NO_EVIDENCE, 0, "blocking", AIMEE_ROUNDTABLE_VERIFY_CAP,
         "suggestion"},
        {AIMEE_ROUNDTABLE_REPLAY_MATCH, 1, "blocking", AIMEE_ROUNDTABLE_VERIFY_KEEP, "blocking"},
@@ -325,8 +323,7 @@ static void test_kb_synthesis(void)
    } cases[] = {
        {AIMEE_KB_SYNTHESIS_CLAIM_NONE, NULL, 0, write_callees, 2, 1, "write"},
        {AIMEE_KB_SYNTHESIS_CLAIM_STRING, none_string, 1, socket_callees, 1, 1, "socket"},
-       {AIMEE_KB_SYNTHESIS_CLAIM_STRING_ARRAY, none_array, 2, ordered_callees, 3, 1,
-        "PQexec"},
+       {AIMEE_KB_SYNTHESIS_CLAIM_STRING_ARRAY, none_array, 2, ordered_callees, 3, 1, "PQexec"},
        {AIMEE_KB_SYNTHESIS_CLAIM_STRING_ARRAY, NULL, 0, clean_callees, 2, 0, ""},
        {AIMEE_KB_SYNTHESIS_CLAIM_STRING, honest_string, 1, write_callees, 2, 0, ""},
        {AIMEE_KB_SYNTHESIS_CLAIM_STRING_ARRAY, mixed_array, 2, socket_callees, 1, 0, ""},
@@ -340,9 +337,9 @@ static void test_kb_synthesis(void)
       uint32_t response_len = 0;
       aimee_kb_synthesis_grounding_decision_t decision;
       aimee_module_invocation_t invocation = {.stage_id = AIMEE_KB_SYNTHESIS_STAGE_GROUNDING};
-      assert(aimee_kb_synthesis_request_encode(
-                 cases[i].kind, cases[i].claims, cases[i].claim_count, cases[i].callees,
-                 cases[i].callee_count, request, sizeof(request)) == 0);
+      assert(aimee_kb_synthesis_request_encode(cases[i].kind, cases[i].claims, cases[i].claim_count,
+                                               cases[i].callees, cases[i].callee_count, request,
+                                               sizeof(request)) == 0);
       assert(aimee_kb_synthesis_module_handler(&invocation, request, sizeof(request), response,
                                                sizeof(response), &response_len,
                                                NULL) == AIMEE_MODULE_STATUS_OK);
@@ -442,9 +439,9 @@ static void test_benchmarks(void)
       uint32_t response_len = 0;
       aimee_benchmarks_ir_scores_t scores;
       aimee_module_invocation_t invocation = {.stage_id = AIMEE_BENCHMARKS_STAGE_RUN};
-      assert(aimee_benchmarks_request_encode(
-                 cases[i].retrieved, cases[i].retrieved_count, cases[i].relevant,
-                 cases[i].relevant_count, cases[i].k, request, sizeof(request)) == 0);
+      assert(aimee_benchmarks_request_encode(cases[i].retrieved, cases[i].retrieved_count,
+                                             cases[i].relevant, cases[i].relevant_count, cases[i].k,
+                                             request, sizeof(request)) == 0);
       assert(aimee_benchmarks_module_handler(&invocation, request, sizeof(request), response,
                                              sizeof(response), &response_len,
                                              NULL) == AIMEE_MODULE_STATUS_OK);
