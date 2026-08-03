@@ -230,8 +230,8 @@ RUN useradd --system --home-dir /var/lib/aimee --create-home --shell /usr/sbin/n
 # and the sidecar then refuses to start, because it has no identity to present. The
 # unit test missed it by creating the directory as the same user it then wrote as.
 RUN install -d -o aimee -g aimee -m 0700 /var/lib/aimee/synthesis-tls
-COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb
-COPY --from=build /src/aimee-kb-resolver /usr/local/bin/aimee-kb-resolver
+# The kb binaries are copied in AFTER the model bake, near the end of this file.
+# Deliberately: see the comment there.
 
 # The embedder registry: every per-model fact that changes the vectors (pooling, width,
 # context, prefixes), keyed by model identity. Read by the in-container embedder to know
@@ -364,6 +364,30 @@ PYBAKE
 # The directory does not exist on AIMEE_EMBEDDER=none, and chmod -R on a missing
 # path is an error rather than a no-op.
 RUN if [ -d /opt/aimee/models ]; then chmod -R a+rX /opt/aimee/models; fi
+
+# THE COMPILED BINARY COMES IN AFTER THE MODEL, and the order is the point.
+#
+# These two lines used to sit ~130 lines above, before the bake. Docker invalidates
+# every layer after a changed one, so any C change changed the binary, which
+# invalidated the bake, which re-downloaded the weights from Hugging Face. On a
+# publish that is four downloads of the same files (two baked variants x two
+# architectures) for a change that touched neither the model nor the registry -- and
+# it is what got these builds answered with
+#   429 Too Many Requests for url .../hotchpotch/bekko-embedding-v1-a25m
+#
+# The --mount=type=cache on the bake does not prevent this. A BuildKit cache mount is
+# local to the builder, and cache-from/to type=gha carries LAYERS, not cache mounts, so
+# a fresh GitHub runner always begins with an empty one. The LAYER cache is what can
+# help, and it only can while this layer's inputs exclude the source tree.
+#
+# So the bake's inputs are now the venv, scripts/embedders.json and AIMEE_EMBEDDER,
+# none of which move when C code moves. Moving these COPY lines back up, or adding
+# anything source-dependent above the bake, silently restores the download.
+#
+# Nothing between the bake and here executes the binary, which is what makes the move
+# safe: the entrypoint script, USER, HEALTHCHECK and ENTRYPOINT all follow.
+COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb
+COPY --from=build /src/aimee-kb-resolver /usr/local/bin/aimee-kb-resolver
 
 # NO BUNDLED SYNTHESIS. llama.cpp and its GGUF used to be baked here, which coupled a
 # multi-gigabyte, near-static artefact to the image rebuilt on every kb code change:
