@@ -388,6 +388,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-entity-registry \
                $(TESTPREFIX)/unit-test-fact-lifecycle \
                $(TESTPREFIX)/unit-test-embedding-dim \
+               $(TESTPREFIX)/unit-test-embedder-probe-register \
                $(TESTPREFIX)/unit-test-ontology-evolution \
                $(TESTPREFIX)/unit-test-extract-patterns \
                $(TESTPREFIX)/unit-test-fact-ingest $(TESTPREFIX)/unit-test-decision-log \
@@ -4067,6 +4068,14 @@ $(TESTPREFIX)/unit-test-fact-lifecycle: $(OBJDIR)/tests/test_fact_lifecycle.o \
 # embedder-runtime-fetch-autodim §2: kb_meta dim record + refuse-on-mismatch, shim.
 $(TESTPREFIX)/unit-test-embedding-dim: $(OBJDIR)/tests/test_embedding_dim.o \
                                $(OBJDIR)/db2/db_schema.o $(TEST_DATA_OBJS_MOCK)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# Which probes embedder_probe_register installs for which embed command. Guards a
+# registration decision, not a computation: skipping the serving-identity probe along
+# with the dim probe is what made the builtin -> model switch undetectable.
+$(TESTPREFIX)/unit-test-embedder-probe-register: $(OBJDIR)/tests/test_embedder_probe_register.o \
+                               $(OBJDIR)/server/embedder_probe.o \
+                               $(OBJDIR)/modules/memory/memory_core_helpers_b.o $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # typed-fact P4: self-extending ontology promotion pipeline (§2), shim.

@@ -1,0 +1,137 @@
+# aimee-embedder: the bundled embedder, as its own image.
+#
+# TWO TAGS, ONE MODEL EACH: aimee-embedder-a25m and aimee-embedder-nomic. There is no
+# third tag for "no embedder" -- the absence of this container IS that case, and the
+# server resolves it by pointing EMBEDDER_URL at whatever the operator runs. A tag
+# carrying no model would be an image whose only purpose is to not be used.
+#
+# WHY THIS LEFT aimee-kb. It was baked in, which put CPU torch, sentence-transformers
+# and a gigabyte of weights into every kb image -- including the ones deployed against
+# an external embedder, which load none of it. Worse for CI: the weights were fetched
+# inside the kb build, behind the compiled binary, so every C change invalidated that
+# layer and re-downloaded them. Four fetches per publish, and Hugging Face answered
+# 429.
+#
+# The kb image now carries no model and no torch, and this tag's inputs -- the model,
+# the registry entry, the venv -- change on the order of never.
+#
+# THE EMBEDDER IS STILL A PROPERTY OF THE INSTALL, not a layer to swap under a running
+# one. Switching it means dropping the embedded corpus and rebuilding: a 384-wide store
+# cannot be read by a 768-wide embedder, and scripts/embedder-server.py's serving_id
+# additionally makes a pooling or prefix change detectable when the width and the model
+# name both stay the same. Splitting the image does not soften that; it only stops the
+# weights being rebuilt alongside unrelated code.
+ARG AIMEE_EMBEDDER=bekko-a25m
+
+# ---- the weights ----------------------------------------------------------------
+# BUILDPLATFORM-pinned: the payload is architecture-independent, so a
+# linux/amd64 + linux/arm64 build fetches ONCE and both manifests reference the same
+# layer, rather than downloading the same gigabytes twice to produce identical bytes.
+# Same reasoning as Dockerfile.model.
+FROM --platform=$BUILDPLATFORM debian:trixie-slim AS weights
+ARG AIMEE_EMBEDDER
+ENV EMBEDDER_VENV=/opt/aimee/embedder-venv
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates python3 python3-pip python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+# CPU-only torch: the CUDA wheels are ~2GB of accelerator runtime this image never uses.
+RUN set -eux; \
+    python3 -m venv "$EMBEDDER_VENV"; \
+    "$EMBEDDER_VENV/bin/pip" install --no-cache-dir --quiet \
+        --index-url https://download.pytorch.org/whl/cpu torch; \
+    "$EMBEDDER_VENV/bin/pip" install --no-cache-dir --quiet \
+        "sentence-transformers>=3.3" "transformers>=5.2" einops; \
+    find "$EMBEDDER_VENV" -name '__pycache__' -type d -prune -exec rm -rf {} +; \
+    rm -rf /root/.cache/pip
+
+COPY scripts/embedders.json /opt/aimee/embedders.json
+COPY scripts/bake-embedder.py /usr/local/bin/bake-embedder.py
+ENV HF_HOME=/opt/aimee/models
+# The fetch retries, because the Hub rate-limits: several variants build in parallel
+# and each wants the same files. Retried statuses only -- a bad revision fails on the
+# first attempt. See scripts/bake-embedder.py.
+RUN --mount=type=cache,target=/root/.cache/huggingface \
+    AIMEE_EMBEDDER="$AIMEE_EMBEDDER" "$EMBEDDER_VENV/bin/python" \
+        /usr/local/bin/bake-embedder.py
+# The bake runs as root and huggingface_hub writes its tree-cache metadata 0600, so a
+# non-root runtime user cannot read it; the weights themselves land world-readable, so
+# the model still loads and merely logs a corrupt-tree-cache warning on every start.
+# a+rX: readable everywhere, traversable on directories, no file gains +x.
+RUN chmod -R a+rX /opt/aimee/models
+
+# ---- runtime --------------------------------------------------------------------
+FROM debian:trixie-slim
+ARG AIMEE_EMBEDDER
+
+# stunnel terminates mTLS in front of the embedder, exactly as it does for aimee-llm.
+# It is a distro package rather than code this project owns, deliberately: termination
+# is security-critical, its failure mode is silent exposure, and a hand-rolled TLS
+# listener would take on a vendoring burden for no gain.
+#
+# curl is the healthcheck client. python3 runs the server; the venv carries torch.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates curl libgomp1 python3 stunnel4 \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV EMBEDDER_VENV=/opt/aimee/embedder-venv \
+    HF_HOME=/opt/aimee/models \
+    HF_HUB_OFFLINE=1 \
+    EMBEDDERS_FILE=/opt/aimee/embedders.json \
+    AIMEE_EMBEDDER_PORT=8762 \
+    AIMEE_EMBEDDER_LOOPBACK_PORT=8760
+COPY --from=weights /opt/aimee/embedder-venv /opt/aimee/embedder-venv
+COPY --from=weights /opt/aimee/models /opt/aimee/models
+COPY --from=weights /opt/aimee/embedders.json /opt/aimee/embedders.json
+COPY scripts/embedder-server.py /opt/aimee/scripts/embedder-server.py
+COPY deploy/container/aimee-embedder-entrypoint.sh /usr/local/bin/aimee-embedder-entrypoint.sh
+RUN chmod +x /usr/local/bin/aimee-embedder-entrypoint.sh
+
+# trust_remote_code compiles fetched modelling code into a writable module cache, which
+# defaults inside HF_HOME and is read-only here. nomic needs it; point it at a writable
+# path or the model fails to load with "Permission denied: /opt/aimee/models/modules".
+ENV HF_MODULES_CACHE=/var/lib/aimee-embedder/.cache/huggingface/modules
+RUN useradd --system --home-dir /var/lib/aimee-embedder --create-home \
+        --shell /usr/sbin/nologin aimee \
+    && install -d -o aimee -g aimee -m 0700 /var/lib/aimee-embedder/tls \
+    && install -d -o aimee -g aimee -m 0700 "$HF_MODULES_CACHE"
+
+# Prove the model is present and loadable IN THIS IMAGE. A server that cannot find its
+# weights otherwise fails at first embed, which reaches the operator as a retrieval
+# outage rather than a build error -- the same reason Dockerfile.llm asserts its blobs.
+ENV AIMEE_EMBEDDER=${AIMEE_EMBEDDER}
+RUN set -eux; \
+    test -d /opt/aimee/models; \
+    EMBEDDER_MODEL="$AIMEE_EMBEDDER" "$EMBEDDER_VENV/bin/python" - <<'PYCHECK'
+import json, os, sys
+sel = os.environ["EMBEDDER_MODEL"]
+with open("/opt/aimee/embedders.json", encoding="utf-8") as fh:
+    table = json.load(fh)["embedders"]
+if sel not in table:
+    sys.exit(f"AIMEE_EMBEDDER={sel!r} is not in the registry: {sorted(table)}")
+# Load offline from the baked cache. This is the assertion: it fails the build if the
+# weights are absent, incomplete, or need the network.
+os.environ["HF_HUB_OFFLINE"] = "1"
+from sentence_transformers import SentenceTransformer
+spec = table[sel]
+m = SentenceTransformer(spec["repo"], revision=spec.get("revision") or "main",
+                        trust_remote_code=True)
+dim = m.get_sentence_embedding_dimension()
+if dim != spec["dim"]:
+    sys.exit(f"{sel}: registry says dim={spec['dim']}, model serves {dim}")
+print(f"baked {sel}: {spec['repo']} dim={dim}", flush=True)
+PYCHECK
+
+USER aimee
+EXPOSE 8762
+
+# READY MEANS THE MODEL CAN EMBED, not that the port is open. embedder-server.py binds
+# immediately and loads in a background thread, answering /health with its state and
+# 200 only when "ok" -- so probing loopback is what distinguishes "listening" from
+# "usable". start_period covers the load, which for nomic is the slow part.
+HEALTHCHECK --interval=15s --timeout=5s --start-period=300s --retries=3 \
+    CMD curl -fsS -m 4 "http://127.0.0.1:${AIMEE_EMBEDDER_LOOPBACK_PORT}/health" || exit 1
+
+ENTRYPOINT ["/usr/local/bin/aimee-embedder-entrypoint.sh"]
