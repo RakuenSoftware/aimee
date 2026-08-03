@@ -385,6 +385,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-memory-fact-gate \
                $(TESTPREFIX)/unit-test-memory-embed-dim-guard \
                $(TESTPREFIX)/unit-test-memory-embed-http-auth \
+               $(TESTPREFIX)/unit-test-memory-embed-batch \
                $(TESTPREFIX)/unit-test-rel-types-store \
                $(TESTPREFIX)/unit-test-entity-registry \
                $(TESTPREFIX)/unit-test-fact-lifecycle \
@@ -1153,6 +1154,14 @@ $(TESTPREFIX)/unit-test-memory-embed-http-auth: \
                     $(OBJDIR)/tests/test_memory_embed_http_auth.o \
                     $(OBJDIR)/modules/memory/memory_core_helpers_b.o \
                     $(OBJDIR)/tests/support/mock_agent_http.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# One embedder round trip per batch: the request COUNT is the behaviour under test.
+$(TESTPREFIX)/unit-test-memory-embed-batch: \
+                    $(OBJDIR)/tests/test_memory_embed_batch.o \
+                    $(OBJDIR)/modules/memory/memory_core_helpers_b.o \
+                    $(OBJDIR)/tests/support/mock_agent_http.o \
+                    $(OBJDIR)/cJSON.o $(OBJDIR)/log.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-rules: $(OBJDIR)/tests/test_rules.o $(DB1_OBJS) $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db2/rules.o $(OBJDIR)/db2/stopwords.o $(OBJDIR)/db2/tool_registry.o $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o \
