@@ -3,8 +3,11 @@
 # testing branch can be deployed/validated (e.g. on .254) WITHOUT promoting to
 # main.
 #
-# Builds the split images plus the isolated one-shot authority bootstrap so a
-# managed stack can pull a single coherent `:testing` channel.
+# Builds the split images, ALL THREE kb embedder variants, and the isolated one-shot
+# authority bootstrap, so a managed stack can pull a single coherent `:testing`
+# channel whichever embedder the wizard selected. Synthesis is NOT here: it is its own
+# image on its own trigger (publish-llm.yml), rebuilt when the model changes rather
+# than when kb code does.
 # Versioned + `:latest` publishing of the full image set
 # stays owned by main (auto-release.yml -> publish-images.yml). Keeping testing on
 # a `:testing` tag — never a version number — avoids confusing a tested-but-
@@ -49,12 +52,35 @@ jobs:
       fail-fast: false
       matrix:
         # Same image set + Dockerfiles as the release pipeline
-        # (publish-images.yml), minus the embedder/llm/css legs that testing does
-        # not redeploy. Cache scopes match publish-images so testing reuses the
-        # release layer cache and never restarts the LTO C build from scratch.
+        # (publish-images.yml), minus the css leg that testing does not redeploy.
+        # Cache scopes match publish-images so testing reuses the release layer
+        # cache and never restarts the LTO C build from scratch.
+        #
+        # NO -llm LEGS HERE, and that is the point. An image carrying llama.cpp and
+        # multi-gigabyte weights must not be rebuilt because kb code changed, and
+        # every leg in this matrix rebuilds on every push that touches src/**. The
+        # two -llm kb variants published from here cost a full kb rebuild each —
+        # under a separate cache scope, so the LTO C build, postgres, pgvectorscale
+        # and torch were all built three times per push for one code change.
+        #
+        # Bundled synthesis moves to its own aimee-llm-e{2,4}b image, deployed
+        # beside the kb, rebuilt only when the model or the model list changes. The
+        # weights stay baked — that property is why they were baked in the first
+        # place — they are just baked into the image whose inputs are stable.
+        #
+        # ALL THREE EMBEDDER VARIANTS, not a subset. An earlier version of this matrix
+        # carried the bekko legs only, on the reasoning that nomic is a one-way choice
+        # this channel had never deployed. That reasoning was wrong: a variant absent
+        # from the channel cannot be deployed FROM the channel, so an operator who
+        # selects nomic on a :testing stack gets a manifest that does not exist. The
+        # deploy layer now picks the image from the embedder choice
+        # (AIMEE_KB_VARIANT), so every choice it can emit has to be publishable here.
         image:
           - { name: aimee-server,    dockerfile: Dockerfile.server }
-          - { name: aimee-kb,        dockerfile: Dockerfile }
+          - { name: aimee-kb,        dockerfile: Dockerfile, args: "AIMEE_EMBEDDER=none" }
+          - { name: aimee-kb-a25m,   dockerfile: Dockerfile, args: "AIMEE_EMBEDDER=bekko-a25m" }
+          - { name: aimee-kb-nomic,  dockerfile: Dockerfile,
+              args: "AIMEE_EMBEDDER=nomic-embed-text-v2-moe" }
           - { name: aimee-authority-bootstrap, dockerfile: Dockerfile.authority-bootstrap }
     steps:
       - uses: actions/checkout@v4
@@ -72,6 +98,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Point the -llm legs at the model image the `models` job just guaranteed, so
+      # the build copies a registry layer. The fetch fallback is kept for the same
+      # reason publish-images keeps it: it makes the model image an optimisation
+      # rather than a dependency, so a quant bump still builds.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -88,12 +118,17 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.image.name }}-amd64
           cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}-amd64
           # WITH_RUNTIME_WEB bundles the browser UI (default for aimee-server; the
-          # aimee-kb image ignores it). The kb embeds in-container; synth resolves an
-          # external endpoint.
+          # aimee-kb image ignores it).
+          #
+          # AIMEE_SYNTHESIS_MODEL is empty on the non-llm legs, which is what the
+          # Dockerfile expects: it gates the whole llama.cpp copy on
+          # AIMEE_WITH_LLAMACPP, and asserts the baked MODEL_ID matches this value
+          # when it is set.
           build-args: |
             AIMEE_VERSION=testing-${{ env.SHA7 }}
             WITH_RUNTIME_WEB=1
-            WITH_LLM=0
+            ${{ matrix.image.args }}
+            ${{ matrix.image.args }}
           tags: |
             ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }}:testing
             ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }}:testing-${{ env.SHA7 }}

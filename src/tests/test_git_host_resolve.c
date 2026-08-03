@@ -1,6 +1,6 @@
 /* test_git_host_resolve.c — the per-host vault seam: dormant when unregistered,
  * resolves a token from an explicit remote URL or from a repo's origin remote. */
-#include "git_host_resolve.h"
+#include "modules/git/git_host_resolve.h"
 
 #include <assert.h>
 #include <stdio.h>

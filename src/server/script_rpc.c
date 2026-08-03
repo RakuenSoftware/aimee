@@ -3,7 +3,7 @@
 #endif
 
 #include "script_rpc.h"
-#include "agent_tools.h"
+#include <aimee/tools/agent_tools.h>
 #include "aimee.h"
 #include "cJSON.h"
 #include "platform_random.h"

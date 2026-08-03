@@ -2,7 +2,7 @@
  * implementation lives in agent_tools.c; this file just routes by name
  * and applies the shared guardrails/snapshot/slop hooks. */
 #include "aimee.h"
-#include "agent_tools.h"
+#include <aimee/tools/agent_tools.h>
 #include "agent_tools_internal.h"
 #include "aimee_home.h"
 #include <aimee/delegates/delegate_ephemeral_ws.h>
@@ -10,7 +10,8 @@
 #include "economizer.h"
 #include "tool_args_coerce.h"
 #include "sandbox_learned.h"
-#include "workspace_provider.h"
+#include "modules/workspace/workspace_provider.h"
+#include <aimee/tools/module_api.h>
 
 /* delegation_active_id is provided by server_compute.c at link time;
  * stub returns NULL when running outside the server (CLI, tests). */
@@ -21,6 +22,12 @@ const char *delegation_active_id(void)
 }
 
 static __thread char g_dispatch_role[64];
+static agent_tool_classifier_fn g_tool_classifier;
+
+void agent_tools_register_classifier(agent_tool_classifier_fn classifier)
+{
+   g_tool_classifier = classifier;
+}
 
 void agent_tools_set_dispatch_role(const char *role)
 {
@@ -99,6 +106,12 @@ static void td_outcome_set(const char *verdict, const char *reason)
  * stored; the parsed tree is freed. */
 static int is_exec_tool(const char *name)
 {
+   if (g_tool_classifier)
+   {
+      int classification = 0;
+      return g_tool_classifier(name, &classification) == 0 &&
+             classification == AIMEE_TOOL_CLASS_EXEC;
+   }
    return strcmp(name, "bash") == 0 || strcmp(name, "execute_script") == 0 ||
           strcmp(name, "test") == 0 || strcmp(name, "run_tests") == 0;
 }
@@ -136,7 +149,7 @@ int db1_session_write_path_record(const char *session_id, const char *path);
 #include "td_search_render.h"
 #include "aimee/protocols/mcp/mcp_client_registry.h"
 #include "lifecycle.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include "diff.h"
 #include "dstr.h"
 #include "anchor_snapshot.h"
@@ -1930,7 +1943,7 @@ static char *td_search_docs(cJSON *args, const char *name, const char *dispatch_
       /* Search with the kb's own embedder unless this server has an explicit
        * override.  A resolved builtin here is 384-dimensional and can never
        * query a remote kb corpus built with a production embedder. */
-      const char *ec = config_embedding_command_current(NULL);
+      const char *ec = config_embedder_command_current(NULL);
       const char *embedding_command = (ec && ec[0]) ? ec : NULL;
       char *envelope = kb_client_search_json_scoped_ex(project, all_projects, q->valuestring,
                                                        embedding_command, max, NULL, NULL);

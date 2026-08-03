@@ -5,8 +5,8 @@ A release happens when a human approves one. Merging to `main` proposes a versio
 That is a change. Until 2026-07-31 every push to `main` tagged, built thin clients for four
 platforms, published `aimee-server` and `aimee-kb`, and moved `:latest`, with no one asked. Under the
 testing to main promote flow a promote merge is a push to `main`, so merging was releasing.
-`v0.2.196` and `v0.3.0` went out that way, mid-cycle, while **v0.2.192** stayed the last release
-anyone meant to make.
+`v0.2.196` went out that way, mid-cycle, while **v0.2.192** stayed the last release anyone meant to
+make.
 
 ## The two channels are not the same
 
@@ -76,9 +76,10 @@ If a tag survives a failed run, delete it by hand before the next release or tha
 
 ## A tag is not a release
 
-The repository can carry tags that were never released. `v0.2.196` and `v0.3.0` are both marked
-prerelease for exactly that reason: they exist, they have artifacts, and they are not releases anyone
-announced. `api/releases/latest` returns `v0.2.192`.
+The repository can carry tags that were never released. `v0.2.196` is marked prerelease for exactly
+that reason: it exists, it has artifacts, and it is not a release anyone announced. The series has no
+`v0.3.*` tag yet, so the next approved release is `v0.3.0`, and it is what
+`api/releases/latest` will report once it ships.
 
 Do not read the tag list to decide what shipped. Read the releases, and check whether the one you are
 looking at is marked prerelease.

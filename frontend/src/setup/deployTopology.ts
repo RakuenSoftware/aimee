@@ -1,37 +1,17 @@
-/* Deploy-topology (wizard page 2) — pure model + config mapping. No DOM, no
+/* Deploy topology (wizard page 2) — pure model + config mapping. No DOM, no
  * network: the whole key-translation contract is unit-tested (deployTopology.test.ts).
  *
- * The page places two LLM roles (embedder / synthesizer) and picks
- * the knowledge-base mode. Every value it persists goes through the SAME page-2
- * config record the backend shipped in p1-p2b (kb_mode + per-role llm_* keys),
- * which `aimee config deploy-env` already translates to compose env.
+ * The page makes two choices — which EMBEDDER turns text into vectors, and which
+ * SYNTHESIS model writes curation and summaries — and picks the knowledge-base
+ * mode. Everything it persists goes through /api/config/set, and
+ * `aimee config deploy-env` translates it to container env.
  *
- * NOTHING IS PLACED ON A CONTAINER OF OURS ANY MORE. aimee-llm is retired, so
- * there is no host to choose and no tier to size: the embedder runs inside the
- * knowledge base from baked-in weights, and synthesis is an endpoint someone
- * else runs, or off. backend local|external|off still maps to
- * AIMEE_LLM_<ROLE>_MODE. See deploy/compose + src/config_database.c. */
-
-export type Role = 'embed' | 'synth';
-
-export const ROLES: { role: Role; label: string; blurb: string }[] = [
-  { role: 'embed', label: 'Embedder', blurb: 'Runs inside the knowledge base; turns text into vectors.' },
-  { role: 'synth', label: 'Synthesizer', blurb: 'Writes the knowledge-base curation + summaries.' },
-];
-
-/** A local LLM tier. cpu = no GPU; small/mid/large size the co-hosted model to
- * the card. These are the literal AIMEE_LLM_TIER tokens. */
-export type Tier = 'cpu' | 'small' | 'mid' | 'large';
-export const GPU_TIERS: Tier[] = ['small', 'mid', 'large'];
-
-/** How a role is served. `local` now means only the embedder inside the
- * knowledge base: the aimee-llm container it used to describe is retired, and
- * the tier/host/gpu fields it carries are written empty. `external` points at an
- * existing endpoint; `off` disables the role. */
-export type Placement =
-  | { backend: 'local'; tier: Tier; host: string; gpu: string }
-  | { backend: 'external'; endpoint: string }
-  | { backend: 'off' };
+ * This used to place LLM "roles" onto a shared aimee-llm container: each role had
+ * a backend (local/external/off), a tier (cpu/small/mid/large), a host and a GPU.
+ * That container is retired. The aimee-kb IMAGE VARIANT now encodes what used to
+ * be placement — which embedder is baked in, and whether llama.cpp ships with it —
+ * so there is no tier to size and no host to choose at wizard time. What remains
+ * is a model choice per role, plus an endpoint when the model is someone else's. */
 
 export type KbMode = 'local' | 'remote';
 
@@ -42,7 +22,7 @@ export interface EmbedderChoice {
   dim: number;
   context: number;
   pooling: string;
-  /** Whether the kb can serve this model itself — i.e. whether it is the bundled one. */
+  /** Whether this image can serve the model itself — i.e. whether it is the baked one. */
   local: boolean;
   prefixed: boolean;
 }
@@ -56,7 +36,9 @@ export interface EmbedderChoice {
  *                     queries even though the columns fit. The kb's serving_id guard
  *                     refuses to start until the corpus is rebuilt.
  *   reembed+schema  — different width. The pgvector columns themselves must be rebuilt,
- *                     on top of the re-embed.
+ *                     on top of the re-embed. This is the 384 (bekko) vs 768 (nomic)
+ *                     case, and it is why they are separate images rather than a
+ *                     runtime switch.
  *
  * `current` empty means a fresh install: there is no corpus to invalidate, so the choice
  * is free. That is the proxy this UI uses for "populated" — it cannot see row counts, and
@@ -80,86 +62,129 @@ export function embedderChangeImpact(
   return 'reembed';
 }
 
-/** Map a card's VRAM to the largest tier it can host. Documented sizing:
- * small≈16 GB, mid≈24 GB, large≈32 GB (deploy/compose/aimee.gpu.yaml). A little
- * headroom is allowed under each floor; a GPU smaller than `small` still labels
- * `small` (best effort — the operator can drop to cpu). */
-export function vramToTier(vram_mb: number): Tier {
-  const gb = vram_mb / 1024;
-  if (gb >= 30) return 'large';
-  if (gb >= 22) return 'mid';
-  return 'small';
-}
+// --- the embedder choice -------------------------------------------------
 
-export interface RoleKeys {
-  backend: string;
-  /** Placement keys, EMPTY for a role with nothing to place. The embedder is served by
-   * the kb itself, so there is no host, GPU or tier for it — those keys described the
-   * retired aimee-llm container and no longer exist in config. */
-  host: string;
-  gpu: string;
-  tier: string;
-  /** External endpoint key. The embed role reuses `embedding_endpoint` (there is
-   * no `llm_embed_endpoint`); synth has its own. */
-  endpoint: string;
-}
-
-/** Whether a role can be placed on a host we run. Only `embed` was ever bundled;
- * `synth` kept host/gpu/tier keys because it ran on the aimee-llm container.
+/** How the embedder is served.
  *
- * That container is retired, so no local option is OFFERED for synth any more
- * (see placementOptions). The keys stay in the config contract and are written
- * empty, so this still reports true for synth: deleting them is a schema change
- * with its own migration, not part of removing the container. */
-export function rolePlaceable(role: Role): boolean {
-  return role !== 'embed';
+ *   bundled  — the model baked into this image variant (bekko-a25m at 384 on
+ *              aimee-kb-a25m, nomic-v2 at 768 on aimee-kb-nomic).
+ *
+ * THERE IS NO 'none'. Retrieval does not work without an embedder, so the choice is a
+ * bundled model or an external endpoint. The plain aimee-kb image carries no weights
+ * and exists for the external case; it is not a way to run without one.
+ *   external — an operator-run endpoint. Its width cannot be derived, so `dims`
+ *              is required; anything up to EMBED_MAX_DIM (4000, the DB2 column
+ *              ceiling) is valid. */
+export type EmbedderSelection =
+  | { kind: 'bundled'; model: string }
+  | { kind: 'external'; endpoint: string; apiKey: string; dims: string };
+
+// --- the synthesis choice ------------------------------------------------
+
+/** The synthesis models that can be deployed. THIS IS A MENU NOW.
+ *
+ * It used to describe whichever single model the kb image happened to bake, because
+ * synthesis lived inside that image. It does not any more: each model is its own
+ * sidecar (aimee-llm-e2b / aimee-llm-e4b) deployed beside the kb, so both are always
+ * offerable and the kb tag has no bearing on the choice.
+ *
+ * Quality numbers are extraction F1 on the 69-note gold set measured at Q8_0
+ * (docs/SYNTHESIS_MODELS.md), so they are indicative of the gap between the two rather
+ * than exact for the shipped quantisations. */
+export interface SynthesisModelChoice {
+  id: string;
+  label: string;
+  blurb: string;
 }
 
-export function roleKeys(role: Role): RoleKeys {
-  const placeable = rolePlaceable(role);
-  return {
-    backend: `llm_${role}_backend`,
-    host: placeable ? `llm_${role}_host` : '',
-    gpu: placeable ? `llm_${role}_gpu` : '',
-    tier: placeable ? `llm_${role}_tier` : '',
-    endpoint: role === 'embed' ? 'embedding_endpoint' : `llm_${role}_endpoint`,
+export const SYNTHESIS_MODELS: SynthesisModelChoice[] = [
+  {
+    id: 'gemma-4-E4B-it',
+    label: 'gemma-4-E4B-it',
+    blurb: 'The better model. 7.46 GB at UD-Q6_K_XL, deployed as the aimee-llm-e4b sidecar.',
+  },
+  {
+    id: 'gemma-4-E2B-it',
+    label: 'gemma-4-E2B-it',
+    blurb: '2.97 GB at UD-Q4_K_XL, deployed as aimee-llm-e2b. Faster, and weaker at extraction (0.72 F1 against 0.81).',
+  },
+];
+
+/** How synthesis is served.
+ *
+ *   off      — no synthesis. A SUPPORTED state, not an error: embedding, search,
+ *              recall and indexing never call this endpoint.
+ *   bundled  — gemma-4 running beside the kb as an aimee-llm-e{2,4}b sidecar, reached
+ *              over mutual TLS. The weights are baked into that image; nothing is
+ *              downloaded at deploy or at run time.
+ *   external — any OpenAI-compatible endpoint. Best quality, no local GPU or RAM
+ *              cost, and your notes leave the machine. */
+export type SynthesisSelection =
+  | { kind: 'off' }
+  | { kind: 'bundled'; model: string }
+  | { kind: 'external'; endpoint: string; apiKey: string };
+
+/** Every config key this page may write — used by a test to assert the mapping
+ * never emits an off-allowlist key. */
+export const ALL_TOPOLOGY_KEYS: string[] = [
+  'embedder_model',
+  'embedder_url',
+  'embedder_api_key',
+  'embedder_dims',
+  'synthesis_endpoint',
+  'synthesis_model',
+  'synthesis_api_key',
+];
+
+/** Translate the embedder selection into the {key: value} map to persist. Keys
+ * not relevant to the chosen kind are cleared ('') so switching never leaves a
+ * stale endpoint or pinned width behind — a stale embedder_dims disagreeing with
+ * a bundled model is exactly the pin that fails startup. */
+export function embedderToConfig(sel: EmbedderSelection): Record<string, string> {
+  const base: Record<string, string> = {
+    embedder_model: '',
+    embedder_url: '',
+    embedder_api_key: '',
   };
+  if (sel.kind === 'bundled') {
+    // The identity is written even though the model is baked in: it is the registry
+    // key the kb resolves pooling and prefixes from, and the value it records against
+    // the corpus. Leaving it blank is what made the vector-space guard a no-op.
+    // embedder_dims is deliberately NOT emitted — a bundled model declares its own
+    // width and the kb derives it (pinned > recorded > probed). Pinning here would
+    // only create a second place to be wrong.
+    return { ...base, embedder_model: sel.model.trim() };
+  }
+  const out: Record<string, string> = {
+    ...base,
+    embedder_url: sel.endpoint.trim(),
+    embedder_api_key: sel.apiKey.trim(),
+  };
+  // embedder_dims is a CFG_INT key — only emit it when set, never a blank string
+  // (which would reach the int allowlist as '').
+  const dims = sel.dims.trim();
+  if (dims !== '') out.embedder_dims = dims;
+  return out;
 }
 
-/** The synthesizer on CPU can only serve the Tier-A model (the GPU tiers add
- * Tier-B); the UI constrains the synth model + hides larger tiers accordingly.
- * (deploy/smoothnas/aimee-kb.plugin.yaml: "CPU tier = Tier-A synth".) */
-export function synthIsTierAOnly(role: Role, p: Placement): boolean {
-  return role === 'synth' && p.backend === 'local' && p.tier === 'cpu';
-}
-
-/** Every page-2 key this page may write, per role — used by a test to assert the
- * mapping never emits an off-allowlist key. */
-export const ALL_ROLE_KEYS: string[] = ROLES.flatMap(({ role }) => {
-  const k = roleKeys(role);
-  return [k.backend, k.host, k.gpu, k.tier, k.endpoint].filter(Boolean);
-});
-
-/** Translate a role's placement selection into the {key: value} config map to
- * persist. Fields not relevant to the chosen backend are cleared ('') so a
- * switch (e.g. local→external) never leaves a stale host/tier/endpoint behind. */
-export function placementToConfig(role: Role, p: Placement): Record<string, string> {
-  const k = roleKeys(role);
-  // Only emit keys this role actually has. A blank key name would otherwise write an
-  // empty-string entry that the config allowlist rejects.
-  const base: Record<string, string> = { [k.backend]: '', [k.endpoint]: '' };
-  for (const key of [k.host, k.gpu, k.tier]) if (key) base[key] = '';
-  if (p.backend === 'local') {
-    const out = { ...base, [k.backend]: 'local' };
-    if (k.tier) out[k.tier] = p.tier;
-    if (k.host) out[k.host] = p.host;
-    if (k.gpu) out[k.gpu] = p.gpu;
-    return out;
-  }
-  if (p.backend === 'external') {
-    return { ...base, [k.backend]: 'external', [k.endpoint]: p.endpoint };
-  }
-  return { ...base, [k.backend]: 'off' };
+/** Translate the synthesis selection into the {key: value} map to persist.
+ *
+ * A bundled model writes synthesis_model and leaves synthesis_endpoint EMPTY: the
+ * container entrypoint starts llama-server and sets the loopback endpoint itself.
+ * Writing a 127.0.0.1 URL here would hardcode a port the entrypoint owns. */
+export function synthesisToConfig(sel: SynthesisSelection): Record<string, string> {
+  const base: Record<string, string> = {
+    synthesis_endpoint: '',
+    synthesis_model: '',
+    synthesis_api_key: '',
+  };
+  if (sel.kind === 'off') return base;
+  if (sel.kind === 'bundled') return { ...base, synthesis_model: sel.model.trim() };
+  return {
+    ...base,
+    synthesis_endpoint: sel.endpoint.trim(),
+    synthesis_api_key: sel.apiKey.trim(),
+  };
 }
 
 /** The operator's full page-2 selection, independent of the DOM. */
@@ -167,17 +192,13 @@ export interface DeploySelection {
   kbMode: KbMode;
   kbUrl: string;
   kbBearer: string;
-  placements: Record<Role, Placement>;
-  embedModel: string;
-  embedDim: string;
+  embedder: EmbedderSelection;
+  synthesis: SynthesisSelection;
 }
 
-/** Build the complete {key: value} config map a selection would persist. A
- * remote KB deploys nothing locally, so ONLY the kb_* keys are written (the LLM
- * placement is skipped, mirroring `deploy-env`'s early return). Otherwise every
- * role's placement is emitted, plus the external-embedder model/dim. The synth
- * model is not configurable — it is fixed by the placement tier (cpu/small/mid/
- * large). Pure — the component saves only the keys that changed vs config. */
+/** Build the complete {key: value} config map a selection would persist. A remote
+ * KB deploys nothing locally, so ONLY the kb_* keys are written, mirroring
+ * `deploy-env`'s early return. Pure — the component saves only what changed. */
 export function buildDesiredConfig(sel: DeploySelection): Record<string, string> {
   const out: Record<string, string> = { kb_mode: sel.kbMode };
   if (sel.kbMode === 'remote') {
@@ -185,25 +206,8 @@ export function buildDesiredConfig(sel: DeploySelection): Record<string, string>
     out.kb_client_bearer_token = sel.kbBearer.trim();
     return out;
   }
-  for (const { role } of ROLES) {
-    const p = sel.placements[role];
-    Object.assign(out, placementToConfig(role, p));
-    if (role === 'embed') {
-      // The embedder identity is written for a LOCAL choice too, not just an external
-      // one: it is the registry key the gateway resolves pooling and prefixes from, and
-      // the value the kb records against its corpus. Leaving it blank locally is what
-      // made the vector-space guard a no-op.
-      if (sel.embedModel.trim() !== '') out.embedding_model = sel.embedModel.trim();
-      if (p.backend === 'external') {
-        // embedding_dim is a CFG_INT key — only emit it when set, never a blank
-        // string (which would reach the int allowlist as ''). For a LOCAL embedder the
-        // width is declared in the registry and derived by the kb (pinned > recorded >
-        // probed), so pinning it here would only create a second place to be wrong.
-        const dim = sel.embedDim.trim();
-        if (dim !== '') out.embedding_dim = dim;
-      }
-    }
-  }
+  Object.assign(out, embedderToConfig(sel.embedder));
+  Object.assign(out, synthesisToConfig(sel.synthesis));
   return out;
 }
 
@@ -212,118 +216,32 @@ function str(cfg: Record<string, unknown>, key: string): string {
   return v == null ? '' : String(v);
 }
 
-/** Recover the current placement for a role from a loaded config map. An unset
- * or `local` backend reads as local (default cpu tier) so a fresh instance lands
- * on the simplest working choice. */
-export function configToPlacement(cfg: Record<string, unknown>, role: Role): Placement {
-  const k = roleKeys(role);
-  const backend = str(cfg, k.backend);
-  if (backend === 'external') return { backend: 'external', endpoint: str(cfg, k.endpoint) };
-  if (backend === 'off') return { backend: 'off' };
-  if (!rolePlaceable(role)) {
-    // In-container: there is no tier to default and no host to name. Reporting 'cpu'
-    // here would be inventing a placement for something that has none.
-    return { backend: 'local', tier: '' as Tier, host: '', gpu: '' };
+/** Recover the embedder selection from a loaded config map. A non-empty URL IS
+ * the external embedder — there is no separate backend selector that could
+ * disagree with it, which is how "external with an empty URL" used to become a
+ * silently dead configuration. */
+export function configToEmbedder(cfg: Record<string, unknown>): EmbedderSelection {
+  const url = str(cfg, 'embedder_url').trim();
+  if (url) {
+    return {
+      kind: 'external',
+      endpoint: url,
+      apiKey: str(cfg, 'embedder_api_key'),
+      dims: str(cfg, 'embedder_dims'),
+    };
   }
-  if (role === 'synth') {
-    // A stored local synth placement names the retired aimee-llm container, and an
-    // unset one used to default to local cpu. Neither can be served now, and the
-    // picker offers no local option, so report it as off rather than selecting a
-    // backend that will never start. An operator who wants synthesis gives an
-    // endpoint.
-    return { backend: 'off' };
-  }
-  const tier = str(cfg, k.tier) as Tier;
-  return {
-    backend: 'local',
-    tier: tier === 'small' || tier === 'mid' || tier === 'large' ? tier : 'cpu',
-    host: str(cfg, k.host),
-    gpu: str(cfg, k.gpu),
-  };
+  return { kind: 'bundled', model: str(cfg, 'embedder_model') };
 }
 
-// --- Host inventory (GET /api/hosts) -------------------------------------
-export interface HostGpu {
-  index: number;
-  name: string;
-  vendor: string;
-  vram_mb: number;
-}
-export interface HostInfo {
-  name: string;
-  kind: 'local' | 'remote';
-  ip?: string;
-  gpus: HostGpu[];
-  error?: string;
+/** Recover the synthesis selection. Empty endpoint AND empty model is 'off',
+ * which is a real configured state rather than a missing one. */
+export function configToSynthesis(cfg: Record<string, unknown>): SynthesisSelection {
+  const endpoint = str(cfg, 'synthesis_endpoint').trim();
+  if (endpoint) {
+    return { kind: 'external', endpoint, apiKey: str(cfg, 'synthesis_api_key') };
+  }
+  const model = str(cfg, 'synthesis_model').trim();
+  if (model) return { kind: 'bundled', model };
+  return { kind: 'off' };
 }
 
-/** One selectable placement option for a role, given the chosen host. */
-export interface PlacementOption {
-  id: string; // 'cpu' | 'gpu:<index>' | 'external'
-  label: string;
-  placement: Placement;
-}
-
-/** Build the per-role option list for the selected host: CPU, one per GPU (tier
- * derived from VRAM), and External. `gpu:<index>` placements carry the host name
- * so all local roles pin to the single shared container's host. */
-/** The placements a role can be given on this host.
- *
- * ROLE-AWARE ON PURPOSE, because the roles do not share a runtime. The embedder used to
- * read the synth list, which let an operator pick "GPU 0" for a model served inside the
- * knowledge base: the choice looked real and wrote nothing. The fix is not "embedders
- * have no placements" — a GPU-served embedder would be a perfectly good option to add
- * here later — it is that every option a role is OFFERED has to be an option that role
- * can actually be given. deployTopology.test.ts asserts exactly that for every role, so
- * adding a GPU embedder means adding an entry here and the guard keeps holding. */
-export function placementOptions(host: HostInfo | undefined, role?: Role): PlacementOption[] {
-  if (role === 'embed') {
-    // Two ways to embed, and neither is a placement of one of our containers: the kb
-    // serves the bundled model itself, or an operator points it at their own endpoint.
-    // The external option is the supported route above the bundled model's width: a
-    // wider or stronger embedder means someone else's GPU, not a tier of ours.
-    return [
-      {
-        id: 'in-container',
-        label: 'In the knowledge base (bundled)',
-        placement: { backend: 'local', tier: '' as Tier, host: '', gpu: '' },
-      },
-      { id: 'external', label: 'External endpoint', placement: { backend: 'external', endpoint: '' } },
-    ];
-  }
-  if (role === 'synth') {
-    // Synthesis has no local option: the container that used to serve it is gone,
-    // and the knowledge base does not run a model. Offering a tier here would ask
-    // an operator to place something that will never be started.
-    return [
-      { id: 'external', label: 'External endpoint', placement: { backend: 'external', endpoint: '' } },
-      { id: 'off', label: 'Off (disabled)', placement: { backend: 'off' } },
-    ];
-  }
-  const opts: PlacementOption[] = [
-    { id: 'cpu', label: 'CPU', placement: { backend: 'local', tier: 'cpu', host: host?.name ?? '', gpu: '' } },
-  ];
-  for (const g of host?.gpus ?? []) {
-    const tier = vramToTier(g.vram_mb);
-    const gb = Math.round(g.vram_mb / 1024);
-    opts.push({
-      id: `gpu:${g.index}`,
-      label: `${g.name} · ${gb} GB (${tier})`,
-      placement: { backend: 'local', tier, host: host?.name ?? '', gpu: String(g.index) },
-    });
-  }
-  opts.push({ id: 'external', label: 'External host', placement: { backend: 'external', endpoint: '' } });
-  // `off` must be a first-class option: without it a role already stored as
-  // backend='off' has no matching <select> entry, renders as the first option
-  // (cpu), and the next save silently re-enables it as local cpu.
-  opts.push({ id: 'off', label: 'Off (disabled)', placement: { backend: 'off' } });
-  return opts;
-}
-
-/** Which option id a placement currently corresponds to (for selecting the right
- * control). A local GPU placement matches `gpu:<gpu>`; local cpu → 'cpu'. */
-export function placementOptionId(p: Placement): string {
-  if (p.backend === 'external') return 'external';
-  if (p.backend === 'off') return 'off';
-  return p.tier === 'cpu' && !p.gpu ? 'cpu' : `gpu:${p.gpu}`;
-}

@@ -26,8 +26,8 @@ the shared logging primitive. The sole production consumer is `src/server/agent_
 calls `plugin_chook_apply_pre_llm` per turn; the focused test consumer is
 `src/tests/test_plugin_c_hook.c`.
 
-Consumption is asymmetric by design. The host tree consumes the registry only as a reader —
-`agent_runtime.c` applies registered hooks — and no host-side source calls
+Consumption is asymmetric by design. The host tree consumes the registry only as a reader.
+`agent_runtime.c` applies registered hooks, and no host-side source calls
 `plugin_chook_register_pre_llm`. The registration entry point is producer-facing ABI for in-process
 callers, so an unfired hook path in a plain host build is the expected state, not a defect.
 
@@ -39,7 +39,7 @@ Build inputs are maintained by Make and CMake; descriptor-driven build generatio
 step, so these ownership fields are documentation and validation only.
 
 The descriptor sets `ownership_complete: true`. That latch exhaustively checks the module-local C
-and private-header files — the module has no private headers — and requires this canonical
+and private-header files (the module has no private headers) and requires this canonical
 document. The public-header and test entries are explicit audited claims. Completeness is a
 statement about file ownership only: it does not assert that every owned public facility has a
 host-side caller, nor that every declared test runs in every build system. The source liveness,

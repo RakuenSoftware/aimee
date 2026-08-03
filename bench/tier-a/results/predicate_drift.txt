@@ -1,0 +1,40 @@
+novel predicate emissions: 133 across 60 distinct
+
+  duplicates an existing seed predicate :   29  (22%)   <- avoidable Class-C drift
+  malformed / not a predicate           :   22  (17%)
+  genuinely new relation                :   82  (62%)   <- Class C is the right outcome
+
+most common novel predicates:
+    9  has_ip                 -> device_has_ip
+    9  founded                genuinely new
+    9  drives                 genuinely new
+    7  is                     malformed
+    6  mentors                genuinely new
+    6  owns                   genuinely new
+    5  daughter               -> child_of
+    5  studied                genuinely new
+    4  to                     malformed
+    4  speaks                 genuinely new
+    4  governed_by            -> linked_policy
+    3  in munich              genuinely new
+    3  hostname               -> has_hostname
+    3  moved_to               genuinely new
+    3  does_not_work_for      malformed
+    2  board member           -> member_of
+    2  no longer on           malformed
+    2  joined                 -> member_of
+    2  started_at             -> works_for
+    2  rebooted               genuinely new
+
+per-model share that is avoidable drift:
+  LiquidAI/LFM2-350M-Extract           8/ 16    50%
+  Qwen/Qwen3-1.7B                      2/  6    33%
+  Qwen/Qwen3.5-0.8B                    4/ 12    33%
+  Qwen/Qwen3.5-2B                      0/ 10     0%
+  google/gemma-4-E2B-it                2/  9    22%
+  google/gemma-4-E4B-it                3/  9    33%
+  ibm-granite/granite-4.0-1b           6/ 21    29%
+  ibm-granite/granite-4.0-350m         0/  6     0%
+  ibm-granite/granite-4.0-h-1b         3/ 27    11%
+  ibm-granite/granite-4.1-3b           0/  9     0%
+  unsloth/gemma-3n-E4B-it              1/  8    12%

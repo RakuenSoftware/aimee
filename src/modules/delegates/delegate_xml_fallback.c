@@ -11,7 +11,7 @@
  */
 #include "aimee.h"
 #include <aimee/delegates/delegate_xml_fallback.h>
-#include "agent_tools.h"
+#include <aimee/tools/agent_tools.h>
 #include "cJSON.h"
 #include <string.h>
 #include <ctype.h>

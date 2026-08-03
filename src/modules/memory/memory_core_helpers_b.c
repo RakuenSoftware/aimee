@@ -387,10 +387,10 @@ int memory_fetch_row_by_unit_id(int64_t unit_id, memory_t *out)
 
 const char *memory_effective_embedding_cmd(const char *command)
 {
-   /* Single policy point: config_embedding_command_current (config_save.c). The caller
+   /* Single policy point: config_embedder_command_current (config_save.c). The caller
     * has already resolved config -> command upstream, so pass it as the request
     * override; this keeps memory_core consistent with the kb-side resolution. */
-   return config_embedding_command_current(command);
+   return config_embedder_command_current(command);
 }
 
 /* Per-recall query-embedding memo.
@@ -447,8 +447,8 @@ int memory_embed_http_post_status(const char *base, const char *path, const char
    char auth[640] = "";
    char token[512] = "";
    const char *auth_header = NULL;
-   int have_token = runtime_secret_get("AIMEE_LLM_AUTH_TOKEN", token, sizeof(token));
-   const char *auth_required = getenv("AIMEE_LLM_AUTH_REQUIRED");
+   int have_token = runtime_secret_get("SYNTHESIS_API_KEY", token, sizeof(token));
+   const char *auth_required = getenv("SYNTHESIS_AUTH_REQUIRED");
    if (status_out)
       *status_out = -1;
    if (auth_required && strcmp(auth_required, "1") == 0 && !have_token)
@@ -513,26 +513,10 @@ int memory_embed_serving_id(const char *command, char *out, size_t out_len)
    out[0] = '\0';
    if (!command || !command[0])
       return 0;
-   if (strcmp(command, "builtin") == 0)
-   {
-      /* The builtin lexical embedder DOES have a vector space, and it needs an identity
-       * for the same reason the model-backed ones do. Reporting none left the one
-       * transition nothing could catch: a corpus embedded lexically and then queried with
-       * the bundled model shares its 384 width, so the dim guard is silent, and with no
-       * recorded identity the serving_id guard recorded the model's fresh and mixed the
-       * two spaces without a word.
-       *
-       * It is a deterministic feature hash over tokens and bigrams, so the space is fixed
-       * by the code rather than by any file: hence a constant, and hence the VERSION.
-       * BUMP IT whenever memory_embed_text_builtin's hashing, weighting or width changes —
-       * that is a different space, and an unbumped identity would claim otherwise. */
-      snprintf(out, out_len, "builtin/lexical-v1");
-      return 0;
-   }
    if (!memory_embed_command_is_http(command))
    {
       /* A SIDECAR command (the shipped container's embed-remote.py) owns endpoint
-       * resolution — AIMEE_EMBEDDER_URL over AIMEE_LLM_URL, plus the bearer — so ask it
+       * resolution — EMBEDDER_URL over SYNTHESIS_ENDPOINT, plus the bearer — so ask it
        * rather than re-deriving that precedence here and getting it subtly different.
        * This is the default deployment shape: without it the guard would be inactive in
        * exactly the configuration everything ships with. Mirrors the `--dim` probe. */
@@ -558,8 +542,8 @@ int memory_embed_serving_id(const char *command, char *out, size_t out_len)
    memory_embed_http_url(command, "/health", url, sizeof(url));
    char auth[640];
    const char *auth_header = NULL;
-   const char *token = getenv("AIMEE_LLM_AUTH_TOKEN");
-   const char *auth_required = getenv("AIMEE_LLM_AUTH_REQUIRED");
+   const char *token = getenv("SYNTHESIS_API_KEY");
+   const char *auth_required = getenv("SYNTHESIS_AUTH_REQUIRED");
    if (auth_required && strcmp(auth_required, "1") == 0 && (!token || !token[0]))
       return -1;
    if (token && token[0])
@@ -687,6 +671,107 @@ static void memory_query_embed_cache_put(const char *command, const char *text, 
    snprintf(e->text, sizeof(e->text), "%s", text);
    memcpy(e->vec, vec, (size_t)dim * sizeof(float));
    e->dim = dim;
+}
+
+/* Names the polarity for the embedder's per-model prefix lookup. The embedder owns
+ * the prefixes themselves; we only say which side this text is. */
+const char *memory_embed_input_type_name(embed_input_type_t input_type)
+{
+   return input_type == EMBED_INPUT_QUERY ? "query" : "document";
+}
+
+int memory_embed_texts(const char *const *texts, int n, const char *command,
+                       embed_input_type_t input_type, float *out, int dim)
+{
+   if (!texts || n <= 0 || !out || dim <= 0)
+      return 0;
+   /* The builtin is in-process feature hashing: there is no round trip to amortize,
+    * so batching it would only add a JSON encode. Callers fall back to the per-text
+    * path, which computes exactly the same vectors. */
+   if (!command || !command[0] || strcmp(command, "builtin") == 0)
+      return 0;
+   if (!memory_embed_command_is_http(command))
+      return 0;
+
+   cJSON *arr = cJSON_CreateArray();
+   if (!arr)
+      return 0;
+   for (int i = 0; i < n; i++)
+   {
+      if (!texts[i] || !texts[i][0])
+      {
+         cJSON_Delete(arr);
+         return 0;
+      }
+      cJSON_AddItemToArray(arr, cJSON_CreateString(texts[i]));
+   }
+   char *input = cJSON_PrintUnformatted(arr);
+   cJSON_Delete(arr);
+   if (!input)
+      return 0;
+
+   /* Same polarity contract as the single-text path: the prefix belonging to a
+    * query differs from a document's, and omitting it is a silent quality loss
+    * rather than an error. */
+   char path[64];
+   snprintf(path, sizeof(path), "/embed_batch?input_type=%s",
+            memory_embed_input_type_name(input_type));
+
+   char *buf = NULL;
+   int http_status = -1;
+   int rc = memory_embed_http_post_status(command, path, input, &buf, &http_status);
+   free(input);
+   if (rc != 0 || !buf)
+   {
+      free(buf);
+      /* Deliberately NOT reported to the dependency breaker. A batch failure sends
+       * the caller to the per-text path, which probes the same embedder and owns
+       * the breaker; tripping it here would open the breaker and then fail the
+       * fallback that was supposed to recover. */
+      aimee_log(LOG_DEBUG, "memory", "batch embed unavailable (status %d); falling back per text",
+                http_status);
+      return 0;
+   }
+
+   cJSON *resp = cJSON_Parse(buf);
+   free(buf);
+   if (!cJSON_IsArray(resp) || cJSON_GetArraySize(resp) != n)
+   {
+      cJSON_Delete(resp);
+      return 0;
+   }
+
+   /* Write into |out| only after every row is validated at full width. A partial
+    * write would leave the caller unable to tell which rows are real, and a short
+    * vector silently means a different point in the vector space. */
+   int row = 0;
+   cJSON *vecj;
+   cJSON_ArrayForEach(vecj, resp)
+   {
+      if (!cJSON_IsArray(vecj) || cJSON_GetArraySize(vecj) != dim)
+      {
+         cJSON_Delete(resp);
+         return 0;
+      }
+      int k = 0;
+      cJSON *el;
+      cJSON_ArrayForEach(el, vecj)
+      {
+         if (!cJSON_IsNumber(el))
+         {
+            cJSON_Delete(resp);
+            return 0;
+         }
+         out[(size_t)row * (size_t)dim + (size_t)k] = (float)el->valuedouble;
+         k++;
+      }
+      row++;
+   }
+   cJSON_Delete(resp);
+   if (row != n)
+      return 0;
+
+   return n;
 }
 
 /* Embed-batching: embed up to `n` query texts in ONE batched embedder call and
@@ -860,7 +945,7 @@ void memory_refresh_unit_embeddings(int64_t memory_id)
 {
    if (memory_id <= 0)
       return;
-   const char *embed_command = config_embedding_command_current(NULL);
+   const char *embed_command = config_embedder_command_current(NULL);
 
    db2_memory_unit_row_t units[64];
    int unit_max = (int)(sizeof(units) / sizeof(units[0]));

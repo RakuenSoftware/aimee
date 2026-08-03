@@ -88,7 +88,7 @@ int econ_reduction_master_on(const config_t *cfg)
  * the struct to ask a two-field question. The config_t forms stay: they are
  * inside the config module, and econ_mode is a PURE function of two fields --
  * test_config_economizer exercises the whole resolution table with no I/O,
- * which is worth keeping. Mirrors config_embedding_command / _current. */
+ * which is worth keeping. Mirrors config_embedder_command / _current. */
 int econ_mode_current(void)
 {
    if (config_module_economizer() == 0)

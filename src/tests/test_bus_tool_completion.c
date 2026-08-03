@@ -32,7 +32,7 @@
 #include "config.h" /* header-order for agent_tools.h */
 #include "log.h"    /* audit_log_open */
 
-#include "agent_tools.h" /* agent_tool_completion_t, agent_tools_fire_tool_completion_for_test */
+#include <aimee/tools/agent_tools.h> /* agent_tool_completion_t, agent_tools_fire_tool_completion_for_test */
 #include "server/tool_completion_audit_bridge.h"
 
 static const char *sval(cJSON *row, const char *key)

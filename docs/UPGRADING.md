@@ -7,9 +7,8 @@ command. Take the backup before step one, not after the first thing goes wrong.
 Read [What's new](WHATS_NEW.md) first. This cycle changes deployment, storage, credentials, remote
 identity, workflows, and removed commands.
 
-Do not install from the `v0.2.196` or `v0.3.0` tags. Both were promoted in error part-way through
-this cycle and are not releases; an installation from either is an untested mid-cycle build missing
-the fixes listed under
+Do not install from the `v0.2.196` tag. It was promoted in error part-way through this cycle and is
+not a release; an installation from it is an untested mid-cycle build missing the fixes listed under
 [If you installed from a mid-cycle tag](WHATS_NEW.md#if-you-installed-from-a-mid-cycle-tag).
 Several of those are cases where a fresh install came up healthy and silently did nothing useful.
 
@@ -103,7 +102,7 @@ certificate-bound `full` grant during enrollment. Additional remote users need K
 and exact subject grants. `aimee.api.remote_writes=data|full` remains parsed, warns at startup, and
 increments `remote_writes.global_ignored`; it does not authorize a user write.
 
-Re-run the managed wizard's Deploy step to create the default team, server
+Re-run the managed wizard and use the summary's Deploy action to create the default team, server
 workload identity, signed generation-1 JWKS, and root-owned public trust volume.
 The one-shot authority image remains separate from the ordinary KB/server
 images, and the server mounts only its public output read-only.
@@ -166,6 +165,139 @@ the KB's configured PAM or OIDC login. Give unattended callers separate service 
 Common refusal reasons are `absent`, `invalid`, `unknown_kid`, `wrong_team`,
 `no_team_configured`, `replay`, and `replay_unavailable`. Use the structured `403`, request ID, and
 server log. A grant for the wrong spelling is a grant for nobody.
+
+## The embedder and synthesis settings are renamed, with no aliases
+
+Every setting naming the embedder or the synthesis model changed name. There is no
+alias: an old name is simply not read. A deployment that upgrades without editing its
+environment and `aimee.yaml` therefore reads as having no embedder configured, and
+**the KB refuses to start** rather than coming up without one. Synthesis goes idle,
+which is a supported state and does not stop anything.
+
+Earlier builds in this cycle did fall back to a builtin lexical embedder here, so the
+KB came up healthy and answered searches with keyword matching while the renamed
+settings sat unread. That fallback is gone precisely because nothing errored.
+
+| Old | New |
+| --- | --- |
+| `AIMEE_EMBEDDER_URL`, config `embedding_endpoint` | `EMBEDDER_URL` / `embedder_url` |
+| `AIMEE_EMBEDDING_DIM`, config `embedding_dim` | `EMBEDDER_DIMS` / `embedder_dims` |
+| config `embedding_model` | `EMBEDDER_MODEL` / `embedder_model` |
+| config `embedding_command` | `embedder_command` |
+| `AIMEE_LLM_URL`, `LLM_ENDPOINT`, config `llm_synth_endpoint` | `SYNTHESIS_ENDPOINT` / `synthesis_endpoint` |
+| `LLM_MODEL`, `AIMEE_LLM_MODEL`, config `llm_synth_model` | `SYNTHESIS_MODEL` / `synthesis_model` |
+| `AIMEE_LLM_AUTH_TOKEN`, `LLM_API_KEY` | `SYNTHESIS_API_KEY` / `synthesis_api_key` |
+| `AIMEE_LLM_AUTH_REQUIRED` | `SYNTHESIS_AUTH_REQUIRED` |
+
+**This applies to `aimee.yaml` as well as the environment.** The config file used
+the `embedding_*` spelling while the code had already moved on, so the file and the
+setting could disagree. They are one name now, which means the old file keys are
+dead: re-set them.
+
+Deleted outright, because the container they configured is retired and the
+`aimee-kb` image variant now encodes that choice: `llm_embed_backend`,
+`llm_synth_backend`, `llm_synth_host`, `llm_synth_gpu`, `llm_synth_tier`,
+`AIMEE_LLM_SYNTH_MODE`, `AIMEE_LLM_SYNTH_URL`, `AIMEE_LLM_SYNTH_TIER`. A config
+still carrying `kb.curator.tier_b.*` is not an error: the key is ignored and
+rewriting the file drops it.
+
+**Check before upgrading**: `aimee config get embedder_model` returns the embedder you
+mean to keep, under its new name. If it is empty, the KB will not start. Afterwards,
+`aimee config get synthesis_endpoint` should also return what you expect.
+
+## One synthesis role, and thinking is now a setting
+
+Tier-A and Tier-B are gone. Every curator stage resolves the same provider, because
+measurement did not support running a cheaper model on the mechanical stages. If you
+configured a second provider under `tier_b.*`, that provider is no longer used.
+Move it to `provider.*` if it is the one you want.
+
+The split had a second effect that is worth knowing you no longer have: the
+reasoning stages deliberately REFUSED the environment endpoint, so a deployment
+configured only that way ran extraction and left synthesis idle. One endpoint under
+one name cannot do that.
+
+Thinking used to be implied by the stage, suppressed for the mechanical stages
+because a reasoning pass can consume the output budget and truncate the answer. It
+is now one global, user-settable switch, `synthesis_thinking`, **default on**. Turn
+it off only if you point synthesis at a model that reasons past its output cap
+without answering; `MF_LLM_OUT_CAP` bounds the damage either way.
+
+## Choosing an aimee-kb image is a one-way door
+
+There are three `aimee-kb` images, on one axis: the embedder. Its weights are baked,
+so which embedder a deployment runs is decided by the tag it pulls:
+
+| image | embedder | size |
+| --- | --- | --- |
+| `aimee-kb` | none; `EMBEDDER_URL` required | 373 MB |
+| `aimee-kb-a25m` | bekko-a25m, 384-dim | 1.95 GB |
+| `aimee-kb-nomic` | nomic-v2, 768-dim | 3.34 GB |
+
+**The embedder axis cannot be changed after the KB has embedded anything.** DB2
+records the vector-column width and refuses to start when the embedder cannot produce
+it, so moving between a 384-dim and a 768-dim image means re-embedding the whole
+corpus. Choose before you ingest. An external embedder (`EMBEDDER_URL`) may be any
+width up to 4000, the DB2 column ceiling, not 4096, and the `aimee-kb` tag exists for
+exactly that case: it carries neither PyTorch nor weights.
+
+**A v0.2 corpus is usually neither 384 nor 768.** The 0.2 default was 1024, so a
+corpus carried across on its existing `AIMEE_DB2_URL` matches no bundled image. The KB
+refuses to start and says so:
+
+```text
+aimee: db2_init: embedder serves 384-dimension vectors but this corpus is recorded at
+1024. Every write would be refused by the vector columns.
+```
+
+Check before you upgrade, so this is a decision rather than a surprise:
+
+```bash
+psql "$AIMEE_DB2_URL" -tAc \
+  "select value from kb_meta where key='schema_embedding_dim'"
+```
+
+Two ways forward, and they are not equivalent: point `EMBEDDER_URL` at an embedder of
+the recorded width and keep the corpus, or re-embed at a bundled width and lose nothing
+but the time. Follow [Change the KB embedder](runbooks/change-embedder.md).
+
+**Synthesis is no longer an axis here.** It was, which is why earlier drafts of this
+page described six tags. It is now its own image deployed beside the kb, so the
+matrix collapsed to the embedder alone:
+
+| image | model |
+| --- | --- |
+| `aimee-llm-e2b` | gemma-4-E2B-it |
+| `aimee-llm-e4b` | gemma-4-E4B-it |
+
+If you are upgrading from an `aimee-kb-llm-*` or `aimee-kb-nomic-llm-*` tag, those no
+longer exist. Pull the matching embedder-only kb image and deploy the sidecar beside
+it: `aimee-kb-llm-e4b` becomes `aimee-kb-a25m` plus `aimee-llm-e4b`. The kb reaches
+the sidecar over mutual TLS, using an identity the kb itself issues at startup, so
+deploy the kb first.
+
+Unlike the embedder, the synthesis choice is reversible: the sidecar holds no data, so
+switching models or removing it entirely leaves the corpus untouched.
+
+Bundling llama.cpp means this project pins it, rather than inheriting upstream's image
+and its CVE fixes. `LLAMACPP_VERSION` in `Dockerfile.llm` is the single pin and needs
+deliberate bumping.
+
+## Bundled synthesis weights are baked into the image
+
+The weights ship inside the `aimee-llm-*` images, at a quant chosen per model:
+7.46 GB for E4B at UD-Q6_K_XL, 2.97 GB for E2B at UD-Q4_K_XL. The container downloads nothing at any point: an image either has its model
+or it does not, and `docker pull` is the one download, with the registry's retry and
+resume behind it.
+
+Budget for that in the image pull and in disk, not in a first-start delay. A `*-llm`
+image is several gigabytes larger than the plain one, and an image upgrade re-pulls
+the layer carrying the weights. Nothing lands on `$AIMEE_HOME`, so a volume wipe does
+not cost you the model.
+
+Leave `SYNTHESIS_ENDPOINT` empty for a bundled model. The container starts
+llama-server against the baked file and points synthesis at loopback itself; a value
+you write there points synthesis somewhere else and the bundled model is not loaded.
 
 ## What is gone, and what replaces it
 

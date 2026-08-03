@@ -120,6 +120,35 @@ static void test_request_target_none(void)
    printf("  request_target_none: ok\n");
 }
 
+/* The identity aimee-server actually presents.
+ *
+ * KB_SERVER_CLIENT_SCOPE becomes the certificate CN, and the mTLS seam turns a
+ * CN containing ':' into "scope:<CN>:m" — so this string alone decides whether
+ * the server is a data-plane caller or the install owner. It was a bare word,
+ * which made it the owner. A regression to any bare word would silently restore
+ * that, and nothing else in the suite would notice. */
+static void test_server_identity_is_scoped_not_owner(void)
+{
+   char kind[32] = "", id[128] = "", secret[256] = "";
+   /* Exactly what kb_tls_serve.c builds from the CN. */
+   char synth[192];
+   snprintf(synth, sizeof(synth), "scope:%s:m", KB_SERVER_CLIENT_SCOPE);
+   kb_scope_token_parse(synth, kind, sizeof(kind), id, sizeof(id), secret, sizeof(secret));
+
+   assert(strchr(KB_SERVER_CLIENT_SCOPE, ':') != NULL); /* a bare word would be owner */
+   assert(strcmp(kind, KB_SCOPE_KIND_SERVICE) == 0);
+   assert(id[0] != '\0');
+   assert(kind[0] != '\0'); /* scoped: every administrative gate refuses it */
+
+   /* Data plane: any project, any workspace. */
+   assert(kb_scope_authorized(kind, id, "project", "anything") == 1);
+   assert(kb_scope_authorized(kind, id, "workspace", "anything") == 1);
+   /* But not another kind's resources. */
+   assert(kb_scope_authorized(kind, id, "user", "someone") == 0);
+   assert(kb_scope_authorized(kind, id, "console-admin", "c1") == 0);
+   printf("  server identity is scoped (%s), not the owner\n", KB_SERVER_CLIENT_SCOPE);
+}
+
 int main(void)
 {
    printf("kb_scope:\n");
@@ -133,6 +162,7 @@ int main(void)
    test_request_target_query();
    test_request_target_body();
    test_request_target_none();
+   test_server_identity_is_scoped_not_owner();
    printf("All kb_scope tests passed.\n");
    return 0;
 }

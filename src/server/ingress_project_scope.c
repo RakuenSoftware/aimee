@@ -3,7 +3,7 @@
  * provide a deterministic seam without linking the full workspace subsystem. */
 #include "ingress_preinject.h"
 #include "util.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 
 #include <limits.h>
 #include <string.h>

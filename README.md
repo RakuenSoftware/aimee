@@ -40,9 +40,10 @@ docker compose -f compose.server-managed.yaml up -d
 docker compose -f compose.server-managed.yaml logs aimee-server
 ```
 
-The log prints a one-time dashboard login. Open <https://localhost:8443>, sign in, and the setup
-wizard covers the account, provider, knowledge base, and workspaces. Its last step starts `aimee-kb`
-with PostgreSQL 18, pgvector and pgvectorscale inside the container.
+The log prints a generated, one-time dashboard login. Open <https://localhost:8443>, sign in, and
+the setup wizard covers the account, provider, knowledge base, deployment, and workspaces. After the
+numbered steps, the summary can start `aimee-kb` with PostgreSQL 18, pgvector, and pgvectorscale
+inside the container.
 
 The managed compose file mounts the Docker socket, which gives aimee-server control of the host
 Docker daemon. Use the split stack if you do not want that.

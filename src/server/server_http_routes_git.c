@@ -14,20 +14,20 @@
 #include "cJSON.h"
 #include "config.h" /* MAX_PATH_LEN */
 #include "log.h"
-#include "git_forge_vault.h" /* GIT_FORGE_VAULT_AGENT/SSHKEY_CRED — per-webuser ssh-key vault */
-#include "git_host_cred.h"   /* per-host git credential store for /v1/git/credentials */
-#include "git_ops.h"         /* git_ops_run for /v1/workspace/git (WP-E) */
-#include "git_pr_api.h"      /* narrow in-process forge operations for Go WFE */
-#include "git_org_repos.h"   /* git_org_repos_list for /v1/workspace/org-repos */
-#include "git_project.h"     /* git_project_clone/_delete for /v1/workspace/clone + delete */
-#include "git_ssh_agent.h"   /* git_ssh_agent_stop — drop live key handles on revoke */
-#include "index.h"           /* index_scan_project after a webuser clone (WP-D) */
-#include "kb_client.h"       /* kb_client_index_scan — push webuser clones into aimee-kb */
-#include "vault_service.h"   /* vault_service_set/delete for the per-webuser ssh-key route */
-#include "webuser_editor.h"  /* webuser_editor_ensure for /v1/workspace/editor (WP-I) */
-#include "workspace_scope.h" /* ws_scope_user_root — project workspace root */
-#include "util.h"            /* bounded argv execution for structural worktree checks */
-#include "util_url.h"        /* util_url_is_remote — reject file:// / local-path clone urls */
+#include "modules/git/git_forge_vault.h" /* GIT_FORGE_VAULT_AGENT/SSHKEY_CRED — per-webuser ssh-key vault */
+#include "modules/git/git_host_cred.h" /* per-host git credential store for /v1/git/credentials */
+#include <aimee/git/git_ops.h>         /* git_ops_run for /v1/workspace/git (WP-E) */
+#include "modules/git/git_pr_api.h"    /* narrow in-process forge operations for Go WFE */
+#include "modules/git/git_org_repos.h" /* git_org_repos_list for /v1/workspace/org-repos */
+#include "modules/git/git_project.h" /* git_project_clone/_delete for /v1/workspace/clone + delete */
+#include "modules/git/git_ssh_agent.h" /* git_ssh_agent_stop — drop live key handles on revoke */
+#include "index.h"                     /* index_scan_project after a webuser clone (WP-D) */
+#include "kb_client.h"      /* kb_client_index_scan — push webuser clones into aimee-kb */
+#include "vault_service.h"  /* vault_service_set/delete for the per-webuser ssh-key route */
+#include "webuser_editor.h" /* webuser_editor_ensure for /v1/workspace/editor (WP-I) */
+#include "modules/workspace/workspace_scope.h" /* ws_scope_user_root — project workspace root */
+#include "util.h"     /* bounded argv execution for structural worktree checks */
+#include "util_url.h" /* util_url_is_remote — reject file:// / local-path clone urls */
 #include <ctype.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -234,11 +234,19 @@ int rh_workspace_clone_org(const route_req_t *rq, char *resp, int cap)
       return err_json(resp, cap, 400, "too many repos (max 100 per request)");
    }
 
-   /* The org: the request's `owner` field — the wizard already knows which
-    * org it is bulk-cloning (this was previously parsed and dropped). Every
-    * repo in the batch lands under it. */
+   /* The org the operator was BROWSING, used only as a fallback. It is not the
+    * owner of every repo in the batch: enumerating an account returns repos it
+    * merely has access to, so a games-on-whales repo can arrive in a batch the
+    * wizard labelled JBailes. Filing all of them under the browsed owner put 15
+    * repos in the wrong org directory on a real appliance —
+    * webusers/admin/JBailes/discowolf whose remote is games-on-whales/discowolf,
+    * a repo JBailes does not own at all. The Projects page groups by that
+    * directory, so it then reported the wrong org for those repos and the org it
+    * was browsing looked as though the clone had never happened.
+    *
+    * Each repo's real owner is in its own clone_url; derive it per repo below. */
    const cJSON *jowner = cJSON_GetObjectItemCaseSensitive(body, "owner");
-   const char *owner =
+   const char *browsed_owner =
        (cJSON_IsString(jowner) && jowner->valuestring[0]) ? jowner->valuestring : NULL;
 
    cJSON *out = cJSON_CreateObject();
@@ -258,8 +266,16 @@ int rh_workspace_clone_org(const route_req_t *rq, char *resp, int cap)
        * also name a real remote, so one crafted clone_url cannot smuggle a
        * local path in through the bulk route. */
       int remote_ok = util_url_is_remote(url);
+      /* This repo's own owner, from its own URL. Falls back to the browsed owner
+       * only when the URL yields no single-segment owner (a GitLab subgroup),
+       * which is the case git_project_clone flattens by design. */
+      char repo_org[GIT_PROJECT_NAME_MAX];
+      int multi = 0;
+      const char *org = browsed_owner;
+      if (remote_ok && git_project_derive_org(url, repo_org, sizeof(repo_org), &multi) == 0)
+         org = repo_org;
       /* token=NULL → the host's stored credential (or server identity) is used. */
-      int rc = remote_ok ? git_project_clone(principal, url, name, owner, NULL, dest, sizeof(dest),
+      int rc = remote_ok ? git_project_clone(principal, url, name, org, NULL, dest, sizeof(dest),
                                              pname, sizeof(pname), err, sizeof(err))
                          : -1;
       if (rc == 0)
@@ -845,12 +861,12 @@ int rh_workspace_projects(const route_req_t *rq, char *resp, int cap)
    return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
 }
 
-/* POST /v1/workspace/projects/delete {ref, force?} — delete a cloned project
- * under the calling webchat user's scoped workspace (webchat project lifecycle
- * proposal, slice 2). The ONLY identity source is the attested X-Aimee-Webuser
- * principal; another webuser's ref is a plain 404. The last holder of a ref
- * triggers the fenced kb purge (503 abort without `force`); other holders keep
- * the shared knowledge (kb_status "retained"). Capability: tool:execute. */
+/* POST /v1/workspace/projects/delete {ref} — delete a cloned project from this
+ * environment (webchat project lifecycle proposal, slice 2). The ONLY identity
+ * source is the attested X-Aimee-Webuser principal; an unresolvable ref is a
+ * plain 404. The delete is LOCAL: the clone and this server's own state go, and
+ * aimee-kb — a separate multi-tenant service — is not called, so there is no
+ * purge outcome to report and nothing to force past. Capability: tool:execute. */
 int rh_workspace_projects_delete(const route_req_t *rq, char *resp, int cap)
 {
    if (!git_surface_enabled())
@@ -866,53 +882,24 @@ int rh_workspace_projects_delete(const route_req_t *rq, char *resp, int cap)
       return err_json(resp, cap, 400, "invalid JSON body");
    }
    const cJSON *jref = cJSON_GetObjectItemCaseSensitive(body, "ref");
-   const cJSON *jforce = cJSON_GetObjectItemCaseSensitive(body, "force");
    char ref[GIT_PROJECT_NAME_MAX];
    ref[0] = '\0';
    if (cJSON_IsString(jref) && jref->valuestring && strlen(jref->valuestring) < sizeof(ref))
       snprintf(ref, sizeof(ref), "%s", jref->valuestring);
-   int force = cJSON_IsBool(jforce) && cJSON_IsTrue(jforce);
    cJSON_Delete(body);
    if (!ref[0])
       return err_json(resp, cap, 400, "ref required");
 
-   git_project_delete_result_t res;
    char err[512];
-   int rc = git_project_delete(principal, ref, force, &res, err, sizeof(err));
+   int rc = git_project_delete(principal, ref, err, sizeof(err));
    if (rc == GP_ERR_NOT_FOUND)
-   {
-      free(res.kb_detail);
       return err_json(resp, cap, 404, "not found");
-   }
-   if (rc == GP_ERR_KB_UNAVAILABLE)
-   {
-      cJSON *out = cJSON_CreateObject();
-      cJSON_AddStringToObject(out, "error", err);
-      cJSON *kb = res.kb_detail ? cJSON_Parse(res.kb_detail) : NULL;
-      if (kb)
-         cJSON_AddItemToObject(out, "kb", kb);
-      free(res.kb_detail);
-      char *s = cJSON_PrintUnformatted(out);
-      int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
-      free(s);
-      cJSON_Delete(out);
-      return (n > 0 && n < cap) ? 503 : err_json(resp, cap, 503, "knowledge service unavailable");
-   }
    if (rc != 0)
-   {
-      free(res.kb_detail);
       return err_json(resp, cap, 400, err);
-   }
 
    cJSON *out = cJSON_CreateObject();
    cJSON_AddBoolToObject(out, "ok", 1);
    cJSON_AddStringToObject(out, "ref", ref);
-   cJSON_AddStringToObject(out, "kb_status", res.kb_status);
-   cJSON_AddStringToObject(out, "purge_id", res.purge_id);
-   cJSON *kb = res.kb_detail ? cJSON_Parse(res.kb_detail) : NULL;
-   if (kb)
-      cJSON_AddItemToObject(out, "kb", kb);
-   free(res.kb_detail);
    char *s = cJSON_PrintUnformatted(out);
    int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
    free(s);

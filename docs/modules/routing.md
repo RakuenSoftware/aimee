@@ -2,22 +2,27 @@
 
 ## Purpose and non-goals
 
-`routing` is required core and selects an eligible agent, model/provider, tier, or execution target for a
+`routing` is a required same-container process and selects an eligible agent, model/provider, tier, or execution target for a
 typed request using role, capability, health, policy, cost, memory, and learned evidence. It does not own
 HTTP route tables, workflow graph edges, channel delivery, provider JSON translation, or the delegate
 execution loop; similarly named local routers remain with those owning modules.
 
 ## Public contracts
 
-`src/modules/routing/routing.c` owns the agent routing surface: role dispatch (`agent_route`,
+`src/modules/routing/routing.c` is the canonical vendored implementation of the daemon-side
+eligibility and policy surface during the process migration: role dispatch (`agent_route`,
 `agent_route_at_tier`, `agent_route_with_caps`), capability/tier selection, delegate pick
 (`delegate_pick_for_role`), availability (`agent_is_available_for_routing`), route-block reasons
 (`agent_routing_block_reason`), and the route health/policy filters. This was extracted from
 `src/server/agent_config.c`; the routing contract is declared in the shared `src/headers/agent_config.h`,
 which this module implements while the config/auth half of `agent_config.c` stays in the server and is
 reached through the same header (the arrangement by which `memory` owns its contract while DB1/DB2
-implement storage). The routing block is self-contained — its statics are module-local and no config
-function calls the routing functions — so `routing.c` has no module-private header. Delegate-specific
+implement storage). Equal-candidate selection no longer uses those module-local statics in the shipping
+server: `module_adapter.c` serves the pointer-free `module_api.h` contract from the separately supervised
+`aimee-module-routing` process, and `server/module_routing_adapter.c` calls it through the shared core
+module client. A missing, cancelled, timed-out, or malformed module reply fails the route closed. The
+routing block is otherwise self-contained: its statics are module-local, and no config
+function calls the routing functions. Therefore, `routing.c` has no module-private header. Delegate-specific
 route overrides and preflight remain in `src/modules/delegates/delegate_routing.c` (the delegates
 module, a routing sibling, calls the same `agent_config.h` role predicates). Advisory
 `router_advise.c` remains workflow-owned and is outside this module despite its filename.
@@ -28,7 +33,7 @@ module, a routing sibling, calls the same `agent_config.h` role predicates). Adv
 - `ir`: supplies typed request facts and capability requirements used during selection.
 - `learning`: supplies bounded outcome evidence that can improve future selection.
 - `memory`: supplies relevant user/project context and recorded provider/delegate evidence.
-- `module-runtime`: supplies required lifecycle and extension contracts for core routing.
+- `module-runtime`: supplies authenticated attach, request/reply, deadline, cancellation, and lifecycle contracts.
 
 Consumers include primary chat, delegates, gateway, workflows, roundtable, failover/retry, and diagnostics.
 HTTP dispatch tables and channel `delivery_router` are consumers of decisions or separate local routers,
@@ -37,13 +42,15 @@ not competing owners of agent/provider selection.
 ## Providers and readiness
 
 The configured `agent_t` roster and health/policy filters are routing inputs, not replaceable routing
-providers. Readiness requires at least one eligible route for each supported required journey and a
-deterministic explanation when candidates are excluded. A provider outage may remove a candidate; it must
-not disable the routing module or cause an unfiltered fallback to a forbidden route.
+providers. Route calls fail closed until the routing process attaches to the server-local bus. A complete
+deployment readiness check must additionally prove that attachment, at least one eligible route for each
+supported required journey, and a deterministic explanation when candidates are excluded; that readiness
+integration remains migration work. A provider outage may remove a candidate; it must not disable the
+routing module or cause an unfiltered fallback to a forbidden route.
 
 ## Configuration and activation
 
-- `runtime_toggle.supported`: `false`; routing is required although individual agents and policy strategies are configurable.
+- `runtime_toggle.supported`: `false`; the routing process is required although individual agents and policy strategies are configurable.
 
 Agent tiers, role mappings, capability flags, provider overrides, health, budgets, and adaptive policies
 tune candidate selection. The GUI and generated config must expose only fields read by the active routing

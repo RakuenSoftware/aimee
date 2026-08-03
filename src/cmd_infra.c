@@ -6,7 +6,7 @@
 #include "aux_router.h"
 #include "kb_client.h"
 #include "log.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include "commands.h"
 #include "dashboard.h"
 #include "db1.h"
@@ -14,9 +14,9 @@
 #include "platform_process.h"
 #include "platform_random.h"
 #include "cJSON.h"
-#include "mcp_git.h"
-#include "git_verify.h"
-#include "workspace_manifest.h"
+#include "modules/git/mcp_git.h"
+#include "modules/git/git_verify.h"
+#include "modules/workspace/workspace_manifest.h"
 #include <unistd.h>
 #include <sys/stat.h>
 #include <ctype.h>

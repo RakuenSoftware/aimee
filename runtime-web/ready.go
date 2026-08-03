@@ -30,35 +30,58 @@ func (s *server) handleReady(w http.ResponseWriter, r *http.Request) {
 	st, data, err := s.v1RequestWebuser(ctx, currentUser(r), http.MethodGet, "/v1/ready", nil)
 	w.Header().Set("Content-Type", "application/json")
 
-	// A server we cannot reach at all IS the degraded case the banner exists to
-	// report — surface it as such rather than as an opaque error, so the UI has
-	// something true to show instead of failing closed into silence.
-	if err != nil || st != http.StatusOK {
+	// Not having ASKED is not the same as having been told "no". This used to
+	// answer every failure with kb:"fail", which renders as "the knowledge
+	// service is unreachable" — a specific claim about a specific dependency
+	// that this handler has no evidence for. On a fresh instance the common
+	// cause is v1RequestWebuser's own 401 (no webchat session established yet),
+	// so a healthy deployment accused its KB of being down for the whole of the
+	// setup wizard, and the one banner that must stay credible was the one
+	// lying.
+	//
+	// 401 means we could not ask with authority: report nothing rather than
+	// guess. healthBanner() treats "unknown" as "no banner", which is right —
+	// a user without a session is not reading search results yet.
+	if st == http.StatusUnauthorized {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"ready":  false,
-			"status": "degraded",
+			"status": "unknown",
 			"dependencies": map[string]string{
-				"kb": "fail", "db1": "unknown", "retrieval": "unknown",
+				"kb": "unknown", "db1": "unknown", "retrieval": "unknown",
 			},
 		})
 		return
 	}
 
+	// A degraded aimee-server answers /v1/ready with HTTP 503 AND a complete
+	// dependency body. That is a VERDICT, not a failure to answer. Treating any
+	// non-200 as unreachable threw that body away and substituted a fabricated
+	// kb:"fail" — which is how an instance whose kb was demonstrably healthy got
+	// reported as "the knowledge service is unreachable" when the real fault was
+	// an embedder that never loaded. Trust any parseable dependency payload,
+	// whatever the status code carrying it.
 	var up struct {
 		Ready        bool              `json:"ready"`
 		Status       string            `json:"status"`
 		Dependencies map[string]string `json:"dependencies"`
 	}
-	if json.Unmarshal(data, &up) != nil {
+	if err == nil && json.Unmarshal(data, &up) == nil && len(up.Dependencies) > 0 {
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"ready": false, "status": "unknown",
-			"dependencies": map[string]string{},
+			"ready":        up.Ready,
+			"status":       up.Status,
+			"dependencies": up.Dependencies,
 		})
 		return
 	}
+
+	// Nothing usable came back, so the user's results really are untrustworthy
+	// and the banner must fire. Say only what we can stand behind: retrieval is
+	// unavailable. We never reached the kb and cannot vouch for it either way.
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"ready":        up.Ready,
-		"status":       up.Status,
-		"dependencies": up.Dependencies,
+		"ready":  false,
+		"status": "degraded",
+		"dependencies": map[string]string{
+			"kb": "unknown", "db1": "unknown", "retrieval": "fail",
+		},
 	})
 }

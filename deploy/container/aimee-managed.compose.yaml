@@ -9,12 +9,15 @@
 #   local kb   -> COMPOSE_PROFILES=kb  -> aimee-kb
 #   remote kb  -> COMPOSE_PROFILES=    -> nothing (the server connects out)
 #
-# NO INFERENCE SERVICE. aimee-llm is retired: the kb embeds in-container from
-# weights baked into its image (bekko-a25m, 384-dim), so embedding needs no
-# sibling container and no download. A deployment that needs a wider embedder
-# points AIMEE_EMBEDDER_URL at an external endpoint instead. Synthesis is the
-# only remaining LLM role and it is external-only for now (AIMEE_LLM_URL,
-# defaulted empty) — a local synth tier is the next piece of work.
+# EMBEDDING NEEDS NO SIBLING. The kb embeds in-container from weights baked into
+# its image, so there is no embedder service and no download. A deployment that
+# needs a wider embedder points EMBEDDER_URL at an external endpoint.
+#
+# SYNTHESIS IS A SIBLING AGAIN, and deliberately a different one from the retired
+# aimee-llm. It carries llama.cpp and one baked GGUF and nothing else, so it is
+# rebuilt only when the model changes rather than on every kb code push, which is
+# what baking synthesis into the kb image cost. It is optional: with the `llm`
+# profile off, SYNTHESIS_ENDPOINT points wherever the operator says, or nowhere.
 #
 # Every service joins the EXTERNAL `aimee` network that aimee-server is also on, so
 # the server reaches them by name (aimee-kb:8741).
@@ -29,7 +32,7 @@ services:
   aimee-kb:
     profiles: ["kb"]
     restart: unless-stopped
-    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:${AIMEE_IMAGE_TAG:-latest}}
+    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb${AIMEE_KB_VARIANT:+-${AIMEE_KB_VARIANT}}:${AIMEE_IMAGE_TAG:-latest}}
     networks: [aimee]
     # The kb's worker threads need a 64 MB stack (the 8 MB default SIGSEGVs on real
     # kb queries). Matches systemd's LimitSTACK=67108864.
@@ -42,24 +45,38 @@ services:
       # inference container to fall back on, so this is empty unless an operator
       # points it at an endpoint they run. Embedding does not use it: the kb embeds
       # in-process from weights baked into its image.
-      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-}
+      SYNTHESIS_ENDPOINT: ${SYNTHESIS_ENDPOINT:-}
       # The wizard's embedder choice, and the endpoint for an external one. The kb
       # MUST receive both: `aimee config deploy-env` emits them, and without them
       # reaching the container the entrypoint sees no selection, starts nothing, and
       # the builtin serves forever — the wizard's embedder silently never runs.
       EMBEDDER_MODEL: ${EMBEDDER_MODEL:-}
-      AIMEE_EMBEDDER_URL: ${AIMEE_EMBEDDER_URL:-}
+      EMBEDDER_URL: ${EMBEDDER_URL:-}
+      # Naming the sidecar is what makes the kb mint its mTLS identities on
+      # startup. Unset for an external or absent synthesis provider, which needs
+      # none of them.
+      AIMEE_LLM_HOST: ${AIMEE_LLM_HOST:-}
+      # The kb's client identity for the synthesis hop.
+      #
+      # SET THESE ONLY FOR THE SIDECAR. SYNTHESIS_CA_FILE REPLACES the system trust
+      # store for that request, so pointing them at our CA while SYNTHESIS_ENDPOINT
+      # names an external https provider would fail to verify a certificate that is
+      # perfectly valid. Whatever sets the endpoint to the sidecar sets these with
+      # it; empty means llm-chat.py behaves exactly as it did before.
+      SYNTHESIS_CA_FILE: ${SYNTHESIS_CA_FILE:-}
+      SYNTHESIS_CERT_FILE: ${SYNTHESIS_CERT_FILE:-}
+      SYNTHESIS_KEY_FILE: ${SYNTHESIS_KEY_FILE:-}
       # Managed setup streams the LLM bearer into the KB Vault through a
       # disposable --rm helper before this long-lived container is created.
       # Managed clients must never downgrade to keyless requests if credential
       # injection is broken. Standalone/external deployments remain compatible
       # unless they opt into this invariant themselves.
-      AIMEE_LLM_AUTH_REQUIRED: ${AIMEE_LLM_AUTH_REQUIRED:-0}
-      # Curator access resolves the same AIMEE_LLM_AUTH_TOKEN from Vault.
+      SYNTHESIS_AUTH_REQUIRED: ${SYNTHESIS_AUTH_REQUIRED:-0}
+      # Curator access resolves the same SYNTHESIS_API_KEY from Vault.
       # One stable model label is shared with the unified gateway. The gateway is
       # single-deployment/multi-role, so callers do not select arbitrary models.
-      AIMEE_LLM_MODEL: ${AIMEE_LLM_MODEL:-aimee-synth}
-      AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
+      SYNTHESIS_MODEL: ${SYNTHESIS_MODEL:-aimee-synth}
+      EMBEDDER_DIMS: ${EMBEDDER_DIMS:-}
       # Internal-only mTLS lane used for server enrollment and signed management
       # JWKS refresh. It is reachable on the Compose network, not published. The
       # value is the certificate DNS identity; the listener still binds all
@@ -79,11 +96,31 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      # FIRST BOOT IS SLOWER THAN retries*interval, so without this the kb is
+      # declared unhealthy while it is still coming up correctly. Postgres initdb
+      # and the extensions run once, and the embedder-bearing images then load
+      # their weights before /v1/health answers.
+      #
+      # That is not cosmetic: the authority/JWKS bootstrap has
+      # `depends_on: aimee-kb: service_healthy`, and Compose fails a dependency the
+      # moment it goes unhealthy rather than waiting. The whole deploy exited 1 with
+      # "dependency failed to start: container aimee-aimee-kb-1 is unhealthy" against
+      # a kb that was healthy a few seconds later. The embedderless image hid this by
+      # having nothing to load -- fixing which image gets deployed is what surfaced it.
+      #
+      # Failures inside the window do not count against `retries`, and a healthy
+      # answer during it marks the container healthy immediately, so a generous
+      # value costs nothing on a fast host.
+      start_period: 300s
     volumes:
       - aimee-managed-kb-home:/var/lib/aimee
       # compose.server-managed owns this volume under the fixed `aimee` project.
       # Sharing it read-only lets kb.build/update resolve server workspace paths.
       - aimee-server-workspaces:/var/lib/aimee-workspaces:ro
+      # Its OWN volume rather than a subpath of kb-home, so the sidecar can be given
+      # the synthesis identities without being given the kb's data directory -- which
+      # holds the CA private key that signs them.
+      - aimee-managed-synthesis-tls:/var/lib/aimee/synthesis-tls
 
   # Explicitly targeted by deploy_apply after the managed KB is healthy. Keeping
   # this on its own profile prevents ordinary `compose up` from treating a
@@ -91,7 +128,7 @@ services:
   # volumes, so no key, enrollment token, or trust material crosses host argv.
   aimee-server-identity:
     profiles: ["identity-bootstrap"]
-    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:${AIMEE_IMAGE_TAG:-latest}}
+    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb${AIMEE_KB_VARIANT:+-${AIMEE_KB_VARIANT}}:${AIMEE_IMAGE_TAG:-latest}}
     user: "0:0"
     networks: [aimee]
     environment:
@@ -136,8 +173,33 @@ services:
       - aimee-managed-authority-home:/tmp/.config/aimee
       - aimee-managed-jwks-trust:/run/aimee-trust
 
+  # Bundled synthesis. Optional, and off unless the wizard selected a local model.
+  #
+  # ONE MODEL PER TAG: aimee-llm-e2b or aimee-llm-e4b. Switching between them is a
+  # stateless container swap -- the kb keeps running and nothing is re-embedded --
+  # which is the operational point of splitting synthesis out of the kb image.
+  aimee-llm:
+    profiles: ["llm"]
+    restart: unless-stopped
+    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm-${AIMEE_LLM_VARIANT:-e4b}:${AIMEE_IMAGE_TAG:-latest}}
+    networks: [aimee]
+    environment:
+      AIMEE_LLM_IDENTITY_DIR: /var/lib/aimee-llm/tls
+      # Context window. Resident memory grows with it well beyond the weights, so it
+      # is a deployment setting rather than a property of the model.
+      AIMEE_LLM_CTX: ${AIMEE_LLM_CTX:-8192}
+    volumes:
+      # Read-only: the sidecar presents this material, it never issues any.
+      - aimee-managed-synthesis-tls:/var/lib/aimee-llm/tls:ro
+    # The kb mints the identities this container refuses to start without, so the
+    # ordering is a hard dependency rather than a convention. service_healthy, not
+    # service_started: the kb writes them during startup.
+    depends_on:
+      aimee-kb: { condition: service_healthy }
+
 volumes:
   aimee-managed-kb-home:
+  aimee-managed-synthesis-tls:
   aimee-managed-authority-home:
   aimee-server-workspaces:
     external: true

@@ -2,6 +2,8 @@
 #define _GNU_SOURCE
 #endif
 #include "kb_client.h"
+#include <aimee/core/connection/auth.h>
+#include <aimee/core/connection/endpoint.h>
 #include "kb_client_cache.h"
 #include "kb_client_internal.h"
 #include "kb_client_mtls.h"
@@ -12,6 +14,7 @@
 #include "platform_path.h"
 #include "runtime_secret.h"
 #include "dependency_breaker.h"
+#include "log.h"
 #include "cJSON.h"
 #include <ctype.h>
 #include <errno.h>
@@ -61,6 +64,7 @@ static __declspec(thread) int64_t g_kb_last_current_generation;
 static __declspec(thread) int64_t g_kb_last_observed_dimension;
 static __declspec(thread) int64_t g_kb_last_current_dimension;
 static __declspec(thread) int64_t g_kb_last_retry_after_ms;
+static __declspec(thread) int g_kb_last_suppressed;
 #else
 static _Thread_local kb_client_result_status_t g_kb_last_result = KB_CLIENT_RESULT_UNAVAILABLE;
 static _Thread_local char g_kb_last_dependency[32] = "kb";
@@ -69,6 +73,9 @@ static _Thread_local int64_t g_kb_last_current_generation;
 static _Thread_local int64_t g_kb_last_observed_dimension;
 static _Thread_local int64_t g_kb_last_current_dimension;
 static _Thread_local int64_t g_kb_last_retry_after_ms;
+/* Set when the local breaker refused the call, so the typed error can say the
+ * KB was never contacted instead of blaming the operation the caller asked for. */
+static _Thread_local int g_kb_last_suppressed;
 #endif
 
 static int64_t kb_dependency_now_ms(void)
@@ -257,9 +264,19 @@ static int kb_transport_begin(int *status_out)
    g_kb_last_observed_dimension = 0;
    g_kb_last_current_dimension = 0;
    g_kb_last_retry_after_ms = 0;
+   g_kb_last_suppressed = 0;
+   int64_t now_ms = kb_dependency_now_ms();
    int64_t retry_after = 0;
-   if (dependency_breaker_allow(&g_kb_dependency, kb_dependency_now_ms(), &retry_after))
+   if (dependency_breaker_allow(&g_kb_dependency, now_ms, &retry_after))
       return 1;
+
+   /* Carry the breaker's own retry window into the typed error. Discarding it
+    * made every suppressed call report the synthetic base-delay floor that
+    * kb_typed_error_json() substitutes for a missing hint, so an operator could
+    * not tell a one-second wait from a thirty-second one — or even tell that the
+    * breaker, rather than the KB, produced the refusal. */
+   g_kb_last_retry_after_ms = retry_after;
+   g_kb_last_suppressed = 1;
    if (status_out)
       *status_out = 503;
    return 0;
@@ -291,6 +308,19 @@ static void kb_capture_result_metadata(const char *response)
    cJSON_Delete(root);
 }
 
+/* Report success, and log the close so an outage has a visible end as well as a
+ * visible start. Silent recovery left an operator unable to tell a healed
+ * dependency from one that simply had not been called again. */
+static void kb_transport_recovered(int64_t now_ms)
+{
+   dependency_breaker_snapshot_t before;
+   dependency_breaker_snapshot(&g_kb_dependency, now_ms, &before);
+   dependency_breaker_report_success(&g_kb_dependency, now_ms);
+   if (before.open)
+      LOG_INFO("server.kb", "knowledge service reachable again after %u open interval(s)",
+               before.open_count);
+}
+
 static void kb_transport_complete(const char *path, const char *response, int http_status)
 {
    int64_t now_ms = kb_dependency_now_ms();
@@ -300,7 +330,7 @@ static void kb_transport_complete(const char *path, const char *response, int ht
       kb_capture_result_metadata(response);
    if (http_status == 401 || http_status == 403)
    {
-      dependency_breaker_report_success(&g_kb_dependency, now_ms);
+      kb_transport_recovered(now_ms);
       g_kb_last_result = KB_CLIENT_RESULT_UNAUTHORIZED;
       return;
    }
@@ -310,7 +340,7 @@ static void kb_transport_complete(const char *path, const char *response, int ht
       /* The KB is reachable and truthfully reported one of its own optional
        * dependencies. Keep that typed outage from suppressing unrelated KB
        * operations through the transport breaker. */
-      dependency_breaker_report_success(&g_kb_dependency, now_ms);
+      kb_transport_recovered(now_ms);
       g_kb_last_result = classified;
       return;
    }
@@ -318,20 +348,37 @@ static void kb_transport_complete(const char *path, const char *response, int ht
    {
       /* A typed unavailable body means the KB answered but one of its own
        * dependencies did not; do not trip the KB transport breaker. */
-      dependency_breaker_report_success(&g_kb_dependency, now_ms);
+      kb_transport_recovered(now_ms);
       g_kb_last_result = classified;
       return;
    }
    if (http_status >= 400 && http_status < 500 && http_status != 408 && http_status != 425 &&
        http_status != 429)
    {
-      dependency_breaker_report_success(&g_kb_dependency, now_ms);
+      kb_transport_recovered(now_ms);
       g_kb_last_result = valid ? classified : KB_CLIENT_RESULT_UNAVAILABLE;
       return;
    }
+   /* This is the only branch that means the KB itself did not answer, and it was
+    * silent. A server that cannot open its mTLS connection reported exactly the
+    * same "<operation> unavailable" text as a healthy KB with an empty index, so
+    * nothing in the log distinguished a transport outage from a data problem.
+    * Log the transition into the open state — not every suppressed call — so a
+    * sustained outage costs one line per backoff window rather than one per
+    * request. */
+   dependency_breaker_snapshot_t before;
+   dependency_breaker_snapshot(&g_kb_dependency, now_ms, &before);
    dependency_breaker_report_failure(&g_kb_dependency, now_ms, DEPENDENCY_BREAKER_DEFAULT_THRESHOLD,
                                      DEPENDENCY_BREAKER_DEFAULT_BASE_MS,
                                      DEPENDENCY_BREAKER_DEFAULT_MAX_MS);
+   dependency_breaker_snapshot_t after;
+   dependency_breaker_snapshot(&g_kb_dependency, now_ms, &after);
+   if (after.open && !before.open)
+      LOG_WARN("server.kb",
+               "knowledge service unreachable (%s %s); suppressing calls for %lldms after %u "
+               "consecutive failure(s)",
+               http_status > 0 ? "http" : "transport", path && path[0] ? path : "(no path)",
+               (long long)after.retry_after_ms, after.failure_streak);
    g_kb_last_result = KB_CLIENT_RESULT_UNAVAILABLE;
 }
 
@@ -356,6 +403,11 @@ static char *kb_typed_error_json(kb_client_result_status_t status, const char *m
       if (retry_after_ms > DEPENDENCY_BREAKER_DEFAULT_MAX_MS)
          retry_after_ms = DEPENDENCY_BREAKER_DEFAULT_MAX_MS;
       cJSON_AddNumberToObject(obj, "retry_after_ms", (double)retry_after_ms);
+      /* Distinguish "we never called the KB" from "the KB answered unavailable".
+       * Both used to surface as the caller's own operation being unavailable,
+       * which sends an operator to the index when the fault is local. */
+      if (g_kb_last_suppressed)
+         cJSON_AddBoolToObject(obj, "circuit_open", 1);
    }
    if (status == KB_CLIENT_RESULT_STALE && g_kb_last_observed_generation > 0)
       cJSON_AddNumberToObject(obj, "observed_generation", (double)g_kb_last_observed_generation);
@@ -718,116 +770,6 @@ static char *kb_error_json(const char *message)
    char *json = cJSON_PrintUnformatted(obj);
    cJSON_Delete(obj);
    return json ? json : strdup("{\"status\":\"error\"}");
-}
-
-char *kb_client_repair_json(const char *path, const char *project, const char *embedding_command)
-{
-   if (!path || !path[0] || !project || !project[0])
-      return kb_error_json("repair requires path and project");
-
-   cJSON *req = cJSON_CreateObject();
-   if (!req)
-      return kb_error_json("out of memory");
-   cJSON_AddStringToObject(req, "path", path);
-   cJSON_AddStringToObject(req, "project", project);
-   if (embedding_command && embedding_command[0])
-      cJSON_AddStringToObject(req, "embedding_command", embedding_command);
-   int http_status = -1;
-   char *resp = kb_client_v1_post_json("/v1/maintenance/repair", req, KB_CLIENT_REPAIR_TIMEOUT_MS,
-                                       &http_status);
-   cJSON_Delete(req);
-   if (resp)
-      return resp;
-   if (http_status >= 100)
-   {
-      char msg[128];
-      snprintf(msg, sizeof(msg), "knowledge service /v1/maintenance/repair returned HTTP %d",
-               http_status);
-      return kb_error_json(msg);
-   }
-   return kb_error_json("knowledge service /v1/maintenance/repair did not respond");
-}
-
-char *kb_client_clear_json(const char *project)
-{
-   if (!project || !project[0])
-      return kb_error_json("clear requires project");
-
-   cJSON *req = cJSON_CreateObject();
-   if (!req)
-      return kb_error_json("out of memory");
-   cJSON_AddStringToObject(req, "project", project);
-   int http_status = -1;
-   char *resp = kb_client_v1_post_json("/v1/maintenance/clear", req, CLIENT_DEFAULT_TIMEOUT_MS,
-                                       &http_status);
-   cJSON_Delete(req);
-   if (resp)
-      return resp;
-   if (http_status >= 100)
-   {
-      char msg[128];
-      snprintf(msg, sizeof(msg), "knowledge service /v1/maintenance/clear returned HTTP %d",
-               http_status);
-      return kb_error_json(msg);
-   }
-   return kb_error_json("knowledge service /v1/maintenance/clear did not respond");
-}
-
-/* webchat-project-lifecycle slice 2: shared POST body/transport handling for
- * the /v1/maintenance/purge-* fence routes. `takeover` < 0 omits the field. */
-static char *kb_client_purge_post_json(const char *endpoint, const char *project,
-                                       const char *generation, const char *purge_id, int takeover)
-{
-   if (!project || !project[0] || !generation || !generation[0] || !purge_id || !purge_id[0])
-      return kb_error_json("purge requires project, generation and purge_id");
-
-   cJSON *req = cJSON_CreateObject();
-   if (!req)
-      return kb_error_json("out of memory");
-   cJSON_AddStringToObject(req, "project", project);
-   cJSON_AddStringToObject(req, "generation", generation);
-   cJSON_AddStringToObject(req, "purge_id", purge_id);
-   if (takeover > 0)
-      cJSON_AddTrueToObject(req, "takeover");
-
-   int http_status = -1;
-   char *resp = kb_client_v1_post_json(endpoint, req, CLIENT_DEFAULT_TIMEOUT_MS, &http_status);
-   cJSON_Delete(req);
-   if (resp)
-      return resp;
-   char msg[160];
-   if (http_status >= 100)
-      snprintf(msg, sizeof(msg), "knowledge service %s returned HTTP %d", endpoint, http_status);
-   else
-      snprintf(msg, sizeof(msg), "knowledge service %s did not respond", endpoint);
-   return kb_error_json(msg);
-}
-
-char *kb_client_purge_project_json(const char *project, const char *generation,
-                                   const char *purge_id, int takeover)
-{
-   return kb_client_purge_post_json("/v1/maintenance/purge-project", project, generation, purge_id,
-                                    takeover ? 1 : 0);
-}
-
-char *kb_client_purge_heartbeat_json(const char *project, const char *generation,
-                                     const char *purge_id)
-{
-   return kb_client_purge_post_json("/v1/maintenance/purge-heartbeat", project, generation,
-                                    purge_id, -1);
-}
-
-char *kb_client_purge_finalize_json(const char *project, const char *generation,
-                                    const char *purge_id)
-{
-   return kb_client_purge_post_json("/v1/maintenance/purge-finalize", project, generation, purge_id,
-                                    -1);
-}
-
-char *kb_client_purge_cancel_json(const char *project, const char *generation, const char *purge_id)
-{
-   return kb_client_purge_post_json("/v1/maintenance/purge-cancel", project, generation, purge_id,
-                                    -1);
 }
 
 /* Synchronous build/update now run entirely inside aimee-kb (which owns DB2
@@ -1499,15 +1441,90 @@ static char *kb_client_v1_url(const char *path)
    return url;
 }
 
+/* Refuse to put the kb bearer on the wire in cleartext.
+ *
+ * The plain-HTTP branches below are reached only when mTLS is not configured,
+ * which is legitimate for a loopback kb. It is not legitimate for a kb across a
+ * network: the bearer would travel unprotected, and the thin client already
+ * refuses exactly this shape. Apply the same rule here so the kb link cannot be
+ * the weak one.
+ *
+ * Returns 1 when the request must NOT be sent. A URL with no credential to leak,
+ * or an https:// URL, is allowed through unchanged. */
+static int kb_plain_would_leak(const char *url)
+{
+   if (!url)
+      return 0;
+   char token[512];
+   int have_token = runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", token, sizeof(token));
+   runtime_secret_wipe(token, sizeof(token));
+   if (!have_token)
+      return 0; /* nothing to leak */
+
+   aimee_core_endpoint_t endpoint;
+   if (aimee_core_endpoint_parse(url, &endpoint) != 0)
+   {
+      fprintf(stderr, "kb_client: refusing to send the kb bearer to invalid endpoint '%s'\n", url);
+      return 1;
+   }
+   if (!aimee_core_would_leak_credential(endpoint.secure, endpoint.host, "x"))
+      return 0;
+   /* stderr rather than aimee_log: this file links into many focused unit-test
+    * binaries that do not carry the logging object. */
+   fprintf(stderr,
+           "kb_client: refusing to send the kb bearer in cleartext to non-loopback host '%s'; "
+           "use the mTLS endpoint or terminate TLS in front of the kb\n",
+           endpoint.host);
+   return 1;
+}
+
 static const char *kb_client_v1_auth_header(char *buf, size_t buf_len)
 {
    /* The HTTP API can run without auth; include a bearer header only when the
-    * operator provides the matching client-side token. */
+    * operator provides the matching client-side token.
+    *
+    * AIMEE_KB_CLIENT_BEARER_TOKEN is what aimee-server PRESENTS, and is read
+    * first so it can be a scoped `service` credential. It falls back to
+    * AIMEE_KB_API_BEARER_TOKEN — aimee-kb's own inbound token — because that is
+    * what every existing deployment set, and reaching the kb matters more than
+    * the ideal credential shape. But see below: falling back means presenting
+    * the OWNER token, and that is worth saying out loud rather than inheriting
+    * silently. */
    char token[512];
-   if (!buf || buf_len == 0 ||
-       !runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", token, sizeof(token)))
+   if (!buf || buf_len == 0)
       return NULL;
-   snprintf(buf, buf_len, "Authorization: Bearer %s", token);
+   int own = runtime_secret_get("AIMEE_KB_CLIENT_BEARER_TOKEN", token, sizeof(token));
+   if (!own && !runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", token, sizeof(token)))
+      return NULL;
+
+   /* An unscoped token IS the install owner on aimee-kb (kb_scope.h): it passes
+    * every administrative gate. aimee-server does not need that — it needs the
+    * data plane — so warn ONCE, naming the remedy, instead of running as owner
+    * without anyone noticing. Not fatal: refusing here would take an upgrading
+    * deployment offline over a configuration preference. */
+   if (strncmp(token, "scope:", 6) != 0)
+   {
+      static int warned = 0;
+      if (!warned)
+      {
+         warned = 1;
+         aimee_log(LOG_WARN, "kb_client",
+                   "presenting an UNSCOPED kb bearer: aimee-server is acting as the aimee-kb "
+                   "install owner and passes every administrative gate. Set "
+                   "AIMEE_KB_CLIENT_BEARER_TOKEN to a scoped service credential "
+                   "(scope:service:<name>:<secret>, minted by the owner) to hold only the "
+                   "data plane%s",
+                   own ? "." : "; currently inheriting AIMEE_KB_API_BEARER_TOKEN.");
+      }
+   }
+
+   char value[512];
+   if (aimee_core_bearer_value(value, sizeof(value), token) != 0)
+   {
+      runtime_secret_wipe(token, sizeof(token));
+      return NULL;
+   }
+   snprintf(buf, buf_len, "Authorization: %s", value);
    runtime_secret_wipe(token, sizeof(token));
    return buf;
 }
@@ -1551,6 +1568,13 @@ static char *kb_client_v1_post_json_impl(const char *path, cJSON *body, int time
    }
 
    char *url = kb_client_v1_url(path);
+   if (url && kb_plain_would_leak(url))
+   {
+      free(url);
+      free(body_json);
+      kb_transport_complete(path, NULL, -1);
+      return NULL;
+   }
    if (url)
    {
       char auth[320];
@@ -1616,6 +1640,12 @@ char *kb_client_v1_post_body_with_type(const char *path, const char *body, const
    }
 
    char *url = kb_client_v1_url(path);
+   if (url && kb_plain_would_leak(url))
+   {
+      free(url);
+      kb_transport_complete(path, NULL, -1);
+      return NULL;
+   }
    if (url)
    {
       char auth[320];
@@ -1661,6 +1691,12 @@ char *kb_client_v1_get_json(const char *path, int timeout_ms, int *status_out)
    }
 
    char *url = kb_client_v1_url(path);
+   if (url && kb_plain_would_leak(url))
+   {
+      free(url);
+      kb_transport_complete(path, NULL, -1);
+      return NULL;
+   }
    if (url)
    {
       char auth[320];

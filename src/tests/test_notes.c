@@ -6,7 +6,7 @@
 #include "db2.h"
 #include "db2_test_shim.h"
 #include "notes.h"
-#include "agent_tools.h"
+#include <aimee/tools/agent_tools.h>
 #include "cJSON.h"
 
 static void setup(void)

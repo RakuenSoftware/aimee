@@ -16,43 +16,6 @@
 # AIMEE_WEBCHAT_USER / AIMEE_WEBCHAT_PASSWORD as first-boot Vault inputs).
 # Enrollment and verified health commands: docs/QUICKSTART.md section 1.3.
 services:
-  # LEGACY torch embedder — retired from the default topology by the unified-llm
-  # cutover (the kb now uses the `aimee-llm` container via AIMEE_LLM_URL). Kept
-  # behind a profile for rollback: `docker compose --profile legacy-embedder up`.
-  embedder:
-    restart: unless-stopped
-    profiles: ["legacy-embedder"]
-    # Published image (pushed to ghcr on every merge to main); override
-    # AIMEE_EMBEDDER_IMAGE to pin a version or use a fork/registry.
-    image: ${AIMEE_EMBEDDER_IMAGE:-ghcr.io/rakuensoftware/aimee-embedder:${AIMEE_IMAGE_TAG:-latest}}
-    build:
-      context: .
-      dockerfile: Dockerfile.embedder
-      args:
-        EMBEDDER_MODEL: ${EMBEDDER_MODEL:-perplexity-ai/pplx-embed-v1-0.6b}
-        RERANKER_MODEL: ${RERANKER_MODEL:-cross-encoder/ettin-reranker-400m-v1}
-    # Tier is a RUNTIME choice now: models are fetched at startup into the volume
-    # (not baked), so EMBEDDER_MODEL / RERANKER_MODEL select the tier with no
-    # rebuild. Light tier: EMBEDDER_MODEL=...-0.6b, RERANKER_MODEL=...-400m-v1,
-    # AIMEE_EMBEDDING_DIM=1024 on the kb (the 4b is 2560).
-    environment:
-      EMBEDDER_MODEL: ${EMBEDDER_MODEL:-perplexity-ai/pplx-embed-v1-0.6b}
-      RERANKER_MODEL: ${RERANKER_MODEL:-cross-encoder/ettin-reranker-400m-v1}
-      # CI stub embedder (off in prod): e2e sets these to serve fixed-dim
-      # vectors with no model download. EMBEDDER_STUB_DIM matches the schema dim.
-      EMBEDDER_STUB: ${EMBEDDER_STUB:-}
-      EMBEDDER_STUB_DIM: ${EMBEDDER_STUB_DIM:-}
-    volumes:
-      - aimee-embedder-models:/opt/models
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      # Long: a cold first boot downloads the model (minutes for the 4b) before
-      # /health returns 200; the volume makes every later boot fast.
-      start_period: 900s
-
   aimee-kb:
     restart: unless-stopped
     # Published image (pushed to ghcr on every merge to main); override
@@ -70,18 +33,22 @@ services:
       AIMEE_HOME: /var/lib/aimee
       # External DB2 credentials are streamed into the KB Vault by the
       # disposable Compose helper; never persist them in Config.Env.
-      # One knob: embed + rerank + synth (curator Tier-A & B at {url}/v1) via the
-      # unified aimee-llm container. The kb runs no model. Override
-      # AIMEE_EMBEDDER_URL / AIMEE_RERANKER_URL to pin a service elsewhere.
-      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-}
+      # Synthesis only, at {url}/v1. The kb embeds in-container and there is no
+      # reranking model — see docs/SYNTHESIS_MODELS.md. Override
+      # EMBEDDER_URL to point embedding at an external service.
+      SYNTHESIS_ENDPOINT: ${SYNTHESIS_ENDPOINT:-}
+      # The bundled synthesis model, on a *-llm image variant: the entrypoint
+      # starts llama-server for it and points SYNTHESIS_ENDPOINT at loopback.
+      # Empty on a non-llm image, or when synthesis is remote/off.
+      SYNTHESIS_MODEL: ${SYNTHESIS_MODEL:-}
       # The wizard's embedder choice, and the endpoint for an external one. The kb
       # MUST receive both: `aimee config deploy-env` emits them, and without them
       # reaching the container the entrypoint sees no selection, starts nothing, and
       # the builtin serves forever — the wizard's embedder silently never runs.
       EMBEDDER_MODEL: ${EMBEDDER_MODEL:-}
-      AIMEE_EMBEDDER_URL: ${AIMEE_EMBEDDER_URL:-}
+      EMBEDDER_URL: ${EMBEDDER_URL:-}
       # Embedding dim — empty = config default 1024 (CPU tier); set 2560 for GPU.
-      AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
+      EMBEDDER_DIMS: ${EMBEDDER_DIMS:-}
       # Internal-only enrollment/JWKS lane; never published on the host. The
       # listener always binds all interfaces; this value is the advertised DNS
       # name placed in its server certificate and must match the client endpoint.
@@ -96,6 +63,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      # First boot runs postgres initdb and, on the embedder-bearing images, loads
+      # the weights before /v1/health answers -- longer than retries*interval, so
+      # without this the kb reads as unhealthy while it is still starting normally.
+      # See deploy/container/aimee-managed.compose.yaml for what that broke.
+      start_period: 300s
     volumes:
       - aimee-kb-home:/var/lib/aimee
       # kb.build/update receive server workspace paths; mount the same durable
@@ -132,6 +104,13 @@ services:
       AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE: ${AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE:-/run/aimee/management/jwks-trust-bundle.json}
       # The one-time AIMEE_KB_CONN enrollment credential is streamed into Vault.
       AIMEE_SERVER_HTTP_BIND: "1"
+      # Reachable address(es) for the self-signed cert's SANs, for clients that
+      # verify by NAME instead of TOFU-pinning the leaf. Empty keeps the default
+      # container hostname + loopback set. pki.c reads it from the environment, so
+      # without this passthrough the knob cannot reach the binary at all. It also
+      # pins the CN, which keeps the cert stable across recreates — set it before
+      # first start; a later change does not re-issue an existing cert.
+      AIMEE_TLS_EXTRA_SAN: ${AIMEE_TLS_EXTRA_SAN:-}
       # Browser webchat (HTTPS on :8443). ON by default — it is a first-class
       # surface whose binary is built into the image. Set
       # AIMEE_RUNTIME_WEB_ENABLED=0 to ship server-only. Set both variables on
@@ -176,31 +155,7 @@ services:
       - aimee-server-workspaces:/var/lib/aimee-workspaces
       - ${AIMEE_SERVER_MANAGEMENT_DIR:-./server-management}:/run/aimee/management:ro
 
-  # Legacy synth-only llama.cpp service retained as an explicit compatibility
-  # profile. The default stack uses `aimee-llm` below for embed + rerank + synth.
-  # Enable only with `--profile curator-llm` while testing a rollback.
-  llm:
-    restart: unless-stopped
-    image: ghcr.io/ggml-org/llama.cpp:server
-    profiles: ["curator-llm"]
-    environment:
-      LLAMA_ARG_HF_REPO: ${CURATOR_LLM_HF_REPO:-ggml-org/gemma-4-E4B-it-GGUF:Q4_K_M}
-      LLAMA_ARG_HOST: 0.0.0.0
-      LLAMA_ARG_PORT: "8080"
-      LLAMA_ARG_ENDPOINT_HEALTH: "1"
-    volumes:
-      - aimee-llm-models:/root/.cache/llama.cpp
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      # Long: the cold first boot downloads the multi-GB GGUF before /health is OK.
-      start_period: 1200s
-
 volumes:
   aimee-kb-home:
   aimee-server-home:
   aimee-server-workspaces:
-  aimee-embedder-models:
-  aimee-llm-models:

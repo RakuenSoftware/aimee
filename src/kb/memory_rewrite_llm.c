@@ -8,7 +8,7 @@
  * 400+ token / 30s+ completion observed), which stalls retrieval. Capping bounds
  * the tail without affecting other curator stages (which call kb_curator_llm_run
  * with their own, uncapped, budget). */
-#include "memory_rewrite_llm.h"
+#include "modules/memory/memory_rewrite_llm.h"
 
 #include "cJSON.h"
 #include "kb_curator_provider.h" /* kb_curator_provider_for_stage, KB_CURATOR_STAGE_* */

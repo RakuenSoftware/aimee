@@ -1,0 +1,161 @@
+# Publish the aimee-llm synthesis sidecars.
+#
+# THIS MUST NOT REBUILD BECAUSE KB CODE CHANGED. That coupling is the whole reason
+# the sidecar exists: when synthesis was baked into aimee-kb, three kb tags under
+# three separate cache scopes each rebuilt the LTO C binary, postgres,
+# pgvectorscale and torch on every push touching src/**, and pushed ~10 GB twice,
+# for artefacts whose real inputs change on the order of never.
+#
+# The guarantee is enforced TWICE, because a path filter is one careless edit away
+# from being wrong:
+#
+#   1. A narrow trigger. Only the files that actually determine these images.
+#   2. A skip-if-already-published check keyed on the inputs -- model, quant and
+#      llama.cpp version, all encoded in the tag. Even a broad or accidental
+#      trigger then costs one `docker manifest inspect` and stops.
+#
+# (2) is what makes this robust rather than aspirational: correctness does not
+# depend on the path list staying right.
+name: Publish aimee-llm
+
+on:
+  push:
+    branches: [testing]
+    paths:
+      - "Dockerfile.llm"
+      - "deploy/container/aimee-llm-entrypoint.sh"
+      - "scripts/fetch-synthesis-model.sh"
+      - "Dockerfile.model"
+      - ".github/workflows/publish-llm.yml"
+  # DELIBERATELY NARROWER THAN THE PUSH TRIGGER: no workflow file here.
+  #
+  # A PR build never pushes, so the skip-if-published check cannot engage on one --
+  # the tag it looks for only ever appears at merge. Every triggered PR therefore
+  # pays a full build, and these are the slow ones. Editing this workflow is not a
+  # change to the image, so it must not cost two of them; the push trigger below
+  # still re-evaluates on merge, where the content hash decides.
+  pull_request:
+    paths:
+      - "Dockerfile.llm"
+      - "deploy/container/aimee-llm-entrypoint.sh"
+      - "scripts/fetch-synthesis-model.sh"
+      - "Dockerfile.model"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Rebuild even when the tag already exists'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: publish-llm-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  # Must match Dockerfile.llm's default. It is part of the published tag because
+  # bumping llama.cpp changes the artefact, and an image that did not rebuild for it
+  # would silently keep the old one.
+  LLAMACPP_VERSION: b10218
+
+jobs:
+  # The weights, as their own image, so the two sidecars copy a registry layer
+  # instead of pulling ~7.5 GB from Hugging Face per build. It lived in the kb
+  # pipelines until synthesis moved out of the kb image; nothing there consumed it
+  # any more, and a model layer belongs with the thing that bakes it.
+  #
+  # BOTH PLATFORMS even though the sidecar publishes amd64 only: the payload is
+  # architecture-independent, and an amd64-only model tag would make a later
+  # multi-arch build skip it and find nothing to copy for arm64.
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: aimee-llm-e2b, model: gemma-4-E2B-it }
+          - { name: aimee-llm-e4b, model: gemma-4-E4B-it }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Normalize owner to lowercase
+        run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The immutable tag must name EVERY input that changes the artefact, or the skip
+      # becomes a trap. Keyed on the model, the quant and the llama.cpp version alone,
+      # a change to Dockerfile.llm or the entrypoint would find the tag already
+      # published, skip the build, and leave :testing pointing at the old image while
+      # the run reported success. That is precisely how the mTLS fix in this image
+      # would have failed to ship.
+      #
+      # So the sidecar's own sources are hashed into the tag. Content-addressed: a
+      # rebuild happens exactly when something that lands in the image changed, and
+      # never otherwise.
+      - name: Has this exact build already been published?
+        id: have
+        env:
+          FORCE: ${{ inputs.force }}
+        run: |
+          quant=$(sh scripts/synthesis-model-table.sh quant "${{ matrix.model }}")
+          rev=$(cat Dockerfile.llm deploy/container/aimee-llm-entrypoint.sh \
+                scripts/synthesis-model-table.sh | sha256sum | cut -c1-12)
+          pinned="ghcr.io/${OWNER}/${{ matrix.name }}:${quant}-${LLAMACPP_VERSION}-${rev}"
+          echo "sidecar sources hash to $rev"
+          echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
+          if [ "${FORCE:-false}" = "true" ]; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "forced rebuild requested; ignoring any published $pinned"
+            exit 0
+          fi
+          if docker manifest inspect "$pinned" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "$pinned already published; nothing to build"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.have.outputs.exists != 'true'
+        uses: docker/setup-buildx-action@v3
+
+      # A PULL REQUEST BUILDS BUT NEVER PUSHES: publishing is a merge-time act, so
+      # nothing unreviewed reaches the registry. The PR still proves the Dockerfile
+      # builds, which is the part that used to be discovered at deploy time.
+      - name: Build ${{ matrix.name }}
+        if: steps.have.outputs.exists != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.llm
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          provenance: false
+          cache-from: type=gha,scope=${{ matrix.name }}-amd64
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}-amd64
+          build-args: |
+            AIMEE_SYNTHESIS_MODEL=${{ matrix.model }}
+            LLAMACPP_VERSION=${{ env.LLAMACPP_VERSION }}
+          tags: |
+            ${{ steps.have.outputs.pinned }}
+            ghcr.io/${{ env.OWNER }}/${{ matrix.name }}:testing
+
+      - name: Report
+        run: |
+          if [ "${{ steps.have.outputs.exists }}" = "true" ]; then
+            echo "skipped: ${{ steps.have.outputs.pinned }} already published"
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "built ${{ matrix.name }} (pull request: not pushed)"
+          else
+            echo "published ${{ steps.have.outputs.pinned }} and :testing"
+          fi

@@ -25,7 +25,7 @@ log a rewrite failure for every query; silent fallback is the friendlier
 default for a local-LLM setup where the endpoint might occasionally hiccup.
 
 Configuration: all env vars honored by `scripts/llm-chat.py`
-(LLM_ENDPOINT, LLM_MODEL, LLM_API_KEY, LLM_NO_THINKING, ...).
+(SYNTHESIS_ENDPOINT, SYNTHESIS_MODEL, SYNTHESIS_API_KEY, LLM_NO_THINKING, ...).
 Point aimee at this wrapper:
 
   aimee config set memory_rewrite_command "python3 $AIMEE_ROOT/scripts/llm-rewrite.py"

@@ -54,9 +54,32 @@ id() {
   [[ -n ${1:-} ]] || return 0
   grep -Fxq "$1" "$existing_users"
 }
+# The account table the guard now reads. `getent group` alone was never enough to
+# answer "can a human sign in?": a wizard-retired account keeps its group
+# membership and loses only its shadow verifier, and a container recreate drops
+# the accounts while the group definition ships in the image.
+group_members="$test_dir/group-members"
+# A FRESH appliance: the group ships in the image with no members. The old stub
+# answered only for "aimee", never the login group, so this matches what the
+# generation checks below have always seen.
+printf '' > "$group_members"
+shadow_hashes="$test_dir/shadow-hashes"   # "<user> <hash>"; absent => a usable hash
+: > "$shadow_hashes"
 getent() {
-  case ${1:-}:${2:-} in
-    group:aimee) printf 'aimee:x:999:operator,legacy\n' ;;
+  case ${1:-} in
+    group)
+      [[ ${2:-} == "${WEBCHAT_LOGIN_GROUP:-aimee}" ]] || return 1
+      printf '%s:x:999:%s\n' "$2" "$(cat "$group_members")"
+      ;;
+    passwd)
+      grep -Fxq "${2:-}" "$existing_users" || return 1
+      printf '%s:x:1001:1001::/home/%s:/bin/sh\n' "$2" "$2"
+      ;;
+    shadow)
+      grep -Fxq "${2:-}" "$existing_users" || return 1
+      _h=$(awk -v u="${2:-}" '$1==u{print $2}' "$shadow_hashes")
+      printf '%s:%s:19000:0:99999:7:::\n' "$2" "${_h:-\$6\$salt\$usableverifier}"
+      ;;
     *) return 1 ;;
   esac
 }
@@ -67,15 +90,29 @@ usermod() {
     return 0
   fi
   printf '%s\n' "$*" >> "$cleared_users"
+  # -aG <group> <user>: reflect the membership so getent group agrees.
+  if [[ ${1:-} == -aG ]]; then
+    printf '%s,%s\n' "$(cat "$group_members")" "${3:-}" > "$group_members"
+  fi
 }
 useradd() {
   printf 'useradd %s\n' "$*" >> "$cleared_users"
   # the last argument is the account name
   for _u in "$@"; do :; done
   printf '%s\n' "$_u" >> "$existing_users"
+  # Provisioning adds the supplementary group separately (usermod -aG); model
+  # that here so group membership reflects what actually happened.
 }
 groupadd() { :; }
-chpasswd() { cat >/dev/null; printf 'chpasswd\n' >> "$cleared_users"; }
+chpasswd() {
+  # -e means the payload is a hash, not a plaintext password (the restore path).
+  if [[ ${1:-} == -e ]]; then
+    printf 'chpasswd -e %s\n' "$(cat)" >> "$cleared_users"
+  else
+    cat >/dev/null; printf 'chpasswd\n' >> "$cleared_users"
+  fi
+}
+userdel() { :; }
 
 # shellcheck source=../deploy/container/runtime-web-lib.sh
 source "$repo_dir/deploy/container/runtime-web-lib.sh"
@@ -130,6 +167,13 @@ rm -rf "$AIMEE_HOME/webchat"
 mkdir -p "$AIMEE_HOME/webchat"
 unset AIMEE_WEBCHAT_USER AIMEE_WEBCHAT_PASSWORD
 : > "$cleared_users"
+# CLEAN install means the accounts too, not just $AIMEE_HOME. The migration
+# section above provisioned a real login and put it in the group; leaving it
+# there would (correctly) suppress generation and this section would be testing
+# nothing. The old stub hid that by never answering for the login group.
+printf '%s\n' operator legacy aimee "$USER" > "$existing_users"
+printf '' > "$group_members"
+: > "$shadow_hashes"
 
 gen_log=$(webchat_provision_bootstrap_account 2>&1)
 
@@ -166,6 +210,101 @@ marker_mode=$(stat -c %a "$WEBCHAT_BOOTSTRAP_USER")
 # lock the operator out of the account they were just handed.
 second_log=$(webchat_provision_bootstrap_account 2>&1)
 ! grep -Fq 'FIRST-BOOT DASHBOARD LOGIN' <<<"$second_log"
+
+# --- an upgrade must never leave the appliance with no way in -----------------
+#
+# THE LOCKOUT, reproduced on a live appliance: PAM identities live in the
+# container's writable layer (/etc/passwd and /etc/shadow are on no volume) while
+# the markers live in $AIMEE_HOME, which is. `up --force-recreate` onto a new
+# image therefore destroyed every account and KEPT the markers saying one exists,
+# so provisioning declined to mint a replacement and the operator could not sign
+# in. The Vault could not help: only session_hmac and tls_key survive there.
+#
+# Model exactly that: markers intact, accounts and group membership gone.
+: > "$cleared_users"
+printf '%s\n' operator legacy aimee "$USER" > "$existing_users"   # the image's own users
+printf '' > "$group_members"                                       # group ships empty
+printf 'generated:%s\n' "$gen_user" > "$WEBCHAT_BOOTSTRAP_USER"
+printf 'jbailes\n' > "$WEBCHAT_BOOTSTRAP_REPLACED"
+upgrade_log=$(webchat_provision_bootstrap_account 2>&1)
+grep -Fq 'FIRST-BOOT DASHBOARD LOGIN' <<<"$upgrade_log"
+upgrade_user=$(sed -n 's/.*username: //p' <<<"$upgrade_log" | tr -d ' ' | head -1)
+[[ $upgrade_user =~ ^aimee-[0-9a-f]{12}$ ]]
+[[ $upgrade_user != "$gen_user" ]]
+# The stale marker must go too: left behind, it tells the wizard setup is already
+# finished while the only working credential is the one just printed.
+[[ ! -e $WEBCHAT_BOOTSTRAP_REPLACED ]]
+
+# --- an upgrade must give the operator back THEIR account ---------------------
+#
+# Not being locked out is only half of it. The operator's projects are filed by
+# webuser NAME under /var/lib/aimee-workspaces/webusers/<name>, so handing them a
+# fresh generated login after an upgrade leaves the whole tree attached to a user
+# nobody signs in as — the same disconnect, by a different route. runtime-web
+# records the managed accounts and their verifiers; restore them instead.
+rm -rf "$AIMEE_HOME/webchat"; mkdir -p "$AIMEE_HOME/webchat"
+: > "$cleared_users"
+printf '%s\n' operator legacy aimee "$USER" > "$existing_users"   # the image's own users
+printf '' > "$group_members"                                       # group ships empty
+printf 'admin:$6$salt$operatorverifier\n' > "$AIMEE_HOME/webchat/identities"
+printf 'generated:aimee-000000000000\n' > "$WEBCHAT_BOOTSTRAP_USER"
+printf 'admin\n' > "$WEBCHAT_BOOTSTRAP_REPLACED"
+restore_log=$(webchat_provision_bootstrap_account 2>&1)
+# The operator's own account is back, with its own verifier...
+grep -Fq 'useradd' "$cleared_users"
+grep -Fq -- "-aG $WEBCHAT_LOGIN_GROUP admin" "$cleared_users"
+grep -Fq 'chpasswd -e admin:$6$salt$operatorverifier' "$cleared_users"
+grep -Fxq admin "$existing_users"
+# ...so no replacement credential is minted, and the marker naming them stands.
+! grep -Fq 'FIRST-BOOT DASHBOARD LOGIN' <<<"$restore_log"
+[[ -f $WEBCHAT_BOOTSTRAP_REPLACED ]]
+
+# An account that SURVIVED keeps its current password: the record can be older
+# than a password change made since, and restoring over it would roll that back.
+: > "$cleared_users"
+survivor_log=$(webchat_provision_bootstrap_account 2>&1)
+! grep -q 'chpasswd' "$cleared_users"
+! grep -q 'useradd' "$cleared_users"
+! grep -Fq 'FIRST-BOOT DASHBOARD LOGIN' <<<"$survivor_log"
+
+# A record naming a LOCKED verifier is not a login: restoring it would recreate
+# an account nobody can authenticate as, and then suppress minting a real one.
+rm -rf "$AIMEE_HOME/webchat"; mkdir -p "$AIMEE_HOME/webchat"
+: > "$cleared_users"
+printf '%s\n' operator legacy aimee "$USER" > "$existing_users"
+printf '' > "$group_members"
+printf 'retired:!$y$locked\n' > "$AIMEE_HOME/webchat/identities"
+locked_record_log=$(webchat_provision_bootstrap_account 2>&1)
+! grep -Fxq retired "$existing_users"
+grep -Fq 'FIRST-BOOT DASHBOARD LOGIN' <<<"$locked_record_log"
+
+rm -f "$AIMEE_HOME/webchat/identities"
+
+# --- a retired account is not a usable login ----------------------------------
+#
+# Replacing the bootstrap login through the wizard LOCKS its shadow entry
+# ("!$y...") and leaves the name in the group. Trusting membership alone, the
+# appliance then refuses to mint a replacement for an account nobody can
+# authenticate as — observed after deleting a probe account left exactly this.
+rm -rf "$AIMEE_HOME/webchat"; mkdir -p "$AIMEE_HOME/webchat"
+: > "$cleared_users"
+printf '%s\n' operator legacy aimee "$USER" retired-acct > "$existing_users"
+printf 'retired-acct\n' > "$group_members"
+printf 'retired-acct !$y$locked\n' > "$shadow_hashes"
+locked_log=$(webchat_provision_bootstrap_account 2>&1)
+grep -Fq 'FIRST-BOOT DASHBOARD LOGIN' <<<"$locked_log"
+
+# ...but a member with a real verifier still suppresses generation, or every
+# restart would rotate the password out from under the operator.
+rm -rf "$AIMEE_HOME/webchat"; mkdir -p "$AIMEE_HOME/webchat"
+: > "$shadow_hashes"
+usable_log=$(webchat_provision_bootstrap_account 2>&1)
+! grep -Fq 'FIRST-BOOT DASHBOARD LOGIN' <<<"$usable_log"
+
+# Restore the baseline table for the checks below.
+printf '%s\n' operator legacy aimee "$USER" > "$existing_users"
+printf '' > "$group_members"
+: > "$shadow_hashes"
 
 # An EXISTING account named by an explicit pair must still join the managed
 # group. This is the live case: the image ships `aimee` as its service account,

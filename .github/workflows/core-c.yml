@@ -1,0 +1,40 @@
+name: core-c-package
+
+on:
+  push:
+    paths:
+      - "src/core/**"
+      - "examples/c-connection-client/**"
+      - "examples/c-event-bus-module/**"
+      - ".github/workflows/core-c.yml"
+  pull_request:
+    paths:
+      - "src/core/**"
+      - "examples/c-connection-client/**"
+      - "examples/c-event-bus-module/**"
+      - ".github/workflows/core-c.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure core
+        run: cmake -S src/core -B build/core -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD/build/prefix"
+      - name: Build and install core
+        run: cmake --build build/core --config Release --parallel 2 && cmake --install build/core --config Release
+      - name: Build installed connection consumer
+        run: cmake -S examples/c-connection-client -B build/connection-consumer -DCMAKE_PREFIX_PATH="$PWD/build/prefix" && cmake --build build/connection-consumer --config Release --parallel 2
+      - name: Build installed event-bus module
+        if: runner.os == 'Linux'
+        run: cmake -S examples/c-event-bus-module -B build/event-bus-module -DCMAKE_PREFIX_PATH="$PWD/build/prefix" && cmake --build build/event-bus-module --config Release --parallel 2

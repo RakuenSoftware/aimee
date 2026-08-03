@@ -28,9 +28,14 @@ const char *platform_home_dir(void)
 /* Stub for the iter-50 aimee_home() resolver. Returning NULL keeps the
  * test's "no real config dir" behaviour, so client_session_id and
  * friends short-circuit before they hit syscalls. */
+/* NULL by default (the original behaviour: no real config dir, so
+ * client_session_id and friends short-circuit before any syscall). The
+ * session-id tests point it at a temp dir so the session-ppid file is real. */
+static const char *g_aimee_home;
+
 const char *aimee_home(void)
 {
-   return NULL;
+   return g_aimee_home;
 }
 
 const char *cli_ensure_server(void)
@@ -46,6 +51,35 @@ const char *cli_ensure_server_for_method(const char *method)
 {
    (void)method;
    return cli_ensure_server();
+}
+
+/* Per-session worktree bootstrap. The real one shells out to git; here it is
+ * stubbed so the test can drive both outcomes (isolated / not applicable) and
+ * assert what `initialize` does with each. g_worktree_to_return == NULL means
+ * "not applicable" (isolation off, already inside a worktree, not a repo). */
+static const char *g_worktree_to_return;
+static char g_worktree_sid[128];
+static int g_worktree_ensure_calls;
+
+int client_session_worktree_ensure(const char *sid, char *out, size_t cap)
+{
+   g_worktree_ensure_calls++;
+   snprintf(g_worktree_sid, sizeof(g_worktree_sid), "%s", sid ? sid : "");
+   if (!g_worktree_to_return)
+   {
+      if (out && cap)
+         out[0] = '\0';
+      return -1;
+   }
+   snprintf(out, cap, "%s", g_worktree_to_return);
+   return 0;
+}
+
+static int g_ppid = 4242;
+
+int platform_getppid(void)
+{
+   return g_ppid;
 }
 
 /* Reverse-channel helpers live in cli_workspace_serve.c, which this unit test
@@ -666,6 +700,10 @@ static void test_resources_read_unknown_uri(void)
 static void test_initialize(void)
 {
    g_reverse_channel_starts = 0;
+   /* No worktree available (isolation off / already isolated / not a repo):
+    * initialize must still serve normally, with the plain instructions. */
+   g_worktree_to_return = NULL;
+   g_worktree_ensure_calls = 0;
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "jsonrpc", "2.0");
    cJSON_AddNumberToObject(req, "id", 10);
@@ -701,10 +739,89 @@ static void test_initialize(void)
    assert(strstr(instructions->valuestring, "get_help") != NULL);
    assert(strstr(instructions->valuestring, "spawn_agent") != NULL);
    assert(strstr(instructions->valuestring, "delegate tool") != NULL);
+   assert(strstr(instructions->valuestring, "isolated checkout") == NULL);
+
+   /* LISTED TOOLS ARE DIRECTLY CALLABLE, AND THE TEXT MUST LEAD WITH THAT.
+    *
+    * Twice now agents have spent their tool budget on the discovery protocol
+    * instead of the work: once at five of fourteen calls, and again on a
+    * benchmark cell that made two find_tools, two describe_tool and two call_tool
+    * calls and not one direct find_symbol -- with find_symbol advertised the
+    * whole time. Pin the ordering, because the ordering is the behaviour. */
+   {
+      const char *ins = instructions->valuestring;
+      assert(strstr(ins, "directly callable") != NULL);
+      assert(strstr(ins, "Do not route a listed tool through call_tool") != NULL);
+      /* Discovery must be framed as the exception, i.e. introduced only after the
+       * direct-call rule, and explicitly for tools that are NOT listed. */
+      assert(strstr(ins, "NOT listed") != NULL);
+      assert(strstr(ins, "directly callable") < strstr(ins, "find_tools"));
+      /* get_help must not be ordered before doing any work. */
+      assert(strstr(ins, "before trying anything else") == NULL);
+   }
+   assert(g_worktree_ensure_calls == 1);
    assert(g_reverse_channel_starts == 0);
 
    cJSON_Delete(resp);
    cJSON_Delete(req);
+}
+
+/* An MCP-hosted session has no SessionStart hook, so `initialize` is where it
+ * gets isolated: the proxy must ENTER the prepared worktree (it is the process
+ * aimee's file/exec tools resolve paths in) and tell the caller where its work
+ * will land. */
+static void test_initialize_enters_session_worktree(void)
+{
+   char origin_cwd[4096];
+   assert(getcwd(origin_cwd, sizeof(origin_cwd)));
+
+   char wt[4096];
+   const char *tmp = getenv("TMPDIR");
+   snprintf(wt, sizeof(wt), "%s/aimee-mcp-init-wt-%d", (tmp && tmp[0]) ? tmp : "/tmp",
+            (int)getpid());
+   char mk[4200];
+   snprintf(mk, sizeof(mk), "rm -rf '%s' && mkdir -p '%s'", wt, wt);
+   assert(system(mk) == 0);
+
+   g_worktree_to_return = wt;
+   g_worktree_ensure_calls = 0;
+   g_worktree_sid[0] = '\0';
+
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "jsonrpc", "2.0");
+   cJSON_AddNumberToObject(req, "id", 11);
+   cJSON_AddStringToObject(req, "method", "initialize");
+   cJSON_AddObjectToObject(req, "params");
+
+   cJSON *resp = capture_response(req);
+   cJSON *result = cJSON_GetObjectItemCaseSensitive(resp, "result");
+   assert(cJSON_IsObject(result));
+
+   /* It asked for a worktree, keyed by a non-empty session id. */
+   assert(g_worktree_ensure_calls == 1);
+   assert(g_worktree_sid[0] != '\0');
+
+   /* It entered it — this process's cwd IS what the file/exec tools use. */
+   char now[4096];
+   assert(getcwd(now, sizeof(now)));
+   char real_wt[4096], real_now[4096];
+   assert(realpath(wt, real_wt) && realpath(now, real_now));
+   assert(strcmp(real_wt, real_now) == 0);
+
+   /* And it told the caller, without dropping the base instructions. */
+   cJSON *instructions = cJSON_GetObjectItemCaseSensitive(result, "instructions");
+   assert(cJSON_IsString(instructions));
+   assert(strstr(instructions->valuestring, "get_help") != NULL);
+   assert(strstr(instructions->valuestring, "isolated checkout") != NULL);
+   assert(strstr(instructions->valuestring, wt) != NULL);
+
+   cJSON_Delete(resp);
+   cJSON_Delete(req);
+
+   assert(chdir(origin_cwd) == 0);
+   snprintf(mk, sizeof(mk), "rm -rf '%s'", wt);
+   (void)system(mk);
+   g_worktree_to_return = NULL;
 }
 
 static void test_tools_list(void)
@@ -1121,6 +1238,70 @@ static void test_notification_no_response(void)
    cJSON_Delete(req);
 }
 
+/* The session id keys the worktree, so how it is minted decides whether two
+ * processes share a checkout or collide in one. Processes of one agent session
+ * share a PPID and must converge on ONE id via session-ppid-<ppid>; a private
+ * invented id would put this proxy in a different worktree from its own
+ * session, and a bare ppid string would put two proxies under one host into the
+ * SAME worktree, overwriting each other. */
+static void test_session_id_is_shared_not_invented(void)
+{
+   char home[512];
+   const char *tmp = getenv("TMPDIR");
+   snprintf(home, sizeof(home), "%s/aimee-mcp-sid-%d", (tmp && tmp[0]) ? tmp : "/tmp",
+            (int)getpid());
+   char cmd[600];
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s' && mkdir -p '%s'", home, home);
+   assert(system(cmd) == 0);
+   g_aimee_home = home;
+   /* No host-provided id: this is the path where the proxy must mint one. */
+   unsetenv("AIMEE_SESSION_ID");
+
+   /* First caller mints and publishes. */
+   char first[64] = "";
+   assert(client_session_id_ensure(first, sizeof(first)) == 0);
+   assert(first[0]);
+
+   char published[600];
+   snprintf(published, sizeof(published), "%s/session-ppid-%d", home, g_ppid);
+   struct stat st;
+   assert(stat(published, &st) == 0); /* it PUBLISHED, so siblings can find it */
+
+   /* A sibling process of the same session (same ppid) adopts that id rather
+    * than minting a second one — same session, same worktree. */
+   char second[64] = "";
+   assert(client_session_id_ensure(second, sizeof(second)) == 0);
+   assert(strcmp(first, second) == 0);
+
+   /* A process under a DIFFERENT host gets a different id — two hosts must not
+    * share one worktree. */
+   g_ppid = 4243;
+   char other[64] = "";
+   assert(client_session_id_ensure(other, sizeof(other)) == 0);
+   assert(strcmp(first, other) != 0);
+
+   /* Orphaned (ppid <= 1) refuses rather than keying on session-ppid-1, which
+    * every unrelated daemon on the box would share. */
+   g_ppid = 1;
+   char orphan[64] = "";
+   assert(client_session_id_ensure(orphan, sizeof(orphan)) == -1);
+   assert(orphan[0] == '\0');
+
+   /* An explicit AIMEE_SESSION_ID always wins and needs no publishing — the
+    * host has already decided which session this is. */
+   setenv("AIMEE_SESSION_ID", "host-provided-id", 1);
+   char from_env[64] = "";
+   assert(client_session_id_ensure(from_env, sizeof(from_env)) == 0);
+   assert(strcmp(from_env, "host-provided-id") == 0);
+
+   g_ppid = 4242;
+   g_aimee_home = NULL;
+   setenv("AIMEE_SESSION_ID", "test-session", 1); /* restore for later cases */
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", home);
+   (void)system(cmd);
+   printf("  PASS: test_session_id_is_shared_not_invented\n");
+}
+
 int main(void)
 {
    setenv("AIMEE_SESSION_ID", "test-session", 1);
@@ -1133,6 +1314,8 @@ int main(void)
    test_resources_read_memory_by_id();
    test_resources_read_unknown_uri();
    test_initialize();
+   test_initialize_enters_session_worktree();
+   test_session_id_is_shared_not_invented();
    test_tools_list();
    test_tools_list_preserves_server_error();
    test_remote_discovery_retries_are_safe();

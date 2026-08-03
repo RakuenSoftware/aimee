@@ -1,6 +1,6 @@
-/* webuser_runtime.c — per-webuser tmpfs runtime dir (fail-closed). See header. */
+/* webuser_runtime.c — shared environment tmpfs runtime dir (fail-closed). */
 #include "webuser_runtime.h"
-#include "workspace_scope.h" /* ws_scope_name_valid */
+#include "modules/workspace/workspace_scope.h" /* ws_scope_name_valid */
 
 #include <dirent.h>
 #include <errno.h>
@@ -52,7 +52,7 @@ static int principal_name(const char *principal, char *name, size_t cap)
    return 0;
 }
 
-/* Resolve the runtime base (parent of per-user dirs) into out[cap]. */
+/* Resolve the runtime base (parent of the environment dir) into out[cap]. */
 static int runtime_base(char *out, size_t cap)
 {
    const char *env = getenv("AIMEE_RUNTIME_DIR");
@@ -76,7 +76,7 @@ static int runtime_base(char *out, size_t cap)
    return 0;
 }
 
-/* Build (NO side effects: no mkdir, no tmpfs check) the per-user runtime dir
+/* Build (NO side effects: no mkdir, no tmpfs check) the shared runtime dir
  * path into out[cap], and optionally the base into base_out. Returns 0, or -1 on
  * a malformed principal / buffer overflow (out emptied). Shared by the creating
  * resolver and cleanup so cleanup never depends on — or triggers — creation. */
@@ -92,7 +92,8 @@ static int resolve_dir(const char *principal, char *out, size_t cap, char *base_
    char base[PATH_MAX];
    if (runtime_base(base, sizeof(base)) != 0)
       return -1;
-   int n = snprintf(out, cap, "%s/webusers/%s", base, name);
+   (void)name; /* authenticated actor, not an environment namespace */
+   int n = snprintf(out, cap, "%s/environment", base);
    if (n < 0 || (size_t)n >= cap)
    {
       out[0] = '\0';
@@ -111,21 +112,14 @@ int webuser_runtime_dir(const char *principal, char *out, size_t cap)
 {
    char base[PATH_MAX];
    /* Build + cap-validate the FULL path before creating anything, so an error
-    * path creates nothing (not even the shared /webusers parent). */
+    * path creates nothing. */
    if (resolve_dir(principal, out, cap, base, sizeof(base)) != 0)
       return -1;
-   char parent[PATH_MAX];
-   if (snprintf(parent, sizeof(parent), "%s/webusers", base) >= (int)sizeof(parent))
-   {
-      out[0] = '\0';
-      return -1;
-   }
-
    /* Create the base, then assert it is tmpfs BEFORE creating anything under it.
     * Fail-closed: a non-tmpfs base must never host credential sockets. On any
     * error `out` is emptied (postcondition: valid path iff return 0). */
    if ((mkdir(base, 0700) != 0 && errno != EEXIST) || webuser_runtime_is_tmpfs(base) != 1 ||
-       (mkdir(parent, 0700) != 0 && errno != EEXIST) || (mkdir(out, 0700) != 0 && errno != EEXIST))
+       (mkdir(out, 0700) != 0 && errno != EEXIST))
    {
       out[0] = '\0';
       return -1;
@@ -140,7 +134,7 @@ void webuser_runtime_cleanup(const char *principal)
     * depending on the tmpfs gate. */
    if (resolve_dir(principal, dir, sizeof(dir), NULL, 0) != 0)
       return;
-   /* The per-user runtime dir holds only flat sockets/files we created (0700,
+   /* The environment runtime dir holds only flat sockets/files we created (0700,
     * our UID) — no subdirs — so unlink each entry then rmdir. No system(), no
     * recursion, no shell-injection surface. */
    int dfd = open(dir, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);

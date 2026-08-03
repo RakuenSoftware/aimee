@@ -95,14 +95,9 @@ vault_status_t vault_service_set(const char *principal, const char *agent, const
  * can read them autonomously over any transport. Encrypted at rest like any other
  * vault; the server-key trust boundary applies (see vault_server_key.h).
  *
- * TENANCY (deliberate): this is a SINGLE shared namespace, not per-user. That is
- * correct because aimee-server is one person's personal agent and the TCP path is
- * gated only by the deploy bearer — i.e. a single trust domain (a TCP caller that
- * can push here can already drive the server). Webchat users, who DO share one
- * server under distinct logins, get isolated `webuser:` vaults and never land
- * here. If aimee-server ever becomes multi-tenant over TCP (distinct identities
- * behind one listener), this principal MUST be namespaced by the attested
- * identity, or one tenant's delegate would resolve another's key. */
+ * TENANCY: this is the one deployment-wide namespace. PAM/UDS/TLS principals are
+ * actors used for authentication, authorization, and audit; they never select a
+ * credential namespace. */
 #define VAULT_SERVER_PRINCIPAL "server"
 
 /* Store `secret` for (agent, cred) under the server principal, encrypted under the
@@ -168,8 +163,9 @@ vault_status_t vault_service_lock(const char *principal);
 #define VAULT_CODEX_TOKEN_CRED   "codex_oauth_token"
 #define VAULT_CODEX_ACCOUNT_CRED "codex_account_id"
 
-/* Delegate use-path helper: if `principal` has a vaulted "api_key" credential for
- * `agent`, decrypt it and overwrite `api_key` (capacity api_key_len). On any
+/* Delegate use-path helper: read the environment's vaulted "api_key" credential
+ * for `agent` and overwrite `api_key` (capacity api_key_len). `principal` is
+ * retained for API compatibility but does not scope state. On any
  * non-OK status `api_key` is left UNTOUCHED (so a config/env key survives a
  * miss). Returns VAULT_OK (injected), VAULT_NO_ENTRY (use env), VAULT_ERR_LOCKED
  * (caller must fail the delegate), or an error. The transient plaintext lives

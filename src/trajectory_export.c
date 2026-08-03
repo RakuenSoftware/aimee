@@ -4,7 +4,7 @@
 
 #include "cJSON.h"
 #include "interaction_events.h"
-#include "memory_platform.h"
+#include "modules/memory/memory_platform.h"
 
 #include <stdint.h>
 #include <stdio.h>

@@ -4,7 +4,7 @@
 #include "db2_internal.h"
 #include "db_postgres.h"
 #include "entity_nodes.h"
-#include "memory_ontology.h"
+#include "modules/memory/memory_ontology.h"
 
 #include <stdio.h>
 #include <stdlib.h>

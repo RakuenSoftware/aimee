@@ -22,11 +22,36 @@ For local use, check the Unix socket, service manager, server log, and config-di
 ## Reads work; writes fail
 
 Read the structured `403` first. For the first wizard user, confirm the Linux client completed mTLS
-enrollment with the exact command shown after Deploy; re-running Deploy as that same user is
+enrollment with the exact command shown after the summary's Deploy action; using Deploy again as that same user is
 idempotent and shows the pairing state. For an additional PAM/OIDC user, check `AIMEE_SERVER_ID`,
 `AIMEE_SERVER_TEAM_ID`, the management-JWKS trust bundle, exact subject spelling, grant tier, and
 identity-token refusal reason. `aimee.api.remote_writes` cannot fix either denial. Do not widen every
 user to test one grant.
+
+## Session start refuses to create a worktree
+
+The message names the repository and says the session worktree base could not be resolved. A new
+session's branch is cut from the repository's default branch, and aimee will not fall back to the
+branch the shared checkout has checked out, because that put new sessions on another session's work.
+
+Set the remote's default with `git remote set-head origin -a`. Without a remote, set
+`session_worktree_base` or `AIMEE_SESSION_WORKTREE_BASE` to an explicit ref. `current` is accepted
+but only as a deliberate choice for offline work; it inherits the checked-out branch.
+
+Until this resolves, the session has no worktree and the isolation guard refuses its writes.
+
+## A worktree under an old key was kept
+
+The message reads `kept pre-rekey worktree <path>`. Session worktree keys changed to stop two
+sessions sharing one checkout, so a session that predates the change owns a worktree under the old
+key. Reclaim removes the old one only when it is clean.
+
+That worktree holds uncommitted or unpushed work. Recover it, then remove the worktree:
+
+```bash
+git -C <path> status
+git -C <path> worktree remove <path>
+```
 
 ## KB is unavailable
 
@@ -128,18 +153,21 @@ On a default install the answer is usually one row:
  memory_facts | no curator provider or command configured | 9
 ```
 
-That is not a fault. Synthesis is external-only in this release, so curator work has nowhere to run
-until you give it an endpoint, and each attempt is recorded as a failure rather than skipped. The
-count grows quietly and `kb status` never says the cause.
+That is not a storage fault. The selected KB has no ready synthesis role, so curator work has nowhere
+to run and each attempt is recorded as a failure rather than skipped. The count grows quietly and
+`kb status` does not name the cause.
 
-Configure a synthesis endpoint, or expect the count. `aimee kb status` shows the curator tiers as
-`configured: false` until you do. See [Inference tiers](AIMEE_KB_SYNTH_TIERS.md).
+Configure synthesis inside that KB container or point it at a remote endpoint supported by the
+profile. Otherwise expect the count. `aimee kb status` shows the curator tiers as
+`configured: false` until a role is ready. See [KB model tiers](AIMEE_KB_SYNTH_TIERS.md).
 
 ## Workflow parks
 
-Read the named park reason and latest artifact. Common causes are a human gate, no valid panel,
-repeated feedback, agent saturation, missing commit, failed verification, merge conflict, lost replay,
-forge identity, or spend limit.
+The park reason names the constraint that stopped the scheduler. Read it with the current node and
+last lifecycle events before changing a limit.
+
+Common causes are a human gate, no valid panel, repeated feedback, agent saturation, missing commit,
+failed verification, merge conflict, lost replay, forge identity, or spend limit.
 
 Repair the condition and resume the same run so its evidence is preserved.
 

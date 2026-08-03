@@ -31,13 +31,12 @@ const EMBEDDERS = [
 ];
 
 /** A fetch double over the three endpoints the page touches, recording config writes. */
-function harness(config: Record<string, unknown>) {
+function harness(config: Record<string, unknown>, catalog = EMBEDDERS) {
   const writes: { key: string; value: unknown }[] = [];
   const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
     const body = (payload: unknown) =>
       ({ ok: true, status: 200, json: async () => payload, text: async () => JSON.stringify(payload) }) as unknown as Response;
-    if (url.startsWith('/api/embedders')) return body({ embedders: EMBEDDERS });
-    if (url.startsWith('/api/hosts')) return body({ hosts: [{ name: 'box', kind: 'local', gpus: [] }] });
+    if (url.startsWith('/api/embedders')) return body({ embedders: catalog });
     if (url.includes('/api/config/set')) {
       writes.push(JSON.parse(String(init?.body ?? '{}')));
       return body({ ok: true });
@@ -55,6 +54,17 @@ async function renderPage(config: Record<string, unknown>) {
   return { writes };
 }
 
+/** The embedderless image: aimee-kb bakes no weights, so nothing is locally hostable
+ * and the bundled route has nothing to seed itself with. */
+async function renderPageWithNoLocalEmbedders() {
+  const { writes, fetchImpl } = harness({}, [
+    { id: 'external-only', dim: 1024, context: 512, pooling: 'mean', local: false, prefixed: false },
+  ]);
+  render(<DeployTopology onSaved={() => {}} fetchImpl={fetchImpl as unknown as typeof fetch} />);
+  await waitFor(() => expect(saveButton()).toBeTruthy());
+  return { writes };
+}
+
 function embedderSelect(): HTMLSelectElement {
   const select = Array.from(document.querySelectorAll('select')).find((s) =>
     Array.from(s.options).some((o) => o.value === 'bekko-a25m'),
@@ -63,12 +73,16 @@ function embedderSelect(): HTMLSelectElement {
   return select as HTMLSelectElement;
 }
 
-function save() {
+function saveButton(): HTMLButtonElement {
   const button = Array.from(document.querySelectorAll('button')).find((b) =>
     /save & continue/i.test(b.textContent || ''),
   );
   if (!button) throw new Error('save control not found');
-  fireEvent.click(button);
+  return button as HTMLButtonElement;
+}
+
+function save() {
+  fireEvent.click(saveButton());
 }
 
 afterEach(cleanup);
@@ -83,21 +97,19 @@ describe('DeployTopology embedder picker', () => {
     expect(values).not.toContain('external-only');
   });
 
-  it('offers NO placement for the embedder, only the model', async () => {
-    // Regression: the embed role used to render the shared placement select, so an
-    // operator could pick "GPU 0" for something that runs inside the kb. The choice
-    // looked real and wrote nothing, which is worse than not offering it.
+  it('offers no host or GPU control at all', async () => {
+    // Regression, now structural: the embed role used to render a shared placement
+    // select, so an operator could pick "GPU 0" for something that runs inside the kb.
+    // The choice looked real and wrote nothing. Placement is now a property of the
+    // image variant, so no such control exists for either role.
     await renderPage({});
-    const selects = Array.from(document.querySelectorAll('select'));
-    const embedderValues = Array.from(embedderSelect().options).map((o) => o.value);
-    expect(embedderValues).toContain('nomic-embed-text-v2-moe');
-    // No select anywhere may offer a tier/GPU option to the embedder card.
-    const placementOptions = selects
-      .filter((sel) => sel !== embedderSelect())
+    const values = Array.from(document.querySelectorAll('select'))
       .flatMap((sel) => Array.from(sel.options).map((o) => o.value));
-    expect(placementOptions).not.toContain('gpu:0');
+    expect(values.some((v) => v.startsWith('gpu:'))).toBe(false);
+    expect(values).not.toContain('cpu');
     // Exactly one select carries the embedder ids, and it is the picker.
-    expect(selects.filter((sel) => Array.from(sel.options).some((o) => o.value === 'bekko-a25m')))
+    expect(Array.from(document.querySelectorAll('select'))
+      .filter((sel) => Array.from(sel.options).some((o) => o.value === 'bekko-a25m')))
       .toHaveLength(1);
   });
 
@@ -108,17 +120,30 @@ describe('DeployTopology embedder picker', () => {
     expect(labels.some((l) => l.includes('384-dim') && l.includes('no prefixes'))).toBe(true);
   });
 
+  it('seeds the shipped local embedder when config names none', async () => {
+    // Regression: an unset embedder_model is not a working default. Without
+    // seeding, accepting the wizard's default writes nothing, the entrypoint
+    // starts no embedder, and the kb serves its builtin lexical embedder forever
+    // while reporting retrieval degraded — on an image built around a real one.
+    const { writes } = await renderPage({});
+    save();
+    await waitFor(() => expect(writes.some((w) => w.key === 'embedder_model')).toBe(true));
+    const v = writes.find((w) => w.key === 'embedder_model')?.value;
+    expect(v).toBeTruthy();
+    expect(['nomic-embed-text-v2-moe', 'bekko-a25m']).toContain(v);
+  });
+
   it('a first choice needs no confirmation (no corpus to invalidate)', async () => {
     const { writes } = await renderPage({});
     fireEvent.change(embedderSelect(), { target: { value: 'bekko-a25m' } });
     expect(screen.queryByLabelText('confirm re-embed')).toBeNull();
     save();
-    await waitFor(() => expect(writes.some((w) => w.key === 'embedding_model')).toBe(true));
-    expect(writes.find((w) => w.key === 'embedding_model')?.value).toBe('bekko-a25m');
+    await waitFor(() => expect(writes.some((w) => w.key === 'embedder_model')).toBe(true));
+    expect(writes.find((w) => w.key === 'embedder_model')?.value).toBe('bekko-a25m');
   });
 
   it('a width change demands a typed confirmation and writes nothing without it', async () => {
-    const { writes } = await renderPage({ embedding_model: 'nomic-embed-text-v2-moe' });
+    const { writes } = await renderPage({ embedder_model: 'nomic-embed-text-v2-moe' });
     fireEvent.change(embedderSelect(), { target: { value: 'bekko-a25m' } });
     // 768 -> 384: the columns are rebuilt too, and the warning must say so.
     await waitFor(() => expect(screen.getByLabelText('confirm re-embed')).toBeTruthy());
@@ -126,21 +151,106 @@ describe('DeployTopology embedder picker', () => {
 
     save();
     await waitFor(() => expect(screen.getByText(/Type RE-EMBED to confirm/i)).toBeTruthy());
-    expect(writes.some((w) => w.key === 'embedding_model')).toBe(false);
+    expect(writes.some((w) => w.key === 'embedder_model')).toBe(false);
 
     fireEvent.change(screen.getByLabelText('confirm re-embed'), { target: { value: 'RE-EMBED' } });
     save();
-    await waitFor(() => expect(writes.some((w) => w.key === 'embedding_model')).toBe(true));
-    expect(writes.find((w) => w.key === 'embedding_model')?.value).toBe('bekko-a25m');
+    await waitFor(() => expect(writes.some((w) => w.key === 'embedder_model')).toBe(true));
+    expect(writes.find((w) => w.key === 'embedder_model')?.value).toBe('bekko-a25m');
   });
 
-  it('a local choice never pins embedding_dim', async () => {
+  it('a local choice never pins embedder_dims', async () => {
     const { writes } = await renderPage({});
     fireEvent.change(embedderSelect(), { target: { value: 'bekko-a25m' } });
     save();
-    await waitFor(() => expect(writes.some((w) => w.key === 'embedding_model')).toBe(true));
+    await waitFor(() => expect(writes.some((w) => w.key === 'embedder_model')).toBe(true));
     // The registry declares the width and the kb derives it; a second copy in config is
     // a second place to be wrong.
-    expect(writes.some((w) => w.key === 'embedding_dim')).toBe(false);
+    expect(writes.some((w) => w.key === 'embedder_dims')).toBe(false);
+  });
+
+  it('states the one-way door at the point of choice, not in a tooltip', async () => {
+    await renderPage({});
+    expect(screen.getByText(/effectively permanent for this install/i)).toBeTruthy();
+  });
+  it('will not save until an embedder is actually chosen', async () => {
+    // There is no fallback embedder any more: the kb refuses to start without one and
+    // the deploy is rejected before a container runs. Saving an empty choice would only
+    // defer that refusal to a later step, so the step does not complete.
+    const { writes } = await renderPageWithNoLocalEmbedders();
+    expect(saveButton().disabled).toBe(true);
+    expect(screen.getByText(/Choose an embedder/i)).toBeTruthy();
+    save();
+    expect(writes.length).toBe(0);
+  });
+
+  it('an external endpoint needs its dimension before it counts as chosen', async () => {
+    const { writes } = await renderPageWithNoLocalEmbedders();
+    fireEvent.change(screen.getByLabelText('embedder'), { target: { value: 'external' } });
+    fireEvent.change(screen.getByLabelText('embedder endpoint'), {
+      target: { value: 'https://embed.example/v1' },
+    });
+    expect(saveButton().disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('embedder dimension'), { target: { value: '1024' } });
+    expect(saveButton().disabled).toBe(false);
+    save();
+    await waitFor(() => expect(writes.some((w) => w.key === 'embedder_url')).toBe(true));
+  });
+});
+
+describe('DeployTopology synthesis picker', () => {
+  function synthSelect(): HTMLSelectElement {
+    const select = Array.from(document.querySelectorAll('select')).find((s) =>
+      Array.from(s.options).some((o) => o.value === 'off'),
+    );
+    if (!select) throw new Error('synthesis picker not rendered');
+    return select as HTMLSelectElement;
+  }
+
+  it('offers off, external and BOTH models, whatever the kb image is', async () => {
+    // Synthesis is its own sidecar now (aimee-llm-e2b / aimee-llm-e4b) deployed beside
+    // the kb, so the kb tag has no bearing on the choice. These assertions were the
+    // inverse of this: the page offered only the model the kb image baked, and hid the
+    // local option entirely when it baked none.
+    await renderPage({});
+    const values = Array.from(synthSelect().options).map((o) => o.value);
+    expect(values).toEqual(
+      expect.arrayContaining(['off', 'external', 'gemma-4-E2B-it', 'gemma-4-E4B-it']),
+    );
+  });
+
+  it('does not gate the local options on kb image properties', async () => {
+    // aimee_with_llamacpp and aimee_synthesis_model described the OLD topology, where
+    // synthesis lived in the kb image. Absent, present or contradictory, they must not
+    // change what is offerable.
+    for (const cfg of [{}, { aimee_with_llamacpp: '0' }, { aimee_with_llamacpp: '1' }]) {
+      // Within one test the auto-cleanup between tests has not run yet, so each
+      // iteration would otherwise stack another copy of the page in the document.
+      cleanup();
+      await renderPage(cfg);
+      const values = Array.from(synthSelect().options).map((o) => o.value);
+      expect(values).toContain('gemma-4-E2B-it');
+      expect(values).toContain('gemma-4-E4B-it');
+    }
+  });
+
+  it('off is presented as supported, and writes no endpoint', async () => {
+    const { writes } = await renderPage({ synthesis_endpoint: 'https://old/v1' });
+    fireEvent.change(synthSelect(), { target: { value: 'off' } });
+    expect(screen.getByText(/Supported, not a gap/i)).toBeTruthy();
+    save();
+    await waitFor(() => expect(writes.some((w) => w.key === 'synthesis_endpoint')).toBe(true));
+    expect(writes.find((w) => w.key === 'synthesis_endpoint')?.value).toBe('');
+  });
+
+  it('a bundled model writes the model and NOT a loopback endpoint', async () => {
+    // The entrypoint owns the port; writing 127.0.0.1 here would hardcode it.
+    const { writes } = await renderPage({});
+    fireEvent.change(synthSelect(), { target: { value: 'gemma-4-E4B-it' } });
+    save();
+    await waitFor(() => expect(writes.some((w) => w.key === 'synthesis_model')).toBe(true));
+    expect(writes.find((w) => w.key === 'synthesis_model')?.value).toBe('gemma-4-E4B-it');
+    const ep = writes.find((w) => w.key === 'synthesis_endpoint');
+    expect(ep === undefined || ep.value === '').toBe(true);
   });
 });

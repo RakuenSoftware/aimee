@@ -253,8 +253,15 @@ int platform_random_bytes(void *buf, size_t len)
    return 0;
 }
 
+static int test_confidence_provider(double score, const char **confidence)
+{
+   *confidence = score >= 0.66 ? "high" : score >= 0.33 ? "medium" : "low";
+   return 0;
+}
+
 static void test_confidence_tiers(void)
 {
+   ingress_preinject_register_confidence_provider(test_confidence_provider);
    assert(strcmp(ingress_preinject_confidence(0.9), "high") == 0);
    assert(strcmp(ingress_preinject_confidence(0.66), "high") == 0);
    assert(strcmp(ingress_preinject_confidence(0.5), "medium") == 0);
@@ -717,11 +724,11 @@ int main(void)
    return 0;
 }
 
-const char *config_embedding_command(const config_t *cfg, const char *requested)
+const char *config_embedder_command(const config_t *cfg, const char *requested)
 {
    if (requested && requested[0])
       return requested;
-   if (cfg && cfg->embedding_command[0])
-      return cfg->embedding_command;
-   return "builtin";
+   if (cfg && cfg->embedder_command[0])
+      return cfg->embedder_command;
+   return MEMORY_EMBED_TEST_FIXTURE;
 }

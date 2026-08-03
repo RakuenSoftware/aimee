@@ -1,0 +1,22 @@
+model                            FP  inv  sym  pred  ent  part  spur    FN
+HuggingFaceTB/SmolLM2-360M-Ins    0    0    0     0    0     0     0    72
+LiquidAI/LFM2-350M-Extract       16    0    0     7    0     5     4    72
+LiquidAI/LFM2.5-230M              0    0    0     0    0     0     0    72
+Qwen/Qwen3-0.6B                   0    0    0     0    0     0     0    72
+Qwen/Qwen3-1.7B                   8    0    0     3    0     1     4    57
+Qwen/Qwen3.5-0.8B                18    0    0     8    0     3     7    55
+Qwen/Qwen3.5-2B                  41    0    0     7    0    17    17    50
+google/gemma-4-E2B-it            24    0    0     7    0     8     9    30
+google/gemma-4-E4B-it            11    0    0     5    0     1     5    25
+ibm-granite/granite-4.0-1b       38    0    0    10    1     8    19    36
+ibm-granite/granite-4.0-350m      6    0    0     0    0     4     2    72
+ibm-granite/granite-4.0-h-1b     39    1    2    10    0     3    23    42
+ibm-granite/granite-4.0-h-350m    1    0    0     0    0     1     0    72
+ibm-granite/granite-4.1-3b       24    1    1     5    2     4    11    35
+unsloth/gemma-3-270m-it           0    0    0     0    0     0     0    72
+unsloth/gemma-3n-E4B-it          31    0    0    10    1     4    16    26
+
+totals across models: {'predicate_variant': 72, 'partial_overlap': 59, 'spurious': 117, 'entity_variant': 4, 'inverse_of_gold': 2, 'symmetric_swap': 3}
+scored as errors but semantically identical: 5 (1.9%)
+reconcilable by the rel_types gate / entity graph: 76 (29.6%)
+genuinely spurious: 117 (45.5%)

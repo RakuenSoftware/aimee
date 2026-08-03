@@ -37,6 +37,13 @@ extern "C"
     * Windows there is no UDS, so the remote path is the only one. */
    int aimee_client_has_remote(void);
 
+   /* Where this process actually sends requests, as a short credential-free
+    * string (any userinfo in the URL is stripped). Returned storage is static
+    * and overwritten by the next call. Error paths print it so a command that
+    * silently used the local socket is not mistaken for one that reached the
+    * configured server. */
+   const char *aimee_client_transport_label(void);
+
    /* Parse a single remote-server CLI flag (argv[*i]): --server=URL,
     * --server URL (advances *i), or --server-token=TOK. On a match, sets *url
     * and/or *token to point into argv and returns 1; returns 0 otherwise. */

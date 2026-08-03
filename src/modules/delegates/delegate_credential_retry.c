@@ -33,29 +33,12 @@ static void codex_oauth_apply_vault_override(const char *principal, const agent_
    char acct[128] = "";
    vault_status_t st = VAULT_NO_ENTRY;
 
-   /* An attested per-turn principal (UDS/webchat) wins; a LOCKED user cred is a
-    * hard miss here, NOT silently downgraded to the server vault (D15). */
-   if (principal && principal[0])
-   {
-      st = vault_service_get(principal, target_agent->name, VAULT_CODEX_TOKEN_CRED, tok,
-                             sizeof(tok), time(NULL));
-      if (st == VAULT_ERR_LOCKED)
-         return;
-      if (st == VAULT_OK)
-         (void)vault_service_get(principal, target_agent->name, VAULT_CODEX_ACCOUNT_CRED, acct,
-                                 sizeof(acct), time(NULL));
-   }
-
-   /* Fall back to the server-owned vault: codex creds provisioned over a TCP thin
-    * client have no per-user principal and live under the server principal (WP-2). */
-   if (st != VAULT_OK)
-   {
-      st = vault_service_get_server_principal(target_agent->name, VAULT_CODEX_TOKEN_CRED, tok,
-                                              sizeof(tok));
-      if (st == VAULT_OK)
-         (void)vault_service_get_server_principal(target_agent->name, VAULT_CODEX_ACCOUNT_CRED,
-                                                  acct, sizeof(acct));
-   }
+   (void)principal;
+   st = vault_service_get_server_principal(target_agent->name, VAULT_CODEX_TOKEN_CRED, tok,
+                                           sizeof(tok));
+   if (st == VAULT_OK)
+      (void)vault_service_get_server_principal(target_agent->name, VAULT_CODEX_ACCOUNT_CRED, acct,
+                                               sizeof(acct));
 
    if (st != VAULT_OK || !tok[0])
       return;
@@ -74,37 +57,32 @@ delegate_cred_resolve_status_t delegate_resolve_credentials(
    if (!target_agent)
       return DELEGATE_CRED_RESOLVE_OK;
 
-   /* Restore persisted per-credential cooldown/health (shared named pool AND
-    * per-principal vault rows) before consulting either path. */
+   /* Restore persisted per-credential cooldown/health before consulting either path. */
    const char *dir = config_output_dir();
    snprintf(credential_state_path, credential_state_path_cap, "%s/delegate-credential-state.tsv",
             dir ? dir : "/tmp");
    (void)delegate_credentials_load_file(credential_state_path, time(NULL));
 
-   /* WP-C.1 vault-FIRST (D14/D15): a per-principal cred beats the shared lease;
-    * LOCKED fails the run; a miss falls through to the shared Vault slots. */
-   if (vault_principal && vault_principal[0])
+   /* The environment credential beats the shared named pool. PAM identity is
+    * never a credential or cooldown namespace. */
    {
-      /* WP-C.3 per-principal 429 backpressure: a vaulted cred is a single key (no
-       * round-robin / exclusive lease — a user's own key may serve their
-       * concurrent delegates), but a prior 429 cools it for THIS principal only. */
-      int cooling = delegate_credentials_cooldown_remaining(vault_principal, target_agent->name,
-                                                            VAULT_API_KEY_CRED, time(NULL));
+      int cooling = delegate_credentials_cooldown_remaining(
+          VAULT_SERVER_PRINCIPAL, target_agent->name, VAULT_API_KEY_CRED, time(NULL));
       if (cooling > 0)
       {
          if (cooldown_secs)
             *cooldown_secs = cooling;
          return DELEGATE_CRED_RESOLVE_COOLING;
       }
-      vault_status_t vst = vault_service_inject_api_key(
-          vault_principal, target_agent->name, target_agent->api_key, MAX_API_KEY_LEN, time(NULL));
+      vault_status_t vst =
+          vault_service_inject_api_key(VAULT_SERVER_PRINCIPAL, target_agent->name,
+                                       target_agent->api_key, MAX_API_KEY_LEN, time(NULL));
       if (vst == VAULT_ERR_LOCKED)
          return DELEGATE_CRED_RESOLVE_LOCKED;
       if (vst == VAULT_OK)
       {
-         /* Key the failure/cooldown row by (principal, agent, "api_key"). No
-          * exclusive lease is taken, so release on exit is a harmless no-op. */
-         snprintf(leased_principal, leased_principal_cap, "%s", vault_principal);
+         /* Key failure/cooldown by the one environment principal. */
+         snprintf(leased_principal, leased_principal_cap, "%s", VAULT_SERVER_PRINCIPAL);
          snprintf(leased_cred_name, leased_cred_name_cap, "%s", VAULT_API_KEY_CRED);
          return DELEGATE_CRED_RESOLVE_OK;
       }

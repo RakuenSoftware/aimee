@@ -3,8 +3,8 @@
  * A git credential a webchat user stores must live ONLY inside the encrypted
  * vault — its plaintext must appear in NO file on disk — yet still be available
  * in-memory to the credential-injection env. Plus the cross-principal denial. */
-#include "git_cred_inject.h"
-#include "git_forge_vault.h"
+#include "modules/git/git_cred_inject.h"
+#include "modules/git/git_forge_vault.h"
 #include "vault_kek_cache.h"
 #include "vault_service.h"
 
@@ -65,6 +65,7 @@ static int walk_cb(const char *path, const struct stat *st, int type, struct FTW
 
 int main(void)
 {
+   int fdY = -1;
    char home[256];
    snprintf(home, sizeof(home), "/tmp/aimee-gitleak-%d", (int)getpid());
    char mk[320];
@@ -80,7 +81,10 @@ int main(void)
    const uint8_t pw[] = "alice-pw";
    assert(vault_service_unlock_password(alice, ATTEST_WEBCHAT_TRUSTED, pw, sizeof(pw) - 1, T0) ==
           VAULT_OK);
-   assert(vault_service_set(alice, GIT_FORGE_VAULT_AGENT, GIT_FORGE_TOKEN_CRED, CANARY, T0) ==
+   /* One environment vault: the credential is the server's, and the actor is
+    * audited rather than used as a namespace. The leak properties below are
+    * unchanged — this only stores it where the autonomous reader looks. */
+   assert(vault_service_set_server(GIT_FORGE_VAULT_AGENT, GIT_FORGE_TOKEN_CRED, CANARY) ==
           VAULT_OK);
 
    /* Drop the cached KEK so nothing transient holds the plaintext; sync so the
@@ -128,13 +132,18 @@ int main(void)
    assert(strcmp(tok, CANARY) == 0);
 
    char *const parent[] = {(char *)"PATH=/usr/bin", NULL};
-   char **env = git_cred_inject_build_env(alice, parent);
+   char **env = git_cred_inject_build_env_for_repo(alice, NULL, NULL, NULL, parent, &fdY);
    assert(env != NULL);
-   int has = 0;
+   /* There is no env mode left: the canary is never an environment string, in
+    * any path. The editor migrated to the same inherited-fd delivery. */
    for (int i = 0; env[i]; i++)
-      if (strncmp(env[i], "GH_TOKEN=", 9) == 0 && strcmp(env[i] + 9, CANARY) == 0)
-         has = 1;
-   assert(has); /* legacy env mode (editor path): the env carries it (in memory only) */
+   {
+      assert(strncmp(env[i], "GH_TOKEN=", 9) != 0);
+      assert(strstr(env[i], CANARY) == NULL);
+   }
+   assert(fdY >= 0);
+   assert(close(fdY) == 0);
+   fdY = -1;
    git_cred_inject_free_env(env);
 
    /* FD mode (the API git ops + clone): the token must NOT be in the env at all —
@@ -153,10 +162,31 @@ int main(void)
    assert(close(tfd) == 0); /* the memfd is a real, open fd we own + release */
    git_cred_inject_free_env(fenv);
 
-   /* Cross-principal denial: bob has no token and cannot read alice's. */
-   char btok[64];
-   assert(git_forge_vault_token("webuser:bob", btok, sizeof(btok)) == 0);
-   assert(git_cred_inject_build_env("webuser:bob", parent) == NULL);
+   /* Single-tenant: another PAM actor resolves the SAME environment credential,
+    * with the same properties in both modes — legacy env carries it in memory,
+    * fd mode keeps it out of the environment entirely. */
+   char btok[4096];
+   assert(git_forge_vault_token("webuser:bob", btok, sizeof(btok)) == 1);
+   assert(strcmp(btok, CANARY) == 0);
+
+   int bfd = -1;
+   char **bfenv = git_cred_inject_build_env_for_repo("webuser:bob", NULL, NULL, NULL, parent, &bfd);
+   assert(bfenv != NULL && bfd >= 0);
+   for (int i = 0; bfenv[i]; i++)
+      assert(strstr(bfenv[i], CANARY) == NULL); /* still nowhere in the env */
+   assert(close(bfd) == 0);
+   git_cred_inject_free_env(bfenv);
+
+   /* No actor at all still resolves the environment credential — and still by fd,
+    * so the canary never reaches an environment string on that path either. */
+   int afd = -1;
+   char **aenv = git_cred_inject_build_env_for_repo("", NULL, NULL, NULL, parent, &afd);
+   assert(aenv != NULL);
+   for (int i = 0; aenv[i]; i++)
+      assert(strstr(aenv[i], CANARY) == NULL);
+   if (afd >= 0)
+      close(afd);
+   git_cred_inject_free_env(aenv);
 
    char clean[320];
    snprintf(clean, sizeof(clean), "rm -rf %s", home);

@@ -17,7 +17,7 @@
 #endif
 #include "aimee.h"
 #include "agent_exec.h"
-#include "agent_tools.h"
+#include <aimee/tools/agent_tools.h>
 #include "aimee_home.h"
 #include "cJSON.h"
 #include "dstr.h"

@@ -649,24 +649,13 @@ static const char *path_basename(const char *p)
    return slash ? slash + 1 : (p ? p : "");
 }
 
-/* Ownership / operator-visibility for the Workflow Actions surface. True iff:
- *   - the run is AUTONOMOUS (system/triggered: the proposals trigger, cron, or a
- *     dev-submit pipeline). These are not private human proposals, so they are
- *     visible to — and operable (pause/resume/stop) by — any authenticated
- *     dashboard operator, so the tab shows the autonomous pipeline regardless of
- *     which webuser convened it; OR
- *   - the item's submitter equals the calling principal — an INTERACTIVE human
- *     proposal stays owner-scoped (closes the list IDOR; one user never sees
- *     another's drafts).
- * A NULL/empty submitter on a non-autonomous row is owned by nobody -> fail
- * closed. The human-gate decision (approve/reject) is separately CAP_WORKFLOW_
- * ADMIN-gated, so widening visibility here does not widen gate authority. */
+/* Work items belong to the one server environment, never to a PAM login. The
+ * submitter remains actor attribution and human-gate decisions remain separately
+ * CAP_WORKFLOW_ADMIN-gated; visibility does not grant mutation authority. */
 static int wf_owns(const db1_work_item_t *wi)
 {
-   if (strcmp(wi->mode, "autonomous") == 0)
-      return 1;
-   const char *principal = server_http_identity_principal();
-   return wi->submitter[0] && principal && principal[0] && strcmp(principal, wi->submitter) == 0;
+   (void)wi;
+   return 1;
 }
 
 /* shared: serialize one work-item row. The base keys (id..repo) are unchanged so
@@ -709,7 +698,7 @@ static int wf_items_filtered(char *resp, int cap, int (*keep)(const db1_work_ite
 
 int wf_api_items(char *resp, int cap)
 {
-   /* Owner-scoped: only the caller's own proposals (closes the list IDOR). */
+   /* Every authenticated actor sees the shared environment's proposals. */
    return wf_items_filtered(resp, cap, wf_owns);
 }
 
@@ -844,7 +833,7 @@ int wf_api_proposal(const char *id, char *resp, int cap)
 }
 
 /* ── lifecycle mutations (start / pause / stop / delete) ─────────────────────
- * All share the same access rule: the item's submitter OR an operator. */
+ * Item ownership is environment-wide; route capabilities decide who may mutate. */
 
 static int item_terminal(const db1_work_item_t *wi)
 {
@@ -859,8 +848,8 @@ static const char *wf_actor(void)
    return (p && p[0]) ? p : "operator";
 }
 
-/* Resolve + owner/operator-gate an item for a mutation. On success fills `wi` and
- * returns 0; otherwise writes an error envelope and returns the HTTP status. */
+/* Resolve an item for a mutation. Route-level capabilities remain authoritative. On success fills
+ * `wi` and returns 0; otherwise writes an error envelope and returns the HTTP status. */
 static int wf_load_for_mutation(const char *id, int is_operator, db1_work_item_t *wi, char *resp,
                                 int cap)
 {
@@ -868,8 +857,7 @@ static int wf_load_for_mutation(const char *id, int is_operator, db1_work_item_t
       return err(resp, cap, 400, "missing work item id");
    if (db1_work_item_get(id, wi) != 1)
       return err(resp, cap, 404, "work item not found");
-   if (!is_operator && !wf_owns(wi))
-      return err(resp, cap, 403, "not your work item");
+   (void)is_operator;
    return 0;
 }
 

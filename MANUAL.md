@@ -20,8 +20,8 @@ operations. Exact command and config tables are generated from source:
 - `aimee-wfe` owns workflow definitions and lifecycle state.
 - `aimee-kb` owns durable memory, documents, the code graph, retrieval, curation, PostgreSQL, and
   pgvector.
-- The KB embeds in-process from weights baked into its image. Synthesis is external-only: point
-  `AIMEE_LLM_URL` at an endpoint you run.
+- Each KB owns its embedding and synthesis placements. A role can run inside that KB container or
+  use a remote endpoint; there is no separate inference service.
 - `aimee-runtime-web` serves the browser workspace.
 
 The server and KB each run a bounded shared-memory event bus. Governed actions, memory mutations,
@@ -33,15 +33,17 @@ one ordered audit tap. See [Event bus](docs/EVENT_BUS.md).
 After the services are running, enroll the client and check every boundary:
 
 ```bash
-aimee remote set https://host:8743 <bootstrap-bearer>
+aimee remote set https://host:8743 <wizard-bearer>
 aimee remote status
 aimee status
 aimee kb status
 aimee audit verify
 ```
 
-Confirm the server certificate fingerprint out of band. The bootstrap bearer is for enrollment,
-not daily use. The first successful enrollment rotates it and records the client identity.
+Copy the command from the setup summary, then confirm the server certificate fingerprint out of
+band. `remote set` stores the bearer, pins the server certificate, and on Linux enrolls a client
+mTLS certificate. It does not rotate the bearer. Use `aimee remote enroll` when you need a separate
+bearer for an additional client without invalidating existing clients.
 
 Register a workspace from the machine that holds the files:
 
@@ -153,8 +155,8 @@ See [Roundtables](docs/ENSEMBLE.md).
 
 ## Workflows
 
-A workflow is a typed graph of authors, delegates, verification, review, gates, forge operations,
-and fan-out:
+Control edges choose the next block. Typed input bindings choose the artifact that block reads. That
+separation lets a graph loop through new work without feeding a gate its own stale verdict.
 
 ```bash
 aimee workflow blocks
@@ -168,20 +170,22 @@ The Go control plane snapshots the definition and admitted request, then persist
 transition before it dispatches work. Plans, code, reviews, and gate decisions remain separate
 artifacts. A crash resumes from durable state.
 
-Triggers and cron can start a run:
+Start a run directly or from a watched-proposal trigger:
 
 ```bash
+aimee workflow run --help
 aimee trigger fire --help
 aimee trigger list
-aimee cron list
 ```
 
-Autonomous mode removes routine operator steps. It never passes a human gate. A human gate parks
-until an authenticated person signs the current content hash.
+The current Go scanner executes `watch-dir` and `proposals` trigger sources. It records trigger mode,
+but schedules `autonomous` and `interactive` runs the same way. A human gate parks until a browser or
+API caller approves or rejects it. That decision is a hashed approval artifact and lifecycle
+transition, not a cryptographic signature over the artifact and principal.
 
 Parallel slices use separate branches and worktrees, then merge against the latest accepted feature
-tip. A missing commit, merge conflict, exhausted loop, lost review replay, or broken forge operation
-parks or fails with a named reason. It does not advance on an empty result.
+tip. A missing commit, merge conflict, exhausted loop, lost review replay, or forge failure parks or
+fails with a named reason. An empty result never advances.
 
 See [Workflows](docs/WORKFLOWS.md), [Workflow actions](docs/WORKFLOW_ACTIONS.md), and
 [Autonomous development](docs/AUTONOMOUS_DEVELOPMENT.md).

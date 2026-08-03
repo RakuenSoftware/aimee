@@ -8,12 +8,13 @@
  * First native resource: GET /v1/rules — the active collaboration rules,
  * proxied from aimee-kb via kb_client. */
 #include "server_http.h"
+#include "server.h" /* server_active_project_from_cwd */
 #include "kb_client.h"
 #include "config.h"
 #include "working_profile.h" /* working_profile_autoobserve_from_feedback */
 #include "agent_config.h"
 #include "agent_types.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include "cJSON.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -142,15 +143,15 @@ static int kb_search_handler(const char *body, char *resp, int cap)
    if (all_projects)
    {
       if (!project && cJSON_IsString(jc) && jc->valuestring[0] &&
-          workspace_repo_identity(jc->valuestring, resolved_project, sizeof(resolved_project), NULL,
-                                  0) == 0)
+          server_active_project_from_cwd(jc->valuestring, resolved_project,
+                                         sizeof(resolved_project)) == 0)
          project = resolved_project;
    }
    else if (!project)
    {
       if (!cJSON_IsString(jc) || !jc->valuestring[0] ||
-          workspace_repo_identity(jc->valuestring, resolved_project, sizeof(resolved_project), NULL,
-                                  0) != 0)
+          server_active_project_from_cwd(jc->valuestring, resolved_project,
+                                         sizeof(resolved_project)) != 0)
       {
          cJSON_Delete(req);
          snprintf(resp, (size_t)cap,
@@ -175,7 +176,7 @@ static int kb_search_handler(const char *body, char *resp, int cap)
     * embedder, and a 384-dim builtin query vector cannot match a real-embedder
     * corpus (1024/2560-dim) — the dim mismatch yields zero hits even though the
     * corpus is fully embedded. */
-   const char *emb = config_embedding_command_field()[0] ? config_embedding_command_field() : NULL;
+   const char *emb = config_embedder_command_field()[0] ? config_embedder_command_field() : NULL;
 
    char *j = kb_client_search_json_scoped_ex(project, all_projects, jq->valuestring, emb,
                                              max_results, format, NULL);

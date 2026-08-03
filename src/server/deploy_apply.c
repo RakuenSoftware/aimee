@@ -4,6 +4,7 @@
 #include "deploy_apply.h"
 
 #include "aimee_home.h"      /* one-shot legacy credential migration path */
+#include "cJSON.h"           /* scope `docker compose ps` to the managed services */
 #include "config.h"          /* config_t, config_load */
 #include "config_database.h" /* config_emit_deploy_env */
 #include "platform_random.h" /* 256-bit managed kb -> llm bearer */
@@ -35,6 +36,30 @@ static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static int g_running = 0;
 static int g_last_exit = INT_MIN;
 static char g_last_out[DEPLOY_OUT_CAP];
+
+/* Is NAME= present in the emitted env with a non-empty value? config_emit_deploy_env
+ * always emits the embedder keys, empty when unset, so presence alone proves nothing. */
+static int deploy_env_value_set(const char *env, const char *name)
+{
+   if (!env || !name || !name[0])
+      return 0;
+   size_t nlen = strlen(name);
+   for (const char *p = env; p && *p;)
+   {
+      const char *eol = strchr(p, '\n');
+      if (!eol)
+         eol = p + strlen(p);
+      if ((size_t)(eol - p) > nlen && strncmp(p, name, nlen) == 0 && p[nlen] == '=')
+      {
+         const char *v = p + nlen + 1;
+         while (v < eol && isspace((unsigned char)*v))
+            v++;
+         return v < eol;
+      }
+      p = (*eol == '\n') ? eol + 1 : eol;
+   }
+   return 0;
+}
 
 static int deploy_env_has_profile(const char *env, const char *profile)
 {
@@ -104,7 +129,7 @@ static int deploy_llm_token(char *out, size_t cap)
 {
    if (!out || cap < DEPLOY_LLM_TOKEN_HEX + 1)
       return -1;
-   /* AIMEE_LLM_AUTH_TOKEN is the child credential and may be stale inherited
+   /* SYNTHESIS_API_KEY is the child credential and may be stale inherited
     * process state. It is deliberately ignored here. Operators who must adopt
     * an existing managed LLM use the distinct, explicit override variable. */
    char configured[513];
@@ -116,13 +141,13 @@ static int deploy_llm_token(char *out, size_t cap)
          return -1;
       }
       snprintf(out, cap, "%s", configured);
-      int rc = vault_runtime_secret_set("AIMEE_LLM_AUTH_TOKEN", configured);
+      int rc = vault_runtime_secret_set("SYNTHESIS_API_KEY", configured);
       runtime_secret_wipe(configured, sizeof(configured));
       return rc;
    }
    runtime_secret_wipe(configured, sizeof(configured));
 
-   if (runtime_secret_get("AIMEE_LLM_AUTH_TOKEN", out, cap))
+   if (runtime_secret_get("SYNTHESIS_API_KEY", out, cap))
       return deploy_llm_token_valid(out) ? 0 : -1;
 
    const char *home = aimee_home();
@@ -149,8 +174,7 @@ static int deploy_llm_token(char *out, size_t cap)
       while (n > 0 && (out[n - 1] == '\n' || out[n - 1] == '\r'))
          n--;
       out[n] = '\0';
-      if (!deploy_llm_token_valid(out) ||
-          vault_runtime_secret_set("AIMEE_LLM_AUTH_TOKEN", out) != 0)
+      if (!deploy_llm_token_valid(out) || vault_runtime_secret_set("SYNTHESIS_API_KEY", out) != 0)
       {
          runtime_secret_wipe(out, cap);
          return -1;
@@ -164,7 +188,7 @@ static int deploy_llm_token(char *out, size_t cap)
    char proposed[DEPLOY_LLM_TOKEN_HEX + 1];
    if (platform_random_hex(proposed, DEPLOY_LLM_TOKEN_HEX) != 0)
       return -1;
-   if (vault_runtime_secret_set("AIMEE_LLM_AUTH_TOKEN", proposed) != 0)
+   if (vault_runtime_secret_set("SYNTHESIS_API_KEY", proposed) != 0)
    {
       runtime_secret_wipe(proposed, sizeof(proposed));
       return -1;
@@ -262,6 +286,20 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
                               (explicit_id && explicit_id[0] ? 1 : 0) +
                               (explicit_team && explicit_team[0] ? 1 : 0);
    runtime_secret_wipe(explicit_conn, sizeof(explicit_conn));
+   /* A managed kb with no embedder will start, print why it cannot serve retrieval, and
+    * exit — leaving a failed deploy whose reason is a line in a container log. There is
+    * no fallback to come up with instead, so refuse here, where the wizard shows it. */
+   if (managed_kb && !deploy_env_value_set(env, "EMBEDDER_MODEL") &&
+       !deploy_env_value_set(env, "EMBEDDER_URL"))
+   {
+      if (err && err_cap)
+         snprintf(err, err_cap,
+                  "no embedder selected: the knowledge base cannot serve retrieval without "
+                  "one, and there is no fallback. Choose a bundled model on the wizard's "
+                  "topology step (or `aimee config set embedder_model bekko-a25m`), or point "
+                  "EMBEDDER_URL at an external endpoint, then deploy again");
+      return NULL;
+   }
    if (managed_kb && explicit_parts != 0 && explicit_parts != 3)
    {
       if (err && err_cap)
@@ -309,8 +347,11 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
        * Do not leave an inherited empty/stale duplicate before it: getenv and
        * Compose are not required to choose the later duplicate. */
       if (deploy_env_overrides(env, *e) ||
-          (managed_llm && (strncmp(*e, "AIMEE_LLM_AUTH_TOKEN=", 21) == 0 ||
-                           strncmp(*e, "AIMEE_LLM_AUTH_REQUIRED=", 24) == 0)))
+          /* sizeof-1, not a hand-counted length: these were literals matching the
+           * OLD names, and a rename silently stopped the filter matching. */
+          (managed_llm &&
+           (strncmp(*e, "SYNTHESIS_API_KEY=", sizeof("SYNTHESIS_API_KEY=") - 1) == 0 ||
+            strncmp(*e, "SYNTHESIS_AUTH_REQUIRED=", sizeof("SYNTHESIS_AUTH_REQUIRED=") - 1) == 0)))
          continue;
       envp[n] = strdup(*e);
       if (!envp[n])
@@ -344,16 +385,16 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
    }
    if (managed_llm)
    {
-      size_t len = strlen("AIMEE_LLM_AUTH_TOKEN=") + strlen(llm_token);
+      size_t len = strlen("SYNTHESIS_API_KEY=") + strlen(llm_token);
       envp[n] = malloc(len + 1);
       if (!envp[n])
       {
          free_envp(envp);
          return NULL;
       }
-      snprintf(envp[n++], len + 1, "AIMEE_LLM_AUTH_TOKEN=%s", llm_token);
+      snprintf(envp[n++], len + 1, "SYNTHESIS_API_KEY=%s", llm_token);
       memset(llm_token, 0, sizeof(llm_token));
-      envp[n] = strdup("AIMEE_LLM_AUTH_REQUIRED=1");
+      envp[n] = strdup("SYNTHESIS_AUTH_REQUIRED=1");
       if (!envp[n])
       {
          free_envp(envp);
@@ -655,10 +696,10 @@ static void *deploy_worker(void *arg)
        * finishes; KB initialization and CPU indexing do not wait for them. */
       if (managed_kb && managed_llm)
       {
-         const char *token = deploy_env_value(envp, "AIMEE_LLM_AUTH_TOKEN");
-         char record[sizeof("AIMEE_LLM_AUTH_TOKEN=") + 512];
+         const char *token = deploy_env_value(envp, "SYNTHESIS_API_KEY");
+         char record[sizeof("SYNTHESIS_API_KEY=") + 512];
          int record_len =
-             token ? snprintf(record, sizeof(record), "AIMEE_LLM_AUTH_TOKEN=%s", token) : -1;
+             token ? snprintf(record, sizeof(record), "SYNTHESIS_API_KEY=%s", token) : -1;
          const char *bootstrap_argv[16];
          int bootstrap_code = -1;
          used = strlen(out);
@@ -808,6 +849,98 @@ void deploy_apply_state(int *running, int *last_exit, char *out, size_t out_cap)
    pthread_mutex_unlock(&g_lock);
 }
 
+/* Keep only the containers the MANAGED compose file defines.
+ *
+ * `docker compose -f <managed file> ps` does NOT scope to the services in that
+ * file — it scopes to COMPOSE_PROJECT_NAME. aimee-server is started from
+ * compose.server-managed.yaml under the same project "aimee", so an unfiltered
+ * `ps` reports the orchestrator alongside the services it manages. This is the
+ * same project-vs-file blind spot documented for --remove-orphans above; there it
+ * deleted the server, here it merely made a never-deployed install look deployed:
+ * the wizard counts the returned services to label its button, so a clean box
+ * offered "Re-deploy" for a knowledge base that did not exist yet.
+ *
+ * Filtering by the compose `project.config_files` label — rather than by passing
+ * service names to `ps` — is what keeps this correct: every managed service sits
+ * behind a profile (kb, identity-bootstrap, authority-bootstrap), so enumerating
+ * them with `config --services` returns nothing unless the matching profiles are
+ * active, and a profile-gated name passed to `ps` is an error rather than an
+ * empty result. The label is present on every container regardless of profile.
+ *
+ * Emits a JSON array (a shape parse_ps already accepts). On any parse failure the
+ * input is left untouched: a wrong service list is worse than an unfiltered one. */
+static void deploy_filter_managed_ps(char *ps, size_t ps_cap, const char *file)
+{
+   const char *trimmed = ps;
+   while (*trimmed == ' ' || *trimmed == '\n' || *trimmed == '\r' || *trimmed == '\t')
+      trimmed++;
+   if (!*trimmed)
+      return;
+
+   char want[600];
+   snprintf(want, sizeof(want), "com.docker.compose.project.config_files=%s", file);
+
+   cJSON *keep = cJSON_CreateArray();
+   if (!keep)
+      return;
+
+   /* compose emits either a JSON array or newline-delimited objects. */
+   int recognized = 0;
+   cJSON *arr = cJSON_Parse(trimmed);
+   if (arr && cJSON_IsArray(arr))
+   {
+      recognized = 1;
+      cJSON *it = NULL;
+      cJSON_ArrayForEach(it, arr)
+      {
+         const cJSON *l = cJSON_GetObjectItemCaseSensitive(it, "Labels");
+         if (cJSON_IsString(l) && l->valuestring && strstr(l->valuestring, want))
+            cJSON_AddItemToArray(keep, cJSON_Duplicate(it, 1));
+      }
+   }
+   else
+   {
+      char *copy = strdup(trimmed);
+      if (copy)
+      {
+         /* Recognized only once a line actually parses. Marking the shape valid
+          * up front turns unparseable output into an empty array — reporting a
+          * torn-down stack for one this code simply could not read. */
+         for (char *p = copy; p && *p;)
+         {
+            char *nl = strchr(p, '\n');
+            if (nl)
+               *nl = '\0';
+            if (*p)
+            {
+               cJSON *o = cJSON_Parse(p);
+               if (o)
+               {
+                  recognized = 1;
+                  const cJSON *l = cJSON_GetObjectItemCaseSensitive(o, "Labels");
+                  if (cJSON_IsString(l) && l->valuestring && strstr(l->valuestring, want))
+                     cJSON_AddItemToArray(keep, cJSON_Duplicate(o, 1));
+                  cJSON_Delete(o);
+               }
+            }
+            p = nl ? nl + 1 : NULL;
+         }
+         free(copy);
+      }
+   }
+   cJSON_Delete(arr);
+
+   if (recognized)
+   {
+      char *s = cJSON_PrintUnformatted(keep);
+      /* Only replace when the result fits; a truncated array would not parse. */
+      if (s && strlen(s) < ps_cap)
+         snprintf(ps, ps_cap, "%s", s);
+      free(s);
+   }
+   cJSON_Delete(keep);
+}
+
 int deploy_apply_status(char *out, size_t out_cap, int *exit_code)
 {
    char file[512];
@@ -818,5 +951,7 @@ int deploy_apply_status(char *out, size_t out_cap, int *exit_code)
    char **envp = build_deploy_envp(NULL, 0, NULL, NULL, NULL);
    int rc = run_capture(argv, envp, out, out_cap, exit_code);
    free_envp(envp);
+   if (rc == 0 && exit_code && *exit_code == 0)
+      deploy_filter_managed_ps(out, out_cap, file);
    return rc;
 }

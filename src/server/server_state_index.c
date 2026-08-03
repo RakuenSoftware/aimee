@@ -4,7 +4,8 @@
 #include "server.h"
 #include "aimee.h"
 #include "kb_client.h"
-#include "workspace.h"
+#include "log.h" /* aimee_log — name the real KB failure in the server log */
+#include <aimee/workspace/workspace.h>
 #include "cJSON.h"
 #include "json_fluent.h"
 
@@ -50,7 +51,7 @@ int handle_index_find(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       {
          const char *cwd = jo_str(req, "cwd", NULL);
          if (cwd)
-            (void)workspace_repo_identity(cwd, project, sizeof(project), NULL, 0);
+            (void)server_active_project_from_cwd(cwd, project, sizeof(project));
       }
    }
    else if (project_arg && project_arg[0])
@@ -58,7 +59,7 @@ int handle_index_find(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    else
    {
       const char *cwd = jo_str(req, "cwd", NULL);
-      if (!cwd || workspace_repo_identity(cwd, project, sizeof(project), NULL, 0) != 0)
+      if (!cwd || server_active_project_from_cwd(cwd, project, sizeof(project)) != 0)
          return server_send_error(
              conn, "scope_required: no active project; pass --scope all explicitly", NULL);
    }
@@ -66,8 +67,18 @@ int handle_index_find(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    term_hit_t hits[128];
    int count = kb_client_index_find_scoped(project, all_projects, identifier, hits, 128);
    if (count < 0)
-      return send_and_free(conn,
-                           kb_last_result_object("knowledge service symbol index unavailable"));
+   {
+      /* Same misattribution as the MCP twin: say which dependency failed, and
+       * leave a log line so a healthy kb is not the first thing suspected. */
+      aimee_log(LOG_WARN, "index.find",
+                "index_find_scoped failed: status=%s project=%s all_projects=%d",
+                kb_client_result_status_name(kb_client_last_result_status()),
+                project[0] ? project : "(none)", all_projects);
+      return send_and_free(
+          conn, kb_last_result_object("code index lookup failed; see result_status for whether the "
+                                      "knowledge service was unreachable, unauthorized, or the "
+                                      "scope did not resolve"));
+   }
 
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "result_status", count > 0 ? "ok" : "empty");
@@ -121,7 +132,7 @@ int handle_index_blast_radius(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    if (!project || !project[0])
    {
       const char *cwd = jo_str(req, "cwd", NULL);
-      if (!cwd || workspace_repo_identity(cwd, project_buf, sizeof(project_buf), NULL, 0) != 0)
+      if (!cwd || server_active_project_from_cwd(cwd, project_buf, sizeof(project_buf)) != 0)
          return server_send_error(conn, "scope_required: no active project", NULL);
       project = project_buf;
    }
@@ -162,7 +173,7 @@ int handle_index_structure(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!project || !project[0])
    {
       const char *cwd = jo_str(req, "cwd", NULL);
-      if (!cwd || workspace_repo_identity(cwd, project_buf, sizeof(project_buf), NULL, 0) != 0)
+      if (!cwd || server_active_project_from_cwd(cwd, project_buf, sizeof(project_buf)) != 0)
          return server_send_error(conn, "scope_required: no active project", NULL);
       project = project_buf;
    }
@@ -205,14 +216,14 @@ int handle_index_find_callers(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
       if (!project || !project[0])
       {
          const char *cwd = jo_str(req, "cwd", NULL);
-         if (cwd && workspace_repo_identity(cwd, project_buf, sizeof(project_buf), NULL, 0) == 0)
+         if (cwd && server_active_project_from_cwd(cwd, project_buf, sizeof(project_buf)) == 0)
             project = project_buf;
       }
    }
    else if (!project || !project[0])
    {
       const char *cwd = jo_str(req, "cwd", NULL);
-      if (!cwd || workspace_repo_identity(cwd, project_buf, sizeof(project_buf), NULL, 0) != 0)
+      if (!cwd || server_active_project_from_cwd(cwd, project_buf, sizeof(project_buf)) != 0)
          return server_send_error(
              conn, "scope_required: no active project; pass --scope all explicitly", NULL);
       project = project_buf;
@@ -280,40 +291,4 @@ int handle_index_deps(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!resp)
       return server_send_error(conn, "knowledge service did not return cross-repo deps", NULL);
    return send_and_free(conn, resp);
-}
-
-/* S7: repo.trust — proxy the cross-repo trust write to the kb. The server op is
- * gated by CAP_INDEX_ADMIN (method_registry), which over TCP is local/owner-only;
- * the kb re-checks the owner credential. Inputs are validated here so a bad value
- * never reaches the kb, and the kb HTTP status is mapped to a precise client error
- * (404 no-such-project, 403 forbidden) instead of a blanket 502. `actor` is
- * caller-asserted (single-tenant P1); a server-derived principal is a future
- * hardening. */
-int handle_repo_trust(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   (void)ctx;
-
-   const char *project;
-   if (jo_need_str(req, "project", &project) < 0 || !project[0])
-      return server_send_error(conn, "missing project", NULL);
-   const char *trust;
-   if (jo_need_str(req, "trust", &trust) < 0 ||
-       (strcmp(trust, "trusted") != 0 && strcmp(trust, "untrusted") != 0))
-      return server_send_error(conn, "trust must be 'trusted' or 'untrusted'", NULL);
-   const char *actor = jo_str(req, "actor", NULL);
-   const char *request_id = jo_str(req, "request_id", NULL);
-
-   int status = -1;
-   char *json = kb_client_repo_trust_json(project, trust, actor, request_id, &status);
-   cJSON *resp = json ? cJSON_Parse(json) : NULL;
-   free(json);
-   if (resp)
-      return send_and_free(conn, resp);
-   if (status == 404)
-      return server_send_error(conn, "no such project", NULL);
-   if (status == 403)
-      return server_send_error(conn, "forbidden: repo trust requires the owner credential", NULL);
-   if (status == 400)
-      return server_send_error(conn, "invalid trust request", NULL);
-   return server_send_error(conn, "knowledge service did not apply the trust change", NULL);
 }

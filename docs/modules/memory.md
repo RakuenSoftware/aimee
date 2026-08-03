@@ -23,8 +23,8 @@ tests, and this document; it sets `ownership_complete: true`. All twelve headers
 five carry no paired source (`memory_assemble_util.h`, `memory_core_internal.h`, `memory_ontology.h`,
 `memory_platform.h`, `memory_rewrite_llm.h`), the highest unpaired count in the module graph. Make
 compiles all thirty-two sources; CMake compiles nineteen, omitting the memory-core CRUD, search, tiers
-and scope family, extraction, the fact and PII gates, graph fusion, and the gateway stage — the
-server/kb-side units — the same intentional thin-client boundary recorded for the earlier modules.
+and scope family, extraction, the fact and PII gates, graph fusion, and the gateway stage. These
+server/KB-side units follow the same intentional thin-client boundary recorded for the earlier modules.
 `docs/validation/core-modularization-slice-56.md` records the declaration audit and
 `docs/validation/core-modularization-slice-57.md` the completeness audit; the two were split so the
 latch reviews declarations merged on their own first. Adding a new module-local source or module-root
@@ -45,6 +45,10 @@ Memory is ready only when durable storage can open and the configured embedding 
 dimension; semantic ranking additionally requires the reranking path selected by `config_t`.
 Lexical fallbacks may preserve a degraded lookup journey, but they do not make a deployment compliant
 with the required embedding-and-reranking capability boundary.
+
+Reranking here is `kb_ranker`, a linear in-process stage over lexical, dense and recency features. It
+is not a model role and needs no endpoint: the cross-encoder reranker was measured out of the stack.
+Embedding is the only model this module requires. See [Local inference](../LOCAL_INFERENCE.md).
 
 ## Configuration and activation
 
@@ -89,7 +93,7 @@ The descriptor's sixteen direct tests are `test_memory.c`, `test_memory_advanced
 `test_memory_filter.c`, `test_memory_health.c`, `test_memory_lanes.c`, `test_memory_profiles.c`,
 `test_memory_provider.c`, `test_memory_ranker_boundary.c`, `test_memory_recall_pivot.c`,
 `test_memory_redirect.c`, `test_memory_retrieval_eval.c`, `test_gw_stage_memory.c`, and
-`test_workspace_memory.c` — the last claimed here because its subject `memory_auto_tag_workspace` is
+`test_workspace_memory.c`. The last is claimed here because its subject `memory_auto_tag_workspace` is
 defined in `memory_core.c`, which is why slice 44 excluded it from workspace.
 
 The `memory` name collides in two directions, so a `*memory*` filename is not an ownership signal.

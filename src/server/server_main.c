@@ -1,18 +1,18 @@
 /* server_main.c: aimee-server entry point -- socket lifecycle, signal handling */
 #include "aimee.h"
-#include "agent_tools.h"
+#include <aimee/tools/agent_tools.h>
 #include "cli_client.h"
 #include "commands.h"
 #include "config.h"
 #include "config_sections.h"
 #include "forge_app_token.h"
-#include "forge_credentials.h"
-#include "git_host_cred.h"
-#include "git_host_resolve.h"
-#include "git_forge_vault.h"
-#include "git_ops.h"
+#include "modules/git/forge_credentials.h"
+#include "modules/git/git_host_cred.h"
+#include "modules/git/git_host_resolve.h"
+#include "modules/git/git_forge_vault.h"
+#include <aimee/git/git_ops.h>
 #include "guardrails.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include "kb_client_cache.h"
 #include "kb_client_mtls.h"
 #include "kb_client_ws.h"
@@ -44,6 +44,10 @@
 #include "sandbox_audit_bridge.h" /* route sandbox degraded-isolation events onto the audit bus */
 #include "memory_audit_bridge.h"  /* route server-side memory mutations onto the audit bus */
 #include "tool_completion_audit_bridge.h" /* route tool-dispatch outcomes onto the audit bus */
+#include "obs_bus_adapter.h"              /* bind shared bus events to server-owned durable sinks */
+#include "module_routing_adapter.h"       /* route selection through the local routing process */
+#include "module_stage_adapters.h"        /* process-owned stage decisions */
+#include <aimee/audit/obs_bus.h>
 #include <aimee/audit/audit_replay.h> /* --audit-replay: inspect a governed-action capture file */
 #include <signal.h>
 #include <errno.h>
@@ -170,6 +174,14 @@ static int run_server(const char *socket_path, log_level_t log_level)
    /* Initialize logging */
    log_init(log_level);
    audit_log_open();
+   if (server_obs_bus_configure() != 0)
+      LOG_WARN("obs_bus", "shared event bus was already started before server sink configuration");
+   if (obs_bus_configure_daemon_module_runtime("server", config_default_dir()) != 0)
+   {
+      startup_notify(notify_fd, "error: invalid server module-bus path configuration\n");
+      audit_log_close();
+      return 1;
+   }
    audit_ensure_key();             /* provision the per-action audit key (best-effort) */
    vault_audit_bridge_install();   /* route vault credential-access events onto the audit bus */
    sandbox_audit_bridge_install(); /* route sandbox degraded-isolation events onto the audit bus */
@@ -317,6 +329,17 @@ static int run_server(const char *socket_path, log_level_t log_level)
    if (!socket_path)
       socket_path = cli_default_socket_path();
 
+   if (obs_bus_start() != 0)
+   {
+      startup_notify(notify_fd, "error: server module bus failed to start\n");
+      agent_http_cleanup();
+      mcp_client_registry_shutdown();
+      audit_log_close();
+      return 1;
+   }
+   server_module_routing_configure();
+   server_module_stage_adapters_configure();
+
    /* Initialize server first — creates the Unix socket so clients can connect
     * (and queue in the listen backlog) while HTTP/SSL initializes. */
    if (server_init(&g_ctx, socket_path) != 0)
@@ -329,6 +352,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
       else
          snprintf(msg, sizeof(msg), "error: server initialization failed\n");
       startup_notify(notify_fd, msg);
+      obs_bus_stop();
       return 1;
    }
 
@@ -384,6 +408,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
       server_shutdown(&g_ctx);
       agent_http_cleanup();
       mcp_client_registry_shutdown();
+      obs_bus_stop();
       audit_log_close();
       return 1;
    }
@@ -407,6 +432,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
    (void)shutdown_forensics_mark_stopped("server", getpid());
    agent_http_cleanup();
    mcp_client_registry_shutdown();
+   obs_bus_stop();
    audit_log_close();
 
    return rc < 0 ? 1 : 0;

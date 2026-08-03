@@ -49,9 +49,9 @@
 #include "server_http.h"
 #include "provider_catalog.h"
 #include "role_templates.h"
-#include "workspace.h"
-#include "workspace_provider.h"
-#include "workspace_turn.h"
+#include <aimee/workspace/workspace.h>
+#include "modules/workspace/workspace_provider.h"
+#include "modules/workspace/workspace_turn.h"
 #include "cJSON.h"
 #include "dstr.h"
 

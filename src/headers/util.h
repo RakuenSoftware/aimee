@@ -280,6 +280,14 @@ char *run_cmd(const char *cmd, int *exit_code);
  * thread-local run_cmd CWD. Caller frees the returned buffer. */
 char *run_cmd_env(const char *cmd, char *const envp[], int *exit_code);
 
+/* Like run_cmd_env, but additionally hands the child ONE inherited descriptor at
+ * a fixed number: pass_fd is dup2'd onto target_fd before exec (which clears
+ * CLOEXEC on the copy, so it survives). Used to deliver a credential memfd the
+ * GIT_ASKPASS shim reads via /proc/self/fd, so a token never enters the child's
+ * environment. pass_fd < 0 or target_fd < 0 passes nothing. */
+char *run_cmd_env_fd(const char *cmd, char *const envp[], int *exit_code, int pass_fd,
+                     int target_fd);
+
 /* Set (or clear with NULL) the working directory for run_cmd() on this thread.
  * Thread-safe: each thread has its own value. Use instead of chdir() in server
  * pool threads so concurrent sessions do not race on the process-global CWD. */

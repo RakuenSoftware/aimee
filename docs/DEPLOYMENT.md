@@ -18,8 +18,14 @@ boundary.
 docker compose -f deploy/compose/aimee.yaml up -d
 ```
 
-Server, KB, and inference are declared together and no browser action needs to create them. This is
-the safer default when the server must not control Docker.
+Server and one KB are declared together, and no browser action needs to create them. The KB owns its
+embedding and synthesis role placements. Each role can run inside the KB container or use a remote
+endpoint supported by the selected profile. There is no separate inference service. This is the
+safer default when the server must not control Docker.
+
+The one-KB Compose files are deployment profiles, not the fleet limit. The target architecture can
+route among several KB containers with explicit corpus, authority, and capability identity. Fleet
+routing is not integrated in this checkout; see [KB fleet and model placement](KB_FLEET.md).
 
 ## External PostgreSQL
 
@@ -28,9 +34,9 @@ disposable container, then remove it before creating the long-lived service:
 
 ```bash
 export AIMEE_DB2_URL='postgresql://...'
-./scripts/aimee-compose-vault-bootstrap.sh -f compose.yaml kb
+./scripts/aimee-compose-vault-bootstrap.sh -f deploy/compose/aimee.yaml kb
 unset AIMEE_DB2_URL
-docker compose -f compose.yaml up -d
+docker compose -f deploy/compose/aimee.yaml up -d
 ```
 
 The operator owns:
@@ -47,12 +53,10 @@ them synchronously, and exits before the service is created.
 
 ## Inference
 
-The KB embeds in-process from weights baked into its image, so embedding needs no second container
-and no model download. Select the embedder in the wizard's Deploy topology step, or set
-`embedding_model`; point `AIMEE_EMBEDDER_URL` at your own endpoint for a wider model.
-
-Synthesis is external-only. `AIMEE_LLM_URL` defaults empty, so a deployment that wants synthesis
-supplies its own endpoint.
+Embedding and synthesis belong to the KB that serves the request. A role can run inside its KB
+container or use a remote endpoint. Internal availability depends on the KB image and profile;
+remote placement needs an explicit endpoint and credential. No standalone inference container is
+part of either topology.
 
 The KB must report explicit degradation when a configured inference stage is unavailable. It cannot
 claim a dense or synthesized result after silently skipping that stage.
@@ -66,10 +70,10 @@ Use the compose files and generated configuration as the source of truth. Typica
 | browser | 8443 | user network, HTTPS |
 | server `/v1` | 8743 | enrolled clients only |
 | KB `/v1` | 8741 | deployment network only |
-| inference | 8742 | deployment network only |
+| remote model endpoint | provider-defined | deployment network only |
 
-Do not publish PostgreSQL or inference ports unless a separate host needs them. Apply TLS and service
-identity before crossing a trusted container network.
+Do not publish PostgreSQL or a remote model endpoint unless a separate host needs it. Apply TLS and
+service identity before crossing a trusted container network.
 
 ## Volumes and backup
 

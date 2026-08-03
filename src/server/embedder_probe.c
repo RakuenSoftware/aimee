@@ -6,8 +6,8 @@
 #include "aimee.h" /* EMBED_MAX_DIM + memory.h prerequisites */
 #include "lifecycle.h"
 #include "log.h"
-#include "memory.h"               /* memory_embed_text — in-process HTTP probe */
-#include "memory_core_internal.h" /* memory_embed_command_is_http */
+#include "memory.h"                              /* memory_embed_text — in-process HTTP probe */
+#include "modules/memory/memory_core_internal.h" /* memory_embed_command_is_http */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,7 +33,7 @@ static int probe_once(void)
    if (!g_embed_cmd[0])
       return -1;
    /* An http(s):// "command" is the in-process embed transport (the combined /
-    * unified-container deployments export AIMEE_LLM_URL and set no sidecar
+    * unified-container deployments export SYNTHESIS_ENDPOINT and set no sidecar
     * command) — there is nothing to exec, and popen would fork
     * `sh -c "http://... --dim"` forever. Probe by embedding a short text and
     * taking the vector's length: transport-exact, and independent of whether
@@ -114,7 +114,7 @@ static int embedder_probe_run(int *out_dim, int budget_ms, char *err, size_t err
  * waited for readiness, so in practice the first read succeeds; the window only covers a
  * restart where no dim probe runs because the dim is already recorded. Exhausting it
  * leaves the guard inactive for this start rather than holding the kb down. */
-#define SERVING_PROBE_BUDGET_MS 60000
+#define SERVING_PROBE_BUDGET_MS   60000
 #define SERVING_PROBE_INTERVAL_MS 2000
 
 static int embedder_probe_serving_id(char *out, size_t out_len, char *err, size_t errlen)
@@ -153,9 +153,18 @@ void embedder_probe_register(const char *embed_command)
       return;
    }
    snprintf(g_embed_cmd, sizeof(g_embed_cmd), "%s", embed_command);
+
    /* Registered, not called: the identity is fetched inside db2_init, once the embedder
-    * has had the dim probe's patience applied to it. */
+    * has had the dim probe's patience applied to it. Both probes register for whatever
+    * embedder is configured — the module that knows what each probe requires owns the
+    * decision, not its caller.
+    *
+    * This used to carry a case for a builtin lexical embedder, which served when none
+    * was configured. It is gone: an unconfigured kb now refuses to start rather than
+    * answering searches with keyword matching and claiming the corpus's vector space
+    * while it does so. */
    db2_set_embedder_serving_probe(embedder_probe_serving_id);
+
    const char *env = getenv("AIMEE_DIM_PROBE_BUDGET_MS");
    if (env && env[0])
    {

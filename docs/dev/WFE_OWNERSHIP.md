@@ -14,31 +14,24 @@ defaults to `go` and any other value fails startup.
 | Agent roster, sealed credential storage/resolution, delegate execution, and roundtable runs | C resource plane, consumed by Go |
 | Non-WFE chat, memory, workspace, and administrative APIs | Existing service owners |
 
-The C HTTP dispatcher returns `410 Gone` for every WFE lifecycle endpoint even
-if it is reached directly. The C process does not register or start its former
-workflow executor or scheduler. Its remaining workflow-named source files are
-retirement debt only; they are not a supported runtime path and can be deleted
-incrementally as their non-lifecycle helpers are moved behind the Go resource
-client.
+The C HTTP dispatcher proxies supported WFE requests to the Go Unix socket. Retired lifecycle
+endpoints return `410 Gone` if reached directly. The C process does not start its former workflow
+executor or scheduler. Its remaining workflow-named source files are retirement debt, not a supported
+runtime path.
 
-The local-only `/v1/internal/forge/execute` resource route is the credential
-boundary between those planes. It accepts only a small typed set of mechanical
-forge operations from a kernel-attested Unix-socket peer. C confines the path to
-the direct-child managed WFE worktree root, derives repository identity from
-the worktree's Git common directory, confines that repository to the
-process-lifetime-canonicalized workspace root, and requires the checked-out branch to
-match the work-item ID and managed feature/slice namespace. Push uses an
-explicit canonical HTTPS destination and refspec under a minimal environment;
-feature final-PR base validation uses GitHub's authoritative `default_branch`,
-not the checkout-mutable `origin/HEAD`; slice IDs use the exact Go-generated
-`<root>.s<10-hex>.g<generation>.<index>` shape, are confined to the `aimee/wi/`
-namespace, and target the exact parent feature branch derived from that ID.
-Root IDs are confined to `aimee/feat/`. The request schema rejects unknown or duplicate fields and
-operation/field combinations that are not meaningful for the selected action,
-including caller-supplied repository identity. C applies the shared vault
-resolution ladder without returning credential material. It does not read DB1,
-choose an operation, interpret a workflow, or advance a transition. Go owns
-those decisions and every resulting lifecycle transition.
+The local-only `/v1/internal/forge/execute` route is the credential boundary between those planes. It
+accepts a small set of typed forge operations from a kernel-attested Unix-socket peer. C confines the
+path to the managed WFE worktree root, derives repository identity from Git, and requires the checked
+out branch to match the work-item ID and managed feature or slice namespace.
+
+Push uses an explicit HTTPS destination and refspec under a minimal environment. A final feature PR
+targets the branch checked out when Go admitted the repository. A slice targets the exact parent
+feature branch derived from its Go-generated `<root>.s<10hex>.g<generation>.<index>` ID. The request
+schema rejects unknown fields, duplicate fields, invalid operation combinations, and caller-supplied
+repository identity.
+
+C resolves credentials without returning them. It does not read workflow state, choose an operation,
+interpret a graph, or advance a transition. Go owns those decisions and their lifecycle evidence.
 
 The Go ID generator is `native_runner.go`'s foreach fan-out. At the mechanical
 boundary, `wfe_item_id_valid` mirrors that grammar and

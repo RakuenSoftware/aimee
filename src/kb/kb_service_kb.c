@@ -25,7 +25,7 @@
 #include "kb_service.h"
 #include "kb_service_kb.h"
 #include "log.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -253,28 +253,35 @@ char *kb_service_ingest_status_json(void)
    return json;
 }
 
-/* Add a per-tier provider sub-object {configured, base_url, model} (no api_key). */
-static void kb_health_add_curator_tier(cJSON *curator, const char *key, kb_curator_stage_t stage)
+/* The synthesis provider sub-object {configured, base_url, model} (no api_key). */
+static void kb_health_add_curator_provider(cJSON *curator)
 {
-   cJSON *t = cJSON_AddObjectToObject(curator, key);
+   cJSON *t = cJSON_AddObjectToObject(curator, "synthesis");
    if (!t)
       return;
    provider_def_owned_t def;
-   int configured = kb_curator_provider_for_stage(stage, &def);
+   /* Any stage resolves the same provider now, so the stage passed here is not a
+    * choice — it only has to be a real one. */
+   int configured = kb_curator_provider_for_stage(KB_CURATOR_STAGE_EXTRACT_DOCS, &def);
    cJSON_AddBoolToObject(t, "configured", configured);
    cJSON_AddStringToObject(t, "base_url", configured && def.def.base_url ? def.def.base_url : "");
    cJSON_AddStringToObject(t, "model", configured && def.def.model ? def.def.model : "");
 }
 
-/* Curator observability block for /v1/health (§4): which tiers have a provider
- * (Tier-A extract/index, Tier-B reason/judge) and the curator queue depth. */
+/* Curator observability block for /v1/health (§4): the synthesis provider and the
+ * curator queue depth.
+ *
+ * ONE provider, not two. This used to report "tier_a" and "tier_b" separately,
+ * from when extract/index ran on a small model and reason/judge on a capable one.
+ * There are no tiers any more — every stage resolves the same provider — so the
+ * two keys had become the same values under two names, which reads as a
+ * configuration an operator could change and cannot. */
 static void kb_health_add_curator(cJSON *resp, kb_curator_queue_counts_t *out_counts)
 {
    cJSON *curator = cJSON_AddObjectToObject(resp, "curator");
    if (!curator)
       return;
-   kb_health_add_curator_tier(curator, "tier_a", KB_CURATOR_STAGE_EXTRACT_DOCS);
-   kb_health_add_curator_tier(curator, "tier_b", KB_CURATOR_STAGE_JUDGE);
+   kb_health_add_curator_provider(curator);
 
    kb_curator_queue_counts_t qc;
    kb_curator_queue_counts(&qc);
@@ -336,13 +343,13 @@ static cJSON *kb_service_health_object(void)
    cJSON_AddNumberToObject(resp, "pgvec_indexed_vectors", pgvec_indexed);
 
    /* Embed: report whether an embedder is configured. The command can come from
-    * the config file OR the AIMEE_EMBEDDER_URL env (the deploy stack exports the
+    * the config file OR the EMBEDDER_URL env (the deploy stack exports the
     * latter), so resolve it the same way embed_command does instead of reading the
     * raw config field — otherwise an env-configured embedder is wrongly reported
-    * embed_ok:false while embed_command shows a real URL. The "builtin" fallback
-    * (nothing configured) still reports false, as before. */
-   const char *embed_cmd = config_embedding_command_current(NULL);
-   int embed_ok = (embed_cmd[0] && strcmp(embed_cmd, "builtin") != 0) ? 1 : 0;
+    * embed_ok:false while embed_command shows a real URL. Nothing configured
+    * reports false — there is no fallback to report instead. */
+   const char *embed_cmd = config_embedder_command_current(NULL);
+   int embed_ok = embed_cmd[0] ? 1 : 0;
    cJSON_AddBoolToObject(resp, "embed_ok", embed_ok);
    cJSON_AddStringToObject(resp, "embed_command", embed_cmd);
 
@@ -434,6 +441,62 @@ static cJSON *kb_service_health_object(void)
    if (stats.chunks > 0 && stats.embeddings < stats.chunks * 9 / 10)
       cJSON_AddItemToArray(warnings,
                            cJSON_CreateString("KB has significant unembedded chunks (>10%)"));
+
+   /* AN EMBEDDER OF THE WRONG WIDTH IS A DEAD KB THAT REPORTS OK.
+    *
+    * The upsert guard in pgvec_transport.c already refuses a mismatched vector and
+    * counts it, and its comment says non-zero "means every vector since startup was
+    * dropped and dense retrieval is dead, however healthy the rest of this response
+    * looks". The count was published and nothing escalated it, so the response kept
+    * saying status ok with an empty warnings array.
+    *
+    * Measured on CT 302: booting the nomic image (768) over a store recorded at 384
+    * gave a running container, /v1/health "status":"ok", "embed_ok":true,
+    * "warnings":[], and a memory store that failed with "failed to store memory" and
+    * no mention of a dimension anywhere. Nothing was corrupted -- the guard held, and
+    * no 768 vector landed beside the 384s -- but nothing said the kb could no longer
+    * embed, which is the whole of what an operator needed to know.
+    *
+    * Reported two ways on purpose:
+    *
+    *   refused > 0   proof it has already happened, with both widths, so an operator
+    *                 does not have to infer which side is wrong
+    *   width drift   BEFORE anything tries. The counter starts at zero after every
+    *                 restart, so a freshly switched embedder looks perfectly healthy
+    *                 until the first write -- which is exactly when someone is
+    *                 checking whether the switch worked.
+    *
+    * The remedy is named because it is not guessable: the corpus has to be re-embedded
+    * at the new width, and `aimee kb reembed` is the command that does it. */
+   /* NO PROACTIVE WIDTH CHECK HERE, having written one and deleted it.
+    *
+    * The obvious version compares db2_embedding_dim() against kb_meta's
+    * schema_embedding_dim. It cannot fire: both resolve to the RECORDED width, so it
+    * agrees with itself. Booting the nomic image (768) over a 384 store leaves both
+    * reading 384 while the embedder reports dim 768 on its own /health -- I shipped
+    * that check, watched it stay silent against exactly the deployment it was written
+    * for, and removed it. A guard that cannot fire is worse than an absent one,
+    * because it reads like cover.
+    *
+    * The serving width is only knowable by asking the embedder: its /health carries
+    * "dim" and a serving_id. Doing that needs a bounded probe so this path never
+    * blocks -- the same requirement already deferred for the curator reachability
+    * probe above -- and it becomes natural rather than bolted-on once the embedder is
+    * a sidecar with a health endpoint of its own
+    * (docs/proposals/pending/embedder-image-split-and-rebuild.md).
+    *
+    * So the refusal counter is the signal until then. It is reactive, and it is true. */
+   int active_dim = db2_embedding_dim();
+   if (dim_refused > 0)
+   {
+      char msg[320];
+      snprintf(msg, sizeof(msg),
+               "embedder width mismatch: %lld vector(s) refused (offered %d, store is %d). "
+               "Dense retrieval is dead until the corpus is re-embedded at the new width "
+               "(`aimee kb reembed`).",
+               dim_refused, db2_embedding_dim_last_offered(), active_dim);
+      cJSON_AddItemToArray(warnings, cJSON_CreateString(msg));
+   }
 
    /* Maintenance stats */
    char last_maintenance_at[64] = "";

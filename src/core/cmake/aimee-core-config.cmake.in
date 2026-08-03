@@ -1,0 +1,14 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+if(@AIMEE_CORE_CONFIG_NEEDS_OPENSSL@)
+    find_dependency(OpenSSL)
+endif()
+if(@AIMEE_CORE_EVENT_BUS_ENABLED@)
+    find_dependency(Threads)
+endif()
+
+set(AIMEE_CORE_NATIVE_TLS_ENABLED @AIMEE_CORE_WITH_NATIVE_TLS@)
+set(AIMEE_CORE_EVENT_BUS_ENABLED @AIMEE_CORE_EVENT_BUS_ENABLED@)
+
+include("${CMAKE_CURRENT_LIST_DIR}/aimee-core-targets.cmake")

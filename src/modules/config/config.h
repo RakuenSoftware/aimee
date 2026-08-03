@@ -340,10 +340,18 @@ typedef struct config
    char openai_key_cmd[512];  /* command that prints the API key */
 
    /* Embedding command: piped text on stdin, returns JSON float array on stdout */
-   char embedding_command[512];
-   char embedding_model[128];
-   char embedding_endpoint[512];
-   int embedding_dim;
+   /* Embedder. Empty embedder_url means the in-container embedder baked into
+    * this image variant (bekko-a25m 384, or nomic-v2 768); a non-empty URL is an
+    * operator-run endpoint, whose width may be anything up to EMBED_MAX_DIM —
+    * 4000, which is the DB2 column ceiling, not 4096.
+    *
+    * embedder_dims is a ONE-WAY DOOR once anything has been embedded: DB2
+    * records the vector-column width and refuses startup on drift. */
+   char embedder_command[512];
+   char embedder_model[128];
+   char embedder_url[512];
+   char embedder_api_key[256];
+   int embedder_dims;
    char memory_weight_profile[512];
    char memory_rerank_mode[16];
    int memory_maintenance_trigger_inserts;
@@ -1481,8 +1489,13 @@ typedef struct config
     * process-memory view of the same Vault record as kb_api_bearer_token and is
     * never serialized to aimee.yaml.
     * Distinct from kb_api_bearer_token above, which is the LOCAL kb server's
-    * inbound-auth token. AIMEE_KB_API_BEARER_TOKEN is accepted only as
-    * first-boot transport, then synchronously sealed and scrubbed before the
+    * inbound-auth token, and NO LONGER required to equal it: set
+    * AIMEE_KB_CLIENT_BEARER_TOKEN to a scoped `service` credential
+    * (scope:service:<name>:<secret>) so aimee-server reaches every project's
+    * data while remaining refused by aimee-kb's administrative routes. When it
+    * is unset, AIMEE_KB_API_BEARER_TOKEN is used as before — which makes
+    * aimee-server the install owner on aimee-kb. Either variable is accepted
+    * only as first-boot transport, then synchronously sealed and scrubbed before the
     * long-lived process starts. */
    char kb_client_url[CONFIG_DB2_URL_LEN];
    char kb_client_bearer_token[256];
@@ -1497,25 +1510,56 @@ typedef struct config
     *              NOTHING is deployed locally (no kb, no llm).
     *   "local"  — run a local aimee-kb and deploy the per-role LLM backends below.
     *
-    * The EMBEDDER is served by the kb itself; llm_embed_backend only chooses between
-    * in-container ("local") and an operator endpoint ("external",
-    * embedding_endpoint). An unset embedding_dim (0) is derived from the selected
-    * model. SYNTH is external (llm_synth_endpoint), local at llm_synth_tier on
-    * llm_synth_host / _gpu, or off. */
+    * The EMBEDDER is served by the kb itself unless embedder_url points at an
+    * operator endpoint. An unset embedder_dims (0) is derived from the selected
+    * model. SYNTHESIS is whatever answers synthesis_endpoint. */
    char kb_mode[16]; /* "" | "local" | "remote" */
 
-   /* "" | "local" (in-container, the default) | "external" (embedding_endpoint).
-    * There is no host/gpu/tier here any more: those placed the retired aimee-llm
-    * container, and the kb now serves the selected embedder itself. */
-   char llm_embed_backend[16];
+   /* Does THIS IMAGE bundle llama.cpp? "1" on the aimee-kb-*-llm variants, "0" or
+    * empty otherwise. Set as ENV by the Dockerfile in every variant, so it is a
+    * fact about the running image rather than a preference. The setup wizard reads
+    * it: offering "run gemma-4 locally" on an image with no llama.cpp is an option
+    * that cannot work, and the failure would only surface later as synthesis
+    * silently never starting. Absent reads as NOT bundled. */
+   char aimee_with_llamacpp[8];
 
+   /* WHICH synthesis model this image bakes: "gemma-4-E2B-it", "gemma-4-E4B-it",
+    * or empty on a non-llm variant. Set as ENV by the Dockerfile, like
+    * aimee_with_llamacpp — a fact about the image, not a preference.
+    *
+    * The wizard needs it because the model is no longer a runtime choice: an image
+    * carries one, so the UI reports what it has instead of offering a menu it
+    * cannot honour. Same shape as the embedder, and for the same reason. */
+   char aimee_synthesis_model[64];
 
-   char llm_synth_backend[16]; /* "" | "external" | "local" | "off" */
-   char llm_synth_host[128];
-   char llm_synth_gpu[64];
-   char llm_synth_tier[16];
-   char llm_synth_endpoint[512];
-   char llm_synth_model[128];
+   /* Synthesis. ONE endpoint, whether the model is bundled or remote: an
+    * aimee-kb *-llm image variant runs gemma-4-E2B-it or gemma-4-E4B-it on the
+    * same host as the kb, so "local" is just a 127.0.0.1 URL and needs no
+    * separate variable. Empty means synthesis is OFF, which is a supported
+    * state — embedding, search, recall and indexing never call this endpoint.
+    *
+    * Retired together with the aimee-llm container: llm_embed_backend,
+    * llm_synth_backend, llm_synth_host, llm_synth_gpu, llm_synth_tier. Those
+    * chose where to place a separate inference container; the aimee-kb image
+    * variant now encodes that choice, so selecting it at runtime is meaningless.
+    * They could also disagree with the fields they gated: backend="external"
+    * with an empty URL emitted nothing and failed silently. */
+   char synthesis_endpoint[512];
+   char synthesis_model[128];
+   char synthesis_api_key[256];
+
+   /* Let the synthesis model think (default ON, and global rather than per-stage).
+    * It measured positive-to-neutral everywhere it was tried: on the 69-note
+    * extraction set the default model gains 0.084 F1 with thinking on, 95% CI
+    * [+0.0094,+0.1712] by paired bootstrap (docs/SYNTHESIS_MODELS.md).
+    *
+    * This was previously not a setting at all — it was implied by the stage's tier,
+    * suppressed for the mechanical stages because a reasoning pass can consume the
+    * output budget and truncate the JSON answer. That risk is bounded by
+    * MF_LLM_OUT_CAP, and it is the operator's call, so it is one switch here rather
+    * than a rule baked into the stage table. Turn it off if you point synthesis at a
+    * model that reasons to the cap without answering. */
+   int synthesis_thinking;
 
    /* aimee-server public HTTP API (aimee.api.*). The /v1 surface is always
     * served over the UDS (aimee-http.sock, filesystem-permission auth, no
@@ -1941,9 +1985,6 @@ typedef struct config
    char kb_curator_provider_base_url[256];
    char kb_curator_provider_model[128];
    char kb_curator_provider_api_key[256];
-   char kb_curator_tier_b_base_url[256];
-   char kb_curator_tier_b_model[128];
-   char kb_curator_tier_b_api_key[256];
    /* judge_command: LLM sidecar that adjudicates the resolve_entities
     * [0.70, 0.85) ambiguous band (same_entity? merge : create). Empty = off;
     * with no judge configured, ambiguous mentions fall through to "create". */
@@ -2016,7 +2057,7 @@ typedef struct config
     * aux_default_model: model override for the default provider (empty = agent default).
     * aux_default_max_tokens: token cap for aux calls; 0 = use agent default.
     * aux_tasks: per-task provider/model/token overrides. */
-#define CONFIG_AUX_MAX_TASKS     16
+#define CONFIG_AUX_MAX_TASKS 16
    int aux_enabled;
    char aux_default_provider[64];
    char aux_default_model[128];
@@ -2441,22 +2482,22 @@ int config_sandbox_package_access_valid(const char *s);
 
 /* Resolve the embedding command actually used to embed text. Precedence:
  * a per-call `requested` command (e.g. from a request payload), then the
- * configured cfg->embedding_command, then "builtin". Either argument may be
+ * configured cfg->embedder_command, then "builtin". Either argument may be
  * NULL. "builtin" is a 384-dim deterministic hash that real halfvec(1024)/
  * (2560) columns reject, so it is only correct in a 384-dim shim/test setup;
  * every production path must carry a real embedder via config or request. This
  * is the single point of truth -- do not re-inline the ternary at call sites. */
-const char *config_embedding_command(const config_t *cfg, const char *requested);
+const char *config_embedder_command(const config_t *cfg, const char *requested);
 
-/* As config_embedding_command, but the caller never holds a config_t. Prefer
+/* As config_embedder_command, but the caller never holds a config_t. Prefer
  * this: materialising the ~750 KB struct to read one string is what overflowed
  * the stack in the memory-search path. Result is valid until the next call on
  * this thread. */
-const char *config_embedding_command_current(const char *requested);
+const char *config_embedder_command_current(const char *requested);
 
 /* The raw configured value, empty when unset — unlike the resolving form
  * above, which never returns empty. */
-const char *config_embedding_command_field(void);
+const char *config_embedder_command_field(void);
 
 /* Copy one element of a config array out. For callers that pass the whole
  * element onward (scheduler callbacks, the cron executor) rather than reading a

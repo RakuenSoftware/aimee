@@ -25,6 +25,71 @@ permissions:
   contents: read
 
 jobs:
+  # Keep the workflow itself unfiltered: GitHub leaves required checks pending
+  # when an entire workflow is skipped by a path filter. Job-level skips report
+  # success, so required checks remain mergeable for documentation-only PRs.
+  change-scope:
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+      # Separate from docs_only on purpose: see the documentation step below.
+      docs_changed: ${{ steps.classify.outputs.docs_changed }}
+    steps:
+      - uses: actions/checkout@v4
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 0
+      - name: Classify changed files
+        id: classify
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # Protected-branch pushes and manual runs always receive the full gate.
+          if [ "$EVENT_NAME" != pull_request ]; then
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            echo "docs_changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # This allowlist is intentionally narrow. Anything executable,
+          # generated from executable sources, or operational takes the full path.
+          docs_only=true
+          docs_changed=false
+          file_count=0
+          while IFS= read -r -d '' path; do
+            file_count=$((file_count + 1))
+            case "$path" in
+              README.md|CONTRIBUTING.md|MANUAL.md|OWNERS.md|docs/*.md|docs/images/*|docs/gen/*.json)
+                docs_changed=true
+                ;;
+              */README.md)
+                case "$path" in
+                  control-web/*|data/*|deploy/*|editors/*|runtime-web/*|scripts/*|server-go/*|src/*)
+                    docs_changed=true
+                    ;;
+                  *)
+                    docs_only=false
+                    ;;
+                esac
+                ;;
+              *)
+                docs_only=false
+                ;;
+            esac
+            printf '%s\n' "$path"
+          done < <(git diff --name-only -z "$BASE_SHA" "$HEAD_SHA" --)
+
+          # An empty or unclassifiable change set must take the conservative path.
+          if [ "$file_count" -eq 0 ]; then
+            docs_only=false
+          fi
+          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
+          echo "docs_changed=$docs_changed" >> "$GITHUB_OUTPUT"
+          echo "docs_only=$docs_only ($file_count changed file(s))"
+
   no-coauthor-trailers:
     # Standing directive: commits/PRs must never carry AI co-authorship trailers.
     # Scans only the PR's NEW commits (base..head), so existing history is
@@ -96,6 +161,8 @@ jobs:
           echo "no AI attribution in PR title/body — ok"
 
   lint:
+    needs: change-scope
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -109,6 +176,7 @@ jobs:
           df -h / | tail -1
           echo "::endgroup::"
       - name: Install clang-format
+        if: needs.change-scope.outputs.docs_only != 'true'
         run: |
           # GitHub runners preinstall third-party apt repos (e.g. packages.microsoft.com)
           # that intermittently serve invalid/unsigned metadata and fail `apt-get update`
@@ -118,13 +186,44 @@ jobs:
           i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
           sudo apt-get install -y -q clang-format-19 ripgrep
       - name: Check formatting
+        if: needs.change-scope.outputs.docs_only != 'true'
         run: cd src && make lint
       - name: Check 3db tier dependencies
+        if: needs.change-scope.outputs.docs_only != 'true'
         run: ./scripts/check_tier_deps.sh
       - name: Check managed authority packaging boundary
+        if: needs.change-scope.outputs.docs_only != 'true'
         run: python3 scripts/check-managed-authority-packaging.py
+      # Runs unconditionally: it costs no network and no build, and the thing it guards
+      # is the gating logic itself, which is exactly the part a conditional step cannot
+      # be trusted to check.
+      - name: Test the CI change classifier
+        run: python3 -I scripts/tests/test_ci_change_scope.py
+
+      # docs_CHANGED, not docs_only. Gated on docs_only, this never ran for a pull
+      # request that touched documentation AND anything else -- which is most of them,
+      # and is how six em-dash violations reached testing in #2280: that PR edited
+      # docs/SYNTHESIS_MODELS.md plus one frontend file, so it was not docs-only, this
+      # step was skipped, lint reported success, and the violation then failed every
+      # branch cut from testing afterwards. The next docs-only PR ran the check and
+      # inherited someone else's failure, which is the worst way to find out.
+      #
+      # docs-gen-check and `git diff --check` stay on docs_only: the first needs a build
+      # and the second is about whitespace in the diff, and both already run in the full
+      # gate that a non-docs-only PR takes.
+      - name: Check documentation
+        if: needs.change-scope.outputs.docs_changed == 'true'
+        run: python3 scripts/check-docs.py
+
+      - name: Check generated docs and diff hygiene
+        if: needs.change-scope.outputs.docs_only == 'true'
+        run: |
+          make -C src docs-gen-check
+          git diff --check
 
   build:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -178,6 +277,8 @@ jobs:
         run: python3 scripts/test-thin-client-remote-exclusive.py ./aimee
 
   build-integrity:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -202,10 +303,29 @@ jobs:
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev
       - name: Build integrity
-        run: cd src && make build-integrity
+        run: cd src && make -j"$(nproc)" build-integrity
 
-  unit-tests:
+      # The linker is what proves a capability is absent from what ships; a source
+      # grep only proves nothing calls it. These checks caught nothing by hand
+      # because they were only ever run by hand — see scripts/validate-aimee-artifacts.sh.
+      - name: Build the shipping set
+        run: cd src && make -j"$(nproc)" all
+      - name: Artifact integrity (removed capabilities stay removed)
+        run: bash scripts/validate-aimee-artifacts.sh
+
+  unit-test-shards:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    name: unit-tests (${{ matrix.label }}/2)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard_index: 0
+            label: 1
+          - shard_index: 1
+            label: 2
     # Live Postgres sidecar so unit-test-aimee-db and unit-test-memory-postgres
     # exercise the real libpq path (placeholder rewriter, FTS5→tsvector
     # translation, ON CONFLICT targets, schema apply) instead of skipping
@@ -213,8 +333,18 @@ jobs:
     # memories_code_fts trigram index (see src/schema/postgres.sql).
     env:
       AIMEE_TEST_PG_URL: postgres://aimee:aimee@localhost:5432/aimee_test
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_NOHASHDIR: "true"
     steps:
       - uses: actions/checkout@v4
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: unit-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-${{ hashFiles('src/Makefile', 'src/tests/Rules.mk') }}-${{ github.run_id }}
+          restore-keys: |
+            unit-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-${{ hashFiles('src/Makefile', 'src/tests/Rules.mk') }}-
+            unit-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-
       - name: Runner diagnostics
         run: |
           echo "::group::Runner environment"
@@ -251,7 +381,7 @@ jobs:
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make \
+          sudo apt-get install -y -q gcc make ccache \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev postgresql-client
       - name: Wait for Postgres
@@ -284,7 +414,46 @@ jobs:
           export AIMEE_TEST_TRUSTED_YES=/run/aimee-test-helpers/yes
           export AIMEE_TEST_TRUSTED_TRUE=/run/aimee-test-helpers/true
           export AIMEE_TEST_TRUSTED_ROOT_FILE=/run/aimee-test-helpers/root-file
-          cd src && make -j$(nproc) unit-tests build/obj/tests/p7-pkcs11-harness
+          ccache --max-size=750M
+          ccache --zero-stats
+          cd src
+          make -j"$(nproc)" CC="ccache gcc" \
+            GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 \
+            UNIT_TEST_SHARD_COUNT=2 \
+            UNIT_TEST_SHARD_INDEX=${{ matrix.shard_index }} \
+            UNIT_TEST_SKIP_P1=1 \
+            unit-tests
+          ccache --show-stats
+
+  # Stable protected context for the sharded suite. It remains named
+  # `unit-tests`, so branch protection needs no transition window, and it also
+  # makes the already-separate real-Postgres RLS gate part of that required
+  # result instead of running it redundantly in every unit build.
+  unit-tests:
+    needs: [change-scope, unit-test-shards, p1-rls-gate]
+    if: ${{ always() && !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm complete unit gate
+        env:
+          CHANGE_SCOPE_RESULT: ${{ needs.change-scope.result }}
+          DOCS_ONLY: ${{ needs.change-scope.outputs.docs_only }}
+          SHARDS_RESULT: ${{ needs.unit-test-shards.result }}
+          P1_RESULT: ${{ needs.p1-rls-gate.result }}
+        run: |
+          if [ "$CHANGE_SCOPE_RESULT" = success ] && [ "$DOCS_ONLY" = true ]; then
+            echo "Documentation-only change: unit shards and P1 gate skipped."
+            exit 0
+          fi
+          [ "$SHARDS_RESULT" = success ] || {
+            echo "Unit-test shard result: $SHARDS_RESULT" >&2
+            exit 1
+          }
+          [ "$P1_RESULT" = success ] || {
+            echo "P1 RLS gate result: $P1_RESULT" >&2
+            exit 1
+          }
+          echo "All unit-test shards and the P1 RLS gate passed."
 
   # The data-plane identity mint, end to end, against a live Postgres and a live
   # signed-HWM KMS helper.
@@ -323,6 +492,8 @@ jobs:
   # --network host so the harness reaches Postgres on 127.0.0.1:5432 the same way it
   # does locally, keeping one code path for both.
   identity-mint-e2e:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -406,6 +577,8 @@ jobs:
   # an encryption key, the audience override, the nonce arriving inside a signed
   # payload, and the IdP refusing both a replayed code and a wrong PKCE verifier.
   oidc-login-live:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -461,6 +634,8 @@ jobs:
   # bundle must be a root-owned 0600 single-link file or the server refuses to load
   # it, which is a property worth keeping rather than relaxing for CI.
   write-tier-enforce-live:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -526,6 +701,8 @@ jobs:
   # then refused for want of a grant). Runner-created throwaway accounts and a
   # Postgres for kb to boot against are the whole fixture.
   pam-login-live:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -580,6 +757,8 @@ jobs:
   # It uses scripts/lib/aimee-live-env.sh, the shared environment, rather than a
   # fourth private copy of the boot recipe.
   authz-residual-live:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -612,6 +791,27 @@ jobs:
         run: cd src && make -j"$(nproc)" all
       - name: Revocation, CSRF and the startup warning, measured
         run: sudo -E bash scripts/run-authz-residual-live.sh postgres://aimee:aimee@127.0.0.1:5432/aimee_resid_ci
+
+      # The kb route tests call kb_http_route_ex() directly, which bypasses the
+      # socket, the HTTP parse and kb_verifier_authenticate(). They prove route
+      # logic and cannot prove the chain. This drives four separately-configured
+      # aimee-kb instances over HTTP with real bearers — owner, project-scoped,
+      # service and console-admin — and is the only check that would notice an
+      # authorization regression between the verifier and a route.
+      - name: Live scope confinement over the wire
+        env:
+          AIMEE_DB2_URL: postgresql://aimee:aimee@127.0.0.1:5432/aimee_resid_ci
+        run: bash scripts/validate-kb-authz-live.sh
+      # The check above drives BEARER tokens. Production does not use one:
+      # aimee-server presents a client certificate and the mTLS seam synthesises
+      # a credential from its CN, which nothing else exercises. This enrols for
+      # real (mint -> CSR -> /v1/enroll/redeem) and then makes genuine mTLS
+      # requests, asserting both that the scoped service CN is refused on owner
+      # routes and that the old colon-free CN would have been allowed.
+      - name: Live mTLS certificate scope
+        env:
+          AIMEE_DB2_URL: postgresql://aimee:aimee@127.0.0.1:5432/aimee_resid_ci
+        run: bash scripts/validate-kb-mtls-scope-live.sh
       - name: Postgres logs on failure
         if: failure()
         run: docker logs aimee-resid-pg 2>&1 | tail -60
@@ -636,6 +836,8 @@ jobs:
   # SQLite shim — and a superuser, because it creates a throwaway database, extensions
   # and the three-role split.
   p1-rls-gate:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -669,6 +871,8 @@ jobs:
         run: bash scripts/run-p1-rls-gate.sh postgres://aimee:aimee@127.0.0.1:5432/aimee_rls_ci
 
   init-migrate-service-test:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -695,7 +899,16 @@ jobs:
       - name: Init/migrate service routing smoke test
         run: cd src && make -j$(nproc) init-migrate-service-test
 
+      # Cheap and image-free: the gate that decides whether a kb may start without an
+      # embedder. Getting it wrong in either direction ships a broken deploy — too
+      # loose and an unconfigured kb serves nothing usable, too tight and the
+      # server-identity one-shot cannot run.
+      - name: KB entrypoint embedder gate
+        run: cd src && make kb-entrypoint-test
+
   windows-cmake:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -784,6 +997,8 @@ jobs:
             bash scripts/aimee-thin-client-smoke.sh
 
   windows-build:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -858,6 +1073,8 @@ jobs:
             bash scripts/aimee-thin-client-smoke.sh
 
   macos-build:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -925,6 +1142,8 @@ jobs:
           echo "PASS: Secure Transport presented client cert; server verified CN=ci-macos-client; no keychain leak"
 
   memory-retrieval-eval:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -951,89 +1170,14 @@ jobs:
       - name: Memory retrieval eval (corpus + regression check)
         run: cd src && make -j$(nproc) memory-retrieval-eval-check
 
-  bench-check:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Runner diagnostics
-        run: |
-          echo "::group::Runner environment"
-          echo "ref: $GITHUB_REF  sha: $GITHUB_SHA  runner: $RUNNER_OS $RUNNER_ARCH"
-          uname -a
-          gcc --version 2>/dev/null || true
-          make --version 2>/dev/null | head -1 || true
-          df -h / | tail -1
-          echo "::endgroup::"
-      - name: Install dependencies
-        run: |
-          # GitHub runners preinstall third-party apt repos (e.g. packages.microsoft.com)
-          # that intermittently serve invalid/unsigned metadata and fail `apt-get update`
-          # hard — though none of our packages come from them. Drop them, then retry
-          # update with backoff so a transient mirror hiccup doesn't fail the job.
-          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make \
-            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
-            libpq-dev
-      - name: Build PR benchmark binary
-        run: |
-          if cd src && make -j$(nproc) tests/bench-perf; then
-            cp tests/bench-perf /tmp/bench-pr
-          else
-            echo "::warning::PR benchmark binary failed to build; benchmarks are informational."
-            touch /tmp/bench-skip
-          fi
-      - name: Build testing baseline binary
-        run: |
-          if [ -f /tmp/bench-skip ]; then
-            echo "Skipping baseline benchmark build because PR benchmark did not build."
-            exit 0
-          fi
-          BASE_REF="${{ github.base_ref }}"
-          if [ -z "$BASE_REF" ]; then
-            BASE_REF="origin/testing"
-          else
-            BASE_REF="origin/$BASE_REF"
-          fi
-          git worktree add /tmp/bench-baseline-wt "$BASE_REF"
-          cd /tmp/bench-baseline-wt/src
-          if make -j$(nproc) tests/bench-perf; then
-            cp tests/bench-perf /tmp/bench-baseline
-            echo "binary" > /tmp/bench-baseline-mode
-          else
-            echo "::warning::Base benchmark binary failed to build; using committed benchmark baseline."
-            cp "$GITHUB_WORKSPACE/benchmarks/baseline.json" /tmp/baseline.json
-            echo "static" > /tmp/bench-baseline-mode
-          fi
-          git -C /home/runner/work/aimee/aimee worktree remove /tmp/bench-baseline-wt --force
-      - name: Run same-machine regression report
-        run: |
-          if [ -f /tmp/bench-skip ]; then
-            echo "Skipping benchmark report because PR benchmark did not build."
-            exit 0
-          fi
-          if [ "$(cat /tmp/bench-baseline-mode)" = "binary" ]; then
-            if /tmp/bench-baseline --save /tmp/baseline.json; then
-              echo "Baseline measured from base branch on same machine. Running PR check..."
-            else
-              echo "::warning::Base benchmark binary failed at runtime; using committed benchmark baseline."
-              cp benchmarks/baseline.json /tmp/baseline.json
-            fi
-          else
-            echo "Using committed benchmark baseline because the base branch benchmark does not build."
-          fi
-          /tmp/bench-pr --check /tmp/baseline.json || \
-            echo "::warning::Benchmark regression detected; benchmarks are informational and do not gate PRs."
-
   # End-to-end deploy matrix: build the images and prove every Docker topology
   # (kb-only, server+kb split, server standalone) boots and serves a usable /v1
   # surface. See
   # docs/proposals/pending/aimee-e2e-deploy-matrix.md. GitHub's ubuntu runners
   # ship Docker + compose, so no port offset is needed (8740/8741 are free).
   e2e-docker:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     # One runner per topology so the deploy matrix runs in PARALLEL instead of
     # serially on one runner (T1+T2+T3 back-to-back was the long pole of CI).
     runs-on: ubuntu-latest
@@ -1042,18 +1186,75 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        topology: [T1, T2, T3]
+        include:
+          # Bake targets built by each compose file. The cache scope is keyed by
+          # IMAGE, not by topology: T1 and T2 build aimee-kb from the same
+          # Dockerfile, and T2 and T3 build aimee-server from the same
+          # Dockerfile.server. Per-topology scopes stored those identical layers
+          # twice and denied each shard the other's work.
+          - topology: T1
+            compose_file: compose.yaml
+            images: aimee-kb aimee-control-web
+          - topology: T2
+            compose_file: compose.server.yaml
+            images: aimee-kb aimee-server
+          - topology: T3
+            compose_file: compose.server-standalone.yaml
+            images: aimee-server
     name: e2e-docker (${{ matrix.topology }})
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
       - name: Runner diagnostics
         run: |
           docker version --format '{{.Server.Version}}'
           docker compose version
+          docker buildx version
           df -h / | tail -1
+      # A GitHub Actions cache is readable only by the ref that wrote it and by
+      # that ref's base branch. Cache written from a PR run therefore lands under
+      # refs/pull/N/merge, where NO other run can ever read it — while still
+      # counting against the repo's 10 GB quota and evicting the shared
+      # refs/heads/testing entries by LRU. That is what happened here: 9.5 GB of
+      # unreadable PR blobs pushed the repo to 14 GB, every e2e image build
+      # missed cache completely, and each shard rebuilt postgres, rust, the
+      # python venv and the C tree from scratch (12-18 min a shard).
+      #
+      # So: every run READS the shared per-image scope, only pushes to the
+      # default branch WRITE it. That also drops the mode=max export (~7 min a
+      # shard) from the PR path entirely.
+      - name: Resolve bake cache flags
+        id: cache_flags
+        env:
+          IMAGES: ${{ matrix.images }}
+          WRITE_CACHE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/testing' }}
+        run: |
+          {
+            echo 'set<<CACHE_FLAGS_EOF'
+            for img in $IMAGES; do
+              echo "${img}.cache-from=type=gha,scope=e2e-${img}"
+              if [ "$WRITE_CACHE" = "true" ]; then
+                echo "${img}.cache-to=type=gha,scope=e2e-${img},mode=max"
+              fi
+            done
+            echo CACHE_FLAGS_EOF
+          } >> "$GITHUB_OUTPUT"
+      - name: Build topology images with persistent cache
+        uses: docker/bake-action@v7
+        with:
+          source: .
+          files: ${{ matrix.compose_file }}
+          load: true
+          set: ${{ steps.cache_flags.outputs.set }}
       - name: Run Docker deploy topology ${{ matrix.topology }}
         # The aimee-server image builds webchat's SPA from its vendored
         # @rakuensoftware/smoothgui dependency — no npm token needed.
+        env:
+          # The Bake step loaded exactly the images named by the compose file.
+          # Keep the smoke scripts' local default intact while avoiding a second
+          # uncached `docker compose build` in CI.
+          AIMEE_E2E_SKIP_BUILD: "1"
         run: scripts/e2e-matrix.sh --only ${{ matrix.topology }}
       - name: Stack logs on failure
         if: failure()
@@ -1063,6 +1264,8 @@ jobs:
           done
 
   e2e-adoption:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     # Thin-client ADOPTION (TOFU enrollment) as its own parallel E2E flow: a
     # fresh `aimee` client against a native aimee-server holding the default
     # bootstrap bearer must pin the cert, auto-rotate to a strong bearer, and
@@ -1092,6 +1295,8 @@ jobs:
   # — and runs the opt-in test that parses real source in every supported language
   # (definitions, nested members, and call edges).
   treesitter:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -1117,6 +1322,8 @@ jobs:
           ./build/obj/tests/unit-test-code-treesitter
 
   vault-pkcs11-token:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     name: vault-pkcs11-token
     permissions:
       contents: read

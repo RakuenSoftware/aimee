@@ -12,7 +12,7 @@
  * marshalling (argv quoting, the read/write/list/stat mapping, error propagation),
  * not the container runtime. */
 #include "aimee.h"
-#include "workspace_provider_container.h"
+#include "modules/workspace/workspace_provider_container.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>

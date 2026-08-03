@@ -35,12 +35,27 @@ static const char *const MCP_CORE_TOOLS[] = {
     AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS, /* direct adoption-critical code intel */
     "git", /* all git/gh ops via one multiplexed tool (command=...) */
     "delegate",
+    /* An MCP delegate call returns a job_id and runs in the background, so its
+     * poller is not optional: without delegate_status in the floor, an agent
+     * that follows our own instruction to delegate cannot read the result
+     * without a find_tools -> describe_tool -> call_tool detour. Measured on a
+     * real cell, five of fourteen tool calls went on exactly that. This is the
+     * same reasoning that already puts roundtable_status here. */
+    "delegate_status",
     "roundtable_review", /* multi-agent */
     "roundtable_status", /* poll asynchronous roundtable_review */
     "ask_user",
     "send_message", /* interaction */
     "note",         /* capture (note family: create/list/search) */
     NULL,
+};
+
+/* Tools that hand work to a SECOND agent. Their cost, tool calls and edits land
+ * outside the caller's transcript, so any measurement of "what did this agent
+ * do" stops being attributable the moment one is used. The "solo" profile
+ * withholds them; nothing else does. */
+static const char *const MCP_MULTI_AGENT_TOOLS[] = {
+    "delegate", "delegate_status", "roundtable_review", "roundtable_status", NULL,
 };
 
 static int mcp_name_in_set(const char *name, const char *const *set)
@@ -150,14 +165,56 @@ static int mcp_ci_contains(const char *haystack, const char *needle)
    return 0;
 }
 
+/* '_' and '-' separate words in tool names; a searcher types spaces. */
+static int mcp_query_sep(char c)
+{
+   return c == ' ' || c == '\t' || c == '_' || c == '-';
+}
+
 int mcp_tool_matches_query(const cJSON *tool, const char *query)
 {
    if (!tool)
       return 0;
+   if (!query || !query[0])
+      return 1;
+
    const cJSON *name = cJSON_GetObjectItemCaseSensitive(tool, "name");
    const cJSON *description = cJSON_GetObjectItemCaseSensitive(tool, "description");
-   return mcp_ci_contains(cJSON_IsString(name) ? name->valuestring : NULL, query) ||
-          mcp_ci_contains(cJSON_IsString(description) ? description->valuestring : NULL, query);
+   const char *name_s = cJSON_IsString(name) ? name->valuestring : NULL;
+   const char *desc_s = cJSON_IsString(description) ? description->valuestring : NULL;
+
+   /* Whole-query match first: preserves phrase searches like "blast radius"
+    * hitting a description verbatim. */
+   if (mcp_ci_contains(name_s, query) || mcp_ci_contains(desc_s, query))
+      return 1;
+
+   /* Otherwise every word of the query must appear somewhere. An agent looking
+    * for delegate_status types "delegate status", and a whole-string test finds
+    * nothing -- it then dumps the entire catalogue to find one tool. Requiring
+    * ALL words keeps this a narrowing search rather than a fuzzy OR. */
+   const char *word = query;
+   while (*word)
+   {
+      while (*word && mcp_query_sep(*word))
+         word++;
+      if (!*word)
+         break;
+      const char *end = word;
+      while (*end && !mcp_query_sep(*end))
+         end++;
+
+      size_t len = (size_t)(end - word);
+      char token[128];
+      if (len == 0 || len >= sizeof(token))
+         return 0;
+      memcpy(token, word, len);
+      token[len] = '\0';
+
+      if (!mcp_ci_contains(name_s, token) && !mcp_ci_contains(desc_s, token))
+         return 0;
+      word = end;
+   }
+   return 1;
 }
 
 const char *mcp_code_project_from_args(cJSON *args)
@@ -210,8 +267,12 @@ int mcp_filter_tools_for_profile(cJSON *tools, const char *profile)
       return 0;
    profile = mcp_tool_profile_effective(profile);
    /* "full" presents everything; an unknown profile fails OPEN to the full set so
-    * a typo never silently hides tools. "core"/"lean" keep only the Tier-0 set. */
-   if (strcmp(profile, "core") != 0 && strcmp(profile, "lean") != 0)
+    * a typo never silently hides tools. "core"/"lean" keep only the Tier-0 set.
+    * "solo" is core minus the tools that hand work to another agent -- it must be
+    * matched explicitly here, because failing open would grant delegation to a
+    * caller that asked for the opposite. */
+   int solo = strcmp(profile, "solo") == 0;
+   if (!solo && strcmp(profile, "core") != 0 && strcmp(profile, "lean") != 0)
       return 0;
 
    int removed = 0;
@@ -219,7 +280,9 @@ int mcp_filter_tools_for_profile(cJSON *tools, const char *profile)
    {
       cJSON *tool = cJSON_GetArrayItem(tools, i);
       cJSON *nm = cJSON_GetObjectItemCaseSensitive(tool, "name");
-      if (!cJSON_IsString(nm) || !mcp_name_in_set(nm->valuestring, MCP_CORE_TOOLS))
+      int keep = cJSON_IsString(nm) && mcp_name_in_set(nm->valuestring, MCP_CORE_TOOLS) &&
+                 !(solo && mcp_name_in_set(nm->valuestring, MCP_MULTI_AGENT_TOOLS));
+      if (!keep)
       {
          cJSON_DeleteItemFromArray(tools, i);
          removed++;

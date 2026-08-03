@@ -1,0 +1,1 @@
+{"model":"Olmo-3.1-32B-Think.q5","host":"192.168.1.254","gpu":"7900XTX","backend":"vulkan","repo":"bartowski/allenai_Olmo-3.1-32B-Think-GGUF:Q5_K_M","offload":"unknown","cpu_layer_warnings":0}

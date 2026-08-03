@@ -17,7 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "gw_stage_memory.h"
+#include "modules/memory/gw_stage_memory.h"
 #include "ingress_preinject.h"
 #include "cJSON.h"
 #include "config.h"

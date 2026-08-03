@@ -37,25 +37,25 @@ describe('computeReadiness (local KB path)', () => {
   });
 
   it('the built-in hash embedder (both keys blank) reads as not-ok, test-only', () => {
-    const r = computeReadiness({ embedding_command: '', embedding_endpoint: '   ' }, { accountReady: true, projectCount: 0 });
+    const r = computeReadiness({ embedder_command: '', embedder_url: '   ' }, { accountReady: true, projectCount: 0 });
     expect(r.steps.embedding.ok).toBe(false);
     expect(r.steps.embedding.detail).toMatch(/hash fallback/i);
   });
 
   it('an embedding command OR endpoint satisfies embedding', () => {
-    expect(computeReadiness({ embedding_command: 'embed.sh' }, { accountReady: true, projectCount: 0 }).steps.embedding.ok).toBe(true);
-    expect(computeReadiness({ embedding_endpoint: 'http://e' }, { accountReady: true, projectCount: 0 }).steps.embedding.ok).toBe(true);
+    expect(computeReadiness({ embedder_command: 'embed.sh' }, { accountReady: true, projectCount: 0 }).steps.embedding.ok).toBe(true);
+    expect(computeReadiness({ embedder_url: 'http://e' }, { accountReady: true, projectCount: 0 }).steps.embedding.ok).toBe(true);
   });
 
   it('a fully configured local instance with a project is ready', () => {
-    const cfg = { provider: 'claude', embedding_endpoint: 'http://e', db2_url: 'postgres://x' };
+    const cfg = { provider: 'claude', embedder_url: 'http://e', db2_url: 'postgres://x' };
     const r = computeReadiness(cfg, { accountReady: true, projectCount: 1 });
     expect(r.ready).toBe(true);
     expect(stepsRemaining(r)).toBe(0);
   });
 
   it('a cloned project flips only the project step', () => {
-    const base = { provider: 'claude', embedding_command: 'e.sh', db2_url: 'x' };
+    const base = { provider: 'claude', embedder_command: 'e.sh', db2_url: 'x' };
     expect(computeReadiness(base, { accountReady: true, projectCount: 0 }).ready).toBe(false);
     const ready = computeReadiness(base, { accountReady: true, projectCount: 19 });
     expect(ready.ready).toBe(true);
@@ -85,7 +85,7 @@ describe('computeReadiness (remote KB path)', () => {
 
 describe('computeReadiness (connection step)', () => {
   it('is optional and reflects the connected-host count without blocking ready', () => {
-    const cfg = { provider: 'claude', embedding_command: 'e.sh', db2_url: 'x' };
+    const cfg = { provider: 'claude', embedder_command: 'e.sh', db2_url: 'x' };
     const none = computeReadiness(cfg, { accountReady: true, projectCount: 1, hostsConnected: 0 });
     expect(none.steps.connection.ok).toBe(false);
     expect(none.ready).toBe(true); // optional never blocks
@@ -109,7 +109,7 @@ describe('completedSteps (affirmative completion — hides wizard sections on re
     expect(completedSteps({}, { accountReady: true, projectCount: 0 }).has('account')).toBe(true);
     expect(completedSteps({ provider: 'claude' }, { accountReady: false, projectCount: 0 }).has('provider')).toBe(true);
     expect(completedSteps({ kb_mode: 'local' }, { accountReady: false, projectCount: 0 }).has('knowledge_base')).toBe(true);
-    expect(completedSteps({ llm_embed_backend: 'local' }, { accountReady: false, projectCount: 0 }).has('embedding')).toBe(true);
+    expect(completedSteps({ embedder_model: 'bekko-a25m' }, { accountReady: false, projectCount: 0 }).has('embedding')).toBe(true);
     expect(completedSteps({}, { accountReady: false, projectCount: 0, hostsConnected: 1 }).has('connection')).toBe(true);
     expect(completedSteps({}, { accountReady: false, projectCount: 19 }).has('project')).toBe(true);
   });
@@ -122,12 +122,12 @@ describe('completedSteps (affirmative completion — hides wizard sections on re
   it('db2 completes via an explicit URL or the deploy walk (embed role placed)', () => {
     expect(completedSteps({}, { accountReady: false, projectCount: 0 }).has('db2')).toBe(false);
     expect(completedSteps({ db2_url: 'postgres://x' }, { accountReady: false, projectCount: 0 }).has('db2')).toBe(true);
-    expect(completedSteps({ llm_embed_backend: 'external' }, { accountReady: false, projectCount: 0 }).has('db2')).toBe(true);
+    expect(completedSteps({ embedder_url: 'https://emb.x' }, { accountReady: false, projectCount: 0 }).has('db2')).toBe(true);
   });
 
   it('a fully set-up instance completes every step', () => {
     const done = completedSteps(
-      { provider: 'claude', kb_mode: 'local', llm_embed_backend: 'local', db2_url: '' },
+      { provider: 'claude', kb_mode: 'local', embedder_model: 'bekko-a25m', db2_url: '' },
       { accountReady: true, projectCount: 19, hostsConnected: 1 },
     );
     expect(done.size).toBe(7);

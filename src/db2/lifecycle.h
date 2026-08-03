@@ -27,12 +27,12 @@ extern "C"
 
    /* Set the embedding dimension used to create the DB2 halfvec embedding
     * columns (one embedder per deployment). Call from startup — with
-    * config_resolve_embedding_dim() — BEFORE db2_init() applies the schema, so
+    * config_resolve_embedder_dims() — BEFORE db2_init() applies the schema, so
     * this layer stays config-free. Unset/<=0 means "nothing pinned", which lets
     * db2_init's §2a precedence fall through to the injected default. */
    void db2_set_embedding_dim(int dim);
 
-   /* Inject the DEFAULT width, from config_embedding_dim_default(). This layer
+   /* Inject the DEFAULT width, from config_embedder_dims_default(). This layer
     * holds no width literal of its own — the number is declared once, in config —
     * so call this beside db2_set_embedding_dim before db2_init. Without it
     * db2_embedding_dim() reports 0 and schema sizing fails loudly rather than
@@ -46,7 +46,7 @@ extern "C"
    /* How many vector upserts have been refused for disagreeing with that width,
     * and the last width actually offered.
     *
-    * A wrong AIMEE_EMBEDDING_DIM is otherwise invisible: the kb starts, reports
+    * A wrong EMBEDDER_DIMS is otherwise invisible: the kb starts, reports
     * healthy, accepts writes, and refuses every upsert with a per-row WARN, so a
     * deployment can store zero vectors indefinitely while looking fine. Health
     * publishes this so the condition is legible without reading kb logs. */
@@ -54,7 +54,7 @@ extern "C"
    int db2_embedding_dim_last_offered(void);
 
    /* embedder-runtime-fetch-autodim §2a: mark whether the operator pinned the dim
-    * (see config_embedding_dim_is_pinned). Call beside db2_set_embedding_dim,
+    * (see config_embedder_dims_is_pinned). Call beside db2_set_embedding_dim,
     * before db2_init. When UNpinned (0, the default), db2_init prefers a recorded
     * kb_meta.schema_embedding_dim over the configured default; when pinned (1) the
     * operator value is authoritative and a recorded mismatch is refused downstream.
@@ -70,6 +70,14 @@ extern "C"
     * test both call it. (A future probe rung, §2b, slots between recorded and the
     * default.) */
    int db2_effective_dim(int pinned, int configured, int recorded);
+
+   /* Should a start be refused because the embedder cannot produce the corpus's
+    * recorded width? Pure. Refuses ONLY when the embedder answered (probe_rc == 0) with
+    * a positive width that differs from a positive recorded width — an embedder that
+    * did not answer is not evidence of drift. UPGRADING.md promises this refusal; a
+    * v0.2 corpus at 1024 under a 384-dim bundled embedder used to come up healthy and
+    * report embed_ok while Postgres bounced every write. */
+   int db2_dim_drift_refuses(int probe_rc, int probed_dim, int recorded_dim);
 
    /* embedder-runtime-fetch-autodim §2b: fresh-DB probe rung. On a fresh DB2 (no
     * operator pin, no recorded schema_embedding_dim) db2_init derives the dim from
@@ -165,6 +173,13 @@ extern "C"
    typedef int (*db2_embedder_serving_probe_fn)(char *out, size_t out_len, char *err,
                                                 size_t errlen);
    void db2_set_embedder_serving_probe(db2_embedder_serving_probe_fn fn);
+   /* Whether each probe seam is currently registered. The bug these exist for was a
+    * registration decision no test could see: the caller skipped BOTH probes for the
+    * builtin embedder because the DIM probe cannot work against it, which silently
+    * disabled the serving-identity guard in the one transition it was written to catch.
+    * A seam that decides whether a guard runs has to be observable. */
+   int db2_embedder_probe_registered(void);
+   int db2_embedder_serving_probe_registered(void);
    void db2_set_embedding_compat(const char *compat_csv);
    const char *db2_embedding_compat(void);
 

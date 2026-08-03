@@ -1,8 +1,8 @@
 /* test_workspace_runner_registry.c: the registry maps a workspace id to one
  * runner queue (get-or-create idempotent, lookup, remove, capacity bound), and
  * a registry-resolved queue carries a request/response round-trip. */
-#include "workspace_runner_registry.h"
-#include "workspace_runner_queue.h"
+#include "modules/workspace/workspace_runner_registry.h"
+#include "modules/workspace/workspace_runner_queue.h"
 #include "cJSON.h"
 
 #include <assert.h>

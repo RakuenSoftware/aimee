@@ -18,6 +18,21 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
+int config_set_claude_model(const char *value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      snprintf(cfg->claude_model, sizeof(cfg->claude_model), "%s", value ? value : "");
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
 int config_set_codex_model(const char *value)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));
@@ -94,7 +109,7 @@ int config_set_openai_key_cmd(const char *value)
    return rc;
 }
 
-int config_set_embedding_model(const char *value)
+int config_set_embedder_model(const char *value)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));
    if (!cfg)
@@ -102,14 +117,14 @@ int config_set_embedding_model(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->embedding_model, sizeof(cfg->embedding_model), "%s", value ? value : "");
+      snprintf(cfg->embedder_model, sizeof(cfg->embedder_model), "%s", value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
    return rc;
 }
 
-int config_set_embedding_endpoint(const char *value)
+int config_set_embedder_url(const char *value)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));
    if (!cfg)
@@ -117,7 +132,22 @@ int config_set_embedding_endpoint(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->embedding_endpoint, sizeof(cfg->embedding_endpoint), "%s", value ? value : "");
+      snprintf(cfg->embedder_url, sizeof(cfg->embedder_url), "%s", value ? value : "");
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_embedder_api_key(const char *value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      snprintf(cfg->embedder_api_key, sizeof(cfg->embedder_api_key), "%s", value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -897,7 +927,7 @@ int config_set_kb_mode(const char *value)
    return rc;
 }
 
-int config_set_llm_embed_backend(const char *value)
+int config_set_aimee_with_llamacpp(const char *value)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));
    if (!cfg)
@@ -905,14 +935,15 @@ int config_set_llm_embed_backend(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->llm_embed_backend, sizeof(cfg->llm_embed_backend), "%s", value ? value : "");
+      snprintf(cfg->aimee_with_llamacpp, sizeof(cfg->aimee_with_llamacpp), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
    return rc;
 }
 
-int config_set_llm_synth_backend(const char *value)
+int config_set_aimee_synthesis_model(const char *value)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));
    if (!cfg)
@@ -920,14 +951,15 @@ int config_set_llm_synth_backend(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->llm_synth_backend, sizeof(cfg->llm_synth_backend), "%s", value ? value : "");
+      snprintf(cfg->aimee_synthesis_model, sizeof(cfg->aimee_synthesis_model), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
    return rc;
 }
 
-int config_set_llm_synth_host(const char *value)
+int config_set_synthesis_endpoint(const char *value)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));
    if (!cfg)
@@ -935,14 +967,14 @@ int config_set_llm_synth_host(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->llm_synth_host, sizeof(cfg->llm_synth_host), "%s", value ? value : "");
+      snprintf(cfg->synthesis_endpoint, sizeof(cfg->synthesis_endpoint), "%s", value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
    return rc;
 }
 
-int config_set_llm_synth_gpu(const char *value)
+int config_set_synthesis_model(const char *value)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));
    if (!cfg)
@@ -950,14 +982,14 @@ int config_set_llm_synth_gpu(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->llm_synth_gpu, sizeof(cfg->llm_synth_gpu), "%s", value ? value : "");
+      snprintf(cfg->synthesis_model, sizeof(cfg->synthesis_model), "%s", value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
    return rc;
 }
 
-int config_set_llm_synth_tier(const char *value)
+int config_set_synthesis_api_key(const char *value)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));
    if (!cfg)
@@ -965,37 +997,7 @@ int config_set_llm_synth_tier(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->llm_synth_tier, sizeof(cfg->llm_synth_tier), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_llm_synth_endpoint(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->llm_synth_endpoint, sizeof(cfg->llm_synth_endpoint), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_llm_synth_model(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->llm_synth_model, sizeof(cfg->llm_synth_model), "%s", value ? value : "");
+      snprintf(cfg->synthesis_api_key, sizeof(cfg->synthesis_api_key), "%s", value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1413,43 +1415,6 @@ int config_set_kb_curator_provider_model(const char *value)
 int config_set_kb_curator_provider_api_key(const char *value)
 {
    return config_secret_store("AIMEE_KB_CURATOR_PROVIDER_API_KEY", value);
-}
-
-int config_set_kb_curator_tier_b_base_url(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->kb_curator_tier_b_base_url, sizeof(cfg->kb_curator_tier_b_base_url), "%s",
-               value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_kb_curator_tier_b_model(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->kb_curator_tier_b_model, sizeof(cfg->kb_curator_tier_b_model), "%s",
-               value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_kb_curator_tier_b_api_key(const char *value)
-{
-   return config_secret_store("AIMEE_KB_CURATOR_TIER_B_API_KEY", value);
 }
 
 int config_set_kb_curator_judge_command(const char *value)

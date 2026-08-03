@@ -595,7 +595,7 @@ int db2_kb_service_async_queue_drain(const char *embedding_cmd, int timeout_secs
                                      void *vector_upsert_ctx,
                                      db2_kb_service_async_queue_stats_t *out)
 {
-   const char *effective_cmd = config_embedding_command_current(embedding_cmd);
+   const char *effective_cmd = config_embedder_command_current(embedding_cmd);
    int processed = 0;
 
    time_t started = time(NULL);
@@ -700,7 +700,19 @@ int db2_kb_service_collect_project_status(const char *project, db2_kb_service_pr
                            "SELECT COUNT(*) FROM vector_index_ops q"
                            " JOIN kb_documents d ON d.id = q.point_id"
                            " JOIN projects p ON p.name=d.project"
-                           " WHERE (?1='' OR d.project=?1) AND q.collection = 'kb_chunks'"
+                           /* BOTH NAMES. The writer records general-corpus vectors under
+                            * 'kb_embeddings'; 'kb_chunks' is the older name and still
+                            * appears in existing stores, which is why
+                            * code_project_lifecycle.c matches the pair too. Matching only
+                            * the legacy name made this count ZERO on every current
+                            * deployment: `aimee kb health` reported embedding_count 0
+                            * beside pgvec_vectors 2, `aimee kb smoke` concluded
+                            * "0 embeddings; lexical search only" on a kb that was
+                            * embedding correctly, and hud.c warned forever because
+                            * embeddings < chunks*9/10 is always true at zero. Three
+                            * surfaces telling an operator the embedder was broken. */
+                           " WHERE (?1='' OR d.project=?1)"
+                           "   AND q.collection IN ('kb_chunks','kb_embeddings')"
                            "   AND p.lifecycle_state='current'"
                            "   AND d.generation=p.current_generation"
                            "   AND q.status = 'ok'",

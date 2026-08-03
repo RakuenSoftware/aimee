@@ -378,8 +378,8 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
                         same_semantic_value ? "semantic profile dedupe" : "exact key match");
 
          {
-            platform_memory_background_embed(existing_id, config_embedding_command_field()[0]
-                                                              ? config_embedding_command_field()
+            platform_memory_background_embed(existing_id, config_embedder_command_field()[0]
+                                                              ? config_embedder_command_field()
                                                               : "builtin");
          }
 
@@ -454,7 +454,7 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
          add_provenance(dup_id, session_id, "merge", "trigram near-duplicate");
 
          {
-            platform_memory_background_embed(dup_id, config_embedding_command_current(NULL));
+            platform_memory_background_embed(dup_id, config_embedder_command_current(NULL));
          }
 
          if (out)
@@ -488,7 +488,7 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
 
       /* Auto-embed if embedding command is configured (background, non-fatal) */
       {
-         platform_memory_background_embed(new_id, config_embedding_command_current(NULL));
+         platform_memory_background_embed(new_id, config_embedder_command_current(NULL));
       }
 
       if (out)

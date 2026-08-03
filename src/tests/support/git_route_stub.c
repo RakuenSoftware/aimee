@@ -5,18 +5,18 @@
  * Binaries that need the real behavior (unit-test-git-project) link the real
  * objects and must NOT also link this TU. */
 #include "deploy_apply.h"
-#include "git_host_cred.h"
-#include "git_oauth_device.h"
-#include "git_oauth_gh.h"
-#include "git_oauth_github.h"
-#include "git_ops.h"
-#include "git_org_repos.h"
-#include "git_pr_api.h"
-#include "git_project.h"
-#include "git_ssh_agent.h"
+#include "modules/git/git_host_cred.h"
+#include "modules/git/git_oauth_device.h"
+#include "modules/git/git_oauth_gh.h"
+#include "modules/git/git_oauth_github.h"
+#include <aimee/git/git_ops.h>
+#include "modules/git/git_org_repos.h"
+#include "modules/git/git_pr_api.h"
+#include "modules/git/git_project.h"
+#include "modules/git/git_ssh_agent.h"
 #include "index.h"
 #include "webuser_editor.h"
-#include "workspace_scope.h"
+#include "modules/workspace/workspace_scope.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -39,19 +39,10 @@ int git_project_clone(const char *principal, const char *url, const char *name, 
    return -1;
 }
 
-int git_project_delete(const char *principal, const char *ref, int force,
-                       git_project_delete_result_t *res, char *err, size_t errlen)
+int git_project_delete(const char *principal, const char *ref, char *err, size_t errlen)
 {
    (void)principal;
    (void)ref;
-   (void)force;
-   if (res)
-   {
-      res->kb_status[0] = '\0';
-      res->purge_id[0] = '\0';
-      res->generation[0] = '\0';
-      res->kb_detail = NULL;
-   }
    if (err && errlen)
       snprintf(err, errlen, "stub");
    return -1;

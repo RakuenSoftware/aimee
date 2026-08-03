@@ -27,6 +27,7 @@
 #include "kb_http.h"
 #include "aimee/protocols/mcp/mcp_client_registry.h" /* host install:kb MCP plugins */
 #include "kb_tls.h"
+#include "kb_sidecar_identity.h"
 #include "kb_paths.h"
 #include "kb_service.h"
 #include "log.h"
@@ -36,7 +37,7 @@
 #include "util.h"
 #include "cJSON.h"
 #include "memory.h"
-#include "memory_graph_fusion.h"
+#include "modules/memory/memory_graph_fusion.h"
 #include "db2/memory_vectors.h"
 #include "db2/rel_types_store.h" /* db2_rel_types_ensure_seed (typed-fact ontology) */
 #include "db2/vault_pg.h"        /* vault_pg_backend + vault_store_set_backend (kb vault bind) */
@@ -52,7 +53,8 @@
 #include "vault_config_bootstrap.h" /* legacy config credential -> Vault */
 #include "runtime_secret.h"         /* wipe Vault-sourced runtime cache at exit */
 #include "kb_memory_audit_bridge.h" /* record memory mutations on aimee-kb's own obs bus */
-#include "log.h"                    /* audit_log_open — KB memory-audit ledger */
+#include <aimee/audit/obs_bus.h>
+#include "log.h" /* audit_log_open — KB memory-audit ledger */
 #include <signal.h>
 #include <errno.h>
 #include <stdint.h>
@@ -653,7 +655,7 @@ static int kb_bootstrap_db2(int json_output)
    return ok ? 0 : 1;
 }
 
-/* `aimee-kb enroll --host H --port N [--scope S]` — mint a one-time enrollment:
+/* `aimee-kb enroll --host H --port N --scope S` — mint a one-time enrollment:
  * persist/reuse the internal CA, issue a single-use token, and print the
  * `aimee://` connection string an operator hands to a client. The CA + token
  * store live under the kb config dir, so the running server can later redeem the
@@ -661,7 +663,7 @@ static int kb_bootstrap_db2(int json_output)
 static int kb_cmd_enroll(int argc, char **argv)
 {
    const char *host = NULL;
-   const char *scope = "global";
+   const char *scope = NULL;
    int port = 0;
    for (int i = 2; i < argc; i++)
    {
@@ -677,13 +679,22 @@ static int kb_cmd_enroll(int argc, char **argv)
          return 1;
       }
    }
-   if (!host || !host[0] || port <= 0 || port > 65535)
+   if (!host || !host[0] || port <= 0 || port > 65535 || !scope || !scope[0])
    {
-      fprintf(stderr, "Usage: aimee-kb enroll --host=HOST --port=N [--scope=SCOPE]\n"
+      /* --scope is REQUIRED. It used to default to "global", which has no ':'
+       * and therefore mints an UNSCOPED certificate — the install owner, past
+       * every administrative gate. A credential that powerful should never be
+       * what you get for not passing a flag. */
+      fprintf(stderr, "Usage: aimee-kb enroll --host=HOST --port=N --scope=SCOPE\n"
                       "  Mints a single-use enrollment token and prints the aimee:// "
                       "connection string\n"
-                      "  for a client. HOST/PORT are the kb's externally reachable "
-                      "address. SCOPE defaults to 'global'.\n");
+                      "  for a client. HOST/PORT are the kb's externally reachable address.\n"
+                      "\n"
+                      "  SCOPE is required and decides how much the client may reach:\n"
+                      "    <kind>:<id>   a scoped client, e.g. project:acme or "
+                      "service:aimee-server\n"
+                      "    a bare word   NO scope: the install owner, past every "
+                      "administrative gate\n");
       return 1;
    }
 
@@ -710,7 +721,7 @@ static int kb_run_fusion_probe(const char *query)
     * block) unless the pgvector memory collection exists, so ensure it. */
    if (pgvec_memory_vector_collection_exists() <= 0)
    {
-      int dim = config_embedding_dim() > 0 ? config_embedding_dim() : 1024;
+      int dim = config_embedder_dims() > 0 ? config_embedder_dims() : 1024;
       (void)pgvec_memory_vector_collection_recreate(dim);
    }
 
@@ -765,8 +776,8 @@ static int kb_cmd_tenancy_init_db2(void)
       fprintf(stderr, "aimee-kb: db2_url not configured (set AIMEE_DB2_URL or run `aimee init`)\n");
       return -1;
    }
-   db2_set_embedding_dim_default(config_embedding_dim_default());
-   db2_set_embedding_dim(config_embedding_dim_current());
+   db2_set_embedding_dim_default(config_embedder_dims_default());
+   db2_set_embedding_dim(config_embedder_dims_current());
    /* These commands read a deployment somebody else is running. Applying the
     * schema from here races the daemon's own pass, and Postgres answers "tuple
     * concurrently updated", which surfaced below as "DB2 not reachable" against a
@@ -798,7 +809,9 @@ static int kb_cmd_managed_server_identity(int argc, char **argv)
    if (argc < 3 || strcmp(argv[2], "install") != 0)
    {
       fputs("Usage: aimee-kb managed-server-identity install --server-home=PATH "
-            "--host=HOST --port=N --endpoint=URL --uid=N\n",
+            "--host=HOST --port=N --endpoint=URL --uid=N [--force]\n"
+            "  --force  re-issue the client certificate even when a stored identity\n"
+            "           already matches this KB (repairs trust the KB no longer accepts)\n",
             stderr);
       return 1;
    }
@@ -826,6 +839,8 @@ static int kb_cmd_managed_server_identity(int argc, char **argv)
          if (kb_parse_unsigned(argv[i] + 6, (unsigned long long)(uid_t)-1, &owner) != 0)
             owner_seen = -1;
       }
+      else if (strcmp(argv[i], "--force") == 0 && !options.force)
+         options.force = 1;
       else
       {
          fprintf(stderr, "aimee-kb managed-server-identity: invalid or duplicate option: %s\n",
@@ -1651,7 +1666,7 @@ int main(int argc, char **argv)
     * only thing that knows where the value lives and how it is spelled. */
    if (argc == 2 && strcmp(argv[1], "--print-embedding-model") == 0)
    {
-      const char *model = config_embedding_model();
+      const char *model = config_embedder_model();
       if (!model || !model[0])
          return 1; /* nothing selected — the caller starts no embedder */
       printf("%s\n", model);
@@ -1660,7 +1675,7 @@ int main(int argc, char **argv)
    if (argc == 2 && strcmp(argv[1], "--vault-llm-auth-configured") == 0)
    {
       char token[513];
-      int present = runtime_secret_get("AIMEE_LLM_AUTH_TOKEN", token, sizeof(token));
+      int present = runtime_secret_get("SYNTHESIS_API_KEY", token, sizeof(token));
       runtime_secret_wipe(token, sizeof(token));
       return present ? 0 : 1;
    }
@@ -1721,8 +1736,10 @@ int main(int argc, char **argv)
       {
          static const char *usage =
              "Usage: aimee-kb [options]\n"
-             "       aimee-kb enroll --host=HOST --port=N [--scope=SCOPE]\n"
-             "                       Mint a one-time enrollment connection string for a client\n"
+             "       aimee-kb enroll --host=HOST --port=N --scope=SCOPE\n"
+             "                       Mint a one-time enrollment connection string for a client.\n"
+             "                       SCOPE is required: '<kind>:<id>' scopes the client, a bare\n"
+             "                       word mints the install owner.\n"
              "       aimee-kb vault status [--json]\n"
              "       aimee-kb vault start --request-id=<32-lowercase-hex> "
              "[--secret-stdin] [--json]\n"
@@ -1780,6 +1797,13 @@ int main(int argc, char **argv)
     * observability bus at the store (every caller). Open the KB audit ledger so
     * the bus consumer can persist the rows, then install the store-side hook. */
    audit_log_open();
+   if (obs_bus_configure_daemon_module_runtime("kb", kb_default_config_dir()) != 0)
+   {
+      fputs("aimee-kb: invalid module-bus path configuration\n", stderr);
+      audit_log_close();
+      agent_http_cleanup();
+      return 1;
+   }
    kb_memory_audit_bridge_install();
 
    /* P7-D3a is an all-or-none service-manager contract. The listener fd and
@@ -1817,24 +1841,20 @@ int main(int argc, char **argv)
 
    /* aimee-kb owns DB2; tell the DB2 layer the deployment's embedding dimension
     * (one embedder: 1024 pplx-0.6b / 2560 pplx-4b) before any db2_init() so the
-    * halfvec embedding columns are created at the right size. AIMEE_EMBEDDING_DIM
+    * halfvec embedding columns are created at the right size. EMBEDDER_DIMS
     * overrides the configured value (containerized deploys without a writable
     * aimee.yaml). */
-   db2_set_embedding_dim_default(config_embedding_dim_default());
-   db2_set_embedding_dim(config_resolve_embedding_dim_current());
-   db2_set_embedding_dim_pinned(config_embedding_dim_pinned_current());
+   db2_set_embedding_dim_default(config_embedder_dims_default());
+   db2_set_embedding_dim(config_resolve_embedder_dims_current());
+   db2_set_embedding_dim_pinned(config_embedder_dims_pinned_current());
    /* unified-llm-container §2: activate the model-identity drift guard (the kb applies
     * the schema, so this is the load-bearing site). Empty embedding_model => no-op. */
-   db2_set_embedder_model_id(config_embedding_model());
-   /* §2b: on a FRESH DB with no pin, let db2_init derive the dim from the running
-    * embedder's /health instead of the default — but only when a REAL remote embed
-    * command is configured (the lexical "builtin" has no /health and a fixed dim,
-    * so probing it would never succeed and would stall the retry loop). */
-   {
-      const char *embed_cmd = config_embedding_command_current(NULL);
-      if (embed_cmd && strcmp(embed_cmd, "builtin") != 0)
-         embedder_probe_register(embed_cmd);
-   }
+   db2_set_embedder_model_id(config_embedder_model());
+   /* §2b: register the embedder probes. Unconditionally, for whatever embed command is
+    * configured: embedder_probe_register decides which probes that command supports.
+    * The distinction belongs to the module that knows what each probe requires, not to
+    * its caller. */
+   embedder_probe_register(config_embedder_command_current(NULL));
    /* Size the DB2 connection pool (leased by worker threads) before db2_init. */
    db2_set_pool_size(aimee_resolve_db2_pool_size(config_db2_connection_pool_size()));
 
@@ -2314,6 +2334,22 @@ int main(int argc, char **argv)
       agent_http_cleanup();
       return 1;
    }
+   if (obs_bus_start() != 0)
+   {
+      fputs("aimee-kb: module bus failed to start\n", stderr);
+      kb_management_runtime_stop();
+      kb_service_shutdown(&g_ctx);
+      kb_vault_operator_service_stop(vault_operator_service);
+      vault_operator_service = NULL;
+      kb_vault_operator_components_destroy(&vault_operator_components);
+      if (vault_operator_runtime_opened)
+         db2_vault_operator_runtime_close(&vault_operator_runtime);
+      db2_shutdown();
+      kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
+      audit_log_close();
+      agent_http_cleanup();
+      return 1;
+   }
    if (kb_http_start(http_port, config_kb_api_bearer_token()) != 0)
    {
       /* Another instance owns the port; yield gracefully with success so
@@ -2330,6 +2366,8 @@ int main(int argc, char **argv)
          db2_vault_operator_runtime_close(&vault_operator_runtime);
       db2_shutdown();
       kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
+      obs_bus_stop();
+      audit_log_close();
       agent_http_cleanup();
       return 0;
    }
@@ -2340,6 +2378,39 @@ int main(int argc, char **argv)
     * configured. Each plugin is OSV-scanned at startup (same gate as the server
     * path; see kb_mcp_osv_stub.c). Torn down after kb_http_stop() below. */
    (void)mcp_client_registry_boot(CONFIG_MCP_INSTALL_KB);
+
+   /* Synthesis sidecar identities. Issued here because the deployment order is
+    * server, wizard, kb, then the sidecar: minting at kb startup means the material
+    * exists before anything can ask for it, with no extra route and no ordering to
+    * coordinate. Idempotent, and only when a sidecar host is configured -- an
+    * external or absent synthesis provider needs none of this. */
+   {
+      const char *llm_host = getenv("AIMEE_LLM_HOST");
+      if (llm_host && llm_host[0])
+      {
+         if (kb_synthesis_identity_ensure(kb_default_config_dir(), llm_host) != 0)
+            LOG_WARN("kb_sidecar_identity",
+                     "could not provision synthesis mTLS identities for %s; the sidecar "
+                     "will refuse to start until this succeeds",
+                     llm_host);
+      }
+   }
+
+   /* Embedder sidecar identities, on the same terms and for the same reason. Keyed on
+    * its own env var rather than on EMBEDDER_MODEL: the model name says WHAT to embed
+    * with, which is equally satisfied by an external endpoint over plain HTTPS, while
+    * this says a sidecar container exists on the aimee network to issue for. */
+   {
+      const char *embedder_host = getenv("AIMEE_EMBEDDER_HOST");
+      if (embedder_host && embedder_host[0])
+      {
+         if (kb_embedder_identity_ensure(kb_default_config_dir(), embedder_host) != 0)
+            LOG_WARN("kb_sidecar_identity",
+                     "could not provision embedder mTLS identities for %s; the sidecar "
+                     "will refuse to start until this succeeds",
+                     embedder_host);
+      }
+   }
 
    /* Optional distributed-mode mTLS listener (every request presents a CA-issued
     * client cert; scope comes from the cert). Enabled by AIMEE_KB_MTLS_PORT. */
@@ -2405,6 +2476,7 @@ int main(int argc, char **argv)
    kb_mtls_stop();
    kb_http_stop();
    mcp_client_registry_shutdown(); /* stop kb-hosted MCP plugins (install: kb) */
+   obs_bus_stop();
    kb_management_runtime_stop();
    kb_service_shutdown(&g_ctx);
    kb_vault_operator_service_stop(vault_operator_service);
@@ -2416,6 +2488,7 @@ int main(int argc, char **argv)
    embedder_probe_unregister(); /* §2b: deregister the probe before db2_shutdown */
    db2_shutdown();
    kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
+   audit_log_close();
    agent_http_cleanup();
    return rc == 0 ? 0 : 1;
 }

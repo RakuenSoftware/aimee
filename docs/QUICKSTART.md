@@ -14,18 +14,20 @@ docker compose -f compose.server-managed.yaml up -d
 docker compose -f compose.server-managed.yaml logs aimee-server
 ```
 
-The server generates a dashboard login on first boot and prints it once, in that log:
+When you do not supply a dashboard login, the server generates one on first boot and prints it once
+in that log. The values below show the format. Your values will be different:
 
 ```text
-[webchat] FIRST-BOOT DASHBOARD LOGIN (shown once, copy it now)
+[webchat] FIRST-BOOT DASHBOARD LOGIN (shown once — copy it now)
 [webchat]     username: aimee-0a901de6e2c3
 [webchat]     password: <64 hex characters>
 ```
 
-Copy it before the log rotates. Only the username is kept on disk afterwards, so the password cannot
-be read back; if you lose it, reset that account's password inside the container or start again from
-an empty volume. To choose the credential yourself instead, seal it before the first `up`. Nothing
-is then generated and nothing is printed:
+Copy the generated password before the log rotates. The plaintext cannot be read back. The data
+volume keeps the username and a root-only password verifier so the PAM account survives a container
+replacement. If you lose the plaintext, reset that account's password inside the container or start
+again from an empty volume. To choose the credential yourself instead, seal it before the first
+`up`. Nothing is then generated or printed:
 
 ```bash
 export AIMEE_WEBCHAT_USER=admin
@@ -36,11 +38,9 @@ unset AIMEE_WEBCHAT_PASSWORD
 docker compose -f compose.server-managed.yaml up -d
 ```
 
-Any name works here, including one that is also a group in the image. First boot creates the account
-with `aimee-webchat` as its primary group, so `useradd` never tries to make a group of its own. The
-wizard's account step is stricter and refuses a name that is already a group
-([#2209](https://github.com/RakuenSoftware/aimee/issues/2209)), so the two disagree until that is
-settled. Sealing the pair here is the path that accepts either.
+The first-boot path accepts a name that is also a group in the image because it creates the account
+with `aimee-webchat` as its primary group. The wizard's replacement-account step refuses that
+collision and tells you to choose another name.
 
 Run the bootstrap script; do not simply export the variables and `up`. `compose.server-managed.yaml`
 deliberately keeps these two out of the server's `environment:` block, because anything listed there
@@ -62,18 +62,20 @@ There is deliberately no default. aimee points `GIT_CONFIG_GLOBAL` and `GIT_CONF
 author: a commit that cannot say who made it is not made.
 
 Those variables are first-boot transport, not runtime configuration. On first boot the entrypoint
-reads that sealed pair and provisions it as a real local PAM account, then the appliance
-authenticates against PAM from the first login onward. There is no parallel credential store, and
-no password, verifier, session bearer, or TLS private key is written to the data volume or
-container logs.
+reads the sealed pair and provisions a real local PAM account. The appliance authenticates against
+PAM from the first login onward. The data volume keeps a root-only shadow verifier so the account
+survives an image replacement; it does not keep the plaintext password. An operator-supplied
+password is not logged. A generated password appears only in the first-boot log shown above.
 
 Open <https://localhost:8443> and sign in.
 
 ![The aimee sign-in page](images/login.png)
 
-Signing in lands you in the chat view with **Set up this instance** already open at step 1 of 6. It
-is a dialog, not a separate page. Closing it does not lose your place: the **Setup** button in the
-header reopens it and shows how many steps are left.
+Signing in lands you in the chat view with **Set up this instance** open at **Secure your account**.
+It is a dialog, not a separate page. A fresh local setup currently has seven steps. A remote KB
+hides the two local-infrastructure steps, and reopening the wizard hides work you already completed,
+so the displayed total can be smaller. Closing the dialog does not lose saved work: the **Setup**
+button in the header reopens it and shows how many required steps remain.
 
 ### Step 1: replace the temporary login
 
@@ -84,17 +86,16 @@ account, and removes the plaintext of the temporary one. A deployment that seale
 `AIMEE_WEBCHAT_USER` pair before first boot skips this step.
 
 Pick a username that is not already a group on the host. The image ships the usual Unix groups, so
-`operator`, `backup`, `staff`, `users`, `news`, `mail`, `proxy`, `adm` and `aimee` will fail here
-with a `useradd` error rather than a readable message
-([#2209](https://github.com/RakuenSoftware/aimee/issues/2209)).
+names such as `operator`, `backup`, `staff`, `users`, `news`, `mail`, `proxy`, `adm`, and `aimee`
+are unavailable. The wizard names the collision and asks you to choose another username.
 
 ### Step 2: choose the primary provider
 
 ![Step 2 of the setup wizard, primary provider](images/wizard-2-provider.png)
 
 An API key for Anthropic or OpenAI, or a Claude or Codex subscription seat signed in through the
-browser. The key is sealed into the server vault and never written to the data volume. You can
-change the primary later on the Agents tab.
+browser. The key is sealed into the server vault; its plaintext is not written to the data volume.
+You can change the primary later on the Agents tab.
 
 ### Step 3: choose the knowledge base
 
@@ -103,13 +104,22 @@ change the primary later on the Agents tab.
 Deploy one locally, or point at an existing `aimee-kb`. A local knowledge base is the default and
 needs nothing else installed.
 
-The remaining steps cover the model roles, optional git host connections, and workspaces. Nothing is
-placed on a host: the embedder runs inside the knowledge base, and synthesis is an endpoint you run
-or nothing at all. Steps 5 and 6 can both be skipped and set later.
+For a local KB, the remaining steps place its embedder and optional synthesizer, choose the bundled
+or external shared store, connect an optional Git host, and add workspaces. The embedder runs inside
+the KB container; synthesis runs in its own sidecar or at a remote endpoint. A Git connection can be
+skipped because public repositories do not require one. You can continue without a
+workspace, but setup remains incomplete until at least one project exists.
 
-The final **Deploy** step starts `aimee-kb`, including private PostgreSQL 18, pgvector, and
-pgvectorscale. There is no inference container: the KB embeds in-process from weights baked into its
-image, and synthesis is external-only (see [Choosing an embedder](#choosing-an-embedder)).
+After the numbered steps, the summary shows a **Deploy the local stack** panel. Its **Deploy** action
+starts one `aimee-kb`, including private PostgreSQL 18, pgvector, and pgvectorscale.
+
+**The embedder runs inside that container. Synthesis does not.** Embedding is served from weights
+baked into the KB image, so it needs no second container. If you selected a local synthesis model,
+Deploy also starts an `aimee-llm` sidecar beside the KB, and the KB reaches it over mutual TLS on the
+Compose network. Choose an external endpoint instead and no sidecar is deployed at all; choose neither
+and synthesis is simply off, which is a supported state. See
+[Choosing an embedder](#choosing-an-embedder), [Local synthesis](#local-synthesis) and
+[KB model backends](KB_LLM_BACKENDS.md).
 
 For a local managed KB, Deploy also runs two explicit one-shot jobs before it
 reports success:
@@ -130,9 +140,9 @@ unprivileged container host that cannot raise `RLIMIT_MEMLOCK`, it proceeds only
 after verifying through `/proc/swaps` that the host has no active swap; otherwise
 Deploy fails closed.
 
-Deploy also claims the signed-in browser account as the first remote owner. It displays one
+The Deploy action also claims the signed-in browser account as the first remote owner. It displays one
 `aimee remote set ...` command that provisions that user's bearer, mTLS certificate, and explicit
-`full` write grant. Keep that page open until you run the command in step 3.
+`full` write grant. Keep that page open until you finish [Section 3](#3-enroll-the-client).
 
 Complete the account step before exposing the host. A deployment that seals both
 `AIMEE_WEBCHAT_USER` and `AIMEE_WEBCHAT_PASSWORD` before the first `up` uses that pair and skips
@@ -152,35 +162,69 @@ password is not one of those and is never sealed into it.
 
 When the appliance is connected to a KB that reports `oidc`, the identity provider owns accounts and
 the wizard's account step disappears; local account creation is refused. Dashboard login itself
-remains PAM in this release. The OIDC login flow arrives in 0.4.0.
+remains PAM in this release. Do not configure OIDC-only identity until the browser login flow is
+available.
 
 ### Choosing an embedder
 
 The wizard's **Deploy topology** step records which embedder the KB uses. Choose one before Deploy.
-The bundled `bekko-a25m` (384-dimension) ships inside the KB image, so it needs no download and no
-second container. Point the KB at your own endpoint instead if you need a wider model.
 
-Nothing is selected on a fresh install, and an unselected KB is not broken. It falls back to a
-builtin lexical embedder and says so once, in the KB log:
+Which embedder a KB can run is a property of the image you pulled, because the weights are baked in:
+
+| image | embedder | size |
+| --- | --- | --- |
+| `aimee-kb-a25m` | `bekko-a25m`, 384-dimension | 1.95 GB |
+| `aimee-kb-nomic` | `nomic-embed-text-v2-moe`, 768-dimension | 3.34 GB |
+| `aimee-kb` | none baked; for an external `EMBEDDER_URL` | 373 MB |
+
+**An embedder is not optional.** Retrieval does not work without one, so the choice is
+between a bundled model and an external endpoint, never "neither". `aimee-kb` exists
+for the external case: it omits PyTorch and the weights rather than shipping code it
+will never run. It is not a way to run without an embedder.
+
+Synthesis is different and genuinely optional: local, external, or off. Off is a
+supported state because embedding, search, recall and indexing never call it.
+
+A bundled embedder needs no download and no second container.
+
+**This choice does not survive a change of mind.** DB2 records the vector-column width and refuses to
+start when it drifts, so moving between 384 and 768 means re-embedding the whole corpus. Choose before
+you ingest anything.
+
+Nothing is selected on a fresh install, and **a KB with no embedder refuses to start**. It says so
+and exits:
 
 ```text
-aimee-kb: no embedder selected; the bundled model stays unloaded (the builtin
-lexical embedder serves until the wizard selects one)
+aimee-kb: no embedder selected, and there is no fallback. Retrieval needs one.
+aimee-kb:   pick a bundled model:  aimee config set embedder_model bekko-a25m
+aimee-kb:   or point at your own:  EMBEDDER_URL=http://<host>:<port>
+aimee-kb: then re-run Deploy. Refusing to start.
 ```
 
-Retrieval still works in that state, but it is keyword matching, not vector search. If you skipped
-the step, set it from the server and re-run Deploy:
+There used to be a lexical fallback here, so an unconfigured KB came up healthy and answered every
+search with keyword matching. A deployment could run for weeks believing it had vector retrieval. It
+is gone. If you skipped the step, set it from the server and re-run Deploy:
 
 ```bash
-aimee config set embedding_model bekko-a25m
+aimee config set embedder_model bekko-a25m
 ```
+
+Once anything has been embedded, changing the embedder is a corpus migration rather than a setting,
+and the KB refuses the switch rather than mixing two vector spaces. See
+[Change the KB embedder](runbooks/change-embedder.md). Choosing in the wizard, before the first
+Deploy, avoids the question entirely.
 
 Confirm the model actually loaded rather than assuming it did:
 
 ```bash
-docker compose -f compose.server-managed.yaml logs aimee-kb | grep -i embedder
+docker compose -p aimee logs aimee-kb | grep -i embedder
 aimee kb status
 ```
+
+Address the managed services by project (`-p aimee`), not by the file you started the server with.
+`compose.server-managed.yaml` declares only `aimee-server`; the server brings `aimee-kb` and
+`aimee-llm` up from its own baked manifest into the same `aimee` project, so
+`-f compose.server-managed.yaml logs aimee-kb` fails with `no such service`.
 
 A loaded embedder logs its dimension and serving identity:
 
@@ -189,9 +233,53 @@ aimee-kb: starting bundled embedder (bekko-a25m) on :8760
 embedder-server: loaded hotchpotch/bekko-embedding-v1-a25m dim=384 threads=8 quant=fp32
 ```
 
-Decide before you ingest. Changing the embedder later re-embeds everything already indexed, and
-changing to one of a different dimension rebuilds the vector schema as well. The wizard names which
-of the two a given switch costs.
+Decide before you ingest. The wizard warns when a later choice changes the vector space, but saving
+the choice does not perform the migration. A different dimension needs the guarded vector-schema
+reset; a same-dimension model, pooling, or prefix change needs a fresh DB2 and source re-ingestion
+because the current reset command deliberately no-ops when the dimensions match. Follow
+[Change the KB embedder](runbooks/change-embedder.md) before changing an active corpus.
+
+### Local synthesis
+
+Synthesis writes curation and summaries. Unlike the embedder it is not inside the KB container: it is
+its own image, `aimee-llm-e2b` or `aimee-llm-e4b`, deployed beside the KB when the wizard selects a
+local model. Which model it carries is a property of the tag, because the weights are baked in.
+
+| image | model | weights |
+| --- | --- | --- |
+| `aimee-llm-e2b` | gemma-4-E2B-it | 2.97 GB (UD-Q4_K_XL) |
+| `aimee-llm-e4b` | gemma-4-E4B-it | 7.46 GB (UD-Q6_K_XL) |
+
+E4B is the better model; E2B is roughly half the resident memory and about twice the CPU speed. See
+[Choosing a synthesis model](SYNTHESIS_MODELS.md) for the measurements behind that.
+
+Three states are all supported, and `off` is not an error: embedding, search, recall and indexing
+never call synthesis.
+
+- **local**: an `aimee-llm-*` sidecar, reached over mutual TLS
+- **external**: `SYNTHESIS_ENDPOINT` at any OpenAI-compatible endpoint
+- **off**: no synthesis
+
+**Unlike the embedder, this is not a one-way door.** The sidecar holds no data, so switching between
+E2B and E4B, adding synthesis to a running deployment, or removing it is a container swap with the KB
+left running.
+
+Confirm the sidecar actually came up, rather than assuming Deploy succeeded:
+
+```bash
+docker compose -p aimee logs aimee-llm | grep -iE 'synthesis|terminator'
+```
+
+A working sidecar logs both halves:
+
+```text
+aimee-llm: starting synthesis (gemma-4-E2B-it) on 127.0.0.1:8760
+aimee-llm: starting mTLS terminator on :8761 (client certificate required)
+```
+
+The mTLS identity is issued by the KB at startup, which is why the KB is deployed first. The sidecar
+refuses to start without it rather than serving unauthenticated, so "no identity" fails loudly at
+deploy instead of quietly at the first curation call.
 
 ### Choosing an image channel
 
@@ -202,7 +290,7 @@ The stack runs the released `:latest` images by default. To run a tested-but-unr
 AIMEE_IMAGE_TAG=testing docker compose -f compose.server-managed.yaml up -d
 ```
 
-Set it for the wizard's **Deploy** step too, not just the server: the server re-runs Compose for the
+Set it for the summary's **Deploy** action too, not just the server: the server re-runs Compose for the
 managed services, so the tag has to be in its environment or the KB falls back to `:latest` while the
 server runs `:testing`. The line above already does this. Mixing versions this way is a real failure
 mode, not a theoretical one. A KB and a server from different builds can disagree about the
@@ -291,7 +379,7 @@ The client is DB-free. It does not need PostgreSQL, SQLite, the KB, or model lib
 
 ## 3. Enroll the client
 
-Copy the exact command shown by the wizard after **Deploy**. It looks like this:
+Copy the exact command shown by the summary after **Deploy**. It looks like this:
 
 ```bash
 aimee remote set https://server.example:8743 <wizard-bearer>

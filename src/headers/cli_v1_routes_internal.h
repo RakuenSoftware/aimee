@@ -73,7 +73,6 @@ cJSON *marshal_memory_archive(int argc, char **argv);
 cJSON *marshal_no_args(const char *method);
 cJSON *marshal_notes_search(int argc, char **argv);
 cJSON *marshal_primary(int argc, char **argv);
-cJSON *marshal_repo_trust(int argc, char **argv);
 cJSON *marshal_request(const char *method, int argc, char **argv);
 
 /* Whether the last marshal_request that returned NULL already told the user why.
@@ -201,7 +200,6 @@ void pt_print_provider_quota(const char *method, cJSON *resp);
 void pt_print_provider_set(const char *method, cJSON *resp);
 void pt_print_provider_show(const char *method, cJSON *resp);
 void pt_print_provider_test(const char *method, cJSON *resp);
-void pt_print_repo_trust(const char *method, cJSON *resp);
 void pt_print_rules_delete(const char *method, cJSON *resp);
 void pt_print_rules_generate(const char *method, cJSON *resp);
 void pt_print_server_health(const char *method, cJSON *resp);

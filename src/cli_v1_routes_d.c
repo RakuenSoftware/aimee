@@ -69,7 +69,6 @@ static const struct
     {"index.structure", pt_print_index_structure},
     {"index.find_callers", pt_print_index_find_callers},
     {"index.deps", pt_print_index_deps},
-    {"repo.trust", pt_print_repo_trust},
     {"graph.sync_code", pt_print_graph_sync_code},
     {"workspace.add", pt_print_workspace_add},
     {"workspace.list", pt_print_workspace_list},
@@ -168,7 +167,31 @@ static void print_text_output(const char *method, cJSON *resp)
          return;
       }
    if (strncmp(method, "skill.", 6) == 0)
+   {
       pt_print_skill_group(method, resp);
+      return;
+   }
+
+   /* NO PRINTER: SHOW THE PAYLOAD, DO NOT SHOW NOTHING.
+    *
+    * 50 of the 181 dispatchable methods reach here. Falling through in silence made
+    * each of them exit 0 having printed nothing at all, which reads as "it worked and
+    * there was nothing to say" and is indistinguishable from it. `aimee vault list`
+    * returned 348 bytes of vault entries over /v1 and printed zero of them; `aimee kb
+    * curator status` and `aimee economizer stats` did the same the moment their
+    * marshallers were added.
+    *
+    * Printing the JSON is never worse than printing nothing. It cannot break a script
+    * that parses this output either, because there was no output to parse -- the only
+    * thing a caller could have depended on is emptiness, and emptiness was the bug.
+    * A method that deserves prose gets an entry in pt_print_table; this is the floor,
+    * not the target. */
+   char *raw = cJSON_PrintUnformatted(resp);
+   if (raw)
+   {
+      puts(raw);
+      free(raw);
+   }
 }
 
 static const char *delegate_output_path_from_args(int argc, char **argv)
@@ -721,7 +744,6 @@ static const struct
     {"provider.test", "POST", "/v1/provider/test"},
     {"ranker.export_view", "GET", "/v1/intelligence/ranker/export-view"},
     {"ranker.fit", "POST", "/v1/intelligence/ranker/fit"},
-    {"repo.trust", "POST", "/v1/repo/trust"},
     {"rules.delete", "POST", "/v1/rules/delete"},
     {"server.health", "GET", "/v1/server/health"},
     {"server.info", "GET", "/v1/server/info"},
@@ -833,13 +855,9 @@ const char *cli_v1_route_for_method(const char *method, const char **verb_out)
         * them; POST on all three because the thin client marshals flags into a body. The
         * server refuses these over TCP (v1_route_requires_uds), so a remote endpoint fails
         * there rather than here. */
-       {"kb.grant.set", "POST", "/v1/grants/write-tier/set"},
-       {"kb.grant.revoke", "POST", "/v1/grants/write-tier/revoke"},
-       {"kb.grant.list", "POST", "/v1/grants/write-tier/list"},
        /* Same route as list: `show` is that listing filtered to one subject, so the row shape
         * has one definition. Only the METHOD differs, so the marshaller can require a
         * subject — without that separation, `show` with no subject silently lists everything. */
-       {"kb.grant.show", "POST", "/v1/grants/write-tier/list"},
        {"kb.health", "GET", "/v1/kb/status"},
        {"kb.ingest.status", "GET", "/v1/kb/ingest/status"},
        {"kb.status", "GET", "/v1/kb/status"},
@@ -1759,7 +1777,8 @@ static int cli_v1_finish_response(const cli_v1_route_t *route, cJSON *resp, int 
    {
       cJSON *msg = cJSON_GetObjectItemCaseSensitive(resp, "message");
       if (cJSON_IsString(msg) && msg->valuestring[0])
-         fprintf(stderr, "aimee: %s\n", msg->valuestring);
+         fprintf(stderr, "aimee: %s\n  (via %s)\n", msg->valuestring,
+                 aimee_client_transport_label());
       cJSON_Delete(resp);
       return 1;
    }
@@ -1772,9 +1791,9 @@ static int cli_v1_finish_response(const cli_v1_route_t *route, cJSON *resp, int 
    if (cJSON_IsObject(err))
    {
       cJSON *emsg = cJSON_GetObjectItemCaseSensitive(err, "message");
-      fprintf(stderr, "aimee: %s\n",
-              (cJSON_IsString(emsg) && emsg->valuestring[0]) ? emsg->valuestring
-                                                             : "request failed");
+      fprintf(stderr, "aimee: %s\n  (via %s)\n",
+              (cJSON_IsString(emsg) && emsg->valuestring[0]) ? emsg->valuestring : "request failed",
+              aimee_client_transport_label());
       cJSON_Delete(resp);
       return 1;
    }
@@ -1788,9 +1807,11 @@ static int cli_v1_finish_response(const cli_v1_route_t *route, cJSON *resp, int 
    if (http_status >= 400)
    {
       if (cJSON_IsString(err) && err->valuestring[0])
-         fprintf(stderr, "aimee: %s\n", err->valuestring);
+         fprintf(stderr, "aimee: %s\n  (via %s)\n", err->valuestring,
+                 aimee_client_transport_label());
       else
-         fprintf(stderr, "aimee: server returned HTTP %d for '%s'\n", http_status, route->method);
+         fprintf(stderr, "aimee: server returned HTTP %d for '%s'\n  (via %s)\n", http_status,
+                 route->method, aimee_client_transport_label());
       cJSON_Delete(resp);
       return 1;
    }
@@ -1874,6 +1895,84 @@ static int cli_v1_finish_response(const cli_v1_route_t *route, cJSON *resp, int 
 
 /* --- Main /v1 forward function --- */
 
+/* Methods that must not be dispatched until the operator has said yes.
+ *
+ * A LIST RATHER THAN A COLUMN in rpc_routes: that table is built with positional
+ * initializers and -Werror=missing-field-initializers, so a seventh field would mean
+ * editing every one of its ~200 rows to add ", 0". The gate is worth more than the
+ * adjacency.
+ *
+ * workspace.remove is here because it silently succeeded. Adding another destructive
+ * method is one line, and cli_v1_confirm_or_refuse's caveat text is where anything
+ * surprising about it belongs. */
+static const char *const CLI_V1_CONFIRM_METHODS[] = {
+    "workspace.remove",
+    NULL,
+};
+
+/* Ask before doing something the operator cannot undo from the CLI.
+ *
+ * CLIENT-SIDE, because the server has no terminal to ask at: by the time a request
+ * reaches /v1 the only options left are to do it or refuse it.
+ *
+ * Two ways through, mirroring `aimee kb reembed`, which is the existing precedent for
+ * a gated mutation: --confirm (or --yes) for a script, or typing y at a prompt. With
+ * neither a flag nor a terminal there is nobody to ask, so it refuses -- a cron job
+ * that removes a workspace should have to say so.
+ *
+ * Returns 1 to proceed, 0 to abort. */
+static int cli_v1_confirm_or_refuse(const char *method, int argc, char **argv)
+{
+   int gated = 0;
+   for (size_t i = 0; CLI_V1_CONFIRM_METHODS[i] && !gated; i++)
+      gated = strcmp(method, CLI_V1_CONFIRM_METHODS[i]) == 0;
+   if (!gated)
+      return 1;
+
+   static const char *bool_flags[] = {"confirm", "yes", "json", NULL};
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, bool_flags, &opts);
+   if (rpc_get(&opts, "confirm") || rpc_get(&opts, "yes"))
+      return 1;
+
+   /* The first positional is the thing being acted on, when there is one. */
+   const char *target = NULL;
+   for (int i = 0; i < argc; i++)
+      if (argv[i] && argv[i][0] != '-')
+      {
+         target = argv[i];
+         break;
+      }
+
+   /* Say what it does AND what it does not. `workspace remove` drops the
+    * registration and leaves the indexed corpus searchable, which is the part an
+    * operator is most likely to get wrong -- and did, in testing. */
+   const char *caveat = strcmp(method, "workspace.remove") == 0
+                            ? "  The indexed corpus is NOT deleted: documents stay in the "
+                              "knowledge base and stay searchable.\n"
+                            : "";
+
+   if (!isatty(STDIN_FILENO))
+   {
+      fprintf(stderr,
+              "aimee: %s needs confirmation and stdin is not a terminal.\n%s"
+              "  Re-run with --confirm.\n",
+              method, caveat);
+      return 0;
+   }
+
+   fprintf(stderr, "%s", caveat);
+   fprintf(stderr, "%s%s%s: proceed? [y/N] ", method, target ? " " : "", target ? target : "");
+   fflush(stderr);
+   char line[16] = "";
+   if (!fgets(line, sizeof(line), stdin) || (line[0] != 'y' && line[0] != 'Y'))
+   {
+      fprintf(stderr, "Aborted.\n");
+      return 0;
+   }
+   return 1;
+}
+
 int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int json_output,
                    const char *json_fields, const char *response_profile, int argc, char **argv)
 {
@@ -1892,6 +1991,9 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
       fwd_argc--;
       fwd_argv++;
    }
+   if (!cli_v1_confirm_or_refuse(route->method, fwd_argc, fwd_argv))
+      return 2;
+
    int effective_json_output = json_output || cli_v1_args_request_json(fwd_argc, fwd_argv);
 
    cJSON *req = marshal_request(route->method, fwd_argc, fwd_argv);

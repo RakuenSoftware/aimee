@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include "aimee.h"
 #include "cJSON.h"
+#include "config_fields.h"
 #include "config_learning.h"
 #include "config_database.h"
 #include "config_sections.h"
@@ -281,10 +282,8 @@ int main(void)
       snprintf(cfg.kb_client_bearer_token, sizeof(cfg.kb_client_bearer_token), "tok-abc123");
       /* Setup-wizard page-2 backend record (kb_mode + per-role llm_* fields). */
       snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
-      snprintf(cfg.llm_embed_backend, sizeof(cfg.llm_embed_backend), "local");
-      snprintf(cfg.llm_synth_backend, sizeof(cfg.llm_synth_backend), "external");
-      snprintf(cfg.llm_synth_endpoint, sizeof(cfg.llm_synth_endpoint), "https://api.example/v1");
-      snprintf(cfg.llm_synth_model, sizeof(cfg.llm_synth_model), "gpt-5.5");
+      snprintf(cfg.synthesis_endpoint, sizeof(cfg.synthesis_endpoint), "https://api.example/v1");
+      snprintf(cfg.synthesis_model, sizeof(cfg.synthesis_model), "gpt-5.5");
       cfg.server_api_http_port = 8910;
       snprintf(cfg.server_api_bearer_token, sizeof(cfg.server_api_bearer_token), "tok-api-xyz");
       cfg.server_api_bearer_extra_count = 2;
@@ -383,10 +382,6 @@ int main(void)
       snprintf(cfg.kb_curator_provider_base_url, sizeof(cfg.kb_curator_provider_base_url),
                "http://curator:8080/v1");
       snprintf(cfg.kb_curator_provider_model, sizeof(cfg.kb_curator_provider_model), "gemma-4-e4b");
-      snprintf(cfg.kb_curator_tier_b_base_url, sizeof(cfg.kb_curator_tier_b_base_url),
-               "https://api.big/v1");
-      snprintf(cfg.kb_curator_tier_b_model, sizeof(cfg.kb_curator_tier_b_model), "big-32b");
-      snprintf(cfg.kb_curator_tier_b_api_key, sizeof(cfg.kb_curator_tier_b_api_key), "sk-secret");
       cfg.kb_evidence_embed_enabled = 0;
       /* kb.curator.cross_repo_graph.* — non-default values must round-trip; enabled
        * defaults on so set off to prove the disabled state survives save+reload. */
@@ -545,10 +540,8 @@ int main(void)
       assert(cfg2.kb_client_bearer_token[0] == '\0');
       /* Setup-wizard page-2 backend record survives save/load. */
       assert(strcmp(cfg2.kb_mode, "local") == 0);
-      assert(strcmp(cfg2.llm_embed_backend, "local") == 0);
-      assert(strcmp(cfg2.llm_synth_backend, "external") == 0);
-      assert(strcmp(cfg2.llm_synth_endpoint, "https://api.example/v1") == 0);
-      assert(strcmp(cfg2.llm_synth_model, "gpt-5.5") == 0);
+      assert(strcmp(cfg2.synthesis_endpoint, "https://api.example/v1") == 0);
+      assert(strcmp(cfg2.synthesis_model, "gpt-5.5") == 0);
       assert(cfg2.server_api_http_port == 8910);
       assert(cfg2.server_api_bearer_token[0] == '\0');
       assert(cfg2.server_api_bearer_extra_count == 0);
@@ -638,9 +631,6 @@ int main(void)
       assert(strcmp(cfg2.kb_curator_synthesize_command, "synth --json") == 0);
       assert(strcmp(cfg2.kb_curator_provider_base_url, "http://curator:8080/v1") == 0);
       assert(strcmp(cfg2.kb_curator_provider_model, "gemma-4-e4b") == 0);
-      assert(strcmp(cfg2.kb_curator_tier_b_base_url, "https://api.big/v1") == 0);
-      assert(strcmp(cfg2.kb_curator_tier_b_model, "big-32b") == 0);
-      assert(cfg2.kb_curator_tier_b_api_key[0] == '\0');
       assert(cfg2.kb_evidence_embed_enabled == 0);
       assert(cfg2.kb_curator_cross_repo_graph_enabled == 0);
       assert(cfg2.kb_curator_cross_repo_distinctiveness_v == 3);
@@ -2415,63 +2405,63 @@ int main(void)
       cJSON_Delete(partial);
    }
 
-   /* AIMEE_EMBEDDING_DIM env override (config_resolve_embedding_dim) */
+   /* EMBEDDER_DIMS env override (config_resolve_embedder_dims) */
    {
-      char *saved = getenv("AIMEE_EMBEDDING_DIM");
+      char *saved = getenv("EMBEDDER_DIMS");
       if (saved)
          saved = strdup(saved);
 
       config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
-      cfg.embedding_dim = 2560;
+      cfg.embedder_dims = 2560;
 
       /* unset -> returns the cfg value */
-      platform_unsetenv("AIMEE_EMBEDDING_DIM");
-      assert(config_resolve_embedding_dim(&cfg) == 2560);
+      platform_unsetenv("EMBEDDER_DIMS");
+      assert(config_resolve_embedder_dims(&cfg) == 2560);
 
       /* valid env -> overrides */
-      platform_setenv("AIMEE_EMBEDDING_DIM", "1024");
-      assert(config_resolve_embedding_dim(&cfg) == 1024);
+      platform_setenv("EMBEDDER_DIMS", "1024");
+      assert(config_resolve_embedder_dims(&cfg) == 1024);
 
       /* empty -> treated as unset, falls back to cfg */
-      platform_setenv("AIMEE_EMBEDDING_DIM", "");
-      assert(config_resolve_embedding_dim(&cfg) == 2560);
+      platform_setenv("EMBEDDER_DIMS", "");
+      assert(config_resolve_embedder_dims(&cfg) == 2560);
 
       /* non-numeric / out-of-range -> rejected, falls back to cfg */
-      platform_setenv("AIMEE_EMBEDDING_DIM", "abc");
-      assert(config_resolve_embedding_dim(&cfg) == 2560);
-      platform_setenv("AIMEE_EMBEDDING_DIM", "999999");
-      assert(config_resolve_embedding_dim(&cfg) == 2560);
+      platform_setenv("EMBEDDER_DIMS", "abc");
+      assert(config_resolve_embedder_dims(&cfg) == 2560);
+      platform_setenv("EMBEDDER_DIMS", "999999");
+      assert(config_resolve_embedder_dims(&cfg) == 2560);
 
       /* NULL cfg with no env -> 0 (no crash) */
-      platform_unsetenv("AIMEE_EMBEDDING_DIM");
-      assert(config_resolve_embedding_dim(NULL) == 0);
+      platform_unsetenv("EMBEDDER_DIMS");
+      assert(config_resolve_embedder_dims(NULL) == 0);
 
-      /* §2a: config_embedding_dim_is_pinned == (config_resolve_embedding_dim > 0).
+      /* §2a: config_embedder_dims_is_pinned == (config_resolve_embedder_dims > 0).
        * The env="0"/non-numeric rows are the point — they must NOT count as a pin. */
-      platform_unsetenv("AIMEE_EMBEDDING_DIM");
-      assert(config_embedding_dim_is_pinned(&cfg) == 1); /* cfg->embedding_dim=2560 */
-      platform_setenv("AIMEE_EMBEDDING_DIM", "2560");
-      assert(config_embedding_dim_is_pinned(&cfg) == 1); /* valid env pin */
-      platform_setenv("AIMEE_EMBEDDING_DIM", "0");
+      platform_unsetenv("EMBEDDER_DIMS");
+      assert(config_embedder_dims_is_pinned(&cfg) == 1); /* cfg->embedder_dims=2560 */
+      platform_setenv("EMBEDDER_DIMS", "2560");
+      assert(config_embedder_dims_is_pinned(&cfg) == 1); /* valid env pin */
+      platform_setenv("EMBEDDER_DIMS", "0");
       {
          config_t unset_cfg;
          memset(&unset_cfg, 0, sizeof(unset_cfg));                /* embedding_dim = 0 */
-         assert(config_embedding_dim_is_pinned(&unset_cfg) == 0); /* env "0" is not a pin */
-         platform_setenv("AIMEE_EMBEDDING_DIM", "garbage");
-         assert(config_embedding_dim_is_pinned(&unset_cfg) == 0); /* non-numeric is not a pin */
-         platform_unsetenv("AIMEE_EMBEDDING_DIM");
-         assert(config_embedding_dim_is_pinned(&unset_cfg) == 0); /* unset + cfg=0 -> not pinned */
-         assert(config_embedding_dim_is_pinned(&cfg) == 1);       /* unset + cfg=2560 -> pinned */
+         assert(config_embedder_dims_is_pinned(&unset_cfg) == 0); /* env "0" is not a pin */
+         platform_setenv("EMBEDDER_DIMS", "garbage");
+         assert(config_embedder_dims_is_pinned(&unset_cfg) == 0); /* non-numeric is not a pin */
+         platform_unsetenv("EMBEDDER_DIMS");
+         assert(config_embedder_dims_is_pinned(&unset_cfg) == 0); /* unset + cfg=0 -> not pinned */
+         assert(config_embedder_dims_is_pinned(&cfg) == 1);       /* unset + cfg=2560 -> pinned */
       }
 
       if (saved)
       {
-         platform_setenv("AIMEE_EMBEDDING_DIM", saved);
+         platform_setenv("EMBEDDER_DIMS", saved);
          free(saved);
       }
       else
-         platform_unsetenv("AIMEE_EMBEDDING_DIM");
+         platform_unsetenv("EMBEDDER_DIMS");
    }
 
    /* --- §5 hybrid RRF weights parse from kb.code_hybrid.* --- */
@@ -2545,6 +2535,81 @@ int main(void)
       cJSON_Delete(root);
    }
 
+   /* --- only credentials are Vault-backed --- */
+   {
+      /* A field with a secret_name is a process-memory view of a Vault record: it is
+       * NEVER serialized, config.show and config.get render it as a presence BOOLEAN,
+       * and config_set writes it to Vault instead of YAML.
+       *
+       * That is right for a credential and catastrophic for a setting. Eight ordinary
+       * fields were tagged this way -- embedder_model, embedder_url, embedder_dims,
+       * synthesis_endpoint, synthesis_model, synthesis_thinking, aimee_synthesis_model,
+       * aimee_with_llamacpp -- because the environment-variable name was written into
+       * the secret_name slot. The effect was that `aimee config set embedder_model
+       * bekko-a25m` reported "= true", `config get` returned false, and the value went
+       * into Vault where nothing reads it. A deployment could not select an embedder at
+       * all, and the KB logged "no embedder selected" whatever the operator did.
+       *
+       * secret_name is not an env-var binding and never was: nothing reads getenv()
+       * through it. The env vars are consumed by the container entrypoint and
+       * embedder-server.py, not by this table.
+       *
+       * So this asserts the classification directly. A model name, a dimension count
+       * and a boolean are not credentials. */
+      static const char *const not_secrets[] = {
+          "embedder_model",        "embedder_url",        "embedder_dims",
+          "synthesis_model",       "synthesis_endpoint",  "synthesis_thinking",
+          "aimee_synthesis_model", "aimee_with_llamacpp", NULL};
+      for (int i = 0; not_secrets[i]; i++)
+      {
+         const config_field_t *f = config_field_lookup(not_secrets[i]);
+         assert(f && "field must exist");
+         assert(config_field_secret_name(f) == NULL);
+      }
+
+      /* --- an embedder the image cannot serve is refused --- */
+      /* config_set writes YAML, so this needs a home of its own; the block that owns
+       * AIMEE_HOME above has already restored the ambient one by here. */
+      {
+         char home[256];
+         snprintf(home, sizeof(home), "/tmp/aimee-cfgset-%d", (int)getpid());
+         mkdir(home, 0700);
+         platform_setenv("AIMEE_HOME", home);
+
+         /* The two names the images bake are accepted. */
+         assert(config_set("embedder_model", "bekko-a25m") == 0);
+         assert(config_set("embedder_model", "nomic-embed-text-v2-moe") == 0);
+
+         /* A typo is NOT, while no external endpoint is configured. Unrefused, it
+          * deployed the a25m image with EMBEDDER_MODEL=<typo>, started no embedder,
+          * and searched lexically while every health surface said ok. */
+         assert(config_set("embedder_model", "bekko-a25") != 0);
+         assert(config_set("embedder_model", "not-a-model") != 0);
+
+         /* With an external endpoint the name belongs to that endpoint and any value
+          * is legitimate -- this is the half a blanket allowlist would have broken. */
+         assert(config_set("embedder_url", "https://embed.example/v1") == 0);
+         assert(config_set("embedder_model", "text-embedding-3-small") == 0);
+
+         /* Clearing stays allowed: it is how an operator hands the role over. */
+         assert(config_set("embedder_model", "") == 0);
+
+         platform_unsetenv("AIMEE_HOME");
+      }
+
+      /* The real credentials stay Vault-backed. This half is what stops the fix above
+       * from being applied too broadly. */
+      static const char *const secrets[] = {"embedder_api_key", "synthesis_api_key",
+                                            "kb_api_bearer_token", "db2_url", NULL};
+      for (int i = 0; secrets[i]; i++)
+      {
+         const config_field_t *f = config_field_lookup(secrets[i]);
+         assert(f && "field must exist");
+         assert(config_field_secret_name(f) != NULL);
+      }
+      printf("  config_field secret classification: ok\n");
+   }
+
    /* --- config_emit_deploy_env: page-2 record -> compose env --- */
    {
       char env[2048];
@@ -2557,33 +2622,71 @@ int main(void)
        * embedder rides along as a MODEL CHOICE rather than a container placement. */
       memset(&cfg, 0, sizeof(cfg));
       snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
-      snprintf(cfg.llm_embed_backend, sizeof(cfg.llm_embed_backend), "local");
-      snprintf(cfg.embedding_model, sizeof(cfg.embedding_model), "bekko-a25m");
-      snprintf(cfg.llm_synth_backend, sizeof(cfg.llm_synth_backend), "external");
-      snprintf(cfg.llm_synth_endpoint, sizeof(cfg.llm_synth_endpoint), "https://api.x/v1");
+      snprintf(cfg.embedder_model, sizeof(cfg.embedder_model), "bekko-a25m");
+      snprintf(cfg.synthesis_endpoint, sizeof(cfg.synthesis_endpoint), "https://api.x/v1");
       config_emit_deploy_env(&cfg, env, sizeof(env));
       assert(strstr(env, "COMPOSE_PROFILES=kb\n") != NULL);
-      assert(strstr(env, ",llm") == NULL); /* the retired container takes its profile */
+      /* An EXTERNAL endpoint deploys no sidecar: nothing local serves synthesis. */
+      assert(strstr(env, ",llm") == NULL);
       assert(strstr(env, "EMBEDDER_MODEL=bekko-a25m\n") != NULL);
-      assert(strstr(env, "AIMEE_LLM_SYNTH_MODE=external\n") != NULL);
-      /* AIMEE_LLM_URL, the variable config_synth_chat_endpoint() honours — not
-       * AIMEE_LLM_SYNTH_URL, which was the retired gateway's own knob and which
-       * nothing reads, so emitting it left external synth configured but dead. */
-      assert(strstr(env, "AIMEE_LLM_URL=https://api.x/v1\n") != NULL);
-      assert(strstr(env, "AIMEE_LLM_SYNTH_URL") == NULL);
-      /* No embedder container to size, place or point at. */
-      assert(strstr(env, "AIMEE_LLM_EMBED_") == NULL);
-      assert(strstr(env, "AIMEE_EMBEDDING_DIM") == NULL); /* in-container => derived */
+      /* The embedder is BAKED, so the choice picks an image, not just a setting.
+       * Emitting the model alone told the kb to start weights its image might not
+       * contain -- and `aimee-kb` changed meaning from "bekko" to "no embedder", so
+       * that combination was a live regression rather than a missing feature. */
+      assert(strstr(env, "AIMEE_KB_VARIANT=a25m\n") != NULL);
+      assert(strstr(env, "SYNTHESIS_ENDPOINT=https://api.x/v1\n") != NULL);
+      /* No sidecar, so no client identity: SYNTHESIS_CA_FILE REPLACES the system trust
+       * store, and pointing it at our CA while the endpoint is external would reject a
+       * perfectly valid certificate. */
+      assert(strstr(env, "SYNTHESIS_CA_FILE") == NULL);
+      assert(strstr(env, "AIMEE_LLM_HOST") == NULL);
+      assert(strstr(env, "EMBEDDER_DIMS") == NULL); /* in-container => derived */
+      assert(strstr(env, "EMBEDDER_URL") == NULL);  /* no URL => the bundled model */
 
-      /* A local synth still names its tier: that role has not moved. */
+      /* Synthesis OFF is a supported state, not an error: no endpoint, no emission,
+       * and the kb still deploys. This is what llm_synth_backend="off" encoded. */
       memset(&cfg, 0, sizeof(cfg));
       snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
-      snprintf(cfg.llm_embed_backend, sizeof(cfg.llm_embed_backend), "local");
-      snprintf(cfg.llm_synth_backend, sizeof(cfg.llm_synth_backend), "local");
-      snprintf(cfg.llm_synth_tier, sizeof(cfg.llm_synth_tier), "cpu");
       config_emit_deploy_env(&cfg, env, sizeof(env));
       assert(strstr(env, "COMPOSE_PROFILES=kb\n") != NULL);
-      assert(strstr(env, "AIMEE_LLM_SYNTH_TIER=cpu\n") != NULL);
+      assert(strstr(env, "SYNTHESIS_ENDPOINT") == NULL);
+      assert(strstr(env, "SYNTHESIS_MODEL") == NULL);
+      assert(strstr(env, "AIMEE_LLM_HOST") == NULL);
+      /* NOTHING SELECTED MUST NOT YIELD THE EMBEDDERLESS IMAGE. aimee-kb carries no
+       * weights, so that combination cannot embed and cannot be repaired by setting a
+       * key -- it needs a different image. a25m is what `aimee-kb` meant before the
+       * axis was split, so an unconfigured deployment keeps what it already had. */
+      assert(strstr(env, "AIMEE_KB_VARIANT=a25m\n") != NULL);
+
+      /* A BUNDLED model is a DEPLOYED SIDECAR, not a loopback endpoint. It used to be
+       * in-process in the kb; it is aimee-llm-e{2,4}b beside the kb now, reached over
+       * mTLS. Every line below is load-bearing: without the profile the service exists
+       * in Compose and nothing starts it, without AIMEE_LLM_HOST the kb never mints the
+       * identity the sidecar refuses to start without, and without the endpoint the kb
+       * has a running sidecar it never calls. Each failure is silent. */
+      memset(&cfg, 0, sizeof(cfg));
+      snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
+      snprintf(cfg.embedder_model, sizeof(cfg.embedder_model), "nomic-embed-text-v2-moe");
+      snprintf(cfg.synthesis_model, sizeof(cfg.synthesis_model), "gemma-4-E4B-it");
+      config_emit_deploy_env(&cfg, env, sizeof(env));
+      assert(strstr(env, "SYNTHESIS_MODEL=gemma-4-E4B-it\n") != NULL);
+      assert(strstr(env, "COMPOSE_PROFILES=kb,llm\n") != NULL);
+      assert(strstr(env, "AIMEE_LLM_VARIANT=e4b\n") != NULL);
+      assert(strstr(env, "AIMEE_LLM_HOST=aimee-llm\n") != NULL);
+      assert(strstr(env, "SYNTHESIS_ENDPOINT=https://aimee-llm:8761/v1\n") != NULL);
+      assert(strstr(env, "SYNTHESIS_CA_FILE=/var/lib/aimee/synthesis-tls/ca.pem\n") != NULL);
+      assert(strstr(env, "SYNTHESIS_CERT_FILE=/var/lib/aimee/synthesis-tls/client.pem\n") != NULL);
+      assert(strstr(env, "SYNTHESIS_KEY_FILE=/var/lib/aimee/synthesis-tls/client.key\n") != NULL);
+      /* The embedder axis is independent of the synthesis axis now. */
+      assert(strstr(env, "AIMEE_KB_VARIANT=nomic\n") != NULL);
+
+      /* E2B selects the other sidecar tag. */
+      memset(&cfg, 0, sizeof(cfg));
+      snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
+      snprintf(cfg.synthesis_model, sizeof(cfg.synthesis_model), "gemma-4-E2B-it");
+      config_emit_deploy_env(&cfg, env, sizeof(env));
+      assert(strstr(env, "AIMEE_LLM_VARIANT=e2b\n") != NULL);
+      assert(strstr(env, "COMPOSE_PROFILES=kb,llm\n") != NULL);
 
       /* Remote kb: connect out, deploy nothing. */
       memset(&cfg, 0, sizeof(cfg));
@@ -2594,7 +2697,7 @@ int main(void)
       assert(strstr(env, "COMPOSE_PROFILES=\n") != NULL);
       assert(strstr(env, "AIMEE_KB_API_URL=https://kb.remote:4010\n") != NULL);
       assert(strstr(env, "AIMEE_KB_API_BEARER_TOKEN=") == NULL);
-      assert(strstr(env, "AIMEE_LLM_") == NULL);
+      assert(strstr(env, "SYNTHESIS_") == NULL);
       assert(strstr(env, "EMBEDDER_MODEL") == NULL);
 
       /* An EXTERNAL embedder: the endpoint is passed as the embedder URL the kb's
@@ -2602,15 +2705,23 @@ int main(void)
        * it from a model we do not serve. */
       memset(&cfg, 0, sizeof(cfg));
       snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
-      snprintf(cfg.llm_embed_backend, sizeof(cfg.llm_embed_backend), "external");
-      snprintf(cfg.embedding_endpoint, sizeof(cfg.embedding_endpoint), "https://emb.x/v1");
-      cfg.embedding_dim = 2560;
-      snprintf(cfg.llm_synth_backend, sizeof(cfg.llm_synth_backend), "external");
-      snprintf(cfg.llm_synth_endpoint, sizeof(cfg.llm_synth_endpoint), "https://synth.x/v1");
+      snprintf(cfg.embedder_url, sizeof(cfg.embedder_url), "https://emb.x/v1");
+      cfg.embedder_dims = 2560;
+      snprintf(cfg.embedder_api_key, sizeof(cfg.embedder_api_key), "emb-key");
+      snprintf(cfg.synthesis_endpoint, sizeof(cfg.synthesis_endpoint), "https://synth.x/v1");
+      snprintf(cfg.synthesis_api_key, sizeof(cfg.synthesis_api_key), "syn-key");
       config_emit_deploy_env(&cfg, env, sizeof(env));
       assert(strstr(env, "COMPOSE_PROFILES=kb\n") != NULL);
-      assert(strstr(env, "AIMEE_EMBEDDER_URL=https://emb.x/v1\n") != NULL);
-      assert(strstr(env, "AIMEE_EMBEDDING_DIM=2560\n") != NULL);
+      /* An external endpoint is the ONE case the embedderless image is right for. */
+      assert(strstr(env, "AIMEE_KB_VARIANT=\n") != NULL);
+      assert(strstr(env, "EMBEDDER_URL=https://emb.x/v1\n") != NULL);
+      /* Credentials are NEVER emitted into a long-lived service environment:
+       * Config.Env persists and shows up in `docker inspect`. They are sealed into
+       * Vault by the disposable bootstrap helper (check-vault-only-container-env
+       * enforces this, and caught it when this emitted them). */
+      assert(strstr(env, "EMBEDDER_API_KEY") == NULL);
+      assert(strstr(env, "EMBEDDER_DIMS=2560\n") != NULL);
+      assert(strstr(env, "SYNTHESIS_API_KEY") == NULL);
    }
 
    printf("all tests passed\n");

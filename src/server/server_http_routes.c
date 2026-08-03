@@ -10,8 +10,8 @@
 #include "server.h"         /* CAP_* / CAPS_* capability bits, server_capability_for_method */
 #include "server_conn_io.h" /* transport-aware fd I/O (native-TLS phase 1) */
 #include "server_tls.h"     /* native TLS termination (phase 1b) */
-#include "workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
-#include "forge_credentials.h"         /* forge_cred_install for the /v1 token-install route */
+#include "modules/workspace/workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
+#include "modules/git/forge_credentials.h" /* forge_cred_install for the /v1 token-install route */
 #include <time.h>
 #include "persona.h"
 #include "role_templates.h"
@@ -43,7 +43,6 @@
 #include "server_workflow_api.h" /* W7: /v1/workflow read+author handlers */
 #include "wfe_http_proxy.h"      /* public workflow routes -> private Go control plane */
 #include "cJSON.h"
-#include "kb_client_grants.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netinet/in.h>
@@ -69,24 +68,24 @@ __attribute__((weak)) int server_agent_management_set_enabled(const char *name, 
 }
 /* Route-handler deps used below but not needed by server_http.c's own body
  * (kept here, not in server_http.c, to respect its 2000-line limit). */
-#include "git_forge_vault.h" /* GIT_FORGE_VAULT_AGENT/SSHKEY_CRED — per-webuser ssh-key vault */
-#include "git_host_cred.h"   /* per-host git credential store for /v1/git/credentials */
-#include "git_ops.h"         /* git_ops_run for /v1/workspace/git (WP-E) */
-#include "git_ssh_agent.h"   /* git_ssh_agent_stop — drop live key handles on revoke */
-#include "vault_service.h"   /* vault_service_set/delete for the per-webuser ssh-key route */
-#include "git_project.h"     /* git_project_clone for /v1/workspace/clone (WP-D) */
-#include "git_org_repos.h"   /* git_org_repos_list for /v1/workspace/org-repos */
-#include "webuser_editor.h"  /* webuser_editor_ensure for /v1/workspace/editor (WP-I) */
-#include "workspace_scope.h" /* ws_scope_user_root — project workspace root */
-#include "webchat_live.h"    /* db1_webchat_live_get — the browser's live-turn poll */
-#include "index.h"           /* index_scan_project after a webuser clone (WP-D) */
-#include "kb_client.h"       /* kb_client_index_scan — push webuser clones into aimee-kb */
-#include "aimee_home.h"      /* aimee_home — proposal artifact dir for /v1/dev/submit */
-#include <math.h>            /* isfinite — validate the /v1/dev/submit budget cap */
-#include <errno.h>           /* strtol overflow detection for /v1/dev/submit caps */
-#include "wfe_engine.h"      /* wfe_work_item_create — POST /v1/dev/submit intake */
-#include "json_fluent.h"     /* jo_cstr — parse the CI-event webhook body */
-#include <openssl/hmac.h>    /* HMAC-SHA256 for the CI-event webhook (server links -lcrypto) */
+#include "modules/git/git_forge_vault.h" /* GIT_FORGE_VAULT_AGENT/SSHKEY_CRED — per-webuser ssh-key vault */
+#include "modules/git/git_host_cred.h" /* per-host git credential store for /v1/git/credentials */
+#include <aimee/git/git_ops.h>         /* git_ops_run for /v1/workspace/git (WP-E) */
+#include "modules/git/git_ssh_agent.h" /* git_ssh_agent_stop — drop live key handles on revoke */
+#include "vault_service.h" /* vault_service_set/delete for the per-webuser ssh-key route */
+#include "modules/git/git_project.h"   /* git_project_clone for /v1/workspace/clone (WP-D) */
+#include "modules/git/git_org_repos.h" /* git_org_repos_list for /v1/workspace/org-repos */
+#include "webuser_editor.h"            /* webuser_editor_ensure for /v1/workspace/editor (WP-I) */
+#include "modules/workspace/workspace_scope.h" /* ws_scope_user_root — project workspace root */
+#include "webchat_live.h" /* db1_webchat_live_get — the browser's live-turn poll */
+#include "index.h"        /* index_scan_project after a webuser clone (WP-D) */
+#include "kb_client.h"    /* kb_client_index_scan — push webuser clones into aimee-kb */
+#include "aimee_home.h"   /* aimee_home — proposal artifact dir for /v1/dev/submit */
+#include <math.h>         /* isfinite — validate the /v1/dev/submit budget cap */
+#include <errno.h>        /* strtol overflow detection for /v1/dev/submit caps */
+#include "wfe_engine.h"   /* wfe_work_item_create — POST /v1/dev/submit intake */
+#include "json_fluent.h"  /* jo_cstr — parse the CI-event webhook body */
+#include <openssl/hmac.h> /* HMAC-SHA256 for the CI-event webhook (server links -lcrypto) */
 #include <openssl/evp.h>
 #include <openssl/sha.h>
 #include <openssl/rand.h>
@@ -1806,14 +1805,6 @@ static const http_route_t g_v1_routes[] = {
      * these over TCP regardless of bearer, tier or capability; CAP_GRANT_ADMIN is defence in
      * depth. Not given an `op` twin, because there is no NDJSON socket method for grant
      * administration and inventing one would create a second reachable path to it. */
-    /* All three are POST, including the read. The thin client marshals a command's flags
-     * into a JSON BODY and has no per-method query-string builder, so a GET here would need
-     * a bespoke path builder for one route — and `aimee kb grant list` is the only caller.
-     * The body is also the better fit for a subject, which can contain ':' and '%'. */
-    {"POST", "/v1/grants/write-tier/set", NULL, RM_EXACT, NULL, CAP_GRANT_ADMIN, rh_grant_set},
-    {"POST", "/v1/grants/write-tier/revoke", NULL, RM_EXACT, NULL, CAP_GRANT_ADMIN,
-     rh_grant_revoke},
-    {"POST", "/v1/grants/write-tier/list", NULL, RM_EXACT, NULL, CAP_GRANT_ADMIN, rh_grant_list},
     {"GET", "/v1/kb/curator", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_kb_curator},
     {"GET", "/v1/agents", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_agents},
     {"GET", "/v1/roadmap", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_roadmap},
@@ -1861,7 +1852,6 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/index/structure", NULL, RM_EXACT, "index.structure", 0, rh_dispatch_op},
     {"POST", "/v1/index/find_callers", NULL, RM_EXACT, "index.find_callers", 0, rh_dispatch_op},
     {"POST", "/v1/index/deps", NULL, RM_EXACT, "index.deps", 0, rh_dispatch_op},
-    {"POST", "/v1/repo/trust", NULL, RM_EXACT, "repo.trust", 0, rh_dispatch_op},
     {"POST", "/v1/index/blast_radius", NULL, RM_EXACT, "index.blast_radius", 0, rh_dispatch_op},
 
     /* Skill + work-queue read families (hub-migration P1), same dispatch-backed

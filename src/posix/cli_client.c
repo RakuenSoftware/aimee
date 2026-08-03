@@ -10,6 +10,10 @@
 #include "cli_server_compat.h"
 #include "platform_path.h"
 #include "cJSON.h"
+#include <aimee/core/connection/auth.h>
+#include <aimee/core/connection/endpoint.h>
+#include <aimee/core/connection/http1.h>
+#include <aimee/core/connection/socket.h>
 #ifdef WITH_TLS
 #include "aimee_tls.h" /* native-TLS /v1 transport for a tls: endpoint */
 #endif
@@ -21,9 +25,6 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #ifdef AIMEE_POSIX
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <netinet/in.h>
 #include <poll.h>
 #include <stdint.h>
 #include <sys/socket.h>
@@ -300,14 +301,18 @@ int cli_http_build_request(const char *method, const char *path, const char *hos
    if (!host || !host[0])
       host = "localhost";
    size_t body_len = body ? strlen(body) : 0;
+   char authorization[4096] = "";
+   if (bearer && bearer[0] &&
+       aimee_core_bearer_value(authorization, sizeof(authorization), bearer) != 0)
+      return -1;
 
    int n;
-   if (bearer && bearer[0])
+   if (authorization[0])
       n = snprintf(buf, cap,
-                   "%s %s HTTP/1.1\r\nHost: %s\r\nAuthorization: Bearer %s\r\n"
+                   "%s %s HTTP/1.1\r\nHost: %s\r\nAuthorization: %s\r\n"
                    "Content-Type: application/json\r\nContent-Length: %zu\r\n"
                    "Connection: close\r\n\r\n",
-                   method, path, host, bearer, body_len);
+                   method, path, host, authorization, body_len);
    else
       n = snprintf(buf, cap,
                    "%s %s HTTP/1.1\r\nHost: %s\r\n"
@@ -329,7 +334,8 @@ int cli_http_build_request(const char *method, const char *path, const char *hos
 
 /* Connect to `endpoint` (UDS path / "unix:<path>" or "[tcp:]host:port") and
  * return a blocking fd, or -1. The TCP host may be a DNS name, an IPv4 literal,
- * or a bracketed IPv6 literal ("[::1]:8740"); resolution is via getaddrinfo.
+ * or a bracketed IPv6 literal ("[::1]:8740"); resolution and bounded connect
+ * are owned by libaimee-core-connection.
  * connect_timeout_ms bounds each TCP connect attempt (<=0 ⇒
  * CLIENT_DEFAULT_TIMEOUT_MS) so an unreachable/filtered host fails fast instead
  * of blocking on the kernel default (~2 min). Writes the HTTP Host header value
@@ -371,86 +377,16 @@ static int cli_http_connect(const char *endpoint, char *host_out, size_t host_n,
    /* TCP: "[tcp:|tls:]host:port". Split host (DNS / IPv4 / bracketed IPv6) and
     * port. A "tls:" endpoint connects the same TCP socket; the caller wraps it in
     * a TLS handshake (cli_http_request). */
-   const char *hp = endpoint;
-   if (strncmp(hp, "tcp:", 4) == 0 || strncmp(hp, "tls:", 4) == 0)
-      hp += 4;
-   char host[256];
-   const char *port_str;
-   if (hp[0] == '[')
-   {
-      const char *close_br = strchr(hp, ']');
-      if (!close_br || close_br[1] != ':')
-         return -1;
-      size_t hl = (size_t)(close_br - hp - 1);
-      if (hl == 0 || hl >= sizeof(host))
-         return -1;
-      memcpy(host, hp + 1, hl);
-      host[hl] = '\0';
-      port_str = close_br + 2;
-   }
-   else
-   {
-      const char *colon = strrchr(hp, ':');
-      if (!colon)
-         return -1;
-      size_t hl = (size_t)(colon - hp);
-      if (hl == 0 || hl >= sizeof(host))
-         return -1;
-      memcpy(host, hp, hl);
-      host[hl] = '\0';
-      port_str = colon + 1;
-   }
-   /* Require a numeric, in-range port (getaddrinfo would otherwise accept
-    * service names like "http"). */
-   if (!port_str[0])
+   const char *authority = endpoint;
+   if (strncmp(authority, "tcp:", 4) == 0 || strncmp(authority, "tls:", 4) == 0)
+      authority += 4;
+   aimee_core_endpoint_t parsed;
+   if (aimee_core_endpoint_parse(authority, &parsed) != 0)
       return -1;
-   {
-      int port = atoi(port_str);
-      if (port <= 0 || port > 65535)
-         return -1;
-   }
+   const char *host = parsed.host;
+   const char *port_str = parsed.port;
 
-   struct addrinfo hints, *res = NULL;
-   memset(&hints, 0, sizeof(hints));
-   hints.ai_family = AF_UNSPEC; /* IPv4 or IPv6 */
-   hints.ai_socktype = SOCK_STREAM;
-   if (getaddrinfo(host, port_str, &hints, &res) != 0 || !res)
-      return -1;
-
-   int out_fd = -1;
-   for (struct addrinfo *ai = res; ai; ai = ai->ai_next)
-   {
-      int fd = socket(ai->ai_family, ai->ai_socktype | SOCK_CLOEXEC, ai->ai_protocol);
-      if (fd < 0)
-         continue;
-      cli_fd_cloexec(fd);
-      int rc;
-      int flags = fcntl(fd, F_GETFL, 0);
-      if (flags >= 0)
-         fcntl(fd, F_SETFL, flags | O_NONBLOCK); /* non-blocking connect for the timeout */
-      rc = connect(fd, ai->ai_addr, ai->ai_addrlen);
-      if (rc != 0 && errno == EINPROGRESS)
-      {
-         struct pollfd pfd = {.fd = fd, .events = POLLOUT};
-         rc = -1;
-         if (poll(&pfd, 1, connect_timeout_ms) == 1 && (pfd.revents & POLLOUT))
-         {
-            int err = 0;
-            socklen_t el = sizeof(err);
-            if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &el) == 0 && err == 0)
-               rc = 0;
-         }
-      }
-      if (rc == 0)
-      {
-         if (flags >= 0)
-            fcntl(fd, F_SETFL, flags); /* restore blocking for the read/write loop */
-         out_fd = fd;
-         break;
-      }
-      close(fd);
-   }
-   freeaddrinfo(res);
+   int out_fd = aimee_core_socket_connect(host, port_str, connect_timeout_ms);
    if (out_fd >= 0 && host_out && host_n)
       snprintf(host_out, host_n, "%s", host);
    return out_fd;
@@ -467,19 +403,7 @@ static int cli_conn_write_all(int fd, void *tlsp, const void *buf, size_t len)
 #else
    (void)tlsp;
 #endif
-   size_t total = 0;
-   while (total < len)
-   {
-      ssize_t n = write(fd, (const char *)buf + total, len - total);
-      if (n < 0)
-      {
-         if (errno == EINTR)
-            continue;
-         return -1;
-      }
-      total += (size_t)n;
-   }
-   return 0;
+   return aimee_core_socket_write_all(fd, buf, len);
 }
 
 static long cli_conn_read(int fd, void *tlsp, void *buf, size_t len)
@@ -490,53 +414,29 @@ static long cli_conn_read(int fd, void *tlsp, void *buf, size_t len)
 #else
    (void)tlsp;
 #endif
-   for (;;)
-   {
-      ssize_t n = read(fd, buf, len);
-      if (n < 0 && errno == EINTR)
-         continue;
-      return n;
-   }
+   return aimee_core_socket_read(fd, buf, len);
 }
 
-/* Parse a case-insensitive Content-Length value from the `n`-byte header block.
- * Returns the declared body length, or -1 if absent/unparseable. */
-static long cli_http_content_length(const char *buf, size_t n)
+typedef struct
 {
-   static const char key[] = "content-length:";
-   size_t klen = sizeof(key) - 1;
-   for (size_t i = 0; i + klen <= n; i++)
-   {
-      if (i != 0 && buf[i - 1] != '\n') /* header names start a line */
-         continue;
-      size_t j = 0;
-      for (; j < klen; j++)
-      {
-         char c = buf[i + j];
-         if (c >= 'A' && c <= 'Z')
-            c = (char)(c - 'A' + 'a');
-         if (c != key[j])
-            break;
-      }
-      if (j != klen)
-         continue;
-      const char *p = buf + i + klen;
-      const char *end = buf + n;
-      while (p < end && (*p == ' ' || *p == '\t'))
-         p++;
-      long v = 0;
-      int any = 0;
-      while (p < end && *p >= '0' && *p <= '9')
-      {
-         v = v * 10 + (*p - '0');
-         any = 1;
-         if (v > (long)CLIENT_MAX_RESPONSE_SIZE) /* implausible; avoid overflow */
-            return -1;
-         p++;
-      }
-      return any ? v : -1;
-   }
-   return -1;
+   int fd;
+   void *tls;
+   int timeout_ms;
+} cli_http_io_t;
+
+static int cli_http_io_write(void *context, const void *buffer, size_t length)
+{
+   cli_http_io_t *io = context;
+   return cli_conn_write_all(io->fd, io->tls, buffer, length);
+}
+
+static long cli_http_io_read(void *context, void *buffer, size_t length)
+{
+   cli_http_io_t *io = context;
+   struct pollfd readable = {.fd = io->fd, .events = POLLIN};
+   return poll(&readable, 1, io->timeout_ms) == 1 && (readable.revents & POLLIN)
+              ? cli_conn_read(io->fd, io->tls, buffer, length)
+              : -1;
 }
 
 /* Send an HTTP request and read the full response over an already-connected
@@ -555,74 +455,19 @@ static char *cli_http_txn(int fd, void *tlsp, const char *method, const char *pa
    if (!req)
       return NULL;
    int reqlen = cli_http_build_request(method, path, host, bearer, body_json, req, reqcap);
-   if (reqlen < 0 || cli_conn_write_all(fd, tlsp, req, (size_t)reqlen) != 0)
+   if (reqlen < 0)
    {
       free(req);
       return NULL;
    }
+   cli_http_io_t transport = {.fd = fd, .tls = tlsp, .timeout_ms = timeout_ms};
+   aimee_core_http1_io_t io = {
+       .context = &transport, .read = cli_http_io_read, .write_all = cli_http_io_write};
+   aimee_core_http1_response_t response;
+   int rc = aimee_core_http1_exchange(&io, req, (size_t)reqlen, 64u * 1024u,
+                                      CLIENT_MAX_RESPONSE_SIZE, 0, &response);
    free(req);
-
-   size_t cap = 8192, len = 0;
-   char *buf = malloc(cap);
-   if (!buf)
-      return NULL;
-   size_t header_end = 0;    /* offset just past "\r\n\r\n", 0 until seen */
-   long content_length = -1; /* declared body length once headers are parsed */
-   for (;;)
-   {
-      /* With a known Content-Length, stop once the whole body is in hand rather
-       * than waiting for the server to close the connection. */
-      if (header_end && content_length >= 0 && len >= header_end + (size_t)content_length)
-         break;
-
-      struct pollfd pfd = {.fd = fd, .events = POLLIN};
-      int rc = poll(&pfd, 1, timeout_ms);
-      if (rc <= 0)
-      {
-         free(buf);
-         return NULL;
-      }
-      if (len + 4096 > cap)
-      {
-         if (cap >= CLIENT_MAX_RESPONSE_SIZE)
-         {
-            free(buf);
-            return NULL;
-         }
-         size_t next = cap * 2;
-         char *grown = realloc(buf, next);
-         if (!grown)
-         {
-            free(buf);
-            return NULL;
-         }
-         buf = grown;
-         cap = next;
-      }
-      long n = cli_conn_read(fd, tlsp, buf + len, cap - len - 1);
-      if (n < 0)
-      {
-         free(buf);
-         return NULL;
-      }
-      if (n == 0)
-         break; /* EOF: close-delimited response (no usable Content-Length) */
-      len += (size_t)n;
-      buf[len] = '\0';
-      /* Learn the body length as soon as the header terminator arrives so we can
-       * stop at the body's end instead of depending on connection close. */
-      if (!header_end)
-      {
-         const char *hb = strstr(buf, "\r\n\r\n");
-         if (hb)
-         {
-            header_end = (size_t)(hb - buf) + 4;
-            content_length = cli_http_content_length(buf, header_end);
-         }
-      }
-   }
-   buf[len] = '\0';
-   return buf;
+   return rc == 0 ? response.data : NULL;
 }
 
 cJSON *cli_http_request(const char *endpoint, const char *method, const char *path,

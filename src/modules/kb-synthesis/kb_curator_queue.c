@@ -11,7 +11,8 @@
 #include "kb_curator_queue.h"
 #include "aimee.h"
 #include "config.h"
-#include "index.h" /* index_list_projects, project_info_t */
+#include "config_database.h" /* config_synth_chat_endpoint_current — the one resolver */
+#include "index.h"           /* index_list_projects, project_info_t */
 #include "log.h"
 #include "db2/kb_payload.h"
 #include "db2/db2_internal.h"
@@ -141,6 +142,34 @@ int kb_curator_queue_code_units_for_project(const char *project, const char *roo
    if (!config_kb_curator_extract_code_enabled())
       return 0;
 
+   /* ENABLING A STAGE IS NOT THE SAME AS BEING ABLE TO RUN IT.
+    *
+    * These rows exist for exactly one consumer: extract_code, which runs the
+    * synthesis sidecar. With no synthesis endpoint configured, not one of them can
+    * ever reach 'done' -- and enqueuing them is not free. This runs on the
+    * SYNCHRONOUS path of /v1/code/scan and inserts one row per symbol: measured on
+    * a 4,018-file corpus, ~173,000 rows and 100 MB of table, adding ~215s to every
+    * scan. The client's scan deadline is spent building a backlog that cannot start.
+    *
+    * It also compounds. The anti-join below scans kb_code_unit_jobs, so each scan
+    * of each new project pays for every dead row every earlier scan left behind.
+    *
+    * Configured-ness, not reachability: a configured endpoint that is temporarily
+    * down is a real outage, its rows are real work, and the drain's process-wide
+    * provider gate already idles the queue instead of spinning. An UNCONFIGURED
+    * endpoint is a steady state that no retry can resolve. Resolved through the
+    * same accessor the sidecar uses, so the two cannot disagree about what an
+    * operator's value means. */
+   char synth_endpoint[512];
+   if (!config_synth_chat_endpoint_current(synth_endpoint, sizeof(synth_endpoint)))
+   {
+      aimee_log(LOG_INFO, "kb.curator.queue",
+                "code-unit enqueue skipped for '%s': no synthesis endpoint configured, so "
+                "extract_code cannot consume these rows (set SYNTHESIS_ENDPOINT to enable)",
+                project);
+      return 0;
+   }
+
    (void)root_path;
 
    void *conn = db2_conn();
@@ -152,38 +181,72 @@ int kb_curator_queue_code_units_for_project(const char *project, const char *roo
     * per-row subquery scan — observed holding a pooled connection for minutes on a
     * large `terms` table) and is NULL-unsafe (a single NULL file_path/symbol in
     * kb_code_unit_jobs makes NOT IN drop ALL rows). NOT EXISTS fixes both. */
-   static const char *sql = "SELECT f.path, t.name, t.kind, t.line::int"
-                            " FROM terms t"
-                            " JOIN files f ON t.file_id = f.id"
-                            " JOIN projects p ON f.project_id = p.id"
-                            " WHERE p.name = ?1 AND p.lifecycle_state = 'current'"
-                            " AND f.generation = p.current_generation"
-                            " AND NOT EXISTS ("
-                            "   SELECT 1 FROM kb_code_unit_jobs j"
-                            "   WHERE j.project = ?1 AND j.status IN ('pending','running','done')"
-                            "     AND j.generation = p.current_generation"
-                            "     AND j.file_path = f.path AND j.symbol = t.name"
-                            " )";
+   /* ONE set-based INSERT, not a row-per-symbol loop. The SELECT below already
+    * names exactly the rows to enqueue, so feeding them back one INSERT at a
+    * time only bought a WAL fsync per symbol: each kb_curator_queue_code_unit()
+    * call is its own autocommit transaction.
+    *
+    * That cost dominated indexing. Measured on a 4,018-file repository: the
+    * enqueue produced ~183,000 rows, postgres sat in LWLock/WALWrite and
+    * IO/WalSync, and the /v1/code/scan request that triggered it never answered
+    * inside the client's 5-minute deadline — so scanning a mid-sized repo could
+    * not complete at all. Folding the loop into the statement makes it one
+    * transaction and one commit.
+    *
+    * DISTINCT ON is load-bearing, and is the one behaviour change the fold
+    * requires: postgres refuses "ON CONFLICT DO UPDATE" that touches the same
+    * row twice in a single statement, and `terms` can legitimately carry the
+    * same symbol name twice for one file (two definitions, different lines).
+    * Row-at-a-time tolerated that because each insert was its own statement.
+    * Ordering by line makes the survivor the first definition, deterministically,
+    * rather than whichever row the scan happened to emit first.
+    *
+    * NOT EXISTS (anti-join), not `(f.path, t.name) NOT IN (subquery)`: the
+    * row-constructor NOT IN can't be planned as a hash anti-join (it degrades to a
+    * per-row subquery scan — observed holding a pooled connection for minutes on a
+    * large `terms` table) and is NULL-unsafe (a single NULL file_path/symbol in
+    * kb_code_unit_jobs makes NOT IN drop ALL rows). NOT EXISTS fixes both. */
+   static const char *sql =
+       "INSERT INTO kb_code_unit_jobs (project, generation, file_path, symbol, line)"
+       " SELECT DISTINCT ON (f.path, t.name)"
+       "        p.name, p.current_generation, f.path, t.name, t.line::int"
+       " FROM terms t"
+       " JOIN files f ON t.file_id = f.id"
+       " JOIN projects p ON f.project_id = p.id"
+       " WHERE p.name = ?1 AND p.lifecycle_state = 'current'"
+       " AND f.generation = p.current_generation"
+       " AND NOT EXISTS ("
+       "   SELECT 1 FROM kb_code_unit_jobs j"
+       "   WHERE j.project = ?1 AND j.status IN ('pending','running','done')"
+       "     AND j.generation = p.current_generation"
+       "     AND j.file_path = f.path AND j.symbol = t.name"
+       " )"
+       " ORDER BY f.path, t.name, t.line"
+       " ON CONFLICT(project, generation, file_path, symbol) DO UPDATE SET"
+       " line=excluded.line,"
+       " updated_at=pg_now_text()";
 
    char err[CQ_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
    {
-      aimee_log(LOG_WARN, "kb.curator.queue", "failed to query terms for project '%s': %s", project,
-                err);
+      aimee_log(LOG_WARN, "kb.curator.queue", "failed to prepare code-unit enqueue for '%s': %s",
+                project, err);
       return -1;
    }
    aimee_pg_bind_text(st, "?1", project);
 
-   int enqueued = 0;
-   while (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   aimee_pg_step_t rc = aimee_pg_step(st, err, sizeof(err));
+   if (rc != AIMEE_PG_DONE)
    {
-      const char *fp = aimee_pg_column_text(st, 0);
-      const char *sym = aimee_pg_column_text(st, 1);
-      int ln = aimee_pg_column_int(st, 3);
-      if (kb_curator_queue_code_unit(project, fp ? fp : "", sym ? sym : "", ln) == 0)
-         enqueued++;
+      aimee_log(LOG_WARN, "kb.curator.queue", "code-unit enqueue failed for project '%s': %s",
+                project, err);
+      aimee_pg_finalize(st);
+      return -1;
    }
+   int enqueued = aimee_pg_stmt_changes(st);
+   if (enqueued < 0)
+      enqueued = 0;
    aimee_pg_finalize(st);
 
    if (enqueued > 0)

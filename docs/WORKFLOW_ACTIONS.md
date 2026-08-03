@@ -1,91 +1,149 @@
 # Workflow Actions
 
-The browser's **Workflow Actions** page starts and operates workflow runs. **Edit Workflows** changes
-definitions; it does not operate live work.
+The browser separates definition from execution. **Edit Workflows** changes the graph for future
+runs. **Workflows** files proposals and operates durable runs. A saved edit never mutates the version
+pinned to work already in flight.
+
+![The Workflows page showing a run waiting at a human gate, its controls, event history, and proposal](images/workflow-actions.png)
 
 ## Start a run
 
-Choose:
+![The new proposal composer with title, workflow, repository, body, delegate draft, and project file controls](images/workflow-actions-new-proposal.png)
 
-- project/repository;
-- saved workflow;
-- proposal or request;
-- interactive or autonomous mode;
-- optional spend ceiling.
+1. **Open the composer.** Select **+ New proposal**.
+2. **Write the request.** Enter a title and proposal body, then choose a saved workflow.
+3. **Name the checkout.** Enter the repository path visible to the server. Although the field says
+   optional, the Go submit endpoint rejects a blank repository.
+4. **Use project help if needed.** **Draft with a delegate** and **Load from project** both show a preview before
+   replacing the proposal body.
+5. **Submit the run.** The page opens it and begins polling.
 
-Submission validates the input, creates the durable work item, snapshots the workflow, and returns
-the item ID. The request, proposal, plan, implementation, reviews, and documentation remain separate
-artifacts.
+The in-progress draft is stored in browser local storage and cleared at logout. Browser submission
+currently creates an `autonomous` run. The composer does not expose trigger mode or a per-run spend
+ceiling; a watched trigger can set `max_spend_usd` instead.
+
+The CLI equivalent is:
+
+```bash
+aimee workflow run build \
+  --proposal docs/proposals/pending/change.md \
+  --repo /srv/repos/project \
+  --watch
+```
 
 ## Read a run
 
-The page shows:
+The left rail lists runs and their derived status labels. Selecting one shows:
 
-- state and current node;
-- feature and slice branches;
-- latest artifact and content hash;
-- delegates, retries, and admission waits;
-- roundtable evidence and verdicts;
-- spend and configured limit;
-- CI, merge, forge, and park state;
-- the append-only lifecycle history.
+- **Identity:** state, stage, workflow, and pinned version.
+- **Authority and cost:** repository, accumulated cost, and optional cap.
+- **Delivery:** the PR reference after one exists.
+- **Attribution:** submitter and override count when present.
+- **History:** append-only events with stage, actor, detail, timestamp, and step cost.
+- **Request:** the immutable admitted proposal.
 
-The UI polls or streams read models from the Go workflow API. It does not reconstruct state from
-browser events.
+The selected run is polled every four seconds while it remains open. Event reads use an incremental
+cursor, so the page appends new history instead of reconstructing state from browser events.
+
+The current page does not expose every stored plan, diff, review, branch, slice, or worktree artifact.
+Use the PR, event detail, CLI status, and server-side artifact store when that deeper evidence is
+needed.
 
 ## Act on a run
 
-Depending on state, an authorized user can:
+Controls depend on the current state:
 
-- start or resume scheduling;
-- pause or cancel;
-- approve or reject a human gate;
-- retry a recoverable parked step;
-- open the current artifact or forge link.
+| Control | Current behavior |
+| --- | --- |
+| **Pause** | parks an unpaused active run and cancels its current scheduler dispatch |
+| **Start** | resumes a non-human paused run |
+| **Approve** | resolves `gate.human`, writes an approval artifact, and follows `on_pass` or `next` |
+| **Reject** | follows the human gate's `on_fail` edge or ends the run as rejected when no edge exists |
+| **Stop** | stops the root and descendants; a stopped run cannot be resumed |
+| **Delete** | stops active descendants, removes run artifacts and managed worktrees, then permanently deletes the run tree and history |
 
-For the default build, the terminal forge link is a draft PR with a proposal-derived title and a
-review body containing the request, plan, diff summary, slice PRs, and completed gates. Marking that
-PR ready and merging it are deliberately outside autonomous workflow actions.
+There is no separate **Retry** button in the current page. Fix the named condition and use **Start**
+when the pause reason is resumable. A human gate must use **Approve** or **Reject** instead.
 
-A gate decision is bound to the principal, node, and current artifact hash. If the artifact changes,
-the old decision cannot advance the run.
+The current human-gate record is a hashed approval artifact plus lifecycle transition. It is not a
+signed principal-and-artifact attestation. Do not treat it as a cryptographic approval record.
 
-Autonomous mode never passes a human gate. It only drives non-human steps until completion, failure,
-or a named park.
+## Understand the build handoff
 
-## Authorization
+The root `build` workflow ends after opening a draft PR against the admitted repository checkout's
+integration branch. Its PR body includes the original request, approved plan, changed-file summary,
+slice PRs, and completed review gates. The workflow does not mark that PR ready or merge it.
 
-Reads require workflow-read authority. Starting, retrying, canceling, or deciding a gate requires the
-corresponding workflow-admin capability and user write grant. Browser project selection is not an
-authorization grant; the owning service checks every request.
+Child `slice` workflows are different. After roundtable approval and green CI, their PRs may merge
+only into the parent's `aimee/feat/...` branch. They cannot autonomously target the repository's
+integration branch.
 
-Forge credentials stay in the server vault. The workflow process requests a narrow mechanical forge
-operation and never receives the secret.
+## Configure automatic starts
 
-Do not expose a repository-write credential used for human review to autonomous or general-purpose
-agents. Draft state records the handoff, but a shared GitHub identity cannot distinguish a person
-from software using that person's token.
+The **Triggers** panel shows what can file a run automatically.
 
-## Failure states
+![The Workflows trigger list beside the expanded Run policy controls](images/workflow-actions-triggers-policy.png)
 
-The page keeps the reason instead of flattening every stop into “failed.” Common states include:
+- **Edit config triggers.** Config-origin rules can be added, saved, and removed in this panel.
+- **Edit graph triggers at the source.** A trigger from a saved workflow's `trigger.watch-dir` node is read-only in this
+  panel. Edit that node in **Edit Workflows** to change or disarm it.
+- **Use a supported scanner.** Go executes `watch-dir` and the compatibility name `proposals`. Other displayed source names
+  are not executed by this scanner.
 
-- human approval required;
-- no eligible agent or agent limit reached;
-- panel degraded or no valid quorum;
-- convergence limit or repeated no progress;
-- missing commit or empty implementation;
-- verification failure;
-- merge conflict;
-- lost review replay;
-- forge or CI failure;
-- spend limit reached.
+A watch rule needs a server-visible workspace, a saved workflow, a repository-relative proposal
+directory, and an optional git ref. Leaving the ref blank resolves the refreshed remote default ref.
+The mode and optional spend cap are stored with the admitted run, but mode alone is not an approval
+barrier in the current scheduler. Put `gate.human` in the graph when a person must decide.
 
-Fix the named condition, then use the offered action. Do not restart a new run merely to lose the
-evidence from the first one.
+## Tune run policy
 
-See [Workflows](WORKFLOWS.md) and [Autonomous development](AUTONOMOUS_DEVELOPMENT.md).
+The collapsible **Run policy** panel writes live workflow configuration. The bootstrap administrator
+is the only browser identity allowed to save these global values.
 
-## Automatic proposal admission
+Current defaults include:
 
-The autonomous pending-proposal watcher decides when a pending proposal becomes eligible for a new run. For the authoritative behavior contract, see [Automatic proposal admission](wfe-autonomy-runbook.md#automatic-proposal-admission).
+| Setting | Default | Effect |
+| --- | ---: | --- |
+| trigger admission cap | 2 | maximum active root runs admitted by triggers and manual submit |
+| proposal scan interval | 5 seconds | delay between watched-directory scans |
+| workflow concurrency | 5 | scheduler work driven concurrently across the instance |
+| maximum turns | 300 | cumulative runaway backstop for one run |
+| wall time per resume | 1,800 seconds | parks a run when one resume window expires |
+| maximum automatic resumes | 50 | bounds wall-cap auto-resume |
+| stale-abandon grace | 3,600 seconds | reaps a stale capped or stuck park |
+| unassigned delegate lease | 120 seconds | cancels and safely retries a job with no eligible agent |
+
+Node-level `max_rounds` is defined in the graph and is separate from these run-level limits. See
+[Workflows](WORKFLOWS.md#create-a-bounded-loop).
+
+The service reads these values live. A process-level environment override still wins. Setting the
+trigger admission cap to `0` pauses new trigger and browser-submit admission; it does not make
+admission unlimited.
+
+`autonomy.per_workflow_concurrency` defaults to `1` but is not exposed in this panel. Change it
+through the typed configuration surface when one workflow may occupy more than one scheduler slot.
+
+## Diagnose a parked or terminal run
+
+Read the pause reason and the last events before acting. Common current reasons include:
+
+| Reason | What to check |
+| --- | --- |
+| `human_gate` | review the proposal and current stage, then approve or reject |
+| `manual` | confirm why the operator paused it, then start or stop it |
+| `ci_pending`, `merge_pending`, `slices_running` | inspect the external PR, checks, or child runs; the scheduler normally redrives these |
+| `panel_unreachable`, `roundtable_discussion`, `roundtable_chairman` | restore the named roundtable or its eligible agents |
+| `request_unimplementable` | resolve the contradiction or missing prerequisite named by the chairman |
+| `retry_limit`, `convergence_limit`, `convergence_no_progress` | inspect the repeated blocker and change the input, node task, or loop before resuming |
+| `fanout_limit` | reduce packets or raise the node's bounded `max_children` |
+| `budget_cap`, `turn_cap`, `wall_cap` | inspect cost and run policy before allowing more work |
+| `base_integration_conflict` | update or resolve the integration branch before resuming |
+| `workflow_definition_invalid`, `workflow_block_unavailable` | restore the pinned definition or block version; editing only the current definition is insufficient |
+
+Do not file a replacement run merely to hide the evidence on the first one. Stop only when the run
+should not continue, and delete only when its proposal, artifacts, descendants, and history are no
+longer needed.
+
+See [Workflows](WORKFLOWS.md), [Autonomous development](AUTONOMOUS_DEVELOPMENT.md), and the
+[autonomy runbook](wfe-autonomy-runbook.md). Automatic watched-proposal admission is specified in
+[Automatic proposal admission](wfe-autonomy-runbook.md#automatic-proposal-admission).

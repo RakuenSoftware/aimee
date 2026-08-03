@@ -56,9 +56,9 @@ static int api_bearer_extra_count(void);
 #include "platform_path.h"
 #include "platform_process.h"
 #include "util.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include "worktree_gc.h"
-#include "git_verify.h"
+#include "modules/git/git_verify.h"
 #include "toolset.h"
 #include "cJSON.h"
 #include <errno.h>
@@ -107,6 +107,22 @@ void server_health_add_kb(cJSON *resp)
       return;
    int reachable = (kb_rc == 0 && kb.process_ok);
    cJSON_AddStringToObject(kbo, "status", reachable ? "ok" : "unreachable");
+
+   /* `status` answers "is the kb process up", which is not the same question as
+    * "can I query it". With the transport breaker open every call is refused
+    * locally without the kb ever being contacted, and this block still said
+    * "ok" — so an operator watching status saw a healthy kb while every lookup
+    * failed, and had no way to connect the two. Report the breaker here, in both
+    * the reachable and unreachable cases, since that is where people look. */
+   kb_client_dependency_health_t dep;
+   kb_client_dependency_health(&dep);
+   cJSON_AddStringToObject(kbo, "transport_state", dep.state);
+   if (strcmp(dep.state, "open") == 0)
+   {
+      cJSON_AddBoolToObject(kbo, "queries_suppressed", 1);
+      cJSON_AddNumberToObject(kbo, "retry_after_ms", (double)dep.retry_after_ms);
+      cJSON_AddNumberToObject(kbo, "suppressed_calls", (double)dep.suppressed_calls);
+   }
    if (!reachable)
       return;
    cJSON_AddBoolToObject(kbo, "store_ok", kb.db2_ok ? 1 : 0);

@@ -6,11 +6,11 @@ Read [Upgrading](UPGRADING.md) before you start, not after.
 
 Everything below is measured against **v0.2.192**, the last public release.
 
-Two tags dated 2026-07-27 and 2026-07-28, `v0.2.196` and `v0.3.0`, appeared on the repository
-part-way through this cycle. Neither is a release. They were promoted mid-cycle in error, they were
-never announced, and the work below continued for another 536 commits after the later one. If you
-installed from either, you have an untested mid-cycle build rather than 0.3.0, and you are missing
-the fixes under [If you installed from a mid-cycle tag](#if-you-installed-from-a-mid-cycle-tag).
+One tag dated 2026-07-27, `v0.2.196`, appeared on the repository part-way through this cycle. It is
+not a release. It was promoted mid-cycle in error, it was never announced, and the work below
+continued for another 705 commits after it. If you installed from it, you have an untested mid-cycle
+build rather than 0.3.0, and you are missing the fixes under
+[If you installed from a mid-cycle tag](#if-you-installed-from-a-mid-cycle-tag).
 
 ## The event bus is the change everything else rests on
 
@@ -72,9 +72,10 @@ See [Event bus](EVENT_BUS.md).
 
 - The Go workflow engine schedules parallel slices, retries, review loops, live forge work, and
   merge recovery.
-- Typed workflow blocks replace implicit pipeline steps. Validation checks edges, inputs, loops,
-  gates, and version hashes before a run starts.
-- Triggers and cron can create runs. Trigger mode chooses autonomous or interactive handling.
+- Typed workflow blocks replace implicit pipeline steps. Validation checks edge targets, input ports,
+  artifact types, required parameters, and roundtable structure before a run starts.
+- Watched-proposal triggers can create runs. Trigger mode is recorded, but current Go scheduling does
+  not change between `autonomous` and `interactive`.
 - A human gate always parks. Autonomous mode cannot approve one.
 - Roundtable findings feed the next author pass instead of disappearing at a boolean verdict.
 - A complete pre-supplied proposal can advance without being rewritten; a failed attempt with no
@@ -92,6 +93,12 @@ See [Event bus](EVENT_BUS.md).
 - Model context and output limits come from the registry. Retry preserves the tool contract.
 - Write-capable delegates get isolated worktrees. Container delegates default to no network, no
   credentials, bounded processes, and an explicit toolchain.
+- Every new session gets its own branch and worktree at session start, cut from the repository's
+  default branch. This now covers MCP sessions, which previously ran against the shared checkout.
+- Session worktree keys are derived from the whole session id. They were the first 16 characters,
+  which collided for ids built on a shared prefix and let concurrent sessions overwrite each other in
+  one checkout. Existing worktrees move to the new key on next session start; a clean one is
+  reclaimed automatically, and one holding uncommitted or unpushed work is kept and reported.
 - Package installation goes through a mediated cache and policy gate. Custom delegate images,
   package sets, and Dockerfiles are supported without giving the agent the Docker socket.
 - Local CLI agents execute on the thin client when the workspace is remote. Their login and working
@@ -118,9 +125,8 @@ See [Event bus](EVENT_BUS.md).
 
 - The KB container can own a private PostgreSQL 18 cluster with pgvector and pgvectorscale. An
   export helper moves that data to an external PostgreSQL server.
-- The KB owns embedding, retrieval, curation, and code-index storage, and now serves the embedder
-  itself from weights baked into its image. Synthesis is the only remaining inference role and it is
-  external-only.
+- The KB owns embedding, synthesis, retrieval, curation, and code-index storage. Each model role can
+  run inside that KB container or use a remote endpoint. There is no standalone inference service.
 - Cross-repository symbol and dependency edges now feed caller lookup, search, and blast radius.
 - CSS migration analysis adds a style graph, dead/conflicting-rule checks, and an optional isolated
   Chromium sidecar for computed-style verification.
@@ -149,8 +155,8 @@ See [Event bus](EVENT_BUS.md).
   compression flags remain off because they saved bytes but missed the latency gate.
 - A configured remote is exclusive. The client no longer falls back to a local Unix socket for a
   subset of hooks, optimization, or delegate probes.
-- `aimee remote set` pins the server certificate, rotates the bootstrap bearer, and enrolls Linux
-  mTLS clients. Verify the fingerprint out of band.
+- `aimee remote set` stores the supplied bearer, pins the server certificate, and enrolls Linux
+  mTLS clients. It does not rotate the bearer. Verify the fingerprint out of band.
 - The browser adds projects, git credentials, OAuth, SSH cloning, workflows, logs, settings, a live
   graph, and per-user VS Code.
 - The dashboard is panel-based and user-configurable; operational logs moved to their own page.
@@ -168,26 +174,28 @@ See [Event bus](EVENT_BUS.md).
   if you need them.
 - `aimee migrate v2`, whose server operation had already been removed.
 - The combined appliance image and its compose file.
-- The `aimee-llm` container and the reranker. The KB embeds in-container; point `AIMEE_LLM_URL` at
-  your own endpoint for synthesis.
+- The `aimee-llm` container and the reranker. Embedding and synthesis are per-KB roles; neither uses
+  a replacement inference service.
 - The legacy KB Unix-socket autostart path.
 - Client-held plaintext agent credentials and the session credential-push endpoint.
 - The generic `/v1/rpc` transport. Named `/v1` routes are authoritative.
 
 ## If you installed from a mid-cycle tag
 
-The `v0.2.196` and `v0.3.0` tags were promoted in error part-way through this cycle and are not
-releases. The cycle continued for another 536 commits after the later one, so an installation taken
-from either is missing the following. Each is a case where the deployment came up healthy and did
-nothing useful, which is why they are listed here rather than folded into the sections above.
+The `v0.2.196` tag was promoted in error part-way through this cycle and is not a release. The cycle
+continued for another 705 commits after it, so an installation taken from it is missing the
+following. Each is a case where the deployment came up healthy and did nothing useful, which is why
+they are listed here rather than folded into the sections above.
 
-- **The `aimee-llm` container is retired and the embedder is baked into the KB image.** A fresh
-  install embeds with no download and no second container. Set the embedder before you ingest:
-  changing it later re-embeds everything, and changing its dimension rebuilds the vector schema.
+- **The `aimee-llm` container is retired.** Embedding and synthesis are owned by the selected KB and
+  can run inside its container or at its configured remote endpoint. After the wizard selects the
+  bundled embedder, a fresh install embeds with no download and no second service. Set the embedder
+  before you ingest. A later change is a data migration: the guarded reset handles a dimension
+  change, while a same-dimension vector-space change needs a fresh DB2 and source re-ingestion.
 - **A clean install could enrol no identity and store zero vectors.** The published config snapshot
   did not match what `config_load` returned on the cached path, so first-user enrolment failed
-  silently and env-var deployments indexed nothing. Both are fixed, and the re-embed route that
-  repairs an affected deployment is now reachable.
+  silently and env-var deployments indexed nothing. Both are fixed, and the write and guarded
+  dimension-reset routes are now reachable through the managed server.
 - **An operator-supplied dashboard login was ignored.** The entrypoint sealed
   `AIMEE_WEBCHAT_USER`/`AIMEE_WEBCHAT_PASSWORD` into Vault and scrubbed them from the environment
   before the PAM account was provisioned, so every install generated a random account instead. The

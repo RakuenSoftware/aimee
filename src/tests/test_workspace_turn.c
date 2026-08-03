@@ -2,11 +2,11 @@
  * workspace binds the active provider to a detached provider; shared workspaces
  * and unregistered cwds stay on the shared provider. Config-backed (the binder
  * reads the registered providers via config_load). */
-#include "workspace_turn.h"
-#include "workspace_provider.h"
+#include "modules/workspace/workspace_turn.h"
+#include "modules/workspace/workspace_provider.h"
 #include "config.h"
 #include <aimee/delegates/delegate_backend.h>
-#include "workspace_provider_container.h"
+#include "modules/workspace/workspace_provider_container.h"
 #include "aimee_home.h"
 #include "platform_path.h"
 #include "platform_test_util.h"

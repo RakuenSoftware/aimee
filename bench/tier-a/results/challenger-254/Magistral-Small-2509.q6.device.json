@@ -1,0 +1,1 @@
+{"model":"Magistral-Small-2509.q6","host":"192.168.1.254","gpu":"7900XTX","backend":"vulkan","repo":"unsloth/Magistral-Small-2509-GGUF:Q6_K","offload":"unknown","cpu_layer_warnings":0}

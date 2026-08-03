@@ -1,0 +1,44 @@
+# One bundled synthesis model, as its own image, so it is downloaded once ever
+# instead of once per (image x architecture) build.
+#
+# WHY THIS EXISTS. The model used to be fetched inside the aimee-kb build. That
+# is four -llm tags x two architectures = eight downloads of the same two files
+# on every publish, about 49 GB pulled from Hugging Face to produce roughly 12 GB
+# of distinct bytes. Hoisting the model into its own tag makes it an ordinary
+# registry layer: the kb builds COPY --from it, the layer is fetched from ghcr
+# (fast, and deduplicated by the registry because every tag references the same
+# blob), and Hugging Face is touched only when the model or quant actually
+# changes — which is what the tag encodes.
+#
+# The fetch stage is pinned to BUILDPLATFORM deliberately. The payload is
+# architecture-independent, so pinning it means a linux/amd64 + linux/arm64 build
+# runs the fetch ONCE and both manifests point at the same layer, rather than
+# downloading the same gigabytes twice to produce identical content.
+#
+# Built and pushed by .github/workflows/publish-images.yml, which skips the build
+# entirely when the tag already exists.
+#
+#   docker buildx build -f Dockerfile.model \
+#     --platform linux/amd64,linux/arm64 \
+#     --build-arg AIMEE_SYNTHESIS_MODEL=gemma-4-E2B-it \
+#     -t ghcr.io/<owner>/aimee-model-gemma-4-e2b-it:UD-Q6_K_XL .
+#
+# The name is lowercased and the tag is not: a repository name must be lowercase,
+# a tag may carry case, and UD-Q6_K_XL is the upstream quant spelling.
+
+FROM --platform=$BUILDPLATFORM debian:trixie-slim AS fetch
+ARG AIMEE_SYNTHESIS_MODEL
+# A mirror is an untrusted input; scripts/fetch-synthesis-model.sh verifies the
+# result against Hugging Face's own digest, which is what makes it safe to allow.
+ARG AIMEE_MODEL_MIRROR
+ENV AIMEE_MODEL_MIRROR=${AIMEE_MODEL_MIRROR}
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+COPY scripts/fetch-synthesis-model.sh /usr/local/bin/fetch-synthesis-model.sh
+RUN sh /usr/local/bin/fetch-synthesis-model.sh "$AIMEE_SYNTHESIS_MODEL" /out/model
+
+# Nothing but the payload: no base image, no packages, nothing to patch. This
+# image is never run — it exists to be a COPY --from source.
+FROM scratch
+COPY --from=fetch /out/model /model

@@ -6,7 +6,7 @@
  * these tests want. Binaries that need the real behaviour
  * (unit-test-git-cred-inject / -git-ops / -git-project) link the real object and
  * must NOT also link this TU. */
-#include "git_cred_inject.h"
+#include "modules/git/git_cred_inject.h"
 
 #include <stddef.h>
 #include <stdio.h>
@@ -22,13 +22,6 @@ char **git_cred_inject_build_env_for_repo(const char *principal, const char *rem
    (void)parent_environ;
    if (out_token_fd)
       *out_token_fd = -1;
-   return NULL;
-}
-
-char **git_cred_inject_build_env(const char *principal, char *const *parent_environ)
-{
-   (void)principal;
-   (void)parent_environ;
    return NULL;
 }
 
@@ -62,4 +55,28 @@ int git_identity_get(char *name_out, size_t name_len, char *email_out, size_t em
    snprintf(name_out, name_len, "%s", "Test Operator");
    snprintf(email_out, email_len, "%s", "operator@example.test");
    return 1;
+}
+
+int git_identity_resolve(const char *repo_dir, char *name_out, size_t name_len, char *email_out,
+                         size_t email_len);
+
+int git_identity_resolve(const char *repo_dir, char *name_out, size_t name_len, char *email_out,
+                         size_t email_len)
+{
+   (void)repo_dir; /* the stub always has a sealed identity, so no fallback runs */
+   return git_identity_get(name_out, name_len, email_out, email_len);
+}
+
+int git_identity_resolve_with(const char *principal,
+                              int (*read_cfg)(const char *, char *, size_t, void *), void *ud,
+                              char *name_out, size_t name_len, char *email_out, size_t email_len);
+
+int git_identity_resolve_with(const char *principal,
+                              int (*read_cfg)(const char *, char *, size_t, void *), void *ud,
+                              char *name_out, size_t name_len, char *email_out, size_t email_len)
+{
+   (void)principal;
+   (void)read_cfg;
+   (void)ud; /* the stub always has a sealed identity, so no fallback runs */
+   return git_identity_get(name_out, name_len, email_out, email_len);
 }

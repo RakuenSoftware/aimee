@@ -35,56 +35,77 @@ ARG AIMEE_VERSION=""
 RUN sh scripts/fetch-treesitter.sh \
     && make -C src ../aimee-kb -j"$(nproc)" AIMEE_TREESITTER=1 ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE_VERSION}
 
-# pgvectorscale (StreamingDiskANN). Always built: it adds ~1 MB to the image, and
-# the kb already decides at RUNTIME whether to use it -- pgvec_vectorscale_available()
+RUN python3 scripts/export_c_repositories.py --runtime-bundle /module-runtime \
+    && mkdir -p /module-runtime/bin \
+    && for source in /module-runtime/src/*.c; do \
+         binary="${source##*/}"; binary="${binary%.c}"; \
+         cc -std=c11 -O2 -Wall -Wextra -Werror -Isrc/core/event_bus/include \
+           -Isrc/modules/memory/include -Isrc/modules/learning/include \
+           -Isrc/modules/routing/include -Isrc/modules/delegates/include \
+           -Isrc/modules/tools/include -Isrc/modules/workspace/include \
+           -Isrc/modules/git/include -Isrc/modules/skills/include \
+           -Isrc/modules/response-composition/include \
+           "$source" \
+           src/core/event_bus/bus_attach.c src/core/event_bus/bus_client.c \
+           src/core/event_bus/bus_endpoint.c src/core/event_bus/bus_region.c \
+           src/core/event_bus/bus_ring.c src/core/event_bus/bus_wire.c \
+           src/core/event_bus/module_protocol.c src/core/event_bus/module_runtime.c \
+           -pthread \
+           -o "/module-runtime/bin/$binary"; \
+       done
+
+# pgvectorscale (StreamingDiskANN). Always installed: it adds ~1 MB to the image,
+# and the kb already decides at RUNTIME whether to use it -- pgvec_vectorscale_available()
 # probes pg_extension and falls back to HNSW with a warning when it is absent
 # (src/db2/pgvec_transport.c). Gating it at build time would defeat that and make
 # the index type a property of which image you happened to pull.
 #
-# The Rust toolchain and pgrx live only in this stage; the runtime image receives
-# the built extension files and none of the build chain. CI caches this layer
-# (cache-from/to type=gha,mode=max), so it recompiles only when the pins below move.
+# Upstream ships the built extension as a .deb per (version, pg major, arch), so
+# this stage FETCHES it rather than compiling it. It used to build the crate from
+# source with rustup + cargo-pgrx, which cost ~7 min of Rust compilation on the
+# critical path of every CI shard -- for a ~1 MB artifact pinned to two ARGs and
+# with no dependency on this repo's source at all. The old comment here claimed CI
+# cached the layer; it never did (the buildx GHA cache was thrashing its quota and
+# restored nothing), so the compile ran in full on every single run.
 FROM debian:trixie-slim AS pgvectorscale-build
 ARG PG_MAJOR
 ARG PGVECTORSCALE_VERSION
-# Same retry as the runtime stage: one transient TLS reset here fails the build.
+# TARGETARCH is supplied by buildx and is exactly the token upstream uses in the
+# asset name (amd64 / arm64).
+ARG TARGETARCH
+# Digests are per-arch and must move with PGVECTORSCALE_VERSION above. A release
+# asset is mutable in a way a git tag build was not, so it is pinned by content.
+ARG PGVECTORSCALE_SHA256_amd64=7a5450b81a7403ca20ff5e5a2f81aa13c81795ddd1fdfe9b986c42c48b12ed67
+ARG PGVECTORSCALE_SHA256_arm64=8d0916df999f082ceb3d019bdfa72f5df395c31b152f7906de59e429ee11edc7
+# Same retry as everywhere else in this file: an unretried fetch is a coin flip
+# wherever it sits.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
-    && install -d /usr/share/postgresql-common/pgdg \
+    && apt-get install -y --no-install-recommends ca-certificates curl unzip \
+    && rm -rf /var/lib/apt/lists/* \
+    && zip="pgvectorscale-${PGVECTORSCALE_VERSION}-pg${PG_MAJOR}-${TARGETARCH}.zip" \
+    && case "$TARGETARCH" in \
+         amd64) want="$PGVECTORSCALE_SHA256_amd64" ;; \
+         arm64) want="$PGVECTORSCALE_SHA256_arm64" ;; \
+         *) echo "pgvectorscale: no pinned digest for arch '$TARGETARCH'" >&2; exit 1 ;; \
+       esac \
     && for a in 1 2 3 4 5; do \
-         curl -fsS --connect-timeout 10 --max-time 60 \
-           -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-           https://www.postgresql.org/media/keys/ACCC4CF8.asc && break; \
-         echo "pgdg key fetch failed (attempt $a/5); backing off"; sleep $((a * 5)); \
+         curl -fsSL --connect-timeout 10 --max-time 300 -o "/tmp/$zip" \
+           "https://github.com/timescale/pgvectorscale/releases/download/${PGVECTORSCALE_VERSION}/${zip}" \
+           && break; \
+         echo "pgvectorscale asset fetch failed (attempt $a/5); backing off"; \
+         rm -f "/tmp/$zip"; sleep $((a * 5)); \
        done \
-    && test -s /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] http://apt.postgresql.org/pub/repos/apt trixie-pgdg main" \
-        > /etc/apt/sources.list.d/pgdg.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-        build-essential clang git pkg-config libssl-dev \
-        "postgresql-${PG_MAJOR}" "postgresql-server-dev-${PG_MAJOR}" \
-    && rm -rf /var/lib/apt/lists/*
-ENV CARGO_HOME=/usr/local/cargo
-ENV PATH=/usr/local/cargo/bin:$PATH
-# cargo-pgrx must match the pgrx the crate depends on, so it is read from the
-# checkout's Cargo.toml rather than pinned separately here.
-RUN curl -fsS https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable \
-    && git clone --depth 1 --branch "${PGVECTORSCALE_VERSION}" \
-        https://github.com/timescale/pgvectorscale.git /src/pgvectorscale \
-    && cd /src/pgvectorscale/pgvectorscale \
-    && pgrx_version="$(awk -F'"' '/^pgrx[[:space:]]*=/{print $2; exit}' Cargo.toml)" \
-    && echo "building pgvectorscale ${PGVECTORSCALE_VERSION} against pgrx ${pgrx_version}" \
-    && cargo install --locked cargo-pgrx --version "${pgrx_version}" \
-    && cargo pgrx init "--pg${PG_MAJOR}=/usr/lib/postgresql/${PG_MAJOR}/bin/pg_config" \
-    && cargo pgrx install --release --pg-config "/usr/lib/postgresql/${PG_MAJOR}/bin/pg_config"
-# Collect only the installed extension artifacts, at the paths the runtime uses.
-RUN mkdir -p "/pgvectorscale/usr/lib/postgresql/${PG_MAJOR}/lib" \
-        "/pgvectorscale/usr/share/postgresql/${PG_MAJOR}/extension" \
-    && cp "/usr/lib/postgresql/${PG_MAJOR}/lib/vectorscale"*.so \
-        "/pgvectorscale/usr/lib/postgresql/${PG_MAJOR}/lib/" \
-    && cp "/usr/share/postgresql/${PG_MAJOR}/extension/vectorscale"* \
-        "/pgvectorscale/usr/share/postgresql/${PG_MAJOR}/extension/"
+    && echo "${want}  /tmp/${zip}" | sha256sum -c - \
+    && unzip -j "/tmp/$zip" -d /tmp/pgvs \
+    && deb="$(find /tmp/pgvs -name '*.deb' ! -name '*dbgsym*' -print -quit)" \
+    && test -n "$deb" \
+    && echo "installing pgvectorscale ${PGVECTORSCALE_VERSION} (pg${PG_MAJOR}/${TARGETARCH}) from ${deb##*/}" \
+    && dpkg-deb -x "$deb" /pgvectorscale \
+    && rm -rf /pgvectorscale/usr/share/doc "/tmp/$zip" /tmp/pgvs
+# Fail here rather than shipping a kb that silently falls back to HNSW: the .deb
+# lays the files down at the paths the runtime reads, so assert they arrived.
+RUN test -n "$(find "/pgvectorscale/usr/lib/postgresql/${PG_MAJOR}/lib" -name 'vectorscale*.so' -print -quit)" \
+    && test -s "/pgvectorscale/usr/share/postgresql/${PG_MAJOR}/extension/vectorscale.control"
 
 # Runtime must match the build stage: libpq5 here has to provide at least the
 # PostgreSQL 17 symbols the kb was linked against (PGDG's libpq 18 does).
@@ -121,14 +142,38 @@ RUN apt-get update \
 # place that reads them: scripts/embedders.json.
 #
 # CPU-only torch: the CUDA wheels are ~2GB of accelerator runtime this image never uses.
+#
+# AIMEE_EMBEDDER=none SKIPS ALL OF THIS. A deployment pointing EMBEDDER_URL at an
+# external endpoint still carried CPU torch, sentence-transformers and a baked model
+# it never loads: roughly a gigabyte of image to hold code that never executes. That
+# variant could not be expressed before, and it is the third kb tag now.
+#
+# A conditional RUN body rather than a conditional stage. The weights land in the
+# final image either way; there is nothing to select between, only work to skip.
+# The default matches the one on the bake ARG below, and it is NOT optional: `set -u`
+# aborts on an unset variable, so declaring this bare made every build that does not
+# pass --build-arg AIMEE_EMBEDDER fail with
+#   /bin/sh: 1: AIMEE_EMBEDDER: parameter not set
+# The publish workflows always pass it; compose builds (and the e2e-docker tests that
+# use them) do not, which is why building locally never reproduced it.
+#
+# bekko rather than `none`, so a build with no build-arg behaves exactly as it did
+# before this change. `none` is opt-in.
+ARG AIMEE_EMBEDDER=bekko-a25m
 ENV EMBEDDER_VENV=/opt/aimee/embedder-venv
-RUN python3 -m venv "$EMBEDDER_VENV" \
-    && "$EMBEDDER_VENV/bin/pip" install --no-cache-dir --quiet \
-        --index-url https://download.pytorch.org/whl/cpu torch \
-    && "$EMBEDDER_VENV/bin/pip" install --no-cache-dir --quiet \
-        "sentence-transformers>=3.3" "transformers>=5.2" einops \
-    && find "$EMBEDDER_VENV" -name '__pycache__' -type d -prune -exec rm -rf {} + \
-    && rm -rf /root/.cache/pip
+RUN set -eux; \
+    if [ "$AIMEE_EMBEDDER" = "none" ]; then \
+      echo "AIMEE_EMBEDDER=none: no in-container embedder is baked;" \
+           "EMBEDDER_URL must be set at runtime"; \
+    else \
+      python3 -m venv "$EMBEDDER_VENV"; \
+      "$EMBEDDER_VENV/bin/pip" install --no-cache-dir --quiet \
+          --index-url https://download.pytorch.org/whl/cpu torch; \
+      "$EMBEDDER_VENV/bin/pip" install --no-cache-dir --quiet \
+          "sentence-transformers>=3.3" "transformers>=5.2" einops; \
+      find "$EMBEDDER_VENV" -name '__pycache__' -type d -prune -exec rm -rf {} +; \
+      rm -rf /root/.cache/pip; \
+    fi
 
 # DB2 engine, from PGDG rather than Debian: trixie ships PostgreSQL 17 with
 # pgvector 0.8.0, and its pgvector hard-depends on postgresql-17-jit-llvm, which
@@ -175,9 +220,9 @@ ENV AIMEE_HOME=/var/lib/aimee
 # internal cluster. Operators can still set the variable to select an external DB2.
 # No baked embedder/LLM endpoint defaults. The kb runs NO model runtime; it calls
 # an external aimee-llm container (CPU/GPU) or endpoint. Point it with ONE of:
-#   AIMEE_LLM_URL       unified container -> embed + synth (one knob)
-#   AIMEE_EMBEDDER_URL  pin the embedder (/embed) independently
-#   LLM_ENDPOINT        Tier-A synth only (small-model interface)
+#   SYNTHESIS_ENDPOINT       unified container -> embed + synth (one knob)
+#   EMBEDDER_URL  pin the embedder (/embed) independently
+#   SYNTHESIS_ENDPOINT        Tier-A synth only (small-model interface)
 # One of these is REQUIRED. The seeded default config selects the remote embedder
 # sidecar, so with no endpoint set the DB2 dim probe fails and db2_init refuses to
 # initialise rather than record a wrong vector width (db2_init.c) -- the kb then
@@ -188,15 +233,26 @@ ENV AIMEE_HOME=/var/lib/aimee
 # only when no embed command is configured at all, and the baked config always
 # configures one. The deploy unit (compose / smoothnas plugin) sets these and
 # brings up a default CPU aimee-llm sibling, which is why this is invisible there. (Old combined leftovers
-# AIMEE_EMBEDDER_URL=embedder:8080 / LLM_ENDPOINT=llm:8080 were removed: on a
+# EMBEDDER_URL=embedder:8080 / SYNTHESIS_ENDPOINT=llm:8080 were removed: on a
 # split deploy they silently pointed at non-existent services.)
 # Bind the /v1 HTTP API on 0.0.0.0 (not the 127.0.0.1 default), so the published
 # port and container-IP access reach it from outside the container.
 ENV AIMEE_KB_HTTP_BIND=1
 
 RUN useradd --system --home-dir /var/lib/aimee --create-home --shell /usr/sbin/nologin aimee
-COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb
-COPY --from=build /src/aimee-kb-resolver /usr/local/bin/aimee-kb-resolver
+# The synthesis identity directory must exist IN THE IMAGE, owned by the runtime
+# user, because the sidecar deployment mounts a named volume over this path.
+#
+# Docker initialises an empty named volume from whatever the image has at the mount
+# point, ownership included -- but if the path does not exist in the image it creates
+# the volume root-owned, and the kb (which runs as `aimee`) cannot write into it. That
+# is not theoretical: booting this produced
+#   kb_synthesis_identity: cannot create .../synthesis-tls/server.pem: Permission denied
+# and the sidecar then refuses to start, because it has no identity to present. The
+# unit test missed it by creating the directory as the same user it then wrote as.
+RUN install -d -o aimee -g aimee -m 0700 /var/lib/aimee/synthesis-tls
+# The kb binaries are copied in AFTER the model bake, near the end of this file.
+# Deliberately: see the comment there.
 
 # The embedder registry: every per-model fact that changes the vectors (pooling, width,
 # context, prefixes), keyed by model identity. Read by the in-container embedder to know
@@ -204,12 +260,34 @@ COPY --from=build /src/aimee-kb-resolver /usr/local/bin/aimee-kb-resolver
 COPY scripts/embedders.json /opt/aimee/embedders.json
 COPY scripts/embedder-server.py /opt/aimee/scripts/embedder-server.py
 
-# Bake the weights for every registered embedder — one ships — so a fresh container
-# embeds with no download and an air-gapped install works. Pinned to the registry's
-# revision: a floating ref would let a rebuild change the vector space silently.
+# Bake the weights for the ONE embedder this image variant serves, so a fresh
+# container embeds with no download and an air-gapped install works. Pinned to the
+# registry's revision: a floating ref would let a rebuild change the vector space
+# silently.
 #
-# A deployment that wants a wider embedder points AIMEE_EMBEDDER_URL at its own endpoint
-# rather than baking a second model in here.
+# AIMEE_EMBEDDER selects the registry entry. THREE images come out of this file,
+# and the embedder is now the only axis:
+#
+#   AIMEE_EMBEDDER            image            notes
+#   none                      aimee-kb         no torch, no weights; EMBEDDER_URL required
+#   bekko-a25m (384)          aimee-kb-a25m
+#   nomic-embed-text-v2-moe   aimee-kb-nomic
+#
+# Synthesis used to be a second axis here, doubling the matrix. It is its own image
+# now (aimee-llm-e2b / -e4b) deployed beside this one, because llama.cpp and a
+# multi-gigabyte GGUF have no business being rebuilt every time kb code changes.
+#
+# The registry lists both models; only the selected one is fetched. Baking both
+# would put nomic's ~1.8GB into every image, which is why these are separate tags.
+#
+# THE EMBEDDER AXIS IS A ONE-WAY DOOR PER INSTALL. DB2 records the vector-column
+# width and refuses startup on drift, so an install embedded with bekko (384)
+# cannot be moved to a nomic image (768) without a full reindex. Do not offer this
+# as a runtime switch; it is a deployment-time choice with data consequences.
+#
+# A deployment that wants a different embedder again points EMBEDDER_URL at its own
+# endpoint rather than baking a third model in here.
+ARG AIMEE_EMBEDDER=bekko-a25m
 #
 # FETCH ONLY WHAT THE TORCH PATH LOADS. snapshot_download takes the whole repo by
 # default, and a repo may publish the same weights several times over: bekko ships an
@@ -225,12 +303,68 @@ COPY scripts/embedder-server.py /opt/aimee/scripts/embedder-server.py
 ENV HF_HOME=/opt/aimee/models \
     HF_MODULES_CACHE=/var/lib/aimee/.cache/huggingface/modules \
     HF_HUB_OFFLINE=1
+# Skipped on AIMEE_EMBEDDER=none, which has no venv to run this with: the interpreter
+# lives in the venv the step above did not create.
+#
+# The SKIP IS THE INTERPRETER, not an `if` around the heredoc. Docker ends a RUN at
+# the heredoc terminator, so a trailing `fi` after PYBAKE is parsed as a Dockerfile
+# instruction and the build dies with "unknown instruction: fi". Choosing /bin/true
+# before the heredoc keeps this one instruction: the shell still feeds it the script,
+# and it discards it.
 RUN --mount=type=cache,target=/root/.cache/huggingface \
-    HF_HUB_OFFLINE=0 "$EMBEDDER_VENV/bin/python" - <<'PYBAKE'
-import json
+    if [ "$AIMEE_EMBEDDER" = "none" ]; then \
+      echo "AIMEE_EMBEDDER=none: no weights baked"; BAKE=/bin/true; \
+    else \
+      BAKE="$EMBEDDER_VENV/bin/python"; \
+    fi; \
+    AIMEE_EMBEDDER="$AIMEE_EMBEDDER" \
+    HF_HUB_OFFLINE=0 "$BAKE" - <<'PYBAKE'
+import json, os, sys, time
 from huggingface_hub import snapshot_download
 with open("/opt/aimee/embedders.json", encoding="utf-8") as handle:
     table = json.load(handle)["embedders"]
+
+
+def fetch(repo, **kw):
+    """snapshot_download with backoff, because the Hub rate-limits and this build
+    cannot make progress without it.
+
+    A bare snapshot_download turns any 429 or 5xx into a failed image build. That is
+    not hypothetical: three separate builds died on
+    "429 Too Many Requests for url .../hotchpotch/bekko-embedding-v1-a25m" inside one
+    evening, once on the publish lane and twice on e2e, simply because several image
+    variants were built in parallel and each fetches the same weights.
+
+    Retried statuses only. A bad revision or a repo that does not exist fails on the
+    first attempt as it should -- waiting sixty seconds to repeat a permanent error
+    just moves the failure further from its cause. Same shape as the apt-get update
+    loops elsewhere in this file, for the same reason.
+    """
+    delay = 15
+    for attempt in range(1, 6):
+        try:
+            return snapshot_download(repo, **kw)
+        except Exception as exc:  # noqa: BLE001 - the Hub raises several types for this
+            text = f"{type(exc).__name__}: {exc}"
+            transient = any(s in text for s in ("429", "5xx", "500", "502", "503", "504",
+                                                "Too Many Requests", "ReadTimeout",
+                                                "ConnectionError", "IncompleteRead"))
+            if not transient or attempt == 5:
+                raise
+            print(f"  hub fetch of {repo} failed ({text[:120]}); "
+                  f"retry {attempt}/4 in {delay}s", flush=True)
+            time.sleep(delay)
+            delay *= 2
+    raise AssertionError("unreachable")
+
+# Bake exactly the selected entry. An unknown name is a BUILD failure, not a
+# silently-empty image: a container with no baked weights starts fine and then
+# cannot embed, which surfaces as a retrieval outage rather than a build error.
+selected = os.environ.get("AIMEE_EMBEDDER", "").strip()
+if selected not in table:
+    sys.exit(f"AIMEE_EMBEDDER={selected!r} is not in the registry. "
+             f"Known: {', '.join(sorted(table))}")
+table = {selected: table[selected]}
 SKIP = [
     "onnx/*", "openvino/*", "*.onnx", "*.onnx_data",   # alternate runtimes
     "*.bin", "*.h5", "*.msgpack", "*.tflite", "*.ckpt",  # duplicate/legacy formats
@@ -267,13 +401,13 @@ def code_repos(snapshot_dir):
 for name, spec in table.items():
     repo, revision = spec["repo"], spec.get("revision") or "main"
     print(f"baking {name}: {repo}@{revision}", flush=True)
-    local = snapshot_download(repo, revision=revision, ignore_patterns=SKIP)
+    local = fetch(repo, revision=revision, ignore_patterns=SKIP)
     # Code repos are referenced by name only — auto_map carries no revision — so these
     # take the default branch. That is a looser pin than the weights get; a model whose
     # code must be pinned needs its auto_map repo added to the registry explicitly.
     for code_repo in sorted(code_repos(local)):
         print(f"  + code: {code_repo}", flush=True)
-        snapshot_download(code_repo, allow_patterns=["*.py", "*.json", "*.txt"])
+        fetch(code_repo, allow_patterns=["*.py", "*.json", "*.txt"])
 PYBAKE
 
 # The bake runs as root and huggingface_hub writes its tree-cache metadata 0600, so
@@ -281,7 +415,47 @@ PYBAKE
 # so the model still loads — it just logs "Ignoring corrupted tree cache file …
 # Permission denied" on every start and re-walks what the cache existed to avoid.
 # a+rX: readable everywhere, traversable on directories, and no file gains +x.
-RUN chmod -R a+rX /opt/aimee/models
+# The directory does not exist on AIMEE_EMBEDDER=none, and chmod -R on a missing
+# path is an error rather than a no-op.
+RUN if [ -d /opt/aimee/models ]; then chmod -R a+rX /opt/aimee/models; fi
+
+# THE COMPILED BINARY COMES IN AFTER THE MODEL, and the order is the point.
+#
+# These two lines used to sit ~130 lines above, before the bake. Docker invalidates
+# every layer after a changed one, so any C change changed the binary, which
+# invalidated the bake, which re-downloaded the weights from Hugging Face. On a
+# publish that is four downloads of the same files (two baked variants x two
+# architectures) for a change that touched neither the model nor the registry -- and
+# it is what got these builds answered with
+#   429 Too Many Requests for url .../hotchpotch/bekko-embedding-v1-a25m
+#
+# The --mount=type=cache on the bake does not prevent this. A BuildKit cache mount is
+# local to the builder, and cache-from/to type=gha carries LAYERS, not cache mounts, so
+# a fresh GitHub runner always begins with an empty one. The LAYER cache is what can
+# help, and it only can while this layer's inputs exclude the source tree.
+#
+# So the bake's inputs are now the venv, scripts/embedders.json and AIMEE_EMBEDDER,
+# none of which move when C code moves. Moving these COPY lines back up, or adding
+# anything source-dependent above the bake, silently restores the download.
+#
+# Nothing between the bake and here executes the binary, which is what makes the move
+# safe: the entrypoint script, USER, HEALTHCHECK and ENTRYPOINT all follow.
+COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb
+COPY --from=build /src/aimee-kb-resolver /usr/local/bin/aimee-kb-resolver
+COPY --from=build /module-runtime/bin/ /usr/local/libexec/aimee-modules/
+COPY --from=build /module-runtime/grants/kb/ /opt/aimee/module-grants/kb/
+COPY --from=build /module-runtime/kb.modules /opt/aimee/module-grants/kb.modules
+
+# NO BUNDLED SYNTHESIS. llama.cpp and its GGUF used to be baked here, which coupled a
+# multi-gigabyte, near-static artefact to the image rebuilt on every kb code change:
+# three kb tags under three cache scopes each rebuilding the LTO C binary, postgres,
+# pgvectorscale and torch, and pushing ~10 GB twice, for one code change.
+#
+# They now live in aimee-llm-e{2,4}b, deployed beside this container and reached over
+# mTLS. The weights are still baked -- into the image whose inputs change on the order
+# of never -- so the reason they were baked is intact. The kb resolves
+# SYNTHESIS_ENDPOINT exactly as it does for any external provider; it no longer cares
+# whether the model is on the same host.
 
 # Sidecar clients (the LLM access code the kb invokes via popen).
 COPY scripts/embed-remote.py scripts/llm-chat.py \
@@ -292,8 +466,10 @@ COPY scripts/embed-remote.py scripts/llm-chat.py \
 # the entrypoint seeds it into $AIMEE_HOME/.config/aimee on first start.
 COPY deploy/container/aimee.yaml /opt/aimee/defaults/aimee.yaml
 COPY deploy/container/aimee-kb-entrypoint.sh /usr/local/bin/aimee-kb-entrypoint.sh
+COPY deploy/container/module-supervisor.sh /usr/local/bin/module-supervisor.sh
 COPY deploy/container/aimee-kb-db-export.sh /usr/local/bin/aimee-kb-db-export
-RUN chmod +x /usr/local/bin/aimee-kb-entrypoint.sh /usr/local/bin/aimee-kb-db-export
+RUN chmod +x /usr/local/bin/aimee-kb-entrypoint.sh /usr/local/bin/aimee-kb-db-export \
+    /usr/local/bin/module-supervisor.sh
 
 USER aimee
 WORKDIR /var/lib/aimee

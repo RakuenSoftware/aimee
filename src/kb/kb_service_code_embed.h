@@ -41,4 +41,15 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
                           int path_count, int batch_size, int max_points, int dry_run,
                           kb_code_embed_result_t *out);
 
+/* 1 when every file of |project|'s CURRENT generation has been embedded at the
+ * active embedding dimension, 0 otherwise (including an unknown project, an
+ * unindexed one, or a store that cannot be read).
+ *
+ * This is the "embedded" step of indexed -> embedded -> curated, and it is the
+ * same signature kb_code_embed_refresh records when a pass completes the whole
+ * file set -- deliberately one definition, because a second reader that computed
+ * "fully embedded" differently would let curation start on a half-embedded
+ * project exactly when the two disagreed. */
+int kb_code_embed_project_fully_embedded(const char *project);
+
 #endif /* KB_SERVICE_CODE_EMBED_H */

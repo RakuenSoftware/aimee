@@ -740,6 +740,96 @@ int db2_embedding_model_record_or_check(void *conn, const char *model_id, const 
    return -1;
 }
 
+/* The identity the retired builtin lexical embedder recorded. Nothing serves it any
+ * more — a kb with no embedder now refuses to start — but corpora created before it
+ * was removed still carry it in kb_meta, so the value has to outlive the code. */
+#define RETIRED_LEXICAL_SERVING_ID "builtin/lexical-v1"
+
+/* The tables that hold derived vectors. Every one is rebuildable from source kept
+ * elsewhere, which is why db2_reembed.c may drop them; here the same set answers a
+ * different question — has anything actually been embedded yet.
+ *
+ * Keep in sync with schema.sql's halfvec(__EMBED_DIM__) tables (and their
+ * schema_sqlite.sql counterparts). A table missing from this list would answer the
+ * emptiness question wrongly in the unsafe direction, so adding one is not optional. */
+const char *const DB2_DERIVED_VECTOR_TABLES[] = {"kb_embeddings",
+                                                 "kb_pdf_embeddings",
+                                                 "memory_embeddings",
+                                                 "curator_entity_vectors",
+                                                 "curator_narrative_vectors",
+                                                 "curator_claim_vectors",
+                                                 "curator_code_unit_vectors",
+                                                 "exemplar_vectors",
+                                                 "evidence_vectors",
+                                                 "code_embeddings",
+                                                 NULL};
+
+/* Does any vector table hold a row?
+ *
+ * Returns 1 (has vectors), 0 (provably empty), or -1 (could not tell). Callers must
+ * treat -1 as "has vectors": an unprovable corpus is not an empty one. */
+
+/* Does `table` exist? 1 yes, 0 no, -1 could not ask. Asked explicitly rather than
+ * inferred from a failed read: "the table is absent" and "the table is there but I
+ * cannot read it" are opposite answers to the emptiness question, and a failed prepare
+ * cannot tell them apart. Treating both as absence let one unreadable table plus one
+ * empty table report a corpus as provably empty. */
+static int corpus_table_exists(void *conn, const char *table)
+{
+   char err[256] = "";
+   /* Views count as existing. Postgres's to_regclass resolves them, so the shim has to
+    * as well or the two backends disagree about what "absent" means — and the answer
+    * that matters is "is there something under this name I would have to read", not
+    * "is it specifically a table". */
+   const char *sql = aimee_pg_is_shim()
+                         ? "SELECT name FROM sqlite_master WHERE type IN ('table','view') "
+                           "AND name=?1"
+                         : "SELECT to_regclass(?1)";
+   aimee_pg_stmt_t *probe = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!probe)
+      return -1;
+   if (aimee_pg_bind_text(probe, "?1", table) != 0)
+   {
+      aimee_pg_finalize(probe);
+      return -1;
+   }
+   int exists = 0;
+   if (aimee_pg_step(probe, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      const char *resolved = aimee_pg_column_text(probe, 0);
+      exists = resolved && resolved[0];
+   }
+   aimee_pg_finalize(probe);
+   return exists;
+}
+
+static int corpus_has_vectors(void *conn)
+{
+   for (int i = 0; DB2_DERIVED_VECTOR_TABLES[i]; i++)
+   {
+      int exists = corpus_table_exists(conn, DB2_DERIVED_VECTOR_TABLES[i]);
+      if (exists < 0)
+         return -1; /* could not even ask whether it is there */
+      if (!exists)
+         continue; /* absent, and absence IS proof that it holds nothing */
+
+      char err[256] = "";
+      char sql[160];
+      snprintf(sql, sizeof(sql), "SELECT 1 FROM %s LIMIT 1", DB2_DERIVED_VECTOR_TABLES[i]);
+      aimee_pg_stmt_t *q = aimee_pg_prepare(conn, sql, err, sizeof(err));
+      if (!q)
+         return -1; /* it exists and we cannot read it: never call that empty */
+      aimee_pg_step_t step = aimee_pg_step(q, err, sizeof(err));
+      aimee_pg_finalize(q);
+      if (step == AIMEE_PG_ROW)
+         return 1;
+      if (step != AIMEE_PG_DONE)
+         return -1;
+   }
+   /* Every table was either provably absent or read and found empty. */
+   return 0;
+}
+
 /* Record/check the embedder's VECTOR-SPACE identity (the gateway's /health
  * serving_id: model + pooling + prefix pair, digested).
  *
@@ -756,9 +846,19 @@ int db2_embedding_model_record_or_check(void *conn, const char *model_id, const 
  *     the drift it could not have detected is the operator's to resolve (the cutover
  *     runbook says re-embed).
  *   - recorded == serving_id -> match.
+ *   - recorded is the RETIRED lexical identity AND nothing has been embedded -> adopt
+ *     the new identity. Those corpora exist because an unconfigured kb used to serve a
+ *     builtin lexical embedder, which recorded itself as the vector space on first
+ *     init whether or not anything was ever embedded. The embedder is gone, but the
+ *     kb_meta rows are not, and without this every such deployment would refuse to
+ *     start the moment it was given the embedder it now requires. With no vectors
+ *     written there is no space to mix. Emptiness must be PROVEN — an unreadable
+ *     corpus is treated as non-empty.
  *   - recorded != serving_id -> REFUSE. There is no compat list: unlike a model swap,
  *     where cosine agreement can be measured and admitted, a pooling or prefix change
- *     is definitionally a different space.
+ *     is definitionally a different space. A lexical corpus that HAS vectors is still
+ *     refused: the builtin was 384-dim and so is the bundled model, so the dim guard
+ *     cannot see that transition and this is the only thing that can.
  */
 int db2_embedder_serving_record_or_check(void *conn, const char *serving_id, char *errbuf,
                                          size_t errlen)
@@ -778,6 +878,17 @@ int db2_embedder_serving_record_or_check(void *conn, const char *serving_id, cha
    if (!recorded[0] || strcmp(recorded, serving_id) == 0)
    {
       if (!recorded[0] && kb_meta_set(conn, "schema_embedder_serving_id", serving_id) != 0)
+      {
+         if (errbuf && errlen)
+            snprintf(errbuf, errlen, "kb_meta write failed for schema_embedder_serving_id");
+         return -1;
+      }
+      return 0;
+   }
+
+   if (strcmp(recorded, RETIRED_LEXICAL_SERVING_ID) == 0 && corpus_has_vectors(conn) == 0)
+   {
+      if (kb_meta_set(conn, "schema_embedder_serving_id", serving_id) != 0)
       {
          if (errbuf && errlen)
             snprintf(errbuf, errlen, "kb_meta write failed for schema_embedder_serving_id");
@@ -819,7 +930,7 @@ int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t 
          snprintf(errbuf, errlen,
                   "embedding dimension %d is unusable (expected 1..%d); the deployment's "
                   "width was never supplied to the DB2 layer — check that startup calls "
-                  "db2_set_embedding_dim_default(config_embedding_dim_default())",
+                  "db2_set_embedding_dim_default(config_embedder_dims_default())",
                   embed_dim, EMBED_MAX_DIM);
       return -1;
    }

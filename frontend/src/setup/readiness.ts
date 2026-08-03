@@ -26,9 +26,9 @@ export type StepId = 'account' | 'provider' | 'knowledge_base' | 'embedding' | '
  * GET /api/setup/account — none has a config key, so they are absent here. */
 export const READINESS_KEYS = [
   'provider',
-  'embedding_command',
-  'embedding_endpoint',
-  'llm_embed_backend',
+  'embedder_command',
+  'embedder_url',
+  'embedder_model',
   'db2_url',
   'kb_mode',
   'kb_client_url',
@@ -69,12 +69,15 @@ export function computeReadiness(
   const remote = asStr(cfg, 'kb_mode') === 'remote';
   const kbUrl = asStr(cfg, 'kb_client_url');
 
-  const embCmd = asStr(cfg, 'embedding_command');
-  const embEndpoint = asStr(cfg, 'embedding_endpoint');
+  const embCmd = asStr(cfg, 'embedder_command');
+  const embUrl = asStr(cfg, 'embedder_url');
+  /* A bundled embedder is configured by NAMING it: the model is baked into the
+   * image, so there is no endpoint to point at. This read llm_embed_backend ===
+   * 'local', a selector that could disagree with the fields it gated. */
+  const embModel = asStr(cfg, 'embedder_model');
   // The deploy-topology page places the embedder as a role (local container or
   // external), which also configures a real embedder.
-  const embBackend = asStr(cfg, 'llm_embed_backend');
-  const embConfigured = embCmd !== '' || embEndpoint !== '' || embBackend === 'local' || embBackend === 'external';
+  const embConfigured = embCmd !== '' || embUrl !== '' || embModel !== '';
   const db2 = asStr(cfg, 'db2_url');
 
   const steps: Record<StepId, StepStatus> = {
@@ -157,10 +160,9 @@ export function completedSteps(
   }
 
   const embConfigured =
-    asStr(cfg, 'embedding_command') !== '' ||
-    asStr(cfg, 'embedding_endpoint') !== '' ||
-    asStr(cfg, 'llm_embed_backend') === 'local' ||
-    asStr(cfg, 'llm_embed_backend') === 'external';
+    asStr(cfg, 'embedder_command') !== '' ||
+    asStr(cfg, 'embedder_url') !== '' ||
+    asStr(cfg, 'embedder_model') !== '';
   if (embConfigured) done.add('embedding');
 
   // A blank db2_url is ALSO the completed "bundled Postgres" choice, but blank

@@ -36,32 +36,32 @@ int config_db2_url_effective(char *out, size_t n);
  * caller keeping its own fallback recreates the bug this replaced: kb_main used
  * to default to 1024 while the bundled model returned 384, so an unpinned kb
  * sized its columns for one embedder and then inserted vectors from another. */
-int config_embedding_dim_default(void);
+int config_embedder_dims_default(void);
 
-/* Effective embedding dim: AIMEE_EMBEDDING_DIM env override (1..EMBED_MAX_DIM)
- * when set, else cfg->embedding_dim. 0 means "nothing pinned" — that is load-
+/* Effective embedding dim: EMBEDDER_DIMS env override (1..EMBED_MAX_DIM)
+ * when set, else cfg->embedder_dims. 0 means "nothing pinned" — that is load-
  * bearing for the §2a precedence below, so this deliberately does NOT apply the
  * default. Callers that need a usable width (not a pin signal) want
- * config_embedding_dim_effective(). Non-mutating. */
-int config_resolve_embedding_dim(const config_t *cfg);
+ * config_embedder_dims_effective(). Non-mutating. */
+int config_resolve_embedder_dims(const config_t *cfg);
 
 /* No-arg form of the above, against the loaded config. Still the PIN signal
- * (0 = nothing pinned), NOT the effective width -- see config_embedding_dim_current. */
-int config_resolve_embedding_dim_current(void);
+ * (0 = nothing pinned), NOT the effective width -- see config_embedder_dims_current. */
+int config_resolve_embedder_dims_current(void);
 
 /* The width to actually embed and size columns with: the pin when there is one,
- * else config_embedding_dim_default(). Pass this to db2_set_embedding_dim() —
+ * else config_embedder_dims_default(). Pass this to db2_set_embedding_dim() —
  * that layer holds no default of its own. Non-mutating. */
-int config_embedding_dim_effective(const config_t *cfg);
+int config_embedder_dims_effective(const config_t *cfg);
 
 /* No-arg form for callers holding no config_t (the CLI doctor). Same value as
- * config_embedding_dim_effective against the loaded config. */
-int config_embedding_dim_current(void);
+ * config_embedder_dims_effective against the loaded config. */
+int config_embedder_dims_current(void);
 
 /* THE synthesis endpoint. One config field (llm_synth_endpoint), one resolver, and
- * the AIMEE_LLM_URL env override applied in one place — the same shape as the
- * embedder address (config_embedding_command) and the embedding width
- * (config_embedding_dim_*).
+ * the SYNTHESIS_ENDPOINT env override applied in one place — the same shape as the
+ * embedder address (config_embedder_command) and the embedding width
+ * (config_embedder_dims_*).
  *
  * Writes the OpenAI chat base into out ("{endpoint}/v1"), appending /v1 only when the
  * configured value did not already include it, so an operator may supply either form.
@@ -73,21 +73,21 @@ int config_embedding_dim_current(void);
 int config_synth_chat_endpoint(const config_t *cfg, char *out, size_t out_len);
 
 /* Same resolver without a config_t: reads llm_synth_endpoint through its accessor.
- * AIMEE_LLM_URL still outranks the stored field, and normalization is shared. */
+ * SYNTHESIS_ENDPOINT still outranks the stored field, and normalization is shared. */
 int config_synth_chat_endpoint_current(char *out, size_t out_len);
 
 /* embedder-runtime-fetch-autodim §2a: 1 iff the operator pinned a positive
- * embedding dim — defined as config_resolve_embedding_dim(cfg) > 0, so "pinned"
+ * embedding dim — defined as config_resolve_embedder_dims(cfg) > 0, so "pinned"
  * is exactly consistent with the value db2_set_embedding_dim receives. A pinned
  * dim is authoritative; an UNpinned deployment lets the recorded
- * kb_meta.schema_embedding_dim win over the default. AIMEE_EMBEDDING_DIM="0" /
+ * kb_meta.schema_embedding_dim win over the default. EMBEDDER_DIMS="0" /
  * non-numeric / empty is NOT a pin (config_resolve already maps it to 0), nor is
- * an unset cfg->embedding_dim. Pass to db2_set_embedding_dim_pinned(). */
-int config_embedding_dim_is_pinned(const config_t *cfg);
+ * an unset cfg->embedder_dims. Pass to db2_set_embedding_dim_pinned(). */
+int config_embedder_dims_is_pinned(const config_t *cfg);
 
 /* No-arg form for callers holding no config_t; same answer as
- * config_embedding_dim_is_pinned against the live config. Prefer this. */
-int config_embedding_dim_pinned_current(void);
+ * config_embedder_dims_is_pinned against the live config. Prefer this. */
+int config_embedder_dims_pinned_current(void);
 
 /* Emit the deploy-time environment the compose stack consumes for the page-2
  * backend record (setup wizard). Writes shell-sourceable KEY=VALUE lines to buf:
@@ -95,8 +95,8 @@ int config_embedding_dim_pinned_current(void);
  *                       "llm" when any LLM role is local; empty for a remote kb).
  *   AIMEE_LLM_<ROLE>_MODE/TIER/URL — per Phase-0 plugin env (local => TIER,
  *                       external => URL, off => mode=off).
- *   AIMEE_LLM_URL     — the compose aimee-llm service, when any role is local.
- *   AIMEE_EMBEDDING_DIM — only when the operator pinned it (external embedder);
+ *   SYNTHESIS_ENDPOINT     — the compose aimee-llm service, when any role is local.
+ *   EMBEDDER_DIMS — only when the operator pinned it (external embedder);
  *                       a local/unset dim is derived from the embedder /health.
  *   AIMEE_KB_API_URL/BEARER — when kb_mode=remote (connect out, deploy nothing).
  * Pure/non-mutating; the single translation both the entrypoint and an operator

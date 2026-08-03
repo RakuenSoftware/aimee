@@ -10,7 +10,7 @@
 #include "kb_client.h"
 #include "platform_process.h"
 #include "kb.h"
-#include "memory_graph_fusion.h"
+#include "modules/memory/memory_graph_fusion.h"
 #include <ctype.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -41,7 +41,7 @@ static cJSON *mem_rpc_unwrap(char *resp_json, const char *what)
 
 void mem_embed(app_ctx_t *ctx, int argc, char **argv)
 {
-   const char *embed_cmd = config_embedding_command_current(NULL);
+   const char *embed_cmd = config_embedder_command_current(NULL);
 
    int all = 0;
    int64_t single_id = 0;
@@ -67,7 +67,7 @@ void mem_embed(app_ctx_t *ctx, int argc, char **argv)
 
    /* Copied out: held alongside embed_cmd through the work below. */
    char embed_model[CONFIG_COPY_MAX];
-   config_embedding_model_copy(embed_model, sizeof(embed_model));
+   config_embedder_model_copy(embed_model, sizeof(embed_model));
    const char *embed_ver = embed_model[0] ? embed_model : embed_cmd;
    cJSON *resp = mem_rpc_unwrap(kb_client_memory_embed_json(1, 0, embed_ver, embed_cmd),
                                 "memory embed failed");
@@ -200,14 +200,14 @@ void mem_reembed(app_ctx_t *ctx, int argc, char **argv)
    }
 
    /* --start */
-   const char *embed_cmd = config_embedding_command_current(NULL);
+   const char *embed_cmd = config_embedder_command_current(NULL);
    char ver_buf[256];
    if (target_version)
       snprintf(ver_buf, sizeof(ver_buf), "%s", target_version);
    else
    {
-      if (config_embedding_model()[0])
-         snprintf(ver_buf, sizeof(ver_buf), "%s", config_embedding_model());
+      if (config_embedder_model()[0])
+         snprintf(ver_buf, sizeof(ver_buf), "%s", config_embedder_model());
       else
          snprintf(ver_buf, sizeof(ver_buf), "%s", embed_cmd);
    }
@@ -1601,7 +1601,15 @@ void mem_benchmark(app_ctx_t *ctx, int argc, char **argv)
          baseline_path = "tests/eval/memory_retrieval_baseline.json";
 
       mem_eval_case_t corpus_cases[MEM_CORPUS_MAX_CASES];
-      int n_corpus = mem_eval_load_corpus(corpus_path, corpus_cases, MEM_CORPUS_MAX_CASES);
+      const char *bench_embed = config_embedder_command_current(NULL);
+      /* Name the actual cause. A retrieval benchmark embeds its corpus, so with no
+       * embedder configured the load fails for a reason that has nothing to do with the
+       * corpus path — and "corpus failed for <path>" sends the operator to the file. */
+      if (!bench_embed || !bench_embed[0])
+         fatal("no embedder configured; a retrieval benchmark cannot embed its corpus. "
+               "Set one with `aimee config set embedder_model <model>` or EMBEDDER_URL");
+      int n_corpus =
+          mem_eval_load_corpus(corpus_path, bench_embed, corpus_cases, MEM_CORPUS_MAX_CASES);
       if (n_corpus <= 0)
          fatal("memory benchmark corpus failed for %s", corpus_path);
 

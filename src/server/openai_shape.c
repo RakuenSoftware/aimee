@@ -810,6 +810,249 @@ int openai_format_chat_completion(const char *id, const char *model, const char 
    return (len < 0 || len >= cap) ? -1 : len;
 }
 
+/* ── openai_split_chat_request ───────────────────────────────────────────── */
+
+int openai_split_chat_request(const char *body, char **instructions_out, cJSON **messages_out,
+                              cJSON **tools_out)
+{
+   if (!instructions_out || !messages_out || !tools_out)
+      return -1;
+   *instructions_out = NULL;
+   *messages_out = NULL;
+   *tools_out = NULL;
+
+   cJSON *root = cJSON_Parse(body ? body : "");
+   if (!cJSON_IsObject(root))
+   {
+      cJSON_Delete(root);
+      return -1;
+   }
+   const cJSON *msgs = cJSON_GetObjectItemCaseSensitive(root, "messages");
+   if (!cJSON_IsArray(msgs))
+   {
+      cJSON_Delete(root);
+      return -1;
+   }
+
+   /* The provider drivers take the system prompt out of band, so lift leading
+    * system turns into `instructions` and pass the rest through untouched —
+    * assistant `tool_calls` and `role:"tool"` results included, which is what
+    * makes a client-driven tool loop converge across turns. */
+   cJSON *messages = cJSON_CreateArray();
+   char *instructions = NULL;
+   const cJSON *m;
+   cJSON_ArrayForEach(m, msgs)
+   {
+      const cJSON *role = cJSON_GetObjectItemCaseSensitive(m, "role");
+      const cJSON *content = cJSON_GetObjectItemCaseSensitive(m, "content");
+      if (cJSON_IsString(role) && strcmp(role->valuestring, "system") == 0 &&
+          cJSON_IsString(content) && !instructions)
+      {
+         instructions = strdup(content->valuestring);
+         continue;
+      }
+      cJSON_AddItemToArray(messages, cJSON_Duplicate(m, 1));
+   }
+   if (cJSON_GetArraySize(messages) == 0)
+   {
+      cJSON_Delete(messages);
+      cJSON_Delete(root);
+      free(instructions);
+      return -1;
+   }
+
+   /* Only function tools survive; anything else would reach a driver that
+    * cannot express it. An empty result stays NULL — never forward `tools: []`. */
+   const cJSON *tools = cJSON_GetObjectItemCaseSensitive(root, "tools");
+   cJSON *kept = NULL;
+   if (cJSON_IsArray(tools))
+   {
+      const cJSON *t;
+      cJSON_ArrayForEach(t, tools)
+      {
+         const cJSON *type = cJSON_GetObjectItemCaseSensitive(t, "type");
+         if (cJSON_IsString(type) && strcmp(type->valuestring, "function") != 0)
+            continue;
+         if (!kept)
+            kept = cJSON_CreateArray();
+         cJSON_AddItemToArray(kept, cJSON_Duplicate(t, 1));
+      }
+   }
+
+   cJSON_Delete(root);
+   *instructions_out = instructions;
+   *messages_out = messages;
+   *tools_out = kept;
+   return 0;
+}
+
+/* ── openai_format_chat_completion_tool_calls ────────────────────────────── */
+
+int openai_format_chat_completion_tool_calls(const char *id, const char *model,
+                                             const parsed_response_t *parsed, long created,
+                                             char *resp, int cap)
+{
+   if (!resp || cap <= 0 || !parsed || parsed->call_count <= 0)
+      return -1;
+
+   cJSON *root = cJSON_CreateObject();
+   if (!root)
+      return -1;
+
+   cJSON_AddStringToObject(root, "id", id ? id : "");
+   cJSON_AddStringToObject(root, "object", "chat.completion");
+   cJSON_AddNumberToObject(root, "created", (double)created);
+   cJSON_AddStringToObject(root, "model", model ? model : "");
+
+   cJSON *choices = cJSON_AddArrayToObject(root, "choices");
+   cJSON *choice = cJSON_CreateObject();
+   if (!choices || !choice)
+   {
+      cJSON_Delete(choice);
+      cJSON_Delete(root);
+      return -1;
+   }
+   cJSON_AddNumberToObject(choice, "index", 0.0);
+   cJSON_AddItemToArray(choices, choice);
+
+   cJSON *msg = cJSON_AddObjectToObject(choice, "message");
+   cJSON_AddStringToObject(msg, "role", "assistant");
+   /* Any prose emitted alongside the calls is preserved; OpenAI sends null when
+    * the turn is purely tool calls, and clients branch on exactly that. */
+   if (parsed->content && parsed->content[0])
+      cJSON_AddStringToObject(msg, "content", parsed->content);
+   else
+      cJSON_AddNullToObject(msg, "content");
+
+   cJSON *tcs = cJSON_AddArrayToObject(msg, "tool_calls");
+   for (int i = 0; i < parsed->call_count; i++)
+   {
+      cJSON *tc = cJSON_CreateObject();
+      cJSON_AddStringToObject(tc, "id", parsed->calls[i].id);
+      cJSON_AddStringToObject(tc, "type", "function");
+      cJSON *fn = cJSON_AddObjectToObject(tc, "function");
+      cJSON_AddStringToObject(fn, "name", parsed->calls[i].name);
+      /* `arguments` is a JSON *string* on the wire, not an object. */
+      cJSON_AddStringToObject(fn, "arguments",
+                              parsed->calls[i].arguments ? parsed->calls[i].arguments : "{}");
+      cJSON_AddItemToArray(tcs, tc);
+   }
+
+   cJSON_AddStringToObject(choice, "finish_reason", "tool_calls");
+
+   cJSON *usage = cJSON_AddObjectToObject(root, "usage");
+   cJSON_AddNumberToObject(usage, "prompt_tokens", (double)parsed->prompt_tokens);
+   cJSON_AddNumberToObject(usage, "completion_tokens", (double)parsed->completion_tokens);
+   cJSON_AddNumberToObject(usage, "total_tokens",
+                           (double)(parsed->prompt_tokens + parsed->completion_tokens));
+
+   char *s = cJSON_PrintUnformatted(root);
+   cJSON_Delete(root);
+   if (!s)
+      return -1;
+
+   int len = snprintf(resp, (size_t)cap, "%s", s);
+   free(s);
+   return (len < 0 || len >= cap) ? -1 : len;
+}
+
+/* ── openai_format_chat_chunk_tool_calls (streaming SSE delta) ───────────── */
+
+int openai_format_chat_chunk_tool_calls(const char *id, const char *model, long created,
+                                        const parsed_response_t *parsed, char *resp, int cap)
+{
+   if (!resp || cap <= 0 || !parsed || parsed->call_count <= 0)
+      return -1;
+
+   cJSON *root = cJSON_CreateObject();
+   if (!root)
+      return -1;
+
+   cJSON_AddStringToObject(root, "id", id ? id : "");
+   cJSON_AddStringToObject(root, "object", "chat.completion.chunk");
+   cJSON_AddNumberToObject(root, "created", (double)created);
+   cJSON_AddStringToObject(root, "model", model ? model : "");
+
+   cJSON *choices = cJSON_AddArrayToObject(root, "choices");
+   cJSON *choice = cJSON_CreateObject();
+   if (!choices || !choice)
+   {
+      cJSON_Delete(choice);
+      cJSON_Delete(root);
+      return -1;
+   }
+   cJSON_AddNumberToObject(choice, "index", 0.0);
+   cJSON_AddItemToArray(choices, choice);
+
+   /* The upstream reply is buffered before it is chunked, so each call's
+    * arguments are complete and go out in a single delta. Clients accumulate
+    * by `index`, so emitting one frame per call is as valid as fragmenting. */
+   cJSON *delta = cJSON_AddObjectToObject(choice, "delta");
+   cJSON *tcs = cJSON_AddArrayToObject(delta, "tool_calls");
+   for (int i = 0; i < parsed->call_count; i++)
+   {
+      cJSON *tc = cJSON_CreateObject();
+      cJSON_AddNumberToObject(tc, "index", (double)i);
+      cJSON_AddStringToObject(tc, "id", parsed->calls[i].id);
+      cJSON_AddStringToObject(tc, "type", "function");
+      cJSON *fn = cJSON_AddObjectToObject(tc, "function");
+      cJSON_AddStringToObject(fn, "name", parsed->calls[i].name);
+      cJSON_AddStringToObject(fn, "arguments",
+                              parsed->calls[i].arguments ? parsed->calls[i].arguments : "{}");
+      cJSON_AddItemToArray(tcs, tc);
+   }
+   cJSON_AddNullToObject(choice, "finish_reason");
+
+   char *s = cJSON_PrintUnformatted(root);
+   cJSON_Delete(root);
+   if (!s)
+      return -1;
+
+   int len = snprintf(resp, (size_t)cap, "%s", s);
+   free(s);
+   return (len < 0 || len >= cap) ? -1 : len;
+}
+
+/* ── openai_format_chat_chunk_finish ─────────────────────────────────────── */
+
+int openai_format_chat_chunk_finish(const char *id, const char *model, long created,
+                                    const char *reason, char *resp, int cap)
+{
+   if (!resp || cap <= 0)
+      return -1;
+
+   cJSON *root = cJSON_CreateObject();
+   if (!root)
+      return -1;
+
+   cJSON_AddStringToObject(root, "id", id ? id : "");
+   cJSON_AddStringToObject(root, "object", "chat.completion.chunk");
+   cJSON_AddNumberToObject(root, "created", (double)created);
+   cJSON_AddStringToObject(root, "model", model ? model : "");
+
+   cJSON *choices = cJSON_AddArrayToObject(root, "choices");
+   cJSON *choice = cJSON_CreateObject();
+   if (!choices || !choice)
+   {
+      cJSON_Delete(choice);
+      cJSON_Delete(root);
+      return -1;
+   }
+   cJSON_AddNumberToObject(choice, "index", 0.0);
+   cJSON_AddItemToArray(choices, choice);
+   cJSON_AddItemToObject(choice, "delta", cJSON_CreateObject());
+   cJSON_AddStringToObject(choice, "finish_reason", reason ? reason : "stop");
+
+   char *s = cJSON_PrintUnformatted(root);
+   cJSON_Delete(root);
+   if (!s)
+      return -1;
+
+   int len = snprintf(resp, (size_t)cap, "%s", s);
+   free(s);
+   return (len < 0 || len >= cap) ? -1 : len;
+}
+
 /* ── openai_format_chat_chunk (streaming SSE delta) ──────────────────────── */
 
 int openai_format_chat_chunk(const char *id, const char *model, long created, int role,

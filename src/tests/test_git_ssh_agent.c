@@ -1,8 +1,8 @@
 /* test_git_ssh_agent.c — WP-C2: a webuser's vaulted SSH key is loaded into a
  * per-user in-memory ssh-agent via a memfd, never touching disk; git/ssh reach
  * it via SSH_AUTH_SOCK. Skips gracefully if openssh tooling is unavailable. */
-#include "git_ssh_agent.h"
-#include "git_forge_vault.h"
+#include "modules/git/git_ssh_agent.h"
+#include "modules/git/git_forge_vault.h"
 #include "vault_kek_cache.h"
 #include "vault_service.h"
 
@@ -97,8 +97,10 @@ int main(void)
    const uint8_t pw[] = "alice-pw";
    assert(vault_service_unlock_password(alice, ATTEST_WEBCHAT_TRUSTED, pw, sizeof(pw) - 1, T0) ==
           VAULT_OK);
-   assert(vault_service_set(alice, GIT_FORGE_VAULT_AGENT, GIT_FORGE_SSHKEY_CRED, key, T0) ==
-          VAULT_OK);
+   /* The key lives in the one environment vault under the server master KEK —
+    * where /v1/vault/set now stores it and the autonomous reader looks. Alice
+    * is the actor who authenticated, not a credential namespace. */
+   assert(vault_service_set_server(GIT_FORGE_VAULT_AGENT, GIT_FORGE_SSHKEY_CRED, key) == VAULT_OK);
 
    /* Ensure the agent: loads the key from a memfd, returns SSH_AUTH_SOCK. */
    char sock[600];
@@ -113,7 +115,7 @@ int main(void)
    /* NO file in the runtime dir holds the private key plaintext (only a socket +
     * pidfile; the key crossed via a memfd). */
    char agentdir[400];
-   snprintf(agentdir, sizeof(agentdir), "%s/webusers/alice", rt);
+   snprintf(agentdir, sizeof(agentdir), "%s/environment", rt);
    assert(dir_has_plaintext(agentdir, "PRIVATE KEY") == 0);
 
    /* ensure() again reuses the live agent. */
@@ -121,9 +123,11 @@ int main(void)
    assert(git_ssh_agent_ensure(alice, sock2, sizeof(sock2)) == 1);
    assert(strcmp(sock, sock2) == 0);
 
-   /* a principal with no vaulted key -> 0 (no agent). */
+   /* Another actor resolves the SAME environment agent — the key is the
+    * environment's, not alice's. */
    char nb[600];
-   assert(git_ssh_agent_ensure("webuser:bob", nb, sizeof(nb)) == 0);
+   assert(git_ssh_agent_ensure("webuser:bob", nb, sizeof(nb)) == 1);
+   assert(strcmp(nb, sock) == 0);
 
    /* stop tears the agent down. */
    git_ssh_agent_stop(alice);

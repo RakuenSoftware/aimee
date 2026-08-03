@@ -1,16 +1,14 @@
-# Child "slice" workflow -- one packet of the parent "build" run.
+# Child `slice` workflow for one packet of a parent `build` run.
 #
-# foreach.workflow spawns one of these per split packet. Each slice implements its
-# packet, freezes the diff, passes the standard roundtable (resubmit-until-
-# convergence), opens a sub-PR, waits for FULLY GREEN CI, then merges into the
-# parent's feature branch. A slice is terminal (done) only once merged.
+# `foreach.workflow` starts one child per packet. Each child implements its packet,
+# freezes and reviews the diff, opens a slice PR, waits for green CI, then merges
+# into the parent feature branch. The child completes only after merge.
 name: slice
 intent_tags:
   - slice
 start: scope
 nodes:
-  # Scope the packet handed down by the parent into an actionable intent (source;
-  # no user -- this is an autonomous child run). Self-loop on delegate failure.
+  # Turn the parent packet into an actionable intent without user input.
   - id: scope
     block: understand
     params:
@@ -23,13 +21,10 @@ nodes:
     in:
       plan: scope.out
     params:
-      # Verification or delegate failures get a small corrective window. A
-      # persistent environment failure must park for an operator, not burn the
-      # default twenty complete implementation turns.
+      # Give implementation a small corrective window before operator repair.
       max_rounds: 3
     next: freeze
-    # A transient implement failure (delegate flub, failed verify) retries; a
-    # looped node with no on_fail edge parks 'stuck' permanently.
+    # Requested changes return to implementation.
     on_fail: impl
   - id: freeze
     block: freeze
@@ -59,14 +54,11 @@ nodes:
     in:
       src: freeze.out
     params:
-      # A slice sub-PR merges INTO the parent's durable feature branch
-      # (aimee/feat/<parent>), NEVER the integration branch. Without this the base
-      # falls through to the autonomous default (testing) and the slice would
-      # merge straight into the integration branch — the merge seam now hard-gates
-      # that, so this keeps the slice mergeable at all.
+      # A slice PR must target the parent's `aimee/feat/<parent>` branch. The forge
+      # boundary rejects a slice merge into the admitted integration branch.
       base: feature
     next: ci
-    # forge push/open can fail transiently; retry rather than dead-end.
+    # Retry a requested forge correction within the node budget.
     on_fail: pr
   # CI must be fully green before the slice may merge; red loops back to implement.
   - id: ci

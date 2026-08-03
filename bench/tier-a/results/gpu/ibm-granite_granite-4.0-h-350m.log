@@ -1,0 +1,4 @@
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+[transformers] The fast path is not available because one of `(selective_state_update, causal_conv1d_fn, causal_conv1d_update)` is None. Falling back to the naive implementation. To install follow https://github.com/state-spaces/mamba/#installation and https://github.com/Dao-AILab/causal-conv1d
+Loading weights:   0%|          | 0/370 [00:00<?, ?it/s]Loading weights:  44%|████▎     | 161/370 [00:00<00:00, 1605.33it/s]Loading weights: 100%|██████████| 370/370 [00:00<00:00, 2108.60it/s]
+{"peak_vram_gib": 4.54}

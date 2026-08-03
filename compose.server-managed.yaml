@@ -45,6 +45,18 @@ services:
       AIMEE_HOME: /var/lib/aimee
       AIMEE_DB1_URL: sqlite:///var/lib/aimee/aimee.db
       AIMEE_SERVER_HTTP_BIND: "1"
+      # Reachable address(es) to place in the self-signed cert's SANs, for clients
+      # that verify by NAME rather than TOFU-pinning the leaf (generic HTTPS
+      # tooling: curl, browsers, probes). Empty keeps the default container
+      # hostname + loopback set. pki.c reads this from the process environment, so
+      # without this passthrough the documented knob reaches the binary from
+      # nowhere and setting it appears to do nothing.
+      #
+      # It also pins the cert's CN (pki_resolve_server_cn), which is what keeps a
+      # self-signed cert STABLE across container recreates — so set it before first
+      # start. Changing it later does not re-issue an existing cert (one is minted
+      # only when absent), and forcing a re-issue breaks every TOFU-pinned client.
+      AIMEE_TLS_EXTRA_SAN: ${AIMEE_TLS_EXTRA_SAN:-}
       # Browser webchat (the wizard lives here). Credentials are streamed into
       # Vault by scripts/aimee-compose-vault-bootstrap.sh before `up`; never add
       # them to this long-lived service's persistent container environment.
@@ -70,19 +82,36 @@ services:
       # per service. It is forwarded into the server's own environment because the
       # server re-runs compose for the managed services (deploy_apply.c copies
       # environ), so the tag has to survive that hop or the wizard's Deploy would
-      # silently fall back to :latest for the kb and llm while the server itself
-      # ran :testing — a split-version stack, which is how a kb with no `dim` in
+      # silently fall back to :latest for the kb while the server itself ran
+      # :testing — a split-version stack, which is how a kb with no `dim` in
       # /health got paired with a server that expected one.
       AIMEE_IMAGE_TAG: ${AIMEE_IMAGE_TAG:-latest}
-      # Passed through to the managed services when a role is placed local (tier,
-      # images). ONE LLM image serves every tier — it is model-less and downloads
-      # what the wizard selected — so there is no separate CPU image to override.
-      AIMEE_KB_IMAGE: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:${AIMEE_IMAGE_TAG:-latest}}
+      # FORWARDED ONLY WHEN THE OPERATOR PINNED ONE. Resolving the default here
+      # instead — as this did — quietly disabled the wizard's embedder choice.
+      #
+      # AIMEE_KB_VARIANT is decided INSIDE the server, by config_emit_deploy_env,
+      # from the saved wizard configuration. It is unset in the shell that brings
+      # THIS file up, so resolving the default here collapsed to a bare
+      # `aimee-kb:<tag>` and baked that into the server's environment. deploy_apply
+      # copies environ, so the explicit AIMEE_KB_IMAGE then won over the variant the
+      # server had just computed, in the managed compose's own
+      # ${AIMEE_KB_IMAGE:-...aimee-kb${AIMEE_KB_VARIANT:+-...}} default.
+      #
+      # The result was silent and total: selecting bekko-a25m deployed the
+      # embedderless image, which logs "'bekko-a25m' selected but this image has no
+      # bundled embedder" and serves lexical-only search. Every gate passed --
+      # the deploy exits 0, the kb is healthy, `kb smoke` reports "vector store
+      # ready" -- because nothing here is broken except which image was chosen.
+      #
+      # Empty is correct for the unpinned case: the managed compose uses `:-`, which
+      # treats an empty value as absent and falls through to its own variant-aware
+      # default.
+      AIMEE_KB_IMAGE: ${AIMEE_KB_IMAGE:-}
       # Separate one-shot image containing the offline root provisioner and JWKS
       # publisher. These binaries never enter the ordinary KB/server images.
       AIMEE_AUTHORITY_BOOTSTRAP_IMAGE: ${AIMEE_AUTHORITY_BOOTSTRAP_IMAGE:-ghcr.io/rakuensoftware/aimee-authority-bootstrap:${AIMEE_IMAGE_TAG:-latest}}
-      # A managed-LLM adoption credential, when needed, uses the same disposable
-      # Vault bootstrap stream before this long-lived container is created.
+      # A remote model credential, when needed, uses the same disposable Vault
+      # bootstrap stream before this long-lived container is created.
       # "Sign in with OAuth" client IDs (public; see oauth_defaults.h). Set the
       # GitHub client ID + secret for the seamless "click → GitHub → back, logged
       # in" web flow (register the OAuth App's callback URL as

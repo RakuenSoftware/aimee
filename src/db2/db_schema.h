@@ -23,7 +23,7 @@ extern "C"
    /* Apply the consolidated Postgres schema to an already-open libpq
     * connection (PGconn *, passed as void * so this header stays libpq-free).
     * |embed_dim| is the deployment's embedding width — from config, the single
-    * place it is declared (config_embedding_dim_effective) — and the schema's
+    * place it is declared (config_embedder_dims_effective) — and the schema's
     * halfvec embedding columns are created at that dimension.
     *
     * A value <= 0 or > EMBED_MAX_DIM is an ERROR, not a fallback: this layer holds
@@ -85,9 +85,21 @@ extern "C"
     * both the width and the name while producing a different vector space. Empty
     * serving_id -> no-op (an endpoint that reports no identity). No compat list — a
     * pooling/prefix change is definitionally a different space. Returns 0
-    * (recorded/match), -1 (mismatch / DB error, errbuf set). */
+    * (recorded/match), -1 (mismatch / DB error, errbuf set).
+    *
+    * One exception: a corpus recorded against the RETIRED builtin lexical embedder,
+    * with no vectors written, adopts the incoming identity. That embedder served when
+    * none was configured and recorded itself on first init whether or not anything was
+    * ever embedded. It is gone — a kb with no embedder now refuses to start — but the
+    * kb_meta rows it left behind are not, and without this every such deployment would
+    * refuse to start once given the embedder it now requires. Emptiness must be proven. */
    int db2_embedder_serving_record_or_check(void *conn, const char *serving_id, char *errbuf,
-                                           size_t errlen);
+                                            size_t errlen);
+
+   /* The derived vector tables — rebuildable from source held elsewhere. NULL-terminated.
+    * db2_reembed drops them on a dimension change; the serving-identity guard reads them
+    * to decide whether anything has been embedded yet. */
+   extern const char *const DB2_DERIVED_VECTOR_TABLES[];
 
    /* Apply the consolidated SQLite schema for DB2's libpq shim/test
     * compatibility path. Production DB2 remains Postgres-only. */

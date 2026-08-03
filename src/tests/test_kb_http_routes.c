@@ -10,6 +10,7 @@
 #include "config.h"
 #include "cJSON.h"
 #include "kb_http.h"
+#include "kb_scope.h"
 #include "td_search_render.h"       /* consumer side of the /v1/search contract test */
 #include "kb/kb_surprising_judge.h" /* §4 judge stub seam (kb_surprising_verdict_t) */
 #include "db2/lifecycle.h"          /* §2c: db2_reembed_* / db2_dim_change_reset stub types */
@@ -566,12 +567,12 @@ int db2_probe_embedder_dim(int budget_ms, int *out)
       *out = 1024;
    return 0;
 }
-int config_resolve_embedding_dim(const config_t *cfg)
+int config_resolve_embedder_dims(const config_t *cfg)
 {
    (void)cfg;
    return 0;
 }
-int config_embedding_dim_is_pinned(const config_t *cfg)
+int config_embedder_dims_is_pinned(const config_t *cfg)
 {
    (void)cfg;
    return 0;
@@ -579,7 +580,7 @@ int config_embedding_dim_is_pinned(const config_t *cfg)
 
 /* kb_http reads the pin through the no-arg form now; same answer as the
  * config_t stub above. */
-int config_embedding_dim_pinned_current(void)
+int config_embedder_dims_pinned_current(void)
 {
    return 0;
 }
@@ -696,10 +697,11 @@ const config_field_t *config_field_lookup(const char *key)
    /* The KB-owned settings surface (KB_SETTINGS) plus the server-owned keys the
     * 403 cases probe — all real config keys, so the route's OWN allowlist is
     * what those assertions exercise, not a lookup miss. */
-   if (strncmp(key, "embedding_", 10) == 0 || strncmp(key, "llm_", 4) == 0 ||
-       strncmp(key, "kb_", 3) == 0 || strncmp(key, "css_", 4) == 0 ||
-       strcmp(key, "typed_facts_enabled") == 0 || strcmp(key, "ocr_command") == 0 ||
-       strcmp(key, "tsr_command") == 0 || strcmp(key, "db2_url") == 0)
+   if (strncmp(key, "embedder_", 9) == 0 || strncmp(key, "synthesis_", 10) == 0 ||
+       strncmp(key, "llm_", 4) == 0 || strncmp(key, "kb_", 3) == 0 ||
+       strncmp(key, "css_", 4) == 0 || strcmp(key, "typed_facts_enabled") == 0 ||
+       strcmp(key, "ocr_command") == 0 || strcmp(key, "tsr_command") == 0 ||
+       strcmp(key, "db2_url") == 0)
       return &g_stub_field;
    return NULL;
 }
@@ -1438,26 +1440,26 @@ const char *config_workspaces(int index)
    return index == 0 ? "/workspace" : "";
 }
 
-const char *config_embedding_command(const config_t *cfg, const char *requested)
+const char *config_embedder_command(const config_t *cfg, const char *requested)
 {
    if (requested && requested[0])
       return requested;
-   if (cfg && cfg->embedding_command[0])
-      return cfg->embedding_command;
-   const char *url = getenv("AIMEE_EMBEDDER_URL");
+   if (cfg && cfg->embedder_command[0])
+      return cfg->embedder_command;
+   const char *url = getenv("EMBEDDER_URL");
    if (url && url[0])
       return url;
-   url = getenv("AIMEE_LLM_URL");
+   url = getenv("SYNTHESIS_ENDPOINT");
    if (url && url[0])
       return url;
-   return "builtin";
+   return ""; /* nothing selected: no embedder, no fabricated name */
 }
 
 /* The config_t-free form callers use now. Same resolution order, minus the
- * struct the caller no longer holds: request > env > builtin. */
-const char *config_embedding_command_current(const char *requested)
+ * struct the caller no longer holds: request > env > nothing. */
+const char *config_embedder_command_current(const char *requested)
 {
-   return config_embedding_command(NULL, requested);
+   return config_embedder_command(NULL, requested);
 }
 
 /* kb_intel_payload reads the demotion knobs through accessors now. Mirror the
@@ -2541,8 +2543,8 @@ static void test_console_settings(void)
        kb_http_route_ex("GET", "/v1/console/settings", NULL, NULL, NULL, NULL, 0, buf, sizeof(buf));
    assert(status == 200);
    assert(strstr(buf, "\"fields\"") != NULL);
-   assert(strstr(buf, "\"embedding_model\"") != NULL);
-   assert(strstr(buf, "\"llm_synth_backend\"") != NULL);
+   assert(strstr(buf, "\"embedder_model\"") != NULL);
+   assert(strstr(buf, "\"synthesis_endpoint\"") != NULL);
    assert(strstr(buf, "\"Embedder\"") != NULL);
    /* Owned by the Typed Facts page, so it must not appear on this surface. */
    assert(strstr(buf, "\"typed_facts_enabled\"") == NULL);
@@ -3430,6 +3432,20 @@ static void test_mtls_listener(void)
       identity_json[identity_n] = '\0';
       assert(strstr(identity_json, "\"version\":1") && strstr(identity_json, "PRIVATE KEY"));
       assert(strstr(identity_json, token2) == NULL); /* never persist the one-time credential */
+
+      /* A REFUSAL MUST ARRIVE WITH ITS REASON. The transport used to return NULL for
+       * any non-2xx, which made kb_client_v1_post_json_keep_error a no-op on this
+       * path: every kb refusal reached the operator as a generic fallback string
+       * while the kb's own explanation was discarded here. `aimee kb reembed` on a
+       * managed appliance answered "knowledge service reembed failed" instead of the
+       * kb's 403 naming the config key to set. */
+      int st_err = -1;
+      char *err_body = kb_client_mtls_request_timeout("GET", "/v1/definitely-not-a-route", NULL,
+                                                      600000, &st_err);
+      assert(st_err >= 400);    /* the status still reports the failure */
+      assert(err_body != NULL); /* and the body survives to be surfaced */
+      assert(strstr(err_body, "error") != NULL);
+      free(err_body);
 
       /* Simulate a full server process restart. The enrollment token was spent
        * by the first request, so this can pass only by validating and loading
@@ -4342,28 +4358,39 @@ static void test_code_context_bounded_current_project(void)
    assert(s == 200);
 }
 
-static void test_code_context_no_answer_is_explicit(void)
+/* With NO embedder configured, the route reports the missing dependency — it does not
+ * answer "nothing matched".
+ *
+ * This test used to assert the opposite, and passed only because an unconfigured kb
+ * resolved to a builtin lexical embedder: the vector leg looked live, returned nothing,
+ * and the route called that an abstention. So "I have not configured retrieval" and "I
+ * searched and found nothing" were the same answer, which is the confusion the builtin
+ * caused everywhere. There is no builtin now, and a kb with no embedder refuses to
+ * start, so the honest report is the dependency.
+ *
+ * Genuine abstention — a live embedder that matches nothing — is not reachable through
+ * this stub set: g_vec_enabled=1 returns canned hits regardless of the query. */
+static void test_code_context_without_an_embedder_reports_the_dependency(void)
 {
    char buf[2048];
    int s =
        kb_http_route_ex("GET", "/v1/code/context", "query=definitely-unrelated&project=proj-alpha",
                         NULL, NULL, NULL, 0, buf, sizeof(buf));
-   assert(s == 200);
-   assert(strstr(buf, "\"status\":\"abstained\"") != NULL);
-   assert(strstr(buf, "\"decision\":\"no_answer\"") != NULL);
-   assert(strstr(buf, "\"results\":[]") != NULL);
-   assert(strstr(buf, "\"why\":[]") != NULL);
+   assert(s == 503);
+   assert(strstr(buf, "\"dependency\":\"embedder\"") != NULL);
+   /* Never a false negative: "no answer" would tell the caller the corpus lacks it. */
+   assert(strstr(buf, "no_answer") == NULL);
 }
 
 static void test_code_context_embedder_outage_is_not_no_answer(void)
 {
    char buf[2048];
-   assert(setenv("AIMEE_EMBEDDER_URL", "http://embedder-down", 1) == 0);
+   assert(setenv("EMBEDDER_URL", "http://embedder-down", 1) == 0);
    g_vec_enabled = 0;
    int s =
        kb_http_route_ex("GET", "/v1/code/context", "query=definitely-unrelated&project=proj-alpha",
                         NULL, NULL, NULL, 0, buf, sizeof(buf));
-   unsetenv("AIMEE_EMBEDDER_URL");
+   unsetenv("EMBEDDER_URL");
    assert(s == 503);
    assert(strstr(buf, "\"status\":\"unavailable\"") != NULL);
    assert(strstr(buf, "\"dependency\":\"embedder\"") != NULL);
@@ -4375,14 +4402,14 @@ static void test_code_context_embedder_outage_is_not_no_answer(void)
 static void test_code_context_embedder_auth_is_unauthorized(void)
 {
    char buf[2048];
-   assert(setenv("AIMEE_EMBEDDER_URL", "http://embedder-auth", 1) == 0);
+   assert(setenv("EMBEDDER_URL", "http://embedder-auth", 1) == 0);
    g_vec_enabled = 0;
    g_vec_unauthorized = 1;
    int s =
        kb_http_route_ex("GET", "/v1/code/context", "query=definitely-unrelated&project=proj-alpha",
                         NULL, NULL, NULL, 0, buf, sizeof(buf));
    g_vec_unauthorized = 0;
-   unsetenv("AIMEE_EMBEDDER_URL");
+   unsetenv("EMBEDDER_URL");
    assert(s == 401);
    assert(strstr(buf, "\"status\":\"unauthorized\"") != NULL);
    assert(strstr(buf, "\"dependency\":\"embedder\"") != NULL);
@@ -4968,7 +4995,13 @@ static void test_code_scan_ok(void)
    assert(strcmp(g_code_scan_project, "proj-alpha") == 0);
    assert(strcmp(g_code_scan_root_path, "/tmp/repo") == 0);
    assert(g_code_scan_force == 1);
-   assert(g_curator_code_queued == 1);
+   /* A scan INDEXES; it does not curate. Curation is enqueued by the embed stage
+    * once the project is fully embedded, so the pipeline order is
+    * indexed -> embedded -> curated rather than indexed -> curated (racing embed).
+    * Enqueuing here also put a one-row-per-symbol INSERT on the synchronous path
+    * of this request -- ~173,000 rows and ~215s on a 4,018-file corpus, against a
+    * client that times out at 300s. */
+   assert(g_curator_code_queued == 0);
 }
 
 static void test_code_project_lifecycle_routes(void)
@@ -5063,10 +5096,11 @@ static void test_code_scan_pushed_files_ok(void)
    assert(strcmp(g_code_scan_file_rel, "src/a.c") == 0);
    assert(strstr(g_code_scan_file_content, "pushed") != NULL);
    assert(g_code_scan_files_force == 1);
-   /* The push path now queues code units for the curator just like a local scan
-    * (the queue reads from DB2 by project name and self-gates on the curator
-    * flag), so with the stubbed config_load reporting the gate on, it enqueues. */
-   assert(g_curator_code_queued == 1);
+   /* Same for a thin-client push: it indexes, it does not curate. The embed sweep
+    * reaches these projects by NAME, so nothing is lost by not enqueuing here --
+    * the push path never needed its own enqueue, it needed the embed stage to own
+    * one. */
+   assert(g_curator_code_queued == 0);
 }
 
 static void test_code_scan_pushed_files_rejects_invalid_item(void)
@@ -5281,7 +5315,9 @@ static void test_drain_default_embedding_command(void)
    g_drain_rc = 0;
    int s = kb_http_route_ex("POST", "/v1/drain", NULL, NULL, NULL, "{}", 2, buf, sizeof(buf));
    assert(s == 200);
-   assert(strcmp(g_drain_embed_cmd, "builtin") == 0);
+   /* No embedder configured resolves to the empty string, not to a name nothing
+    * implements — the drain then embeds nothing rather than exec'ing it. */
+   assert(g_drain_embed_cmd[0] == '\0');
 }
 
 static void test_drain_error(void)
@@ -5294,6 +5330,190 @@ static void test_drain_error(void)
    g_drain_rc = 0;
 }
 
+/* Every /v1/maintenance/ route is destructive and owner-gated, so the tests that
+ * exercise the mechanics below must first authenticate as the owner: an unscoped
+ * credential whose presented value matches the configured one. */
+#define OWNER_AUTH "Bearer owner-secret"
+#define OWNER_TOK  "owner-secret"
+
+/* The gate itself: a scoped service bearer — what an aimee-server carries — must
+ * never reach a maintenance route, and auth-off must not fall open either. Both
+ * are checked on every route in the family, because the gate is by prefix and a
+ * per-route regression would otherwise hide behind its neighbours. */
+
+/* A scoped credential must not reach another project's data, including on the
+ * POST routes that name their target in the body rather than the query string.
+ * These read/write a project's index, so a bypass here is cross-tenant. */
+static void test_scoped_token_cannot_cross_project_via_body(void)
+{
+   const char *scoped_auth = "Bearer scope:project:proj-alpha:secret";
+   const char *scoped_tok = "scope:project:proj-alpha:secret";
+   static const struct
+   {
+      const char *path;
+      const char *foreign;
+      const char *own;
+   } cases[] = {
+       {"/v1/code/build", "{\"path\":\"/tmp/kb\",\"project\":\"proj-beta\"}",
+        "{\"path\":\"/tmp/kb\",\"project\":\"proj-alpha\"}"},
+       {"/v1/code/update", "{\"path\":\"/tmp/kb\",\"project\":\"proj-beta\"}",
+        "{\"path\":\"/tmp/kb\",\"project\":\"proj-alpha\"}"},
+       {"/v1/code/scan", "{\"project\":\"proj-beta\",\"root_path\":\"/tmp/repo\"}",
+        "{\"project\":\"proj-alpha\",\"root_path\":\"/tmp/repo\"}"},
+   };
+   char buf[2048];
+   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+   {
+      /* Another project, named only in the body and with no query string —
+       * the shape that used to resolve to "no scope named" and be allowed. */
+      int s = kb_http_route_ex("POST", cases[i].path, NULL, scoped_auth, scoped_tok,
+                               cases[i].foreign, (int)strlen(cases[i].foreign), buf, sizeof(buf));
+      assert(s == 403);
+      assert(strstr(buf, "cannot access project:proj-beta") != NULL);
+
+      /* The credential's own project is unaffected. */
+      s = kb_http_route_ex("POST", cases[i].path, NULL, scoped_auth, scoped_tok, cases[i].own,
+                           (int)strlen(cases[i].own), buf, sizeof(buf));
+      assert(s != 403);
+   }
+}
+
+/* POST /v1/ingest with no workspace (or "all") targets every project in every
+ * configured workspace, and with force:true that CLEARS each one's vectors, kb
+ * rows and file index before re-queueing. Naming no workspace also names no
+ * scope, so the generic layer cannot deny it — the route must. */
+static void test_scoped_token_cannot_ingest_all_projects(void)
+{
+   const char *scoped_auth = "Bearer scope:project:proj-alpha:secret";
+   const char *scoped_tok = "scope:project:proj-alpha:secret";
+   char buf[1024];
+
+   static const char *const all_bodies[] = {
+       "{}",                      /* workspace absent */
+       "{\"workspace\":\"all\"}", /* explicit all */
+       "{\"force\":true}",        /* the destructive shape */
+       "{\"workspace\":\"all\",\"force\":true}",
+   };
+   for (size_t i = 0; i < sizeof(all_bodies) / sizeof(all_bodies[0]); i++)
+   {
+      int s = kb_http_route_ex("POST", "/v1/ingest", NULL, scoped_auth, scoped_tok, all_bodies[i],
+                               (int)strlen(all_bodies[i]), buf, sizeof(buf));
+      assert(s == 403);
+      assert(strstr(buf, "cannot ingest all projects") != NULL);
+   }
+
+   /* A named workspace still goes through the ordinary scope check rather than
+    * this one, and the owner is not restricted at all. */
+   const char *named = "{\"workspace\":\"ws-a\"}";
+   int s = kb_http_route_ex("POST", "/v1/ingest", NULL, OWNER_AUTH, OWNER_TOK, named,
+                            (int)strlen(named), buf, sizeof(buf));
+   assert(s != 403);
+   s = kb_http_route_ex("POST", "/v1/ingest", NULL, OWNER_AUTH, OWNER_TOK, "{\"force\":true}", 15,
+                        buf, sizeof(buf));
+   assert(s != 403); /* the owner may still ingest everything */
+}
+
+/* A `service` credential is aimee-server's data-plane identity: it reaches any
+ * project and may ingest the whole deployment, because indexing everything is
+ * the job it exists for. What it must NOT gain is privilege — it is still a
+ * scoped token, so every administrative gate keeps refusing it. That asymmetry
+ * is the entire point of issuing one, so both halves are pinned here. */
+static void test_service_scope_is_data_plane_not_admin(void)
+{
+   const char *svc_auth = "Bearer scope:service:aimee-server:secret";
+   const char *svc_tok = "scope:service:aimee-server:secret";
+   char buf[2048];
+
+   /* MAY: any project, named in the body — the shape a project-scoped token is
+    * refused for. */
+   const char *other = "{\"path\":\"/tmp/kb\",\"project\":\"proj-beta\"}";
+   int s = kb_http_route_ex("POST", "/v1/code/build", NULL, svc_auth, svc_tok, other,
+                            (int)strlen(other), buf, sizeof(buf));
+   assert(s != 403);
+
+   /* MAY: ingest every project (workspace absent, and the destructive force
+    * shape) — routine work for the indexer. */
+   s = kb_http_route_ex("POST", "/v1/ingest", NULL, svc_auth, svc_tok, "{}", 2, buf, sizeof(buf));
+   assert(s != 403);
+   s = kb_http_route_ex("POST", "/v1/ingest", NULL, svc_auth, svc_tok, "{\"force\":true}", 15, buf,
+                        sizeof(buf));
+   assert(s != 403);
+
+   /* MUST NOT: any maintenance route. This is the boundary that makes a service
+    * credential worth issuing instead of the owner token. */
+   static const char *const admin_routes[] = {
+       "/v1/maintenance/repair",          "/v1/maintenance/reconcile",
+       "/v1/maintenance/clear",           "/v1/maintenance/purge-project",
+       "/v1/maintenance/purge-heartbeat", "/v1/maintenance/purge-finalize",
+       "/v1/maintenance/purge-cancel",
+   };
+   const char *body = "{\"project\":\"proj-alpha\",\"path\":\"/tmp/kb\","
+                      "\"generation\":\"g1\",\"purge_id\":\"p1\"}";
+   for (size_t i = 0; i < sizeof(admin_routes) / sizeof(admin_routes[0]); i++)
+   {
+      s = kb_http_route_ex("POST", admin_routes[i], NULL, svc_auth, svc_tok, body,
+                           (int)strlen(body), buf, sizeof(buf));
+      assert(s == 403);
+      assert(strstr(buf, "owner credential") != NULL);
+   }
+
+   /* MUST NOT: widen into non-data-plane scopes. A service token spans projects
+    * and workspaces only — never another kind's resources. */
+   assert(kb_scope_authorized("service", "aimee-server", "project", "anything") == 1);
+   assert(kb_scope_authorized("service", "aimee-server", "workspace", "anything") == 1);
+   assert(kb_scope_authorized("service", "aimee-server", "user", "someone") == 0);
+   assert(kb_scope_authorized("service", "aimee-server", "console-admin", "x") == 0);
+   assert(kb_scope_authorized("service", "aimee-server", "curator", "x") == 0);
+
+   /* MUST NOT: be minted by the console — only the owner issues one. */
+   const char *mint = "{\"host\":\"h\",\"port\":1,\"scope\":\"service:aimee-server\"}";
+   s = kb_http_route_ex("POST", "/v1/enroll", NULL, "Bearer scope:console-admin:c:secret",
+                        "scope:console-admin:c:secret", mint, (int)strlen(mint), buf, sizeof(buf));
+   assert(s == 403);
+}
+
+static void test_maintenance_routes_are_owner_gated(void)
+{
+   static const char *const routes[] = {
+       "/v1/maintenance/repair",          "/v1/maintenance/reconcile",
+       "/v1/maintenance/clear",           "/v1/maintenance/purge-project",
+       "/v1/maintenance/purge-heartbeat", "/v1/maintenance/purge-finalize",
+       "/v1/maintenance/purge-cancel",
+   };
+   const char *body = "{\"project\":\"proj-alpha\",\"path\":\"/tmp/kb\","
+                      "\"generation\":\"g1\",\"purge_id\":\"p1\"}";
+   char buf[1024];
+   for (size_t i = 0; i < sizeof(routes) / sizeof(routes[0]); i++)
+   {
+      /* A project-scoped service credential is authenticated but not admin. */
+      int s = kb_http_route_ex("POST", routes[i], NULL, "Bearer scope:project:proj-alpha:secret",
+                               "scope:project:proj-alpha:secret", body, (int)strlen(body), buf,
+                               sizeof(buf));
+      assert(s == 403);
+      assert(strstr(buf, "owner credential") != NULL);
+
+      /* Auth-off manufactures no actor, so it is refused rather than open. */
+      s = kb_http_route_ex("POST", routes[i], NULL, NULL, NULL, body, (int)strlen(body), buf,
+                           sizeof(buf));
+      assert(s == 403);
+      assert(strstr(buf, "owner credential") != NULL);
+
+      /* The owner is not refused — it gets past the gate into the handler,
+       * whatever that handler then decides about the request itself. */
+      s = kb_http_route_ex("POST", routes[i], NULL, OWNER_AUTH, OWNER_TOK, body, (int)strlen(body),
+                           buf, sizeof(buf));
+      assert(s != 403);
+   }
+
+   /* The gate is POST-shaped like the routes it guards, but it is keyed on the
+    * path prefix, so an unknown maintenance verb is refused too rather than
+    * falling through to a 404 that confirms the route does not exist. */
+   int s = kb_http_route_ex(
+       "POST", "/v1/maintenance/not-a-real-route", NULL, "Bearer scope:project:proj-alpha:secret",
+       "scope:project:proj-alpha:secret", body, (int)strlen(body), buf, sizeof(buf));
+   assert(s == 403);
+}
+
 static void test_maintenance_repair_ok(void)
 {
    char buf[1024];
@@ -5302,7 +5522,7 @@ static void test_maintenance_repair_ok(void)
    g_kb_build_rc = 0;
    const char *body =
        "{\"path\":\"/tmp/kb\",\"project\":\"proj-alpha\",\"embedding_command\":\"embed-a\"}";
-   int s = kb_http_route_ex("POST", "/v1/maintenance/repair", NULL, NULL, NULL, body,
+   int s = kb_http_route_ex("POST", "/v1/maintenance/repair", NULL, OWNER_AUTH, OWNER_TOK, body,
                             (int)strlen(body), buf, sizeof(buf));
    assert(s == 200);
    assert(strcmp(g_kb_build_path, "/tmp/kb") == 0);
@@ -5316,7 +5536,7 @@ static void test_maintenance_repair_ok(void)
 static void test_maintenance_repair_missing_project(void)
 {
    char buf[256];
-   int s = kb_http_route_ex("POST", "/v1/maintenance/repair", NULL, NULL, NULL,
+   int s = kb_http_route_ex("POST", "/v1/maintenance/repair", NULL, OWNER_AUTH, OWNER_TOK,
                             "{\"path\":\"/tmp/kb\"}", 18, buf, sizeof(buf));
    assert(s == 400);
    assert(strstr(buf, "missing project") != NULL);
@@ -5326,7 +5546,7 @@ static void test_maintenance_reconcile_ok(void)
 {
    char buf[512];
    g_reconcile_rc = 0;
-   int s = kb_http_route_ex("POST", "/v1/maintenance/reconcile", NULL, NULL, NULL,
+   int s = kb_http_route_ex("POST", "/v1/maintenance/reconcile", NULL, OWNER_AUTH, OWNER_TOK,
                             "{\"dry_run\":true}", 16, buf, sizeof(buf));
    assert(s == 200);
    assert(g_reconcile_dry_run == 1);
@@ -5339,7 +5559,7 @@ static void test_maintenance_clear_ok(void)
 {
    char buf[512];
    g_clear_deleted = 12;
-   int s = kb_http_route_ex("POST", "/v1/maintenance/clear", NULL, NULL, NULL,
+   int s = kb_http_route_ex("POST", "/v1/maintenance/clear", NULL, OWNER_AUTH, OWNER_TOK,
                             "{\"project\":\"proj-alpha\"}", 24, buf, sizeof(buf));
    assert(s == 200);
    assert(strcmp(g_clear_project, "proj-alpha") == 0);
@@ -5350,7 +5570,7 @@ static void test_maintenance_clear_error(void)
 {
    char buf[256];
    g_clear_deleted = -1;
-   int s = kb_http_route_ex("POST", "/v1/maintenance/clear", NULL, NULL, NULL,
+   int s = kb_http_route_ex("POST", "/v1/maintenance/clear", NULL, OWNER_AUTH, OWNER_TOK,
                             "{\"project\":\"proj-alpha\"}", 24, buf, sizeof(buf));
    assert(s == 500);
    assert(strstr(buf, "kb clear failed") != NULL);
@@ -5374,7 +5594,7 @@ static void test_purge_project_writes_fence(void)
    g_clear_deleted = 12;
    char buf[2048];
    int s =
-       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, NULL, NULL,
+       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, OWNER_AUTH, OWNER_TOK,
                         "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
                         -1, buf, sizeof(buf));
    assert(s == 200);
@@ -5408,7 +5628,7 @@ static void test_purge_project_live_fence_409(void)
    g_fence_live = 1;
    char buf[1024];
    int s =
-       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, NULL, NULL,
+       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, OWNER_AUTH, OWNER_TOK,
                         "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
                         -1, buf, sizeof(buf));
    assert(s == 409);
@@ -5426,7 +5646,7 @@ static void test_purge_project_takeover_displaces(void)
    assert(db2_kb_purge_fence_write("proj-alpha", "g0", "p0") == 0);
    g_fence_live = 1;
    char buf[2048];
-   int s = kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, NULL, NULL,
+   int s = kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, OWNER_AUTH, OWNER_TOK,
                             "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":"
                             "\"p1\",\"takeover\":true}",
                             -1, buf, sizeof(buf));
@@ -5445,7 +5665,7 @@ static void test_purge_project_stale_fence_replaced(void)
    g_fence_live = 0; /* stale heartbeat: no takeover needed */
    char buf[2048];
    int s =
-       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, NULL, NULL,
+       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, OWNER_AUTH, OWNER_TOK,
                         "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
                         -1, buf, sizeof(buf));
    assert(s == 200);
@@ -5459,7 +5679,7 @@ static void test_purge_project_store_error_continues(void)
    g_purge_canonical_rc = -1; /* one store fails: fan-out continues, ok:false */
    char buf[2048];
    int s =
-       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, NULL, NULL,
+       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, OWNER_AUTH, OWNER_TOK,
                         "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
                         -1, buf, sizeof(buf));
    assert(s == 200);
@@ -5476,12 +5696,12 @@ static void test_purge_project_bad_request(void)
    purge_fence_reset();
    char buf[512];
    int s =
-       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, NULL, NULL,
+       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, OWNER_AUTH, OWNER_TOK,
                         "{\"project\":\"proj-alpha\",\"purge_id\":\"p1\"}", -1, buf, sizeof(buf));
    assert(s == 400);
    assert(strstr(buf, "generation") != NULL);
    /* Space-carrying tokens would corrupt the space-separated fence value. */
-   s = kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, NULL, NULL,
+   s = kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, OWNER_AUTH, OWNER_TOK,
                         "{\"project\":\"proj-alpha\",\"generation\":\"g 1\",\"purge_id\":\"p1\"}",
                         -1, buf, sizeof(buf));
    assert(s == 400);
@@ -5494,14 +5714,14 @@ static void test_purge_heartbeat_match_and_mismatch(void)
    assert(db2_kb_purge_fence_write("proj-alpha", "g1", "p1") == 0);
    char buf[1024];
    int s =
-       kb_http_route_ex("POST", "/v1/maintenance/purge-heartbeat", NULL, NULL, NULL,
+       kb_http_route_ex("POST", "/v1/maintenance/purge-heartbeat", NULL, OWNER_AUTH, OWNER_TOK,
                         "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
                         -1, buf, sizeof(buf));
    assert(s == 200);
    assert(strstr(buf, "\"refreshed\":true") != NULL);
    assert(g_fence_heartbeats == 1);
    /* Displaced owner: mismatch no-ops and echoes the current fence. */
-   s = kb_http_route_ex("POST", "/v1/maintenance/purge-heartbeat", NULL, NULL, NULL,
+   s = kb_http_route_ex("POST", "/v1/maintenance/purge-heartbeat", NULL, OWNER_AUTH, OWNER_TOK,
                         "{\"project\":\"proj-alpha\",\"generation\":\"g0\",\"purge_id\":\"p0\"}",
                         -1, buf, sizeof(buf));
    assert(s == 200);
@@ -5516,7 +5736,7 @@ static void test_purge_finalize_mismatch_noop(void)
    assert(db2_kb_purge_fence_write("proj-alpha", "g1", "p1") == 0);
    char buf[1024];
    int s =
-       kb_http_route_ex("POST", "/v1/maintenance/purge-finalize", NULL, NULL, NULL,
+       kb_http_route_ex("POST", "/v1/maintenance/purge-finalize", NULL, OWNER_AUTH, OWNER_TOK,
                         "{\"project\":\"proj-alpha\",\"generation\":\"g0\",\"purge_id\":\"p1\"}",
                         -1, buf, sizeof(buf));
    assert(s == 200);
@@ -5531,7 +5751,7 @@ static void test_purge_finalize_match_clears(void)
    assert(db2_kb_purge_fence_write("proj-alpha", "g1", "p1") == 0);
    char buf[1024];
    int s =
-       kb_http_route_ex("POST", "/v1/maintenance/purge-finalize", NULL, NULL, NULL,
+       kb_http_route_ex("POST", "/v1/maintenance/purge-finalize", NULL, OWNER_AUTH, OWNER_TOK,
                         "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
                         -1, buf, sizeof(buf));
    assert(s == 200);
@@ -5545,14 +5765,14 @@ static void test_purge_cancel_match_clears(void)
    assert(db2_kb_purge_fence_write("proj-alpha", "g1", "p1") == 0);
    char buf[1024];
    int s =
-       kb_http_route_ex("POST", "/v1/maintenance/purge-cancel", NULL, NULL, NULL,
+       kb_http_route_ex("POST", "/v1/maintenance/purge-cancel", NULL, OWNER_AUTH, OWNER_TOK,
                         "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
                         -1, buf, sizeof(buf));
    assert(s == 200);
    assert(strstr(buf, "\"cleared\":true") != NULL);
    assert(g_fence_present == 0);
    /* Idempotent: a second cancel is a mismatch/absent no-op. */
-   s = kb_http_route_ex("POST", "/v1/maintenance/purge-cancel", NULL, NULL, NULL,
+   s = kb_http_route_ex("POST", "/v1/maintenance/purge-cancel", NULL, OWNER_AUTH, OWNER_TOK,
                         "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
                         -1, buf, sizeof(buf));
    assert(s == 200);
@@ -5922,21 +6142,21 @@ static void test_search_scope_all_keeps_active_project_first(void)
 }
 
 /* A managed KB normally has no raw embedding_command in aimee.yaml: the
- * wizard supplies AIMEE_LLM_URL. Search must resolve that deployment default
+ * wizard supplies SYNTHESIS_ENDPOINT. Search must resolve that deployment default
  * before entering the ranked backend, or it silently queries a 1024-dim corpus
  * with the 384-dim builtin vector. */
 static void test_search_uses_managed_embedder(void)
 {
    char buf[1024];
-   unsetenv("AIMEE_EMBEDDER_URL");
-   setenv("AIMEE_LLM_URL", "http://managed-llm:8742", 1);
+   unsetenv("EMBEDDER_URL");
+   setenv("SYNTHESIS_ENDPOINT", "http://managed-llm:8742", 1);
    g_test_search_embedding[0] = '\0';
    const char *body = "{\"query\":\"foo\",\"project\":\"proj-alpha\"}";
    int s = kb_http_route_ex("POST", "/v1/search", NULL, NULL, NULL, body, (int)strlen(body), buf,
                             sizeof(buf));
    assert(s == 200);
    assert(strcmp(g_test_search_embedding, "http://managed-llm:8742") == 0);
-   unsetenv("AIMEE_LLM_URL");
+   unsetenv("SYNTHESIS_ENDPOINT");
 }
 
 /* Producer->consumer contract: the /v1/search ranked handler and the kb_search
@@ -6387,7 +6607,7 @@ int main(void)
    test_code_context_vector_store_outage_is_not_empty();
    test_code_context_dimension_mismatch_is_stale();
    test_code_context_bounded_current_project();
-   test_code_context_no_answer_is_explicit();
+   test_code_context_without_an_embedder_reports_the_dependency();
    test_code_context_embedder_outage_is_not_no_answer();
    test_code_context_embedder_auth_is_unauthorized();
    test_code_context_does_not_substitute_global_memory();
@@ -6435,6 +6655,10 @@ int main(void)
    test_drain_ok();
    test_drain_default_embedding_command();
    test_drain_error();
+   test_scoped_token_cannot_cross_project_via_body();
+   test_scoped_token_cannot_ingest_all_projects();
+   test_service_scope_is_data_plane_not_admin();
+   test_maintenance_routes_are_owner_gated();
    test_maintenance_repair_ok();
    test_maintenance_repair_missing_project();
    test_maintenance_reconcile_ok();

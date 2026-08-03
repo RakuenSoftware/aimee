@@ -12,7 +12,7 @@
 #include "agent_exec.h"
 #include "agent_protocol.h"
 #include "agent_runtime_messages.h"
-#include "agent_tools.h"
+#include <aimee/tools/agent_tools.h>
 #include "agent_tunnel.h"
 #include <aimee/delegates/delegate_driver.h>
 #include <aimee/delegates/delegate_role.h>

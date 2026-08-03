@@ -1,33 +1,35 @@
-# Build the three aimee container images on GitHub runners and push them to
-# ghcr.io. Covers the full image set documented in
+# Build the aimee container images on GitHub runners and push them to ghcr.io.
+# Covers the full image set documented in
 # docs/proposals/pending/aimee-e2e-deploy-matrix.md:
 #
 #   aimee-server     (Dockerfile.server)      ghcr.io/<owner>/aimee-server
-#   aimee-kb         (Dockerfile)             ghcr.io/<owner>/aimee-kb
 #   aimee-authority-bootstrap (Dockerfile.authority-bootstrap) ghcr.io/<owner>/aimee-authority-bootstrap
-#   aimee-embedder   (Dockerfile.embedder)    ghcr.io/<owner>/aimee-embedder (+ -4b)
 #   aimee-css-render (deploy/css-render/Dockerfile) ghcr.io/<owner>/aimee-css-render
+#
+# plus the aimee-kb images, all three from the SAME Dockerfile via one build-arg.
+# The embedder is the only axis, and it is baked, so which embedder a deployment runs
+# is a property of the tag it pulled and never a first-run download:
+#
+#   aimee-kb        no embedder            EMBEDDER_URL required; ~373 MB
+#   aimee-kb-a25m   bekko-a25m (384)       ~1.95 GB
+#   aimee-kb-nomic  nomic-v2   (768)       ~3.34 GB
+#
+# SYNTHESIS IS NOT HERE. It used to be a second axis, doubling this to six tags and
+# rebuilding llama.cpp and a multi-gigabyte GGUF on every push that touched src/**.
+# It is its own image on its own trigger now (publish-llm.yml), rebuilt when the
+# model changes rather than when kb code does, and the aimee-model-* layers moved
+# there with it.
 #
 # Multi-arch (linux/amd64 + linux/arm64) via the canonical build-by-digest then
 # merge-manifest pattern, on native runners (no QEMU emulation of the C build).
 #
-# Triggers:
-#   - push of a `v*` tag  -> versioned images derived from the tag
-#   - workflow_call       -> version passed in by the auto-release orchestrator
-#   - workflow_dispatch   -> optional manual version input
-# Versioned publishing on `main` is owned by auto-release.yml (which calls this
-# workflow), so there is no bare `push: branches: [main]` trigger here.
+# This workflow is deliberately reusable-only. The sole caller is
+# auto-release.yml, whose tag job is blocked by the protected `release`
+# environment. Do not add tag-push or workflow-dispatch triggers here: either
+# would create a second path to GHCR that bypasses the human release approval.
 name: Publish images
 
 on:
-  push:
-    tags: ["v*"]
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version without leading v (e.g. 0.2.1)'
-        required: false
-        type: string
   workflow_call:
     inputs:
       version:
@@ -44,8 +46,8 @@ permissions:
   packages: write
 
 jobs:
-  # Resolve the version once (from the call/dispatch input or the pushed tag) so
-  # the build (binary embedding) and merge (image tags) jobs agree.
+  # Resolve and validate the approved version once so the build (binary
+  # embedding) and merge (image tags) jobs agree.
   prep:
     runs-on: ubuntu-latest
     outputs:
@@ -54,30 +56,39 @@ jobs:
       - name: Resolve version
         id: v
         run: |
-          if [ -n "${{ inputs.version }}" ]; then
-            v="${{ inputs.version }}"
-          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            v="${GITHUB_REF_NAME#v}"
-          else
-            v=""
+          v="${{ inputs.version }}"
+          if ! [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::approved release version must be MAJOR.MINOR.PATCH; got '${v:-<empty>}'"
+            exit 1
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
   # Build each image for each arch on a native runner; push by digest only.
   build:
-    needs: prep
+    needs: [prep]
+    # `models` is skipped on a pull request, and a skipped dependency would
+    # otherwise skip this job too. Proceed as long as it did not FAIL.
+    if: ${{ !cancelled() && needs.prep.result == 'success' && needs.models.result != 'failure' }}
     strategy:
       fail-fast: false
       matrix:
         image:
           - { name: aimee-server,    dockerfile: Dockerfile.server }
-          - { name: aimee-kb,        dockerfile: Dockerfile }
+          # The aimee-kb images, on ONE axis: the embedder. Synthesis used to be a
+          # second axis here, doubling this to six tags and rebuilding llama.cpp and
+          # a multi-gigabyte GGUF on every kb code change. It is its own image now
+          # (publish-llm.yml), rebuilt only when the model does.
+          #
+          # The embedder axis IS a one-way door per install: DB2 records the
+          # vector-column width and refuses to start on drift, so moving between
+          # these means re-embedding the corpus.
+          - { name: aimee-kb,        dockerfile: Dockerfile,
+              extra_args: "AIMEE_EMBEDDER=none" }
+          - { name: aimee-kb-a25m,   dockerfile: Dockerfile,
+              extra_args: "AIMEE_EMBEDDER=bekko-a25m" }
+          - { name: aimee-kb-nomic,  dockerfile: Dockerfile,
+              extra_args: "AIMEE_EMBEDDER=nomic-embed-text-v2-moe" }
           - { name: aimee-authority-bootstrap, dockerfile: Dockerfile.authority-bootstrap }
-          - { name: aimee-embedder,  dockerfile: Dockerfile.embedder }
-          # Higher-fidelity alternate tier: same Dockerfile, 4b embedder
-          # baked in. Pair with embedding_dim: 2560 (see docs). Default (above) is
-          # the 0.6b embedder.
-          - { name: aimee-embedder-4b, dockerfile: Dockerfile.embedder, embedder_arg: "EMBEDDER_MODEL=perplexity-ai/pplx-embed-v1-4b" }
           # #4-full render backend (headless-Chromium sidecar). Self-contained
           # under deploy/css-render (its own build context); independent of the C
           # build, so a failure here never blocks the aimee images (fail-fast off).
@@ -94,13 +105,24 @@ jobs:
       - name: Normalize owner to lowercase
         run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
 
+      # Logging in on a pull request too, so the PR build can READ the prebuilt
+      # aimee-model-* layers instead of re-downloading gigabytes from Hugging
+      # Face. Logging in is not pushing: `push=` on the build step below is what
+      # decides that, and it stays false for a pull request. A fork's
+      # GITHUB_TOKEN is read-only regardless, and the probe below degrades to an
+      # inline fetch if the read is not permitted.
       - name: Log in to ghcr.io
         uses: docker/login-action@v3
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Prefer the published model layer; fall back to fetching it in the build.
+      # The fallback is what keeps this an optimisation rather than a dependency:
+      # bootstrapping a fresh registry, or a commit that bumps the quant before
+      # the matching model image exists, still builds instead of hard-failing.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -115,29 +137,31 @@ jobs:
           # Reuse layers across releases. Without this every release rebuilt all
           # images on both arches from scratch — re-running the full LTO C build
           # each time. Scoped per image+arch so the matrix legs never clobber each
-          # other. EXCLUDES aimee-embedder: its baked multi-GB
-          # model layers would blow the 10 GB GHA cache budget and evict the (small,
-          # high-reuse) C-image caches, defeating the purpose. The embedder's real
-          # win is the runtime model fetch (embedder-runtime-fetch-autodim proposal),
-          # not the layer cache.
-          cache-from: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-embedder-4b' && matrix.image.name != 'aimee-css-render') && format('type=gha,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
-          cache-to: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-embedder-4b' && matrix.image.name != 'aimee-css-render') && format('type=gha,mode=max,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
+          # other. EXCLUDES aimee-css-render: its browser layers would blow the
+          # 10 GB GHA cache budget and evict the (small, high-reuse) C-image
+          # caches, defeating the purpose.
+          cache-from: ${{ matrix.image.name != 'aimee-css-render' && format('type=gha,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
+          cache-to: ${{ matrix.image.name != 'aimee-css-render' && format('type=gha,mode=max,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
           # Images bundle the browser UI (WITH_RUNTIME_WEB=1, the default). webchat's
           # frontend dependency (@rakuensoftware/smoothgui) is vendored in-repo, so
           # the build needs no npm token. The aimee-kb image ignores WITH_RUNTIME_WEB.
           build-args: |
             AIMEE_VERSION=${{ needs.prep.outputs.version }}
             WITH_RUNTIME_WEB=1
-            ${{ matrix.image.embedder_arg }}
             ${{ matrix.image.extra_args }}
-          outputs: type=image,name=ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }},push-by-digest=true,name-canonical=true,push=true
+          # push=false on a pull_request: build only, publish nothing.
+          outputs: type=image,name=ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
 
+      # Digests only exist when something was pushed, so both steps and the whole
+      # merge job below are skipped on a pull request.
       - name: Export digest
+        if: github.event_name != 'pull_request'
         run: |
           mkdir -p /tmp/digests
           echo "${{ steps.build.outputs.digest }}" > "/tmp/digests/${{ matrix.image.name }}-${{ matrix.platform.arch }}"
 
       - name: Upload digest
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: digest-${{ matrix.image.name }}-${{ matrix.platform.arch }}
@@ -148,20 +172,22 @@ jobs:
   # tag it (sha, semver/version, latest).
   merge:
     needs: [prep, build]
+    # Nothing to merge when nothing was pushed. A PR stops after the build.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        image: [aimee-server, aimee-kb, aimee-authority-bootstrap, aimee-embedder, aimee-embedder-4b, aimee-css-render]
+        image: [aimee-server, aimee-kb, aimee-kb-a25m, aimee-kb-nomic,
+                aimee-authority-bootstrap, aimee-css-render]
     steps:
       - name: Normalize owner to lowercase
         run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
 
-      # Match ONLY this image's per-arch digests. A trailing `-*` would be greedy:
-      # `digest-aimee-embedder-*` also matches `digest-aimee-embedder-4b-*` (one
-      # image name is a prefix of another), which would pull another image's digests
-      # into this manifest and break the push. Anchor on the exact arch suffixes
-      # instead (brace expansion, no wildcard across `-`).
+      # Match ONLY this image's per-arch digests. A trailing `-*` would be greedy
+      # whenever one image name is a prefix of another, pulling another image's
+      # digests into this manifest and breaking the push. Anchor on the exact arch
+      # suffixes instead (brace expansion, no wildcard across `-`).
       - name: Download this image's digests
         uses: actions/download-artifact@v4
         with:

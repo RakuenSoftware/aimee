@@ -49,12 +49,9 @@ REQUIRED_COMPOSE_PATTERNS = {
     "kb-build-context": r"(?s)aimee-kb:.*build:.*context:\s*\.",
     "aimee-home-env": r"(?s)aimee-kb:.*AIMEE_HOME:\s*/var/lib/aimee",
     "kb-health": r"(?s)aimee-kb:.*healthcheck:.*http://127\.0\.0\.1:8741/v1/health",
-    # No inference service in the default topology: the kb embeds in-container. The
-    # legacy torch embedder is retained behind a profile for rollback.
-    "embedder-service": r"(?m)^\s{2}embedder:",
-    # AIMEE_LLM_URL is SYNTH ONLY now and must carry no default — the container it used
+    # SYNTHESIS_ENDPOINT is SYNTH ONLY now and must carry no default — the container it used
     # to name is gone, so a default would point every deploy at a dead host.
-    "llm-url-no-default": r"(?m)^\s*AIMEE_LLM_URL:\s*\$\{AIMEE_LLM_URL:-\}\s*$",
+    "llm-url-no-default": r"(?m)^\s*SYNTHESIS_ENDPOINT:\s*\$\{SYNTHESIS_ENDPOINT:-\}\s*$",
 }
 
 FORBIDDEN_COMPOSE_PATTERNS = {
@@ -206,7 +203,7 @@ def kb_publication_failures(text: str) -> list[str]:
     if not isinstance(service, dict):
         return ["missing aimee-kb service"]
     failures: list[str] = []
-    required_services = {"aimee-kb", "embedder"}
+    required_services = {"aimee-kb"}
     missing_services = required_services - set(services)
     if missing_services:
         failures.append("missing required services: " + ", ".join(sorted(missing_services)))
@@ -227,10 +224,10 @@ def kb_publication_failures(text: str) -> list[str]:
             failures.append("aimee-kb AIMEE_HOME must be exactly /var/lib/aimee")
         if "AIMEE_DB2_URL" in environment:
             failures.append("aimee-kb must load DB2 credentials from Vault, not Config.Env")
-        if environment.get("AIMEE_LLM_URL") != "${AIMEE_LLM_URL:-}":
+        if environment.get("SYNTHESIS_ENDPOINT") != "${SYNTHESIS_ENDPOINT:-}":
             failures.append(
-                "aimee-kb AIMEE_LLM_URL must have an empty default (synth only; the "
-                "aimee-llm container is retired)"
+                "aimee-kb SYNTHESIS_ENDPOINT must have an empty default: synthesis is "
+                "optional, and whatever selects a provider supplies the endpoint"
             )
     depends_on = service.get("depends_on")
     if isinstance(depends_on, dict) and "postgres" in depends_on:
@@ -398,29 +395,68 @@ def managed_kb_llm_contract_failures(text: str) -> list[str]:
     kb = services.get("aimee-kb") if isinstance(services, dict) else None
     if not isinstance(kb, dict):
         return ["managed Compose must contain the aimee-kb service"]
-    if isinstance(services, dict) and "aimee-llm" in services:
-        return ["aimee-llm is retired; managed Compose must not deploy it"]
-
     failures: list[str] = []
+
+    # aimee-llm is allowed again, but only in the shape that makes it safe to
+    # deploy. The old one was retired for coupling synthesis to the kb image and
+    # for carrying the embedder role; each check below is one of those ways back.
+    llm = services.get("aimee-llm") if isinstance(services, dict) else None
+    if isinstance(llm, dict):
+        if llm.get("profiles") != ["llm"]:
+            failures.append(
+                "aimee-llm must be gated behind the 'llm' profile; an ungated "
+                "sidecar deploys on every managed stack, including those using an "
+                "external synthesis provider or none"
+            )
+        llm_env = llm.get("environment")
+        if isinstance(llm_env, dict) and any(k.startswith("EMBEDDER") for k in llm_env):
+            failures.append(
+                "aimee-llm must not carry an embedder role; the kb embeds "
+                "in-container and a second embedder is the topology that was retired"
+            )
+        volumes = llm.get("volumes")
+        if not (
+            isinstance(volumes, list)
+            and any(
+                isinstance(v, str) and "synthesis-tls" in v and v.endswith(":ro")
+                for v in volumes
+            )
+        ):
+            failures.append(
+                "aimee-llm must mount the synthesis identity READ-ONLY; it presents "
+                "that material and never issues any"
+            )
+        llm_dep = llm.get("depends_on")
+        healthy = (
+            isinstance(llm_dep, dict)
+            and isinstance(llm_dep.get("aimee-kb"), dict)
+            and llm_dep["aimee-kb"].get("condition") == "service_healthy"
+        )
+        if not healthy:
+            failures.append(
+                "aimee-llm must depend on aimee-kb being service_healthy: the kb "
+                "mints the mTLS identity the sidecar refuses to start without"
+            )
+
     kb_env = kb.get("environment")
     if not isinstance(kb_env, dict):
         return ["managed KB environment must use mapping form"]
 
-    token_expr = "${AIMEE_LLM_AUTH_TOKEN:-}"
-    if "AIMEE_LLM_AUTH_TOKEN" in kb_env:
+    token_expr = "${SYNTHESIS_API_KEY:-}"
+    if "SYNTHESIS_API_KEY" in kb_env:
         failures.append("managed KB LLM bearer must be loaded from Vault, not Config.Env")
-    if kb_env.get("AIMEE_LLM_AUTH_REQUIRED") != "${AIMEE_LLM_AUTH_REQUIRED:-0}":
+    if kb_env.get("SYNTHESIS_AUTH_REQUIRED") != "${SYNTHESIS_AUTH_REQUIRED:-0}":
         failures.append(
             "managed KB auth-required mode must follow the local-LLM deployment transaction"
         )
-    if "LLM_API_KEY" in kb_env:
+    if "SYNTHESIS_API_KEY" in kb_env:
         failures.append("managed KB legacy curator token must not be stored in Config.Env")
-    if kb_env.get("AIMEE_LLM_URL") != "${AIMEE_LLM_URL:-}":
-        failures.append("managed KB AIMEE_LLM_URL must have an empty default (synth only)")
+    if kb_env.get("SYNTHESIS_ENDPOINT") != "${SYNTHESIS_ENDPOINT:-}":
+        failures.append("managed KB SYNTHESIS_ENDPOINT must have an empty default (synth only)")
     for key in kb_env:
         if str(key).startswith("AIMEE_LLM_EMBED_"):
             failures.append(f"managed KB must not receive {key}; the embedder is in-container")
-    if kb_env.get("AIMEE_LLM_MODEL") != "${AIMEE_LLM_MODEL:-aimee-synth}":
+    if kb_env.get("SYNTHESIS_MODEL") != "${SYNTHESIS_MODEL:-aimee-synth}":
         failures.append("managed KB must receive the unified model label")
 
     depends_on = kb.get("depends_on")
@@ -601,7 +637,6 @@ def plant_test() -> int:
             "compose.yaml missing kb-build-context",
             "compose.yaml missing aimee-home-env",
             "compose.yaml missing kb-health",
-            "compose.yaml missing embedder-service",
             "compose.yaml missing llm-url-no-default",
             "missing .dockerignore",
         }
@@ -637,18 +672,13 @@ def plant_test() -> int:
             "\n".join(
                 [
                     "services:",
-                    "  embedder:",
-                    "    build:",
-                    "      context: .",
-                    "      dockerfile: Dockerfile.embedder",
-                    "    profiles: [\"legacy-embedder\"]",
                     "  aimee-kb:",
                     "    build:",
                     "      context: .",
                     "      dockerfile: Dockerfile",
                     "    environment:",
                     "      AIMEE_HOME: /var/lib/aimee",
-                    "      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-}",
+                    "      SYNTHESIS_ENDPOINT: ${SYNTHESIS_ENDPOINT:-}",
                     "      AIMEE_KB_MTLS_HOST: aimee-kb",
                     '      AIMEE_KB_MTLS_PORT: "8745"',
                     "    ports:",
@@ -700,10 +730,10 @@ def plant_test() -> int:
             "    environment:\n"
             "      AIMEE_KB_MTLS_HOST: aimee-kb\n"
             '      AIMEE_KB_MTLS_PORT: "8745"\n'
-            "      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-}\n"
-            "      AIMEE_LLM_AUTH_REQUIRED: ${AIMEE_LLM_AUTH_REQUIRED:-0}\n"
-            "      AIMEE_LLM_MODEL: ${AIMEE_LLM_MODEL:-aimee-synth}\n"
-            "      AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}\n",
+            "      SYNTHESIS_ENDPOINT: ${SYNTHESIS_ENDPOINT:-}\n"
+            "      SYNTHESIS_AUTH_REQUIRED: ${SYNTHESIS_AUTH_REQUIRED:-0}\n"
+            "      SYNTHESIS_MODEL: ${SYNTHESIS_MODEL:-aimee-synth}\n"
+            "      EMBEDDER_DIMS: ${EMBEDDER_DIMS:-}\n",
             encoding="utf-8",
         )
         (root / "deploy/container/aimee-server-remote-writes.yaml").write_text(
@@ -755,18 +785,23 @@ def plant_test() -> int:
                 )
                 return 1
 
-        # aimee-llm is retired: neither a service definition nor a leftover depends_on
-        # edge may creep back into managed Compose. Both are planted because the
-        # service check returns early, so it would otherwise mask the edge check.
+        # The sidecar may exist, but not ungated and not without the kb ordering it
+        # depends on. Planting a bare service definition exercises both.
         managed_text = read(root / "deploy/container/aimee-managed.compose.yaml")
-        planted_service = managed_text + (
-            "  aimee-llm:\n    image: ghcr.io/example/aimee-llm:latest\n"
-        )
-        if "aimee-llm is retired; managed Compose must not deploy it" not in (
-            managed_kb_llm_contract_failures(planted_service)
-        ):
+        planted_service = managed_text.replace(
+            "  aimee-llm:\n    profiles: [\"llm\"]\n",
+            "  aimee-llm-ungated:\n",
+        ) + ("  aimee-llm:\n    image: ghcr.io/example/aimee-llm:latest\n")
+        planted_failures = managed_kb_llm_contract_failures(planted_service)
+        if not any("gated behind the 'llm' profile" in f for f in planted_failures):
             print(
-                "kb-container-packaging plant: missed resurrected aimee-llm service",
+                "kb-container-packaging plant: missed an ungated aimee-llm sidecar",
+                file=sys.stderr,
+            )
+            return 1
+        if not any("service_healthy" in f for f in planted_failures):
+            print(
+                "kb-container-packaging plant: missed an aimee-llm with no kb ordering",
                 file=sys.stderr,
             )
             return 1
@@ -793,7 +828,7 @@ def plant_test() -> int:
             print("kb-container-packaging plant: missed active legacy remote_writes default", file=sys.stderr)
             return 1
 
-        (root / ".env").write_text("COMPOSE_PROFILES=curator-llm\n", encoding="utf-8")
+        (root / ".env").write_text("COMPOSE_PROFILES=some-profile\n", encoding="utf-8")
         if ".env enables optional Compose profiles by default" not in check(root):
             print("kb-container-packaging plant: missed enabled default profile", file=sys.stderr)
             return 1
@@ -883,10 +918,10 @@ def plant_test() -> int:
         # Any non-empty default is rejected now, including the retired container's own
         # host:port — there is nothing listening there to point a deploy at.
         for bad_llm in (
-            "${AIMEE_LLM_URL:-http://aimee-llm.attacker.example}",
-            "${AIMEE_LLM_URL:-http://aimee-llm:8080}",
+            "${SYNTHESIS_ENDPOINT:-http://aimee-llm.attacker.example}",
+            "${SYNTHESIS_ENDPOINT:-http://aimee-llm:8080}",
         ):
-            planted = safe_compose.replace("${AIMEE_LLM_URL:-}", bad_llm, 1)
+            planted = safe_compose.replace("${SYNTHESIS_ENDPOINT:-}", bad_llm, 1)
             if not kb_publication_failures(planted):
                 print(f"kb-container-packaging plant: missed LLM URL {bad_llm}", file=sys.stderr)
                 return 1

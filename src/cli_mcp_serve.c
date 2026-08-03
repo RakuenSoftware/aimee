@@ -8,9 +8,12 @@
 #include "cli_client.h"
 #include "cli_mcp_serve.h"
 #include "client_constants.h"
+#include "client_session_worktree.h"
 #include "platform_path.h"
+#include "platform_random.h"
 #include "cJSON.h"
 #include <ctype.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -127,6 +130,88 @@ static const char *client_session_id(void)
    }
    fclose(fp);
    return id[0] ? id : NULL;
+}
+
+/* Read the session id published at `path` into out[cap]. 0 on success. */
+static int session_id_read_published(const char *path, char *out, size_t cap)
+{
+   FILE *fp = fopen(path, "r");
+   if (!fp)
+      return -1;
+   char buf[64] = "";
+   if (fgets(buf, sizeof(buf), fp))
+   {
+      size_t len = strlen(buf);
+      while (len > 0 && (buf[len - 1] == '\n' || buf[len - 1] == '\r' || buf[len - 1] == ' '))
+         buf[--len] = '\0';
+   }
+   fclose(fp);
+   if (!buf[0])
+      return -1;
+   snprintf(out, cap, "%s", buf);
+   return 0;
+}
+
+/* Mint this agent session's id and publish it at session-ppid-<ppid>, so every
+ * process of the session (hook, this proxy, delegates) resolves the SAME id.
+ * Mirrors config.c's session_id(), which the thin client does not link.
+ *
+ * The create is O_EXCL: when two sibling processes race, exactly one wins and
+ * the loser re-reads the winner's id, so they converge instead of each keying a
+ * worktree on its own invented string. ppid <= 1 means orphaned — refuse rather
+ * than key on session-ppid-1, which unrelated daemons would all share.
+ * Returns 0 and fills out[cap] on success, -1 when no stable id is available. */
+static int client_session_id_ensure(char *out, size_t cap)
+{
+   if (!out || !cap)
+      return -1;
+   out[0] = '\0';
+
+   /* Reads env and file directly rather than through client_session_id(), whose
+    * result is memoised on first call — by the time this runs that cache may
+    * already hold a "no id" answer from before the file existed. */
+   const char *env = getenv("AIMEE_SESSION_ID");
+   if (env && env[0])
+   {
+      snprintf(out, cap, "%s", env);
+      return 0;
+   }
+
+   int ppid = (int)platform_getppid();
+   const char *base = aimee_home();
+   if (ppid <= 1 || !base)
+      return -1;
+
+   char path[MAX_PATH_LEN];
+   snprintf(path, sizeof(path), "%s/session-ppid-%d", base, ppid);
+
+   /* Already published by a sibling (or an earlier run of this session). */
+   if (session_id_read_published(path, out, cap) == 0)
+      return 0;
+
+   unsigned char rnd[16];
+   if (platform_random_bytes(rnd, sizeof(rnd)) != 0)
+      return -1;
+   char id[64];
+   snprintf(id, sizeof(id), "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+            rnd[0], rnd[1], rnd[2], rnd[3], rnd[4], rnd[5], rnd[6], rnd[7], rnd[8], rnd[9], rnd[10],
+            rnd[11], rnd[12], rnd[13], rnd[14], rnd[15]);
+
+   int fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0644);
+   if (fd >= 0)
+   {
+      ssize_t wrote = write(fd, id, strlen(id));
+      close(fd);
+      if (wrote == (ssize_t)strlen(id))
+      {
+         snprintf(out, cap, "%s", id);
+         return 0;
+      }
+      return -1;
+   }
+
+   /* Lost the O_EXCL race: adopt the id the winner published. */
+   return session_id_read_published(path, out, cap);
 }
 
 /* Ensure a co-located aimee-server is reachable over the /v1 HTTP UDS. The thin
@@ -296,6 +381,55 @@ static void add_prompt_message(cJSON *messages, const char *role, const char *te
 
 /* --- Local protocol handlers --- */
 
+/* Place this MCP session on its own branch + worktree, and ENTER it.
+ *
+ * An MCP-hosted agent has no SessionStart hook, so nothing else would isolate
+ * it: it would drive aimee's file/exec tools straight against the shared
+ * checkout. Unlike a hook — which cannot chdir its host — this proxy IS the
+ * process those tools resolve their paths in, so it can complete the handoff
+ * itself by chdir'ing into the worktree.
+ *
+ * Runs once, at `initialize`, before any tool traffic. Writes the entered path
+ * into out[cap] and returns 1; returns 0 when no worktree was entered (isolation
+ * disabled, already inside one, not a git repo, or creation failed — in which
+ * case client_session_worktree_ensure has already explained itself on stderr,
+ * which the MCP host surfaces as server log output). Never fatal: a session that
+ * cannot be isolated still serves read-only tools, and the attention guard
+ * remains the backstop that refuses its writes. */
+static int mcp_enter_session_worktree(char *out, size_t cap)
+{
+   const char *sid = client_session_id();
+   char fallback[64];
+   if (!sid || !sid[0])
+   {
+      /* No host-provided id (no AIMEE_SESSION_ID, no session-ppid file yet).
+       * Mint one the way config.c does and PERSIST it to session-ppid-<ppid>,
+       * rather than inventing a private "mcp-ppid-N" string.
+       *
+       * Both halves matter. Processes of one agent session share a PPID, and
+       * that file is how the hook, this proxy and the delegates agree on one
+       * session id — an id invented here would be seen by nobody else, so the
+       * proxy would work in a different worktree from its own session. And a
+       * bare ppid is not unique enough to key a worktree on: two proxies under
+       * one host process would derive the same key and land in the SAME
+       * worktree, overwriting each other. The file's O_EXCL create settles that
+       * race — whoever loses re-reads the winner's id. */
+      if (client_session_id_ensure(fallback, sizeof(fallback)) != 0 || !fallback[0])
+         return 0; /* no stable identity -> better unisolated than colliding */
+      sid = fallback;
+   }
+
+   if (client_session_worktree_ensure(sid, out, cap) != 0)
+      return 0;
+   if (chdir(out) != 0)
+   {
+      fprintf(stderr, "aimee: prepared session worktree %s but could not enter it\n", out);
+      return 0;
+   }
+   fprintf(stderr, "aimee: MCP session isolated in %s\n", out);
+   return 1;
+}
+
 static void handle_initialize(cJSON *id)
 {
    cJSON *result = cJSON_CreateObject();
@@ -322,17 +456,48 @@ static void handle_initialize(cJSON *id)
    cJSON_AddStringToObject(info, "version", MCP_VERSION);
    cJSON_AddItemToObject(result, "serverInfo", info);
 
-   cJSON_AddStringToObject(
-       result, "instructions",
-       "When you are unsure how aimee works — work queue, delegation, memory, git, "
-       "build, conventions — call get_help() before trying anything else. It "
-       "returns the authoritative topic index. Pass a topic name for details "
-       "(e.g. get_help(\"work queue\")). The tools/list is a curated core set; the "
-       "full catalog is larger — call find_tools(\"<keyword>\") to discover more "
-       "tools and describe_tool(\"<name>\") for a tool's full input schema, then "
-       "call call_tool with that name and matching arguments. Do "
-       "not use provider-native sub-agent tools such as spawn_agent or Agent; use "
-       "the aimee delegate tool for delegated work.");
+   /* EVERY TOOL IN tools/list IS DIRECTLY CALLABLE. SAY SO FIRST.
+    *
+    * This text used to open with "call get_help() before trying anything else"
+    * and then describe find_tools -> describe_tool -> call_tool as the way to
+    * reach tools. Agents read that as the normal path and spent their tool budget
+    * on the protocol rather than the work. Measured twice now: once at five of
+    * fourteen calls, and again on a benchmark cell that made two find_tools, two
+    * describe_tool and two call_tool calls and NOT ONE direct find_symbol -- while
+    * find_symbol was in the advertised list the whole time, one call away.
+    *
+    * Discovery is for what is NOT in the list. Leading with it taxes every session
+    * to buy something almost none of them need. */
+   static const char *const base_instructions =
+       "The tools in tools/list are directly callable — call them directly, by "
+       "name, with their arguments. Do not route a listed tool through call_tool, "
+       "and do not look one up before using it. find_symbol, "
+       "preview_blast_radius, search_docs and search_memory are listed: use them "
+       "as your first move on repository questions rather than after a shell "
+       "search. Only when you need a tool that is NOT listed: find_tools("
+       "\"<keyword>\") to locate it, describe_tool(\"<name>\") for its schema, "
+       "then call_tool with that name and matching arguments. get_help(\"<topic>\") "
+       "explains how aimee itself works — work queue, delegation, memory, git, "
+       "build, conventions — when you are unsure; it is not a required first step. "
+       "Do not use provider-native sub-agent tools such as spawn_agent or Agent; "
+       "use the aimee delegate tool for delegated work.";
+
+   /* Isolate before serving any tool call, and tell the caller where its work
+    * will land — the host's own idea of the cwd is now stale for aimee's tools. */
+   char wt[4200];
+   if (mcp_enter_session_worktree(wt, sizeof(wt)))
+   {
+      char instructions[8192];
+      snprintf(instructions, sizeof(instructions),
+               "%s\n\nThis session has its own isolated checkout — a branch cut from the "
+               "repository's default branch, in a dedicated worktree at %s. aimee's file and "
+               "shell tools already run there; use RELATIVE paths, or absolute paths under that "
+               "root. Do not edit the shared checkout.",
+               base_instructions, wt);
+      cJSON_AddStringToObject(result, "instructions", instructions);
+   }
+   else
+      cJSON_AddStringToObject(result, "instructions", base_instructions);
 
    mcp_respond(id, result);
 }

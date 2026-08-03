@@ -14,7 +14,7 @@
 #include <fcntl.h>
 #include <stdarg.h>
 #include <stddef.h> /* offsetof */
-#include <stdlib.h> /* getenv — AIMEE_EMBEDDER_URL default */
+#include <stdlib.h> /* getenv — EMBEDDER_URL default */
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -383,13 +383,10 @@ int config_save(const config_t *cfg)
          size_t off;
       } page2[] = {
           {"kb_mode", offsetof(config_t, kb_mode)},
-          {"llm_embed_backend", offsetof(config_t, llm_embed_backend)},
-          {"llm_synth_backend", offsetof(config_t, llm_synth_backend)},
-          {"llm_synth_host", offsetof(config_t, llm_synth_host)},
-          {"llm_synth_gpu", offsetof(config_t, llm_synth_gpu)},
-          {"llm_synth_tier", offsetof(config_t, llm_synth_tier)},
-          {"llm_synth_endpoint", offsetof(config_t, llm_synth_endpoint)},
-          {"llm_synth_model", offsetof(config_t, llm_synth_model)},
+          /* Must mirror the parse table in config.c: a key parsed but not saved
+           * silently loses the operator's value on the next rewrite. */
+          {"synthesis_endpoint", offsetof(config_t, synthesis_endpoint)},
+          {"synthesis_model", offsetof(config_t, synthesis_model)},
       };
       for (size_t i = 0; i < sizeof(page2) / sizeof(page2[0]); i++)
       {
@@ -458,14 +455,14 @@ int config_save(const config_t *cfg)
          }
       }
    }
-   if (cfg->embedding_command[0])
-      cJSON_AddStringToObject(root, "embedding_command", cfg->embedding_command);
-   if (cfg->embedding_model[0])
-      cJSON_AddStringToObject(root, "embedding_model", cfg->embedding_model);
-   if (cfg->embedding_endpoint[0])
-      cJSON_AddStringToObject(root, "embedding_endpoint", cfg->embedding_endpoint);
-   if (cfg->embedding_dim > 0)
-      cJSON_AddNumberToObject(root, "embedding_dim", cfg->embedding_dim);
+   if (cfg->embedder_command[0])
+      cJSON_AddStringToObject(root, "embedder_command", cfg->embedder_command);
+   if (cfg->embedder_model[0])
+      cJSON_AddStringToObject(root, "embedder_model", cfg->embedder_model);
+   if (cfg->embedder_url[0])
+      cJSON_AddStringToObject(root, "embedder_url", cfg->embedder_url);
+   if (cfg->embedder_dims > 0)
+      cJSON_AddNumberToObject(root, "embedder_dims", cfg->embedder_dims);
    if (cfg->memory_weight_profile[0])
       cJSON_AddStringToObject(root, "memory_weight_profile", cfg->memory_weight_profile);
    if (cfg->memory_rerank_mode[0])
@@ -1388,34 +1385,40 @@ const char *config_guardrail_mode(void)
    return buf[0] ? buf : MODE_APPROVE;
 }
 
-const char *config_embedding_command(const config_t *cfg, const char *requested)
+const char *config_embedder_command(const config_t *cfg, const char *requested)
 {
    if (requested && requested[0])
       return requested;
    /* This is the ONE place an embedder address is resolved. Precedence, and why:
     *
-    * AIMEE_EMBEDDER_URL OUTRANKS the stored command, because the env var is how the
+    * EMBEDDER_URL OUTRANKS the stored command, because the env var is how the
     * RUNNING embedder announces itself. The shipped config pre-selects nothing (first
     * boot leaves the choice to the wizard), and when the entrypoint does start the
-    * bundled in-container model it exports AIMEE_EMBEDDER_URL pointing at it — so the
+    * bundled in-container model it exports EMBEDDER_URL pointing at it — so the
     * bundled model and an operator's external endpoint arrive by the same route and
     * obey one rule. Checking config first would make the variable dead and let the kb
     * embed locally while its schema was sized for the external endpoint.
     *
     * memory_embed_text speaks http:// directly, so this costs no fork and no python.
     *
-    * Deliberately NOT falling back to AIMEE_LLM_URL: that knob is synthesis-only since
+    * Deliberately NOT falling back to SYNTHESIS_ENDPOINT: that knob is synthesis-only since
     * the aimee-llm container was retired, and letting it select an embedder would point
     * retrieval at a chat endpoint. */
-   const char *env = getenv("AIMEE_EMBEDDER_URL");
+   const char *env = getenv("EMBEDDER_URL");
    if (env && env[0])
       return env;
-   if (cfg && cfg->embedding_command[0])
-      return cfg->embedding_command;
-   /* Nothing selected at all: the lexical builtin, which fills the deployment's
-    * configured width (config is the single place that is declared). Correct for a
-    * first boot before the wizard runs, and for an unconfigured shim/test setup. */
-   return "builtin";
+   if (cfg && cfg->embedder_command[0])
+      return cfg->embedder_command;
+   /* Nothing selected at all. The honest answer is the empty string, and callers read
+    * it as "no embedder": memory_embed_text embeds nothing, the kb refuses to start,
+    * and a deploy is rejected before a container runs.
+    *
+    * This used to return "builtin", naming a lexical feature hash that served whenever
+    * nothing was configured. Returning a name for it now would be worse than the
+    * fallback ever was: nothing implements it, so the string would reach the sidecar
+    * exec path, fork `/bin/sh -c builtin` for every embed call, fail, and charge the
+    * dependency breaker for an endpoint that was never configured. */
+   return "";
 }
 
 /* --- Conversation directories --- */
@@ -1582,6 +1585,21 @@ static int config_write_doc(cJSON *root)
    return 0;
 }
 
+/* The embedder names an image can actually serve. Empty embedder_url means the
+ * weights BAKED INTO the image variant, so the name has to be one of them; a
+ * non-empty URL means an operator-run endpoint whose model may be called anything
+ * (see config.h's embedder_model comment).
+ *
+ * Unvalidated, a typo produced a deployment that looked configured and searched
+ * lexically forever: config_emit_deploy_env maps any unrecognised name to the a25m
+ * variant, so the image arrives WITH bekko weights and EMBEDDER_MODEL=<typo>, the
+ * entrypoint finds no match, logs "'<typo>' selected but this image has no bundled
+ * embedder" once, and starts nothing. Everything downstream reports healthy. */
+static int embedder_model_is_bundled(const char *v)
+{
+   return v && (strcmp(v, "bekko-a25m") == 0 || strcmp(v, "nomic-embed-text-v2-moe") == 0);
+}
+
 int config_set(const char *key, const char *value)
 {
    if (!key || !value)
@@ -1589,6 +1607,27 @@ int config_set(const char *key, const char *value)
    const config_field_t *f = config_field_lookup(key);
    if (!f)
       return -1; /* unknown key */
+
+   /* Refused rather than warned: the failure it prevents is silent and permanent
+    * once a corpus has been embedded at the wrong width, and re-running the command
+    * in the other order costs nothing. Clearing the field is allowed -- that is how
+    * an operator moves to an external embedder. */
+   if (strcmp(key, "embedder_model") == 0 && value[0] && !embedder_model_is_bundled(value))
+   {
+      char url[512] = "";
+      config_embedder_url_copy(url, sizeof(url));
+      if (!url[0])
+      {
+         fprintf(stderr,
+                 "config: '%s' is not an embedder this image bakes (bekko-a25m or "
+                 "nomic-embed-text-v2-moe).\n"
+                 "  A name the image does not carry deploys with no embedder running and "
+                 "searches lexically, reporting healthy throughout.\n"
+                 "  If this is an external endpoint's model name, set embedder_url first.\n",
+                 value);
+         return -1;
+      }
+   }
    const char *secret_name = config_field_secret_name(f);
    if (secret_name)
    {

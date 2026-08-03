@@ -24,7 +24,7 @@
   },
   "time": { "from": "now-6h", "to": "now" },
   "timezone": "",
-  "title": "Aimee — Virtual Context Assembly",
+  "title": "Aimee: Virtual Context Assembly",
   "uid": "aimee-virtual-context",
   "version": 1,
   "panels": [
@@ -32,7 +32,7 @@
       "id": 1,
       "type": "stat",
       "title": "Context Segments (tool-chains)",
-      "description": "session_context_segments_total — tool-chains created for the session.",
+      "description": "session_context_segments_total: tool-chains created for the session.",
       "datasource": { "type": "datasource", "uid": "${datasource}" },
       "gridPos": { "x": 0, "y": 0, "w": 4, "h": 6 },
       "targets": [
@@ -48,7 +48,7 @@
       "id": 2,
       "type": "stat",
       "title": "Tool-chains Stubbed",
-      "description": "session_tool_chains_stubbed_total — chains compacted to a deterministic stub.",
+      "description": "session_tool_chains_stubbed_total: chains compacted to a deterministic stub.",
       "datasource": { "type": "datasource", "uid": "${datasource}" },
       "gridPos": { "x": 4, "y": 0, "w": 4, "h": 6 },
       "targets": [
@@ -64,7 +64,7 @@
       "id": 3,
       "type": "stat",
       "title": "Compression Ratio",
-      "description": "compression_ratio — raw_bytes_total / stub_bytes_total. Gate floor is 1.7x (40% reduction).",
+      "description": "compression_ratio: raw_bytes_total / stub_bytes_total. Gate floor is 1.7x (40% reduction).",
       "datasource": { "type": "datasource", "uid": "${datasource}" },
       "gridPos": { "x": 8, "y": 0, "w": 4, "h": 6 },
       "targets": [
@@ -80,7 +80,7 @@
       "id": 4,
       "type": "stat",
       "title": "Pending Events (un-flushed)",
-      "description": "pending_events — tool events not yet flushed into a chain. Auto-flush threshold is 10.",
+      "description": "pending_events: tool events not yet flushed into a chain. Auto-flush threshold is 10.",
       "datasource": { "type": "datasource", "uid": "${datasource}" },
       "gridPos": { "x": 12, "y": 0, "w": 4, "h": 6 },
       "targets": [
@@ -96,7 +96,7 @@
       "id": 5,
       "type": "timeseries",
       "title": "Context Bytes Saved",
-      "description": "session_context_bytes_saved — raw_bytes_total minus stub_bytes_total.",
+      "description": "session_context_bytes_saved: raw_bytes_total minus stub_bytes_total.",
       "datasource": { "type": "datasource", "uid": "${datasource}" },
       "gridPos": { "x": 0, "y": 6, "w": 8, "h": 8 },
       "targets": [
@@ -112,7 +112,7 @@
       "id": 6,
       "type": "timeseries",
       "title": "Assembly Latency (p50 / p95)",
-      "description": "session_context_assembly_ms — wall time to assemble a stubbed working set.",
+      "description": "session_context_assembly_ms: wall time to assemble a stubbed working set.",
       "datasource": { "type": "datasource", "uid": "${datasource}" },
       "gridPos": { "x": 8, "y": 6, "w": 8, "h": 8 },
       "targets": [
@@ -129,7 +129,7 @@
       "id": 7,
       "type": "timeseries",
       "title": "Stub Expansions (raw recovery)",
-      "description": "session_context_expand_total by result — lazy recovery of raw turns. Expansion-failure alert fires above 5% error ratio.",
+      "description": "session_context_expand_total by result: lazy recovery of raw turns. Expansion-failure alert fires above 5% error ratio.",
       "datasource": { "type": "datasource", "uid": "${datasource}" },
       "gridPos": { "x": 0, "y": 14, "w": 16, "h": 8 },
       "targets": [

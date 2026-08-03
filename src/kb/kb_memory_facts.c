@@ -16,10 +16,12 @@
 #include "db2/memory_query.h"    /* db2_memory_get */
 #include "db2/rel_types_store.h" /* db2_fact_commit */
 #include "db2/fact_ingest.h"     /* db2_fact_ingest_text (offline pattern extraction) */
-#include "rel_types.h"           /* seed ontology: rel_types_seed_* (extractor constraint, §7) */
-#include "memory.h"              /* memory_t */
-#include "memory_ontology.h"     /* NODE_* */
+#include "fact_grounding.h"
+#include "rel_types.h" /* seed ontology: rel_types_seed_* (extractor constraint, §7) */
+#include "memory.h"    /* memory_t */
+#include "modules/memory/memory_ontology.h" /* NODE_* */
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,8 +37,21 @@
 /* Reclaim runs at most this often (throttled; the drain calls it per batch). */
 #define MF_RECLAIM_EVERY_S 60
 /* Auto-injected into every turn (ingress_preinject), so precision matters more
- * than recall: only commit facts the model is confident are durable. */
-#define MF_CONF_FLOOR 0.6
+ * than recall: a wrong fact is repeated back forever.
+ *
+ * This used to be a floor on the model's self-reported confidence (>= 0.6).
+ * Measured across 18 extraction models on the Tier-A benchmark, that number
+ * carries almost no signal: most models write exactly 0.0 or exactly 0.9 and
+ * nothing between, several write 0.0 for every fact including the ones they get
+ * right, and for one model the low-confidence facts are MORE accurate than the
+ * confident ones. The floor silently discarded everything four models extracted
+ * — Qwen3-0.6B commits nothing at 0.6, while 40% of what it extracts is correct.
+ *
+ * Replaced with a check on the text instead of on the model's opinion of itself:
+ * a fact commits only if both of its endpoints can be traced back to the note.
+ * That needs no calibration, behaves identically for every provider, and catches
+ * the failure that actually matters here — an invented entity. A hallucinated
+ * person carries a confidence of 0.9 just as happily as a real one. */
 
 /* The model must return ONLY durable, generalizable subject-relation-object
  * facts -- not transient state, opinions, or one-off events. relation is a short
@@ -60,8 +75,12 @@
    "\"other\"/\"unknown\"/\"misc\". subject is the entity the fact is about "                      \
    "(use \"user\" for the note's author when it is first-person). "                                \
    "confidence is 0..1. Extract only durable, generalizable facts; skip transient "                \
-   "state, feelings, plans, and one-off events. If the note asserts no durable "                   \
-   "fact, return an empty list. No prose, no markdown."
+   "state, feelings, plans, and one-off events. If the note RETRACTS or DENIES "                   \
+   "something (\"no longer\", \"did not\", \"never\", \"is not\", \"has left\", "                  \
+   "\"was removed\"), do NOT emit the negated fact - a retraction asserts a fact "                 \
+   "is FALSE, so there is nothing durable to record. "                                             \
+   "If the note asserts no durable fact, return exactly {\"facts\":[]} - the "                     \
+   "wrapper object is ALWAYS required, never a bare []. No prose, no markdown."
 
 /* Build the extraction system prompt, binding the model to the canonical relation
  * set (autonomous reconciliation, §7). Sourced from the seed ontology so it stays
@@ -235,17 +254,36 @@ static memory_node_kind_t mf_subject_kind(const char *subject)
 
 /* Parse {"facts":[...]} and commit each triple above the confidence floor.
  * Returns the number committed (ACCEPT or NOVEL). */
-static int mf_commit_facts(const char *llm_json)
+static int mf_commit_facts(const char *llm_json, const char *note)
 {
    if (!llm_json)
       return 0;
    /* Models often wrap the JSON in ```json ... ``` fences or add a sentence of
     * prose despite instructions. Parse the outermost {...} object so a fenced or
     * prefixed response still yields facts. */
+   /* A bare "[]" is a CORRECT abstention, not a malformed response. Small models
+    * write it instead of {"facts":[]} on notes that assert no durable fact —
+    * 297 of 1000 notes in the tier-A small-corpus run, of which 184 were notes
+    * whose gold is deliberately empty. Both spellings mean "nothing to commit",
+    * and both return 0 here, so the two are indistinguishable to the caller and
+    * to anyone reading a log. Report the abstention explicitly so a future
+    * "the model emits nothing" investigation can tell refusal from garbage. */
+   const char *p = llm_json;
+   while (*p && isspace((unsigned char)*p))
+      p++;
+   if (p[0] == '[' && p[1] == ']')
+   {
+      aimee_log(LOG_DEBUG, "kb.memory.facts", "note yielded an explicit empty extraction ('[]')");
+      return 0;
+   }
    const char *start = strchr(llm_json, '{');
    const char *end = strrchr(llm_json, '}');
    if (!start || !end || end < start)
+   {
+      aimee_log(LOG_WARN, "kb.memory.facts",
+                "response contained no JSON object - nothing committed");
       return 0;
+   }
    size_t span = (size_t)(end - start) + 1;
    char *obj = malloc(span + 1);
    if (!obj)
@@ -263,7 +301,12 @@ static int mf_commit_facts(const char *llm_json)
       return 0;
    }
 
+   char note_norm[4096];
+   fact_norm_text(note, note_norm, sizeof(note_norm));
+
    int committed = 0;
+   int ungrounded = 0;
+   int malformed = 0;
    cJSON *f = NULL;
    cJSON_ArrayForEach(f, facts)
    {
@@ -274,12 +317,34 @@ static int mf_commit_facts(const char *llm_json)
       const cJSON *obj_j = cJSON_GetObjectItemCaseSensitive(f, "object");
       const cJSON *conf_j = cJSON_GetObjectItemCaseSensitive(f, "confidence");
       const char *subject = cJSON_IsString(subj_j) ? subj_j->valuestring : "";
-      const char *relation = cJSON_IsString(rel_j) ? rel_j->valuestring : "";
+      const char *raw_relation = cJSON_IsString(rel_j) ? rel_j->valuestring : "";
       const char *object = cJSON_IsString(obj_j) ? obj_j->valuestring : "";
       double conf = cJSON_IsNumber(conf_j) ? conf_j->valuedouble : 0.0;
 
-      if (!subject[0] || !relation[0] || !object[0] || conf < MF_CONF_FLOOR)
+      if (!subject[0] || !raw_relation[0] || !object[0])
+      {
+         malformed++;
          continue;
+      }
+      /* Both endpoints must be traceable to the note. Counted, not silent: a
+       * drop that commits nothing used to look exactly like "the model cannot
+       * extract". */
+      if (!fact_grounded(subject, note_norm) || !fact_grounded(object, note_norm))
+      {
+         ungrounded++;
+         continue;
+      }
+      (void)conf; /* recorded by the model, not trusted — see the note above */
+
+      /* Fold a known synonym onto its canonical seed relation before anything
+       * downstream sees it: the gate would otherwise return NOVEL for "has_ip"
+       * and stage a provisional rel_type on a Class-C edge, when we already
+       * model exactly that relation as device_has_ip. Entities have had this
+       * (db2_entity_alias_bind); relations have not. Unknown labels pass through
+       * normalized, so a genuinely new predicate still stages for §7.2. */
+      char relation_buf[REL_TYPE_NAME_MAX];
+      rel_type_canonicalize(raw_relation, relation_buf, sizeof(relation_buf));
+      const char *relation = relation_buf[0] ? relation_buf : raw_relation;
 
       /* The extractor supplies no node kinds, so guess: subject via
        * mf_subject_kind, object OTHER (unknown). But the kind gate REJECTS a
@@ -303,6 +368,13 @@ static int mf_commit_facts(const char *llm_json)
       if (v == FACT_GATE_ACCEPT || v == FACT_GATE_NOVEL)
          committed++;
    }
+   /* A provider whose confidences are uninformative drops every fact here, and
+    * the job still reports success — that combination once looked exactly like
+    * "the model cannot extract". Say so instead of committing silently. */
+   if (ungrounded > 0 || malformed > 0)
+      aimee_log(committed == 0 ? LOG_WARN : LOG_INFO, "kb.memory.facts",
+                "dropped %d ungrounded + %d malformed fact(s), committed %d%s", ungrounded,
+                malformed, committed, committed == 0 ? " - NOTHING committed for this note" : "");
    cJSON_Delete(root);
    return committed;
 }
@@ -351,7 +423,7 @@ static int mf_process_one(const mf_job_t *job)
       return -1;
    }
 
-   int n = mf_commit_facts(resp);
+   int n = mf_commit_facts(resp, mem.content);
    free(resp);
    mf_mark_done(job->job_id);
    if (n > 0)

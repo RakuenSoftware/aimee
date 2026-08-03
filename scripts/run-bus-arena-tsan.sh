@@ -34,14 +34,15 @@ echo "== bus-arena TSan lane: building bus sources + race harness under -fsaniti
 # code that ships clean.
 "$CC" -std=c11 -fsanitize=thread -O1 -g -Wall -Wextra -Werror \
   -Wno-unused-parameter -Wno-format-truncation -Wno-unused-result \
-  -I"$SRC" -I"$SRC/modules/bus" \
-  "$SRC/modules/bus/bus_arena.c" \
-  "$SRC/modules/bus/bus_host.c" \
-  "$SRC/modules/bus/bus_route.c" \
-  "$SRC/modules/bus/bus_region.c" \
-  "$SRC/modules/bus/bus_ring.c" \
-  "$SRC/modules/bus/bus_wire.c" \
-  "$SRC/modules/bus/bus_client.c" \
+  -I"$SRC" -I"$SRC/core/event_bus/include" \
+  "$SRC/core/event_bus/bus_attach.c" \
+  "$SRC/core/event_bus/bus_arena.c" \
+  "$SRC/core/event_bus/bus_host.c" \
+  "$SRC/core/event_bus/bus_route.c" \
+  "$SRC/core/event_bus/bus_region.c" \
+  "$SRC/core/event_bus/bus_ring.c" \
+  "$SRC/core/event_bus/bus_wire.c" \
+  "$SRC/core/event_bus/bus_client.c" \
   "$SRC/tests/test_bus_arena_tsan.c" \
   -o "$OUT/bus-arena-race-tsan" -lpthread
 

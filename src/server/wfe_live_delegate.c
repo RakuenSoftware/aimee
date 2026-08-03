@@ -17,13 +17,13 @@
  * functionality. Registration alone runs nothing — a run only begins when intake
  * creates a work item and the autonomy driver advances it. */
 #include "aimee.h"
-#include "git_forge_vault.h"
+#include "modules/git/git_forge_vault.h"
 
 #include "wfe_live_delegate.h"
 
 #include "agent_config.h"
 #include "agent_exec.h"
-#include "agent_tools.h"
+#include <aimee/tools/agent_tools.h>
 #include "agent_types.h"
 #include "cJSON.h"
 #include "coord_jobs.h"
@@ -33,7 +33,7 @@
 #include "sandbox_learned.h" /* learn verify's apt installs -> pre-bake next image */
 #include "persona.h"
 #include "provider_catalog.h"
-#include "git_verify.h"
+#include "modules/git/git_verify.h"
 #include "log.h"
 #include "util.h"
 #include "wfe_approval.h"
@@ -233,11 +233,11 @@ static void wfe_commit_worktree_changes(const char *workdir)
     * GitHub attach a Co-authored-by trailer to the squash of every PR carrying
     * both authors, which the standing directive forbids. */
    char au_name[256] = "", au_email[256] = "";
-   if (git_identity_get(au_name, sizeof au_name, au_email, sizeof au_email) != 1)
+   if (git_identity_resolve(workdir, au_name, sizeof au_name, au_email, sizeof au_email) != 1)
    {
       aimee_log(LOG_WARN, "wfe-delegate",
-                "no git identity configured; refusing to commit in %s (seal "
-                "AIMEE_GIT_AUTHOR_NAME/_EMAIL at install)",
+                "no git identity configured; refusing to commit in %s (set user.name/user.email on "
+                "the checkout, or seal AIMEE_GIT_AUTHOR_NAME/_EMAIL at install)",
                 workdir);
       return;
    }

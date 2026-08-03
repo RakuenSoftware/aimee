@@ -14,9 +14,10 @@ export const RESTART_KEYS = new Set<string>([
   // topology (which containers run) only changes on a restart — RELOAD_RESTART
   // in src/config_fields.c. (embedding_endpoint/model/dim apply on the next turn.)
   "kb_mode", "kb_client_url", "kb_client_bearer_token",
-  "llm_embed_backend", "llm_embed_host", "llm_embed_gpu", "llm_embed_tier",
-  "llm_synth_backend", "llm_synth_host", "llm_synth_gpu", "llm_synth_tier", "llm_synth_endpoint",
-  "llm_synth_model",
+  // Changing the width means rebuilding the vector columns, and synthesis_endpoint
+  // is what the container is started against. The llm_embed_*/llm_synth_* keys that
+  // used to be here placed the retired aimee-llm container and are deleted.
+  "embedder_dims", "synthesis_endpoint",
 ]);
 
 /* Keys another tab OWNS, so the Settings page does not list them: a single
@@ -88,20 +89,11 @@ export const OWNED_ELSEWHERE: Record<string, string> = {
    * Settings page (KB_SETTINGS in src/kb/http/kb_http_console.c is the source of
    * truth for this list). aimee-server still READS some of these — one owner is
    * about who edits the value, not who consumes it. */
-  embedding_command: KB_CONSOLE_SETTINGS,
-  embedding_model: KB_CONSOLE_SETTINGS,
-  embedding_dim: KB_CONSOLE_SETTINGS,
-  embedding_endpoint: KB_CONSOLE_SETTINGS,
-  llm_embed_backend: KB_CONSOLE_SETTINGS,
-  llm_embed_host: KB_CONSOLE_SETTINGS,
-  llm_embed_gpu: KB_CONSOLE_SETTINGS,
-  llm_embed_tier: KB_CONSOLE_SETTINGS,
-  llm_synth_backend: KB_CONSOLE_SETTINGS,
-  llm_synth_host: KB_CONSOLE_SETTINGS,
-  llm_synth_gpu: KB_CONSOLE_SETTINGS,
-  llm_synth_tier: KB_CONSOLE_SETTINGS,
-  llm_synth_endpoint: KB_CONSOLE_SETTINGS,
-  llm_synth_model: KB_CONSOLE_SETTINGS,
+  embedder_command: KB_CONSOLE_SETTINGS,
+  embedder_model: KB_CONSOLE_SETTINGS,
+  embedder_dims: KB_CONSOLE_SETTINGS,
+  embedder_url: KB_CONSOLE_SETTINGS,
+  embedder_api_key: KB_CONSOLE_SETTINGS,
   kb_search_max_results: KB_CONSOLE_SETTINGS,
   kb_fusion_mode: KB_CONSOLE_SETTINGS,
   // The kb console's Typed Facts page owns the master switch, beside the
@@ -198,11 +190,12 @@ export const FIELD_HELP: Record<string, string> = {
   openai_model: "Model name for an OpenAI-compatible primary, e.g. gpt-4o.",
   openai_key_cmd:
     "Shell command that prints the API key for the OpenAI-compatible primary. Keeps the key out of the config file.",
-  embedding_command:
+  embedder_command:
     "Command that turns text into an embedding vector (text on stdin, JSON float array on stdout). Blank falls back to the built-in 384-dim hash, which only works in a test setup.",
-  embedding_model: "Name of the embedding model, recorded next to the vectors so a model change can be spotted.",
-  embedding_endpoint: "HTTP endpoint for the embedder when it's a service rather than a command.",
-  embedding_dim:
+  embedder_model: "Name of the embedding model, recorded next to the vectors so a model change can be spotted.",
+  embedder_url: "HTTP endpoint for an external embedder. A non-empty value IS the external embedder; blank uses the model baked into this image.",
+  embedder_api_key: "Bearer token for an external embedder endpoint. Blank if it needs none.",
+  embedder_dims:
     "Vector width the embedder produces (e.g. 1024, 2560). Has to match what the database columns expect.",
 
   // Deploy topology (setup wizard page 2). The deploy layer reads these; the
@@ -211,16 +204,11 @@ export const FIELD_HELP: Record<string, string> = {
     "Where the knowledge base runs: 'local' deploys an aimee-kb here; 'remote' connects to an existing one (see kb_client_url).",
   kb_client_url: "URL of an existing aimee-kb to connect to when kb_mode is 'remote'. Nothing is deployed locally.",
   kb_client_bearer_token: "Bearer token for the remote aimee-kb (kb_mode='remote'). Needs a restart.",
-  llm_embed_backend: "How the embedder is served: 'local' (inside the knowledge base, from weights in its image), 'external' (an endpoint), or 'off'.",
-  llm_embed_host: "Unused. The embedder runs inside the knowledge base, so there is no host to name.",
-  llm_embed_gpu: "GPU index on the host for a local embedder; blank runs it on CPU.",
-  llm_embed_tier: "Local embedder tier: cpu / small / mid / large (sizes the model to the card).",
-  llm_synth_backend: "How the synthesizer is served: 'local', 'external', or 'off'.",
-  llm_synth_host: "Host that runs the local synthesizer.",
-  llm_synth_gpu: "GPU index on the host for a local synthesizer; blank runs it on CPU.",
-  llm_synth_tier: "Local synthesizer tier: cpu / small / mid / large. CPU serves the Tier-A model only.",
-  llm_synth_endpoint: "Endpoint URL for an external synthesizer.",
-  llm_synth_model: "Model name the synthesizer serves.",
+  synthesis_endpoint: "The one synthesis endpoint. Blank means synthesis is off, which is supported — search, recall and indexing never use it. On an image that bundles llama.cpp the container sets this to loopback itself.",
+  synthesis_model: "Synthesis model. On an image with llama.cpp bundled this picks the local model to run (gemma-4-E2B-it or gemma-4-E4B-it); otherwise it is the model name sent to the endpoint.",
+  synthesis_api_key: "Bearer token for the synthesis endpoint. Blank for a keyless or local endpoint.",
+  synthesis_thinking: "Let the synthesis model think before answering. On by default — it measured positive-to-neutral everywhere. Turn it off only if your model reasons past its output budget without answering.",
+  aimee_with_llamacpp: "Retired. It recorded whether the kb image bundled llama.cpp, which decided whether local synthesis could be offered. Synthesis is its own sidecar image now, so the kb image no longer constrains the choice and nothing reads this.",
 
   delegate_graph_context_enabled:
     "Prepend the callers and dependencies of the files a delegate task mentions to its prompt. Advisory, off by default.",

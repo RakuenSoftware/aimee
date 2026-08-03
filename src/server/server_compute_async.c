@@ -3,13 +3,13 @@
 #include "aimee.h"
 #include "agent_config.h" /* agent_set_request_codex_creds */
 #include "json_fluent.h"  /* jo_ok, jo_str */
-#include "agent_tools.h"
+#include <aimee/tools/agent_tools.h>
 #include "compute_pool.h"
 #include "guardrails.h"
 #include "presence.h"
 #include "turn_registry.h"
 #include "log.h"
-#include "workspace_turn.h"
+#include "modules/workspace/workspace_turn.h"
 #include "cJSON.h"
 #include <ctype.h>
 #include <pthread.h>

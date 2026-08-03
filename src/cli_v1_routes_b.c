@@ -454,12 +454,24 @@ static cJSON *marshal_workspace_add(int argc, char **argv)
    if (!req)
       return NULL;
    rpc_opts_t opts;
-   rpc_parse(argc, argv, NULL, &opts);
+   /* --no-scan takes no value, so it must be declared boolean: rpc_parse would
+    * otherwise treat the following argument as its value, and swallow the flag
+    * entirely when it is last. */
+   static const char *ws_bool_flags[] = {"no-scan", NULL};
+   rpc_parse(argc, argv, ws_bool_flags, &opts);
    if (opts.pos_count > 0)
       cJSON_AddStringToObject(req, "root", opts.positional[0]);
    const char *prov = rpc_get(&opts, "provider");
    if (prov)
       cJSON_AddStringToObject(req, "provider", prov);
+   /* --no-scan registers the workspace and returns instead of walking every
+    * discovered project first. On a large tree the eager scan makes this RPC
+    * take minutes, so a caller with a timeout abandons a registration that
+    * already succeeded; the background ingest timer indexes them regardless.
+    * Omitted (not sent as true) by default, so an older server sees exactly the
+    * body it saw before. */
+   if (rpc_has_flag(&opts, "no-scan"))
+      cJSON_AddBoolToObject(req, "scan", 0);
    return req;
 }
 
@@ -1205,9 +1217,12 @@ static const char *const MARSHAL_NO_ARGS[] = {
     "delegate.backend_list",
     "delegate.sandbox_list",
     "demotion.check",
+    "doctor.forensics",
+    "economizer.stats",
     "episode.list",
     "hud.status",
     "identity.show",
+    "kb.curator",
     "kb.health",
     "kb.ingest.status",
     "mcp.audit",
@@ -1303,7 +1318,6 @@ static const struct
     {"provider.list", marshal_provider_list},
     {"provider.models", marshal_provider_models},
     {"provider.set", marshal_provider_set},
-    {"repo.trust", marshal_repo_trust},
     {"rules.delete", marshal_rules_delete},
     {"session.attach", marshal_session_attach},
     {"session.brief", marshal_session_brief},
@@ -1586,6 +1600,20 @@ void print_server_health(cJSON *resp)
    {
       const char *kbs = json_str(kb, "status");
       printf("aimee-kb: %s\n", (kbs && kbs[0]) ? kbs : "unknown");
+      /* An open transport breaker refuses every call locally, so the kb can be
+       * "ok" here while nothing works. Print it before the detail lines: this is
+       * the line that explains an index that answers "unavailable" on a server
+       * whose kb looks healthy. */
+      if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(kb, "queries_suppressed")))
+      {
+         cJSON *retry = cJSON_GetObjectItemCaseSensitive(kb, "retry_after_ms");
+         printf("  QUERIES SUPPRESSED: the transport breaker is open, so kb calls are being\n");
+         printf("  refused locally without reaching the kb%s.\n",
+                cJSON_IsNumber(retry) && retry->valuedouble > 0 ? "" : " (retrying shortly)");
+         if (cJSON_IsNumber(retry) && retry->valuedouble > 0)
+            printf("  next retry in %lldms; see the server log for the cause.\n",
+                   (long long)retry->valuedouble);
+      }
       if (kbs && strcmp(kbs, "ok") == 0)
       {
          cJSON *vec = cJSON_GetObjectItemCaseSensitive(kb, "vectors");

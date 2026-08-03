@@ -9,7 +9,7 @@
 #include <aimee/delegates/delegate_credentials.h>
 #include "db2/lifecycle.h"
 #include "kb_client.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include "commands.h"
 #include "persona.h"
 #include "dashboard.h"
@@ -17,11 +17,11 @@
 #include "memory.h"
 #include "cJSON.h"
 #include "aimee_client.h"
-#include "mcp_git.h"
-#include "git_verify.h"
+#include "modules/git/mcp_git.h"
+#include "modules/git/git_verify.h"
 #include "headers/events.h"
 #include "headers/aimee_home.h"
-#include "workspace_manifest.h"
+#include "modules/workspace/workspace_manifest.h"
 #include <unistd.h>
 #include <sys/stat.h>
 #include <ctype.h>
@@ -48,12 +48,12 @@ static int bootstrap_db2(int json_output)
       return 0;
    }
 
-   db2_set_embedding_dim_default(config_embedding_dim_default());
-   db2_set_embedding_dim(config_embedding_dim_current());
-   db2_set_embedding_dim_pinned(config_embedding_dim_pinned_current());
+   db2_set_embedding_dim_default(config_embedder_dims_default());
+   db2_set_embedding_dim(config_embedder_dims_current());
+   db2_set_embedding_dim_pinned(config_embedder_dims_pinned_current());
    /* unified-llm-container §2: activate the model-identity drift guard with the
     * configured embedder identity (empty => no-op, back-compat). */
-   db2_set_embedder_model_id(config_embedding_model());
+   db2_set_embedder_model_id(config_embedder_model());
    if (db2_init(config_db2_url()) == 0)
    {
       int schema_ok = 0;

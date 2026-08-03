@@ -189,7 +189,7 @@ EMBEDDER_QUANTIZE = os.environ.get("EMBEDDER_QUANTIZE", "fp32").strip().lower()
 # kb -> embedder -> pgvector wiring (at the deployment's real dim, e.g. 2560 or
 # 1024 — never the retired 384) without a multi-GB cold model fetch. Off in prod.
 EMBEDDER_STUB = os.environ.get("EMBEDDER_STUB", "").strip() not in ("", "0", "false", "no")
-STUB_DIM = int(os.environ.get("EMBEDDER_STUB_DIM", os.environ.get("AIMEE_EMBEDDING_DIM", "2560")) or "2560")
+STUB_DIM = int(os.environ.get("EMBEDDER_STUB_DIM", os.environ.get("EMBEDDER_DIMS", "2560")) or "2560")
 
 _model = None
 _dim = 0

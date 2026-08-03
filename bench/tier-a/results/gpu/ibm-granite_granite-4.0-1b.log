@@ -1,0 +1,4 @@
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights:   0%|          | 0/322 [00:00<?, ?it/s]Loading weights:   2%|▏         | 8/322 [00:00<00:03, 78.89it/s]Loading weights:  20%|█▉        | 64/322 [00:00<00:00, 358.92it/s]Loading weights:  38%|███▊      | 121/322 [00:00<00:00, 450.82it/s]Loading weights:  55%|█████▍    | 177/322 [00:00<00:00, 491.36it/s]Loading weights:  72%|███████▏  | 232/322 [00:00<00:00, 500.10it/s]Loading weights:  91%|█████████▏| 294/322 [00:00<00:00, 538.28it/s]Loading weights: 100%|██████████| 322/322 [00:00<00:00, 476.85it/s]
+note: KV cache unusable for ibm-granite/granite-4.0-1b; retrying without it
+{"peak_vram_gib": 3.07}

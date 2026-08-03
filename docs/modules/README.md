@@ -14,7 +14,7 @@ A module document should cover:
 
 Current contracts:
 
-- [audit](audit.md), [event bus](bus.md), [config](config.md), and
+- [audit](audit.md), [event bus](../../src/core/README.md), [config](config.md), and
   [module runtime](module-runtime.md);
 - [memory](memory.md), [learning](learning.md), [KB synthesis](kb-synthesis.md), and
   [benchmarks](benchmarks.md);

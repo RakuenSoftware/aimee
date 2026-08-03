@@ -238,39 +238,6 @@ size_t config_kb_curator_provider_api_key_copy(char *out, size_t n)
    return sizeof(buf);
 }
 
-size_t config_kb_curator_tier_b_base_url_copy(char *out, size_t n)
-{
-   char buf[256];
-   if (!out || n == 0)
-      return 0;
-   config_field_read(offsetof(config_t, kb_curator_tier_b_base_url), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   snprintf(out, n, "%s", buf);
-   return sizeof(buf);
-}
-
-size_t config_kb_curator_tier_b_model_copy(char *out, size_t n)
-{
-   char buf[128];
-   if (!out || n == 0)
-      return 0;
-   config_field_read(offsetof(config_t, kb_curator_tier_b_model), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   snprintf(out, n, "%s", buf);
-   return sizeof(buf);
-}
-
-size_t config_kb_curator_tier_b_api_key_copy(char *out, size_t n)
-{
-   char buf[256];
-   if (!out || n == 0)
-      return 0;
-   config_field_read(offsetof(config_t, kb_curator_tier_b_api_key), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   snprintf(out, n, "%s", buf);
-   return sizeof(buf);
-}
-
 size_t config_kb_curator_judge_command_copy(char *out, size_t n)
 {
    char buf[512];
@@ -619,7 +586,7 @@ int config_set_subagent_ban_enabled(int value)
    return rc;
 }
 
-int config_set_embedding_dim(int value)
+int config_set_embedder_dims(int value)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));
    if (!cfg)
@@ -627,7 +594,7 @@ int config_set_embedding_dim(int value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      cfg->embedding_dim = value;
+      cfg->embedder_dims = value;
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1948,6 +1915,36 @@ int config_set_kb_search_max_results(int value)
    if (rc == 0)
    {
       cfg->kb_search_max_results = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_memory_negation_enabled(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->memory_negation_enabled = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_memory_query_expansion_k(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->memory_query_expansion_k = value;
       rc = config_save(cfg);
    }
    free(cfg);

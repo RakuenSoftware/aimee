@@ -6,6 +6,8 @@
 
 #include "config.h"
 #include "agent_exec.h"
+#include "aimee.h"  /* KIND_COUNT, required by memory.h */
+#include "memory.h" /* MEMORY_EMBED_TEST_FIXTURE */
 
 static int g_max_iterations = 0;
 static int g_max_iterations_delegate = 0;
@@ -174,11 +176,11 @@ int main(void)
    return 0;
 }
 
-const char *config_embedding_command(const config_t *cfg, const char *requested)
+const char *config_embedder_command(const config_t *cfg, const char *requested)
 {
    if (requested && requested[0])
       return requested;
-   if (cfg && cfg->embedding_command[0])
-      return cfg->embedding_command;
-   return "builtin";
+   if (cfg && cfg->embedder_command[0])
+      return cfg->embedder_command;
+   return MEMORY_EMBED_TEST_FIXTURE;
 }

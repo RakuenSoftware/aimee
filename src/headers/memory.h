@@ -955,12 +955,34 @@ int memory_graph_prune(void);
 int memory_graph_normalize(void);
 
 int memory_embed(int64_t memory_id, const char *command);
+
+/* The embed command that selects the in-process lexical fixture. TEST BUILDS ONLY —
+ * it is compiled out of aimee-kb, so passing it there is an ordinary (failing) exec.
+ * There is no implicit embedder: an empty command embeds nothing and returns 0. */
+#define MEMORY_EMBED_TEST_FIXTURE "test-lexical-fixture"
+
 /* `input_type` declares which side of the embedder this text is (see
  * embed_input_type_t). It is required rather than defaulted so the compiler forces
  * every call site to state it — a query silently embedded as a document costs
  * retrieval quality and raises no error. */
 int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
                       float *out, int max_dim);
+
+/* Embed |n| texts in ONE embedder round trip, writing |n| * |dim| floats to |out|
+ * (row-major: text i occupies out[i * dim .. i * dim + dim - 1]).
+ *
+ * Batching is the difference between a usable ingest and an unusable one: the
+ * embedder serves ~2000 vectors/min batched and ~800 unbatched, and a corpus is
+ * tens of thousands of vectors. Callers embedding a known set of texts should
+ * prefer this over a memory_embed_text() loop.
+ *
+ * Returns |n| when every vector came back at |dim|, and 0 otherwise — including
+ * a builtin (in-process) embedder, a transport failure, or any count/width
+ * mismatch. Zero means "nothing was written to |out|"; the caller falls back to
+ * per-text memory_embed_text(), which is the only path that carries the
+ * dependency-breaker and per-text error reporting. */
+int memory_embed_texts(const char *const *texts, int n, const char *command,
+                       embed_input_type_t input_type, float *out, int dim);
 
 typedef struct
 {

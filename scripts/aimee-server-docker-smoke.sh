@@ -46,7 +46,7 @@ WAIT_SECONDS="${WAIT_SECONDS:-300}"
 
 # The kb embeds in-container from weights baked into the image: no tier to pick and
 # nothing to download. Select the bundled model (the image pre-selects nothing) and
-# let AIMEE_EMBEDDING_DIM default from config, so the schema width and the model's
+# let EMBEDDER_DIMS default from config, so the schema width and the model's
 # output width come from one source rather than being pinned apart here.
 : "${EMBEDDER_MODEL:=bekko-a25m}"
 export EMBEDDER_MODEL
@@ -128,7 +128,11 @@ trap cleanup EXIT
 
 if [[ "$DO_UP" == 1 ]]; then
   bold "==> Building + Vault-bootstrapping + starting the full stack ($COMPOSE_FILE)"
-  "${DC[@]}" build
+  if [[ "${AIMEE_E2E_SKIP_BUILD:-0}" != "1" ]]; then
+    "${DC[@]}" build
+  else
+    bold "==> Using prebuilt topology images (AIMEE_E2E_SKIP_BUILD=1)"
+  fi
   # Port-remap overrides do not affect the persistent Vault volumes. Bootstrap
   # both owners against the base file before creating either long-lived service.
   bootstrap_compose="${COMPOSE_FILE%% *}"

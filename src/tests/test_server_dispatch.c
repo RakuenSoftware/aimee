@@ -705,6 +705,17 @@ int kb_client_health(kb_health_t *out)
    return -1;
 }
 
+/* server.health also reports the kb transport breaker, so an operator can see
+ * that calls are being refused locally while the kb itself looks fine. Same
+ * reasoning as above: report a closed breaker without linking the kb client. */
+void kb_client_dependency_health(kb_client_dependency_health_t *out)
+{
+   if (!out)
+      return;
+   memset(out, 0, sizeof(*out));
+   snprintf(out->state, sizeof(out->state), "closed");
+}
+
 int handle_kb_build(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "kb.build");
@@ -2211,11 +2222,11 @@ int main(void)
    return 0;
 }
 
-const char *config_embedding_command(const config_t *cfg, const char *requested)
+const char *config_embedder_command(const config_t *cfg, const char *requested)
 {
    if (requested && requested[0])
       return requested;
-   if (cfg && cfg->embedding_command[0])
-      return cfg->embedding_command;
-   return "builtin";
+   if (cfg && cfg->embedder_command[0])
+      return cfg->embedder_command;
+   return MEMORY_EMBED_TEST_FIXTURE;
 }

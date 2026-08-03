@@ -1,53 +1,43 @@
-# Default full-lifecycle "build" workflow (sliced-lifecycle + documentation).
+# Default proposal-to-PR workflow.
 #
 # input (proposal | user request)
 #   -> author.proposal
-#   -> branch.open (durable feature branch, based on the repo's DEFAULT branch)   [before the plan]
-#   -> author.plan -> roundtable {plan reviewed WITH the proposal}  (loop until convergence)
+#   -> branch.open (durable feature branch from the repository default branch)
+#   -> author.plan -> roundtable (bounded refinement loop)
 #   -> split (plan -> per-slice packets)
-#   -> foreach.workflow (each packet runs the child "slice" workflow: implement ->
-#      freeze -> roundtable -> sub-PR -> GREEN CI -> merge into the feature branch)
-#   -> freeze + roundtable {acceptance: proposal completed? quality? missing tests?}  (loop)
-#   -> document + freeze + roundtable {documentation quality}  (loop) -> pushed to the feature branch
-#   -> draft PR (feature branch -> the repo's DEFAULT branch). Opened, never marked ready or merged:
-#      the workflow ends at the human handoff (review + merge happen out-of-band on the forge).
+#   -> foreach.workflow (each packet runs slice: implement -> review -> sub-PR -> CI -> merge)
+#   -> acceptance review -> documentation review
+#   -> draft PR (feature branch -> admitted checkout branch)
 #
-# The roundtable always sees the originating proposal alongside the artifact under
-# review (the engine supplies it from the run's proposal), so the plan gate, the
-# acceptance gate, and the documentation gate all judge the work AGAINST what was
-# asked. No engine privilege over a user-authored workflow; clone and edit freely
-# (`aimee workflow new`).
+# The engine supplies the admitted proposal to review prompts, so each gate can judge
+# the artifact against the original request. The final PR remains a draft for human
+# review and merge.
 #
-# "default branch" = the target repo's REAL trunk (git origin/HEAD, e.g. `main`),
-# resolved at runtime -- NOT the aimee integration branch. branch.open bases the
-# feature branch on it (clean final diff); the final pr.open targets it open-only
-# (pr.open never merges, so a PR against a protected trunk is the safe terminal).
+# `branch.open base: trunk` starts the feature from the repository default branch.
+# `pr.open base: trunk` targets the branch checked out when Go admitted the repo.
+# Those branches can differ by design. Only slice PRs merge automatically.
 name: build
 intent_tags:
   - proposal
   - full-lifecycle
 start: draft
 nodes:
-  # Ingest: normalize the input (a proposal, or a bare user request) into a proposal
-  # artifact. author.proposal loops on delegate failure; self-loop so it retries.
+  # Normalize a proposal or bare request. Requested corrections return to this node.
   - id: draft
     block: author.proposal
     params:
       with_user: true
     next: feature
     on_fail: draft
-  # Open the durable feature branch BEFORE the plan, based on the repo's default
-  # branch, so slice sub-PRs merge into it and the eventual feature->default PR is a
-  # clean diff. No `in` binding (branch.open needs none); base:trunk selects the base.
+  # Open the durable feature branch before the plan. Slice PRs merge into it.
+  # branch.open needs no input; base: trunk selects the repository default branch.
   - id: feature
     block: branch.open
     params:
       base: trunk
     next: plan
-  # The primary authors the implementation/action plan from the proposal.
-  # max_rounds gives the plan<->plan_gate refinement loop enough re-author rounds
-  # to converge: each rejection persists the panel's blockers, which the next
-  # author.plan pass folds into its prompt (see wfe_blocks exec_author).
+  # Author the implementation plan from the admitted proposal.
+  # Bound repeated authoring. Review findings feed the next plan pass.
   - id: plan
     block: author.plan
     in:
@@ -56,8 +46,7 @@ nodes:
       max_rounds: 60
     next: plan_gate
     on_fail: plan
-  # Roundtable approves the plan AGAINST the proposal (focus lens). Standard
-  # resubmit-until-convergence: a non-approval loops back to re-author the plan.
+  # Review the plan against the proposal. Requested changes return to plan.
   - id: plan_gate
     block: gate.roundtable
     in:
@@ -73,10 +62,7 @@ nodes:
         eligible:
           - contrarian
       quorum: 4
-      # The gate's own loop budget (panel convenes -> request_changes -> the plan
-      # is re-authored -> gate again). The engine's default cap parked runs after
-      # a handful of rounds; honest refinement loops need more headroom before
-      # escalating to a human.
+      # Bound the gate -> plan -> gate refinement loop.
       max_rounds: 6
       focus: does this implementation plan fully satisfy the proposal/request?
     on_pass: split
@@ -87,12 +73,9 @@ nodes:
     in:
       plan: plan.out
     next: slices
-    # A transient split failure (the packet-authoring delegate flubbing its
-    # output) must retry, not dead-end the run: a looped node with no on_fail
-    # edge parks 'stuck' permanently.
+    # Regenerate packets when split requests another pass.
     on_fail: split
-  # Fan every packet out to the child "slice" workflow; park until all have merged
-  # into the feature branch. A failed/blocked slice parks the run for a human.
+  # Run one child workflow per packet and wait for every accepted child.
   - id: slices
     block: foreach.workflow
     in:
@@ -100,8 +83,7 @@ nodes:
       feature: feature.out
     params:
       workflow: slice
-      # A terminal child may justify one regenerated packet set, but a broken
-      # verifier or unsatisfiable packet must not manufacture 20 generations.
+      # Bound whole-generation retries after a child fails.
       max_rounds: 3
     next: accept_freeze
     on_fail: split
@@ -111,8 +93,7 @@ nodes:
     in:
       branch: slices.out
     next: accept_gate
-  # Acceptance roundtable: given the proposal, was it completed? code quality?
-  # missing tests? Findings loop back to re-split/fix until the panel converges.
+  # Judge the assembled branch against the proposal. Changes return to split.
   - id: accept_gate
     block: gate.roundtable
     in:
@@ -130,8 +111,7 @@ nodes:
       focus: was the proposal completed? assess code quality and any missing tests.
     on_pass: document
     on_fail: split
-  # Author the feature's documentation onto the feature branch (README/CHANGELOG/
-  # docs + inline comments). Self-loop on delegate failure.
+  # Write user-facing and inline documentation on the feature branch.
   - id: document
     block: document
     in:
@@ -144,9 +124,7 @@ nodes:
     in:
       branch: document.out
     next: doc_gate
-  # Documentation roundtable: is the documentation complete, accurate, and clear?
-  # Findings loop back to re-document until the panel converges; on pass the docs are
-  # already committed on the feature branch.
+  # Review documentation. Requested changes return to document.
   - id: doc_gate
     block: gate.roundtable
     in:
@@ -159,7 +137,7 @@ nodes:
           - qa
           - reviewer
         eligible:
-          - technical-writer # the documentation domain expert joins when seatable
+          - technical-writer # joins when an eligible agent is available
       quorum: 3
       max_rounds: 6
       focus: is the documentation complete, accurate, and clear for this feature?
@@ -168,15 +146,14 @@ nodes:
   # Retire the triggering proposal on the run branch: move it from the watch dir
   # (docs/proposals/pending) to docs/proposals/done, committed on the feature
   # branch so the final PR retires the trigger input atomically with the work.
-  # A run without a trigger artifact (interactive intake) advances as a no-op.
+  # A run without a trigger artifact advances as a no-op.
   - id: archive
     block: source.archive
     in:
       branch: document.out
     next: final_pr
-  # Open the final PR: feature branch -> the repo's DEFAULT branch. Terminal: the
-  # workflow ends here. pr.open creates a DRAFT PR (base:trunk, never marked ready
-  # or merged); a human reviews, marks ready, and decides whether to merge on the forge.
+  # Open a draft PR into the admitted checkout branch, then stop. A human reviews,
+  # marks it ready, and decides whether to merge.
   - id: final_pr
     block: pr.open
     in:

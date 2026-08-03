@@ -30,6 +30,8 @@ means the contract or branch exists but is not part of the integrated path yet.
 | Client-side content push | Done | Remote clients upload bytes; server paths never name client files. |
 | Structured PDF evidence | Gated | Coordinates are the base; vectors, tables, assets, and OCR have separate gates. |
 | Autonomous curation | Done | Extract, dedupe, contradict, decay, reflect, and promote through bounded workers. |
+| Multi-KB fleet routing | Next | The design selects a KB by corpus, authority, and capabilities; current managed and split profiles configure one KB URL. |
+| Per-KB internal or remote model roles | In progress | Configuration records embedding and synthesis placement; profile support is still converging. There is no standalone inference service. |
 
 ## Agents and workflows
 
@@ -37,11 +39,13 @@ means the contract or branch exists but is not part of the integrated path yet.
 | --- | --- | --- |
 | Role/persona delegate routing | Done | Viable-agent retry; explicit pins fail instead of silently changing model. |
 | Isolated delegate worktrees | Done | Created on first write and bounded to the assigned workspace. |
+| Per-session branch and worktree | Done | CLI and MCP sessions; cut from the default branch, keyed per session id so two sessions never share one. |
 | Networkless delegate sandbox | Done | Default container posture; custom images and mediated packages are supported. |
 | Roundtables | Done | Parallel seats, per-seat models, evidence, retry, chair, and cost accounting. |
 | Typed workflows | Done | Validation, version hashes, retries, loops, gates, and durable run state. |
 | Parallel workflow slices | Done | Agent admission and per-workflow limits prevent oversubscription. |
-| Triggers and cron | Done | Start runs in autonomous or interactive mode. Human gates always park. |
+| Watched-proposal triggers | Done | Go scans `watch-dir` and `proposals`. Mode is recorded, but current scheduling is identical; human gates always park. |
+| Generic cron jobs | Done | The C job scheduler runs configured commands. Cron is not a Go WFE trigger source. |
 | Live forge and PR completion | Done | Branch, implement, verify, review, merge, and PR steps have terminal failure states. |
 | Transactional turn rewind | Proposed | Design exists; not a shipped recovery path. |
 
@@ -65,7 +69,7 @@ means the contract or branch exists but is not part of the integrated path yet.
 | External witness and anchor | Gated | Needed for evidence against a compromised host. |
 | Org budgets and rate limits | Done | Catalog, admission, spend, and quota surfaces. |
 | Browser workspace | Done | Chat, projects, agents, workflows, graph, logs, settings, and VS Code. |
-| Managed container deploy | Done | Browser can launch KB and inference through the mounted Docker socket. |
+| Managed container deploy | Done | Browser can launch the current one-KB profile through the mounted Docker socket. |
 | Split deploy | Done | Server and KB can run without Docker-socket delegation. |
 | Native thin clients | Done | Linux, macOS, and Windows; no database linkage. |
 
@@ -79,7 +83,7 @@ means the contract or branch exists but is not part of the integrated path yet.
 | Generic `/v1/rpc` | Named, versioned `/v1` routes. |
 | Combined appliance image | Managed or split container stack. |
 | Client-held agent keys | Server-sealed vault. |
-| `aimee-llm` inference container | Embedding runs inside the knowledge base from weights in its image; synthesis is an external endpoint set through `AIMEE_LLM_URL`. |
+| `aimee-llm` inference container | Embedding and synthesis are per-KB roles, internal to that KB container or remote. No replacement inference service exists. |
 | KB socket autostart | Explicit KB `/v1` service. |
 
 Generated [commands](gen/cli-commands.md), [configuration](gen/configuration.md), and

@@ -97,3 +97,10 @@ int kb_route_acl_console_admin_allows(const char *method, const char *path)
    }
    return 0;
 }
+
+/* See kb_route_acl.h: prefix match, so a maintenance route added later is
+ * refused by default rather than shipping open. */
+int kb_route_acl_is_maintenance(const char *path)
+{
+   return path && strncmp(path, "/v1/maintenance/", 16) == 0;
+}

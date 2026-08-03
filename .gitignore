@@ -189,3 +189,23 @@ scratchpad/
 # UTF-8 in those names broke the Docker build context for every e2e topology.
 # Ignore them by shape so a stray run cannot be swept up by `git add -A` again.
 **/[0-9][0-9][0-9][0-9]-[0-9][0-9].jsonl
+
+# Scratch test harnesses. These drive real containers on a test host, are
+# rewritten constantly while debugging, and are not part of the build. One of
+# them reached the repo by accident (.stack-smoke.sh, in 7d64fdaf6) and a later
+# `git add -A` swept in twenty more, which is why this ignores the shape rather
+# than the filenames.
+.stack-smoke.sh
+.modelcache-test.sh
+.hashcmp.sh
+.ocicheck.sh
+.health-probe.sh
+.prefix-test.sh
+.matrix-test.sh
+.verify-ghcr.sh
+.review-guide.md
+.upgrade-*.sh
+.start-*.sh
+.ship.sh
+.mt.tgz
+.mt.b64

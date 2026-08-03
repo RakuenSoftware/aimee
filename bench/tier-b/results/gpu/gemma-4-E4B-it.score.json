@@ -1,0 +1,112 @@
+{
+  "model": "gemma-4-E4B-it",
+  "topics": 6,
+  "format_rate": 1.0,
+  "coverage": 0.9,
+  "faithfulness": 0.9744,
+  "invented_claims": 1,
+  "checked_claims": 39,
+  "median_words": 51,
+  "median_latency_ms": 6349.7,
+  "by_category": {
+    "conflicting": {
+      "n": 1,
+      "coverage": 0.75,
+      "invented": 0
+    },
+    "distractor": {
+      "n": 1,
+      "coverage": 1.0,
+      "invented": 0
+    },
+    "factual": {
+      "n": 2,
+      "coverage": 0.875,
+      "invented": 0
+    },
+    "numeric": {
+      "n": 1,
+      "coverage": 1.0,
+      "invented": 1
+    },
+    "thin": {
+      "n": 1,
+      "coverage": 1.0,
+      "invented": 0
+    }
+  },
+  "per_topic": [
+    {
+      "id": "t01",
+      "category": "factual",
+      "format_ok": true,
+      "words": 75,
+      "coverage": 1.0,
+      "missed": [],
+      "checked_claims": 12,
+      "invented": [],
+      "latency_ms": 6451.4
+    },
+    {
+      "id": "t02",
+      "category": "numeric",
+      "format_ok": true,
+      "words": 69,
+      "coverage": 1.0,
+      "missed": [],
+      "checked_claims": 17,
+      "invented": [
+        "hardware"
+      ],
+      "latency_ms": 6349.7
+    },
+    {
+      "id": "t03",
+      "category": "conflicting",
+      "format_ok": true,
+      "words": 47,
+      "coverage": 0.75,
+      "missed": [
+        "location is disputed between Berlin and Munich"
+      ],
+      "checked_claims": 6,
+      "invented": [],
+      "latency_ms": 5149.0
+    },
+    {
+      "id": "t04",
+      "category": "thin",
+      "format_ok": true,
+      "words": 17,
+      "coverage": 1.0,
+      "missed": [],
+      "checked_claims": 2,
+      "invented": [],
+      "latency_ms": 3671.6
+    },
+    {
+      "id": "t05",
+      "category": "distractor",
+      "format_ok": true,
+      "words": 39,
+      "coverage": 1.0,
+      "missed": [],
+      "checked_claims": 0,
+      "invented": [],
+      "latency_ms": 5170.4
+    },
+    {
+      "id": "t06",
+      "category": "factual",
+      "format_ok": true,
+      "words": 51,
+      "coverage": 0.75,
+      "missed": [
+        "one call per note"
+      ],
+      "checked_claims": 2,
+      "invented": [],
+      "latency_ms": 6842.6
+    }
+  ]
+}

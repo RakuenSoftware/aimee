@@ -1,0 +1,238 @@
+# aimee-llm: the bundled synthesis runtime, as its own image.
+#
+# WHY THIS IS NOT PART OF aimee-kb. It was, and that coupled a multi-gigabyte,
+# near-static artefact to the most frequently rebuilt one. Three kb tags under three
+# separate cache scopes meant one kb code change rebuilt the LTO C binary, postgres,
+# pgvectorscale, torch and the embedder weights three times over and pushed ~10 GB
+# twice. The inputs that actually decide THIS image -- the model, the quant, the
+# pinned llama.cpp -- change on the order of never.
+#
+# THE WEIGHTS ARE STILL BAKED, and for the reason they always were: a first-run
+# download fails on a rate limit, behind a proxy, on a flaky link or on an air-gapped
+# host, and every one of those reaches the operator as "synthesis never started" long
+# after the deploy looked fine. An image either has its model or it does not, and
+# `docker pull` is the one download, with the registry's retry and resume behind it.
+# What changed is which image carries them, not whether they are carried.
+#
+# One model per tag: aimee-llm-e2b and aimee-llm-e4b. Which model is a property of
+# the tag, exactly as the embedder is a property of an aimee-kb tag.
+ARG AIMEE_SYNTHESIS_MODEL=""
+ARG AIMEE_MODEL_SOURCE=fetch
+ARG AIMEE_MODEL_IMAGE=scratch
+ARG AIMEE_MODEL_MIRROR=""
+# Pinned llama.cpp. Load-bearing in three ways, all checked against the tag rather
+# than assumed: gemma-4 / gemma-3n architecture support, --no-mmproj and
+# LLAMA_ARG_MMPROJ_AUTO, and the server target living under tools/. Bumping this
+# needs all three re-checked, not just a version number changed.
+#
+# BUMPING THIS IS A SECURITY ACT. Building from a pinned tag makes this project the
+# vendor: upstream's CVE fixes do not arrive on their own.
+ARG LLAMACPP_VERSION=b10218
+
+# ---- llama.cpp, built from source ----------------------------------------------
+# LLAMA_CURL=ON, and the container still never downloads. Those are not in tension:
+# curl is what compiles in the -hf/-hfd RESOLUTION path, and MTP requires it. llama.cpp
+# reaches multi-token prediction through speculative decoding with -hfd naming the same
+# repo; the file-path form (-md) does not engage MTP. So the model has to be addressed
+# repo-shaped even though it is baked.
+#
+# What guarantees nothing is fetched at runtime is --offline in the entrypoint, which
+# llama.cpp documents as "forces use of cache, prevents network access". That is a
+# STRONGER guarantee than omitting curl: an explicit prohibition rather than a missing
+# code path, and it is checkable.
+#
+# BUILT, NOT DOWNLOADED. Upstream publishes a Linux binary for x64 only, so a
+# download-based install cannot produce the arm64 half of the matrix at all.
+# Compiling from a pinned tag gives both arches one code path, and a git tag is
+# verifiable in a way an unchecksummed release zip is not.
+#
+# The .so copy takes SYMLINKS as well as regular files, with cp -a. The loader
+# resolves by SONAME (libllama-common.so.0), which is a symlink to the versioned
+# file, so a `-type f` copy takes the real file and leaves behind the name the
+# binary actually asks for. That fails as "cannot open shared object file" at first
+# run; the --version check in the final stage is what surfaces it at build time.
+FROM debian:trixie-slim AS llamacpp
+ARG LLAMACPP_VERSION
+# THE CLONE RETRIES. Same reason as the other fetches in this tree: a forge 502/503
+# failed image builds three separate times in one evening, each time on whichever
+# unretried fetch happened to run first. --branch is a pinned tag, so a retry clones
+# the same commit.
+#
+# The comment lives OUT here rather than inside the RUN. A `#` line inside a
+# backslash-continued RUN is a shell comment that swallows the trailing backslash, and
+# this file already records what that class of mistake costs ("Docker ends a RUN at the
+# heredoc terminator ... the build dies with unknown instruction: fi").
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        build-essential cmake git ca-certificates curl libcurl4-openssl-dev; \
+    for a in 1 2 3 4 5; do \
+      git clone --depth 1 --branch "$LLAMACPP_VERSION" \
+          https://github.com/ggml-org/llama.cpp.git /tmp/llamacpp-src && break; \
+      echo "llama.cpp clone failed (attempt $a/5); backing off"; \
+      rm -rf /tmp/llamacpp-src; sleep $((a * 5)); \
+    done; \
+    test -d /tmp/llamacpp-src/.git; \
+    cmake -S /tmp/llamacpp-src -B /tmp/llamacpp-src/build \
+        -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=ON \
+        -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF \
+        -DLLAMA_BUILD_TOOLS=ON -DLLAMA_BUILD_SERVER=ON; \
+    cmake --build /tmp/llamacpp-src/build --target llama-server -j"$(nproc)"; \
+    mkdir -p /out; \
+    cp "$(find /tmp/llamacpp-src/build -name llama-server -type f -perm -u+x | head -1)" /out/; \
+    find /tmp/llamacpp-src/build \( -type f -o -type l \) -name '*.so*' \
+        -exec cp -a {} /out/ ';' ; \
+    rm -rf /tmp/llamacpp-src
+
+# ---- the baked model cache ------------------------------------------------------
+# TWO FILES PER MODEL, which is the part worth reading twice: the model, and
+# mtp-<model>.gguf, its multi-token-prediction draft. llama.cpp reaches MTP through
+# speculative decoding with -hfd naming the same repo, so the draft is a separate
+# artefact rather than a head inside the main GGUF. An image carrying only the main
+# file starts, serves correctly, and is 1.6-1.8x slower with nothing to say why.
+#
+# WHY A CACHE RATHER THAN A BARE .gguf. MTP needs repo-shaped resolution; the
+# file-path form does not engage it. So the files must sit where -hf looks:
+# llama.cpp's cache, in HuggingFace hub layout, snapshots/ symlinking into blobs/.
+# That layout belongs to llama.cpp, so it is produced BY llama.cpp here rather than
+# hand-built. A hand-built tree that is subtly wrong fails closed at RUNTIME under
+# --offline, which is the worst place to find out.
+#
+# THE USER DOWNLOADS NOTHING. This fetch happens in CI. The cache is committed into
+# the image, the entrypoint runs --offline, and the snapshot revision is pinned in
+# the baked path, so the model cannot change under a deployment.
+FROM debian:trixie-slim AS modelcache
+ARG AIMEE_SYNTHESIS_MODEL
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates libcurl4t64 libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=llamacpp /out/ /opt/llama/
+COPY scripts/synthesis-model-table.sh /usr/local/bin/synthesis-model-table.sh
+ENV LD_LIBRARY_PATH=/opt/llama \
+    LLAMA_CACHE=/cache
+
+# No download-only flag exists, so the server runs just long enough to fetch and is
+# then stopped. Completion is detected by the BLOB FILENAMES, which under HF's layout
+# ARE the sha256 of their contents -- so waiting for them is simultaneously the digest
+# verification, and a partial download (a different, .incomplete name) can never
+# satisfy it.
+#
+# An earlier attempt used --list-devices expecting it to resolve -hf and exit. It
+# exits first, the cache came out EMPTY, and the build still succeeded. Hence an
+# explicit failure here rather than a hopeful `|| true`.
+RUN set -eux; \
+    repo="$(sh /usr/local/bin/synthesis-model-table.sh repo "$AIMEE_SYNTHESIS_MODEL")"; \
+    quant="$(sh /usr/local/bin/synthesis-model-table.sh quant "$AIMEE_SYNTHESIS_MODEL")"; \
+    sha="$(sh /usr/local/bin/synthesis-model-table.sh sha "$AIMEE_SYNTHESIS_MODEL")"; \
+    mtpsha="$(sh /usr/local/bin/synthesis-model-table.sh mtpsha "$AIMEE_SYNTHESIS_MODEL")"; \
+    blobs="/cache/models--$(printf '%s' "$repo" | sed 's|/|--|g')/blobs"; \
+    mkdir -p /cache; \
+    /opt/llama/llama-server -hf "$repo:$quant" -hfd "$repo" \
+        -c 512 --no-webui --no-mmproj --no-warmup \
+        --host 127.0.0.1 --port 18999 >/tmp/seed.log 2>&1 & \
+    seed=$!; \
+    ok=0; \
+    for _ in $(seq 1 900); do \
+      if [ -s "$blobs/$sha" ] && [ -s "$blobs/$mtpsha" ]; then ok=1; break; fi; \
+      kill -0 "$seed" 2>/dev/null || break; \
+      sleep 5; \
+    done; \
+    kill "$seed" 2>/dev/null || true; \
+    wait "$seed" 2>/dev/null || true; \
+    if [ "$ok" != "1" ]; then \
+      echo "model cache not populated: both blobs must exist under their digests" >&2; \
+      echo "  want $blobs/$sha" >&2; \
+      echo "  want $blobs/$mtpsha" >&2; \
+      ls -la "$blobs" 2>/dev/null || echo "  (no blobs directory)" >&2; \
+      tail -40 /tmp/seed.log >&2; \
+      exit 1; \
+    fi; \
+    rm -f /tmp/seed.log; \
+    du -sh /cache
+
+# ---- runtime --------------------------------------------------------------------
+FROM debian:trixie-slim
+ARG AIMEE_SYNTHESIS_MODEL
+ARG LLAMACPP_VERSION
+
+# stunnel terminates mTLS in front of llama-server. It is a distro package rather
+# than code this project owns, deliberately: mTLS termination is security-critical,
+# its failure mode is silent exposure, and a hand-rolled TLS listener would take on
+# the same vendoring burden the LLAMACPP_VERSION comment above describes. stunnel
+# from apt inherits Debian's CVE fixes.
+#
+# llama-server itself cannot do this. The pinned b10218 offers --api-key and
+# --ssl-cert-file but has no client-certificate or CA verification flag at all,
+# which is unremarkable: terminating mTLS is not an inference server's job.
+# libgomp1 is llama-server's OpenMP runtime. It is NOT optional and it is easy to
+# miss: the kb image carried it incidentally through postgres and torch, so lifting
+# this build into a slim image produced a binary that linked fine and died at exec
+# with "libgomp.so.1: cannot open shared object file". The --version check below is
+# what turned that into a build failure instead of a first-synthesis one.
+# curl(1) here is the healthcheck client, distinct from libcurl in the llama.cpp build.
+# libcurl compiles in the -hf resolution path MTP needs; this binary answers "am I able
+# to serve yet" against loopback.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends stunnel4 ca-certificates libgomp1 curl; \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=llamacpp /out/ /opt/aimee/llama.cpp/
+# -a, so the snapshots/ -> blobs/ symlinks survive as symlinks. Dereferencing them
+# would double the image for no benefit; breaking them fails closed under --offline.
+COPY --from=modelcache /cache /opt/aimee/llama.cpp/cache
+
+# The shared objects ship beside the binary, which is not a default search path.
+#
+# NO trailing ${LD_LIBRARY_PATH}: nothing sets it earlier in this image, so appending
+# it expands to a trailing colon, and an EMPTY entry means "search the working
+# directory" -- which would let a stray .so wherever the process happens to run take
+# precedence over the real one.
+ENV LD_LIBRARY_PATH=/opt/aimee/llama.cpp
+
+# Prove every half in THIS image before shipping it: the binary resolves its own .so
+# files, and BOTH baked blobs survived the copy under the digests that name them.
+# Otherwise the failure lands at first synthesis, which is exactly the "it deployed
+# fine and does nothing" class that baking the model exists to remove.
+#
+# The MTP draft is checked as strictly as the model. Losing it is not a crash, it is a
+# silent 1.6-1.8x, and a check that only looked at the main file would pass.
+COPY scripts/synthesis-model-table.sh /usr/local/bin/synthesis-model-table.sh
+RUN set -eux; \
+    chmod +x /opt/aimee/llama.cpp/llama-server; \
+    /opt/aimee/llama.cpp/llama-server --version; \
+    repo="$(sh /usr/local/bin/synthesis-model-table.sh repo "$AIMEE_SYNTHESIS_MODEL")"; \
+    sha="$(sh /usr/local/bin/synthesis-model-table.sh sha "$AIMEE_SYNTHESIS_MODEL")"; \
+    mtpsha="$(sh /usr/local/bin/synthesis-model-table.sh mtpsha "$AIMEE_SYNTHESIS_MODEL")"; \
+    blobs="/opt/aimee/llama.cpp/cache/models--$(printf '%s' "$repo" | sed 's|/|--|g')/blobs"; \
+    test -s "$blobs/$sha"; \
+    test -s "$blobs/$mtpsha"; \
+    # A symlink that resolves is the whole point of copying with -a; a dangling one
+    # would only surface when --offline refuses to fetch a replacement.
+    find /opt/aimee/llama.cpp/cache -name '*.gguf' -exec test -r {} ';'
+
+COPY deploy/container/aimee-llm-entrypoint.sh /usr/local/bin/aimee-llm-entrypoint.sh
+RUN chmod +x /usr/local/bin/aimee-llm-entrypoint.sh
+
+ENV AIMEE_SYNTHESIS_MODEL=${AIMEE_SYNTHESIS_MODEL} \
+    AIMEE_LLAMACPP_VERSION=${LLAMACPP_VERSION} \
+    AIMEE_LLM_PORT=8761 \
+    AIMEE_LLM_LOOPBACK_PORT=8760 \
+    LLAMA_CACHE=/opt/aimee/llama.cpp/cache
+
+# Only the mTLS port. llama-server binds loopback inside this container and is
+# unreachable from outside it by construction, so the terminator is the only way in.
+EXPOSE 8761
+
+# READY MEANS LLAMA-SERVER CAN ANSWER, not that the terminator is listening. Those are
+# seconds apart: the entrypoint starts llama-server in the background and stunnel
+# immediately after, so the port accepts connections while the model is still loading
+# and the hop returns 503. Probing loopback is what distinguishes them.
+#
+# start-period covers the model load, which is the slow part and scales with the
+# weights: E4B is ~7.5 GB and a cold page cache makes it slower still. Failures during
+# that window do not count against retries.
+HEALTHCHECK --interval=15s --timeout=5s --start-period=180s --retries=3 \
+    CMD curl -fsS -m 4 "http://127.0.0.1:${AIMEE_LLM_LOOPBACK_PORT}/health" || exit 1
+
+ENTRYPOINT ["/usr/local/bin/aimee-llm-entrypoint.sh"]

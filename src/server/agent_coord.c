@@ -9,7 +9,7 @@
 #include "agent_tasks.h"
 #include "dstr.h"
 #include "cJSON.h"
-#include "git_verify.h"
+#include "modules/git/git_verify.h"
 #include "model_registry.h"
 #include "log.h"
 #include <ctype.h>

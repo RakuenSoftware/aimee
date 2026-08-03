@@ -3,7 +3,7 @@
 #include "db1.h"
 #include "headers/agent_pipeline.h"
 #include "headers/agent_coord.h"
-#include "git_verify.h"
+#include "modules/git/git_verify.h"
 #include "config.h"
 #include "headers/index.h"
 #include "kb_client.h"

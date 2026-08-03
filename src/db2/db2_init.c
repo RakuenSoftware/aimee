@@ -64,7 +64,7 @@ static pthread_mutex_t g_init_lock = PTHREAD_MUTEX_INITIALIZER;
  * existing corpus keeps working and is migrated deliberately via `aimee kb reembed`. */
 static int g_embed_dim = 0;
 
-/* The default width, INJECTED from config (config_embedding_dim_default) at the
+/* The default width, INJECTED from config (config_embedder_dims_default) at the
  * same startup site that sets g_embed_dim. This layer deliberately holds no
  * literal of its own: the width is declared once, in config, and a copy here
  * could disagree with the embedder that is actually running. 0 = never injected,
@@ -122,6 +122,11 @@ void db2_set_embedder_probe(db2_embedder_probe_fn fn)
    g_embedder_probe = fn;
 }
 
+int db2_embedder_probe_registered(void)
+{
+   return g_embedder_probe != NULL;
+}
+
 void db2_set_dim_probe_budget_ms(int ms)
 {
    if (ms > 0)
@@ -170,6 +175,11 @@ void db2_set_embedder_serving_probe(db2_embedder_serving_probe_fn fn)
 {
    g_embedder_serving_probe = fn;
 }
+
+int db2_embedder_serving_probe_registered(void)
+{
+   return g_embedder_serving_probe != NULL;
+}
 static char g_embedding_compat[1024] = ""; /* CSV of "old_id->new_id" transitions */
 
 void db2_set_embedder_model_id(const char *model_id)
@@ -210,6 +220,21 @@ int db2_effective_dim(int pinned, int configured, int recorded)
    if (recorded > 0)
       return recorded; /* recorded wins over the configured default */
    return configured;  /* fresh DB / nothing recorded: the default */
+}
+
+/* Should a start be refused because the embedder cannot produce the corpus's recorded
+ * width? Pure, so the rule is testable without a database.
+ *
+ * REFUSE ONLY ON EVIDENCE. probe_rc != 0 means the embedder did not answer, which is
+ * not the same as disagreeing: an embedder that is slow, or that reports no width, must
+ * keep starting exactly as it did before. Guessing in that direction takes down working
+ * deployments; guessing in the other lets a kb come up healthy against a corpus every
+ * write will bounce off. */
+int db2_dim_drift_refuses(int probe_rc, int probed_dim, int recorded_dim)
+{
+   if (probe_rc != 0 || probed_dim <= 0 || recorded_dim <= 0)
+      return 0; /* no answer, or nothing recorded: not evidence of drift */
+   return probed_dim != recorded_dim;
 }
 
 /* §2b precedence (pure): pin > recorded > probe > default. */
@@ -900,6 +925,40 @@ int db2_init(const char *libpq_url)
             effective_dim = probed;
             derived_via_probe = 1;
          }
+      }
+   }
+
+   /* A RECORDED dim is adopted without asking the embedder whether it can produce that
+    * width, and that gap is reachable by the documented 0.2 -> 0.3 upgrade: a v0.2.192
+    * corpus recorded at 1024 came up under the 384-dim bundled embedder reporting
+    * healthy, embed_ok:true and embedding_dim_refused:0, and recorded that embedder's
+    * serving identity over the corpus. Postgres then refuses every write ("expected
+    * 1024 dimensions, not 384"), so the data is safe and the deployment is inert while
+    * claiming to be well — which is the failure this release exists to stop, and which
+    * UPGRADING.md already promises does not happen ("refuses to start on drift").
+    *
+    * Refuse only when the embedder ANSWERS and disagrees. A probe that fails is not
+    * evidence of drift: an embedder that is merely slow, or one that reports no width,
+    * must keep starting exactly as before. Knowing beats guessing in both directions. */
+   if (!derived_via_probe && effective_dim > 0 && g_embedder_probe)
+   {
+      int probed = 0;
+      char perr[DB2_PROBE_ERR_LEN] = "";
+      int prc = g_embedder_probe(&probed, g_dim_probe_budget_ms, perr, sizeof(perr));
+      if (db2_dim_drift_refuses(prc, probed, effective_dim))
+      {
+         snprintf(errbuf, sizeof(errbuf),
+                  "embedder serves %d-dimension vectors but this corpus is recorded at %d. "
+                  "Every write would be refused by the vector columns. Point EMBEDDER_URL at "
+                  "a %d-dimension embedder, or re-embed the corpus at %d "
+                  "(docs/runbooks/change-embedder.md).",
+                  probed, effective_dim, effective_dim, probed);
+         LOG_ERROR("db2", "%s", errbuf);
+         if (dim_lock_held)
+            db2_dim_lock_release(conn);
+         aimee_pg_close(conn);
+         pthread_mutex_unlock(&g_init_lock);
+         return -1;
       }
    }
 

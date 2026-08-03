@@ -27,7 +27,7 @@ selected and active.
 
 ## Providers and readiness
 
-The current physical providers are `kb-console` for the Go HTTPS/session proxy and
+The current physical providers are `control-web` for the Go HTTPS/session proxy and
 `frontend/src/console` for the React SPA. Readiness must distinguish module selection, startup enablement,
 asset availability, listener state, Control Plane API reachability, credential validity, and optional-page
 capabilities. A healthy `aimee-control` API does not imply that the GUI is running.
@@ -36,16 +36,16 @@ capabilities. A healthy `aimee-control` API does not imply that the GUI is runni
 
 - `runtime_toggle.supported`: `true`; the descriptor is `enabled_by_default: true`, but the target web control is evaluated at startup and changing it does not reload or restart a running process.
 
-When `control.web.enabled` is false, the module must not load/register, bind, serve assets or routes, start
-jobs, or emit module metrics. CLI, environment variables, configuration files, and non-web APIs remain
-operable. The current `compose.yaml` instead puts `aimee-kb-console` behind the default-off `console`
-profile, and the executable requires explicit startup; this contradicts the target default and is
-implementation debt. Effective GUI configuration must advertise only active settings with a proven
-production read; disabled or absent module/provider settings are hidden.
+When `control.web.enabled` is false, the module must not load/register, bind, serve assets or routes,
+start jobs, or emit module metrics. CLI, environment variables, configuration files, and non-web APIs
+remain operable. The current `compose.yaml` ships `aimee-control-web` enabled and lets an operator set
+`AIMEE_CONTROL_WEB_ENABLED=0`; the process then idles without a listener. Effective GUI configuration
+must advertise only active settings with a proven production read; disabled or absent
+module/provider settings are hidden.
 
 ## Surfaces
 
-Current surfaces include the `kb-console` HTTPS listener and proxy, `console.html`, `ConsoleApp`,
+Current surfaces include the `control-web` HTTPS listener and proxy, `console.html`, `ConsoleApp`,
 `ConsoleDashboard`, Accounts, and Governance pages. Dashboard routes are part of the same console shell.
 OIDC issuer-profile controls appear only when `governance` is selected and active. The GUI may manage
 workflows or other capabilities but cannot register their schedulers.
@@ -74,7 +74,7 @@ complete equivalent supported administration through headless surfaces.
 
 ## Tests and failure behavior
 
-Current coverage includes `kb-console` auth, ACL, drift, session, TLS, proxy, rate-limit, and console
+Current coverage includes `control-web` auth, ACL, drift, session, TLS, proxy, rate-limit, and console
 tests; `test_kb_http_routes` covers dashboard and OIDC configuration APIs. Future profile tests must prove
 default-on and independent disable/omission, dashboard co-lifecycle, no disabled residue, headless
 operation, truthful fields, and Make/CMake absence. Missing assets, invalid credentials, unreachable
@@ -89,15 +89,15 @@ absent, disabled, starting, ready, degraded, unavailable, and failed states.
 
 ## Compatibility
 
-`aimee-kb`, `aimee-kb-console`, `KB_CONSOLE_*`, `/v1/console/*`, and existing console asset locations are
-legacy product/config/package surfaces requiring bounded compatibility records during the
+`aimee-kb`, `aimee-control-web`, `CONTROL_WEB_*`, `/v1/console/*`, and existing console asset locations
+are product/config/package surfaces requiring bounded compatibility records during the
 `aimee-control` rename. A web-route alias exists only while this module is selected and enabled. The
 dashboard remains inseparable throughout migration; compatibility cannot resurrect it in core.
 
 ## Extension and removal
 
 New pages declare their owning capability and consume the generated effective catalog; they do not add
-parallel config schemas, auth, data stores, schedulers, or dashboards. `kb-console`,
-`frontend/src/console`, `Dockerfile.kb-console`, and compose/service wiring are `relocate` candidates.
-Legacy duplicate routes, settings, and assets require caller, production-read, profile, and journey
-evidence before consolidation or deletion.
+parallel config schemas, auth, data stores, schedulers, or dashboards. The provider lives under
+`control-web/`, the SPA under `frontend/src/console`, and its image in `Dockerfile.control-web`.
+Duplicate routes, settings, and assets require caller, production-read, profile, and journey evidence
+before consolidation or deletion.

@@ -1,7 +1,7 @@
 /* test_git_ops.c — WP-E: per-project git operations, scoped + sanitized.
  * Builds a real repo (+ a local bare remote) under a webuser's scope and drives
  * status/log/branch/diff/commit/checkout/push/pull, plus the refusal paths. */
-#include "git_ops.h"
+#include <aimee/git/git_ops.h>
 
 #include <assert.h>
 #include <stdarg.h>
@@ -35,8 +35,38 @@ static int fake_isolation(const char *cwd, const char *sid, char *out, size_t ou
    return 1;
 }
 
+/* The production classifier is an event-bus module. This integration test
+ * isolates filesystem/git execution, so provide the module's fixed contract
+ * locally; process-handler vectors cover the actual module implementation. */
+static int fake_classifier(const char *op, aimee_git_classification_t *out)
+{
+   static const struct
+   {
+      const char *name;
+      aimee_git_operation_t operation;
+      int needs_credentials;
+   } rows[] = {{"status", AIMEE_GIT_OP_STATUS, 0}, {"log", AIMEE_GIT_OP_LOG, 0},
+               {"diff", AIMEE_GIT_OP_DIFF, 0},     {"branch", AIMEE_GIT_OP_BRANCH, 0},
+               {"fetch", AIMEE_GIT_OP_FETCH, 1},   {"pull", AIMEE_GIT_OP_PULL, 1},
+               {"push", AIMEE_GIT_OP_PUSH, 1},     {"checkout", AIMEE_GIT_OP_CHECKOUT, 0},
+               {"commit", AIMEE_GIT_OP_COMMIT, 0}, {"pr", AIMEE_GIT_OP_PR, 1}};
+   if (!op || !out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); ++i)
+   {
+      if (strcmp(op, rows[i].name) != 0)
+         continue;
+      out->operation = rows[i].operation;
+      out->needs_credentials = rows[i].needs_credentials;
+      break;
+   }
+   return 0;
+}
+
 int main(void)
 {
+   git_ops_register_classifier(fake_classifier);
    char home[256];
    snprintf(home, sizeof(home), "/tmp/aimee-gitops-%d", (int)getpid());
    assert(run("rm -rf %s && mkdir -p %s", home, home) == 0);
@@ -50,7 +80,7 @@ int main(void)
 
    /* alice's project dir + a bare remote it tracks. */
    char proj[400], bare[400];
-   snprintf(proj, sizeof(proj), "%s/webusers/alice/proj", ws);
+   snprintf(proj, sizeof(proj), "%s/environment/proj", ws);
    snprintf(bare, sizeof(bare), "%s/remote.git", home);
    assert(run("git init -q --bare %s", bare) == 0);
    assert(run("mkdir -p %s && cd %s && git init -q -b main && git config user.email t@t && git "
@@ -115,8 +145,11 @@ int main(void)
    assert(git_ops_run("webuser:alice", "proj", "commit", "", 0, &out, err, sizeof(err)) == -1);
    assert(git_ops_run("webuser:alice", "../escape", "status", NULL, 0, &out, err, sizeof(err)) ==
           -1);
-   /* bob cannot touch alice's project (no such project in bob's scope) */
-   assert(git_ops_run("webuser:bob", "proj", "status", NULL, 0, &out, err, sizeof(err)) == -1);
+   /* Another actor reaches the same project: one environment, and PAM identity
+    * authorizes and attributes the request rather than selecting a tree. */
+   assert(git_ops_run("webuser:bob", "proj", "status", NULL, 0, &out, err, sizeof(err)) == 0);
+   free(out);
+   out = NULL;
 
    /* --- session worktree redirect (git_ops_session_dir wiring) --- */
    char dir[4096];

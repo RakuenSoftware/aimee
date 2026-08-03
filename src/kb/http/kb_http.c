@@ -4,7 +4,7 @@
  * Runs in a background pthread; disabled when port == 0. */
 #include "aimee.h"
 #include "config.h"
-#include "config_database.h" /* §2c: config_resolve_embedding_dim / is_pinned */
+#include "config_database.h" /* §2c: config_resolve_embedder_dims / is_pinned */
 #include "db2_pool.h"        /* db2_pool_stats — health reports pool starvation */
 #include "lifecycle.h"       /* §2c: db2_dim_change_reset / db2_probe_embedder_dim */
 #include "kb_curator_queue.h"
@@ -60,9 +60,10 @@
 #include "kb_intel_payload.h"
 #include "kb/kb_login_throttle.h"
 #include "log.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include "cJSON.h"
 #include "kb_http_json.h"
+#include <aimee/core/connection/auth.h>
 #include <unistd.h>
 #define KB_HTTP_READ_MAX 4096
 #define KB_HTTP_RESP_MAX (1024 * 1024)
@@ -164,8 +165,9 @@ int kb_http_route(const char *method, const char *path, const char *auth_header,
     * The built-in kb-token verifier reproduces the v1 opaque-bearer check. */
    if (bearer_token && bearer_token[0])
    {
-      const char *presented =
-          (auth_header && strncmp(auth_header, "Bearer ", 7) == 0) ? auth_header + 7 : "";
+      const char *presented = aimee_core_bearer_token(auth_header);
+      if (!presented)
+         presented = "";
       kb_verify_result_t vr;
       if (!kb_verifier_authenticate(presented, bearer_token, &vr, NULL, 0))
       {
@@ -489,6 +491,11 @@ static void kb_http_corpus_pipeline_json(char *out_buf, int out_cap,
        stats->failed > 0 ? "failed" : (stats->pending + stats->running > 0 ? "active" : "idle"));
    if (stats->processed > 0)
       cJSON_AddNumberToObject(root, "processed", stats->processed);
+   /* ALWAYS emitted, including zero. "processed: 14, failed: 0" read as a fully
+    * processed document when eight of those fourteen transitions did nothing; an
+    * absent field would leave the same impression for anyone who did not know to
+    * look for it. See db2_corpus_pipeline_stats_t.skipped. */
+   cJSON_AddNumberToObject(root, "skipped", stats->skipped);
    cJSON_AddNumberToObject(root, "pending", stats->pending);
    cJSON_AddNumberToObject(root, "running", stats->running);
    cJSON_AddNumberToObject(root, "done", stats->complete);
@@ -628,8 +635,9 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
     * /v1/metrics + POST /v1/telemetry/metrics WITHOUT the kb bearer, so it runs
     * BEFORE the bearer gate; a miss returns -1 and falls through to admin auth. */
    {
-      const char *presented =
-          (auth_header && strncmp(auth_header, "Bearer ", 7) == 0) ? auth_header + 7 : "";
+      const char *presented = aimee_core_bearer_token(auth_header);
+      if (!presented)
+         presented = "";
       int tk = kb_http_telemetry_token_route(method, path, query_string, body, presented, out_buf,
                                              out_cap);
       if (tk >= 0)
@@ -641,6 +649,22 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
     * "scope:<kind>:<id>:<secret>") and yields the verified scope. Per verify-then-trust, the
     * cross-scope check uses that verified scope, never the caller's. `vr` is function-scoped so
     * owner-only routes (e.g. /v1/enroll) tell an unscoped owner credential from a scoped one. */
+   /* The container healthcheck must keep working once a bearer is sealed. It is
+    * a LOOPBACK GET of /v1/health with no query string, from inside the
+    * container, and presents no credential — it cannot, since the bearer lives
+    * in the Vault.
+    *
+    * The exemption is deliberately three conditions, not one. /v1/health also
+    * answers ?status=1&project=<p>, whose scope is enforced against the CLIENT
+    * CERTIFICATE, so a cross-scope query must still be refused (test_mtls_serve);
+    * and a wrong bearer on /v1/health must still be 401 for any non-local caller
+    * (test_scope_token_secret_auth). An unknown peer is not local, so a direct
+    * router call — every unit test, and the mTLS listener — is never exempt. */
+   int local_liveness_probe = (strcmp(method, "GET") == 0 || strcmp(method, "HEAD") == 0) &&
+                              strcmp(path, "/v1/health") == 0 &&
+                              (!query_string || !query_string[0]) &&
+                              kb_login_throttle_peer_is_loopback();
+
    kb_verify_result_t vr;
    memset(&vr, 0, sizeof(vr));
    /* Reset any prior request's actor on this worker thread; a request that fails
@@ -650,10 +674,11 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
    /* No owner actor is manufactured in auth-off mode: the tenancy mutation routes
     * require a real authenticated principal, so an auth-off deployment cannot make
     * anonymous admin writes. */
-   if (bearer_token && bearer_token[0])
+   if (!local_liveness_probe && bearer_token && bearer_token[0])
    {
-      const char *presented =
-          (auth_header && strncmp(auth_header, "Bearer ", 7) == 0) ? auth_header + 7 : "";
+      const char *presented = aimee_core_bearer_token(auth_header);
+      if (!presented)
+         presented = "";
       if (!kb_verifier_authenticate(presented, bearer_token, &vr, vr_which, sizeof(vr_which)))
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"unauthorized\"}");
@@ -839,6 +864,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          int privileged = !colon /* owner / full-access */ ||
                           (kindlen == 13 && strncmp(scope, "console-admin", 13) == 0) ||
                           (kindlen == 7 && strncmp(scope, "curator", 7) == 0) ||
+                          (kindlen == 7 && strncmp(scope, "service", 7) == 0) ||
                           (kindlen == 5 && strncmp(scope, "owner", 5) == 0);
          if (privileged)
          {
@@ -1093,13 +1119,13 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       int target = kb_http_json_int(body, "target_dim", 0);
       if (target <= 0)
       {
-         if (config_embedding_dim_pinned_current())
-            target = config_resolve_embedding_dim_current();
+         if (config_embedder_dims_pinned_current())
+            target = config_resolve_embedder_dims_current();
          else if (db2_probe_embedder_dim(8000, &target) != 0 || target <= 0)
          {
             snprintf(out_buf, (size_t)out_cap,
                      "{\"error\":\"could not determine the target dim from the embedder; pass "
-                     "target_dim, pin AIMEE_EMBEDDING_DIM, or ensure the embedder /health is "
+                     "target_dim, pin EMBEDDER_DIMS, or ensure the embedder /health is "
                      "reachable\"}");
             return 503;
          }
@@ -1196,14 +1222,14 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       /* Embed the query with the SAME embedder as the corpus. Passing NULL
        * here falls back to "builtin", so a corpus produced by the managed LLM
        * would be queried with a 384-dimensional hash vector. Resolve the full
-       * deployment default (explicit command, AIMEE_EMBEDDER_URL, or
-       * AIMEE_LLM_URL), not just the raw config field. */
+       * deployment default (explicit command, EMBEDDER_URL, or
+       * SYNTHESIS_ENDPOINT), not just the raw config field. */
       char embed_cmd[256] = "";
       kb_http_json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
       if (!embed_cmd[0])
       {
          if (config_present())
-            snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedding_command_current(NULL));
+            snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedder_command_current(NULL));
       }
       char *raw =
           kb_search_json_scoped_ex(project, all_projects, query, embed_cmd[0] ? embed_cmd : NULL,
@@ -1555,7 +1581,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       (void)kb_http_json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
       if (!embed_cmd[0])
       {
-         snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedding_command_current(NULL));
+         snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedder_command_current(NULL));
       }
       int force = kb_http_json_bool(body, "force", 0);
 
@@ -1644,7 +1670,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       (void)kb_http_json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
       if (!embed_cmd[0])
       {
-         snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedding_command_current(NULL));
+         snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedder_command_current(NULL));
       }
 
       if (!db2_is_initialized())
@@ -1710,6 +1736,21 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       (void)kb_http_json_str(body, "workspace", workspace, sizeof(workspace));
       int force = kb_http_json_bool(body, "force", 0);
       int use_all = !workspace[0] || strcmp(workspace, "all") == 0;
+
+      /* An absent or "all" workspace names NO scope, so the scope layer above
+       * has nothing to deny against — and with force:true this clears the
+       * vectors, kb rows and file index of every project in every configured
+       * workspace. A scoped credential must not reach that: same rule as
+       * "a scoped credential cannot search all projects" on /v1/search.
+       * A `service` credential MAY: indexing the whole deployment is the job it
+       * exists for, and it is still refused every administrative route. */
+      if (use_all && vr.scope_kind[0] && strcmp(vr.scope_kind, KB_SCOPE_KIND_SERVICE) != 0)
+      {
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"error\":\"forbidden: a scoped credential cannot ingest all projects; "
+                  "name a workspace\"}");
+         return 403;
+      }
 
       char(*projects)[MAX_PATH_LEN] = calloc(MAX_DISCOVERED_PROJECTS, MAX_PATH_LEN);
       if (!projects)
@@ -1891,7 +1932,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       (void)kb_http_json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
       if (!embed_cmd[0])
       {
-         snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedding_command_current(NULL));
+         snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedder_command_current(NULL));
       }
       int timeout = kb_http_json_int(body, "timeout", 0);
       if (timeout < 0)
@@ -1913,6 +1954,10 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
                stats.done, stats.failed, stats.total);
       return 200;
    }
+   /* Destructive as a family; see kb_route_acl.h for why this is by prefix. */
+   if (kb_route_acl_is_maintenance(path) && !(kb_reqctx_actor() != NULL && !vr.scope_kind[0]))
+      return kb_http_owner_required(out_buf, out_cap, "knowledge maintenance");
+
    /* POST /v1/maintenance/repair */
    if (strcmp(path, "/v1/maintenance/repair") == 0)
    {
@@ -1937,7 +1982,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       (void)kb_http_json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
       if (!embed_cmd[0])
       {
-         snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedding_command_current(NULL));
+         snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedder_command_current(NULL));
       }
       int kb_embed_dim = db2_embedding_dim();
       if (kb_embed_dim <= 0 || kb_embed_dim > EMBED_MAX_DIM)

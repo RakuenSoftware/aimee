@@ -12,14 +12,15 @@
 #include "db1.h"
 #include "util.h" /* is_safe_id */
 #include "kb_client.h"
+#include "log.h" /* aimee_log — name the real KB failure in the server log */
 #include "config.h"
 #include "dashboard.h"
 #include <aimee/protocols/mcp/mcp_tools.h>
-#include "agent_tools.h" /* agent_tools_emit_tool_completion — served tool-call outcome audit */
-#include "mcp_git.h"
-#include "git_verify.h"
-#include "workspace_turn.h"
-#include "workspace.h"
+#include <aimee/tools/agent_tools.h> /* agent_tools_emit_tool_completion — served tool-call outcome audit */
+#include "modules/git/mcp_git.h"
+#include "modules/git/git_verify.h"
+#include "modules/workspace/workspace_turn.h"
+#include <aimee/workspace/workspace.h>
 #include "notes.h"
 #include "agent_coord.h"
 #include "agent_tasks.h"
@@ -313,7 +314,9 @@ void mcp_memory_scope_begin(cJSON *args, int *active_context_missing)
       char resolved_workspace[MAX_PATH_LEN] = "";
       char resolved_project[MAX_PATH_LEN] = "";
       if (workspace_repo_identity(jcwd->valuestring, resolved_project, sizeof(resolved_project),
-                                  resolved_workspace, sizeof(resolved_workspace)) == 0)
+                                  resolved_workspace, sizeof(resolved_workspace)) == 0 ||
+          server_active_project_from_cwd(jcwd->valuestring, resolved_project,
+                                         sizeof(resolved_project)) == 0)
       {
          if (!workspace[0])
             snprintf(workspace, sizeof(workspace), "%s", resolved_workspace);
@@ -1019,7 +1022,19 @@ cJSON *smcp_tool_find_symbol(cJSON *args)
    term_hit_t hits[20];
    int count = kb_client_index_find_scoped(project, all_projects, jid->valuestring, hits, 20);
    if (count < 0)
-      return kb_last_result_content("knowledge service symbol index unavailable");
+   {
+      /* Name the dependency that actually failed. "symbol index unavailable"
+       * reads as "the kb's index is broken" and sent an investigation at a
+       * healthy kb; a failed client-side auth or an unresolved scope produced
+       * the identical string with nothing in the log to correct it. */
+      aimee_log(LOG_WARN, "mcp.code_find",
+                "index_find_scoped failed: status=%s project=%s all_projects=%d",
+                kb_client_result_status_name(kb_client_last_result_status()),
+                project ? project : "(none)", all_projects);
+      return kb_last_result_content("code index lookup failed; see result_status for whether the "
+                                    "knowledge service was unreachable, unauthorized, or the "
+                                    "scope did not resolve");
+   }
    int matched = 0;
    for (int i = 0; i < count; i++)
       if (all_projects || !project || strcmp(hits[i].project, project) == 0)
@@ -1069,7 +1084,7 @@ cJSON *smcp_tool_search_docs(cJSON *args)
    /* The kb owns the corpus and its embedder.  Only override that embedder when
     * the operator explicitly configured a command on this server; resolving an
     * unset value to the 384-dim builtin can mismatch a remote kb's corpus. */
-   const char *embedding_command = config_embedding_command_field();
+   const char *embedding_command = config_embedder_command_field();
    /* "builtin" is also the resolver's fallback value on a thin server. It is
     * not evidence that the remote corpus was built with the 384-dim shim, so
     * leave selection to the KB just as we do for an empty field. */
@@ -1815,7 +1830,7 @@ static void mcp_inject_active_project(cJSON *args)
    if (!cJSON_IsString(cwd) || !cwd->valuestring[0])
       return;
    char project[MAX_PATH_LEN] = "";
-   if (workspace_repo_identity(cwd->valuestring, project, sizeof(project), NULL, 0) == 0 &&
+   if (server_active_project_from_cwd(cwd->valuestring, project, sizeof(project)) == 0 &&
        project[0])
       cJSON_AddStringToObject(args, "project", project);
 }

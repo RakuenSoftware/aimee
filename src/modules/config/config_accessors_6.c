@@ -18,7 +18,7 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
-int config_set_kb_api_http_port(int value)
+int config_set_synthesis_thinking(int value)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));
    if (!cfg)
@@ -26,7 +26,7 @@ int config_set_kb_api_http_port(int value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      cfg->kb_api_http_port = value;
+      cfg->synthesis_thinking = value;
       rc = config_save(cfg);
    }
    free(cfg);
@@ -2102,21 +2102,6 @@ int config_set_default_persona(const char *value)
    if (rc == 0)
    {
       snprintf(cfg->default_persona, sizeof(cfg->default_persona), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_claude_model(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->claude_model, sizeof(cfg->claude_model), "%s", value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);

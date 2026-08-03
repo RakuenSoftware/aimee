@@ -8,7 +8,7 @@
 #include "aimee.h"
 #include "cJSON.h"
 #include "guardrails_internal.h"
-#include "git_verify.h"
+#include "modules/git/git_verify.h"
 #include "log.h"
 #include "platform_path.h"
 #include "slop_detect.h"

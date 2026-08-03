@@ -105,8 +105,13 @@ delegate can touch. Treat them as security policy. See [Delegate sandbox](DELEGA
 
 ### Autonomous workflows
 
-`autonomy.*` fields set retry, fan-out, agent, and gate budgets. They never authorize a human gate.
-Some are copied into the Go workflow process at startup and therefore need a restart.
+`autonomy.*` fields set scheduler concurrency, turn, resume, wall-clock, stale-run, and delegate
+lease limits. Trigger scan and admission policy lives under `trigger.*`. The Go workflow service
+reads these values live, so a browser or config API save does not need a restart. An explicit process
+environment override still wins.
+
+These limits never authorize a human gate. Node retry and fan-out budgets such as `max_rounds` and
+`max_children` remain part of the workflow definition.
 
 ### Sub-agent ban
 

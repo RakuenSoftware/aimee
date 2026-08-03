@@ -79,7 +79,7 @@ func TestTouchAndListChatSessions(t *testing.T) {
 	if err := s.touchChatSession("alice", "sess-2", "/proj/b", "another conversation"); err != nil {
 		t.Fatalf("touch: %v", err)
 	}
-	// Bob's session must not appear in Alice's list.
+	// Bob is a distinct actor in the same environment; every session is shared.
 	if err := s.touchChatSession("bob", "sess-3", "/proj/c", "bob's chat"); err != nil {
 		t.Fatalf("touch: %v", err)
 	}
@@ -88,8 +88,8 @@ func TestTouchAndListChatSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(got) != 2 {
-		t.Fatalf("expected 2 sessions for alice, got %d: %+v", len(got), got)
+	if len(got) != 3 {
+		t.Fatalf("expected 3 environment sessions, got %d: %+v", len(got), got)
 	}
 	// Title derived from first line of the first message only.
 	var s1 *chatSession
@@ -127,12 +127,12 @@ func TestTouchChatSessionPreservesTitleAcrossTurns(t *testing.T) {
 	}
 }
 
-func TestTouchChatSessionScopedByUser(t *testing.T) {
+func TestTouchChatSessionSharedAcrossActors(t *testing.T) {
 	s := newSessionTestServer(t)
 	if err := s.touchChatSession("alice", "shared-id", "/a", "alice msg"); err != nil {
 		t.Fatalf("touch: %v", err)
 	}
-	// A second user touching the same id must not hijack or mutate alice's row.
+	// A second actor continues the same environment session.
 	if err := s.touchChatSession("bob", "shared-id", "/b", "bob msg"); err != nil {
 		t.Fatalf("touch: %v", err)
 	}
@@ -140,12 +140,11 @@ func TestTouchChatSessionScopedByUser(t *testing.T) {
 	if err != nil || cs == nil {
 		t.Fatalf("alice get: %v %+v", err, cs)
 	}
-	if cs.Cwd != "/a" {
-		t.Fatalf("alice row mutated by bob: cwd=%q", cs.Cwd)
+	if cs.Cwd != "/b" || cs.Title != "alice msg" {
+		t.Fatalf("shared session = %+v", cs)
 	}
-	// Bob owns nothing under that id.
-	if bobCS, _ := s.getChatSession("bob", "shared-id"); bobCS != nil {
-		t.Fatalf("bob unexpectedly owns shared-id: %+v", bobCS)
+	if bobCS, _ := s.getChatSession("bob", "shared-id"); bobCS == nil || bobCS.Cwd != "/b" {
+		t.Fatalf("bob did not resolve the shared session: %+v", bobCS)
 	}
 }
 
@@ -175,8 +174,8 @@ func TestChatSessionRestoresTranscriptAndProviderID(t *testing.T) {
 		cs.Messages[1].Role != "assistant" || cs.Messages[1].Text != "hi back" {
 		t.Fatalf("messages = %+v", cs.Messages)
 	}
-	if bob, err := s.getChatSession("bob", "stable-web-id"); err != nil || bob != nil {
-		t.Fatalf("bob read alice session: err=%v session=%+v", err, bob)
+	if bob, err := s.getChatSession("bob", "stable-web-id"); err != nil || bob == nil || len(bob.Messages) != 2 {
+		t.Fatalf("bob did not read shared session: err=%v session=%+v", err, bob)
 	}
 }
 
@@ -200,7 +199,7 @@ func TestSeedChatMessagesDoesNotOverwriteServerHistory(t *testing.T) {
 	}
 }
 
-func TestHandleChatSessionsListReturnsUserSessions(t *testing.T) {
+func TestHandleChatSessionsListReturnsEnvironmentSessions(t *testing.T) {
 	s := newSessionTestServer(t)
 	_ = s.touchChatSession("alice", "sess-1", "/a", "hello there")
 	_ = s.touchChatSession("bob", "sess-2", "/b", "bob only")
@@ -216,8 +215,8 @@ func TestHandleChatSessionsListReturnsUserSessions(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &sessions); err != nil {
 		t.Fatalf("decode: %v (%s)", err, rr.Body.String())
 	}
-	if len(sessions) != 1 || sessions[0].ID != "sess-1" {
-		t.Fatalf("expected only alice's sess-1, got %+v", sessions)
+	if len(sessions) != 2 {
+		t.Fatalf("expected both environment sessions, got %+v", sessions)
 	}
 }
 
@@ -320,7 +319,7 @@ func TestHandleChatSessionUpsertRejectsUntrustedLegacyAlias(t *testing.T) {
 	}
 }
 
-func TestHandleChatSessionUpsertRejectsAnotherUsersLegacyAlias(t *testing.T) {
+func TestHandleChatSessionUpsertAcceptsLegacyAliasAcrossActors(t *testing.T) {
 	s := newSessionTestServer(t)
 	_ = s.touchChatSession("alice", "alice-provider-id", "", "alice chat")
 	_ = s.setChatSessionRuntime("alice", "alice-provider-id", "alice-provider-id")
@@ -329,30 +328,30 @@ func TestHandleChatSessionUpsertRejectsAnotherUsersLegacyAlias(t *testing.T) {
 	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/session", strings.NewReader(
 		`{"id":"bob-stable-id","legacy_provider_alias_id":"alice-provider-id"}`)), "bob")
 	s.handleChatSession(rr, req)
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409 (%s)", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rr.Code, rr.Body.String())
 	}
-	if got, err := s.chatSessionProviderID("bob", "bob-stable-id"); err != nil || got != "" {
-		t.Fatalf("cross-user alias established runtime %q, err=%v", got, err)
+	if got, err := s.chatSessionProviderID("bob", "bob-stable-id"); err != nil || got != "alice-provider-id" {
+		t.Fatalf("shared alias runtime %q, err=%v", got, err)
 	}
-	if cs, err := s.getChatSession("bob", "bob-stable-id"); err != nil || cs != nil {
-		t.Fatalf("cross-user alias left a target row: err=%v session=%+v", err, cs)
+	if cs, err := s.getChatSession("bob", "bob-stable-id"); err != nil || cs == nil {
+		t.Fatalf("shared alias did not create target: err=%v session=%+v", err, cs)
 	}
 }
 
-func TestHandleChatSessionUpsertRejectsAnotherUsersID(t *testing.T) {
+func TestHandleChatSessionUpsertUpdatesSharedIDAcrossActors(t *testing.T) {
 	s := newSessionTestServer(t)
 	_ = s.touchChatSession("alice", "shared-id", "", "alice")
 	rr := httptest.NewRecorder()
 	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/session",
 		strings.NewReader(`{"id":"shared-id","title":"hijacked"}`)), "bob")
 	s.handleChatSession(rr, req)
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409 (%s)", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rr.Code, rr.Body.String())
 	}
 	cs, _ := s.getChatSession("alice", "shared-id")
-	if cs == nil || cs.Title == "hijacked" {
-		t.Fatalf("alice session mutated: %+v", cs)
+	if cs == nil || cs.Title != "hijacked" {
+		t.Fatalf("shared session not updated: %+v", cs)
 	}
 }
 
@@ -396,16 +395,16 @@ func TestHandleChatSessionDelete(t *testing.T) {
 	}
 }
 
-func TestHandleChatSessionDeleteScopedByUser(t *testing.T) {
+func TestHandleChatSessionDeleteSharedAcrossActors(t *testing.T) {
 	s := newSessionTestServer(t)
 	_ = s.touchChatSession("alice", "sess-1", "/a", "alice's")
 
-	// Bob attempts to delete Alice's session — must not succeed.
+	// Bob deletes the shared environment session created by Alice.
 	rr := httptest.NewRecorder()
 	req := asUser(httptest.NewRequest(http.MethodDelete, "/api/chat/session?sid=sess-1", nil), "bob")
 	s.handleChatSession(rr, req)
-	if cs, _ := s.getChatSession("alice", "sess-1"); cs == nil {
-		t.Fatal("bob deleted alice's session")
+	if cs, _ := s.getChatSession("alice", "sess-1"); cs != nil {
+		t.Fatal("shared session was not deleted")
 	}
 }
 

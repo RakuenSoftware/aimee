@@ -7,8 +7,8 @@
  * mechanical-tier default, and the cancelled->unavailable mapping that keeps an
  * unfinished run DISTINCT from a real pass. */
 
-#include "git_verify.h"
-#include "git_verify_internal.h"
+#include "modules/git/git_verify.h"
+#include "modules/git/git_verify_internal.h"
 
 #include "cJSON.h"
 

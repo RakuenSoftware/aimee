@@ -18,6 +18,51 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
+const char *config_prompt_tier(void)
+{
+   static _Thread_local char buf[16];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, prompt_tier), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_prompt_file(void)
+{
+   static _Thread_local char buf[MAX_PATH_LEN];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, prompt_file), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_delegate_prompt_tier(void)
+{
+   static _Thread_local char buf[16];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, delegate_prompt_tier), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_otel_endpoint(void)
+{
+   static _Thread_local char buf[512];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, otel_endpoint), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_otel_service_name(void)
+{
+   static _Thread_local char buf[64];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, otel_service_name), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
 const char *config_mcp_osv_endpoint(void)
 {
    static _Thread_local char buf[256];
@@ -126,65 +171,47 @@ const char *config_kb_mode(void)
    return buf;
 }
 
-const char *config_llm_embed_backend(void)
+const char *config_aimee_with_llamacpp(void)
 {
-   static _Thread_local char buf[16];
+   static _Thread_local char buf[8];
    buf[0] = 0;
-   config_field_read(offsetof(config_t, llm_embed_backend), sizeof(buf), buf);
+   config_field_read(offsetof(config_t, aimee_with_llamacpp), sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
 }
 
-const char *config_llm_synth_backend(void)
-{
-   static _Thread_local char buf[16];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, llm_synth_backend), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_llm_synth_host(void)
-{
-   static _Thread_local char buf[128];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, llm_synth_host), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_llm_synth_gpu(void)
+const char *config_aimee_synthesis_model(void)
 {
    static _Thread_local char buf[64];
    buf[0] = 0;
-   config_field_read(offsetof(config_t, llm_synth_gpu), sizeof(buf), buf);
+   config_field_read(offsetof(config_t, aimee_synthesis_model), sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
 }
 
-const char *config_llm_synth_tier(void)
-{
-   static _Thread_local char buf[16];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, llm_synth_tier), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_llm_synth_endpoint(void)
+const char *config_synthesis_endpoint(void)
 {
    static _Thread_local char buf[512];
    buf[0] = 0;
-   config_field_read(offsetof(config_t, llm_synth_endpoint), sizeof(buf), buf);
+   config_field_read(offsetof(config_t, synthesis_endpoint), sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
 }
 
-const char *config_llm_synth_model(void)
+const char *config_synthesis_model(void)
 {
    static _Thread_local char buf[128];
    buf[0] = 0;
-   config_field_read(offsetof(config_t, llm_synth_model), sizeof(buf), buf);
+   config_field_read(offsetof(config_t, synthesis_model), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_synthesis_api_key(void)
+{
+   static _Thread_local char buf[256];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, synthesis_api_key), sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
 }
@@ -441,33 +468,6 @@ const char *config_kb_curator_provider_api_key(void)
    return buf;
 }
 
-const char *config_kb_curator_tier_b_base_url(void)
-{
-   static _Thread_local char buf[256];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, kb_curator_tier_b_base_url), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_kb_curator_tier_b_model(void)
-{
-   static _Thread_local char buf[128];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, kb_curator_tier_b_model), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_kb_curator_tier_b_api_key(void)
-{
-   static _Thread_local char buf[256];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, kb_curator_tier_b_api_key), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
 const char *config_kb_curator_judge_command(void)
 {
    static _Thread_local char buf[512];
@@ -668,23 +668,34 @@ size_t config_openai_key_cmd_copy(char *out, size_t n)
    return sizeof(buf);
 }
 
-size_t config_embedding_model_copy(char *out, size_t n)
+size_t config_embedder_model_copy(char *out, size_t n)
 {
    char buf[128];
    if (!out || n == 0)
       return 0;
-   config_field_read(offsetof(config_t, embedding_model), sizeof(buf), buf);
+   config_field_read(offsetof(config_t, embedder_model), sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    snprintf(out, n, "%s", buf);
    return sizeof(buf);
 }
 
-size_t config_embedding_endpoint_copy(char *out, size_t n)
+size_t config_embedder_url_copy(char *out, size_t n)
 {
    char buf[512];
    if (!out || n == 0)
       return 0;
-   config_field_read(offsetof(config_t, embedding_endpoint), sizeof(buf), buf);
+   config_field_read(offsetof(config_t, embedder_url), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_embedder_api_key_copy(char *out, size_t n)
+{
+   char buf[256];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, embedder_api_key), sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    snprintf(out, n, "%s", buf);
    return sizeof(buf);
@@ -1284,78 +1295,56 @@ size_t config_kb_mode_copy(char *out, size_t n)
    return sizeof(buf);
 }
 
-size_t config_llm_embed_backend_copy(char *out, size_t n)
+size_t config_aimee_with_llamacpp_copy(char *out, size_t n)
 {
-   char buf[16];
+   char buf[8];
    if (!out || n == 0)
       return 0;
-   config_field_read(offsetof(config_t, llm_embed_backend), sizeof(buf), buf);
+   config_field_read(offsetof(config_t, aimee_with_llamacpp), sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    snprintf(out, n, "%s", buf);
    return sizeof(buf);
 }
 
-size_t config_llm_synth_backend_copy(char *out, size_t n)
-{
-   char buf[16];
-   if (!out || n == 0)
-      return 0;
-   config_field_read(offsetof(config_t, llm_synth_backend), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   snprintf(out, n, "%s", buf);
-   return sizeof(buf);
-}
-
-size_t config_llm_synth_host_copy(char *out, size_t n)
-{
-   char buf[128];
-   if (!out || n == 0)
-      return 0;
-   config_field_read(offsetof(config_t, llm_synth_host), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   snprintf(out, n, "%s", buf);
-   return sizeof(buf);
-}
-
-size_t config_llm_synth_gpu_copy(char *out, size_t n)
+size_t config_aimee_synthesis_model_copy(char *out, size_t n)
 {
    char buf[64];
    if (!out || n == 0)
       return 0;
-   config_field_read(offsetof(config_t, llm_synth_gpu), sizeof(buf), buf);
+   config_field_read(offsetof(config_t, aimee_synthesis_model), sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    snprintf(out, n, "%s", buf);
    return sizeof(buf);
 }
 
-size_t config_llm_synth_tier_copy(char *out, size_t n)
-{
-   char buf[16];
-   if (!out || n == 0)
-      return 0;
-   config_field_read(offsetof(config_t, llm_synth_tier), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   snprintf(out, n, "%s", buf);
-   return sizeof(buf);
-}
-
-size_t config_llm_synth_endpoint_copy(char *out, size_t n)
+size_t config_synthesis_endpoint_copy(char *out, size_t n)
 {
    char buf[512];
    if (!out || n == 0)
       return 0;
-   config_field_read(offsetof(config_t, llm_synth_endpoint), sizeof(buf), buf);
+   config_field_read(offsetof(config_t, synthesis_endpoint), sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    snprintf(out, n, "%s", buf);
    return sizeof(buf);
 }
 
-size_t config_llm_synth_model_copy(char *out, size_t n)
+size_t config_synthesis_model_copy(char *out, size_t n)
 {
    char buf[128];
    if (!out || n == 0)
       return 0;
-   config_field_read(offsetof(config_t, llm_synth_model), sizeof(buf), buf);
+   config_field_read(offsetof(config_t, synthesis_model), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_synthesis_api_key_copy(char *out, size_t n)
+{
+   char buf[256];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, synthesis_api_key), sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    snprintf(out, n, "%s", buf);
    return sizeof(buf);

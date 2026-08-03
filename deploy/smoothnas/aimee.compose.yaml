@@ -5,7 +5,7 @@
 # tierd's compose backend (no smoothnas.io/v1 Plugin manifest needed). It is the
 # GPU tier: the unified aimee-llm runs Vulkan/RADV on the host /dev/dri (7900 XTX
 # on .254), 2560-dim embeddings. Drop `devices:` + set AIMEE_LLM_IMAGE=...:cpu +
-# AIMEE_EMBEDDING_DIM=1024 for the CPU tier.
+# EMBEDDER_DIMS=1024 for the CPU tier.
 #
 # Migrated from deploy/compose/aimee.yaml (+ aimee.gpu.yaml). Two things change
 # vs the split *manifest* plugins (aimee-kb/-server/-llm .plugin.yaml):
@@ -38,18 +38,22 @@ services:
       # find GUI-cloned repos.
       AIMEE_WORKSPACES_DIR: /var/lib/aimee-workspaces
       # External DB2 credentials are streamed into Vault before `up`.
-      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-}
+      SYNTHESIS_ENDPOINT: ${SYNTHESIS_ENDPOINT:-}
+      # The bundled synthesis model, on a *-llm image variant: the entrypoint
+      # starts llama-server for it and points SYNTHESIS_ENDPOINT at loopback.
+      # Empty on a non-llm image, or when synthesis is remote/off.
+      SYNTHESIS_MODEL: ${SYNTHESIS_MODEL:-}
       # The wizard's embedder choice, and the endpoint for an external one. The kb
       # MUST receive both: `aimee config deploy-env` emits them, and without them
       # reaching the container the entrypoint sees no selection, starts nothing, and
       # the builtin serves forever — the wizard's embedder silently never runs.
       EMBEDDER_MODEL: ${EMBEDDER_MODEL:-}
-      AIMEE_EMBEDDER_URL: ${AIMEE_EMBEDDER_URL:-}
+      EMBEDDER_URL: ${EMBEDDER_URL:-}
       # Empty so the kb uses the width of the embedder it serves (bundled
       # bekko-a25m is 384). This carried the retired aimee-llm GPU tier's 2560,
       # which made the kb refuse every vector upsert while reporting healthy.
-      # Set it ONLY for an external AIMEE_EMBEDDER_URL.
-      AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
+      # Set it ONLY for an external EMBEDDER_URL.
+      EMBEDDER_DIMS: ${EMBEDDER_DIMS:-}
       AIMEE_KB_HTTP_BIND: "1"
     command: ["--http-port=8741"]
     ports:
@@ -59,6 +63,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      # First boot runs postgres initdb and, on the embedder-bearing images, loads
+      # the weights before /v1/health answers -- longer than retries*interval, so
+      # without this the kb reads as unhealthy while it is still starting normally.
+      # See deploy/container/aimee-managed.compose.yaml for what that broke.
+      start_period: 300s
     volumes:
       - aimee-kb-home:/var/lib/aimee
       - aimee-server-workspaces:/var/lib/aimee-workspaces:ro

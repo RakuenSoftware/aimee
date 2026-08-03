@@ -7,7 +7,7 @@
 #include <unistd.h>
 
 #include "aimee.h"
-#include "workspace_manifest.h"
+#include "modules/workspace/workspace_manifest.h"
 #include "platform_test_util.h"
 
 /* Write text to path, return 0 on success. */

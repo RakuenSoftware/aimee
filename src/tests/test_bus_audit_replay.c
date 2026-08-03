@@ -21,7 +21,7 @@
 #include <unistd.h>
 
 #include <aimee/audit/obs_bus.h>
-#include "bus_capture.h"
+#include <aimee/core/event_bus/bus_capture.h>
 #include "log.h"
 
 #define N                 3000

@@ -61,7 +61,10 @@ finished its work. Callers that need read-after-write behavior use the bridge fl
 
 Requests and replies use a correlation ID. A missing server returns `capability_absent`. A reply
 goes only to its requester. Notifications fan out to the authorized observers registered for that
-kind.
+kind. Wire version 3 permits a correlated request or reply to span ordered inline fragments:
+`BUS_F_MORE` is set on every non-final fragment, and the first frame without it completes the
+message. The host keeps the route pending until the request is complete, and cancellation retires
+any partial request or reply.
 
 Each client has its own queue pair. One slow consumer does not create an unbounded host queue.
 Kinds declare whether they block or may shed under pressure. Sheds become typed overflow records in
@@ -69,7 +72,8 @@ the ordered tap.
 
 ## Payloads
 
-Small payloads ride inside a ring slot. Large payloads use a lease in the shared arena:
+Small payloads ride inside a ring slot. Trusted in-daemon publishers can put larger event payloads
+in a lease in the shared arena:
 
 1. the producer allocates and fills a span;
 2. the frame carries its offset, length, and generation;
@@ -80,8 +84,11 @@ Small payloads ride inside a ring slot. Large payloads use a lease in the shared
 Generation checks reject stale references. Client reap releases abandoned references. Capture
 materializes arena bytes into the record, so replay never depends on a live arena.
 
-Arena allocation is currently for trusted code co-located with the host. A follow-on branch adds
-cross-process attachment for inline events; it does not expose arena allocation or lease resolution.
+Arena allocation is for trusted code co-located with the host. Separately shipped module processes
+do not allocate arena leases: the module protocol fragments request and reply bodies above the
+negotiated inline budget and reassembles them at the endpoints. The current module-message limit is
+16 MiB; an oversized or malformed stream is rejected and drained without being delivered to a
+handler.
 
 ## Capture and replay
 
@@ -105,8 +112,10 @@ The control region is read-only. Every admitted client maps only its queue pair 
 arena; it cannot enumerate or map another client's rings. The arena is cooperative isolation for
 trusted native modules, not a sandbox for hostile code.
 
-The bus is intra-daemon. Traffic between `aimee-server`, `aimee-kb`, browsers, thin clients, and
-providers still uses the authenticated `/v1` network surfaces.
+The bus is intra-daemon. `aimee-server` and `aimee-kb` each host their own bus from the same
+`libaimee-core-event-bus.a`; the thin client does not link it. Traffic between `aimee-server`, `aimee-kb`,
+browsers, thin clients, and providers uses the authenticated `/v1` network surfaces through the
+shared connection layer.
 
 ## Adding a consumer
 
@@ -120,8 +129,9 @@ Keep the contract small:
 - add C/Go vectors when the wire contract changes;
 - test shutdown, queue exhaustion, malformed frames, client reap, and capture replay.
 
-Use `bus_client_publish` for inline events. Use the arena only when a real payload can exceed the
-inline budget.
+Use `bus_client_publish` for ordinary inline events. Use the arena for a trusted co-located event
+publisher that needs a lease. Use the module request API for module calls; it selects ordered inline
+fragmentation when a request or reply exceeds the inline budget.
 
-Code lives under `src/modules/bus/`. The public C client is `bus_client.h`; the pure-Go client is
+Code lives under `src/core/event_bus/`. The public C client is `bus_client.h`; the pure-Go client is
 under `server-go/bus/`. The source headers hold the wire and arena invariants.

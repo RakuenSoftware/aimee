@@ -17,12 +17,12 @@
 #include "wfe_native_gate.h" /* wfe_native_tool_externalizes / wfe_is_shell_tool */
 #include <aimee/audit/audit_action.h>
 #include "trace_analysis.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include "commands.h"
 #include "cmd_hooks_platform.h"
 #include "platform_random.h"
 #include "slop_detect.h"
-#include "git_verify.h"
+#include "modules/git/git_verify.h"
 #include "cJSON.h"
 #include "headers/util.h"
 #include "headers/conversation_context.h"

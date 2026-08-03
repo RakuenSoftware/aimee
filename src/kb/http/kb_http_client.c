@@ -4,6 +4,9 @@
 
 #include "kb_http_client.h"
 #include "kb_http_resolver_protocol.h"
+#include <aimee/core/connection/control.h>
+#include <aimee/core/connection/socket.h>
+#include <aimee/core/connection/tls_openssl.h>
 
 #include <arpa/inet.h>
 #include <ctype.h>
@@ -445,26 +448,28 @@ void kb_http_response_parser_free(kb_http_response_parser_t **parser)
 
 static int64_t now_ns(void)
 {
-   struct timespec ts;
-   if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
-      return -1;
-   return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+   return aimee_core_now_ns();
 }
 
 static int deadline_poll_ms(int64_t deadline)
 {
-   int64_t now = now_ns();
-   if (now < 0 || now >= deadline)
+   aimee_core_control_t control;
+   if (aimee_core_control_init(&control, deadline, 0, NULL, NULL) != AIMEE_CORE_OK)
       return 0;
-   int64_t ns = deadline - now;
-   int64_t ms = (ns + 999999LL) / 1000000LL;
-   return ms > INT_MAX ? INT_MAX : (int)ms;
+   return aimee_core_control_remaining_ms(&control);
 }
 
 static int deadline_expired(int64_t deadline)
 {
-   int64_t now = now_ns();
-   return now < 0 || now >= deadline;
+   aimee_core_control_t control;
+   return aimee_core_control_init(&control, deadline, 0, NULL, NULL) != AIMEE_CORE_OK;
+}
+
+static aimee_core_control_t deadline_control(int64_t deadline)
+{
+   aimee_core_control_t control;
+   (void)aimee_core_control_init(&control, deadline, 0, NULL, NULL);
+   return control;
 }
 
 /* Resolver helpers are capped process-wide. A slot is held until the exact
@@ -1073,30 +1078,12 @@ kb_http_client_test__dns_slots(size_t *used, size_t *high_water)
 
 static kb_http_result_t wait_fd(int fd, short events, int64_t deadline)
 {
-   for (;;)
-   {
-      int timeout = deadline_poll_ms(deadline);
-      if (!timeout)
-         return KB_HTTP_TIMEOUT;
-      struct pollfd pfd = {.fd = fd, .events = events};
-      int rc = poll(&pfd, 1, timeout);
-      if (rc > 0)
-      {
-         if (deadline_expired(deadline))
-            return KB_HTTP_TIMEOUT;
-         if (pfd.revents & (POLLERR | POLLNVAL))
-            return KB_HTTP_IO_ERROR;
-         if (pfd.revents & events)
-            return KB_HTTP_OK;
-         if (pfd.revents & POLLHUP)
-            return KB_HTTP_IO_ERROR;
-         continue;
-      }
-      if (rc == 0)
-         return KB_HTTP_TIMEOUT;
-      if (errno != EINTR)
-         return KB_HTTP_IO_ERROR;
-   }
+   aimee_core_control_t control = deadline_control(deadline);
+   aimee_core_wait_t direction = events & POLLIN ? AIMEE_CORE_WAIT_READ : AIMEE_CORE_WAIT_WRITE;
+   aimee_core_result_t result = aimee_core_wait_fd(fd, direction, &control);
+   return result == AIMEE_CORE_OK        ? KB_HTTP_OK
+          : result == AIMEE_CORE_TIMEOUT ? KB_HTTP_TIMEOUT
+                                         : KB_HTTP_IO_ERROR;
 }
 
 __attribute__((visibility("hidden"))) kb_http_result_t kb_http_client_test__wait_fd(int fd,
@@ -1111,55 +1098,12 @@ __attribute__((visibility("hidden"))) kb_http_result_t kb_http_client_test__wait
 
 static kb_http_result_t connect_deadline(struct addrinfo *addresses, int64_t deadline, int *out_fd)
 {
-   *out_fd = -1;
-   kb_http_result_t last = KB_HTTP_CONNECT_ERROR;
-   for (struct addrinfo *a = addresses; a; a = a->ai_next)
-   {
-      if (!deadline_poll_ms(deadline))
-         return KB_HTTP_TIMEOUT;
-      int fd = socket(a->ai_family, a->ai_socktype | SOCK_CLOEXEC, a->ai_protocol);
-      if (fd < 0)
-         continue;
-      int flags = fcntl(fd, F_GETFL, 0);
-      if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) != 0)
-      {
-         close(fd);
-         continue;
-      }
-      int rc = connect(fd, a->ai_addr, a->ai_addrlen);
-      if (rc != 0 && errno == EINPROGRESS)
-      {
-         last = wait_fd(fd, POLLOUT, deadline);
-         int error = 0;
-         socklen_t error_len = sizeof(error);
-         if (last == KB_HTTP_OK &&
-             (getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &error_len) != 0 || error))
-            last = KB_HTTP_CONNECT_ERROR;
-      }
-      else if (rc == 0)
-         last = KB_HTTP_OK;
-      else
-         last = KB_HTTP_CONNECT_ERROR;
-      if (last == KB_HTTP_OK)
-      {
-         *out_fd = fd;
-         return KB_HTTP_OK;
-      }
-      close(fd);
-      if (last == KB_HTTP_TIMEOUT)
-         return last;
-   }
-   return last;
-}
-
-static kb_http_result_t ssl_wait(SSL *ssl, int rc, int64_t deadline)
-{
-   int error = SSL_get_error(ssl, rc);
-   if (error == SSL_ERROR_WANT_READ)
-      return wait_fd(SSL_get_fd(ssl), POLLIN, deadline);
-   if (error == SSL_ERROR_WANT_WRITE)
-      return wait_fd(SSL_get_fd(ssl), POLLOUT, deadline);
-   return KB_HTTP_TLS_ERROR;
+   aimee_core_control_t control = deadline_control(deadline);
+   aimee_core_result_t result = aimee_core_socket_connect_addresses(
+       addresses, AIMEE_CORE_CONNECT_NONBLOCKING, &control, out_fd);
+   return result == AIMEE_CORE_OK        ? KB_HTTP_OK
+          : result == AIMEE_CORE_TIMEOUT ? KB_HTTP_TIMEOUT
+                                         : KB_HTTP_CONNECT_ERROR;
 }
 
 typedef struct
@@ -1326,7 +1270,7 @@ __attribute__((visibility("hidden"))) int kb_http_client_test__nosigpipe_bio_wri
 
 __attribute__((visibility("hidden"))) int kb_http_client_test__nosigpipe_ssl_fd(int fd)
 {
-   SSL_CTX *context = SSL_CTX_new(TLS_client_method());
+   SSL_CTX *context = aimee_core_tls_client_context();
    SSL *ssl = context ? SSL_new(context) : NULL;
    BIO *bio = ssl ? nosigpipe_socket_bio(fd) : NULL;
    if (!ssl || !bio)
@@ -1345,45 +1289,23 @@ __attribute__((visibility("hidden"))) int kb_http_client_test__nosigpipe_ssl_fd(
 
 static kb_http_result_t ssl_handshake(SSL *ssl, int64_t deadline)
 {
-   for (;;)
-   {
-      if (deadline_expired(deadline))
-         return KB_HTTP_TIMEOUT;
-      int rc = SSL_connect(ssl);
-      if (deadline_expired(deadline))
-         return KB_HTTP_TIMEOUT;
-      if (rc == 1)
-         return KB_HTTP_OK;
-      kb_http_result_t wait = ssl_wait(ssl, rc, deadline);
-      if (wait != KB_HTTP_OK)
-         return wait == KB_HTTP_TIMEOUT ? wait : KB_HTTP_TLS_ERROR;
-   }
+   aimee_core_control_t control = deadline_control(deadline);
+   aimee_core_result_t result = aimee_core_tls_handshake_client_controlled(ssl, &control);
+   return result == AIMEE_CORE_OK        ? KB_HTTP_OK
+          : result == AIMEE_CORE_TIMEOUT ? KB_HTTP_TIMEOUT
+                                         : KB_HTTP_TLS_ERROR;
 }
 
 static kb_http_result_t ssl_write_all(SSL *ssl, const unsigned char *bytes, size_t length,
                                       int64_t deadline)
 {
-   size_t offset = 0;
-   while (offset < length)
-   {
-      if (deadline_expired(deadline))
-         return KB_HTTP_TIMEOUT;
-      size_t written = 0;
-      int rc = SSL_write_ex(ssl, bytes + offset, length - offset, &written);
-      if (deadline_expired(deadline))
-         return KB_HTTP_TIMEOUT;
-      if (rc == 1)
-      {
-         if (!written)
-            return KB_HTTP_IO_ERROR;
-         offset += written;
-         continue;
-      }
-      kb_http_result_t wait = ssl_wait(ssl, rc, deadline);
-      if (wait != KB_HTTP_OK)
-         return wait == KB_HTTP_TIMEOUT ? wait : KB_HTTP_IO_ERROR;
-   }
-   return KB_HTTP_OK;
+   aimee_core_control_t control = deadline_control(deadline);
+   size_t written = 0;
+   aimee_core_result_t result =
+       aimee_core_tls_write_all_controlled(ssl, bytes, length, &control, &written);
+   return result == AIMEE_CORE_OK        ? KB_HTTP_OK
+          : result == AIMEE_CORE_TIMEOUT ? KB_HTTP_TIMEOUT
+                                         : KB_HTTP_IO_ERROR;
 }
 
 static int authority_valid(const char *host)
@@ -1468,10 +1390,9 @@ kb_http_result_t kb_http_request_validate(const kb_http_request_t *r)
 
 static SSL_CTX *client_context(void)
 {
-   SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
+   SSL_CTX *ctx = aimee_core_tls_client_context();
    if (!ctx)
       return NULL;
-   SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
    /* Do not consult SSL_CERT_FILE/SSL_CERT_DIR: egress trust is anchored only in
     * an administrator-managed Linux system bundle at a fixed location. */
@@ -1485,7 +1406,7 @@ static SSL_CTX *client_context(void)
    for (size_t i = 0; i < sizeof(system_bundles) / sizeof(system_bundles[0]); i++)
    {
       ERR_clear_error();
-      if (SSL_CTX_load_verify_locations(ctx, system_bundles[i], NULL) == 1)
+      if (aimee_core_tls_trust_file(ctx, system_bundles[i]) == 0)
       {
          trust_loaded = 1;
          break;
@@ -1591,8 +1512,8 @@ kb_http_result_t kb_http_tls_exchange(const kb_http_request_t *request,
    ctx = client_context();
    ssl = ctx ? SSL_new(ctx) : NULL;
    BIO *transport_bio = ssl ? nosigpipe_socket_bio(fd) : NULL;
-   if (!ssl || !transport_bio || SSL_set_tlsext_host_name(ssl, request->authority) != 1 ||
-       SSL_set1_host(ssl, request->authority) != 1)
+   if (!ssl || !transport_bio ||
+       aimee_core_tls_configure_client_session(ssl, request->authority, 1) != 0)
    {
       BIO_free(transport_bio);
       result = KB_HTTP_TLS_ERROR;
@@ -1620,30 +1541,12 @@ kb_http_result_t kb_http_tls_exchange(const kb_http_request_t *request,
    {
       unsigned char buffer[16384];
       size_t got = 0;
-      if (deadline_expired(deadline))
+      aimee_core_control_t control = deadline_control(deadline);
+      aimee_core_result_t read_result =
+          aimee_core_tls_read_controlled(ssl, buffer, sizeof(buffer), &control, &got);
+      if (read_result == AIMEE_CORE_OK)
       {
-         result = KB_HTTP_TIMEOUT;
-         break;
-      }
-      int rc = SSL_read_ex(ssl, buffer, sizeof(buffer), &got);
-      if (deadline_expired(deadline))
-      {
-         if (rc == 1 && got)
-            OPENSSL_cleanse(buffer, got);
-         result = KB_HTTP_TIMEOUT;
-         break;
-      }
-      if (rc == 1)
-      {
-         if (!got)
-         {
-            result = KB_HTTP_IO_ERROR;
-            break;
-         }
-         if (deadline_expired(deadline))
-            result = KB_HTTP_TIMEOUT;
-         else
-            result = kb_http_response_parser_feed(parser, buffer, got);
+         result = kb_http_response_parser_feed(parser, buffer, got);
          OPENSSL_cleanse(buffer, got);
          if (result == KB_HTTP_MORE && deadline_expired(deadline))
             result = KB_HTTP_TIMEOUT;
@@ -1651,21 +1554,13 @@ kb_http_result_t kb_http_tls_exchange(const kb_http_request_t *request,
             break;
          continue;
       }
-      int error = SSL_get_error(ssl, rc);
-      if (kb_http_client_test__tls_eof_is_authenticated(error))
+      if (read_result == AIMEE_CORE_EOF)
       {
          result = deadline_expired(deadline) ? KB_HTTP_TIMEOUT
                                              : kb_http_response_parser_finish_eof(parser);
          break;
       }
-      if (error == SSL_ERROR_WANT_READ || error == SSL_ERROR_WANT_WRITE)
-      {
-         result = wait_fd(fd, error == SSL_ERROR_WANT_READ ? POLLIN : POLLOUT, deadline);
-         if (result == KB_HTTP_OK)
-            continue;
-         break;
-      }
-      result = KB_HTTP_IO_ERROR;
+      result = read_result == AIMEE_CORE_TIMEOUT ? KB_HTTP_TIMEOUT : KB_HTTP_IO_ERROR;
       break;
    }
    if (result == KB_HTTP_OK)

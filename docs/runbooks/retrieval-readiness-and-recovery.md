@@ -4,7 +4,10 @@ Use `GET /v1/health` only as the process liveness probe. It returns success whil
 dependency outage is recoverable, so the supervisor does not restart-loop a healthy
 server. Use `GET /v1/ready` to admit or drain retrieval-bearing traffic. Readiness is
 false until DB1, KB transport, the KB schema/vector collection, the embedder, and the
-E5a dependency breaker can serve the advertised retrieval contract.
+E5a dependency breaker can serve the advertised retrieval contract. It also stays
+false until every required same-container module process is attached to the server's
+local event bus: memory, learning, routing, delegates, tools, workspace, git, skills,
+and response-composition.
 
 The shipped Compose files use `restart: unless-stopped` and intentionally healthcheck
 `/v1/health`. Orchestrators with separate probes should configure liveness at
@@ -25,9 +28,10 @@ curl -fsS http://127.0.0.1:8741/v1/pipeline/status
 
 The readiness `dependencies` object names the failed boundary. Its `diagnostics`
 object reports the E5a breaker state, bounded retry delay, last successful query time
-(Unix milliseconds), and KB's last successful ingest timestamp. Pipeline status
-reports `queue_depth` and pending/running/failed counts. Preserve all four responses
-with UTC time, image digest, and server version before recovery.
+(Unix milliseconds), KB's last successful ingest timestamp, and the first missing
+required module process. Pipeline status reports `queue_depth` and
+pending/running/failed counts. Preserve all four responses with UTC time, image
+digest, and server version before recovery.
 
 ## Recover safely
 
@@ -43,7 +47,10 @@ with UTC time, image digest, and server version before recovery.
 4. If queue depth is growing, stop new ingest, retain failed-job evidence, repair the
    worker dependency, and let the normal queue drain. Use the documented pipeline
    drain endpoint only after preserving status and confirming the operation's limit.
-5. Wait at least one readiness sampling interval (default 15 seconds), then require
+5. If `modules=fail`, inspect `diagnostics.missing_module`, then restore that module
+   process and its installed grant in the server container. Do not route module calls
+   over the server↔KB network: each daemon admits modules only to its own local bus.
+6. Wait at least one readiness sampling interval (default 15 seconds), then require
    `/v1/ready` HTTP 200 and a successful scoped retrieval before restoring traffic.
 
 Do not delete queues, DB volumes, benchmark artifacts, or breaker evidence as a

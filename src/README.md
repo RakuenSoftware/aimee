@@ -12,7 +12,6 @@ boundaries and the [manual](../MANUAL.md) for use.
 | `aimee-kb` | C11 | DB2, memory, documents, code graph, retrieval, curation |
 | `aimee-wfe` | Go | workflow definitions, lifecycle, artifacts, scheduler, worktrees, forge |
 | `aimee-runtime-web` | Go | authenticated browser proxy and UI service |
-| `aimee-llm` | container service | embedding and synthesis inference |
 
 The server image supervises `aimee-server` and `aimee-wfe` as peers. Workflow lifecycle has one
 writer: Go. The C server supplies typed agent, credential, policy, and forge resources; it does not
@@ -22,13 +21,15 @@ advance workflow state.
 
 ```text
 src/
+  core/                 extraction-ready shared C libraries
+    connection/         TCP, deadline/cancel, HTTP/1, auth, TLS/mTLS
+    event_bus/           local shared-memory host and module clients
   cli_*                 thin-client commands and transport
   server/               server listeners, handlers, agent/resource plane
   kb/                   KB daemon and HTTP surface
   db1/                  server SQLite owner
   db2/                  KB PostgreSQL/pgvector owner
-  modules/              owned C modules and public include trees
-    bus/                shared-memory event bus
+  modules/              product modules and public include trees
     audit/              WORM audit, replay, observability bridge
     sandbox/            delegate isolation
   tests/                C unit and integration tests
@@ -41,14 +42,19 @@ server-go/
   internal/api/          workflow/control-plane routes
 
 runtime-web/             Go browser service
+control-web/             Go knowledge-base administration service
 frontend/                browser application
 api/                     OpenAPI sources and SDK generation
 scripts/                 checks, generation, deployment, smoke tests
 ```
 
+Embedding and synthesis are KB-owned roles. Each can run inside the selected KB container or use a
+remote endpoint. The current server configuration names one KB URL; fleet selection is the next
+routing boundary. There is no standalone inference runtime artifact.
+
 ## Event bus
 
-`src/modules/bus/` provides the intra-daemon transport:
+`src/core/event_bus/` provides the intra-daemon transport:
 
 | File | Contract |
 | --- | --- |
@@ -59,6 +65,8 @@ scripts/                 checks, generation, deployment, smoke tests
 | `bus_host.*` | admission, sequence, routing, correlation, flow control, reap, tap |
 | `bus_client.*` | C attach, publish, subscribe, request/reply, poll |
 | `bus_capture.*` | ordered CRC-checked capture and observational replay |
+| `module_protocol.*` | versioned pointer-free feature request/result envelope |
+| `module_runtime.*` | authenticated process loop, dispatch, deadline and cancellation |
 
 One host owns all `memfd` creation. An admitted client receives only its queue pair and shared arena.
 The host stamps `seq` before routing and invokes the tap for every accepted event. Per-source FIFO is

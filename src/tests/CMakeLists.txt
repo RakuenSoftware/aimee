@@ -38,6 +38,8 @@ aimee_add_test(test_memory_provider test_memory_provider.c)
 aimee_add_test(test_harness_memory test_harness_memory.c)
 aimee_add_test(test_memory_redirect test_memory_redirect.c)
 aimee_add_test(test_roundtable_brief test_roundtable_brief.c)
+aimee_add_test(test_server_active_project test_server_active_project.c
+               ../server/server_active_project.c)
 aimee_add_test(test_harness_memory_scope test_harness_memory_scope.c)
 aimee_add_test(test_harness_memory_spill test_harness_memory_spill.c)
 aimee_add_test(test_harness_memory_audit test_harness_memory_audit.c)
@@ -128,33 +130,57 @@ aimee_add_test(test_util test_util.c)
 
 # Event-bus wire codec (feature tree slice 1). Self-contained: bus_wire.c has no
 # dependency beyond libc, so the test links it directly rather than via a lib.
-aimee_add_test(test_bus_wire test_bus_wire.c ../modules/bus/bus_wire.c)
-target_include_directories(test_bus_wire PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
+if(TARGET aimee-core-event-bus)
+set(AIMEE_TEST_OBS_BUS_RUNTIME_SOURCES
+  ../core/event_bus/bus_runtime.c
+  ../core/event_bus/bus_endpoint.c
+  ../core/event_bus/module_client.c
+  ../core/event_bus/module_protocol.c)
+aimee_add_test(test_bus_wire test_bus_wire.c ../core/event_bus/bus_wire.c)
+target_include_directories(test_bus_wire PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
 target_compile_definitions(test_bus_wire PRIVATE
   BUS_VECTOR_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bus")
-aimee_add_test(test_bus_ring test_bus_ring.c ../modules/bus/bus_ring.c)
-target_include_directories(test_bus_ring PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
+aimee_add_test(test_module_protocol test_module_protocol.c ../core/event_bus/module_protocol.c)
+target_include_directories(test_module_protocol PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
+aimee_add_test(test_bus_ring test_bus_ring.c ../core/event_bus/bus_ring.c)
+target_include_directories(test_bus_ring PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
 find_package(Threads REQUIRED)
 target_link_libraries(test_bus_ring PRIVATE Threads::Threads)
-aimee_add_test(test_bus_region test_bus_region.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c)
-target_include_directories(test_bus_region PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
-aimee_add_test(test_bus_arena test_bus_arena.c ../modules/bus/bus_arena.c)
-target_include_directories(test_bus_arena PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
-aimee_add_test(test_bus_host test_bus_host.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c)
-target_include_directories(test_bus_host PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
+aimee_add_test(test_bus_region test_bus_region.c ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c ../core/event_bus/bus_ring.c)
+target_include_directories(test_bus_region PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
+aimee_add_test(test_bus_arena test_bus_arena.c ../core/event_bus/bus_arena.c)
+target_include_directories(test_bus_arena PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
+aimee_add_test(test_bus_host test_bus_host.c ../core/event_bus/bus_attach.c ../core/event_bus/bus_host.c ../core/event_bus/bus_route.c ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c ../core/event_bus/bus_ring.c ../core/event_bus/bus_arena.c ../core/event_bus/bus_wire.c)
+target_include_directories(test_bus_host PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
 
-aimee_add_test(test_bus_route test_bus_route.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c)
-target_include_directories(test_bus_route PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
+aimee_add_test(test_bus_route test_bus_route.c ../core/event_bus/bus_attach.c ../core/event_bus/bus_host.c ../core/event_bus/bus_route.c ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c ../core/event_bus/bus_ring.c ../core/event_bus/bus_arena.c ../core/event_bus/bus_wire.c)
+target_include_directories(test_bus_route PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
 
-aimee_add_test(test_bus_flow test_bus_flow.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c)
-target_include_directories(test_bus_flow PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
+aimee_add_test(test_bus_flow test_bus_flow.c ../core/event_bus/bus_attach.c ../core/event_bus/bus_host.c ../core/event_bus/bus_route.c ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c ../core/event_bus/bus_ring.c ../core/event_bus/bus_arena.c ../core/event_bus/bus_wire.c)
+target_include_directories(test_bus_flow PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
 
-aimee_add_test(test_bus_client test_bus_client.c ../modules/bus/bus_client.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c)
-target_include_directories(test_bus_client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
+aimee_add_test(test_bus_client test_bus_client.c ../core/event_bus/bus_client.c ../core/event_bus/bus_attach.c ../core/event_bus/bus_host.c ../core/event_bus/bus_route.c ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c ../core/event_bus/bus_ring.c ../core/event_bus/bus_arena.c ../core/event_bus/bus_wire.c)
+target_include_directories(test_bus_client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
 find_package(Threads REQUIRED)
 target_link_libraries(test_bus_client PRIVATE Threads::Threads)
-aimee_add_test(test_bus_capture test_bus_capture.c ../modules/bus/bus_capture.c ../modules/bus/bus_client.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c)
-target_include_directories(test_bus_capture PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
+aimee_add_test(test_bus_endpoint test_bus_endpoint.c ../core/event_bus/bus_endpoint.c)
+target_include_directories(test_bus_endpoint PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
+aimee_add_test(test_bus_runtime test_bus_runtime.c)
+target_include_directories(test_bus_runtime PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
+target_link_libraries(test_bus_runtime PRIVATE aimee-core-event-bus Threads::Threads)
+aimee_add_test(test_module_runtime test_module_runtime.c)
+target_include_directories(test_module_runtime PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
+target_link_libraries(test_module_runtime PRIVATE aimee-core-event-bus Threads::Threads)
+aimee_add_test(test_routing_module test_routing_module.c ../modules/routing/module_adapter.c)
+target_include_directories(test_routing_module PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/../modules/routing/include)
+aimee_add_test(test_bus_capture test_bus_capture.c ../core/event_bus/bus_capture.c ../core/event_bus/bus_client.c ../core/event_bus/bus_attach.c ../core/event_bus/bus_host.c ../core/event_bus/bus_route.c ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c ../core/event_bus/bus_ring.c ../core/event_bus/bus_arena.c ../core/event_bus/bus_wire.c)
+target_include_directories(test_bus_capture PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
 target_link_libraries(test_bus_capture PRIVATE Threads::Threads)
 
 # First real module-on-bus integration: the DB1-backed user-memory recall served
@@ -162,55 +188,56 @@ target_link_libraries(test_bus_capture PRIVATE Threads::Threads)
 # The bus sources are compiled straight into this test binary; the real DB1 memory
 # path comes from aimee-core, which aimee_add_test links. A test binary only — D7
 # keeps the bus out of every shipping target.
-aimee_add_test(test_bus_memory_recall test_bus_memory_recall.c ../modules/bus/bus_client.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c)
-target_include_directories(test_bus_memory_recall PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
+aimee_add_test(test_bus_memory_recall test_bus_memory_recall.c ../core/event_bus/bus_client.c ../core/event_bus/bus_attach.c ../core/event_bus/bus_host.c ../core/event_bus/bus_route.c ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c ../core/event_bus/bus_ring.c ../core/event_bus/bus_arena.c ../core/event_bus/bus_wire.c)
+target_include_directories(test_bus_memory_recall PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
 target_link_libraries(test_bus_memory_recall PRIVATE Threads::Threads)
 
 # Real mutating memory op over the bus: upsert (insert + update), verified by
 # reading the real store back. Same rationale as the recall test above (D7-clean).
-aimee_add_test(test_bus_memory_upsert test_bus_memory_upsert.c ../modules/bus/bus_client.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c)
-target_include_directories(test_bus_memory_upsert PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
+aimee_add_test(test_bus_memory_upsert test_bus_memory_upsert.c ../core/event_bus/bus_client.c ../core/event_bus/bus_attach.c ../core/event_bus/bus_host.c ../core/event_bus/bus_route.c ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c ../core/event_bus/bus_ring.c ../core/event_bus/bus_arena.c ../core/event_bus/bus_wire.c)
+target_include_directories(test_bus_memory_upsert PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
 target_link_libraries(test_bus_memory_upsert PRIVATE Threads::Threads)
 
 # A second, distinct module over the bus: real config_autonomy_lookup vs a direct
 # call, incl. a live env-override case. Config deps come from aimee-core. D7-clean.
-aimee_add_test(test_bus_config_autonomy test_bus_config_autonomy.c ../modules/bus/bus_client.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c)
-target_include_directories(test_bus_config_autonomy PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
+aimee_add_test(test_bus_config_autonomy test_bus_config_autonomy.c ../core/event_bus/bus_client.c ../core/event_bus/bus_attach.c ../core/event_bus/bus_host.c ../core/event_bus/bus_route.c ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c ../core/event_bus/bus_ring.c ../core/event_bus/bus_arena.c ../core/event_bus/bus_wire.c)
+target_include_directories(test_bus_config_autonomy PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
 target_link_libraries(test_bus_config_autonomy PRIVATE Threads::Threads)
 
 # audit-on-bus durability: the first module being migrated onto the bus. Emits N
 # rows through the real producer/consumer and requires the real ledger to hold
 # exactly N, each once, zero drops. obs_bus + bus compiled in; the ledger reader
 # and file writer come from aimee-core. Test binary only.
-aimee_add_test(test_bus_audit_durability test_bus_audit_durability.c ../modules/audit/obs_bus.c ../modules/bus/bus_client.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c ../modules/bus/bus_capture.c)
-target_include_directories(test_bus_audit_durability PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
+aimee_add_test(test_bus_audit_durability test_bus_audit_durability.c ../modules/audit/obs_bus.c ${AIMEE_TEST_OBS_BUS_RUNTIME_SOURCES} ../core/event_bus/bus_client.c ../core/event_bus/bus_attach.c ../core/event_bus/bus_host.c ../core/event_bus/bus_route.c ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c ../core/event_bus/bus_ring.c ../core/event_bus/bus_arena.c ../core/event_bus/bus_wire.c ../core/event_bus/bus_capture.c)
+target_include_directories(test_bus_audit_durability PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
 target_link_libraries(test_bus_audit_durability PRIVATE Threads::Threads)
 
 # audit-on-bus record+replay: the auditability payoff. Emits rows, reads the real
 # capture file back, requires faithful ordered replay of every governed-action row.
-aimee_add_test(test_bus_audit_replay test_bus_audit_replay.c ../modules/audit/obs_bus.c ../modules/bus/bus_client.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c ../modules/bus/bus_capture.c)
-target_include_directories(test_bus_audit_replay PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
+aimee_add_test(test_bus_audit_replay test_bus_audit_replay.c ../modules/audit/obs_bus.c ${AIMEE_TEST_OBS_BUS_RUNTIME_SOURCES} ../core/event_bus/bus_client.c ../core/event_bus/bus_attach.c ../core/event_bus/bus_host.c ../core/event_bus/bus_route.c ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c ../core/event_bus/bus_ring.c ../core/event_bus/bus_arena.c ../core/event_bus/bus_wire.c ../core/event_bus/bus_capture.c)
+target_include_directories(test_bus_audit_replay PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
 target_link_libraries(test_bus_audit_replay PRIVATE Threads::Threads)
 
 # audit-on-bus capture retention: prior sessions kept, files bounded.
-aimee_add_test(test_bus_audit_retention test_bus_audit_retention.c ../modules/audit/obs_bus.c ../modules/bus/bus_client.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c ../modules/bus/bus_capture.c)
-target_include_directories(test_bus_audit_retention PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
+aimee_add_test(test_bus_audit_retention test_bus_audit_retention.c ../modules/audit/obs_bus.c ${AIMEE_TEST_OBS_BUS_RUNTIME_SOURCES} ../core/event_bus/bus_client.c ../core/event_bus/bus_attach.c ../core/event_bus/bus_host.c ../core/event_bus/bus_route.c ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c ../core/event_bus/bus_ring.c ../core/event_bus/bus_arena.c ../core/event_bus/bus_wire.c ../core/event_bus/bus_capture.c)
+target_include_directories(test_bus_audit_retention PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
 target_link_libraries(test_bus_audit_retention PRIVATE Threads::Threads)
 
 # The operator replay tool (aimee-server --audit-replay): render a capture file.
-aimee_add_test(test_bus_audit_replay_tool test_bus_audit_replay_tool.c ../modules/audit/obs_bus.c ../modules/audit/audit_replay.c ../modules/bus/bus_client.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c ../modules/bus/bus_capture.c)
-target_include_directories(test_bus_audit_replay_tool PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
+aimee_add_test(test_bus_audit_replay_tool test_bus_audit_replay_tool.c ../modules/audit/obs_bus.c ../modules/audit/audit_replay.c ${AIMEE_TEST_OBS_BUS_RUNTIME_SOURCES} ../core/event_bus/bus_client.c ../core/event_bus/bus_attach.c ../core/event_bus/bus_host.c ../core/event_bus/bus_route.c ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c ../core/event_bus/bus_ring.c ../core/event_bus/bus_arena.c ../core/event_bus/bus_wire.c ../core/event_bus/bus_capture.c)
+target_include_directories(test_bus_audit_replay_tool PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
 target_link_libraries(test_bus_audit_replay_tool PRIVATE Threads::Threads)
 
 # Second module on the bus: the guardrail-semantic event -> db1 guardrail_events.
-aimee_add_test(test_bus_guardrail_durability test_bus_guardrail_durability.c ../modules/audit/obs_bus.c ../modules/bus/bus_client.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c ../modules/bus/bus_capture.c)
-target_include_directories(test_bus_guardrail_durability PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
+aimee_add_test(test_bus_guardrail_durability test_bus_guardrail_durability.c ../modules/audit/obs_bus.c ${AIMEE_TEST_OBS_BUS_RUNTIME_SOURCES} ../core/event_bus/bus_client.c ../core/event_bus/bus_attach.c ../core/event_bus/bus_host.c ../core/event_bus/bus_route.c ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c ../core/event_bus/bus_ring.c ../core/event_bus/bus_arena.c ../core/event_bus/bus_wire.c ../core/event_bus/bus_capture.c)
+target_include_directories(test_bus_guardrail_durability PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
 target_link_libraries(test_bus_guardrail_durability PRIVATE Threads::Threads)
 
 # Shutdown race: concurrent producers vs obs_bus_stop() (UAF regression).
-aimee_add_test(test_bus_shutdown_race test_bus_shutdown_race.c ../modules/audit/obs_bus.c ../modules/bus/bus_client.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c ../modules/bus/bus_capture.c)
-target_include_directories(test_bus_shutdown_race PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
+aimee_add_test(test_bus_shutdown_race test_bus_shutdown_race.c ../modules/audit/obs_bus.c ${AIMEE_TEST_OBS_BUS_RUNTIME_SOURCES} ../core/event_bus/bus_client.c ../core/event_bus/bus_attach.c ../core/event_bus/bus_host.c ../core/event_bus/bus_route.c ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c ../core/event_bus/bus_ring.c ../core/event_bus/bus_arena.c ../core/event_bus/bus_wire.c ../core/event_bus/bus_capture.c)
+target_include_directories(test_bus_shutdown_race PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
 target_link_libraries(test_bus_shutdown_race PRIVATE Threads::Threads)
+endif()
 
 
 

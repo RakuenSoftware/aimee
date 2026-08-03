@@ -6,7 +6,7 @@
 #include <unistd.h>
 #include <math.h>
 #include "aimee.h"
-#include "config_database.h" /* config_embedding_dim_current — the one width declaration */
+#include "config_database.h" /* config_embedder_dims_current — the one width declaration */
 #include "db.h"
 #include "db1.h"
 #include "db2.h"
@@ -17,7 +17,7 @@
 #include "kind_lifecycle.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include "../db2/db2_internal.h"
 #include "../db2/lifecycle.h" /* db2_set_embedding_dim (embedder-aware semantic recall) */
 #include "../db2/entity_edges.h"
@@ -1689,10 +1689,10 @@ static void test_memory_embed_records_embedder_version(void)
     * config this test just wrote (embedding_dim: 768) rather than a literal here.
     * Pinning a different number would make the test contradict its own config and
     * assert a coupling that no longer exists. */
-   db2_set_embedding_dim(config_embedding_dim_current());
+   db2_set_embedding_dim(config_embedder_dims_current());
    memory_t mem;
    assert(memory_insert(TIER_L2, KIND_FACT, "embed-version", "test content", 0.9, "", &mem) == 0);
-   assert(memory_embed(mem.id, "builtin") == 0);
+   assert(memory_embed(mem.id, MEMORY_EMBED_TEST_FIXTURE) == 0);
 
    char vio_err[128] = "";
    aimee_pg_stmt_t *vio_st = aimee_pg_prepare(
@@ -2544,7 +2544,7 @@ int main(void)
       memory_t mem;
       memory_insert(TIER_L2, KIND_FACT, "embed-test", "test content", 0.9, "", &mem);
 
-      assert(memory_embed(mem.id, "builtin") == 0);
+      assert(memory_embed(mem.id, MEMORY_EMBED_TEST_FIXTURE) == 0);
 
       {
          static const char *sql =
@@ -2572,17 +2572,34 @@ int main(void)
       }
    }
 
-   /* --- deterministic builtin embedding fallback --- */
+   /* --- no embedder configured is a FAILURE, not a fallback ---
+    *
+    * This used to assert the opposite: an empty command embedded via a builtin lexical
+    * feature hash and returned a full-width vector. That is what let an unconfigured kb
+    * answer every search with keyword matching while reporting itself healthy, and what
+    * let the fallback record itself as the corpus vector space. Retrieval without an
+    * embedder is not a degraded answer, it is a wrong one, so it now returns 0 and the
+    * caller skips the op. */
    {
       float vec[4];
       memory_embedder_dependency_reset_for_tests();
       memory_embedder_dependency_set_clock_for_tests(embedder_test_clock);
       g_embedder_now_ms = 100000;
-      int dim = memory_embed_text("test", "", EMBED_INPUT_DOCUMENT, vec, 4);
-      assert(dim == 4);
+      for (int i = 0; i < 4; i++)
+         vec[i] = -99.0f;
 
-      dim = memory_embed_text("test", NULL, EMBED_INPUT_DOCUMENT, vec, 4);
-      assert(dim == 4);
+      assert(memory_embed_text("test", "", EMBED_INPUT_DOCUMENT, vec, 4) == 0);
+      assert(memory_embed_text("test", NULL, EMBED_INPUT_DOCUMENT, vec, 4) == 0);
+      /* And it must not have written a partial vector on the way out. */
+      for (int i = 0; i < 4; i++)
+         assert(vec[i] == -99.0f);
+
+      /* Failing to configure an embedder is not an embedder that FAILED: nothing was
+       * called, so the dependency breaker must not count it against the endpoint. */
+      memory_embedder_health_t none_health;
+      memory_embedder_health(&none_health);
+      assert(none_health.failure_streak == 0);
+      assert(strcmp(none_health.state, "closed") == 0);
    }
 
    /* --- embedding_command sidecar contract (deep-curator AC#3): a sidecar

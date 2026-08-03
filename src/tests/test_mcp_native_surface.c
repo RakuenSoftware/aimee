@@ -16,7 +16,7 @@
  * The provider is faked so this needs no server: the point under test is aimee's
  * plumbing (advertise / schema / filter), not any one MCP handler. */
 #include "aimee.h" /* MAX_PATH_LEN, via agent_types.h */
-#include "agent_tools.h"
+#include <aimee/tools/agent_tools.h>
 #include "cJSON.h"
 #include <assert.h>
 #include <stdio.h>

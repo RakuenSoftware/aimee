@@ -27,6 +27,20 @@
  * with the extract gates disabled so the real config_load() the queue functions
  * call reports the gate off deterministically (and the run never touches the
  * developer's real ~/.config/aimee). */
+/* The single place this test binary names config_t. Every case that needs a
+ * different extract-code gate goes through here rather than loading its own copy:
+ * config_t is a secret of the config module, and one reader is the budget. */
+static void ccu_set_extract_code_gate(int on)
+{
+   config_t cfg;
+   config_load(&cfg);
+   cfg.kb_curator_extract_code_enabled = on;
+   cfg.kb_curator_extract_docs_enabled = 0;
+   if (!on)
+      cfg.synthesis_endpoint[0] = '\0';
+   config_save(&cfg);
+}
+
 static void test_force_curator_gate_off(void)
 {
    static char dir[] = "/tmp/aimee-curtest-XXXXXX";
@@ -36,11 +50,7 @@ static void test_force_curator_gate_off(void)
    done = 1;
    if (mkdtemp(dir))
       setenv("AIMEE_HOME", dir, 1);
-   config_t cfg;
-   config_load(&cfg);
-   cfg.kb_curator_extract_code_enabled = 0;
-   cfg.kb_curator_extract_docs_enabled = 0;
-   config_save(&cfg);
+   ccu_set_extract_code_gate(0);
 }
 
 /* Forward declarations (headers live in src/, not src/headers/). The opts struct
@@ -676,9 +686,10 @@ static void test_pick_sidecar_command_resolution(void)
    /* (a) explicit command wins verbatim, candidates ignored. */
    const char *none[] = {"/should/not/matter.py"};
    kb_curator_pick_sidecar_command(
-       "env LLM_ENDPOINT=x python3 /opt/aimee/scripts/curator-extract.py", none, 1, out,
+       "env SYNTHESIS_ENDPOINT=x python3 /opt/aimee/scripts/curator-extract.py", none, 1, out,
        sizeof(out));
-   assert(strcmp(out, "env LLM_ENDPOINT=x python3 /opt/aimee/scripts/curator-extract.py") == 0);
+   assert(strcmp(out, "env SYNTHESIS_ENDPOINT=x python3 /opt/aimee/scripts/curator-extract.py") ==
+          0);
 
    /* (b) first READABLE candidate is chosen; a missing one ahead of it is skipped,
     *     and a 0644 (non-executable) file still qualifies. */
@@ -793,6 +804,72 @@ static void test_stale_generation_job_is_not_claimed(void)
    printf("  PASS: stale-generation code-unit job is not claimed for a re-added path\n");
 }
 
+static int ccu_count(sqlite3 *db, const char *sql)
+{
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
+      return -1;
+   int n = (sqlite3_step(st) == SQLITE_ROW) ? sqlite3_column_int(st, 0) : -1;
+   sqlite3_finalize(st);
+   return n;
+}
+
+/* The rows this enqueue writes have exactly one consumer: extract_code, which runs
+ * the synthesis sidecar. With the stage ENABLED but no endpoint configured, not one
+ * of them can ever reach 'done' -- and the enqueue is not free. It runs on the
+ * synchronous path of /v1/code/scan and inserts one row per symbol: measured on a
+ * 4,018-file corpus, ~173,000 rows and 100 MB of table, adding ~215s to every scan
+ * for work that cannot start. It compounds too, since the enqueue's anti-join scans
+ * the table every later scan keeps growing.
+ *
+ * Both halves matter. Asserting only "nothing was enqueued" would pass just as well
+ * if the fixture were wrong and there had been nothing to enqueue in the first
+ * place, so the same corpus is enqueued again WITH an endpoint configured. */
+static void test_queue_code_units_skipped_without_synthesis_endpoint(void)
+{
+   db2_test_shim_open();
+   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   assert(db != NULL);
+   assert(sqlite3_exec(db,
+                       "INSERT INTO projects"
+                       " (id,name,root,scanned_at,lifecycle_state,current_generation)"
+                       " VALUES (1,'p','/p','t','current',1);"
+                       "INSERT INTO files"
+                       " (id,project_id,generation,path,scanned_at)"
+                       " VALUES (1,1,1,'a.c','t');"
+                       "INSERT INTO terms (file_id,name,kind,line)"
+                       " VALUES (1,'fn_one','definition',1),(1,'fn_two','definition',2)",
+                       NULL, NULL, NULL) == SQLITE_OK);
+
+   ccu_set_extract_code_gate(1);
+   unsetenv("SYNTHESIS_ENDPOINT");
+
+   /* The fixture really does have rows to enqueue, so "nothing was enqueued" below
+    * cannot pass for the trivial reason that there was nothing to insert. */
+   assert(ccu_count(db, "SELECT count(*) FROM terms") == 2);
+
+   assert(kb_curator_queue_code_units_for_project("p", "/p") == 0);
+   assert(ccu_count(db, "SELECT count(*) FROM kb_code_unit_jobs") == 0);
+
+   /* Configured (not necessarily reachable): the rows become real work again, and a
+    * transient outage is the drain's provider gate to handle, not this one's.
+    *
+    * Asserted as "gets past the gate", not "inserts 2 rows": the enqueue is one
+    * PostgreSQL statement (DISTINCT ON, ::int) that the sqlite shim cannot prepare,
+    * so it returns -1 here. That still separates the two paths exactly where it
+    * matters -- unconfigured short-circuits BEFORE the statement (0, no DB touched),
+    * configured reaches it (-1 from prepare). Coverage that the statement itself
+    * enqueues correctly belongs on a PostgreSQL-backed test, not this shim. */
+   setenv("SYNTHESIS_ENDPOINT", "http://synth.invalid:8742", 1);
+   assert(kb_curator_queue_code_units_for_project("p", "/p") == -1);
+   assert(ccu_count(db, "SELECT count(*) FROM kb_code_unit_jobs") == 0);
+   unsetenv("SYNTHESIS_ENDPOINT");
+
+   ccu_set_extract_code_gate(0);
+   db2_test_shim_close();
+   printf("  PASS: code-unit enqueue skipped when no synthesis endpoint can consume the rows\n");
+}
+
 int main(void)
 {
    printf("curator_code_unit:\n");
@@ -825,6 +902,7 @@ int main(void)
 
    test_queue_counts_surface_failures();
    test_stale_generation_job_is_not_claimed();
+   test_queue_code_units_skipped_without_synthesis_endpoint();
    printf("ok\n");
    return 0;
 }

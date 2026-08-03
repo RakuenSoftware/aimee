@@ -157,20 +157,50 @@ static const char *resolved_aimee_bin_path(void)
    return path;
 }
 
+/* The agent host spawns `aimee mcp-serve` itself, with an environment of its own
+ * choosing, and the generated config is the only place we can state what the
+ * server needs. Where AIMEE_HOME is what locates the config -- every
+ * containerised or managed-server install -- leaving it out means the server
+ * starts, cannot reach aimee-server, and answers tools/list with an EMPTY list.
+ * The agent is offered no tools at all and falls back to grep, which looks
+ * exactly like deciding the index was not worth calling. Measured on a
+ * container install: 18 tools with AIMEE_HOME present, 0 without it, whatever
+ * HOME is set to.
+ *
+ * Only when the operator set it explicitly: with AIMEE_HOME unset the default
+ * resolution already works, and pinning a value they never chose would freeze
+ * this machine's layout into a config that may be copied elsewhere. */
+static const char *explicit_aimee_home(void)
+{
+   const char *home = getenv("AIMEE_HOME");
+   return (home && *home) ? home : NULL;
+}
+
 static void format_mcp_json(char *buf, size_t cap, const char *aimee_bin)
 {
+   const char *aimee_home = explicit_aimee_home();
+   char env_block[MAX_PATH_LEN + 64];
+
    if (!buf || cap == 0)
       return;
+
+   env_block[0] = '\0';
+   /* This writer emits raw JSON, so refuse a value it cannot represent rather
+    * than produce a config that silently fails to parse. */
+   if (aimee_home && !strpbrk(aimee_home, "\"\\"))
+      snprintf(env_block, sizeof(env_block), ",\n      \"env\": { \"AIMEE_HOME\": \"%s\" }",
+               aimee_home);
+
    snprintf(buf, cap,
             "{\n"
             "  \"mcpServers\": {\n"
             "    \"aimee\": {\n"
             "      \"command\": \"%s\",\n"
-            "      \"args\": [\"mcp-serve\"]\n"
+            "      \"args\": [\"mcp-serve\"]%s\n"
             "    }\n"
             "  }\n"
             "}\n",
-            aimee_bin ? aimee_bin : "aimee");
+            aimee_bin ? aimee_bin : "aimee", env_block);
 }
 
 static cJSON *create_aimee_mcp_server(const char *aimee_bin)
@@ -182,6 +212,16 @@ static cJSON *create_aimee_mcp_server(const char *aimee_bin)
    cJSON *a = cJSON_CreateArray();
    cJSON_AddItemToArray(a, cJSON_CreateString("mcp-serve"));
    cJSON_AddItemToObject(aimee_server, "args", a);
+   const char *aimee_home = explicit_aimee_home();
+   if (aimee_home)
+   {
+      cJSON *env = cJSON_CreateObject();
+      if (env)
+      {
+         cJSON_AddStringToObject(env, "AIMEE_HOME", aimee_home);
+         cJSON_AddItemToObject(aimee_server, "env", env);
+      }
+   }
    return aimee_server;
 }
 
@@ -209,8 +249,23 @@ static cJSON *build_aimee_plugin_entry(void)
    return entry;
 }
 
+/* Under the "solo" tool profile the delegate tools are withheld, so instructing
+ * the agent to delegate would point it at something it cannot see -- and the
+ * point of that profile is that no second agent touches the work. Tell it to do
+ * the work itself instead of naming a tool that is absent. */
+/* The profile name only; deliberately not linking the protocol module into the
+ * client, which would cross a module boundary for one string comparison. */
+static int client_solo_profile(void)
+{
+   const char *profile = getenv("AIMEE_MCP_TOOL_PROFILE");
+   return profile && strcmp(profile, "solo") == 0;
+}
+
 static const char *codex_delegate_policy_prompt(void)
 {
+   if (client_solo_profile())
+      return "Do not spawn or delegate to sub-agents of any kind, including Codex "
+             "spawn_agent, Claude Agent, or aimee delegate; do this work yourself";
    return "Do not spawn provider-native sub-agents such as Codex spawn_agent or "
           "Claude Agent; use the aimee delegate MCP tool for every delegated or "
           "parallel sub-task";
@@ -228,22 +283,100 @@ static const char *codex_skill_markdown(void)
           "\n"
           "Use this plugin when Codex needs repository memory or aimee-specific helpers.\n"
           "\n"
-          "- Prefer local file inspection first for nearby code.\n"
+          /* TWO REVISIONS, TWO DIFFERENT FAILURES — BOTH CAUSED BY THIS TEXT.
+           *
+           * v1 opened with "prefer local file inspection first for nearby code"
+           * and offered find_symbol only "when the local search surface is
+           * missing indexed context" — the index as a fallback after grep.
+           * Agents followed it exactly: over a four-task benchmark with a
+           * verified-healthy index, every cell read this file and then made ZERO
+           * index calls, resolving everything with three to four recursive greps.
+           *
+           * v2 (leading with the questions the index answers) fixed the zero-call
+           * problem but was ADDITIVE: it said what to use the index for without
+           * saying what to stop doing. Agents then did both. Measured over eight
+           * tasks against the same corpus, the aimee arm ran 1.5-2.4x the commands
+           * of the plain-codex arm (22 vs 9 on one task) and cost up to 4.4x as
+           * much, while making 2 index calls. The extra spend was not the index:
+           * every command's output stays in the conversation and is re-sent on
+           * every later turn, so cost grows with the SQUARE of the command count.
+           * One unfiltered `rg --files` early in a run carried ~24k tokens for the
+           * rest of it.
+           *
+           * So this list has to be substitutive and it has to bound exploration.
+           * The index replacing a search is the entire point; an index used
+           * alongside the search it was meant to replace is pure overhead. */
+          "**Start from the index, not from a survey of the repository.** Do not "
+          "orient yourself by listing files, walking directories, or reading whole "
+          "files to see what is there. Every command's output stays in context for "
+          "the rest of this session, so a repo-wide listing costs more than the "
+          "answer it was meant to find.\n"
+          "\n"
+          "- Locating a definition, or finding every caller of something: use "
+          "`" AIMEE_CODE_TOOL_FIND_SYMBOL
+          "`. It answers from the index in one call, and it is exact where a "
+          "recursive text search is a guess that also matches comments, strings "
+          "and unrelated names. It REPLACES that search — do not also grep for "
+          "the same symbol to confirm it.\n"
+          "- Before changing anything shared, or editing more than one file: use "
+          "`" AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS
+          "` to see what depends on it. A grep for the symbol will not tell you "
+          "what breaks.\n"
           "- Use `search_memory` for stored project facts or prior decisions.\n"
-          "- Use `" AIMEE_CODE_TOOL_FIND_SYMBOL
-          "` when the local search surface is missing indexed context.\n"
-          "- Use `" AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS "` before broad multi-file edits.\n"
+          "- Reading a file the index has already pointed you at: just read it, "
+          "and read the range you need rather than the whole file.\n"
+          "- Recursive grep is for text that is not a code symbol, or for when the "
+          "index has no answer. Scope it to a path when you use it. Never run it "
+          "over the whole tree to find out what the tree contains.\n"
           "- Do not call provider-native sub-agent tools such as `spawn_agent`; use "
           "the aimee `delegate` MCP tool for every delegated or parallel sub-task.\n"
           "- Use `delegate` only for bounded sub-tasks that materially advance the "
           "current work.\n";
 }
 
+/* Under "solo" the delegate tools are withheld, so the two delegation bullets
+ * above would name a tool the agent cannot see. Swap them for the rule that
+ * profile actually enforces: nobody else touches this work. */
+static const char *codex_skill_markdown_effective(void)
+{
+   static const char *const SOLO_TAIL =
+       "- Do not call provider-native sub-agent tools such as `spawn_agent`; use "
+       "the aimee `delegate` MCP tool for every delegated or parallel sub-task.\n"
+       "- Use `delegate` only for bounded sub-tasks that materially advance the "
+       "current work.\n";
+   static char solo_buf[8192];
+
+   const char *base = codex_skill_markdown();
+   if (!client_solo_profile())
+      return base;
+
+   const char *cut = strstr(base, SOLO_TAIL);
+   if (!cut)
+      return base; /* text moved: say nothing rather than emit a mangled skill */
+
+   size_t head = (size_t)(cut - base);
+   int n = snprintf(solo_buf, sizeof(solo_buf),
+                    "%.*s- Do all of this work yourself. Do not spawn or delegate to a "
+                    "sub-agent of any kind.\n",
+                    (int)head, base);
+   if (n < 0 || (size_t)n >= sizeof(solo_buf))
+      return base;
+   return solo_buf;
+}
+
 static const char *codex_code_exploration_prompt(void)
 {
+   /* "instead of" is load-bearing: the index is a REPLACEMENT for the search, not
+    * an addition to it. The second sentence bounds exploration, because an agent
+    * that uses the index and then surveys the tree anyway pays for both — and the
+    * survey is the expensive half, since every command's output is re-sent on every
+    * later turn. See the measurement in codex_skill_markdown(). */
    return "Explore the codebase through aimee's tools (" AIMEE_CODE_TOOL_FIND_SYMBOL
           ", " AIMEE_CODE_TOOL_AST_GREP_SEARCH ", " AIMEE_CODE_TOOL_INDEX
-          " command=" AIMEE_CODE_INDEX_COMMAND_HYBRID ") instead of raw grep/read";
+          " command=" AIMEE_CODE_INDEX_COMMAND_HYBRID
+          ") instead of raw grep/read. Do not survey the repository first: no "
+          "repo-wide file listings, no directory walks, no reading whole files to "
+          "orient. Ask the index, then read only what it points at.";
 }
 
 static void ensure_codex_marketplace(const char *path)
@@ -810,7 +943,7 @@ static void ensure_codex_plugin_files(const char *home)
    char mcp_buf[MAX_PATH_LEN + 256];
    format_mcp_json(mcp_buf, sizeof(mcp_buf), aimee_bin);
 
-   const char *skill_buf = codex_skill_markdown();
+   const char *skill_buf = codex_skill_markdown_effective();
 
    write_text_file(plugin_json, plugin_buf, 0644);
    write_text_file(marketplace_plugin_json, plugin_buf, 0644);

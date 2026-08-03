@@ -131,15 +131,20 @@ fi
 SH
 chmod +x "$kb_entrypoint_test_dir/aimee-kb"
 # stderr is captured separately, not folded in: the entrypoint legitimately logs
-# operator diagnostics there (which embedder it started, or why it started none),
-# and folding them into stdout would turn this into an assertion that the
-# entrypoint is silent. What must hold is that no credential VALUE reaches either
-# stream, and that the final process image is credential-free.
+# operator diagnostics there (which embedder it is using), and folding them into
+# stdout would turn this into an assertion that the entrypoint is silent. What must
+# hold is that no credential VALUE reaches either stream, and that the final process
+# image is credential-free.
+#
+# EMBEDDER_URL is set because a serving kb with no embedder refuses to start, and
+# these two checks are about credential scrubbing, not embedder selection. The gate
+# itself is covered by tests/test_kb_entrypoint.sh.
 kb_entrypoint_stderr="$kb_entrypoint_test_dir/stderr.log"
 kb_entrypoint_output=$(env -i PATH="$kb_entrypoint_test_dir:/usr/bin:/bin" \
     AIMEE_HOME="$kb_entrypoint_test_dir/home" \
     AIMEE_DB2_URL=postgresql://external.invalid/aimee \
     ENTRYPOINT_TEST_API_KEY=first-boot-only \
+    EMBEDDER_URL=http://embedder.invalid \
     sh ../deploy/container/aimee-kb-entrypoint.sh 2>"$kb_entrypoint_stderr")
 if [ "$kb_entrypoint_output" = "clean" ] &&
     ! grep -qE 'first-boot-only|external\.invalid' "$kb_entrypoint_stderr"; then
@@ -158,6 +163,7 @@ kb_marked_output=$(env -i PATH="$kb_entrypoint_test_dir:/usr/bin:/bin" \
     AIMEE_DB2_URL=postgresql://external.invalid/aimee \
     ENTRYPOINT_TEST_API_KEY=first-boot-only \
     ENTRYPOINT_BOOTSTRAP_LOG="$kb_bootstrap_log" \
+    EMBEDDER_URL=http://embedder.invalid \
     sh ../deploy/container/aimee-kb-entrypoint.sh \
     --aimee-internal-vault-bootstrapped-external-db 2>"$kb_marked_stderr")
 kb_bootstrap_count=$(wc -c <"$kb_bootstrap_log")
@@ -214,6 +220,41 @@ else
     fail "KB entrypoint did not reuse the running cluster ($kb_shared_output, stderr=$(tr '\n' ' ' <"$kb_shared_stderr"))"
 fi
 rm -rf "$kb_shared_dir"
+
+# pg_ctl --wait defaults to a 60s deadline, and crash recovery after an unclean
+# stop routinely exceeds it: fsyncing the data directory alone measured 65s on a
+# 27k-vector corpus. Timing out makes the entrypoint exit, `restart:
+# unless-stopped` start the container again, and recovery replay FROM SCRATCH --
+# a livelock where every attempt is killed at a deadline it could never meet.
+# Assert the timeout is raised, and raised BEFORE the start it has to govern.
+kb_pgctltimeout_line=$(grep -nE '^[[:space:]]+export PGCTLTIMEOUT=' \
+    ../deploy/container/aimee-kb-entrypoint.sh | head -1 | cut -d: -f1)
+kb_pgctl_start_line=$(grep -nF '"$PGBIN/pg_ctl" --pgdata="$PGDATA" --wait --silent' \
+    ../deploy/container/aimee-kb-entrypoint.sh | head -1 | cut -d: -f1)
+kb_pgctltimeout_default=$(sed -n 's/.*export PGCTLTIMEOUT="\${AIMEE_DB2_PGCTLTIMEOUT:-\([0-9]*\)}".*/\1/p' \
+    ../deploy/container/aimee-kb-entrypoint.sh | head -1)
+if [ -n "$kb_pgctltimeout_line" ] && [ -n "$kb_pgctl_start_line" ] &&
+    [ -n "$kb_pgctltimeout_default" ] &&
+    [ "$kb_pgctltimeout_line" -lt "$kb_pgctl_start_line" ] &&
+    [ "$kb_pgctltimeout_default" -gt 60 ]; then
+    pass "KB entrypoint waits past pg_ctl's 60s default so crash recovery can finish"
+else
+    fail "KB entrypoint must export PGCTLTIMEOUT>60 before starting the cluster (export=$kb_pgctltimeout_line, start=$kb_pgctl_start_line, default=$kb_pgctltimeout_default)"
+fi
+
+# The export path starts the same cluster in a stopped container, so it is
+# exposed to the identical recovery wait -- and an export timing out aborts with
+# the data intact but unread.
+kb_export_timeout_line=$(grep -nE '^[[:space:]]+export PGCTLTIMEOUT=' \
+    ../deploy/container/aimee-kb-db-export.sh | head -1 | cut -d: -f1)
+kb_export_start_line=$(grep -nF '"$PGBIN/pg_ctl" --pgdata="$PGDATA" --wait --silent' \
+    ../deploy/container/aimee-kb-db-export.sh | head -1 | cut -d: -f1)
+if [ -n "$kb_export_timeout_line" ] && [ -n "$kb_export_start_line" ] &&
+    [ "$kb_export_timeout_line" -lt "$kb_export_start_line" ]; then
+    pass "KB db-export waits past pg_ctl's 60s default before reading the cluster"
+else
+    fail "KB db-export must export PGCTLTIMEOUT before starting the cluster (export=$kb_export_timeout_line, start=$kb_export_start_line)"
+fi
 
 # The server image intentionally supervises multiple long-lived planes, so it
 # still needs a PID-1 subreaper. It must not start tini until after first-boot
@@ -303,6 +344,15 @@ if grep -qF '[ -d "$AIMEE_HOME/workflows" ] && chown -R aimee:aimee "$AIMEE_HOME
     pass "server entrypoint makes the workflow registry writable by the Go WFE"
 else
     fail "server entrypoint leaves the workflow registry root-owned"
+fi
+
+if grep -qF 'chown aimee:aimee "$AIMEE_HOME/modules.d"' \
+        ../deploy/container/server-entrypoint.sh &&
+   grep -qF 'chmod 0700 "$AIMEE_HOME/modules.d" "$AIMEE_HOME/modules.d/server"' \
+        ../deploy/container/server-entrypoint.sh; then
+    pass "server entrypoint keeps the private module policy traversable by the daemon"
+else
+    fail "server entrypoint leaves the private module policy inaccessible to the daemon"
 fi
 
 # Upgraded persistent volumes can spend tens of seconds recovering WAL state
@@ -485,20 +535,57 @@ else
     fail "config.o without platform_random.o in: $bad_targets"
 fi
 
-# 6. Every .PHONY target has a corresponding rule (catches missing targets)
-phony_targets=$(grep '^\.PHONY:' Makefile tests/Rules.mk 2>/dev/null | \
-    sed 's/^.*\.PHONY://' | tr ' ' '\n' | sort -u | grep -v '^$')
-missing_rules=""
-for target in $phony_targets; do
-    # make -n (dry run) exits non-zero if the target has no rule
-    if ! make -n "$target" >/dev/null 2>&1; then
-        missing_rules="$missing_rules $target"
-    fi
-done
+# 6. Parse the Make database once, then verify every literal .PHONY declaration
+# has a rule in the source. The previous implementation started a fresh
+# `make -n` for every phony target; reparsing this large graph 100+ times took
+# more than two minutes in CI. GNU make returns 1 from -q when the default goal
+# is merely out of date, while 2 means the database itself could not be parsed.
+make_db_rc=0
+make -qp >/dev/null 2>&1 || make_db_rc=$?
+if [ "$make_db_rc" -gt 1 ]; then
+    fail "Make database parses cleanly"
+else
+    pass "Make database parses cleanly"
+fi
+
+# Join continuations once so multi-line .PHONY declarations and target rules
+# can be compared by one awk process. This deliberately checks the source rule,
+# not the database's synthetic target: declaring `.PHONY: missing` causes GNU
+# make to manufacture a target named `missing`, which made `make -n missing`
+# report success even when no corresponding rule existed.
+missing_rules=$(
+    {
+        sed ':a; /\\$/ { N; s/\\\n/ /; ba }' Makefile
+        sed ':a; /\\$/ { N; s/\\\n/ /; ba }' tests/Rules.mk
+    } | awk '
+        /^\.PHONY:[[:space:]]/ {
+            line = $0
+            sub(/^\.PHONY:[[:space:]]*/, "", line)
+            count = split(line, names, /[[:space:]]+/)
+            for (i = 1; i <= count; i++)
+                if (names[i] != "")
+                    phony[names[i]] = 1
+            next
+        }
+        /^[^#[:space:]][^=]*:/ {
+            line = $0
+            sub(/:.*/, "", line)
+            count = split(line, names, /[[:space:]]+/)
+            for (i = 1; i <= count; i++)
+                if (names[i] != "")
+                    rules[names[i]] = 1
+        }
+        END {
+            for (target in phony)
+                if (!(target in rules))
+                    print target
+        }
+    ' | sort | tr '\n' ' '
+)
 if [ -z "$missing_rules" ]; then
     pass "all .PHONY targets have rules"
 else
-    fail ".PHONY targets with no rule:$missing_rules"
+    fail ".PHONY targets with no rule: $missing_rules"
 fi
 
 # 7. Scripts don't reference non-existent make targets
@@ -692,11 +779,11 @@ cmake_boundary_failures=""
 for target_block in client webchat; do
     block_var="cmake_${target_block}_links"
     block="${!block_var}"
-    if echo "$block" | grep -Eq 'aimee-(cmd|git|agent|data|core)|SQLite::SQLite3|LIBPQ|libpq'; then
+    if echo "$block" | grep -Eq 'aimee-(cmd|git|agent|data|core)([[:space:]]|[)]|$)|SQLite::SQLite3|LIBPQ|libpq'; then
         cmake_boundary_failures="$cmake_boundary_failures aimee-$target_block"
     fi
 done
-if echo "$cmake_server_links" | grep -Eq 'aimee-(cmd|git|agent|data|core)|LIBPQ|libpq'; then
+if echo "$cmake_server_links" | grep -Eq 'aimee-(cmd|git|agent|data|core)([[:space:]]|[)]|$)|LIBPQ|libpq'; then
     cmake_boundary_failures="$cmake_boundary_failures aimee-server"
 fi
 if [ -z "$cmake_boundary_failures" ]; then
@@ -1471,6 +1558,24 @@ else
 fi
 
 echo ""
+# NOTE: `set -e` is active here, and `grep -c` exits 1 on zero matches -- hence
+# `|| true` below. Without it this block silently ended the run.
+# indexed -> embedded -> curated. The scan handler must NOT enqueue curator work:
+# at that point the project is indexed and its vectors do not exist yet, so
+# curation would race embedding. The enqueue belongs to the embed stage, gated on
+# the project being fully embedded. It also kept a one-row-per-symbol INSERT on
+# the synchronous path of /v1/code/scan (~173,000 rows, ~215s on a 4,018-file
+# corpus, against a 300s client deadline), so a drift back here is both a
+# correctness and a latency regression.
+scan_enqueues=$(grep -c 'kb_curator_queue_code_units_for_project' ../src/kb/http/kb_http_code.c 2>/dev/null || true)
+embed_enqueues=$(grep -c 'kb_curator_queue_code_units_for_project' ../src/modules/kb-synthesis/kb_curator_drain.c 2>/dev/null || true)
+embed_gated=$(grep -c 'kb_code_embed_project_fully_embedded' ../src/modules/kb-synthesis/kb_curator_drain.c 2>/dev/null || true)
+if [ "$scan_enqueues" -eq 0 ] && [ "$embed_enqueues" -ge 1 ] && [ "$embed_gated" -ge 1 ]; then
+    pass "curator work is enqueued by the embed stage, not by the scan handler"
+else
+    fail "curation must be enqueued after embedding, not during scan (scan=$scan_enqueues, embed=$embed_enqueues, gated=$embed_gated)"
+fi
+
 if [ "$FAIL" = "0" ]; then
     if [ "$MODE" = "--build-variants" ]; then
         echo "All build variant checks passed."
@@ -1485,3 +1590,4 @@ else
     fi
     exit 1
 fi
+

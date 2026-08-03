@@ -2,9 +2,9 @@
 """Generate CLI + configuration reference docs from the canonical source tables.
 
 Two committed outputs (regenerate with `make -C src docs-gen`):
-  docs/gen/cli-commands.md   — every `aimee` CLI command + subcommands, from the
+  docs/gen/cli-commands.md  : every `aimee` CLI command + subcommands, from the
                                client help table (src/cli_help_data.h).
-  docs/gen/configuration.md  — every config key: the `aimee config get/set`
+  docs/gen/configuration.md : every config key: the `aimee config get/set`
                                scalar allowlist (src/modules/config/config_fields.c) plus the
                                config-file (JSON) sections parsed by src/config*.c.
 
@@ -98,7 +98,7 @@ CFG_TYPE = {"CFG_STRING": "string", "CFG_BOOL": "bool", "CFG_INT": "int", "CFG_F
             "CFG_ECON_TIER": "string (off\\|safe\\|aggressive)"}
 
 # Curated one-line descriptions for the CLI-settable keys (the `aimee config set`
-# surface). A key in the generated table with no entry here renders "—" and is
+# surface). A key in the generated table with no entry here renders "n/a" and is
 # counted as undescribed so the gap is visible (see render_config).
 CFG_KEY_DESC = {
     "kb_pdf_tier": "Structured-PDF pipeline preset: off (plain pdftotext, default) | basic (ingest+vector) | full (all stages).",
@@ -118,13 +118,23 @@ CFG_KEY_DESC = {
     "verify_role": "Delegate role used for cross-verification.",
     "wfe_proposals_autoscan_enabled": "Automatically scan watched proposal directories; off requires explicit trigger.fire.",
 
-    "llm_embed_backend": "Deploy-time embedding backend: local or external.",
-    "llm_synth_backend": "Deploy-time synthesis backend: local, external, or off.",
-    "llm_synth_endpoint": "External synthesis endpoint used when the synth backend is external.",
-    "llm_synth_gpu": "Deploy-time GPU selector for the local synthesis backend.",
-    "llm_synth_host": "Deploy-time host selector for the local synthesis backend.",
-    "llm_synth_model": "Model label sent to the configured synthesis endpoint.",
-    "llm_synth_tier": "Deploy-time local synthesis tier: cpu, small, mid, or large.",
+    "aimee_with_llamacpp": "Whether THIS IMAGE bundles llama.cpp (\"1\" on the "
+    "aimee-kb-*-llm variants). Set by the Dockerfile, not by an operator: it is a fact "
+    "about the running image, and the setup wizard reads it to decide whether the local "
+    "synthesis models can be offered at all.",
+    "synthesis_endpoint": "The ONE synthesis endpoint, remote or loopback. Empty means "
+    "synthesis is off, which is supported - embedding, search, recall and indexing "
+    "never call it. On a *-llm image the container entrypoint sets this to loopback "
+    "itself after starting the bundled model.",
+    "synthesis_model": "Synthesis model. On a *-llm image this selects the bundled model "
+    "to fetch and serve (gemma-4-E2B-it or gemma-4-E4B-it); otherwise it is the model "
+    "label sent to the configured endpoint.",
+    "synthesis_api_key": "Bearer token for the synthesis endpoint (blank for a keyless "
+    "or loopback endpoint).",
+    "synthesis_thinking": "Let the synthesis model think before answering (default on). "
+    "It measured positive-to-neutral everywhere it was tried. Global rather than "
+    "per-stage, and the operator's call: turn it off only for a model that reasons past "
+    "its output budget without answering.",
 
     "kb_curator_cross_repo_graph_enabled": "Resolve and maintain cross-repository dependency edges.",
     "kb_curator_custom_stages": "JSON definitions that recompose vetted curator operations with bounded budgets.",
@@ -142,7 +152,7 @@ CFG_KEY_DESC = {
     "kb_curator_synthesize_enabled": "Create evidence-backed topic synthesis with the configured reasoning tier.",
     "kb_curator_user_presets": "JSON array of operator-defined curator stage presets.",
 
-    "autonomous": "Run autonomously (auto-advance machine gates; human gates always park) vs interactive.",
+    "autonomous": "Legacy mode flag. The current Go WFE records run mode at admission but does not branch scheduler behavior on it; human gates always park.",
     "economizer": "Context economizer tier: `off` (verbatim passthrough), `safe` (default; Anthropic prompt caching + lossless, freeze-guarded reduction), or `aggressive` (adds lossy compression + live OpenAI-side mutation; Anthropic context is never mutated). See docs/features/economizer.md.",
     "cache_aware_rewrite_enabled": "Rewrite prompts to align with the provider's prompt cache.",
     "cache_min_chars": "Minimum prompt size (chars) before cache-shaping applies.",
@@ -155,7 +165,7 @@ CFG_KEY_DESC = {
     "cost_reward_enabled": "Factor token cost into the reward signal.",
     "cost_reward_lambda_pct": "Cost-penalty weight (percent) in the reward.",
     "cost_reward_ref_usd_milli": "Reference cost (USD-milli) normalizing the cost reward.",
-    "client_integrations_enabled": "Auto-register aimee (MCP server, hooks, slash commands) into detected AI-tool user configs — Claude Code (~/.claude), Gemini, Copilot, Codex. Default-ON; set false, or export AIMEE_NO_CLIENT_INTEGRATIONS, to keep aimee out of every tool's global config and wire a single project by hand.",
+    "client_integrations_enabled": "Auto-register aimee (MCP server, hooks, slash commands) into detected AI-tool user configs: Claude Code (~/.claude), Gemini, Copilot, Codex. Default-ON; set false, or export AIMEE_NO_CLIENT_INTEGRATIONS, to keep aimee out of every tool's global config and wire a single project by hand.",
     "cross_verify": "Enable cross-model verification of outputs.",
     "wfe_live_forge_enabled": "Gate for the autonomous live forge (default-ON). When off, the forge provider is not registered and every forge op fails closed, so an autonomous run can never open or merge a real PR. Even on, each op re-checks this flag and the merge-target rail.",
     "css_style_graph_enabled": "Enable the CSS migration assistant's style-graph write path during indexing.",
@@ -172,10 +182,20 @@ CFG_KEY_DESC = {
     "dogfood_inline_tagging": "Inline-tag dogfood events during the session.",
     "dogfood_log_dir": "Directory for dogfood logs.",
     "ecomode": "Reduce background compute (eco mode).",
-    "embedding_command": "Command that produces embeddings (overrides the endpoint).",
-    "embedding_dim": "Embedding vector dimension.",
-    "embedding_endpoint": "Embeddings provider endpoint URL.",
-    "embedding_model": "Embeddings model name.",
+    "embedder_command": "Command that produces embeddings (overrides the endpoint).",
+    "embedder_dims": "Embedding vector width. Leave unset for a bundled embedder - it "
+    "declares its own width and the kb derives it (pinned > recorded > probed). REQUIRED "
+    "for an external endpoint, whose width cannot be derived; valid to 4000, the DB2 "
+    "column ceiling. A ONE-WAY DOOR once anything is embedded: DB2 records the width and "
+    "refuses to start on drift.",
+    "embedder_url": "External embedder endpoint. A non-empty value IS the external "
+    "embedder; empty means the model baked into this image variant (bekko-a25m at 384, "
+    "or nomic-v2 at 768 on the -nomic images).",
+    "embedder_model": "Embedder identity. Written for a bundled model too, not just an "
+    "external one: it is the registry key pooling and prefixes resolve from, and the "
+    "value recorded against the corpus.",
+    "embedder_api_key": "Bearer token for an external embedder endpoint (blank if it "
+    "needs none).",
     "fidelity_check_enabled": "Run the answer-fidelity judge on terminal-text turns "
     "(default off; requires kb_evidence_emit_enabled + ingress_preinject_enabled).",
     "guardrail_mode": "Guardrail enforcement mode: approve (default; a tool call needs approval, so an unattended delegate is blocked), prompt, or deny.",
@@ -222,13 +242,13 @@ CFG_KEY_DESC = {
     "sandbox on its own: the container still has a network, so `require_aimee_git` and the "
     "credential strip remain the live boundary. The delegate image must carry whatever the "
     "work needs (a toolchain, or `verify` fails). The server logs OFF/INERT/ARMED at boot, "
-    "probing `docker version` — check it, because an unreachable daemon means every delegate "
+    "probing `docker version`. Check it because an unreachable daemon means every delegate "
     "runs on the host; set `delegate_sandbox_require_isolation` to refuse rather than fall "
     "back to un-isolated host execution.",
     "delegate_sandbox_package_access": "Runtime package-access policy for a `--network none` "
     "delegate sandbox. aimee always performs and logs the fetch (the delegate holds no outside "
     "socket); this selects how much: `proxy` (default) proxies package-manager fetches to any "
-    "host — egress-via-aimee, for out-of-the-box functionality; `off` no runtime proxy "
+    "host through aimee for out-of-the-box functionality; `off` no runtime proxy "
     "(build-time installs + learned pre-bake only); `gated` host-allowlisted registries, "
     "off-allowlist requires human approval; `governance` allowlist from a governance provider, "
     "off-allowlist refused. Only meaningful when `delegate_sandbox` is on.",
@@ -237,13 +257,13 @@ CFG_KEY_DESC = {
     "`--network none`, but some runtimes ignore it and give the sandbox real egress, defeating the "
     "package-access proxy. After the container starts aimee asks the host daemon whether a network "
     "with an IP is attached and always logs an error on a breach; when this is set, sandboxing is "
-    "mandatory — aimee refuses to run the delegate at all (rather than fall back to un-isolated "
+    "mandatory. aimee refuses to run the delegate at all (rather than fall back to un-isolated "
     "in-process host execution) on any failure to isolate: a breach, an unverifiable probe, docker "
     "being unavailable, or a failed acquire.",
     "delegate_sandbox_learn_packages": "Learned toolchain for delegate sandboxes (default on). "
     "aimee captures the apt packages a delegate installs inside its `--network none` sandbox, "
     "records them per project (git root), and pre-bakes the learned set into that project's next "
-    "sandbox image build — augmenting a declared `.aimee/project.yaml` from+packages spec, or "
+    "sandbox image build. It augments a declared `.aimee/project.yaml` from+packages spec, or "
     "synthesizing one (FROM the resolved base + the learned packages) when none is declared. "
     "Best-effort: a learned build that fails falls back to the un-augmented image. The first "
     "delegate turn after a new package is learned pays a one-time image build.",
@@ -299,7 +319,7 @@ CFG_KEY_DESC = {
     "text + geometry feed the normal citation path (default off; without it a scanned PDF is "
     "ingested asset-only).",
     "ocr_command": "OCR sidecar endpoint/command for structured-PDF scanned-page recognition "
-    "(resolves like embedding_command; AIMEE_OCR_URL env fallback).",
+    "(resolves like embedder_command; AIMEE_OCR_URL env fallback).",
     "kb_mining_enabled": "Enable background KB mining.",
     "kb_mining_min_poll_s": "Minimum interval (s) between KB mining polls.",
     "kb_search_max_results": "Default max results for KB search.",
@@ -421,12 +441,12 @@ SECTION_DESC = {
 def parse_config_fields():
     # Each entry is `{"<key>", offsetof(...), <size>, <flag>, CFG_<TYPE>}`. The
     # offsetof/sizeof macros embed commas, so match the key (first string before
-    # offsetof) and the type (CFG_* before the closing brace) positionally — they
+    # offsetof) and the type (CFG_* before the closing brace) positionally: they
     # are 1:1 in source order.
     text = (SRC / "modules" / "config" / "config_fields.c").read_text(encoding="utf-8")
     # Bound to the config_fields[] initializer, then parse each `{...}` entry as a
     # unit (split on `},`) so the key and its CFG_* type are paired within one
-    # entry — robust to CFG_* uses in helper functions below the table.
+    # entry: robust to CFG_* uses in helper functions below the table.
     start = text.index("config_fields[] = {")
     text = text[start:text.index("\n};", start)]
     fields, seen = [], set()
@@ -452,7 +472,7 @@ ASSIGN_RE = re.compile(
     r'(\w+)\s*=\s*cJSON_GetObjectItemCaseSensitive\(\s*root\s*,\s*"([^"]+)"\s*\)')
 CHILD_RE = re.compile(
     r'cJSON_GetObjectItemCaseSensitive\(\s*(\w+)\s*,\s*"([^"]+)"\s*\)')
-# `cJSON_ArrayForEach(<item>, <arr>)` — element fields of an array-valued section
+# `cJSON_ArrayForEach(<item>, <arr>)`: element fields of an array-valued section
 # are read off <item>; map <item> to the array's section so they're captured too.
 FOREACH_RE = re.compile(r'cJSON_ArrayForEach\(\s*(\w+)\s*,\s*(\w+)\s*\)')
 
@@ -493,18 +513,18 @@ def render_config(fields, sections, flat):
     out = ["# Configuration Reference",
            "",
            "> Auto-generated from the canonical source tables by "
-           "`scripts/gen-reference-docs.py` — config keys from `src/modules/config/config_fields.c` + "
+           "`scripts/gen-reference-docs.py`: config keys from `src/modules/config/config_fields.c` + "
            "`src/config*.c`, env vars scanned from `getenv()` in `src/`, and the "
-           "workflow surface from `src/modules/workflows/`. Do not edit by hand; run "
+           "workflow catalog from `server-go/internal/wfe/catalog.go`. Do not edit by hand; run "
            "`make -C src docs-gen` to regenerate.",
            "",
            "This reference covers every configurable surface:",
            "",
-           "1. **Config-store keys** — the `aimee config` keys + config-file sections (below).",
-           "2. **Environment variables** — `AIMEE_*` runtime/deployment overrides.",
-           "3. **External & provider environment** — provider keys, endpoints, proxy, editor.",
-           "4. **Workflow engine** — workflow definition + custom-block (`blocks.yaml`) schema.",
-           "5. **Other config files** — `agents.json`, toolsets, guardrails.",
+           "1. **Config-store keys**: the `aimee config` keys + config-file sections (below).",
+           "2. **Environment variables**: `AIMEE_*` runtime/deployment overrides.",
+           "3. **External & provider environment**: provider keys, endpoints, proxy, editor.",
+           "4. **Workflow engine**: workflow definition + custom-block (`blocks.yaml`) schema.",
+           "5. **Other config files**: `agents.json`, toolsets, guardrails.",
            "",
            "CLI commands + flags are documented separately in "
            "[`cli-commands.md`](cli-commands.md).",
@@ -518,7 +538,7 @@ def render_config(fields, sections, flat):
            "aimee config set <key> <value>    # set one value",
            "```",
            "",
-           "Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) "
+           "Structured options (arrays, nested objects: e.g. `ensemble.reference_models`) "
            "are not CLI-settable; they are written into the config file under the "
            "sections listed at the end.",
            ""]
@@ -538,7 +558,7 @@ def render_config(fields, sections, flat):
     out.append("| Key | Type | Description |")
     out.append("|-----|------|-------------|")
     for key, typ in sorted(runtime):
-        out.append(f"| `{key}` | {typ} | {CFG_KEY_DESC.get(key, '—')} |")
+        out.append(f"| `{key}` | {typ} | {CFG_KEY_DESC.get(key, 'n/a')} |")
     out.append("")
     if undescribed:
         out.append("> **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): "
@@ -561,7 +581,7 @@ def render_config(fields, sections, flat):
             out.append("| Key | Type | Description |")
             out.append("|-----|------|-------------|")
             for key, typ in sorted(group):
-                out.append(f"| `{key}` | {typ} | {CFG_KEY_DESC.get(key, '—')} |")
+                out.append(f"| `{key}` | {typ} | {CFG_KEY_DESC.get(key, 'n/a')} |")
             out.append("")
 
     out.append(f"## Config-file sections ({len(sections)})")
@@ -575,7 +595,7 @@ def render_config(fields, sections, flat):
         keys = ", ".join(f"`{k}`" for k in sorted(sections[sect]))
         desc = SECTION_DESC.get(sect)
         lead = f"_{desc}_ Keys: " if desc else ""
-        out.append(f"- **`{sect}`** — {lead}{keys}")
+        out.append(f"- **`{sect}`**: {lead}{keys}")
     out.append("")
 
     if flat:
@@ -594,7 +614,7 @@ def render_config(fields, sections, flat):
 # Every env var the binaries actually read. The scan is the completeness anchor;
 # ENV_DESC supplies the (group, description) for each. A scanned var missing from
 # ENV_DESC is surfaced under "Undocumented" so a new var can never silently slip
-# the reference — keeping this gate honest is the whole point.
+# the reference: keeping this gate honest is the whole point.
 
 # Hardened offline binaries copy environment values before clearenv(); treat
 # that local accessor exactly like getenv() so their deployment contract is
@@ -686,7 +706,7 @@ ENV_DESC = {
         "looks like search. Set to exactly `1`; any other value is off. Never widens fetches of "
         "model-supplied or search-result URLs, which stay denied.",
     ),
-    "AIMEE_WEBCHAT_GIT": ("Server runtime", "Per-webuser webchat git surface — repo connect/clone, git ops (pull/commit/push/branch), per-host token + SSH-key credential intake, the workspace forge-token broker, project listing + session-dir resolution, and \"Sign in with GitHub\" (on by default; set to the literal value 0 to disable the entire surface — all of those routes then return 503, e.g. for a chat/editor-only deployment; any other value leaves it on). Independent of AIMEE_WEBCHAT_EDITOR."),
+    "AIMEE_WEBCHAT_GIT": ("Server runtime", "Per-webuser webchat git surface: repo connect/clone, git ops (pull/commit/push/branch), per-host token + SSH-key credential intake, the workspace forge-token broker, project listing + session-dir resolution, and \"Sign in with GitHub\". It is on by default. Set the literal value 0 to disable the entire surface; all of those routes then return 503. Any other value leaves it on. Independent of AIMEE_WEBCHAT_EDITOR."),
     "AIMEE_WEBCHAT_EDITOR": ("Server runtime", "Per-webuser in-browser code-server editor (on by default; set to 0 to disable; needs a code-server binary, shipped by WITH_VSCODE images)."),
     "AIMEE_WEBCHAT_EDITOR_BIN": ("Server runtime", "Override path to the code-server binary used for the in-browser editor."),
     "AIMEE_WEBCHAT_EDITOR_IDLE_SECS": ("Server runtime", "Idle timeout in seconds before a per-webuser code-server editor is reaped. Default 1800 (30 min); positive values are clamped to [60, 604800]; 0 disables idle reaping; malformed/negative/overflow values fall back to the default. An actively-open editor is kept alive by the proxy keepalive, so it is not reaped mid-session."),
@@ -705,16 +725,16 @@ ENV_DESC = {
     "AIMEE_WORKTREE_GC_DAYS": ("Server runtime", "Age threshold (days) for worktree GC."),
     "AIMEE_SOCK": ("Server runtime", "Sandbox helper socket path."),
     # Knowledge base
-    "AIMEE_LLM_URL": ("Knowledge base (aimee-kb)", "Synthesis endpoint (curator Tier-A + Tier-B at {url}/v1). No longer selects an embedder: the kb embeds in-container, and AIMEE_EMBEDDER_URL points at an external embedder. See docs/KB_LLM_BACKENDS.md."),
-    "AIMEE_LLM_AUTH_TOKEN": ("Managed KB and inference", "First-boot transport for the bearer aimee-kb presents to the external synthesis endpoint. aimee-kb synchronously seals it into Vault, scrubs the environment, and cleanly re-execs before serving; wizard-managed deploys generate the 256-bit value in Vault. This is separate from user/server bearers."),
-    "AIMEE_LLM_AUTH_REQUIRED": ("Managed KB and inference", "Set to 1 on wizard-managed KBs so synthesis clients refuse to contact the LLM when its bearer service identity is missing."),
-    "AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE": ("Managed KB and inference", "Explicit first-boot migration/adoption transport for an existing wizard-managed LLM credential. aimee-server seals it into Vault and scrubs the environment before normal startup. Ordinary inherited AIMEE_LLM_AUTH_TOKEN is ignored by managed credential creation so stale child-service state cannot win. Must be a 32..512 character RFC 6750 b64token."),
+    "SYNTHESIS_ENDPOINT": ("Knowledge base (aimee-kb)", "Synthesis endpoint (every curator stage, at {url}/v1). No longer selects an embedder: the kb embeds in-container, and EMBEDDER_URL points at an external embedder. See docs/SYNTHESIS_MODELS.md for what to put behind it and docs/KB_LLM_BACKENDS.md for the provider surface."),
+    "SYNTHESIS_API_KEY": ("Managed KB and inference", "First-boot transport for the bearer aimee-kb presents to the external synthesis endpoint. aimee-kb synchronously seals it into Vault, scrubs the environment, and cleanly re-execs before serving; wizard-managed deploys generate the 256-bit value in Vault. This is separate from user/server bearers."),
+    "SYNTHESIS_AUTH_REQUIRED": ("Managed KB and inference", "Set to 1 on wizard-managed KBs so synthesis clients refuse to contact the LLM when its bearer service identity is missing."),
+    "AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE": ("Managed KB and inference", "Explicit first-boot migration/adoption transport for an existing wizard-managed LLM credential. aimee-server seals it into Vault and scrubs the environment before normal startup. Ordinary inherited SYNTHESIS_API_KEY is ignored by managed credential creation so stale child-service state cannot win. Must be a 32..512 character RFC 6750 b64token."),
     "AIMEE_OFFLINE_ALLOW_NO_SWAP_MLOCK_FALLBACK": (
         "Managed KB and inference",
         "Internal managed-authority switch: still attempts mlockall first, but when an unprivileged container cannot raise RLIMIT_MEMLOCK, permits the offline one-shot to continue only if the kernel reports no active swap. Operator-run custody tools leave this unset and retain mandatory mlockall.",
     ),
-    "AIMEE_LLM_MODEL": ("Knowledge base (aimee-kb)", "Model label sent to AIMEE_LLM_URL's chat endpoint (single-model gateways ignore it). Default 'aimee-synth'."),
-    "AIMEE_EMBEDDER_URL": ("Knowledge base (aimee-kb)", "Embedder endpoint override (/embed, /embed_batch); takes precedence over AIMEE_LLM_URL for embedding."),
+    "SYNTHESIS_MODEL": ("Knowledge base (aimee-kb)", "Model label sent to SYNTHESIS_ENDPOINT's chat endpoint (single-model gateways ignore it). Default 'aimee-synth'."),
+    "EMBEDDER_URL": ("Knowledge base (aimee-kb)", "Embedder endpoint override (/embed, /embed_batch); takes precedence over SYNTHESIS_ENDPOINT for embedding."),
     "AIMEE_KB_API_URL": ("Knowledge base (aimee-kb)", "aimee-kb HTTP API base URL."),
     "AIMEE_KB_API_BEARER_TOKEN": ("Knowledge base (aimee-kb)", "First-boot transport for the aimee-kb API bearer token. Server and KB bootstrap paths seal it into Vault and remove it from the environment before long-lived service startup."),
     "AIMEE_KB_API_CA_BUNDLE": ("Knowledge base (aimee-kb)", "CA bundle path for verifying the aimee-kb TLS certificate."),
@@ -737,6 +757,27 @@ ENV_DESC = {
         "Advertised mTLS hostname placed in the aimee-kb server certificate; the listener binds all interfaces.",
     ),
     "AIMEE_KB_MTLS_PORT": ("Knowledge base (aimee-kb)", "aimee-kb mTLS listener port."),
+    # The two sidecar hops. Naming a sidecar is what makes the kb mint the mTLS
+    # identities for it at startup, so these read as wiring rather than as a model
+    # choice: EMBEDDER_MODEL says what to embed with, and is equally satisfied by an
+    # external endpoint, while this says a container exists on the aimee network to
+    # issue a certificate for. Leaving them unset is the supported external-provider
+    # deployment, not a misconfiguration.
+    "AIMEE_LLM_HOST": (
+        "Knowledge base (aimee-kb)",
+        "DNS name of the synthesis sidecar container. Setting it makes aimee-kb issue the "
+        "mTLS identities for the kb -> aimee-llm hop into $AIMEE_HOME/synthesis-tls at "
+        "startup, from the kb's own CA. Unset for an external or absent synthesis provider, "
+        "which needs none of them. The sidecar refuses to start without this material.",
+    ),
+    "AIMEE_EMBEDDER_HOST": (
+        "Knowledge base (aimee-kb)",
+        "DNS name of the embedder sidecar container (aimee-embedder-a25m or "
+        "aimee-embedder-nomic). Setting it makes aimee-kb issue the mTLS identities for the "
+        "kb -> embedder hop into $AIMEE_HOME/embedder-tls at startup, independently of the "
+        "synthesis hop. Unset for an external embedder reached over plain HTTPS, or when no "
+        "embedder is deployed. The sidecar refuses to start without this material.",
+    ),
     "AIMEE_KB_EMIT_ENROLL": ("Knowledge base (aimee-kb)", "Emit a client enrollment token on KB start."),
     "AIMEE_KB_EMIT_SCOPE": ("Knowledge base (aimee-kb)", "Scope for the emitted enrollment token."),
     "AIMEE_KB_OIDC_ISSUER": ("Knowledge base (aimee-kb)", "OIDC issuer for KB API auth."),
@@ -775,10 +816,10 @@ ENV_DESC = {
         "Database & vectors",
         "Per-connection `statement_timeout` in ms. Defaults to the pool's stuck-lease "
         "ceiling (`DB2_POOL_HOLD_CEILING_MS`, 300000), because a statement must not "
-        "outlive the duration that defines a lease as stuck — the pool can report such a "
+        "outlive the duration that defines a lease as stuck. The pool can report such a "
         "lease but cannot reclaim it. The value must be canonical decimal digits with no "
-        "sign, surrounding whitespace or leading zero. Exactly `0` disables the bound — a "
-        "deliberate opt-out for genuinely long work — and every other spelling of zero "
+        "sign, surrounding whitespace or leading zero. Exactly `0` disables the bound. This is a "
+        "deliberate opt-out for genuinely long work. Every other spelling of zero "
         "(`00`, `+0`, `-0`, ` 0`) is treated as malformed. Anything malformed or "
         "out-of-range falls back to the default and never to unlimited, so no typo can "
         "silently remove the bound.",
@@ -789,13 +830,13 @@ ENV_DESC = {
         "same pool stuck-lease ceiling (`DB2_POOL_HOLD_CEILING_MS`, 300000). "
         "`statement_timeout` bounds a STATEMENT, so a unit of work that opens a "
         "transaction and then stalls before its next statement is invisible to it and "
-        "holds its pool member indefinitely — measured at ~4.5 hours against a "
+        "holds its pool member indefinitely. This measured at about 4.5 hours against a "
         "five-minute ceiling. Postgres ends such a backend itself, so the stalled thread "
         "unwinds and the lease is returned without a restart. Same value grammar as "
         "`AIMEE_DB2_STATEMENT_TIMEOUT_MS`; exactly `0` opts out, independently of the "
         "statement bound.",
     ),
-    "AIMEE_EMBEDDING_DIM": ("Database & vectors", "Embedding dimension (drives halfvec column sizing)."),
+    "EMBEDDER_DIMS": ("Database & vectors", "Embedding dimension (drives halfvec column sizing)."),
     "AIMEE_PGVEC_SLOW_QUERY_MS": ("Database & vectors", "Slow-query log threshold (ms) for the pgvector transport."),
     # Memory
     "AIMEE_MEMORY_CITATIONS_MODE": ("Memory", "Citation rendering mode for memory recall."),
@@ -852,10 +893,10 @@ ENV_DESC = {
     "AIMEE_GATEWAY_WEBHOOK_INSECURE": ("Gateway (voice / webhooks / push)", "Allow the webhook listener without TLS (dev)."),
     "AIMEE_GATEWAY_WEBHOOK_DELIVER_ONLY": ("Gateway (voice / webhooks / push)", "Webhook deliver-only mode (no reply path)."),
     # Workflow engine
-    "AIMEE_WORKFLOW_REPO": ("Workflow engine", "Local repository directory the workflow engine operates on."),
-    "AIMEE_WORKFLOW_BASE": ("Workflow engine", "Base branch for the engine's freeze/diff."),
-    "AIMEE_AUTONOMY_PANEL_RETRIES": ("Workflow engine", "Per-(work item, stage) budget for auto-retrying a TRANSIENT roundtable park (`panel_degraded`/`panel_unreachable`) in an autonomous run, one retry per scheduler backstop sweep, before it escalates to a human. Default 6. An explicit `0` disables auto-retry (a degraded panel escalates immediately — the pre-feature behavior, useful during a known provider incident); a malformed/negative value floors to the default so a typo can't silently disable the rail."),
-    "AIMEE_DEFAULT_BRANCH": ("Workflow engine", "Override the target repo's real default branch (its trunk) that a `base:trunk` `branch.open`/`pr.open` resolves to; else read from `git origin/HEAD`. Distinct from `AIMEE_AUTONOMY_BASE` (the aimee integration branch). A final feature PR opens against this branch (open-only, never auto-merged)."),
+    "AIMEE_WORKFLOW_REPO": ("Workflow engine", "Legacy C workflow fallback for a local repository. The Go WFE uses the repository admitted with each work item."),
+    "AIMEE_WORKFLOW_BASE": ("Workflow engine", "Legacy C workflow fallback for the freeze/diff base. It does not set the Go WFE integration branch."),
+    "AIMEE_AUTONOMY_PANEL_RETRIES": ("Workflow engine", "Legacy C scheduler budget for retrying transient roundtable parks. It does not configure the Go WFE scheduler."),
+    "AIMEE_DEFAULT_BRANCH": ("Workflow engine", "Legacy C workflow override for default-branch resolution. The Go WFE derives branch authority from the admitted repository and checkout."),
     # Git verify / MCP
     "AIMEE_VERIFY_PARALLEL": ("Git verify / MCP", "Run `aimee git verify` steps in parallel."),
     "AIMEE_VERIFY_LOCK_FILE": (
@@ -874,7 +915,7 @@ ENV_DESC = {
     ),
     "AIMEE_VERIFY_STEP_TIMEOUT_MS": ("Git verify / MCP", "Per-step timeout (ms) for git verify."),
     "AIMEE_MCP_CWD": ("Git verify / MCP", "Working-directory hint for MCP git-root resolution."),
-    "AIMEE_MCP_TOOL_PROFILE": ("Git verify / MCP", "MCP tools/list presentation profile: 'core'/'lean' (default — Tier-0 high-frequency tools only, with find_tools/describe_tool reaching the rest) or 'full' (present every tool upfront)."),
+    "AIMEE_MCP_TOOL_PROFILE": ("Git verify / MCP", "MCP tools/list presentation profile: 'core'/'lean' (default: Tier-0 high-frequency tools only, with find_tools/describe_tool reaching the rest) or 'full' (present every tool upfront)."),
     # Models
     "AIMEE_MODEL_CAPABILITY_OVERRIDES": ("Models", "Override model capability flags (reasoning/tools/vision/…)."),
     # TLS & networking
@@ -896,7 +937,7 @@ ENV_DESC = {
     "AIMEE_WEBCHAT_PASSWORD": ("Server runtime", "Optional first-boot webchat password paired with AIMEE_WEBCHAT_USER. The bootstrap record is sealed into Vault and removed from the environment before runtime-web starts."),
     "AIMEE_WEBCHAT_USERS": ("Server runtime", "Optional first-boot webchat account registry. It is sealed into Vault and removed from the environment before runtime-web starts."),
     "AIMEE_VAULT_ENV_OVERWRITE": ("Server runtime", "First-boot control flag allowing supplied credential values to replace existing Vault records. It is not itself a credential."),
-    "AIMEE_AUTONOMY_BASE": ("Workflow engine", "Integration branch used by autonomous workflow work; distinct from the repository default branch."),
+    "AIMEE_AUTONOMY_BASE": ("Workflow engine", "Legacy C workflow integration-branch fallback. The Go WFE uses the branch checked out when it admits the repository."),
     "AIMEE_AUTONOMY_MAX_ACTIVE_PER_PRINCIPAL": ("Workflow engine", "Maximum active autonomous work items for one authenticated principal."),
     "AIMEE_AUTONOMY_MAX_USD": ("Workflow engine", "Default USD ceiling for an autonomous work item; 0 disables this default ceiling."),
     "AIMEE_AUTONOMY_SUBMIT_RATE_PER_MIN": ("Workflow engine", "Autonomous-submission rate limit per principal."),
@@ -1042,7 +1083,7 @@ def render_env(found):
     if undocumented:
         out.append("### Undocumented (add to `ENV_DESC` in gen-reference-docs.py)")
         out.append("")
-        out.append("> These are read by the code but have no description yet — the "
+        out.append("> These are read by the code but have no description yet: the "
                    "generator surfaces them so the reference can't silently fall behind.")
         out.append("")
         out.append(", ".join(f"`{v}`" for v in undocumented))
@@ -1065,7 +1106,7 @@ EXT_OS_IGNORE = {
     "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR",
     "LISTEN_FDS", "LISTEN_PID",
 }
-# provider keys resolved via per-agent api_key_env (not getenv literals) — added so
+# provider keys resolved via per-agent api_key_env (not getenv literals): added so
 # the reference lists them even though the static scan can't see them
 EXT_DYNAMIC = {"ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"}
 
@@ -1095,9 +1136,12 @@ EXT_DESC = {
     "CODEX_CWD": ("Codex / Claude integration", "Working directory reported by the Codex frontend."),
     "CODEX_THREAD_ID": ("Codex / Claude integration", "Codex conversation/thread id."),
     "CLAUDE_SESSION_ID": ("Codex / Claude integration", "Claude Code session id when aimee runs as its backend."),
-    "LLM_API_KEY": ("Provider credentials", "Bearer credential used by the generic llm-chat sidecar; prefer the vault or a secret command."),
-    "LLM_ENDPOINT": ("Provider endpoints", "OpenAI-compatible base URL used by the generic llm-chat sidecar."),
-    "LLM_MODEL": ("Provider endpoints", "Model requested by the generic llm-chat sidecar."),
+    "SYNTHESIS_API_KEY": ("Provider credentials", "Bearer credential used by the generic llm-chat sidecar; prefer the vault or a secret command."),
+    "SYNTHESIS_ENDPOINT": ("Provider endpoints", "OpenAI-compatible base URL used by the generic llm-chat sidecar."),
+    "SYNTHESIS_MODEL": ("Provider endpoints", "Model requested by the generic llm-chat sidecar."),
+    "SYNTHESIS_CA_FILE": ("Provider endpoints", "CA that verifies the synthesis sidecar's certificate on the kb -> aimee-llm hop. REPLACES the system trust store for that endpoint, so set it only for a sidecar the kb's own CA issued."),
+    "SYNTHESIS_CERT_FILE": ("Provider endpoints", "Client certificate the kb presents to the synthesis sidecar, whose terminator requires one. Offered only to the host:port `SYNTHESIS_ENDPOINT` names."),
+    "SYNTHESIS_KEY_FILE": ("Provider endpoints", "Private key for `SYNTHESIS_CERT_FILE`."),
 }
 
 
@@ -1153,21 +1197,34 @@ def render_external_env(found):
 
 # ─── Workflow engine config (src/modules/workflows/) ───────────────────────────────────
 
-ART = {f"WFE_ART_{k.upper()}": k for k in
-       ("none", "proposal", "plan", "branch", "frozen_diff", "pr", "verdict", "approval")}
-BLOCK_ENTRY_RE = re.compile(
-    r'\{\s*WFE_BLK_\w+\s*,\s*"([^"]+)"\s*,\s*(WFE_ART_\w+)\s*,\s*\d+\s*,\s*\{([^}]*)\}')
-
-
 def parse_block_catalog():
-    text = (SRC / "modules" / "workflows" / "wfe_def.c").read_text(encoding="utf-8")
-    body = text[text.index("CATALOG[] = {"):text.index("\n};", text.index("CATALOG[] = {"))]
+    text = (ROOT / "server-go" / "internal" / "wfe" / "catalog.go").read_text(
+        encoding="utf-8")
+    start = text.index("var BuiltinBlocks = []BlockDefinition{")
+    body = text[start:text.index("\n}", start)]
     cat = []
-    for m in BLOCK_ENTRY_RE.finditer(body):
-        name, produces, accepts_raw = m.groups()
-        accepts = [ART[a] for a in re.findall(r'WFE_ART_\w+', accepts_raw)
-                   if ART.get(a) and ART[a] != "none"]
-        cat.append((name, ART.get(produces, produces), accepts))
+    for line in body.splitlines():
+        name = re.search(r'Name:\s*"([^"]+)"', line)
+        if not name:
+            continue
+        produces = re.search(r'Produces:\s*"([^"]+)"', line)
+        accepts = re.search(r'Accepts:\s*\[\]string\{([^}]*)\}', line)
+        ports = re.search(r'InputPorts:\s*\[\]string\{([^}]*)\}', line)
+        required = re.search(r'RequiredPorts:\s*\[\]string\{([^}]*)\}', line)
+        required_params = re.search(r'RequiredParams:\s*\[\]string\{([^}]*)\}', line)
+
+        def strings(match):
+            return re.findall(r'"([^"]+)"', match.group(1)) if match else []
+
+        cat.append({
+            "name": name.group(1),
+            "produces": produces.group(1) if produces else "none",
+            "accepts": strings(accepts),
+            "ports": strings(ports),
+            "required": strings(required),
+            "required_params": strings(required_params),
+            "requires_input": "RequiresInput: true" in line,
+        })
     return cat
 
 
@@ -1205,60 +1262,76 @@ def render_workflow(catalog, default_rounds):
            "",
            "### Built-in block catalog",
            "",
-           "| Block | Produces | Accepts inputs |",
-           "|-------|----------|----------------|"]
-    for name, produces, accepts in catalog:
-        acc = ", ".join(f"`{a}`" for a in accepts) if accepts else "_(source: none)_"
-        out.append(f"| `{name}` | `{produces}` | {acc} |")
+           "| Block | Required input ports and accepted artifacts | Produces |",
+           "|-------|---------------------------------------------|----------|"]
+    for block in catalog:
+        required = set(block["required"])
+        if not block["ports"]:
+            inputs = "none"
+        else:
+            if block["requires_input"] and not required:
+                port_names = [" or ".join(f"`{p}`" for p in block["ports"])
+                              + " (one required)"]
+            else:
+                port_names = [f"`{p}`{' (required)' if p in required else ' (optional)'}"
+                              for p in block["ports"]]
+            accepts = ", ".join(f"`{a}`" for a in block["accepts"])
+            inputs = f"{', '.join(port_names)}; accepts {accepts}"
+        if block["required_params"]:
+            inputs += "; requires param " + ", ".join(
+                f"`{p}`" for p in block["required_params"])
+        out.append(f"| `{block['name']}` | {inputs} | `{block['produces']}` |")
     out += [
         "",
         "### Block parameters (`params:`)",
         "",
-        "- **`gate.roundtable`** — `panel.required` (list of required reviewer "
-        "personas), `panel.eligible` (list of additional eligible personas), "
-        "`quorum` (int; effective quorum is `max(2, quorum)` and at least the "
-        "required-panel size).",
-        "- **`gate.human`** — parks the run for a human decision. **Inviolable**: never "
-        "auto-satisfied in autonomous mode, and declaring it auto-satisfiable "
-        "(`policy: preauthorized` / `optional: true`) is rejected at validation. Cleared "
-        "only by a human's signed approval via the gate endpoint.",
-        "- Other blocks take no params today; unknown params are ignored by the "
-        "validator.",
+        "- **Review panels:** `gate.roundtable` requires `roundtable`. Its optional "
+        "`panel.required`, `panel.eligible`, and `quorum` fields select the seats. "
+        "Quorum must be between one and the configured persona count.",
+        "- **Human gates:** `gate.human` parks until the browser or API records an "
+        "approve or reject decision. The current record is a hashed approval artifact "
+        "and lifecycle transition, not a cryptographic principal signature.",
+        "- **Loop budgets:** `max_rounds` limits repeated execution of one node. "
+        "Blocks also read parameters such as `workflow`, `max_children`, `base`, "
+        "`persona`, `focus`, and trigger workspace settings.",
         "",
-        "### Custom blocks — `$AIMEE_HOME/workflows/blocks.yaml`",
+        "### Custom blocks: `$AIMEE_HOME/workflows/blocks.yaml`",
         "",
-        "Operator-owned (refused if a symlink or group/world-writable). Adds blocks "
-        "to the catalog above:",
+        "Operator-owned and refused if it is a symlink or group/world-writable. "
+        "It adds blocks to the catalog above:",
         "",
         "```yaml",
-        "allow_command: false       # opt-in gate for the `command` executor (no-shell, argv-only)",
+        "allow_command: false       # opt-in gate for command blocks",
+        "command_timeout_ms: 60000  # bounded timeout for command blocks",
         "blocks:",
         "  - name: <block-name>     # must not shadow a built-in or duplicate",
         "    consumes: <artifact>   # input artifact type, or none (a source)",
-        "    produces: branch|none  # custom blocks may NOT mint verdict/approval/pr",
+        "    produces: branch|none  # custom blocks cannot mint verdict/approval/pr",
         "    executor: command|delegate",
-        "    command: [ argv0, arg1, ... ]   # executor: command (run in the repo, no shell)",
+        "    command: [ /abs/path/to/tool, arg1, ... ]  # command executor, no shell",
+        "    command_sha256: <hex>  # digest of the executable",
         "    persona: <name>        # executor: delegate",
         "    prompt: <text>         # executor: delegate",
         "```",
         "",
         "### Run-level controls (not in the definition)",
         "",
-        "- **Per-stage loop cap** — `params.max_rounds` bounds retries for a node "
+        "- **Per-node loop cap**: `params.max_rounds` bounds retries for a node "
         f"that loops through `on_fail` (default `{default_rounds}`). Exhaustion parks "
         "the run with `retry_limit` or a more specific convergence reason. The "
         "retired `max_iters` and `on_max` fields are ignored by the Go engine.",
-        "- **Cost cap** — an optional per-work-item USD ceiling set at run creation "
-        "(`work_item_max_cost_usd`); the engine parks the run when cumulative cost "
-        "reaches it.",
-        "- **Trigger / autonomy mode** — `interactive` vs `autonomous`, set when the "
-        "run is created.",
+        "- **Cost cap**: an optional per-work-item USD ceiling is set when the run is "
+        "created. The engine parks the run when cumulative cost reaches it.",
+        "- **Trigger mode**: `interactive` or `autonomous` is recorded at admission. "
+        "The current Go scheduler advances both the same way, so use `gate.human` or "
+        "manual pause for an approval boundary.",
         "",
         "### Workflow environment overrides",
         "",
-        "`AIMEE_WORKFLOW_REPO` (repo the engine operates on) and "
-        "`AIMEE_WORKFLOW_BASE` (base branch for freeze/diff) — see Environment "
-        "variables above.",
+        "`AIMEE_WFE_RUNNER_URL` and `AIMEE_WFE_RUNNER_SOCKET` select a compatibility "
+        "runner. `AIMEE_AUTONOMY_CONCURRENCY` supplies the startup fallback for global "
+        "scheduler concurrency; live `autonomy.*` configuration then controls the "
+        "running service. Legacy C variables are identified in the environment table.",
     ]
     return "\n".join(out).rstrip() + "\n"
 
@@ -1355,7 +1428,7 @@ def render_config_files(agent_fields):
            "Beyond the config store, aimee reads a few standalone JSON/policy files "
            "(paths under `$AIMEE_HOME` unless an env override is set).",
            "",
-           "### `agents.json` — agent / model definitions",
+           "### `agents.json`: agent / model definitions",
            "",
            "`{\"default_agent\": \"<name>\", \"agents\": [ {<agent>}, … ]}`. Each agent "
            "object's fields (scanned from `src/server/agent_config.c`):",
@@ -1375,15 +1448,15 @@ def render_config_files(agent_fields):
                    + ", ".join(f"`{k}`" for k in undescribed))
         out.append("")
     out += [
-        "### Toolsets — `AIMEE_TOOLSETS_CONFIG` (or the config `toolsets` map)",
+        "### Toolsets: `AIMEE_TOOLSETS_CONFIG` (or the config `toolsets` map)",
         "",
         "Named tool allowlists. `{\"toolsets\": {\"<name>\": { … }}}`; each toolset:",
         "",
-        "- `tools` / `allowed_tools` — the tool names the set permits.",
-        "- `include` — inherit another toolset's tools.",
-        "- `script` — script-tool configuration for the set.",
+        "- `tools` / `allowed_tools`: the tool names the set permits.",
+        "- `include`: inherit another toolset's tools.",
+        "- `script`: script-tool configuration for the set.",
         "",
-        "### Guardrails — `AIMEE_GUARDRAILS_PATH`",
+        "### Guardrails: `AIMEE_GUARDRAILS_PATH`",
         "",
         "A policy file governing path read/write classification and pre-tool "
         "enforcement (antipattern blocking). It is a behavioral policy rather than a "
@@ -1398,7 +1471,7 @@ def render_limitations():
         "## Coverage & limitations",
         "",
         "This reference is generated by scanning the canonical source tables, which "
-        "covers the scalar/keyed config surface but has known blind spots — listed "
+        "covers the scalar/keyed config surface but has known blind spots. They are listed "
         "here so a reader can tell *deliberately out of scope* from *not auto-derived*:",
         "",
         "- **Array/object element fields** are captured when the parser iterates with "
@@ -1411,14 +1484,14 @@ def render_limitations():
         "`api_key_env`; only the common defaults are listed.",
         "- **Compile-time `-D` defines** used as build-level configuration are not "
         "scanned (they are not runtime-overridable config).",
-        "- **Separate config files** — `agents.json`, toolsets, guardrails, and "
+        "- **Separate config files**: `agents.json`, toolsets, guardrails, and "
         "custom workflow blocks (`blocks.yaml`) / workflow definitions are documented "
         "in their own sections above. Per-agent field set is scanned from "
         "`agent_config.c`; the guardrails *policy* is behavioral (path classification "
         "+ pre-tool enforcement), with its tunables exposed as config keys.",
         "",
         "If the scan ever finds a config var with no description, it is emitted under "
-        "an **Undocumented** heading in the relevant section — so a new option cannot "
+        "an **Undocumented** heading in the relevant section, so a new option cannot "
         "silently bypass this reference.",
     ]).rstrip() + "\n"
 
@@ -1430,7 +1503,7 @@ def main():
     fields = parse_config_fields()
     sections, flat = parse_config_sections()
     # a key that is a CLI-settable scalar (or a section name) is not also a stray
-    # "other top-level" key — subtract both so nothing is double-listed.
+    # "other top-level" key: subtract both so nothing is double-listed.
     flat = flat - {k for k, _, _ in fields} - set(sections)
     cfg = render_config(fields, sections, flat)
     cfg = (cfg.rstrip() + "\n\n"
@@ -1445,7 +1518,7 @@ def main():
         stale = [p.name for p, want in targets.items()
                  if not p.exists() or p.read_text(encoding="utf-8") != want]
         if stale:
-            print(f"gen-reference-docs: STALE — run scripts/gen-reference-docs.py: {stale}")
+            print(f"gen-reference-docs: STALE: run scripts/gen-reference-docs.py: {stale}")
             return 1
         print("gen-reference-docs: ok (cli-commands.md, configuration.md in sync)")
         return 0
