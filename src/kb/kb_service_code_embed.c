@@ -132,6 +132,8 @@ static int ce_flush_batch(ce_pending_t *pend, int n, const char **texts, float *
       }
    }
    return ok;
+}
+
 /* The project's content signature at |generation|: file count, the ACTIVE embedding
  * dimension, and a digest over every file id:hash. Recorded by a pass that embedded
  * the whole file set, and compared on the next pass to skip an unchanged project.
