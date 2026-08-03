@@ -7,6 +7,14 @@ forge operations, and provenance-bearing repository records submitted through me
 boundary. It does not own workspace path authority, code-intelligence storage/indexing/retrieval,
 federated OIDC governance, generic tool dispatch, or secret custody.
 
+### Go process stage
+
+The supervised `git-operation` stage now runs in the shared pure-Go module
+runtime. It preserves the GOPS/GCLS contract, classifies the bounded operation,
+and marks the operations that require credentials. The C adapter remains a
+wire-parity fixture. Repository execution, verification, OAuth, forge, SSH, and
+credential implementation units remain C relocation work.
+
 ## Public contracts
 
 `src/modules/git` owns `git_ops`, MCP `handle_git_*` operations beginning at

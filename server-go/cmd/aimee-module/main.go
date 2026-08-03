@@ -12,10 +12,14 @@ import (
 	"syscall"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/JBailes/aimee/server-go/modules/delegates"
+	modulegit "github.com/JBailes/aimee/server-go/modules/git"
 	"github.com/JBailes/aimee/server-go/modules/learning"
+	responsecomposition "github.com/JBailes/aimee/server-go/modules/response-composition"
 	"github.com/JBailes/aimee/server-go/modules/routing"
 	"github.com/JBailes/aimee/server-go/modules/skills"
 	moduletools "github.com/JBailes/aimee/server-go/modules/tools"
+	"github.com/JBailes/aimee/server-go/modules/workspace"
 )
 
 var errUsage = errors.New("usage: aimee-module-NAME DAEMON_MODULE_BUS_SOCKET")
@@ -34,16 +38,36 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 		config.PrincipalRef = 9
 		config.Stages = []bus.ModuleStage{{EventKind: routing.EventKind, StageID: routing.StageSelect}}
 		config.Handler = routing.Handle
+	case "delegates":
+		config.ModuleName = name
+		config.PrincipalRef = 10
+		config.Stages = []bus.ModuleStage{{EventKind: delegates.EventKind, StageID: delegates.StageInvoke}}
+		config.Handler = delegates.Handle
 	case "tools":
 		config.ModuleName = name
 		config.PrincipalRef = 11
 		config.Stages = []bus.ModuleStage{{EventKind: moduletools.EventKind, StageID: moduletools.StageDispatch}}
 		config.Handler = moduletools.Handle
+	case "workspace":
+		config.ModuleName = name
+		config.PrincipalRef = 12
+		config.Stages = []bus.ModuleStage{{EventKind: workspace.EventKind, StageID: workspace.StageAccess}}
+		config.Handler = workspace.Handle
+	case "git":
+		config.ModuleName = name
+		config.PrincipalRef = 13
+		config.Stages = []bus.ModuleStage{{EventKind: modulegit.EventKind, StageID: modulegit.StageOperation}}
+		config.Handler = modulegit.Handle
 	case "skills":
 		config.ModuleName = name
 		config.PrincipalRef = 14
 		config.Stages = []bus.ModuleStage{{EventKind: skills.EventKind, StageID: skills.StageContext}}
 		config.Handler = skills.Handle
+	case "response-composition":
+		config.ModuleName = name
+		config.PrincipalRef = 15
+		config.Stages = []bus.ModuleStage{{EventKind: responsecomposition.EventKind, StageID: responsecomposition.StageCompose}}
+		config.Handler = responsecomposition.Handle
 	default:
 		return bus.ModuleProcessConfig{}, false
 	}

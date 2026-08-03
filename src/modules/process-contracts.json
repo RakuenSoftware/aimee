@@ -21,22 +21,22 @@
     {"id": "routing", "execution": "process", "runtime": "go", "principal_ref": 9, "placements": ["server"], "stages": [
       {"id": 1, "name": "route-selection", "event_kind": 6401}
     ]},
-    {"id": "delegates", "execution": "process", "runtime": "c", "principal_ref": 10, "placements": ["server"], "stages": [
+    {"id": "delegates", "execution": "process", "runtime": "go", "principal_ref": 10, "placements": ["server"], "stages": [
       {"id": 1, "name": "delegate-invocation", "event_kind": 6657}
     ]},
     {"id": "tools", "execution": "process", "runtime": "go", "principal_ref": 11, "placements": ["server"], "stages": [
       {"id": 1, "name": "tool-dispatch", "event_kind": 6913}
     ]},
-    {"id": "workspace", "execution": "process", "runtime": "c", "principal_ref": 12, "placements": ["server"], "stages": [
+    {"id": "workspace", "execution": "process", "runtime": "go", "principal_ref": 12, "placements": ["server"], "stages": [
       {"id": 1, "name": "workspace-access", "event_kind": 7169}
     ]},
-    {"id": "git", "execution": "process", "runtime": "c", "principal_ref": 13, "placements": ["server"], "stages": [
+    {"id": "git", "execution": "process", "runtime": "go", "principal_ref": 13, "placements": ["server"], "stages": [
       {"id": 1, "name": "git-operation", "event_kind": 7425}
     ]},
     {"id": "skills", "execution": "process", "runtime": "go", "principal_ref": 14, "placements": ["server"], "stages": [
       {"id": 1, "name": "skill-context", "event_kind": 7681}
     ]},
-    {"id": "response-composition", "execution": "process", "runtime": "c", "principal_ref": 15, "placements": ["server"], "stages": [
+    {"id": "response-composition", "execution": "process", "runtime": "go", "principal_ref": 15, "placements": ["server"], "stages": [
       {"id": 1, "name": "response-composition", "event_kind": 7937}
     ]},
     {"id": "vault", "execution": "core", "placements": ["server", "kb"]},

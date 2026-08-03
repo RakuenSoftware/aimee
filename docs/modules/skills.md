@@ -20,7 +20,7 @@ The skill-context review stage now runs in the supervised Go
 `aimee-module-skills` process from `server-go/modules/skills`. The C
 `module_adapter.c` remains a wire-parity fixture while filesystem resolution,
 management, review, rollback, and injection continue through the existing C
-surfaces pending later migration batches.
+surfaces and remain scheduled for later migration batches.
 
 `src/modules/skills/module.yaml` declares ownership of the C production and parity sources, the Go
 process handler and tests, canonical public headers, direct C tests, and this document; the module has

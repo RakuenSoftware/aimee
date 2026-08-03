@@ -7,6 +7,15 @@ messages, use tools, and return auditable results. The module owns delegation pl
 provider drivers, execution backends, credentials, sandbox/workspace coordination, and lifecycle. It is
 not an optional extension and does not own roundtable policy, tools, vault, or workspace storage.
 
+### Go process stage
+
+The supervised `delegate-invocation` stage now runs in the shared pure-Go module
+runtime. Its Go handler validates the existing DROL request, normalizes role
+aliases, and emits the unchanged DCAN response contract. The C adapter remains a
+wire-parity fixture. Delegate backends, checkout, credentials, orchestration, and
+the other deeper implementation units remain C relocation work; this stage move
+does not claim that the complete delegates engine has been rewritten.
+
 ## Public contracts
 
 Current canonical source under `src/modules/delegates` includes `delegate_driver`, routing, launch/plan,

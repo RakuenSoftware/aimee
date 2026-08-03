@@ -6,10 +6,14 @@
 #include <aimee/core/event_bus/bus_runtime.h>
 #include <aimee/core/event_bus/module_client.h>
 #include <aimee/core/event_bus/module_runtime.h>
+#include <aimee/delegates/module_api.h>
+#include <aimee/git/module_api.h>
 #include <aimee/learning/module_api.h>
+#include <aimee/response-composition/module_api.h>
 #include <aimee/routing/module_api.h>
 #include <aimee/skills/module_api.h>
 #include <aimee/tools/module_api.h>
+#include <aimee/workspace/module_api.h>
 
 #include <assert.h>
 #include <errno.h>
@@ -126,10 +130,18 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
       *kind = AIMEE_LEARNING_EVENT_OBSERVE, *principal_ref = 8;
    else if (strcmp(name, "routing") == 0)
       *kind = AIMEE_ROUTING_EVENT_KIND, *principal_ref = 9;
+   else if (strcmp(name, "delegates") == 0)
+      *kind = AIMEE_DELEGATES_EVENT_INVOKE, *principal_ref = 10;
    else if (strcmp(name, "tools") == 0)
       *kind = AIMEE_TOOLS_EVENT_DISPATCH, *principal_ref = 11;
+   else if (strcmp(name, "workspace") == 0)
+      *kind = AIMEE_WORKSPACE_EVENT_ACCESS, *principal_ref = 12;
+   else if (strcmp(name, "git") == 0)
+      *kind = AIMEE_GIT_EVENT_OPERATION, *principal_ref = 13;
    else if (strcmp(name, "skills") == 0)
       *kind = AIMEE_SKILLS_EVENT_CONTEXT, *principal_ref = 14;
+   else if (strcmp(name, "response-composition") == 0)
+      *kind = AIMEE_RESPONSE_EVENT_COMPOSE, *principal_ref = 15;
    else
       return -1;
    return 0;
@@ -138,8 +150,8 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
 static void smoke_production_module(aimee_module_client_t *client, const char *name,
                                     uint32_t kind)
 {
-   uint8_t request[AIMEE_TOOLS_REQUEST_LEN] = {0};
-   uint8_t response[AIMEE_TOOLS_REQUEST_LEN] = {0};
+   uint8_t request[1024] = {0};
+   uint8_t response[1024] = {0};
    uint32_t request_len = 0, response_len = 0;
    if (strcmp(name, "learning") == 0)
    {
@@ -165,27 +177,88 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(aimee_routing_response_decode(response, response_len, 3, &selected) == 0);
       assert(selected == 0);
    }
+   else if (strcmp(name, "delegates") == 0)
+   {
+      char role[AIMEE_DELEGATES_ROLE_MAX + 1u];
+      assert(aimee_delegates_message_encode(AIMEE_DELEGATES_REQUEST_MAGIC, "implement", request,
+                                             sizeof(request)) == 0);
+      request_len = AIMEE_DELEGATES_MESSAGE_LEN;
+      assert(aimee_module_client_call(client, kind, 1, 2003, 0, request, request_len, response,
+                                      sizeof(response), &response_len, NULL,
+                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(aimee_delegates_message_decode(response, response_len,
+                                             AIMEE_DELEGATES_RESPONSE_MAGIC, role,
+                                             sizeof(role)) == 0);
+      assert(strcmp(role, "code") == 0);
+   }
    else if (strcmp(name, "tools") == 0)
    {
       aimee_tool_class_t classification = AIMEE_TOOL_CLASS_UNKNOWN;
       assert(aimee_tools_request_encode("bash", request, sizeof(request)) == 0);
       request_len = AIMEE_TOOLS_REQUEST_LEN;
-      assert(aimee_module_client_call(client, kind, 1, 2003, 0, request, request_len, response,
+      assert(aimee_module_client_call(client, kind, 1, 2004, 0, request, request_len, response,
                                       sizeof(response), &response_len, NULL,
                                       NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_tools_response_decode(response, response_len, &classification) == 0);
       assert(classification == AIMEE_TOOL_CLASS_EXEC);
    }
-   else
+   else if (strcmp(name, "workspace") == 0)
+   {
+      int allowed = 0;
+      const char reference[] = "owner/repo";
+      assert(aimee_workspace_request_encode(reference, strlen(reference), request,
+                                             sizeof(request)) == 0);
+      request_len = AIMEE_WORKSPACE_REQUEST_LEN;
+      assert(aimee_module_client_call(client, kind, 1, 2005, 0, request, request_len, response,
+                                      sizeof(response), &response_len, NULL,
+                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(aimee_workspace_response_decode(response, response_len, &allowed) == 0 && allowed);
+   }
+   else if (strcmp(name, "git") == 0)
+   {
+      aimee_git_classification_t classification = {0};
+      assert(aimee_git_request_encode("push", request, sizeof(request)) == 0);
+      request_len = AIMEE_GIT_REQUEST_LEN;
+      assert(aimee_module_client_call(client, kind, 1, 2006, 0, request, request_len, response,
+                                      sizeof(response), &response_len, NULL,
+                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(aimee_git_response_decode(response, response_len, &classification) == 0);
+      assert(classification.operation == AIMEE_GIT_OP_PUSH && classification.needs_credentials);
+   }
+   else if (strcmp(name, "skills") == 0)
    {
       int fire = 0;
-      assert(strcmp(name, "skills") == 0);
       assert(aimee_skills_request_encode(12, 6, request, sizeof(request)) == 0);
       request_len = AIMEE_SKILLS_REQUEST_LEN;
-      assert(aimee_module_client_call(client, kind, 1, 2004, 0, request, request_len, response,
+      assert(aimee_module_client_call(client, kind, 1, 2007, 0, request, request_len, response,
                                       sizeof(response), &response_len, NULL,
                                       NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_skills_response_decode(response, response_len, &fire) == 0 && fire);
+   }
+   else
+   {
+      assert(strcmp(name, "response-composition") == 0);
+      const aimee_response_key_input_t input = {
+          .principal = "uid:1",
+          .source = "openai-ingress",
+          .provider = "openai",
+          .model = "gpt-4o",
+          .endpoint = "/v1/chat/completions",
+          .idempotency_key = "idem-a",
+          .body = "{\"x\":1}",
+          .context = "ctx",
+          .behavior_flags = "cs0 rc0",
+          .stream = 0};
+      size_t encoded_len = aimee_response_request_size(&input);
+      char key[AIMEE_RESPONSE_KEY_MAX + 1u];
+      assert(encoded_len > 0 && encoded_len <= sizeof(request) && encoded_len <= UINT32_MAX);
+      assert(aimee_response_request_encode(&input, request, sizeof(request)) == 0);
+      request_len = (uint32_t)encoded_len;
+      assert(aimee_module_client_call(client, kind, 1, 2008, 0, request, request_len, response,
+                                      sizeof(response), &response_len, NULL,
+                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(aimee_response_response_decode(response, response_len, key, sizeof(key)) == 0);
+      assert(strcmp(key, "uid:1|45fd46a03cb4a28da3227155fec20a71") == 0);
    }
 }
 

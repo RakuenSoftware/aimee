@@ -11,7 +11,16 @@ func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
 		name      string
 		principal uint32
 		kind      uint32
-	}{{"learning", 8, 6145}, {"routing", 9, 6401}, {"tools", 11, 6913}, {"skills", 14, 7681}}
+	}{
+		{"learning", 8, 6145},
+		{"routing", 9, 6401},
+		{"delegates", 10, 6657},
+		{"tools", 11, 6913},
+		{"workspace", 12, 7169},
+		{"git", 13, 7425},
+		{"skills", 14, 7681},
+		{"response-composition", 15, 7937},
+	}
 	for _, test := range tests {
 		config, ok := moduleConfig("/usr/local/libexec/aimee-modules/aimee-module-" + test.name)
 		if !ok || config.ModuleName != test.name || config.PrincipalClass != 1 ||
