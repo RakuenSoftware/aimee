@@ -209,9 +209,14 @@ aimee config set embedder_model bekko-a25m
 Confirm the model actually loaded rather than assuming it did:
 
 ```bash
-docker compose -f compose.server-managed.yaml logs aimee-kb | grep -i embedder
+docker compose -p aimee logs aimee-kb | grep -i embedder
 aimee kb status
 ```
+
+Address the managed services by project (`-p aimee`), not by the file you started the server with.
+`compose.server-managed.yaml` declares only `aimee-server`; the server brings `aimee-kb` and
+`aimee-llm` up from its own baked manifest into the same `aimee` project, so
+`-f compose.server-managed.yaml logs aimee-kb` fails with `no such service`.
 
 A loaded embedder logs its dimension and serving identity:
 
@@ -254,7 +259,7 @@ left running.
 Confirm the sidecar actually came up, rather than assuming Deploy succeeded:
 
 ```bash
-docker compose -f compose.server-managed.yaml logs aimee-llm | grep -iE 'synthesis|terminator'
+docker compose -p aimee logs aimee-llm | grep -iE 'synthesis|terminator'
 ```
 
 A working sidecar logs both halves:

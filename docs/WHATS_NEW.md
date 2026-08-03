@@ -1,16 +1,16 @@
-# What's new in 0.3.1
+# What's new in 0.3.0
 
-0.3.1 is a one-way upgrade. It removes the combined image, the work queue, the inference container,
+0.3.0 is a one-way upgrade. It removes the combined image, the work queue, the inference container,
 the interactive TUI, and the generic RPC transport, and it will not read a 0.2 deployment back.
 Read [Upgrading](UPGRADING.md) before you start, not after.
 
 Everything below is measured against **v0.2.192**, the last public release.
 
-Two tags dated 2026-07-27 and 2026-07-28, `v0.2.196` and `v0.3.0`, appeared on the repository
-part-way through this cycle. Neither is a release. They were promoted mid-cycle in error, they were
-never announced, and the work below continued for another 536 commits after the later one. If you
-installed from either, you have an untested mid-cycle build rather than 0.3.1, and you are missing
-the fixes under [If you installed from a mid-cycle tag](#if-you-installed-from-a-mid-cycle-tag).
+One tag dated 2026-07-27, `v0.2.196`, appeared on the repository part-way through this cycle. It is
+not a release. It was promoted mid-cycle in error, it was never announced, and the work below
+continued for another 705 commits after it. If you installed from it, you have an untested mid-cycle
+build rather than 0.3.0, and you are missing the fixes under
+[If you installed from a mid-cycle tag](#if-you-installed-from-a-mid-cycle-tag).
 
 ## The event bus is the change everything else rests on
 
@@ -182,10 +182,10 @@ See [Event bus](EVENT_BUS.md).
 
 ## If you installed from a mid-cycle tag
 
-The `v0.2.196` and `v0.3.0` tags were promoted in error part-way through this cycle and are not
-releases. The cycle continued for another 536 commits after the later one, so an installation taken
-from either is missing the following. Each is a case where the deployment came up healthy and did
-nothing useful, which is why they are listed here rather than folded into the sections above.
+The `v0.2.196` tag was promoted in error part-way through this cycle and is not a release. The cycle
+continued for another 705 commits after it, so an installation taken from it is missing the
+following. Each is a case where the deployment came up healthy and did nothing useful, which is why
+they are listed here rather than folded into the sections above.
 
 - **The `aimee-llm` container is retired.** Embedding and synthesis are owned by the selected KB and
   can run inside its container or at its configured remote endpoint. After the wizard selects the

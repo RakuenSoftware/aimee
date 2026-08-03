@@ -1,15 +1,14 @@
 # Upgrading from v0.2.192
 
-There is no route back. 0.3.1 rewrites storage, credentials, and remote identity, and a 0.2 server
+There is no route back. 0.3.0 rewrites storage, credentials, and remote identity, and a 0.2 server
 will not read what it leaves behind. Your backup is the rollback plan; there is no downgrade
 command. Take the backup before step one, not after the first thing goes wrong.
 
 Read [What's new](WHATS_NEW.md) first. This cycle changes deployment, storage, credentials, remote
 identity, workflows, and removed commands.
 
-Do not install from the `v0.2.196` or `v0.3.0` tags. Both were promoted in error part-way through
-this cycle and are not releases; an installation from either is an untested mid-cycle build missing
-the fixes listed under
+Do not install from the `v0.2.196` tag. It was promoted in error part-way through this cycle and is
+not a release; an installation from it is an untested mid-cycle build missing the fixes listed under
 [If you installed from a mid-cycle tag](WHATS_NEW.md#if-you-installed-from-a-mid-cycle-tag).
 Several of those are cases where a fresh install came up healthy and silently did nothing useful.
 
@@ -46,7 +45,7 @@ Do not rely on a raw copy of a live SQLite main file. Take a consistent backup w
 
 ## This upgrade is one-way, by design
 
-0.3.1 does not preserve backwards compatibility, and that includes the image itself: once a server
+0.3.0 does not preserve backwards compatibility, and that includes the image itself: once a server
 volume has been booted by this release, an older image will not start on it again. It crash-loops
 with:
 
