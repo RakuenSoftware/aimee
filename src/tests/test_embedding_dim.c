@@ -104,6 +104,22 @@ int main(void)
    /* NULL conn -> 0. */
    assert(db2_embedding_dim_get(NULL) == 0);
 
+   /* ---- dim-drift refusal (pure) ----
+    * UPGRADING.md promises DB2 "refuses to start" when the embedder cannot produce the
+    * recorded width. It did not: a v0.2.192 corpus recorded at 1024 came up under the
+    * 384-dim bundled embedder reporting healthy and embed_ok:true, recorded that
+    * embedder's serving identity over the corpus, and left Postgres to bounce every
+    * write ("expected 1024 dimensions, not 384"). Inert while claiming to be well. */
+   assert(db2_dim_drift_refuses(0, 384, 1024) == 1);  /* answered, and disagrees */
+   assert(db2_dim_drift_refuses(0, 768, 1024) == 1);  /* the other bundled width too */
+   assert(db2_dim_drift_refuses(0, 1024, 1024) == 0); /* answered, and agrees */
+   /* No answer is NOT evidence of drift: a slow or silent embedder must still start,
+    * or the fix takes down deployments that were working. */
+   assert(db2_dim_drift_refuses(-1, 0, 1024) == 0);
+   assert(db2_dim_drift_refuses(-1, 384, 1024) == 0); /* rc wins over a stale out-param */
+   assert(db2_dim_drift_refuses(0, 0, 1024) == 0);    /* answered with nothing usable */
+   assert(db2_dim_drift_refuses(0, 384, 0) == 0);     /* fresh DB: nothing recorded yet */
+
    /* ---- §2b: db2_dim_source precedence (pure: pin > recorded > probe > default) ---- */
    assert(db2_dim_source(1, 1, 1) == DB2_DIM_SRC_PIN);      /* pin wins over all */
    assert(db2_dim_source(1, 0, 0) == DB2_DIM_SRC_PIN);      /* pin even with nothing else */

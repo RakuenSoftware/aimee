@@ -71,6 +71,14 @@ extern "C"
     * default.) */
    int db2_effective_dim(int pinned, int configured, int recorded);
 
+   /* Should a start be refused because the embedder cannot produce the corpus's
+    * recorded width? Pure. Refuses ONLY when the embedder answered (probe_rc == 0) with
+    * a positive width that differs from a positive recorded width — an embedder that
+    * did not answer is not evidence of drift. UPGRADING.md promises this refusal; a
+    * v0.2 corpus at 1024 under a 384-dim bundled embedder used to come up healthy and
+    * report embed_ok while Postgres bounced every write. */
+   int db2_dim_drift_refuses(int probe_rc, int probed_dim, int recorded_dim);
+
    /* embedder-runtime-fetch-autodim §2b: fresh-DB probe rung. On a fresh DB2 (no
     * operator pin, no recorded schema_embedding_dim) db2_init derives the dim from
     * the running embedder's /health, under a Postgres advisory lock, instead of the
