@@ -138,9 +138,11 @@ profile. Otherwise expect the count. `aimee kb status` shows the curator tiers a
 
 ## Workflow parks
 
-Read the named park reason and latest artifact. Common causes are a human gate, no valid panel,
-repeated feedback, agent saturation, missing commit, failed verification, merge conflict, lost replay,
-forge identity, or spend limit.
+The park reason names the constraint that stopped the scheduler. Read it with the current node and
+last lifecycle events before changing a limit.
+
+Common causes are a human gate, no valid panel, repeated feedback, agent saturation, missing commit,
+failed verification, merge conflict, lost replay, forge identity, or spend limit.
 
 Repair the condition and resume the same run so its evidence is preserved.
 

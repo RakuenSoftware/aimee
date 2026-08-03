@@ -152,7 +152,7 @@ CFG_KEY_DESC = {
     "kb_curator_synthesize_enabled": "Create evidence-backed topic synthesis with the configured reasoning tier.",
     "kb_curator_user_presets": "JSON array of operator-defined curator stage presets.",
 
-    "autonomous": "Run autonomously (auto-advance machine gates; human gates always park) vs interactive.",
+    "autonomous": "Legacy mode flag. The current Go WFE records run mode at admission but does not branch scheduler behavior on it; human gates always park.",
     "economizer": "Context economizer tier: `off` (verbatim passthrough), `safe` (default; Anthropic prompt caching + lossless, freeze-guarded reduction), or `aggressive` (adds lossy compression + live OpenAI-side mutation; Anthropic context is never mutated). See docs/features/economizer.md.",
     "cache_aware_rewrite_enabled": "Rewrite prompts to align with the provider's prompt cache.",
     "cache_min_chars": "Minimum prompt size (chars) before cache-shaping applies.",
@@ -515,7 +515,7 @@ def render_config(fields, sections, flat):
            "> Auto-generated from the canonical source tables by "
            "`scripts/gen-reference-docs.py`: config keys from `src/modules/config/config_fields.c` + "
            "`src/config*.c`, env vars scanned from `getenv()` in `src/`, and the "
-           "workflow surface from `src/modules/workflows/`. Do not edit by hand; run "
+           "workflow catalog from `server-go/internal/wfe/catalog.go`. Do not edit by hand; run "
            "`make -C src docs-gen` to regenerate.",
            "",
            "This reference covers every configurable surface:",
@@ -893,10 +893,10 @@ ENV_DESC = {
     "AIMEE_GATEWAY_WEBHOOK_INSECURE": ("Gateway (voice / webhooks / push)", "Allow the webhook listener without TLS (dev)."),
     "AIMEE_GATEWAY_WEBHOOK_DELIVER_ONLY": ("Gateway (voice / webhooks / push)", "Webhook deliver-only mode (no reply path)."),
     # Workflow engine
-    "AIMEE_WORKFLOW_REPO": ("Workflow engine", "Local repository directory the workflow engine operates on."),
-    "AIMEE_WORKFLOW_BASE": ("Workflow engine", "Base branch for the engine's freeze/diff."),
-    "AIMEE_AUTONOMY_PANEL_RETRIES": ("Workflow engine", "Per-(work item, stage) budget for auto-retrying a TRANSIENT roundtable park (`panel_degraded`/`panel_unreachable`) in an autonomous run, one retry per scheduler backstop sweep, before it escalates to a human. Default 6. An explicit `0` disables auto-retry, so a degraded panel escalates immediately. A malformed or negative value floors to the default so a typo cannot silently disable the rail."),
-    "AIMEE_DEFAULT_BRANCH": ("Workflow engine", "Override the target repo's real default branch (its trunk) that a `base:trunk` `branch.open`/`pr.open` resolves to; else read from `git origin/HEAD`. Distinct from `AIMEE_AUTONOMY_BASE` (the aimee integration branch). A final feature PR opens against this branch (open-only, never auto-merged)."),
+    "AIMEE_WORKFLOW_REPO": ("Workflow engine", "Legacy C workflow fallback for a local repository. The Go WFE uses the repository admitted with each work item."),
+    "AIMEE_WORKFLOW_BASE": ("Workflow engine", "Legacy C workflow fallback for the freeze/diff base. It does not set the Go WFE integration branch."),
+    "AIMEE_AUTONOMY_PANEL_RETRIES": ("Workflow engine", "Legacy C scheduler budget for retrying transient roundtable parks. It does not configure the Go WFE scheduler."),
+    "AIMEE_DEFAULT_BRANCH": ("Workflow engine", "Legacy C workflow override for default-branch resolution. The Go WFE derives branch authority from the admitted repository and checkout."),
     # Git verify / MCP
     "AIMEE_VERIFY_PARALLEL": ("Git verify / MCP", "Run `aimee git verify` steps in parallel."),
     "AIMEE_VERIFY_LOCK_FILE": (
@@ -937,7 +937,7 @@ ENV_DESC = {
     "AIMEE_WEBCHAT_PASSWORD": ("Server runtime", "Optional first-boot webchat password paired with AIMEE_WEBCHAT_USER. The bootstrap record is sealed into Vault and removed from the environment before runtime-web starts."),
     "AIMEE_WEBCHAT_USERS": ("Server runtime", "Optional first-boot webchat account registry. It is sealed into Vault and removed from the environment before runtime-web starts."),
     "AIMEE_VAULT_ENV_OVERWRITE": ("Server runtime", "First-boot control flag allowing supplied credential values to replace existing Vault records. It is not itself a credential."),
-    "AIMEE_AUTONOMY_BASE": ("Workflow engine", "Integration branch used by autonomous workflow work; distinct from the repository default branch."),
+    "AIMEE_AUTONOMY_BASE": ("Workflow engine", "Legacy C workflow integration-branch fallback. The Go WFE uses the branch checked out when it admits the repository."),
     "AIMEE_AUTONOMY_MAX_ACTIVE_PER_PRINCIPAL": ("Workflow engine", "Maximum active autonomous work items for one authenticated principal."),
     "AIMEE_AUTONOMY_MAX_USD": ("Workflow engine", "Default USD ceiling for an autonomous work item; 0 disables this default ceiling."),
     "AIMEE_AUTONOMY_SUBMIT_RATE_PER_MIN": ("Workflow engine", "Autonomous-submission rate limit per principal."),
@@ -1197,21 +1197,34 @@ def render_external_env(found):
 
 # ─── Workflow engine config (src/modules/workflows/) ───────────────────────────────────
 
-ART = {f"WFE_ART_{k.upper()}": k for k in
-       ("none", "proposal", "plan", "branch", "frozen_diff", "pr", "verdict", "approval")}
-BLOCK_ENTRY_RE = re.compile(
-    r'\{\s*WFE_BLK_\w+\s*,\s*"([^"]+)"\s*,\s*(WFE_ART_\w+)\s*,\s*\d+\s*,\s*\{([^}]*)\}')
-
-
 def parse_block_catalog():
-    text = (SRC / "modules" / "workflows" / "wfe_def.c").read_text(encoding="utf-8")
-    body = text[text.index("CATALOG[] = {"):text.index("\n};", text.index("CATALOG[] = {"))]
+    text = (ROOT / "server-go" / "internal" / "wfe" / "catalog.go").read_text(
+        encoding="utf-8")
+    start = text.index("var BuiltinBlocks = []BlockDefinition{")
+    body = text[start:text.index("\n}", start)]
     cat = []
-    for m in BLOCK_ENTRY_RE.finditer(body):
-        name, produces, accepts_raw = m.groups()
-        accepts = [ART[a] for a in re.findall(r'WFE_ART_\w+', accepts_raw)
-                   if ART.get(a) and ART[a] != "none"]
-        cat.append((name, ART.get(produces, produces), accepts))
+    for line in body.splitlines():
+        name = re.search(r'Name:\s*"([^"]+)"', line)
+        if not name:
+            continue
+        produces = re.search(r'Produces:\s*"([^"]+)"', line)
+        accepts = re.search(r'Accepts:\s*\[\]string\{([^}]*)\}', line)
+        ports = re.search(r'InputPorts:\s*\[\]string\{([^}]*)\}', line)
+        required = re.search(r'RequiredPorts:\s*\[\]string\{([^}]*)\}', line)
+        required_params = re.search(r'RequiredParams:\s*\[\]string\{([^}]*)\}', line)
+
+        def strings(match):
+            return re.findall(r'"([^"]+)"', match.group(1)) if match else []
+
+        cat.append({
+            "name": name.group(1),
+            "produces": produces.group(1) if produces else "none",
+            "accepts": strings(accepts),
+            "ports": strings(ports),
+            "required": strings(required),
+            "required_params": strings(required_params),
+            "requires_input": "RequiresInput: true" in line,
+        })
     return cat
 
 
@@ -1249,60 +1262,76 @@ def render_workflow(catalog, default_rounds):
            "",
            "### Built-in block catalog",
            "",
-           "| Block | Produces | Accepts inputs |",
-           "|-------|----------|----------------|"]
-    for name, produces, accepts in catalog:
-        acc = ", ".join(f"`{a}`" for a in accepts) if accepts else "_(source: none)_"
-        out.append(f"| `{name}` | `{produces}` | {acc} |")
+           "| Block | Required input ports and accepted artifacts | Produces |",
+           "|-------|---------------------------------------------|----------|"]
+    for block in catalog:
+        required = set(block["required"])
+        if not block["ports"]:
+            inputs = "none"
+        else:
+            if block["requires_input"] and not required:
+                port_names = [" or ".join(f"`{p}`" for p in block["ports"])
+                              + " (one required)"]
+            else:
+                port_names = [f"`{p}`{' (required)' if p in required else ' (optional)'}"
+                              for p in block["ports"]]
+            accepts = ", ".join(f"`{a}`" for a in block["accepts"])
+            inputs = f"{', '.join(port_names)}; accepts {accepts}"
+        if block["required_params"]:
+            inputs += "; requires param " + ", ".join(
+                f"`{p}`" for p in block["required_params"])
+        out.append(f"| `{block['name']}` | {inputs} | `{block['produces']}` |")
     out += [
         "",
         "### Block parameters (`params:`)",
         "",
-        "- **`gate.roundtable`**: `panel.required` (list of required reviewer "
-        "personas), `panel.eligible` (list of additional eligible personas), "
-        "`quorum` (int; effective quorum is `max(2, quorum)` and at least the "
-        "required-panel size).",
-        "- **`gate.human`**: parks the run for a human decision. **Inviolable**: never "
-        "auto-satisfied in autonomous mode, and declaring it auto-satisfiable "
-        "(`policy: preauthorized` / `optional: true`) is rejected at validation. Cleared "
-        "only by a human's signed approval via the gate endpoint.",
-        "- Other blocks take no params today; unknown params are ignored by the "
-        "validator.",
+        "- **Review panels:** `gate.roundtable` requires `roundtable`. Its optional "
+        "`panel.required`, `panel.eligible`, and `quorum` fields select the seats. "
+        "Quorum must be between one and the configured persona count.",
+        "- **Human gates:** `gate.human` parks until the browser or API records an "
+        "approve or reject decision. The current record is a hashed approval artifact "
+        "and lifecycle transition, not a cryptographic principal signature.",
+        "- **Loop budgets:** `max_rounds` limits repeated execution of one node. "
+        "Blocks also read parameters such as `workflow`, `max_children`, `base`, "
+        "`persona`, `focus`, and trigger workspace settings.",
         "",
         "### Custom blocks: `$AIMEE_HOME/workflows/blocks.yaml`",
         "",
-        "Operator-owned (refused if a symlink or group/world-writable). Adds blocks "
-        "to the catalog above:",
+        "Operator-owned and refused if it is a symlink or group/world-writable. "
+        "It adds blocks to the catalog above:",
         "",
         "```yaml",
-        "allow_command: false       # opt-in gate for the `command` executor (no-shell, argv-only)",
+        "allow_command: false       # opt-in gate for command blocks",
+        "command_timeout_ms: 60000  # bounded timeout for command blocks",
         "blocks:",
         "  - name: <block-name>     # must not shadow a built-in or duplicate",
         "    consumes: <artifact>   # input artifact type, or none (a source)",
-        "    produces: branch|none  # custom blocks may NOT mint verdict/approval/pr",
+        "    produces: branch|none  # custom blocks cannot mint verdict/approval/pr",
         "    executor: command|delegate",
-        "    command: [ argv0, arg1, ... ]   # executor: command (run in the repo, no shell)",
+        "    command: [ /abs/path/to/tool, arg1, ... ]  # command executor, no shell",
+        "    command_sha256: <hex>  # digest of the executable",
         "    persona: <name>        # executor: delegate",
         "    prompt: <text>         # executor: delegate",
         "```",
         "",
         "### Run-level controls (not in the definition)",
         "",
-        "- **Per-stage loop cap**: `params.max_rounds` bounds retries for a node "
+        "- **Per-node loop cap**: `params.max_rounds` bounds retries for a node "
         f"that loops through `on_fail` (default `{default_rounds}`). Exhaustion parks "
         "the run with `retry_limit` or a more specific convergence reason. The "
         "retired `max_iters` and `on_max` fields are ignored by the Go engine.",
-        "- **Cost cap**: an optional per-work-item USD ceiling set at run creation "
-        "(`work_item_max_cost_usd`); the engine parks the run when cumulative cost "
-        "reaches it.",
-        "- **Trigger / autonomy mode**: `interactive` vs `autonomous`, set when the "
-        "run is created.",
+        "- **Cost cap**: an optional per-work-item USD ceiling is set when the run is "
+        "created. The engine parks the run when cumulative cost reaches it.",
+        "- **Trigger mode**: `interactive` or `autonomous` is recorded at admission. "
+        "The current Go scheduler advances both the same way, so use `gate.human` or "
+        "manual pause for an approval boundary.",
         "",
         "### Workflow environment overrides",
         "",
-        "`AIMEE_WORKFLOW_REPO` (repo the engine operates on) and "
-        "`AIMEE_WORKFLOW_BASE` (base branch for freeze/diff): see Environment "
-        "variables above.",
+        "`AIMEE_WFE_RUNNER_URL` and `AIMEE_WFE_RUNNER_SOCKET` select a compatibility "
+        "runner. `AIMEE_AUTONOMY_CONCURRENCY` supplies the startup fallback for global "
+        "scheduler concurrency; live `autonomy.*` configuration then controls the "
+        "running service. Legacy C variables are identified in the environment table.",
     ]
     return "\n".join(out).rstrip() + "\n"
 

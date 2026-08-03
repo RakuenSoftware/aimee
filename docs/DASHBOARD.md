@@ -20,8 +20,8 @@ resolves to PAM, which is the mode with a local answer.
 - **Dashboard:** server-incurred agent, token, cost, latency, cache, guardrail, and readiness metrics.
 - **Projects:** git accounts, clones, workspaces, and per-page project selection.
 - **Agents / Roundtables:** roster, probes, role coverage, presets, and seats.
-- **Edit Workflows:** visual definition editor.
-- **Workflow Actions:** start and operate durable runs.
+- **Edit Workflows:** build typed graphs, data bindings, loops, child workflows, and delegate blocks.
+- **Workflow Actions:** submit proposals, inspect durable runs, resolve human gates, and configure triggers.
 - **Graph:** code and relationship exploration.
 - **Logs:** action/audit views for the selected service.
 - **Settings:** allowlisted typed configuration.

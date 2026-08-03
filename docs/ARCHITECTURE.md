@@ -159,13 +159,13 @@ The client opens no database and starts no daemon. Warm state stays in `aimee-se
 
 ### Workflow run
 
-1. `aimee-wfe` validates and snapshots the definition and admitted request.
-2. The scheduler persists a transition before dispatching work.
-3. Agent and roundtable work uses typed resource calls to the C server; credentials never cross
+1. **Admit immutable input.** `aimee-wfe` validates and snapshots the definition and request.
+2. **Persist before dispatch.** The scheduler writes the transition before starting work.
+3. **Cross a typed resource boundary.** Agent and roundtable work calls the C server; credentials never cross
    back into the workflow store.
-4. Each slice gets a confined worktree and branch.
-5. Verification, review, merge, and forge operations produce separate artifacts.
-6. A human gate parks until an explicit browser or API decision arrives. The current service stores
+4. **Confine each slice.** Every child gets its own worktree and branch.
+5. **Keep evidence separate.** Verification, review, merge, and forge operations produce distinct artifacts.
+6. **Stop at human authority.** A human gate parks until a browser or API decision arrives. The service stores
    a hashed approval artifact and lifecycle event, not a cryptographic principal signature. A crash
    resumes from the durable event log.
 

@@ -1,20 +1,22 @@
 # Workflow Actions
 
-The browser's **Workflows** page starts proposals and operates saved runs. **Edit Workflows** changes
-the graph used by future runs. Editing a definition does not mutate the version pinned to an existing
-run.
+The browser separates definition from execution. **Edit Workflows** changes the graph for future
+runs. **Workflows** files proposals and operates durable runs. A saved edit never mutates the version
+pinned to work already in flight.
 
 ![The Workflows page showing a run waiting at a human gate, its controls, event history, and proposal](images/workflow-actions.png)
 
 ## Start a run
 
-1. Select **+ New proposal**.
-2. Enter a title and proposal body, then choose a saved workflow.
-3. Enter the repository checkout path visible to the server. Although the current field says
+![The new proposal composer with title, workflow, repository, body, delegate draft, and project file controls](images/workflow-actions-new-proposal.png)
+
+1. **Open the composer.** Select **+ New proposal**.
+2. **Write the request.** Enter a title and proposal body, then choose a saved workflow.
+3. **Name the checkout.** Enter the repository path visible to the server. Although the field says
    optional, the Go submit endpoint rejects a blank repository.
-4. Optionally use **Draft with a delegate** or **Load from project**. Both show a preview before
+4. **Use project help if needed.** **Draft with a delegate** and **Load from project** both show a preview before
    replacing the proposal body.
-5. Select **Submit**. The page opens the new run and begins polling it.
+5. **Submit the run.** The page opens it and begins polling.
 
 The in-progress draft is stored in browser local storage and cleared at logout. Browser submission
 currently creates an `autonomous` run. The composer does not expose trigger mode or a per-run spend
@@ -31,14 +33,14 @@ aimee workflow run build \
 
 ## Read a run
 
-The left rail lists runs and their derived status labels. Selecting one shows the current:
+The left rail lists runs and their derived status labels. Selecting one shows:
 
-- state, stage, workflow, and pinned version;
-- repository, accumulated cost and optional cap;
-- PR reference when one has been created;
-- submitter and override count when present;
-- append-only lifecycle events with stage, actor, detail, timestamp, and step cost;
-- immutable admitted proposal.
+- **Identity:** state, stage, workflow, and pinned version.
+- **Authority and cost:** repository, accumulated cost, and optional cap.
+- **Delivery:** the PR reference after one exists.
+- **Attribution:** submitter and override count when present.
+- **History:** append-only events with stage, actor, detail, timestamp, and step cost.
+- **Request:** the immutable admitted proposal.
 
 The selected run is polled every four seconds while it remains open. Event reads use an incremental
 cursor, so the page appends new history instead of reconstructing state from browser events.
@@ -80,10 +82,12 @@ integration branch.
 
 The **Triggers** panel shows what can file a run automatically.
 
-- Config-origin trigger rules can be added, edited, saved, and removed there.
-- A trigger originating from a saved workflow's `trigger.watch-dir` start node is read-only in this
+![The Workflows trigger list beside the expanded Run policy controls](images/workflow-actions-triggers-policy.png)
+
+- **Edit config triggers.** Config-origin rules can be added, saved, and removed in this panel.
+- **Edit graph triggers at the source.** A trigger from a saved workflow's `trigger.watch-dir` node is read-only in this
   panel. Edit that node in **Edit Workflows** to change or disarm it.
-- The current Go scanner executes `watch-dir` and `proposals` sources. Other displayed source names
+- **Use a supported scanner.** Go executes `watch-dir` and the compatibility name `proposals`. Other displayed source names
   are not executed by this scanner.
 
 A watch rule needs a server-visible workspace, a saved workflow, a repository-relative proposal
@@ -111,6 +115,13 @@ Current defaults include:
 
 Node-level `max_rounds` is defined in the graph and is separate from these run-level limits. See
 [Workflows](WORKFLOWS.md#create-a-bounded-loop).
+
+The service reads these values live. A process-level environment override still wins. Setting the
+trigger admission cap to `0` pauses new trigger and browser-submit admission; it does not make
+admission unlimited.
+
+`autonomy.per_workflow_concurrency` defaults to `1` but is not exposed in this panel. Change it
+through the typed configuration surface when one workflow may occupy more than one scheduler slot.
 
 ## Diagnose a parked or terminal run
 

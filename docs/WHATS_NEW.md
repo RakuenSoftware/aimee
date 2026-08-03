@@ -72,9 +72,10 @@ See [Event bus](EVENT_BUS.md).
 
 - The Go workflow engine schedules parallel slices, retries, review loops, live forge work, and
   merge recovery.
-- Typed workflow blocks replace implicit pipeline steps. Validation checks edges, inputs, loops,
-  gates, and version hashes before a run starts.
-- Triggers and cron can create runs. Trigger mode chooses autonomous or interactive handling.
+- Typed workflow blocks replace implicit pipeline steps. Validation checks edge targets, input ports,
+  artifact types, required parameters, and roundtable structure before a run starts.
+- Watched-proposal triggers can create runs. Trigger mode is recorded, but current Go scheduling does
+  not change between `autonomous` and `interactive`.
 - A human gate always parks. Autonomous mode cannot approve one.
 - Roundtable findings feed the next author pass instead of disappearing at a boolean verdict.
 - A complete pre-supplied proposal can advance without being rewritten; a failed attempt with no

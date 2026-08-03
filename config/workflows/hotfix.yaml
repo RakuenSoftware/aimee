@@ -1,11 +1,8 @@
-# hotfix -- expedited enforced workflow for genuine one-liners / trivial changes.
+# Short workflow for a small, contained change.
 #
-# EXPEDITED, NOT WEAKENED (author ruling 2026-07-01): the roundtable keeps the
-# SAME required-persona quorum as managed-change -- expediting is faster/cheaper
-# panel models + a tighter round budget (max_rounds: 2), never fewer personas.
-# So the §8 fail-closed guarantee holds identically here. The single-packet path
-# feeds understand -> implement directly (no split), which is the only structural
-# difference from managed-change.
+# It keeps the managed-change review panel but removes `split` and limits review
+# loops to two rounds. `enforced` is metadata in the current Go definition; the
+# explicit pass edge into `gate.deliver` is the operative delivery boundary.
 name: hotfix
 intent_tags:
   - one-liner
@@ -18,7 +15,7 @@ nodes:
     params:
       with_user: true
     next: implement
-  # single packet: implement consumes the intent directly (no split step).
+  # Implement consumes the intent directly; this graph has no split step.
   - id: implement
     block: implement
     in:

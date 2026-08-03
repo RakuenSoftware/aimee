@@ -1,10 +1,8 @@
-# manual-review: the deepening sweep files its candidates here, NOT "build".
-# The sweep's output is machine-proposed and untrusted, so it must never auto-
-# implement: this workflow only authors the (sweep-provided) proposal and puts it
-# behind a single human gate, then ends. A human who approves promotes it
-# deliberately (re-submit to "build") — nothing the sweep produces reaches
-# implement/merge without an explicit person. (Enforced by a test that asserts no
-# implement/merge node exists here.)
+# Human review for untrusted, machine-proposed input.
+#
+# This graph normalizes the proposal and stops at `gate.human`. Approval ends the
+# run; it does not start `build`. Submit the approved proposal to `build` as a
+# separate action. A test keeps implementation and merge blocks out of this file.
 name: manual-review
 start: draft
 nodes:
@@ -13,8 +11,7 @@ nodes:
     params:
       with_user: false
     next: review
-    # Self-loop: author.proposal loops on delegate failure and needs an on_fail
-    # edge, else the engine hard-errors and the run wedges (see build.yaml draft).
+    # Retry a requested proposal correction within the node budget.
     on_fail: draft
   - id: review
     block: gate.human

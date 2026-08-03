@@ -1,15 +1,11 @@
-# managed-change -- the default interactive "primary as manager" workflow.
+# Manager-led change workflow.
 #
-# The primary agent's role, made structural: scope intent WITH the user
-# (understand) -> decompose into delegate packets (split) -> delegates do the
-# work (implement) -> the primary REVIEWS their output (review, read-only) ->
-# the primary LEADS a roundtable review (gate.roundtable) -> deliver.
+# understand -> split -> implement -> review -> roundtable -> deliver
 #
-# `enforced: true` means the validator REQUIRES the terminal gate.deliver node
-# (I2): "delivered" is unreachable except by crossing the gate, and the gate is
-# only crossable once review + roundtable have passed. The router (S1) may bind
-# an interactive session to this workflow; it is the default for substantive
-# multi-file change.
+# `enforced` is preserved as definition metadata. The current Go validator does
+# not infer delivery policy from it, so the explicit control edges below are the
+# operative boundary. Edit this file as YAML because the visual editor does not
+# preserve top-level `enforced` or `intent_tags`.
 name: managed-change
 intent_tags:
   - feature
@@ -40,22 +36,18 @@ nodes:
     in:
       branch: implement.out
     next: review
-  # The primary reviews the delegates' frozen diff. read-only: it cannot edit
-  # the diff (S0 invariant I3, wired in a later slice) -- a requested change
-  # loops back to split for re-delegation, it is never patched here.
+  # Review the frozen diff. Requested changes return to split for new work.
   - id: review
     block: review
     in:
       src: freeze.out
     params:
-      # explicit reviewer persona, validator-checked disjoint from the rt_gate
-      # panel below (anti-rubber-stamp); bounded re-delegation via max_rounds.
+      # Use a named reviewer and bound the review -> split loop.
       reviewer: contrarian
       max_rounds: 3
     on_pass: rt_gate
     on_fail: split
-  # The primary leads the roundtable; wfe_gate_decide owns pass/fail (fail-closed
-  # quorum), so "lead" is not "rubber-stamp".
+  # Require the configured roundtable and quorum before delivery.
   - id: rt_gate
     block: gate.roundtable
     in:
@@ -72,9 +64,7 @@ nodes:
       max_rounds: 6
     on_pass: deliver
     on_fail: split
-  # Terminal enforcement gate: reachable only via the roundtable's on_pass, which
-  # only fires on a fail-closed pass -- so review + roundtable are both guaranteed
-  # to have passed before delivery.
+  # Deliver only from the roundtable pass edge.
   - id: deliver
     block: gate.deliver
     in:

@@ -1,6 +1,6 @@
 # Configuration Reference
 
-> Auto-generated from the canonical source tables by `scripts/gen-reference-docs.py`: config keys from `src/modules/config/config_fields.c` + `src/config*.c`, env vars scanned from `getenv()` in `src/`, and the workflow surface from `src/modules/workflows/`. Do not edit by hand; run `make -C src docs-gen` to regenerate.
+> Auto-generated from the canonical source tables by `scripts/gen-reference-docs.py`: config keys from `src/modules/config/config_fields.c` + `src/config*.c`, env vars scanned from `getenv()` in `src/`, and the workflow catalog from `server-go/internal/wfe/catalog.go`. Do not edit by hand; run `make -C src docs-gen` to regenerate.
 
 This reference covers every configurable surface:
 
@@ -32,7 +32,7 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `aimee_with_llamacpp` | string | Whether THIS IMAGE bundles llama.cpp ("1" on the aimee-kb-*-llm variants). Set by the Dockerfile, not by an operator: it is a fact about the running image, and the setup wizard reads it to decide whether the local synthesis models can be offered at all. |
 | `audit_action_enabled` | bool | Publish governed tool-action audit rows (default on); disabling it creates an audit coverage gap. |
 | `audit_worm_enabled` | bool | Dual-write governed-action audit rows into the append-only, hash-chained WORM store alongside audit.log (default off). |
-| `autonomous` | bool | Run autonomously (auto-advance machine gates; human gates always park) vs interactive. |
+| `autonomous` | bool | Legacy mode flag. The current Go WFE records run mode at admission but does not branch scheduler behavior on it; human gates always park. |
 | `cache_aware_rewrite_enabled` | bool | Rewrite prompts to align with the provider's prompt cache. |
 | `cache_shaping_enabled` | bool | Enable prompt cache-shaping. |
 | `claude_model` | string | Default Claude model (empty = CLI default). |
@@ -513,14 +513,14 @@ The binaries read 222 `AIMEE_*` environment variables (scanned from `getenv()` i
 
 | Variable | Description |
 |----------|-------------|
-| `AIMEE_AUTONOMY_BASE` | Integration branch used by autonomous workflow work; distinct from the repository default branch. |
+| `AIMEE_AUTONOMY_BASE` | Legacy C workflow integration-branch fallback. The Go WFE uses the branch checked out when it admits the repository. |
 | `AIMEE_AUTONOMY_MAX_ACTIVE_PER_PRINCIPAL` | Maximum active autonomous work items for one authenticated principal. |
 | `AIMEE_AUTONOMY_MAX_USD` | Default USD ceiling for an autonomous work item; 0 disables this default ceiling. |
-| `AIMEE_AUTONOMY_PANEL_RETRIES` | Per-(work item, stage) budget for auto-retrying a TRANSIENT roundtable park (`panel_degraded`/`panel_unreachable`) in an autonomous run, one retry per scheduler backstop sweep, before it escalates to a human. Default 6. An explicit `0` disables auto-retry, so a degraded panel escalates immediately. A malformed or negative value floors to the default so a typo cannot silently disable the rail. |
+| `AIMEE_AUTONOMY_PANEL_RETRIES` | Legacy C scheduler budget for retrying transient roundtable parks. It does not configure the Go WFE scheduler. |
 | `AIMEE_AUTONOMY_SUBMIT_RATE_PER_MIN` | Autonomous-submission rate limit per principal. |
 | `AIMEE_AUTONOMY_SUBMIT_WINDOW_SECS` | Window used by the autonomous-submission rate limiter. |
 | `AIMEE_AUTONOMY_USD_PER_SEC` | Fallback spend estimator for autonomous admission when exact provider cost is unavailable. |
-| `AIMEE_DEFAULT_BRANCH` | Override the target repo's real default branch (its trunk) that a `base:trunk` `branch.open`/`pr.open` resolves to; else read from `git origin/HEAD`. Distinct from `AIMEE_AUTONOMY_BASE` (the aimee integration branch). A final feature PR opens against this branch (open-only, never auto-merged). |
+| `AIMEE_DEFAULT_BRANCH` | Legacy C workflow override for default-branch resolution. The Go WFE derives branch authority from the admitted repository and checkout. |
 | `AIMEE_ORCH_DELEGATES` | Enable delegate resource use by the orchestration plane. |
 | `AIMEE_ORCH_WORKFLOWS` | Enable workflow orchestration surfaces. |
 | `AIMEE_PANEL_SEAT_WAIT_SECS` | Maximum wait for a roundtable seat to acquire an eligible agent. |
@@ -528,11 +528,11 @@ The binaries read 222 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_WFE_HTTP_SOCKET` | Unix socket for the Go workflow control plane. |
 | `AIMEE_WFE_WORKTREE_GC_GRACE_SECS` | Grace period before an unowned workflow worktree can be collected. |
 | `AIMEE_WORKFLOW_AUTONOMOUS_ROUTER` | Enable automatic scheduling of admitted autonomous work items. |
-| `AIMEE_WORKFLOW_BASE` | Base branch for the engine's freeze/diff. |
+| `AIMEE_WORKFLOW_BASE` | Legacy C workflow fallback for the freeze/diff base. It does not set the Go WFE integration branch. |
 | `AIMEE_WORKFLOW_BRANCH` | Explicit workflow feature branch for a compatibility or test runner. |
 | `AIMEE_WORKFLOW_ENFORCE_STAGE` | Require runner requests to match the persisted workflow stage. |
 | `AIMEE_WORKFLOW_LEASE_TTL_SECS` | Lifetime of a workflow execution lease before recovery may reclaim it. |
-| `AIMEE_WORKFLOW_REPO` | Local repository directory the workflow engine operates on. |
+| `AIMEE_WORKFLOW_REPO` | Legacy C workflow fallback for a local repository. The Go WFE uses the repository admitted with each work item. |
 
 ### Git verify / MCP
 
@@ -674,59 +674,61 @@ nodes:
 
 ### Built-in block catalog
 
-| Block | Produces | Accepts inputs |
-|-------|----------|----------------|
-| `author.proposal` | `proposal` | `proposal` |
-| `trigger.watch-dir` | `proposal` | _(source: none)_ |
-| `author.plan` | `plan` | `proposal` |
-| `implement` | `branch` | `plan` |
-| `document` | `branch` | `branch` |
-| `source.archive` | `branch` | `branch` |
-| `freeze` | `frozen_diff` | `branch` |
-| `gate.roundtable` | `verdict` | `proposal`, `plan`, `frozen_diff` |
-| `gate.human` | `approval` | `proposal`, `plan`, `branch`, `frozen_diff`, `pr` |
-| `pr.open` | `pr` | `proposal`, `frozen_diff` |
-| `merge` | `none` | `pr` |
-| `gate.ci` | `verdict` | `pr` |
-| `check.mergeable` | `verdict` | `pr` |
-| `understand` | `WFE_ART_INTENT` | _(source: none)_ |
-| `split` | `plan` | `plan` |
-| `review` | `verdict` | `frozen_diff`, `branch` |
-| `gate.deliver` | `none` | `verdict`, `approval` |
-| `branch.open` | `branch` | `plan` |
-| `foreach.workflow` | `branch` | `plan`, `branch` |
+| Block | Required input ports and accepted artifacts | Produces |
+|-------|---------------------------------------------|----------|
+| `author.proposal` | `proposal` (optional); accepts `proposal` | `proposal` |
+| `trigger.watch-dir` | none | `proposal` |
+| `author.plan` | `proposal` (required); accepts `proposal` | `plan` |
+| `implement` | `plan` (required); accepts `plan`, `intent` | `branch` |
+| `document` | `branch` (required); accepts `branch` | `branch` |
+| `source.archive` | `branch` (required); accepts `branch` | `branch` |
+| `freeze` | `branch` (required); accepts `branch` | `frozen_diff` |
+| `gate.roundtable` | `src` (required); accepts `proposal`, `plan`, `frozen_diff`; requires param `roundtable` | `verdict` |
+| `gate.human` | `src` (required); accepts `proposal`, `plan`, `branch`, `frozen_diff`, `pr` | `approval` |
+| `pr.open` | `src` (required); accepts `proposal`, `frozen_diff` | `pr` |
+| `merge` | `pr` (required); accepts `pr` | `none` |
+| `gate.ci` | `pr` (required); accepts `pr` | `verdict` |
+| `check.mergeable` | `pr` (required); accepts `pr` | `verdict` |
+| `understand` | none | `intent` |
+| `split` | `intent` or `plan` (one required); accepts `intent`, `plan` | `plan` |
+| `review` | `src` (required); accepts `frozen_diff`, `branch` | `verdict` |
+| `gate.deliver` | `verdict` (required); accepts `verdict`, `approval` | `none` |
+| `branch.open` | none | `branch` |
+| `foreach.workflow` | `packets` (required), `feature` (required); accepts `plan`, `branch` | `branch` |
 
 ### Block parameters (`params:`)
 
-- **`gate.roundtable`**: `panel.required` (list of required reviewer personas), `panel.eligible` (list of additional eligible personas), `quorum` (int; effective quorum is `max(2, quorum)` and at least the required-panel size).
-- **`gate.human`**: parks the run for a human decision. **Inviolable**: never auto-satisfied in autonomous mode, and declaring it auto-satisfiable (`policy: preauthorized` / `optional: true`) is rejected at validation. Cleared only by a human's signed approval via the gate endpoint.
-- Other blocks take no params today; unknown params are ignored by the validator.
+- **Review panels:** `gate.roundtable` requires `roundtable`. Its optional `panel.required`, `panel.eligible`, and `quorum` fields select the seats. Quorum must be between one and the configured persona count.
+- **Human gates:** `gate.human` parks until the browser or API records an approve or reject decision. The current record is a hashed approval artifact and lifecycle transition, not a cryptographic principal signature.
+- **Loop budgets:** `max_rounds` limits repeated execution of one node. Blocks also read parameters such as `workflow`, `max_children`, `base`, `persona`, `focus`, and trigger workspace settings.
 
 ### Custom blocks: `$AIMEE_HOME/workflows/blocks.yaml`
 
-Operator-owned (refused if a symlink or group/world-writable). Adds blocks to the catalog above:
+Operator-owned and refused if it is a symlink or group/world-writable. It adds blocks to the catalog above:
 
 ```yaml
-allow_command: false       # opt-in gate for the `command` executor (no-shell, argv-only)
+allow_command: false       # opt-in gate for command blocks
+command_timeout_ms: 60000  # bounded timeout for command blocks
 blocks:
   - name: <block-name>     # must not shadow a built-in or duplicate
     consumes: <artifact>   # input artifact type, or none (a source)
-    produces: branch|none  # custom blocks may NOT mint verdict/approval/pr
+    produces: branch|none  # custom blocks cannot mint verdict/approval/pr
     executor: command|delegate
-    command: [ argv0, arg1, ... ]   # executor: command (run in the repo, no shell)
+    command: [ /abs/path/to/tool, arg1, ... ]  # command executor, no shell
+    command_sha256: <hex>  # digest of the executable
     persona: <name>        # executor: delegate
     prompt: <text>         # executor: delegate
 ```
 
 ### Run-level controls (not in the definition)
 
-- **Per-stage loop cap**: `params.max_rounds` bounds retries for a node that loops through `on_fail` (default `20`). Exhaustion parks the run with `retry_limit` or a more specific convergence reason. The retired `max_iters` and `on_max` fields are ignored by the Go engine.
-- **Cost cap**: an optional per-work-item USD ceiling set at run creation (`work_item_max_cost_usd`); the engine parks the run when cumulative cost reaches it.
-- **Trigger / autonomy mode**: `interactive` vs `autonomous`, set when the run is created.
+- **Per-node loop cap**: `params.max_rounds` bounds retries for a node that loops through `on_fail` (default `20`). Exhaustion parks the run with `retry_limit` or a more specific convergence reason. The retired `max_iters` and `on_max` fields are ignored by the Go engine.
+- **Cost cap**: an optional per-work-item USD ceiling is set when the run is created. The engine parks the run when cumulative cost reaches it.
+- **Trigger mode**: `interactive` or `autonomous` is recorded at admission. The current Go scheduler advances both the same way, so use `gate.human` or manual pause for an approval boundary.
 
 ### Workflow environment overrides
 
-`AIMEE_WORKFLOW_REPO` (repo the engine operates on) and `AIMEE_WORKFLOW_BASE` (base branch for freeze/diff): see Environment variables above.
+`AIMEE_WFE_RUNNER_URL` and `AIMEE_WFE_RUNNER_SOCKET` select a compatibility runner. `AIMEE_AUTONOMY_CONCURRENCY` supplies the startup fallback for global scheduler concurrency; live `autonomy.*` configuration then controls the running service. Legacy C variables are identified in the environment table.
 
 ## Other configuration files
 

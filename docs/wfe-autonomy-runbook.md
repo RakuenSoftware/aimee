@@ -1,14 +1,15 @@
 # Workflow autonomy runbook
 
-Use this when an autonomous workflow stops or behaves unexpectedly.
+A parked run is preserved evidence, not a failed retry. Use this runbook to repair the named
+constraint and continue the same work item.
 
 ## Triage
 
-1. Open the work item in **Workflow Actions**.
-2. Record state, current node, park reason, workflow version, artifact hash, repository, and spend.
-3. Read the last lifecycle events and the first failed external attempt.
-4. Check agent admission, provider, worktree, verification, and forge health for that node.
-5. Repair the named condition and resume the same work item.
+1. **Open the work item.** Use **Workflow Actions**.
+2. **Record its boundary.** Capture state, node, park reason, version, artifact hash, repository, and spend.
+3. **Find the first failure.** Read the latest events and the first failed external attempt.
+4. **Check that node's dependencies.** Inspect agent admission, provider, worktree, verification, and forge health.
+5. **Repair and resume.** Continue the same work item.
 
 The default build opens a draft final PR against the branch checked out when the repository was
 admitted. That integration lane can differ from the forge default. The workflow does not mark the PR
@@ -22,14 +23,13 @@ and verify repository protection before running another live workflow.
 
 ## Never force past
 
-- a human gate;
-- a missing or changed artifact hash;
-- a failed or missing implementation commit;
-- a merge conflict;
-- non-green required CI;
-- a degraded panel without quorum;
-- a forge identity or branch-confinement failure.
-- the draft state of a final workflow PR.
+- **Human decision:** a human gate.
+- **Artifact identity:** a missing or changed hash.
+- **Implementation evidence:** a failed or missing commit.
+- **Repository state:** a merge conflict or forge confinement failure.
+- **Verification:** non-green required CI.
+- **Review authority:** a degraded panel without quorum.
+- **Final handoff:** the draft state of a final workflow PR.
 
 ## Recovery
 
@@ -48,22 +48,13 @@ not yet an integrated bus consumer.
 
 ## Automatic proposal admission
 
-The autonomous pending-proposal watcher scans the watched branch on every poll and decides whether
-each pending proposal is eligible for a new run. The decisions are governed by five behaviors:
+The pending-proposal watcher scans the refreshed git ref on every poll. Five rules decide admission:
 
-1. **Identity derivation.** Pending-proposal identity is derived from the complete proposal file
-   bytes together with workflow and mode. The watched-branch commit is not part of the identity
-   and is therefore not sufficient on its own to identify a pending proposal.
-2. **No duplicate runs on branch-only advances.** Advancing the watched branch without changing the
-   proposal bytes does not start a duplicate run. The watcher treats the unchanged bytes as the
-   same pending proposal and leaves its prior run status intact.
-3. **Byte changes re-eligibility.** Changing the proposal bytes produces a new pending-proposal
-   identity, which makes the proposal eligible for a new run on the next scan.
-4. **Admission cap queues eligible proposals.** The live trigger admission cap can queue an
-   otherwise eligible proposal when the cap is reached on a given scan. The cap is edited in
-   **Workflows → Run policy**; an otherwise eligible proposal that exceeds the cap is held
-   for a later scan instead of being admitted or rejected.
-5. **Cap-queued proposals stay eligible on later scans.** A proposal queued by the cap remains
-   eligible on a later scan; the watcher does not require manual firing to retry a proposal that
-   was only held back by the cap. As long as the proposal bytes, workflow, and mode are
-   unchanged, it is reconsidered on every subsequent scan until the cap admits it.
+1. **Hash proposal bytes, workflow, and mode.** The watched commit is not part of identity.
+2. **Ignore branch-only movement.** A new commit with unchanged proposal bytes does not duplicate a run.
+3. **Admit changed proposals again.** New bytes create a new identity for the next scan.
+4. **Queue at the cap.** An eligible proposal waits for a later scan instead of being rejected.
+5. **Retry queued work.** The watcher reconsiders it without a manual fire.
+
+Edit the cap under **Workflows > Run policy**. A value of `0` pauses new watched-proposal and
+browser-submit admission.

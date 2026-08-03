@@ -1,14 +1,12 @@
-# Triggered "build": identical to the build workflow, but the trigger IS the
-# graph's entry node (triggers-as-blocks) — saving this workflow with a
-# params.workspace ARMS it: the trigger scheduler watches params.dir at
-# params.ref in that repo and files one autonomous run per new file, through the
-# exact same intake, dedup, cost-cap and max_concurrent policy as an equivalent
-# `trigger_rules` stanza. Without params.workspace the workflow saves fine but
-# stays disarmed (the server logs one warning).
+# Triggered build. `trigger.watch-dir` is the graph entry node.
 #
-# The trigger node advances instantly at run time (the scheduler already
-# materialized the watched file as the run's proposal artifact); its data edge
-# feeds author.proposal explicitly.
+# Set `params.workspace` to arm it. The Go scanner reads committed Markdown files
+# under `params.dir` at the refreshed `params.ref`, then applies the same identity,
+# spend, and admission rules as a `trigger_rules` entry. A blank workspace leaves
+# the saved workflow disarmed.
+#
+# The scanner materializes the watched file as the proposal artifact before the
+# trigger node advances. Its data edge feeds `author.proposal`.
 name: build-triggered
 intent_tags:
   - proposal
@@ -16,15 +14,14 @@ intent_tags:
   - triggered
 start: watch
 nodes:
-  # The trigger: watch a repo-relative dir for new files. Set workspace to the
-  # server-side repo clone to arm (e.g. /var/lib/aimee-workspaces/webusers/<u>/<repo>).
+  # Watch a repo-relative directory. `workspace` must name a server-visible clone.
   - id: watch
     block: trigger.watch-dir
     params:
       dir: docs/proposals/pending
       # workspace: /abs/path/to/the/repo/to/watch   # REQUIRED to arm
       # ref: origin/main                             # default: auto-detected origin HEAD
-      # mode: autonomous                             # or interactive
+      # mode: autonomous                             # recorded; scheduling is currently identical
       # max_spend_usd: 2
     next: draft
   - id: draft
@@ -63,10 +60,7 @@ nodes:
         eligible:
           - contrarian
       quorum: 4
-      # The gate's own loop budget (panel convenes -> request_changes -> the plan
-      # is re-authored -> gate again). The engine's default cap parked runs after
-      # a handful of rounds; honest refinement loops need more headroom before
-      # escalating to a human.
+      # Bound the gate -> plan -> gate refinement loop.
       max_rounds: 6
       focus: does this implementation plan fully satisfy the proposal/request?
     on_pass: split
@@ -76,9 +70,7 @@ nodes:
     in:
       plan: plan.out
     next: slices
-    # A transient split failure (the packet-authoring delegate flubbing its
-    # output) must retry, not dead-end the run: a looped node with no on_fail
-    # edge parks 'stuck' permanently.
+    # Regenerate packets when split requests another pass.
     on_fail: split
   - id: slices
     block: foreach.workflow
@@ -87,9 +79,7 @@ nodes:
       feature: feature.out
     params:
       workflow: slice
-      # Bound whole-generation retries independently of the child workflow.
-      # This contains terminal slice failures instead of repeatedly respawning
-      # byte-identical packets until the engine-wide default is exhausted.
+      # Bound whole-generation retries after a child fails.
       max_rounds: 3
     next: accept_freeze
     on_fail: split
@@ -151,8 +141,8 @@ nodes:
     in:
       branch: document.out
     next: final_pr
-  # Terminal human handoff: the feature->trunk PR is created as a draft. The
-  # workflow never marks it ready or merges it.
+  # Open a draft PR into the branch checked out at admission, then stop. The
+  # workflow never marks the PR ready or merges it.
   - id: final_pr
     block: pr.open
     in:

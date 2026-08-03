@@ -1,8 +1,11 @@
 # Workflows
 
-Use **Edit Workflows** to define a workflow graph. Use **Workflows** to submit a proposal and
-operate a run. Definitions are instance-wide files under `$AIMEE_HOME/workflows`; the project picker
-sets the current browser context but does not create a separate definition namespace per project.
+A workflow is not a list of steps. Control edges decide what runs; input bindings decide what each
+step reads. Confusing the two produces a graph that looks connected and fails validation.
+
+Use **Edit Workflows** to define the graph. Use **Workflows** to submit a proposal and operate the
+run. Definitions are instance-wide files under `$AIMEE_HOME/workflows`. The project picker changes
+browser context, not the definition namespace.
 
 ![The Edit Workflows page with a four-node review graph, the block palette, and colored transition edges](images/workflow-editor-graph.png)
 
@@ -47,15 +50,15 @@ of the definition, so the editor lays out the graph again when it is reopened.
 
 ## Build a graph in the browser
 
-1. Open **Edit Workflows**, then open a saved workflow or select **+ New**.
-2. Select a block in the left palette. A new node is added but remains disconnected.
-3. Select the node and set its title, task, persona, and optional delegate in the inspector.
-4. Select **set as start** on the entry node.
-5. Under **Inputs**, bind every required input name to the node that produces it.
-6. Set `next`, `on_pass`, and `on_fail` to create the control graph.
-7. Use **Advanced (raw params)** for parameters without a dedicated control.
-8. Select **Validate**. Resolve every reported port, type, parameter, block, or edge error.
-9. Select **Save**. If another editor saved first, reopen the definition and reapply the change
+1. **Open the graph.** Open a saved workflow or select **+ New**.
+2. **Add a block.** The new node starts disconnected.
+3. **Set its work.** Select the node and set its title, task, persona, and optional delegate.
+4. **Mark the entry.** Select **set as start** on the first node.
+5. **Bind its inputs.** Under **Inputs**, connect every required port to a producer.
+6. **Set its control edges.** Choose `next`, `on_pass`, and `on_fail` targets.
+7. **Add raw parameters.** Use **Advanced (raw params)** for fields without a dedicated control.
+8. **Validate the graph.** Resolve every port, type, parameter, block, and edge error.
+9. **Save the definition.** If another editor saved first, reopen and reapply the change
    against the new version.
 
 The editor saves `name`, `start`, and `nodes`. It does not currently preserve top-level
@@ -64,9 +67,11 @@ them through the visual editor.
 
 ## Create a bounded loop
 
-A loop is a control edge back to the same node or to an earlier node. Use a self-loop for a transient
-retry. Send review findings back to an author or implementation node when another artifact must be
-produced before review runs again.
+The arrow is easy. The budget is the loop.
+
+A backward control edge retries the same node or returns to an earlier one. Use a self-loop for a
+transient retry. Send requested changes to an author or implementation node when review needs a new
+artifact before it runs again.
 
 In the example below, **Quality gate** advances to `deliver` on approval and returns to `plan` when
 the panel requests changes. The inspector exposes those targets directly.
@@ -75,12 +80,12 @@ the panel requests changes. The inspector exposes those targets directly.
 
 To build this loop in the browser:
 
-1. Select the review or gate node.
-2. Set **on_pass** to the next stage after approval.
-3. Set **on_fail** to the node that can address the feedback.
-4. Open **Advanced (raw params)** and add a positive `max_rounds` value to the node that returns the
+1. **Select the decision node.** Choose the review or gate.
+2. **Set the pass edge.** Point **on_pass** at the stage after approval.
+3. **Set the change edge.** Point **on_fail** at the node that can address the feedback.
+4. **Bound the loop.** Add a positive `max_rounds` value to the node that returns the
    requested-change result. For a plan-to-gate refinement loop, put it on the gate.
-5. Confirm that the author node's output is bound into the gate, then validate and save.
+5. **Check the data edge.** Bind the new author output into the gate, then validate and save.
 
 This is a complete YAML version of that graph:
 
@@ -140,8 +145,10 @@ wall-clock, concurrency, and resume limits remain additional backstops.
 
 ## Compose a graph from child workflows
 
-`foreach.workflow` makes a graph call another saved graph once for each packet. The parent waits at
-the node until every child is accepted, then emits the assembled feature branch.
+`foreach.workflow` calls another saved graph once for each packet. The parent waits until every child
+is accepted, then emits the assembled feature branch.
+
+![A foreach.workflow node selected in Edit Workflows with its child workflow and fan-out settings](images/workflow-editor-foreach.png)
 
 ```yaml
   - id: split
@@ -181,14 +188,13 @@ block catalog it started with. Later edits affect new runs only.
 
 Validation currently checks:
 
-- one YAML document with known fields;
-- a non-empty name and at least one node;
-- unique node IDs matching `[A-Za-z][A-Za-z0-9_-]*`;
-- an existing start node and existing transition targets;
-- known blocks, required parameters, and required input ports;
-- bindings in `producer.out` form whose producer exists;
-- artifact types accepted by the receiving block;
-- roundtable panel and quorum structure.
+- **Document shape:** one YAML document with known fields.
+- **Graph identity:** a non-empty name, at least one node, and unique IDs matching
+  `[A-Za-z][A-Za-z0-9_-]*`.
+- **Control targets:** an existing start node and existing transition targets.
+- **Block contracts:** known blocks, required parameters, and required input ports.
+- **Data bindings:** `producer.out` syntax, an existing producer, and an accepted artifact type.
+- **Panel shape:** valid roundtable personas and quorum.
 
 Validation does not prove that every node is reachable, require a cycle budget, or judge whether a
 loop can make semantic progress. Make the start explicit and inspect both sides of every loop.
@@ -225,6 +231,8 @@ Custom blocks live in `$AIMEE_HOME/workflows/blocks.yaml` and cannot shadow a bu
 **Blocks + New** form creates delegate blocks with a persona, prompt, consumed artifact type, and an
 output of either `branch` or `none`. A consuming custom block uses the input port named `in`.
 
+![The custom delegate block form with consumed and produced artifact types, persona, and prompt](images/workflow-editor-custom-block.png)
+
 Operator-managed command blocks are YAML-only. They remain disabled unless `allow_command` is set,
 and require an absolute executable, a matching SHA-256 digest, and a bounded timeout.
 
@@ -233,8 +241,9 @@ progress retains the old prompt and block contract.
 
 ## Start and inspect a run
 
-The local definition commands read files and `$AIMEE_HOME/workflows`. The `run` and `status`
-commands use the server:
+The local definition commands use the legacy C catalog and read files from disk or
+`$AIMEE_HOME/workflows`. The `run` and `status` commands use the Go server. Browser Save and Validate
+are authoritative for a definition that the Go engine will execute.
 
 ```bash
 aimee workflow blocks
@@ -261,14 +270,17 @@ Other source names can be displayed by the UI but are reported as unsupported by
 
 You can configure a watched directory in either place:
 
-- add a rule under `trigger_rules` in `aimee.yaml`, or edit it in the **Workflows** trigger panel;
-- make `trigger.watch-dir` the workflow's start node and set its `params.workspace`.
+- **Configure a rule.** Add it under `trigger_rules` in `aimee.yaml` or use the **Workflows** trigger panel.
+- **Configure the graph.** Make `trigger.watch-dir` the start node and set `params.workspace`.
 
 A graph-native trigger without `params.workspace` is saved but disarmed. `params.dir` defaults to
 `docs/proposals/pending`; `params.ref` defaults to the refreshed remote default ref; and
 `params.max_spend_usd` sets the admitted run's spend ceiling. The scanner reads committed, visible
 Markdown files from the selected git ref, deduplicates the proposal bytes with workflow and mode,
 and retries admission on a later scan when the concurrency cap is full.
+
+Setting `trigger.max_concurrent` to `0` pauses new trigger and browser-submit admission. It does not
+remove the cap.
 
 Trigger mode is persisted, but the current Go scheduler does not branch its advancement behavior on
 `interactive` versus `autonomous`. Use `gate.human` or pause the run when operator approval must be a

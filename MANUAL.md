@@ -155,8 +155,8 @@ See [Roundtables](docs/ENSEMBLE.md).
 
 ## Workflows
 
-A workflow is a typed graph of authors, delegates, verification, review, gates, forge operations,
-and fan-out:
+Control edges choose the next block. Typed input bindings choose the artifact that block reads. That
+separation lets a graph loop through new work without feeding a gate its own stale verdict.
 
 ```bash
 aimee workflow blocks
@@ -178,14 +178,14 @@ aimee trigger fire --help
 aimee trigger list
 ```
 
-The current Go scanner executes `watch-dir` and `proposals` trigger sources. Autonomous mode removes
-routine operator steps, but it never passes a human gate. A human gate parks until a browser or API
-caller approves or rejects it. That decision is recorded as a hashed approval artifact and lifecycle
-transition; it is not a cryptographic signature over the artifact and principal.
+The current Go scanner executes `watch-dir` and `proposals` trigger sources. It records trigger mode,
+but schedules `autonomous` and `interactive` runs the same way. A human gate parks until a browser or
+API caller approves or rejects it. That decision is a hashed approval artifact and lifecycle
+transition, not a cryptographic signature over the artifact and principal.
 
 Parallel slices use separate branches and worktrees, then merge against the latest accepted feature
-tip. A missing commit, merge conflict, exhausted loop, lost review replay, or broken forge operation
-parks or fails with a named reason. It does not advance on an empty result.
+tip. A missing commit, merge conflict, exhausted loop, lost review replay, or forge failure parks or
+fails with a named reason. An empty result never advances.
 
 See [Workflows](docs/WORKFLOWS.md), [Workflow actions](docs/WORKFLOW_ACTIONS.md), and
 [Autonomous development](docs/AUTONOMOUS_DEVELOPMENT.md).

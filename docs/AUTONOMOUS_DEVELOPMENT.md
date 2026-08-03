@@ -1,18 +1,21 @@
 # Autonomous development
 
-Autonomous mode lets the workflow scheduler run ordinary steps without waiting for an operator. It
-does not widen tool, workspace, credential, budget, or gate authority.
+Autonomy comes from the graph and its authority, not the run's mode label. The current Go scheduler
+records `autonomous` or `interactive` but advances both the same way. Use `gate.human` or manual pause
+when an operator must decide.
+
+Autonomous execution does not widen tool, workspace, credential, budget, or gate authority.
 
 ## Start
 
 Use Workflow Actions, a watched-proposal trigger, the workflow CLI, or the typed submission API.
 Every path creates the same durable work item with:
 
-- an immutable admitted request and proposal;
-- a named, versioned workflow;
-- a repository and worktree authority;
-- retry, round, agent, and spend limits;
-- the initiating principal and audit context.
+- **Request:** an immutable admitted proposal.
+- **Definition:** a named workflow and pinned version.
+- **Repository:** checkout and worktree authority.
+- **Limits:** retry, round, agent, and spend budgets.
+- **Attribution:** the initiating principal and audit context.
 
 ## Lifecycle
 
@@ -47,20 +50,20 @@ runner, or compatibility-worker failure cannot erase the authoritative state.
 
 On restart, the scheduler:
 
-1. reads active and parked items;
-2. reconciles in-flight reservations and artifacts;
-3. retries work that is safe to repeat;
-4. parks anything that needs a decision or manual repair.
+1. **Loads durable work.** It reads active and parked items.
+2. **Reconciles dispatch.** It checks in-flight reservations and artifacts.
+3. **Redrives safe work.** It retries actions that are safe to repeat.
+4. **Preserves hard stops.** It parks anything that needs a decision or repair.
 
 It never converts a missing result into success.
 
 ## Gates
 
-- roundtable gates require valid evidence and quorum;
-- CI gates fail closed when required checks are not green;
-- mergeability gates stop on a conflict;
-- delivery gates enforce the current verdict;
-- human gates always park for an explicit browser or API decision.
+- **Roundtable gates** require valid evidence and quorum.
+- **CI gates** fail closed when required checks are not green.
+- **Mergeability gates** stop on a conflict.
+- **Delivery gates** enforce the current verdict.
+- **Human gates** park for an explicit browser or API decision.
 
 The current decision record is a hashed approval artifact plus a lifecycle transition. It is not a
 cryptographic signature binding the principal to the reviewed artifact, so repository protection
@@ -73,15 +76,13 @@ feedback and output parks as no progress instead of consuming the full budget fo
 
 Autonomy is bounded by:
 
-- global and per-workflow agent slots;
-- per-node retry and round counts;
-- fan-out packet count;
-- provider rate and quota;
-- per-run spend;
-- tool and process timeouts;
-- worktree and branch confinement;
-- trigger concurrency;
-- sandbox network, package, and credential policy.
+- **Scheduler capacity:** global and per-workflow slots.
+- **Graph budgets:** per-node rounds and fan-out packets.
+- **Provider capacity:** rate, quota, and per-run spend.
+- **Execution bounds:** tool and process timeouts.
+- **Repository authority:** confined worktrees and branches.
+- **Admission:** trigger and browser-submit concurrency.
+- **Sandbox policy:** network, package, and credential access.
 
 Fields under `autonomy.*` tune these limits. The browser's **Run policy** panel updates the live Go
 workflow service. See [Configuration](gen/configuration.md).
@@ -91,7 +92,7 @@ workflow service. See [Configuration](gen/configuration.md).
 | Reason | What to do |
 | --- | --- |
 | `human_gate` | inspect the run evidence, then approve or reject in Workflow Actions or through the API |
-| `panel_degraded` | restore eligible reviewers or change the named preset |
+| `panel_unreachable` | restore eligible reviewers or change the named preset |
 | `convergence_limit` | inspect the last blockers and refine the request/workflow |
 | `convergence_no_progress` | break the repeated plan/feedback cycle |
 | `dependency_pending` | no action; the scheduler resumes the slice after its declared predecessors are accepted |
@@ -104,13 +105,13 @@ workflow service. See [Configuration](gen/configuration.md).
 
 ## Security
 
-- The workflow process does not own agent credentials.
-- Forge operations are typed and confined to managed worktrees and branch namespaces.
-- Delegates retain their normal sandbox and source authority.
-- Remote workspace mutation requires full per-user write authority.
-- Tool and credential activity is audited through the event bus.
-- Autonomous mode cannot approve a human gate.
-- Autonomous mode cannot mark a final workflow PR ready or merge it.
+- **Credentials:** the workflow process does not own agent credentials.
+- **Forge:** operations are typed and confined to managed worktrees and branch namespaces.
+- **Delegates:** each delegate retains its sandbox and source authority.
+- **Remote writes:** workspace mutation requires full per-user write authority.
+- **Audit:** tool and credential activity crosses the event bus.
+- **Human gates:** workflow automation cannot approve one.
+- **Final PRs:** workflow automation cannot mark one ready or merge it.
 
 ## Observe
 

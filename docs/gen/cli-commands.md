@@ -673,7 +673,7 @@ Server worker-pool status.
 
 ### `aimee workflow`
 
-Inspect & validate development workflows.
+Author, validate, run, and inspect workflow graphs.
 
 Subcommands:
 
@@ -683,6 +683,8 @@ Subcommands:
   show <file.yaml>       Print the canonical form + version hash
   list                   List workflows under $AIMEE_HOME/workflows
   new <file.yaml>        Scaffold a starter workflow
+  run <name> --proposal <file> --repo <path> [--watch]
+  status <id> [--events] Inspect one durable run
 ```
 
 ### `aimee workspace`

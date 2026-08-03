@@ -36,40 +36,37 @@ preference for another language is not sufficient justification for Rust.
    `/v1` contract while handlers move behind it. Compatibility adapters are
    removable and hold no durable state.
 
-## First vertical slice: WFE
+## Current WFE boundary
 
-`server-go/` establishes the replacement process with:
+`server-go/` is now the sole workflow lifecycle owner. It provides:
 
-- Go-owned DB1 workflow rows and append-only lifecycle events using a CGO-free
-  SQLite driver;
-- immutable proposal storage and independent atomic plan/feedback artifacts;
-- full-size typed plan/review packets and out-of-process runner requests;
-- a Go workflow definition loader, state machine, scheduler, and immediate slot
-  refill;
-- recoverable `convergence_limit` and `convergence_no_progress` parks;
-- automatic retry after an isolated runner disappears;
-- compatible workflow item/event/proposal reads and proposal trigger filing;
-- Git-blob admission from a pinned commit with deterministic deduplication.
+- **Durable state:** Go-owned DB1 workflow rows and append-only lifecycle events use a CGO-free
+  SQLite driver.
+- **Distinct artifacts:** immutable proposals remain separate from atomic plans and feedback.
+- **Typed dispatch:** full-size plan and review packets cross an out-of-process runner boundary.
+- **Scheduling:** the Go loader, state machine, and scheduler refill available slots immediately.
+- **Recoverable loops:** `convergence_limit` and `convergence_no_progress` preserve exhausted work.
+- **Worker isolation:** a lost runner retries through a bounded failure path.
+- **Compatible APIs:** work-item, event, proposal, and trigger reads retain their `/v1` shapes.
+- **Deterministic admission:** Git blobs are read from a refreshed ref and deduplicated by content.
 
-The vertical slice deliberately does not link the C server. Until a Go runner
-implements every production block, the Go control plane may call an isolated
-compatibility worker over the typed runner protocol. That worker is disposable:
-its death is a failed attempt, not a control-plane failure.
+The Go process does not link the C server. Native execution uses typed agent and forge resource
+calls. A configured compatibility runner remains disposable: its death is a failed attempt, not a
+control-plane failure. The C workflow engine and scheduler no longer start.
 
 ## Migration sequence
 
-1. Complete WFE block runners, roundtables, Git forge operations, worktree
-   isolation, and provider routing in Go.
-2. Shadow-read current DB1 and compare API responses; stop the C scheduler, then
-   transfer the workflow tables to the Go writer in one cutover.
-3. Move the remaining DB1 API families and session/auth control plane to Go one
+1. **Retire the remaining C WFE inventory.** Move reusable CLI and resource helpers behind Go APIs,
+   then delete lifecycle code that no supported route reaches.
+2. **Keep one WFE writer.** Go owns workflow tables, definitions, artifacts, scheduling, and recovery.
+3. **Move remaining DB1 families.** Transfer session and authentication control one
    family at a time, maintaining one writer per family.
-4. Move delegate/provider execution, vault and policy enforcement into isolated
+4. **Isolate resource execution.** Move delegate/provider execution, vault, and policy enforcement into
    Go services. Preserve durable admission-before-dispatch semantics.
-5. Rewrite the KB service and DB2 ownership in Go, retaining typed HTTP boundaries.
-6. Replace thin-client and gateway behavior where needed. Delete compatibility
+5. **Rewrite KB ownership.** Move the KB service and DB2 while retaining typed HTTP boundaries.
+6. **Replace remaining clients.** Move thin-client and gateway behavior where needed. Delete compatibility
    adapters once no deployed client depends on them.
-7. Remove C build/runtime dependencies from production images. Any retained
+7. **Remove native runtime dependencies.** Any retained
    native component requires a documented Go impossibility and an isolated Rust
    boundary.
 
@@ -77,12 +74,11 @@ its death is a failed attempt, not a control-plane failure.
 
 Every migrated family must prove:
 
-- race-enabled unit and integration tests;
-- restart recovery from every durable transition;
-- worker kill/connection-loss isolation;
-- exact multi-megabyte Unicode artifact round trips, including final-byte
-  acceptance criteria and blocker recommendations;
-- API compatibility fixtures against the current client;
-- single-writer enforcement during migration;
-- an end-to-end proposal commit producing an implementation PR without a C
-  control-plane process.
+- **Concurrency:** race-enabled unit and integration tests.
+- **Recovery:** restart from every durable transition.
+- **Isolation:** worker kill and connection-loss tests.
+- **Artifact integrity:** exact multi-megabyte Unicode round trips, including final-byte
+  acceptance criteria and blocker recommendations.
+- **Compatibility:** API fixtures against the current client.
+- **Ownership:** single-writer enforcement during migration.
+- **Delivery:** an end-to-end proposal commit produces a PR without a C control-plane process.
