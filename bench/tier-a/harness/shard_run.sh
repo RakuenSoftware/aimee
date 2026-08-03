@@ -87,9 +87,19 @@ verify_model() {  # $1 = port. Confirm the server there loaded the quant we aske
   # A health check proves something is listening, not that it is the right
   # model. A stale server on a port we failed to claim answers /health happily
   # and silently substitutes its own weights for an entire arm.
+  # The expected stem is derived from REPO generically. It used to grep for
+  # E[24]B, which only exists in the gemma-4 names: for granite, Qwen or any
+  # other family want_fam came back EMPTY and the case below degenerated to
+  # "does the filename contain the quant", so a stale granite server answering
+  # on a port we failed to claim would have passed. The check that exists to
+  # catch a wrong model silently checked almost nothing for two thirds of the
+  # model field.
+  #
+  #   unsloth/granite-4.0-1b-GGUF:UD-Q4_K_XL -> stem granite-4.0-1b, quant UD-Q4_K_XL
   local p=$1 want_fam want_q loaded
-  want_fam=$(echo "$REPO" | grep -oE 'E[24]B')
-  want_q=$(echo "$REPO"   | grep -oE 'UD-Q[0-9]_K_XL')
+  want_fam=$(basename "${REPO%%:*}" | sed -E 's/-GGUF$//I')
+  want_q="${REPO##*:}"
+  [ "$want_q" = "$REPO" ] && want_q=""   # no ':quant' in REPO
   loaded=$(ssh -n -o ConnectTimeout=15 $HOST "curl -sf --max-time 8 http://$EP:$p/props" 2>/dev/null \
            | python3 -c "import json,sys;print((json.load(sys.stdin).get('model_path') or '').split('/')[-1])" 2>/dev/null)
   if [ -z "$loaded" ]; then say "  FAIL: port $p served no /props"; return 1; fi
