@@ -104,7 +104,21 @@ static void test_drain_advances_to_complete_with_events(void)
    assert(strcmp(job.stage, "complete") == 0);
    assert(strcmp(job.stage_status, "complete") == 0);
    assert(query_int("SELECT COUNT(*) FROM corpus_stage_events WHERE doc_id = 1") >= 14);
-   assert(query_int("SELECT COUNT(*) FROM corpus_stage_events WHERE outcome = 'skipped'") > 0);
+
+   /* THE SKIPS MUST BE REPORTED, not merely recorded. This assertion used to stop at
+    * the line below -- it knew most stages are no-ops and checked only that the event
+    * log said so, while the stats the API actually returns had no way to express it.
+    * {processed: 14, failed: 0, complete: 1} then read as a fully processed document
+    * that had in fact been chunked, summarized, entity- and claim-extracted by
+    * nobody. */
+   int logged_skips =
+       query_int("SELECT COUNT(*) FROM corpus_stage_events WHERE outcome = 'skipped'");
+   assert(logged_skips > 0);
+   assert(stats.skipped == logged_skips);
+   /* And the no-ops must outnumber the real work, because that is the current shape
+    * of the pipeline: five stages have a handler and the rest do not. If this ever
+    * flips, the comment above is stale and the reporting matters less. */
+   assert(stats.skipped > stats.processed - stats.skipped);
    assert(query_int("SELECT COUNT(*) FROM document_sections WHERE doc_id = 1") == 2);
    assert(query_int("SELECT COUNT(*) FROM document_references WHERE from_doc_id = 1") >= 1);
 
