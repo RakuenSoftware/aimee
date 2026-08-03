@@ -73,11 +73,12 @@ Re-running an arm does not move it at all, so a sign is
 not a coin flip on run-to-run variation, and the signs above are not counting
 noise.
 
-What that does not license is comparing across configurations. The same arm at
-one server instead of three scores 0.6114 rather than 0.6138 — 0.0024 of pure
-configuration, on a question where the effects of interest are 0.0065 and 0.0150.
+What that does not license is comparing across configurations. The same arm on
+one single-slot process instead of three scores 0.6033 rather than 0.6138 —
+0.0105 of pure configuration, on a question where the effects of interest are
+0.0065 and 0.0150. The configuration difference is larger than either effect.
 Every arm in the ladder is therefore held at three processes, and the two figures
-in the paired table above are only comparable because of it.
+in the paired table above are comparable only because of it.
 
 ## The trap, stated plainly
 

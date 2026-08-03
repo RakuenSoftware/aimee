@@ -160,10 +160,9 @@ configuration to agree with some other configuration it is not using.
 The bottom row is the configuration this benchmark actually runs, and it is the
 clearest case of the rule. Its "matches sequential" cell is empty on purpose: we
 never ran plain sequential at 1001 notes, so the comparison does not exist. What
-we do have is the same arm at **one** MTP server against **three**, which holds
-the model, quant, prompt and MTP setting fixed and varies only the process count
-— 645 of 1001. That is the cleaner measurement anyway, and it is the subject of
-the next section.
+we do have is the same arm on **one** single-slot server against **three**,
+holding model, quant, prompt and MTP fixed and varying only the process count —
+652 of 1001. That is the subject of the next section.
 
 The quant deltas we are chasing are around 0.01 F1. The configuration noise in
 those bottom two rows moves 20 to 26 percent of notes. Mixing configurations
@@ -198,19 +197,28 @@ different script on a different day, is much harder to explain that way.
 And in the same breath it earns the article's title. That arm agrees with itself
 perfectly and does **not** agree with the one-server run of the same model, same
 quant, same prompt and same MTP setting — the process count is the only thing
-that differs. 645 of 1001 raw completions match, and strict F1 lands at 0.6114
-against 0.6138. All three isolated runs disagree with the one-server run on the
-identical 645, which is itself the point: the difference is a fixed property of
-the configuration, not something that wanders between runs. Isolation reproduces itself exactly while differing from a
-one-server run of the identical arm by 0.0024 F1. Repeatable, not identical,
+that differs. 652 of 1001 raw completions match, and strict F1 lands at 0.6033
+against 0.6138. Isolation reproduces itself exactly while differing from a
+one-process run of the identical arm by 0.0105 F1. Repeatable, not identical,
 measured on the full corpus rather than argued from 60 notes.
 
-That 0.0024 deserves its own warning, because it is the same size as the effects
-this benchmark chases. A quant step we care about is worth roughly 0.0065 to
-0.015 F1. Switching between one server and three moves the score by 0.0024 while
-changing nothing about the model. Comparing an arm run at one process against an
-arm run at three is therefore not a clean comparison, and no amount of sample
-size fixes it — it is a bias, not a variance.
+That 0.0105 deserves its own warning, because it dwarfs the effects this
+benchmark chases. A quant step we care about is worth roughly 0.0065 to 0.015
+F1. Changing nothing but the number of server processes moves the score by
+0.0105. Comparing an arm run at one process against an arm run at three is
+therefore not a comparison at all, and sample size does not help.
+
+One caution on that number, because we nearly published a worse version of it.
+Our first single-server reference was an older banked arm scoring 0.6114, which
+made for a tidy 0.0024 gap. Its device record says `total_slots : 4`. It was
+never a single-slot run at all — it belongs with the multi-slot configurations
+above, where a shared forward pass makes results non-reproducible by
+construction, and it is not comparable to anything in this section. The 0.6033
+figure is the honest one because `-np 1` is asserted in the harness on both
+sides. Whether the one-process configuration reproduces *itself* is a separate
+question, and a second single-server run is in flight to answer it. Until it
+lands, read 0.0105 as the distance between two configurations rather than as a
+settled constant.
 
 So the production configuration is N
 single-slot servers, each with its own draft head, corpus split round-robin

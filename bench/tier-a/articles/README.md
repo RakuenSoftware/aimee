@@ -28,9 +28,12 @@ can be rebuilt from source. Article 5 covers this.
 
 **Configurations are not interchangeable across arms.** Multi-token prediction
 moves 26 of 100 notes relative to a sequential run; 32 parallel slots move 25 of
-100 relative to *themselves*; and running the identical arm on one server rather
-than three moves 356 of 1001 notes and 0.0024 strict F1. Any comparison in this
-series is valid only within one configuration. Article 3 covers this.
+100 relative to *themselves*; and running the identical arm on one single-slot
+process rather than three moves 349 of 1001 notes and 0.0105 strict F1 — larger
+than any quant effect in the series. Any comparison here is valid only within one
+configuration, and a run's slot count is part of its configuration: one banked
+arm that looked like a single-server reference turned out to have
+`total_slots : 4`. Article 3 covers this.
 
 **Within one configuration, repetition is exact.** Three independent runs of the
 same three-process arm, spread over days across server restarts, returned

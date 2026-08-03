@@ -603,26 +603,37 @@ what was measured.
 
 What the experiment did establish, on three independent runs of that arm:
 
-| pair | raw completions identical |
-|---|---:|
-| ledger_3srv vs shard3_run1 | 1001/1001 |
-| ledger_3srv vs shard3_run2 | 1001/1001 |
-| shard3_run1 vs shard3_run2 | 1001/1001 |
-| each of the three vs v8base_1srv | 645/1001 |
+| pair | raw completions identical | strict F1 |
+|---|---:|---|
+| ledger_3srv vs shard3_run1 | 1001/1001 | 0.6138 = 0.6138 |
+| ledger_3srv vs shard3_run2 | 1001/1001 | 0.6138 = 0.6138 |
+| shard3_run1 vs shard3_run2 | 1001/1001 | 0.6138 = 0.6138 |
+| any of the three vs single_run1 (1 proc, 1 slot) | 652/1001 | 0.6138 vs 0.6033 |
+| any of the three vs v8base (1 proc, **4 slots**) | 645/1001 | see caveat |
 
-Strict F1 was 0.6138 on all three isolated runs and 0.6114 on the single-server
-run. So:
+So:
 
-- **Run-to-run noise within a configuration is zero**, not small. Three runs,
-  days apart, across server restarts, byte-identical on every note. Finding 15's
-  sign test is not counting noise.
-- **The one-vs-three-server difference is real and fixed**: 0.0024 F1, and the
-  *same* 356 notes move every time. That is a bias, not a variance, and sample
-  size does not touch it. Arms compared to each other must share a process count.
-- Hypothesis A in the script header ("same config twice") is answered. The
-  single-server arms (`single_run1`, `single_run2`) are still worth running for
-  hypothesis B -- whether one server reproduces *itself* -- which nothing here
-  has tested.
+- **Run-to-run noise within the three-process configuration is zero**, not small.
+  Three runs, days apart, across server restarts, byte-identical on every note.
+  Finding 15's sign test is not counting noise.
+- **The one-vs-three-process difference is 0.0105 F1** and moves 349 of 1001
+  notes -- larger than either quant effect the campaign chases. Arms compared to
+  each other must share a process count.
+- Hypothesis A in the script header ("same config twice") is answered.
+  `single_run2` is still needed for hypothesis B, whether one process reproduces
+  *itself*. Until it lands, 0.0105 is a distance between configurations, not a
+  demonstrated constant.
+
+**CAVEAT, and it invalidated a first draft of this finding.** The obvious
+single-server reference is `results/v8-baseline/E2B.UD-Q4_K_XL.mtp`, and it is
+not one. Its `E2B.UD-Q4_K_XL.mtp.device.txt` records `total_slots : 4`. It is a
+four-slot shared-batch run, the configuration finding 12 shows is not
+reproducible by construction, so its 0.6114 is not comparable to either the
+one-process or the three-process arms and the tidy "0.0024 gap" computed against
+it was meaningless. This is finding 3's defect class again -- a plausible number
+from an apparatus nobody checked -- and it was caught only because `single_run1`
+landed at 0.6033 and forced the question. **Check `total_slots` in the device
+record before using any banked arm as a reference.**
 
 Method: `results/noise-floor/`, compared against
 `results/quant-ledger/v5small.E2B.UD-Q4_K_XL.pred.jsonl` and
