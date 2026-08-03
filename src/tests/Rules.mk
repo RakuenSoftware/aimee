@@ -263,6 +263,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-bus-client \
                $(TESTPREFIX)/unit-test-bus-endpoint \
                $(TESTPREFIX)/unit-test-bus-runtime \
+               $(TESTPREFIX)/unit-test-module-runtime \
                $(TESTPREFIX)/unit-test-bus-capture \
                $(TESTPREFIX)/unit-test-guardrails-blast-radius \
                $(TESTPREFIX)/unit-test-code-collect \
@@ -2952,6 +2953,27 @@ $(TESTPREFIX)/unit-test-bus-runtime: $(OBJDIR)/tests/test_bus_runtime.o \
 
 .PHONY: unit-test-bus-runtime
 unit-test-bus-runtime: $(TESTPREFIX)/unit-test-bus-runtime
+	$<
+
+$(OBJDIR)/tests/test_module_runtime.o: C_FLAGS += -Icore/event_bus/include
+$(TESTPREFIX)/unit-test-module-runtime: $(OBJDIR)/tests/test_module_runtime.o \
+                                        $(OBJDIR)/core/event_bus/module_runtime.o \
+                                        $(OBJDIR)/core/event_bus/module_protocol.o \
+                                        $(OBJDIR)/core/event_bus/bus_runtime.o \
+                                        $(OBJDIR)/core/event_bus/bus_endpoint.o \
+                                        $(OBJDIR)/core/event_bus/bus_client.o \
+                                        $(OBJDIR)/core/event_bus/bus_attach.o \
+                                        $(OBJDIR)/core/event_bus/bus_host.o \
+                                        $(OBJDIR)/core/event_bus/bus_route.o \
+                                        $(OBJDIR)/core/event_bus/bus_region.o \
+                                        $(OBJDIR)/core/event_bus/bus_region_host.o \
+                                        $(OBJDIR)/core/event_bus/bus_ring.o \
+                                        $(OBJDIR)/core/event_bus/bus_arena.o \
+                                        $(OBJDIR)/core/event_bus/bus_wire.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
+
+.PHONY: unit-test-module-runtime
+unit-test-module-runtime: $(TESTPREFIX)/unit-test-module-runtime
 	$<
 
 # Event-bus conformance host harness (feature tree slice 10). A test binary that

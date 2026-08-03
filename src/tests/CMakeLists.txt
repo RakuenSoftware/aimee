@@ -169,6 +169,10 @@ aimee_add_test(test_bus_runtime test_bus_runtime.c)
 target_include_directories(test_bus_runtime PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
 target_link_libraries(test_bus_runtime PRIVATE aimee-core-event-bus Threads::Threads)
+aimee_add_test(test_module_runtime test_module_runtime.c)
+target_include_directories(test_module_runtime PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
+target_link_libraries(test_module_runtime PRIVATE aimee-core-event-bus Threads::Threads)
 aimee_add_test(test_bus_capture test_bus_capture.c ../core/event_bus/bus_capture.c ../core/event_bus/bus_client.c ../core/event_bus/bus_attach.c ../core/event_bus/bus_host.c ../core/event_bus/bus_route.c ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c ../core/event_bus/bus_ring.c ../core/event_bus/bus_arena.c ../core/event_bus/bus_wire.c)
 target_include_directories(test_bus_capture PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
 target_link_libraries(test_bus_capture PRIVATE Threads::Threads)

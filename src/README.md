@@ -65,6 +65,8 @@ routing boundary. There is no standalone inference runtime artifact.
 | `bus_host.*` | admission, sequence, routing, correlation, flow control, reap, tap |
 | `bus_client.*` | C attach, publish, subscribe, request/reply, poll |
 | `bus_capture.*` | ordered CRC-checked capture and observational replay |
+| `module_protocol.*` | versioned pointer-free feature request/result envelope |
+| `module_runtime.*` | authenticated process loop, dispatch, deadline and cancellation |
 
 One host owns all `memfd` creation. An admitted client receives only its queue pair and shared arena.
 The host stamps `seq` before routing and invokes the tap for every accepted event. Per-source FIFO is

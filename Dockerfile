@@ -44,7 +44,8 @@ RUN python3 scripts/export_c_repositories.py --runtime-bundle /module-runtime \
            src/core/event_bus/bus_attach.c src/core/event_bus/bus_client.c \
            src/core/event_bus/bus_endpoint.c src/core/event_bus/bus_region.c \
            src/core/event_bus/bus_ring.c src/core/event_bus/bus_wire.c \
-           src/core/event_bus/module_protocol.c \
+           src/core/event_bus/module_protocol.c src/core/event_bus/module_runtime.c \
+           -pthread \
            -o "/module-runtime/bin/$binary"; \
        done
 

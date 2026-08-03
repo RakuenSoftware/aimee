@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(aimee_core_c VERSION 0.1.0 LANGUAGES C)
+project(aimee_core_c VERSION 0.2.0 LANGUAGES C)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -62,6 +62,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         event_bus/bus_client.c
         event_bus/bus_endpoint.c
         event_bus/module_protocol.c
+        event_bus/module_runtime.c
         event_bus/bus_region.c
         event_bus/bus_ring.c
         event_bus/bus_wire.c
@@ -70,6 +71,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_include_directories(aimee-core-event-bus-client PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/event_bus/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+    target_link_libraries(aimee-core-event-bus-client PUBLIC Threads::Threads)
 
     add_library(aimee-core-event-bus STATIC
         event_bus/bus_attach.c
@@ -79,6 +81,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         event_bus/bus_endpoint.c
         event_bus/bus_host.c
         event_bus/module_protocol.c
+        event_bus/module_runtime.c
         event_bus/bus_region.c
         event_bus/bus_region_host.c
         event_bus/bus_ring.c

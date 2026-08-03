@@ -55,8 +55,8 @@ def main() -> int:
                 return fail(f"{module_id}: classification mismatch")
             if item.get("repository") != f"{exporter.REMOTE_ROOT}/aimee-module-{module_id}.git":
                 return fail(f"{module_id}: unexpected repository")
-            if item.get("version") != "0.1.0" or item.get("ref") != "v0.1.0":
-                return fail(f"{module_id}: version is not pinned to v0.1.0")
+            if item.get("version") != version or item.get("ref") != f"v{version}":
+                return fail(f"{module_id}: version is not pinned to v{version}")
             contract = contracts[module_id]
             if item.get("execution") != contract["execution"] or item.get("placements") != contract["placements"]:
                 return fail(f"{module_id}: execution/placement mismatch")

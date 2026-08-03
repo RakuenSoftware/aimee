@@ -1,13 +1,12 @@
-#define _POSIX_C_SOURCE 200809L
-#include <aimee/core/event_bus/bus_client.h>
-#include <aimee/core/event_bus/bus_endpoint.h>
+#include <aimee/core/event_bus/module_runtime.h>
 
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
-#include <unistd.h>
+#include <string.h>
+
+#define EXAMPLE_KIND 4200u
 
 static uint32_t parse_identity(const char *text)
 {
@@ -15,6 +14,21 @@ static uint32_t parse_identity(const char *text)
    errno = 0;
    unsigned long value = text ? strtoul(text, &end, 10) : 0;
    return !errno && end && !*end && value <= UINT32_MAX ? (uint32_t)value : UINT32_MAX;
+}
+
+static aimee_module_status_t handle(const aimee_module_invocation_t *invocation,
+                                    const uint8_t *request, uint32_t request_len, uint8_t *response,
+                                    uint32_t response_capacity, uint32_t *response_len,
+                                    void *user_data)
+{
+   (void)user_data;
+   if (aimee_module_invocation_cancelled(invocation))
+      return AIMEE_MODULE_STATUS_CANCELLED;
+   if (request_len > response_capacity)
+      return AIMEE_MODULE_STATUS_INTERNAL;
+   memcpy(response, request, request_len);
+   *response_len = request_len;
+   return AIMEE_MODULE_STATUS_OK;
 }
 
 int main(int argc, char **argv)
@@ -29,32 +43,13 @@ int main(int argc, char **argv)
    if (principal_class == UINT32_MAX || principal_ref == UINT32_MAX)
       return 2;
 
-   int socket_fd = -1;
-   bus_client_t client;
-   if (bus_endpoint_connect(argv[1], &socket_fd) != 0 ||
-       bus_client_attach_as(socket_fd, &client, principal_class, principal_ref) != BUS_CLIENT_OK)
-   {
-      perror("event-bus attach");
-      bus_endpoint_close(&socket_fd);
-      return 1;
-   }
-   bus_endpoint_close(&socket_fd); /* shared memory is the data path after attach */
-
-   for (;;)
-   {
-      struct timespec now;
-      if (clock_gettime(CLOCK_MONOTONIC, &now) == 0)
-         bus_client_heartbeat(&client, (uint64_t)now.tv_sec * 1000000000ULL + now.tv_nsec);
-      bus_event_t event;
-      bus_client_result_t result = bus_client_poll(&client, &event);
-      if (result == BUS_CLIENT_EPOCH)
-         break;
-      if (result == BUS_CLIENT_OK && (event.frame.hdr_flags & BUS_F_REQUEST))
-         (void)bus_client_reply(&client, event.frame.event_kind, event.frame.correlation_id,
-                                event.payload, event.payload_len);
-      struct timespec idle = {.tv_sec = 0, .tv_nsec = 1000000};
-      nanosleep(&idle, NULL);
-   }
-   bus_client_detach(&client);
-   return 0;
+   static const aimee_module_stage_t stages[] = {{EXAMPLE_KIND, 1u}};
+   const aimee_module_process_config_t config = {.socket_path = argv[1],
+                                                 .module_name = "example",
+                                                 .principal_class = principal_class,
+                                                 .principal_ref = principal_ref,
+                                                 .stages = stages,
+                                                 .stage_count = 1,
+                                                 .handler = handle};
+   return aimee_module_process_run(&config);
 }
