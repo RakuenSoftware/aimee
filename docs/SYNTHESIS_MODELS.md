@@ -20,13 +20,14 @@ distinction this page replaces.
 
 **The two images do not carry the same quant, and the asymmetry is the point.** On
 the 69-note gold set, dropping Q6 to Q4 costs E4B 0.0862 F1 (95% CI
-[+0.010, +0.181] — significant) and costs E2B 0.0012 (95% CI [-0.063, +0.069] —
-undecidable at this n). So E4B's quant is settled by measurement, and E2B's is not:
+[+0.010, +0.181], which is significant) and costs E2B 0.0012 (95% CI
+[-0.063, +0.069], undecidable at this n). So E4B's quant is settled by measurement,
+and E2B's is not:
 its tie is broken by the role E2B exists for. On the small box where you would pick
 E2B at all, Q4 is 1.70 GB of VRAM and 2.68 GB of host RSS against 2.30 and 3.86 at
 Q6, and the F1 difference is smaller than one gold triple.
 
-Be careful reading that as "Q4 is free for E2B". It is not measured to be equal — it
+Be careful reading that as "Q4 is free for E2B". It is not measured to be equal. It
 is measured to be *indistinguishable*, which is a statement about the set as much as
 the model, and `QUANT_DECISION.md` argues the opposite call on a directional prior
 (pooled P(Q6 > Q4) = 0.946). The full six-arm table, the memory figures, and what
@@ -140,7 +141,7 @@ difference is insignificant. The paired test is the one to read.
 now measured rather than assumed.** Every number in this section was taken at
 Q8_0; the images ship UD-Q4_K_XL for E2B and UD-Q6_K_XL for E4B.
 `bench/tier-a/QUANT_DECISION.md` measures all six arms on the same gold set, and
-the shipped pair scores 0.7206 (E2B Q4) and 0.8062 (E4B Q6) — so the Q8_0 table
+the shipped pair scores 0.7206 (E2B Q4) and 0.8062 (E4B Q6), so the Q8_0 table
 overstates E4B slightly and understates E2B by more than a little. Prefer the
 QUANT_DECISION numbers when the question is "what will I get", and this section
 when the question is "how do the two models compare on one lane".
@@ -215,7 +216,7 @@ flags).
 
 **The model-to-repo mapping is fixed at build time, not resolved at run time.**
 `gemma-4-E2B-it` maps to `unsloth/gemma-4-E2B-it-GGUF` at `UD-Q4_K_XL` and
-`gemma-4-E4B-it` to `unsloth/gemma-4-E4B-it-GGUF` at `UD-Q6_K_XL` — per-model
+`gemma-4-E4B-it` to `unsloth/gemma-4-E4B-it-GGUF` at `UD-Q6_K_XL`: per-model
 quants, decided by measurement (see QUANT_DECISION.md), with
 `scripts/synthesis-model-table.sh` as the single source of truth for the pairing
 and both digests. Each is fetched by exact filename and checked against its
@@ -301,8 +302,8 @@ It buys an operational property too. The sidecar holds no data, so moving betwee
 synthesis to a running deployment, or removing it, is a container swap with the kb left running. The
 embedder is still a one-way door; synthesis is not.
 
-Weights are baked per-model — 7.46 GB for E4B at UD-Q6_K_XL, 2.97 GB for E2B at
-UD-Q4_K_XL — from unsloth's GGUF repos, which is where the UD quants are published.
+Weights are baked per-model, 7.46 GB for E4B at UD-Q6_K_XL and 2.97 GB for E2B at
+UD-Q4_K_XL, from unsloth's GGUF repos, which is where the UD quants are published.
 The quant is a property of the model, not of the channel; see
 `scripts/synthesis-model-table.sh`.
 

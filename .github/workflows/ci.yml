@@ -32,6 +32,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       docs_only: ${{ steps.classify.outputs.docs_only }}
+      # Separate from docs_only on purpose: see the documentation step below.
+      docs_changed: ${{ steps.classify.outputs.docs_changed }}
     steps:
       - uses: actions/checkout@v4
         if: github.event_name == 'pull_request'
@@ -48,21 +50,25 @@ jobs:
           # Protected-branch pushes and manual runs always receive the full gate.
           if [ "$EVENT_NAME" != pull_request ]; then
             echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            echo "docs_changed=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           # This allowlist is intentionally narrow. Anything executable,
           # generated from executable sources, or operational takes the full path.
           docs_only=true
+          docs_changed=false
           file_count=0
           while IFS= read -r -d '' path; do
             file_count=$((file_count + 1))
             case "$path" in
               README.md|CONTRIBUTING.md|MANUAL.md|OWNERS.md|docs/*.md|docs/images/*|docs/gen/*.json)
+                docs_changed=true
                 ;;
               */README.md)
                 case "$path" in
                   control-web/*|data/*|deploy/*|editors/*|runtime-web/*|scripts/*|server-go/*|src/*)
+                    docs_changed=true
                     ;;
                   *)
                     docs_only=false
@@ -81,6 +87,7 @@ jobs:
             docs_only=false
           fi
           echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
+          echo "docs_changed=$docs_changed" >> "$GITHUB_OUTPUT"
           echo "docs_only=$docs_only ($file_count changed file(s))"
 
   no-coauthor-trailers:
@@ -187,10 +194,30 @@ jobs:
       - name: Check managed authority packaging boundary
         if: needs.change-scope.outputs.docs_only != 'true'
         run: python3 scripts/check-managed-authority-packaging.py
+      # Runs unconditionally: it costs no network and no build, and the thing it guards
+      # is the gating logic itself, which is exactly the part a conditional step cannot
+      # be trusted to check.
+      - name: Test the CI change classifier
+        run: python3 -I scripts/tests/test_ci_change_scope.py
+
+      # docs_CHANGED, not docs_only. Gated on docs_only, this never ran for a pull
+      # request that touched documentation AND anything else -- which is most of them,
+      # and is how six em-dash violations reached testing in #2280: that PR edited
+      # docs/SYNTHESIS_MODELS.md plus one frontend file, so it was not docs-only, this
+      # step was skipped, lint reported success, and the violation then failed every
+      # branch cut from testing afterwards. The next docs-only PR ran the check and
+      # inherited someone else's failure, which is the worst way to find out.
+      #
+      # docs-gen-check and `git diff --check` stay on docs_only: the first needs a build
+      # and the second is about whitespace in the diff, and both already run in the full
+      # gate that a non-docs-only PR takes.
       - name: Check documentation
+        if: needs.change-scope.outputs.docs_changed == 'true'
+        run: python3 scripts/check-docs.py
+
+      - name: Check generated docs and diff hygiene
         if: needs.change-scope.outputs.docs_only == 'true'
         run: |
-          python3 scripts/check-docs.py
           make -C src docs-gen-check
           git diff --check
 
