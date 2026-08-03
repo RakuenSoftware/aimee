@@ -12,8 +12,8 @@ Each KB configures the roles independently:
 | embedding | Run the selected embedder inside the KB container. | Call the configured embedding endpoint. | Not a supported state: a KB with no embedder refuses to start. |
 | synthesis | Run the selected synthesizer inside the KB container. | Call the configured synthesis endpoint. | Curator and answer-synthesis stages report degradation. |
 
-A KB hosts the embedding role internally or remotely — never neither — and may host synthesis, or
-not. Available internal models depend on the KB image and deployment profile. A remote role uses an
+A KB hosts the embedding role internally or remotely, never neither, and may host synthesis or not.
+Available internal models depend on the KB image and deployment profile. A remote role uses an
 explicit endpoint and credential owned by that KB.
 
 The current configuration descriptors call internal placement `local`:

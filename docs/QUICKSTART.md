@@ -210,7 +210,7 @@ aimee config set embedder_model bekko-a25m
 ```
 
 Once anything has been embedded, changing the embedder is a corpus migration rather than a setting,
-and the KB refuses the switch rather than mixing two vector spaces — see
+and the KB refuses the switch rather than mixing two vector spaces. See
 [Change the KB embedder](runbooks/change-embedder.md). Choosing in the wizard, before the first
 Deploy, avoids the question entirely.
 
