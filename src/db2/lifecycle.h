@@ -165,6 +165,13 @@ extern "C"
    typedef int (*db2_embedder_serving_probe_fn)(char *out, size_t out_len, char *err,
                                                 size_t errlen);
    void db2_set_embedder_serving_probe(db2_embedder_serving_probe_fn fn);
+   /* Whether each probe seam is currently registered. The bug these exist for was a
+    * registration decision no test could see: the caller skipped BOTH probes for the
+    * builtin embedder because the DIM probe cannot work against it, which silently
+    * disabled the serving-identity guard in the one transition it was written to catch.
+    * A seam that decides whether a guard runs has to be observable. */
+   int db2_embedder_probe_registered(void);
+   int db2_embedder_serving_probe_registered(void);
    void db2_set_embedding_compat(const char *compat_csv);
    const char *db2_embedding_compat(void);
 

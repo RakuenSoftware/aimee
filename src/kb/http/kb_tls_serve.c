@@ -31,6 +31,7 @@
 #include "kb_paths.h"        /* kb_default_config_dir */
 #include "kb_pki.h"          /* CA load + CSR signing for renew */
 
+#include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -757,6 +758,13 @@ static void *mtls_listener_thread(void *arg)
             continue;
          break;
       }
+      /* Close-on-exec, as the plaintext listener already does (kb_http_listener.c).
+       * This process forks constantly — a curator sidecar per symbol, pdf and
+       * normalize helpers — and a child that inherits a client's socket holds it
+       * open past our close(), leaving that client blocked reading a response we
+       * already finished. In the managed topology this listener carries the
+       * aimee-server -> aimee-kb traffic, so the stall lands on the server. */
+      fcntl(fd, F_SETFD, FD_CLOEXEC);
       /* Bound both concurrent handshakes and queued sockets. Saturation is
        * fail-closed: the accepted socket is dropped before reading a request. */
       if (mtls_queue_conn(fd) != 0)

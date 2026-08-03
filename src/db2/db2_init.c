@@ -122,6 +122,11 @@ void db2_set_embedder_probe(db2_embedder_probe_fn fn)
    g_embedder_probe = fn;
 }
 
+int db2_embedder_probe_registered(void)
+{
+   return g_embedder_probe != NULL;
+}
+
 void db2_set_dim_probe_budget_ms(int ms)
 {
    if (ms > 0)
@@ -169,6 +174,11 @@ static db2_embedder_serving_probe_fn g_embedder_serving_probe = NULL;
 void db2_set_embedder_serving_probe(db2_embedder_serving_probe_fn fn)
 {
    g_embedder_serving_probe = fn;
+}
+
+int db2_embedder_serving_probe_registered(void)
+{
+   return g_embedder_serving_probe != NULL;
 }
 static char g_embedding_compat[1024] = ""; /* CSV of "old_id->new_id" transitions */
 
