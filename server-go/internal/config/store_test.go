@@ -104,3 +104,48 @@ func TestTriggerRulesUseOptimisticVersion(t *testing.T) {
 		t.Fatal("stale trigger edit accepted")
 	}
 }
+
+func TestTriggerRulesRejectOversizedRegistry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "aimee.yaml")
+	store, _ := NewStore(path)
+	version, err := store.Version("trigger_rules")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules := make([]map[string]any, MaxTriggerRules+1)
+	for i := range rules {
+		rules[i] = map[string]any{
+			"source":   "watch-dir",
+			"pipeline": map[string]any{"template": "build", "workspace": "/repo"},
+		}
+	}
+	if err := store.SetVersioned("trigger_rules", rules, version); err == nil || !strings.Contains(err.Error(), "maximum is 32") {
+		t.Fatalf("oversized registry error = %v", err)
+	}
+}
+
+func TestTriggerRulesRejectUnsafeHumanInputs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "aimee.yaml")
+	store, _ := NewStore(path)
+	version, _ := store.Version("trigger_rules")
+	base := map[string]any{
+		"source": "watch-dir", "event": "docs/proposals/pending",
+		"pipeline": map[string]any{"template": "build", "workspace": "/repo"},
+	}
+	for name, mutate := range map[string]func(map[string]any){
+		"traversal":    func(rule map[string]any) { rule["event"] = "../outside" },
+		"git-option":   func(rule map[string]any) { rule["schedule"] = "--all" },
+		"negative-cap": func(rule map[string]any) { rule["pipeline"].(map[string]any)["max_spend_usd"] = -1 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			rule := map[string]any{
+				"source": base["source"], "event": base["event"],
+				"pipeline": map[string]any{"template": "build", "workspace": "/repo"},
+			}
+			mutate(rule)
+			if err := store.SetVersioned("trigger_rules", []map[string]any{rule}, version); err == nil {
+				t.Fatal("unsafe trigger rule was accepted")
+			}
+		})
+	}
+}

@@ -31,7 +31,7 @@ interface WfEvent {
   created_at: string;
 }
 // A configured trigger rule (aimee.yaml `trigger_rules`) that auto-starts runs.
-interface Trigger {
+export interface Trigger {
   source: string;
   event: string;
   schedule: string;
@@ -41,6 +41,19 @@ interface Trigger {
   max_spend_usd?: number;
   origin?: "config" | "workflow";
   last_error?: string;
+}
+
+interface TriggerRegistryResponse {
+  triggers: Trigger[];
+  version: string;
+  editable?: boolean;
+  max_rules?: number;
+  registry_error?: string;
+}
+
+interface WorkspaceOption {
+  label: string;
+  value: string;
 }
 
 const POLL_MS = 4000;
@@ -56,11 +69,17 @@ const SCAFFOLD = `## Goal
 ## Tests
 `;
 
-interface Draft {
+export interface Draft {
   title: string;
   body: string;
   workflow: string;
   repo: string;
+}
+
+export function proposalDraftError(draft: Draft): string {
+  if (!draft.body.trim()) return "Proposal body is empty.";
+  if (!draft.repo.trim()) return "Choose a repository checkout before starting the workflow.";
+  return "";
 }
 const emptyDraft = (): Draft => ({ title: "", body: SCAFFOLD, workflow: "build", repo: "" });
 function loadDraft(): Draft {
@@ -75,8 +94,15 @@ function loadDraft(): Draft {
 
 async function getJSON<T>(url: string): Promise<T> {
   const r = await fetch(url, { headers: { "X-CSRF-Token": window._csrf || "" } });
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  return (await r.json()) as T;
+  let data: unknown = {};
+  try { data = await r.json(); } catch { /* the status still carries the failure */ }
+  if (!r.ok) {
+    const message = data && typeof data === "object" && "error" in data
+      ? String((data as { error?: unknown }).error || `HTTP ${r.status}`)
+      : `HTTP ${r.status}`;
+    throw new Error(message);
+  }
+  return data as T;
 }
 async function postJSON<T>(url: string, body: unknown): Promise<{ status: number; data: T }> {
   const r = await fetch(url, {
@@ -101,11 +127,11 @@ async function loadWorkflowConfig(): Promise<Record<string, unknown>> {
   }
 }
 
-async function saveWorkflowConfig(key: string, value: unknown, previousVersion?: string): Promise<{ ok: boolean; value?: unknown; error?: string }> {
+async function saveWorkflowConfig(key: string, value: unknown, previousVersion?: string): Promise<{ ok: boolean; status: number; value?: unknown; error?: string }> {
   const response = await postJSON<{ ok?: boolean; key?: string; value?: unknown; error?: string }>("/api/workflow/config/set", { key, value, ...(previousVersion ? { previous_version: previousVersion } : {}) });
   return response.status >= 200 && response.status < 300 && response.data.ok === true && response.data.key === key && !response.data.error
-    ? { ok: true, value: response.data.value ?? value }
-    : { ok: false, error: response.data.error || `save failed (${response.status})` };
+    ? { ok: true, status: response.status, value: response.data.value ?? value }
+    : { ok: false, status: response.status, error: response.data.error || `save failed (${response.status})` };
 }
 
 // A bare method call (POST/DELETE) with no body — used for the lifecycle actions.
@@ -211,6 +237,11 @@ export default function WorkflowActions() {
   const [defs, setDefs] = useState<string[]>([]);
   const [triggers, setTriggers] = useState<Trigger[]>([]);
   const [triggerVersion, setTriggerVersion] = useState("");
+  const [triggerEditable, setTriggerEditable] = useState(false);
+  const [triggerMaxRules, setTriggerMaxRules] = useState(32);
+  const [triggerRegistryError, setTriggerRegistryError] = useState("");
+  const [triggerLoadError, setTriggerLoadError] = useState("");
+  const [triggerWorkspaces, setTriggerWorkspaces] = useState<WorkspaceOption[]>([]);
   const [triggersOpen, setTriggersOpen] = useState(true);
   const [submitMsg, setSubmitMsg] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -228,13 +259,37 @@ export default function WorkflowActions() {
   useEffect(() => {
     refreshList();
     // Workflow choices for the composer's picker (falls back to "build").
-    getJSON<{ defs: { name: string }[] }>("/api/workflow/defs")
-      .then((d) => setDefs((d.defs || []).map((x) => x.name)))
+    getJSON<{ defs: { name: string; valid?: boolean }[] }>("/api/workflow/defs")
+      .then((d) => setDefs((d.defs || []).filter((x) => x.valid !== false).map((x) => x.name)))
       .catch(() => setDefs([]));
-    // Configured trigger rules — what auto-starts runs (read-only view).
-    getJSON<{ triggers: Trigger[]; version: string }>("/api/workflow/triggers")
-      .then((d) => { setTriggers(d.triggers || []); setTriggerVersion(d.version || ""); })
-      .catch(() => setTriggers([]));
+    // Configured trigger rules — what auto-starts runs and whether this caller
+    // may edit the global registry.
+    getJSON<TriggerRegistryResponse>("/api/workflow/triggers")
+      .then((d) => {
+        setTriggers(d.triggers || []);
+        setTriggerVersion(d.version || "");
+        setTriggerEditable(d.editable === true);
+        setTriggerMaxRules(d.max_rules || 32);
+        setTriggerRegistryError(d.registry_error || "");
+        setTriggerLoadError("");
+      })
+      .catch((e: Error) => {
+        setTriggers([]);
+        setTriggerEditable(false);
+        setTriggerLoadError(`Could not load triggers: ${e.message}`);
+      });
+    // Offer managed repositories by name. A custom server-visible path remains
+    // available for repositories outside the managed workspace root.
+    getJSON<{ root?: string; projects?: string[] }>("/api/git/projects")
+      .then((d) => {
+        const root = (d.root || "").replace(/\/+$/, "");
+        const byPath = new Map<string, string>();
+        for (const name of d.projects || []) {
+          if (root && name) byPath.set(`${root}/${name}`, name);
+        }
+        setTriggerWorkspaces([...byPath].map(([value, label]) => ({ value, label })));
+      })
+      .catch(() => setTriggerWorkspaces([]));
   }, [refreshList]);
 
   // Persist the in-progress draft locally (device-local; cleared on logout).
@@ -251,7 +306,11 @@ export default function WorkflowActions() {
     setSelId(null);
     setDetail(null);
     setSubmitMsg("");
-  }, []);
+    setDraft((current) => ({
+      ...current,
+      repo: current.repo || (triggerWorkspaces.length === 1 ? triggerWorkspaces[0].value : ""),
+    }));
+  }, [triggerWorkspaces]);
   const updateDraft = useCallback(
     (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch })),
     [],
@@ -304,17 +363,19 @@ export default function WorkflowActions() {
   const submitProposal = useCallback(async () => {
     const title = draft.title.trim();
     const body = draft.body.trim();
-    if (!body) {
-      setSubmitMsg("Proposal body is empty.");
+    const validation = proposalDraftError(draft);
+    if (validation) {
+      setSubmitMsg(validation);
       return;
     }
+    const repo = draft.repo.trim();
     const md = title ? `# ${title}\n\n${body}` : body;
     setSubmitting(true);
     setSubmitMsg("");
     try {
       const { status: st, data } = await postJSON<{ work_item_id?: string; error?: string }>(
         "/api/dev/submit",
-        { proposal_md: md, workflow: draft.workflow || "build", repo: draft.repo || "" },
+        { proposal_md: md, workflow: draft.workflow || "build", repo },
       );
       if (st >= 200 && st < 300 && data.work_item_id) {
         try {
@@ -490,6 +551,12 @@ export default function WorkflowActions() {
           onChange={setTriggers}
           version={triggerVersion}
           onVersion={setTriggerVersion}
+          workflows={defs}
+          workspaces={triggerWorkspaces}
+          editable={triggerEditable}
+          maxRules={triggerMaxRules}
+          registryError={triggerRegistryError}
+          loadError={triggerLoadError}
           open={triggersOpen}
           onToggle={() => setTriggersOpen((v) => !v)}
         />
@@ -536,6 +603,7 @@ export default function WorkflowActions() {
           <Composer
             draft={draft}
             defs={defs}
+            workspaces={triggerWorkspaces}
             update={updateDraft}
             onSubmit={() => void submitProposal()}
             submitting={submitting}
@@ -792,16 +860,67 @@ function RunPolicyPanel() {
   );
 }
 
+export function triggerValidationError(trigger: Trigger): string {
+  if (!trigger.workspace.trim()) return "Choose a repository or enter its server-visible checkout path.";
+  if (!trigger.template.trim()) return "Choose a saved workflow.";
+  const directory = trigger.event.trim();
+  if (!directory) return "Enter the repository-relative directory to watch.";
+  if (directory.includes("\\") || /[\u0000-\u001f\u007f]/.test(directory)) {
+    return "Use a repository path with forward slashes and no control characters.";
+  }
+  const parts = directory.split("/");
+  if (directory.startsWith("/") || parts.includes("..") || directory === ".") {
+    return "The watched directory must stay inside the repository (for example docs/proposals/pending).";
+  }
+  if (trigger.schedule.trim().startsWith("-")) return "A branch or ref cannot start with '-'.";
+  if (trigger.mode !== "autonomous" && trigger.mode !== "interactive") return "Choose a supported run mode.";
+  if (trigger.max_spend_usd !== undefined && (!Number.isFinite(trigger.max_spend_usd) || trigger.max_spend_usd < 0)) {
+    return "The spend cap must be zero or a positive dollar amount.";
+  }
+  return "";
+}
+
+export function triggerRulesPayload(triggers: Trigger[]) {
+  return triggers.filter((t) => t.origin !== "workflow").map((t) => ({
+    source: "watch-dir",
+    event: t.event.trim() || "docs/proposals/pending",
+    schedule: t.schedule.trim(),
+    mode: t.mode || "autonomous",
+    pipeline: {
+      template: t.template.trim(),
+      workspace: t.workspace.trim(),
+      ...(t.max_spend_usd && t.max_spend_usd > 0 ? { max_spend_usd: t.max_spend_usd } : {}),
+    },
+  }));
+}
+
+function emptyTrigger(workflows: string[], workspaces: WorkspaceOption[]): Trigger {
+  return {
+    source: "watch-dir",
+    event: "docs/proposals/pending",
+    schedule: "",
+    mode: "autonomous",
+    template: workflows[0] || "build",
+    workspace: workspaces.length === 1 ? workspaces[0].value : "",
+    origin: "config",
+  };
+}
+
 // The configured trigger rules that auto-start runs, rendered as a compact,
-// collapsible section above the run list. This is the GUI's answer to "what is
-// wired to fire a workflow, and which workflow does it start" — read-only; rules
-// are edited in aimee.yaml. Empty => a hint that runs start only from a manual
-// submit (the + New proposal button).
-function TriggersPanel({
+// collapsible section above the run list. Config-origin rules are edited through
+// a guarded form; graph-native triggers remain read-only and point back to the
+// workflow editor that owns them.
+export function TriggersPanel({
   triggers,
   onChange,
   version,
   onVersion,
+  workflows,
+  workspaces,
+  editable,
+  maxRules,
+  registryError,
+  loadError,
   open,
   onToggle,
 }: {
@@ -809,46 +928,90 @@ function TriggersPanel({
   onChange: (triggers: Trigger[]) => void;
   version: string;
   onVersion: (version: string) => void;
+  workflows: string[];
+  workspaces: WorkspaceOption[];
+  editable: boolean;
+  maxRules: number;
+  registryError: string;
+  loadError: string;
   open: boolean;
   onToggle: () => void;
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const persist = async (next: Trigger[]) => {
+  const [notice, setNotice] = useState("");
+  const [editing, setEditing] = useState<number | "new" | null>(null);
+  const [draft, setDraft] = useState<Trigger>(() => emptyTrigger(workflows, workspaces));
+
+  const reload = async () => {
+    const current = await getJSON<TriggerRegistryResponse>("/api/workflow/triggers");
+    onChange(current.triggers || []);
+    onVersion(current.version || "");
+  };
+  const persist = async (next: Trigger[]): Promise<boolean> => {
     setSaving(true);
     setError("");
-    const value = next.filter((t) => t.origin !== "workflow").map((t) => ({
-      source: t.source || "watch-dir",
-      event: t.event || "docs/proposals/pending",
-      schedule: t.schedule,
-      mode: t.mode || "autonomous",
-      pipeline: {
-        template: t.template,
-        workspace: t.workspace,
-        ...(t.max_spend_usd ? { max_spend_usd: t.max_spend_usd } : {}),
-      },
-    }));
-    const result = await saveWorkflowConfig("trigger_rules", value, version);
-    setSaving(false);
-    if (!result.ok) {
-      setError(result.error || "save failed; reloading current trigger configuration");
-      try {
-        const current = await getJSON<{ triggers: Trigger[]; version: string }>("/api/workflow/triggers");
-        onChange(current.triggers || []);
-        onVersion(current.version || "");
-      } catch { /* preserve the visible error */ }
-    } else {
-      const current = await getJSON<{ triggers: Trigger[]; version: string }>("/api/workflow/triggers");
-      onChange(current.triggers || []);
-      onVersion(current.version || "");
+    setNotice("");
+    try {
+      const result = await saveWorkflowConfig("trigger_rules", triggerRulesPayload(next), version);
+      if (!result.ok) {
+        if (result.status === 409) {
+          try { await reload(); } catch { /* retain the conflict error */ }
+          setError("Triggers changed in another session. The current registry was reloaded; review your edit and save again.");
+        } else {
+          setError(result.error || "Could not save the trigger registry.");
+        }
+        return false;
+      }
+      await reload();
+      return true;
+    } catch (e) {
+      setError(`Could not save triggers: ${e instanceof Error ? e.message : "service unavailable"}`);
+      return false;
+    } finally {
+      setSaving(false);
     }
   };
-  const add = () => onChange([...triggers, { source: "watch-dir", event: "docs/proposals/pending", schedule: "", mode: "autonomous", template: "build", workspace: "" }]);
-  const remove = (index: number) => persist(triggers.filter((_, i) => i !== index));
-  const update = (index: number, patch: Partial<Trigger>) => {
-    const next = triggers.map((t, i) => i === index ? { ...t, ...patch } : t);
-    onChange(next);
+  const startAdd = () => {
+    setDraft(emptyTrigger(workflows, workspaces));
+    setEditing("new");
+    setError("");
+    setNotice("");
   };
+  const startEdit = (index: number) => {
+    setDraft({ ...triggers[index], source: "watch-dir", origin: "config" });
+    setEditing(index);
+    setError("");
+    setNotice("");
+  };
+  const saveDraft = async () => {
+    const validation = triggerValidationError(draft);
+    if (validation) {
+      setError(validation);
+      return;
+    }
+    const next = editing === "new"
+      ? [...triggers, draft]
+      : triggers.map((trigger, index) => index === editing ? draft : trigger);
+    if (await persist(next)) {
+      setEditing(null);
+      setNotice(editing === "new" ? "Trigger created. It will scan on the next scheduler pass." : "Trigger updated.");
+    }
+  };
+  const remove = async (index: number) => {
+    if (!window.confirm("Remove this automatic trigger? Existing workflow runs are not affected.")) return;
+    if (await persist(triggers.filter((_, i) => i !== index))) {
+      if (editing === index) setEditing(null);
+      setNotice("Trigger removed. Existing workflow runs were left intact.");
+    }
+  };
+  const configCount = triggers.filter((trigger) => trigger.origin !== "workflow").length;
+  const unsupportedConfigCount = triggers.filter((trigger) =>
+    trigger.origin !== "workflow" && trigger.source !== "watch-dir" && trigger.source !== "proposals",
+  ).length;
+  const canEdit = editable && !registryError && !loadError && unsupportedConfigCount === 0;
+  const atLimit = configCount >= maxRules;
+
   return (
     <div style={{ marginTop: 10, borderTop: "1px solid #eee", paddingTop: 8 }}>
       <div
@@ -858,45 +1021,184 @@ function TriggersPanel({
         <span style={{ fontSize: 11, color: "#999", width: 10 }}>{open ? "▾" : "▸"}</span>
         <span style={{ fontWeight: 600, fontSize: 13 }}>⚡ Triggers</span>
         <Badge label={`${triggers.length}`} variant="neutral" />
-        <span style={{ marginLeft: "auto", fontSize: 11, color: "#aaa" }}>auto-start</span>
+        <span style={{ marginLeft: "auto", fontSize: 11, color: "#aaa" }}>automatic starts</span>
       </div>
       {open && (
         <div style={{ marginTop: 6 }}>
+          <div style={{ fontSize: 11, color: "#777", lineHeight: 1.45, marginBottom: 8 }}>
+            Watch a Git repository folder for committed Markdown files and start a saved workflow for each new proposal.
+          </div>
+          {loadError && <div role="alert" style={triggerErrorStyle}>{loadError}</div>}
+          {registryError && (
+            <div role="alert" style={triggerErrorStyle}>
+              The saved trigger registry is invalid and cannot be safely edited here: {registryError}
+            </div>
+          )}
+          {unsupportedConfigCount > 0 && (
+            <div role="alert" style={triggerErrorStyle}>
+              {unsupportedConfigCount} config trigger{unsupportedConfigCount === 1 ? " uses" : "s use"} a source this workflow scanner cannot edit. Manage the registry in <code>aimee.yaml</code>; browser writes are disabled to preserve those rules exactly.
+            </div>
+          )}
+          {!editable && !loadError && (
+            <div style={{ fontSize: 11, color: "#777", marginBottom: 8 }}>
+              Only the appliance administrator can change automatic triggers. You can still inspect what is active.
+            </div>
+          )}
           {triggers.length === 0 ? (
             <div style={{ fontSize: 12, color: "#999", lineHeight: 1.4 }}>
               No triggers configured — runs start from a manual submit (+ New proposal).
             </div>
           ) : (
-            triggers.map((t, i) => (
-              <div key={i} style={{ marginBottom: 8 }}>
-                <TriggerCard t={t} />
-                {t.origin === "workflow" ? (
-                  <div style={{ fontSize: 11, color: "#777", marginTop: 4 }}>Configured by the saved workflow’s trigger.watch-dir start node. Edit that node to change or disarm it.</div>
-                ) : (<>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, marginTop: 4 }}>
-                  <input value={t.workspace} placeholder="workspace path" style={inp} onChange={(e) => update(i, { workspace: e.target.value })} />
-                  <input value={t.template} placeholder="workflow" style={inp} onChange={(e) => update(i, { template: e.target.value })} />
-                  <input value={t.event} placeholder="docs/proposals/pending" style={inp} onChange={(e) => update(i, { event: e.target.value })} />
-                  <input value={t.schedule} placeholder="git ref (auto if blank)" style={inp} onChange={(e) => update(i, { schedule: e.target.value })} />
-                </div>
-                <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-                  <select value={t.mode} style={inp} onChange={(e) => update(i, { mode: e.target.value })}>
-                    <option value="autonomous">autonomous</option><option value="interactive">interactive</option>
-                  </select>
-                  <Button size="sm" onClick={() => persist(triggers)} disabled={saving || !t.workspace || !t.template}>save</Button>
-                  <Button size="sm" onClick={() => remove(i)} disabled={saving}>remove</Button>
-                </div>
-                </>)}
+            triggers.map((trigger, index) => (
+              <div key={`${trigger.origin || "config"}-${trigger.source}-${trigger.workspace}-${trigger.template}-${index}`} style={{ marginBottom: 8 }}>
+                <TriggerCard t={trigger} />
+                {trigger.origin === "workflow" ? (
+                  <div style={{ fontSize: 11, color: "#777", marginTop: 4 }}>
+                    Owned by this workflow’s <code>trigger.watch-dir</code> start node. Edit that node in Edit Workflows to change or disarm it.
+                  </div>
+                ) : canEdit && editing !== index ? (
+                  <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                    <Button size="sm" onClick={() => startEdit(index)} disabled={saving || editing !== null}>Edit</Button>
+                    <Button size="sm" onClick={() => remove(index)} disabled={saving || editing !== null}>Remove</Button>
+                  </div>
+                ) : null}
+                {editing === index && (
+                  <TriggerEditor
+                    draft={draft}
+                    onChange={(patch) => setDraft((current) => ({ ...current, ...patch }))}
+                    workflows={workflows}
+                    workspaces={workspaces}
+                    saving={saving}
+                    onSave={saveDraft}
+                    onCancel={() => { setEditing(null); setError(""); }}
+                  />
+                )}
               </div>
             ))
           )}
-          <Button size="sm" onClick={add} disabled={saving}>+ trigger</Button>
-          {error && <div style={{ color: "#c00", fontSize: 11 }}>{error}</div>}
+          {editing === "new" && (
+            <TriggerEditor
+              draft={draft}
+              onChange={(patch) => setDraft((current) => ({ ...current, ...patch }))}
+              workflows={workflows}
+              workspaces={workspaces}
+              saving={saving}
+              onSave={saveDraft}
+              onCancel={() => { setEditing(null); setError(""); }}
+            />
+          )}
+          {canEdit && editing === null && (
+            <Button size="sm" onClick={startAdd} disabled={saving || atLimit} title={atLimit ? `At the ${maxRules}-trigger safety limit.` : "Create an automatic workflow trigger."}>
+              + New trigger
+            </Button>
+          )}
+          {atLimit && canEdit && <div style={{ fontSize: 11, color: "#777", marginTop: 4 }}>The {maxRules}-trigger safety limit has been reached.</div>}
+          {notice && <div role="status" style={{ color: "#287a3f", fontSize: 11, marginTop: 5 }}>{notice}</div>}
+          {error && <div role="alert" style={triggerErrorStyle}>{error}</div>}
         </div>
       )}
     </div>
   );
 }
+
+function TriggerEditor({
+  draft,
+  onChange,
+  workflows,
+  workspaces,
+  saving,
+  onSave,
+  onCancel,
+}: {
+  draft: Trigger;
+  onChange: (patch: Partial<Trigger>) => void;
+  workflows: string[];
+  workspaces: WorkspaceOption[];
+  saving: boolean;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  const managed = workspaces.some((workspace) => workspace.value === draft.workspace);
+  const availableWorkflows = workflows.includes(draft.template) || !draft.template
+    ? workflows
+    : [draft.template, ...workflows];
+  return (
+    <div style={{ border: "1px solid #dbe5f4", background: "#f8fbff", borderRadius: 6, padding: 9, marginTop: 6 }}>
+      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 7 }}>Watch for committed Markdown proposals</div>
+      <div style={{ display: "grid", gap: 8 }}>
+        {workspaces.length > 0 && (
+          <TriggerField label="Managed repository" help="Choose a repository Aimee already manages, or use a custom checkout path.">
+            <select
+              aria-label="Managed repository"
+              style={inp}
+              value={managed ? draft.workspace : "__custom__"}
+              onChange={(e) => onChange({ workspace: e.target.value === "__custom__" ? "" : e.target.value })}
+            >
+              <option value="__custom__">Custom server path…</option>
+              {workspaces.map((workspace) => <option key={workspace.value} value={workspace.value}>{workspace.label}</option>)}
+            </select>
+          </TriggerField>
+        )}
+        {(!managed || workspaces.length === 0) && (
+          <TriggerField label="Repository checkout" help="Absolute checkout path visible to the Aimee server, not a path on your browser device.">
+            <input aria-label="Repository checkout" value={draft.workspace} placeholder="/srv/repos/my-project" style={inp} onChange={(e) => onChange({ workspace: e.target.value })} />
+          </TriggerField>
+        )}
+        <TriggerField label="Workflow" help="The saved workflow started once for each new Markdown file.">
+          <select aria-label="Workflow" value={draft.template} style={inp} onChange={(e) => onChange({ template: e.target.value })}>
+            {!draft.template && <option value="">Choose a workflow…</option>}
+            {availableWorkflows.map((workflow) => <option key={workflow} value={workflow}>{workflow}</option>)}
+          </select>
+        </TriggerField>
+        <TriggerField label="Directory to watch" help="Repository-relative directory containing proposal Markdown files.">
+          <input aria-label="Directory to watch" value={draft.event} placeholder="docs/proposals/pending" style={inp} onChange={(e) => onChange({ event: e.target.value })} />
+        </TriggerField>
+        <TriggerField label="Branch or Git ref (optional)" help="Blank follows the refreshed origin default branch. Branch names are resolved on the remote.">
+          <input aria-label="Branch or Git ref (optional)" value={draft.schedule} placeholder="default branch" style={inp} onChange={(e) => onChange({ schedule: e.target.value })} />
+        </TriggerField>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 8 }}>
+          <TriggerField label="Run mode" help="Interactive records the mode; use a human gate in the workflow when approval must be mandatory.">
+            <select aria-label="Run mode" value={draft.mode} style={inp} onChange={(e) => onChange({ mode: e.target.value })}>
+              <option value="autonomous">Autonomous</option>
+              <option value="interactive">Interactive metadata</option>
+            </select>
+          </TriggerField>
+          <TriggerField label="Spend cap (optional)" help="Maximum provider spend for each admitted run; blank means the workflow default.">
+            <input
+              aria-label="Spend cap (optional)"
+              type="number"
+              min="0"
+              step="0.01"
+              value={draft.max_spend_usd ?? ""}
+              placeholder="No extra cap"
+              style={inp}
+              onChange={(e) => onChange({ max_spend_usd: e.target.value === "" ? undefined : Number(e.target.value) })}
+            />
+          </TriggerField>
+        </div>
+      </div>
+      <div style={{ fontSize: 11, color: "#777", lineHeight: 1.4, marginTop: 8 }}>
+        The scanner reads committed files from Git. Uncommitted files do not fire, and unchanged proposal content is deduplicated.
+      </div>
+      <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+        <Button variant="primary" size="sm" onClick={onSave} disabled={saving}>{saving ? "Saving…" : "Save trigger"}</Button>
+        <Button size="sm" onClick={onCancel} disabled={saving}>Cancel</Button>
+      </div>
+    </div>
+  );
+}
+
+function TriggerField({ label, help, children }: { label: string; help: string; children: React.ReactNode }) {
+  return (
+    <label title={help} style={{ display: "grid", gap: 3, fontSize: 11, color: "#555" }}>
+      <span style={{ fontWeight: 600 }}>{label}</span>
+      {children}
+      <span style={{ color: "#8a8a8a", lineHeight: 1.25 }}>{help}</span>
+    </label>
+  );
+}
+
+const triggerErrorStyle: React.CSSProperties = { color: "#a51d1d", background: "#fff3f3", border: "1px solid #ffd2d2", borderRadius: 4, padding: "5px 7px", fontSize: 11, marginTop: 5, marginBottom: 5 };
 
 // One trigger rule as a compact card: what fires it (source + event/schedule),
 // which workflow it starts, how it runs (mode), and where (workspace).
@@ -948,6 +1250,7 @@ function TriggerCard({ t }: { t: Trigger }) {
 function Composer({
   draft,
   defs,
+  workspaces,
   update,
   onSubmit,
   submitting,
@@ -955,6 +1258,7 @@ function Composer({
 }: {
   draft: Draft;
   defs: string[];
+  workspaces: WorkspaceOption[];
   update: (patch: Partial<Draft>) => void;
   onSubmit: () => void;
   submitting: boolean;
@@ -1088,15 +1392,34 @@ function Composer({
           </select>
         </L>
       </div>
-      <L label="Repo (optional)">
-        <input
-          value={draft.repo}
-          onChange={(e) => update({ repo: e.target.value })}
-          placeholder="owner/name or clone URL (blank = default)"
-          style={inp}
-          disabled={busy}
-        />
-      </L>
+      {workspaces.length > 0 && (
+        <L label="Managed repository">
+          <select
+            aria-label="Proposal repository"
+            value={workspaces.some((workspace) => workspace.value === draft.repo) ? draft.repo : "__custom__"}
+            onChange={(e) => update({ repo: e.target.value === "__custom__" ? "" : e.target.value })}
+            style={inp}
+            disabled={busy}
+            title="Repository checkout the workflow is allowed to modify."
+          >
+            <option value="__custom__">Custom server path…</option>
+            {workspaces.map((workspace) => <option key={workspace.value} value={workspace.value}>{workspace.label}</option>)}
+          </select>
+        </L>
+      )}
+      {(!workspaces.some((workspace) => workspace.value === draft.repo) || workspaces.length === 0) && (
+        <L label="Repository checkout (required)">
+          <input
+            aria-label="Repository checkout (required)"
+            value={draft.repo}
+            onChange={(e) => update({ repo: e.target.value })}
+            placeholder="/srv/repos/my-project"
+            style={inp}
+            disabled={busy}
+            title="Absolute checkout path visible to the Aimee server."
+          />
+        </L>
+      )}
       <L label="Proposal (Markdown)">
         <textarea
           value={draft.body}
