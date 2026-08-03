@@ -1552,6 +1552,24 @@ else
 fi
 
 echo ""
+# NOTE: `set -e` is active here, and `grep -c` exits 1 on zero matches -- hence
+# `|| true` below. Without it this block silently ended the run.
+# indexed -> embedded -> curated. The scan handler must NOT enqueue curator work:
+# at that point the project is indexed and its vectors do not exist yet, so
+# curation would race embedding. The enqueue belongs to the embed stage, gated on
+# the project being fully embedded. It also kept a one-row-per-symbol INSERT on
+# the synchronous path of /v1/code/scan (~173,000 rows, ~215s on a 4,018-file
+# corpus, against a 300s client deadline), so a drift back here is both a
+# correctness and a latency regression.
+scan_enqueues=$(grep -c 'kb_curator_queue_code_units_for_project' ../src/kb/http/kb_http_code.c 2>/dev/null || true)
+embed_enqueues=$(grep -c 'kb_curator_queue_code_units_for_project' ../src/modules/kb-synthesis/kb_curator_drain.c 2>/dev/null || true)
+embed_gated=$(grep -c 'kb_code_embed_project_fully_embedded' ../src/modules/kb-synthesis/kb_curator_drain.c 2>/dev/null || true)
+if [ "$scan_enqueues" -eq 0 ] && [ "$embed_enqueues" -ge 1 ] && [ "$embed_gated" -ge 1 ]; then
+    pass "curator work is enqueued by the embed stage, not by the scan handler"
+else
+    fail "curation must be enqueued after embedding, not during scan (scan=$scan_enqueues, embed=$embed_enqueues, gated=$embed_gated)"
+fi
+
 if [ "$FAIL" = "0" ]; then
     if [ "$MODE" = "--build-variants" ]; then
         echo "All build variant checks passed."
@@ -1566,3 +1584,4 @@ else
     fi
     exit 1
 fi
+

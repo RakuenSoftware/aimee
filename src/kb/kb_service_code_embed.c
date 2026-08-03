@@ -134,6 +134,105 @@ static int ce_flush_batch(ce_pending_t *pend, int n, const char **texts, float *
    return ok;
 }
 
+/* The project's content signature at |generation|: file count, the ACTIVE embedding
+ * dimension, and a digest over every file id:hash. Recorded by a pass that embedded
+ * the whole file set, and compared on the next pass to skip an unchanged project.
+ *
+ * The dimension is part of it on purpose: the same files at a different width are
+ * different vectors, so a dim change must invalidate the signature rather than read
+ * as "already embedded". */
+static void ce_project_signature(void *conn, int64_t proj_id, int64_t generation, char *out,
+                                 size_t out_len)
+{
+   if (!out || out_len == 0)
+      return;
+   out[0] = '\0';
+   if (!conn)
+      return;
+   int sc_dim = db2_embedding_dim();
+   if (sc_dim <= 0 || sc_dim > CE_EMBED_MAX_DIM)
+      sc_dim = 1024;
+   char err[CE_ERRBUF] = "";
+   static const char *sig_sql = "SELECT count(*), coalesce(md5(string_agg(id::text || ':' || "
+                                "hash, ',' ORDER BY id)), '') "
+                                "FROM files WHERE project_id = ?1 AND generation = ?2";
+   aimee_pg_stmt_t *sst = aimee_pg_prepare(conn, sig_sql, err, sizeof(err));
+   if (!sst)
+      return;
+   aimee_pg_bind_int64(sst, "?1", proj_id);
+   aimee_pg_bind_int64(sst, "?2", generation);
+   if (aimee_pg_step(sst, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      int64_t fcount = aimee_pg_column_int64(sst, 0);
+      const char *fhash = aimee_pg_column_text(sst, 1);
+      snprintf(out, out_len, "%lld:%d:%s", (long long)fcount, sc_dim, fhash ? fhash : "");
+   }
+   aimee_pg_finalize(sst);
+}
+
+int kb_code_embed_project_fully_embedded(const char *project)
+{
+   if (!project || !project[0])
+      return 0;
+   void *conn = db2_conn();
+   if (!conn)
+      return 0;
+
+   /* Ask the STORE, not the pass bookkeeping.
+    *
+    * The obvious implementation -- compare the recorded code_embed_sig against the
+    * project's current signature -- is wrong for exactly the projects that matter.
+    * That signature is only written when a pass covered the whole file set
+    * (row_count < effective_max), and the collection is capped at 5000 rows. A
+    * project with more files than the cap therefore NEVER records a signature, so a
+    * signature-based predicate would report "not embedded" forever and silently
+    * withhold curation from every large repository. The aimee corpus alone is ~22k
+    * C/H files.
+    *
+    * Counting unembedded files has no such ceiling: zero rows means every file of
+    * the current generation has a vector at its current content hash, whether that
+    * took one pass or fifty. */
+   char err[CE_ERRBUF] = "";
+   static const char *sql =
+       "SELECT count(*) FROM files f"
+       " JOIN projects p ON f.project_id = p.id"
+       " WHERE p.name = ?1 AND p.lifecycle_state = 'current'"
+       "   AND f.generation = p.current_generation"
+       "   AND NOT EXISTS ("
+       "     SELECT 1 FROM code_embeddings ce"
+       "      WHERE ce.project = p.name AND ce.generation = p.current_generation"
+       "        AND ce.file_path = f.path AND ce.content_hash = f.hash)";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return 0;
+   aimee_pg_bind_text(st, "?1", project);
+   int64_t missing = -1;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      missing = aimee_pg_column_int64(st, 0);
+   aimee_pg_finalize(st);
+   /* -1 is "could not tell" (no such project, unreadable store). Not indexed is not
+    * embedded, and an unreadable answer must not read as complete. */
+   if (missing != 0)
+      return 0;
+
+   /* A project with no files is indexed-but-empty, not embedded. Curating nothing
+    * is harmless, but reporting it as ready hides a scan that indexed zero files --
+    * the silent-success shape this codebase keeps paying for. */
+   static const char *cnt_sql = "SELECT count(*) FROM files f JOIN projects p"
+                                " ON f.project_id = p.id"
+                                " WHERE p.name = ?1 AND p.lifecycle_state = 'current'"
+                                "   AND f.generation = p.current_generation";
+   aimee_pg_stmt_t *cst = aimee_pg_prepare(conn, cnt_sql, err, sizeof(err));
+   if (!cst)
+      return 0;
+   aimee_pg_bind_text(cst, "?1", project);
+   int64_t total = 0;
+   if (aimee_pg_step(cst, err, sizeof(err)) == AIMEE_PG_ROW)
+      total = aimee_pg_column_int64(cst, 0);
+   aimee_pg_finalize(cst);
+   return total > 0;
+}
+
 static unsigned long long ce_fnv1a_update(unsigned long long h, unsigned char c)
 {
    h ^= (unsigned long long)c;
@@ -435,26 +534,7 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
    char sig_now[160] = "";
    if (!paths && !dry_run && strcmp(out->scope, "changed_files") == 0)
    {
-      int sc_dim = db2_embedding_dim();
-      if (sc_dim <= 0 || sc_dim > CE_EMBED_MAX_DIM)
-         sc_dim = 1024;
-      static const char *sig_sql = "SELECT count(*), coalesce(md5(string_agg(id::text || ':' || "
-                                   "hash, ',' ORDER BY id)), '') "
-                                   "FROM files WHERE project_id = ?1 AND generation = ?2";
-      aimee_pg_stmt_t *sst = aimee_pg_prepare(conn, sig_sql, err, sizeof(err));
-      if (sst)
-      {
-         aimee_pg_bind_int64(sst, "?1", proj_id);
-         aimee_pg_bind_int64(sst, "?2", generation);
-         if (aimee_pg_step(sst, err, sizeof(err)) == AIMEE_PG_ROW)
-         {
-            int64_t fcount = aimee_pg_column_int64(sst, 0);
-            const char *fhash = aimee_pg_column_text(sst, 1);
-            snprintf(sig_now, sizeof(sig_now), "%lld:%d:%s", (long long)fcount, sc_dim,
-                     fhash ? fhash : "");
-         }
-         aimee_pg_finalize(sst);
-      }
+      ce_project_signature(conn, proj_id, generation, sig_now, sizeof(sig_now));
       if (sig_now[0])
       {
          char sig_key[320];

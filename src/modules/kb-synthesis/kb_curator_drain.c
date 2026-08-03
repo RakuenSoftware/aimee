@@ -257,8 +257,21 @@ static int stage_embed_code(const kb_curator_extract_opts_t *opts)
    {
       kb_code_embed_result_t r;
       memset(&r, 0, sizeof(r));
-      if (kb_code_embed_refresh(projects[i].name, "changed_files", NULL, 0, 0, 0, 0, &r) == 0)
-         total += (int)r.embedded;
+      if (kb_code_embed_refresh(projects[i].name, "changed_files", NULL, 0, 0, 0, 0, &r) != 0)
+         continue;
+      total += (int)r.embedded;
+
+      /* indexed -> embedded -> CURATED. The scan handler used to enqueue curation
+       * the moment indexing finished, handing the curator a project whose vectors
+       * did not exist yet. The enqueue lives here instead, and only fires once this
+       * project's whole file set is embedded at the active dimension, so curation
+       * cannot claim a row for data that is not both indexed and embedded.
+       *
+       * Idempotent and cheap when there is nothing new: the enqueue anti-joins
+       * against the existing jobs, and it self-gates on the extract_code stage and
+       * on a synthesis endpoint being configured. */
+      if (kb_code_embed_project_fully_embedded(projects[i].name))
+         kb_curator_queue_code_units_for_project(projects[i].name, NULL);
    }
    if (total > 0)
       aimee_log(LOG_DEBUG, "kb.code.embed", "embedded %d code/doc vector(s) across %d project(s)",
@@ -365,11 +378,23 @@ static const struct
    const char *stage;
    const char *reqs; /* comma-separated prerequisite stage names */
 } CURATOR_STAGE_DEPS[] = {
-    {"resolve_entities", "extract_docs"}, {"index_narrative", "extract_docs"},
-    {"index_claims", "extract_docs"},     {"detect_contradictions", "index_claims"},
-    {"index_code_unit", "extract_code"},  {"link_artifacts", "extract_docs,extract_code"},
-    {"synthesize", "index_claims"},       {"promote_entity", "resolve_entities"},
-    {"embed_evidence", "index_claims"},   {"cross_repo_graph", "projection_graph"},
+    {"resolve_entities", "extract_docs"},
+    {"index_narrative", "extract_docs"},
+    {"index_claims", "extract_docs"},
+    {"detect_contradictions", "index_claims"},
+    {"index_code_unit", "extract_code"},
+    {"link_artifacts", "extract_docs,extract_code"},
+    {"synthesize", "index_claims"},
+    {"promote_entity", "resolve_entities"},
+    {"embed_evidence", "index_claims"},
+    {"cross_repo_graph", "projection_graph"},
+    /* indexed -> embedded -> curated. This edge is CROSS-LANE (embed_code is
+     * INDEX, extract_code is LLM), so the order validator above treats it as
+     * advisory and it is NOT what enforces the invariant -- stage_embed_code is,
+     * by owning the enqueue and only running it for a fully embedded project.
+     * Declared anyway so `requires` states the real contract instead of showing
+     * extract_code as having no prerequisites at all. */
+    {"extract_code", "embed_code"},
 };
 
 /* Prerequisite string for a stage (comma-separated), or "" if none. */
