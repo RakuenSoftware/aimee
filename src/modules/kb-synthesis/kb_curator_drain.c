@@ -39,6 +39,7 @@
 #include "index.h"
 #include "aimee.h"
 #include "config.h"
+#include "config_database.h" /* config_synth_chat_endpoint_current */
 #include "kb_background.h"
 #include "cJSON.h"
 #include "log.h"
@@ -1086,7 +1087,33 @@ void kb_curator_drain_init(kb_curator_drain_ctx_t *ctx)
    }
 
    ctx->stop = 0;
-   if (pthread_create(&ctx->thread, NULL, drain_thread_main, ctx) == 0)
+
+   /* NO SYNTHESIS PROVIDER => NO LLM LANE.
+    *
+    * Every stage on this thread and on the code/doc worker threads calls the
+    * synthesis sidecar. With no endpoint configured not one of them can succeed,
+    * and running them anyway is not merely idle: each pass claims rows, forks a
+    * sidecar, fails, and rewrites the row. The provider gate added for #2298 damps
+    * that to a 30s..300s probe, but the honest answer is not to start the lane.
+    *
+    * THE INDEX LANE STILL STARTS, DELIBERATELY. It is gated on the EMBEDDER, not on
+    * synthesis, and it owns stage_embed_code -- the pass that writes code_embeddings.
+    * Stopping the whole curator here would take code embedding down with it and
+    * leave a deployment indexed but never embedded, which is the opposite of what
+    * an operator running without a synth provider wants.
+    *
+    * Configured-ness, not reachability: a configured endpoint that is down is a
+    * real outage and its rows are real work, which the provider gate already
+    * handles. An unconfigured one is a steady state no retry resolves. */
+   char synth_endpoint[512];
+   int have_synth = config_synth_chat_endpoint_current(synth_endpoint, sizeof(synth_endpoint));
+   if (!have_synth)
+   {
+      aimee_log(LOG_INFO, "kb.curator.drain",
+                "no synthesis endpoint configured: LLM lane not started (extraction and "
+                "synthesis stages cannot run); index lane still serves embedding and graph");
+   }
+   else if (pthread_create(&ctx->thread, NULL, drain_thread_main, ctx) == 0)
    {
       ctx->active = 1;
       aimee_log(LOG_INFO, "kb.curator.drain", "drain thread started");
@@ -1101,8 +1128,10 @@ void kb_curator_drain_init(kb_curator_drain_ctx_t *ctx)
     * synth backend serving N parallel slots actually receives N concurrent
     * sidecar extractions. Job claims are transactional (UPDATE ... SELECT ...
     * LIMIT 1), so concurrent workers never double-claim. */
+   /* Same reason as the LLM lane above: these workers only run extract_code. */
    ctx->code_active = 0;
-   if (config_kb_curator_extract_code_enabled() && config_kb_curator_extract_code_workers() > 1)
+   if (have_synth && config_kb_curator_extract_code_enabled() &&
+       config_kb_curator_extract_code_workers() > 1)
    {
       int extra = config_kb_curator_extract_code_workers() - 1;
       if (extra > KB_CURATOR_MAX_CODE_WORKERS)
@@ -1124,7 +1153,8 @@ void kb_curator_drain_init(kb_curator_drain_ctx_t *ctx)
     * still contributes one doc per pass. Claims are transactional (UPDATE ...
     * SELECT ... LIMIT 1 FOR UPDATE SKIP LOCKED), so workers never double-claim. */
    ctx->doc_active = 0;
-   if (config_kb_curator_extract_docs_enabled() && config_kb_curator_extract_docs_workers() > 1)
+   if (have_synth && config_kb_curator_extract_docs_enabled() &&
+       config_kb_curator_extract_docs_workers() > 1)
    {
       int extra = config_kb_curator_extract_docs_workers() - 1;
       if (extra > KB_CURATOR_MAX_DOC_WORKERS)

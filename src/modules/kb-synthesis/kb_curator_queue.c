@@ -11,6 +11,7 @@
 #include "kb_curator_queue.h"
 #include "aimee.h"
 #include "config.h"
+#include "config_database.h" /* config_synth_chat_endpoint_current — the one resolver */
 #include "index.h" /* index_list_projects, project_info_t */
 #include "log.h"
 #include "db2/kb_payload.h"
@@ -140,6 +141,34 @@ int kb_curator_queue_code_units_for_project(const char *project, const char *roo
       return 0;
    if (!config_kb_curator_extract_code_enabled())
       return 0;
+
+   /* ENABLING A STAGE IS NOT THE SAME AS BEING ABLE TO RUN IT.
+    *
+    * These rows exist for exactly one consumer: extract_code, which runs the
+    * synthesis sidecar. With no synthesis endpoint configured, not one of them can
+    * ever reach 'done' -- and enqueuing them is not free. This runs on the
+    * SYNCHRONOUS path of /v1/code/scan and inserts one row per symbol: measured on
+    * a 4,018-file corpus, ~173,000 rows and 100 MB of table, adding ~215s to every
+    * scan. The client's scan deadline is spent building a backlog that cannot start.
+    *
+    * It also compounds. The anti-join below scans kb_code_unit_jobs, so each scan
+    * of each new project pays for every dead row every earlier scan left behind.
+    *
+    * Configured-ness, not reachability: a configured endpoint that is temporarily
+    * down is a real outage, its rows are real work, and the drain's process-wide
+    * provider gate already idles the queue instead of spinning. An UNCONFIGURED
+    * endpoint is a steady state that no retry can resolve. Resolved through the
+    * same accessor the sidecar uses, so the two cannot disagree about what an
+    * operator's value means. */
+   char synth_endpoint[512];
+   if (!config_synth_chat_endpoint_current(synth_endpoint, sizeof(synth_endpoint)))
+   {
+      aimee_log(LOG_INFO, "kb.curator.queue",
+                "code-unit enqueue skipped for '%s': no synthesis endpoint configured, so "
+                "extract_code cannot consume these rows (set SYNTHESIS_ENDPOINT to enable)",
+                project);
+      return 0;
+   }
 
    (void)root_path;
 
