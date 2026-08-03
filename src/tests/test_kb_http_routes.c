@@ -3433,6 +3433,20 @@ static void test_mtls_listener(void)
       assert(strstr(identity_json, "\"version\":1") && strstr(identity_json, "PRIVATE KEY"));
       assert(strstr(identity_json, token2) == NULL); /* never persist the one-time credential */
 
+      /* A REFUSAL MUST ARRIVE WITH ITS REASON. The transport used to return NULL for
+       * any non-2xx, which made kb_client_v1_post_json_keep_error a no-op on this
+       * path: every kb refusal reached the operator as a generic fallback string
+       * while the kb's own explanation was discarded here. `aimee kb reembed` on a
+       * managed appliance answered "knowledge service reembed failed" instead of the
+       * kb's 403 naming the config key to set. */
+      int st_err = -1;
+      char *err_body = kb_client_mtls_request_timeout("GET", "/v1/definitely-not-a-route", NULL,
+                                                      600000, &st_err);
+      assert(st_err >= 400);    /* the status still reports the failure */
+      assert(err_body != NULL); /* and the body survives to be surfaced */
+      assert(strstr(err_body, "error") != NULL);
+      free(err_body);
+
       /* Simulate a full server process restart. The enrollment token was spent
        * by the first request, so this can pass only by validating and loading
        * the owner-only identity file. */
