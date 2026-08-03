@@ -15,15 +15,33 @@ distinction this page replaces.
 | You want | Do this | What you get |
 | --- | --- | --- |
 | **Simplest thing that works** | Point `SYNTHESIS_ENDPOINT` at an external OpenAI-compatible endpoint | Best quality, no local GPU or RAM cost, your notes leave the machine |
-| **Local, and quality matters most** | deploy the `aimee-llm-e4b` sidecar | 0.82 F1 extraction, 7.46 GB of weights, 3.3 tok/s on 8 CPU threads |
-| **Local, and the box is small** | deploy the `aimee-llm-e2b` sidecar | 0.69 F1 extraction, 4.71 GB of weights, 6.3 tok/s on 8 CPU threads |
+| **Local, and quality matters most** | deploy the `aimee-llm-e4b` sidecar | 0.81 F1 extraction, 7.46 GB of weights (UD-Q6_K_XL), 3.3 tok/s on 8 CPU threads |
+| **Local, and the box is small** | deploy the `aimee-llm-e2b` sidecar | 0.72 F1 extraction, 2.97 GB of weights (UD-Q4_K_XL), 6.3 tok/s on 8 CPU threads |
 
-The weight sizes are what the images actually carry: UD-Q6_K_XL, baked in. The F1
-and throughput numbers were measured at Q8_0, so read them as the shape of the
-gap between the two models rather than as a prediction of what you will see.
-See [the caveats](#caveats-you-should-read-before-leaning-on-any-of-this).
-Resident memory is larger than the weights by the KV cache for your configured
-context, which is a deployment setting rather than a property of the model.
+**The two images do not carry the same quant, and the asymmetry is the point.** On
+the 69-note gold set, dropping Q6 to Q4 costs E4B 0.0862 F1 (95% CI
+[+0.010, +0.181], which is significant) and costs E2B 0.0012 (95% CI
+[-0.063, +0.069], undecidable at this n). So E4B's quant is settled by measurement,
+and E2B's is not:
+its tie is broken by the role E2B exists for. On the small box where you would pick
+E2B at all, Q4 is 1.70 GB of VRAM and 2.68 GB of host RSS against 2.30 and 3.86 at
+Q6, and the F1 difference is smaller than one gold triple.
+
+Be careful reading that as "Q4 is free for E2B". It is not measured to be equal. It
+is measured to be *indistinguishable*, which is a statement about the set as much as
+the model, and `QUANT_DECISION.md` argues the opposite call on a directional prior
+(pooled P(Q6 > Q4) = 0.946). The full six-arm table, the memory figures, and what
+would resolve the E2B half are in
+[`bench/tier-a/QUANT_DECISION.md`](../bench/tier-a/QUANT_DECISION.md).
+
+The F1 figures above are the shipped quants at strict F1 on that set, measured on
+GPU so throughput is not a confound. The throughput figures are `llama-bench` at
+Q8_0 on 8 CPU threads and have NOT been re-measured at the shipped quants, so treat
+them as the shape of the gap rather than a prediction; E2B at Q4 will be somewhat
+faster than the 6.3 shown. See
+[the caveats](#caveats-you-should-read-before-leaning-on-any-of-this). Resident
+memory is larger than the weights by the KV cache for your configured context, which
+is a deployment setting rather than a property of the model.
 
 E4B is the default because it is the better model. E2B exists on this page
 because it is roughly half the resident memory and about twice the CPU speed,
@@ -119,13 +137,14 @@ reported without a CI on this page, it has not been tested and should not be
 read as a ranking. Note that overlapping single-run CIs do *not* imply a
 difference is insignificant. The paired test is the one to read.
 
-**The quantisation still does not match.** Every number above was measured at
-Q8_0. The bundled path ships `UD-Q6_K_XL` (Unsloth Dynamic Q6), which is a
-different quantisation, so expect the shipped configuration to differ from the
-table by an amount nobody has measured. It is close in size (7.46 GB for E4B and
-4.71 GB for E2B, against 7.46 and 4.61 at Q8_0), but size is not quality, and a
-dynamic quant distributes precision differently across layers rather than
-uniformly.
+**The quantisation in the tables above does not match what ships, and the gap is
+now measured rather than assumed.** Every number in this section was taken at
+Q8_0; the images ship UD-Q4_K_XL for E2B and UD-Q6_K_XL for E4B.
+`bench/tier-a/QUANT_DECISION.md` measures all six arms on the same gold set, and
+the shipped pair scores 0.7206 (E2B Q4) and 0.8062 (E4B Q6), so the Q8_0 table
+overstates E4B slightly and understates E2B by more than a little. Prefer the
+QUANT_DECISION numbers when the question is "what will I get", and this section
+when the question is "how do the two models compare on one lane".
 
 An earlier draft named `Q4_K_M`, which is not published in these repos at all.
 That would not have failed: llama.cpp's `-hf` falls back to another file when the
@@ -196,9 +215,12 @@ target lives (it moved from `examples/` to `tools/`, which changes the cmake
 flags).
 
 **The model-to-repo mapping is fixed at build time, not resolved at run time.**
-`gemma-4-E2B-it` and `gemma-4-E4B-it` map to
-`unsloth/gemma-4-E{2,4}B-it-UD-Q6_K_XL.gguf`, fetched by exact filename and
-checked against the digest above. An earlier draft resolved a quant *tag*
+`gemma-4-E2B-it` maps to `unsloth/gemma-4-E2B-it-GGUF` at `UD-Q4_K_XL` and
+`gemma-4-E4B-it` to `unsloth/gemma-4-E4B-it-GGUF` at `UD-Q6_K_XL`: per-model
+quants, decided by measurement (see QUANT_DECISION.md), with
+`scripts/synthesis-model-table.sh` as the single source of truth for the pairing
+and both digests. Each is fetched by exact filename and checked against its
+digest. An earlier draft resolved a quant *tag*
 (`:Q4_K_M`) at run time instead, which is worse than it sounds: that quantisation
 is not published in these repos at all, and llama.cpp falls back to another file
 when the named quant is absent, so it would not have failed. It would have
@@ -280,8 +302,10 @@ It buys an operational property too. The sidecar holds no data, so moving betwee
 synthesis to a running deployment, or removing it, is a container swap with the kb left running. The
 embedder is still a one-way door; synthesis is not.
 
-Weights are baked at UD-Q6_K_XL (7.46 GB for E4B, 4.71 GB for E2B) from
-unsloth's GGUF repos, which is where the UD quants are published.
+Weights are baked per-model, 7.46 GB for E4B at UD-Q6_K_XL and 2.97 GB for E2B at
+UD-Q4_K_XL, from unsloth's GGUF repos, which is where the UD quants are published.
+The quant is a property of the model, not of the channel; see
+`scripts/synthesis-model-table.sh`.
 
 **The container downloads nothing.** An earlier design fetched the weights on
 first start and cached them on the data volume. That is a support burden: a

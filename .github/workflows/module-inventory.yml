@@ -82,6 +82,15 @@ jobs:
         run: python3 -I scripts/tests/test_refactor_baselines.py -v
       - name: Test cleanup-ledger failure modes
         run: python3 -I scripts/tests/test_check_cleanup_ledger.py -v
+        # The image build's Hugging Face retry. Cheap, no network, and it guards a
+        # function that only ever runs where a failure costs a whole image build.
+      - name: Test Dockerfile hub-fetch retry
+        run: python3 -I scripts/tests/test_dockerfile_hub_retry.py
+        # The embedder sidecar's bake: its retry, its refusal of an unknown model, and
+        # the auto_map follow that stops a trust_remote_code model reaching the Hub at
+        # first use. No network, and it guards code that only runs inside an image build.
+      - name: Test embedder bake script
+        run: python3 -I scripts/tests/test_bake_embedder.py
       - name: Enforce individual module documentation
         run: python3 -I -S scripts/check_module_docs.py
       - name: Test module-documentation failure modes

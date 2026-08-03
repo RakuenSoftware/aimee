@@ -491,6 +491,11 @@ static void kb_http_corpus_pipeline_json(char *out_buf, int out_cap,
        stats->failed > 0 ? "failed" : (stats->pending + stats->running > 0 ? "active" : "idle"));
    if (stats->processed > 0)
       cJSON_AddNumberToObject(root, "processed", stats->processed);
+   /* ALWAYS emitted, including zero. "processed: 14, failed: 0" read as a fully
+    * processed document when eight of those fourteen transitions did nothing; an
+    * absent field would leave the same impression for anyone who did not know to
+    * look for it. See db2_corpus_pipeline_stats_t.skipped. */
+   cJSON_AddNumberToObject(root, "skipped", stats->skipped);
    cJSON_AddNumberToObject(root, "pending", stats->pending);
    cJSON_AddNumberToObject(root, "running", stats->running);
    cJSON_AddNumberToObject(root, "done", stats->complete);

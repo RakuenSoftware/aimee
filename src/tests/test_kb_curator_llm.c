@@ -81,7 +81,14 @@ static void test_provider_path(void)
    assert(resp != NULL);
    assert(strcmp(resp, "{\"synthesis\":\"ok\"}") == 0);
    assert(strcmp(g_seen_url, "http://big/v1/chat/completions") == 0);
-   assert(g_seen_timeout_ms == 300000);
+   /* The ceiling has to clear the SLOWEST sidecar we ship, and this assertion is
+    * what makes lowering it a deliberate act. It has been wrong twice: 120s was
+    * shorter than a normal constrained extraction, and 300s was shorter than an E4B
+    * one -- 1768 completion tokens at 4.98 tokens/s is 375s, measured on the
+    * deployed sidecar. See KB_CURATOR_PROVIDER_TIMEOUT_MS for why the value is 600s
+    * and not the ~825s the 4096-token budget would suggest (the 15-minute
+    * stale-lease reaper is the real ceiling). */
+   assert(g_seen_timeout_ms == 600000);
    assert(g_post_calls == 1);
    assert(!kb_curator_provider_backoff_active());
    /* system_prompt + request_json must reach the provider as message content. */

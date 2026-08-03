@@ -715,6 +715,13 @@ static void kb_cmd_pipeline(app_ctx_t *ctx, int argc, char **argv)
    printf("Corpus pipeline: %s\n", cJSON_IsString(state) ? state->valuestring : "unknown");
    if (cJSON_IsNumber(processed))
       printf("  processed: %d\n", (int)processed->valuedouble);
+   /* Named "no-op" rather than "skipped" because that is what it means to the person
+    * reading it: the stage advanced and did nothing. Most of the 14 stages have no
+    * local handler, so a document can reach "complete" having only been classified,
+    * sectioned, term-normalised and gap-checked. */
+   int skipped = kb_cmd_json_int(resp, "skipped", 0);
+   printf("  no-op:     %d%s\n", skipped,
+          skipped > 0 ? "   (stages with no local handler; nothing was written)" : "");
    printf("  pending:   %d\n", kb_cmd_json_int(resp, "pending", 0));
    printf("  running:   %d\n", kb_cmd_json_int(resp, "running", 0));
    printf("  complete:  %d\n", kb_cmd_json_int(resp, "done", 0));

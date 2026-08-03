@@ -53,7 +53,18 @@ def main() -> int:
             print(f"  {m}")
         return 1
 
-    print(f"check-cli-v1-routes: ok ({n} client /v1 routes in sync, all reachable)")
+    unmarshalled = dispatchable_without_marshaller()
+    if unmarshalled:
+        print("check-cli-v1-routes: FAIL — these methods have a dispatch row and a "
+              "route but NO marshaller, so the command exists, is documented, and "
+              "exits 2 with \"arguments are missing or invalid\" whatever you pass it. "
+              "Add a {method, marshal_*} entry, or MARSHAL_NO_ARGS for a bare GET:")
+        for m in unmarshalled:
+            print(f"  {m}")
+        return 1
+
+    print(f"check-cli-v1-routes: ok ({n} client /v1 routes in sync, all reachable, "
+          f"all marshalled)")
     return 0
 
 
@@ -65,6 +76,58 @@ def main() -> int:
 ROUTE_RE = re.compile(r'\{"([a-z0-9_.]+)",\s*"(?:GET|POST|PUT|DELETE)",\s*"/v1/[^"]+"\}')
 MARSHAL_RE = re.compile(r'\{"([a-z0-9_.]+)",\s*marshal_[a-z0-9_]+\}')
 DISPATCH_RE = re.compile(r'\{"[a-z0-9_-]+",\s*(?:NULL|"[a-z0-9 _-]*")\s*,\s*"([a-z0-9_.]+)"')
+
+
+# marshal_request() resolves a method through FIVE paths, and a check that knows
+# about only some of them cries wolf. These mirror the function itself: exact
+# strcmp cases, {method, marshal_*} tables, the MARSHAL_NO_ARGS string list, and
+# strncmp prefix fallbacks. Parsed from the source so adding a path there does not
+# silently narrow this check.
+MARSHAL_FN_RE = re.compile(r"cJSON \*marshal_request\(.*?\n\}", re.S)
+EXACT_RE = re.compile(r'strcmp\(method,\s*"([a-z0-9_.]+)"\)\s*==\s*0')
+PREFIX_RE = re.compile(r'strncmp\(method,\s*"([a-z0-9_.]+)",\s*\d+\)\s*==\s*0')
+NO_ARGS_RE = re.compile(r"MARSHAL_NO_ARGS\[\]\s*=\s*\{(.*?)\};", re.S)
+NO_ARGS_ITEM_RE = re.compile(r'"([a-z0-9_.]+)"')
+
+
+def marshal_coverage():
+    """(exact methods, prefixes) that marshal_request() can build a request for."""
+    exact, prefixes = set(), set()
+    for f in sorted(glob.glob(TARGET_GLOB)):
+        text = Path(f).read_text(encoding="utf-8")
+        exact |= set(MARSHAL_RE.findall(text))          # {method, marshal_*} tables
+        for block in NO_ARGS_RE.findall(text):          # plain string list
+            exact |= set(NO_ARGS_ITEM_RE.findall(block))
+        for body in MARSHAL_FN_RE.findall(text):        # hand-written cases
+            exact |= set(EXACT_RE.findall(body))
+            prefixes |= set(PREFIX_RE.findall(body))
+    return exact, prefixes
+
+
+def dispatchable_without_marshaller():
+    """Methods the CLI offers that marshal_request() cannot build a request for.
+
+    THE OTHER DIRECTION FROM unreachable_methods(), and the one that was missing.
+    That one catches a method plumbed with no dispatch row. This catches a method WITH
+    a dispatch row and a path and no marshaller at all, which is worse for a user: the
+    command appears in the help, is documented, and then refuses every invocation with
+    a usage error that blames their arguments.
+
+    Three shipped exactly like that -- `aimee kb curator status`, `aimee doctor
+    forensics`, `aimee economizer stats`. Route table entry, dispatch row, printer,
+    the GET serving fine, and no marshaller, so each answered "arguments are missing
+    or invalid, so no request was sent" whether you passed arguments or not.
+    """
+    routed = set()
+    for f in sorted(glob.glob(TARGET_GLOB)):
+        routed |= set(ROUTE_RE.findall(Path(f).read_text(encoding="utf-8")))
+    dispatch = set(DISPATCH_RE.findall(
+        Path(ROOT / "src" / "cli_v1_routes.c").read_text(encoding="utf-8")))
+    exact, prefixes = marshal_coverage()
+    # Only methods that also have a path: a dispatch row for a method with no route is
+    # a different defect, reported by the generated-map check above.
+    missing = (dispatch & routed) - exact
+    return sorted(m for m in missing if not any(m.startswith(p) for p in prefixes))
 
 
 def unreachable_methods():

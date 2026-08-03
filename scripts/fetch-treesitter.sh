@@ -37,7 +37,26 @@ fetch() {
     mkdir -p "$dest"
     git -C "$dest" init -q
     git -C "$dest" remote add origin "$url"
-    GIT_TERMINAL_PROMPT=0 git -C "$dest" fetch -q --depth=1 origin "$sha"
+    # RETRIED, because one 503 from the forge fails an entire image build. Observed:
+    #   error: RPC failed; HTTP 503 curl 22 The requested URL returned error: 503
+    # which killed the e2e-docker lane on a run whose code changes were unrelated to
+    # anything fetched here. Six concurrent fetches make a transient upstream refusal
+    # likelier, not less likely.
+    #
+    # Safe to retry: the fetch is content-addressed on $sha and every file is
+    # re-verified by sha256 below, so a retry cannot smuggle in different bytes than a
+    # first-attempt success would have. The partial state from a failed attempt is
+    # cleared each time rather than fetched on top of.
+    attempt=1
+    until GIT_TERMINAL_PROMPT=0 git -C "$dest" fetch -q --depth=1 origin "$sha"; do
+        if [ "$attempt" -ge 4 ]; then
+            echo "fetch-treesitter: $name failed after $attempt attempts" >&2
+            return 1
+        fi
+        echo "fetch-treesitter: $name fetch failed (attempt $attempt/4); backing off" >&2
+        sleep $((attempt * 5))
+        attempt=$((attempt + 1))
+    done
     git -C "$dest" checkout --detach -q FETCH_HEAD
     rm -rf "$dest/.git"
     touch "$dest/.fetched"

@@ -54,56 +54,58 @@ RUN python3 scripts/export_c_repositories.py --runtime-bundle /module-runtime \
            -o "/module-runtime/bin/$binary"; \
        done
 
-# pgvectorscale (StreamingDiskANN). Always built: it adds ~1 MB to the image, and
-# the kb already decides at RUNTIME whether to use it -- pgvec_vectorscale_available()
+# pgvectorscale (StreamingDiskANN). Always installed: it adds ~1 MB to the image,
+# and the kb already decides at RUNTIME whether to use it -- pgvec_vectorscale_available()
 # probes pg_extension and falls back to HNSW with a warning when it is absent
 # (src/db2/pgvec_transport.c). Gating it at build time would defeat that and make
 # the index type a property of which image you happened to pull.
 #
-# The Rust toolchain and pgrx live only in this stage; the runtime image receives
-# the built extension files and none of the build chain. CI caches this layer
-# (cache-from/to type=gha,mode=max), so it recompiles only when the pins below move.
+# Upstream ships the built extension as a .deb per (version, pg major, arch), so
+# this stage FETCHES it rather than compiling it. It used to build the crate from
+# source with rustup + cargo-pgrx, which cost ~7 min of Rust compilation on the
+# critical path of every CI shard -- for a ~1 MB artifact pinned to two ARGs and
+# with no dependency on this repo's source at all. The old comment here claimed CI
+# cached the layer; it never did (the buildx GHA cache was thrashing its quota and
+# restored nothing), so the compile ran in full on every single run.
 FROM debian:trixie-slim AS pgvectorscale-build
 ARG PG_MAJOR
 ARG PGVECTORSCALE_VERSION
-# Same retry as the runtime stage: one transient TLS reset here fails the build.
+# TARGETARCH is supplied by buildx and is exactly the token upstream uses in the
+# asset name (amd64 / arm64).
+ARG TARGETARCH
+# Digests are per-arch and must move with PGVECTORSCALE_VERSION above. A release
+# asset is mutable in a way a git tag build was not, so it is pinned by content.
+ARG PGVECTORSCALE_SHA256_amd64=7a5450b81a7403ca20ff5e5a2f81aa13c81795ddd1fdfe9b986c42c48b12ed67
+ARG PGVECTORSCALE_SHA256_arm64=8d0916df999f082ceb3d019bdfa72f5df395c31b152f7906de59e429ee11edc7
+# Same retry as everywhere else in this file: an unretried fetch is a coin flip
+# wherever it sits.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
-    && install -d /usr/share/postgresql-common/pgdg \
+    && apt-get install -y --no-install-recommends ca-certificates curl unzip \
+    && rm -rf /var/lib/apt/lists/* \
+    && zip="pgvectorscale-${PGVECTORSCALE_VERSION}-pg${PG_MAJOR}-${TARGETARCH}.zip" \
+    && case "$TARGETARCH" in \
+         amd64) want="$PGVECTORSCALE_SHA256_amd64" ;; \
+         arm64) want="$PGVECTORSCALE_SHA256_arm64" ;; \
+         *) echo "pgvectorscale: no pinned digest for arch '$TARGETARCH'" >&2; exit 1 ;; \
+       esac \
     && for a in 1 2 3 4 5; do \
-         curl -fsS --connect-timeout 10 --max-time 60 \
-           -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-           https://www.postgresql.org/media/keys/ACCC4CF8.asc && break; \
-         echo "pgdg key fetch failed (attempt $a/5); backing off"; sleep $((a * 5)); \
+         curl -fsSL --connect-timeout 10 --max-time 300 -o "/tmp/$zip" \
+           "https://github.com/timescale/pgvectorscale/releases/download/${PGVECTORSCALE_VERSION}/${zip}" \
+           && break; \
+         echo "pgvectorscale asset fetch failed (attempt $a/5); backing off"; \
+         rm -f "/tmp/$zip"; sleep $((a * 5)); \
        done \
-    && test -s /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] http://apt.postgresql.org/pub/repos/apt trixie-pgdg main" \
-        > /etc/apt/sources.list.d/pgdg.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-        build-essential clang git pkg-config libssl-dev \
-        "postgresql-${PG_MAJOR}" "postgresql-server-dev-${PG_MAJOR}" \
-    && rm -rf /var/lib/apt/lists/*
-ENV CARGO_HOME=/usr/local/cargo
-ENV PATH=/usr/local/cargo/bin:$PATH
-# cargo-pgrx must match the pgrx the crate depends on, so it is read from the
-# checkout's Cargo.toml rather than pinned separately here.
-RUN curl -fsS https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable \
-    && git clone --depth 1 --branch "${PGVECTORSCALE_VERSION}" \
-        https://github.com/timescale/pgvectorscale.git /src/pgvectorscale \
-    && cd /src/pgvectorscale/pgvectorscale \
-    && pgrx_version="$(awk -F'"' '/^pgrx[[:space:]]*=/{print $2; exit}' Cargo.toml)" \
-    && echo "building pgvectorscale ${PGVECTORSCALE_VERSION} against pgrx ${pgrx_version}" \
-    && cargo install --locked cargo-pgrx --version "${pgrx_version}" \
-    && cargo pgrx init "--pg${PG_MAJOR}=/usr/lib/postgresql/${PG_MAJOR}/bin/pg_config" \
-    && cargo pgrx install --release --pg-config "/usr/lib/postgresql/${PG_MAJOR}/bin/pg_config"
-# Collect only the installed extension artifacts, at the paths the runtime uses.
-RUN mkdir -p "/pgvectorscale/usr/lib/postgresql/${PG_MAJOR}/lib" \
-        "/pgvectorscale/usr/share/postgresql/${PG_MAJOR}/extension" \
-    && cp "/usr/lib/postgresql/${PG_MAJOR}/lib/vectorscale"*.so \
-        "/pgvectorscale/usr/lib/postgresql/${PG_MAJOR}/lib/" \
-    && cp "/usr/share/postgresql/${PG_MAJOR}/extension/vectorscale"* \
-        "/pgvectorscale/usr/share/postgresql/${PG_MAJOR}/extension/"
+    && echo "${want}  /tmp/${zip}" | sha256sum -c - \
+    && unzip -j "/tmp/$zip" -d /tmp/pgvs \
+    && deb="$(find /tmp/pgvs -name '*.deb' ! -name '*dbgsym*' -print -quit)" \
+    && test -n "$deb" \
+    && echo "installing pgvectorscale ${PGVECTORSCALE_VERSION} (pg${PG_MAJOR}/${TARGETARCH}) from ${deb##*/}" \
+    && dpkg-deb -x "$deb" /pgvectorscale \
+    && rm -rf /pgvectorscale/usr/share/doc "/tmp/$zip" /tmp/pgvs
+# Fail here rather than shipping a kb that silently falls back to HNSW: the .deb
+# lays the files down at the paths the runtime reads, so assert they arrived.
+RUN test -n "$(find "/pgvectorscale/usr/lib/postgresql/${PG_MAJOR}/lib" -name 'vectorscale*.so' -print -quit)" \
+    && test -s "/pgvectorscale/usr/share/postgresql/${PG_MAJOR}/extension/vectorscale.control"
 
 # Runtime must match the build stage: libpq5 here has to provide at least the
 # PostgreSQL 17 symbols the kb was linked against (PGDG's libpq 18 does).
@@ -249,11 +251,8 @@ RUN useradd --system --home-dir /var/lib/aimee --create-home --shell /usr/sbin/n
 # and the sidecar then refuses to start, because it has no identity to present. The
 # unit test missed it by creating the directory as the same user it then wrote as.
 RUN install -d -o aimee -g aimee -m 0700 /var/lib/aimee/synthesis-tls
-COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb
-COPY --from=build /src/aimee-kb-resolver /usr/local/bin/aimee-kb-resolver
-COPY --from=build /module-runtime/bin/ /usr/local/libexec/aimee-modules/
-COPY --from=build /module-runtime/grants/kb/ /opt/aimee/module-grants/kb/
-COPY --from=build /module-runtime/kb.modules /opt/aimee/module-grants/kb.modules
+# The kb binaries are copied in AFTER the model bake, near the end of this file.
+# Deliberately: see the comment there.
 
 # The embedder registry: every per-model fact that changes the vectors (pooling, width,
 # context, prefixes), keyed by model identity. Read by the in-container embedder to know
@@ -320,10 +319,43 @@ RUN --mount=type=cache,target=/root/.cache/huggingface \
     fi; \
     AIMEE_EMBEDDER="$AIMEE_EMBEDDER" \
     HF_HUB_OFFLINE=0 "$BAKE" - <<'PYBAKE'
-import json, os, sys
+import json, os, sys, time
 from huggingface_hub import snapshot_download
 with open("/opt/aimee/embedders.json", encoding="utf-8") as handle:
     table = json.load(handle)["embedders"]
+
+
+def fetch(repo, **kw):
+    """snapshot_download with backoff, because the Hub rate-limits and this build
+    cannot make progress without it.
+
+    A bare snapshot_download turns any 429 or 5xx into a failed image build. That is
+    not hypothetical: three separate builds died on
+    "429 Too Many Requests for url .../hotchpotch/bekko-embedding-v1-a25m" inside one
+    evening, once on the publish lane and twice on e2e, simply because several image
+    variants were built in parallel and each fetches the same weights.
+
+    Retried statuses only. A bad revision or a repo that does not exist fails on the
+    first attempt as it should -- waiting sixty seconds to repeat a permanent error
+    just moves the failure further from its cause. Same shape as the apt-get update
+    loops elsewhere in this file, for the same reason.
+    """
+    delay = 15
+    for attempt in range(1, 6):
+        try:
+            return snapshot_download(repo, **kw)
+        except Exception as exc:  # noqa: BLE001 - the Hub raises several types for this
+            text = f"{type(exc).__name__}: {exc}"
+            transient = any(s in text for s in ("429", "5xx", "500", "502", "503", "504",
+                                                "Too Many Requests", "ReadTimeout",
+                                                "ConnectionError", "IncompleteRead"))
+            if not transient or attempt == 5:
+                raise
+            print(f"  hub fetch of {repo} failed ({text[:120]}); "
+                  f"retry {attempt}/4 in {delay}s", flush=True)
+            time.sleep(delay)
+            delay *= 2
+    raise AssertionError("unreachable")
 
 # Bake exactly the selected entry. An unknown name is a BUILD failure, not a
 # silently-empty image: a container with no baked weights starts fine and then
@@ -369,13 +401,13 @@ def code_repos(snapshot_dir):
 for name, spec in table.items():
     repo, revision = spec["repo"], spec.get("revision") or "main"
     print(f"baking {name}: {repo}@{revision}", flush=True)
-    local = snapshot_download(repo, revision=revision, ignore_patterns=SKIP)
+    local = fetch(repo, revision=revision, ignore_patterns=SKIP)
     # Code repos are referenced by name only — auto_map carries no revision — so these
     # take the default branch. That is a looser pin than the weights get; a model whose
     # code must be pinned needs its auto_map repo added to the registry explicitly.
     for code_repo in sorted(code_repos(local)):
         print(f"  + code: {code_repo}", flush=True)
-        snapshot_download(code_repo, allow_patterns=["*.py", "*.json", "*.txt"])
+        fetch(code_repo, allow_patterns=["*.py", "*.json", "*.txt"])
 PYBAKE
 
 # The bake runs as root and huggingface_hub writes its tree-cache metadata 0600, so
@@ -386,6 +418,33 @@ PYBAKE
 # The directory does not exist on AIMEE_EMBEDDER=none, and chmod -R on a missing
 # path is an error rather than a no-op.
 RUN if [ -d /opt/aimee/models ]; then chmod -R a+rX /opt/aimee/models; fi
+
+# THE COMPILED BINARY COMES IN AFTER THE MODEL, and the order is the point.
+#
+# These two lines used to sit ~130 lines above, before the bake. Docker invalidates
+# every layer after a changed one, so any C change changed the binary, which
+# invalidated the bake, which re-downloaded the weights from Hugging Face. On a
+# publish that is four downloads of the same files (two baked variants x two
+# architectures) for a change that touched neither the model nor the registry -- and
+# it is what got these builds answered with
+#   429 Too Many Requests for url .../hotchpotch/bekko-embedding-v1-a25m
+#
+# The --mount=type=cache on the bake does not prevent this. A BuildKit cache mount is
+# local to the builder, and cache-from/to type=gha carries LAYERS, not cache mounts, so
+# a fresh GitHub runner always begins with an empty one. The LAYER cache is what can
+# help, and it only can while this layer's inputs exclude the source tree.
+#
+# So the bake's inputs are now the venv, scripts/embedders.json and AIMEE_EMBEDDER,
+# none of which move when C code moves. Moving these COPY lines back up, or adding
+# anything source-dependent above the bake, silently restores the download.
+#
+# Nothing between the bake and here executes the binary, which is what makes the move
+# safe: the entrypoint script, USER, HEALTHCHECK and ENTRYPOINT all follow.
+COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb
+COPY --from=build /src/aimee-kb-resolver /usr/local/bin/aimee-kb-resolver
+COPY --from=build /module-runtime/bin/ /usr/local/libexec/aimee-modules/
+COPY --from=build /module-runtime/grants/kb/ /opt/aimee/module-grants/kb/
+COPY --from=build /module-runtime/kb.modules /opt/aimee/module-grants/kb.modules
 
 # NO BUNDLED SYNTHESIS. llama.cpp and its GGUF used to be baked here, which coupled a
 # multi-gigabyte, near-static artefact to the image rebuilt on every kb code change:

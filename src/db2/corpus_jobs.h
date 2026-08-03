@@ -32,6 +32,22 @@ extern "C"
       int failed;
       int complete;
       int processed;
+      /* Stage transitions this corpus recorded as SKIPPED, cumulative.
+       *
+       * processed counts every step the drain took, and most steps take the
+       * "no local handler" path: of the 14 stages, only classified, sectioned,
+       * references_extracted, terms_normalized and gaps_detected do work. A drain
+       * that reported {processed: 14, failed: 0, state: complete} therefore looked
+       * like a fully processed document and was in fact eight no-ops -- including
+       * chunked, summarized, entities_extracted and claims_extracted, which is why
+       * a pushed document ends up with no chunks and no claims while its pipeline
+       * says complete.
+       *
+       * The information was already in corpus_stage_events.outcome. Nothing read it,
+       * which made an empty run indistinguishable from a real one -- the failure mode
+       * docs/BENCHMARKS.md names when it says a suite "must not report a pass from an
+       * empty run". */
+      int skipped;
    } db2_corpus_pipeline_stats_t;
 
    typedef struct

@@ -153,9 +153,34 @@ void embedder_probe_register(const char *embed_command)
       return;
    }
    snprintf(g_embed_cmd, sizeof(g_embed_cmd), "%s", embed_command);
+
    /* Registered, not called: the identity is fetched inside db2_init, once the embedder
-    * has had the dim probe's patience applied to it. */
+    * has had the dim probe's patience applied to it.
+    *
+    * ALWAYS, INCLUDING FOR THE BUILTIN, and that is the whole point of this function
+    * owning the decision. The caller used to skip this call entirely for the builtin
+    * lexical embedder, correctly reasoning that the DIM probe cannot work against it --
+    * it has no /health and a fixed width, so probing would never succeed and would
+    * stall the retry loop. But skipping the call skipped BOTH probes, and the serving
+    * identity needs no /health at all: memory_embed_serving_id answers "builtin" from a
+    * constant, locally, instantly.
+    *
+    * The cost of conflating them was the exact transition the serving-id guard exists
+    * to catch. A corpus embedded by the builtin recorded no identity, because no probe
+    * was registered to report one. Selecting the bundled model then found kb_meta empty
+    * and adopted the model's identity over lexically-embedded vectors -- same 384 width,
+    * so the dim guard stayed silent, and the guard that would have refused was never
+    * asked. db2_embedder_serving_record_or_check's tests assert it catches exactly this;
+    * nothing ever told it. */
    db2_set_embedder_serving_probe(embedder_probe_serving_id);
+
+   if (strcmp(embed_command, "builtin") == 0)
+   {
+      LOG_INFO("db2", "builtin lexical embedder: dim probe skipped (fixed width, no /health); "
+                      "vector-space guard active");
+      return;
+   }
+
    const char *env = getenv("AIMEE_DIM_PROBE_BUDGET_MS");
    if (env && env[0])
    {

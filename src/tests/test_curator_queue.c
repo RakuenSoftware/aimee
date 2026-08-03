@@ -52,6 +52,13 @@ static void test_provider_unavailable_is_not_a_job_failure(void)
    /* A 4xx that is ABOUT the request, a malformed reply, and a missing document
     * are all real job failures: retrying them forever would be the poison-job
     * loop the attempt budget exists to stop. */
+   /* A missing SYNTHESIS_ENDPOINT is global, not per-row: no job can succeed
+    * until an operator configures it, so it must open the provider circuit
+    * rather than burn an attempt budget per symbol. Unmatched, this forked a
+    * sidecar per symbol x3 attempts and pinned the box for hours. */
+   assert(kb_curator_error_is_provider_unavailable(
+       "sidecar exited 1: no synthesis endpoint configured: set SYNTHESIS_ENDPOINT"));
+
    assert(!kb_curator_error_is_provider_unavailable("provider HTTP 400"));
    assert(!kb_curator_error_is_provider_unavailable("provider HTTP 422"));
    assert(!kb_curator_error_is_provider_unavailable("sidecar returned non-JSON"));
