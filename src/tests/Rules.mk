@@ -256,6 +256,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-bus-capture \
                $(TESTPREFIX)/unit-test-guardrails-blast-radius \
                $(TESTPREFIX)/unit-test-code-collect \
+               $(TESTPREFIX)/unit-test-server-conn-accept \
                $(TESTPREFIX)/unit-test-server-compute \
                $(TESTPREFIX)/unit-test-server-memory-benchmark \
                $(TESTPREFIX)/unit-test-server-jobs-aux \
@@ -305,7 +306,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-workspace-provider-detached \
                $(TESTPREFIX)/unit-test-workspace-runner-queue \
                $(TESTPREFIX)/unit-test-cli-kb-smoke \
-               $(TESTPREFIX)/unit-test-kb-synthesis-identity \
+               $(TESTPREFIX)/unit-test-kb-sidecar-identity \
                $(TESTPREFIX)/unit-test-synthesis-mtls-client \
                $(TESTPREFIX)/unit-test-workspace-scope \
                $(TESTPREFIX)/unit-test-workspace-migration \
@@ -3328,6 +3329,12 @@ $(TESTPREFIX)/unit-test-code-collect: $(OBJDIR)/tests/test_code_collect.o \
                                       $(OBJDIR)/code_collect.o $(OBJDIR)/cJSON.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_CORE)
 
+# Accepted-connection fds must be close-on-exec: an inherited fd keeps the
+# client blocked in read() until the child exits (see server_conn_io.c).
+$(TESTPREFIX)/unit-test-server-conn-accept: $(OBJDIR)/tests/test_server_conn_accept.o \
+                                           $(OBJDIR)/server/server_conn_io.o $(PLATFORM_BASIC_OBJS)
+	$(TESTLINK) -o $@ $^ $(L_CORE)
+
 # §2 tree-sitter front-end test — opt-in only (links the fetched runtime + grammar).
 # Default `make unit-tests` (CI) never builds it: the target + its TEST_TARGETS entry are
 # gated on AIMEE_TREESITTER, so the vendored objects are required only when enabled.
@@ -5690,9 +5697,9 @@ $(TESTPREFIX)/unit-test-subject-grammar: $(OBJDIR)/tests/test_subject_grammar.o 
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-kb-synthesis-identity: \
-                     $(OBJDIR)/tests/test_kb_synthesis_identity.o \
-                     $(OBJDIR)/kb/kb_synthesis_identity.o \
+$(TESTPREFIX)/unit-test-kb-sidecar-identity: \
+                     $(OBJDIR)/tests/test_kb_sidecar_identity.o \
+                     $(OBJDIR)/kb/kb_sidecar_identity.o \
                      $(OBJDIR)/kb/pki.o \
                      $(OBJDIR)/kb/modules/vault/vault_crypto.o \
                      $(OBJDIR)/kb/modules/vault/vault_server_key.o \
@@ -5707,7 +5714,7 @@ $(TESTPREFIX)/unit-test-synthesis-mtls-client: \
                      $(OBJDIR)/tests/test_synthesis_mtls_client.o \
                      $(OBJDIR)/posix/agent_bridge.o \
                      $(OBJDIR)/proxy_bootstrap.o \
-                     $(OBJDIR)/kb/kb_synthesis_identity.o \
+                     $(OBJDIR)/kb/kb_sidecar_identity.o \
                      $(OBJDIR)/kb/pki.o \
                      $(OBJDIR)/kb/modules/vault/vault_crypto.o \
                      $(OBJDIR)/kb/modules/vault/vault_server_key.o \

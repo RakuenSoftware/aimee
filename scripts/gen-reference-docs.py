@@ -757,6 +757,27 @@ ENV_DESC = {
         "Advertised mTLS hostname placed in the aimee-kb server certificate; the listener binds all interfaces.",
     ),
     "AIMEE_KB_MTLS_PORT": ("Knowledge base (aimee-kb)", "aimee-kb mTLS listener port."),
+    # The two sidecar hops. Naming a sidecar is what makes the kb mint the mTLS
+    # identities for it at startup, so these read as wiring rather than as a model
+    # choice: EMBEDDER_MODEL says what to embed with, and is equally satisfied by an
+    # external endpoint, while this says a container exists on the aimee network to
+    # issue a certificate for. Leaving them unset is the supported external-provider
+    # deployment, not a misconfiguration.
+    "AIMEE_LLM_HOST": (
+        "Knowledge base (aimee-kb)",
+        "DNS name of the synthesis sidecar container. Setting it makes aimee-kb issue the "
+        "mTLS identities for the kb -> aimee-llm hop into $AIMEE_HOME/synthesis-tls at "
+        "startup, from the kb's own CA. Unset for an external or absent synthesis provider, "
+        "which needs none of them. The sidecar refuses to start without this material.",
+    ),
+    "AIMEE_EMBEDDER_HOST": (
+        "Knowledge base (aimee-kb)",
+        "DNS name of the embedder sidecar container (aimee-embedder-a25m or "
+        "aimee-embedder-nomic). Setting it makes aimee-kb issue the mTLS identities for the "
+        "kb -> embedder hop into $AIMEE_HOME/embedder-tls at startup, independently of the "
+        "synthesis hop. Unset for an external embedder reached over plain HTTPS, or when no "
+        "embedder is deployed. The sidecar refuses to start without this material.",
+    ),
     "AIMEE_KB_EMIT_ENROLL": ("Knowledge base (aimee-kb)", "Emit a client enrollment token on KB start."),
     "AIMEE_KB_EMIT_SCOPE": ("Knowledge base (aimee-kb)", "Scope for the emitted enrollment token."),
     "AIMEE_KB_OIDC_ISSUER": ("Knowledge base (aimee-kb)", "OIDC issuer for KB API auth."),
