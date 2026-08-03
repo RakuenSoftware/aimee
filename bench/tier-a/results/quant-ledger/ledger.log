@@ -7,3 +7,6 @@
 [08:47:57Z] SKIP gold70.E2B.UD-Q4_K_XL
 [08:47:57Z] --- gold70.E2B.UD-Q6_K_XL  (70 notes, 3 procs)
 [08:49:54Z] OK   gold70.E2B.UD-Q6_K_XL strictF1=0.6667
+[08:49:54Z]   committed gold70.E2B.UD-Q6_K_XL
+[08:49:54Z] --- gold70.E2B.UD-Q8_K_XL  (70 notes, 3 procs)
+[08:51:56Z] OK   gold70.E2B.UD-Q8_K_XL strictF1=0.6619
