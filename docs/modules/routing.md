@@ -18,10 +18,11 @@ eligibility and policy surface during the process migration: role dispatch (`age
 which this module implements while the config/auth half of `agent_config.c` stays in the server and is
 reached through the same header (the arrangement by which `memory` owns its contract while DB1/DB2
 implement storage). Equal-candidate selection no longer uses those module-local statics in the shipping
-server: `module_adapter.c` serves the pointer-free `module_api.h` contract from the separately supervised
-`aimee-module-routing` process, and `server/module_routing_adapter.c` calls it through the shared core
-module client. A missing, cancelled, timed-out, or malformed module reply fails the route closed. The
-routing block is otherwise self-contained: its statics are module-local, and no config
+server: `server-go/modules/routing` serves the pointer-free `module_api.h` contract from the separately
+supervised Go `aimee-module-routing` process, and `server/module_routing_adapter.c` calls it through the
+shared core module client. A missing, cancelled, timed-out, or malformed module reply fails the route
+closed. The routing C `module_adapter.c` remains a parity fixture while the rest of `routing.c` is
+migrated. The routing block is otherwise self-contained: its statics are module-local, and no config
 function calls the routing functions. Therefore, `routing.c` has no module-private header. Delegate-specific
 route overrides and preflight remain in `src/modules/delegates/delegate_routing.c` (the delegates
 module, a routing sibling, calls the same `agent_config.h` role predicates). Advisory

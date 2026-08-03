@@ -14,6 +14,17 @@ ARG WITH_RUNTIME_WEB=1
 # webchat Projects/editor surface. ON by default — the editor is a first-class
 # feature; build with --build-arg WITH_VSCODE=0 to omit it (saves ~100 MB).
 ARG WITH_VSCODE=1
+
+# The module runtime is a static multicall binary. The canonical process
+# contracts decide which executable names are populated from it in the C build
+# stage below, so Docker never carries a second language-selection list.
+FROM golang:1.25-bookworm AS module-go-build
+WORKDIR /src/server-go
+COPY server-go/go.mod server-go/go.sum ./
+RUN go mod download
+COPY server-go/ ./
+RUN CGO_ENABLED=0 go build -trimpath -o /out/aimee-module ./cmd/aimee-module
+
 FROM debian:bookworm-slim AS build
 
 RUN apt-get update \
@@ -31,6 +42,7 @@ RUN apt-get update \
 
 WORKDIR /src
 COPY . .
+COPY --from=module-go-build /out/aimee-module /tmp/aimee-module-go
 ARG AIMEE_VERSION=""
 # The CLI ships alongside the server. It is what gives a spawned provider-CLI
 # delegate (the `claude` binary) any access to aimee at all: `aimee mcp serve` is
@@ -41,8 +53,8 @@ ARG AIMEE_VERSION=""
 RUN make -C src ../aimee-server ../aimee ../aimee-forwarder -j"$(nproc)" ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE_VERSION}
 
 # Build the independently supervised same-container module adapters from the
-# canonical contract. They link only the extracted event-bus client/protocol;
-# no feature source is linked into the adapter boundary.
+# canonical contract. C processes link only the extracted event-bus client;
+# Go processes are copies of the static multicall runtime under attested names.
 RUN python3 scripts/export_c_repositories.py --runtime-bundle /module-runtime \
     && mkdir -p /module-runtime/bin \
     && for source in /module-runtime/src/*.c; do \
@@ -60,7 +72,12 @@ RUN python3 scripts/export_c_repositories.py --runtime-bundle /module-runtime \
            src/core/event_bus/module_protocol.c src/core/event_bus/module_runtime.c \
            -pthread \
            -o "/module-runtime/bin/$binary"; \
-       done
+       done \
+    && while IFS= read -r module_id; do \
+         [ -n "$module_id" ] || continue; \
+         install -m 0755 /tmp/aimee-module-go \
+           "/module-runtime/bin/aimee-module-$module_id"; \
+       done < /module-runtime/go.modules
 
 # --- webchat frontend: build the React SPA into a single index.html ---
 # vite-plugin-singlefile inlines all JS/CSS, so the runtime image ships one file.

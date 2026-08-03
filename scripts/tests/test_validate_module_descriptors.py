@@ -254,7 +254,7 @@ class DescriptorTests(unittest.TestCase):
         self.assertEqual(
             {field: len(report["ownership"][field]) for field in validator.OWNERSHIP_FIELDS},
             {"sources": 1, "private_headers": 0, "public_headers": 1, "tests": 1,
-             "docs": 1},
+             "docs": 1, "go_sources": 0, "go_tests": 0},
         )
 
     def test_production_complete_ownership_mutations(self) -> None:
@@ -280,8 +280,11 @@ class DescriptorTests(unittest.TestCase):
             ("benchmarks", "sources", "src/modules/benchmarks/agent_eval.c"),
             ("benchmarks", "private_headers", "src/modules/benchmarks/agent_eval.h"),
             ("tools", "sources", "src/modules/tools/agent_tools_dispatch.c"),
-            ("tools", "private_headers", "src/modules/tools/agent_tools.h"),
+            ("tools", "go_sources", "server-go/modules/tools/tools.go"),
+            ("tools", "go_tests", "server-go/modules/tools/tools_test.go"),
             ("routing", "sources", "src/modules/routing/routing.c"),
+            ("routing", "go_sources", "server-go/modules/routing/routing.go"),
+            ("routing", "go_tests", "server-go/modules/routing/routing_test.go"),
             ("execution-policy", "sources", "src/modules/execution-policy/execution_policy.c"),
             ("kb-synthesis", "sources", "src/modules/kb-synthesis/kb_curator_synthesize.c"),
             ("kb-synthesis", "private_headers", "src/modules/kb-synthesis/kb_curator_synthesize.h"),
@@ -291,7 +294,10 @@ class DescriptorTests(unittest.TestCase):
             ("governance", "sources", "src/modules/governance/gw_stage_governance.c"),
             ("governance", "private_headers", "src/modules/governance/gw_stage_governance.h"),
             ("learning", "sources", "src/modules/learning/learning_router.c"),
-            ("learning", "private_headers", "src/modules/learning/learning.h"),
+            ("learning", "go_sources", "server-go/modules/learning/learning.go"),
+            ("learning", "go_tests", "server-go/modules/learning/learning_test.go"),
+            ("skills", "go_sources", "server-go/modules/skills/skills.go"),
+            ("skills", "go_tests", "server-go/modules/skills/skills_test.go"),
             ("workspace", "sources", "src/modules/workspace/workspace_turn.c"),
             ("workspace", "private_headers", "src/modules/workspace/workspace_provider.h"),
             ("vault", "sources", "src/modules/vault/vault_service.c"),
@@ -367,7 +373,7 @@ class DescriptorTests(unittest.TestCase):
         """An unmigrated module must not satisfy the latch vacuously."""
         empty = (
             "control-web",
-            "response-composition", "runtime-web",
+            "runtime-web",
         )
         for identifier in empty:
             tmp = self.production_repo()

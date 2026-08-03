@@ -18,6 +18,12 @@
     "src/modules/learning/learning_router.c",
     "src/modules/learning/module_adapter.c"
   ],
+  "go_sources": [
+    "server-go/modules/learning/learning.go"
+  ],
+  "go_tests": [
+    "server-go/modules/learning/learning_test.go"
+  ],
   "public_headers": [
     "src/modules/learning/include/aimee/learning/learning.h",
     "src/modules/learning/include/aimee/learning/module_api.h"

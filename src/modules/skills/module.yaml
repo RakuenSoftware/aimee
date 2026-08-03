@@ -19,6 +19,12 @@
     "src/modules/skills/skill_rollback.c",
     "src/modules/skills/module_adapter.c"
   ],
+  "go_sources": [
+    "server-go/modules/skills/skills.go"
+  ],
+  "go_tests": [
+    "server-go/modules/skills/skills_test.go"
+  ],
   "public_headers": [
     "src/modules/skills/include/aimee/skills/skill.h",
     "src/modules/skills/include/aimee/skills/skill_curator.h",

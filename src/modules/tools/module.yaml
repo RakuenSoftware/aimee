@@ -21,6 +21,12 @@
     "src/modules/tools/agent_tools_dispatch.c",
     "src/modules/tools/module_adapter.c"
   ],
+  "go_sources": [
+    "server-go/modules/tools/tools.go"
+  ],
+  "go_tests": [
+    "server-go/modules/tools/tools_test.go"
+  ],
   "public_headers": [
     "src/modules/tools/include/aimee/tools/agent_tools.h",
     "src/modules/tools/include/aimee/tools/module_api.h"

@@ -1,0 +1,72 @@
+// Command aimee-module is a multicall executable for isolated Go module processes.
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strings"
+	"syscall"
+
+	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/JBailes/aimee/server-go/modules/learning"
+	"github.com/JBailes/aimee/server-go/modules/routing"
+	"github.com/JBailes/aimee/server-go/modules/skills"
+	moduletools "github.com/JBailes/aimee/server-go/modules/tools"
+)
+
+var errUsage = errors.New("usage: aimee-module-NAME DAEMON_MODULE_BUS_SOCKET")
+
+func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
+	name := strings.TrimPrefix(filepath.Base(executable), "aimee-module-")
+	config := bus.ModuleProcessConfig{PrincipalClass: 1}
+	switch name {
+	case "learning":
+		config.ModuleName = name
+		config.PrincipalRef = 8
+		config.Stages = []bus.ModuleStage{{EventKind: learning.EventKind, StageID: learning.StageObserve}}
+		config.Handler = learning.Handle
+	case "routing":
+		config.ModuleName = name
+		config.PrincipalRef = 9
+		config.Stages = []bus.ModuleStage{{EventKind: routing.EventKind, StageID: routing.StageSelect}}
+		config.Handler = routing.Handle
+	case "tools":
+		config.ModuleName = name
+		config.PrincipalRef = 11
+		config.Stages = []bus.ModuleStage{{EventKind: moduletools.EventKind, StageID: moduletools.StageDispatch}}
+		config.Handler = moduletools.Handle
+	case "skills":
+		config.ModuleName = name
+		config.PrincipalRef = 14
+		config.Stages = []bus.ModuleStage{{EventKind: skills.EventKind, StageID: skills.StageContext}}
+		config.Handler = skills.Handle
+	default:
+		return bus.ModuleProcessConfig{}, false
+	}
+	return config, true
+}
+
+func run(ctx context.Context, args []string) error {
+	if len(args) != 2 {
+		return errUsage
+	}
+	config, ok := moduleConfig(args[0])
+	if !ok {
+		return fmt.Errorf("unknown Go module executable %q", filepath.Base(args[0]))
+	}
+	config.SocketPath = args[1]
+	return bus.RunModuleProcess(ctx, config)
+}
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	if err := run(ctx, os.Args); err != nil {
+		fmt.Fprintf(os.Stderr, "aimee-module: %v\n", err)
+		os.Exit(1)
+	}
+}

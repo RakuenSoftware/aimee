@@ -46,12 +46,24 @@ socket; after `bus_client_attach_as` completes, the socket is no longer the data
 path and the module uses only its mappings. Admission and event-kind grants are
 daemon policy injected into the core host.
 
-External module repositories consume the host-free
-`aimee-core-event-bus-client` target. The shared runtime in `bus_runtime.c`
+External C module repositories consume the host-free
+`aimee-core-event-bus-client` target. Go modules use the pure-Go client and
+process runtime under `server-go/bus`; it mirrors authenticated attach, AMOD
+fragmentation, deadlines, cancellation, bounded concurrent handlers,
+heartbeats, and host-epoch shutdown without cgo. The shared host runtime in `bus_runtime.c`
 owns the listener, peer admission, heartbeat, and reap lifecycle. Server and KB
 configure separate endpoints at `<config>/<daemon>-module-bus.sock` and separate
 policies at `<config>/modules.d/<daemon>`; the environment can override those
 with `AIMEE_MODULE_BUS_SOCKET` and `AIMEE_MODULE_POLICY_DIR`.
+
+`src/modules/process-contracts.json` is also the implementation-language switch
+for supervised processes. The first migrated batch—`learning`, `routing`,
+`tools`, and `skills`—runs through the Go multicall executable in
+`server-go/cmd/aimee-module`; its basename selects an isolated identity and one
+module package under `server-go/modules`. The runtime bundle emits no C process
+source for those entries. Their former C `module_adapter.c` files remain only as
+wire-parity fixtures while the deeper module-owned C surfaces are migrated in
+later batches.
 
 Every strict `*.grant` policy binds one principal class/reference to an exact
 absolute executable (resolved and compared with Linux `SO_PEERCRED` and

@@ -6,14 +6,21 @@
 #include <aimee/core/event_bus/bus_runtime.h>
 #include <aimee/core/event_bus/module_client.h>
 #include <aimee/core/event_bus/module_runtime.h>
+#include <aimee/learning/module_api.h>
+#include <aimee/routing/module_api.h>
+#include <aimee/skills/module_api.h>
+#include <aimee/tools/module_api.h>
 
 #include <assert.h>
+#include <errno.h>
 #include <limits.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -113,20 +120,99 @@ static void wait_for_clients(bus_host_t *host, pthread_mutex_t *lock, uint32_t c
    assert(!"timed out waiting for module clients");
 }
 
-int main(void)
+static int production_contract(const char *name, uint32_t *kind, uint32_t *principal_ref)
 {
+   if (strcmp(name, "learning") == 0)
+      *kind = AIMEE_LEARNING_EVENT_OBSERVE, *principal_ref = 8;
+   else if (strcmp(name, "routing") == 0)
+      *kind = AIMEE_ROUTING_EVENT_KIND, *principal_ref = 9;
+   else if (strcmp(name, "tools") == 0)
+      *kind = AIMEE_TOOLS_EVENT_DISPATCH, *principal_ref = 11;
+   else if (strcmp(name, "skills") == 0)
+      *kind = AIMEE_SKILLS_EVENT_CONTEXT, *principal_ref = 14;
+   else
+      return -1;
+   return 0;
+}
+
+static void smoke_production_module(aimee_module_client_t *client, const char *name,
+                                    uint32_t kind)
+{
+   uint8_t request[AIMEE_TOOLS_REQUEST_LEN] = {0};
+   uint8_t response[AIMEE_TOOLS_REQUEST_LEN] = {0};
+   uint32_t request_len = 0, response_len = 0;
+   if (strcmp(name, "learning") == 0)
+   {
+      uint32_t mask = 0;
+      assert(aimee_learning_request_encode("correction", request, sizeof(request)) == 0);
+      request_len = AIMEE_LEARNING_REQUEST_LEN;
+      assert(aimee_module_client_call(client, kind, 1, 2001, 0, request, request_len, response,
+                                      sizeof(response), &response_len, NULL,
+                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(aimee_learning_response_decode(response, response_len, &mask) == 0);
+      assert(mask == (AIMEE_LEARNING_SINK_RERANKER | AIMEE_LEARNING_SINK_SUPERSEDE |
+                      AIMEE_LEARNING_SINK_RULE));
+   }
+   else if (strcmp(name, "routing") == 0)
+   {
+      uint32_t selected = UINT32_MAX;
+      assert(aimee_routing_request_encode(AIMEE_ROUTING_SELECT_BALANCED, 3, request,
+                                           sizeof(request)) == 0);
+      request_len = AIMEE_ROUTING_REQUEST_LEN;
+      assert(aimee_module_client_call(client, kind, 1, 2002, 0, request, request_len, response,
+                                      sizeof(response), &response_len, NULL,
+                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(aimee_routing_response_decode(response, response_len, 3, &selected) == 0);
+      assert(selected == 0);
+   }
+   else if (strcmp(name, "tools") == 0)
+   {
+      aimee_tool_class_t classification = AIMEE_TOOL_CLASS_UNKNOWN;
+      assert(aimee_tools_request_encode("bash", request, sizeof(request)) == 0);
+      request_len = AIMEE_TOOLS_REQUEST_LEN;
+      assert(aimee_module_client_call(client, kind, 1, 2003, 0, request, request_len, response,
+                                      sizeof(response), &response_len, NULL,
+                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(aimee_tools_response_decode(response, response_len, &classification) == 0);
+      assert(classification == AIMEE_TOOL_CLASS_EXEC);
+   }
+   else
+   {
+      int fire = 0;
+      assert(strcmp(name, "skills") == 0);
+      assert(aimee_skills_request_encode(12, 6, request, sizeof(request)) == 0);
+      request_len = AIMEE_SKILLS_REQUEST_LEN;
+      assert(aimee_module_client_call(client, kind, 1, 2004, 0, request, request_len, response,
+                                      sizeof(response), &response_len, NULL,
+                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(aimee_skills_response_decode(response, response_len, &fire) == 0 && fire);
+   }
+}
+
+int main(int argc, char **argv)
+{
+   assert(argc >= 1 && argc <= 3);
+   uint32_t test_kind = TEST_KIND, module_ref = MODULE_REF;
+   if (argc == 3)
+      assert(production_contract(argv[2], &test_kind, &module_ref) == 0);
    char directory[] = "/tmp/aimee-module-runtime-XXXXXX";
    assert(mkdtemp(directory) != NULL);
    char socket_path[PATH_MAX], executable[PATH_MAX];
    assert(snprintf(socket_path, sizeof socket_path, "%s/module.sock", directory) > 0);
    assert(realpath("/proc/self/exe", executable) != NULL);
 
-   uint32_t served[] = {TEST_KIND};
-   uint32_t requested[] = {TEST_KIND, EMPTY_KIND};
+   char module_executable[PATH_MAX];
+   if (argc >= 2)
+      assert(realpath(argv[1], module_executable) != NULL);
+   else
+      assert(snprintf(module_executable, sizeof module_executable, "%s", executable) > 0);
+
+   uint32_t served[] = {test_kind};
+   uint32_t requested[] = {test_kind, EMPTY_KIND};
    bus_runtime_grant_t grants[] = {{.principal_class = 1,
-                                    .principal_ref = MODULE_REF,
+                                    .principal_ref = module_ref,
                                     .uid = BUS_RUNTIME_SELF_UID,
-                                    .executable = executable,
+                                    .executable = module_executable,
                                     .serve = served,
                                     .serve_count = 1},
                                    {.principal_class = 1,
@@ -161,7 +247,19 @@ int main(void)
                                           .stage_count = 1,
                                           .handler = handle}};
    pthread_t module_thread;
-   assert(pthread_create(&module_thread, NULL, run_process, &process) == 0);
+   pid_t module_pid = -1;
+   if (argc >= 2)
+   {
+      module_pid = fork();
+      assert(module_pid >= 0);
+      if (module_pid == 0)
+      {
+         execl(module_executable, module_executable, socket_path, (char *)NULL);
+         _exit(127);
+      }
+   }
+   else
+      assert(pthread_create(&module_thread, NULL, run_process, &process) == 0);
 
    int caller_fd = -1;
    bus_client_t caller;
@@ -177,6 +275,12 @@ int main(void)
 
    aimee_module_client_t module_client;
    assert(aimee_module_client_init(&module_client, &caller) == 0);
+
+   if (argc == 3)
+   {
+      smoke_production_module(&module_client, argv[2], test_kind);
+      goto finish;
+   }
 
    char body[64];
    uint32_t body_len = 0;
@@ -233,9 +337,21 @@ int main(void)
                                    NULL) == AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE);
    assert(body_len == 8);
 
+finish:
    aimee_module_client_destroy(&module_client);
-   aimee_module_process_stop();
-   assert(pthread_join(module_thread, NULL) == 0 && process.result == 0);
+   if (module_pid > 0)
+   {
+      assert(kill(module_pid, SIGTERM) == 0);
+      int status = 0;
+      while (waitpid(module_pid, &status, 0) < 0)
+         assert(errno == EINTR);
+      assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+   }
+   else
+   {
+      aimee_module_process_stop();
+      assert(pthread_join(module_thread, NULL) == 0 && process.result == 0);
+   }
    atomic_store_explicit(&pump_state.stop, 1, memory_order_release);
    assert(pthread_join(pump_thread, NULL) == 0);
    bus_client_detach(&caller);
@@ -243,6 +359,10 @@ int main(void)
    bus_host_destroy(&host);
    pthread_mutex_destroy(&host_lock);
    assert(rmdir(directory) == 0);
-   puts("module runtime: dispatch, fragmented payloads, deadline, and cancellation passed");
+   if (argc == 3)
+      printf("module runtime (%s): C caller/Go handler wire parity passed\n", argv[2]);
+   else
+      printf("module runtime (%s): dispatch, fragmented payloads, deadline, and cancellation passed\n",
+             argc == 2 ? "Go process" : "C process");
    return 0;
 }

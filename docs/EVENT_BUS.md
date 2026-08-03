@@ -31,6 +31,12 @@ That buys us:
 
 The last item is an extension surface, not a claim that every subsystem has moved already.
 
+The first production C-to-Go process batch is `learning`, `routing`, `tools`,
+and `skills`. Each keeps its existing event kind and AMOD body contract, but the
+supervisor now starts an authenticated Go process for that identity. C adapters
+remain as parity fixtures; this does not yet mean the modules' storage-heavy or
+daemon orchestration code has all moved to Go.
+
 ## What is on it now
 
 The server and KB publish these through the observability bridge:
@@ -133,5 +139,7 @@ Use `bus_client_publish` for ordinary inline events. Use the arena for a trusted
 publisher that needs a lease. Use the module request API for module calls; it selects ordered inline
 fragmentation when a request or reply exceeds the inline budget.
 
-Code lives under `src/core/event_bus/`. The public C client is `bus_client.h`; the pure-Go client is
-under `server-go/bus/`. The source headers hold the wire and arena invariants.
+Code lives under `src/core/event_bus/`. The public C client is `bus_client.h`; the pure-Go client and
+module process runtime are under `server-go/bus/`. Both runtimes implement the same AMOD envelope,
+fragmentation, deadline, cancellation, heartbeat, and host-epoch behavior. The source headers hold
+the wire and arena invariants.
