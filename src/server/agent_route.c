@@ -337,6 +337,13 @@ static int agent_is_local(const agent_t *ag)
    return strcmp(ag->auth_type, "none") == 0 && agent_endpoint_is_localish(ag->endpoint);
 }
 
+static agent_route_selection_fn g_route_selection_provider;
+
+void agent_set_route_selection_provider(agent_route_selection_fn provider)
+{
+   g_route_selection_provider = provider;
+}
+
 static agent_t *agent_pick_balanced(agent_t **candidates, int count)
 {
    static unsigned cursor;
@@ -344,6 +351,14 @@ static agent_t *agent_pick_balanced(agent_t **candidates, int count)
       return NULL;
    if (count == 1)
       return candidates[0];
+   if (g_route_selection_provider)
+   {
+      uint32_t selected = 0;
+      if (g_route_selection_provider(0, (uint32_t)count, &selected) != 0 ||
+          selected >= (uint32_t)count)
+         return NULL;
+      return candidates[selected];
+   }
    unsigned pick = __atomic_fetch_add(&cursor, 1u, __ATOMIC_RELAXED);
    return candidates[pick % (unsigned int)count];
 }
@@ -439,6 +454,14 @@ int delegate_pick_for_role(agent_config_t *cfg, const char *role, const char *co
 
    const int *pool = nfree > 0 ? freeel : elig;
    int pool_n = nfree > 0 ? nfree : n;
+   if (g_route_selection_provider)
+   {
+      uint32_t selected = 0;
+      if (g_route_selection_provider(1, (uint32_t)pool_n, &selected) != 0 ||
+          selected >= (uint32_t)pool_n)
+         return -1;
+      return pool[selected];
+   }
    return pool[delegate_role_rand() % (unsigned)pool_n];
 }
 

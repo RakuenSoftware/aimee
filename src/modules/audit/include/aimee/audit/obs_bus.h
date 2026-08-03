@@ -32,6 +32,8 @@
 #include <stddef.h> /* size_t */
 #include <stdint.h>
 
+#include <aimee/core/event_bus/module_client.h>
+
 #include "guardrail_events.h" /* guardrail_event_t — a second event kind on this bus */
 
 #ifdef __cplusplus
@@ -74,6 +76,18 @@ extern "C"
     * consumer thread. Idempotent: a second call while running is a no-op that
     * returns 0. Returns 0 on success, -1 if the bus could not be created. */
    int obs_bus_start(void);
+
+   /* Invoke a separately shipped process module on this daemon's local bus.
+    * This is the shared server/KB bridge into the core module client: AMOD
+    * framing, correlation, monotonic deadline enforcement, cancellation, and
+    * response validation remain in aimee-core-c. The optional cancellation
+    * callback is also combined with daemon shutdown, so stop cannot strand a
+    * caller. */
+   aimee_module_call_result_t obs_bus_module_call(
+       uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
+       const void *request_body, uint32_t request_len, void *response_body,
+       uint32_t response_capacity, uint32_t *response_len, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
 
    /* Publish one governed-action audit row. Same field contract as
     * audit_action_log — the fields are serialized and published; the consumer

@@ -201,14 +201,26 @@ def module_owned_files(module_id: str, descriptor: dict[str, object]) -> list[st
     return result
 
 
-def module_main(module_id: str, principal_ref: int, stages: list[dict[str, object]]) -> str:
+def module_main(
+    module_id: str,
+    principal_ref: int,
+    stages: list[dict[str, object]],
+    has_handler: bool = False,
+) -> str:
     entries = "\n".join(
         f"   {{{stage['event_kind']}u, {stage['id']}u}},"
         for stage in stages
     )
+    handler_declaration = """
+extern aimee_module_status_t aimee_module_handler(
+    const aimee_module_invocation_t *, const uint8_t *, uint32_t, uint8_t *, uint32_t,
+    uint32_t *, void *);
+""" if has_handler else ""
+    handler_value = "aimee_module_handler" if has_handler else "NULL"
     return f"""#include <aimee/core/event_bus/module_runtime.h>
 
 #include <stdio.h>
+{handler_declaration}
 
 static const aimee_module_stage_t stages[] = {{
 {entries}
@@ -228,8 +240,7 @@ int main(int argc, char **argv)
        .principal_ref = {principal_ref}u,
        .stages = stages,
        .stage_count = sizeof stages / sizeof stages[0],
-       /* Replaced by the repository's owned handler during semantic cutover. */
-       .handler = NULL,
+       .handler = {handler_value},
    }};
    return aimee_module_process_run(&config);
 }}
@@ -249,6 +260,8 @@ def export_module(
     if descriptor.get("id") != module_id:
         raise ExportError(f"{descriptor_path}: descriptor id mismatch")
     owned = module_owned_files(module_id, descriptor)
+    adapter_source = f"src/modules/{module_id}/module_adapter.c"
+    has_handler = adapter_source in owned
     repository = output_root / f"aimee-module-{module_id}"
     repository.mkdir()
     for relative in owned:
@@ -261,7 +274,10 @@ def export_module(
         stages = contract["stages"]
         assert isinstance(principal_ref, int) and isinstance(stages, list)
         serve = ",".join(str(stage["event_kind"]) for stage in stages)
-        write_text(repository / "runtime/main.c", module_main(module_id, principal_ref, stages))
+        write_text(
+            repository / "runtime/main.c",
+            module_main(module_id, principal_ref, stages, has_handler),
+        )
         write_text(
             repository / "grants/module.grant.in",
             f"""version=1
@@ -285,8 +301,9 @@ find_package(aimee-core {version} EXACT CONFIG REQUIRED)
 if(NOT TARGET aimee::aimee-core-event-bus-client)
     message(FATAL_ERROR "{binary} requires the Linux event-bus client")
 endif()
-add_executable({binary} runtime/main.c)
+add_executable({binary} runtime/main.c{f' {adapter_source}' if has_handler else ''})
 target_compile_features({binary} PRIVATE c_std_11)
+target_include_directories({binary} PRIVATE src/modules/{module_id}/include)
 target_link_libraries({binary} PRIVATE aimee::aimee-core-event-bus-client)
 configure_file(grants/module.grant.in ${{CMAKE_CURRENT_BINARY_DIR}}/{module_id}.grant @ONLY)
 install(TARGETS {binary} RUNTIME DESTINATION ${{CMAKE_INSTALL_BINDIR}})
@@ -294,11 +311,14 @@ install(FILES ${{CMAKE_CURRENT_BINARY_DIR}}/{module_id}.grant
         DESTINATION ${{CMAKE_INSTALL_DATADIR}}/aimee/module-grants)
 """,
         )
+        handler_text = (
+            "Its repository-owned handler implements the declared stage contract."
+            if has_handler
+            else "The boundary returns typed `capability_absent` until its repository-owned handler is ported; it never echoes a request or reports false success."
+        )
         runtime_text = f"""It builds `{binary}` as a separate process for the
 {', '.join(contract['placements'])} bus. Its generated grant serves exactly the
-declared stage event kinds. The boundary adapter returns typed
-`capability_absent` until the owned implementation is ported behind it; it never
-echoes a request or reports false success.
+declared stage event kinds. {handler_text}
 
 The daemon admits the process only when its installed absolute executable path,
 UID, principal class, principal reference, and event-kind grants match the
@@ -416,12 +436,18 @@ def export_runtime_bundle(output_root: Path) -> int:
         if contract["execution"] != "process":
             continue
         descriptor = load_json(ROOT / f"src/modules/{module_id}/module.yaml")
+        adapter_source = f"src/modules/{module_id}/module_adapter.c"
+        owned = module_owned_files(module_id, descriptor)
+        has_handler = adapter_source in owned
         enabled = module_id in required or descriptor.get("enabled_by_default") is True
         principal_ref = contract["principal_ref"]
         stages = contract["stages"]
         assert isinstance(principal_ref, int) and isinstance(stages, list)
         binary = f"aimee-module-{module_id}"
-        write_text(output_root / "src" / f"{binary}.c", module_main(module_id, principal_ref, stages))
+        generated = module_main(module_id, principal_ref, stages, has_handler)
+        if has_handler:
+            generated += "\n" + (ROOT / adapter_source).read_text(encoding="utf-8")
+        write_text(output_root / "src" / f"{binary}.c", generated)
         serve = ",".join(str(stage["event_kind"]) for stage in stages)
         grant = f"""version=1
 principal_class={PRINCIPAL_CLASS}

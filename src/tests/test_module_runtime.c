@@ -4,12 +4,13 @@
 #include <aimee/core/event_bus/bus_endpoint.h>
 #include <aimee/core/event_bus/bus_host.h>
 #include <aimee/core/event_bus/bus_runtime.h>
-#include <aimee/core/event_bus/module_protocol.h>
+#include <aimee/core/event_bus/module_client.h>
 #include <aimee/core/event_bus/module_runtime.h>
 
 #include <assert.h>
 #include <limits.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,6 +18,7 @@
 #include <unistd.h>
 
 #define TEST_KIND  5889U
+#define EMPTY_KIND 5890U
 #define TEST_STAGE 1U
 #define MODULE_REF 7U
 #define CALLER_REF 90U
@@ -26,6 +28,15 @@ typedef struct
    aimee_module_process_config_t config;
    int result;
 } process_thread_t;
+
+typedef struct
+{
+   bus_host_t *host;
+   pthread_mutex_t *lock;
+   atomic_int stop;
+} pump_thread_t;
+
+static void pump(bus_host_t *host, pthread_mutex_t *lock);
 
 static aimee_module_status_t handle(const aimee_module_invocation_t *invocation,
                                     const uint8_t *request, uint32_t request_len, uint8_t *response,
@@ -54,6 +65,31 @@ static void *run_process(void *argument)
    return NULL;
 }
 
+static void *run_pump(void *argument)
+{
+   pump_thread_t *pump_state = argument;
+   const struct timespec pause = {.tv_sec = 0, .tv_nsec = 1000000};
+   while (!atomic_load_explicit(&pump_state->stop, memory_order_acquire))
+   {
+      pump(pump_state->host, pump_state->lock);
+      nanosleep(&pause, NULL);
+   }
+   return NULL;
+}
+
+static int cancellation_flag(void *context)
+{
+   return atomic_load_explicit((atomic_int *)context, memory_order_acquire);
+}
+
+static void *cancel_soon(void *context)
+{
+   const struct timespec pause = {.tv_sec = 0, .tv_nsec = 10000000};
+   nanosleep(&pause, NULL);
+   atomic_store_explicit((atomic_int *)context, 1, memory_order_release);
+   return NULL;
+}
+
 static void pump(bus_host_t *host, pthread_mutex_t *lock)
 {
    pthread_mutex_lock(lock);
@@ -76,53 +112,6 @@ static void wait_for_clients(bus_host_t *host, pthread_mutex_t *lock, uint32_t c
    assert(!"timed out waiting for module clients");
 }
 
-static void send_invoke(bus_client_t *caller, uint64_t correlation, uint64_t deadline,
-                        const char *body)
-{
-   uint8_t payload[256];
-   uint32_t body_len = body ? (uint32_t)strlen(body) : 0;
-   aimee_module_message_t request = {.operation = AIMEE_MODULE_OP_INVOKE,
-                                     .stage_id = TEST_STAGE,
-                                     .body_len = body_len,
-                                     .deadline_ns = deadline,
-                                     .trace_id = correlation + 1000};
-   assert(aimee_module_message_encode(&request, payload, sizeof payload) ==
-          AIMEE_MODULE_MESSAGE_HEADER_LEN);
-   if (body_len)
-      memcpy(payload + AIMEE_MODULE_MESSAGE_HEADER_LEN, body, body_len);
-   assert(bus_client_request(caller, TEST_KIND, correlation, payload,
-                             AIMEE_MODULE_MESSAGE_HEADER_LEN + body_len) == BUS_CLIENT_OK);
-}
-
-static aimee_module_message_t wait_for_reply(bus_host_t *host, pthread_mutex_t *lock,
-                                             bus_client_t *caller, uint64_t correlation, char *body,
-                                             size_t body_capacity)
-{
-   const struct timespec pause = {.tv_sec = 0, .tv_nsec = 1000000};
-   for (int i = 0; i < 3000; ++i)
-   {
-      pump(host, lock);
-      bus_event_t event;
-      if (bus_client_poll(caller, &event) == BUS_CLIENT_OK &&
-          event.frame.correlation_id == correlation && (event.frame.hdr_flags & BUS_F_REPLY))
-      {
-         aimee_module_message_t reply;
-         assert(aimee_module_message_decode(event.payload, event.payload_len, &reply) ==
-                AIMEE_MODULE_MESSAGE_OK);
-         assert(reply.operation == AIMEE_MODULE_OP_RESULT && reply.stage_id == TEST_STAGE);
-         assert(reply.body_len < body_capacity);
-         if (reply.body_len)
-            memcpy(body, event.payload + AIMEE_MODULE_MESSAGE_HEADER_LEN, reply.body_len);
-         body[reply.body_len] = '\0';
-         return reply;
-      }
-      nanosleep(&pause, NULL);
-   }
-   assert(!"timed out waiting for module reply");
-   aimee_module_message_t unreachable = {0};
-   return unreachable;
-}
-
 int main(void)
 {
    char directory[] = "/tmp/aimee-module-runtime-XXXXXX";
@@ -132,7 +121,7 @@ int main(void)
    assert(realpath("/proc/self/exe", executable) != NULL);
 
    uint32_t served[] = {TEST_KIND};
-   uint32_t requested[] = {TEST_KIND};
+   uint32_t requested[] = {TEST_KIND, EMPTY_KIND};
    bus_runtime_grant_t grants[] = {{.principal_class = 1,
                                     .principal_ref = MODULE_REF,
                                     .uid = BUS_RUNTIME_SELF_UID,
@@ -144,7 +133,7 @@ int main(void)
                                     .uid = BUS_RUNTIME_SELF_UID,
                                     .executable = executable,
                                     .request = requested,
-                                    .request_count = 1}};
+                                    .request_count = 2}};
    bus_host_config_t host_config = {.max_slots = 8,
                                     .slot_size = 512,
                                     .inline_budget = 400,
@@ -180,26 +169,56 @@ int main(void)
    assert(bus_endpoint_close(&caller_fd) == 0);
    wait_for_clients(&host, &host_lock, 2);
 
+   pump_thread_t pump_state = {.host = &host, .lock = &host_lock};
+   atomic_init(&pump_state.stop, 0);
+   pthread_t pump_thread;
+   assert(pthread_create(&pump_thread, NULL, run_pump, &pump_state) == 0);
+
+   aimee_module_client_t module_client;
+   assert(aimee_module_client_init(&module_client, &caller) == 0);
+
    char body[64];
-   send_invoke(&caller, 1, 0, "real-result");
-   aimee_module_message_t reply = wait_for_reply(&host, &host_lock, &caller, 1, body, sizeof body);
-   assert(reply.status == AIMEE_MODULE_STATUS_OK && strcmp(body, "real-result") == 0);
+   uint32_t body_len = 0;
+   assert(aimee_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1001, 0, "real-result",
+                                   11, body, sizeof body, &body_len, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(body_len == 11 && memcmp(body, "real-result", 11) == 0);
 
-   send_invoke(&caller, 2, 1, "late");
-   reply = wait_for_reply(&host, &host_lock, &caller, 2, body, sizeof body);
-   assert(reply.status == AIMEE_MODULE_STATUS_DEADLINE_EXCEEDED && reply.body_len == 0);
+   assert(aimee_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1002, 1, "late", 4,
+                                   body, sizeof body, &body_len, NULL, NULL) ==
+          AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);
+   assert(body_len == 0);
 
-   send_invoke(&caller, 3, 0, "cancel");
-   pump(&host, &host_lock); /* establish the pending correlation */
-   const struct timespec start_work = {.tv_sec = 0, .tv_nsec = 10000000};
-   nanosleep(&start_work, NULL);
-   assert(bus_client_cancel(&caller, TEST_KIND, 3) == BUS_CLIENT_OK);
-   pump(&host, &host_lock);
-   reply = wait_for_reply(&host, &host_lock, &caller, 3, body, sizeof body);
-   assert(reply.status == AIMEE_MODULE_STATUS_CANCELLED && reply.body_len == 0);
+   atomic_int cancel;
+   atomic_init(&cancel, 0);
+   pthread_t cancel_thread;
+   assert(pthread_create(&cancel_thread, NULL, cancel_soon, &cancel) == 0);
+   assert(aimee_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1003, 0, "cancel", 6,
+                                   body, sizeof body, &body_len, cancellation_flag, &cancel) ==
+          AIMEE_MODULE_CALL_CANCELLED);
+   assert(pthread_join(cancel_thread, NULL) == 0 && body_len == 0);
 
+   /* The cancelled handler's terminal reply may arrive after call() returned.
+    * A subsequent call must drain that stale correlation and still complete. */
+   assert(aimee_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1004, 0, "after", 5,
+                                   body, sizeof body, &body_len, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(body_len == 5 && memcmp(body, "after", 5) == 0);
+
+   assert(aimee_module_client_call(&module_client, EMPTY_KIND, 2, 1005, 0, NULL, 0, body,
+                                   sizeof body, &body_len, NULL, NULL) ==
+          AIMEE_MODULE_CALL_CAPABILITY_ABSENT);
+
+   assert(aimee_module_client_call(&module_client, TEST_KIND, TEST_STAGE, 1006, 0, "toolarge", 8,
+                                   body, 3, &body_len, NULL, NULL) ==
+          AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE);
+   assert(body_len == 8);
+
+   aimee_module_client_destroy(&module_client);
    aimee_module_process_stop();
    assert(pthread_join(module_thread, NULL) == 0 && process.result == 0);
+   atomic_store_explicit(&pump_state.stop, 1, memory_order_release);
+   assert(pthread_join(pump_thread, NULL) == 0);
    bus_client_detach(&caller);
    bus_runtime_stop(&runtime);
    bus_host_destroy(&host);

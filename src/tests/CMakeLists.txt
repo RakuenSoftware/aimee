@@ -133,7 +133,9 @@ aimee_add_test(test_util test_util.c)
 if(TARGET aimee-core-event-bus)
 set(AIMEE_TEST_OBS_BUS_RUNTIME_SOURCES
   ../core/event_bus/bus_runtime.c
-  ../core/event_bus/bus_endpoint.c)
+  ../core/event_bus/bus_endpoint.c
+  ../core/event_bus/module_client.c
+  ../core/event_bus/module_protocol.c)
 aimee_add_test(test_bus_wire test_bus_wire.c ../core/event_bus/bus_wire.c)
 target_include_directories(test_bus_wire PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
 target_compile_definitions(test_bus_wire PRIVATE
@@ -173,6 +175,10 @@ aimee_add_test(test_module_runtime test_module_runtime.c)
 target_include_directories(test_module_runtime PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
 target_link_libraries(test_module_runtime PRIVATE aimee-core-event-bus Threads::Threads)
+aimee_add_test(test_routing_module test_routing_module.c ../modules/routing/module_adapter.c)
+target_include_directories(test_routing_module PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/../modules/routing/include)
 aimee_add_test(test_bus_capture test_bus_capture.c ../core/event_bus/bus_capture.c ../core/event_bus/bus_client.c ../core/event_bus/bus_attach.c ../core/event_bus/bus_host.c ../core/event_bus/bus_route.c ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c ../core/event_bus/bus_ring.c ../core/event_bus/bus_arena.c ../core/event_bus/bus_wire.c)
 target_include_directories(test_bus_capture PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
 target_link_libraries(test_bus_capture PRIVATE Threads::Threads)

@@ -67,6 +67,15 @@ agent_t *agent_find(agent_config_t *cfg, const char *name);
 agent_t *agent_default_primary(agent_config_t *cfg);
 int agent_is_available_for_routing(const agent_t *agent);
 
+/* Optional server-owned selection provider. Eligibility, policy, and capability
+ * filtering remain local; the provider selects an index from the resulting
+ * equally eligible pool. `randomized` is nonzero for role/panel diversity and
+ * zero for balanced ordinary routing. Once registered, provider failure fails
+ * the route closed rather than falling back to an in-process selector. */
+typedef int (*agent_route_selection_fn)(int randomized, uint32_t candidate_count,
+                                        uint32_t *selected_index);
+void agent_set_route_selection_provider(agent_route_selection_fn provider);
+
 /* Why an agent is not a routable delegate. Mirrors the decision order of
  * agent_is_available_for_routing so callers can surface the ACTUAL reason
  * instead of a single catch-all "unavailable" string. */

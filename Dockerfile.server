@@ -48,6 +48,7 @@ RUN python3 scripts/export_c_repositories.py --runtime-bundle /module-runtime \
     && for source in /module-runtime/src/*.c; do \
          binary="${source##*/}"; binary="${binary%.c}"; \
          cc -std=c11 -O2 -Wall -Wextra -Werror -Isrc/core/event_bus/include \
+           -Isrc/modules/routing/include \
            "$source" \
            src/core/event_bus/bus_attach.c src/core/event_bus/bus_client.c \
            src/core/event_bus/bus_endpoint.c src/core/event_bus/bus_region.c \

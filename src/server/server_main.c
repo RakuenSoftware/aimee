@@ -45,6 +45,7 @@
 #include "memory_audit_bridge.h"  /* route server-side memory mutations onto the audit bus */
 #include "tool_completion_audit_bridge.h" /* route tool-dispatch outcomes onto the audit bus */
 #include "obs_bus_adapter.h"              /* bind shared bus events to server-owned durable sinks */
+#include "module_routing_adapter.h"       /* route selection through the local routing process */
 #include <aimee/audit/obs_bus.h>
 #include <aimee/audit/audit_replay.h> /* --audit-replay: inspect a governed-action capture file */
 #include <signal.h>
@@ -335,6 +336,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
       audit_log_close();
       return 1;
    }
+   server_module_routing_configure();
 
    /* Initialize server first — creates the Unix socket so clients can connect
     * (and queue in the listen backlog) while HTTP/SSL initializes. */

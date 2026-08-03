@@ -493,6 +493,61 @@ static void test_agent_route(void)
    assert(agent_is_available_for_routing(&cfg.agents[0]) == 0);
 }
 
+static int g_route_selector_fail;
+static int g_route_selector_randomized;
+static uint32_t g_route_selector_count;
+static uint32_t g_route_selector_pick;
+
+static int test_route_selector(int randomized, uint32_t candidate_count,
+                               uint32_t *selected_index)
+{
+   g_route_selector_randomized = randomized;
+   g_route_selector_count = candidate_count;
+   if (g_route_selector_fail)
+      return -1;
+   *selected_index = g_route_selector_pick;
+   return 0;
+}
+
+static void test_agent_route_selection_provider(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.agent_count = 2;
+   for (int i = 0; i < cfg.agent_count; ++i)
+   {
+      snprintf(cfg.agents[i].name, sizeof(cfg.agents[i].name), "worker-%d", i);
+      strcpy(cfg.agents[i].roles[0], "review");
+      cfg.agents[i].role_count = 1;
+      cfg.agents[i].enabled = 1;
+      cfg.agents[i].cost_tier = 0;
+   }
+
+   agent_set_route_selection_provider(test_route_selector);
+   g_route_selector_fail = 0;
+   g_route_selector_pick = 1;
+   assert(agent_route(&cfg, "review") == &cfg.agents[1]);
+   assert(g_route_selector_randomized == 0);
+   assert(g_route_selector_count == 2);
+
+   g_route_selector_pick = 0;
+   assert(delegate_pick_for_role(&cfg, "review", NULL, 0) == 0);
+   assert(g_route_selector_randomized == 1);
+   assert(g_route_selector_count == 2);
+
+   /* A registered external selector is authoritative: an unavailable process
+    * or invalid reply cannot silently resurrect the old in-process decision. */
+   g_route_selector_fail = 1;
+   assert(agent_route(&cfg, "review") == NULL);
+   assert(delegate_pick_for_role(&cfg, "review", NULL, 0) == -1);
+
+   g_route_selector_fail = 0;
+   g_route_selector_pick = 2;
+   assert(agent_route(&cfg, "review") == NULL);
+   assert(delegate_pick_for_role(&cfg, "review", NULL, 0) == -1);
+   agent_set_route_selection_provider(NULL);
+}
+
 /* The OpenAI Chat and Responses tool surfaces are generated from one builtin
  * tool table (agent_tools.c). This gate locks in the single-source guarantee:
  *   - exact per-surface membership (the surface-specific tools are explicit,
@@ -3308,6 +3363,7 @@ int main(void)
    test_agent_supports_persona();
    test_agent_find();
    test_agent_route();
+   test_agent_route_selection_provider();
    test_agent_route_policy_filter();
    test_agent_route_primary_turn_marker();
    test_agent_route_client_only_claude_excluded();

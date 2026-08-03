@@ -28,6 +28,7 @@
 #include <aimee/core/event_bus/bus_host.h>
 #include <aimee/core/event_bus/bus_region.h> /* bus_control_epoch */
 #include <aimee/core/event_bus/bus_runtime.h>
+#include <aimee/core/event_bus/module_client.h>
 #include "config.h"     /* config_default_dir */
 #include "log.h"
 #include "wfe_def.h" /* wfe_sha256_raw — obs_bus_key_fingerprint */
@@ -56,6 +57,8 @@ static struct
    bus_host_t host;
    bus_client_t producer;
    bus_client_t consumer;
+   bus_client_t module_bus;
+   aimee_module_client_t module_client;
    pthread_t thread;
    pthread_mutex_t pub_lock; /* serializes the single producer ring */
    pthread_mutex_t host_lock; /* serializes pump/reap with external admission */
@@ -64,6 +67,9 @@ static struct
    atomic_int emitting;      /* 1 while accepting emits */
    atomic_int stop;          /* 1 tells the consumer to final-drain and exit */
    atomic_int publishers;    /* # producers inside the emit window (see enter_emit) */
+   atomic_int accepting_calls; /* module RPC admission during daemon lifetime */
+   atomic_int module_stop;     /* cancels an in-flight module RPC on shutdown */
+   atomic_int module_callers;  /* calls using module_client during teardown */
    atomic_uint_least64_t dropped;
    atomic_uint_least64_t written;
    atomic_uint_least64_t enqueued;  /* events successfully placed on the ring */
@@ -415,6 +421,7 @@ static void *consumer_main(void *arg)
       uint64_t now = bus_runtime_monotonic_ns();
       bus_client_heartbeat(&g.producer, now);
       bus_client_heartbeat(&g.consumer, now);
+      bus_client_heartbeat(&g.module_bus, now);
       pthread_mutex_lock(&g.host_lock);
       if (g.runtime)
          (void)bus_runtime_maintain(g.runtime, now);
@@ -490,7 +497,7 @@ static int start_locked(void)
 
    bus_host_config_t cfg;
    memset(&cfg, 0, sizeof cfg);
-   cfg.max_slots = 64; /* two internal clients plus separately shipped modules */
+   cfg.max_slots = 64; /* three internal clients plus separately shipped modules */
    cfg.slot_size = 2048; /* an audit row (7 short strings + an int) fits inline */
    cfg.inline_budget = 1900;
    cfg.queue_capacity = 1024; /* absorb bursts between drain ticks */
@@ -503,9 +510,14 @@ static int start_locked(void)
       pthread_mutex_destroy(&g.pub_lock);
       return -1;
    }
-   if (attach(&g.producer) != 0 || attach(&g.consumer) != 0)
+   if (attach(&g.producer) != 0 || attach(&g.consumer) != 0 || attach(&g.module_bus) != 0 ||
+       aimee_module_client_init(&g.module_client, &g.module_bus) != 0)
    {
       aimee_log(LOG_ERROR, "obs_bus", "audit bus client attach failed");
+      aimee_module_client_destroy(&g.module_client);
+      bus_client_detach(&g.module_bus);
+      bus_client_detach(&g.consumer);
+      bus_client_detach(&g.producer);
       bus_host_destroy(&g.host);
       pthread_mutex_destroy(&g.host_lock);
       pthread_mutex_destroy(&g.pub_lock);
@@ -552,6 +564,7 @@ static int start_locked(void)
 
    g.started = 1;
    atomic_store_explicit(&g.emitting, 1, memory_order_release);
+   atomic_store_explicit(&g.accepting_calls, 1, memory_order_release);
    return 0;
 
 start_fail:
@@ -562,6 +575,8 @@ start_fail:
    bus_capture_free(&g.capture);
    bus_client_detach(&g.producer);
    bus_client_detach(&g.consumer);
+   aimee_module_client_destroy(&g.module_client);
+   bus_client_detach(&g.module_bus);
    bus_host_destroy(&g.host);
    pthread_mutex_destroy(&g.host_lock);
    pthread_mutex_destroy(&g.pub_lock);
@@ -574,6 +589,41 @@ int obs_bus_start(void)
    int rc = g.started ? 0 : start_locked();
    pthread_mutex_unlock(&start_lock);
    return rc;
+}
+
+typedef struct
+{
+   aimee_module_cancelled_fn external;
+   void *context;
+} module_cancel_context_t;
+
+static int module_call_cancelled(void *context)
+{
+   module_cancel_context_t *state = context;
+   return atomic_load_explicit(&g.module_stop, memory_order_acquire) ||
+          (state->external && state->external(state->context));
+}
+
+aimee_module_call_result_t obs_bus_module_call(
+    uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
+    const void *request_body, uint32_t request_len, void *response_body,
+    uint32_t response_capacity, uint32_t *response_len, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (response_len)
+      *response_len = 0;
+   atomic_fetch_add(&g.module_callers, 1); /* seq_cst: pairs with stop admission gate */
+   if (!atomic_load(&g.accepting_calls))
+   {
+      atomic_fetch_sub(&g.module_callers, 1);
+      return AIMEE_MODULE_CALL_TRANSPORT;
+   }
+   module_cancel_context_t state = {.external = cancelled, .context = cancel_context};
+   aimee_module_call_result_t result = aimee_module_client_call(
+       &g.module_client, event_kind, stage_id, trace_id, deadline_ns, request_body, request_len,
+       response_body, response_capacity, response_len, module_call_cancelled, &state);
+   atomic_fetch_sub(&g.module_callers, 1);
+   return result;
 }
 
 int obs_bus_set_guardrail_sink(obs_bus_guardrail_sink_fn sink, void *ctx)
@@ -791,8 +841,12 @@ void obs_bus_stop(void)
     * still drains and completes. Bounded: a producer waits at most AB_PUB_MAX
     * backoffs. */
    atomic_store(&g.emitting, 0);                                    /* seq_cst */
+   atomic_store(&g.accepting_calls, 0); /* seq_cst: no new caller can pass re-check */
+   atomic_store_explicit(&g.module_stop, 1, memory_order_release);
    const struct timespec nap = {.tv_sec = 0, .tv_nsec = 50 * 1000}; /* 50 us */
    while (atomic_load(&g.publishers) > 0)
+      nanosleep(&nap, NULL);
+   while (atomic_load(&g.module_callers) > 0)
       nanosleep(&nap, NULL);
 
    /* No new process may receive mappings once shutdown begins. The listener is
@@ -811,6 +865,8 @@ void obs_bus_stop(void)
    bus_capture_free(&g.capture);
    bus_client_detach(&g.producer);
    bus_client_detach(&g.consumer);
+   aimee_module_client_destroy(&g.module_client);
+   bus_client_detach(&g.module_bus);
    bus_host_destroy(&g.host);
    bus_runtime_policy_free(&g.runtime_policy);
    pthread_mutex_destroy(&g.host_lock);

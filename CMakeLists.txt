@@ -72,6 +72,8 @@ set(AIMEE_PROTOCOLS_INCLUDE_DIR
     "${AIMEE_SRC_DIR}/modules/protocols/include")
 set(AIMEE_CORE_CONNECTION_INCLUDE_DIR
     "${AIMEE_SRC_DIR}/core/connection/include")
+set(AIMEE_CORE_EVENT_BUS_INCLUDE_DIR
+    "${AIMEE_SRC_DIR}/core/event_bus/include")
 
 # The core-modularization layout keeps each module's public headers under
 # modules/<m>/include/aimee/<m>/. The Makefile adds these as -Imodules/<m>/include;
@@ -86,7 +88,9 @@ include_directories(
     ${AIMEE_DELEGATES_INCLUDE_DIR}
     ${AIMEE_PROTOCOLS_INCLUDE_DIR}
     ${AIMEE_CORE_CONNECTION_INCLUDE_DIR}
-    "${AIMEE_SRC_DIR}/modules/skills/include")
+    ${AIMEE_CORE_EVENT_BUS_INCLUDE_DIR}
+    "${AIMEE_SRC_DIR}/modules/skills/include"
+    "${AIMEE_SRC_DIR}/modules/routing/include")
 
 # LTO / IPO: must be set BEFORE any target is declared so the setting takes
 # effect uniformly across aimee-core/data/agent/cmd and every test binary.
@@ -891,6 +895,7 @@ set(CLI_SRCS
 
 set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_main.c
+    ${AIMEE_SRC_DIR}/server/module_routing_adapter.c
     ${AIMEE_SRC_DIR}/server/vault_bootstrap_privilege.c
     ${AIMEE_SRC_DIR}/server/server.c
     ${AIMEE_SRC_DIR}/server/s2_native_gate_hook.c

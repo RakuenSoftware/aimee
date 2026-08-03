@@ -31,7 +31,9 @@ TEST_RUN_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/n
 # one fixture rather than duplicating them in every target below.
 OBS_BUS_LINK_OBJS = $(OBJDIR)/modules/audit/obs_bus.o \
                     $(OBJDIR)/core/event_bus/bus_runtime.o \
-                    $(OBJDIR)/core/event_bus/bus_endpoint.o
+                    $(OBJDIR)/core/event_bus/bus_endpoint.o \
+                    $(OBJDIR)/core/event_bus/module_client.o \
+                    $(OBJDIR)/core/event_bus/module_protocol.o
 
 .PHONY: unit-test-server-management-tls
 unit-test-server-management-tls: $(TESTPREFIX)/unit-test-server-management-tls
@@ -264,6 +266,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-bus-endpoint \
                $(TESTPREFIX)/unit-test-bus-runtime \
                $(TESTPREFIX)/unit-test-module-runtime \
+               $(TESTPREFIX)/unit-test-routing-module \
                $(TESTPREFIX)/unit-test-bus-capture \
                $(TESTPREFIX)/unit-test-guardrails-blast-radius \
                $(TESTPREFIX)/unit-test-code-collect \
@@ -2957,6 +2960,7 @@ unit-test-bus-runtime: $(TESTPREFIX)/unit-test-bus-runtime
 
 $(OBJDIR)/tests/test_module_runtime.o: C_FLAGS += -Icore/event_bus/include
 $(TESTPREFIX)/unit-test-module-runtime: $(OBJDIR)/tests/test_module_runtime.o \
+                                        $(OBJDIR)/core/event_bus/module_client.o \
                                         $(OBJDIR)/core/event_bus/module_runtime.o \
                                         $(OBJDIR)/core/event_bus/module_protocol.o \
                                         $(OBJDIR)/core/event_bus/bus_runtime.o \
@@ -2974,6 +2978,16 @@ $(TESTPREFIX)/unit-test-module-runtime: $(OBJDIR)/tests/test_module_runtime.o \
 
 .PHONY: unit-test-module-runtime
 unit-test-module-runtime: $(TESTPREFIX)/unit-test-module-runtime
+	$<
+
+$(OBJDIR)/tests/test_routing_module.o: C_FLAGS += -Icore/event_bus/include -Imodules/routing/include
+$(OBJDIR)/modules/routing/module_adapter.o: C_FLAGS += -Icore/event_bus/include -Imodules/routing/include
+$(TESTPREFIX)/unit-test-routing-module: $(OBJDIR)/tests/test_routing_module.o \
+                                        $(OBJDIR)/modules/routing/module_adapter.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
+
+.PHONY: unit-test-routing-module
+unit-test-routing-module: $(TESTPREFIX)/unit-test-routing-module
 	$<
 
 # Event-bus conformance host harness (feature tree slice 10). A test binary that
