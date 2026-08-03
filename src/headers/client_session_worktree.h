@@ -8,15 +8,27 @@
  *
  * It exists separately because the client binary links none of workspace.o /
  * config.o / guardrails.o, so it cannot call those functions: everything here
- * goes through shell-free `git` subprocesses. The two implementations MUST agree
- * on the layout and the base-branch policy — a client that picked a different
- * path or base would hand the session a worktree the server-side guard then
- * rejects. Both produce:
+ * goes through shell-free `git` subprocesses. Both produce:
  *
  *   worktree: <git_root>/.aimee/worktrees/<key>/main
  *   branch:   aimee/session/<key>
  *   base:     the repository's default branch (never the checkout's current
  *             branch, unless an operator opts in explicitly)
+ *
+ * KNOWN DIVERGENCE — the two do NOT derive <key> the same way, and this is a
+ * live defect, not a design choice:
+ *
+ *   client (here):            <alnum prefix>-<64-bit FNV-1a of the FULL id>
+ *   server (worktree_session_key, workspace.c): the first 16 sanitized chars
+ *
+ * For sid "4e2f8b9e-4d46-4744-b08b-1cdc7623f121" that is
+ * "4e2f8b9e-752dfcbbee8ce090" here versus "4e2f8b9e-4d46-47" there. So a
+ * session the client has already placed can be given a SECOND worktree by
+ * hooks_ensure_cwd_worktree (server_hooks.c), which creates its own expected
+ * path when it does not find one. The server side is also lossy: two ids
+ * sharing a 16-char prefix collapse onto one worktree AND one branch, which is
+ * how concurrent writers end up overwriting each other. The hash here is the
+ * collision-free half; unifying the two is tracked work, not done.
  *
  * Delegates are deliberately NOT handled here: a delegate must inherit its
  * PARENT's branch and working-tree state, which is the server-side
