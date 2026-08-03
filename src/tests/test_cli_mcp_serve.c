@@ -28,9 +28,14 @@ const char *platform_home_dir(void)
 /* Stub for the iter-50 aimee_home() resolver. Returning NULL keeps the
  * test's "no real config dir" behaviour, so client_session_id and
  * friends short-circuit before they hit syscalls. */
+/* NULL by default (the original behaviour: no real config dir, so
+ * client_session_id and friends short-circuit before any syscall). The
+ * session-id tests point it at a temp dir so the session-ppid file is real. */
+static const char *g_aimee_home;
+
 const char *aimee_home(void)
 {
-   return NULL;
+   return g_aimee_home;
 }
 
 const char *cli_ensure_server(void)
@@ -70,9 +75,11 @@ int client_session_worktree_ensure(const char *sid, char *out, size_t cap)
    return 0;
 }
 
+static int g_ppid = 4242;
+
 int platform_getppid(void)
 {
-   return 4242;
+   return g_ppid;
 }
 
 /* Reverse-channel helpers live in cli_workspace_serve.c, which this unit test
@@ -1211,6 +1218,69 @@ static void test_notification_no_response(void)
    cJSON_Delete(req);
 }
 
+/* The session id keys the worktree, so how it is minted decides whether two
+ * processes share a checkout or collide in one. Processes of one agent session
+ * share a PPID and must converge on ONE id via session-ppid-<ppid>; a private
+ * invented id would put this proxy in a different worktree from its own
+ * session, and a bare ppid string would put two proxies under one host into the
+ * SAME worktree, overwriting each other. */
+static void test_session_id_is_shared_not_invented(void)
+{
+   char home[512];
+   const char *tmp = getenv("TMPDIR");
+   snprintf(home, sizeof(home), "%s/aimee-mcp-sid-%d", (tmp && tmp[0]) ? tmp : "/tmp", (int)getpid());
+   char cmd[600];
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s' && mkdir -p '%s'", home, home);
+   assert(system(cmd) == 0);
+   g_aimee_home = home;
+   /* No host-provided id: this is the path where the proxy must mint one. */
+   unsetenv("AIMEE_SESSION_ID");
+
+   /* First caller mints and publishes. */
+   char first[64] = "";
+   assert(client_session_id_ensure(first, sizeof(first)) == 0);
+   assert(first[0]);
+
+   char published[600];
+   snprintf(published, sizeof(published), "%s/session-ppid-%d", home, g_ppid);
+   struct stat st;
+   assert(stat(published, &st) == 0); /* it PUBLISHED, so siblings can find it */
+
+   /* A sibling process of the same session (same ppid) adopts that id rather
+    * than minting a second one — same session, same worktree. */
+   char second[64] = "";
+   assert(client_session_id_ensure(second, sizeof(second)) == 0);
+   assert(strcmp(first, second) == 0);
+
+   /* A process under a DIFFERENT host gets a different id — two hosts must not
+    * share one worktree. */
+   g_ppid = 4243;
+   char other[64] = "";
+   assert(client_session_id_ensure(other, sizeof(other)) == 0);
+   assert(strcmp(first, other) != 0);
+
+   /* Orphaned (ppid <= 1) refuses rather than keying on session-ppid-1, which
+    * every unrelated daemon on the box would share. */
+   g_ppid = 1;
+   char orphan[64] = "";
+   assert(client_session_id_ensure(orphan, sizeof(orphan)) == -1);
+   assert(orphan[0] == '\0');
+
+   /* An explicit AIMEE_SESSION_ID always wins and needs no publishing — the
+    * host has already decided which session this is. */
+   setenv("AIMEE_SESSION_ID", "host-provided-id", 1);
+   char from_env[64] = "";
+   assert(client_session_id_ensure(from_env, sizeof(from_env)) == 0);
+   assert(strcmp(from_env, "host-provided-id") == 0);
+
+   g_ppid = 4242;
+   g_aimee_home = NULL;
+   setenv("AIMEE_SESSION_ID", "test-session", 1); /* restore for later cases */
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", home);
+   (void)system(cmd);
+   printf("  PASS: test_session_id_is_shared_not_invented\n");
+}
+
 int main(void)
 {
    setenv("AIMEE_SESSION_ID", "test-session", 1);
@@ -1224,6 +1294,7 @@ int main(void)
    test_resources_read_unknown_uri();
    test_initialize();
    test_initialize_enters_session_worktree();
+   test_session_id_is_shared_not_invented();
    test_tools_list();
    test_tools_list_preserves_server_error();
    test_remote_discovery_retries_are_safe();

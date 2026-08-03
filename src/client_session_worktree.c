@@ -7,6 +7,7 @@
  * paths reach argv directly, so there is nothing to quote or inject. */
 #include "client_session_worktree.h"
 #include "cli_attention_guard.h" /* attn_require_session_worktree, attn_session_isolation_blocked */
+#include "session_worktree_key.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,27 +21,10 @@
 
 void client_session_worktree_key(const char *sid, char *out, size_t cap)
 {
-   if (!out || !cap)
-      return;
-   out[0] = '\0';
-   if (!sid || !sid[0])
-      return;
-   unsigned long long h = 1469598103934665603ULL;
-   for (const char *p = sid; *p; p++)
-   {
-      h ^= (unsigned char)*p;
-      h *= 1099511628211ULL;
-   }
-   char pre[9];
-   size_t k = 0;
-   for (const char *p = sid; *p && k < 8; p++)
-   {
-      char c = *p;
-      if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))
-         pre[k++] = c;
-   }
-   pre[k] = '\0';
-   snprintf(out, cap, "%s%s%016llx", pre, k ? "-" : "", h);
+   /* One derivation, shared with the server (session_worktree_key.c). This used
+    * to be a second, independent copy here — which is how the client and server
+    * came to disagree about where a session's worktree lived. */
+   session_worktree_key(sid, out, cap);
 }
 
 #ifndef _WIN32
@@ -240,6 +224,48 @@ int client_session_worktree_base(const char *git_root, char *buf, size_t cap)
    return -1;
 }
 
+/* Give back the worktree this session owned under the PREVIOUS (truncating)
+ * key. The derivation changed to stop two sessions colliding on one worktree; a
+ * session that spans the change would otherwise strand its old worktree and
+ * branch on disk. Only a CLEAN one is removed — `git worktree remove` without
+ * --force refuses a dirty tree, so stranded work is kept, not destroyed. The
+ * branch goes only if git accepts `branch -d` (merged), never -D. */
+static void csw_reclaim_legacy(const char *git_root, const char *sid, const char *live_key)
+{
+   char old_key[SESSION_WORKTREE_KEY_MAX];
+   session_worktree_key_legacy(sid, old_key, sizeof old_key);
+   if (!old_key[0] || strcmp(old_key, live_key) == 0)
+      return; /* both derivations agree -> that IS the live worktree */
+
+   char old_path[4200];
+   if (snprintf(old_path, sizeof old_path, "%s/.aimee/worktrees/%s/main", git_root, old_key) >=
+       (int)sizeof old_path)
+      return;
+   struct stat st;
+   if (stat(old_path, &st) != 0 || !S_ISDIR(st.st_mode))
+      return; /* nothing stranded */
+
+   const char *const rm_argv[] = {"git", "-C", git_root, "worktree", "remove", old_path, NULL};
+   if (csw_git(rm_argv, NULL, 0) != 0)
+   {
+      fprintf(stderr, "aimee: kept pre-rekey worktree %s — it has uncommitted or unpushed work.\n",
+              old_path);
+      return;
+   }
+   fprintf(stderr, "aimee: reclaimed pre-rekey worktree %s\n", old_path);
+
+   char old_branch[160];
+   if (snprintf(old_branch, sizeof old_branch, "aimee/session/%s", old_key) < (int)sizeof old_branch)
+   {
+      const char *const br_argv[] = {"git", "-C", git_root, "branch", "-d", old_branch, NULL};
+      (void)csw_git(br_argv, NULL, 0); /* -d, not -D: keeps an unmerged branch */
+   }
+   char parent[4200];
+   if (snprintf(parent, sizeof parent, "%s/.aimee/worktrees/%s", git_root, old_key) <
+       (int)sizeof parent)
+      (void)rmdir(parent);
+}
+
 int client_session_worktree_ensure(const char *sid, char *out, size_t cap)
 {
    if (!out || !cap)
@@ -320,6 +346,8 @@ int client_session_worktree_ensure(const char *sid, char *out, size_t cap)
       fprintf(stderr, "aimee: failed to create the session worktree at %s\n", wt);
       return -2; /* don't hand the caller a path that isn't there */
    }
+
+   csw_reclaim_legacy(git_root, sid, key);
 
    snprintf(out, cap, "%s", wt);
    return 0;

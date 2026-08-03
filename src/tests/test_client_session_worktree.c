@@ -257,6 +257,104 @@ static void test_ensure_requires_a_session_id_and_a_repo(void)
    printf("  ensure: no session id / no repo -> not applicable: ok\n");
 }
 
+/* Reproduce the pre-rekey layout by hand: <root>/.aimee/worktrees/<old_key>/main
+ * on branch aimee/session/<old_key>, exactly as the old truncating derivation
+ * would have left it. Returns the old key in old_key[cap]. */
+static void seed_pre_rekey_worktree(const char *clone, const char *sid, char *old_key, size_t cap,
+                                    char *old_path, size_t path_cap)
+{
+   snprintf(old_key, cap, "%.16s", sid);
+   snprintf(old_path, path_cap, "%s/.aimee/worktrees/%s/main", clone, old_key);
+   shell("git -C '%s' worktree add -q '%s' -b 'aimee/session/%s' origin/testing >/dev/null 2>&1",
+         clone, old_path, old_key);
+}
+
+/* The key derivation changed, so a session spanning the change owns a worktree
+ * under the OLD key. It must be recycled automatically rather than stranded. */
+static void test_ensure_reclaims_pre_rekey_worktree(void)
+{
+   char upstream[512], clone[512];
+   make_repo("upstream-c", "testing", upstream, sizeof upstream);
+   make_clone(upstream, "clone-c", clone, sizeof clone);
+
+   const char *sid = "aimee-task-abcdef0123456789";
+   char old_key[64], old_path[1024], new_key[64];
+   seed_pre_rekey_worktree(clone, sid, old_key, sizeof old_key, old_path, sizeof old_path);
+   client_session_worktree_key(sid, new_key, sizeof new_key);
+   assert(strcmp(old_key, new_key) != 0);
+   struct stat st;
+   assert(stat(old_path, &st) == 0);
+
+   char cwd_before[512];
+   assert(getcwd(cwd_before, sizeof cwd_before));
+   assert(chdir(clone) == 0);
+
+   char wt[4200];
+   int rc = client_session_worktree_ensure(sid, wt, sizeof wt);
+   if (rc == -1)
+   {
+      assert(chdir(cwd_before) == 0);
+      printf("  reclaim: SKIPPED (session isolation not enforced here)\n");
+      return;
+   }
+   assert(rc == 0);
+
+   /* The session runs on the NEW key... */
+   assert(strstr(wt, new_key) != NULL);
+   assert(stat(wt, &st) == 0);
+   /* ...and the clean pre-rekey worktree is gone, with its branch and the
+    * now-empty parent directory. */
+   assert(stat(old_path, &st) != 0);
+   char parent[1024];
+   snprintf(parent, sizeof parent, "%s/.aimee/worktrees/%s", clone, old_key);
+   assert(stat(parent, &st) != 0);
+   char branch[256];
+   capture(branch, sizeof branch, "git -C '%s' rev-parse --verify --quiet 'aimee/session/%s'", clone,
+           old_key);
+   assert(branch[0] == '\0');
+
+   assert(chdir(cwd_before) == 0);
+   printf("  reclaim: clean pre-rekey worktree recycled: ok\n");
+}
+
+/* Recycling must never become a way to lose work. */
+static void test_reclaim_keeps_a_dirty_pre_rekey_worktree(void)
+{
+   char upstream[512], clone[512];
+   make_repo("upstream-d", "testing", upstream, sizeof upstream);
+   make_clone(upstream, "clone-d", clone, sizeof clone);
+
+   const char *sid = "aimee-task-fedcba9876543210";
+   char old_key[64], old_path[1024];
+   seed_pre_rekey_worktree(clone, sid, old_key, sizeof old_key, old_path, sizeof old_path);
+   /* Uncommitted work stranded in the old worktree. */
+   shell("printf 'unsaved work' > '%s/wip.txt'", old_path);
+
+   char cwd_before[512];
+   assert(getcwd(cwd_before, sizeof cwd_before));
+   assert(chdir(clone) == 0);
+
+   char wt[4200];
+   int rc = client_session_worktree_ensure(sid, wt, sizeof wt);
+   if (rc == -1)
+   {
+      assert(chdir(cwd_before) == 0);
+      printf("  reclaim (dirty): SKIPPED (session isolation not enforced here)\n");
+      return;
+   }
+   assert(rc == 0);
+
+   /* Kept, with the file intact. */
+   struct stat st;
+   assert(stat(old_path, &st) == 0);
+   char wip[1024];
+   snprintf(wip, sizeof wip, "%s/wip.txt", old_path);
+   assert(stat(wip, &st) == 0);
+
+   assert(chdir(cwd_before) == 0);
+   printf("  reclaim: dirty pre-rekey worktree kept, not destroyed: ok\n");
+}
+
 int main(void)
 {
    printf("client session worktree bootstrap\n");
@@ -275,6 +373,8 @@ int main(void)
    test_base_explicit_ref_override();
    test_ensure_creates_branch_and_worktree();
    test_ensure_requires_a_session_id_and_a_repo();
+   test_ensure_reclaims_pre_rekey_worktree();
+   test_reclaim_keeps_a_dirty_pre_rekey_worktree();
 
    shell("rm -rf '%s'", g_tmp_root);
    printf("all client session worktree tests passed\n");
