@@ -34,3 +34,6 @@
 [12:03:02Z]   committed v3small.E2B.UD-Q4_K_XL
 [12:03:02Z] --- v3small.E2B.UD-Q6_K_XL  (1001 notes, 3 procs)
 [12:26:33Z] OK   v3small.E2B.UD-Q6_K_XL strictF1=0.5832
+[12:26:34Z]   committed v3small.E2B.UD-Q6_K_XL
+[12:26:34Z] --- v3small.E4B.UD-Q4_K_XL  (1001 notes, 2 procs)
+[12:47:54Z] OK   v3small.E4B.UD-Q4_K_XL strictF1=0.5770
