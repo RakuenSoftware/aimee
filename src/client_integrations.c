@@ -283,28 +283,51 @@ static const char *codex_skill_markdown(void)
           "\n"
           "Use this plugin when Codex needs repository memory or aimee-specific helpers.\n"
           "\n"
-          /* This list used to open with "prefer local file inspection first for
-           * nearby code" and offer find_symbol only "when the local search
-           * surface is missing indexed context" — i.e. the index as a fallback
-           * after grep. Agents followed it exactly: measured over a four-task
-           * benchmark with a verified-healthy index, every cell read this file
-           * and then made ZERO index calls, resolving everything with three to
-           * four recursive greps. The instruction, not the tooling, was the
-           * reason. Lead with the questions the index answers better, and keep
-           * reading files for what reading files is actually for. */
-          "- Reading a file you already know the path of: just read it.\n"
+          /* TWO REVISIONS, TWO DIFFERENT FAILURES — BOTH CAUSED BY THIS TEXT.
+           *
+           * v1 opened with "prefer local file inspection first for nearby code"
+           * and offered find_symbol only "when the local search surface is
+           * missing indexed context" — the index as a fallback after grep.
+           * Agents followed it exactly: over a four-task benchmark with a
+           * verified-healthy index, every cell read this file and then made ZERO
+           * index calls, resolving everything with three to four recursive greps.
+           *
+           * v2 (leading with the questions the index answers) fixed the zero-call
+           * problem but was ADDITIVE: it said what to use the index for without
+           * saying what to stop doing. Agents then did both. Measured over eight
+           * tasks against the same corpus, the aimee arm ran 1.5-2.4x the commands
+           * of the plain-codex arm (22 vs 9 on one task) and cost up to 4.4x as
+           * much, while making 2 index calls. The extra spend was not the index:
+           * every command's output stays in the conversation and is re-sent on
+           * every later turn, so cost grows with the SQUARE of the command count.
+           * One unfiltered `rg --files` early in a run carried ~24k tokens for the
+           * rest of it.
+           *
+           * So this list has to be substitutive and it has to bound exploration.
+           * The index replacing a search is the entire point; an index used
+           * alongside the search it was meant to replace is pure overhead. */
+          "**Start from the index, not from a survey of the repository.** Do not "
+          "orient yourself by listing files, walking directories, or reading whole "
+          "files to see what is there. Every command's output stays in context for "
+          "the rest of this session, so a repo-wide listing costs more than the "
+          "answer it was meant to find.\n"
+          "\n"
           "- Locating a definition, or finding every caller of something: use "
           "`" AIMEE_CODE_TOOL_FIND_SYMBOL
           "`. It answers from the index in one call, and it is exact where a "
           "recursive text search is a guess that also matches comments, strings "
-          "and unrelated names.\n"
+          "and unrelated names. It REPLACES that search — do not also grep for "
+          "the same symbol to confirm it.\n"
           "- Before changing anything shared, or editing more than one file: use "
           "`" AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS
           "` to see what depends on it. A grep for the symbol will not tell you "
           "what breaks.\n"
           "- Use `search_memory` for stored project facts or prior decisions.\n"
-          "- Reach for a recursive grep when you need text that is not a code "
-          "symbol, or when the index has no answer.\n"
+          "- Reading a file the index has already pointed you at: just read it, "
+          "and read the range you need rather than the whole file.\n"
+          "- Recursive grep is for text that is not a code symbol, or for when the "
+          "index has no answer. Scope it to a path when you use it. Never run it "
+          "over the whole tree to find out what the tree contains.\n"
           "- Do not call provider-native sub-agent tools such as `spawn_agent`; use "
           "the aimee `delegate` MCP tool for every delegated or parallel sub-task.\n"
           "- Use `delegate` only for bounded sub-tasks that materially advance the "
@@ -343,9 +366,17 @@ static const char *codex_skill_markdown_effective(void)
 
 static const char *codex_code_exploration_prompt(void)
 {
+   /* "instead of" is load-bearing: the index is a REPLACEMENT for the search, not
+    * an addition to it. The second sentence bounds exploration, because an agent
+    * that uses the index and then surveys the tree anyway pays for both — and the
+    * survey is the expensive half, since every command's output is re-sent on every
+    * later turn. See the measurement in codex_skill_markdown(). */
    return "Explore the codebase through aimee's tools (" AIMEE_CODE_TOOL_FIND_SYMBOL
           ", " AIMEE_CODE_TOOL_AST_GREP_SEARCH ", " AIMEE_CODE_TOOL_INDEX
-          " command=" AIMEE_CODE_INDEX_COMMAND_HYBRID ") instead of raw grep/read";
+          " command=" AIMEE_CODE_INDEX_COMMAND_HYBRID
+          ") instead of raw grep/read. Do not survey the repository first: no "
+          "repo-wide file listings, no directory walks, no reading whole files to "
+          "orient. Ask the index, then read only what it points at.";
 }
 
 static void ensure_codex_marketplace(const char *path)

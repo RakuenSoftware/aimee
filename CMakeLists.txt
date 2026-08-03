@@ -98,7 +98,36 @@ include_directories(
     "${AIMEE_SRC_DIR}/modules/skills/include"
     "${AIMEE_SRC_DIR}/modules/routing/include"
     "${AIMEE_SRC_DIR}/modules/roundtable/include"
-    "${AIMEE_SRC_DIR}/modules/benchmarks/include")
+    "${AIMEE_SRC_DIR}/modules/benchmarks/include"
+    # MODULES THAT KEEP THEIR HEADERS FLAT, beside their sources, rather than
+    # under an include/ subdir. src/Makefile has carried -I for every one of
+    # these all along; CMake had only the include/-style modules, so the
+    # thin-client build compiled these modules' sources while being unable to
+    # find their headers. That is why macos-build and windows-cmake failed on
+    # 'wfe_def.h' and then 'guardrails.h' (the latter reached from
+    # src/headers/aimee.h, so it broke translation units that never named a
+    # module at all) while the Make build stayed green.
+    #
+    # Listed to match src/Makefile rather than added one at a time as each new
+    # missing header surfaces: an unused -I costs nothing, and the next flat
+    # header should not be another red CI run.
+    "${AIMEE_SRC_DIR}/modules/workflows"
+    "${AIMEE_SRC_DIR}/modules/guardrails"
+    "${AIMEE_SRC_DIR}/modules/config"
+    "${AIMEE_SRC_DIR}/modules/economizer"
+    "${AIMEE_SRC_DIR}/modules/roadmap"
+    "${AIMEE_SRC_DIR}/modules/sandbox"
+    "${AIMEE_SRC_DIR}/modules/lsp"
+    "${AIMEE_SRC_DIR}/modules/css"
+    "${AIMEE_SRC_DIR}/modules/webuser"
+    "${AIMEE_SRC_DIR}/modules/governance"
+    "${AIMEE_SRC_DIR}/modules/vault"
+    "${AIMEE_SRC_DIR}/modules/roundtable"
+    "${AIMEE_SRC_DIR}/modules/kb_client"
+    "${AIMEE_SRC_DIR}/modules/kb-synthesis"
+    "${AIMEE_SRC_DIR}/modules/benchmarks"
+    "${AIMEE_SRC_DIR}/modules/aws"
+    "${AIMEE_SRC_DIR}/pipeline")
 
 # LTO / IPO: must be set BEFORE any target is declared so the setting takes
 # effect uniformly across aimee-core/data/agent/cmd and every test binary.
