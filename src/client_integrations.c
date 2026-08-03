@@ -328,6 +328,21 @@ static const char *codex_skill_markdown(void)
           "- Recursive grep is for text that is not a code symbol, or for when the "
           "index has no answer. Scope it to a path when you use it. Never run it "
           "over the whole tree to find out what the tree contains.\n"
+          /* An unbounded recursive search is the single most expensive thing an
+           * agent can do here, and it is invisible at the time: the output lands
+           * once but is re-sent on every later turn. Measured on one cell after
+           * the guidance above was already in place -- a single
+           * `rg -n "<alternation>" src --glob '*.[ch]'` with no cap returned
+           * 80,330 characters (~20k tokens) and rode the remaining ~13 model
+           * calls, about a fifth of that run's entire input. Plain codex capped
+           * every one of its five searches with `| head -n 100` unprompted and
+           * spent 15k characters on search in total against aimee's 93k. */
+          "- Cap what a search prints. Pipe it through `head` (say `| head -n 60`) "
+          "and prefer a narrow pattern over a wide alternation: an uncapped "
+          "recursive search can return tens of thousands of characters, and every "
+          "one of them is re-sent on every later turn of this session.\n"
+          "- Do not repeat a search you have already run. If you need the same "
+          "answer again, it is already above you in this conversation.\n"
           "- Do not call provider-native sub-agent tools such as `spawn_agent`; use "
           "the aimee `delegate` MCP tool for every delegated or parallel sub-task.\n"
           "- Use `delegate` only for bounded sub-tasks that materially advance the "
@@ -376,7 +391,8 @@ static const char *codex_code_exploration_prompt(void)
           " command=" AIMEE_CODE_INDEX_COMMAND_HYBRID
           ") instead of raw grep/read. Do not survey the repository first: no "
           "repo-wide file listings, no directory walks, no reading whole files to "
-          "orient. Ask the index, then read only what it points at.";
+          "orient. Ask the index, then read only what it points at. Cap what any "
+          "search prints (`| head -n 60`): its output is re-sent on every later turn.";
 }
 
 static void ensure_codex_marketplace(const char *path)

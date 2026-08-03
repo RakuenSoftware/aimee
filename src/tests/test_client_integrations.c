@@ -114,6 +114,17 @@ static void test_codex_delegate_policy_is_explicit(void)
    assert(strstr(skill, "Never run it over the whole tree") != NULL);
    /* The v1 phrasing that caused the zero-index-call run must not come back. */
    assert(strstr(skill, "prefer local file inspection first") == NULL);
+
+   /* AN UNCAPPED SEARCH IS THE MOST EXPENSIVE THING AVAILABLE HERE, and its cost
+    * is invisible when it happens: the output lands once and is re-sent on every
+    * later turn. Measured after the substitutive rewrite was already in place --
+    * one uncapped `rg` returned 80,330 characters (~20k tokens) and rode the
+    * remaining ~13 model calls, roughly a fifth of that run's whole input, while
+    * plain codex capped all five of its searches unprompted. */
+   assert(strstr(skill, "Cap what a search prints") != NULL);
+   assert(strstr(skill, "head -n") != NULL);
+   assert(strstr(skill, "Do not repeat a search") != NULL);
+   assert(strstr(code_prompt, "Cap what any search prints") != NULL);
 }
 
 static void test_mcp_config_uses_resolved_command(void)
