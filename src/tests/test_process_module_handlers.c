@@ -1,9 +1,11 @@
 #include <assert.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
 #include <aimee/core/event_bus/module_runtime.h>
+#include <aimee/benchmarks/module_api.h>
 #include <aimee/delegates/module_api.h>
 #include <aimee/git/module_api.h>
 #include <aimee/learning/module_api.h>
@@ -25,6 +27,7 @@ DECLARE_HANDLER(aimee_workspace_module_handler);
 DECLARE_HANDLER(aimee_git_module_handler);
 DECLARE_HANDLER(aimee_skills_module_handler);
 DECLARE_HANDLER(aimee_roundtable_module_handler);
+DECLARE_HANDLER(aimee_benchmarks_module_handler);
 
 int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation)
 {
@@ -198,6 +201,48 @@ static void test_roundtable(void)
    }
 }
 
+static void test_benchmarks(void)
+{
+   static const int64_t perfect_retrieved[] = {11, 22, 33};
+   static const int64_t perfect_relevant[] = {11, 22, 33};
+   static const int64_t rank_two_retrieved[] = {5, 9, 7};
+   static const int64_t rank_two_relevant[] = {9};
+   static const int64_t duplicate_retrieved[] = {7, 7};
+   static const int64_t duplicate_relevant[] = {7};
+   static const struct
+   {
+      const int64_t *retrieved;
+      uint32_t retrieved_count;
+      const int64_t *relevant;
+      uint32_t relevant_count;
+      uint32_t k;
+      double mrr;
+      double ndcg;
+      double recall;
+   } cases[] = {
+       {perfect_retrieved, 3, perfect_relevant, 3, 3, 1.0, 1.0, 1.0},
+       {rank_two_retrieved, 3, rank_two_relevant, 1, 3, 0.5, 0.6309297535714574, 1.0},
+       {duplicate_retrieved, 2, duplicate_relevant, 1, 2, 1.0, 1.6309297535714575, 2.0},
+   };
+   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)
+   {
+      uint8_t request[AIMEE_BENCHMARKS_REQUEST_LEN], response[AIMEE_BENCHMARKS_RESPONSE_LEN];
+      uint32_t response_len = 0;
+      aimee_benchmarks_ir_scores_t scores;
+      aimee_module_invocation_t invocation = {.stage_id = AIMEE_BENCHMARKS_STAGE_RUN};
+      assert(aimee_benchmarks_request_encode(
+                 cases[i].retrieved, cases[i].retrieved_count, cases[i].relevant,
+                 cases[i].relevant_count, cases[i].k, request, sizeof(request)) == 0);
+      assert(aimee_benchmarks_module_handler(&invocation, request, sizeof(request), response,
+                                             sizeof(response), &response_len,
+                                             NULL) == AIMEE_MODULE_STATUS_OK);
+      assert(aimee_benchmarks_response_decode(response, response_len, &scores) == 0);
+      assert(fabs(scores.mrr - cases[i].mrr) < 1e-12);
+      assert(fabs(scores.ndcg - cases[i].ndcg) < 1e-12);
+      assert(fabs(scores.recall - cases[i].recall) < 1e-12);
+   }
+}
+
 int main(void)
 {
    test_memory();
@@ -208,6 +253,7 @@ int main(void)
    test_git();
    test_skills();
    test_roundtable();
+   test_benchmarks();
    puts("process module handlers: PASS");
    return 0;
 }

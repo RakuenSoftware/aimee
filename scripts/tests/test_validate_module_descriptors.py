@@ -326,6 +326,9 @@ class DescriptorTests(unittest.TestCase):
             ("roundtable", "sources", "src/modules/roundtable/module_adapter.c"),
             ("roundtable", "go_sources", "server-go/modules/roundtable/roundtable.go"),
             ("roundtable", "go_tests", "server-go/modules/roundtable/roundtable_test.go"),
+            ("benchmarks", "sources", "src/modules/benchmarks/module_adapter.c"),
+            ("benchmarks", "go_sources", "server-go/modules/benchmarks/benchmarks.go"),
+            ("benchmarks", "go_tests", "server-go/modules/benchmarks/benchmarks_test.go"),
         )
         for identifier, field, relative in cases:
             tmp = self.production_repo()

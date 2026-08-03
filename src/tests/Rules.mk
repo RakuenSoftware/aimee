@@ -718,7 +718,8 @@ MODULE_HANDLER_TEST_OBJS = \
    $(OBJDIR)/tests/module_handlers/workspace.o \
    $(OBJDIR)/tests/module_handlers/git.o \
    $(OBJDIR)/tests/module_handlers/skills.o \
-   $(OBJDIR)/tests/module_handlers/roundtable.o
+   $(OBJDIR)/tests/module_handlers/roundtable.o \
+   $(OBJDIR)/tests/module_handlers/benchmarks.o
 
 define module_handler_test_object
 $(OBJDIR)/tests/module_handlers/$(1).o: modules/$(2)/module_adapter.c
@@ -733,10 +734,11 @@ $(eval $(call module_handler_test_object,workspace,workspace))
 $(eval $(call module_handler_test_object,git,git))
 $(eval $(call module_handler_test_object,skills,skills))
 $(eval $(call module_handler_test_object,roundtable,roundtable))
+$(eval $(call module_handler_test_object,benchmarks,benchmarks))
 
 $(TESTPREFIX)/unit-test-process-module-handlers: \
    $(OBJDIR)/tests/test_process_module_handlers.o $(MODULE_HANDLER_TEST_OBJS)
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
 # The shared connection archive is the only implementation of endpoint,
 # credential, and OpenSSL mTLS primitives. Tests may link it through L_CORE,

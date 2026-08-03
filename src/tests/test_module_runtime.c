@@ -6,6 +6,7 @@
 #include <aimee/core/event_bus/bus_runtime.h>
 #include <aimee/core/event_bus/module_client.h>
 #include <aimee/core/event_bus/module_runtime.h>
+#include <aimee/benchmarks/module_api.h>
 #include <aimee/delegates/module_api.h>
 #include <aimee/git/module_api.h>
 #include <aimee/learning/module_api.h>
@@ -159,6 +160,8 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
       *kind = AIMEE_RESPONSE_EVENT_COMPOSE, *principal_ref = 15;
    else if (strcmp(name, "roundtable") == 0)
       *kind = AIMEE_ROUNDTABLE_EVENT_DELIBERATE, *principal_ref = 21;
+   else if (strcmp(name, "benchmarks") == 0)
+      *kind = AIMEE_BENCHMARKS_EVENT_RUN, *principal_ref = 25;
    else
       return -1;
    served[0] = *kind;
@@ -289,9 +292,8 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(aimee_response_response_decode(response, response_len, key, sizeof(key)) == 0);
       assert(strcmp(key, "uid:1|45fd46a03cb4a28da3227155fec20a71") == 0);
    }
-   else
+   else if (strcmp(name, "roundtable") == 0)
    {
-      assert(strcmp(name, "roundtable") == 0);
       aimee_roundtable_verify_action_t action = AIMEE_ROUNDTABLE_VERIFY_REJECT;
       char severity[AIMEE_ROUNDTABLE_SEVERITY_MAX + 1u];
       assert(aimee_roundtable_request_encode(AIMEE_ROUNDTABLE_REPLAY_MATCH, 1, "blocking",
@@ -303,6 +305,22 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(aimee_roundtable_response_decode(response, response_len, &action, severity,
                                               sizeof(severity)) == 0);
       assert(action == AIMEE_ROUNDTABLE_VERIFY_KEEP && strcmp(severity, "blocking") == 0);
+   }
+   else
+   {
+      assert(strcmp(name, "benchmarks") == 0);
+      const int64_t retrieved[] = {5, 9, 7};
+      const int64_t relevant[] = {9};
+      aimee_benchmarks_ir_scores_t scores;
+      assert(aimee_benchmarks_request_encode(retrieved, 3, relevant, 1, 3, request,
+                                             sizeof(request)) == 0);
+      request_len = AIMEE_BENCHMARKS_REQUEST_LEN;
+      assert(aimee_module_client_call(client, kind, AIMEE_BENCHMARKS_STAGE_RUN, 2010, 0, request,
+                                      request_len, response, sizeof(response), &response_len, NULL,
+                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(aimee_benchmarks_response_decode(response, response_len, &scores) == 0);
+      assert(scores.mrr == 0.5 && scores.recall == 1.0);
+      assert(scores.ndcg > 0.630929753571 && scores.ndcg < 0.630929753572);
    }
 }
 

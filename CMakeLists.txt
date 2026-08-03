@@ -97,7 +97,8 @@ include_directories(
     "${AIMEE_SRC_DIR}/modules/response-composition/include"
     "${AIMEE_SRC_DIR}/modules/skills/include"
     "${AIMEE_SRC_DIR}/modules/routing/include"
-    "${AIMEE_SRC_DIR}/modules/roundtable/include")
+    "${AIMEE_SRC_DIR}/modules/roundtable/include"
+    "${AIMEE_SRC_DIR}/modules/benchmarks/include")
 
 # LTO / IPO: must be set BEFORE any target is declared so the setting takes
 # effect uniformly across aimee-core/data/agent/cmd and every test binary.

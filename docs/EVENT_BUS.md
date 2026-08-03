@@ -31,14 +31,14 @@ That buys us:
 
 The last item is an extension surface, not a claim that every subsystem has moved already.
 
-The first four production C-to-Go process batches are `memory`, `learning`,
-`routing`, `delegates`, `tools`, `workspace`, `git`, `skills`, and
-`response-composition`, followed by `roundtable`.
+Five production C-to-Go process batches now cover `memory`, `learning`,
+`routing`, `delegates`, `tools`, `workspace`, `git`, `skills`,
+`response-composition`, `roundtable`, and `benchmarks`.
 Each keeps its existing event kind and AMOD body contract, but the supervisor now
 starts an authenticated Go process for that identity. C adapters remain as parity
-fixtures; the bounded memory rerank, response-composition key, and roundtable
-verification-rubric stages do not mean those modules' storage-heavy or daemon
-orchestration code has all moved to Go.
+fixtures; the bounded memory rerank, response-composition key, roundtable
+verification-rubric, and benchmark IR-scoring stages do not mean those modules'
+storage-heavy or daemon orchestration code has all moved to Go.
 
 ## What is on it now
 

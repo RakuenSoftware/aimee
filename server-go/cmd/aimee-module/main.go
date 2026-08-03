@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/JBailes/aimee/server-go/modules/benchmarks"
 	"github.com/JBailes/aimee/server-go/modules/delegates"
 	modulegit "github.com/JBailes/aimee/server-go/modules/git"
 	"github.com/JBailes/aimee/server-go/modules/learning"
@@ -86,6 +87,11 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 		config.PrincipalRef = 21
 		config.Stages = []bus.ModuleStage{{EventKind: roundtable.EventDeliberate, StageID: roundtable.StageDeliberate}}
 		config.Handler = roundtable.Handle
+	case "benchmarks":
+		config.ModuleName = name
+		config.PrincipalRef = 25
+		config.Stages = []bus.ModuleStage{{EventKind: benchmarks.EventRun, StageID: benchmarks.StageRun}}
+		config.Handler = benchmarks.Handle
 	default:
 		return bus.ModuleProcessConfig{}, false
 	}
