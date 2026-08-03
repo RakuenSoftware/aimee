@@ -11,6 +11,7 @@
 #include <aimee/learning/module_api.h>
 #include <aimee/memory/module_api.h>
 #include <aimee/response-composition/module_api.h>
+#include <aimee/roundtable/module_api.h>
 #include <aimee/routing/module_api.h>
 #include <aimee/skills/module_api.h>
 #include <aimee/tools/module_api.h>
@@ -156,6 +157,8 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
       *kind = AIMEE_SKILLS_EVENT_CONTEXT, *principal_ref = 14;
    else if (strcmp(name, "response-composition") == 0)
       *kind = AIMEE_RESPONSE_EVENT_COMPOSE, *principal_ref = 15;
+   else if (strcmp(name, "roundtable") == 0)
+      *kind = AIMEE_ROUNDTABLE_EVENT_DELIBERATE, *principal_ref = 21;
    else
       return -1;
    served[0] = *kind;
@@ -262,9 +265,8 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
                                       NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_skills_response_decode(response, response_len, &fire) == 0 && fire);
    }
-   else
+   else if (strcmp(name, "response-composition") == 0)
    {
-      assert(strcmp(name, "response-composition") == 0);
       const aimee_response_key_input_t input = {
           .principal = "uid:1",
           .source = "openai-ingress",
@@ -286,6 +288,21 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
                                       NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_response_response_decode(response, response_len, key, sizeof(key)) == 0);
       assert(strcmp(key, "uid:1|45fd46a03cb4a28da3227155fec20a71") == 0);
+   }
+   else
+   {
+      assert(strcmp(name, "roundtable") == 0);
+      aimee_roundtable_verify_action_t action = AIMEE_ROUNDTABLE_VERIFY_REJECT;
+      char severity[AIMEE_ROUNDTABLE_SEVERITY_MAX + 1u];
+      assert(aimee_roundtable_request_encode(AIMEE_ROUNDTABLE_REPLAY_MATCH, 1, "blocking",
+                                             request, sizeof(request)) == 0);
+      request_len = AIMEE_ROUNDTABLE_REQUEST_LEN;
+      assert(aimee_module_client_call(client, kind, AIMEE_ROUNDTABLE_STAGE_DELIBERATE, 2009, 0,
+                                      request, request_len, response, sizeof(response), &response_len,
+                                      NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(aimee_roundtable_response_decode(response, response_len, &action, severity,
+                                              sizeof(severity)) == 0);
+      assert(action == AIMEE_ROUNDTABLE_VERIFY_KEEP && strcmp(severity, "blocking") == 0);
    }
 }
 

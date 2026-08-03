@@ -8,6 +8,7 @@
 #include <aimee/git/module_api.h>
 #include <aimee/learning/module_api.h>
 #include <aimee/memory/module_api.h>
+#include <aimee/roundtable/module_api.h>
 #include <aimee/skills/module_api.h>
 #include <aimee/tools/module_api.h>
 #include <aimee/workspace/module_api.h>
@@ -23,6 +24,7 @@ DECLARE_HANDLER(aimee_tools_module_handler);
 DECLARE_HANDLER(aimee_workspace_module_handler);
 DECLARE_HANDLER(aimee_git_module_handler);
 DECLARE_HANDLER(aimee_skills_module_handler);
+DECLARE_HANDLER(aimee_roundtable_module_handler);
 
 int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation)
 {
@@ -158,6 +160,44 @@ static void test_skills(void)
    assert(aimee_skills_response_decode(response, response_len, &fire) == 0 && fire);
 }
 
+static void test_roundtable(void)
+{
+   static const struct
+   {
+      aimee_roundtable_replay_status_t status;
+      int factual;
+      const char *claimed;
+      aimee_roundtable_verify_action_t action;
+      const char *severity;
+   } cases[] = {
+       {AIMEE_ROUNDTABLE_REPLAY_CONTRADICTED, 1, "blocking", AIMEE_ROUNDTABLE_VERIFY_REJECT, ""},
+       {AIMEE_ROUNDTABLE_REPLAY_VACUOUS, 1, "blocking", AIMEE_ROUNDTABLE_VERIFY_REJECT, ""},
+       {AIMEE_ROUNDTABLE_REPLAY_INDEX_UNAVAILABLE, 1, "blocking",
+        AIMEE_ROUNDTABLE_VERIFY_DEGRADE, "blocking"},
+       {AIMEE_ROUNDTABLE_REPLAY_NO_EVIDENCE, 0, "blocking", AIMEE_ROUNDTABLE_VERIFY_CAP,
+        "suggestion"},
+       {AIMEE_ROUNDTABLE_REPLAY_MATCH, 1, "blocking", AIMEE_ROUNDTABLE_VERIFY_KEEP, "blocking"},
+       {AIMEE_ROUNDTABLE_REPLAY_MATCH, 0, "blocking", AIMEE_ROUNDTABLE_VERIFY_CAP, "suggestion"},
+       {AIMEE_ROUNDTABLE_REPLAY_CORRECTED, 1, "nit", AIMEE_ROUNDTABLE_VERIFY_KEEP, "nit"},
+   };
+   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)
+   {
+      uint8_t request[AIMEE_ROUNDTABLE_REQUEST_LEN], response[AIMEE_ROUNDTABLE_RESPONSE_LEN];
+      uint32_t response_len = 0;
+      char severity[AIMEE_ROUNDTABLE_SEVERITY_MAX + 1u];
+      aimee_roundtable_verify_action_t action;
+      aimee_module_invocation_t invocation = {.stage_id = AIMEE_ROUNDTABLE_STAGE_DELIBERATE};
+      assert(aimee_roundtable_request_encode(cases[i].status, cases[i].factual, cases[i].claimed,
+                                             request, sizeof(request)) == 0);
+      assert(aimee_roundtable_module_handler(&invocation, request, sizeof(request), response,
+                                             sizeof(response), &response_len,
+                                             NULL) == AIMEE_MODULE_STATUS_OK);
+      assert(aimee_roundtable_response_decode(response, response_len, &action, severity,
+                                              sizeof(severity)) == 0);
+      assert(action == cases[i].action && strcmp(severity, cases[i].severity) == 0);
+   }
+}
+
 int main(void)
 {
    test_memory();
@@ -167,6 +207,7 @@ int main(void)
    test_workspace();
    test_git();
    test_skills();
+   test_roundtable();
    puts("process module handlers: PASS");
    return 0;
 }

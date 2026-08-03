@@ -323,6 +323,9 @@ class DescriptorTests(unittest.TestCase):
             ("memory", "private_headers", "src/modules/memory/memory_core_internal.h"),
             ("memory", "go_sources", "server-go/modules/memory/memory.go"),
             ("memory", "go_tests", "server-go/modules/memory/memory_test.go"),
+            ("roundtable", "sources", "src/modules/roundtable/module_adapter.c"),
+            ("roundtable", "go_sources", "server-go/modules/roundtable/roundtable.go"),
+            ("roundtable", "go_tests", "server-go/modules/roundtable/roundtable_test.go"),
         )
         for identifier, field, relative in cases:
             tmp = self.production_repo()
@@ -467,7 +470,7 @@ class DescriptorTests(unittest.TestCase):
         try:
             repo = Path(tmp.name)
             public = repo / "src/modules/roundtable/include/aimee/roundtable/public.h"
-            public.parent.mkdir(parents=True)
+            public.parent.mkdir(parents=True, exist_ok=True)
             public.write_text("/* public contract */\n", encoding="utf-8")
             self.assertEqual(
                 validator.validate_roots(repo, [Path("src/modules")]), 25

@@ -717,7 +717,8 @@ MODULE_HANDLER_TEST_OBJS = \
    $(OBJDIR)/tests/module_handlers/tools.o \
    $(OBJDIR)/tests/module_handlers/workspace.o \
    $(OBJDIR)/tests/module_handlers/git.o \
-   $(OBJDIR)/tests/module_handlers/skills.o
+   $(OBJDIR)/tests/module_handlers/skills.o \
+   $(OBJDIR)/tests/module_handlers/roundtable.o
 
 define module_handler_test_object
 $(OBJDIR)/tests/module_handlers/$(1).o: modules/$(2)/module_adapter.c
@@ -731,6 +732,7 @@ $(eval $(call module_handler_test_object,tools,tools))
 $(eval $(call module_handler_test_object,workspace,workspace))
 $(eval $(call module_handler_test_object,git,git))
 $(eval $(call module_handler_test_object,skills,skills))
+$(eval $(call module_handler_test_object,roundtable,roundtable))
 
 $(TESTPREFIX)/unit-test-process-module-handlers: \
    $(OBJDIR)/tests/test_process_module_handlers.o $(MODULE_HANDLER_TEST_OBJS)
