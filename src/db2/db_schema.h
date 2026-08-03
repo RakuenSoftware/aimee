@@ -85,9 +85,20 @@ extern "C"
     * both the width and the name while producing a different vector space. Empty
     * serving_id -> no-op (an endpoint that reports no identity). No compat list — a
     * pooling/prefix change is definitionally a different space. Returns 0
-    * (recorded/match), -1 (mismatch / DB error, errbuf set). */
+    * (recorded/match), -1 (mismatch / DB error, errbuf set).
+    *
+    * One exception: a corpus still recorded against the builtin lexical placeholder,
+    * with no vectors written, adopts the incoming identity. The placeholder is what a
+    * kb serves before an embedder has been chosen, so the first deploy records it
+    * whether or not anything is ever embedded; refusing there locked an empty kb out
+    * of the choice it had not made yet. Emptiness must be proven. */
    int db2_embedder_serving_record_or_check(void *conn, const char *serving_id, char *errbuf,
                                             size_t errlen);
+
+   /* The derived vector tables — rebuildable from source held elsewhere. NULL-terminated.
+    * db2_reembed drops them on a dimension change; the serving-identity guard reads them
+    * to decide whether anything has been embedded yet. */
+   extern const char *const DB2_DERIVED_VECTOR_TABLES[];
 
    /* Apply the consolidated SQLite schema for DB2's libpq shim/test
     * compatibility path. Production DB2 remains Postgres-only. */

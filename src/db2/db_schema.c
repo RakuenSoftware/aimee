@@ -740,6 +740,58 @@ int db2_embedding_model_record_or_check(void *conn, const char *model_id, const 
    return -1;
 }
 
+/* The identity the builtin lexical embedder reports (memory_embed_serving_id). It is
+ * a placeholder: the kb serves it only until an embedder is actually selected. */
+#define BUILTIN_LEXICAL_SERVING_ID "builtin/lexical-v1"
+
+/* The tables that hold derived vectors. Every one is rebuildable from source kept
+ * elsewhere, which is why db2_reembed.c may drop them; here the same set answers a
+ * different question — has anything actually been embedded yet.
+ *
+ * Keep in sync with schema.sql's halfvec(__EMBED_DIM__) tables (and their
+ * schema_sqlite.sql counterparts). A table missing from this list would answer the
+ * emptiness question wrongly in the unsafe direction, so adding one is not optional. */
+const char *const DB2_DERIVED_VECTOR_TABLES[] = {"kb_embeddings",
+                                                 "kb_pdf_embeddings",
+                                                 "memory_embeddings",
+                                                 "curator_entity_vectors",
+                                                 "curator_narrative_vectors",
+                                                 "curator_claim_vectors",
+                                                 "curator_code_unit_vectors",
+                                                 "exemplar_vectors",
+                                                 "evidence_vectors",
+                                                 "code_embeddings",
+                                                 NULL};
+
+/* Does any vector table hold a row?
+ *
+ * Returns 1 (has vectors), 0 (provably empty), or -1 (could not tell). Callers must
+ * treat -1 as "has vectors": an unprovable corpus is not an empty one. A table that
+ * does not exist holds nothing, so a failed prepare is skipped rather than fatal —
+ * this runs during init, where the schema may be partly applied. */
+static int corpus_has_vectors(void *conn)
+{
+   int checked = 0;
+   for (int i = 0; DB2_DERIVED_VECTOR_TABLES[i]; i++)
+   {
+      char err[256] = "";
+      char sql[160];
+      snprintf(sql, sizeof(sql), "SELECT 1 FROM %s LIMIT 1", DB2_DERIVED_VECTOR_TABLES[i]);
+      aimee_pg_stmt_t *q = aimee_pg_prepare(conn, sql, err, sizeof(err));
+      if (!q)
+         continue; /* absent table -> nothing embedded in it */
+      aimee_pg_step_t step = aimee_pg_step(q, err, sizeof(err));
+      aimee_pg_finalize(q);
+      if (step == AIMEE_PG_ROW)
+         return 1;
+      if (step != AIMEE_PG_DONE)
+         return -1; /* a live table we could not read: do not claim it is empty */
+      checked++;
+   }
+   /* No vector table readable at all is not proof of emptiness. */
+   return checked > 0 ? 0 : -1;
+}
+
 /* Record/check the embedder's VECTOR-SPACE identity (the gateway's /health
  * serving_id: model + pooling + prefix pair, digested).
  *
@@ -756,9 +808,18 @@ int db2_embedding_model_record_or_check(void *conn, const char *model_id, const 
  *     the drift it could not have detected is the operator's to resolve (the cutover
  *     runbook says re-embed).
  *   - recorded == serving_id -> match.
+ *   - recorded is the builtin lexical placeholder AND nothing has been embedded ->
+ *     adopt the new identity. The placeholder serves a kb whose embedder has not been
+ *     chosen yet, so the first Deploy records it before the wizard's choice can reach
+ *     the container. With no vectors written there is no space to mix, and refusing
+ *     here stranded a brand-new empty kb: the documented recovery is `aimee kb
+ *     reembed`, which is gated behind a setting inside the kb's own container.
+ *     The emptiness must be PROVEN — an unreadable corpus is treated as non-empty.
  *   - recorded != serving_id -> REFUSE. There is no compat list: unlike a model swap,
  *     where cosine agreement can be measured and admitted, a pooling or prefix change
- *     is definitionally a different space.
+ *     is definitionally a different space. This still covers the lexical corpus that
+ *     HAS vectors, which is the transition nothing else can see: the builtin is
+ *     384-dim and so is the bundled model, so the dim guard stays silent.
  */
 int db2_embedder_serving_record_or_check(void *conn, const char *serving_id, char *errbuf,
                                          size_t errlen)
@@ -778,6 +839,17 @@ int db2_embedder_serving_record_or_check(void *conn, const char *serving_id, cha
    if (!recorded[0] || strcmp(recorded, serving_id) == 0)
    {
       if (!recorded[0] && kb_meta_set(conn, "schema_embedder_serving_id", serving_id) != 0)
+      {
+         if (errbuf && errlen)
+            snprintf(errbuf, errlen, "kb_meta write failed for schema_embedder_serving_id");
+         return -1;
+      }
+      return 0;
+   }
+
+   if (strcmp(recorded, BUILTIN_LEXICAL_SERVING_ID) == 0 && corpus_has_vectors(conn) == 0)
+   {
+      if (kb_meta_set(conn, "schema_embedder_serving_id", serving_id) != 0)
       {
          if (errbuf && errlen)
             snprintf(errbuf, errlen, "kb_meta write failed for schema_embedder_serving_id");

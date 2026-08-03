@@ -25,18 +25,9 @@
  * elsewhere (kb_documents, artifacts, evidence_index_ops, memories), so dropping +
  * recreating + re-deriving loses no source data. Any halfvec table NOT on this list
  * is unknown -> the reset REFUSES rather than risk destroying source it doesn't
- * understand. Keep in sync with schema.sql's halfvec(__EMBED_DIM__) tables. */
-static const char *DERIVED_VECTOR_TABLES[] = {"kb_embeddings",
-                                              "kb_pdf_embeddings",
-                                              "memory_embeddings",
-                                              "curator_entity_vectors",
-                                              "curator_narrative_vectors",
-                                              "curator_claim_vectors",
-                                              "curator_code_unit_vectors",
-                                              "exemplar_vectors",
-                                              "evidence_vectors",
-                                              "code_embeddings",
-                                              NULL};
+ * understand. Declared in db_schema.c, which reads the same set to decide whether a
+ * corpus has been embedded at all. */
+#define DERIVED_VECTOR_TABLES DB2_DERIVED_VECTOR_TABLES
 
 static int is_known_vector_table(const char *t)
 {

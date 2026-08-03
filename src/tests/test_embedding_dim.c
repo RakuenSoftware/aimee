@@ -223,17 +223,44 @@ int main(void)
    assert(db2_embedder_serving_record_or_check(NULL, "nomic/aaaa", err, sizeof err) == -1);
 
    /* The builtin lexical embedder declares an identity too, and switching off it must be
-    * caught. This was the one transition nothing could see: the builtin is 384-dim and so
-    * is the bundled model, so the dim guard is silent, and while the builtin reported NO
-    * identity the guard simply recorded the model's fresh over a lexically-embedded
-    * corpus. */
+    * caught ONCE SOMETHING IS EMBEDDED. This is the one transition nothing else can see:
+    * the builtin is 384-dim and so is the bundled model, so the dim guard is silent.
+    *
+    * An EMPTY corpus is the exception. The builtin serves a kb whose embedder has not
+    * been chosen yet, so the first deploy records the placeholder before the wizard's
+    * choice can reach the container; refusing there left a brand-new kb unable to adopt
+    * the embedder it had just been given, with the documented escape (`aimee kb reembed`)
+    * gated behind a setting inside the kb's own container. */
+   err[0] = '\0';
+   assert(aimee_pg_exec(conn, "DELETE FROM kb_meta WHERE key = 'schema_embedder_serving_id'", err,
+                        sizeof err) == 0);
+   assert(aimee_pg_exec(conn, "DELETE FROM memory_embeddings", err, sizeof err) == 0);
+   assert(db2_embedder_serving_record_or_check(conn, "builtin/lexical-v1", err, sizeof err) == 0);
+   assert(db2_embedder_serving_record_or_check(conn, "builtin/lexical-v1", err, sizeof err) == 0);
+   /* Empty corpus: the placeholder yields, and the new identity is what is now recorded. */
+   assert(db2_embedder_serving_record_or_check(conn, "bekko-a25m/abcd", err, sizeof err) == 0);
+   assert(err[0] == '\0');
+   assert(db2_embedder_serving_record_or_check(conn, "bekko-a25m/abcd", err, sizeof err) == 0);
+   /* Having yielded, it is an ordinary recorded identity — the next change is refused
+    * even though the corpus is still empty. The escape is for the placeholder only. */
+   assert(db2_embedder_serving_record_or_check(conn, "bekko-a25m/zzzz", err, sizeof err) == -1);
+   assert(strstr(err, "bekko-a25m/abcd") != NULL && strstr(err, "bekko-a25m/zzzz") != NULL);
+
+   /* Same placeholder, but the corpus HAS vectors: refused, and the record is unchanged.
+    * This is the lexically-embedded corpus the guard was added for. */
    err[0] = '\0';
    assert(aimee_pg_exec(conn, "DELETE FROM kb_meta WHERE key = 'schema_embedder_serving_id'", err,
                         sizeof err) == 0);
    assert(db2_embedder_serving_record_or_check(conn, "builtin/lexical-v1", err, sizeof err) == 0);
-   assert(db2_embedder_serving_record_or_check(conn, "builtin/lexical-v1", err, sizeof err) == 0);
+   assert(aimee_pg_exec(conn, "INSERT INTO memory_embeddings (point_id) VALUES (1)", err,
+                        sizeof err) == 0);
+   err[0] = '\0';
    assert(db2_embedder_serving_record_or_check(conn, "bekko-a25m/abcd", err, sizeof err) == -1);
    assert(strstr(err, "builtin/lexical-v1") != NULL && strstr(err, "bekko-a25m/abcd") != NULL);
+   /* The refusal left the corpus on the placeholder. */
+   err[0] = '\0';
+   assert(db2_embedder_serving_record_or_check(conn, "builtin/lexical-v1", err, sizeof err) == 0);
+   assert(aimee_pg_exec(conn, "DELETE FROM memory_embeddings", err, sizeof err) == 0);
 
    /* NULL conn -> -1. */
    assert(db2_embedding_model_record_or_check(NULL, "x", NULL, err, sizeof err) == -1);

@@ -206,6 +206,12 @@ the step, set it from the server and re-run Deploy:
 aimee config set embedder_model bekko-a25m
 ```
 
+This works while the corpus is still empty. The lexical fallback is a placeholder, so a kb that has
+embedded nothing yet adopts the model you just chose. Once anything has been embedded the placeholder
+is a real vector space like any other, the change becomes a corpus migration, and the kb refuses the
+switch rather than mixing the two — see [Change the KB embedder](runbooks/change-embedder.md).
+Choosing in the wizard, before the first Deploy, avoids the question entirely.
+
 Confirm the model actually loaded rather than assuming it did:
 
 ```bash
