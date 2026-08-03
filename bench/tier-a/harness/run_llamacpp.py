@@ -138,7 +138,30 @@ def main():
             usage = resp.get("usage") or {}
             err = None
         except (urllib.error.URLError, KeyError, TimeoutError, OSError) as e:
+            # Retry TRANSPORT failures. A dropped SSH tunnel is not a property of
+            # the model, but with no retry every request during the outage became
+            # a permanent errored row: the E2B Q4 10k arm lost 1,644 rows (16%,
+            # all on shard 0) to one tunnel that died and stayed dead, while the
+            # server on the far side kept serving normally throughout.
+            #
+            # Only transport errors are retried. A KeyError means the response
+            # came back and was the wrong shape, which retrying cannot fix.
             raw, usage, err, reasoning = "", {}, f"{type(e).__name__}: {e}", ""
+            if isinstance(e, (urllib.error.URLError, TimeoutError, OSError)):
+                for attempt in range(6):
+                    time.sleep(min(2 ** attempt, 30))
+                    try:
+                        resp = complete(args.base_url, args.model, sys_prompt,
+                                        r["note"], args.max_tokens, args.timeout,
+                                        args.thinking)
+                        msg = resp["choices"][0]["message"]
+                        raw = msg.get("content") or ""
+                        reasoning = msg.get("reasoning_content") or ""
+                        usage = resp.get("usage") or {}
+                        err = None
+                        break
+                    except (urllib.error.URLError, KeyError, TimeoutError, OSError) as e2:
+                        err = f"{type(e2).__name__}: {e2} (after {attempt + 1} retries)"
         dt = (time.perf_counter() - t0) * 1000
 
         facts, ok, schema_ok, malformed = extract_json(raw)
