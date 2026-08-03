@@ -53,12 +53,26 @@ ARG LLAMACPP_VERSION=b10218
 # run; the --version check in the final stage is what surfaces it at build time.
 FROM debian:trixie-slim AS llamacpp
 ARG LLAMACPP_VERSION
+# THE CLONE RETRIES. Same reason as the other fetches in this tree: a forge 502/503
+# failed image builds three separate times in one evening, each time on whichever
+# unretried fetch happened to run first. --branch is a pinned tag, so a retry clones
+# the same commit.
+#
+# The comment lives OUT here rather than inside the RUN. A `#` line inside a
+# backslash-continued RUN is a shell comment that swallows the trailing backslash, and
+# this file already records what that class of mistake costs ("Docker ends a RUN at the
+# heredoc terminator ... the build dies with unknown instruction: fi").
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
         build-essential cmake git ca-certificates curl libcurl4-openssl-dev; \
-    git clone --depth 1 --branch "$LLAMACPP_VERSION" \
-        https://github.com/ggml-org/llama.cpp.git /tmp/llamacpp-src; \
+    for a in 1 2 3 4 5; do \
+      git clone --depth 1 --branch "$LLAMACPP_VERSION" \
+          https://github.com/ggml-org/llama.cpp.git /tmp/llamacpp-src && break; \
+      echo "llama.cpp clone failed (attempt $a/5); backing off"; \
+      rm -rf /tmp/llamacpp-src; sleep $((a * 5)); \
+    done; \
+    test -d /tmp/llamacpp-src/.git; \
     cmake -S /tmp/llamacpp-src -B /tmp/llamacpp-src/build \
         -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=ON \
         -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF \
