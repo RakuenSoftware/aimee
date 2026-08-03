@@ -7,24 +7,13 @@
 # endpoint (AIMEE_SERVER_URL / --server); see the thin-client cross-platform
 # proposal.
 #
-# Triggers:
-#   - push of a `v*` tag      -> version derived from the tag (manual release)
-#   - workflow_call           -> version passed in by the auto-release orchestrator
-#   - workflow_dispatch       -> optional manual version input
-# When a version is supplied (call/dispatch) the matching `v<version>` tag must
-# already exist on the remote so the GitHub Release can attach to it.
+# This workflow is deliberately reusable-only. The sole caller is
+# auto-release.yml, after its tag job receives approval from the protected
+# `release` environment. Do not add tag-push or workflow-dispatch triggers here:
+# either would create a release path that bypasses the human approval.
 name: release-thin-client
 
 on:
-  push:
-    tags:
-      - 'v*'
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version without leading v (e.g. 0.2.1); blank = no release'
-        required: false
-        type: string
   workflow_call:
     inputs:
       version:
@@ -66,19 +55,21 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      # Resolve the version string to embed (without leading v). From the
-      # workflow input when called/dispatched, otherwise from the pushed tag.
+      # Resolve the approved version string to embed (without leading v) and
+      # ensure the gated tag job created exactly that tag.
       - name: Resolve version
         id: ver
         shell: bash
         run: |
-          if [ -n "${{ inputs.version }}" ]; then
-            v="${{ inputs.version }}"
-          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            v="${GITHUB_REF_NAME#v}"
-          else
-            v=""
+          v="${{ inputs.version }}"
+          if ! [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::approved release version must be MAJOR.MINOR.PATCH; got '${v:-<empty>}'"
+            exit 1
           fi
+          git rev-parse -q --verify "refs/tags/v$v" >/dev/null || {
+            echo "::error::approved release tag v$v does not exist"
+            exit 1
+          }
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
       # --- Linux: authoritative make build of the lean thin client ---

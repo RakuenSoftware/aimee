@@ -1,0 +1,17 @@
+name: Release policy
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  release-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify release approval topology
+        run: bash scripts/check-release-policy.sh

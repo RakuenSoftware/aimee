@@ -23,35 +23,13 @@
 # Multi-arch (linux/amd64 + linux/arm64) via the canonical build-by-digest then
 # merge-manifest pattern, on native runners (no QEMU emulation of the C build).
 #
-# Triggers:
-#   - push of a `v*` tag  -> versioned images derived from the tag
-#   - workflow_call       -> version passed in by the auto-release orchestrator
-#   - workflow_dispatch   -> optional manual version input
-# Versioned publishing on `main` is owned by auto-release.yml (which calls this
-# workflow), so there is no bare `push: branches: [main]` trigger here.
+# This workflow is deliberately reusable-only. The sole caller is
+# auto-release.yml, whose tag job is blocked by the protected `release`
+# environment. Do not add tag-push or workflow-dispatch triggers here: either
+# would create a second path to GHCR that bypasses the human release approval.
 name: Publish images
 
 on:
-  # A PULL REQUEST BUILDS BUT NEVER PUSHES. The point is to prove the Dockerfile
-  # still builds — publishing is a merge-time act, so nothing unreviewed can land
-  # in the registry. Path-filtered so unrelated PRs do not pay for a multi-arch
-  # build of four images.
-  pull_request:
-    paths:
-      - "Dockerfile*"
-      - "deploy/**"
-      - "scripts/embedders.json"
-      - "src/**"
-      - "frontend/**"
-      - ".github/workflows/publish-images.yml"
-  push:
-    tags: ["v*"]
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version without leading v (e.g. 0.2.1)'
-        required: false
-        type: string
   workflow_call:
     inputs:
       version:
@@ -68,8 +46,8 @@ permissions:
   packages: write
 
 jobs:
-  # Resolve the version once (from the call/dispatch input or the pushed tag) so
-  # the build (binary embedding) and merge (image tags) jobs agree.
+  # Resolve and validate the approved version once so the build (binary
+  # embedding) and merge (image tags) jobs agree.
   prep:
     runs-on: ubuntu-latest
     outputs:
@@ -78,12 +56,10 @@ jobs:
       - name: Resolve version
         id: v
         run: |
-          if [ -n "${{ inputs.version }}" ]; then
-            v="${{ inputs.version }}"
-          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            v="${GITHUB_REF_NAME#v}"
-          else
-            v=""
+          v="${{ inputs.version }}"
+          if ! [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::approved release version must be MAJOR.MINOR.PATCH; got '${v:-<empty>}'"
+            exit 1
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
