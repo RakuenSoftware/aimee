@@ -1167,6 +1167,129 @@ static cJSON *mcph_index_hybrid(struct mcp_call *c)
    return code_graph_passthrough(json, status, "index_hybrid");
 }
 
+/* index command=investigate -- the bounded task packet (/v1/code/context).
+ *
+ * This existed as a route and a client call, wired ONLY as automatic
+ * pre-injection for aimee's own ingress and for delegates. An agent talking over
+ * MCP could not reach it by any path, which is why the measured opening move is
+ * four separate hybrid queries followed by four structure calls: the composed
+ * answer was there and was never on the menu.
+ *
+ * Unlike hybrid it leads with exact and structural evidence, rejects weak
+ * vector-only rows, attaches current-generation provenance, carries a span per
+ * item so the caller can read the range without a second lookup, and returns an
+ * explicit answerable/no_answer decision. The route fixes max_results=4 and a
+ * 1200-token budget, so this cannot become the expensive call. */
+static cJSON *mcph_index_investigate(struct mcp_call *c)
+{
+   cJSON *jq = cJSON_GetObjectItemCaseSensitive(c->jargs, "query");
+   cJSON *jqs = cJSON_GetObjectItemCaseSensitive(c->jargs, "queries");
+   int batch = cJSON_IsArray(jqs) && cJSON_GetArraySize(jqs) > 0;
+   if (!batch && (!cJSON_IsString(jq) || !jq->valuestring[0]))
+      return text_content("error: index investigate requires 'query' or 'queries'");
+   cJSON *js = cJSON_GetObjectItemCaseSensitive(c->jargs, "symbol");
+   const char *symbol = cJSON_IsString(js) ? js->valuestring : NULL;
+   /* The route requires an active project and never broadens scope. */
+   const char *project = mcp_code_project_from_args(c->jargs);
+   if (!project)
+      return text_content("error: no active project determined from cwd; pass 'project'");
+
+   if (batch)
+   {
+      cJSON *out = cJSON_CreateArray();
+      if (!out)
+         return text_content("error: out of memory");
+      cJSON *e;
+      cJSON_ArrayForEach(e, jqs)
+      {
+         if (!cJSON_IsString(e) || !e->valuestring[0])
+            continue; /* skip the malformed entry; the rest of the batch still answers */
+         int st = -1;
+         char *j = kb_client_code_context(e->valuestring, symbol, project, &st);
+         cJSON *row = cJSON_CreateObject();
+         cJSON_AddStringToObject(row, "query", e->valuestring);
+         if (j)
+         {
+            cJSON *parsed = cJSON_Parse(j);
+            if (parsed)
+               cJSON_AddItemToObject(row, "result", parsed);
+            else
+               cJSON_AddStringToObject(row, "result_raw", j);
+            free(j);
+         }
+         else
+            cJSON_AddNumberToObject(row, "error_status", st);
+         cJSON_AddItemToArray(out, row);
+      }
+      return json_result_content(out);
+   }
+
+   int status = -1;
+   char *json = kb_client_code_context(jq->valuestring, symbol, project, &status);
+   if (!json)
+      return code_graph_passthrough(json, status, "index_investigate");
+
+   /* FULL investigate: attach the code, not just a pointer to it.
+    *
+    * The packet ranks evidence and hands back file_path + a single anchor line.
+    * An agent then has to spend a second round trip reading each one -- which is
+    * the two-call discovery shape this command exists to collapse. Read a bounded
+    * window around each anchor here, in-process, so orienting and reading are one
+    * call. Budget is deliberately small: at most INV_ITEMS items and INV_WINDOW
+    * lines each, because a composed call that can flood the context is worse than
+    * the two calls it replaced. `include_code: false` opts out. */
+   cJSON *inc = cJSON_GetObjectItemCaseSensitive(c->jargs, "include_code");
+   int want_code = !cJSON_IsBool(inc) || cJSON_IsTrue(inc);
+   cJSON *root = want_code ? cJSON_Parse(json) : NULL;
+   cJSON *results = root ? cJSON_GetObjectItemCaseSensitive(root, "results") : NULL;
+   if (!cJSON_IsArray(results))
+   {
+      cJSON_Delete(root);
+      return code_graph_passthrough(json, status, "index_investigate");
+   }
+   free(json);
+
+   enum
+   {
+      INV_ITEMS = 4,
+      INV_WINDOW = 60
+   };
+   char rootdir[MAX_PATH_LEN] = "";
+   if (code_span_resolve_root(project, rootdir, sizeof(rootdir)) == 0)
+   {
+      int attached = 0;
+      cJSON *row;
+      cJSON_ArrayForEach(row, results)
+      {
+         if (attached >= INV_ITEMS)
+            break;
+         cJSON *fp = cJSON_GetObjectItemCaseSensitive(row, "file_path");
+         cJSON *sp = cJSON_GetObjectItemCaseSensitive(row, "span");
+         if (!cJSON_IsString(fp) || !fp->valuestring[0] || !cJSON_IsObject(sp))
+            continue;
+         cJSON *ls = cJSON_GetObjectItemCaseSensitive(sp, "line_start");
+         int anchor = cJSON_IsNumber(ls) ? ls->valueint : 0;
+         /* kind:"file" means the packet had no line anchor -- read from the top
+          * rather than guessing a window around zero. */
+         int from = anchor > INV_WINDOW / 2 ? anchor - INV_WINDOW / 2 : 1;
+         int to = from + INV_WINDOW - 1;
+         cJSON *span = code_span_read(project, rootdir, fp->valuestring, from, to, INV_WINDOW);
+         if (!span)
+            continue;
+         cJSON *content = cJSON_DetachItemFromObjectCaseSensitive(span, "content");
+         if (content)
+         {
+            cJSON_AddItemToObject(row, "code", content);
+            cJSON_AddNumberToObject(row, "code_line_start", from);
+            cJSON_AddNumberToObject(row, "code_line_end", to);
+            attached++;
+         }
+         cJSON_Delete(span);
+      }
+   }
+   return json_result_content(root); /* takes ownership of root */
+}
+
 static cJSON *mcph_index_graph_hubs(struct mcp_call *c)
 {
    cJSON *jp = cJSON_GetObjectItemCaseSensitive(c->jargs, "project");
@@ -1621,6 +1744,7 @@ static const struct
     {"index_structure", mcph_index_structure, "core,review_indexed"},
     {"code_span_get", mcph_code_span_get, NULL},
     {"index_hybrid", mcph_index_hybrid, NULL},
+    {"index_investigate", mcph_index_investigate, "core,review_indexed"},
     {"index_graph_hubs", mcph_index_graph_hubs, NULL},
     {"index_graph_audit", mcph_index_graph_audit, NULL},
     {"index_graph_diff", mcph_index_graph_diff, NULL},

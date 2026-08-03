@@ -127,6 +127,20 @@ void mcp_add_extended_tools(cJSON *tools)
             "round trip together. Replaces 'query' when present; returns one {query, result} per "
             "entry, in order.");
 
+   t = ext_tool(tools, "index_investigate",
+                "START HERE for an unfamiliar area. Bounded task packet: exact and structural "
+                "evidence first, weak vector-only matches rejected, each item carrying the file "
+                "path AND the line span to read next, plus an explicit answerable/no_answer "
+                "verdict. Capped at 4 items / ~1200 tokens, so it cannot flood the context. "
+                "Prefer this over a bare hybrid search when you are orienting rather than "
+                "confirming a name you already know.");
+   ext_prop(t, "query", "string", "What you are trying to find out, in plain words.");
+   ext_prop(t, "queries", "array",
+            "Ask SEVERAL questions in ONE call: [\"question a\", \"question b\", ...]. Returns "
+            "one {query, result} per entry, in order.");
+   ext_prop(t, "symbol", "string", "Seed symbol, if you already have one (optional).");
+   ext_prop(t, "project", "string", "Project to search. Required; this call never broadens scope.");
+
    t = ext_tool(tools, "index_graph_hubs",
                 "Rank a project's most-connected symbols by degree centrality over the code "
                 "projection graph — a refactor-risk signal ('editing this touches a lot'). Returns "
@@ -327,6 +341,7 @@ static const struct fam_def MCP_FAMILIES[] = {
       {"blast_radius", "index_blast_radius"},
       {AIMEE_CODE_INDEX_COMMAND_PREVIEW, AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS},
       {AIMEE_CODE_INDEX_COMMAND_HYBRID, "index_hybrid"},
+      {AIMEE_CODE_INDEX_COMMAND_INVESTIGATE, "index_investigate"},
       {"hubs", "index_graph_hubs"},
       {"audit", "index_graph_audit"},
       {"diff", "index_graph_diff"},

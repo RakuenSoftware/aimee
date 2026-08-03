@@ -168,6 +168,11 @@ static void test_codex_delegate_policy_is_explicit(void)
     * issued 4 single hybrid queries and 4 single structure calls. */
    assert(strstr(skill, "file_paths") != NULL);
    assert(strstr(skill, "queries") != NULL);
+   /* The composed packet (/v1/code/context) shipped reachable only as ingress
+    * pre-injection; an MCP agent could not call it, so it never appeared in a
+    * transcript. Pin both the command and the instruction to start there. */
+   assert(strstr(skill, AIMEE_CODE_INDEX_COMMAND_INVESTIGATE) != NULL);
+   assert(strstr(skill, "STARTING on an unfamiliar area") != NULL);
    /* Empty searches are pure wasted turns -- 4 of 9 on one measured cell. */
    assert(strstr(skill, "signal to change TOOL") != NULL);
 

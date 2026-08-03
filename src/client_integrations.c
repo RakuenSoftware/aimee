@@ -323,6 +323,19 @@ static const char *codex_skill_markdown(void)
           "`" AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS
           "` to see what depends on it. A grep for the symbol will not tell you "
           "what breaks.\n"
+          /* The composed packet existed as /v1/code/context and was wired ONLY as
+           * automatic pre-injection for aimee's own ingress and for delegates --
+           * an agent over MCP could not reach it at all. That is why the measured
+           * opening move is four hybrid queries followed by four structure calls
+           * and then reads: the one-call answer was there and was never offered. */
+          "- STARTING on an unfamiliar area, or you do not yet know which files "
+          "matter: use `" AIMEE_CODE_TOOL_INDEX
+          "` with command=" AIMEE_CODE_INDEX_COMMAND_INVESTIGATE
+          " and a plain-words question. It returns ranked evidence with the code "
+          "already attached and an explicit answerable/no_answer verdict, capped "
+          "so it cannot flood the context. One call where searching, mapping and "
+          "reading would be three. If it says no_answer, stop probing the index "
+          "and go read the files it named.\n"
           "- Looking for a PHRASE rather than a symbol -- an error string, a config "
           "key, a concept like \"config cache\" or \"pool lease\": use `" AIMEE_CODE_TOOL_INDEX
           "` with command=" AIMEE_CODE_INDEX_COMMAND_HYBRID
