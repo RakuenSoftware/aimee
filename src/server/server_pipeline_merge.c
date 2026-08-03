@@ -5,10 +5,10 @@
 #include "server_pipeline.h"
 #include "cJSON.h"
 #include "config.h"
-#include "git_pr_api.h" /* in-process GitHub REST: the CI verdict for the merge gate */
+#include "modules/git/git_pr_api.h" /* in-process GitHub REST: the CI verdict for the merge gate */
 #include "json_fluent.h"
 #include "log.h"
-#include "mcp_git.h"
+#include "modules/git/mcp_git.h"
 #include "openai_runs_store.h"
 #include "roundtable_pipeline.h"
 #include "roundtable_pipeline_chunk.h"

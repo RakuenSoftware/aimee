@@ -13,10 +13,10 @@
 #include "guardrails_internal.h"
 #include "guardrails_semantic.h"
 #include "guardrails_blast_radius.h"
-#include "workspace_provider.h" /* skip worktree enforcement for a detached (client) workspace */
-#include "workspace_turn.h" /* workspace_turn_container_bound — relax file guards for a container delegate */
+#include "modules/workspace/workspace_provider.h" /* skip worktree enforcement for a detached (client) workspace */
+#include "modules/workspace/workspace_turn.h" /* workspace_turn_container_bound — relax file guards for a container delegate */
 #include "config.h"
-#include "git_verify.h"
+#include "modules/git/git_verify.h"
 #include <aimee/skills/skill.h>
 #include "kb_client.h"
 #if !defined(AIMEE_DB2_DISABLED)

@@ -8,10 +8,10 @@
 #include <sys/stat.h>
 #include <sqlite3.h>
 #include "aimee.h"
-#include "mcp_git.h"
+#include "modules/git/mcp_git.h"
 #include "session_worktree_key.h"
-#include "workspace_provider.h"
-#include "git_verify.h"
+#include "modules/workspace/workspace_provider.h"
+#include "modules/git/git_verify.h"
 #include "cJSON.h"
 #include "db_schema.h"
 #include "../db1/db1.h"

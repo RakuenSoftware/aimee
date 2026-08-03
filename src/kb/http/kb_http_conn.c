@@ -12,6 +12,7 @@
 #include "kb_reqctx.h"
 #include "log.h"
 #include "kb/http/openapi_data.h"
+#include <aimee/core/connection/auth.h>
 
 /* Buffer sizes shared with kb_http.c — keep in sync. */
 #ifndef KB_HTTP_READ_MAX
@@ -191,8 +192,9 @@ void handle_connection(int fd)
    {
       if (g_bearer_token[0])
       {
-         const char *presented =
-             (auth_val[0] && strncmp(auth_val, "Bearer ", 7) == 0) ? auth_val + 7 : "";
+         const char *presented = aimee_core_bearer_token(auth_val);
+         if (!presented)
+            presented = "";
          kb_verify_result_t vr;
          if (!kb_verifier_authenticate(presented, g_bearer_token, &vr, NULL, 0))
          {

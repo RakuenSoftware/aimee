@@ -3,9 +3,9 @@
  * back — closing the detached loop across threads. The runner thread drains the
  * queue and executes ops via the real runner against a real tmp dir, so this
  * exercises detached provider -> queue -> runner -> filesystem end to end. */
-#include "workspace_runner_queue.h"
-#include "workspace_provider_detached.h"
-#include "workspace_provider.h"
+#include "modules/workspace/workspace_runner_queue.h"
+#include "modules/workspace/workspace_provider_detached.h"
+#include "modules/workspace/workspace_provider.h"
 #include "cJSON.h"
 
 #include <assert.h>

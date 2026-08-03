@@ -1,6 +1,6 @@
 /* webuser_runtime.c — shared environment tmpfs runtime dir (fail-closed). */
 #include "webuser_runtime.h"
-#include "workspace_scope.h" /* ws_scope_name_valid */
+#include "modules/workspace/workspace_scope.h" /* ws_scope_name_valid */
 
 #include <dirent.h>
 #include <errno.h>

@@ -31,7 +31,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "bus_ring.h"
+#include <aimee/core/event_bus/bus_ring.h>
 
 static void must(int cond, const char *what)
 {

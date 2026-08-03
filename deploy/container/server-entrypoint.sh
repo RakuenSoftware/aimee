@@ -24,6 +24,7 @@ export AIMEE_HOME
 SERVER_SOCK="${AIMEE_SERVER_SOCK:-/var/lib/aimee/aimee-server.sock}"
 server_pid=""
 wfe_pid=""
+module_pid=""
 
 # The one-shot bootstrap begins with a narrowly scoped legacy-volume ownership
 # repair, then drops privileges before it touches credentials. Disable core
@@ -101,6 +102,8 @@ case "$AIMEE_WFE_ENGINE" in
     *) printf '[server-entrypoint] fatal: WFE is Go-only; AIMEE_WFE_ENGINE must be go\n' >&2; exit 2 ;;
 esac
 export AIMEE_WFE_HTTP_SOCKET="${AIMEE_WFE_HTTP_SOCKET:-$AIMEE_HOME/aimee-wfe-http.sock}"
+export AIMEE_MODULE_BUS_SOCKET="${AIMEE_MODULE_BUS_SOCKET:-$AIMEE_HOME/server-module-bus.sock}"
+MODULE_MANIFEST="${AIMEE_MODULE_MANIFEST:-/opt/aimee/module-grants/server.modules}"
 # Existing appliances may need to recover SQLite WAL state and refresh seeded
 # workflow definitions before the C resource socket appears.  A real upgraded
 # volume on the supported container path takes about 30 seconds, so the former
@@ -195,6 +198,24 @@ chown aimee:aimee "$AIMEE_HOME" "${AIMEE_WORKSPACES_DIR:-/var/lib/aimee-workspac
 # Seeded as root; the server and its preset-editing API run as aimee.
 [ -d "$AIMEE_HOME/roundtables" ] && chown -R aimee:aimee "$AIMEE_HOME/roundtables" 2>/dev/null || true
 
+# Admission policy must exist before the C host opens its local bus. Seed only
+# missing grants so an operator may tighten a persisted policy without the next
+# image start overwriting it.
+mkdir -p "$AIMEE_HOME/modules.d/server"
+for module_grant in /opt/aimee/module-grants/server/*.grant; do
+    [ -f "$module_grant" ] || continue
+    grant_target="$AIMEE_HOME/modules.d/server/$(basename "$module_grant")"
+    [ -e "$grant_target" ] || cp "$module_grant" "$grant_target"
+done
+# The root entrypoint creates modules.d before dropping to the aimee user.  The
+# daemon must be able to traverse that 0700 parent in order to load the strict
+# grant policy; owning only its server child leaves the parent root-only and
+# makes every otherwise-valid grant look like an invalid policy.
+chown aimee:aimee "$AIMEE_HOME/modules.d" 2>/dev/null || true
+chown -R aimee:aimee "$AIMEE_HOME/modules.d/server" 2>/dev/null || true
+chmod 0700 "$AIMEE_HOME/modules.d" "$AIMEE_HOME/modules.d/server" 2>/dev/null || true
+chmod 0600 "$AIMEE_HOME/modules.d/server/"*.grant 2>/dev/null || true
+
 # Vendor OAuth CLIs require a HOME-like directory while completing their device
 # flow. Keep that short-lived transport on /run (container tmpfs), never on the
 # persistent AIMEE_HOME volume. The server seals the result in Vault and removes
@@ -252,13 +273,15 @@ plane_exit_message() {
 shutdown() {
     [ -n "$server_pid" ] && kill "$server_pid" 2>/dev/null || true
     [ -n "$wfe_pid" ] && kill "$wfe_pid" 2>/dev/null || true
+	[ -n "$module_pid" ] && kill "$module_pid" 2>/dev/null || true
 	_wait=0
-	while { [ -n "$server_pid" ] && kill -0 "$server_pid" 2>/dev/null; } || { [ -n "$wfe_pid" ] && kill -0 "$wfe_pid" 2>/dev/null; }; do
+	while { [ -n "$server_pid" ] && kill -0 "$server_pid" 2>/dev/null; } || { [ -n "$wfe_pid" ] && kill -0 "$wfe_pid" 2>/dev/null; } || { [ -n "$module_pid" ] && kill -0 "$module_pid" 2>/dev/null; }; do
 		[ "$_wait" -ge 50 ] && break
 		_wait=$((_wait + 1)); sleep 0.1
 	done
 	[ -n "$server_pid" ] && kill -KILL "$server_pid" 2>/dev/null || true
 	[ -n "$wfe_pid" ] && kill -KILL "$wfe_pid" 2>/dev/null || true
+	[ -n "$module_pid" ] && kill -KILL "$module_pid" 2>/dev/null || true
     webchat_stop
 }
 # A plane that is asked to stop reports the same exit 1 as a plane that broke:
@@ -352,6 +375,8 @@ log "starting aimee-server (socket=$SERVER_SOCK) as user aimee"
 rm -f "$AIMEE_HOME/aimee-http.sock" "$AIMEE_WFE_HTTP_SOCKET"
 runuser -u aimee -- sh -c 'set -eu; ulimit -c 0 2>/dev/null || true; exec aimee-server --socket="$1"' sh "$SERVER_SOCK" &
 server_pid=$!
+runuser -u aimee -- module-supervisor.sh server "$AIMEE_MODULE_BUS_SOCKET" "$MODULE_MANIFEST" &
+module_pid=$!
 
 if [ "$AIMEE_WFE_ENGINE" = go ]; then
     if [ ! -x /usr/local/bin/aimee-wfe ]; then

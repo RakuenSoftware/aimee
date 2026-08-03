@@ -12,11 +12,12 @@
 #include "db1.h"
 #include "db2.h"
 #include "db2_test_shim.h"
-#include "workspace.h"
+#include "server/obs_bus_adapter.h"
+#include <aimee/workspace/workspace.h>
 #include "session_worktree_key.h"
-#include "workspace_turn.h" /* workspace_turn_set_container_bound_for_test */
+#include "modules/workspace/workspace_turn.h" /* workspace_turn_set_container_bound_for_test */
 #include "platform_test_util.h"
-#include "git_verify.h"
+#include "modules/git/git_verify.h"
 
 /* Per-case in-memory DB2 backing for test bodies that round-trip
  * memory-subsystem state. The shim helper owns the sqlite handle and
@@ -3747,6 +3748,7 @@ int main(void)
    snprintf(db_path, sizeof(db_path), "/tmp/test-guardrails-db1-%d.sqlite", (int)getpid());
    unlink(db_path);
    assert(db1_init(db_path) == 0);
+   assert(server_obs_bus_configure() == 0);
    /* anti_patterns is DB2 (Postgres). */
 
    test_classify_sensitive();
@@ -3848,6 +3850,7 @@ int main(void)
    test_workflow_parse_test_command();
    test_workflow_parse_active_branch();
    test_workflow_parse_negative();
+   obs_bus_stop();
    db1_shutdown();
    unlink(db_path);
    if (old_home)

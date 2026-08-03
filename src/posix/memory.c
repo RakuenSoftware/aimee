@@ -1,7 +1,7 @@
 /* posix/memory.c: POSIX memory quality gates and content scanning. */
 #include "aimee.h"
 #include "memory.h"
-#include "memory_platform.h"
+#include "modules/memory/memory_platform.h"
 #include "lifecycle.h"
 #include <pthread.h>
 #include <regex.h>

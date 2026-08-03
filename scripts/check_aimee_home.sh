@@ -14,10 +14,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="$ROOT/src"
 
-# Allowlist: files where the legacy pattern is intentional or where
-# `.config/aimee` appears only in a comment / help string. Add a new
-# entry here only after confirming the reference is not a runtime
-# path construction.
+# Allowlist: the product path implementation, its platform facades, and the
+# dependency-free core TLS path implementation. The latter must duplicate the
+# same tiny environment contract because the extracted core package cannot
+# import product code; its behavior is pinned by the TLS/profile tests.
 ALLOWLIST=(
   "src/aimee_home.c"
   "src/aimee_home.h"
@@ -25,6 +25,7 @@ ALLOWLIST=(
   "src/headers/platform_path.h"
   "src/posix/platform_path.c"
   "src/windows/platform_path.c"
+  "src/core/connection/native_tls_path.c"
 )
 
 # Forbidden patterns:

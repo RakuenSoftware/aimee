@@ -14,8 +14,8 @@
 #include <aimee/audit/audit_action.h> /* audit_args_hash, AUDIT_ARGS_HASH_LEN */
 #include <aimee/audit/obs_bus.h>      /* obs_bus_emit */
 
-#include "config.h"      /* MAX_PATH_LEN, transitively needed by agent_types.h */
-#include "agent_tools.h" /* agent_tool_completion_t, agent_tools_set_tool_completion_cb */
+#include "config.h"                  /* MAX_PATH_LEN, transitively needed by agent_types.h */
+#include <aimee/tools/agent_tools.h> /* agent_tool_completion_t, agent_tools_set_tool_completion_cb */
 
 /* Publish one completion row (KIND_AUDIT_ACTION -> the audit ledger +
  * capture/replay). Fields, mapped onto obs_bus_emit's fixed eight:

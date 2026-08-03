@@ -25,7 +25,7 @@ import sys
 
 HDR_LEN = 64
 MAGIC = 0x30535542  # "BUS0" little-endian
-WIRE_VERSION = 2
+WIRE_VERSION = 3
 
 # hdr_flags
 F_INLINE = 0x0001
@@ -35,6 +35,7 @@ F_REQUEST = 0x0008
 F_REPLY = 0x0010
 F_CANCEL = 0x0020
 F_CONTROL = 0x0040
+F_MORE = 0x0080
 
 # reserved event kinds
 K_CAPABILITY_ABSENT = 4
@@ -102,6 +103,11 @@ VECTORS = [
     ("reply.inline",
      frame(flags=F_REPLY | F_INLINE, corr=CORR, plen=16, pref=INLINE_AT,
            seq=4242, dst=7)),
+    ("request.more.inline",
+     frame(flags=F_REQUEST | F_INLINE | F_MORE, corr=CORR, plen=32, pref=INLINE_AT)),
+    ("reply.more.inline",
+     frame(flags=F_REPLY | F_INLINE | F_MORE, corr=CORR, plen=32, pref=INLINE_AT,
+           seq=4243, dst=7)),
     ("cancel", frame(flags=F_CANCEL, corr=CORR)),
     ("capability_absent",
      frame(flags=F_REPLY, kind=K_CAPABILITY_ABSENT, corr=CORR, seq=99, dst=7)),
@@ -158,6 +164,12 @@ def negatives():
     mut("neg.ref_without_payload", "ERR_PAYLOAD_LEN", [(40, "<Q", 4096)])
     mut("neg.notification_with_correlation", "ERR_CORRELATION", [(16, "<Q", 5)])
     mut("neg.request_without_correlation", "ERR_CORRELATION", [(4, "<H", F_REQUEST)])
+    mut("neg.more_notification", "ERR_FLAGS", [(4, "<H", F_NOTIFICATION | F_MORE)])
+    mut("neg.more_without_payload", "ERR_FLAGS",
+        [(4, "<H", F_REQUEST | F_MORE), (16, "<Q", CORR)])
+    mut("neg.more_arena", "ERR_FLAGS",
+        [(4, "<H", F_REQUEST | F_ARENA | F_MORE), (16, "<Q", CORR),
+         (40, "<Q", 1), (48, "<I", 32), (60, "<I", 1)])
     return out
 
 

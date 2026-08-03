@@ -8,7 +8,7 @@
 #include "db2.h"
 #include "db2_test_shim.h"
 #include "platform_test_util.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include "../db2/db2_internal.h"
 #include "../db2/db_postgres.h"
 #include "../db2/lifecycle.h"

@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "git_pr_api.h"
+#include "modules/git/git_pr_api.h"
 
 #define RUNS(x)     "{\"total_count\":9,\"check_runs\":[" x "]}"
 #define RUN(st, co) "{\"status\":\"" st "\",\"conclusion\":" co "}"

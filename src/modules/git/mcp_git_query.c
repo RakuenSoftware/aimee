@@ -8,7 +8,7 @@
 #include "mcp_git.h"
 #include "platform_process.h"
 #include "util.h"
-#include "workspace_provider.h"
+#include "modules/workspace/workspace_provider.h"
 #include "forge_credentials.h"
 #include "git_cred_inject.h"
 #include <time.h>

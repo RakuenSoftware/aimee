@@ -1,7 +1,7 @@
 /* test_memory_assemble_util.c: unit tests for the pure string helpers
  * extracted from memory_assemble.c (xml_escape_text, context_xml_tag_for_header).
  * Header is static inline → this test links nothing extra. */
-#include "memory_assemble_util.h"
+#include "modules/memory/memory_assemble_util.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

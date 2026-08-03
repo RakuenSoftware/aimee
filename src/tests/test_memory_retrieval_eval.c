@@ -15,7 +15,7 @@
 #include "../db2/db_postgres.h"
 #include "../db2/lifecycle.h"
 #include "memory.h"
-#include "memory_graph_fusion.h"
+#include "modules/memory/memory_graph_fusion.h"
 #include "db2/memory_query.h"
 #include "config.h"
 #include "agent_eval_internal.h"

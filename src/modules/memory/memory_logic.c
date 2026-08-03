@@ -22,7 +22,7 @@
 #include "kb.h"
 #include "log.h"
 #include "platform_process.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include <ctype.h>
 #include <limits.h>
 #include <math.h>

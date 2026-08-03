@@ -3,6 +3,9 @@
 #include "agent_exec.h"
 #include "log.h"
 #include "proxy_bootstrap.h"
+#include <aimee/core/connection/control.h>
+#include <aimee/core/connection/socket.h>
+#include <aimee/core/connection/tls_openssl.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -59,18 +62,17 @@ void agent_http_init(void)
     * the CA bundle path (SSL_CERT_FILE / REQUESTS_CA_BUNDLE) is available. */
    proxy_bootstrap_init_global();
 
-   s_ssl_ctx = SSL_CTX_new(TLS_client_method());
+   s_ssl_ctx = aimee_core_tls_client_context();
    if (s_ssl_ctx)
    {
       SSL_CTX_set_default_verify_paths(s_ssl_ctx);
       SSL_CTX_set_verify(s_ssl_ctx, SSL_VERIFY_PEER, NULL);
-      SSL_CTX_set_min_proto_version(s_ssl_ctx, TLS1_2_VERSION);
 
       /* Load custom CA bundle when configured */
       const proxy_bootstrap_t *pb = proxy_get();
       if (pb && pb->ca_bundle[0])
       {
-         if (SSL_CTX_load_verify_file(s_ssl_ctx, pb->ca_bundle) != 1)
+         if (aimee_core_tls_trust_file(s_ssl_ctx, pb->ca_bundle) != 0)
             aimee_log(LOG_WARN, "proxy", "failed to load CA bundle: %s", pb->ca_bundle);
          else
             aimee_log(LOG_DEBUG, "proxy", "loaded CA bundle: %s", pb->ca_bundle);
@@ -188,16 +190,14 @@ static void synth_ssl_ctx_load_locked(void)
    if (!ca || !cert || !key)
       return;
 
-   SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
+   SSL_CTX *ctx = aimee_core_tls_client_context();
    if (!ctx)
       return;
    /* Deliberately NO SSL_CTX_set_default_verify_paths: on this hop our CA REPLACES
     * the system store. A public CA has no business vouching for the sidecar, and
     * accepting one would turn a private hop into a publicly impersonable one. */
-   if (SSL_CTX_load_verify_file(ctx, ca) != 1 ||
-       SSL_CTX_use_certificate_chain_file(ctx, cert) != 1 ||
-       SSL_CTX_use_PrivateKey_file(ctx, key, SSL_FILETYPE_PEM) != 1 ||
-       SSL_CTX_check_private_key(ctx) != 1)
+   if (aimee_core_tls_trust_file(ctx, ca) != 0 ||
+       aimee_core_tls_use_identity_files(ctx, cert, key) != 0)
    {
       char ebuf[256] = "";
       unsigned long e = ERR_peek_last_error();
@@ -210,8 +210,6 @@ static void synth_ssl_ctx_load_locked(void)
       return;
    }
    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
-   SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
-
    s_synth_ssl_ctx = ctx;
    aimee_log(LOG_INFO, "synthesis_mtls", "client identity loaded for %s:%d", s_synth_host,
              s_synth_port);
@@ -272,27 +270,18 @@ typedef struct
 {
    int fd;
    SSL *ssl;
-   /* Wall-clock deadline for the entire response body read, in CLOCK_MONOTONIC
-    * nanoseconds. 0 means no deadline. Catches slow-trickle connections where
-    * SO_RCVTIMEO never fires because the remote keeps sending small chunks. */
-   int64_t deadline_ns;
+   aimee_core_control_t control;
 } http_conn_t;
 
-static int64_t conn_now_ns(void)
+static int core_agent_cancelled(void *unused)
 {
-   struct timespec ts;
-   clock_gettime(CLOCK_MONOTONIC, &ts);
-   return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
+   (void)unused;
+   return agent_request_cancelled && agent_request_cancelled();
 }
 
 static int conn_past_deadline(const http_conn_t *conn)
 {
-   return conn->deadline_ns && conn_now_ns() > conn->deadline_ns;
-}
-
-static int conn_cancelled(void)
-{
-   return agent_request_cancelled && agent_request_cancelled();
+   return aimee_core_control_check(&conn->control) == AIMEE_CORE_TIMEOUT;
 }
 
 /* A panel deadline is shorter than an individual provider timeout. Once a
@@ -301,131 +290,27 @@ static int conn_cancelled(void)
  * pthread_join can extend the panel past its wall-clock budget. */
 #define HTTP_CANCEL_POLL_MS 100
 
-static void conn_enable_cancel_poll(http_conn_t *conn)
-{
-   if (!conn || conn->fd < 0 || !agent_request_cancelled)
-      return;
-   struct timeval tv;
-   tv.tv_sec = 0;
-   tv.tv_usec = HTTP_CANCEL_POLL_MS * 1000;
-   setsockopt(conn->fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-   setsockopt(conn->fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-}
-
-static int connect_with_timeout(const char *host, int port, int timeout_ms)
+static int connect_controlled(const char *host, int port, int timeout_ms, unsigned flags)
 {
    char port_str[16];
    snprintf(port_str, sizeof(port_str), "%d", port);
-
-   struct addrinfo hints = {0}, *res = NULL;
-   hints.ai_family = AF_UNSPEC;
-   hints.ai_socktype = SOCK_STREAM;
-
-   if (getaddrinfo(host, port_str, &hints, &res) != 0 || !res)
+   aimee_core_control_t control;
+   int connect_timeout = agent_http_effective_connect_timeout_ms(timeout_ms);
+   if (aimee_core_control_init_timeout(&control, connect_timeout, HTTP_CANCEL_POLL_MS,
+                                       agent_request_cancelled ? core_agent_cancelled : NULL,
+                                       NULL) != AIMEE_CORE_OK)
       return -1;
-
-   int fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-   if (fd < 0)
-   {
-      freeaddrinfo(res);
+   int fd = -1;
+   if (aimee_core_socket_connect_controlled(host, port_str, flags | AIMEE_CORE_CONNECT_NONBLOCKING,
+                                            &control, &fd) != AIMEE_CORE_OK)
       return -1;
-   }
-
-   /* Set non-blocking for connect timeout */
-   int flags = fcntl(fd, F_GETFL, 0);
-   fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-
-   int rc = connect(fd, res->ai_addr, res->ai_addrlen);
-   freeaddrinfo(res);
-
-   if (rc < 0 && errno != EINPROGRESS)
-   {
-      close(fd);
-      return -1;
-   }
-
-   if (rc < 0)
-   {
-      /* Wait for connect — capped well below the overall request timeout so an
-       * unreachable host (e.g. a down kb behind a SYN-dropping gateway) fails
-       * fast instead of blocking for the full request budget. See
-       * agent_http_effective_connect_timeout_ms() in agent_exec.h. */
-      struct pollfd pfd = {fd, POLLOUT, 0};
-      int pr = poll(&pfd, 1, agent_http_effective_connect_timeout_ms(timeout_ms));
-      if (pr <= 0)
-      {
-         close(fd);
-         return -1;
-      }
-      int err = 0;
-      socklen_t errlen = sizeof(err);
-      getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &errlen);
-      if (err)
-      {
-         close(fd);
-         return -1;
-      }
-   }
-
-   /* Restore blocking */
-   fcntl(fd, F_SETFL, flags);
-   return fd;
-}
-
-/* Connect to a pre-validated NUMERIC IP (no DNS lookup). Used by the SSRF-safe
- * fetch path so the socket lands on exactly the address the egress policy
- * validated, not a fresh resolution that a hostile resolver could rebind. */
-static int connect_pinned(const char *ip, int port, int timeout_ms)
-{
-   char port_str[16];
-   snprintf(port_str, sizeof(port_str), "%d", port);
-   struct addrinfo hints = {0}, *res = NULL;
-   hints.ai_family = AF_UNSPEC;
-   hints.ai_socktype = SOCK_STREAM;
-   hints.ai_flags = AI_NUMERICHOST; /* never resolve — ip is already numeric */
-   if (getaddrinfo(ip, port_str, &hints, &res) != 0 || !res)
-      return -1;
-
-   int fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-   if (fd < 0)
-   {
-      freeaddrinfo(res);
-      return -1;
-   }
-   int flags = fcntl(fd, F_GETFL, 0);
-   fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-   int rc = connect(fd, res->ai_addr, res->ai_addrlen);
-   freeaddrinfo(res);
-   if (rc < 0 && errno != EINPROGRESS)
-   {
-      close(fd);
-      return -1;
-   }
-   if (rc < 0)
-   {
-      struct pollfd pfd = {fd, POLLOUT, 0};
-      if (poll(&pfd, 1, agent_http_effective_connect_timeout_ms(timeout_ms)) <= 0)
-      {
-         close(fd);
-         return -1;
-      }
-      int err = 0;
-      socklen_t errlen = sizeof(err);
-      getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &errlen);
-      if (err)
-      {
-         close(fd);
-         return -1;
-      }
-   }
-   fcntl(fd, F_SETFL, flags);
    return fd;
 }
 
 /* Send HTTP CONNECT to establish a tunnel through `proxy_host:proxy_port` to
  * `target_host:target_port`.  The fd must already be connected to the proxy.
  * Returns 0 on success (proxy returned "200"), -1 on failure. */
-static int proxy_connect_tunnel(int fd, const char *target_host, int target_port,
+static int proxy_connect_tunnel(http_conn_t *conn, const char *target_host, int target_port,
                                 const char *proxy_auth)
 {
    char req[1024];
@@ -450,24 +335,21 @@ static int proxy_connect_tunnel(int fd, const char *target_host, int target_port
       return -1;
 
    /* Send the CONNECT request */
-   ssize_t written = 0;
-   while (written < req_len)
-   {
-      ssize_t n = write(fd, req + written, (size_t)(req_len - written));
-      if (n <= 0)
-         return -1;
-      written += n;
-   }
+   size_t written = 0;
+   if (aimee_core_socket_write_all_controlled(conn->fd, req, (size_t)req_len, &conn->control,
+                                              &written) != AIMEE_CORE_OK)
+      return -1;
 
    /* Read the response line (up to 512 bytes) */
    char resp[512];
    int resp_len = 0;
    while (resp_len < (int)sizeof(resp) - 1)
    {
-      ssize_t n = read(fd, resp + resp_len, 1);
-      if (n <= 0)
+      size_t received = 0;
+      if (aimee_core_socket_read_controlled(conn->fd, resp + resp_len, 1, &conn->control,
+                                            &received) != AIMEE_CORE_OK)
          return -1;
-      resp_len++;
+      resp_len += (int)received;
       resp[resp_len] = '\0';
       /* Detect end of response headers: \r\n\r\n */
       if (resp_len >= 4 && resp[resp_len - 4] == '\r' && resp[resp_len - 3] == '\n' &&
@@ -488,14 +370,12 @@ static int proxy_connect_tunnel(int fd, const char *target_host, int target_port
 
 static int conn_open(http_conn_t *conn, const parsed_url_t *url, int timeout_ms)
 {
+   conn->fd = -1;
    conn->ssl = NULL;
-   /* Wall-clock deadline: total time allowed for this connection's response read.
-    * Cap SO_RCVTIMEO at 30 s per recv call; the deadline catches slow-trickle
-    * responses (e.g. models streaming long reasoning chains) that would
-    * otherwise reset the per-recv timer on every small chunk. */
-   conn->deadline_ns = timeout_ms > 0 ? conn_now_ns() + (int64_t)timeout_ms * 1000000LL : 0;
-   /* Per-recv socket timeout: min(timeout_ms, 30000 ms). */
-   int rcv_ms = timeout_ms > 0 ? (timeout_ms < 30000 ? timeout_ms : 30000) : 0;
+   if (aimee_core_control_init_timeout(
+           &conn->control, timeout_ms > 0 ? timeout_ms : 0, HTTP_CANCEL_POLL_MS,
+           agent_request_cancelled ? core_agent_cancelled : NULL, NULL) != AIMEE_CORE_OK)
+      return -1;
 
    const proxy_bootstrap_t *pb = proxy_get();
    /* A pinned (SSRF-validated) fetch connects directly to the checked IP and
@@ -505,22 +385,15 @@ static int conn_open(http_conn_t *conn, const parsed_url_t *url, int timeout_ms)
 
    if (url->pinned_ip[0])
    {
-      conn->fd = connect_pinned(url->pinned_ip, url->port, timeout_ms);
+      conn->fd = connect_controlled(url->pinned_ip, url->port, timeout_ms,
+                                    AIMEE_CORE_CONNECT_NUMERIC_HOST);
       if (conn->fd < 0)
          return -1;
-      if (rcv_ms > 0)
-      {
-         struct timeval tv;
-         tv.tv_sec = rcv_ms / 1000;
-         tv.tv_usec = (rcv_ms % 1000) * 1000;
-         setsockopt(conn->fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-         setsockopt(conn->fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-      }
    }
    else if (use_proxy)
    {
       /* Connect to the proxy, then tunnel to the target via CONNECT */
-      conn->fd = connect_with_timeout(pb->https_proxy.host, pb->https_proxy.port, timeout_ms);
+      conn->fd = connect_controlled(pb->https_proxy.host, pb->https_proxy.port, timeout_ms, 0);
       if (conn->fd < 0)
       {
          aimee_log(LOG_WARN, "proxy", "failed to connect to proxy %s:%d", pb->https_proxy.host,
@@ -528,79 +401,47 @@ static int conn_open(http_conn_t *conn, const parsed_url_t *url, int timeout_ms)
          return -1;
       }
 
-      if (rcv_ms > 0)
+      if (proxy_connect_tunnel(conn, url->host, url->port, pb->https_proxy.auth) != 0)
       {
-         struct timeval tv;
-         tv.tv_sec = rcv_ms / 1000;
-         tv.tv_usec = (rcv_ms % 1000) * 1000;
-         setsockopt(conn->fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-         setsockopt(conn->fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-      }
-
-      if (proxy_connect_tunnel(conn->fd, url->host, url->port, pb->https_proxy.auth) != 0)
-      {
-         close(conn->fd);
+         aimee_core_socket_close(conn->fd);
          conn->fd = -1;
          return -1;
       }
    }
    else
    {
-      conn->fd = connect_with_timeout(url->host, url->port, timeout_ms);
+      conn->fd = connect_controlled(url->host, url->port, timeout_ms, 0);
       if (conn->fd < 0)
          return -1;
-
-      if (rcv_ms > 0)
-      {
-         struct timeval tv;
-         tv.tv_sec = rcv_ms / 1000;
-         tv.tv_usec = (rcv_ms % 1000) * 1000;
-         setsockopt(conn->fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-         setsockopt(conn->fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-      }
    }
-
-   conn_enable_cancel_poll(conn);
 
    if (url->use_ssl)
    {
       SSL_CTX *ctx = ssl_ctx_for(url);
       if (!ctx)
       {
-         close(conn->fd);
+         aimee_core_socket_close(conn->fd);
          conn->fd = -1;
          return -1;
       }
       conn->ssl = SSL_new(ctx);
       if (!conn->ssl)
       {
-         close(conn->fd);
+         aimee_core_socket_close(conn->fd);
          conn->fd = -1;
          return -1;
       }
-      SSL_set_fd(conn->ssl, conn->fd);
-      SSL_set_tlsext_host_name(conn->ssl, url->host);
-
-      /* Enable hostname verification */
-      SSL_set1_host(conn->ssl, url->host);
-
-      int connected = 0;
-      while (!conn_cancelled() && !conn_past_deadline(conn))
+      if (SSL_set_fd(conn->ssl, conn->fd) != 1 ||
+          aimee_core_tls_configure_client_session(conn->ssl, url->host, 1) != 0)
       {
-         int rc = SSL_connect(conn->ssl);
-         if (rc == 1)
-         {
-            connected = 1;
-            break;
-         }
-         int ssl_err = SSL_get_error(conn->ssl, rc);
-         if (ssl_err == SSL_ERROR_WANT_READ || ssl_err == SSL_ERROR_WANT_WRITE ||
-             (ssl_err == SSL_ERROR_SYSCALL &&
-              (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)))
-            continue;
-         break;
+         SSL_free(conn->ssl);
+         aimee_core_socket_close(conn->fd);
+         conn->fd = -1;
+         conn->ssl = NULL;
+         return -1;
       }
-      if (!connected)
+
+      if (aimee_core_tls_handshake_client_controlled(conn->ssl, &conn->control) != AIMEE_CORE_OK)
       {
          /* Name the handshake. The caller's only message is "TCP connect failed",
           * which is actively misleading here: the TCP connect succeeded and TLS is
@@ -613,7 +454,7 @@ static int conn_open(http_conn_t *conn, const parsed_url_t *url, int timeout_ms)
          aimee_log(LOG_ERROR, "agent_http", "TLS handshake failed with %s:%d%s%s", url->host,
                    url->port, ebuf[0] ? ": " : "", ebuf);
          SSL_free(conn->ssl);
-         close(conn->fd);
+         aimee_core_socket_close(conn->fd);
          conn->fd = -1;
          conn->ssl = NULL;
          return -1;
@@ -626,96 +467,39 @@ static void conn_close(http_conn_t *conn)
 {
    if (conn->ssl)
    {
-      SSL_shutdown(conn->ssl);
-      SSL_free(conn->ssl);
+      aimee_core_tls_session_free(conn->ssl);
       conn->ssl = NULL;
    }
    if (conn->fd >= 0)
    {
-      close(conn->fd);
+      aimee_core_socket_close(conn->fd);
       conn->fd = -1;
    }
 }
 
 static ssize_t conn_write(http_conn_t *conn, const void *buf, size_t len)
 {
-   for (;;)
-   {
-      if (conn_cancelled() || conn_past_deadline(conn))
-         return -1;
-      if (conn->ssl)
-      {
-         ssize_t n = SSL_write(conn->ssl, buf, (int)len);
-         if (n > 0)
-            return n;
-         int err = SSL_get_error(conn->ssl, (int)n);
-         if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE ||
-             (err == SSL_ERROR_SYSCALL &&
-              (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)))
-            continue;
-         return -1;
-      }
-      ssize_t n = send(conn->fd, buf, len, 0);
-      if (n >= 0)
-         return n;
-      if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
-         continue;
-      return -1;
-   }
+   size_t written = 0;
+   aimee_core_result_t result =
+       conn->ssl
+           ? aimee_core_tls_write_all_controlled(conn->ssl, buf, len, &conn->control, &written)
+           : aimee_core_socket_write_all_controlled(conn->fd, buf, len, &conn->control, &written);
+   return result == AIMEE_CORE_OK ? (ssize_t)written : -1;
 }
 
 static ssize_t conn_read(http_conn_t *conn, void *buf, size_t len)
 {
-   /* SO_RCVTIMEO is capped at 30 s per recv (see conn_open) so a wedged socket
-    * can't hang forever, but a slow-but-alive peer -- e.g. a reasoning model
-    * that pauses tens of seconds before emitting its first byte -- must not be
-    * treated as dead. On a per-recv timeout, keep waiting until the overall
-    * response deadline (conn->deadline_ns, the full configured timeout) is
-    * actually past. Only a real EOF or error ends the read early. */
-   for (;;)
-   {
-      if (conn_cancelled())
-         return -1;
-      if (conn->ssl)
-      {
-         ssize_t n = SSL_read(conn->ssl, buf, (int)len);
-         if (n > 0)
-            return n;
-         int err = SSL_get_error(conn->ssl, (int)n);
-         if (err == SSL_ERROR_ZERO_RETURN)
-            return 0; /* clean TLS close */
-         if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE ||
-             (err == SSL_ERROR_SYSCALL &&
-              (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)))
-         {
-            if (conn_cancelled() || conn_past_deadline(conn))
-               return -1;
-            continue; /* SO_RCVTIMEO fired; peer is slow, not gone */
-         }
-         return -1; /* real SSL/transport error */
-      }
-      ssize_t n = recv(conn->fd, buf, len, 0);
-      if (n >= 0)
-         return n;
-      if (errno == EINTR || ((errno == EAGAIN || errno == EWOULDBLOCK) && !conn_cancelled() &&
-                             !conn_past_deadline(conn)))
-         continue;
-      return -1;
-   }
+   size_t received = 0;
+   aimee_core_result_t result =
+       conn->ssl ? aimee_core_tls_read_controlled(conn->ssl, buf, len, &conn->control, &received)
+                 : aimee_core_socket_read_controlled(conn->fd, buf, len, &conn->control, &received);
+   return result == AIMEE_CORE_OK ? (ssize_t)received : (result == AIMEE_CORE_EOF ? 0 : -1);
 }
 
 /* Write all bytes, retrying short writes */
 static int conn_write_all(http_conn_t *conn, const char *buf, size_t len)
 {
-   while (len > 0)
-   {
-      ssize_t n = conn_write(conn, buf, len);
-      if (n <= 0)
-         return -1;
-      buf += n;
-      len -= (size_t)n;
-   }
-   return 0;
+   return conn_write(conn, buf, len) == (ssize_t)len ? 0 : -1;
 }
 
 /* ---- HTTP request/response ---- */

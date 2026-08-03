@@ -13,7 +13,7 @@
 #include "memory_context_internal.h"
 #include "memory_ontology.h"
 #include "platform_process.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include <ctype.h>
 #include <limits.h>
 #include <math.h>

@@ -8,6 +8,7 @@
 #define _GNU_SOURCE
 #endif
 #include "server_http_internal.h"
+#include <aimee/core/connection/auth.h>
 #include "server_http.h"
 #include "sandbox_pkg_proxy.h" /* delegate-sandbox package forward proxy (UDS demux) */
 #include "kb_identity_token.h"
@@ -18,9 +19,9 @@
 #include "server_tls.h"     /* native TLS termination (phase 1b) */
 #include "runtime_secret.h" /* Vault-sourced management private keys */
 #include "server_mgmt_checkpoint_client.h"
-#include "pki.h"                       /* P8a per-request durable cert revocation/expiry re-check */
-#include "workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
-#include "forge_credentials.h"         /* forge_cred_install for the /v1 token-install route */
+#include "pki.h" /* P8a per-request durable cert revocation/expiry re-check */
+#include "modules/workspace/workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
+#include "modules/git/forge_credentials.h" /* forge_cred_install for the /v1 token-install route */
 #include <time.h>
 #include "persona.h"
 #include "role_templates.h"
@@ -260,8 +261,7 @@ int server_http_authorize(int is_tcp, const char *bearer_cfg, const char *auth_h
    /* TCP requires a configured bearer and a matching Authorization header. */
    if (!have_bearer)
       return 503;
-   if (auth_header && strncmp(auth_header, "Bearer ", 7) == 0 && auth_header[7])
-      authorized = server_ct_equal(auth_header + 7, bearer_cfg);
+   authorized = server_ct_equal(aimee_core_bearer_token(auth_header), bearer_cfg);
    if (api_key_header && api_key_header[0])
       authorized |= server_ct_equal(api_key_header, bearer_cfg);
    if (!authorized)

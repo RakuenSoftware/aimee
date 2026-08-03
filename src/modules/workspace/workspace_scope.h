@@ -72,6 +72,8 @@ int ws_scope_name_valid(const char *name);
  * project reference; embedded NUL is rejected by byte-scan (the buffer is not
  * assumed NUL-terminated). Pure. */
 int ws_scope_project_ref_valid(const char *buf, size_t len);
+typedef int (*ws_scope_ref_validator_fn)(const char *buf, size_t len, int *allowed);
+void ws_scope_register_ref_validator(ws_scope_ref_validator_fn validator);
 
 /* openat2(dirfd, name, RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS, O_DIRECTORY|
  * O_NOFOLLOW|O_CLOEXEC). Returns the fd or -1. The webuser project surface is

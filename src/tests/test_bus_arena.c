@@ -19,7 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "bus_arena.h"
+#include <aimee/core/event_bus/bus_arena.h>
 
 static void must(int cond, const char *what)
 {

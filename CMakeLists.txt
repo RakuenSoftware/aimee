@@ -22,10 +22,10 @@ option(WITH_PAM "Enable PAM authentication support" ON)
 option(WITH_LIBSECRET "Enable libsecret integration" ON)
 option(WITH_UI "Enable embedded dashboard UI" OFF)
 option(WITH_TLS "Enable in-client TLS for https:// remote aimee-servers" ON)
-# TLS backend by platform (all behind the same 4-function aimee_tls.h interface):
-#   Linux   -> OpenSSL    (aimee_tls.c)
-#   macOS   -> Secure Transport (aimee_tls_securetransport.c) — universal-safe, Keychain trust
-#   Windows -> Schannel/SSPI    (aimee_tls_schannel.c)        — no OpenSSL, Windows cert store
+# Native TLS backends are part of aimee-core-connection:
+#   Linux   -> OpenSSL
+#   macOS   -> Secure Transport
+#   Windows -> Schannel/SSPI
 # Each uses the OS trust store, so the single-binary thin client needs no bundled
 # CA bundle and no external TLS library.
 option(AIMEE_LEAN "Lean build profile: size-optimized, no UI" OFF)
@@ -70,6 +70,10 @@ set(AIMEE_DELEGATES_INCLUDE_DIR
     "${AIMEE_SRC_DIR}/modules/delegates/include")
 set(AIMEE_PROTOCOLS_INCLUDE_DIR
     "${AIMEE_SRC_DIR}/modules/protocols/include")
+set(AIMEE_CORE_CONNECTION_INCLUDE_DIR
+    "${AIMEE_SRC_DIR}/core/connection/include")
+set(AIMEE_CORE_EVENT_BUS_INCLUDE_DIR
+    "${AIMEE_SRC_DIR}/core/event_bus/include")
 
 # The core-modularization layout keeps each module's public headers under
 # modules/<m>/include/aimee/<m>/. The Makefile adds these as -Imodules/<m>/include;
@@ -83,7 +87,16 @@ include_directories(
     ${AIMEE_TRANSLATION_INCLUDE_DIR}
     ${AIMEE_DELEGATES_INCLUDE_DIR}
     ${AIMEE_PROTOCOLS_INCLUDE_DIR}
-    "${AIMEE_SRC_DIR}/modules/skills/include")
+    ${AIMEE_CORE_CONNECTION_INCLUDE_DIR}
+    ${AIMEE_CORE_EVENT_BUS_INCLUDE_DIR}
+    "${AIMEE_SRC_DIR}/modules/memory/include"
+    "${AIMEE_SRC_DIR}/modules/learning/include"
+    "${AIMEE_SRC_DIR}/modules/tools/include"
+    "${AIMEE_SRC_DIR}/modules/workspace/include"
+    "${AIMEE_SRC_DIR}/modules/git/include"
+    "${AIMEE_SRC_DIR}/modules/response-composition/include"
+    "${AIMEE_SRC_DIR}/modules/skills/include"
+    "${AIMEE_SRC_DIR}/modules/routing/include")
 
 # LTO / IPO: must be set BEFORE any target is declared so the setting takes
 # effect uniformly across aimee-core/data/agent/cmd and every test binary.
@@ -646,7 +659,7 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/worktree_gc.c
     ${AIMEE_SRC_DIR}/modules/workspace/workspace_manifest.c
     ${AIMEE_SRC_DIR}/server/agent_config.c
-    ${AIMEE_SRC_DIR}/server/agent_route.c
+    ${AIMEE_SRC_DIR}/modules/routing/routing.c
     ${AIMEE_SRC_DIR}/agent_tier_lint.c
     ${AIMEE_SRC_DIR}/cmd_describe.c
     ${AIMEE_SRC_DIR}/history.c
@@ -903,6 +916,7 @@ set(CLI_SRCS
 
 set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_main.c
+    ${AIMEE_SRC_DIR}/server/module_routing_adapter.c
     ${AIMEE_SRC_DIR}/server/vault_bootstrap_privilege.c
     ${AIMEE_SRC_DIR}/server/server.c
     ${AIMEE_SRC_DIR}/server/s2_native_gate_hook.c
@@ -1187,29 +1201,47 @@ endif()
 # means a packaging box needs no SQLite/libpq/zstd/PAM/libsecret toolchain.
 if(NOT AIMEE_THIN_CLIENT)
 
+set(AIMEE_PROJECT_INCLUDE_DIRS
+    ${AIMEE_SRC_DIR}
+    ${AIMEE_SRC_DIR}/headers
+    ${AIMEE_SRC_DIR}/modules/config
+    ${AIMEE_SRC_DIR}/modules/economizer
+    ${AIMEE_SRC_DIR}/modules/governance
+    ${AIMEE_SRC_DIR}/modules/workflows
+    ${AIMEE_SRC_DIR}/modules/vault
+    ${AIMEE_SRC_DIR}/modules/guardrails
+    ${AIMEE_SRC_DIR}/modules/roundtable
+    ${AIMEE_SRC_DIR}/modules/kb_client
+    ${AIMEE_SRC_DIR}/modules/agent_eval
+    ${AIMEE_SRC_DIR}/modules/roadmap
+    ${AIMEE_SRC_DIR}/modules/sandbox
+    ${AIMEE_SRC_DIR}/modules/lsp
+    ${AIMEE_SRC_DIR}/modules/skill
+    ${AIMEE_SRC_DIR}/modules/css
+    ${AIMEE_SRC_DIR}/modules/webuser
+    ${AIMEE_SRC_DIR}/pipeline
+    ${AIMEE_SRC_DIR}/vendor/headers)
+
 add_library(aimee-core STATIC
     ${CORE_SRCS}
     ${DB1_SRCS}
     ${DB2_SRCS}
 )
 target_include_directories(aimee-core PUBLIC
-    ${AIMEE_SRC_DIR}
-    ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/config ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance  ${AIMEE_SRC_DIR}/modules/workflows   ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/modules/git ${AIMEE_SRC_DIR}/modules/workspace ${AIMEE_SRC_DIR}/modules/guardrails ${AIMEE_SRC_DIR}/modules/roundtable  ${AIMEE_SRC_DIR}/modules/kb_client ${AIMEE_SRC_DIR}/modules/agent_eval ${AIMEE_SRC_DIR}/modules/learning ${AIMEE_SRC_DIR}/modules/roadmap ${AIMEE_SRC_DIR}/modules/sandbox ${AIMEE_SRC_DIR}/modules/lsp ${AIMEE_SRC_DIR}/modules/skill ${AIMEE_SRC_DIR}/modules/css ${AIMEE_SRC_DIR}/modules/webuser ${AIMEE_SRC_DIR}/pipeline
-    ${AIMEE_SRC_DIR}/vendor/headers
+    ${AIMEE_PROJECT_INCLUDE_DIRS}
     ${AIMEE_SRC_DIR}/db1
     ${AIMEE_SRC_DIR}/db2
-   
 )
 target_compile_options(aimee-core PRIVATE ${AIMEE_COMMON_WARNINGS})
 target_link_libraries(aimee-core PUBLIC Threads::Threads)
 
 add_library(aimee-data STATIC ${DATA_SRCS})
-target_include_directories(aimee-data PUBLIC ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/config ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance  ${AIMEE_SRC_DIR}/modules/workflows   ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/modules/git ${AIMEE_SRC_DIR}/modules/workspace ${AIMEE_SRC_DIR}/modules/guardrails ${AIMEE_SRC_DIR}/modules/roundtable  ${AIMEE_SRC_DIR}/modules/kb_client ${AIMEE_SRC_DIR}/modules/agent_eval ${AIMEE_SRC_DIR}/modules/learning ${AIMEE_SRC_DIR}/modules/roadmap ${AIMEE_SRC_DIR}/modules/sandbox ${AIMEE_SRC_DIR}/modules/lsp ${AIMEE_SRC_DIR}/modules/skill ${AIMEE_SRC_DIR}/modules/css ${AIMEE_SRC_DIR}/modules/webuser ${AIMEE_SRC_DIR}/pipeline ${AIMEE_SRC_DIR}/vendor/headers)
+target_include_directories(aimee-data PUBLIC ${AIMEE_PROJECT_INCLUDE_DIRS})
 target_compile_options(aimee-data PRIVATE ${AIMEE_COMMON_WARNINGS})
 target_link_libraries(aimee-data PUBLIC aimee-core ${ZSTD_LIBRARY})
 
 add_library(aimee-agent STATIC ${AGENT_SRCS})
-target_include_directories(aimee-agent PUBLIC ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/config ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance  ${AIMEE_SRC_DIR}/modules/workflows   ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/modules/git ${AIMEE_SRC_DIR}/modules/workspace ${AIMEE_SRC_DIR}/modules/guardrails ${AIMEE_SRC_DIR}/modules/roundtable  ${AIMEE_SRC_DIR}/modules/kb_client ${AIMEE_SRC_DIR}/modules/agent_eval ${AIMEE_SRC_DIR}/modules/learning ${AIMEE_SRC_DIR}/modules/roadmap ${AIMEE_SRC_DIR}/modules/sandbox ${AIMEE_SRC_DIR}/modules/lsp ${AIMEE_SRC_DIR}/modules/skill ${AIMEE_SRC_DIR}/modules/css ${AIMEE_SRC_DIR}/modules/webuser ${AIMEE_SRC_DIR}/pipeline ${AIMEE_SRC_DIR}/vendor/headers)
+target_include_directories(aimee-agent PUBLIC ${AIMEE_PROJECT_INCLUDE_DIRS})
 target_compile_options(aimee-agent PRIVATE ${AIMEE_COMMON_WARNINGS})
 if(OpenSSL_FOUND OR OPENSSL_FOUND)
     target_link_libraries(aimee-agent PUBLIC aimee-data aimee-core OpenSSL::SSL OpenSSL::Crypto)
@@ -1218,12 +1250,12 @@ else()
 endif()
 
 add_library(aimee-git STATIC ${GIT_SRCS})
-target_include_directories(aimee-git PUBLIC ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/config ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance  ${AIMEE_SRC_DIR}/modules/workflows   ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/modules/git ${AIMEE_SRC_DIR}/modules/workspace ${AIMEE_SRC_DIR}/modules/guardrails ${AIMEE_SRC_DIR}/modules/roundtable  ${AIMEE_SRC_DIR}/modules/kb_client ${AIMEE_SRC_DIR}/modules/agent_eval ${AIMEE_SRC_DIR}/modules/learning ${AIMEE_SRC_DIR}/modules/roadmap ${AIMEE_SRC_DIR}/modules/sandbox ${AIMEE_SRC_DIR}/modules/lsp ${AIMEE_SRC_DIR}/modules/skill ${AIMEE_SRC_DIR}/modules/css ${AIMEE_SRC_DIR}/modules/webuser ${AIMEE_SRC_DIR}/pipeline ${AIMEE_SRC_DIR}/vendor/headers)
+target_include_directories(aimee-git PUBLIC ${AIMEE_PROJECT_INCLUDE_DIRS})
 target_compile_options(aimee-git PRIVATE ${AIMEE_COMMON_WARNINGS})
 target_link_libraries(aimee-git PUBLIC aimee-agent aimee-data aimee-core)
 
 add_library(aimee-cmd STATIC ${CMD_SRCS})
-target_include_directories(aimee-cmd PUBLIC ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/config ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance  ${AIMEE_SRC_DIR}/modules/workflows   ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/modules/git ${AIMEE_SRC_DIR}/modules/workspace ${AIMEE_SRC_DIR}/modules/guardrails ${AIMEE_SRC_DIR}/modules/roundtable  ${AIMEE_SRC_DIR}/modules/kb_client ${AIMEE_SRC_DIR}/modules/agent_eval ${AIMEE_SRC_DIR}/modules/learning ${AIMEE_SRC_DIR}/modules/roadmap ${AIMEE_SRC_DIR}/modules/sandbox ${AIMEE_SRC_DIR}/modules/lsp ${AIMEE_SRC_DIR}/modules/skill ${AIMEE_SRC_DIR}/modules/css ${AIMEE_SRC_DIR}/modules/webuser ${AIMEE_SRC_DIR}/pipeline ${AIMEE_SRC_DIR}/vendor/headers)
+target_include_directories(aimee-cmd PUBLIC ${AIMEE_PROJECT_INCLUDE_DIRS})
 target_compile_options(aimee-cmd PRIVATE ${AIMEE_COMMON_WARNINGS})
 target_link_libraries(aimee-cmd PUBLIC aimee-git aimee-agent aimee-data aimee-core)
 if(WITH_UI)
@@ -1368,6 +1400,59 @@ if(AIMEE_LEAN)
     endif()
 endif()
 
+file(STRINGS "${AIMEE_SRC_DIR}/core/VERSION" AIMEE_CORE_SOURCE_VERSION LIMIT_COUNT 1)
+set(AIMEE_CORE_REQUIRED_VERSION "${AIMEE_CORE_SOURCE_VERSION}" CACHE STRING
+    "Pinned aimee-core package version")
+option(AIMEE_USE_INSTALLED_CORE "Use a versioned installed aimee-core package" OFF)
+if(AIMEE_USE_INSTALLED_CORE)
+    find_package(aimee-core ${AIMEE_CORE_REQUIRED_VERSION} EXACT CONFIG REQUIRED)
+    if(WITH_TLS AND NOT AIMEE_CORE_NATIVE_TLS_ENABLED)
+        message(FATAL_ERROR "The pinned installed aimee-core package has native TLS disabled")
+    endif()
+    add_library(aimee-core-connection ALIAS aimee::aimee-core-connection)
+    if(TARGET aimee::aimee-core-event-bus)
+        add_library(aimee-core-event-bus ALIAS aimee::aimee-core-event-bus)
+    endif()
+else()
+add_library(aimee-core-connection STATIC
+    ${AIMEE_SRC_DIR}/core/connection/auth.c
+    ${AIMEE_SRC_DIR}/core/connection/control.c
+    ${AIMEE_SRC_DIR}/core/connection/endpoint.c
+    ${AIMEE_SRC_DIR}/core/connection/http1.c
+    ${AIMEE_SRC_DIR}/core/connection/socket.c
+)
+target_include_directories(aimee-core-connection PUBLIC ${AIMEE_CORE_CONNECTION_INCLUDE_DIR})
+target_compile_options(aimee-core-connection PRIVATE ${AIMEE_COMMON_WARNINGS})
+if(WIN32)
+    target_compile_definitions(aimee-core-connection PRIVATE _WIN32_WINNT=0x0A00)
+    target_link_libraries(aimee-core-connection PUBLIC ws2_32)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_library(aimee-core-event-bus STATIC
+        ${AIMEE_SRC_DIR}/core/event_bus/bus_attach.c
+        ${AIMEE_SRC_DIR}/core/event_bus/bus_arena.c
+        ${AIMEE_SRC_DIR}/core/event_bus/bus_capture.c
+        ${AIMEE_SRC_DIR}/core/event_bus/bus_client.c
+        ${AIMEE_SRC_DIR}/core/event_bus/bus_endpoint.c
+        ${AIMEE_SRC_DIR}/core/event_bus/bus_host.c
+        ${AIMEE_SRC_DIR}/core/event_bus/module_client.c
+        ${AIMEE_SRC_DIR}/core/event_bus/module_protocol.c
+        ${AIMEE_SRC_DIR}/core/event_bus/module_runtime.c
+        ${AIMEE_SRC_DIR}/core/event_bus/bus_region.c
+        ${AIMEE_SRC_DIR}/core/event_bus/bus_region_host.c
+        ${AIMEE_SRC_DIR}/core/event_bus/bus_ring.c
+        ${AIMEE_SRC_DIR}/core/event_bus/bus_route.c
+        ${AIMEE_SRC_DIR}/core/event_bus/bus_runtime.c
+        ${AIMEE_SRC_DIR}/core/event_bus/bus_wire.c
+    )
+    target_include_directories(aimee-core-event-bus PUBLIC
+        ${AIMEE_SRC_DIR}/core/event_bus/include)
+    target_compile_options(aimee-core-event-bus PRIVATE ${AIMEE_COMMON_WARNINGS})
+    target_link_libraries(aimee-core-event-bus PUBLIC Threads::Threads)
+endif()
+endif()
+
 add_executable(aimee
     ${CLI_SRCS}
     ${CLIENT_SUPPORT_SRCS}
@@ -1395,8 +1480,15 @@ add_executable(aimee
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_router_catalog.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_autonomous_route.c
 )
-target_include_directories(aimee PRIVATE ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/config ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance  ${AIMEE_SRC_DIR}/modules/workflows   ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/modules/git ${AIMEE_SRC_DIR}/modules/workspace ${AIMEE_SRC_DIR}/modules/guardrails ${AIMEE_SRC_DIR}/modules/roundtable  ${AIMEE_SRC_DIR}/modules/kb_client ${AIMEE_SRC_DIR}/modules/agent_eval ${AIMEE_SRC_DIR}/modules/learning ${AIMEE_SRC_DIR}/modules/roadmap ${AIMEE_SRC_DIR}/modules/sandbox ${AIMEE_SRC_DIR}/modules/lsp ${AIMEE_SRC_DIR}/modules/skill ${AIMEE_SRC_DIR}/modules/css ${AIMEE_SRC_DIR}/modules/webuser ${AIMEE_SRC_DIR}/pipeline ${AIMEE_SRC_DIR}/vendor/headers ${AIMEE_SRC_DIR}/db1 ${AIMEE_SRC_DIR}/db2)
+target_include_directories(aimee PRIVATE
+    ${AIMEE_SRC_DIR}
+    ${AIMEE_SRC_DIR}/headers
+    ${AIMEE_SRC_DIR}/modules/config
+    ${AIMEE_SRC_DIR}/vendor/headers
+    ${AIMEE_SRC_DIR}/db1
+    ${AIMEE_SRC_DIR}/db2)
 target_compile_options(aimee PRIVATE ${AIMEE_COMMON_WARNINGS})
+target_link_libraries(aimee PRIVATE aimee-core-connection)
 find_package(ZLIB QUIET)
 if(ZLIB_FOUND)
     target_sources(aimee PRIVATE ${AIMEE_SRC_DIR}/http_content_encoding.c)
@@ -1424,30 +1516,41 @@ if(WIN32)
 endif()
 if(WITH_TLS)
     target_compile_definitions(aimee PRIVATE WITH_TLS)
+endif()
+if(WITH_TLS AND NOT AIMEE_USE_INSTALLED_CORE)
+    target_sources(aimee-core-connection PRIVATE
+        ${AIMEE_SRC_DIR}/core/connection/native_tls_identity.c
+        ${AIMEE_SRC_DIR}/core/connection/native_tls_path.c)
     if(APPLE)
         # macOS: Secure Transport (system frameworks; universal-binary safe; Keychain
         # trust). Deprecated since 10.15 -> silence the deprecation warning for THIS
         # TU only (the build is -Werror); never globally.
-        target_sources(aimee PRIVATE ${AIMEE_SRC_DIR}/aimee_tls_securetransport.c)
-        set_source_files_properties(${AIMEE_SRC_DIR}/aimee_tls_securetransport.c
+        target_sources(aimee-core-connection PRIVATE
+            ${AIMEE_SRC_DIR}/core/connection/native_tls_securetransport.c)
+        set_source_files_properties(
+            ${AIMEE_SRC_DIR}/core/connection/native_tls_securetransport.c
             PROPERTIES COMPILE_OPTIONS "-Wno-deprecated-declarations")
         find_library(SECURITY_FRAMEWORK Security REQUIRED)
         find_library(COREFOUNDATION_FRAMEWORK CoreFoundation REQUIRED)
-        target_link_libraries(aimee PRIVATE ${SECURITY_FRAMEWORK} ${COREFOUNDATION_FRAMEWORK})
+        target_link_libraries(aimee-core-connection PUBLIC
+            ${SECURITY_FRAMEWORK} ${COREFOUNDATION_FRAMEWORK})
     elseif(WIN32)
         # Windows: Schannel/SSPI (no OpenSSL; Windows certificate store). ncrypt
         # supplies CNG (NCryptImportKey) for mTLS client-key import. Pin
         # _WIN32_WINNT>=0x0A00 at the build level too (the schannel TU also sets
         # it before any include) so the CNG/CERT_NCRYPT_KEY_SPEC symbols are
         # exposed regardless of header include order.
-        target_sources(aimee PRIVATE ${AIMEE_SRC_DIR}/aimee_tls_schannel.c)
-        target_compile_definitions(aimee PRIVATE _WIN32_WINNT=0x0A00)
-        target_link_libraries(aimee PRIVATE secur32 crypt32 ncrypt)
+        target_sources(aimee-core-connection PRIVATE
+            ${AIMEE_SRC_DIR}/core/connection/native_tls_schannel.c)
+        target_compile_definitions(aimee-core-connection PRIVATE _WIN32_WINNT=0x0A00)
+        target_link_libraries(aimee-core-connection PUBLIC secur32 crypt32 ncrypt)
     else()
         # Linux/other POSIX: OpenSSL.
         find_package(OpenSSL REQUIRED)
-        target_sources(aimee PRIVATE ${AIMEE_SRC_DIR}/aimee_tls.c)
-        target_link_libraries(aimee PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+        target_sources(aimee-core-connection PRIVATE
+            ${AIMEE_SRC_DIR}/core/connection/tls_openssl.c
+            ${AIMEE_SRC_DIR}/core/connection/native_tls_openssl.c)
+        target_link_libraries(aimee-core-connection PUBLIC OpenSSL::SSL OpenSSL::Crypto)
     endif()
 endif()
 

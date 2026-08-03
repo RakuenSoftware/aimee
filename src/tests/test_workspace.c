@@ -24,7 +24,7 @@ static void write_test_config(const char *yaml)
    fputs(yaml, f);
    fclose(f);
 }
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include "worktree_gc.h"
 #include "session_worktree_key.h"
 #include "platform_test_util.h"

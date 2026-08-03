@@ -12,7 +12,7 @@
 #include "config.h"
 #include "db2/artifacts.h"
 #include "db2/db2_learning.h"
-#include "learning.h"
+#include <aimee/learning/learning.h>
 #include "db2/db2_internal.h"
 #include "db2/db_postgres.h"
 #include "db2/feature_rows.h"

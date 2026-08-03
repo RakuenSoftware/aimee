@@ -4,6 +4,9 @@
 #include "aimee.h"
 #include "agent_config.h"
 
+typedef int (*delegate_role_canonicalizer_fn)(const char *role, char *out, size_t out_cap);
+void delegate_role_register_canonicalizer(delegate_role_canonicalizer_fn canonicalizer);
+
 /* Returns 1 when the role should have tool use enabled even without
  * an explicit --tools flag. */
 int delegate_role_enable_tools_by_default(const char *role);

@@ -17,7 +17,7 @@
 #include "agent_protocol.h"
 #include "agent_request_shaping.h"
 #include "agent_request_build.h" /* agent_build_request + provider predicates */
-#include "agent_tools.h"
+#include <aimee/tools/agent_tools.h>
 #include "agent_tunnel.h"
 #include "config.h"
 #include <aimee/delegates/delegate_driver.h>
@@ -768,7 +768,7 @@ void agent_store_feedback(const agent_result_t *result, const char *role,
 /* ================================================================
  * From: agent_context.c
  * ================================================================ */
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include "tasks.h"
 #include "token_tracker.h"
 #include "conversation_context.h"

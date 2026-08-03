@@ -24,7 +24,7 @@
 #include <unistd.h>
 
 #include "aimee.h"
-#include "agent_tools.h"
+#include <aimee/tools/agent_tools.h>
 #include "anchor_snapshot.h"
 #include "cJSON.h"
 #include "platform_test_util.h"

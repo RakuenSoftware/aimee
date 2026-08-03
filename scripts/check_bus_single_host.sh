@@ -9,7 +9,7 @@
 # mechanical:
 #
 #   1. bus_host_create is defined in exactly one translation unit.
-#   2. memfd_create (region creation) appears only in the bus's own region/host
+#   2. memfd_create (region creation) appears only in the bus's host-only region
 #      code, never in a second would-be host.
 #   3. no Go file in server-go/bus creates regions or accepts attaches — it maps
 #      what it is handed and connects; it never listens or memfds.
@@ -26,7 +26,7 @@ note() { printf '%s\n' "$*" >&2; }
 
 # 1. exactly one definition of bus_host_create.
 defs=$({ grep -rlE 'bus_host_result_t[[:space:]]+bus_host_create[[:space:]]*\(' \
-   src/modules/bus/*.c 2>/dev/null || true; })
+   src/core/event_bus/*.c 2>/dev/null || true; })
 n=$(printf '%s\n' "$defs" | grep -c . || true)
 if [ "$n" != "1" ]; then
    note "FAIL: bus_host_create is defined in $n translation units (want 1):"
@@ -35,19 +35,19 @@ if [ "$n" != "1" ]; then
 fi
 
 # 2. Within the bus module, a region (memfd) is created in exactly one place —
-#    bus_region.c. This is about a second BUS host, not global memfd policy:
+#    bus_region_host.c. This is about a second BUS host, not global memfd policy:
 #    other subsystems (git credential fds, ssh-agent) use memfd_create for their
 #    own reasons and are none of the bus's business. So the scan is scoped to
-#    src/modules/bus/ and matches the CALL (with a paren), not comments.
+#    src/core/event_bus/ and matches the CALL (with a paren), not comments.
 while IFS= read -r hit; do
    [ -z "$hit" ] && continue
    file="${hit%%:*}"
    case "$file" in
-   src/modules/bus/bus_region.c) continue ;;
+   src/core/event_bus/bus_region_host.c) continue ;;
    esac
-   note "FAIL: a second region creator — memfd_create called outside bus_region.c: $hit"
+   note "FAIL: a second region creator — memfd_create called outside bus_region_host.c: $hit"
    fail=1
-done < <(grep -rn 'memfd_create[[:space:]]*(' src/modules/bus/*.c 2>/dev/null || true)
+done < <(grep -rn 'memfd_create[[:space:]]*(' src/core/event_bus/*.c 2>/dev/null || true)
 
 # 3. the Go client is a client only: it must not create regions (memfd) or
 #    accept/listen (a host does that).

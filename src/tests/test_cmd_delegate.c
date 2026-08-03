@@ -10,7 +10,7 @@
 #include <aimee/delegates/delegate_role.h>
 #include "model_registry.h"
 #include "log.h"
-#include "agent_tools_internal.h"
+#include "modules/tools/agent_tools_internal.h"
 #include "provider_cli_adapter.h"
 #include "cJSON.h"
 

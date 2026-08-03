@@ -24,6 +24,13 @@
 
 #define WS_NAME_MAX 64
 
+static ws_scope_ref_validator_fn g_ref_validator;
+
+void ws_scope_register_ref_validator(ws_scope_ref_validator_fn validator)
+{
+   g_ref_validator = validator;
+}
+
 int ws_scope_name_valid(const char *name)
 {
    if (!name || !name[0])
@@ -52,6 +59,11 @@ int ws_scope_name_valid(const char *name)
 
 int ws_scope_project_ref_valid(const char *buf, size_t len)
 {
+   if (g_ref_validator)
+   {
+      int allowed = 0;
+      return g_ref_validator(buf, len, &allowed) == 0 && allowed;
+   }
    if (!buf || len == 0 || len > WS_REF_MAX)
       return 0;
    /* Embedded NUL is rejected by byte-scan — callers pass (buf, len) straight

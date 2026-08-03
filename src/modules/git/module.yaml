@@ -40,7 +40,12 @@
     "src/modules/git/mcp_git_branch.c",
     "src/modules/git/mcp_git_pr.c",
     "src/modules/git/mcp_git_query.c",
-    "src/modules/git/mcp_git_write.c"
+    "src/modules/git/mcp_git_write.c",
+    "src/modules/git/module_adapter.c"
+  ],
+  "public_headers": [
+    "src/modules/git/include/aimee/git/git_ops.h",
+    "src/modules/git/include/aimee/git/module_api.h"
   ],
   "private_headers": [
     "src/modules/git/forge_credentials.h",
@@ -51,7 +56,6 @@
     "src/modules/git/git_oauth_device.h",
     "src/modules/git/git_oauth_gh.h",
     "src/modules/git/git_oauth_github.h",
-    "src/modules/git/git_ops.h",
     "src/modules/git/git_org_repos.h",
     "src/modules/git/git_pr_api.h",
     "src/modules/git/git_project.h",

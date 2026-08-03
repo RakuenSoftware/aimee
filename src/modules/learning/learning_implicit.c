@@ -8,7 +8,7 @@
 #include "aimee.h"
 #include "config.h"
 #include "dogfood.h"
-#include "learning.h"
+#include <aimee/learning/learning.h>
 #include "learning_implicit.h"
 #include <string.h>
 #include <time.h>

@@ -2,7 +2,7 @@
 #include "aimee.h"
 #include "platform_path.h"
 #include "commands.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include "agent.h"
 #include "config.h"
 #include "cmd_describe_platform.h"

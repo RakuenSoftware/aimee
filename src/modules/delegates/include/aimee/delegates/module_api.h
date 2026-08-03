@@ -1,0 +1,58 @@
+/* Wire contract for delegate invocation role normalization. */
+#ifndef AIMEE_DELEGATES_MODULE_API_H
+#define AIMEE_DELEGATES_MODULE_API_H 1
+
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+
+#define AIMEE_DELEGATES_EVENT_INVOKE    6657u
+#define AIMEE_DELEGATES_STAGE_INVOKE    1u
+#define AIMEE_DELEGATES_REQUEST_MAGIC   0x4c4f5244u /* "DROL" */
+#define AIMEE_DELEGATES_RESPONSE_MAGIC  0x4e414344u /* "DCAN" */
+#define AIMEE_DELEGATES_WIRE_VERSION    1u
+#define AIMEE_DELEGATES_ROLE_MAX        63u
+#define AIMEE_DELEGATES_MESSAGE_LEN     72u
+
+static inline void aimee_delegates_put_u32(uint8_t *p, uint32_t v)
+{
+   for (unsigned i = 0; i < 4; ++i)
+      p[i] = (uint8_t)(v >> (8u * i));
+}
+
+static inline uint32_t aimee_delegates_get_u32(const uint8_t *p)
+{
+   uint32_t v = 0;
+   for (unsigned i = 0; i < 4; ++i)
+      v |= (uint32_t)p[i] << (8u * i);
+   return v;
+}
+
+static inline int aimee_delegates_message_encode(uint32_t magic, const char *role, uint8_t *out,
+                                                  size_t cap)
+{
+   size_t len = role ? strlen(role) : 0;
+   if (!out || cap < AIMEE_DELEGATES_MESSAGE_LEN || len == 0 || len > AIMEE_DELEGATES_ROLE_MAX)
+      return -1;
+   memset(out, 0, AIMEE_DELEGATES_MESSAGE_LEN);
+   aimee_delegates_put_u32(out, magic);
+   out[4] = (uint8_t)AIMEE_DELEGATES_WIRE_VERSION;
+   out[6] = (uint8_t)len;
+   memcpy(out + 8, role, len);
+   return 0;
+}
+
+static inline int aimee_delegates_message_decode(const uint8_t *in, size_t len, uint32_t magic,
+                                                  char *role, size_t role_cap)
+{
+   if (!in || len != AIMEE_DELEGATES_MESSAGE_LEN || !role || role_cap == 0 ||
+       aimee_delegates_get_u32(in) != magic || in[4] != AIMEE_DELEGATES_WIRE_VERSION ||
+       in[5] != 0 || in[7] != 0 || in[6] == 0 || in[6] > AIMEE_DELEGATES_ROLE_MAX ||
+       (size_t)in[6] >= role_cap)
+      return -1;
+   memcpy(role, in + 8, in[6]);
+   role[in[6]] = '\0';
+   return 0;
+}
+
+#endif

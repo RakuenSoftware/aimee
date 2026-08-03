@@ -12,6 +12,7 @@
 #include "kb_workload_provider.h"
 #include "management_read.h"
 #include "cJSON.h"
+#include <aimee/core/connection/auth.h>
 
 #include <openssl/bio.h>
 #include <openssl/crypto.h>
@@ -815,9 +816,11 @@ static kb_management_read_result_t runtime_read(void *unused, const kb_principal
    }
    if (monotonic_millis(NULL) >= deadline)
       goto done;
-   n = snprintf(headers, sizeof(headers),
-                "Authorization: Bearer %s\r\nX-Aimee-Management-Status: %s\r\n", bearer.jwt,
-                staple);
+   char authorization[KB_MGMT_TOKEN_WIRE_MAX + 8] = "";
+   if (aimee_core_bearer_value(authorization, sizeof(authorization), bearer.jwt) != 0)
+      goto done;
+   n = snprintf(headers, sizeof(headers), "Authorization: %s\r\nX-Aimee-Management-Status: %s\r\n",
+                authorization, staple);
    if (n < 0 || (size_t)n >= sizeof(headers))
       goto done;
    server_response = calloc(32769, 1);

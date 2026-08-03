@@ -4,11 +4,11 @@
  * the entire server, semantic sidecar, skill loader, or release gate. */
 #include "aimee.h"
 #include "agent_config.h"
-#include "git_verify.h"
+#include "modules/git/git_verify.h"
 #include "guardrails.h"
 #include "guardrails_semantic.h"
 #include "model_registry.h"
-#include "workspace_provider.h"
+#include "modules/workspace/workspace_provider.h"
 #include <aimee/skills/skill.h>
 
 #include <string.h>

@@ -1,6 +1,6 @@
-#include "git_verify_select.h"
+#include "modules/git/git_verify_select.h"
 
-#include "git_verify.h"
+#include "modules/git/git_verify.h"
 
 #include <assert.h>
 #include <stdio.h>

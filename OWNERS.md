@@ -5,7 +5,7 @@ serve several modules; they do not inherit authority over those modules.
 
 | Area | Owner | Paths | Review focus |
 | --- | --- | --- | --- |
-| event bus | runtime core | `src/modules/bus/`, `server-go/bus/` | wire vectors, ordering, backpressure, leases, admission, shutdown |
+| event bus | runtime core | `src/core/event_bus/`, `server-go/bus/` | wire vectors, ordering, backpressure, leases, admission, shutdown |
 | audit and governance | audit module | `src/modules/audit/` | completeness, PII bounds, WORM parity, witness behavior |
 | DB1 | server | `src/db1/` | migrations, transaction ownership, local privacy |
 | DB2 | KB | `src/db2/`, `src/kb/` | schema, scope, retrieval, pgvector, ingest |

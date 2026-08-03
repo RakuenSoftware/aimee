@@ -2,7 +2,7 @@
 
 #include "log.h"
 #include "util.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 
 #include <dirent.h>
 #include <stdio.h>

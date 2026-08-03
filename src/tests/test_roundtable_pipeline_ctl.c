@@ -20,8 +20,8 @@
 #include "config.h" /* defines MAX_PATH_LEN used by agent_types.h */
 #include "agent_config.h"
 #include "cJSON.h"
-#include "git_pr_api.h" /* git_pr_ci_t for the CI-gate stub */
-#include "mcp_git.h"
+#include "modules/git/git_pr_api.h" /* git_pr_ci_t for the CI-gate stub */
+#include "modules/git/mcp_git.h"
 #include "roundtable_pipeline.h"
 #include "server.h"
 #include "server_http.h"

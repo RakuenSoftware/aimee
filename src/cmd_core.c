@@ -9,7 +9,7 @@
 #include <aimee/delegates/delegate_credentials.h>
 #include "db2/lifecycle.h"
 #include "kb_client.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include "commands.h"
 #include "persona.h"
 #include "dashboard.h"
@@ -17,11 +17,11 @@
 #include "memory.h"
 #include "cJSON.h"
 #include "aimee_client.h"
-#include "mcp_git.h"
-#include "git_verify.h"
+#include "modules/git/mcp_git.h"
+#include "modules/git/git_verify.h"
 #include "headers/events.h"
 #include "headers/aimee_home.h"
-#include "workspace_manifest.h"
+#include "modules/workspace/workspace_manifest.h"
 #include <unistd.h>
 #include <sys/stat.h>
 #include <ctype.h>

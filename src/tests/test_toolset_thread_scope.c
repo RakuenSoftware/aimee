@@ -14,8 +14,8 @@
  * These tests fail against the env-var implementation and pass against the
  * thread-local, which is the whole point of writing them. */
 #include "aimee.h"
-#include "agent_tools.h"
-#include "workspace_provider.h"
+#include <aimee/tools/agent_tools.h>
+#include "modules/workspace/workspace_provider.h"
 #include <assert.h>
 #include <pthread.h>
 #include <stdio.h>

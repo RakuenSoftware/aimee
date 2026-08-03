@@ -36,14 +36,33 @@ void kb_client_dependency_health(kb_client_dependency_health_t *out)
    snprintf(out->state, sizeof(out->state), "closed");
 }
 
+int obs_bus_module_available(uint32_t event_kind)
+{
+   (void)event_kind;
+   return 1;
+}
+
 #define NOW 1000000L
 
 int main(void)
 {
    char resp[2048];
-   server_ready_diagnostics_t ok = {1, "", "closed", 0, 999000, "2026-07-30T00:00:00Z"};
-   server_ready_diagnostics_t failed = {0,    "kb_breaker", "open",
-                                        1200, 998000,       "2026-07-30T00:00:00Z"};
+   server_ready_diagnostics_t ok = {.retrieval_ok = 1,
+                                    .modules_ok = 1,
+                                    .failed_boundary = "",
+                                    .missing_module = "",
+                                    .breaker_state = "closed",
+                                    .retry_after_ms = 0,
+                                    .last_success_query_ms = 999000,
+                                    .last_ingest_at = "2026-07-30T00:00:00Z"};
+   server_ready_diagnostics_t failed = {.retrieval_ok = 0,
+                                        .modules_ok = 1,
+                                        .failed_boundary = "kb_breaker",
+                                        .missing_module = "",
+                                        .breaker_state = "open",
+                                        .retry_after_ms = 1200,
+                                        .last_success_query_ms = 998000,
+                                        .last_ingest_at = "2026-07-30T00:00:00Z"};
 
    /* Never sampled ⇒ unknown, not ready, and a null age rather than a
     * fabricated one. An unsampled server must never read as ready. */
@@ -82,8 +101,21 @@ int main(void)
       assert(strstr(resp, "\"db1\":\"ok\""));
       assert(strstr(resp, "\"kb\":\"ok\""));
       assert(strstr(resp, "\"retrieval\":\"ok\""));
+      assert(strstr(resp, "\"modules\":\"ok\""));
       assert(strstr(resp, "\"last_success_query_ms\":999000"));
       assert(strstr(resp, "\"age_seconds\":5"));
+   }
+
+   /* A required process module that has not attached keeps the daemon out of
+    * rotation even when its remote dependencies are healthy. */
+   {
+      server_ready_diagnostics_t detached = ok;
+      detached.modules_ok = 0;
+      detached.missing_module = "routing";
+      int st = server_ready_render(1, 1, &detached, NOW - 5, NOW, 60, resp, sizeof(resp));
+      assert(st == 503);
+      assert(strstr(resp, "\"modules\":\"fail\""));
+      assert(strstr(resp, "\"missing_module\":\"routing\""));
    }
 
    /* A fresh snapshot with missing diagnostics fails closed with valid,

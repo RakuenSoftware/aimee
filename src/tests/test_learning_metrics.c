@@ -14,7 +14,7 @@
 #include <string.h>
 #include <unistd.h>
 #include "aimee.h"
-#include "learning.h"
+#include <aimee/learning/learning.h>
 
 static void seed_signal(const char *signal_type, const char *title, const char *description)
 {

@@ -32,6 +32,7 @@
 #include "server.h" /* CAP_* / CAPS_* */
 #include "server_write_tier.h"
 #include "server_write_tier_db1.h" /* the db1-backed verify/consume wrappers */
+#include <aimee/core/connection/auth.h>
 
 #include <openssl/crypto.h> /* OPENSSL_cleanse */
 #include <pthread.h>
@@ -245,9 +246,8 @@ int server_http_resolve_write_tier(int is_tcp, const char *buf, const char *meth
    size_t identity_len = 0;
    if (http_header(buf, "Authorization", auth_value, sizeof(auth_value)))
    {
-      const char *credential = auth_value;
-      if (strncasecmp(credential, "Bearer ", 7) == 0)
-         credential += 7;
+      const char *bearer = aimee_core_bearer_token(auth_value);
+      const char *credential = bearer ? bearer : auth_value;
       while (*credential == ' ')
          credential++;
       /* Only a compact JWS can be an identity token. The legacy shared bearer is

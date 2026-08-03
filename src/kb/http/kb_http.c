@@ -60,9 +60,10 @@
 #include "kb_intel_payload.h"
 #include "kb/kb_login_throttle.h"
 #include "log.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include "cJSON.h"
 #include "kb_http_json.h"
+#include <aimee/core/connection/auth.h>
 #include <unistd.h>
 #define KB_HTTP_READ_MAX 4096
 #define KB_HTTP_RESP_MAX (1024 * 1024)
@@ -164,8 +165,9 @@ int kb_http_route(const char *method, const char *path, const char *auth_header,
     * The built-in kb-token verifier reproduces the v1 opaque-bearer check. */
    if (bearer_token && bearer_token[0])
    {
-      const char *presented =
-          (auth_header && strncmp(auth_header, "Bearer ", 7) == 0) ? auth_header + 7 : "";
+      const char *presented = aimee_core_bearer_token(auth_header);
+      if (!presented)
+         presented = "";
       kb_verify_result_t vr;
       if (!kb_verifier_authenticate(presented, bearer_token, &vr, NULL, 0))
       {
@@ -633,8 +635,9 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
     * /v1/metrics + POST /v1/telemetry/metrics WITHOUT the kb bearer, so it runs
     * BEFORE the bearer gate; a miss returns -1 and falls through to admin auth. */
    {
-      const char *presented =
-          (auth_header && strncmp(auth_header, "Bearer ", 7) == 0) ? auth_header + 7 : "";
+      const char *presented = aimee_core_bearer_token(auth_header);
+      if (!presented)
+         presented = "";
       int tk = kb_http_telemetry_token_route(method, path, query_string, body, presented, out_buf,
                                              out_cap);
       if (tk >= 0)
@@ -673,8 +676,9 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
     * anonymous admin writes. */
    if (!local_liveness_probe && bearer_token && bearer_token[0])
    {
-      const char *presented =
-          (auth_header && strncmp(auth_header, "Bearer ", 7) == 0) ? auth_header + 7 : "";
+      const char *presented = aimee_core_bearer_token(auth_header);
+      if (!presented)
+         presented = "";
       if (!kb_verifier_authenticate(presented, bearer_token, &vr, vr_which, sizeof(vr_which)))
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"unauthorized\"}");

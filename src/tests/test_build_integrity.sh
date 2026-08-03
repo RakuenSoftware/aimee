@@ -340,6 +340,15 @@ else
     fail "server entrypoint leaves the workflow registry root-owned"
 fi
 
+if grep -qF 'chown aimee:aimee "$AIMEE_HOME/modules.d"' \
+        ../deploy/container/server-entrypoint.sh &&
+   grep -qF 'chmod 0700 "$AIMEE_HOME/modules.d" "$AIMEE_HOME/modules.d/server"' \
+        ../deploy/container/server-entrypoint.sh; then
+    pass "server entrypoint keeps the private module policy traversable by the daemon"
+else
+    fail "server entrypoint leaves the private module policy inaccessible to the daemon"
+fi
+
 # Upgraded persistent volumes can spend tens of seconds recovering WAL state
 # before the C resource socket appears.  The entrypoint must not kill a live
 # child at the old 15-second deadline, and the same-binary OAuth prewarm helper
@@ -764,11 +773,11 @@ cmake_boundary_failures=""
 for target_block in client webchat; do
     block_var="cmake_${target_block}_links"
     block="${!block_var}"
-    if echo "$block" | grep -Eq 'aimee-(cmd|git|agent|data|core)|SQLite::SQLite3|LIBPQ|libpq'; then
+    if echo "$block" | grep -Eq 'aimee-(cmd|git|agent|data|core)([[:space:]]|[)]|$)|SQLite::SQLite3|LIBPQ|libpq'; then
         cmake_boundary_failures="$cmake_boundary_failures aimee-$target_block"
     fi
 done
-if echo "$cmake_server_links" | grep -Eq 'aimee-(cmd|git|agent|data|core)|LIBPQ|libpq'; then
+if echo "$cmake_server_links" | grep -Eq 'aimee-(cmd|git|agent|data|core)([[:space:]]|[)]|$)|LIBPQ|libpq'; then
     cmake_boundary_failures="$cmake_boundary_failures aimee-server"
 fi
 if [ -z "$cmake_boundary_failures" ]; then

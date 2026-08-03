@@ -5,6 +5,8 @@
  * same in-memory PEM the CA / cert-issuance layer (kb_pki.h) produces — so no
  * temp files are involved. TLS 1.2+ only. */
 #include "kb_tls.h"
+#include <aimee/core/connection/socket.h>
+#include <aimee/core/connection/tls_openssl.h>
 
 #include <openssl/bn.h>
 #include <openssl/pem.h>
@@ -16,12 +18,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <netdb.h>
-#include <netinet/tcp.h>
-#include <sys/socket.h>
-#include <sys/time.h>
-#include <unistd.h>
-
 /* Trust `ca` as the verify anchor, and — when both cert_pem and key_pem are
  * non-NULL — load (cert, key) as this peer's own identity. A NULL cert/key pair
  * yields a CA-verify-only context (e.g. a client doing the cert-less enrollment
@@ -32,50 +28,17 @@ static int ctx_load_identity(SSL_CTX *ctx, const char *cert_pem, const char *key
    if (!ca_pem)
       return -1;
    int want_identity = (cert_pem && key_pem);
-
-   int ok = -1;
-   BIO *cb = want_identity ? BIO_new_mem_buf(cert_pem, -1) : NULL;
-   BIO *kb = want_identity ? BIO_new_mem_buf(key_pem, -1) : NULL;
-   BIO *ab = BIO_new_mem_buf(ca_pem, -1);
-   X509 *cert = cb ? PEM_read_bio_X509(cb, NULL, NULL, NULL) : NULL;
-   EVP_PKEY *key = kb ? PEM_read_bio_PrivateKey(kb, NULL, NULL, NULL) : NULL;
-   X509 *ca = ab ? PEM_read_bio_X509(ab, NULL, NULL, NULL) : NULL;
-   if (!ca)
-      goto done;
-
-   if (want_identity)
-   {
-      if (!cert || !key)
-         goto done;
-      if (SSL_CTX_use_certificate(ctx, cert) != 1)
-         goto done;
-      if (SSL_CTX_use_PrivateKey(ctx, key) != 1)
-         goto done;
-      if (SSL_CTX_check_private_key(ctx) != 1)
-         goto done;
-   }
-   /* Trust the CA for verifying the peer. */
-   if (X509_STORE_add_cert(SSL_CTX_get_cert_store(ctx), ca) != 1)
-      goto done;
-   ok = 0;
-
-done:
-   X509_free(ca);
-   EVP_PKEY_free(key);
-   X509_free(cert);
-   BIO_free(ab);
-   BIO_free(kb);
-   BIO_free(cb);
-   return ok;
+   if (want_identity && aimee_core_tls_use_identity_pem(ctx, cert_pem, key_pem) != 0)
+      return -1;
+   return aimee_core_tls_trust_pem(ctx, ca_pem);
 }
 
 SSL_CTX *kb_tls_server_ctx(const char *ca_cert_pem, const char *server_cert_pem,
                            const char *server_key_pem)
 {
-   SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
+   SSL_CTX *ctx = aimee_core_tls_server_context();
    if (!ctx)
       return NULL;
-   SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
    if (ctx_load_identity(ctx, server_cert_pem, server_key_pem, ca_cert_pem) != 0)
    {
       SSL_CTX_free(ctx);
@@ -99,10 +62,9 @@ SSL_CTX *kb_tls_server_ctx(const char *ca_cert_pem, const char *server_cert_pem,
 SSL_CTX *kb_tls_client_ctx(const char *ca_cert_pem, const char *client_cert_pem,
                            const char *client_key_pem)
 {
-   SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
+   SSL_CTX *ctx = aimee_core_tls_client_context();
    if (!ctx)
       return NULL;
-   SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
    if (ctx_load_identity(ctx, client_cert_pem, client_key_pem, ca_cert_pem) != 0)
    {
       SSL_CTX_free(ctx);
@@ -218,8 +180,6 @@ int kb_tls_peer_serial(SSL *ssl, char *out, size_t cap)
 
 /* --- the mTLS client dialer --- */
 
-#include <netdb.h>
-
 #define KB_TLS_CLIENT_HEAD_MAX (64 * 1024)
 
 struct kb_tls_client_conn
@@ -229,19 +189,6 @@ struct kb_tls_client_conn
    int fd;
    char host[256];
 };
-
-static int ssl_write_all(SSL *ssl, const char *buf, size_t len)
-{
-   size_t sent = 0;
-   while (sent < len)
-   {
-      int n = SSL_write(ssl, buf + sent, (int)(len - sent));
-      if (n <= 0)
-         return -1;
-      sent += (size_t)n;
-   }
-   return 0;
-}
 
 static int response_token(const char *start, const char *end, const char *token)
 {
@@ -282,7 +229,7 @@ static int read_content_length_response(SSL *ssl, char *resp_out, size_t resp_ca
    size_t total = 0, head_len = 0, content_len = 0;
    while (total < KB_TLS_CLIENT_HEAD_MAX)
    {
-      int n = SSL_read(ssl, raw + total, (int)(KB_TLS_CLIENT_HEAD_MAX - total));
+      long n = aimee_core_tls_read(ssl, raw + total, KB_TLS_CLIENT_HEAD_MAX - total);
       if (n <= 0)
          goto done;
       total += (size_t)n;
@@ -362,7 +309,7 @@ static int read_content_length_response(SSL *ssl, char *resp_out, size_t resp_ca
       goto done;
    while (total < head_len + content_len)
    {
-      int n = SSL_read(ssl, raw + total, (int)(head_len + content_len - total));
+      long n = aimee_core_tls_read(ssl, raw + total, head_len + content_len - total);
       if (n <= 0)
          goto done;
       total += (size_t)n;
@@ -399,39 +346,17 @@ static kb_tls_client_conn_t *client_conn_open_owned_ctx(const char *host, int po
 
    char portstr[16];
    snprintf(portstr, sizeof(portstr), "%d", port);
-   struct addrinfo hints, *res = NULL;
-   memset(&hints, 0, sizeof(hints));
-   hints.ai_family = AF_UNSPEC;
-   hints.ai_socktype = SOCK_STREAM;
-   if (getaddrinfo(host, portstr, &hints, &res) != 0)
-      goto fail;
-   for (struct addrinfo *a = res; a; a = a->ai_next)
-   {
-      conn->fd = socket(a->ai_family, a->ai_socktype, a->ai_protocol);
-      if (conn->fd < 0)
-         continue;
-      if (connect(conn->fd, a->ai_addr, a->ai_addrlen) == 0)
-         break;
-      close(conn->fd);
-      conn->fd = -1;
-   }
-   freeaddrinfo(res);
+   conn->fd = aimee_core_socket_connect(host, portstr, 30000);
    if (conn->fd < 0)
       goto fail;
-   int one = 1;
-   (void)setsockopt(conn->fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
-   struct timeval timeout = {.tv_sec = 30, .tv_usec = 0};
-   setsockopt(conn->fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-   setsockopt(conn->fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
-   conn->ssl = SSL_new(conn->ctx);
+   if (aimee_core_socket_set_timeouts(conn->fd, 30000, 30000) != 0)
+      goto fail;
+   conn->ssl = aimee_core_tls_client_session_new(conn->ctx, conn->fd, host, 1);
    if (!conn->ssl)
       goto fail;
    if (session && SSL_set_session(conn->ssl, session) != 1)
       goto fail;
-   SSL_set_fd(conn->ssl, conn->fd);
-   SSL_set_tlsext_host_name(conn->ssl, host);
-   SSL_set1_host(conn->ssl, host);
-   if (SSL_connect(conn->ssl) != 1)
+   if (aimee_core_tls_handshake_client(conn->ssl) != 0)
       goto fail;
    snprintf(conn->host, sizeof(conn->host), "%s", host);
    return conn;
@@ -468,14 +393,7 @@ int kb_tls_client_conn_set_timeout(kb_tls_client_conn_t *conn, int timeout_ms)
 {
    if (!conn || conn->fd < 0 || timeout_ms <= 0)
       return -1;
-   struct timeval timeout = {
-       .tv_sec = timeout_ms / 1000,
-       .tv_usec = (timeout_ms % 1000) * 1000,
-   };
-   if (setsockopt(conn->fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) != 0 ||
-       setsockopt(conn->fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) != 0)
-      return -1;
-   return 0;
+   return aimee_core_socket_set_timeouts(conn->fd, timeout_ms, timeout_ms);
 }
 
 int kb_tls_client_conn_session_reused(const kb_tls_client_conn_t *conn)
@@ -521,7 +439,7 @@ int kb_tls_client_conn_request_with_type(kb_tls_client_conn_t *conn, const char 
                                 method, path, conn->host, authorization ? authorization : "",
                                 type_header, blen, close_after ? "close" : "keep-alive", b);
    int rc =
-       (rn > 0 && (size_t)rn < cap && ssl_write_all(conn->ssl, req, (size_t)rn) == 0)
+       (rn > 0 && (size_t)rn < cap && aimee_core_tls_write_all(conn->ssl, req, (size_t)rn) == 0)
            ? read_content_length_response(conn->ssl, resp_out, resp_cap, status_out, reusable_out)
            : -1;
    free(req);
@@ -545,11 +463,10 @@ void kb_tls_client_conn_close(kb_tls_client_conn_t *conn)
       return;
    if (conn->ssl)
    {
-      SSL_shutdown(conn->ssl);
-      SSL_free(conn->ssl);
+      aimee_core_tls_session_free(conn->ssl);
    }
    if (conn->fd >= 0)
-      close(conn->fd);
+      aimee_core_socket_close(conn->fd);
    SSL_CTX_free(conn->ctx);
    free(conn);
 }
@@ -596,35 +513,14 @@ int kb_tls_fetch_ca(const char *host, int port, const char *expected_fp_hex, cha
 
    /* First contact: no CA yet, so do NOT verify the server here — trust comes
     * from matching the fetched CA's fingerprint to the pinned value below. */
-   SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
+   SSL_CTX *ctx = aimee_core_tls_client_context();
    if (!ctx)
       return -1;
-   SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
    SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
 
    char portstr[16];
    snprintf(portstr, sizeof(portstr), "%d", port);
-   struct addrinfo hints, *res = NULL;
-   memset(&hints, 0, sizeof(hints));
-   hints.ai_family = AF_UNSPEC;
-   hints.ai_socktype = SOCK_STREAM;
-   if (getaddrinfo(host, portstr, &hints, &res) != 0)
-   {
-      SSL_CTX_free(ctx);
-      return -1;
-   }
-   int fd = -1;
-   for (struct addrinfo *a = res; a; a = a->ai_next)
-   {
-      fd = socket(a->ai_family, a->ai_socktype, a->ai_protocol);
-      if (fd < 0)
-         continue;
-      if (connect(fd, a->ai_addr, a->ai_addrlen) == 0)
-         break;
-      close(fd);
-      fd = -1;
-   }
-   freeaddrinfo(res);
+   int fd = aimee_core_socket_connect(host, portstr, 30000);
    if (fd < 0)
    {
       SSL_CTX_free(ctx);
@@ -633,12 +529,10 @@ int kb_tls_fetch_ca(const char *host, int port, const char *expected_fp_hex, cha
 
    int rc = -1;
    char *raw = NULL;
-   SSL *ssl = SSL_new(ctx);
+   SSL *ssl = aimee_core_tls_client_session_new(ctx, fd, host, 0);
    if (!ssl)
       goto done;
-   SSL_set_fd(ssl, fd);
-   SSL_set_tlsext_host_name(ssl, host);
-   if (SSL_connect(ssl) != 1)
+   if (aimee_core_tls_handshake_client(ssl) != 0)
       goto done;
 
    {
@@ -646,7 +540,8 @@ int kb_tls_fetch_ca(const char *host, int port, const char *expected_fp_hex, cha
       int rn =
           snprintf(req, sizeof(req),
                    "GET /v1/enroll/ca HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", host);
-      if (SSL_write(ssl, req, rn) <= 0)
+      if (rn <= 0 || (size_t)rn >= sizeof(req) ||
+          aimee_core_tls_write_all(ssl, req, (size_t)rn) != 0)
          goto done;
    }
 
@@ -658,7 +553,7 @@ int kb_tls_fetch_ca(const char *host, int port, const char *expected_fp_hex, cha
       size_t total = 0;
       while (total < rawcap - 1)
       {
-         int n = SSL_read(ssl, raw + total, (int)(rawcap - 1 - total));
+         long n = aimee_core_tls_read(ssl, raw + total, rawcap - 1 - total);
          if (n <= 0)
             break;
          total += (size_t)n;
@@ -689,10 +584,9 @@ done:
    free(raw);
    if (ssl)
    {
-      SSL_shutdown(ssl);
-      SSL_free(ssl);
+      aimee_core_tls_session_free(ssl);
    }
-   close(fd);
+   aimee_core_socket_close(fd);
    SSL_CTX_free(ctx);
    return rc;
 }

@@ -13,7 +13,7 @@
 #include "kb_demote.h"
 #include "kb_ranker_fit.h"
 #include "kb_service_agent.h"
-#include "learning_evidence.h"
+#include "modules/learning/learning_evidence.h"
 #include "aimee/protocols/mcp/mcp_client_registry.h" /* invoke kb-hosted MCP plugin tools */
 #include "kb_mcp_audit_bridge.h" /* record kb-hosted tool-call outcomes on the kb bus */
 

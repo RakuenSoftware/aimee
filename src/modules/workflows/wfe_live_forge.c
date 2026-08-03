@@ -21,8 +21,8 @@
 #include "wfe_live_forge.h"
 
 #include "config.h"
-#include "git_cred_inject.h" /* FD-mode env for the branch push (token on a memfd) */
-#include "git_pr_api.h"      /* in-process GitHub REST: create/info/ci/merge */
+#include "modules/git/git_cred_inject.h" /* FD-mode env for the branch push (token on a memfd) */
+#include "modules/git/git_pr_api.h"      /* in-process GitHub REST: create/info/ci/merge */
 #include "log.h"
 #include "util.h" /* safe_exec_capture* */
 #include "wfe_blocks.h"

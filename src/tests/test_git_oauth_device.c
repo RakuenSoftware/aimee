@@ -2,7 +2,7 @@
  * provider-name parsing + endpoint construction. No network (the HTTP/vault
  * externals are stubbed for linking only; these tests never invoke them). */
 
-#include "git_oauth_device.h"
+#include "modules/git/git_oauth_device.h"
 #include "vault_service.h"
 
 #include <assert.h>
