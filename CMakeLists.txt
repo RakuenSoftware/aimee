@@ -96,7 +96,14 @@ include_directories(
     "${AIMEE_SRC_DIR}/modules/git/include"
     "${AIMEE_SRC_DIR}/modules/response-composition/include"
     "${AIMEE_SRC_DIR}/modules/skills/include"
-    "${AIMEE_SRC_DIR}/modules/routing/include")
+    "${AIMEE_SRC_DIR}/modules/routing/include"
+    # workflows keeps its headers flat beside its sources rather than under an
+    # include/ subdir, so it needs the module directory itself. src/Makefile has
+    # carried -Imodules/workflows all along; without the same entry here the
+    # thin-client CMake build compiled modules/workflows/*.c but could not find
+    # wfe_def.h from cmd_workflow.c -- breaking macos-build and windows-cmake
+    # while the Make build stayed green.
+    "${AIMEE_SRC_DIR}/modules/workflows")
 
 # LTO / IPO: must be set BEFORE any target is declared so the setting takes
 # effect uniformly across aimee-core/data/agent/cmd and every test binary.

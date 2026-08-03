@@ -3511,6 +3511,12 @@ $(OBJDIR)/code_treesitter.o: C_FLAGS += -DAIMEE_TREESITTER -Ivendor/tree-sitter/
 # Order-only dep on a fetch target so a cold checkout fetches tree_sitter/api.h before
 # this object (which includes it) is compiled (see the same note in src/Makefile).
 $(OBJDIR)/code_treesitter.o: | vendor/tree-sitter/lib/src/lib.c
+# The blanket `$(TEST_TARGETS): | $(CORE_CONNECTION_LIB)` earlier in this file
+# expands TEST_TARGETS where it is written, and this target appends itself
+# BELOW that line -- so it never inherited the dependency. It still links the
+# archive through L_CORE, so a clean tree failed with "cannot find
+# build/obj/libaimee-core-connection.a" at link time.
+$(TESTPREFIX)/unit-test-code-treesitter: | $(CORE_CONNECTION_LIB)
 $(TESTPREFIX)/unit-test-code-treesitter: $(OBJDIR)/tests/test_code_treesitter.o \
                                          $(OBJDIR)/code_treesitter.o \
                                          $(OBJDIR)/extractors.o \
