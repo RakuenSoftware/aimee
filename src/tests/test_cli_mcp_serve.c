@@ -740,6 +740,25 @@ static void test_initialize(void)
    assert(strstr(instructions->valuestring, "spawn_agent") != NULL);
    assert(strstr(instructions->valuestring, "delegate tool") != NULL);
    assert(strstr(instructions->valuestring, "isolated checkout") == NULL);
+
+   /* LISTED TOOLS ARE DIRECTLY CALLABLE, AND THE TEXT MUST LEAD WITH THAT.
+    *
+    * Twice now agents have spent their tool budget on the discovery protocol
+    * instead of the work: once at five of fourteen calls, and again on a
+    * benchmark cell that made two find_tools, two describe_tool and two call_tool
+    * calls and not one direct find_symbol -- with find_symbol advertised the
+    * whole time. Pin the ordering, because the ordering is the behaviour. */
+   {
+      const char *ins = instructions->valuestring;
+      assert(strstr(ins, "directly callable") != NULL);
+      assert(strstr(ins, "Do not route a listed tool through call_tool") != NULL);
+      /* Discovery must be framed as the exception, i.e. introduced only after the
+       * direct-call rule, and explicitly for tools that are NOT listed. */
+      assert(strstr(ins, "NOT listed") != NULL);
+      assert(strstr(ins, "directly callable") < strstr(ins, "find_tools"));
+      /* get_help must not be ordered before doing any work. */
+      assert(strstr(ins, "before trying anything else") == NULL);
+   }
    assert(g_worktree_ensure_calls == 1);
    assert(g_reverse_channel_starts == 0);
 
