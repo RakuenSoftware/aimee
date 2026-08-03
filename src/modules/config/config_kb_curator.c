@@ -8,7 +8,7 @@
  *     extract_code:
  *       enabled: false
  *     extract_command: ""
- *     extract_max_tokens: 1024
+ *     extract_max_tokens: 4096
  *     max_attempts: 3
  */
 
@@ -86,23 +86,39 @@ void config_kb_curator_defaults(config_t *cfg)
    cfg->kb_curator_synthesize_k = 8;
    /* SIZED FOR A MODEL THAT THINKS BEFORE IT ANSWERS, which 512 was not.
     *
-    * 512 came from a 2-4 tokens/s bundled synth, chosen to stay inside the
-    * five-minute provider deadline. The bundled synth is now gemma-4 E2B/E4B, which
-    * emits a reasoning pass before any content: on the shipped extract prompt it
-    * spent ~290 tokens reasoning and then had the JSON envelope cut off mid-object
-    * at exactly 512. cJSON_Parse then failed, the job was marked
-    * "sidecar returned non-JSON", and it retried into permanent failure -- every
-    * extract_doc job, every time, on the default configuration.
+    * 512 came from a 2-4 tokens/s bundled synth with no reasoning pass, chosen to
+    * stay inside the five-minute provider deadline. The bundled synth is now gemma-4
+    * E2B/E4B, which reasons before emitting content: on the shipped extract prompt it
+    * spent ~290 tokens reasoning and then had the JSON envelope cut off mid-object at
+    * exactly 512. cJSON_Parse failed, the job was marked "sidecar returned non-JSON",
+    * and it retried into permanent failure -- every extract_doc job, every time, on
+    * the default configuration.
     *
-    * 1024 comes from measurement, not roundness: that prompt completes in 767
-    * tokens with finish_reason "stop" and parseable JSON, so this is the observed
-    * requirement plus a third again. The deadline still holds -- the sidecar runs
-    * 6-13 tokens/s with multi-token prediction, so 1024 tokens is 80-170s against a
-    * 300s budget, where 2048 would not have been safe at the low end.
+    * 4096 IS THE SAME NUMBER bench/tier-a ALREADY ARRIVED AT, and arriving at it a
+    * second time by a shorter route is the whole argument for the comment. Its
+    * Defect 16: run_b.py capped completions at 1024, "with thinking left on, models
+    * spend 400-1000 tokens reasoning before a short answer", gemma-4-12B truncated on
+    * one topic, scored zero, and the truncation was reported as a model finding. The
+    * fix there was a 4096 cap and a scorer that refuses to score a truncated row.
     *
-    * Turning synthesis_thinking off is the other half of the trade and belongs to
-    * the operator: the same extraction then finishes in ~94 tokens. */
-   cfg->kb_curator_extract_max_tokens = 1024;
+    * The measurement here, on the deployed E2B sidecar with thinking on: a
+    * one-sentence document needs 767 tokens, a single realistic paragraph needs 1087.
+    * A 1024 cap is therefore below what an ordinary document costs -- it is inside the
+    * band the log says reasoning ALONE occupies.
+    *
+    * THE CAP IS A CEILING, NOT AN EXPECTED COST, and the two ways of exceeding it are
+    * not equally bad. Truncating at the cap yields invalid JSON, which is permanent
+    * after max_attempts. Exceeding the 300s provider deadline is a transport error,
+    * which kb_curator_error_is_provider_unavailable treats as retryable with backoff.
+    * A generous cap degrades gracefully; a tight one fails for good. At the measured
+    * ~10 tokens/s a typical extraction is 118s, and only a document that reasoned past
+    * ~3000 tokens would reach the deadline at all.
+    *
+    * Do NOT "fix" the cost by turning synthesis_thinking off. That was measured too:
+    * bench/tier-a records disable_thinking costing E4B 0.09 F1 against a 0.582
+    * baseline, and its Defect 24 is a whole sweep that ran reasoning models with
+    * reasoning suppressed and wrongly concluded they were worse. */
+   cfg->kb_curator_extract_max_tokens = 4096;
    cfg->kb_curator_max_attempts = 3;
    cfg->kb_curator_provider_base_url[0] = '\0';
    cfg->kb_curator_provider_model[0] = '\0';
@@ -549,7 +565,7 @@ void config_save_kb_curator(const config_t *cfg, cJSON *root)
        cfg->kb_curator_projection_graph_enabled || cfg->kb_curator_synthesize_enabled ||
        cfg->kb_curator_promote_entity_enabled || cfg->kb_curator_extract_command[0] ||
        cfg->kb_curator_judge_command[0] || cfg->kb_curator_synthesize_command[0] ||
-       cfg->kb_curator_extract_max_tokens != 1024 || cfg->kb_curator_max_attempts != 3 ||
+       cfg->kb_curator_extract_max_tokens != 4096 || cfg->kb_curator_max_attempts != 3 ||
        cfg->kb_curator_synthesize_k != 8 || cfg->kb_curator_promote_min_sources != 3 ||
        cfg->kb_curator_provider_base_url[0] || cfg->kb_curator_provider_model[0];
    int cross_repo_nondefault =
@@ -672,7 +688,7 @@ void config_save_kb_curator(const config_t *cfg, cJSON *root)
             cJSON_AddStringToObject(cur, "judge_command", cfg->kb_curator_judge_command);
          if (cfg->kb_curator_synthesize_command[0])
             cJSON_AddStringToObject(cur, "synthesize_command", cfg->kb_curator_synthesize_command);
-         if (cfg->kb_curator_extract_max_tokens != 1024)
+         if (cfg->kb_curator_extract_max_tokens != 4096)
             cJSON_AddNumberToObject(cur, "extract_max_tokens", cfg->kb_curator_extract_max_tokens);
          if (cfg->kb_curator_max_attempts != 3)
             cJSON_AddNumberToObject(cur, "max_attempts", cfg->kb_curator_max_attempts);
