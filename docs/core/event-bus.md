@@ -57,10 +57,11 @@ policies at `<config>/modules.d/<daemon>`; the environment can override those
 with `AIMEE_MODULE_BUS_SOCKET` and `AIMEE_MODULE_POLICY_DIR`.
 
 `src/modules/process-contracts.json` is also the implementation-language switch
-for supervised processes. Nine migrated batches—`memory`, `learning`,
+for supervised processes. Ten migrated batches—`memory`, `learning`,
 `routing`, `delegates`, `tools`, `workspace`, `git`, `skills`, and
 `response-composition`, followed by `governance`, `workflows`, `roundtable`,
-`kb-synthesis`, `runtime-web`, and `benchmarks`—run through the Go multicall
+`kb-synthesis`, `runtime-web`, `control-web`, and `benchmarks`—put every process
+identity on the Go multicall
 executable in `server-go/cmd/aimee-module`; its basename selects an isolated
 identity and one module package under `server-go/modules`. The runtime bundle emits no C process
 source for those entries. Their C `module_adapter.c` files serve only as
@@ -72,6 +73,10 @@ the curator worker, provider, or persistence lifecycle.
 The runtime-web process owns only RPC fault classification. The physical Go web
 provider imports the same policy package; it remains the owner of HTTPS,
 browser authentication, sessions, routing, proxy transport, and assets.
+The control-web process owns only proxy-route authorization. Its physical Go
+provider imports the same policy package; HTTPS, OIDC/session handling, CSRF,
+credential selection, proxy transport, and assets remain provider-owned. The
+KB's C console-admin allowlist remains an independent defence-in-depth check.
 
 Every strict `*.grant` policy binds one principal class/reference to an exact
 absolute executable (resolved and compared with Linux `SO_PEERCRED` and

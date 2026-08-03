@@ -7,6 +7,7 @@
 #include <aimee/core/event_bus/module_client.h>
 #include <aimee/core/event_bus/module_runtime.h>
 #include <aimee/benchmarks/module_api.h>
+#include <aimee/control-web/module_api.h>
 #include <aimee/delegates/module_api.h>
 #include <aimee/git/module_api.h>
 #include <aimee/governance/module_api.h>
@@ -172,6 +173,8 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
       *kind = AIMEE_KB_SYNTHESIS_EVENT_GROUNDING, *principal_ref = 22;
    else if (strcmp(name, "runtime-web") == 0)
       *kind = AIMEE_RUNTIME_WEB_EVENT_CLASSIFY, *principal_ref = 23;
+   else if (strcmp(name, "control-web") == 0)
+      *kind = AIMEE_CONTROL_WEB_EVENT_AUTHORIZE, *principal_ref = 24;
    else if (strcmp(name, "benchmarks") == 0)
       *kind = AIMEE_BENCHMARKS_EVENT_RUN, *principal_ref = 25;
    else
@@ -369,6 +372,18 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(aimee_runtime_web_response_decode(response, response_len, &status) == 0);
       assert(status == 403u);
    }
+   else if (strcmp(name, "control-web") == 0)
+   {
+      int allowed = 0;
+      assert(aimee_control_web_request_encode(AIMEE_CONTROL_WEB_TARGET_FLEET, "GET",
+                                              "/v1/servers/s1/health", request,
+                                              sizeof(request)) == 0);
+      request_len = AIMEE_CONTROL_WEB_REQUEST_LEN;
+      assert(aimee_module_client_call(client, kind, AIMEE_CONTROL_WEB_STAGE_AUTHORIZE, 2014, 0,
+                                      request, request_len, response, sizeof(response), &response_len,
+                                      NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(aimee_control_web_response_decode(response, response_len, &allowed) == 0 && allowed);
+   }
    else
    {
       assert(strcmp(name, "benchmarks") == 0);
@@ -378,7 +393,7 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(aimee_benchmarks_request_encode(retrieved, 3, relevant, 1, 3, request,
                                              sizeof(request)) == 0);
       request_len = AIMEE_BENCHMARKS_REQUEST_LEN;
-      assert(aimee_module_client_call(client, kind, AIMEE_BENCHMARKS_STAGE_RUN, 2014, 0, request,
+      assert(aimee_module_client_call(client, kind, AIMEE_BENCHMARKS_STAGE_RUN, 2015, 0, request,
                                       request_len, response, sizeof(response), &response_len, NULL,
                                       NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_benchmarks_response_decode(response, response_len, &scores) == 0);

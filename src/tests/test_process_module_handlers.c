@@ -6,6 +6,7 @@
 
 #include <aimee/core/event_bus/module_runtime.h>
 #include <aimee/benchmarks/module_api.h>
+#include <aimee/control-web/module_api.h>
 #include <aimee/delegates/module_api.h>
 #include <aimee/git/module_api.h>
 #include <aimee/governance/module_api.h>
@@ -35,6 +36,7 @@ DECLARE_HANDLER(aimee_workflows_module_handler);
 DECLARE_HANDLER(aimee_roundtable_module_handler);
 DECLARE_HANDLER(aimee_kb_synthesis_module_handler);
 DECLARE_HANDLER(aimee_runtime_web_module_handler);
+DECLARE_HANDLER(aimee_control_web_module_handler);
 DECLARE_HANDLER(aimee_benchmarks_module_handler);
 
 int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation)
@@ -375,6 +377,42 @@ static void test_runtime_web(void)
    }
 }
 
+static void test_control_web(void)
+{
+   static const struct
+   {
+      aimee_control_web_target_t target;
+      const char *method;
+      const char *path;
+      int allowed;
+   } cases[] = {
+       {AIMEE_CONTROL_WEB_TARGET_CONSOLE_ADMIN, "GET", "/v1/console/overview", 1},
+       {AIMEE_CONTROL_WEB_TARGET_CONSOLE_ADMIN, "POST", "/v1/enrollments/abc/revoke", 1},
+       {AIMEE_CONTROL_WEB_TARGET_CONSOLE_ADMIN, "GET", "/v1/enrollments/", 1},
+       {AIMEE_CONTROL_WEB_TARGET_CONSOLE_ADMIN, "GET", "/v1/servers/s1/health", 0},
+       {AIMEE_CONTROL_WEB_TARGET_CONSOLE_ADMIN, "GET", "/v1/%65nrollments", 0},
+       {AIMEE_CONTROL_WEB_TARGET_FLEET, "GET", "/v1/servers/s1/health", 1},
+       {AIMEE_CONTROL_WEB_TARGET_FLEET, "POST", "/v1/servers/s1/actions", 1},
+       {AIMEE_CONTROL_WEB_TARGET_FLEET, "GET", "/v1/servers/", 0},
+       {AIMEE_CONTROL_WEB_TARGET_FLEET, "POST", "/v1/servers/s1/config", 0},
+   };
+   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)
+   {
+      uint8_t request[AIMEE_CONTROL_WEB_REQUEST_LEN];
+      uint8_t response[AIMEE_CONTROL_WEB_RESPONSE_LEN];
+      uint32_t response_len = 0;
+      int allowed = 0;
+      aimee_module_invocation_t invocation = {.stage_id = AIMEE_CONTROL_WEB_STAGE_AUTHORIZE};
+      assert(aimee_control_web_request_encode(cases[i].target, cases[i].method, cases[i].path,
+                                              request, sizeof(request)) == 0);
+      assert(aimee_control_web_module_handler(&invocation, request, sizeof(request), response,
+                                              sizeof(response), &response_len,
+                                              NULL) == AIMEE_MODULE_STATUS_OK);
+      assert(aimee_control_web_response_decode(response, response_len, &allowed) == 0);
+      assert(allowed == cases[i].allowed);
+   }
+}
+
 static void test_benchmarks(void)
 {
    static const int64_t perfect_retrieved[] = {11, 22, 33};
@@ -431,6 +469,7 @@ int main(void)
    test_roundtable();
    test_kb_synthesis();
    test_runtime_web();
+   test_control_web();
    test_benchmarks();
    puts("process module handlers: PASS");
    return 0;

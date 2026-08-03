@@ -26,6 +26,7 @@ func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
 		{"roundtable", 21, []uint32{9473}},
 		{"kb-synthesis", 22, []uint32{9729}},
 		{"runtime-web", 23, []uint32{9985}},
+		{"control-web", 24, []uint32{10241}},
 		{"benchmarks", 25, []uint32{10497}},
 	}
 	for _, test := range tests {
@@ -44,8 +45,8 @@ func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
 }
 
 func TestModuleRegistryRejectsUnknownAndBadArguments(t *testing.T) {
-	if _, ok := moduleConfig("aimee-module-control-web"); ok {
-		t.Fatal("C module appeared in Go registry")
+	if _, ok := moduleConfig("aimee-module-unknown"); ok {
+		t.Fatal("unknown module appeared in Go registry")
 	}
 	if err := run(context.Background(), []string{"aimee-module-routing"}); !errors.Is(err, errUsage) {
 		t.Fatalf("bad arguments error = %v", err)

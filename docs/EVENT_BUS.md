@@ -31,10 +31,11 @@ That buys us:
 
 The last item is an extension surface, not a claim that every subsystem has moved already.
 
-Nine production C-to-Go process batches now cover `memory`, `learning`,
+Ten production C-to-Go process batches now cover every supervised process:
+`memory`, `learning`,
 `routing`, `delegates`, `tools`, `workspace`, `git`, `skills`,
 `response-composition`, `governance`, `workflows`, `roundtable`, `kb-synthesis`,
-`runtime-web`, and `benchmarks`.
+`runtime-web`, `control-web`, and `benchmarks`.
 Each keeps its existing event kind and AMOD body contract, but the supervisor now
 starts an authenticated Go process for that identity. C adapters serve as parity
 fixtures; the bounded memory rerank, response-composition key, roundtable
@@ -49,6 +50,9 @@ storage, linking, promotion, and scheduling remain in their current owners.
 Runtime web moves the bounded RPC-fault-to-HTTP-status decision; its physical Go
 HTTPS provider consumes that exact shared policy package, while listener,
 authentication, sessions, proxying, and assets remain provider-owned.
+Control web moves bounded console-admin and fleet proxy-route authorization; its
+physical Go provider and isolated process consume the same policy package. The
+KB keeps its independent C console-admin allowlist as defence in depth.
 
 ## What is on it now
 

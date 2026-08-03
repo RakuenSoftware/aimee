@@ -221,19 +221,13 @@ class DescriptorTests(unittest.TestCase):
             runtime["ownership"]["docs"],
             [{"path": "docs/modules/module-runtime.md", "result": "PASS"}],
         )
-        # An undeclared descriptor still reports every ownership role as empty. Derived from
-        # the graph rather than naming one module, so completing a module's declaration does
-        # not stale this fixture the way declaring `memory` did.
+        # Every production descriptor is now ownership-latched. A new empty descriptor is
+        # migration debt and must make this assertion fail.
         undeclared = [
             item for item in descriptors
             if not any(item["ownership"][field] for field in validator.OWNERSHIP_FIELDS)
         ]
-        self.assertTrue(undeclared, "expected at least one descriptor with no declared ownership")
-        for item in undeclared:
-            with self.subTest(identifier=item["id"]):
-                self.assertEqual(
-                    item["ownership"], {field: [] for field in validator.OWNERSHIP_FIELDS}
-                )
+        self.assertEqual(undeclared, [])
 
     def test_ownership_report_sorts_descriptors_independent_of_root_order(self) -> None:
         root = Path("tests/fixtures/modules/positive")
@@ -346,6 +340,13 @@ class DescriptorTests(unittest.TestCase):
              "server-go/modules/runtime-web/runtime_web.go"),
             ("runtime-web", "go_tests",
              "server-go/modules/runtime-web/runtime_web_test.go"),
+            ("control-web", "sources", "src/modules/control-web/module_adapter.c"),
+            ("control-web", "go_sources",
+             "server-go/modules/control-web/policy/acl.go"),
+            ("control-web", "go_sources",
+             "server-go/modules/control-web/control_web.go"),
+            ("control-web", "go_tests",
+             "server-go/modules/control-web/control_web_test.go"),
         )
         for identifier, field, relative in cases:
             tmp = self.production_repo()
@@ -364,7 +365,7 @@ class DescriptorTests(unittest.TestCase):
             finally:
                 tmp.cleanup()
 
-        for identifier in ("benchmarks", "tools", "routing", "execution-policy", "kb-synthesis", "runtime-web", "roundtable", "protocols", "ir", "translation", "skills",
+        for identifier in ("benchmarks", "tools", "routing", "execution-policy", "kb-synthesis", "runtime-web", "control-web", "roundtable", "protocols", "ir", "translation", "skills",
                            "audit", "module-runtime", "gateway", "governance",
                            "learning", "workspace", "vault", "config", "git", "delegates",
                            "workflows", "memory"):
@@ -406,49 +407,56 @@ class DescriptorTests(unittest.TestCase):
 
     def test_empty_module_root_cannot_be_latched(self) -> None:
         """An unmigrated module must not satisfy the latch vacuously."""
-        empty = (
-            "control-web",
-        )
-        for identifier in empty:
-            tmp = self.production_repo()
-            try:
-                repo = Path(tmp.name)
-                document = f"docs/modules/{identifier}.md"
-                self.mutate_descriptor(
-                    repo, identifier,
-                    lambda value, document=document: value.update(
-                        {"ownership_complete": True, "docs": [document]}
-                    ),
-                )
-                (repo / document).parent.mkdir(parents=True, exist_ok=True)
-                (repo / document).write_text("placeholder\n", encoding="utf-8")
-                with self.subTest(identifier=identifier), self.assertRaisesRegex(
-                    validator.DescriptorError,
-                    r"rule=ownership-empty-domain pointer=/ownership_complete",
-                ):
-                    validator.validate_roots(repo, [Path("src/modules")])
-            finally:
-                tmp.cleanup()
+        tmp = self.production_repo()
+        try:
+            repo = Path(tmp.name)
+            shutil.rmtree(repo / "src/modules/control-web")
+            shutil.rmtree(repo / "server-go/modules/control-web")
+            (repo / "docs/modules/control-web.md").unlink()
+            root = repo / "src/modules/control-web"
+            root.mkdir(parents=True)
+            (root / "module.yaml").write_text(json.dumps({
+                "descriptor_version": 1,
+                "id": "control-web",
+                "dependencies": ["config", "gateway", "module-runtime", "protocols"],
+                "enabled_by_default": True,
+                "runtime_toggle": {"supported": True},
+                "ownership_complete": True,
+                "docs": ["docs/modules/control-web.md"],
+            }) + "\n", encoding="utf-8")
+            document = repo / "docs/modules/control-web.md"
+            document.parent.mkdir(parents=True, exist_ok=True)
+            document.write_text("placeholder\n", encoding="utf-8")
+            with self.assertRaisesRegex(
+                validator.DescriptorError,
+                r"rule=ownership-empty-domain pointer=/ownership_complete",
+            ):
+                validator.validate_roots(repo, [Path("src/modules")])
+        finally:
+            tmp.cleanup()
 
     def test_a_single_module_local_file_is_enough_domain_to_latch(self) -> None:
         """The guard rejects an empty domain, not a small one."""
         tmp = self.production_repo()
         try:
             repo = Path(tmp.name)
+            shutil.rmtree(repo / "src/modules/control-web")
+            shutil.rmtree(repo / "server-go/modules/control-web")
+            (repo / "docs/modules/control-web.md").unlink()
             source = repo / "src/modules/control-web/control_web_stub.c"
             source.parent.mkdir(parents=True, exist_ok=True)
             source.write_text("/* planted */\n", encoding="utf-8")
             document = "docs/modules/control-web.md"
-            self.mutate_descriptor(
-                repo, "control-web",
-                lambda value: value.update(
-                    {
-                        "ownership_complete": True,
-                        "docs": [document],
-                        "sources": ["src/modules/control-web/control_web_stub.c"],
-                    }
-                ),
-            )
+            (source.parent / "module.yaml").write_text(json.dumps({
+                "descriptor_version": 1,
+                "id": "control-web",
+                "dependencies": ["config", "gateway", "module-runtime", "protocols"],
+                "enabled_by_default": True,
+                "runtime_toggle": {"supported": True},
+                "ownership_complete": True,
+                "docs": [document],
+                "sources": ["src/modules/control-web/control_web_stub.c"],
+            }) + "\n", encoding="utf-8")
             (repo / document).parent.mkdir(parents=True, exist_ok=True)
             (repo / document).write_text("placeholder\n", encoding="utf-8")
             validator.validate_roots(repo, [Path("src/modules")])
@@ -468,7 +476,7 @@ class DescriptorTests(unittest.TestCase):
         self.assertTrue(latched, "no latched descriptor found; the guard would be untested")
 
     def test_complete_ownership_requires_canonical_doc(self) -> None:
-        for identifier in ("benchmarks", "tools", "routing", "execution-policy", "kb-synthesis", "runtime-web", "roundtable", "ir", "translation", "skills", "audit",
+        for identifier in ("benchmarks", "tools", "routing", "execution-policy", "kb-synthesis", "runtime-web", "control-web", "roundtable", "ir", "translation", "skills", "audit",
                            "module-runtime", "gateway", "governance", "learning",
                            "workspace", "vault", "config", "git", "delegates", "workflows",
                            "memory"):

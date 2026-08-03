@@ -13,6 +13,7 @@ import (
 
 	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/benchmarks"
+	controlweb "github.com/JBailes/aimee/server-go/modules/control-web"
 	"github.com/JBailes/aimee/server-go/modules/delegates"
 	modulegit "github.com/JBailes/aimee/server-go/modules/git"
 	"github.com/JBailes/aimee/server-go/modules/governance"
@@ -111,6 +112,11 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 		config.PrincipalRef = 23
 		config.Stages = []bus.ModuleStage{{EventKind: runtimeweb.EventClassify, StageID: runtimeweb.StageClassify}}
 		config.Handler = runtimeweb.Handle
+	case "control-web":
+		config.ModuleName = name
+		config.PrincipalRef = 24
+		config.Stages = []bus.ModuleStage{{EventKind: controlweb.EventAuthorize, StageID: controlweb.StageAuthorize}}
+		config.Handler = controlweb.Handle
 	case "benchmarks":
 		config.ModuleName = name
 		config.PrincipalRef = 25
