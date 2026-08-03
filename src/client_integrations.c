@@ -317,7 +317,8 @@ static const char *codex_skill_markdown(void)
           "`. It answers from the index in one call, and it is exact where a "
           "recursive text search is a guess that also matches comments, strings "
           "and unrelated names. It REPLACES that search — do not also grep for "
-          "the same symbol to confirm it.\n"
+          "the same symbol to confirm it. Looking up several names? Pass them "
+          "together as `identifiers` — one call, one section per name.\n"
           "- Before changing anything shared, or editing more than one file: use "
           "`" AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS
           "` to see what depends on it. A grep for the symbol will not tell you "
@@ -386,6 +387,15 @@ static const char *codex_skill_markdown(void)
           "` with command=span takes a `spans` array -- "
           "[{file_path, line_start, line_end}, ...] -- and returns every range in "
           "one call. Use it whenever you want more than one range.\n"
+          /* Measured on one cell: 4 of 9 shell searches returned 0-35 characters.
+           * Each is a full round trip bought for nothing, and the pattern is
+           * always the same -- a guessed regex misses, so the agent guesses a
+           * narrower or wider one instead of switching to the index. */
+          "- A search that comes back empty is a signal to change TOOL, not to "
+          "retry with another pattern. Two empty greps in a row means the thing "
+          "you are looking for is not literal text: use `" AIMEE_CODE_TOOL_INDEX
+          "` with command=" AIMEE_CODE_INDEX_COMMAND_HYBRID " or `" AIMEE_CODE_TOOL_FIND_SYMBOL
+          "` instead.\n"
           "- Do not call provider-native sub-agent tools such as `spawn_agent`; use "
           "the aimee `delegate` MCP tool for every delegated or parallel sub-task.\n"
           "- Use `delegate` only for bounded sub-tasks that materially advance the "

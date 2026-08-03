@@ -599,15 +599,20 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(scope_values, cJSON_CreateString(AIMEE_CODE_SCOPE_ALL));
       cJSON_AddStringToObject(scope, "description",
                               "Search the current project (default) or explicitly all projects.");
-      cJSON *req = cJSON_CreateArray();
-      cJSON_AddItemToArray(req, cJSON_CreateString("identifier"));
-      cJSON_AddItemToObject(s, "required", req);
+      cJSON *ids = cJSON_AddObjectToObject(p, "identifiers");
+      cJSON_AddStringToObject(ids, "type", "array");
+      cJSON_AddStringToObject(ids, "description",
+                              "Look several symbols up in ONE call: [\"name_a\", \"name_b\", ...]. "
+                              "Prefer this whenever you want more than one symbol -- a round trip "
+                              "costs far more than an extra name. Replaces 'identifier' when "
+                              "present; returns one section per name, in order.");
       cJSON_AddItemToArray(
           tools,
           mcp_tool_new(AIMEE_CODE_TOOL_FIND_SYMBOL,
                        "Find a code symbol (function, class, variable) in the active indexed "
                        "project by default. Set scope=all for labeled cross-project results. "
-                       "Returns file path, line number, and kind.",
+                       "Returns file path, line number, and kind. Pass 'identifiers' to resolve "
+                       "several symbols in one call.",
                        s));
    }
 

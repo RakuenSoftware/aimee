@@ -494,7 +494,7 @@ static void test_osv_offline_cache_miss_allows(void)
    "epistemic_directive "                                                                          \
    "{anchor_entity,anchor_file,cause,command,id,limit,note,priority,question,resolution_memory_"   \
    "id,state,suppress,topic,valid_until} req:command\n"                                            \
-   "find_symbol {identifier,project,scope} req:identifier\n"                                       \
+   "find_symbol {identifier,identifiers,project,scope} req:\n"                                     \
    "find_tools {limit,query} req:\n"                                                               \
    "get_help {topic} req:\n"                                                                       \
    "get_identity {} req:\n"                                                                        \
