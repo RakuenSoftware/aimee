@@ -170,16 +170,18 @@ The Go control plane snapshots the definition and admitted request, then persist
 transition before it dispatches work. Plans, code, reviews, and gate decisions remain separate
 artifacts. A crash resumes from durable state.
 
-Triggers and cron can start a run:
+Start a run directly or from a watched-proposal trigger:
 
 ```bash
+aimee workflow run --help
 aimee trigger fire --help
 aimee trigger list
-aimee cron list
 ```
 
-Autonomous mode removes routine operator steps. It never passes a human gate. A human gate parks
-until an authenticated person signs the current content hash.
+The current Go scanner executes `watch-dir` and `proposals` trigger sources. Autonomous mode removes
+routine operator steps, but it never passes a human gate. A human gate parks until a browser or API
+caller approves or rejects it. That decision is recorded as a hashed approval artifact and lifecycle
+transition; it is not a cryptographic signature over the artifact and principal.
 
 Parallel slices use separate branches and worktrees, then merge against the latest accepted feature
 tip. A missing commit, merge conflict, exhausted loop, lost review replay, or broken forge operation

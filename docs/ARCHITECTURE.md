@@ -165,8 +165,9 @@ The client opens no database and starts no daemon. Warm state stays in `aimee-se
    back into the workflow store.
 4. Each slice gets a confined worktree and branch.
 5. Verification, review, merge, and forge operations produce separate artifacts.
-6. A human gate parks until a signed human decision arrives. A crash resumes from the durable event
-   log.
+6. A human gate parks until an explicit browser or API decision arrives. The current service stores
+   a hashed approval artifact and lifecycle event, not a cryptographic principal signature. A crash
+   resumes from the durable event log.
 
 ## Trust boundaries
 
