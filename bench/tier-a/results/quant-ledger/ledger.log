@@ -7,3 +7,6 @@
 [10:08:21Z]   committed gold70.E2B.UD-Q6_K_XL
 [10:08:21Z] --- gold70.E2B.UD-Q8_K_XL  (70 notes, 3 procs)
 [10:11:39Z] OK   gold70.E2B.UD-Q8_K_XL strictF1=0.6475
+[10:11:39Z]   committed gold70.E2B.UD-Q8_K_XL
+[10:11:39Z] --- gold70.E4B.UD-Q4_K_XL  (70 notes, 2 procs)
+[10:14:05Z] OK   gold70.E4B.UD-Q4_K_XL strictF1=0.7083
