@@ -207,6 +207,11 @@ for module_grant in /opt/aimee/module-grants/server/*.grant; do
     grant_target="$AIMEE_HOME/modules.d/server/$(basename "$module_grant")"
     [ -e "$grant_target" ] || cp "$module_grant" "$grant_target"
 done
+# The root entrypoint creates modules.d before dropping to the aimee user.  The
+# daemon must be able to traverse that 0700 parent in order to load the strict
+# grant policy; owning only its server child leaves the parent root-only and
+# makes every otherwise-valid grant look like an invalid policy.
+chown aimee:aimee "$AIMEE_HOME/modules.d" 2>/dev/null || true
 chown -R aimee:aimee "$AIMEE_HOME/modules.d/server" 2>/dev/null || true
 chmod 0700 "$AIMEE_HOME/modules.d" "$AIMEE_HOME/modules.d/server" 2>/dev/null || true
 chmod 0600 "$AIMEE_HOME/modules.d/server/"*.grant 2>/dev/null || true

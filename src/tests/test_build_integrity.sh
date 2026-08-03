@@ -305,6 +305,15 @@ else
     fail "server entrypoint leaves the workflow registry root-owned"
 fi
 
+if grep -qF 'chown aimee:aimee "$AIMEE_HOME/modules.d"' \
+        ../deploy/container/server-entrypoint.sh &&
+   grep -qF 'chmod 0700 "$AIMEE_HOME/modules.d" "$AIMEE_HOME/modules.d/server"' \
+        ../deploy/container/server-entrypoint.sh; then
+    pass "server entrypoint keeps the private module policy traversable by the daemon"
+else
+    fail "server entrypoint leaves the private module policy inaccessible to the daemon"
+fi
+
 # Upgraded persistent volumes can spend tens of seconds recovering WAL state
 # before the C resource socket appears.  The entrypoint must not kill a live
 # child at the old 15-second deadline, and the same-binary OAuth prewarm helper
