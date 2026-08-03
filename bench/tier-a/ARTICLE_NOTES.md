@@ -693,6 +693,25 @@ The rule it earns: **a default you did not set is a configuration you did not
 choose.** The harness pinned NPROC, quant, prompt, corpus and MTP, and then let
 an 8 GiB per-process allocation ride on a library default.
 
+### Sizing, after measurement
+
+512 MiB was chosen as "clearly less than 8192" rather than derived, and the
+derivation matters. One cached entry is one request -- ~600-token system prompt,
+~50-token note, ~350 tokens of reasoning -- and weighs 25-32 MiB. So this model
+costs ~26 KiB of KV per token and a full 8192 context is ~213 MiB. The 8192 MiB
+default is ~38 full contexts of cache on a server with ONE slot.
+
+At 512 MiB (~19 entries) the memory problem was solved but the server still
+logged **89 evictions in ten minutes**, with prompt eval alternating 28 tokens on
+a prefix hit and ~515 on a miss. Raised to 1024 (~38 entries): **zero evictions**,
+server RSS 7.04 GB across three processes, 15.0 GB free, swap down to 297 MB,
+throughput unchanged at 67-69 notes/min.
+
+Unchanged throughput is the expected result, not a disappointment -- a miss costs
+~150-195 ms of prompt eval against ~1.5 s of decode. The cache was never a speed
+problem. It was a memory problem, and the fix is now sized from the KV arithmetic
+instead of from an order of magnitude.
+
 ### It is a results-affecting variable
 
 Not just a memory knob. Whether a prefix is restored from cache or recomputed

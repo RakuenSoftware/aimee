@@ -43,14 +43,25 @@ RESERVE_MIB=${RESERVE_MIB:-1800}  # headroom for fragmentation + the draft ctx
 #
 # Not 0. The ~600-token system prompt is shared by every note and is served from
 # this cache; prompt eval logs 33 tokens, not 600. Disabling it re-evaluates the
-# prefix per note at ~170 tok/s, about 3.5 s each. Entries are ~27 MiB, so 512
-# keeps ~19 -- the hot prefix stays, the hoard goes.
+# prefix per note at ~170 tok/s, about 3.5 s each.
+#
+# Sizing, measured rather than guessed. One cached entry is one request --
+# ~600-token system prompt + ~50-token note + ~350 tokens of reasoning -- and
+# weighs 25-32 MiB, so this model costs ~26 KiB of KV per token and a full 8192
+# context is ~213 MiB. The 8192 MiB default is therefore ~38 full contexts of
+# cache on a server with ONE slot, which is the actual absurdity.
+#
+# 512 MiB (~19 entries, ~2.4 contexts) fixed the memory problem but still logged
+# 89 evictions in ten minutes, with prompt eval alternating 28 tokens on a prefix
+# hit and ~515 on a miss. 1024 (~38 entries) roughly halves that for +512 MiB per
+# process, which the host has: 22.4 GB free after the first fix. Misses are cheap
+# next to decode (~150-195 ms against ~1.5 s), so this buys headroom, not speed.
 #
 # THIS VALUE CHANGES RESULTS. Cache reuse decides whether a prefix is recomputed
 # or restored, and those paths do not produce bit-identical logits (the
 # warm-server effect, 14/20 notes). Arms compared to each other must share it,
 # exactly like NPROC.
-CACHE_RAM_MIB=${CACHE_RAM_MIB:-512}
+CACHE_RAM_MIB=${CACHE_RAM_MIB:-1024}
 
 case "$CARD" in
   5080) HOST=root@192.168.1.253; RUN="pct exec 140 -- bash -lc"; EP=192.168.0.5
