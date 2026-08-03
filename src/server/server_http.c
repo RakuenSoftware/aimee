@@ -2151,7 +2151,7 @@ static void *listener_thread(void *arg)
 
       if (uds_idx >= 0 && (pfds[uds_idx].revents & POLLIN))
       {
-         int fd = accept(pfds[uds_idx].fd, NULL, NULL);
+         int fd = server_conn_accept(pfds[uds_idx].fd);
          if (fd >= 0 && !conn_offload(fd, 0, 0, 0))
          {
             handle_conn(fd, 0, 0);
@@ -2160,7 +2160,7 @@ static void *listener_thread(void *arg)
       }
       if (tcp_idx >= 0 && (pfds[tcp_idx].revents & POLLIN))
       {
-         int fd = accept(pfds[tcp_idx].fd, NULL, NULL);
+         int fd = server_conn_accept(pfds[tcp_idx].fd);
          if (fd >= 0 && !conn_offload(fd, 1, 0, 0))
          {
             handle_conn(fd, 1, 0);
@@ -2169,7 +2169,7 @@ static void *listener_thread(void *arg)
       }
       if (tls_idx >= 0 && (pfds[tls_idx].revents & POLLIN))
       {
-         int fd = accept(pfds[tls_idx].fd, NULL, NULL);
+         int fd = server_conn_accept(pfds[tls_idx].fd);
          /* TLS conns must run in a worker (the handshake + SSL live there); if the
           * conn cap is hit we drop rather than handle inline (no SSL here). */
          if (fd >= 0 && !conn_offload(fd, 1, 1, 0))
@@ -2177,7 +2177,7 @@ static void *listener_thread(void *arg)
       }
       if (management_idx >= 0 && (pfds[management_idx].revents & POLLIN))
       {
-         int fd = accept(pfds[management_idx].fd, NULL, NULL);
+         int fd = server_conn_accept(pfds[management_idx].fd);
          /* Like data TLS, management TLS must never handshake on the accept
           * thread. The cap is shared so a second listener cannot double it. */
          if (fd >= 0 && !conn_offload(fd, 1, 1, 1))
