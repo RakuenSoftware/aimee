@@ -5,8 +5,8 @@ does not widen tool, workspace, credential, budget, or gate authority.
 
 ## Start
 
-Use Workflow Actions, a trigger, cron rule, or the typed submission API. Every path creates the same
-durable work item with:
+Use Workflow Actions, a watched-proposal trigger, the workflow CLI, or the typed submission API.
+Every path creates the same durable work item with:
 
 - an immutable admitted request and proposal;
 - a named, versioned workflow;
@@ -29,7 +29,8 @@ Each slice gets a branch and worktree, implements one packet, verifies it, freez
 runs review before merge into the feature branch. New slices branch from the current merged feature
 tip.
 
-The final PR targets the forge's authoritative default branch. The default workflow opens it as a
+The final PR targets the branch checked out when the repository was admitted. This integration lane
+can intentionally differ from the forge's default branch. The default workflow opens the PR as a
 draft and stops. Its title comes from the admitted proposal, and its body carries the original
 request, approved plan, changed-file summary, slice PRs, completed workflow gates, and explicit
 human-review instructions. Automation must not mark this PR ready, approve it, or merge it.
@@ -59,7 +60,11 @@ It never converts a missing result into success.
 - CI gates fail closed when required checks are not green;
 - mergeability gates stop on a conflict;
 - delivery gates enforce the current verdict;
-- human gates always park for a signed person.
+- human gates always park for an explicit browser or API decision.
+
+The current decision record is a hashed approval artifact plus a lifecycle transition. It is not a
+cryptographic signature binding the principal to the reviewed artifact, so repository protection
+and audit policy remain the authoritative human-review controls.
 
 Review findings persist and feed the next authoring or implementation pass. Repeated identical
 feedback and output parks as no progress instead of consuming the full budget forever.
@@ -78,14 +83,14 @@ Autonomy is bounded by:
 - trigger concurrency;
 - sandbox network, package, and credential policy.
 
-Fields under `autonomy.*` tune these limits. Some load at workflow-process startup. See
-[Configuration](gen/configuration.md).
+Fields under `autonomy.*` tune these limits. The browser's **Run policy** panel updates the live Go
+workflow service. See [Configuration](gen/configuration.md).
 
 ## Park reasons
 
 | Reason | What to do |
 | --- | --- |
-| `human_gate` | inspect the exact artifact and sign approve/reject |
+| `human_gate` | inspect the run evidence, then approve or reject in Workflow Actions or through the API |
 | `panel_degraded` | restore eligible reviewers or change the named preset |
 | `convergence_limit` | inspect the last blockers and refine the request/workflow |
 | `convergence_no_progress` | break the repeated plan/feedback cycle |
@@ -109,8 +114,9 @@ Fields under `autonomy.*` tune these limits. Some load at workflow-process start
 
 ## Observe
 
-Use Workflow Actions for live state and artifacts. Use `aimee trigger status`, `aimee jobs`, server
-logs, provider diagnostics, and `aimee audit verify` for the surrounding resource plane.
+Use Workflow Actions for live state, proposal text, and lifecycle events. Use the CLI, server-side
+artifact store, `aimee trigger status`, `aimee jobs`, server logs, provider diagnostics, and
+`aimee audit verify` for deeper evidence and the surrounding resource plane.
 
 The event bus records migrated action paths, but workflow trigger delivery is not yet an integrated
 bus consumer. See [Event bus](EVENT_BUS.md).

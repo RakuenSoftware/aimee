@@ -205,6 +205,21 @@ if [ "$external_db" -eq 0 ]; then
         "$PGBIN/initdb" --pgdata="$PGDATA" --auth-local=trust --encoding=UTF8 >/dev/null
     fi
 
+    # pg_ctl --wait gives up after 60s by default. That is far less than crash
+    # recovery needs on a large cluster: an unclean stop (the runtime SIGKILLing
+    # postgres, or `docker rm -f` on the kb, neither of which lets the EXIT trap
+    # below run) makes the next start fsync the whole data directory before it
+    # will accept connections. Past 60s pg_ctl returns failure, the entrypoint
+    # exits, `restart: unless-stopped` starts the container again, and recovery
+    # replays FROM SCRATCH -- a livelock that never converges, because each
+    # attempt is killed at the same deadline it could never have met. Observed
+    # as an endless "server did not start in time" loop on a 27k-vector corpus.
+    #
+    # Wait long enough for recovery to finish instead. This only ever delays the
+    # unhealthy case: a cleanly-stopped cluster still starts in seconds, so the
+    # value is a ceiling, not a cost.
+    export PGCTLTIMEOUT="${AIMEE_DB2_PGCTLTIMEOUT:-1800}"
+
     # No TCP listener: DB2 is reachable only over the socket inside this
     # container. An operator who wants it exposed runs an external server.
     "$PGBIN/pg_ctl" --pgdata="$PGDATA" --wait --silent \
