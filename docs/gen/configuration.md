@@ -288,7 +288,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 221 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
+The binaries read 222 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
 
 ### Paths & assets
 
@@ -390,6 +390,7 @@ The binaries read 221 `AIMEE_*` environment variables (scanned from `getenv()` i
 |----------|-------------|
 | `AIMEE_CODE_INDEX_SOURCE` | Source label recorded for code-index ingestion. |
 | `AIMEE_EMBEDDERS_FILE` | Path to the embedder registry the server reads for GET /v1/embedders (the setup wizard's embedder picker). Defaults to /opt/aimee/embedders.json, then scripts/embedders.json in a source checkout. The same file the in-container embedder reads, so one declaration drives the picker, the loading and the serving flags. |
+| `AIMEE_EMBEDDER_HOST` | DNS name of the embedder sidecar container (aimee-embedder-a25m or aimee-embedder-nomic). Setting it makes aimee-kb issue the mTLS identities for the kb -> embedder hop into $AIMEE_HOME/embedder-tls at startup, independently of the synthesis hop. Unset for an external embedder reached over plain HTTPS, or when no embedder is deployed. The sidecar refuses to start without this material. |
 | `AIMEE_KB_API_CA_BUNDLE` | CA bundle path for verifying the aimee-kb TLS certificate. |
 | `AIMEE_KB_API_URL` | aimee-kb HTTP API base URL. |
 | `AIMEE_KB_CACHE_TTL_S` | KB client cache TTL (seconds). |
@@ -426,6 +427,7 @@ The binaries read 221 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_KB_TOKEN_ROOT_CUSTODY_ID` | Custody identifier for the management token signing root. |
 | `AIMEE_KB_VAULT_OPERATOR_ENABLED` | Enable the dedicated KB vault-operator runtime. |
 | `AIMEE_KB_VAULT_ORCHESTRATOR_URL` | Operator-configured vault orchestrator endpoint. |
+| `AIMEE_LLM_HOST` | DNS name of the synthesis sidecar container. Setting it makes aimee-kb issue the mTLS identities for the kb -> aimee-llm hop into $AIMEE_HOME/synthesis-tls at startup, from the kb's own CA. Unset for an external or absent synthesis provider, which needs none of them. The sidecar refuses to start without this material. |
 | `AIMEE_OCR_URL` | Structured-PDF OCR sidecar endpoint. |
 | `AIMEE_SERVER_ID` | Registry identity used by the server mTLS heartbeat. |
 | `AIMEE_SERVER_TEAM_ID` | The team this server serves, from the same registry row as AIMEE_SERVER_ID. Required for per-user /v1 write authorization: unset, the server still starts and serves reads but denies every write with no_team_configured. |
@@ -593,7 +595,7 @@ The binaries read 221 `AIMEE_*` environment variables (scanned from `getenv()` i
 
 > These are read by the code but have no description yet: the generator surfaces them so the reference can't silently fall behind.
 
-`AIMEE_LLM_HOST`, `AIMEE_SESSION_WORKTREE_BASE`
+`AIMEE_SESSION_WORKTREE_BASE`
 
 ## External & provider environment
 

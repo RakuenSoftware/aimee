@@ -303,8 +303,14 @@ int kb_service_init(kb_service_ctx_t *ctx)
                                  config_learning_synthesize_prompt_version(), NULL);
    {
       kb_curator_version_replay_t cvr;
+      /* The two model identities are passed alongside the declared versions so that
+       * switching a model replays the pass that depends on it, without an operator
+       * having to remember to bump a label. db2_embedder_serving_id() is the same value
+       * db2's drift guard records against the corpus, so a change means the same thing
+       * in both places. */
       (void)kb_curator_version_replay(config_kb_curator_extract_prompt_version(),
-                                      config_kb_curator_embed_model_version(), &cvr);
+                                      config_kb_curator_embed_model_version(),
+                                      config_synthesis_model(), db2_embedder_serving_id(), &cvr);
    }
 
    return 0;
