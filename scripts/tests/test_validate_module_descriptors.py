@@ -321,6 +321,8 @@ class DescriptorTests(unittest.TestCase):
             ("workflows", "private_headers", "src/modules/workflows/wfe_engine.h"),
             ("memory", "sources", "src/modules/memory/memory_core.c"),
             ("memory", "private_headers", "src/modules/memory/memory_core_internal.h"),
+            ("memory", "go_sources", "server-go/modules/memory/memory.go"),
+            ("memory", "go_tests", "server-go/modules/memory/memory_test.go"),
         )
         for identifier, field, relative in cases:
             tmp = self.production_repo()

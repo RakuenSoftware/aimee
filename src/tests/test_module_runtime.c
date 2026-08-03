@@ -9,6 +9,7 @@
 #include <aimee/delegates/module_api.h>
 #include <aimee/git/module_api.h>
 #include <aimee/learning/module_api.h>
+#include <aimee/memory/module_api.h>
 #include <aimee/response-composition/module_api.h>
 #include <aimee/routing/module_api.h>
 #include <aimee/skills/module_api.h>
@@ -34,6 +35,7 @@
 #define MODULE_REF 7U
 #define CALLER_REF 90U
 #define LARGE_BODY (128U * 1024U + 37U)
+#define PRODUCTION_STAGE_MAX 5U
 
 typedef struct
 {
@@ -124,8 +126,20 @@ static void wait_for_clients(bus_host_t *host, pthread_mutex_t *lock, uint32_t c
    assert(!"timed out waiting for module clients");
 }
 
-static int production_contract(const char *name, uint32_t *kind, uint32_t *principal_ref)
+static int production_contract(const char *name, uint32_t *kind, uint32_t *principal_ref,
+                               uint32_t served[PRODUCTION_STAGE_MAX], size_t *serve_count)
 {
+   if (strcmp(name, "memory") == 0)
+   {
+      *kind = AIMEE_MEMORY_EVENT_RERANK, *principal_ref = 7;
+      served[0] = AIMEE_MEMORY_EVENT_EXTRACT_INDEX;
+      served[1] = AIMEE_MEMORY_EVENT_WRITE;
+      served[2] = AIMEE_MEMORY_EVENT_EMBED;
+      served[3] = AIMEE_MEMORY_EVENT_RETRIEVE;
+      served[4] = AIMEE_MEMORY_EVENT_RERANK;
+      *serve_count = PRODUCTION_STAGE_MAX;
+      return 0;
+   }
    if (strcmp(name, "learning") == 0)
       *kind = AIMEE_LEARNING_EVENT_OBSERVE, *principal_ref = 8;
    else if (strcmp(name, "routing") == 0)
@@ -144,6 +158,8 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
       *kind = AIMEE_RESPONSE_EVENT_COMPOSE, *principal_ref = 15;
    else
       return -1;
+   served[0] = *kind;
+   *serve_count = 1;
    return 0;
 }
 
@@ -153,7 +169,18 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
    uint8_t request[1024] = {0};
    uint8_t response[1024] = {0};
    uint32_t request_len = 0, response_len = 0;
-   if (strcmp(name, "learning") == 0)
+   if (strcmp(name, "memory") == 0)
+   {
+      aimee_memory_confidence_t confidence = AIMEE_MEMORY_CONFIDENCE_LOW;
+      assert(aimee_memory_request_encode(660000, request, sizeof(request)) == 0);
+      request_len = AIMEE_MEMORY_REQUEST_LEN;
+      assert(aimee_module_client_call(client, kind, AIMEE_MEMORY_STAGE_RERANK, 2000, 0, request,
+                                      request_len, response, sizeof(response), &response_len, NULL,
+                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(aimee_memory_response_decode(response, response_len, &confidence) == 0);
+      assert(confidence == AIMEE_MEMORY_CONFIDENCE_HIGH);
+   }
+   else if (strcmp(name, "learning") == 0)
    {
       uint32_t mask = 0;
       assert(aimee_learning_request_encode("correction", request, sizeof(request)) == 0);
@@ -266,8 +293,10 @@ int main(int argc, char **argv)
 {
    assert(argc >= 1 && argc <= 3);
    uint32_t test_kind = TEST_KIND, module_ref = MODULE_REF;
+   uint32_t served[PRODUCTION_STAGE_MAX] = {test_kind};
+   size_t serve_count = 1;
    if (argc == 3)
-      assert(production_contract(argv[2], &test_kind, &module_ref) == 0);
+      assert(production_contract(argv[2], &test_kind, &module_ref, served, &serve_count) == 0);
    char directory[] = "/tmp/aimee-module-runtime-XXXXXX";
    assert(mkdtemp(directory) != NULL);
    char socket_path[PATH_MAX], executable[PATH_MAX];
@@ -280,14 +309,13 @@ int main(int argc, char **argv)
    else
       assert(snprintf(module_executable, sizeof module_executable, "%s", executable) > 0);
 
-   uint32_t served[] = {test_kind};
    uint32_t requested[] = {test_kind, EMPTY_KIND};
    bus_runtime_grant_t grants[] = {{.principal_class = 1,
                                     .principal_ref = module_ref,
                                     .uid = BUS_RUNTIME_SELF_UID,
                                     .executable = module_executable,
                                     .serve = served,
-                                    .serve_count = 1},
+                                    .serve_count = serve_count},
                                    {.principal_class = 1,
                                     .principal_ref = CALLER_REF,
                                     .uid = BUS_RUNTIME_SELF_UID,

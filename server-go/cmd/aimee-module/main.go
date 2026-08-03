@@ -15,6 +15,7 @@ import (
 	"github.com/JBailes/aimee/server-go/modules/delegates"
 	modulegit "github.com/JBailes/aimee/server-go/modules/git"
 	"github.com/JBailes/aimee/server-go/modules/learning"
+	"github.com/JBailes/aimee/server-go/modules/memory"
 	responsecomposition "github.com/JBailes/aimee/server-go/modules/response-composition"
 	"github.com/JBailes/aimee/server-go/modules/routing"
 	"github.com/JBailes/aimee/server-go/modules/skills"
@@ -28,6 +29,17 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 	name := strings.TrimPrefix(filepath.Base(executable), "aimee-module-")
 	config := bus.ModuleProcessConfig{PrincipalClass: 1}
 	switch name {
+	case "memory":
+		config.ModuleName = name
+		config.PrincipalRef = 7
+		config.Stages = []bus.ModuleStage{
+			{EventKind: memory.EventExtractIndex, StageID: memory.StageExtractIndex},
+			{EventKind: memory.EventWrite, StageID: memory.StageWrite},
+			{EventKind: memory.EventEmbed, StageID: memory.StageEmbed},
+			{EventKind: memory.EventRetrieve, StageID: memory.StageRetrieve},
+			{EventKind: memory.EventRerank, StageID: memory.StageRerank},
+		}
+		config.Handler = memory.Handle
 	case "learning":
 		config.ModuleName = name
 		config.PrincipalRef = 8

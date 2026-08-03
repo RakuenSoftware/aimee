@@ -31,11 +31,12 @@ That buys us:
 
 The last item is an extension surface, not a claim that every subsystem has moved already.
 
-The first two production C-to-Go process batches are `learning`, `routing`,
-`delegates`, `tools`, `workspace`, `git`, `skills`, and `response-composition`.
+The first three production C-to-Go process batches are `memory`, `learning`,
+`routing`, `delegates`, `tools`, `workspace`, `git`, `skills`, and
+`response-composition`.
 Each keeps its existing event kind and AMOD body contract, but the supervisor now
 starts an authenticated Go process for that identity. C adapters remain as parity
-fixtures; except for the bounded response-composition key stage, this does not yet
+fixtures; except for the bounded memory rerank and response-composition key stages, this does not yet
 mean the modules' storage-heavy or daemon orchestration code has all moved to Go.
 
 ## What is on it now

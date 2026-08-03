@@ -8,6 +8,17 @@ Aimee useful across turns and repositories. It includes code intelligence, embed
 `src/db2`, KB services, clients, and root command files, which is migration debt rather than a second
 memory subsystem.
 
+### Go process stage
+
+The supervised memory process now uses the shared pure-Go module runtime. Its
+live `reranking` stage preserves the MRNK/MCNF fixed-point confidence contract
+and the existing 330000/660000 thresholds. The process still registers the
+four earlier memory event identities so grants and callers remain stable, but
+those unimplemented stage boundaries continue to fail closed exactly as the C
+handler did. The C adapter remains a parity fixture; storage, extraction,
+embedding, retrieval, graph, and lifecycle implementation units remain C
+relocation work.
+
 ## Public contracts
 
 The current C contract is principally `src/headers/memory.h`, with platform seams in

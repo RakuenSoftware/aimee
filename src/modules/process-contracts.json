@@ -8,7 +8,7 @@
     {"id": "translation", "execution": "core", "placements": ["server", "kb"]},
     {"id": "protocols", "execution": "core", "placements": ["server", "kb"]},
     {"id": "gateway", "execution": "core", "placements": ["server", "kb"]},
-    {"id": "memory", "execution": "process", "runtime": "c", "principal_ref": 7, "placements": ["server"], "stages": [
+    {"id": "memory", "execution": "process", "runtime": "go", "principal_ref": 7, "placements": ["server"], "stages": [
       {"id": 1, "name": "structured-extraction-indexing", "event_kind": 5889},
       {"id": 2, "name": "memory-write", "event_kind": 5890},
       {"id": 3, "name": "embedding", "event_kind": 5891},
