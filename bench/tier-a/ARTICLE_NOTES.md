@@ -639,3 +639,75 @@ Method: `results/noise-floor/`, compared against
 `results/quant-ledger/v5small.E2B.UD-Q4_K_XL.pred.jsonl` and
 `results/v8-baseline/E2B.UD-Q4_K_XL.mtp.pred.jsonl`, keyed by note id on the
 `raw` field. All four files are 1001 rows.
+
+## 20. The parallelism limit was never VRAM. It was an 8 GiB per-process default nobody set
+
+Two servers died mid-arm on 2026-08-03, minutes apart, on different ports. Their
+logs end mid-task with no error, no stack, no OOM message. The arm kept running
+and kept recording transport errors, six on one shard, one on another.
+
+The reflex diagnosis was VRAM, because that is what you size a GPU benchmark by,
+and the harness already carries a comment saying the XTX has no VRAM probe. It
+was wrong. The evidence, per server:
+
+| | |
+|---|---|
+| `RssAnon` | 7,422 MB |
+| `RssFile` | 158 MB |
+| `VmSwap` | 1,260 MB |
+
+`-ngl 99` puts the weights on the card, so the model contributes almost nothing
+to host RSS -- 158 MB of file pages for a 3.0 GiB GGUF. The 7.4 GB is anonymous
+and therefore not reclaimable; it can only go to swap, and swap was full.
+
+The server log says exactly what it is, over and over:
+
+    srv alloc: - making room for prompt cache entry, removing oldest entry
+               (size = 27.482 MiB)
+
+`llama-server --cache-ram` sets "the maximum cache size in MiB (default: 8192)".
+A host-side prompt cache of KV snapshots, ~27 MiB each, **8 GiB per process**,
+never set by anything in this harness.
+
+    3 servers x 8 GiB = 24 GiB   on a 31.4 GiB host  -> survives, thrashing
+    4 servers x 8 GiB = 32 GiB   on a 31.4 GiB host  -> exceeds RAM
+
+That is the whole explanation for both deaths, for the earlier decision to drop
+from 4 processes to 3, and for the throughput collapse from 67 to 35 notes/min
+that we first explained away as ordinary contention. Setting `--cache-ram 512`
+took server memory from 21.8 GB to 6.75 GB, available RAM from 1.0 GB to 22.4 GB,
+and throughput back to 69 notes/min.
+
+It also resolves a contradiction we could not explain: E4B UD-Q8_K_XL, an 8.11
+GiB model, completed at 3 processes while E2B UD-Q4_K_XL at 2.97 GiB was
+thrashing. Host memory is dominated by the cache cap, which is per-process and
+independent of model size, so the two arms cost the same host RAM.
+
+### Why this is finding 3's defect class, not a footnote
+
+Nothing failed. The default is documented in `--help`. The log narrated the
+eviction thousands of times. And the result was a silently truncated arm and a
+halved throughput figure that we rationalised twice before measuring.
+
+The rule it earns: **a default you did not set is a configuration you did not
+choose.** The harness pinned NPROC, quant, prompt, corpus and MTP, and then let
+an 8 GiB per-process allocation ride on a library default.
+
+### It is a results-affecting variable
+
+Not just a memory knob. Whether a prefix is restored from cache or recomputed
+decides the logits -- the warm-server effect measured at 14/20 notes in finding
+11. `--cache-ram` therefore belongs with NPROC in the list of things that must
+be held constant across compared arms, and is now recorded in the DONE line.
+
+Not set to 0, despite that being the most reproducible choice: the ~600-token
+system prompt is shared by every note and served from this cache (prompt eval
+logs 33 tokens, not 600). Disabling it re-evaluates the prefix per note at ~170
+tok/s, about 3.5 s each, hours per arm. 512 MiB holds ~19 entries: the hot
+prefix stays, the hoard goes.
+
+### OUTSTANDING
+
+The three banked E4B 10k arms ran at the 8192 default. The E2B ladder now runs
+at 512. **Cross-family comparison at 10k is invalid until E4B is re-run at 512.**
+Within-family comparisons on either side are unaffected. Roughly 9h of XTX time.

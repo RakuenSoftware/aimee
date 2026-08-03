@@ -30,6 +30,27 @@ CARD=${CARD:?set CARD to 5080 or xtx}
 NPROC=${NPROC:-0}               # 0 = auto-size from measured VRAM
 BASE_PORT=${BASE_PORT:-8200}
 RESERVE_MIB=${RESERVE_MIB:-1800}  # headroom for fragmentation + the draft ctx
+# llama-server keeps a HOST-side prompt cache of KV snapshots, and its default
+# cap is 8192 MiB PER PROCESS. Nothing here ever set it, so three servers
+# reserved 24 GiB and four reserved 32 GiB on a 31.4 GiB host. That is why two
+# servers died mid-arm on 2026-08-03 leaving nothing in their logs but a
+# truncated line, and why the surviving three sat at ~1 GB free with swap full.
+#
+# The limit on parallelism here was never VRAM. -ngl 99 puts the weights on the
+# card: RssFile stays at ~158 MB while RssAnon reaches 7.4 GB, and the log says
+# what it is doing -- "making room for prompt cache entry, removing oldest entry
+# (size = 27.482 MiB)", over and over.
+#
+# Not 0. The ~600-token system prompt is shared by every note and is served from
+# this cache; prompt eval logs 33 tokens, not 600. Disabling it re-evaluates the
+# prefix per note at ~170 tok/s, about 3.5 s each. Entries are ~27 MiB, so 512
+# keeps ~19 -- the hot prefix stays, the hoard goes.
+#
+# THIS VALUE CHANGES RESULTS. Cache reuse decides whether a prefix is recomputed
+# or restored, and those paths do not produce bit-identical logits (the
+# warm-server effect, 14/20 notes). Arms compared to each other must share it,
+# exactly like NPROC.
+CACHE_RAM_MIB=${CACHE_RAM_MIB:-512}
 
 case "$CARD" in
   5080) HOST=root@192.168.1.253; RUN="pct exec 140 -- bash -lc"; EP=192.168.0.5
@@ -113,10 +134,10 @@ start_one() {  # $1 = port
   local p=$1
   if [ "$CARD" = 5080 ]; then
     ssh -n -o ConnectTimeout=25 $HOST \
-      "pct exec 140 -- bash -lc 'HF_HOME=$HFH nohup setsid $BIN -hf $REPO -hfd $DRAFT --host 0.0.0.0 --port $p -c 8192 -np 1 --no-webui --no-mmproj -ngl 99 >/opt/tierA/shard-$LABEL-$p.log 2>&1 </dev/null &'" >/dev/null 2>&1
+      "pct exec 140 -- bash -lc 'HF_HOME=$HFH nohup setsid $BIN -hf $REPO -hfd $DRAFT --host 0.0.0.0 --port $p -c 8192 -np 1 --cache-ram $CACHE_RAM_MIB --no-webui --no-mmproj -ngl 99 >/opt/tierA/shard-$LABEL-$p.log 2>&1 </dev/null &'" >/dev/null 2>&1
   else
     ssh -n -o ConnectTimeout=25 $HOST \
-      "HF_HOME=$HFH nohup setsid $BIN -hf $REPO -hfd $DRAFT --host 0.0.0.0 --port $p -c 8192 -np 1 $DEV --no-webui --no-mmproj -ngl 99 >/tmp/shard-$LABEL-$p.log 2>&1 </dev/null &" >/dev/null 2>&1
+      "HF_HOME=$HFH nohup setsid $BIN -hf $REPO -hfd $DRAFT --host 0.0.0.0 --port $p -c 8192 -np 1 $DEV --cache-ram $CACHE_RAM_MIB --no-webui --no-mmproj -ngl 99 >/tmp/shard-$LABEL-$p.log 2>&1 </dev/null &" >/dev/null 2>&1
   fi
   # Health must be checked at the address the server actually listens on. On the
   # 5080 the server runs INSIDE CT 140 (192.168.0.5); curling 127.0.0.1 on the
@@ -179,7 +200,7 @@ if [ "$NPROC" = 0 ]; then
     say "           defaulting to $NPROC. This arm's shard count is a GUESS."
   fi
 fi
-say "  -> running $NPROC processes"
+say "  -> running $NPROC processes, cache-ram ${CACHE_RAM_MIB} MiB each"
 
 for i in $(seq 1 $((NPROC-1))); do
   p=$((BASE_PORT+i))
