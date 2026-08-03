@@ -33,6 +33,7 @@ require_reusable_only() {
 }
 
 auto_release="$repo_root/.github/workflows/auto-release.yml"
+main_approval="$repo_root/.github/workflows/main-merge-approval.yml"
 publish_images="$repo_root/.github/workflows/publish-images.yml"
 release_client="$repo_root/.github/workflows/release-thin-client.yml"
 
@@ -52,5 +53,15 @@ grep -Fq 'uses: ./.github/workflows/publish-images.yml' "$auto_release" ||
     fail "$auto_release must call the guarded image publisher"
 grep -Fq 'uses: ./.github/workflows/release-thin-client.yml' "$auto_release" ||
     fail "$auto_release must call the guarded thin-client publisher"
+
+approval_job=$(awk '
+    /^  approval:[[:space:]]*$/ { in_approval = 1; print; next }
+    in_approval && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { exit }
+    in_approval { print }
+' "$main_approval")
+
+printf '%s\n' "$approval_job" |
+    grep -Eq '^    environment:[[:space:]]+main-merge-approval[[:space:]]*$' ||
+    fail "$main_approval must deploy through the protected main-merge-approval environment"
 
 echo "release-policy: approval topology is intact"

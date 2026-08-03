@@ -1,0 +1,21 @@
+name: Main merge approval
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# The default branch ruleset requires a successful deployment to this
+# environment. JBailes is its required reviewer, self-review is allowed so PRs
+# created with the owner's CLI identity remain approvable, and admin bypass is
+# disabled. The job therefore cannot complete until the owner explicitly
+# approves it on github.com.
+jobs:
+  approval:
+    environment: main-merge-approval
+    runs-on: ubuntu-latest
+    steps:
+      - name: Record manual main approval
+        run: echo "Main change approved through the protected GitHub environment"
