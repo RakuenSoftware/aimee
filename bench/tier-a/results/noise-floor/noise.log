@@ -5,3 +5,6 @@
 [13:28:46Z]   committed shard3_run1
 [13:28:46Z] --- shard3_run2 (3 proc)
 [13:49:20Z] OK   shard3_run2 strictF1=0.6138
+[13:49:20Z]   committed shard3_run2
+[13:49:20Z] --- single_run1 (1 proc)
+[14:12:34Z] OK   single_run1 strictF1=0.6033
