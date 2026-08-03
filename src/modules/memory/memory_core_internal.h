@@ -126,6 +126,10 @@ int memory_embed_serving_id(const char *command, char *out, size_t out_len);
 int memory_embed_http_post_status(const char *base, const char *path, const char *body, char **resp,
                                   int *status_out);
 int memory_embed_text_runtime(const char *text, const char *command, float *out, int max_dim);
+/* Polarity name for the embedder's per-model prefix lookup. Declared here because
+ * both the single-text and the batched embed paths must name it the same way — a
+ * query embedded with the document prefix is a silent retrieval-quality loss. */
+const char *memory_embed_input_type_name(embed_input_type_t input_type);
 int memory_env_int(const char *name, int fallback, int min_value, int max_value);
 double memory_env_weight(const char *name, double fallback);
 int memory_expand_query_terms(const char *norm_query, char base_tokens[][64], int base_count,

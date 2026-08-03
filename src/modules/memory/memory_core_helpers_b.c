@@ -689,6 +689,107 @@ static void memory_query_embed_cache_put(const char *command, const char *text, 
    e->dim = dim;
 }
 
+/* Names the polarity for the embedder's per-model prefix lookup. The embedder owns
+ * the prefixes themselves; we only say which side this text is. */
+const char *memory_embed_input_type_name(embed_input_type_t input_type)
+{
+   return input_type == EMBED_INPUT_QUERY ? "query" : "document";
+}
+
+int memory_embed_texts(const char *const *texts, int n, const char *command,
+                       embed_input_type_t input_type, float *out, int dim)
+{
+   if (!texts || n <= 0 || !out || dim <= 0)
+      return 0;
+   /* The builtin is in-process feature hashing: there is no round trip to amortize,
+    * so batching it would only add a JSON encode. Callers fall back to the per-text
+    * path, which computes exactly the same vectors. */
+   if (!command || !command[0] || strcmp(command, "builtin") == 0)
+      return 0;
+   if (!memory_embed_command_is_http(command))
+      return 0;
+
+   cJSON *arr = cJSON_CreateArray();
+   if (!arr)
+      return 0;
+   for (int i = 0; i < n; i++)
+   {
+      if (!texts[i] || !texts[i][0])
+      {
+         cJSON_Delete(arr);
+         return 0;
+      }
+      cJSON_AddItemToArray(arr, cJSON_CreateString(texts[i]));
+   }
+   char *input = cJSON_PrintUnformatted(arr);
+   cJSON_Delete(arr);
+   if (!input)
+      return 0;
+
+   /* Same polarity contract as the single-text path: the prefix belonging to a
+    * query differs from a document's, and omitting it is a silent quality loss
+    * rather than an error. */
+   char path[64];
+   snprintf(path, sizeof(path), "/embed_batch?input_type=%s",
+            memory_embed_input_type_name(input_type));
+
+   char *buf = NULL;
+   int http_status = -1;
+   int rc = memory_embed_http_post_status(command, path, input, &buf, &http_status);
+   free(input);
+   if (rc != 0 || !buf)
+   {
+      free(buf);
+      /* Deliberately NOT reported to the dependency breaker. A batch failure sends
+       * the caller to the per-text path, which probes the same embedder and owns
+       * the breaker; tripping it here would open the breaker and then fail the
+       * fallback that was supposed to recover. */
+      aimee_log(LOG_DEBUG, "memory", "batch embed unavailable (status %d); falling back per text",
+                http_status);
+      return 0;
+   }
+
+   cJSON *resp = cJSON_Parse(buf);
+   free(buf);
+   if (!cJSON_IsArray(resp) || cJSON_GetArraySize(resp) != n)
+   {
+      cJSON_Delete(resp);
+      return 0;
+   }
+
+   /* Write into |out| only after every row is validated at full width. A partial
+    * write would leave the caller unable to tell which rows are real, and a short
+    * vector silently means a different point in the vector space. */
+   int row = 0;
+   cJSON *vecj;
+   cJSON_ArrayForEach(vecj, resp)
+   {
+      if (!cJSON_IsArray(vecj) || cJSON_GetArraySize(vecj) != dim)
+      {
+         cJSON_Delete(resp);
+         return 0;
+      }
+      int k = 0;
+      cJSON *el;
+      cJSON_ArrayForEach(el, vecj)
+      {
+         if (!cJSON_IsNumber(el))
+         {
+            cJSON_Delete(resp);
+            return 0;
+         }
+         out[(size_t)row * (size_t)dim + (size_t)k] = (float)el->valuedouble;
+         k++;
+      }
+      row++;
+   }
+   cJSON_Delete(resp);
+   if (row != n)
+      return 0;
+
+   return n;
+}
+
 /* Embed-batching: embed up to `n` query texts in ONE batched embedder call and
  * seed them into the per-recall memo, so the retrieval lanes hit the memo
  * instead of making one HTTP round-trip per distinct text. Best-effort: skips

@@ -31,6 +31,109 @@
 #define CE_FALLBACK_MAX_CALLS   5
 #define CE_FALLBACK_MAX_IMPORTS 5
 
+/* Ceiling on rows held in memory per embedder round trip. The batch buffers are
+ * dominated by the per-row text (4 KiB) and vector (dim * 4 B), so 256 rows is a
+ * few MB at the widest model — bounded regardless of what an operator configures
+ * as the batch size. Throughput is flat well below this: measured on a 4-core
+ * deployment, batches of 8 already reach the model's ceiling (~33 emb/s vs 13.4
+ * unbatched) and larger batches do not improve on it. */
+#define CE_EMBED_BATCH_MAX 256
+
+/* One row that needs embedding, held until its batch is flushed. `row_idx` indexes
+ * the caller's rows[] array, which outlives every batch, so path/hash are read
+ * from there rather than copied again. */
+typedef struct
+{
+   int row_idx;
+   int64_t point_id;
+   char node_key[GRAPH_ENDPOINT_MAX];
+   char body_hash[32];
+   char payload[2048];
+   char text[CE_TEXT_CAP];
+} ce_pending_t;
+
+typedef struct
+{
+   int64_t id;
+   char path[512];
+   char hash[128];
+} ce_file_row_t;
+
+/* Embed one batch and upsert every vector it produced. Returns the number of rows
+ * actually written, and advances *batch_num by the same amount.
+ *
+ * The batch is an OPTIMIZATION, never a correctness boundary: if the batched call
+ * does not return exactly n vectors at the right width it is discarded whole and
+ * every row is re-embedded individually. That path is the pre-existing one — it
+ * owns the dependency breaker and the per-row error record — so a batch failure
+ * degrades to the old behaviour rather than losing rows. */
+static int ce_flush_batch(ce_pending_t *pend, int n, const char **texts, float *vecs,
+                          const ce_file_row_t *rows, const char *project, const char *embed_command,
+                          int embed_dim, int *batch_num)
+{
+   if (n <= 0)
+      return 0;
+
+   for (int i = 0; i < n; i++)
+      texts[i] = pend[i].text;
+
+   int wrote = 0;
+   if (memory_embed_texts(texts, n, embed_command, EMBED_INPUT_DOCUMENT, vecs, embed_dim) == n)
+   {
+      wrote = n;
+   }
+   else
+   {
+      /* Per-row fallback. A row that fails here is recorded and skipped, exactly as
+       * it was before batching existed. */
+      for (int i = 0; i < n; i++)
+      {
+         const ce_file_row_t *r = &rows[pend[i].row_idx];
+         float *slot = vecs + (size_t)i * (size_t)embed_dim;
+         int dim =
+             memory_embed_text(pend[i].text, embed_command, EMBED_INPUT_DOCUMENT, slot, embed_dim);
+         if (dim != embed_dim)
+         {
+            db2_code_index_op_record(pend[i].point_id, project, pend[i].node_key, r->path, 0,
+                                     "code embedding failed (embedder unavailable or dim "
+                                     "mismatch)");
+            pend[i].point_id = -1; /* marks "no vector"; skipped by the upsert below */
+            continue;
+         }
+         wrote++;
+      }
+   }
+   if (wrote == 0)
+      return 0;
+
+   int ok = 0;
+   for (int i = 0; i < n; i++)
+   {
+      if (pend[i].point_id < 0)
+         continue;
+      const ce_file_row_t *r = &rows[pend[i].row_idx];
+      /* content_hash and source_hash are intentionally the SAME value here —
+       * r->hash, the source file's hash (files.hash) at embed time. They serve
+       * different roles: content_hash backs the (project,node_key,content_hash)
+       * dedup index, while source_hash is the D7 drift contract (files.hash <>
+       * source_hash ⇒ content drift). Code embeds are file-granular today, so the
+       * two coincide; node-level hashing later would split them. */
+      int up = pgvec_kb_service_code_upsert(pend[i].point_id, vecs + (size_t)i * (size_t)embed_dim,
+                                            embed_dim, project, pend[i].node_key, r->path, "",
+                                            r->hash, pend[i].body_hash, r->hash, pend[i].payload);
+      /* Per-chunk replay bookkeeping so a failed embed is retried by
+       * `memory repair --reset-stuck`, not orphaned. */
+      db2_code_index_op_record(pend[i].point_id, project, pend[i].node_key, r->path, up == 0,
+                               up == 0 ? NULL : "code vector upsert failed");
+      if (up == 0)
+      {
+         ok++;
+         (*batch_num)++;
+      }
+   }
+   return ok;
+}
+
 static unsigned long long ce_fnv1a_update(unsigned long long h, unsigned char c)
 {
    h ^= (unsigned long long)c;
@@ -377,16 +480,10 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
    aimee_pg_bind_int64(st, "?1", proj_id);
    aimee_pg_bind_int64(st, "?2", generation);
 
-   typedef struct
-   {
-      int64_t id;
-      char path[512];
-      char hash[128];
-   } file_row_t;
-   file_row_t *rows = NULL;
+   ce_file_row_t *rows = NULL;
    int row_count = 0;
    int row_cap = 256;
-   rows = (file_row_t *)malloc((size_t)row_cap * sizeof(file_row_t));
+   rows = (ce_file_row_t *)malloc((size_t)row_cap * sizeof(ce_file_row_t));
    if (!rows)
    {
       aimee_pg_finalize(st);
@@ -413,7 +510,8 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
       if (row_count >= row_cap)
       {
          row_cap *= 2;
-         file_row_t *tmp = (file_row_t *)realloc(rows, (size_t)row_cap * sizeof(file_row_t));
+         ce_file_row_t *tmp =
+             (ce_file_row_t *)realloc(rows, (size_t)row_cap * sizeof(ce_file_row_t));
          if (!tmp)
             break;
          rows = tmp;
@@ -451,7 +549,37 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
    int embedded = 0;
    int skipped = 0;
    int batch_num = 0;
-   (void)effective_batch; /* batch processing implemented in caller for now */
+
+   /* ONE EMBEDDER ROUND TRIP PER BATCH, NOT PER FILE.
+    *
+    * This loop used to call memory_embed_text() per file and discard
+    * effective_batch entirely. The embedder serves ~2000 vectors/min when texts
+    * arrive batched and ~800 when they arrive one at a time, and a corpus is tens
+    * of thousands of vectors -- so the per-file shape made a ~15 minute ingest
+    * take hours, which is what made per-workspace embedding look impractical.
+    *
+    * Rows are collected into a pending batch, embedded in one call, then upserted.
+    * Everything that decides WHETHER a row needs embedding (node_key, hashes, the
+    * exists-by-hash skip) still happens per row before the batch is filled, so the
+    * skip path is unchanged and unchanged files still cost no embedder work. */
+   int cap = effective_batch;
+   if (cap < 1)
+      cap = 1;
+   if (cap > CE_EMBED_BATCH_MAX)
+      cap = CE_EMBED_BATCH_MAX;
+
+   ce_pending_t *pend = calloc((size_t)cap, sizeof(*pend));
+   float *vecs = calloc((size_t)cap * (size_t)embed_dim, sizeof(float));
+   const char **texts = calloc((size_t)cap, sizeof(*texts));
+   if (!pend || !vecs || !texts)
+   {
+      free(pend);
+      free(vecs);
+      free(texts);
+      free(rows);
+      return -1;
+   }
+   int pending = 0;
 
    for (int i = 0; i < row_count && embedded < effective_max; i++)
    {
@@ -490,6 +618,14 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
       /* Build deterministic fallback text (no LLM required). */
       char text[CE_TEXT_CAP];
       kb_code_embed_build_fallback_text(project, rows[i].path, rows[i].id, text, sizeof(text));
+      if (!text[0])
+      {
+         /* An empty text is not embeddable and would fail the batch for every
+          * other row in it. Record it and move on, as the per-file path did. */
+         db2_code_index_op_record(rows[i].id, project, node_key, rows[i].path, 0,
+                                  "code embedding text empty");
+         continue;
+      }
 
       /* files.id is a global IDENTITY primary key — already unique across every
        * project — so it is the point id directly. The previous
@@ -515,36 +651,33 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
          continue;
       }
 
-      /* Embed the deterministic fallback text with the configured embedder
-       * (embed_command runs the 0.6B embedder; "builtin" falls back to a stable
-       * deterministic vector when no embedder is configured, e.g. in tests). */
-      float vec[CE_EMBED_MAX_DIM];
-      int dim = memory_embed_text(text, embed_command, EMBED_INPUT_DOCUMENT, vec, embed_dim);
-      if (dim != embed_dim)
-      {
-         db2_code_index_op_record(point_id, project, node_key, rows[i].path, 0,
-                                  "code embedding failed (embedder unavailable or dim mismatch)");
-         continue;
-      }
+      /* Queue for the next embedder round trip. */
+      pend[pending].row_idx = i;
+      pend[pending].point_id = point_id;
+      snprintf(pend[pending].node_key, sizeof(pend[pending].node_key), "%s", node_key);
+      memcpy(pend[pending].body_hash, body_hash, sizeof(pend[pending].body_hash));
+      memcpy(pend[pending].payload, payload, sizeof(pend[pending].payload));
+      snprintf(pend[pending].text, sizeof(pend[pending].text), "%s", text);
+      pending++;
 
-      /* content_hash and source_hash are intentionally the SAME value here —
-       * rows[i].hash, the source file's hash (files.hash) at embed time. They serve
-       * different roles: content_hash backs the (project,node_key,content_hash)
-       * dedup index, while source_hash is the D7 drift contract (files.hash <>
-       * source_hash ⇒ content drift). Code embeds are file-granular today, so the
-       * two coincide; node-level hashing later would split them. */
-      int up = pgvec_kb_service_code_upsert(point_id, vec, dim, project, node_key, rows[i].path, "",
-                                            rows[i].hash, body_hash, rows[i].hash, payload);
-      /* Per-chunk replay bookkeeping so a failed embed is retried by
-       * `memory repair --reset-stuck`, not orphaned. */
-      db2_code_index_op_record(point_id, project, node_key, rows[i].path, up == 0,
-                               up == 0 ? NULL : "code vector upsert failed");
-      if (up == 0)
+      if (pending == cap)
       {
-         embedded++;
-         batch_num++;
+         embedded += ce_flush_batch(pend, pending, texts, vecs, rows, project, embed_command,
+                                    embed_dim, &batch_num);
+         pending = 0;
       }
    }
+
+   if (pending > 0)
+   {
+      embedded += ce_flush_batch(pend, pending, texts, vecs, rows, project, embed_command,
+                                 embed_dim, &batch_num);
+      pending = 0;
+   }
+
+   free(pend);
+   free(vecs);
+   free(texts);
 
    /* Record the fully-embedded signature so the next poll skips this project when
     * nothing changed — but only when the WHOLE file set was loaded this pass. A
