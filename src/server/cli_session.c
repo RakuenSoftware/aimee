@@ -7,7 +7,7 @@
 #include "cli_session.h"
 #include "platform_path.h"
 #include "util.h"
-#include "workspace_provider.h"
+#include "modules/workspace/workspace_provider.h"
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>

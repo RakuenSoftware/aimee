@@ -23,7 +23,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include "bus_host.h"
+#include <aimee/core/event_bus/bus_host.h>
 
 static void must(int cond, const char *what)
 {
@@ -112,9 +112,11 @@ static void client_unmap(client_t *c)
 }
 
 /* Deny a specific principal, to exercise the admission seam. */
-static bus_attach_status_t admit_deny_666(void *ctx, const bus_attach_request_t *req)
+static bus_attach_status_t admit_deny_666(void *ctx, int attach_fd, const bus_attach_request_t *req)
 {
    (void)ctx;
+   if (attach_fd < 0)
+      return BUS_ATTACH_PROTOCOL;
    return req->principal_ref == 666 ? BUS_ATTACH_DENIED_POLICY : BUS_ATTACH_OK;
 }
 
@@ -333,6 +335,44 @@ static void test_epoch(void)
    printf("  epoch: a host restart is visible through the control region\n");
 }
 
+typedef struct
+{
+   uint32_t kind;
+   uint32_t slot;
+   int calls;
+} hook_state_t;
+
+static bus_attach_status_t bind_capabilities(void *ctx, bus_host_t *host, uint32_t slot,
+                                             const bus_attach_request_t *request)
+{
+   hook_state_t *state = ctx;
+   state->calls++;
+   state->slot = slot;
+   if (request->principal_ref == 777)
+      return BUS_ATTACH_DENIED_POLICY;
+   return bus_host_subscribe(host, slot, state->kind) == BUS_HOST_OK ? BUS_ATTACH_OK
+                                                                     : BUS_ATTACH_DENIED_POLICY;
+}
+
+static void test_capability_hook(void)
+{
+   bus_host_config_t cfg = default_cfg();
+   bus_host_t h;
+   hook_state_t state = {.kind = 9090, .slot = UINT32_MAX, .calls = 0};
+   must(bus_host_create(&h, &cfg, NULL, NULL) == BUS_HOST_OK, "host create");
+   bus_host_set_attach_hook(&h, bind_capabilities, &state);
+   client_t admitted, denied;
+   must(attach(&h, BUS_WIRE_VERSION, BUS_WIRE_VERSION, 42, &admitted) == BUS_ATTACH_OK,
+        "hook admits and binds");
+   must(state.calls == 1 && state.slot == admitted.reply.handle_id, "hook sees assigned slot");
+   must(attach(&h, BUS_WIRE_VERSION, BUS_WIRE_VERSION, 777, &denied) == BUS_ATTACH_DENIED_POLICY,
+        "hook denial grants no descriptors");
+   must(state.calls == 2 && bus_host_admitted(&h) == 1, "denied hook slot rolled back");
+   client_unmap(&admitted);
+   bus_host_destroy(&h);
+   printf("  capability hook: grants bind before descriptors; denial rolls back\n");
+}
+
 int main(void)
 {
    printf("test_bus_host:\n");
@@ -342,6 +382,7 @@ int main(void)
    test_full_host();
    test_reaping();
    test_epoch();
+   test_capability_hook();
    printf("test_bus_host: OK\n");
    return 0;
 }

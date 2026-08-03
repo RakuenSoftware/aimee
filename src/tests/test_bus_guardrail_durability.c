@@ -16,6 +16,7 @@
 
 #include <aimee/audit/obs_bus.h> /* obs_bus_*, guardrail_event_t, db1_guardrail_event_* */
 #include "db1/db1.h"
+#include "server/obs_bus_adapter.h"
 
 #define N 2000
 
@@ -35,6 +36,7 @@ int main(void)
       fprintf(stderr, "FAIL: db1 init\n");
       return 1;
    }
+   assert(server_obs_bus_configure() == 0);
 
    /* Each event carries a UNIQUE identity (session_id "s<i>") and per-i field
     * values, so the read-back can prove exactly-once (a loss+dup that nets to N

@@ -4,6 +4,7 @@
 #include "kb_mgmt_status.h"
 #include "server_runtime_identity.h"
 #include "runtime_secret.h"
+#include <aimee/core/connection/auth.h>
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -477,7 +478,11 @@ int server_http_management_action_framing_valid(const char *method, const char *
          conn = ++conn == 1 && exact ? conn : 99;
       }
       else if (n == 13 && !strncasecmp(line, "Authorization", n))
-         auth = ++auth == 1 && vn > 7 && vn <= 4096 && !strncasecmp(v, "Bearer ", 7) ? auth : 99;
+      {
+         auth = ++auth == 1 && vn <= 4096 && aimee_core_bearer_token_span(v, vn, NULL, NULL) == 0
+                    ? auth
+                    : 99;
+      }
       else if (n == 25 && !strncasecmp(line, "X-Aimee-Management-Status", n))
          staple = ++staple == 1 && vn > 0 && vn <= KB_MGMT_STATUS_JSON_MAX ? staple : 99;
       else if ((n == 17 && !strncasecmp(line, "Transfer-Encoding", n)) ||
@@ -550,7 +555,11 @@ int server_http_management_read_framing_valid(const char *method, const char *pa
          conn = ++conn == 1 && exact ? conn : 99;
       }
       else if (n == 13 && !strncasecmp(line, "Authorization", n))
-         auth = ++auth == 1 && vn > 7 && vn <= 4096 && !strncasecmp(v, "Bearer ", 7) ? auth : 99;
+      {
+         auth = ++auth == 1 && vn <= 4096 && aimee_core_bearer_token_span(v, vn, NULL, NULL) == 0
+                    ? auth
+                    : 99;
+      }
       else if (n == 25 && !strncasecmp(line, "X-Aimee-Management-Status", n))
          staple = ++staple == 1 && vn > 0 && vn <= KB_MGMT_STATUS_JSON_MAX ? staple : 99;
       else if ((n == 17 && !strncasecmp(line, "Transfer-Encoding", n)) ||

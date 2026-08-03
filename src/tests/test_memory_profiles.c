@@ -4,7 +4,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include "memory_profile_pack.h"
+#include "modules/memory/memory_profile_pack.h"
 
 static char s_tmpdir[256];
 

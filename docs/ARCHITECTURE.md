@@ -205,7 +205,7 @@ The old combined appliance image is gone.
 
 ## Code boundaries
 
-- `src/modules/bus/`: event transport, arena, host, client, capture.
+- `src/core/event_bus/`: event transport, arena, host, client, capture.
 - `src/modules/`: owned C modules and public headers.
 - `src/server/`: C resource plane and `/v1` handlers.
 - `src/kb/`: KB daemon and DB2-facing routes.

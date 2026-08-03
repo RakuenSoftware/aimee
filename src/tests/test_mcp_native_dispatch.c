@@ -19,7 +19,7 @@
  * handlers' dependencies at link time — this TU pulls in every tool aimee has, and
  * none of those paths run here. */
 #include "aimee.h" /* MAX_PATH_LEN via agent_types.h */
-#include "agent_tools.h"
+#include <aimee/tools/agent_tools.h>
 #include "cJSON.h"
 #include <assert.h>
 #include <stdio.h>

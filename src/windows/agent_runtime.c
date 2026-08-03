@@ -80,7 +80,7 @@ int agent_eval_load_tasks(const char *suite_dir, eval_task_t *tasks, int max_tas
 /* ================================================================
  * From: agent_tools.c
  * ================================================================ */
-#include "agent_tools.h"
+#include <aimee/tools/agent_tools.h>
 #include "cJSON.h"
 #include "diff.h"
 

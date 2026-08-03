@@ -28,7 +28,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include "bus_region.h"
+#include <aimee/core/event_bus/bus_region.h>
+#include <aimee/core/event_bus/bus_region_host.h>
 
 static void must(int cond, const char *what)
 {

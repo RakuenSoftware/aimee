@@ -437,13 +437,6 @@ static int memory_embed_text_builtin(const char *text, float *out, int max_dim)
    return dim;
 }
 
-/* Names the polarity for the gateway's per-model prefix lookup. The gateway owns the
- * prefixes themselves; we only say which side this text is. */
-const char *memory_embed_input_type_name(embed_input_type_t input_type)
-{
-   return input_type == EMBED_INPUT_QUERY ? "query" : "document";
-}
-
 /* Run embedding command: pipes text on stdin, reads JSON float array from stdout. */
 int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
                       float *out, int max_dim)

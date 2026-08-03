@@ -39,6 +39,7 @@ means the contract or branch exists but is not part of the integrated path yet.
 | --- | --- | --- |
 | Role/persona delegate routing | Done | Viable-agent retry; explicit pins fail instead of silently changing model. |
 | Isolated delegate worktrees | Done | Created on first write and bounded to the assigned workspace. |
+| Per-session branch and worktree | Done | CLI and MCP sessions; cut from the default branch, keyed per session id so two sessions never share one. |
 | Networkless delegate sandbox | Done | Default container posture; custom images and mediated packages are supported. |
 | Roundtables | Done | Parallel seats, per-seat models, evidence, retry, chair, and cost accounting. |
 | Typed workflows | Done | Validation, version hashes, retries, loops, gates, and durable run state. |

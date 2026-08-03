@@ -142,7 +142,7 @@ tap and the audit replay path already handle it.
 | `bus_arena_read_ptr` | consumer (co-located) | resolve the span to read in place |
 | `bus_arena_release` | consumer | release after reading (exactly once) |
 
-All of these are in [`src/modules/bus/bus_arena.h`](../../src/modules/bus/bus_arena.h)
-and [`bus_client.h`](../../src/modules/bus/bus_client.h); see
+All of these are in [`bus_arena.h`](../../src/core/event_bus/include/aimee/core/event_bus/bus_arena.h)
+and [`bus_client.h`](../../src/core/event_bus/include/aimee/core/event_bus/bus_client.h); see
 [`test_bus_route.c`](../../src/tests/test_bus_route.c) and
 [`test_bus_client.c`](../../src/tests/test_bus_client.c) for worked examples.

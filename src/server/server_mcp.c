@@ -16,11 +16,11 @@
 #include "config.h"
 #include "dashboard.h"
 #include <aimee/protocols/mcp/mcp_tools.h>
-#include "agent_tools.h" /* agent_tools_emit_tool_completion — served tool-call outcome audit */
-#include "mcp_git.h"
-#include "git_verify.h"
-#include "workspace_turn.h"
-#include "workspace.h"
+#include <aimee/tools/agent_tools.h> /* agent_tools_emit_tool_completion — served tool-call outcome audit */
+#include "modules/git/mcp_git.h"
+#include "modules/git/git_verify.h"
+#include "modules/workspace/workspace_turn.h"
+#include <aimee/workspace/workspace.h>
 #include "notes.h"
 #include "agent_coord.h"
 #include "agent_tasks.h"

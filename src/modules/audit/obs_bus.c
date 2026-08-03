@@ -23,10 +23,12 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "bus_capture.h"
-#include "bus_client.h"
-#include "bus_host.h"
-#include "bus_region.h" /* bus_control_epoch */
+#include <aimee/core/event_bus/bus_capture.h>
+#include <aimee/core/event_bus/bus_client.h>
+#include <aimee/core/event_bus/bus_host.h>
+#include <aimee/core/event_bus/bus_region.h> /* bus_control_epoch */
+#include <aimee/core/event_bus/bus_runtime.h>
+#include <aimee/core/event_bus/module_client.h>
 #include "config.h"     /* config_default_dir */
 #include "log.h"
 #include "wfe_def.h" /* wfe_sha256_raw — obs_bus_key_fingerprint */
@@ -55,11 +57,19 @@ static struct
    bus_host_t host;
    bus_client_t producer;
    bus_client_t consumer;
+   bus_client_t module_bus;
+   aimee_module_client_t module_client;
    pthread_t thread;
    pthread_mutex_t pub_lock; /* serializes the single producer ring */
+   pthread_mutex_t host_lock; /* serializes pump/reap with external admission */
+   bus_runtime_t *runtime;
+   bus_runtime_policy_t *runtime_policy;
    atomic_int emitting;      /* 1 while accepting emits */
    atomic_int stop;          /* 1 tells the consumer to final-drain and exit */
    atomic_int publishers;    /* # producers inside the emit window (see enter_emit) */
+   atomic_int accepting_calls; /* module RPC admission during daemon lifetime */
+   atomic_int module_stop;     /* cancels an in-flight module RPC on shutdown */
+   atomic_int module_callers;  /* calls using module_client during teardown */
    atomic_uint_least64_t dropped;
    atomic_uint_least64_t written;
    atomic_uint_least64_t enqueued;  /* events successfully placed on the ring */
@@ -78,6 +88,17 @@ static struct
 /* Guards start/stop transitions and the started/terminated fields. Separate from
  * g.pub_lock (which serializes producers) and never held across a producer wait. */
 static pthread_mutex_t start_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/* Service-owned sinks live outside `g` because start_locked() resets the bus
+ * runtime. Configuration is immutable while the bus is running, guarded by
+ * start_lock, so the consumer may read it without another lock. */
+static struct
+{
+   obs_bus_guardrail_sink_fn guardrail;
+   void *guardrail_ctx;
+   char module_socket[108];
+   char module_policy_dir[4096];
+} sinks;
 
 /* ---------------------------------------------------------- wire form ---- */
 
@@ -195,7 +216,9 @@ static uint32_t serialize_guardrail(uint8_t *buf, uint32_t cap, const guardrail_
    return off + 4;
 }
 
-/* Deserialize a guardrail event and write it to db1. Returns 1 if written. */
+/* Deserialize a guardrail event and hand it to the daemon-owned sink. The
+ * shared bus has no DB1 dependency: aimee-server installs that adapter, while
+ * aimee-kb never subscribes to this kind. Returns 1 if written. */
 static int write_guardrail(const uint8_t *p, uint32_t len)
 {
    guardrail_event_t e;
@@ -226,11 +249,7 @@ static int write_guardrail(const uint8_t *p, uint32_t len)
    int32_t dry;
    memcpy(&dry, p + off, 4);
    e.dry_run = dry;
-   /* db1_guardrail_event_insert wraps the write in db1's transaction gate, so it
-    * is safe to call from this consumer thread and isolated from other threads'
-    * transactions on the shared connection. A failed insert is a visible drop,
-    * not a silent success. */
-   if (db1_guardrail_event_insert(&e) != 0)
+   if (!sinks.guardrail || sinks.guardrail(&e, sinks.guardrail_ctx) != 0)
    {
       atomic_fetch_add_explicit(&g.dropped, 1, memory_order_relaxed);
       return 0;
@@ -399,7 +418,15 @@ static void *consumer_main(void *arg)
    const struct timespec nap = {.tv_sec = 0, .tv_nsec = 200 * 1000}; /* 200 us */
    while (!atomic_load_explicit(&g.stop, memory_order_acquire))
    {
+      uint64_t now = bus_runtime_monotonic_ns();
+      bus_client_heartbeat(&g.producer, now);
+      bus_client_heartbeat(&g.consumer, now);
+      bus_client_heartbeat(&g.module_bus, now);
+      pthread_mutex_lock(&g.host_lock);
+      if (g.runtime)
+         (void)bus_runtime_maintain(g.runtime, now);
       bus_host_pump(&g.host); /* the tap records each routed event into g.capture */
+      pthread_mutex_unlock(&g.host_lock);
       uint32_t n = drain();
       /* Flush the capture stream on the threshold (bound memory during a burst)
        * or when the flow goes idle (so a recorded row is not stranded in memory
@@ -414,7 +441,9 @@ static void *consumer_main(void *arg)
    int empty = 0;
    while (empty < 2)
    {
+      pthread_mutex_lock(&g.host_lock);
       bus_host_pump(&g.host);
+      pthread_mutex_unlock(&g.host_lock);
       empty = (drain() == 0) ? empty + 1 : 0;
    }
    capture_flush(); /* persist whatever the final drain recorded */
@@ -464,10 +493,11 @@ static int start_locked(void)
 {
    memset(&g, 0, sizeof g);
    pthread_mutex_init(&g.pub_lock, NULL);
+   pthread_mutex_init(&g.host_lock, NULL);
 
    bus_host_config_t cfg;
    memset(&cfg, 0, sizeof cfg);
-   cfg.max_slots = 4;
+   cfg.max_slots = 64; /* three internal clients plus separately shipped modules */
    cfg.slot_size = 2048; /* an audit row (7 short strings + an int) fits inline */
    cfg.inline_budget = 1900;
    cfg.queue_capacity = 1024; /* absorb bursts between drain ticks */
@@ -476,36 +506,81 @@ static int start_locked(void)
    if (bus_host_create(&g.host, &cfg, NULL, NULL) != BUS_HOST_OK)
    {
       aimee_log(LOG_ERROR, "obs_bus", "bus host create failed; audit rows will not be recorded");
+      pthread_mutex_destroy(&g.host_lock);
+      pthread_mutex_destroy(&g.pub_lock);
       return -1;
    }
-   if (attach(&g.producer) != 0 || attach(&g.consumer) != 0)
+   if (attach(&g.producer) != 0 || attach(&g.consumer) != 0 || attach(&g.module_bus) != 0 ||
+       aimee_module_client_init(&g.module_client, &g.module_bus) != 0)
    {
       aimee_log(LOG_ERROR, "obs_bus", "audit bus client attach failed");
+      aimee_module_client_destroy(&g.module_client);
+      bus_client_detach(&g.module_bus);
+      bus_client_detach(&g.consumer);
+      bus_client_detach(&g.producer);
       bus_host_destroy(&g.host);
+      pthread_mutex_destroy(&g.host_lock);
+      pthread_mutex_destroy(&g.pub_lock);
       return -1;
    }
    bus_host_subscribe(&g.host, g.consumer.reply.handle_id, KIND_AUDIT_ACTION);
-   bus_host_subscribe(&g.host, g.consumer.reply.handle_id, KIND_GUARDRAIL_EVENT);
+   if (sinks.guardrail)
+      bus_host_subscribe(&g.host, g.consumer.reply.handle_id, KIND_GUARDRAIL_EVENT);
 
    /* Register the capture tap BEFORE the consumer thread starts pumping, so the
     * first routed event onward is recorded. */
    capture_open();
 
+   if (sinks.module_socket[0])
+   {
+      if (bus_runtime_policy_load_dir(sinks.module_policy_dir, &g.runtime_policy) != 0)
+      {
+         aimee_log(LOG_ERROR, "obs_bus", "module grant policy is invalid: %s",
+                   sinks.module_policy_dir);
+         goto start_fail;
+      }
+      size_t grant_count = 0;
+      const bus_runtime_grant_t *grants =
+          bus_runtime_policy_grants(g.runtime_policy, &grant_count);
+      bus_runtime_config_t runtime_cfg = {.socket_path = sinks.module_socket,
+                                          .socket_mode = 0600,
+                                          .backlog = 32,
+                                          .stale_after_ns = 30ULL * 1000000000ULL,
+                                          .grants = grants,
+                                          .grant_count = grant_count};
+      g.runtime = bus_runtime_start(&g.host, &g.host_lock, &runtime_cfg);
+      if (!g.runtime)
+      {
+         aimee_log(LOG_ERROR, "obs_bus", "module endpoint failed: %s", sinks.module_socket);
+         goto start_fail;
+      }
+   }
+
    if (pthread_create(&g.thread, NULL, consumer_main, NULL) != 0)
    {
       aimee_log(LOG_ERROR, "obs_bus", "audit consumer thread spawn failed");
-      if (g.cap_fd >= 0)
-         close(g.cap_fd);
-      bus_capture_free(&g.capture);
-      bus_client_detach(&g.producer);
-      bus_client_detach(&g.consumer);
-      bus_host_destroy(&g.host);
-      return -1;
+      goto start_fail;
    }
 
    g.started = 1;
    atomic_store_explicit(&g.emitting, 1, memory_order_release);
+   atomic_store_explicit(&g.accepting_calls, 1, memory_order_release);
    return 0;
+
+start_fail:
+   bus_runtime_stop(&g.runtime);
+   bus_runtime_policy_free(&g.runtime_policy);
+   if (g.cap_fd >= 0)
+      close(g.cap_fd);
+   bus_capture_free(&g.capture);
+   bus_client_detach(&g.producer);
+   bus_client_detach(&g.consumer);
+   aimee_module_client_destroy(&g.module_client);
+   bus_client_detach(&g.module_bus);
+   bus_host_destroy(&g.host);
+   pthread_mutex_destroy(&g.host_lock);
+   pthread_mutex_destroy(&g.pub_lock);
+   return -1;
 }
 
 int obs_bus_start(void)
@@ -514,6 +589,112 @@ int obs_bus_start(void)
    int rc = g.started ? 0 : start_locked();
    pthread_mutex_unlock(&start_lock);
    return rc;
+}
+
+typedef struct
+{
+   aimee_module_cancelled_fn external;
+   void *context;
+} module_cancel_context_t;
+
+static int module_call_cancelled(void *context)
+{
+   module_cancel_context_t *state = context;
+   return atomic_load_explicit(&g.module_stop, memory_order_acquire) ||
+          (state->external && state->external(state->context));
+}
+
+aimee_module_call_result_t obs_bus_module_call(
+    uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
+    const void *request_body, uint32_t request_len, void *response_body,
+    uint32_t response_capacity, uint32_t *response_len, aimee_module_cancelled_fn cancelled,
+    void *cancel_context)
+{
+   if (response_len)
+      *response_len = 0;
+   atomic_fetch_add(&g.module_callers, 1); /* seq_cst: pairs with stop admission gate */
+   if (!atomic_load(&g.accepting_calls))
+   {
+      atomic_fetch_sub(&g.module_callers, 1);
+      return AIMEE_MODULE_CALL_TRANSPORT;
+   }
+   module_cancel_context_t state = {.external = cancelled, .context = cancel_context};
+   aimee_module_call_result_t result = aimee_module_client_call(
+       &g.module_client, event_kind, stage_id, trace_id, deadline_ns, request_body, request_len,
+       response_body, response_capacity, response_len, module_call_cancelled, &state);
+   atomic_fetch_sub(&g.module_callers, 1);
+   return result;
+}
+
+int obs_bus_module_available(uint32_t event_kind)
+{
+   int available = 0;
+   pthread_mutex_lock(&start_lock);
+   if (g.started && atomic_load_explicit(&g.accepting_calls, memory_order_acquire))
+   {
+      pthread_mutex_lock(&g.host_lock);
+      available = bus_host_kind_has_server(&g.host, event_kind);
+      pthread_mutex_unlock(&g.host_lock);
+   }
+   pthread_mutex_unlock(&start_lock);
+   return available;
+}
+
+int obs_bus_set_guardrail_sink(obs_bus_guardrail_sink_fn sink, void *ctx)
+{
+   pthread_mutex_lock(&start_lock);
+   if (g.started)
+   {
+      pthread_mutex_unlock(&start_lock);
+      return -1;
+   }
+   sinks.guardrail = sink;
+   sinks.guardrail_ctx = sink ? ctx : NULL;
+   pthread_mutex_unlock(&start_lock);
+   return 0;
+}
+
+int obs_bus_configure_module_runtime(const char *socket_path, const char *policy_dir)
+{
+   if (!socket_path || socket_path[0] != '/' || !policy_dir || policy_dir[0] != '/' ||
+       strlen(socket_path) >= sizeof(sinks.module_socket) ||
+       strlen(policy_dir) >= sizeof(sinks.module_policy_dir))
+      return -1;
+   pthread_mutex_lock(&start_lock);
+   if (g.started)
+   {
+      pthread_mutex_unlock(&start_lock);
+      return -1;
+   }
+   snprintf(sinks.module_socket, sizeof(sinks.module_socket), "%s", socket_path);
+   snprintf(sinks.module_policy_dir, sizeof(sinks.module_policy_dir), "%s", policy_dir);
+   pthread_mutex_unlock(&start_lock);
+   return 0;
+}
+
+int obs_bus_configure_daemon_module_runtime(const char *daemon_name,
+                                            const char *config_directory)
+{
+   if (!daemon_name || !daemon_name[0] || strchr(daemon_name, '/') || !config_directory ||
+       config_directory[0] != '/')
+      return -1;
+   const char *socket_override = getenv("AIMEE_MODULE_BUS_SOCKET");
+   const char *policy_override = getenv("AIMEE_MODULE_POLICY_DIR");
+   char socket_path[108], policy_dir[4096];
+   int socket_length =
+       socket_override && socket_override[0]
+           ? snprintf(socket_path, sizeof(socket_path), "%s", socket_override)
+           : snprintf(socket_path, sizeof(socket_path), "%s/%s-module-bus.sock", config_directory,
+                      daemon_name);
+   int policy_length =
+       policy_override && policy_override[0]
+           ? snprintf(policy_dir, sizeof(policy_dir), "%s", policy_override)
+           : snprintf(policy_dir, sizeof(policy_dir), "%s/modules.d/%s", config_directory,
+                      daemon_name);
+   if (socket_length <= 0 || (size_t)socket_length >= sizeof(socket_path) || policy_length <= 0 ||
+       (size_t)policy_length >= sizeof(policy_dir))
+      return -1;
+   return obs_bus_configure_module_runtime(socket_path, policy_dir);
 }
 
 /* Lazy start on first emit, so obs_bus_emit is a drop-in for the old direct
@@ -632,6 +813,11 @@ void obs_bus_emit_guardrail(const guardrail_event_t *e)
 {
    if (!e)
       return;
+   if (!sinks.guardrail)
+   {
+      aimee_log(LOG_WARN, "obs_bus", "guardrail event has no configured daemon sink; not recorded");
+      return;
+   }
    if (!enter_emit())
    {
       aimee_log(LOG_WARN, "obs_bus", "audit bus unavailable; guardrail event not recorded");
@@ -669,9 +855,17 @@ void obs_bus_stop(void)
     * still drains and completes. Bounded: a producer waits at most AB_PUB_MAX
     * backoffs. */
    atomic_store(&g.emitting, 0);                                    /* seq_cst */
+   atomic_store(&g.accepting_calls, 0); /* seq_cst: no new caller can pass re-check */
+   atomic_store_explicit(&g.module_stop, 1, memory_order_release);
    const struct timespec nap = {.tv_sec = 0, .tv_nsec = 50 * 1000}; /* 50 us */
    while (atomic_load(&g.publishers) > 0)
       nanosleep(&nap, NULL);
+   while (atomic_load(&g.module_callers) > 0)
+      nanosleep(&nap, NULL);
+
+   /* No new process may receive mappings once shutdown begins. The listener is
+    * joined before the host and regions are touched. */
+   bus_runtime_stop(&g.runtime);
 
    /* Now no producer will touch the ring again — final-drain and exit. */
    atomic_store_explicit(&g.stop, 1, memory_order_release);
@@ -685,7 +879,11 @@ void obs_bus_stop(void)
    bus_capture_free(&g.capture);
    bus_client_detach(&g.producer);
    bus_client_detach(&g.consumer);
+   aimee_module_client_destroy(&g.module_client);
+   bus_client_detach(&g.module_bus);
    bus_host_destroy(&g.host);
+   bus_runtime_policy_free(&g.runtime_policy);
+   pthread_mutex_destroy(&g.host_lock);
    pthread_mutex_destroy(&g.pub_lock);
    g.started = 0;
    g.terminated = 1; /* a lazy emit must not resurrect the bus after shutdown */

@@ -21,13 +21,15 @@ advance workflow state.
 
 ```text
 src/
+  core/                 extraction-ready shared C libraries
+    connection/         TCP, deadline/cancel, HTTP/1, auth, TLS/mTLS
+    event_bus/           local shared-memory host and module clients
   cli_*                 thin-client commands and transport
   server/               server listeners, handlers, agent/resource plane
   kb/                   KB daemon and HTTP surface
   db1/                  server SQLite owner
   db2/                  KB PostgreSQL/pgvector owner
-  modules/              owned C modules and public include trees
-    bus/                shared-memory event bus
+  modules/              product modules and public include trees
     audit/              WORM audit, replay, observability bridge
     sandbox/            delegate isolation
   tests/                C unit and integration tests
@@ -52,7 +54,7 @@ routing boundary. There is no standalone inference runtime artifact.
 
 ## Event bus
 
-`src/modules/bus/` provides the intra-daemon transport:
+`src/core/event_bus/` provides the intra-daemon transport:
 
 | File | Contract |
 | --- | --- |
@@ -63,6 +65,8 @@ routing boundary. There is no standalone inference runtime artifact.
 | `bus_host.*` | admission, sequence, routing, correlation, flow control, reap, tap |
 | `bus_client.*` | C attach, publish, subscribe, request/reply, poll |
 | `bus_capture.*` | ordered CRC-checked capture and observational replay |
+| `module_protocol.*` | versioned pointer-free feature request/result envelope |
+| `module_runtime.*` | authenticated process loop, dispatch, deadline and cancellation |
 
 One host owns all `memfd` creation. An admitted client receives only its queue pair and shared arena.
 The host stamps `seq` before routing and invokes the tap for every accepted event. Per-source FIFO is

@@ -12,7 +12,7 @@
 #include "db2_test_shim.h"
 #include "platform_test_util.h"
 #include "memory.h"
-#include "memory_graph_fusion.h"
+#include "modules/memory/memory_graph_fusion.h"
 #include "db2/entity_edges.h"
 #include "db2/memory_query.h"
 

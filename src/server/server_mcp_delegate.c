@@ -1,7 +1,7 @@
 /* server_mcp_delegate.c: MCP delegate tool dispatch helpers. */
 #include "server_mcp_delegate.h"
 #include "aimee.h"
-#include "mcp_git.h"
+#include "modules/git/mcp_git.h"
 
 #include <stdlib.h>
 

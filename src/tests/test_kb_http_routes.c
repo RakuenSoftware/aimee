@@ -4984,7 +4984,13 @@ static void test_code_scan_ok(void)
    assert(strcmp(g_code_scan_project, "proj-alpha") == 0);
    assert(strcmp(g_code_scan_root_path, "/tmp/repo") == 0);
    assert(g_code_scan_force == 1);
-   assert(g_curator_code_queued == 1);
+   /* A scan INDEXES; it does not curate. Curation is enqueued by the embed stage
+    * once the project is fully embedded, so the pipeline order is
+    * indexed -> embedded -> curated rather than indexed -> curated (racing embed).
+    * Enqueuing here also put a one-row-per-symbol INSERT on the synchronous path
+    * of this request -- ~173,000 rows and ~215s on a 4,018-file corpus, against a
+    * client that times out at 300s. */
+   assert(g_curator_code_queued == 0);
 }
 
 static void test_code_project_lifecycle_routes(void)
@@ -5079,10 +5085,11 @@ static void test_code_scan_pushed_files_ok(void)
    assert(strcmp(g_code_scan_file_rel, "src/a.c") == 0);
    assert(strstr(g_code_scan_file_content, "pushed") != NULL);
    assert(g_code_scan_files_force == 1);
-   /* The push path now queues code units for the curator just like a local scan
-    * (the queue reads from DB2 by project name and self-gates on the curator
-    * flag), so with the stubbed config_load reporting the gate on, it enqueues. */
-   assert(g_curator_code_queued == 1);
+   /* Same for a thin-client push: it indexes, it does not curate. The embed sweep
+    * reaches these projects by NAME, so nothing is lost by not enqueuing here --
+    * the push path never needed its own enqueue, it needed the embed stage to own
+    * one. */
+   assert(g_curator_code_queued == 0);
 }
 
 static void test_code_scan_pushed_files_rejects_invalid_item(void)

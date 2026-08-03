@@ -1,7 +1,7 @@
 /* test_git_org_repos.c — provider detection + repo-list JSON parsing + the
  * paginated enumeration path (with a stubbed HTTP layer). No network. */
 
-#include "git_org_repos.h"
+#include "modules/git/git_org_repos.h"
 #include "cJSON.h"
 
 #include <assert.h>

@@ -13,7 +13,7 @@
 #include "lifecycle.h"
 #include "provider_catalog.h"
 #include "shutdown_forensics.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include "cJSON.h"
 #include <unistd.h>
 #include <sys/stat.h>

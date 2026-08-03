@@ -4,9 +4,6 @@
  * ("unix:" / absolute-path) transport is unsupported here — those callers fail
  * gracefully; the cross-platform remote path goes through aimee_client_request. */
 #include "cli_client.h"
-/* winsock2 must precede windows.h to avoid the legacy winsock.h being pulled in. */
-#include <winsock2.h>
-#include <ws2tcpip.h>
 #include "aimee_client.h"
 #include "aimee_home.h"
 #include "aimee_version.h"
@@ -15,6 +12,10 @@
 #include "platform_path.h"
 #include "platform_process.h"
 #include "cJSON.h"
+#include <aimee/core/connection/auth.h>
+#include <aimee/core/connection/endpoint.h>
+#include <aimee/core/connection/http1.h>
+#include <aimee/core/connection/socket.h>
 #include <direct.h>
 #include <errno.h>
 #include <stdio.h>
@@ -514,90 +515,52 @@ int cli_v1_pct_encode(const char *in, char *out, size_t cap)
    return 0;
 }
 
-/* Connect a TCP socket to a "[tcp:]host:port" endpoint. Returns INVALID_SOCKET
- * for UDS/local endpoints (unsupported on Windows) or on failure. host_out gets
+/* Connect a TCP socket to a "[tcp:]host:port" endpoint. Returns -1 for
+ * UDS/local endpoints (unsupported on Windows) or on failure. host_out gets
  * the bare host for the HTTP Host header. */
-static SOCKET cli_win_http_connect(const char *endpoint, char *host_out, size_t host_n,
-                                   int timeout_ms)
+static int cli_win_http_connect(const char *endpoint, char *host_out, size_t host_n, int timeout_ms)
 {
    if (host_out && host_n)
       snprintf(host_out, host_n, "localhost");
    if (!endpoint || !endpoint[0])
-      return INVALID_SOCKET;
+      return -1;
    if (strncmp(endpoint, "unix:", 5) == 0 || endpoint[0] == '/')
-      return INVALID_SOCKET; /* no Unix-domain socket on Windows */
+      return -1; /* no Unix-domain socket on Windows */
 
-   const char *hp = endpoint;
-   if (strncmp(hp, "tcp:", 4) == 0)
-      hp += 4;
-   char host[256];
-   const char *port_str;
-   if (hp[0] == '[')
-   {
-      const char *close_br = strchr(hp, ']');
-      if (!close_br || close_br[1] != ':')
-         return INVALID_SOCKET;
-      size_t hl = (size_t)(close_br - hp - 1);
-      if (hl == 0 || hl >= sizeof(host))
-         return INVALID_SOCKET;
-      memcpy(host, hp + 1, hl);
-      host[hl] = '\0';
-      port_str = close_br + 2;
-   }
-   else
-   {
-      const char *colon = strrchr(hp, ':');
-      if (!colon)
-         return INVALID_SOCKET;
-      size_t hl = (size_t)(colon - hp);
-      if (hl == 0 || hl >= sizeof(host))
-         return INVALID_SOCKET;
-      memcpy(host, hp, hl);
-      host[hl] = '\0';
-      port_str = colon + 1;
-   }
-   if (!port_str[0] || atoi(port_str) <= 0 || atoi(port_str) > 65535)
-      return INVALID_SOCKET;
+   const char *authority = endpoint;
+   if (strncmp(authority, "tcp:", 4) == 0)
+      authority += 4;
+   aimee_core_endpoint_t parsed;
+   if (aimee_core_endpoint_parse(authority, &parsed) != 0)
+      return -1;
+   const char *host = parsed.host;
+   const char *port_str = parsed.port;
    if (host_out && host_n)
       snprintf(host_out, host_n, "%s", host);
 
-   static int wsa_started = 0;
-   if (!wsa_started)
+   int effective_timeout = timeout_ms > 0 ? timeout_ms : CLIENT_DEFAULT_TIMEOUT_MS;
+   int fd = aimee_core_socket_connect(host, port_str, effective_timeout);
+   if (fd >= 0 && aimee_core_socket_set_timeouts(fd, effective_timeout, effective_timeout) != 0)
    {
-      WSADATA wsa;
-      if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
-         return INVALID_SOCKET;
-      wsa_started = 1;
+      aimee_core_socket_close(fd);
+      return -1;
    }
-
-   struct addrinfo hints, *res = NULL;
-   memset(&hints, 0, sizeof(hints));
-   hints.ai_family = AF_UNSPEC;
-   hints.ai_socktype = SOCK_STREAM;
-   if (getaddrinfo(host, port_str, &hints, &res) != 0 || !res)
-      return INVALID_SOCKET;
-   SOCKET s = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-   if (s == INVALID_SOCKET)
-   {
-      freeaddrinfo(res);
-      return INVALID_SOCKET;
-   }
-   DWORD tmo = (DWORD)(timeout_ms > 0 ? timeout_ms : CLIENT_DEFAULT_TIMEOUT_MS);
-   setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tmo, sizeof(tmo));
-   setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char *)&tmo, sizeof(tmo));
-   if (connect(s, res->ai_addr, (int)res->ai_addrlen) != 0)
-   {
-      closesocket(s);
-      freeaddrinfo(res);
-      return INVALID_SOCKET;
-   }
-   freeaddrinfo(res);
-   return s;
+   return fd;
 }
 
 /* Send a fully-built HTTP request over s and read the whole response into a
  * heap buffer (Connection: close). Returns the buffer (caller frees) + length;
  * NULL on failure. */
+static int cli_win_http_write(void *context, const void *buffer, size_t length)
+{
+   return aimee_core_socket_write_all(*(int *)context, buffer, length);
+}
+
+static long cli_win_http_read(void *context, void *buffer, size_t length)
+{
+   return aimee_core_socket_read(*(int *)context, buffer, length);
+}
+
 static char *cli_win_http_exec(const char *endpoint, const char *method, const char *path,
                                const char *body, const char *bearer, int timeout_ms,
                                size_t *len_out)
@@ -605,24 +568,32 @@ static char *cli_win_http_exec(const char *endpoint, const char *method, const c
    if (len_out)
       *len_out = 0;
    char host[256];
-   SOCKET s = cli_win_http_connect(endpoint, host, sizeof(host), timeout_ms);
-   if (s == INVALID_SOCKET)
+   int fd = cli_win_http_connect(endpoint, host, sizeof(host), timeout_ms);
+   if (fd < 0)
       return NULL;
    size_t blen = body ? strlen(body) : 0;
    size_t reqcap = blen + strlen(path) + strlen(host) + (bearer ? strlen(bearer) : 0) + 256;
    char *req = malloc(reqcap);
    if (!req)
    {
-      closesocket(s);
+      aimee_core_socket_close(fd);
+      return NULL;
+   }
+   char authorization[4096] = "";
+   if (bearer && bearer[0] &&
+       aimee_core_bearer_value(authorization, sizeof(authorization), bearer) != 0)
+   {
+      free(req);
+      aimee_core_socket_close(fd);
       return NULL;
    }
    int reqlen;
-   if (bearer && bearer[0])
+   if (authorization[0])
       reqlen = snprintf(req, reqcap,
-                        "%s %s HTTP/1.1\r\nHost: %s\r\nAuthorization: Bearer %s\r\n"
+                        "%s %s HTTP/1.1\r\nHost: %s\r\nAuthorization: %s\r\n"
                         "Content-Type: application/json\r\nContent-Length: %zu\r\n"
                         "Connection: close\r\n\r\n",
-                        method, path, host, bearer, blen);
+                        method, path, host, authorization, blen);
    else
       reqlen = snprintf(req, reqcap,
                         "%s %s HTTP/1.1\r\nHost: %s\r\nContent-Type: application/json\r\n"
@@ -631,7 +602,7 @@ static char *cli_win_http_exec(const char *endpoint, const char *method, const c
    if (reqlen < 0 || (size_t)reqlen >= reqcap || (blen && (size_t)reqlen + blen >= reqcap))
    {
       free(req);
-      closesocket(s);
+      aimee_core_socket_close(fd);
       return NULL;
    }
    if (blen)
@@ -639,54 +610,18 @@ static char *cli_win_http_exec(const char *endpoint, const char *method, const c
       memcpy(req + reqlen, body, blen);
       reqlen += (int)blen;
    }
-   int off = 0;
-   while (off < reqlen)
-   {
-      int n = send(s, req + off, reqlen - off, 0);
-      if (n <= 0)
-      {
-         free(req);
-         closesocket(s);
-         return NULL;
-      }
-      off += n;
-   }
+   aimee_core_http1_io_t io = {
+       .context = &fd, .read = cli_win_http_read, .write_all = cli_win_http_write};
+   aimee_core_http1_response_t response;
+   int rc = aimee_core_http1_exchange(&io, req, (size_t)reqlen, 64u * 1024u,
+                                      CLIENT_MAX_RESPONSE_SIZE, 0, &response);
    free(req);
-
-   size_t cap = 8192, len = 0;
-   char *buf = malloc(cap);
-   if (!buf)
-   {
-      closesocket(s);
+   aimee_core_socket_close(fd);
+   if (rc != 0)
       return NULL;
-   }
-   for (;;)
-   {
-      if (len + 4096 > cap)
-      {
-         if (cap >= CLIENT_MAX_RESPONSE_SIZE)
-            break;
-         size_t next = cap * 2;
-         char *grown = realloc(buf, next);
-         if (!grown)
-         {
-            free(buf);
-            closesocket(s);
-            return NULL;
-         }
-         buf = grown;
-         cap = next;
-      }
-      int n = recv(s, buf + len, (int)(cap - len - 1), 0);
-      if (n <= 0)
-         break;
-      len += (size_t)n;
-   }
-   closesocket(s);
-   buf[len] = '\0';
    if (len_out)
-      *len_out = len;
-   return buf;
+      *len_out = response.length;
+   return response.data;
 }
 
 cJSON *cli_http_request(const char *endpoint, const char *method, const char *path,

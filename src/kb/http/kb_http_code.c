@@ -2177,14 +2177,12 @@ int handle_post_code_scan(const char *body, char *out_buf, int out_cap)
       return 503;
    }
 
-   /* Queue code units for the deep curator on BOTH paths — a local scan and a
-    * thin-client push (which sends `files`). The queue reads code units from DB2
-    * by project name (it ignores root_path, so the server need not see the
-    * client's filesystem) and self-gates on kb_curator_extract_code_enabled.
-    * Previously this ran only for `!pushed_files`, so workspaces ingested from a
-    * thin client were never queued for curation. The 0.6B embed pass is driven
-    * separately by the curator drain. */
-   kb_curator_queue_code_units_for_project(project, root_path);
+   /* Curation is not enqueued here. The pipeline is indexed -> embedded -> curated,
+    * and this point is only indexed; the old call raced curation against vectors
+    * that did not exist yet. It also inserted one row per symbol synchronously:
+    * ~173,000 rows and ~215s for 4,018 files against a 300s client timeout.
+    * stage_embed_code now enqueues after full project embedding. Thin-client pushes
+    * remain covered because the embed sweep visits projects by name, not path. */
 
    /* Record the scanned default-branch SHA so the next !force scan can no-op when the
     * branch hasn't moved (sha_now is set only on the local-scan path that resolved it). */

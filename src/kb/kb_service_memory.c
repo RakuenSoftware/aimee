@@ -19,7 +19,7 @@
 #include "kb_bandit_registry.h"
 #include "kb_service_memory.h"
 #include "log.h"
-#include "memory_graph_fusion.h"
+#include "modules/memory/memory_graph_fusion.h"
 
 #include <stdlib.h>
 

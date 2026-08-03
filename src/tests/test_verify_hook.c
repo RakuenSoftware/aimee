@@ -5,7 +5,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
-#include "git_verify.h"
+#include "modules/git/git_verify.h"
 
 /* ---- Helpers ---- */
 

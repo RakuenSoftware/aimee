@@ -10,5 +10,15 @@
   ],
   "runtime_toggle": {
     "supported": false
-  }
+  },
+  "ownership_complete": true,
+  "sources": [
+    "src/modules/response-composition/module_adapter.c"
+  ],
+  "public_headers": [
+    "src/modules/response-composition/include/aimee/response-composition/module_api.h"
+  ],
+  "docs": [
+    "docs/modules/response-composition.md"
+  ]
 }

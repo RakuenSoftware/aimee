@@ -21,8 +21,8 @@
 #include <aimee/delegates/delegate_plan.h>
 #include <aimee/delegates/delegate_launch.h>
 #include <aimee/delegates/delegate_economics.h>
-#include "memory_platform.h"
-#include "workspace.h"
+#include "modules/memory/memory_platform.h"
+#include <aimee/workspace/workspace.h>
 #include "guardrails.h"
 #include <aimee/delegates/delegate_source_authority.h>
 #include "toolset.h"

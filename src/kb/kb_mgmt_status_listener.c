@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #endif
 #include "kb_mgmt_status_listener.h"
+#include <aimee/core/connection/tls_openssl.h>
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -524,7 +525,7 @@ SSL_CTX *kb_mgmt_status_listener_tls_ctx(const char *ca, const char *cert, const
 {
    if (!ca || !cert || !key)
       return NULL;
-   SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
+   SSL_CTX *ctx = aimee_core_tls_server_context();
    if (!ctx)
       return NULL;
    long options = SSL_OP_NO_TICKET | SSL_OP_NO_COMPRESSION;
@@ -546,11 +547,8 @@ SSL_CTX *kb_mgmt_status_listener_tls_ctx(const char *ca, const char *cert, const
       return NULL;
    }
    SSL_CTX_set_alpn_select_cb(ctx, alpn_select, NULL);
-   if (!SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION) ||
-       SSL_CTX_load_verify_locations(ctx, ca, NULL) != 1 ||
-       SSL_CTX_use_certificate_chain_file(ctx, cert) != 1 ||
-       SSL_CTX_use_PrivateKey_file(ctx, key, SSL_FILETYPE_PEM) != 1 ||
-       SSL_CTX_check_private_key(ctx) != 1)
+   if (aimee_core_tls_trust_file(ctx, ca) != 0 ||
+       aimee_core_tls_use_identity_files(ctx, cert, key) != 0)
    {
       SSL_CTX_free(ctx);
       return NULL;

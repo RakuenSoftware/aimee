@@ -962,6 +962,22 @@ int memory_embed(int64_t memory_id, const char *command);
 int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
                       float *out, int max_dim);
 
+/* Embed |n| texts in ONE embedder round trip, writing |n| * |dim| floats to |out|
+ * (row-major: text i occupies out[i * dim .. i * dim + dim - 1]).
+ *
+ * Batching is the difference between a usable ingest and an unusable one: the
+ * embedder serves ~2000 vectors/min batched and ~800 unbatched, and a corpus is
+ * tens of thousands of vectors. Callers embedding a known set of texts should
+ * prefer this over a memory_embed_text() loop.
+ *
+ * Returns |n| when every vector came back at |dim|, and 0 otherwise — including
+ * a builtin (in-process) embedder, a transport failure, or any count/width
+ * mismatch. Zero means "nothing was written to |out|"; the caller falls back to
+ * per-text memory_embed_text(), which is the only path that carries the
+ * dependency-breaker and per-text error reporting. */
+int memory_embed_texts(const char *const *texts, int n, const char *command,
+                       embed_input_type_t input_type, float *out, int dim);
+
 typedef struct
 {
    char state[16]; /* closed | open | half_open */

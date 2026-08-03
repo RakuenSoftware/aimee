@@ -10,7 +10,7 @@
  * File I/O routes through the workspace provider; path policy through the same
  * public guardrail as the other tools. */
 #include "aimee.h"
-#include "agent_tools.h"
+#include <aimee/tools/agent_tools.h>
 #include "agent_tools_internal.h"
 #include "anchor_snapshot.h"
 #include "code_outline.h"
@@ -20,7 +20,7 @@
 #include "economizer.h"
 #include "aimee_home.h"
 #include "config.h"
-#include "workspace_provider.h"
+#include "modules/workspace/workspace_provider.h"
 #include "dstr.h"
 #include "cJSON.h"
 

@@ -5,7 +5,7 @@
  * that instead of falling back to local session state. */
 #include "aimee.h"
 #include "commands.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include "lsp.h"
 #include "kb_client.h"
 #include "util.h"

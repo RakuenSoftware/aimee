@@ -1,0 +1,37 @@
+name: c-repository-pins
+
+on:
+  push:
+    paths:
+      - "dependencies/aimee-repositories.lock.json"
+      - "src/core/**"
+      - "src/modules/**"
+      - "src/tests/**"
+      - "docs/modules/**"
+      - "scripts/export_c_repositories.py"
+      - "scripts/check_c_repository_lock.py"
+      - "scripts/validate_module_process_contracts.py"
+      - ".github/workflows/c-repositories.yml"
+  pull_request:
+    paths:
+      - "dependencies/aimee-repositories.lock.json"
+      - "src/core/**"
+      - "src/modules/**"
+      - "src/tests/**"
+      - "docs/modules/**"
+      - "scripts/export_c_repositories.py"
+      - "scripts/check_c_repository_lock.py"
+      - "scripts/validate_module_process_contracts.py"
+      - ".github/workflows/c-repositories.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  pins:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -I -S scripts/validate_module_process_contracts.py
+      - run: python3 -I scripts/check_c_repository_lock.py
+      - run: sh src/tests/test_module_supervisor.sh

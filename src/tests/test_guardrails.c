@@ -12,10 +12,12 @@
 #include "db1.h"
 #include "db2.h"
 #include "db2_test_shim.h"
-#include "workspace.h"
-#include "workspace_turn.h" /* workspace_turn_set_container_bound_for_test */
+#include "server/obs_bus_adapter.h"
+#include <aimee/workspace/workspace.h>
+#include "session_worktree_key.h"
+#include "modules/workspace/workspace_turn.h" /* workspace_turn_set_container_bound_for_test */
 #include "platform_test_util.h"
-#include "git_verify.h"
+#include "modules/git/git_verify.h"
 
 /* Per-case in-memory DB2 backing for test bodies that round-trip
  * memory-subsystem state. The shim helper owns the sqlite handle and
@@ -438,23 +440,38 @@ static void test_worktree_sibling_path(void)
 {
    char buf[MAX_PATH_LEN];
 
-   /* The session key is the first 16 chars of the id (WORKTREE_SID_KEY_LEN). */
+   /* The session key is a readable prefix plus a hash of the FULL id
+    * (session_worktree_key.h). It used to be the first 16 characters, which
+    * collided for ids sharing a prefix. Derive the expectation rather than
+    * hard-coding it, so this pins the LAYOUT ("<key>/main", "<key>/<work>")
+    * without re-pinning the key algorithm a second time — that has its own
+    * dedicated test. */
+   const char *sid = "fadc648f-1234-5678";
+   char key[SESSION_WORKTREE_KEY_MAX], expect[MAX_PATH_LEN];
+   session_worktree_key(sid, key, sizeof(key));
+   assert(key[0]);
 
    /* Without work_name: session-level worktree. */
-   int rc = worktree_sibling_path("/root/dev/aimee", "fadc648f-1234-5678", NULL, buf, sizeof(buf));
+   int rc = worktree_sibling_path("/root/dev/aimee", sid, NULL, buf, sizeof(buf));
    assert(rc == 0);
-   assert(strcmp(buf, "/root/dev/aimee/.aimee/worktrees/fadc648f-1234-56/main") == 0);
+   snprintf(expect, sizeof(expect), "/root/dev/aimee/.aimee/worktrees/%s/main", key);
+   assert(strcmp(buf, expect) == 0);
 
-   /* With work_name: per-delegate worktree. */
-   rc = worktree_sibling_path("/root/dev/aimee", "fadc648f-1234-5678", "task01", buf, sizeof(buf));
+   /* With work_name: per-delegate worktree, a sibling of the session one. */
+   rc = worktree_sibling_path("/root/dev/aimee", sid, "task01", buf, sizeof(buf));
    assert(rc == 0);
-   assert(strcmp(buf, "/root/dev/aimee/.aimee/worktrees/fadc648f-1234-56/task01") == 0);
+   snprintf(expect, sizeof(expect), "/root/dev/aimee/.aimee/worktrees/%s/task01", key);
+   assert(strcmp(buf, expect) == 0);
 
-   /* A legacy short (<=16 char) id maps to itself, so worktrees created before
-    * the key was widened keep their path. */
-   rc = worktree_sibling_path("/root/dev/aimee", "abcd1234", NULL, buf, sizeof(buf));
+   /* Two ids that differ only past the OLD 16-char window must resolve to
+    * DIFFERENT worktrees. Sharing one is how concurrent sessions overwrote
+    * each other. */
+   char other[MAX_PATH_LEN];
+   rc =
+       worktree_sibling_path("/root/dev/aimee", "fadc648f-1234-5678-b", NULL, other, sizeof(other));
    assert(rc == 0);
-   assert(strcmp(buf, "/root/dev/aimee/.aimee/worktrees/abcd1234/main") == 0);
+   snprintf(expect, sizeof(expect), "/root/dev/aimee/.aimee/worktrees/%s/main", key);
+   assert(strcmp(other, expect) != 0);
 }
 
 static void test_worktree_detect_base_branch_active(void)
@@ -806,8 +823,9 @@ static void test_session_isolation_creates_and_returns_worktree(void)
    int rc = session_isolation_target(repo, "fadc648f-1234-5678", target, sizeof(target), 1);
    assert(rc == 1);
 
-   char expected[MAX_PATH_LEN];
-   snprintf(expected, sizeof(expected), "%s/aimee/.aimee/worktrees/fadc648f-1234-56/main", tmpdir);
+   char skey[SESSION_WORKTREE_KEY_MAX], expected[MAX_PATH_LEN];
+   session_worktree_key("fadc648f-1234-5678", skey, sizeof(skey));
+   snprintf(expected, sizeof(expected), "%s/aimee/.aimee/worktrees/%s/main", tmpdir, skey);
    assert(strcmp(target, expected) == 0);
 
    /* Worktree must exist on disk after create_if_missing */
@@ -885,8 +903,9 @@ static void test_session_isolation_creates_new_worktree_from_existing_worktree(v
    assert(rc == 1);
    assert(strcmp(first, second) != 0);
 
-   char expected[MAX_PATH_LEN];
-   snprintf(expected, sizeof(expected), "%s/aimee/.aimee/worktrees/ccccdddd-1234-56/main", tmpdir);
+   char skey2[SESSION_WORKTREE_KEY_MAX], expected[MAX_PATH_LEN];
+   session_worktree_key("ccccdddd-1234-5678", skey2, sizeof(skey2));
+   snprintf(expected, sizeof(expected), "%s/aimee/.aimee/worktrees/%s/main", tmpdir, skey2);
    assert(strcmp(second, expected) == 0);
 
    struct stat st;
@@ -3307,8 +3326,12 @@ static void test_verify_gate_push_registered_worktree_from_nonrepo_cwd(void)
        maindir, "verify:\n  enforce: true\n  steps:\n    - name: build\n      run: echo ok\n");
 
    const char *sid = "reg12345-1234-5678";
-   /* Session branch is keyed by the first 16 chars of the sid (WORKTREE_SID_KEY_LEN). */
-   const char *branch = "aimee/session/reg12345-1234-56";
+   /* The session branch carries the same key as the worktree; derive it rather
+    * than hard-coding, since the key is a hash of the full id now. */
+   char bkey[SESSION_WORKTREE_KEY_MAX], branch_buf[160];
+   session_worktree_key(sid, bkey, sizeof(bkey));
+   snprintf(branch_buf, sizeof(branch_buf), "aimee/session/%s", bkey);
+   const char *branch = branch_buf;
    assert(worktree_create_sibling(maindir, sid, NULL) == 0);
 
    char wt_path[MAX_PATH_LEN];
@@ -3385,8 +3408,11 @@ static void test_verify_gate_pr_create_registered_worktree_from_nonrepo_cwd(void
    vy_set_global_yaml(nonrepo, verify_yaml);
 
    const char *sid = "prreg123-1234-5678";
-   /* Session branch is keyed by the first 16 chars of the sid (WORKTREE_SID_KEY_LEN). */
-   const char *branch = "aimee/session/prreg123-1234-56";
+   /* Derived, not hard-coded: the session key hashes the full id. */
+   char bkey[SESSION_WORKTREE_KEY_MAX], branch_buf[160];
+   session_worktree_key(sid, bkey, sizeof(bkey));
+   snprintf(branch_buf, sizeof(branch_buf), "aimee/session/%s", bkey);
+   const char *branch = branch_buf;
    assert(worktree_create_sibling(maindir, sid, NULL) == 0);
 
    char wt_path[MAX_PATH_LEN];
@@ -3722,6 +3748,7 @@ int main(void)
    snprintf(db_path, sizeof(db_path), "/tmp/test-guardrails-db1-%d.sqlite", (int)getpid());
    unlink(db_path);
    assert(db1_init(db_path) == 0);
+   assert(server_obs_bus_configure() == 0);
    /* anti_patterns is DB2 (Postgres). */
 
    test_classify_sensitive();
@@ -3823,6 +3850,7 @@ int main(void)
    test_workflow_parse_test_command();
    test_workflow_parse_active_branch();
    test_workflow_parse_negative();
+   obs_bus_stop();
    db1_shutdown();
    unlink(db_path);
    if (old_home)

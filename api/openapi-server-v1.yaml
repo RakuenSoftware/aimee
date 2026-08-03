@@ -50,6 +50,22 @@ components:
           properties:
             db1: { type: string, example: ok }
             kb: { type: string, example: ok }
+            retrieval: { type: string, example: ok }
+            modules:
+              type: string
+              description: "State of the required same-container module processes on the local event bus"
+              example: ok
+        diagnostics:
+          type: object
+          properties:
+            failed_boundary: { type: string }
+            breaker_state: { type: string }
+            retry_after_ms: { type: integer, format: int64 }
+            last_success_query_ms: { type: integer, format: int64 }
+            last_ingest_at: { type: string }
+            missing_module:
+              type: string
+              description: "First required process module not attached to the local event bus; empty when all are present"
     VersionResponse:
       type: object
       properties:
@@ -305,7 +321,9 @@ paths:
         /health failure but only drain on a /ready failure. The answer comes
         from a snapshot sampled on a background interval, so this route performs
         no dependency I/O. It fails closed: before the first sample, past the
-        staleness bound, or when any dependency failed, the answer is 503.
+        staleness bound, when any data dependency failed, or while a required
+        same-container module process is absent from the local event bus, the
+        answer is 503.
       security: []
       responses:
         "200":

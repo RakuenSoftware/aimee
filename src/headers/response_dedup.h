@@ -42,6 +42,10 @@ typedef struct
    const char *behavior_flags;  /* behaviour-affecting config flags */
 } response_dedup_key_inputs_t;
 
+typedef int (*response_dedup_key_provider_fn)(const response_dedup_key_inputs_t *in, char *out,
+                                               size_t out_cap);
+void response_dedup_register_key_provider(response_dedup_key_provider_fn provider);
+
 /* Build a stable dedup key from `in`. Writes a NUL-terminated key into out (empty
  * when `in` is NULL). Pure and deterministic; unit-tested. */
 void response_dedup_key(const response_dedup_key_inputs_t *in, char *out, size_t out_cap);

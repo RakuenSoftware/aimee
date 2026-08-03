@@ -11,7 +11,7 @@
  * read_all/write_all are plain stdio; stat/list/exec use the Win32 CRT
  * (_stat, _findfirst, _popen). exec_shell runs the command through the native
  * shell (cmd.exe via _popen), honouring the runner's thread-local cwd. */
-#include "workspace_provider.h"
+#include "modules/workspace/workspace_provider.h"
 
 #include <direct.h>
 #include <io.h>

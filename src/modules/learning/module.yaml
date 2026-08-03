@@ -15,10 +15,14 @@
     "src/modules/learning/learning_bundle.c",
     "src/modules/learning/learning_evidence.c",
     "src/modules/learning/learning_implicit.c",
-    "src/modules/learning/learning_router.c"
+    "src/modules/learning/learning_router.c",
+    "src/modules/learning/module_adapter.c"
+  ],
+  "public_headers": [
+    "src/modules/learning/include/aimee/learning/learning.h",
+    "src/modules/learning/include/aimee/learning/module_api.h"
   ],
   "private_headers": [
-    "src/modules/learning/learning.h",
     "src/modules/learning/learning_bundle.h",
     "src/modules/learning/learning_evidence.h",
     "src/modules/learning/learning_implicit.h"

@@ -2,7 +2,7 @@
  * through the sealed per-principal vault and is readable AUTONOMOUSLY (server
  * wrap) after the user's session KEK expires — while staying isolated to the
  * owning webuser. Mirrors the vault_service harness (tmp AIMEE_HOME). */
-#include "git_forge_vault.h"
+#include "modules/git/git_forge_vault.h"
 #include "vault_kek_cache.h"
 #include "vault_service.h"
 

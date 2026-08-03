@@ -1,11 +1,11 @@
 #include "kb_mgmt_endpoint.h"
+#include <aimee/core/connection/control.h>
+#include <aimee/core/connection/socket.h>
 #include <arpa/inet.h>
 #include <ctype.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <limits.h>
 #include <netdb.h>
-#include <poll.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -144,10 +144,8 @@ static pthread_once_t resolver_once = PTHREAD_ONCE_INIT;
 
 static uint64_t monotonic_ms(void)
 {
-   struct timespec ts;
-   return clock_gettime(CLOCK_MONOTONIC, &ts) == 0
-              ? (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000
-              : UINT64_MAX;
+   int64_t now = aimee_core_now_ns();
+   return now < 0 ? UINT64_MAX : (uint64_t)now / 1000000U;
 }
 
 static struct timespec deadline_ts(uint64_t ms)
@@ -248,40 +246,20 @@ int kb_mgmt_endpoint_connect_deadline(const kb_mgmt_endpoint_t *ep, uint64_t dea
    {
       if (!trusted && !kb_mgmt_sockaddr_permitted(a->ai_addr, a->ai_addrlen))
          continue;
-      fd = socket(a->ai_family, a->ai_socktype, a->ai_protocol);
-      if (fd >= 0)
-      {
-         int flags = fcntl(fd, F_GETFL, 0);
-         if (flags >= 0 && fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0)
-         {
-            int rc = connect(fd, a->ai_addr, a->ai_addrlen);
-            if (rc == 0)
-               break;
-            if (errno == EINPROGRESS)
-            {
-               struct pollfd p = {.fd = fd, .events = POLLOUT};
-               int pr = -1;
-               for (;;)
-               {
-                  uint64_t now = monotonic_ms();
-                  if (now >= deadline)
-                     break;
-                  uint64_t left = deadline - now;
-                  pr = poll(&p, 1, left > INT_MAX ? INT_MAX : (int)left);
-                  if (pr >= 0 || errno != EINTR)
-                     break;
-               }
-               int error = 0;
-               socklen_t error_len = sizeof(error);
-               if (pr > 0 && (p.revents & POLLOUT) &&
-                   getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &error_len) == 0 && !error)
-                  break;
-            }
-         }
-      }
-      if (fd >= 0)
-         close(fd);
-      fd = -1;
+      if (deadline > (uint64_t)INT64_MAX / 1000000U)
+         break;
+      aimee_core_control_t control;
+      if (aimee_core_control_init(&control, (int64_t)deadline * 1000000LL, 0, NULL, NULL) !=
+          AIMEE_CORE_OK)
+         break;
+      struct addrinfo candidate = *a;
+      candidate.ai_next = NULL;
+      aimee_core_result_t result = aimee_core_socket_connect_addresses(
+          &candidate, AIMEE_CORE_CONNECT_NONBLOCKING, &control, &fd);
+      if (result == AIMEE_CORE_OK)
+         break;
+      if (result == AIMEE_CORE_TIMEOUT)
+         break;
    }
    freeaddrinfo(res);
    return fd;

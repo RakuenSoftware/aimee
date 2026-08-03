@@ -19,9 +19,9 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include "bus_host.h"
-#include "bus_ring.h"
-#include "bus_wire.h"
+#include <aimee/core/event_bus/bus_host.h>
+#include <aimee/core/event_bus/bus_ring.h>
+#include <aimee/core/event_bus/bus_wire.h>
 
 static void must(int cond, const char *what)
 {
@@ -235,6 +235,71 @@ static void test_request_reply(void)
    detach(&bystander);
    bus_host_destroy(&h);
    printf("  request/reply: point-to-point to the server and back to the requester\n");
+}
+
+static void test_fragmented_request_reply(void)
+{
+   bus_host_config_t c = cfg();
+   bus_host_t h;
+   must(bus_host_create(&h, &c, NULL, NULL) == BUS_HOST_OK, "host");
+
+   client_t req, server;
+   attach(&h, 1, &req);
+   attach(&h, 2, &server);
+   must(bus_host_serve_kind(&h, server.reply.handle_id, KIND_A) == BUS_HOST_OK, "server serves A");
+   must(bus_host_kind_has_server(&h, KIND_A), "kind reports an attached server");
+
+   const uint64_t corr = 0xF12A6;
+   bus_frame_t f;
+   uint8_t buf[8];
+   emit(&req, BUS_F_REQUEST | BUS_F_MORE, KIND_A, corr, 4, 0x10);
+   must(bus_host_pump(&h) == 1, "first request fragment routed");
+   must(recv_event(&server, &f, buf, sizeof buf) == 1 && (f.hdr_flags & BUS_F_MORE) &&
+            buf[0] == 0x10,
+        "server got first request fragment");
+
+   /* A server cannot close the correlation before the request is complete. */
+   emit(&server, BUS_F_REPLY, KIND_A, corr, 4, 0x99);
+   must(bus_host_pump(&h) == 1, "premature reply processed");
+   must(recv_event(&req, &f, buf, sizeof buf) == 0, "premature reply dropped");
+
+   emit(&req, BUS_F_REQUEST, KIND_A, corr, 4, 0x11);
+   must(bus_host_pump(&h) == 1, "final request fragment routed");
+   must(recv_event(&server, &f, buf, sizeof buf) == 1 && !(f.hdr_flags & BUS_F_MORE) &&
+            buf[0] == 0x11,
+        "server got final request fragment");
+
+   emit(&server, BUS_F_REPLY | BUS_F_MORE, KIND_A, corr, 4, 0x20);
+   must(bus_host_pump(&h) == 1, "first reply fragment routed");
+   must(recv_event(&req, &f, buf, sizeof buf) == 1 && (f.hdr_flags & BUS_F_MORE) && buf[0] == 0x20,
+        "requester got first reply fragment");
+   emit(&server, BUS_F_REPLY, KIND_A, corr, 4, 0x21);
+   must(bus_host_pump(&h) == 1, "final reply fragment routed");
+   must(recv_event(&req, &f, buf, sizeof buf) == 1 && !(f.hdr_flags & BUS_F_MORE) && buf[0] == 0x21,
+        "requester got final reply fragment");
+
+   /* Cancellation retires an unfinished request, allowing its correlation to
+    * be used later without leaking one pending-table entry. */
+   const uint64_t cancelled = 0xCA11CE1;
+   emit(&req, BUS_F_REQUEST | BUS_F_MORE, KIND_A, cancelled, 4, 0x30);
+   must(bus_host_pump(&h) == 1, "partial request routed");
+   must(recv_event(&server, &f, buf, sizeof buf) == 1, "server got partial request");
+   emit(&req, BUS_F_CANCEL, KIND_A, cancelled, 0, 0);
+   must(bus_host_pump(&h) == 1, "partial request cancelled");
+   must(recv_event(&server, &f, buf, sizeof buf) == 1 && (f.hdr_flags & BUS_F_CANCEL),
+        "server got partial request cancellation");
+   emit(&req, BUS_F_REQUEST, KIND_A, cancelled, 4, 0x31);
+   must(bus_host_pump(&h) == 1, "cancelled correlation reused");
+   must(recv_event(&server, &f, buf, sizeof buf) == 1 && buf[0] == 0x31,
+        "reused correlation starts a fresh request");
+   emit(&server, BUS_F_REPLY, KIND_A, cancelled, 4, 0x32);
+   must(bus_host_pump(&h) == 1, "fresh request answered");
+   must(recv_event(&req, &f, buf, sizeof buf) == 1 && buf[0] == 0x32, "fresh reply delivered");
+
+   detach(&req);
+   detach(&server);
+   bus_host_destroy(&h);
+   printf("  fragments: ordered request/reply lifecycle and partial cancellation\n");
 }
 
 /* A reply may come only from the kind's server, and a cancel only from the
@@ -828,6 +893,7 @@ int main(void)
    printf("test_bus_route:\n");
    test_notification_observer_routing();
    test_request_reply();
+   test_fragmented_request_reply();
    test_reply_and_cancel_spoofing_refused();
    test_capability_absent();
    test_cancel();

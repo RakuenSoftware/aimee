@@ -39,6 +39,7 @@
 #include "index.h"
 #include "aimee.h"
 #include "config.h"
+#include "config_database.h" /* config_synth_chat_endpoint_current */
 #include "kb_background.h"
 #include "cJSON.h"
 #include "log.h"
@@ -256,8 +257,21 @@ static int stage_embed_code(const kb_curator_extract_opts_t *opts)
    {
       kb_code_embed_result_t r;
       memset(&r, 0, sizeof(r));
-      if (kb_code_embed_refresh(projects[i].name, "changed_files", NULL, 0, 0, 0, 0, &r) == 0)
-         total += (int)r.embedded;
+      if (kb_code_embed_refresh(projects[i].name, "changed_files", NULL, 0, 0, 0, 0, &r) != 0)
+         continue;
+      total += (int)r.embedded;
+
+      /* indexed -> embedded -> CURATED. The scan handler used to enqueue curation
+       * the moment indexing finished, handing the curator a project whose vectors
+       * did not exist yet. The enqueue lives here instead, and only fires once this
+       * project's whole file set is embedded at the active dimension, so curation
+       * cannot claim a row for data that is not both indexed and embedded.
+       *
+       * Idempotent and cheap when there is nothing new: the enqueue anti-joins
+       * against the existing jobs, and it self-gates on the extract_code stage and
+       * on a synthesis endpoint being configured. */
+      if (kb_code_embed_project_fully_embedded(projects[i].name))
+         kb_curator_queue_code_units_for_project(projects[i].name, NULL);
    }
    if (total > 0)
       aimee_log(LOG_DEBUG, "kb.code.embed", "embedded %d code/doc vector(s) across %d project(s)",
@@ -364,11 +378,23 @@ static const struct
    const char *stage;
    const char *reqs; /* comma-separated prerequisite stage names */
 } CURATOR_STAGE_DEPS[] = {
-    {"resolve_entities", "extract_docs"}, {"index_narrative", "extract_docs"},
-    {"index_claims", "extract_docs"},     {"detect_contradictions", "index_claims"},
-    {"index_code_unit", "extract_code"},  {"link_artifacts", "extract_docs,extract_code"},
-    {"synthesize", "index_claims"},       {"promote_entity", "resolve_entities"},
-    {"embed_evidence", "index_claims"},   {"cross_repo_graph", "projection_graph"},
+    {"resolve_entities", "extract_docs"},
+    {"index_narrative", "extract_docs"},
+    {"index_claims", "extract_docs"},
+    {"detect_contradictions", "index_claims"},
+    {"index_code_unit", "extract_code"},
+    {"link_artifacts", "extract_docs,extract_code"},
+    {"synthesize", "index_claims"},
+    {"promote_entity", "resolve_entities"},
+    {"embed_evidence", "index_claims"},
+    {"cross_repo_graph", "projection_graph"},
+    /* indexed -> embedded -> curated. This edge is CROSS-LANE (embed_code is
+     * INDEX, extract_code is LLM), so the order validator above treats it as
+     * advisory and it is NOT what enforces the invariant -- stage_embed_code is,
+     * by owning the enqueue and only running it for a fully embedded project.
+     * Declared anyway so `requires` states the real contract instead of showing
+     * extract_code as having no prerequisites at all. */
+    {"extract_code", "embed_code"},
 };
 
 /* Prerequisite string for a stage (comma-separated), or "" if none. */
@@ -1086,7 +1112,33 @@ void kb_curator_drain_init(kb_curator_drain_ctx_t *ctx)
    }
 
    ctx->stop = 0;
-   if (pthread_create(&ctx->thread, NULL, drain_thread_main, ctx) == 0)
+
+   /* NO SYNTHESIS PROVIDER => NO LLM LANE.
+    *
+    * Every stage on this thread and on the code/doc worker threads calls the
+    * synthesis sidecar. With no endpoint configured not one of them can succeed,
+    * and running them anyway is not merely idle: each pass claims rows, forks a
+    * sidecar, fails, and rewrites the row. The provider gate added for #2298 damps
+    * that to a 30s..300s probe, but the honest answer is not to start the lane.
+    *
+    * THE INDEX LANE STILL STARTS, DELIBERATELY. It is gated on the EMBEDDER, not on
+    * synthesis, and it owns stage_embed_code -- the pass that writes code_embeddings.
+    * Stopping the whole curator here would take code embedding down with it and
+    * leave a deployment indexed but never embedded, which is the opposite of what
+    * an operator running without a synth provider wants.
+    *
+    * Configured-ness, not reachability: a configured endpoint that is down is a
+    * real outage and its rows are real work, which the provider gate already
+    * handles. An unconfigured one is a steady state no retry resolves. */
+   char synth_endpoint[512];
+   int have_synth = config_synth_chat_endpoint_current(synth_endpoint, sizeof(synth_endpoint));
+   if (!have_synth)
+   {
+      aimee_log(LOG_INFO, "kb.curator.drain",
+                "no synthesis endpoint configured: LLM lane not started (extraction and "
+                "synthesis stages cannot run); index lane still serves embedding and graph");
+   }
+   else if (pthread_create(&ctx->thread, NULL, drain_thread_main, ctx) == 0)
    {
       ctx->active = 1;
       aimee_log(LOG_INFO, "kb.curator.drain", "drain thread started");
@@ -1101,8 +1153,10 @@ void kb_curator_drain_init(kb_curator_drain_ctx_t *ctx)
     * synth backend serving N parallel slots actually receives N concurrent
     * sidecar extractions. Job claims are transactional (UPDATE ... SELECT ...
     * LIMIT 1), so concurrent workers never double-claim. */
+   /* Same reason as the LLM lane above: these workers only run extract_code. */
    ctx->code_active = 0;
-   if (config_kb_curator_extract_code_enabled() && config_kb_curator_extract_code_workers() > 1)
+   if (have_synth && config_kb_curator_extract_code_enabled() &&
+       config_kb_curator_extract_code_workers() > 1)
    {
       int extra = config_kb_curator_extract_code_workers() - 1;
       if (extra > KB_CURATOR_MAX_CODE_WORKERS)
@@ -1124,7 +1178,8 @@ void kb_curator_drain_init(kb_curator_drain_ctx_t *ctx)
     * still contributes one doc per pass. Claims are transactional (UPDATE ...
     * SELECT ... LIMIT 1 FOR UPDATE SKIP LOCKED), so workers never double-claim. */
    ctx->doc_active = 0;
-   if (config_kb_curator_extract_docs_enabled() && config_kb_curator_extract_docs_workers() > 1)
+   if (have_synth && config_kb_curator_extract_docs_enabled() &&
+       config_kb_curator_extract_docs_workers() > 1)
    {
       int extra = config_kb_curator_extract_docs_workers() - 1;
       if (extra > KB_CURATOR_MAX_DOC_WORKERS)

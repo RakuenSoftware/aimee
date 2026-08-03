@@ -28,6 +28,31 @@ idempotent and shows the pairing state. For an additional PAM/OIDC user, check `
 identity-token refusal reason. `aimee.api.remote_writes` cannot fix either denial. Do not widen every
 user to test one grant.
 
+## Session start refuses to create a worktree
+
+The message names the repository and says the session worktree base could not be resolved. A new
+session's branch is cut from the repository's default branch, and aimee will not fall back to the
+branch the shared checkout has checked out, because that put new sessions on another session's work.
+
+Set the remote's default with `git remote set-head origin -a`. Without a remote, set
+`session_worktree_base` or `AIMEE_SESSION_WORKTREE_BASE` to an explicit ref. `current` is accepted
+but only as a deliberate choice for offline work; it inherits the checked-out branch.
+
+Until this resolves, the session has no worktree and the isolation guard refuses its writes.
+
+## A worktree under an old key was kept
+
+The message reads `kept pre-rekey worktree <path>`. Session worktree keys changed to stop two
+sessions sharing one checkout, so a session that predates the change owns a worktree under the old
+key. Reclaim removes the old one only when it is clean.
+
+That worktree holds uncommitted or unpushed work. Recover it, then remove the worktree:
+
+```bash
+git -C <path> status
+git -C <path> worktree remove <path>
+```
+
 ## KB is unavailable
 
 Check `AIMEE_KB_API_URL`, service bearer, TLS, KB health, PostgreSQL readiness, extensions, disk, and

@@ -13,8 +13,8 @@
 #include "kb_mgmt_status.h"
 #include "platform_ipc.h"
 #include "vault_principal.h"
+#include <aimee/core/connection/auth.h>
 #include <string.h>
-#include <strings.h> /* strncasecmp */
 
 /* Per-thread captured identity for the request currently being routed. Thread-
  * local for the same reason as the front-end's g_rpc_conn_caps: each connection
@@ -97,10 +97,12 @@ void server_http_identity_capture(int fd, int is_tcp, const char *buf)
    {
       http_header(buf, "aimee-session-id", tl_session_hdr, sizeof(tl_session_hdr));
       char authz[4105] = "";
-      /* Bearer scheme token is case-insensitive (RFC 7235 §2.1). */
-      if (http_header(buf, "Authorization", authz, sizeof(authz)) &&
-          strncasecmp(authz, "Bearer ", 7) == 0)
-         snprintf(tl_bearer, sizeof(tl_bearer), "%s", authz + 7);
+      if (http_header(buf, "Authorization", authz, sizeof(authz)))
+      {
+         const char *bearer = aimee_core_bearer_token(authz);
+         if (bearer)
+            snprintf(tl_bearer, sizeof(tl_bearer), "%s", bearer);
+      }
       http_header(buf, "X-Aimee-Management-Status", tl_status_staple, sizeof(tl_status_staple));
    }
 }

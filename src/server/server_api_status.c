@@ -56,9 +56,9 @@ static int api_bearer_extra_count(void);
 #include "platform_path.h"
 #include "platform_process.h"
 #include "util.h"
-#include "workspace.h"
+#include <aimee/workspace/workspace.h>
 #include "worktree_gc.h"
-#include "git_verify.h"
+#include "modules/git/git_verify.h"
 #include "toolset.h"
 #include "cJSON.h"
 #include <errno.h>

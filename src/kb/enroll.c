@@ -10,6 +10,7 @@
 #include "kb_pki.h"     /* internal CA: load-or-create + fingerprint */
 #include "oauth_pkce.h" /* oauth_pkce_base64url_encode */
 #include "platform_random.h"
+#include <aimee/core/connection/auth.h>
 
 #include <openssl/crypto.h> /* OPENSSL_cleanse — secure zero of transient secrets */
 #include <openssl/sha.h>
@@ -52,24 +53,6 @@ int kb_enroll_token_hash(const char *token, char *hex_out, size_t cap)
    return 0;
 }
 
-/* Constant-time compare of two NUL-terminated strings of equal expected length.
- * Does not short-circuit on the first mismatch and folds the length check into
- * the accumulator so the timing does not leak how far the strings matched. */
-static int ct_streq(const char *a, const char *b)
-{
-   size_t alen = a ? strlen(a) : 0;
-   size_t blen = b ? strlen(b) : 0;
-   size_t n = alen > blen ? alen : blen;
-   unsigned char diff = (unsigned char)(alen ^ blen);
-   for (size_t i = 0; i < n; i++)
-   {
-      unsigned char x = i < alen ? (unsigned char)a[i] : 0;
-      unsigned char y = i < blen ? (unsigned char)b[i] : 0;
-      diff |= (unsigned char)(x ^ y);
-   }
-   return diff == 0;
-}
-
 int kb_enroll_token_verify(const char *presented, const char *stored_hex)
 {
    if (!presented || !stored_hex || !stored_hex[0])
@@ -77,7 +60,7 @@ int kb_enroll_token_verify(const char *presented, const char *stored_hex)
    char computed[KB_ENROLL_HASH_HEX];
    if (kb_enroll_token_hash(presented, computed, sizeof(computed)) != 0)
       return 0;
-   return ct_streq(computed, stored_hex);
+   return aimee_core_credential_equal(computed, stored_hex);
 }
 
 /* --- connection-string codec --- */
@@ -246,7 +229,8 @@ int kb_enroll_registry_consume(const char *token, char *scope_out, size_t scope_
    pthread_mutex_lock(&g_registry_lock);
    for (int i = 0; i < KB_ENROLL_REGISTRY_MAX; i++)
    {
-      if (g_registry[i].in_use && !g_registry[i].consumed && ct_streq(g_registry[i].hash, hash))
+      if (g_registry[i].in_use && !g_registry[i].consumed &&
+          aimee_core_credential_equal(g_registry[i].hash, hash))
       {
          g_registry[i].consumed = 1; /* single-use: atomic under the lock */
          if (scope_out && scope_cap)
@@ -484,7 +468,7 @@ int kb_enroll_store_consume(const char *path, const char *token, char *scope_out
          memcpy(linehash, line, 64);
          linehash[64] = '\0';
          char flag = line[65];
-         if (flag == '0' && ct_streq(linehash, hash))
+         if (flag == '0' && aimee_core_credential_equal(linehash, hash))
          {
             /* copy scope (between the 2nd tab and end-of-line) */
             const char *scope = line + 67;

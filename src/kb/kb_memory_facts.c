@@ -17,9 +17,9 @@
 #include "db2/rel_types_store.h" /* db2_fact_commit */
 #include "db2/fact_ingest.h"     /* db2_fact_ingest_text (offline pattern extraction) */
 #include "fact_grounding.h"
-#include "rel_types.h"       /* seed ontology: rel_types_seed_* (extractor constraint, §7) */
-#include "memory.h"          /* memory_t */
-#include "memory_ontology.h" /* NODE_* */
+#include "rel_types.h" /* seed ontology: rel_types_seed_* (extractor constraint, §7) */
+#include "memory.h"    /* memory_t */
+#include "modules/memory/memory_ontology.h" /* NODE_* */
 
 #include <ctype.h>
 #include <stdio.h>
