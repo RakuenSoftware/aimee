@@ -505,8 +505,8 @@ static void test_osv_offline_cache_miss_allows(void)
    "graph {command,cwd,entity,episode_key,limit,project,query,scope,workspace} req:command\n"      \
    "host {command,name} req:command\n"                                                             \
    "index "                                                                                        \
-   "{command,file_path,judge,line_end,line_start,max_results,node,paths,project,query,scope,"      \
-   "spans,symbol} "                                                                                \
+   "{command,file_path,file_paths,judge,line_end,line_start,max_results,node,paths,project,"       \
+   "queries,query,scope,spans,symbol} "                                                            \
    "req:command\n"                                                                                 \
    "job {command,job_id,max_concurrent,plan_id} req:command\n"                                     \
    "learning "                                                                                     \

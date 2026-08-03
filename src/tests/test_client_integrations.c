@@ -163,6 +163,11 @@ static void test_codex_delegate_policy_is_explicit(void)
    /* Symbol lookups batch the same way spans do: one cell issued five
     * consecutive single-symbol find_symbol calls, each a full round trip. */
    assert(strstr(skill, "identifiers") != NULL);
+   /* All four plural forms must be named, or the agent batches only what it was
+    * explicitly told about -- span batching landed first and the next run still
+    * issued 4 single hybrid queries and 4 single structure calls. */
+   assert(strstr(skill, "file_paths") != NULL);
+   assert(strstr(skill, "queries") != NULL);
    /* Empty searches are pure wasted turns -- 4 of 9 on one measured cell. */
    assert(strstr(skill, "signal to change TOOL") != NULL);
 

@@ -82,8 +82,11 @@ void mcp_add_extended_tools(cJSON *tools)
    t = ext_tool(tools, "index_structure",
                 "List the definitions (functions / types) in an indexed file with line ranges.");
    ext_prop(t, "file_path", "string", "File path within the indexed project.");
+   ext_prop(t, "file_paths", "array",
+            "Map SEVERAL files in ONE call: [\"a.c\", \"b.c\", ...]. Prefer this whenever you "
+            "want more than one file -- the maps are independent, so they cost one round trip "
+            "together. Replaces file_path when present; returns one entry per file, in order.");
    ext_prop(t, "project", "string", "Project the file belongs to (optional).");
-   ext_require(t, "file_path");
 
    t = ext_tool(tools, "code_span_get",
                 "Read an exact line range from an indexed source file (the recovery resolver for a "
@@ -118,7 +121,11 @@ void mcp_add_extended_tools(cJSON *tools)
             "Seed symbol whose callers form the graph leg (optional; omit for code+memory only).");
    ext_prop(t, "project", "string", "Restrict to a project (optional; omit to search all).");
    ext_prop(t, "max_results", "integer", "Max fused results (default 20, max 100).");
-   ext_require(t, "query");
+   ext_prop(t, "queries", "array",
+            "Ask SEVERAL questions in ONE call: [\"question a\", \"question b\", ...]. Prefer "
+            "this when you have more than one thing to look up -- independent questions cost one "
+            "round trip together. Replaces 'query' when present; returns one {query, result} per "
+            "entry, in order.");
 
    t = ext_tool(tools, "index_graph_hubs",
                 "Rank a project's most-connected symbols by degree centrality over the code "

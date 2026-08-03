@@ -383,10 +383,17 @@ static const char *codex_skill_markdown(void)
           "into one command cost a fraction of four separate calls. Batch your "
           "reads, and fold `git status` / `git diff --check` / a cleanup into the "
           "command you were already running rather than spending a turn on each.\n"
-          "- The same applies to spans: `" AIMEE_CODE_TOOL_INDEX
-          "` with command=span takes a `spans` array -- "
-          "[{file_path, line_start, line_end}, ...] -- and returns every range in "
-          "one call. Use it whenever you want more than one range.\n"
+          /* Every retrieval verb the agent uses in bulk now takes a plural form.
+           * Measured on one cell AFTER span batching landed: 4 separate hybrid
+           * queries and 4 separate structure calls over 4 different files, all
+           * independent, all a full round trip each. */
+          "- The same applies to every index lookup: `" AIMEE_CODE_TOOL_INDEX
+          "` takes `spans` ([{file_path, line_start, line_end}, ...]) for reads, "
+          "`file_paths` for command=structure, and `queries` for "
+          "command=" AIMEE_CODE_INDEX_COMMAND_HYBRID ". `" AIMEE_CODE_TOOL_FIND_SYMBOL
+          "` takes `identifiers`. If you are about to ask the same question about "
+          "several files, ranges, symbols or topics, ask it ONCE with the plural "
+          "form -- independent lookups do not need separate turns.\n"
           /* Measured on one cell: 4 of 9 shell searches returned 0-35 characters.
            * Each is a full round trip bought for nothing, and the pattern is
            * always the same -- a guessed regex misses, so the agent guesses a
