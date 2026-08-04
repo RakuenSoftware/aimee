@@ -2030,8 +2030,6 @@ typedef struct config
    int skills_stale_after_days;
    int skills_archive_after_days;
    int skills_dispatch_enabled;
-   int skills_curator_enabled;
-   int skills_curator_interval_hours;
    int skills_dispatch_max_index;
    int skills_dispatch_advisory;
    int skills_capability_autostub;
@@ -2419,6 +2417,12 @@ int config_workspace_remove(const char *path);
 /* Write the config file out, materialising declared defaults when it does not
  * exist yet. Idempotent. */
 int config_persist_defaults(void);
+
+/* Enable the loopback /v1 HTTP listener in one disk-based config transaction.
+ * Both values must be positive. Reading the file avoids stale live-snapshot
+ * writes inside aimee-server, and the successful update republishes the
+ * snapshot before returning. */
+int config_set_api_http_listener(int http_port, int rate_limit_per_min);
 
 /* Disable the /v1 HTTP listener and persist. Reads the FILE, not the snapshot --
  * see config_save.c for why this one cannot use the generated setter. */

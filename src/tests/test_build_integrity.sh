@@ -131,15 +131,20 @@ fi
 SH
 chmod +x "$kb_entrypoint_test_dir/aimee-kb"
 # stderr is captured separately, not folded in: the entrypoint legitimately logs
-# operator diagnostics there (which embedder it started, or why it started none),
-# and folding them into stdout would turn this into an assertion that the
-# entrypoint is silent. What must hold is that no credential VALUE reaches either
-# stream, and that the final process image is credential-free.
+# operator diagnostics there (which embedder it is using), and folding them into
+# stdout would turn this into an assertion that the entrypoint is silent. What must
+# hold is that no credential VALUE reaches either stream, and that the final process
+# image is credential-free.
+#
+# EMBEDDER_URL is set because a serving kb with no embedder refuses to start, and
+# these two checks are about credential scrubbing, not embedder selection. The gate
+# itself is covered by tests/test_kb_entrypoint.sh.
 kb_entrypoint_stderr="$kb_entrypoint_test_dir/stderr.log"
 kb_entrypoint_output=$(env -i PATH="$kb_entrypoint_test_dir:/usr/bin:/bin" \
     AIMEE_HOME="$kb_entrypoint_test_dir/home" \
     AIMEE_DB2_URL=postgresql://external.invalid/aimee \
     ENTRYPOINT_TEST_API_KEY=first-boot-only \
+    EMBEDDER_URL=http://embedder.invalid \
     sh ../deploy/container/aimee-kb-entrypoint.sh 2>"$kb_entrypoint_stderr")
 if [ "$kb_entrypoint_output" = "clean" ] &&
     ! grep -qE 'first-boot-only|external\.invalid' "$kb_entrypoint_stderr"; then
@@ -158,6 +163,7 @@ kb_marked_output=$(env -i PATH="$kb_entrypoint_test_dir:/usr/bin:/bin" \
     AIMEE_DB2_URL=postgresql://external.invalid/aimee \
     ENTRYPOINT_TEST_API_KEY=first-boot-only \
     ENTRYPOINT_BOOTSTRAP_LOG="$kb_bootstrap_log" \
+    EMBEDDER_URL=http://embedder.invalid \
     sh ../deploy/container/aimee-kb-entrypoint.sh \
     --aimee-internal-vault-bootstrapped-external-db 2>"$kb_marked_stderr")
 kb_bootstrap_count=$(wc -c <"$kb_bootstrap_log")
@@ -234,6 +240,18 @@ if [ -n "$kb_pgctltimeout_line" ] && [ -n "$kb_pgctl_start_line" ] &&
     pass "KB entrypoint waits past pg_ctl's 60s default so crash recovery can finish"
 else
     fail "KB entrypoint must export PGCTLTIMEOUT>60 before starting the cluster (export=$kb_pgctltimeout_line, start=$kb_pgctl_start_line, default=$kb_pgctltimeout_default)"
+fi
+
+# An ordinary docker stop/restart must terminate the supervising shell after it
+# forwards the signal and must stop embedded PostgreSQL before Docker's timeout
+# escalates to SIGKILL. Merely trapping TERM without exiting returns to the
+# monitor loop and makes every routine restart depend on WAL recovery.
+if grep -qF 'shutdown_embedded() {' ../deploy/container/aimee-kb-entrypoint.sh &&
+   grep -qF 'trap - EXIT HUP INT TERM' ../deploy/container/aimee-kb-entrypoint.sh &&
+   grep -qF "trap 'shutdown_embedded; exit 0' HUP INT TERM" ../deploy/container/aimee-kb-entrypoint.sh; then
+    pass "KB entrypoint makes signal-driven embedded PostgreSQL shutdown terminal"
+else
+    fail "KB entrypoint can return to its monitor loop after Docker requests shutdown"
 fi
 
 # The export path starts the same cluster in a stopped container, so it is
@@ -1597,4 +1615,3 @@ else
     fi
     exit 1
 fi
-

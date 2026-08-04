@@ -62,10 +62,11 @@ def main() -> int:
                 return fail(f"{module_id}: execution/placement mismatch")
             if contract["execution"] == "process":
                 expected_serve = [stage["event_kind"] for stage in contract["stages"]]
-                if (item.get("principal_class") != exporter.PRINCIPAL_CLASS or
+                if (item.get("runtime") != contract["runtime"] or
+                        item.get("principal_class") != exporter.PRINCIPAL_CLASS or
                         item.get("principal_ref") != principal_ref or
                         item.get("serve") != expected_serve):
-                    return fail(f"{module_id}: process identity/grant mismatch")
+                    return fail(f"{module_id}: process runtime/identity/grant mismatch")
             elif any(key in item for key in ("principal_class", "principal_ref", "serve")):
                 return fail(f"{module_id}: core component has process identity")
             if not isinstance(item.get("commit"), str) or not COMMIT.fullmatch(item["commit"]):

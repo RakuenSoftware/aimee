@@ -62,6 +62,13 @@ for arg in "$@"; do
   esac
 done
 
+# A fresh smoke stack owns its own project. Without an explicit name the Vault
+# bootstrap helper discovers every running project that used the same Compose
+# filename and refuses an otherwise isolated run on a shared Docker host.
+if [[ "$DO_UP" == 1 && -z "${COMPOSE_PROJECT_NAME:-}" ]]; then
+  export COMPOSE_PROJECT_NAME="aimee-e2e-kb-$$"
+fi
+
 # Run from the repo root (this script lives in scripts/).
 cd "$(dirname "$0")/.."
 

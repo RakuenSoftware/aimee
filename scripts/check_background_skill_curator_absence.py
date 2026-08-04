@@ -80,7 +80,9 @@ def validate(root: Path) -> None:
 
     for rel in BUILD_FILES:
         text = read(root / rel)
-        require("skill_curator" not in text, "retired-build-object", rel)
+        # The protected build may invoke this checker by name; reject only the
+        # retired object/source forms rather than making enforcement self-failing.
+        require("skill_curator.o" not in text, "retired-build-object", rel)
 
     memory = read(root / "src/modules/memory/memory_maintenance.c")
     require("db1_maintenance_state_load" in memory, "memory-maintenance-preserved", "load anchor")

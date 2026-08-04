@@ -18,6 +18,15 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
+const char *config_coord_closet_denylist(void)
+{
+   static _Thread_local char buf[256];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, coord_closet_denylist), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
 const char *config_prompt_tier(void)
 {
    static _Thread_local char buf[16];
@@ -1411,28 +1420,6 @@ size_t config_calibration_model_version_copy(char *out, size_t n)
    if (!out || n == 0)
       return 0;
    config_field_read(offsetof(config_t, calibration_model_version), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   snprintf(out, n, "%s", buf);
-   return sizeof(buf);
-}
-
-size_t config_kb_fusion_mode_copy(char *out, size_t n)
-{
-   char buf[32];
-   if (!out || n == 0)
-      return 0;
-   config_field_read(offsetof(config_t, kb_fusion_mode), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   snprintf(out, n, "%s", buf);
-   return sizeof(buf);
-}
-
-size_t config_ranker_fuse_command_copy(char *out, size_t n)
-{
-   char buf[512];
-   if (!out || n == 0)
-      return 0;
-   config_field_read(offsetof(config_t, ranker_fuse_command), sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    snprintf(out, n, "%s", buf);
    return sizeof(buf);

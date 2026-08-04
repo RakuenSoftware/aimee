@@ -1852,13 +1852,8 @@ int main(int argc, char **argv)
    db2_set_embedder_model_id(config_embedder_model());
    /* §2b: register the embedder probes. Unconditionally, for whatever embed command is
     * configured: embedder_probe_register decides which probes that command supports.
-    *
-    * This gate used to live here and excluded "builtin", because the DIM probe cannot
-    * work against the lexical embedder. That silently disabled the serving-identity
-    * probe too, which needs no /health and reports the builtin's space from a constant,
-    * and so left the builtin-to-model transition undetectable -- both are 384-dim, so
-    * the dim guard cannot see it either. The distinction belongs to the module that
-    * knows what each probe requires, not to its caller. */
+    * The distinction belongs to the module that knows what each probe requires, not to
+    * its caller. */
    embedder_probe_register(config_embedder_command_current(NULL));
    /* Size the DB2 connection pool (leased by worker threads) before db2_init. */
    db2_set_pool_size(aimee_resolve_db2_pool_size(config_db2_connection_pool_size()));

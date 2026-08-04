@@ -14,6 +14,21 @@ The shipped Compose files use `restart: unless-stopped` and intentionally health
 `/v1/health` and readiness at `/v1/ready`. A 503 from readiness is an operational
 signal, not a reason to kill the process.
 
+The healthcheck is `curl -fsS`, so it reads only the HTTP status. A container can be
+`healthy` while the KB inside it cannot embed or search. That is deliberate: a width
+mismatch or a missing embedder is not fixed by restarting, and failing the healthcheck
+would turn a diagnosable fault into a restart loop. **The body carries the verdict the
+HTTP status cannot.** Read `status` and `blockers`:
+
+| `status`    | Meaning                                                    |
+|-------------|------------------------------------------------------------|
+| `ok`        | The KB can serve retrieval.                                 |
+| `degraded`  | It answered and cannot work. `blockers` says why, and names the remedy for each. |
+
+`blockers` is empty exactly when `status` is `ok`. `warnings` is advisory (a stale
+ingest, unembedded chunks) and leaves `status` at `ok`. `aimee status` surfaces each
+blocker on its own `BLOCKED:` line.
+
 ## Diagnose
 
 Run these from a host that can reach the relevant listeners (add authentication or TLS

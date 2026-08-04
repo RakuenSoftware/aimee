@@ -5,7 +5,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -17,6 +19,11 @@ type Store struct {
 	path string
 	mu   sync.Mutex
 }
+
+// MaxTriggerRules keeps the human-editable Go registry aligned with the
+// long-standing C config schema. More rules than this are almost certainly an
+// accidental duplicate/import and would make every scheduler scan expensive.
+const MaxTriggerRules = 32
 
 // TriggerRule is the persisted trigger_rules shape exposed by the Workflows UI.
 // Pipeline remains nested in YAML; callers never need to reinterpret flattened
@@ -53,6 +60,9 @@ func (s *Store) TriggerRules() ([]TriggerRule, error) {
 	if err := node.Decode(&rules); err != nil {
 		return nil, fmt.Errorf("decode trigger_rules: %w", err)
 	}
+	if len(rules) > MaxTriggerRules {
+		return nil, fmt.Errorf("trigger_rules has %d rules; maximum is %d", len(rules), MaxTriggerRules)
+	}
 	for i := range rules {
 		if rules[i].Source == "" {
 			return nil, fmt.Errorf("trigger_rules[%d].source is required", i)
@@ -67,8 +77,20 @@ func (s *Store) TriggerRules() ([]TriggerRule, error) {
 			if rules[i].Event == "" {
 				rules[i].Event = "docs/proposals/pending"
 			}
+			if !confinedTriggerDirectory(rules[i].Event) {
+				return nil, fmt.Errorf("trigger_rules[%d].event must be a repository-relative directory", i)
+			}
+			if strings.HasPrefix(strings.TrimSpace(rules[i].Schedule), "-") {
+				return nil, fmt.Errorf("trigger_rules[%d].schedule cannot start with '-'", i)
+			}
 			if rules[i].Pipeline.Template == "" || rules[i].Pipeline.Workspace == "" {
 				return nil, fmt.Errorf("trigger_rules[%d] needs pipeline.template and pipeline.workspace", i)
+			}
+			if !validTriggerWorkspace(rules[i].Pipeline.Workspace) {
+				return nil, fmt.Errorf("trigger_rules[%d].pipeline.workspace must be an absolute server path", i)
+			}
+			if rules[i].Pipeline.MaxSpendUSD < 0 || math.IsNaN(rules[i].Pipeline.MaxSpendUSD) || math.IsInf(rules[i].Pipeline.MaxSpendUSD, 0) {
+				return nil, fmt.Errorf("trigger_rules[%d].pipeline.max_spend_usd must be finite and non-negative", i)
 			}
 		}
 	}
@@ -333,6 +355,9 @@ func validateKeyValue(key string, value any) error {
 		if err := node.Decode(&rules); err != nil {
 			return fmt.Errorf("trigger_rules must be a list of rules: %w", err)
 		}
+		if len(rules) > MaxTriggerRules {
+			return fmt.Errorf("trigger_rules has %d rules; maximum is %d", len(rules), MaxTriggerRules)
+		}
 		for i, rule := range rules {
 			if rule.Source != "watch-dir" && rule.Source != "proposals" {
 				return fmt.Errorf("trigger_rules[%d].source must be watch-dir or proposals", i)
@@ -340,8 +365,24 @@ func validateKeyValue(key string, value any) error {
 			if rule.Mode != "" && rule.Mode != "autonomous" && rule.Mode != "interactive" {
 				return fmt.Errorf("trigger_rules[%d].mode must be autonomous or interactive", i)
 			}
+			event := rule.Event
+			if event == "" {
+				event = "docs/proposals/pending"
+			}
+			if !confinedTriggerDirectory(event) {
+				return fmt.Errorf("trigger_rules[%d].event must be a repository-relative directory", i)
+			}
+			if strings.HasPrefix(strings.TrimSpace(rule.Schedule), "-") {
+				return fmt.Errorf("trigger_rules[%d].schedule cannot start with '-'", i)
+			}
 			if rule.Pipeline.Template == "" || rule.Pipeline.Workspace == "" {
 				return fmt.Errorf("trigger_rules[%d] needs pipeline.template and pipeline.workspace", i)
+			}
+			if !validTriggerWorkspace(rule.Pipeline.Workspace) {
+				return fmt.Errorf("trigger_rules[%d].pipeline.workspace must be an absolute server path", i)
+			}
+			if rule.Pipeline.MaxSpendUSD < 0 || math.IsNaN(rule.Pipeline.MaxSpendUSD) || math.IsInf(rule.Pipeline.MaxSpendUSD, 0) {
+				return fmt.Errorf("trigger_rules[%d].pipeline.max_spend_usd must be finite and non-negative", i)
 			}
 		}
 		return nil
@@ -365,6 +406,20 @@ func validateKeyValue(key string, value any) error {
 		}
 	}
 	return nil
+}
+
+func confinedTriggerDirectory(directory string) bool {
+	directory = strings.TrimSpace(directory)
+	if strings.Contains(directory, "\\") || strings.IndexFunc(directory, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+		return false
+	}
+	clean := path.Clean(directory)
+	return clean != "." && !path.IsAbs(clean) && clean != ".." && !strings.HasPrefix(clean, "../")
+}
+
+func validTriggerWorkspace(workspace string) bool {
+	return workspace == strings.TrimSpace(workspace) && filepath.IsAbs(workspace) &&
+		strings.IndexFunc(workspace, func(r rune) bool { return r < 0x20 || r == 0x7f }) < 0
 }
 
 func number(value any) (int64, bool) {

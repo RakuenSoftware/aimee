@@ -242,6 +242,16 @@ static void test_empty_pass_releases_before_backoff(void)
    printf("  empty pass releases its DB lease before scheduler backoff OK\n");
 }
 
+static void test_backoff_is_interruptible(void)
+{
+   kb_reflection_ctx_t ctx = {0};
+   ctx.stop = 1;
+   time_t started = time(NULL);
+   reflection_sleep_interruptible(&ctx, 900);
+   assert(time(NULL) - started < 1);
+   printf("  scheduler backoff observes shutdown without a long sleep OK\n");
+}
+
 int main(void)
 {
    printf("test_kb_reflection: reflection synthesis write-gate\n");
@@ -251,6 +261,7 @@ int main(void)
    test_garbage_writes_none();
    test_command_failure_writes_none();
    test_empty_pass_releases_before_backoff();
+   test_backoff_is_interruptible();
    printf("test_kb_reflection: all passed\n");
    return 0;
 }

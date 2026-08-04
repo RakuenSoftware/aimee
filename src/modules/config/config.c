@@ -964,8 +964,6 @@ static void config_set_defaults(config_t *cfg)
    cfg->skills_stale_after_days = 30;
    cfg->skills_archive_after_days = 90;
    cfg->skills_dispatch_enabled = 1;
-   cfg->skills_curator_enabled = 0;
-   cfg->skills_curator_interval_hours = 168;
    cfg->skills_dispatch_max_index = 24;
    cfg->skills_dispatch_advisory = 0;
    cfg->skills_capability_autostub = 0;
@@ -2376,7 +2374,7 @@ const char *config_embedder_command_current(const char *requested)
    static _Thread_local char cached[512];
    config_t *cfg = calloc(1, sizeof(*cfg));
    if (!cfg)
-      return "builtin"; /* allocation failure must not fabricate an embedder */
+      return ""; /* allocation failure must not fabricate an embedder */
    config_load(cfg);
    snprintf(cached, sizeof(cached), "%s", config_embedder_command(cfg, NULL));
    free(cfg);

@@ -3,8 +3,9 @@
 # testing branch can be deployed/validated (e.g. on .254) WITHOUT promoting to
 # main.
 #
-# Builds the split images, ALL THREE kb embedder variants, and the isolated one-shot
-# authority bootstrap, so a managed stack can pull a single coherent `:testing`
+# Builds the split images, the control console, ALL THREE kb embedder variants, and
+# the isolated one-shot authority bootstrap, so every committed Compose topology can
+# pull a single coherent `:testing`
 # channel whichever embedder the wizard selected. Synthesis is NOT here: it is its own
 # image on its own trigger (publish-llm.yml), rebuilt when the model changes rather
 # than when kb code does.
@@ -25,6 +26,7 @@ on:
       # Go-only fixes must publish a deployable testing image just like C changes.
       - "server-go/**"
       - "runtime-web/**"
+      - "control-web/**"
       - "config/**"
       - "deploy/container/**"
       - "scripts/**"
@@ -33,6 +35,7 @@ on:
       - "frontend/**"
       - "Dockerfile"
       - "Dockerfile.server"
+      - "Dockerfile.control-web"
       - "Dockerfile.authority-bootstrap"
       - ".github/workflows/publish-testing.yml"
   workflow_dispatch:
@@ -77,6 +80,7 @@ jobs:
         # (AIMEE_KB_VARIANT), so every choice it can emit has to be publishable here.
         image:
           - { name: aimee-server,    dockerfile: Dockerfile.server }
+          - { name: aimee-control-web, dockerfile: Dockerfile.control-web }
           - { name: aimee-kb,        dockerfile: Dockerfile, args: "AIMEE_EMBEDDER=none" }
           - { name: aimee-kb-a25m,   dockerfile: Dockerfile, args: "AIMEE_EMBEDDER=bekko-a25m" }
           - { name: aimee-kb-nomic,  dockerfile: Dockerfile,
@@ -127,7 +131,6 @@ jobs:
           build-args: |
             AIMEE_VERSION=testing-${{ env.SHA7 }}
             WITH_RUNTIME_WEB=1
-            ${{ matrix.image.args }}
             ${{ matrix.image.args }}
           tags: |
             ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }}:testing

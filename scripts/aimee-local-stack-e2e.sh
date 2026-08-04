@@ -5,7 +5,7 @@
 # Builds the real aimee-server / aimee-kb binaries and runs them as a scratch
 # instance under a throwaway AIMEE_HOME (the proven host-validation pattern:
 # ulimit -s 65536 + a baked api.yaml), then exercises the live /v1 surface. This
-# covers two topologies from docs/proposals/pending/aimee-e2e-deploy-matrix.md:
+# covers the two local topologies from scripts/e2e-matrix.sh:
 #
 #   --mode full    (T5) local aimee-server + local aimee-kb (needs local
 #                  Postgres+pgvector at AIMEE_DB2_URL). Server reaches the kb over

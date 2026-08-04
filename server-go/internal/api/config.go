@@ -3,8 +3,11 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
+
+	appconfig "github.com/JBailes/aimee/server-go/internal/config"
 )
 
 func (s *Server) configGet(w http.ResponseWriter, _ *http.Request) {
@@ -21,7 +24,7 @@ func (s *Server) configGet(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) configSet(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("X-Aimee-Webuser") != "admin" {
+	if !workflowOperator(r) {
 		writeError(w, http.StatusForbidden, errors.New("administrator access required"))
 		return
 	}
@@ -38,6 +41,10 @@ func (s *Server) configSet(w http.ResponseWriter, r *http.Request) {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil || request.Key == "" {
 		writeError(w, http.StatusBadRequest, errors.New("expected key and value"))
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		writeError(w, http.StatusBadRequest, errors.New("request must contain one JSON value"))
 		return
 	}
 	if request.Key == "trigger_rules" && request.PreviousVersion == "" {
@@ -58,13 +65,17 @@ func (s *Server) configSet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "key": request.Key, "value": request.Value})
 }
 
-func (s *Server) workflowTriggers(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) workflowTriggers(w http.ResponseWriter, r *http.Request) {
 	if s.config == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"max_concurrent": 2, "triggers": []any{}})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"operator": workflowOperator(r), "editable": false, "max_concurrent": 2,
+			"max_rules": appconfig.MaxTriggerRules, "triggers": []any{},
+		})
 		return
 	}
 	rules := s.triggerRequests()
 	version, _ := s.config.Version("trigger_rules")
+	_, registryErr := s.config.TriggerRules()
 	triggers := make([]map[string]any, 0, len(rules))
 	for _, rule := range rules {
 		item := map[string]any{
@@ -83,5 +94,18 @@ func (s *Server) workflowTriggers(w http.ResponseWriter, _ *http.Request) {
 		}
 		triggers = append(triggers, item)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"max_concurrent": s.config.Int("trigger.max_concurrent", 2), "version": version, "triggers": triggers})
+	response := map[string]any{
+		"operator":       workflowOperator(r),
+		"editable":       workflowOperator(r),
+		"max_concurrent": s.config.Int("trigger.max_concurrent", 2),
+		"max_rules":      appconfig.MaxTriggerRules,
+		"version":        version,
+		"triggers":       triggers,
+	}
+	if registryErr != nil {
+		// Do not disguise a malformed registry as an empty one: the browser must
+		// not offer to overwrite config it could not faithfully load.
+		response["registry_error"] = registryErr.Error()
+	}
+	writeJSON(w, http.StatusOK, response)
 }

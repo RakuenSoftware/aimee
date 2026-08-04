@@ -18,6 +18,13 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
+int config_verify_cross_project(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, verify_cross_project), sizeof(v), &v);
+   return v;
+}
+
 int config_cross_verify(void)
 {
    int v = 0;
@@ -981,19 +988,5 @@ int config_kb_bg_ingest_enabled(void)
 {
    int v = 0;
    config_field_read(offsetof(config_t, kb_bg_ingest_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_bg_ingest_interval_hours(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_bg_ingest_interval_hours), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_bg_watch_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_bg_watch_enabled), sizeof(v), &v);
    return v;
 }

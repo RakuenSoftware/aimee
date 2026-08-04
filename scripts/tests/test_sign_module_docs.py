@@ -50,7 +50,7 @@ class SignModuleDocsTests(unittest.TestCase):
     def test_committed_inventory_is_the_only_signing_inventory(self) -> None:
         required, optional = signer._inventory(REPO_ROOT)
         self.assertEqual(len(required), 18)
-        self.assertEqual(len(optional), 8)
+        self.assertEqual(len(optional), 7)
         self.assertFalse(required & optional)
 
     def test_public_key_input_cannot_be_a_private_key(self) -> None:

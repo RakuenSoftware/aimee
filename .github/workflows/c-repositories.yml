@@ -11,6 +11,12 @@ on:
       - "scripts/export_c_repositories.py"
       - "scripts/check_c_repository_lock.py"
       - "scripts/validate_module_process_contracts.py"
+      - "scripts/check_go_module_runtime_bundle.py"
+      - "server-go/bus/**"
+      - "server-go/modules/**"
+      - "server-go/cmd/aimee-module/**"
+      - "Dockerfile"
+      - "Dockerfile.server"
       - ".github/workflows/c-repositories.yml"
   pull_request:
     paths:
@@ -22,6 +28,12 @@ on:
       - "scripts/export_c_repositories.py"
       - "scripts/check_c_repository_lock.py"
       - "scripts/validate_module_process_contracts.py"
+      - "scripts/check_go_module_runtime_bundle.py"
+      - "server-go/bus/**"
+      - "server-go/modules/**"
+      - "server-go/cmd/aimee-module/**"
+      - "Dockerfile"
+      - "Dockerfile.server"
       - ".github/workflows/c-repositories.yml"
 
 permissions:
@@ -33,5 +45,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: python3 -I -S scripts/validate_module_process_contracts.py
+      - run: python3 -I scripts/check_go_module_runtime_bundle.py
+      - run: cd server-go && CGO_ENABLED=0 go test ./bus ./modules/... ./cmd/aimee-module
       - run: python3 -I scripts/check_c_repository_lock.py
       - run: sh src/tests/test_module_supervisor.sh

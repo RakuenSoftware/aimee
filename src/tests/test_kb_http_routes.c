@@ -1452,11 +1452,11 @@ const char *config_embedder_command(const config_t *cfg, const char *requested)
    url = getenv("SYNTHESIS_ENDPOINT");
    if (url && url[0])
       return url;
-   return "builtin";
+   return ""; /* nothing selected: no embedder, no fabricated name */
 }
 
 /* The config_t-free form callers use now. Same resolution order, minus the
- * struct the caller no longer holds: request > env > builtin. */
+ * struct the caller no longer holds: request > env > nothing. */
 const char *config_embedder_command_current(const char *requested)
 {
    return config_embedder_command(NULL, requested);
@@ -1496,9 +1496,8 @@ char *kb_ranker_export_view_json(const char *subject_kind, const char *feature_s
    return strdup("{\"status\":\"ok\",\"n_rows\":0,\"rows\":[]}");
 }
 
-int kb_ranker_fit_run(const config_t *cfg, char *id_out, int id_out_len, char **report_out)
+int kb_ranker_fit_run(char *id_out, int id_out_len, char **report_out)
 {
-   (void)cfg;
    if (id_out && id_out_len > 0)
       id_out[0] = '\0';
    if (report_out)
@@ -4358,17 +4357,28 @@ static void test_code_context_bounded_current_project(void)
    assert(s == 200);
 }
 
-static void test_code_context_no_answer_is_explicit(void)
+/* With NO embedder configured, the route reports the missing dependency — it does not
+ * answer "nothing matched".
+ *
+ * This test used to assert the opposite, and passed only because an unconfigured kb
+ * resolved to a builtin lexical embedder: the vector leg looked live, returned nothing,
+ * and the route called that an abstention. So "I have not configured retrieval" and "I
+ * searched and found nothing" were the same answer, which is the confusion the builtin
+ * caused everywhere. There is no builtin now, and a kb with no embedder refuses to
+ * start, so the honest report is the dependency.
+ *
+ * Genuine abstention — a live embedder that matches nothing — is not reachable through
+ * this stub set: g_vec_enabled=1 returns canned hits regardless of the query. */
+static void test_code_context_without_an_embedder_reports_the_dependency(void)
 {
    char buf[2048];
    int s =
        kb_http_route_ex("GET", "/v1/code/context", "query=definitely-unrelated&project=proj-alpha",
                         NULL, NULL, NULL, 0, buf, sizeof(buf));
-   assert(s == 200);
-   assert(strstr(buf, "\"status\":\"abstained\"") != NULL);
-   assert(strstr(buf, "\"decision\":\"no_answer\"") != NULL);
-   assert(strstr(buf, "\"results\":[]") != NULL);
-   assert(strstr(buf, "\"why\":[]") != NULL);
+   assert(s == 503);
+   assert(strstr(buf, "\"dependency\":\"embedder\"") != NULL);
+   /* Never a false negative: "no answer" would tell the caller the corpus lacks it. */
+   assert(strstr(buf, "no_answer") == NULL);
 }
 
 static void test_code_context_embedder_outage_is_not_no_answer(void)
@@ -5304,7 +5314,9 @@ static void test_drain_default_embedding_command(void)
    g_drain_rc = 0;
    int s = kb_http_route_ex("POST", "/v1/drain", NULL, NULL, NULL, "{}", 2, buf, sizeof(buf));
    assert(s == 200);
-   assert(strcmp(g_drain_embed_cmd, "builtin") == 0);
+   /* No embedder configured resolves to the empty string, not to a name nothing
+    * implements — the drain then embeds nothing rather than exec'ing it. */
+   assert(g_drain_embed_cmd[0] == '\0');
 }
 
 static void test_drain_error(void)
@@ -6594,7 +6606,7 @@ int main(void)
    test_code_context_vector_store_outage_is_not_empty();
    test_code_context_dimension_mismatch_is_stale();
    test_code_context_bounded_current_project();
-   test_code_context_no_answer_is_explicit();
+   test_code_context_without_an_embedder_reports_the_dependency();
    test_code_context_embedder_outage_is_not_no_answer();
    test_code_context_embedder_auth_is_unauthorized();
    test_code_context_does_not_substitute_global_memory();

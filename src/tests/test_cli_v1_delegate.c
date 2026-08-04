@@ -1000,6 +1000,54 @@ static void test_git_verify_marshaled_with_session_id(void)
    printf("  PASS: test_git_verify_marshaled_with_session_id\n");
 }
 
+/* An explicit path= must actually reach the server.
+ *
+ * cJSON permits duplicate keys and cJSON_GetObjectItemCaseSensitive returns the
+ * FIRST match. path=<cwd> was added before the caller's arguments were parsed, so
+ * `aimee git verify path=<repo>` produced two "path" entries and the server read
+ * the cwd every time. Measured: verify resolved /var/lib (the shell's directory)
+ * while explicitly told path=/repo. The error message's own advice to pass path
+ * was therefore impossible to act on.
+ *
+ * Assert the value the server will actually read, and that exactly one exists. */
+static int count_keys(cJSON *obj, const char *key)
+{
+   int n = 0;
+   for (cJSON *it = obj ? obj->child : NULL; it; it = it->next)
+      if (it->string && strcmp(it->string, key) == 0)
+         n++;
+   return n;
+}
+
+static void test_git_verify_explicit_path_wins_over_cwd(void)
+{
+   char path_arg[] = "path=/tmp/some-other-repo";
+   char *argv[] = {path_arg};
+   cJSON *req = marshal_git_verify(1, argv);
+   assert(req != NULL);
+   cJSON *args = cJSON_GetObjectItem(req, "arguments");
+   assert(cJSON_IsObject(args));
+
+   assert(count_keys(args, "path") == 1);
+   cJSON *p = cJSON_GetObjectItemCaseSensitive(args, "path");
+   assert(cJSON_IsString(p));
+   assert(strcmp(p->valuestring, "/tmp/some-other-repo") == 0);
+   cJSON_Delete(req);
+
+   /* With no path given, the cwd is still the default. */
+   char async_arg2[] = "--async=false";
+   char *argv2[] = {async_arg2};
+   req = marshal_git_verify(1, argv2);
+   assert(req != NULL);
+   args = cJSON_GetObjectItem(req, "arguments");
+   assert(count_keys(args, "path") == 1);
+   p = cJSON_GetObjectItemCaseSensitive(args, "path");
+   assert(cJSON_IsString(p) && p->valuestring[0] == '/');
+   cJSON_Delete(req);
+
+   printf("  PASS: test_git_verify_explicit_path_wins_over_cwd\n");
+}
+
 static void test_get_help_route_marshaled(void)
 {
    cli_v1_route_t route;
@@ -2036,6 +2084,7 @@ int main(void)
    test_kb_remote_status_routes();
    test_git_verify_failure_detection();
    test_git_verify_marshaled_with_session_id();
+   test_git_verify_explicit_path_wins_over_cwd();
    test_get_help_route_marshaled();
    test_subcommand_json_flag_is_output_mode();
    test_grant_set_created_vs_changed_from_off();

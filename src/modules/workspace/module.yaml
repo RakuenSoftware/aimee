@@ -25,6 +25,12 @@
     "src/modules/workspace/workspace_turn.c",
     "src/modules/workspace/module_adapter.c"
   ],
+  "go_sources": [
+    "server-go/modules/workspace/workspace.go"
+  ],
+  "go_tests": [
+    "server-go/modules/workspace/workspace_test.go"
+  ],
   "public_headers": [
     "src/modules/workspace/include/aimee/workspace/module_api.h",
     "src/modules/workspace/include/aimee/workspace/workspace.h"

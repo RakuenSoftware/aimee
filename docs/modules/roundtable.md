@@ -7,6 +7,16 @@ behavior, roundtable-specific review/verification, iterative authoring pipelines
 panel findings. It is not a workflow engine, generic router, delegate runtime, benchmark authority, or
 replacement for core `response-composition`.
 
+### Go process stage
+
+The supervised roundtable process uses the shared pure-Go module runtime for its
+deterministic post-deliberation verification rubric. The RTGR/RTGD wire contract
+maps replay status, factuality, and claimed severity to the existing
+keep/cap/degrade/reject decision without a model call. The C adapter remains a
+wire-parity fixture. Panel execution, seat resolution, providers, chair logic,
+capture, pipelines, and active workflow composition remain in their current C
+or existing Go owners while their process boundaries are migrated.
+
 ## Public contracts
 
 Current contracts include delegate ensemble execution, preset seat resolution,
@@ -19,8 +29,9 @@ Provider-neutral request/options and aggregate-result types, registration and in
 release dispatch live in the required delegates module's `panel_provider.h`. Required consumers use those
 facades and never include optional roundtable execution headers. The private `roundtable_types.h` provides
 compatibility aliases, while the private `delegate_ensemble.h` declares optional implementation entry
-points and compatibility types. `scripts/check_panel_contract_boundary.py` rejects either private header
-outside the roundtable owner and its tests, with no allowlist.
+points and compatibility types. `scripts/check_panel_contract_boundary.py` rejects new private-header
+consumers and exact-ratchets the remaining provider/roster and composition migration debt. Removing an
+existing consumer also fails until the ratchet is reduced in the same change.
 Private `ROUNDTABLE_MAX_REVIEW_ITEMS` and `ROUNDTABLE_MAX_QUESTIONS` aliases mirror the canonical
 `AIMEE_PANEL_MAX_*` bounds for legacy implementation code; new code uses the IR names directly.
 

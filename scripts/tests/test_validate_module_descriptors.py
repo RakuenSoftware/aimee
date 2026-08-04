@@ -221,19 +221,13 @@ class DescriptorTests(unittest.TestCase):
             runtime["ownership"]["docs"],
             [{"path": "docs/modules/module-runtime.md", "result": "PASS"}],
         )
-        # An undeclared descriptor still reports every ownership role as empty. Derived from
-        # the graph rather than naming one module, so completing a module's declaration does
-        # not stale this fixture the way declaring `memory` did.
+        # Every production descriptor is now ownership-latched. A new empty descriptor is
+        # migration debt and must make this assertion fail.
         undeclared = [
             item for item in descriptors
             if not any(item["ownership"][field] for field in validator.OWNERSHIP_FIELDS)
         ]
-        self.assertTrue(undeclared, "expected at least one descriptor with no declared ownership")
-        for item in undeclared:
-            with self.subTest(identifier=item["id"]):
-                self.assertEqual(
-                    item["ownership"], {field: [] for field in validator.OWNERSHIP_FIELDS}
-                )
+        self.assertEqual(undeclared, [])
 
     def test_ownership_report_sorts_descriptors_independent_of_root_order(self) -> None:
         root = Path("tests/fixtures/modules/positive")
@@ -254,7 +248,7 @@ class DescriptorTests(unittest.TestCase):
         self.assertEqual(
             {field: len(report["ownership"][field]) for field in validator.OWNERSHIP_FIELDS},
             {"sources": 1, "private_headers": 0, "public_headers": 1, "tests": 1,
-             "docs": 1},
+             "docs": 1, "go_sources": 0, "go_tests": 0},
         )
 
     def test_production_complete_ownership_mutations(self) -> None:
@@ -280,8 +274,11 @@ class DescriptorTests(unittest.TestCase):
             ("benchmarks", "sources", "src/modules/benchmarks/agent_eval.c"),
             ("benchmarks", "private_headers", "src/modules/benchmarks/agent_eval.h"),
             ("tools", "sources", "src/modules/tools/agent_tools_dispatch.c"),
-            ("tools", "private_headers", "src/modules/tools/agent_tools.h"),
+            ("tools", "go_sources", "server-go/modules/tools/tools.go"),
+            ("tools", "go_tests", "server-go/modules/tools/tools_test.go"),
             ("routing", "sources", "src/modules/routing/routing.c"),
+            ("routing", "go_sources", "server-go/modules/routing/routing.go"),
+            ("routing", "go_tests", "server-go/modules/routing/routing_test.go"),
             ("execution-policy", "sources", "src/modules/execution-policy/execution_policy.c"),
             ("kb-synthesis", "sources", "src/modules/kb-synthesis/kb_curator_synthesize.c"),
             ("kb-synthesis", "private_headers", "src/modules/kb-synthesis/kb_curator_synthesize.h"),
@@ -291,20 +288,65 @@ class DescriptorTests(unittest.TestCase):
             ("governance", "sources", "src/modules/governance/gw_stage_governance.c"),
             ("governance", "private_headers", "src/modules/governance/gw_stage_governance.h"),
             ("learning", "sources", "src/modules/learning/learning_router.c"),
-            ("learning", "private_headers", "src/modules/learning/learning.h"),
+            ("learning", "go_sources", "server-go/modules/learning/learning.go"),
+            ("learning", "go_tests", "server-go/modules/learning/learning_test.go"),
+            ("skills", "go_sources", "server-go/modules/skills/skills.go"),
+            ("skills", "go_tests", "server-go/modules/skills/skills_test.go"),
             ("workspace", "sources", "src/modules/workspace/workspace_turn.c"),
             ("workspace", "private_headers", "src/modules/workspace/workspace_provider.h"),
+            ("workspace", "go_sources", "server-go/modules/workspace/workspace.go"),
+            ("workspace", "go_tests", "server-go/modules/workspace/workspace_test.go"),
             ("vault", "sources", "src/modules/vault/vault_service.c"),
             ("vault", "private_headers", "src/modules/vault/vault_internal.h"),
             ("config", "sources", "src/modules/config/config.c"),
             ("config", "private_headers", "src/modules/config/config_internal.h"),
             ("git", "sources", "src/modules/git/git_ops.c"),
             ("git", "private_headers", "src/modules/git/git_verify_internal.h"),
+            ("git", "go_sources", "server-go/modules/git/git.go"),
+            ("git", "go_tests", "server-go/modules/git/git_test.go"),
             ("delegates", "sources", "src/modules/delegates/delegate_driver.c"),
+            ("delegates", "go_sources", "server-go/modules/delegates/delegates.go"),
+            ("delegates", "go_tests", "server-go/modules/delegates/delegates_test.go"),
+            ("response-composition", "go_sources",
+             "server-go/modules/response-composition/response_composition.go"),
+            ("response-composition", "go_tests",
+             "server-go/modules/response-composition/response_composition_test.go"),
             ("workflows", "sources", "src/modules/workflows/wfe_engine.c"),
             ("workflows", "private_headers", "src/modules/workflows/wfe_engine.h"),
             ("memory", "sources", "src/modules/memory/memory_core.c"),
             ("memory", "private_headers", "src/modules/memory/memory_core_internal.h"),
+            ("memory", "go_sources", "server-go/modules/memory/memory.go"),
+            ("memory", "go_tests", "server-go/modules/memory/memory_test.go"),
+            ("roundtable", "sources", "src/modules/roundtable/module_adapter.c"),
+            ("roundtable", "go_sources", "server-go/modules/roundtable/roundtable.go"),
+            ("roundtable", "go_tests", "server-go/modules/roundtable/roundtable_test.go"),
+            ("benchmarks", "sources", "src/modules/benchmarks/module_adapter.c"),
+            ("benchmarks", "go_sources", "server-go/modules/benchmarks/benchmarks.go"),
+            ("benchmarks", "go_tests", "server-go/modules/benchmarks/benchmarks_test.go"),
+            ("governance", "sources", "src/modules/governance/module_adapter.c"),
+            ("governance", "go_sources", "server-go/modules/governance/governance.go"),
+            ("governance", "go_tests", "server-go/modules/governance/governance_test.go"),
+            ("workflows", "sources", "src/modules/workflows/module_adapter.c"),
+            ("workflows", "go_sources", "server-go/modules/workflows/workflows.go"),
+            ("workflows", "go_tests", "server-go/modules/workflows/workflows_test.go"),
+            ("kb-synthesis", "sources", "src/modules/kb-synthesis/module_adapter.c"),
+            ("kb-synthesis", "go_sources", "server-go/modules/kb-synthesis/kb_synthesis.go"),
+            ("kb-synthesis", "go_tests",
+             "server-go/modules/kb-synthesis/kb_synthesis_test.go"),
+            ("runtime-web", "sources", "src/modules/runtime-web/module_adapter.c"),
+            ("runtime-web", "go_sources",
+             "server-go/modules/runtime-web/policy/status.go"),
+            ("runtime-web", "go_sources",
+             "server-go/modules/runtime-web/runtime_web.go"),
+            ("runtime-web", "go_tests",
+             "server-go/modules/runtime-web/runtime_web_test.go"),
+            ("control-web", "sources", "src/modules/control-web/module_adapter.c"),
+            ("control-web", "go_sources",
+             "server-go/modules/control-web/policy/acl.go"),
+            ("control-web", "go_sources",
+             "server-go/modules/control-web/control_web.go"),
+            ("control-web", "go_tests",
+             "server-go/modules/control-web/control_web_test.go"),
         )
         for identifier, field, relative in cases:
             tmp = self.production_repo()
@@ -323,7 +365,7 @@ class DescriptorTests(unittest.TestCase):
             finally:
                 tmp.cleanup()
 
-        for identifier in ("benchmarks", "tools", "routing", "execution-policy", "kb-synthesis", "roundtable", "protocols", "ir", "translation", "skills",
+        for identifier in ("benchmarks", "tools", "routing", "execution-policy", "kb-synthesis", "runtime-web", "control-web", "roundtable", "protocols", "ir", "translation", "skills",
                            "audit", "module-runtime", "gateway", "governance",
                            "learning", "workspace", "vault", "config", "git", "delegates",
                            "workflows", "memory"):
@@ -365,50 +407,56 @@ class DescriptorTests(unittest.TestCase):
 
     def test_empty_module_root_cannot_be_latched(self) -> None:
         """An unmigrated module must not satisfy the latch vacuously."""
-        empty = (
-            "control-web",
-            "response-composition", "runtime-web",
-        )
-        for identifier in empty:
-            tmp = self.production_repo()
-            try:
-                repo = Path(tmp.name)
-                document = f"docs/modules/{identifier}.md"
-                self.mutate_descriptor(
-                    repo, identifier,
-                    lambda value, document=document: value.update(
-                        {"ownership_complete": True, "docs": [document]}
-                    ),
-                )
-                (repo / document).parent.mkdir(parents=True, exist_ok=True)
-                (repo / document).write_text("placeholder\n", encoding="utf-8")
-                with self.subTest(identifier=identifier), self.assertRaisesRegex(
-                    validator.DescriptorError,
-                    r"rule=ownership-empty-domain pointer=/ownership_complete",
-                ):
-                    validator.validate_roots(repo, [Path("src/modules")])
-            finally:
-                tmp.cleanup()
+        tmp = self.production_repo()
+        try:
+            repo = Path(tmp.name)
+            shutil.rmtree(repo / "src/modules/control-web")
+            shutil.rmtree(repo / "server-go/modules/control-web")
+            (repo / "docs/modules/control-web.md").unlink()
+            root = repo / "src/modules/control-web"
+            root.mkdir(parents=True)
+            (root / "module.yaml").write_text(json.dumps({
+                "descriptor_version": 1,
+                "id": "control-web",
+                "dependencies": ["config", "gateway", "module-runtime", "protocols"],
+                "enabled_by_default": True,
+                "runtime_toggle": {"supported": True},
+                "ownership_complete": True,
+                "docs": ["docs/modules/control-web.md"],
+            }) + "\n", encoding="utf-8")
+            document = repo / "docs/modules/control-web.md"
+            document.parent.mkdir(parents=True, exist_ok=True)
+            document.write_text("placeholder\n", encoding="utf-8")
+            with self.assertRaisesRegex(
+                validator.DescriptorError,
+                r"rule=ownership-empty-domain pointer=/ownership_complete",
+            ):
+                validator.validate_roots(repo, [Path("src/modules")])
+        finally:
+            tmp.cleanup()
 
     def test_a_single_module_local_file_is_enough_domain_to_latch(self) -> None:
         """The guard rejects an empty domain, not a small one."""
         tmp = self.production_repo()
         try:
             repo = Path(tmp.name)
+            shutil.rmtree(repo / "src/modules/control-web")
+            shutil.rmtree(repo / "server-go/modules/control-web")
+            (repo / "docs/modules/control-web.md").unlink()
             source = repo / "src/modules/control-web/control_web_stub.c"
             source.parent.mkdir(parents=True, exist_ok=True)
             source.write_text("/* planted */\n", encoding="utf-8")
             document = "docs/modules/control-web.md"
-            self.mutate_descriptor(
-                repo, "control-web",
-                lambda value: value.update(
-                    {
-                        "ownership_complete": True,
-                        "docs": [document],
-                        "sources": ["src/modules/control-web/control_web_stub.c"],
-                    }
-                ),
-            )
+            (source.parent / "module.yaml").write_text(json.dumps({
+                "descriptor_version": 1,
+                "id": "control-web",
+                "dependencies": ["config", "gateway", "module-runtime", "protocols"],
+                "enabled_by_default": True,
+                "runtime_toggle": {"supported": True},
+                "ownership_complete": True,
+                "docs": [document],
+                "sources": ["src/modules/control-web/control_web_stub.c"],
+            }) + "\n", encoding="utf-8")
             (repo / document).parent.mkdir(parents=True, exist_ok=True)
             (repo / document).write_text("placeholder\n", encoding="utf-8")
             validator.validate_roots(repo, [Path("src/modules")])
@@ -428,7 +476,7 @@ class DescriptorTests(unittest.TestCase):
         self.assertTrue(latched, "no latched descriptor found; the guard would be untested")
 
     def test_complete_ownership_requires_canonical_doc(self) -> None:
-        for identifier in ("benchmarks", "tools", "routing", "execution-policy", "kb-synthesis", "roundtable", "ir", "translation", "skills", "audit",
+        for identifier in ("benchmarks", "tools", "routing", "execution-policy", "kb-synthesis", "runtime-web", "control-web", "roundtable", "ir", "translation", "skills", "audit",
                            "module-runtime", "gateway", "governance", "learning",
                            "workspace", "vault", "config", "git", "delegates", "workflows",
                            "memory"):
@@ -449,7 +497,7 @@ class DescriptorTests(unittest.TestCase):
         try:
             repo = Path(tmp.name)
             public = repo / "src/modules/roundtable/include/aimee/roundtable/public.h"
-            public.parent.mkdir(parents=True)
+            public.parent.mkdir(parents=True, exist_ok=True)
             public.write_text("/* public contract */\n", encoding="utf-8")
             self.assertEqual(
                 validator.validate_roots(repo, [Path("src/modules")]), 25

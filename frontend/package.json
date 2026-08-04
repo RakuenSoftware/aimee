@@ -14,7 +14,7 @@
     "@rakuensoftware/smoothgui": "file:vendor/rakuensoftware-smoothgui-0.8.1.tgz",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "react-router-dom": "^7.5.0"
+    "react-router-dom": "^7.18.2"
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.0",

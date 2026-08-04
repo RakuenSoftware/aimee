@@ -120,9 +120,7 @@ static void kb_cmd_update(app_ctx_t *ctx, int argc, char **argv)
       root[0] = '\0';
 
    /* Pass NULL when no local embedder is configured (the thin client has none)
-    * so the kb embeds with its OWN embedder; defaulting to "builtin" (384-dim
-    * hash) would mismatch a real-embedder corpus (1024/2560-dim) and return
-    * nothing. */
+    * so the kb embeds with its OWN embedder, whose width matches the corpus. */
    const char *embed_cmd =
        config_embedder_command_field()[0] ? config_embedder_command_field() : NULL;
 
@@ -202,9 +200,7 @@ static void kb_cmd_search(app_ctx_t *ctx, int argc, char **argv)
    const char *fusion_mode_override = opt_get(&opts, "fusion-mode");
 
    /* Pass NULL when no local embedder is configured (the thin client has none)
-    * so the kb embeds with its OWN embedder; defaulting to "builtin" (384-dim
-    * hash) would mismatch a real-embedder corpus (1024/2560-dim) and return
-    * nothing. */
+    * so the kb embeds with its OWN embedder, whose width matches the corpus. */
    const char *embed_cmd =
        config_embedder_command_field()[0] ? config_embedder_command_field() : NULL;
 
@@ -510,8 +506,7 @@ static void kb_cmd_health(app_ctx_t *ctx, int argc, char **argv)
    fprintf(stdout, fmt, "db2 kb tables:", h.db2_kb_tables_ok ? "ok" : "WARN (missing)");
    fprintf(stdout, fmt, "pgvector ext:", h.pgvec_ok ? "ok" : "FAIL");
    fprintf(stdout, fmt, "pgvec table:", h.pgvec_collection_ok ? "ok" : "FAIL");
-   fprintf(stdout, fmt, "embed model:",
-           h.embed_ok ? (h.embed_command[0] ? h.embed_command : "builtin") : "not configured");
+   fprintf(stdout, fmt, "embed model:", h.embed_ok ? h.embed_command : "not configured");
 
    char fresh_buf[80];
    if (h.freshness_days < 0)

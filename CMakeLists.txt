@@ -97,6 +97,13 @@ include_directories(
     "${AIMEE_SRC_DIR}/modules/response-composition/include"
     "${AIMEE_SRC_DIR}/modules/skills/include"
     "${AIMEE_SRC_DIR}/modules/routing/include"
+    "${AIMEE_SRC_DIR}/modules/roundtable/include"
+    "${AIMEE_SRC_DIR}/modules/benchmarks/include"
+    "${AIMEE_SRC_DIR}/modules/governance/include"
+    "${AIMEE_SRC_DIR}/modules/workflows/include"
+    "${AIMEE_SRC_DIR}/modules/kb-synthesis/include"
+    "${AIMEE_SRC_DIR}/modules/runtime-web/include"
+    "${AIMEE_SRC_DIR}/modules/control-web/include"
     # MODULES THAT KEEP THEIR HEADERS FLAT, beside their sources, rather than
     # under an include/ subdir. src/Makefile has carried -I for every one of
     # these all along; CMake had only the include/-style modules, so the
@@ -695,7 +702,6 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/role_templates.c
     ${AIMEE_SRC_DIR}/modules/skills/skill.c
     ${AIMEE_SRC_DIR}/modules/skills/skill_rollback.c
-    ${AIMEE_SRC_DIR}/modules/skills/skill_curator.c
     ${AIMEE_SRC_DIR}/modules/skills/skill_review.c
     ${AIMEE_SRC_DIR}/conversation.c
     ${AIMEE_SRC_DIR}/trajectory_export.c

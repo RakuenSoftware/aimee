@@ -595,10 +595,15 @@ static cJSON *marshal_git_verify(int argc, char **argv)
       cJSON_AddStringToObject(req, "session_id", sid);
 
    cJSON *args = cJSON_CreateObject();
-   char cwd[4096];
-   if (getcwd(cwd, sizeof(cwd)))
-      cJSON_AddStringToObject(args, "path", cwd);
    cJSON_AddBoolToObject(args, "no_session_redirect", 1);
+   /* The cwd default is filled in AFTER the caller's arguments, not before.
+    *
+    * cJSON permits duplicate keys and cJSON_GetObjectItemCaseSensitive returns
+    * the FIRST match, so adding path=<cwd> up here made an explicit
+    * `aimee git verify path=<repo>` a second, unreachable entry. The server read
+    * the cwd every time and the user's path was silently discarded -- which made
+    * the error message's own advice ("pass path=<repo> to target it explicitly")
+    * impossible to act on. */
 
    int has_async = 0;
    for (int i = 0; i < argc; i++)
@@ -640,6 +645,16 @@ static cJSON *marshal_git_verify(int argc, char **argv)
          has_async = 1;
       add_verify_arg(args, raw, val);
       *eq = '=';
+   }
+
+   /* Default the target to the caller's shell directory only when they did not
+    * name one. The server prefers a git root over a bare directory, so sending
+    * the cwd is a useful default and a poor override. */
+   if (!cJSON_GetObjectItemCaseSensitive(args, "path"))
+   {
+      char cwd[4096];
+      if (getcwd(cwd, sizeof(cwd)))
+         cJSON_AddStringToObject(args, "path", cwd);
    }
 
    if (!has_async)
@@ -1600,6 +1615,30 @@ void print_server_health(cJSON *resp)
    {
       const char *kbs = json_str(kb, "status");
       printf("aimee-kb: %s\n", (kbs && kbs[0]) ? kbs : "unknown");
+      /* Why the kb cannot work, straight from the kb, before any detail line.
+       * These are the sentences someone is running this command to find; burying
+       * them under the store/vector/embedder triple means reading "ok" first and
+       * inferring the rest. */
+      cJSON *blockers = cJSON_GetObjectItemCaseSensitive(kb, "blockers");
+      if (cJSON_IsArray(blockers) && cJSON_GetArraySize(blockers) > 0)
+      {
+         cJSON *b;
+         cJSON_ArrayForEach(b, blockers) if (cJSON_IsString(b))
+             printf("  BLOCKED: %s\n", b->valuestring);
+      }
+      /* Advisory findings. They do not move the verdict, which is exactly why they
+       * need printing: a kb that is genuinely "ok" can still be accumulating work
+       * nothing will process, and a status line that only ever renders blockers
+       * reports that as a clean bill of health. Measured: a typed-fact backlog of
+       * 4 jobs, unclaimable for 11.5 hours, with `aimee status` showing "aimee-kb:
+       * ok" and nothing else. */
+      cJSON *kbwarn = cJSON_GetObjectItemCaseSensitive(kb, "warnings");
+      if (cJSON_IsArray(kbwarn) && cJSON_GetArraySize(kbwarn) > 0)
+      {
+         cJSON *w;
+         cJSON_ArrayForEach(w, kbwarn) if (cJSON_IsString(w))
+             printf("  note: %s\n", w->valuestring);
+      }
       /* An open transport breaker refuses every call locally, so the kb can be
        * "ok" here while nothing works. Print it before the detail lines: this is
        * the line that explains an index that answers "unavailable" on a server
@@ -1614,7 +1653,11 @@ void print_server_health(cJSON *resp)
             printf("  next retry in %lldms; see the server log for the cause.\n",
                    (long long)retry->valuedouble);
       }
-      if (kbs && strcmp(kbs, "ok") == 0)
+      /* "degraded" means the kb ANSWERED and told us what is broken, so the detail
+       * lines below are real and worth printing. Only a kb that never answered
+       * gets the "did not answer" text — testing `== "ok"` would have sent every
+       * degraded install down that branch and reported a running kb as absent. */
+      if (kbs && (strcmp(kbs, "ok") == 0 || strcmp(kbs, "degraded") == 0))
       {
          cJSON *vec = cJSON_GetObjectItemCaseSensitive(kb, "vectors");
          printf("  store:       %s\n",
@@ -1634,6 +1677,17 @@ void print_server_health(cJSON *resp)
       {
          printf("  the knowledge base did not answer; memory and kb search will not work.\n");
          printf("  `aimee kb status` has the detail.\n");
+         /* "did not answer" reads as a network problem, and the most common cause
+          * is not. A kb that refuses to start fails CLOSED before it ever binds
+          * the health port, so its diagnosis never reaches this response and
+          * exists only in the container log. Measured: booting a 768-dimension
+          * embedder over a corpus recorded at 384 logs the width, both sides, and
+          * the remedy, then holds DB2 unready until the container crashloops --
+          * and every operator-facing surface said "unreachable", pointing away
+          * from the one place that already knew the answer. Name that place. */
+         printf("  if it never became healthy, the reason is in its own log and not\n");
+         printf("  on the network: `docker logs aimee-kb` (compose) or the kb\n");
+         printf("  service log for your deployment.\n");
       }
    }
 }

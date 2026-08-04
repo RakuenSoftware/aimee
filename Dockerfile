@@ -8,6 +8,13 @@
 ARG PG_MAJOR=18
 ARG PGVECTORSCALE_VERSION=0.9.0
 
+FROM golang:1.25-bookworm AS module-go-build
+WORKDIR /src/server-go
+COPY server-go/go.mod server-go/go.sum ./
+RUN go mod download
+COPY server-go/ ./
+RUN CGO_ENABLED=0 go build -trimpath -o /out/aimee-module ./cmd/aimee-module
+
 FROM debian:trixie-slim AS build
 
 RUN apt-get update \
@@ -27,17 +34,22 @@ RUN apt-get update \
 
 WORKDIR /src
 COPY . .
+COPY --from=module-go-build /out/aimee-module /tmp/aimee-module-go
 ARG AIMEE_VERSION=""
 # Ship the tree-sitter extraction front-end: fetch + sha256-verify the pinned
 # grammars (scripts/fetch-treesitter.sh; git + network needed only in this trusted
 # build stage), then build the kb with AIMEE_TREESITTER=1 (real-AST C/C++ class/
 # method extraction). See docs/proposals/pending/cpp-class-method-extraction.md.
 RUN sh scripts/fetch-treesitter.sh \
-    && make -C src ../aimee-kb -j"$(nproc)" AIMEE_TREESITTER=1 ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE_VERSION}
+    && build_version="$AIMEE_VERSION" \
+    && if [ -z "$build_version" ]; then build_version=$(cat src/core/VERSION); fi \
+    && make -C src ../aimee-kb -j"$(nproc)" AIMEE_TREESITTER=1 \
+         GIT_VERSION="v$build_version"
 
 RUN python3 scripts/export_c_repositories.py --runtime-bundle /module-runtime \
     && mkdir -p /module-runtime/bin \
     && for source in /module-runtime/src/*.c; do \
+         [ -e "$source" ] || continue; \
          binary="${source##*/}"; binary="${binary%.c}"; \
          cc -std=c11 -O2 -Wall -Wextra -Werror -Isrc/core/event_bus/include \
            -Isrc/modules/memory/include -Isrc/modules/learning/include \
@@ -52,7 +64,12 @@ RUN python3 scripts/export_c_repositories.py --runtime-bundle /module-runtime \
            src/core/event_bus/module_protocol.c src/core/event_bus/module_runtime.c \
            -pthread \
            -o "/module-runtime/bin/$binary"; \
-       done
+       done \
+    && while IFS= read -r module_id; do \
+         [ -n "$module_id" ] || continue; \
+         install -m 0755 /tmp/aimee-module-go \
+           "/module-runtime/bin/aimee-module-$module_id"; \
+       done < /module-runtime/go.modules
 
 # pgvectorscale (StreamingDiskANN). Always installed: it adds ~1 MB to the image,
 # and the kb already decides at RUNTIME whether to use it -- pgvec_vectorscale_available()
