@@ -1,3 +1,7 @@
 [07:26:37Z] === waiting for the E4B cache-ram re-run to release the XTX
 [09:34:38Z] === XTX free; starting the no-MTP ladder, 6 arms, 10000 notes each
 [09:34:38Z] --- E2B.UD-Q4_K_XL.10k  unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL  nproc=3  NO MTP
+[10:32:32Z] === XTX: E4B no-MTP ladder, 3 arms, 10000 notes each
+[10:32:32Z] --- E4B.UD-Q4_K_XL.10k  unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL  nproc=3  NO MTP
+[10:36:53Z] === XTX: no-MTP ladder, 6 arms (E2B x3 then E4B x3), 10000 notes each
+[10:36:53Z] --- E2B.UD-Q4_K_XL.10k  unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL  nproc=3  NO MTP
