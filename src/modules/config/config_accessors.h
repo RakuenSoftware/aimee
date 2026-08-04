@@ -420,7 +420,6 @@ const char *config_memory_coref_mode(void);
 const char *config_memory_cognify_model(void);
 const char *config_memory_cognify_command(void);
 const char *config_code_context_mode(void);
-const char *config_completeness_review_persona(void);
 const char *config_session_worktree_base(void);
 const char *config_delegate_sandbox_image(void);
 const char *config_delegate_sandbox_package_access(void);

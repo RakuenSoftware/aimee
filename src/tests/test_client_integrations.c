@@ -187,9 +187,12 @@ static void test_codex_delegate_policy_is_explicit(void)
                         "one caller, a caller-side fix is incomplete") != NULL ||
           strstr(skill, "caller-side fix is incomplete") != NULL);
    assert(strstr(skill, "account for every symptom") != NULL);
-   /* The three all-fail tasks were all under-scoped patches, not bad retrieval.
-    * A separate reviewer is the check; the author is the one who cannot see it. */
-   assert(strstr(skill, "review_completeness") != NULL);
+   /* The three all-fail tasks were under-scoped patches, not bad retrieval, and
+    * the author is the one who cannot see it. roundtable_review already exists
+    * for this -- original_request is documented as goal-drift detection -- so
+    * point at it rather than shipping a second review path. */
+   assert(strstr(skill, "roundtable_review") != NULL);
+   assert(strstr(skill, "original_request") != NULL);
    /* am_12b43fa38e: the ticket opens "Two bugs" and names both; aimee fixed the
     * second and never touched the first, while still editing the file the first
     * lives in for an unrelated reason. File overlap is not coverage. */

@@ -375,11 +375,20 @@ static const char *codex_skill_markdown(void)
           "agree; fixing the first link usually leaves the rest wedged. Check "
           "your changed symbols with `" AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS
           "` and ask what else participates.\n"
-          "- Before you report the work done, run `review_completeness` with the "
-          "ticket text. A separate reviewer reads the tree against the "
-          "requirements and returns COMPLETE or INCOMPLETE with what is missing. "
-          "Self-review misses omissions because you already believe you are "
-          "finished.\n"
+          /* A completeness check was nearly built as a new tool before noticing
+           * roundtable_review already IS one: every seat is an ordinary delegate,
+           * `original_request` exists precisely to detect goal drift, `brief`
+           * takes focus/invariants/questions, and `workdir` gives the reviewer
+           * the checkout. A one-seat preset is a single reviewer with a persona.
+           * Reuse it rather than shipping a parallel path that would have thrown
+           * away chairman synthesis, evidence requirements and cost caps. */
+          "- Before you report the work done, get a second pair of eyes on it: "
+          "`roundtable_review` with `diff` set to your change and "
+          "`original_request` set to the FULL ticket text. It runs reviewers as "
+          "delegates and uses the original request to catch goal drift — the "
+          "case where the change is reasonable but is not the change that was "
+          "asked for. Poll `roundtable_status` for the verdict. Self-review "
+          "misses omissions because you already believe you are finished.\n"
           "- Use `search_memory` for stored project facts or prior decisions.\n"
           "- Do not read this file, or anything else under the plugin cache. You "
           "are already reading it; spending a call to fetch it again tells you "

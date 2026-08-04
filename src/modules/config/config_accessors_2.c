@@ -864,15 +864,6 @@ const char *config_code_context_mode(void)
    return buf;
 }
 
-const char *config_completeness_review_persona(void)
-{
-   static _Thread_local char buf[32];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, completeness_review_persona), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
 const char *config_session_worktree_base(void)
 {
    static _Thread_local char buf[64];
