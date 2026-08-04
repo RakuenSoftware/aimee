@@ -249,23 +249,8 @@ static cJSON *build_aimee_plugin_entry(void)
    return entry;
 }
 
-/* Under the "solo" tool profile the delegate tools are withheld, so instructing
- * the agent to delegate would point it at something it cannot see -- and the
- * point of that profile is that no second agent touches the work. Tell it to do
- * the work itself instead of naming a tool that is absent. */
-/* The profile name only; deliberately not linking the protocol module into the
- * client, which would cross a module boundary for one string comparison. */
-static int client_solo_profile(void)
-{
-   const char *profile = getenv("AIMEE_MCP_TOOL_PROFILE");
-   return profile && strcmp(profile, "solo") == 0;
-}
-
 static const char *codex_delegate_policy_prompt(void)
 {
-   if (client_solo_profile())
-      return "Do not spawn or delegate to sub-agents of any kind, including Codex "
-             "spawn_agent, Claude Agent, or aimee delegate; do this work yourself";
    return "Do not spawn provider-native sub-agents such as Codex spawn_agent or "
           "Claude Agent; use the aimee delegate MCP tool for every delegated or "
           "parallel sub-task";
@@ -468,34 +453,12 @@ static const char *codex_skill_markdown(void)
           "current work.\n";
 }
 
-/* Under "solo" the delegate tools are withheld, so the two delegation bullets
- * above would name a tool the agent cannot see. Swap them for the rule that
- * profile actually enforces: nobody else touches this work. */
+/* The skill is the same text for every run. There is no benchmark variant: a
+ * profile that hides shipped tools during measurement makes the measured thing a
+ * configuration nobody deploys. */
 static const char *codex_skill_markdown_effective(void)
 {
-   static const char *const SOLO_TAIL =
-       "- Do not call provider-native sub-agent tools such as `spawn_agent`; use "
-       "the aimee `delegate` MCP tool for every delegated or parallel sub-task.\n"
-       "- Use `delegate` only for bounded sub-tasks that materially advance the "
-       "current work.\n";
-   static char solo_buf[8192];
-
-   const char *base = codex_skill_markdown();
-   if (!client_solo_profile())
-      return base;
-
-   const char *cut = strstr(base, SOLO_TAIL);
-   if (!cut)
-      return base; /* text moved: say nothing rather than emit a mangled skill */
-
-   size_t head = (size_t)(cut - base);
-   int n = snprintf(solo_buf, sizeof(solo_buf),
-                    "%.*s- Do all of this work yourself. Do not spawn or delegate to a "
-                    "sub-agent of any kind.\n",
-                    (int)head, base);
-   if (n < 0 || (size_t)n >= sizeof(solo_buf))
-      return base;
-   return solo_buf;
+   return codex_skill_markdown();
 }
 
 /* The codex PreToolUse registration. aimee already HAS the guard -- `aimee hooks`
