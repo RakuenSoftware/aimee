@@ -343,6 +343,27 @@ static const char *codex_skill_markdown(void)
           "returns a bounded, ranked result set (max_results, default 20), where a "
           "recursive search returns every line that matched in whatever order the "
           "filesystem walk found them.\n"
+          /* THE MEASURED FAILURE MODE IS UNDER-SCOPING, NOT BAD RETRIEVAL.
+           * On two benchmark tasks that every arm failed, aimee's retrieval was
+           * correct and its patch was too narrow. On a leaked-connection task it
+           * ran find_callers on the acquire and release functions, read the
+           * owning module -- then patched ONE consumer to hold the lease for less
+           * time, where the reference made the pool reclaim a lease that is never
+           * returned. On a wedged-fan-out task whose ticket names a three-link
+           * chain, it changed two of the five files the reference changes. Both
+           * fixes were reasoned and both left the defect reachable. */
+          "- Fix the OWNER, not one caller. If something is acquired and never "
+          "released, or handed out and never reclaimed, the durable fix belongs "
+          "with whatever hands it out — a fix in one caller leaves every other "
+          "caller able to reproduce it. Run `" AIMEE_CODE_TOOL_INDEX
+          "` command=find_callers on the function at fault: if it has more than "
+          "one caller, a caller-side fix is incomplete by construction.\n"
+          "- Before you finish, re-read the ticket and account for every symptom "
+          "it names. A ticket that describes a CHAIN (\"X did A, which collided "
+          "with B, so C never ran\") is describing several places that must "
+          "agree; fixing the first link usually leaves the rest wedged. Check "
+          "your changed symbols with `" AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS
+          "` and ask what else participates.\n"
           "- Use `search_memory` for stored project facts or prior decisions.\n"
           "- Do not read this file, or anything else under the plugin cache. You "
           "are already reading it; spending a call to fetch it again tells you "

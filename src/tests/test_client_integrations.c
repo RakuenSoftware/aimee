@@ -176,6 +176,18 @@ static void test_codex_delegate_policy_is_explicit(void)
    /* Empty searches are pure wasted turns -- 4 of 9 on one measured cell. */
    assert(strstr(skill, "signal to change TOOL") != NULL);
 
+   /* UNDER-SCOPING, NOT RETRIEVAL, IS WHAT LOSES THE HARD TASKS.
+    * Two solvable tasks that every arm failed: on both, aimee's retrieval landed
+    * on the right code (find_callers on the acquire/release pair, then the owning
+    * module) and its patch was too narrow -- one consumer's lease discipline
+    * instead of the pool reclaiming an unreturned lease, and two of five files on
+    * a ticket that names a three-link chain. Pin both rules. */
+   assert(strstr(skill, "Fix the OWNER, not one caller") != NULL);
+   assert(strstr(skill, "more than "
+                        "one caller, a caller-side fix is incomplete") != NULL ||
+          strstr(skill, "caller-side fix is incomplete") != NULL);
+   assert(strstr(skill, "account for every symptom") != NULL);
+
    /* THE GUARD EXISTED AND WAS NEVER WIRED FOR CODEX.
     *
     * `aimee hooks` implements the PreToolUse contract and require_aimee_git is ON
