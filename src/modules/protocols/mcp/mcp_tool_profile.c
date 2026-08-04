@@ -50,6 +50,24 @@ static const char *const MCP_CORE_TOOLS[] = {
     AIMEE_CODE_TOOL_INDEX,
     "git", /* all git/gh ops via one multiplexed tool (command=...) */
     "delegate",
+    /* SAME REASONING AS `index` ABOVE, AND THE SAME MEASUREMENT.
+     *
+     * The failure that loses the hard tasks is a patch that is reasonable but is
+     * not the change that was asked for. roundtable_review exists precisely for
+     * that -- `original_request` is documented as goal-drift detection, and every
+     * seat is an ordinary delegate, so a one-seat panel is a single reviewer.
+     *
+     * It was left out of the floor, so reaching it cost find_tools ->
+     * describe_tool -> call_tool. Measured on am_b84c9294aa: 74 tool calls, the
+     * skill telling the agent to review before reporting done, and roundtable
+     * NEVER invoked -- the MCP mix was find_symbol, index, preview_blast_radius,
+     * search_memory. The agent shipped the same one-file, 7-line caller-side fix
+     * as before, against a reference that changes four files in another module.
+     *
+     * That looked like guidance being ignored. It was the tool not being visible.
+     * A tool the agent cannot afford to reach is a tool it does not have. */
+    "roundtable_review",
+    "roundtable_status", /* the verdict is async; without the poller the review is unreadable */
     /* An MCP delegate call returns a job_id and runs in the background, so its
      * poller is not optional: without delegate_status in the floor, an agent
      * that follows our own instruction to delegate cannot read the result

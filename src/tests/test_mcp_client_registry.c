@@ -664,6 +664,33 @@ static void test_tool_profile_filter(void)
    assert(profile_core_has("find_tools", core) && profile_core_has("describe_tool", core));
    assert(profile_core_has("call_tool", core));
 
+   /* THE MIRROR ABOVE LISTED THESE BEFORE THE REAL FLOOR DID.
+    *
+    * roundtable_review/roundtable_status were in this array but NOT in
+    * MCP_CORE_TOOLS, and nothing compared the two, so the drift went unnoticed.
+    * Measured consequence on am_b84c9294aa: 74 tool calls, the skill telling the
+    * agent to get a review before reporting done, and roundtable never invoked --
+    * reaching it cost find_tools -> describe_tool -> call_tool. The agent shipped
+    * a one-file caller-side fix against a reference that changes four files
+    * elsewhere. Assert both are actually served, not merely mirrored. */
+   {
+      cJSON *served = mcp_build_tools_list();
+      int have_review = 0, have_status = 0;
+      cJSON *t = NULL;
+      cJSON_ArrayForEach(t, served)
+      {
+         cJSON *nm = cJSON_GetObjectItemCaseSensitive(t, "name");
+         if (!cJSON_IsString(nm))
+            continue;
+         if (strcmp(nm->valuestring, "roundtable_review") == 0)
+            have_review = 1;
+         if (strcmp(nm->valuestring, "roundtable_status") == 0)
+            have_status = 1;
+      }
+      cJSON_Delete(served);
+      assert(have_review && have_status);
+   }
+
    /* An asynchronous tool whose poller is NOT core costs the agent a
     * find_tools -> describe_tool -> call_tool detour before it can read the
     * result of a call it was told to make. Measured on a real cell: five of
