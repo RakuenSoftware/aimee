@@ -3676,6 +3676,7 @@ $(TESTPREFIX)/unit-test-cron-config: $(OBJDIR)/tests/test_cron_config.o \
 
 $(TESTPREFIX)/unit-test-cron-runtime: $(OBJDIR)/tests/test_cron_runtime.o \
                                       $(OBJDIR)/server/server_cron.o \
+                                      $(OBJDIR)/util.o \
                                       $(OBJDIR)/server/trigger_scheduler.o \
                                       $(OBJDIR)/modules/workflows/gw_orch_workflows.o \
                                       $(OBJDIR)/pipeline/gw_orchestration_seam.o \

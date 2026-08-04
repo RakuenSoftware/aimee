@@ -11,6 +11,7 @@
 #include "events.h"
 #include "trigger_scheduler.h"
 #include "json_fluent.h" /* jo_ok */
+#include "util.h"        /* run_cmd_set_cwd — thread-local cwd, never the process CWD */
 
 #include <pthread.h>
 #include <stdio.h>
@@ -113,7 +114,7 @@ static int cron_deliver_output(const cron_job_t *job, const char *status, const 
    return notify_deliver_target(&notify_target, event_name, message) == 0 ? 1 : 0;
 }
 
-static int cron_capture_script(const char *script, char **out, int *exit_code)
+static int cron_capture_script(const char *script, const char *workdir, char **out, int *exit_code)
 {
    if (out)
       *out = NULL;
@@ -137,8 +138,18 @@ static int cron_capture_script(const char *script, char **out, int *exit_code)
    fputc('\n', fp);
    fclose(fp);
 
-   char cmd[512];
-   snprintf(cmd, sizeof(cmd), "/bin/sh '%s' 2>&1", path);
+   /* The SHELL changes directory, not this process.
+    *
+    * popen() forks a shell that inherits the caller's CWD, which is why running a
+    * job "in its workdir" used to mean chdir()ing aimee-server itself. Prefixing
+    * the command is the same technique run_cmd() already uses for exactly this
+    * reason (see tl_run_cwd in util.c) and it keeps the directory change inside
+    * the child, where it cannot be observed by any other thread. */
+   char cmd[MAX_PATH_LEN + 512];
+   if (workdir && workdir[0])
+      snprintf(cmd, sizeof(cmd), "cd '%s' && /bin/sh '%s' 2>&1", workdir, path);
+   else
+      snprintf(cmd, sizeof(cmd), "/bin/sh '%s' 2>&1", path);
    FILE *pipe = popen(cmd, "r");
    if (!pipe)
    {
@@ -249,7 +260,7 @@ static int cron_run_config_job_at_cwd(const cron_job_t *job, cJSON **out_resp)
    int is_hybrid = strcmp(job->mode, "hybrid") == 0;
    if ((is_script || is_hybrid) && job->script[0])
    {
-      if (cron_capture_script(job->script, &script_output, &exit_code) != 0)
+      if (cron_capture_script(job->script, job->workdir, &script_output, &exit_code) != 0)
          snprintf(error, sizeof(error), "failed to execute script");
       else if (exit_code != 0)
          snprintf(error, sizeof(error), "script exited %d", exit_code);
@@ -353,14 +364,38 @@ int cron_run_config_job(const cron_job_t *job, cJSON **out_resp)
    if (!job->workdir[0])
       return cron_run_config_job_at_cwd(job, out_resp);
 
+   /* NO chdir(). THE PROCESS CWD IS SHARED WITH EVERY OTHER SESSION.
+    *
+    * This used to getcwd(), chdir() into the job's workdir, run the job, and
+    * chdir() back, serialized by g_cron_workdir_lock. That lock keeps cron jobs
+    * from tripping over each other, and does nothing at all for the rest of the
+    * thread pool: for the whole duration of a job, every other thread in
+    * aimee-server sees a different current directory.
+    *
+    * Anything that resolves a path from the process CWD therefore reads state a
+    * cron job can move. `aimee git verify` resolved its target that way and could
+    * verify -- and PASS -- a repository the caller never named, whenever a cron
+    * job with a workdir happened to be running. That is silent, it is timing
+    * dependent, and on a box where several sessions share a repo it is exactly the
+    * cwd clobbering this codebase already worked hard to avoid elsewhere.
+    *
+    * The mechanism to avoid it already exists and is used everywhere else:
+    * run_cmd_set_cwd() keeps the directory in a __thread variable and prefixes
+    * "cd '<dir>' && " onto the command, so the CHILD changes directory and no
+    * other thread can observe it. cron_capture_script does the same for its
+    * popen(). Between them every execution path a job actually uses is covered,
+    * and the process CWD is left alone.
+    *
+    * The lock stays. It no longer guards the CWD, but it preserved job-to-job
+    * serialization from the day it was written, and changing that is a separate
+    * decision from fixing the shared-state bug. */
    pthread_mutex_lock(&g_cron_workdir_lock);
 
-   char old_cwd[MAX_PATH_LEN];
-   if (!getcwd(old_cwd, sizeof(old_cwd)))
-      old_cwd[0] = '\0';
-
    int rc = 0;
-   if (chdir(job->workdir) != 0)
+   /* Preserves the previous failure mode: a workdir that cannot be entered is a
+    * job failure with the same message, reported before anything runs. chdir()
+    * used to be what discovered that. */
+   if (access(job->workdir, X_OK) != 0)
    {
       (void)db1_cron_job_upsert(job);
       char error[512];
@@ -384,9 +419,12 @@ int cron_run_config_job(const cron_job_t *job, cJSON **out_resp)
    }
    else
    {
+      /* Thread-local, so concurrent threads keep their own view. Covers every
+       * run_cmd()-based callee (agent_run and below); cron_capture_script's
+       * popen() carries the workdir itself. */
+      run_cmd_set_cwd(job->workdir);
       rc = cron_run_config_job_at_cwd(job, out_resp);
-      if (old_cwd[0])
-         (void)chdir(old_cwd);
+      run_cmd_set_cwd(NULL);
    }
 
    pthread_mutex_unlock(&g_cron_workdir_lock);

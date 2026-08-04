@@ -1,6 +1,7 @@
 /* test_cron_runtime.c: cron job runtime behavior with stubbed LLM/delivery. */
 #include <assert.h>
 #include <pthread.h>
+#include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -376,6 +377,99 @@ static void *run_cron_thread(void *arg)
    return NULL;
 }
 
+/* THE PROCESS CWD MUST NOT MOVE WHILE A JOB RUNS.
+ *
+ * test_workdir_applies_to_script_and_restores_cwd checks the cwd AFTERWARDS, which
+ * the old chdir()/chdir()-back also satisfied. The bug was in the middle: for the
+ * whole duration of a job, every other thread in aimee-server saw the job's
+ * workdir as its own current directory.
+ *
+ * Anything resolving a path from the process CWD read that. `aimee git verify`
+ * did, and could verify -- and PASS -- a repository the caller never named,
+ * whenever a cron job with a workdir happened to be running. Silent, timing
+ * dependent, and worst on exactly the boxes where several sessions share a repo.
+ *
+ * So observe from another thread WHILE the job runs, which is the only place the
+ * defect was ever visible. */
+typedef struct
+{
+   volatile int stop;
+   volatile int started;
+   char expect[1024]; /* captured by the MAIN thread, before the job starts */
+} cwd_watch_t;
+
+/* The baseline MUST come from the caller. Capturing it inside this thread races
+ * the job: pthread_create returns immediately, so the chdir could already have
+ * happened by the time the watcher first looks, making the job's workdir its
+ * "base" and rendering the whole check incapable of failing. That is not
+ * hypothetical -- the first version of this test did exactly that and passed
+ * against the very chdir() it was written to catch. */
+static void *cwd_watcher_main(void *arg)
+{
+   cwd_watch_t *w = (cwd_watch_t *)arg;
+   static char seen[1024];
+   w->started = 1;
+   while (!w->stop)
+   {
+      if (getcwd(seen, sizeof(seen)) && strcmp(seen, w->expect) != 0)
+         return seen;                        /* non-NULL == the process cwd moved under us */
+      struct timespec ts = {0, 1000 * 1000}; /* 1ms */
+      nanosleep(&ts, NULL);
+   }
+   return NULL;
+}
+
+static void test_job_does_not_move_the_process_cwd(void)
+{
+   reset_state();
+   char tmpdir[512];
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-cron-nocwd-XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(tmpdir) != NULL);
+
+   char old_cwd[1024];
+   assert(getcwd(old_cwd, sizeof(old_cwd)) != NULL);
+
+   cron_job_t job = base_job("script");
+   /* Long enough that a 2ms watcher samples the window many times. */
+   snprintf(job.script, sizeof(job.script), "pwd; sleep 0.4; pwd");
+   snprintf(job.workdir, sizeof(job.workdir), "%s", tmpdir);
+   job.deliver_target[0] = '\0';
+
+   cwd_watch_t w;
+   memset(&w, 0, sizeof(w));
+   snprintf(w.expect, sizeof(w.expect), "%s", old_cwd);
+   pthread_t watcher;
+   assert(pthread_create(&watcher, NULL, cwd_watcher_main, &w) == 0);
+   /* Do not start the job until the watcher is actually sampling, or a short job
+    * could open and close the window entirely unobserved. */
+   while (!w.started)
+   {
+      struct timespec ts = {0, 200 * 1000};
+      nanosleep(&ts, NULL);
+   }
+
+   cJSON *resp = NULL;
+   assert(cron_run_config_job(&job, &resp) == 0);
+   cJSON_Delete(resp);
+
+   w.stop = 1;
+   void *moved = NULL;
+   assert(pthread_join(watcher, &moved) == 0);
+   /* The watcher returns the offending directory if it ever saw one. */
+   assert(moved == NULL);
+
+   /* The job still ran WHERE IT WAS TOLD -- the point is that the child changed
+    * directory, not this process. */
+   assert(strstr(g_last_output, tmpdir) != NULL);
+
+   char now_cwd[1024];
+   assert(getcwd(now_cwd, sizeof(now_cwd)) != NULL);
+   assert(strcmp(old_cwd, now_cwd) == 0);
+
+   platform_test_rmrf(tmpdir);
+   printf("  PASS: a job's workdir never becomes the process cwd\n");
+}
+
 static void test_parallel_workdir_jobs_are_serialized(void)
 {
    reset_state();
@@ -431,6 +525,7 @@ int main(void)
    test_when_context_contains_skips_absent_substring();
    test_wake_gate_false_skips_hybrid_llm();
    test_workdir_applies_to_script_and_restores_cwd();
+   test_job_does_not_move_the_process_cwd();
    test_parallel_workdir_jobs_are_serialized();
    printf("cron runtime tests passed\n");
    return 0;
