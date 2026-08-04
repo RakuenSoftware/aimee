@@ -127,6 +127,43 @@ static void test_polymorphic_async_subject(sqlite3 *db)
    printf("  PASS: polymorphic async subject accepts a memory id without a document row\n");
 }
 
+/* A backlog nothing will drain has to be countable, and countable SEPARATELY from
+ * work already finished.
+ *
+ * memory.store enqueues a memory_facts job whenever typed_facts is on (the
+ * default); the only consumer runs on the curator LLM lane, which does not start
+ * without a synthesis endpoint. On an install with no synth provider -- a
+ * supported configuration -- that queue grows by one row per stored memory and is
+ * never claimed. Observed on the e2e VM: 4 pending for 11.5 hours, attempts=0,
+ * while health reported ok with an empty warnings array.
+ *
+ * The health surface reports it, and to do that it needs PENDING, not total:
+ * total cannot tell a queue that is draining from one that never will. */
+static void test_pending_count_excludes_finished(sqlite3 *db)
+{
+   seed(db, "DELETE FROM kb_async_jobs WHERE kind='memory_facts'");
+   assert(db2_kb_async_count_kind_pending("memory_facts") == 0);
+
+   assert(db2_kb_async_enqueue("memory_facts", 881001, "memory") == 0);
+   assert(db2_kb_async_enqueue("memory_facts", 881002, "memory") == 0);
+   assert(db2_kb_async_count_kind_pending("memory_facts") == 2);
+   assert(db2_kb_async_count_kind("memory_facts") == 2);
+
+   /* One finishes. The backlog is 1, even though two rows exist -- reporting 2
+    * here would keep warning about work that already completed. */
+   seed(db, "UPDATE kb_async_jobs SET status='done' WHERE kind='memory_facts'"
+            " AND document_id=881001");
+   assert(db2_kb_async_count_kind_pending("memory_facts") == 1);
+   assert(db2_kb_async_count_kind("memory_facts") == 2);
+
+   /* Other kinds are not counted into this backlog: kb_async_jobs is shared. */
+   assert(db2_kb_async_enqueue("extract_doc", 881003, "p") == 0);
+   assert(db2_kb_async_count_kind_pending("memory_facts") == 1);
+
+   seed(db, "DELETE FROM kb_async_jobs WHERE document_id IN (881001,881002,881003)");
+   printf("  PASS: pending count is the backlog, not the row total\n");
+}
+
 static const char *job_status(sqlite3 *db, int64_t id)
 {
    static char buf[64];
@@ -359,6 +396,7 @@ int main(void)
             " VALUES ('p','/p','2026-01-01 00:00:00')");
 
    test_polymorphic_async_subject(db);
+   test_pending_count_excludes_finished(db);
 
    /* Contract: every non-pdf doc gets one extract_doc job; PDFs are excluded;
     * re-running enqueues nothing. Guard for "docs present but zero jobs". */

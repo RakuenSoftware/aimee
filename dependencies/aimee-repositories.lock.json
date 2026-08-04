@@ -378,7 +378,7 @@
       "placements": [
         "kb"
       ],
-      "source_sha256": "66d64ce9e3efb425d4b0bf7aaa6481f74d6d9735fed7f89b915b28b0f22551d2",
+      "source_sha256": "8f3a706ef4e2aeef3250b7cc33c0c2bbd3f29250ed24bdaeff548ae3f2cf8878",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 22,

@@ -240,6 +240,12 @@ extern "C"
     * helper. Returns the count (>=0) or -1 on error. */
    int db2_kb_async_count_kind(const char *kind);
 
+   /* Count only the PENDING rows for a kind. Separate from the total above because a
+    * backlog is the interesting quantity: total conflates work still waiting with work
+    * long finished, and cannot distinguish a queue that is draining from one nothing
+    * will ever claim. Returns the count (>=0) or -1 on error. */
+   int db2_kb_async_count_kind_pending(const char *kind);
+
    /* structured-pdf Phase B: a recognised table cell. Stored ONLY in kb_table_cells (never
     * in the shared typed_facts table — see schema.sql). */
    typedef struct
