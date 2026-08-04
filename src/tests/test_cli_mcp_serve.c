@@ -699,6 +699,10 @@ static void test_resources_read_unknown_uri(void)
 
 static void test_initialize(void)
 {
+   /* The MCP path no longer isolates by default -- an MCP host owns the cwd it
+    * handed over, and relocating its edits made real patches invisible to the
+    * caller. These suites exercise the isolation path, so they opt in. */
+   setenv("AIMEE_MCP_SESSION_WORKTREE", "1", 1);
    g_reverse_channel_starts = 0;
    /* No worktree available (isolation off / already isolated / not a repo):
     * initialize must still serve normally, with the plain instructions. */
@@ -761,6 +765,7 @@ static void test_initialize(void)
    }
    assert(g_worktree_ensure_calls == 1);
    assert(g_reverse_channel_starts == 0);
+   unsetenv("AIMEE_MCP_SESSION_WORKTREE");
 
    cJSON_Delete(resp);
    cJSON_Delete(req);
@@ -772,6 +777,8 @@ static void test_initialize(void)
  * will land. */
 static void test_initialize_enters_session_worktree(void)
 {
+   /* Isolation is opt-in on the MCP path now; this suite tests that path. */
+   setenv("AIMEE_MCP_SESSION_WORKTREE", "1", 1);
    char origin_cwd[4096];
    assert(getcwd(origin_cwd, sizeof(origin_cwd)));
 
