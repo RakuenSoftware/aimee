@@ -36,7 +36,13 @@ components:
       properties:
         status:
           type: string
-          description: "ok when healthy; a non-ok string when degraded"
+          enum: [ok, degraded]
+          description: >-
+            Whether the KB can do its job, derived from `blockers`, not whether
+            this handler ran. `degraded` means it answered and cannot work; the
+            reasons are in `blockers`. A degraded KB is still up: treat it as
+            reachable and read the blockers, do not retry it as a transport
+            failure. Advisory findings live in `warnings` and leave status `ok`.
         db2_ok:
           type: boolean
           description: DB2 (Postgres) reachable
@@ -58,6 +64,14 @@ components:
           type: integer
         warnings:
           type: array
+          description: Advisory findings. Noteworthy, but the KB still works.
+          items:
+            type: string
+        blockers:
+          type: array
+          description: >-
+            Reasons the KB cannot do its job, each naming its remedy. Empty
+            exactly when status is ok. This is the field to show an operator.
           items:
             type: string
 

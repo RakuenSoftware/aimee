@@ -814,7 +814,110 @@ static void test_health_uses_v1_api_when_configured(void)
    assert(strstr(health.warnings, "warn-a") != NULL);
    assert(strstr(health.warnings, "warn-b") != NULL);
 
+   assert(strcmp(health.status, "ok") == 0);
+   assert(health.blockers[0] == '\0');
+
    assert(g_get_seen == 2);
+   unsetenv("AIMEE_KB_API_URL");
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
+   mock_agent_http_reset();
+}
+
+/* A kb that answers "degraded" is UP and is telling us exactly what is wrong.
+ *
+ * kb_client_health used to require status == "ok" and return -1 for anything
+ * else, which predates the kb having any other verdict to send. The moment it
+ * gained one, that check would have converted every degraded kb into a transport
+ * failure: `aimee status` would print "the knowledge base did not answer" about a
+ * running kb, and the blockers explaining the fault would be discarded unread —
+ * the original defect inverted, and strictly worse, because "unreachable" sends
+ * the operator to look at the network.
+ *
+ * Reachability and capability are separate answers. Assert they stay separate. */
+static int degraded_health_get_handler(const char *url, const char *extra_headers,
+                                       char **response_buf, int timeout_ms)
+{
+   (void)timeout_ms;
+   (void)extra_headers;
+   assert(url);
+   g_get_seen++;
+   if (strstr(url, "/v1/version"))
+   {
+      if (response_buf)
+         *response_buf = strdup("{\"version\":\"v0.3.0-test\",\"service\":\"aimee-kb\"}");
+      return 200;
+   }
+   assert(strcmp(url, "http://127.0.0.1:4010/v1/health") == 0);
+   if (response_buf)
+      *response_buf = strdup("{\"status\":\"degraded\",\"db2_ok\":true,"
+                             "\"db2_kb_tables_ok\":true,\"pgvec_ok\":true,"
+                             "\"pgvec_collection_ok\":true,\"pgvec_vectors\":0,"
+                             "\"embed_ok\":false,\"embed_command\":\"\","
+                             "\"chunk_count\":0,\"embedding_count\":0,"
+                             "\"warnings\":[],"
+                             "\"blockers\":[\"no embedder configured: set embedder_model\","
+                             "\"embedder width mismatch: 3 vector(s) refused\"]}");
+   return 200;
+}
+
+static void test_health_degraded_is_reachable_and_carries_blockers(void)
+{
+   g_get_seen = 0;
+   mock_agent_http_reset();
+   mock_agent_http_set_get_handler(degraded_health_get_handler);
+   assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010/", 1) == 0);
+   assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", "test-token") == 0);
+
+   kb_health_t health;
+   /* Not -1: the kb answered. */
+   assert(kb_client_health(&health) == 0);
+   assert(health.process_ok == 1);
+   assert(strcmp(health.status, "degraded") == 0);
+   /* Every blocker survives the boundary, newline-joined and in order. */
+   assert(strstr(health.blockers, "no embedder configured") != NULL);
+   assert(strstr(health.blockers, "width mismatch") != NULL);
+   assert(strchr(health.blockers, '\n') != NULL);
+   /* The siblings still parse — a degraded response is a full response. */
+   assert(health.embed_ok == 0);
+   assert(health.db2_ok == 1);
+
+   unsetenv("AIMEE_KB_API_URL");
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
+   mock_agent_http_reset();
+}
+
+/* An older kb sends no `status` field shape we recognise beyond the string, and
+ * no blockers at all. It must still read as reachable with an empty verdict —
+ * callers distinguish "said ok" from "said nothing" and must not read the latter
+ * as the former. */
+static int legacy_health_get_handler(const char *url, const char *extra_headers,
+                                     char **response_buf, int timeout_ms)
+{
+   (void)timeout_ms;
+   (void)extra_headers;
+   assert(url);
+   g_get_seen++;
+   if (strstr(url, "/v1/version"))
+      return 404;
+   if (response_buf)
+      *response_buf = strdup("{\"status\":\"ok\",\"db2_ok\":true,\"pgvec_ok\":true}");
+   return 200;
+}
+
+static void test_health_legacy_kb_without_blockers(void)
+{
+   g_get_seen = 0;
+   mock_agent_http_reset();
+   mock_agent_http_set_get_handler(legacy_health_get_handler);
+   assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010/", 1) == 0);
+   assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", "test-token") == 0);
+
+   kb_health_t health;
+   assert(kb_client_health(&health) == 0);
+   assert(health.process_ok == 1);
+   assert(strcmp(health.status, "ok") == 0);
+   assert(health.blockers[0] == '\0');
+
    unsetenv("AIMEE_KB_API_URL");
    runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
    mock_agent_http_reset();
@@ -1294,6 +1397,8 @@ static void test_index_scan_uses_v1_api_when_configured(void)
 int main(void)
 {
    test_health_uses_v1_api_when_configured();
+   test_health_degraded_is_reachable_and_carries_blockers();
+   test_health_legacy_kb_without_blockers();
    test_status_uses_v1_api_when_configured();
    test_search_uses_v1_api_when_configured();
    test_search_v1_reports_http_status();
