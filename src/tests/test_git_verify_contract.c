@@ -243,10 +243,68 @@ static void test_git_toplevel_rejects_a_non_repo(void)
    printf("  test_git_toplevel_rejects_a_non_repo: PASS\n");
 }
 
+/* THE CONCURRENCY PROPERTY: verify must never resolve from the process CWD.
+ *
+ * aimee-server chdir()s the whole process -- server_cron.c enters a job's workdir,
+ * serialized against other cron jobs by g_cron_workdir_lock, a lock that does
+ * nothing for the other threads in the pool, which simply observe a different cwd
+ * for its duration. Any resolution ending in getcwd() therefore reads state a
+ * CONCURRENT SESSION can move. On a box where several sessions share a repo, that
+ * is a verify silently run against the wrong tree.
+ *
+ * This test puts the process cwd inside a real repository -- the most tempting
+ * possible wrong answer, since it IS a valid git root -- and asserts it is not
+ * chosen when nothing request-scoped says so. */
+static void test_select_root_ignores_process_cwd(void)
+{
+   char cwd_before[1024];
+   assert(getcwd(cwd_before, sizeof(cwd_before)) != NULL);
+
+   char tmpl[] = "/tmp/aimee-verify-conc-XXXXXX";
+   char *dir = mkdtemp(tmpl);
+   assert(dir != NULL);
+   char cmd[1200];
+   snprintf(cmd, sizeof(cmd), "git -C '%s' init -q 2>/dev/null", dir);
+   assert(system(cmd) == 0);
+
+   /* Stand inside a genuine repository, exactly as a concurrent cron job would
+    * leave the process. */
+   assert(chdir(dir) == 0);
+
+   char out[1024];
+
+   /* No request-scoped cwd, no path: refuse rather than answer with the process
+    * cwd. NULL is a real answer; the wrong repository is not. */
+   out[0] = '\0';
+   assert(verify_select_root(NULL, NULL, out, sizeof(out)) == NULL);
+
+   /* An explicit path still wins, and is not overridden by the process cwd. */
+   char other[] = "/tmp/aimee-verify-conc2-XXXXXX";
+   char *dir2 = mkdtemp(other);
+   assert(dir2 != NULL);
+   snprintf(cmd, sizeof(cmd), "git -C '%s' init -q 2>/dev/null", dir2);
+   assert(system(cmd) == 0);
+   const char *sel = verify_select_root(NULL, dir2, out, sizeof(out));
+   assert(sel != NULL);
+   const char *leaf2 = strrchr(dir2, '/');
+   assert(leaf2 && strstr(sel, leaf2 + 1) != NULL);
+
+   /* A named directory that is not a repo is reported against ITSELF, so the
+    * error names what the caller asked about. */
+   sel = verify_select_root(NULL, "/tmp", out, sizeof(out));
+   assert(sel != NULL && strcmp(sel, "/tmp") == 0);
+
+   assert(chdir(cwd_before) == 0);
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s' '%s'", dir, dir2);
+   (void)system(cmd);
+   printf("  test_select_root_ignores_process_cwd: PASS\n");
+}
+
 int main(void)
 {
    printf("git_verify_contract:\n");
    test_git_toplevel_rejects_a_non_repo();
+   test_select_root_ignores_process_cwd();
    test_all_pass();
    test_one_fail();
    test_skip();
