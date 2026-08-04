@@ -420,6 +420,51 @@ delegates run on a free local fleet and MISLEADING on a paid one — aimee would
 look cheaper purely by moving work where the meter cannot see it. Report delegate
 cost alongside primary cost; never fold it in silently, and never omit it.
 
+## Finding 15 — five times, the capability existed and nothing pointed at it
+
+The single most repeated result of this investigation is not a cost number. It is
+that aimee already had the thing, and the agent could not reach it or was never
+told:
+
+| # | capability | why it went unused |
+|---|---|---|
+| 1 | `index` (hybrid/structure/span/callers) | not in the MCP core tool floor — reaching it cost find_tools → describe_tool → call_tool, so the agent grepped instead |
+| 2 | `read_symbol` | **no MCP presence at all** — not in tools/list, not in the extended catalog, unreachable by any path |
+| 3 | `/v1/code/context` (bounded task packet) | wired ONLY as ingress pre-injection and for delegates; an MCP agent could not call it |
+| 4 | `roundtable_review` | present and never pointed at, so a duplicate `review_completeness` tool was nearly shipped |
+| 5 | session-worktree handoff | the isolation exists; what the caller was TOLD about it changed the outcome from pass to zero |
+
+Every one of these showed up in transcripts as "the agent explores inefficiently"
+or "the agent under-fixes". None of them was a model capability problem.
+
+`roundtable_review` is the sharpest case because the duplication was caught only
+by reading the schema. It already provides everything the new tool was being
+built for: every seat is an ordinary delegate request (a one-seat panel IS a
+single reviewer with a persona), `original_request` is documented as *"used to
+detect goal drift"* — which is precisely the measured failure, a change that is
+reasonable but is not the change that was asked for — `brief` carries
+focus/fixes/invariants/questions, and `workdir` hands the reviewer the checkout.
+`rt_preset_t` carries seats[]/seat_count with per-seat persona plus chairman,
+min_successful, max_cost_usd and deadline_ms, and presets are a server-owned
+registry created over /v1. A named one-seat "completeness" preset is the
+configurable form and needs no new code.
+
+Shipping a second review path would have discarded chairman synthesis, evidence
+requirements and cost caps to re-solve a solved problem.
+
+**For the article.** The interesting claim is not "aimee is 1.11x baseline". It is
+that a framework's measured performance was dominated, repeatedly, by tool
+DISCOVERABILITY rather than tool capability — and that the fix each time was to
+put an existing thing on the path the agent actually walks. That is a
+generalisable finding about agent frameworks, and it is falsifiable: each fix has
+a before/after transcript.
+
+**Accounting note for the roundtable path.** A review seat is a delegate, and
+delegate tokens never appear in the codex transcript the harness meters. The
+polling turns (`roundtable_status`) DO appear and are billed to the primary.
+Report seat cost separately rather than letting review work vanish into an
+unmetered channel — the same discipline as Finding 14.
+
 ## Methodology traps hit in this work
 
 Record these; several produced wrong published numbers first.
