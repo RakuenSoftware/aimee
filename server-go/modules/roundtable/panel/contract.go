@@ -52,6 +52,23 @@ type ReviewRequest struct {
 	Roundtable      string `json:"roundtable"`
 	Workdir         string `json:"workdir"`
 	RunID           string `json:"run_id"`
+
+	// Stage and ExecutionVersion identify which attempt of which step this is.
+	// They key the durable slot each seat reserves, so a caller that omits them
+	// gets a fresh panel on every retry -- paying again for work it already has.
+	Stage            string `json:"stage,omitempty"`
+	ExecutionVersion string `json:"execution_version,omitempty"`
+	// ReplayOnly forbids launching fresh seats: the spend was already reconciled,
+	// so only an existing durable result may be consumed.
+	ReplayOnly bool `json:"replay_only,omitempty"`
+	// CostLimitUSD is the ceiling for the whole review, zero meaning unbounded.
+	CostLimitUSD float64 `json:"cost_limit_usd,omitempty"`
+	// Focus, Lenses and Pins are the caller's overlay on a saved roundtable. The
+	// saved panel owns its seats; these only name review angles and pin
+	// individual personas to agents.
+	Focus  string            `json:"focus,omitempty"`
+	Lenses []string          `json:"lenses,omitempty"`
+	Pins   map[string]string `json:"pins,omitempty"`
 }
 
 // ParticipantFailure keeps degraded-panel diagnostics attached to the result.

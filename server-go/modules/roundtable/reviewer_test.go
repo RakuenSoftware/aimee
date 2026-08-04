@@ -279,3 +279,89 @@ func TestReviewRejectsASeatThatEchoesAnotherIdentity(t *testing.T) {
 		t.Fatalf("stale panel response was accepted: %+v", result)
 	}
 }
+
+// A retry must replay the seats it already paid for, and that depends entirely
+// on the run identity reaching the seat requests. If Stage or ExecutionVersion
+// are dropped on the wire, every attempt keys a different durable slot and
+// convenes -- and bills -- a fresh panel.
+func TestReviewCarriesRunIdentityOntoEverySeat(t *testing.T) {
+	seats := &scriptedSeats{}
+	request := panel.ReviewRequest{
+		Artifact: strings.Repeat("diff --git a/a b/a\n", 4), OriginalRequest: "review it",
+		ArtifactStage: "frozen_diff", Roundtable: "default", RunID: "wi-7",
+		Stage: "gate", ExecutionVersion: "v3", CostLimitUSD: 4,
+	}
+	if _, err := reviewerWithSeats(t, seats).Review(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	seats.mu.Lock()
+	defer seats.mu.Unlock()
+	if len(seats.requests) == 0 {
+		t.Fatal("no seat was convened")
+	}
+	first := seats.requests[0]
+	if first.DurableSlot == "" {
+		t.Fatal("seat carries no durable slot, so a retry cannot replay it")
+	}
+	// The slot hashes the run identity, so the same review keys the same slot
+	// and a different attempt keys a different one.
+	other := request
+	other.ExecutionVersion = "v4"
+	otherSeats := &scriptedSeats{}
+	if _, err := reviewerWithSeats(t, otherSeats).Review(t.Context(), other); err != nil {
+		t.Fatal(err)
+	}
+	otherSeats.mu.Lock()
+	defer otherSeats.mu.Unlock()
+	if otherSeats.requests[0].DurableSlot != first.DurableSlot {
+		t.Fatal("execution version leaked into the durable slot; a replay would never match")
+	}
+	// The per-seat ceiling is the plane adapter's to divide, not the panel's, so
+	// it is asserted where that division happens rather than through a double
+	// that does not implement it.
+}
+
+// ReplayOnly is what stops a lifecycle retry from paying twice for spend that
+// was already reconciled. It has to reach the seat, not stop at the boundary.
+func TestReviewPropagatesReplayOnly(t *testing.T) {
+	seats := &recordingRun{}
+	_, err := reviewerWithSeats(t, seats).Review(t.Context(), panel.ReviewRequest{
+		Artifact: strings.Repeat("diff --git a/a b/a\n", 4), Roundtable: "default",
+		RunID: "wi-8", Stage: "gate", ExecutionVersion: "v1", ReplayOnly: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !seats.seen.ReplayOnly {
+		t.Fatal("replay-only was dropped; a reconciled retry would launch and bill again")
+	}
+	if seats.seen.Stage != "gate" || seats.seen.ExecutionVersion != "v1" {
+		t.Fatalf("run identity did not reach the plane: %+v", seats.seen)
+	}
+	if seats.seen.CostLimitUSD != 0 {
+		t.Fatalf("unset reservation became %v", seats.seen.CostLimitUSD)
+	}
+}
+
+type recordingRun struct {
+	mu   sync.Mutex
+	seen panel.Run
+}
+
+func (r *recordingRun) One(_ context.Context, run panel.Run, request panel.SeatRequest) panel.SeatResult {
+	r.mu.Lock()
+	r.seen = run
+	r.mu.Unlock()
+	return panel.SeatResult{Response: fmt.Sprintf(
+		`{"run_id":%q,"artifact_hash":%q,"artifact_stage":%q,`+
+			`"original_request_alignment":{"status":"aligned","summary":"ok"},`+
+			`"verdict":"approve","findings":[]}`, run.ID, request.ArtifactHash, request.ArtifactStage)}
+}
+
+func (r *recordingRun) Group(ctx context.Context, run panel.Run, requests []panel.SeatRequest) []panel.SeatResult {
+	out := make([]panel.SeatResult, len(requests))
+	for i := range requests {
+		out[i] = r.One(ctx, run, requests[i])
+	}
+	return out
+}

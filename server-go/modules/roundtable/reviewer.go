@@ -81,7 +81,7 @@ func (r *PanelReviewer) Review(ctx context.Context, request panel.ReviewRequest)
 		id = fmt.Sprintf("roundtable-%x", sum[:12])
 	}
 
-	convened, err := r.presets.Resolve(request.Roundtable, nil, nil)
+	convened, err := r.presets.Resolve(request.Roundtable, request.Lenses, request.Pins)
 	if err != nil {
 		// An unresolvable panel is not a verdict about the artifact, so it is
 		// reported as a park with the reason rather than as a review failure.
@@ -90,16 +90,20 @@ func (r *PanelReviewer) Review(ctx context.Context, request panel.ReviewRequest)
 	}
 
 	run := panel.Run{
-		ID:              id,
-		Workdir:         request.Workdir,
-		OriginalRequest: original,
+		ID:               id,
+		Stage:            request.Stage,
+		ExecutionVersion: request.ExecutionVersion,
+		ReplayOnly:       request.ReplayOnly,
+		CostLimitUSD:     request.CostLimitUSD,
+		Workdir:          request.Workdir,
+		OriginalRequest:  original,
 		Reviewed: panel.Artifact{
 			Stage:   stage,
 			Content: request.Artifact,
 			Hash:    panel.Hash([]byte(request.Artifact)),
 		},
 	}
-	result, err := panel.Convene(ctx, r.seats, run, convened, "")
+	result, err := panel.Convene(ctx, r.seats, run, convened, request.Focus)
 	if err != nil {
 		return result, err
 	}
