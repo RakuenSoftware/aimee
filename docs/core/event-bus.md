@@ -57,12 +57,11 @@ policies at `<config>/modules.d/<daemon>`; the environment can override those
 with `AIMEE_MODULE_BUS_SOCKET` and `AIMEE_MODULE_POLICY_DIR`.
 
 `src/modules/process-contracts.json` is also the implementation-language switch
-for supervised processes. Ten migrated batches—`memory`, `learning`,
-`routing`, `delegates`, `tools`, `workspace`, `git`, `skills`, and
-`response-composition`, followed by `governance`, `workflows`, `roundtable`,
-`kb-synthesis`, `runtime-web`, `control-web`, and `benchmarks`—put every process
-identity on the Go multicall
-executable in `server-go/cmd/aimee-module`; its basename selects an isolated
+for supervised processes. Across ten migrated batches, every process identity
+moved to the Go multicall executable in `server-go/cmd/aimee-module`: `memory`,
+`learning`, `routing`, `delegates`, `tools`, `workspace`, `git`, `skills`,
+`response-composition`, `governance`, `workflows`, `roundtable`, `kb-synthesis`,
+`runtime-web`, `control-web`, and `benchmarks`. Its basename selects an isolated
 identity and one module package under `server-go/modules`. The runtime bundle emits no C process
 source for those entries. Their C `module_adapter.c` files serve only as
 wire-parity fixtures while the deeper module-owned C surfaces are migrated in
