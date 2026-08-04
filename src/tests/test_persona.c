@@ -259,8 +259,7 @@ int main(void)
    {
       char names[PERSONA_MAX_NAMES][PERSONA_NAME_MAX];
       int n = persona_list(NULL, names, PERSONA_MAX_NAMES);
-      int eng = 0, nov = 0, song = 0, noir = 0, qa = 0, sec = 0, rev = 0, chair = 0,
-          arch = 0;
+      int eng = 0, nov = 0, song = 0, noir = 0, qa = 0, sec = 0, rev = 0, chair = 0, arch = 0;
       for (int i = 0; i < n; i++)
       {
          if (strcmp(names[i], "engineer") == 0)

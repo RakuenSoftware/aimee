@@ -61,8 +61,7 @@ static void ag_set_exec_roles_csv(agent_t *ag, const char *csv)
 
 static void ag_set_default_delegate_roles(agent_t *ag)
 {
-   ag_set_roles_csv(ag,
-                    "code,explain,refactor,draft,execute,summarize,format,reason,search");
+   ag_set_roles_csv(ag, "code,explain,refactor,draft,execute,summarize,format,reason,search");
 }
 
 static int ag_looks_like_endpoint(const char *s)

@@ -458,8 +458,7 @@ static void test_add_requires_explicit_review_role(void)
 
    set_home_empty();
    reset_capture();
-   const char *reviewer[] = {"reviewer", "http://model.test/v1", "model", "--roles",
-                             "code,review"};
+   const char *reviewer[] = {"reviewer", "http://model.test/v1", "model", "--roles", "code,review"};
    req = args_request_array(reviewer, 5);
    assert(handle_agent_add(NULL, NULL, req) == 0);
    cJSON_Delete(req);

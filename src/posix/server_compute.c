@@ -545,8 +545,7 @@ static void chat_agent_add_default_roles(agent_t *ag)
     * until the agent is explicitly registered with the review role. */
    const char *roles[] = {"code", "explain", "refactor", "draft", "execute"};
    ag->role_count = 0;
-   for (int i = 0; i < (int)(sizeof(roles) / sizeof(roles[0])) &&
-                   ag->role_count < MAX_AGENT_ROLES;
+   for (int i = 0; i < (int)(sizeof(roles) / sizeof(roles[0])) && ag->role_count < MAX_AGENT_ROLES;
         i++)
       snprintf(ag->roles[ag->role_count++], sizeof(ag->roles[0]), "%s", roles[i]);
 }

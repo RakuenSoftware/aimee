@@ -110,9 +110,8 @@ static void server_agent_set_exec_roles_csv(agent_t *ag, const char *csv)
 
 static void server_agent_default_roles(agent_t *ag)
 {
-   server_agent_set_roles_csv(ag,
-                              "code,explain,refactor,draft,execute,summarize,format,reason,"
-                              "search");
+   server_agent_set_roles_csv(ag, "code,explain,refactor,draft,execute,summarize,format,reason,"
+                                  "search");
 }
 
 static int server_agent_looks_endpoint(const char *s)
