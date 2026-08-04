@@ -783,32 +783,6 @@ func TestNativeRunnerUsesCompleteArtifactsAndOnlyPositiveUIPins(t *testing.T) {
 	}
 }
 
-func TestDirectRoundtableReviewReturnsAndVerifiesRunArtifactIdentity(t *testing.T) {
-	agents := &recordingAgents{}
-	runner := &NativeRunner{agents: agents, roundtables: configuredTestRoundtable(t)}
-	artifact := "\n" + strings.Repeat("diff --git a/a b/a\n", 4) + "DIRECT_ARTIFACT_MARKER\n\n"
-	result, err := runner.Review(context.Background(), roundtablecfg.ReviewRequest{
-		Artifact: artifact, OriginalRequest: "Review only the supplied direct artifact.",
-		ArtifactStage: "frozen_diff", RunID: "review-pr-1828-attempt-2", Roundtable: "default",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantHash := wfe.Hash([]byte(artifact))
-	if result.RunID != "review-pr-1828-attempt-2" || result.ArtifactHash != wantHash || result.Feedback == nil || result.Feedback.ArtifactHash != wantHash {
-		t.Fatalf("result identity=%+v want run and artifact %s", result, wantHash)
-	}
-	agents.mu.Lock()
-	defer agents.mu.Unlock()
-	if len(agents.requests) != 2 {
-		t.Fatalf("requests=%d want direct two-seat bound", len(agents.requests))
-	}
-	for _, request := range agents.requests {
-		if !strings.Contains(request.Prompt, "DIRECT_ARTIFACT_MARKER") {
-			t.Fatalf("review request received another run's artifact: %+v", request)
-		}
-	}
-}
 
 func TestNativeRunnerSplitAcceptsManagedChangeIntentBinding(t *testing.T) {
 	runner := &NativeRunner{agents: fixedResponseAgents{response: `{"schema_version":1,"packets":[{"packet_id":"p1","summary":"implement feature","target_blocks":["implement"],"dependencies":[],"acceptance_criteria":["feature exists"]}]}`}}
@@ -892,16 +866,6 @@ func TestNativeRunnerSplitPromptCarriesOriginalRequestAndRejectsFollowUpPackets(
 	}
 }
 
-func TestDirectRoundtableRejectsStalePanelIdentityWithoutChairman(t *testing.T) {
-	agents := &recordingAgents{reviewResponse: `{"run_id":"another-run","artifact_hash":"stale-hash","artifact_stage":"frozen_diff","original_request_alignment":{"status":"aligned","summary":"looks right"},"verdict":"approve","findings":[]}`}
-	runner := &NativeRunner{agents: agents, roundtables: configuredTestRoundtable(t)}
-	result, err := runner.Review(context.Background(), roundtablecfg.ReviewRequest{
-		Artifact: strings.Repeat("diff --git a/a b/a\n", 4), RunID: "review-current", Roundtable: "default",
-	})
-	if err == nil || !strings.Contains(err.Error(), "identity mismatch") || result.ParticipantsUsed != 0 || !result.Degraded {
-		t.Fatalf("stale panel response accepted: result=%+v err=%v", result, err)
-	}
-}
 
 func TestRoundtableRunIDIsJSONEscapedInTrustedPromptPreamble(t *testing.T) {
 	agents := &recordingAgents{}

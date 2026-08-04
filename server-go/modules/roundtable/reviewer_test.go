@@ -3,9 +3,11 @@ package roundtable
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/JBailes/aimee/server-go/modules/delegates/plane"
@@ -49,7 +51,7 @@ func testReviewer(t *testing.T, seats int) *PanelReviewer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reviewer, err := NewPanelReviewer(testPresets(t, seats), client)
+	reviewer, err := NewPanelReviewer(testPresets(t, seats), NewPlaneDelegates(client))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,4 +191,91 @@ func asValidation(err error, target *panel.ValidationError) bool {
 		*target = validation
 	}
 	return ok
+}
+
+// scriptedSeats answers every seat with one response, echoing the run and
+// artifact identity unless the test deliberately supplies its own.
+type scriptedSeats struct {
+	mu       sync.Mutex
+	requests []panel.SeatRequest
+	response string
+}
+
+func (s *scriptedSeats) One(_ context.Context, run panel.Run, request panel.SeatRequest) panel.SeatResult {
+	s.mu.Lock()
+	s.requests = append(s.requests, request)
+	s.mu.Unlock()
+	response := s.response
+	if response == "" {
+		response = fmt.Sprintf(
+			`{"run_id":%q,"artifact_hash":%q,"artifact_stage":%q,`+
+				`"original_request_alignment":{"status":"aligned","summary":"implements the request"},`+
+				`"verdict":"approve","findings":[]}`,
+			run.ID, request.ArtifactHash, request.ArtifactStage)
+	}
+	return panel.SeatResult{Response: response, Participant: "opaque-seat-token"}
+}
+
+func (s *scriptedSeats) Group(ctx context.Context, run panel.Run, requests []panel.SeatRequest) []panel.SeatResult {
+	out := make([]panel.SeatResult, len(requests))
+	for i := range requests {
+		out[i] = s.One(ctx, run, requests[i])
+	}
+	return out
+}
+
+func reviewerWithSeats(t *testing.T, seats panel.Delegates) *PanelReviewer {
+	t.Helper()
+	reviewer, err := NewPanelReviewer(testPresets(t, 1), seats)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return reviewer
+}
+
+// The verdict has to be tied to the exact bytes reviewed, and to this run. A
+// result that cannot be traced back to them is not evidence the artifact was
+// reviewed at all.
+func TestReviewBindsTheVerdictToTheRunAndArtifact(t *testing.T) {
+	seats := &scriptedSeats{}
+	artifact := "\n" + strings.Repeat("diff --git a/a b/a\n", 4) + "DIRECT_ARTIFACT_MARKER\n\n"
+	result, err := reviewerWithSeats(t, seats).Review(t.Context(), panel.ReviewRequest{
+		Artifact: artifact, OriginalRequest: "Review only the supplied direct artifact.",
+		ArtifactStage: "frozen_diff", RunID: "review-pr-1828-attempt-2", Roundtable: "default",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantHash := panel.Hash([]byte(artifact))
+	if result.RunID != "review-pr-1828-attempt-2" || result.ArtifactHash != wantHash ||
+		result.Feedback == nil || result.Feedback.ArtifactHash != wantHash {
+		t.Fatalf("result identity=%+v want run and artifact %s", result, wantHash)
+	}
+	seats.mu.Lock()
+	defer seats.mu.Unlock()
+	if len(seats.requests) == 0 {
+		t.Fatal("no seat was convened")
+	}
+	for _, request := range seats.requests {
+		if !strings.Contains(request.Prompt, "DIRECT_ARTIFACT_MARKER") {
+			t.Fatalf("seat received another run's artifact: %+v", request)
+		}
+	}
+}
+
+// A seat that echoes some other run or artifact is reporting on work this
+// review did not ask about, so it cannot count toward the verdict.
+func TestReviewRejectsASeatThatEchoesAnotherIdentity(t *testing.T) {
+	seats := &scriptedSeats{response: `{"run_id":"another-run","artifact_hash":"stale-hash",` +
+		`"artifact_stage":"frozen_diff","original_request_alignment":{"status":"aligned","summary":"looks right"},` +
+		`"verdict":"approve","findings":[]}`}
+	result, err := reviewerWithSeats(t, seats).Review(t.Context(), panel.ReviewRequest{
+		Artifact: strings.Repeat("diff --git a/a b/a\n", 4), RunID: "review-current", Roundtable: "default",
+	})
+	if err != nil {
+		t.Fatalf("stale identity should park, not error: %v", err)
+	}
+	if result.Approved || result.ParticipantsUsed != 0 || !result.Degraded {
+		t.Fatalf("stale panel response was accepted: %+v", result)
+	}
 }

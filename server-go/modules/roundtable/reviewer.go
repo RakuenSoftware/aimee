@@ -20,14 +20,22 @@ import (
 // agent_jobs.
 type PanelReviewer struct {
 	presets *panel.Store
-	plane   *plane.HTTPAgentClient
+	seats   panel.Delegates
 }
 
-func NewPanelReviewer(presets *panel.Store, client *plane.HTTPAgentClient) (*PanelReviewer, error) {
-	if presets == nil || client == nil {
-		return nil, errors.New("roundtable review needs a preset store and a delegate plane client")
+// NewPanelReviewer takes the seat contract rather than a transport, so what
+// convenes a panel is substitutable and this stays testable without a live
+// resource plane.
+func NewPanelReviewer(presets *panel.Store, seats panel.Delegates) (*PanelReviewer, error) {
+	if presets == nil || seats == nil {
+		return nil, errors.New("roundtable review needs a preset store and a way to seat delegates")
 	}
-	return &PanelReviewer{presets: presets, plane: client}, nil
+	return &PanelReviewer{presets: presets, seats: seats}, nil
+}
+
+// NewPlaneDelegates seats a panel over the delegate resource plane.
+func NewPlaneDelegates(client *plane.HTTPAgentClient) panel.Delegates {
+	return seatPlane{client: client}
 }
 
 // Review runs one roundtable and returns its verdict.
@@ -36,9 +44,19 @@ func NewPanelReviewer(presets *panel.Store, client *plane.HTTPAgentClient) (*Pan
 // a panel the operator never configured is worse than not reviewing at all,
 // because the unconfigured shape is invisible in the result.
 func (r *PanelReviewer) Review(ctx context.Context, request panel.ReviewRequest) (panel.RunResult, error) {
-	if r == nil || r.presets == nil || r.plane == nil {
+	if r == nil || r.presets == nil || r.seats == nil {
 		return panel.RunResult{}, errors.New("roundtable reviewer is not configured")
 	}
+	// A caller may name a GitHub pull request instead of pasting its diff.
+	// Resolving it here rather than at some caller's edge is what keeps every
+	// review -- workflow gate, CLI, MCP tool -- accepting the same artifact
+	// forms, and keeps reviewers from spending their tool budget fetching it.
+	materialized, err := panel.MaterializeArtifact(ctx, request.Artifact, nil)
+	if err != nil {
+		return panel.RunResult{}, err
+	}
+	request.Artifact = materialized
+
 	artifact := strings.TrimSpace(request.Artifact)
 	if len(artifact) < 20 {
 		return panel.RunResult{}, panel.ValidationError{Message: "roundtable artifact must be at least 20 characters"}
@@ -81,7 +99,7 @@ func (r *PanelReviewer) Review(ctx context.Context, request panel.ReviewRequest)
 			Hash:    panel.Hash([]byte(request.Artifact)),
 		},
 	}
-	result, err := panel.Convene(ctx, seatPlane{client: r.plane}, run, convened, "")
+	result, err := panel.Convene(ctx, r.seats, run, convened, "")
 	if err != nil {
 		return result, err
 	}

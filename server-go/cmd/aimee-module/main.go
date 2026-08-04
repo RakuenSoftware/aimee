@@ -57,7 +57,7 @@ func roundtableReviewer() (*roundtable.PanelReviewer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return roundtable.NewPanelReviewer(presets, client)
+	return roundtable.NewPanelReviewer(presets, roundtable.NewPlaneDelegates(client))
 }
 
 func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
