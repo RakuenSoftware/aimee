@@ -123,7 +123,7 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 
 > **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `aimee_synthesis_model`
 
-### Advanced tuning keys (78)
+### Advanced tuning keys (79)
 
 Expert scalars with sensible defaults; settable in the config file but off the everyday surface.
 
@@ -138,6 +138,7 @@ Expert scalars with sensible defaults; settable in the config file but off the e
 | `code_hybrid_weight_vector` | float | RRF weight for the embedding-similarity signal in /v1/code/hybrid (default 1.0; <=0 disables it; auto-skips when no dim-matched embedder). |
 | `code_span_max_lines` | int | Max line span the code_span_get recovery resolver returns per call (default 400). |
 | `code_surprising_precision_floor` | float | §4 self-suppress: when the LLM-judge-sampled precision of surprising-link candidates falls below this floor, an unjudged /v1/code/graph/surprising request returns no candidates (default 0 = disabled). |
+| `completeness_review_persona` | string | n/a |
 | `cost_reward_lambda_pct` | int | Cost-penalty weight (percent) in the reward. |
 | `guardrails_semantic_block_threshold` | float | Semantic score threshold to block. |
 | `guardrails_semantic_prompt_threshold` | float | Semantic score threshold for prompt-level flags. |

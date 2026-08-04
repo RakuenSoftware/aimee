@@ -187,6 +187,9 @@ static void test_codex_delegate_policy_is_explicit(void)
                         "one caller, a caller-side fix is incomplete") != NULL ||
           strstr(skill, "caller-side fix is incomplete") != NULL);
    assert(strstr(skill, "account for every symptom") != NULL);
+   /* The three all-fail tasks were all under-scoped patches, not bad retrieval.
+    * A separate reviewer is the check; the author is the one who cannot see it. */
+   assert(strstr(skill, "review_completeness") != NULL);
    /* am_12b43fa38e: the ticket opens "Two bugs" and names both; aimee fixed the
     * second and never touched the first, while still editing the file the first
     * lives in for an unrelated reason. File overlap is not coverage. */

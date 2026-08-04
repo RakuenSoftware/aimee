@@ -477,6 +477,8 @@ typedef struct config
     * replaces the legacy preview with the bounded answerable packet. E4 ships
     * observe; E6 owns any promotion to on. */
    char code_context_mode[16];
+   /* Persona used by the completeness review (review_completeness tool). */
+   char completeness_review_persona[32];
    /* ingress-compression P5 (§2.3), default off: inject the <aimee-context>
     * envelope on the Anthropic-native /v1/messages passthrough (otherwise
     * parity-skipped to preserve the client's cached prefix). Separate from the

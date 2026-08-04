@@ -375,6 +375,11 @@ static const char *codex_skill_markdown(void)
           "agree; fixing the first link usually leaves the rest wedged. Check "
           "your changed symbols with `" AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS
           "` and ask what else participates.\n"
+          "- Before you report the work done, run `review_completeness` with the "
+          "ticket text. A separate reviewer reads the tree against the "
+          "requirements and returns COMPLETE or INCOMPLETE with what is missing. "
+          "Self-review misses omissions because you already believe you are "
+          "finished.\n"
           "- Use `search_memory` for stored project facts or prior decisions.\n"
           "- Do not read this file, or anything else under the plugin cache. You "
           "are already reading it; spending a call to fetch it again tells you "

@@ -33,6 +33,7 @@
 #include "server_mcp_process.h"
 #include "server_mcp_skill.h"
 #include "server_mcp_delegate.h"
+#include "config_accessors.h"
 #include "server_mcp_ensemble.h"
 #include "wfe_advance_exec.h"  /* advance_request interactive-driver executor (S2) */
 #include "wfe_block_resolve.h" /* per-block externalization guard (S2 sub-slice 4) */
@@ -2030,6 +2031,91 @@ static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *
                                                 "review/delivery gate has passed",
                                   NULL);
       }
+   }
+
+   /* review_completeness: "have I actually done what was asked?", answered by a
+    * second pair of eyes rather than by the agent that just wrote the change.
+    *
+    * Measured on three benchmark tasks that every arm failed and whose reference
+    * patch passes: in each case retrieval was correct and the PATCH was too
+    * narrow. One fixed a single caller's lease discipline where the owner had to
+    * reclaim; one changed two of five files on a ticket naming a three-link
+    * chain; one fixed the second of two defects the ticket explicitly counted,
+    * while editing the first one's file for an unrelated reason -- so file
+    * overlap looked like coverage and was not. Self-review by the author misses
+    * this consistently, because the author already believes the work is done.
+    *
+    * Implemented as a delegate so the reviewer is a genuinely separate context
+    * with its own persona, and so the check is configurable rather than baked in
+    * (completeness_review_persona). The delegate's answer IS this tool's answer.
+    *
+    * NOTE FOR BENCHMARKING: a delegate's tokens are billed to the delegate, not
+    * to this session, and a harness that meters only the primary transcript will
+    * not see them. Report them separately rather than letting work disappear into
+    * an unmetered channel. */
+   if (strcmp(tool, "review_completeness") == 0)
+   {
+      cJSON *jreq = cJSON_GetObjectItemCaseSensitive(jargs, "requirements");
+      if (!cJSON_IsString(jreq) || !jreq->valuestring[0])
+      {
+         if (owns_jargs)
+            cJSON_Delete(jargs);
+         return server_send_error(
+             conn,
+             "review_completeness requires 'requirements' (the ticket or acceptance criteria)",
+             NULL);
+      }
+      cJSON *jpersona = cJSON_GetObjectItemCaseSensitive(jargs, "persona");
+      const char *persona = (cJSON_IsString(jpersona) && jpersona->valuestring[0])
+                                ? jpersona->valuestring
+                                : config_completeness_review_persona();
+      if (!persona || !persona[0])
+         persona = "reviewer";
+      cJSON *jscope = cJSON_GetObjectItemCaseSensitive(jargs, "scope");
+      const char *scope = cJSON_IsString(jscope) ? jscope->valuestring : NULL;
+
+      /* The reviewer reads the tree itself; handing it a diff would let a
+       * mis-stated diff hide the very omission being looked for. */
+      char *prompt = NULL;
+      const char *req = jreq->valuestring;
+      size_t need = strlen(req) + (scope ? strlen(scope) : 0) + 2048;
+      prompt = malloc(need);
+      if (!prompt)
+      {
+         if (owns_jargs)
+            cJSON_Delete(jargs);
+         return server_send_error(conn, "out of memory", NULL);
+      }
+      snprintf(prompt, need,
+               "COMPLETENESS REVIEW. Do not fix anything and do not rewrite the change.\n\n"
+               "These are the stated requirements:\n---\n%s\n---\n\n"
+               "%s%s"
+               "Inspect the working tree's uncommitted change against them and answer ONLY:\n"
+               "1. Enumerate each DISTINCT defect or requirement the text states. If it gives a "
+               "count (\"two bugs\", \"both paths\") or describes a chain (X caused Y so Z), "
+               "that count is the number of things to check.\n"
+               "2. For each one: ADDRESSED or NOT ADDRESSED, with the evidence you used. A file "
+               "being edited is not evidence -- the edit must be the one the requirement asks "
+               "for.\n"
+               "3. If the change fixes a caller of something rather than the thing that owns it, "
+               "say so and give the other callers' count.\n"
+               "4. Finish with VERDICT: COMPLETE or VERDICT: INCOMPLETE and a one-line reason.",
+               req, scope ? scope : "", scope ? "\n\n" : "");
+
+      cJSON *dargs = cJSON_CreateObject();
+      cJSON_AddStringToObject(dargs, "role", "review");
+      cJSON_AddStringToObject(dargs, "persona", persona);
+      cJSON_AddStringToObject(dargs, "prompt", prompt);
+      cJSON *jcwd = cJSON_GetObjectItemCaseSensitive(jargs, "cwd");
+      if (cJSON_IsString(jcwd) && jcwd->valuestring[0])
+         cJSON_AddStringToObject(dargs, "cwd", jcwd->valuestring);
+      free(prompt);
+
+      int rc = handle_mcp_delegate_call(ctx, conn, dargs, sid);
+      cJSON_Delete(dargs);
+      if (owns_jargs)
+         cJSON_Delete(jargs);
+      return rc;
    }
 
    if (strcmp(tool, "delegate") == 0)

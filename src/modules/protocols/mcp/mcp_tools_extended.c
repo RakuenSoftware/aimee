@@ -127,6 +127,20 @@ void mcp_add_extended_tools(cJSON *tools)
             "round trip together. Replaces 'query' when present; returns one {query, result} per "
             "entry, in order.");
 
+   t = ext_tool(tools, "review_completeness",
+                "Ask a SEPARATE reviewer whether your change actually does what was asked. Runs "
+                "as a delegate with its own persona and context, inspects the working tree "
+                "against the requirements you give it, and returns each stated defect marked "
+                "ADDRESSED or NOT ADDRESSED plus a COMPLETE/INCOMPLETE verdict. Use it before "
+                "you report work as done. It reviews; it does not edit.");
+   ext_prop(t, "requirements", "string",
+            "The ticket, issue or acceptance criteria to check the change against.");
+   ext_prop(t, "persona", "string",
+            "Reviewer persona (default: the configured completeness_review_persona).");
+   ext_prop(t, "scope", "string", "Optional extra instruction, e.g. which paths matter.");
+   ext_prop(t, "cwd", "string", "Working directory to review (optional).");
+   ext_require(t, "requirements");
+
    t = ext_tool(tools, "index_investigate",
                 "START HERE for an unfamiliar area. Bounded task packet: exact and structural "
                 "evidence first, weak vector-only matches rejected, each item carrying the file "
