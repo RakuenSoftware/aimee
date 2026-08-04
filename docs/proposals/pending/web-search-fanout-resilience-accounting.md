@@ -1,5 +1,8 @@
 # Design brief: multi-engine fanout, circuit-breaking, provenance, accounting
 
+- **State:** PENDING — decision brief; the proposed default path, resilience, provenance, and
+  accounting changes remain open.
+
 Items 3–6 of [web-retrieval-capability-map.md](../done/web-retrieval-capability-map.md).
 Items 1 and 2 (search→extract fusion, page cache) merged in #1830.
 

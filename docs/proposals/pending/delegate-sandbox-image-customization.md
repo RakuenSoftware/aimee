@@ -91,7 +91,7 @@ An in-repo `.aimee/project.yaml` lets a repository dictate what is built into it
 own sandbox. This is acceptable: it is the co-located developer's own code, the
 build is isolated in a throwaway layer, and the resulting container has no network.
 It is nonetheless a trust surface — the same trust already extended to the repo's
-`Makefile`/build scripts. Operators who want it locked down use scope 2/3
+`src/Makefile`/build scripts. Operators who want it locked down use scope 2/3
 (aimee.yaml) and can disable in-repo specs.
 
 ## Prerequisite: the model's code execution must actually run in the sandbox

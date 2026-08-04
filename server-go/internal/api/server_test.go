@@ -775,3 +775,74 @@ func TestConfiguredZeroConcurrencyPausesAdmission(t *testing.T) {
 		t.Fatalf("expected 409 paused-admission, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestManualFileSubmissionPreservesValidatedProposalSource(t *testing.T) {
+	server, store, _ := newTestServer(t)
+	root := t.TempDir()
+	runGit(t, root, "init")
+	runGit(t, root, "config", "user.email", "test@example.com")
+	runGit(t, root, "config", "user.name", "Test")
+	pendingDir := filepath.Join(root, "docs", "proposals", "pending")
+	if err := os.MkdirAll(pendingDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	source := "# Proposal: source-aware run\n\n- **State:** pending — single slice.\n\nDo the thing.\n"
+	approved := "# Proposal: source-aware run\n\n- **State:** approved — run now.\n\nDo the thing.\n"
+	if err := os.WriteFile(filepath.Join(pendingDir, "source-aware.md"), []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", ".")
+	runGit(t, root, "commit", "-m", "proposal")
+	workflowDir := filepath.Join(root, "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workflowDir, "build.yaml"), []byte("name: build\nstart: draft\nnodes:\n  - id: draft\n    block: author.proposal\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server.workflowDir = workflowDir
+	server.workflows = nil
+
+	body, err := json.Marshal(map[string]string{
+		"proposal_md": approved,
+		"workflow":    "build",
+		"repo":        root,
+		"source_path": "docs/proposals/pending/source-aware.md",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/dev/submit", bytes.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		WorkItemID string `json:"work_item_id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.WorkItem(context.Background(), response.WorkItemID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.SourcePath != "docs/proposals/pending/source-aware.md" {
+		t.Fatalf("source_path=%q", item.SourcePath)
+	}
+
+	body, err = json.Marshal(map[string]string{
+		"proposal_md": approved + "unrelated mutation\n",
+		"workflow":    "build",
+		"repo":        root,
+		"source_path": "docs/proposals/pending/source-aware.md",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec = httptest.NewRecorder()
+	server.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/dev/submit", bytes.NewReader(body)))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("mismatched source status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}

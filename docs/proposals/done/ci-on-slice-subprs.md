@@ -1,7 +1,8 @@
 # Proposal: run CI on slice sub-PRs
 
-- **State:** implementation prepared — option 1 is present in `ci.yml`; rollout
-  remains blocked until the pre-enablement Q0 baseline is recorded.
+- **State:** DONE — archived after the implementation and rollout decision were completed.
+- **Historical state:** implementation prepared — option 1 is present in `ci.yml`; rollout remained
+  blocked until the pre-enablement Q0 baseline was recorded.
 
 ## Problem
 

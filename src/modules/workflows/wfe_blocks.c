@@ -1955,14 +1955,29 @@ static wfe_step_result_t exec_split(wfe_ctx *ctx, const wfe_node_t *node)
          fclose(f);
       }
    }
-   char prompt[14 * 1024];
+   /* An acceptance gate loops back to split when the assembled generation is
+    * wrong.  Its blockers are not optional commentary: they are the reason a
+    * replacement generation exists and therefore supersede conflicting details
+    * in the previously approved plan.  Thread them into packetization instead
+    * of blindly producing the same packets from the stale plan again. */
+   char feedback[4096];
+   wfe_feedback_read(wfe_ctx_work_item(ctx), feedback, sizeof feedback);
+   char prompt[18 * 1024];
    snprintf(prompt, sizeof prompt,
             "Decompose the APPROVED PLAN below into a structured PACKET PLAN: "
             "{\"schema_version\":1,\"packets\":[{\"packet_id\":\"p1\",\"summary\":\"...\","
             "\"target_blocks\":[\"implement\"],\"dependencies\":[],"
             "\"acceptance_criteria\":[\"...\"]}]}. Write the JSON to the given path and commit it "
             "if you can; if file tools are unavailable to you, your ENTIRE reply must be exactly "
-            "that JSON document — no prose, no code fences, nothing else.\n\nAPPROVED PLAN:\n%s",
+            "that JSON document — no prose, no code fences, nothing else.%s%s"
+            "\n\nAPPROVED PLAN:\n%s",
+            feedback[0]
+                ? "\n\nSUPERSEDING ACCEPTANCE FEEDBACK:\nThe prior assembled generation failed "
+                  "acceptance. Every blocking correction below is authoritative and supersedes "
+                  "any conflicting detail in the approved plan. Encode the corrections in the "
+                  "new packets and their acceptance criteria:\n"
+                : "",
+            feedback[0] ? feedback : "",
             plan[0] ? plan : "(no plan artifact found — decompose the work item's ask)");
    return manager_produce(ctx, node, "architect", prompt, wfe_packets_validate);
 }

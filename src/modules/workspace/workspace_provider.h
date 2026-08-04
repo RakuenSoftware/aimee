@@ -105,6 +105,15 @@ struct workspace_provider
       future `detached` provider marshals it to the client-side runner. */
    char *(*exec_shell)(const workspace_provider_t *p, const char *cmd, int *exit_code);
 
+   /* Optional timeout-aware form of exec_shell. `timeout_ms <= 0` means no
+      provider deadline. Callers that expose a bounded shell/script contract
+      should prefer this hook when it is present and fall back to exec_shell for
+      older/shared providers. Container providers implement it by forwarding the
+      deadline to their delegate backend, so a docker exec cannot outlive the
+      tool call that launched it. */
+   char *(*exec_shell_timeout)(const workspace_provider_t *p, const char *cmd, int timeout_ms,
+                               int *exit_code);
+
    /* Run `argv` (NULL-terminated) with `stdin_data` (`stdin_len` bytes, may be
     * NULL/0) written to the child's stdin, in working directory `cwd` (NULL =
     * inherit). The child's stdout is delivered incrementally via `on_chunk`

@@ -1,5 +1,7 @@
 # P1 — merge-readiness review (tiered-llm-p1-tenancy-identity)
 
+- **State:** DONE — archived review artifact for the completed P1 delivery.
+
 Branch `worktree-claude+tiered-llm-p1-tenancy` off `testing`: 25 commits, 57 files,
 ~5.3k insertions. All objects compile `-Werror`; unit tests pass; the DB-layer
 behaviors are validated on **real PG17 + pgvector** (a CT matching CI's sidecar).

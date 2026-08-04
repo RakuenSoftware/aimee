@@ -464,6 +464,7 @@ void test_detached_dead_channel_reports_clear_error(void)
  * bash/execute_script were the hole. The spy stands in for the container: if either
  * tool still forked locally, the spy would never be called. */
 static int g_sbx_exec_called;
+static int g_sbx_timeout_ms;
 static char *g_sbx_exec_cmd;
 static char *sandbox_capture_exec_shell(const workspace_provider_t *p, const char *cmd,
                                         int *exit_code)
@@ -477,14 +478,23 @@ static char *sandbox_capture_exec_shell(const workspace_provider_t *p, const cha
    return strdup("SANDBOX-STDOUT-MARKER");
 }
 
+static char *sandbox_capture_exec_shell_timeout(const workspace_provider_t *p, const char *cmd,
+                                                int timeout_ms, int *exit_code)
+{
+   g_sbx_timeout_ms = timeout_ms;
+   return sandbox_capture_exec_shell(p, cmd, exit_code);
+}
+
 void test_container_bash_runs_in_sandbox(void)
 {
    workspace_provider_t mock;
    memset(&mock, 0, sizeof(mock));
    mock.kind = WS_PROVIDER_CONTAINER;
    mock.exec_shell = sandbox_capture_exec_shell;
+   mock.exec_shell_timeout = sandbox_capture_exec_shell_timeout;
    workspace_provider_set_active(&mock);
    g_sbx_exec_called = 0;
+   g_sbx_timeout_ms = -1;
    free(g_sbx_exec_cmd);
    g_sbx_exec_cmd = NULL;
 
@@ -493,6 +503,7 @@ void test_container_bash_runs_in_sandbox(void)
 
    /* Routed INTO the container (spy hit), carrying our command. */
    assert(g_sbx_exec_called == 1);
+   assert(g_sbx_timeout_ms == 5000);
    assert(g_sbx_exec_cmd && strstr(g_sbx_exec_cmd, "echo hi"));
    cJSON *j = cJSON_Parse(result);
    assert(j);
@@ -511,8 +522,10 @@ void test_container_execute_script_runs_in_sandbox(void)
    memset(&mock, 0, sizeof(mock));
    mock.kind = WS_PROVIDER_CONTAINER;
    mock.exec_shell = sandbox_capture_exec_shell;
+   mock.exec_shell_timeout = sandbox_capture_exec_shell_timeout;
    workspace_provider_set_active(&mock);
    g_sbx_exec_called = 0;
+   g_sbx_timeout_ms = -1;
    free(g_sbx_exec_cmd);
    g_sbx_exec_cmd = NULL;
 
@@ -528,13 +541,14 @@ void test_container_execute_script_runs_in_sandbox(void)
                    sandbox_root) < (int)sizeof(sandbox_cwd));
    assert(platform_mkdir_p(sandbox_cwd, 0700) == 0 || access(sandbox_cwd, F_OK) == 0);
    run_cmd_set_cwd(sandbox_cwd);
-   char *result =
-       dispatch_tool_call("execute_script", "{\"language\":\"bash\",\"body\":\"echo hi\"}", 5000);
+   char *result = dispatch_tool_call(
+       "execute_script", "{\"language\":\"bash\",\"body\":\"echo hi\",\"timeout_secs\":7}", 5000);
    run_cmd_set_cwd(NULL);
    workspace_provider_clear_active();
    platform_test_rmrf(sandbox_root);
 
    assert(g_sbx_exec_called == 1);
+   assert(g_sbx_timeout_ms == 7000);
    assert(g_sbx_exec_cmd && strstr(g_sbx_exec_cmd, "echo hi"));
    /* Fed over a quoted heredoc so the body needs no escaping. */
    assert(strstr(g_sbx_exec_cmd, "AIMEE_SCRIPT_EOF"));

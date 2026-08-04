@@ -406,7 +406,8 @@ function AgentEditModal({
     setBusy(true);
     setErr("");
     // One surgical set carrying every editable field. The server patches only what
-    // is passed; roles empty resets to the default set, personas empty resets to "all".
+    // is passed; an empty role selection remains empty, while personas empty resets
+    // to "all".
     const args = [
       agent.name,
       "--provider", provider,

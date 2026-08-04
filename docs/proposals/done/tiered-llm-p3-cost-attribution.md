@@ -1,6 +1,7 @@
 # Proposal: P3 — Per-team/project cost attribution at the kb egress point
 
-- **State:** proposed (pending — not started). Part of `tiered-llm-offering.md`.
+- **State:** DONE — archived after P3 delivery.
+- **Historical state:** proposed (pending — not started). Part of `tiered-llm-offering.md`.
 - **Author:** JBailes (drafted by the engineer agent, 2026-07-17).
 - **Depends on:** P1 (teams), P2 (kb egress seam). **Blocks:** nothing (P4 reuses
   the same rollup but does not require P3).

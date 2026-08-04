@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""Validate the 2026-07-26 pending-proposal reconciliation manifest."""
+"""Validate the latest pending-proposal reconciliation manifest."""
 
 from __future__ import annotations
 
 import csv
+import re
 import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MANIFEST = ROOT / "docs/proposals/PENDING_AUDIT_2026-07-26.tsv"
+PROPOSALS = ROOT / "docs/proposals"
+MANIFEST_RE = re.compile(r"^PENDING_AUDIT_\d{4}-\d{2}-\d{2}\.tsv$")
 ALLOWED = {"complete", "partial_archived", "pending_accurate", "pending_regressed"}
 
 
@@ -17,17 +19,31 @@ def fail(message: str) -> None:
     raise ValueError(message)
 
 
+def latest_manifest() -> Path:
+    manifests = sorted(
+        path for path in PROPOSALS.glob("PENDING_AUDIT_*.tsv")
+        if MANIFEST_RE.fullmatch(path.name)
+    )
+    if not manifests:
+        fail("no dated pending-audit manifest found")
+    return manifests[-1]
+
+
 def main() -> int:
-    with MANIFEST.open(encoding="utf-8", newline="") as handle:
+    manifest = latest_manifest()
+    with manifest.open(encoding="utf-8", newline="") as handle:
         rows = list(csv.DictReader(handle, delimiter="\t"))
-    required = {
+    required_base = {
         "original", "disposition", "final_path", "residual_path", "stale_updated",
-        "evidence_anchor", "roundtable",
+        "evidence_anchor",
     }
-    if not rows or set(rows[0]) != required:
+    if not rows:
+        fail("manifest is empty")
+    columns = set(rows[0])
+    review_columns = columns & {"review_record", "roundtable"}
+    if columns - {"review_record", "roundtable"} != required_base or len(review_columns) != 1:
         fail("manifest columns do not match the audit contract")
-    if len(rows) != 79:
-        fail(f"expected 79 originals, found {len(rows)}")
+    review_column = next(iter(review_columns))
     originals = [row["original"] for row in rows]
     if len(set(originals)) != len(originals):
         fail("duplicate original proposal")
@@ -43,12 +59,16 @@ def main() -> int:
             fail(f"{name}: final path does not exist: {row['final_path']}")
         text = final.read_text(encoding="utf-8")
         if disposition in {"complete", "partial_archived"}:
-            if final.parent.name != "done" or "**State:** DONE" not in text or "Archived" not in text:
+            if (
+                final.parent.name != "done"
+                or "**state:** done" not in text.lower()
+                or "archiv" not in text.lower()
+            ):
                 fail(f"{name}: archived proposal lacks done state/archive notice")
         else:
             if final.parent.name != "pending":
                 fail(f"{name}: live proposal is not in pending")
-            if disposition == "pending_regressed" and "**State:** PENDING" not in text:
+            if disposition == "pending_regressed" and "**state:** pending" not in text.lower():
                 fail(f"{name}: regressed proposal lacks explicit pending state")
             expected_pending.add(final.name)
 
@@ -58,7 +78,7 @@ def main() -> int:
             if not residual.is_file() or residual.parent.name != "pending":
                 fail(f"{name}: residual does not exist in pending")
             residual_text = residual.read_text(encoding="utf-8")
-            if "**State:** PENDING" not in residual_text or name not in residual_text:
+            if "**state:** pending" not in residual_text.lower() or name not in residual_text:
                 fail(f"{name}: residual lacks pending state or archived-parent link")
             if residual.name not in text:
                 fail(f"{name}: archive lacks reciprocal residual link")
@@ -66,11 +86,11 @@ def main() -> int:
         elif residual_value != "-":
             fail(f"{name}: non-partial disposition has a residual")
 
-        evidence = ROOT / "docs/proposals" / row["evidence_anchor"]
+        evidence = PROPOSALS / row["evidence_anchor"]
         if not evidence.is_file():
             fail(f"{name}: evidence anchor is missing")
-        if not row["roundtable"].startswith("roundtable-"):
-            fail(f"{name}: roundtable decision is missing")
+        if not row[review_column].strip():
+            fail(f"{name}: review record is missing")
 
     actual_pending = {path.name for path in (ROOT / "docs/proposals/pending").glob("*.md")}
     if actual_pending != expected_pending:
@@ -80,7 +100,8 @@ def main() -> int:
         )
     print(
         "pending-audit-manifest: ok "
-        f"({len(rows)} originals, {len(actual_pending)} final pending proposals)"
+        f"({manifest.name}: {len(rows)} originals, "
+        f"{len(actual_pending)} final pending proposals)"
     )
     return 0
 
