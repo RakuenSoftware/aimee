@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
-	roundtablecfg "github.com/JBailes/aimee/server-go/internal/roundtable"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	roundtablecfg "github.com/JBailes/aimee/server-go/modules/roundtable/panel"
 )
 
 func (r *NativeRunner) Review(ctx context.Context, request roundtablecfg.ReviewRequest) (roundtablecfg.RunResult, error) {
@@ -64,38 +64,4 @@ func (r *NativeRunner) Review(ctx context.Context, request roundtablecfg.ReviewR
 		return *result.Roundtable, errors.New(result.Detail)
 	}
 	return *result.Roundtable, nil
-}
-
-func assembleRoundtableArtifact(feedback *wfe.ReviewFeedback, approved bool) string {
-	if approved {
-		return "Roundtable approved the artifact with no findings.\n"
-	}
-	if feedback == nil || len(feedback.Findings) == 0 {
-		return "Roundtable did not approve the artifact and returned no usable findings.\n"
-	}
-	var out strings.Builder
-	out.WriteString("Roundtable requested changes.\n")
-	for _, finding := range feedback.Findings {
-		fmt.Fprintf(&out, "\n- **%s**", firstNonempty(finding.Severity, "blocking"))
-		if finding.Location != "" {
-			fmt.Fprintf(&out, " (%s)", finding.Location)
-		}
-		fmt.Fprintf(&out, ": %s", finding.Summary)
-		if finding.Recommendation != "" {
-			fmt.Fprintf(&out, " — %s", finding.Recommendation)
-		}
-	}
-	out.WriteByte('\n')
-	return out.String()
-}
-
-func roundtableResult(feedback *wfe.ReviewFeedback, approved, converged bool, analysis panelAnalysis, total int, cost float64) *roundtablecfg.RunResult {
-	failed := total - len(analysis.Reports)
-	var items []wfe.Finding
-	if feedback != nil {
-		items = append(items, feedback.Findings...)
-	}
-	return &roundtablecfg.RunResult{Artifact: assembleRoundtableArtifact(feedback, approved), Feedback: feedback, Items: items,
-		Approved: approved, Converged: converged, Degraded: failed > 0, ParticipantsTotal: total,
-		ParticipantsFailed: failed, ParticipantsUsed: len(analysis.Reports), ParticipantFailures: append([]roundtablecfg.ParticipantFailure(nil), analysis.Failures...), CostUSD: cost}
 }

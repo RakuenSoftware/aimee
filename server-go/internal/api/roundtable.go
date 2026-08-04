@@ -5,7 +5,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/JBailes/aimee/server-go/internal/roundtable"
+	roundtablecfg "github.com/JBailes/aimee/server-go/modules/roundtable/panel"
 )
 
 func (s *Server) roundtableReview(w http.ResponseWriter, r *http.Request) {
@@ -13,7 +13,7 @@ func (s *Server) roundtableReview(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, errors.New("Go roundtable engine is unavailable"))
 		return
 	}
-	var request roundtable.ReviewRequest
+	var request roundtablecfg.ReviewRequest
 	// A 16 MiB text artifact can expand substantially when JSON-escaped. Bound
 	// the wire representation without truncating it; Review applies the smaller
 	// semantic artifact limit after decoding.
@@ -27,9 +27,9 @@ func (s *Server) roundtableReview(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("request must contain one JSON value"))
 		return
 	}
-	artifact, err := roundtable.MaterializeArtifact(r.Context(), request.Artifact, s.artifactHTTPClient)
+	artifact, err := roundtablecfg.MaterializeArtifact(r.Context(), request.Artifact, s.artifactHTTPClient)
 	if err != nil {
-		var validation roundtable.ValidationError
+		var validation roundtablecfg.ValidationError
 		if errors.As(err, &validation) {
 			writeError(w, http.StatusBadRequest, err)
 			return
@@ -40,7 +40,7 @@ func (s *Server) roundtableReview(w http.ResponseWriter, r *http.Request) {
 	request.Artifact = artifact
 	result, err := s.roundtable.Review(r.Context(), request)
 	if err != nil {
-		var validation roundtable.ValidationError
+		var validation roundtablecfg.ValidationError
 		if errors.As(err, &validation) {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error(), "roundtable": result})
 			return

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/internal/roundtable"
+	roundtablecfg "github.com/JBailes/aimee/server-go/modules/roundtable/panel"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -17,18 +17,18 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
 
 type fakeRoundtableReviewer struct {
-	request roundtable.ReviewRequest
+	request roundtablecfg.ReviewRequest
 	err     error
 }
 
-func (f *fakeRoundtableReviewer) Review(_ context.Context, request roundtable.ReviewRequest) (roundtable.RunResult, error) {
+func (f *fakeRoundtableReviewer) Review(_ context.Context, request roundtablecfg.ReviewRequest) (roundtablecfg.RunResult, error) {
 	f.request = request
-	return roundtable.RunResult{Artifact: "approved", Approved: true, ParticipantsTotal: 3, ParticipantsUsed: 3}, f.err
+	return roundtablecfg.RunResult{Artifact: "approved", Approved: true, ParticipantsTotal: 3, ParticipantsUsed: 3}, f.err
 }
 
 func TestRoundtableReviewEndpointRejectsValidationErrors(t *testing.T) {
 	server, _, _ := newTestServer(t)
-	server.SetRoundtableReviewer(&fakeRoundtableReviewer{err: roundtable.ValidationError{Message: "invalid artifact"}})
+	server.SetRoundtableReviewer(&fakeRoundtableReviewer{err: roundtablecfg.ValidationError{Message: "invalid artifact"}})
 	req := httptest.NewRequest(http.MethodPost, "/v1/roundtable/review", strings.NewReader(`{"artifact":"invalid"}`))
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
@@ -77,7 +77,7 @@ func TestRoundtableReviewEndpointReportsArtifactDeliveryFailures(t *testing.T) {
 			return nil, errors.New("network unavailable")
 		}},
 		{name: "oversized", wantStatus: http.StatusBadRequest, transport: func(*http.Request) (*http.Response, error) {
-			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(io.LimitReader(zeroReader{}, roundtable.MaxArtifactBytes+1)), Header: make(http.Header)}, nil
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(io.LimitReader(zeroReader{}, roundtablecfg.MaxArtifactBytes+1)), Header: make(http.Header)}, nil
 		}},
 	}
 	for _, tc := range tests {

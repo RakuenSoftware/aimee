@@ -1,4 +1,4 @@
-package roundtable
+package panel
 
 import (
 	"encoding/json"

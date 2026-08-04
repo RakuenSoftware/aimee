@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	roundtablecfg "github.com/JBailes/aimee/server-go/internal/roundtable"
+	roundtablecfg "github.com/JBailes/aimee/server-go/modules/roundtable/panel"
 )
 
 func TestRoundtableReviewRejectsOversizedArtifact(t *testing.T) {

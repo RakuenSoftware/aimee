@@ -1,4 +1,4 @@
-package roundtable
+package panel
 
 import (
 	"encoding/json"
@@ -11,9 +11,14 @@ import (
 
 const DefaultDeadlineMS = 600000
 
+// Seat is one convened reviewer. Persona is its review lens; Selector is an
+// operator's positive pin, empty meaning ordinary eligibility routing.
+// Participant and Ordinal are filled in when the panel actually convenes.
 type Seat struct {
-	Persona  string
-	Selector string
+	Persona     string
+	Selector    string
+	Participant string
+	Ordinal     int
 }
 
 type Panel struct {

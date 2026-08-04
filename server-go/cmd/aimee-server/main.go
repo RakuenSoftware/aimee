@@ -19,8 +19,8 @@ import (
 	appconfig "github.com/JBailes/aimee/server-go/internal/config"
 	"github.com/JBailes/aimee/server-go/internal/db1"
 	"github.com/JBailes/aimee/server-go/internal/engine"
-	"github.com/JBailes/aimee/server-go/internal/roundtable"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	roundtablecfg "github.com/JBailes/aimee/server-go/modules/roundtable/panel"
 )
 
 func main() {
@@ -132,7 +132,7 @@ func main() {
 		// No configured-default source: a roundtable review names its roundtable
 		// in the workflow, which validation requires. roundtable.default no longer
 		// selects a panel for the Go control plane.
-		roundtables, roundtableErr := roundtable.NewStore(filepath.Join(*home, "roundtables"))
+		roundtables, roundtableErr := roundtablecfg.NewStore(filepath.Join(*home, "roundtables"))
 		if roundtableErr != nil {
 			log.Fatal(roundtableErr)
 		}

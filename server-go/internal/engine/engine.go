@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
-	roundtablecfg "github.com/JBailes/aimee/server-go/internal/roundtable"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	roundtablecfg "github.com/JBailes/aimee/server-go/modules/roundtable/panel"
 )
 
 type StepStatus string

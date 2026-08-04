@@ -7,17 +7,17 @@ import (
 	"testing"
 
 	"github.com/JBailes/aimee/server-go/bus"
-	roundtablecfg "github.com/JBailes/aimee/server-go/internal/roundtable"
+	"github.com/JBailes/aimee/server-go/modules/roundtable/panel"
 )
 
 type stubReviewer struct {
-	got    roundtablecfg.ReviewRequest
-	result roundtablecfg.RunResult
+	got    panel.ReviewRequest
+	result panel.RunResult
 	err    error
 	calls  int
 }
 
-func (s *stubReviewer) Review(_ context.Context, request roundtablecfg.ReviewRequest) (roundtablecfg.RunResult, error) {
+func (s *stubReviewer) Review(_ context.Context, request panel.ReviewRequest) (panel.RunResult, error) {
 	s.calls++
 	s.got = request
 	return s.result, s.err
@@ -26,9 +26,9 @@ func (s *stubReviewer) Review(_ context.Context, request roundtablecfg.ReviewReq
 // The body on the wire is the SAME JSON the HTTP route carried, so moving the
 // transport must not change the contract a caller sees.
 func TestReviewHandlerRoundTripsTheJSONContract(t *testing.T) {
-	stub := &stubReviewer{result: roundtablecfg.RunResult{RunID: "run-1", Approved: true, Artifact: "reviewed"}}
+	stub := &stubReviewer{result: panel.RunResult{RunID: "run-1", Approved: true, Artifact: "reviewed"}}
 	handler := NewReviewHandler(stub)
-	request, err := json.Marshal(roundtablecfg.ReviewRequest{
+	request, err := json.Marshal(panel.ReviewRequest{
 		Artifact: "diff", OriginalRequest: "two bugs", ArtifactStage: "frozen_diff", RunID: "run-1",
 	})
 	if err != nil {
@@ -41,7 +41,7 @@ func TestReviewHandlerRoundTripsTheJSONContract(t *testing.T) {
 	if stub.calls != 1 || stub.got.OriginalRequest != "two bugs" || stub.got.ArtifactStage != "frozen_diff" {
 		t.Fatalf("reviewer saw %+v after %d calls", stub.got, stub.calls)
 	}
-	var decoded roundtablecfg.RunResult
+	var decoded panel.RunResult
 	if err := json.Unmarshal(body, &decoded); err != nil {
 		t.Fatal(err)
 	}

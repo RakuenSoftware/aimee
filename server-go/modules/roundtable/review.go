@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/JBailes/aimee/server-go/bus"
-	roundtablecfg "github.com/JBailes/aimee/server-go/internal/roundtable"
+	"github.com/JBailes/aimee/server-go/modules/roundtable/panel"
 )
 
 // The review stage carried over the event bus.
@@ -35,7 +35,7 @@ const (
 // Reviewer is the engine capability this stage needs. Narrow on purpose: the
 // stage depends on the one method, not on the runner.
 type Reviewer interface {
-	Review(context.Context, roundtablecfg.ReviewRequest) (roundtablecfg.RunResult, error)
+	Review(context.Context, panel.ReviewRequest) (panel.RunResult, error)
 }
 
 // NewReviewHandler adapts a Reviewer to the module contract.
@@ -52,7 +52,7 @@ func NewReviewHandler(reviewer Reviewer) bus.ModuleHandler {
 		if invocation.StageID != StageReview {
 			return nil, bus.ModuleStatusInvalidRequest
 		}
-		var decoded roundtablecfg.ReviewRequest
+		var decoded panel.ReviewRequest
 		if err := json.Unmarshal(request, &decoded); err != nil {
 			return nil, bus.ModuleStatusInvalidRequest
 		}

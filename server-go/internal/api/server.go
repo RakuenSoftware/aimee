@@ -14,8 +14,8 @@ import (
 
 	appconfig "github.com/JBailes/aimee/server-go/internal/config"
 	"github.com/JBailes/aimee/server-go/internal/db1"
-	"github.com/JBailes/aimee/server-go/internal/roundtable"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	roundtablecfg "github.com/JBailes/aimee/server-go/modules/roundtable/panel"
 )
 
 type Server struct {
@@ -29,7 +29,7 @@ type Server struct {
 	cancel          func(string)
 	cleanupWorktree func(context.Context, db1.WorkItem) error
 	roundtable      interface {
-		Review(context.Context, roundtable.ReviewRequest) (roundtable.RunResult, error)
+		Review(context.Context, roundtablecfg.ReviewRequest) (roundtablecfg.RunResult, error)
 	}
 	artifactHTTPClient *http.Client
 	triggerMu          sync.Mutex
@@ -87,7 +87,7 @@ func (s *Server) SetWorktreeCleanup(cleanup func(context.Context, db1.WorkItem) 
 }
 func (s *Server) SetConfigStore(store *appconfig.Store) { s.config = store }
 func (s *Server) SetRoundtableReviewer(reviewer interface {
-	Review(context.Context, roundtable.ReviewRequest) (roundtable.RunResult, error)
+	Review(context.Context, roundtablecfg.ReviewRequest) (roundtablecfg.RunResult, error)
 }) {
 	s.roundtable = reviewer
 }

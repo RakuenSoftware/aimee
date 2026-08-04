@@ -30,10 +30,26 @@
     "src/modules/roundtable/module_adapter.c"
   ],
   "go_sources": [
-    "server-go/modules/roundtable/roundtable.go"
+    "server-go/modules/roundtable/roundtable.go",
+    "server-go/modules/roundtable/panel/analysis.go",
+    "server-go/modules/roundtable/panel/artifact.go",
+    "server-go/modules/roundtable/panel/chairman.go",
+    "server-go/modules/roundtable/panel/contract.go",
+    "server-go/modules/roundtable/panel/convene.go",
+    "server-go/modules/roundtable/panel/delegate.go",
+    "server-go/modules/roundtable/panel/discussion.go",
+    "server-go/modules/roundtable/panel/response.go",
+    "server-go/modules/roundtable/panel/result.go",
+    "server-go/modules/roundtable/panel/store.go"
   ],
   "go_tests": [
-    "server-go/modules/roundtable/roundtable_test.go"
+    "server-go/modules/roundtable/roundtable_test.go",
+    "server-go/modules/roundtable/panel/analysis_test.go",
+    "server-go/modules/roundtable/panel/artifact_test.go",
+    "server-go/modules/roundtable/panel/chairman_test.go",
+    "server-go/modules/roundtable/panel/discussion_test.go",
+    "server-go/modules/roundtable/panel/response_test.go",
+    "server-go/modules/roundtable/panel/store_test.go"
   ],
   "public_headers": [
     "src/modules/roundtable/include/aimee/roundtable/module_api.h"
