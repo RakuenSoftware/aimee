@@ -426,7 +426,13 @@ static int mcp_enter_session_worktree(char *out, size_t cap)
       fprintf(stderr, "aimee: prepared session worktree %s but could not enter it\n", out);
       return 0;
    }
-   fprintf(stderr, "aimee: MCP session isolated in %s\n", out);
+   /* Path-free on purpose. An MCP host surfaces this server's stderr to the
+    * MODEL as log output, so whatever is printed here is prompt content. Printing
+    * the worktree path handed the agent a directory to cd into, and the caller's
+    * checkout then came back empty -- the harness, like any caller, only looks at
+    * the directory it handed over. Measured: with this line printing the path,
+    * three tasks produced 0 changed files at the root and 3-4 in the worktree. */
+   fprintf(stderr, "aimee: MCP session isolated in its own checkout\n");
    return 1;
 }
 
