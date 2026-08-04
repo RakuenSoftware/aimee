@@ -2,9 +2,9 @@ package api
 
 import (
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -19,10 +19,13 @@ func (s *Server) devSubmit(w http.ResponseWriter, r *http.Request) {
 		Workflow string `json:"workflow"`
 		Repo     string `json:"repo"`
 	}
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
+	decoder := jsonDecoder(r.Body)
 	if err := decoder.Decode(&request); err != nil {
 		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		writeError(w, http.StatusBadRequest, errors.New("request must contain one JSON value"))
 		return
 	}
 	if strings.TrimSpace(request.Proposal) == "" || request.Repo == "" {
@@ -44,7 +47,11 @@ func (s *Server) devSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	identity := ""
 	if idempotencyKey != "" {
-		identity = fmt.Sprintf("manual:%s:%s", wfe.Hash([]byte(idempotencyKey)), request.Workflow)
+		// Idempotency belongs to the authenticated submitter, not merely the repo.
+		// Otherwise two browser users choosing the same client key would cause the
+		// second request to return the first user's work-item ID and silently skip
+		// the second proposal.
+		identity = manualSubmissionIdentity(workflowPrincipal(r), idempotencyKey, request.Workflow)
 	}
 	if identity != "" {
 		if existing, findErr := s.db.WorkItemByProposal(r.Context(), repo, identity); findErr == nil {
@@ -94,7 +101,7 @@ func (s *Server) devSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.db.AdmitRoot(r.Context(), db1.CreateWorkItem{ID: id, Repo: repo,
 		ProposalPath: identity, WorkflowName: definition.Name, WorkflowVersion: definition.Version,
-		StartStage: start, Mode: "autonomous", Submitter: r.Header.Get("X-Aimee-Webuser")}, cap); err != nil {
+		StartStage: start, Mode: "autonomous", Submitter: workflowPrincipal(r)}, cap); err != nil {
 		_ = s.artifacts.DeleteWorkItem(id)
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 			if existing, findErr := s.db.WorkItemByProposal(r.Context(), repo, identity); findErr == nil {
@@ -109,4 +116,9 @@ func (s *Server) devSubmit(w http.ResponseWriter, r *http.Request) {
 		s.notify()
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "work_item_id": id})
+}
+
+func manualSubmissionIdentity(submitter, idempotencyKey, workflow string) string {
+	scope := submitter + "\x00" + idempotencyKey
+	return fmt.Sprintf("manual:%s:%s", wfe.Hash([]byte(scope)), workflow)
 }

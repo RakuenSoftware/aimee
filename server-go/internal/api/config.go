@@ -24,7 +24,7 @@ func (s *Server) configGet(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) configSet(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("X-Aimee-Webuser") != "admin" {
+	if !workflowOperator(r) {
 		writeError(w, http.StatusForbidden, errors.New("administrator access required"))
 		return
 	}
@@ -68,7 +68,7 @@ func (s *Server) configSet(w http.ResponseWriter, r *http.Request) {
 func (s *Server) workflowTriggers(w http.ResponseWriter, r *http.Request) {
 	if s.config == nil {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"editable": false, "max_concurrent": 2,
+			"operator": workflowOperator(r), "editable": false, "max_concurrent": 2,
 			"max_rules": appconfig.MaxTriggerRules, "triggers": []any{},
 		})
 		return
@@ -95,7 +95,8 @@ func (s *Server) workflowTriggers(w http.ResponseWriter, r *http.Request) {
 		triggers = append(triggers, item)
 	}
 	response := map[string]any{
-		"editable":       r.Header.Get("X-Aimee-Webuser") == "admin",
+		"operator":       workflowOperator(r),
+		"editable":       workflowOperator(r),
 		"max_concurrent": s.config.Int("trigger.max_concurrent", 2),
 		"max_rules":      appconfig.MaxTriggerRules,
 		"version":        version,

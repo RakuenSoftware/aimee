@@ -86,6 +86,9 @@ func (s *Store) TriggerRules() ([]TriggerRule, error) {
 			if rules[i].Pipeline.Template == "" || rules[i].Pipeline.Workspace == "" {
 				return nil, fmt.Errorf("trigger_rules[%d] needs pipeline.template and pipeline.workspace", i)
 			}
+			if !validTriggerWorkspace(rules[i].Pipeline.Workspace) {
+				return nil, fmt.Errorf("trigger_rules[%d].pipeline.workspace must be an absolute server path", i)
+			}
 			if rules[i].Pipeline.MaxSpendUSD < 0 || math.IsNaN(rules[i].Pipeline.MaxSpendUSD) || math.IsInf(rules[i].Pipeline.MaxSpendUSD, 0) {
 				return nil, fmt.Errorf("trigger_rules[%d].pipeline.max_spend_usd must be finite and non-negative", i)
 			}
@@ -375,6 +378,9 @@ func validateKeyValue(key string, value any) error {
 			if rule.Pipeline.Template == "" || rule.Pipeline.Workspace == "" {
 				return fmt.Errorf("trigger_rules[%d] needs pipeline.template and pipeline.workspace", i)
 			}
+			if !validTriggerWorkspace(rule.Pipeline.Workspace) {
+				return fmt.Errorf("trigger_rules[%d].pipeline.workspace must be an absolute server path", i)
+			}
 			if rule.Pipeline.MaxSpendUSD < 0 || math.IsNaN(rule.Pipeline.MaxSpendUSD) || math.IsInf(rule.Pipeline.MaxSpendUSD, 0) {
 				return fmt.Errorf("trigger_rules[%d].pipeline.max_spend_usd must be finite and non-negative", i)
 			}
@@ -409,6 +415,11 @@ func confinedTriggerDirectory(directory string) bool {
 	}
 	clean := path.Clean(directory)
 	return clean != "." && !path.IsAbs(clean) && clean != ".." && !strings.HasPrefix(clean, "../")
+}
+
+func validTriggerWorkspace(workspace string) bool {
+	return workspace == strings.TrimSpace(workspace) && filepath.IsAbs(workspace) &&
+		strings.IndexFunc(workspace, func(r rune) bool { return r < 0x20 || r == 0x7f }) < 0
 }
 
 func number(value any) (int64, bool) {

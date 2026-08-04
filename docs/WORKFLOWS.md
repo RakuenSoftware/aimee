@@ -7,6 +7,12 @@ Use **Edit Workflows** to define the graph. Use **Workflows** to submit a propos
 run. Definitions are instance-wide files under `$AIMEE_HOME/workflows`. The project picker changes
 browser context, not the definition namespace.
 
+All signed-in users can inspect definitions and validate an in-browser draft. Because definitions
+and custom blocks affect every future run on the instance, only the appliance administrator can
+persist, delete, or edit them globally. The editor marks persistence and custom-block mutation
+controls unavailable for other users, who may still inspect or validate an unsaved local draft;
+both the web proxy and workflow service enforce the global-write boundary.
+
 ![The Edit Workflows page with a four-node review graph, the block palette, and colored transition edges](images/workflow-editor-graph.png)
 
 ## Choose a shipped workflow
@@ -271,7 +277,8 @@ Other source names can be displayed by the UI but are reported as unsupported by
 You can configure a watched directory in either place:
 
 - select **Workflows → Triggers → + New trigger** as the appliance administrator, then choose the
-  repository, saved workflow, watched directory, optional branch/ref, mode, and spend cap;
+  repository or an absolute server-visible checkout path, saved workflow, watched directory,
+  optional branch/ref, mode, and spend cap;
 - add a rule under `trigger_rules` in `aimee.yaml` when repairing an invalid registry or managing it
   as configuration;
 - make `trigger.watch-dir` the workflow's start node and set its `params.workspace`.
@@ -287,6 +294,10 @@ A graph-native trigger without `params.workspace` is saved but disarmed. `params
 `params.max_spend_usd` sets the admitted run's spend ceiling. The scanner reads committed, visible
 Markdown files from the selected git ref, deduplicates the proposal bytes with workflow and mode,
 and retries admission on a later scan when the concurrency cap is full.
+
+The definition validator checks graph-native trigger parameter types, directory confinement, Git
+ref safety, run mode, and spend cap when the workflow is authored. Invalid trigger nodes therefore
+fail **Validate** or **Save** instead of becoming a repeating scanner error.
 
 Setting `trigger.max_concurrent` to `0` pauses new trigger and browser-submit admission. It does not
 remove the cap.

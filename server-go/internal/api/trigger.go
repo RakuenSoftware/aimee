@@ -5,10 +5,11 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"os/exec"
 	"path"
@@ -145,6 +146,10 @@ func (s *Server) scanTrigger(ctx context.Context, request triggerFireRequest) er
 func confinedProposalDirectory(directory string) (string, error) {
 	if directory == "" {
 		directory = "docs/proposals/pending"
+	}
+	if directory != strings.TrimSpace(directory) || strings.Contains(directory, "\\") ||
+		strings.IndexFunc(directory, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+		return "", errors.New("proposal directory must use forward slashes with no surrounding whitespace or control characters")
 	}
 	clean := path.Clean(directory)
 	if clean == "." || path.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, "../") {
@@ -289,8 +294,13 @@ type triggerFireRequest struct {
 
 func (s *Server) triggerFire(w http.ResponseWriter, r *http.Request) {
 	var request triggerFireRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+	decoder := jsonDecoder(r.Body)
+	if err := decoder.Decode(&request); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("decode trigger: %w", err))
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		writeError(w, http.StatusBadRequest, errors.New("request must contain one JSON value"))
 		return
 	}
 	if request.Source != "proposals" && request.Source != "watch-dir" {
@@ -301,6 +311,11 @@ func (s *Server) triggerFire(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("workspace and proposal are required"))
 		return
 	}
+	if request.Workspace != strings.TrimSpace(request.Workspace) || !filepath.IsAbs(request.Workspace) ||
+		strings.IndexFunc(request.Workspace, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+		writeError(w, http.StatusBadRequest, errors.New("workspace must be an absolute server path with no surrounding whitespace or control characters"))
+		return
+	}
 	if request.Ref == "" {
 		request.Ref = "HEAD"
 	}
@@ -309,6 +324,23 @@ func (s *Server) triggerFire(w http.ResponseWriter, r *http.Request) {
 	}
 	if request.Mode == "" {
 		request.Mode = "autonomous"
+	}
+	if request.Mode != "autonomous" && request.Mode != "interactive" {
+		writeError(w, http.StatusBadRequest, errors.New("mode must be autonomous or interactive"))
+		return
+	}
+	if _, err := confinedProposalDirectory(request.Event); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if request.Ref != strings.TrimSpace(request.Ref) || strings.HasPrefix(request.Ref, "-") ||
+		strings.IndexFunc(request.Ref, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+		writeError(w, http.StatusBadRequest, errors.New("ref must not contain surrounding whitespace, control characters, or start with '-'"))
+		return
+	}
+	if request.MaxSpend < 0 || math.IsNaN(request.MaxSpend) || math.IsInf(request.MaxSpend, 0) {
+		writeError(w, http.StatusBadRequest, errors.New("max_spend_usd must be finite and non-negative"))
+		return
 	}
 	if s.workflowDir == "" {
 		writeError(w, http.StatusServiceUnavailable, errors.New("workflow directory is not configured"))
