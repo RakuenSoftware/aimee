@@ -637,6 +637,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-curator-promote \
                $(TESTPREFIX)/unit-test-db1-write-retry \
                $(TESTPREFIX)/unit-test-db1-agent-job-heartbeat \
+               $(TESTPREFIX)/unit-test-db1-delegate-reservation \
                $(TESTPREFIX)/unit-test-server-delegate-monitor \
                $(TESTPREFIX)/unit-test-db1-delegation-recursive-cancel \
                $(TESTPREFIX)/unit-test-tool-args-coerce \
@@ -4619,6 +4620,12 @@ $(TESTPREFIX)/unit-test-db1-agent-job-heartbeat: \
                                        $(OBJDIR)/tests/test_db1_agent_job_heartbeat.o \
                                        $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
                                        $(OBJDIR)/db1/agent_jobs.o $(OBJDIR)/db1/agent_log.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-db1-delegate-reservation: \
+                                       $(OBJDIR)/tests/test_db1_delegate_reservation.o \
+                                       $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
+                                       $(OBJDIR)/db1/delegate_reservation.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-server-delegate-monitor: \

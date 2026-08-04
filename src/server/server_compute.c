@@ -29,6 +29,8 @@
 #include <aimee/delegates/delegate_economics.h>
 #include <aimee/delegates/delegate_run_phases.h>
 #include "db1/delegate_learning.h"
+#include "db1/delegate_reservation.h"
+#include "request_context.h" /* execution key carried as the idempotency key */
 #include "kb_client.h"
 #include "kb_bandit.h"
 #include "db1/interaction_events.h"
@@ -2086,8 +2088,39 @@ int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * synchronous delegate path — the connection is closed at dispatch and the
     * caller polls delegate.status. The legacy `background` request field is
     * accepted-and-ignored for one release (older clients may still send it). */
+   /* A caller that supplies an execution key is asking to replay its own step,
+    * not to launch a second delegate for it. Resolve the reservation, launch,
+    * and record it here, on the side that owns agent_jobs: when the ledger lived
+    * across the network from the launch, a crash between the two left a
+    * paid-for job that nothing could replay. */
+   const char *execution_key = request_context_idempotency_key();
+   char participant[DB1_AJ_PARTICIPANT_LEN] = "";
+   int job_id = 0;
+   if (execution_key[0] &&
+       db1_delegate_reservation_get(execution_key, &job_id, participant, sizeof(participant)) == 0)
+   {
+      cJSON *replayed = jo_ok();
+      cJSON_AddNumberToObject(replayed, "job_id", job_id);
+      if (participant[0])
+         cJSON_AddStringToObject(replayed, "participant", participant);
+      cJSON_AddStringToObject(replayed, "job_status", "pending");
+      cJSON_AddBoolToObject(replayed, "replayed", 1);
+      return server_send_ok(conn, replayed);
+   }
+
+   /* A replay-only caller has already reconciled this step's spend. With no
+    * reservation to replay there is nothing to serve, and launching would be
+    * unreconciled duplicate spend, so report the absence instead. */
+   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "replay_only")))
+   {
+      cJSON *absent = jo_ok();
+      cJSON_AddNumberToObject(absent, "job_id", 0);
+      cJSON_AddStringToObject(absent, "error", "no delegate reservation to replay");
+      return server_send_ok(conn, absent);
+   }
+
    char err[80] = "";
-   int job_id = server_delegate_launch_async(ctx, conn, req, err, sizeof(err));
+   job_id = server_delegate_launch_async(ctx, conn, req, err, sizeof(err));
    if (job_id <= 0)
       return server_send_error(conn, err[0] ? err : "failed to launch delegate", NULL);
 
@@ -2097,8 +2130,20 @@ int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (db1_agent_job_get(job_id, &job) == 0)
    {
       if (job.participant_token[0])
+      {
+         snprintf(participant, sizeof(participant), "%s", job.participant_token);
          cJSON_AddStringToObject(resp, "participant", job.participant_token);
+      }
       db1_agent_job_free(&job);
+   }
+   /* Reserve only after the launch produced a usable job id. A reservation
+    * written first would make every retry replay a launch that never happened. */
+   if (execution_key[0])
+   {
+      cJSON *witem = cJSON_GetObjectItemCaseSensitive(req, "work_item_id");
+      db1_delegate_reservation_save(execution_key,
+                                    cJSON_IsString(witem) ? witem->valuestring : "", job_id,
+                                    participant);
    }
    cJSON_AddStringToObject(resp, "job_status", "pending");
    return server_send_ok(conn, resp);

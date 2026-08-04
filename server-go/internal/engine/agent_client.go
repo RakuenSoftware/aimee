@@ -315,49 +315,54 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 	var launched struct {
 		JobID       int    `json:"job_id"`
 		Participant string `json:"participant"`
+		Replayed    bool   `json:"replayed"`
 		Error       string `json:"error"`
 	}
-	if c.store != nil && request.WorkItemID != "" {
-		if existing, participant, err := c.store.DelegateJob(ctx, key); err == nil {
-			launched.JobID = existing
-			launched.Participant = participant
+	// The reservation lives with agent_jobs on the resource plane, so the lookup,
+	// the launch and the write happen in one call on the side that owns both.
+	// Splitting them across the network left a paid-for job unreplayable whenever
+	// this process died between launching and recording.
+	//
+	// WorkItemID scopes the reservation to a workflow item; without one there is
+	// nothing to replay into, so the key is withheld and every call launches.
+	if request.WorkItemID != "" {
+		payload["work_item_id"] = request.WorkItemID
+		// A replay-only attempt must never cause a launch: its spend was already
+		// reconciled, so a second job would be unreconciled duplicate spend.
+		if request.ReplayOnly {
+			payload["replay_only"] = true
 		}
+	} else {
+		key = ""
 	}
+	if err := c.doJSONKey(ctx, http.MethodPost, "/v1/delegate/run", payload, &launched, key); err != nil {
+		// A non-2xx response is an authoritative admission rejection. A
+		// transport/decode failure after sending the idempotent request is
+		// ambiguous and must retain the reservation for durable replay.
+		var rejected *agentHTTPStatusError
+		return DelegateResult{}, delegateExecutionError(err, !errors.As(err, &rejected), false, 0)
+	}
+	// A replay-only attempt that found no reservation is reported as an absent
+	// job rather than a launch, because the plane was forbidden from launching.
 	if launched.JobID <= 0 && request.ReplayOnly {
 		return DelegateResult{}, &DelegateExecutionError{Err: ErrDelegateReplayUnavailable, Dispatched: true, CostKnown: false}
 	}
-	if launched.JobID == 0 {
-		if err := c.doJSONKey(ctx, http.MethodPost, "/v1/delegate/run", payload, &launched, key); err != nil {
-			// A non-2xx response is an authoritative admission rejection. A
-			// transport/decode failure after sending the idempotent request is
-			// ambiguous and must retain the reservation for durable replay.
-			var rejected *agentHTTPStatusError
-			return DelegateResult{}, delegateExecutionError(err, !errors.As(err, &rejected), false, 0)
-		}
-		// Validate before SaveDelegateJob: a phantom mapping would make every
-		// retry replay an invalid launch instead of recovering when capacity returns.
-		if launched.JobID <= 0 {
-			detail := strings.TrimSpace(safeDiagnostic(launched.Error))
-			if detail == "" {
-				detail = "empty launch response"
-			} else {
-				var printable strings.Builder
-				for _, r := range detail {
-					if r < ' ' || r == 0x7f {
-						_, _ = fmt.Fprintf(&printable, `\x%02x`, r)
-						continue
-					}
-					printable.WriteRune(r)
+	if launched.JobID <= 0 {
+		detail := strings.TrimSpace(safeDiagnostic(launched.Error))
+		if detail == "" {
+			detail = "empty launch response"
+		} else {
+			var printable strings.Builder
+			for _, r := range detail {
+				if r < ' ' || r == 0x7f {
+					_, _ = fmt.Fprintf(&printable, `\x%02x`, r)
+					continue
 				}
-				detail = printable.String()
+				printable.WriteRune(r)
 			}
-			return DelegateResult{}, fmt.Errorf("%w: %s", ErrDelegateNoJobID, detail)
+			detail = printable.String()
 		}
-		if c.store != nil && request.WorkItemID != "" {
-			if err := c.store.SaveWorkflowDelegateJob(ctx, key, request.WorkItemID, launched.JobID, launched.Participant); err != nil {
-				return DelegateResult{}, delegateExecutionError(err, true, false, 0)
-			}
-		}
+		return DelegateResult{}, fmt.Errorf("%w: %s", ErrDelegateNoJobID, detail)
 	}
 	ticker := time.NewTicker(c.pollEvery)
 	defer ticker.Stop()
@@ -421,15 +426,11 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 			return DelegateResult{Response: status.Result, Agent: status.Agent, Participant: launched.Participant, CostUSD: status.CostUSD, CostUnknown: !status.CostKnown}, nil
 		case "partial":
 			if strings.TrimSpace(status.Result) == "" {
-				if c.store != nil {
-					_ = c.store.ForgetDelegateJob(context.WithoutCancel(ctx), key)
-				}
+				c.releaseReservation(context.WithoutCancel(ctx), key, 0)
 				return DelegateResult{}, delegateExecutionError(fmt.Errorf("delegate job %d returned an empty partial result", launched.JobID), true, status.CostKnown, status.CostUSD)
 			}
 			if !request.acceptPartial {
-				if c.store != nil {
-					_ = c.store.ForgetDelegateJob(context.WithoutCancel(ctx), key)
-				}
+				c.releaseReservation(context.WithoutCancel(ctx), key, 0)
 				return DelegateResult{}, delegateExecutionError(fmt.Errorf("delegate job %d returned a partial result for a block that requires completion", launched.JobID), true, status.CostKnown, status.CostUSD)
 			}
 			// A delegate can leave a complete, independently verifiable artifact and
@@ -440,9 +441,7 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 			// The native branch-producing block validates its own output contract.
 			return DelegateResult{Response: status.Result, Agent: status.Agent, CostUSD: status.CostUSD, CostUnknown: !status.CostKnown, Partial: true}, nil
 		case "failed", "cancelled", "stopped", "invalid", "not_found":
-			if c.store != nil {
-				_ = c.store.ForgetDelegateJob(context.WithoutCancel(ctx), key)
-			}
+			c.releaseReservation(context.WithoutCancel(ctx), key, 0)
 			detail := firstNonempty(strings.TrimSpace(status.Error), strings.TrimSpace(status.Result))
 			if detail != "" {
 				return DelegateResult{}, delegateExecutionError(fmt.Errorf("%w: job %d %s: %s", ErrDelegateTerminal, launched.JobID, status.JobStatus, detail), true, status.CostKnown, status.CostUSD)
@@ -709,15 +708,31 @@ func (c *HTTPAgentClient) expireUnassigned(jobID int, key string, since time.Tim
 		return errors.Join(ErrDelegateUnassignedExpired,
 			errors.New("Go unassigned-job cancellation authority is not configured; durable mapping retained"))
 	}
-	if c.store != nil {
-		forgetCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		err := c.store.ForgetDelegateJob(forgetCtx, key)
-		cancel()
-		if err != nil {
-			return errors.Join(ErrDelegateUnassignedExpired, fmt.Errorf("forget expired delegate job %d: %w", jobID, err))
-		}
-	}
+	c.releaseReservation(context.Background(), key, 0)
 	return fmt.Errorf("%w: job %d (%s) remained unassigned for %s", ErrDelegateUnassignedExpired, jobID, key, time.Since(since).Round(time.Millisecond))
+}
+
+// releaseReservation drops the plane-side reservation for key so the next
+// attempt launches fresh. Pass jobID to make it a compare-delete; zero releases
+// unconditionally.
+//
+// Whether a result is replayable is the caller's judgement, not the plane's --
+// an acceptable partial for one block is a failure for another -- so the policy
+// stays here while the storage stays with agent_jobs.
+//
+// Failing to release is not fatal: the reservation still points at a terminal
+// job, and a replay observes that terminal row rather than reusing a result.
+func (c *HTTPAgentClient) releaseReservation(ctx context.Context, key string, jobID int) {
+	if key == "" {
+		return
+	}
+	payload := map[string]any{"execution_key": key}
+	if jobID > 0 {
+		payload["job_id"] = jobID
+	}
+	releaseCtx, cancel := context.WithTimeout(ctx, delegateForgetTimeout)
+	defer cancel()
+	_ = c.doJSON(releaseCtx, http.MethodPost, "/v1/delegate/reservation/forget", payload, nil)
 }
 
 func delegateJobKey(request DelegateRequest) string {
@@ -741,16 +756,12 @@ func (c *HTTPAgentClient) cancelRemoteAndForget(jobID int, key string, parent co
 	if response.Cancelled == nil || !*response.Cancelled {
 		return fmt.Errorf("%w: job %d", ErrDelegateCancelUnacknowledged, jobID)
 	}
-	if c.store == nil || key == "" {
-		return nil
-	}
 	// /v1/jobs/cancel atomically marks the delegate job cancelled before it
-	// returns cancelled=true. Give local cleanup an independent bounded window;
-	// if it fails, replay remains safe because status observes that terminal row.
-	forgetCtx, forgetCancel := context.WithTimeout(context.WithoutCancel(parent), delegateForgetTimeout)
-	defer forgetCancel()
-	_, err := c.store.ForgetDelegateJobIfMatches(forgetCtx, key, jobID)
-	return err
+	// returns cancelled=true. Release only the reservation that still names this
+	// job, so a retry which has already reserved a newer one survives. If the
+	// release fails, replay remains safe because status observes that terminal row.
+	c.releaseReservation(context.WithoutCancel(parent), key, jobID)
+	return nil
 }
 
 func (c *HTTPAgentClient) doJSON(ctx context.Context, method, path string, input, output any) error {

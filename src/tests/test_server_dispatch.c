@@ -1033,6 +1033,10 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
 {
    return stub_handler(conn, "delegate.aggregate");
 }
+int handle_delegate_reservation_forget(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "delegate.reservation.forget");
+}
 int handle_roundtable_review_proxy(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "roundtable.review");

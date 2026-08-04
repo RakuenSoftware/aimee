@@ -736,31 +736,6 @@ func TestCancelUnassignedDelegateJobRacesAssignment(t *testing.T) {
 	}
 }
 
-func TestForgetDelegateJobIfMatchesCannotEraseNewerRetry(t *testing.T) {
-	store := newTestStore(t)
-	const key = "same-logical-seat"
-	if err := store.SaveDelegateJob(t.Context(), key, 51, "participant-51"); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SaveDelegateJob(t.Context(), key, 52, "participant-52"); err != nil {
-		t.Fatal(err)
-	}
-	forgot, err := store.ForgetDelegateJobIfMatches(t.Context(), key, 51)
-	if err != nil || forgot {
-		t.Fatalf("stale cleanup forgot=%v err=%v", forgot, err)
-	}
-	if jobID, participant, err := store.DelegateJob(t.Context(), key); err != nil || jobID != 52 || participant != "participant-52" {
-		t.Fatalf("newer retry mapping job=%d participant=%q err=%v", jobID, participant, err)
-	}
-	forgot, err = store.ForgetDelegateJobIfMatches(t.Context(), key, 52)
-	if err != nil || !forgot {
-		t.Fatalf("matching cleanup forgot=%v err=%v", forgot, err)
-	}
-	if _, _, err := store.DelegateJob(t.Context(), key); err == nil {
-		t.Fatal("matching cleanup retained mapping")
-	}
-}
-
 func TestConcurrentStoreOpenDoesNotClearLiveBudgetLease(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "aimee.db")
 	first, err := Open(path)

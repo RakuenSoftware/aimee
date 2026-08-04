@@ -1581,6 +1581,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"dev.sweep", handle_dev_sweep},
     {"delegate.launch", handle_delegate_launch},
     {"delegate.status", handle_delegate_status},
+    {"delegate.reservation.forget", handle_delegate_reservation_forget},
     {"vault.unlock", handle_vault_unlock},
     {"vault.rekey", handle_vault_rekey},
     {"vault.set", handle_vault_set},

@@ -164,17 +164,6 @@ CREATE TABLE IF NOT EXISTS lifecycle_delegate_job (
 	return nil
 }
 
-func (s *Store) DelegateJob(ctx context.Context, key string) (int, string, error) {
-	var id int
-	var participant string
-	err := s.db.QueryRowContext(ctx, `SELECT job_id,participant_token FROM lifecycle_delegate_job WHERE execution_key=?`, key).Scan(&id, &participant)
-	return id, participant, err
-}
-
-func (s *Store) SaveDelegateJob(ctx context.Context, key string, id int, participant string) error {
-	return s.SaveWorkflowDelegateJob(ctx, key, "", id, participant)
-}
-
 func (s *Store) SaveWorkflowDelegateJob(ctx context.Context, key, workItemID string, id int, participant string) error {
 	if key == "" || id <= 0 {
 		return errors.New("delegate execution key and job id are required")
@@ -233,30 +222,6 @@ ORDER BY mapping.cancel_attempts,mapping.job_id LIMIT ?`, terminalCancellationBa
 		return nil, err
 	}
 	return mappings, nil
-}
-
-func (s *Store) ForgetDelegateJob(ctx context.Context, key string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM lifecycle_delegate_job WHERE execution_key=?`, key)
-	return err
-}
-
-// ForgetDelegateJobIfMatches physically compare-deletes a durable mapping by
-// execution key and job ID. It returns true only when exactly that row was
-// deleted; a later retry under the same logical key is preserved.
-func (s *Store) ForgetDelegateJobIfMatches(ctx context.Context, key string, jobID int) (bool, error) {
-	if err := ctx.Err(); err != nil {
-		return false, err
-	}
-	if key == "" || jobID <= 0 {
-		return false, errors.New("delegate execution key and job id are required")
-	}
-	result, err := s.db.ExecContext(ctx,
-		`DELETE FROM lifecycle_delegate_job WHERE execution_key=? AND job_id=?`, key, jobID)
-	if err != nil {
-		return false, err
-	}
-	changed, err := result.RowsAffected()
-	return changed == 1, err
 }
 
 // CancelUnassignedDelegateJob returns true only when this call atomically moves
