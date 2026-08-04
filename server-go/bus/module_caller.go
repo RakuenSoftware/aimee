@@ -50,8 +50,17 @@ func (e *ModuleCallStatusError) Unwrap() error { return ErrModuleCallFailed }
 // there, one shared client meant a long stage blocked every other call in the
 // process, including the callback that stage was waiting on. Give each
 // concurrent caller its own ModuleCaller over its own Client.
+// callerBus is the narrow surface a caller needs, mirroring the serving side's
+// moduleBus so both halves are testable without a live host.
+type callerBus interface {
+	Poll() (Event, bool, error)
+	RequestFragment(kind uint32, correlation uint64, payload []byte, more bool) error
+	Cancel(kind uint32, correlation uint64) error
+	moduleInlineBudget() uint32
+}
+
 type ModuleCaller struct {
-	client        *Client
+	client        callerBus
 	correlation   uint64
 	pollInterval  time.Duration
 	responseLimit uint32
@@ -63,8 +72,12 @@ func NewModuleCaller(client *Client) (*ModuleCaller, error) {
 	if client == nil {
 		return nil, ErrModuleConfig
 	}
+	return newModuleCaller(client), nil
+}
+
+func newModuleCaller(client callerBus) *ModuleCaller {
 	return &ModuleCaller{client: client, pollInterval: 200 * time.Microsecond,
-		responseLimit: ModuleMessageMaxBody}, nil
+		responseLimit: ModuleMessageMaxBody}
 }
 
 // Call invokes one stage and returns its response body.
