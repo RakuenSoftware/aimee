@@ -16,10 +16,12 @@ MCP/ACP, and non-web APIs; UI convenience must not become a second execution aut
 
 The separately supervised module process serves one bounded Go stage at principal 23/event 9985. It
 maps a server-classified RPC fault kind to the HTTP status exposed by runtime-web, preserving unknown
-and unclassified faults as `502 Bad Gateway`. The physical `aimee-runtime-web` provider imports the
-exact same Go policy package, so browser behavior and the event-bus boundary cannot drift. Listener,
-TLS, authentication, sessions, route dispatch, proxy I/O, and assets remain in the physical provider;
-the C `module_adapter.c` exists only as a wire-parity fixture.
+and unclassified faults as `502 Bad Gateway`. The server obtains that decision through its event bus
+and includes the returned status in the existing error envelope. The physical `aimee-runtime-web`
+provider consumes the status without importing or reimplementing the classification policy; a missing
+or invalid status remains a generic `502 Bad Gateway`. Listener, TLS, authentication, sessions, route
+dispatch, proxy I/O, and assets remain in the physical provider; the C `module_adapter.c` exists only
+as a wire-parity fixture.
 
 ## Dependencies and consumers
 
@@ -82,8 +84,8 @@ and non-web APIs without a web process.
 ## Tests and failure behavior
 
 Current coverage spans `runtime-web` Go tests, frontend Dashboard/setup/tutorial tests, server
-HTTP/dashboard tests, trusted-web principal/vault tests, C/Go process parity, and container/build
-integrity. Future profile tests must prove
+HTTP/dashboard tests, trusted-web principal/vault tests, server-envelope process parity and failure
+handling, C/Go process parity, and container/build integrity. Future profile tests must prove
 default-on behavior, independent disable/omission, dashboard co-lifecycle, no disabled residue, headless
 journeys, truthful settings, and object/symbol absence. Authentication, transport, asset, or page-provider
 failure must be contained and typed; it cannot start a partial authority or crash unrelated Runtime APIs.

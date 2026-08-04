@@ -8,6 +8,9 @@
  * this suite is about the decision, not about reaching the dependencies. */
 #include "server_http.h"
 #include "kb_client.h"
+#include <aimee/git/module_api.h>
+#include <aimee/runtime-web/module_api.h>
+#include <aimee/skills/module_api.h>
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -36,9 +39,18 @@ void kb_client_dependency_health(kb_client_dependency_health_t *out)
    snprintf(out->state, sizeof(out->state), "closed");
 }
 
+static int g_runtime_web_checked;
+static int g_skills_trigger_checked;
+static int g_git_ref_checked;
+
 int obs_bus_module_available(uint32_t event_kind)
 {
-   (void)event_kind;
+   if (event_kind == AIMEE_RUNTIME_WEB_EVENT_CLASSIFY)
+      g_runtime_web_checked = 1;
+   if (event_kind == AIMEE_SKILLS_EVENT_TRIGGER)
+      g_skills_trigger_checked = 1;
+   if (event_kind == AIMEE_GIT_EVENT_REF_VALIDATE)
+      g_git_ref_checked = 1;
    return 1;
 }
 
@@ -47,6 +59,10 @@ int obs_bus_module_available(uint32_t event_kind)
 int main(void)
 {
    char resp[2048];
+   server_ready_sample_now();
+   assert(g_runtime_web_checked == 1);
+   assert(g_skills_trigger_checked == 1);
+   assert(g_git_ref_checked == 1);
    server_ready_diagnostics_t ok = {.retrieval_ok = 1,
                                     .modules_ok = 1,
                                     .failed_boundary = "",

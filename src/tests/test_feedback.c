@@ -8,9 +8,15 @@
 #include "db1.h"
 #include "db2.h"
 #include "db2_test_shim.h"
+#include "modules/learning/learning_signal_policy.h"
 #include "platform_test_util.h"
 
 static char g_learning_tmpdir[PATH_MAX];
+
+static int test_signal_classifier(const char *signal, uint32_t *sink_mask)
+{
+   return learning_signal_policy_sink_mask(signal, sink_mask);
+}
 
 static void learning_test_cleanup_tmpdir(void)
 {
@@ -49,6 +55,7 @@ static void test_db_close(void)
 int main(void)
 {
    printf("feedback: ");
+   learning_router_register_signal_classifier(test_signal_classifier);
 
    /* --- db2_feedback_parse_polarity --- */
    {

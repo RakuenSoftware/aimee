@@ -58,8 +58,10 @@ char *tool_list_notes(const char *tag, int limit);
 char *tool_search_notes(const char *query);
 char *dispatch_tool_call(const char *name, const char *arguments_json, int timeout_ms);
 
-/* Server registration seam for the separately supervised tool classifier.
- * classification values are the AIMEE_TOOL_CLASS_* constants. */
+/* Server registration seam for the separately supervised event-bus tool
+ * classifier. classification values are the AIMEE_TOOL_CLASS_* constants.
+ * There is no local classification fallback: an absent or failed provider
+ * leaves the tool unclassified. */
 typedef int (*agent_tool_classifier_fn)(const char *name, int *classification);
 void agent_tools_register_classifier(agent_tool_classifier_fn classifier);
 

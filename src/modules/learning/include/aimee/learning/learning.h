@@ -9,6 +9,8 @@
 #include <stdint.h>
 
 typedef int (*learning_signal_classifier_fn)(const char *signal_type, uint32_t *sink_mask);
+/* Production installs the supervised event-bus classifier during server startup.
+ * NULL clears it. Signal ingestion fails before persistence when it is absent or fails. */
 void learning_router_register_signal_classifier(learning_signal_classifier_fn classifier);
 
 #define LEARNING_MAX_PROPOSAL_IDS 8

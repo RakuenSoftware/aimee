@@ -10,7 +10,7 @@
     "response-composition",
     "routing"
   ],
-  "enabled_by_default": true,
+  "enabled_by_default": false,
   "ownership_complete": true,
   "runtime_toggle": {
     "supported": false
@@ -31,8 +31,6 @@
   ],
   "go_sources": [
     "server-go/modules/roundtable/roundtable.go",
-    "server-go/modules/delegates/plane/client.go",
-    "server-go/modules/delegates/plane/helpers.go",
     "server-go/modules/roundtable/panel/analysis.go",
     "server-go/modules/roundtable/panel/artifact.go",
     "server-go/modules/roundtable/panel/chairman.go",

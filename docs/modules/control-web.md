@@ -19,8 +19,10 @@ authorizes console-admin and fleet proxy method/path pairs, preserving exact met
 `{id}` wildcard semantics, path bounds, and the fleet trailing-slash rejection. The physical
 `control-web` provider imports that exact Go policy package, so live proxy behavior and the event-bus
 boundary cannot drift. HTTPS, authentication, sessions, CSRF, credential selection, proxy I/O, and
-assets remain in the physical provider. The C `module_adapter.c` is a wire-parity fixture; the KB keeps
-its separate console-admin C allowlist as defence in depth.
+assets remain in the physical provider. The C `module_adapter.c` is a wire-parity fixture. The KB
+authorizes console-admin requests only by calling the separately supervised control-web module through
+its event bus; an unavailable or invalid module response fails closed with HTTP 503, with no local
+authorization fallback.
 
 ## Dependencies and consumers
 
@@ -82,9 +84,9 @@ complete equivalent supported administration through headless surfaces.
 
 ## Tests and failure behavior
 
-Current coverage includes `control-web` auth, ACL, drift, session, TLS, proxy, rate-limit, console,
-malformed-wire, and C/Go event-bus parity tests; `test_kb_http_routes` covers dashboard and OIDC
-configuration APIs. Future profile tests must prove
+Current coverage includes `control-web` auth, ACL, session, TLS, proxy, rate-limit, console,
+malformed-wire, C/Go event-bus parity, the KB provider seam, and fail-closed missing-module behavior;
+`test_kb_http_routes` covers dashboard and OIDC configuration APIs. Future profile tests must prove
 default-on and independent disable/omission, dashboard co-lifecycle, no disabled residue, headless
 operation, truthful fields, and Make/CMake absence. Missing assets, invalid credentials, unreachable
 Control APIs, or half-configured OIDC must fail closed without starting a misleading partial console.

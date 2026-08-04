@@ -7,6 +7,14 @@
 
 #include "cJSON.h"
 #include "server.h"
+#include "server_error_kind.h"
+
+static server_error_http_status_provider_fn g_http_status_provider;
+
+void server_error_kind_register_http_status_provider(server_error_http_status_provider_fn provider)
+{
+   g_http_status_provider = provider;
+}
 
 /* Send a dispatch error, naming WHO was at fault.
  *
@@ -23,14 +31,15 @@
  * never succeed.
  *
  * `kind` is OPTIONAL and additive. server_send_error() passes NULL, so its ~479
- * call sites are untouched and everything not yet audited keeps today's exact
- * behaviour (the relay's 502). Handlers opt in as they are reviewed, which lets
- * the mapping tighten one handler at a time instead of in a single 479-site
- * change nobody could review honestly.
+ * call sites remain unclassified and the runtime-web module returns 502.
+ * Handlers opt in as they are reviewed, which lets the mapping tighten one
+ * handler at a time instead of in a single 479-site change nobody could review
+ * honestly. The module-produced HTTP status is additive too; CLI consumers may
+ * ignore it, while the physical web provider no longer evaluates `kind`.
  *
- * Use the SERVER_ERR_* constants from server.h. A kind the consumer does not
- * recognise is treated as unclassified, so adding one here can never make a
- * downstream mapping worse than it was. */
+ * Use the SERVER_ERR_* constants from server.h. If the event-bus provider is
+ * unavailable or returns invalid data, the envelope omits `http_status` and the
+ * web boundary treats it as a generic transport failure. */
 int server_send_error_kind(server_conn_t *conn, const char *kind, const char *message,
                            const char *request_id)
 {
@@ -39,6 +48,10 @@ int server_send_error_kind(server_conn_t *conn, const char *kind, const char *me
    cJSON_AddStringToObject(resp, "message", message);
    if (kind && kind[0])
       cJSON_AddStringToObject(resp, "kind", kind);
+   uint32_t http_status = 0;
+   if (g_http_status_provider && g_http_status_provider(kind, &http_status) == 0 &&
+       http_status >= 400u && http_status <= 599u)
+      cJSON_AddNumberToObject(resp, "http_status", (double)http_status);
    if (request_id)
       cJSON_AddStringToObject(resp, "request_id", request_id);
    return server_send_ok(conn, resp);

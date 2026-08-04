@@ -5,7 +5,11 @@
  * PAM identities that authorize and attribute a request; they never select a
  * tree, so they all resolve the same projects. */
 #include "modules/git/git_project.h"
+#include "modules/workspace/workspace_scope.h"
 #include "ws_registry.h"
+
+#include <aimee/core/event_bus/module_runtime.h>
+#include <aimee/workspace/module_api.h>
 
 #include <assert.h>
 #include <limits.h>
@@ -15,6 +19,29 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+extern aimee_module_status_t aimee_workspace_module_handler(const aimee_module_invocation_t *,
+                                                            const uint8_t *, uint32_t, uint8_t *,
+                                                            uint32_t, uint32_t *, void *);
+
+int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation)
+{
+   (void)invocation;
+   return 0;
+}
+
+static int validate_workspace_ref_via_module(const char *ref, size_t ref_len, int *allowed)
+{
+   uint8_t request[AIMEE_WORKSPACE_REQUEST_LEN], response[AIMEE_WORKSPACE_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_WORKSPACE_STAGE_ACCESS};
+   return aimee_workspace_request_encode(ref, ref_len, request, sizeof(request)) == 0 &&
+                  aimee_workspace_module_handler(&invocation, request, sizeof(request), response,
+                                                 sizeof(response), &response_len,
+                                                 NULL) == AIMEE_MODULE_STATUS_OK
+              ? aimee_workspace_response_decode(response, response_len, allowed)
+              : -1;
+}
 
 static int run(const char *fmt, ...)
 {
@@ -28,6 +55,7 @@ static int run(const char *fmt, ...)
 
 int main(void)
 {
+   ws_scope_register_ref_validator(validate_workspace_ref_via_module);
    char home[256];
    snprintf(home, sizeof(home), "/tmp/aimee-gitproj-%d", (int)getpid());
    assert(run("rm -rf %s && mkdir -p %s", home, home) == 0);

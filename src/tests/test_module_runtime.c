@@ -158,9 +158,21 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
    else if (strcmp(name, "workspace") == 0)
       *kind = AIMEE_WORKSPACE_EVENT_ACCESS, *principal_ref = 12;
    else if (strcmp(name, "git") == 0)
+   {
       *kind = AIMEE_GIT_EVENT_OPERATION, *principal_ref = 13;
+      served[0] = AIMEE_GIT_EVENT_OPERATION;
+      served[1] = AIMEE_GIT_EVENT_REF_VALIDATE;
+      *serve_count = 2;
+      return 0;
+   }
    else if (strcmp(name, "skills") == 0)
+   {
       *kind = AIMEE_SKILLS_EVENT_CONTEXT, *principal_ref = 14;
+      served[0] = AIMEE_SKILLS_EVENT_CONTEXT;
+      served[1] = AIMEE_SKILLS_EVENT_TRIGGER;
+      *serve_count = 2;
+      return 0;
+   }
    else if (strcmp(name, "response-composition") == 0)
       *kind = AIMEE_RESPONSE_EVENT_COMPOSE, *principal_ref = 15;
    else if (strcmp(name, "governance") == 0)
@@ -176,7 +188,13 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
    else if (strcmp(name, "control-web") == 0)
       *kind = AIMEE_CONTROL_WEB_EVENT_AUTHORIZE, *principal_ref = 24;
    else if (strcmp(name, "benchmarks") == 0)
+   {
       *kind = AIMEE_BENCHMARKS_EVENT_RUN, *principal_ref = 25;
+      served[0] = AIMEE_BENCHMARKS_EVENT_RUN;
+      served[1] = AIMEE_BENCHMARKS_EVENT_LATENCY;
+      *serve_count = 2;
+      return 0;
+   }
    else
       return -1;
    served[0] = *kind;
@@ -270,6 +288,14 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
                                       NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_git_response_decode(response, response_len, &classification) == 0);
       assert(classification.operation == AIMEE_GIT_OP_PUSH && classification.needs_credentials);
+
+      int allowed = 0;
+      assert(aimee_git_ref_request_encode("feature/topic-1", request, sizeof(request)) == 0);
+      assert(aimee_module_client_call(client, AIMEE_GIT_EVENT_REF_VALIDATE,
+                                      AIMEE_GIT_STAGE_REF_VALIDATE, 2016, 0, request,
+                                      AIMEE_GIT_REF_REQUEST_LEN, response, sizeof(response),
+                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(aimee_git_ref_response_decode(response, response_len, &allowed) == 0 && allowed);
    }
    else if (strcmp(name, "skills") == 0)
    {
@@ -280,6 +306,19 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
                                       sizeof(response), &response_len, NULL,
                                       NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_skills_response_decode(response, response_len, &fire) == 0 && fire);
+
+      const char *content = "---\nname: wait\ntriggers:\n  tool: [Bash]\n"
+                            "  arg_pattern: [\"sleep \"]\n---\nWait safely.\n";
+      size_t encoded_len = aimee_skills_trigger_request_size(content, "Bash", "sleep 5");
+      int match = 0;
+      assert(encoded_len > 0 && encoded_len <= sizeof(request) && encoded_len <= UINT32_MAX);
+      assert(aimee_skills_trigger_request_encode(content, "Bash", "sleep 5", request,
+                                                 sizeof(request)) == 0);
+      assert(aimee_module_client_call(client, AIMEE_SKILLS_EVENT_TRIGGER,
+                                      AIMEE_SKILLS_STAGE_TRIGGER, 2017, 0, request,
+                                      (uint32_t)encoded_len, response, sizeof(response),
+                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(aimee_skills_trigger_response_decode(response, response_len, &match) == 0 && match);
    }
    else if (strcmp(name, "response-composition") == 0)
    {
@@ -395,6 +434,18 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(aimee_benchmarks_response_decode(response, response_len, &scores) == 0);
       assert(scores.mrr == 0.5 && scores.recall == 1.0);
       assert(scores.ndcg > 0.630929753571 && scores.ndcg < 0.630929753572);
+
+      const double latencies[] = {10.0, 1.0, 5.0, 3.0, 8.0};
+      aimee_benchmarks_latency_summary_t summary;
+      assert(aimee_benchmarks_latency_request_encode(latencies, 5, request, sizeof(request)) == 0);
+      request_len = AIMEE_BENCHMARKS_LATENCY_REQUEST_LEN;
+      assert(aimee_module_client_call(client, AIMEE_BENCHMARKS_EVENT_LATENCY,
+                                      AIMEE_BENCHMARKS_STAGE_LATENCY, 2016, 0, request, request_len,
+                                      response, sizeof(response), &response_len, NULL,
+                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(aimee_benchmarks_latency_response_decode(response, response_len, &summary) == 0);
+      assert(summary.queries == 5 && summary.p50_ms == 5.0 && summary.p95_ms == 10.0 &&
+             summary.p99_ms == 10.0 && summary.min_ms == 1.0 && summary.max_ms == 10.0);
    }
 }
 
@@ -418,7 +469,9 @@ int main(int argc, char **argv)
    else
       assert(snprintf(module_executable, sizeof module_executable, "%s", executable) > 0);
 
-   uint32_t requested[] = {test_kind, EMPTY_KIND};
+   uint32_t requested[PRODUCTION_STAGE_MAX + 1] = {0};
+   memcpy(requested, served, serve_count * sizeof(*requested));
+   requested[serve_count] = EMPTY_KIND;
    bus_runtime_grant_t grants[] = {{.principal_class = 1,
                                     .principal_ref = module_ref,
                                     .uid = BUS_RUNTIME_SELF_UID,
@@ -430,7 +483,7 @@ int main(int argc, char **argv)
                                     .uid = BUS_RUNTIME_SELF_UID,
                                     .executable = executable,
                                     .request = requested,
-                                    .request_count = 2}};
+                                    .request_count = serve_count + 1}};
    bus_host_config_t host_config = {.max_slots = 8,
                                     .slot_size = 512,
                                     .inline_budget = 400,

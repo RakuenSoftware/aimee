@@ -17,21 +17,19 @@ evidence assembly, and candidate generation, while DB2 persistence currently rem
 The pointer-free learning-observation stage is now implemented by
 `server-go/modules/learning` and shipped as the supervised Go
 `aimee-module-learning` process. Its C `module_adapter.c` remains a parity
-fixture for the unchanged `module_api.h` wire contract; proposal persistence,
-evidence assembly, and the broader learning engine are still C migration work.
+fixture for the unchanged `module_api.h` wire contract, with the pure C parity
+policy isolated in `learning_signal_policy.c`. The production router has no
+local signal-to-sink fallback: it requests the sink mask over event `6145` and
+aborts before signal persistence when the process is absent or its response is
+invalid. Proposal persistence, evidence assembly, and the broader learning
+engine are still C migration work.
 
 The descriptor declares the module-owned C implementation and parity adapter, the Go process handler
-and tests, its module-root headers, direct C tests, and this document; it sets
-`ownership_complete: true`. All four headers are declared as
-`private_headers` because they live at the module root rather than under
-`src/modules/learning/include/aimee/learning/`, which is the layout the header-layout checker treats as
-private. `learning.h` is nonetheless a de-facto public contract: it is included repository-wide via the
-`-Imodules/learning` search path, including by `src/headers/aimee.h`. Promoting it to a canonical public
-header would move the file under the include tree and rewrite every include site, which is a separate
-header-layout slice; an ownership-declaration slice moves nothing. `docs/validation/core-modularization-slice-42.md`
-records the declaration audit and `docs/validation/core-modularization-slice-43.md` the completeness
-audit; the two were split so the latch reviews declarations merged on their own first. Adding a new
-module-local source or module-root header without declaring it now fails CI on `rule=ownership-complete`.
+and tests, its headers, direct C tests, and this document; it sets `ownership_complete: true`.
+`learning.h` and `module_api.h` are canonical public headers under
+`src/modules/learning/include/aimee/learning/`. The bundle, evidence, implicit-detection, and C parity
+policy headers remain private at the module root. Adding a new module-local source or header without
+declaring it fails CI on `rule=ownership-complete`.
 
 ## Dependencies and consumers
 
@@ -96,8 +94,10 @@ carry the `learning` name and link `learning_bundle.o` as a dependency but are K
 claimed here, the same way gateway does not claim the delivery-binary `test_gateway_*` tests.
 `learning_implicit_replay.c` is a replay harness, not a `unit-test-learning-*` target. Together these
 cover evidence, detection, proposals, metrics, candidate synthesis, and version behavior. Invalid
-signals and unavailable storage fail closed; optional synthesis failure leaves evidence/proposals
-inspectable and must not fabricate an accepted action.
+signals, unavailable storage, and unavailable learning-module classification fail closed. The router
+metrics test verifies that a missing classifier returns before producing a signal or proposal result.
+Optional synthesis failure leaves evidence/proposals inspectable and must not fabricate an accepted
+action.
 
 ## Operational diagnostics
 

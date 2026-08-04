@@ -36,11 +36,11 @@ Each line is one standalone JSON object (JSON Lines).
 - `callees`, structural call-graph edges (function names this symbol calls).
 - `claimed_side_effects`, what the extraction claims (`[]` / `["none"]` ⇒ claims none).
 - `expected_grounding`, `reject` iff the claim is none-like **and** at least one
-  callee is side-effecting (see `src/kb/kb_curator_grounding.c`); otherwise `commit`.
+  callee is side-effecting (the `kb-synthesis` process stage); otherwise `commit`.
 
-`test_curator_fixtures.c` runs every `extract_code_unit` line through the real
-`kb_curator_grounding_contradicts()` predicate and asserts the verdict matches
-`expected_grounding`, so a mislabeled fixture fails the build.
+`test_curator_fixtures.c` shapes every `extract_code_unit` line through the production
+curator seam, invokes the process-module parity handler, and asserts the verdict
+matches `expected_grounding`, so a mislabeled fixture fails the build.
 
 ### `bridge`, doc-claim ↔ code-unit `implements` linkage
 - `topic`, proposal/topic string.

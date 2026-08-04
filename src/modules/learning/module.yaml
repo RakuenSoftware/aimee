@@ -16,6 +16,7 @@
     "src/modules/learning/learning_evidence.c",
     "src/modules/learning/learning_implicit.c",
     "src/modules/learning/learning_router.c",
+    "src/modules/learning/learning_signal_policy.c",
     "src/modules/learning/module_adapter.c"
   ],
   "go_sources": [
@@ -31,7 +32,8 @@
   "private_headers": [
     "src/modules/learning/learning_bundle.h",
     "src/modules/learning/learning_evidence.h",
-    "src/modules/learning/learning_implicit.h"
+    "src/modules/learning/learning_implicit.h",
+    "src/modules/learning/learning_signal_policy.h"
   ],
   "tests": [
     "src/tests/test_learning_bundle.c",

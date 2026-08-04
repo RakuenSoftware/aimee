@@ -43,6 +43,7 @@
 #include <aimee/memory/module_api.h>
 #include <aimee/response-composition/module_api.h>
 #include <aimee/routing/module_api.h>
+#include <aimee/runtime-web/module_api.h>
 #include <aimee/skills/module_api.h>
 #include <aimee/tools/module_api.h>
 #include <aimee/workspace/module_api.h>
@@ -209,8 +210,11 @@ void server_ready_sample_now(void)
        {AIMEE_TOOLS_EVENT_DISPATCH, "tools"},
        {AIMEE_WORKSPACE_EVENT_ACCESS, "workspace"},
        {AIMEE_GIT_EVENT_OPERATION, "git"},
+       {AIMEE_GIT_EVENT_REF_VALIDATE, "git"},
        {AIMEE_SKILLS_EVENT_CONTEXT, "skills"},
+       {AIMEE_SKILLS_EVENT_TRIGGER, "skills"},
        {AIMEE_RESPONSE_EVENT_COMPOSE, "response-composition"},
+       {AIMEE_RUNTIME_WEB_EVENT_CLASSIFY, "runtime-web"},
    };
    s.modules = DEP_OK;
    for (size_t i = 0; i < sizeof(required_modules) / sizeof(required_modules[0]); ++i)

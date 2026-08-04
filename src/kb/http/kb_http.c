@@ -727,17 +727,15 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          }
       }
 
-      /* console-admin containment: the web console's scope:console-admin bearer
-       * is authorized ONLY for its fixed route allowlist (kb_route_acl.c); every
-       * other route is a 403 regardless of scope target. Server-side enforcement,
-       * defence-in-depth with the console's own role gate. */
-      if (vr.scope_kind[0] && strcmp(vr.scope_kind, KB_SCOPE_KIND_CONSOLE_ADMIN) == 0 &&
-          !kb_route_acl_console_admin_allows(method, path))
+      /* Event-bus control-web decisions are authoritative and fail closed. */
+      if (vr.scope_kind[0] && strcmp(vr.scope_kind, KB_SCOPE_KIND_CONSOLE_ADMIN) == 0)
       {
-         snprintf(out_buf, (size_t)out_cap,
-                  "{\"error\":\"forbidden: console-admin credential not permitted for %s %s\"}",
-                  method, path);
-         return 403;
+         int allowed = 0;
+         if (kb_route_acl_console_admin_authorize(method, path, &allowed) != 0)
+            return json_body_error(out_buf, out_cap, 503, "control-web authorization unavailable");
+         if (!allowed)
+            return json_body_error(out_buf, out_cap, 403,
+                                   "forbidden: console-admin credential not permitted");
       }
    }
    /* Tenancy routes (P1 slice 4): /v1/team*, /v1/project*. Reachable for any

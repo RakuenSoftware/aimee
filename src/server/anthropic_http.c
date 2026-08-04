@@ -616,12 +616,13 @@ static int messages_buffered(const char *body, char *resp, int cap)
       /* P2c (response-side tool policing, buffered). Drops any `tool_use` block
        * the model emitted despite the request-side strip, before the audit row
        * reads parsed.stop_reason (so the audit log matches the wire) and before
-       * anthropic_response_from_parsed renders the reply. Gated internally on
-       * gateway_prevent_subagents (the predicate + the police function are both
-       * no-ops at the default config). Drop count is plumbed through to the
+       * anthropic_response_from_parsed renders the reply. The already-resolved
+       * gateway policy gate is sent to the event-bus governance module; no
+       * in-process decision fallback remains. Drop count is plumbed through to the
        * same pipeline-runner total the request-side strip already emits; a
        * future P2b audit pass surfaces both at once. */
-      gw_response_run_governance(&parsed, anthropic_governance_enabled());
+      gw_response_run_governance(&parsed, anthropic_governance_enabled(),
+                                 gateway_prevent_subagents_enabled());
 
       /* Cost accounting: the Anthropic /v1/messages ingress is a raw provider
        * proxy (no agent_log_call), so record this turn's spend, billed against
@@ -897,7 +898,8 @@ static void messages_stream_buffered_replay(const char *url, const char *auth,
             free(buf_resp);
             return;
          }
-         gw_response_run_governance(&parsed, anthropic_governance_enabled());
+         gw_response_run_governance(&parsed, anthropic_governance_enabled(),
+                                    gateway_prevent_subagents_enabled());
          emit_message_as_sse(&parsed, msg_id, model, emit, ctx);
          /* Cost accounting (mirror the buffered path). */
          if ((parsed.prompt_tokens > 0 || parsed.completion_tokens > 0) &&
@@ -918,7 +920,8 @@ static void messages_stream_buffered_replay(const char *url, const char *auth,
             /* Slice 2 (canonical-IR): shadow-compare legacy vs IR response parse
              * (RESP_MATCH / RESP_MISMATCH). No-op unless AIMEE_IR_SHADOW. */
             aimee_ir_shadow_compare_response(&parsed, provider_resp, shadow_provider_wire(driver));
-            gw_response_run_governance(&parsed, anthropic_governance_enabled());
+            gw_response_run_governance(&parsed, anthropic_governance_enabled(),
+                                       gateway_prevent_subagents_enabled());
             emit_message_as_sse(&parsed, msg_id, model, emit, ctx);
             /* Cost accounting (mirror the buffered path). */
             if ((parsed.prompt_tokens > 0 || parsed.completion_tokens > 0) &&

@@ -1,5 +1,4 @@
-// Package policy contains decisions shared by the physical runtime-web provider
-// and its isolated module process.
+// Package policy contains the isolated runtime-web process's RPC-fault decision.
 package policy
 
 import "net/http"
