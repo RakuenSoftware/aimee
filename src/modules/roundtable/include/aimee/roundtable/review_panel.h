@@ -36,9 +36,10 @@ static inline int roundtable_review_deadline_ms(int deadline_ms, int chairman_en
 /* Resolve the C-configured default panel so the MCP schema's documented default
  * can reach Go, which deliberately requires a named saved panel.
  *
- * requested_preset may be NULL. out receives the resolved panel name, or an
- * empty string when nothing resolved. timeout_ms receives the call deadline and
- * is always set. Returns 1 when a panel was resolved, 0 when none was. */
+ * requested_preset may be NULL. out must be non-NULL with out_len > 0 and
+ * receives the resolved panel name, or an empty string when nothing resolved.
+ * timeout_ms must be non-NULL and always receives a usable deadline, including
+ * on every failure path. Returns 1 when a panel was resolved, 0 when none was. */
 int roundtable_review_resolve_panel(const char *requested_preset, char *out, size_t out_len,
                                     int *timeout_ms);
 

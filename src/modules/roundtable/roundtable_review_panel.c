@@ -18,6 +18,15 @@ _Static_assert(ROUNDTABLE_REVIEW_PANEL_NAME_MAX == RT_PRESET_NAME_MAX,
 int roundtable_review_resolve_panel(const char *requested_preset, char *out, size_t out_len,
                                     int *timeout_ms)
 {
+   /* A published surface validates what a static helper could assume. A caller
+    * that gets this wrong must not corrupt memory or leave the deadline unset. */
+   if (!timeout_ms)
+      return 0;
+   if (!out || out_len == 0)
+   {
+      *timeout_ms = roundtable_review_deadline_ms(0, 0);
+      return 0;
+   }
    out[0] = '\0';
    ensemble_panel_t panel;
    ensemble_panel_from_config(&panel);
