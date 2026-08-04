@@ -894,3 +894,69 @@ holds about 38 entries -- or that run was a transient. One 2000-note run settles
 it by showing whether the rate decays with corpus position. It has not been run,
 and until it is, **no 10k throughput figure in this project should be compared
 against a 200-note one.**
+
+## 25. MTP is free speed: +84% throughput, no measurable accuracy cost
+
+The measurement finding 12 never made, and the one a reader asks for first.
+Finding 12 established that speculative decoding changes 26 of 100 notes and left
+open whether the changed notes were WORSE. At 10,000 notes they are not.
+
+E2B UD-Q4_K_XL, XTX, nproc=3, cache-ram 1024, prompt v8, thinking on, v5
+gold_large. The only difference between the two arms is the draft:
+
+| | MTP | no-MTP | delta |
+|---|---:|---:|---:|
+| strict F1 | 0.6246 | 0.6207 | **+0.0039** |
+| steady notes/min | 73.77 | 40.10 | **+84.0%** |
+| median completion tokens | 464 | 467 | - |
+| median latency | 2439.9 ms | 4488.6 ms | - |
+
+Both arms: 10,000 rows, zero transport errors, zero truncated, 10,000/10,000
+carrying reasoning.
+
+**+0.0039 is inside the 0.0105 noise threshold**, so no gain-per-accuracy-point
+ratio is computed. "Accuracy-neutral at this resolution" is the honest phrasing,
+not "identical" -- 26 of 100 notes really do change, they just do not change for
+the worse in aggregate.
+
+Five more pairs (E2B Q6/Q8, E4B Q4/Q6/Q8) will show whether this holds across
+quants and both model families, or whether Q4 was the friendly case. **Do not
+generalise from one pair.**
+
+### Why this number is trustworthy and the earlier one was not
+
+The same comparison was reported as **5.3x** earlier the same day and withdrawn.
+Three instrument problems had to be fixed before the 84% could be believed, and
+all three are article material in their own right:
+
+**The metric measured startup.** `notes/min` was rows over wall clock, and wall
+clock includes server load -- about 30s per server, so it grew with process
+count, the variable under test. Steady state is now computed from per-request
+latency and process count instead, and the difference is printed as an explicit
+`startup` line rather than absorbed. (defect 35)
+
+**Orphaned clients were stealing the ports.** Killing a sweep left its
+`run_llamacpp.py` children running on the same ports the next arm used. Fifteen
+of them held this very arm at 8.8 notes/min until killed, after which it ran 40+.
+Every request was served normally, it just queued, so the server's own timings
+looked healthy and only the client saw it. (defect 36)
+
+**The 5.3x itself was a ratio of two incomparable measurements** -- a completed
+10k MTP average divided by an early-partial, orphan-contaminated no-MTP rate.
+Third instance of that exact error in this project, after the +0.084 thinking
+gain and the 4-slot v8-baseline reference.
+
+The chain is worth writing as a chain: a contaminated measurement produced an
+implausible number, the implausible number motivated a hypothesis about memory
+bandwidth on Vulkan, two eight-config sweeps were built to test it, and the sweeps
+were themselves biased by a startup term nobody had looked at. The thing that
+broke the chain was not a better experiment. It was `ps | grep -c` and a load
+average of 27 that had been sitting in plain sight for six hours.
+
+### Caveat carried on this pair
+
+The first ~500 rows of the no-MTP arm ran while the orphans were still alive.
+Median latency is robust to 5% contamination -- recent-window medians read
+4300-4400ms against an all-rows median of 4489 -- so steady state holds. The
+`startup (s) = 1561` figure on that side absorbs the slow period and is
+meaningless. F1 is unaffected: the rows are correct, they were merely slow.
