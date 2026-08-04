@@ -595,10 +595,15 @@ static cJSON *marshal_git_verify(int argc, char **argv)
       cJSON_AddStringToObject(req, "session_id", sid);
 
    cJSON *args = cJSON_CreateObject();
-   char cwd[4096];
-   if (getcwd(cwd, sizeof(cwd)))
-      cJSON_AddStringToObject(args, "path", cwd);
    cJSON_AddBoolToObject(args, "no_session_redirect", 1);
+   /* The cwd default is filled in AFTER the caller's arguments, not before.
+    *
+    * cJSON permits duplicate keys and cJSON_GetObjectItemCaseSensitive returns
+    * the FIRST match, so adding path=<cwd> up here made an explicit
+    * `aimee git verify path=<repo>` a second, unreachable entry. The server read
+    * the cwd every time and the user's path was silently discarded -- which made
+    * the error message's own advice ("pass path=<repo> to target it explicitly")
+    * impossible to act on. */
 
    int has_async = 0;
    for (int i = 0; i < argc; i++)
@@ -640,6 +645,16 @@ static cJSON *marshal_git_verify(int argc, char **argv)
          has_async = 1;
       add_verify_arg(args, raw, val);
       *eq = '=';
+   }
+
+   /* Default the target to the caller's shell directory only when they did not
+    * name one. The server prefers a git root over a bare directory, so sending
+    * the cwd is a useful default and a poor override. */
+   if (!cJSON_GetObjectItemCaseSensitive(args, "path"))
+   {
+      char cwd[4096];
+      if (getcwd(cwd, sizeof(cwd)))
+         cJSON_AddStringToObject(args, "path", cwd);
    }
 
    if (!has_async)
