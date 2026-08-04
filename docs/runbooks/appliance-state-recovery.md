@@ -38,9 +38,11 @@ ls -1 "$AIMEE_HOME"/agents.json.bak-*
 ```
 
 If the second command prints the literal `agents.json.bak-*` pattern (i.e.
-no siblings exist), FM1's happy path collapses -- the vault-based agent
-config cannot be reconstructed from `agents.json` alone. Migrate the
-affected agents from the vault before proceeding.
+no siblings exist), there is no `agents.json` to restore in this runbook.
+**Stop and escalate** -- recovering the agent configuration without an
+existing sibling backup is out of scope for this runbook. Only proceed
+with the Restore step below when at least one `agents.json.bak-*` sibling
+is present.
 
 ### Recover
 
