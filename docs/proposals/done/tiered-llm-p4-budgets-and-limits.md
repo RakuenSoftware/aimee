@@ -1,6 +1,7 @@
 # Proposal: P4 — Budgets + rate limits (turn tracked spend into enforced caps)
 
-- **State:** proposed (pending — not started). Part of `tiered-llm-offering.md`.
+- **State:** DONE — archived after P4 delivery.
+- **Historical state:** proposed (pending — not started). Part of `tiered-llm-offering.md`.
 - **Author:** JBailes (drafted by the engineer agent, 2026-07-17).
 - **Depends on:** P1 (teams), P2 (kb egress seam), and **P3a** — the hard-budget algorithm meters against P3's Postgres `org_model_pricing` and settles realized spend through the DB2 `org_token_audit` machinery, so P3a's schema/pricing is a prerequisite, not optional.
 

@@ -1,5 +1,7 @@
 # Proposal: Document proposal-trigger blob deduplication
 
+- **State:** DONE — archived after the runbook update shipped.
+
 ## Goal
 
 Document the production behavior of the autonomous pending-proposal watcher so

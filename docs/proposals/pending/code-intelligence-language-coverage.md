@@ -72,7 +72,7 @@ slice alone restores nine languages including C#.
 
 **S2 — Build and configuration as first-class.** Add `cmake`, `make`,
 `dockerfile`, `yaml`, `toml`, `json` classification, including the filename-only
-forms (`CMakeLists.txt`, `Makefile`, `Dockerfile.server`, `Containerfile`).
+forms (`CMakeLists.txt`, `src/Makefile`, `Dockerfile.server`, `Containerfile`).
 Aimee is itself a CMake + Docker + compose-YAML project: a 68 KB
 `CMakeLists.txt`, dozens of compose files, and `aimee.yaml` are core artifacts
 that symbol search cannot currently see as code. Symbol extraction for these is

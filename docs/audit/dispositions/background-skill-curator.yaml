@@ -3,7 +3,7 @@
   "feature": "background-skill-curator",
   "owner": "skills",
   "decision": "remove",
-  "source_proposal": "docs/proposals/pending/feature-liveness-and-background-curator-removal.md",
+  "source_proposal": "docs/proposals/done/feature-liveness-and-background-curator-removal.md",
   "reason": "The scheduler, configuration, implementation, and tests formed a self-contained feature island. No independent product path consumed its consolidation plans or metrics.",
   "removed_files": [
     "src/modules/skill/skill_curator.c",

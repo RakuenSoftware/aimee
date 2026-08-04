@@ -1,6 +1,7 @@
 # Proposal: P10 — Shared vault core (one vault, two profiles)
 
-- **State:** proposed (pending — not started). Part of `tiered-llm-offering.md`.
+- **State:** DONE — archived after P10 delivery.
+- **Historical state:** proposed (pending — not started). Part of `tiered-llm-offering.md`.
 - **Author:** JBailes (drafted by the engineer agent, 2026-07-18).
 - **Depends on:** nothing new — it is an **extraction** of the already-built aimee-server
   credential vault (WP-C) into a self-contained module. It is a **prerequisite of P7**:
