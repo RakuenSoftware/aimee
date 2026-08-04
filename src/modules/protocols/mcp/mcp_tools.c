@@ -1148,7 +1148,13 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
           {"expected_head_sha", "string", "pr merge: refuse if the head SHA has moved."},
           {"state", "string", "issue: filter open/closed/all (default open)."},
           {"url", "string", "clone: repository URL."},
-          {"path", "string", "clone: local path; verify: repo path."},
+          {"path", "string",
+           "WHICH REPOSITORY every command acts on — pass it whenever you mean a specific "
+           "checkout, not just for clone/verify. mcp_chdir_git_root takes it as the "
+           "priority-1 candidate; omit it and the repo is inferred from session state, "
+           "which in a worktree-isolated session can resolve to the SHARED checkout on "
+           "another branch. A commit or push there stages work that is not yours. "
+           "(clone: destination path; verify: repo path.)"},
           {"branch", "string", "clone: branch to checkout."},
           {"depth", "integer", "clone: shallow depth."},
           {"mode", "string", "reset: soft / mixed (default) / hard."},
@@ -1190,7 +1196,10 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
               "diff_summary, pr, issue, clone, stash, tag, reset, restore, verify. Remaining "
               "params apply per command (see each description); branch/pr/stash/tag/issue/"
               "verify also take an 'action' sub-selector. Use command=pr action=view to "
-              "check a PR's merge state before pushing.",
+              "check a PR's merge state before pushing. PASS 'path' WHENEVER YOU MEAN A "
+              "SPECIFIC CHECKOUT: without it the repository is inferred from session state, "
+              "and a worktree-isolated session can silently act on the shared checkout — "
+              "committing or pushing another branch's work.",
               s));
    }
 

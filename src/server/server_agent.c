@@ -675,6 +675,22 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
                                     "usage: agent add <name> <endpoint> <model>", NULL);
 
+   /* The first three arguments are positional, so a flag typed in the endpoint's place
+    * is silently stored AS the endpoint: `agent add x --provider openai --endpoint URL`
+    * saved endpoint="--provider", reported the agent ON, and returned success. Nothing
+    * said otherwise until `agent probe` reported
+    * "GET --provider/models returned -1".
+    *
+    * Only a leading '-' is refused: unambiguous evidence of a mis-parsed flag, since no
+    * address begins with one. Demanding a scheme would reject host:port forms this
+    * command has always accepted. */
+   if (!agent_endpoint_valid(argv[1]))
+      return server_send_error_kind(
+          conn, SERVER_ERR_INVALID_ARGUMENT,
+          "the endpoint looks like a flag; the first three arguments are positional: "
+          "agent add <name> <endpoint> <model>",
+          NULL);
+
    opt_parsed_t opts;
    opt_parse(argc - 3, argv + 3, bool_flags, &opts);
 
