@@ -95,6 +95,31 @@ static int api_bearer_extra_count(void);
  * storage tier's vocabulary — build-integrity greps the client binary for exactly
  * that and fails the build. The client reports whether the kb's store and vector
  * index are healthy without knowing what implements them. */
+/* Split a newline-joined kb field back into a JSON array under `key`, omitting the
+ * key entirely when there is nothing to say. Extracted when warnings joined
+ * blockers: two copies of the same pointer arithmetic was how the warnings array
+ * came to be dropped in the first place. */
+static void kb_health_add_lines(cJSON *kbo, const char *key, const char *joined)
+{
+   if (!kbo || !key || !joined || !joined[0])
+      return;
+   cJSON *arr = cJSON_AddArrayToObject(kbo, key);
+   if (!arr)
+      return;
+   for (const char *p = joined; p && *p;)
+   {
+      const char *nl = strchr(p, '\n');
+      size_t len = nl ? (size_t)(nl - p) : strlen(p);
+      char line[384];
+      if (len >= sizeof(line))
+         len = sizeof(line) - 1;
+      memcpy(line, p, len);
+      line[len] = '\0';
+      cJSON_AddItemToArray(arr, cJSON_CreateString(line));
+      p = nl ? nl + 1 : NULL;
+   }
+}
+
 void server_health_add_kb(cJSON *resp)
 {
    if (!resp)
@@ -150,23 +175,17 @@ void server_health_add_kb(cJSON *resp)
       return;
    /* Pass the reasons through verbatim. The kb composed them next to the evidence
     * and named the remedy; re-deriving them here from the booleans below would be
-    * a second place for the verdict to drift out of step with the facts. */
-   if (kb.blockers[0])
-   {
-      cJSON *arr = cJSON_AddArrayToObject(kbo, "blockers");
-      for (const char *p = kb.blockers; p && *p;)
-      {
-         const char *nl = strchr(p, '\n');
-         size_t len = nl ? (size_t)(nl - p) : strlen(p);
-         char line[320];
-         if (len >= sizeof(line))
-            len = sizeof(line) - 1;
-         memcpy(line, p, len);
-         line[len] = '\0';
-         cJSON_AddItemToArray(arr, cJSON_CreateString(line));
-         p = nl ? nl + 1 : NULL;
-      }
-   }
+    * a second place for the verdict to drift out of step with the facts.
+    *
+    * WARNINGS TRAVEL TOO, not just blockers. The kb has always assembled a
+    * warnings array and this block dropped it on the floor, so findings that do
+    * not move the verdict reached no operator at all: a typed-fact backlog that
+    * nothing will ever drain sat in /v1/health for hours while `aimee status`
+    * showed a clean kb and `aimee kb status` printed a bare "4 pending". Publishing
+    * a finding into a field no surface renders is the same defect as not computing
+    * it -- the evidence exists and the summary does not carry it. */
+   kb_health_add_lines(kbo, "blockers", kb.blockers);
+   kb_health_add_lines(kbo, "warnings", kb.warnings);
    cJSON_AddBoolToObject(kbo, "store_ok", kb.db2_ok ? 1 : 0);
    cJSON_AddBoolToObject(kbo, "vectors_ok", kb.pgvec_ok ? 1 : 0);
    cJSON_AddBoolToObject(kbo, "embed_configured", kb.embed_ok ? 1 : 0);

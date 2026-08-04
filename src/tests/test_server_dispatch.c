@@ -2282,6 +2282,29 @@ static void test_health_kb_verdict_states(void)
    assert(strcmp(cJSON_GetArrayItem(blockers, 1)->valuestring, "vector table missing") == 0);
    cJSON_Delete(resp);
 
+   /* Warnings travel even though they do not move the verdict. This block used to
+    * drop the kb's warnings array entirely, so an advisory finding reached no
+    * operator: a typed-fact backlog nothing could drain sat unreported for hours
+    * behind a status of "ok". Publishing a finding into a field no surface renders
+    * is the same defect as never computing it. */
+   kb_health_stub_reset();
+   g_kb_health_rc = 0;
+   g_kb_health.process_ok = 1;
+   snprintf(g_kb_health.status, sizeof(g_kb_health.status), "ok");
+   snprintf(g_kb_health.warnings, sizeof(g_kb_health.warnings),
+            "typed-fact extraction: 4 job(s) queued with nothing to drain them\nKB not ingested "
+            "in over 7 days");
+   resp = cJSON_CreateObject();
+   server_health_add_kb(resp);
+   assert(strcmp(kb_status_of(resp), "ok") == 0); /* advisory: verdict unchanged */
+   kb = cJSON_GetObjectItemCaseSensitive(resp, "kb");
+   cJSON *warns = cJSON_GetObjectItemCaseSensitive(kb, "warnings");
+   assert(cJSON_IsArray(warns) && cJSON_GetArraySize(warns) == 2);
+   assert(strstr(cJSON_GetArrayItem(warns, 0)->valuestring, "typed-fact extraction") != NULL);
+   /* No blockers key at all when there are none, rather than an empty array. */
+   assert(cJSON_GetObjectItemCaseSensitive(kb, "blockers") == NULL);
+   cJSON_Delete(resp);
+
    /* 4. An open transport breaker refuses every call locally, so a kb that
     * considers itself perfectly healthy still cannot be queried. The breaker is
     * part of the verdict rather than a flag beside it. */
