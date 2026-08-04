@@ -368,9 +368,9 @@ and swaps the executable without downgrading.
 
 Note: `aimee self-update --check` reports client and server build identifiers, but it cannot
 order or auto-install non-semver branch builds. `aimee self-update --version vX.Y.Z` installs a
-published semantic-version release and does not downgrade. Operators validating `:testing` on the
-`testing` channel must install or build the matching testing thin client separately when exercising
-client-local catalog behavior.
+published semantic-version release and does not downgrade. Operators validating a `:testing` build
+must install or build the matching testing thin client separately when exercising client-local catalog
+behavior.
 
 Read [What's new](docs/WHATS_NEW.md) before changing deployment manifests.
 
