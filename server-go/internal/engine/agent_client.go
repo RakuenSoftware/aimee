@@ -111,7 +111,6 @@ type AgentHTTPConfig struct {
 	RequestTimeout       time.Duration
 	PendingTimeout       time.Duration
 	PendingTimeoutSource func() time.Duration
-	CancelUnassigned     func(context.Context, int, string, time.Duration) (bool, error)
 	Store                *db1.Store
 }
 
@@ -169,12 +168,11 @@ func (e *agentHTTPStatusError) Error() string {
 // workflow state or transitions; losing it parks the Go-owned run and a later
 // scheduler pass can retry safely.
 type HTTPAgentClient struct {
-	baseURL, bearer  string
-	client           *http.Client
-	pollEvery        time.Duration
-	pendingTimeout   func() time.Duration
-	cancelUnassigned func(context.Context, int, string, time.Duration) (bool, error)
-	store            *db1.Store
+	baseURL, bearer string
+	client          *http.Client
+	pollEvery       time.Duration
+	pendingTimeout  func() time.Duration
+	store           *db1.Store
 }
 
 func NewHTTPAgentClient(cfg AgentHTTPConfig) (*HTTPAgentClient, error) {
@@ -215,7 +213,7 @@ func NewHTTPAgentClient(cfg AgentHTTPConfig) (*HTTPAgentClient, error) {
 	}
 	return &HTTPAgentClient{baseURL: strings.TrimRight(cfg.BaseURL, "/"), bearer: cfg.Bearer,
 		client: &http.Client{Transport: transport, Timeout: cfg.RequestTimeout}, pollEvery: cfg.PollEvery,
-		pendingTimeout: timeoutSource, cancelUnassigned: cfg.CancelUnassigned, store: cfg.Store}, nil
+		pendingTimeout: timeoutSource, store: cfg.Store}, nil
 }
 
 func (c *HTTPAgentClient) delegatePendingTimeout() time.Duration {
@@ -692,21 +690,32 @@ func isTerminalDelegateStatus(status string) bool {
 	}
 }
 
+// expireUnassigned reclaims a delegate job no worker ever picked up.
+//
+// agent_jobs belongs to the resource plane, so the transition is asked for
+// rather than performed here: only the plane can decide atomically that the row
+// is still unassigned, which is what stops a worker starting in the same
+// instant from being cancelled underneath. This client therefore holds no
+// database handle at all, which is what lets it run inside a module process.
 func (c *HTTPAgentClient) expireUnassigned(jobID int, key string, since time.Time) error {
-	if c.cancelUnassigned != nil {
-		cancelCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		cancelled, err := c.cancelUnassigned(cancelCtx, jobID, "unassigned delegate lease expired", c.delegatePendingTimeout())
-		cancel()
-		if err != nil {
-			return errors.Join(ErrDelegateUnassignedExpired, fmt.Errorf("cancel expired delegate job %d: %w", jobID, err))
-		}
-		if !cancelled {
-			return errors.Join(ErrDelegateUnassignedExpired,
-				fmt.Errorf("delegate job %d is no longer pending and unassigned; durable mapping retained", jobID))
-		}
-	} else {
+	cancelCtx, cancel := context.WithTimeout(context.Background(), delegateCancelTimeout)
+	defer cancel()
+	var response struct {
+		Cancelled *bool `json:"cancelled"`
+	}
+	err := c.doJSON(cancelCtx, http.MethodPost, "/v1/delegate/cancel_unassigned", map[string]any{
+		"job_id":              jobID,
+		"reason":              "unassigned delegate lease expired",
+		"min_unassigned_secs": int(c.delegatePendingTimeout() / time.Second),
+	}, &response)
+	if err != nil {
+		return errors.Join(ErrDelegateUnassignedExpired, fmt.Errorf("cancel expired delegate job %d: %w", jobID, err))
+	}
+	if response.Cancelled == nil || !*response.Cancelled {
+		// The job was assigned, already terminal, or not yet old enough. Keep the
+		// reservation: it may still produce a result worth replaying.
 		return errors.Join(ErrDelegateUnassignedExpired,
-			errors.New("Go unassigned-job cancellation authority is not configured; durable mapping retained"))
+			fmt.Errorf("delegate job %d is no longer pending and unassigned; durable reservation retained", jobID))
 	}
 	c.releaseReservation(context.Background(), key, 0)
 	return fmt.Errorf("%w: job %d (%s) remained unassigned for %s", ErrDelegateUnassignedExpired, jobID, key, time.Since(since).Round(time.Millisecond))

@@ -224,38 +224,6 @@ ORDER BY mapping.cancel_attempts,mapping.job_id LIMIT ?`, terminalCancellationBa
 	return mappings, nil
 }
 
-// CancelUnassignedDelegateJob returns true only when this call atomically moves
-// an expired job without a worker lease to cancelled. Routing may persist an
-// agent name while the row is still pending, so a pending row remains
-// unassigned regardless of agent_name. Once the worker moves it to running, a
-// non-empty agent_name proves assignment and protects it from this lease.
-//
-// Both worker transitions are reciprocal: taking the lease requires pending,
-// and assigning an agent rejects cancelled rows. Whichever SQLite update wins
-// prevents a later transition from reviving a cancelled job.
-func (s *Store) CancelUnassignedDelegateJob(ctx context.Context, jobID int, reason string, minAge time.Duration) (bool, error) {
-	if jobID <= 0 {
-		return false, errors.New("delegate job id is required")
-	}
-	if minAge <= 0 {
-		return false, errors.New("delegate minimum unassigned age is required")
-	}
-	cutoff := time.Now().UTC().Add(-minAge).Format("2006-01-02 15:04:05")
-	result, err := s.db.ExecContext(ctx, `UPDATE agent_jobs
-SET status='cancelled',
-    cancelled_at=datetime('now'),
-    cancel_reason=?,
-    updated_at=datetime('now')
-WHERE id=?
-  AND (status='pending' OR (status='running' AND trim(agent_name)=''))
-  AND COALESCE(NULLIF(heartbeat_at,''),created_at) <= ?`, reason, jobID, cutoff)
-	if err != nil {
-		return false, fmt.Errorf("cancel unassigned delegate job: %w", err)
-	}
-	changed, err := result.RowsAffected()
-	return changed == 1, err
-}
-
 func (s *Store) hasWorkItemColumn(ctx context.Context, wanted string) (bool, error) {
 	rows, err := s.db.QueryContext(ctx, `PRAGMA table_info(lifecycle_work_item)`)
 	if err != nil {

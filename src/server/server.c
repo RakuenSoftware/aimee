@@ -1582,6 +1582,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"delegate.launch", handle_delegate_launch},
     {"delegate.status", handle_delegate_status},
     {"delegate.reservation.forget", handle_delegate_reservation_forget},
+    {"delegate.cancel_unassigned", handle_delegate_cancel_unassigned},
     {"vault.unlock", handle_vault_unlock},
     {"vault.rekey", handle_vault_rekey},
     {"vault.set", handle_vault_set},

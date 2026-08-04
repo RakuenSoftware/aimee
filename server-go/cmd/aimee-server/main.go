@@ -104,7 +104,6 @@ func main() {
 			PendingTimeoutSource: func() time.Duration {
 				return time.Duration(configStore.Int("autonomy.delegate_pending_secs", 120)) * time.Second
 			},
-			CancelUnassigned: store.CancelUnassignedDelegateJob,
 		})
 		if clientErr != nil {
 			log.Fatal(clientErr)

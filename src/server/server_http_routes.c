@@ -1947,6 +1947,8 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/delegate/launch", NULL, RM_EXACT, "delegate.launch", 0, rh_dispatch_op},
     {"POST", "/v1/delegate/reservation/forget", NULL, RM_EXACT, "delegate.reservation.forget", 0,
      rh_dispatch_op},
+    {"POST", "/v1/delegate/cancel_unassigned", NULL, RM_EXACT, "delegate.cancel_unassigned", 0,
+     rh_dispatch_op},
     {"POST", "/v1/delegate/backend_exec", NULL, RM_EXACT, "delegate.backend_exec", 0,
      rh_dispatch_op},
     {"GET", "/v1/job/list", NULL, RM_EXACT, "job.list", 0, rh_dispatch_op},

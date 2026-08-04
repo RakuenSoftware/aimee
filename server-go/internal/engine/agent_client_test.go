@@ -755,6 +755,8 @@ func TestHTTPAgentClientExpiresUnassignedPendingJob(t *testing.T) {
 		case "/v1/delegate/run":
 			launches.Add(1)
 			plane.run(w, r)
+		case "/v1/delegate/cancel_unassigned":
+			cancelUnassignedHandler(&cancellations, true)(w, r)
 		case "/v1/delegate/reservation/forget":
 			plane.forget(w, r)
 		case "/v1/delegate/status":
@@ -768,11 +770,7 @@ func TestHTTPAgentClientExpiresUnassignedPendingJob(t *testing.T) {
 	}))
 	defer server.Close()
 	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store,
-		PollEvery: time.Millisecond, PendingTimeout: 20 * time.Millisecond,
-		CancelUnassigned: func(context.Context, int, string, time.Duration) (bool, error) {
-			cancellations.Add(1)
-			return true, nil
-		}})
+		PollEvery: time.Millisecond, PendingTimeout: 20 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -807,6 +805,8 @@ func TestHTTPAgentClientExpiresRoutedPendingJob(t *testing.T) {
 		switch r.URL.Path {
 		case "/v1/delegate/run":
 			plane.run(w, r)
+		case "/v1/delegate/cancel_unassigned":
+			cancelUnassignedHandler(&cancellations, true)(w, r)
 		case "/v1/delegate/reservation/forget":
 			plane.forget(w, r)
 		case "/v1/delegate/status":
@@ -819,11 +819,7 @@ func TestHTTPAgentClientExpiresRoutedPendingJob(t *testing.T) {
 	}))
 	defer server.Close()
 	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store,
-		PollEvery: time.Millisecond, PendingTimeout: MinDelegatePendingTimeout,
-		CancelUnassigned: func(context.Context, int, string, time.Duration) (bool, error) {
-			cancellations.Add(1)
-			return true, nil
-		}})
+		PollEvery: time.Millisecond, PendingTimeout: MinDelegatePendingTimeout})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -861,21 +857,27 @@ func TestHTTPAgentClientExpiresUnassignedRunningJob(t *testing.T) {
 			plane.forget(w, r)
 		case "/v1/delegate/status":
 			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "running", "agent_name": ""})
+		case "/v1/delegate/cancel_unassigned":
+			// The plane owns agent_jobs, so the expiry is asked for over the wire
+			// rather than written directly. Record what was asked.
+			var body struct {
+				JobID  int    `json:"job_id"`
+				Reason string `json:"reason"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			cancellations.Add(1)
+			cancelledJobID.Store(int64(body.JobID))
+			cancelReasonMu.Lock()
+			cancelReason = body.Reason
+			cancelReasonMu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "cancelled": true})
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	defer server.Close()
 	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store,
-		PollEvery: time.Millisecond, PendingTimeout: 20 * time.Millisecond,
-		CancelUnassigned: func(_ context.Context, jobID int, reason string, _ time.Duration) (bool, error) {
-			cancellations.Add(1)
-			cancelledJobID.Store(int64(jobID))
-			cancelReasonMu.Lock()
-			cancelReason = reason
-			cancelReasonMu.Unlock()
-			return true, nil
-		}})
+		PollEvery: time.Millisecond, PendingTimeout: 20 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -931,11 +933,7 @@ func TestHTTPAgentClientAssignedObservationClearsUnassignedLease(t *testing.T) {
 	}))
 	defer server.Close()
 	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store,
-		PollEvery: time.Millisecond, PendingTimeout: MinDelegatePendingTimeout,
-		CancelUnassigned: func(context.Context, int, string, time.Duration) (bool, error) {
-			cancellations.Add(1)
-			return true, nil
-		}})
+		PollEvery: time.Millisecond, PendingTimeout: MinDelegatePendingTimeout})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -977,11 +975,7 @@ func TestHTTPAgentClientTerminalEmptyAgentDoesNotExpire(t *testing.T) {
 	}))
 	defer server.Close()
 	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store,
-		PollEvery: time.Millisecond, PendingTimeout: MinDelegatePendingTimeout,
-		CancelUnassigned: func(context.Context, int, string, time.Duration) (bool, error) {
-			cancellations.Add(1)
-			return true, nil
-		}})
+		PollEvery: time.Millisecond, PendingTimeout: MinDelegatePendingTimeout})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1054,6 +1048,8 @@ func TestHTTPAgentClientExpiresAfterTransientStatusFailures(t *testing.T) {
 		switch r.URL.Path {
 		case "/v1/delegate/run":
 			plane.run(w, r)
+		case "/v1/delegate/cancel_unassigned":
+			cancelUnassignedHandler(&cancellations, true)(w, r)
 		case "/v1/delegate/reservation/forget":
 			plane.forget(w, r)
 		case "/v1/delegate/status":
@@ -1071,11 +1067,7 @@ func TestHTTPAgentClientExpiresAfterTransientStatusFailures(t *testing.T) {
 	}))
 	defer server.Close()
 	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store,
-		PollEvery: time.Millisecond, PendingTimeout: 20 * time.Millisecond,
-		CancelUnassigned: func(context.Context, int, string, time.Duration) (bool, error) {
-			cancellations.Add(1)
-			return true, nil
-		}})
+		PollEvery: time.Millisecond, PendingTimeout: 20 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1111,10 +1103,7 @@ func TestHTTPAgentClientRetainsMappingWhenExpiryCancellationFails(t *testing.T) 
 		http.NotFound(w, r)
 	}))
 	defer server.Close()
-	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store,
-		CancelUnassigned: func(context.Context, int, string, time.Duration) (bool, error) {
-			return false, errors.New("agent job database unavailable")
-		}})
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1136,25 +1125,27 @@ func TestHTTPAgentClientRetainsMappingWhenExpiryCancellationRejected(t *testing.
 	defer store.Close()
 	plane := newReservationPlane(23)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/delegate/reservation/forget" {
+		switch r.URL.Path {
+		case "/v1/delegate/reservation/forget":
 			plane.forget(w, r)
-			return
+		case "/v1/delegate/cancel_unassigned":
+			// The plane refuses: the job is assigned, terminal, or not yet old
+			// enough. Whichever it is, this client may not treat it as reclaimed.
+			cancelUnassignedHandler(nil, false)(w, r)
+		default:
+			http.NotFound(w, r)
 		}
-		http.NotFound(w, r)
 	}))
 	defer server.Close()
 	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL,
-		Store: store,
-		CancelUnassigned: func(context.Context, int, string, time.Duration) (bool, error) {
-			return false, nil
-		}})
+		Store: store})
 	if err != nil {
 		t.Fatal(err)
 	}
 	const key = "durable-rejected-key"
 	plane.reserve(key, 23)
 	if err := client.expireUnassigned(23, key, time.Now()); err == nil ||
-		!errors.Is(err, ErrDelegateUnassignedExpired) || !strings.Contains(err.Error(), "durable mapping retained") {
+		!errors.Is(err, ErrDelegateUnassignedExpired) || !strings.Contains(err.Error(), "durable reservation retained") {
 		t.Fatalf("rejected cancellation lost structured expiry: %v", err)
 	}
 	if jobID, held := plane.reservedJob(key); !held || jobID != 23 {
@@ -1526,4 +1517,16 @@ func (p *reservationPlane) launchCount() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.launches
+}
+
+// cancelUnassignedHandler serves the expiry transition the plane owns, counting
+// what was asked for. The plane decides atomically whether the row is still
+// unassigned, so the client only ever learns the answer.
+func cancelUnassignedHandler(count *atomic.Int32, cancelled bool) func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if count != nil {
+			count.Add(1)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "cancelled": cancelled})
+	}
 }

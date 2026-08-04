@@ -669,8 +669,6 @@ func TestRoundtableDoesNotLaunchChairmanAfterCostExhaustion(t *testing.T) {
 	}
 }
 
-
-
 func TestPanelFailureCategoryPreservesActionableCause(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -924,7 +922,6 @@ func TestRoundtableRunIDIsJSONEscapedInTrustedPromptPreamble(t *testing.T) {
 	}
 }
 
-
 func TestRoundtablesAreNotSerializedByProcessWideAdmission(t *testing.T) {
 	agents := &concurrentPanelAgents{started: make(chan struct{}, 4), release: make(chan struct{})}
 	runner := &NativeRunner{agents: agents, roundtables: configuredTestRoundtable(t)}
@@ -1113,7 +1110,6 @@ func TestExtractJSONObjectFailsClosedAfterMismatchedCandidate(t *testing.T) {
 		}
 	}
 }
-
 
 // Looping back to the gate without changing the artifact must not pay for a
 // fresh panel: identical bytes yield an identical verdict, so the prior findings
@@ -1544,7 +1540,6 @@ func TestPanelWithAnUnreachableSeatStillParks(t *testing.T) {
 	}
 }
 
-
 // The planner expanded a 2.8KB proposal into a 23.7KB plan that split into 11
 // packets, inventing a metadata format, a resolution contract and three CLI
 // flags with no antecedent in the request. Its prompt asked only for a complete
@@ -1629,7 +1624,6 @@ func TestPanelTreatsUnrequestedAdditionAsDriftWithoutExcusingDefects(t *testing.
 		t.Fatal("panel is not told that undocumented debt is a finding")
 	}
 }
-
 
 // The distinction has to survive in the prompt too, or reviewers will reach for
 // blocked whenever an artifact is merely bad — trading a loop for an escape hatch.
