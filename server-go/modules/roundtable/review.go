@@ -10,30 +10,26 @@ import (
 
 // The review stage carried over the event bus.
 //
-// StageDeliberate above is a pure rubric with a 40-byte fixed contract, which is
-// why it migrated with the other modules. A review is not that: it needs the
-// engine -- delegates, artifact store, worktrees, preset store, cost accounting
-// -- so it stayed on a bespoke AF_UNIX HTTP proxy (src/server/wfe_roundtable_proxy.c)
-// while everything around it moved to the bus.
+// StageDeliberate is a pure rubric with a fixed 40-byte contract, which is why
+// it migrated early. A review is not that: it convenes real agents, spends real
+// money, and has to reach the delegate resource plane. That is why it stayed on
+// a bespoke AF_UNIX HTTP proxy long after everything around it had moved.
 //
-// That proxy is a second transport doing what the bus already does, with its own
-// framing, timeouts and failure taxonomy. Its cost is not theoretical: the C side
-// and the Go side ended up with separate notions of the same panel settings,
-// reconciled nowhere, so a chair-synthesis guard added in C had no effect on
-// reviews at all.
-//
-// The handler is a closure over the reviewer rather than a package-level
-// function, so the process that already owns the engine serves the stage. The
-// module runtime owns attach, deadlines, cancellation and correlation; this only
-// decodes, calls, and encodes.
+// It can move now because the panel owns itself: seat fan-out, discussion,
+// chairing and the verdict live in modules/roundtable/panel with no
+// control-plane imports, and the plane client it convenes over holds no
+// database handle. What is left here is only the stage adapter.
 const (
-	// EventReview is the next free kind after the highest allocated module kind.
-	EventReview uint32 = 10753
+	// EventReview is roundtable's second stage kind. The allocation is not a free
+	// choice: the process contract fixes it at 4096 + ordinal*256 + stage, and
+	// roundtable is ordinal 21, so review is deliberate's successor rather than a
+	// kind taken from the top of the range.
+	EventReview uint32 = 9474
 	StageReview uint32 = 2
 )
 
-// Reviewer is the engine capability this stage needs. Narrow on purpose: the
-// stage depends on the one method, not on the runner.
+// Reviewer convenes one roundtable. Narrow on purpose: the stage depends on the
+// single capability, not on whatever assembles it.
 type Reviewer interface {
 	Review(context.Context, panel.ReviewRequest) (panel.RunResult, error)
 }
@@ -49,6 +45,8 @@ func NewReviewHandler(reviewer Reviewer) bus.ModuleHandler {
 		if reviewer == nil {
 			return nil, bus.ModuleStatusInternal
 		}
+		// Review and deliberate share a module and are told apart only by stage id,
+		// so a deliberate id arriving here is a protocol error, not a review.
 		if invocation.StageID != StageReview {
 			return nil, bus.ModuleStatusInvalidRequest
 		}
@@ -63,6 +61,9 @@ func NewReviewHandler(reviewer Reviewer) bus.ModuleHandler {
 		// so a review that overruns is reported as such rather than replied to.
 		result, err := reviewer.Review(context.Background(), decoded)
 		if err != nil {
+			// A failed review must never be reported as an empty success: a caller
+			// reading an empty result as "approved, no findings" would ship
+			// unreviewed work.
 			return nil, bus.ModuleStatusInternal
 		}
 		body, err := json.Marshal(result)
@@ -73,5 +74,26 @@ func NewReviewHandler(reviewer Reviewer) bus.ModuleHandler {
 			return nil, bus.ModuleStatusInternal
 		}
 		return body, bus.ModuleStatusOK
+	}
+}
+
+// NewHandler dispatches the module's stages.
+//
+// One process serves both, and only the stage id tells them apart, so the split
+// is made once here rather than in each handler. A nil reviewer means the review
+// stage was never configured; it is rejected rather than silently answered,
+// because a review that did not happen must not look like one that found
+// nothing.
+func NewHandler(reviewer Reviewer) bus.ModuleHandler {
+	review := NewReviewHandler(reviewer)
+	return func(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+		switch invocation.StageID {
+		case StageDeliberate:
+			return Handle(invocation, request)
+		case StageReview:
+			return review(invocation, request)
+		default:
+			return nil, bus.ModuleStatusInvalidRequest
+		}
 	}
 }

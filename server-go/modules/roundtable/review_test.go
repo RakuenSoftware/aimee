@@ -92,16 +92,51 @@ func TestReviewHandlerWithoutReviewerFailsClosed(t *testing.T) {
 	}
 }
 
-// EventReview must not collide with an allocated kind, and must sit at or above
-// the module base -- kinds below it belong to the bus itself.
-func TestReviewEventKindIsDistinct(t *testing.T) {
-	if EventReview == EventDeliberate {
-		t.Fatal("review and deliberate share an event kind")
+// The kind is not a free choice: the process contract computes it as
+// 4096 + ordinal*256 + stage, and a mismatch means the daemon routes this kind
+// to a module that does not serve it. Pinning it here catches a drift between
+// the contract and this constant at build time rather than at attach time.
+func TestReviewEventKindMatchesTheProcessContract(t *testing.T) {
+	const roundtableOrdinal = 21
+	if want := uint32(4096 + roundtableOrdinal*256 + StageReview); EventReview != want {
+		t.Fatalf("EventReview = %d, want %d", EventReview, want)
 	}
-	if EventReview < 256 {
-		t.Fatalf("EventReview %d is below BUS_KIND_MODULE_BASE", EventReview)
+	if EventReview == EventDeliberate || StageReview == StageDeliberate {
+		t.Fatal("review and deliberate must be distinguishable")
 	}
-	if StageReview == StageDeliberate {
-		t.Fatal("review and deliberate share a stage id")
+	// Deliberate is stage 1 of the same module, so review has to be its
+	// successor rather than a kind taken from elsewhere in the range.
+	if EventReview != EventDeliberate+1 {
+		t.Fatalf("EventReview %d does not follow EventDeliberate %d", EventReview, EventDeliberate)
+	}
+}
+
+// One process serves both stages, so the dispatcher must route by stage id
+// alone. A review body reaching the deliberate rubric, or the reverse, would be
+// rejected as malformed and look like a broken caller.
+func TestHandlerRoutesEachStageToItsOwnContract(t *testing.T) {
+	stub := &stubReviewer{result: panel.RunResult{RunID: "run-1", Approved: true}}
+	handler := NewHandler(stub)
+
+	request, err := json.Marshal(panel.ReviewRequest{Artifact: "diff", RunID: "run-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, status := handler(bus.ModuleInvocation{StageID: StageReview}, request); status != bus.ModuleStatusOK {
+		t.Fatalf("review stage status = %v", status)
+	}
+	if stub.calls != 1 {
+		t.Fatalf("reviewer ran %d times", stub.calls)
+	}
+	// The deliberate rubric has a fixed 40-byte contract; a review body is not
+	// one, and must be rejected rather than reaching the reviewer.
+	if _, status := handler(bus.ModuleInvocation{StageID: StageDeliberate}, request); status != bus.ModuleStatusInvalidRequest {
+		t.Fatalf("deliberate stage accepted a review body: %v", status)
+	}
+	if _, status := handler(bus.ModuleInvocation{StageID: 99}, request); status != bus.ModuleStatusInvalidRequest {
+		t.Fatalf("unknown stage was served: %v", status)
+	}
+	if stub.calls != 1 {
+		t.Fatalf("reviewer ran %d times across all stages", stub.calls)
 	}
 }

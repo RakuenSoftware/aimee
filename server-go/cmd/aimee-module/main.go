@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"github.com/JBailes/aimee/server-go/modules/benchmarks"
 	controlweb "github.com/JBailes/aimee/server-go/modules/control-web"
 	"github.com/JBailes/aimee/server-go/modules/delegates"
+	"github.com/JBailes/aimee/server-go/modules/delegates/plane"
 	modulegit "github.com/JBailes/aimee/server-go/modules/git"
 	"github.com/JBailes/aimee/server-go/modules/governance"
 	kbsynthesis "github.com/JBailes/aimee/server-go/modules/kb-synthesis"
@@ -22,6 +24,7 @@ import (
 	"github.com/JBailes/aimee/server-go/modules/memory"
 	responsecomposition "github.com/JBailes/aimee/server-go/modules/response-composition"
 	"github.com/JBailes/aimee/server-go/modules/roundtable"
+	"github.com/JBailes/aimee/server-go/modules/roundtable/panel"
 	"github.com/JBailes/aimee/server-go/modules/routing"
 	runtimeweb "github.com/JBailes/aimee/server-go/modules/runtime-web"
 	"github.com/JBailes/aimee/server-go/modules/skills"
@@ -31,6 +34,31 @@ import (
 )
 
 var errUsage = errors.New("usage: aimee-module-NAME DAEMON_MODULE_BUS_SOCKET")
+
+// roundtableReviewer assembles the review capability from this process's own
+// environment: the saved roundtables on disk, and the delegate resource plane
+// it seats them over. Both are required -- a review with no configured panel,
+// or with no way to reach an agent, is not a degraded review but no review.
+func roundtableReviewer() (*roundtable.PanelReviewer, error) {
+	home := os.Getenv("AIMEE_HOME")
+	if home == "" {
+		return nil, errors.New("AIMEE_HOME is unset")
+	}
+	socket := os.Getenv("AIMEE_AGENT_SERVICE_SOCKET")
+	url := os.Getenv("AIMEE_AGENT_SERVICE_URL")
+	if socket == "" && url == "" {
+		return nil, errors.New("no agent resource plane is configured")
+	}
+	presets, err := panel.NewStore(filepath.Join(home, "roundtables"))
+	if err != nil {
+		return nil, err
+	}
+	client, err := plane.NewHTTPAgentClient(plane.AgentHTTPConfig{BaseURL: url, UnixSocket: socket})
+	if err != nil {
+		return nil, err
+	}
+	return roundtable.NewPanelReviewer(presets, client)
+}
 
 func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 	name := strings.TrimPrefix(filepath.Base(executable), "aimee-module-")
@@ -102,6 +130,19 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 		config.PrincipalRef = 21
 		config.Stages = []bus.ModuleStage{{EventKind: roundtable.EventDeliberate, StageID: roundtable.StageDeliberate}}
 		config.Handler = roundtable.Handle
+		// Deliberate is a pure rubric and always available. Review convenes real
+		// agents, so it is served only when this process can actually reach the
+		// delegate plane and the saved roundtables. Declaring the stage anyway
+		// would make an unreachable review look like a failing one; leaving it
+		// undeclared makes the daemon report the module as not serving that kind,
+		// which is what is true.
+		if reviewer, err := roundtableReviewer(); err != nil {
+			log.Printf("roundtable review stage unavailable: %v", err)
+		} else {
+			config.Stages = append(config.Stages,
+				bus.ModuleStage{EventKind: roundtable.EventReview, StageID: roundtable.StageReview})
+			config.Handler = roundtable.NewHandler(reviewer)
+		}
 	case "kb-synthesis":
 		config.ModuleName = name
 		config.PrincipalRef = 22
