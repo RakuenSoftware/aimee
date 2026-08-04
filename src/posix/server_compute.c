@@ -540,9 +540,14 @@ static void chat_stream_worker_codex(compute_ctx_t *cctx, const char *message,
 
 static void chat_agent_add_default_roles(agent_t *ag)
 {
-   const char *roles[] = {"code", "review", "explain", "refactor", "draft", "execute"};
+   /* These agents are synthesized from legacy provider settings, not from an
+    * operator role selection. Review gate authority must therefore stay off
+    * until the agent is explicitly registered with the review role. */
+   const char *roles[] = {"code", "explain", "refactor", "draft", "execute"};
    ag->role_count = 0;
-   for (int i = 0; i < 6 && ag->role_count < MAX_AGENT_ROLES; i++)
+   for (int i = 0; i < (int)(sizeof(roles) / sizeof(roles[0])) &&
+                   ag->role_count < MAX_AGENT_ROLES;
+        i++)
       snprintf(ag->roles[ag->role_count++], sizeof(ag->roles[0]), "%s", roles[i]);
 }
 

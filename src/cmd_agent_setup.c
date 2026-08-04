@@ -123,7 +123,8 @@ static void setup_api_provider(agent_config_t *cfg, const char *provider, const 
 
    char roles_buf[256];
    read_line(
-       "Roles (comma-separated, default: summarize,format,draft,review,explain,code,execute): ",
+       "Roles (comma-separated, default: summarize,format,draft,explain,code,execute; "
+       "add review explicitly to authorize review work): ",
        roles_buf, sizeof(roles_buf), 0);
 
    char tier_buf[16];
@@ -201,9 +202,8 @@ static void setup_api_provider(agent_config_t *cfg, const char *provider, const 
    }
    else
    {
-      const char *defaults[] = {"summarize", "format", "draft",  "review",
-                                "explain",   "code",   "execute"};
-      for (int i = 0; i < 7; i++)
+      const char *defaults[] = {"summarize", "format", "draft", "explain", "code", "execute"};
+      for (int i = 0; i < (int)(sizeof(defaults) / sizeof(defaults[0])); i++)
          snprintf(ag->roles[ag->role_count++], 32, "%s", defaults[i]);
    }
 
