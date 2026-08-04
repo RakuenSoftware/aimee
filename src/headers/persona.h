@@ -133,7 +133,7 @@ extern "C"
    int persona_delete(const char *name);
 
    /* 1 if name is a built-in persona (engineer/novel/songwriter/qa/security/
-    * reviewer/architect). */
+    * reviewer/chairman/architect and the other bundled review lenses). */
    int persona_is_builtin(const char *name);
 
    /* 1 if `name` resolves to a real persona: a built-in, or a project/user file.
