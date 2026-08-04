@@ -1,0 +1,138 @@
+# Appliance state recovery
+
+Two pieces of live state live on tier-bound volumes for an `aimee-server`
+appliance: the agent config (`$AIMEE_HOME/agents.json`) and the workspace
+repo's git metadata (`$WS/.git`). Both can be lost or corrupted by a missing
+volume, a partial restore, or a botched edit. The symptoms are specific and
+the recovery is mechanical; this runbook is the checklist.
+
+Throughout this runbook:
+
+- `$AIMEE_HOME` is the server's data directory (e.g. `/var/lib/aimee`).
+- `$WS` is the affected workspace repo path (e.g.
+  `/var/lib/aimee/workspaces/<user>/<repo>`).
+- `$CANONICAL_HTTPS_URL` is the canonical HTTPS clone URL of that repo
+  (the same URL the forge uses).
+
+All commands assume shell expansion of these variables. Run them as the
+server runtime user.
+
+## Failure Mode 1 — Lost or absent `agents.json`
+
+### Symptom
+
+`GET /v1/agents` returns `502 agents backend unavailable`.
+
+> `GET /v1/agent/list` masks the failure as an empty array. Probe with
+> `/v1/agents` (the strict endpoint) to see it.
+
+### Confirm
+
+`agents.json` is missing or zero-bytes; one or more sibling backups exist:
+
+```bash
+ls -l "$AIMEE_HOME/agents.json"
+ls -1 "$AIMEE_HOME"/agents.json.bak-*
+```
+
+### Recover
+
+Pick the latest backup, restore it in place preserving mode/timestamps,
+bust the in-process identity cache (mtime + size + inode) with `touch`,
+then probe the strict endpoint:
+
+```bash
+bak="$(ls -1t "$AIMEE_HOME"/agents.json.bak-* | head -n1)"
+cp -p "$bak" "$AIMEE_HOME/agents.json"
+touch "$AIMEE_HOME/agents.json"
+curl -fsS http://127.0.0.1:8740/v1/agents
+```
+
+API keys live in the vault keyed by agent name, not in `agents.json`. A
+restored config needs no secrets re-entered — the vault lookups continue
+to resolve unchanged.
+
+## Failure Mode 2 — Stale but present `agents.json`
+
+### Symptom
+
+The daemon reports the agent config as absent even though the file is
+clearly valid on disk.
+
+### Confirm
+
+`agents.json` exists with non-zero size, but its mtime is in the past
+relative to the box clock. Size and inode are unchanged across reads:
+
+```bash
+stat "$AIMEE_HOME/agents.json"
+```
+
+`Modify:` predates the current clock; `Size:` and `Inode:` are stable
+between successive `stat` calls.
+
+### Recover
+
+Refresh mtime and inode so the cache invalidator notices, then probe:
+
+```bash
+touch "$AIMEE_HOME/agents.json"
+curl -fsS http://127.0.0.1:8740/v1/agents
+```
+
+## Failure Mode 3 — Corrupt or lost workspace repo git dir
+
+### Symptom
+
+- Proposals trigger logs report `ls-tree failed ... rc=128` on every poll.
+- Forge logs report `resolve https origin: no origin remote` for the
+  affected workspace repo.
+
+### Confirm
+
+Run the clone probe on a sibling path **on the same volume** as `$WS` so
+storage faults are visible. `/tmp` would mask a tier-bound volume fault,
+so pick a directory under `$AIMEE_HOME`:
+
+```bash
+test_repo="$AIMEE_HOME/.recovery-probe-$RANDOM"
+git clone --no-local "$CANONICAL_HTTPS_URL" "$test_repo"
+cd "$test_repo"
+git rev-parse HEAD
+git ls-remote origin HEAD
+```
+
+Sanity checks before you proceed with the real recovery:
+
+- `[ "$(stat -c '%m' "$WS")" = "$(stat -c '%m' "$test_repo")" ]` —
+  the probe and the broken repo share a mount (same dev id).
+- `git rev-parse HEAD` resolves to a commit hash on the probe.
+- `git ls-remote origin HEAD` returns a matching remote HEAD.
+
+If the probe clone succeeds and the canonical remote answers, the
+storage layer is fine; the on-disk `$WS/.git` is the fault.
+
+### Recover
+
+Move the broken repo aside to preserve any uncommitted state, then clone
+a clean single-branch repo from the canonical HTTPS URL into `$WS`. Do
+**not** edit `$WS/.git` in place and do **not** `rm -rf` the workspace
+root — `mv` keeps the broken copy recoverable:
+
+```bash
+ts="$(date -u +%Y%m%dT%H%M%SZ)"
+mv "$WS" "${WS}.bak.${ts}"
+git clone --single-branch "$CANONICAL_HTTPS_URL" "$WS"
+```
+
+Verify the fresh clone has its `origin` set correctly and that HEAD
+resolves:
+
+```bash
+git -C "$WS" remote -v
+git -C "$WS" rev-parse HEAD
+```
+
+The fresh clone uses the canonical `origin` URL and tracks the default
+branch by virtue of `--single-branch`; no `remote set-url` or
+`symbolic-ref` step is required.
