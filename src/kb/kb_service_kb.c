@@ -489,6 +489,44 @@ static cJSON *kb_service_health_object(void)
          snprintf(msg, sizeof(msg), "curator: %d job(s) failing", n);
       cJSON_AddItemToArray(warnings, cJSON_CreateString(msg));
    }
+   /* TWO GATES THAT DO NOT AGREE.
+    *
+    * memory.store enqueues a "memory_facts" job whenever typed_facts_enabled is on,
+    * which is the DEFAULT. The only consumer of those jobs is kb_memory_facts_drain,
+    * which runs on the curator LLM lane -- and that lane deliberately does not start
+    * without a synthesis endpoint ("NO SYNTHESIS PROVIDER => NO LLM LANE"). Both
+    * decisions are individually right. Together they mean an install with no synth
+    * provider, which is a supported configuration, enqueues one row per stored
+    * memory that nothing will ever claim.
+    *
+    * Measured on the e2e VM: 4 memory_facts jobs pending for 11.5 hours with
+    * attempts=0, while /v1/health reported status ok and an empty warnings array,
+    * and `aimee kb status` printed "4 pending" with no hint that pending here means
+    * forever. It grows without bound for the life of the install.
+    *
+    * NOT a blocker. Running without a synthesis provider is explicitly supported,
+    * and memory store and search work perfectly; only typed-fact enrichment is
+    * deferred. Degrading the verdict for a supported configuration is exactly the
+    * dilution this file's status derivation exists to avoid. It is a warning, and
+    * it says the backlog is not lost -- configuring a provider drains it. */
+   if (config_typed_facts_enabled())
+   {
+      int facts_pending = db2_kb_async_count_kind_pending("memory_facts");
+      char synth_endpoint[512];
+      if (facts_pending > 0 &&
+          !config_synth_chat_endpoint_current(synth_endpoint, sizeof(synth_endpoint)))
+      {
+         char msg[320];
+         snprintf(msg, sizeof(msg),
+                  "typed-fact extraction: %d job(s) queued with nothing to drain them — no "
+                  "synthesis endpoint is configured, so the curator LLM lane is not running. "
+                  "Memories are stored and searchable but contribute no typed facts. The "
+                  "backlog is not lost: configuring a synthesis provider drains it.",
+                  facts_pending);
+         cJSON_AddItemToArray(warnings, cJSON_CreateString(msg));
+      }
+   }
+
    if (freshness_days > 30)
       cJSON_AddItemToArray(warnings, cJSON_CreateString("KB not ingested in over 30 days"));
    else if (freshness_days > 7)
