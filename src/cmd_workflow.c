@@ -372,12 +372,19 @@ static int cmd_run(int argc, char **argv, int json_output)
     * manual submissions with no repository source to retire. */
    if (proposal_file && strcmp(proposal_file, "-") != 0 && !aimee_path_is_absolute(proposal_file))
    {
-      const char *source = proposal_file;
-      while (source[0] == '.' && (source[1] == '/' || source[1] == '\\'))
-         source += 2;
-      if (strncmp(source, "docs/proposals/pending/", 23) == 0 && !strstr(source, "/../") &&
-          !strstr(source, "\\..\\") && !strchr(source, '\\'))
-         cJSON_AddStringToObject(req, "source_path", source);
+      size_t source_len = strlen(proposal_file);
+      char *normalized = malloc(source_len + 1);
+      if (normalized)
+      {
+         for (size_t i = 0; i <= source_len; i++)
+            normalized[i] = proposal_file[i] == '\\' ? '/' : proposal_file[i];
+         const char *source = normalized;
+         while (source[0] == '.' && source[1] == '/')
+            source += 2;
+         if (strncmp(source, "docs/proposals/pending/", 23) == 0 && !strstr(source, "/../"))
+            cJSON_AddStringToObject(req, "source_path", source);
+         free(normalized);
+      }
    }
    if (repo && repo[0])
       cJSON_AddStringToObject(req, "repo", repo);
