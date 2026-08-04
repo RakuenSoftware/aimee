@@ -1649,6 +1649,17 @@ void print_server_health(cJSON *resp)
       {
          printf("  the knowledge base did not answer; memory and kb search will not work.\n");
          printf("  `aimee kb status` has the detail.\n");
+         /* "did not answer" reads as a network problem, and the most common cause
+          * is not. A kb that refuses to start fails CLOSED before it ever binds
+          * the health port, so its diagnosis never reaches this response and
+          * exists only in the container log. Measured: booting a 768-dimension
+          * embedder over a corpus recorded at 384 logs the width, both sides, and
+          * the remedy, then holds DB2 unready until the container crashloops --
+          * and every operator-facing surface said "unreachable", pointing away
+          * from the one place that already knew the answer. Name that place. */
+         printf("  if it never became healthy, the reason is in its own log and not\n");
+         printf("  on the network: `docker logs aimee-kb` (compose) or the kb\n");
+         printf("  service log for your deployment.\n");
       }
    }
 }
