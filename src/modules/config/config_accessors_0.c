@@ -991,10 +991,3 @@ int config_roundtable_chair_synthesis(void)
    config_field_read(offsetof(config_t, roundtable_chair_synthesis), sizeof(v), &v);
    return v;
 }
-
-int config_verify_cross_project(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, verify_cross_project), sizeof(v), &v);
-   return v;
-}

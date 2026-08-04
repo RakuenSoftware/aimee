@@ -167,13 +167,18 @@ int config_retry_max_ms(void)
 {
    return 0;
 }
-int http_retry_post(const char *u, const char *a, const char *b, char **r, int t)
+int http_retry_post(const char *u, const char *a, const char *b, char **r, int t,
+                    const char *headers, int attempts, int base_ms, int max_ms)
 {
    (void)u;
    (void)a;
    (void)b;
    (void)r;
    (void)t;
+   (void)headers;
+   (void)attempts;
+   (void)base_ms;
+   (void)max_ms;
    return -1;
 }
 

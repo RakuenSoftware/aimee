@@ -3,7 +3,7 @@ services:
     restart: unless-stopped
     # Published image (pushed to ghcr on every merge to main); override
     # AIMEE_KB_IMAGE to pin a version or use a fork/registry.
-    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:${AIMEE_IMAGE_TAG:-latest}}
+    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb-a25m:${AIMEE_IMAGE_TAG:-latest}}
     build:
       context: .
       dockerfile: Dockerfile

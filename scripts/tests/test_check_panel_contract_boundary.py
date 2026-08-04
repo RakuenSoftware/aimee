@@ -22,14 +22,9 @@ SPEC.loader.exec_module(checker)
 
 class PanelContractBoundaryTests(unittest.TestCase):
     def fixture(self, root: Path) -> None:
-        paths = {
-            "src/cmd_agent_delegate.c",
-            "src/modules/workflows/wfe_live_panel.c",
-            "src/server/server_compute.c",
-            "src/server/server_sweep.c",
-            "src/headers/evidence_replay.h",
-            "src/server/server_pipeline.c",
-        }
+        paths = set(checker.TEMPORARY_TYPE_CONSUMERS)
+        paths |= set(checker.TEMPORARY_ENSEMBLE_CONSUMERS)
+        paths.add("src/server/server_pipeline.c")
         paths |= {
             "src/modules/roundtable/roundtable_types.h",
             "src/tests/test_delegate_ensemble.c",
@@ -79,6 +74,20 @@ class PanelContractBoundaryTests(unittest.TestCase):
             root = Path(tmp)
             self.fixture(root)
             checker.validate(root)
+
+    def test_known_debt_disappearing_requires_ratchet_update(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.fixture(root)
+            path = root / "src/cmd_agent_delegate.c"
+            path.write_text(path.read_text(encoding="utf-8").replace(
+                '#include "delegate_ensemble.h"',
+                '#include <aimee/delegates/panel_provider.h>',
+                1,
+            ), encoding="utf-8")
+            with self.assertRaisesRegex(checker.CheckError,
+                                        "rule=temporary-ensemble-header-debt"):
+                checker.validate(root)
 
 
 if __name__ == "__main__":
