@@ -1,0 +1,6 @@
+[12:33:22Z] sizing: starting one server to measure resident VRAM
+[12:33:39Z]   one instance uses  MiB of 24560 MiB
+[12:33:39Z]   -> running 4 processes, cache-ram 1024 MiB each
+[12:34:28Z]   all 4 servers up; VRAM now  MiB
+[12:34:28Z] START scale.np4.nomtp across 4 shards
+[12:39:24Z] DONE scale.np4.nomtp rows=200/200 wall=4m56s procs=4 retries=0

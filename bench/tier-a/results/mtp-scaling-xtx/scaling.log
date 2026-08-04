@@ -1,0 +1,24 @@
+[11:51:43Z] === MTP scaling on the XTX: E2B UD-Q4_K_XL, 200 notes, nproc 1..4 x {mtp,nomtp}
+[11:51:43Z]     speed only; these outputs are not scored
+[11:51:43Z] --- scale.np1.mtp  nproc=1  mtp
+[11:57:43Z] RESULT scale.np1.mtp n=200 per-stream=293.9 tok/s aggregate=269.8 tok/s notes/min=33.3 med_tok=448 med_lat=1473ms wall=360s
+[11:57:43Z] --- scale.np1.nomtp  nproc=1  nomtp
+[12:07:52Z] RESULT scale.np1.nomtp n=200 per-stream=167.9 tok/s aggregate=159.9 tok/s notes/min=19.7 med_tok=456 med_lat=2761ms wall=609s
+[12:07:52Z] --- scale.np2.mtp  nproc=2  mtp
+[12:12:09Z] RESULT scale.np2.mtp n=200 per-stream=230.8 tok/s aggregate=374.4 tok/s notes/min=46.7 med_tok=454 med_lat=1882ms wall=257s
+[12:12:09Z] --- scale.np2.nomtp  nproc=2  nomtp
+[12:19:01Z] RESULT scale.np2.nomtp n=200 per-stream=133.3 tok/s aggregate=235.0 tok/s notes/min=29.1 med_tok=460 med_lat=3460ms wall=412s
+[12:19:01Z] --- scale.np3.mtp  nproc=3  mtp
+[12:22:57Z] RESULT scale.np3.mtp n=200 per-stream=188.0 tok/s aggregate=400.5 tok/s notes/min=50.8 med_tok=446 med_lat=2305ms wall=236s
+[12:22:57Z] --- scale.np3.nomtp  nproc=3  nomtp
+[12:29:12Z] RESULT scale.np3.nomtp n=200 per-stream=105.9 tok/s aggregate=258.9 tok/s notes/min=32.0 med_tok=469 med_lat=4364ms wall=375s
+[12:29:12Z] --- scale.np4.mtp  nproc=4  mtp
+[12:33:17Z] RESULT scale.np4.mtp n=200 per-stream=150.8 tok/s aggregate=399.5 tok/s notes/min=49.0 med_tok=454 med_lat=2880ms wall=245s
+[12:33:17Z] --- scale.np4.nomtp  nproc=4  nomtp
+[12:39:29Z] RESULT scale.np4.nomtp n=200 per-stream=84.0 tok/s aggregate=262.1 tok/s notes/min=32.3 med_tok=472 med_lat=5510ms wall=372s
+[12:39:29Z] === SCALING SWEEP COMPLETE ===
+[12:39:29Z] SUMMARY per-stream tok/s, and the mtp/nomtp ratio at each process count:
+[12:39:29Z] nproc=1  mtp= 293.9  nomtp= 167.9  ratio=1.75x
+[12:39:29Z] nproc=2  mtp= 230.8  nomtp= 133.3  ratio=1.73x
+[12:39:29Z] nproc=3  mtp= 188.0  nomtp= 105.9  ratio=1.78x
+[12:39:29Z] nproc=4  mtp= 150.8  nomtp=  84.0  ratio=1.79x

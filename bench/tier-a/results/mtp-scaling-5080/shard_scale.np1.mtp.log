@@ -1,0 +1,6 @@
+[11:18:56Z] sizing: starting one server to measure resident VRAM
+[11:19:27Z]   one instance uses 2082 MiB of 16303 MiB
+[11:19:27Z]   -> running 1 processes, cache-ram 1024 MiB each
+[11:19:28Z]   all 1 servers up; VRAM now 2082 MiB
+[11:19:28Z] START scale.np1.mtp across 1 shards
+[11:23:54Z] DONE scale.np1.mtp rows=200/200 wall=4m26s procs=1 retries=0

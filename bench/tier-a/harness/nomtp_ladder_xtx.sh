@@ -12,12 +12,24 @@
 # 14/20 notes), and MTP moves 26 of 100 notes relative to a sequential run --
 # a number that was read as speed and never checked against the score.
 #
-# RUNS ON THE XTX, all six arms, deliberately. The MTP arms these pair against
-# were all taken on the XTX; running the no-MTP side on the 5080 would put the
-# card inside the comparison, and this benchmark moves more between
-# configurations than between the things being compared. That costs the
-# parallelism -- one card, one arm at a time -- and the alternative costs the
-# result.
+# ALL SIX ARMS ON THE XTX, SEQUENTIALLY, GROUPED BY MODEL.
+#
+# Every MTP arm this pairs against is banked on the XTX at cache-ram 1024. A
+# model's MTP and no-MTP sides must share a card or the card sits inside the
+# comparison, and this benchmark moves more between configurations than between
+# the things being compared. Putting the no-MTP side anywhere else would mean
+# re-taking the MTP side there too -- six extra arms to answer the same question,
+# and a second E2B lineage that could not be compared with the ladder of record.
+#
+# So this is the whole job, and it is serial by necessity rather than by choice.
+# Splitting it across cards was tried twice and is wrong both ways: E4B-only here
+# with E2B on the 5080 puts 3 arms on one card and 6 on the other, which is
+# slower than 6 here, and it forks E2B into two incomparable sets.
+#
+# The 5080 is left free for unrelated work.
+#
+# Grouped by model rather than interleaved by quant: all three E2B arms, then all
+# three E4B arms. Same total, and the E2B comparison completes as a set.
 #
 # Everything else is held to the banked arms exactly: nproc=3, cache-ram 1024,
 # prompt v8, thinking on, same quants, same gold. The ONLY difference is DRAFT.
@@ -25,8 +37,7 @@
 # Output goes to a separate directory so the MTP arms stay banked under their own
 # labels and the pairing is by name across the two directories.
 #
-# Ordered to front-load a usable answer: both Q4 arms first, so the paired Q4
-# comparison exists before the slower quants have run.
+# Ordered Q4, Q6, Q8 so the cheapest pairing completes first.
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
@@ -40,15 +51,13 @@ say() { echo "[$(date -u +%H:%M:%SZ)] $*" | tee -a "$OUT/nomtp.log"; }
 # label|repo|base_port
 ARMS="\
 E2B.UD-Q4_K_XL.10k|unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL|8700
-E4B.UD-Q4_K_XL.10k|unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL|8700
 E2B.UD-Q6_K_XL.10k|unsloth/gemma-4-E2B-it-GGUF:UD-Q6_K_XL|8700
-E4B.UD-Q6_K_XL.10k|unsloth/gemma-4-E4B-it-GGUF:UD-Q6_K_XL|8700
 E2B.UD-Q8_K_XL.10k|unsloth/gemma-4-E2B-it-GGUF:UD-Q8_K_XL|8700
+E4B.UD-Q4_K_XL.10k|unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL|8700
+E4B.UD-Q6_K_XL.10k|unsloth/gemma-4-E4B-it-GGUF:UD-Q6_K_XL|8700
 E4B.UD-Q8_K_XL.10k|unsloth/gemma-4-E4B-it-GGUF:UD-Q8_K_XL|8700"
 
-say "=== waiting for the E4B cache-ram re-run to release the XTX"
-while pgrep -f 'rerun_e4b_10k_cacheram[.]sh' >/dev/null 2>&1; do sleep 120; done
-say "=== XTX free; starting the no-MTP ladder, 6 arms, $EXPECT notes each"
+say "=== XTX: no-MTP ladder, 6 arms (E2B x3 then E4B x3), $EXPECT notes each"
 
 while IFS='|' read -r label repo port; do
   [ -n "${label:-}" ] || continue

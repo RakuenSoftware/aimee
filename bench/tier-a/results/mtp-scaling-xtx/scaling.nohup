@@ -1,0 +1,80 @@
+[11:51:43Z] === MTP scaling on the XTX: E2B UD-Q4_K_XL, 200 notes, nproc 1..4 x {mtp,nomtp}
+[11:51:43Z]     speed only; these outputs are not scored
+[11:51:43Z] --- scale.np1.mtp  nproc=1  mtp
+[11:51:48Z] sizing: starting one server to measure resident VRAM
+[11:52:07Z]   one instance uses  MiB of 24560 MiB
+[11:52:07Z]   -> running 1 processes, cache-ram 1024 MiB each
+[11:52:07Z]   all 1 servers up; VRAM now  MiB
+[11:52:07Z] START scale.np1.mtp across 1 shards
+merged 200 rows, 0 missing
+[11:57:38Z] DONE scale.np1.mtp rows=200/200 wall=5m31s procs=1 retries=0
+[11:57:43Z] RESULT scale.np1.mtp n=200 per-stream=293.9 tok/s aggregate=269.8 tok/s notes/min=33.3 med_tok=448 med_lat=1473ms wall=360s
+[11:57:43Z] --- scale.np1.nomtp  nproc=1  nomtp
+[11:57:48Z] sizing: starting one server to measure resident VRAM
+[11:58:05Z]   one instance uses  MiB of 24560 MiB
+[11:58:05Z]   -> running 1 processes, cache-ram 1024 MiB each
+[11:58:05Z]   all 1 servers up; VRAM now  MiB
+[11:58:05Z] START scale.np1.nomtp across 1 shards
+merged 200 rows, 0 missing
+[12:07:46Z] DONE scale.np1.nomtp rows=200/200 wall=9m41s procs=1 retries=0
+[12:07:52Z] RESULT scale.np1.nomtp n=200 per-stream=167.9 tok/s aggregate=159.9 tok/s notes/min=19.7 med_tok=456 med_lat=2761ms wall=609s
+[12:07:52Z] --- scale.np2.mtp  nproc=2  mtp
+[12:07:57Z] sizing: starting one server to measure resident VRAM
+[12:08:13Z]   one instance uses  MiB of 24560 MiB
+[12:08:13Z]   -> running 2 processes, cache-ram 1024 MiB each
+[12:08:32Z]   all 2 servers up; VRAM now  MiB
+[12:08:32Z] START scale.np2.mtp across 2 shards
+merged 200 rows, 0 missing
+[12:12:04Z] DONE scale.np2.mtp rows=200/200 wall=3m31s procs=2 retries=0
+[12:12:09Z] RESULT scale.np2.mtp n=200 per-stream=230.8 tok/s aggregate=374.4 tok/s notes/min=46.7 med_tok=454 med_lat=1882ms wall=257s
+[12:12:09Z] --- scale.np2.nomtp  nproc=2  nomtp
+[12:12:14Z] sizing: starting one server to measure resident VRAM
+[12:12:30Z]   one instance uses  MiB of 24560 MiB
+[12:12:30Z]   -> running 2 processes, cache-ram 1024 MiB each
+[12:12:47Z]   all 2 servers up; VRAM now  MiB
+[12:12:47Z] START scale.np2.nomtp across 2 shards
+merged 200 rows, 0 missing
+[12:18:55Z] DONE scale.np2.nomtp rows=200/200 wall=6m8s procs=2 retries=0
+[12:19:01Z] RESULT scale.np2.nomtp n=200 per-stream=133.3 tok/s aggregate=235.0 tok/s notes/min=29.1 med_tok=460 med_lat=3460ms wall=412s
+[12:19:01Z] --- scale.np3.mtp  nproc=3  mtp
+[12:19:06Z] sizing: starting one server to measure resident VRAM
+[12:19:22Z]   one instance uses  MiB of 24560 MiB
+[12:19:22Z]   -> running 3 processes, cache-ram 1024 MiB each
+[12:19:57Z]   all 3 servers up; VRAM now  MiB
+[12:19:57Z] START scale.np3.mtp across 3 shards
+merged 200 rows, 0 missing
+[12:22:51Z] DONE scale.np3.mtp rows=200/200 wall=2m54s procs=3 retries=0
+[12:22:57Z] RESULT scale.np3.mtp n=200 per-stream=188.0 tok/s aggregate=400.5 tok/s notes/min=50.8 med_tok=446 med_lat=2305ms wall=236s
+[12:22:57Z] --- scale.np3.nomtp  nproc=3  nomtp
+[12:23:02Z] sizing: starting one server to measure resident VRAM
+[12:23:18Z]   one instance uses  MiB of 24560 MiB
+[12:23:18Z]   -> running 3 processes, cache-ram 1024 MiB each
+[12:23:51Z]   all 3 servers up; VRAM now  MiB
+[12:23:51Z] START scale.np3.nomtp across 3 shards
+merged 200 rows, 0 missing
+[12:29:06Z] DONE scale.np3.nomtp rows=200/200 wall=5m15s procs=3 retries=0
+[12:29:12Z] RESULT scale.np3.nomtp n=200 per-stream=105.9 tok/s aggregate=258.9 tok/s notes/min=32.0 med_tok=469 med_lat=4364ms wall=375s
+[12:29:12Z] --- scale.np4.mtp  nproc=4  mtp
+[12:29:17Z] sizing: starting one server to measure resident VRAM
+[12:29:33Z]   one instance uses  MiB of 24560 MiB
+[12:29:33Z]   -> running 4 processes, cache-ram 1024 MiB each
+[12:30:25Z]   all 4 servers up; VRAM now  MiB
+[12:30:25Z] START scale.np4.mtp across 4 shards
+merged 200 rows, 0 missing
+[12:33:12Z] DONE scale.np4.mtp rows=200/200 wall=2m47s procs=4 retries=0
+[12:33:17Z] RESULT scale.np4.mtp n=200 per-stream=150.8 tok/s aggregate=399.5 tok/s notes/min=49.0 med_tok=454 med_lat=2880ms wall=245s
+[12:33:17Z] --- scale.np4.nomtp  nproc=4  nomtp
+[12:33:22Z] sizing: starting one server to measure resident VRAM
+[12:33:39Z]   one instance uses  MiB of 24560 MiB
+[12:33:39Z]   -> running 4 processes, cache-ram 1024 MiB each
+[12:34:28Z]   all 4 servers up; VRAM now  MiB
+[12:34:28Z] START scale.np4.nomtp across 4 shards
+merged 200 rows, 0 missing
+[12:39:24Z] DONE scale.np4.nomtp rows=200/200 wall=4m56s procs=4 retries=0
+[12:39:29Z] RESULT scale.np4.nomtp n=200 per-stream=84.0 tok/s aggregate=262.1 tok/s notes/min=32.3 med_tok=472 med_lat=5510ms wall=372s
+[12:39:29Z] === SCALING SWEEP COMPLETE ===
+[12:39:29Z] SUMMARY per-stream tok/s, and the mtp/nomtp ratio at each process count:
+[12:39:29Z] nproc=1  mtp= 293.9  nomtp= 167.9  ratio=1.75x
+[12:39:29Z] nproc=2  mtp= 230.8  nomtp= 133.3  ratio=1.73x
+[12:39:29Z] nproc=3  mtp= 188.0  nomtp= 105.9  ratio=1.78x
+[12:39:29Z] nproc=4  mtp= 150.8  nomtp=  84.0  ratio=1.79x

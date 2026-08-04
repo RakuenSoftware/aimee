@@ -816,3 +816,81 @@ indistinguishable from zero is how the +0.084 claim survived for months
 **A null result is a real possibility and would still be the finding.** The 26
 perturbed notes can cancel in aggregate. "1.6x-1.8x for no measurable accuracy
 cost" is the answer a reader wants, and it would be earned rather than assumed.
+
+## 24. What MTP costs, what it buys, and the number that was neither
+
+Article 3 says MTP changes 26 of 100 notes and buys 1.83x on E4B, 1.59x on E2B,
+measured at one process on 100 notes. Two paired sweeps now put a proper interval
+around that: **1.58x to 1.91x**, eight measurements, two backends, four process
+counts each, 200 notes per config, steady state.
+
+| card | nproc | MTP | no-MTP | ratio |
+|---|---:|---:|---:|---:|
+| 5080 (CUDA) | 1 | 47.6 | 30.1 | 1.58x |
+| 5080 | 2 | 67.4 | 36.7 | 1.84x |
+| 5080 | 3 | 59.9 | 34.4 | 1.74x |
+| 5080 | 4 | 61.8 | 33.6 | 1.84x |
+| XTX (Vulkan) | 1 | 40.7 | 21.7 | 1.87x |
+| XTX | 2 | 63.8 | 34.7 | 1.84x |
+| XTX | 3 | 78.1 | 41.2 | 1.89x |
+| XTX | 4 | 83.3 | 43.6 | 1.91x |
+
+finding 12's 1.59x sits at the bottom of that band, at the process count where it
+was taken. The article can now say "1.6x-1.9x depending on card and shard count"
+instead of quoting one number, which is the same correction finding 12 already
+made for models and never made for anything else.
+
+**The accuracy half is still not measured.** The 10k no-MTP arms that would give
+F1 on both sides were stopped to free the card for this. What MTP's 26 changed
+notes do to the score remains open, and it is the question a reader will ask
+first.
+
+### The best paragraph in this whole investigation is about the instrument
+
+The sweep's throughput metric was rows divided by wall clock. Wall clock includes
+server startup. Startup is ~30 seconds per server, so it grows with the process
+count -- the exact variable under test:
+
+| card | np1 | np2 | np3 | np4 |
+|---|---:|---:|---:|---:|
+| 5080 | 56s | 84s | 107s | 137s |
+| XTX | 61s | 67s | 83s | 99s |
+
+On a 200-note run that is a third of the wall clock at nproc=1 and nearly half at
+nproc=4. The metric did not merely add noise; it added a bias pointing the same
+way as the hypothesis being tested, which is the worst kind.
+
+It produced two confident, wrong conclusions, both of which were reported before
+being caught: that aggregate throughput peaks at two processes and declines (it
+plateaus), and that four processes are slower than one (they are 30-100% faster).
+
+Worth writing because the fix is not clever -- compute throughput from
+per-request latency and process count, ignore the wall clock -- and because the
+wrong version looked completely reasonable in a table.
+
+### And the number that was neither
+
+A 5.3x MTP speedup was reported from the 10k arms, questioned as implausible, and
+is now withdrawn. It came from dividing a **completed** 10,000-note MTP average
+by an **early-partial** no-MTP rate. Neither figure was wrong; the division was
+meaningless.
+
+This is the third time in this project a headline number turned out to be an
+arithmetic relationship between two incomparable measurements -- after the +0.084
+thinking gain (defect 32) and the 4-slot v8-baseline reference. The pattern is
+always the same: two numbers exist, a ratio is taken, and nobody asks whether the
+denominators match.
+
+### The open thread
+
+At nproc=3 no-MTP, the 10k arm ran ~13 notes/min where the sweep's steady state
+is 41.2. Startup cannot explain it. While that arm was live the server accounted
+for 4.7s per request and the client measured 13.7s -- nine seconds unaccounted,
+a gap the 200-note sweep does not show.
+
+Either long runs behave differently from short ones -- prompt-cache pressure at
+10,000 distinct notes against 200 is the obvious suspect, and `--cache-ram 1024`
+holds about 38 entries -- or that run was a transient. One 2000-note run settles
+it by showing whether the rate decays with corpus position. It has not been run,
+and until it is, **no 10k throughput figure in this project should be compared
+against a 200-note one.**

@@ -1569,3 +1569,99 @@ Reasoning coverage is not uniform across the ladder: 10000/10000 on all three E2
 arms, 9989 on E4B Q4, 9994 on E4B Q8, and **8673 on E4B Q6**. All are above the
 guard's zero threshold so all scored without flags. No explanation is offered
 here because none has been measured.
+
+## Defect 35: the throughput metric included server startup, and startup scales with nproc
+
+`notes/min` in the scaling sweeps is rows divided by wall clock, and wall clock
+starts before the servers do. Measured startup, median of both modes:
+
+| card | nproc=1 | nproc=2 | nproc=3 | nproc=4 |
+|---|---:|---:|---:|---:|
+| 5080 | 56s | 84s | 107s | 137s |
+| XTX | 61s | 67s | 83s | 99s |
+
+Roughly 30s of model load per additional server. On a 200-note run that is a
+third to a half of the wall clock, and **it is not a constant across the
+configurations being compared** -- it grows with the variable under test. So the
+metric systematically penalised higher process counts, which is what the sweep
+existed to measure.
+
+Corrected by computing steady-state throughput from per-request latency and
+process count (`nproc * 60 / median_latency_s`) instead:
+
+| card | nproc | MTP | no-MTP | ratio |
+|---|---:|---:|---:|---:|
+| 5080 | 1 | 47.6 | 30.1 | 1.58x |
+| 5080 | 2 | 67.4 | 36.7 | 1.84x |
+| 5080 | 3 | 59.9 | 34.4 | 1.74x |
+| 5080 | 4 | 61.8 | 33.6 | 1.84x |
+| XTX | 1 | 40.7 | 21.7 | 1.87x |
+| XTX | 2 | 63.8 | 34.7 | 1.84x |
+| XTX | 3 | 78.1 | 41.2 | 1.89x |
+| XTX | 4 | 83.3 | 43.6 | 1.91x |
+
+### Two claims retracted
+
+Both were made from the contaminated metric and both were wrong.
+
+**"Aggregate throughput peaks at nproc=2 and declines."** It plateaus. Steady
+state on the 5080 is 47.6 / 67.4 / 59.9 / 61.8 -- flat after two processes, not
+falling.
+
+**"nproc=4 is 25% below peak and slower than a single process."** nproc=4 is
+FASTER than nproc=1 on both cards (61.8 vs 47.6 on the 5080, 83.3 vs 40.7 on the
+XTX). The apparent decline was entirely the extra 80s of startup that four
+servers cost over one.
+
+### What survives, and is stronger for the correction
+
+**MTP is worth 1.58x-1.91x, and it does not depend much on process count.** Eight
+paired measurements across two backends land in that band. finding 12's 1.59x
+sits at the bottom of it, measured at nproc=1 where this table also reads 1.58x.
+
+**The scaling curves differ by backend.** The 5080 (CUDA) flattens after two
+processes; the XTX (RADV Vulkan) is still climbing at four, 40.7 -> 83.3. The
+project runs nproc=3 on both cards, chosen by what fits in VRAM. On the XTX that
+leaves throughput on the table; on the 5080 it is past the point where more
+processes buy anything.
+
+Per-stream throughput falls with every added process on both cards (5080 MTP
+359 -> 108, XTX MTP 294 -> 151) while aggregate rises or holds. Adding processes
+does not create throughput; it divides existing throughput into more, slower
+streams, and stops helping once the card is saturated.
+
+## The 5.3x MTP speedup was an artefact, and is withdrawn
+
+Reported earlier from the 10k arms: E2B Q4 on the XTX at nproc=3 ran 68.5
+notes/min with MTP against ~13 without, so MTP looked worth 5.3x.
+
+It was a comparison between two things that were never comparable. The 68.5 is a
+**completed 10,000-note average**, startup amortised over 146 minutes. The ~13
+came from a run **sampled while it was still early**. Dividing them produced a
+number that is a property of neither.
+
+The paired sweeps put the real figure at 1.89x for that exact configuration.
+
+### The residual, which is NOT explained
+
+Startup correction reconciles the MTP side: the banked 10k arm's 68.5 sits
+against the sweep's steady-state 78.1, a 12% gap that longer-run effects can
+plausibly cover.
+
+It does not reconcile the other side. The 10k no-MTP arm ran at ~13 notes/min
+where the sweep's steady state for the identical configuration is 41.2 -- a 3x
+gap that startup cannot touch, because the 10k arm amortises startup away.
+
+The signature, recorded while that arm was live: the server reported 53ms prompt
+eval and 4638ms decode per request, total 4.7s, while the client measured 13.7s.
+Nine seconds per request outside the server's own accounting. The 200-note sweep
+shows no such gap -- its client latency matches its token counts.
+
+Candidates, neither tested: prompt-cache pressure at 10,000 distinct notes
+against 200 (finding 20's territory, and `--cache-ram 1024` holds roughly 38
+entries), or a transient on that specific run. The discriminating test is the
+same configuration on ~2000 notes, watching whether the rate decays with corpus
+position. It has not been run.
+
+**Until it is, no 10k throughput number should be compared against a 200-note
+one in either direction.**
