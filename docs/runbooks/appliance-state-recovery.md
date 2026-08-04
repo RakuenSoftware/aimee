@@ -51,6 +51,10 @@ is present.
 
    ```bash
    LATEST=$(ls -1t "$AIMEE_HOME"/agents.json.bak-* | head -n1)
+   [ -n "$LATEST" ] && [ -f "$LATEST" ] || {
+     echo "No agents.json backup selected; aborting." >&2
+     exit 1
+   }
    ls -l "$LATEST"
    ```
 
@@ -63,6 +67,9 @@ is present.
    touch "$AIMEE_HOME/agents.json"
    curl -fsS http://127.0.0.1:${AIMEE_PORT}/v1/agents
    ```
+
+   Success is HTTP 200 with a JSON object containing `default` and a
+   non-empty `agents` array.
 
 API keys live in the vault keyed by agent name, not in `agents.json`. A
 restored config needs no secrets re-entered -- the vault lookups continue
@@ -105,22 +112,25 @@ touch "$AIMEE_HOME/agents.json"
 curl -fsS http://127.0.0.1:${AIMEE_PORT}/v1/agents
 ```
 
+Success is HTTP 200 with a JSON object containing `default` and a non-empty
+`agents` array.
+
 ## Failure Mode 3 -- Corrupt or lost workspace repo git dir
 
 ### Symptom
 
 - Proposals trigger logs report `ls-tree failed ... rc=128` on every poll.
-- Forge logs report `resolve https origin: no origin remote` for the
-  affected workspace repo.
+- The `wfe-forge` subsystem logs
+  `resolve https origin: no origin remote` for the affected workspace repo.
 
 ### Confirm
 
 Run the clone probe on a sibling path **on the same volume** as `$WS` so
 storage faults are visible. `/tmp` would mask a tier-bound volume fault;
-a path under the same parent as `$WS` keeps the dev-id check meaningful:
+a path under the same parent as `$WS` keeps the device-id check meaningful:
 
 ```bash
-WS_DEV=$(stat -c '%m' "$WS")
+WS_DEV=$(stat -c '%d' "$WS")
 PROBE="${WS%/*}/ws-probe-$$"
 git clone --single-branch "$CANONICAL_HTTPS_URL" "$PROBE"
 git -C "$PROBE" rev-parse HEAD
@@ -129,8 +139,8 @@ git -C "$PROBE" ls-remote origin HEAD
 
 Sanity checks before you proceed with the real recovery:
 
-- `[ "$(stat -c '%m' "$PROBE")" = "$WS_DEV" ]` -- the probe and the
-  broken repo share a mount (same dev id). This audit is the whole
+- `[ "$(stat -c '%d' "$PROBE")" = "$WS_DEV" ]` -- the probe and the
+  broken repo share a filesystem (same device id). This audit is the whole
   point of the probe: if it fails, the workspace storage itself is
   the fault, not `$WS/.git`.
 - `git rev-parse HEAD` resolves to a commit hash on the probe.
