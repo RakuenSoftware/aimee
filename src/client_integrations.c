@@ -358,6 +358,17 @@ static const char *codex_skill_markdown(void)
           "caller able to reproduce it. Run `" AIMEE_CODE_TOOL_INDEX
           "` command=find_callers on the function at fault: if it has more than "
           "one caller, a caller-side fix is incomplete by construction.\n"
+          /* Third instance of the same failure, and the sharpest: the ticket
+           * opens "Two bugs that made ..." and names both. aimee fixed the
+           * second (a request shape) and never touched the first -- an
+           * over-broad provider/endpoint/model test that had to be narrowed to
+           * one model. It edited the right FILE for an unrelated reason, so file
+           * overlap with the reference looked like coverage and was not. */
+          "- If the ticket states a COUNT — \"two bugs\", \"both paths\", "
+          "\"three call sites\" — your patch must address that many DISTINCT "
+          "defects. Name them to yourself before you start and check them off at "
+          "the end. Editing a file the second defect happens to live in is not "
+          "fixing it.\n"
           "- Before you finish, re-read the ticket and account for every symptom "
           "it names. A ticket that describes a CHAIN (\"X did A, which collided "
           "with B, so C never ran\") is describing several places that must "

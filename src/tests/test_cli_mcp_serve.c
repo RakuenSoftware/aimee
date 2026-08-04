@@ -739,7 +739,7 @@ static void test_initialize(void)
    assert(strstr(instructions->valuestring, "get_help") != NULL);
    assert(strstr(instructions->valuestring, "spawn_agent") != NULL);
    assert(strstr(instructions->valuestring, "delegate tool") != NULL);
-   assert(strstr(instructions->valuestring, "isolated checkout") == NULL);
+   assert(strstr(instructions->valuestring, "per-session") == NULL);
 
    /* LISTED TOOLS ARE DIRECTLY CALLABLE, AND THE TEXT MUST LEAD WITH THAT.
     *
@@ -812,25 +812,19 @@ static void test_initialize_enters_session_worktree(void)
    cJSON *instructions = cJSON_GetObjectItemCaseSensitive(result, "instructions");
    assert(cJSON_IsString(instructions));
    assert(strstr(instructions->valuestring, "get_help") != NULL);
-   assert(strstr(instructions->valuestring, "isolated checkout") != NULL);
+   assert(strstr(instructions->valuestring, "per-session") != NULL);
    assert(strstr(instructions->valuestring, wt) != NULL);
 
-   /* TWO TOOL SURFACES, ONE OF WHICH MOVED.
+   /* THE INSTRUCTION MUST NOT RELOCATE THE CALLER.
     *
-    * This proxy chdir'd itself, so aimee's tools are inside the worktree -- but
-    * the MCP host's own shell/edit tools never moved, so a relative path from
-    * those lands in the shared checkout the same text forbids editing. The
-    * earlier wording said "use RELATIVE paths" without naming the split; an
-    * agent given it spent nine calls locating the worktree and then prefixed
-    * every shell command with an absolute cd. Pin that both surfaces are named
-    * and that the host's tools are told to use the absolute root. */
-   assert(strstr(instructions->valuestring, "aimee's OWN file and shell tools") != NULL);
-   assert(strstr(instructions->valuestring, "host's shell and edit tools do NOT") != NULL);
-   /* The worktree path must appear for the host's tools too, not once in prose. */
-   {
-      const char *first = strstr(instructions->valuestring, wt);
-      assert(first && strstr(first + 1, wt) != NULL);
-   }
+    * A revision that told the host's shell to use absolute paths under the
+    * worktree moved agents out of the checkout the caller owns: benchmark cells
+    * that passed before came back with 0 changed files, the real patch stranded
+    * on the session branch. Pin that aimee's tools are described and the host's
+    * are told they are unaffected. */
+   assert(strstr(instructions->valuestring, "aimee's own file and shell tools") != NULL);
+   assert(strstr(instructions->valuestring, "still run where this session started") != NULL);
+   assert(strstr(instructions->valuestring, "cd there first") == NULL);
 
    cJSON_Delete(resp);
    cJSON_Delete(req);

@@ -187,6 +187,11 @@ static void test_codex_delegate_policy_is_explicit(void)
                         "one caller, a caller-side fix is incomplete") != NULL ||
           strstr(skill, "caller-side fix is incomplete") != NULL);
    assert(strstr(skill, "account for every symptom") != NULL);
+   /* am_12b43fa38e: the ticket opens "Two bugs" and names both; aimee fixed the
+    * second and never touched the first, while still editing the file the first
+    * lives in for an unrelated reason. File overlap is not coverage. */
+   assert(strstr(skill, "states a COUNT") != NULL);
+   assert(strstr(skill, "DISTINCT") != NULL);
 
    /* THE GUARD EXISTED AND WAS NEVER WIRED FOR CODEX.
     *

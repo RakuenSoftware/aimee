@@ -488,27 +488,25 @@ static void handle_initialize(cJSON *id)
    if (mcp_enter_session_worktree(wt, sizeof(wt)))
    {
       char instructions[8192];
-      /* Two tool surfaces, two working directories, and only one of them moved.
-       * This proxy chdir'd itself, so AIMEE's tools resolve relative paths inside
-       * the worktree -- but the MCP host's own shell/edit tools are a different
-       * process tree that never moved, so a relative path from those still lands
-       * in the shared checkout, which the next sentence forbids. Saying "use
-       * relative paths" without that distinction is wrong for whichever surface
-       * the agent happens to reach for. Measured: an agent told this spent nine
-       * calls locating the worktree and prefixed every later shell command with
-       * an absolute cd -- it had to derive the rule the text should have given
-       * it. Name the split, and give the absolute root for the host's tools. */
+      /* DO NOT direct the host's own tools into the worktree.
+       *
+       * An earlier revision of this text named the two tool surfaces and told
+       * the host's shell to use absolute paths under the worktree. That is
+       * accurate about where aimee's tools run, and it changed agent behaviour:
+       * agents that had been working in the ORIGINAL checkout moved into the
+       * worktree, where the caller's own tooling does not look. Measured on the
+       * benchmark -- cells that passed before produced 0 changed files after,
+       * with a real 3-file patch stranded on the session branch.
+       *
+       * The worktree is aimee's private isolation for ITS tools. The host still
+       * owns the directory it started in, and its edits must stay reachable
+       * there. Say where aimee's tools run; do not relocate the caller. */
       snprintf(instructions, sizeof(instructions),
-               "%s\n\nThis session has its own isolated checkout — a branch cut from the "
-               "repository's default branch, in a dedicated worktree at %s. Work there, and do "
-               "not edit the shared checkout.\n"
-               "- aimee's OWN file and shell tools already run in that worktree: relative paths "
-               "are correct for them.\n"
-               "- YOUR host's shell and edit tools do NOT: they still run in the directory this "
-               "session started in. For those, use absolute paths under %s (or cd there first), "
-               "or your edits will land in the shared checkout and be lost from this session's "
-               "branch.",
-               base_instructions, wt, wt);
+               "%s\n\naimee's own file and shell tools run in a private per-session "
+               "worktree at %s, so paths you give THEM resolve there. Your own shell and edit "
+               "tools are unaffected and still run where this session started — keep working "
+               "there as normal.",
+               base_instructions, wt);
       cJSON_AddStringToObject(result, "instructions", instructions);
    }
    else
