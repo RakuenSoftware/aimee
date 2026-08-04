@@ -11,11 +11,11 @@ Throughout this runbook:
 - `$AIMEE_HOME` is the server's data directory (e.g. `/var/lib/aimee`).
 - `$WS` is the affected workspace repo path (e.g.
   `/var/lib/aimee/workspaces/<user>/<repo>`).
-- `$AIMEE_PORT` is the listener port the daemon serves the v1 API on
-  (e.g. `8740`). Confirm the actual bind address and port from the
-  service unit, container environment, or startup logs before running
-  the `curl` probes below; replace `127.0.0.1:${AIMEE_PORT}` if the
-  daemon is not bound on loopback.
+- `$AIMEE_BASE_URL` is the daemon's v1 API base URL (e.g.
+  `http://127.0.0.1:8740`). Before running any `curl` probe, set it
+  from the actual daemon bind address and port shown in the systemd unit
+  (`Environment=`/`ExecStart=`), container environment, or startup logs;
+  do not assume the appliance is bound on loopback.
 - `$CANONICAL_HTTPS_URL` is the canonical HTTPS clone URL of that repo
   (the same URL the forge uses; e.g. `https://example.com/<user>/<repo>.git`).
 
@@ -29,9 +29,10 @@ server runtime user.
 `GET /v1/agents` returns `502 agents backend unavailable`.
 
 > Current builds report this failure explicitly from `GET /v1/agent/list`.
-> Older builds, and summary consumers such as `GET /v1/server/state`, can
-> mask the same agent-config load failure as an empty agent array. Probe
-> with `/v1/agents` (the strict endpoint) to see the backend error.
+> The masking path is `server_agent_list_json`, which still returns `[]`
+> for summary consumers such as `GET /v1/server/state`; older builds also
+> masked the error at `/v1/agent/list`. Probe with `/v1/agents` (the
+> strict endpoint) to see the backend error.
 
 ### Confirm
 
@@ -70,7 +71,7 @@ is present.
    ```bash
    cp -p "$LATEST" "$AIMEE_HOME/agents.json"
    touch "$AIMEE_HOME/agents.json"
-   curl -fsS http://127.0.0.1:${AIMEE_PORT}/v1/agents
+   curl -fsS "${AIMEE_BASE_URL}/v1/agents"
    ```
 
    Success is HTTP 200 with a JSON object containing `default` and a
@@ -114,7 +115,7 @@ Refresh mtime and inode so the cache invalidator notices, then probe:
 
 ```bash
 touch "$AIMEE_HOME/agents.json"
-curl -fsS http://127.0.0.1:${AIMEE_PORT}/v1/agents
+curl -fsS "${AIMEE_BASE_URL}/v1/agents"
 ```
 
 Success is HTTP 200 with a JSON object containing `default` and a non-empty
@@ -133,8 +134,9 @@ Success is HTTP 200 with a JSON object containing `default` and a non-empty
 Run the clone probe on a sibling path **on the same volume** as `$WS` so
 storage faults are visible. `/tmp` would mask a tier-bound volume fault;
 a path under the same parent as `$WS` keeps the device-id check meaningful.
-Use a shallow probe so the diagnostic clone does not consume more of the
-workspace tier than necessary:
+Use a shallow (`--depth 1`) probe so the diagnostic clone does not
+consume more of the workspace tier than necessary; keep only the final
+recovery clone full.
 
 ```bash
 WS_DEV=$(stat -c '%d' "$WS")
@@ -175,8 +177,9 @@ mv "$WS" "${WS}.bak.${ts}"
 git clone --single-branch "$CANONICAL_HTTPS_URL" "$WS"
 ```
 
-If this clone fails, stop. Preserve `${WS}.bak.${ts}` and either escalate
-or restore it before attempting any further recovery on the canonical path.
+If this clone fails, stop immediately. Preserve `${WS}.bak.${ts}`, do not
+try to repair a partial new `$WS` in place, and either escalate or restore
+the backup before attempting any further recovery on the canonical path.
 
 Verify the fresh clone has its `origin` set correctly and that HEAD
 resolves:
