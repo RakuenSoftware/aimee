@@ -1921,7 +1921,8 @@ $(TESTPREFIX)/unit-test-server-compute: $(OBJDIR)/tests/test_server_compute.o $(
                                $(OBJDIR)/modules/workspace/workspace_runner_registry.o $(OBJDIR)/modules/workspace/workspace_runner_queue.o \
                                $(OBJDIR)/modules/workspace/workspace_mirror.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o \
 	                               $(OBJDIR)/posix/workspace_provider.o $(OBJDIR)/json_fluent.o \
-	                               $(OBJDIR)/server/token_tracker.o
+	                               $(OBJDIR)/server/token_tracker.o \
+	                               $(OBJDIR)/server/request_context.o $(OBJDIR)/db1/delegate_reservation.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # The embedder catalog is deliberately free of server deps so it links against cJSON
