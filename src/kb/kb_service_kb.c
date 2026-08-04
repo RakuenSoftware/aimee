@@ -5,6 +5,7 @@
 #include "aimee.h"
 #include "cJSON.h"
 #include "config.h"
+#include "config_database.h" /* config_synth_chat_endpoint_current */
 #include "kb_curator_queue.h"
 #include "kb_curator_provider.h"
 #include "json_fluent.h"
