@@ -5,16 +5,30 @@ against the target model, so accepted tokens are the ones the target would have
 produced. If that holds exactly, MTP is free speed and the F1 delta is zero. This
 prints both sides of that trade for a pair of arms that differ ONLY in DRAFT.
 
-Throughput is reported two ways because they answer different questions:
+Throughput is reported three ways because they answer different questions, and
+because one of them lies on short runs:
 
   per-stream tok/s   completion_tokens / latency_ms for each request, medianed.
                      This is what speculative decoding actually accelerates --
                      one request's decode loop. Use this to judge MTP itself.
 
-  aggregate tok/s    total completion tokens / wall seconds, across all shards.
-                     This is what the benchmark experiences. It folds in process
-                     count and queueing, so it is the number that decides how
-                     long a 10k arm takes.
+  steady-state       nproc * 60 / median_latency_s. Throughput once the servers
+  notes/min          are up, with startup excluded by construction. This is the
+                     number to compare ACROSS configurations.
+
+  wall-clock         rows / wall seconds. What the run actually cost, INCLUDING
+  notes/min          server startup.
+
+Wall clock is reported but must not be used for cross-configuration comparison.
+Startup is roughly 30s per server, so it grows with process count -- 56s at
+nproc=1 against 137s at nproc=4 on the 5080. On a short run that is a third to a
+half of the wall clock, and the bias points the same way as any hypothesis about
+process count. That is defect 35: it produced two confident wrong conclusions
+(that aggregate throughput peaks at nproc=2 and declines, and that nproc=4 is
+slower than nproc=1) before anyone checked what the denominator contained.
+
+The gap between steady-state and wall-clock is printed as `startup` so it stays
+visible rather than being absorbed into the result.
 
 completion_tokens counts ACCEPTED tokens, not drafted ones, so neither figure
 credits MTP for speculation that was rejected. That is the honest accounting: a
@@ -89,6 +103,15 @@ def summarise(stem):
     rows = load_rows(stem)
     wall, procs = wall_seconds(stem)
     total_ct = sum(r.get("completion_tokens") or 0 for r in rows)
+    med_lat = statistics.median([r.get("latency_ms") or 0 for r in rows]) if rows else 0
+    # Steady state excludes startup by construction: it asks how fast the servers
+    # go once they are up, not how long the job took door to door.
+    steady = (procs * 60 / (med_lat / 1000.0)) if (procs and med_lat) else None
+    wallclock = (len(rows) * 60 / wall) if wall else None
+    # Seconds of the wall clock not accounted for by generation at steady state.
+    startup = None
+    if steady and wall:
+        startup = wall - (len(rows) / (steady / 60.0))
     return {
         "stem": stem,
         "n": len(rows),
@@ -97,9 +120,11 @@ def summarise(stem):
         "total_tokens": total_ct,
         "wall_s": wall,
         "procs": procs,
-        "aggregate": (total_ct / wall) if wall else None,
+        "steady_npm": steady,
+        "wallclock_npm": wallclock,
+        "startup_s": startup,
         "median_ct": statistics.median([r.get("completion_tokens") or 0 for r in rows]) if rows else 0,
-        "median_lat": statistics.median([r.get("latency_ms") or 0 for r in rows]) if rows else 0,
+        "median_lat": med_lat,
     }
 
 
@@ -136,8 +161,11 @@ def main():
           f"{fmt((a['f1'] - b['f1']) if (a['f1'] and b['f1']) else None, '+.4f'):>14}")
     print(f"{'per-stream tok/s':22} {fmt(a['per_stream']):>14} {fmt(b['per_stream']):>14} "
           f"{fmt(pct(a['per_stream'], b['per_stream']), '+.1f') + '%':>14}")
-    print(f"{'aggregate tok/s':22} {fmt(a['aggregate']):>14} {fmt(b['aggregate']):>14} "
-          f"{fmt(pct(a['aggregate'], b['aggregate']), '+.1f') + '%':>14}")
+    print(f"{'steady notes/min':22} {fmt(a['steady_npm']):>14} {fmt(b['steady_npm']):>14} "
+          f"{fmt(pct(a['steady_npm'], b['steady_npm']), '+.1f') + '%':>14}   <- compare on this")
+    print(f"{'wall-clock notes/min':22} {fmt(a['wallclock_npm']):>14} {fmt(b['wallclock_npm']):>14} "
+          f"{fmt(pct(a['wallclock_npm'], b['wallclock_npm']), '+.1f') + '%':>14}   (includes startup)")
+    print(f"{'startup (s)':22} {fmt(a['startup_s'], '.0f'):>14} {fmt(b['startup_s'], '.0f'):>14}")
     print(f"{'wall (s)':22} {fmt(a['wall_s'], '.0f'):>14} {fmt(b['wall_s'], '.0f'):>14} "
           f"{fmt(pct(a['wall_s'], b['wall_s']), '+.1f') + '%':>14}")
     print(f"{'median completion tok':22} {a['median_ct']:>14} {b['median_ct']:>14}")
@@ -149,8 +177,10 @@ def main():
         print("F1 missing on one side; no trade computed.")
         return
     d = a["f1"] - b["f1"]
-    gain = pct(a["per_stream"], b["per_stream"])
-    print(f"MTP costs {(-d):+.4f} F1 and changes per-stream throughput by "
+    gain = pct(a["steady_npm"], b["steady_npm"])
+    if gain is None:
+        gain = pct(a["per_stream"], b["per_stream"])
+    print(f"MTP costs {(-d):+.4f} F1 and changes steady-state throughput by "
           f"{fmt(gain, '+.1f')}%.")
     if abs(d) < args.noise:
         print(f"The F1 difference is smaller than the {args.noise} noise threshold, "
