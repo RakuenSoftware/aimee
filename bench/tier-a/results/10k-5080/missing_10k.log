@@ -11,3 +11,10 @@
 [02:24:40Z] --- gemma-3n-E4B-it.10k  unsloth/gemma-3n-E4B-it-GGUF:UD-Q4_K_XL  nproc=auto  port=8600
 [03:12:01Z] OK   gemma-3n-E4B-it.10k strictF1=scorer-refused wall=47m
 [03:12:01Z] === GEMMA-3N COMPLETE ===
+[07:25:40Z]   quarantined gemma-3n-E4B-it.10k.pred.jsonl
+[07:25:40Z]   quarantined gemma-3n-E4B-it.10k.score.json
+[07:25:40Z] === gemma-3n re-take at NPROC=3 (correcting the nproc=4 arm)
+[07:25:40Z] --- gemma-3n-E4B-it.10k  unsloth/gemma-3n-E4B-it-GGUF:UD-Q4_K_XL  nproc=3  port=8600
+[08:12:41Z]   thinking guard fired; scoring with --allow-thinking-off
+[08:12:42Z] OK   gemma-3n-E4B-it.10k strictF1=0.5424 wall=47m  nproc=3
+[08:12:42Z] === GEMMA-3N NPROC=3 COMPLETE ===
