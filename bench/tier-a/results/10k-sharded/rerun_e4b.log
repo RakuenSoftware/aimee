@@ -11,3 +11,5 @@
 [03:21:30Z] --- E4B.UD-Q6_K_XL.10k  unsloth/gemma-4-E4B-it-GGUF:UD-Q6_K_XL  nproc=3 cache-ram=1024
 [06:05:51Z] OK   E4B.UD-Q6_K_XL.10k strictF1=0.6452 wall=164m
 [06:05:51Z] --- E4B.UD-Q8_K_XL.10k  unsloth/gemma-4-E4B-it-GGUF:UD-Q8_K_XL  nproc=3 cache-ram=1024
+[09:33:33Z] OK   E4B.UD-Q8_K_XL.10k strictF1=0.6337 wall=207m
+[09:33:33Z] === E4B RERUN COMPLETE ===

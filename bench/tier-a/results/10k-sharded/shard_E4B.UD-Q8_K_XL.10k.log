@@ -1,0 +1,28 @@
+[02:45:23Z] sizing: starting one server to measure resident VRAM
+[02:46:40Z]   one instance uses  MiB of 24560 MiB
+[02:46:40Z]   -> running 3 processes
+[02:47:58Z]   all 3 servers up; VRAM now  MiB
+[02:47:58Z] START E4B.UD-Q8_K_XL.10k across 3 shards
+[06:15:28Z] sizing: starting one server to measure resident VRAM
+[06:16:30Z]   one instance uses  MiB of 24560 MiB
+[06:16:30Z]   -> running 3 processes
+[06:17:03Z]   all 3 servers up; VRAM now  MiB
+[06:17:03Z] START E4B.UD-Q8_K_XL.10k across 3 shards
+[06:17:03Z] FAIL E4B.UD-Q8_K_XL.10k: contaminated merge, discarding
+[06:19:55Z] sizing: starting one server to measure resident VRAM
+[06:20:12Z]   one instance uses  MiB of 24560 MiB
+[06:20:12Z]   -> running 3 processes
+[06:20:44Z]   all 3 servers up; VRAM now  MiB
+[06:20:45Z] START E4B.UD-Q8_K_XL.10k across 3 shards
+[07:03:53Z] sizing: starting one server to measure resident VRAM
+[07:04:55Z]   one instance uses  MiB of 24560 MiB
+[07:04:55Z]   -> running 3 processes
+[07:04:58Z]   all 3 servers up; VRAM now  MiB
+[07:04:58Z] START E4B.UD-Q8_K_XL.10k across 3 shards
+[10:41:06Z] DONE E4B.UD-Q8_K_XL.10k rows=10000/10000 wall=216m8s procs=3
+[06:05:56Z] sizing: starting one server to measure resident VRAM
+[06:06:28Z]   one instance uses  MiB of 24560 MiB
+[06:06:28Z]   -> running 3 processes, cache-ram 1024 MiB each
+[06:07:01Z]   all 3 servers up; VRAM now  MiB
+[06:07:01Z] START E4B.UD-Q8_K_XL.10k across 3 shards
+[09:33:26Z] DONE E4B.UD-Q8_K_XL.10k rows=10000/10000 wall=206m24s procs=3 retries=0
