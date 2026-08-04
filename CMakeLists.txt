@@ -702,7 +702,6 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/role_templates.c
     ${AIMEE_SRC_DIR}/modules/skills/skill.c
     ${AIMEE_SRC_DIR}/modules/skills/skill_rollback.c
-    ${AIMEE_SRC_DIR}/modules/skills/skill_curator.c
     ${AIMEE_SRC_DIR}/modules/skills/skill_review.c
     ${AIMEE_SRC_DIR}/conversation.c
     ${AIMEE_SRC_DIR}/trajectory_export.c

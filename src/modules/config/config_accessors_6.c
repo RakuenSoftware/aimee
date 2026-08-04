@@ -18,6 +18,66 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
+int config_set_guardrails_semantic_warn_threshold(double value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->guardrails_semantic_warn_threshold = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_guardrails_semantic_prompt_threshold(double value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->guardrails_semantic_prompt_threshold = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_guardrails_semantic_block_threshold(double value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->guardrails_semantic_block_threshold = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_kb_api_http_port(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->kb_api_http_port = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
 int config_set_synthesis_thinking(int value)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));
@@ -1608,36 +1668,6 @@ int config_set_skills_dispatch_enabled(int value)
    return rc;
 }
 
-int config_set_skills_curator_enabled(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->skills_curator_enabled = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_skills_curator_interval_hours(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->skills_curator_interval_hours = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
 int config_set_skills_dispatch_max_index(int value)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));
@@ -2067,41 +2097,6 @@ int config_set_db1_path(const char *value)
    if (rc == 0)
    {
       snprintf(cfg->db1_path, sizeof(cfg->db1_path), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_db2_url(const char *value)
-{
-   return config_secret_store("AIMEE_DB2_URL", value);
-}
-
-int config_set_provider(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->provider, sizeof(cfg->provider), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_default_persona(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->default_persona, sizeof(cfg->default_persona), "%s", value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);

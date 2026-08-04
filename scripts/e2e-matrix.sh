@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 #
-# e2e-matrix.sh — run the aimee deploy-matrix E2E
-# (docs/proposals/pending/aimee-e2e-deploy-matrix.md) and print one pass/fail
+# e2e-matrix.sh — run the aimee deploy-matrix E2E below and print one pass/fail
 # table. Runs ON the host it is invoked on: on a Docker host it can run the
 # container topologies (T1-T3); on a Linux box with the build deps it can run the
 # local topologies (T5-T6). For the pve runs, invoke this INSIDE CT 101

@@ -18,6 +18,41 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
+int config_set_db2_url(const char *value)
+{
+   return config_secret_store("AIMEE_DB2_URL", value);
+}
+
+int config_set_provider(const char *value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      snprintf(cfg->provider, sizeof(cfg->provider), "%s", value ? value : "");
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_default_persona(const char *value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      snprintf(cfg->default_persona, sizeof(cfg->default_persona), "%s", value ? value : "");
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
 int config_set_claude_model(const char *value)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));

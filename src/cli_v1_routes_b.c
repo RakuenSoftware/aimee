@@ -1626,6 +1626,19 @@ void print_server_health(cJSON *resp)
          cJSON_ArrayForEach(b, blockers) if (cJSON_IsString(b))
              printf("  BLOCKED: %s\n", b->valuestring);
       }
+      /* Advisory findings. They do not move the verdict, which is exactly why they
+       * need printing: a kb that is genuinely "ok" can still be accumulating work
+       * nothing will process, and a status line that only ever renders blockers
+       * reports that as a clean bill of health. Measured: a typed-fact backlog of
+       * 4 jobs, unclaimable for 11.5 hours, with `aimee status` showing "aimee-kb:
+       * ok" and nothing else. */
+      cJSON *kbwarn = cJSON_GetObjectItemCaseSensitive(kb, "warnings");
+      if (cJSON_IsArray(kbwarn) && cJSON_GetArraySize(kbwarn) > 0)
+      {
+         cJSON *w;
+         cJSON_ArrayForEach(w, kbwarn) if (cJSON_IsString(w))
+             printf("  note: %s\n", w->valuestring);
+      }
       /* An open transport breaker refuses every call locally, so the kb can be
        * "ok" here while nothing works. Print it before the detail lines: this is
        * the line that explains an index that answers "unavailable" on a server

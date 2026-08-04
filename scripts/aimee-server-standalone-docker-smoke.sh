@@ -5,7 +5,7 @@
 # /v1 surface with NO kb wired in, and that the lazy-kb path degrades gracefully
 # instead of crashing.
 #
-# Exercises (T3 in docs/proposals/pending/aimee-e2e-deploy-matrix.md):
+# Exercises T3 in scripts/e2e-matrix.sh:
 #   1. GET /v1/health             — server up (server-native, SQLite DB1)
 #   2. GET /v1/version            — build identifies itself
 #   3. GET /v1/health (no bearer) — rejected (401): auth enforced on TCP
@@ -40,6 +40,12 @@ for arg in "$@"; do
     *) echo "unknown arg: $arg" >&2; exit 2 ;;
   esac
 done
+
+# Scope every fresh smoke stack explicitly. This keeps Vault bootstrap, startup,
+# logs, and teardown on the same project even when other projects use this file.
+if [[ "$DO_UP" == 1 && -z "${COMPOSE_PROJECT_NAME:-}" ]]; then
+  export COMPOSE_PROJECT_NAME="aimee-e2e-standalone-$$"
+fi
 
 if [[ -z "$BEARER" ]]; then
   if [[ "$DO_UP" == 1 ]]; then

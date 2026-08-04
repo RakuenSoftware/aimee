@@ -2,7 +2,7 @@
 #
 # aimee-thin-client-smoke.sh — prove the cross-platform thin `aimee` client can
 # drive a remote aimee-server over the HTTP transport. This is the CLIENT axis of
-# the deploy matrix (docs/proposals/pending/aimee-e2e-deploy-matrix.md §2.2):
+# the PC step in scripts/e2e-matrix.sh:
 # the SAME script runs on Linux, macOS, and Windows (git-bash / CI `shell: bash`)
 # because the only OS-specific thing is the `aimee` binary it invokes.
 #

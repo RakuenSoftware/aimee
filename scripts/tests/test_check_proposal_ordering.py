@@ -56,6 +56,9 @@ class ProposalOrderingTests(unittest.TestCase):
         return tmp, repo, cutoff
 
     def test_current_repository_passes(self) -> None:
+        head = ordering.git_text(REPO_ROOT, "rev-parse", "HEAD")
+        if not ordering.on_first_parent_chain(REPO_ROOT, ordering.SLICE2_ANCHOR, head):
+            self.skipTest("checkout is not on the feature/core-modularization first-parent line")
         signal_count = ordering.validate_ordering(REPO_ROOT)
         self.assertIsInstance(signal_count, int)
         self.assertGreaterEqual(signal_count, 1)
@@ -70,6 +73,12 @@ class ProposalOrderingTests(unittest.TestCase):
                 ("C075", ("source", "copy")),
                 ("D", ("gone",)),
             ],
+        )
+
+    def test_name_status_preserves_non_utf8_git_paths(self) -> None:
+        self.assertEqual(
+            ordering.parse_name_status(b"M\0bad-\xff.yml\0"),
+            [("M", ("bad-\udcff.yml",))],
         )
 
     def test_source_and_exact_path_detection(self) -> None:
