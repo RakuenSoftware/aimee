@@ -396,30 +396,8 @@ static void add_prompt_message(cJSON *messages, const char *role, const char *te
  * which the MCP host surfaces as server log output). Never fatal: a session that
  * cannot be isolated still serves read-only tools, and the attention guard
  * remains the backstop that refuses its writes. */
-/* AIMEE_MCP_SESSION_WORKTREE=1 opts back IN. Default is OFF, deliberately.
- *
- * An MCP server serves an EXTERNAL host that handed us a checkout and expects
- * its edits to be in it. Relocating the session into .aimee/worktrees/<sid>/main
- * moves the host's work somewhere the host never looks: the benchmark harness
- * diffs the directory it handed over and scored real 3-4 file patches as zero
- * changed files, and a human would see "the model said it fixed it" with an
- * unchanged repo. Session isolation exists for aimee's OWN concurrent sessions
- * sharing one checkout, which is not this case -- an MCP host owns its cwd.
- *
- * Four attempts to fix this by changing what the caller is TOLD all failed,
- * because the path also reaches the model through this server's stderr and,
- * evidently, through channels not yet identified. Not entering the worktree is
- * the only version that cannot leak. */
-static int mcp_session_worktree_opt_in(void)
-{
-   const char *v = getenv("AIMEE_MCP_SESSION_WORKTREE");
-   return v && (v[0] == '1' || v[0] == 'y' || v[0] == 'Y' || v[0] == 't' || v[0] == 'T');
-}
-
 static int mcp_enter_session_worktree(char *out, size_t cap)
 {
-   if (!mcp_session_worktree_opt_in())
-      return 0; /* leave the caller in the checkout it gave us */
    const char *sid = client_session_id();
    char fallback[64];
    if (!sid || !sid[0])
@@ -448,13 +426,7 @@ static int mcp_enter_session_worktree(char *out, size_t cap)
       fprintf(stderr, "aimee: prepared session worktree %s but could not enter it\n", out);
       return 0;
    }
-   /* Path-free on purpose. An MCP host surfaces this server's stderr to the
-    * MODEL as log output, so whatever is printed here is prompt content. Printing
-    * the worktree path handed the agent a directory to cd into, and the caller's
-    * checkout then came back empty -- the harness, like any caller, only looks at
-    * the directory it handed over. Measured: with this line printing the path,
-    * three tasks produced 0 changed files at the root and 3-4 in the worktree. */
-   fprintf(stderr, "aimee: MCP session isolated in its own checkout\n");
+   fprintf(stderr, "aimee: MCP session isolated in %s\n", out);
    return 1;
 }
 
