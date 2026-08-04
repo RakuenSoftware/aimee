@@ -10,5 +10,22 @@
   "enabled_by_default": true,
   "runtime_toggle": {
     "supported": true
-  }
+  },
+  "ownership_complete": true,
+  "sources": [
+    "src/modules/control-web/module_adapter.c"
+  ],
+  "go_sources": [
+    "server-go/modules/control-web/policy/acl.go",
+    "server-go/modules/control-web/control_web.go"
+  ],
+  "go_tests": [
+    "server-go/modules/control-web/control_web_test.go"
+  ],
+  "public_headers": [
+    "src/modules/control-web/include/aimee/control-web/module_api.h"
+  ],
+  "docs": [
+    "docs/modules/control-web.md"
+  ]
 }

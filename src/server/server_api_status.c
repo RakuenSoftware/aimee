@@ -306,8 +306,7 @@ int handle_api_enable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       generated = 1;
    }
 
-   if (config_set_server_api_http_port(port) != 0 ||
-       config_set_server_api_rate_limit_per_min(rate) != 0)
+   if (config_set_api_http_listener(port, rate) != 0)
    {
       runtime_secret_wipe(bearer, sizeof(bearer));
       pthread_mutex_unlock(&g_api_bearer_mutation_lock);

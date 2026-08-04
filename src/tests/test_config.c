@@ -2594,6 +2594,15 @@ int main(void)
          /* Clearing stays allowed: it is how an operator hands the role over. */
          assert(config_set("embedder_model", "") == 0);
 
+         /* api.enable changes the port and rate limit as one transaction. Two
+          * generated setters used to load the same published server snapshot;
+          * the rate-limit save then silently restored the old port. */
+         assert(config_set("provider", "gemini") == 0);
+         assert(config_set_api_http_listener(9123, 77) == 0);
+         assert(config_server_api_http_port() == 9123);
+         assert(config_server_api_rate_limit_per_min() == 77);
+         assert(strcmp(config_provider(), "gemini") == 0); /* unrelated disk state survives */
+
          platform_unsetenv("AIMEE_HOME");
       }
 

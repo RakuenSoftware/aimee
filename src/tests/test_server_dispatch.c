@@ -1292,6 +1292,18 @@ int config_disable_api_http_listener(void)
    return 0;
 }
 
+int config_set_api_http_listener(int http_port, int rate_limit_per_min)
+{
+   if (http_port <= 0 || rate_limit_per_min <= 0)
+      return -1;
+   if (g_config_stateful)
+   {
+      g_config_disk.server_api_http_port = http_port;
+      g_config_disk.server_api_rate_limit_per_min = rate_limit_per_min;
+   }
+   return 0;
+}
+
 /* The generated accessors read every field through this. Serve them out of the
  * SAME in-memory config the config_load stub returns, so an accessor and a
  * config_load observed in one test can never disagree. Non-stateful mode zeroes,

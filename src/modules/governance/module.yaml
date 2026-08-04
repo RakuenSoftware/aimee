@@ -20,7 +20,17 @@
   },
   "ownership_complete": true,
   "sources": [
-    "src/modules/governance/gw_stage_governance.c"
+    "src/modules/governance/gw_stage_governance.c",
+    "src/modules/governance/module_adapter.c"
+  ],
+  "go_sources": [
+    "server-go/modules/governance/governance.go"
+  ],
+  "go_tests": [
+    "server-go/modules/governance/governance_test.go"
+  ],
+  "public_headers": [
+    "src/modules/governance/include/aimee/governance/module_api.h"
   ],
   "private_headers": [
     "src/modules/governance/gw_stage_governance.h"

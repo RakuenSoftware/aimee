@@ -43,6 +43,12 @@
     "src/modules/git/mcp_git_write.c",
     "src/modules/git/module_adapter.c"
   ],
+  "go_sources": [
+    "server-go/modules/git/git.go"
+  ],
+  "go_tests": [
+    "server-go/modules/git/git_test.go"
+  ],
   "public_headers": [
     "src/modules/git/include/aimee/git/git_ops.h",
     "src/modules/git/include/aimee/git/module_api.h"

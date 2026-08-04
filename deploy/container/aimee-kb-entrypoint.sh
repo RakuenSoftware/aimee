@@ -354,20 +354,11 @@ if [ "$external_db" -eq 0 ]; then
     fi
     AIMEE_DB2_URL="$embedded_dsn" aimee-kb --bootstrap-vault-env
 
-    start_embedder "$@"
-    start_modules
-
-    # Not exec: the trap above has to outlive the kb so the cluster shuts down
-    # cleanly. Forward the stop signal so the kb still gets its own shutdown.
-    aimee-kb "$@" &
-    kb=$!
-    trap 'kill -TERM "$kb" 2>/dev/null || true; stop_modules' HUP INT TERM
-
     # POSIX sh has no portable wait -n. Monitor both children, including Linux
     # zombies: kill -0 still succeeds for a dead-but-unreaped postmaster, which
     # previously left the container running unhealthy forever after PostgreSQL
-    # crashed. Either child is load-bearing, so stop its peer and let the
-    # container restart them together.
+    # crashed. The same check also puts a hard bound on a KB whose worker
+    # threads do not drain after TERM.
     process_alive() {
         _pid=$1
         kill -0 "$_pid" 2>/dev/null || return 1
@@ -376,6 +367,40 @@ if [ "$external_db" -eq 0 ]; then
         [ "$_stat_state" != Z ]
     }
 
+    start_embedder "$@"
+    start_modules
+
+    # Not exec: the trap above has to outlive the kb so the cluster shuts down
+    # cleanly. Forward the stop signal so the kb still gets its own shutdown.
+    aimee-kb "$@" &
+    kb=$!
+    shutdown_embedded() {
+        # A signal trap that only forwards to the KB returns to the monitor loop
+        # below. Docker then reaches its stop timeout and SIGKILLs PID 1 plus the
+        # still-running postmaster, forcing WAL recovery on every ordinary
+        # restart. Make shutdown terminal and keep all children inside the same
+        # bounded lifecycle. Reset the traps first so the explicit exit below
+        # cannot run this handler a second time.
+        trap - EXIT HUP INT TERM
+        kill -TERM "$kb" 2>/dev/null || true
+        stop_modules
+        "$PGBIN/pg_ctl" --pgdata="$PGDATA" --mode=fast --wait --silent stop || true
+        _stop_ticks=0
+        while process_alive "$kb" && [ "$_stop_ticks" -lt 30 ]; do
+            sleep 0.1
+            _stop_ticks=$((_stop_ticks + 1))
+        done
+        if process_alive "$kb"; then
+            echo "aimee-kb: KB did not stop after 3s; forcing shutdown after database stop" >&2
+            kill -KILL "$kb" 2>/dev/null || true
+        fi
+        wait "$kb" 2>/dev/null || true
+    }
+    trap 'shutdown_embedded' EXIT
+    trap 'shutdown_embedded; exit 0' HUP INT TERM
+
+    # Either child is load-bearing, so stop its peer and let the container
+    # restart them together.
     first=
     while [ -z "$first" ]; do
         if ! process_alive "$kb"; then

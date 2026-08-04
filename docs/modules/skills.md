@@ -16,8 +16,15 @@ and `skill_rollback.c` in `src/modules/skills`, with CLI orchestration in `src/c
 use the `aimee/skills` include namespace. The former singular source directory is retired without a
 forwarding API or parallel skill registry.
 
-`src/modules/skills/module.yaml` declares ownership of the three production sources above, both
-canonical public headers, two direct unit tests, and this document; the module has no private headers.
+The skill-context review stage now runs in the supervised Go
+`aimee-module-skills` process from `server-go/modules/skills`. The C
+`module_adapter.c` remains a wire-parity fixture while filesystem resolution,
+management, review, rollback, and injection continue through the existing C
+surfaces and remain scheduled for later migration batches.
+
+`src/modules/skills/module.yaml` declares ownership of the C production and parity sources, the Go
+process handler and tests, canonical public headers, direct C tests, and this document; the module has
+no private headers.
 Its `ownership_complete: true` latch exhaustively checks module-local C and private-header files and
 requires this canonical document. Public-header and test entries are explicit ownership claims, but the
 completeness latch does not discover undeclared public headers or tests. Command, server, protocol, and

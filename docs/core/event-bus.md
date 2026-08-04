@@ -46,12 +46,36 @@ socket; after `bus_client_attach_as` completes, the socket is no longer the data
 path and the module uses only its mappings. Admission and event-kind grants are
 daemon policy injected into the core host.
 
-External module repositories consume the host-free
-`aimee-core-event-bus-client` target. The shared runtime in `bus_runtime.c`
+External C module repositories consume the host-free
+`aimee-core-event-bus-client` target. Go modules use the pure-Go client and
+process runtime under `server-go/bus`; it mirrors authenticated attach, AMOD
+fragmentation, deadlines, cancellation, bounded concurrent handlers,
+heartbeats, and host-epoch shutdown without cgo. The shared host runtime in `bus_runtime.c`
 owns the listener, peer admission, heartbeat, and reap lifecycle. Server and KB
 configure separate endpoints at `<config>/<daemon>-module-bus.sock` and separate
 policies at `<config>/modules.d/<daemon>`; the environment can override those
 with `AIMEE_MODULE_BUS_SOCKET` and `AIMEE_MODULE_POLICY_DIR`.
+
+`src/modules/process-contracts.json` is also the implementation-language switch
+for supervised processes. Across ten migrated batches, every process identity
+moved to the Go multicall executable in `server-go/cmd/aimee-module`: `memory`,
+`learning`, `routing`, `delegates`, `tools`, `workspace`, `git`, `skills`,
+`response-composition`, `governance`, `workflows`, `roundtable`, `kb-synthesis`,
+`runtime-web`, `control-web`, and `benchmarks`. Its basename selects an isolated
+identity and one module package under `server-go/modules`. The runtime bundle emits no C process
+source for those entries. Their C `module_adapter.c` files serve only as
+wire-parity fixtures while the deeper module-owned C surfaces are migrated in
+later batches. The workflows process owns only the deterministic advance
+admission classification; it is not a second workflow lifecycle runtime.
+The KB synthesis process similarly owns only the pure grounding decision, not
+the curator worker, provider, or persistence lifecycle.
+The runtime-web process owns only RPC fault classification. The physical Go web
+provider imports the same policy package; it remains the owner of HTTPS,
+browser authentication, sessions, routing, proxy transport, and assets.
+The control-web process owns only proxy-route authorization. Its physical Go
+provider imports the same policy package; HTTPS, OIDC/session handling, CSRF,
+credential selection, proxy transport, and assets remain provider-owned. The
+KB's C console-admin allowlist remains an independent defence-in-depth check.
 
 Every strict `*.grant` policy binds one principal class/reference to an exact
 absolute executable (resolved and compared with Linux `SO_PEERCRED` and

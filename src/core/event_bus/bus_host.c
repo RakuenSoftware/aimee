@@ -44,6 +44,14 @@ static void slot_release(bus_host_t *h, uint32_t idx)
       h->admitted--;
 }
 
+bus_host_result_t bus_host_release_slot(bus_host_t *h, uint32_t slot)
+{
+   if (!h || !h->slots || slot >= h->cfg.max_slots || !h->slots[slot].in_use)
+      return BUS_HOST_ERR_ARG;
+   slot_release(h, slot);
+   return BUS_HOST_OK;
+}
+
 bus_host_result_t bus_host_create(bus_host_t *h, const bus_host_config_t *cfg, bus_admit_fn admit,
                                   void *admit_ctx)
 {
@@ -217,6 +225,7 @@ bus_host_result_t bus_host_serve_attach_ex(bus_host_t *h, int conn_fd, uint32_t 
    }
 
    s->in_use = 1;
+   s->principal_class = req.principal_class;
    s->principal_ref = req.principal_ref;
    s->last_heartbeat = 0;
    s->heartbeat_at = 0;

@@ -270,8 +270,17 @@ Other source names can be displayed by the UI but are reported as unsupported by
 
 You can configure a watched directory in either place:
 
-- **Configure a rule.** Add it under `trigger_rules` in `aimee.yaml` or use the **Workflows** trigger panel.
-- **Configure the graph.** Make `trigger.watch-dir` the start node and set `params.workspace`.
+- select **Workflows → Triggers → + New trigger** as the appliance administrator, then choose the
+  repository, saved workflow, watched directory, optional branch/ref, mode, and spend cap;
+- add a rule under `trigger_rules` in `aimee.yaml` when repairing an invalid registry or managing it
+  as configuration;
+- make `trigger.watch-dir` the workflow's start node and set its `params.workspace`.
+
+The browser keeps a new trigger as a draft until an explicit save succeeds, uses optimistic
+versioning to avoid overwriting another operator, and makes graph-native triggers read-only. Other
+users can inspect automatic starts but cannot change the global registry. The registry accepts at
+most 32 rules and rejects repository traversal, option-shaped Git refs, invalid run modes, and
+negative or non-finite spend caps.
 
 A graph-native trigger without `params.workspace` is saved but disarmed. `params.dir` defaults to
 `docs/proposals/pending`; `params.ref` defaults to the refreshed remote default ref; and
