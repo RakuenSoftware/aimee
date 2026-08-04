@@ -54,7 +54,8 @@ static char *wsc_shell_quote(const char *raw)
 /* Run `cmd` in the container, capturing combined stdout+stderr. Returns the
  * command's exit code, or -1 if the backend could not run it at all. `*out` (when
  * non-NULL) receives a malloc'd NUL-terminated capture; caller frees. */
-static int wsc_run(const ws_container_provider_t *self, const char *cmd, char **out, size_t max_out)
+static int wsc_run(const ws_container_provider_t *self, const char *cmd, int timeout_ms, char **out,
+                   size_t max_out)
 {
    if (out)
       *out = NULL;
@@ -78,7 +79,7 @@ static int wsc_run(const ws_container_provider_t *self, const char *cmd, char **
                                .stderr_buf = ebuf,
                                .stderr_cap = cap + 1};
    ws_container_provider_t *mut = wsc_self(&self->base);
-   int rc = mut->backend->exec(mut->backend, mut->state, cmd, 0, &r);
+   int rc = mut->backend->exec(mut->backend, mut->state, cmd, timeout_ms, &r);
    if (rc != 0)
    {
       free(sbuf);
@@ -188,7 +189,7 @@ static int wsc_stat(const workspace_provider_t *p, const char *path, ws_stat_t *
    free(q);
 
    char *out = NULL;
-   if (wsc_run(self, cmd, &out, 256) < 0 || !out)
+   if (wsc_run(self, cmd, 0, &out, 256) < 0 || !out)
    {
       free(out);
       return 0;
@@ -291,7 +292,7 @@ static int wsc_exec(const workspace_provider_t *p, const char *const argv[], cha
       dstr_append_str(&cmd, q);
       free(q);
    }
-   int rc = cmd.data ? wsc_run(self, cmd.data, out, max_out) : -1;
+   int rc = cmd.data ? wsc_run(self, cmd.data, 0, out, max_out) : -1;
    dstr_free(&cmd);
    return rc;
 }
@@ -300,7 +301,18 @@ static char *wsc_exec_shell(const workspace_provider_t *p, const char *cmd, int 
 {
    ws_container_provider_t *self = wsc_self(p);
    char *out = NULL;
-   int rc = wsc_run(self, cmd, &out, WSC_EXEC_CAP);
+   int rc = wsc_run(self, cmd, 0, &out, WSC_EXEC_CAP);
+   if (exit_code)
+      *exit_code = rc; /* -1 on spawn/transport failure, per the contract */
+   return out;
+}
+
+static char *wsc_exec_shell_timeout(const workspace_provider_t *p, const char *cmd, int timeout_ms,
+                                    int *exit_code)
+{
+   ws_container_provider_t *self = wsc_self(p);
+   char *out = NULL;
+   int rc = wsc_run(self, cmd, timeout_ms, &out, WSC_EXEC_CAP);
    if (exit_code)
       *exit_code = rc; /* -1 on spawn/transport failure, per the contract */
    return out;
@@ -321,6 +333,7 @@ int ws_container_provider_init(ws_container_provider_t *out, delegate_backend_t 
    out->base.list = wsc_list;
    out->base.exec = wsc_exec;
    out->base.exec_shell = wsc_exec_shell;
+   out->base.exec_shell_timeout = wsc_exec_shell_timeout;
    /* exec_stream stays NULL: the backend has no streaming op, and the contract
     * permits NULL. A provider-CLI delegate (`claude -p`) therefore cannot yet run
     * through this provider — it needs streaming to surface a turn. Tracked. */

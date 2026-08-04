@@ -777,7 +777,10 @@ char *tool_bash(const char *command, int timeout_ms)
          dstr_free(&w);
       }
       int exit_code = -1;
-      char *out = ws->exec_shell(ws, wrapped ? wrapped : command, &exit_code);
+      char *out =
+          ws->exec_shell_timeout
+              ? ws->exec_shell_timeout(ws, wrapped ? wrapped : command, timeout_ms, &exit_code)
+              : ws->exec_shell(ws, wrapped ? wrapped : command, &exit_code);
       free(wrapped);
       /* Learned toolchain: capture apt-install intent ONLY after a successful run, so a
        * failed/typo'd/nonexistent install is never recorded (and can't poison later

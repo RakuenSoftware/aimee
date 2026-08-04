@@ -635,6 +635,11 @@ static char *td_execute_script(cJSON *args, const char *name, const char *dispat
       free(env_json);
       return result;
    }
+   int secs = (tout && cJSON_IsNumber(tout)) ? tout->valueint : 120;
+   if (secs <= 0)
+      secs = 120;
+   if (secs > 600)
+      secs = 600;
 
    /* Sandboxed (CONTAINER) delegate: run the script INSIDE the container via the
     * provider's exec_shell, NOT as tool_execute_script's local fork on the
@@ -670,7 +675,10 @@ static char *td_execute_script(cJSON *args, const char *name, const char *dispat
       dstr_append_str(&c, body->valuestring);
       dstr_append_str(&c, "\nAIMEE_SCRIPT_EOF\n");
       int exit_code = -1;
-      char *out = c.data ? ws->exec_shell(ws, c.data, &exit_code) : NULL;
+      char *out = NULL;
+      if (c.data)
+         out = ws->exec_shell_timeout ? ws->exec_shell_timeout(ws, c.data, secs * 1000, &exit_code)
+                                      : ws->exec_shell(ws, c.data, &exit_code);
       dstr_free(&c);
       /* Learned toolchain: record apt-install intent only after a successful run. */
       if (exit_code == 0)
@@ -690,7 +698,6 @@ static char *td_execute_script(cJSON *args, const char *name, const char *dispat
    }
 
    {
-      int secs = (tout && cJSON_IsNumber(tout)) ? tout->valueint : 120;
       const char *dir = (wd && cJSON_IsString(wd)) ? wd->valuestring : NULL;
       result = tool_execute_script(lang->valuestring, body->valuestring, secs, dir, env_json);
    }
