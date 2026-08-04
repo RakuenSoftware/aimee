@@ -638,6 +638,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-db1-write-retry \
                $(TESTPREFIX)/unit-test-db1-agent-job-heartbeat \
                $(TESTPREFIX)/unit-test-db1-delegate-reservation \
+               $(TESTPREFIX)/unit-test-obs-bus-module-concurrency \
                $(TESTPREFIX)/unit-test-db1-agent-job-cancel-unassigned \
                $(TESTPREFIX)/unit-test-server-delegate-monitor \
                $(TESTPREFIX)/unit-test-db1-delegation-recursive-cancel \
@@ -3197,6 +3198,22 @@ unit-test-bus-config-autonomy: $(TESTPREFIX)/unit-test-bus-config-autonomy
 # obs_bus + audit_ledger + the bus + the shared support objects. Test binary only.
 $(OBJDIR)/tests/test_bus_audit_durability.o: C_FLAGS += -Icore/event_bus/include
 $(TESTPREFIX)/unit-test-bus-audit-durability: $(OBJDIR)/tests/test_bus_audit_durability.o \
+                                              $(OBS_BUS_LINK_OBJS) \
+                                              $(OBJDIR)/modules/audit/audit_ledger.o \
+                                              $(OBJDIR)/aimee_home.o \
+                                              $(OBJDIR)/core/event_bus/bus_client.o \
+                                              $(OBJDIR)/core/event_bus/bus_attach.o \
+                                              $(OBJDIR)/core/event_bus/bus_host.o \
+                                              $(OBJDIR)/core/event_bus/bus_route.o \
+                                              $(OBJDIR)/core/event_bus/bus_region.o $(OBJDIR)/core/event_bus/bus_region_host.o \
+                                              $(OBJDIR)/core/event_bus/bus_ring.o \
+                                              $(OBJDIR)/core/event_bus/bus_arena.o \
+                                              $(OBJDIR)/core/event_bus/bus_wire.o \
+                                              $(OBJDIR)/core/event_bus/bus_capture.o \
+                                              $(BUS_MEM_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+
+$(TESTPREFIX)/unit-test-obs-bus-module-concurrency: $(OBJDIR)/tests/test_obs_bus_module_concurrency.o \
                                               $(OBS_BUS_LINK_OBJS) \
                                               $(OBJDIR)/modules/audit/audit_ledger.o \
                                               $(OBJDIR)/aimee_home.o \
