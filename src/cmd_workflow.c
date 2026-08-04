@@ -9,6 +9,7 @@
 #include "aimee_client.h"
 #include "cli_client.h"
 #include "cJSON.h"
+#include "util.h"
 #include "wfe_def.h"
 
 #ifndef _WIN32
@@ -365,6 +366,19 @@ static int cmd_run(int argc, char **argv, int json_output)
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "workflow", workflow);
    cJSON_AddStringToObject(req, "proposal_md", proposal);
+   /* A file-backed proposal can participate in source.archive, but only when
+    * its name is already a safe repo-relative pending-proposal path. Message,
+    * stdin, absolute, and parent-relative inputs intentionally remain ordinary
+    * manual submissions with no repository source to retire. */
+   if (proposal_file && strcmp(proposal_file, "-") != 0 && !aimee_path_is_absolute(proposal_file))
+   {
+      const char *source = proposal_file;
+      while (source[0] == '.' && (source[1] == '/' || source[1] == '\\'))
+         source += 2;
+      if (strncmp(source, "docs/proposals/pending/", 23) == 0 && !strstr(source, "/../") &&
+          !strstr(source, "\\..\\") && !strchr(source, '\\'))
+         cJSON_AddStringToObject(req, "source_path", source);
+   }
    if (repo && repo[0])
       cJSON_AddStringToObject(req, "repo", repo);
    char *body = cJSON_PrintUnformatted(req);
