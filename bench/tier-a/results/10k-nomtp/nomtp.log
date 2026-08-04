@@ -5,3 +5,7 @@
 [10:32:32Z] --- E4B.UD-Q4_K_XL.10k  unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL  nproc=3  NO MTP
 [10:36:53Z] === XTX: no-MTP ladder, 6 arms (E2B x3 then E4B x3), 10000 notes each
 [10:36:53Z] --- E2B.UD-Q4_K_XL.10k  unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL  nproc=3  NO MTP
+[13:04:46Z] === XTX: no-MTP ladder, 6 arms (E2B x3 then E4B x3), 10000 notes each
+[13:04:46Z] --- E2B.UD-Q4_K_XL.10k  unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL  nproc=3  NO MTP
+[17:41:11Z] OK   E2B.UD-Q4_K_XL.10k noMTP=0.6207  MTP=0.6246  wall=276m
+[17:41:11Z] --- E2B.UD-Q6_K_XL.10k  unsloth/gemma-4-E2B-it-GGUF:UD-Q6_K_XL  nproc=3  NO MTP
