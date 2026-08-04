@@ -22,6 +22,19 @@ type PullRequest struct {
 	Head string
 }
 
+type GitIdentity struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+// GitIdentityProvider is the narrow resource-plane seam used by workflow
+// commits. Author identity is sealed in the C server's Vault and deliberately
+// absent from the long-lived Go process environment, so production resolves it
+// just in time over the local root-owned Unix socket.
+type GitIdentityProvider interface {
+	Identity(context.Context, string) (GitIdentity, error)
+}
+
 // PullRequestSpec is the review contract the workflow hands to the forge. A
 // root workflow always sets Draft: automation may assemble and publish the
 // handoff, but making it reviewable and merging it are human actions. Slice PRs
@@ -70,6 +83,21 @@ func (f *HTTPForge) Push(ctx context.Context, repo, workdir, head string) error 
 	}
 	var ignored map[string]any
 	return f.execute(ctx, map[string]any{"op": "push", "workdir": workdir, "head": head}, &ignored)
+}
+
+func (f *HTTPForge) Identity(ctx context.Context, workdir string) (GitIdentity, error) {
+	var result struct {
+		Configured bool   `json:"configured"`
+		Name       string `json:"name"`
+		Email      string `json:"email"`
+	}
+	if err := f.execute(ctx, map[string]any{"op": "identity", "workdir": workdir}, &result); err != nil {
+		return GitIdentity{}, err
+	}
+	if !result.Configured || strings.TrimSpace(result.Name) == "" || strings.TrimSpace(result.Email) == "" {
+		return GitIdentity{}, ErrGitIdentityMissing
+	}
+	return GitIdentity{Name: result.Name, Email: result.Email}, nil
 }
 func (unavailableForge) CI(context.Context, string, string) (CIState, error) {
 	return CIPending, errors.New("forge resource plane is unavailable")

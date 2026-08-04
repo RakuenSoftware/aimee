@@ -160,6 +160,7 @@ Read the pause reason and the last events before acting. Common current reasons 
 | `fanout_limit` | reduce packets or raise the node's bounded `max_children` |
 | `budget_cap`, `turn_cap`, `wall_cap` | inspect cost and run policy before allowing more work |
 | `base_integration_conflict` | update or resolve the integration branch before resuming |
+| `git_identity_missing` | seal `AIMEE_GIT_AUTHOR_NAME` and `AIMEE_GIT_AUTHOR_EMAIL` through the install-time Vault bootstrap, then start the run |
 | `workflow_definition_invalid`, `workflow_block_unavailable` | restore the pinned definition or block version; editing only the current definition is insufficient |
 
 Do not file a replacement run merely to hide the evidence on the first one. Stop only when the run

@@ -2223,6 +2223,54 @@ func TestCommitChangesDropsCoreDumpAndRejectsGiantBlob(t *testing.T) {
 	}
 }
 
+func TestCommitChangesReturnsTypedMissingIdentity(t *testing.T) {
+	t.Setenv("AIMEE_GIT_AUTHOR_NAME", "")
+	t.Setenv("AIMEE_GIT_AUTHOR_EMAIL", "")
+	repo := t.TempDir()
+	cmd := exec.Command("git", "init", "-b", "testing", repo)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "change.md"), []byte("change\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := commitChanges(context.Background(), repo, "impl")
+	if !errors.Is(err, ErrGitIdentityMissing) {
+		t.Fatalf("commit error = %v, want ErrGitIdentityMissing", err)
+	}
+}
+
+type fixedIdentityForge struct{ unavailableForge }
+
+func (fixedIdentityForge) Identity(context.Context, string) (GitIdentity, error) {
+	return GitIdentity{Name: "Vault Operator", Email: "vault@example.test"}, nil
+}
+
+func TestNativeRunnerCommitUsesResourcePlaneIdentity(t *testing.T) {
+	t.Setenv("AIMEE_GIT_AUTHOR_NAME", "")
+	t.Setenv("AIMEE_GIT_AUTHOR_EMAIL", "")
+	repo := t.TempDir()
+	cmd := exec.Command("git", "init", "-b", "testing", repo)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "change.md"), []byte("change\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := &NativeRunner{forge: fixedIdentityForge{}}
+	if err := runner.commitChanges(t.Context(), repo, "impl"); err != nil {
+		t.Fatal(err)
+	}
+	show := exec.Command("git", "-C", repo, "show", "-s", "--format=%an <%ae>")
+	out, err := show.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git show: %v: %s", err, out)
+	}
+	if strings.TrimSpace(string(out)) != "Vault Operator <vault@example.test>" {
+		t.Fatalf("commit author = %q", out)
+	}
+}
+
 // The intended slice cycle is: cut a branch from the feature tip, do the work,
 // merge back into the feature branch, and let the NEXT slice start from the
 // updated tip. That merge happens through the FORGE, which advances the remote

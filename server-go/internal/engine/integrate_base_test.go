@@ -81,6 +81,28 @@ func TestIntegrateFeatureBasePicksUpSiblingMerge(t *testing.T) {
 	}
 }
 
+func TestNativeRunnerIntegrateFeatureBaseUsesResourcePlaneIdentity(t *testing.T) {
+	t.Setenv("AIMEE_GIT_AUTHOR_NAME", "")
+	t.Setenv("AIMEE_GIT_AUTHOR_EMAIL", "")
+	repo, slicedir := setupSliceRepo(t)
+	if err := os.WriteFile(filepath.Join(slicedir, "slice.txt"), []byte("slice\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, slicedir, "add", "slice.txt")
+	gitRun(t, slicedir, "commit", "-m", "slice change")
+	advanceFeature(t, repo, "sibling.txt", "sibling\n")
+
+	runner := &NativeRunner{forge: fixedIdentityForge{}}
+	park, err := runner.integrateFeatureBase(t.Context(), slicedir, "wi_parent")
+	if err != nil || park != "" {
+		t.Fatalf("integrateFeatureBase: park=%q err=%v", park, err)
+	}
+	author := gitRun(t, slicedir, "show", "-s", "--format=%an <%ae>")
+	if strings.TrimSpace(author) != "Vault Operator <vault@example.test>" {
+		t.Fatalf("merge author = %q", author)
+	}
+}
+
 // A slice freeze must review only that slice's delta over the latest feature
 // tip. Forge merges advance origin/aimee/feat/<parent>, not the stale local ref;
 // using the local ref makes later slice artifacts include every landed sibling

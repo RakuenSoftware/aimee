@@ -634,6 +634,8 @@ static int wfe_forge_operation_valid(const char *op, const char *head, const cha
       return 0;
    if (strcmp(op, "push") == 0)
       return head && !base && !title && !body && !has_draft && !has_number;
+   if (strcmp(op, "identity") == 0)
+      return !head && !base && !title && !body && !has_draft && !has_number;
    if (strcmp(op, "open") == 0)
    {
       int final_head = head && strncmp(head, "aimee/feat/wi_", 14) == 0;
@@ -699,7 +701,24 @@ int rh_internal_forge_execute(const route_req_t *rq, char *resp, int cap)
    int slice_head = head && strncmp(head, "aimee/wi/wi_", 12) == 0;
    int allowed_push_head =
        feature_head || (slice_head && wfe_slice_ref_matches_workdir(workdir, "aimee/wi/", 0, head));
-   if (strcmp(op, "push") == 0 && head && allowed_push_head)
+   if (strcmp(op, "identity") == 0)
+   {
+      char name[256], email[256];
+      int identity_rc = git_identity_resolve(workdir, name, sizeof(name), email, sizeof(email));
+      if (identity_rc < 0)
+         snprintf(err, sizeof(err), "cannot read configured git identity");
+      else
+      {
+         rc = 0;
+         cJSON_AddBoolToObject(out, "configured", identity_rc == 1);
+         if (identity_rc == 1)
+         {
+            cJSON_AddStringToObject(out, "name", name);
+            cJSON_AddStringToObject(out, "email", email);
+         }
+      }
+   }
+   else if (strcmp(op, "push") == 0 && head && allowed_push_head)
    {
       rc = git_ops_push_dir(principal, workdir, remote, head, &detail, err, sizeof(err));
    }
