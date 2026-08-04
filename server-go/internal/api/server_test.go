@@ -139,6 +139,130 @@ func TestBearerAuthentication(t *testing.T) {
 	}
 }
 
+func TestWorkflowTriggerRegistryRoundTripFromBrowserContract(t *testing.T) {
+	server, _, _ := newTestServer(t)
+	configPath := filepath.Join(t.TempDir(), "aimee.yaml")
+	if err := os.WriteFile(configPath, []byte("provider: codex\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configStore, err := appconfig.NewStore(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.SetConfigStore(configStore)
+
+	get := func(user string) map[string]any {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/v1/workflow/triggers", nil)
+		req.Header.Set("X-Aimee-Webuser", user)
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET triggers status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		var response map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+
+	initial := get("admin")
+	version, _ := initial["version"].(string)
+	if version == "" || initial["editable"] != true || initial["max_rules"] != float64(appconfig.MaxTriggerRules) {
+		t.Fatalf("initial trigger registry metadata = %#v", initial)
+	}
+	rules := []map[string]any{{
+		"source": "watch-dir", "event": "docs/requests", "schedule": "testing",
+		"mode":     "interactive",
+		"pipeline": map[string]any{"template": "build", "workspace": "/srv/repos/demo", "max_spend_usd": 4.5},
+	}}
+	body, _ := json.Marshal(map[string]any{"key": "trigger_rules", "value": rules, "previous_version": version})
+	req := httptest.NewRequest(http.MethodPost, "/v1/workflow/config/set", bytes.NewReader(body))
+	req.Header.Set("X-Aimee-Webuser", "admin")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save registry status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	saved := get("admin")
+	triggers, _ := saved["triggers"].([]any)
+	if len(triggers) != 1 {
+		t.Fatalf("saved triggers = %#v", saved)
+	}
+	trigger, _ := triggers[0].(map[string]any)
+	if trigger["event"] != "docs/requests" || trigger["template"] != "build" || trigger["origin"] != "config" || trigger["max_spend_usd"] != 4.5 {
+		t.Fatalf("saved trigger = %#v", trigger)
+	}
+	content, _ := os.ReadFile(configPath)
+	if !strings.Contains(string(content), "provider: codex") {
+		t.Fatalf("unrelated config was lost:\n%s", content)
+	}
+	if get("alice")["editable"] != false {
+		t.Fatal("non-administrator registry was advertised as editable")
+	}
+
+	staleReq := httptest.NewRequest(http.MethodPost, "/v1/workflow/config/set", bytes.NewReader(body))
+	staleReq.Header.Set("X-Aimee-Webuser", "admin")
+	staleRec := httptest.NewRecorder()
+	server.ServeHTTP(staleRec, staleReq)
+	if staleRec.Code != http.StatusConflict || !strings.Contains(staleRec.Body.String(), "version conflict") {
+		t.Fatalf("stale save status=%d body=%s", staleRec.Code, staleRec.Body.String())
+	}
+}
+
+func TestWorkflowTriggerRegistryRejectsUnsafeWrites(t *testing.T) {
+	server, _, _ := newTestServer(t)
+	configStore, _ := appconfig.NewStore(filepath.Join(t.TempDir(), "aimee.yaml"))
+	server.SetConfigStore(configStore)
+	version, _ := configStore.Version("trigger_rules")
+	validRule := `[{"source":"watch-dir","pipeline":{"template":"build","workspace":"/repo"}}]`
+
+	cases := []struct {
+		name, user, body string
+		status           int
+	}{
+		{"non-admin", "alice", `{"key":"trigger_rules","value":` + validRule + `,"previous_version":"` + version + `"}`, http.StatusForbidden},
+		{"unsupported-source", "admin", `{"key":"trigger_rules","value":[{"source":"webhook","pipeline":{"template":"build","workspace":"/repo"}}],"previous_version":"` + version + `"}`, http.StatusBadRequest},
+		{"trailing-json", "admin", `{"key":"trigger_rules","value":` + validRule + `,"previous_version":"` + version + `"}{}`, http.StatusBadRequest},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/v1/workflow/config/set", strings.NewReader(test.body))
+			req.Header.Set("X-Aimee-Webuser", test.user)
+			rec := httptest.NewRecorder()
+			server.ServeHTTP(rec, req)
+			if rec.Code != test.status {
+				t.Fatalf("status=%d body=%s, want %d", rec.Code, rec.Body.String(), test.status)
+			}
+		})
+	}
+}
+
+func TestWorkflowTriggerRegistryReportsMalformedConfigWithoutHidingIt(t *testing.T) {
+	server, _, _ := newTestServer(t)
+	configPath := filepath.Join(t.TempDir(), "aimee.yaml")
+	bad := "trigger_rules:\n  - source: watch-dir\n    event: ../outside\n    pipeline:\n      template: build\n      workspace: /repo\n"
+	if err := os.WriteFile(configPath, []byte(bad), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configStore, _ := appconfig.NewStore(configPath)
+	server.SetConfigStore(configStore)
+	req := httptest.NewRequest(http.MethodGet, "/v1/workflow/triggers", nil)
+	req.Header.Set("X-Aimee-Webuser", "admin")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"registry_error"`) ||
+		!strings.Contains(rec.Body.String(), "repository-relative") {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	content, _ := os.ReadFile(configPath)
+	if string(content) != bad {
+		t.Fatalf("malformed config was changed by a read:\n%s", content)
+	}
+}
+
 func TestProposalTriggerFilesCompleteGitBlobAndDeduplicates(t *testing.T) {
 	server, store, artifacts := newTestServer(t)
 	root := t.TempDir()
