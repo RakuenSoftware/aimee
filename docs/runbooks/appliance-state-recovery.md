@@ -130,7 +130,7 @@ storage faults are visible. `/tmp` would mask a tier-bound volume fault;
 a path under the same parent as `$WS` keeps the device-id check meaningful:
 
 ```bash
-WS_DEVICE=$(stat -c '%d' "$WS")
+WS_DEV=$(stat -c '%d' "$WS")
 PROBE="${WS%/*}/ws-probe-$$"
 git clone --single-branch "$CANONICAL_HTTPS_URL" "$PROBE"
 git -C "$PROBE" rev-parse HEAD
@@ -139,7 +139,7 @@ git -C "$PROBE" ls-remote origin HEAD
 
 Sanity checks before you proceed with the real recovery:
 
-- `[ "$(stat -c '%d' "$PROBE")" = "$WS_DEVICE" ]` -- the probe and the
+- `[ "$(stat -c '%d' "$PROBE")" = "$WS_DEV" ]` -- the probe and the
   broken repo share a filesystem (same device id). This audit is the whole
   point of the probe: if it fails, the workspace storage itself is
   the fault, not `$WS/.git`.
