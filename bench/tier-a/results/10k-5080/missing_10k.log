@@ -9,3 +9,5 @@
 [02:24:33Z] === MISSING 10K COMPLETE ===
 [02:24:40Z] === 5080 free; starting gemma-3n-E4B
 [02:24:40Z] --- gemma-3n-E4B-it.10k  unsloth/gemma-3n-E4B-it-GGUF:UD-Q4_K_XL  nproc=auto  port=8600
+[03:12:01Z] OK   gemma-3n-E4B-it.10k strictF1=scorer-refused wall=47m
+[03:12:01Z] === GEMMA-3N COMPLETE ===
