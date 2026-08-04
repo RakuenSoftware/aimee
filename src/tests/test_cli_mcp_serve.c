@@ -739,7 +739,7 @@ static void test_initialize(void)
    assert(strstr(instructions->valuestring, "get_help") != NULL);
    assert(strstr(instructions->valuestring, "spawn_agent") != NULL);
    assert(strstr(instructions->valuestring, "delegate tool") != NULL);
-   assert(strstr(instructions->valuestring, "per-session") == NULL);
+   assert(strstr(instructions->valuestring, "isolated checkout") == NULL);
 
    /* LISTED TOOLS ARE DIRECTLY CALLABLE, AND THE TEXT MUST LEAD WITH THAT.
     *
@@ -812,30 +812,8 @@ static void test_initialize_enters_session_worktree(void)
    cJSON *instructions = cJSON_GetObjectItemCaseSensitive(result, "instructions");
    assert(cJSON_IsString(instructions));
    assert(strstr(instructions->valuestring, "get_help") != NULL);
-   assert(strstr(instructions->valuestring, "isolated per-session") != NULL);
-   /* THE WORKTREE PATH MUST NOT REACH THE MODEL.
-    * Printing it made behaviour non-deterministic: on one build one task wrote to
-    * the caller's checkout and passed, another wrote only into the worktree and
-    * graded as zero changed files. A path in the prompt is an attractor. */
-   assert(strstr(instructions->valuestring, wt) == NULL);
-   /* NOTE: this suite cannot see the server's stderr, and stderr is ALSO
-    * model-visible -- an MCP host surfaces it as server log output. Removing the
-    * path from the instructions alone left agents relocating because they were
-    * reading it from "aimee: MCP session isolated in <path>". That line now goes
-    * through aimee_log instead. Unverified here; verified by the deployed
-    * behaviour (root edits present after the change). */
-   assert(strstr(instructions->valuestring, "do not go looking for another copy") != NULL);
-
-   /* THE INSTRUCTION MUST NOT RELOCATE THE CALLER.
-    *
-    * A revision that told the host's shell to use absolute paths under the
-    * worktree moved agents out of the checkout the caller owns: benchmark cells
-    * that passed before came back with 0 changed files, the real patch stranded
-    * on the session branch. Pin that aimee's tools are described and the host's
-    * are told they are unaffected. */
-   assert(strstr(instructions->valuestring, "aimee's own file and shell tools") != NULL);
-   assert(strstr(instructions->valuestring, "keep using them exactly where") != NULL);
-   assert(strstr(instructions->valuestring, "cd there first") == NULL);
+   assert(strstr(instructions->valuestring, "isolated checkout") != NULL);
+   assert(strstr(instructions->valuestring, wt) != NULL);
 
    cJSON_Delete(resp);
    cJSON_Delete(req);

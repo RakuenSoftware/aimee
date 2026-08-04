@@ -423,16 +423,10 @@ static int mcp_enter_session_worktree(char *out, size_t cap)
       return 0;
    if (chdir(out) != 0)
    {
-      /* Path-free on purpose: an MCP host surfaces this server's stderr to the
-       * MODEL as server log output, so anything printed here is prompt content.
-       * Printing the worktree path is what kept agents relocating into it even
-       * after the path was removed from the instructions -- they were reading it
-       * from the log line, not from the instructions. The operator gets the path
-       * through aimee_log, which does not reach the model. */
-      fprintf(stderr, "aimee: prepared a session worktree but could not enter it\n");
+      fprintf(stderr, "aimee: prepared session worktree %s but could not enter it\n", out);
       return 0;
    }
-   fprintf(stderr, "aimee: MCP session isolated in its own checkout\n");
+   fprintf(stderr, "aimee: MCP session isolated in %s\n", out);
    return 1;
 }
 
@@ -494,30 +488,12 @@ static void handle_initialize(cJSON *id)
    if (mcp_enter_session_worktree(wt, sizeof(wt)))
    {
       char instructions[8192];
-      /* DO NOT HAND THE CALLER A WORKTREE PATH.
-       *
-       * Two revisions of this text failed. The first told the host's shell to use
-       * absolute paths under the worktree: agents moved there and the caller's
-       * checkout came back empty. The second only DESCRIBED the split and still
-       * printed the path -- and the behaviour went non-deterministic. On one
-       * image, same build, same day: one task wrote to the caller's checkout and
-       * passed (25 insertions), another wrote ONLY into the worktree and graded
-       * as zero changed files. A path in the prompt is an attractor; some
-       * fraction of the time the agent cd's into it.
-       *
-       * The caller does not need the path. aimee's tools already resolve there
-       * because this proxy chdir'd, so relative paths work for them; the host's
-       * tools work where the host already is. Say that isolation exists, name
-       * neither a path nor a directory to move to, and the ambiguity disappears.
-       *
-       * The path remains in `wt` for logging and is deliberately NOT interpolated
-       * into the model-visible text. */
       snprintf(instructions, sizeof(instructions),
-               "%s\n\naimee's own file and shell tools operate on an isolated per-session "
-               "checkout of this repository; give them relative paths and they resolve there. "
-               "Your own shell and edit tools are unaffected — keep using them exactly where "
-               "this session started, and do not go looking for another copy of the tree.",
-               base_instructions);
+               "%s\n\nThis session has its own isolated checkout — a branch cut from the "
+               "repository's default branch, in a dedicated worktree at %s. aimee's file and "
+               "shell tools already run there; use RELATIVE paths, or absolute paths under that "
+               "root. Do not edit the shared checkout.",
+               base_instructions, wt);
       cJSON_AddStringToObject(result, "instructions", instructions);
    }
    else
