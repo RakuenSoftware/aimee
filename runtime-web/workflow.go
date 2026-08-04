@@ -113,7 +113,20 @@ func (s *server) handleWorkflowDefs(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/workflow/triggers — the configured trigger rules that auto-start runs.
 func (s *server) handleWorkflowTriggers(w http.ResponseWriter, r *http.Request) {
-	s.proxyWorkflow(w, r, http.MethodGet, "/v1/workflow/triggers", "")
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	// The Go registry response includes whether this principal may edit global
+	// triggers, so this read must carry the attested web identity too. The runtime
+	// owns the appliance-admin lookup (the bootstrap account is renamed during
+	// setup); normalize that capability to the Go control plane's internal admin
+	// principal after the trusted check instead of forwarding a literal username.
+	user := currentUser(r)
+	if s.isAdmin(r) {
+		user = "admin"
+	}
+	s.webuserPassAs(w, r, user, http.MethodGet, "/v1/workflow/triggers", nil)
 }
 
 func (s *server) handleWorkflowConfig(w http.ResponseWriter, r *http.Request) {
@@ -132,7 +145,7 @@ func (s *server) handleWorkflowConfigSet(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	s.webuserPass(w, r, http.MethodPost, "/v1/workflow/config/set", body)
+	s.webuserPassAs(w, r, "admin", http.MethodPost, "/v1/workflow/config/set", body)
 }
 
 // POST /api/workflow/validate — validate posted YAML without saving.
@@ -218,9 +231,16 @@ func (s *server) handleWorkflowItems(w http.ResponseWriter, r *http.Request) {
 // webuserPass proxies to an aimee-server /v1 path under the caller's webuser
 // identity (so ownership scoping resolves) and streams the envelope back verbatim.
 func (s *server) webuserPass(w http.ResponseWriter, r *http.Request, method, v1path string, body []byte) {
+	s.webuserPassAs(w, r, currentUser(r), method, v1path, body)
+}
+
+// webuserPassAs is reserved for identities resolved at this trusted runtime
+// boundary, notably the appliance administrator capability. Ordinary workflow
+// ownership calls use webuserPass and retain the signed-in username unchanged.
+func (s *server) webuserPassAs(w http.ResponseWriter, r *http.Request, user, method, v1path string, body []byte) {
 	ctx, cancel := context.WithTimeout(r.Context(), socketCallTimeout)
 	defer cancel()
-	st, data, err := s.v1RequestWebuser(ctx, currentUser(r), method, v1path, body)
+	st, data, err := s.v1RequestWebuser(ctx, user, method, v1path, body)
 	w.Header().Set("Content-Type", "application/json")
 	if err != nil {
 		w.WriteHeader(http.StatusBadGateway)
