@@ -155,7 +155,14 @@ int resolve_main_repo_root(const char *dir, char *out, size_t out_len)
 /* Resolve to the current checkout's top-level directory. In a worktree this is
  * the worktree root, not the shared main repo, so per-worktree verify state is
  * recorded alongside the checkout that ran the verification. */
-static int resolve_verify_root(const char *dir, char *out, size_t out_len)
+/* The git toplevel for `dir` (or the ambient cwd when NULL), and NOTHING else.
+ *
+ * Split out of resolve_verify_root because the difference between "this is a
+ * repository" and "this is merely a directory" is the whole question when
+ * choosing which candidate root to verify. resolve_verify_root deliberately
+ * falls back to a plain directory, which is right for its callers and useless
+ * for ranking candidates. Returns 0 only when git answered. */
+int verify_git_toplevel(const char *dir, char *out, size_t out_len)
 {
    char cmd[MAX_PATH_LEN + 64];
    int rc;
@@ -176,6 +183,13 @@ static int resolve_verify_root(const char *dir, char *out, size_t out_len)
       return 0;
    }
    free(top);
+   return -1;
+}
+
+static int resolve_verify_root(const char *dir, char *out, size_t out_len)
+{
+   if (verify_git_toplevel(dir, out, out_len) == 0)
+      return 0;
 
    if (dir && dir[0])
    {
@@ -1584,16 +1598,47 @@ cJSON *handle_git_verify(server_ctx_t *server_ctx, cJSON *args, const char *sess
    else
       is_async = (jasync && cJSON_IsTrue(jasync)); /* others: sync unless explicitly async */
 
-   /* The dispatch layer (dispatch_git_tool) already called mcp_chdir_git_root() which
-    * read the 'path' arg, applied the session's worktree mapping, and set the
-    * thread-local run_cmd CWD to the correct worktree.  resolve_verify_root(NULL, ...)
-    * picks that up via run_cmd, so we get the worktree path even when the caller passed
-    * path=<main-repo-root>. */
+   /* WHICH REPOSITORY ARE WE VERIFYING.
+    *
+    * This used to be resolve_verify_root(NULL, ...) alone, on the reasoning that
+    * dispatch_git_tool had already called mcp_chdir_git_root() to point the
+    * thread-local cwd at the session's mapped worktree. That holds on the MCP
+    * dispatch path. It does not hold on every path into this handler, and when it
+    * does not, resolve_verify_root falls back to getcwd() and confidently returns
+    * the SERVER PROCESS's own directory.
+    *
+    * Measured: `aimee git verify` resolved /var/lib/aimee -- aimee-server's home,
+    * not a repository at all -- and reported no Makefile there. Passing an explicit
+    * path=<repo> changed nothing, because the 'path' argument was never read here.
+    * The advice to pass it, which this file now prints, was advice to do something
+    * that did not work.
+    *
+    * Ordered by how much each candidate proves about itself:
+    *
+    *   1. ambient cwd, IF it is a git root -- the mapped worktree, preserving the
+    *      original intent that a session's worktree beats a caller-supplied
+    *      main-repo root
+    *   2. the explicit `path` argument -- the caller said so, and on the CLI route
+    *      this is the user's actual shell directory (marshal_git_verify sends it)
+    *   3. resolve_verify_root's own fallback, so behaviour is unchanged when
+    *      neither of the above resolves
+    *
+    * Being a git root is the discriminator because it is the only one of these
+    * that cannot be true by accident. */
    char project_root[MAX_PATH_LEN] = "";
-   const char *verify_root =
-       (resolve_verify_root(NULL, project_root, sizeof(project_root)) == 0 && project_root[0])
-           ? project_root
-           : NULL;
+   const cJSON *jpath = cJSON_GetObjectItemCaseSensitive(args, "path");
+   const char *path_arg =
+       (cJSON_IsString(jpath) && jpath->valuestring[0]) ? jpath->valuestring : NULL;
+
+   const char *verify_root = NULL;
+   if (verify_git_toplevel(NULL, project_root, sizeof(project_root)) == 0 && project_root[0])
+      verify_root = project_root;
+   else if (path_arg && verify_git_toplevel(path_arg, project_root, sizeof(project_root)) == 0 &&
+            project_root[0])
+      verify_root = project_root;
+   else if (resolve_verify_root(path_arg, project_root, sizeof(project_root)) == 0 &&
+            project_root[0])
+      verify_root = project_root;
 
    /* Cross-project scope gate. When the target is not the session's current
     * project and cross-project verify is disabled (default), do not run, gate,

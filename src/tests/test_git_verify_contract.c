@@ -195,9 +195,58 @@ static void test_unavailable_reason_names_the_root(void)
    printf("  test_unavailable_reason_names_the_root: PASS\n");
 }
 
+/* Verify picks its target by asking which candidate is actually a repository.
+ * That question only has value if "no" is a possible answer.
+ *
+ * resolve_verify_root falls back to the directory itself, and ultimately to
+ * getcwd(), so it answers "yes, here" for ANY directory. Relying on it to choose
+ * a root is how `aimee git verify` came to resolve /var/lib/aimee -- aimee-server's
+ * own home, not a repository -- and then report no Makefile there. Passing an
+ * explicit path=<repo> did not help, because the argument was never read.
+ *
+ * Pin the discriminator: a real repo resolves, a plain directory does NOT. */
+static void test_git_toplevel_rejects_a_non_repo(void)
+{
+   char out[1024];
+
+   char tmpl[] = "/tmp/aimee-verify-root-XXXXXX";
+   char *dir = mkdtemp(tmpl);
+   assert(dir != NULL);
+
+   /* A directory that is not a repository must fail, not answer with itself. */
+   out[0] = '\0';
+   assert(verify_git_toplevel(dir, out, sizeof(out)) != 0);
+
+   /* The same directory, once it IS a repository, resolves to its toplevel. */
+   char cmd[1200];
+   snprintf(cmd, sizeof(cmd), "git -C '%s' init -q 2>/dev/null", dir);
+   assert(system(cmd) == 0);
+   out[0] = '\0';
+   assert(verify_git_toplevel(dir, out, sizeof(out)) == 0);
+   assert(out[0] == '/');
+   /* mkdtemp under /tmp may be a symlink (macOS /tmp -> /private/tmp), so compare
+    * on the leaf rather than the full path. */
+   const char *leaf = strrchr(dir, '/');
+   assert(leaf && strstr(out, leaf + 1) != NULL);
+
+   /* A subdirectory resolves to the repository ROOT, not to itself. */
+   char sub[1100];
+   snprintf(sub, sizeof(sub), "%s/nested/deeper", dir);
+   snprintf(cmd, sizeof(cmd), "mkdir -p '%s'", sub);
+   assert(system(cmd) == 0);
+   char sub_out[1024];
+   assert(verify_git_toplevel(sub, sub_out, sizeof(sub_out)) == 0);
+   assert(strcmp(sub_out, out) == 0);
+
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", dir);
+   (void)system(cmd);
+   printf("  test_git_toplevel_rejects_a_non_repo: PASS\n");
+}
+
 int main(void)
 {
    printf("git_verify_contract:\n");
+   test_git_toplevel_rejects_a_non_repo();
    test_all_pass();
    test_one_fail();
    test_skip();
