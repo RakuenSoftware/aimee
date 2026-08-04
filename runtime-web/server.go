@@ -257,6 +257,13 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/deploy/apply", s.requireAuth(s.handleDeployApply))
 	mux.HandleFunc("/api/deploy/status", s.requireAuth(s.handleDeployStatus))
 	mux.HandleFunc("/api/setup/appliance", s.requireAuth(s.handleSetupAppliance))
+	// The wizard's embedder picker. Without this the topology step offers no bundled
+	// model and a new user cannot complete setup in the browser.
+	mux.HandleFunc("/api/embedders", s.requireAuth(s.handleEmbedders))
+	// The wizard's embedder picker. Without this the topology step offers no bundled
+	// model and a new user cannot complete setup in the browser.
+	// The wizard's embedder picker. Without this the topology step offers no bundled
+	// model and a new user cannot complete setup in the browser.
 	mux.HandleFunc("/api/auth/mode", s.handleAuthMode)
 	mux.HandleFunc("/api/setup/account", s.requireAuth(s.handleSetupAccount))
 
