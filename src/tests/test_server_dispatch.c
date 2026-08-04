@@ -1041,7 +1041,7 @@ int handle_delegate_cancel_unassigned(server_ctx_t *ctx, server_conn_t *conn, cJ
 {
    return stub_handler(conn, "delegate.cancel_unassigned");
 }
-int handle_roundtable_review_proxy(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+int handle_roundtable_review(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "roundtable.review");
 }

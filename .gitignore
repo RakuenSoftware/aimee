@@ -223,3 +223,6 @@ scratchpad/
 /.deploytmp/
 /*.py
 /*.sh
+
+# Transient deploy/sync bundles for the test container.
+.synctmp/

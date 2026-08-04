@@ -375,7 +375,14 @@ log "starting aimee-server (socket=$SERVER_SOCK) as user aimee"
 rm -f "$AIMEE_HOME/aimee-http.sock" "$AIMEE_WFE_HTTP_SOCKET"
 runuser -u aimee -- sh -c 'set -eu; ulimit -c 0 2>/dev/null || true; exec aimee-server --socket="$1"' sh "$SERVER_SOCK" &
 server_pid=$!
-runuser -u aimee -- module-supervisor.sh server "$AIMEE_MODULE_BUS_SOCKET" "$MODULE_MANIFEST" &
+# The roundtable module seats its review panel over the agent resource plane,
+# so it needs the same socket the WFE is given. A module that cannot reach the
+# plane declines to serve the review stage rather than failing reviews one at a
+# time, so without this the stage is simply never offered.
+export AIMEE_AGENT_SERVICE_SOCKET="${AIMEE_AGENT_SERVICE_SOCKET:-$AIMEE_HOME/aimee-http.sock}"
+runuser -u aimee -- env AIMEE_HOME="$AIMEE_HOME" \
+    AIMEE_AGENT_SERVICE_SOCKET="$AIMEE_AGENT_SERVICE_SOCKET" \
+    module-supervisor.sh server "$AIMEE_MODULE_BUS_SOCKET" "$MODULE_MANIFEST" &
 module_pid=$!
 
 if [ "$AIMEE_WFE_ENGINE" = go ]; then

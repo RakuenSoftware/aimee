@@ -1,5 +1,5 @@
 #include "server_mcp_roundtable.h"
-#include "../server/wfe_roundtable_proxy.h"
+#include "../server/roundtable_review_bus.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -117,11 +117,14 @@ static void test_status_cannot_read_an_unrelated_run(void)
    cJSON_Delete(args);
 }
 
-static void test_transport_covers_the_chairman_phase(void)
+/* The chairman is a separate turn with its own full phase deadline, so the call
+ * must cover analysis plus chairman plus a serialization grace. A single-phase
+ * deadline starved it whenever the seats ran long. */
+static void test_deadline_covers_the_chairman_phase(void)
 {
-   assert(wfe_roundtable_transport_timeout_ms(600000, 0) == 630000);
-   assert(wfe_roundtable_transport_timeout_ms(600000, 1) == 1230000);
-   assert(wfe_roundtable_transport_timeout_ms(INT_MAX, 1) == INT_MAX);
+   assert(roundtable_review_deadline_ms(600000, 0) == 630000);
+   assert(roundtable_review_deadline_ms(600000, 1) == 1230000);
+   assert(roundtable_review_deadline_ms(INT_MAX, 1) == INT_MAX);
 }
 
 int main(void)
@@ -131,7 +134,7 @@ int main(void)
    test_submission_preserves_named_roundtable();
    test_status_returns_terminal_synthesis();
    test_status_cannot_read_an_unrelated_run();
-   test_transport_covers_the_chairman_phase();
+   test_deadline_covers_the_chairman_phase();
    printf("ok\n");
    return 0;
 }

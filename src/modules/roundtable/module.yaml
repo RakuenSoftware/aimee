@@ -10,7 +10,7 @@
     "response-composition",
     "routing"
   ],
-  "enabled_by_default": false,
+  "enabled_by_default": true,
   "ownership_complete": true,
   "runtime_toggle": {
     "supported": false
