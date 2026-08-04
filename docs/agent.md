@@ -48,10 +48,6 @@ Call these directly without CLI. All available via the MCP server.
 Primary agents must not use provider-native sub-agent tools such as Codex
 `spawn_agent`, Claude `Agent`, or remote-agent launchers. Use the Aimee
 `delegate` MCP tool for every delegated or parallel sub-task.
-When `AIMEE_MCP_TOOL_PROFILE=solo` is set, Aimee withholds the delegate and
-roundtable tools from MCP clients for single-agent evaluation or explicitly solo
-runs. In that profile, do not look for a delegate workaround; do the work in the
-current agent.
 
 MCP delegate calls run in the background by default and return a `job_id`;
 poll `delegate_status` for the result. CLI delegate calls remain synchronous

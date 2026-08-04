@@ -33,8 +33,7 @@ const char *mcp_tool_profile_effective(const char *explicit_profile);
 
 /* Filter a served tools/list IN PLACE to the named profile (NULL => resolve via
  * mcp_tool_profile_effective). "full" / unknown is a no-op (fail open); "core"
- * or "lean" keeps only the Tier-0 set; "solo" keeps Tier-0 except delegate and
- * roundtable tools. Returns the number of tools removed. */
+ * or "lean" keeps only the Tier-0 set. Returns the number of tools removed. */
 int mcp_filter_tools_for_profile(cJSON *tools, const char *profile);
 
 /* Append the find_tools / describe_tool discovery meta-tools and the call_tool

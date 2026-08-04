@@ -254,15 +254,6 @@ worktree, budget, and audit path.
 `aimee mcp-serve` exposes memory, index, and delegate tools over stdio JSON-RPC. Client setup writes
 the supported coding-tool registrations unless `AIMEE_NO_CLIENT_INTEGRATIONS=1` is set.
 
-`AIMEE_MCP_TOOL_PROFILE` controls the MCP `tools/list` presentation. The default
-`core`/`lean` profile shows only the high-frequency tools plus `find_tools`,
-`describe_tool`, and `call_tool`; clients discover the rest on demand instead of
-receiving the full catalog up front. Set `AIMEE_MCP_TOOL_PROFILE=full` to present
-every tool directly. Set `AIMEE_MCP_TOOL_PROFILE=solo` when measuring or running a
-single agent: it keeps the core presentation but withholds `delegate` and
-`roundtable_*`, and generated Codex guidance tells the agent to do the work itself
-instead of delegating.
-
 The MCP registry audits configured servers and checks packages against OSV:
 
 ```bash
