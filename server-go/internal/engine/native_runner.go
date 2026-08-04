@@ -1102,7 +1102,17 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 	feedback, approvals, totalCost := analysis.Feedback, analysis.Approvals, analysis.CostUSD
 	totalCostUnknown := analysis.CostUnknown
 	discussionFailed := 0
-	if panel.Discussion {
+	// A PANEL OF ONE HAS NOBODY TO DISCUSS WITH OR BE CHAIRED BY.
+	//
+	// Discussion is seats exchanging views; the chairman arbitrates between them.
+	// With a single seat there is no second opinion to exchange with or resolve,
+	// so both are pure cost and pure risk. Measured on a one-seat completeness
+	// review: the seat returned a correct blocking finding, the chairman then
+	// died on "unknown persona 'chairman'", and roundtable_status reported the
+	// whole run FAILED -- a caller polling that status discards findings that
+	// were exactly right.
+	multiSeat := len(seats) > 1
+	if panel.Discussion && multiSeat {
 		req.CostLimitUSD = remainingCostLimit(stepCostLimit, totalCost)
 		var discussionErr string
 		feedback, approvals, totalCost, totalCostUnknown, discussionFailed, discussionErr = r.runPanelDiscussion(roundtableCtx, req, panel, analysis, stage)
@@ -1114,7 +1124,7 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 			return StepResult{Status: StepPending, PauseReason: "roundtable_discussion", Detail: discussionErr, CostUSD: totalCost, CostUnknown: totalCostUnknown, Roundtable: rt}, nil
 		}
 	}
-	if panel.ChairmanEnabled {
+	if panel.ChairmanEnabled && multiSeat {
 		// The chairman is a separate step and gets its own deadline, not the tail of
 		// the analysis phase's. It previously inherited the shared panel context, so
 		// slow seats left it nothing and it failed on the POST that launches its job

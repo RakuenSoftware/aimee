@@ -626,7 +626,7 @@ func TestConfiguredRoundtableReportsEveryPhaseDeadline(t *testing.T) {
 		},
 		{
 			name:      "chairman",
-			preset:    `{"name":"default","seats":[{"model":"codex","persona":"security"}],"min_successful":1,"chairman":"codex","chairman_enabled":true,"deadline_ms":80}`,
+			preset:    `{"name":"default","seats":[{"model":"codex","persona":"security"},{"model":"codex","persona":"qa"}],"min_successful":1,"chairman":"codex","chairman_enabled":true,"deadline_ms":80}`,
 			agents:    chairmanDeadlineAgents{},
 			wantPause: "roundtable_chairman",
 		},
@@ -661,7 +661,7 @@ func TestConfiguredRoundtableReportsEveryPhaseDeadline(t *testing.T) {
 
 func TestConfiguredRoundtableChairmanFailureIsVisiblyDegraded(t *testing.T) {
 	dir := t.TempDir()
-	body := `{"name":"default","seats":[{"model":"codex","persona":"security"}],"min_successful":1,"chairman":"kimi","chairman_enabled":true,"deadline_ms":100}`
+	body := `{"name":"default","seats":[{"model":"codex","persona":"security"},{"model":"codex","persona":"qa"}],"min_successful":1,"chairman":"kimi","chairman_enabled":true,"deadline_ms":100}`
 	if err := os.WriteFile(filepath.Join(dir, "default.json"), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -700,7 +700,7 @@ func (a *budgetExhaustionAgents) DelegateGroup(ctx context.Context, requests []D
 
 func TestRoundtableDoesNotLaunchChairmanAfterCostExhaustion(t *testing.T) {
 	dir := t.TempDir()
-	body := `{"name":"default","seats":[{"model":"codex","persona":"security"}],"min_successful":1,"chairman":"codex","chairman_enabled":true}`
+	body := `{"name":"default","seats":[{"model":"codex","persona":"security"},{"model":"codex","persona":"qa"}],"min_successful":1,"chairman":"codex","chairman_enabled":true}`
 	if err := os.WriteFile(filepath.Join(dir, "default.json"), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
