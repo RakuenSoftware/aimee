@@ -12,7 +12,10 @@ Throughout this runbook:
 - `$WS` is the affected workspace repo path (e.g.
   `/var/lib/aimee/workspaces/<user>/<repo>`).
 - `$AIMEE_PORT` is the listener port the daemon serves the v1 API on
-  (e.g. `8740`).
+  (e.g. `8740`). Confirm the actual bind address and port from the
+  service unit, container environment, or startup logs before running
+  the `curl` probes below; replace `127.0.0.1:${AIMEE_PORT}` if the
+  daemon is not bound on loopback.
 - `$CANONICAL_HTTPS_URL` is the canonical HTTPS clone URL of that repo
   (the same URL the forge uses; e.g. `https://example.com/<user>/<repo>.git`).
 
@@ -25,8 +28,10 @@ server runtime user.
 
 `GET /v1/agents` returns `502 agents backend unavailable`.
 
-> `GET /v1/agent/list` masks the failure as an empty array. Probe with
-> `/v1/agents` (the strict endpoint) to see it.
+> Current builds report this failure explicitly from `GET /v1/agent/list`.
+> Older builds, and summary consumers such as `GET /v1/server/state`, can
+> mask the same agent-config load failure as an empty agent array. Probe
+> with `/v1/agents` (the strict endpoint) to see the backend error.
 
 ### Confirm
 
@@ -127,12 +132,14 @@ Success is HTTP 200 with a JSON object containing `default` and a non-empty
 
 Run the clone probe on a sibling path **on the same volume** as `$WS` so
 storage faults are visible. `/tmp` would mask a tier-bound volume fault;
-a path under the same parent as `$WS` keeps the device-id check meaningful:
+a path under the same parent as `$WS` keeps the device-id check meaningful.
+Use a shallow probe so the diagnostic clone does not consume more of the
+workspace tier than necessary:
 
 ```bash
 WS_DEV=$(stat -c '%d' "$WS")
 PROBE="${WS%/*}/ws-probe-$$"
-git clone --single-branch "$CANONICAL_HTTPS_URL" "$PROBE"
+git clone --depth 1 --single-branch "$CANONICAL_HTTPS_URL" "$PROBE"
 git -C "$PROBE" rev-parse HEAD
 git -C "$PROBE" ls-remote origin HEAD
 ```
@@ -167,6 +174,9 @@ ts=$(date +%s)
 mv "$WS" "${WS}.bak.${ts}"
 git clone --single-branch "$CANONICAL_HTTPS_URL" "$WS"
 ```
+
+If this clone fails, stop. Preserve `${WS}.bak.${ts}` and either escalate
+or restore it before attempting any further recovery on the canonical path.
 
 Verify the fresh clone has its `origin` set correctly and that HEAD
 resolves:
