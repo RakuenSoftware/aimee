@@ -1,0 +1,6 @@
+[21:30:29Z] sizing: starting one server to measure resident VRAM
+[21:30:45Z]   one instance uses 2104 MiB of 16303 MiB
+[21:30:45Z]   -> running 3 processes, cache-ram 1024 MiB each
+[21:31:18Z]   all 3 servers up; VRAM now 6302 MiB
+[21:31:18Z] START LFM2.5-2.6B.Q4_K_M across 3 shards
+[22:40:03Z] DONE LFM2.5-2.6B.Q4_K_M rows=1001/1001 wall=68m45s procs=3 retries=0

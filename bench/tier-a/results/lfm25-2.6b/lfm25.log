@@ -1,0 +1,6 @@
+[21:25:08Z] === LFM2.5-2.6B quant sweep on the 5080: Q4_K_M, Q6_K, Q8_0; 10000 notes each
+[21:25:08Z] --- LFM2.5-2.6B.Q4_K_M  LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M  nproc=3  no MTP
+[21:30:23Z] === LFM2.5-2.6B quant sweep on the 5080: Q4_K_M, Q6_K, Q8_0; 1001 notes each
+[21:30:23Z] --- LFM2.5-2.6B.Q4_K_M  LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M  nproc=3  no MTP
+[22:40:09Z] OK   LFM2.5-2.6B.Q4_K_M strictF1=0.5854 wall=69m
+[22:40:09Z] --- LFM2.5-2.6B.Q6_K  LiquidAI/LFM2.5-2.6B-GGUF:Q6_K  nproc=3  no MTP

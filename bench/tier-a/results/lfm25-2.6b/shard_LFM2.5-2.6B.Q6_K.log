@@ -1,0 +1,3 @@
+[22:40:15Z] sizing: starting one server to measure resident VRAM
+[22:41:01Z]   one instance uses 2626 MiB of 16303 MiB
+[22:41:01Z]   -> running 3 processes, cache-ram 1024 MiB each
