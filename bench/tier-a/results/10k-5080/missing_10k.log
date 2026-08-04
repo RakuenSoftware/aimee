@@ -5,3 +5,7 @@
 [20:01:17Z] --- granite-4.1-3b.10k  unsloth/granite-4.1-3b-GGUF:UD-Q4_K_XL  nproc=3  port=8600
 [20:22:44Z] OK   granite-4.1-3b.10k strictF1=scorer-refused wall=21m
 [20:22:44Z] --- Qwen3-1.7B.10k  unsloth/Qwen3-1.7B-GGUF:UD-Q4_K_XL  nproc=3  port=8600
+[02:24:33Z] OK   Qwen3-1.7B.10k strictF1=0.4591 wall=361m
+[02:24:33Z] === MISSING 10K COMPLETE ===
+[02:24:40Z] === 5080 free; starting gemma-3n-E4B
+[02:24:40Z] --- gemma-3n-E4B-it.10k  unsloth/gemma-3n-E4B-it-GGUF:UD-Q4_K_XL  nproc=auto  port=8600

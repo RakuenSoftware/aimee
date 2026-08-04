@@ -1,0 +1,6 @@
+[20:22:50Z] sizing: starting one server to measure resident VRAM
+[20:23:06Z]   one instance uses 2334 MiB of 16303 MiB
+[20:23:06Z]   -> running 3 processes, cache-ram 1024 MiB each
+[20:23:39Z]   all 3 servers up; VRAM now 6992 MiB
+[20:23:39Z] START Qwen3-1.7B.10k across 3 shards
+[02:24:26Z] DONE Qwen3-1.7B.10k rows=10000/10000 wall=360m46s procs=3 retries=0
