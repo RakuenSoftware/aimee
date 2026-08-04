@@ -20,9 +20,6 @@
 #include "roundtable_review_bus.h"
 
 #include "cJSON.h"
-#include "config.h"
-#include "delegate_ensemble.h" /* ensemble_panel_from_config */
-#include "roundtable_preset.h"
 #include "util.h"
 
 #include <aimee/audit/obs_bus.h>
@@ -45,25 +42,6 @@ static uint64_t monotonic_deadline_ns(int timeout_ms)
       return 0;
    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec +
           (uint64_t)timeout_ms * 1000000ull;
-}
-
-/* Resolve the C-configured default panel so the MCP schema's documented default
- * can reach Go, which deliberately requires a named saved panel. */
-static void resolve_default_panel(const cJSON *request, char *out, size_t out_len, int *timeout_ms)
-{
-   out[0] = '\0';
-   ensemble_panel_t panel;
-   ensemble_panel_from_config(&panel);
-   const cJSON *preset = cJSON_GetObjectItemCaseSensitive(request, "roundtable");
-   const char *requested = cJSON_IsString(preset) ? preset->valuestring : NULL;
-   if (roundtable_preset_resolve_runtime(requested, &panel, out, out_len, NULL, 0) > 0)
-   {
-      roundtable_preset_t acquired;
-      int chairman = roundtable_preset_load(out, &acquired) == 0 ? acquired.chairman_enabled : 0;
-      *timeout_ms = roundtable_review_deadline_ms(panel.deadline_ms, chairman);
-   }
-   else
-      *timeout_ms = roundtable_review_deadline_ms(0, 0);
 }
 
 /* Build the review body. Identical JSON to what the HTTP route carried: the
@@ -134,9 +112,11 @@ int handle_roundtable_review(server_ctx_t *ctx, server_conn_t *conn, cJSON *requ
       return server_send_error(
           conn, "roundtable review module is not attached to the event bus", NULL);
 
-   char resolved[RT_PRESET_NAME_MAX] = "";
+   const cJSON *requested = cJSON_GetObjectItemCaseSensitive(request, "roundtable");
+   char resolved[ROUNDTABLE_REVIEW_PANEL_NAME_MAX] = "";
    int timeout_ms = 0;
-   resolve_default_panel(request, resolved, sizeof(resolved), &timeout_ms);
+   roundtable_review_resolve_panel(cJSON_IsString(requested) ? requested->valuestring : NULL,
+                                   resolved, sizeof(resolved), &timeout_ms);
 
    char *wire = build_review_body(request, resolved);
    if (!wire)
