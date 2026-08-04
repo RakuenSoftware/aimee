@@ -186,53 +186,6 @@ int verify_git_toplevel(const char *dir, char *out, size_t out_len)
    return -1;
 }
 
-/* Choose the repository to verify from REQUEST-SCOPED INPUTS ONLY.
- *
- * `req_cwd` is run_cmd_get_cwd(): the thread-local directory this request
- * established, which dispatch_git_tool resets to NULL on entry and on every exit
- * path. `path_arg` is the caller's explicit target. Neither is shared with any
- * other session.
- *
- * WHAT IS DELIBERATELY NOT CONSULTED: the process-global CWD.
- *
- * aimee-server changes it. server_cron.c chdir()s the whole process into a job's
- * workdir, serialized against other cron jobs by g_cron_workdir_lock -- a lock
- * that does nothing for the other threads in the pool, which simply observe a
- * different cwd for the duration. Any resolution that ends in getcwd() therefore
- * reads state a CONCURRENT SESSION can move, and answers with whatever repository
- * that session happened to be working in. On a box where several sessions share a
- * repo, that is a verify silently run against the wrong tree.
- *
- * The old code ended in getcwd() and this is where it landed: verify resolved
- * /var/lib/aimee, aimee-server's own home, because nothing request-scoped had been
- * set and the process cwd was simply where the daemon started.
- *
- * So: resolve from request state or refuse. NULL out means "could not tell", which
- * verify_config_unavailable_reason renders as a real answer. Guessing from shared
- * mutable state is the one option that can be confidently wrong. */
-const char *verify_select_root(const char *req_cwd, const char *path_arg, char *out, size_t out_len)
-{
-   /* 1. The worktree this request resolved. Preserves the original intent that a
-    *    session's mapped worktree beats a caller-supplied main-repo root. */
-   if (req_cwd && req_cwd[0] && verify_git_toplevel(NULL, out, out_len) == 0 && out[0])
-      return out;
-
-   /* 2. The repository the caller named. */
-   if (path_arg && path_arg[0] && verify_git_toplevel(path_arg, out, out_len) == 0 && out[0])
-      return out;
-
-   /* 3. A named directory that is not a repository. Report against IT, so the
-    *    error names what the caller actually asked about rather than silently
-    *    widening to something else. */
-   if (path_arg && path_arg[0])
-   {
-      snprintf(out, out_len, "%s", path_arg);
-      return out;
-   }
-
-   return NULL;
-}
-
 static int resolve_verify_root(const char *dir, char *out, size_t out_len)
 {
    if (verify_git_toplevel(dir, out, out_len) == 0)
@@ -1645,16 +1598,47 @@ cJSON *handle_git_verify(server_ctx_t *server_ctx, cJSON *args, const char *sess
    else
       is_async = (jasync && cJSON_IsTrue(jasync)); /* others: sync unless explicitly async */
 
-   /* WHICH REPOSITORY ARE WE VERIFYING. See verify_select_root: request-scoped
-    * inputs only, never the process-global CWD that a concurrent session can move
-    * out from under us. */
+   /* WHICH REPOSITORY ARE WE VERIFYING.
+    *
+    * This used to be resolve_verify_root(NULL, ...) alone, on the reasoning that
+    * dispatch_git_tool had already called mcp_chdir_git_root() to point the
+    * thread-local cwd at the session's mapped worktree. That holds on the MCP
+    * dispatch path. It does not hold on every path into this handler, and when it
+    * does not, resolve_verify_root falls back to getcwd() and confidently returns
+    * the SERVER PROCESS's own directory.
+    *
+    * Measured: `aimee git verify` resolved /var/lib/aimee -- aimee-server's home,
+    * not a repository at all -- and reported no Makefile there. Passing an explicit
+    * path=<repo> changed nothing, because the 'path' argument was never read here.
+    * The advice to pass it, which this file now prints, was advice to do something
+    * that did not work.
+    *
+    * Ordered by how much each candidate proves about itself:
+    *
+    *   1. ambient cwd, IF it is a git root -- the mapped worktree, preserving the
+    *      original intent that a session's worktree beats a caller-supplied
+    *      main-repo root
+    *   2. the explicit `path` argument -- the caller said so, and on the CLI route
+    *      this is the user's actual shell directory (marshal_git_verify sends it)
+    *   3. resolve_verify_root's own fallback, so behaviour is unchanged when
+    *      neither of the above resolves
+    *
+    * Being a git root is the discriminator because it is the only one of these
+    * that cannot be true by accident. */
    char project_root[MAX_PATH_LEN] = "";
    const cJSON *jpath = cJSON_GetObjectItemCaseSensitive(args, "path");
    const char *path_arg =
        (cJSON_IsString(jpath) && jpath->valuestring[0]) ? jpath->valuestring : NULL;
 
-   const char *verify_root =
-       verify_select_root(run_cmd_get_cwd(), path_arg, project_root, sizeof(project_root));
+   const char *verify_root = NULL;
+   if (verify_git_toplevel(NULL, project_root, sizeof(project_root)) == 0 && project_root[0])
+      verify_root = project_root;
+   else if (path_arg && verify_git_toplevel(path_arg, project_root, sizeof(project_root)) == 0 &&
+            project_root[0])
+      verify_root = project_root;
+   else if (resolve_verify_root(path_arg, project_root, sizeof(project_root)) == 0 &&
+            project_root[0])
+      verify_root = project_root;
 
    /* Cross-project scope gate. When the target is not the session's current
     * project and cross-project verify is disabled (default), do not run, gate,

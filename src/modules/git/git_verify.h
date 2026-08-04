@@ -56,17 +56,6 @@ int verify_load_config(const char *project_root, verify_config_t *cfg);
  * home. Returns 0 only when git answered. */
 int verify_git_toplevel(const char *dir, char *out, size_t out_len);
 
-/* Choose the repository to verify from REQUEST-SCOPED inputs only: `req_cwd` is
- * run_cmd_get_cwd() (thread-local, reset by dispatch_git_tool on entry and every
- * exit) and `path_arg` is the caller's explicit target. Returns `out`, or NULL
- * when neither identifies anything.
- *
- * The process-global CWD is deliberately not a candidate: aimee-server chdir()s
- * it (server_cron.c), so a resolution ending in getcwd() reads state a CONCURRENT
- * SESSION can move and can verify the wrong repository entirely. */
-const char *verify_select_root(const char *req_cwd, const char *path_arg, char *out,
-                               size_t out_len);
-
 /* Explain why verify_load_config found nothing, for the error path. Writes a
  * sentence naming the root that was searched: the previous message asserted "no
  * Makefile found" for five different causes and never said WHERE it looked, which
