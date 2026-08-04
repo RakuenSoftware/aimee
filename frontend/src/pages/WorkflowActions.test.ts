@@ -32,6 +32,7 @@ describe("human-authored workflow triggers", () => {
     expect(triggerValidationError({ ...valid, event: "../secrets" })).toContain("inside the repository");
     expect(triggerValidationError({ ...valid, event: "docs\\requests" })).toContain("forward slashes");
     expect(triggerValidationError({ ...valid, workspace: "" })).toContain("Choose a repository");
+    expect(triggerValidationError({ ...valid, workspace: "relative/repo" })).toContain("absolute server-visible");
     expect(triggerValidationError({ ...valid, schedule: "--all" })).toContain("cannot start");
   });
 

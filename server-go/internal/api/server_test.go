@@ -37,6 +37,13 @@ func newTestServer(t *testing.T) (*Server, *db1.Store, *wfe.ArtifactStore) {
 	return server, store, artifacts
 }
 
+func setWorkflowIdentity(req *http.Request, user string, operator bool) {
+	req.Header.Set("X-Aimee-Webuser", user)
+	if operator {
+		req.Header.Set("X-Aimee-Workflow-Operator", "true")
+	}
+}
+
 func TestProposalEndpointImportsLegacySourceWithoutTruncation(t *testing.T) {
 	server, store, _ := newTestServer(t)
 	tail := "ACCEPTANCE_CRITERION_AFTER_ALL_PRIOR_BYTE_LIMITS"
@@ -47,12 +54,13 @@ func TestProposalEndpointImportsLegacySourceWithoutTruncation(t *testing.T) {
 	}
 	if err := store.CreateWorkItem(context.Background(), db1.CreateWorkItem{
 		ID: "wi_api", Repo: "repo", ProposalPath: source, WorkflowName: "build",
-		WorkflowVersion: strings.Repeat("a", 64), StartStage: "plan", Mode: "autonomous",
+		WorkflowVersion: strings.Repeat("a", 64), StartStage: "plan", Mode: "autonomous", Submitter: "alice",
 	}); err != nil {
 		t.Fatal(err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/workflow/items/wi_api/proposal", nil)
+	setWorkflowIdentity(req, "alice", false)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -96,7 +104,7 @@ func TestWorkflowStopCancelsAndStopsEveryDescendant(t *testing.T) {
 	server, store, _ := newTestServer(t)
 	ctx := context.Background()
 	for _, in := range []db1.CreateWorkItem{
-		{ID: "wi_api_stop", Repo: "repo", ProposalPath: "root", WorkflowName: "build", StartStage: "slices"},
+		{ID: "wi_api_stop", Repo: "repo", ProposalPath: "root", WorkflowName: "build", StartStage: "slices", Submitter: "alice"},
 		{ID: "wi_api_stop.child", Repo: "repo", ProposalPath: "child", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_api_stop"},
 	} {
 		if err := store.CreateWorkItem(ctx, in); err != nil {
@@ -106,7 +114,9 @@ func TestWorkflowStopCancelsAndStopsEveryDescendant(t *testing.T) {
 	cancelled := make(map[string]bool)
 	server.SetSchedulerCancel(func(id string) { cancelled[id] = true })
 	rec := httptest.NewRecorder()
-	server.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/workflow/items/wi_api_stop/stop", nil))
+	req := httptest.NewRequest(http.MethodPost, "/v1/workflow/items/wi_api_stop/stop", nil)
+	setWorkflowIdentity(req, "alice", false)
+	server.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -118,6 +128,187 @@ func TestWorkflowStopCancelsAndStopsEveryDescendant(t *testing.T) {
 		if !cancelled[id] {
 			t.Fatalf("scheduler did not cancel %s", id)
 		}
+	}
+}
+
+func TestWorkflowItemsAreScopedToRootSubmitterAndOperator(t *testing.T) {
+	server, store, _ := newTestServer(t)
+	ctx := context.Background()
+	for _, in := range []db1.CreateWorkItem{
+		{ID: "wi_alice", Repo: "repo", ProposalPath: "alice", WorkflowName: "build", StartStage: "plan", Submitter: "alice"},
+		// Older child slices have no submitter of their own. Ownership must follow
+		// the durable parent chain to the root instead of hiding or exposing them.
+		{ID: "wi_alice.s0", Repo: "repo", ProposalPath: "alice-child", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_alice"},
+		{ID: "wi_bob", Repo: "repo", ProposalPath: "bob", WorkflowName: "build", StartStage: "plan", Submitter: "bob"},
+		// Trigger-origin runs have no browser submitter and are operator-only.
+		{ID: "wi_trigger", Repo: "repo", ProposalPath: "trigger", WorkflowName: "build", StartStage: "plan"},
+	} {
+		if err := store.CreateWorkItem(ctx, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	request := func(method, target, user, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, target, strings.NewReader(body))
+		setWorkflowIdentity(req, user, user == "admin")
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+		return rec
+	}
+	ids := func(rec *httptest.ResponseRecorder) map[string]bool {
+		t.Helper()
+		var response struct {
+			Items []db1.WorkItem `json:"items"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		result := make(map[string]bool, len(response.Items))
+		for _, item := range response.Items {
+			result[item.ID] = true
+		}
+		return result
+	}
+
+	aliceList := request(http.MethodGet, "/v1/workflow/items", "alice", "")
+	if aliceList.Code != http.StatusOK {
+		t.Fatalf("alice list status=%d body=%s", aliceList.Code, aliceList.Body.String())
+	}
+	if got := ids(aliceList); len(got) != 2 || !got["wi_alice"] || !got["wi_alice.s0"] {
+		t.Fatalf("alice visible items=%v, want root and inherited child only", got)
+	}
+	if rec := request(http.MethodGet, "/v1/workflow/items/all", "alice", ""); rec.Code != http.StatusForbidden {
+		t.Fatalf("non-operator all-items status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	// The operator role is not inferred from username data. This remains
+	// important after the bootstrap account is renamed and "admin" can be an
+	// unrelated authenticated identity.
+	literalAdmin := httptest.NewRequest(http.MethodGet, "/v1/workflow/items/wi_alice", nil)
+	setWorkflowIdentity(literalAdmin, "admin", false)
+	literalAdminRec := httptest.NewRecorder()
+	server.ServeHTTP(literalAdminRec, literalAdmin)
+	if literalAdminRec.Code != http.StatusForbidden {
+		t.Fatalf("literal admin username status=%d body=%s", literalAdminRec.Code, literalAdminRec.Body.String())
+	}
+	operatorList := request(http.MethodGet, "/v1/workflow/items/all", "admin", "")
+	if operatorList.Code != http.StatusOK || len(ids(operatorList)) != 4 {
+		t.Fatalf("operator items status=%d body=%s", operatorList.Code, operatorList.Body.String())
+	}
+	if rec := request(http.MethodGet, "/v1/workflow/items/wi_alice.s0", "alice", ""); rec.Code != http.StatusOK {
+		t.Fatalf("inherited child ownership status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec := request(http.MethodGet, "/v1/workflow/items/wi_trigger", "admin", ""); rec.Code != http.StatusOK {
+		t.Fatalf("operator trigger detail status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	for _, tc := range []struct {
+		name, method, target, body string
+	}{
+		{"detail", http.MethodGet, "/v1/workflow/items/wi_alice", ""},
+		{"events", http.MethodGet, "/v1/workflow/items/wi_alice/events", ""},
+		{"proposal", http.MethodGet, "/v1/workflow/items/wi_alice/proposal", ""},
+		{"pause", http.MethodPost, "/v1/workflow/items/wi_alice/pause", ""},
+		{"resume", http.MethodPost, "/v1/workflow/items/wi_alice/resume", ""},
+		{"stop", http.MethodPost, "/v1/workflow/items/wi_alice/stop", ""},
+		{"delete", http.MethodDelete, "/v1/workflow/items/wi_alice", ""},
+	} {
+		t.Run("cross-user-"+tc.name, func(t *testing.T) {
+			if rec := request(tc.method, tc.target, "bob", tc.body); rec.Code != http.StatusForbidden {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+	if rec := request(http.MethodPost, "/v1/workflow/items/wi_alice/gate", "alice", `{"decision":"approve"}`); rec.Code != http.StatusForbidden {
+		t.Fatalf("owner gate decision status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	item, err := store.WorkItem(ctx, "wi_alice")
+	if err != nil || item.State != "active" || item.PauseReason != "" {
+		t.Fatalf("unauthorized lifecycle calls mutated item=%+v err=%v", item, err)
+	}
+}
+
+func TestWorkflowDefinitionWritesRequireAdministrator(t *testing.T) {
+	server, _, _ := newTestServer(t)
+	server.workflowDir = t.TempDir()
+
+	request := func(method, target, user, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, target, strings.NewReader(body))
+		setWorkflowIdentity(req, user, user == "admin")
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+		return rec
+	}
+	for _, user := range []string{"alice", "admin"} {
+		rec := request(http.MethodGet, "/v1/workflow/blocks", user, "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("blocks user=%q status=%d body=%s", user, rec.Code, rec.Body.String())
+		}
+		var response struct {
+			Editable bool `json:"editable"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		if response.Editable != (user == "admin") {
+			t.Fatalf("blocks user=%q editable=%t", user, response.Editable)
+		}
+	}
+	for _, tc := range []struct {
+		method, target, body string
+	}{
+		{http.MethodPut, "/v1/workflow/blocks/custom.test", `{}`},
+		{http.MethodDelete, "/v1/workflow/blocks/custom.test", ``},
+		{http.MethodPost, "/v1/workflow/save", `{}`},
+	} {
+		if rec := request(tc.method, tc.target, "alice", tc.body); rec.Code != http.StatusForbidden {
+			t.Fatalf("%s %s status=%d body=%s", tc.method, tc.target, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestWorkflowMutationBodiesAndDirectTriggersAreStrict(t *testing.T) {
+	server, _, _ := newTestServer(t)
+	server.workflowDir = t.TempDir()
+
+	for _, tc := range []struct {
+		name, method, target, user, body string
+	}{
+		{"trigger-unknown-field", http.MethodPost, "/v1/trigger/fire", "admin", `{"source":"watch-dir","workspace":"/repo","proposal":"p.md","surprise":true}`},
+		{"trigger-trailing-json", http.MethodPost, "/v1/trigger/fire", "admin", `{"source":"watch-dir","workspace":"/repo","proposal":"p.md"} {}`},
+		{"trigger-invalid-mode", http.MethodPost, "/v1/trigger/fire", "admin", `{"source":"watch-dir","workspace":"/repo","proposal":"p.md","mode":"manual"}`},
+		{"trigger-relative-workspace", http.MethodPost, "/v1/trigger/fire", "admin", `{"source":"watch-dir","workspace":"repo","proposal":"p.md"}`},
+		{"trigger-traversal", http.MethodPost, "/v1/trigger/fire", "admin", `{"source":"watch-dir","workspace":"/repo","proposal":"p.md","event":"../private"}`},
+		{"trigger-backslash", http.MethodPost, "/v1/trigger/fire", "admin", `{"source":"watch-dir","workspace":"/repo","proposal":"p.md","event":"docs\\private"}`},
+		{"trigger-option-ref", http.MethodPost, "/v1/trigger/fire", "admin", `{"source":"watch-dir","workspace":"/repo","proposal":"p.md","ref":"--all"}`},
+		{"trigger-negative-spend", http.MethodPost, "/v1/trigger/fire", "admin", `{"source":"watch-dir","workspace":"/repo","proposal":"p.md","max_spend_usd":-1}`},
+		{"submit-trailing-json", http.MethodPost, "/v1/dev/submit", "alice", `{"proposal_md":"# Request","repo":"/repo"} {}`},
+		{"gate-trailing-json", http.MethodPost, "/v1/workflow/items/missing/gate", "admin", `{"decision":"approve"} {}`},
+		{"block-trailing-json", http.MethodPut, "/v1/workflow/blocks/custom.test", "admin", `{} {}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.target, strings.NewReader(tc.body))
+			setWorkflowIdentity(req, tc.user, tc.user == "admin")
+			rec := httptest.NewRecorder()
+			server.ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestManualSubmissionIdempotencyIsScopedToSubmitter(t *testing.T) {
+	alice := manualSubmissionIdentity("alice", "client-request-1", "build")
+	if alice != manualSubmissionIdentity("alice", "client-request-1", "build") {
+		t.Fatal("same submitter and key did not produce a stable identity")
+	}
+	if alice == manualSubmissionIdentity("bob", "client-request-1", "build") {
+		t.Fatal("different submitters shared one idempotency identity")
+	}
+	if alice == manualSubmissionIdentity("alice", "client-request-2", "build") {
+		t.Fatal("different keys shared one idempotency identity")
 	}
 }
 
@@ -154,7 +345,7 @@ func TestWorkflowTriggerRegistryRoundTripFromBrowserContract(t *testing.T) {
 	get := func(user string) map[string]any {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodGet, "/v1/workflow/triggers", nil)
-		req.Header.Set("X-Aimee-Webuser", user)
+		setWorkflowIdentity(req, user, user == "admin")
 		rec := httptest.NewRecorder()
 		server.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
@@ -169,7 +360,7 @@ func TestWorkflowTriggerRegistryRoundTripFromBrowserContract(t *testing.T) {
 
 	initial := get("admin")
 	version, _ := initial["version"].(string)
-	if version == "" || initial["editable"] != true || initial["max_rules"] != float64(appconfig.MaxTriggerRules) {
+	if version == "" || initial["operator"] != true || initial["editable"] != true || initial["max_rules"] != float64(appconfig.MaxTriggerRules) {
 		t.Fatalf("initial trigger registry metadata = %#v", initial)
 	}
 	rules := []map[string]any{{
@@ -179,7 +370,7 @@ func TestWorkflowTriggerRegistryRoundTripFromBrowserContract(t *testing.T) {
 	}}
 	body, _ := json.Marshal(map[string]any{"key": "trigger_rules", "value": rules, "previous_version": version})
 	req := httptest.NewRequest(http.MethodPost, "/v1/workflow/config/set", bytes.NewReader(body))
-	req.Header.Set("X-Aimee-Webuser", "admin")
+	setWorkflowIdentity(req, "admin", true)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -199,16 +390,37 @@ func TestWorkflowTriggerRegistryRoundTripFromBrowserContract(t *testing.T) {
 	if !strings.Contains(string(content), "provider: codex") {
 		t.Fatalf("unrelated config was lost:\n%s", content)
 	}
-	if get("alice")["editable"] != false {
+	if ordinary := get("alice"); ordinary["operator"] != false || ordinary["editable"] != false {
 		t.Fatal("non-administrator registry was advertised as editable")
 	}
 
 	staleReq := httptest.NewRequest(http.MethodPost, "/v1/workflow/config/set", bytes.NewReader(body))
-	staleReq.Header.Set("X-Aimee-Webuser", "admin")
+	setWorkflowIdentity(staleReq, "admin", true)
 	staleRec := httptest.NewRecorder()
 	server.ServeHTTP(staleRec, staleReq)
 	if staleRec.Code != http.StatusConflict || !strings.Contains(staleRec.Body.String(), "version conflict") {
 		t.Fatalf("stale save status=%d body=%s", staleRec.Code, staleRec.Body.String())
+	}
+}
+
+func TestWorkflowOperatorCapabilityIsIndependentOfTriggerRegistryAvailability(t *testing.T) {
+	server, _, _ := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/v1/workflow/triggers", nil)
+	setWorkflowIdentity(req, "renamed-owner", true)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Operator bool `json:"operator"`
+		Editable bool `json:"editable"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if !response.Operator || response.Editable {
+		t.Fatalf("operator=%t editable=%t, want true/false", response.Operator, response.Editable)
 	}
 }
 
@@ -221,16 +433,19 @@ func TestWorkflowTriggerRegistryRejectsUnsafeWrites(t *testing.T) {
 
 	cases := []struct {
 		name, user, body string
+		operator         bool
 		status           int
 	}{
-		{"non-admin", "alice", `{"key":"trigger_rules","value":` + validRule + `,"previous_version":"` + version + `"}`, http.StatusForbidden},
-		{"unsupported-source", "admin", `{"key":"trigger_rules","value":[{"source":"webhook","pipeline":{"template":"build","workspace":"/repo"}}],"previous_version":"` + version + `"}`, http.StatusBadRequest},
-		{"trailing-json", "admin", `{"key":"trigger_rules","value":` + validRule + `,"previous_version":"` + version + `"}{}`, http.StatusBadRequest},
+		{"non-admin", "alice", `{"key":"trigger_rules","value":` + validRule + `,"previous_version":"` + version + `"}`, false, http.StatusForbidden},
+		{"literal-admin-without-capability", "admin", `{"key":"trigger_rules","value":` + validRule + `,"previous_version":"` + version + `"}`, false, http.StatusForbidden},
+		{"relative-workspace", "admin", `{"key":"trigger_rules","value":[{"source":"watch-dir","pipeline":{"template":"build","workspace":"repo"}}],"previous_version":"` + version + `"}`, true, http.StatusBadRequest},
+		{"unsupported-source", "admin", `{"key":"trigger_rules","value":[{"source":"webhook","pipeline":{"template":"build","workspace":"/repo"}}],"previous_version":"` + version + `"}`, true, http.StatusBadRequest},
+		{"trailing-json", "admin", `{"key":"trigger_rules","value":` + validRule + `,"previous_version":"` + version + `"}{}`, true, http.StatusBadRequest},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/v1/workflow/config/set", strings.NewReader(test.body))
-			req.Header.Set("X-Aimee-Webuser", test.user)
+			setWorkflowIdentity(req, test.user, test.operator)
 			rec := httptest.NewRecorder()
 			server.ServeHTTP(rec, req)
 			if rec.Code != test.status {
@@ -250,7 +465,7 @@ func TestWorkflowTriggerRegistryReportsMalformedConfigWithoutHidingIt(t *testing
 	configStore, _ := appconfig.NewStore(configPath)
 	server.SetConfigStore(configStore)
 	req := httptest.NewRequest(http.MethodGet, "/v1/workflow/triggers", nil)
-	req.Header.Set("X-Aimee-Webuser", "admin")
+	setWorkflowIdentity(req, "admin", true)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"registry_error"`) ||

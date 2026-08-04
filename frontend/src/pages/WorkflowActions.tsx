@@ -46,6 +46,7 @@ export interface Trigger {
 interface TriggerRegistryResponse {
   triggers: Trigger[];
   version: string;
+  operator?: boolean;
   editable?: boolean;
   max_rules?: number;
   registry_error?: string;
@@ -120,11 +121,7 @@ async function postJSON<T>(url: string, body: unknown): Promise<{ status: number
 }
 
 async function loadWorkflowConfig(): Promise<Record<string, unknown>> {
-  try {
-    return (await getJSON<{ config: Record<string, unknown> }>("/api/workflow/config")).config || {};
-  } catch {
-    return {};
-  }
+  return (await getJSON<{ config: Record<string, unknown> }>("/api/workflow/config")).config || {};
 }
 
 async function saveWorkflowConfig(key: string, value: unknown, previousVersion?: string): Promise<{ ok: boolean; status: number; value?: unknown; error?: string }> {
@@ -238,6 +235,7 @@ export default function WorkflowActions() {
   const [triggers, setTriggers] = useState<Trigger[]>([]);
   const [triggerVersion, setTriggerVersion] = useState("");
   const [triggerEditable, setTriggerEditable] = useState(false);
+  const [workflowOperator, setWorkflowOperator] = useState(false);
   const [triggerMaxRules, setTriggerMaxRules] = useState(32);
   const [triggerRegistryError, setTriggerRegistryError] = useState("");
   const [triggerLoadError, setTriggerLoadError] = useState("");
@@ -269,6 +267,7 @@ export default function WorkflowActions() {
         setTriggers(d.triggers || []);
         setTriggerVersion(d.version || "");
         setTriggerEditable(d.editable === true);
+        setWorkflowOperator(d.operator === true);
         setTriggerMaxRules(d.max_rules || 32);
         setTriggerRegistryError(d.registry_error || "");
         setTriggerLoadError("");
@@ -276,6 +275,7 @@ export default function WorkflowActions() {
       .catch((e: Error) => {
         setTriggers([]);
         setTriggerEditable(false);
+        setWorkflowOperator(false);
         setTriggerLoadError(`Could not load triggers: ${e.message}`);
       });
     // Offer managed repositories by name. A custom server-visible path remains
@@ -494,7 +494,7 @@ export default function WorkflowActions() {
     [selId, acting, refreshList, openProposal],
   );
 
-  const canDecide = !!detail && isHumanGatePause(detail.pause_reason);
+  const canDecide = workflowOperator && !!detail && isHumanGatePause(detail.pause_reason);
   // Which lifecycle controls apply to the current item.
   const term = !!detail && isTerminal(detail.state);
   const paused = !!detail && !term && !!detail.pause_reason;
@@ -534,13 +534,15 @@ export default function WorkflowActions() {
         >
           + New proposal
         </Button>
-        <label
-          style={{ fontSize: 12, color: "#666", display: "flex", alignItems: "center", gap: 6 }}
-          title="Show every run across all users, not just your own."
-        >
-          <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
-          Show all (operator)
-        </label>
+        {workflowOperator && (
+          <label
+            style={{ fontSize: 12, color: "#666", display: "flex", alignItems: "center", gap: 6 }}
+            title="Show every run across all users, not just your own."
+          >
+            <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
+            Show all (operator)
+          </label>
+        )}
         {status && (
           <div style={{ marginTop: 6 }}>
             <InlineStatus status={status} />
@@ -560,7 +562,7 @@ export default function WorkflowActions() {
           open={triggersOpen}
           onToggle={() => setTriggersOpen((v) => !v)}
         />
-        <RunPolicyPanel />
+        <RunPolicyPanel editable={workflowOperator} />
         <div style={{ marginTop: 8 }}>
           {items.length === 0 && (
             <EmptyState message="No proposals yet." inline />
@@ -717,7 +719,7 @@ const RUN_POLICY_FIELDS: { key: string; label: string; help: string; kind: "int"
     key: "trigger.max_concurrent",
     label: "Trigger admission cap",
     kind: "int",
-    help: "Maximum active runs admitted across configured triggers. New proposals remain queued for a later scheduler pass when the cap is reached. Default 2. 0 = uncapped.",
+    help: "Maximum active runs admitted across configured triggers. New proposals remain queued for a later scheduler pass when the cap is reached. Default 2. 0 pauses new admission.",
   },
   {
     key: "trigger.scan_interval_secs",
@@ -759,7 +761,7 @@ const RUN_POLICY_FIELDS: { key: string; label: string; help: string; kind: "int"
     key: "autonomy.concurrency",
     label: "Concurrency",
     kind: "int",
-    help: "Max autonomous runs driven concurrently per scheduler sweep. Default 2.",
+    help: "Max autonomous runs driven concurrently per scheduler sweep. Default 5.",
   },
   {
     key: "autonomy.delegate_pending_secs",
@@ -773,13 +775,25 @@ const RUN_POLICY_FIELDS: { key: string; label: string; help: string; kind: "int"
 
 // Collapsible run-policy editor: loads the autonomy.* config on first open and writes
 // each change back via the same /api/config/set the Settings page uses.
-function RunPolicyPanel() {
+function RunPolicyPanel({ editable }: { editable: boolean }) {
   const [open, setOpen] = useState(false);
   const [cfg, setCfg] = useState<Record<string, unknown> | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
-    if (open && cfg === null) loadWorkflowConfig().then(setCfg);
+    if (!open || cfg !== null) return;
+    let cancelled = false;
+    setErr(null);
+    loadWorkflowConfig()
+      .then((value) => {
+        if (!cancelled) setCfg(value);
+      })
+      .catch((error: Error) => {
+        if (!cancelled) setErr(`Could not load run policy: ${error.message}`);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [open, cfg]);
   const save = async (key: string, value: unknown) => {
     setSaving(key);
@@ -801,12 +815,16 @@ function RunPolicyPanel() {
       </div>
       {open && (
         <div style={{ marginTop: 6 }}>
-          {cfg === null ? (
+          {cfg === null && !err ? (
             <div style={{ fontSize: 12, color: "#999" }}>Loading…</div>
+          ) : cfg === null ? (
+            <div style={{ fontSize: 11, color: "#c00" }}>{err}</div>
           ) : (
             <>
               <div style={{ fontSize: 11, color: "#999", lineHeight: 1.4, marginBottom: 6 }}>
-                Admission, safety caps, and auto-resume for autonomous runs. Changes apply live.
+                {editable
+                  ? "Admission, safety caps, and auto-resume for autonomous runs. Changes apply live."
+                  : "Read-only. Administrator access is required to change global run policy."}
               </div>
               {RUN_POLICY_FIELDS.map((f) => (
                 <div
@@ -819,6 +837,7 @@ function RunPolicyPanel() {
                     <input
                       type="checkbox"
                       checked={!!cfg?.[f.key]}
+                      disabled={!editable || saving !== null}
                       onChange={(e) => save(f.key, e.target.checked)}
                     />
                   ) : (
@@ -827,6 +846,7 @@ function RunPolicyPanel() {
                       min={f.min}
                       max={f.max}
                       defaultValue={Number(cfg?.[f.key] ?? 0)}
+                      disabled={!editable || saving !== null}
                       style={{
                         width: 90,
                         fontFamily: "ui-monospace, monospace",
@@ -861,7 +881,11 @@ function RunPolicyPanel() {
 }
 
 export function triggerValidationError(trigger: Trigger): string {
-  if (!trigger.workspace.trim()) return "Choose a repository or enter its server-visible checkout path.";
+  const workspace = trigger.workspace.trim();
+  if (!workspace) return "Choose a repository or enter its server-visible checkout path.";
+  if (!workspace.startsWith("/") || /[\u0000-\u001f\u007f]/.test(workspace)) {
+    return "Enter an absolute server-visible checkout path (for example /srv/repos/project).";
+  }
   if (!trigger.template.trim()) return "Choose a saved workflow.";
   const directory = trigger.event.trim();
   if (!directory) return "Enter the repository-relative directory to watch.";

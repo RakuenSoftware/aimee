@@ -133,9 +133,10 @@ func TestTriggerRulesRejectUnsafeHumanInputs(t *testing.T) {
 		"pipeline": map[string]any{"template": "build", "workspace": "/repo"},
 	}
 	for name, mutate := range map[string]func(map[string]any){
-		"traversal":    func(rule map[string]any) { rule["event"] = "../outside" },
-		"git-option":   func(rule map[string]any) { rule["schedule"] = "--all" },
-		"negative-cap": func(rule map[string]any) { rule["pipeline"].(map[string]any)["max_spend_usd"] = -1 },
+		"traversal":          func(rule map[string]any) { rule["event"] = "../outside" },
+		"relative-workspace": func(rule map[string]any) { rule["pipeline"].(map[string]any)["workspace"] = "repo" },
+		"git-option":         func(rule map[string]any) { rule["schedule"] = "--all" },
+		"negative-cap":       func(rule map[string]any) { rule["pipeline"].(map[string]any)["max_spend_usd"] = -1 },
 	} {
 		t.Run(name, func(t *testing.T) {
 			rule := map[string]any{

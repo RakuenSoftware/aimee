@@ -74,7 +74,15 @@ func splitBinding(binding string) (string, string, bool) {
 	return "", "", false
 }
 
-func (s *Server) workflowBlocks(w http.ResponseWriter, _ *http.Request) {
+func requireWorkflowAdmin(w http.ResponseWriter, r *http.Request) bool {
+	if !workflowOperator(r) {
+		writeError(w, http.StatusForbidden, errors.New("administrator access required"))
+		return false
+	}
+	return true
+}
+
+func (s *Server) workflowBlocks(w http.ResponseWriter, r *http.Request) {
 	registry, err := s.workflowRegistry()
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, err)
@@ -85,20 +93,28 @@ func (s *Server) workflowBlocks(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"blocks": blocks})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"blocks": blocks, "editable": workflowOperator(r),
+	})
 }
 
 func (s *Server) workflowBlockPut(w http.ResponseWriter, r *http.Request) {
+	if !requireWorkflowAdmin(w, r) {
+		return
+	}
 	registry, err := s.workflowRegistry()
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, err)
 		return
 	}
 	var block wfe.BlockDefinition
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
+	decoder := jsonDecoder(r.Body)
 	if err := decoder.Decode(&block); err != nil {
 		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		writeError(w, http.StatusBadRequest, errors.New("request must contain one JSON value"))
 		return
 	}
 	block.Name = r.PathValue("name")
@@ -110,6 +126,9 @@ func (s *Server) workflowBlockPut(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) workflowBlockDelete(w http.ResponseWriter, r *http.Request) {
+	if !requireWorkflowAdmin(w, r) {
+		return
+	}
 	registry, err := s.workflowRegistry()
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, err)
@@ -195,6 +214,9 @@ func (s *Server) workflowValidate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) workflowSave(w http.ResponseWriter, r *http.Request) {
+	if !requireWorkflowAdmin(w, r) {
+		return
+	}
 	request, err := decodeWorkflowRequest(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)

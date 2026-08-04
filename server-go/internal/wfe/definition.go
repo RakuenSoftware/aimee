@@ -5,8 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
+	"path"
+	"path/filepath"
 	"regexp"
+	"strings"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -124,6 +128,11 @@ func (d Definition) Validate() error {
 				return err
 			}
 		}
+		if node.Block == "trigger.watch-dir" {
+			if err := validateWatchDirParams(node); err != nil {
+				return err
+			}
+		}
 		if node.Block == "gate.roundtable" {
 			panel, _ := node.Params["panel"].(map[string]any)
 			if panel != nil {
@@ -170,6 +179,55 @@ func (d Definition) Validate() error {
 	return nil
 }
 
+func validateWatchDirParams(node Node) error {
+	stringParam := func(key string) (string, bool, error) {
+		raw, present := node.Params[key]
+		if !present {
+			return "", false, nil
+		}
+		value, ok := raw.(string)
+		if !ok {
+			return "", true, fmt.Errorf("node %q param %q must be a string", node.ID, key)
+		}
+		return value, true, nil
+	}
+	if workspace, present, err := stringParam("workspace"); err != nil {
+		return err
+	} else if present && workspace != "" && (workspace != strings.TrimSpace(workspace) || !filepath.IsAbs(workspace) ||
+		strings.IndexFunc(workspace, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0) {
+		return fmt.Errorf("node %q param %q must be an absolute server path with no surrounding whitespace or control characters", node.ID, "workspace")
+	}
+	if directory, present, err := stringParam("dir"); err != nil {
+		return err
+	} else if present && directory != "" {
+		trimmed := strings.TrimSpace(directory)
+		clean := path.Clean(trimmed)
+		if directory != trimmed || strings.Contains(directory, "\\") ||
+			strings.IndexFunc(directory, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 ||
+			clean == "." || path.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, "../") {
+			return fmt.Errorf("node %q param %q must be a confined repository-relative directory", node.ID, "dir")
+		}
+	}
+	if ref, present, err := stringParam("ref"); err != nil {
+		return err
+	} else if present && (ref != strings.TrimSpace(ref) || strings.HasPrefix(ref, "-") ||
+		strings.IndexFunc(ref, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0) {
+		return fmt.Errorf("node %q param %q must not contain surrounding whitespace, control characters, or start with '-'", node.ID, "ref")
+	}
+	if mode, present, err := stringParam("mode"); err != nil {
+		return err
+	} else if present && mode != "" && mode != "autonomous" && mode != "interactive" {
+		return fmt.Errorf("node %q param %q must be autonomous or interactive", node.ID, "mode")
+	}
+	if raw, present := node.Params["max_spend_usd"]; present {
+		spend, ok := numericFloat(raw)
+		if !ok || spend < 0 || math.IsNaN(spend) || math.IsInf(spend, 0) {
+			return fmt.Errorf("node %q param %q must be finite and non-negative", node.ID, "max_spend_usd")
+		}
+	}
+	return nil
+}
+
 func (d Definition) Node(id string) (Node, bool) {
 	for _, node := range d.Nodes {
 		if node.ID == id {
@@ -203,6 +261,20 @@ func numericInt(value any) (int, bool) {
 		if n == float64(int(n)) {
 			return int(n), true
 		}
+	}
+	return 0, false
+}
+
+func numericFloat(value any) (float64, bool) {
+	switch n := value.(type) {
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case uint64:
+		return float64(n), true
+	case float64:
+		return n, true
 	}
 	return 0, false
 }

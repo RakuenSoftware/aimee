@@ -12,8 +12,8 @@ pinned to work already in flight.
 
 1. **Open the composer.** Select **+ New proposal**.
 2. **Write the request.** Enter a title and proposal body, then choose a saved workflow.
-3. **Choose the checkout.** Choose a managed repository or enter a custom checkout path visible to
-   the server. The form
+3. **Choose the checkout.** Choose a managed repository or enter an absolute custom checkout path
+   visible to the server. The form
    requires this before it sends the proposal.
 4. **Use project help if needed.** **Draft with a delegate** and **Load from project** both show a preview before
    replacing the proposal body.
@@ -46,6 +46,11 @@ The left rail lists runs and their derived status labels. Selecting one shows:
 The selected run is polled every four seconds while it remains open. Event reads use an incremental
 cursor, so the page appends new history instead of reconstructing state from browser events.
 
+The normal list, detail, proposal, and event views are scoped to the person who submitted the root
+run. Child slices inherit that root ownership even when an older child record has no submitter of
+its own. The appliance administrator can select **Show all (operator)** to inspect every user's run
+and trigger-origin runs, which have no browser owner. Other users are not offered that view.
+
 The current page does not expose every stored plan, diff, review, branch, slice, or worktree artifact.
 Use the PR, event detail, CLI status, and server-side artifact store when that deeper evidence is
 needed.
@@ -65,6 +70,11 @@ Controls depend on the current state:
 
 There is no separate **Retry** button in the current page. Fix the named condition and use **Start**
 when the pause reason is resumable. A human gate must use **Approve** or **Reject** instead.
+
+The root submitter can pause, resume, stop, or delete their own run tree. **Approve** and **Reject**
+are operator decisions and are available only to the appliance administrator. The service enforces
+the same ownership and operator checks as the browser; knowing another work-item ID does not grant
+access to its details, artifacts, history, or controls.
 
 The current human-gate record is a hashed approval artifact plus lifecycle transition. It is not a
 signed principal-and-artifact attestation. Do not treat it as a cryptographic approval record.
@@ -86,7 +96,7 @@ The **Triggers** panel shows what can file a run automatically.
 ![The Workflows trigger list beside the expanded Run policy controls](images/workflow-actions-triggers-policy.png)
 
 - The appliance administrator can select **+ New trigger** and choose a managed repository (or
-  enter a custom server-visible checkout path), a saved workflow, the repository-relative
+  enter an absolute custom server-visible checkout path), a saved workflow, the repository-relative
   Markdown directory to watch, and an optional branch/ref, run mode, and per-run spend cap.
 - New and edited rules stay as browser drafts until **Save trigger** succeeds. The form validates
   repository confinement and Git-ref safety before changing the shared registry, and a concurrent
