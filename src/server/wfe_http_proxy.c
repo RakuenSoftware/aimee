@@ -12,8 +12,8 @@
 #ifdef _WIN32
 
 int wfe_http_proxy_request(const char *method, const char *path, const char *query,
-                           const char *body, int body_len, const char *principal, char *resp,
-                           int resp_cap)
+                           const char *body, int body_len, const char *principal,
+                           int workflow_operator, char *resp, int resp_cap)
 {
    (void)method;
    (void)path;
@@ -21,6 +21,7 @@ int wfe_http_proxy_request(const char *method, const char *path, const char *que
    (void)body;
    (void)body_len;
    (void)principal;
+   (void)workflow_operator;
    if (resp && resp_cap > 0)
       snprintf(resp, (size_t)resp_cap,
                "{\"error\":\"Go WFE control plane is unavailable on this platform\"}");
@@ -99,8 +100,8 @@ static char *decode_chunked(const char *body)
 }
 
 int wfe_http_proxy_request(const char *method, const char *path, const char *query,
-                           const char *body, int body_len, const char *principal, char *resp,
-                           int resp_cap)
+                           const char *body, int body_len, const char *principal,
+                           int workflow_operator, char *resp, int resp_cap)
 {
    if (!method || !path || !resp || resp_cap <= 0 || body_len < 0 || strchr(method, '\r') ||
        strchr(method, '\n') || strchr(path, '\r') || strchr(path, '\n') ||
@@ -146,7 +147,7 @@ int wfe_http_proxy_request(const char *method, const char *path, const char *que
    if (!principal)
       principal = "";
    size_t head_cap =
-       strlen(method) + strlen(path) + strlen(query) + strlen(bearer) + strlen(principal) + 512;
+       strlen(method) + strlen(path) + strlen(query) + strlen(bearer) + strlen(principal) + 576;
    char *head = malloc(head_cap);
    if (!head)
    {
@@ -157,10 +158,11 @@ int wfe_http_proxy_request(const char *method, const char *path, const char *que
    int head_len =
        snprintf(head, head_cap,
                 "%s %s%s%s HTTP/1.1\r\nHost: aimee\r\nContent-Type: application/json\r\n"
-                "Content-Length: %d\r\n%s%s%s%s%s%sConnection: close\r\n\r\n",
+                "Content-Length: %d\r\n%s%s%s%s%s%s%sConnection: close\r\n\r\n",
                 method, path, query[0] ? "?" : "", query, body_len,
                 bearer[0] ? "Authorization: Bearer " : "", bearer, bearer[0] ? "\r\n" : "",
-                principal[0] ? "X-Aimee-Webuser: " : "", principal, principal[0] ? "\r\n" : "");
+                principal[0] ? "X-Aimee-Webuser: " : "", principal, principal[0] ? "\r\n" : "",
+                workflow_operator ? "X-Aimee-Workflow-Operator: true\r\n" : "");
    runtime_secret_wipe(bearer, sizeof(bearer));
    if (head_len <= 0 || (size_t)head_len >= head_cap ||
        write_all(fd, head, (size_t)head_len) != 0 ||

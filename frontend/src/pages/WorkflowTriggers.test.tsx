@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { TriggersPanel, type Trigger } from "./WorkflowActions";
+import WorkflowActions, { TriggersPanel, type Trigger } from "./WorkflowActions";
 
 afterEach(() => {
   cleanup();
@@ -93,5 +93,60 @@ describe("TriggersPanel", () => {
     expect(screen.getByRole("alert").textContent).toContain("browser writes are disabled");
     expect(screen.queryByRole("button", { name: "+ New trigger" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+  });
+});
+
+describe("workflow operator capabilities", () => {
+  function mockWorkflowPage(editable: boolean, configResponse?: Response, operator = editable) {
+    return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === "/api/workflow/items") return Response.json({ items: [] });
+      if (url === "/api/workflow/defs") return Response.json({ defs: [] });
+      if (url === "/api/workflow/triggers") {
+        return Response.json({ operator, editable, version: "v1", triggers: [] });
+      }
+      if (url === "/api/git/projects") return Response.json({ root: "/srv/repos", projects: [] });
+      if (url === "/api/workflow/config") {
+        return configResponse || Response.json({
+          config: {
+            "trigger.max_concurrent": 2,
+            "trigger.scan_interval_secs": 5,
+            "autonomy.auto_resume_cap_parks": true,
+            "autonomy.concurrency": 5,
+          },
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+  }
+
+  it("hides operator-only controls and makes global policy read-only for ordinary users", async () => {
+    mockWorkflowPage(false);
+    render(<WorkflowActions />);
+    await screen.findByText(/Only the appliance administrator/);
+    expect(screen.queryByText("Show all (operator)")).toBeNull();
+
+    fireEvent.click(screen.getByText("⚙ Run policy"));
+    await screen.findByText(/Read-only\. Administrator access is required/);
+    for (const input of screen.getAllByRole("spinbutton")) expect((input as HTMLInputElement).disabled).toBe(true);
+    for (const input of screen.getAllByRole("checkbox")) expect((input as HTMLInputElement).disabled).toBe(true);
+    expect(screen.getByTitle(/0 pauses new admission/)).toBeTruthy();
+    expect(screen.getByTitle(/Max autonomous runs.*Default 5/)).toBeTruthy();
+  });
+
+  it("shows a load failure instead of editable zero values", async () => {
+    mockWorkflowPage(true, Response.json({ error: "policy offline" }, { status: 503 }));
+    render(<WorkflowActions />);
+    await screen.findByText("Show all (operator)");
+    fireEvent.click(screen.getByText("⚙ Run policy"));
+    expect(await screen.findByText("Could not load run policy: policy offline")).toBeTruthy();
+    expect(screen.queryByRole("spinbutton")).toBeNull();
+  });
+
+  it("keeps operator run access when trigger mutation is unavailable", async () => {
+    mockWorkflowPage(false, undefined, true);
+    render(<WorkflowActions />);
+    expect(await screen.findByText("Show all (operator)")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "+ New trigger" })).toBeNull();
   });
 });

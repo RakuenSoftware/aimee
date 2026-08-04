@@ -21,13 +21,24 @@ import (
 // v1RequestWebuser is v1Request plus X-Aimee-Webuser. aimee-server accepts that
 // assertion only from the kernel-attested root peer on its Unix socket.
 func (s *server) v1RequestWebuser(ctx context.Context, username, method, path string, body []byte) (int, []byte, error) {
-	return s.v1RequestWebuserT(ctx, username, method, path, body, socketCallTimeout)
+	return s.v1RequestWebuserTCapability(ctx, username, method, path, body, socketCallTimeout, false)
+}
+
+// v1RequestWorkflowOperator carries an explicit operator capability resolved
+// by isAdmin at this trusted boundary. Keeping it separate from the username
+// prevents a literal account named "admin" from acquiring operator authority.
+func (s *server) v1RequestWorkflowOperator(ctx context.Context, username, method, path string, body []byte) (int, []byte, error) {
+	return s.v1RequestWebuserTCapability(ctx, username, method, path, body, socketCallTimeout, true)
 }
 
 // v1RequestWebuserT is v1RequestWebuser with an explicit client timeout, for the
 // few endpoints that legitimately hold the request open longer than the default
 // socketCallTimeout (e.g. a synchronous one-shot LLM draft).
 func (s *server) v1RequestWebuserT(ctx context.Context, username, method, path string, body []byte, timeout time.Duration) (int, []byte, error) {
+	return s.v1RequestWebuserTCapability(ctx, username, method, path, body, timeout, false)
+}
+
+func (s *server) v1RequestWebuserTCapability(ctx context.Context, username, method, path string, body []byte, timeout time.Duration, workflowOperator bool) (int, []byte, error) {
 	if username == "" {
 		return http.StatusUnauthorized, nil, errNoVaultTrust
 	}
@@ -52,6 +63,9 @@ func (s *server) v1RequestWebuserT(ctx context.Context, username, method, path s
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("X-Aimee-Webuser", username)
+	if workflowOperator {
+		req.Header.Set("X-Aimee-Workflow-Operator", "true")
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, nil, err

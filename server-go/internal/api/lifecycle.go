@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
@@ -19,8 +20,16 @@ func (s *Server) workflowGate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("decision must be approve or reject"))
 		return
 	}
-	item, err := s.db.WorkItem(r.Context(), r.PathValue("id"))
-	if err != nil || item.PauseReason != "human_gate" {
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		writeError(w, http.StatusBadRequest, errors.New("request must contain one JSON value"))
+		return
+	}
+	item, err := s.authorizedWorkItem(r, true)
+	if err != nil {
+		writeWorkItemAccessError(w, err)
+		return
+	}
+	if item.PauseReason != "human_gate" {
 		writeError(w, http.StatusConflict, errors.New("workflow is not waiting at a human gate"))
 		return
 	}
@@ -78,6 +87,10 @@ func (s *Server) workflowGate(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) workflowPause(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	if _, err := s.authorizedWorkItem(r, false); err != nil {
+		writeWorkItemAccessError(w, err)
+		return
+	}
 	if err := s.db.Pause(r.Context(), id); err != nil {
 		writeError(w, http.StatusConflict, err)
 		return
@@ -89,6 +102,10 @@ func (s *Server) workflowPause(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) workflowResume(w http.ResponseWriter, r *http.Request) {
+	if _, err := s.authorizedWorkItem(r, false); err != nil {
+		writeWorkItemAccessError(w, err)
+		return
+	}
 	if err := s.db.Resume(r.Context(), r.PathValue("id")); err != nil {
 		writeError(w, http.StatusConflict, err)
 		return
@@ -101,6 +118,10 @@ func (s *Server) workflowResume(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) workflowStop(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	if _, err := s.authorizedWorkItem(r, false); err != nil {
+		writeWorkItemAccessError(w, err)
+		return
+	}
 	ids, err := s.db.StopTree(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusConflict, err)
@@ -116,12 +137,11 @@ func (s *Server) workflowStop(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) workflowDelete(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	ids, err := s.db.DescendantIDs(r.Context(), id)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err)
+	if _, err := s.authorizedWorkItem(r, false); err != nil {
+		writeWorkItemAccessError(w, err)
 		return
 	}
-	_, err = s.db.WorkItem(r.Context(), id)
+	ids, err := s.db.DescendantIDs(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err)
 		return
@@ -167,9 +187,9 @@ func (s *Server) workflowDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) writeItem(w http.ResponseWriter, r *http.Request) {
-	item, err := s.db.WorkItem(r.Context(), r.PathValue("id"))
+	item, err := s.authorizedWorkItem(r, false)
 	if err != nil {
-		writeError(w, http.StatusNotFound, err)
+		writeWorkItemAccessError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, item)

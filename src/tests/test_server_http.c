@@ -322,7 +322,8 @@ static void test_wfe_http_proxy_round_trip(void)
       }
       if (!strstr(request, "POST /v1/dev/submit?source=release-test HTTP/1.1\r\n") ||
           !strstr(request, "Authorization: Bearer proxy-test-token\r\n") ||
-          !strstr(request, "X-Aimee-Webuser: webuser:release-test\r\n"))
+          !strstr(request, "X-Aimee-Webuser: webuser:release-test\r\n") ||
+          !strstr(request, "X-Aimee-Workflow-Operator: true\r\n"))
          _exit(12);
       const char *response = "HTTP/1.1 202 Accepted\r\nContent-Type: application/json\r\n"
                              "Content-Length: 30\r\nConnection: close\r\n\r\n"
@@ -339,7 +340,7 @@ static void test_wfe_http_proxy_round_trip(void)
    char response[256];
    const char *body = "{\"proposal_md\":\"test\"}";
    int status = wfe_http_proxy_request("POST", "/v1/dev/submit", "source=release-test", body,
-                                       (int)strlen(body), "webuser:release-test", response,
+                                       (int)strlen(body), "webuser:release-test", 1, response,
                                        sizeof(response));
    unsetenv("AIMEE_WFE_HTTP_SOCKET");
    runtime_secret_remove("AIMEE_API_BEARER_TOKEN");
