@@ -242,6 +242,28 @@ for i,line in enumerate(open(gold)):
 for f in fhs: f.close()
 PY
 
+# Reap the client processes if this wrapper dies. Without this, killing
+# shard_run.sh leaves its run_llamacpp.py children running: they are not in a
+# process group that dies with the parent, and they keep issuing requests to
+# BASE_PORT forever.
+#
+# That is not a tidiness problem, it is a correctness one. The next arm launched
+# on the same BASE_PORT competes with the orphans for the same servers, and the
+# only symptom is that it runs slowly -- the server's own per-task timings look
+# healthy because each individual request is served normally, it just waited.
+#
+# Measured 2026-08-04: fifteen orphans accumulated across a day of stopped runs
+# held the E2B Q4 no-MTP arm at 8.8 notes/min. Killing them took the same arm to
+# 38.7 immediately, against 41.2 measured on ports nothing else was using. The
+# gap was read as a 3x "unexplained residual" and produced a bogus 5.3x MTP
+# speedup before anyone counted the python processes.
+cleanup_children() {
+  for cp in "${pids[@]:-}"; do
+    [ -n "$cp" ] && kill "$cp" 2>/dev/null
+  done
+}
+trap cleanup_children EXIT INT TERM
+
 say "START $LABEL across $NPROC shards"
 t0=$(date +%s)
 pids=()

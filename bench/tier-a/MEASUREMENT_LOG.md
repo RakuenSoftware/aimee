@@ -1665,3 +1665,63 @@ position. It has not been run.
 
 **Until it is, no 10k throughput number should be compared against a 200-note
 one in either direction.**
+
+## Defect 36: killing a sweep leaves its clients running, and the next run on the same ports silently competes with them
+
+`shard_run.sh` launches one `run_llamacpp.py` per shard and backgrounds them.
+Nothing reaps those children if the wrapper dies. Kill the wrapper -- or the
+driver above it -- and three python clients survive with PPID 1, still issuing
+requests to `BASE_PORT..BASE_PORT+n` forever.
+
+This is a correctness defect, not a tidiness one. The next arm launched on the
+same `BASE_PORT` shares its servers with the orphans. Every request is served
+normally, it just waits, so **the server's own timings look perfectly healthy**
+and only the client sees the cost.
+
+Measured 2026-08-04 after a day of stopped and relaunched lanes:
+
+| | run_llamacpp.py processes | E2B Q4 no-MTP, nproc=3 |
+|---|---:|---:|
+| 15 orphans + 3 live | 18 | **8.8 notes/min** |
+| orphans killed | 3 | **37-39 notes/min** |
+| 200-note sweep, ports nothing else used | 3 | 41.2 notes/min |
+
+Killing fifteen orphaned clients took the same in-flight arm from 8.8 to 38.7
+notes/min immediately, with no other change.
+
+### What this invalidates
+
+**The 5.3x MTP speedup, already withdrawn, was this.** The no-MTP arm ran while
+orphans held the same ports; the banked MTP arm had run before any existed.
+Dividing them measured process contention, not speculation.
+
+**The "9 seconds per request unaccounted for by the server".** Server-side cost
+was 4.7s while the client measured 13.7s. That gap was queueing behind orphaned
+requests -- invisible to per-task server timing by construction.
+
+**The "3x unexplained residual" between 10k arms and the 200-note sweeps.** The
+sweeps ran on ports 8900 and 8950. Every 10k ladder attempt ran on 8700. Only the
+ladder had orphans on its ports, which is why the two disagreed and why the
+disagreement looked like a corpus-size effect. It was not: prompt-cache pressure
+was the leading hypothesis and it was wrong.
+
+**Not invalidated:** the scaling sweeps themselves. They used unused ports and
+their internal comparisons were clean, which is now confirmed rather than assumed
+-- their 41.2 figure matches the 37-39 measured once the ports were clear.
+
+### Fixed
+
+`shard_run.sh` now traps EXIT/INT/TERM and kills its recorded child PIDs.
+
+The general form, and the third variant of it in this log: a background process
+whose lifetime is not tied to its parent's. defect 27 was `pgrep -f` matching the
+process doing the matching; defect 29 was a healing pass deleting a live run.
+This is the same family -- process management assumed rather than enforced -- and
+it cost most of a day plus one fabricated headline number.
+
+### The tell that was available the whole time
+
+`uptime` read a load average of 27 on a workstation whose only job was to shuttle
+JSON over three ssh tunnels. Nothing in the harness looks at load, and no
+diagnostic printed the client count. `pgrep -c run_llamacpp` would have answered
+it in one second at any point in the preceding six hours.
