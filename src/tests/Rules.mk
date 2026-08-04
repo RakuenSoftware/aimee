@@ -825,6 +825,14 @@ unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) $(UNIT_TEST_TARGETS)
 	@# while this suite runs. A few white-box tests invoke handle_git_verify again;
 	@# give those nested test invocations their own lock instead of deadlocking on
 	@# their parent process, while still serializing them with one another.
+	@# The failure summary redirects >&2 BEFORE 2>/dev/null, and the order is not
+	@# cosmetic. Written the other way round -- `cat ... 2>/dev/null >&2` -- the
+	@# shell points fd2 at /dev/null first and then aims stdout at fd2, so every
+	@# name in the list is discarded. That is what it used to do: a parallel run
+	@# printed "Unit test failures:" with nothing under it, reporting that
+	@# something failed without ever saying what. The per-test "FAILED: <target>"
+	@# line on stderr was the only surviving clue, buried in thousands of lines of
+	@# passing output, and CI showed the same empty list.
 	@th="$$(mktemp -d /tmp/aut.XXXXXX)"; \
 	export HOME="$$th" TMPDIR="$$th" AIMEE_VERIFY_LOCK_FILE="$$th/nested-verify.lock"; \
 	unset AIMEE_HOME AIMEE_API_REMOTE_WRITES AIMEE_API_MTLS AIMEE_API_BEARER_TOKEN \
@@ -847,7 +855,7 @@ unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) $(UNIT_TEST_TARGETS)
 	  if ! printf '%s\0' $(UNIT_TEST_TARGETS) | \
 	    xargs -0 -n1 -P "$$jobs" sh -c 't="$$1"; log="$$(mktemp /tmp/aimee-test-run.XXXXXX)"; echo "  $$t"; "./$$t" >"$$log" 2>&1; rc="$$?"; cat "$$log"; rm -f "$$log"; if [ "$$rc" -ne 0 ]; then echo "FAILED: $$t" >&2; printf "FAILED: %s\\n" "$$t" >"$$AIMEE_TEST_FAILURE_DIR/failure.$$$$"; fi; exit "$$rc"' _; then \
 	    echo "Unit test failures:" >&2; \
-	    cat "$$th"/failure.* 2>/dev/null >&2 || true; \
+	    cat "$$th"/failure.* >&2 2>/dev/null || true; \
 	    exit 1; \
 	  fi; \
 	fi
