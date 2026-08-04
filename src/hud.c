@@ -62,7 +62,14 @@ int hud_gather(hud_status_t *out)
    if (kb_client_health(&kbh) == 0)
    {
       out->kb_health_checked = 1;
-      if (!kbh.pgvec_ok || !kbh.pgvec_collection_ok || kbh.freshness_days > 30)
+      /* Prefer the kb's own verdict: this block used to re-derive one from two
+       * booleans, which made it a fourth copy of the same judgement and left the
+       * HUD blind to everything those two did not cover — a missing embedder and
+       * a width mismatch both showed a clean HUD on a kb that could not embed.
+       * The boolean terms stay as a fallback for an older kb that sends no
+       * status, where they are all the evidence there is. */
+      if (strcmp(kbh.status, "degraded") == 0 || !kbh.pgvec_ok || !kbh.pgvec_collection_ok ||
+          kbh.freshness_days > 30)
          out->kb_health_fail = 1;
       else if (kbh.freshness_days > 7 ||
                (kbh.chunk_count > 0 && kbh.embedding_count < kbh.chunk_count * 9 / 10))
