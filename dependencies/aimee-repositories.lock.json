@@ -165,7 +165,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "7e613d15fe78b69ae7329675b0349ba20b53a01dc2c52c50a102291fa86bc65a",
+      "source_sha256": "40531e49aa64b16901ac2a61f3d0b201f8a509d013d33a7eea00f3c71cb8b822",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 10,
@@ -184,7 +184,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "07ae6a5eed6f7a0353a21823a994e43319ab5a07a9d9dedb8a20273b59945b0a",
+      "source_sha256": "c02607efe86010af31723a937739fedf75fa405aaaaa95f41ec0b816fc55f391",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 11,
@@ -203,7 +203,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "315c597a8bb79cdd8ba57b770dc0b4770b1538e91aff023f37d6fe59d0821c13",
+      "source_sha256": "b3874351efb7060d864cbffb90c7db60b53422df2115ff506fca241e36b2135a",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 12,
@@ -340,7 +340,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "772455b5b7ce40fdc7ed1601eae268221728f4411ba78b4022d4285d270a1b6b",
+      "source_sha256": "5190d744e2dcde35050b5cad0b910821641ccdfbb291ac0a75d470baa3f33e14",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 20,

@@ -10,8 +10,9 @@
 #include <sys/stat.h>
 
 #include "db1.h"
-#include "wfe_store.h"
+#include "wfe_def.h"
 #include "wfe_live_foreach.h"
+#include "wfe_store.h"
 
 /* A minimal but valid "slice" workflow so wfe_work_item_resolve can pin its version
  * + start stage (the spawner needs those to create children). */
@@ -23,6 +24,21 @@ static void write_file(const char *path, const char *content)
    assert(f);
    fputs(content, f);
    fclose(f);
+}
+
+static char *read_file(const char *path)
+{
+   FILE *f = fopen(path, "rb");
+   assert(f);
+   assert(fseek(f, 0, SEEK_END) == 0);
+   long n = ftell(f);
+   assert(n >= 0 && fseek(f, 0, SEEK_SET) == 0);
+   char *out = malloc((size_t)n + 1);
+   assert(out);
+   assert(fread(out, 1, (size_t)n, f) == (size_t)n);
+   out[n] = '\0';
+   fclose(f);
+   return out;
 }
 
 /* Build a packet-plan JSON with `n` packets into `path`. */
@@ -62,6 +78,8 @@ int main(void)
    /* --- 3 packets -> 3 linked child slice runs. --- */
    assert(db1_work_item_create("par", "repo1", "p/par", "build", "v", "slices", "autonomous") == 0);
    write_plan(plan, 3);
+   assert(wfe_feedback_write(
+              "par", "Use stat -c '%d'; this supersedes the stale plan's stat -c '%m'.") == 0);
    assert(wfe_foreach_spawn("par", "slice", plan, 16, err, sizeof err) == 3);
    int total = 0, acc = 0, fail = 0;
    assert(db1_work_item_child_counts("par", &total, &acc, &fail) == 0);
@@ -72,6 +90,10 @@ int main(void)
    assert(strcmp(wi.workflow_name, "slice") == 0);
    assert(strcmp(wi.state, "active") == 0);
    assert(wi.proposal_path[0]); /* seeded with a packet proposal */
+   char *seed = read_file(wi.proposal_path);
+   assert(strstr(seed, "Superseding acceptance feedback") != NULL);
+   assert(strstr(seed, "stat -c '%d'") != NULL);
+   free(seed);
 
    /* --- idempotent: a re-spawn creates nothing new. --- */
    assert(wfe_foreach_spawn("par", "slice", plan, 16, err, sizeof err) == 3);

@@ -35,7 +35,7 @@ CONFIG_FILES = (
 )
 BUILD_FILES = ("CMakeLists.txt", "src/Makefile", "src/tests/Rules.mk")
 DISPOSITION = "docs/audit/dispositions/background-skill-curator.yaml"
-PROPOSAL = "docs/proposals/pending/feature-liveness-and-background-curator-removal.md"
+PROPOSAL = "docs/proposals/done/feature-liveness-and-background-curator-removal.md"
 
 
 class CheckError(ValueError):

@@ -2,7 +2,7 @@
 
 - **State:** DRAFT — 2026-07-23; awaiting roundtable review. Later-drafted consuming child; it does
   not inherit any prior approval.
-- **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries-residual.md)
+- **Parent:** [`core process separation residual`](core-process-separation-residual.md)
 - **Owns:** the optional `module-loader` module — the module package format, artifact verification,
   the sandbox host runtimes (OS-sandboxed process and WebAssembly), and the loaded-module lifecycle
   by which an external or user-authored module is started, health-checked, upgraded, and stopped.

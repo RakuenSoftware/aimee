@@ -1,5 +1,7 @@
 # A delegate's budget and its stage wall cap must be reconcilable
 
+- **State:** PENDING — measured workflow failure; no reconciliation or diagnostic is implemented.
+
 ## Problem
 
 Two independent limits bound an implement delegate, and nothing checks them

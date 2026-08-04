@@ -95,7 +95,8 @@ cannot be invoked is a defect on its own.
 `kb docs push` populates `docs` and `document_sections`; the searchable corpus
 (`kb_documents`, `kb_embeddings`) is populated by `aimee kb build --path P --project
 N`, which works correctly — verified on the same deployment: 2 files, 2 chunks,
-4 embeddings at dim 384, and semantic search ranked `src/reconcile.py` (0.5164) over
+4 embeddings at dim 384, and semantic search ranked the then-present
+src/reconcile.py (0.5164) over
 `README.md` (0.3170) for "matching payments against statements", a query sharing no
 terms with either. Anyone reading "chunks: 0" after a `docs push` is likely to
 conclude the embedder is broken when it is not.

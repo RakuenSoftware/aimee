@@ -110,9 +110,8 @@ static void server_agent_set_exec_roles_csv(agent_t *ag, const char *csv)
 
 static void server_agent_default_roles(agent_t *ag)
 {
-   server_agent_set_roles_csv(ag,
-                              "code,review,explain,refactor,draft,execute,summarize,format,reason,"
-                              "search");
+   server_agent_set_roles_csv(ag, "code,explain,refactor,draft,execute,summarize,format,reason,"
+                                  "search");
 }
 
 static int server_agent_looks_endpoint(const char *s)
@@ -804,16 +803,15 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    }
 
    const char *roles = opt_get(&opts, "roles");
-   if (roles && roles[0])
+   if (roles)
       server_agent_set_roles_csv(ag, roles);
    else
-      /* Default to the FULL capable role set, matching the client-side default
-       * (cmd_agent.c ag_set_default_delegate_roles). A capable coding delegate
-       * must not be silently crippled to summarize/format/draft when added
-       * without an explicit --roles: that regression left mistral/minimax/glm/
-       * codex unable to take `code`/`execute` work. */
-      server_agent_set_roles_csv(
-          ag, "code,review,explain,refactor,draft,execute,summarize,format,reason,search");
+      /* An omitted role list gets the general delegate roles, but `review` is
+       * deliberately opt-in. Reviewers participate in merge gates, so merely
+       * registering a capable coding model must never authorize it to review.
+       * An explicitly empty --roles value is also meaningful and is preserved
+       * by the branch above instead of being expanded into hidden privileges. */
+      server_agent_default_roles(ag);
 
    const char *exec_roles = opt_get(&opts, "exec-roles");
    if (exec_roles && exec_roles[0])
@@ -956,7 +954,7 @@ int handle_agent_local(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    ag->max_turns = opt_get_int(&opts, "max-turns", -1);
    ag->max_parallel = slots;
    ag->middleware.context_window = context_window;
-   if (roles_arg && roles_arg[0])
+   if (roles_arg)
       server_agent_set_roles_csv(ag, roles_arg);
    else
       server_agent_default_roles(ag);
@@ -1090,8 +1088,8 @@ int handle_agent_disable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 /* Surgically update ONLY an agent's roles, preserving endpoint/model/provider/
  * auth/vault key (unlike agent.add, which resets the record). argv[0]=name,
- * optional argv[1]=comma-separated roles, or `--reset` for the full default
- * capable set. Omitting argv[1] REPORTS the current roles and writes nothing. */
+ * optional argv[1]=comma-separated roles, or `--reset` for the default delegate
+ * set. Omitting argv[1] REPORTS the current roles and writes nothing. */
 int handle_agent_roles(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -1116,8 +1114,7 @@ int handle_agent_roles(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_ok(conn, server_agent_read_json(ag));
 
    if (strcmp(argv[1], "--reset") == 0)
-      server_agent_set_roles_csv(
-          ag, "code,review,explain,refactor,draft,execute,summarize,format,reason,search");
+      server_agent_default_roles(ag);
    else
       server_agent_set_roles_csv(ag, argv[1]);
 
@@ -1224,9 +1221,10 @@ int handle_agent_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if ((v = opt_get(&opts, "primary-only")) != NULL)
       ag->primary_only = (strcmp(v, "true") == 0 || strcmp(v, "1") == 0 || strcmp(v, "on") == 0);
    if ((v = opt_get(&opts, "roles")) != NULL)
-      server_agent_set_roles_csv(
-          ag,
-          v[0] ? v : "code,review,explain,refactor,draft,execute,summarize,format,reason,search");
+      /* Empty is an explicit empty selection from the GUI, not a request to
+       * grant every default role. In particular it must not manufacture review
+       * authorization after the operator unchecks review. */
+      server_agent_set_roles_csv(ag, v);
    if ((v = opt_get(&opts, "personas")) != NULL)
       server_agent_set_personas_csv(ag, v[0] ? v : "all");
 
@@ -1406,8 +1404,8 @@ int handle_agent_probe(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return server_send_ok(conn, resp);
 }
 
-static const char *sagent_provider_cli_roles[] = {"code",     "review", "explain",
-                                                  "refactor", "draft",  "execute"};
+static const char *sagent_provider_cli_roles[] = {"code", "explain", "refactor", "draft",
+                                                  "execute"};
 
 static void sagent_configure_tmux_cli_agent(agent_t *ag, const char *name, const char *provider,
                                             const char *cli_kind, const char *cli_cmd,
@@ -1561,10 +1559,9 @@ static void sagent_configure_http_codex_agent(agent_t *ag, const char *name)
     * Pin the real gpt-5-codex window explicitly (the middleware field capability
     * routing and the agent listing both read). */
    ag->middleware.context_window = 272000;
-   /* Full capable delegate role set (matches `agent add` default): a coding
-    * delegate must take code/execute work, not just summarize/format/draft. */
-   server_agent_set_roles_csv(
-       ag, "code,review,explain,refactor,draft,execute,summarize,format,reason,search");
+   /* General delegate roles (matches `agent add` default). Review remains an
+    * explicit operator grant, including for subscription-backed agents. */
+   server_agent_default_roles(ag);
 }
 
 /* Register the now-authenticated vendor: codex as a direct-HTTP `chatgpt` agent

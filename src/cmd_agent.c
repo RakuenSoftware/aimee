@@ -61,8 +61,7 @@ static void ag_set_exec_roles_csv(agent_t *ag, const char *csv)
 
 static void ag_set_default_delegate_roles(agent_t *ag)
 {
-   ag_set_roles_csv(ag,
-                    "code,review,explain,refactor,draft,execute,summarize,format,reason,search");
+   ag_set_roles_csv(ag, "code,explain,refactor,draft,execute,summarize,format,reason,search");
 }
 
 static int ag_looks_like_endpoint(const char *s)
@@ -844,6 +843,7 @@ static void ag_add(app_ctx_t *ctx, int argc, char **argv)
    ag->max_parallel = AGENT_DEFAULT_MAX_PARALLEL;
    ag->enabled = 1;
 
+   int roles_specified = 0;
    for (int i = 3; i < argc; i++)
    {
       if (strcmp(argv[i], "--key") == 0 && i + 1 < argc)
@@ -862,7 +862,10 @@ static void ag_add(app_ctx_t *ctx, int argc, char **argv)
       else if (strcmp(argv[i], "--provider") == 0 && i + 1 < argc)
          snprintf(ag->provider, sizeof(ag->provider), "%s", argv[++i]);
       else if (strcmp(argv[i], "--roles") == 0 && i + 1 < argc)
+      {
+         roles_specified = 1;
          ag_set_roles_csv(ag, argv[++i]);
+      }
       else if (strcmp(argv[i], "--cost-tier") == 0 && i + 1 < argc)
          ag->cost_tier = atoi(argv[++i]);
       /* Price overrides ($/Mtok). Only meaningful when this deployment does not
@@ -911,8 +914,9 @@ static void ag_add(app_ctx_t *ctx, int argc, char **argv)
          ag_set_exec_roles_csv(ag, argv[++i]);
    }
 
-   /* Default roles if none specified */
-   if (ag->role_count == 0)
+   /* Preserve an explicitly empty --roles selection. Omission gets the small
+    * historical add default, which does not silently authorize review. */
+   if (!roles_specified)
    {
       snprintf(ag->roles[0], sizeof(ag->roles[0]), "summarize");
       snprintf(ag->roles[1], sizeof(ag->roles[1]), "format");
@@ -981,7 +985,7 @@ static void ag_enable(app_ctx_t *ctx, int argc, char **argv)
  * auth/vault key (unlike `agent add`, which resets the whole record). Fixes the
  * config regression where capable coding delegates were left with just
  * summarize/format/draft. Omit the csv to SHOW the roles; `--reset` restores the
- * full default set. */
+ * default delegate set. Review is an explicit operator grant. */
 static void ag_roles(app_ctx_t *ctx, int argc, char **argv)
 {
    (void)ctx;
@@ -1144,7 +1148,7 @@ static void ag_local(app_ctx_t *ctx, int argc, char **argv)
    ag->max_parallel = slots;
    ag->middleware.context_window = context_window;
 
-   if (roles_arg && roles_arg[0])
+   if (roles_arg)
       ag_set_roles_csv(ag, roles_arg);
    else
       ag_set_default_delegate_roles(ag);

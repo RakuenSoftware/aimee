@@ -1,6 +1,7 @@
 # Proposal: a real readiness endpoint for aimee-server
 
-- **State:** PENDING — design only, no code in this PR.
+- **State:** DONE — archived after the readiness endpoint shipped.
+- **Historical state:** PENDING — design only, no code in the proposal PR.
 - **Author:** JBailes
 - **Date:** 2026-07-22
 - **Charter roles:** Constrain-Verify (report measured dependency state instead
