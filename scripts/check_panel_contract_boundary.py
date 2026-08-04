@@ -28,7 +28,6 @@ TEMPORARY_ENSEMBLE_CONSUMERS = {
     "src/server/server_compute.c",
     "src/server/server_compute_roundtable.c",
     "src/server/server_sweep.c",
-    "src/server/wfe_roundtable_proxy.c",
 }
 INCLUDE = re.compile(r'^\s*#\s*include\s*[<"]([^>"]+)[>"]', re.MULTILINE)
 
