@@ -818,6 +818,12 @@ static void test_initialize_enters_session_worktree(void)
     * the caller's checkout and passed, another wrote only into the worktree and
     * graded as zero changed files. A path in the prompt is an attractor. */
    assert(strstr(instructions->valuestring, wt) == NULL);
+   /* NOTE: this suite cannot see the server's stderr, and stderr is ALSO
+    * model-visible -- an MCP host surfaces it as server log output. Removing the
+    * path from the instructions alone left agents relocating because they were
+    * reading it from "aimee: MCP session isolated in <path>". That line now goes
+    * through aimee_log instead. Unverified here; verified by the deployed
+    * behaviour (root edits present after the change). */
    assert(strstr(instructions->valuestring, "do not go looking for another copy") != NULL);
 
    /* THE INSTRUCTION MUST NOT RELOCATE THE CALLER.

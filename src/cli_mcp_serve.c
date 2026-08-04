@@ -423,10 +423,16 @@ static int mcp_enter_session_worktree(char *out, size_t cap)
       return 0;
    if (chdir(out) != 0)
    {
-      fprintf(stderr, "aimee: prepared session worktree %s but could not enter it\n", out);
+      /* Path-free on purpose: an MCP host surfaces this server's stderr to the
+       * MODEL as server log output, so anything printed here is prompt content.
+       * Printing the worktree path is what kept agents relocating into it even
+       * after the path was removed from the instructions -- they were reading it
+       * from the log line, not from the instructions. The operator gets the path
+       * through aimee_log, which does not reach the model. */
+      fprintf(stderr, "aimee: prepared a session worktree but could not enter it\n");
       return 0;
    }
-   fprintf(stderr, "aimee: MCP session isolated in %s\n", out);
+   fprintf(stderr, "aimee: MCP session isolated in its own checkout\n");
    return 1;
 }
 
