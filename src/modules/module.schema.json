@@ -25,6 +25,20 @@
     "enabled_by_default": {
       "type": "boolean"
     },
+    "go_sources": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "go_tests": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
     "id": {
       "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
       "type": "string"

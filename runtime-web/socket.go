@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	runtimewebpolicy "github.com/JBailes/aimee/server-go/modules/runtime-web/policy"
 )
 
 const socketCallTimeout = 10 * time.Second
@@ -84,18 +86,9 @@ func rpcErrorKind(msg map[string]json.RawMessage) string {
 func rpcErrorStatus(err error) int {
 	var fault *rpcFault
 	if errors.As(err, &fault) {
-		switch fault.Kind() {
-		case "invalid_argument":
-			return http.StatusBadRequest
-		case "not_found":
-			return http.StatusNotFound
-		case "permission_denied":
-			return http.StatusForbidden
-		case "unavailable":
-			return http.StatusServiceUnavailable
-		}
+		return runtimewebpolicy.HTTPStatusForRPCFault(fault.Kind())
 	}
-	return http.StatusBadGateway
+	return runtimewebpolicy.HTTPStatusForRPCFault("")
 }
 
 // socketCall sends a single-shot RPC and returns the parsed response.

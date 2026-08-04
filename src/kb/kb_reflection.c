@@ -316,6 +316,12 @@ static void run_reflection_pass_releasing_lease(void)
    db2_lease_release_idle();
 }
 
+static void reflection_sleep_interruptible(kb_reflection_ctx_t *ctx, long seconds)
+{
+   while (ctx && !ctx->stop && seconds-- > 0)
+      sleep(1);
+}
+
 static void *reflection_thread_main(void *arg)
 {
    kb_reflection_ctx_t *ctx = (kb_reflection_ctx_t *)arg;
@@ -363,8 +369,12 @@ static void *reflection_thread_main(void *arg)
       kb_background_clear("reflection");
       last_fired = now;
 
-      /* Back off until the next idle window */
-      sleep((int)(idle_threshold / 2));
+      /* Back off until the next idle window, but remain joinable on shutdown.
+       * A single 15-minute sleep kept the KB process alive past Docker's stop
+       * timeout whenever reflection fired just before SIGTERM. PID 1 and the
+       * embedded postmaster were then killed as a unit and the next boot had to
+       * replay WAL. */
+      reflection_sleep_interruptible(ctx, idle_threshold / 2);
    }
    return NULL;
 }

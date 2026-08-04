@@ -14,9 +14,15 @@ and the router API. `learning_implicit.h`, `learning_bundle.h`, and `learning_ev
 evidence assembly, and candidate generation, while DB2 persistence currently remains in
 `src/db2/db2_learning.h` and related source files as explicit physical-ownership debt.
 
-The descriptor declares this module's four sources (`learning_bundle.c`, `learning_evidence.c`,
-`learning_implicit.c`, `learning_router.c`), its four module-root headers, its two direct tests, and
-this document; it sets `ownership_complete: true`. All four headers are declared as
+The pointer-free learning-observation stage is now implemented by
+`server-go/modules/learning` and shipped as the supervised Go
+`aimee-module-learning` process. Its C `module_adapter.c` remains a parity
+fixture for the unchanged `module_api.h` wire contract; proposal persistence,
+evidence assembly, and the broader learning engine are still C migration work.
+
+The descriptor declares the module-owned C implementation and parity adapter, the Go process handler
+and tests, its module-root headers, direct C tests, and this document; it sets
+`ownership_complete: true`. All four headers are declared as
 `private_headers` because they live at the module root rather than under
 `src/modules/learning/include/aimee/learning/`, which is the layout the header-layout checker treats as
 private. `learning.h` is nonetheless a de-facto public contract: it is included repository-wide via the

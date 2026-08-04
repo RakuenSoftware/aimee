@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "principal_class": 1,
   "components": [
     {"id": "module-runtime", "execution": "core", "placements": ["server", "kb"]},
@@ -8,59 +8,59 @@
     {"id": "translation", "execution": "core", "placements": ["server", "kb"]},
     {"id": "protocols", "execution": "core", "placements": ["server", "kb"]},
     {"id": "gateway", "execution": "core", "placements": ["server", "kb"]},
-    {"id": "memory", "execution": "process", "principal_ref": 7, "placements": ["server"], "stages": [
+    {"id": "memory", "execution": "process", "runtime": "go", "principal_ref": 7, "placements": ["server"], "stages": [
       {"id": 1, "name": "structured-extraction-indexing", "event_kind": 5889},
       {"id": 2, "name": "memory-write", "event_kind": 5890},
       {"id": 3, "name": "embedding", "event_kind": 5891},
       {"id": 4, "name": "candidate-retrieval", "event_kind": 5892},
       {"id": 5, "name": "reranking", "event_kind": 5893}
     ]},
-    {"id": "learning", "execution": "process", "principal_ref": 8, "placements": ["server"], "stages": [
+    {"id": "learning", "execution": "process", "runtime": "go", "principal_ref": 8, "placements": ["server"], "stages": [
       {"id": 1, "name": "learning-observation", "event_kind": 6145}
     ]},
-    {"id": "routing", "execution": "process", "principal_ref": 9, "placements": ["server"], "stages": [
+    {"id": "routing", "execution": "process", "runtime": "go", "principal_ref": 9, "placements": ["server"], "stages": [
       {"id": 1, "name": "route-selection", "event_kind": 6401}
     ]},
-    {"id": "delegates", "execution": "process", "principal_ref": 10, "placements": ["server"], "stages": [
+    {"id": "delegates", "execution": "process", "runtime": "go", "principal_ref": 10, "placements": ["server"], "stages": [
       {"id": 1, "name": "delegate-invocation", "event_kind": 6657}
     ]},
-    {"id": "tools", "execution": "process", "principal_ref": 11, "placements": ["server"], "stages": [
+    {"id": "tools", "execution": "process", "runtime": "go", "principal_ref": 11, "placements": ["server"], "stages": [
       {"id": 1, "name": "tool-dispatch", "event_kind": 6913}
     ]},
-    {"id": "workspace", "execution": "process", "principal_ref": 12, "placements": ["server"], "stages": [
+    {"id": "workspace", "execution": "process", "runtime": "go", "principal_ref": 12, "placements": ["server"], "stages": [
       {"id": 1, "name": "workspace-access", "event_kind": 7169}
     ]},
-    {"id": "git", "execution": "process", "principal_ref": 13, "placements": ["server"], "stages": [
+    {"id": "git", "execution": "process", "runtime": "go", "principal_ref": 13, "placements": ["server"], "stages": [
       {"id": 1, "name": "git-operation", "event_kind": 7425}
     ]},
-    {"id": "skills", "execution": "process", "principal_ref": 14, "placements": ["server"], "stages": [
+    {"id": "skills", "execution": "process", "runtime": "go", "principal_ref": 14, "placements": ["server"], "stages": [
       {"id": 1, "name": "skill-context", "event_kind": 7681}
     ]},
-    {"id": "response-composition", "execution": "process", "principal_ref": 15, "placements": ["server"], "stages": [
+    {"id": "response-composition", "execution": "process", "runtime": "go", "principal_ref": 15, "placements": ["server"], "stages": [
       {"id": 1, "name": "response-composition", "event_kind": 7937}
     ]},
     {"id": "vault", "execution": "core", "placements": ["server", "kb"]},
     {"id": "execution-policy", "execution": "core", "placements": ["server", "kb"]},
     {"id": "audit", "execution": "core", "placements": ["server", "kb"]},
-    {"id": "governance", "execution": "process", "principal_ref": 19, "placements": ["server"], "stages": [
+    {"id": "governance", "execution": "process", "runtime": "go", "principal_ref": 19, "placements": ["server"], "stages": [
       {"id": 1, "name": "governance-evaluation", "event_kind": 8961}
     ]},
-    {"id": "workflows", "execution": "process", "principal_ref": 20, "placements": ["server"], "stages": [
-      {"id": 1, "name": "workflow-execution", "event_kind": 9217}
+    {"id": "workflows", "execution": "process", "runtime": "go", "principal_ref": 20, "placements": ["server"], "stages": [
+      {"id": 1, "name": "workflow-advance-decision", "event_kind": 9217}
     ]},
-    {"id": "roundtable", "execution": "process", "principal_ref": 21, "placements": ["server"], "stages": [
+    {"id": "roundtable", "execution": "process", "runtime": "go", "principal_ref": 21, "placements": ["server"], "stages": [
       {"id": 1, "name": "roundtable-deliberation", "event_kind": 9473}
     ]},
-    {"id": "kb-synthesis", "execution": "process", "principal_ref": 22, "placements": ["kb"], "stages": [
-      {"id": 1, "name": "kb-synthesis", "event_kind": 9729}
+    {"id": "kb-synthesis", "execution": "process", "runtime": "go", "principal_ref": 22, "placements": ["kb"], "stages": [
+      {"id": 1, "name": "kb-grounding-decision", "event_kind": 9729}
     ]},
-    {"id": "runtime-web", "execution": "process", "principal_ref": 23, "placements": ["server"], "stages": [
-      {"id": 1, "name": "runtime-web", "event_kind": 9985}
+    {"id": "runtime-web", "execution": "process", "runtime": "go", "principal_ref": 23, "placements": ["server"], "stages": [
+      {"id": 1, "name": "rpc-fault-http-status", "event_kind": 9985}
     ]},
-    {"id": "control-web", "execution": "process", "principal_ref": 24, "placements": ["kb"], "stages": [
-      {"id": 1, "name": "control-web", "event_kind": 10241}
+    {"id": "control-web", "execution": "process", "runtime": "go", "principal_ref": 24, "placements": ["kb"], "stages": [
+      {"id": 1, "name": "proxy-route-authorization", "event_kind": 10241}
     ]},
-    {"id": "benchmarks", "execution": "process", "principal_ref": 25, "placements": ["server", "kb"], "stages": [
+    {"id": "benchmarks", "execution": "process", "runtime": "go", "principal_ref": 25, "placements": ["server", "kb"], "stages": [
       {"id": 1, "name": "benchmark-run", "event_kind": 10497}
     ]}
   ]

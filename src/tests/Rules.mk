@@ -717,7 +717,14 @@ MODULE_HANDLER_TEST_OBJS = \
    $(OBJDIR)/tests/module_handlers/tools.o \
    $(OBJDIR)/tests/module_handlers/workspace.o \
    $(OBJDIR)/tests/module_handlers/git.o \
-   $(OBJDIR)/tests/module_handlers/skills.o
+   $(OBJDIR)/tests/module_handlers/skills.o \
+   $(OBJDIR)/tests/module_handlers/governance.o \
+   $(OBJDIR)/tests/module_handlers/workflows.o \
+   $(OBJDIR)/tests/module_handlers/roundtable.o \
+   $(OBJDIR)/tests/module_handlers/kb_synthesis.o \
+   $(OBJDIR)/tests/module_handlers/runtime_web.o \
+   $(OBJDIR)/tests/module_handlers/control_web.o \
+   $(OBJDIR)/tests/module_handlers/benchmarks.o
 
 define module_handler_test_object
 $(OBJDIR)/tests/module_handlers/$(1).o: modules/$(2)/module_adapter.c
@@ -731,10 +738,18 @@ $(eval $(call module_handler_test_object,tools,tools))
 $(eval $(call module_handler_test_object,workspace,workspace))
 $(eval $(call module_handler_test_object,git,git))
 $(eval $(call module_handler_test_object,skills,skills))
+$(eval $(call module_handler_test_object,governance,governance))
+$(eval $(call module_handler_test_object,workflows,workflows))
+$(eval $(call module_handler_test_object,roundtable,roundtable))
+$(eval $(call module_handler_test_object,kb_synthesis,kb-synthesis))
+$(eval $(call module_handler_test_object,runtime_web,runtime-web))
+$(eval $(call module_handler_test_object,control_web,control-web))
+$(eval $(call module_handler_test_object,benchmarks,benchmarks))
 
 $(TESTPREFIX)/unit-test-process-module-handlers: \
-   $(OBJDIR)/tests/test_process_module_handlers.o $(MODULE_HANDLER_TEST_OBJS)
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
+   $(OBJDIR)/tests/test_process_module_handlers.o $(MODULE_HANDLER_TEST_OBJS) \
+   $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_grounding.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
 # The shared connection archive is the only implementation of endpoint,
 # credential, and OpenSSL mTLS primitives. Tests may link it through L_CORE,

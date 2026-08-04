@@ -1772,15 +1772,36 @@ int config_workspace_remove(const char *path)
    return rc;
 }
 
-/* Disable the /v1 HTTP listener and persist, reading the FILE rather than the
- * live snapshot.
+/* Enable the /v1 HTTP listener and persist both settings atomically, reading the
+ * FILE rather than the live snapshot.
  *
- * The generated config_set_server_api_http_port() would work everywhere else,
- * but it goes through config_load, which in the SERVER returns the published
- * snapshot. This runs inside aimee-server under the bearer-mutation lock, and
- * writing back a snapshot would discard anything written to aimee.yaml since the
- * last publish. Reading the file keeps the read-modify-write over the same thing
- * config_save is about to overwrite. */
+ * The generated setters go through config_load, which in the SERVER returns the
+ * published snapshot. Calling the port and rate-limit setters back-to-back made
+ * the second save start from the same stale snapshot and overwrite the port the
+ * first save had just written. Reading the file once also preserves edits made
+ * since the last publish. */
+int config_set_api_http_listener(int http_port, int rate_limit_per_min)
+{
+   if (http_port <= 0 || rate_limit_per_min <= 0)
+      return -1;
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load_file(cfg);
+   if (rc == 0)
+   {
+      cfg->server_api_http_port = http_port;
+      cfg->server_api_rate_limit_per_min = rate_limit_per_min;
+      rc = config_save(cfg);
+      if (rc == 0 && config_reload() < 0)
+         rc = -1;
+   }
+   free(cfg);
+   return rc;
+}
+
+/* Disable the /v1 HTTP listener and persist, reading the FILE rather than the
+ * live snapshot for the same stale-write reason as the enable path above. */
 int config_disable_api_http_listener(void)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));

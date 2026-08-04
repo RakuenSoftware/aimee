@@ -16,6 +16,12 @@
     "src/modules/routing/routing.c",
     "src/modules/routing/module_adapter.c"
   ],
+  "go_sources": [
+    "server-go/modules/routing/routing.go"
+  ],
+  "go_tests": [
+    "server-go/modules/routing/routing_test.go"
+  ],
   "public_headers": [
     "src/modules/routing/include/aimee/routing/module_api.h"
   ],

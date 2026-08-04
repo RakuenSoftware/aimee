@@ -242,6 +242,18 @@ else
     fail "KB entrypoint must export PGCTLTIMEOUT>60 before starting the cluster (export=$kb_pgctltimeout_line, start=$kb_pgctl_start_line, default=$kb_pgctltimeout_default)"
 fi
 
+# An ordinary docker stop/restart must terminate the supervising shell after it
+# forwards the signal and must stop embedded PostgreSQL before Docker's timeout
+# escalates to SIGKILL. Merely trapping TERM without exiting returns to the
+# monitor loop and makes every routine restart depend on WAL recovery.
+if grep -qF 'shutdown_embedded() {' ../deploy/container/aimee-kb-entrypoint.sh &&
+   grep -qF 'trap - EXIT HUP INT TERM' ../deploy/container/aimee-kb-entrypoint.sh &&
+   grep -qF "trap 'shutdown_embedded; exit 0' HUP INT TERM" ../deploy/container/aimee-kb-entrypoint.sh; then
+    pass "KB entrypoint makes signal-driven embedded PostgreSQL shutdown terminal"
+else
+    fail "KB entrypoint can return to its monitor loop after Docker requests shutdown"
+fi
+
 # The export path starts the same cluster in a stopped container, so it is
 # exposed to the identical recovery wait -- and an export timing out aborts with
 # the data intact but unread.
@@ -1590,4 +1602,3 @@ else
     fi
     exit 1
 fi
-

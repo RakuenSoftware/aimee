@@ -67,6 +67,7 @@ static void test_key_isolation(void)
                                        .context = "ctx",
                                        .behavior_flags = "cs0 rc0"};
    response_dedup_key(&base, k1, sizeof(k1));
+   assert(strcmp(k1, "uid:1|45fd46a03cb4a28da3227155fec20a71") == 0);
 
    /* Different principal -> different key (no cross-account reads). */
    response_dedup_key_inputs_t v = base;

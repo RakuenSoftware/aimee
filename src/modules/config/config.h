@@ -2420,6 +2420,12 @@ int config_workspace_remove(const char *path);
  * exist yet. Idempotent. */
 int config_persist_defaults(void);
 
+/* Enable the loopback /v1 HTTP listener in one disk-based config transaction.
+ * Both values must be positive. Reading the file avoids stale live-snapshot
+ * writes inside aimee-server, and the successful update republishes the
+ * snapshot before returning. */
+int config_set_api_http_listener(int http_port, int rate_limit_per_min);
+
 /* Disable the /v1 HTTP listener and persist. Reads the FILE, not the snapshot --
  * see config_save.c for why this one cannot use the generated setter. */
 int config_disable_api_http_listener(void);

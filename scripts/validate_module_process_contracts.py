@@ -20,6 +20,11 @@ PROCESS_REQUIRED = {
     "memory", "learning", "routing", "delegates", "tools", "workspace", "git",
     "skills", "response-composition",
 }
+GO_PROCESSES = {
+    "memory", "learning", "routing", "delegates", "tools", "workspace", "git",
+    "skills", "response-composition", "governance", "workflows", "roundtable", "kb-synthesis",
+    "runtime-web", "control-web", "benchmarks",
+}
 STAGE_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 
 
@@ -42,8 +47,8 @@ def validate() -> dict[str, dict[str, object]]:
     contract = load(CONTRACTS)
     if set(contract) != {"schema_version", "principal_class", "components"}:
         raise ContractError("top-level keys differ from v1")
-    if contract["schema_version"] != 1 or contract["principal_class"] != 1:
-        raise ContractError("schema_version and principal_class must equal 1")
+    if contract["schema_version"] != 2 or contract["principal_class"] != 1:
+        raise ContractError("schema_version must equal 2 and principal_class must equal 1")
     components = contract["components"]
     if not isinstance(components, list) or len(components) != len(ordered):
         raise ContractError("component count differs from canonical inventory")
@@ -79,8 +84,13 @@ def validate() -> dict[str, dict[str, object]]:
             if set(raw) != {"id", "execution", "placements"}:
                 raise ContractError(f"{component_id}: core component has process fields")
         else:
-            if set(raw) != {"id", "execution", "principal_ref", "placements", "stages"}:
-                raise ContractError(f"{component_id}: process keys differ from v1")
+            if set(raw) != {"id", "execution", "runtime", "principal_ref", "placements", "stages"}:
+                raise ContractError(f"{component_id}: process keys differ from v2")
+            runtime = raw["runtime"]
+            if runtime not in {"c", "go"}:
+                raise ContractError(f"{component_id}: process runtime must be c or go")
+            if (component_id in GO_PROCESSES) != (runtime == "go"):
+                raise ContractError(f"{component_id}: runtime differs from the migration set")
             principal_ref = raw["principal_ref"]
             if type(principal_ref) is not int or principal_ref != ordinal or principal_ref in refs:
                 raise ContractError(f"{component_id}: principal_ref must equal inventory ordinal")
@@ -114,8 +124,9 @@ def main() -> int:
         print(f"validate_module_process_contracts: error: {exc}", file=sys.stderr)
         return 1
     process_count = sum(item["execution"] == "process" for item in components.values())
+    go_count = sum(item.get("runtime") == "go" for item in components.values())
     print(f"validate_module_process_contracts: ok ({len(components)} components, "
-          f"{process_count} processes)")
+          f"{process_count} processes: {go_count} Go, {process_count - go_count} C)")
     return 0
 
 

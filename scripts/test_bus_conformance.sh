@@ -21,6 +21,10 @@ make -C src --no-print-directory unit-test-bus-wire
 echo "== 1. wire vectors: Go codec =="
 ( cd server-go && CGO_ENABLED=0 go test ./bus/... -run 'TestWireVectors|TestValidationAxes|TestRing|TestControl' )
 
+echo "== 1. migrated Go module handlers =="
+( cd server-go && CGO_ENABLED=0 go test ./modules/... ./cmd/aimee-module )
+python3 -I scripts/check_go_module_runtime_bundle.py
+
 echo "== 2. cross-language interop: C host <-> Go client =="
 make -C src --no-print-directory bus-conformance-host
 harness="$repo_root/src/build/obj/tests/bus-conformance-host"
@@ -31,6 +35,22 @@ fi
 [ -x "$harness" ] || { echo "FAIL: conformance host harness not built" >&2; exit 1; }
 ( cd server-go && BUS_CONFORMANCE_HOST="$harness" \
    CGO_ENABLED=0 go test ./bus/... -run TestCrossLanguageConformance -v -timeout 60s )
+
+echo "== 2. module runtime interop: C host/core caller <-> Go module process =="
+make -C src --no-print-directory "build/obj/tests/unit-test-module-runtime"
+module_harness="$repo_root/src/build/obj/tests/unit-test-module-runtime"
+go_module="$repo_root/src/build/obj/tests/go-module-runtime-helper"
+( cd server-go && CGO_ENABLED=0 go build -o "$go_module" ./bus/testdata/module_helper )
+timeout 60s "$module_harness" "$go_module"
+
+echo "== 2. migrated module interop: C core caller <-> shipped Go processes =="
+go_multicall="$repo_root/src/build/obj/tests/aimee-module-go"
+( cd server-go && CGO_ENABLED=0 go build -trimpath -o "$go_multicall" ./cmd/aimee-module )
+for module_id in memory learning routing delegates tools workspace git skills response-composition governance workflows roundtable kb-synthesis runtime-web control-web benchmarks; do
+   executable="$repo_root/src/build/obj/tests/aimee-module-$module_id"
+   install -m 0755 "$go_multicall" "$executable"
+   timeout 60s "$module_harness" "$executable" "$module_id"
+done
 
 echo "== 3. single-host (D8) =="
 "$repo_root/scripts/check_bus_single_host.sh"

@@ -31,6 +31,29 @@ That buys us:
 
 The last item is an extension surface, not a claim that every subsystem has moved already.
 
+Ten production C-to-Go process batches now cover every supervised process:
+`memory`, `learning`,
+`routing`, `delegates`, `tools`, `workspace`, `git`, `skills`,
+`response-composition`, `governance`, `workflows`, `roundtable`, `kb-synthesis`,
+`runtime-web`, `control-web`, and `benchmarks`.
+Each keeps its existing event kind and AMOD body contract, but the supervisor now
+starts an authenticated Go process for that identity. C adapters serve as parity
+fixtures; the bounded memory rerank, response-composition key, roundtable
+verification-rubric, and benchmark IR-scoring stages do not mean those modules'
+storage-heavy or daemon orchestration code has all moved to Go. Governance moves
+the bounded response tool-policy decision; parsed-response mutation and its
+broader identity/OIDC plane remain in their current C owners. Workflows moves
+only the pure advance admission classification; the Go WFE remains the sole
+lifecycle, persistence, scheduling, and transition owner. KB synthesis moves
+only the deterministic code-unit grounding gate; curator queues, model calls,
+storage, linking, promotion, and scheduling remain in their current owners.
+Runtime web moves the bounded RPC-fault-to-HTTP-status decision; its physical Go
+HTTPS provider consumes that exact shared policy package, while listener,
+authentication, sessions, proxying, and assets remain provider-owned.
+Control web moves bounded console-admin and fleet proxy-route authorization; its
+physical Go provider and isolated process consume the same policy package. The
+KB keeps its independent C console-admin allowlist as defence in depth.
+
 ## What is on it now
 
 The server and KB publish these through the observability bridge:
@@ -133,5 +156,7 @@ Use `bus_client_publish` for ordinary inline events. Use the arena for a trusted
 publisher that needs a lease. Use the module request API for module calls; it selects ordered inline
 fragmentation when a request or reply exceeds the inline budget.
 
-Code lives under `src/core/event_bus/`. The public C client is `bus_client.h`; the pure-Go client is
-under `server-go/bus/`. The source headers hold the wire and arena invariants.
+Code lives under `src/core/event_bus/`. The public C client is `bus_client.h`; the pure-Go client and
+module process runtime are under `server-go/bus/`. Both runtimes implement the same AMOD envelope,
+fragmentation, deadline, cancellation, heartbeat, and host-epoch behavior. The source headers hold
+the wire and arena invariants.

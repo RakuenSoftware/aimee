@@ -5,12 +5,14 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <poll.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/time.h>
 #include <sys/un.h>
 #include <time.h>
@@ -35,6 +37,8 @@ struct bus_runtime
    uint64_t last_reap_ns;
    const bus_runtime_grant_t *grants;
    size_t grant_count;
+   int pending_peer_pid;
+   int slot_pidfd[BUS_ARENA_MAX_SLOTS];
 };
 
 typedef struct
@@ -105,6 +109,7 @@ static int peer_identity(int fd, uint32_t *uid_out, int *pid_out, char *exe, siz
 static bus_attach_status_t runtime_admit(void *ctx, int fd, const bus_attach_request_t *request)
 {
    bus_runtime_t *runtime = ctx;
+   runtime->pending_peer_pid = 0;
    const bus_runtime_grant_t *grant = grant_find(runtime, request);
    if (!grant || !grant->executable || grant->executable[0] != '/')
       return BUS_ATTACH_DENIED_POLICY;
@@ -113,11 +118,41 @@ static bus_attach_status_t runtime_admit(void *ctx, int fd, const bus_attach_req
    char peer_exe[PATH_MAX];
    if (peer_identity(fd, &peer_uid, &peer_pid, peer_exe, sizeof(peer_exe)) != 0)
       return BUS_ATTACH_DENIED_POLICY;
-   (void)peer_pid;
    uint32_t expected_uid = grant->uid == BUS_RUNTIME_SELF_UID ? (uint32_t)geteuid() : grant->uid;
    if (peer_uid != expected_uid || strcmp(peer_exe, grant->executable) != 0)
       return BUS_ATTACH_DENIED_POLICY;
+   runtime->pending_peer_pid = peer_pid;
    return BUS_ATTACH_OK;
+}
+
+static int process_handle_open(int pid)
+{
+#if defined(__linux__) && defined(SYS_pidfd_open)
+   return (int)syscall(SYS_pidfd_open, pid, 0);
+#else
+   (void)pid;
+   errno = ENOTSUP;
+   return -1;
+#endif
+}
+
+static int process_handle_exited(int fd)
+{
+   if (fd < 0)
+      return 0;
+   struct pollfd process = {.fd = fd, .events = POLLIN};
+   int rc;
+   do
+      rc = poll(&process, 1, 0);
+   while (rc < 0 && errno == EINTR);
+   return rc == 1 && (process.revents & (POLLIN | POLLHUP | POLLERR));
+}
+
+static void process_handle_close(int *fd)
+{
+   if (*fd >= 0)
+      close(*fd);
+   *fd = -1;
 }
 
 static int grant_many(bus_host_t *host, uint32_t slot, const uint32_t *kinds, size_t count,
@@ -134,17 +169,41 @@ static bus_attach_status_t runtime_bind(void *ctx, bus_host_t *host, uint32_t sl
 {
    bus_runtime_t *runtime = ctx;
    const bus_runtime_grant_t *grant = grant_find(runtime, request);
+   int peer_pidfd = process_handle_open(runtime->pending_peer_pid);
+   runtime->pending_peer_pid = 0;
+   /* A crashed process cannot detach its shared-memory slot. Prefer an exact
+    * kernel process handle over the heartbeat timeout when its supervisor
+    * immediately launches the same principal again. A live duplicate is still
+    * denied, and kernels without pidfd support retain heartbeat-only reaping. */
+   for (uint32_t i = 0; grant && i < host->cfg.max_slots; ++i)
+   {
+      if (i == slot || !host->slots[i].in_use ||
+          host->slots[i].principal_class != request->principal_class ||
+          host->slots[i].principal_ref != request->principal_ref)
+         continue;
+      if (!process_handle_exited(runtime->slot_pidfd[i]))
+         goto denied;
+      process_handle_close(&runtime->slot_pidfd[i]);
+      if (bus_host_release_slot(host, i) != BUS_HOST_OK)
+         goto denied;
+   }
    if (!grant || bus_host_enforce_grants(host, slot) != BUS_HOST_OK ||
        grant_many(host, slot, grant->publish, grant->publish_count, BUS_GRANT_NOTIFY) != 0 ||
        grant_many(host, slot, grant->request, grant->request_count, BUS_GRANT_REQUEST) != 0)
-      return BUS_ATTACH_DENIED_POLICY;
+      goto denied;
    for (size_t i = 0; i < grant->subscribe_count; i++)
       if (bus_host_subscribe(host, slot, grant->subscribe[i]) != BUS_HOST_OK)
-         return BUS_ATTACH_DENIED_POLICY;
+         goto denied;
    for (size_t i = 0; i < grant->serve_count; i++)
       if (bus_host_serve_kind(host, slot, grant->serve[i]) != BUS_HOST_OK)
-         return BUS_ATTACH_DENIED_POLICY;
+         goto denied;
+   process_handle_close(&runtime->slot_pidfd[slot]);
+   runtime->slot_pidfd[slot] = peer_pidfd;
    return BUS_ATTACH_OK;
+
+denied:
+   process_handle_close(&peer_pidfd);
+   return BUS_ATTACH_DENIED_POLICY;
 }
 
 static void connection_timeouts(int fd)
@@ -215,6 +274,8 @@ bus_runtime_t *bus_runtime_start(bus_host_t *host, pthread_mutex_t *host_lock,
    if (!runtime)
       return NULL;
    runtime->listener_fd = -1;
+   for (uint32_t i = 0; i < BUS_ARENA_MAX_SLOTS; ++i)
+      runtime->slot_pidfd[i] = -1;
    runtime->host = host;
    runtime->host_lock = host_lock;
    runtime->stale_after_ns = config->stale_after_ns;
@@ -266,6 +327,8 @@ void bus_runtime_stop(bus_runtime_t **runtime_ptr)
    pthread_mutex_lock(runtime->host_lock);
    bus_host_set_admission(runtime->host, NULL, NULL);
    bus_host_set_attach_hook(runtime->host, NULL, NULL);
+   for (uint32_t i = 0; i < BUS_ARENA_MAX_SLOTS; ++i)
+      process_handle_close(&runtime->slot_pidfd[i]);
    pthread_mutex_unlock(runtime->host_lock);
    (void)bus_endpoint_remove(runtime->socket_path);
    free(runtime);
@@ -281,7 +344,11 @@ uint32_t bus_runtime_maintain(bus_runtime_t *runtime, uint64_t now_ns)
        now_ns - runtime->last_reap_ns < runtime->stale_after_ns / 4U)
       return 0;
    runtime->last_reap_ns = now_ns;
-   return bus_host_reap(runtime->host, now_ns, runtime->stale_after_ns);
+   uint32_t reaped = bus_host_reap(runtime->host, now_ns, runtime->stale_after_ns);
+   for (uint32_t i = 0; i < runtime->host->cfg.max_slots; ++i)
+      if (!runtime->host->slots[i].in_use)
+         process_handle_close(&runtime->slot_pidfd[i]);
+   return reaped;
 }
 
 static char *trim(char *value)

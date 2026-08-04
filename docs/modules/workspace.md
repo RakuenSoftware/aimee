@@ -7,6 +7,14 @@ working-tree lifecycle, per-turn filesystem/process context, and local coding-ag
 It does not own Git repository semantics, tool schemas, action authorization, credentials, memory
 scope semantics, or optional workflow orchestration.
 
+### Go process stage
+
+The supervised `workspace-access` stage now runs in the shared pure-Go module
+runtime. It preserves the WREF/WWOK contract and validates bounded
+`owner/repository` references before admitting access. The C adapter remains a
+wire-parity fixture. Provider binding, containment, runner queues, mirrors,
+manifests, and worktree lifecycle remain in C for later isolated migrations.
+
 ## Public contracts
 
 `src/modules/workspace` owns `workspace_active_root` at `src/modules/workspace/workspace.c:117`,

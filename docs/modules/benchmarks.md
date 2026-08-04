@@ -7,12 +7,23 @@ corpora, scoring, baselines, result aggregation, and benchmark cadence. It is no
 not own runtime agent assessment, production verification, routing/policy decisions, roundtable
 verification, workflow approval, memory behavior, or general telemetry.
 
+### Go process stage
+
+The supervised benchmarks process uses the shared pure-Go module runtime for a
+bounded deterministic IR-scoring kernel. Its BIRQ/BIRS wire contract accepts up
+to 32 retrieved and relevant identifiers plus K, then returns the existing MRR,
+NDCG@K, and recall@K definitions. The C adapter is a wire-parity fixture. Dataset
+loading, benchmark execution, providers, scratch databases, latency accounting,
+baselines, reporting, and result persistence remain in their current C and
+script owners while those boundaries are migrated.
+
 ## Public contracts
 
-The module directory `src/modules/benchmarks/` owns four sources: `agent_eval.c` (shared eval
+The module directory `src/modules/benchmarks/` owns four production C sources: `agent_eval.c` (shared eval
 machinery: case scoring, latency buckets, temp-db bootstrap, progress files), `agent_eval_baseline.c`
 (regression baseline load/compare/save), `agent_eval_benchmarks.c` (LoCoMo and LongMemEval dataset
-runners), and `agent_eval_memory_support.c` (memory-retrieval eval support). Two module-root
+runners), and `agent_eval_memory_support.c` (memory-retrieval eval support), plus the process
+wire-parity fixture `module_adapter.c`. Two module-root
 headers: `agent_eval.h`, the public contract consumed by CLI, server, and test callers through
 `-Imodules/benchmarks`, and `agent_eval_internal.h`, the private seam shared across the four sources.
 This code was relocated from the former non-descriptor `src/modules/agent_eval/` directory, whose

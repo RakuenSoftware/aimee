@@ -24,7 +24,9 @@ MAX_DEPTH = 32
 MAX_ARRAY = 256
 ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 BASE_KEYS = {"descriptor_version", "id", "dependencies", "runtime_toggle"}
-OWNERSHIP_FIELDS = ("sources", "private_headers", "public_headers", "tests", "docs")
+OWNERSHIP_FIELDS = (
+    "sources", "private_headers", "public_headers", "tests", "docs", "go_sources", "go_tests",
+)
 DEFAULT_ON = {"runtime-web", "control-web"}
 ROLE_EXTENSIONS = {
     "sources": {".c", ".cpp", ".S", ".s"},
@@ -32,6 +34,8 @@ ROLE_EXTENSIONS = {
     "public_headers": {".h", ".hpp"},
     "tests": {".c", ".cpp", ".py", ".sh"},
     "docs": {".md"},
+    "go_sources": {".go"},
+    "go_tests": {".go"},
 }
 
 
@@ -293,6 +297,8 @@ def validate_owned_path(repo: Path, identifier: str, field: str, raw: object,
         "public_headers": PurePosixPath("src/modules") / identifier / "include/aimee" / identifier,
         "tests": PurePosixPath("src/tests"),
         "docs": PurePosixPath("docs/modules"),
+        "go_sources": PurePosixPath("server-go/modules") / identifier,
+        "go_tests": PurePosixPath("server-go/modules") / identifier,
     }
     prefix = role_prefixes[field]
     try:
@@ -315,6 +321,8 @@ def validate_owned_path(repo: Path, identifier: str, field: str, raw: object,
         "public_headers": _resolve_owned(module_root / "include/aimee" / identifier, pointer),
         "tests": _resolve_owned(resolved_repo / "src/tests", pointer),
         "docs": _resolve_owned(resolved_repo / "docs/modules", pointer),
+        "go_sources": _resolve_owned(resolved_repo / "server-go/modules" / identifier, pointer),
+        "go_tests": _resolve_owned(resolved_repo / "server-go/modules" / identifier, pointer),
     }
     boundary = boundaries[field]
     if not _contained(resolved, boundary):
@@ -325,6 +333,10 @@ def validate_owned_path(repo: Path, identifier: str, field: str, raw: object,
              pointer)
     if field == "tests" and not PurePosixPath(raw).name.startswith("test_"):
         fail("ownership-role", f"test path must use the test_ convention: {raw}", pointer)
+    if field == "go_sources" and PurePosixPath(raw).name.endswith("_test.go"):
+        fail("ownership-role", f"Go test must be declared in go_tests: {raw}", pointer)
+    if field == "go_tests" and not PurePosixPath(raw).name.endswith("_test.go"):
+        fail("ownership-role", f"Go test path must end in _test.go: {raw}", pointer)
     if field == "docs" and raw != f"docs/modules/{identifier}.md":
         fail("ownership-doc-canonical", f"expected docs/modules/{identifier}.md, actual {raw}",
              pointer)
@@ -337,7 +349,7 @@ def validate_owned_path(repo: Path, identifier: str, field: str, raw: object,
 
 def validate_complete_ownership(repo: Path, identifier: str,
                                 value: dict[str, object]) -> None:
-    """Require an opted-in descriptor to enumerate its complete owner-local C surface."""
+    """Require an opted-in descriptor to enumerate its owner-local implementation surface."""
     module_root = repo / "src/modules" / identifier
     public_root = module_root / "include/aimee" / identifier
     policies = {
@@ -377,6 +389,27 @@ def validate_complete_ownership(repo: Path, identifier: str,
                 f"missing={missing}, extra={extra}",
                 f"/{role}",
             )
+    go_root = repo / "server-go/modules" / identifier
+    for role, is_test in (("go_sources", False), ("go_tests", True)):
+        actual: set[str] = set()
+        if go_root.is_dir():
+            for path in go_root.rglob("*.go"):
+                if path.name.endswith("_test.go") != is_test:
+                    continue
+                relative = path.relative_to(repo).as_posix()
+                if path.is_symlink() or not path.is_file():
+                    fail("ownership-complete-file",
+                         f"{identifier} {role} path is not a regular file: {relative}",
+                         f"/{role}")
+                actual.add(relative)
+        found[role] = actual
+        declared = set(value.get(role, []))
+        missing = sorted(actual - declared)
+        extra = sorted(declared - actual)
+        if missing or extra:
+            fail("ownership-complete",
+                 f"{identifier} {role} mismatch for Go files; missing={missing}, extra={extra}",
+                 f"/{role}")
     if not any(found.values()):
         # An empty module root satisfies set equality vacuously, so the latch would
         # assert completeness for a module whose implementation has never been moved

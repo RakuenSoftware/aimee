@@ -45,6 +45,12 @@
     "src/modules/memory/memory_scan.c",
     "src/modules/memory/module_adapter.c"
   ],
+  "go_sources": [
+    "server-go/modules/memory/memory.go"
+  ],
+  "go_tests": [
+    "server-go/modules/memory/memory_test.go"
+  ],
   "public_headers": [
     "src/modules/memory/include/aimee/memory/module_api.h"
   ],

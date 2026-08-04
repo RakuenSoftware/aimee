@@ -36,7 +36,7 @@
 /* Outbound patterns authorized for an externally admitted slot. Replies and
  * cancellation are authorized from the host's pending-correlation table; only
  * fresh notifications and requests need manifest grants. */
-#define BUS_GRANT_NOTIFY 0x01u
+#define BUS_GRANT_NOTIFY  0x01u
 #define BUS_GRANT_REQUEST 0x02u
 
 typedef struct
@@ -54,6 +54,7 @@ typedef void (*bus_tap_fn)(void *ctx, const bus_frame_t *frame, const uint8_t *p
 typedef struct
 {
    int in_use;
+   uint32_t principal_class;
    uint32_t principal_ref;
    int qpair_fd;
    bus_region_t qpair_region; /* host RW mapping of this client's queue pair */
@@ -190,6 +191,12 @@ void bus_host_destroy(bus_host_t *h);
  * error if the handshake itself failed. */
 bus_host_result_t bus_host_serve_attach(bus_host_t *h, int conn_fd);
 bus_host_result_t bus_host_serve_attach_ex(bus_host_t *h, int conn_fd, uint32_t *slot_out);
+
+/* Release one admitted slot immediately. Runtime owners use this only after an
+ * OS-backed process handle proves the client has exited; ordinary liveness
+ * remains heartbeat-reaped. The caller must hold the same host lock used for
+ * attach, pump, and reap. */
+bus_host_result_t bus_host_release_slot(bus_host_t *h, uint32_t slot);
 
 /* Install the daemon-owned capability binder. Admission authenticates the
  * request before allocation; this hook runs after a slot exists but before its
