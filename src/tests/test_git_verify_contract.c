@@ -16,6 +16,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 static verify_step_t mk_step(const char *name, const char *tier)
 {
@@ -139,6 +141,60 @@ static void test_cancelled_unavailable(void)
    printf("  PASS: cancelled -> unavailable (distinct from passed)\n");
 }
 
+/* "no Makefile found" was asserted for five different causes and never named the
+ * directory it searched. In this very repository -- which has src/Makefile, a case
+ * find_makefile_subdir handles explicitly -- `aimee git verify` reported exactly
+ * that, because verify_root resolved to a different checkout via the session's
+ * worktree mapping. The Makefile was never missing.
+ *
+ * The fix is not a better guess, it is naming the path. Assert the root appears in
+ * every branch, so a wrong root stays diagnosable from the message alone. */
+static void test_unavailable_reason_names_the_root(void)
+{
+   char why[768];
+
+   /* A directory with no Makefile: say so, and say where. */
+   char tmpl[] = "/tmp/aimee-verify-reason-XXXXXX";
+   char *dir = mkdtemp(tmpl);
+   assert(dir != NULL);
+   verify_config_unavailable_reason(dir, why, sizeof(why));
+   assert(strstr(why, dir) != NULL);
+   assert(strstr(why, "no Makefile") != NULL);
+   /* And point at the real cause of the observed failure, which is not the file. */
+   assert(strstr(why, "worktree mapping") != NULL);
+
+   /* A Makefile under src/ is FOUND, so the message must not claim otherwise --
+    * this is the exact shape of this repo, and the case that was misreported. */
+   char sub[512];
+   snprintf(sub, sizeof(sub), "%s/src", dir);
+   assert(mkdir(sub, 0755) == 0);
+   char mk[600];
+   snprintf(mk, sizeof(mk), "%s/Makefile", sub);
+   FILE *f = fopen(mk, "w");
+   assert(f != NULL);
+   fputs("nothing-aimee-knows:\n\t@true\n", f);
+   fclose(f);
+
+   verify_config_unavailable_reason(dir, why, sizeof(why));
+   assert(strstr(why, "no Makefile") == NULL); /* it exists; do not lie about it */
+   assert(strstr(why, dir) != NULL);
+   assert(strstr(why, "src") != NULL);
+   assert(strstr(why, "recognise") != NULL);
+
+   unlink(mk);
+   rmdir(sub);
+   rmdir(dir);
+
+   /* No resolvable root at all: distinct from "no Makefile", because there was
+    * nowhere to look rather than nothing to find. */
+   verify_config_unavailable_reason("", why, sizeof(why));
+   assert(strstr(why, "no repository root") != NULL);
+   verify_config_unavailable_reason(NULL, why, sizeof(why));
+   assert(strstr(why, "no repository root") != NULL);
+
+   printf("  test_unavailable_reason_names_the_root: PASS\n");
+}
+
 int main(void)
 {
    printf("git_verify_contract:\n");
@@ -146,6 +202,7 @@ int main(void)
    test_one_fail();
    test_skip();
    test_cancelled_unavailable();
+   test_unavailable_reason_names_the_root();
    printf("ok\n");
    return 0;
 }

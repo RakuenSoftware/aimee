@@ -49,6 +49,12 @@ typedef struct
  * verify section found. project_root may be NULL (uses cwd). */
 int verify_load_config(const char *project_root, verify_config_t *cfg);
 
+/* Explain why verify_load_config found nothing, for the error path. Writes a
+ * sentence naming the root that was searched: the previous message asserted "no
+ * Makefile found" for five different causes and never said WHERE it looked, which
+ * is the one fact that distinguishes a missing Makefile from a wrong root. */
+void verify_config_unavailable_reason(const char *verify_root, char *out, size_t out_len);
+
 /* Verify scope gate. Returns 1 if target_repo_root is in scope for
  * verification — either cross-project verify is enabled in config, or the
  * target resolves to the same canonical main repo as one of the session's
