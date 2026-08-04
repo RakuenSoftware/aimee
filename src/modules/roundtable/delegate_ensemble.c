@@ -2224,7 +2224,19 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
           * DEMOTE/DROP an over-flagged finding (never escalate/add), each change shown
           * with its rationale. Best-effort + opt-in; on any failure out is untouched. */
          char *chair_adj = NULL;
-         if (panel->chair_synthesis)
+         /* A ONE-SEAT PANEL HAS NOTHING TO RECONCILE.
+          *
+          * The chair pass exists to arbitrate between seats that disagree. With
+          * one reviewer it is an extra delegate call and an extra way to fail:
+          * measured on a one-seat completeness review, the seat returned a
+          * correct blocking finding and the chair then died on "unknown persona
+          * 'chairman'", so roundtable_status reported the whole run FAILED and a
+          * caller polling it would discard findings that were exactly right.
+          *
+          * Gated HERE rather than in ensemble_panel_from_config because a preset
+          * overlay is applied after that runs and would put chair_synthesis
+          * back. */
+         if (panel->chair_synthesis && panel->reference_count > 1)
          {
             char *chair_prompt = roundtable_chair_build_prompt(out);
             if (chair_prompt)
