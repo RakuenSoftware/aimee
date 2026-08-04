@@ -488,25 +488,30 @@ static void handle_initialize(cJSON *id)
    if (mcp_enter_session_worktree(wt, sizeof(wt)))
    {
       char instructions[8192];
-      /* DO NOT direct the host's own tools into the worktree.
+      /* DO NOT HAND THE CALLER A WORKTREE PATH.
        *
-       * An earlier revision of this text named the two tool surfaces and told
-       * the host's shell to use absolute paths under the worktree. That is
-       * accurate about where aimee's tools run, and it changed agent behaviour:
-       * agents that had been working in the ORIGINAL checkout moved into the
-       * worktree, where the caller's own tooling does not look. Measured on the
-       * benchmark -- cells that passed before produced 0 changed files after,
-       * with a real 3-file patch stranded on the session branch.
+       * Two revisions of this text failed. The first told the host's shell to use
+       * absolute paths under the worktree: agents moved there and the caller's
+       * checkout came back empty. The second only DESCRIBED the split and still
+       * printed the path -- and the behaviour went non-deterministic. On one
+       * image, same build, same day: one task wrote to the caller's checkout and
+       * passed (25 insertions), another wrote ONLY into the worktree and graded
+       * as zero changed files. A path in the prompt is an attractor; some
+       * fraction of the time the agent cd's into it.
        *
-       * The worktree is aimee's private isolation for ITS tools. The host still
-       * owns the directory it started in, and its edits must stay reachable
-       * there. Say where aimee's tools run; do not relocate the caller. */
+       * The caller does not need the path. aimee's tools already resolve there
+       * because this proxy chdir'd, so relative paths work for them; the host's
+       * tools work where the host already is. Say that isolation exists, name
+       * neither a path nor a directory to move to, and the ambiguity disappears.
+       *
+       * The path remains in `wt` for logging and is deliberately NOT interpolated
+       * into the model-visible text. */
       snprintf(instructions, sizeof(instructions),
-               "%s\n\naimee's own file and shell tools run in a private per-session "
-               "worktree at %s, so paths you give THEM resolve there. Your own shell and edit "
-               "tools are unaffected and still run where this session started — keep working "
-               "there as normal.",
-               base_instructions, wt);
+               "%s\n\naimee's own file and shell tools operate on an isolated per-session "
+               "checkout of this repository; give them relative paths and they resolve there. "
+               "Your own shell and edit tools are unaffected — keep using them exactly where "
+               "this session started, and do not go looking for another copy of the tree.",
+               base_instructions);
       cJSON_AddStringToObject(result, "instructions", instructions);
    }
    else

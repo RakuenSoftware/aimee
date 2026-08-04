@@ -812,8 +812,13 @@ static void test_initialize_enters_session_worktree(void)
    cJSON *instructions = cJSON_GetObjectItemCaseSensitive(result, "instructions");
    assert(cJSON_IsString(instructions));
    assert(strstr(instructions->valuestring, "get_help") != NULL);
-   assert(strstr(instructions->valuestring, "per-session") != NULL);
-   assert(strstr(instructions->valuestring, wt) != NULL);
+   assert(strstr(instructions->valuestring, "isolated per-session") != NULL);
+   /* THE WORKTREE PATH MUST NOT REACH THE MODEL.
+    * Printing it made behaviour non-deterministic: on one build one task wrote to
+    * the caller's checkout and passed, another wrote only into the worktree and
+    * graded as zero changed files. A path in the prompt is an attractor. */
+   assert(strstr(instructions->valuestring, wt) == NULL);
+   assert(strstr(instructions->valuestring, "do not go looking for another copy") != NULL);
 
    /* THE INSTRUCTION MUST NOT RELOCATE THE CALLER.
     *
@@ -823,7 +828,7 @@ static void test_initialize_enters_session_worktree(void)
     * on the session branch. Pin that aimee's tools are described and the host's
     * are told they are unaffected. */
    assert(strstr(instructions->valuestring, "aimee's own file and shell tools") != NULL);
-   assert(strstr(instructions->valuestring, "still run where this session started") != NULL);
+   assert(strstr(instructions->valuestring, "keep using them exactly where") != NULL);
    assert(strstr(instructions->valuestring, "cd there first") == NULL);
 
    cJSON_Delete(resp);
