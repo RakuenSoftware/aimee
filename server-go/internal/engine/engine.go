@@ -266,7 +266,12 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 		}
 		reason := "runner_unavailable"
 		capacity := isCapacityBackpressure(err)
-		if capacity {
+		if errors.Is(err, ErrGitIdentityMissing) {
+			// This cannot heal on the scheduler's five-second runner backoff. Park
+			// until an operator seals the documented install-time identity and
+			// explicitly resumes the run.
+			reason = "git_identity_missing"
+		} else if capacity {
 			// The provider refused the dispatch outright; no delegate ran. Park
 			// on a distinct transient reason so this waits out the throttle on a
 			// longer backoff instead of burning the runner-failure bound.

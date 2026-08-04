@@ -30,6 +30,12 @@ type CommandVerifier struct {
 
 const defaultCommandVerifyLock = "aimee-wfe-command-verify.lock"
 
+// ErrGitIdentityMissing is a permanent deployment prerequisite, not a transient
+// runner outage. The engine gives it a non-auto-resumed park reason so a missing
+// install-time identity cannot launch a new implementation delegate every five
+// seconds while no commit can succeed.
+var ErrGitIdentityMissing = errors.New("git identity is not configured")
+
 // gitIdentityArgs returns the `-c user.name=... -c user.email=...` the WFE commits
 // under, read from the identity aimee was installed with.
 //
@@ -746,7 +752,8 @@ func commitChanges(ctx context.Context, workdir, stage string) error {
 	}
 	ident := gitIdentityArgs()
 	if len(ident) == 0 {
-		return fmt.Errorf("no git identity configured: seal AIMEE_GIT_AUTHOR_NAME and AIMEE_GIT_AUTHOR_EMAIL at install")
+		return fmt.Errorf("%w: seal AIMEE_GIT_AUTHOR_NAME and AIMEE_GIT_AUTHOR_EMAIL at install",
+			ErrGitIdentityMissing)
 	}
 	_, err := gitText(ctx, workdir, append(ident, "commit", "-m", "wfe: "+stage)...)
 	return err
