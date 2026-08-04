@@ -730,3 +730,89 @@ prefix stays, the hoard goes.
 The three banked E4B 10k arms ran at the 8192 default. The E2B ladder now runs
 at 512. **Cross-family comparison at 10k is invalid until E4B is re-run at 512.**
 Within-family comparisons on either side are unaffected. Roughly 9h of XTX time.
+
+## 22. The ranking finally has a corpus underneath it
+
+Article 1 ranked six models. Four of them had never been run on more than 1001
+notes, and two had never been run on more than 70. The E2B and E4B figures it
+compared them against came from the 10k ladder. So the table was comparing
+numbers taken on different corpora at different sample sizes and calling the
+result a ranking.
+
+All six now have a 10,000-note arm on the same gold, at nproc=3, cache-ram 1024,
+UD-Q4_K_XL:
+
+| model | strict F1 | wall | MTP available |
+|---|---:|---:|---|
+| gemma-4-E4B | 0.6301 | 159m | yes |
+| gemma-4-E2B | 0.6246 | 146m | yes |
+| granite-4.1-3b | 0.5627 | 21m | no |
+| gemma-3n-E4B | 0.5424 | 47m | no |
+| Qwen3-1.7B | 0.4591 | 361m | no |
+| granite-4.0-1b | 0.4215 | 16m | no |
+
+**Do not publish this table yet.** The last column is a confound: the two gemma-4
+arms ran with speculative drafts and the other four cannot, and MTP moves 26 of
+100 notes (finding 12). The no-MTP ladder now running removes it. The ordering
+may well survive -- the top gap is 0.055 and the bottom is 0.14 -- but "may well
+survive" is what finding 19 said before process count turned out to be worth
+0.0105.
+
+### The two numbers article 1 should actually lead with
+
+**22:1 on wall clock for 0.04 F1.** granite-4.0-1b does 10,000 notes in 16
+minutes; Qwen3-1.7B takes 361 on the same card at the same settings, and lands
+0.037 F1 ahead. If the article's question is "what should we use today", that
+ratio is the answer to a deployment question in a way the F1 column alone is not.
+No interval was computed on the 0.037.
+
+**Abstention, not extraction, separates the granites.** granite-4.0-1b abstains
+on 31.5% of factless notes, granite-4.1-3b on 75.7%. That is most of the 0.14
+between them. A model that answers when it should stay quiet loses on precision
+across the whole corpus, and that is a behavioural property you can see in a
+sample of ten notes -- much easier to write about than a leaderboard delta.
+
+### Three of the six emitted no reasoning at all
+
+granite-4.0-1b, granite-4.1-3b and gemma-3n-E4B recorded `thinking: true` and
+produced zero reasoning characters on all 10,000 rows. The scorer refused all
+three under the defect-31 guard; they were scored with `--allow-thinking-off`.
+Qwen3 and both gemma-4 arms scored clean.
+
+Whether that is "no thought channel" or "a channel this prompt closes" is NOT
+established, and the difference matters for the article: the first is a property
+of the model, the second is defect 31 recurring on three more models. One
+`/props` call per model settles it.
+
+## 23. Article 3's open list is missing the question everyone asks
+
+Finding 12 established that MTP changes 26 of 100 notes and buys 1.59x-1.83x
+depending on model, and that it is self-consistent so a ladder run entirely under
+it stays internally comparable. Article 3 carries all of that.
+
+What none of it says is whether those 26 changed notes are **worse**. Identity
+was measured; accuracy never was. The article tells a reader that speculative
+decoding perturbs output and is usable anyway, and the obvious next question --
+"perturbed toward what?" -- is not in the text or in the open-items list.
+
+Two lanes are now measuring it at n=10000 with strict F1 on both sides:
+
+- **XTX**: six no-MTP arms paired against the six MTP arms banked there.
+- **5080**: E2B runs both sides itself, three quants x {MTP, no-MTP}.
+
+The second exists because article 3's own header admits "one throughput
+comparison is missing because the two configurations ran on different cards".
+Running both sides on one card fixes that caveat and gives an independent
+replication: if MTP moves the score on one card and not the other, that is a
+finding about the interaction, and a single lane could not tell it apart from MTP
+simply not mattering.
+
+`harness/compare_mtp.py` reports the trade -- F1 delta against per-stream and
+aggregate tok/s -- and refuses to print a gain-per-accuracy-point ratio when the
+F1 delta is inside the noise threshold. A ratio whose denominator is
+indistinguishable from zero is how the +0.084 claim survived for months
+(defect 32).
+
+**A null result is a real possibility and would still be the finding.** The 26
+perturbed notes can cancel in aggregate. "1.6x-1.8x for no measurable accuracy
+cost" is the answer a reader wants, and it would be earned rather than assumed.

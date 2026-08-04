@@ -1467,3 +1467,105 @@ Both numbers should improve under the 24-relation ontology, since runs_on,
 owns_account and customer_of are now canonical and were among the invented
 predicates counted against E4B here. That is a prediction, not a measurement:
 these runs predate the change.
+
+## The 10k tier, and what it took to make one comparable
+
+Before 2026-08-03 only two models had ever been run on `gold_large`: E2B and E4B.
+Everything else in the project topped out at 1001 notes or at the 70-note
+`data/gold.jsonl`, so article 1's ranking compared a 1001-note granite against a
+1001-note E2B taken by a different sweep at a different setting.
+
+All six models now have a 10,000-note arm on `data/corpora/v5/gold_large.jsonl`,
+nproc=3, cache-ram 1024, UD-Q4_K_XL, prompt v8, thinking requested:
+
+| model | strict F1 | precision | recall | parse_ok | wall | MTP |
+|---|---:|---:|---:|---:|---:|---|
+| gemma-4-E4B | 0.6301 | 0.5874 | 0.6796 | — | 159m | yes |
+| gemma-4-E2B | 0.6246 | — | — | — | 146m | yes |
+| granite-4.1-3b | 0.5627 | 0.5622 | 0.5632 | 9974 | 21m | none published |
+| gemma-3n-E4B | 0.5424 | 0.4992 | 0.5938 | 9989 | 47m | none published |
+| Qwen3-1.7B | 0.4591 | 0.4500 | 0.4685 | 9895 | 361m | none published |
+| granite-4.0-1b | 0.4215 | 0.4118 | 0.4317 | 9563 | 16m | none published |
+
+Every arm: 10,000 rows, zero transport errors, zero truncation, fabrication rate
+0.0 where computed.
+
+**The ranking is not yet clean, and the reason is in the last column.** The two
+gemma-4 arms ran with MTP drafts because they came from the ladder; the other
+four cannot, because no `mtp-*.gguf` is published for them. MTP moves 26 of 100
+notes (finding 12), so the draft head currently sits inside the comparison. The
+no-MTP ladder now running is what removes it.
+
+### Three arms scored only under protest
+
+`granite-4.0-1b`, `granite-4.1-3b` and `gemma-3n-E4B` recorded `thinking: true`
+and produced zero reasoning characters on all 10,000 rows, so `score.py` refused
+them under the defect-31 guard and they were scored with `--allow-thinking-off`.
+Qwen3-1.7B and every gemma-4 arm scored with no flags.
+
+Recorded as an observation, not a diagnosis: whether these three have no thought
+channel, or have one that this prompt closes, is not established here. The
+distinction matters and is cheap to settle from `/props`.
+
+### 22:1 on wall clock, at similar quality
+
+granite-4.0-1b finished 10,000 notes in 16 minutes; Qwen3-1.7B took 361 on the
+same card at the same settings. Median completion tokens is the mechanism -- 33
+against Qwen3's much longer reasoning-bearing outputs -- and the two land 0.04 F1
+apart. No interval was computed on that gap.
+
+### Abstention separates the two granites more than anything else does
+
+granite-4.0-1b abstains on 31.5% of factless notes; granite-4.1-3b on 75.7%.
+Both were scored identically. That is the larger part of the 0.14 F1 between
+them, and it is a behavioural difference rather than a capability one.
+
+## Process count, measured a second time
+
+finding 19 put 1-vs-3 processes at 0.0105 F1. gemma-3n-E4B at 10k, same card,
+same everything else:
+
+| processes | strict F1 | precision | recall | wall | rows/min |
+|---|---:|---:|---:|---:|---:|
+| 4 | 0.5429 | 0.5000 | 0.5939 | 47m | 217 |
+| 3 | 0.5424 | 0.4992 | 0.5938 | 47m | 212 |
+| delta | **-0.0005** | | | | |
+
+Whether 3-vs-4 is small because the step is smaller than 1-vs-3, or because the
+effect is model-dependent, is not established by one pairing and no interval was
+computed. It cost nothing in throughput either way.
+
+The arm was originally taken at nproc=4 because its driver passed `NPROC=0` and
+let the sizer choose. That choice was made from the model's 5.02 GiB **file
+size**; resident VRAM is 3414 MiB. Sizing a run from file size is the defect --
+the sizer was right and the assumption feeding it was wrong.
+
+## The cache-ram re-run closed, and moved almost nothing
+
+The three E4B 10k arms were re-taken at `--cache-ram 1024` to match the E2B
+ladder, and the 8192 originals quarantined rather than deleted:
+
+| arm | at 8192 | at 1024 | delta |
+|---|---:|---:|---:|
+| E4B.UD-Q4_K_XL | 0.6324 | 0.6301 | -0.0023 |
+| E4B.UD-Q6_K_XL | 0.6450 | 0.6452 | +0.0002 |
+| E4B.UD-Q8_K_XL | 0.6321 | 0.6337 | +0.0016 |
+
+Single pairings, no intervals. The re-run was not done because the old numbers
+looked wrong -- it was done because cache-ram is results-affecting and the two
+families have to share the value before they can be compared. That reasoning
+stands whatever the deltas turned out to be, and they turned out to be small.
+
+The full ladder now shares one cache-ram value:
+
+|  | Q4 | Q6 | Q8 |
+|---|---:|---:|---:|
+| E2B | 0.6246 | 0.6344 | 0.6329 |
+| E4B | 0.6301 | 0.6452 | 0.6337 |
+
+### One inconsistency, recorded and unexplained
+
+Reasoning coverage is not uniform across the ladder: 10000/10000 on all three E2B
+arms, 9989 on E4B Q4, 9994 on E4B Q8, and **8673 on E4B Q6**. All are above the
+guard's zero threshold so all scored without flags. No explanation is offered
+here because none has been measured.
