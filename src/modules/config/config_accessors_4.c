@@ -18,6 +18,28 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
+size_t config_kb_fusion_mode_copy(char *out, size_t n)
+{
+   char buf[32];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, kb_fusion_mode), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_ranker_fuse_command_copy(char *out, size_t n)
+{
+   char buf[512];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, ranker_fuse_command), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
 size_t config_kb_ranker_fit_command_copy(char *out, size_t n)
 {
    char buf[512];
@@ -1900,51 +1922,6 @@ int config_set_memory_window_radius(int value)
    if (rc == 0)
    {
       cfg->memory_window_radius = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_kb_search_max_results(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->kb_search_max_results = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_negation_enabled(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_negation_enabled = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_query_expansion_k(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_query_expansion_k = value;
       rc = config_save(cfg);
    }
    free(cfg);

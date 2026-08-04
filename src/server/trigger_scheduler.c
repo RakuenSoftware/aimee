@@ -19,7 +19,6 @@
 #include "aimee_home.h"
 #include "log.h"
 #include "platform_random.h"
-#include <aimee/skills/skill_curator.h>
 #include "trigger_scheduler.h"
 #include "util.h"
 #include "gw_orch_workflows.h" /* trigger workflow dispatch via the orchestration seam */
@@ -1430,10 +1429,6 @@ static void sched_tick(void)
     * a trigger block file runs through the same plumbing as trigger_rules. */
    if (!go_wfe)
       sched_tick_armed(now, config_trigger_max_concurrent());
-
-   /* Skill curator: idle-guarded; safe to call on every tick. */
-   if (config_skills_curator_enabled())
-      skill_curator_maybe();
 }
 
 /* ------------------------------------------------------------------ */

@@ -29,8 +29,9 @@ Provider-neutral request/options and aggregate-result types, registration and in
 release dispatch live in the required delegates module's `panel_provider.h`. Required consumers use those
 facades and never include optional roundtable execution headers. The private `roundtable_types.h` provides
 compatibility aliases, while the private `delegate_ensemble.h` declares optional implementation entry
-points and compatibility types. `scripts/check_panel_contract_boundary.py` rejects either private header
-outside the roundtable owner and its tests, with no allowlist.
+points and compatibility types. `scripts/check_panel_contract_boundary.py` rejects new private-header
+consumers and exact-ratchets the remaining provider/roster and composition migration debt. Removing an
+existing consumer also fails until the ratchet is reduced in the same change.
 Private `ROUNDTABLE_MAX_REVIEW_ITEMS` and `ROUNDTABLE_MAX_QUESTIONS` aliases mirror the canonical
 `AIMEE_PANEL_MAX_*` bounds for legacy implementation code; new code uses the IR names directly.
 

@@ -1,8 +1,8 @@
 # Build the aimee container images on GitHub runners and push them to ghcr.io.
-# Covers the full image set documented in
-# docs/proposals/pending/aimee-e2e-deploy-matrix.md:
+# Covers the full image set used by the committed Compose topologies:
 #
 #   aimee-server     (Dockerfile.server)      ghcr.io/<owner>/aimee-server
+#   aimee-control-web (Dockerfile.control-web) ghcr.io/<owner>/aimee-control-web
 #   aimee-authority-bootstrap (Dockerfile.authority-bootstrap) ghcr.io/<owner>/aimee-authority-bootstrap
 #   aimee-css-render (deploy/css-render/Dockerfile) ghcr.io/<owner>/aimee-css-render
 #
@@ -74,6 +74,7 @@ jobs:
       matrix:
         image:
           - { name: aimee-server,    dockerfile: Dockerfile.server }
+          - { name: aimee-control-web, dockerfile: Dockerfile.control-web }
           # The aimee-kb images, on ONE axis: the embedder. Synthesis used to be a
           # second axis here, doubling this to six tags and rebuilding llama.cpp and
           # a multi-gigabyte GGUF on every kb code change. It is its own image now
@@ -178,7 +179,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [aimee-server, aimee-kb, aimee-kb-a25m, aimee-kb-nomic,
+        image: [aimee-server, aimee-control-web, aimee-kb, aimee-kb-a25m, aimee-kb-nomic,
                 aimee-authority-bootstrap, aimee-css-render]
     steps:
       - name: Normalize owner to lowercase

@@ -284,7 +284,8 @@ deploy instead of quietly at the first curation call.
 ### Choosing an image channel
 
 The stack runs the released `:latest` images by default. To run a tested-but-unreleased build, set
-`AIMEE_IMAGE_TAG` once. It moves the server and the KB together:
+`AIMEE_IMAGE_TAG` once. It moves every image in the topology together, including the server, KB,
+and browser console:
 
 ```bash
 AIMEE_IMAGE_TAG=testing docker compose -f compose.server-managed.yaml up -d

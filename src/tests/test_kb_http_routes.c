@@ -1496,9 +1496,8 @@ char *kb_ranker_export_view_json(const char *subject_kind, const char *feature_s
    return strdup("{\"status\":\"ok\",\"n_rows\":0,\"rows\":[]}");
 }
 
-int kb_ranker_fit_run(const config_t *cfg, char *id_out, int id_out_len, char **report_out)
+int kb_ranker_fit_run(char *id_out, int id_out_len, char **report_out)
 {
-   (void)cfg;
    if (id_out && id_out_len > 0)
       id_out[0] = '\0';
    if (report_out)

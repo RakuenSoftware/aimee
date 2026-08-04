@@ -62,6 +62,12 @@ for arg in "$@"; do
   esac
 done
 
+# Scope every fresh smoke stack explicitly. This keeps Vault bootstrap, startup,
+# logs, and teardown on the same project even when other projects use this file.
+if [[ "$DO_UP" == 1 && -z "${COMPOSE_PROJECT_NAME:-}" ]]; then
+  export COMPOSE_PROJECT_NAME="aimee-e2e-server-$$"
+fi
+
 if [[ -z "$BEARER" ]]; then
   if [[ "$DO_UP" == 1 ]]; then
     BEARER="$(openssl rand -hex 32)"

@@ -142,7 +142,7 @@
       "loads": 1
     },
     "src/tests/test_kb_http_routes.c": {
-      "decls": 8,
+      "decls": 7,
       "loads": 1
     },
     "src/tests/test_kb_maintenance.c": {
@@ -223,7 +223,7 @@
     }
   },
   "totals": {
-    "decls": 242,
+    "decls": 241,
     "files": 55,
     "loads": 149
   }

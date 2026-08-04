@@ -338,10 +338,12 @@ def parse_name_status(raw: bytes) -> list[tuple[str, tuple[str, ...]]]:
         path_count = 2 if status.startswith(("R", "C")) else 1
         if index + path_count > len(fields):
             fail("name-status", f"truncated record for status {status!r}")
-        try:
-            paths = tuple(field.decode("utf-8") for field in fields[index : index + path_count])
-        except UnicodeDecodeError as exc:
-            fail("name-status", f"non-UTF-8 path: {exc}")
+        # Git pathnames are arbitrary non-NUL bytes, not guaranteed UTF-8. Preserve
+        # them losslessly so a historical filename cannot disable the ordering gate.
+        paths = tuple(
+            field.decode("utf-8", errors="surrogateescape")
+            for field in fields[index : index + path_count]
+        )
         index += path_count
         records.append((status, paths))
     return records

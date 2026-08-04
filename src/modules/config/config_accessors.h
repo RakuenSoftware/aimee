@@ -362,8 +362,6 @@ int config_skills_review_nudge_interval(void);
 int config_skills_stale_after_days(void);
 int config_skills_archive_after_days(void);
 int config_skills_dispatch_enabled(void);
-int config_skills_curator_enabled(void);
-int config_skills_curator_interval_hours(void);
 int config_skills_dispatch_max_index(void);
 int config_skills_dispatch_advisory(void);
 int config_skills_capability_autostub(void);
@@ -854,8 +852,6 @@ int config_set_skills_review_nudge_interval(int value);
 int config_set_skills_stale_after_days(int value);
 int config_set_skills_archive_after_days(int value);
 int config_set_skills_dispatch_enabled(int value);
-int config_set_skills_curator_enabled(int value);
-int config_set_skills_curator_interval_hours(int value);
 int config_set_skills_dispatch_max_index(int value);
 int config_set_skills_dispatch_advisory(int value);
 int config_set_skills_capability_autostub(int value);
@@ -1137,7 +1133,6 @@ const char *config_computer_use_allowed_domains(int index);
 const char *config_server_api_bearer_extra(int index);
 const char *config_ensemble_reference_models(int index);
 const char *config_ensemble_reference_personas(int index);
-
 
 /* Struct-array elements: one member of one element per call. Bounds-checked
  * like the char[][] accessors — an out-of-range index yields 0 or "".

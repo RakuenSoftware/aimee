@@ -1,6 +1,6 @@
 # Proposal: audit feature liveness and remove the background skill curator
 
-- **State:** PENDING — previously delivered, regressed on `testing`; repair required.
+- **State:** PENDING — curator repair complete; suite-wide liveness audit remains.
 - **Parent:** [`core-substrate-and-source-module-boundaries-residual.md`](core-substrate-and-source-module-boundaries-residual.md)
 - **Owns:** feature-liveness evidence/dispositions and deletion of the current background curator
 - **Implementation dependencies:** none; this proposal may land first
@@ -12,6 +12,12 @@
 > `rule=deleted-file`. This proposal therefore remains live until the forbidden background worker is
 > removed again and the checker is enforced in the protected lane. Foreground/operator-triggered
 > skill paths remain outside the deletion scope.
+
+> **Repair update (2026-08-04).** The reintroduced worker, config, build membership, and scheduler
+> hook have been removed again. `check_background_skill_curator_absence.py` now passes and runs from
+> the repository's default `make -C src lint` lane, so a future testing-branch merge cannot silently
+> restore the feature island. The proposal remains pending only for the broader feature-liveness
+> inventory and disposition work below.
 
 > **2026-07-23 amendment reconciliation.** This proposal is essentially unaffected by the suite
 > amendment: its liveness-evidence rule and the background-curator removal stand. The amendment only
