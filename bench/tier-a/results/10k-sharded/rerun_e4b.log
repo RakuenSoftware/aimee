@@ -1,0 +1,9 @@
+[17:19:34Z] === waiting for the E2B ladder to release the XTX
+[00:41:36Z] === ladder finished; starting E4B re-run at cache-ram 1024
+[00:41:36Z]   quarantined E4B.UD-Q4_K_XL.10k.pred.jsonl
+[00:41:36Z]   quarantined E4B.UD-Q4_K_XL.10k.score.json
+[00:41:36Z]   quarantined E4B.UD-Q6_K_XL.10k.pred.jsonl
+[00:41:36Z]   quarantined E4B.UD-Q6_K_XL.10k.score.json
+[00:41:36Z]   quarantined E4B.UD-Q8_K_XL.10k.pred.jsonl
+[00:41:36Z]   quarantined E4B.UD-Q8_K_XL.10k.score.json
+[00:41:36Z] --- E4B.UD-Q4_K_XL.10k  unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL  nproc=3 cache-ram=1024
