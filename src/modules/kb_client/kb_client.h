@@ -32,6 +32,12 @@ typedef struct
    int chunk_count;
    int embedding_count;
    char warnings[512]; /* newline-separated warning strings */
+   /* The kb's own verdict on whether it can do its job: "ok" | "degraded".
+    * Distinct from process_ok, which only says something answered. Empty when an
+    * older kb omits it — callers must treat empty as "no verdict offered", not as
+    * ok, or they reintroduce exactly the gap this field closes. */
+   char status[16];
+   char blockers[512]; /* newline-separated incapacity reasons; empty when ok */
    char last_maintenance_at[64];
    int last_maintenance_rows_decayed;
    int last_maintenance_orphans_pruned;

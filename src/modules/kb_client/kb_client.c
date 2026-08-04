@@ -584,6 +584,35 @@ char *kb_client_curator_json(void)
    return out ? out : kb_status_unavailable_json("curator status serialization failed");
 }
 
+/* Flatten a JSON array of strings into a newline-separated buffer, truncating at
+ * the buffer rather than overrunning it. Extracted when `blockers` joined
+ * `warnings` and the second caller made a copy-paste of the pointer arithmetic
+ * the obvious alternative. A non-array (including a missing key, which is how an
+ * older kb answers) leaves the buffer untouched. */
+static void kb_client_join_strings(cJSON *arr, char *buf, size_t cap)
+{
+   if (!cJSON_IsArray(arr) || !buf || cap == 0)
+      return;
+   size_t pos = 0;
+   cJSON *item;
+   cJSON_ArrayForEach(item, arr)
+   {
+      if (!cJSON_IsString(item))
+         continue;
+      if (pos > 0 && pos < cap - 1)
+         buf[pos++] = '\n';
+      size_t rem = cap - pos - 1;
+      if (rem == 0)
+         break;
+      size_t len = strlen(item->valuestring);
+      if (len > rem)
+         len = rem;
+      memcpy(buf + pos, item->valuestring, len);
+      pos += len;
+      buf[pos] = '\0';
+   }
+}
+
 int kb_client_health(kb_health_t *out)
 {
    if (!out)
@@ -605,8 +634,18 @@ int kb_client_health(kb_health_t *out)
    if (!resp)
       return -1;
 
+   /* process_ok means SOMETHING ANSWERED, which is the only thing this check can
+    * honestly establish. It used to demand status == "ok" exactly and return -1
+    * otherwise — so the moment the kb learned to say "degraded", a kb that was up
+    * and telling us precisely what was wrong would have been reported to every
+    * caller as unreachable, and its blockers discarded unread. The verdict is
+    * carried in out->status for callers to act on; it is not this function's job
+    * to turn a diagnosis into a transport failure.
+    *
+    * Any status string counts as an answer. An unparseable or non-200 response
+    * has already returned -1 above, which is the real "did not answer". */
    cJSON *s = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(s) || strcmp(s->valuestring, "ok") != 0)
+   if (!cJSON_IsString(s))
    {
       cJSON_Delete(resp);
       return -1;
@@ -643,6 +682,7 @@ int kb_client_health(kb_health_t *out)
    COPY_INT(pgvec_indexed, "pgvec_indexed_vectors");
    COPY_BOOL(embed_ok, "embed_ok");
    COPY_STR(embed_command, "embed_command");
+   COPY_STR(status, "status");
    COPY_INT(freshness_days, "freshness_days");
    COPY_STR(last_ingest_at, "last_ingest_at");
    COPY_INT(chunk_count, "chunk_count");
@@ -669,28 +709,10 @@ int kb_client_health(kb_health_t *out)
 #undef COPY_INT
 #undef COPY_STR
 
-   cJSON *warns = cJSON_GetObjectItemCaseSensitive(resp, "warnings");
-   if (cJSON_IsArray(warns))
-   {
-      size_t pos = 0;
-      cJSON *w;
-      cJSON_ArrayForEach(w, warns)
-      {
-         if (!cJSON_IsString(w))
-            continue;
-         if (pos > 0 && pos < sizeof(out->warnings) - 1)
-            out->warnings[pos++] = '\n';
-         size_t rem = sizeof(out->warnings) - pos - 1;
-         if (rem == 0)
-            break;
-         size_t wlen = strlen(w->valuestring);
-         if (wlen > rem)
-            wlen = rem;
-         memcpy(out->warnings + pos, w->valuestring, wlen);
-         pos += wlen;
-         out->warnings[pos] = '\0';
-      }
-   }
+   kb_client_join_strings(cJSON_GetObjectItemCaseSensitive(resp, "warnings"), out->warnings,
+                          sizeof(out->warnings));
+   kb_client_join_strings(cJSON_GetObjectItemCaseSensitive(resp, "blockers"), out->blockers,
+                          sizeof(out->blockers));
 
    cJSON_Delete(resp);
 

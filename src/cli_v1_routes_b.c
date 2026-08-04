@@ -1600,6 +1600,17 @@ void print_server_health(cJSON *resp)
    {
       const char *kbs = json_str(kb, "status");
       printf("aimee-kb: %s\n", (kbs && kbs[0]) ? kbs : "unknown");
+      /* Why the kb cannot work, straight from the kb, before any detail line.
+       * These are the sentences someone is running this command to find; burying
+       * them under the store/vector/embedder triple means reading "ok" first and
+       * inferring the rest. */
+      cJSON *blockers = cJSON_GetObjectItemCaseSensitive(kb, "blockers");
+      if (cJSON_IsArray(blockers) && cJSON_GetArraySize(blockers) > 0)
+      {
+         cJSON *b;
+         cJSON_ArrayForEach(b, blockers) if (cJSON_IsString(b))
+             printf("  BLOCKED: %s\n", b->valuestring);
+      }
       /* An open transport breaker refuses every call locally, so the kb can be
        * "ok" here while nothing works. Print it before the detail lines: this is
        * the line that explains an index that answers "unavailable" on a server
@@ -1614,7 +1625,11 @@ void print_server_health(cJSON *resp)
             printf("  next retry in %lldms; see the server log for the cause.\n",
                    (long long)retry->valuedouble);
       }
-      if (kbs && strcmp(kbs, "ok") == 0)
+      /* "degraded" means the kb ANSWERED and told us what is broken, so the detail
+       * lines below are real and worth printing. Only a kb that never answered
+       * gets the "did not answer" text — testing `== "ok"` would have sent every
+       * degraded install down that branch and reported a running kb as absent. */
+      if (kbs && (strcmp(kbs, "ok") == 0 || strcmp(kbs, "degraded") == 0))
       {
          cJSON *vec = cJSON_GetObjectItemCaseSensitive(kb, "vectors");
          printf("  store:       %s\n",

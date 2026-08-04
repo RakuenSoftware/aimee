@@ -8,7 +8,8 @@
 #include "../db1/db.h"
 #include "../db1/eval.h"
 #include "../db1/server_sessions.h"
-#include "kb_client.h" /* kb_health_t for the stub below */
+#include "kb_client.h"       /* kb_health_t for the stub below */
+#include "server_internal.h" /* server_health_add_kb, for the kb verdict tests */
 #include "agent_config.h"
 #include "config_fields.h" /* config_field_lookup / _set_value for the config_set stub */
 #include "agent_eval.h"
@@ -697,23 +698,38 @@ int handle_curator_invalidated(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
 }
 /* server_api_status.c (linked here for handle_api_*) probes the kb from
  * server.health. This test exercises the dispatch table, not the kb, so answer
- * "unreachable" without linking the whole kb client. */
+ * "unreachable" by default without linking the whole kb client.
+ *
+ * The health-verdict tests below drive it instead: set g_kb_health_rc and the
+ * fields they care about, so server_health_add_kb's aggregation can be exercised
+ * without a kb. */
+static int g_kb_health_rc = -1;
+static kb_health_t g_kb_health;
+
 int kb_client_health(kb_health_t *out)
 {
    if (out)
-      memset(out, 0, sizeof(*out));
-   return -1;
+      *out = g_kb_health;
+   return g_kb_health_rc;
+}
+
+static void kb_health_stub_reset(void)
+{
+   memset(&g_kb_health, 0, sizeof(g_kb_health));
+   g_kb_health_rc = -1;
 }
 
 /* server.health also reports the kb transport breaker, so an operator can see
  * that calls are being refused locally while the kb itself looks fine. Same
  * reasoning as above: report a closed breaker without linking the kb client. */
+static const char *g_kb_breaker_state = "closed";
+
 void kb_client_dependency_health(kb_client_dependency_health_t *out)
 {
    if (!out)
       return;
    memset(out, 0, sizeof(*out));
-   snprintf(out->state, sizeof(out->state), "closed");
+   snprintf(out->state, sizeof(out->state), "%s", g_kb_breaker_state);
 }
 
 int handle_kb_build(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -2199,8 +2215,94 @@ static void test_session_brief_assemble(void)
    printf("test_session_brief_assemble: PASS\n");
 }
 
+/* The kb block in server.health is where "accepted, reports healthy, cannot work"
+ * became visible to users: `status` was `reachable ? "ok" : "unreachable"`, and
+ * every capability the kb reported sat beside it as a sibling that nothing read.
+ * `aimee status` printed "aimee-kb: ok" one line above "embedder: not
+ * configured" and both were true.
+ *
+ * These pin the three states apart, because the failure mode is not that any one
+ * of them is wrong — it is that two of them used to collapse into one. */
+static const char *kb_status_of(cJSON *resp)
+{
+   cJSON *kb = cJSON_GetObjectItemCaseSensitive(resp, "kb");
+   cJSON *s = kb ? cJSON_GetObjectItemCaseSensitive(kb, "status") : NULL;
+   return cJSON_IsString(s) ? s->valuestring : NULL;
+}
+
+static void test_health_kb_verdict_states(void)
+{
+   /* 1. Nothing answered — the only case that may say unreachable. */
+   kb_health_stub_reset();
+   cJSON *resp = cJSON_CreateObject();
+   server_health_add_kb(resp);
+   assert(strcmp(kb_status_of(resp), "unreachable") == 0);
+   cJSON_Delete(resp);
+
+   /* 2. Answered and capable. */
+   kb_health_stub_reset();
+   g_kb_health_rc = 0;
+   g_kb_health.process_ok = 1;
+   snprintf(g_kb_health.status, sizeof(g_kb_health.status), "ok");
+   resp = cJSON_CreateObject();
+   server_health_add_kb(resp);
+   assert(strcmp(kb_status_of(resp), "ok") == 0);
+   cJSON_Delete(resp);
+
+   /* 3. Answered and told us it cannot work. This is the case that used to
+    * report "ok"; it must be degraded, NOT unreachable — the kb is up, and
+    * sending an operator to debug the network would be a fresh wrong answer. */
+   kb_health_stub_reset();
+   g_kb_health_rc = 0;
+   g_kb_health.process_ok = 1;
+   snprintf(g_kb_health.status, sizeof(g_kb_health.status), "degraded");
+   snprintf(g_kb_health.blockers, sizeof(g_kb_health.blockers),
+            "no embedder configured: set embedder_model\nvector table missing");
+   resp = cJSON_CreateObject();
+   server_health_add_kb(resp);
+   assert(strcmp(kb_status_of(resp), "degraded") == 0);
+   /* The reasons reach the client, split back into one string per blocker. */
+   cJSON *kb = cJSON_GetObjectItemCaseSensitive(resp, "kb");
+   cJSON *blockers = cJSON_GetObjectItemCaseSensitive(kb, "blockers");
+   assert(cJSON_IsArray(blockers) && cJSON_GetArraySize(blockers) == 2);
+   assert(strcmp(cJSON_GetArrayItem(blockers, 0)->valuestring,
+                 "no embedder configured: set embedder_model") == 0);
+   assert(strcmp(cJSON_GetArrayItem(blockers, 1)->valuestring, "vector table missing") == 0);
+   cJSON_Delete(resp);
+
+   /* 4. An open transport breaker refuses every call locally, so a kb that
+    * considers itself perfectly healthy still cannot be queried. The breaker is
+    * part of the verdict rather than a flag beside it. */
+   kb_health_stub_reset();
+   g_kb_health_rc = 0;
+   g_kb_health.process_ok = 1;
+   snprintf(g_kb_health.status, sizeof(g_kb_health.status), "ok");
+   g_kb_breaker_state = "open";
+   resp = cJSON_CreateObject();
+   server_health_add_kb(resp);
+   assert(strcmp(kb_status_of(resp), "degraded") == 0);
+   kb = cJSON_GetObjectItemCaseSensitive(resp, "kb");
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(kb, "queries_suppressed")));
+   cJSON_Delete(resp);
+   g_kb_breaker_state = "closed";
+
+   /* 5. An older kb sends no verdict. Absence is not a blocker, and must not be
+    * read as one — inventing "degraded" out of silence would make every
+    * pre-upgrade install look broken. */
+   kb_health_stub_reset();
+   g_kb_health_rc = 0;
+   g_kb_health.process_ok = 1;
+   resp = cJSON_CreateObject();
+   server_health_add_kb(resp);
+   assert(strcmp(kb_status_of(resp), "ok") == 0);
+   cJSON_Delete(resp);
+
+   kb_health_stub_reset();
+}
+
 int main(void)
 {
+   test_health_kb_verdict_states();
    test_invalid_json();
    test_session_brief_assemble();
    test_conn_update_events_null_evloop();

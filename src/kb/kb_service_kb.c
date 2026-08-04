@@ -301,12 +301,36 @@ static void kb_health_add_curator(cJSON *resp, kb_curator_queue_counts_t *out_co
    }
 }
 
+/* THE ONE PLACE a capability verdict is computed. Add a blocker at the site that
+ * discovers the evidence and the summary follows automatically — that is the whole
+ * point of this function existing.
+ *
+ * `status` used to be the literal string "ok", written as the first statement of
+ * kb_service_health_object and never revised. Every finding below it -- db2_ok,
+ * pgvec_ok, embed_ok, the dimension-refusal counter -- was published as a SIBLING
+ * field that nothing aggregated, so the response could say "ok" while carrying the
+ * proof it was not. That is not a bug in any one check; it is the absence of a
+ * place where the checks add up, and it reproduced three times (here, in
+ * server_health_add_kb, and in the transport-breaker patch that answered it by
+ * adding yet another sibling for the CLI to special-case).
+ *
+ * A blocker means CANNOT WORK, not "worth mentioning". Advisory findings stay in
+ * `warnings` and leave the verdict at ok: a stale ingest, a disabled synthesis
+ * tier, or zero vectors on a fresh install are all supported states, and
+ * degrading on them would dilute the signal in exactly the direction this
+ * function exists to correct. */
+static const char *kb_health_verdict(cJSON *blockers)
+{
+   return (cJSON_IsArray(blockers) && cJSON_GetArraySize(blockers) > 0) ? "degraded" : "ok";
+}
+
 static cJSON *kb_service_health_object(void)
 {
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
-   cJSON_AddStringToObject(resp, "status", "ok");
+   /* No `status` here. It is derived from the blockers array at the bottom of this
+    * function, once the evidence it summarises actually exists. */
 
    /* DB2: generic schema + KB-specific tables */
    int schema_ok = 0, have_pg_trgm = 0, kb_tables_ok = 0;
@@ -406,14 +430,45 @@ static cJSON *kb_service_health_object(void)
    cJSON_AddNumberToObject(resp, "chunk_count", stats.chunks);
    cJSON_AddNumberToObject(resp, "embedding_count", stats.embeddings);
 
-   /* Warning accumulation */
+   /* Warning accumulation.
+    *
+    * Two arrays, two meanings, kept deliberately distinct: `warnings` is
+    * everything worth saying, `blockers` is the subset that means the kb cannot
+    * do its job. Only the latter moves `status`. A blocker names its remedy —
+    * the operator reading it is by definition looking at something broken, and
+    * "vector store unavailable" without "reinstall the extension" costs them the
+    * search that follows. */
    cJSON *warnings = cJSON_AddArrayToObject(resp, "warnings");
+   cJSON *blockers = cJSON_AddArrayToObject(resp, "blockers");
    if (!db2_ok)
+   {
       cJSON_AddItemToArray(warnings, cJSON_CreateString("DB2 schema not ready"));
+      cJSON_AddItemToArray(blockers,
+                           cJSON_CreateString("store unavailable: the KB database schema is not "
+                                              "ready, so nothing can be stored or retrieved"));
+   }
    if (!pgvec_ok)
+   {
       cJSON_AddItemToArray(warnings, cJSON_CreateString("pgvector extension not loaded in DB2"));
+      cJSON_AddItemToArray(blockers,
+                           cJSON_CreateString("vector store unavailable: the pgvector extension is "
+                                              "not loaded, so dense retrieval cannot run"));
+   }
    if (!pgvec_collection_ok)
+   {
       cJSON_AddItemToArray(warnings, cJSON_CreateString("KB vector table missing"));
+      cJSON_AddItemToArray(blockers, cJSON_CreateString("vector table missing: the KB chunk vector "
+                                                        "table is absent, so search returns "
+                                                        "nothing"));
+   }
+   /* An unconfigured embedder is the single most common way this install reaches
+    * "accepted, reports healthy, cannot work": deploy succeeds, the container goes
+    * healthy, and the first `aimee memory store` fails with no mention of an
+    * embedder anywhere. */
+   if (!embed_ok)
+      cJSON_AddItemToArray(blockers,
+                           cJSON_CreateString("no embedder configured: set embedder_model (or "
+                                              "EMBEDDER_URL) — memory and KB search cannot embed"));
    /* A curator that fails every job used to leave the kb reporting a clean
     * bill of health. The counters said pending=41485 done=0 — indistinguishable
     * from "queued, not started yet" — and nothing in warnings mentioned that
@@ -496,7 +551,14 @@ static cJSON *kb_service_health_object(void)
                "(`aimee kb reembed`).",
                dim_refused, db2_embedding_dim_last_offered(), active_dim);
       cJSON_AddItemToArray(warnings, cJSON_CreateString(msg));
+      /* The comment above says this state means "dense retrieval is dead". It said
+       * so while the response reported status ok, because saying it in a warning
+       * was the end of the sentence. It is a blocker. */
+      cJSON_AddItemToArray(blockers, cJSON_CreateString(msg));
    }
+
+   /* Derived last, from the evidence above, and never written anywhere else. */
+   cJSON_AddStringToObject(resp, "status", kb_health_verdict(blockers));
 
    /* Maintenance stats */
    char last_maintenance_at[64] = "";
