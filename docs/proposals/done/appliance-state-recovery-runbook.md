@@ -1,8 +1,13 @@
 # Proposal: appliance state-recovery runbook
 
-- **State:** approved — single slice, documentation only; approved for workflow execution 2026-08-04.
+- **State:** DONE — implemented by workflow and archived 2026-08-04.
 - **Author:** JBailes
 - **Charter roles:** Recall (operator orientation), Constrain-Verify (a checklist a human follows under incident pressure).
+
+> **Archived as complete.** Workflow `wi_36d92dad5082a081952bac50d0aaf4bb` delivered
+> `docs/runbooks/appliance-state-recovery.md`, passed implementation, acceptance, documentation,
+> and documentation-review gates, and opened draft PR
+> [#2329](https://github.com/RakuenSoftware/aimee/pull/2329) against `testing` for human review.
 
 ## Thesis
 

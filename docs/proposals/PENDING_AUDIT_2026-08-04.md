@@ -8,8 +8,9 @@ reliability fixes, per-user writes, embedder/synthesis topology, and current con
 
 The machine-verifiable partition is
 [`PENDING_AUDIT_2026-08-04.tsv`](PENDING_AUDIT_2026-08-04.tsv): one row per original, with its final
-path and any residual. After reconciliation there are 3 complete originals, 20 partially delivered
-originals, 46 still-accurate pending originals, 19 new residuals, and 65 final pending proposals.
+path and any residual. After reconciliation and the workflow proof there are 4 complete originals,
+20 partially delivered originals, 45 still-accurate pending originals, 19 new residuals, and 64
+final pending proposals.
 
 ## Decision rules
 
@@ -21,10 +22,11 @@ originals, 46 still-accurate pending originals, 19 new residuals, and 65 final p
    the proposal's requested deltas must have shipped.
 5. Evidence is taken from the `testing` tree and merged history, not from feature-branch intent.
 
-## Complete originals moved to done (3)
+## Complete originals moved to done (4)
 
 | Original | Completion evidence |
 |---|---|
+| `appliance-state-recovery-runbook.md` | Workflow `wi_36d92dad5082a081952bac50d0aaf4bb` delivered the runbook, passed implementation, acceptance, documentation, and documentation-review gates, and opened draft PR #2329 against `testing` for human review. |
 | `wizard-first-user-bootstrap.md` | The first-user wizard, persisted bootstrap state, validation, and live proof are implemented; the proposal itself recorded ready/validated status. |
 | `per-user-writes-operator-cli-spec.md` | Subject/team/tier grant functions, server and KB routes, CLI commands/help/rendering, unit coverage, and live validation are present. |
 | `embedder-query-document-prefixes.md` | The registry owns query/document prefixes; every C embed call declares polarity; request `input_type` and default-document behavior are covered by tests. |
@@ -53,12 +55,11 @@ originals, 46 still-accurate pending originals, 19 new residuals, and 65 final p
 | `event-bus-governance-and-capture.md` | Capture/replay and audit, guardrail, memory, tool, vault, and sandbox sinks landed. Structural all-event capture, synchronous action verdicts, and attestation integration remain. | `event-bus-enforcement-and-attestation-residual.md` |
 | `code-graph-architecture-surface.md` | Project lifecycle, graph diff, provenance/confidence, task-conditioned context, and language-aware blast radius landed. Route/storage nodes and repository orientation did not. | `code-graph-route-storage-orientation-residual.md` |
 
-## Accurate proposals left pending (46)
+## Accurate proposals left pending (45)
 
 | Proposal | Current live gap |
 |---|---|
 | `agentic-supervised-swebench.md` | Design-only; no supervised agentic benchmark harness. |
-| `appliance-state-recovery-runbook.md` | The required operator runbook does not exist; selected as the bounded workflow proof after this audit. |
 | `capability-scoped-agent-execution.md` | Resolve-once execution scope and removal of legacy unbound dispatch are absent. |
 | `capability-thresholded-delegate-routing-residual.md` | Threshold calibration and rollout residual remains unimplemented. |
 | `code-intelligence-language-coverage.md` | Language suffix/parser policy is still duplicated and omits the named coverage. |
