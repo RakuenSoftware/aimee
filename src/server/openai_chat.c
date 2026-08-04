@@ -99,7 +99,8 @@ static void record_avoided_turn(const char *model, double avoided_cost)
  * on and the client supplied an explicit Idempotency-Key. The caller has already
  * rejected streaming, and this path runs no tools — both v1 requirements. The key
  * is built from the RESOLVED backend (ag), so it is computed after agent/config
- * resolution and two requests resolving to a different backend never collide. */
+ * resolution and two requests resolving to a different backend never collide.
+ * Returns -1 when the required response-composition module cannot produce a key. */
 static int dedup_eligible(char *key, size_t key_cap, const agent_t *ag, const char *endpoint,
                           const char *body, const char *context, int *ttl_out)
 {
@@ -126,7 +127,8 @@ static int dedup_eligible(char *key, size_t key_cap, const agent_t *ag, const ch
        .context = context,
        .behavior_flags = flags,
    };
-   response_dedup_key(&in, key, key_cap);
+   if (response_dedup_key(&in, key, key_cap) != 0)
+      return -1;
    if (ttl_out)
       *ttl_out = config_dedup_window_seconds() > 0 ? config_dedup_window_seconds()
                                                    : RESPONSE_DEDUP_TTL_SECONDS;
@@ -255,8 +257,9 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
 
          /* Same response-side policing the streaming path runs, so a denied
           * subagent-spawning call cannot reach an external caller. */
-         if (parsed.is_tool_call && parsed.call_count > 0 && gateway_prevent_subagents_enabled())
-            (void)gw_response_run_governance(&parsed, openai_governance_enabled());
+         if (parsed.is_tool_call && parsed.call_count > 0)
+            (void)gw_response_run_governance(&parsed, openai_governance_enabled(),
+                                             gateway_prevent_subagents_enabled());
 
          long tcreated = (long)time(NULL);
          char tid[48];
@@ -293,6 +296,13 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
    const char *endpoint = chat ? "/v1/chat/completions" : "/v1/completions";
    int dedup_on =
        dedup_eligible(dedup_key, sizeof(dedup_key), ag, endpoint, body, pi_env, &dedup_ttl);
+   if (dedup_on < 0)
+   {
+      free(pi_env);
+      free(prompt);
+      openai_format_error(resp, cap, "server_error", "response composition unavailable");
+      return 503;
+   }
    if (dedup_on)
    {
       char *cached = NULL;
@@ -855,8 +865,9 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
                                       parsed.cache_write_tokens, parsed.cache_read_tokens,
                                       "openai-ingress", NULL);
 
-         if (parsed.is_tool_call && parsed.call_count > 0 && gateway_prevent_subagents_enabled())
-            (void)gw_response_run_governance(&parsed, openai_governance_enabled());
+         if (parsed.is_tool_call && parsed.call_count > 0)
+            (void)gw_response_run_governance(&parsed, openai_governance_enabled(),
+                                             gateway_prevent_subagents_enabled());
 
          if (parsed.is_tool_call && parsed.call_count > 0)
          {
@@ -1355,15 +1366,15 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
    if (erc == 0 && parsed.is_tool_call && parsed.call_count > 0)
    {
       /* P2c streaming: when gateway_prevent_subagents is ON, run the police
-       * function on the parsed struct first (drops denied subagent tool_call
+       * event-bus governance module first (drops denied subagent tool_call
        * entries in place; preserves upstream stop_reason in partial-drop,
-       * rewrites to "end_turn" on all-dropped). When OFF, this is a no-op
-       * and the dispatch below runs byte-for-byte identical to today's loop.
+       * rewrites to "end_turn" on all-dropped). The module receives the
+       * already-resolved policy gate; it remains the sole decision path.
        * Police contract is finalized in PR #677 (buffered) and PR #679
        * (streaming Anthropic). */
       int police_drops = 0;
-      if (gateway_prevent_subagents_enabled())
-         police_drops = gw_response_run_governance(&parsed, openai_governance_enabled());
+      police_drops = gw_response_run_governance(&parsed, openai_governance_enabled(),
+                                                gateway_prevent_subagents_enabled());
       (void)police_drops; /* drop count plumbed through the pipeline total
                              for the future P2b audit pass; today the only
                              visible effect is the parsed.calls[] mutation. */

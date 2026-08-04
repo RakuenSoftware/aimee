@@ -3,7 +3,8 @@
 // is administrable with no colocated aimee-server. It mirrors aimee-runtime-web's
 // shape (auto-TLS HTTPS, SQLite sessions, /api/* proxy) but uses NO PAM — login is
 // OIDC (with a presence-flag break-glass) and it holds a scoped console-admin
-// credential whose route allowlist the kb enforces server-side (kb_route_acl.c).
+// credential whose route allowlist the kb enforces through its event-bus
+// control-web module.
 //
 // Optional module `control-web`: ships ENABLED and binds to localhost unless told
 // otherwise. Turn it off for fully scripted deployments with AIMEE_CONTROL_WEB_ENABLED=0

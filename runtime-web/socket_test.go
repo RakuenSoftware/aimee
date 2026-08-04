@@ -27,15 +27,17 @@ func TestRPCErrorStatusMapsClassifiedFaults(t *testing.T) {
 		body string
 		want int
 	}{
-		{"invalid_argument", `{"status":"error","kind":"invalid_argument","message":"usage: agent add"}`, http.StatusBadRequest},
-		{"not_found", `{"status":"error","kind":"not_found","message":"no such agent"}`, http.StatusNotFound},
-		{"permission_denied", `{"status":"error","kind":"permission_denied","message":"nope"}`, http.StatusForbidden},
-		{"unavailable", `{"status":"error","kind":"unavailable","message":"kb down"}`, http.StatusServiceUnavailable},
-		// Unclassified keeps the old behaviour ON PURPOSE: most of the server's
-		// error sites are unaudited, and guessing would mislabel real server
-		// faults as the caller's fault.
-		{"unclassified stays 502", `{"status":"error","message":"something broke"}`, http.StatusBadGateway},
-		{"unknown kind stays 502", `{"status":"error","kind":"wat","message":"x"}`, http.StatusBadGateway},
+		{"invalid_argument", `{"status":"error","kind":"invalid_argument","http_status":400,"message":"usage: agent add"}`, http.StatusBadRequest},
+		{"not_found", `{"status":"error","kind":"not_found","http_status":404,"message":"no such agent"}`, http.StatusNotFound},
+		{"permission_denied", `{"status":"error","kind":"permission_denied","http_status":403,"message":"nope"}`, http.StatusForbidden},
+		{"unavailable", `{"status":"error","kind":"unavailable","http_status":503,"message":"kb down"}`, http.StatusServiceUnavailable},
+		// The module classifies unclassified and unknown faults as 502 without
+		// asking the physical web provider to interpret their kind.
+		{"unclassified stays 502", `{"status":"error","http_status":502,"message":"something broke"}`, http.StatusBadGateway},
+		{"unknown kind stays 502", `{"status":"error","kind":"wat","http_status":502,"message":"x"}`, http.StatusBadGateway},
+		// Missing or invalid module output is a transport failure, also 502.
+		{"kind without module status stays 502", `{"status":"error","kind":"invalid_argument","message":"x"}`, http.StatusBadGateway},
+		{"invalid module status stays 502", `{"status":"error","kind":"invalid_argument","http_status":200,"message":"x"}`, http.StatusBadGateway},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -213,6 +213,14 @@ int platform_random_bytes(void *buf, size_t len)
    return 0;
 }
 
+static int test_confidence_provider(double score, const char **confidence)
+{
+   if (!confidence)
+      return -1;
+   *confidence = score >= 0.66 ? "high" : score >= 0.33 ? "medium" : "low";
+   return 0;
+}
+
 static const char *instr_of(cJSON *raw)
 {
    cJSON *i = cJSON_GetObjectItemCaseSensitive(raw, "instructions");
@@ -454,6 +462,7 @@ static void test_ir_stage_no_recall_noop(void)
 int main(void)
 {
    printf("test_gw_stage_memory:\n");
+   ingress_preinject_register_confidence_provider(test_confidence_provider);
    test_system_prompt_raw_env();
    test_instructions_merge_with_prior();
    test_instructions_no_prior();

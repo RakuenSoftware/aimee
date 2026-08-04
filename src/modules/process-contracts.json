@@ -31,10 +31,12 @@
       {"id": 1, "name": "workspace-access", "event_kind": 7169}
     ]},
     {"id": "git", "execution": "process", "runtime": "go", "principal_ref": 13, "placements": ["server"], "stages": [
-      {"id": 1, "name": "git-operation", "event_kind": 7425}
+      {"id": 1, "name": "git-operation", "event_kind": 7425},
+      {"id": 2, "name": "git-ref-validation", "event_kind": 7426}
     ]},
     {"id": "skills", "execution": "process", "runtime": "go", "principal_ref": 14, "placements": ["server"], "stages": [
-      {"id": 1, "name": "skill-context", "event_kind": 7681}
+      {"id": 1, "name": "skill-context", "event_kind": 7681},
+      {"id": 2, "name": "skill-trigger-match", "event_kind": 7682}
     ]},
     {"id": "response-composition", "execution": "process", "runtime": "go", "principal_ref": 15, "placements": ["server"], "stages": [
       {"id": 1, "name": "response-composition", "event_kind": 7937}
@@ -61,7 +63,8 @@
       {"id": 1, "name": "proxy-route-authorization", "event_kind": 10241}
     ]},
     {"id": "benchmarks", "execution": "process", "runtime": "go", "principal_ref": 25, "placements": ["server", "kb"], "stages": [
-      {"id": 1, "name": "benchmark-run", "event_kind": 10497}
+      {"id": 1, "name": "benchmark-run", "event_kind": 10497},
+      {"id": 2, "name": "benchmark-latency-summary", "event_kind": 10498}
     ]}
   ]
 }

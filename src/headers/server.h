@@ -267,11 +267,10 @@ server_ctx_t *server_active_ctx(void);
 int server_send_response(server_conn_t *conn, cJSON *resp);
 int server_send_error(server_conn_t *conn, const char *message, const char *request_id);
 
-/* Fault classes for server_send_error_kind. The dispatch envelope otherwise says
- * only "error", which leaves anything mapping it to HTTP unable to separate a
- * caller's mistake from a server-side failure — so runtime-web called all of
- * them 502. Optional and additive: an unclassified error keeps the old
- * behaviour. */
+/* Fault classes for server_send_error_kind. The runtime-web process maps these
+ * over the event bus and the server adds its status to the dispatch envelope.
+ * Optional and additive: an unclassified or unavailable decision remains a
+ * generic 502 at the physical web boundary. */
 #define SERVER_ERR_INVALID_ARGUMENT  "invalid_argument"  /* caller sent bad/missing input */
 #define SERVER_ERR_NOT_FOUND         "not_found"         /* named thing does not exist */
 #define SERVER_ERR_PERMISSION_DENIED "permission_denied" /* caller not allowed */

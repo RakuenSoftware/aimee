@@ -28,8 +28,12 @@ The separately supervised `kb-synthesis` process serves one bounded Go stage at 
 9729. It evaluates the existing code-unit grounding rule: when a parsed artifact claims no side
 effects, structural callees are checked against the exact side-effecting function set and the first
 contradiction is returned. The caller still owns JSON parsing, evidence authorization, queue state,
-model invocation, persistence, and artifact acceptance. Its C `module_adapter.c` calls the production
-C grounding predicate as a parity fixture; it is not a second curator worker.
+model invocation, persistence, and artifact acceptance. Production `aimee-kb` shapes each request in
+`kb_curator_grounding.c`, batches an unbounded structural call graph into the bounded 64-callee wire
+contract, and calls the process only through its local event bus. A missing module, malformed response,
+or transport failure rolls back the artifact transaction and retries the extraction; there is no local
+grounding-policy fallback. The C `module_adapter.c` remains a process-parity fixture only and is not a
+second curator worker.
 
 ## Dependencies and consumers
 
@@ -102,8 +106,10 @@ answers to remain operational when this module is omitted.
 `test_curator_synthesize.c`, `test_curator_serve.c`, `test_kb_curator_provider.c`,
 `test_curator_pipeline.c`, and curator queue/index tests cover selection, provider separation, persistence,
 serving, and scheduling. C/Go process parity tests cover only the bounded grounding decision described
-above. Disabled/unconfigured providers and no eligible topic are clean idle results;
-malformed output, provider failure, or artifact-write failure must not mark a topic successfully synthesized.
+above, while the curator tests inject that wire handler at the production provider seam. A missing or
+failed grounding process is a visible retryable extraction failure, never a clean decision. Disabled or
+unconfigured synthesis providers and no eligible topic are clean idle results; malformed output,
+provider failure, or artifact-write failure must not mark a topic successfully synthesized.
 
 ## Operational diagnostics
 

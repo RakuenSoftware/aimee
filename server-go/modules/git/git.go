@@ -2,20 +2,29 @@
 package git
 
 import (
+	"bytes"
 	"encoding/binary"
+	"strings"
 
 	"github.com/JBailes/aimee/server-go/bus"
 )
 
 const (
-	EventKind      uint32 = 7425
-	StageOperation uint32 = 1
-	requestMagic   uint32 = 0x53504f47
-	responseMagic  uint32 = 0x534c4347
-	wireVersion    byte   = 1
-	opMax                 = 15
-	requestLen            = 24
-	responseLen           = 12
+	EventKind        uint32 = 7425
+	EventRefValidate uint32 = 7426
+	StageOperation   uint32 = 1
+	StageRefValidate uint32 = 2
+	requestMagic     uint32 = 0x53504f47
+	responseMagic    uint32 = 0x534c4347
+	refRequestMagic  uint32 = 0x46455247
+	refResponseMagic uint32 = 0x4c415647
+	wireVersion      byte   = 1
+	opMax                   = 15
+	requestLen              = 24
+	responseLen             = 12
+	refMax                  = 200
+	refRequestLen           = 208
+	refResponseLen          = 8
 )
 
 const (
@@ -39,22 +48,63 @@ var operations = map[string]uint32{
 	"pr": OperationPR,
 }
 
-// Handle classifies a Git operation without performing repository I/O.
+func validRef(ref string) bool {
+	if ref == "" || ref[0] == '-' || strings.Contains(ref, "..") {
+		return false
+	}
+	for index := 0; index < len(ref); index++ {
+		char := ref[index]
+		if !((char >= 'A' && char <= 'Z') || (char >= 'a' && char <= 'z') ||
+			(char >= '0' && char <= '9') || char == '.' || char == '_' || char == '/' || char == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+// Handle classifies Git operations and validates refs without repository I/O.
 func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
-	if invocation.StageID != StageOperation || len(request) != requestLen ||
-		binary.LittleEndian.Uint32(request[0:4]) != requestMagic || request[4] != wireVersion ||
-		request[5] != 0 || request[7] != 0 || request[6] == 0 || request[6] > opMax {
+	switch invocation.StageID {
+	case StageOperation:
+		if len(request) != requestLen || binary.LittleEndian.Uint32(request[0:4]) != requestMagic ||
+			request[4] != wireVersion || request[5] != 0 || request[7] != 0 ||
+			request[6] == 0 || request[6] > opMax {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		if invocation.Cancelled() {
+			return nil, bus.ModuleStatusCancelled
+		}
+		operation := operations[string(request[8:8+int(request[6])])]
+		response := make([]byte, responseLen)
+		binary.LittleEndian.PutUint32(response[0:4], responseMagic)
+		binary.LittleEndian.PutUint32(response[4:8], operation)
+		if operation == OperationFetch || operation == OperationPull || operation == OperationPush {
+			binary.LittleEndian.PutUint32(response[8:12], 1)
+		}
+		return response, bus.ModuleStatusOK
+	case StageRefValidate:
+		if len(request) != refRequestLen || binary.LittleEndian.Uint32(request[0:4]) != refRequestMagic ||
+			request[4] != wireVersion || request[5] != 0 {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		refLen := int(binary.LittleEndian.Uint16(request[6:8]))
+		if refLen == 0 || refLen > refMax {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		ref := request[8 : 8+refLen]
+		if bytes.IndexByte(ref, 0) >= 0 {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		if invocation.Cancelled() {
+			return nil, bus.ModuleStatusCancelled
+		}
+		response := make([]byte, refResponseLen)
+		binary.LittleEndian.PutUint32(response[0:4], refResponseMagic)
+		if validRef(string(ref)) {
+			binary.LittleEndian.PutUint32(response[4:8], 1)
+		}
+		return response, bus.ModuleStatusOK
+	default:
 		return nil, bus.ModuleStatusInvalidRequest
 	}
-	if invocation.Cancelled() {
-		return nil, bus.ModuleStatusCancelled
-	}
-	operation := operations[string(request[8:8+int(request[6])])]
-	response := make([]byte, responseLen)
-	binary.LittleEndian.PutUint32(response[0:4], responseMagic)
-	binary.LittleEndian.PutUint32(response[4:8], operation)
-	if operation == OperationFetch || operation == OperationPull || operation == OperationPush {
-		binary.LittleEndian.PutUint32(response[8:12], 1)
-	}
-	return response, bus.ModuleStatusOK
 }

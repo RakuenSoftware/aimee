@@ -75,12 +75,18 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 	case "git":
 		config.ModuleName = name
 		config.PrincipalRef = 13
-		config.Stages = []bus.ModuleStage{{EventKind: modulegit.EventKind, StageID: modulegit.StageOperation}}
+		config.Stages = []bus.ModuleStage{
+			{EventKind: modulegit.EventKind, StageID: modulegit.StageOperation},
+			{EventKind: modulegit.EventRefValidate, StageID: modulegit.StageRefValidate},
+		}
 		config.Handler = modulegit.Handle
 	case "skills":
 		config.ModuleName = name
 		config.PrincipalRef = 14
-		config.Stages = []bus.ModuleStage{{EventKind: skills.EventKind, StageID: skills.StageContext}}
+		config.Stages = []bus.ModuleStage{
+			{EventKind: skills.EventKind, StageID: skills.StageContext},
+			{EventKind: skills.EventTrigger, StageID: skills.StageTrigger},
+		}
 		config.Handler = skills.Handle
 	case "response-composition":
 		config.ModuleName = name
@@ -120,7 +126,10 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 	case "benchmarks":
 		config.ModuleName = name
 		config.PrincipalRef = 25
-		config.Stages = []bus.ModuleStage{{EventKind: benchmarks.EventRun, StageID: benchmarks.StageRun}}
+		config.Stages = []bus.ModuleStage{
+			{EventKind: benchmarks.EventRun, StageID: benchmarks.StageRun},
+			{EventKind: benchmarks.EventLatency, StageID: benchmarks.StageLatency},
+		}
 		config.Handler = benchmarks.Handle
 	default:
 		return bus.ModuleProcessConfig{}, false

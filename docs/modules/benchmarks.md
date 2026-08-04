@@ -7,15 +7,22 @@ corpora, scoring, baselines, result aggregation, and benchmark cadence. It is no
 not own runtime agent assessment, production verification, routing/policy decisions, roundtable
 verification, workflow approval, memory behavior, or general telemetry.
 
-### Go process stage
+### Go process stages
 
-The supervised benchmarks process uses the shared pure-Go module runtime for a
-bounded deterministic IR-scoring kernel. Its BIRQ/BIRS wire contract accepts up
-to 32 retrieved and relevant identifiers plus K, then returns the existing MRR,
-NDCG@K, and recall@K definitions. The C adapter is a wire-parity fixture. Dataset
-loading, benchmark execution, providers, scratch databases, latency accounting,
-baselines, reporting, and result persistence remain in their current C and
-script owners while those boundaries are migrated.
+The supervised benchmarks process uses the shared pure-Go module runtime for two
+bounded deterministic stages. Its BIRQ/BIRS scoring contract accepts up to 32
+retrieved and relevant identifiers plus K, then returns the existing MRR, NDCG@K,
+and recall@K definitions. Its BLRQ/BLRS latency contract accepts up to 512
+non-negative finite measurements, then returns nearest-rank p50/p95/p99 plus the
+minimum and maximum. The C adapter is a wire-parity fixture. Dataset loading,
+benchmark execution, providers, scratch databases, raw timing capture, baselines,
+reporting, and result persistence remain in their current C and script owners
+while those boundaries are migrated. The production server's live
+`memory.benchmark` RPC sends every bounded result set and latency set through
+these event-bus stages and fails the run when the process is unavailable or
+returns invalid wire data; it has no local scoring or percentile fallback.
+Offline harnesses continue to use the module's C scoring primitives without
+requiring a daemon bus.
 
 ## Public contracts
 
@@ -90,9 +97,10 @@ module does not make per-request production decisions or participate in roundtab
 ## Tests and failure behavior
 
 Benchmark inventory/LLM tests, the extensive `benchmarks/tests` suites, agent/memory evaluation tests,
-server memory-benchmark tests, corpus validators, and smoke workflows cover current harnesses. Missing
-dataset/provider, invalid case, scratch-store failure, timeout, incomplete sample, or baseline mismatch
-must be explicit; skipped/incomparable cases cannot be silently scored as passes.
+server memory-benchmark process-parity and fail-closed tests, corpus validators, and smoke workflows
+cover current harnesses. Missing dataset/provider, scoring or latency process stage, invalid case,
+scratch-store failure, timeout, incomplete sample, or baseline mismatch must be explicit;
+skipped/incomparable cases cannot be silently scored as passes.
 
 ## Operational diagnostics
 

@@ -10,6 +10,7 @@
 #include "config.h"
 #include "cJSON.h"
 #include "kb_http.h"
+#include "kb_route_acl.h"
 #include "kb_scope.h"
 #include "td_search_render.h"       /* consumer side of the /v1/search contract test */
 #include "kb/kb_surprising_judge.h" /* §4 judge stub seam (kb_surprising_verdict_t) */
@@ -29,6 +30,34 @@
 #include "kb_tls.h"
 #include "kb_client_mtls.h"
 #include "runtime_secret.h"
+
+#include <aimee/control-web/module_api.h>
+#include <aimee/core/event_bus/module_runtime.h>
+
+extern aimee_module_status_t aimee_control_web_module_handler(const aimee_module_invocation_t *,
+                                                              const uint8_t *, uint32_t, uint8_t *,
+                                                              uint32_t, uint32_t *, void *);
+
+int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation)
+{
+   (void)invocation;
+   return 0;
+}
+
+static int control_web_module_provider(const char *method, const char *path, int *allowed)
+{
+   uint8_t request[AIMEE_CONTROL_WEB_REQUEST_LEN];
+   uint8_t response[AIMEE_CONTROL_WEB_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_CONTROL_WEB_STAGE_AUTHORIZE};
+   if (aimee_control_web_request_encode(AIMEE_CONTROL_WEB_TARGET_CONSOLE_ADMIN, method, path,
+                                        request, sizeof(request)) != 0 ||
+       aimee_control_web_module_handler(&invocation, request, sizeof(request), response,
+                                        sizeof(response), &response_len,
+                                        NULL) != AIMEE_MODULE_STATUS_OK)
+      return -1;
+   return aimee_control_web_response_decode(response, response_len, allowed);
+}
 
 extern int g_test_registry_heartbeat_allow;
 extern char g_test_registry_server_id[128], g_test_registry_issuer[601],
@@ -2481,6 +2510,25 @@ static void test_console_overview(void)
    int s2 =
        kb_http_route_ex("POST", "/v1/console/overview", NULL, NULL, NULL, NULL, 0, b2, sizeof(b2));
    assert(s2 == 405);
+}
+
+static void test_console_admin_requires_authorization_module(void)
+{
+   const char *token = "scope:console-admin:test:secret";
+   const char *auth = "Bearer scope:console-admin:test:secret";
+   char buf[256];
+
+   kb_route_acl_register_authorization_provider(NULL);
+   int status = kb_http_route_ex("GET", "/v1/console/overview", NULL, auth, token, NULL, 0, buf,
+                                 sizeof(buf));
+   assert(status == 503);
+   assert(strstr(buf, "control-web authorization unavailable") != NULL);
+
+   kb_route_acl_register_authorization_provider(control_web_module_provider);
+   status = kb_http_route_ex("POST", "/v1/console/overview", NULL, auth, token, NULL, 0, buf,
+                             sizeof(buf));
+   assert(status == 403);
+   assert(strstr(buf, "not permitted") != NULL);
 }
 
 static void test_console_pipeline(void)
@@ -6538,6 +6586,7 @@ int main(void)
     * close, and the default SIGPIPE disposition would kill the fixture instead
     * of letting OpenSSL report the failed connection. */
    signal(SIGPIPE, SIG_IGN);
+   kb_route_acl_register_authorization_provider(control_web_module_provider);
    printf("kb_http_routes: ");
 
    test_health();
@@ -6546,6 +6595,7 @@ int main(void)
    test_version();
    test_capabilities();
    test_console_overview();
+   test_console_admin_requires_authorization_module();
    test_console_pipeline();
    test_console_settings();
    test_accounts_routes();

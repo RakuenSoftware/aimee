@@ -59,48 +59,10 @@ int ws_scope_name_valid(const char *name)
 
 int ws_scope_project_ref_valid(const char *buf, size_t len)
 {
-   if (g_ref_validator)
-   {
-      int allowed = 0;
-      return g_ref_validator(buf, len, &allowed) == 0 && allowed;
-   }
-   if (!buf || len == 0 || len > WS_REF_MAX)
+   if (!g_ref_validator || !buf || len == 0 || len > WS_REF_MAX)
       return 0;
-   /* Embedded NUL is rejected by byte-scan — callers pass (buf, len) straight
-    * from the parser; the ref is NOT assumed NUL-terminated. */
-   size_t slash = len; /* index of the single allowed '/' */
-   for (size_t i = 0; i < len; i++)
-   {
-      if (buf[i] == '\0')
-         return 0;
-      if (buf[i] == '/')
-      {
-         if (slash != len)
-            return 0; /* second '/' — deeper nesting rejected */
-         slash = i;
-      }
-   }
-   /* Each component must independently pass ws_scope_name_valid — the ONLY
-    * character-set / traversal authority. No new alphabet is introduced. */
-   char comp[WS_NAME_MAX + 1];
-   if (slash == len)
-   {
-      if (len > WS_NAME_MAX)
-         return 0;
-      memcpy(comp, buf, len);
-      comp[len] = '\0';
-      return ws_scope_name_valid(comp);
-   }
-   size_t org_len = slash, repo_len = len - slash - 1;
-   if (org_len == 0 || org_len > WS_NAME_MAX || repo_len == 0 || repo_len > WS_NAME_MAX)
-      return 0;
-   memcpy(comp, buf, org_len);
-   comp[org_len] = '\0';
-   if (!ws_scope_name_valid(comp))
-      return 0;
-   memcpy(comp, buf + slash + 1, repo_len);
-   comp[repo_len] = '\0';
-   return ws_scope_name_valid(comp);
+   int allowed = 0;
+   return g_ref_validator(buf, len, &allowed) == 0 && allowed;
 }
 
 /* Split a VALIDATED ref into org (may be empty for a flat ref) + repo. Returns

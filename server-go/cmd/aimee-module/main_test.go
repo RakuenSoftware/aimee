@@ -18,8 +18,8 @@ func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
 		{"delegates", 10, []uint32{6657}},
 		{"tools", 11, []uint32{6913}},
 		{"workspace", 12, []uint32{7169}},
-		{"git", 13, []uint32{7425}},
-		{"skills", 14, []uint32{7681}},
+		{"git", 13, []uint32{7425, 7426}},
+		{"skills", 14, []uint32{7681, 7682}},
 		{"response-composition", 15, []uint32{7937}},
 		{"governance", 19, []uint32{8961}},
 		{"workflows", 20, []uint32{9217}},
@@ -27,7 +27,7 @@ func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
 		{"kb-synthesis", 22, []uint32{9729}},
 		{"runtime-web", 23, []uint32{9985}},
 		{"control-web", 24, []uint32{10241}},
-		{"benchmarks", 25, []uint32{10497}},
+		{"benchmarks", 25, []uint32{10497, 10498}},
 	}
 	for _, test := range tests {
 		config, ok := moduleConfig("/usr/local/libexec/aimee-modules/aimee-module-" + test.name)

@@ -231,12 +231,23 @@ static void ingress_query_fingerprint(const char *q, char *out, size_t len)
    snprintf(out, len, "q:%016llx", (unsigned long long)h);
 }
 
-const char *ingress_preinject_confidence(double top_score)
+static int ingress_confidence_valid(const char *confidence)
 {
-   const char *confidence = NULL;
-   if (!g_confidence_provider || g_confidence_provider(top_score, &confidence) != 0 || !confidence)
-      return "low";
-   return confidence;
+   return confidence && (strcmp(confidence, "high") == 0 || strcmp(confidence, "medium") == 0 ||
+                         strcmp(confidence, "low") == 0);
+}
+
+int ingress_preinject_confidence(double top_score, const char **confidence)
+{
+   if (!confidence)
+      return -1;
+   *confidence = NULL;
+   const char *value = NULL;
+   if (!g_confidence_provider || g_confidence_provider(top_score, &value) != 0 ||
+       !ingress_confidence_valid(value))
+      return -1;
+   *confidence = value;
+   return 0;
 }
 
 char *ingress_preinject_format_envelope(const char *context_block, const char *confidence)
@@ -250,8 +261,8 @@ char *ingress_preinject_format_envelope(const char *context_block, const char *c
    if (*p == '\0')
       return NULL;
 
-   if (!confidence || !confidence[0])
-      confidence = "low";
+   if (!ingress_confidence_valid(confidence))
+      return NULL;
 
    dstr_t d;
    dstr_init(&d);
@@ -1120,7 +1131,14 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       free(blk);
       return NULL;
    }
-   char *env = ingress_preinject_format_envelope(blk, ingress_preinject_confidence(score));
+   const char *confidence = NULL;
+   if (ingress_preinject_confidence(score, &confidence) != 0)
+   {
+      LOG_WARN("memory", "rerank confidence unavailable; omitting pre-injection envelope");
+      free(blk);
+      return NULL;
+   }
+   char *env = ingress_preinject_format_envelope(blk, confidence);
    free(blk);
    return env;
 }
