@@ -205,7 +205,26 @@ mkdir -p "$AIMEE_HOME/modules.d/server"
 for module_grant in /opt/aimee/module-grants/server/*.grant; do
     [ -f "$module_grant" ] || continue
     grant_target="$AIMEE_HOME/modules.d/server/$(basename "$module_grant")"
-    [ -e "$grant_target" ] || cp "$module_grant" "$grant_target"
+    if [ ! -e "$grant_target" ]; then
+        cp "$module_grant" "$grant_target"
+        continue
+    fi
+    # A module that gains a stage in a new image cannot serve it under a grant
+    # persisted before that stage existed, and the failure is silent: the daemon
+    # simply reports the module as not serving that kind. Copying over the
+    # operator's file would defeat the whole point of seeding only what is
+    # missing, so say so instead and let them decide.
+    shipped_serve=$(grep '^serve=' "$module_grant" 2>/dev/null || true)
+    persisted_serve=$(grep '^serve=' "$grant_target" 2>/dev/null || true)
+    if [ "$shipped_serve" != "$persisted_serve" ]; then
+        # log() is not defined this early in the script, so match its format.
+        printf '[server-entrypoint] warning: %s grant differs from this image\n' \
+            "$(basename "$module_grant" .grant)" >&2
+        printf '[server-entrypoint]   persisted: %s\n' "${persisted_serve:-<none>}" >&2
+        printf '[server-entrypoint]   shipped:   %s\n' "${shipped_serve:-<none>}" >&2
+        printf '[server-entrypoint]   stages only in the shipped grant are refused until %s is updated\n' \
+            "$grant_target" >&2
+    fi
 done
 # The root entrypoint creates modules.d before dropping to the aimee user.  The
 # daemon must be able to traverse that 0700 parent in order to load the strict

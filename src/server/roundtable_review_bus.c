@@ -1,10 +1,10 @@
 /* roundtable_review_bus.c: roundtable.review over the event bus.
  *
- * This replaces wfe_roundtable_proxy.c, which opened its own AF_UNIX socket to a
- * Go listener and spoke HTTP over it -- a second transport doing what the bus
- * already does, with its own framing, timeouts and failure taxonomy. Everything
- * around it had already migrated: tools, skills, governance, workflows,
- * response-composition, and roundtable's own deliberate stage.
+ * This replaced a private AF_UNIX socket that spoke HTTP to a Go listener -- a
+ * second transport doing what the bus already does, with its own framing,
+ * timeouts and failure taxonomy. Everything around it had already migrated:
+ * tools, skills, governance, workflows, response-composition, and roundtable's
+ * own deliberate stage.
  *
  * The cost of keeping a private transport was not theoretical. The C side and
  * the Go side ended up with separate notions of the same panel settings,
