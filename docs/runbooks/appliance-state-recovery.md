@@ -111,7 +111,8 @@ columns 2 and 3 are unchanged between repeated `stat` calls.
 
 ### Recover
 
-Refresh mtime and inode so the cache invalidator notices, then probe:
+Refresh mtime so the cache tuple changes (the inode and size may stay the
+same), then probe:
 
 ```bash
 touch "$AIMEE_HOME/agents.json"
