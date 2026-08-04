@@ -11,8 +11,10 @@ Throughout this runbook:
 - `$AIMEE_HOME` is the server's data directory (e.g. `/var/lib/aimee`).
 - `$WS` is the affected workspace repo path (e.g.
   `/var/lib/aimee/workspaces/<user>/<repo>`).
+- `$AIMEE_PORT` is the listener port the daemon serves the v1 API on
+  (e.g. `8740`).
 - `$CANONICAL_HTTPS_URL` is the canonical HTTPS clone URL of that repo
-  (the same URL the forge uses).
+  (the same URL the forge uses; e.g. `https://example.com/<user>/<repo>.git`).
 
 All commands assume shell expansion of these variables. Run them as the
 server runtime user.
@@ -35,18 +37,30 @@ ls -l "$AIMEE_HOME/agents.json"
 ls -1 "$AIMEE_HOME"/agents.json.bak-*
 ```
 
+If the second command prints the literal `agents.json.bak-*` pattern (i.e.
+no siblings exist), FM1's happy path collapses — the vault-based agent
+config cannot be reconstructed from `agents.json` alone. Migrate the
+affected agents from the vault before proceeding.
+
 ### Recover
 
-Pick the latest backup, restore it in place preserving mode/timestamps,
-bust the in-process identity cache (mtime + size + inode) with `touch`,
-then probe the strict endpoint:
+1. Pick the latest backup so the operator can eyeball the choice before
+   overwriting the canonical file:
 
-```bash
-bak="$(ls -1t "$AIMEE_HOME"/agents.json.bak-* | head -n1)"
-cp -p "$bak" "$AIMEE_HOME/agents.json"
-touch "$AIMEE_HOME/agents.json"
-curl -fsS http://127.0.0.1:8740/v1/agents
-```
+   ```bash
+   LATEST=$(ls -1t "$AIMEE_HOME"/agents.json.bak-* | head -n1)
+   ls -l "$LATEST"
+   ```
+
+2. Restore it in place preserving mode/timestamps, bust the in-process
+   identity cache (mtime + size + inode) with `touch`, then probe the
+   strict endpoint:
+
+   ```bash
+   cp -p "$LATEST" "$AIMEE_HOME/agents.json"
+   touch "$AIMEE_HOME/agents.json"
+   curl -fsS http://127.0.0.1:${AIMEE_PORT}/v1/agents
+   ```
 
 API keys live in the vault keyed by agent name, not in `agents.json`. A
 restored config needs no secrets re-entered — the vault lookups continue
@@ -62,14 +76,23 @@ clearly valid on disk.
 ### Confirm
 
 `agents.json` exists with non-zero size, but its mtime is in the past
-relative to the box clock. Size and inode are unchanged across reads:
+relative to the box clock. Size and inode are unchanged across reads.
+The cache key is the (mtime, size, inode) tuple; print it in a single
+structured line so the operator can compare two snapshots directly:
 
 ```bash
-stat "$AIMEE_HOME/agents.json"
+stat -c '%Y %s %i %n' "$AIMEE_HOME/agents.json"
 ```
 
-`Modify:` predates the current clock; `Size:` and `Inode:` are stable
-between successive `stat` calls.
+The four whitespace-separated columns are, in order:
+
+1. `%Y` — mtime in epoch seconds (the freshness signal the cache keys on).
+2. `%s` — size in bytes.
+3. `%i` — inode number.
+4. `%n` — file name.
+
+Stale-mtime symptom: column 1 predates the current `date +%s` while
+columns 2 and 3 are unchanged between repeated `stat` calls.
 
 ### Recover
 
@@ -77,7 +100,7 @@ Refresh mtime and inode so the cache invalidator notices, then probe:
 
 ```bash
 touch "$AIMEE_HOME/agents.json"
-curl -fsS http://127.0.0.1:8740/v1/agents
+curl -fsS http://127.0.0.1:${AIMEE_PORT}/v1/agents
 ```
 
 ## Failure Mode 3 — Corrupt or lost workspace repo git dir
@@ -91,23 +114,31 @@ curl -fsS http://127.0.0.1:8740/v1/agents
 ### Confirm
 
 Run the clone probe on a sibling path **on the same volume** as `$WS` so
-storage faults are visible. `/tmp` would mask a tier-bound volume fault,
-so pick a directory under `$AIMEE_HOME`:
+storage faults are visible. `/tmp` would mask a tier-bound volume fault;
+a path under the same parent as `$WS` keeps the dev-id check meaningful:
 
 ```bash
-test_repo="$AIMEE_HOME/.recovery-probe-$RANDOM"
-git clone --no-local "$CANONICAL_HTTPS_URL" "$test_repo"
-cd "$test_repo"
-git rev-parse HEAD
-git ls-remote origin HEAD
+WS_DEV=$(stat -c '%m' "$WS")
+PROBE="${WS%/*}/ws-probe-$$"
+git clone --single-branch "$CANONICAL_HTTPS_URL" "$PROBE"
+git -C "$PROBE" rev-parse HEAD
+git -C "$PROBE" ls-remote origin HEAD
 ```
 
 Sanity checks before you proceed with the real recovery:
 
-- `[ "$(stat -c '%m' "$WS")" = "$(stat -c '%m' "$test_repo")" ]` —
-  the probe and the broken repo share a mount (same dev id).
+- `[ "$(stat -c '%m' "$PROBE")" = "$WS_DEV" ]` — the probe and the
+  broken repo share a mount (same dev id). This audit is the whole
+  point of the probe: if it fails, the workspace storage itself is
+  the fault, not `$WS/.git`.
 - `git rev-parse HEAD` resolves to a commit hash on the probe.
 - `git ls-remote origin HEAD` returns a matching remote HEAD.
+
+Then clean up the probe so it does not accumulate on tier-bound storage:
+
+```bash
+rm -rf "$PROBE"
+```
 
 If the probe clone succeeds and the canonical remote answers, the
 storage layer is fine; the on-disk `$WS/.git` is the fault.
@@ -120,7 +151,7 @@ a clean single-branch repo from the canonical HTTPS URL into `$WS`. Do
 root — `mv` keeps the broken copy recoverable:
 
 ```bash
-ts="$(date -u +%Y%m%dT%H%M%SZ)"
+ts=$(date +%s)
 mv "$WS" "${WS}.bak.${ts}"
 git clone --single-branch "$CANONICAL_HTTPS_URL" "$WS"
 ```
