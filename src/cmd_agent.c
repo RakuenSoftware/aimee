@@ -805,6 +805,21 @@ static void ag_add(app_ctx_t *ctx, int argc, char **argv)
             "alphanumeric or . _ -",
             argv[0]);
 
+   /* The endpoint is positional, so a flag typed where it belongs is silently
+    * ACCEPTED as the address: `agent add x --provider openai --endpoint URL` stored
+    * endpoint="--provider", saved, reported the agent ON, and exited 0. The failure
+    * surfaced only at `agent probe`, as "GET --provider/models returned -1".
+    *
+    * Only a leading '-' is refused. That is unambiguous evidence of a mis-parsed
+    * flag — no address starts with one — whereas demanding a scheme would reject
+    * host:port forms this command has never rejected before. */
+   if (!agent_endpoint_valid(argv[1]))
+      fatal("'%s' is not an endpoint — it looks like a flag in the endpoint's place.\n"
+            "  usage: aimee agent add <name> <endpoint> <model> [options]\n"
+            "  the first three arguments are positional, e.g.\n"
+            "    aimee agent add local http://127.0.0.1:8080/v1 my-model",
+            argv[1]);
+
    char old_model[MAX_MODEL_LEN] = {0};
    int was_empty = cfg->agent_count == 0;
    agent_t *ag = agent_find(cfg, argv[0]);
@@ -1554,7 +1569,8 @@ void cmd_eval(app_ctx_t *ctx, int argc, char **argv)
 
       /* Try corpus-based eval first. */
       static mem_eval_case_t corpus_cases[MEM_CORPUS_MAX_CASES];
-      int n_corpus = mem_eval_load_corpus(corpus_path, corpus_cases, MEM_CORPUS_MAX_CASES);
+      int n_corpus = mem_eval_load_corpus(corpus_path, config_embedder_command_current(NULL),
+                                          corpus_cases, MEM_CORPUS_MAX_CASES);
 
       if (n_corpus > 0)
       {

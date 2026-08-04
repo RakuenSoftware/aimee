@@ -3079,6 +3079,24 @@ static void test_agent_trace_log_uses_db1_execution_trace(void)
    sqlite3_close(db);
 }
 
+static void test_agent_endpoint_valid(void)
+{
+   /* `agent add` is positional, so a flag in the endpoint slot used to be SAVED as the
+    * endpoint: the agent reported ON and returned success, and the only symptom was
+    * `agent probe` reporting "GET --provider/models returned -1" later. */
+   assert(!agent_endpoint_valid("--provider"));
+   assert(!agent_endpoint_valid("-x"));
+   assert(!agent_endpoint_valid(""));
+   assert(!agent_endpoint_valid(NULL));
+
+   /* Narrow on purpose: everything that is not obviously a flag stays accepted,
+    * including the scheme-less host:port forms this command has always taken. */
+   assert(agent_endpoint_valid("http://127.0.0.1:8080/v1"));
+   assert(agent_endpoint_valid("https://api.openai.com/v1"));
+   assert(agent_endpoint_valid("localhost:11434"));
+   assert(agent_endpoint_valid("wizard-llm:8080/v1"));
+}
+
 static void test_agent_name_valid(void)
 {
    /* legit agent/model slugs accepted */
@@ -3355,6 +3373,7 @@ int main(void)
    assert(strncmp(agent_config_path(), tmp_home, strlen(tmp_home)) == 0);
    session_id_set_override("unit-test-agent");
    test_tool_surface_single_source();
+   test_agent_endpoint_valid();
    test_agent_name_valid();
    test_agent_expand_env();
    test_agent_save_never_serializes_literal_key();

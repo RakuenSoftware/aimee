@@ -345,6 +345,22 @@ double cosine_similarity(const float *a, const float *b, int dim)
    return denom > 1e-9 ? dot / denom : 0.0;
 }
 
+/* A deterministic lexical feature hash, built ONLY into test binaries.
+ *
+ * This was the product's fallback embedder: it served whenever none was configured,
+ * which meant an unconfigured kb answered searches with keyword matching while
+ * reporting itself healthy, and recorded itself as the corpus vector space so that
+ * choosing a real embedder afterwards was refused forever. That behaviour is gone —
+ * a kb with no embedder now refuses to start.
+ *
+ * What remains is a test fixture. Tests need SOME embedder to exercise ingest and
+ * retrieval end to end, and a deterministic in-process hash is a better fixture than
+ * a network dependency. It is selected only by the explicit command name
+ * MEMORY_EMBED_TEST_FIXTURE, never by absence of configuration, and the
+ * AIMEE_DISABLE_DB2_SQLITE_SHIM guard keeps it out of the shipped aimee-kb entirely:
+ * there is no build of the product in which this code can run. */
+#ifndef AIMEE_DISABLE_DB2_SQLITE_SHIM
+
 static uint32_t memory_embed_hash_token(const char *tok)
 {
    uint32_t h = 2166136261u;
@@ -370,14 +386,12 @@ static void memory_embed_add_feature(float *out, int dim, const char *feature, f
       out[bucket - 1] += sign * mag * 0.10f;
 }
 
-static int memory_embed_text_builtin(const char *text, float *out, int max_dim)
+static int memory_embed_text_lexical_fixture(const char *text, float *out, int max_dim)
 {
    if (!text || !out || max_dim <= 0)
       return 0;
-   /* The builtin serves before an embedder is selected, so its vectors land in the
-    * same columns the schema was sized for. Take that width from config — the one
-    * place it is declared — rather than repeating a number here, which is how the
-    * builtin and the schema could end up disagreeing. */
+   /* Vectors land in the columns the schema was sized for, so take that width from
+    * config rather than repeating a number here. */
    int width = config_embedder_dims_current();
    int dim = max_dim < width ? max_dim : width;
    for (int i = 0; i < dim; i++)
@@ -437,6 +451,8 @@ static int memory_embed_text_builtin(const char *text, float *out, int max_dim)
    return dim;
 }
 
+#endif /* !AIMEE_DISABLE_DB2_SQLITE_SHIM */
+
 /* Run embedding command: pipes text on stdin, reads JSON float array from stdout. */
 int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
                       float *out, int max_dim)
@@ -447,13 +463,28 @@ int memory_embed_text(const char *text, const char *command, embed_input_type_t 
       return 0;
    }
 
-   /* The builtin embedder is lexical feature hashing — it has no prefixes to apply. */
-   if (!command || !command[0] || strcmp(command, "builtin") == 0)
+   /* No embedder configured is a failure, not a mode. There used to be a lexical
+    * feature-hashing fallback here, which meant an unconfigured kb answered every
+    * search with keyword matching while reporting itself healthy — a deployment could
+    * run for weeks believing it had vector retrieval. Worse, it claimed the corpus:
+    * db2 recorded the fallback's identity as the vector space, so selecting a real
+    * embedder afterwards was a space change the guard then refused forever.
+    * Retrieval without an embedder is not a degraded answer, it is a wrong one. */
+   if (!command || !command[0])
    {
-      int dim = memory_embed_text_builtin(text, out, max_dim);
+      g_embedder_last_unauthorized = 0;
+      return 0;
+   }
+
+#ifndef AIMEE_DISABLE_DB2_SQLITE_SHIM
+   /* Test-only, and only ever by explicit name — see the fixture's comment above. */
+   if (strcmp(command, MEMORY_EMBED_TEST_FIXTURE) == 0)
+   {
+      int dim = memory_embed_text_lexical_fixture(text, out, max_dim);
       g_embedder_last_unauthorized = 0;
       return dim;
    }
+#endif
 
    int64_t retry_after_ms = 0;
    if (!dependency_breaker_allow(&g_embedder_dependency, memory_embedder_now_ms(), &retry_after_ms))

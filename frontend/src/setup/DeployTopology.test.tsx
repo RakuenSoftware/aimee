@@ -31,12 +31,12 @@ const EMBEDDERS = [
 ];
 
 /** A fetch double over the three endpoints the page touches, recording config writes. */
-function harness(config: Record<string, unknown>) {
+function harness(config: Record<string, unknown>, catalog = EMBEDDERS) {
   const writes: { key: string; value: unknown }[] = [];
   const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
     const body = (payload: unknown) =>
       ({ ok: true, status: 200, json: async () => payload, text: async () => JSON.stringify(payload) }) as unknown as Response;
-    if (url.startsWith('/api/embedders')) return body({ embedders: EMBEDDERS });
+    if (url.startsWith('/api/embedders')) return body({ embedders: catalog });
     if (url.includes('/api/config/set')) {
       writes.push(JSON.parse(String(init?.body ?? '{}')));
       return body({ ok: true });
@@ -54,6 +54,17 @@ async function renderPage(config: Record<string, unknown>) {
   return { writes };
 }
 
+/** The embedderless image: aimee-kb bakes no weights, so nothing is locally hostable
+ * and the bundled route has nothing to seed itself with. */
+async function renderPageWithNoLocalEmbedders() {
+  const { writes, fetchImpl } = harness({}, [
+    { id: 'external-only', dim: 1024, context: 512, pooling: 'mean', local: false, prefixed: false },
+  ]);
+  render(<DeployTopology onSaved={() => {}} fetchImpl={fetchImpl as unknown as typeof fetch} />);
+  await waitFor(() => expect(saveButton()).toBeTruthy());
+  return { writes };
+}
+
 function embedderSelect(): HTMLSelectElement {
   const select = Array.from(document.querySelectorAll('select')).find((s) =>
     Array.from(s.options).some((o) => o.value === 'bekko-a25m'),
@@ -62,12 +73,16 @@ function embedderSelect(): HTMLSelectElement {
   return select as HTMLSelectElement;
 }
 
-function save() {
+function saveButton(): HTMLButtonElement {
   const button = Array.from(document.querySelectorAll('button')).find((b) =>
     /save & continue/i.test(b.textContent || ''),
   );
   if (!button) throw new Error('save control not found');
-  fireEvent.click(button);
+  return button as HTMLButtonElement;
+}
+
+function save() {
+  fireEvent.click(saveButton());
 }
 
 afterEach(cleanup);
@@ -157,6 +172,29 @@ describe('DeployTopology embedder picker', () => {
   it('states the one-way door at the point of choice, not in a tooltip', async () => {
     await renderPage({});
     expect(screen.getByText(/effectively permanent for this install/i)).toBeTruthy();
+  });
+  it('will not save until an embedder is actually chosen', async () => {
+    // There is no fallback embedder any more: the kb refuses to start without one and
+    // the deploy is rejected before a container runs. Saving an empty choice would only
+    // defer that refusal to a later step, so the step does not complete.
+    const { writes } = await renderPageWithNoLocalEmbedders();
+    expect(saveButton().disabled).toBe(true);
+    expect(screen.getByText(/Choose an embedder/i)).toBeTruthy();
+    save();
+    expect(writes.length).toBe(0);
+  });
+
+  it('an external endpoint needs its dimension before it counts as chosen', async () => {
+    const { writes } = await renderPageWithNoLocalEmbedders();
+    fireEvent.change(screen.getByLabelText('embedder'), { target: { value: 'external' } });
+    fireEvent.change(screen.getByLabelText('embedder endpoint'), {
+      target: { value: 'https://embed.example/v1' },
+    });
+    expect(saveButton().disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('embedder dimension'), { target: { value: '1024' } });
+    expect(saveButton().disabled).toBe(false);
+    save();
+    await waitFor(() => expect(writes.some((w) => w.key === 'embedder_url')).toBe(true));
   });
 });
 

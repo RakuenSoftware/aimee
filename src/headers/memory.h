@@ -955,6 +955,12 @@ int memory_graph_prune(void);
 int memory_graph_normalize(void);
 
 int memory_embed(int64_t memory_id, const char *command);
+
+/* The embed command that selects the in-process lexical fixture. TEST BUILDS ONLY —
+ * it is compiled out of aimee-kb, so passing it there is an ordinary (failing) exec.
+ * There is no implicit embedder: an empty command embeds nothing and returns 0. */
+#define MEMORY_EMBED_TEST_FIXTURE "test-lexical-fixture"
+
 /* `input_type` declares which side of the embedder this text is (see
  * embed_input_type_t). It is required rather than defaulted so the compiler forces
  * every call site to state it — a query silently embedded as a document costs

@@ -35,26 +35,59 @@
 #   EMBEDDER_URL set  -> an external embedder; start nothing.
 #   EMBEDDER_MODEL set      -> the bundled embedder; start it.
 #   embedding_model in cfg  -> same, for a hand-run container.
-#   none of the above       -> start nothing. The kb falls back to its builtin lexical
-#                              embedder, which needs no model and no port, so an
-#                              unconfigured container is idle rather than half-configured.
+#   none of the above       -> REFUSE TO START.
 #
 # When it DOES start, the loopback URL is exported as EMBEDDER_URL. That makes the
 # bundled embedder just "an embedder at a URL" and reuses one precedence rule for both
 # cases, instead of a second mechanism that can disagree with the first.
 #
-# Starting is best-effort: the kb degrades honestly when embedding is unavailable, whereas
-# an entrypoint that refuses takes the whole knowledge base down with it.
+# Refusing is the point. There used to be a builtin lexical embedder behind this, so an
+# unconfigured container came up healthy and answered every search with keyword matching
+# — a deployment could run for weeks believing it had vector retrieval. It also claimed
+# the corpus: db2 recorded the fallback as the vector space, so choosing a real embedder
+# later was a space change the guard refused, and the kb never started again. A kb with
+# no embedder cannot do the one thing it exists for, and saying so at startup is cheaper
+# than discovering it from bad answers.
 # Ask the binary, never the file. This used to parse aimee.yaml with a sed regex, which
 # hardcoded the config paths and assumed a top-level `embedding_model:` key — a second
 # reader of a setting config owns. It worked only because config_save happens to write
-# the key at root, and it failed SILENTLY: an unparsed key reads as "nothing selected",
-# so the builtin serves forever and nothing says why.
+# the key at root, and it failed SILENTLY: an unparsed key reads as "nothing selected".
 read_cfg_embedding_model() {
     aimee-kb --print-embedding-model 2>/dev/null || true
 }
 
+# Is this container starting the KB SERVICE, or running a one-shot that exits?
+#
+# Only a serving container needs an embedder. Two kinds of invocation do not:
+#
+#   1. A bare subcommand first — `managed-server-identity install ...` is the managed
+#      deploy's server-enrolment job, which runs this image against the kb's volume and
+#      never serves a query. Requiring an embedder of it failed server identity
+#      enrolment on every clean install: the kb came up and the server could not talk
+#      to it.
+#   2. An informational flag that aimee-kb answers at argv[1] and exits — `--help`,
+#      `--version`, and the vault/config one-shots the entrypoint itself invokes.
+#      Classifying every `-*` as serving refused `docker run <image> --help` on a fresh
+#      install, which is the first thing someone types to check the image is alive, and
+#      the moment they are least likely to have configured an embedder.
+#
+# The flag list mirrors aimee-kb's own argv[1] handling in kb_main.c. If a one-shot flag
+# is added there it belongs here too; the cost of missing one is a refusal to print
+# help, not a kb serving without an embedder.
+kb_is_serving() {
+    case "${1:-}" in
+    --help | -h | --version | -v | --print-embedding-model | --bootstrap-vault-env | \
+        --bootstrap-vault-stdin | --list-credential-env-names)
+        return 1 ;;
+    "" | -*) return 0 ;;
+    *) return 1 ;;
+    esac
+}
+
 start_embedder() {
+    if ! kb_is_serving "$@"; then
+        return 0
+    fi
     if [ -n "${EMBEDDER_URL:-}" ]; then
         echo "aimee-kb: external embedder configured ($EMBEDDER_URL); bundled model not loaded" >&2
         return 0
@@ -63,17 +96,21 @@ start_embedder() {
         EMBEDDER_MODEL="$(read_cfg_embedding_model)"
     fi
     if [ -z "$EMBEDDER_MODEL" ]; then
-        echo "aimee-kb: no embedder selected; the bundled model stays unloaded (the builtin" \
-             "lexical embedder serves until the wizard selects one)" >&2
-        return 0
+        echo "aimee-kb: no embedder selected, and there is no fallback. Retrieval needs one." >&2
+        echo "aimee-kb:   pick a bundled model:  aimee config set embedder_model bekko-a25m" >&2
+        echo "aimee-kb:   or point at your own:  EMBEDDER_URL=http://<host>:<port>" >&2
+        echo "aimee-kb: then re-run Deploy. Refusing to start." >&2
+        exit 1
     fi
     export EMBEDDER_MODEL
 
     venv="${EMBEDDER_VENV:-/opt/aimee/embedder-venv}"
     server=/opt/aimee/scripts/embedder-server.py
     if [ ! -x "$venv/bin/python" ] || [ ! -f "$server" ]; then
-        echo "aimee-kb: '$EMBEDDER_MODEL' selected but this image has no bundled embedder" >&2
-        return 0
+        echo "aimee-kb: '$EMBEDDER_MODEL' selected but this image has no bundled embedder." >&2
+        echo "aimee-kb: the aimee-kb image carries no weights — use aimee-kb-a25m or" >&2
+        echo "aimee-kb: aimee-kb-nomic, or set EMBEDDER_URL. Refusing to start." >&2
+        exit 1
     fi
     : "${EMBEDDER_PORT:=8760}"
     export EMBEDDER_PORT
@@ -98,6 +135,11 @@ start_embedder() {
 #
 # The mTLS material for the sidecar hop is issued by the kb at startup, not here;
 # see kb_synthesis_identity.c.
+
+# Sourcing stops here: everything above is definitions, everything below starts a
+# container. tests/test_kb_entrypoint.sh uses this to exercise the embedder gate without
+# a PostgreSQL cluster, a Vault, or an image.
+[ -n "${AIMEE_KB_ENTRYPOINT_SOURCE_ONLY:-}" ] && return 0
 
 set -e
 
@@ -218,7 +260,7 @@ if [ "$external_db" -eq 0 ]; then
     if "$PGBIN/pg_isready" --host="$PGSOCK" --quiet 2>/dev/null; then
         echo "aimee-kb: PostgreSQL already running on $PGSOCK; using it instead of" \
              "starting a second cluster" >&2
-        start_embedder
+        start_embedder "$@"
         run_kb_with_modules "$@"
         exit $?
     fi
@@ -312,10 +354,11 @@ if [ "$external_db" -eq 0 ]; then
     fi
     AIMEE_DB2_URL="$embedded_dsn" aimee-kb --bootstrap-vault-env
 
-    # POSIX sh has no portable wait -n. Monitor children through /proc so a
-    # dead-but-unreaped process (for which kill -0 still succeeds) is not
-    # mistaken for a live one. The shutdown handler uses the same check to put
-    # a hard bound on a KB whose worker threads do not drain after TERM.
+    # POSIX sh has no portable wait -n. Monitor both children, including Linux
+    # zombies: kill -0 still succeeds for a dead-but-unreaped postmaster, which
+    # previously left the container running unhealthy forever after PostgreSQL
+    # crashed. The same check also puts a hard bound on a KB whose worker
+    # threads do not drain after TERM.
     process_alive() {
         _pid=$1
         kill -0 "$_pid" 2>/dev/null || return 1
@@ -324,7 +367,7 @@ if [ "$external_db" -eq 0 ]; then
         [ "$_stat_state" != Z ]
     }
 
-    start_embedder
+    start_embedder "$@"
     start_modules
 
     # Not exec: the trap above has to outlive the kb so the cluster shuts down
@@ -395,6 +438,6 @@ if [ "$external_db" -eq 0 ]; then
     exit "$rc"
 fi
 
-start_embedder
+start_embedder "$@"
 run_kb_with_modules "$@"
 exit $?

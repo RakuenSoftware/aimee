@@ -1122,6 +1122,11 @@ integration-tests: $(BINARY) $(SERVER)
 init-migrate-service-test: $(BINARY) $(SERVER)
 	./tests/test_init_migrate_service.sh
 
+# The kb entrypoint's embedder gate. Needs no binary, no cluster and no image: it
+# sources the entrypoint's definitions and calls them directly.
+kb-entrypoint-test:
+	./tests/test_kb_entrypoint.sh
+
 index-scan-e2e-test: $(BINARY) $(SERVER)
 	./tests/test_index_scan_e2e.sh
 

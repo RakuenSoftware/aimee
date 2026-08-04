@@ -298,6 +298,7 @@ static void test_namespaced_tools_and_dispatch(void)
    int saw_job_family = 0;
    int saw_skill_manage = 0;
    int saw_skill_manage_cwd = 0;
+   int saw_git_path_is_universal = 0;
    cJSON *tool = NULL;
    cJSON_ArrayForEach(tool, public_tools)
    {
@@ -312,6 +313,23 @@ static void test_namespaced_tools_and_dispatch(void)
        * member description no longer appears standalone. Verify the family tool. */
       if (cJSON_IsString(tool_name) && strcmp(tool_name->valuestring, "job") == 0)
          saw_job_family = 1;
+      /* The git tool resolves WHICH repository it acts on from args["path"]
+       * (mcp_chdir_git_root's priority-1 candidate). That param was described as
+       * "clone: local path; verify: repo path", so a schema-driven caller never
+       * passed it for status/commit/push and silently got whatever session state
+       * resolved to — in a worktree-isolated session, the SHARED checkout on another
+       * branch, where a commit stages someone else's work. The description has to
+       * say the param selects the repository for EVERY command. */
+      if (cJSON_IsString(tool_name) && strcmp(tool_name->valuestring, "git") == 0)
+      {
+         cJSON *schema = cJSON_GetObjectItemCaseSensitive(tool, "inputSchema");
+         cJSON *props = cJSON_GetObjectItemCaseSensitive(schema, "properties");
+         cJSON *path = cJSON_GetObjectItemCaseSensitive(props, "path");
+         cJSON *desc = cJSON_GetObjectItemCaseSensitive(path, "description");
+         if (cJSON_IsString(desc) && strstr(desc->valuestring, "every command") &&
+             strstr(desc->valuestring, "SHARED checkout"))
+            saw_git_path_is_universal = 1;
+      }
       if (cJSON_IsString(tool_name) && strcmp(tool_name->valuestring, "skill_manage") == 0)
       {
          saw_skill_manage = 1;
@@ -344,6 +362,7 @@ static void test_namespaced_tools_and_dispatch(void)
    assert(saw_job_family);
    assert(saw_skill_manage);
    assert(saw_skill_manage_cwd);
+   assert(saw_git_path_is_universal);
    cJSON_Delete(public_tools);
 
    mcp_client_registry_shutdown();

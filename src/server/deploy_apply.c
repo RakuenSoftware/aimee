@@ -37,6 +37,30 @@ static int g_running = 0;
 static int g_last_exit = INT_MIN;
 static char g_last_out[DEPLOY_OUT_CAP];
 
+/* Is NAME= present in the emitted env with a non-empty value? config_emit_deploy_env
+ * always emits the embedder keys, empty when unset, so presence alone proves nothing. */
+static int deploy_env_value_set(const char *env, const char *name)
+{
+   if (!env || !name || !name[0])
+      return 0;
+   size_t nlen = strlen(name);
+   for (const char *p = env; p && *p;)
+   {
+      const char *eol = strchr(p, '\n');
+      if (!eol)
+         eol = p + strlen(p);
+      if ((size_t)(eol - p) > nlen && strncmp(p, name, nlen) == 0 && p[nlen] == '=')
+      {
+         const char *v = p + nlen + 1;
+         while (v < eol && isspace((unsigned char)*v))
+            v++;
+         return v < eol;
+      }
+      p = (*eol == '\n') ? eol + 1 : eol;
+   }
+   return 0;
+}
+
 static int deploy_env_has_profile(const char *env, const char *profile)
 {
    if (!profile || !profile[0])
@@ -262,6 +286,20 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
                               (explicit_id && explicit_id[0] ? 1 : 0) +
                               (explicit_team && explicit_team[0] ? 1 : 0);
    runtime_secret_wipe(explicit_conn, sizeof(explicit_conn));
+   /* A managed kb with no embedder will start, print why it cannot serve retrieval, and
+    * exit — leaving a failed deploy whose reason is a line in a container log. There is
+    * no fallback to come up with instead, so refuse here, where the wizard shows it. */
+   if (managed_kb && !deploy_env_value_set(env, "EMBEDDER_MODEL") &&
+       !deploy_env_value_set(env, "EMBEDDER_URL"))
+   {
+      if (err && err_cap)
+         snprintf(err, err_cap,
+                  "no embedder selected: the knowledge base cannot serve retrieval without "
+                  "one, and there is no fallback. Choose a bundled model on the wizard's "
+                  "topology step (or `aimee config set embedder_model bekko-a25m`), or point "
+                  "EMBEDDER_URL at an external endpoint, then deploy again");
+      return NULL;
+   }
    if (managed_kb && explicit_parts != 0 && explicit_parts != 3)
    {
       if (err && err_cap)

@@ -17,6 +17,7 @@
 #include "server_cli_oauth.h"     /* server-hosted OAuth CLI agent setup */
 #include "provider_cli_adapter.h" /* provider_cli_adapter_get: declared CLI caps */
 #include "config.h"               /* config_load / config_t */
+#include <errno.h>
 #include <pthread.h>
 #include <string.h>
 #include <stdlib.h>
@@ -519,7 +520,27 @@ int handle_agent_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * (it did, on the appliance). Report the failure; reserve the empty array for
     * a config that really loaded and really has zero agents. */
    if (agent_load_config(&cfg) != 0)
-      return server_send_error(conn, "failed to load agent configuration", NULL);
+   {
+      /* Still an error, never an empty roster — but say WHICH failure it is. A fresh
+       * install has no agents.json at all, and answering that with a bare "failed to
+       * load" tells a first-run user nothing about what to do next. Anything else
+       * (unreadable, malformed, truncated) is a real fault and names the file. */
+      const char *path = agent_config_path();
+      if (path && access(path, F_OK) != 0)
+         return server_send_error(conn,
+                                  "no agents are configured yet: choose a provider in the setup "
+                                  "wizard, or run `aimee provider list --available`",
+                                  NULL);
+      /* The file is there and the load still failed: unreadable, malformed, or
+       * truncated. Deliberately no strerror() — reaching here means access() SUCCEEDED,
+       * so errno carries nothing about this failure and printing it invents a cause. */
+      char msg[512];
+      snprintf(msg, sizeof(msg),
+               "agent configuration at %s exists but could not be loaded; "
+               "check that it is readable and valid JSON",
+               path ? path : "?");
+      return server_send_error(conn, msg, NULL);
+   }
    cJSON *resp = jo_ok();
    cJSON *arr = cJSON_CreateArray();
    for (int i = 0; i < cfg.agent_count; i++)
@@ -653,6 +674,22 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (argc < 3)
       return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
                                     "usage: agent add <name> <endpoint> <model>", NULL);
+
+   /* The first three arguments are positional, so a flag typed in the endpoint's place
+    * is silently stored AS the endpoint: `agent add x --provider openai --endpoint URL`
+    * saved endpoint="--provider", reported the agent ON, and returned success. Nothing
+    * said otherwise until `agent probe` reported
+    * "GET --provider/models returned -1".
+    *
+    * Only a leading '-' is refused: unambiguous evidence of a mis-parsed flag, since no
+    * address begins with one. Demanding a scheme would reject host:port forms this
+    * command has always accepted. */
+   if (!agent_endpoint_valid(argv[1]))
+      return server_send_error_kind(
+          conn, SERVER_ERR_INVALID_ARGUMENT,
+          "the endpoint looks like a flag; the first three arguments are positional: "
+          "agent add <name> <endpoint> <model>",
+          NULL);
 
    opt_parsed_t opts;
    opt_parse(argc - 3, argv + 3, bool_flags, &opts);

@@ -72,28 +72,9 @@ int main(void)
    check(!db2_embedder_probe_registered(), "empty command registers no dim probe");
    check(!db2_embedder_serving_probe_registered(), "empty command registers no serving probe");
 
-   printf("the builtin lexical embedder\n");
-   reset();
-   embedder_probe_register("builtin");
-   /* The dim probe genuinely cannot work here: no /health, fixed width, and the retry
-    * loop would spin for its whole budget on every boot. Registering it would be the
-    * bug in the other direction. */
-   check(!db2_embedder_probe_registered(), "no dim probe: nothing to probe, and it would stall");
-   /* Characterization, not regression: always true of this module. What was missing is a
-    * caller that reached it. */
-   check(db2_embedder_serving_probe_registered(),
-         "serving probe IS registered: the builtin has a vector space and declares it");
-
-   /* Link three, so the chain from registration to a recordable identity is closed by
-    * tests rather than by assumption. An empty answer here would make the guard a
-    * documented no-op, which is what the builtin used to look like from db2's side. */
-   {
-      char sid[160] = "zzz";
-      check(memory_embed_serving_id("builtin", sid, sizeof(sid)) == 0,
-            "the builtin answers a serving-identity probe");
-      check(sid[0] != '\0', "and the answer is NOT empty (empty would re-disable the guard)");
-      check(strcmp(sid, "builtin/lexical-v1") == 0, "it names the lexical space specifically");
-   }
+   /* "builtin" was a real embedder here once — a lexical feature hash that served when
+    * nothing was configured. It is gone, and with it the idea that an unconfigured kb
+    * has a vector space at all: no command means no probes, asserted above. */
 
    printf("a sidecar embed command\n");
    reset();

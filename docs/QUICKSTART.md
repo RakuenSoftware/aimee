@@ -191,27 +191,40 @@ A bundled embedder needs no download and no second container.
 start when it drifts, so moving between 384 and 768 means re-embedding the whole corpus. Choose before
 you ingest anything.
 
-Nothing is selected on a fresh install, and an unselected KB is not broken. It falls back to a
-builtin lexical embedder and says so once, in the KB log:
+Nothing is selected on a fresh install, and **a KB with no embedder refuses to start**. It says so
+and exits:
 
 ```text
-aimee-kb: no embedder selected; the bundled model stays unloaded (the builtin
-lexical embedder serves until the wizard selects one)
+aimee-kb: no embedder selected, and there is no fallback. Retrieval needs one.
+aimee-kb:   pick a bundled model:  aimee config set embedder_model bekko-a25m
+aimee-kb:   or point at your own:  EMBEDDER_URL=http://<host>:<port>
+aimee-kb: then re-run Deploy. Refusing to start.
 ```
 
-Retrieval still works in that state, but it is keyword matching, not vector search. If you skipped
-the step, set it from the server and re-run Deploy:
+There used to be a lexical fallback here, so an unconfigured KB came up healthy and answered every
+search with keyword matching. A deployment could run for weeks believing it had vector retrieval. It
+is gone. If you skipped the step, set it from the server and re-run Deploy:
 
 ```bash
 aimee config set embedder_model bekko-a25m
 ```
 
+Once anything has been embedded, changing the embedder is a corpus migration rather than a setting,
+and the KB refuses the switch rather than mixing two vector spaces. See
+[Change the KB embedder](runbooks/change-embedder.md). Choosing in the wizard, before the first
+Deploy, avoids the question entirely.
+
 Confirm the model actually loaded rather than assuming it did:
 
 ```bash
-docker compose -f compose.server-managed.yaml logs aimee-kb | grep -i embedder
+docker compose -p aimee logs aimee-kb | grep -i embedder
 aimee kb status
 ```
+
+Address the managed services by project (`-p aimee`), not by the file you started the server with.
+`compose.server-managed.yaml` declares only `aimee-server`; the server brings `aimee-kb` and
+`aimee-llm` up from its own baked manifest into the same `aimee` project, so
+`-f compose.server-managed.yaml logs aimee-kb` fails with `no such service`.
 
 A loaded embedder logs its dimension and serving identity:
 
@@ -254,7 +267,7 @@ left running.
 Confirm the sidecar actually came up, rather than assuming Deploy succeeded:
 
 ```bash
-docker compose -f compose.server-managed.yaml logs aimee-llm | grep -iE 'synthesis|terminator'
+docker compose -p aimee logs aimee-llm | grep -iE 'synthesis|terminator'
 ```
 
 A working sidecar logs both halves:

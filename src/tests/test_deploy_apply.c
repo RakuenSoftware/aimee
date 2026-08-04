@@ -53,10 +53,17 @@ int config_present(void)
    return 1;
 }
 
+/* Emitted alongside the profiles because a managed kb without an embedder is refused.
+ * Both keys are always emitted, empty when unset — which is what the real emitter does,
+ * and why presence alone cannot be the test. */
+static const char *g_stub_embedder_model = "bekko-a25m";
+static const char *g_stub_embedder_url = "";
+
 void config_emit_deploy_env_current(char *buf, size_t n)
 {
    if (buf && n)
-      snprintf(buf, n, "COMPOSE_PROFILES=%s\n", g_stub_profiles);
+      snprintf(buf, n, "COMPOSE_PROFILES=%s\nEMBEDDER_MODEL=%s\nEMBEDDER_URL=%s\n", g_stub_profiles,
+               g_stub_embedder_model, g_stub_embedder_url);
 }
 
 /* Keyless Vault double: persistence semantics are exercised through the same
@@ -226,6 +233,52 @@ static void test_managed_llm_service_credential(void)
    unsetenv("AIMEE_SERVER_TEAM_ID");
    snprintf(g_stub_profiles, sizeof(g_stub_profiles), "kb,llm");
    printf("  managed kb -> llm credential is stable, private, and scoped ok\n");
+}
+
+/* A managed kb with no embedder is refused before anything is started. There is no
+ * fallback embedder left to come up with instead: the container would print why it
+ * cannot serve retrieval and exit, so the deploy fails either way. It fails here
+ * because this is where the wizard shows the reason, rather than a container log. */
+static void test_managed_kb_without_an_embedder_is_refused(void)
+{
+   char err[256];
+   char **envp;
+   snprintf(g_stub_profiles, sizeof(g_stub_profiles), "kb");
+   g_stub_embedder_model = "";
+   g_stub_embedder_url = "";
+
+   err[0] = '\0';
+   assert(build_deploy_envp(err, sizeof(err), NULL, NULL, NULL) == NULL);
+   assert(strstr(err, "no embedder selected") != NULL);
+   /* The message has to name a way out, not just the problem. */
+   assert(strstr(err, "embedder_model") != NULL);
+   assert(strstr(err, "EMBEDDER_URL") != NULL);
+
+   /* A bundled model satisfies it. */
+   g_stub_embedder_model = "bekko-a25m";
+   envp = build_deploy_envp(err, sizeof(err), NULL, NULL, NULL);
+   assert(envp != NULL);
+   free_envp(envp);
+
+   /* So does an external endpoint, on its own. */
+   g_stub_embedder_model = "";
+   g_stub_embedder_url = "http://embedder.example:8760";
+   envp = build_deploy_envp(err, sizeof(err), NULL, NULL, NULL);
+   assert(envp != NULL);
+   free_envp(envp);
+
+   /* A remote kb deploys no container, so the check does not apply to it. */
+   g_stub_profiles[0] = '\0';
+   g_stub_embedder_model = "";
+   g_stub_embedder_url = "";
+   envp = build_deploy_envp(err, sizeof(err), NULL, NULL, NULL);
+   assert(envp != NULL);
+   free_envp(envp);
+
+   snprintf(g_stub_profiles, sizeof(g_stub_profiles), "kb,llm");
+   g_stub_embedder_model = "bekko-a25m";
+   g_stub_embedder_url = "";
+   printf("  managed kb with no embedder is refused, with a way out named ok\n");
 }
 
 /* --- the deploy argv itself --- */
@@ -448,6 +501,7 @@ int main(void)
 {
    printf("test_deploy_apply\n");
    test_managed_llm_service_credential();
+   test_managed_kb_without_an_embedder_is_refused();
    test_deploy_argv_is_orderable_and_has_no_remove_orphans();
    test_managed_kb_credential_bootstrap_is_stdin_only();
    test_managed_identity_bootstrap_runs_inside_kb_without_secret_argv();

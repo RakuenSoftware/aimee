@@ -346,10 +346,10 @@ static cJSON *kb_service_health_object(void)
     * the config file OR the EMBEDDER_URL env (the deploy stack exports the
     * latter), so resolve it the same way embed_command does instead of reading the
     * raw config field — otherwise an env-configured embedder is wrongly reported
-    * embed_ok:false while embed_command shows a real URL. The "builtin" fallback
-    * (nothing configured) still reports false, as before. */
+    * embed_ok:false while embed_command shows a real URL. Nothing configured
+    * reports false — there is no fallback to report instead. */
    const char *embed_cmd = config_embedder_command_current(NULL);
-   int embed_ok = (embed_cmd[0] && strcmp(embed_cmd, "builtin") != 0) ? 1 : 0;
+   int embed_ok = embed_cmd[0] ? 1 : 0;
    cJSON_AddBoolToObject(resp, "embed_ok", embed_ok);
    cJSON_AddStringToObject(resp, "embed_command", embed_cmd);
 

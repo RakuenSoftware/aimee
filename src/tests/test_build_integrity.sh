@@ -131,15 +131,20 @@ fi
 SH
 chmod +x "$kb_entrypoint_test_dir/aimee-kb"
 # stderr is captured separately, not folded in: the entrypoint legitimately logs
-# operator diagnostics there (which embedder it started, or why it started none),
-# and folding them into stdout would turn this into an assertion that the
-# entrypoint is silent. What must hold is that no credential VALUE reaches either
-# stream, and that the final process image is credential-free.
+# operator diagnostics there (which embedder it is using), and folding them into
+# stdout would turn this into an assertion that the entrypoint is silent. What must
+# hold is that no credential VALUE reaches either stream, and that the final process
+# image is credential-free.
+#
+# EMBEDDER_URL is set because a serving kb with no embedder refuses to start, and
+# these two checks are about credential scrubbing, not embedder selection. The gate
+# itself is covered by tests/test_kb_entrypoint.sh.
 kb_entrypoint_stderr="$kb_entrypoint_test_dir/stderr.log"
 kb_entrypoint_output=$(env -i PATH="$kb_entrypoint_test_dir:/usr/bin:/bin" \
     AIMEE_HOME="$kb_entrypoint_test_dir/home" \
     AIMEE_DB2_URL=postgresql://external.invalid/aimee \
     ENTRYPOINT_TEST_API_KEY=first-boot-only \
+    EMBEDDER_URL=http://embedder.invalid \
     sh ../deploy/container/aimee-kb-entrypoint.sh 2>"$kb_entrypoint_stderr")
 if [ "$kb_entrypoint_output" = "clean" ] &&
     ! grep -qE 'first-boot-only|external\.invalid' "$kb_entrypoint_stderr"; then
@@ -158,6 +163,7 @@ kb_marked_output=$(env -i PATH="$kb_entrypoint_test_dir:/usr/bin:/bin" \
     AIMEE_DB2_URL=postgresql://external.invalid/aimee \
     ENTRYPOINT_TEST_API_KEY=first-boot-only \
     ENTRYPOINT_BOOTSTRAP_LOG="$kb_bootstrap_log" \
+    EMBEDDER_URL=http://embedder.invalid \
     sh ../deploy/container/aimee-kb-entrypoint.sh \
     --aimee-internal-vault-bootstrapped-external-db 2>"$kb_marked_stderr")
 kb_bootstrap_count=$(wc -c <"$kb_bootstrap_log")

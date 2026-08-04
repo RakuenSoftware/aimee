@@ -104,6 +104,22 @@ int main(void)
    /* NULL conn -> 0. */
    assert(db2_embedding_dim_get(NULL) == 0);
 
+   /* ---- dim-drift refusal (pure) ----
+    * UPGRADING.md promises DB2 "refuses to start" when the embedder cannot produce the
+    * recorded width. It did not: a v0.2.192 corpus recorded at 1024 came up under the
+    * 384-dim bundled embedder reporting healthy and embed_ok:true, recorded that
+    * embedder's serving identity over the corpus, and left Postgres to bounce every
+    * write ("expected 1024 dimensions, not 384"). Inert while claiming to be well. */
+   assert(db2_dim_drift_refuses(0, 384, 1024) == 1);  /* answered, and disagrees */
+   assert(db2_dim_drift_refuses(0, 768, 1024) == 1);  /* the other bundled width too */
+   assert(db2_dim_drift_refuses(0, 1024, 1024) == 0); /* answered, and agrees */
+   /* No answer is NOT evidence of drift: a slow or silent embedder must still start,
+    * or the fix takes down deployments that were working. */
+   assert(db2_dim_drift_refuses(-1, 0, 1024) == 0);
+   assert(db2_dim_drift_refuses(-1, 384, 1024) == 0); /* rc wins over a stale out-param */
+   assert(db2_dim_drift_refuses(0, 0, 1024) == 0);    /* answered with nothing usable */
+   assert(db2_dim_drift_refuses(0, 384, 0) == 0);     /* fresh DB: nothing recorded yet */
+
    /* ---- §2b: db2_dim_source precedence (pure: pin > recorded > probe > default) ---- */
    assert(db2_dim_source(1, 1, 1) == DB2_DIM_SRC_PIN);      /* pin wins over all */
    assert(db2_dim_source(1, 0, 0) == DB2_DIM_SRC_PIN);      /* pin even with nothing else */
@@ -223,17 +239,68 @@ int main(void)
    assert(db2_embedder_serving_record_or_check(NULL, "nomic/aaaa", err, sizeof err) == -1);
 
    /* The builtin lexical embedder declares an identity too, and switching off it must be
-    * caught. This was the one transition nothing could see: the builtin is 384-dim and so
-    * is the bundled model, so the dim guard is silent, and while the builtin reported NO
-    * identity the guard simply recorded the model's fresh over a lexically-embedded
-    * corpus. */
+    * caught ONCE SOMETHING IS EMBEDDED. This is the one transition nothing else can see:
+    * the builtin is 384-dim and so is the bundled model, so the dim guard is silent.
+    *
+    * An EMPTY corpus is the exception. The builtin serves a kb whose embedder has not
+    * been chosen yet, so the first deploy records the placeholder before the wizard's
+    * choice can reach the container; refusing there left a brand-new kb unable to adopt
+    * the embedder it had just been given, with the documented escape (`aimee kb reembed`)
+    * gated behind a setting inside the kb's own container. */
+   err[0] = '\0';
+   assert(aimee_pg_exec(conn, "DELETE FROM kb_meta WHERE key = 'schema_embedder_serving_id'", err,
+                        sizeof err) == 0);
+   assert(aimee_pg_exec(conn, "DELETE FROM memory_embeddings", err, sizeof err) == 0);
+   assert(db2_embedder_serving_record_or_check(conn, "builtin/lexical-v1", err, sizeof err) == 0);
+   assert(db2_embedder_serving_record_or_check(conn, "builtin/lexical-v1", err, sizeof err) == 0);
+   /* Empty corpus: the placeholder yields, and the new identity is what is now recorded. */
+   assert(db2_embedder_serving_record_or_check(conn, "bekko-a25m/abcd", err, sizeof err) == 0);
+   assert(err[0] == '\0');
+   assert(db2_embedder_serving_record_or_check(conn, "bekko-a25m/abcd", err, sizeof err) == 0);
+   /* Having yielded, it is an ordinary recorded identity — the next change is refused
+    * even though the corpus is still empty. The escape is for the placeholder only. */
+   assert(db2_embedder_serving_record_or_check(conn, "bekko-a25m/zzzz", err, sizeof err) == -1);
+   assert(strstr(err, "bekko-a25m/abcd") != NULL && strstr(err, "bekko-a25m/zzzz") != NULL);
+
+   /* Same placeholder, but the corpus HAS vectors: refused, and the record is unchanged.
+    * This is the lexically-embedded corpus the guard was added for. */
    err[0] = '\0';
    assert(aimee_pg_exec(conn, "DELETE FROM kb_meta WHERE key = 'schema_embedder_serving_id'", err,
                         sizeof err) == 0);
    assert(db2_embedder_serving_record_or_check(conn, "builtin/lexical-v1", err, sizeof err) == 0);
-   assert(db2_embedder_serving_record_or_check(conn, "builtin/lexical-v1", err, sizeof err) == 0);
+   assert(aimee_pg_exec(conn, "INSERT INTO memory_embeddings (point_id) VALUES (1)", err,
+                        sizeof err) == 0);
+   err[0] = '\0';
    assert(db2_embedder_serving_record_or_check(conn, "bekko-a25m/abcd", err, sizeof err) == -1);
    assert(strstr(err, "builtin/lexical-v1") != NULL && strstr(err, "bekko-a25m/abcd") != NULL);
+   /* The refusal left the corpus on the placeholder. */
+   err[0] = '\0';
+   assert(db2_embedder_serving_record_or_check(conn, "builtin/lexical-v1", err, sizeof err) == 0);
+   assert(aimee_pg_exec(conn, "DELETE FROM memory_embeddings", err, sizeof err) == 0);
+
+   /* An UNREADABLE vector table is not an absent one. Emptiness is only proof when every
+    * listed table was either shown absent or actually read; a table that exists but
+    * cannot be queried must block adoption, or one broken table beside one empty table
+    * reports a corpus as provably empty and the placeholder yields over real vectors.
+    *
+    * Renaming kb_embeddings away and leaving a VIEW that cannot be selected reproduces
+    * "it is there, and I cannot read it" without needing a permissions system. */
+   err[0] = '\0';
+   assert(aimee_pg_exec(conn, "DELETE FROM kb_meta WHERE key = 'schema_embedder_serving_id'", err,
+                        sizeof err) == 0);
+   assert(db2_embedder_serving_record_or_check(conn, "builtin/lexical-v1", err, sizeof err) == 0);
+   assert(aimee_pg_exec(conn, "ALTER TABLE kb_embeddings RENAME TO kb_embeddings_hidden", err,
+                        sizeof err) == 0);
+   assert(aimee_pg_exec(conn, "CREATE VIEW kb_embeddings AS SELECT * FROM missing_relation_xyz",
+                        err, sizeof err) == 0);
+   err[0] = '\0';
+   assert(db2_embedder_serving_record_or_check(conn, "bekko-a25m/abcd", err, sizeof err) == -1);
+   /* and the placeholder still stands */
+   err[0] = '\0';
+   assert(aimee_pg_exec(conn, "DROP VIEW kb_embeddings", err, sizeof err) == 0);
+   assert(aimee_pg_exec(conn, "ALTER TABLE kb_embeddings_hidden RENAME TO kb_embeddings", err,
+                        sizeof err) == 0);
+   assert(db2_embedder_serving_record_or_check(conn, "builtin/lexical-v1", err, sizeof err) == 0);
 
    /* NULL conn -> -1. */
    assert(db2_embedding_model_record_or_check(NULL, "x", NULL, err, sizeof err) == -1);
