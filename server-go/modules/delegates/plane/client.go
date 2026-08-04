@@ -1,4 +1,13 @@
-package engine
+// Package plane is the client side of the delegate resource plane: launching a
+// delegate, polling it to a terminal state, cancelling it, and releasing its
+// replay reservation.
+//
+// It lives outside internal/ because the roundtable runs as a module process
+// and has to reach the same plane, and there must not be two implementations of
+// this to keep in step. It holds no database handle -- every durable decision
+// (reserving a replay, reclaiming an unassigned job) is asked of the side that
+// owns agent_jobs, which is what makes it safe to run in a module.
+package plane
 
 import (
 	"bytes"
@@ -14,8 +23,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/JBailes/aimee/server-go/internal/db1"
 )
 
 type DelegateRequest struct {
@@ -62,10 +69,13 @@ type DelegateRequest struct {
 	// operator pin. A selected seat may be generically rerouted after a terminal
 	// provider failure; an operator pin never may.
 	routeSelected bool
-	// acceptPartial is reserved for native branch-producing blocks whose worktree output
-	// is independently committed and verified by the Go native runner. Structured
-	// and prose blocks must receive a complete resource-plane result.
-	acceptPartial bool
+	// AcceptPartial is reserved for native branch-producing blocks whose worktree
+	// output is independently committed and verified by the caller. Structured and
+	// prose blocks must receive a complete resource-plane result.
+	//
+	// It is the caller's policy, not the plane's: whether a partial result is
+	// usable depends on what the calling block required of it.
+	AcceptPartial bool
 }
 
 type DelegateResult struct {
@@ -111,7 +121,6 @@ type AgentHTTPConfig struct {
 	RequestTimeout       time.Duration
 	PendingTimeout       time.Duration
 	PendingTimeoutSource func() time.Duration
-	Store                *db1.Store
 }
 
 const (
@@ -172,7 +181,6 @@ type HTTPAgentClient struct {
 	client          *http.Client
 	pollEvery       time.Duration
 	pendingTimeout  func() time.Duration
-	store           *db1.Store
 }
 
 func NewHTTPAgentClient(cfg AgentHTTPConfig) (*HTTPAgentClient, error) {
@@ -213,7 +221,7 @@ func NewHTTPAgentClient(cfg AgentHTTPConfig) (*HTTPAgentClient, error) {
 	}
 	return &HTTPAgentClient{baseURL: strings.TrimRight(cfg.BaseURL, "/"), bearer: cfg.Bearer,
 		client: &http.Client{Transport: transport, Timeout: cfg.RequestTimeout}, pollEvery: cfg.PollEvery,
-		pendingTimeout: timeoutSource, store: cfg.Store}, nil
+		pendingTimeout: timeoutSource}, nil
 }
 
 func (c *HTTPAgentClient) delegatePendingTimeout() time.Duration {
@@ -284,7 +292,7 @@ func delegateRouteRetryable(request DelegateRequest, err error) bool {
 	if err == nil || (request.Delegate != "" && !request.routeSelected) || request.Participant != "" {
 		return false
 	}
-	return errors.Is(err, ErrDelegateTerminal) || isCapacityBackpressure(err)
+	return errors.Is(err, ErrDelegateTerminal) || IsCapacityBackpressure(err)
 }
 
 func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequest) (DelegateResult, error) {
@@ -309,7 +317,7 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 	if request.Participant != "" {
 		payload["participant"] = request.Participant
 	}
-	key := delegateJobKey(request)
+	key := DelegateJobKey(request)
 	var launched struct {
 		JobID       int    `json:"job_id"`
 		Participant string `json:"participant"`
@@ -346,7 +354,7 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 		return DelegateResult{}, &DelegateExecutionError{Err: ErrDelegateReplayUnavailable, Dispatched: true, CostKnown: false}
 	}
 	if launched.JobID <= 0 {
-		detail := strings.TrimSpace(safeDiagnostic(launched.Error))
+		detail := strings.TrimSpace(SafeDiagnostic(launched.Error))
 		if detail == "" {
 			detail = "empty launch response"
 		} else {
@@ -369,7 +377,7 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 	unassignedSince := time.Now()
 	for {
 		if err := ctx.Err(); err != nil {
-			_ = c.cancelRemoteAndForget(launched.JobID, key, ctx)
+			_ = c.CancelAndRelease(launched.JobID, key, ctx)
 			return DelegateResult{}, delegateExecutionError(err, true, false, 0)
 		}
 		var status struct {
@@ -382,7 +390,7 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 		}
 		if err := c.doJSON(ctx, http.MethodPost, "/v1/delegate/status", map[string]any{"job_id": launched.JobID, "full_result": true, "result_limit": -1}, &status); err != nil {
 			if ctx.Err() != nil {
-				_ = c.cancelRemoteAndForget(launched.JobID, key, ctx)
+				_ = c.CancelAndRelease(launched.JobID, key, ctx)
 				return DelegateResult{}, delegateExecutionError(ctx.Err(), true, false, 0)
 			}
 			// Once the resource plane has acknowledged that a job is waiting
@@ -393,7 +401,7 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 			if !unassignedSince.IsZero() {
 				select {
 				case <-ctx.Done():
-					_ = c.cancelRemoteAndForget(launched.JobID, key, ctx)
+					_ = c.CancelAndRelease(launched.JobID, key, ctx)
 					return DelegateResult{}, ctx.Err()
 				case <-ticker.C:
 					continue
@@ -427,7 +435,7 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 				c.releaseReservation(context.WithoutCancel(ctx), key, 0)
 				return DelegateResult{}, delegateExecutionError(fmt.Errorf("delegate job %d returned an empty partial result", launched.JobID), true, status.CostKnown, status.CostUSD)
 			}
-			if !request.acceptPartial {
+			if !request.AcceptPartial {
 				c.releaseReservation(context.WithoutCancel(ctx), key, 0)
 				return DelegateResult{}, delegateExecutionError(fmt.Errorf("delegate job %d returned a partial result for a block that requires completion", launched.JobID), true, status.CostKnown, status.CostUSD)
 			}
@@ -451,34 +459,11 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 			// The remote resource-plane job outlives an HTTP poll unless it is
 			// explicitly cancelled. Wait for the cancellation acknowledgement so
 			// a wall-cap resume cannot overlap the old job in the same worktree.
-			_ = c.cancelRemoteAndForget(launched.JobID, key, ctx)
+			_ = c.CancelAndRelease(launched.JobID, key, ctx)
 			return DelegateResult{}, delegateExecutionError(ctx.Err(), true, false, 0)
 		case <-ticker.C:
 		}
 	}
-}
-
-// CancelTerminalJobs closes the durable commit-to-cancel crash window. A
-// mapping is removed only after the resource plane acknowledges cancellation;
-// failures remain mapped and are retried by the next scheduler fill.
-func (c *HTTPAgentClient) CancelTerminalJobs(ctx context.Context) (int, error) {
-	if c.store == nil {
-		return 0, nil
-	}
-	mappings, err := c.store.TerminalDelegateJobs(ctx)
-	if err != nil {
-		return 0, err
-	}
-	cancelled := 0
-	var errs []error
-	for _, mapping := range mappings {
-		if err := c.cancelRemoteAndForget(mapping.JobID, mapping.ExecutionKey, ctx); err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		cancelled++
-	}
-	return cancelled, errors.Join(errs...)
 }
 
 func (c *HTTPAgentClient) DelegateGroup(ctx context.Context, requests []DelegateRequest) []DelegateGroupResult {
@@ -744,12 +729,16 @@ func (c *HTTPAgentClient) releaseReservation(ctx context.Context, key string, jo
 	_ = c.doJSON(releaseCtx, http.MethodPost, "/v1/delegate/reservation/forget", payload, nil)
 }
 
-func delegateJobKey(request DelegateRequest) string {
+// DelegateJobKey is the execution key a call reserves under. It is exported
+// because the reservation is a contract between this client and the plane that
+// stores it: anything reasoning about replay -- including the scheduler's
+// terminal sweep -- has to name the same key.
+func DelegateJobKey(request DelegateRequest) string {
 	keyMaterial, _ := json.Marshal(request)
 	return fmt.Sprintf("%s:%s:%s:%x", request.WorkItemID, request.Stage, request.ExecutionVersion, sha256.Sum256(keyMaterial))
 }
 
-func (c *HTTPAgentClient) cancelRemoteAndForget(jobID int, key string, parent context.Context) error {
+func (c *HTTPAgentClient) CancelAndRelease(jobID int, key string, parent context.Context) error {
 	cancelCtx, cancel := context.WithTimeout(context.WithoutCancel(parent), delegateCancelTimeout)
 	defer cancel()
 	var response struct {

@@ -100,7 +100,7 @@ func main() {
 		}
 	} else if *agentURL != "" || *agentSocket != "" {
 		agents, clientErr := engine.NewHTTPAgentClient(engine.AgentHTTPConfig{
-			BaseURL: *agentURL, UnixSocket: *agentSocket, Store: store,
+			BaseURL: *agentURL, UnixSocket: *agentSocket,
 			PendingTimeoutSource: func() time.Duration {
 				return time.Duration(configStore.Int("autonomy.delegate_pending_secs", 120)) * time.Second
 			},
@@ -146,7 +146,10 @@ func main() {
 		}
 		scheduler := engine.NewScheduler(store, workflowEngine, *concurrency, nil)
 		if agentClient != nil {
-			scheduler.SetTerminalCancellation(agentClient.CancelTerminalJobs)
+			// The plane client holds no database handle, so the terminal sweep --
+			// which reads the Go-owned lifecycle tables -- composes it with the store
+			// here instead of the client carrying one.
+			scheduler.SetTerminalCancellation(engine.NewTerminalJobCanceller(store, agentClient).CancelTerminalJobs)
 		}
 		var liveMu sync.Mutex
 		lastConcurrency := *concurrency

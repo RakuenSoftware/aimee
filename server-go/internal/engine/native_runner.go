@@ -593,7 +593,7 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 		// implement/document are native branch-producing blocks regardless of the
 		// custom block registry's Produces metadata. This pre-step is committed here,
 		// and the completed implementation is verified before the step advances.
-		testResult, testErr := r.delegate(ctx, req, DelegateRequest{Role: "code", Persona: paramString(req.Node, "test_persona", "qa"), Delegate: paramString(req.Node, "test_delegate", ""), Prompt: testPrompt, Workdir: workdir, Tools: true, acceptPartial: true})
+		testResult, testErr := r.delegate(ctx, req, DelegateRequest{Role: "code", Persona: paramString(req.Node, "test_persona", "qa"), Delegate: paramString(req.Node, "test_delegate", ""), Prompt: testPrompt, Workdir: workdir, Tools: true, AcceptPartial: true})
 		if testErr != nil {
 			return StepResult{}, testErr
 		}
@@ -611,7 +611,7 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 	// independently committed and verified by the Go native runner". Record the
 	// pre-delegate HEAD so that promise can actually be checked below.
 	baseHead, baseHeadErr := gitText(ctx, workdir, "rev-parse", "HEAD")
-	result, err := r.delegate(ctx, req, DelegateRequest{Role: "code", Persona: paramString(req.Node, "persona", "engineer"), Delegate: paramString(req.Node, "delegate", ""), Prompt: prompt, Workdir: workdir, Tools: true, acceptPartial: true})
+	result, err := r.delegate(ctx, req, DelegateRequest{Role: "code", Persona: paramString(req.Node, "persona", "engineer"), Delegate: paramString(req.Node, "delegate", ""), Prompt: prompt, Workdir: workdir, Tools: true, AcceptPartial: true})
 	if err != nil {
 		return StepResult{}, err
 	}

@@ -1,31 +1,22 @@
-package engine
+package plane
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/JBailes/aimee/server-go/internal/db1"
 )
 
 func TestHTTPAgentClientReusesDurableRemoteJob(t *testing.T) {
-	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
 	plane := newReservationPlane(42)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -38,7 +29,7 @@ func TestHTTPAgentClientReusesDurableRemoteJob(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store, PollEvery: time.Millisecond})
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, PollEvery: time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,11 +130,6 @@ func TestHTTPAgentClientReplayMissRemainsUnresolved(t *testing.T) {
 }
 
 func TestHTTPAgentClientDurableSlotsLaunchDistinctJobs(t *testing.T) {
-	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
 	var launches atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -170,7 +156,7 @@ func TestHTTPAgentClientDurableSlotsLaunchDistinctJobs(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store, PollEvery: time.Millisecond})
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, PollEvery: time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,11 +316,6 @@ func TestHTTPAgentClientRetriesUnpinnedRoutingButNeverWeakensPin(t *testing.T) {
 }
 
 func TestHTTPAgentClientPreservesContextCancellationWhenRemoteDoesNotAcknowledge(t *testing.T) {
-	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
 	statusStarted := make(chan struct{})
 	statusRelease := make(chan struct{})
 	var statusOnce sync.Once
@@ -355,7 +336,7 @@ func TestHTTPAgentClientPreservesContextCancellationWhenRemoteDoesNotAcknowledge
 		}
 	}))
 	defer server.Close()
-	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store, PollEvery: time.Millisecond})
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, PollEvery: time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -376,17 +357,12 @@ func TestHTTPAgentClientPreservesContextCancellationWhenRemoteDoesNotAcknowledge
 	}
 	// The remote refused to acknowledge the cancellation, so the job may still be
 	// running and its reservation must survive for a durable replay.
-	if jobID, ok := plane.reservedJob(delegateJobKey(request)); !ok || jobID != 45 {
+	if jobID, ok := plane.reservedJob(DelegateJobKey(request)); !ok || jobID != 45 {
 		t.Fatalf("unacknowledged remote cancellation released the reservation: job=%d held=%v", jobID, ok)
 	}
 }
 
 func TestHTTPAgentClientCancelsDelegateResourceAndForgetsAcknowledgedJob(t *testing.T) {
-	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
 	statusStarted := make(chan struct{})
 	statusRelease := make(chan struct{})
 	var statusOnce sync.Once
@@ -421,7 +397,7 @@ func TestHTTPAgentClientCancelsDelegateResourceAndForgetsAcknowledgedJob(t *test
 		}
 	}))
 	defer server.Close()
-	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store, PollEvery: time.Millisecond})
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, PollEvery: time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -442,94 +418,9 @@ func TestHTTPAgentClientCancelsDelegateResourceAndForgetsAcknowledgedJob(t *test
 	if singularCancels.Load() != 0 || pluralCancels.Load() != 1 || cancelledJobID.Load() != 43 {
 		t.Fatalf("singular=%d plural=%d job_id=%d", singularCancels.Load(), pluralCancels.Load(), cancelledJobID.Load())
 	}
-	if _, held := plane.reservedJob(delegateJobKey(request)); held {
+	if _, held := plane.reservedJob(DelegateJobKey(request)); held {
 		t.Fatal("acknowledged cancelled delegate retained its reservation")
 	}
-}
-
-func TestCancelTerminalJobsRecoversCommitToCancelCrashWindow(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "db.sqlite")
-	store, err := db1.Open(dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	const workItemID = "wi_crash_recovery"
-	if err := store.CreateWorkItem(t.Context(), db1.CreateWorkItem{ID: workItemID, Repo: "repo", ProposalPath: workItemID, WorkflowName: "build", StartStage: "impl"}); err != nil {
-		t.Fatal(err)
-	}
-	request := DelegateRequest{Role: "code", Persona: "engineer", Prompt: "implement", WorkItemID: workItemID, Stage: "impl", ExecutionVersion: "v1"}
-	key := delegateJobKey(request)
-	if err := store.SaveWorkflowDelegateJob(t.Context(), key, workItemID, 77, "participant-77"); err != nil {
-		t.Fatal(err)
-	}
-	const completedID = "wi_completed_mapping"
-	if err := store.CreateWorkItem(t.Context(), db1.CreateWorkItem{ID: completedID, Repo: "repo", ProposalPath: completedID, WorkflowName: "build", StartStage: "impl"}); err != nil {
-		t.Fatal(err)
-	}
-	completedKey := completedID + ":impl:v1:hash"
-	if err := store.SaveWorkflowDelegateJob(t.Context(), completedKey, completedID, 78, "participant-78"); err != nil {
-		t.Fatal(err)
-	}
-	rawDB, err := sql.Open("sqlite", "file:"+dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rawDB.Close()
-	if _, err := rawDB.ExecContext(t.Context(), `CREATE TABLE IF NOT EXISTS agent_jobs (id INTEGER PRIMARY KEY,status TEXT NOT NULL); INSERT INTO agent_jobs(id,status) VALUES(77,'running'),(78,'done')`); err != nil {
-		t.Fatal(err)
-	}
-	// Model a server failure immediately after the terminal lifecycle commit:
-	// the durable delegate mapping remains and no in-memory cancel callback ran.
-	if _, err := store.StopTree(t.Context(), workItemID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.StopTree(t.Context(), completedID); err != nil {
-		t.Fatal(err)
-	}
-	var cancelledJob atomic.Int32
-	// The terminal sweep still reads the Go lifecycle tables, but releasing the
-	// reservation is now the plane's, so the release has to be observed there.
-	var released sync.Map
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v1/jobs/cancel":
-			var body struct {
-				JobID int `json:"job_id"`
-			}
-			_ = json.NewDecoder(r.Body).Decode(&body)
-			cancelledJob.Store(int32(body.JobID))
-			_ = json.NewEncoder(w).Encode(map[string]any{"cancelled": true})
-		case "/v1/delegate/reservation/forget":
-			var body struct {
-				ExecutionKey string `json:"execution_key"`
-				JobID        int    `json:"job_id"`
-			}
-			_ = json.NewDecoder(r.Body).Decode(&body)
-			released.Store(body.ExecutionKey, body.JobID)
-			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "released": true})
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store})
-	if err != nil {
-		t.Fatal(err)
-	}
-	cancelled, err := client.CancelTerminalJobs(t.Context())
-	if err != nil || cancelled != 1 || cancelledJob.Load() != 77 {
-		t.Fatalf("cancelled=%d job=%d err=%v", cancelled, cancelledJob.Load(), err)
-	}
-	// The release names the job it cancelled, so a retry that has already
-	// reserved a newer job under the same key survives the compare-delete.
-	if jobID, ok := released.Load(key); !ok || jobID != 77 {
-		t.Fatalf("acknowledged terminal reservation was not released: job=%v held=%v", jobID, ok)
-	}
-	if _, ok := released.Load(completedKey); ok {
-		t.Fatal("completed mapping was incorrectly released")
-	}
-
 }
 
 func TestCancelRemoteRetainsMappingWithoutBooleanAcknowledgement(t *testing.T) {
@@ -549,11 +440,6 @@ func TestCancelRemoteRetainsMappingWithoutBooleanAcknowledgement(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer store.Close()
 			plane := newReservationPlane(44)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/v1/delegate/reservation/forget" {
@@ -570,13 +456,13 @@ func TestCancelRemoteRetainsMappingWithoutBooleanAcknowledgement(t *testing.T) {
 				_, _ = w.Write([]byte(tc.response))
 			}))
 			defer server.Close()
-			client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store})
+			client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL})
 			if err != nil {
 				t.Fatal(err)
 			}
 			const key = "cancel-unacknowledged"
 			plane.reserve(key, 44)
-			cancelErr := client.cancelRemoteAndForget(44, key, t.Context())
+			cancelErr := client.CancelAndRelease(44, key, t.Context())
 			if cancelErr == nil {
 				t.Fatal("unacknowledged cancellation returned success")
 			}
@@ -606,18 +492,13 @@ func TestHTTPAgentClientAcceptsNonemptyPartialResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := client.Delegate(t.Context(), DelegateRequest{Role: "code", Persona: "engineer", Prompt: "implement", acceptPartial: true})
+	result, err := client.Delegate(t.Context(), DelegateRequest{Role: "code", Persona: "engineer", Prompt: "implement", AcceptPartial: true})
 	if err != nil || result.Response != "commit already created" || result.Agent != "minimax" || !result.Partial {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
 }
 
 func TestHTTPAgentClientRejectsLaunchWithoutJobID(t *testing.T) {
-	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
 	var launches atomic.Int32
 	plane := newReservationPlane(7)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -629,16 +510,17 @@ func TestHTTPAgentClientRejectsLaunchWithoutJobID(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"error": "no\neligible\tcapacity"})
 	}))
 	defer server.Close()
+	// A WorkItemID is what makes a call replayable: it is the only reason an
+	// execution key is sent. Both shapes must report the same launch failure.
 	for _, tc := range []struct {
 		name    string
-		store   *db1.Store
 		request DelegateRequest
 	}{
-		{name: "durable", store: store, request: DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review", WorkItemID: "wi_no_capacity", Stage: "gate", ExecutionVersion: "v1"}},
-		{name: "without durable mapping", request: DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review"}},
+		{name: "replayable", request: DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review", WorkItemID: "wi_no_capacity", Stage: "gate", ExecutionVersion: "v1"}},
+		{name: "without a reservation", request: DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			client, clientErr := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: tc.store})
+			client, clientErr := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL})
 			if clientErr != nil {
 				t.Fatal(clientErr)
 			}
@@ -653,10 +535,10 @@ func TestHTTPAgentClientRejectsLaunchWithoutJobID(t *testing.T) {
 	// A launch that produced no usable job id must leave nothing reserved:
 	// a phantom reservation would make every retry replay a launch that
 	// never happened instead of recovering when capacity returns.
-	if jobID, held := plane.reservedJob(delegateJobKey(request)); held {
+	if jobID, held := plane.reservedJob(DelegateJobKey(request)); held {
 		t.Fatalf("invalid launch reserved job=%d", jobID)
 	}
-	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store})
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -706,11 +588,6 @@ func TestHTTPAgentClientRejectsPartialUnlessBlockOptsIn(t *testing.T) {
 }
 
 func TestHTTPAgentClientReplaysAcceptedPartialIdempotently(t *testing.T) {
-	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
 	plane := newReservationPlane(9)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -725,11 +602,11 @@ func TestHTTPAgentClientReplaysAcceptedPartialIdempotently(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store, PollEvery: time.Millisecond})
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, PollEvery: time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := DelegateRequest{Role: "code", Persona: "engineer", Prompt: "implement", WorkItemID: "wi", Stage: "impl", ExecutionVersion: "v1", acceptPartial: true}
+	request := DelegateRequest{Role: "code", Persona: "engineer", Prompt: "implement", WorkItemID: "wi", Stage: "impl", ExecutionVersion: "v1", AcceptPartial: true}
 	for range 2 {
 		result, callErr := client.Delegate(t.Context(), request)
 		if callErr != nil || result.Response != "committed artifact" || !result.Partial {
@@ -742,11 +619,6 @@ func TestHTTPAgentClientReplaysAcceptedPartialIdempotently(t *testing.T) {
 }
 
 func TestHTTPAgentClientExpiresUnassignedPendingJob(t *testing.T) {
-	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
 	var launches atomic.Int32
 	var cancellations atomic.Int32
 	plane := newReservationPlane(17)
@@ -769,7 +641,7 @@ func TestHTTPAgentClientExpiresUnassignedPendingJob(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store,
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL,
 		PollEvery: time.Millisecond, PendingTimeout: 20 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
@@ -782,7 +654,7 @@ func TestHTTPAgentClientExpiresUnassignedPendingJob(t *testing.T) {
 	if launches.Load() != 1 || cancellations.Load() != 1 {
 		t.Fatalf("launches=%d cancellations=%d", launches.Load(), cancellations.Load())
 	}
-	if _, held := plane.reservedJob(delegateJobKey(request)); held {
+	if _, held := plane.reservedJob(DelegateJobKey(request)); held {
 		t.Fatal("expired pending job retained its reservation")
 	}
 	if _, err := client.Delegate(t.Context(), request); err == nil {
@@ -794,11 +666,6 @@ func TestHTTPAgentClientExpiresUnassignedPendingJob(t *testing.T) {
 }
 
 func TestHTTPAgentClientExpiresRoutedPendingJob(t *testing.T) {
-	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
 	var cancellations atomic.Int32
 	plane := newReservationPlane(23)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -818,7 +685,7 @@ func TestHTTPAgentClientExpiresRoutedPendingJob(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store,
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL,
 		PollEvery: time.Millisecond, PendingTimeout: MinDelegatePendingTimeout})
 	if err != nil {
 		t.Fatal(err)
@@ -831,17 +698,12 @@ func TestHTTPAgentClientExpiresRoutedPendingJob(t *testing.T) {
 	if cancellations.Load() != 1 {
 		t.Fatalf("cancellations=%d, want 1", cancellations.Load())
 	}
-	if _, held := plane.reservedJob(delegateJobKey(request)); held {
+	if _, held := plane.reservedJob(DelegateJobKey(request)); held {
 		t.Fatal("expired routed pending job retained its reservation")
 	}
 }
 
 func TestHTTPAgentClientExpiresUnassignedRunningJob(t *testing.T) {
-	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
 	var launches atomic.Int32
 	var cancellations atomic.Int32
 	var cancelledJobID atomic.Int64
@@ -876,7 +738,7 @@ func TestHTTPAgentClientExpiresUnassignedRunningJob(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store,
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL,
 		PollEvery: time.Millisecond, PendingTimeout: 20 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
@@ -895,17 +757,12 @@ func TestHTTPAgentClientExpiresUnassignedRunningJob(t *testing.T) {
 	if cancelledJobID.Load() != 20 || gotCancelReason != "unassigned delegate lease expired" {
 		t.Fatalf("cancelled job=%d reason=%q", cancelledJobID.Load(), gotCancelReason)
 	}
-	if _, held := plane.reservedJob(delegateJobKey(request)); held {
+	if _, held := plane.reservedJob(DelegateJobKey(request)); held {
 		t.Fatal("expired running job retained its reservation")
 	}
 }
 
 func TestHTTPAgentClientAssignedObservationClearsUnassignedLease(t *testing.T) {
-	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
 	var polls atomic.Int32
 	var cancellations atomic.Int32
 	plane := newReservationPlane(21)
@@ -932,7 +789,7 @@ func TestHTTPAgentClientAssignedObservationClearsUnassignedLease(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store,
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL,
 		PollEvery: time.Millisecond, PendingTimeout: MinDelegatePendingTimeout})
 	if err != nil {
 		t.Fatal(err)
@@ -948,17 +805,12 @@ func TestHTTPAgentClientAssignedObservationClearsUnassignedLease(t *testing.T) {
 	}
 	// A transient status failure on an assigned job is not an expiry, so its
 	// reservation must survive for the replay that follows.
-	if jobID, ok := plane.reservedJob(delegateJobKey(request)); !ok || jobID != 21 {
+	if jobID, ok := plane.reservedJob(DelegateJobKey(request)); !ok || jobID != 21 {
 		t.Fatalf("assigned job reservation was not retained: job=%d held=%v", jobID, ok)
 	}
 }
 
 func TestHTTPAgentClientTerminalEmptyAgentDoesNotExpire(t *testing.T) {
-	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
 	var cancellations atomic.Int32
 	plane := newReservationPlane(22)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -974,7 +826,7 @@ func TestHTTPAgentClientTerminalEmptyAgentDoesNotExpire(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store,
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL,
 		PollEvery: time.Millisecond, PendingTimeout: MinDelegatePendingTimeout})
 	if err != nil {
 		t.Fatal(err)
@@ -1036,11 +888,6 @@ func TestHTTPAgentClientDoesNotExpireAssignedJob(t *testing.T) {
 }
 
 func TestHTTPAgentClientExpiresAfterTransientStatusFailures(t *testing.T) {
-	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
 	var polls atomic.Int32
 	var cancellations atomic.Int32
 	plane := newReservationPlane(19)
@@ -1066,7 +913,7 @@ func TestHTTPAgentClientExpiresAfterTransientStatusFailures(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store,
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL,
 		PollEvery: time.Millisecond, PendingTimeout: 20 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
@@ -1079,17 +926,12 @@ func TestHTTPAgentClientExpiresAfterTransientStatusFailures(t *testing.T) {
 	if cancellations.Load() != 1 {
 		t.Fatalf("cancellations=%d, want 1", cancellations.Load())
 	}
-	if _, held := plane.reservedJob(delegateJobKey(request)); held {
+	if _, held := plane.reservedJob(DelegateJobKey(request)); held {
 		t.Fatal("expired job retained its reservation after transient status failures")
 	}
 }
 
 func TestHTTPAgentClientRetainsMappingWhenExpiryCancellationFails(t *testing.T) {
-	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
 	plane := newReservationPlane(20)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/delegate/reservation/forget" {
@@ -1103,7 +945,7 @@ func TestHTTPAgentClientRetainsMappingWhenExpiryCancellationFails(t *testing.T) 
 		http.NotFound(w, r)
 	}))
 	defer server.Close()
-	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store})
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1118,11 +960,6 @@ func TestHTTPAgentClientRetainsMappingWhenExpiryCancellationFails(t *testing.T) 
 }
 
 func TestHTTPAgentClientRetainsMappingWhenExpiryCancellationRejected(t *testing.T) {
-	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
 	plane := newReservationPlane(23)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -1137,8 +974,7 @@ func TestHTTPAgentClientRetainsMappingWhenExpiryCancellationRejected(t *testing.
 		}
 	}))
 	defer server.Close()
-	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL,
-		Store: store})
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1173,7 +1009,7 @@ func TestDelegateJobKeyIncludesCompleteCorrectivePrompt(t *testing.T) {
 	base := DelegateRequest{Role: "draft", Persona: "architect", Prompt: "original", WorkItemID: "wi", Stage: "scope", ExecutionVersion: "v1"}
 	repair := base
 	repair.Prompt += "\ncomplete invalid response"
-	if delegateJobKey(base) == delegateJobKey(repair) {
+	if DelegateJobKey(base) == DelegateJobKey(repair) {
 		t.Fatal("corrective synthesis reused the original durable job key")
 	}
 }
@@ -1183,7 +1019,7 @@ func TestDelegateJobKeyIncludesExplicitEligibilityFallback(t *testing.T) {
 	fallback := assigned
 	fallback.Delegate = ""
 	fallback.RetryTag = "eligible-fallback:0:kimi"
-	if delegateJobKey(assigned) == delegateJobKey(fallback) {
+	if DelegateJobKey(assigned) == DelegateJobKey(fallback) {
 		t.Fatal("eligibility fallback reused the assigned delegate job key")
 	}
 }
@@ -1251,7 +1087,7 @@ func TestHTTPAgentClientDoesNotRerouteOperatorPinAfterAdmissionBackpressure(t *t
 	}
 	client.client.Transport = transport
 	_, err = client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Prompt: "review", Delegate: "operator-pinned"})
-	if err == nil || !isCapacityBackpressure(err) || launches.Load() != 1 {
+	if err == nil || !IsCapacityBackpressure(err) || launches.Load() != 1 {
 		t.Fatalf("operator pin was rerouted: launches=%d err=%v", launches.Load(), err)
 	}
 }
