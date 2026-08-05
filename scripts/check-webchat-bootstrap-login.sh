@@ -15,6 +15,11 @@ trap 'find "$test_dir" -depth -delete 2>/dev/null || true' EXIT
 export AIMEE_HOME="$test_dir/home"
 mkdir -p "$AIMEE_HOME/webchat"
 
+# Minimal containers do not have to export USER.  Resolve the account before the
+# fixture replaces id() below so set -u cannot turn an environment detail into a
+# release-check failure.
+fixture_process_user=${USER:-$(id -un 2>/dev/null || printf '%s' aimee)}
+
 sealed_dir="$test_dir/sealed-vault-fixture"
 mkdir -p "$sealed_dir"
 cleared_users="$test_dir/cleared-users"
@@ -46,7 +51,7 @@ runuser() {
 # unconditionally, so provisioning always took the already-exists branch and the
 # useradd path — the one a FRESH appliance actually walks — was never exercised.
 existing_users="$test_dir/existing-users"
-printf '%s\n' operator legacy aimee "$USER" > "$existing_users"
+printf '%s\n' operator legacy aimee "$fixture_process_user" > "$existing_users"
 id() {
   case ${1:-} in
     -nG|-gn|-u) shift ;;
@@ -171,7 +176,7 @@ unset AIMEE_WEBCHAT_USER AIMEE_WEBCHAT_PASSWORD
 # section above provisioned a real login and put it in the group; leaving it
 # there would (correctly) suppress generation and this section would be testing
 # nothing. The old stub hid that by never answering for the login group.
-printf '%s\n' operator legacy aimee "$USER" > "$existing_users"
+printf '%s\n' operator legacy aimee "$fixture_process_user" > "$existing_users"
 printf '' > "$group_members"
 : > "$shadow_hashes"
 
@@ -222,7 +227,7 @@ second_log=$(webchat_provision_bootstrap_account 2>&1)
 #
 # Model exactly that: markers intact, accounts and group membership gone.
 : > "$cleared_users"
-printf '%s\n' operator legacy aimee "$USER" > "$existing_users"   # the image's own users
+printf '%s\n' operator legacy aimee "$fixture_process_user" > "$existing_users"   # the image's own users
 printf '' > "$group_members"                                       # group ships empty
 printf 'generated:%s\n' "$gen_user" > "$WEBCHAT_BOOTSTRAP_USER"
 printf 'jbailes\n' > "$WEBCHAT_BOOTSTRAP_REPLACED"
@@ -244,7 +249,7 @@ upgrade_user=$(sed -n 's/.*username: //p' <<<"$upgrade_log" | tr -d ' ' | head -
 # records the managed accounts and their verifiers; restore them instead.
 rm -rf "$AIMEE_HOME/webchat"; mkdir -p "$AIMEE_HOME/webchat"
 : > "$cleared_users"
-printf '%s\n' operator legacy aimee "$USER" > "$existing_users"   # the image's own users
+printf '%s\n' operator legacy aimee "$fixture_process_user" > "$existing_users"   # the image's own users
 printf '' > "$group_members"                                       # group ships empty
 printf 'admin:$6$salt$operatorverifier\n' > "$AIMEE_HOME/webchat/identities"
 printf 'generated:aimee-000000000000\n' > "$WEBCHAT_BOOTSTRAP_USER"
@@ -271,7 +276,7 @@ survivor_log=$(webchat_provision_bootstrap_account 2>&1)
 # an account nobody can authenticate as, and then suppress minting a real one.
 rm -rf "$AIMEE_HOME/webchat"; mkdir -p "$AIMEE_HOME/webchat"
 : > "$cleared_users"
-printf '%s\n' operator legacy aimee "$USER" > "$existing_users"
+printf '%s\n' operator legacy aimee "$fixture_process_user" > "$existing_users"
 printf '' > "$group_members"
 printf 'retired:!$y$locked\n' > "$AIMEE_HOME/webchat/identities"
 locked_record_log=$(webchat_provision_bootstrap_account 2>&1)
@@ -288,7 +293,7 @@ rm -f "$AIMEE_HOME/webchat/identities"
 # authenticate as — observed after deleting a probe account left exactly this.
 rm -rf "$AIMEE_HOME/webchat"; mkdir -p "$AIMEE_HOME/webchat"
 : > "$cleared_users"
-printf '%s\n' operator legacy aimee "$USER" retired-acct > "$existing_users"
+printf '%s\n' operator legacy aimee "$fixture_process_user" retired-acct > "$existing_users"
 printf 'retired-acct\n' > "$group_members"
 printf 'retired-acct !$y$locked\n' > "$shadow_hashes"
 locked_log=$(webchat_provision_bootstrap_account 2>&1)
@@ -302,7 +307,7 @@ usable_log=$(webchat_provision_bootstrap_account 2>&1)
 ! grep -Fq 'FIRST-BOOT DASHBOARD LOGIN' <<<"$usable_log"
 
 # Restore the baseline table for the checks below.
-printf '%s\n' operator legacy aimee "$USER" > "$existing_users"
+printf '%s\n' operator legacy aimee "$fixture_process_user" > "$existing_users"
 printf '' > "$group_members"
 : > "$shadow_hashes"
 
