@@ -460,10 +460,131 @@ generalisable finding about agent frameworks, and it is falsifiable: each fix ha
 a before/after transcript.
 
 **Accounting note for the roundtable path.** A review seat is a delegate, and
-delegate tokens never appear in the codex transcript the harness meters. The
-polling turns (`roundtable_status`) DO appear and are billed to the primary.
-Report seat cost separately rather than letting review work vanish into an
-unmetered channel — the same discipline as Finding 14.
+delegate tokens never appear in the codex transcript the harness meters. Report
+seat cost separately rather than letting review work vanish into an unmetered
+channel — the same discipline as Finding 14. (Until Finding 16 the polling turns
+DID appear and were billed to the primary; the review is synchronous now, so the
+only metered turn is the single blocking call.)
+
+## Finding 16 — the roundtable poll contract, and why polling is never cheap
+
+**Counting note, and a correction.** `summary.json`'s `codex.tool_calls` counts
+`item.started` AND `item.completed` for the same item, so every call type that
+emits both (command_execution, mcp_tool_call, file_change) is DOUBLED there.
+This finding originally quoted those doubled figures. Count distinct item ids
+from `item.completed` instead. Token usage is NOT affected: exactly one event
+per run carries `usage` (`turn.completed`), so every credit figure below and
+elsewhere in this document stands.
+
+`aimee__am_1f0f1ab528__r1` (CT403), distinct tool calls:
+
+```
+shell (command_execution)      19
+mcp:aimee:roundtable_status    16   <--
+mcp:aimee:index                 2
+mcp:aimee:preview_blast_radius  2
+mcp:aimee:find_symbol           1
+mcp:aimee:roundtable_review     1
+file_change                     1
+                            -----
+                               42   (baseline: 10)
+```
+
+**16 of 42 calls were polling one review to completion.** Actual retrieval — the
+thing aimee is supposed to be paying for — was 5 calls.
+
+Measured, not inferred:
+
+| | baseline | aimee |
+|---|---|---|
+| uncached input | 68,295 | 94,458 (1.38x) |
+| cached input | 423,168 | 2,705,152 (6.39x) |
+| credits | 16.52 | 53.49 |
+| — cached component | 5.29 | **33.81 (63% of the bill)** |
+
+The retrieval context aimee pulls in is cheap: uncached input is only 1.38x
+baseline. The cost is cached input, and cached input scales with TURN COUNT,
+because every turn re-sends the whole accumulated conversation. Across all four
+arms, credits are monotonic in call count (10/16/22/42 calls →
+16.52/24.61/30.84/53.49 credits).
+
+**The mechanism.** A poll costs microseconds server-side and an entire model
+turn on the client. The tool description said, in as many words:
+
+> "Returns a run_id immediately; poll roundtable_status until synthesis completes."
+
+and the submit path attached `poll_after_ms: 1000` to every non-terminal
+snapshot. A one-second poll interval, advertised on a job whose own header
+comment says it can run twenty minutes. The agent was following instructions.
+
+**The part that makes this a design finding rather than a tuning one.** The
+layer below was already synchronous: `handle_roundtable_review` calls
+`obs_bus_module_call` and blocks on the bus until the verdict arrives. The
+asynchronous op-run wrapper on top of it made nothing concurrent that was not
+already concurrent — it only moved completion-detection to the one place where
+waiting is expensive, the model's turn loop.
+
+Fixed by deleting the wrapper: `roundtable_review` dispatches inline and returns
+the verdict. Each layer blocks on the one below —
+
+```
+thin client -> aimee-server -> event bus -> roundtable -> model
+```
+
+— and none of it is provider-specific. `roundtable_status` is gone from the tool
+surface entirely; a status tool is an invitation to poll even when the call
+already blocks.
+
+**Not yet measured.** The post-fix cost is a rerun, not an arithmetic exercise:
+polls land late in a run when context is fattest, so 16/42 calls is not 38% of
+the bill, and the blocking call's wall time is a real (if unbilled) change.
+Report the new cell, do not project this one.
+
+**What the fix does NOT address.** Removing the polls takes the cell from 42
+calls to 26, against baseline's 10. The remaining +16 is Finding 17.
+
+## Finding 17 — the rest of the turns: retrieval was additive, not substitutive
+
+Same cell, with the 16 polls removed: **26 calls against baseline's 10.** Where
+the remaining +16 sits, by category:
+
+| category | baseline | aimee | delta |
+|---|---|---|---|
+| MCP retrieval (index/find_symbol/blast_radius) | 0 | 5 | +5 |
+| roundtable_review (blocking verdict) | 0 | 1 | +1 |
+| exploration shell (search, read, search+read) | 5 | 12 | **+7** |
+| git inspection | 1 | 3 | +2 |
+| build/test | 3 | 3 | 0 |
+| file write | 1 | 1 | 0 |
+| read own SKILL.md from the plugin cache | 0 | 1 | +1 |
+
+**The finding is the third row.** aimee spent 5 calls on the index — and then did
+**12 exploration shell calls to baseline's 5**, on the same task. It grepped the
+tree *more* than the arm with no index at all. Retrieval did not replace search;
+it was added on top of it. That is 7 turns, and it is the largest remaining
+block after polling.
+
+This is the same shape as Finding 7 but a different mechanism. Finding 7 was
+about *batching* (span reads one range per call where the shell form chained
+several). Here the shell calls ARE well batched — five of the twelve chain two
+or three reads with `&&`, and the three build/test calls exactly match
+baseline's. The waste is not in how the calls are formed; it is that the
+retrieval and the searching answer the same question and both get asked.
+
+Two calls bought nothing at all:
+
+- **#1** reads `…/plugins/cache/local/aimee/0.3.0/skills/…` — the agent reading
+  its own skill file. `client_integrations.c` tells it not to, in those words
+  ("Do not read this file, or anything else under the plugin cache"), and it did
+  anyway. This same call appears in Finding 7's waste table on a different task,
+  so it is not a one-off.
+- **#18** re-reads `TICKET.txt` at the end of the run, after **#2** had already
+  read all 240 lines of it.
+
+**What this does not say.** n=1 cell, one task, index-only mode. The exploration
+gap needs to hold across the corpus before it is a claim; a single task where
+the index answers badly would produce this pattern honestly. Check it against
+the other 13 before publishing.
 
 ## Methodology traps hit in this work
 
