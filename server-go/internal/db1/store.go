@@ -164,17 +164,6 @@ CREATE TABLE IF NOT EXISTS lifecycle_delegate_job (
 	return nil
 }
 
-func (s *Store) DelegateJob(ctx context.Context, key string) (int, string, error) {
-	var id int
-	var participant string
-	err := s.db.QueryRowContext(ctx, `SELECT job_id,participant_token FROM lifecycle_delegate_job WHERE execution_key=?`, key).Scan(&id, &participant)
-	return id, participant, err
-}
-
-func (s *Store) SaveDelegateJob(ctx context.Context, key string, id int, participant string) error {
-	return s.SaveWorkflowDelegateJob(ctx, key, "", id, participant)
-}
-
 func (s *Store) SaveWorkflowDelegateJob(ctx context.Context, key, workItemID string, id int, participant string) error {
 	if key == "" || id <= 0 {
 		return errors.New("delegate execution key and job id are required")
@@ -233,62 +222,6 @@ ORDER BY mapping.cancel_attempts,mapping.job_id LIMIT ?`, terminalCancellationBa
 		return nil, err
 	}
 	return mappings, nil
-}
-
-func (s *Store) ForgetDelegateJob(ctx context.Context, key string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM lifecycle_delegate_job WHERE execution_key=?`, key)
-	return err
-}
-
-// ForgetDelegateJobIfMatches physically compare-deletes a durable mapping by
-// execution key and job ID. It returns true only when exactly that row was
-// deleted; a later retry under the same logical key is preserved.
-func (s *Store) ForgetDelegateJobIfMatches(ctx context.Context, key string, jobID int) (bool, error) {
-	if err := ctx.Err(); err != nil {
-		return false, err
-	}
-	if key == "" || jobID <= 0 {
-		return false, errors.New("delegate execution key and job id are required")
-	}
-	result, err := s.db.ExecContext(ctx,
-		`DELETE FROM lifecycle_delegate_job WHERE execution_key=? AND job_id=?`, key, jobID)
-	if err != nil {
-		return false, err
-	}
-	changed, err := result.RowsAffected()
-	return changed == 1, err
-}
-
-// CancelUnassignedDelegateJob returns true only when this call atomically moves
-// an expired job without a worker lease to cancelled. Routing may persist an
-// agent name while the row is still pending, so a pending row remains
-// unassigned regardless of agent_name. Once the worker moves it to running, a
-// non-empty agent_name proves assignment and protects it from this lease.
-//
-// Both worker transitions are reciprocal: taking the lease requires pending,
-// and assigning an agent rejects cancelled rows. Whichever SQLite update wins
-// prevents a later transition from reviving a cancelled job.
-func (s *Store) CancelUnassignedDelegateJob(ctx context.Context, jobID int, reason string, minAge time.Duration) (bool, error) {
-	if jobID <= 0 {
-		return false, errors.New("delegate job id is required")
-	}
-	if minAge <= 0 {
-		return false, errors.New("delegate minimum unassigned age is required")
-	}
-	cutoff := time.Now().UTC().Add(-minAge).Format("2006-01-02 15:04:05")
-	result, err := s.db.ExecContext(ctx, `UPDATE agent_jobs
-SET status='cancelled',
-    cancelled_at=datetime('now'),
-    cancel_reason=?,
-    updated_at=datetime('now')
-WHERE id=?
-  AND (status='pending' OR (status='running' AND trim(agent_name)=''))
-  AND COALESCE(NULLIF(heartbeat_at,''),created_at) <= ?`, reason, jobID, cutoff)
-	if err != nil {
-		return false, fmt.Errorf("cancel unassigned delegate job: %w", err)
-	}
-	changed, err := result.RowsAffected()
-	return changed == 1, err
 }
 
 func (s *Store) hasWorkItemColumn(ctx context.Context, wanted string) (bool, error) {

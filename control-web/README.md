@@ -9,12 +9,14 @@ does not own KB data or reuse runtime-web PAM authority.
 | --- | --- |
 | `auth.go` | OIDC verification and explicit break-glass path |
 | `session.go` | per-user SQLite sessions and CSRF token |
-| `acl.go` | mirror of the KB console-admin route allowlist |
+| `acl.go` | shared control-web module route policy |
 | `proxy.go` | authenticated `/api` to KB `/v1` proxy |
 | `audit.go` | console administration audit |
 | `tls.go` | HTTPS setup |
 
-The console and KB allowlists must agree; the KB remains authoritative.
+The physical proxy uses the same policy package as the separately supervised
+control-web module. The KB obtains its authoritative console-admin decision from
+that module over the event bus and has no duplicate local allowlist.
 
 ```bash
 cd control-web

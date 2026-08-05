@@ -156,6 +156,18 @@ extern "C"
    /* Cancel one job by id with a reason. Returns rows changed (0/1). */
    int db1_agent_job_cancel_by_id(int job_id, const char *reason);
 
+   /* Cancel a job only if it is still unassigned and has been so for at least
+    * min_age_secs. Returns 1 when this call performed that transition, 0 when it
+    * did not apply, -1 on error.
+    *
+    * Routing may persist an agent name while a row is still pending, so pending
+    * counts as unassigned regardless of agent_name; once the worker moves it to
+    * running, a non-empty agent_name proves assignment and protects it. Both
+    * worker transitions are reciprocal -- taking the lease requires pending, and
+    * assigning an agent rejects cancelled rows -- so whichever update wins
+    * prevents the other from reviving a cancelled job. */
+   int db1_agent_job_cancel_unassigned(int job_id, const char *reason, int min_age_secs);
+
    /* Cancel every pending/running delegate row left by an earlier server
     * process. Call once during server startup, before any worker can exist.
     * Empty results receive the cancellation reason; existing results remain. */

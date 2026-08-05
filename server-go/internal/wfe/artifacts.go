@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"syscall"
+
+	"github.com/JBailes/aimee/server-go/modules/roundtable/panel"
 )
 
 var (
@@ -177,20 +179,13 @@ func (s *ArtifactStore) NodeArtifact(workItemID, nodeID string) (Artifact, error
 	return artifact, nil
 }
 
-type Finding struct {
-	ID             string `json:"id"`
-	Persona        string `json:"persona"`
-	Severity       string `json:"severity"`
-	Location       string `json:"location,omitempty"`
-	Summary        string `json:"summary"`
-	Recommendation string `json:"recommendation"`
-}
-
-type ReviewFeedback struct {
-	SchemaVersion int       `json:"schema_version"`
-	ArtifactHash  string    `json:"artifact_hash"`
-	Findings      []Finding `json:"findings"`
-}
+// Findings and review feedback are the roundtable's vocabulary, and the
+// roundtable now owns them: it runs as a module process whose sources cannot
+// import internal/, so the definitions live there and the control plane refers
+// to them here. These are aliases, not copies -- one type, no conversion, and
+// no way for the two sides to drift apart.
+type Finding = panel.Finding
+type ReviewFeedback = panel.ReviewFeedback
 
 func (s *ArtifactStore) PutFeedback(workItemID string, feedback ReviewFeedback) error {
 	if feedback.SchemaVersion == 0 {

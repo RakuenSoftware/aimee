@@ -9,22 +9,24 @@ unbounded mechanism for downloaded text to bypass routing, policy, or user appro
 
 ## Public contracts
 
-The canonical contracts are
-`src/modules/skills/include/aimee/skills/skill.h` and
-`src/modules/skills/include/aimee/skills/skill_review.h`, implemented by `skill.c`, `skill_review.c`,
-and `skill_rollback.c` in `src/modules/skills`, with CLI orchestration in `src/cmd_skill.c`. Consumers
+The canonical contracts are `src/modules/skills/include/aimee/skills/skill.h` and the process wire API,
+implemented by `skill.c`, `skill_rollback.c`, and the process-only trigger policy in
+`skill_trigger_policy.c`, with CLI orchestration in `src/cmd_skill.c`. Consumers
 use the `aimee/skills` include namespace. The former singular source directory is retired without a
 forwarding API or parallel skill registry.
 
-The skill-context review stage now runs in the supervised Go
-`aimee-module-skills` process from `server-go/modules/skills`. The C
-`module_adapter.c` remains a wire-parity fixture while filesystem resolution,
-management, review, rollback, and injection continue through the existing C
-surfaces and remain scheduled for later migration batches.
+The review-nudge and trigger-frontmatter decisions run in the supervised Go
+`aimee-module-skills` process from `server-go/modules/skills`. The C `module_adapter.c` and
+`skill_trigger_policy.c` remain wire/behavior parity fixtures. Production guardrails loads the bounded
+skill body through the filesystem resolver and requests its tool/subject trigger match through event
+`7682`; it has no local parser or fallback. An unavailable or malformed module reply produces the
+conservative advisory. Management, review orchestration, rollback, and injection continue through the
+existing C surfaces and remain scheduled for later migration batches. The obsolete local
+`skill_review_should_fire` implementation and duplicate test were removed because event `7681` already
+owns that decision and its C/Go parity coverage.
 
 `src/modules/skills/module.yaml` declares ownership of the C production and parity sources, the Go
-process handler and tests, canonical public headers, direct C tests, and this document; the module has
-no private headers.
+process handler and tests, canonical public/private headers, direct C tests, and this document.
 Its `ownership_complete: true` latch exhaustively checks module-local C and private-header files and
 requires this canonical document. Public-header and test entries are explicit ownership claims, but the
 completeness latch does not discover undeclared public headers or tests. Command, server, protocol, and
@@ -49,7 +51,8 @@ delegate execution, client integration installers, and capability autostub logic
 The filesystem-backed resolver is the required provider and searches project then user scopes according
 to `skill_path`; absence of a named skill is a normal lookup miss. Evaluation or proposal generation may
 use other modules, but core readiness requires deterministic parsing, linting, bounded loading, and
-injection even when no optional plugin or web GUI is present.
+injection even when no optional plugin or web GUI is present. Server readiness also requires the
+supervised skills identity, which serves both declared skills event kinds on the local bus.
 
 ## Configuration and activation
 
@@ -90,10 +93,11 @@ changes derived from learning or uncovered tools.
 ## Tests and failure behavior
 
 The descriptor owns `test_skill.c`, which covers discovery, loading, validation, management, injection,
-lifecycle, rollback, and telemetry, and `test_skill_review.c`, which covers the review predicate and
-poison checks through the management contract. Invalid names, oversized content, unsafe support paths,
-failed lint/evaluation, and write errors fail closed; a missing requested skill leaves the base prompt
-usable rather than inventing instructions.
+lifecycle, rollback, telemetry, poison checks, and trigger-policy fixtures. The shared C process-handler
+test and Go skills tests cover both event stages and malformed wire input. Invalid names, oversized
+content, unsafe support paths, failed lint/evaluation, and write errors fail closed; a missing requested
+skill leaves the base prompt usable rather than inventing instructions. Trigger transport/decode failure
+emits the conservative advisory instead of becoming a silent non-match.
 
 ## Operational diagnostics
 

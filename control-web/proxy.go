@@ -13,10 +13,11 @@ const maxProxyResponseBytes = 1 << 20
 
 // proxyAPI forwards an authenticated /api/* request to the kb /v1 surface using
 // the console-admin credential. DENY-BY-DEFAULT: the path is remapped to a /v1
-// route that must pass the console-admin ACL mirror (acl.go); anything else is a
-// 403 that never reaches the kb. Administrative routes use only the server-side
-// console-admin bearer; fleet routes use only the verified OIDC credential bound
-// to the current session.
+// route that must pass the shared control-web module policy (acl.go); anything
+// else is a 403 that never reaches the kb. The KB independently requests its
+// authoritative console-admin decision over the event bus. Administrative routes
+// use only the server-side console-admin bearer; fleet routes use only the
+// verified OIDC credential bound to the current session.
 func (s *server) proxyAPI(w http.ResponseWriter, r *http.Request, sess *session) {
 	if r.URL.RawPath != "" {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "encoded proxy paths are forbidden"})

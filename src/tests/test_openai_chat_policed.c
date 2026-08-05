@@ -10,10 +10,10 @@
  * contract — emitting created here too would double it on the wire.
  *
  * Scope: these tests exercise the helper's consumption of an already
- * post-police parsed_response_t (calls[] front-packed, call_count lowered).
- * The police function itself (gateway_policy_police_parsed_response) is
- * tested separately in test_anthropic_http.c; seeding the post-police shape
- * directly here keeps this test free of the config/guardrails link. */
+ * governed parsed_response_t (calls[] front-packed, call_count lowered).
+ * The event-bus decision seam is tested separately in
+ * test_response_governance_stage.c; seeding the governed shape directly here
+ * keeps this test focused on wire rendering. */
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>

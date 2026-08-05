@@ -114,6 +114,116 @@ static void test_codex_delegate_policy_is_explicit(void)
    assert(strstr(skill, "Never run it over the whole tree") != NULL);
    /* The v1 phrasing that caused the zero-index-call run must not come back. */
    assert(strstr(skill, "prefer local file inspection first") == NULL);
+
+   /* AN UNCAPPED SEARCH IS THE MOST EXPENSIVE THING AVAILABLE HERE, and its cost
+    * is invisible when it happens: the output lands once and is re-sent on every
+    * later turn. Measured after the substitutive rewrite was already in place --
+    * one uncapped `rg` returned 80,330 characters (~20k tokens) and rode the
+    * remaining ~13 model calls, roughly a fifth of that run's whole input, while
+    * plain codex capped all five of its searches unprompted. */
+   assert(strstr(skill, "Cap what a search prints") != NULL);
+   assert(strstr(skill, "head -n") != NULL);
+   /* The "do not repeat a search" bullet was REMOVED, deliberately. It was added
+    * on intuition and never measured; measuring it afterwards showed duplicate
+    * searches account for 0-1% of work across every arm, so it bought nothing and
+    * spent skill budget that batching guidance now uses. Assert it stays gone, so
+    * it is not reintroduced on the same intuition. */
+   assert(strstr(skill, "Do not repeat a search") == NULL);
+   assert(strstr(code_prompt, "Cap what any search prints") != NULL);
+
+   /* THE SKILL MUST ANSWER "find this phrase", because that is the question the
+    * agent had no aimee answer for and resolved with a recursive shell search --
+    * 87 of them across the benchmark's aimee cells, 2.4 MB of output, one large
+    * enough to hit the client's 1 MB truncation. find_symbol covers symbol names
+    * only; index command=hybrid covers the rest and is bounded by max_results. */
+   assert(strstr(skill, AIMEE_CODE_TOOL_INDEX) != NULL);
+   assert(strstr(skill, AIMEE_CODE_INDEX_COMMAND_HYBRID) != NULL);
+   assert(strstr(skill, "PHRASE rather than a symbol") != NULL);
+
+   /* Reading is the largest remaining work category (15 reads carrying 660k
+    * tokens on one measured cell, 17.7% of its whole input), and build output is
+    * almost entirely echoed compiler command lines (6 builds, 241k tokens).
+    * Both are addressed by naming the bounded alternative, so pin both. */
+   assert(strstr(skill, "command=span") != NULL);
+   assert(strstr(skill, "read the RANGE") != NULL);
+   assert(strstr(skill, "make -s") != NULL);
+
+   /* TURN COUNT IS THE BILL, NOT BYTES.
+    *
+    * On a cell where all four arms passed, aimee moved the FEWEST tool-output
+    * characters of any arm (74k vs baseline's 124k) and still paid 4.4x the
+    * tokens: 47 tool calls against baseline's 9. Per call it was cheaper (41.0k
+    * input-tokens vs 49.1k) -- it just took five times as many. Baseline chained
+    * (16 sed reads inside 9 calls, up to five ranges per command); aimee spread 7
+    * reads across 22 calls. Pin the batching rules, and pin that the agent is
+    * told not to spend a call re-reading the skill it is already being shown. */
+   assert(strstr(skill, "ONE call, joined with `&&`") != NULL);
+   assert(strstr(skill, "spans") != NULL);
+   assert(strstr(skill, "Do not read this file") != NULL);
+   /* Symbol lookups batch the same way spans do: one cell issued five
+    * consecutive single-symbol find_symbol calls, each a full round trip. */
+   assert(strstr(skill, "identifiers") != NULL);
+   /* All four plural forms must be named, or the agent batches only what it was
+    * explicitly told about -- span batching landed first and the next run still
+    * issued 4 single hybrid queries and 4 single structure calls. */
+   assert(strstr(skill, "file_paths") != NULL);
+   assert(strstr(skill, "queries") != NULL);
+   /* The composed packet (/v1/code/context) shipped reachable only as ingress
+    * pre-injection; an MCP agent could not call it, so it never appeared in a
+    * transcript. Pin both the command and the instruction to start there. */
+   assert(strstr(skill, AIMEE_CODE_INDEX_COMMAND_INVESTIGATE) != NULL);
+   assert(strstr(skill, "STARTING on an unfamiliar area") != NULL);
+   /* Empty searches are pure wasted turns -- 4 of 9 on one measured cell. */
+   assert(strstr(skill, "signal to change TOOL") != NULL);
+
+   /* UNDER-SCOPING, NOT RETRIEVAL, IS WHAT LOSES THE HARD TASKS.
+    * Two solvable tasks that every arm failed: on both, aimee's retrieval landed
+    * on the right code (find_callers on the acquire/release pair, then the owning
+    * module) and its patch was too narrow -- one consumer's lease discipline
+    * instead of the pool reclaiming an unreturned lease, and two of five files on
+    * a ticket that names a three-link chain. Pin both rules. */
+   assert(strstr(skill, "Fix the OWNER, not one caller") != NULL);
+   assert(strstr(skill, "more than "
+                        "one caller, a caller-side fix is incomplete") != NULL ||
+          strstr(skill, "caller-side fix is incomplete") != NULL);
+   assert(strstr(skill, "account for every symptom") != NULL);
+   /* The three all-fail tasks were under-scoped patches, not bad retrieval, and
+    * the author is the one who cannot see it. roundtable_review already exists
+    * for this -- original_request is documented as goal-drift detection -- so
+    * point at it rather than shipping a second review path. */
+   assert(strstr(skill, "roundtable_review") != NULL);
+   assert(strstr(skill, "original_request") != NULL);
+   /* am_12b43fa38e: the ticket opens "Two bugs" and names both; aimee fixed the
+    * second and never touched the first, while still editing the file the first
+    * lives in for an unrelated reason. File overlap is not coverage. */
+   assert(strstr(skill, "states a COUNT") != NULL);
+   assert(strstr(skill, "DISTINCT") != NULL);
+
+   /* THE GUARD EXISTED AND WAS NEVER WIRED FOR CODEX.
+    *
+    * `aimee hooks` implements the PreToolUse contract and require_aimee_git is ON
+    * by default with a deny naming git_status / git_log / git_diff_summary. The
+    * codex plugin shipped no hooks at all, so it never ran: 98 shell `git` calls
+    * across the benchmark's aimee cells (48 full `git diff`) and ZERO calls to the
+    * aimee git tool whose schema costs ~1,000 tokens on every call.
+    *
+    * Pin the registration, not just the rule -- an unwired guard is not a guard. */
+   {
+      const char *hooks = codex_hooks_json("/usr/local/bin/aimee");
+      assert(strstr(hooks, "\"PreToolUse\"") != NULL);
+      /* MUST be `hooks pre`, not `hooks`. Bare `hooks` exits with "hooks requires
+       * 'pre' or 'post'" and codex allows the tool -- a hook that is installed,
+       * declared, well-formed, and enforces nothing. The first version of this
+       * assertion pinned exactly that defect by matching the prefix. */
+      assert(strstr(hooks, "/usr/local/bin/aimee hooks pre") != NULL);
+      cJSON *parsed = cJSON_Parse(hooks);
+      assert(parsed != NULL); /* codex refuses a malformed hooks file outright */
+      cJSON_Delete(parsed);
+      /* A hooks file codex never loads is the same as no hook, so the manifest
+       * must point at it. ensure_codex_plugin writes both; assert the path the
+       * manifest declares matches the file the writer emits. */
+      assert(strstr(hooks, "\"command\"") != NULL);
+   }
 }
 
 static void test_mcp_config_uses_resolved_command(void)
@@ -145,34 +255,27 @@ static void test_mcp_config_uses_resolved_command(void)
  * all and falls back to grep, which is indistinguishable from deciding the
  * index was not worth calling. Measured: 18 tools with AIMEE_HOME, 0 without,
  * regardless of HOME. */
-/* The solo profile withholds the delegate tools. Guidance that still tells the
- * agent to delegate would point at a tool it cannot see, and would undermine the
- * one guarantee the profile exists to give: that no second agent touches the
- * work. */
-static void test_solo_profile_guidance_forbids_delegation(void)
+/* THE SKILL IS THE SAME TEXT FOR EVERY RUN.
+ *
+ * There used to be a "solo" variant that withheld the delegate tools and swapped
+ * the delegation bullets for "do all of this work yourself". A profile that hides
+ * shipped tools during measurement makes the measured thing a configuration
+ * nobody deploys -- the benchmark stops describing aimee. If work should not be
+ * delegated, that is a rule of the run, not a different build.
+ *
+ * Pin that the profile no longer changes what the agent is told. */
+static void test_skill_does_not_vary_by_profile(void)
 {
-   const char *prompt = NULL;
-
    setenv("AIMEE_MCP_TOOL_PROFILE", "solo", 1);
-   prompt = codex_delegate_policy_prompt();
-   assert(strstr(prompt, "do this work yourself") != NULL);
-   assert(strstr(prompt, "use the aimee delegate MCP tool") == NULL);
-
-   /* The skill is what the agent actually reads: it must not name a tool the
-    * profile withheld. */
-   {
-      const char *skill = codex_skill_markdown_effective();
-      assert(strstr(skill, "`delegate` MCP tool") == NULL);
-      assert(strstr(skill, "Do all of this work yourself") != NULL);
-      /* the rest of the skill survives */
-      assert(strstr(skill, AIMEE_CODE_TOOL_FIND_SYMBOL) != NULL);
-   }
-
-   /* The default still routes parallel work through delegate. */
-   setenv("AIMEE_MCP_TOOL_PROFILE", "core", 1);
-   prompt = codex_delegate_policy_prompt();
-   assert(strstr(prompt, "use the aimee delegate MCP tool") != NULL);
+   const char *solo_prompt = codex_delegate_policy_prompt();
+   assert(strstr(solo_prompt, "use the aimee delegate MCP tool") != NULL);
+   assert(strstr(solo_prompt, "do this work yourself") == NULL);
    assert(strstr(codex_skill_markdown_effective(), "`delegate` MCP tool") != NULL);
+   assert(strstr(codex_skill_markdown_effective(), "Do all of this work yourself") == NULL);
+
+   setenv("AIMEE_MCP_TOOL_PROFILE", "core", 1);
+   assert(strcmp(solo_prompt, codex_delegate_policy_prompt()) == 0);
+   assert(strstr(codex_skill_markdown_effective(), AIMEE_CODE_TOOL_FIND_SYMBOL) != NULL);
 
    unsetenv("AIMEE_MCP_TOOL_PROFILE");
 }
@@ -1295,7 +1398,7 @@ int main(void)
    test_build_aimee_plugin_entry();
    test_codex_delegate_policy_is_explicit();
    test_mcp_config_uses_resolved_command();
-   test_solo_profile_guidance_forbids_delegation();
+   test_skill_does_not_vary_by_profile();
    test_mcp_config_carries_aimee_home();
    test_read_json_file_missing();
    test_read_json_file_valid();

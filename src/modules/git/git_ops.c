@@ -31,27 +31,17 @@ void git_ops_register_session_isolation(int (*fn)(const char *cwd, const char *s
 #define GO_LOG_DEFAULT 30
 #define GO_LOG_MAX     200
 
-/* A git ref/branch name safe to pass as an argv token: non-empty, <=200, no
- * control chars/space, not starting with '-' (flag), no "..", charset limited to
- * [A-Za-z0-9._/-]. (git imposes more rules; this is a conservative subset.) */
-static int ref_name_valid(const char *s)
+static git_ops_ref_validator_fn g_ref_validator;
+
+void git_ops_register_ref_validator(git_ops_ref_validator_fn validator)
 {
-   if (!s || !s[0] || s[0] == '-')
-      return 0;
-   size_t n = strlen(s);
-   if (n > 200)
-      return 0;
-   if (strstr(s, ".."))
-      return 0;
-   for (size_t i = 0; i < n; i++)
-   {
-      unsigned char c = (unsigned char)s[i];
-      int ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-               c == '.' || c == '_' || c == '/' || c == '-';
-      if (!ok)
-         return 0;
-   }
-   return 1;
+   g_ref_validator = validator;
+}
+
+static int ref_allowed(const char *ref)
+{
+   int allowed = 0;
+   return g_ref_validator && g_ref_validator(ref, &allowed) == 0 && allowed;
 }
 
 /* Run argv in `dir` with creds injected when `needs_cred`. Returns the child
@@ -130,7 +120,7 @@ int git_ops_push_dir(const char *principal, const char *repo_dir, const char *re
       *out = NULL;
    if (err && errlen)
       err[0] = '\0';
-   if (!repo_dir || !remote_url || !ref_name_valid(branch))
+   if (!repo_dir || !remote_url || !ref_allowed(branch))
    {
       snprintf(err, errlen, "invalid managed push request");
       return -1;
@@ -433,7 +423,7 @@ int git_ops_run_session(const char *principal, const char *project, const char *
    }
    else if (classification.operation == AIMEE_GIT_OP_CHECKOUT)
    {
-      if (!ref_name_valid(text_arg))
+      if (!ref_allowed(text_arg))
       {
          snprintf(err, errlen, "invalid branch name");
          return -1;

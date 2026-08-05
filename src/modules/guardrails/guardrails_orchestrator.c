@@ -1056,8 +1056,11 @@ static int skill_dispatch_trigger_advisory(session_state_t *state, const char *p
    if (!config_skills_dispatch_advisory() || *sent_flag)
       return 0;
 
-   if (!skill_trigger_matches(project_root, skill_name, tool_name, subject))
+   int trigger_match = skill_trigger_matches(project_root, skill_name, tool_name, subject);
+   if (trigger_match == 0)
       return 0;
+   if (trigger_match < 0)
+      LOG_WARN("guardrails", "skills trigger module unavailable; emitting conservative advisory");
 
    *sent_flag = 1;
    state->dirty = 1;

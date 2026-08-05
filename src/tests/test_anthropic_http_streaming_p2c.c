@@ -19,6 +19,7 @@
 #include "../headers/agent_protocol.h"
 #include "../headers/anthropic_ingress.h"
 #include <aimee/delegates/delegate_driver.h>
+#include "gw_stage_governance.h"
 #include "../headers/log.h"
 #include "../headers/server_http.h"
 #include "../vendor/headers/cJSON.h"
@@ -60,8 +61,37 @@ static int g_prevent;
 static const char *g_tool_uses_json;
 static const char *g_upstream_stop_reason;
 
+static int governance_event_bus_provider(int policy_active, const char *const *tool_names,
+                                         uint32_t tool_count, const char *stop_reason,
+                                         aimee_governance_decision_t *decision)
+{
+   memset(decision, 0, sizeof(*decision));
+   decision->keep_mask = aimee_governance_mask_for_count(tool_count);
+   snprintf(decision->stop_reason, sizeof(decision->stop_reason), "%s",
+            stop_reason ? stop_reason : "");
+   if (!policy_active)
+      return 0;
+   decision->keep_mask = 0;
+   for (uint32_t i = 0; i < tool_count; ++i)
+   {
+      int denied =
+          strcmp(tool_names[i], "Agent") == 0 || strcmp(tool_names[i], "spawn_agent") == 0 ||
+          strcmp(tool_names[i], "RemoteTrigger") == 0 || strcmp(tool_names[i], "Task") == 0;
+      if (denied)
+         decision->drop_count++;
+      else
+         decision->keep_mask |= 1u << i;
+   }
+   uint32_t kept = tool_count - decision->drop_count;
+   if (!decision->stop_reason[0] || kept == 0)
+      snprintf(decision->stop_reason, sizeof(decision->stop_reason), "%s",
+               kept > 0 ? "tool_use" : "end_turn");
+   return 0;
+}
+
 static void reset_capture(void)
 {
+   gw_response_governance_register_provider(governance_event_bus_provider);
    free(g_last_body);
    g_last_body = NULL;
    free(g_last_extra);

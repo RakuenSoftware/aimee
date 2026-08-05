@@ -6,10 +6,9 @@
  * live data, not dead files:
  *   1. schema validation — every line parses, carries the common keys, and
  *      carries the per-pass keys for its declared `pass`.
- *   2. behavioral grounding — every extract_code_unit fixture is run through
- *      the real AC#7 grounding predicate; its `expected_grounding` label must
- *      match what kb_curator_grounding_contradicts() actually decides. This
- *      catches mislabeled fixtures and pins the gate's behavior to the corpus.
+ *   2. behavioral grounding — every extract_code_unit fixture is shaped by the
+ *      production curator seam and decided by the process-module parity handler;
+ *      its `expected_grounding` label must match the module decision.
  *
  * CURATOR_FIXTURE_DIR is injected at compile time (see tests/Rules.mk). */
 
@@ -18,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <aimee/core/event_bus/module_runtime.h>
 #include "cJSON.h"
 #include "kb_curator_grounding.h"
 
@@ -35,6 +35,34 @@ typedef struct
    int n_bridge;
    int n_code_reject;
 } fx_stats_t;
+
+extern aimee_module_status_t aimee_kb_synthesis_module_handler(const aimee_module_invocation_t *,
+                                                               const uint8_t *, uint32_t, uint8_t *,
+                                                               uint32_t, uint32_t *, void *);
+
+int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation)
+{
+   (void)invocation;
+   return 0;
+}
+
+static int grounding_module_provider(aimee_kb_synthesis_claim_kind_t claim_kind,
+                                     const char *const *claims, uint32_t claim_count,
+                                     const char *const *callees, uint32_t callee_count,
+                                     aimee_kb_synthesis_grounding_decision_t *decision)
+{
+   uint8_t request[AIMEE_KB_SYNTHESIS_REQUEST_LEN];
+   uint8_t response[AIMEE_KB_SYNTHESIS_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_KB_SYNTHESIS_STAGE_GROUNDING};
+   if (aimee_kb_synthesis_request_encode(claim_kind, claims, claim_count, callees, callee_count,
+                                         request, sizeof(request)) != 0 ||
+       aimee_kb_synthesis_module_handler(&invocation, request, sizeof(request), response,
+                                         sizeof(response), &response_len,
+                                         NULL) != AIMEE_MODULE_STATUS_OK)
+      return -1;
+   return aimee_kb_synthesis_response_decode(response, response_len, decision);
+}
 
 /* Read an entire file into a malloc'd NUL-terminated buffer (caller frees). */
 static char *read_file(const char *path)
@@ -97,7 +125,7 @@ static void validate_code_unit(const cJSON *obj, const char *id, fx_stats_t *st)
           "expected_grounding must be reject|commit");
 
    /* Build a code_unit payload carrying the claimed side_effects, then run the
-    * real grounding predicate against the structural callee list. */
+    * production request-shaping seam against the process-module handler. */
    cJSON *payload = cJSON_CreateObject();
    cJSON_AddItemToObject(payload, "side_effects", cJSON_Duplicate(se_j, 1));
 
@@ -110,21 +138,20 @@ static void validate_code_unit(const cJSON *obj, const char *id, fx_stats_t *st)
          callees[n++] = c->valuestring;
    }
 
-   char reason[128] = "";
-   int contradicts = kb_curator_grounding_contradicts(payload, callees, n, reason, sizeof(reason));
+   aimee_kb_synthesis_grounding_decision_t decision;
+   assert(kb_curator_grounding_decide(payload, callees, (uint32_t)n, &decision) == 0);
    cJSON_Delete(payload);
 
    int want_reject = (strcmp(expected, "reject") == 0);
-   if (contradicts != want_reject)
+   if (decision.contradicts != want_reject)
    {
-      fprintf(stderr,
-              "  FAIL: fixture %s expected_grounding=%s but predicate says %s (reason='%s')\n", id,
-              expected, contradicts ? "reject" : "commit", reason);
+      fprintf(stderr, "  FAIL: fixture %s expected_grounding=%s but module says %s (reason='%s')\n",
+              id, expected, decision.contradicts ? "reject" : "commit", decision.reason);
       assert(0 && "grounding label mismatch");
    }
    if (want_reject)
    {
-      assert(reason[0] != '\0' && "reject must name an offending callee");
+      assert(decision.reason[0] != '\0' && "reject must name an offending callee");
       st->n_code_reject++;
    }
    st->n_code++;
@@ -202,6 +229,7 @@ static void validate_file(const char *shape, fx_stats_t *st)
 int main(void)
 {
    printf("curator_fixtures:\n");
+   kb_curator_grounding_register_provider(grounding_module_provider);
 
    fx_stats_t pos, fp, reg;
    validate_file("positive", &pos);

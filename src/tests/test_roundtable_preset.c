@@ -102,6 +102,33 @@ int main(void)
                                       &errmsg) != 0);
    assert(errmsg && strcmp(errmsg, "chairman_enabled requires a chairman") == 0);
 
+   /* A PANEL OF ONE HAS NOBODY TO CHAIR, SYNTHESISE OR DISCUSS WITH.
+    *
+    * Each of these arbitrates or exchanges BETWEEN seats; with one seat the
+    * agent would be discussing with itself. Measured: a one-seat review returned
+    * a correct blocking finding and the chair then died on "unknown persona
+    * 'chairman'", failing the whole run and hiding the finding. Refused at
+    * intake so the operator is told, rather than having it silently dropped. */
+   {
+      roundtable_preset_t one;
+      const char *e1 = NULL;
+      assert(roundtable_preset_from_json("{\"seats\":[{\"model\":\"m\"}],\"chairman\":\"c\"}",
+                                         "one-chair", &one, &e1) != 0);
+      assert(e1 && strstr(e1, "roundtable of one") != NULL);
+
+      const char *e2 = NULL;
+      assert(roundtable_preset_from_json("{\"seats\":[{\"model\":\"m\"}],\"discussion\":true}",
+                                         "one-disc", &one, &e2) != 0);
+      assert(e2 && strstr(e2, "roundtable of one") != NULL);
+
+      /* Two seats may have all three. */
+      const char *e3 = NULL;
+      assert(roundtable_preset_from_json(
+                 "{\"seats\":[{\"model\":\"a\"},{\"model\":\"b\"}],"
+                 "\"chairman\":\"c\",\"chairman_enabled\":true,\"discussion\":true}",
+                 "two-ok", &one, &e3) == 0);
+   }
+
    /* url_name overrides body name */
    roundtable_preset_t p2;
    assert(roundtable_preset_from_json(PRESET_JSON, "override-name", &p2, &err) == 0);

@@ -31,10 +31,12 @@
       {"id": 1, "name": "workspace-access", "event_kind": 7169}
     ]},
     {"id": "git", "execution": "process", "runtime": "go", "principal_ref": 13, "placements": ["server"], "stages": [
-      {"id": 1, "name": "git-operation", "event_kind": 7425}
+      {"id": 1, "name": "git-operation", "event_kind": 7425},
+      {"id": 2, "name": "git-ref-validation", "event_kind": 7426}
     ]},
     {"id": "skills", "execution": "process", "runtime": "go", "principal_ref": 14, "placements": ["server"], "stages": [
-      {"id": 1, "name": "skill-context", "event_kind": 7681}
+      {"id": 1, "name": "skill-context", "event_kind": 7681},
+      {"id": 2, "name": "skill-trigger-match", "event_kind": 7682}
     ]},
     {"id": "response-composition", "execution": "process", "runtime": "go", "principal_ref": 15, "placements": ["server"], "stages": [
       {"id": 1, "name": "response-composition", "event_kind": 7937}
@@ -45,11 +47,13 @@
     {"id": "governance", "execution": "process", "runtime": "go", "principal_ref": 19, "placements": ["server"], "stages": [
       {"id": 1, "name": "governance-evaluation", "event_kind": 8961}
     ]},
-    {"id": "workflows", "execution": "process", "runtime": "go", "principal_ref": 20, "placements": ["server"], "stages": [
-      {"id": 1, "name": "workflow-advance-decision", "event_kind": 9217}
+    {"id": "workflows", "execution": "process", "runtime": "go", "principal_ref": 20, "placements": ["server"], "hosted_by": "wfe", "stages": [
+      {"id": 1, "name": "workflow-advance-decision", "event_kind": 9217},
+      {"id": 2, "name": "workflow-control", "event_kind": 9218}
     ]},
     {"id": "roundtable", "execution": "process", "runtime": "go", "principal_ref": 21, "placements": ["server"], "stages": [
-      {"id": 1, "name": "roundtable-deliberation", "event_kind": 9473}
+      {"id": 1, "name": "roundtable-deliberation", "event_kind": 9473},
+      {"id": 2, "name": "roundtable-review", "event_kind": 9474}
     ]},
     {"id": "kb-synthesis", "execution": "process", "runtime": "go", "principal_ref": 22, "placements": ["kb"], "stages": [
       {"id": 1, "name": "kb-grounding-decision", "event_kind": 9729}
@@ -61,7 +65,12 @@
       {"id": 1, "name": "proxy-route-authorization", "event_kind": 10241}
     ]},
     {"id": "benchmarks", "execution": "process", "runtime": "go", "principal_ref": 25, "placements": ["server", "kb"], "stages": [
-      {"id": 1, "name": "benchmark-run", "event_kind": 10497}
+      {"id": 1, "name": "benchmark-run", "event_kind": 10497},
+      {"id": 2, "name": "benchmark-latency-summary", "event_kind": 10498}
+    ]},
+    {"id": "sandbox", "execution": "process", "runtime": "go", "principal_ref": 26, "placements": ["server"], "stages": [
+      {"id": 1, "name": "sandbox-learned-observe", "event_kind": 10753},
+      {"id": 2, "name": "sandbox-learned-load", "event_kind": 10754}
     ]}
   ]
 }

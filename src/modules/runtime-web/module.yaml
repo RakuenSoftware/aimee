@@ -25,6 +25,9 @@
   "public_headers": [
     "src/modules/runtime-web/include/aimee/runtime-web/module_api.h"
   ],
+  "tests": [
+    "src/tests/test_server_error_kind.c"
+  ],
   "docs": [
     "docs/modules/runtime-web.md"
   ]

@@ -19,6 +19,7 @@
 #include <aimee/delegates/delegate_xml_fallback.h>
 #include <aimee/gateway/gateway_delegate.h>
 #include <aimee/gateway/gateway_policy.h>
+#include "gw_stage_governance.h"
 #include "http_retry.h"
 #include "economizer.h"
 #include "economizer_wire_snapshot.h"
@@ -1134,26 +1135,40 @@ native_provider_http:
       }
       free(response_body);
 
-      /* Universal-gateway P4 (response side): police a denied tool_use the model
-       * emitted anyway. Shape-agnostic — operates on the normalized parsed_response_t,
-       * so it covers every provider. Config-gated internally and gated
-       * to delegate calls here: the primary spawns delegates via the very Task/Subagent
-       * tool this would drop, so policing the primary's response would neuter aimee's
-       * own delegation. Drop count discarded, as in the ingress (anthropic_http.c). */
+      /* Universal-gateway P4 (response side): ask the event-bus governance module
+       * about a denied tool_use the model emitted anyway. Shape-agnostic — the
+       * returned decision is applied to normalized parsed_response_t. This stays
+       * gated to delegate calls: the primary spawns delegates via the very
+       * Task/Subagent tool this policy would drop, so applying it to the primary's
+       * response would neuter aimee's own delegation. */
       int denied_calls = 0;
       char denied_tool[64] = "";
       if (role != NULL)
       {
-         for (int i = 0; i < parsed.call_count; i++)
+         int original_call_count = parsed.call_count;
+         if (original_call_count < 0)
+            original_call_count = 0;
+         else if (original_call_count > AGENT_MAX_TOOL_CALLS)
+            original_call_count = AGENT_MAX_TOOL_CALLS;
+         char original_tool_names[AGENT_MAX_TOOL_CALLS][sizeof(parsed.calls[0].name)];
+         for (int i = 0; i < original_call_count; i++)
+            snprintf(original_tool_names[i], sizeof(original_tool_names[i]), "%s",
+                     parsed.calls[i].name);
+
+         int governance_tri = config_present() ? config_module_governance() : -1;
+         denied_calls = gw_response_run_governance(
+             &parsed, config_module_enabled(governance_tri, gw_response_governance_enabled()),
+             gateway_prevent_subagents_enabled());
+
+         int kept_index = 0;
+         for (int i = 0; i < original_call_count && !denied_tool[0]; i++)
          {
-            if (gateway_policy_is_denied_tool(parsed.calls[i].name))
-            {
-               if (!denied_tool[0])
-                  snprintf(denied_tool, sizeof denied_tool, "%s", parsed.calls[i].name);
-               denied_calls++;
-            }
+            if (kept_index < parsed.call_count &&
+                strcmp(original_tool_names[i], parsed.calls[kept_index].name) == 0)
+               kept_index++;
+            else
+               snprintf(denied_tool, sizeof denied_tool, "%s", original_tool_names[i]);
          }
-         gateway_policy_police_parsed_response(&parsed);
       }
 
       /* Log response trace */

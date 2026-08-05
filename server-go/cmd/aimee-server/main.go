@@ -15,12 +15,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/internal/api"
 	appconfig "github.com/JBailes/aimee/server-go/internal/config"
 	"github.com/JBailes/aimee/server-go/internal/db1"
 	"github.com/JBailes/aimee/server-go/internal/engine"
-	"github.com/JBailes/aimee/server-go/internal/roundtable"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	roundtablecfg "github.com/JBailes/aimee/server-go/modules/roundtable/panel"
+	"github.com/JBailes/aimee/server-go/modules/workflows"
 )
 
 func main() {
@@ -100,11 +102,10 @@ func main() {
 		}
 	} else if *agentURL != "" || *agentSocket != "" {
 		agents, clientErr := engine.NewHTTPAgentClient(engine.AgentHTTPConfig{
-			BaseURL: *agentURL, UnixSocket: *agentSocket, Store: store,
+			BaseURL: *agentURL, UnixSocket: *agentSocket,
 			PendingTimeoutSource: func() time.Duration {
 				return time.Duration(configStore.Int("autonomy.delegate_pending_secs", 120)) * time.Second
 			},
-			CancelUnassigned: store.CancelUnassignedDelegateJob,
 		})
 		if clientErr != nil {
 			log.Fatal(clientErr)
@@ -132,12 +133,11 @@ func main() {
 		// No configured-default source: a roundtable review names its roundtable
 		// in the workflow, which validation requires. roundtable.default no longer
 		// selects a panel for the Go control plane.
-		roundtables, roundtableErr := roundtable.NewStore(filepath.Join(*home, "roundtables"))
+		roundtables, roundtableErr := roundtablecfg.NewStore(filepath.Join(*home, "roundtables"))
 		if roundtableErr != nil {
 			log.Fatal(roundtableErr)
 		}
 		nativeRunner.SetRoundtableStore(roundtables)
-		handler.SetRoundtableReviewer(nativeRunner)
 		runner = nativeRunner
 	}
 	if runner != nil {
@@ -147,7 +147,10 @@ func main() {
 		}
 		scheduler := engine.NewScheduler(store, workflowEngine, *concurrency, nil)
 		if agentClient != nil {
-			scheduler.SetTerminalCancellation(agentClient.CancelTerminalJobs)
+			// The plane client holds no database handle, so the terminal sweep --
+			// which reads the Go-owned lifecycle tables -- composes it with the store
+			// here instead of the client carrying one.
+			scheduler.SetTerminalCancellation(engine.NewTerminalJobCanceller(store, agentClient).CancelTerminalJobs)
 		}
 		var liveMu sync.Mutex
 		lastConcurrency := *concurrency
@@ -229,6 +232,36 @@ func main() {
 		log.Fatal(err)
 	}
 	defer listener.Close()
+
+	// Serve the workflow control stage over the event bus.
+	//
+	// This is the same mux the private AF_UNIX socket above serves; what changes
+	// is that the C resource plane no longer needs a second transport to reach
+	// it. The engine and its stores stay here -- only the way in moves -- so this
+	// deletes src/server/wfe_http_proxy.c without relocating any state.
+	//
+	// A missing bus socket is not fatal: this process still serves its own
+	// listener, and reporting the stage as unserved is more honest than exiting.
+	if busSocket := os.Getenv("AIMEE_MODULE_BUS_SOCKET"); busSocket != "" {
+		go func() {
+			err := bus.RunModuleProcess(rootCtx, bus.ModuleProcessConfig{
+				SocketPath:     busSocket,
+				ModuleName:     "workflows",
+				PrincipalClass: 1,
+				PrincipalRef:   20,
+				Stages: []bus.ModuleStage{
+					{EventKind: workflows.EventAdvance, StageID: workflows.StageAdvance},
+					{EventKind: workflows.EventControl, StageID: workflows.StageControl},
+				},
+				Handler: workflows.NewHandler(handler),
+			})
+			if err != nil && rootCtx.Err() == nil {
+				log.Printf("workflow control stage stopped: %v", err)
+			}
+		}()
+	} else {
+		log.Print("AIMEE_MODULE_BUS_SOCKET is unset; the workflow control stage is not served")
+	}
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)

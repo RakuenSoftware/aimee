@@ -82,8 +82,11 @@ void mcp_add_extended_tools(cJSON *tools)
    t = ext_tool(tools, "index_structure",
                 "List the definitions (functions / types) in an indexed file with line ranges.");
    ext_prop(t, "file_path", "string", "File path within the indexed project.");
+   ext_prop(t, "file_paths", "array",
+            "Map SEVERAL files in ONE call: [\"a.c\", \"b.c\", ...]. Prefer this whenever you "
+            "want more than one file -- the maps are independent, so they cost one round trip "
+            "together. Replaces file_path when present; returns one entry per file, in order.");
    ext_prop(t, "project", "string", "Project the file belongs to (optional).");
-   ext_require(t, "file_path");
 
    t = ext_tool(tools, "code_span_get",
                 "Read an exact line range from an indexed source file (the recovery resolver for a "
@@ -94,8 +97,12 @@ void mcp_add_extended_tools(cJSON *tools)
    ext_prop(t, "line_start", "integer", "First line to read (1-based; default 1).");
    ext_prop(t, "line_end", "integer",
             "Last line to read (1-based, inclusive; default line_start).");
+   ext_prop(t, "spans", "array",
+            "Read several ranges in ONE call: [{\"file_path\":..., \"line_start\":..., "
+            "\"line_end\":...}, ...]. Prefer this whenever you want more than one range -- a "
+            "round trip costs far more than the extra range. Replaces file_path/line_start/"
+            "line_end when present; returns one span object per entry, in order.");
    ext_require(t, "project");
-   ext_require(t, "file_path");
 
    t = ext_tool(tools, "index_blast_radius",
                 "Impact analysis for one file: the files that depend on it (dependents) and the "
@@ -114,7 +121,25 @@ void mcp_add_extended_tools(cJSON *tools)
             "Seed symbol whose callers form the graph leg (optional; omit for code+memory only).");
    ext_prop(t, "project", "string", "Restrict to a project (optional; omit to search all).");
    ext_prop(t, "max_results", "integer", "Max fused results (default 20, max 100).");
-   ext_require(t, "query");
+   ext_prop(t, "queries", "array",
+            "Ask SEVERAL questions in ONE call: [\"question a\", \"question b\", ...]. Prefer "
+            "this when you have more than one thing to look up -- independent questions cost one "
+            "round trip together. Replaces 'query' when present; returns one {query, result} per "
+            "entry, in order.");
+
+   t = ext_tool(tools, "index_investigate",
+                "START HERE for an unfamiliar area. Bounded task packet: exact and structural "
+                "evidence first, weak vector-only matches rejected, each item carrying the file "
+                "path AND the line span to read next, plus an explicit answerable/no_answer "
+                "verdict. Capped at 4 items / ~1200 tokens, so it cannot flood the context. "
+                "Prefer this over a bare hybrid search when you are orienting rather than "
+                "confirming a name you already know.");
+   ext_prop(t, "query", "string", "What you are trying to find out, in plain words.");
+   ext_prop(t, "queries", "array",
+            "Ask SEVERAL questions in ONE call: [\"question a\", \"question b\", ...]. Returns "
+            "one {query, result} per entry, in order.");
+   ext_prop(t, "symbol", "string", "Seed symbol, if you already have one (optional).");
+   ext_prop(t, "project", "string", "Project to search. Required; this call never broadens scope.");
 
    t = ext_tool(tools, "index_graph_hubs",
                 "Rank a project's most-connected symbols by degree centrality over the code "
@@ -316,6 +341,7 @@ static const struct fam_def MCP_FAMILIES[] = {
       {"blast_radius", "index_blast_radius"},
       {AIMEE_CODE_INDEX_COMMAND_PREVIEW, AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS},
       {AIMEE_CODE_INDEX_COMMAND_HYBRID, "index_hybrid"},
+      {AIMEE_CODE_INDEX_COMMAND_INVESTIGATE, "index_investigate"},
       {"hubs", "index_graph_hubs"},
       {"audit", "index_graph_audit"},
       {"diff", "index_graph_diff"},

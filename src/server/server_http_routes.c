@@ -40,8 +40,8 @@
 #include "server_mgmt_audit.h"
 #include "server_runtime_identity.h"
 #include "kb_client_mtls.h"
-#include "server_workflow_api.h" /* W7: /v1/workflow read+author handlers */
-#include "wfe_http_proxy.h"      /* public workflow routes -> private Go control plane */
+#include "server_workflow_api.h"  /* W7: /v1/workflow read+author handlers */
+#include "workflow_control_bus.h" /* public workflow routes -> the workflows control stage */
 #include "cJSON.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -1945,6 +1945,10 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/delegate/run", NULL, RM_EXACT, "delegate", 0, rh_dispatch_op},
     {"POST", "/v1/delegate/reply", NULL, RM_EXACT, "delegate.reply", 0, rh_dispatch_op},
     {"POST", "/v1/delegate/launch", NULL, RM_EXACT, "delegate.launch", 0, rh_dispatch_op},
+    {"POST", "/v1/delegate/reservation/forget", NULL, RM_EXACT, "delegate.reservation.forget", 0,
+     rh_dispatch_op},
+    {"POST", "/v1/delegate/cancel_unassigned", NULL, RM_EXACT, "delegate.cancel_unassigned", 0,
+     rh_dispatch_op},
     {"POST", "/v1/delegate/backend_exec", NULL, RM_EXACT, "delegate.backend_exec", 0,
      rh_dispatch_op},
     {"GET", "/v1/job/list", NULL, RM_EXACT, "job.list", 0, rh_dispatch_op},
@@ -2449,9 +2453,9 @@ int v1_route_dispatch(const char *method, const char *path, const char *body, in
       return err_json(resp, resp_cap, 400, "bad request");
    if ((strcmp(path, "/v1/workflow") == 0 || strncmp(path, "/v1/workflow/", 13) == 0) ||
        strcmp(path, "/v1/trigger/fire") == 0 || strcmp(path, "/v1/dev/submit") == 0)
-      return wfe_http_proxy_request(method, path, server_http_identity_query(), body, body_len,
-                                    server_http_identity_principal(),
-                                    (g_rpc_conn_caps & CAP_WORKFLOW_ADMIN) != 0, resp, resp_cap);
+      return workflow_control_request(method, path, server_http_identity_query(), body, body_len,
+                                      server_http_identity_principal(),
+                                      (g_rpc_conn_caps & CAP_WORKFLOW_ADMIN) != 0, resp, resp_cap);
    char id[256];
    const http_route_t *e = route_match(method, path, id, sizeof(id));
    if (!e || !e->handler)

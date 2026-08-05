@@ -122,6 +122,9 @@ static aimee_tool_class_t tool_class(const char *name)
 static void test_tools(void)
 {
    assert(tool_class("bash") == AIMEE_TOOL_CLASS_EXEC);
+   assert(tool_class("execute_script") == AIMEE_TOOL_CLASS_EXEC);
+   assert(tool_class("test") == AIMEE_TOOL_CLASS_EXEC);
+   assert(tool_class("run_tests") == AIMEE_TOOL_CLASS_EXEC);
    assert(tool_class("read_file") == AIMEE_TOOL_CLASS_READ);
    assert(tool_class("mcp:remote") == AIMEE_TOOL_CLASS_REMOTE);
    assert(tool_class("not_registered") == AIMEE_TOOL_CLASS_UNKNOWN);
@@ -158,19 +161,46 @@ static void test_git(void)
                                    NULL) == AIMEE_MODULE_STATUS_OK);
    assert(aimee_git_response_decode(response, response_len, &result) == 0);
    assert(result.operation == AIMEE_GIT_OP_PUSH && result.needs_credentials);
+
+   uint8_t ref_request[AIMEE_GIT_REF_REQUEST_LEN];
+   int allowed = 0;
+   invocation.stage_id = AIMEE_GIT_STAGE_REF_VALIDATE;
+   assert(aimee_git_ref_request_encode("feature/topic-1", ref_request, sizeof(ref_request)) == 0);
+   assert(aimee_git_module_handler(&invocation, ref_request, sizeof(ref_request), response,
+                                   sizeof(response), &response_len,
+                                   NULL) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_git_ref_response_decode(response, response_len, &allowed) == 0 && allowed);
+   assert(aimee_git_ref_request_encode("-evil", ref_request, sizeof(ref_request)) == 0);
+   assert(aimee_git_module_handler(&invocation, ref_request, sizeof(ref_request), response,
+                                   sizeof(response), &response_len,
+                                   NULL) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_git_ref_response_decode(response, response_len, &allowed) == 0 && !allowed);
 }
 
 static void test_skills(void)
 {
-   uint8_t request[AIMEE_SKILLS_REQUEST_LEN], response[AIMEE_SKILLS_RESPONSE_LEN];
+   uint8_t request[512], response[AIMEE_SKILLS_TRIGGER_RESPONSE_LEN];
    uint32_t response_len = 0;
    int fire = 0;
    aimee_module_invocation_t invocation = {.stage_id = AIMEE_SKILLS_STAGE_CONTEXT};
    assert(aimee_skills_request_encode(12, 6, request, sizeof(request)) == 0);
-   assert(aimee_skills_module_handler(&invocation, request, sizeof(request), response,
+   assert(aimee_skills_module_handler(&invocation, request, AIMEE_SKILLS_REQUEST_LEN, response,
                                       sizeof(response), &response_len,
                                       NULL) == AIMEE_MODULE_STATUS_OK);
    assert(aimee_skills_response_decode(response, response_len, &fire) == 0 && fire);
+
+   const char *content = "---\nname: wait\ntriggers:\n  tool: [Bash]\n"
+                         "  arg_pattern: [\"sleep \", \"curl \"]\n---\nWait safely.\n";
+   size_t request_len = aimee_skills_trigger_request_size(content, "Bash", "sleep 5");
+   assert(request_len > 0 && request_len <= sizeof(request));
+   assert(aimee_skills_trigger_request_encode(content, "Bash", "sleep 5", request,
+                                              sizeof(request)) == 0);
+   invocation.stage_id = AIMEE_SKILLS_STAGE_TRIGGER;
+   int match = 0;
+   assert(aimee_skills_module_handler(&invocation, request, (uint32_t)request_len, response,
+                                      sizeof(response), &response_len,
+                                      NULL) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_skills_trigger_response_decode(response, response_len, &match) == 0 && match);
 }
 
 static void test_governance(void)
@@ -450,6 +480,22 @@ static void test_benchmarks(void)
       assert(fabs(scores.ndcg - cases[i].ndcg) < 1e-12);
       assert(fabs(scores.recall - cases[i].recall) < 1e-12);
    }
+
+   static const double latencies[] = {10.0, 1.0, 5.0, 3.0, 8.0};
+   uint8_t latency_request[AIMEE_BENCHMARKS_LATENCY_REQUEST_LEN];
+   uint8_t latency_response[AIMEE_BENCHMARKS_LATENCY_RESPONSE_LEN];
+   uint32_t latency_response_len = 0;
+   aimee_benchmarks_latency_summary_t summary;
+   aimee_module_invocation_t latency_invocation = {.stage_id = AIMEE_BENCHMARKS_STAGE_LATENCY};
+   assert(aimee_benchmarks_latency_request_encode(latencies, 5, latency_request,
+                                                  sizeof(latency_request)) == 0);
+   assert(aimee_benchmarks_module_handler(
+              &latency_invocation, latency_request, sizeof(latency_request), latency_response,
+              sizeof(latency_response), &latency_response_len, NULL) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_benchmarks_latency_response_decode(latency_response, latency_response_len,
+                                                   &summary) == 0);
+   assert(summary.queries == 5 && summary.p50_ms == 5.0 && summary.p95_ms == 10.0 &&
+          summary.p99_ms == 10.0 && summary.min_ms == 1.0 && summary.max_ms == 10.0);
 }
 
 int main(void)

@@ -24,6 +24,12 @@ def main() -> int:
         contracts = exporter.process_contracts.validate()
         expected_go = [name for name, row in contracts.items()
                        if row.get("runtime") == "go"]
+        # go.modules is the module runtime's SPAWN list, not the set of Go
+        # processes. A process hosted by an already-supervised program is not
+        # spawned there -- the bus denies a live duplicate of its principal --
+        # so it is a Go module with source and a repository, but not a row here.
+        expected_spawned = [name for name, row in contracts.items()
+                            if row.get("runtime") == "go" and not row.get("hosted_by")]
         expected_c = [name for name, row in contracts.items()
                       if row.get("runtime") == "c"]
         with tempfile.TemporaryDirectory(prefix="aimee-go-module-bundle-") as temporary:
@@ -31,8 +37,8 @@ def main() -> int:
             bundle = temporary_root / "bundle"
             exporter.export_runtime_bundle(bundle)
             actual_go = (bundle / "go.modules").read_text(encoding="utf-8").splitlines()
-            if actual_go != expected_go:
-                return fail(f"Go module list {actual_go!r} differs from {expected_go!r}")
+            if actual_go != expected_spawned:
+                return fail(f"Go module list {actual_go!r} differs from {expected_spawned!r}")
             actual_c = sorted(path.stem.removeprefix("aimee-module-")
                               for path in (bundle / "src").glob("aimee-module-*.c"))
             if actual_c != sorted(expected_c):

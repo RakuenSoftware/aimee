@@ -7,7 +7,8 @@
 #include "http_content_encoding.h"
 #include "server.h" /* CAP_* / CAPS_* bits, server_capability_for_method */
 #include "server/server_mgmt_endpoint.h"
-#include "server/wfe_http_proxy.h"
+#include "server/workflow_control_bus.h"
+#include <aimee/audit/obs_bus.h>
 #include "agent_config.h"
 #include "config.h"
 #include "cJSON.h"
@@ -287,78 +288,58 @@ static void submit_and_wait_op(const char *method)
    assert(status == OPENAI_RUN_COMPLETED);
 }
 
-static void test_wfe_http_proxy_round_trip(void)
+/* The bus is not started in a unit test, so the module surface is stubbed to
+ * report exactly that. obs_bus_module_call must still resolve for the link even
+ * though an unattached module is answered before it is reached. */
+int obs_bus_module_available(uint32_t event_kind)
 {
-   char temp[] = "/tmp/aimee-wfe-proxy-XXXXXX";
-   assert(mkdtemp(temp) != NULL);
-   char socket_path[sizeof(((struct sockaddr_un *)0)->sun_path)];
-   assert(snprintf(socket_path, sizeof(socket_path), "%s/wfe.sock", temp) > 0);
+   (void)event_kind;
+   return 0;
+}
 
-   int listener = socket(AF_UNIX, SOCK_STREAM, 0);
-   assert(listener >= 0);
-   struct sockaddr_un addr = {.sun_family = AF_UNIX};
-   assert(snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", socket_path) > 0);
-   assert(bind(listener, (struct sockaddr *)&addr, sizeof(addr)) == 0);
-   assert(listen(listener, 1) == 0);
+aimee_module_call_result_t
+obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
+                    const void *request_body, uint32_t request_len, void *response_body,
+                    uint32_t response_capacity, uint32_t *response_len,
+                    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   (void)event_kind;
+   (void)stage_id;
+   (void)trace_id;
+   (void)deadline_ns;
+   (void)request_body;
+   (void)request_len;
+   (void)response_body;
+   (void)response_capacity;
+   (void)response_len;
+   (void)cancelled;
+   (void)cancel_context;
+   return AIMEE_MODULE_CALL_TRANSPORT;
+}
 
-   pid_t child = fork();
-   assert(child >= 0);
-   if (child == 0)
-   {
-      int client = accept(listener, NULL, NULL);
-      if (client < 0)
-         _exit(10);
-      char request[4096] = "";
-      size_t used = 0;
-      while (used + 1 < sizeof(request))
-      {
-         ssize_t got = read(client, request + used, sizeof(request) - used - 1);
-         if (got <= 0)
-            _exit(11);
-         used += (size_t)got;
-         request[used] = '\0';
-         if (strstr(request, "{\"proposal_md\":\"test\"}"))
-            break;
-      }
-      if (!strstr(request, "POST /v1/dev/submit?source=release-test HTTP/1.1\r\n") ||
-          !strstr(request, "Authorization: Bearer proxy-test-token\r\n") ||
-          !strstr(request, "X-Aimee-Webuser: webuser:release-test\r\n") ||
-          !strstr(request, "X-Aimee-Workflow-Operator: true\r\n"))
-         _exit(12);
-      const char *response = "HTTP/1.1 202 Accepted\r\nContent-Type: application/json\r\n"
-                             "Content-Length: 30\r\nConnection: close\r\n\r\n"
-                             "{\"ok\":true,\"work_item_id\":\"w\"}";
-      if (write(client, response, strlen(response)) != (ssize_t)strlen(response))
-         _exit(13);
-      close(client);
-      close(listener);
-      _exit(0);
-   }
-
-   setenv("AIMEE_WFE_HTTP_SOCKET", socket_path, 1);
-   assert(runtime_secret_store("AIMEE_API_BEARER_TOKEN", "proxy-test-token") == 0);
+/* The private workflow proxy is gone: the control plane is reached over the
+ * event bus. Its round-trip test went with the transport it exercised -- the
+ * request shaping it covered is now tested in Go against the same mux
+ * (server-go/modules/workflows/control_test.go).
+ *
+ * What is still C's to answer is the unattached case. A control call with no
+ * module serving the stage must say so, not hang or claim success. */
+static void test_workflow_control_reports_an_unattached_module(void)
+{
    char response[256];
    const char *body = "{\"proposal_md\":\"test\"}";
-   int status = wfe_http_proxy_request("POST", "/v1/dev/submit", "source=release-test", body,
-                                       (int)strlen(body), "webuser:release-test", 1, response,
-                                       sizeof(response));
-   unsetenv("AIMEE_WFE_HTTP_SOCKET");
-   runtime_secret_remove("AIMEE_API_BEARER_TOKEN");
-   int child_status = 0;
-   assert(waitpid(child, &child_status, 0) == child);
-   assert(WIFEXITED(child_status) && WEXITSTATUS(child_status) == 0);
-   assert(status == 202);
-   assert(strcmp(response, "{\"ok\":true,\"work_item_id\":\"w\"}") == 0);
-   close(listener);
-   assert(unlink(socket_path) == 0);
-   assert(rmdir(temp) == 0);
+   int status = workflow_control_request("POST", "/v1/dev/submit", "source=release-test", body,
+                                         (int)strlen(body), "webuser:release-test", 1, response,
+                                         sizeof(response));
+   assert(status == 503);
+   assert(strstr(response, "not attached to the event bus") != NULL);
 }
 
 int main(void)
 {
    printf("server_http: ");
 
-   test_wfe_http_proxy_round_trip();
+   test_workflow_control_reports_an_unattached_module();
 
    char home[PATH_MAX];
    snprintf(home, sizeof(home), "%s/aimee-shttp-XXXXXX", platform_tmpdir());
@@ -616,12 +597,12 @@ int main(void)
    }
 
    /* Go owns workflow state, but the public C resource plane must forward to it.
-    * An absent private socket is a service outage, not a retired 410 endpoint. */
+    * A control plane that is not serving the stage is a service outage, not a
+    * retired 410 endpoint. The stub above reports the module as unattached. */
    {
-      unsetenv("AIMEE_WFE_HTTP_SOCKET");
       int st = server_http_route("POST", "/v1/dev/submit", "{}", 2, resp, sizeof(resp));
       assert(st == 503);
-      assert(strstr(resp, "control plane is unavailable"));
+      assert(strstr(resp, "not attached to the event bus"));
       st = server_http_route("GET", "/v1/workflow/items/wi_test", NULL, 0, resp, sizeof(resp));
       assert(st == 503);
    }

@@ -43,12 +43,14 @@ typedef struct
 } response_dedup_key_inputs_t;
 
 typedef int (*response_dedup_key_provider_fn)(const response_dedup_key_inputs_t *in, char *out,
-                                               size_t out_cap);
+                                              size_t out_cap);
 void response_dedup_register_key_provider(response_dedup_key_provider_fn provider);
 
-/* Build a stable dedup key from `in`. Writes a NUL-terminated key into out (empty
- * when `in` is NULL). Pure and deterministic; unit-tested. */
-void response_dedup_key(const response_dedup_key_inputs_t *in, char *out, size_t out_cap);
+/* Request a stable dedup key from the registered response-composition module
+ * provider. Returns 0 and writes a non-empty NUL-terminated key on success;
+ * returns -1 and clears out when the input is invalid, no provider is registered,
+ * or the provider fails. */
+int response_dedup_key(const response_dedup_key_inputs_t *in, char *out, size_t out_cap);
 
 /* Look up a live (unexpired) entry for `key` as of `now` (unix seconds). On a
  * hit, *resp_out is set to a malloc'd copy of the cached response (caller frees)

@@ -13,6 +13,7 @@
 
 #include "cJSON.h"
 #include "db1.h"
+#include "wfe_advance.h"
 #include "wfe_advance_exec.h"
 #include "wfe_binding.h"
 #include "wfe_engine.h"
@@ -78,11 +79,36 @@ static const char *stage_now(const char *wi)
    return buf;
 }
 
+/* Event-bus test double matching the shipped Go workflows decision contract. */
+static int workflow_event_bus_provider(const char *bound_wi, const wfe_advance_args_t *args,
+                                       const char *actual_stage, const char *actual_state,
+                                       const char *last_nonce, wfe_advance_outcome_t *outcome)
+{
+   if (!args || !outcome)
+      return -1;
+   if (!args->work_item_id[0] || !args->observed_stage[0])
+      *outcome = WFE_ADV_BADARGS;
+   else if (!bound_wi || !bound_wi[0] || strcmp(bound_wi, args->work_item_id) != 0)
+      *outcome = WFE_ADV_UNBOUND;
+   else if (args->have_nonce && last_nonce && last_nonce[0] && strcmp(args->nonce, last_nonce) == 0)
+      *outcome = WFE_ADV_REPLAY;
+   else if (actual_state &&
+            (strcmp(actual_state, "accepted") == 0 || strcmp(actual_state, "rejected") == 0 ||
+             strcmp(actual_state, "abandoned") == 0))
+      *outcome = WFE_ADV_TERMINAL;
+   else if (!actual_stage || strcmp(args->observed_stage, actual_stage) != 0)
+      *outcome = WFE_ADV_STALE;
+   else
+      *outcome = WFE_ADV_OK;
+   return 0;
+}
+
 int main(void)
 {
    printf("wfe-advance-exec: ");
    setup_home();
    assert(db1_init(":memory:") == 0);
+   wfe_advance_register_decision_provider(workflow_event_bus_provider);
    wfe_reset_block_executors();
    wfe_register_stub_executors(); /* every block -> ADVANCED, follows `next` */
 
@@ -183,6 +209,16 @@ int main(void)
    free(ev);
    assert(adv == 2);   /* a->b and b->c */
    assert(stale == 1); /* the one stale attempt */
+
+   /* Removing the event-bus provider fails closed and never advances. */
+   wfe_advance_register_decision_provider(NULL);
+   assert(strcmp(stage_now(id2), "b") == 0);
+   char args_b2[256];
+   snprintf(args_b2, sizeof args_b2, "{\"work_item_id\":\"%s\",\"observed_stage\":\"b\"}", id2);
+   assert(wfe_advance_request_run("sess-C", args_b2, out, sizeof out) == 0);
+   status_of(out, st, sizeof st);
+   assert(strcmp(st, "error") == 0);
+   assert(strcmp(stage_now(id2), "b") == 0);
 
    printf("ok\n");
    return 0;

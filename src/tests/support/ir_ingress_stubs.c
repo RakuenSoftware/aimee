@@ -264,10 +264,11 @@ __attribute__((weak)) void aimee_response_free(void *r)
  * (which now calls gw_response_run_governance) but links no policing graph. Inert weak
  * stub -> no policing, which the shape test does not exercise. The p2c tests link the real
  * gw_stage_governance.o + gateway_policy.o, so the strong symbol wins there. */
-__attribute__((weak)) int gw_response_run_governance(void *parsed, int enabled)
+__attribute__((weak)) int gw_response_run_governance(void *parsed, int enabled, int policy_active)
 {
    (void)parsed;
    (void)enabled;
+   (void)policy_active;
    return 0;
 }
 

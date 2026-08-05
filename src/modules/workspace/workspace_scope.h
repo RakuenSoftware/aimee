@@ -66,11 +66,10 @@ int ws_scope_name_valid(const char *name);
 /* Component cap shared with ws_scope_name_valid (kept here for ref buffers). */
 #define WS_REF_COMP_MAX 64
 
-/* 1 iff buf[0..len) is a valid project ref: a flat single component, or
- * exactly <org>/<repo> where BOTH components independently pass
- * ws_scope_name_valid. This is the ONLY function that ever accepts a '/' in a
- * project reference; embedded NUL is rejected by byte-scan (the buffer is not
- * assumed NUL-terminated). Pure. */
+/* Validate buf[0..len) through the separately supervised workspace-access
+ * event-bus stage. This is the ONLY function that ever accepts a '/' in a
+ * project reference. It fails closed until a provider is registered and when
+ * the module is unavailable or returns invalid wire data. */
 int ws_scope_project_ref_valid(const char *buf, size_t len);
 typedef int (*ws_scope_ref_validator_fn)(const char *buf, size_t len, int *allowed);
 void ws_scope_register_ref_validator(ws_scope_ref_validator_fn validator);

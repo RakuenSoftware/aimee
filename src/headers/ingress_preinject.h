@@ -81,10 +81,11 @@ typedef struct
 char *ingress_render_block(const ingress_entry_t *entries, int count, size_t envelope_budget,
                            int headline_missing_count, int *omitted_count_out);
 
-/* Map a recall relevance score in [0,1] to a confidence tier string
- * ("high" | "medium" | "low"). Pure; thresholds documented in the .c. */
-const char *ingress_preinject_confidence(double top_score);
 typedef int (*ingress_confidence_provider_fn)(double top_score, const char **confidence);
+/* Request a confidence tier from the supervised memory process. Returns 0 and
+ * one of "high"/"medium"/"low" on success; -1 when the provider is absent,
+ * fails, or returns an invalid tier. */
+int ingress_preinject_confidence(double top_score, const char **confidence);
 void ingress_preinject_register_confidence_provider(ingress_confidence_provider_fn provider);
 
 /* Format code-search hits into a `recommended (code):` block — one
@@ -95,8 +96,8 @@ void ingress_preinject_register_confidence_provider(ingress_confidence_provider_
 char *ingress_preinject_format_code_block(const code_search_hit_t *hits, int n);
 
 /* Format the <aimee-context …> envelope from an already-packed context block
- * and a confidence tier. Returns a malloc'd string the caller frees, or NULL
- * when context_block is NULL/blank (no envelope → no injection). Pure. */
+ * and a validated confidence tier. Returns a malloc'd string the caller frees,
+ * or NULL when the block/tier is absent or invalid. Pure. */
 char *ingress_preinject_format_envelope(const char *context_block, const char *confidence);
 
 /* Extract the recall seed query from a parsed chat `messages` array: the text
