@@ -209,7 +209,7 @@ func TestFreezeRejectsDivergentSiblingCreateCreateCollision(t *testing.T) {
 	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	definition := []byte("name: slice\nstart: freeze\nnodes:\n  - id: freeze\n    block: freeze\n    next: review\n  - id: review\n    block: review\n")
+	definition := []byte("name: slice\nstart: freeze\nnodes:\n  - id: branch\n    block: branch.open\n  - id: freeze\n    block: freeze\n    in: {branch: branch.out}\n    next: review\n  - id: review\n    block: review\n    in: {src: freeze.out}\n")
 	if err := os.WriteFile(filepath.Join(workflowDir, "slice.yaml"), definition, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +359,7 @@ nodes:
     in: {branch: impl.out}
     next: review
   - id: review
-    block: review
+    block: gate.human
     in: {src: freeze.out}
     on_pass: done
     on_fail: impl
@@ -437,7 +437,8 @@ nodes:
 		t.Fatal(err)
 	}
 
-	scheduler := NewScheduler(store, eng, 2, nil)
+	// Include the parent plus both slices so the collision is exercised concurrently.
+	scheduler := NewScheduler(store, eng, 3, nil)
 	scheduler.SetPerWorkflowSource(func() int { return 2 })
 	scheduler.fill(ctx)
 	deadline := time.Now().Add(5 * time.Second)
@@ -463,7 +464,7 @@ nodes:
 			t.Fatal(err)
 		}
 		switch {
-		case item.Stage == "review" && item.State == "active" && item.PauseReason == "":
+		case item.Stage == "review" && item.State == "active" && item.PauseReason == "human_gate":
 			advanced = id
 		case item.Stage == "freeze" && item.State == "rejected":
 			rejected = id
@@ -481,7 +482,7 @@ nodes:
 	if loser.Stage != "freeze" || loser.State != "rejected" || loser.PRRef != "" {
 		t.Fatalf("loser crossed the freeze boundary: %+v", loser)
 	}
-	if _, err := artifacts.NodeArtifact(rejected, "pr.open"); !errors.Is(err, os.ErrNotExist) {
+	if _, err := artifacts.NodeArtifact(rejected, "pr"); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("rejected slice opened a PR/CONFLICTING PR: %v", err)
 	}
 	if _, err := artifacts.NodeArtifact(rejected, "freeze"); !errors.Is(err, os.ErrNotExist) {
@@ -555,8 +556,11 @@ func TestSynchronizedSimultaneousFreezeRejectsExactlyOneDivergentCreate(t *testi
 	definition := []byte(`name: slice
 start: freeze
 nodes:
+  - id: impl
+    block: branch.open
   - id: freeze
     block: freeze
+    in: {branch: impl.out}
     next: review
   - id: review
     block: review
@@ -591,7 +595,7 @@ nodes:
 		if err := store.CreateWorkItem(ctx, item); err != nil {
 			t.Fatal(err)
 		}
-		if err := artifacts.PutProposal(item.ID, []byte("freeze sync collision")); err != nil {
+		if err := artifacts.PutProposal(item.ID, []byte(`{"packet_id":"`+item.ID+`","dependencies":[]}`)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -654,7 +658,8 @@ nodes:
 			case outcome.result.Ran && outcome.result.Terminal && outcome.result.State == "rejected" && item.Stage == "freeze" && item.State == "rejected":
 				rejected = outcome.id
 			default:
-				t.Fatalf("unexpected synchronized outcome for %s: result=%+v item=%+v", outcome.id, outcome.result, item)
+				events, _ := store.Events(ctx, outcome.id, 0, 50)
+				t.Fatalf("unexpected synchronized outcome for %s: result=%+v item=%+v events=%+v", outcome.id, outcome.result, item, events)
 			}
 		case <-time.After(5 * time.Second):
 			t.Fatal("timed out waiting for synchronized freezes")
@@ -681,7 +686,7 @@ nodes:
 			t.Fatalf("terminal detail %q missing %q", detail, want)
 		}
 	}
-	if _, err := artifacts.NodeArtifact(rejected, "pr.open"); !errors.Is(err, os.ErrNotExist) {
+	if _, err := artifacts.NodeArtifact(rejected, "pr"); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("rejected slice opened a PR/CONFLICTING PR: %v", err)
 	}
 }
@@ -705,6 +710,31 @@ func TestFreezeAllowsIdenticalSiblingCreateAndExistingFileEdits(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	artifacts, err := wfe.NewArtifactStore(filepath.Join(t.TempDir(), "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflowDir := filepath.Join(t.TempDir(), "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	definition := []byte(`name: slice
+start: branch
+nodes:
+  - id: branch
+    block: branch.open
+    next: freeze
+  - id: freeze
+    block: freeze
+    in: {branch: branch.out}
+    next: gate
+  - id: gate
+    block: review
+    in: {src: freeze.out}
+`)
+	if err := os.WriteFile(filepath.Join(workflowDir, "slice.yaml"), definition, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registry, err := wfe.NewRegistry(workflowDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -732,7 +762,7 @@ func TestFreezeAllowsIdenticalSiblingCreateAndExistingFileEdits(t *testing.T) {
 	if err := store.SetWorktree(ctx, "wi_s0", slicedir); err != nil {
 		t.Fatal(err)
 	}
-	runner := &NativeRunner{db: store, artifacts: artifacts}
+	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
 	item, err := store.WorkItem(ctx, "wi_s1")
 	if err != nil {
 		t.Fatal(err)
