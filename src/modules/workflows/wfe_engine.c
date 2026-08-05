@@ -390,8 +390,8 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
                   sizeof(WFE_FREEZE_SIBLING_CREATE_COLLISION)) == 0)
       {
          WFE_CKW(db1_work_item_set_terminal(work_item_id, "rejected"));
-         db1_lifecycle_event_add(work_item_id, node->id, "terminal", "engine",
-                                 r.failure_detail, "", r.cost_usd);
+         db1_lifecycle_event_add(work_item_id, node->id, "terminal", "engine", r.failure_detail, "",
+                                 r.cost_usd);
          out->terminal = 1;
          snprintf(out->state, sizeof out->state, "rejected");
       }

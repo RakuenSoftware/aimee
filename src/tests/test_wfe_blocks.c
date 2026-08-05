@@ -144,15 +144,18 @@ int main(void)
                      "printf 'from mine\\n' > doc.md && git add -A && git commit -q -m mine",
                      sdir, cut);
             assert(sh(cmd) == 0);
-            assert(db1_work_item_create("slice0", "repo", "p0", "build", "", "pr", "autonomous") == 0);
-            assert(db1_work_item_create("mine", "repo", "p1", "build", "", "freeze", "autonomous") == 0);
+            assert(db1_work_item_create("slice0", "repo", "p0", "build", "", "pr", "autonomous") ==
+                   0);
+            assert(db1_work_item_create("mine", "repo", "p1", "build", "", "freeze",
+                                        "autonomous") == 0);
             assert(db1_work_item_set_parent("slice0", "parent") == 0);
             assert(db1_work_item_set_parent("mine", "parent") == 0);
             assert(db1_work_item_set_stage("slice0", "after_freeze", cut) == 0);
             assert(db1_work_item_set_pr_ref("slice0", "feat") == 0);
             char sibling[80];
             assert(wfe_slice_conflicts_with_frozen_sibling("mine", sdir, cut, "HEAD", clash,
-                                                           sizeof clash, sibling, sizeof sibling) == 1);
+                                                           sizeof clash, sibling,
+                                                           sizeof sibling) == 1);
             assert(strcmp(clash, "doc.md") == 0);
             assert(strcmp(sibling, "slice0") == 0);
 
@@ -162,7 +165,8 @@ int main(void)
                      sdir, cut);
             assert(sh(cmd) == 0);
             assert(wfe_slice_conflicts_with_frozen_sibling("mine", sdir, cut, "HEAD", clash,
-                                                           sizeof clash, sibling, sizeof sibling) == 0);
+                                                           sizeof clash, sibling,
+                                                           sizeof sibling) == 0);
 
             snprintf(cmd, sizeof cmd,
                      "cd %s && git checkout -q feat && printf 'base edit\n' >> seed.txt && "
@@ -171,10 +175,11 @@ int main(void)
                      sdir, cut);
             assert(sh(cmd) == 0);
             assert(wfe_slice_conflicts_with_frozen_sibling("mine", sdir, cut, "HEAD", clash,
-                                                           sizeof clash, sibling, sizeof sibling) == 0);
+                                                           sizeof clash, sibling,
+                                                           sizeof sibling) == 0);
 
-            assert(wfe_slice_conflicts_with_frozen_sibling(NULL, sdir, cut, "HEAD", clash,
-                                                           sizeof clash, sibling, sizeof sibling) == 0);
+            assert(wfe_slice_conflicts_with_frozen_sibling(
+                       NULL, sdir, cut, "HEAD", clash, sizeof clash, sibling, sizeof sibling) == 0);
          }
       }
    }

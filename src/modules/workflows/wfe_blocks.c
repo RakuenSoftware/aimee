@@ -1274,8 +1274,8 @@ static int git_blob_id(const char *workdir, const char *spec, char out[80])
 
 int wfe_slice_conflicts_with_frozen_sibling(const char *work_item_id, const char *workdir,
                                             const char *base_sha, const char *head_sha,
-                                            char *path_out, size_t path_cap,
-                                            char *sibling_out, size_t sibling_cap)
+                                            char *path_out, size_t path_cap, char *sibling_out,
+                                            size_t sibling_cap)
 {
    if (path_out && path_cap)
       path_out[0] = '\0';
@@ -1289,8 +1289,9 @@ int wfe_slice_conflicts_with_frozen_sibling(const char *work_item_id, const char
    if (db1_work_item_get(work_item_id, &self) != 1 || !self.parent_id[0])
       return 0;
 
-   const char *argv[] = {"git",    "-C",   workdir, "diff", "--name-only", "-z", "--diff-filter=A",
-                         base_sha, head_sha, NULL};
+   const char *argv[] = {"git",         "-C", workdir,           "diff",
+                         "--name-only", "-z", "--diff-filter=A", base_sha,
+                         head_sha,      NULL};
    char *added = NULL;
    if (git_capture(argv, &added) != 0 || !added)
    {
@@ -1323,8 +1324,8 @@ int wfe_slice_conflicts_with_frozen_sibling(const char *work_item_id, const char
       {
          db1_work_item_t *sib = &siblings[i];
          if (strcmp(sib->work_item_id, work_item_id) == 0 || strcmp(sib->state, "active") != 0 ||
-             strcmp(sib->current_stage, self.current_stage) == 0 || strcmp(sib->content_hash, base_sha) != 0 ||
-             !sib->pr_ref[0])
+             strcmp(sib->current_stage, self.current_stage) == 0 ||
+             strcmp(sib->content_hash, base_sha) != 0 || !sib->pr_ref[0])
             continue;
          char sib_spec[1200], sib_blob[80];
          snprintf(sib_spec, sizeof sib_spec, "%s:%s", sib->pr_ref, path);
@@ -1359,11 +1360,12 @@ static wfe_step_result_t exec_freeze(wfe_ctx *ctx, const wfe_node_t *node)
 
    char clash[1024], sibling[80];
    if (wfe_slice_conflicts_with_frozen_sibling(wfe_ctx_work_item(ctx), wd, base, head, clash,
-                                              sizeof clash, sibling, sizeof sibling))
+                                               sizeof clash, sibling, sizeof sibling))
    {
       char detail[512];
-      snprintf(detail, sizeof detail, WFE_FREEZE_SIBLING_CREATE_COLLISION " path=%s current=%s sibling=%s",
-               clash, wfe_ctx_work_item(ctx) ? wfe_ctx_work_item(ctx) : "", sibling);
+      snprintf(detail, sizeof detail,
+               WFE_FREEZE_SIBLING_CREATE_COLLISION " path=%s current=%s sibling=%s", clash,
+               wfe_ctx_work_item(ctx) ? wfe_ctx_work_item(ctx) : "", sibling);
       return wfe_step_failed_detail(WFE_FAIL_PERMANENT, detail);
    }
 

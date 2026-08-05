@@ -194,8 +194,8 @@ int wfe_tdd_tests_survive(const char *workdir, const char *red_sha);
  * and leave downstream merge handling as the backstop. Exposed for tests. */
 int wfe_slice_conflicts_with_frozen_sibling(const char *work_item_id, const char *workdir,
                                             const char *base_sha, const char *head_sha,
-                                            char *path_out, size_t path_cap,
-                                            char *sibling_out, size_t sibling_cap);
+                                            char *path_out, size_t path_cap, char *sibling_out,
+                                            size_t sibling_cap);
 
 /* ---- Child-workflow fan-out seam for foreach.workflow (sliced-lifecycle build).
  * The block decomposes the split packets into one CHILD workflow run per packet

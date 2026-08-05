@@ -685,15 +685,13 @@ int db1_work_item_list(db1_work_item_t **out)
                                  "SELECT " WI_COLS " FROM lifecycle_work_item ORDER BY id DESC");
 }
 
-
 int db1_work_item_list_by_parent(const char *parent_id, db1_work_item_t **out)
 {
    if (!parent_id || !parent_id[0])
       return -1;
-   return work_item_list_ordered_bind(out,
-                                      "SELECT " WI_COLS
-                                      " FROM lifecycle_work_item WHERE parent_id=? ORDER BY id DESC",
-                                      parent_id);
+   return work_item_list_ordered_bind(
+       out, "SELECT " WI_COLS " FROM lifecycle_work_item WHERE parent_id=? ORDER BY id DESC",
+       parent_id);
 }
 int db1_work_item_list_lru(db1_work_item_t **out)
 {
