@@ -513,10 +513,11 @@ func TestPartialImplementWithNoCommitDoesNotAdvance(t *testing.T) {
 	reviewedHash := wfe.Hash([]byte(reviewedDiff))
 	verifier := &recordingVerifier{}
 	runner.verifier = verifier
+	blockingFeedback := &wfe.ReviewFeedback{ArtifactHash: reviewedHash, Findings: []wfe.Finding{{
+		ID: "still-broken", Severity: "blocking", Summary: "the reviewed implementation is still broken",
+	}}}
 	out, err = runner.mutate(ctx, StepRequest{WorkItem: child, Node: wfe.Node{ID: "impl"},
-		Feedback: &wfe.ReviewFeedback{ArtifactHash: reviewedHash, Findings: []wfe.Finding{{
-			ID: "still-broken", Severity: "blocking", Summary: "the reviewed implementation is still broken",
-		}}}}, false)
+		Feedback: blockingFeedback}, false)
 	if err != nil {
 		t.Fatalf("review correction mutate: %v", err)
 	}
@@ -525,6 +526,31 @@ func TestPartialImplementWithNoCommitDoesNotAdvance(t *testing.T) {
 	}
 	if verifier.calls != 0 {
 		t.Fatalf("unchanged partial correction reached verifier: calls=%d", verifier.calls)
+	}
+
+	// The inverse is equally important: a prior correction attempt may have
+	// committed the requested repair before its delegate result was lost or
+	// downgraded to partial. Once the frozen diff differs from the reviewed
+	// artifact, the retry may advance after mechanical verification even if it
+	// makes no additional commit of its own.
+	if err := os.WriteFile(filepath.Join(workdir, "implementation.go"),
+		[]byte("package implementation\n\nconst repaired = true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, workdir, "add", "implementation.go")
+	gitRun(t, workdir, "commit", "-m", "repair reviewed implementation")
+	repairedHead := strings.TrimSpace(gitRun(t, workdir, "rev-parse", "HEAD"))
+	child, _ = store.WorkItem(ctx, "wi_child")
+	out, err = runner.mutate(ctx, StepRequest{WorkItem: child, Node: wfe.Node{ID: "impl"},
+		Feedback: blockingFeedback}, false)
+	if err != nil {
+		t.Fatalf("changed review correction mutate: %v", err)
+	}
+	if out.Status != StepAdvanced || out.ContentHash != repairedHead {
+		t.Fatalf("partial correction after changed reviewed artifact result=%+v, want advanced HEAD %s", out, repairedHead)
+	}
+	if verifier.calls != 1 {
+		t.Fatalf("changed partial correction verifier calls=%d, want 1", verifier.calls)
 	}
 }
 
@@ -570,10 +596,17 @@ func TestDocumentPartialNoChangeAdvancesUnchangedHead(t *testing.T) {
 	gitRun(t, workdir, "commit", "-m", "accepted implementation")
 	head := strings.TrimSpace(gitRun(t, workdir, "rev-parse", "HEAD"))
 	item, _ = store.WorkItem(ctx, "wi_root")
+	reviewedDiff, err := frozenWorktreeDiff(ctx, item, workdir)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	runner := &NativeRunner{agents: documentedNoopAgents{}, worktrees: manager, db: store}
 	out, err := runner.mutate(ctx, StepRequest{WorkItem: item, Node: wfe.Node{ID: "document"},
-		Proposal: "Document the accepted implementation."}, true)
+		Proposal: "Document the accepted implementation.",
+		Feedback: &wfe.ReviewFeedback{ArtifactHash: wfe.Hash([]byte(reviewedDiff)), Findings: []wfe.Finding{{
+			ID: "optional-polish", Severity: "suggestion", Summary: "consider optional wording polish",
+		}}}}, true)
 	if err != nil {
 		t.Fatalf("mutate: %v", err)
 	}
