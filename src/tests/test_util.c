@@ -144,6 +144,14 @@ static void test_sanitize_utf8(void)
    assert(strcmp(malformed, "x?? ??? ????") == 0);
    assert(text_sanitize_utf8(NULL) == 0);
 
+   assert(text_is_valid_utf8("plain ASCII"));
+   assert(text_is_valid_utf8("caf\xc3\xa9 \xe2\x80\x94 \xf0\x9f\x98\x80"));
+   assert(text_is_valid_utf8(NULL));
+   assert(!text_is_valid_utf8("truncated \xc2"));
+   assert(!text_is_valid_utf8("overlong \xc0\xaf"));
+   assert(!text_is_valid_utf8("surrogate \xed\xa0\x80"));
+   assert(!text_is_valid_utf8("too-high \xf4\x90\x80\x80"));
+
    printf("  PASS: test_sanitize_utf8\n");
 }
 

@@ -182,7 +182,11 @@ def check_link(errors: list[str], source: Path, line: int, raw: str, images: set
 
 
 def check_file(path: Path, errors: list[str], images: set[Path]) -> None:
-    text = path.read_text(encoding="utf-8")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        errors.append(f"{relative(path)}: invalid UTF-8 at byte {exc.start}")
+        return
     lines = list(visible_lines(text))
 
     if is_maintained(path):

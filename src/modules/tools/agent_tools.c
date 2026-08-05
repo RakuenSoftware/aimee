@@ -1327,6 +1327,8 @@ char *tool_write_file(const char *path, const char *content)
       return safe_strdup("error: write blocked: read-only delegate (not write-capable)");
    if (agent_tools_parent_write_guard_blocks(actual_path, NULL))
       return safe_strdup("error: write blocked: parent worktree is read-only for delegates");
+   if (!text_is_valid_utf8(content))
+      return safe_strdup("error: content is not valid UTF-8; refusing text-file write");
 
    /* Route raw I/O through the workspace provider (shared = direct fs, the
     * same calls as before). Policy above this point — cwd resolution, path

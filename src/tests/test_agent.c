@@ -1478,6 +1478,17 @@ static void test_tool_write_file(void)
    assert(strcmp(result, "ok") == 0);
    free(result);
 
+   /* Text tools must reject malformed UTF-8 without changing the file. */
+   char malformed[] = {'b', 'a', 'd', (char)0xc2, '\0'};
+   result = tool_write_file(tmppath, malformed);
+   assert(result != NULL);
+   assert(strstr(result, "not valid UTF-8") != NULL);
+   free(result);
+   readback = tool_read_file(tmppath, 0, 0, 1);
+   assert(readback != NULL);
+   assert(strcmp(readback, "hello changed") == 0);
+   free(readback);
+
    unlink(tmppath);
 }
 
