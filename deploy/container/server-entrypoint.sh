@@ -248,12 +248,15 @@ grant_untouched_since_seed() {
 grant_known_historical_default() { # <persisted> <shipped>
     _persisted=$1
     _shipped=$2
-    # Git originally shipped with only operation classification (7425). Ref
-    # validation (7426) was added later. Match the entire remaining policy so
-    # an operator change to identity, executable, or any other capability is
-    # never mistaken for that old image default.
-    [ "$(basename "$_persisted")" = "git.grant" ] || return 1
-    [ "$(grep '^serve=' "$_persisted" 2>/dev/null || true)" = "serve=7425" ] || return 1
+    # These modules originally shipped with one stage and later gained a second.
+    # Match the entire remaining policy so an operator change to identity,
+    # executable, or any other capability is never mistaken for an old image
+    # default.
+    _historical="$(basename "$_persisted"):$(grep '^serve=' "$_persisted" 2>/dev/null || true)"
+    case "$_historical" in
+        git.grant:serve=7425|skills.grant:serve=7681|roundtable.grant:serve=9473|benchmarks.grant:serve=10497) ;;
+        *) return 1 ;;
+    esac
     [ "$(sed '/^serve=/d' "$_persisted")" = "$(sed '/^serve=/d' "$_shipped")" ]
 }
 

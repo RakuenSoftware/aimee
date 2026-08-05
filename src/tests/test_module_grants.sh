@@ -80,6 +80,20 @@ serve=$3
 EOF
 }
 
+write_module_grant() { # <path> <principal-ref> <executable> <serve>
+    cat > "$1" <<EOF
+version=1
+principal_class=1
+principal_ref=$2
+uid=self
+executable=$3
+publish=
+subscribe=
+request=
+serve=$4
+EOF
+}
+
 run_seeding() { sh "$block" 2>"$tmp/err$caseno"; }
 serve_of() { sed -n 's/^serve=//p' "$1"; }
 
@@ -139,16 +153,24 @@ write_grant "$target" "$tmp/removed-by-this-image" "9999"
 run_seeding
 [ -f "$target" ] && bad "grant for a removed module survived" || ok "stale grant removed"
 
-echo "7. the exact pre-record Git default adopts its added ref-validation stage"
-setup
-write_git_grant "$AIMEE_MODULE_GRANT_SRC/git.grant" "$real_exe" "7425,7426"
-target="$AIMEE_HOME/modules.d/server/git.grant"
-write_git_grant "$target" "$real_exe" "7425"
-run_seeding
-if [ "$(serve_of "$target")" = "7425,7426" ]; then ok "historical default refreshed"
-else bad "historical default stayed stale (serve=$(serve_of "$target"))"; fi
-[ -f "$AIMEE_HOME/modules.d/server/.seeded/git.grant" ] && ok "historical default recorded" \
-    || bad "historical default was not recorded"
+echo "7. exact pre-record defaults adopt their added stages"
+for transition in \
+    "git 13 7425 7425,7426" \
+    "skills 14 7681 7681,7682" \
+    "roundtable 21 9473 9473,9474" \
+    "benchmarks 25 10497 10497,10498"
+do
+    set -- $transition
+    setup
+    write_module_grant "$AIMEE_MODULE_GRANT_SRC/$1.grant" "$2" "$real_exe" "$4"
+    target="$AIMEE_HOME/modules.d/server/$1.grant"
+    write_module_grant "$target" "$2" "$real_exe" "$3"
+    run_seeding
+    if [ "$(serve_of "$target")" = "$4" ]; then ok "$1 historical default refreshed"
+    else bad "$1 historical default stayed stale (serve=$(serve_of "$target"))"; fi
+    [ -f "$AIMEE_HOME/modules.d/server/.seeded/$1.grant" ] && ok "$1 default recorded" \
+        || bad "$1 historical default was not recorded"
+done
 
 echo "8. a nearby pre-record operator edit is preserved"
 setup
