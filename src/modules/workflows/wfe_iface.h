@@ -122,6 +122,7 @@ typedef enum
    WFE_FAIL_FORGE,     /* git/forge op failed -> park human */
    WFE_FAIL_CORRUPTION /* worktree/tree corruption -> terminal */
 } wfe_failure_class_t;
+#define WFE_FREEZE_SIBLING_CREATE_COLLISION "sibling_create_create_collision"
 
 typedef struct
 {

@@ -1362,7 +1362,7 @@ static wfe_step_result_t exec_freeze(wfe_ctx *ctx, const wfe_node_t *node)
                                               sizeof clash, sibling, sizeof sibling))
    {
       char detail[512];
-      snprintf(detail, sizeof detail, "sibling_create_create_collision path=%s current=%s sibling=%s",
+      snprintf(detail, sizeof detail, WFE_FREEZE_SIBLING_CREATE_COLLISION " path=%s current=%s sibling=%s",
                clash, wfe_ctx_work_item(ctx) ? wfe_ctx_work_item(ctx) : "", sibling);
       return wfe_step_failed_detail(WFE_FAIL_PERMANENT, detail);
    }
