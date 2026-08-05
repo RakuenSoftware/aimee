@@ -1017,3 +1017,68 @@ it is a different class of model and its multimodal path is unused here.
 
 It also over-extracts badly: abstention 0.180 against the 2.6B's 0.668. It
 answers on 82% of factless notes, which is where its precision goes.
+
+## 27. The context ran out and every guard said the run was clean
+
+A model that thinks too long does not fail. It returns nothing, and this
+benchmark records that as a valid empty answer.
+
+MiniCPM5-1B at Q4_K_M, 1001 notes:
+
+| | |
+|---|---:|
+| rows | 1001 |
+| parsed | 661 |
+| failed to parse | 340 |
+| **returned empty content** | **292** |
+| **flagged as truncated** | **0** |
+| median completion tokens, rows that parsed | 1980 |
+| median completion tokens, empty rows | **7632** |
+| prompt + completion on every empty row | **8192, exactly** |
+
+Every empty row sat precisely on the context boundary. The model reasoned for
+~7600 tokens and had no room left to answer.
+
+### Why nothing caught it
+
+`run_llamacpp.py` records `truncated = (completion_tokens == max_tokens)`. Every
+driver passes `--max-tokens 8192`; every server starts with `-c 8192`. Completion
+is therefore capped at `8192 - prompt_tokens`, about 7630 with this benchmark's
+~560-token prompt. **The equality can never hold.** The flag is unreachable by
+construction and has never fired once in this project's history.
+
+So a row that hit the wall recorded as: no error, not truncated, parse failure.
+Three signals, and the only one that moved was the vaguest.
+
+### It is not confined to one model
+
+| arm | rows at the context limit | flagged truncated |
+|---|---:|---:|
+| MiniCPM5-1B Q4_K_M | 292 / 1001 | 0 |
+| **Qwen3-1.7B 10k** | **54 / 10000** | 0 |
+| LFM2.5-2.6B Q4_K_M | 1 / 1001 | 0 |
+| gemma-4-E2B Q4 10k | 0 / 10000 | 0 |
+
+The gemma arms never come close, which is exactly why this survived a year of
+benchmarking: the models the harness was built around do not exhibit it. Qwen3's
+figure is already committed and sits in the published field ranking.
+
+### The shape of the mistake
+
+Defect 16 added a truncation refusal and its commit message read "this class of
+defect fails loudly or it recurs". Defect 18 recorded that it recurred within the
+hour, because the check was written over a **cause** rather than an **outcome**.
+This is the third instance of the same shape: the check asks "did the model hit
+max_tokens" when the question is "did this row produce a usable answer".
+
+The outcome-shaped check is one line and cannot go stale:
+
+    prompt_tokens + completion_tokens >= context_size   # or simply: content is empty
+
+### What it costs a reader
+
+MiniCPM5-1B's headline number is **0.1258**. Twenty-nine percent of its corpus
+produced nothing and was scored as a miss. That number is a floor, not a
+measurement, and published without this paragraph it would read as "MiniCPM5 is
+bad at extraction" when what happened is "MiniCPM5 reasons past the context
+window and the harness did not notice".
