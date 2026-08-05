@@ -48,6 +48,11 @@ def score(gold_rows, pred_rows):
         return json.load(fh)["strict"]["f1"]
 
 
+def gold_facts(row):
+    g = row["gold"]
+    return json.loads(g) if isinstance(g, str) else g
+
+
 def load(path):
     if not os.path.exists(path):
         return None
@@ -81,6 +86,17 @@ def main():
         for cat, ids in sorted(by_cat.items()):
             ids = [i for i in ids if i in shared]
             if len(ids) < 50:
+                continue
+            # A category whose notes carry no gold triples has UNDEFINED F1, not
+            # zero. score.py emits null for exactly these and says why: fp=0 on a
+            # factless note is perfect restraint, so printing 0.0 inverts the
+            # meaning and ranks the best behaviour as the worst. This script
+            # printed 0.0000 for negation/transient/ambiguous in its first
+            # version, reintroducing the bug the scorer was written to avoid.
+            # Read abstention_rate_on_schema in the score.json for these.
+            if not any(gold_facts(gold[i]) for i in ids):
+                print("    %-16s %6d %8s %8s %8s   (no gold triples; see "
+                      "abstention_rate_on_schema)" % (cat, len(ids), "n/a", "n/a", "n/a"))
                 continue
             fm = score([gold[i] for i in ids], [m[i] for i in ids])
             fn_ = score([gold[i] for i in ids], [n[i] for i in ids])

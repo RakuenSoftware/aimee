@@ -1483,7 +1483,7 @@ instrument is less sensitive than the thing being measured.
 
 ## 32. A third of the corpus cannot raise any score, and it is where the models differ most
 
-Article 6's open item 3 asked whether the MTP null is an average of two opposite
+Article 6 open item 3 asked whether the MTP null is an average of two opposite
 effects. Splitting the six paired 10k arms by note category answers that -- and
 turns up something much larger on the way.
 
@@ -1501,53 +1501,71 @@ The largest single movement is implicit on E2B Q8 at +0.0220, which is inside th
 +/-0.024 that n=723 supports and so is not a finding. The MTP null is a null all
 the way down, not a cancellation. **Article 6 open item 3 is closed.**
 
-### What the split actually exposed
+### What the split exposed, and the part of it I got wrong
 
-Three categories score **exactly 0.0000 strict F1 in every arm ever run**:
+Three categories score **exactly 0.0000 strict F1** in the first version of that
+split: negation (1318), transient (1391), ambiguous (506) -- 3215 of 10000 notes,
+32.1% of gold_large, all with empty gold by construction. They are abstention
+tests: the correct answer is no facts.
 
-| category | n | empty gold |
+I read that as a structural blind spot in F1 and wrote it up as one. **That was
+wrong, and it was wrong against the project's own source.** Two checks settle it,
+both of which should have come before the writeup:
+
+**1. The zeros were my bug, not the scorer's.** `score.py` already emits `null`
+rather than 0.0 for factless categories, with a comment giving the reason: "fp=0
+on a factless note is perfect restraint, not failure, and a chart would show it
+as the worst category." My `mtp_by_category.py` printed 0.0000 and thereby
+reintroduced precisely the error the scorer was written to avoid. Fixed.
+
+**2. The rows are not invisible to F1.** The scoring loop runs over every note,
+so a spurious triple on a factless note lands in global fp exactly like any other
+false positive. Setting the false positives on those rows to zero:
+
+| arm | F1 | spurious | F1 with perfect abstention | gain |
+|---|---:|---:|---:|---:|
+| E2B Q4 | 0.6246 | 1083 | 0.6644 | +0.0398 |
+| E2B Q6 | 0.6344 | 1145 | 0.6773 | +0.0429 |
+| E2B Q8 | 0.6329 | 1142 | 0.6754 | +0.0425 |
+| E4B Q4 | 0.6301 | 1410 | 0.6808 | +0.0507 |
+| E4B Q6 | 0.6452 | 1413 | 0.6975 | +0.0523 |
+| E4B Q8 | 0.6337 | 1456 | 0.6865 | +0.0528 |
+
+Over-extraction on the abstention third is worth **0.040 to 0.053 F1** -- an
+order of magnitude larger than every effect this campaign has argued about. The
+corpus design is sound and the metric responds to it. What I published as "a
+third of the corpus can only cost points and correct restraint is worth exactly
+nothing" is withdrawn: restraint is worth about four to five F1 points, which is
+what a precision term is supposed to do.
+
+**3. The metric I "introduced" has been in every score.json all along.** Each one
+carries an `over_extraction` block: `abstention_rate_on_schema` and
+`spurious_triples`, with a comment explaining that abstention is credited only
+where the model emitted the right shape, so a broken model cannot look maximally
+precise. E2B Q4 reads 0.674 and E4B Q4 reads 0.578. `abstention_quality.py`
+rediscovered a number that was already on disk, which is the fourth time this
+campaign has "found" something it had already measured.
+
+### What actually survives
+
+The behavioural difference is real, and it is the part worth keeping:
+
+| arm | abstention rate | spurious triples |
 |---|---:|---:|
-| negation | 1318 | 100% |
-| transient | 1391 | 100% |
-| ambiguous | 506 | 100% |
-| **total** | **3215** | **32.1% of gold_large** |
+| E2B Q4 / Q6 / Q8 | 0.674 / 0.658 / 0.659 | 1083 / 1145 / 1142 |
+| E4B Q4 / Q6 / Q8 | **0.578 / 0.576 / 0.565** | 1410 / 1413 / 1456 |
 
-They are abstention tests. The correct answer is no facts, so gold is empty by
-construction, so tp is structurally zero, so strict F1 is
-`2*0/(0+fp+0) = 0` -- **whether the model abstained perfectly or hallucinated on
-every row.** Within a category slice the two are indistinguishable.
+E4B stays silent on 57-58% of factless notes; E2B on 66-67%. Stable across all
+three quants, same card, same process count, same tier -- no confound between
+these six arms.
 
-In the aggregate these rows are not entirely invisible: their false positives
-inflate global fp and pull F1 down. But they can never push it up. **A third of
-this corpus can only cost a model points, and correct restraint on it is worth
-exactly nothing.** Every headline F1 in this project is effectively computed over
-the other 68%, with the abstention third acting only as a penalty term.
-
-### The measurement those rows do support, and what it shows
-
-The right metric is: how often does the model invent a fact when the answer is
-silence? Lower is better and zero is achievable. `harness/abstention_quality.py`.
-gold_large, 3215 empty-gold rows, XTX, nproc=3, MTP:
-
-| arm | invented on | spurious facts |
-|---|---:|---:|
-| E2B Q4 | 1022 (31.8%) | 1052 |
-| E2B Q6 | 1077 (33.5%) | 1123 |
-| E2B Q8 | 1093 (34.0%) | 1138 |
-| E4B Q4 | **1450 (45.1%)** | 1503 |
-| E4B Q6 | **1407 (43.8%)** | 1432 |
-| E4B Q8 | **1418 (44.1%)** | 1459 |
-
-**E4B invents facts on ~44% of abstention rows; E2B on ~33%.** An eleven-point
-gap, stable across all three quants, same card, same process count, same tier,
-same corpus -- there is no confound between these six arms. And the F1 spread
-across all six is under 0.015. *F1 ranks these two models as near-equals while
-one fabricates a third more often on the third of the corpus built to test
-restraint.*
-
-That also explains the fp asymmetry finding 31 could see but not account for: at
-the mid tier E4B carried +177 false positives over E2B at identical F1. This is
-where they come from.
+And F1 does **not** hide this, it *nets* it. At Q4, E4B leads E2B by +0.0055 as
+scored; with both abstaining perfectly the lead would be +0.0163. E4B is the
+stronger extractor and pays roughly a point of that back in over-extraction. The
+single number is the sum of two opposed movements, which is what a single number
+is for -- but a reader choosing a model for a pipeline that cannot tolerate
+invented facts needs the parts, and the parts were sitting in the score files
+unread.
 
 ### The MTP null survives on this metric too
 
@@ -1568,13 +1586,14 @@ is responsible is a real open question.
 
 ### For the articles
 
-This is the sharpest instance of the campaign's recurring shape. Six pathologies
-so far have been invisible to F1; this one is invisible **by construction** --
-not a bug in the scorer, but a property of what F1 is. A benchmark whose corpus
-is one third abstention tests is a benchmark reporting a number that ignores a
-third of its own design, and no amount of care with intervals fixes that, because
-the interval is on the wrong quantity.
+The keepable claim is narrow: **report abstention rate beside F1.** Not because
+F1 is blind to over-extraction -- it is not, it prices it at four to five points
+-- but because one number is the net of two opposed behaviours, and two models
+that tie can differ by ten points in how often they invent facts. `score.py`
+already computes it; the campaign simply never printed it.
 
-**Report abstention rate beside F1, always.** It is one line of code and it is
-the difference between "these two models are equivalent" and "one of them makes
-things up 33% more often".
+The retraction is the more useful story. This was the sixth "F1 is blind to X"
+finding, the shape was familiar, the data fit, and it took two checks against the
+project's own source to notice that the scorer had handled the case deliberately
+and documented why. Pattern-matching to a house theme is its own failure mode,
+and it is faster than the checks that catch it.
