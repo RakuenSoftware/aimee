@@ -2107,3 +2107,27 @@ the 5080 has never been checked. `harness/cacheoff_selfrepro_5080.sh` runs
 gold_small a second time in the identical configuration; if it does not match
 run 1 byte for byte, corpus composition was never the variable and this defect
 has been measuring plain nondeterminism.
+
+## Defect 41: MiniCPM5-1B does not serve under this harness, and I kept paying to rediscover that
+
+`openbmb/MiniCPM5-1B-GGUF` has now failed on three separate rented hosts and
+earlier on local hardware. The signature is identical every time: the container
+starts, the port maps, and `/health` never answers, so the placement logic
+concludes the host is bad and re-places onto another one.
+
+**The re-placement logic was the wrong response.** It was written for a host
+problem (a stalled image pull), and it correctly handles that. Applied to a model
+that cannot load, it turns one failure into an unbounded sequence of paid
+failures, each of which looks like a fresh host problem in the log. Three hosts
+showing the same symptom is evidence about the model, not about the hosts, and
+nothing in the pool was counting that.
+
+**Not fixed by retrying, and no longer attempted.** MiniCPM5-1B is removed from
+every job list. What is already known about it is banked and sufficient for the
+head-to-head: at 1001 notes on local hardware it scores 0.1652 at Q8_0 and 0.1258
+at Q4_K_M, with parse rates of 0.87 and 0.66. Both figures are floors caused by
+parse failure rather than capability measurements, and they are reported that way.
+
+**The rule this earns:** a failure that repeats across independent hosts is a
+property of the thing being placed. Count failures per JOB, not per host, and
+stop after the second.
