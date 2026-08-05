@@ -165,7 +165,6 @@ int db2_vault_operator_conninfo_allowed_for_test(const char *conninfo, int *tcp_
 
 static void pq_cancel_async(PGconn *connection, int64_t deadline)
 {
-#if PG_VERSION_NUM >= 170000
    PGcancelConn *cancel = PQcancelCreate(connection);
    if (!cancel)
       return;
@@ -180,15 +179,6 @@ static void pq_cancel_async(PGconn *connection, int64_t deadline)
             break;
       }
    PQcancelFinish(cancel);
-#else
-   (void)deadline;
-   char error[256] = "";
-   PGcancel *cancel = PQgetCancel(connection);
-   if (!cancel)
-      return;
-   (void)PQcancel(cancel, error, sizeof error);
-   PQfreeCancel(cancel);
-#endif
 }
 
 static void *prod_open(void *context, const char *conninfo, int64_t deadline, char *err,
