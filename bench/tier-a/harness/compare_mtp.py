@@ -143,10 +143,22 @@ def main():
     ap.add_argument("--mtp", required=True, help="arm stem for the MTP side")
     ap.add_argument("--nomtp", required=True, help="arm stem for the no-MTP side")
     ap.add_argument("--gold", help="unused; accepted so the call site reads symmetrically")
-    ap.add_argument("--noise", type=float, default=0.0105,
-                    help="F1 difference treated as indistinguishable. Default is "
-                         "finding 19's process-count effect, the smallest "
-                         "configuration change this benchmark has resolved.")
+    # DEFECT 39. This used to default to 0.0105 and call it a "noise threshold".
+    # 0.0105 is finding 19's MEASURED EFFECT of process count on F1, from an
+    # unrelated experiment. It is not an interval and it never was, and using it
+    # as one made every ranking gap between 0.0105 and the real interval look
+    # settled when it was not.
+    #
+    # There is no correct constant to put here, which is the point: the interval
+    # depends on n and on the pair. So this now only decides whether to PRINT a
+    # ratio, it makes no claim about significance, and the real answer comes from
+    # harness/bootstrap_ci.py on the same two arms. The default is the rough
+    # +/-0.024 that n=1001 supports, which is deliberately conservative at
+    # n=10000 -- it suppresses a ratio more often than needed rather than
+    # asserting a trade that a bootstrap would refuse.
+    ap.add_argument("--noise", type=float, default=0.024,
+                    help="F1 delta below which no gain-per-point ratio is printed. "
+                         "NOT a significance threshold: run bootstrap_ci.py for that.")
     args = ap.parse_args()
 
     a, b = summarise(args.mtp), summarise(args.nomtp)
@@ -183,11 +195,11 @@ def main():
     print(f"MTP costs {(-d):+.4f} F1 and changes steady-state throughput by "
           f"{fmt(gain, '+.1f')}%.")
     if abs(d) < args.noise:
-        print(f"The F1 difference is smaller than the {args.noise} noise threshold, "
-              f"so no gain-per-point ratio is reported: dividing by a denominator "
-              f"indistinguishable from zero manufactures a number rather than "
-              f"measuring one. Treat MTP as accuracy-neutral at this resolution "
-              f"and judge it on throughput alone.")
+        print(f"|delta| is under {args.noise}, so no gain-per-point ratio is "
+              f"printed: dividing by a denominator that may be zero manufactures a "
+              f"number rather than measuring one. This is a display rule, NOT a "
+              f"significance test -- run harness/bootstrap_ci.py on these two arms "
+              f"for the interval, per defect 39.")
     elif gain is not None:
         print(f"Trade: {gain / (abs(d) * 100):.2f}% throughput per 0.01 F1 given up."
               f"  ({'MTP is worse on accuracy' if d < 0 else 'MTP is better on accuracy'})")

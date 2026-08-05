@@ -204,13 +204,22 @@ def run_arm(job, gpu, maxprice, outdir, log):
         if not offers:
             log("FAIL %s: no offer under %.3f" % (label, maxprice)); return
         ep = None
-        for off in offers[:3]:          # re-place on a slow puller, do not wait it out
+        # Try more offers than there are workers. Every worker queries the same
+        # ordered list, so the cheapest offers collide and the losers get an
+        # HTTP 400 from the ask being gone. That is a race, not a bad job: the
+        # arm should walk down the list rather than fail.
+        for off in offers[:8]:          # re-place on a taken ask or a slow puller
             bid = None
             if job.get("_bid"):
                 # 35% over the floor: enough to survive ordinary competition and
                 # still far under on-demand.
                 bid = max(off.get("min_bid") or off["dph_total"], 0.005) * 1.35
-            cid = launch(off["id"], repo, job.get("ctx", 8192), job.get("cache_ram", 1024), bid)
+            try:
+                cid = launch(off["id"], repo, job.get("ctx", 8192), job.get("cache_ram", 1024), bid)
+            except (urllib.error.HTTPError, RuntimeError) as e:
+                log("    offer %s unavailable (%s); next offer" % (off["id"], e))
+                cid = None
+                continue
             log("--- %s on %s %s $%.3f/hr contract %s" % (label, gpu, off["id"], off["dph_total"], cid))
             try:
                 ep = endpoint(cid)
