@@ -1,0 +1,5 @@
+[06:05:09Z] === LFM2.5-8B-A1B Q4_K_M, 1001 notes, NPROC=auto (cannot fit 3 copies)
+[06:05:09Z]     NOT comparable to the nproc=3 ranking table -- see header
+[06:05:09Z] --- LFM2.5-8B-A1B.Q4_K_M  LiquidAI/LFM2.5-8B-A1B-GGUF:Q4_K_M  nproc=auto  no MTP
+[06:36:08Z] OK   LFM2.5-8B-A1B.Q4_K_M strictF1=0.5198 wall=30m  (nproc differs from the field)
+[06:36:08Z] === 8B-A1B COMPLETE ===

@@ -1153,3 +1153,73 @@ then needed for the QAT arms, where Google names files `gemma-4-E2B_q4_0-it.gguf
 and this project had only ever thought about one of them. A check that refuses
 too much is as costly as a check that refuses too little -- it just fails
 quietly, into a log, instead of into a headline number.
+
+## 29. The MoE is the best-behaved model in the field
+
+LFM2.5-8B-A1B at Q4_K_M, 1001 notes: **strict F1 0.5198**, precision 0.5707,
+recall 0.4773, abstention 0.7321.
+
+That places it between LFM2.5-2.6B (0.5854) and granite-4.1-3b (0.5432) -- except
+it is not a ranking row, for a reason given below.
+
+### It is the only model tonight with none of the pathologies
+
+| check | 8B-A1B |
+|---|---:|
+| parse_ok / schema_ok | 984 / 984 |
+| tool-call envelope | 0 |
+| empty content | 0 |
+| rows at the context limit | 0 |
+| transport errors | 0 |
+| fabrication rate | **0.0** |
+| in-seed ontology | 0.795 |
+
+Every other model added this campaign failed at least one of those. The 230M
+switched envelope by quant; the 1.2B lost 41% of a corpus to parse failure;
+MiniCPM5 starved 29% of its rows on context; SmolLM3 was refused outright by a
+naming guard. This one just worked.
+
+### Sparsity, not size, explains the speed
+
+8B total parameters, ~1B active. Measured: **5372 MiB resident** for one
+instance, auto-sized to 2 processes, **252.5 tok/s per stream**, 30 minutes for
+the arm.
+
+Its dense 2.6B sibling runs **107 tok/s per stream**. The 8B is 2.4x faster while
+being three times larger, because only the active experts are touched per token.
+That is the number to put in front of anyone assuming parameter count predicts
+latency.
+
+Caveat on that ratio: the two arms ran at different process counts (2 against 3),
+and the scaling sweep showed per-stream throughput rises as processes fall. The
+gap is far too large to be explained by that alone, but the precise multiple
+should not be quoted.
+
+### Its profile is the one you actually want
+
+Precision leads recall, 0.571 against 0.477, with **73% abstention**. It finds
+fewer facts and is right more often about the ones it reports. For a knowledge
+base that is the correct posture -- a false fact costs more than a missed one,
+and the whole benchmark exists because a system was writing facts nobody checked.
+
+Contrast LFM2.5-VL-1.6B at 18% abstention, which answers on four factless notes
+in five and pays for it in precision.
+
+### Why it is not a ranking row
+
+It cannot run 3 processes: Q4_K_M is 5.16 GB and three copies are 15.5 GB of a
+16303 MiB card before KV. As a MoE all experts stay resident, so the gemma-3n
+lesson (file size >> resident) does not rescue it. The sizer chose 2, and finding
+19 prices process count at 0.0105 F1 -- the same magnitude as this campaign's
+noise threshold. Its gap to granite-4.1-3b is 0.023, so the ordering probably
+survives, but "probably survives" is not a measurement and the table should say
+so rather than quietly include it.
+
+### One methodological note worth keeping
+
+A partial read of this arm at 473 rows gave 0.5131; the full 1001 gave 0.5198,
+a difference of +0.0067. The partial was accurate. It was still correct not to
+publish it -- that could not be known in advance, and this project withdrew a
+5.3x MTP headline built on exactly that shortcut a day earlier. The rule is not
+"partials are wrong", it is "you cannot tell which partials are wrong until
+afterwards".
