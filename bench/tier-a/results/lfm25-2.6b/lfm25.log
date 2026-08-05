@@ -4,3 +4,5 @@
 [21:30:23Z] --- LFM2.5-2.6B.Q4_K_M  LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M  nproc=3  no MTP
 [22:40:09Z] OK   LFM2.5-2.6B.Q4_K_M strictF1=0.5854 wall=69m
 [22:40:09Z] --- LFM2.5-2.6B.Q6_K  LiquidAI/LFM2.5-2.6B-GGUF:Q6_K  nproc=3  no MTP
+[00:02:44Z] OK   LFM2.5-2.6B.Q6_K strictF1=0.5795 wall=82m
+[00:02:44Z] --- LFM2.5-2.6B.Q8_0  LiquidAI/LFM2.5-2.6B-GGUF:Q8_0  nproc=3  no MTP
