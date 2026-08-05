@@ -32,6 +32,14 @@ var (
 	ErrModuleCallCancelled = errors.New("module call cancelled")
 	// ErrModuleCallFailed carries a non-OK status from the module itself.
 	ErrModuleCallFailed = errors.New("module call failed")
+	// ErrModuleCallCapabilityAbsent reports that no module serves the kind.
+	// The host answers a serverless request immediately with a control frame;
+	// surfacing it as an error is what keeps "nobody is listening" from looking
+	// like "the module is slow" until the deadline expires.
+	ErrModuleCallCapabilityAbsent = errors.New("module call capability absent")
+	// ErrModuleCallRejected reports that the host refused the request, e.g.
+	// because the caller's grant does not cover the kind.
+	ErrModuleCallRejected = errors.New("module call rejected by host")
 )
 
 // ModuleCallStatusError names the module's own outcome, so a caller can tell an
@@ -175,6 +183,18 @@ func (m *ModuleCaller) awaitReply(ctx context.Context, eventKind uint32, correla
 			}
 			time.Sleep(m.pollInterval)
 			continue
+		}
+		// The host answers on its own reserved kinds, not the requested one, so
+		// a control frame for this correlation has to be matched before the
+		// kind filter below or it reads as someone else's traffic and the call
+		// waits out a deadline for a reply that was already refused.
+		if event.Frame.CorrelationID == correlation {
+			switch event.Frame.EventKind {
+			case KindCapabilityAbsent:
+				return nil, ErrModuleCallCapabilityAbsent
+			case KindError:
+				return nil, ErrModuleCallRejected
+			}
 		}
 		if event.Frame.EventKind != eventKind || event.Frame.CorrelationID != correlation {
 			continue

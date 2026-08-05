@@ -236,3 +236,38 @@ func TestModuleCallerUsesADistinctCorrelationPerCall(t *testing.T) {
 		t.Fatalf("three calls used %d correlation(s)", len(seen))
 	}
 }
+
+// The host answers a request nobody serves with a control frame on its own
+// reserved kind. Before this was matched, the caller skipped it as another
+// correlation's traffic and blocked until its deadline, so an unserved kind was
+// indistinguishable from a slow module.
+func TestModuleCallerSurfacesCapabilityAbsent(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		kind uint32
+		want error
+	}{
+		{"capability absent", KindCapabilityAbsent, ErrModuleCallCapabilityAbsent},
+		{"host error", KindError, ErrModuleCallRejected},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &fakeCallerBus{budget: 256}
+			fake.replyTo = func(f *fakeCallerBus, kind uint32, correlation uint64, _ []byte) {
+				f.mu.Lock()
+				defer f.mu.Unlock()
+				f.pending = append(f.pending, Event{Frame: Frame{HdrFlags: FControl,
+					EventKind: tc.kind, CorrelationID: correlation}})
+			}
+			caller := newModuleCaller(fake)
+			start := time.Now()
+			_, err := caller.Call(context.Background(), KindModuleBase, 1, 0,
+				30*time.Second, []byte("{}"))
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("err = %v, want %v", err, tc.want)
+			}
+			if elapsed := time.Since(start); elapsed > 5*time.Second {
+				t.Fatalf("returned after %v: the caller waited out its deadline", elapsed)
+			}
+		})
+	}
+}
