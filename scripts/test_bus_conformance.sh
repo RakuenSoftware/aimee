@@ -46,7 +46,18 @@ timeout 60s "$module_harness" "$go_module"
 echo "== 2. migrated module interop: C core caller <-> shipped Go processes =="
 go_multicall="$repo_root/src/build/obj/tests/aimee-module-go"
 ( cd server-go && CGO_ENABLED=0 go build -trimpath -o "$go_multicall" ./cmd/aimee-module )
-for module_id in memory learning routing delegates tools workspace git skills response-composition governance workflows roundtable kb-synthesis runtime-web control-web benchmarks; do
+# Derive the list from the contract rather than restating it. A hardcoded list
+# drifts silently: a module hosted by another program is no longer a spawned
+# multicall binary, and a newly migrated one would never be exercised here.
+module_ids=$(python3 -I -c '
+import json, sys
+contract = json.load(open("src/modules/process-contracts.json"))
+print(" ".join(
+    component["id"]
+    for component in contract["components"]
+    if component.get("runtime") == "go" and not component.get("hosted_by")
+))')
+for module_id in $module_ids; do
    executable="$repo_root/src/build/obj/tests/aimee-module-$module_id"
    install -m 0755 "$go_multicall" "$executable"
    timeout 60s "$module_harness" "$executable" "$module_id"

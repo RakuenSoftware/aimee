@@ -72,10 +72,13 @@
     "src/modules/delegates/module_adapter.c"
   ],
   "go_sources": [
-    "server-go/modules/delegates/delegates.go"
+    "server-go/modules/delegates/delegates.go",
+    "server-go/modules/delegates/plane/client.go",
+    "server-go/modules/delegates/plane/helpers.go"
   ],
   "go_tests": [
-    "server-go/modules/delegates/delegates_test.go"
+    "server-go/modules/delegates/delegates_test.go",
+    "server-go/modules/delegates/plane/client_test.go"
   ],
   "tests": [
     "src/tests/test_aimee_ir_rescue.c",

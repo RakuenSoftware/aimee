@@ -1922,9 +1922,39 @@ static void test_roundtable_deadline_returns_best_so_far(void)
    printf("  test_roundtable_deadline_returns_best_so_far: ok\n");
 }
 
+/* A ONE-SEAT PANEL MUST NOT RUN THE CHAIR PASS.
+ *
+ * The chair pass arbitrates between seats that disagree; with one reviewer it is
+ * an extra delegate call and an extra failure mode. Measured: a one-seat
+ * completeness review returned a correct blocking finding, the chair then died
+ * on "unknown persona 'chairman'", and roundtable_status reported the whole run
+ * FAILED -- a caller polling it discards findings that were right.
+ *
+ * Gated at the USE SITE, not at config load: a preset overlay is applied after
+ * ensemble_panel_from_config and would put chair_synthesis back. */
+static void test_one_seat_panel_skips_chair_pass(void)
+{
+   ensemble_panel_t p;
+   memset(&p, 0, sizeof(p));
+   p.chair_synthesis = 1;
+
+   p.reference_count = 1;
+   assert(!(p.chair_synthesis && p.reference_count > 1));
+
+   p.reference_count = 2;
+   assert(p.chair_synthesis && p.reference_count > 1);
+
+   /* Off stays off regardless of seat count. */
+   p.chair_synthesis = 0;
+   p.reference_count = 5;
+   assert(!(p.chair_synthesis && p.reference_count > 1));
+   printf("  PASS: one-seat panel skips the chair pass\n");
+}
+
 int main(void)
 {
    printf("delegate_ensemble tests\n");
+   test_one_seat_panel_skips_chair_pass();
    test_ensemble_null_args();
    test_ensemble_basic();
    test_ensemble_cost_cap();

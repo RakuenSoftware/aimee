@@ -259,15 +259,38 @@ static int test_confidence_provider(double score, const char **confidence)
    return 0;
 }
 
+static int failing_confidence_provider(double score, const char **confidence)
+{
+   (void)score;
+   (void)confidence;
+   return -1;
+}
+
+static int invalid_confidence_provider(double score, const char **confidence)
+{
+   (void)score;
+   *confidence = "unknown";
+   return 0;
+}
+
 static void test_confidence_tiers(void)
 {
+   const char *confidence = "stale";
+   ingress_preinject_register_confidence_provider(NULL);
+   assert(ingress_preinject_confidence(0.9, &confidence) == -1 && confidence == NULL);
+   ingress_preinject_register_confidence_provider(failing_confidence_provider);
+   assert(ingress_preinject_confidence(0.9, &confidence) == -1 && confidence == NULL);
+   ingress_preinject_register_confidence_provider(invalid_confidence_provider);
+   assert(ingress_preinject_confidence(0.9, &confidence) == -1 && confidence == NULL);
+
    ingress_preinject_register_confidence_provider(test_confidence_provider);
-   assert(strcmp(ingress_preinject_confidence(0.9), "high") == 0);
-   assert(strcmp(ingress_preinject_confidence(0.66), "high") == 0);
-   assert(strcmp(ingress_preinject_confidence(0.5), "medium") == 0);
-   assert(strcmp(ingress_preinject_confidence(0.33), "medium") == 0);
-   assert(strcmp(ingress_preinject_confidence(0.1), "low") == 0);
-   assert(strcmp(ingress_preinject_confidence(0.0), "low") == 0);
+   assert(ingress_preinject_confidence(0.9, &confidence) == 0 && strcmp(confidence, "high") == 0);
+   assert(ingress_preinject_confidence(0.66, &confidence) == 0 && strcmp(confidence, "high") == 0);
+   assert(ingress_preinject_confidence(0.5, &confidence) == 0 && strcmp(confidence, "medium") == 0);
+   assert(ingress_preinject_confidence(0.33, &confidence) == 0 &&
+          strcmp(confidence, "medium") == 0);
+   assert(ingress_preinject_confidence(0.1, &confidence) == 0 && strcmp(confidence, "low") == 0);
+   assert(ingress_preinject_confidence(0.0, &confidence) == 0 && strcmp(confidence, "low") == 0);
    printf("confidence_tiers OK\n");
 }
 
@@ -285,10 +308,9 @@ static void test_format_envelope(void)
    assert(strstr(e, "</aimee-context>") != NULL);
    free(e);
 
-   /* Missing confidence defaults to low. */
-   char *e2 = ingress_preinject_format_envelope("x", NULL);
-   assert(e2 && strstr(e2, "confidence=\"low\"") != NULL);
-   free(e2);
+   /* Confidence must come from the supervised memory stage. */
+   assert(ingress_preinject_format_envelope("x", NULL) == NULL);
+   assert(ingress_preinject_format_envelope("x", "unknown") == NULL);
    printf("format_envelope OK\n");
 }
 
@@ -562,6 +584,17 @@ static void test_budgeted_build_uses_memory_previews(void)
    printf("budgeted_build_uses_memory_previews OK\n");
 }
 
+static void test_build_requires_confidence_provider(void)
+{
+   ingress_preinject_task_state_reset();
+   ingress_preinject_register_confidence_provider(NULL);
+   char *env = ingress_preinject_build("deploy matrix", 0);
+   assert(env == NULL);
+   ingress_preinject_register_confidence_provider(test_confidence_provider);
+   ingress_preinject_task_state_reset();
+   printf("build_requires_confidence_provider OK\n");
+}
+
 /* P0 Envelope IR: the renderer reproduces the old inline rendering — group
  * headers, single blank-line separators between non-empty groups, the
  * header-rides-the-first-fitting-candidate rule, the budget/omitted gate, the
@@ -718,6 +751,7 @@ int main(void)
    test_append();
    test_render_block();
    test_budgeted_build_uses_memory_previews();
+   test_build_requires_confidence_provider();
    test_turn_id_mint_and_thread_local();
    test_compress_code_fold();
    printf("all tests passed\n");

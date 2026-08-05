@@ -15,8 +15,15 @@ set -uo pipefail
 # container, or from any checkout. AIMEE_ROOT / AIMEE_KB_BIN override.
 SRC="${AIMEE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 KB="${AIMEE_KB_BIN:-$SRC/aimee-kb}"
+# Console-admin authorization is an event-bus module decision now, and the kb
+# fails closed when it cannot reach one -- 503 "control-web authorization
+# unavailable" rather than a verdict. Production always runs the module (it is in
+# kb.modules and enabled by default), so a harness that starts a bare aimee-kb is
+# testing a shape that never ships. Build and run the module here so the
+# confinement assertions below exercise a REAL denial instead of an outage.
 WORK="${TMPDIR:-/tmp}/aimee-authz-live"
 mkdir -p "$WORK"
+MODULE_BIN="${AIMEE_MODULE_BIN:-$WORK/aimee-module-control-web}"
 PORT=8741
 BASE="http://127.0.0.1:$PORT"
 PASS=0; FAIL=0; SKIP=0
@@ -25,6 +32,83 @@ log()  { printf '%s\n' "$*"; }
 pass() { printf '  \033[32mPASS\033[0m  %s\n' "$1"; PASS=$((PASS+1)); }
 fail() { printf '  \033[31mFAIL\033[0m  %s\n     -> %s\n' "$1" "$2"; FAIL=$((FAIL+1)); }
 skip() { printf '  \033[33mSKIP\033[0m  %s (%s)\n' "$1" "$2"; SKIP=$((SKIP+1)); }
+
+build_control_web_module() {
+  [ -x "$MODULE_BIN" ] && return 0
+  ( cd "$SRC/server-go" && CGO_ENABLED=0 go build -trimpath -o "$MODULE_BIN" ./cmd/aimee-module ) \
+    >"$WORK/module-build.log" 2>&1 || return 1
+  return 0
+}
+
+# Seed the grant BEFORE the kb starts. The bus loads its admission policy exactly
+# once, when the host comes up (obs_bus start_locked -> bus_runtime_policy_load_dir),
+# so a grant written afterwards is never read and the attach is denied with no
+# grant found. This mirrors the container entrypoint, which seeds grants before
+# launching the daemon for the same reason.
+#
+# The grant is the shape the image ships: it pins the executable that may hold
+# principal 24 and the single kind it may serve.
+seed_control_web_grant() {
+  mkdir -p "$AIMEE_HOME/modules.d/kb"
+  cat > "$AIMEE_HOME/modules.d/kb/control-web.grant" <<GRANT
+version=1
+principal_class=1
+principal_ref=24
+uid=self
+executable=$MODULE_BIN
+publish=
+subscribe=
+request=
+serve=10241
+GRANT
+  chmod 0700 "$AIMEE_HOME/modules.d" "$AIMEE_HOME/modules.d/kb" 2>/dev/null || true
+  chmod 0600 "$AIMEE_HOME/modules.d/kb/control-web.grant" 2>/dev/null || true
+}
+
+# Launch the module once the kb's bus is actually listening.
+#
+# Two things were learned the hard way here. The bus is LAZY: obs_bus starts on
+# the first emit, so a kb that is healthy but has not yet audited anything has no
+# module socket at all. And the module does not wait it out -- it exits with
+# "attach: no such file or directory" rather than retrying forever.
+#
+# So the harness has to provoke the bus rather than hope it is up: one
+# authenticated request produces an audit event, which starts obs_bus and creates
+# the socket. Both failure modes are then reported by name; the earlier version
+# just gave up quietly after 30s and let the console-admin assertions fail with
+# the very 503 this exists to remove, which reads exactly like a confinement
+# regression instead of a rig that never attached.
+start_control_web_module() {
+  [ -x "$MODULE_BIN" ] || return 1
+
+  # Provoke the lazy bus: any authenticated call emits an audit event.
+  curl -s -m 5 -H "Authorization: Bearer $1" "$BASE/v1/health" >/dev/null 2>&1 || true
+
+  local i
+  for i in $(seq 1 60); do
+    [ -S "$AIMEE_MODULE_BUS_SOCKET" ] && break
+    curl -s -m 2 -H "Authorization: Bearer $1" "$BASE/v1/health" >/dev/null 2>&1 || true
+    sleep 0.5
+  done
+  [ -S "$AIMEE_MODULE_BUS_SOCKET" ] || {
+    echo "  (kb never opened $AIMEE_MODULE_BUS_SOCKET; console-admin suite would 503)"
+    return 1
+  }
+
+  nohup "$MODULE_BIN" "$AIMEE_MODULE_BUS_SOCKET" > "$WORK/control-web.log" 2>&1 &
+  echo $! > "$WORK/module.pid"
+  sleep 2
+  kill -0 "$(cat "$WORK/module.pid")" 2>/dev/null || {
+    echo "  (control-web module exited; see $WORK/control-web.log)"
+    return 1
+  }
+  return 0
+}
+
+stop_control_web_module() {
+  [ -f "$WORK/module.pid" ] && kill "$(cat "$WORK/module.pid")" 2>/dev/null
+  rm -f "$WORK/module.pid"
+}
 
 status() { # status METHOD PATH BEARER [BODY] -> prints "code body"
   local m="$1" p="$2" b="$3" d="${4-}" out code
@@ -57,6 +141,7 @@ expect_not() { # expect_not NAME NOT_CODE GOT_TSV
 start_kb() { # start_kb CONFIGURED_TOKEN
   stop_kb
   export AIMEE_HOME="$WORK/home"
+  export AIMEE_MODULE_BUS_SOCKET="$AIMEE_HOME/kb-module-bus.sock"
   # Fresh vault state per credential shape, else the first sealed bearer sticks.
   rm -rf "$AIMEE_HOME"
   export AIMEE_KB_API_BEARER_TOKEN="$1"
@@ -67,6 +152,9 @@ kb:
   api:
     http_port: $PORT
 YAML
+  # The bus reads its admission policy once at host startup, so this must happen
+  # before aimee-kb is launched, not after it is healthy.
+  seed_control_web_grant
   ulimit -s 65536
   # The env bearer is FIRST-BOOT TRANSPORT only: the runtime reads it from Vault,
   # so it has to be sealed before the listener starts. This mirrors
@@ -77,13 +165,20 @@ YAML
   nohup "$KB" > "$WORK/kb.log" 2>&1 &
   echo $! > "$WORK/kb.pid"
   for _ in $(seq 1 60); do
-    curl -s -m 2 "$BASE/v1/health" >/dev/null 2>&1 && return 0
+    if curl -s -m 2 "$BASE/v1/health" >/dev/null 2>&1; then
+      # Console-admin confinement is only meaningful once the authorizer is
+      # reachable; without it every such request is 503 and the assertions below
+      # would be measuring an outage rather than a policy.
+      start_control_web_module "$1" || echo "  (control-web module did not attach)"
+      return 0
+    fi
     sleep 1
   done
   return 1
 }
 
 stop_kb() {
+  stop_control_web_module
   [ -f "$WORK/kb.pid" ] && kill "$(cat "$WORK/kb.pid")" 2>/dev/null
   rm -f "$WORK/kb.pid"
   sleep 1
@@ -98,6 +193,14 @@ OWNER='owner-secret-abc123'
 SCOPED='scope:project:proj-alpha:s3cr3t'
 SERVICE='scope:service:aimee-server:svc3cr3t'
 CONSOLE='scope:console-admin:c1:cadmin'
+
+# The console-admin suite needs the authorization module; build it once up front
+# so a failure there is reported as a build problem rather than as a confinement
+# failure forty assertions later.
+if ! build_control_web_module; then
+  log "  (could not build aimee-module-control-web; console-admin suite will be skipped)"
+  tail -5 "$WORK/module-build.log" 2>/dev/null || true
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 log ""

@@ -634,14 +634,14 @@
     {
       "ctest": false,
       "make": true,
-      "module": "skills",
-      "test": "src/tests/test_skill.c"
+      "module": "runtime-web",
+      "test": "src/tests/test_server_error_kind.c"
     },
     {
       "ctest": false,
       "make": true,
       "module": "skills",
-      "test": "src/tests/test_skill_review.c"
+      "test": "src/tests/test_skill.c"
     },
     {
       "ctest": false,

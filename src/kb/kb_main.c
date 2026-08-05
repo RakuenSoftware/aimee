@@ -48,11 +48,12 @@
 #include "kb_vault_tpm_runtime_lock.h"
 #include "db2/kb_audit_worm.h"
 #include "db2/vault_operator_status_runtime.h"
-#include "vault_server_key.h"       /* startup durable seal-epoch synchronization */
-#include "vault_env_bootstrap.h"    /* first-boot credential env -> Vault */
-#include "vault_config_bootstrap.h" /* legacy config credential -> Vault */
-#include "runtime_secret.h"         /* wipe Vault-sourced runtime cache at exit */
-#include "kb_memory_audit_bridge.h" /* record memory mutations on aimee-kb's own obs bus */
+#include "vault_server_key.h"         /* startup durable seal-epoch synchronization */
+#include "vault_env_bootstrap.h"      /* first-boot credential env -> Vault */
+#include "vault_config_bootstrap.h"   /* legacy config credential -> Vault */
+#include "runtime_secret.h"           /* wipe Vault-sourced runtime cache at exit */
+#include "kb_memory_audit_bridge.h"   /* record memory mutations on aimee-kb's own obs bus */
+#include "kb_module_stage_adapters.h" /* process-module calls over aimee-kb's event bus */
 #include <aimee/audit/obs_bus.h>
 #include "log.h" /* audit_log_open — KB memory-audit ledger */
 #include <signal.h>
@@ -1804,6 +1805,7 @@ int main(int argc, char **argv)
       agent_http_cleanup();
       return 1;
    }
+   kb_module_stage_adapters_configure();
    kb_memory_audit_bridge_install();
 
    /* P7-D3a is an all-or-none service-manager contract. The listener fd and

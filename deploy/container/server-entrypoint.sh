@@ -205,7 +205,56 @@ mkdir -p "$AIMEE_HOME/modules.d/server"
 for module_grant in /opt/aimee/module-grants/server/*.grant; do
     [ -f "$module_grant" ] || continue
     grant_target="$AIMEE_HOME/modules.d/server/$(basename "$module_grant")"
-    [ -e "$grant_target" ] || cp "$module_grant" "$grant_target"
+    if [ ! -e "$grant_target" ]; then
+        cp "$module_grant" "$grant_target"
+        continue
+    fi
+    # A module that gains a stage in a new image cannot serve it under a grant
+    # persisted before that stage existed, and the failure is silent: the daemon
+    # simply reports the module as not serving that kind. Copying over the
+    # operator's file would defeat the whole point of seeding only what is
+    # missing, so say so instead and let them decide.
+    shipped_serve=$(grep '^serve=' "$module_grant" 2>/dev/null || true)
+    persisted_serve=$(grep '^serve=' "$grant_target" 2>/dev/null || true)
+    if [ "$shipped_serve" != "$persisted_serve" ]; then
+        # log() is not defined this early in the script, so match its format.
+        printf '[server-entrypoint] warning: %s grant differs from this image\n' \
+            "$(basename "$module_grant" .grant)" >&2
+        printf '[server-entrypoint]   persisted: %s\n' "${persisted_serve:-<none>}" >&2
+        printf '[server-entrypoint]   shipped:   %s\n' "${shipped_serve:-<none>}" >&2
+        printf '[server-entrypoint]   stages only in the shipped grant are refused until %s is updated\n' \
+            "$grant_target" >&2
+    fi
+done
+
+# Reconcile grants whose pinned executable this image does not ship.
+#
+# The loader realpath()s executable= and rejects the ENTIRE policy directory if
+# any single entry is unresolvable, so one stale grant is not a degraded module —
+# it is a daemon that will not boot. That is exactly what an upgrade produces:
+# seeding never overwrites a persisted grant, so a module that MOVED (workflows
+# is hosted by aimee-wfe now, not spawned as a multicall binary) or was REMOVED
+# leaves behind a grant pinning a path that no longer exists.
+#
+# A pinned path is an image fact, not an operator policy choice, so repairing it
+# does not override anyone's intent — whereas leaving it bricks the server. Where
+# the image still ships a grant for that module, adopt it; where it does not, the
+# module is gone and so is its grant. Both are logged, because silently rewriting
+# admission policy would be worse than the failure.
+for grant_target in "$AIMEE_HOME"/modules.d/server/*.grant; do
+    [ -f "$grant_target" ] || continue
+    pinned=$(sed -n 's/^executable=//p' "$grant_target" | head -1)
+    [ -n "$pinned" ] && [ ! -x "$pinned" ] || continue
+    shipped="/opt/aimee/module-grants/server/$(basename "$grant_target")"
+    if [ -f "$shipped" ]; then
+        printf '[server-entrypoint] %s grant pins %s, which this image does not ship; adopting the shipped grant
+'             "$(basename "$grant_target" .grant)" "$pinned" >&2
+        cp "$shipped" "$grant_target"
+    else
+        printf '[server-entrypoint] %s grant pins %s and this image ships no such module; removing the stale grant
+'             "$(basename "$grant_target" .grant)" "$pinned" >&2
+        rm -f "$grant_target"
+    fi
 done
 # The root entrypoint creates modules.d before dropping to the aimee user.  The
 # daemon must be able to traverse that 0700 parent in order to load the strict
@@ -375,7 +424,14 @@ log "starting aimee-server (socket=$SERVER_SOCK) as user aimee"
 rm -f "$AIMEE_HOME/aimee-http.sock" "$AIMEE_WFE_HTTP_SOCKET"
 runuser -u aimee -- sh -c 'set -eu; ulimit -c 0 2>/dev/null || true; exec aimee-server --socket="$1"' sh "$SERVER_SOCK" &
 server_pid=$!
-runuser -u aimee -- module-supervisor.sh server "$AIMEE_MODULE_BUS_SOCKET" "$MODULE_MANIFEST" &
+# The roundtable module seats its review panel over the agent resource plane,
+# so it needs the same socket the WFE is given. A module that cannot reach the
+# plane declines to serve the review stage rather than failing reviews one at a
+# time, so without this the stage is simply never offered.
+export AIMEE_AGENT_SERVICE_SOCKET="${AIMEE_AGENT_SERVICE_SOCKET:-$AIMEE_HOME/aimee-http.sock}"
+runuser -u aimee -- env AIMEE_HOME="$AIMEE_HOME" \
+    AIMEE_AGENT_SERVICE_SOCKET="$AIMEE_AGENT_SERVICE_SOCKET" \
+    module-supervisor.sh server "$AIMEE_MODULE_BUS_SOCKET" "$MODULE_MANIFEST" &
 module_pid=$!
 
 if [ "$AIMEE_WFE_ENGINE" = go ]; then
@@ -409,9 +465,15 @@ if [ "$AIMEE_WFE_ENGINE" = go ]; then
         exit 1
     fi
     log "starting Go WFE control plane (socket=$AIMEE_WFE_HTTP_SOCKET)"
-    runuser -u aimee -- sh -c 'set -eu; ulimit -c 0 2>/dev/null || true; exec aimee-wfe --home "$1" --socket "$2" --config "$3" --workflow-dir "$4" --agent-service-socket "$5"' sh \
+    # The WFE is the workflows bus principal: it serves the advance decision and
+    # the control stage the C resource plane calls. The module supervisor does
+    # not spawn a workflows process (the contract marks it hosted_by=wfe), because
+    # the bus denies a live duplicate of a principal. Pass the bus socket
+    # explicitly rather than relying on runuser's environment handling.
+    runuser -u aimee -- sh -c 'set -eu; ulimit -c 0 2>/dev/null || true; export AIMEE_MODULE_BUS_SOCKET="$6"; exec aimee-wfe --home "$1" --socket "$2" --config "$3" --workflow-dir "$4" --agent-service-socket "$5"' sh \
         "$AIMEE_HOME" "$AIMEE_WFE_HTTP_SOCKET" "$AIMEE_HOME/aimee.yaml" \
-        "$AIMEE_HOME/workflows" "$AIMEE_HOME/aimee-http.sock" &
+        "$AIMEE_HOME/workflows" "$AIMEE_HOME/aimee-http.sock" \
+        "$AIMEE_MODULE_BUS_SOCKET" &
     wfe_pid=$!
 
     # Start this only after the resource plane owns the current pid file.  On a

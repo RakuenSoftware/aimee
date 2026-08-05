@@ -7,6 +7,7 @@
 #include <aimee/core/event_bus/module_client.h>
 #include <aimee/core/event_bus/module_runtime.h>
 #include <aimee/benchmarks/module_api.h>
+#include <aimee/sandbox/module_api.h>
 #include <aimee/control-web/module_api.h>
 #include <aimee/delegates/module_api.h>
 #include <aimee/git/module_api.h>
@@ -20,7 +21,6 @@
 #include <aimee/runtime-web/module_api.h>
 #include <aimee/skills/module_api.h>
 #include <aimee/tools/module_api.h>
-#include <aimee/workflows/module_api.h>
 #include <aimee/workspace/module_api.h>
 
 #include <assert.h>
@@ -158,15 +158,25 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
    else if (strcmp(name, "workspace") == 0)
       *kind = AIMEE_WORKSPACE_EVENT_ACCESS, *principal_ref = 12;
    else if (strcmp(name, "git") == 0)
+   {
       *kind = AIMEE_GIT_EVENT_OPERATION, *principal_ref = 13;
+      served[0] = AIMEE_GIT_EVENT_OPERATION;
+      served[1] = AIMEE_GIT_EVENT_REF_VALIDATE;
+      *serve_count = 2;
+      return 0;
+   }
    else if (strcmp(name, "skills") == 0)
+   {
       *kind = AIMEE_SKILLS_EVENT_CONTEXT, *principal_ref = 14;
+      served[0] = AIMEE_SKILLS_EVENT_CONTEXT;
+      served[1] = AIMEE_SKILLS_EVENT_TRIGGER;
+      *serve_count = 2;
+      return 0;
+   }
    else if (strcmp(name, "response-composition") == 0)
       *kind = AIMEE_RESPONSE_EVENT_COMPOSE, *principal_ref = 15;
    else if (strcmp(name, "governance") == 0)
       *kind = AIMEE_GOVERNANCE_EVENT_EVALUATE, *principal_ref = 19;
-   else if (strcmp(name, "workflows") == 0)
-      *kind = AIMEE_WORKFLOWS_EVENT_ADVANCE, *principal_ref = 20;
    else if (strcmp(name, "roundtable") == 0)
       *kind = AIMEE_ROUNDTABLE_EVENT_DELIBERATE, *principal_ref = 21;
    else if (strcmp(name, "kb-synthesis") == 0)
@@ -176,7 +186,21 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
    else if (strcmp(name, "control-web") == 0)
       *kind = AIMEE_CONTROL_WEB_EVENT_AUTHORIZE, *principal_ref = 24;
    else if (strcmp(name, "benchmarks") == 0)
+   {
       *kind = AIMEE_BENCHMARKS_EVENT_RUN, *principal_ref = 25;
+      served[0] = AIMEE_BENCHMARKS_EVENT_RUN;
+      served[1] = AIMEE_BENCHMARKS_EVENT_LATENCY;
+      *serve_count = 2;
+      return 0;
+   }
+   else if (strcmp(name, "sandbox") == 0)
+   {
+      *kind = AIMEE_SANDBOX_EVENT_OBSERVE, *principal_ref = 26;
+      served[0] = AIMEE_SANDBOX_EVENT_OBSERVE;
+      served[1] = AIMEE_SANDBOX_EVENT_LOAD;
+      *serve_count = 2;
+      return 0;
+   }
    else
       return -1;
    served[0] = *kind;
@@ -270,6 +294,14 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
                                       NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_git_response_decode(response, response_len, &classification) == 0);
       assert(classification.operation == AIMEE_GIT_OP_PUSH && classification.needs_credentials);
+
+      int allowed = 0;
+      assert(aimee_git_ref_request_encode("feature/topic-1", request, sizeof(request)) == 0);
+      assert(aimee_module_client_call(client, AIMEE_GIT_EVENT_REF_VALIDATE,
+                                      AIMEE_GIT_STAGE_REF_VALIDATE, 2016, 0, request,
+                                      AIMEE_GIT_REF_REQUEST_LEN, response, sizeof(response),
+                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(aimee_git_ref_response_decode(response, response_len, &allowed) == 0 && allowed);
    }
    else if (strcmp(name, "skills") == 0)
    {
@@ -280,6 +312,19 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
                                       sizeof(response), &response_len, NULL,
                                       NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_skills_response_decode(response, response_len, &fire) == 0 && fire);
+
+      const char *content = "---\nname: wait\ntriggers:\n  tool: [Bash]\n"
+                            "  arg_pattern: [\"sleep \"]\n---\nWait safely.\n";
+      size_t encoded_len = aimee_skills_trigger_request_size(content, "Bash", "sleep 5");
+      int match = 0;
+      assert(encoded_len > 0 && encoded_len <= sizeof(request) && encoded_len <= UINT32_MAX);
+      assert(aimee_skills_trigger_request_encode(content, "Bash", "sleep 5", request,
+                                                 sizeof(request)) == 0);
+      assert(aimee_module_client_call(client, AIMEE_SKILLS_EVENT_TRIGGER,
+                                      AIMEE_SKILLS_STAGE_TRIGGER, 2017, 0, request,
+                                      (uint32_t)encoded_len, response, sizeof(response),
+                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(aimee_skills_trigger_response_decode(response, response_len, &match) == 0 && match);
    }
    else if (strcmp(name, "response-composition") == 0)
    {
@@ -317,18 +362,6 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(aimee_governance_response_decode(response, response_len, 3, &decision) == 0);
       assert(decision.keep_mask == 1 && decision.drop_count == 2);
       assert(strcmp(decision.stop_reason, "max_tokens") == 0);
-   }
-   else if (strcmp(name, "workflows") == 0)
-   {
-      aimee_workflows_advance_outcome_t outcome = AIMEE_WORKFLOWS_ADVANCE_BADARGS;
-      assert(aimee_workflows_request_encode("wi_1", "wi_1", "understand", "split", "accepted", 1,
-                                            "nonce_1", "nonce_1", request, sizeof(request)) == 0);
-      request_len = AIMEE_WORKFLOWS_REQUEST_LEN;
-      assert(aimee_module_client_call(client, kind, AIMEE_WORKFLOWS_STAGE_ADVANCE, 2010, 0, request,
-                                      request_len, response, sizeof(response), &response_len, NULL,
-                                      NULL) == AIMEE_MODULE_CALL_OK);
-      assert(aimee_workflows_response_decode(response, response_len, &outcome) == 0);
-      assert(outcome == AIMEE_WORKFLOWS_ADVANCE_REPLAY);
    }
    else if (strcmp(name, "roundtable") == 0)
    {
@@ -380,6 +413,55 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
                                       &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_control_web_response_decode(response, response_len, &allowed) == 0 && allowed);
    }
+   else if (strcmp(name, "sandbox") == 0)
+   {
+      /* The sandbox stages carry JSON, not the fixed framing the other modules
+       * use: a shell command and a git root are variable-length. Load a project
+       * with nothing learned, which must still answer with a packages field
+       * rather than an error. */
+      const char *probe = "{\"git_root\":\"/probe\"}";
+      request_len = (uint32_t)strlen(probe);
+      assert(request_len <= sizeof(request));
+      memcpy(request, probe, request_len);
+      assert(aimee_module_client_call(client, AIMEE_SANDBOX_EVENT_LOAD, AIMEE_SANDBOX_STAGE_LOAD,
+                                      2016, 0, request, request_len, response, sizeof(response),
+                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(response_len > 0 && response_len < sizeof(response));
+      response[response_len] = '\0';
+      assert(strstr((const char *)response, "packages") != NULL);
+
+      /* The write path, which nothing else exercises across the process
+       * boundary. OBSERVE is what sandbox_learned_observe() emits after it has
+       * resolved a git root, so this is the same call the delegate shell tool
+       * makes -- minus the model. Parsing lives in the module now, so the
+       * round-trip is the only thing that proves the C caller's payload is
+       * shaped the way the Go side decodes it. */
+      const char *learn = "{\"git_root\":\"/probe\",\"command\":\"apt-get install -y tree\"}";
+      request_len = (uint32_t)strlen(learn);
+      assert(request_len <= sizeof(request));
+      memcpy(request, learn, request_len);
+      assert(aimee_module_client_call(client, AIMEE_SANDBOX_EVENT_OBSERVE,
+                                      AIMEE_SANDBOX_STAGE_OBSERVE, 2017, 0, request, request_len,
+                                      response, sizeof(response), &response_len, NULL,
+                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(response_len > 0 && response_len < sizeof(response));
+      response[response_len] = '\0';
+      /* Not just "it answered": it parsed one package and persisted it. */
+      assert(strstr((const char *)response, "\"recorded\":1") != NULL);
+      assert(strstr((const char *)response, "tree") != NULL);
+
+      /* Read it back through the separate LOAD stage, so the assertion covers
+       * the store actually landing on disk rather than the handler echoing its
+       * own input. */
+      request_len = (uint32_t)strlen(probe);
+      memcpy(request, probe, request_len);
+      assert(aimee_module_client_call(client, AIMEE_SANDBOX_EVENT_LOAD, AIMEE_SANDBOX_STAGE_LOAD,
+                                      2018, 0, request, request_len, response, sizeof(response),
+                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(response_len > 0 && response_len < sizeof(response));
+      response[response_len] = '\0';
+      assert(strstr((const char *)response, "tree") != NULL);
+   }
    else
    {
       assert(strcmp(name, "benchmarks") == 0);
@@ -395,6 +477,18 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(aimee_benchmarks_response_decode(response, response_len, &scores) == 0);
       assert(scores.mrr == 0.5 && scores.recall == 1.0);
       assert(scores.ndcg > 0.630929753571 && scores.ndcg < 0.630929753572);
+
+      const double latencies[] = {10.0, 1.0, 5.0, 3.0, 8.0};
+      aimee_benchmarks_latency_summary_t summary;
+      assert(aimee_benchmarks_latency_request_encode(latencies, 5, request, sizeof(request)) == 0);
+      request_len = AIMEE_BENCHMARKS_LATENCY_REQUEST_LEN;
+      assert(aimee_module_client_call(client, AIMEE_BENCHMARKS_EVENT_LATENCY,
+                                      AIMEE_BENCHMARKS_STAGE_LATENCY, 2016, 0, request, request_len,
+                                      response, sizeof(response), &response_len, NULL,
+                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(aimee_benchmarks_latency_response_decode(response, response_len, &summary) == 0);
+      assert(summary.queries == 5 && summary.p50_ms == 5.0 && summary.p95_ms == 10.0 &&
+             summary.p99_ms == 10.0 && summary.min_ms == 1.0 && summary.max_ms == 10.0);
    }
 }
 
@@ -408,6 +502,10 @@ int main(int argc, char **argv)
       assert(production_contract(argv[2], &test_kind, &module_ref, served, &serve_count) == 0);
    char directory[] = "/tmp/aimee-module-runtime-XXXXXX";
    assert(mkdtemp(directory) != NULL);
+   /* Point the spawned module at a throwaway home BEFORE it is forked: the
+    * sandbox module persists what it learns under AIMEE_HOME, and a test that
+    * exercises the write path must not touch the developer's real store. */
+   assert(setenv("AIMEE_HOME", directory, 1) == 0);
    char socket_path[PATH_MAX], executable[PATH_MAX];
    assert(snprintf(socket_path, sizeof socket_path, "%s/module.sock", directory) > 0);
    assert(realpath("/proc/self/exe", executable) != NULL);
@@ -418,7 +516,9 @@ int main(int argc, char **argv)
    else
       assert(snprintf(module_executable, sizeof module_executable, "%s", executable) > 0);
 
-   uint32_t requested[] = {test_kind, EMPTY_KIND};
+   uint32_t requested[PRODUCTION_STAGE_MAX + 1] = {0};
+   memcpy(requested, served, serve_count * sizeof(*requested));
+   requested[serve_count] = EMPTY_KIND;
    bus_runtime_grant_t grants[] = {{.principal_class = 1,
                                     .principal_ref = module_ref,
                                     .uid = BUS_RUNTIME_SELF_UID,
@@ -430,7 +530,7 @@ int main(int argc, char **argv)
                                     .uid = BUS_RUNTIME_SELF_UID,
                                     .executable = executable,
                                     .request = requested,
-                                    .request_count = 2}};
+                                    .request_count = serve_count + 1}};
    bus_host_config_t host_config = {.max_slots = 8,
                                     .slot_size = 512,
                                     .inline_budget = 400,
@@ -568,6 +668,13 @@ finish:
    bus_runtime_stop(&runtime);
    bus_host_destroy(&host);
    pthread_mutex_destroy(&host_lock);
+   /* The sandbox leg drives a stage that persists, so this run leaves a store
+    * behind in the throwaway home. Remove exactly that file and keep the rmdir
+    * assertion strict, so anything ELSE a module wrote still fails loudly
+    * rather than being swept up by a recursive delete. */
+   char learned_store[PATH_MAX];
+   assert(snprintf(learned_store, sizeof learned_store, "%s/sandbox-learned.json", directory) > 0);
+   (void)unlink(learned_store); /* absent for every other module: not an error */
    assert(rmdir(directory) == 0);
    if (argc == 3)
       printf("module runtime (%s): C caller/Go handler wire parity passed\n", argv[2]);

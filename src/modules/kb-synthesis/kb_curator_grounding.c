@@ -1,139 +1,90 @@
 #include "kb_curator_grounding.h"
+
 #include "cJSON.h"
+
 #include <string.h>
-#include <strings.h>
-#include <stddef.h>
-#include <stdio.h>
 
-static const char *const side_effecting_funcs[] = {
-    "accept",       "aimee_pg_exec", "aimee_pg_step", "bind",
-    "chdir",        "chmod",         "chown",         "close",
-    "creat",        "execle",        "execl",         "execlp",
-    "execv",        "execve",        "execvp",        "fclose",
-    "fgets",        "fopen",         "fputs",         "fread",
-    "freopen",      "fsync",         "fdatasync",     "fdopen",
-    "fflush",       "ftruncate",     "fwrite",        "fprintf",
-    "fork",         "ioctl",         "kill",          "link",
-    "listen",       "lseek",         "mkdir",         "mmap",
-    "munmap",       "open",          "openat",        "pclose",
-    "popen",        "posix_spawn",   "pread",         "PQexec",
-    "PQexecParams", "putenv",        "pwrite",        "raise",
-    "read",         "recv",          "recvfrom",      "remove",
-    "rename",       "renameat",      "rewind",        "rmdir",
-    "send",         "sendto",        "setenv",        "sigaction",
-    "signal",       "socket",        "sqlite3_exec",  "sqlite3_prepare_v2",
-    "sqlite3_step", "symlink",       "system",        "truncate",
-    "unlink",       "unlinkat",      "unsetenv",      "vfprintf",
-    "vfork",        "write",
-};
+static kb_curator_grounding_provider_fn g_grounding_provider;
 
-static const size_t side_effecting_funcs_count =
-    sizeof(side_effecting_funcs) / sizeof(side_effecting_funcs[0]);
-
-int kb_curator_callee_is_side_effecting(const char *callee)
+void kb_curator_grounding_register_provider(kb_curator_grounding_provider_fn provider)
 {
-   if (!callee || !callee[0])
+   g_grounding_provider = provider;
+}
+
+static int claim_from_payload(const struct cJSON *payload, aimee_kb_synthesis_claim_kind_t *kind,
+                              const char *claims[AIMEE_KB_SYNTHESIS_CLAIM_COUNT_MAX],
+                              uint32_t *claim_count)
+{
+   if (!kind || !claims || !claim_count)
+      return -1;
+
+   *claim_count = 0;
+   const cJSON *side_effects =
+       payload ? cJSON_GetObjectItemCaseSensitive(payload, "side_effects") : NULL;
+   if (!side_effects || cJSON_IsNull(side_effects))
    {
+      *kind = AIMEE_KB_SYNTHESIS_CLAIM_NONE;
       return 0;
    }
-   /* Linear scan rather than bsearch: the table is tiny (looked up once per
-    * code unit) and a linear scan is immune to ordering / case-sort mistakes
-    * when the table is hand-edited (e.g. uppercase "PQexec" sorts before all
-    * lowercase entries under strcmp, which silently breaks a binary search). */
-   for (size_t i = 0; i < side_effecting_funcs_count; i++)
+   if (cJSON_IsString(side_effects))
    {
-      if (strcmp(callee, side_effecting_funcs[i]) == 0)
+      if (!side_effects->valuestring ||
+          strlen(side_effects->valuestring) > AIMEE_KB_SYNTHESIS_TEXT_MAX)
+         return -1;
+      *kind = AIMEE_KB_SYNTHESIS_CLAIM_STRING;
+      claims[0] = side_effects->valuestring;
+      *claim_count = 1;
+      return 0;
+   }
+   if (!cJSON_IsArray(side_effects))
+   {
+      *kind = AIMEE_KB_SYNTHESIS_CLAIM_NONSTRING;
+      return 0;
+   }
+
+   int count = cJSON_GetArraySize(side_effects);
+   if (count < 0 || count > (int)AIMEE_KB_SYNTHESIS_CLAIM_COUNT_MAX)
+      return -1;
+   *kind = AIMEE_KB_SYNTHESIS_CLAIM_STRING_ARRAY;
+   const cJSON *item = NULL;
+   cJSON_ArrayForEach(item, side_effects)
+   {
+      if (!cJSON_IsString(item))
       {
-         return 1;
+         *kind = AIMEE_KB_SYNTHESIS_CLAIM_NONSTRING;
+         *claim_count = 0;
+         return 0;
       }
+      if (!item->valuestring || strlen(item->valuestring) > AIMEE_KB_SYNTHESIS_TEXT_MAX)
+         return -1;
+      claims[*claim_count] = item->valuestring;
+      (*claim_count)++;
    }
    return 0;
 }
 
-static int is_none_like(const char *s)
+int kb_curator_grounding_decide(const struct cJSON *payload, const char *const *callees,
+                                uint32_t callee_count,
+                                aimee_kb_synthesis_grounding_decision_t *decision)
 {
-   static const char *const none_like[] = {
-       "none", "no", "no side effects", "pure", "n/a",
-   };
-   static const size_t count = sizeof(none_like) / sizeof(none_like[0]);
-   size_t i;
-   if (!s)
-   {
-      return 0;
-   }
-   for (i = 0; i < count; i++)
-   {
-      if (strcasecmp(s, none_like[i]) == 0)
-      {
-         return 1;
-      }
-   }
-   return 0;
-}
+   if (!decision || callee_count > AIMEE_KB_SYNTHESIS_CALLEE_COUNT_MAX ||
+       (callee_count > 0 && !callees) || !g_grounding_provider)
+      return -1;
 
-int kb_curator_payload_claims_no_side_effects(const struct cJSON *payload)
-{
-   if (!payload)
-   {
-      return 1;
-   }
-   const cJSON *se = cJSON_GetObjectItemCaseSensitive(payload, "side_effects");
-   if (!se)
-   {
-      return 1;
-   }
-   if (cJSON_IsNull(se))
-   {
-      return 1;
-   }
-   if (cJSON_IsArray(se))
-   {
-      if (cJSON_GetArraySize(se) == 0)
-      {
-         return 1;
-      }
-      cJSON *item;
-      cJSON_ArrayForEach(item, se)
-      {
-         if (!cJSON_IsString(item))
-         {
-            return 0;
-         }
-         if (!is_none_like(item->valuestring))
-         {
-            return 0;
-         }
-      }
-      return 1;
-   }
-   if (cJSON_IsString(se))
-   {
-      return is_none_like(se->valuestring) ? 1 : 0;
-   }
-   return 0;
-}
+   const char *claims[AIMEE_KB_SYNTHESIS_CLAIM_COUNT_MAX] = {0};
+   uint32_t claim_count = 0;
+   aimee_kb_synthesis_claim_kind_t kind;
+   if (claim_from_payload(payload, &kind, claims, &claim_count) != 0)
+      return -1;
 
-int kb_curator_grounding_contradicts(const struct cJSON *payload, const char *const *callees,
-                                     int n_callees, char *reason_out, size_t reason_len)
-{
-   if (reason_out && reason_len > 0)
+   memset(decision, 0, sizeof *decision);
+   if (g_grounding_provider(kind, claims, claim_count, callees, callee_count, decision) != 0 ||
+       !memchr(decision->reason, '\0', sizeof(decision->reason)) ||
+       (decision->contradicts != 0 && decision->contradicts != 1) ||
+       ((decision->contradicts != 0) != (decision->reason[0] != '\0')))
    {
-      reason_out[0] = '\0';
-   }
-   if (!kb_curator_payload_claims_no_side_effects(payload))
-   {
-      return 0;
-   }
-   for (int i = 0; i < n_callees; i++)
-   {
-      if (kb_curator_callee_is_side_effecting(callees[i]))
-      {
-         if (reason_out && reason_len > 0)
-         {
-            snprintf(reason_out, reason_len, "%s", callees[i]);
-         }
-         return 1;
-      }
+      memset(decision, 0, sizeof *decision);
+      return -1;
    }
    return 0;
 }

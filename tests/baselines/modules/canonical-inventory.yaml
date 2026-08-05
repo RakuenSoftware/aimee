@@ -27,6 +27,7 @@
     "kb-synthesis",
     "runtime-web",
     "control-web",
-    "benchmarks"
+    "benchmarks",
+    "sandbox"
   ]
 }

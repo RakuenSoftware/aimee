@@ -10,6 +10,37 @@
 #include <aimee/delegates/delegate_sandbox_image.h>
 #include "platform_path.h"
 #include "platform_test_util.h"
+#include <aimee/audit/obs_bus.h>
+
+/* The learned toolchain moved to the sandbox module, so resolving a sandbox
+ * image now asks the bus for it. No bus runs in a unit test: report the module
+ * as unattached, which is the condition these cases already assume (an image
+ * resolved with no learned packages). */
+int obs_bus_module_available(uint32_t event_kind)
+{
+   (void)event_kind;
+   return 0;
+}
+
+aimee_module_call_result_t
+obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
+                    const void *request_body, uint32_t request_len, void *response_body,
+                    uint32_t response_capacity, uint32_t *response_len,
+                    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   (void)event_kind;
+   (void)stage_id;
+   (void)trace_id;
+   (void)deadline_ns;
+   (void)request_body;
+   (void)request_len;
+   (void)response_body;
+   (void)response_capacity;
+   (void)response_len;
+   (void)cancelled;
+   (void)cancel_context;
+   return AIMEE_MODULE_CALL_TRANSPORT;
+}
 
 /* Resolver precedence: repo .aimee/project.yaml > per-workspace override > global. */
 

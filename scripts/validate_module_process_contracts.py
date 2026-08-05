@@ -23,8 +23,11 @@ PROCESS_REQUIRED = {
 GO_PROCESSES = {
     "memory", "learning", "routing", "delegates", "tools", "workspace", "git",
     "skills", "response-composition", "governance", "workflows", "roundtable", "kb-synthesis",
-    "runtime-web", "control-web", "benchmarks",
+    "runtime-web", "control-web", "benchmarks", "sandbox",
 }
+# Executables that host a process other than the module runtime's multicall binary.
+HOSTED_BY = {"wfe": "/usr/local/bin/aimee-wfe"}
+
 STAGE_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 
 
@@ -84,8 +87,18 @@ def validate() -> dict[str, dict[str, object]]:
             if set(raw) != {"id", "execution", "placements"}:
                 raise ContractError(f"{component_id}: core component has process fields")
         else:
-            if set(raw) != {"id", "execution", "runtime", "principal_ref", "placements", "stages"}:
+            keys = set(raw) - {"hosted_by"}
+            if keys != {"id", "execution", "runtime", "principal_ref", "placements", "stages"}:
                 raise ContractError(f"{component_id}: process keys differ from v2")
+            # Most processes are multicall binaries the module runtime spawns and
+            # pins by path. A process that is an already-supervised program instead
+            # says so, because its grant must pin THAT executable and the runtime
+            # must not spawn a second holder of the same principal -- a live
+            # duplicate principal is denied admission.
+            hosted_by = raw.get("hosted_by")
+            if hosted_by is not None and hosted_by not in HOSTED_BY:
+                raise ContractError(
+                    f"{component_id}: hosted_by must be one of {sorted(HOSTED_BY)}")
             runtime = raw["runtime"]
             if runtime not in {"c", "go"}:
                 raise ContractError(f"{component_id}: process runtime must be c or go")

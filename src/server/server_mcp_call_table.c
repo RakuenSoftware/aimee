@@ -760,29 +760,32 @@ static cJSON *mcph_index_find_callers(struct mcp_call *c)
    return json_result_content(result);
 }
 
-static cJSON *mcph_index_structure(struct mcp_call *c)
+/* One file's definition list, as its own object. Split out so a batched call can
+ * loop it: the agent's measured shape is structure(fileA) ... structure(fileD),
+ * four separate round trips over four different files, because it maps each file
+ * before choosing ranges to read. Those maps are independent -- nothing about
+ * file B depends on file A's answer -- so they belong in one call. */
+static cJSON *structure_one(const char *project, const char *file_path)
 {
-   cJSON *jf = cJSON_GetObjectItemCaseSensitive(c->jargs, "file_path");
-   if (!cJSON_IsString(jf) || !jf->valuestring[0])
-      return text_content("error: index_structure requires 'file_path'");
-   int all_projects = mcp_code_scope_all(c->jargs);
-   if (all_projects != 0)
-      return text_content(all_projects < 0 ? "error: scope must be 'current'"
-                                           : "error: index_structure requires one project");
-   const char *project = mcp_code_project_from_args(c->jargs);
-   if (!project)
-      return text_content("error: no active project determined from cwd; pass 'project'");
    const int max = 1000;
    definition_t *defs = calloc((size_t)max, sizeof(*defs));
    if (!defs)
-      return text_content("error: out of memory");
-   int n = kb_client_index_structure(project, jf->valuestring, defs, max);
-   if (n < 0)
+      return NULL;
+   int n = kb_client_index_structure(project, file_path, defs, max);
+   cJSON *result = cJSON_CreateObject();
+   if (!result)
    {
       free(defs);
-      return mcph_kb_last_result("index_structure failed");
+      return NULL;
    }
-   cJSON *result = cJSON_CreateObject();
+   cJSON_AddStringToObject(result, "file_path", file_path);
+   if (n < 0)
+   {
+      /* One unreadable file must not discard the maps that resolved. */
+      cJSON_AddStringToObject(result, "status", "error");
+      free(defs);
+      return result;
+   }
    cJSON_AddStringToObject(result, "status", n > 0 ? "ok" : "empty");
    cJSON *arr = cJSON_AddArrayToObject(result, "definitions");
    for (int i = 0; i < n; i++)
@@ -797,6 +800,50 @@ static cJSON *mcph_index_structure(struct mcp_call *c)
    }
    cJSON_AddNumberToObject(result, "count", n);
    free(defs);
+   return result;
+}
+
+static cJSON *mcph_index_structure(struct mcp_call *c)
+{
+   cJSON *jf = cJSON_GetObjectItemCaseSensitive(c->jargs, "file_path");
+   cJSON *jfs = cJSON_GetObjectItemCaseSensitive(c->jargs, "file_paths");
+   int batch = cJSON_IsArray(jfs) && cJSON_GetArraySize(jfs) > 0;
+   if (!batch && (!cJSON_IsString(jf) || !jf->valuestring[0]))
+      return text_content("error: index_structure requires 'file_path' or 'file_paths'");
+   int all_projects = mcp_code_scope_all(c->jargs);
+   if (all_projects != 0)
+      return text_content(all_projects < 0 ? "error: scope must be 'current'"
+                                           : "error: index_structure requires one project");
+   const char *project = mcp_code_project_from_args(c->jargs);
+   if (!project)
+      return text_content("error: no active project determined from cwd; pass 'project'");
+
+   if (batch)
+   {
+      cJSON *out = cJSON_CreateArray();
+      if (!out)
+         return text_content("error: out of memory");
+      cJSON *e;
+      cJSON_ArrayForEach(e, jfs)
+      {
+         if (!cJSON_IsString(e) || !e->valuestring[0])
+            continue; /* skip the malformed entry; the rest of the batch still answers */
+         cJSON *one = structure_one(project, e->valuestring);
+         if (one)
+            cJSON_AddItemToArray(out, one);
+      }
+      return json_result_content(out);
+   }
+
+   cJSON *result = structure_one(project, jf->valuestring);
+   if (!result)
+      return text_content("error: out of memory");
+   cJSON *st = cJSON_GetObjectItemCaseSensitive(result, "status");
+   if (cJSON_IsString(st) && strcmp(st->valuestring, "error") == 0)
+   {
+      cJSON_Delete(result);
+      return mcph_kb_last_result("index_structure failed");
+   }
    return json_result_content(result);
 }
 
@@ -1026,11 +1073,50 @@ static cJSON *code_graph_passthrough(char *json, int status, const char *tool)
    return text_content(msg);
 }
 
+/* Run one hybrid query, including the live cite-capture side effect. Split out
+ * so a batched call can loop it: the measured shape is four separate hybrid
+ * searches in one task, each a full round trip, and the queries are independent
+ * -- the agent is asking four different questions up front, not refining one. */
+static char *hybrid_one(struct mcp_call *c, const char *query, const char *symbol,
+                        const char *project, int all_projects, int max_results, int *status)
+{
+   char *json =
+       kb_client_code_hybrid_scoped(query, symbol, project, all_projects, max_results, status);
+   /* §3 live cite-capture (default off): observe the retrieved file paths for this
+    * session so a re-cited source earns trust across turns. Best-effort; gated by the
+    * same flag as the retrieval-side trust tie-break. */
+   if (json && project && c->sid && c->sid[0] && config_code_trust_actuation_enabled())
+   {
+      cJSON *root = cJSON_Parse(json);
+      cJSON *results = root ? cJSON_GetObjectItemCaseSensitive(root, "results") : NULL;
+      if (cJSON_IsArray(results))
+      {
+         int n = cJSON_GetArraySize(results);
+         const char **paths = calloc((size_t)(n > 0 ? n : 1), sizeof(*paths));
+         int cnt = 0;
+         for (int i = 0; paths && i < n; i++)
+         {
+            cJSON *row = cJSON_GetArrayItem(results, i);
+            cJSON *fp = row ? cJSON_GetObjectItemCaseSensitive(row, "file_path") : NULL;
+            if (cJSON_IsString(fp) && fp->valuestring[0])
+               paths[cnt++] = fp->valuestring;
+         }
+         if (cnt > 0)
+            kb_client_code_lessons_observe(project, c->sid, paths, cnt);
+         free(paths);
+      }
+      cJSON_Delete(root);
+   }
+   return json;
+}
+
 static cJSON *mcph_index_hybrid(struct mcp_call *c)
 {
    cJSON *jq = cJSON_GetObjectItemCaseSensitive(c->jargs, "query");
-   if (!cJSON_IsString(jq) || !jq->valuestring[0])
-      return text_content("error: index_hybrid requires 'query'");
+   cJSON *jqs = cJSON_GetObjectItemCaseSensitive(c->jargs, "queries");
+   int batch = cJSON_IsArray(jqs) && cJSON_GetArraySize(jqs) > 0;
+   if (!batch && (!cJSON_IsString(jq) || !jq->valuestring[0]))
+      return text_content("error: index_hybrid requires 'query' or 'queries'");
    cJSON *js = cJSON_GetObjectItemCaseSensitive(c->jargs, "symbol");
    const char *symbol = cJSON_IsString(js) ? js->valuestring : NULL;
    int all_projects = mcp_code_scope_all(c->jargs);
@@ -1043,37 +1129,169 @@ static cJSON *mcph_index_hybrid(struct mcp_call *c)
    long long mr = 0;
    int max_results = pdf_arg_pos_int(c->jargs, "max_results", 100.0, &mr) ? (int)mr : 20;
    int status = -1;
-   char *json = kb_client_code_hybrid_scoped(jq->valuestring, symbol, project, all_projects,
-                                             max_results, &status);
-   /* §3 live cite-capture (default off): observe the retrieved file paths for this
-    * session so a re-cited source earns trust across turns. Best-effort; gated by the
-    * same flag as the retrieval-side trust tie-break. */
-   if (json && project && c->sid && c->sid[0])
+
+   if (batch)
    {
-      if (config_code_trust_actuation_enabled())
+      cJSON *out = cJSON_CreateArray();
+      if (!out)
+         return text_content("error: out of memory");
+      cJSON *e;
+      cJSON_ArrayForEach(e, jqs)
       {
-         cJSON *root = cJSON_Parse(json);
-         cJSON *results = root ? cJSON_GetObjectItemCaseSensitive(root, "results") : NULL;
-         if (cJSON_IsArray(results))
+         if (!cJSON_IsString(e) || !e->valuestring[0])
+            continue; /* skip the malformed entry; the rest of the batch still answers */
+         int st = -1;
+         char *j = hybrid_one(c, e->valuestring, symbol, project, all_projects, max_results, &st);
+         cJSON *row = cJSON_CreateObject();
+         cJSON_AddStringToObject(row, "query", e->valuestring);
+         if (j)
          {
-            int n = cJSON_GetArraySize(results);
-            const char **paths = calloc((size_t)(n > 0 ? n : 1), sizeof(*paths));
-            int cnt = 0;
-            for (int i = 0; paths && i < n; i++)
-            {
-               cJSON *row = cJSON_GetArrayItem(results, i);
-               cJSON *fp = row ? cJSON_GetObjectItemCaseSensitive(row, "file_path") : NULL;
-               if (cJSON_IsString(fp) && fp->valuestring[0])
-                  paths[cnt++] = fp->valuestring;
-            }
-            if (cnt > 0)
-               kb_client_code_lessons_observe(project, c->sid, paths, cnt);
-            free(paths);
+            /* Parse so the batch is one JSON document rather than strings of
+             * JSON; fall back to the raw text if the service returned
+             * something unparseable rather than dropping the answer. */
+            cJSON *parsed = cJSON_Parse(j);
+            if (parsed)
+               cJSON_AddItemToObject(row, "result", parsed);
+            else
+               cJSON_AddStringToObject(row, "result_raw", j);
+            free(j);
          }
-         cJSON_Delete(root);
+         else
+            cJSON_AddNumberToObject(row, "error_status", st);
+         cJSON_AddItemToArray(out, row);
+      }
+      return json_result_content(out);
+   }
+
+   char *json = hybrid_one(c, jq->valuestring, symbol, project, all_projects, max_results, &status);
+   return code_graph_passthrough(json, status, "index_hybrid");
+}
+
+/* Defined with the span handler below; investigate reads bounded windows through
+ * the same containment-checked resolver rather than duplicating the walk. */
+static int code_span_resolve_root(const char *project, char *out, size_t out_len);
+
+/* index command=investigate -- the bounded task packet (/v1/code/context).
+ *
+ * This existed as a route and a client call, wired ONLY as automatic
+ * pre-injection for aimee's own ingress and for delegates. An agent talking over
+ * MCP could not reach it by any path, which is why the measured opening move is
+ * four separate hybrid queries followed by four structure calls: the composed
+ * answer was there and was never on the menu.
+ *
+ * Unlike hybrid it leads with exact and structural evidence, rejects weak
+ * vector-only rows, attaches current-generation provenance, carries a span per
+ * item so the caller can read the range without a second lookup, and returns an
+ * explicit answerable/no_answer decision. The route fixes max_results=4 and a
+ * 1200-token budget, so this cannot become the expensive call. */
+static cJSON *mcph_index_investigate(struct mcp_call *c)
+{
+   cJSON *jq = cJSON_GetObjectItemCaseSensitive(c->jargs, "query");
+   cJSON *jqs = cJSON_GetObjectItemCaseSensitive(c->jargs, "queries");
+   int batch = cJSON_IsArray(jqs) && cJSON_GetArraySize(jqs) > 0;
+   if (!batch && (!cJSON_IsString(jq) || !jq->valuestring[0]))
+      return text_content("error: index investigate requires 'query' or 'queries'");
+   cJSON *js = cJSON_GetObjectItemCaseSensitive(c->jargs, "symbol");
+   const char *symbol = cJSON_IsString(js) ? js->valuestring : NULL;
+   /* The route requires an active project and never broadens scope. */
+   const char *project = mcp_code_project_from_args(c->jargs);
+   if (!project)
+      return text_content("error: no active project determined from cwd; pass 'project'");
+
+   if (batch)
+   {
+      cJSON *out = cJSON_CreateArray();
+      if (!out)
+         return text_content("error: out of memory");
+      cJSON *e;
+      cJSON_ArrayForEach(e, jqs)
+      {
+         if (!cJSON_IsString(e) || !e->valuestring[0])
+            continue; /* skip the malformed entry; the rest of the batch still answers */
+         int st = -1;
+         char *j = kb_client_code_context(e->valuestring, symbol, project, &st);
+         cJSON *row = cJSON_CreateObject();
+         cJSON_AddStringToObject(row, "query", e->valuestring);
+         if (j)
+         {
+            cJSON *parsed = cJSON_Parse(j);
+            if (parsed)
+               cJSON_AddItemToObject(row, "result", parsed);
+            else
+               cJSON_AddStringToObject(row, "result_raw", j);
+            free(j);
+         }
+         else
+            cJSON_AddNumberToObject(row, "error_status", st);
+         cJSON_AddItemToArray(out, row);
+      }
+      return json_result_content(out);
+   }
+
+   int status = -1;
+   char *json = kb_client_code_context(jq->valuestring, symbol, project, &status);
+   if (!json)
+      return code_graph_passthrough(json, status, "index_investigate");
+
+   /* FULL investigate: attach the code, not just a pointer to it.
+    *
+    * The packet ranks evidence and hands back file_path + a single anchor line.
+    * An agent then has to spend a second round trip reading each one -- which is
+    * the two-call discovery shape this command exists to collapse. Read a bounded
+    * window around each anchor here, in-process, so orienting and reading are one
+    * call. Budget is deliberately small: at most INV_ITEMS items and INV_WINDOW
+    * lines each, because a composed call that can flood the context is worse than
+    * the two calls it replaced. `include_code: false` opts out. */
+   cJSON *inc = cJSON_GetObjectItemCaseSensitive(c->jargs, "include_code");
+   int want_code = !cJSON_IsBool(inc) || cJSON_IsTrue(inc);
+   cJSON *root = want_code ? cJSON_Parse(json) : NULL;
+   cJSON *results = root ? cJSON_GetObjectItemCaseSensitive(root, "results") : NULL;
+   if (!cJSON_IsArray(results))
+   {
+      cJSON_Delete(root);
+      return code_graph_passthrough(json, status, "index_investigate");
+   }
+   free(json);
+
+   enum
+   {
+      INV_ITEMS = 4,
+      INV_WINDOW = 60
+   };
+   char rootdir[MAX_PATH_LEN] = "";
+   if (code_span_resolve_root(project, rootdir, sizeof(rootdir)) == 0)
+   {
+      int attached = 0;
+      cJSON *row;
+      cJSON_ArrayForEach(row, results)
+      {
+         if (attached >= INV_ITEMS)
+            break;
+         cJSON *fp = cJSON_GetObjectItemCaseSensitive(row, "file_path");
+         cJSON *sp = cJSON_GetObjectItemCaseSensitive(row, "span");
+         if (!cJSON_IsString(fp) || !fp->valuestring[0] || !cJSON_IsObject(sp))
+            continue;
+         cJSON *ls = cJSON_GetObjectItemCaseSensitive(sp, "line_start");
+         int anchor = cJSON_IsNumber(ls) ? ls->valueint : 0;
+         /* kind:"file" means the packet had no line anchor -- read from the top
+          * rather than guessing a window around zero. */
+         int from = anchor > INV_WINDOW / 2 ? anchor - INV_WINDOW / 2 : 1;
+         int to = from + INV_WINDOW - 1;
+         cJSON *span = code_span_read(project, rootdir, fp->valuestring, from, to, INV_WINDOW);
+         if (!span)
+            continue;
+         cJSON *content = cJSON_DetachItemFromObjectCaseSensitive(span, "content");
+         if (content)
+         {
+            cJSON_AddItemToObject(row, "code", content);
+            cJSON_AddNumberToObject(row, "code_line_start", from);
+            cJSON_AddNumberToObject(row, "code_line_end", to);
+            attached++;
+         }
+         cJSON_Delete(span);
       }
    }
-   return code_graph_passthrough(json, status, "index_hybrid");
+   return json_result_content(root); /* takes ownership of root */
 }
 
 static cJSON *mcph_index_graph_hubs(struct mcp_call *c)
@@ -1260,14 +1478,91 @@ static cJSON *mcph_pdf_open_asset(struct mcp_call *c)
  * line range through the active workspace provider (code_span_read does the B4
  * path-safety + slicing). Bounds the line args via pdf_arg_pos_int so an
  * out-of-range double can't UB-cast. */
+/* Resolve a project's indexed root once. Split out so a batched call pays the
+ * project-list walk a single time instead of per span. */
+static int code_span_resolve_root(const char *project, char *out, size_t out_len)
+{
+   const int max_projs = 256;
+   project_info_t *projs = calloc((size_t)max_projs, sizeof(*projs));
+   if (!projs)
+      return -1;
+   int np = kb_client_index_list(projs, max_projs);
+   if (np < 0)
+   {
+      free(projs);
+      return -1;
+   }
+   out[0] = '\0';
+   for (int i = 0; i < np; i++)
+      if (strcmp(projs[i].name, project) == 0 && projs[i].root[0])
+      {
+         snprintf(out, out_len, "%s", projs[i].root);
+         break;
+      }
+   free(projs);
+   return out[0] ? 0 : -1;
+}
+
 static cJSON *mcph_code_span_get(struct mcp_call *c)
 {
    cJSON *jp = cJSON_GetObjectItemCaseSensitive(c->jargs, "project");
    cJSON *jf = cJSON_GetObjectItemCaseSensitive(c->jargs, "file_path");
    if (!cJSON_IsString(jp) || !jp->valuestring[0])
       return text_content("error: code_span_get requires 'project'");
+
+   /* BATCH FORM: spans:[{file_path,line_start,line_end}, ...].
+    *
+    * One range per call made this the most expensive way to read a file. Reading
+    * six ranges cost six round trips, where the shell form it replaced batched
+    * them into one command -- and a round trip is not cheap: the whole
+    * conversation prefix is re-sent every time. Measured on one cell, 82 tool
+    * calls against a ~12k fixed prefix is ~1M tokens of a 1.18M total, so turns,
+    * not bytes, are the bill. Accepting a list lets the caller pay once. */
+   cJSON *jspans = cJSON_GetObjectItemCaseSensitive(c->jargs, "spans");
+   if (cJSON_IsArray(jspans) && cJSON_GetArraySize(jspans) > 0)
+   {
+      char root[MAX_PATH_LEN] = "";
+      if (code_span_resolve_root(jp->valuestring, root, sizeof(root)) != 0)
+         return text_content("error: unknown project (no indexed root)");
+      int max_lines = config_code_span_max_lines() > 0 ? config_code_span_max_lines() : 400;
+      cJSON *out = cJSON_CreateArray();
+      if (!out)
+         return text_content("error: out of memory");
+      cJSON *sp;
+      cJSON_ArrayForEach(sp, jspans)
+      {
+         /* Models double-encode array elements. Measured on a benchmark cell: one
+          * batch of three arrived as JSON *strings* ("{\"file_path\":...}") rather
+          * than objects and silently returned nothing -- a wasted round trip,
+          * which is the exact cost this call exists to avoid. Re-parse a string
+          * element instead of skipping it. */
+         cJSON *decoded = NULL;
+         if (cJSON_IsString(sp) && sp->valuestring && sp->valuestring[0] == '{')
+         {
+            decoded = cJSON_Parse(sp->valuestring);
+            if (decoded)
+               sp = decoded;
+         }
+         cJSON *sf = cJSON_GetObjectItemCaseSensitive(sp, "file_path");
+         if (!cJSON_IsString(sf) || !sf->valuestring[0])
+         {
+            cJSON_Delete(decoded);
+            continue; /* skip the malformed entry; the rest of the batch still answers */
+         }
+         long long bls = 0, ble = 0;
+         int b_start = pdf_arg_pos_int(sp, "line_start", 2000000000.0, &bls) ? (int)bls : 1;
+         int b_end = pdf_arg_pos_int(sp, "line_end", 2000000000.0, &ble) ? (int)ble : b_start;
+         cJSON *one =
+             code_span_read(jp->valuestring, root, sf->valuestring, b_start, b_end, max_lines);
+         if (one)
+            cJSON_AddItemToArray(out, one);
+         cJSON_Delete(decoded);
+      }
+      return json_result_content(out);
+   }
+
    if (!cJSON_IsString(jf) || !jf->valuestring[0])
-      return text_content("error: code_span_get requires 'file_path'");
+      return text_content("error: code_span_get requires 'file_path' or 'spans'");
 
    long long ls = 0, le = 0;
    int line_start = pdf_arg_pos_int(c->jargs, "line_start", 2000000000.0, &ls) ? (int)ls : 1;
@@ -1453,6 +1748,7 @@ static const struct
     {"index_structure", mcph_index_structure, "core,review_indexed"},
     {"code_span_get", mcph_code_span_get, NULL},
     {"index_hybrid", mcph_index_hybrid, NULL},
+    {"index_investigate", mcph_index_investigate, "core,review_indexed"},
     {"index_graph_hubs", mcph_index_graph_hubs, NULL},
     {"index_graph_audit", mcph_index_graph_audit, NULL},
     {"index_graph_diff", mcph_index_graph_diff, NULL},

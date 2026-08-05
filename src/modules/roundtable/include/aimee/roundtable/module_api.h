@@ -8,6 +8,14 @@
 
 #define AIMEE_ROUNDTABLE_EVENT_DELIBERATE       9473u
 #define AIMEE_ROUNDTABLE_STAGE_DELIBERATE       1u
+
+/* The review stage. Unlike deliberate, which is a fixed 40-byte rubric, a review
+ * carries JSON in both directions -- the same body the private HTTP proxy used
+ * to carry, so moving the transport did not change the contract. The kind is
+ * fixed by the process contract at 4096 + ordinal*256 + stage; roundtable is
+ * ordinal 21, so review is deliberate's successor and not a free choice. */
+#define AIMEE_ROUNDTABLE_EVENT_REVIEW           9474u
+#define AIMEE_ROUNDTABLE_STAGE_REVIEW           2u
 #define AIMEE_ROUNDTABLE_REQUEST_MAGIC          0x52475452u /* "RTGR" */
 #define AIMEE_ROUNDTABLE_RESPONSE_MAGIC         0x44475452u /* "RTGD" */
 #define AIMEE_ROUNDTABLE_WIRE_VERSION           1u

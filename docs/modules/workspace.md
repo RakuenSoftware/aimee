@@ -12,8 +12,10 @@ scope semantics, or optional workflow orchestration.
 The supervised `workspace-access` stage now runs in the shared pure-Go module
 runtime. It preserves the WREF/WWOK contract and validates bounded
 `owner/repository` references before admitting access. The C adapter remains a
-wire-parity fixture. Provider binding, containment, runner queues, mirrors,
-manifests, and worktree lifecycle remain in C for later isolated migrations.
+wire-parity fixture. The C scope seam fails closed until the server registers
+its event-bus provider and has no local reference-validation fallback. Provider
+binding, containment, runner queues, mirrors, manifests, and worktree lifecycle
+remain in C for later isolated migrations.
 
 ## Public contracts
 

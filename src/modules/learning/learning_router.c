@@ -39,19 +39,9 @@ void learning_router_register_signal_classifier(learning_signal_classifier_fn cl
 #if !defined(AIMEE_DB2_DISABLED)
 static int learning_classify_signal(const char *signal, uint32_t *mask)
 {
-   if (g_signal_classifier)
-      return g_signal_classifier(signal, mask);
-   *mask = 0;
-   if (strcmp(signal, "thumb_up") == 0 || strcmp(signal, "thumb_down") == 0)
-      *mask = AIMEE_LEARNING_SINK_RERANKER;
-   else if (strcmp(signal, "correction") == 0)
-      *mask =
-          AIMEE_LEARNING_SINK_RERANKER | AIMEE_LEARNING_SINK_SUPERSEDE | AIMEE_LEARNING_SINK_RULE;
-   else if (strcmp(signal, "preference_statement") == 0 || strcmp(signal, "mark_rule") == 0)
-      *mask = AIMEE_LEARNING_SINK_RULE;
-   else if (strcmp(signal, "workflow_repetition") == 0)
-      *mask = AIMEE_LEARNING_SINK_WORKFLOW;
-   return 0;
+   if (!g_signal_classifier || !signal || !mask)
+      return -1;
+   return g_signal_classifier(signal, mask);
 }
 #endif
 
@@ -464,9 +454,13 @@ int learning_router_record_signal(const learning_signal_input_t *raw_input,
 
    learning_signal_input_t input = *raw_input;
    uint32_t sink_mask = 0;
-   if (learning_classify_signal(input.signal_type, &sink_mask) != 0)
-      return -1;
    learning_dispatch_clear(out);
+   if (learning_classify_signal(input.signal_type, &sink_mask) != 0)
+   {
+      LOG_WARN("learning", "signal classification unavailable; refusing signal type=%s",
+               input.signal_type);
+      return -1;
+   }
    learning_fill_target_key(&input);
    db2_learning_proposals_archive_expired();
 

@@ -513,7 +513,7 @@ static void test_osv_offline_cache_miss_allows(void)
    "epistemic_directive "                                                                          \
    "{anchor_entity,anchor_file,cause,command,id,limit,note,priority,question,resolution_memory_"   \
    "id,state,suppress,topic,valid_until} req:command\n"                                            \
-   "find_symbol {identifier,project,scope} req:identifier\n"                                       \
+   "find_symbol {identifier,identifiers,project,scope} req:\n"                                     \
    "find_tools {limit,query} req:\n"                                                               \
    "get_help {topic} req:\n"                                                                       \
    "get_identity {} req:\n"                                                                        \
@@ -524,8 +524,8 @@ static void test_osv_offline_cache_miss_allows(void)
    "graph {command,cwd,entity,episode_key,limit,project,query,scope,workspace} req:command\n"      \
    "host {command,name} req:command\n"                                                             \
    "index "                                                                                        \
-   "{command,file_path,judge,line_end,line_start,max_results,node,paths,project,query,scope,"      \
-   "symbol} "                                                                                      \
+   "{command,file_path,file_paths,judge,line_end,line_start,max_results,node,paths,project,"       \
+   "queries,query,scope,spans,symbol} "                                                            \
    "req:command\n"                                                                                 \
    "job {command,job_id,max_concurrent,plan_id} req:command\n"                                     \
    "learning "                                                                                     \
@@ -667,6 +667,7 @@ static void test_tool_profile_filter(void)
                                       "find_symbol",
                                       "ast_grep_search",
                                       "preview_blast_radius",
+                                      "index",
                                       "git",
                                       "delegate",
                                       "delegate_status",
@@ -682,6 +683,33 @@ static void test_tool_profile_filter(void)
    assert(profile_core_has("find_tools", core) && profile_core_has("describe_tool", core));
    assert(profile_core_has("call_tool", core));
 
+   /* THE MIRROR ABOVE LISTED THESE BEFORE THE REAL FLOOR DID.
+    *
+    * roundtable_review/roundtable_status were in this array but NOT in
+    * MCP_CORE_TOOLS, and nothing compared the two, so the drift went unnoticed.
+    * Measured consequence on am_b84c9294aa: 74 tool calls, the skill telling the
+    * agent to get a review before reporting done, and roundtable never invoked --
+    * reaching it cost find_tools -> describe_tool -> call_tool. The agent shipped
+    * a one-file caller-side fix against a reference that changes four files
+    * elsewhere. Assert both are actually served, not merely mirrored. */
+   {
+      cJSON *served = mcp_build_tools_list();
+      int have_review = 0, have_status = 0;
+      cJSON *t = NULL;
+      cJSON_ArrayForEach(t, served)
+      {
+         cJSON *nm = cJSON_GetObjectItemCaseSensitive(t, "name");
+         if (!cJSON_IsString(nm))
+            continue;
+         if (strcmp(nm->valuestring, "roundtable_review") == 0)
+            have_review = 1;
+         if (strcmp(nm->valuestring, "roundtable_status") == 0)
+            have_status = 1;
+      }
+      cJSON_Delete(served);
+      assert(have_review && have_status);
+   }
+
    /* An asynchronous tool whose poller is NOT core costs the agent a
     * find_tools -> describe_tool -> call_tool detour before it can read the
     * result of a call it was told to make. Measured on a real cell: five of
@@ -689,6 +717,14 @@ static void test_tool_profile_filter(void)
     * already ships roundtable_status for exactly this reason; delegate must
     * ship delegate_status on the same grounds. */
    assert(profile_core_has("roundtable_status", core));
+
+   /* The retrieval an agent reaches for when the question is NOT a symbol name.
+    * Withholding `index` did not reduce retrieval; it moved it to a recursive
+    * shell search, because that was one visible call while index_hybrid cost a
+    * find_tools -> describe_tool -> call_tool detour. Measured across the
+    * benchmark's aimee cells: 87 shell searches emitting 2.4 MB, one large
+    * enough to hit the client's 1 MB output truncation. */
+   assert(profile_core_has("index", core));
    assert(profile_core_has("delegate_status", core));
    {
       cJSON *listed = mcp_build_tools_list();
@@ -864,31 +900,30 @@ static void test_get_help_topics_exist(void)
    cJSON_Delete(tools);
 }
 
-/* Some callers must not be able to hand work to a second agent: an evaluation
- * harness measuring one agent, or any run where a delegated sub-agent's tokens
- * and edits would be attributed to the caller. The multi-agent tools are the
- * only way to do that, so a profile has to be able to withhold them. Note the
- * filter fails OPEN on an unknown profile, so "solo" must be handled explicitly
- * or a typo would silently grant delegation instead of removing it. */
-static void test_solo_profile_withholds_multi_agent_tools(void)
+/* THE "solo" PROFILE IS GONE, AND MUST NOT COME BACK.
+ *
+ * It withheld delegate/delegate_status/roundtable_review/roundtable_status so a
+ * run could be measured without a second agent's tokens landing outside the
+ * caller's transcript. That makes the measured thing a configuration nobody
+ * deploys -- the benchmark stops describing aimee and starts describing a
+ * variant built for the benchmark. If delegates should not run, do not configure
+ * them; that is a real deployment state. Hiding shipped tools to flatter a
+ * measurement is not.
+ *
+ * An unknown profile fails OPEN to the full set, so "solo" now presents
+ * everything rather than silently withholding. */
+static void test_solo_profile_is_gone(void)
 {
-   static const char *const multi[] = {"delegate", "delegate_status", "roundtable_review",
-                                       "roundtable_status", NULL};
-   static const char *const kept[] = {
-       "get_help", "find_symbol", "search_memory", "preview_blast_radius", "call_tool", NULL};
-
    cJSON *tools = mcp_build_tools_list_flat();
-   for (int i = 0; multi[i]; i++)
-      assert(tools_get(tools, multi[i]) != NULL); /* present before filtering */
-
-   assert(mcp_filter_tools_for_profile(tools, "solo") > 0);
-   for (int i = 0; multi[i]; i++)
-      assert(tools_get(tools, multi[i]) == NULL);
-   for (int i = 0; kept[i]; i++)
-      assert(tools_get(tools, kept[i]) != NULL);
+   assert(tools_get(tools, "delegate") != NULL);
+   assert(tools_get(tools, "roundtable_review") != NULL);
+   /* Unknown profile -> fail open: nothing is removed. */
+   assert(mcp_filter_tools_for_profile(tools, "solo") == 0);
+   assert(tools_get(tools, "delegate") != NULL);
+   assert(tools_get(tools, "roundtable_review") != NULL);
    cJSON_Delete(tools);
 
-   /* "core" still ships delegation: solo is opt-in, not a quiet default. */
+   /* "core" ships delegation, as it always did. */
    cJSON *core_tools = mcp_build_tools_list_flat();
    mcp_filter_tools_for_profile(core_tools, "core");
    assert(tools_get(core_tools, "delegate") != NULL);
@@ -1014,7 +1049,7 @@ int main(void)
    test_tool_profile_filter();
    test_call_tool_demux();
    test_get_help_topics_exist();
-   test_solo_profile_withholds_multi_agent_tools();
+   test_solo_profile_is_gone();
    test_agent_code_intelligence_contracts();
    test_flat_list_keeps_family_members();
    test_boot_and_lazy_tools();

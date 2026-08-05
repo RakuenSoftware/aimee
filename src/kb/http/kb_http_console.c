@@ -1,6 +1,6 @@
 /* kb_http_console.c: /v1/console routes for the aimee-kb web console.
  * See kb_http_console.h. Reached only with a console-admin credential that the
- * route ACL (kb_route_acl.c) has already authorized. */
+ * control-web module, reached through the event bus, has already authorized. */
 #include "kb_http_console.h"
 
 #include "aimee.h" /* now_utc */

@@ -5,7 +5,6 @@
 #include "db1.h"
 #include "db1/delegations.h" /* db1_delegation_spawn_is_stopped — admission cancel poll */
 #include <aimee/delegates/delegate_role.h>
-#include <aimee/skills/skill_review.h>
 #include "provider_catalog.h"
 #include "db2/agent_hints.h"
 #include "db2/agent_outcomes.h"

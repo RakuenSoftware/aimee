@@ -106,14 +106,10 @@ static void td_outcome_set(const char *verdict, const char *reason)
  * stored; the parsed tree is freed. */
 static int is_exec_tool(const char *name)
 {
-   if (g_tool_classifier)
-   {
-      int classification = 0;
-      return g_tool_classifier(name, &classification) == 0 &&
-             classification == AIMEE_TOOL_CLASS_EXEC;
-   }
-   return strcmp(name, "bash") == 0 || strcmp(name, "execute_script") == 0 ||
-          strcmp(name, "test") == 0 || strcmp(name, "run_tests") == 0;
+   if (!g_tool_classifier)
+      return 0;
+   int classification = 0;
+   return g_tool_classifier(name, &classification) == 0 && classification == AIMEE_TOOL_CLASS_EXEC;
 }
 
 static void td_classify_exec_result(const char *result)

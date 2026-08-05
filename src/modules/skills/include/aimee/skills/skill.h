@@ -73,7 +73,9 @@ char *skill_load(const char *project_root, const char *name);
  * Returns count written. */
 int skill_list(const char *project_root, char names_out[][SKILL_NAME_MAX], int max_names);
 int skill_description(const char *project_root, const char *name, char *out, size_t out_len);
-int skill_trigger_matches_content(const char *content, const char *tool_name, const char *subject);
+/* Resolve the skill and ask the supervised skills process to evaluate its trigger.
+ * Returns 1 for a match, 0 for a definite non-match/missing skill, and -1 when
+ * the process is unavailable or returns an invalid decision. */
 int skill_trigger_matches(const char *project_root, const char *name, const char *tool_name,
                           const char *subject);
 

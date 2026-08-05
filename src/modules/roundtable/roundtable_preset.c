@@ -274,6 +274,30 @@ int roundtable_preset_from_json(const char *body, const char *url_name, roundtab
       *errmsg = "chairman_enabled requires a chairman";
       return -1;
    }
+
+   /* CHAIRING, SYNTHESIS AND DISCUSSION ALL REQUIRE SOMEONE TO DISAGREE WITH.
+    *
+    * A chairman arbitrates between seats; synthesis reconciles their findings;
+    * discussion is seats talking to each other. On a panel of one there is no
+    * second opinion to arbitrate, reconcile or talk to -- a lone seat would be
+    * discussing with itself. Each option can only add a delegate call and a way
+    * to fail.
+    *
+    * Measured on a real one-seat completeness review: the seat returned a correct
+    * blocking finding, the chair then died on "unknown persona 'chairman'", and
+    * the whole run reported FAILED -- so a caller polling roundtable_status
+    * discards findings that were exactly right.
+    *
+    * Refused at intake rather than normalised silently, so an operator asking for
+    * these on one seat is told the request is meaningless instead of having it
+    * quietly dropped. */
+   if (out->seat_count <= 1 && (out->chairman_enabled || out->chairman[0] || out->discussion))
+   {
+      cJSON_Delete(req);
+      *errmsg = "a roundtable of one has nobody to chair, synthesise or discuss with: "
+                "drop chairman/discussion or add seats";
+      return -1;
+   }
    cJSON_Delete(req);
    return 0;
 }

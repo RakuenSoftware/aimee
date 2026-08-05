@@ -1,0 +1,1 @@
+pct exec 402 -- bash -c 'rm -rf /opt/aimee-now; mkdir -p /opt/aimee-now; tar -xz -C /opt/aimee-now && echo SHIP_OK && grep -c AIMEE_CODE_TOOL_INDEX /opt/aimee-now/src/modules/protocols/mcp/mcp_tool_profile.c && grep -c codex-hooks /opt/aimee-now/src/client_integrations.c'
