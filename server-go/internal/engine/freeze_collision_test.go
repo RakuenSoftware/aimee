@@ -214,3 +214,34 @@ func TestRejectDivergentSiblingCreatesStillRejectsWithWorktree(t *testing.T) {
 		t.Fatalf("expected %s error, got: %v", freezeCreateCreateCollision, err)
 	}
 }
+
+// TestRejectDivergentSiblingCreatesFailsClosedWithoutWorkflowRegistry proves the
+// fail-closed invariant: a NativeRunner constructed without a workflow registry
+// must surface a non-nil error from rejectDivergentSiblingCreates when the
+// current slice would otherwise need a sibling-collision check. A silent return
+// would let colliding sibling freezes pass undetected.
+func TestRejectDivergentSiblingCreatesFailsClosedWithoutWorkflowRegistry(t *testing.T) {
+	ctx, store, artifacts, _, _, slicedir, base, _ := setupFreezeCollisionHarness(t)
+
+	if err := os.WriteFile(filepath.Join(slicedir, "frozen.txt"), []byte("conflicting slice blob\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, slicedir, "add", "frozen.txt")
+	gitRun(t, slicedir, "commit", "-m", "divergent create")
+	currentHead := strings.TrimSpace(gitRun(t, slicedir, "rev-parse", "HEAD"))
+
+	item, err := store.WorkItem(ctx, "wi_s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Deliberately omit workflows: the runner cannot inspect sibling workflow
+	// stages, so the collision check must fail closed rather than pass silently.
+	runner := &NativeRunner{db: store, artifacts: artifacts}
+	err = runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead)
+	if err == nil {
+		t.Fatal("expected workflow-registry error from workflow-less runner, got nil")
+	}
+	if !strings.Contains(err.Error(), "workflow registry is required") {
+		t.Fatalf("expected workflow-registry-required error, got: %v", err)
+	}
+}

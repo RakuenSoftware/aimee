@@ -113,6 +113,12 @@ func (r *NativeRunner) rejectDivergentSiblingCreates(ctx context.Context, item d
 	if r.db == nil || r.artifacts == nil {
 		return nil
 	}
+	if r.workflows == nil {
+		// A workflow-less runner cannot determine which sibling stages are
+		// frozen vs. transient, so sibling collision detection cannot run.
+		// Fail closed: a colliding create must not be silently allowed.
+		return errors.New("workflow registry is required for sibling freeze collision inspection")
+	}
 	creates, err := freezeCreatedFiles(ctx, workdir, base, head)
 	if err != nil {
 		return err
