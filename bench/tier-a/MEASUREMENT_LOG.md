@@ -1991,6 +1991,18 @@ same prompt, same everything:
 
 **47% of outputs differ on identical inputs in an identical configuration.**
 
+Per defect 39 the difference carries its own interval rather than a fixed
+threshold. Paired bootstrap over the shared 1001 notes, 20000 replicates:
+
+> extracted_from_3002 - native_1001 = **-0.0079, 95% CI [-0.0278, +0.0114]**
+> -- INDISTINGUISHABLE
+
+The error budget moves almost entirely into precision: fp goes 338 -> 356 while
+fn is flat at 306 -> 308 and tp barely moves, 574 -> 572. So the churn is not
+symmetric noise; the 3002-note context yields marginally more spurious spans.
+n=1001 cannot resolve a difference this size, and confirming it would need the
+gap re-measured at the mid or large tier rather than argued from these counts.
+
 This contradicts the standing claim in `articles/README.md` that "within one
 configuration, repetition is exact", which rests on three runs of the same
 three-process arm agreeing byte-for-byte on all 1001 notes. That claim is true

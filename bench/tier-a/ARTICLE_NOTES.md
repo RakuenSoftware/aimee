@@ -1313,3 +1313,78 @@ QAT parses slightly worse on E2B -- 992 of 1001 against UD's 1001 -- while
 scoring substantially better. A quant comparison tracking F1 alone shows a clean
 win and hides that the winner is marginally less well-formed. Same blind spot as
 every other pathology this campaign turned up.
+
+## 31. QAT at 3002 notes, and the tier-consistency check that failed usefully
+
+Finding 30 measured QAT against UD at n=1001 and left one thing unresolved: E4B
+scored *below* E2B under QAT, -0.0213 with 95% CI [-0.0445, +0.0015], which is
+backwards for a model whose smaller sibling is a nested submodel of it. The mid
+tier was run to settle that, and the E2B side is banked.
+
+### The headline: the tier does not move the score
+
+| arm | n | strict F1 | precision | recall |
+|---|---:|---:|---:|---:|
+| E2B QAT, native gold_small | 1001 | 0.6406 | 0.6294 | 0.6523 |
+| E2B QAT, gold_mid | 3002 | **0.6416** | 0.6276 | 0.6563 |
+
++0.0010 across a threefold increase in corpus size. These are different note
+sets, so this is not a paired test -- it says only that the model performs the
+same on the wider corpus, which is the reassuring and boring result. The value of
+the mid tier is the interval it buys: roughly +/-0.014 against +/-0.024 at n=1001.
+
+### The check that was designed in, and what it caught
+
+Because gold_small is a strict subset of gold_mid, the 1001-note arm should be
+reproduced inside the 3002-note arm. It is not:
+
+| | strict F1 | tp | fp | fn |
+|---|---:|---:|---:|---:|
+| native 1001 | 0.6406 | 574 | 338 | 306 |
+| the same 1001 notes extracted from the 3002 arm | 0.6327 | 572 | 356 | 308 |
+
+> extracted - native = **-0.0079, 95% CI [-0.0278, +0.0114]**, 20000 replicates
+> -- INDISTINGUISHABLE
+
+The score is unmoved. The *outputs* are not: 529 of 1001 completions are
+byte-identical, so **47% of notes produced different text** for the same model,
+quant, card, process count and prompt. The only difference is which corpus the
+note was embedded in. Full treatment in defect 40, including the fact that the
+obvious explanation -- the immediately preceding note -- does not survive its own
+test (44.8% churn with the same predecessor, 48.3% with a different one).
+
+### Why this belongs in the QAT material rather than only in the defect log
+
+It is the third instance of the same shape in this campaign, and by now that is
+the finding rather than an incident. MTP perturbs 26% of outputs and moves F1 by
+less than 0.004. Corpus composition perturbs 47% of outputs and moves F1 by
+0.008, indistinguishable from zero. Quantisation-aware training changes *how the
+weights were trained* and moves E2B by +0.039 while doing nothing measurable to
+E4B.
+
+**F1 is nearly blind to how the text was produced and sensitive to something
+else.** The interventions that visibly rewrite half the output are the ones that
+do not matter; the one that matters is invisible at the token level. Any quant
+comparison reported as a single number is reporting the least sensitive
+instrument available.
+
+### The caveat this creates
+
+`results/subset-1001/` ranks natively-run 1001-note arms -- LFM2.5, the
+newcomers -- against a field extracted from banked 10k arms. Those two kinds of
+number are now known to be non-equivalent. At -0.0079 the effect is well inside
+the interval n=1001 supports, so no ranking conclusion in this campaign changes,
+but the tables carry the caveat and it should be stated where they appear.
+
+### Still open
+
+E4B QAT at 3002 is running. Its pairing against this arm is the clean
+within-corpus comparison, both arms on the same 3002 notes, and it is the direct
+answer to whether E4B really loses to its own submodel under QAT.
+
+### Where this goes
+
+No article currently carries QAT. Findings 26, 30 and 31 -- the LFM2.5 quant
+ladder, QAT vs UD, and this -- are one article's worth of material on the theme
+that which quant matters more than how many bits, and that the measuring
+instrument is less sensitive than the thing being measured.
