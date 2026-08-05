@@ -949,7 +949,7 @@ WHERE work_item_id=? AND reservation_owner=? AND reservation_state='reserved'`, 
 func (s *Store) HeartbeatWorkflowBudget(ctx context.Context, workItemID, owner string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE lifecycle_work_item
 SET reservation_lease_until=datetime('now','+2 minutes')
-WHERE work_item_id=? AND reservation_owner=? AND reservation_state='reserved'`, workItemID, owner)
+WHERE work_item_id=? AND reservation_owner=? AND reservation_state IN ('reserved','actual','unresolved')`, workItemID, owner)
 	return err
 }
 

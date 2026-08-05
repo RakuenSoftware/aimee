@@ -332,6 +332,29 @@ func TestRetryLimitResumeStartsFreshBudgetAndKeepsDiagnostic(t *testing.T) {
 	}
 }
 
+func TestWorkflowBudgetHeartbeatExtendsReplayReservations(t *testing.T) {
+	for _, state := range []string{"actual", "unresolved"} {
+		t.Run(state, func(t *testing.T) {
+			store := newTestStore(t)
+			createTestItem(t, store, "wi_heartbeat_"+state)
+			id := "wi_heartbeat_" + state
+			if _, err := store.db.ExecContext(t.Context(), `UPDATE lifecycle_work_item
+SET reservation_state=?,reservation_owner='owner',reservation_lease_until=datetime('now','-1 minute')
+WHERE work_item_id=?`, state, id); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.HeartbeatWorkflowBudget(t.Context(), id, "owner"); err != nil {
+				t.Fatal(err)
+			}
+			var live bool
+			if err := store.db.QueryRowContext(t.Context(), `SELECT reservation_lease_until > datetime('now')
+FROM lifecycle_work_item WHERE work_item_id=?`, id).Scan(&live); err != nil || !live {
+				t.Fatalf("live=%v err=%v", live, err)
+			}
+		})
+	}
+}
+
 func TestTransientPauseIsNotRepairContext(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
