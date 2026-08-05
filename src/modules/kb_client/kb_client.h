@@ -1127,6 +1127,13 @@ int kb_client_code_scan_push(const char *name, const char *root, int force, void
  * failure or kb-side error. */
 int kb_client_index_scan_apply_response(const void *resp, kb_client_index_scan_result_t *out);
 
+/* Blast-radius contract checks, split from the transport so a recorded kb
+ * payload can be asserted against without a live kb. `why` receives the first
+ * failing term ("resolved", "dependent_edges", ...) so a rejection names
+ * itself. Returns 1 when the payload satisfies the contract. */
+int kb_client_index_blast_response_valid(const void *resp, char *why, size_t why_n);
+int kb_client_index_blast_edges_valid(const void *edges, const char *identity_field);
+
 /* Timeout the code-index scan POST uses, in ms. Default 5 minutes; raise with
  * AIMEE_KB_SCAN_TIMEOUT_MS for trees whose scan legitimately runs longer.
  * Values outside (0, 24h] are ignored so a typo cannot disable the bound. */

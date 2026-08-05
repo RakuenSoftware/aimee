@@ -115,3 +115,82 @@ int kb_client_index_scan_apply_response(const void *resp_v, kb_client_index_scan
    }
    return 0;
 }
+
+/* Blast-radius CONTRACT validation, kept here rather than beside the transport
+ * so it can be exercised against a recorded kb payload without a live kb.
+ *
+ * This split is not cosmetic. The lookup used to fail with a bare -1 while the
+ * kb served a conforming 200, and there was no test that took the bytes the kb
+ * actually returns and asserted the client accepts them. Hours went into
+ * rebuilding images to answer a question one assertion settles.
+ *
+ * `why` receives the first failing term, so a rejection names itself instead of
+ * arriving as "blast radius lookup failed". One malformed edge anywhere rejects
+ * the whole payload, which is deliberate -- a partial graph is worse than none
+ * for impact analysis -- but it has to say so. */
+static int blast_edge_valid(const cJSON *edge, const char *identity_field)
+{
+   if (!cJSON_IsObject(edge))
+      return 0;
+   const cJSON *identity = cJSON_GetObjectItemCaseSensitive(edge, identity_field);
+   const cJSON *provenance = cJSON_GetObjectItemCaseSensitive(edge, "provenance");
+   const cJSON *confidence = cJSON_GetObjectItemCaseSensitive(edge, "confidence");
+   const cJSON *project = cJSON_GetObjectItemCaseSensitive(edge, "project");
+   const cJSON *generation = cJSON_GetObjectItemCaseSensitive(edge, "generation");
+   const cJSON *freshness = cJSON_GetObjectItemCaseSensitive(edge, "freshness");
+   return cJSON_IsString(identity) && identity->valuestring[0] && cJSON_IsString(provenance) &&
+          provenance->valuestring[0] && cJSON_IsString(confidence) && confidence->valuestring[0] &&
+          cJSON_IsString(project) && project->valuestring[0] && cJSON_IsNumber(generation) &&
+          cJSON_IsString(freshness) && freshness->valuestring[0];
+}
+
+int kb_client_index_blast_edges_valid(const void *edges_v, const char *identity_field)
+{
+   const cJSON *edges = (const cJSON *)edges_v;
+   if (!cJSON_IsArray(edges))
+      return 0;
+   const cJSON *edge = NULL;
+   cJSON_ArrayForEach(edge, edges) if (!blast_edge_valid(edge, identity_field)) return 0;
+   return 1;
+}
+
+int kb_client_index_blast_response_valid(const void *resp_v, char *why, size_t why_n)
+{
+   const cJSON *resp = (const cJSON *)resp_v;
+   if (why && why_n)
+      why[0] = '\0';
+#define BLAST_REJECT(term)                                                                         \
+   do                                                                                              \
+   {                                                                                               \
+      if (why && why_n)                                                                            \
+         snprintf(why, why_n, "%s", (term));                                                       \
+      return 0;                                                                                    \
+   } while (0)
+
+   if (!resp)
+      BLAST_REJECT("no response");
+   if (cJSON_IsString(cJSON_GetObjectItemCaseSensitive(resp, "error")))
+      BLAST_REJECT("error field");
+
+   const cJSON *project = cJSON_GetObjectItemCaseSensitive(resp, "project");
+   const cJSON *generation = cJSON_GetObjectItemCaseSensitive(resp, "generation");
+   const cJSON *freshness = cJSON_GetObjectItemCaseSensitive(resp, "freshness");
+   const cJSON *resolved = cJSON_GetObjectItemCaseSensitive(resp, "resolved");
+
+   if (!cJSON_IsString(project) || !project->valuestring[0])
+      BLAST_REJECT("project");
+   if (!cJSON_IsNumber(generation))
+      BLAST_REJECT("generation");
+   if (!cJSON_IsString(freshness) || !freshness->valuestring[0])
+      BLAST_REJECT("freshness");
+   if (!cJSON_IsTrue(resolved))
+      BLAST_REJECT("resolved");
+   if (!kb_client_index_blast_edges_valid(cJSON_GetObjectItemCaseSensitive(resp, "dependency_edges"),
+                                          "identity"))
+      BLAST_REJECT("dependency_edges");
+   if (!kb_client_index_blast_edges_valid(cJSON_GetObjectItemCaseSensitive(resp, "dependent_edges"),
+                                          "path"))
+      BLAST_REJECT("dependent_edges");
+#undef BLAST_REJECT
+   return 1;
+}

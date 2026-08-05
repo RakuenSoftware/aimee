@@ -450,31 +450,6 @@ int kb_client_index_list(project_info_t *out, int max)
    return count;
 }
 
-static int kb_index_blast_edge_valid(const cJSON *edge, const char *identity_field)
-{
-   if (!cJSON_IsObject(edge))
-      return 0;
-   cJSON *identity = cJSON_GetObjectItemCaseSensitive(edge, identity_field);
-   cJSON *provenance = cJSON_GetObjectItemCaseSensitive(edge, "provenance");
-   cJSON *confidence = cJSON_GetObjectItemCaseSensitive(edge, "confidence");
-   cJSON *project = cJSON_GetObjectItemCaseSensitive(edge, "project");
-   cJSON *generation = cJSON_GetObjectItemCaseSensitive(edge, "generation");
-   cJSON *freshness = cJSON_GetObjectItemCaseSensitive(edge, "freshness");
-   return cJSON_IsString(identity) && identity->valuestring[0] && cJSON_IsString(provenance) &&
-          provenance->valuestring[0] && cJSON_IsString(confidence) && confidence->valuestring[0] &&
-          cJSON_IsString(project) && project->valuestring[0] && cJSON_IsNumber(generation) &&
-          cJSON_IsString(freshness) && freshness->valuestring[0];
-}
-
-static int kb_index_blast_edges_valid(const cJSON *edges, const char *identity_field)
-{
-   if (!cJSON_IsArray(edges))
-      return 0;
-   cJSON *edge;
-   cJSON_ArrayForEach(edge, edges) if (!kb_index_blast_edge_valid(edge, identity_field)) return 0;
-   return 1;
-}
-
 int kb_client_index_blast_radius(const char *project, const char *file_path, blast_radius_t *out)
 {
    if (!project || !file_path || !out)
@@ -536,25 +511,17 @@ int kb_client_index_blast_radius(const char *project, const char *file_path, bla
    cJSON *project_json = cJSON_GetObjectItemCaseSensitive(resp, "project");
    cJSON *generation = cJSON_GetObjectItemCaseSensitive(resp, "generation");
    cJSON *freshness = cJSON_GetObjectItemCaseSensitive(resp, "freshness");
-   cJSON *resolved = cJSON_GetObjectItemCaseSensitive(resp, "resolved");
    cJSON *dependency_edges = cJSON_GetObjectItemCaseSensitive(resp, "dependency_edges");
    cJSON *dependent_edges = cJSON_GetObjectItemCaseSensitive(resp, "dependent_edges");
-   if (!cJSON_IsString(project_json) || !project_json->valuestring[0] ||
-       !cJSON_IsNumber(generation) || !cJSON_IsString(freshness) || !freshness->valuestring[0] ||
-       !cJSON_IsTrue(resolved) || !kb_index_blast_edges_valid(dependency_edges, "identity") ||
-       !kb_index_blast_edges_valid(dependent_edges, "path"))
+   /* The contract check lives in kb_client_index_parse.c so it can be asserted
+    * against a recorded kb payload without a live kb. It names the first failing
+    * term, because one malformed edge anywhere rejects the whole lookup and
+    * "the payload was wrong" is not actionable on its own. */
+   char why[64] = "";
+   if (!kb_client_index_blast_response_valid(resp, why, sizeof(why)))
    {
-      /* Say WHICH term failed. A single malformed edge anywhere rejects the whole
-       * lookup, so "the payload was wrong" is not actionable on its own. */
-      aimee_log(LOG_ERROR, "kb_client",
-                "blast_radius '%s' '%s': response rejected (project=%d generation=%d "
-                "freshness=%d resolved=%d dep_edges=%d dependent_edges=%d)",
-                project, file_path,
-                cJSON_IsString(project_json) && project_json->valuestring[0],
-                cJSON_IsNumber(generation),
-                cJSON_IsString(freshness) && freshness->valuestring[0], cJSON_IsTrue(resolved),
-                kb_index_blast_edges_valid(dependency_edges, "identity"),
-                kb_index_blast_edges_valid(dependent_edges, "path"));
+      aimee_log(LOG_ERROR, "kb_client", "blast_radius '%s' '%s': response rejected on '%s'",
+                project, file_path, why);
       cJSON_Delete(resp);
       return -1;
    }
