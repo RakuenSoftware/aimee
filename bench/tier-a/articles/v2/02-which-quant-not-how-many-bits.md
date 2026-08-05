@@ -13,8 +13,7 @@ be worth more than the quantisation answer.
 
 ## The interval answers a question I was not asking
 
-Corpus v5, 1,001 notes, prompt v8, every arm under speculative decoding at three
-processes, one variable changed at a time:
+Corpus v5, 1,001 notes, prompt v8, three processes, one variable at a time:
 
 | arm | strict F1 | relation-agnostic F1 | abstention | spurious triples |
 |---|---:|---:|---:|---:|
@@ -32,10 +31,9 @@ Paired bootstrap, 5,000 replicates, resampling notes rather than facts:
 
 Both contain zero.
 
-A confidence interval on one run answers one question: if I re-ran this same
-comparison on a fresh sample from this same corpus, how much would the delta
-move? It does not answer whether the effect exists. Those are different
-questions.
+A confidence interval on one run answers one question: if I re-ran this comparison
+on a fresh sample from this corpus, how much would the delta move? It does not
+answer whether the effect exists.
 
 ## Eight runs, eight times the same sign
 
@@ -65,12 +63,12 @@ a sign is not a coin flip on run-to-run variation.
 control, replicate across corpora before you invest in sample size. The sign is
 cheap and accumulates. The interval is expensive and does not.
 
-**And the concession that limits it:** my eight runs are not independent. They
-share a prompt lineage, a scorer, and a corpus generation procedure. A systematic
-bias in any of those produces the same sign every time for reasons that have
-nothing to do with quantisation. Read p = 0.008 as an optimistic bound rather than
-a number. What I can say without qualification is that the direction is stable
-across every variation I have introduced, and no run has ever reversed it.
+**And the concession that limits it:** my eight runs are not independent. They share
+a prompt lineage, a scorer, and a corpus generation procedure, and a systematic bias
+in any of those produces the same sign every time for reasons unrelated to
+quantisation. Read p = 0.008 as an optimistic bound. What survives without
+qualification is that the direction is stable across every variation I have
+introduced, and no run has reversed it.
 
 ## More bits is not a direction
 

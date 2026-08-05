@@ -32,17 +32,14 @@ least two common jobs.
 | LFM2.5-230M | Q8_0 | 0.1309 | 0.1289 | 0.1330 | 1.00 | 0.180 | 264 | 0.00 |
 
 `abstention` is how often a model correctly says nothing on the 322 notes whose
-correct answer is nothing. `spurious` is how many triples it invented on those
-same notes. `reasons` is the fraction of rows carrying a reasoning pass.
+correct answer is nothing. `spurious` is how many triples it invented on those same
+notes. `reasons` is the fraction of rows carrying a reasoning pass.
 
-**Read the interval before the order.** At n=1,001 a paired bootstrap gives
-roughly ±0.024, so the top four are one group, not a ranking. Any two rows within
-0.024 of each other are not ordered by this table.
+**Read the interval before the order.** At n=1,001 a paired bootstrap gives roughly
+±0.024, so the top four are one group. Any two rows within 0.024 are not ordered by
+this table.
 
-## The column that decides it
-
-F1 and restraint are close to independent axes here, and the two ends of the table
-prove it in opposite directions.
+## F1 and restraint are independent axes
 
 **granite-4.1-3b ranks seventh on F1 and first on discipline.** It abstains on 79%
 of factless notes and invents 71 triples, half what the models above it invent. It
@@ -51,13 +48,13 @@ finds fewer facts and it makes up far less.
 **LFM2.5-VL-1.6B is the inverse.** 0.2725 F1, abstains on 17%, invents 279
 triples. It answers almost everything, including the notes that assert nothing.
 
-Those two models are 0.27 apart on F1 and four times apart on invention rate, in
-opposite directions.
+Those two are 0.27 apart on F1 and four times apart on invention rate, in opposite
+directions.
 
 So the choice depends on what your pipeline does with a wrong fact. If a bad edge
-gets caught by a write gate and costs a review, buy recall. If it lands in a
-knowledge graph and nothing downstream will ever find it again, buy restraint, and
-granite-4.1-3b is a better answer than three models scoring above it.
+is caught by a write gate and costs a review, buy recall. If it lands in a graph and
+nothing downstream will ever find it again, buy restraint, and granite-4.1-3b beats
+three models scoring above it.
 
 ## Three models whose score is a floor, not a capability
 
@@ -72,10 +69,9 @@ Before you conclude a model cannot do the task, check the parse rate. Two of my
 fourteen score in the bottom third for reasons that are not capability, and the
 fix is a prompt matched to the model rather than a bigger model.
 
-**And the reverse trap.** LFM2.5-230M parses 100% and scores 0.1309 with an
-abstention rate of 0.180. Nothing is wrong with its output format. It is simply
-answering, at length, incorrectly. A clean parse rate is not evidence of a working
-model.
+**And the reverse trap.** LFM2.5-230M parses 100% and scores 0.1309 at an abstention
+rate of 0.180. Nothing is wrong with its format. It is answering, at length,
+incorrectly. A clean parse rate is not evidence of a working model.
 
 ## Half the field never reasons
 

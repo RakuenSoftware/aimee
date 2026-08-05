@@ -3,9 +3,8 @@
 ROUGH DRAFT. The sample sizes here are the smallest in the series. Most of the
 defects are structural, which is why I am willing to write them at this n.
 
-The benchmark ranked the models. It also turned out to encode a specification of
-how a knowledge graph should behave, and my production path disagreed with it in
-four places.
+The benchmark ranked the models. It also encoded a specification of how a knowledge
+graph should behave, and my production path disagreed with it in four places.
 
 Production was wrong in all four. One section breaks the pattern and it is the one
 worth reading closely.
@@ -14,11 +13,8 @@ worth reading closely.
 
 To grade an answer, a scorer must decide when two names are the same name, when two
 predicates mean the same thing, and what a negated fact is. Production never had to
-state any of that, so it never did.
-
-Mine had been accumulating good decisions for months while the production path had
-not. That is not a happy accident. It is what happens when one side of a system is
-forced to be explicit and the other is not.
+state any of that, so it never did. That is not a happy accident: it is what happens
+when one side of a system is forced to be explicit and the other is not.
 
 ## Three names for one entity
 

@@ -3,11 +3,11 @@
 ROUGH DRAFT. The +0.116 figure below has no interval, and that is stated where it
 appears rather than at the end.
 
-A 10,000 note extraction run finished in 34 minutes. I read that as a fact about
-the hardware and moved on to the next arm.
+A 10,000 note extraction run finished in 34 minutes. I read that as a fact about the
+hardware and moved on.
 
-It should have taken about six hours. The model was not thinking, and it was not
-thinking because of a sentence I had written to make its output easier to parse.
+It should have taken six hours. The model was not thinking, and it was not thinking
+because of a sentence I had written to make its output easier to parse.
 
 ## The clause
 
@@ -28,10 +28,10 @@ I isolated it rather than guessing:
 | rescoped to "the answer itself must be JSON only" | 0/20 |
 | v5, "Reason first if it helps; the answer that follows..." | 20/20 |
 
-Two properties made it hard to see. **Nothing failed:** valid JSON, clean parse, no
-truncation, and an F1 of 0.5947 sitting comfortably among the other models. And
-**E2B does not have the behaviour**, so two arms of one sweep disagreed in a way
-that looked like an ordinary model-size effect.
+Two properties hid it. **Nothing failed:** valid JSON, clean parse, no truncation,
+an F1 of 0.5947 sitting comfortably among the other models. And **E2B does not have
+the behaviour**, so two arms of one sweep disagreed in a way that looked like an
+ordinary model-size effect.
 
 Deleting the sentence is not the fix. Removing it restores reasoning and brings
 back fenced ` ```json ` output on 14 of 20 notes. The clause was doing real work

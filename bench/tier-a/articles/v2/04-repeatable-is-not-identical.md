@@ -3,20 +3,15 @@
 ROUGH DRAFT. The discriminating run for the last mechanism is in flight.
 
 A benchmark arm that takes 44 minutes is one you run once a night. I wanted a
-six-arm ladder over 10,000 notes, which at that rate is 44 hours, so I went
-looking for speed.
+six-arm ladder over 10,000 notes, which at that rate is 44 hours, so I went looking
+for speed.
 
-Every option I found changed the model's output. Working out which changes were
-acceptable turned out to be the useful result, because the rule I started with was
-wrong.
+Every option I found changed the model's output. The rule I was using to judge them
+was wrong, and it took the fastest option to show me.
 
-## Identical to what
+## The question is not whether it matches sequential
 
-The question people ask about a fast configuration is whether it reproduces the
-sequential baseline. That is the wrong question, and it took the 32-slot result to
-show me.
-
-The right question is whether a configuration reproduces **itself**.
+It is whether a configuration reproduces **itself**.
 
 | configuration | speed | matches sequential | repeats itself |
 |---|---:|---:|---|
@@ -100,9 +95,9 @@ target in one forward pass. Batch shape changes, floating-point reduction order
 changes with it, near-ties flip. 26 notes in a hundred, and the same 26 every time.
 
 **Corpus composition.** The one I did not expect. The same note, model, quant,
-process count and prompt produces different text depending on which corpus it was
+process count and prompt gives different text depending on which corpus it was
 embedded in: 529 of 1,001 identical between a 1,001-note run and a 3,002-note run
-that strictly contains it.
+containing it.
 
 The obvious cause fails its own test. Same predecessor, 44.8% churn. Different
 predecessor, 48.3%. The cache holds roughly 38 entries, so what carries is the last

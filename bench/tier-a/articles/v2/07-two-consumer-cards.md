@@ -49,10 +49,10 @@ Thirty-two slots in one process is 4.54x, far beyond anything process isolation
 reaches. It is also not reproducible: two runs of that configuration agree on 63 of
 100 raw completions and 75 of 100 extracted fact sets.
 
-Slots batch requests into a shared forward pass, so one sequence's logits depend on
-which other requests are in flight beside it, and that depends on arrival timing.
-Separate processes have separate contexts and never share a matrix multiply.
-Contention between them changes timing, which changes nothing arithmetic.
+Slots batch requests into a shared forward pass, so a sequence's logits depend on
+which other requests happen to be in flight beside it. Isolated processes do not
+share a matrix multiply, so contention between them costs time and changes no
+arithmetic.
 
 That is why this benchmark runs N single-slot servers rather than one server with N
 slots, and pays roughly half the available speed for it. The corpus is split

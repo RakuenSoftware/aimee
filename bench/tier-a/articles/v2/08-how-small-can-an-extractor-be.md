@@ -4,15 +4,13 @@ ROUGH DRAFT. The full field table lives in the head-to-head piece; this one asks
 only the size question. The original ranking behind it ran on 69 notes, and the
 corpus-backed rebuild has not been done, so read any ordering here as a hypothesis.
 
-If you want a local model to turn a note into structured facts, the first question
-is how much model you have to buy. I measured sixteen, from 230M to 8B.
+If you want a local model to turn a note into structured facts, the first question is
+how much model you have to buy. I measured sixteen, from 230M to 8B.
 
-The answer is smaller than I expected, and the reason the answer is unreliable is
-more interesting than the answer.
+The answer is smaller than I expected, and why it is unreliable is more interesting
+than the answer.
 
-## The wrong number is parameter count
-
-The field does not sort by size. A 2B model and its 4B sibling, where the smaller
+## The field does not sort by size A 2B model and its 4B sibling, where the smaller
 is architecturally a nested submodel of the larger, land within 0.005 F1 of each
 other at 3,002 notes. A 3B model gains **+0.0352** from a quant change, which is
 larger than most of the size gaps I care about.

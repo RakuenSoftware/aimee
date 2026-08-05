@@ -112,14 +112,14 @@ nproc=4 is 30% to 100% faster than nproc=1.
 
 ## Before dividing two numbers, check the denominators are the same thing
 
-That rule would have caught all three attempts. It is not a statistical rule.
+That rule would have caught both wrong answers, and it is not a statistical one.
 
-In each case the data needed to catch the error already existed. The 5.3x needed
-a process count. The sweep needed its own startup column, which it was computing
-and discarding. And when I multiplied a single-stream figure by three to project
-a three-process rate, the correction factor was in the sweep's own output:
-per-stream throughput falls from 359 to 148 tok/s between one process and three,
-on that card, measured that afternoon.
+Each time, the data that would have caught me already existed. The 5.3x needed a
+process count. The sweep needed its own startup column, which it computed and
+discarded. And when I multiplied a single-stream figure by three to project a
+three-process rate, the correction factor was in that sweep's output: per-stream
+throughput falls from 359 to 148 tok/s between one process and three, on that card,
+that afternoon.
 
 ## What to do with it
 

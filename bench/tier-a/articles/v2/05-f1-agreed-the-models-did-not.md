@@ -2,11 +2,10 @@
 
 ROUGH DRAFT.
 
-Every failure below produced a number. Most of them produced a plausible number.
-One produced a rank.
+Every failure below produced a number, most of them plausible. One produced a rank.
 
-If you are ranking local models on one column, this is the piece about what that
-column does not carry.
+If you are ranking local models on one column, this is what that column does not
+carry.
 
 ## Concede the strong version first
 
@@ -35,12 +34,12 @@ A model wrapped its output in a tool-call structure instead of returning the
 schema. The extraction inside was fine. The parser saw nothing it recognised and
 scored near zero.
 
-Read as a ranking, that model is incapable. Read as a run, the harness and the
-model disagreed about the envelope.
+Read as a ranking, that model is incapable. Read as a run, the harness and the model
+disagreed about the envelope.
 
-**The tell:** parse rate collapsing while completion tokens stay normal. A model
-that cannot do the task produces short or empty output. A model in the wrong
-envelope produces full-length output that scores nothing.
+**The tell:** parse rate collapses while completion tokens stay normal. A model that
+cannot do the task produces short or empty output. A model in the wrong envelope
+produces full-length output that scores nothing.
 
 ## Two: the context ran out and every guard said the run was clean
 

@@ -6,18 +6,16 @@ Every wrong answer I published in this project came from an instrument biased in
 the direction I wanted. In five of the six, the data that would have caught it was
 already sitting in my own output. The sixth is worse, and it is last.
 
-That is the finding. Not "measure carefully". The specific, repeatable failure is
-that a benchmark computes more than it prints, and the discarded column is the
-one that would have stopped you.
+That is the finding. Not "measure carefully". The repeatable failure is that a
+benchmark computes more than it prints, and the discarded column is the one that
+would have stopped you.
 
-## The wrong number you are watching is your own harness
+You are watching the model. Sixteen of them, a ladder of quants, an accuracy column.
+What is moving your numbers is a process count, a startup timer, and a threshold you
+borrowed from an unrelated experiment.
 
-You are watching the model. Sixteen of them, a ladder of quants, an accuracy
-column. The thing actually moving your numbers is a process count, a startup
-timer, and a threshold you borrowed from an unrelated experiment.
-
-Six instances follow. Each has a correction beside it, because a defect list
-without fixes is a confession rather than a method.
+Six instances, each with its correction, because a defect list without fixes is a
+confession rather than a method.
 
 ## One: throughput that grew with the variable under test
 

@@ -3,18 +3,16 @@
 ROUGH DRAFT.
 
 I spent most of this project measuring models and most of my mistakes were in the
-corpus. Three of the five worst errors were properties of how the notes were
-assembled rather than of anything a model did.
+corpus. Three of the five worst were properties of how the notes were assembled
+rather than of anything a model did.
 
-A benchmark corpus is not a test set. It is the experiment, and it encodes
-decisions that your results cannot see past.
+A benchmark corpus is not a test set. It is the experiment.
 
-## The wrong number is the model column
+## You read down a ranking and compare models
 
-You read down a ranking and compare models. What decided those numbers is the
-composition of the corpus: what fraction of notes carry no facts at all, which
-relations the ontology defines, and whether one template quietly mislabels a
-relation across a whole stratum.
+What decided those numbers is the composition of the corpus: what fraction of notes
+carry no facts at all, which relations the ontology defines, and whether one
+template quietly mislabels a relation across a whole stratum.
 
 ## A third of my corpus is a test of restraint
 
