@@ -27,6 +27,7 @@ import (
 	"github.com/JBailes/aimee/server-go/modules/roundtable/panel"
 	"github.com/JBailes/aimee/server-go/modules/routing"
 	runtimeweb "github.com/JBailes/aimee/server-go/modules/runtime-web"
+	"github.com/JBailes/aimee/server-go/modules/sandbox"
 	"github.com/JBailes/aimee/server-go/modules/skills"
 	moduletools "github.com/JBailes/aimee/server-go/modules/tools"
 	"github.com/JBailes/aimee/server-go/modules/workspace"
@@ -57,6 +58,19 @@ func roundtableReviewer() (*roundtable.PanelReviewer, error) {
 		return nil, err
 	}
 	return roundtable.NewPanelReviewer(presets, roundtable.NewPlaneDelegates(client))
+}
+
+// sandboxHome resolves the learned store's root the same way the WFE resolves
+// its own: AIMEE_HOME, else the per-user config directory.
+func sandboxHome() string {
+	if home := os.Getenv("AIMEE_HOME"); home != "" {
+		return home
+	}
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		return os.TempDir()
+	}
+	return filepath.Join(userHome, ".config", "aimee")
 }
 
 func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
@@ -158,6 +172,23 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 		config.PrincipalRef = 24
 		config.Stages = []bus.ModuleStage{{EventKind: controlweb.EventAuthorize, StageID: controlweb.StageAuthorize}}
 		config.Handler = controlweb.Handle
+	case "sandbox":
+		config.ModuleName = name
+		config.PrincipalRef = 26
+		config.Stages = []bus.ModuleStage{
+			{EventKind: sandbox.EventObserve, StageID: sandbox.StageObserve},
+			{EventKind: sandbox.EventLoad, StageID: sandbox.StageLoad},
+		}
+		// The learned store lives under AIMEE_HOME. Unlike roundtable's review
+		// stage -- which needs a resource plane that may genuinely be absent --
+		// a home always resolves, so both stages are unconditional and the same
+		// fallback the WFE uses applies here.
+		store, err := sandbox.NewStore(sandboxHome())
+		if err != nil {
+			log.Printf("sandbox stages unavailable: %v", err)
+			return bus.ModuleProcessConfig{}, false
+		}
+		config.Handler = sandbox.NewHandler(store)
 	case "benchmarks":
 		config.ModuleName = name
 		config.PrincipalRef = 25
