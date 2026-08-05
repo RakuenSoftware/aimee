@@ -614,6 +614,7 @@ int accept_generated_embedding(int64_t doc_id, const float *vec, int dim)
    return 0;
 }
 
+
 /* ── Purge-fence write discipline (webchat-project-lifecycle slice 2) ──
  * EVERY project-scoped ingest write runs inside an explicit transaction that
  * takes the project advisory guard and re-checks the generation fence before
@@ -844,6 +845,81 @@ typedef struct
  * LSH near-duplicate handling, chunk insertion, and synchronous-or-async
  * embedding with batched pgvector upserts. Mutates the shared sketches, batch
  * buffer, and stats counters through `c`. */
+/* Embed one chunk, but pay for the round trip ONCE per file.
+ *
+ * On the first chunk of a file this embeds every chunk of that file in a single
+ * memory_embed_texts() call and caches the vectors; later chunks read from the
+ * cache. A file's chunks are already all in memory (c->chunks) and are embedded
+ * back to back, so nothing is held any longer than the loop that follows.
+ *
+ * Falls back to the single-text path whenever the batch cannot be built or the
+ * batch call fails, so a batching problem degrades to the old speed rather than
+ * dropping embeddings.
+ *
+ * Returns the vector dimension, or <= 0 on failure. */
+static int kb_embed_one_batched(kb_build_file_ctx_t *c, int ci, int n_chunks,
+                                const char *embed_text,
+                                float *vec_out)
+{
+   static float *g_batch_vecs;
+   static int g_batch_dim;
+   static int g_batch_n;
+
+   if (ci == 0)
+   {
+      free(g_batch_vecs);
+      g_batch_vecs = NULL;
+      g_batch_dim = 0;
+      g_batch_n = 0;
+
+      if (n_chunks > 1)
+      {
+         char **texts = calloc((size_t)n_chunks, sizeof(*texts));
+         float *vecs = calloc((size_t)n_chunks * EMBED_MAX_DIM, sizeof(*vecs));
+         if (texts && vecs)
+         {
+            int built = 1;
+            for (int i = 0; i < n_chunks && built; i++)
+            {
+               texts[i] = malloc(4096);
+               if (!texts[i])
+               {
+                  built = 0;
+                  break;
+               }
+               kb_async_make_embed_text(c->chunks[i].heading_path, c->chunks[i].content, texts[i],
+                                        4096);
+            }
+            if (built)
+            {
+               int dim = memory_embed_texts((const char *const *)texts, n_chunks, c->effective_cmd,
+                                            EMBED_INPUT_DOCUMENT, vecs, EMBED_MAX_DIM);
+               if (dim > 0)
+               {
+                  g_batch_vecs = vecs;
+                  g_batch_dim = dim;
+                  g_batch_n = n_chunks;
+                  vecs = NULL; /* owned by the cache now */
+               }
+            }
+            for (int i = 0; i < n_chunks; i++)
+               free(texts[i]);
+         }
+         free(texts);
+         free(vecs);
+      }
+   }
+
+   if (g_batch_vecs && ci < g_batch_n && g_batch_dim > 0)
+   {
+      memcpy(vec_out, g_batch_vecs + (size_t)ci * EMBED_MAX_DIM,
+             (size_t)g_batch_dim * sizeof(float));
+      return g_batch_dim;
+   }
+   return memory_embed_text(embed_text, c->effective_cmd, EMBED_INPUT_DOCUMENT, vec_out,
+                            EMBED_MAX_DIM);
+}
+
 static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
 {
    if (fi > 0 && fi % c->kb_progress_every == 0)
@@ -1036,14 +1112,21 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
       }
       if (c->effective_cmd[0])
       {
-         /* Embed heading_path + content */
+         /* Embed heading_path + content.
+          *
+          * One call per chunk is the whole reason a corpus ingest took hours:
+          * the cost here is the round trip, not the model. bekko-a25m is a 25M
+          * parameter embedder that batches hundreds of texts per call, and
+          * memory_embed_texts() -- which memory search already uses to embed a
+          * query and its sub-questions in ONE call -- takes an array. Ingest
+          * kept calling the single-text entry point in a loop, so a ~3000 file
+          * project paid one request per chunk. */
          char embed_text[4096];
          kb_async_make_embed_text(c->chunks[ci].heading_path, c->chunks[ci].content, embed_text,
                                   sizeof(embed_text));
 
          float vec[EMBED_MAX_DIM];
-         int dim = memory_embed_text(embed_text, c->effective_cmd, EMBED_INPUT_DOCUMENT, vec,
-                                     EMBED_MAX_DIM);
+         int dim = kb_embed_one_batched(c, ci, n_chunks, embed_text, vec);
          if (dim > 0)
          {
             accept_generated_embedding(doc_id, vec, dim);
