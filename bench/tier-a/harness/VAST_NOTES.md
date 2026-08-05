@@ -70,6 +70,17 @@ requeued whole** unless the job declares `resumable`, in which case the partial 
 kept and resume narrows the CORPUS to unanswered ids rather than changing the
 client.
 
+**A stray signal to the launching shell tore down the fleet.** The pool is
+started with `nohup setsid ... &`, but when the launching shell was killed -- a
+tool timeout is enough -- the signal reached the whole process group, the pool's
+own SIGTERM handler fired, and it dutifully destroyed every instance it had just
+rented and exited. It looked like a crash. The reaper added to stop orphaned
+rentals had made the pool fragile to exactly the thing that happens most often.
+The pool now calls `os.setsid()` itself at startup and ignores SIGHUP, so
+group-directed signals cannot reach it while a deliberate `kill <pid>` still can:
+reap on purpose, survive by accident. It also writes a pidfile, because `pgrep`
+has repeatedly matched the caller's own command line.
+
 ## Not fixed. Do these before the next campaign.
 
 **1. Cap failures per JOB, not per host.** Defect 41 states the rule and nothing
