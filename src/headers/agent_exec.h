@@ -201,7 +201,16 @@ char *agent_build_exec_context(const agent_t *agent, const agent_network_t *netw
                                const char *custom_prompt);
 /* Opening instruction for a task type. A review must be told to answer; an
  * execution agent must be told to act. Pure so the choice is testable. */
+/* The task a delegate is actually running. A declared role wins over guessing
+ * from prose, which cannot be trusted for a review: the panel prompt contains
+ * bug-fix vocabulary and the classifier scans its keyword table in order. */
+task_type_t agent_task_type_for_role(const char *role, const char *prompt);
+
 const char *agent_exec_instructions(task_type_t task_type);
+
+char *agent_build_exec_context_for_role(const agent_t *agent, const agent_network_t *network,
+                                        const char *role, const char *custom_prompt,
+                                        int skip_kb_context);
 
 char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *network,
                                   const char *custom_prompt, int skip_kb_context);

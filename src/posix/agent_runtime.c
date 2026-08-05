@@ -454,8 +454,8 @@ native_provider_http:
 
    /* Build context-rich system prompt */
    int current_code_only = agent_tools_role_current_code_only(role);
-   char *assembled_sys = agent_build_exec_context_ex(
-       agent, has_ephemeral_ssh ? &eff_network : (network ? network : NULL), system_prompt,
+   char *assembled_sys = agent_build_exec_context_for_role(
+       agent, has_ephemeral_ssh ? &eff_network : (network ? network : NULL), role, system_prompt,
        current_code_only);
    const char *sys = assembled_sys ? assembled_sys : system_prompt;
    if (!sys || !sys[0])

@@ -247,14 +247,35 @@ static void test_classify_feature(void)
    assert(task_type_classify("build webhook support") == TASK_TYPE_FEATURE);
 }
 
-/* The roundtable review prompt must classify as a review, because that is what
- * selects instructions telling the agent to answer rather than to act. */
-static void test_roundtable_review_prompt_classifies_as_review(void)
+/* The real panel prompt, abridged but keeping the vocabulary that matters: it
+ * contains bug-fix words ("fail closed", "fixed") alongside "Review". The
+ * keyword table is scanned in its own order with bug-fix terms first, so
+ * classifying this prose calls it a bug fix -- which is exactly why every
+ * roundtable seat was handed execution-agent instructions and died without
+ * emitting its verdict. */
+static const char *panel_prompt(void)
 {
-   const char *panel_prompt =
-       "Review the complete artifact against the complete original request.\n"
-       "RUN ID JSON: \"wi-1\"\nARTIFACT STAGE: frozen_diff\n";
-   assert(task_type_classify(panel_prompt) == TASK_TYPE_REVIEW);
+   return "Review the complete artifact against the complete original request.\n"
+          "ARTIFACT STAGE: frozen_diff\n"
+          "This frozen diff is the implemented deliverable. Required edits that are "
+          "absent are drift and must fail closed. A requirement of the original request "
+          "that is unmet must be fixed before this passes.\n";
+}
+
+static void test_declared_role_beats_classifying_the_prose(void)
+{
+   /* Prose classification gets this wrong, and that is the point. */
+   assert(task_type_classify(panel_prompt()) != TASK_TYPE_REVIEW);
+
+   /* The declared role is authoritative. */
+   assert(agent_task_type_for_role("review", panel_prompt()) == TASK_TYPE_REVIEW);
+   assert(strstr(agent_exec_instructions(agent_task_type_for_role("review", panel_prompt())),
+                 "final message IS the deliverable"));
+
+   /* Without a role, classification still decides, so other callers keep their
+    * existing behaviour. */
+   assert(agent_task_type_for_role(NULL, "review the PR changes") == TASK_TYPE_REVIEW);
+   assert(agent_task_type_for_role("code", "implement the endpoint") != TASK_TYPE_REVIEW);
 }
 
 /* A reviewer's deliverable is its final message. The execution-agent
@@ -464,7 +485,7 @@ int main(void)
    test_classify_refactor();
    test_classify_feature();
    test_classify_review();
-   test_roundtable_review_prompt_classifies_as_review();
+   test_declared_role_beats_classifying_the_prose();
    test_review_instructions_do_not_forbid_a_final_answer();
    test_classify_test();
    test_classify_general();

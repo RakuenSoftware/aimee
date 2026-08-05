@@ -1452,6 +1452,19 @@ static const char *agent_context_cwd(char *buf, size_t buf_len)
  * calling tools and is killed with "max turns exhausted without final
  * response". Tools stay available -- a reviewer may need evidence -- but
  * gathering it is optional and answering is mandatory. */
+task_type_t agent_task_type_for_role(const char *role, const char *prompt)
+{
+   /* A caller that declares its role has told us the task; classifying the
+    * prose as well can only disagree with it. It did: the roundtable panel
+    * prompt says "must fail closed" and "must be fixed", and the keyword table
+    * is scanned in its own order with bug-fix terms ahead of "review", so every
+    * review classified as a bug fix and was handed execution-agent
+    * instructions. */
+   if (role && role[0] && strcmp(role, "review") == 0)
+      return TASK_TYPE_REVIEW;
+   return task_type_classify(prompt);
+}
+
 const char *agent_exec_instructions(task_type_t task_type)
 {
    if (task_type == TASK_TYPE_REVIEW)
@@ -1472,8 +1485,14 @@ const char *agent_exec_instructions(task_type_t task_type)
 char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *network,
                                   const char *custom_prompt, int skip_kb_context)
 {
-   /* Classify the task type from the prompt */
-   task_type_t task_type = task_type_classify(custom_prompt);
+   return agent_build_exec_context_for_role(agent, network, NULL, custom_prompt, skip_kb_context);
+}
+
+char *agent_build_exec_context_for_role(const agent_t *agent, const agent_network_t *network,
+                                        const char *role, const char *custom_prompt,
+                                        int skip_kb_context)
+{
+   task_type_t task_type = agent_task_type_for_role(role, custom_prompt);
    if (task_type != TASK_TYPE_GENERAL)
       aimee_log(LOG_DEBUG, "agent_context", "context assembly: task_type=%s",
                 task_type_name(task_type));
