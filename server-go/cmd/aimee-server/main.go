@@ -20,6 +20,7 @@ import (
 	"github.com/JBailes/aimee/server-go/internal/db1"
 	"github.com/JBailes/aimee/server-go/internal/engine"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	roundtablemod "github.com/JBailes/aimee/server-go/modules/roundtable"
 )
 
 func main() {
@@ -143,6 +144,12 @@ func main() {
 			if reviewerErr != nil {
 				log.Printf("roundtable reviews unavailable: %v", reviewerErr)
 			} else {
+				// Say so on success too. A control plane that attached and one that
+				// silently did not look identical from outside until a gate hangs
+				// waiting for a reply that was never routed.
+				log.Printf("roundtable reviews over the event bus (socket=%s principal=%d/%d kind=%d)",
+					*moduleBusSocket, engine.BusPrincipalClass, engine.WFEBusPrincipalRef,
+					roundtablemod.EventReview)
 				nativeRunner.SetRoundtableReviewer(reviewer)
 			}
 		} else {
