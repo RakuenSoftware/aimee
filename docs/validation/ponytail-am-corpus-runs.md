@@ -35,10 +35,15 @@ Separating tasks: `am_270b3483d5` (addon only), `am_67e9b0449a` (both ponytail
 arms, not baseline). All-fail: `am_b84c9294aa`, `am_1e7cb3da16`,
 `am_12b43fa38e`, `am_842ff35656`.
 
-`am_a7f183fd10` produced no cells: its hidden test is a full C build
+`am_a7f183fd10` initially produced no cells: its hidden test is a full C build
 (`PT_BUILD_TIMEOUT=2400`) and the harness graded with `PT_GRADE_TIMEOUT`
 defaulting to 30s, so every arm was killed mid-grade and recorded a dead cell
-rather than a result. Re-running with `PT_GRADE_TIMEOUT=2700`.
+rather than a result. Re-run with `PT_GRADE_TIMEOUT=2700`: all three arms
+complete and PASS (wall 148-221s). The patches never hung; the grade budget was
+simply smaller than the task's build. Any build-graded task needs this raised.
+
+With that task included the non-aimee baseline is 14/14 tasks:
+**baseline 8/14, ponytail-instructions 9/14, ponytail-addon 10/14.**
 
 ### R2 — aimee arm, n=1 (2026-08-05)
 
