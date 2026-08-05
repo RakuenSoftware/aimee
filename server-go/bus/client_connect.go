@@ -34,6 +34,9 @@ func ConnectClient(ctx context.Context, socketPath string, principalClass, princ
 		if err == nil {
 			client, attachErr := AttachAs(fd, principalClass, principalRef)
 			unix.Close(fd)
+			if attachErr == nil {
+				keepAlive(ctx, client, clientHeartbeatInterval)
+			}
 			return client, attachErr
 		}
 		unix.Close(fd)
@@ -46,4 +49,34 @@ func ConnectClient(ctx context.Context, socketPath string, principalClass, princ
 		case <-time.After(moduleConnectRetry):
 		}
 	}
+}
+
+// heartbeater is the one thing keepAlive needs, so the liveness contract can be
+// exercised without a live host.
+type heartbeater interface{ Heartbeat(now uint64) }
+
+// keepAlive advances this client's heartbeat until ctx ends.
+//
+// The host reaps a slot whose heartbeat stops advancing, which is how it
+// notices a client that died. A serving module gets this for free because its
+// poll loop heartbeats every pass, but a caller is idle between calls -- so it
+// was reaped shortly after attaching, and every later request was dropped by a
+// host that no longer had a slot to route from. Nothing reported that: the
+// caller sat waiting for a reply to a request nobody received, and only its own
+// deadline ended the call.
+func keepAlive(ctx context.Context, client heartbeater, interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if now := monotonicNowNS(); now != 0 {
+					client.Heartbeat(now)
+				}
+			}
+		}
+	}()
 }

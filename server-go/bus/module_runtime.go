@@ -14,6 +14,9 @@ const (
 	moduleMaxInFlight  = 16
 	moduleIdle         = time.Millisecond
 	moduleConnectRetry = 100 * time.Millisecond
+	// Well inside the host's 30s stale window, so a client stays admitted
+	// across an idle stretch without heartbeating hot.
+	clientHeartbeatInterval = 5 * time.Second
 )
 
 var (
