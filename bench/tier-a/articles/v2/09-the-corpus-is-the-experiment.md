@@ -1,0 +1,128 @@
+# The corpus decides what your benchmark can find
+
+ROUGH DRAFT.
+
+I spent most of this project measuring models and most of my mistakes were in the
+corpus. Three of the five worst errors were properties of how the notes were
+assembled rather than of anything a model did.
+
+A benchmark corpus is not a test set. It is the experiment, and it encodes
+decisions that your results cannot see past.
+
+## The wrong number is the model column
+
+You read down a ranking and compare models. What decided those numbers is the
+composition of the corpus: what fraction of notes carry no facts at all, which
+relations the ontology defines, and whether one template quietly mislabels a
+relation across a whole stratum.
+
+## A third of my corpus is a test of restraint
+
+10,000 notes, ten categories, of which three carry no facts by construction:
+
+| category | n |
+|---|---:|
+| transient | 1391 |
+| negation | 1318 |
+| ambiguous | 506 |
+| **total factless** | **3215 (32.1%)** |
+
+The correct answer on those is nothing. That is a deliberate and good design
+choice: a fact extractor that cannot decline is worse than useless downstream,
+because every invented edge has to be caught by a write gate later.
+
+It also means a third of the corpus is scored entirely through false positives.
+Zeroing them is worth **+0.040 to +0.053 F1** across six arms, which is larger
+than every model, quant, and decoding effect in this project combined.
+
+**Concede the version that damages me:** I first published this as a hole in the
+metric, claiming those rows could only cost points and correct restraint was worth
+nothing. Both halves were wrong. The rows are scored properly, and my own scorer
+already emitted `null` rather than 0.0 for those categories with a comment
+explaining why printing 0.0 inverts the meaning. I had reintroduced the bug it was
+written to avoid.
+
+The lesson survived the retraction with a different shape. Your corpus composition
+sets the ceiling on what any single number can express, and if a third of it tests
+one behaviour you should report that behaviour separately.
+
+## Tiers only help if a subset is a run, and it is not
+
+I built three tiers: 1,001 notes, 3,002, and 10,000, each a strict subset of the
+next. The intent was that a cheap arm could be compared against an expensive one,
+and that a 10,000-note run could be scored down to a smaller tier for free.
+
+That does not hold. The same 1,001 notes, same model, same quant, same process
+count, same prompt, score 0.6406 run alone and 0.6327 inside the 3,002-note
+corpus. **529 of 1001 completions are byte-identical**, so 47% of outputs differ
+on identical inputs.
+
+The prompt cache holds roughly 38 entries, so what carries into a request is the
+last 38 notes rather than the last one, and almost every note has a different
+38-note history between the two corpora. That predicts uniform churn, and uniform
+churn is what appears. The obvious alternative, the immediately preceding note,
+fails its own test: 44.8% churn with the same predecessor against 48.3% with a
+different one.
+
+The F1 movement is inside the interval, so nothing in my rankings changed. It was
+luck rather than design, and the fix is cheap: disable the prompt cache for any
+arm you intend to compare across corpora. I recorded that as unaffordable for two
+days and then measured it at 38 minutes against 41.
+
+## The ontology did not cover its own gold
+
+19% of the predicates appearing in my gold data were not defined by the ontology
+the models were prompted with.
+
+A model producing a correct relation the ontology does not name scores it as a
+miss. Expanding the ontology moved the novel-predicate rate from 23.5% to 10.0%,
+on n=223 from an interrupted run, which is why that figure is in a note rather
+than in a conclusion.
+
+## One template mislabelled a relation and produced a bimodal score
+
+A corpus template phrased a hostname fact as "runs on", which the scorer then
+graded against a different relation. The tell was a score distribution inside one
+relation with two peaks and nothing between them.
+
+I found it by noticing the bimodality. Nothing has audited the other templates the
+same way, and I have no reason to think this one was unique.
+
+## The corpus cannot be regenerated
+
+The inventory and synthesis inputs were not committed. The corpus exists as a
+binary artifact and cannot be rebuilt from source.
+
+That is unfixable retroactively. Every result in this project is conditional on a
+file I cannot reproduce, and the only honest options are to version it as a binary
+artifact and say so, or to rebuild from scratch and lose comparability with
+everything already banked.
+
+## What to do
+
+**Commit the generator inputs before the first run.** Not after. I lost this and
+cannot get it back.
+
+**Stratify, and report per stratum.** My ten categories are the only reason I can
+tell a real null from two effects cancelling: on one question the aggregate null
+was +0.24 on one subset and −0.02 on another.
+
+**Check your ontology covers your own gold** before you rank anything against it.
+A predicate you did not define is a model penalty you did not intend.
+
+**Look for bimodality inside a single relation.** That is what a mislabelled
+template looks like from the outside.
+
+**Turn the cache off before comparing across corpora**, or accept that a subset is
+a different measurement from a run.
+
+## The limit I cannot close from inside
+
+Everything here ran on one corpus from one pipeline with one generator model. Any
+bias in that generator is shared by every arm, so a quant direction and a corpus
+artifact are indistinguishable to me.
+
+The test is a second corpus built by a different pipeline and generator, with the
+same ladders re-run. That is a corpus-generation project rather than a run, and it
+is the largest open item in this work. Until it exists, every conclusion in this
+series carries it.
