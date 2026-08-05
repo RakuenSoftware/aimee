@@ -46,21 +46,30 @@ def api(path, method="GET", body=None, params=None):
         return json.loads(r.read())
 
 
-def find_offers(gpu, maxprice, n):
+def find_offers(gpu, maxprice, n, interruptible=False):
     q = {"rentable": {"eq": True}, "num_gpus": {"eq": 1},
          "gpu_name": {"in": [gpu]}, "disk_space": {"gte": 60},
          "inet_down": {"gte": 400}, "reliability2": {"gte": 0.97},
          "dph_total": {"lte": maxprice},
+         "type": "bid" if interruptible else "on-demand",
          "order": [["dph_total", "asc"]], "limit": max(n * 4, 20)}
     return api("bundles/", params={"q": json.dumps(q)}).get("offers", [])
 
 
-def launch(offer_id, repo, ctx, cache_ram):
+def launch(offer_id, repo, ctx, cache_ram, bid=None):
+    """bid=None rents on-demand; a float rents interruptible at that price.
+
+    Bid ABOVE min_bid rather than at it. Bidding the floor is what gets an
+    instance outbid first, and a preemption costs the whole arm: an arm cannot be
+    resumed on another machine without becoming a blend of two configurations,
+    which is the hazard defect 40 and article 04 are about."""
     args = ["-hf", repo, "--host", "0.0.0.0", "--port", "8080",
             "-c", str(ctx), "-np", "1", "--cache-ram", str(cache_ram),
             "--no-webui", "--no-mmproj", "-ngl", "99"]
     body = {"client_id": "me", "image": IMAGE, "disk": 60, "runtype": "args",
             "env": {"-p 8080:8080": "1"}, "args": args}
+    if bid is not None:
+        body["price"] = round(bid, 4)
     r = api("asks/%d/" % offer_id, method="PUT", body=body)
     if not r.get("success"):
         raise RuntimeError("launch refused: %s" % json.dumps(r)[:200])
@@ -109,11 +118,44 @@ def verify(ep, repo, want_fam=None):
     return loaded
 
 
+def alive(cid):
+    """False once the instance is gone or exited. A preempted interruptible
+    instance disappears mid-arm and the client would otherwise hang on a dead
+    endpoint until its 3600s timeout."""
+    try:
+        d = (api("instances/%d/" % cid).get("instances")) or {}
+    except Exception:
+        return True          # transient API error is not evidence of preemption
+    return d.get("actual_status") not in ("exited", None) or bool(d.get("ports"))
+
+
+def run_client(cmd, cid, log, label):
+    """Run the client, watching for preemption. Returns (ok, preempted)."""
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    preempted = False
+    while proc.poll() is None:
+        for _ in range(6):
+            time.sleep(10)
+            if proc.poll() is not None:
+                break
+        if proc.poll() is None and not alive(cid):
+            log("    %s: instance %s vanished mid-arm (preempted); killing client" % (label, cid))
+            preempted = True
+            proc.kill()
+            break
+    out, err = proc.communicate()
+    return (proc.returncode == 0 and not preempted), preempted
+
+
 def destroy(cid):
     try:
         api("instances/%d/" % cid, method="DELETE", body={})
     except Exception as e:
         print("  WARN could not destroy %s: %s" % (cid, e), file=sys.stderr)
+
+
+class Preempted(Exception):
+    pass
 
 
 def run_arm(job, gpu, maxprice, outdir, log):
@@ -135,12 +177,17 @@ def run_arm(job, gpu, maxprice, outdir, log):
     cid = None
     t0 = time.time()
     try:
-        offers = find_offers(gpu, maxprice, 1)
+        offers = find_offers(gpu, maxprice, 1, interruptible=job.get("_bid", False))
         if not offers:
             log("FAIL %s: no offer under %.3f" % (label, maxprice)); return
         ep = None
         for off in offers[:3]:          # re-place on a slow puller, do not wait it out
-            cid = launch(off["id"], repo, job.get("ctx", 8192), job.get("cache_ram", 1024))
+            bid = None
+            if job.get("_bid"):
+                # 35% over the floor: enough to survive ordinary competition and
+                # still far under on-demand.
+                bid = max(off.get("min_bid") or off["dph_total"], 0.005) * 1.35
+            cid = launch(off["id"], repo, job.get("ctx", 8192), job.get("cache_ram", 1024), bid)
             log("--- %s on %s %s $%.3f/hr contract %s" % (label, gpu, off["id"], off["dph_total"], cid))
             try:
                 ep = endpoint(cid)
@@ -165,9 +212,18 @@ def run_arm(job, gpu, maxprice, outdir, log):
                    "--max-tokens", str(job.get("max_tokens", 8192)),
                    "--prompt-version", v,
                    "--concurrency", "1"] + job.get("extra", [])
-            r = subprocess.run(cmd, capture_output=True, text=True)
-            if r.returncode != 0:
-                log("FAIL %s/%s rc=%d: %s" % (label, v, r.returncode, r.stderr[-250:])); continue
+            ok, preempted = run_client(cmd, cid, log, "%s/%s" % (label, v))
+            if not ok:
+                # A partial arm is never kept. run_llamacpp.py opens its output
+                # with "w" so a rerun truncates anyway, but leaving a short file
+                # on disk invites a later reader to score it as if it were an arm.
+                if os.path.exists(pred):
+                    os.remove(pred)
+                    log("    discarded partial %s" % os.path.basename(pred))
+                log("FAIL %s/%s%s" % (label, v, " (preempted)" if preempted else ""))
+                if preempted:
+                    raise Preempted(v)
+                continue
             rows = [json.loads(l) for l in open(pred)]
             reasoned = sum(1 for x in rows if (x.get("reasoning_chars") or 0) > 0)
             pk = sum(1 for x in rows if x.get("parse_ok"))
@@ -175,6 +231,11 @@ def run_arm(job, gpu, maxprice, outdir, log):
                 label, v, len(rows), reasoned, len(rows), pk))
         cost = off["dph_total"] * (time.time() - t0) / 3600.0
         log("DONE %s wall=%dm cost=$%.3f" % (label, (time.time() - t0) / 60, cost))
+    except Preempted:
+        log("REQUEUE %s after preemption" % label)
+        if cid:
+            destroy(cid)
+        return "requeue"
     except Exception as e:
         log("FAIL %s: %s" % (label, e))
     finally:
@@ -189,6 +250,12 @@ def main():
     ap.add_argument("--gpu", default="RTX 3090")
     ap.add_argument("--max-price", type=float, default=0.14)
     ap.add_argument("--parallel", type=int, default=4)
+    ap.add_argument("--interruptible", action="store_true",
+                    help="rent by bid. Roughly 5x cheaper on this fleet. An arm "
+                         "that is preempted is DISCARDED and requeued whole, "
+                         "never resumed, because a resumed arm would blend two "
+                         "configurations.")
+    ap.add_argument("--max-retries", type=int, default=2)
     a = ap.parse_args()
     if not KEY:
         print("VAST_API_KEY is not set", file=sys.stderr); return 2
@@ -203,6 +270,9 @@ def main():
             print(line); logf.write(line + "\n"); logf.flush()
 
     jobs = json.load(open(a.jobs))
+    for j in jobs:
+        j["_bid"] = a.interruptible
+        j["_tries"] = 0
     log("=== %d arms, %s, up to %d at once, cap $%.3f/hr each"
         % (len(jobs), a.gpu, a.parallel, a.max_price))
     q = list(jobs)
@@ -213,7 +283,11 @@ def main():
             with qlock:
                 if not q: return
                 job = q.pop(0)
-            run_arm(job, a.gpu, a.max_price, outdir, log)
+            r = run_arm(job, a.gpu, a.max_price, outdir, log)
+            if r == "requeue" and job["_tries"] < a.max_retries:
+                job["_tries"] += 1
+                with qlock:
+                    q.append(job)
 
     ts = [threading.Thread(target=worker) for _ in range(min(a.parallel, len(jobs)))]
     for t in ts: t.start()
