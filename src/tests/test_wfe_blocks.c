@@ -8,6 +8,9 @@
 
 #include "wfe_blocks.h"
 #include "wfe_iface.h"
+#include "wfe_store.h"
+
+int db1_init(const char *path);
 
 static int sh(const char *cmd)
 {
@@ -37,6 +40,7 @@ static int git_head(const char *dir, char out[64])
 int main(void)
 {
    printf("wfe-blocks: ");
+   assert(db1_init(":memory:") == 0);
 
    /* --- default executors registered for every non-gate block --- */
    wfe_reset_block_executors();
@@ -140,30 +144,37 @@ int main(void)
                      "printf 'from mine\\n' > doc.md && git add -A && git commit -q -m mine",
                      sdir, cut);
             assert(sh(cmd) == 0);
-            assert(wfe_slice_recreates_base_path(sdir, "feat", cut, clash, sizeof clash) == 1);
-            assert(strcmp(clash, "doc.md") == 0); /* names the colliding path */
+            assert(db1_work_item_create("slice0", "repo", "p0", "build", "", "pr", "autonomous") == 0);
+            assert(db1_work_item_create("mine", "repo", "p1", "build", "", "freeze", "autonomous") == 0);
+            assert(db1_work_item_set_parent("slice0", "parent") == 0);
+            assert(db1_work_item_set_parent("mine", "parent") == 0);
+            assert(db1_work_item_set_stage("slice0", "after_freeze", cut) == 0);
+            assert(db1_work_item_set_pr_ref("slice0", "feat") == 0);
+            char sibling[80];
+            assert(wfe_slice_conflicts_with_frozen_sibling("mine", sdir, cut, "HEAD", clash,
+                                                           sizeof clash, sibling, sizeof sibling) == 1);
+            assert(strcmp(clash, "doc.md") == 0);
+            assert(strcmp(sibling, "slice0") == 0);
 
-            /* IDENTICAL content is not a conflict: git merges that add/add
-             * cleanly, so flagging it would reject work that would land. */
             snprintf(cmd, sizeof cmd,
-                     "cd %s && git checkout -q -b same %s && printf 'from slice0\\n' > doc.md && "
+                     "cd %s && git checkout -q -b same %s && printf 'from slice0\n' > doc.md && "
                      "git add -A && git commit -q -m same",
                      sdir, cut);
             assert(sh(cmd) == 0);
-            assert(wfe_slice_recreates_base_path(sdir, "feat", cut, clash, sizeof clash) == 0);
+            assert(wfe_slice_conflicts_with_frozen_sibling("mine", sdir, cut, "HEAD", clash,
+                                                           sizeof clash, sibling, sizeof sibling) == 0);
 
-            /* A file only WE create (absent on the base ref) is not a collision. */
             snprintf(cmd, sizeof cmd,
-                     "cd %s && git checkout -q -b solo %s && printf 'only mine\\n' > solo.md && "
-                     "git add -A && git commit -q -m solo",
+                     "cd %s && git checkout -q feat && printf 'base edit\n' >> seed.txt && "
+                     "git add -A && git commit -q -m base-edit && git checkout -q -b edit %s && "
+                     "printf 'mine edit\n' >> seed.txt && git add -A && git commit -q -m edit",
                      sdir, cut);
             assert(sh(cmd) == 0);
-            assert(wfe_slice_recreates_base_path(sdir, "feat", cut, clash, sizeof clash) == 0);
+            assert(wfe_slice_conflicts_with_frozen_sibling("mine", sdir, cut, "HEAD", clash,
+                                                           sizeof clash, sibling, sizeof sibling) == 0);
 
-            /* Bad args / unresolvable refs fail SAFE (0), never a false block. */
-            assert(wfe_slice_recreates_base_path(NULL, "feat", cut, clash, sizeof clash) == 0);
-            assert(wfe_slice_recreates_base_path(sdir, "", cut, clash, sizeof clash) == 0);
-            assert(wfe_slice_recreates_base_path(sdir, "feat", "", clash, sizeof clash) == 0);
+            assert(wfe_slice_conflicts_with_frozen_sibling(NULL, sdir, cut, "HEAD", clash,
+                                                           sizeof clash, sibling, sizeof sibling) == 0);
          }
       }
    }

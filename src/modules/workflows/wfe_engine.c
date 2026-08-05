@@ -418,7 +418,8 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
          break; /* terminal-reject: reason "failed", detail "" (inert) */
       }
       WFE_CKW(db1_work_item_set_pause(work_item_id, reason, node->id));
-      db1_lifecycle_event_add(work_item_id, node->id, "failed", "engine", detail, "", r.cost_usd);
+      db1_lifecycle_event_add(work_item_id, node->id, "failed", "engine",
+                              r.failure_detail[0] ? r.failure_detail : detail, "", r.cost_usd);
    }
    else
    {

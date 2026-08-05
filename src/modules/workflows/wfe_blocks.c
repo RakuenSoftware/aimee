@@ -1256,41 +1256,41 @@ static wfe_step_result_t exec_source_archive(wfe_ctx *ctx, const wfe_node_t *nod
    return wfe_step_advanced(handle, head, 0.0);
 }
 
-/* Does this slice CREATE a path that already exists on `base_ref`, with
- * different content? That is an add/add conflict waiting to happen at merge.
- *
- * Slices of one work item are cut from the feature branch at the same instant
- * and merged one at a time. When two of them each *create* the same file — the
- * normal shape when the deliverable is a single document — the first merges and
- * every later one hits `add/add`: two independently authored versions with no
- * common ancestor for the content. Nothing mechanical resolves that; a rebase
- * reproduces it exactly. Left undetected it surfaces only at merge, as a bare
- * forge 400, after every slice has paid its full implementation cost.
- *
- * Checked against the CURRENT feature head rather than against sibling slices,
- * which is both simpler and race-free: there is no shared mutable state to
- * serialise, only a read of a branch that already reflects whatever has merged.
- * The trade-off is that it fires from the second colliding slice onward, not on
- * the first — the first one is not yet a collision.
- *
- * Identical content is NOT flagged: git merges an add/add cleanly when both
- * sides added the same bytes, so failing it would reject work that would land.
- *
- * Returns 1 and fills `path_out` when a diverging collision exists, else 0.
- * Fails SAFE: any git error returns 0, leaving today's behaviour (surface at
- * merge) rather than failing a slice on a command we could not run. */
-int wfe_slice_recreates_base_path(const char *workdir, const char *base_ref, const char *base_sha,
-                                  char *path_out, size_t path_cap)
+static int git_blob_id(const char *workdir, const char *spec, char out[80])
+{
+   out[0] = '\0';
+   const char *argv[] = {"git", "-C", workdir, "rev-parse", "--verify", "-q", spec, NULL};
+   char *o = NULL;
+   if (git_capture(argv, &o) != 0 || !o || !o[0])
+   {
+      free(o);
+      return 0;
+   }
+   chomp(o);
+   snprintf(out, 80, "%s", o);
+   free(o);
+   return out[0] ? 1 : 0;
+}
+
+int wfe_slice_conflicts_with_frozen_sibling(const char *work_item_id, const char *workdir,
+                                            const char *base_sha, const char *head_sha,
+                                            char *path_out, size_t path_cap,
+                                            char *sibling_out, size_t sibling_cap)
 {
    if (path_out && path_cap)
       path_out[0] = '\0';
-   if (!workdir || !workdir[0] || !base_ref || !base_ref[0] || !base_sha || !base_sha[0])
+   if (sibling_out && sibling_cap)
+      sibling_out[0] = '\0';
+   if (!work_item_id || !work_item_id[0] || !workdir || !workdir[0] || !base_sha || !base_sha[0] ||
+       !head_sha || !head_sha[0])
       return 0;
 
-   /* Paths this slice ADDED relative to where it was cut. -z keeps paths with
-    * spaces/specials unambiguous (no core.quotePath quoting). */
+   db1_work_item_t self;
+   if (db1_work_item_get(work_item_id, &self) != 1 || !self.parent_id[0])
+      return 0;
+
    const char *argv[] = {"git",    "-C",   workdir, "diff", "--name-only", "-z", "--diff-filter=A",
-                         base_sha, "HEAD", NULL};
+                         base_sha, head_sha, NULL};
    char *added = NULL;
    if (git_capture(argv, &added) != 0 || !added)
    {
@@ -1298,45 +1298,50 @@ int wfe_slice_recreates_base_path(const char *workdir, const char *base_ref, con
       return 0;
    }
 
-   int found = 0;
-   for (const char *p = added; *p && !found; p += strlen(p) + 1)
+   db1_work_item_t *siblings = NULL;
+   int ns = db1_work_item_list_by_parent(self.parent_id, &siblings);
+   if (ns < 0)
    {
-      char ours[80] = "", theirs[80] = "";
-      char spec_ours[1200], spec_theirs[1200];
-      snprintf(spec_ours, sizeof spec_ours, "HEAD:%s", p);
-      snprintf(spec_theirs, sizeof spec_theirs, "%s:%s", base_ref, p);
+      free(added);
+      return 0;
+   }
 
-      /* Absent on the base ref -> no collision; this slice is the only author. */
-      const char *tv[] = {"git", "-C", workdir, "rev-parse", "--verify", "-q", spec_theirs, NULL};
-      char *t = NULL;
-      if (git_capture(tv, &t) != 0 || !t || !t[0])
-      {
-         free(t);
+   int found = 0;
+   for (const char *path = added; *path && !found; path += strlen(path) + 1)
+   {
+      char base_spec[1200], base_blob[80];
+      snprintf(base_spec, sizeof base_spec, "%s:%s", base_sha, path);
+      if (git_blob_id(workdir, base_spec, base_blob))
          continue;
-      }
-      snprintf(theirs, sizeof theirs, "%s", t);
-      chomp(theirs);
-      free(t);
 
-      const char *ov[] = {"git", "-C", workdir, "rev-parse", "--verify", "-q", spec_ours, NULL};
-      char *o = NULL;
-      if (git_capture(ov, &o) != 0 || !o || !o[0])
-      {
-         free(o);
+      char ours_spec[1200], ours_blob[80];
+      snprintf(ours_spec, sizeof ours_spec, "%s:%s", head_sha, path);
+      if (!git_blob_id(workdir, ours_spec, ours_blob))
          continue;
-      }
-      snprintf(ours, sizeof ours, "%s", o);
-      chomp(ours);
-      free(o);
 
-      /* Same blob on both sides merges cleanly — only divergence conflicts. */
-      if (ours[0] && theirs[0] && strcmp(ours, theirs) != 0)
+      for (int i = 0; i < ns && !found; i++)
       {
-         if (path_out && path_cap)
-            snprintf(path_out, path_cap, "%s", p);
-         found = 1;
+         db1_work_item_t *sib = &siblings[i];
+         if (strcmp(sib->work_item_id, work_item_id) == 0 || strcmp(sib->state, "active") != 0 ||
+             strcmp(sib->current_stage, self.current_stage) == 0 || strcmp(sib->content_hash, base_sha) != 0 ||
+             !sib->pr_ref[0])
+            continue;
+         char sib_spec[1200], sib_blob[80];
+         snprintf(sib_spec, sizeof sib_spec, "%s:%s", sib->pr_ref, path);
+         if (!git_blob_id(workdir, sib_spec, sib_blob))
+            continue;
+         if (strcmp(ours_blob, sib_blob) != 0)
+         {
+            if (path_out && path_cap)
+               snprintf(path_out, path_cap, "%s", path);
+            if (sibling_out && sibling_cap)
+               snprintf(sibling_out, sibling_cap, "%s", sib->work_item_id);
+            found = 1;
+         }
       }
    }
+
+   free(siblings);
    free(added);
    return found;
 }
@@ -1352,32 +1357,14 @@ static wfe_step_result_t exec_freeze(wfe_ctx *ctx, const wfe_node_t *node)
        0)
       return wfe_step_failed();
 
-   /* Fail now, not at merge, if this slice re-creates a file a sibling already
-    * landed on the feature branch with different content. That is an add/add
-    * conflict: no rebase or retry resolves it, so letting it reach merge only
-    * spends the rest of the pipeline to arrive at an unwinnable merge. Naming
-    * the path here is the difference between an actionable failure and the bare
-    * forge 400 it would otherwise become. */
-   if (base_branch && base_branch[0])
+   char clash[1024], sibling[80];
+   if (wfe_slice_conflicts_with_frozen_sibling(wfe_ctx_work_item(ctx), wd, base, head, clash,
+                                              sizeof clash, sibling, sizeof sibling))
    {
-      char clash[1024];
-      if (wfe_slice_recreates_base_path(wd, base_branch, base, clash, sizeof clash))
-      {
-         /* PERMANENT, not TRANSIENT: re-running the slice produces another
-          * independently authored version of the same file, which collides the
-          * same way. There is no new input that changes the outcome, so the
-          * taxonomy's "never auto-retry without new input" rule applies at its
-          * strongest here.
-          *
-          * The colliding path is known (`clash`) but not reported: this block
-          * interface carries no message field, by design — a step speaks only
-          * through wfe_step_result_t. Surfacing it needs that struct widened,
-          * which is a broader change than this fix; until then the operator sees
-          * a permanent freeze failure rather than the path. Still a strict
-          * improvement on discovering it as a bare forge 400 at merge, after the
-          * whole pipeline has run. */
-         return wfe_step_failed_class(WFE_FAIL_PERMANENT, 0);
-      }
+      char detail[512];
+      snprintf(detail, sizeof detail, "sibling_create_create_collision path=%s current=%s sibling=%s",
+               clash, wfe_ctx_work_item(ctx) ? wfe_ctx_work_item(ctx) : "", sibling);
+      return wfe_step_failed_detail(WFE_FAIL_PERMANENT, detail);
    }
 
    char handle[80];

@@ -635,7 +635,7 @@ int db1_work_item_inc_override(const char *wi)
    return -1;
 }
 
-static int work_item_list_ordered(db1_work_item_t **out, const char *sql)
+static int work_item_list_ordered_bind(db1_work_item_t **out, const char *sql, const char *bind1)
 {
    if (out)
       *out = NULL;
@@ -645,6 +645,8 @@ static int work_item_list_ordered(db1_work_item_t **out, const char *sql)
    sqlite3_stmt *st = NULL;
    if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
       return -1;
+   if (bind1)
+      sqlite3_bind_text(st, 1, bind1, -1, SQLITE_TRANSIENT);
    int cap = 8, n = 0;
    db1_work_item_t *arr = malloc((size_t)cap * sizeof *arr);
    if (!arr)
@@ -672,12 +674,27 @@ static int work_item_list_ordered(db1_work_item_t **out, const char *sql)
    return n;
 }
 
+static int work_item_list_ordered(db1_work_item_t **out, const char *sql)
+{
+   return work_item_list_ordered_bind(out, sql, NULL);
+}
+
 int db1_work_item_list(db1_work_item_t **out)
 {
    return work_item_list_ordered(out,
                                  "SELECT " WI_COLS " FROM lifecycle_work_item ORDER BY id DESC");
 }
 
+
+int db1_work_item_list_by_parent(const char *parent_id, db1_work_item_t **out)
+{
+   if (!parent_id || !parent_id[0])
+      return -1;
+   return work_item_list_ordered_bind(out,
+                                      "SELECT " WI_COLS
+                                      " FROM lifecycle_work_item WHERE parent_id=? ORDER BY id DESC",
+                                      parent_id);
+}
 int db1_work_item_list_lru(db1_work_item_t **out)
 {
    /* Staleness-first (see wfe_store.h). id ASC tie-break keeps the order total

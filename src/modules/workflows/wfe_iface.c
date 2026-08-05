@@ -147,6 +147,14 @@ wfe_step_result_t wfe_step_failed_class(wfe_failure_class_t cls, int has_new_inp
    return r;
 }
 
+wfe_step_result_t wfe_step_failed_detail(wfe_failure_class_t cls, const char *detail)
+{
+   wfe_step_result_t r = wfe_step_failed_class(cls, 0);
+   if (detail)
+      snprintf(r.failure_detail, sizeof r.failure_detail, "%s", detail);
+   return r;
+}
+
 wfe_failure_disposition_t wfe_failure_disposition(wfe_failure_class_t cls, int has_new_input)
 {
    switch (cls)

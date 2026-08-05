@@ -136,6 +136,7 @@ typedef struct
     * executor that has not been taught the classes. */
    wfe_failure_class_t failure_class;
    int failure_has_new_input; /* 1 iff a TRANSIENT failure carries genuinely new input */
+   char failure_detail[512];
 } wfe_step_result_t;
 
 /* ---- Executor vtable: gates ARE ordinary block executors (one call-site) ---- */
@@ -160,6 +161,7 @@ wfe_step_result_t wfe_step_looped(void);
 /* A classified failure (Phase-C Q4). has_new_input is honored only for
  * WFE_FAIL_TRANSIENT (retry vs park-stuck); ignored for the other classes. */
 wfe_step_result_t wfe_step_failed_class(wfe_failure_class_t cls, int has_new_input);
+wfe_step_result_t wfe_step_failed_detail(wfe_failure_class_t cls, const char *detail);
 
 /* Map a failure class to the run-loop disposition, so the routing lives in one
  * place (exposed for the unit test). */
