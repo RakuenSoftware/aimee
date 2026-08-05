@@ -104,6 +104,22 @@ type Engine struct {
 	invocationSeq uint64
 }
 
+// rootCompletionLock returns the existing short per-root serialization lock.
+// Capped work uses it after a runner completes to order accounting and lifecycle
+// commits. Freeze acquires the same lock before inspecting sibling state and
+// holds it through artifact publication and Move, making compare-and-record
+// atomic without introducing a second parent-lock implementation.
+func (e *Engine) rootCompletionLock(rootID string) *sync.Mutex {
+	e.budgetMu.Lock()
+	defer e.budgetMu.Unlock()
+	lock := e.budgetLocks[rootID]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		e.budgetLocks[rootID] = lock
+	}
+	return lock
+}
+
 func New(db *db1.Store, artifacts *wfe.ArtifactStore, workflowDir string, runner Runner) (*Engine, error) {
 	if db == nil || artifacts == nil || workflowDir == "" || runner == nil {
 		return nil, errors.New("DB1, artifacts, workflow directory, and runner are required")
@@ -205,6 +221,18 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 	if feedback, err := e.artifacts.Feedback(item.ID); err == nil {
 		req.Feedback = &feedback
 	}
+	var completionLock *sync.Mutex
+	completionLocked := false
+	if node.Block == "freeze" {
+		completionLock = e.rootCompletionLock(budget.RootID)
+		completionLock.Lock()
+		completionLocked = true
+	}
+	defer func() {
+		if completionLocked {
+			completionLock.Unlock()
+		}
+	}()
 
 	stopHeartbeat := make(chan struct{})
 	heartbeatDone := make(chan struct{})
@@ -235,16 +263,10 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 	// Runner calls are deliberately outside this lock. Atomic durable reservation
 	// permits capped siblings to execute concurrently; only the short actual-cost
 	// reconciliation and lifecycle commit remain ordered per root.
-	if budget.MaxUSD > 0 {
-		e.budgetMu.Lock()
-		budgetLock := e.budgetLocks[budget.RootID]
-		if budgetLock == nil {
-			budgetLock = &sync.Mutex{}
-			e.budgetLocks[budget.RootID] = budgetLock
-		}
-		e.budgetMu.Unlock()
-		budgetLock.Lock()
-		defer budgetLock.Unlock()
+	if budget.MaxUSD > 0 && !completionLocked {
+		completionLock = e.rootCompletionLock(budget.RootID)
+		completionLock.Lock()
+		completionLocked = true
 	}
 	if err != nil {
 		// A replay-only invocation whose durable result is gone can never succeed
@@ -361,7 +383,6 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 			step.ContentHash = artifact.Hash
 		}
 	}
-
 	switch step.Status {
 	case StepAdvanced:
 		// An approving gate may still have recorded non-blocking deficiencies —
