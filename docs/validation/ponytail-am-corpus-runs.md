@@ -168,6 +168,43 @@ fresh path, `chown -R 999:999`, `aimee workspace add`, `aimee index scan
 `{"retryable":true,"dependency":"kb","message":"blast radius lookup failed"}`
 even on that good index.
 
+## R2 status: STOPPED, zero cells produced
+
+The aimee arm never produced a single cell. Not one task failed -- readiness
+never passed. Where it ended, honestly:
+
+**CT403's scan path is now wedged for every tree, and restart no longer clears
+it.** `aimee index scan` returns `knowledge service unavailable` for the
+known-good `manualprobe` tree that indexed 2978 files earlier today, on a KB
+restarted minutes before, while: both containers report healthy, the server's
+socket answers, `aimee --json status` reports `kb: {"status":"ok"}`, the KB
+serves `/v1/health` 200 every 10s, and there are ZERO pool warnings since that
+restart. Every health signal aimee exposes says fine; the operation fails.
+
+**What is confirmed**
+
+- A scan of a ~3000-file tree succeeds, and a later scan fails; the failure does
+  not recover on its own (probed once a minute for five minutes).
+- The KB container CAN read the paths it reports as unreadable: `docker exec`
+  lists 50-53 entries in the exact cell directories whose scans warn
+  "knowledge service saw no files at that path".
+- Cell checkouts (git working trees) indexed 0 files while a plain copy of the
+  same corpus indexed 2978, across fresh projects, fresh KB, matching ownership.
+
+**What is NOT confirmed, and I am not claiming it**
+
+- That `.git` is the cause of the zero-file scans. It is the one difference I
+  isolated, but the service wedged before I could scan the same tree with `.git`
+  removed as a first-post-restart scan. Twice. So it stands as the leading
+  hypothesis and nothing more.
+- Any root cause for the wedge itself. 64 mTLS workers and a 64-slot queue are
+  not exhausted, and one stuck member out of 16 db2 connections should not
+  starve the pool, so the lease warnings do not explain it either.
+
+**Environment state:** CT403 is degraded. The non-aimee results are on 401/402/403
+under `/opt/bench/results/cells` and are unaffected -- they were produced before
+any of this and do not depend on the KB.
+
 ## Harness environment for the am_ corpus
 
 Not recorded anywhere before this; reconstructed from cell artifacts.
