@@ -30,7 +30,12 @@ echo repo-added'" 2>&1 | tail -1
 log "cuda-toolkit packages now visible:"
 ssh -n -o ConnectTimeout=60 $HOST "pct exec 140 -- bash -lc 'apt-cache search \"^cuda-toolkit-1[23]-\" | sort -V | tail -5'" 2>&1 | tail -5
 
-PKG=$(ssh -n -o ConnectTimeout=60 $HOST "pct exec 140 -- bash -lc 'apt-cache search \"^cuda-toolkit-1[23]-\" | awk \"{print \\\$1}\" | sort -V | tail -1'" 2>/dev/null | tr -d '\r' | tr -d ' ')
+# Pick the real meta-package. Sorting the whole match and taking the last gives
+# cuda-toolkit-13-config-common, a config stub that sorts AFTER cuda-toolkit-13-3,
+# installs cleanly, and contains no nvcc. The install then reports success and the
+# build fails later with an empty compiler path.
+PKG=$(ssh -n -o ConnectTimeout=60 $HOST "pct exec 140 -- bash -lc 'apt-cache search \"^cuda-toolkit-[0-9]+-[0-9]+\$\" | awk \"{print \\\$1}\" | grep -E \"^cuda-toolkit-[0-9]+-[0-9]+\$\" | sort -V | tail -1'" 2>/dev/null | tr -d '\r' | tr -d ' ')
+[ -z "$PKG" ] && PKG=cuda-toolkit-13-3
 log "installing $PKG (large download, no timeout applied)"
 ssh -n -o ConnectTimeout=900 $HOST "pct exec 140 -- bash -lc '
 export DEBIAN_FRONTEND=noninteractive
