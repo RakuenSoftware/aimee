@@ -919,6 +919,7 @@ go-unit-tests:
 verify-local: all
 	@$(MAKE) check-linking
 	@$(MAKE) lint
+	@cd .. && python3 -I scripts/check_c_repository_lock.py
 	@$(MAKE) TEST_RUN_JOBS=$(AIMEE_VERIFY_TEST_JOBS) unit-tests
 	@$(MAKE) go-unit-tests
 	@echo "verify-local: ok"
