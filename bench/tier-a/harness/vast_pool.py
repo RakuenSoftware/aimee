@@ -77,7 +77,7 @@ def launch(offer_id, repo, ctx, cache_ram, bid=None):
     return r["new_contract"]
 
 
-def endpoint(cid, timeout=420):
+def endpoint(cid, timeout=900):
     """Wait for the mapped port, then for llama-server to answer /health.
 
     The timeout is short on purpose. Advertised inet_down does not predict
