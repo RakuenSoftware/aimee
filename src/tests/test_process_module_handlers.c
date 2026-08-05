@@ -170,6 +170,13 @@ static void test_git(void)
                                    sizeof(response), &response_len,
                                    NULL) == AIMEE_MODULE_STATUS_OK);
    assert(aimee_git_ref_response_decode(response, response_len, &allowed) == 0 && allowed);
+   assert(aimee_git_ref_request_encode(
+              "aimee/wi/wi_57186250728b511961573e5afb37cc93.s4263a4834d.g0.0", ref_request,
+              sizeof(ref_request)) == 0);
+   assert(aimee_git_module_handler(&invocation, ref_request, sizeof(ref_request), response,
+                                   sizeof(response), &response_len,
+                                   NULL) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_git_ref_response_decode(response, response_len, &allowed) == 0 && allowed);
    assert(aimee_git_ref_request_encode("-evil", ref_request, sizeof(ref_request)) == 0);
    assert(aimee_git_module_handler(&invocation, ref_request, sizeof(ref_request), response,
                                    sizeof(response), &response_len,

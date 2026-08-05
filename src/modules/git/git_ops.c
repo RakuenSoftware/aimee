@@ -44,6 +44,32 @@ static int ref_allowed(const char *ref)
    return g_ref_validator && g_ref_validator(ref, &allowed) == 0 && allowed;
 }
 
+static int validate_managed_ref(const char *ref, char *err, size_t errlen)
+{
+   if (!ref || !ref[0])
+   {
+      snprintf(err, errlen, "managed push ref is required");
+      return -1;
+   }
+   if (!g_ref_validator)
+   {
+      snprintf(err, errlen, "managed push ref validator is unavailable");
+      return -1;
+   }
+   int allowed = 0;
+   if (g_ref_validator(ref, &allowed) != 0)
+   {
+      snprintf(err, errlen, "managed push ref validation failed");
+      return -1;
+   }
+   if (!allowed)
+   {
+      snprintf(err, errlen, "managed push ref is invalid");
+      return -1;
+   }
+   return 0;
+}
+
 /* Run argv in `dir` with creds injected when `needs_cred`. Returns the child
  * exit code (0 = ok), -1 on fork/pipe failure; *out receives the captured
  * output (caller frees). */
@@ -120,11 +146,13 @@ int git_ops_push_dir(const char *principal, const char *repo_dir, const char *re
       *out = NULL;
    if (err && errlen)
       err[0] = '\0';
-   if (!repo_dir || !remote_url || !ref_allowed(branch))
+   if (!repo_dir || !repo_dir[0] || !remote_url || !remote_url[0])
    {
-      snprintf(err, errlen, "invalid managed push request");
+      snprintf(err, errlen, "managed push repository and remote are required");
       return -1;
    }
+   if (validate_managed_ref(branch, err, errlen) != 0)
+      return -1;
    char refspec[420];
    if ((size_t)snprintf(refspec, sizeof(refspec), "%s:%s", branch, branch) >= sizeof(refspec))
    {
