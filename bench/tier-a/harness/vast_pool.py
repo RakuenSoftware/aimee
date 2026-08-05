@@ -119,6 +119,21 @@ def verify(ep, repo, want_fam=None):
     return loaded
 
 
+def billed_rate(cid):
+    """The rate actually charged, which is NOT the offer's dph_total.
+
+    The offer price excludes storage and, on an interruptible rental, your bid
+    premium. Logging the offer price understated the real burn by roughly 3x
+    across a ten-instance fleet and produced a cost estimate that was wrong in
+    the reassuring direction. Read it back from the instance instead.
+    """
+    try:
+        d = (api("instances/%d/" % cid).get("instances")) or {}
+        return float(d.get("dph_total") or 0.0)
+    except Exception:
+        return 0.0
+
+
 def alive(cid):
     """False once the instance is gone or exited. A preempted interruptible
     instance disappears mid-arm and the client would otherwise hang on a dead
@@ -220,7 +235,8 @@ def run_arm(job, gpu, maxprice, outdir, log):
                 log("    offer %s unavailable (%s); next offer" % (off["id"], e))
                 cid = None
                 continue
-            log("--- %s on %s %s $%.3f/hr contract %s" % (label, gpu, off["id"], off["dph_total"], cid))
+            log("--- %s on %s %s contract %s (offer $%.4f/hr; billed rate read after start)"
+                % (label, gpu, off["id"], cid, off["dph_total"]))
             try:
                 ep = endpoint(cid)
                 break
@@ -229,6 +245,8 @@ def run_arm(job, gpu, maxprice, outdir, log):
                 destroy(cid); cid = None
         if ep is None:
             log("FAIL %s: no host served within the pull timeout" % label); return
+        rate = billed_rate(cid) or off["dph_total"]
+        log("    billed $%.4f/hr (offer said $%.4f)" % (rate, off["dph_total"]))
         loaded = verify(ep, repo, job.get("verify_fam"))
         log("    healthy, loaded %s; %d variant(s): %s" % (loaded, len(todo), ",".join(todo)))
         # run_llamacpp.py REQUIRES an explicit thinking flag and has no default,
@@ -296,7 +314,7 @@ def run_arm(job, gpu, maxprice, outdir, log):
             pk = sum(1 for x in rows if x.get("parse_ok"))
             log("OK   %s/%s rows=%d reasoned=%d/%d parse_ok=%d" % (
                 label, v, len(rows), reasoned, len(rows), pk))
-        cost = off["dph_total"] * (time.time() - t0) / 3600.0
+        cost = rate * (time.time() - t0) / 3600.0
         log("DONE %s wall=%dm cost=$%.3f" % (label, (time.time() - t0) / 60, cost))
     except Preempted:
         log("REQUEUE %s after preemption" % label)
