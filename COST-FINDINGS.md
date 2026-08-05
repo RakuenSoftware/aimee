@@ -543,7 +543,31 @@ Report the new cell, do not project this one.
 **What the fix does NOT address.** Removing the polls takes the cell from 42
 calls to 26, against baseline's 10. The remaining +16 is Finding 17.
 
-## Finding 17 — the rest of the turns: retrieval was additive, not substitutive
+## Finding 17 — WITHDRAWN, and replaced by Finding 19
+
+**This finding was wrong and its correction matters more than the original.**
+
+It claimed aimee "paid for the index and still grepped" -- retrieval additive
+rather than substitutive, 12 exploration shell calls against baseline's 5. The
+mechanism was not additive retrieval. `index command=investigate` ABSTAINED:
+
+```json
+{"results":[], "status":"abstained", "item_count":0,
+ "answerability":{"decision":"no_answer","reason":"no_evidence_above_floor",
+                  "candidate_count":0, "top_confidence":0, "vector_floor":0.7}}
+```
+
+`code_embeddings` held **zero rows, globally, for every project that has ever
+existed in this deployment**. The agent asked semantic search the right
+question, got "no answer", and fell back to grep. It behaved correctly; the
+capability was absent.
+
+Retained below as the original text, because the numbers in it are real and the
+conclusion drawn from them was not. See Finding 19 for the cause.
+
+### Original text (conclusion withdrawn)
+
+### Finding 17 — the rest of the turns: retrieval was additive, not substitutive
 
 Same cell, with the 16 polls removed: **26 calls against baseline's 10.** Where
 the remaining +16 sits, by category:
@@ -653,6 +677,44 @@ three arms did not write.
 article was built to measure was reading zero for everyone, and the one arm-level
 difference visible in it points the opposite way from the cost story. n=1 on the
 four-arm comparison; check it across the corpus before publishing.
+
+## Finding 19 — the aimee arm has never had a code vector
+
+`SELECT count(*) FROM code_embeddings` returns **0**. Not for the cell under
+test -- for every project, across the whole deployment, for the life of this
+study.
+
+The cause is a gap between two paths that were supposed to do the same build:
+
+| | doc vectors | canonical code index | code vectors |
+|---|---|---|---|
+| async worker (`kbiw_process_job`) | yes (`kb_build`) | yes | **never** |
+| sync HTTP (`/v1/code/build`) | yes | yes | yes |
+
+`kb_code_embed_refresh` appeared zero times in the worker. Every project arrives
+through the queue, so no project ever got code vectors. The benchmark then ran
+with `PT_SKIP_KB_BUILD=1`, so the one path that did build them was never called
+either.
+
+**What this contaminates.** Every aimee cell in this study ran with semantic
+code search disabled. The arm's measured turn count and credit cost are the cost
+of an agent falling back to grep, not the cost of the retrieval design. Finding
+17's exploration gap, and any share of Findings 5/6/7 attributable to discovery
+turns, are affected. Findings that do not depend on semantic search -- the
+roundtable polling (Finding 16), the LOC classifier (Finding 18), the credit
+arithmetic (Findings 1-3) -- stand.
+
+**What it does NOT explain.** The 16 roundtable polls were a real defect of
+their own. So were the plugin-cache read and a blast-radius query 139x slower
+than necessary. "Embeddings were empty" is not a universal excuse, and the
+temptation to treat it as one should be resisted.
+
+**Unmeasured.** Whether working semantic search actually reduces turns is a
+hypothesis, not a result. It could plausibly increase follow-up reads instead.
+The honest position is that the comparison has not been run yet: no aimee cell
+to date is a valid measurement of aimee's retrieval, and the first one that will
+be is the rerun on the build that fixes this.
+
 
 ## Methodology traps hit in this work
 
