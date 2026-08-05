@@ -1,0 +1,5 @@
+[13:32:05Z] === defect 40 discriminating test: same model, prompt cache OFF, two tiers
+[13:32:05Z]     prediction: shared-1001 byte identity ~1001/1001 (cache on gave 529)
+[13:32:05Z] --- E2B.qat.cacheoff.small  1001 notes  nproc=1  no MTP  CACHE_RAM_MIB=0
+[14:11:03Z] OK   E2B.qat.cacheoff.small strictF1=0.6466 wall=38m  rate=25.7/min
+[14:11:03Z] --- E2B.qat.cacheoff.mid  3002 notes  nproc=1  no MTP  CACHE_RAM_MIB=0
