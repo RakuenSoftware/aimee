@@ -16,6 +16,12 @@ admitted. That integration lane can differ from the forge default. The workflow 
 ready or merge it automatically. The draft must have a proposal-derived title and include the
 original request, approved plan, diff summary, slice PRs, completed gates, and human-review boundary.
 
+After `accept_gate` approves the implementation, the document delegate's scope is strictly limited to
+the immutable original request and the exact accepted implementation diff. The delegate must not
+infer additional work from unrelated repository history, and when the documentation is already
+complete, the delegate leaves the worktree unchanged. `doc_freeze` and `doc_gate` remain the review
+authority for any documentation edits the delegate produces.
+
 If a final PR is non-draft, has a work-item ID for a title, lacks that review context, or was merged
 without the explicit human handoff, treat the run as failed even when its lifecycle row says
 `accepted`. Preserve the PR and lifecycle audit trail, revoke any agent-accessible write credential,
