@@ -1363,8 +1363,8 @@ static wfe_step_result_t exec_freeze(wfe_ctx *ctx, const wfe_node_t *node)
          return wfe_step_failed();
       snprintf(head, sizeof head, "%s", head2);
    }
-   else if (wfe_git_freeze(wd, base_branch ? base_branch : "HEAD", base, head, dhash, err, sizeof err) !=
-            0)
+   else if (wfe_git_freeze(wd, base_branch ? base_branch : "HEAD", base, head, dhash, err,
+                           sizeof err) != 0)
       return wfe_step_failed();
 
    char clash[1024], sibling[80];
