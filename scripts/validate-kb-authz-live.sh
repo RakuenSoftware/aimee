@@ -40,10 +40,15 @@ build_control_web_module() {
   return 0
 }
 
-# Start the module against the kb's bus and wait for it to attach. The grant is
-# the same shape the image ships: it pins the executable that may hold principal
-# 24 and the kind it may serve.
-start_control_web_module() {
+# Seed the grant BEFORE the kb starts. The bus loads its admission policy exactly
+# once, when the host comes up (obs_bus start_locked -> bus_runtime_policy_load_dir),
+# so a grant written afterwards is never read and the attach is denied with no
+# grant found. This mirrors the container entrypoint, which seeds grants before
+# launching the daemon for the same reason.
+#
+# The grant is the shape the image ships: it pins the executable that may hold
+# principal 24 and the single kind it may serve.
+seed_control_web_grant() {
   mkdir -p "$AIMEE_HOME/modules.d/kb"
   cat > "$AIMEE_HOME/modules.d/kb/control-web.grant" <<GRANT
 version=1
@@ -58,6 +63,12 @@ serve=10241
 GRANT
   chmod 0700 "$AIMEE_HOME/modules.d" "$AIMEE_HOME/modules.d/kb" 2>/dev/null || true
   chmod 0600 "$AIMEE_HOME/modules.d/kb/control-web.grant" 2>/dev/null || true
+}
+
+# Launch the module once the kb's bus socket exists, then give it a moment to
+# attach and claim its kind.
+start_control_web_module() {
+  [ -x "$MODULE_BIN" ] || return 1
   for _ in $(seq 1 60); do
     [ -S "$AIMEE_MODULE_BUS_SOCKET" ] && break
     sleep 0.5
@@ -116,6 +127,9 @@ kb:
   api:
     http_port: $PORT
 YAML
+  # The bus reads its admission policy once at host startup, so this must happen
+  # before aimee-kb is launched, not after it is healthy.
+  seed_control_web_grant
   ulimit -s 65536
   # The env bearer is FIRST-BOOT TRANSPORT only: the runtime reads it from Vault,
   # so it has to be sealed before the listener starts. This mirrors
