@@ -194,6 +194,7 @@ func main() {
 		handler.SetSchedulerCancel(scheduler.Cancel)
 		if worktreeManager != nil {
 			handler.SetWorktreeCleanup(worktreeManager.Cleanup)
+			scheduler.SetTerminalCleanup(worktreeManager.Cleanup)
 		}
 		go scheduler.Run(rootCtx)
 		// Trigger definitions are live UI/config state. Re-read them every scan so
