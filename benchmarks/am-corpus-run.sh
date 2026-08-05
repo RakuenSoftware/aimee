@@ -80,6 +80,32 @@ export PT_BUILD_TIMEOUT=2400
 #   docker inspect aimee-aimee-server-1 --format '{{.Config.Image}}'
 #   grep -c "<expected new string>" "$PT_HOME/.agents/plugins/plugins/aimee/skills/aimee/SKILL.md"
 # The bundle regenerates on any aimee CLI invocation with HOME=$PT_HOME.
+#
+# DEPLOYING A NEW IMAGE HERE. Two traps, both hit in one sitting:
+#
+#  1. The server and the KB are owned by DIFFERENT compose projects and
+#     directories -- aimee-server from /opt/aimee-src/compose.server-managed.yaml
+#     (which has a .env), aimee-kb from
+#     /opt/aimee-now/deploy/container/aimee-managed.compose.yaml (which does NOT).
+#     Editing the wrong .env, or letting compose infer the project name from the
+#     directory, silently creates a SECOND container on the default :latest image
+#     and leaves the real service untouched. Always read the labels off the
+#     running container and replay them:
+#       docker inspect <container> --format '{{index .Config.Labels "com.docker.compose.project"}}'
+#       docker compose -p <project> --project-directory <working_dir> -f <config_file> up -d <service>
+#
+#  2. The KB's runtime environment is NOT in any .env -- it came from whatever
+#     shell first started it. Recreating the container drops every variable you
+#     do not re-supply, and the KB then refuses to start ("no embedder selected"),
+#     because serving a corpus against a different embedding model would silently
+#     return wrong neighbours. Capture the env BEFORE recreating:
+#       docker inspect <container> --format '{{range .Config.Env}}{{println .}}{{end}}'
+#     At minimum EMBEDDER_MODEL=bekko-a25m must be present; the compose file also
+#     reads EMBEDDER_DIMS, EMBEDDER_URL, AIMEE_LLM_HOST and the SYNTHESIS_* set.
+#
+# Keep aimee-server and aimee-kb on the SAME build. The index, symbol lookup and
+# blast-radius answers the aimee arm depends on come from the KB, so a newer
+# server against an older KB measures a combination that does not exist.
 
 cd "$RUNNER_DIR"
 echo "runner : $RUNNER"
