@@ -850,6 +850,16 @@ void delegate_worker(void *arg)
       compute_ctx_free(cctx);
       return;
    }
+   if (tool_loop_timeout_ms_cap > 0)
+   {
+      struct timespec now;
+      if (clock_gettime(CLOCK_MONOTONIC, &now) == 0)
+      {
+         acfg.tool_loop_timeout_ms_cap = tool_loop_timeout_ms_cap;
+         acfg.tool_loop_deadline_ms =
+             (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000 + tool_loop_timeout_ms_cap;
+      }
+   }
    /* A participant is a delegate-service continuation token. Resolve it here,
     * behind the generic delegation boundary, so coordinators never learn or
     * retain the concrete agent identity. The durable job row survives service

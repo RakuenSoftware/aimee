@@ -35,6 +35,40 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <time.h>
+
+int agent_request_tool_loop_remaining_ms(const agent_config_t *cfg)
+{
+   if (!cfg || cfg->tool_loop_timeout_ms_cap <= 0 || cfg->tool_loop_deadline_ms <= 0)
+      return 0;
+   struct timespec now;
+   if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+      return cfg->tool_loop_timeout_ms_cap;
+   int64_t now_ms = (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+   int64_t remaining = cfg->tool_loop_deadline_ms - now_ms;
+   if (remaining <= 0)
+      return -1;
+   if (remaining > INT_MAX)
+      return INT_MAX;
+   return (int)remaining;
+}
+
+static int agent_apply_request_tool_loop_cap(const agent_config_t *cfg, agent_t *agent,
+                                             agent_result_t *out)
+{
+   int remaining = agent_request_tool_loop_remaining_ms(cfg);
+   if (remaining < 0)
+   {
+      if (out)
+         snprintf(out->error, sizeof(out->error),
+                  "tool loop total timeout exceeded across delegate retry/fallback attempts");
+      return -1;
+   }
+   if (remaining > 0 &&
+       (agent->tool_loop_timeout_ms_cap <= 0 || agent->tool_loop_timeout_ms_cap > remaining))
+      agent->tool_loop_timeout_ms_cap = remaining;
+   return 0;
+}
 void agent_store_feedback(const agent_result_t *result, const char *role,
                           const char *prompt_summary);
 const char *delegation_active_id(void);
@@ -361,6 +395,8 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
                                         : (agent_uses_provider_cli(ag) ||
                                            (ag->tools_enabled && agent_is_exec_role(ag, role)));
       agent_apply_runtime_config(ag);
+      if (agent_apply_request_tool_loop_cap(cfg, ag, out) != 0)
+         break;
       ag->ablation = cfg->ablation;
       ag->write_capable = use_tools && delegate_role_is_write(role) ? 1 : 0;
 
@@ -526,6 +562,8 @@ int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
     * tables (keyed by agent name), so siblings still see each other's signals. */
    agent_t local = *src;
    agent_apply_runtime_config(&local);
+   if (agent_apply_request_tool_loop_cap(cfg, &local, out) != 0)
+      return -1;
    local.ablation = cfg->ablation;
    local.write_capable = 0; /* ensemble references answer a prompt; no write tools */
 
@@ -561,6 +599,8 @@ int agent_run_named_with_tools(agent_config_t *cfg, const char *name, const char
 
    agent_t local = *src; /* clone before mutating — see agent_run_named */
    agent_apply_runtime_config(&local);
+   if (agent_apply_request_tool_loop_cap(cfg, &local, out) != 0)
+      return -1;
    local.require_initial_tool_call = tl_require_initial_tool_call;
    local.ablation = cfg->ablation;
    /* write_capable stays 0: this exists for REVIEWERS, and a reviewer that can edit
@@ -603,6 +643,8 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
       return -1;
    }
    agent_apply_runtime_config(ag);
+   if (agent_apply_request_tool_loop_cap(cfg, ag, out) != 0)
+      return -1;
    ag->ablation = cfg->ablation;
    ag->write_capable = enforce_writes && delegate_role_is_write(role) ? 1 : 0;
 
@@ -647,6 +689,8 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
             aimee_log(LOG_DEBUG, "agent", "skipping DOWN agent '%s' in fallback", fb->name);
             continue;
          }
+         if (agent_apply_request_tool_loop_cap(cfg, fb, out) != 0)
+            break;
          fb->write_capable = enforce_writes && delegate_role_is_write(role) ? 1 : 0;
 
          free(out->response);

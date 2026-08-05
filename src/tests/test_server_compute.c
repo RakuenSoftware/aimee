@@ -51,6 +51,9 @@ static int g_agent_tool_run_calls = 0, g_config_tools_enabled = 1;
 static int g_force_no_tools = 0;
 static int g_agent_run_seen_no_tools = 0;
 static int g_last_agent_max_turns = -999;
+static int g_last_request_tool_loop_cap = -999;
+static int64_t g_last_request_tool_loop_deadline = -999;
+static int g_last_agent_tool_loop_cap = -999;
 static int g_last_write_enforce = -999;
 static int g_budget_acquire_calls = 0;
 static int g_budget_release_calls = 0;
@@ -286,6 +289,10 @@ int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt, 
    g_agent_run_seen_no_tools = g_force_no_tools;
    g_agent_run_seen_compute_override = g_aimee_compute_threads_override;
    g_last_agent_max_turns = cfg->agent_count > 0 ? cfg->agents[0].max_turns : -999;
+   g_last_request_tool_loop_cap = cfg->tool_loop_timeout_ms_cap;
+   g_last_request_tool_loop_deadline = cfg->tool_loop_deadline_ms;
+   g_last_agent_tool_loop_cap =
+       cfg->agent_count > 0 ? cfg->agents[0].tool_loop_timeout_ms_cap : -999;
    g_agent_seen_compute_override = g_aimee_compute_threads_override;
    g_agent_seen_budget_release_calls = g_budget_release_calls;
    fake_agent_fill_response(prompt, result);
@@ -311,6 +318,10 @@ int agent_run_with_tools(agent_config_t *cfg, const char *role, const char *syst
    g_agent_tool_run_calls++;
    g_agent_run_seen_compute_override = g_aimee_compute_threads_override;
    g_last_agent_max_turns = cfg->agent_count > 0 ? cfg->agents[0].max_turns : -999;
+   g_last_request_tool_loop_cap = cfg->tool_loop_timeout_ms_cap;
+   g_last_request_tool_loop_deadline = cfg->tool_loop_deadline_ms;
+   g_last_agent_tool_loop_cap =
+       cfg->agent_count > 0 ? cfg->agents[0].tool_loop_timeout_ms_cap : -999;
    g_agent_seen_compute_override = g_aimee_compute_threads_override;
    g_agent_seen_budget_release_calls = g_budget_release_calls;
    fake_agent_fill_response(prompt, result);
@@ -2147,6 +2158,43 @@ static void test_direct_delegate_explicit_tools_forces_tools(void)
    printf("  PASS: test_direct_delegate_explicit_tools_forces_tools\n");
 }
 
+static void test_direct_delegate_tool_loop_cap_is_request_wide(void)
+{
+   reset_last_response();
+   int fds[2];
+   assert(pipe(fds) == 0);
+   server_ctx_t *ctx = calloc(1, sizeof(*ctx));
+   server_conn_t *conn = calloc(1, sizeof(*conn));
+   assert(ctx != NULL && conn != NULL);
+   conn->fd = fds[1];
+   g_agent_response = "bounded delegate completed";
+   g_last_request_tool_loop_cap = -999;
+   g_last_request_tool_loop_deadline = -999;
+   g_last_agent_tool_loop_cap = -999;
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "role", "code");
+   cJSON_AddStringToObject(req, "persona", "engineer");
+   cJSON_AddStringToObject(req, "prompt", "run the request-wide timeout cap test");
+   cJSON_AddTrueToObject(req, "tools");
+   cJSON_AddNumberToObject(req, "tool_loop_timeout_ms_cap", 4321);
+   assert(handle_delegate(ctx, conn, req) == 0);
+   assert(g_submitted_fn == delegate_worker && g_submitted_arg != NULL);
+   g_submitted_fn(g_submitted_arg);
+   g_submitted_arg = NULL;
+   close(fds[1]);
+   char buf[256];
+   assert(read(fds[0], buf, sizeof(buf)) >= 0);
+   close(fds[0]);
+   assert(g_last_request_tool_loop_cap == 4321);
+   assert(g_last_request_tool_loop_deadline > 0);
+   assert(g_last_agent_tool_loop_cap == 4321);
+   cJSON_Delete(req);
+   reset_last_response();
+   free(conn);
+   free(ctx);
+   printf("  PASS: test_direct_delegate_tool_loop_cap_is_request_wide\n");
+}
+
 /* Regression: an explicit tools:false (CLI --no-tools) on a tools-on-by-default
  * exec role must run the tools-OFF branch AND force tools off for the turn, so
  * agent_run_ex cannot silently re-enable tools from the agent config (the codex
@@ -3182,6 +3230,7 @@ int main(void)
    test_direct_delegate_review_auto_tools_uses_tools();
    test_direct_delegate_reviewer_alias_auto_tools_uses_tools();
    test_direct_delegate_explicit_tools_forces_tools();
+   test_direct_delegate_tool_loop_cap_is_request_wide();
    test_direct_delegate_no_tools_forces_no_tools();
    test_direct_delegate_one_turn_diagnose_suppresses_default_tools();
    test_readonly_code_delegate_disables_write_enforce();
