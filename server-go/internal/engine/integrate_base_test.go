@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
@@ -310,11 +309,10 @@ func TestFreezeRejectsDivergentSiblingCreateCreateCollision(t *testing.T) {
 	}
 }
 
-// This is the appliance-runbook failure mode reduced to two synchronized
-// slices: both start from one feature tip and create the same path differently.
-// The complete Engine.Advance boundary must let exactly one publish a freeze and
-// advance; the other must finish rejected at freeze, before any PR/merge stage.
-func TestConcurrentSiblingFreezeRejectsExactlyOneBeforePR(t *testing.T) {
+// Replays the appliance-runbook packet failure mode: two slices from the same
+// packet set create the same new runbook path differently. The scheduler must
+// stop the losing packet at freeze and never queue PR or merge work for it.
+func TestApplianceRunbookReplayRejectsDivergentCreateBeforeMergeQueue(t *testing.T) {
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin.git")
 	repo := filepath.Join(root, "repo")
@@ -423,52 +421,39 @@ nodes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	type outcome struct {
-		id  string
-		out AdvanceResult
-		err error
-	}
-	start := make(chan struct{})
-	results := make(chan outcome, 2)
-	var ready sync.WaitGroup
-	ready.Add(2)
-	for _, id := range []string{"wi_runbook_a", "wi_runbook_b"} {
-		go func(id string) {
-			ready.Done()
-			<-start
-			out, err := eng.Advance(ctx, id)
-			results <- outcome{id: id, out: out, err: err}
-		}(id)
-	}
-	ready.Wait()
-	close(start)
 
+	scheduler := NewScheduler(store, eng, 2, nil)
+	scheduler.SetPerWorkflowSource(func() int { return 2 })
+	scheduler.fill(ctx)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		scheduler.mu.Lock()
+		running := len(scheduler.running)
+		scheduler.mu.Unlock()
+		if running == 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	scheduler.mu.Lock()
+	stillRunning := len(scheduler.running)
+	scheduler.mu.Unlock()
+	if stillRunning != 0 {
+		t.Fatalf("scheduler still has %d running work items", stillRunning)
+	}
 	advanced, rejected := "", ""
-	for range 2 {
-		result := <-results
-		if result.err != nil {
-			t.Fatalf("advance %s: %v", result.id, result.err)
-		}
-		// A simultaneous SQLite reservation can fairly ask one scheduler call to
-		// retry without running. The retry still enters the same atomic freeze
-		// boundary and must observe the winner's durable record.
-		if !result.out.Ran && !result.out.Terminal && !result.out.Parked {
-			result.out, result.err = eng.Advance(ctx, result.id)
-			if result.err != nil {
-				t.Fatalf("retry advance %s: %v", result.id, result.err)
-			}
-		}
-		if result.out.Parked {
-			events, _ := store.Events(ctx, result.id, 0, 50)
-			t.Fatalf("freeze parked for %s: %+v events=%+v", result.id, result.out, events)
+	for _, id := range []string{"wi_runbook_a", "wi_runbook_b"} {
+		item, err := store.WorkItem(ctx, id)
+		if err != nil {
+			t.Fatal(err)
 		}
 		switch {
-		case result.out.NextStage == "review" && !result.out.Terminal:
-			advanced = result.id
-		case result.out.Terminal && result.out.State == "rejected":
-			rejected = result.id
+		case item.Stage == "review" && item.State == "active" && item.PauseReason == "":
+			advanced = id
+		case item.Stage == "freeze" && item.State == "rejected":
+			rejected = id
 		default:
-			t.Fatalf("unexpected outcome for %s: %+v", result.id, result.out)
+			t.Fatalf("unexpected scheduler outcome for %s: %+v", id, item)
 		}
 	}
 	if advanced == "" || rejected == "" || advanced == rejected {

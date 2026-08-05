@@ -1334,11 +1334,9 @@ int wfe_slice_conflicts_with_frozen_sibling(const char *work_item_id, const char
          if (strcmp(sib->work_item_id, work_item_id) == 0 || strcmp(sib->state, "active") != 0)
             continue;
 
-         /* The slice workflow's impl/CI-review loops invalidate an older freeze.
-          * A row still at freeze has not durably completed compare-and-record.
-          * The engine holds BEGIN IMMEDIATE around this check and its stage write,
-          * so a simultaneous sibling cannot observe an in-between state. */
-         if (strcmp(sib->current_stage, "freeze") == 0 || strcmp(sib->current_stage, "impl") == 0)
+         /* The slice workflow's mutating loops invalidate an older freeze. */
+         if (strcmp(sib->current_stage, "freeze") == 0 || strcmp(sib->current_stage, "impl") == 0 ||
+             strcmp(sib->current_stage, "implement") == 0 || strcmp(sib->current_stage, "document") == 0)
             continue;
          if (!sib->worktree[0])
          {
@@ -1347,7 +1345,13 @@ int wfe_slice_conflicts_with_frozen_sibling(const char *work_item_id, const char
          }
 
          char sib_head[80], merge_base[80];
-         if (!git_blob_id(sib->worktree, "HEAD", sib_head))
+         snprintf(sib_head, sizeof sib_head, "%s", sib->content_hash);
+         if (!sib_head[0] || !git_blob_id(sib->worktree, sib_head, verified))
+         {
+            found = -1;
+            break;
+         }
+         if (!git_blob_id(sib->worktree, "HEAD", verified))
          {
             found = -1;
             break;
@@ -1369,7 +1373,7 @@ int wfe_slice_conflicts_with_frozen_sibling(const char *work_item_id, const char
             break;
          }
          char sib_spec[1200], sib_blob[80];
-         snprintf(sib_spec, sizeof sib_spec, "HEAD:%s", path);
+         snprintf(sib_spec, sizeof sib_spec, "%s:%s", sib_head, path);
          if (!git_blob_id(sib->worktree, sib_spec, sib_blob))
             continue;
          if (strcmp(ours_blob, sib_blob) != 0)
@@ -1418,7 +1422,7 @@ static wfe_step_result_t exec_freeze(wfe_ctx *ctx, const wfe_node_t *node)
    {
       char detail[512];
       snprintf(detail, sizeof detail,
-               WFE_FREEZE_SIBLING_CREATE_COLLISION " path=%s current=%s sibling=%s", clash,
+               WFE_FREEZE_SIBLING_CREATE_COLLISION ": path %s current slice %s conflicts with already frozen sibling slice %s", clash,
                wfe_ctx_work_item(ctx) ? wfe_ctx_work_item(ctx) : "", sibling);
       return wfe_step_failed_detail(WFE_FAIL_PERMANENT, detail);
    }

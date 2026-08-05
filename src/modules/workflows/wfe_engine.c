@@ -50,8 +50,12 @@ const char *wfe_ctx_worktree(const wfe_ctx *c)
 }
 const char *wfe_ctx_base_hash(const wfe_ctx *c)
 {
-   (void)c;
-   return "";
+   static char base[256];
+   base[0] = '\0';
+   if (!c || !c->wi || !c->wi->parent_id[0])
+      return "";
+   snprintf(base, sizeof base, "refs/remotes/origin/aimee/feat/%s", c->wi->parent_id);
+   return base;
 }
 
 static int wfe_has_prefix(const char *s, const char *prefix)
@@ -420,6 +424,7 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
       if (node->block == WFE_BLK_FREEZE && wfe_is_freeze_sibling_collision(&r))
       {
          WFE_CKW(db1_work_item_set_terminal(work_item_id, "rejected"));
+         (void)db1_work_item_abandon_children(work_item_id);
          db1_lifecycle_event_add(work_item_id, node->id, "terminal", "engine", r.failure_detail, "",
                                  r.cost_usd);
          out->terminal = 1;

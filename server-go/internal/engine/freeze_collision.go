@@ -130,10 +130,7 @@ func (r *NativeRunner) siblingStageHasFrozenDiff(sibling db1.WorkItem) (bool, er
 		return false, nil
 	}
 	if r.workflows == nil {
-		// Unit-level callers that do not install a registry still exercise the
-		// durable-stage rule: any stage other than freeze represents a completed
-		// Move in those fixtures.
-		return true, nil
+		return sibling.Stage != "freeze" && sibling.Stage != "impl", nil
 	}
 	def, err := r.workflows.LoadVersion(sibling.WorkflowName, sibling.WorkflowVersion)
 	if err != nil {
@@ -143,7 +140,7 @@ func (r *NativeRunner) siblingStageHasFrozenDiff(sibling db1.WorkItem) (bool, er
 	if !ok {
 		return false, errors.New("sibling workflow has no freeze node")
 	}
-	queue := []string{start.Next, start.OnPass}
+	queue := []string{start.Next, start.OnPass, start.OnFail}
 	seen := map[string]bool{"freeze": true}
 	for len(queue) > 0 {
 		id := queue[0]

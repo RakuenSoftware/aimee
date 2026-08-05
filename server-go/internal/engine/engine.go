@@ -219,7 +219,11 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 			return out, err
 		}
 	}
-	defer unlockStep()
+	defer func() {
+		if unlockStep != nil {
+			unlockStep()
+		}
+	}()
 
 	stopHeartbeat := make(chan struct{})
 	heartbeatDone := make(chan struct{})
@@ -362,6 +366,10 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 		}
 		step.ContentHash = wfe.Hash([]byte(step.Artifact))
 	}
+	if unlockStep != nil && step.Status != StepAdvanced {
+		unlockStep()
+		unlockStep = nil
+	}
 	if step.Status == StepAdvanced {
 		artifactType := step.ArtifactType
 		if artifactType == "" {
@@ -376,7 +384,6 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 			step.ContentHash = artifact.Hash
 		}
 	}
-
 	switch step.Status {
 	case StepAdvanced:
 		// An approving gate may still have recorded non-blocking deficiencies —
