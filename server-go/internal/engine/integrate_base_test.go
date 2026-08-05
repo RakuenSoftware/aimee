@@ -278,7 +278,17 @@ func (a *rejectDelegateAgents) Delegate(_ context.Context, _ DelegateRequest) (D
 	return DelegateResult{}, errors.New("delegate must not run for an already-repaired reviewed tree")
 }
 
-func TestDocumentResumeRefreezesHumanRepairWithoutMeaninglessDelegateEdit(t *testing.T) {
+type recordingVerifier struct {
+	calls int
+	err   error
+}
+
+func (v *recordingVerifier) Verify(context.Context, string) error {
+	v.calls++
+	return v.err
+}
+
+func TestReviewResumeRefreezesHumanRepairWithoutMeaninglessDelegateEdit(t *testing.T) {
 	root := t.TempDir()
 	repo := filepath.Join(root, "repo")
 	if err := os.MkdirAll(repo, 0o755); err != nil {
@@ -338,7 +348,34 @@ func TestDocumentResumeRefreezesHumanRepairWithoutMeaninglessDelegateEdit(t *tes
 	gitRun(t, workdir, "add", "runbook.md")
 	gitRun(t, workdir, "commit", "-m", "human repair")
 	agents.calls = 0
-	result, err := runner.mutate(ctx, StepRequest{WorkItem: item, Node: wfe.Node{ID: "document"},
+	verifier := &recordingVerifier{err: errors.New("repair still fails verification")}
+	runner.verifier = verifier
+	implementationRequest := StepRequest{WorkItem: item, Node: wfe.Node{ID: "impl"},
+		Feedback: &wfe.ReviewFeedback{ArtifactHash: reviewedHash}}
+	result, err := runner.mutate(ctx, implementationRequest, false)
+	if err != nil || result.Status != StepChanges ||
+		!strings.Contains(result.Detail, "repair still fails verification") {
+		t.Fatalf("unverified implementation repair result=%+v err=%v", result, err)
+	}
+	if agents.calls != 0 || verifier.calls != 1 {
+		t.Fatalf("unverified repair delegate calls=%d verifier calls=%d", agents.calls, verifier.calls)
+	}
+
+	verifier.err = nil
+	result, err = runner.mutate(ctx, implementationRequest, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agents.calls != 0 || verifier.calls != 2 {
+		t.Fatalf("verified repair delegate calls=%d verifier calls=%d", agents.calls, verifier.calls)
+	}
+	if result.Status != StepAdvanced || result.Artifact != branch ||
+		!strings.Contains(result.Detail, "verified and re-freezing exact repair") {
+		t.Fatalf("implementation repair result=%+v", result)
+	}
+
+	agents.calls = 0
+	result, err = runner.mutate(ctx, StepRequest{WorkItem: item, Node: wfe.Node{ID: "document"},
 		Feedback: &wfe.ReviewFeedback{ArtifactHash: reviewedHash}}, true)
 	if err != nil {
 		t.Fatal(err)
