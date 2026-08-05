@@ -255,8 +255,27 @@ def load_model():
     _model = None
     if EMBEDDER_BACKEND in ("onnx", "auto"):
         try:
-            _model = SentenceTransformer(MODEL_NAME, revision=MODEL_REVISION,
-                                         trust_remote_code=True, backend="onnx")
+            # Load from the LOCAL SNAPSHOT DIRECTORY, not the repo id.
+            #
+            # Given a repo id, sentence-transformers lists the repo tree over the
+            # network to decide which onnx artefact to load -- before it honours
+            # file_name -- so under HF_HUB_OFFLINE=1 it fails with "Cannot reach
+            # https://huggingface.co/api/models/.../tree/main: offline mode is
+            # enabled" and silently drops onto fp32 torch. local_files_only and
+            # an explicit file_name do not prevent that listing.
+            #
+            # snapshot_download(local_files_only=True) resolves the already-baked
+            # directory without touching the network, and a local path gives ST
+            # nothing to enumerate. Loading through ST rather than driving
+            # onnxruntime directly keeps its pooling and normalisation exactly as
+            # the torch path had them, so the vector space does not move.
+            from huggingface_hub import snapshot_download
+
+            local_dir = snapshot_download(MODEL_NAME, revision=MODEL_REVISION,
+                                          local_files_only=True)
+            _model = SentenceTransformer(
+                local_dir, trust_remote_code=True, backend="onnx",
+                model_kwargs={"file_name": "onnx/model.onnx"})
             _runtime = "onnx"
         except Exception as exc:  # missing optimum/onnxruntime, or no baked graph
             if EMBEDDER_BACKEND == "onnx":
