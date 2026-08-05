@@ -819,7 +819,7 @@ WHERE work_item_id=? AND reservation_owner=? AND reservation_state='reserved'`, 
 func (s *Store) HeartbeatWorkflowBudget(ctx context.Context, workItemID, owner string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE lifecycle_work_item
 SET reservation_lease_until=datetime('now','+2 minutes')
-WHERE work_item_id=? AND reservation_owner=? AND reservation_state='reserved'`, workItemID, owner)
+WHERE work_item_id=? AND reservation_owner=? AND reservation_state IN ('reserved','actual','unresolved')`, workItemID, owner)
 	return err
 }
 
@@ -1227,7 +1227,7 @@ func (s *Store) Resume(ctx context.Context, workItemID string) error {
 	}
 	// delegate_failed parks explicitly for a human, so a human must be able to
 	// release it once the underlying delegate problem is addressed.
-	operatorReasons := map[string]bool{"manual": true, "wall_cap": true, "turn_cap": true, "retry_limit": true, "convergence_limit": true, "convergence_no_progress": true, "budget_cap": true, "fanout_limit": true, "workflow_definition_invalid": true, "workflow_block_unavailable": true, "delegate_failed": true,
+	operatorReasons := map[string]bool{"manual": true, "wall_cap": true, "turn_cap": true, "retry_limit": true, "convergence_limit": true, "convergence_no_progress": true, "budget_cap": true, "fanout_limit": true, "workflow_definition_invalid": true, "workflow_block_unavailable": true, "delegate_failed": true, "replay_unrecoverable": true,
 		// The roundtable judged the request itself unimplementable. A human amends
 		// the request and resumes; nothing the engine can do releases it.
 		"request_unimplementable": true}

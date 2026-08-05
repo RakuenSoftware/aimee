@@ -203,23 +203,19 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 
 	stopHeartbeat := make(chan struct{})
 	heartbeatDone := make(chan struct{})
-	if !budget.ReplayOnly {
-		go func() {
-			defer close(heartbeatDone)
-			ticker := time.NewTicker(30 * time.Second)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-stopHeartbeat:
-					return
-				case <-ticker.C:
-					_ = e.db.HeartbeatWorkflowBudget(context.WithoutCancel(ctx), item.ID, owner)
-				}
+	go func() {
+		defer close(heartbeatDone)
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopHeartbeat:
+				return
+			case <-ticker.C:
+				_ = e.db.HeartbeatWorkflowBudget(context.WithoutCancel(ctx), item.ID, owner)
 			}
-		}()
-	} else {
-		close(heartbeatDone)
-	}
+		}
+	}()
 	step, err := e.runner.Run(ctx, req)
 	// Stop the heartbeat and wait for it to exit before touching the reservation.
 	// Awaiting the goroutine guarantees no lease-extending write can land after

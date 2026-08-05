@@ -35,6 +35,14 @@ extern "C"
    int db1_delegate_reservation_get(const char *execution_key, int *out_job_id, char *participant,
                                     size_t participant_cap);
 
+   /* Adopt a reservation written by an older execution-key algorithm. The new
+    * and old keys must share the complete work-item/stage/version prefix, and
+    * exactly one usable row may match. The row is moved atomically to
+    * execution_key; ambiguous grouped reservations fail closed with -1. */
+   int db1_delegate_reservation_adopt_sole_legacy(const char *execution_key,
+                                                  const char *work_item_id, int *out_job_id,
+                                                  char *participant, size_t participant_cap);
+
    /* Reserve execution_key for job_id, replacing any previous reservation under
     * that key. work_item_id may be NULL or "" for a reservation that no workflow
     * item owns. Returns 0 on success, -1 on error or an absent table. */

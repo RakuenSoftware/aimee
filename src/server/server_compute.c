@@ -852,6 +852,16 @@ void delegate_worker(void *arg)
       compute_ctx_free(cctx);
       return;
    }
+   if (tool_loop_timeout_ms_cap > 0)
+   {
+      struct timespec now;
+      if (clock_gettime(CLOCK_MONOTONIC, &now) == 0)
+      {
+         acfg.tool_loop_timeout_ms_cap = tool_loop_timeout_ms_cap;
+         acfg.tool_loop_deadline_ms =
+             (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000 + tool_loop_timeout_ms_cap;
+      }
+   }
    /* A participant is a delegate-service continuation token. Resolve it here,
     * behind the generic delegation boundary, so coordinators never learn or
     * retain the concrete agent identity. The durable job row survives service
@@ -2105,8 +2115,16 @@ int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    const char *execution_key = request_context_idempotency_key();
    char participant[DB1_AJ_PARTICIPANT_LEN] = "";
    int job_id = 0;
-   if (execution_key[0] &&
-       db1_delegate_reservation_get(execution_key, &job_id, participant, sizeof(participant)) == 0)
+   int reservation_found =
+       execution_key[0] &&
+       db1_delegate_reservation_get(execution_key, &job_id, participant, sizeof(participant)) == 0;
+   cJSON *replay_only = cJSON_GetObjectItemCaseSensitive(req, "replay_only");
+   cJSON *work_item = cJSON_GetObjectItemCaseSensitive(req, "work_item_id");
+   if (!reservation_found && cJSON_IsTrue(replay_only) && cJSON_IsString(work_item))
+      reservation_found =
+          db1_delegate_reservation_adopt_sole_legacy(execution_key, work_item->valuestring, &job_id,
+                                                     participant, sizeof(participant)) == 0;
+   if (reservation_found)
    {
       cJSON *replayed = jo_ok();
       cJSON_AddNumberToObject(replayed, "job_id", job_id);
@@ -2120,7 +2138,7 @@ int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    /* A replay-only caller has already reconciled this step's spend. With no
     * reservation to replay there is nothing to serve, and launching would be
     * unreconciled duplicate spend, so report the absence instead. */
-   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "replay_only")))
+   if (cJSON_IsTrue(replay_only))
    {
       cJSON *absent = jo_ok();
       cJSON_AddNumberToObject(absent, "job_id", 0);
@@ -2149,9 +2167,9 @@ int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * written first would make every retry replay a launch that never happened. */
    if (execution_key[0])
    {
-      cJSON *witem = cJSON_GetObjectItemCaseSensitive(req, "work_item_id");
-      db1_delegate_reservation_save(execution_key, cJSON_IsString(witem) ? witem->valuestring : "",
-                                    job_id, participant);
+      db1_delegate_reservation_save(execution_key,
+                                    cJSON_IsString(work_item) ? work_item->valuestring : "", job_id,
+                                    participant);
    }
    cJSON_AddStringToObject(resp, "job_status", "pending");
    return server_send_ok(conn, resp);

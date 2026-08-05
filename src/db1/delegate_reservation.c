@@ -66,6 +66,68 @@ int db1_delegate_reservation_get(const char *execution_key, int *out_job_id, cha
    return found;
 }
 
+int db1_delegate_reservation_adopt_sole_legacy(const char *execution_key, const char *work_item_id,
+                                               int *out_job_id, char *participant,
+                                               size_t participant_cap)
+{
+   if (participant && participant_cap)
+      participant[0] = '\0';
+   if (!reservation_key_ok(execution_key) || !work_item_id || !work_item_id[0] || !out_job_id)
+      return -1;
+   *out_job_id = 0;
+   const char *hash_separator = strrchr(execution_key, ':');
+   if (!hash_separator || hash_separator == execution_key || !hash_separator[1])
+      return -1;
+   size_t prefix_len = (size_t)(hash_separator - execution_key) + 1;
+   if (prefix_len >= DB1_DELEGATE_RESERVATION_KEY_MAX)
+      return -1;
+   char prefix[DB1_DELEGATE_RESERVATION_KEY_MAX];
+   memcpy(prefix, execution_key, prefix_len);
+   prefix[prefix_len] = '\0';
+
+   sqlite3 *db = db1_conn();
+   if (!db || !reservation_table_present(db))
+      return -1;
+   sqlite3_stmt *stmt = NULL;
+   /* One UPDATE owns both the cardinality check and the key move. There is no
+    * read-then-write window in which a grouped seat can appear and be guessed. */
+   static const char *sql =
+       "UPDATE lifecycle_delegate_job SET execution_key = ?, updated_at = datetime('now') "
+       "WHERE execution_key = ("
+       " SELECT execution_key FROM lifecycle_delegate_job"
+       " WHERE work_item_id = ? AND substr(execution_key, 1, ?) = ? AND job_id > 0 LIMIT 1"
+       ") AND 1 = ("
+       " SELECT COUNT(*) FROM lifecycle_delegate_job"
+       " WHERE work_item_id = ? AND substr(execution_key, 1, ?) = ? AND job_id > 0"
+       ") AND NOT EXISTS (SELECT 1 FROM lifecycle_delegate_job WHERE execution_key = ?) "
+       "RETURNING job_id, participant_token";
+   if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(stmt, 1, execution_key, -1, SQLITE_STATIC);
+   sqlite3_bind_text(stmt, 2, work_item_id, -1, SQLITE_STATIC);
+   sqlite3_bind_int(stmt, 3, (int)prefix_len);
+   sqlite3_bind_text(stmt, 4, prefix, (int)prefix_len, SQLITE_TRANSIENT);
+   sqlite3_bind_text(stmt, 5, work_item_id, -1, SQLITE_STATIC);
+   sqlite3_bind_int(stmt, 6, (int)prefix_len);
+   sqlite3_bind_text(stmt, 7, prefix, (int)prefix_len, SQLITE_TRANSIENT);
+   sqlite3_bind_text(stmt, 8, execution_key, -1, SQLITE_STATIC);
+   int adopted = -1;
+   if (sqlite3_step(stmt) == SQLITE_ROW)
+   {
+      int job_id = sqlite3_column_int(stmt, 0);
+      if (job_id > 0)
+      {
+         *out_job_id = job_id;
+         const unsigned char *token = sqlite3_column_text(stmt, 1);
+         if (participant && participant_cap && token)
+            snprintf(participant, participant_cap, "%s", (const char *)token);
+         adopted = 0;
+      }
+   }
+   sqlite3_finalize(stmt);
+   return adopted;
+}
+
 int db1_delegate_reservation_save(const char *execution_key, const char *work_item_id, int job_id,
                                   const char *participant)
 {
