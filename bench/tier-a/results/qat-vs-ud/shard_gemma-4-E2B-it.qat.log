@@ -1,0 +1,6 @@
+[06:36:21Z] sizing: starting one server to measure resident VRAM
+[06:40:39Z]   one instance uses 1834 MiB of 16303 MiB
+[06:40:39Z]   -> running 1 processes, cache-ram 1024 MiB each
+[06:40:39Z]   all 1 servers up; VRAM now 1834 MiB
+[06:40:39Z] START gemma-4-E2B-it.qat across 1 shards
+[07:17:53Z] DONE gemma-4-E2B-it.qat rows=1001/1001 wall=37m14s procs=1 retries=0
