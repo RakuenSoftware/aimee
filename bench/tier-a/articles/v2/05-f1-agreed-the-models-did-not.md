@@ -1,4 +1,4 @@
-# Six ways a run scores fine and is broken
+# Eight ways a run scores fine and is broken
 
 ROUGH DRAFT.
 
@@ -104,7 +104,41 @@ model for a pipeline that writes into a knowledge graph and cannot tolerate
 invented edges. Those two models are not interchangeable and the ranking says
 they are.
 
-## Six: the guard refused a model that was fine
+## Six: a gate discarded every fact the model found
+
+`Qwen3-0.6B` scored 0.000. It scores 0.403 without the confidence floor.
+
+The model extracted facts, wrote a confidence of 0.0 beside them, and a gate meant
+to protect precision discarded all of them. `granite-4.0-350m` shows the same
+pattern, 0.000 floored against 0.206 unfloored.
+
+Across all sixteen models the self-reported confidence carries almost no signal.
+Most write exactly 0.0 or exactly 0.9 and nothing between. The floor was retired
+and replaced with a groundedness check that both endpoints trace back to the note
+text.
+
+It also inverted a size comparison. `granite-4.0-1b` against `granite-4.1-3b`
+inverts **only under the floor**: floored, the 1B wins 0.600 to 0.571; unfloored,
+the 3B wins 0.648 to 0.592. The floor discarded 13 of the 3B's facts against the
+1B's 2. That pair measures the gate, not the parameter count, and it sat in a
+ranking table looking like a size result.
+
+**A small model that scores zero on your benchmark may be extracting correctly and
+failing your gate.** Check the unfloored score before concluding anything.
+
+## Seven: two models scored zero for opposite reasons
+
+`SmolLM2-360M` and `gemma-3-270m` both score 0.000 with a JSON parse rate of 1.00
+and a schema rate of 0.00. They answer, the answer parses, and it is never the
+`{"facts":[...]}` wrapper the task asks for. No downstream gate recovers that.
+
+`Qwen3-0.6B` also scores 0.000, with a parse rate of 0.99 and a schema rate of
+0.97. Its output is fine and a gate ate it.
+
+Same number, opposite diagnosis: one pair is unusable at this prompt, the other was
+misconfigured. Parse rate and schema rate separate them in one line.
+
+## Eight: the guard refused a model that was fine
 
 A model-identity check derived the expected family name from the repository name.
 Google names its file `gemma-4-E2B_q4_0-it.gguf`, which does not contain the stem
@@ -129,8 +163,11 @@ more often".
 **Precision and recall separately.** A tie in F1 is frequently two failure modes
 netting out.
 
-Five of those six were already being computed somewhere in my harness before I
-printed them. The cost of this list is display, not measurement.
+**The unfloored score, beside the floored one.** A gate that protects precision can
+take a working model to zero, and it did, twice.
+
+Every one of those was already being computed somewhere in my harness before I
+printed it. The cost of this list is display, not measurement.
 
 ## What is still open
 

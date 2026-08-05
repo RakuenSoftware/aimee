@@ -53,8 +53,15 @@ Verification pushes several tokens through the target in one forward pass. The
 batch shape changes, the floating-point reduction order changes with it, and
 near-ties flip. Twenty-six notes in a hundred.
 
-So the question is not whether the output moved. It moved. The question is
-whether it got worse, and the table above says no.
+So the question is not whether the output moved. It moved. The question is whether
+it got worse, and the table above says no.
+
+It also moves the **same way every time**. Two speculative runs against each other,
+fresh server each: 100/100 on E4B and 100/100 on E2B. The batch shapes are fixed by
+the draft length rather than by anything external. I checked E2B rather than
+assuming it, because `--model` is only a label and a stale server would have loaded
+E4B twice and produced a meaningless pass: `/props` confirmed the quant, and a
+median latency of 1345 ms against E4B's 2548 ms confirmed it independently.
 
 I checked one more way, because an aggregate null can be two opposite effects
 cancelling. On a different question in this project, reasoning on against
@@ -121,10 +128,23 @@ throughput for no accuracy cost that 10,000 notes can detect.
 
 Two limits, both load-bearing. It is repeatable but not identical, so an arm run
 with MTP cannot be compared against an arm run without it. Those are different
-configurations, not two measurements of one thing. And the speedup belongs to the
-model and the backend rather than to the feature: 1.59x for E2B and 1.83x for E4B
-at one process, on a curve that keeps climbing on Vulkan where it flattens on
-CUDA.
+configurations, not two measurements of one thing. And the speedup belongs to the model
+and the backend rather than to the feature:
+
+| model | sequential | with MTP | ratio |
+|---|---:|---:|---:|
+| E4B UD-Q4_K_XL | 22.9 notes/min | 41.9 | **1.83x** |
+| E2B UD-Q4_K_XL | 27.0 notes/min | 43.0 | **1.59x** |
+
+Speculation reclaims compute that sits idle while the card waits on memory. A
+smaller model is less bandwidth-bound at batch size 1, so there is less idle compute
+to reclaim and less to gain. Quoting one number for "MTP speedup" would be wrong.
+
+The same mechanism explains why it does not compound with concurrency. Thirty-two
+slots alone is 4.54x; thirty-two slots and speculation together is **4.34x**, which
+is marginally slower. They spend the same resource. With 32 sequences in flight
+there is no idle capacity left for drafting to claim, so verification is added work
+with nowhere to hide.
 
 I can only vouch for gemma-4. It is the only family in this field that publishes
 an MTP draft, so I have no second family to check, and that is a limit on the

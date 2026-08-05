@@ -1,99 +1,192 @@
 # One sentence in my prompt turned a model's reasoning off
 
-ROUGH DRAFT. The +0.116 figure below has no interval. That is stated where it
+ROUGH DRAFT. The +0.116 figure below has no interval, and that is stated where it
 appears rather than at the end.
 
-A 10,000-note extraction run finished in 34 minutes. I read that as a fact about
-the hardware.
+A 10,000 note extraction run finished in 34 minutes. I read that as a fact about
+the hardware and moved on to the next arm.
 
-It should have taken about six hours. The model was not thinking. One sentence in
-my system prompt had suppressed its reasoning pass, and the benchmark got faster
-and worse at the same time.
+It should have taken about six hours. The model was not thinking, and it was not
+thinking because of a sentence I had written to make its output easier to parse.
 
-## Speed is a diagnostic, and I was reading it as a result
+## The clause
 
-The wrong number here is wall clock treated as a property of your setup. A run
-that comes in far under estimate is telling you something about the run.
+The extraction prompt ended with:
 
-The thing that binds is the reasoning pass. On gemma-4 E4B, turning it back on
-was worth **+0.116 relation-agnostic recall**. That figure carries no confidence
-interval, because my bootstrap tool scores strict F1 only and I never extended it.
-It is a single measurement on one model, and it is the number that decided the
-whole project's prompt.
+    No prose, no markdown.
 
-Flagging that: the largest single effect I have measured is also the one I have
-been laziest about.
+`gemma-4-E4B` applies that to its own reasoning channel. Across 10,000 notes of a
+run whose every row recorded `thinking: true`, it emitted zero reasoning tokens.
+
+I isolated it rather than guessing:
+
+| system prompt | notes that reasoned |
+|---|---:|
+| v4, unmodified | 0/20 |
+| minus `No prose, no markdown.` | 20/20 |
+| minus `Return ONLY a JSON object:` | 0/20 |
+| rescoped to "the answer itself must be JSON only" | 0/20 |
+| v5, "Reason first if it helps; the answer that follows..." | 20/20 |
+
+Two properties made it hard to see. **Nothing failed:** valid JSON, clean parse, no
+truncation, and an F1 of 0.5947 sitting comfortably among the other models. And
+**E2B does not have the behaviour**, so two arms of one sweep disagreed in a way
+that looked like an ordinary model-size effect.
+
+Deleting the sentence is not the fix. Removing it restores reasoning and brings
+back fenced ` ```json ` output on 14 of 20 notes. The clause was doing real work
+and the production parser's first-brace-to-last-brace scan was quietly absorbing
+the cost. The fix was to rescope it, and the rescoping had to be tested, because
+the first two attempts did nothing at all.
+
+The obvious objection was the quantisation. I tested it on two independent builds
+with **different chat templates**, Unsloth UD-Q4_K_XL and stock ggml-org Q8_0.
+Both suppress. It is the model.
+
+## The evidence was in all ten thousand rows
+
+The first instinct was completion length. Median 27 tokens sounds broken. It is
+not: `{"facts":[]}` is 5 tokens and a single triple is about 30, so a p10 of 5, a
+median of 27 and a p90 of 49 is what a healthy extractor produces on a corpus that
+is a third factless. `parse_ok` was 10000 of 10000.
+
+The answer channel was never unhealthy. Only the reasoning channel was, and the
+answer channel is the one every tool looks at.
+
+The real evidence was in every row:
+
+```json
+{"thinking": true, "reasoning_chars": 0, "parse_ok": true, "truncated": false}
+```
+
+That row contradicts itself. The run was configured to think, produced no thought,
+and said so ten thousand times, in a field added during an earlier investigation
+and never consumed by anything.
+
+| | v4 as banked | thinking restored |
+|---|---:|---:|
+| median completion tokens | 27 | ~390 |
+| median latency | 214 ms | ~1790 ms |
+| notes that reasoned | 0/10000 | 20/20 |
+| throughput | 280/min | 27/min |
+
+The tenfold speed difference was the most visible symptom and the one I explained
+away first.
+
+**Recording a signal is not checking it.** This was the fourth instance of that
+defect class in this codebase. The fix is a gate rather than a note: the scorer now
+refuses to score a run whose rows claim thinking and contain no reasoning anywhere.
+
+## The constant came from 70 notes and outlived them
+
+While fixing the above I went looking for why thinking was enabled at all. The
+justification was a constant that appeared in `kb_curator_provider.c`, in
+`provider_client.c`, and in the commit messages that introduced both:
+
+**"Thinking is worth +0.084 F1 to E4B."**
+
+Its provenance was 53 true positives across about 70 notes, with no interval. It
+had become a design decision.
+
+Re-measured paired over 955 notes, same model, quant, card and corpus:
+
+| | strict F1 | precision | recall |
+|---|---:|---:|---:|
+| thinking suppressed | 0.5990 | 0.6607 | 0.5478 |
+| thinking restored | 0.6093 | 0.6175 | 0.6014 |
+
+**+0.0103, 95% interval [−0.0201, +0.0404]**, 5,000 paired replicates. The constant
+was eight times its own re-measured value and the sign was the only part that
+survived.
+
+## Stopping there would have been the same error in reverse
+
+That is the part of this worth taking away.
+
+An audit of the errors found that 68 of the 93 extra false positives introduced by
+thinking are reconcilable by `rel_type_canonicalize()` and the entity graph,
+machinery production already runs. Only about 24 are genuinely spurious. Scored on
+entity pairs while ignoring how the predicate was named:
+
+| | relation-agnostic F1 | precision | recall |
+|---|---:|---:|---:|
+| thinking suppressed | 0.7783 | 0.8585 | 0.7118 |
+| thinking restored | 0.8390 | 0.8503 | 0.8280 |
+
+**Recall up 0.116 at flat precision**, fabrication rate 0.0 in both arms. It does
+cost abstention, 0.907 down to 0.870.
+
+Thinking finds materially more real facts and names them more variably. Strict F1
+charges that variance twice, once as a miss and once as a false positive, so a
+change that is clearly good under the metric production cares about looks like
+noise under the metric the benchmark reports.
+
+I have no interval on the relation-agnostic delta. The bootstrap tool scores strict
+F1 only. That is the same defect as the +0.084 constant, one level up, and it is
+the largest unbounded number in this project.
 
 ## Reasoning is a property of the run, not the model
 
-Three shapes appear in this field of sixteen models.
+Three shapes appear across fourteen models.
 
-**Suppressed by prompt.** E4B loses its reasoning pass to a prompt clause. E2B,
-the same family, does not. I know of no way to predict which from the model card.
+**Suppressed by prompt.** E4B loses its reasoning pass to a clause. E2B, same
+family, does not.
 
-**Absent entirely.** granite and gemma-3n reason on zero rows in this harness.
-Not reduced. Zero.
+**Absent entirely.** Seven of fourteen models in my head-to-head emit no reasoning
+pass at all: both granite models, gemma-3n-E4B, SmolLM3-3B, and three of the LFM2.5
+family. Not reduced. Zero.
 
-**Partial, and stable.** gemma-4 E4B under quantisation-aware training declines to
-reason on 479 of 3,002 rows, 16%. 204 of those answer `{"facts":[]}` in five
-tokens. The rate reproduces at two corpus sizes, so it is not a small-sample
-artifact.
+**Partial and stable.** gemma-4 E4B under QAT declines to reason on 479 of 3,002
+rows, 16%, of which 204 answer `{"facts":[]}` in five tokens. The rate reproduces at
+two corpus sizes. Those rows abstain at 51% against 24.5% on rows where it did
+reason.
 
-Those partial rows abstain at 51% against 24.5% on rows where the model did
-reason. A model that silently loses its reasoning pass on a sixth of your input
-scores as a worse model.
+I know E4B suppresses and E2B does not. **The other twelve are unchecked.** Some
+fraction of the bottom half of my ranking may be a prompt problem rather than a
+model problem, and I cannot currently tell you which.
 
-## The explanation I had was wrong, and its own test killed it
+## The explanation I had was wrong and its own test killed it
 
-The obvious reading of the 16% is that reasoning starvation causes the deficit:
-E4B scores below its own submodel under QAT, and here are the rows where it
-skipped the work.
+The obvious reading of the 16% is that starvation causes E4B's deficit against its
+own submodel.
 
 Restricted to the 2,523 rows where E4B **did** reason, it scores 0.6238 against
-E2B's 0.6420. The gap is wider where it reasons, not narrower.
+E2B's 0.6420. The gap is wider where it reasons.
 
 So the starvation is real, reproducible, and not the cause of anything I can
-attribute to it. I do not know what drives those rows. It is not context length,
-truncation, or an output-envelope problem: all three are zero across that arm.
-
-That is an open question, not a caveat.
+attribute to it. Not context length, not truncation, not an output-envelope
+problem: all three are zero across that arm. That is an open question, not a
+caveat.
 
 ## An aggregate null hid a +0.24
 
-The reason I now split every null by category comes from this subject.
-
 Reasoning on against reasoning off aggregated to approximately nothing across the
-corpus. Split by note category, it is **+0.24 F1 on one subset and −0.02 on
+corpus. Split by note category it is **+0.24 F1 on one subset and −0.02 on
 another**, cancelling.
 
 A single number over a heterogeneous corpus can be the average of two effects
-that point in opposite directions, and the corpus here is heterogeneous by design:
-ten categories, from notes carrying three facts to notes carrying none.
+pointing opposite ways, and mine is heterogeneous by design: ten categories, from
+notes carrying three facts to notes carrying none.
 
-I have since split the speculative-decoding pairs the same way, and there the null
-survives: no category exceeds its own interval. That is the useful contrast.
-Aggregate nulls are not all the same, and you cannot tell which kind you have
+I have since split the speculative-decoding pairs the same way and there the null
+survives, no category exceeding its own interval. That contrast is the useful part.
+Aggregate nulls are not all the same kind, and you cannot tell which you have
 without splitting.
 
 ## What to do
 
-**Count reasoning rows and print the percentage.** Not a flag. A percentage, per
-arm. Mine is one field in the prediction row and I did not look at it for weeks.
+**Count reasoning rows and print the percentage.** Not a flag, a percentage, per
+arm. Mine was one field in the prediction row and nothing read it for weeks.
 
-**Treat an unexpectedly fast run as a bug report.** Six hours became 34 minutes
-and I filed it as good news.
+**Make it a gate, not a field.** A check that can refuse the run is worth more than
+a value in the output.
 
-**Split every null by whatever strata your corpus has.** If it has none, that is
-worth fixing before you trust any aggregate.
+**Treat an unexpectedly fast run as a bug report.** Six hours became 34 minutes and
+I filed it as good news.
 
-**Test your prompt against every model you rank, not the one you developed
-against.** I know E4B suppresses and E2B does not. The other fourteen in my field
-are unchecked, and a model that quietly loses its reasoning pass looks like a
-worse model rather than a misconfigured one.
+**Put an interval beside any constant that reaches your source code**, or keep the
+constant out of the source. Mine was off by a factor of eight and shaped a design
+decision in two files.
 
-## What I have not done
-
-The +0.116 needs an interval, which means extending the bootstrap tool to
-relation-agnostic scoring. Until then it is one number from one model on one
-corpus, and it is carrying more weight in this project than anything else with
-that provenance.
+**Split every null by whatever strata your corpus has.** If it has none, fix that
+before trusting any aggregate.

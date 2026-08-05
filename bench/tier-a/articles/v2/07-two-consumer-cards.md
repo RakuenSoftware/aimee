@@ -43,6 +43,23 @@ it.
 assumption that the card is bandwidth-saturated by then. That assumption has never
 been measured and I would not defend it.
 
+## The fast configuration is the one you cannot use
+
+Thirty-two slots in one process is 4.54x, far beyond anything process isolation
+reaches. It is also not reproducible: two runs of that configuration agree on 63 of
+100 raw completions and 75 of 100 extracted fact sets.
+
+Slots batch requests into a shared forward pass, so one sequence's logits depend on
+which other requests are in flight beside it, and that depends on arrival timing.
+Separate processes have separate contexts and never share a matrix multiply.
+Contention between them changes timing, which changes nothing arithmetic.
+
+That is why this benchmark runs N single-slot servers rather than one server with N
+slots, and pays roughly half the available speed for it. The corpus is split
+round-robin rather than in blocks, because it is ordered by domain and a contiguous
+split would hand one shard every negation note and another every infrastructure
+note, and they would finish hours apart.
+
 ## Per-stream throughput falls, and that is the number people project with
 
 At one process the 5080 serves 359 tok/s. At three processes it serves 148 tok/s
@@ -76,6 +93,12 @@ So that arm runs at a different process count from the rest of the field, which
 makes it incomparable to the ranking table by construction. Process count is worth
 about 0.0105 F1 in this harness. I say so where the number appears rather than
 letting it sit in a ranking it does not belong in.
+
+## Load time is a real budget line
+
+On GPU, the largest quantisation of E4B took **420 seconds** to load before serving
+its first note. Run several models in sequence and that is a meaningful part of an
+overnight campaign, and it appears in no accuracy column anywhere.
 
 ## Two sessions, one GPU
 

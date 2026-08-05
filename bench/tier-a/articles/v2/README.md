@@ -1,4 +1,4 @@
-# Ten drafts
+# Eleven drafts
 
 Rough drafts, one per distinct subject the measurement body supports. Written
 against `/home/virant/dev/voice-guide/VOICE.md` (Part I and Part III).
@@ -8,6 +8,7 @@ deleted or superseded yet; that is a decision, not a cleanup.
 
 | # | subject | evidence | state |
 |---|---|---|---|
+| 00 | the head-to-head: 18 arms, 14 models | native 1001-note arms on v5, full pathology columns | the piece the project was for |
 | 01 | speculative decoding, throughput against accuracy | 4 of 6 paired 10k arms, 1 bootstrap, per-category split | strongest; 2 arms outstanding |
 | 02 | which quant beats how many bits | 3 ladders, QAT vs UD at 2 tiers, mid-tier resolution | strong |
 | 03 | how a benchmark lies to its author | 5 defects, each with correction and the discarded column | strong, and self-implicating |
@@ -18,6 +19,23 @@ deleted or superseded yet; that is a decision, not a cleanup.
 | 08 | how small can an extractor be | 16 models | weakest; ranking needs rebuilding at n>=1001 |
 | 09 | the corpus decides what you can find | composition, tiers, ontology, one bad template | strong; corpus not reproducible |
 | 10 | the benchmark audited production | 5 structural defects | smallest n; defects are structural |
+
+## What the mining pass moved out of the original six
+
+Three imports were structural rather than decorative:
+
+- **The sign test** into 02. Eight independent runs across five corpora, same sign
+  every time, p = 0.008 by direction alone. Replication beats sample size for small
+  effects, and it appeared in none of the first ten drafts.
+- **The 32-slot disqualification** into 04 and 07. 4.54x faster and 63/100 against
+  itself. That contrast is what makes "repeatable, not identical" land.
+- **The confidence floor** into 05 and 08. A gate took two working models to 0.000
+  and inverted a size comparison, and self-reported confidence carries almost no
+  signal across sixteen models.
+
+Also imported: the `No prose, no markdown.` isolation table, the +0.084 constant
+that re-measured at +0.0103, the `runs_on` template with its 23/23 against 0/28
+split, the ontology's 167 undefined predicates, and the production detail in 10.
 
 ## What every draft carries
 

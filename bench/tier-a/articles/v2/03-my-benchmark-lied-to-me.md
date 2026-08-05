@@ -1,10 +1,10 @@
-# My benchmark lied to me five times and the evidence was always already on disk
+# My benchmark lied to me six times and the evidence was always already on disk
 
 ROUGH DRAFT.
 
 Every wrong answer I published in this project came from an instrument biased in
-the direction I wanted. In all five cases the data that would have caught it was
-already sitting in my own output.
+the direction I wanted. In five of the six, the data that would have caught it was
+already sitting in my own output. The sixth is worse, and it is last.
 
 That is the finding. Not "measure carefully". The specific, repeatable failure is
 that a benchmark computes more than it prints, and the discarded column is the
@@ -16,7 +16,7 @@ You are watching the model. Sixteen of them, a ladder of quants, an accuracy
 column. The thing actually moving your numbers is a process count, a startup
 timer, and a threshold you borrowed from an unrelated experiment.
 
-Five instances follow. Each has a correction beside it, because a defect list
+Six instances follow. Each has a correction beside it, because a defect list
 without fixes is a confession rather than a method.
 
 ## One: throughput that grew with the variable under test
@@ -102,7 +102,26 @@ unaffordable was free.
 a larger run is comparing two different things. Mine did. The effect is −0.0079,
 inside the interval, so no ranking moved. It was luck, not design.
 
-## Five: I fitted a story to my own house theme
+## Five: a constant from 70 notes reached three source files
+
+The justification for enabling the model's reasoning pass was a constant that
+appeared in `kb_curator_provider.c`, in `provider_client.c`, and in the commit
+messages that introduced both: **thinking is worth +0.084 F1 to E4B.**
+
+Its provenance was 53 true positives across about 70 notes, with no interval.
+
+Re-measured paired over 955 notes: **+0.0103, 95% interval [−0.0201, +0.0404].**
+The constant was eight times its own re-measured value and only the sign survived.
+
+**Fix:** an interval beside the number, in the source comment, or the number does
+not go in the source.
+
+**Already on disk:** nothing, and that is the point. This one had no discarded
+column, because no interval was ever computed. It is the cheapest of the six to
+prevent and the most expensive to find, because a number in a source file has no
+provenance attached to it at all.
+
+## Six: I fitted a story to my own house theme
 
 Splitting the paired arms by category, three categories scored exactly 0.0000 in
 every arm. I wrote that up as a structural blind spot in F1: a third of the
@@ -125,12 +144,13 @@ which is the fourth time in this project.
 ## What survives
 
 A benchmark computes more than it prints. The discarded column is the one that
-catches you, and in five out of five cases here it was already being computed.
+catches you, and in five of the six cases here it was already being computed. The sixth had no
+interval to discard, which is worse.
 
 So the practice is not "be careful". It is:
 
-**Print the denominators.** Process count, startup time, sample size, client
-count. Every one of my five was a number the harness had and did not show.
+**Print the denominators.** Process count, startup time, sample size, client count,
+slot count. Five of my six were a number the harness had and did not show.
 
 **Never share a threshold across experiments.** A number that was an effect size
 in one place is not a significance bound in another, however similar its
@@ -143,4 +163,4 @@ saying why.
 **A subset is not a run**, unless you have turned the cache off and checked.
 
 Each of those is one line of output or one hour of work. I spent about a week on
-the five errors they would have prevented.
+the six errors they would have prevented.
