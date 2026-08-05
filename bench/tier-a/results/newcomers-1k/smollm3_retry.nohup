@@ -14,3 +14,10 @@ merged 1001 rows, 0 missing
 [05:52:21Z] sizing: starting one server to measure resident VRAM
 [05:52:37Z]   one instance uses 4084 MiB of 16303 MiB
 [05:52:37Z]   -> running 3 processes, cache-ram 1024 MiB each
+[05:53:09Z]   all 3 servers up; VRAM now 12242 MiB
+[05:53:10Z] START SmolLM3-3B.Q8_0 across 3 shards
+merged 1001 rows, 0 missing
+[06:04:00Z] DONE SmolLM3-3B.Q8_0 rows=1001/1001 wall=10m50s procs=3 retries=0
+[06:04:06Z]   thinking guard fired; re-scoring with --allow-thinking-off
+[06:04:06Z] OK   SmolLM3-3B.Q8_0 strictF1=0.3933 wall=11m
+[06:04:06Z] === SMOLLM3 RETRY COMPLETE ===

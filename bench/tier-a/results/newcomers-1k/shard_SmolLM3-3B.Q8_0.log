@@ -4,3 +4,6 @@
 [05:52:21Z] sizing: starting one server to measure resident VRAM
 [05:52:37Z]   one instance uses 4084 MiB of 16303 MiB
 [05:52:37Z]   -> running 3 processes, cache-ram 1024 MiB each
+[05:53:09Z]   all 3 servers up; VRAM now 12242 MiB
+[05:53:10Z] START SmolLM3-3B.Q8_0 across 3 shards
+[06:04:00Z] DONE SmolLM3-3B.Q8_0 rows=1001/1001 wall=10m50s procs=3 retries=0
