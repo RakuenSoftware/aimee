@@ -296,6 +296,81 @@ func TestExecutedTurnCountExcludesAdministrativeEvents(t *testing.T) {
 	}
 }
 
+func TestRetryLimitResumeStartsFreshBudgetAndKeepsDiagnostic(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	if err := store.CreateWorkItem(ctx, CreateWorkItem{ID: "wi_retry_resume", Repo: "repo", ProposalPath: "retry", WorkflowName: "build", StartStage: "impl"}); err != nil {
+		t.Fatal(err)
+	}
+	if parked, err := store.RecordRetry(ctx, "wi_retry_resume", "impl", "impl", "verify failed: stale docs", 1, 0); err != nil || !parked {
+		t.Fatalf("initial retry: parked=%v err=%v", parked, err)
+	}
+	if err := store.Resume(ctx, "wi_retry_resume"); err != nil {
+		t.Fatal(err)
+	}
+	if attempts, err := store.StageAttemptCount(ctx, "wi_retry_resume", "impl"); err != nil || attempts != 0 {
+		t.Fatalf("attempts after retry-limit resume=%d err=%v, want fresh budget", attempts, err)
+	}
+	if detail, err := store.LatestStageRetryDetail(ctx, "wi_retry_resume", "impl"); err != nil || detail != "verify failed: stale docs" {
+		t.Fatalf("retry detail=%q err=%v", detail, err)
+	}
+	if parked, err := store.RecordRetry(ctx, "wi_retry_resume", "impl", "impl", "verify failed again", 3, 0); err != nil || parked {
+		t.Fatalf("first retry in fresh budget: parked=%v err=%v", parked, err)
+	}
+	if attempts, err := store.StageAttemptCount(ctx, "wi_retry_resume", "impl"); err != nil || attempts != 1 {
+		t.Fatalf("attempts after fresh failure=%d err=%v", attempts, err)
+	}
+	if detail, err := store.LatestStageRetryDetail(ctx, "wi_retry_resume", "impl"); err != nil || detail != "verify failed again" {
+		t.Fatalf("new retry detail=%q err=%v", detail, err)
+	}
+	if err := store.Move(ctx, "wi_retry_resume", "impl", "review", "advance", "verified", "hash", 0); err != nil {
+		t.Fatal(err)
+	}
+	if detail, err := store.LatestStageRetryDetail(ctx, "wi_retry_resume", "impl"); err != nil || detail != "" {
+		t.Fatalf("completed-stage retry detail=%q err=%v, want stale detail cleared", detail, err)
+	}
+}
+
+func TestWorkflowBudgetHeartbeatExtendsReplayReservations(t *testing.T) {
+	for _, state := range []string{"actual", "unresolved"} {
+		t.Run(state, func(t *testing.T) {
+			store := newTestStore(t)
+			createTestItem(t, store, "wi_heartbeat_"+state)
+			id := "wi_heartbeat_" + state
+			if _, err := store.db.ExecContext(t.Context(), `UPDATE lifecycle_work_item
+SET reservation_state=?,reservation_owner='owner',reservation_lease_until=datetime('now','-1 minute')
+WHERE work_item_id=?`, state, id); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.HeartbeatWorkflowBudget(t.Context(), id, "owner"); err != nil {
+				t.Fatal(err)
+			}
+			var live bool
+			if err := store.db.QueryRowContext(t.Context(), `SELECT reservation_lease_until > datetime('now')
+FROM lifecycle_work_item WHERE work_item_id=?`, id).Scan(&live); err != nil || !live {
+				t.Fatalf("live=%v err=%v", live, err)
+			}
+		})
+	}
+}
+
+func TestTransientPauseIsNotRepairContext(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	if err := store.CreateWorkItem(ctx, CreateWorkItem{ID: "wi_transient", Repo: "repo", ProposalPath: "transient", WorkflowName: "build", StartStage: "impl"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ParkWithDetail(ctx, "wi_transient", "impl", "runner_unavailable", "delegate service restarting", 0); err != nil {
+		t.Fatal(err)
+	}
+	if resumed, err := store.ResumeTransient(ctx, "runner_unavailable", 0); err != nil || resumed != 1 {
+		t.Fatalf("resume transient=%d err=%v", resumed, err)
+	}
+	if detail, err := store.LatestStageRetryDetail(ctx, "wi_transient", "impl"); err != nil || detail != "" {
+		t.Fatalf("transient pause leaked as repair detail=%q err=%v", detail, err)
+	}
+}
+
 func TestWorkflowBudgetAggregatesChildrenAndParksWholeTree(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
@@ -352,6 +427,21 @@ func TestGenericResumeCannotBypassLifecycleOwnedPause(t *testing.T) {
 	item, _ := store.WorkItem(context.Background(), "wi_owned_pause")
 	if item.PauseReason != "human_gate" {
 		t.Fatalf("item=%+v", item)
+	}
+}
+
+func TestReplayUnrecoverableCanBeResumedByOperator(t *testing.T) {
+	store := newTestStore(t)
+	createTestItem(t, store, "wi_replay_operator")
+	if err := store.Park(context.Background(), "wi_replay_operator", "plan_gate", "replay_unrecoverable", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Resume(context.Background(), "wi_replay_operator"); err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.WorkItem(context.Background(), "wi_replay_operator")
+	if err != nil || item.PauseReason != "" || item.State != "active" {
+		t.Fatalf("item=%+v err=%v", item, err)
 	}
 }
 

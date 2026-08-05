@@ -502,12 +502,17 @@ int db1_agent_job_cancel_unassigned(int job_id, const char *reason, int min_age_
                      -1, SQLITE_TRANSIENT);
    sqlite3_bind_int(stmt, 2, job_id);
    sqlite3_bind_text(stmt, 3, cutoff, -1, SQLITE_TRANSIENT);
+   /* Keep the transition result tied to this statement. sqlite3_changes() is
+    * connection-global, so a worker racing on the process-wide connection can
+    * replace its value after this statement releases SQLite's connection mutex.
+    * That made callers report that cancellation lost while the row was in fact
+    * cancelled (or report a win that belonged to the lease statement). */
    int rc = sqlite3_step(stmt);
    int cancelled = rc == SQLITE_ROW && sqlite3_column_int(stmt, 0) == job_id;
    int final_rc = sqlite3_finalize(stmt);
-   if (final_rc != SQLITE_OK || (rc != SQLITE_ROW && rc != SQLITE_DONE))
-      return -1;
-   return cancelled ? 1 : 0;
+   if (cancelled)
+      return final_rc == SQLITE_OK ? 1 : -1;
+   return rc == SQLITE_DONE && final_rc == SQLITE_OK ? 0 : -1;
 }
 
 int db1_agent_job_cancel_by_id(int job_id, const char *reason)

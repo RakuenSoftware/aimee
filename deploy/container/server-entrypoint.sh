@@ -202,11 +202,54 @@ chown aimee:aimee "$AIMEE_HOME" "${AIMEE_WORKSPACES_DIR:-/var/lib/aimee-workspac
 # missing grants so an operator may tighten a persisted policy without the next
 # image start overwriting it.
 mkdir -p "$AIMEE_HOME/modules.d/server"
-for module_grant in /opt/aimee/module-grants/server/*.grant; do
+# Overridable ONLY so the seeding rules can be tested against a fixture
+# directory; production always uses the image path.
+AIMEE_MODULE_GRANT_SRC="${AIMEE_MODULE_GRANT_SRC:-/opt/aimee/module-grants/server}"
+
+# >>> module-grant-seeding (extracted by src/tests/test_module_grants.sh)
+# Telling a STALE IMAGE DEFAULT apart from an OPERATOR'S POLICY.
+#
+# Seeding deliberately never overwrites a persisted grant, so a module that
+# gains a stage cannot serve it until someone edits the file by hand — and the
+# failure is silent at the bus (the kind is simply refused). Blindly adopting
+# the shipped stage list would fix that by trampling deliberate policy, which is
+# a privilege expansion and strictly worse.
+#
+# The two cases are distinguishable if we record what the image wrote at seed
+# time: a file still byte-identical to what we seeded was never touched by an
+# operator, so replacing it restores an image default rather than overriding a
+# decision. Anything else keeps the warning and waits for a human.
+#
+# Note this is only knowable going forward. A grant seeded by an older image has
+# no record, so it is treated as operator-owned (warn, do not touch) — the
+# conservative side of the ambiguity.
+# Recorded under .seeded/<name>, the same convention seed_managed_defaults uses
+# above. The policy loader selects entries by a ".grant" suffix, so this
+# subdirectory is skipped rather than parsed -- worth stating, because the loader
+# rejects the WHOLE directory on one bad entry.
+grant_seed_record() { printf '%s/.seeded/%s\n' "$(dirname "$1")" "$(basename "$1")"; }
+
+grant_record_seed() {
+    command -v sha256sum >/dev/null 2>&1 || return 0
+    _rec=$(grant_seed_record "$1")
+    mkdir -p "$(dirname "$_rec")" 2>/dev/null || return 0
+    sha256sum "$1" | cut -d' ' -f1 > "$_rec" 2>/dev/null || return 0
+    chmod 0600 "$_rec" 2>/dev/null || true
+}
+
+grant_untouched_since_seed() {
+    command -v sha256sum >/dev/null 2>&1 || return 1
+    _rec=$(grant_seed_record "$1")
+    [ -f "$_rec" ] || return 1
+    [ "$(sha256sum "$1" | cut -d' ' -f1)" = "$(cat "$_rec" 2>/dev/null)" ]
+}
+
+for module_grant in "$AIMEE_MODULE_GRANT_SRC"/*.grant; do
     [ -f "$module_grant" ] || continue
     grant_target="$AIMEE_HOME/modules.d/server/$(basename "$module_grant")"
     if [ ! -e "$grant_target" ]; then
         cp "$module_grant" "$grant_target"
+        grant_record_seed "$grant_target"
         continue
     fi
     # A module that gains a stage in a new image cannot serve it under a grant
@@ -214,16 +257,32 @@ for module_grant in /opt/aimee/module-grants/server/*.grant; do
     # simply reports the module as not serving that kind. Copying over the
     # operator's file would defeat the whole point of seeding only what is
     # missing, so say so instead and let them decide.
+    # No record yet but already byte-identical to what this image ships: adopt it
+    # as managed so a LATER image can refresh it. Existing installs come under
+    # management this way instead of staying unmanageable forever.
+    if [ ! -f "$(grant_seed_record "$grant_target")" ] && cmp -s "$module_grant" "$grant_target"; then
+        grant_record_seed "$grant_target"
+    fi
     shipped_serve=$(grep '^serve=' "$module_grant" 2>/dev/null || true)
     persisted_serve=$(grep '^serve=' "$grant_target" 2>/dev/null || true)
     if [ "$shipped_serve" != "$persisted_serve" ]; then
         # log() is not defined this early in the script, so match its format.
-        printf '[server-entrypoint] warning: %s grant differs from this image\n' \
-            "$(basename "$module_grant" .grant)" >&2
-        printf '[server-entrypoint]   persisted: %s\n' "${persisted_serve:-<none>}" >&2
-        printf '[server-entrypoint]   shipped:   %s\n' "${shipped_serve:-<none>}" >&2
-        printf '[server-entrypoint]   stages only in the shipped grant are refused until %s is updated\n' \
-            "$grant_target" >&2
+        if grant_untouched_since_seed "$grant_target"; then
+            # Still exactly what this installation seeded, so the difference is
+            # image drift and adopting it overrides nobody.
+            printf '[server-entrypoint] %s grant is an unmodified image default and this image ships %s; adopting it\n' \
+                "$(basename "$module_grant" .grant)" "${shipped_serve:-<none>}" >&2
+            cp "$module_grant" "$grant_target"
+            grant_record_seed "$grant_target"
+        else
+            printf '[server-entrypoint] warning: %s grant differs from this image\n' \
+                "$(basename "$module_grant" .grant)" >&2
+            printf '[server-entrypoint]   persisted: %s\n' "${persisted_serve:-<none>}" >&2
+            printf '[server-entrypoint]   shipped:   %s\n' "${shipped_serve:-<none>}" >&2
+            printf '[server-entrypoint]   this file was edited after seeding, so it is treated as operator policy\n' >&2
+            printf '[server-entrypoint]   stages only in the shipped grant are refused until %s is updated\n' \
+                "$grant_target" >&2
+        fi
     fi
 done
 
@@ -245,17 +304,21 @@ for grant_target in "$AIMEE_HOME"/modules.d/server/*.grant; do
     [ -f "$grant_target" ] || continue
     pinned=$(sed -n 's/^executable=//p' "$grant_target" | head -1)
     [ -n "$pinned" ] && [ ! -x "$pinned" ] || continue
-    shipped="/opt/aimee/module-grants/server/$(basename "$grant_target")"
+    shipped="$AIMEE_MODULE_GRANT_SRC/$(basename "$grant_target")"
     if [ -f "$shipped" ]; then
         printf '[server-entrypoint] %s grant pins %s, which this image does not ship; adopting the shipped grant
 '             "$(basename "$grant_target" .grant)" "$pinned" >&2
         cp "$shipped" "$grant_target"
+        # Now byte-identical to the image default again, so a later stage change
+        # is recognisable as drift rather than as an operator edit.
+        grant_record_seed "$grant_target"
     else
         printf '[server-entrypoint] %s grant pins %s and this image ships no such module; removing the stale grant
 '             "$(basename "$grant_target" .grant)" "$pinned" >&2
-        rm -f "$grant_target"
+        rm -f "$grant_target" "$(grant_seed_record "$grant_target")"
     fi
 done
+# <<< module-grant-seeding
 # The root entrypoint creates modules.d before dropping to the aimee user.  The
 # daemon must be able to traverse that 0700 parent in order to load the strict
 # grant policy; owning only its server child leaves the parent root-only and

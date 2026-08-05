@@ -1127,6 +1127,12 @@ init-migrate-service-test: $(BINARY) $(SERVER)
 kb-entrypoint-test:
 	./tests/test_kb_entrypoint.sh
 
+# The server entrypoint's module-grant seeding rules: stale image default vs
+# operator policy, and the stale-pin reconciliation that once bricked a live
+# server. Needs no image -- it runs the entrypoint's own block against fixtures.
+module-grants-test:
+	./tests/test_module_grants.sh
+
 index-scan-e2e-test: $(BINARY) $(SERVER)
 	./tests/test_index_scan_e2e.sh
 

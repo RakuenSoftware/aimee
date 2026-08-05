@@ -107,6 +107,9 @@ int agent_error_is_retryable(const char *error);
  * saturation refusal (AGENT_RC_AT_LIMIT) or a retryable provider error; false for
  * success (0) or a non-retryable hard failure. */
 int agent_rc_should_try_another(int rc, const char *error);
+/* Remaining milliseconds in the one request-wide delegate tool-loop budget.
+ * Returns 0 when no request cap exists and -1 after an existing cap expires. */
+int agent_request_tool_loop_remaining_ms(const agent_config_t *cfg);
 int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const char *role,
                                  const char *system_prompt, const char *user_prompt, int max_tokens,
                                  int enforce_writes, agent_result_t *out, int rc);

@@ -619,6 +619,17 @@ func delegatePartialIsNoChange(response string) bool {
 			strings.Contains(response, "no file changes detected"))
 }
 
+func retryDetailForPrompt(detail string) string {
+	detail = strings.TrimSpace(safeDiagnostic(detail))
+	const maxRunes = 24_000
+	runes := []rune(detail)
+	if len(runes) <= maxRunes {
+		return detail
+	}
+	const headRunes = 8_000
+	return string(runes[:headRunes]) + "\n...[retry diagnostic truncated]...\n" + string(runes[len(runes)-(maxRunes-headRunes):])
+}
+
 func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (StepResult, error) {
 	workdir, branch, err := r.worktrees.Ensure(ctx, req.WorkItem, req.WorkItem.ParentID == "")
 	if err != nil {
@@ -649,20 +660,12 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 	// repairs must also pass the same mechanical verifier used after a delegate.
 	// This does not bypass review, and feedback left by an earlier gate cannot
 	// trigger it.
-	repairFastPath := true
-	if !docs {
-		attempts, attemptErr := r.db.StageAttemptCount(ctx, req.WorkItem.ID, req.Node.ID)
-		if attemptErr != nil {
-			return StepResult{}, attemptErr
-		}
-		// The first pass after review may verify a clean committed repair without
-		// asking a delegate to make a meaningless extra edit. Once that verifier
-		// has failed, however, RecordRetry has incremented this stage counter. A
-		// later pass must dispatch an implementation delegate so it can actually
-		// repair the failure instead of replaying the same verifier until the
-		// retry limit parks the workflow.
-		repairFastPath = attempts == 0
-	}
+	// The first pass after review may verify a clean committed repair without
+	// asking a delegate to make a meaningless extra edit. Once that verifier has
+	// failed, the engine supplies its diagnostic and a later pass must dispatch an
+	// implementation delegate. RetryDetail remains present across an operator
+	// retry-budget reset, unlike the numeric attempt counter.
+	repairFastPath := docs || req.RetryDetail == ""
 	if repairFastPath && req.Feedback != nil && req.WorkItem.ContentHash != "" &&
 		req.WorkItem.ContentHash == req.Feedback.ArtifactHash {
 		diff, diffErr := frozenWorktreeDiff(ctx, req.WorkItem, workdir)
@@ -708,6 +711,9 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 	if req.Feedback != nil {
 		encoded, _ := json.Marshal(req.Feedback)
 		prompt += "\n\nREVIEW FEEDBACK TO RESOLVE:\n" + string(encoded)
+	}
+	if retryDetail := retryDetailForPrompt(req.RetryDetail); retryDetail != "" {
+		prompt += "\n\nPREVIOUS ATTEMPT FAILURE TO FIX:\n" + retryDetail
 	}
 	var cost float64
 	costUnknown := false
@@ -763,13 +769,27 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 		// "no owned files changed; result treated as incomplete".
 		//
 		// So only fail when the BRANCH carries no work either. Ask the branch, not
-		// this attempt.
+		// this attempt. Review correction is stricter: an older implementation commit
+		// cannot excuse a partial retry when its current diff is still byte-identical
+		// to the artifact carrying blocking findings. That exact failure advanced
+		// wi_57186250 from impl to freeze without addressing its second review, then
+		// immediately exhausted the roundtable convergence limit.
 		// A document no-op is the requested outcome when the accepted diff is
 		// already documented. Freeze the exact unchanged HEAD so doc_freeze and
-		// doc_gate still review it; all other empty partials remain failures.
+		// doc_gate still review it; blocking review feedback overrides that exemption.
 		documentedNoop := docs && delegatePartialIsNoChange(result.Response)
-		if headErr == nil && head == baseHead && !documentedNoop &&
-			!branchHasWorkOverBase(ctx, workdir, req.WorkItem.ParentID) {
+		blockingReviewUnchanged := false
+		if headErr == nil && head == baseHead && feedbackHasBlockingFinding(req.Feedback) &&
+			req.Feedback.ArtifactHash != "" {
+			diff, diffErr := frozenWorktreeDiff(ctx, req.WorkItem, workdir)
+			if diffErr != nil {
+				return StepResult{}, diffErr
+			}
+			blockingReviewUnchanged = wfe.Hash([]byte(diff)) == req.Feedback.ArtifactHash
+		}
+		if headErr == nil && head == baseHead &&
+			(blockingReviewUnchanged || (!documentedNoop &&
+				!branchHasWorkOverBase(ctx, workdir, req.WorkItem.ParentID))) {
 			detail := strings.TrimSpace(result.Response)
 			if detail == "" {
 				detail = "delegate returned a partial result and produced no commit"
@@ -788,6 +808,20 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 		return StepResult{}, err
 	}
 	return StepResult{Status: StepAdvanced, ArtifactType: "branch", Artifact: branch, ContentHash: head, CostUSD: cost, CostUnknown: costUnknown}, nil
+}
+
+func feedbackHasBlockingFinding(feedback *wfe.ReviewFeedback) bool {
+	if feedback == nil {
+		return false
+	}
+	for _, finding := range feedback.Findings {
+		switch strings.ToLower(strings.TrimSpace(finding.Severity)) {
+		case "suggestion", "nit":
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 func (r *NativeRunner) review(ctx context.Context, req StepRequest) (StepResult, error) {

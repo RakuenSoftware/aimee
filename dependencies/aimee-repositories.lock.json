@@ -160,12 +160,12 @@
       "repository": "https://github.com/RakuenSoftware/aimee-module-delegates.git",
       "ref": "v0.3.0",
       "version": "0.3.0",
-      "commit": "48bcac87d06759b332eaa883aa4d0e07a9e598d1",
+      "commit": "11acd4f9d5c7cdf815fe758fc6713c46bbc6a376",
       "execution": "process",
       "placements": [
         "server"
       ],
-      "source_sha256": "43fc572cc32becb17f4b3e7426972ec9688588f6970e43575966eed3c93732f4",
+      "source_sha256": "1f8bee09d6676af0f1e2a1ad92307850657b69d1a406e15549756e2e034341ef",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 10,
