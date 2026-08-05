@@ -538,21 +538,7 @@ func (r *NativeRunner) branchOpen(ctx context.Context, req StepRequest) (StepRes
 // name alone invites the delegate to mine unrelated history for undocumented
 // changes and expand the final PR after acceptance.
 func documentDelegatePrompt(ctx context.Context, req StepRequest, workdir string) (string, error) {
-	base, err := freezeBase(ctx, req.WorkItem, workdir)
-	if err != nil {
-		return "", err
-	}
-	resolvedBase, err := gitText(ctx, workdir, "rev-parse", base)
-	if err != nil {
-		return "", err
-	}
-	resolvedBase = strings.TrimSpace(resolvedBase)
-	head, err := gitText(ctx, workdir, "rev-parse", "HEAD")
-	if err != nil {
-		return "", err
-	}
-	head = strings.TrimSpace(head)
-	acceptedDiff, err := frozenWorktreeDiff(ctx, workdir, resolvedBase, head)
+	_, _, acceptedDiff, err := frozenWorktreeDiff(ctx, req.WorkItem, workdir)
 	if err != nil {
 		return "", err
 	}
@@ -605,21 +591,7 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 	// bypass review, and feedback left by an earlier gate cannot trigger it.
 	if docs && req.Feedback != nil && req.WorkItem.ContentHash != "" &&
 		req.WorkItem.ContentHash == req.Feedback.ArtifactHash {
-		base, baseErr := freezeBase(ctx, req.WorkItem, workdir)
-		if baseErr != nil {
-			return StepResult{}, baseErr
-		}
-		resolvedBase, err := gitText(ctx, workdir, "rev-parse", base)
-		if err != nil {
-			return StepResult{}, err
-		}
-		resolvedBase = strings.TrimSpace(resolvedBase)
-		head, err := gitText(ctx, workdir, "rev-parse", "HEAD")
-		if err != nil {
-			return StepResult{}, err
-		}
-		head = strings.TrimSpace(head)
-		diff, diffErr := frozenWorktreeDiff(ctx, workdir, resolvedBase, head)
+		_, _, diff, diffErr := frozenWorktreeDiff(ctx, req.WorkItem, workdir)
 		if diffErr != nil {
 			return StepResult{}, diffErr
 		}
@@ -1035,21 +1007,7 @@ func (r *NativeRunner) freeze(ctx context.Context, req StepRequest) (StepResult,
 		return StepResult{}, err
 	}
 
-	base, err := freezeBase(ctx, item, workdir)
-	if err != nil {
-		return StepResult{}, err
-	}
-	resolvedBase, err := gitText(ctx, workdir, "rev-parse", base)
-	if err != nil {
-		return StepResult{}, err
-	}
-	resolvedBase = strings.TrimSpace(resolvedBase)
-	head, err := gitText(ctx, workdir, "rev-parse", "HEAD")
-	if err != nil {
-		return StepResult{}, err
-	}
-	head = strings.TrimSpace(head)
-	diff, err := frozenWorktreeDiff(ctx, workdir, resolvedBase, head)
+	resolvedBase, head, diff, err := frozenWorktreeDiff(ctx, item, workdir)
 	if err != nil {
 		return StepResult{}, err
 	}
@@ -1093,18 +1051,28 @@ func freezeBase(ctx context.Context, item db1.WorkItem, workdir string) (string,
 	return "origin/" + trunk, nil
 }
 
-// frozenWorktreeDiff computes the merged diff between two resolved commit
-// SHAs in the given workdir. Base resolution (parent feature tip vs origin
-// trunk) lives in freezeBase; each caller rev-parses both ends before
-// invoking this helper so the diff, the validation, and the recorded commit
-// artifacts all describe the same snapshot. Used by freeze(),
-// documentDelegatePrompt, and the review-correctness path in mutate.
-func frozenWorktreeDiff(ctx context.Context, workdir, base, head string) (string, error) {
-	diff, err := gitText(ctx, workdir, "--no-pager", "diff", base+"..."+head)
+// frozenWorktreeDiff resolves the immutable base and HEAD snapshots and computes
+// the merged diff between them.
+func frozenWorktreeDiff(ctx context.Context, item db1.WorkItem, workdir string) (string, string, string, error) {
+	base, err := freezeBase(ctx, item, workdir)
 	if err != nil {
-		return "", err
+		return "", "", "", err
 	}
-	return diff, nil
+	resolvedBase, err := gitText(ctx, workdir, "rev-parse", base)
+	if err != nil {
+		return "", "", "", err
+	}
+	resolvedBase = strings.TrimSpace(resolvedBase)
+	head, err := gitText(ctx, workdir, "rev-parse", "HEAD")
+	if err != nil {
+		return "", "", "", err
+	}
+	head = strings.TrimSpace(head)
+	diff, err := gitText(ctx, workdir, "--no-pager", "diff", resolvedBase+"..."+head)
+	if err != nil {
+		return "", "", "", err
+	}
+	return resolvedBase, head, diff, nil
 }
 
 type panelFinding struct {
