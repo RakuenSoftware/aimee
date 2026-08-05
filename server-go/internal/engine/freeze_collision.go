@@ -125,9 +125,13 @@ func (r *NativeRunner) rejectDivergentSiblingCreates(ctx context.Context, item d
 		return err
 	}
 	for _, sibling := range siblings {
-		if sibling.ID == item.ID || sibling.State != "active" || sibling.Worktree == "" {
-			// A sibling with no worktree is GC'd or transiently absent; there is no
-			// basis for comparison, so skip it rather than raising a spurious freeze
+		if sibling.ID == item.ID || sibling.State != "active" {
+			continue
+		}
+		if !siblingWorktreeUsable(sibling.Worktree) {
+			// A sibling whose recorded worktree is empty or whose directory is
+			// absent is GC'd or transiently absent; there is no basis for
+			// comparison, so skip it rather than raising a spurious freeze
 			// failure.
 			continue
 		}
@@ -174,4 +178,19 @@ func (r *NativeRunner) rejectDivergentSiblingCreates(ctx context.Context, item d
 		}
 	}
 	return nil
+}
+
+// siblingWorktreeUsable reports whether the recorded sibling worktree path is
+// present on disk. A missing directory means the worktree is GC'd or transiently
+// absent; in either case the sibling cannot be compared and must be skipped
+// rather than surfaced as a freeze failure.
+func siblingWorktreeUsable(path string) bool {
+	if path == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	return true
 }

@@ -155,6 +155,37 @@ func TestRejectDivergentSiblingCreatesNoCollisionWithoutWorktree(t *testing.T) {
 	}
 }
 
+// TestRejectDivergentSiblingCreatesSkipsMissingWorktreeDir exercises the half
+// of the acceptance criterion the empty-string test does not: a sibling whose
+// recorded Worktree path is set but whose directory no longer exists must be
+// treated as not-comparable. Without this guard the sibling would flow into
+// frozenSiblingCreatedFiles, where gitText would surface a git error as a
+// spurious freeze failure.
+func TestRejectDivergentSiblingCreatesSkipsMissingWorktreeDir(t *testing.T) {
+	ctx, store, artifacts, registry, _, slicedir, base, _ := setupFreezeCollisionHarness(t)
+
+	missingDir := filepath.Join(t.TempDir(), "definitely-not-present")
+	if err := store.SetWorktree(ctx, "wi_s0", missingDir); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(slicedir, "frozen.txt"), []byte("conflicting slice blob\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, slicedir, "add", "frozen.txt")
+	gitRun(t, slicedir, "commit", "-m", "divergent create")
+	currentHead := strings.TrimSpace(gitRun(t, slicedir, "rev-parse", "HEAD"))
+
+	item, err := store.WorkItem(ctx, "wi_s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
+	if err := runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead); err != nil {
+		t.Fatalf("missing-worktree-dir sibling should be skipped, got error: %v", err)
+	}
+}
+
 // TestRejectDivergentSiblingCreatesStillRejectsWithWorktree guards the
 // regression-sensitive behavior: when the sibling's worktree IS present and the
 // current slice creates the same file with a different blob, the function must
