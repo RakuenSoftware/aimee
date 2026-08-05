@@ -452,9 +452,32 @@ def main():
         with lock:
             print(line); logf.write(line + "\n"); logf.flush()
 
+    # DETACH INTO OUR OWN SESSION FIRST.
+    #
+    # The pool is normally started with `nohup setsid ... &` from a shell. When
+    # that shell is itself killed -- which happens routinely, a tool timeout is
+    # enough -- the signal goes to the whole process group. Before this, the
+    # pool's own SIGTERM handler would then fire, destroy every instance it had
+    # just rented, and exit cleanly. A stray signal aimed at a shell silently
+    # tore down a fleet, and it looked like the pool had crashed.
+    #
+    # Becoming a session leader means group-directed signals no longer reach us.
+    # A deliberate `kill <pid>` still does, which is the behaviour we want: reap
+    # on purpose, survive by accident.
+    try:
+        os.setsid()
+    except OSError:
+        pass                    # already a session leader; nothing to do
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
     signal.signal(signal.SIGTERM, _reap)
     signal.signal(signal.SIGINT, _reap)
-    atexit.register(lambda: None)
+    # Write the pid so a caller can stop this pool deliberately without pgrep,
+    # which has repeatedly matched the caller's own command line.
+    pidfile = os.path.join(SCRATCH, "vast_pool.%d.pid" % os.getpid())
+    os.makedirs(SCRATCH, exist_ok=True)
+    with open(pidfile, "w") as fh:
+        fh.write("%d %s\n" % (os.getpid(), a.jobs))
+    atexit.register(lambda: os.path.exists(pidfile) and os.remove(pidfile))
     jobs = json.load(open(a.jobs))
     for j in jobs:
         j["_bid"] = a.interruptible
