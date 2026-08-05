@@ -1867,3 +1867,59 @@ invalidate banked arms mid-campaign, and that is the article owner's call.
 
 MiniCPM5-1B Q4_K_M's F1 of 0.1258 is a floor, not a capability measurement: 29%
 of its corpus produced nothing and was scored as a miss.
+
+## Defect 38, full scope: published scores that are context exhaustion, not capability
+
+The truncation flag has never been able to fire (see above), so no banked arm was
+ever checked. Auditing every arm in `results/sub1b/` and `results/thinking/` for
+empty output, parse failure and rows sitting at the context limit:
+
+| arm | published F1 | n | parse_ok | schema_ok | empty | at context limit |
+|---|---:|---:|---:|---:|---:|---:|
+| **Qwen3.5-0.8B** | **0.0000** | 70 | 0 | 0 | **70** | **70** |
+| **gemma-3-270m-it** | **0.0000** | 70 | 0 | 0 | 0 | **70** |
+| **Qwen3.5-2B** | **0.3210** | 70 | 9 | 9 | **61** | **61** |
+| **LFM2-350M-Extract** | **0.0144** | 70 | 14 | 14 | 0 | **56** |
+| Qwen3.6-35B-A3B | — | 70 | 6 | 6 | **64** | 0 |
+| gemma-4-31B-it | — | 70 | 58 | 58 | **12** | 0 |
+| granite-4.0-h-350m | 0.2045 | 70 | 22 | 22 | 0 | 0 |
+| GLM-4.7-Flash | 0.7801 | 70 | 64 | 64 | 6 | 6 |
+| gemma-4-12B-it | 0.8472 | 70 | 67 | 64 | 3 | 3 |
+| SmolLM2-360M-Instruct | 0.0000 | 70 | **70** | **0** | 0 | 0 |
+
+**Two models scored 0.0000 and it does not mean what it appears to mean.**
+Qwen3.5-0.8B produced no content on all 70 notes, every one at
+`prompt + completion == 8192` with a median 7933 completion tokens of reasoning.
+gemma-3-270m-it likewise sat on the limit for all 70. Neither number measures
+extraction ability; both measure a model reasoning past the context window.
+
+**Qwen3.5-2B's 0.3210 was computed on 9 of 70 notes.** The other 61 were empty.
+
+**SmolLM2-360M-Instruct is a different failure again**: it parses cleanly on all
+70 rows at a median 308 tokens -- nowhere near the limit -- but matches the schema
+on zero. That is the envelope problem of defect 37 without the tool-call frame.
+Its 0.0000 is also not capability.
+
+**It reaches the large models too.** Qwen3.6-35B-A3B has 64 of 70 rows empty and
+gemma-4-31B has 12. Those are two of the models whose figures are quoted in this
+log's dense-vs-MoE comparison.
+
+### What this means for anything already published
+
+The sub1b table and the 70-note model table both contain numbers that are floors
+or artefacts rather than measurements, and nothing in the pipeline distinguished
+them because the only detector was unreachable. Any article quoting a 0.0000, or
+ranking models near the bottom of those tables, is reporting harness behaviour as
+model behaviour.
+
+The rows that are clean -- gemma-4-E4B 70/70, granite-4.1-3b 70/70, gemma-3n-E4B
+70/70 -- are clean. The problem is that nothing said which was which.
+
+### Not fixed
+
+score.py is unchanged. Adding a refusal now would invalidate arms mid-campaign
+and is the article owner's call. The detector needed is one line, and this table
+is what it would have printed at any point in the past year:
+
+    prompt_tokens + completion_tokens >= context_size    # exhausted
+    schema_ok < parse_ok                                 # wrong envelope
