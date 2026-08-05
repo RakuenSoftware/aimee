@@ -410,7 +410,9 @@ native_provider_http:
 
    struct timespec loop_start;
    clock_gettime(CLOCK_MONOTONIC, &loop_start);
-   int total_timeout_ms = agent->timeout_ms * 4;
+   int configured_total_timeout_ms = agent_loop_total_timeout_ms(agent->timeout_ms, 0);
+   int total_timeout_ms =
+       agent_loop_total_timeout_ms(agent->timeout_ms, agent->tool_loop_timeout_ms_cap);
 
    /* Ephemeral SSH setup */
    char ephemeral_key[MAX_PATH_LEN] = {0};
@@ -627,7 +629,14 @@ native_provider_http:
                              (now_ts.tv_nsec - loop_start.tv_nsec) / 1000000);
       if (elapsed_ms > total_timeout_ms)
       {
-         snprintf(out->error, sizeof(out->error), "total timeout exceeded (%dms)", elapsed_ms);
+         if (agent->tool_loop_timeout_ms_cap > 0)
+            snprintf(out->error, sizeof(out->error),
+                     "tool loop total timeout exceeded (elapsed=%dms effective=%dms "
+                     "configured=%dms stage_remaining_cap=%dms)",
+                     elapsed_ms, total_timeout_ms, configured_total_timeout_ms,
+                     agent->tool_loop_timeout_ms_cap);
+         else
+            snprintf(out->error, sizeof(out->error), "total timeout exceeded (%dms)", elapsed_ms);
          break;
       }
 
@@ -848,8 +857,16 @@ native_provider_http:
           agent_loop_per_call_timeout_ms(agent->timeout_ms, total_timeout_ms, elapsed_ms);
       if (per_call < 0)
       {
-         snprintf(out->error, sizeof(out->error), "tool loop budget exhausted (%dms of %dms used)",
-                  elapsed_ms, total_timeout_ms);
+         if (agent->tool_loop_timeout_ms_cap > 0)
+            snprintf(out->error, sizeof(out->error),
+                     "tool loop budget exhausted (elapsed=%dms effective=%dms configured=%dms "
+                     "stage_remaining_cap=%dms)",
+                     elapsed_ms, total_timeout_ms, configured_total_timeout_ms,
+                     agent->tool_loop_timeout_ms_cap);
+         else
+            snprintf(out->error, sizeof(out->error),
+                     "tool loop budget exhausted (%dms of %dms used)", elapsed_ms,
+                     total_timeout_ms);
          free(body);
          break;
       }
