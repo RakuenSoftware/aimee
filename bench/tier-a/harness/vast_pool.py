@@ -26,7 +26,7 @@ never holds an idle rented GPU. Cost is reported per arm.
 
 The API key is read from VAST_API_KEY and is never written to disk.
 """
-import argparse, json, os, subprocess, sys, threading, time
+import argparse, atexit, json, os, signal, subprocess, sys, threading, time
 import urllib.error, urllib.parse, urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -176,10 +176,37 @@ def run_client(cmd, cid, log, label):
 
 
 def destroy(cid):
+    with LIVE_LOCK:
+        LIVE.discard(cid)
     try:
         api("instances/%d/" % cid, method="DELETE", body={})
     except Exception as e:
         print("  WARN could not destroy %s: %s" % (cid, e), file=sys.stderr)
+
+
+LIVE = set()
+LIVE_LOCK = threading.Lock()
+
+
+def _reap(*_a):
+    """Destroy every instance this pool created, then exit.
+
+    Killing a pool with SIGTERM leaves its worker threads mid-run_arm, so the
+    finally block that destroys the instance never executes and the rental keeps
+    billing with nothing attached to it. That happened repeatedly: ten instances
+    were found alive after their pools were gone, four of them orphans. This is
+    the same defect as the orphaned llama clients on the local host, one layer up
+    and with a meter attached.
+    """
+    with LIVE_LOCK:
+        ids = sorted(LIVE)
+    for cid in ids:
+        try:
+            api("instances/%d/" % cid, method="DELETE", body={})
+            print("reaped instance %d" % cid, file=sys.stderr)
+        except Exception:
+            pass
+    os._exit(0)
 
 
 class Preempted(Exception):
@@ -248,6 +275,8 @@ def run_arm(job, gpu, maxprice, outdir, log):
                 log("    offer %s unavailable (%s); next offer" % (off["id"], e))
                 cid = None
                 continue
+            with LIVE_LOCK:
+                LIVE.add(cid)
             log("--- %s on %s %s contract %s (offer $%.4f/hr; billed rate read after start)"
                 % (label, gpu, off["id"], cid, off["dph_total"]))
             try:
@@ -368,6 +397,9 @@ def main():
         with lock:
             print(line); logf.write(line + "\n"); logf.flush()
 
+    signal.signal(signal.SIGTERM, _reap)
+    signal.signal(signal.SIGINT, _reap)
+    atexit.register(lambda: None)
     jobs = json.load(open(a.jobs))
     for j in jobs:
         j["_bid"] = a.interruptible
