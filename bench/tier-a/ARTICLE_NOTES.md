@@ -1655,7 +1655,7 @@ are not close to their intervals. The piece's central argument, that F1 and
 restraint are independent axes, is the part that survives an interval sweep
 intact while the ranking around it dissolves.
 
-## 34. Does speculative decoding pay differently on QAT weights? (OPEN, with a design)
+## 34. Speculative decoding pays the same on QAT and post-hoc weights (ANSWERED: no effect)
 
 ### The observation, and why it is not yet evidence
 
@@ -1718,3 +1718,49 @@ model and the backend, not of the feature", supported by 1.59x for E2B against
 clause and the article gets a genuinely new section. Draft 02 (quant) gains the
 converse: a reason to care which quant you pick that has nothing to do with
 accuracy.
+
+### ANSWER: no. Acceptance is indistinguishable, and the throughput gap was the host.
+
+gemma-4-12B, same draft file, same corpus, same prompt, MTP on both sides:
+
+| arm | drafted | accepted | acceptance |
+|---|---:|---:|---:|
+| QAT UD-Q4_K_XL | 30,328 | 24,913 | **82.1%** |
+| non-QAT UD-Q4_K_XL | 33,452 | 27,627 | **82.6%** |
+
+Half a point apart on more than sixty thousand drafted tokens. **The hypothesis
+is refuted.** Quantisation-aware training does not move the target's output
+distribution far enough from what the draft head predicts to cost acceptance, so
+the MTP speedup transfers to QAT builds intact.
+
+That matters for the recommendation rather than for the theory: the head-to-head's
+best model is a QAT build, and article 01's speedup was measured only on non-QAT
+UD quants. Those two results now compose instead of sitting next to each other
+with an untested gap between them.
+
+### The number that looked huge, and was the host
+
+Wall-clock throughput for the non-QAT arm, across five placements in one hour,
+same model, same quant, same draft, only the rented machine differing:
+
+    131.9 -> 100.7 -> 109.6 -> 101.6 -> 84.4 tok/s
+
+A 1.5x spread with nothing about the model changing. Set beside the QAT arm's
+163.7 tok/s it reads as a large quant effect and is not one. This is exactly why
+`draft_n`/`draft_n_accepted` were added: **tok/s prices the mechanism and the
+machine together, and on rented hardware the machine dominates.**
+
+Every MTP figure in this project before today is wall clock, including the
++84/92/102/111/116% ladder. Those were all measured on ONE card with everything
+else held, so they are not contaminated in the way these rented numbers are. But
+they measure the shadow, and the acceptance rate measures the thing.
+
+### What to write, and what not to
+
+**Write:** MTP and QAT compose. Acceptance is ~82% on both, so a QAT build gets
+the same speedup a post-hoc quant does, and the two cheapest wins in this project
+stack.
+
+**Do not write:** that QAT changes MTP throughput. The evidence for that is a
+tok/s comparison across different rented machines, and the same arm varies by 1.5x
+across machines on its own.
