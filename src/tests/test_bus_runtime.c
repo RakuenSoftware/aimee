@@ -17,6 +17,7 @@
 
 #define TEST_KIND        4100U
 #define TEST_SERVER_KIND 4101U
+#define TEST_SERVER_KIND_2 4102U
 
 static bus_client_result_t attach(const char *path, uint32_t principal_ref, bus_client_t *client)
 {
@@ -67,7 +68,7 @@ int main(int argc, char **argv)
 
    uint32_t publisher_kinds[] = {TEST_KIND};
    uint32_t subscriber_kinds[] = {TEST_KIND};
-   uint32_t server_kinds[] = {TEST_SERVER_KIND};
+   uint32_t server_kinds[] = {TEST_SERVER_KIND, TEST_SERVER_KIND_2};
    bus_runtime_grant_t grants[] = {{.principal_class = 1,
                                     .principal_ref = 7,
                                     .uid = BUS_RUNTIME_SELF_UID,
@@ -85,7 +86,7 @@ int main(int argc, char **argv)
                                     .uid = BUS_RUNTIME_SELF_UID,
                                     .executable = executable,
                                     .serve = server_kinds,
-                                    .serve_count = 1}};
+                                    .serve_count = 2}};
 
    bus_host_config_t host_config = {.max_slots = 8,
                                     .slot_size = 512,
@@ -147,6 +148,10 @@ int main(int argc, char **argv)
    char marker = 0;
    assert(read(ready[0], &marker, 1) == 1 && marker == 'R');
    close(ready[0]);
+   pthread_mutex_lock(&host_lock);
+   assert(bus_host_kind_has_server(&host, TEST_SERVER_KIND));
+   assert(bus_host_kind_has_server(&host, TEST_SERVER_KIND_2));
+   pthread_mutex_unlock(&host_lock);
    bus_client_t duplicate;
    assert(attach(socket_path, 9, &duplicate) == BUS_CLIENT_DENIED);
    assert(kill(crashed, SIGKILL) == 0);
@@ -157,6 +162,8 @@ int main(int argc, char **argv)
    assert(attach(socket_path, 9, &replacement) == BUS_CLIENT_OK);
    pthread_mutex_lock(&host_lock);
    assert(bus_host_admitted(&host) == 3);
+   assert(bus_host_kind_has_server(&host, TEST_SERVER_KIND));
+   assert(bus_host_kind_has_server(&host, TEST_SERVER_KIND_2));
    pthread_mutex_unlock(&host_lock);
    bus_client_detach(&replacement);
 
