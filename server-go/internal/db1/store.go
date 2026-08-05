@@ -1203,12 +1203,31 @@ func (s *Store) StageAttemptCount(ctx context.Context, workItemID, stage string)
 // LatestStageRetryDetail returns the diagnostic that caused the current stage
 // retry. A loop is preferred over later transient runner pauses so cancellation
 // recovery does not hide the verifier failure the next delegate must repair.
-// The pause fallback covers stages configured with a one-attempt retry limit.
+// When an operator resumes a retry-limit park, the park diagnostic is retained
+// while the numeric attempt budget starts fresh. A successful advance is the
+// boundary that makes all earlier diagnostics stale.
 func (s *Store) LatestStageRetryDetail(ctx context.Context, workItemID, stage string) (string, error) {
+	var boundary, reset int64
+	attempts, err := s.StageAttemptCount(ctx, workItemID, stage)
+	if err != nil {
+		return "", err
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM lifecycle_event WHERE work_item_id=? AND stage=? AND kind='advance'`, workItemID, stage).Scan(&boundary); err != nil {
+		return "", err
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM lifecycle_event WHERE work_item_id=? AND stage=? AND kind='resume' AND detail='retry_limit' AND id>?`, workItemID, stage, boundary).Scan(&reset); err != nil {
+		return "", err
+	}
+	if attempts == 0 && reset <= boundary {
+		return "", nil
+	}
 	var detail string
-	err := s.db.QueryRowContext(ctx, `SELECT detail FROM lifecycle_event WHERE work_item_id=? AND stage=? AND kind='loop' ORDER BY id DESC LIMIT 1`, workItemID, stage).Scan(&detail)
+	err = s.db.QueryRowContext(ctx, `SELECT detail FROM lifecycle_event WHERE work_item_id=? AND stage=? AND kind='loop' AND id>? ORDER BY id DESC LIMIT 1`, workItemID, stage, max(boundary, reset)).Scan(&detail)
+	if errors.Is(err, sql.ErrNoRows) && reset > boundary {
+		err = s.db.QueryRowContext(ctx, `SELECT detail FROM lifecycle_event WHERE work_item_id=? AND stage=? AND kind='pause' AND detail!='manual' AND id>? AND id<? ORDER BY id DESC LIMIT 1`, workItemID, stage, boundary, reset).Scan(&detail)
+	}
 	if errors.Is(err, sql.ErrNoRows) {
-		err = s.db.QueryRowContext(ctx, `SELECT detail FROM lifecycle_event WHERE work_item_id=? AND stage=? AND kind='pause' AND detail!='manual' ORDER BY id DESC LIMIT 1`, workItemID, stage).Scan(&detail)
+		err = s.db.QueryRowContext(ctx, `SELECT detail FROM lifecycle_event WHERE work_item_id=? AND stage=? AND kind='pause' AND detail!='manual' AND id>? ORDER BY id DESC LIMIT 1`, workItemID, stage, boundary).Scan(&detail)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
@@ -1284,6 +1303,14 @@ func (s *Store) Resume(ctx context.Context, workItemID string) error {
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE lifecycle_work_item SET pause_reason='', paused_state='', updated_at=datetime('now') WHERE work_item_id=? AND state='active'`, workItemID); err != nil {
 		return err
+	}
+	if reason == "retry_limit" {
+		// A human resume is an explicit request for another bounded repair cycle.
+		// Keeping the exhausted value made the very next failed repair park again,
+		// effectively reducing recovery to one attempt per manual resume.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM lifecycle_stage_attempt WHERE work_item_id=? AND stage=?`, workItemID, stage); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO lifecycle_event (work_item_id, stage, kind, actor, detail) VALUES (?, ?, 'resume', 'operator', ?)`, workItemID, stage, reason); err != nil {
 		return err

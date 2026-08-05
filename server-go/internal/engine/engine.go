@@ -194,15 +194,11 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 	}
 	req := StepRequest{WorkItem: item, Node: node, Proposal: string(proposal), CostLimitUSD: budget.Amount, ReplayOnly: budget.ReplayOnly}
 	req.Block = block
-	if attempts, attemptErr := e.db.StageAttemptCount(ctx, item.ID, item.Stage); attemptErr != nil {
-		return out, attemptErr
-	} else if attempts > 0 {
-		retryDetail, detailErr := e.db.LatestStageRetryDetail(ctx, item.ID, item.Stage)
-		if detailErr != nil {
-			return out, detailErr
-		}
-		req.RetryDetail = retryDetail
+	retryDetail, detailErr := e.db.LatestStageRetryDetail(ctx, item.ID, item.Stage)
+	if detailErr != nil {
+		return out, detailErr
 	}
+	req.RetryDetail = retryDetail
 	if len(node.In) > 0 {
 		req.Inputs = make(map[string]wfe.Artifact, len(node.In))
 		for inputName, binding := range node.In {

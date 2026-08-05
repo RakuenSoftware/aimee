@@ -651,20 +651,12 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 	// repairs must also pass the same mechanical verifier used after a delegate.
 	// This does not bypass review, and feedback left by an earlier gate cannot
 	// trigger it.
-	repairFastPath := true
-	if !docs {
-		attempts, attemptErr := r.db.StageAttemptCount(ctx, req.WorkItem.ID, req.Node.ID)
-		if attemptErr != nil {
-			return StepResult{}, attemptErr
-		}
-		// The first pass after review may verify a clean committed repair without
-		// asking a delegate to make a meaningless extra edit. Once that verifier
-		// has failed, however, RecordRetry has incremented this stage counter. A
-		// later pass must dispatch an implementation delegate so it can actually
-		// repair the failure instead of replaying the same verifier until the
-		// retry limit parks the workflow.
-		repairFastPath = attempts == 0
-	}
+	// The first pass after review may verify a clean committed repair without
+	// asking a delegate to make a meaningless extra edit. Once that verifier has
+	// failed, the engine supplies its diagnostic and a later pass must dispatch an
+	// implementation delegate. RetryDetail remains present across an operator
+	// retry-budget reset, unlike the numeric attempt counter.
+	repairFastPath := docs || req.RetryDetail == ""
 	if repairFastPath && req.Feedback != nil && req.WorkItem.ContentHash != "" &&
 		req.WorkItem.ContentHash == req.Feedback.ArtifactHash {
 		diff, diffErr := frozenWorktreeDiff(ctx, req.WorkItem, workdir)
