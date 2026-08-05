@@ -1,1 +1,6 @@
 [04:10:01Z] sizing: starting one server to measure resident VRAM
+[04:11:18Z]   one instance uses 1434 MiB of 16303 MiB
+[04:11:18Z]   -> running 3 processes, cache-ram 1024 MiB each
+[04:11:50Z]   all 3 servers up; VRAM now 4292 MiB
+[04:11:50Z] START MiniCPM5-1B.Q8_0 across 3 shards
+[05:40:30Z] DONE MiniCPM5-1B.Q8_0 rows=1001/1001 wall=88m40s procs=3 retries=0
