@@ -1808,3 +1808,62 @@ the model being bad at the task.
 
 Cheap detector, not currently in any driver: count rows whose `raw` contains
 `tool_call`, or simply alert when `schema_ok` diverges from `parse_ok`.
+
+## Defect 38: the truncation flag is unreachable by construction
+
+`run_llamacpp.py` sets `"truncated": usage.completion_tokens == args.max_tokens`.
+Every driver passes `--max-tokens 8192`, and `shard_run.sh` starts every server
+with `-c 8192`. Completion is therefore capped at `8192 - prompt_tokens`, roughly
+7630 with this benchmark's ~560-token prompt. **`completion_tokens` can never
+equal `max_tokens`, so the flag can never be true.**
+
+Found on MiniCPM5-1B Q4_K_M, where 292 of 1001 rows returned EMPTY content after
+exhausting the context on reasoning:
+
+| | value |
+|---|---:|
+| rows | 1001 |
+| parse_ok | 661 |
+| failed to parse | 340 |
+| empty raw content | **292** |
+| rows flagged truncated | **0** |
+| median completion tokens, rows that parsed | 1980 |
+| median completion tokens, empty rows | **7632** |
+| prompt + completion on every empty row | **8192 exactly** |
+
+All 292 sit exactly at the context limit. None was flagged.
+
+### Scope: every arm in this project
+
+The detector has never been able to fire, so no banked result has ever been
+checked for truncation. Sampling committed arms for rows at the context limit:
+
+| arm | rows at context limit | flagged truncated |
+|---|---:|---:|
+| MiniCPM5-1B Q4_K_M | 292/1001 | 0 |
+| Qwen3-1.7B 10k | **54/10000** | 0 |
+| LFM2.5-2.6B Q4_K_M | 1/1001 | 0 |
+| gemma-4-E2B Q4 10k | 0/10000 | 0 |
+
+The gemma arms never approach the limit so nothing is at stake there, which is
+why this survived. Qwen3-1.7B's 10k arm -- already committed and used in the
+field ranking -- contains 54 silently empty rows.
+
+### Why this is defect 16/18's third appearance
+
+Defect 16 added a refusal for rows that hit `--max-tokens`, with the commit
+message "this class of defect fails loudly or it recurs". Defect 18 recorded that
+it recurred within the hour because the check was written over a cause rather
+than an outcome. This is the same failure a third time: the check is written over
+`max_tokens` (a cause) instead of "the row produced no usable content" (the
+outcome), and a configuration where the two limits coincide makes it silent.
+
+### The correct check, not applied
+
+`prompt_tokens + completion_tokens >= context_size` catches it, as does the
+outcome-shaped test the earlier defects already argued for: refuse a row whose
+content is empty. score.py is NOT changed here -- adding a refusal now would
+invalidate banked arms mid-campaign, and that is the article owner's call.
+
+MiniCPM5-1B Q4_K_M's F1 of 0.1258 is a floor, not a capability measurement: 29%
+of its corpus produced nothing and was scored as a miss.

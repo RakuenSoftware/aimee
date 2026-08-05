@@ -1,0 +1,5 @@
+[21:35:25Z] === waiting for the LFM2.5 family sweep to release the 5080
+[02:13:28Z] === 5080 free; starting newcomers, 1001 notes each
+[02:13:28Z] --- MiniCPM5-1B.Q4_K_M  openbmb/MiniCPM5-1B-GGUF:Q4_K_M  nproc=3  no MTP
+[04:09:55Z] OK   MiniCPM5-1B.Q4_K_M strictF1=0.1258 wall=116m
+[04:09:55Z] --- MiniCPM5-1B.Q8_0  openbmb/MiniCPM5-1B-GGUF:Q8_0  nproc=3  no MTP
