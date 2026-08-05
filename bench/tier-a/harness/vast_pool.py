@@ -115,6 +115,12 @@ def endpoint(cid, stall=600, hard_cap=3600):
             time.sleep(15); continue
         if d.get("actual_status") == "exited":
             raise RuntimeError("instance exited: %s" % (d.get("status_msg") or "")[:120])
+        # A docker daemon error is terminal, not slow. Waiting out the stall
+        # window on one costs ten minutes of billing to learn what the very
+        # first poll already said.
+        sm = d.get("status_msg") or ""
+        if "Error response from daemon" in sm or "failed to set up container" in sm:
+            raise RuntimeError("container failed: %s" % sm[:90].replace("\n", " "))
         msg = "%s|%s" % (d.get("actual_status"), (d.get("status_msg") or "")[:160])
         if msg != seen:
             seen, last_change = msg, time.time()
@@ -201,6 +207,27 @@ def destroy(cid):
 LIVE = set()
 LIVE_LOCK = threading.Lock()
 
+# Physical machines already claimed by this pool. Several vast OFFERS can belong
+# to one machine, so placing arms concurrently by walking the price-ordered offer
+# list double-books a single GPU: the first container takes it and the rest fail
+# with "failed to set up container". Five of six arms died that way before this
+# existed. Offer id is not identity; machine_id is.
+CLAIMED = set()
+CLAIM_LOCK = threading.Lock()
+
+
+def claim(machine_id):
+    with CLAIM_LOCK:
+        if machine_id in CLAIMED:
+            return False
+        CLAIMED.add(machine_id)
+        return True
+
+
+def release(machine_id):
+    with CLAIM_LOCK:
+        CLAIMED.discard(machine_id)
+
 
 def _reap(*_a):
     """Destroy every instance this pool created, then exit.
@@ -276,7 +303,10 @@ def run_arm(job, gpu, maxprice, outdir, log):
         # ordered list, so the cheapest offers collide and the losers get an
         # HTTP 400 from the ask being gone. That is a race, not a bad job: the
         # arm should walk down the list rather than fail.
-        for off in offers[:8]:          # re-place on a taken ask or a slow puller
+        for off in offers[:24]:         # re-place on a taken ask, a dead host, or a busy machine
+            mid = off.get("machine_id")
+            if mid is not None and not claim(mid):
+                continue                # another arm in this pool already has that GPU
             bid = None
             if job.get("_bid"):
                 # 35% over the floor: enough to survive ordinary competition and
@@ -287,6 +317,7 @@ def run_arm(job, gpu, maxprice, outdir, log):
                              bid, job.get("draft"))
             except (urllib.error.HTTPError, RuntimeError) as e:
                 log("    offer %s unavailable (%s); next offer" % (off["id"], e))
+                release(off.get("machine_id"))
                 cid = None
                 continue
             with LIVE_LOCK:
@@ -298,7 +329,7 @@ def run_arm(job, gpu, maxprice, outdir, log):
                 break
             except RuntimeError as e:
                 log("    host %s unusable (%s); destroying and re-placing" % (off["id"], e))
-                destroy(cid); cid = None
+                destroy(cid); release(off.get("machine_id")); cid = None
         if ep is None:
             log("FAIL %s: no host served within the pull timeout" % label); return
         rate = billed_rate(cid) or off["dph_total"]
