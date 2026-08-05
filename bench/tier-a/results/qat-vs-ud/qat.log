@@ -4,3 +4,6 @@
 [07:17:59Z] OK   gemma-4-E2B-it.qat QAT=0.6406  UD=0.6017  delta=+0.0389
 [07:17:59Z]      wall=41m
 [07:17:59Z] --- gemma-4-E4B-it.qat  google/gemma-4-E4B-it-qat-q4_0-gguf:q4_0  nproc=1  no MTP
+[08:04:15Z] OK   gemma-4-E4B-it.qat QAT=0.6194  UD=0.6166  delta=+0.0028
+[08:04:15Z]      wall=46m
+[08:04:15Z] === QAT VS UD COMPLETE ===

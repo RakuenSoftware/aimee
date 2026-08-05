@@ -1256,3 +1256,60 @@ Note also that two of the larger models above -- Qwen3.6-35B-A3B and
 gemma-4-26B-A4B -- are themselves MoE with 3B and 4B active. The 70-note tier
 never compared them on this axis, so whether the sparsity effect scales is
 unmeasured here.
+
+## 30. QAT beats the default quant on one model and does nothing on the other
+
+Google ships quantisation-aware-trained weights for gemma-4 as legacy q4_0.
+Everything in this benchmark's history runs unsloth's post-hoc UD-Q4_K_XL. Both
+are ~4 bit. Paired at 1001 notes, nproc=1, no MTP, same card, same prompt --
+only the quant scheme differs:
+
+| model | QAT q4_0 | UD-Q4_K_XL | delta |
+|---|---:|---:|---:|
+| gemma-4-E2B | **0.6406** | 0.6017 | **+0.0389** |
+| gemma-4-E4B | 0.6194 | 0.6166 | +0.0028 |
+
+Noise threshold is 0.0105. E2B's gain is 3.7x it. E4B's is a quarter of it.
+
+**0.6406 is the highest gemma-4-E2B figure anywhere in this project**, at any
+tier -- above the 10k MTP arm's 0.6246 and its 1001-note subset's 0.6178.
+
+### The components say it is not a threshold shift
+
+| | precision | recall |
+|---|---:|---:|
+| E2B QAT vs UD | **+0.0454** | **+0.0318** |
+| E4B QAT vs UD | +0.0111 | **-0.0080** |
+
+On E2B both rise substantially, which is a genuinely better model rather than a
+different operating point. On E4B precision rises slightly, recall falls
+slightly, and they cancel.
+
+### What NOT to write
+
+The tempting sentence is "smaller models have less redundancy, so quantisation
+damage costs them more and QAT recovers more". It is plausible, it fits both
+points, and it is exactly the move this project already retracted once: the
+"dense models are more disciplined than MoE" finding came with a mechanism about
+per-token expert routing, and the log's verdict was "a story fitted to a bug".
+
+Two models is not a size trend. The mechanism is unmeasured and stays unwritten.
+
+### What is safe to write
+
+On gemma-4-E2B, quantisation-aware training is worth +0.039 F1 over the dynamic
+quant this benchmark has defaulted to throughout. On gemma-4-E4B the two are
+indistinguishable. **Test your own model; neither result transfers.**
+
+That lands in the same place as the quant ladders from the other direction:
+LFM2.5-2.6B got worse with more bits, SmolLM3-3B got better, and here a
+differently-*trained* quant at the same bit width beats both framings. The
+portable claim across all of it is that **which quant matters more than how many
+bits**, and that the only way to know is to run it.
+
+### One detail that would have been invisible
+
+QAT parses slightly worse on E2B -- 992 of 1001 against UD's 1001 -- while
+scoring substantially better. A quant comparison tracking F1 alone shows a clean
+win and hides that the winner is marginally less well-formed. Same blind spot as
+every other pathology this campaign turned up.

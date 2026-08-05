@@ -1,0 +1,236 @@
+{
+  "strict": {
+    "precision": 0.5878,
+    "recall": 0.6545,
+    "f1": 0.6194,
+    "tp": 576,
+    "fp": 404,
+    "fn": 304,
+    "by_category": {
+      "ambiguous": {
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "tp": 0,
+        "fp": 14,
+        "fn": 0,
+        "_note": "no gold triples in this category; see abstention_rate_on_schema"
+      },
+      "first_person": {
+        "precision": 0.619,
+        "recall": 0.4906,
+        "f1": 0.5474,
+        "tp": 52,
+        "fp": 32,
+        "fn": 54
+      },
+      "governance": {
+        "precision": 0.7582,
+        "recall": 0.8023,
+        "f1": 0.7797,
+        "tp": 69,
+        "fp": 22,
+        "fn": 17
+      },
+      "implicit": {
+        "precision": 0.434,
+        "recall": 0.3151,
+        "f1": 0.3651,
+        "tp": 23,
+        "fp": 30,
+        "fn": 50
+      },
+      "infra": {
+        "precision": 0.96,
+        "recall": 0.96,
+        "f1": 0.96,
+        "tp": 96,
+        "fp": 4,
+        "fn": 4
+      },
+      "multi_fact": {
+        "precision": 0.6111,
+        "recall": 0.6306,
+        "f1": 0.6207,
+        "tp": 198,
+        "fp": 126,
+        "fn": 116
+      },
+      "negation": {
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "tp": 0,
+        "fp": 110,
+        "fn": 0,
+        "_note": "no gold triples in this category; see abstention_rate_on_schema"
+      },
+      "novel_pred": {
+        "precision": 0.5789,
+        "recall": 0.6875,
+        "f1": 0.6286,
+        "tp": 22,
+        "fp": 16,
+        "fn": 10
+      },
+      "third_person": {
+        "precision": 0.7296,
+        "recall": 0.6864,
+        "f1": 0.7073,
+        "tp": 116,
+        "fp": 43,
+        "fn": 53
+      },
+      "transient": {
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "tp": 0,
+        "fp": 7,
+        "fn": 0,
+        "_note": "no gold triples in this category; see abstention_rate_on_schema"
+      }
+    }
+  },
+  "lenient": {
+    "precision": 0.6224,
+    "recall": 0.6932,
+    "f1": 0.6559,
+    "tp": 610,
+    "fp": 370,
+    "fn": 270,
+    "by_category": {
+      "ambiguous": {
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "tp": 0,
+        "fp": 14,
+        "fn": 0,
+        "_note": "no gold triples in this category; see abstention_rate_on_schema"
+      },
+      "first_person": {
+        "precision": 0.619,
+        "recall": 0.4906,
+        "f1": 0.5474,
+        "tp": 52,
+        "fp": 32,
+        "fn": 54
+      },
+      "governance": {
+        "precision": 0.7582,
+        "recall": 0.8023,
+        "f1": 0.7797,
+        "tp": 69,
+        "fp": 22,
+        "fn": 17
+      },
+      "implicit": {
+        "precision": 0.434,
+        "recall": 0.3151,
+        "f1": 0.3651,
+        "tp": 23,
+        "fp": 30,
+        "fn": 50
+      },
+      "infra": {
+        "precision": 0.96,
+        "recall": 0.96,
+        "f1": 0.96,
+        "tp": 96,
+        "fp": 4,
+        "fn": 4
+      },
+      "multi_fact": {
+        "precision": 0.6296,
+        "recall": 0.6497,
+        "f1": 0.6395,
+        "tp": 204,
+        "fp": 120,
+        "fn": 110
+      },
+      "negation": {
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "tp": 0,
+        "fp": 110,
+        "fn": 0,
+        "_note": "no gold triples in this category; see abstention_rate_on_schema"
+      },
+      "novel_pred": {
+        "precision": 0.5789,
+        "recall": 0.6875,
+        "f1": 0.6286,
+        "tp": 22,
+        "fp": 16,
+        "fn": 10
+      },
+      "third_person": {
+        "precision": 0.9057,
+        "recall": 0.8521,
+        "f1": 0.878,
+        "tp": 144,
+        "fp": 15,
+        "fn": 25
+      },
+      "transient": {
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "tp": 0,
+        "fp": 7,
+        "fn": 0,
+        "_note": "no gold triples in this category; see abstention_rate_on_schema"
+      }
+    }
+  },
+  "fabrication": {
+    "_note": "a triple is counted here when a subject or object cannot be traced to the source note. Gold-independent: it measures invented entities, not disagreement with my labels. The write gate cannot catch these \u2014 a well-formed triple about someone never mentioned looks valid.",
+    "predicted_triples": 980,
+    "ungrounded_triples": 0,
+    "fabrication_rate": 0.0,
+    "examples": []
+  },
+  "relation_agnostic": {
+    "_note": "diagnostic, not a quality score: subject+object matched, relation ignored. The gap to lenient F1 is the share of error that is edge labelling rather than a missed fact.",
+    "precision": 0.7071,
+    "recall": 0.7875,
+    "f1": 0.7452,
+    "tp": 693,
+    "fp": 287,
+    "fn": 187
+  },
+  "over_extraction": {
+    "empty_gold_notes": 322,
+    "on_schema_empty_gold_notes": 322,
+    "notes_correctly_empty": 193,
+    "abstention_rate_on_schema": 0.5994,
+    "spurious_triples": 131
+  },
+  "output_health": {
+    "notes": 1001,
+    "json_parse_ok": 1001,
+    "json_parse_rate": 1.0,
+    "schema_ok": 1001,
+    "schema_rate": 1.0,
+    "malformed_facts": 17,
+    "dropped_by_conf_floor": 110,
+    "predicted_triples": 980,
+    "in_seed_ontology": 0.9051,
+    "catch_all_relations": 0
+  },
+  "latency_ms": {
+    "median": 2496.2,
+    "p90": 4021.1,
+    "mean": 2366.2
+  },
+  "completion_tokens": {
+    "median": 389,
+    "mean": 369.7,
+    "max": 1427
+  },
+  "model": "gemma-4-E4B-it.qat",
+  "scored_key": "pred_grounded",
+  "alias_folding": true
+}
