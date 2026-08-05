@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -178,12 +180,31 @@ func RunModuleProcess(ctx context.Context, config ModuleProcessConfig) error {
 
 func validModuleStatus(status ModuleStatus) bool { return status <= ModuleStatusInternal }
 
+// moduleDetail renders whatever a failing handler returned as a short, printable
+// reason. Handlers are not required to supply one.
+func moduleDetail(response []byte) string {
+	if len(response) == 0 {
+		return "no detail"
+	}
+	const max = 300
+	if len(response) > max {
+		return strings.ToValidUTF8(string(response[:max]), "") + "..."
+	}
+	return strings.ToValidUTF8(string(response), "")
+}
+
 func runHandler(done chan<- moduleResult, work *moduleWork, handler ModuleHandler, body []byte) {
 	response, status := handler(work.invocation, body)
 	if !validModuleStatus(status) || uint64(len(response)) > uint64(ModuleMessageMaxBody) {
 		status = ModuleStatusInternal
 		response = nil
 	} else if status != ModuleStatusOK {
+		// A non-OK reply carries no body, so whatever the handler said about the
+		// failure stops here. Say it on the way past: a caller that receives a
+		// bare status has nothing to report but the number, and a stage that
+		// refuses every request looks identical to one that is merely slow.
+		log.Printf("module stage %d (kind %d) failed with status %d: %s",
+			work.invocation.StageID, work.eventKind, status, moduleDetail(response))
 		response = nil
 	}
 	if work.cancelled.set.Load() {
