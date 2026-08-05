@@ -1137,6 +1137,17 @@ int kb_client_index_scan_timeout_ms(void);
  * on the wire (no body, no status), so elapsed time against the budget is
  * what separates 'nobody answered' from 'someone is still working'. A
  * timeout must not open the shared dependency breaker. */
+/* Failure-budget classes. Bulk work (ingest, embed) and interactive work (reads,
+ * lookups) keep separate breakers so neither can suppress the other. */
+typedef enum
+{
+   KB_DEP_INTERACTIVE = 0,
+   KB_DEP_BULK = 1,
+   KB_DEP_CLASS_COUNT = 2
+} kb_dependency_class_t;
+
+kb_dependency_class_t kb_dependency_class_for_path(const char *path);
+
 int kb_transport_call_timed_out(int http_status, const char *response, int64_t elapsed_ms,
                                 int timeout_ms);
 

@@ -1416,8 +1416,35 @@ static void test_timeout_is_distinguished_from_unreachable(void)
    assert(kb_transport_call_timed_out(-1, NULL, 300000, 0) == 0);
 }
 
+
+/* Bulk ingestion and interactive reads keep separate failure budgets. A corpus
+ * ingest that is failing says nothing about whether a symbol lookup will work,
+ * and while they shared one breaker it could suppress every unrelated KB call
+ * in the process. */
+static void test_bulk_and_interactive_have_separate_budgets(void)
+{
+   assert(kb_dependency_class_for_path("/v1/code/scan") == KB_DEP_BULK);
+   assert(kb_dependency_class_for_path("/v1/code/build") == KB_DEP_BULK);
+   assert(kb_dependency_class_for_path("/v1/code/embed") == KB_DEP_BULK);
+   assert(kb_dependency_class_for_path("/v1/ingest") == KB_DEP_BULK);
+
+   /* Reads and lookups are interactive and must stay answerable. */
+   assert(kb_dependency_class_for_path("/v1/code/find") == KB_DEP_INTERACTIVE);
+   assert(kb_dependency_class_for_path("/v1/code/callers") == KB_DEP_INTERACTIVE);
+   assert(kb_dependency_class_for_path("/v1/search") == KB_DEP_INTERACTIVE);
+   assert(kb_dependency_class_for_path("/v1/health") == KB_DEP_INTERACTIVE);
+   assert(kb_dependency_class_for_path("/v1/memory/recall") == KB_DEP_INTERACTIVE);
+
+   /* Unknown and empty paths default to interactive: a path we cannot classify
+    * must not silently borrow the bulk budget. */
+   assert(kb_dependency_class_for_path("/v1/something/new") == KB_DEP_INTERACTIVE);
+   assert(kb_dependency_class_for_path("") == KB_DEP_INTERACTIVE);
+   assert(kb_dependency_class_for_path(NULL) == KB_DEP_INTERACTIVE);
+}
+
 int main(void)
 {
+   test_bulk_and_interactive_have_separate_budgets();
    test_timeout_is_distinguished_from_unreachable();
    test_health_uses_v1_api_when_configured();
    test_health_degraded_is_reachable_and_carries_blockers();
