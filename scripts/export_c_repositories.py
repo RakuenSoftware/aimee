@@ -627,6 +627,23 @@ serve={serve}
             if enabled:
                 placement_rows[placement].append(f"{module_id}\t/usr/local/libexec/aimee-modules/{binary}")
         count += 1
+    # Bus clients request stages but serve none, so they get a grant and no
+    # manifest row: nothing supervises them, they are already running.
+    contract_doc = load_json(process_contracts.CONTRACTS)
+    for client in contract_doc.get("clients", []):
+        request = ",".join(str(kind) for kind in client["request"])
+        client_grant = f"""version=1
+principal_class={PRINCIPAL_CLASS}
+principal_ref={client["principal_ref"]}
+uid=self
+executable={client["executable"]}
+publish=
+subscribe=
+request={request}
+serve=
+"""
+        for placement in client["placements"]:
+            write_text(output_root / "grants" / placement / f"{client['id']}.grant", client_grant)
     for placement, rows in placement_rows.items():
         write_text(output_root / f"{placement}.modules", "\n".join(rows) + "\n")
     write_text(output_root / "go.modules", "\n".join(go_modules) + "\n")
