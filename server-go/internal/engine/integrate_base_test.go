@@ -249,6 +249,20 @@ func (partialNoCommitAgents) Delegate(_ context.Context, _ DelegateRequest) (Del
 	}, nil
 }
 
+type documentedNoopAgents struct{}
+
+func (documentedNoopAgents) Delegate(_ context.Context, _ DelegateRequest) (DelegateResult, error) {
+	return DelegateResult{
+		Response: "Partial result; delegate ended with error: delegate code: no owned files changed; " +
+			"result treated as incomplete\n\nNo changes made. Documentation is already complete.",
+		Partial: true,
+	}, nil
+}
+
+func (documentedNoopAgents) DelegateGroup(_ context.Context, requests []DelegateRequest) []DelegateGroupResult {
+	return make([]DelegateGroupResult, len(requests))
+}
+
 func (a partialNoCommitAgents) DelegateGroup(_ context.Context, requests []DelegateRequest) []DelegateGroupResult {
 	out := make([]DelegateGroupResult, len(requests))
 	for i := range requests {
@@ -408,5 +422,62 @@ func TestPartialImplementWithNoCommitDoesNotAdvance(t *testing.T) {
 	// The delegate already said exactly what was wrong; that is the finding.
 	if !strings.Contains(out.Detail, "was not created by delegate") {
 		t.Fatalf("delegate's own diagnosis must survive into the step detail: %q", out.Detail)
+	}
+}
+
+func TestDocumentPartialNoChangeAdvancesUnchangedHead(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "init", "-b", "trunk")
+	if err := os.WriteFile(filepath.Join(repo, "README"), []byte("base\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "add", "README")
+	gitRun(t, repo, "commit", "-m", "init")
+	gitRun(t, repo, "remote", "add", "origin", repo)
+	gitRun(t, repo, "update-ref", "refs/remotes/origin/trunk", "HEAD")
+	gitRun(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+
+	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	ctx := t.Context()
+	if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: "wi_root", Repo: repo,
+		ProposalPath: "p", WorkflowName: "build", StartStage: "document"}); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewWorktreeManager(store, filepath.Join(root, "trees"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, _ := store.WorkItem(ctx, "wi_root")
+	workdir, branch, err := manager.Ensure(ctx, item, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, "docs.md"), []byte("already documented\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, workdir, "add", "docs.md")
+	gitRun(t, workdir, "commit", "-m", "accepted implementation")
+	head := strings.TrimSpace(gitRun(t, workdir, "rev-parse", "HEAD"))
+	item, _ = store.WorkItem(ctx, "wi_root")
+
+	runner := &NativeRunner{agents: documentedNoopAgents{}, worktrees: manager, db: store}
+	out, err := runner.mutate(ctx, StepRequest{WorkItem: item, Node: wfe.Node{ID: "document"},
+		Proposal: "Document the accepted implementation."}, true)
+	if err != nil {
+		t.Fatalf("mutate: %v", err)
+	}
+	if out.Status != StepAdvanced || out.Artifact != branch || out.ContentHash != head {
+		t.Fatalf("result=%+v, want unchanged advanced HEAD %s", out, head)
+	}
+	if got := strings.TrimSpace(gitRun(t, workdir, "status", "--porcelain")); got != "" {
+		t.Fatalf("document no-op dirtied the worktree: %q", got)
 	}
 }
