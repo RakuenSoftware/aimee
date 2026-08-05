@@ -30,6 +30,7 @@ import argparse, json, os, subprocess, sys, threading, time
 import urllib.error, urllib.parse, urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SCRATCH = os.path.join(ROOT, ".scratch")
 API = "https://console.vast.ai/api/v0"
 IMAGE = "ghcr.io/ggml-org/llama.cpp:server-cuda"
 KEY = os.environ.get("VAST_API_KEY", "")
@@ -158,6 +159,28 @@ class Preempted(Exception):
     pass
 
 
+def remaining_gold(gold_path, pred_path, scratch, tag):
+    """Write a gold file of the notes a partial arm has not answered yet.
+
+    Resume is done by narrowing the CORPUS, not by changing the client.
+    run_llamacpp.py opens its output with "w" and has no resume path, and giving
+    it one would be an instrument change for a billing problem.
+    """
+    done = set()
+    if os.path.exists(pred_path):
+        for l in open(pred_path):
+            try:
+                done.add(json.loads(l)["id"])
+            except Exception:
+                pass            # a torn final line from a killed process
+    rows = [l for l in open(gold_path)
+            if json.loads(l)["id"] not in done]
+    out = os.path.join(scratch, "resume-%s.jsonl" % tag)
+    with open(out, "w") as fh:
+        fh.writelines(rows)
+    return out, len(done), len(rows)
+
+
 def run_arm(job, gpu, maxprice, outdir, log):
     """One instance, one model, and every prompt variant the job asks for.
 
@@ -205,25 +228,60 @@ def run_arm(job, gpu, maxprice, outdir, log):
         # --thinking, so that is what a job gets unless it says otherwise.
         for v in todo:
             pred = os.path.join(outdir, "%s.%s.pred.jsonl" % (label, v))
+            use_gold = os.path.join(ROOT, gold)
+            frag = pred + ".part"
+            if job.get("resumable") and os.path.exists(frag):
+                use_gold, ndone, nleft = remaining_gold(
+                    os.path.join(ROOT, gold), frag, SCRATCH, "%s.%s" % (label, v))
+                log("    resuming %s/%s: %d done, %d remaining" % (label, v, ndone, nleft))
             cmd = [sys.executable, os.path.join(ROOT, "harness/run_llamacpp.py"),
                    "--base-url", "http://" + ep, "--model", "%s.%s" % (label, v),
-                   "--gold", os.path.join(ROOT, gold), "--out", pred,
+                   "--gold", use_gold, "--out", pred,
                    "--thinking" if job.get("thinking", True) else "--no-thinking",
                    "--max-tokens", str(job.get("max_tokens", 8192)),
                    "--prompt-version", v,
                    "--concurrency", "1"] + job.get("extra", [])
+            # RESUME, and when it is allowed. Each note is an independent
+            # request, so a prediction made on one machine is valid whatever made
+            # the next one. What a mixed arm costs is the cross-card term, which
+            # this project has now measured: rented 3090 against local 5080, same
+            # config, +0.0057 F1 with 95% CI [-0.0136, +0.0251], tp and fn
+            # identical and the whole difference in fp.
+            #
+            # So resume is fine when the arm's own tolerance is WIDER than that:
+            # parse rates, reasoning present or absent, a model that scores 0.16
+            # against one that scores 0.60. It is NOT fine for the paired ladders,
+            # where the effects being chased (quant steps 0.0065-0.015, the MTP
+            # null at +/-0.004) are smaller than the cross-card term, so a mixed
+            # arm injects an uncontrolled shift of comparable size and unknown
+            # sign. It is never fine for byte-identity or throughput work.
+            #
+            # Jobs declare this. The default is to discard, because the expensive
+            # mistake is the silent one.
+            if os.path.exists(pred):
+                os.remove(pred)
+            src_pred = pred + ".part"
             ok, preempted = run_client(cmd, cid, log, "%s/%s" % (label, v))
             if not ok:
-                # A partial arm is never kept. run_llamacpp.py opens its output
-                # with "w" so a rerun truncates anyway, but leaving a short file
-                # on disk invites a later reader to score it as if it were an arm.
+                if preempted and job.get("resumable"):
+                    log("    %s/%s preempted; %d rows kept for resume" % (
+                        label, v, sum(1 for _ in open(pred)) if os.path.exists(pred) else 0))
+                    if os.path.exists(pred):
+                        os.replace(pred, src_pred)
+                    raise Preempted(v)
                 if os.path.exists(pred):
                     os.remove(pred)
-                    log("    discarded partial %s" % os.path.basename(pred))
+                    log("    discarded partial %s (job is not resumable)" % os.path.basename(pred))
                 log("FAIL %s/%s%s" % (label, v, " (preempted)" if preempted else ""))
                 if preempted:
                     raise Preempted(v)
                 continue
+            if os.path.exists(src_pred):
+                # stitch the earlier fragment back on, then drop it
+                with open(pred, "a") as fh:
+                    fh.write(open(src_pred).read())
+                os.remove(src_pred)
+                log("    %s/%s stitched with an earlier fragment (MIXED HARDWARE)" % (label, v))
             rows = [json.loads(l) for l in open(pred)]
             reasoned = sum(1 for x in rows if (x.get("reasoning_chars") or 0) > 0)
             pk = sum(1 for x in rows if x.get("parse_ok"))
@@ -261,6 +319,7 @@ def main():
         print("VAST_API_KEY is not set", file=sys.stderr); return 2
     outdir = os.path.join(ROOT, a.out)
     os.makedirs(outdir, exist_ok=True)
+    os.makedirs(SCRATCH, exist_ok=True)
     lock = threading.Lock()
     logf = open(os.path.join(outdir, "vast.log"), "a")
 
