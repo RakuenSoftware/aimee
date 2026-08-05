@@ -140,8 +140,10 @@ int main(void)
             /* slice 0 lands doc.md on feat; our slice creates its OWN doc.md. */
             snprintf(cmd, sizeof cmd,
                      "cd %s && printf 'from slice0\\n' > doc.md && git add -A && "
-                     "git commit -q -m slice0 && git checkout -q -b mine %s && "
-                     "printf 'from mine\\n' > doc.md && git add -A && git commit -q -m mine",
+                     "git commit -q -m slice0 && "
+                     "git rev-parse HEAD > /tmp/wfe_addadd_sibling_head && "
+                     "git checkout -q -b mine %s && printf 'from mine\\n' > doc.md && "
+                     "git add -A && git commit -q -m mine",
                      sdir, cut);
             assert(sh(cmd) == 0);
             assert(db1_work_item_create("slice0", "repo", "p0", "build", "", "pr", "autonomous") ==
@@ -150,7 +152,17 @@ int main(void)
                                         "autonomous") == 0);
             assert(db1_work_item_set_parent("slice0", "parent") == 0);
             assert(db1_work_item_set_parent("mine", "parent") == 0);
-            assert(db1_work_item_set_stage("slice0", "rt_gate", cut) == 0);
+            char sibling_head[64] = "";
+            FILE *sf = fopen("/tmp/wfe_addadd_sibling_head", "r");
+            assert(sf);
+            assert(fgets(sibling_head, sizeof sibling_head, sf));
+            sibling_head[strcspn(sibling_head, "\r\n")] = '\0';
+            fclose(sf);
+            assert(db1_work_item_set_stage("slice0", "rt_gate", sibling_head) == 0);
+            assert(db1_lifecycle_event_add("slice0", "freeze", "freeze_base", "engine", "", cut,
+                                           0) == 0);
+            assert(db1_lifecycle_event_add("slice0", "freeze", "freeze_head", "engine", "",
+                                           sibling_head, 0) == 0);
             char sibdir[] = "/tmp/wfe_addadd_sibling_XXXXXX";
             assert(wfe_test_mkdtemp(sibdir));
             snprintf(cmd, sizeof cmd, "git clone -q -b feat %s %s", sdir, sibdir);

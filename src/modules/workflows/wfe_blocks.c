@@ -1285,6 +1285,25 @@ static int sibling_stage_is_mutating(const char *stage)
    return 0;
 }
 
+static int recorded_freeze_endpoint(const char *work_item_id, const char *kind, char out[80])
+{
+   out[0] = '\0';
+   db1_lifecycle_event_t *events = NULL;
+   int n = db1_lifecycle_event_list(work_item_id, &events);
+   if (n < 0)
+      return -1;
+   for (int i = n - 1; i >= 0; i--)
+      if (!strcmp(events[i].stage, "freeze") && !strcmp(events[i].kind, kind) &&
+          events[i].content_hash[0])
+      {
+         snprintf(out, 80, "%s", events[i].content_hash);
+         free(events);
+         return 1;
+      }
+   free(events);
+   return 0;
+}
+
 int wfe_slice_conflicts_with_frozen_sibling(const char *work_item_id, const char *workdir,
                                             const char *base_sha, const char *head_sha,
                                             char *path_out, size_t path_cap, char *sibling_out,
@@ -1356,14 +1375,19 @@ int wfe_slice_conflicts_with_frozen_sibling(const char *work_item_id, const char
             break;
          }
 
-         char sib_head[80], merge_base[80];
-         snprintf(sib_head, sizeof sib_head, "%s", sib->content_hash);
-         if (!sib_head[0] || !git_blob_id(sib->worktree, sib_head, verified))
+         char sib_base[80], sib_head[80], merge_base[80];
+         int base_seen = recorded_freeze_endpoint(sib->work_item_id, "freeze_base", sib_base);
+         int head_seen = recorded_freeze_endpoint(sib->work_item_id, "freeze_head", sib_head);
+         if (base_seen < 0 || head_seen < 0)
          {
             found = -1;
             break;
          }
-         if (!git_blob_id(sib->worktree, "HEAD", verified))
+         if (base_seen == 0 || head_seen == 0)
+            continue;
+         if (strcmp(sib_base, base_sha) != 0)
+            continue;
+         if (!sib_head[0] || !git_blob_id(sib->worktree, sib_head, verified))
          {
             found = -1;
             break;
@@ -1415,8 +1439,7 @@ static wfe_step_result_t exec_freeze(wfe_ctx *ctx, const wfe_node_t *node)
    if (pinned_base && pinned_base[0])
    {
       char head2[64] = "";
-      if (wfe_git_freeze(wd, pinned_base, base, head2, dhash, err, sizeof err) != 0 ||
-          strcmp(base, pinned_base) != 0)
+      if (wfe_git_freeze(wd, pinned_base, base, head2, dhash, err, sizeof err) != 0)
          return wfe_step_failed();
       snprintf(head, sizeof head, "%s", head2);
    }
@@ -1433,12 +1456,17 @@ static wfe_step_result_t exec_freeze(wfe_ctx *ctx, const wfe_node_t *node)
    if (collision > 0)
    {
       char detail[512];
-      snprintf(detail, sizeof detail, "%s: path %s current slice %s conflicts with already "
-                                     "frozen sibling slice %s",
+      snprintf(detail, sizeof detail,
+               "%s: path %s current slice %s conflicts with already frozen sibling slice %s",
                WFE_FREEZE_SIBLING_CREATE_COLLISION, clash,
                wfe_ctx_work_item(ctx) ? wfe_ctx_work_item(ctx) : "", sibling);
       return wfe_step_failed_detail(WFE_FAIL_PERMANENT, detail);
    }
+   if (db1_lifecycle_event_add(wfe_ctx_work_item(ctx), node->id, "freeze_base", "engine", "",
+                               base, 0) != 0 ||
+       db1_lifecycle_event_add(wfe_ctx_work_item(ctx), node->id, "freeze_head", "engine", "",
+                               head, 0) != 0)
+      return wfe_step_failed_detail(WFE_FAIL_CORRUPTION, "freeze endpoint recording failed");
 
    char handle[80];
    snprintf(handle, sizeof handle, "%s.out", node->id);
