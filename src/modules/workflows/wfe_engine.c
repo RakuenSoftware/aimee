@@ -66,8 +66,9 @@ static int wfe_has_prefix(const char *s, const char *prefix)
 
 static int wfe_is_freeze_sibling_collision(const wfe_step_result_t *r)
 {
-   return r && r->failure_class == WFE_FAIL_PERMANENT &&
-          wfe_has_prefix(r->failure_detail, WFE_FREEZE_SIBLING_CREATE_COLLISION " ");
+   if (!r || r->failure_class != WFE_FAIL_PERMANENT)
+      return 0;
+   return wfe_has_prefix(r->failure_detail, WFE_FREEZE_SIBLING_CREATE_COLLISION ":");
 }
 
 wfe_def_t *wfe_load_workflow(const char *name, char *err, size_t errlen)

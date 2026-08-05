@@ -130,7 +130,7 @@ func (r *NativeRunner) siblingStageHasFrozenDiff(sibling db1.WorkItem) (bool, er
 		return false, nil
 	}
 	if r.workflows == nil {
-		return sibling.Stage != "freeze" && sibling.Stage != "impl", nil
+		return false, errors.New("workflow registry is required for sibling freeze collision inspection")
 	}
 	def, err := r.workflows.LoadVersion(sibling.WorkflowName, sibling.WorkflowVersion)
 	if err != nil {
