@@ -7,7 +7,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
@@ -203,6 +205,19 @@ func TestFreezeRejectsDivergentSiblingCreateCreateCollision(t *testing.T) {
 	gitRun(t, repo, "branch", feature)
 	gitRun(t, repo, "push", "origin", feature)
 
+	workflowDir := filepath.Join(root, "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	definition := []byte("name: slice\nstart: freeze\nnodes:\n  - id: freeze\n    block: freeze\n    next: review\n  - id: review\n    block: review\n")
+	if err := os.WriteFile(filepath.Join(workflowDir, "slice.yaml"), definition, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registry, err := wfe.NewRegistry(workflowDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
@@ -226,7 +241,7 @@ func TestFreezeRejectsDivergentSiblingCreateCreateCollision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner := &NativeRunner{db: store, worktrees: manager, artifacts: artifacts}
+	runner := &NativeRunner{db: store, worktrees: manager, artifacts: artifacts, workflows: registry}
 
 	first, err := store.WorkItem(ctx, "wi_s0")
 	if err != nil {
@@ -489,6 +504,185 @@ nodes:
 		if !strings.Contains(detail, want) {
 			t.Fatalf("terminal detail %q missing %q", detail, want)
 		}
+	}
+}
+
+type synchronizedFreezeRunner struct {
+	*NativeRunner
+	mu    sync.Mutex
+	count int
+	ready chan struct{}
+}
+
+func (r *synchronizedFreezeRunner) lockStep(ctx context.Context, req StepRequest) (func(), error) {
+	if req.Node.Block != "freeze" {
+		return r.NativeRunner.lockStep(ctx, req)
+	}
+	r.mu.Lock()
+	r.count++
+	if r.count == 2 {
+		close(r.ready)
+	}
+	ready := r.ready
+	r.mu.Unlock()
+	select {
+	case <-ready:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return r.NativeRunner.lockStep(ctx, req)
+}
+
+func TestSynchronizedSimultaneousFreezeRejectsExactlyOneDivergentCreate(t *testing.T) {
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin.git")
+	repo := filepath.Join(root, "repo")
+	gitRun(t, root, "init", "--bare", "-b", "trunk", origin)
+	gitRun(t, root, "clone", origin, repo)
+	if err := os.WriteFile(filepath.Join(repo, "README"), []byte("root\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "add", "README")
+	gitRun(t, repo, "commit", "-m", "init")
+	gitRun(t, repo, "push", "-u", "origin", "trunk")
+	gitRun(t, repo, "branch", "aimee/feat/wi_parent")
+	gitRun(t, repo, "push", "origin", "aimee/feat/wi_parent")
+
+	workflowDir := filepath.Join(root, "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	definition := []byte(`name: slice
+start: freeze
+nodes:
+  - id: freeze
+    block: freeze
+    next: review
+  - id: review
+    block: review
+    in: {src: freeze.out}
+`)
+	if err := os.WriteFile(filepath.Join(workflowDir, "slice.yaml"), definition, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registry, err := wfe.NewRegistry(workflowDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, err := registry.Pin("slice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	artifacts, err := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := t.Context()
+	for _, item := range []db1.CreateWorkItem{
+		{ID: "wi_parent", Repo: repo, ProposalPath: "parent", WorkflowName: "build", StartStage: "feature"},
+		{ID: "wi_parent.s0", Repo: repo, ProposalPath: "a", WorkflowName: "slice", WorkflowVersion: def.Version, StartStage: "freeze", ParentID: "wi_parent"},
+		{ID: "wi_parent.s1", Repo: repo, ProposalPath: "b", WorkflowName: "slice", WorkflowVersion: def.Version, StartStage: "freeze", ParentID: "wi_parent"},
+	} {
+		if err := store.CreateWorkItem(ctx, item); err != nil {
+			t.Fatal(err)
+		}
+		if err := artifacts.PutProposal(item.ID, []byte("freeze sync collision")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manager, err := NewWorktreeManager(store, filepath.Join(root, "trees"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, id := range []string{"wi_parent.s0", "wi_parent.s1"} {
+		item, err := store.WorkItem(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dir, branch, err := manager.Ensure(ctx, item, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "collision.txt"), []byte{byte('A' + i), '\n'}, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		gitRun(t, dir, "add", "collision.txt")
+		gitRun(t, dir, "commit", "-m", "colliding create")
+		if _, err := artifacts.PutNodeArtifact(id, "impl", "branch", []byte(branch)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	native := &NativeRunner{db: store, worktrees: manager, artifacts: artifacts, workflows: registry, freezeLocks: freezeCollisionLockSet{root: manager.root}}
+	runner := &synchronizedFreezeRunner{NativeRunner: native, ready: make(chan struct{})}
+	eng, err := New(store, artifacts, workflowDir, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type advanceOutcome struct {
+		id     string
+		result AdvanceResult
+		err    error
+	}
+	outcomes := make(chan advanceOutcome, 2)
+	for _, id := range []string{"wi_parent.s0", "wi_parent.s1"} {
+		go func(id string) {
+			result, err := eng.Advance(ctx, id)
+			outcomes <- advanceOutcome{id: id, result: result, err: err}
+		}(id)
+	}
+
+	advanced, rejected := "", ""
+	for i := 0; i < 2; i++ {
+		select {
+		case outcome := <-outcomes:
+			if outcome.err != nil {
+				t.Fatalf("advance %s: %v", outcome.id, outcome.err)
+			}
+			item, err := store.WorkItem(ctx, outcome.id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch {
+			case outcome.result.Ran && outcome.result.NextStage == "review" && item.Stage == "review" && item.State == "active":
+				advanced = outcome.id
+			case outcome.result.Ran && outcome.result.Terminal && outcome.result.State == "rejected" && item.Stage == "freeze" && item.State == "rejected":
+				rejected = outcome.id
+			default:
+				t.Fatalf("unexpected synchronized outcome for %s: result=%+v item=%+v", outcome.id, outcome.result, item)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for synchronized freezes")
+		}
+	}
+	if advanced == "" || rejected == "" || advanced == rejected {
+		t.Fatalf("want exactly one advanced and one rejected, advanced=%q rejected=%q", advanced, rejected)
+	}
+	events, err := store.Events(ctx, rejected, 0, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) == 0 {
+		t.Fatal("rejected slice has no terminal audit event")
+	}
+	for _, event := range events {
+		if event.Kind == "loop" || event.Kind == "pause" {
+			t.Fatalf("rejected synchronized freeze queued retry/merge work: %+v", event)
+		}
+	}
+	detail := events[len(events)-1].Detail
+	for _, want := range []string{freezeCreateCreateCollision, "collision.txt", advanced, rejected} {
+		if !strings.Contains(detail, want) {
+			t.Fatalf("terminal detail %q missing %q", detail, want)
+		}
+	}
+	if _, err := artifacts.NodeArtifact(rejected, "pr.open"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("rejected slice opened a PR/CONFLICTING PR: %v", err)
 	}
 }
 
