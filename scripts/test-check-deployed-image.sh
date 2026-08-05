@@ -65,7 +65,12 @@ chmod +x "$tmp/bin/docker"
 run_case() {
    local name="$1" want_rc="$2" want_re="$3"
    local out rc
-   out=$(PATH="$tmp/bin:$PATH" STATE="$tmp/state" bash "$CHECK" aimee-kb 2>&1)
+   # The server intentionally exports its deployed stack tag so managed compose
+   # operations use the same immutable image. Keep that host environment out of
+   # these fixed :testing fixtures or the test becomes deployment-dependent.
+   out=$(PATH="$tmp/bin:$PATH" STATE="$tmp/state" \
+         AIMEE_IMAGE_TAG=testing AIMEE_IMAGE_REPO=ghcr.io/rakuensoftware \
+         bash "$CHECK" aimee-kb 2>&1)
    rc=$?
    if [ "$rc" != "$want_rc" ]; then
       echo "  FAIL  $name: exit $rc, expected $want_rc"

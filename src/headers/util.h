@@ -188,6 +188,11 @@ void text_trim_partial_utf8(char *s);
  * UTF-8 boundary such as Postgres. Returns the number of bytes replaced. */
 size_t text_sanitize_utf8(char *s);
 
+/* Return non-zero when a NUL-terminated string contains only well-formed UTF-8.
+ * NULL is treated as an empty string. Unlike text_sanitize_utf8(), this never
+ * modifies the input. */
+int text_is_valid_utf8(const char *s);
+
 /* Basic Porter-like stemming. Result written to buf. Returns buf. */
 char *stem_word(const char *word, char *buf, size_t buf_len);
 
