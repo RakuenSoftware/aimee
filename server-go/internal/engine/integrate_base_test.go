@@ -491,6 +491,41 @@ func TestPartialImplementWithNoCommitDoesNotAdvance(t *testing.T) {
 	if !strings.Contains(out.Detail, "was not created by delegate") {
 		t.Fatalf("delegate's own diagnosis must survive into the step detail: %q", out.Detail)
 	}
+
+	// Existing branch work must not excuse a later partial correction attempt
+	// when the exact reviewed artifact still carries blocking feedback. Without
+	// this check the old commit made branchHasWorkOverBase true, so the unchanged
+	// retry advanced to freeze and immediately re-served the same findings.
+	workdir, _, err := manager.Ensure(ctx, child, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, "implementation.go"), []byte("package implementation\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, workdir, "add", "implementation.go")
+	gitRun(t, workdir, "commit", "-m", "initial reviewed implementation")
+	child, _ = store.WorkItem(ctx, "wi_child")
+	reviewedDiff, err := frozenWorktreeDiff(ctx, child, workdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewedHash := wfe.Hash([]byte(reviewedDiff))
+	verifier := &recordingVerifier{}
+	runner.verifier = verifier
+	out, err = runner.mutate(ctx, StepRequest{WorkItem: child, Node: wfe.Node{ID: "impl"},
+		Feedback: &wfe.ReviewFeedback{ArtifactHash: reviewedHash, Findings: []wfe.Finding{{
+			ID: "still-broken", Severity: "blocking", Summary: "the reviewed implementation is still broken",
+		}}}}, false)
+	if err != nil {
+		t.Fatalf("review correction mutate: %v", err)
+	}
+	if out.Status != StepChanges {
+		t.Fatalf("partial correction of unchanged reviewed artifact status=%q, want changes", out.Status)
+	}
+	if verifier.calls != 0 {
+		t.Fatalf("unchanged partial correction reached verifier: calls=%d", verifier.calls)
+	}
 }
 
 func TestDocumentPartialNoChangeAdvancesUnchangedHead(t *testing.T) {
