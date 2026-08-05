@@ -48,28 +48,6 @@ const char *wfe_ctx_worktree(const wfe_ctx *c)
     * back to the shared repo dir while empty. */
    return (c && c->wi) ? c->wi->worktree : "";
 }
-const char *wfe_ctx_base_hash(const wfe_ctx *c)
-{
-   static char base[256];
-   base[0] = '\0';
-   if (!c || !c->wi || !c->wi->parent_id[0])
-      return "";
-   snprintf(base, sizeof base, "refs/remotes/origin/aimee/feat/%s", c->wi->parent_id);
-   return base;
-}
-
-static int wfe_has_prefix(const char *s, const char *prefix)
-{
-   size_t n = prefix ? strlen(prefix) : 0;
-   return s && prefix && strncmp(s, prefix, n) == 0;
-}
-
-static int wfe_is_freeze_sibling_collision(const wfe_step_result_t *r)
-{
-   if (!r || r->failure_class != WFE_FAIL_PERMANENT)
-      return 0;
-   return wfe_has_prefix(r->failure_detail, WFE_FREEZE_SIBLING_CREATE_COLLISION ":");
-}
 
 wfe_def_t *wfe_load_workflow(const char *name, char *err, size_t errlen)
 {
@@ -343,34 +321,19 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
       return 0;
    }
 
+   /* The executor runs OUTSIDE any transaction (see scope note above). Its own
+    * incidental db1 writes (attempt counters, loop audit events) auto-commit
+    * individually, which is strictly better than riding a step txn that a later
+    * write failure would erase. */
    wfe_ctx ctx = {work_item_id, def, node, &wi};
-   wfe_step_result_t r;
-   int freeze_txn_open = 0;
-
-   if (node->block == WFE_BLK_FREEZE)
-   {
-      if (db1_lifecycle_txn_begin() != 0)
-      {
-         snprintf(err, errlen, "could not begin advance transaction");
-         wfe_def_free(def);
-         return -1;
-      }
-      freeze_txn_open = 1;
-   }
-
-   /* Non-freeze executors run OUTSIDE any transaction (see scope note above). Freeze is
-    * short git inspection plus sibling-state serialization and must be atomic with its
-    * state write so simultaneous sibling freezes cannot both pass create/create checks.
-    * db1_lifecycle_txn_begin uses BEGIN IMMEDIATE and the db1 transaction gate, so this
-    * is a single-writer compare-and-record boundary across threads and processes. */
-   r = fn(&ctx, node);
+   wfe_step_result_t r = fn(&ctx, node);
    out->last_status = r.status;
    out->failure_class = r.failure_class;
    out->failure_has_new_input = r.failure_has_new_input;
 
    /* --- atomic critical section: cost + step outcome + state update. Held only
-    * for these writes (milliseconds), never across long-running executors. --- */
-   if (!freeze_txn_open && db1_lifecycle_txn_begin() != 0)
+    * for these writes (milliseconds), never across the executor above. --- */
+   if (db1_lifecycle_txn_begin() != 0)
    {
       snprintf(err, errlen, "could not begin advance transaction");
       wfe_def_free(def);
@@ -422,53 +385,40 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
    }
    else if (r.status == WFE_STEP_FAILED)
    {
-      if (node->block == WFE_BLK_FREEZE && wfe_is_freeze_sibling_collision(&r))
+      /* Phase-C failure taxonomy: derive the pause reason from the failure class,
+       * REUSING the existing reason strings (budget_exceeded / panel_degraded /
+       * stuck / pending_human / failed) so the scheduler + UI need no new vocabulary
+       * (the run loop already skips a 'stuck' item; park_budget already uses
+       * 'budget_exceeded'). The lifecycle-event detail stays EMPTY for the legacy
+       * terminal case (byte-inert for any consumer of the old wfe_step_failed()
+       * events); only the new dispositions carry a tag. A retryable failure must be
+       * returned as LOOPED, never FAILED — a FAILED that claims retry can't loop from
+       * here, so it parks 'stuck' (visible, no silent terminal-stop). */
+      const char *reason = "failed"; /* REFUSAL / PERMANENT / CORRUPTION / NONE -> terminal */
+      const char *detail = "";       /* legacy-inert for terminal */
+      switch (r.failure_class)
       {
-         WFE_CKW(db1_work_item_set_terminal(work_item_id, "rejected"));
-         (void)db1_work_item_abandon_children(work_item_id);
-         db1_lifecycle_event_add(work_item_id, node->id, "terminal", "engine", r.failure_detail, "",
-                                 r.cost_usd);
-         out->terminal = 1;
-         snprintf(out->state, sizeof out->state, "rejected");
+      case WFE_FAIL_BUDGET:
+         reason = "budget_exceeded";
+         detail = "budget";
+         break;
+      case WFE_FAIL_DEGRADED:
+         reason = "panel_degraded";
+         detail = "degraded";
+         break;
+      case WFE_FAIL_FORGE:
+         reason = "pending_human";
+         detail = "forge";
+         break;
+      case WFE_FAIL_TRANSIENT:
+         reason = "stuck";
+         detail = r.failure_has_new_input ? "retry_expected_looped" : "park_stuck";
+         break;
+      default:
+         break; /* terminal-reject: reason "failed", detail "" (inert) */
       }
-      else
-      {
-         /* Phase-C failure taxonomy: derive the pause reason from the failure class,
-          * REUSING the existing reason strings (budget_exceeded / panel_degraded /
-          * stuck / pending_human / failed) so the scheduler + UI need no new vocabulary
-          * (the run loop already skips a 'stuck' item; park_budget already uses
-          * 'budget_exceeded'). The lifecycle-event detail stays EMPTY for the legacy
-          * terminal case (byte-inert for any consumer of the old wfe_step_failed()
-          * events); only the new dispositions carry a tag. A retryable failure must be
-          * returned as LOOPED, never FAILED — a FAILED that claims retry can't loop from
-          * here, so it parks 'stuck' (visible, no silent terminal-stop). */
-         const char *reason = "failed"; /* REFUSAL / PERMANENT / CORRUPTION / NONE -> terminal */
-         const char *detail = "";       /* legacy-inert for terminal */
-         switch (r.failure_class)
-         {
-         case WFE_FAIL_BUDGET:
-            reason = "budget_exceeded";
-            detail = "budget";
-            break;
-         case WFE_FAIL_DEGRADED:
-            reason = "panel_degraded";
-            detail = "degraded";
-            break;
-         case WFE_FAIL_FORGE:
-            reason = "pending_human";
-            detail = "forge";
-            break;
-         case WFE_FAIL_TRANSIENT:
-            reason = "stuck";
-            detail = r.failure_has_new_input ? "retry_expected_looped" : "park_stuck";
-            break;
-         default:
-            break; /* terminal-reject: reason "failed", detail "" (inert) */
-         }
-         WFE_CKW(db1_work_item_set_pause(work_item_id, reason, node->id));
-         db1_lifecycle_event_add(work_item_id, node->id, "failed", "engine",
-                                 r.failure_detail[0] ? r.failure_detail : detail, "", r.cost_usd);
-      }
+      WFE_CKW(db1_work_item_set_pause(work_item_id, reason, node->id));
+      db1_lifecycle_event_add(work_item_id, node->id, "failed", "engine", detail, "", r.cost_usd);
    }
    else
    {
@@ -580,13 +530,10 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
    }
 
    db1_lifecycle_txn_commit();
-   freeze_txn_open = 0;
    wfe_def_free(def);
    return 0;
 
 txn_fail:
-   if (freeze_txn_open)
-      freeze_txn_open = 0;
    db1_lifecycle_txn_rollback();
    snprintf(err, errlen, "advance: a state write failed; rolled back");
    wfe_def_free(def);

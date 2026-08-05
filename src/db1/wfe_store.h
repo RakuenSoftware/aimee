@@ -160,8 +160,6 @@ int db1_work_item_reap_stale_parks(long grace_secs);
 
 /* List work items (newest first). Caller frees *out. Returns count or -1. */
 int db1_work_item_list(db1_work_item_t **out);
-/* List children for one parent work item (newest first). Caller frees *out. Returns count or -1. */
-int db1_work_item_list_by_parent(const char *parent_id, db1_work_item_t **out);
 
 /* List work items LEAST-RECENTLY-UPDATED first — the scheduler's fairness
  * order. A newest-first sweep starves older siblings: the sequential autonomy
