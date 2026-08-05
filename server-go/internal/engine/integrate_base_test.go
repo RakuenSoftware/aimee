@@ -186,6 +186,180 @@ func TestFreezeUsesMergedRemoteFeatureTip(t *testing.T) {
 	}
 }
 
+func TestFreezeRejectsDivergentSiblingCreateCreateCollision(t *testing.T) {
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin.git")
+	repo := filepath.Join(root, "repo")
+	gitRun(t, root, "init", "--bare", "-b", "trunk", origin)
+	gitRun(t, root, "clone", origin, repo)
+	if err := os.WriteFile(filepath.Join(repo, "README"), []byte("root\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "add", "README")
+	gitRun(t, repo, "commit", "-m", "init")
+	gitRun(t, repo, "push", "-u", "origin", "trunk")
+
+	feature := "aimee/feat/wi_parent"
+	gitRun(t, repo, "branch", feature)
+	gitRun(t, repo, "push", "origin", feature)
+
+	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	artifacts, err := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := t.Context()
+	for _, in := range []db1.CreateWorkItem{
+		{ID: "wi_parent", Repo: repo, ProposalPath: "p", WorkflowName: "build", StartStage: "feature"},
+		{ID: "wi_s0", Repo: repo, ProposalPath: "s0", WorkflowName: "slice", StartStage: "freeze", ParentID: "wi_parent"},
+		{ID: "wi_s1", Repo: repo, ProposalPath: "s1", WorkflowName: "slice", StartStage: "freeze", ParentID: "wi_parent"},
+	} {
+		if err := store.CreateWorkItem(ctx, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manager, err := NewWorktreeManager(store, filepath.Join(root, "trees"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &NativeRunner{db: store, worktrees: manager, artifacts: artifacts}
+
+	first, err := store.WorkItem(ctx, "wi_s0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstDir, _, err := manager.Ensure(ctx, first, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(firstDir, "collision.txt"), []byte("first\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, firstDir, "add", "collision.txt")
+	gitRun(t, firstDir, "commit", "-m", "first")
+	firstResult, err := runner.freeze(ctx, StepRequest{WorkItem: first, Node: wfe.Node{ID: "freeze"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstResult.Status != StepAdvanced {
+		t.Fatalf("first freeze status=%q detail=%q", firstResult.Status, firstResult.Detail)
+	}
+	if err := store.Move(ctx, "wi_s0", "freeze", "review", "advance", "", firstResult.ContentHash, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := store.WorkItem(ctx, "wi_s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondDir, _, err := manager.Ensure(ctx, second, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(secondDir, "collision.txt"), []byte("second\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, secondDir, "add", "collision.txt")
+	gitRun(t, secondDir, "commit", "-m", "second")
+	secondResult, err := runner.freeze(ctx, StepRequest{WorkItem: second, Node: wfe.Node{ID: "freeze"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secondResult.Status != StepFailed {
+		t.Fatalf("second freeze status=%q detail=%q", secondResult.Status, secondResult.Detail)
+	}
+	for _, want := range []string{freezeCreateCreateCollision, "collision.txt", "wi_s1", "wi_s0"} {
+		if !strings.Contains(secondResult.Detail, want) {
+			t.Fatalf("collision detail %q missing %q", secondResult.Detail, want)
+		}
+	}
+	storedSecond, err := store.WorkItem(ctx, "wi_s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if storedSecond.Stage != "freeze" || storedSecond.State != "active" || storedSecond.ContentHash != "" {
+		t.Fatalf("second slice mutated before engine transition: stage=%q state=%q hash=%q", storedSecond.Stage, storedSecond.State, storedSecond.ContentHash)
+	}
+	if _, err := artifacts.NodeArtifact("wi_s1", "freeze"); err == nil {
+		t.Fatal("rejected freeze published an artifact")
+	}
+}
+
+func TestFreezeAllowsIdenticalSiblingCreateAndExistingFileEdits(t *testing.T) {
+	repo, slicedir := setupSliceRepo(t)
+	ctx := t.Context()
+	gitRun(t, repo, "remote", "add", "origin", repo)
+	gitRun(t, repo, "update-ref", "refs/remotes/origin/aimee/feat/wi_parent", "aimee/feat/wi_parent")
+	gitRun(t, slicedir, "remote", "add", "origin", repo)
+	base := strings.TrimSpace(gitRun(t, slicedir, "rev-parse", featureBaseRef(ctx, slicedir, "wi_parent")))
+	if err := os.WriteFile(filepath.Join(slicedir, "same.txt"), []byte("same\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, slicedir, "add", "same.txt")
+	gitRun(t, slicedir, "commit", "-m", "same")
+	head := strings.TrimSpace(gitRun(t, slicedir, "rev-parse", "HEAD"))
+
+	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	artifacts, err := wfe.NewArtifactStore(filepath.Join(t.TempDir(), "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, in := range []db1.CreateWorkItem{
+		{ID: "wi_parent", Repo: repo, ProposalPath: "p", WorkflowName: "build", StartStage: "feature"},
+		{ID: "wi_s0", Repo: repo, ProposalPath: "s0", WorkflowName: "slice", StartStage: "freeze", ParentID: "wi_parent"},
+		{ID: "wi_s1", Repo: repo, ProposalPath: "s1", WorkflowName: "slice", StartStage: "freeze", ParentID: "wi_parent"},
+	} {
+		if err := store.CreateWorkItem(ctx, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := artifacts.PutNodeArtifact("wi_s0", "freeze", "frozen_diff", []byte("diff")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Move(ctx, "wi_s0", "freeze", "gate", "advance", "", head, 0); err != nil {
+		t.Fatal(err)
+	}
+	runner := &NativeRunner{db: store, artifacts: artifacts}
+	item, err := store.WorkItem(ctx, "wi_s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, head); err != nil {
+		t.Fatalf("identical create rejected: %v", err)
+	}
+
+	gitRun(t, repo, "checkout", "aimee/feat/wi_parent")
+	if err := os.WriteFile(filepath.Join(repo, "README"), []byte("sibling edit\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "add", "README")
+	gitRun(t, repo, "commit", "-m", "sibling existing edit")
+	siblingHead := strings.TrimSpace(gitRun(t, repo, "rev-parse", "HEAD"))
+	gitRun(t, repo, "checkout", "trunk")
+	gitRun(t, repo, "update-ref", "refs/remotes/origin/aimee/feat/wi_parent", base)
+	if err := store.Move(ctx, "wi_s0", "gate", "merge", "advance", "", siblingHead, 0); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, slicedir, "checkout", "-q", "-B", "aimee/wi/wi_child", base)
+	if err := os.WriteFile(filepath.Join(slicedir, "README"), []byte("current edit\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, slicedir, "add", "README")
+	gitRun(t, slicedir, "commit", "-m", "current existing edit")
+	currentHead := strings.TrimSpace(gitRun(t, slicedir, "rev-parse", "HEAD"))
+	if err := runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead); err != nil {
+		t.Fatalf("existing-file edit rejected: %v", err)
+	}
+}
+
 func TestIntegrateFeatureBaseNoopWhenAlreadyCurrent(t *testing.T) {
 	repo, slicedir := setupSliceRepo(t)
 	_ = repo

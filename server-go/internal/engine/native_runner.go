@@ -133,6 +133,7 @@ type NativeRunner struct {
 	workflows   *wfe.Registry
 	forge       Forge
 	roundtables *roundtablecfg.Store
+	freezeLocks freezeCollisionLockSet
 }
 
 func (r *NativeRunner) SetRoundtableStore(store *roundtablecfg.Store) { r.roundtables = store }
@@ -1006,39 +1007,64 @@ func (r *NativeRunner) freeze(ctx context.Context, req StepRequest) (StepResult,
 	if err != nil {
 		return StepResult{}, err
 	}
-	diff, err := frozenWorktreeDiff(ctx, item, workdir)
+
+	unlock := r.freezeLocks.lock(item.ParentID)
+	defer unlock()
+
+	base, err := freezeBase(ctx, item, workdir)
+	if err != nil {
+		return StepResult{}, err
+	}
+	head, err := gitText(ctx, workdir, "rev-parse", "HEAD")
+	if err != nil {
+		return StepResult{}, err
+	}
+	head = strings.TrimSpace(head)
+	diff, err := gitText(ctx, workdir, "--no-pager", "diff", base+"..."+head)
 	if err != nil {
 		return StepResult{}, err
 	}
 	if strings.TrimSpace(diff) == "" {
-		// The slice produced no net change vs its base — its work is already present
-		// (e.g. a sibling merged it and base-integration pulled it in) or the task was
-		// a no-op. Freezing an empty diff sends an empty artifact through review, which
-		// rejects it, looping the slice to convergence_no_progress. There is nothing to
-		// review, PR, or merge, so complete the slice as an accepted no-op.
 		return StepResult{Status: StepAccepted, Detail: "no-op: empty diff vs base"}, nil
 	}
-	return StepResult{Status: StepAdvanced, ArtifactType: "frozen_diff", Artifact: diff, ContentHash: wfe.Hash([]byte(diff))}, nil
+	if err := r.rejectDivergentSiblingCreates(ctx, item, workdir, base, head); err != nil {
+		return StepResult{Status: StepFailed, Detail: err.Error()}, nil
+	}
+	if r.artifacts != nil && req.Node.ID != "" {
+		if _, err := r.artifacts.PutNodeArtifact(item.ID, req.Node.ID, "frozen_diff", []byte(diff)); err != nil {
+			return StepResult{}, err
+		}
+		if _, err := r.artifacts.PutNodeArtifact(item.ID, req.Node.ID+"-head", "commit", []byte(head)); err != nil {
+			return StepResult{}, err
+		}
+	}
+	return StepResult{Status: StepAdvanced, ArtifactType: "frozen_diff", Artifact: diff, ContentHash: head}, nil
 }
 
-func frozenWorktreeDiff(ctx context.Context, item db1.WorkItem, workdir string) (string, error) {
-	base := ""
+func freezeBase(ctx context.Context, item db1.WorkItem, workdir string) (string, error) {
 	if item.ParentID != "" {
 		// Slice PRs merge through the forge, which advances the remote feature
 		// branch while the local aimee/feat/<parent> ref stays at the run's
 		// starting point.  Freeze against the same fetched feature tip used by
 		// slice creation/integration; otherwise every later slice's review
 		// artifact incorrectly includes all previously merged sibling work.
-		base = featureBaseRef(ctx, workdir, item.ParentID)
+		base := featureBaseRef(ctx, workdir, item.ParentID)
 		if base == "" {
 			return "", errors.New("parent feature branch is unavailable")
 		}
-	} else {
-		trunk, e := repoDefaultBranch(ctx, workdir)
-		if e != nil {
-			return "", e
-		}
-		base = "origin/" + trunk
+		return base, nil
+	}
+	trunk, err := repoDefaultBranch(ctx, workdir)
+	if err != nil {
+		return "", err
+	}
+	return "origin/" + trunk, nil
+}
+
+func frozenWorktreeDiff(ctx context.Context, item db1.WorkItem, workdir string) (string, error) {
+	base, err := freezeBase(ctx, item, workdir)
+	if err != nil {
+		return "", err
 	}
 	diff, err := gitText(ctx, workdir, "--no-pager", "diff", base+"...HEAD")
 	if err != nil {
