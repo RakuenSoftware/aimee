@@ -436,8 +436,7 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
        * makes -- minus the model. Parsing lives in the module now, so the
        * round-trip is the only thing that proves the C caller's payload is
        * shaped the way the Go side decodes it. */
-      const char *learn =
-          "{\"git_root\":\"/probe\",\"command\":\"apt-get install -y tree\"}";
+      const char *learn = "{\"git_root\":\"/probe\",\"command\":\"apt-get install -y tree\"}";
       request_len = (uint32_t)strlen(learn);
       assert(request_len <= sizeof(request));
       memcpy(request, learn, request_len);
