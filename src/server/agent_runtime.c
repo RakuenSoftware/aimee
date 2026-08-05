@@ -1474,7 +1474,14 @@ const char *agent_exec_instructions(task_type_t task_type)
              "call.\n"
              "The tools are available for evidence only, and only when the artifact alone "
              "cannot settle a question; a complete artifact usually can. Treat current "
-             "source as the file-content authority when it differs from indexed snippets.\n";
+             "source as the file-content authority when it differs from indexed snippets.\n"
+             "Your turn budget is small and shared with nothing else. Look something up only "
+             "when the answer would change your verdict, and stop looking as soon as it "
+             "would not. If a lookup does not settle a point -- the file is absent, the "
+             "workspace is not the one the artifact came from, the search returns nothing -- "
+             "that is not a reason to keep searching: record the uncertainty in your verdict "
+             "and answer. A review that never returns is worth less than one that answers "
+             "with a stated gap.\n";
    return "You are an execution agent. Complete the task using the provided tools.\n"
           "IMPORTANT: Always invoke tools (bash, read_file, write_file, list_files) to act. "
           "Never write shell commands or code as plain text — call the tool instead.\n"

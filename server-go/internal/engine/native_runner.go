@@ -116,17 +116,26 @@ func (v CommandVerifier) acquire(ctx context.Context) (func(), error) {
 }
 
 type NativeRunner struct {
-	db          *db1.Store
-	worktrees   *WorktreeManager
-	agents      AgentClient
-	verifier    Verifier
-	artifacts   *wfe.ArtifactStore
-	workflows   *wfe.Registry
-	forge       Forge
-	roundtables *roundtablecfg.Store
+	db        *db1.Store
+	worktrees *WorktreeManager
+	agents    AgentClient
+	verifier  Verifier
+	artifacts *wfe.ArtifactStore
+	workflows *wfe.Registry
+	forge     Forge
+	// reviews convenes a roundtable. The runner does not host a panel: the
+	// module does, over the bus, so this is the whole of the runner's coupling
+	// to reviewing.
+	reviews RoundtableReviewer
 }
 
-func (r *NativeRunner) SetRoundtableStore(store *roundtablecfg.Store) { r.roundtables = store }
+// RoundtableReviewer convenes one review. Narrow on purpose: the runner depends
+// on the capability, not on whatever transport reaches it.
+type RoundtableReviewer interface {
+	Review(context.Context, roundtablecfg.ReviewRequest) (roundtablecfg.RunResult, error)
+}
+
+func (r *NativeRunner) SetRoundtableReviewer(reviewer RoundtableReviewer) { r.reviews = reviewer }
 
 const (
 	roundtableDelegateRole        = "review"
@@ -985,16 +994,12 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 	for _, lens := range lenses {
 		lensNames = append(lensNames, lens.persona)
 	}
-	// Without a roundtable store there is nothing to resolve a name against, so
-	// there is no panel to convene. Park instead of substituting an implicit one:
-	// a review that never had a configured panel must be visible as a park, not
-	// pass through as a verdict.
-	if r.roundtables == nil {
-		return StepResult{Status: StepPending, PauseReason: "panel_unreachable", Detail: "no roundtable store configured; a roundtable review requires a saved roundtable"}, nil
-	}
-	convened, err := r.roundtables.Resolve(paramString(req.Node, "roundtable", ""), lensNames, panelPins(req.Node))
-	if err != nil {
-		return StepResult{Status: StepPending, PauseReason: "panel_unreachable", Detail: err.Error()}, nil
+	// Reviews are convened by the roundtable module over the bus. Without a
+	// reviewer there is no path to one, so park rather than pass through: a
+	// review that never happened must be visible as a park, not as a verdict.
+	if r.reviews == nil {
+		return StepResult{Status: StepPending, PauseReason: "panel_unreachable",
+			Detail: "no roundtable reviewer configured; reviews run in the roundtable module over the event bus"}, nil
 	}
 	reviewed, ok := req.Inputs["src"]
 	if !ok {
@@ -1018,12 +1023,24 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 	}
 	req.WorkItem.Worktree = workdir
 
-	run := roundtablecfg.Run{ID: req.WorkItem.ID, Stage: req.Node.ID,
-		ExecutionVersion: req.WorkItem.UpdatedAt, Workdir: workdir, ReplayOnly: req.ReplayOnly,
-		CostLimitUSD: req.CostLimitUSD, OriginalRequest: req.Proposal,
-		Reviewed: roundtablecfg.Artifact{Stage: reviewed.Type, Content: string(reviewed.Content), Hash: reviewed.Hash}}
-	result, err := roundtablecfg.Convene(ctx, panelDelegates{runner: r}, run, convened,
-		paramString(req.Node, "focus", ""))
+	// The saved panel is named, not resolved here: the module owns its preset
+	// store, and resolving a second time in the control plane is how the two
+	// sides previously ended up with different notions of the same panel.
+	result, err := r.reviews.Review(ctx, roundtablecfg.ReviewRequest{
+		Artifact:         string(reviewed.Content),
+		OriginalRequest:  req.Proposal,
+		ArtifactStage:    reviewed.Type,
+		Roundtable:       paramString(req.Node, "roundtable", ""),
+		Workdir:          workdir,
+		RunID:            req.WorkItem.ID,
+		Stage:            req.Node.ID,
+		ExecutionVersion: req.WorkItem.UpdatedAt,
+		ReplayOnly:       req.ReplayOnly,
+		CostLimitUSD:     req.CostLimitUSD,
+		Focus:            paramString(req.Node, "focus", ""),
+		Lenses:           lensNames,
+		Pins:             panelPins(req.Node),
+	})
 	if err != nil {
 		// A lost replay is not a park: retrying reproduces the same absence, and
 		// only the engine's reservation recovery can resolve it.
