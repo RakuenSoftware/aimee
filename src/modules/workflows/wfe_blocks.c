@@ -1338,8 +1338,7 @@ int wfe_slice_conflicts_with_frozen_sibling(const char *work_item_id, const char
           * A row still at freeze has not durably completed compare-and-record.
           * The engine holds BEGIN IMMEDIATE around this check and its stage write,
           * so a simultaneous sibling cannot observe an in-between state. */
-         if (strcmp(sib->current_stage, "freeze") == 0 ||
-             strcmp(sib->current_stage, "impl") == 0)
+         if (strcmp(sib->current_stage, "freeze") == 0 || strcmp(sib->current_stage, "impl") == 0)
             continue;
          if (!sib->worktree[0])
          {
@@ -1410,9 +1409,8 @@ static wfe_step_result_t exec_freeze(wfe_ctx *ctx, const wfe_node_t *node)
       return wfe_step_failed();
 
    char clash[1024], sibling[80];
-   int collision = wfe_slice_conflicts_with_frozen_sibling(wfe_ctx_work_item(ctx), wd, base, head,
-                                                           clash, sizeof clash, sibling,
-                                                           sizeof sibling);
+   int collision = wfe_slice_conflicts_with_frozen_sibling(
+       wfe_ctx_work_item(ctx), wd, base, head, clash, sizeof clash, sibling, sizeof sibling);
    if (collision < 0)
       return wfe_step_failed_detail(WFE_FAIL_CORRUPTION,
                                     "freeze sibling collision inspection failed");

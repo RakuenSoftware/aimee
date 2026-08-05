@@ -191,9 +191,9 @@ int main(void)
                                                            sizeof clash, sibling,
                                                            sizeof sibling) == 0);
 
-            assert(wfe_slice_conflicts_with_frozen_sibling(
-                       NULL, sdir, cut, "HEAD", clash, sizeof clash, sibling, sizeof sibling) ==
-                   -1);
+            assert(wfe_slice_conflicts_with_frozen_sibling(NULL, sdir, cut, "HEAD", clash,
+                                                           sizeof clash, sibling,
+                                                           sizeof sibling) == -1);
          }
       }
    }
