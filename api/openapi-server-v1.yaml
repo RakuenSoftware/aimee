@@ -2256,6 +2256,16 @@ paths:
       summary: Status of a delegate job
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Delegate status, content: { application/json: { schema: { type: object } } } } }
+  /delegate/reservation/forget:
+    post:
+      summary: Release a delegate replay reservation (job_id makes it a compare-delete, so a newer job under the same key is not erased)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: "Release outcome; released is false when the reservation was already gone or now names a different job", content: { application/json: { schema: { type: object } } } } }
+  /delegate/cancel_unassigned:
+    post:
+      summary: Cancel a delegate job that was never assigned to a worker, if it has been unassigned for at least min_unassigned_secs
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: "Cancellation outcome; cancelled is false when the job was assigned, already terminal, or not yet old enough", content: { application/json: { schema: { type: object } } } } }
   /delegate/sandbox/images:
     get:
       summary: List build-from-spec sandbox images (aimee-sbx:*) with created time, size, and in-use flag

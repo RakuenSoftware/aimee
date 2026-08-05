@@ -16,7 +16,7 @@ and owns a store; the delegate sandbox image builder consumes the result.
 
 ## Public contracts
 
-Two stages, both carrying JSON in each direction — a shell command and a git root are
+Two stages, both carrying JSON in each direction. A shell command and a git root are
 variable-length, so the fixed binary framing the pure-decision stages use does not fit.
 
 | Stage | Kind | Request | Response |
@@ -27,8 +27,8 @@ variable-length, so the fixed binary framing the pure-decision stages use does n
 The kinds are fixed by the process contract at `4096 + ordinal*256 + stage`; sandbox is
 ordinal 26, so they are not a free choice.
 
-`load` returns the set **sorted**, so the derived Dockerfile — and therefore the
-content-hash image tag — is stable regardless of insertion order.
+`load` returns the set **sorted**, so the derived Dockerfile, and therefore the
+content-hash image tag, is stable regardless of insertion order.
 
 ## Ownership
 
@@ -46,8 +46,8 @@ incidental `apt` substring free, the config gate
 
 The input is an **untrusted, delegate-authored shell command**. The tokenizer is
 deliberately a best-effort, quote-unaware lexical splitter: it does not interpret
-quotes, backslash escapes, command substitution, expansion, or globbing — the
-delegate's real shell does.
+quotes, backslash escapes, command substitution, expansion, or globbing. The
+delegate's real shell does that.
 
 That is safe because the **Debian package-name grammar is the security boundary**: a
 token is recorded only if it is a leading alphanumeric followed by `[a-z0-9._+:-]`, so
