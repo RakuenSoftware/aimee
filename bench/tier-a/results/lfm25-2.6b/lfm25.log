@@ -6,3 +6,9 @@
 [22:40:09Z] --- LFM2.5-2.6B.Q6_K  LiquidAI/LFM2.5-2.6B-GGUF:Q6_K  nproc=3  no MTP
 [00:02:44Z] OK   LFM2.5-2.6B.Q6_K strictF1=0.5795 wall=82m
 [00:02:44Z] --- LFM2.5-2.6B.Q8_0  LiquidAI/LFM2.5-2.6B-GGUF:Q8_0  nproc=3  no MTP
+[01:41:06Z] OK   LFM2.5-2.6B.Q8_0 strictF1=0.5750 wall=98m
+[01:41:06Z] === LFM2.5 QUANT SWEEP COMPLETE ===
+[01:41:06Z] SUMMARY LFM2.5-2.6B by quant (strict F1):
+[01:41:06Z] LFM2.5-2.6B.Q4_K_M       f1=0.5854 p=0.5664 r=0.6057
+[01:41:06Z] LFM2.5-2.6B.Q6_K         f1=0.5795 p=0.5526 r=0.6091
+[01:41:06Z] LFM2.5-2.6B.Q8_0         f1=0.5750 p=0.5454 r=0.6080
