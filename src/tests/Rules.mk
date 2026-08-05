@@ -585,6 +585,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-kb-tls \
                $(TESTPREFIX)/unit-test-kb-releases-db \
                $(TESTPREFIX)/unit-test-kb-ingest-format \
+               $(TESTPREFIX)/unit-test-kb-ingest-worker-cap \
                $(TESTPREFIX)/unit-test-kb-doc-pdf \
                $(TESTPREFIX)/unit-test-kb-http-ingest \
                $(TESTPREFIX)/unit-test-kb-releases \
@@ -6224,6 +6225,10 @@ $(TESTPREFIX)/unit-test-kb-models-validate: $(OBJDIR)/tests/test_kb_models_valid
 
 $(TESTPREFIX)/unit-test-p3b-spend: $(OBJDIR)/tests/test_p3b_spend.o \
                      $(OBJDIR)/kb/http/kb_insights_util.o $(OBJDIR)/cJSON.o $(PLATFORM_BASIC_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-kb-ingest-worker-cap: $(OBJDIR)/tests/test_kb_ingest_worker_cap.o \
+                     $(OBJDIR)/kb/kb_ingest_workers.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-kb-ingest-format: $(OBJDIR)/tests/test_kb_ingest_format.o \

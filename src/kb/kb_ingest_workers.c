@@ -21,6 +21,7 @@
 #include "kb_background.h"
 #include "kb_ingest_workers.h"
 #include "kb_service.h"
+#include "kb_service_code_embed.h"
 #include "log.h"
 #include <aimee/workspace/workspace.h>
 #include "modules/workspace/workspace_scope.h"
@@ -201,13 +202,46 @@ static void kbiw_process_job(const db2_kb_ingest_job_t *job)
       db2_kb_runtime_state_set(sha_key, scanned_sha);
    }
 
+   /* Code vectors are part of a complete build, and they belong HERE.
+    *
+    * This worker built doc vectors and the code index but never called
+    * kb_code_embed_refresh, so code_embeddings stayed empty for every project
+    * that arrived through the queue -- which is every project. Semantic CODE
+    * search therefore had nothing to search and abstained with candidate_count
+    * 0, and agents fell back to grep.
+    *
+    * That gap is also why the HTTP build route was made synchronous: the
+    * symptom ("my project never got embedded") read as the global backlog
+    * starving it, so the fix was to make the caller wait. No amount of waiting
+    * on the queue would ever have produced a code vector, because nothing on
+    * this path made one. Embedding is asynchronous by design -- it completes
+    * when it completes -- so the queue is where it has to happen.
+    *
+    * Ordered after the canonical scan on purpose: code embeddings are derived
+    * from indexed definitions, so the index must exist first. A failure here is
+    * NOT fatal to the job: the code index and doc vectors are already durable
+    * and useful on their own, and the next pass re-embeds what is missing.
+    * Failing the whole job would discard that work and re-do it forever. */
+   kb_background_set("ingest", "project=%s phase=code-embed", job->project);
+   kb_code_embed_result_t code_embed;
+   memset(&code_embed, 0, sizeof(code_embed));
+   if (kb_code_embed_refresh(job->project, "changed_files", NULL, 0, 0, 0, 0, &code_embed) != 0)
+      aimee_log(LOG_WARN, "kb.ingest.worker",
+                "code embedding incomplete for project='%s' (index and docs are durable; "
+                "the next pass retries)",
+                job->project);
+   else
+      stats.embeddings_added += (int)code_embed.embedded;
+
    db2_kb_ingest_queue_complete(job->id, stats.files_indexed, stats.chunks_added,
                                 stats.embeddings_added);
    db2_kb_runtime_state_set_now("last_ingest_at");
    kb_background_clear("ingest");
 
-   aimee_log(LOG_INFO, "kb.ingest.worker", "done: project='%s' files=%d chunks=%d embeddings=%d",
-             job->project, stats.files_indexed, stats.chunks_added, stats.embeddings_added);
+   aimee_log(LOG_INFO, "kb.ingest.worker",
+             "done: project='%s' files=%d chunks=%d embeddings=%d code_vectors=%lld",
+             job->project, stats.files_indexed, stats.chunks_added, stats.embeddings_added,
+             (long long)code_embed.embedded);
 }
 
 /* Claim one job and process it. Returns 1 if a job was processed, 0 if the
@@ -432,6 +466,35 @@ static void *kbiw_watch_thread(void *arg)
 }
 #endif
 
+/* Effective ingest-worker count.
+ *
+ * Ingest work is embedding, and embedding is CPU-bound: each worker drives the
+ * embedder, which itself runs torch with EMBEDDER_THREADS threads. Running as
+ * many workers as the config allows (up to KB_WORKER_MAX=8) on a 4-CPU box
+ * oversubscribes the machine several times over -- measured against bekko-a25m,
+ * a 128-text batch goes from 6.6s at concurrency 1 to 25.5s at concurrency 8,
+ * i.e. every in-flight batch slows together until one of them trips a bound.
+ *
+ * Embedding is background work and must never take the whole machine: ALWAYS
+ * leave at least one core for the interactive path (search, the /v1 routes, the
+ * agent waiting on them). Workers additionally run at nice +5 so even the cores
+ * they do use yield to foreground work.
+ *
+ * Pure and separated from sysconf so the policy is testable without a host of a
+ * particular size. */
+int kb_ingest_worker_cap(int configured, long ncpu)
+{
+   if (configured <= 0)
+      return 0; /* explicitly disabled */
+   int cpu_cap = (ncpu > 1) ? (int)(ncpu - 1) : 1;
+   int cap = configured;
+   if (cap > KB_WORKER_MAX)
+      cap = KB_WORKER_MAX;
+   if (cap > cpu_cap)
+      cap = cpu_cap;
+   return cap;
+}
+
 /* ------------------------------------------------------------------ */
 /* Start / stop                                                        */
 /* ------------------------------------------------------------------ */
@@ -447,11 +510,7 @@ void kb_ingest_workers_start(kb_service_ctx_t *ctx)
    ctx->ingest_count = 0;
    ctx->ingest_timer_active = 0;
    ctx->bg_watch_active = 0;
-   int cap = config_kb_worker_count();
-   if (cap < 0)
-      cap = 0;
-   if (cap > KB_WORKER_MAX)
-      cap = KB_WORKER_MAX;
+   int cap = kb_ingest_worker_cap(config_kb_worker_count(), sysconf(_SC_NPROCESSORS_ONLN));
 
    if (cap == 0 || !db2_is_initialized())
    {

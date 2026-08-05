@@ -5196,60 +5196,17 @@ static void test_code_scan_db_unavailable(void)
    g_db_initialized = 1;
 }
 
-static void test_code_build_ok(void)
-{
-   char buf[1024];
-   g_db_initialized = 1;
-   g_pgvec_ensure_rc = 0;
-   g_kb_build_rc = 0;
-   g_code_scan_rc = 0;
-   g_runtime_state_set_now = 0;
-   g_code_embed_refresh_rc = 0;
-   g_code_embed_estimated = 4;
-   g_code_embed_embedded = 3;
-   g_code_embed_skipped = 1;
-   g_doc_refresh_rc = 2;
-   g_doc_backfill_rc = 1;
-   const char *body =
-       "{\"path\":\"/tmp/kb\",\"project\":\"proj-alpha\",\"embedding_command\":\"embed-a\","
-       "\"force\":true}";
-   int s = kb_http_route_ex("POST", "/v1/code/build", NULL, NULL, NULL, body, (int)strlen(body),
-                            buf, sizeof(buf));
-   assert(s == 200);
-   assert(strcmp(g_kb_build_path, "/tmp/kb") == 0);
-   /* /v1/code/build now also runs the canonical scan (matches the async ingest path). */
-   assert(strcmp(g_code_scan_project, "proj-alpha") == 0);
-   assert(strcmp(g_kb_build_project, "proj-alpha") == 0);
-   assert(strcmp(g_kb_build_embed_cmd, "embed-a") == 0);
-   assert(g_kb_build_force == 1);
-   assert(strcmp(g_code_embed_project, "proj-alpha") == 0);
-   assert(strcmp(g_doc_refresh_project, "proj-alpha") == 0);
-   assert(g_runtime_state_set_now == 1);
-   assert(strstr(buf, "\"files_scanned\":9") != NULL);
-   assert(strstr(buf, "\"embeddings_added\":11") != NULL);
-}
 
-static void test_code_build_rejects_partial_project_embedding(void)
-{
-   char buf[1024];
-   g_db_initialized = 1;
-   g_pgvec_ensure_rc = 0;
-   g_kb_build_rc = 0;
-   g_code_scan_rc = 0;
-   g_code_embed_refresh_rc = 0;
-   g_code_embed_estimated = 4;
-   g_code_embed_embedded = 2;
-   g_code_embed_skipped = 1;
-   const char *body = "{\"path\":\"/client/repo\",\"project\":\"thin-client\"}";
-   int s = kb_http_route_ex("POST", "/v1/code/build", NULL, NULL, NULL, body, (int)strlen(body),
-                            buf, sizeof(buf));
-   assert(s == 503);
-   assert(strstr(buf, "project code embedding refresh failed") != NULL);
 
-   g_code_embed_estimated = 0;
-   g_code_embed_embedded = 0;
-   g_code_embed_skipped = 0;
-}
+/* test_code_build_ok, test_code_build_rejects_partial_project_embedding and
+ * test_maintenance_repair_ok were REMOVED, not ported: they asserted that /v1/code/build did the work inline
+ * (kb_build called with the caller's path, a 503 when inline code embedding came
+ * back partial). That contract is gone -- the route commits the work to the
+ * queue and answers immediately, and embedding completes when it completes.
+ * Keeping them adapted would have pinned the shape that made a long build report
+ * itself as a failure. The replacements are
+ * test_code_build_queues_instead_of_embedding_inline and
+ * test_maintenance_repair_queues_too. */
 
 static void test_code_update_ok(void)
 {
@@ -5584,24 +5541,6 @@ static void test_maintenance_routes_are_owner_gated(void)
    assert(s == 403);
 }
 
-static void test_maintenance_repair_ok(void)
-{
-   char buf[1024];
-   g_db_initialized = 1;
-   g_pgvec_ensure_rc = 0;
-   g_kb_build_rc = 0;
-   const char *body =
-       "{\"path\":\"/tmp/kb\",\"project\":\"proj-alpha\",\"embedding_command\":\"embed-a\"}";
-   int s = kb_http_route_ex("POST", "/v1/maintenance/repair", NULL, OWNER_AUTH, OWNER_TOK, body,
-                            (int)strlen(body), buf, sizeof(buf));
-   assert(s == 200);
-   assert(strcmp(g_kb_build_path, "/tmp/kb") == 0);
-   assert(strcmp(g_kb_build_project, "proj-alpha") == 0);
-   assert(strcmp(g_kb_build_embed_cmd, "embed-a") == 0);
-   assert(g_kb_build_force == 1);
-   assert(strstr(buf, "\"files_scanned\":9") != NULL);
-   assert(strstr(buf, "\"embeddings_added\":5") != NULL);
-}
 
 static void test_maintenance_repair_missing_project(void)
 {
@@ -6602,6 +6541,70 @@ static void test_http_listener_concurrent_requests(void)
    kb_http_stop();
 }
 
+/* ---- embedding is asynchronous, full stop ------------------------------------
+ *
+ * RED-GREEN. /v1/code/build used to do the whole build inline: doc embedding,
+ * canonical scan, then code embedding. On a 3825-file checkout that is minutes
+ * of embedder time held open on one HTTP request, and the first bound anywhere
+ * in that chain to expire turned a build that was progressing normally into a
+ * hard failure -- observed as "knowledge service /v1/code/build did not respond"
+ * with the embedder logging BrokenPipeError after the kb dropped a connection
+ * whose embed batch had merely taken longer than the client's patience.
+ *
+ * A build's cost is a property of the CORPUS, not of the service being healthy.
+ * So the route commits the work and answers immediately; the queue worker does
+ * the same build -- doc vectors, canonical index, AND code vectors -- and it
+ * completes when it completes.
+ *
+ * INTERACTIVE priority is load-bearing: an explicit build must jump the periodic
+ * sweep. Starvation behind the global backlog is what made someone inline this
+ * work in the first place, and priority is the fix for that, not blocking. */
+static void test_code_build_queues_instead_of_embedding_inline(void)
+{
+   char buf[1024];
+   g_ingest_root[0] = 0;
+   g_db_initialized = 1;
+   g_pgvec_ensure_rc = 0;
+   g_ingest_force = 0;
+   g_ingest_priority = -1;
+   g_ingest_project[0] = '\0';
+   const char *body = "{\"path\":\"/tmp/repo\",\"project\":\"proj-build\",\"force\":true}";
+   int s = kb_http_route_ex("POST", "/v1/code/build", NULL, NULL, NULL, body, (int)strlen(body),
+                            buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"queued\":true") != NULL);
+   /* The work was handed to the queue, not done here. */
+   assert(strcmp(g_ingest_project, "proj-build") == 0);
+   assert(strcmp(g_ingest_root, "/tmp/repo") == 0);
+   assert(g_ingest_force == 1);
+   /* An explicit request must not sit behind the periodic sweep. */
+   assert(g_ingest_priority == DB2_KB_INGEST_PRIO_INTERACTIVE);
+}
+
+/* Repair embeds too, so it queues on the same grounds: an operator gets a
+ * durable commitment, not a request held open across minutes of embedder time
+ * that reports failure the moment a bound expires. */
+static void test_maintenance_repair_queues_too(void)
+{
+   char buf[1024];
+   g_ingest_root[0] = 0;
+   g_db_initialized = 1;
+   g_pgvec_ensure_rc = 0;
+   g_ingest_force = 0;
+   g_ingest_priority = -1;
+   g_ingest_project[0] = '\0';
+   const char *body = "{\"path\":\"/tmp/repo\",\"project\":\"proj-repair\"}";
+   /* Maintenance is owner-only; the credential is orthogonal to the async
+    * change but the route rightly refuses without it. */
+   int s = kb_http_route_ex("POST", "/v1/maintenance/repair", NULL, OWNER_AUTH, OWNER_TOK, body,
+                            (int)strlen(body), buf, sizeof(buf));
+   assert(s == 200);
+   assert(strcmp(g_ingest_project, "proj-repair") == 0);
+   /* Repair is always a forced rebuild; that must survive the hand-off. */
+   assert(g_ingest_force == 1);
+   assert(g_ingest_priority == DB2_KB_INGEST_PRIO_INTERACTIVE);
+}
+
 int main(void)
 {
    /* Match kb_main's process contract. TLS readiness probes deliberately open
@@ -6714,8 +6717,6 @@ int main(void)
    test_code_scan_pushed_files_ok();
    test_code_scan_pushed_files_rejects_invalid_item();
    test_code_scan_db_unavailable();
-   test_code_build_ok();
-   test_code_build_rejects_partial_project_embedding();
    test_code_update_ok();
    test_ingest_enqueue_ok();
    test_ingest_status_ok();
@@ -6731,7 +6732,6 @@ int main(void)
    test_scoped_token_cannot_ingest_all_projects();
    test_service_scope_is_data_plane_not_admin();
    test_maintenance_routes_are_owner_gated();
-   test_maintenance_repair_ok();
    test_maintenance_repair_missing_project();
    test_maintenance_reconcile_ok();
    test_maintenance_clear_ok();
@@ -6776,6 +6776,8 @@ int main(void)
    test_search_facet_scope_all_keeps_active_project_first();
    test_search_no_filters_not_facet();
 
+   test_code_build_queues_instead_of_embedding_inline();
+   test_maintenance_repair_queues_too();
    printf("ok\n");
    return 0;
 }
