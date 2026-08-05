@@ -89,7 +89,7 @@ def launch(offer_id, repo, ctx, cache_ram, bid=None, draft=None):
     return r["new_contract"]
 
 
-def endpoint(cid, stall=600, hard_cap=3600):
+def endpoint(cid, stall=900, hard_cap=None):
     """Wait for llama-server, abandoning a host only when it STOPS MAKING PROGRESS.
 
     A fixed deadline is the wrong instrument here and has now been wrong twice.
@@ -105,10 +105,16 @@ def endpoint(cid, stall=600, hard_cap=3600):
     that has gone quiet for `stall` seconds is abandoned. `hard_cap` bounds the
     pathological case where a host reports progress forever.
     """
+    # NO CLOCK BOUNDS THE DOWNLOAD. There is no defensible number: it depends on
+    # the model size and the host's bandwidth, both unknown in advance, and every
+    # value tried so far (420s, 900s, 600s-from-container-start) abandoned healthy
+    # hosts pulling large weights. A host is dead when it STOPS TALKING, and that
+    # is the only thing this waits on. hard_cap exists solely as a runaway guard
+    # and defaults to off.
     t0 = last_change = time.time()
     seen = None
     ep = None
-    while time.time() - t0 < hard_cap:
+    while hard_cap is None or time.time() - t0 < hard_cap:
         try:
             d = (api("instances/%d/" % cid).get("instances")) or {}
         except Exception:
@@ -154,7 +160,7 @@ def endpoint(cid, stall=600, hard_cap=3600):
         if time.time() - last_change > stall:
             raise RuntimeError("no progress for %ds (last: %s)" % (stall, (seen or "")[:80]))
         time.sleep(15)
-    raise RuntimeError("hard cap %ds reached (last endpoint %s)" % (hard_cap, ep))
+    raise RuntimeError("hard cap %ss reached (last endpoint %s)" % (hard_cap, ep))
 
 
 def verify(ep, repo, want_fam=None):
