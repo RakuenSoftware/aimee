@@ -8,7 +8,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -21,10 +20,10 @@ func (s *server) aimeeHTTPSockPath() string {
 }
 
 func (s *server) aimeeHTTPSockPathFor(path string) string {
-	if os.Getenv("AIMEE_WFE_ENGINE") == "go" &&
+	if s.cfg.wfeEngine == "go" &&
 		(path == "/v1/workflow" || strings.HasPrefix(path, "/v1/workflow/") || path == "/v1/trigger/fire" || path == "/v1/dev/submit") {
-		if configured := strings.TrimSpace(os.Getenv("AIMEE_WFE_HTTP_SOCKET")); configured != "" {
-			return configured
+		if s.cfg.wfeSocket != "" {
+			return s.cfg.wfeSocket
 		}
 	}
 	return s.aimeeHTTPSockPath()
