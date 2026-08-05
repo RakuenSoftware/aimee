@@ -3,3 +3,14 @@
 [09:24:34Z] --- gemma-4-E2B-it.qat.mid  google/gemma-4-E2B-it-qat-q4_0-gguf:q4_0  nproc=1  no MTP  VERIFY_FAM=gemma-4-E2B
 [11:20:46Z] OK   gemma-4-E2B-it.qat.mid strictF1=0.6416 wall=116m
 [11:20:46Z] --- gemma-4-E4B-it.qat.mid  google/gemma-4-E4B-it-qat-q4_0-gguf:q4_0  nproc=1  no MTP  VERIFY_FAM=gemma-4-E4B
+[13:19:47Z] OK   gemma-4-E4B-it.qat.mid strictF1=0.6374 wall=119m
+[13:19:47Z] === QAT MID COMPLETE; paired bootstrap follows ===
+run                                 F1            95% CI   tp  fp  fn
+E2B_qat_mid                     0.6416  [0.6260,0.6570]  1734 1029 908
+E4B_qat_mid                     0.6374  [0.6228,0.6517]  1800 1206 842
+
+Paired deltas vs E2B_qat_mid (same notes resampled for both):
+comparison                                  delta              95% CI  verdict
+E4B_qat_mid - E2B_qat_mid                 -0.0042  [-0.0173,+0.0088]  INDISTINGUISHABLE
+
+n = 3002 notes resampled, 20000 bootstrap replicates.
