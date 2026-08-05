@@ -376,7 +376,17 @@ def main():
     ap.add_argument("--out", default="results/vast")
     ap.add_argument("--gpu", default="RTX 3090")
     ap.add_argument("--max-price", type=float, default=0.14)
-    ap.add_argument("--parallel", type=int, default=4)
+    # Default: place EVERY arm at once. Arms are independent -- separate
+    # instances, separate models, separate output files -- so throttling them
+    # only makes the batch take longer for no benefit. The old default of 4 left
+    # half an eight-arm list queued while the fleet was described as running.
+    #
+    # The real constraints are not this number. They are offer availability at
+    # the price cap, the budget (burn is roughly arms x $0.05/hr), and the local
+    # client processes, one per arm, which are HTTP-bound and cheap but not free.
+    # 0 means "as many as there are jobs".
+    ap.add_argument("--parallel", type=int, default=0,
+                    help="max arms in flight; 0 (default) means one per job")
     ap.add_argument("--interruptible", action="store_true",
                     help="rent by bid. Roughly 5x cheaper on this fleet. An arm "
                          "that is preempted is DISCARDED and requeued whole, "
@@ -404,8 +414,7 @@ def main():
     for j in jobs:
         j["_bid"] = a.interruptible
         j["_tries"] = 0
-    log("=== %d arms, %s, up to %d at once, cap $%.3f/hr each"
-        % (len(jobs), a.gpu, a.parallel, a.max_price))
+    log("=== %d arms, %s, cap $%.3f/hr each" % (len(jobs), a.gpu, a.max_price))
     q = list(jobs)
     qlock = threading.Lock()
 
@@ -420,7 +429,9 @@ def main():
                 with qlock:
                     q.append(job)
 
-    ts = [threading.Thread(target=worker) for _ in range(min(a.parallel, len(jobs)))]
+    width = len(jobs) if a.parallel <= 0 else min(a.parallel, len(jobs))
+    log("    placing %d arm(s) concurrently" % width)
+    ts = [threading.Thread(target=worker) for _ in range(width)]
     for t in ts: t.start()
     for t in ts: t.join()
     log("=== pool drained")
