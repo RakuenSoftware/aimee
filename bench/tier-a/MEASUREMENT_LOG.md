@@ -1923,3 +1923,55 @@ is what it would have printed at any point in the past year:
 
     prompt_tokens + completion_tokens >= context_size    # exhausted
     schema_ok < parse_ok                                 # wrong envelope
+
+## Defect 39: 0.0105 was used as a significance threshold all campaign, and it is not one
+
+Every "inside noise" / "3.4x the threshold" judgement in this campaign compared a
+delta against **0.0105**. That number is finding 19's measured effect of changing
+process count from 1 to 3. It is a specific configuration difference on a
+specific model. It is not a confidence interval, and it was never derived from
+the sampling distribution of anything.
+
+Caught when the user questioned an apparent E4B < E2B result. Running the paired
+bootstrap this project already has (`harness/bootstrap_ci.py`, 5000 replicates,
+same notes resampled for both arms):
+
+| comparison | delta | 95% CI | verdict |
+|---|---:|---|---|
+| E4B - E2B, QAT q4_0 | -0.0213 | [-0.0437, +0.0016] | indistinguishable |
+| E4B - E2B, UD-Q4_K_XL | +0.0150 | [-0.0085, +0.0390] | indistinguishable |
+
+**The real interval at n=1001 is roughly +/- 0.024**, more than double the 0.0105
+that has been standing in for it.
+
+### What this changes
+
+Both directions of the E2B/E4B comparison are noise. Across all five
+configurations where the two were run head to head, the sign flips and no gap
+clears its interval. Given E2B is architecturally a nested submodel of E4B, the
+supportable statement is that **the submodel matches its parent on this task to
+within what 1001 notes can resolve** -- which is a stronger and more interesting
+claim than either ordering, and the one that should be written.
+
+### What survives
+
+Deltas comfortably outside +/- 0.024 are unaffected:
+
+  SmolLM3-3B  Q8 vs Q4      +0.0352
+  gemma-4-E2B QAT vs UD     +0.0389
+
+Deltas that were called null and stay null, being far inside it:
+
+  MTP vs no-MTP, E2B Q4/Q6/Q8   +0.0039 / +0.0013 / -0.0022
+
+### What needs re-checking
+
+Anything this campaign called significant on the strength of the 0.0105 figure
+alone, particularly the LFM2.5-2.6B quant spread (-0.0104, described as "exactly
+at the noise threshold" -- it is well inside a +/- 0.024 interval and should be
+reported as flat) and any model-to-model gap in the 1001-note ranking under
+0.024, which includes several adjacent pairs.
+
+The tool to do it correctly has existed in this harness the whole time and was
+used twice in this campaign, both times for MTP. It should have been used for
+every comparison.
