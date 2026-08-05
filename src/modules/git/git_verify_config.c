@@ -160,10 +160,11 @@ static void append_go_module_steps(const char *project_root, verify_config_t *cf
 
 void verify_config_prefer_verify_local(const char *project_root, verify_config_t *cfg)
 {
+   const char *root = (project_root && project_root[0]) ? project_root : ".";
    char subdir[MAX_PATH_LEN];
    int generated = generated_verify_local_step(cfg);
    if (generated_make_step_set(cfg) &&
-       makefile_has_target(project_root, "verify-local", subdir, sizeof(subdir)))
+       makefile_has_target(root, "verify-local", subdir, sizeof(subdir)))
    {
       int enforce = cfg->enforce;
       memset(cfg->steps, 0, sizeof(cfg->steps));
@@ -182,5 +183,5 @@ void verify_config_prefer_verify_local(const char *project_root, verify_config_t
       generated = 1;
    }
    if (generated)
-      append_go_module_steps(project_root, cfg);
+      append_go_module_steps(root, cfg);
 }

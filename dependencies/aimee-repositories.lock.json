@@ -222,7 +222,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "674a208d7dc0771f2bbb70ed174f53d160a924c1036e183db21a4511ca5c8883",
+      "source_sha256": "ede6c716bb8f99e76e10594b6a4e8ba38a0521ca68fea20d9fe989e00c32a444",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 13,

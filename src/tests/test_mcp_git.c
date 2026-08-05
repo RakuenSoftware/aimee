@@ -1434,6 +1434,29 @@ static void test_verify_load_config_leaves_custom_plan_unchanged(void)
    verify_test_teardown(tmpdir, fake_home);
 }
 
+static void test_verify_load_config_discovers_go_modules_from_cwd(void)
+{
+   char tmpdir[256], fake_home[256], saved_cwd[4096];
+   verify_test_setup_repo(tmpdir, sizeof(tmpdir), "aimee-test-verify-cwd-go");
+   verify_test_add_go_module(tmpdir, "server-go");
+   verify_test_write_yaml(tmpdir, fake_home, sizeof(fake_home),
+                          "verify:\n"
+                          "  enforce: false\n"
+                          "  steps:\n"
+                          "    - name: verify-local\n"
+                          "      run: make -j${AIMEE_VERIFY_MAKE_JOBS:-2} verify-local\n");
+   assert(getcwd(saved_cwd, sizeof(saved_cwd)) != NULL);
+   assert(chdir(tmpdir) == 0);
+
+   verify_config_t cfg;
+   assert(verify_load_config(NULL, &cfg) == 0);
+   assert(cfg.count == 2);
+   assert(strcmp(cfg.steps[1].name, "go-test-server-go") == 0);
+
+   assert(chdir(saved_cwd) == 0);
+   verify_test_teardown(tmpdir, fake_home);
+}
+
 static void test_verify_load_config_collapses_generated_pipeline_to_verify_local(void)
 {
    char tmpdir[256], fake_home[256];
@@ -2606,6 +2629,7 @@ int main(void)
    test_verify_load_config_emits_parallel_steps();
    test_verify_load_config_repairs_existing_generated_plan_with_go_modules();
    test_verify_load_config_leaves_custom_plan_unchanged();
+   test_verify_load_config_discovers_go_modules_from_cwd();
    test_verify_load_config_collapses_generated_pipeline_to_verify_local();
    test_verify_load_config_prefers_check_linking_for_build();
    test_verify_load_config_test_only_has_no_missing_build_dependency();
