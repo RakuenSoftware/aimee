@@ -65,18 +65,43 @@ GRANT
   chmod 0600 "$AIMEE_HOME/modules.d/kb/control-web.grant" 2>/dev/null || true
 }
 
-# Launch the module once the kb's bus socket exists, then give it a moment to
-# attach and claim its kind.
+# Launch the module once the kb's bus is actually listening.
+#
+# Two things were learned the hard way here. The bus is LAZY: obs_bus starts on
+# the first emit, so a kb that is healthy but has not yet audited anything has no
+# module socket at all. And the module does not wait it out -- it exits with
+# "attach: no such file or directory" rather than retrying forever.
+#
+# So the harness has to provoke the bus rather than hope it is up: one
+# authenticated request produces an audit event, which starts obs_bus and creates
+# the socket. Both failure modes are then reported by name; the earlier version
+# just gave up quietly after 30s and let the console-admin assertions fail with
+# the very 503 this exists to remove, which reads exactly like a confinement
+# regression instead of a rig that never attached.
 start_control_web_module() {
   [ -x "$MODULE_BIN" ] || return 1
-  for _ in $(seq 1 60); do
+
+  # Provoke the lazy bus: any authenticated call emits an audit event.
+  curl -s -m 5 -H "Authorization: Bearer $1" "$BASE/v1/health" >/dev/null 2>&1 || true
+
+  local i
+  for i in $(seq 1 60); do
     [ -S "$AIMEE_MODULE_BUS_SOCKET" ] && break
+    curl -s -m 2 -H "Authorization: Bearer $1" "$BASE/v1/health" >/dev/null 2>&1 || true
     sleep 0.5
   done
-  [ -S "$AIMEE_MODULE_BUS_SOCKET" ] || return 1
+  [ -S "$AIMEE_MODULE_BUS_SOCKET" ] || {
+    echo "  (kb never opened $AIMEE_MODULE_BUS_SOCKET; console-admin suite would 503)"
+    return 1
+  }
+
   nohup "$MODULE_BIN" "$AIMEE_MODULE_BUS_SOCKET" > "$WORK/control-web.log" 2>&1 &
   echo $! > "$WORK/module.pid"
   sleep 2
+  kill -0 "$(cat "$WORK/module.pid")" 2>/dev/null || {
+    echo "  (control-web module exited; see $WORK/control-web.log)"
+    return 1
+  }
   return 0
 }
 
@@ -144,7 +169,7 @@ YAML
       # Console-admin confinement is only meaningful once the authorizer is
       # reachable; without it every such request is 503 and the assertions below
       # would be measuring an outage rather than a policy.
-      start_control_web_module || echo "  (control-web module did not attach)"
+      start_control_web_module "$1" || echo "  (control-web module did not attach)"
       return 0
     fi
     sleep 1
