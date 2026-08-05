@@ -960,3 +960,60 @@ Median latency is robust to 5% contamination -- recent-window medians read
 4300-4400ms against an all-rows median of 4489 -- so steady state holds. The
 `startup (s) = 1561` figure on that side absorbs the slow period and is
 meaningless. F1 is unaffected: the rows are correct, they were merely slow.
+
+## 26. The LFM2.5 family, and what a quant ladder actually measures
+
+LiquidAI's LFM2.5 line, all at 1001 notes on v5 gold_small, 5080, nproc=3,
+cache-ram 1024, prompt v8, no MTP, LiquidAI's own standard K-quants:
+
+| model | Q4_K_M | Q6_K | Q8_0 |
+|---|---:|---:|---:|
+| 2.6B | **0.5854** | 0.5795 | 0.5750 |
+| VL-1.6B *(vision, text-only)* | 0.2619 | **0.2744** | 0.2725 |
+| 1.2B-Instruct | **0.1911** | 0.1771 | 0.1671 |
+| 230M | *0.0022* | **0.1363** | 0.1309 |
+
+Placed against the field on the same 1001 notes at the same process count, the
+2.6B lands third overall -- ahead of granite-4.1-3b and behind only the two
+gemma-4s -- while every other LFM2.5 model lands below the field's floor.
+
+**The cliff is between 1.6B and 2.6B.** 0.2744 to 0.5854 is a doubling across a
+1B parameter gap, and nothing else in this benchmark shows a step that sharp.
+Article 1's question is how small an extractor can be; this line puts the answer
+for this family between those two sizes rather than anywhere lower.
+
+### The quant ladder measures output behaviour, not just precision
+
+Three sweeps, three different pathologies, and F1 alone hides all of them:
+
+**2.6B: clean and monotonically worse.** 1001/1001 parseable at every quant.
+Recall flat (0.6057/0.6091/0.6080), precision falling (0.5664/0.5526/0.5454),
+abstention falling with it (0.668/0.612/0.593). More bits make it answer more
+often on factless notes, and each extra answer is a false positive. Total spread
+-0.0104, sitting exactly on the 0.0105 noise threshold.
+
+**230M: the quant chose the envelope.** Q4_K_M emitted
+`<|tool_call_start|>[{"name":"facts","arguments":{...}}]` on **982 of 1001 rows**
+and scored 0.0022. Q6 and Q8 emitted it on **zero** rows and scored 0.1363 and
+0.1309. A 62x swing in apparent capability from the quantisation alone, with two
+quants acting as controls. See defect 37.
+
+**1.2B: non-monotonic parse failure.** Rows producing no parseable JSON at all:
+57 at Q4, **407** at Q6, 266 at Q8. Q6 scores on 59% of the corpus and takes
+zeros elsewhere. Not monotonic in bits, so "lower quant degrades structure" does
+not explain it.
+
+The through-line is the useful one for the article: **a quant ladder run on F1
+alone will report three tidy near-identical numbers and conceal that the model is
+behaving completely differently at each point.** The columns that expose it are
+`parse_ok` and `schema_ok`, and no driver in this project reads either. The
+detector is one comparison: alert when schema_ok diverges from parse_ok.
+
+### VL-1.6B beats the text models at its size
+
+The vision-language model, run text-only under `--no-mmproj`, scores 0.2744
+against the text-only 1.2B-Instruct's 0.1911. Worth a line, with the caveat that
+it is a different class of model and its multimodal path is unused here.
+
+It also over-extracts badly: abstention 0.180 against the 2.6B's 0.668. It
+answers on 82% of factless notes, which is where its precision goes.
