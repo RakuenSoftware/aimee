@@ -1354,8 +1354,17 @@ static wfe_step_result_t exec_freeze(wfe_ctx *ctx, const wfe_node_t *node)
    resolve_workdir(ctx, wd, sizeof wd);
    const char *base_branch = getenv("AIMEE_WORKFLOW_BASE");
    char base[64] = "", head[64] = "", dhash[65] = "", err[128];
-   if (wfe_git_freeze(wd, base_branch ? base_branch : "HEAD", base, head, dhash, err, sizeof err) !=
-       0)
+   const char *pinned_base = wfe_ctx_base_hash(ctx);
+   if (pinned_base && pinned_base[0])
+   {
+      char head2[64] = "";
+      if (wfe_git_freeze(wd, pinned_base, base, head2, dhash, err, sizeof err) != 0 ||
+          strcmp(base, pinned_base) != 0)
+         return wfe_step_failed();
+      snprintf(head, sizeof head, "%s", head2);
+   }
+   else if (wfe_git_freeze(wd, base_branch ? base_branch : "HEAD", base, head, dhash, err, sizeof err) !=
+            0)
       return wfe_step_failed();
 
    char clash[1024], sibling[80];

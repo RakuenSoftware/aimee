@@ -48,6 +48,10 @@ const char *wfe_ctx_worktree(const wfe_ctx *c)
     * back to the shared repo dir while empty. */
    return (c && c->wi) ? c->wi->worktree : "";
 }
+const char *wfe_ctx_base_hash(const wfe_ctx *c)
+{
+   return (c && c->wi) ? c->wi->content_hash : "";
+}
 
 wfe_def_t *wfe_load_workflow(const char *name, char *err, size_t errlen)
 {
@@ -321,19 +325,32 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
       return 0;
    }
 
-   /* The executor runs OUTSIDE any transaction (see scope note above). Its own
-    * incidental db1 writes (attempt counters, loop audit events) auto-commit
-    * individually, which is strictly better than riding a step txn that a later
-    * write failure would erase. */
    wfe_ctx ctx = {work_item_id, def, node, &wi};
-   wfe_step_result_t r = fn(&ctx, node);
+   wfe_step_result_t r;
+   int freeze_txn_open = 0;
+
+   if (node->block == WFE_BLK_FREEZE)
+   {
+      if (db1_lifecycle_txn_begin() != 0)
+      {
+         snprintf(err, errlen, "could not begin advance transaction");
+         wfe_def_free(def);
+         return -1;
+      }
+      freeze_txn_open = 1;
+   }
+
+   /* Non-freeze executors run OUTSIDE any transaction (see scope note above). Freeze is
+    * short git inspection plus sibling-state serialization and must be atomic with its
+    * state write so simultaneous sibling freezes cannot both pass create/create checks. */
+   r = fn(&ctx, node);
    out->last_status = r.status;
    out->failure_class = r.failure_class;
    out->failure_has_new_input = r.failure_has_new_input;
 
    /* --- atomic critical section: cost + step outcome + state update. Held only
-    * for these writes (milliseconds), never across the executor above. --- */
-   if (db1_lifecycle_txn_begin() != 0)
+    * for these writes (milliseconds), never across long-running executors. --- */
+   if (!freeze_txn_open && db1_lifecycle_txn_begin() != 0)
    {
       snprintf(err, errlen, "could not begin advance transaction");
       wfe_def_free(def);
@@ -544,10 +561,13 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
    }
 
    db1_lifecycle_txn_commit();
+   freeze_txn_open = 0;
    wfe_def_free(def);
    return 0;
 
 txn_fail:
+   if (freeze_txn_open)
+      freeze_txn_open = 0;
    db1_lifecycle_txn_rollback();
    snprintf(err, errlen, "advance: a state write failed; rolled back");
    wfe_def_free(def);
