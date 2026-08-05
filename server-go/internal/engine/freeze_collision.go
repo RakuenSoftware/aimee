@@ -95,23 +95,24 @@ func freezeCreatedFiles(ctx context.Context, workdir, base, head string) (map[st
 	return creates, nil
 }
 
-func frozenSiblingCreatedFiles(ctx context.Context, workdir, base, siblingBase, head string) (map[string]freezeCreate, error) {
+func frozenSiblingCreatedFiles(ctx context.Context, siblingWorkdir, base, siblingBase, head string) (map[string]freezeCreate, error) {
 	head = strings.TrimSpace(head)
 	siblingBase = strings.TrimSpace(siblingBase)
+	base = strings.TrimSpace(base)
 	if head == "" || siblingBase == "" {
 		return nil, errors.New("frozen sibling is missing its base or head commit")
 	}
-	if siblingBase != strings.TrimSpace(base) {
+	if siblingBase != base {
 		return nil, nil
 	}
-	mergeBase, err := gitText(ctx, workdir, "merge-base", base, head)
+	mergeBase, err := gitText(ctx, siblingWorkdir, "merge-base", base, head)
 	if err != nil {
 		return nil, fmt.Errorf("resolve frozen sibling merge base: %w", err)
 	}
-	if strings.TrimSpace(mergeBase) != strings.TrimSpace(base) {
+	if strings.TrimSpace(mergeBase) != base {
 		return nil, fmt.Errorf("frozen sibling head %s is not based on recorded base %s", head, base)
 	}
-	return freezeCreatedFiles(ctx, workdir, base, head)
+	return freezeCreatedFiles(ctx, siblingWorkdir, base, head)
 }
 
 // siblingStageHasFrozenDiff distinguishes a durable freeze from both an orphan
@@ -214,7 +215,7 @@ func (r *NativeRunner) rejectDivergentSiblingCreates(ctx context.Context, item d
 		if baseArtifact.Type != "commit" {
 			return errors.New("sibling freeze base has invalid type")
 		}
-		siblingCreates, err := frozenSiblingCreatedFiles(ctx, workdir, base,
+		siblingCreates, err := frozenSiblingCreatedFiles(ctx, sibling.Worktree, base,
 			string(baseArtifact.Content), string(headArtifact.Content))
 		if err != nil {
 			return err

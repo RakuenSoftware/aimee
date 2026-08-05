@@ -50,7 +50,20 @@ const char *wfe_ctx_worktree(const wfe_ctx *c)
 }
 const char *wfe_ctx_base_hash(const wfe_ctx *c)
 {
-   return (c && c->wi) ? c->wi->content_hash : "";
+   (void)c;
+   return "";
+}
+
+static int wfe_has_prefix(const char *s, const char *prefix)
+{
+   size_t n = prefix ? strlen(prefix) : 0;
+   return s && prefix && strncmp(s, prefix, n) == 0;
+}
+
+static int wfe_is_freeze_sibling_collision(const wfe_step_result_t *r)
+{
+   return r && r->failure_class == WFE_FAIL_PERMANENT &&
+          wfe_has_prefix(r->failure_detail, WFE_FREEZE_SIBLING_CREATE_COLLISION " ");
 }
 
 wfe_def_t *wfe_load_workflow(const char *name, char *err, size_t errlen)
@@ -404,9 +417,7 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
    }
    else if (r.status == WFE_STEP_FAILED)
    {
-      if (node->block == WFE_BLK_FREEZE && r.failure_class == WFE_FAIL_PERMANENT &&
-          strncmp(r.failure_detail, WFE_FREEZE_SIBLING_CREATE_COLLISION " ",
-                  sizeof(WFE_FREEZE_SIBLING_CREATE_COLLISION)) == 0)
+      if (node->block == WFE_BLK_FREEZE && wfe_is_freeze_sibling_collision(&r))
       {
          WFE_CKW(db1_work_item_set_terminal(work_item_id, "rejected"));
          db1_lifecycle_event_add(work_item_id, node->id, "terminal", "engine", r.failure_detail, "",

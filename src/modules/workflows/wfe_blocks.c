@@ -1335,11 +1335,10 @@ int wfe_slice_conflicts_with_frozen_sibling(const char *work_item_id, const char
             continue;
 
          /* The slice workflow's impl/CI-review loops invalidate an older freeze.
-          * A row still at freeze has not durably completed compare-and-record;
-          * impl is the only mutating stage reachable after a slice freeze. The
-          * engine holds BEGIN IMMEDIATE around this check and its stage write, so
-          * a simultaneous sibling cannot observe an in-between state. */
-         if (strcmp(sib->current_stage, self.current_stage) == 0 ||
+          * A row still at freeze has not durably completed compare-and-record.
+          * The engine holds BEGIN IMMEDIATE around this check and its stage write,
+          * so a simultaneous sibling cannot observe an in-between state. */
+         if (strcmp(sib->current_stage, "freeze") == 0 ||
              strcmp(sib->current_stage, "impl") == 0)
             continue;
          if (!sib->worktree[0])

@@ -533,6 +533,9 @@ func TestFreezeAllowsIdenticalSiblingCreateAndExistingFileEdits(t *testing.T) {
 	if err := store.Move(ctx, "wi_s0", "freeze", "gate", "advance", "", head, 0); err != nil {
 		t.Fatal(err)
 	}
+	if err := store.SetWorktree(ctx, "wi_s0", slicedir); err != nil {
+		t.Fatal(err)
+	}
 	runner := &NativeRunner{db: store, artifacts: artifacts}
 	item, err := store.WorkItem(ctx, "wi_s1")
 	if err != nil {
