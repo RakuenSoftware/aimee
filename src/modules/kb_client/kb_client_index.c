@@ -3,6 +3,7 @@
 #include "kb_client_internal.h"
 #include "code_collect.h"
 #include "cJSON.h"
+#include "log.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -495,15 +496,32 @@ int kb_client_index_blast_radius(const char *project, const char *file_path, bla
    free(file_q);
    int status = 0;
    char *json = kb_client_v1_get_json(path, KB_CLIENT_INDEX_READ_TIMEOUT_MS, &status);
+   /* Every refusal below used to return a bare -1, and the caller rendered all of
+    * them as "blast radius lookup failed". Four distinct causes behind one string
+    * is what made a kb serving a perfectly good 200 indistinguishable from a kb
+    * that was never reached. Name which boundary refused. */
    if (!json || status < 200 || status >= 300)
    {
+      aimee_log(LOG_ERROR, "kb_client",
+                "blast_radius '%s' '%s': fetch failed (http=%d, body=%s)", project, file_path,
+                status, json ? "present" : "none");
       free(json);
       return -1;
    }
+   size_t json_len = strlen(json);
    cJSON *resp = cJSON_Parse(json);
-   free(json);
    if (!resp)
+   {
+      /* A truncated body parses as garbage. Report the length and the tail so a
+       * response cut off by a transport cap is obvious rather than looking like
+       * a malformed kb. */
+      aimee_log(LOG_ERROR, "kb_client",
+                "blast_radius '%s' '%s': unparseable response (%zu bytes, tail: %.40s)", project,
+                file_path, json_len, json_len > 40 ? json + json_len - 40 : json);
+      free(json);
       return -1;
+   }
+   free(json);
 
    cJSON *file = cJSON_GetObjectItemCaseSensitive(resp, "file");
    if (cJSON_IsString(file))
@@ -526,6 +544,17 @@ int kb_client_index_blast_radius(const char *project, const char *file_path, bla
        !cJSON_IsTrue(resolved) || !kb_index_blast_edges_valid(dependency_edges, "identity") ||
        !kb_index_blast_edges_valid(dependent_edges, "path"))
    {
+      /* Say WHICH term failed. A single malformed edge anywhere rejects the whole
+       * lookup, so "the payload was wrong" is not actionable on its own. */
+      aimee_log(LOG_ERROR, "kb_client",
+                "blast_radius '%s' '%s': response rejected (project=%d generation=%d "
+                "freshness=%d resolved=%d dep_edges=%d dependent_edges=%d)",
+                project, file_path,
+                cJSON_IsString(project_json) && project_json->valuestring[0],
+                cJSON_IsNumber(generation),
+                cJSON_IsString(freshness) && freshness->valuestring[0], cJSON_IsTrue(resolved),
+                kb_index_blast_edges_valid(dependency_edges, "identity"),
+                kb_index_blast_edges_valid(dependent_edges, "path"));
       cJSON_Delete(resp);
       return -1;
    }
