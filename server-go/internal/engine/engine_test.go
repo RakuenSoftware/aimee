@@ -98,6 +98,12 @@ type artifactRoutingRunner struct {
 
 type recoveringRunner struct{ calls int }
 
+type retryDetailRunner struct {
+	t      *testing.T
+	calls  int
+	detail string
+}
+
 type blockingSiblingRunner struct {
 	started chan StepRequest
 	release chan struct{}
@@ -124,6 +130,60 @@ func (r *recoveringRunner) Run(_ context.Context, _ StepRequest) (StepResult, er
 		return StepResult{}, errors.New("temporary runner outage")
 	}
 	return StepResult{Status: StepAdvanced}, nil
+}
+
+func (r *retryDetailRunner) Run(_ context.Context, req StepRequest) (StepResult, error) {
+	r.calls++
+	if r.calls == 1 {
+		return StepResult{Status: StepChanges, Detail: r.detail}, nil
+	}
+	if req.RetryDetail != r.detail {
+		r.t.Fatalf("retry detail=%q, want %q", req.RetryDetail, r.detail)
+	}
+	return StepResult{Status: StepAdvanced}, nil
+}
+
+func TestRetryPassesPreviousFailureDetailToRunner(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	definition := []byte("name: retry-detail\nstart: work\nnodes:\n  - id: work\n    block: author.proposal\n    on_fail: work\n    params:\n      max_rounds: 3\n")
+	if err := os.WriteFile(filepath.Join(workflowDir, "retry-detail.yaml"), definition, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	def, err := wfe.ParseDefinition(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	artifacts, err := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := db1.CreateWorkItem{ID: "wi_retry_detail", Repo: "repo", ProposalPath: "proposal", WorkflowName: "retry-detail", WorkflowVersion: def.Version, StartStage: "work"}
+	if err := store.CreateWorkItem(t.Context(), item); err != nil {
+		t.Fatal(err)
+	}
+	if err := artifacts.PutProposal(item.ID, []byte("proposal")); err != nil {
+		t.Fatal(err)
+	}
+	runner := &retryDetailRunner{t: t, detail: "verify failed: clang-format violation"}
+	workflowEngine, err := New(store, artifacts, workflowDir, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result, err := workflowEngine.Advance(t.Context(), item.ID); err != nil || result.Parked || result.NextStage != "work" {
+		t.Fatalf("first advance result=%+v err=%v", result, err)
+	}
+	if result, err := workflowEngine.Advance(t.Context(), item.ID); err != nil || !result.Terminal || result.State != "accepted" {
+		t.Fatalf("retry advance result=%+v err=%v", result, err)
+	}
 }
 
 func testSiblingStepsRunConcurrently(t *testing.T, maxUSD, stepCostUSD float64) {
