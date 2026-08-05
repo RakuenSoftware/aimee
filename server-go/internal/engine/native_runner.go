@@ -139,9 +139,14 @@ func (r *NativeRunner) SetRoundtableStore(store *roundtablecfg.Store) { r.roundt
 const (
 	roundtableDelegateRole        = "review"
 	roundtableDelegateMaxTurnsCap = 24
+	delegateDeadlineGraceReserve  = 5 * time.Second
+	delegateWriteVerifyReserve    = 5 * time.Minute
 )
 
 func (r *NativeRunner) delegate(ctx context.Context, step StepRequest, request DelegateRequest) (DelegateResult, error) {
+	if err := applyDelegateDeadlineCap(ctx, &request); err != nil {
+		return DelegateResult{}, err
+	}
 	request.WorkItemID = step.WorkItem.ID
 	request.Stage = step.Node.ID
 	request.ExecutionVersion = step.WorkItem.UpdatedAt
@@ -155,6 +160,13 @@ func (r *NativeRunner) delegateGroup(ctx context.Context, step StepRequest, requ
 		return nil
 	}
 	for i := range requests {
+		if err := applyDelegateDeadlineCap(ctx, &requests[i]); err != nil {
+			out := make([]DelegateGroupResult, len(requests))
+			for j := range out {
+				out[j].Err = err
+			}
+			return out
+		}
 		requests[i].WorkItemID = step.WorkItem.ID
 		requests[i].Stage = step.Node.ID
 		requests[i].ExecutionVersion = step.WorkItem.UpdatedAt
@@ -175,6 +187,43 @@ func (r *NativeRunner) delegateGroup(ctx context.Context, step StepRequest, requ
 		out[i].Err = errors.New("delegate service does not support grouped delegation")
 	}
 	return out
+}
+
+// applyDelegateDeadlineCap converts the enclosing stage deadline into a
+// resource-plane tool-loop cap. Write delegates leave enough time for the
+// mandatory repository verifier; read-only delegates only need cancellation
+// and lifecycle-transition slack. The cap can only reduce the agent's own
+// configured loop budget.
+func applyDelegateDeadlineCap(ctx context.Context, request *DelegateRequest) error {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return nil
+	}
+	remaining := time.Until(deadline)
+	reserve := remaining / 20
+	if reserve > delegateDeadlineGraceReserve {
+		reserve = delegateDeadlineGraceReserve
+	}
+	if request.Role == "code" && request.Tools {
+		reserve = delegateWriteVerifyReserve
+		if remaining <= reserve {
+			return fmt.Errorf("delegate stage wall budget exhausted: remaining=%s reserve=%s: %w",
+				remaining.Round(time.Millisecond), reserve, context.DeadlineExceeded)
+		}
+	}
+	capMillis := (remaining - reserve).Milliseconds()
+	maxInt := int64(^uint(0) >> 1)
+	if capMillis > maxInt {
+		capMillis = maxInt
+	}
+	if capMillis < 1 {
+		capMillis = 1
+	}
+	capValue := int(capMillis)
+	if request.ToolLoopTimeoutMSCap <= 0 || request.ToolLoopTimeoutMSCap > capValue {
+		request.ToolLoopTimeoutMSCap = capValue
+	}
+	return nil
 }
 
 func NewNativeRunner(db *db1.Store, worktrees *WorktreeManager, agents AgentClient, verifier Verifier, artifacts *wfe.ArtifactStore, workflows *wfe.Registry, forge Forge) (*NativeRunner, error) {
@@ -582,13 +631,29 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 				Detail: "conflict merging aimee/feat/" + req.WorkItem.ParentID + " into slice"}, nil
 		}
 	}
-	// A documentation gate can be resumed after a human repair commit. The
+	// A review gate can be resumed after a human repair commit. The
 	// reviewed hash then remains on both the work item and feedback artifact,
 	// while the clean exact frozen diff has changed. Send that new diff back through
 	// freeze + roundtable rather than demanding that a delegate invent another
-	// edit solely to satisfy its "owned files changed" contract. This does not
-	// bypass review, and feedback left by an earlier gate cannot trigger it.
-	if docs && req.Feedback != nil && req.WorkItem.ContentHash != "" &&
+	// edit solely to satisfy its "owned files changed" contract. Implementation
+	// repairs must also pass the same mechanical verifier used after a delegate.
+	// This does not bypass review, and feedback left by an earlier gate cannot
+	// trigger it.
+	repairFastPath := true
+	if !docs {
+		attempts, attemptErr := r.db.StageAttemptCount(ctx, req.WorkItem.ID, req.Node.ID)
+		if attemptErr != nil {
+			return StepResult{}, attemptErr
+		}
+		// The first pass after review may verify a clean committed repair without
+		// asking a delegate to make a meaningless extra edit. Once that verifier
+		// has failed, however, RecordRetry has incremented this stage counter. A
+		// later pass must dispatch an implementation delegate so it can actually
+		// repair the failure instead of replaying the same verifier until the
+		// retry limit parks the workflow.
+		repairFastPath = attempts == 0
+	}
+	if repairFastPath && req.Feedback != nil && req.WorkItem.ContentHash != "" &&
 		req.WorkItem.ContentHash == req.Feedback.ArtifactHash {
 		diff, diffErr := frozenWorktreeDiff(ctx, req.WorkItem, workdir)
 		if diffErr != nil {
@@ -600,12 +665,21 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 		}
 		if status == "" && strings.TrimSpace(diff) != "" &&
 			wfe.Hash([]byte(diff)) != req.Feedback.ArtifactHash {
+			if !docs {
+				if err := r.verifier.Verify(ctx, workdir); err != nil {
+					return StepResult{Status: StepChanges, Detail: err.Error()}, nil
+				}
+			}
 			head, headErr := gitText(ctx, workdir, "rev-parse", "HEAD")
 			if headErr != nil {
 				return StepResult{}, headErr
 			}
+			detail := "reviewed worktree advanced; re-freezing exact repair"
+			if !docs {
+				detail = "reviewed worktree advanced; verified and re-freezing exact repair"
+			}
 			return StepResult{Status: StepAdvanced, ArtifactType: "branch", Artifact: branch,
-				ContentHash: head, Detail: "reviewed worktree advanced; re-freezing exact repair"}, nil
+				ContentHash: head, Detail: detail}, nil
 		}
 	}
 	prompt := "Implement the complete approved task in this worktree, run the repository verification, fix failures, and leave the accepted changes in the worktree."
@@ -1070,6 +1144,41 @@ type panelSeat struct {
 	ordinal                        int
 }
 
+// ensureRoundtableDeadlineFits avoids spending an expiring workflow window on
+// a panel that cannot possibly reach its last configured phase. Analysis and
+// discussion share one panel deadline; an enabled chairman receives a second.
+// Returning DeadlineExceeded before dispatch lets the scheduler reopen the
+// workflow with a fresh wall window instead of cancelling a billed chairman
+// and rerunning the whole panel.
+func ensureRoundtableDeadlineFits(ctx context.Context, panel roundtablecfg.Panel) error {
+	deadline, ok := ctx.Deadline()
+	if !ok || panel.DeadlineMS <= 0 {
+		return nil
+	}
+	phases := int64(1)
+	if panel.ChairmanEnabled {
+		phases++
+	}
+	maxDuration := time.Duration(1<<63 - 1)
+	maxDeadlineMS := int64(maxDuration/time.Millisecond) / phases
+	if int64(panel.DeadlineMS) > maxDeadlineMS {
+		return fmt.Errorf("roundtable deadline budget overflows duration: deadline_ms=%d phases=%d: %w",
+			panel.DeadlineMS, phases, context.DeadlineExceeded)
+	}
+	required := time.Duration(int64(panel.DeadlineMS)*phases) * time.Millisecond
+	reserve := required / 20
+	if reserve > delegateDeadlineGraceReserve {
+		reserve = delegateDeadlineGraceReserve
+	}
+	required += reserve
+	remaining := time.Until(deadline)
+	if remaining <= required {
+		return fmt.Errorf("roundtable phases do not fit workflow wall budget: remaining=%s required=%s phases=%d: %w",
+			remaining.Round(time.Millisecond), required, phases, context.DeadlineExceeded)
+	}
+	return nil
+}
+
 func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepResult, error) {
 	lenses := panelSeats(req.Node)
 	if len(lenses) == 0 {
@@ -1095,6 +1204,9 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 	convened, err := r.roundtables.Resolve(paramString(req.Node, "roundtable", ""), lensNames, panelPins(req.Node))
 	if err != nil {
 		return StepResult{Status: StepPending, PauseReason: "panel_unreachable", Detail: err.Error()}, nil
+	}
+	if err := ensureRoundtableDeadlineFits(ctx, convened); err != nil {
+		return StepResult{}, err
 	}
 	reviewed, ok := req.Inputs["src"]
 	if !ok {

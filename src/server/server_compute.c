@@ -712,6 +712,7 @@ void delegate_worker(void *arg)
    cJSON *jcwd = cJSON_GetObjectItemCaseSensitive(req, "cwd");
    cJSON *jbranch = cJSON_GetObjectItemCaseSensitive(req, "branch");
    cJSON *jtimeout = cJSON_GetObjectItemCaseSensitive(req, "timeout_ms");
+   cJSON *jloop_timeout_cap = cJSON_GetObjectItemCaseSensitive(req, "tool_loop_timeout_ms_cap");
    cJSON *jmaxturns = cJSON_GetObjectItemCaseSensitive(req, "max_turns");
    cJSON *jmaxturnscap = cJSON_GetObjectItemCaseSensitive(req, "max_turns_cap");
    cJSON *jhandoff = cJSON_GetObjectItemCaseSensitive(req, "handoff_json");
@@ -737,6 +738,11 @@ void delegate_worker(void *arg)
    const char *branch =
        (cJSON_IsString(jbranch) && jbranch->valuestring[0]) ? jbranch->valuestring : NULL;
    int timeout_ms = cJSON_IsNumber(jtimeout) ? (int)jtimeout->valuedouble : 0;
+   int tool_loop_timeout_ms_cap =
+       cJSON_IsNumber(jloop_timeout_cap) && jloop_timeout_cap->valuedouble > 0
+           ? (jloop_timeout_cap->valuedouble > INT_MAX ? INT_MAX
+                                                       : (int)jloop_timeout_cap->valuedouble)
+           : 0;
    int max_turns = cJSON_IsNumber(jmaxturns) ? (int)jmaxturns->valuedouble : -1;
    int max_turns_cap = cJSON_IsNumber(jmaxturnscap) && jmaxturnscap->valuedouble > 0
                            ? (int)jmaxturnscap->valuedouble
@@ -1068,8 +1074,11 @@ void delegate_worker(void *arg)
     * forever, leaking its pool thread + concurrency slot (see
     * delegate_effective_timeout_ms). Resolve request > agent-config > default. */
    if (target_agent)
+   {
       target_agent->timeout_ms =
           delegate_effective_timeout_ms(timeout_ms, target_agent->timeout_ms);
+      target_agent->tool_loop_timeout_ms_cap = tool_loop_timeout_ms_cap;
+   }
    delegate_apply_max_turns_policy(&acfg, role, max_turns);
    delegate_apply_max_turns_cap(&acfg, role, max_turns_cap);
    if (cctx->background_job_id > 0 && target_agent)

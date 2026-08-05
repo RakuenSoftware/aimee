@@ -1123,6 +1123,16 @@ func (s *Store) StageLoopCount(ctx context.Context, workItemID, stage string) (i
 	return count, err
 }
 
+// StageAttemptCount reports the current consecutive retry count for a stage.
+// Unlike StageLoopCount, this counter is cleared when the stage advances, so it
+// distinguishes a newly reviewed repair from a verifier failure that has just
+// looped back to the same implementation stage.
+func (s *Store) StageAttemptCount(ctx context.Context, workItemID, stage string) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COALESCE((SELECT attempts FROM lifecycle_stage_attempt WHERE work_item_id=? AND stage=?), 0)`, workItemID, stage).Scan(&count)
+	return count, err
+}
+
 // Park records the stable pause reason as both item state and event detail.
 // Call ParkWithDetail when an operator-safe diagnostic should accompany it.
 func (s *Store) Park(ctx context.Context, workItemID, stage, reason string, costUSD float64) error {

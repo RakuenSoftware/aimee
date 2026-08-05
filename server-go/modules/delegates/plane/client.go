@@ -45,6 +45,11 @@ type DelegateRequest struct {
 	// MaxTurnsCap bounds a delegate without overriding a smaller role/agent cap.
 	// It is forwarded to the resource plane as max_turns_cap.
 	MaxTurnsCap int
+	// ToolLoopTimeoutMSCap bounds the delegate's whole multi-turn tool loop
+	// without increasing a smaller configured agent budget. Workflow runners set
+	// it from the enclosing stage deadline so the resource plane can return a
+	// partial result before a hard context cancellation.
+	ToolLoopTimeoutMSCap int
 	// ReplayOnly forbids launching a replacement job when a lifecycle retry is
 	// consuming an already-billed durable result.
 	ReplayOnly bool
@@ -305,6 +310,9 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 	}
 	if request.MaxTurnsCap > 0 {
 		payload["max_turns_cap"] = request.MaxTurnsCap
+	}
+	if request.ToolLoopTimeoutMSCap > 0 {
+		payload["tool_loop_timeout_ms_cap"] = request.ToolLoopTimeoutMSCap
 	}
 	if request.ProvidedTarget {
 		payload["provided_target"] = true

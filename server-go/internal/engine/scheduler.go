@@ -22,6 +22,7 @@ type Scheduler struct {
 	pollEvery         time.Duration
 	transientPauses   []transientPause
 	cancelTerminal    func(context.Context) (int, error)
+	cleanupTerminal   func(context.Context, db1.WorkItem) error
 	log               *slog.Logger
 
 	mu      sync.Mutex
@@ -86,6 +87,16 @@ func (s *Scheduler) SetTerminalCancellation(cancel func(context.Context) (int, e
 	s.Notify()
 }
 
+// SetTerminalCleanup installs the managed-worktree cleanup boundary. Terminal
+// rows remain as workflow history, but their checkouts must not accumulate
+// forever after the final transition.
+func (s *Scheduler) SetTerminalCleanup(cleanup func(context.Context, db1.WorkItem) error) {
+	s.mu.Lock()
+	s.cleanupTerminal = cleanup
+	s.mu.Unlock()
+	s.Notify()
+}
+
 type RunPolicy struct {
 	MaxTurns       int
 	MaxWall        time.Duration
@@ -146,6 +157,7 @@ func (s *Scheduler) fill(ctx context.Context) {
 	concurrencySource := s.concurrencySource
 	perWorkflowSource := s.perWorkflowSource
 	cancelTerminal := s.cancelTerminal
+	cleanupTerminal := s.cleanupTerminal
 	concurrency := s.concurrency
 	perWorkflow := s.perWorkflow
 	s.mu.Unlock()
@@ -206,15 +218,36 @@ func (s *Scheduler) fill(ctx context.Context) {
 	if perWorkflow < 1 {
 		perWorkflow = 1
 	}
+	items, err := s.db.WorkItems(ctx)
+	if err != nil {
+		s.log.Error("list workflow items", "error", err)
+		return
+	}
+	if cleanupTerminal != nil {
+		for _, item := range items {
+			terminal := item.State == "accepted" || item.State == "rejected" || item.State == "stopped"
+			if !terminal || item.Worktree == "" {
+				continue
+			}
+			s.mu.Lock()
+			_, running := s.running[item.ID]
+			s.mu.Unlock()
+			if running {
+				continue
+			}
+			if err := cleanupTerminal(ctx, item); err != nil {
+				s.log.Error("clean terminal workflow worktree", "work_item", item.ID, "error", err)
+				continue
+			}
+			if err := s.db.SetWorktree(ctx, item.ID, ""); err != nil {
+				s.log.Error("clear terminal workflow worktree", "work_item", item.ID, "error", err)
+			}
+		}
+	}
 	s.mu.Lock()
 	available := concurrency - len(s.running)
 	s.mu.Unlock()
 	if available <= 0 {
-		return
-	}
-	items, err := s.db.WorkItems(ctx)
-	if err != nil {
-		s.log.Error("list workflow items", "error", err)
 		return
 	}
 	// WorkItems is newest-first. Traverse oldest-first so continuously arriving

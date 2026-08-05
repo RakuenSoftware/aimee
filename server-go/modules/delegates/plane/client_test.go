@@ -199,7 +199,7 @@ func TestHTTPAgentClientOmitsProvidedTargetByDefault(t *testing.T) {
 	}
 }
 
-func TestHTTPAgentClientForwardsMaxTurnsCap(t *testing.T) {
+func TestHTTPAgentClientForwardsResourceCaps(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/delegate/run":
@@ -208,8 +208,14 @@ func TestHTTPAgentClientForwardsMaxTurnsCap(t *testing.T) {
 			if got := payload["max_turns_cap"]; got != float64(24) {
 				t.Errorf("max_turns_cap=%v payload=%v", got, payload)
 			}
+			if got := payload["tool_loop_timeout_ms_cap"]; got != float64(420000) {
+				t.Errorf("tool_loop_timeout_ms_cap=%v payload=%v", got, payload)
+			}
 			if _, leaked := payload["MaxTurnsCap"]; leaked {
 				t.Errorf("Go-local field name leaked in payload: %v", payload)
+			}
+			if _, leaked := payload["ToolLoopTimeoutMSCap"]; leaked {
+				t.Errorf("Go-local timeout field name leaked in payload: %v", payload)
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": 1})
 		case "/v1/delegate/status":
@@ -223,7 +229,7 @@ func TestHTTPAgentClientForwardsMaxTurnsCap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review artifact", MaxTurnsCap: 24}); err != nil {
+	if _, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review artifact", MaxTurnsCap: 24, ToolLoopTimeoutMSCap: 420000}); err != nil {
 		t.Fatal(err)
 	}
 }

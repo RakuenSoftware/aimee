@@ -108,6 +108,81 @@ func TestSchedulerFillsFreedSlotImmediately(t *testing.T) {
 	runner.release <- struct{}{}
 }
 
+func TestSchedulerCleansTerminalWorktreesAndRetriesFailures(t *testing.T) {
+	store, err := db1.Open(filepath.Join(t.TempDir(), "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	ctx := t.Context()
+	states := map[string]string{
+		"wi_accepted": "accepted",
+		"wi_rejected": "rejected",
+		"wi_stopped":  "stopped",
+		"wi_retry":    "accepted",
+		"wi_running":  "accepted",
+	}
+	for id, state := range states {
+		if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{
+			ID: id, Repo: "repo", ProposalPath: id, WorkflowName: "one",
+			StartStage: "work", Mode: "autonomous",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.SetWorktree(ctx, id, filepath.Join("/managed", id)); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Finish(ctx, id, "work", state, "done", "", 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	scheduler := NewScheduler(store, nil, 1, nil)
+	retryFails := true
+	calls := make(map[string]int)
+	scheduler.SetTerminalCleanup(func(_ context.Context, item db1.WorkItem) error {
+		calls[item.ID]++
+		if item.ID == "wi_retry" && retryFails {
+			return errors.New("temporary cleanup failure")
+		}
+		return nil
+	})
+	// A terminal transition can race the tail of its executing turn. Never remove
+	// that checkout until drive() has released it, even when all worker capacity is
+	// occupied.
+	scheduler.running["wi_running"] = struct{}{}
+	scheduler.fill(ctx)
+
+	for _, id := range []string{"wi_accepted", "wi_rejected", "wi_stopped"} {
+		item, err := store.WorkItem(ctx, id)
+		if err != nil || item.Worktree != "" || calls[id] != 1 {
+			t.Fatalf("terminal cleanup %s: item=%+v calls=%d err=%v", id, item, calls[id], err)
+		}
+	}
+	for _, id := range []string{"wi_retry", "wi_running"} {
+		item, err := store.WorkItem(ctx, id)
+		if err != nil || item.Worktree == "" {
+			t.Fatalf("premature cleanup %s: item=%+v err=%v", id, item, err)
+		}
+	}
+	if calls["wi_retry"] != 1 || calls["wi_running"] != 0 {
+		t.Fatalf("retry calls=%d running calls=%d", calls["wi_retry"], calls["wi_running"])
+	}
+
+	retryFails = false
+	delete(scheduler.running, "wi_running")
+	scheduler.fill(ctx)
+	for _, id := range []string{"wi_retry", "wi_running"} {
+		item, err := store.WorkItem(ctx, id)
+		if err != nil || item.Worktree != "" {
+			t.Fatalf("retry cleanup %s: item=%+v err=%v", id, item, err)
+		}
+	}
+	if calls["wi_retry"] != 2 || calls["wi_running"] != 1 {
+		t.Fatalf("retry calls=%d running calls=%d", calls["wi_retry"], calls["wi_running"])
+	}
+}
+
 // seedPerWorkflowItems writes a one-node "author.proposal" workflow and creates a
 // work item per id, returning a store + a blocking runner + a started scheduler.
 // Items whose ids share a prefix before the first "." belong to the same root
