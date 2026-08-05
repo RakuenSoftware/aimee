@@ -107,6 +107,74 @@ true`, 2977 files indexed, ~382s/cell). That measures aimee with its code index
 and NO embeddings or semantic recall. Any claim from R2 must say so; the
 harness records the mode per cell precisely so the two are never conflated.
 
+## R2 blockers — aimee defects found while trying to run the arm
+
+None of these are the tasks failing. They are aimee failing to become ready.
+
+**1. `full` readiness cannot complete.** `/v1/code/build` is posted with a
+ten-minute client timeout (`KB_CLIENT_REPAIR_TIMEOUT_MS`,
+`modules/kb_client/kb_client.c:783`) while a full corpus embed takes ~3.5h
+(measured 320 vectors/min over a ~3000-file checkout). The client gives up; the
+server keeps building and keeps its db2 connection. Each cell orphans another.
+
+**2. The wedge that follows.** Orphaned builds hold leases taken at
+`kb/http/kb_tls_serve.c:463` well past the 300s ceiling, counters climbing
+monotonically, until the service stops answering `/v1/code/build` entirely.
+`lease_begin`/`lease_end` are correctly paired -- the request outlives its
+caller and nothing cancels server-side work on client disconnect.
+
+**3. A scan can index nothing and only warn.** `aimee index scan` on a runner
+cell returned `Scan complete: 1 project(s), 0 file(s) re-indexed` with
+
+    warning: nothing was indexed — knowledge service saw no files at that path
+    — it may not be able to read it (aimee-kb runs in its own container and
+    does not share the server's filesystem)
+
+The warning is good, but its stated cause is wrong here: the KB container CAN
+read the path (verified by `docker exec` -- 50 entries, same as the workspace
+that indexed fine). So the real cause is unreported, and readiness then fails
+three assertions downstream with no reference to the warning that explains them.
+
+**4. `status` disagrees with the transport the scan uses.** `aimee index scan`
+returns `knowledge service unavailable (via local Unix socket (no remote server
+configured))` while, seconds earlier and later, `aimee --json status` reports
+`kb: {"status":"ok", ...}` and the container is healthy with zero pool warnings.
+A green status that does not reflect the path the next command takes is worse
+than no status.
+
+**5. Re-scanning an existing project with `--force` indexes zero files.** The
+same directory scanned under a NEW project name indexes 2978 files; scanned
+again under its existing project it indexes 0. Every cell mints a fresh project
+name, so this compounds with the no-reuse embedding cost in (1).
+
+Reproduction for 3 and 5: copy `/opt/bench/amcorpus/corpus/am_1e7cb3da16` to a
+fresh path, `chown -R 999:999`, `aimee workspace add`, `aimee index scan
+<newname> <path> --force` -> 2978 files, and `index find dstr_append` /
+`index callers dstr_append` both answer correctly. `index blast-radius` returns
+`{"retryable":true,"dependency":"kb","message":"blast radius lookup failed"}`
+even on that good index.
+
+## Harness environment for the am_ corpus
+
+Not recorded anywhere before this; reconstructed from cell artifacts.
+
+    PT_FIXTURE=/opt/bench/amcorpus/corpus
+    PT_HIDDEN=/opt/bench/amcorpus/hidden
+    PT_TASKS=/opt/bench/amcorpus/arms/tasks.tsv
+    PT_RESULTS=/opt/bench/results
+    PT_RUNTIME=/var/lib/aimee-workspaces/bench
+    PT_PONYTAIL=/opt/bench/ponytail-upstream
+    PT_AIMEE=/usr/local/bin/aimee        AIMEE_HOME=/var/lib/aimee
+    PT_SKIP_KB_BUILD=1                   PT_AIMEE_MODE=index-only
+    PT_WS_OWNER=999:999
+    PT_PROBE_SYMBOL=dstr_append          PT_PROBE_FILE=src/dstr.c
+    PT_PROBE_CALLERS=anchor_format_read,ensure_codex_trusted_project_in_config,diff_format_unified
+    PT_GRADE_TIMEOUT=2700                PT_RED_TIMEOUT=2700
+
+`PT_AIMEE_MODE` only relaxes the readiness assertions; the build is skipped by
+`PT_SKIP_KB_BUILD`. The probe defaults (`app/dates.py` / `end_of_month`) belong
+to the synthetic battery fixture and do not exist in this corpus.
+
 ## Per-cell metrics captured
 
 `cell, arm, task, hidden_ok, compile_exit, smoke_exit, wall_s, credits,
