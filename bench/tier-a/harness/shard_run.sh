@@ -139,7 +139,16 @@ verify_model() {  # $1 = port. Confirm the server there loaded the quant we aske
   #
   #   unsloth/granite-4.0-1b-GGUF:UD-Q4_K_XL -> stem granite-4.0-1b, quant UD-Q4_K_XL
   local p=$1 want_fam want_q loaded
-  want_fam=$(basename "${REPO%%:*}" | sed -E 's/-GGUF$//I')
+  # The stem is derived from REPO, which assumes the publisher names its files
+  # after its repo. Not everyone does: ggml-org/SmolLM3-3B-GGUF ships
+  # SmolLM3-Q4_K_M.gguf, with no size suffix, so the derived stem "SmolLM3-3B"
+  # never matches and a correctly-loaded model is refused as wrong.
+  #
+  # That is a FALSE NEGATIVE in a guard whose whole job is catching false
+  # positives (defect 30: a stale server answering with someone else's weights).
+  # Weakening the match would give the stale-server case back, so instead the
+  # caller may state the expected stem explicitly. Unset, behaviour is unchanged.
+  want_fam=${VERIFY_FAM:-$(basename "${REPO%%:*}" | sed -E 's/-GGUF$//I')}
   want_q="${REPO##*:}"
   [ "$want_q" = "$REPO" ] && want_q=""   # no ':quant' in REPO
   loaded=$(ssh -n -o ConnectTimeout=15 $HOST "curl -sf --max-time 8 http://$EP:$p/props" 2>/dev/null \
