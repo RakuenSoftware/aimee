@@ -1145,7 +1145,7 @@ func TestHTTPAgentClientReplayUsesOriginalDurableJobKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	original := DelegateRequest{Role: "code", Persona: "engineer", Prompt: "implement", WorkItemID: "wi", Stage: "impl", ExecutionVersion: "v1"}
+	original := DelegateRequest{Role: "code", Persona: "engineer", Prompt: "implement", WorkItemID: "wi", Stage: "impl", ExecutionVersion: "v1", MaxCostUSD: 0.75, ToolLoopTimeoutMSCap: 120_000}
 	if err := store.SaveWorkflowDelegateJob(t.Context(), delegateJobKey(original), original.WorkItemID, 45, "participant-45"); err != nil {
 		t.Fatal(err)
 	}
@@ -1168,6 +1168,8 @@ func TestHTTPAgentClientReplayUsesOriginalDurableJobKey(t *testing.T) {
 	}
 	replay := original
 	replay.ReplayOnly = true
+	replay.MaxCostUSD = 0.13
+	replay.ToolLoopTimeoutMSCap = 45_000
 	result, err := client.Delegate(t.Context(), replay)
 	if err != nil || result.Response != "replayed" {
 		t.Fatalf("replay result=%+v err=%v", result, err)
