@@ -75,9 +75,37 @@ and no `return`/`break`/`continue`/`goto` sits between them, so this is not a
 missing release on an error path. Either a handler blocks forever while holding
 the lease, or the worker thread leaves without unwinding.
 
-Restarting aimee-kb cleared it; `kb build` then answered in 0.5s. Run relaunched.
-The leak accumulates, so it is a live risk over a 14-cell run where every cell
-forces a KB build. Root cause still open.
+Restarting aimee-kb cleared it; `kb build` then answered in 0.5s. The failure
+reproduced on relaunch, and the mechanism is now known.
+
+**Root cause: a client timeout far shorter than the operation it invokes.**
+
+`kb_client_code_post_json()` posts `/v1/code/build` with
+`KB_CLIENT_REPAIR_TIMEOUT_MS`, which is `10 * 60 * 1000` — ten minutes
+(`modules/kb_client/kb_client.c:783`). A full corpus embed of one am_ task
+takes about 3.5 hours: measured here at 320 vectors/min, sustained, against a
+~3000-file checkout. So:
+
+1. readiness runs `kb build --force` against a per-cell project (no reuse);
+2. the client gives up at 10 minutes and reports
+   `knowledge service /v1/code/build did not respond`, failing the cell;
+3. the SERVER keeps building, still holding the db2 connection it leased at
+   `kb_tls_serve.c:463` — which is the >300s lease that keeps climbing;
+4. the next cell orphans another one, until the service stops answering.
+
+So the pool warning is a symptom, not the defect, and the begin/end pair is
+correct — the request simply outlives the caller with no server-side
+cancellation on client disconnect. Fixing it properly means one of: making the
+build asynchronous (submit + poll), cancelling server-side work when the client
+disconnects, or sizing the client timeout to the operation. A synchronous
+3.5-hour HTTP request is not the answer.
+
+**Consequence for this run:** `full` readiness mode cannot complete on the
+current build. R2 therefore runs `PT_AIMEE_MODE=index-only`, which is what the
+archived aimee cells used (`readiness_mode: index-only`, `skipped_kb_build:
+true`, 2977 files indexed, ~382s/cell). That measures aimee with its code index
+and NO embeddings or semantic recall. Any claim from R2 must say so; the
+harness records the mode per cell precisely so the two are never conflated.
 
 ## Per-cell metrics captured
 
