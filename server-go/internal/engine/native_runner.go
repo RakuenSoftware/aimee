@@ -533,6 +533,34 @@ func (r *NativeRunner) branchOpen(ctx context.Context, req StepRequest) (StepRes
 	return StepResult{Status: StepAdvanced, ArtifactType: "branch", Artifact: branch, ContentHash: wfe.Hash([]byte(branch))}, nil
 }
 
+// documentDelegatePrompt anchors documentation work to the same immutable
+// request and exact branch diff that the acceptance gate reviewed. A branch
+// name alone invites the delegate to mine unrelated history for undocumented
+// changes and expand the final PR after acceptance.
+func documentDelegatePrompt(ctx context.Context, req StepRequest, workdir string) (string, error) {
+	acceptedDiff, err := frozenWorktreeDiff(ctx, req.WorkItem, workdir)
+	if err != nil {
+		return "", err
+	}
+	return "Document only the accepted implementation of the original request below. " +
+		"Do not infer work from unrelated repository history or document pre-existing changes. " +
+		"Update appropriate user or developer documentation and inline comments only when the " +
+		"accepted implementation needs it; if its documentation is already complete, leave the " +
+		"worktree unchanged.\n\nORIGINAL REQUEST:\n" + req.Proposal +
+		"\n\nACCEPTED IMPLEMENTATION DIFF:\n" + acceptedDiff, nil
+}
+
+// The shared write-role guard reports a successful no-op as a partial result so
+// ordinary implementation steps cannot silently advance without producing work.
+// Documentation is different: its prompt explicitly requires an unchanged tree
+// when the accepted implementation is already documented. Recognize only the
+// guard's stable diagnostics; unrelated partial results remain failures.
+func delegatePartialIsNoChange(response string) bool {
+	return strings.Contains(response, "result treated as incomplete") &&
+		(strings.Contains(response, "no owned files changed") ||
+			strings.Contains(response, "no file changes detected"))
+}
+
 func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (StepResult, error) {
 	workdir, branch, err := r.worktrees.Ensure(ctx, req.WorkItem, req.WorkItem.ParentID == "")
 	if err != nil {
@@ -583,7 +611,10 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 	}
 	prompt := "Implement the complete approved task in this worktree, run the repository verification, fix failures, and leave the accepted changes in the worktree."
 	if docs {
-		prompt = "Document the complete implemented change in this worktree. Update the appropriate user and developer documentation and inline comments; leave the accepted changes in the worktree."
+		prompt, err = documentDelegatePrompt(ctx, req, workdir)
+		if err != nil {
+			return StepResult{}, err
+		}
 	}
 	if task := paramString(req.Node, "task", ""); task != "" {
 		prompt += "\n\nWORKFLOW STEP INSTRUCTIONS:\n" + task
@@ -650,7 +681,12 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 		//
 		// So only fail when the BRANCH carries no work either. Ask the branch, not
 		// this attempt.
-		if headErr == nil && head == baseHead && !branchHasWorkOverBase(ctx, workdir, req.WorkItem.ParentID) {
+		// A document no-op is the requested outcome when the accepted diff is
+		// already documented. Freeze the exact unchanged HEAD so doc_freeze and
+		// doc_gate still review it; all other empty partials remain failures.
+		documentedNoop := docs && delegatePartialIsNoChange(result.Response)
+		if headErr == nil && head == baseHead && !documentedNoop &&
+			!branchHasWorkOverBase(ctx, workdir, req.WorkItem.ParentID) {
 			detail := strings.TrimSpace(result.Response)
 			if detail == "" {
 				detail = "delegate returned a partial result and produced no commit"
