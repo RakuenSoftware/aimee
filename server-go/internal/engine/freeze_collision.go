@@ -29,9 +29,9 @@ func (s *freezeCollisionLockSet) lock(ctx context.Context, parentID string) (fun
 	if parentID == "" {
 		return func() {}, nil
 	}
-	// The server normally has one process, but appliance upgrades and operator
-	// restarts can overlap briefly. A host-local flock preserves compare-and-
-	// record atomicity across that boundary; process death releases it.
+	// Engine.Advance holds this from freeze inspection through the durable stage
+	// transition. A host-local flock covers overlapping server processes as well
+	// as goroutines, and process death releases it.
 	key := sha256.Sum256([]byte(parentID))
 	root := s.root
 	if root == "" {
@@ -66,14 +66,15 @@ func (s *freezeCollisionLockSet) lock(ctx context.Context, parentID string) (fun
 	}, nil
 }
 
-// lockStep is consumed by Engine.Advance. The engine deliberately owns the
-// lock lifetime so a sibling cannot run its comparison between this runner's
-// artifact publication and the durable Move out of freeze.
 func (r *NativeRunner) lockStep(ctx context.Context, req StepRequest) (func(), error) {
 	if req.Node.Block != "freeze" {
 		return func() {}, nil
 	}
-	return r.freezeLocks.lock(ctx, req.WorkItem.ParentID)
+	locks := r.freezeLocks
+	if locks.root == "" && r.worktrees != nil {
+		locks.root = r.worktrees.root
+	}
+	return locks.lock(ctx, req.WorkItem.ParentID)
 }
 
 func freezeCreatedFiles(ctx context.Context, workdir, base, head string) (map[string]freezeCreate, error) {
