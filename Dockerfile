@@ -389,8 +389,14 @@ if selected not in table:
     sys.exit(f"AIMEE_EMBEDDER={selected!r} is not in the registry. "
              f"Known: {', '.join(sorted(table))}")
 table = {selected: table[selected]}
+# KEEP onnx/model.onnx: it is the runtime this embedder is served with. Excluding
+# it left sentence-transformers on fp32 torch, at ~2000 ms for one ~512-token text
+# on 4 cores (25M-param model) -- ~20 s per source file of corpus ingest.
+# Only the BASE graph. bekko publishes nine variants (fp16, int8, quantized,
+# O1-O4); quantized drifts the vectors and optimized is redundant with ORT's own
+# graph optimisation, so model_*.onnx stay out, as does the onnx_data sidecar.
 SKIP = [
-    "onnx/*", "openvino/*", "*.onnx", "*.onnx_data",   # alternate runtimes
+    "onnx/model_*.onnx", "openvino/*", "*.onnx_data",  # variants we do not serve
     "*.bin", "*.h5", "*.msgpack", "*.tflite", "*.ckpt",  # duplicate/legacy formats
     "*.gguf",                                          # not this runtime either
 ]
