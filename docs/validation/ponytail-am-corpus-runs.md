@@ -57,6 +57,28 @@ Prior aimee cells (an older build) were archived to
 
 Results: pending.
 
+**Blocker hit on the first attempt — aimee-kb wedged.** Cell 1 failed its
+readiness gate with `aimee kb build` returning
+`knowledge service /v1/code/build did not respond`. The KB's own log showed only
+health checks plus a growing pool warning:
+
+    db2.pool: member 0 leased 964195ms (> 300000ms ceiling)
+              by kb/http/kb_tls_serve.c:463 — missed lease_end?
+
+Two members were stuck (0 at ~964s, 1 at ~327s) with the counters climbing
+monotonically, so leases taken on the mTLS serve path were never returned. The
+pool is 16 connections, so two leaks did not starve it by themselves, but the
+service was wedged regardless: no build request ever reached the request log.
+
+`db2_lease_begin()` at kb_tls_serve.c:463 pairs with `db2_lease_end()` at 636
+and no `return`/`break`/`continue`/`goto` sits between them, so this is not a
+missing release on an error path. Either a handler blocks forever while holding
+the lease, or the worker thread leaves without unwinding.
+
+Restarting aimee-kb cleared it; `kb build` then answered in 0.5s. Run relaunched.
+The leak accumulates, so it is a live risk over a 14-cell run where every cell
+forces a KB build. Root cause still open.
+
 ## Per-cell metrics captured
 
 `cell, arm, task, hidden_ok, compile_exit, smoke_exit, wall_s, credits,
