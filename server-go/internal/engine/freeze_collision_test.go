@@ -11,9 +11,11 @@ import (
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
 
-// setupFreezeCollisionHarness builds a parent + sibling pair where the sibling
-// has a frozen diff artifact and a worktree on disk containing the file the
-// frozen_diff claims was created. The sibling's record can be mutated by
+// setupFreezeCollisionHarness builds a parent plus two children: wi_s0 is the
+// pre-frozen sibling (carries a frozen_diff artifact and a worktree on disk
+// containing the file the frozen_diff claims was created) and wi_s1 is a
+// second child that callers use as the "current" item under inspection, so
+// wi_s0 is not skipped as self. The sibling's record can be mutated by
 // callers to test missing-worktree scenarios.
 func setupFreezeCollisionHarness(t *testing.T) (ctx context.Context, store *db1.Store, artifacts *wfe.ArtifactStore, registry *wfe.Registry, repo, slicedir, base, head string) {
 	t.Helper()
@@ -73,6 +75,7 @@ nodes:
 	for _, in := range []db1.CreateWorkItem{
 		{ID: "wi_parent", Repo: repo, ProposalPath: "p", WorkflowName: "build", StartStage: "feature"},
 		{ID: "wi_s0", Repo: repo, ProposalPath: "s0", WorkflowName: "slice", StartStage: "freeze", ParentID: "wi_parent"},
+		{ID: "wi_s1", Repo: repo, ProposalPath: "s1", WorkflowName: "slice", StartStage: "freeze", ParentID: "wi_parent"},
 	} {
 		if err := store.CreateWorkItem(ctx, in); err != nil {
 			t.Fatal(err)
@@ -114,7 +117,7 @@ func TestRejectDivergentSiblingCreatesSkipsMissingWorktree(t *testing.T) {
 	gitRun(t, slicedir, "commit", "-m", "current create")
 	currentHead := strings.TrimSpace(gitRun(t, slicedir, "rev-parse", "HEAD"))
 
-	item, err := store.WorkItem(ctx, "wi_s0")
+	item, err := store.WorkItem(ctx, "wi_s1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +145,7 @@ func TestRejectDivergentSiblingCreatesNoCollisionWithoutWorktree(t *testing.T) {
 	gitRun(t, slicedir, "commit", "-m", "divergent create")
 	currentHead := strings.TrimSpace(gitRun(t, slicedir, "rev-parse", "HEAD"))
 
-	item, err := store.WorkItem(ctx, "wi_s0")
+	item, err := store.WorkItem(ctx, "wi_s1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +170,7 @@ func TestRejectDivergentSiblingCreatesStillRejectsWithWorktree(t *testing.T) {
 	gitRun(t, slicedir, "commit", "-m", "divergent create")
 	currentHead := strings.TrimSpace(gitRun(t, slicedir, "rev-parse", "HEAD"))
 
-	item, err := store.WorkItem(ctx, "wi_s0")
+	item, err := store.WorkItem(ctx, "wi_s1")
 	if err != nil {
 		t.Fatal(err)
 	}
