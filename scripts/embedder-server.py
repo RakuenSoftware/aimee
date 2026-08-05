@@ -193,6 +193,11 @@ def _usable_cpus():
 
 
 EMBEDDER_THREADS = int(os.environ.get("EMBEDDER_THREADS", "0")) or min(8, _usable_cpus())
+# onnx | torch | auto. "auto" prefers onnx and falls back; "onnx" refuses to serve
+# on the slow path, which is what a benchmark host wants -- silently serving fp32
+# torch is how a 50x regression went unnoticed.
+EMBEDDER_BACKEND = os.environ.get("EMBEDDER_BACKEND", "auto").strip().lower()
+_runtime = "unloaded"
 os.environ.setdefault("OMP_NUM_THREADS", str(EMBEDDER_THREADS))
 # Optional int8 dynamic quantization. Pure torch (no optimum/onnx) rather than the
 # q4 ONNX path.
@@ -236,7 +241,31 @@ def load_model():
     # custom modelling code on the Hub.
     # revision pinned from the registry: the weights are baked at build time, and a
     # floating ref would let an image rebuild change the vector space silently.
-    _model = SentenceTransformer(MODEL_NAME, revision=MODEL_REVISION, trust_remote_code=True)
+    # ONNX FIRST. onnxruntime is the CPU path this embedder was characterised on;
+    # fp32 torch is the fallback, not the intent. Measured on 4 cores with a
+    # 25M-parameter model, torch costs ~2000 ms for a single ~512-token text,
+    # which made one source file take 66 s to embed and corpus ingest run at
+    # ~20 s/file. The base onnx graph is baked alongside the safetensors.
+    #
+    # Fall back rather than fail: a deployment whose image predates the baked
+    # graph, or one built with a different embedder, must still serve. The path
+    # actually taken is reported in /health as `runtime`, so "is this the fast
+    # one?" is answerable without reading logs.
+    global _runtime
+    _model = None
+    if EMBEDDER_BACKEND in ("onnx", "auto"):
+        try:
+            _model = SentenceTransformer(MODEL_NAME, revision=MODEL_REVISION,
+                                         trust_remote_code=True, backend="onnx")
+            _runtime = "onnx"
+        except Exception as exc:  # missing optimum/onnxruntime, or no baked graph
+            if EMBEDDER_BACKEND == "onnx":
+                raise
+            sys.stderr.write(f"embedder-server: onnx unavailable ({exc}); using torch\n")
+            _model = None
+    if _model is None:
+        _model = SentenceTransformer(MODEL_NAME, revision=MODEL_REVISION, trust_remote_code=True)
+        _runtime = "torch"
     _dim = _model.get_sentence_embedding_dimension() or 0  # read before quantizing
     if EMBEDDER_QUANTIZE == "int8":
         import torch.ao.quantization as ao_q
@@ -244,7 +273,7 @@ def load_model():
         _model = ao_q.quantize_dynamic(_model, {torch.nn.Linear}, dtype=torch.qint8)
     sys.stderr.write(
         f"embedder-server: loaded {MODEL_NAME} dim={_dim} threads={EMBEDDER_THREADS}"
-        f" quant={EMBEDDER_QUANTIZE}\n"
+        f" quant={EMBEDDER_QUANTIZE} runtime={_runtime}\n"
     )
     return _model
 
@@ -358,6 +387,12 @@ class Handler(BaseHTTPRequestHandler):
                 "repo": MODEL_NAME,
                 "dim": _dim,
                 "quantize": EMBEDDER_QUANTIZE,
+                # Which runtime is actually serving. Reported because the fast
+                # path (onnx) and the ~50x slower fallback (fp32 torch) are
+                # otherwise indistinguishable from outside, and a silent fallback
+                # is exactly how corpus ingest ended up at ~20 s/file.
+                "runtime": _runtime,
+                "threads": EMBEDDER_THREADS,
             }
             # Registry data, not a measurement, so it is answerable while the model
             # loads — the kb reads it before it can embed anything.
