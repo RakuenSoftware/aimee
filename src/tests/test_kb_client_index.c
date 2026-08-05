@@ -361,6 +361,35 @@ static void test_blast_radius_rejects_missing_edge_arrays(void)
    cJSON_Delete(resp);
 }
 
+/* ---- index read timeout ----------------------------------------------------
+ *
+ * RED-GREEN. This was a hardcoded 5s. Measured on CT403 against a 3825-file
+ * checkout, the kb answers /v1/code/blast-radius in 5.8-5.9s consistently -- it
+ * walks a dependency graph, not one row -- so every lookup missed by under a
+ * second and surfaced as "blast radius lookup failed" (http=-1, no body). Symbol
+ * and caller lookups are cheap and stayed inside it, which is exactly why two of
+ * three readiness probes passed and the third never did.
+ *
+ * The defect scaled with corpus size: invisible on a small fixture, total on a
+ * real one. A bound below the measured cost is the bug, so assert the headroom. */
+static void test_index_read_timeout_clears_measured_blast_radius_cost(void)
+{
+   /* 5.9s measured; a 5s bound is what broke it. Demand real headroom. */
+   assert(kb_client_index_read_timeout_ms() >= 15000);
+}
+
+static void test_index_read_timeout_is_operator_tunable(void)
+{
+   setenv("AIMEE_KB_READ_TIMEOUT_MS", "12345", 1);
+   assert(kb_client_index_read_timeout_ms() == 12345);
+   /* Garbage and out-of-range values fall back rather than disabling the bound. */
+   setenv("AIMEE_KB_READ_TIMEOUT_MS", "0", 1);
+   assert(kb_client_index_read_timeout_ms() >= 15000);
+   setenv("AIMEE_KB_READ_TIMEOUT_MS", "not-a-number", 1);
+   assert(kb_client_index_read_timeout_ms() >= 15000);
+   unsetenv("AIMEE_KB_READ_TIMEOUT_MS");
+}
+
 int main(void)
 {
    test_scan_timeout_is_tunable_and_bounded();
@@ -383,6 +412,8 @@ int main(void)
    test_blast_radius_rejects_an_error_object();
    test_blast_radius_rejects_a_missing_response();
    test_blast_radius_rejects_missing_edge_arrays();
+   test_index_read_timeout_clears_measured_blast_radius_cost();
+   test_index_read_timeout_is_operator_tunable();
    printf("kb_client_index: all tests passed\n");
    return 0;
 }

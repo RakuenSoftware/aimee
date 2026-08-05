@@ -14,7 +14,6 @@
  * otherwise tunnel the same /v1 route over the local UDS transport. */
 #define KB_CLIENT_INDEX_SCAN_TIMEOUT_DEFAULT_MS (5 * 60 * 1000)
 
-#define KB_CLIENT_INDEX_READ_TIMEOUT_MS (5 * 1000)
 
 static int kb_index_find_parse(cJSON *resp, term_hit_t *out, int max)
 {
@@ -370,7 +369,7 @@ char *kb_client_index_project_lifecycle_json(const char *operation, const char *
       cJSON_AddStringToObject(req, "reason", reason);
    if (strcmp(operation, "gc") == 0)
       cJSON_AddNumberToObject(req, "retention_days", retention_days);
-   char *json = kb_client_v1_post_json(path, req, KB_CLIENT_INDEX_READ_TIMEOUT_MS, http_status);
+   char *json = kb_client_v1_post_json(path, req, kb_client_index_read_timeout_ms(), http_status);
    cJSON_Delete(req);
    return json;
 }
@@ -408,7 +407,7 @@ int kb_client_index_find_scoped(const char *project, int all_projects, const cha
             encoded_project ? encoded_project : "");
    free(encoded_project);
    free(encoded);
-   char *json = kb_client_v1_get_json(path, KB_CLIENT_INDEX_READ_TIMEOUT_MS, NULL);
+   char *json = kb_client_v1_get_json(path, kb_client_index_read_timeout_ms(), NULL);
    free(path);
    if (!json)
       return -1;
@@ -440,7 +439,7 @@ int kb_client_index_list(project_info_t *out, int max)
 
    char path[64];
    snprintf(path, sizeof(path), "/v1/code/projects?max_results=%d", max);
-   char *json = kb_client_v1_get_json(path, KB_CLIENT_INDEX_READ_TIMEOUT_MS, NULL);
+   char *json = kb_client_v1_get_json(path, kb_client_index_read_timeout_ms(), NULL);
    if (!json)
       return -1; /* service unavailable — caller can distinguish from empty (0) */
    cJSON *resp = cJSON_Parse(json);
@@ -470,7 +469,7 @@ int kb_client_index_blast_radius(const char *project, const char *file_path, bla
    free(project_q);
    free(file_q);
    int status = 0;
-   char *json = kb_client_v1_get_json(path, KB_CLIENT_INDEX_READ_TIMEOUT_MS, &status);
+   char *json = kb_client_v1_get_json(path, kb_client_index_read_timeout_ms(), &status);
    /* Every refusal below used to return a bare -1, and the caller rendered all of
     * them as "blast radius lookup failed". Four distinct causes behind one string
     * is what made a kb serving a perfectly good 200 indistinguishable from a kb
@@ -736,7 +735,7 @@ int kb_client_index_structure(const char *project, const char *file_path, defini
             project_q, file_q, max);
    free(project_q);
    free(file_q);
-   char *json = kb_client_v1_get_json(path, KB_CLIENT_INDEX_READ_TIMEOUT_MS, NULL);
+   char *json = kb_client_v1_get_json(path, kb_client_index_read_timeout_ms(), NULL);
    if (!json)
       return -1;
    cJSON *resp = cJSON_Parse(json);
@@ -786,7 +785,7 @@ int kb_client_index_project_stats(const char *project, int *files_out, int *defs
       char path[512];
       snprintf(path, sizeof(path), "/v1/code/project-stats?project=%s", project_q);
       free(project_q);
-      char *json = kb_client_v1_get_json(path, KB_CLIENT_INDEX_READ_TIMEOUT_MS, NULL);
+      char *json = kb_client_v1_get_json(path, kb_client_index_read_timeout_ms(), NULL);
       if (!json)
          return -1;
       cJSON *resp = cJSON_Parse(json);
@@ -828,7 +827,7 @@ int kb_client_index_project_lang(const char *project, char *buf, size_t bufsz)
       char path[512];
       snprintf(path, sizeof(path), "/v1/code/project-stats?project=%s", project_q);
       free(project_q);
-      char *json = kb_client_v1_get_json(path, KB_CLIENT_INDEX_READ_TIMEOUT_MS, NULL);
+      char *json = kb_client_v1_get_json(path, kb_client_index_read_timeout_ms(), NULL);
       if (!json)
          return -1;
       cJSON *resp = cJSON_Parse(json);
@@ -887,7 +886,7 @@ int kb_client_index_code_search_scoped(const char *query, const char *project, i
    free(query_q);
    free(project_q);
 
-   char *json = kb_client_v1_get_json(path, KB_CLIENT_INDEX_READ_TIMEOUT_MS, NULL);
+   char *json = kb_client_v1_get_json(path, kb_client_index_read_timeout_ms(), NULL);
    free(path);
    if (!json)
       return -1;
@@ -936,7 +935,7 @@ int kb_client_index_find_callers_scoped(const char *project, int all_projects, c
    free(symbol_q);
    free(project_q);
 
-   char *json = kb_client_v1_get_json(path, KB_CLIENT_INDEX_READ_TIMEOUT_MS, NULL);
+   char *json = kb_client_v1_get_json(path, kb_client_index_read_timeout_ms(), NULL);
    free(path);
    if (!json)
       return -1;
@@ -998,7 +997,7 @@ char *kb_client_index_cross_repo_deps_json(const char *project, const char *dire
    free(direction_q);
    free(min_tier_q);
 
-   char *json = kb_client_v1_get_json(path, KB_CLIENT_INDEX_READ_TIMEOUT_MS, NULL);
+   char *json = kb_client_v1_get_json(path, kb_client_index_read_timeout_ms(), NULL);
    free(path);
    return json;
 }

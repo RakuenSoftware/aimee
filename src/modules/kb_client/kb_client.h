@@ -1138,6 +1138,7 @@ int kb_client_index_blast_edges_valid(const void *edges, const char *identity_fi
  * AIMEE_KB_SCAN_TIMEOUT_MS for trees whose scan legitimately runs longer.
  * Values outside (0, 24h] are ignored so a typo cannot disable the bound. */
 int kb_client_index_scan_timeout_ms(void);
+int kb_client_index_read_timeout_ms(void);
 
 /* Whether a failed call is the caller's budget expiring rather than the KB
  * being unreachable. A read timeout and a refused connection look identical

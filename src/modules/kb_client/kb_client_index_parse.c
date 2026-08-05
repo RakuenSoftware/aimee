@@ -21,6 +21,30 @@
  * caller reports the service as unavailable -- while the kb is still scanning,
  * holding the db2 connection it leased. Operators scanning big trees need to
  * raise this rather than watch every scan report a healthy service as down. */
+/* Read timeout for the code-index query routes.
+ *
+ * This was a hardcoded 5s. Measured against a 3825-file checkout on CT403, the
+ * kb answers /v1/code/blast-radius in 5.8-5.9s consistently -- it walks the
+ * dependency graph, not a single row -- so EVERY blast-radius lookup missed the
+ * deadline by under a second and surfaced as "blast radius lookup failed" with
+ * http=-1. Symbol and caller lookups are far cheaper and stayed under it, which
+ * is why two of three readiness probes passed and the third never did.
+ *
+ * The failure scaled with corpus size, so it was invisible on small fixtures and
+ * total on real ones. Default generously and let an operator tune it, matching
+ * the scan timeout above. */
+int kb_client_index_read_timeout_ms(void)
+{
+   const char *env = getenv("AIMEE_KB_READ_TIMEOUT_MS");
+   if (env && env[0])
+   {
+      long v = strtol(env, NULL, 10);
+      if (v > 0 && v <= 24L * 60 * 60 * 1000)
+         return (int)v;
+   }
+   return (60 * 1000);
+}
+
 int kb_client_index_scan_timeout_ms(void)
 {
    const char *env = getenv("AIMEE_KB_SCAN_TIMEOUT_MS");
