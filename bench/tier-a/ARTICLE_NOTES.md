@@ -1223,3 +1223,36 @@ publish it -- that could not be known in advance, and this project withdrew a
 5.3x MTP headline built on exactly that shortcut a day earlier. The rule is not
 "partials are wrong", it is "you cannot tell which partials are wrong until
 afterwards".
+
+### Correction to finding 29: "largest" is the wrong frame twice over
+
+Stated in conversation and wrong: that 8B-A1B was "the largest model tested".
+
+**It is not the largest this project has run.** Larger models were measured, all
+at 70 notes on `data/gold.jsonl`:
+
+| model | size |
+|---|---:|
+| Qwen3.6-35B-A3B | 35B |
+| gemma-4-31B-it | 31B |
+| Qwen3.6-27B | 27B |
+| gemma-4-26B-A4B-it | 26B |
+| gemma-4-12B-it | 12B |
+| **LFM2.5-8B-A1B** | **8B, n=1001** |
+
+What is true and worth saying instead: it is the largest model this project has
+run **at a usable sample size**. Everything above it was measured on 70 notes,
+where the 95% interval is near +/- 0.12 -- wide enough that the entire field
+below fits inside it.
+
+**And "largest" muddles the actual finding.** A1B means ~1B ACTIVE parameters of
+8B total. The result is precisely that parameter count did not predict latency:
+252.5 tok/s per stream against the dense 2.6B's 107. Calling it "the largest
+model" and then reporting it as fast makes the observation sound like a paradox
+when it is a straightforward consequence of sparsity. The sentence to write is
+about active parameters, not total ones.
+
+Note also that two of the larger models above -- Qwen3.6-35B-A3B and
+gemma-4-26B-A4B -- are themselves MoE with 3B and 4B active. The 70-note tier
+never compared them on this axis, so whether the sparsity effect scales is
+unmeasured here.
