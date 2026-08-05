@@ -299,6 +299,15 @@ func TestFreezeRejectsDivergentSiblingCreateCreateCollision(t *testing.T) {
 	if _, err := artifacts.NodeArtifact("wi_s1", "freeze"); err == nil {
 		t.Fatal("rejected freeze published an artifact")
 	}
+	events, err := store.Events(ctx, "wi_s1", 0, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.Kind == "loop" || event.Kind == "pause" {
+			t.Fatalf("rejected freeze queued retry/merge work: %+v", event)
+		}
+	}
 }
 
 // This is the appliance-runbook failure mode reduced to two synchronized
@@ -472,6 +481,9 @@ nodes:
 	if loser.Stage != "freeze" || loser.State != "rejected" || loser.PRRef != "" {
 		t.Fatalf("loser crossed the freeze boundary: %+v", loser)
 	}
+	if _, err := artifacts.NodeArtifact(rejected, "pr.open"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("rejected slice opened a PR/CONFLICTING PR: %v", err)
+	}
 	if _, err := artifacts.NodeArtifact(rejected, "freeze"); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("rejected slice published freeze artifact: %v", err)
 	}
@@ -481,6 +493,11 @@ nodes:
 	}
 	if len(events) == 0 {
 		t.Fatal("rejected slice has no terminal audit event")
+	}
+	for _, event := range events {
+		if event.Kind == "loop" || event.Kind == "pause" {
+			t.Fatalf("rejected freeze queued retry/merge work: %+v", event)
+		}
 	}
 	detail := events[len(events)-1].Detail
 	for _, want := range []string{freezeCreateCreateCollision, "docs/runbooks/appliance-state-recovery.md", advanced, rejected} {
