@@ -1376,11 +1376,103 @@ number are now known to be non-equivalent. At -0.0079 the effect is well inside
 the interval n=1001 supports, so no ranking conclusion in this campaign changes,
 but the tables carry the caveat and it should be stated where they appear.
 
+### The resolution: E4B does not lose to its own submodel
+
+E4B QAT at 3002 landed at strict F1 0.6374 against E2B's 0.6416. Both arms on the
+same 3002 notes, same card, same quant, nproc=1, no MTP:
+
+| | E2B | E4B |
+|---|---:|---:|
+| strict F1 | 0.6416 | 0.6374 |
+| tp / fp / fn | 1734 / 1029 / 908 | 1800 / **1206** / 842 |
+| parse_ok = schema_ok | 2962/3002 | **3002/3002** |
+| empty raw | 1 | 0 |
+| rows at context limit | 1 | 0 |
+| median completion tokens | 512 | 391 |
+| abstention | 875 | 865 |
+| reasoned | 3002/3002 | **2523/3002** |
+| tool-call envelope | 0 | 0 |
+
+> E4B - E2B = **-0.0042, 95% CI [-0.0173, +0.0088]** -- INDISTINGUISHABLE,
+> 20000 replicates
+
+**The n=1001 anomaly was noise.** The -0.0213 that looked like a model losing to
+its own nested submodel shrank to -0.0042 once the interval tightened, and the
+new interval excludes the old point estimate. Nothing needs explaining, because
+there is no longer anything anomalous to explain. This is what defect 39 predicts
+happens to a marginal result when it is finally given enough notes.
+
+### Correcting for the floor, three ways, all of which change nothing
+
+E2B's 0.6416 is a **floor**: 40 rows failed to parse and contributed nothing.
+E4B's 0.6374 is **capability**: 3002/3002 parsed. Reporting the two side by side
+without correcting is comparing a suppressed number to an unsuppressed one.
+
+**1. Restrict both arms to the 2962 rows E2B parsed.** Paired, 20000 replicates:
+
+| | F1 | P | R | tp/fp/fn |
+|---|---:|---:|---:|---|
+| E2B | 0.6434 | 0.6276 | 0.6601 | 1734/1029/893 |
+| E4B | 0.6406 | 0.6038 | 0.6821 | 1792/1176/835 |
+
+> E4B - E2B = **-0.0028, 95% CI [-0.0158, +0.0103]** -- INDISTINGUISHABLE
+
+This conditions on one arm's failures, which is a selection effect and not
+neutral in principle. Correction 2 is what bounds how much that matters.
+
+**2. Bound the best case instead of dropping rows.** The 40 failed rows contain
+**15 gold facts in total**, and 26 of the 40 have empty gold, so abstaining is
+the correct answer on most of them. Perfect handling of all 40 gives tp 1734 ->
+1749, fn 908 -> 893, fp unchanged, F1 **0.6454**. The entire correction is worth
+at most **+0.0038** against an interval of +/-0.013.
+
+**3. Repair the JSON.** All 40 are structurally malformed rather than wrong -- a
+missing closing brace, an extra `}}` -- at a median 535 completion tokens, no
+truncation flag, one row near the context limit. A lenient parser would recover
+them. Not done: it means changing the instrument mid-campaign, and correction 2
+already bounds the gain below the noise.
+
+Corrections 1 and 2 move the delta in **opposite** directions -- -0.0028 and
+-0.0080 against the uncorrected -0.0042 -- because one adds facts to E2B while
+the other removes rows from both. Both sit inside the interval. The conclusion is
+identical under all three: **E2B and E4B are the same model under QAT at this
+tier.**
+
+The general rule this arm earns: *state whether each F1 is a floor or a
+capability, then bound the correction before arguing about it.* Here the bound is
+a tenth of the noise, so the floor is a caveat rather than a confound. On the
+arms in finding 27 it was the entire result.
+
+### What the null is averaging over
+
+The F1 agreement hides a real difference. E4B finds **66 more true positives and
+177 more false positives** -- higher recall, materially worse precision. It
+extracts more and is more often wrong. Under correction 1 the same shape holds
+(recall 0.6821 vs 0.6601, precision 0.6038 vs 0.6276). Every slice of this arm
+shows two models that differ in *where* their errors fall and not at all in how
+many. A ranking table reports these as tied, and for choosing a model that may
+even be right -- but they are not the same instrument, and a pipeline that cares
+about precision should not read the tie as indifference.
+
+### The reasoning starvation persists, and does not explain the gap
+
+E4B skipped reasoning on 479 of 3002 rows; 204 of those answered `{"facts":[]}`
+in five tokens. Those rows abstain at 51% against 24.5% on rows where it did
+reason. So the partial-reasoning behaviour seen at n=1001 is not a small-sample
+artefact -- it reproduces at the mid tier.
+
+It is **not** the cause of the E4B deficit. Restricted to the 2523 rows where E4B
+reasoned, E4B scores 0.6238 against E2B's 0.6420 -- a *wider* gap than on the
+full corpus. E4B is worse precisely where it reasons. The obvious hypothesis is
+refuted by its own test, which is the second time in this campaign that the
+natural explanation for a churn pattern failed to survive being checked (the
+first was the predecessor hypothesis in defect 40).
+
 ### Still open
 
-E4B QAT at 3002 is running. Its pairing against this arm is the clean
-within-corpus comparison, both arms on the same 3002 notes, and it is the direct
-answer to whether E4B really loses to its own submodel under QAT.
+Why E4B declines to reason on a stable ~16% of rows is unexplained. The rows are
+not distinguished by context length, truncation, or the tool-call envelope. That
+is a real open question, not a caveat.
 
 ### Where this goes
 
