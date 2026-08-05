@@ -15,14 +15,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/internal/api"
 	appconfig "github.com/JBailes/aimee/server-go/internal/config"
 	"github.com/JBailes/aimee/server-go/internal/db1"
 	"github.com/JBailes/aimee/server-go/internal/engine"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
-	roundtablecfg "github.com/JBailes/aimee/server-go/modules/roundtable/panel"
-	"github.com/JBailes/aimee/server-go/modules/workflows"
+	roundtablemod "github.com/JBailes/aimee/server-go/modules/roundtable"
 )
 
 func main() {
@@ -46,6 +44,8 @@ func main() {
 	agentSocket := flag.String("agent-service-socket", os.Getenv("AIMEE_AGENT_SERVICE_SOCKET"),
 		"agent resource-plane Unix socket used by the native Go WFE runner")
 	workflowDir := flag.String("workflow-dir", "", "workflow definition directory")
+	moduleBusSocket := flag.String("module-bus-socket", os.Getenv("AIMEE_MODULE_BUS_SOCKET"),
+		"daemon module bus socket; reviews are requested over it")
 	configPath := flag.String("config", "", "aimee.yaml path")
 	concurrency := flag.Int("workflow-concurrency", envInt("AIMEE_AUTONOMY_CONCURRENCY", 5),
 		"maximum concurrent work items across the whole WFE (total agent budget)")
@@ -130,14 +130,31 @@ func main() {
 		if runnerErr != nil {
 			log.Fatal(runnerErr)
 		}
-		// No configured-default source: a roundtable review names its roundtable
-		// in the workflow, which validation requires. roundtable.default no longer
-		// selects a panel for the Go control plane.
-		roundtables, roundtableErr := roundtablecfg.NewStore(filepath.Join(*home, "roundtables"))
-		if roundtableErr != nil {
-			log.Fatal(roundtableErr)
+		// Reviews run in the roundtable module over the daemon's bus. This process
+		// attaches as a requesting principal under its generated grant; it does
+		// not host a panel, so there is one implementation and one place that
+		// spends money convening seats.
+		//
+		// A gate whose reviewer never attached parks with that reason rather than
+		// failing the run, so a bus that is not up yet delays reviews instead of
+		// losing work.
+		if *moduleBusSocket != "" {
+			reviewer, reviewerErr := engine.NewBusReviewer(rootCtx, *moduleBusSocket,
+				engine.BusPrincipalClass, engine.WFEBusPrincipalRef, 0)
+			if reviewerErr != nil {
+				log.Printf("roundtable reviews unavailable: %v", reviewerErr)
+			} else {
+				// Say so on success too. A control plane that attached and one that
+				// silently did not look identical from outside until a gate hangs
+				// waiting for a reply that was never routed.
+				log.Printf("roundtable reviews over the event bus (socket=%s principal=%d/%d kind=%d)",
+					*moduleBusSocket, engine.BusPrincipalClass, engine.WFEBusPrincipalRef,
+					roundtablemod.EventReview)
+				nativeRunner.SetRoundtableReviewer(reviewer)
+			}
+		} else {
+			log.Printf("roundtable reviews unavailable: no module bus socket configured")
 		}
-		nativeRunner.SetRoundtableStore(roundtables)
 		runner = nativeRunner
 	}
 	if runner != nil {
@@ -197,7 +214,6 @@ func main() {
 		handler.SetSchedulerCancel(scheduler.Cancel)
 		if worktreeManager != nil {
 			handler.SetWorktreeCleanup(worktreeManager.Cleanup)
-			scheduler.SetTerminalCleanup(worktreeManager.Cleanup)
 		}
 		go scheduler.Run(rootCtx)
 		// Trigger definitions are live UI/config state. Re-read them every scan so
@@ -232,36 +248,6 @@ func main() {
 		log.Fatal(err)
 	}
 	defer listener.Close()
-
-	// Serve the workflow control stage over the event bus.
-	//
-	// This is the same mux the private AF_UNIX socket above serves; what changes
-	// is that the C resource plane no longer needs a second transport to reach
-	// it. The engine and its stores stay here -- only the way in moves -- so this
-	// deletes src/server/wfe_http_proxy.c without relocating any state.
-	//
-	// A missing bus socket is not fatal: this process still serves its own
-	// listener, and reporting the stage as unserved is more honest than exiting.
-	if busSocket := os.Getenv("AIMEE_MODULE_BUS_SOCKET"); busSocket != "" {
-		go func() {
-			err := bus.RunModuleProcess(rootCtx, bus.ModuleProcessConfig{
-				SocketPath:     busSocket,
-				ModuleName:     "workflows",
-				PrincipalClass: 1,
-				PrincipalRef:   20,
-				Stages: []bus.ModuleStage{
-					{EventKind: workflows.EventAdvance, StageID: workflows.StageAdvance},
-					{EventKind: workflows.EventControl, StageID: workflows.StageControl},
-				},
-				Handler: workflows.NewHandler(handler),
-			})
-			if err != nil && rootCtx.Err() == nil {
-				log.Printf("workflow control stage stopped: %v", err)
-			}
-		}()
-	} else {
-		log.Print("AIMEE_MODULE_BUS_SOCKET is unset; the workflow control stage is not served")
-	}
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)

@@ -1211,9 +1211,6 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 		return StepResult{Status: StepPending, PauseReason: "panel_unreachable",
 			Detail: "no roundtable reviewer configured; reviews run in the roundtable module over the event bus"}, nil
 	}
-	if err := ensureRoundtableDeadlineFits(ctx, convened); err != nil {
-		return StepResult{}, err
-	}
 	reviewed, ok := req.Inputs["src"]
 	if !ok {
 		return StepResult{}, errors.New("roundtable missing src input")
