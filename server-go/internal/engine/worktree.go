@@ -198,11 +198,36 @@ func (m *WorktreeManager) Cleanup(ctx context.Context, item db1.WorkItem) error 
 	} else if statErr != nil {
 		return fmt.Errorf("stat managed worktree: %w", statErr)
 	}
+	// A web workspace can be removed before the workflow scheduler reaches its
+	// terminal cleanup pass. Linked worktrees keep their administrative data in
+	// that source checkout, so git cannot unregister the worktree once the
+	// checkout has gone. The terminal lifecycle still owns this scope-validated
+	// path and would have asked git to remove it with --force; finish the same
+	// physical cleanup directly instead of retrying forever with `git -C` against
+	// a directory that no longer exists.
+	if _, repoErr := os.Stat(item.Repo); errors.Is(repoErr, os.ErrNotExist) {
+		if removeErr := os.RemoveAll(abs); removeErr != nil {
+			return fmt.Errorf("remove managed worktree after repository removal: %w", removeErr)
+		}
+		return nil
+	} else if repoErr != nil {
+		return fmt.Errorf("stat workflow repository for cleanup: %w", repoErr)
+	}
 	// Ensure creates every managed tree with --lock so external GC cannot race a
 	// live workflow. Explicit lifecycle deletion owns this path, so unlock it
 	// before the validated removal; a missing lock is harmless.
 	_, _ = gitText(ctx, item.Repo, "worktree", "unlock", abs)
 	_, err = gitText(ctx, item.Repo, "worktree", "remove", "--force", abs)
+	// Close the check/use race above: deleting a workspace between os.Stat and
+	// git invocation must have the same terminal-cleanup behavior.
+	if err != nil {
+		if _, repoErr := os.Stat(item.Repo); errors.Is(repoErr, os.ErrNotExist) {
+			if removeErr := os.RemoveAll(abs); removeErr != nil {
+				return fmt.Errorf("remove managed worktree after repository removal: %w", removeErr)
+			}
+			return nil
+		}
+	}
 	return err
 }
 

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -82,6 +83,51 @@ func TestCleanupIsIdempotentAfterManagedPathWasRemoved(t *testing.T) {
 	item.Worktree = filepath.Join(root, "outside-managed-root")
 	if err := manager.Cleanup(t.Context(), item); err == nil {
 		t.Fatal("missing path outside the managed root bypassed scope validation")
+	}
+}
+
+func TestCleanupRemovesManagedWorktreeAfterRepositoryWasRemoved(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	trees := filepath.Join(root, "trees")
+	worktree := filepath.Join(trees, "wi_orphaned")
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=t@example",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=t@example")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	run("init", "-b", "testing", repo)
+	if err := os.WriteFile(filepath.Join(repo, "README"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run("-C", repo, "add", "README")
+	run("-C", repo, "commit", "-m", "init")
+	if err := os.MkdirAll(trees, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	run("-C", repo, "worktree", "add", "--lock", "-b", "aimee/wi/wi_orphaned", worktree)
+	if err := os.RemoveAll(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	manager, err := NewWorktreeManager(store, trees)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := db1.WorkItem{ID: "wi_orphaned", Repo: repo, Worktree: worktree}
+	if err := manager.Cleanup(t.Context(), item); err != nil {
+		t.Fatalf("cleanup after repository removal: %v", err)
+	}
+	if _, err := os.Stat(worktree); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("managed worktree still exists after cleanup: %v", err)
 	}
 }
 
