@@ -173,7 +173,26 @@ PORT = int(os.environ.get("EMBEDDER_PORT", "8080"))
 # threads — on a 32-core host pplx-embed-0.6b is 269ms at 32 threads but 189ms at
 # 8 (per-call thread overhead dominates the tiny workload). Cap to a sane default;
 # an explicit EMBEDDER_THREADS wins. Set OMP before torch is imported.
-EMBEDDER_THREADS = int(os.environ.get("EMBEDDER_THREADS", "0")) or min(8, os.cpu_count() or 8)
+def _usable_cpus():
+    """CPUs this process may actually run on.
+
+    os.cpu_count() reports the HOST's CPUs and ignores the cgroup/affinity mask a
+    container is confined to. On the bench container it answers 8 while the
+    process is pinned to 4, so torch was told to run 8 intra-op threads on 4
+    usable cores -- and with several ingest workers issuing concurrent batches
+    that is dozens of threads contending for a handful of cores. Measured cost of
+    that thrash on bekko-a25m (a 25M-parameter model): 1727 ms for a single
+    ~512-token text, against tens of ms when the thread count matches reality.
+
+    sched_getaffinity is what nproc uses and what the scheduler honours.
+    """
+    try:
+        return len(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        return os.cpu_count() or 1
+
+
+EMBEDDER_THREADS = int(os.environ.get("EMBEDDER_THREADS", "0")) or min(8, _usable_cpus())
 os.environ.setdefault("OMP_NUM_THREADS", str(EMBEDDER_THREADS))
 # Optional int8 dynamic quantization. Pure torch (no optimum/onnx) rather than the
 # q4 ONNX path.
