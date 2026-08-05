@@ -101,6 +101,15 @@ static inline int agent_loop_per_call_timeout_ms(int agent_timeout_ms, int total
    return agent_timeout_ms < remaining ? agent_timeout_ms : remaining;
 }
 
+/* Would this delegate be refused before its first call? A workflow stage cap may
+ * be smaller than one viable call, in which case the loop stops immediately and
+ * blames a budget it never got to spend. Callers preflight with this so the
+ * refusal is stated honestly (and costs no model call). Pure -- unit-tested. */
+static inline int agent_loop_window_too_small(int agent_timeout_ms, int total_timeout_ms)
+{
+   return agent_loop_per_call_timeout_ms(agent_timeout_ms, total_timeout_ms, 0) < 0;
+}
+
 /* Whole tool-loop budget for one delegate. The configured per-call timeout keeps
  * its existing four-call ceiling, while a positive request cap may only reduce
  * that budget. Workflow callers use the cap to leave time for post-delegate
@@ -418,11 +427,6 @@ typedef struct
    /* Transient per-request routing contract: an explicit agent/provider pin
     * must surface that agent's result and may never substitute a peer. */
    int route_pinned;
-   /* One absolute per-request budget shared by the primary route, credential
-    * retries, configured fallbacks, and same-tier fallbacks. Runtime-only: the
-    * deadline is CLOCK_MONOTONIC milliseconds and is never serialized. */
-   int tool_loop_timeout_ms_cap;
-   int64_t tool_loop_deadline_ms;
    agent_network_t network;
    agent_tunnel_mgr_t tunnel_mgr;
    agent_ablation_flags_t ablation;
