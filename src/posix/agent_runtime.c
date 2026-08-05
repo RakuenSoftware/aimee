@@ -731,8 +731,9 @@ native_provider_http:
       /* A final-only turn cannot satisfy an evidence gate. Keep read-only tools
        * available until one actually succeeds; provider tool_choice is a request,
        * not an enforcement boundary, and some compatible endpoints ignore it. */
-      if (agent_required_evidence_keep_tools(agent->require_initial_tool_call,
-                                             successful_tool_calls))
+      if (agent_evidence_gate_defers_final_turn(agent->require_initial_tool_call,
+                                                successful_tool_calls,
+                                                final_mode == LIVENESS_FINAL_RESPONSE_HARD))
       {
          final_instruction_turn = 0;
          final_text_only_turn = 0;
