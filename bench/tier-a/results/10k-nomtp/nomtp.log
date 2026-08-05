@@ -15,3 +15,5 @@
 [05:09:37Z] --- E4B.UD-Q4_K_XL.10k  unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL  nproc=3  NO MTP
 [10:42:13Z] OK   E4B.UD-Q4_K_XL.10k noMTP=0.6306  MTP=0.6301  wall=332m
 [10:42:13Z] --- E4B.UD-Q6_K_XL.10k  unsloth/gemma-4-E4B-it-GGUF:UD-Q6_K_XL  nproc=3  NO MTP
+[16:38:13Z] OK   E4B.UD-Q6_K_XL.10k noMTP=0.6435  MTP=0.6452  wall=355m
+[16:38:13Z] --- E4B.UD-Q8_K_XL.10k  unsloth/gemma-4-E4B-it-GGUF:UD-Q8_K_XL  nproc=3  NO MTP

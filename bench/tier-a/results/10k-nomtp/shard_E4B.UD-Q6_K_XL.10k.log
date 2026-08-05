@@ -3,3 +3,4 @@
 [10:42:50Z]   -> running 3 processes, cache-ram 1024 MiB each
 [10:43:23Z]   all 3 servers up; VRAM now  MiB
 [10:43:23Z] START E4B.UD-Q6_K_XL.10k across 3 shards
+[16:38:06Z] DONE E4B.UD-Q6_K_XL.10k rows=10000/10000 wall=354m42s procs=3 retries=0
