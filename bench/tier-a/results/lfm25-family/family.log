@@ -10,3 +10,12 @@
 [01:47:34Z]   thinking guard fired; re-scoring with --allow-thinking-off
 [01:47:34Z] OK   LFM2.5-230M.Q8_0 strictF1=0.1309 wall=2m
 [01:47:34Z] --- LFM2.5-1.2B-Instruct.Q4_K_M  LiquidAI/LFM2.5-1.2B-Instruct-GGUF:Q4_K_M  nproc=3  no MTP
+[01:53:06Z]   thinking guard fired; re-scoring with --allow-thinking-off
+[01:53:06Z] OK   LFM2.5-1.2B-Instruct.Q4_K_M strictF1=0.1911 wall=5m
+[01:53:06Z] --- LFM2.5-1.2B-Instruct.Q6_K  LiquidAI/LFM2.5-1.2B-Instruct-GGUF:Q6_K  nproc=3  no MTP
+[01:57:46Z]   thinking guard fired; re-scoring with --allow-thinking-off
+[01:57:47Z] OK   LFM2.5-1.2B-Instruct.Q6_K strictF1=0.1771 wall=4m
+[01:57:47Z] --- LFM2.5-1.2B-Instruct.Q8_0  LiquidAI/LFM2.5-1.2B-Instruct-GGUF:Q8_0  nproc=3  no MTP
+[02:03:55Z]   thinking guard fired; re-scoring with --allow-thinking-off
+[02:03:55Z] OK   LFM2.5-1.2B-Instruct.Q8_0 strictF1=0.1671 wall=6m
+[02:03:55Z] --- LFM2.5-VL-1.6B.Q4_K_M  LiquidAI/LFM2.5-VL-1.6B-GGUF:Q4_K_M  nproc=3  no MTP
