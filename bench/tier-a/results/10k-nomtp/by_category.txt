@@ -1,0 +1,61 @@
+MTP minus no-MTP, strict F1, split by note category
+gold_large, 10000 notes, 3 processes, XTX
+
+=== E2B.UD-Q4_K_XL.10k   aggregate MTP 0.6246  no-MTP 0.6207  delta +0.0039  n=10000
+    category              n      MTP    noMTP    delta
+    novel_pred          321   0.2783   0.2987  -0.0204
+    implicit            723   0.3145   0.2989  +0.0156
+    infra               772   0.9738   0.9631  +0.0107
+    governance          856   0.7084   0.6986  +0.0098
+    first_person        795   0.7530   0.7448  +0.0082
+    third_person       1580   0.6379   0.6363  +0.0016
+    multi_fact         1738   0.6374   0.6368  +0.0006
+    ambiguous           506   0.0000   0.0000  +0.0000
+    negation           1318   0.0000   0.0000  +0.0000
+    transient          1391   0.0000   0.0000  +0.0000
+    sign: 6 categories positive, 4 negative, spread 0.0360
+
+=== E2B.UD-Q6_K_XL.10k   aggregate MTP 0.6344  no-MTP 0.6331  delta +0.0013  n=10000
+    category              n      MTP    noMTP    delta
+    infra               772   0.9713   0.9649  +0.0064
+    governance          856   0.7322   0.7259  +0.0063
+    novel_pred          321   0.4108   0.4058  +0.0050
+    first_person        795   0.7938   0.7974  -0.0036
+    third_person       1580   0.6512   0.6479  +0.0033
+    multi_fact         1738   0.6439   0.6452  -0.0013
+    implicit            723   0.2665   0.2673  -0.0008
+    ambiguous           506   0.0000   0.0000  +0.0000
+    negation           1318   0.0000   0.0000  +0.0000
+    transient          1391   0.0000   0.0000  +0.0000
+    sign: 4 categories positive, 6 negative, spread 0.0100
+
+=== E2B.UD-Q8_K_XL.10k   aggregate MTP 0.6329  no-MTP 0.6351  delta -0.0022  n=10000
+    category              n      MTP    noMTP    delta
+    implicit            723   0.2807   0.2587  +0.0220
+    multi_fact         1738   0.6406   0.6508  -0.0102
+    infra               772   0.9674   0.9771  -0.0097
+    novel_pred          321   0.3814   0.3754  +0.0060
+    first_person        795   0.8010   0.7960  +0.0050
+    third_person       1580   0.6499   0.6482  +0.0017
+    governance          856   0.7265   0.7270  -0.0005
+    ambiguous           506   0.0000   0.0000  +0.0000
+    negation           1318   0.0000   0.0000  +0.0000
+    transient          1391   0.0000   0.0000  +0.0000
+    sign: 4 categories positive, 6 negative, spread 0.0322
+
+=== E4B.UD-Q4_K_XL.10k   aggregate MTP 0.6301  no-MTP 0.6306  delta -0.0005  n=10000
+    category              n      MTP    noMTP    delta
+    novel_pred          321   0.6487   0.6325  +0.0162
+    governance          856   0.8041   0.8002  +0.0039
+    first_person        795   0.6252   0.6277  -0.0025
+    multi_fact         1738   0.6300   0.6314  -0.0014
+    third_person       1580   0.6493   0.6479  +0.0014
+    implicit            723   0.4482   0.4492  -0.0010
+    infra               772   0.9903   0.9913  -0.0010
+    ambiguous           506   0.0000   0.0000  +0.0000
+    negation           1318   0.0000   0.0000  +0.0000
+    transient          1391   0.0000   0.0000  +0.0000
+    sign: 3 categories positive, 7 negative, spread 0.0187
+
+E4B.UD-Q6_K_XL.10k     -- no-MTP side not banked yet, skipped
+E4B.UD-Q8_K_XL.10k     -- no-MTP side not banked yet, skipped

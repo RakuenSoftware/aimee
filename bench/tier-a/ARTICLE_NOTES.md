@@ -1480,3 +1480,101 @@ No article currently carries QAT. Findings 26, 30 and 31 -- the LFM2.5 quant
 ladder, QAT vs UD, and this -- are one article's worth of material on the theme
 that which quant matters more than how many bits, and that the measuring
 instrument is less sensitive than the thing being measured.
+
+## 32. A third of the corpus cannot raise any score, and it is where the models differ most
+
+Article 6's open item 3 asked whether the MTP null is an average of two opposite
+effects. Splitting the six paired 10k arms by note category answers that -- and
+turns up something much larger on the way.
+
+### The answer to the MTP question: no, the null is real
+
+| pair | aggregate delta | category spread | sign split |
+|---|---:|---:|---|
+| E2B Q4 | +0.0039 | 0.0360 | 6 pos / 4 neg |
+| E2B Q6 | +0.0013 | 0.0100 | 4 pos / 6 neg |
+| E2B Q8 | -0.0022 | 0.0322 | 4 pos / 6 neg |
+| E4B Q4 | -0.0005 | 0.0187 | 3 pos / 7 neg |
+
+No category comes close to the +0.24 that the reasoning-on/off null was hiding.
+The largest single movement is implicit on E2B Q8 at +0.0220, which is inside the
++/-0.024 that n=723 supports and so is not a finding. The MTP null is a null all
+the way down, not a cancellation. **Article 6 open item 3 is closed.**
+
+### What the split actually exposed
+
+Three categories score **exactly 0.0000 strict F1 in every arm ever run**:
+
+| category | n | empty gold |
+|---|---:|---:|
+| negation | 1318 | 100% |
+| transient | 1391 | 100% |
+| ambiguous | 506 | 100% |
+| **total** | **3215** | **32.1% of gold_large** |
+
+They are abstention tests. The correct answer is no facts, so gold is empty by
+construction, so tp is structurally zero, so strict F1 is
+`2*0/(0+fp+0) = 0` -- **whether the model abstained perfectly or hallucinated on
+every row.** Within a category slice the two are indistinguishable.
+
+In the aggregate these rows are not entirely invisible: their false positives
+inflate global fp and pull F1 down. But they can never push it up. **A third of
+this corpus can only cost a model points, and correct restraint on it is worth
+exactly nothing.** Every headline F1 in this project is effectively computed over
+the other 68%, with the abstention third acting only as a penalty term.
+
+### The measurement those rows do support, and what it shows
+
+The right metric is: how often does the model invent a fact when the answer is
+silence? Lower is better and zero is achievable. `harness/abstention_quality.py`.
+gold_large, 3215 empty-gold rows, XTX, nproc=3, MTP:
+
+| arm | invented on | spurious facts |
+|---|---:|---:|
+| E2B Q4 | 1022 (31.8%) | 1052 |
+| E2B Q6 | 1077 (33.5%) | 1123 |
+| E2B Q8 | 1093 (34.0%) | 1138 |
+| E4B Q4 | **1450 (45.1%)** | 1503 |
+| E4B Q6 | **1407 (43.8%)** | 1432 |
+| E4B Q8 | **1418 (44.1%)** | 1459 |
+
+**E4B invents facts on ~44% of abstention rows; E2B on ~33%.** An eleven-point
+gap, stable across all three quants, same card, same process count, same tier,
+same corpus -- there is no confound between these six arms. And the F1 spread
+across all six is under 0.015. *F1 ranks these two models as near-equals while
+one fabricates a third more often on the third of the corpus built to test
+restraint.*
+
+That also explains the fp asymmetry finding 31 could see but not account for: at
+the mid tier E4B carried +177 false positives over E2B at identical F1. This is
+where they come from.
+
+### The MTP null survives on this metric too
+
+MTP against no-MTP on the same rows moves the invention rate by 3 to 23 rows out
+of 3215 (E2B Q4 31.8/31.9, Q6 33.5/34.0, Q8 34.0/34.5, E4B Q4 45.1/44.4). So
+speculative decoding does not trade restraint for speed either. That is a
+stronger statement than the F1 null, because it is measured on the rows F1
+cannot see.
+
+### One contrast that is NOT clean, and is flagged rather than explained
+
+Under QAT at nproc=1 on the 5080, the gap disappears: E2B 277/965 (28.7%), E4B
+282/965 (29.2%) on gold_mid. Four things differ from the arms above at once --
+quant scheme, process count, card, tier -- so this comparison carries no weight
+in either direction. It is recorded because it is the one place the E4B
+abstention deficit does not appear, and finding out which of those four variables
+is responsible is a real open question.
+
+### For the articles
+
+This is the sharpest instance of the campaign's recurring shape. Six pathologies
+so far have been invisible to F1; this one is invisible **by construction** --
+not a bug in the scorer, but a property of what F1 is. A benchmark whose corpus
+is one third abstention tests is a benchmark reporting a number that ignores a
+third of its own design, and no amount of care with intervals fixes that, because
+the interval is on the wrong quantity.
+
+**Report abstention rate beside F1, always.** It is one line of code and it is
+the difference between "these two models are equivalent" and "one of them makes
+things up 33% more often".
