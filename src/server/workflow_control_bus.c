@@ -143,8 +143,7 @@ int workflow_control_request(const char *method, const char *path, const char *q
    cJSON *parsed = cJSON_ParseWithLength(response, response_len);
    free(response);
    if (!parsed)
-      return control_error(resp, resp_cap, 502,
-                           "workflow control returned an unparseable result");
+      return control_error(resp, resp_cap, 502, "workflow control returned an unparseable result");
    const cJSON *status = cJSON_GetObjectItemCaseSensitive(parsed, "status");
    const cJSON *reply = cJSON_GetObjectItemCaseSensitive(parsed, "body");
    if (!cJSON_IsNumber(status) || !cJSON_IsString(reply))
@@ -156,8 +155,7 @@ int workflow_control_request(const char *method, const char *path, const char *q
    if (reply_len >= (size_t)resp_cap)
    {
       cJSON_Delete(parsed);
-      return control_error(resp, resp_cap, 502,
-                           "workflow response exceeds the public API limit");
+      return control_error(resp, resp_cap, 502, "workflow response exceeds the public API limit");
    }
    memcpy(resp, reply->valuestring, reply_len + 1);
    int http_status = status->valueint;

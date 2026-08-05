@@ -95,8 +95,8 @@ static void test_unknown_key_misses(void)
 {
    int job_id = -1;
    char participant[128] = "seeded";
-   assert(db1_delegate_reservation_get("never-saved", &job_id, participant,
-                                       sizeof(participant)) == -1);
+   assert(db1_delegate_reservation_get("never-saved", &job_id, participant, sizeof(participant)) ==
+          -1);
    assert(job_id == 0);
    /* A miss must not leave a stale participant readable from a prior call. */
    assert(participant[0] == '\0');

@@ -83,8 +83,8 @@ static void test_calls_overlap(void)
     * call the whole time, so wall-clock spans overlap just as much when every
     * call is serialized -- more, in fact, because everyone is queued. */
    int occupancy = obs_bus_module_peak_concurrency();
-   printf("  %d calls across %d callers, peak client occupancy=%d\n",
-          CALLERS * CALLS_PER_CALLER, CALLERS, occupancy);
+   printf("  %d calls across %d callers, peak client occupancy=%d\n", CALLERS * CALLS_PER_CALLER,
+          CALLERS, occupancy);
    assert(occupancy > 1);
 }
 

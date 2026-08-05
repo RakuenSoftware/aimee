@@ -492,8 +492,8 @@ int db1_agent_job_cancel_unassigned(int job_id, const char *reason, int min_age_
       return -1;
    char cutoff[64];
    snprintf(cutoff, sizeof(cutoff), "-%d seconds", min_age_secs);
-   sqlite3_bind_text(stmt, 1, reason && reason[0] ? reason : "unassigned delegate lease expired", -1,
-                     SQLITE_TRANSIENT);
+   sqlite3_bind_text(stmt, 1, reason && reason[0] ? reason : "unassigned delegate lease expired",
+                     -1, SQLITE_TRANSIENT);
    sqlite3_bind_int(stmt, 2, job_id);
    sqlite3_bind_text(stmt, 3, cutoff, -1, SQLITE_TRANSIENT);
    int rc = sqlite3_step(stmt);

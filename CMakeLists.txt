@@ -967,7 +967,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/presence.c
     ${AIMEE_SRC_DIR}/server/turn_registry.c
     ${AIMEE_SRC_DIR}/server/wfe_live_delegate.c
-    ${AIMEE_SRC_DIR}/server/wfe_http_proxy.c
+    ${AIMEE_SRC_DIR}/server/workflow_control_bus.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_scheduler.c
     ${AIMEE_SRC_DIR}/modules/vault/vault_principal.c
     ${AIMEE_SRC_DIR}/modules/vault/vault_crypto.c

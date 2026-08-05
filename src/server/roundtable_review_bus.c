@@ -110,8 +110,8 @@ int handle_roundtable_review(server_ctx_t *ctx, server_conn_t *conn, cJSON *requ
 {
    (void)ctx;
    if (!obs_bus_module_available(AIMEE_ROUNDTABLE_EVENT_REVIEW))
-      return server_send_error(
-          conn, "roundtable review module is not attached to the event bus", NULL);
+      return server_send_error(conn, "roundtable review module is not attached to the event bus",
+                               NULL);
 
    const cJSON *preset = cJSON_GetObjectItemCaseSensitive(request, "roundtable");
    char resolved[ROUNDTABLE_REVIEW_PANEL_NAME_MAX] = "";
@@ -136,10 +136,10 @@ int handle_roundtable_review(server_ctx_t *ctx, server_conn_t *conn, cJSON *requ
       return server_send_error(conn, "out of memory", NULL);
    }
    uint32_t response_len = 0;
-   aimee_module_call_result_t result = obs_bus_module_call(
-       AIMEE_ROUNDTABLE_EVENT_REVIEW, AIMEE_ROUNDTABLE_STAGE_REVIEW, 0,
-       monotonic_deadline_ns(timeout_ms), wire, (uint32_t)wire_len, response,
-       ROUNDTABLE_REVIEW_MAX_BODY, &response_len, NULL, NULL);
+   aimee_module_call_result_t result =
+       obs_bus_module_call(AIMEE_ROUNDTABLE_EVENT_REVIEW, AIMEE_ROUNDTABLE_STAGE_REVIEW, 0,
+                           monotonic_deadline_ns(timeout_ms), wire, (uint32_t)wire_len, response,
+                           ROUNDTABLE_REVIEW_MAX_BODY, &response_len, NULL, NULL);
    free(wire);
 
    if (result != AIMEE_MODULE_CALL_OK)

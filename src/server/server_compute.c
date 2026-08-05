@@ -2141,9 +2141,8 @@ int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (execution_key[0])
    {
       cJSON *witem = cJSON_GetObjectItemCaseSensitive(req, "work_item_id");
-      db1_delegate_reservation_save(execution_key,
-                                    cJSON_IsString(witem) ? witem->valuestring : "", job_id,
-                                    participant);
+      db1_delegate_reservation_save(execution_key, cJSON_IsString(witem) ? witem->valuestring : "",
+                                    job_id, participant);
    }
    cJSON_AddStringToObject(resp, "job_status", "pending");
    return server_send_ok(conn, resp);

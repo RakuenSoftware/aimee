@@ -12,7 +12,7 @@
 
 #include "sandbox_learned.h"
 
-#include "aimee.h"      /* MAX_PATH_LEN */
+#include "aimee.h" /* MAX_PATH_LEN */
 #include "cJSON.h"
 #include "config.h"     /* config_delegate_sandbox_learn_packages */
 #include "guardrails.h" /* git_repo_root */
