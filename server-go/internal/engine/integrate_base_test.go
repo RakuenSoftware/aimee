@@ -271,10 +271,14 @@ func (a partialNoCommitAgents) DelegateGroup(_ context.Context, requests []Deleg
 	return out
 }
 
-type rejectDelegateAgents struct{ calls int }
+type rejectDelegateAgents struct {
+	calls int
+	last  DelegateRequest
+}
 
-func (a *rejectDelegateAgents) Delegate(_ context.Context, _ DelegateRequest) (DelegateResult, error) {
+func (a *rejectDelegateAgents) Delegate(_ context.Context, request DelegateRequest) (DelegateResult, error) {
 	a.calls++
+	a.last = request
 	return DelegateResult{}, errors.New("delegate must not run for an already-repaired reviewed tree")
 }
 
@@ -390,9 +394,12 @@ func TestReviewResumeRefreezesHumanRepairWithoutMeaninglessDelegateEdit(t *testi
 	agents.calls = 0
 	verifierCalls := verifier.calls
 	_, err = runner.mutate(ctx, StepRequest{WorkItem: item, Node: wfe.Node{ID: "impl"},
-		Feedback: &wfe.ReviewFeedback{ArtifactHash: reviewedHash}}, false)
+		Feedback: &wfe.ReviewFeedback{ArtifactHash: reviewedHash}, RetryDetail: "verify failed: clang-format violation"}, false)
 	if err == nil || agents.calls != 1 {
 		t.Fatalf("failed verification retry bypassed delegate: calls=%d err=%v", agents.calls, err)
+	}
+	if !strings.Contains(agents.last.Prompt, "PREVIOUS ATTEMPT FAILURE TO FIX:\nverify failed: clang-format violation") {
+		t.Fatalf("repair delegate did not receive verifier failure: %q", agents.last.Prompt)
 	}
 	if verifier.calls != verifierCalls {
 		t.Fatalf("failed verification retry replayed verifier: calls=%d, want %d", verifier.calls, verifierCalls)

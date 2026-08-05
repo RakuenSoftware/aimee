@@ -1200,6 +1200,22 @@ func (s *Store) StageAttemptCount(ctx context.Context, workItemID, stage string)
 	return count, err
 }
 
+// LatestStageRetryDetail returns the diagnostic that caused the current stage
+// retry. A loop is preferred over later transient runner pauses so cancellation
+// recovery does not hide the verifier failure the next delegate must repair.
+// The pause fallback covers stages configured with a one-attempt retry limit.
+func (s *Store) LatestStageRetryDetail(ctx context.Context, workItemID, stage string) (string, error) {
+	var detail string
+	err := s.db.QueryRowContext(ctx, `SELECT detail FROM lifecycle_event WHERE work_item_id=? AND stage=? AND kind='loop' ORDER BY id DESC LIMIT 1`, workItemID, stage).Scan(&detail)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = s.db.QueryRowContext(ctx, `SELECT detail FROM lifecycle_event WHERE work_item_id=? AND stage=? AND kind='pause' AND detail!='manual' ORDER BY id DESC LIMIT 1`, workItemID, stage).Scan(&detail)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return detail, err
+}
+
 // Park records the stable pause reason as both item state and event detail.
 // Call ParkWithDetail when an operator-safe diagnostic should accompany it.
 func (s *Store) Park(ctx context.Context, workItemID, stage, reason string, costUSD float64) error {

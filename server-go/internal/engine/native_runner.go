@@ -610,6 +610,17 @@ func delegatePartialIsNoChange(response string) bool {
 			strings.Contains(response, "no file changes detected"))
 }
 
+func retryDetailForPrompt(detail string) string {
+	detail = strings.TrimSpace(safeDiagnostic(detail))
+	const maxRunes = 24_000
+	runes := []rune(detail)
+	if len(runes) <= maxRunes {
+		return detail
+	}
+	const headRunes = 8_000
+	return string(runes[:headRunes]) + "\n...[retry diagnostic truncated]...\n" + string(runes[len(runes)-(maxRunes-headRunes):])
+}
+
 func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (StepResult, error) {
 	workdir, branch, err := r.worktrees.Ensure(ctx, req.WorkItem, req.WorkItem.ParentID == "")
 	if err != nil {
@@ -699,6 +710,9 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 	if req.Feedback != nil {
 		encoded, _ := json.Marshal(req.Feedback)
 		prompt += "\n\nREVIEW FEEDBACK TO RESOLVE:\n" + string(encoded)
+	}
+	if retryDetail := retryDetailForPrompt(req.RetryDetail); retryDetail != "" {
+		prompt += "\n\nPREVIOUS ATTEMPT FAILURE TO FIX:\n" + retryDetail
 	}
 	var cost float64
 	costUnknown := false
