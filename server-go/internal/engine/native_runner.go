@@ -2332,4 +2332,3 @@ func validateStructured(kind string, doc []byte) error {
 	}
 	return nil
 }
-test
