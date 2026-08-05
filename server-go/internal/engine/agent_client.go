@@ -729,6 +729,10 @@ func (c *HTTPAgentClient) expireUnassigned(jobID int, key string, since time.Tim
 }
 
 func delegateJobKey(request DelegateRequest) string {
+	// ReplayOnly controls whether a missing mapping may launch; it does not
+	// identify different work. A replay must derive the exact key used by the
+	// original dispatch or an existing terminal result appears to be lost.
+	request.ReplayOnly = false
 	keyMaterial, _ := json.Marshal(request)
 	return fmt.Sprintf("%s:%s:%s:%x", request.WorkItemID, request.Stage, request.ExecutionVersion, sha256.Sum256(keyMaterial))
 }

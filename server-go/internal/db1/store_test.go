@@ -408,6 +408,21 @@ func TestGenericResumeCannotBypassLifecycleOwnedPause(t *testing.T) {
 	}
 }
 
+func TestReplayUnrecoverableCanBeResumedByOperator(t *testing.T) {
+	store := newTestStore(t)
+	createTestItem(t, store, "wi_replay_operator")
+	if err := store.Park(context.Background(), "wi_replay_operator", "plan_gate", "replay_unrecoverable", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Resume(context.Background(), "wi_replay_operator"); err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.WorkItem(context.Background(), "wi_replay_operator")
+	if err != nil || item.PauseReason != "" || item.State != "active" {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+}
+
 func TestStopTerminalizesActiveWorkflowTree(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

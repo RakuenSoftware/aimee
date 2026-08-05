@@ -1139,6 +1139,41 @@ func TestDelegateJobKeyIncludesExplicitEligibilityFallback(t *testing.T) {
 	}
 }
 
+func TestHTTPAgentClientReplayUsesOriginalDurableJobKey(t *testing.T) {
+	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	original := DelegateRequest{Role: "code", Persona: "engineer", Prompt: "implement", WorkItemID: "wi", Stage: "impl", ExecutionVersion: "v1"}
+	if err := store.SaveWorkflowDelegateJob(t.Context(), delegateJobKey(original), original.WorkItemID, 45, "participant-45"); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/delegate/run" {
+			t.Error("replay launched a replacement job")
+			http.Error(w, "unexpected launch", http.StatusInternalServerError)
+			return
+		}
+		if r.URL.Path != "/v1/delegate/status" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "replayed", "cost_known": true})
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store, PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay := original
+	replay.ReplayOnly = true
+	result, err := client.Delegate(t.Context(), replay)
+	if err != nil || result.Response != "replayed" {
+		t.Fatalf("replay result=%+v err=%v", result, err)
+	}
+}
+
 func TestHTTPAgentClientRequiresAuthenticationOffLoopback(t *testing.T) {
 	if _, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: "https://resource-plane.example"}); err == nil {
 		t.Fatal("unauthenticated non-loopback agent service accepted")
