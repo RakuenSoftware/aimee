@@ -1975,3 +1975,68 @@ reported as flat) and any model-to-model gap in the 1001-note ranking under
 The tool to do it correctly has existed in this harness the whole time and was
 used twice in this campaign, both times for MTP. It should have been used for
 every comparison.
+
+## Defect 40: corpus composition changes per-note output, so a subset is not a run
+
+Running gemma-4-E2B-it-qat on gold_small (1001 notes) and on gold_mid (3002
+notes, which strictly contains gold_small), same card, same quant, same nproc=1,
+same prompt, same everything:
+
+| | value |
+|---|---:|
+| 1001-note subset of the 3002 arm, strict F1 | 0.6327 |
+| independently-run 1001 arm, strict F1 | 0.6406 |
+| difference | -0.0079 |
+| **byte-identical completions on the shared 1001 notes** | **529 / 1001** |
+
+**47% of outputs differ on identical inputs in an identical configuration.**
+
+This contradicts the standing claim in `articles/README.md` that "within one
+configuration, repetition is exact", which rests on three runs of the same
+three-process arm agreeing byte-for-byte on all 1001 notes. That claim is true
+for *re-running the same corpus*. It is false across corpora that share notes.
+
+### The mechanism is cache history, and the obvious test does NOT isolate it
+
+The natural hypothesis is the immediately preceding note: gold_small's notes are
+scattered through gold_mid (positions 1 to 3000), and 675 of the 1001 have a
+different predecessor in the mid run. Splitting the churn by that:
+
+| | outputs differing |
+|---|---:|
+| same predecessor in both runs | 146/326 (44.8%) |
+| different predecessor | 326/675 (48.3%) |
+
+Nearly identical. The predecessor explains nothing.
+
+The consistent reading is that `--cache-ram 1024` holds roughly 38 entries
+(finding 20's arithmetic: ~26 KiB per token, ~213 MiB per full context), so the
+state carried into any request is the last ~38 notes, not the last one. Between a
+1001-note and a 3002-note corpus almost every note has a different 38-note
+history, which predicts uniform churn -- and uniform churn is what appears. That
+is consistent with the mechanism but is not a measurement of it; the
+discriminating experiment (vary cache-ram, or run with the cache disabled) has
+not been done.
+
+### What this invalidates
+
+**Subset extraction is not equivalent to running at that tier.** This campaign
+built `results/subset-1001/` by extracting the 1001 gold_small notes from banked
+10k arms and scoring them, then ranked new 1001-note arms against that table. The
+extraction is internally consistent -- every model was subset the same way, so
+model-to-model comparisons within that table hold -- but any comparison between a
+**natively-run** 1001 arm and a **subset-extracted** one carries this effect.
+That includes the LFM2.5 and newcomer models, all run natively at 1001, ranked
+against a field extracted from 10k.
+
+The F1 impact measured here is -0.0079, well inside the +/-0.024 interval that
+n=1001 supports, so no ranking conclusion in this campaign changes. The byte-level
+churn of 47% is much larger than the F1 movement, which is the same pattern MTP
+shows: outputs move a great deal and the aggregate score barely notices.
+
+### Not fixed
+
+Nothing is changed. The options are to disable the prompt cache for comparability
+runs, at a cost of hours per arm (finding 20: the ~600-token system prompt is
+served from that cache and disabling it re-evaluates the prefix per note), or to
+state the caveat and keep the speed. That is the article owner's call.

@@ -1,0 +1,5 @@
+[09:24:34Z] === QAT at the mid tier: E2B and E4B, 3002 notes, nproc=1, no MTP
+[09:24:34Z]     resolves an E2B/E4B gap that n=1001 left marginal (CI [-0.0445,+0.0015])
+[09:24:34Z] --- gemma-4-E2B-it.qat.mid  google/gemma-4-E2B-it-qat-q4_0-gguf:q4_0  nproc=1  no MTP  VERIFY_FAM=gemma-4-E2B
+[11:20:46Z] OK   gemma-4-E2B-it.qat.mid strictF1=0.6416 wall=116m
+[11:20:46Z] --- gemma-4-E4B-it.qat.mid  google/gemma-4-E4B-it-qat-q4_0-gguf:q4_0  nproc=1  no MTP  VERIFY_FAM=gemma-4-E4B
