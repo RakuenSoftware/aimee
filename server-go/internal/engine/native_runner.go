@@ -1042,7 +1042,7 @@ func (r *NativeRunner) freeze(ctx context.Context, req StepRequest) (StepResult,
 			return StepResult{}, err
 		}
 	}
-	return StepResult{Status: StepAdvanced, ArtifactType: "frozen_diff", Artifact: diff}, nil
+	return StepResult{Status: StepAdvanced, ArtifactType: "frozen_diff", Artifact: diff, ContentHash: wfe.Hash([]byte(diff))}, nil
 }
 
 func freezeBase(ctx context.Context, item db1.WorkItem, workdir string) (string, error) {

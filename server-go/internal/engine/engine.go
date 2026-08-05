@@ -374,13 +374,9 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 		if artifactType == "" {
 			artifactType = block.Produces
 		}
-		artifact, artifactErr := e.artifacts.PutNodeArtifact(item.ID, node.ID, artifactType,
-			[]byte(step.Artifact))
-		if artifactErr != nil {
+		if _, artifactErr := e.artifacts.PutNodeArtifact(item.ID, node.ID, artifactType,
+			[]byte(step.Artifact)); artifactErr != nil {
 			return out, e.parkAfterSpend(ctx, item, "artifact_write_failed", artifactErr, step.CostUSD)
-		}
-		if step.ContentHash == "" {
-			step.ContentHash = artifact.Hash
 		}
 	}
 	switch step.Status {
