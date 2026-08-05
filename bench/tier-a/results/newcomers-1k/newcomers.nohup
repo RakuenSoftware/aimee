@@ -492,3 +492,12 @@ merged 1001 rows, 0 missing
 [05:40:36Z] OK   MiniCPM5-1B.Q8_0 strictF1=0.1652 wall=90m
 [05:40:36Z] --- SmolLM3-3B.Q4_K_M  ggml-org/SmolLM3-3B-GGUF:Q4_K_M  nproc=3  no MTP
 [05:40:42Z] sizing: starting one server to measure resident VRAM
+[05:42:14Z]   FAIL: port 8990 loaded 'SmolLM3-Q4_K_M.gguf', expected SmolLM3-3B / Q4_K_M
+[05:42:14Z] FAIL SmolLM3-3B.Q4_K_M: wrong model on 8990
+[05:42:14Z] FAIL SmolLM3-3B.Q4_K_M (rc=1) -- llama.cpp may not know this architecture; continuing
+[05:42:14Z] --- SmolLM3-3B.Q8_0  ggml-org/SmolLM3-3B-GGUF:Q8_0  nproc=3  no MTP
+[05:42:20Z] sizing: starting one server to measure resident VRAM
+[05:43:36Z]   FAIL: port 8990 loaded 'SmolLM3-Q8_0.gguf', expected SmolLM3-3B / Q8_0
+[05:43:36Z] FAIL SmolLM3-3B.Q8_0: wrong model on 8990
+[05:43:36Z] FAIL SmolLM3-3B.Q8_0 (rc=1) -- llama.cpp may not know this architecture; continuing
+[05:43:36Z] === NEWCOMERS SWEEP COMPLETE ===

@@ -1,1 +1,9 @@
 [05:40:42Z] sizing: starting one server to measure resident VRAM
+[05:42:14Z]   FAIL: port 8990 loaded 'SmolLM3-Q4_K_M.gguf', expected SmolLM3-3B / Q4_K_M
+[05:42:14Z] FAIL SmolLM3-3B.Q4_K_M: wrong model on 8990
+[05:43:51Z] sizing: starting one server to measure resident VRAM
+[05:44:07Z]   one instance uses 2786 MiB of 16303 MiB
+[05:44:07Z]   -> running 3 processes, cache-ram 1024 MiB each
+[05:44:39Z]   all 3 servers up; VRAM now 8348 MiB
+[05:44:39Z] START SmolLM3-3B.Q4_K_M across 3 shards
+[05:52:08Z] DONE SmolLM3-3B.Q4_K_M rows=1001/1001 wall=7m29s procs=3 retries=0

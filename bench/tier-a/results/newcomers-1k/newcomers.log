@@ -5,3 +5,13 @@
 [04:09:55Z] --- MiniCPM5-1B.Q8_0  openbmb/MiniCPM5-1B-GGUF:Q8_0  nproc=3  no MTP
 [05:40:36Z] OK   MiniCPM5-1B.Q8_0 strictF1=0.1652 wall=90m
 [05:40:36Z] --- SmolLM3-3B.Q4_K_M  ggml-org/SmolLM3-3B-GGUF:Q4_K_M  nproc=3  no MTP
+[05:42:14Z] FAIL SmolLM3-3B.Q4_K_M (rc=1) -- llama.cpp may not know this architecture; continuing
+[05:42:14Z] --- SmolLM3-3B.Q8_0  ggml-org/SmolLM3-3B-GGUF:Q8_0  nproc=3  no MTP
+[05:43:36Z] FAIL SmolLM3-3B.Q8_0 (rc=1) -- llama.cpp may not know this architecture; continuing
+[05:43:36Z] === NEWCOMERS SWEEP COMPLETE ===
+[05:43:45Z] === SmolLM3 retry: waiting for the newcomers sweep to release the 5080
+[05:43:45Z] === 5080 free; retrying SmolLM3-3B with VERIFY_FAM=SmolLM3
+[05:43:45Z] --- SmolLM3-3B.Q4_K_M  ggml-org/SmolLM3-3B-GGUF:Q4_K_M  nproc=3  no MTP  VERIFY_FAM=SmolLM3
+[05:52:14Z]   thinking guard fired; re-scoring with --allow-thinking-off
+[05:52:14Z] OK   SmolLM3-3B.Q4_K_M strictF1=0.3581 wall=8m
+[05:52:14Z] --- SmolLM3-3B.Q8_0  ggml-org/SmolLM3-3B-GGUF:Q8_0  nproc=3  no MTP  VERIFY_FAM=SmolLM3
