@@ -1,0 +1,60 @@
+Fix the aimee readiness gate to wait for everything it grades on.
+
+Applies to: ponytail-codex-benchmark/battery/codex_matrix_runner.py
+Applied live on CT401/402/403; backup left as codex_matrix_runner.py.pre-blastwait.bak
+
+THE BUG. prepare_aimee() polls until the index settles, then asserts on three
+probes: symbol lookup, callers, and blast-radius. `settled` only covered the
+first two. `blast` was re-fetched every iteration and checked in the assertions
+but never in the exit condition, so the loop broke the moment symbol and callers
+agreed and then failed on a blast-radius value read in that same iteration --
+before it could be ready. Blast-radius resolves last: it needs the project's
+generation to be current, which only happens once ingestion finishes, whereas
+symbol and caller lookups answer from partial index state.
+
+Symptom: every aimee cell died with "Aimee readiness failed: blast-radius did
+not answer" while a direct query against the same finished scan returned HTTP
+200 with freshness "current" and a full dependent set.
+
+The deadline is raised at the same time because 120s cannot cover this corpus:
+a measured cold scan of the 3825-file checkout takes ~177s on CT403. Left
+env-tunable so a bigger corpus does not need another patch.
+
+This is a correctness fix to the gate, not a change to what is measured. It does
+not touch the task, the model, the grading, or any arm's behaviour, and the
+non-aimee arms never run this gate. Cells that previously died here produced no
+data at all, so nothing already measured is reinterpreted.
+
+--- a/battery/codex_matrix_runner.py
++++ b/battery/codex_matrix_runner.py
+@@
+-    index_deadline = time.monotonic() + 120
++    index_deadline = time.monotonic() + int(os.environ.get("PT_INDEX_SETTLE_SECS", "420"))
+     while True:
+         symbol = json.loads(run([AIMEE, "--json", "index", "find", PROBE_SYMBOL],
+                                 cwd=workspace, check=False).stdout or "{}")
+         callers = json.loads(run([AIMEE, "--json", "index", "callers", PROBE_SYMBOL],
+                                  cwd=workspace, check=False).stdout or "{}")
+         blast = json.loads(run([AIMEE, "--json", "index", "blast-radius", project,
+                                 PROBE_FILE], cwd=workspace, check=False).stdout or "{}")
++        # Wait for EVERYTHING this gate asserts on, not a subset of it.
++        # blast-radius resolves last: it needs the project's generation to be
++        # current, which only happens once ingestion finishes, whereas symbol
++        # and caller lookups answer from partial index state. Leaving it out of
++        # `settled` made the loop exit the moment symbol+callers agreed and then
++        # fail on a blast-radius value captured in that same iteration -- before
++        # it could possibly be ready.
+         settled = (any(hit.get("file_path") == PROBE_FILE
+                        for hit in project_hits(symbol, project))
+                    and expected_callers.issubset(
+-                       {hit.get("caller") for hit in project_hits(callers, project)}))
++                       {hit.get("caller") for hit in project_hits(callers, project)})
++                   and "file" in blast)
+         if settled or time.monotonic() >= index_deadline:
+             break
+         time.sleep(3)
+
+STILL OWED. This patch has no test. The harness is a separate checkout with no
+suite of its own here, which is exactly why the defect survived: a gate that
+asserts on more than it waits for is a property a test can state in three lines.
+If the harness is ever vendored, that test comes with it.
