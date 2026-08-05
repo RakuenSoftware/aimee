@@ -7,3 +7,6 @@
 [01:45:20Z]   thinking guard fired; re-scoring with --allow-thinking-off
 [01:45:21Z] OK   LFM2.5-230M.Q6_K strictF1=0.1363 wall=2m
 [01:45:21Z] --- LFM2.5-230M.Q8_0  LiquidAI/LFM2.5-230M-GGUF:Q8_0  nproc=3  no MTP
+[01:47:34Z]   thinking guard fired; re-scoring with --allow-thinking-off
+[01:47:34Z] OK   LFM2.5-230M.Q8_0 strictF1=0.1309 wall=2m
+[01:47:34Z] --- LFM2.5-1.2B-Instruct.Q4_K_M  LiquidAI/LFM2.5-1.2B-Instruct-GGUF:Q4_K_M  nproc=3  no MTP
