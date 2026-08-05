@@ -759,13 +759,27 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 		// "no owned files changed; result treated as incomplete".
 		//
 		// So only fail when the BRANCH carries no work either. Ask the branch, not
-		// this attempt.
+		// this attempt. Review correction is stricter: an older implementation commit
+		// cannot excuse a partial retry when its current diff is still byte-identical
+		// to the artifact carrying blocking findings. That exact failure advanced
+		// wi_57186250 from impl to freeze without addressing its second review, then
+		// immediately exhausted the roundtable convergence limit.
 		// A document no-op is the requested outcome when the accepted diff is
 		// already documented. Freeze the exact unchanged HEAD so doc_freeze and
-		// doc_gate still review it; all other empty partials remain failures.
+		// doc_gate still review it; blocking review feedback overrides that exemption.
 		documentedNoop := docs && delegatePartialIsNoChange(result.Response)
-		if headErr == nil && head == baseHead && !documentedNoop &&
-			!branchHasWorkOverBase(ctx, workdir, req.WorkItem.ParentID) {
+		blockingReviewUnchanged := false
+		if headErr == nil && head == baseHead && feedbackHasBlockingFinding(req.Feedback) &&
+			req.Feedback.ArtifactHash != "" {
+			diff, diffErr := frozenWorktreeDiff(ctx, req.WorkItem, workdir)
+			if diffErr != nil {
+				return StepResult{}, diffErr
+			}
+			blockingReviewUnchanged = wfe.Hash([]byte(diff)) == req.Feedback.ArtifactHash
+		}
+		if headErr == nil && head == baseHead &&
+			(blockingReviewUnchanged || (!documentedNoop &&
+				!branchHasWorkOverBase(ctx, workdir, req.WorkItem.ParentID))) {
 			detail := strings.TrimSpace(result.Response)
 			if detail == "" {
 				detail = "delegate returned a partial result and produced no commit"
@@ -784,6 +798,20 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 		return StepResult{}, err
 	}
 	return StepResult{Status: StepAdvanced, ArtifactType: "branch", Artifact: branch, ContentHash: head, CostUSD: cost, CostUnknown: costUnknown}, nil
+}
+
+func feedbackHasBlockingFinding(feedback *wfe.ReviewFeedback) bool {
+	if feedback == nil {
+		return false
+	}
+	for _, finding := range feedback.Findings {
+		switch strings.ToLower(strings.TrimSpace(finding.Severity)) {
+		case "suggestion", "nit":
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 func (r *NativeRunner) review(ctx context.Context, req StepRequest) (StepResult, error) {
