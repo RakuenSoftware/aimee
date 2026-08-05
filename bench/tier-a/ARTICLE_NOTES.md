@@ -1597,3 +1597,60 @@ finding, the shape was familiar, the data fit, and it took two checks against th
 project's own source to notice that the scorer had handled the case deliberately
 and documented why. Pattern-matching to a house theme is its own failure mode,
 and it is faster than the checks that catch it.
+
+## 33. The head-to-head is mostly not a ranking
+
+`harness/h2h_intervals.py` runs a paired bootstrap on every adjacent pair in the
+head-to-head table, because an adjacent pair IS the ordering claim a ranked table
+makes. Eight thousand replicates, gold_small, n=1001.
+
+**Nine of fifteen adjacent pairs are indistinguishable.**
+
+| pair | delta | 95% CI | |
+|---|---:|---|---|
+| E2B-QAT vs E4B-QAT | -0.0213 | [-0.0442,+0.0017] | indistinguishable |
+| E4B-QAT vs E4B-UD | -0.0027 | [-0.0225,+0.0174] | indistinguishable |
+| E4B-UD vs E2B-UD | -0.0150 | [-0.0391,+0.0085] | indistinguishable |
+| E2B-UD vs LFM2.5-2.6B-Q4 | -0.0163 | [-0.0468,+0.0150] | indistinguishable |
+| LFM2.5-2.6B Q4 vs Q8 | -0.0104 | [-0.0366,+0.0153] | indistinguishable |
+| LFM2.5-2.6B-Q8 vs granite-4.1-3b | -0.0275 | [-0.0575,+0.0028] | indistinguishable |
+| granite-4.1-3b vs gemma-3n-E4B | -0.0144 | [-0.0461,+0.0166] | indistinguishable |
+| gemma-3n-E4B vs LFM2.5-8B-A1B | -0.0133 | [-0.0441,+0.0177] | indistinguishable |
+| LFM2.5-8B-A1B vs Qwen3-1.7B | -0.0580 | [-0.0912,-0.0247] | **separable** |
+| Qwen3-1.7B vs SmolLM3-Q8 | -0.0685 | [-0.1027,-0.0345] | **separable** |
+| SmolLM3-Q8 vs granite-4.0-1b | -0.0022 | [-0.0344,+0.0312] | indistinguishable |
+| granite-4.0-1b vs SmolLM3-Q4 | -0.0330 | [-0.0662,-0.0002] | **separable** |
+| SmolLM3-Q4 vs LFM2.5-VL-1.6B | -0.0856 | [-0.1145,-0.0567] | **separable** |
+| LFM2.5-VL-1.6B vs LFM2.5-1.2B | -0.1054 | [-0.1375,-0.0735] | **separable** |
+| LFM2.5-1.2B vs LFM2.5-230M | -0.0362 | [-0.0650,-0.0065] | **separable** |
+
+The top eight rows of the table are one group. Nothing in them is ordered by this
+data. The separable pairs are all in the bottom half, where the gaps are large
+because the models are failing rather than competing.
+
+**A ranked table is a claim per row boundary, and most of mine are unsupported.**
+Printing models in F1 order implies an ordering the interval does not carry. The
+honest presentation is tiers, not ranks.
+
+### One published claim does not survive
+
+| claim | delta | 95% CI | |
+|---|---:|---|---|
+| QAT beats UD on gemma-4-E2B | -0.0390 | [-0.0635,-0.0152] | **holds** |
+| more bits helps SmolLM3-3B | -0.0351 | [-0.0543,-0.0165] | **holds** |
+| E2B-QAT beats E4B-UD | -0.0240 | [-0.0445,-0.0034] | **holds** |
+| **fewer bits helps LFM2.5-2.6B** | **-0.0104** | **[-0.0366,+0.0153]** | **WITHDRAWN** |
+| granite-4.1-3b vs the arm above it | -0.0144 | [-0.0461,+0.0166] | indistinguishable |
+
+The LFM2.5-2.6B inverse ladder was one of three ladder shapes carrying the "more
+bits is not a direction" argument. It is indistinguishable from zero and comes
+out. The argument survives on the two that hold, and it survives BETTER for
+losing the third: SmolLM3 rising and gemma-4 E4B falling at Q8 are enough, and
+they are measured rather than asserted.
+
+**What this does not cost.** The restraint finding is untouched, because it was
+never an F1 claim: granite-4.1-3b invents on 71 factless notes against
+LFM2.5-VL-1.6B's 279, and abstention rates are 0.786 against 0.171. Those gaps
+are not close to their intervals. The piece's central argument, that F1 and
+restraint are independent axes, is the part that survives an interval sweep
+intact while the ranking around it dissolves.

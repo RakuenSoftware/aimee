@@ -2098,7 +2098,46 @@ better estimate. Turning the prompt cache off is free in both wall time and
 accuracy, so there is no longer a tradeoff to weigh: **for any arm that will be
 compared across corpora, run with `--cache-ram 0`.**
 
-### Still open, and now narrower
+### SOLVED: sequence position, on a prediction registered before the run
+
+Third hypothesis, stated in `harness/order_test_5080.sh` before it started: with
+the prompt cache off and per-corpus determinism confirmed, the only thing still
+differing between a gold_small run and a gold_mid run is WHERE each note sits in
+the sequence. Test: the same 1001 notes, seeded shuffle, everything else held.
+
+| | byte-identical |
+|---|---:|
+| same notes, same order, cache off | **1001/1001 (100%)** |
+| same notes, SHUFFLED order, cache off | **524/1001 (52.3%)** |
+| same notes, inside gold_mid, cache off | 499/1001 (49.9%) |
+
+Shuffling reproduces the cross-corpus churn to within 25 notes. **Sequence
+position is the mechanism.** A subset is not a run because its notes sit
+somewhere else in the queue.
+
+Note what this implies and what it does not. It implies state carries between
+requests even with `--cache-ram 0`: llama-server keeps a live KV context per slot
+across requests, and `--cache-ram` governs the prompt cache rather than that
+context. It does NOT identify which state, and I am not going to name one without
+another registered test.
+
+**Three hypotheses, two dead, one confirmed.** Predecessor identity: refuted,
+44.8% against 48.3%. Prompt-cache history: refuted, 49.9% against 52.8%. Sequence
+position: confirmed. The two failures were both explanations that fitted the data
+and did not survive their own tests, which is why the third was registered in
+writing before the run rather than after seeing the number.
+
+### The consequence for every tier in this project
+
+`gold_small` is a strict subset of `gold_mid` is a strict subset of `gold_large`,
+and that containment is now known NOT to give comparability. Scoring a 10k arm
+down to 1001 notes measures those notes at their 10k positions, which is a
+different configuration from running them as a 1001-note corpus.
+
+The fix is cheap and known: for any arm intended for cross-corpus comparison, the
+notes must occupy the same positions. Same tier, same order, no exceptions.
+
+### Still narrower, and still open
 
 Whether corpus composition is the variable at all. Every explanation so far has
 assumed this configuration reproduces itself, and that was measured with the

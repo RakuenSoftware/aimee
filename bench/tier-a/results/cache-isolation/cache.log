@@ -25,3 +25,23 @@ n = 1001 notes resampled, 20000 bootstrap replicates.
 [16:08:12Z] === CACHE ISOLATION COMPLETE ===
 [16:19:43Z] === self-reproduction control: E2B qat, cache OFF, gold_small, run 2
 [16:19:43Z]     prediction: 1001/1001 against run 1 if the configuration is deterministic
+[16:58:49Z] OK   run2 wall=39m
+
+same corpus, same config, two runs: 1001/1001 identical (100.0%)
+cross-corpus, cache OFF          : 499/1001 (49.9%)
+
+VERDICT: the configuration IS deterministic, so corpus composition is real
+         and its mechanism is still unidentified.
+[16:58:49Z] === SELF-REPRO CONTROL COMPLETE ===
+[17:12:51Z] === order test: same 1001 notes, shuffled, cache OFF, 5080, nproc=1
+[17:12:51Z]     prediction: near 499/1001 if position is the mechanism; ~1001/1001 kills it
+[17:49:54Z] OK   shuffled run wall=37m
+
+same notes, shuffled order, cache OFF: 524/1001 identical (52.3%)
+same notes, same order,     cache OFF: 1001/1001 (100.0%)
+same notes, inside gold_mid, cache OFF: 499/1001 (49.9%)
+
+VERDICT: position IS the mechanism. Corpus composition acts through
+         sequence position, and a subset is not a run because the notes
+         sit somewhere else in the queue.
+[17:49:54Z] === ORDER TEST COMPLETE ===

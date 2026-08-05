@@ -11,6 +11,9 @@ named claims in the prose. Paired means the same notes are resampled for both
 arms, so it prices the difference rather than the two arms separately.
 """
 import json, os, subprocess, sys
+# unbuffered: a 20-minute sweep that prints nothing until it ends is a sweep you
+# cannot tell from a hung one, and I could not.
+sys.stdout.reconfigure(line_buffering=True)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GOLD = os.path.join(ROOT, "data/corpora/v5/gold_small.jsonl")
@@ -52,12 +55,19 @@ def boot(a, b):
            "--gold", GOLD,
            "--pred", "%s=%s" % (a, os.path.join(ROOT, ARMS[a] + ".pred.jsonl")),
            "--pred", "%s=%s" % (b, os.path.join(ROOT, ARMS[b] + ".pred.jsonl")),
-           "--boot", "20000"]
-    out = subprocess.run(cmd, capture_output=True, text=True).stdout
-    for ln in out.splitlines():
-        if ln.strip().startswith("%s - %s" % (b, a)) or (" - " in ln and "[" in ln and "CI" not in ln):
-            return " ".join(ln.split())
-    return "(no delta line)\n" + out[-200:]
+           "--boot", "8000"]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    # bootstrap_ci.py prints exactly one line of the form
+    #   "B - A    -0.0390  [-0.0617,-0.0154]  significant"
+    # Match on the leading comparison token rather than on punctuation, which is
+    # what the first version got wrong: it guessed at the format and silently
+    # returned nothing for every pair.
+    want = "%s - %s" % (b, a)
+    for ln in r.stdout.splitlines():
+        t = " ".join(ln.split())
+        if t.startswith(want):
+            return t[len(want):].strip()
+    return "PARSE FAILED rc=%d %s" % (r.returncode, (r.stderr or r.stdout)[-160:].replace("\n", " "))
 
 
 def main():
