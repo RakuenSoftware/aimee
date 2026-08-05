@@ -538,7 +538,11 @@ func (r *NativeRunner) branchOpen(ctx context.Context, req StepRequest) (StepRes
 // name alone invites the delegate to mine unrelated history for undocumented
 // changes and expand the final PR after acceptance.
 func documentDelegatePrompt(ctx context.Context, req StepRequest, workdir string) (string, error) {
-	acceptedDiff, err := frozenWorktreeDiff(ctx, req.WorkItem, workdir)
+	base, err := freezeBase(ctx, req.WorkItem, workdir)
+	if err != nil {
+		return "", err
+	}
+	acceptedDiff, err := frozenWorktreeDiff(ctx, workdir, base)
 	if err != nil {
 		return "", err
 	}
@@ -591,7 +595,11 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 	// bypass review, and feedback left by an earlier gate cannot trigger it.
 	if docs && req.Feedback != nil && req.WorkItem.ContentHash != "" &&
 		req.WorkItem.ContentHash == req.Feedback.ArtifactHash {
-		diff, diffErr := frozenWorktreeDiff(ctx, req.WorkItem, workdir)
+		base, baseErr := freezeBase(ctx, req.WorkItem, workdir)
+		if baseErr != nil {
+			return StepResult{}, baseErr
+		}
+		diff, diffErr := frozenWorktreeDiff(ctx, workdir, base)
 		if diffErr != nil {
 			return StepResult{}, diffErr
 		}
@@ -1011,24 +1019,24 @@ func (r *NativeRunner) freeze(ctx context.Context, req StepRequest) (StepResult,
 	if err != nil {
 		return StepResult{}, err
 	}
-	base, err = gitText(ctx, workdir, "rev-parse", base)
+	resolvedBase, err := gitText(ctx, workdir, "rev-parse", base)
 	if err != nil {
 		return StepResult{}, err
 	}
-	base = strings.TrimSpace(base)
+	resolvedBase = strings.TrimSpace(resolvedBase)
 	head, err := gitText(ctx, workdir, "rev-parse", "HEAD")
 	if err != nil {
 		return StepResult{}, err
 	}
 	head = strings.TrimSpace(head)
-	diff, err := gitText(ctx, workdir, "--no-pager", "diff", base+"..."+head)
+	diff, err := frozenWorktreeDiff(ctx, workdir, base)
 	if err != nil {
 		return StepResult{}, err
 	}
 	if strings.TrimSpace(diff) == "" {
 		return StepResult{Status: StepAccepted, Detail: "no-op: empty diff vs base"}, nil
 	}
-	if err := r.rejectDivergentSiblingCreates(ctx, item, workdir, base, head); err != nil {
+	if err := r.rejectDivergentSiblingCreates(ctx, item, workdir, resolvedBase, head); err != nil {
 		return StepResult{Status: StepFailed, Detail: err.Error()}, nil
 	}
 	if r.artifacts != nil && req.Node.ID != "" {
@@ -1038,7 +1046,7 @@ func (r *NativeRunner) freeze(ctx context.Context, req StepRequest) (StepResult,
 		if _, err := r.artifacts.PutNodeArtifact(item.ID, req.Node.ID+"-head", "commit", []byte(head)); err != nil {
 			return StepResult{}, err
 		}
-		if _, err := r.artifacts.PutNodeArtifact(item.ID, req.Node.ID+"-base", "commit", []byte(base)); err != nil {
+		if _, err := r.artifacts.PutNodeArtifact(item.ID, req.Node.ID+"-base", "commit", []byte(resolvedBase)); err != nil {
 			return StepResult{}, err
 		}
 	}
@@ -1065,11 +1073,12 @@ func freezeBase(ctx context.Context, item db1.WorkItem, workdir string) (string,
 	return "origin/" + trunk, nil
 }
 
-func frozenWorktreeDiff(ctx context.Context, item db1.WorkItem, workdir string) (string, error) {
-	base, err := freezeBase(ctx, item, workdir)
-	if err != nil {
-		return "", err
-	}
+// frozenWorktreeDiff computes the merged diff between a resolved base ref and
+// HEAD for the given workdir. Base resolution (parent feature tip vs origin
+// trunk) lives in freezeBase; this helper is the single seam that turns that
+// ref into a diff, used by freeze() and by callers that need the accepted diff
+// (documentDelegatePrompt, the review-correctness path in mutate).
+func frozenWorktreeDiff(ctx context.Context, workdir, base string) (string, error) {
 	diff, err := gitText(ctx, workdir, "--no-pager", "diff", base+"...HEAD")
 	if err != nil {
 		return "", err
@@ -2323,3 +2332,4 @@ func validateStructured(kind string, doc []byte) error {
 	}
 	return nil
 }
+test
