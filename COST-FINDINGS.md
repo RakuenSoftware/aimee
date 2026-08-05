@@ -586,6 +586,39 @@ gap needs to hold across the corpus before it is a claim; a single task where
 the index answers badly would produce this pattern honestly. Check it against
 the other 13 before publishing.
 
+## Finding 18 — "no arm wrote tests" is a harness bug, not a result
+
+`codex_matrix_runner.py:672`:
+
+```python
+bucket = "test" if rel.startswith("tests/") else "production"
+```
+
+The am_ corpus keeps its tests at **`src/tests/`**, not `tests/`. The prefix never
+matches, so every test file in every arm is bucketed as production and
+`test_added` is structurally 0.
+
+`aimee__am_1f0f1ab528__r1` is the proof — its own `per_file` contradicts its
+totals:
+
+```
+{'added': 40, 'deleted': 5, 'kind': 'production', 'path': 'src/tests/test_bus_capture.c'}
+...
+'production_added': 71,  'test_added': 0
+```
+
+40 of those 71 "production" lines are test code. Real production is ~31.
+
+**Two published claims die here.** "No arm wrote tests on a corpus built from
+real fix commits" was my statement and it is wrong. And every
+`production_added` figure in this document is inflated by whatever test code
+that cell wrote — which is exactly the axis the article wants to compare.
+
+**Do not fix the runner mid-experiment**; changing the metric between cells makes
+early and late cells incomparable. Recompute post-hoc from each cell's retained
+`patch.diff` instead, bucketing on `"/tests/" in path or basename.startswith("test_")`,
+and restate the LOC table from that.
+
 ## Methodology traps hit in this work
 
 Record these; several produced wrong published numbers first.
