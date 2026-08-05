@@ -374,6 +374,30 @@ func TestReviewResumeRefreezesHumanRepairWithoutMeaninglessDelegateEdit(t *testi
 		t.Fatalf("implementation repair result=%+v", result)
 	}
 
+	// A failed mechanical repair verification loops back to implementation.
+	// That retry must call a delegate; otherwise the fast path just reruns the
+	// identical failing verifier until retry_limit without giving anything a
+	// chance to fix the checkout.
+	if err := store.Move(ctx, item.ID, "document", "impl", "advance", "", reviewedHash, 0); err != nil {
+		t.Fatal(err)
+	}
+	if parked, err := store.RecordRetry(ctx, item.ID, "impl", "impl", "verify failed", 3, 0); err != nil || parked {
+		t.Fatalf("record implementation retry: parked=%v err=%v", parked, err)
+	}
+	item, _ = store.WorkItem(ctx, item.ID)
+	item.ContentHash = reviewedHash
+	item.Worktree = workdir
+	agents.calls = 0
+	verifierCalls := verifier.calls
+	_, err = runner.mutate(ctx, StepRequest{WorkItem: item, Node: wfe.Node{ID: "impl"},
+		Feedback: &wfe.ReviewFeedback{ArtifactHash: reviewedHash}}, false)
+	if err == nil || agents.calls != 1 {
+		t.Fatalf("failed verification retry bypassed delegate: calls=%d err=%v", agents.calls, err)
+	}
+	if verifier.calls != verifierCalls {
+		t.Fatalf("failed verification retry replayed verifier: calls=%d, want %d", verifier.calls, verifierCalls)
+	}
+
 	agents.calls = 0
 	result, err = runner.mutate(ctx, StepRequest{WorkItem: item, Node: wfe.Node{ID: "document"},
 		Feedback: &wfe.ReviewFeedback{ArtifactHash: reviewedHash}}, true)
