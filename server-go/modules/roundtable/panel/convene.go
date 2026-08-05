@@ -30,7 +30,11 @@ func Convene(ctx context.Context, delegates Delegates, run Run, panel Panel, foc
 	}
 	stage, ok := normalizeRoundtableStage(reviewed.Stage)
 	if !ok {
-		return RunResult{}, fmt.Errorf("roundtable unsupported artifact stage %q", reviewed.Stage)
+		// A stage no reviewer covers is a bad request, not an internal fault:
+		// retrying reproduces it exactly. Saying so lets the caller stop rather
+		// than park and resubmit the same review forever.
+		return RunResult{}, ValidationError{
+			Message: fmt.Sprintf("roundtable unsupported artifact stage %q", reviewed.Stage)}
 	}
 	if focus == "" {
 		focus = "correctness, completeness, security, and test quality"

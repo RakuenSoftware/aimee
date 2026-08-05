@@ -54,7 +54,16 @@ __attribute__((weak)) char *kb_client_mtls_request(const char *method, const cha
    return NULL;
 }
 
-static dependency_breaker_t g_kb_dependency = DEPENDENCY_BREAKER_INITIALIZER;
+/* One breaker per operation CLASS, not one for the whole dependency.
+ *
+ * Bulk ingestion and interactive reads have nothing to say about each other's
+ * health: a slow or failing corpus ingest is not evidence that a symbol lookup
+ * will fail, and sharing a failure budget meant one could suppress the other
+ * process-wide. That is what happened -- ingest scans tripped the single
+ * breaker and every unrelated KB call was refused with a 503 that never left
+ * this process, while the KB was healthy and answering. */
+static dependency_breaker_t g_kb_dependency[KB_DEP_CLASS_COUNT] = {
+    DEPENDENCY_BREAKER_INITIALIZER, DEPENDENCY_BREAKER_INITIALIZER};
 static int64_t (*g_kb_dependency_clock)(void);
 #if defined(_MSC_VER)
 static __declspec(thread) kb_client_result_status_t g_kb_last_result = KB_CLIENT_RESULT_UNAVAILABLE;
@@ -84,6 +93,23 @@ static int64_t kb_dependency_now_ms(void)
       return g_kb_dependency_clock();
    return (int64_t)time(NULL) * 1000;
 }
+
+/* Which failure budget a path draws on. Bulk means work whose duration is a
+ * property of the corpus rather than of the service being healthy: ingestion
+ * and embedding. Everything else is interactive and must stay answerable while
+ * bulk work is struggling. */
+kb_dependency_class_t kb_dependency_class_for_path(const char *path)
+{
+   if (!path || !path[0])
+      return KB_DEP_INTERACTIVE;
+   static const char *bulk[] = {"/v1/code/scan", "/v1/code/build", "/v1/code/embed", "/v1/ingest",
+                                "/v1/kb/build"};
+   for (size_t i = 0; i < sizeof(bulk) / sizeof(bulk[0]); i++)
+      if (strncmp(path, bulk[i], strlen(bulk[i])) == 0)
+         return KB_DEP_BULK;
+   return KB_DEP_INTERACTIVE;
+}
+
 
 kb_client_result_status_t kb_client_last_result_status(void)
 {
@@ -120,7 +146,11 @@ void kb_client_dependency_health(kb_client_dependency_health_t *out)
       return;
    memset(out, 0, sizeof(*out));
    dependency_breaker_snapshot_t snap;
-   dependency_breaker_snapshot(&g_kb_dependency, kb_dependency_now_ms(), &snap);
+   /* Interactive is what an operator means by "is the KB answering". A bulk
+    * ingest budget that is open does not make the service unreachable, and
+    * reporting it here is what made status contradict the next command. */
+   dependency_breaker_snapshot(&g_kb_dependency[KB_DEP_INTERACTIVE], kb_dependency_now_ms(),
+                               &snap);
    const char *state =
        !snap.open ? "closed"
                   : (snap.probe_inflight || snap.retry_after_ms == 0 ? "half_open" : "open");
@@ -135,7 +165,8 @@ void kb_client_dependency_health(kb_client_dependency_health_t *out)
 
 void kb_client_dependency_reset_for_tests(void)
 {
-   dependency_breaker_reset(&g_kb_dependency);
+   for (int i = 0; i < KB_DEP_CLASS_COUNT; i++)
+      dependency_breaker_reset(&g_kb_dependency[i]);
    g_kb_last_result = KB_CLIENT_RESULT_UNAVAILABLE;
    snprintf(g_kb_last_dependency, sizeof(g_kb_last_dependency), "%s", "kb");
    g_kb_last_observed_generation = 0;
@@ -253,7 +284,7 @@ static kb_client_result_status_t kb_classify_json_result(const char *path, const
    return result;
 }
 
-static int kb_transport_begin(int *status_out)
+static int kb_transport_begin(const char *path, int *status_out)
 {
    if (status_out)
       *status_out = -1;
@@ -267,7 +298,8 @@ static int kb_transport_begin(int *status_out)
    g_kb_last_suppressed = 0;
    int64_t now_ms = kb_dependency_now_ms();
    int64_t retry_after = 0;
-   if (dependency_breaker_allow(&g_kb_dependency, now_ms, &retry_after))
+   kb_dependency_class_t cls = kb_dependency_class_for_path(path);
+   if (dependency_breaker_allow(&g_kb_dependency[cls], now_ms, &retry_after))
       return 1;
 
    /* Carry the breaker's own retry window into the typed error. Discarding it
@@ -311,17 +343,43 @@ static void kb_capture_result_metadata(const char *response)
 /* Report success, and log the close so an outage has a visible end as well as a
  * visible start. Silent recovery left an operator unable to tell a healed
  * dependency from one that simply had not been called again. */
-static void kb_transport_recovered(int64_t now_ms)
+static void kb_transport_recovered_class(kb_dependency_class_t cls, int64_t now_ms)
 {
    dependency_breaker_snapshot_t before;
-   dependency_breaker_snapshot(&g_kb_dependency, now_ms, &before);
-   dependency_breaker_report_success(&g_kb_dependency, now_ms);
+   dependency_breaker_snapshot(&g_kb_dependency[cls], now_ms, &before);
+   dependency_breaker_report_success(&g_kb_dependency[cls], now_ms);
    if (before.open)
       LOG_INFO("server.kb", "knowledge service reachable again after %u open interval(s)",
                before.open_count);
 }
 
+/* A call that spent its whole budget and got nothing is a TIMEOUT, not evidence
+ * the dependency is down. The transport cannot tell them apart -- a read timeout
+ * and a refused connection both surface as status -1 with no body -- but the
+ * caller knows what it allowed, so elapsed time separates them: failing fast
+ * means nobody answered, failing at the deadline means someone is still working.
+ *
+ * This mattered because a slow ingest scan was recorded as an outage, three of
+ * them opened the shared breaker, and every unrelated KB call was then
+ * suppressed with a 503 that never left the process. */
+int kb_transport_call_timed_out(int http_status, const char *response, int64_t elapsed_ms,
+                                int timeout_ms)
+{
+   if (response || http_status > 0 || timeout_ms <= 0)
+      return 0;
+   return elapsed_ms >= (int64_t)timeout_ms * 9 / 10;
+}
+
+static void kb_transport_complete_timed(const char *path, const char *response, int http_status,
+                                        int64_t elapsed_ms, int timeout_ms);
+
 static void kb_transport_complete(const char *path, const char *response, int http_status)
+{
+   kb_transport_complete_timed(path, response, http_status, 0, 0);
+}
+
+static void kb_transport_complete_timed(const char *path, const char *response, int http_status,
+                                        int64_t elapsed_ms, int timeout_ms)
 {
    int64_t now_ms = kb_dependency_now_ms();
    int valid = 0;
@@ -330,7 +388,7 @@ static void kb_transport_complete(const char *path, const char *response, int ht
       kb_capture_result_metadata(response);
    if (http_status == 401 || http_status == 403)
    {
-      kb_transport_recovered(now_ms);
+      kb_transport_recovered_class(kb_dependency_class_for_path(path), now_ms);
       g_kb_last_result = KB_CLIENT_RESULT_UNAUTHORIZED;
       return;
    }
@@ -340,7 +398,7 @@ static void kb_transport_complete(const char *path, const char *response, int ht
       /* The KB is reachable and truthfully reported one of its own optional
        * dependencies. Keep that typed outage from suppressing unrelated KB
        * operations through the transport breaker. */
-      kb_transport_recovered(now_ms);
+      kb_transport_recovered_class(kb_dependency_class_for_path(path), now_ms);
       g_kb_last_result = classified;
       return;
    }
@@ -348,14 +406,14 @@ static void kb_transport_complete(const char *path, const char *response, int ht
    {
       /* A typed unavailable body means the KB answered but one of its own
        * dependencies did not; do not trip the KB transport breaker. */
-      kb_transport_recovered(now_ms);
+      kb_transport_recovered_class(kb_dependency_class_for_path(path), now_ms);
       g_kb_last_result = classified;
       return;
    }
    if (http_status >= 400 && http_status < 500 && http_status != 408 && http_status != 425 &&
        http_status != 429)
    {
-      kb_transport_recovered(now_ms);
+      kb_transport_recovered_class(kb_dependency_class_for_path(path), now_ms);
       g_kb_last_result = valid ? classified : KB_CLIENT_RESULT_UNAVAILABLE;
       return;
    }
@@ -366,13 +424,22 @@ static void kb_transport_complete(const char *path, const char *response, int ht
     * Log the transition into the open state — not every suppressed call — so a
     * sustained outage costs one line per backoff window rather than one per
     * request. */
+   if (kb_transport_call_timed_out(http_status, response, elapsed_ms, timeout_ms))
+   {
+      /* The caller's budget ran out. The KB may well still be working on it, so
+       * this says nothing about reachability and must not open the breaker. */
+      g_kb_last_result = KB_CLIENT_RESULT_UNAVAILABLE;
+      return;
+   }
+   kb_dependency_class_t fail_cls = kb_dependency_class_for_path(path);
    dependency_breaker_snapshot_t before;
-   dependency_breaker_snapshot(&g_kb_dependency, now_ms, &before);
-   dependency_breaker_report_failure(&g_kb_dependency, now_ms, DEPENDENCY_BREAKER_DEFAULT_THRESHOLD,
+   dependency_breaker_snapshot(&g_kb_dependency[fail_cls], now_ms, &before);
+   dependency_breaker_report_failure(&g_kb_dependency[fail_cls], now_ms,
+                                     DEPENDENCY_BREAKER_DEFAULT_THRESHOLD,
                                      DEPENDENCY_BREAKER_DEFAULT_BASE_MS,
                                      DEPENDENCY_BREAKER_DEFAULT_MAX_MS);
    dependency_breaker_snapshot_t after;
-   dependency_breaker_snapshot(&g_kb_dependency, now_ms, &after);
+   dependency_breaker_snapshot(&g_kb_dependency[fail_cls], now_ms, &after);
    if (after.open && !before.open)
       LOG_WARN("server.kb",
                "knowledge service unreachable (%s %s); suppressing calls for %lldms after %u "
@@ -1562,12 +1629,12 @@ static const char *kb_client_v1_auth_header(char *buf, size_t buf_len)
 static char *kb_client_v1_post_json_impl(const char *path, cJSON *body, int timeout_ms,
                                          int *status_out, int keep_error)
 {
-   if (!kb_transport_begin(status_out))
+   if (!kb_transport_begin(path, status_out))
       return NULL;
    char *body_json = body ? cJSON_PrintUnformatted(body) : strdup("{}");
    if (!body_json)
    {
-      dependency_breaker_cancel_probe(&g_kb_dependency);
+      dependency_breaker_cancel_probe(&g_kb_dependency[kb_dependency_class_for_path(path)]);
       return NULL;
    }
 
@@ -1576,8 +1643,10 @@ static char *kb_client_v1_post_json_impl(const char *path, cJSON *body, int time
    {
       int local_status = -1;
       int *wire_status = status_out ? status_out : &local_status;
+      int64_t started_ms = kb_dependency_now_ms();
       char *r = kb_client_mtls_request_timeout("POST", path, body_json, timeout_ms, wire_status);
-      kb_transport_complete(path, r, *wire_status);
+      kb_transport_complete_timed(path, r, *wire_status, kb_dependency_now_ms() - started_ms,
+                                  timeout_ms);
       free(body_json);
       if (*wire_status < 200 || *wire_status >= 300 || !r)
       {
@@ -1643,7 +1712,7 @@ char *kb_client_v1_post_body(const char *path, const char *body, int timeout_ms,
 char *kb_client_v1_post_body_with_type(const char *path, const char *body, const char *content_type,
                                        int timeout_ms, int *status_out)
 {
-   if (!kb_transport_begin(status_out))
+   if (!kb_transport_begin(path, status_out))
       return NULL;
 
    if (kb_client_mtls_configured())
@@ -1693,7 +1762,7 @@ char *kb_client_v1_post_body_with_type(const char *path, const char *body, const
 
 char *kb_client_v1_get_json(const char *path, int timeout_ms, int *status_out)
 {
-   if (!kb_transport_begin(status_out))
+   if (!kb_transport_begin(path, status_out))
       return NULL;
 
    /* Distributed mode: a configured remote kb (AIMEE_KB_CONN) is reached over

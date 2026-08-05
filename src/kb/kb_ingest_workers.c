@@ -33,6 +33,7 @@
 #include "db2/db_postgres.h"
 #include "db2/lifecycle.h"
 #include "db2/pgvec_kb_service.h"
+#include "code_collect.h" /* git_resolve_default_sha, code_index_source_is_worktree */
 #include "kb_doc_hash.h"
 #include "memory.h"
 
@@ -183,6 +184,21 @@ static void kbiw_process_job(const db2_kb_ingest_job_t *job)
       db2_kb_ingest_queue_fail(job->id, "canonical index scan failed");
       kb_background_clear("ingest");
       return;
+   }
+
+   /* Record the branch SHA now the walk has actually happened. The HTTP route
+    * used to do this inline because it did the walk; now that it only queues,
+    * doing it there would claim a project was indexed at a SHA before any of it
+    * ran -- and a later failure would leave that claim standing, so every
+    * !force scan would skip a project that was never ingested. */
+   char scanned_sha[128] = "";
+   if (!code_index_source_is_worktree() &&
+       git_resolve_default_sha(job->root_path, scanned_sha, sizeof(scanned_sha)) == 0 &&
+       scanned_sha[0])
+   {
+      char sha_key[320];
+      snprintf(sha_key, sizeof(sha_key), "code_scan_sha:%s", job->project);
+      db2_kb_runtime_state_set(sha_key, scanned_sha);
    }
 
    db2_kb_ingest_queue_complete(job->id, stats.files_indexed, stats.chunks_added,

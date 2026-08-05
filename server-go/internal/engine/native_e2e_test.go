@@ -279,7 +279,7 @@ nodes:
 	}
 	// Every gate in this workflow names "default", and a named roundtable must
 	// resolve to a saved preset, so the end-to-end run needs a real one.
-	runner.SetRoundtableStore(unpinnedTestRoundtable(t, "architect"))
+	withPanel(runner, unpinnedTestRoundtable(t, "architect"))
 	recoveringRunner := &transientGateRunner{next: runner, failures: []string{"roundtable_discussion", "roundtable_chairman"}}
 	eng, err := New(store, artifacts, workflowDir, recoveringRunner)
 	if err != nil {

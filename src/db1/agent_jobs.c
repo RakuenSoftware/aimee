@@ -482,12 +482,18 @@ int db1_agent_job_cancel_unassigned(int job_id, const char *reason, int min_age_
       return -1;
 
    sqlite3_stmt *stmt = NULL;
+   /* RETURNING for the same reason db1_agent_job_take_lease uses it: this is the
+    * other half of that race. sqlite3_changes(db) is connection-global, so a
+    * worker claiming the lease between this sqlite3_step() and the count would
+    * make a cancellation that did happen report that it did not -- leaving the
+    * caller to believe a job it just cancelled is still someone else's to run. */
    static const char *sql =
        "UPDATE agent_jobs SET status = 'cancelled', cancelled_at = datetime('now'),"
        " cancel_reason = ?, updated_at = datetime('now')"
        " WHERE id = ?"
        "   AND (status = 'pending' OR (status = 'running' AND trim(agent_name) = ''))"
-       "   AND COALESCE(NULLIF(heartbeat_at, ''), created_at) <= datetime('now', ?)";
+       "   AND COALESCE(NULLIF(heartbeat_at, ''), created_at) <= datetime('now', ?)"
+       " RETURNING id";
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
       return -1;
    char cutoff[64];
@@ -497,8 +503,11 @@ int db1_agent_job_cancel_unassigned(int job_id, const char *reason, int min_age_
    sqlite3_bind_int(stmt, 2, job_id);
    sqlite3_bind_text(stmt, 3, cutoff, -1, SQLITE_TRANSIENT);
    int rc = sqlite3_step(stmt);
-   sqlite3_finalize(stmt);
-   return rc != SQLITE_DONE ? -1 : (sqlite3_changes(db) == 1 ? 1 : 0);
+   int cancelled = rc == SQLITE_ROW && sqlite3_column_int(stmt, 0) == job_id;
+   int final_rc = sqlite3_finalize(stmt);
+   if (final_rc != SQLITE_OK || (rc != SQLITE_ROW && rc != SQLITE_DONE))
+      return -1;
+   return cancelled ? 1 : 0;
 }
 
 int db1_agent_job_cancel_by_id(int job_id, const char *reason)

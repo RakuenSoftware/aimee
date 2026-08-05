@@ -9,6 +9,7 @@
 #include "db2/cross_repo_deps.h"     /* canonical_index_cross_repo_deps */
 #include "db2/cross_repo_review.h"   /* db2_cross_repo_review_list */
 #include "db2/cross_repo_stats.h"    /* db2_cross_repo_set_trust, recompute_blocked_symbols */
+#include "db2/kb_service_backend.h" /* db2_kb_ingest_queue_enqueue */
 #include "db2/lifecycle.h"
 #include "db2/memory_query.h"
 #include "db2/code_projection.h"
@@ -2168,7 +2169,45 @@ int handle_post_code_scan(const char *body, char *out_buf, int out_cap)
             return 200;
          }
       }
-      files = canonical_index_scan_project(project, root_path, force, &inspected);
+      /* Hand the walk to the ingest queue instead of running it on this request
+       * thread. The contract this route owes a caller is "the files are queued
+       * and ready to be ingested", not "the index is built": a canonical scan of
+       * a large checkout runs for minutes, and doing it inline pinned a db2
+       * connection for that whole time (the >300s lease warnings) while the
+       * caller sat on a timeout it had no way to size. Worse, the caller's
+       * timeout was then recorded as the KB being unreachable, which tripped the
+       * shared dependency breaker and suppressed unrelated KB calls.
+       *
+       * aimee-kb already owns this queue and the workers that claim off it, so
+       * this is the existing asynchronous path, not a new one. Enqueue is a
+       * single insert: it answers in milliseconds or it honestly failed. */
+      int queued = db2_kb_ingest_queue_enqueue(project, root_path, "", force,
+                                               DB2_KB_INGEST_PRIO_INTERACTIVE);
+      if (queued < 0)
+      {
+         cJSON_Delete(root);
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"error\":\"could not queue project for ingestion\"}");
+         return 503;
+      }
+      /* The branch hook is a property of the REPO, not of the index: installing
+       * it does not depend on the walk having run, so it still happens here
+       * rather than waiting on the queue. */
+      int queued_hook = 0;
+      if (sha_now[0] && code_scan_bool(root, "install_hook", 0))
+         queued_hook = (code_index_install_branch_hook(root_path, project) == 0);
+
+      /* skipped stays FALSE: it means the route declined the work, which is what
+       * the branch-unchanged case above reports. Queued work was accepted --
+       * files:0 says nothing is indexed YET and reason says why. Overloading
+       * skipped for both would leave a caller unable to tell "nothing to do"
+       * from "your work is pending". */
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"status\":\"ok\",\"skipped\":false,\"queued\":true,\"reason\":\"queued\","
+               "\"project\":\"%s\",\"files\":0,\"inspected\":0,\"hook_installed\":%s}",
+               project, queued_hook ? "true" : "false");
+      cJSON_Delete(root);
+      return 200;
    }
    if (files < 0)
    {

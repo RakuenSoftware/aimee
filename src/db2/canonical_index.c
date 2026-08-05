@@ -1339,12 +1339,22 @@ int canonical_index_scan_files(const char *name, const char *root_label,
 
    void *conn = ci_conn();
    if (!conn)
+   {
+      /* Every one of these used to return a bare -1, which the HTTP route turned
+       * into "canonical index scan failed" with no way to tell them apart. Say
+       * which boundary refused: a caller staring at a 503 has nothing else. */
+      aimee_log(LOG_ERROR, "canonical_index", "scan_files '%s': no db2 connection", name);
       return -1;
+   }
 
    int64_t project_id =
        ci_upsert_project(conn, name, root_label && root_label[0] ? root_label : "remote");
    if (project_id < 0)
+   {
+      aimee_log(LOG_ERROR, "canonical_index", "scan_files '%s': upsert_project failed (root='%s')",
+                name, root_label && root_label[0] ? root_label : "remote");
       return -1;
+   }
 
    char ts[32];
    now_utc(ts, sizeof(ts));
@@ -1362,7 +1372,11 @@ int canonical_index_scan_files(const char *name, const char *root_label,
        * the same Postgres UTF-8 boundary as the filesystem scanner. */
       char *clean_content = strdup(content);
       if (!clean_content)
+      {
+         aimee_log(LOG_ERROR, "canonical_index", "scan_files '%s': out of memory on '%s'", name,
+                   rel);
          return -1;
+      }
       (void)text_sanitize_utf8(clean_content);
 
       inspected++;
@@ -1377,6 +1391,9 @@ int canonical_index_scan_files(const char *name, const char *root_label,
       if (ci_replace_file_data(conn, name, file_id, css_ext, clean_content) != 0)
       {
          /* Purge fence: abort the whole scan for this project. */
+         aimee_log(LOG_ERROR, "canonical_index",
+                   "scan_files '%s': replace_file_data failed on '%s' (file_id=%lld) — aborting",
+                   name, rel, (long long)file_id);
          free(clean_content);
          if (inspected_out)
             *inspected_out = inspected;

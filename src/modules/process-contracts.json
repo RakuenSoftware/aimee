@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "principal_class": 1,
   "components": [
     {"id": "module-runtime", "execution": "core", "placements": ["server", "kb"]},
@@ -72,5 +72,8 @@
       {"id": 1, "name": "sandbox-learned-observe", "event_kind": 10753},
       {"id": 2, "name": "sandbox-learned-load", "event_kind": 10754}
     ]}
+  ],
+  "clients": [
+    {"id": "wfe", "principal_ref": 64, "executable": "/usr/local/bin/aimee-wfe", "placements": ["server"], "request": [9474]}
   ]
 }

@@ -614,6 +614,7 @@ int accept_generated_embedding(int64_t doc_id, const float *vec, int dim)
    return 0;
 }
 
+
 /* ── Purge-fence write discipline (webchat-project-lifecycle slice 2) ──
  * EVERY project-scoped ingest write runs inside an explicit transaction that
  * takes the project advisory guard and re-checks the generation fence before
@@ -844,6 +845,49 @@ typedef struct
  * LSH near-duplicate handling, chunk insertion, and synchronous-or-async
  * embedding with batched pgvector upserts. Mutates the shared sketches, batch
  * buffer, and stats counters through `c`. */
+/* Embed every chunk of one file in a single call, into a caller-owned buffer.
+ *
+ * Ingest used to call the single-text memory_embed_text() once per chunk, so a
+ * ~3000 file project paid one embedder round trip per chunk -- measured at
+ * ~190ms each, which is the round trip, not the model. memory_embed_texts()
+ * has always existed (memory search embeds a query and its sub-questions in ONE
+ * call) and the bundled embedder serves /embed_batch.
+ *
+ * The buffer is caller-owned rather than cached in a static: ingest runs up to
+ * KB_WORKER_MAX worker threads, and a shared cache here would hand one file's
+ * vectors to another file being embedded concurrently.
+ *
+ * Returns the vector dimension, or <= 0 if the batch could not be produced --
+ * the caller then falls back to the per-text path, which computes the same
+ * vectors more slowly. */
+static int kb_embed_file_chunks(kb_build_file_ctx_t *c, int n_chunks, float *out)
+{
+   if (!c || !out || n_chunks <= 1 || !c->effective_cmd[0])
+      return 0;
+
+   char **texts = calloc((size_t)n_chunks, sizeof(*texts));
+   if (!texts)
+      return 0;
+   int built = 1;
+   for (int i = 0; i < n_chunks; i++)
+   {
+      texts[i] = malloc(4096);
+      if (!texts[i])
+      {
+         built = 0;
+         break;
+      }
+      kb_async_make_embed_text(c->chunks[i].heading_path, c->chunks[i].content, texts[i], 4096);
+   }
+   int dim = built ? memory_embed_texts((const char *const *)texts, n_chunks, c->effective_cmd,
+                                        EMBED_INPUT_DOCUMENT, out, EMBED_MAX_DIM)
+                   : 0;
+   for (int i = 0; i < n_chunks; i++)
+      free(texts[i]);
+   free(texts);
+   return dim;
+}
+
 static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
 {
    if (fi > 0 && fi % c->kb_progress_every == 0)
@@ -1021,7 +1065,14 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
    }
    c->stats->chunks_added += inserted;
 
-   /* Phase 2: embed each committed chunk (sync or async). */
+   /* Phase 2: embed each committed chunk (sync or async).
+    *
+    * One batched call for the whole file, then each chunk reads its own vector
+    * out of it. The buffer is per-call: ingest is multi-threaded. */
+   float *batch_vecs = calloc((size_t)(n_chunks > 0 ? n_chunks : 1) * EMBED_MAX_DIM,
+                              sizeof(*batch_vecs));
+   int batch_dim = batch_vecs ? kb_embed_file_chunks(c, n_chunks, batch_vecs) : 0;
+
    for (int ci = 0; ci < n_chunks; ci++)
    {
       int64_t doc_id = doc_ids[ci];
@@ -1036,14 +1087,32 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
       }
       if (c->effective_cmd[0])
       {
-         /* Embed heading_path + content */
+         /* Embed heading_path + content.
+          *
+          * One call per chunk is the whole reason a corpus ingest took hours:
+          * the cost here is the round trip, not the model. bekko-a25m is a 25M
+          * parameter embedder that batches hundreds of texts per call, and
+          * memory_embed_texts() -- which memory search already uses to embed a
+          * query and its sub-questions in ONE call -- takes an array. Ingest
+          * kept calling the single-text entry point in a loop, so a ~3000 file
+          * project paid one request per chunk. */
          char embed_text[4096];
          kb_async_make_embed_text(c->chunks[ci].heading_path, c->chunks[ci].content, embed_text,
                                   sizeof(embed_text));
 
          float vec[EMBED_MAX_DIM];
-         int dim = memory_embed_text(embed_text, c->effective_cmd, EMBED_INPUT_DOCUMENT, vec,
-                                     EMBED_MAX_DIM);
+         int dim = 0;
+         if (batch_dim > 0)
+         {
+            memcpy(vec, batch_vecs + (size_t)ci * EMBED_MAX_DIM,
+                   (size_t)batch_dim * sizeof(float));
+            dim = batch_dim;
+         }
+         else
+         {
+            dim = memory_embed_text(embed_text, c->effective_cmd, EMBED_INPUT_DOCUMENT, vec,
+                                    EMBED_MAX_DIM);
+         }
          if (dim > 0)
          {
             accept_generated_embedding(doc_id, vec, dim);
@@ -1079,6 +1148,7 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
          }
       }
    }
+   free(batch_vecs);
    free(doc_ids);
 
    sketch_bloom_add_hash(c->bloom, h64);

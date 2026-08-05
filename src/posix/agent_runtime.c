@@ -456,8 +456,8 @@ native_provider_http:
 
    /* Build context-rich system prompt */
    int current_code_only = agent_tools_role_current_code_only(role);
-   char *assembled_sys = agent_build_exec_context_ex(
-       agent, has_ephemeral_ssh ? &eff_network : (network ? network : NULL), system_prompt,
+   char *assembled_sys = agent_build_exec_context_for_role(
+       agent, has_ephemeral_ssh ? &eff_network : (network ? network : NULL), role, system_prompt,
        current_code_only);
    const char *sys = assembled_sys ? assembled_sys : system_prompt;
    if (!sys || !sys[0])
@@ -740,8 +740,9 @@ native_provider_http:
       /* A final-only turn cannot satisfy an evidence gate. Keep read-only tools
        * available until one actually succeeds; provider tool_choice is a request,
        * not an enforcement boundary, and some compatible endpoints ignore it. */
-      if (agent_required_evidence_keep_tools(agent->require_initial_tool_call,
-                                             successful_tool_calls))
+      if (agent_evidence_gate_defers_final_turn(agent->require_initial_tool_call,
+                                                successful_tool_calls,
+                                                final_mode == LIVENESS_FINAL_RESPONSE_HARD))
       {
          final_instruction_turn = 0;
          final_text_only_turn = 0;

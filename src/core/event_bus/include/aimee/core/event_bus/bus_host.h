@@ -113,12 +113,21 @@ typedef struct
    uint32_t dst_slot;
 } bus_overflow_t;
 
-/* An outstanding request, so a reply can be routed back to its requester. */
+/* An outstanding request, so a reply can be routed back to its requester.
+ *
+ * Correlation ids are chosen by each client for itself, so they are unique only
+ * within one client: two clients calling the same server will eventually pick
+ * the same number. The host therefore keeps both -- the requester's id, and a
+ * host-assigned id that is unique across the bus and is the only one the server
+ * ever sees. Requests are rewritten to server_correlation_id on the way out and
+ * replies back to correlation_id on the way in, so each caller sees its own
+ * numbering and the server can key its work on something unambiguous. */
 typedef struct
 {
    int in_use;
    int request_open;
    uint64_t correlation_id;
+   uint64_t server_correlation_id;
    uint32_t requester;
    uint32_t server;
 } bus_pending_t;
@@ -155,6 +164,7 @@ typedef struct bus_host
    bus_kind_t kinds[BUS_HOST_MAX_KINDS];
    bus_pending_t pending[BUS_HOST_MAX_PENDING];
    uint64_t seq; /* host-assigned monotonic dispatch order */
+   uint64_t next_server_correlation; /* host-unique ids handed to servers */
 
    bus_tap_fn tap;
    void *tap_ctx;
