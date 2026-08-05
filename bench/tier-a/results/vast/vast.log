@@ -85,3 +85,385 @@ run_llamacpp.py: error: one of the arguments --thinking --no-thinking is require
 [18:20:08Z] OK   LFM2.5-230M/noclause rows=1001 reasoned=0/1001 parse_ok=1001
 [18:20:08Z] DONE LFM2.5-230M wall=87m cost=$0.139
 [18:20:09Z] === pool drained
+[19:38:47Z] === 2 arms, RTX 3090, up to 2 at once, cap $0.200/hr each
+[19:38:49Z] --- gemma-4-26B-A4B.qat-google-q4_0 on RTX 3090 45640047 $0.016/hr contract 46910094
+[19:38:49Z] --- gemma-4-26B-A4B.qat-unsloth-UDQ4 on RTX 3090 45640045 $0.016/hr contract 46910095
+[19:41:46Z] === 1 arms, RTX 3090, up to 1 at once, cap $0.250/hr each
+[19:41:48Z] --- Qwen3.6-35B-A3B.UD-Q4_K_XL on RTX 3090 45640045 $0.016/hr contract 46910297
+[19:43:01Z] === 2 arms, RTX 3090, up to 2 at once, cap $0.250/hr each
+[19:43:02Z] --- gemma-4-31B-it.qat-UD-Q4_K_XL on RTX 3090 45640047 $0.016/hr contract 46910372
+[19:43:04Z] --- Qwen3.6-27B.UD-Q4_K_XL on RTX 3090 45640045 $0.021/hr contract 46910376
+[19:44:00Z] === 1 arms, RTX 3090, up to 1 at once, cap $0.250/hr each
+[19:44:03Z] --- gemma-4-31B-it.UD-Q4_K_XL on RTX 3090 45640047 $0.021/hr contract 46910444
+[19:45:13Z] === 2 arms, RTX 3090, up to 2 at once, cap $0.250/hr each
+[19:45:14Z]     offer 45640045 unavailable (launch refused: {"success": false, "new_contract": 46910504, "instance_api_key": "cf52d79c66fddca615d7727e7f1e384b3c52dce0023f111a663fefb6d67502a2"}); next offer
+[19:45:15Z] --- gemma-4-12B-it.qat-UD-Q4_K_XL on RTX 3090 41106418 $0.040/hr contract 46910507
+[19:45:19Z]     offer 45640045 unavailable (launch refused: {"success": false, "new_contract": 46910512, "instance_api_key": "16b3540bc77176bd53c615da0f3def2f5a51bc7138103624028146c2387ee9f6"}); next offer
+[19:45:21Z] --- gemma-4-12B-it.UD-Q4_K_XL on RTX 3090 42584240 $0.054/hr contract 46910526
+[19:45:46Z] === 2 arms, RTX 3090, up to 2 at once, cap $0.250/hr each
+[19:45:49Z]     offer 45640047 unavailable (launch refused: {"success": false, "new_contract": 46910554, "instance_api_key": "25c715c8d98a747152fe3371e3747653ccbe49843ee78dca564d5483c7e5c0ae"}); next offer
+[19:45:49Z] --- gemma-4-12B-it.qat-UD-Q4_K_XL on RTX 3090 41106418 $0.054/hr contract 46910555
+[19:45:50Z]     offer 45640047 unavailable (launch refused: {"success": false, "new_contract": 46910556, "instance_api_key": "6a537d7ba4447afac6471ecbabbae83e6270ccc156bfb2d1781fde2e814a8bde"}); next offer
+[19:45:51Z] --- gemma-4-12B-it.UD-Q4_K_XL on RTX 3090 41106418 $0.054/hr contract 46910562
+[19:49:53Z]     healthy, loaded gemma-4-12b-it-UD-Q4_K_XL.gguf; 1 variant(s): live
+[19:53:59Z]     host 45640047 unusable (never became healthy (last endpoint None)); destroying and re-placing
+[19:54:01Z]     offer 41106418 unavailable (launch refused: {"success": false, "new_contract": 46911024, "instance_api_key": "e3ac4157895bc7deba5e959623d61c27a58aae84d0d7399ff26e0e2ae29f8d58"}); next offer
+[19:54:04Z] --- gemma-4-26B-A4B.qat-google-q4_0 on RTX 3090 42584240 $0.054/hr contract 46911025
+[19:54:07Z]     host 45640045 unusable (never became healthy (last endpoint None)); destroying and re-placing
+[19:54:13Z] --- gemma-4-26B-A4B.qat-unsloth-UDQ4 on RTX 3090 42584238 $0.054/hr contract 46911041
+[19:54:59Z]     gemma-4-12B-it.UD-Q4_K_XL/live: instance 46910562 vanished mid-arm (preempted); killing client
+[19:54:59Z]     gemma-4-12B-it.UD-Q4_K_XL/live preempted; 16 rows kept for resume
+[19:54:59Z] REQUEUE gemma-4-12B-it.UD-Q4_K_XL after preemption
+[19:55:09Z] --- gemma-4-12B-it.UD-Q4_K_XL on RTX 3090 45640047 $0.027/hr contract 46911132
+[19:56:31Z]     healthy, loaded gemma-4-12B-it-qat-UD-Q4_K_XL.gguf; 1 variant(s): live
+[19:56:55Z]     host 45640045 unusable (never became healthy (last endpoint None)); destroying and re-placing
+[19:56:56Z] --- Qwen3.6-35B-A3B.UD-Q4_K_XL on RTX 3090 42584240 $0.054/hr contract 46911252
+[19:58:17Z]     host 45640045 unusable (never became healthy (last endpoint None)); destroying and re-placing
+[19:58:17Z]     host 45640047 unusable (never became healthy (last endpoint None)); destroying and re-placing
+[19:58:19Z]     offer 42584238 unavailable (launch refused: {"success": false, "new_contract": 46911343, "instance_api_key": "01e1b7a7c00869f74738851a953ca4c51d0e6c7fa1a4153386297734ae3d3243"}); next offer
+[19:58:20Z] --- gemma-4-31B-it.qat-UD-Q4_K_XL on RTX 3090 36130605 $0.068/hr contract 46911345
+[19:58:21Z]     offer 41106418 unavailable (launch refused: {"success": false, "new_contract": 46911346, "instance_api_key": "7940ac226f32cd4458947357c42203c7857a5ba1f99661ef521a9e7a5b973ddc"}); next offer
+[19:58:22Z]     offer 45517055 unavailable (launch refused: {"success": false, "new_contract": 46911347, "instance_api_key": "1b7d40e368220dd9e9abd20aca3e6963575f221477a43fa55fd1c420f03b0784"}); next offer
+[19:58:22Z]     offer 42584240 unavailable (launch refused: {"success": false, "new_contract": 46911348, "instance_api_key": "859a81235df1255d4a880482dcd3f19bc5645476c54af74c7802996ebab855bd"}); next offer
+[19:58:23Z] --- Qwen3.6-27B.UD-Q4_K_XL on RTX 3090 36130605 $0.068/hr contract 46911349
+[19:59:05Z]     host 45640047 unusable (never became healthy (last endpoint None)); destroying and re-placing
+[19:59:11Z]     offer 42584240 unavailable (launch refused: {"success": false, "new_contract": 46911392, "instance_api_key": "a8f36ca5fbd0fa8e4b79928e7aaa0c3093bbb100d6b4348304c1ddd0a5b0167a"}); next offer
+[19:59:13Z] --- gemma-4-31B-it.UD-Q4_K_XL on RTX 3090 36130605 $0.068/hr contract 46911393
+[20:09:07Z]     host 42584240 unusable (never became healthy (last endpoint None)); destroying and re-placing
+[20:09:12Z] --- gemma-4-26B-A4B.qat-google-q4_0 on RTX 3090 34537585 $0.055/hr contract 46912205
+[20:09:34Z]     host 42584238 unusable (never became healthy (last endpoint 181.22.113.53:30020)); destroying and re-placing
+[20:09:40Z]     offer 36130605 unavailable (launch refused: {"success": false, "new_contract": 46912222, "instance_api_key": "2b52101e81fa4cc7e18393ebbb3cd61502528ec055fea37ff1267b7c0b8e4ba1"}); next offer
+[20:09:41Z] --- gemma-4-26B-A4B.qat-unsloth-UDQ4 on RTX 3090 39926392 $0.069/hr contract 46912224
+[20:11:38Z] === 8 arms, RTX 3090, up to 4 at once, cap $0.250/hr each
+[20:11:39Z] --- gemma-4-26B-A4B.qat-unsloth-UDQ4.mtp on RTX 3090 45640045 contract 46912330 (offer $0.0163/hr; billed rate read after start)
+[20:11:39Z] --- gemma-4-12B-it.UD-Q4_K_XL.mtp on RTX 3090 45640047 contract 46912331 (offer $0.0163/hr; billed rate read after start)
+[20:11:42Z] --- gemma-4-12B-it.qat-UD-Q4_K_XL.mtp on RTX 3090 45640047 contract 46912343 (offer $0.0210/hr; billed rate read after start)
+[20:11:42Z]     offer 45640045 unavailable (launch refused: {"success": false, "new_contract": 46912342, "instance_api_key": "5a2f24a467120be42bbdec2073304d1a27a502e063b823325947ad6c8d1aec7c"}); next offer
+[20:11:42Z] --- gemma-4-26B-A4B.qat-google-q4_0.mtp on RTX 3090 36130603 contract 46912344 (offer $0.0681/hr; billed rate read after start)
+[20:26:43Z]     host 45640047 unusable (never became healthy (last endpoint None)); destroying and re-placing
+[20:26:46Z] --- gemma-4-12B-it.qat-UD-Q4_K_XL.mtp on RTX 3090 41106418 contract 46913419 (offer $0.0544/hr; billed rate read after start)
+[20:26:46Z]     host 45640047 unusable (never became healthy (last endpoint None)); destroying and re-placing
+[20:26:47Z] --- gemma-4-12B-it.UD-Q4_K_XL.mtp on RTX 3090 41106418 contract 46913422 (offer $0.0544/hr; billed rate read after start)
+[20:26:52Z]     host 45640045 unusable (never became healthy (last endpoint None)); destroying and re-placing
+[20:26:52Z]     host 36130603 unusable (never became healthy (last endpoint None)); destroying and re-placing
+[20:26:54Z] --- gemma-4-26B-A4B.qat-google-q4_0.mtp on RTX 3090 42584240 contract 46913436 (offer $0.0729/hr; billed rate read after start)
+[20:27:00Z]     offer 45517055 unavailable (launch refused: {"success": false, "new_contract": 46913448, "instance_api_key": "a5e22403d64730ecccad9ebaf45fe80cf338df3f76aee3587bcfdd8a1b25747e"}); next offer
+[20:27:01Z] --- gemma-4-26B-A4B.qat-unsloth-UDQ4.mtp on RTX 3090 42584240 contract 46913452 (offer $0.0729/hr; billed rate read after start)
+[20:29:15Z]     billed $0.0762/hr (offer said $0.0544)
+[20:29:15Z]     healthy, loaded gemma-4-12b-it-UD-Q4_K_XL.gguf; 1 variant(s): live
+[20:35:22Z]     gemma-4-12B-it.UD-Q4_K_XL.mtp/live: instance 46913422 vanished mid-arm (preempted); killing client
+[20:35:22Z]     gemma-4-12B-it.UD-Q4_K_XL.mtp/live preempted; 21 rows kept for resume
+[20:35:22Z] REQUEUE gemma-4-12B-it.UD-Q4_K_XL.mtp after preemption
+[20:35:24Z] --- gemma-4-31B-it.qat-UD-Q4_K_XL.mtp on RTX 3090 45640045 contract 46914104 (offer $0.0163/hr; billed rate read after start)
+[20:36:58Z]     billed $0.0762/hr (offer said $0.0544)
+[20:36:58Z]     healthy, loaded gemma-4-12B-it-qat-UD-Q4_K_XL.gguf; 1 variant(s): live
+[20:37:56Z]     host 42584240 unusable (instance exited: success, running ghcr.io/ggml-org/llama.cpp:server-cuda); destroying and re-placing
+[20:37:57Z] --- gemma-4-26B-A4B.qat-unsloth-UDQ4.mtp on RTX 3090 43369585 contract 46914359 (offer $0.0738/hr; billed rate read after start)
+[20:42:12Z]     host 42584240 unusable (never became healthy (last endpoint 181.22.113.53:30155)); destroying and re-placing
+[20:42:14Z]     offer 43369585 unavailable (launch refused: {"success": false, "new_contract": 46914708, "instance_api_key": "a0b1cdfc3ea8e73c21987a53ce9cd5a2f9a23fd9bdd894158c04d9530ccc28fc"}); next offer
+[20:42:15Z] --- gemma-4-26B-A4B.qat-google-q4_0.mtp on RTX 3090 46773112 contract 46914711 (offer $0.0756/hr; billed rate read after start)
+[20:43:13Z]     billed $0.1105/hr (offer said $0.0738)
+[20:43:15Z]     healthy, loaded gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf; 1 variant(s): live
+[20:50:25Z]     host 45640045 unusable (never became healthy (last endpoint None)); destroying and re-placing
+[20:50:27Z]     offer 45609635 unavailable (launch refused: {"success": false, "new_contract": 46915235, "instance_api_key": "ad9bcb48cae23213e376a2a5cff18ed2c0865fc2970616c9ac4ac3235d00b0ce"}); next offer
+[20:50:27Z] --- gemma-4-31B-it.qat-UD-Q4_K_XL.mtp on RTX 3090 36130603 contract 46915236 (offer $0.0681/hr; billed rate read after start)
+[20:54:08Z]     gemma-4-12B-it.qat-UD-Q4_K_XL.mtp/live: instance 46913419 vanished mid-arm (preempted); killing client
+[20:54:08Z]     gemma-4-12B-it.qat-UD-Q4_K_XL.mtp/live preempted; 109 rows kept for resume
+[20:54:08Z] REQUEUE gemma-4-12B-it.qat-UD-Q4_K_XL.mtp after preemption
+[20:54:11Z] --- gemma-4-31B-it.UD-Q4_K_XL.mtp on RTX 3090 45640045 contract 46915513 (offer $0.0163/hr; billed rate read after start)
+[20:57:20Z]     host 46773112 unusable (never became healthy (last endpoint 173.239.95.142:42763)); destroying and re-placing
+[20:57:21Z] --- gemma-4-26B-A4B.qat-google-q4_0.mtp on RTX 3090 46854553 contract 46915688 (offer $0.0822/hr; billed rate read after start)
+[21:03:41Z] === 8 arms, RTX 3090, up to 8 at once, cap $0.300/hr each
+[21:03:43Z] --- Qwen3.6-27B.UD-Q4_K_XL.mtp on RTX 3090 45640045 contract 46916086 (offer $0.0163/hr; billed rate read after start)
+[21:03:43Z] --- gemma-4-26B-A4B.qat-google-q4_0.mtp on RTX 3090 45640047 contract 46916087 (offer $0.0163/hr; billed rate read after start)
+[21:03:43Z] --- gemma-4-26B-A4B.qat-unsloth-UDQ4.mtp on RTX 3090 45640047 contract 46916085 (offer $0.0163/hr; billed rate read after start)
+[21:03:43Z] --- gemma-4-31B-it.qat-UD-Q4_K_XL.mtp on RTX 3090 45640045 contract 46916083 (offer $0.0163/hr; billed rate read after start)
+[21:03:43Z] --- gemma-4-12B-it.qat-UD-Q4_K_XL.mtp on RTX 3090 45640045 contract 46916088 (offer $0.0163/hr; billed rate read after start)
+[21:03:43Z] --- gemma-4-12B-it.UD-Q4_K_XL.mtp on RTX 3090 45640045 contract 46916089 (offer $0.0163/hr; billed rate read after start)
+[21:03:43Z] --- Qwen3.6-35B-A3B.UD-Q4_K_XL.mtp on RTX 3090 45640045 contract 46916090 (offer $0.0163/hr; billed rate read after start)
+[21:03:43Z] --- gemma-4-31B-it.UD-Q4_K_XL.mtp on RTX 3090 45640045 contract 46916084 (offer $0.0163/hr; billed rate read after start)
+[21:18:56Z]     host 45640047 unusable (never became healthy (last endpoint None)); destroying and re-placing
+[21:18:56Z]     host 45640045 unusable (never became healthy (last endpoint None)); destroying and re-placing
+[21:18:56Z]     host 45640045 unusable (never became healthy (last endpoint None)); destroying and re-placing
+[21:18:57Z]     host 45640045 unusable (never became healthy (last endpoint None)); destroying and re-placing
+[21:18:57Z]     host 45640045 unusable (never became healthy (last endpoint None)); destroying and re-placing
+[21:18:57Z]     host 45640045 unusable (never became healthy (last endpoint None)); destroying and re-placing
+[21:18:57Z]     host 45640047 unusable (never became healthy (last endpoint None)); destroying and re-placing
+[21:18:57Z] --- gemma-4-26B-A4B.qat-google-q4_0.mtp on RTX 3090 45978204 contract 46917069 (offer $0.0502/hr; billed rate read after start)
+[21:18:58Z] --- Qwen3.6-27B.UD-Q4_K_XL.mtp on RTX 3090 36130603 contract 46917070 (offer $0.0681/hr; billed rate read after start)
+[21:18:58Z]     host 45640045 unusable (never became healthy (last endpoint None)); destroying and re-placing
+[21:18:58Z]     offer 45609635 unavailable (launch refused: {"success": false, "new_contract": 46917072, "instance_api_key": "2600abd51544dcb32374d1375c4018ee0267fb058ed94a40ecd0a8d9405bc3e7"}); next offer
+[21:18:58Z] --- Qwen3.6-35B-A3B.UD-Q4_K_XL.mtp on RTX 3090 45978204 contract 46917073 (offer $0.0502/hr; billed rate read after start)
+[21:18:59Z] --- gemma-4-31B-it.UD-Q4_K_XL.mtp on RTX 3090 21554246 contract 46917075 (offer $0.0681/hr; billed rate read after start)
+[21:18:59Z]     offer 45978204 unavailable (launch refused: {"success": false, "new_contract": 46917077, "instance_api_key": "556354e7622c8d20aac13747011c26962363eaa96c79adcd370d32c7ec5cdc68"}); next offer
+[21:18:59Z] --- gemma-4-12B-it.UD-Q4_K_XL.mtp on RTX 3090 19228514 contract 46917076 (offer $0.0681/hr; billed rate read after start)
+[21:18:59Z]     offer 45609635 unavailable (launch refused: {"success": false, "new_contract": 46917078, "instance_api_key": "de160ef5b82628f5ea0eee2f1d05cc6b5cd60b274e9eddacd145ce766205d63a"}); next offer
+[21:18:59Z]     offer 45978204 unavailable (launch refused: {"success": false, "new_contract": 46917079, "instance_api_key": "cc5730a6aff1ed0821798cd5d5bc6281b7358eff876196458ff326e6e0670107"}); next offer
+[21:18:59Z] --- gemma-4-26B-A4B.qat-unsloth-UDQ4.mtp on RTX 3090 34537585 contract 46917080 (offer $0.0548/hr; billed rate read after start)
+[21:18:59Z]     offer 45978204 unavailable (launch refused: {"success": false, "new_contract": 46917081, "instance_api_key": "7938c9ff7b73ee43ca2aaa9b1bb62ca0a7341c0ac60b918e9cd2ffe0bcabd434"}); next offer
+[21:19:00Z] --- gemma-4-12B-it.qat-UD-Q4_K_XL.mtp on RTX 3090 36130603 contract 46917082 (offer $0.0681/hr; billed rate read after start)
+[21:19:00Z] --- gemma-4-31B-it.qat-UD-Q4_K_XL.mtp on RTX 3090 36130603 contract 46917083 (offer $0.0681/hr; billed rate read after start)
+[21:22:31Z] === 8 arms, RTX 3090, cap $0.300/hr each
+[21:22:31Z]     placing 8 arm(s) concurrently
+[21:22:33Z] --- gemma-4-31B-it.UD-Q4_K_XL.mtp on RTX 3090 42093969 contract 46917372 (offer $0.0896/hr; billed rate read after start)
+[21:22:33Z] --- gemma-4-12B-it.qat-UD-Q4_K_XL.mtp on RTX 3090 46854557 contract 46917371 (offer $0.0956/hr; billed rate read after start)
+[21:22:33Z] --- Qwen3.6-35B-A3B.UD-Q4_K_XL.mtp on RTX 3090 42093967 contract 46917373 (offer $0.0896/hr; billed rate read after start)
+[21:22:33Z] --- gemma-4-12B-it.UD-Q4_K_XL.mtp on RTX 3090 46854546 contract 46917370 (offer $0.0956/hr; billed rate read after start)
+[21:22:33Z] --- gemma-4-31B-it.qat-UD-Q4_K_XL.mtp on RTX 3090 42093973 contract 46917374 (offer $0.0896/hr; billed rate read after start)
+[21:22:33Z] --- gemma-4-26B-A4B.qat-google-q4_0.mtp on RTX 3090 42093967 contract 46917375 (offer $0.0896/hr; billed rate read after start)
+[21:22:33Z] --- gemma-4-26B-A4B.qat-unsloth-UDQ4.mtp on RTX 3090 42093969 contract 46917377 (offer $0.0896/hr; billed rate read after start)
+[21:22:33Z] --- Qwen3.6-27B.UD-Q4_K_XL.mtp on RTX 3090 42093969 contract 46917376 (offer $0.0896/hr; billed rate read after start)
+[21:25:24Z] === 8 arms, RTX 3090, cap $0.300/hr each
+[21:25:24Z]     placing 8 arm(s) concurrently
+[21:25:25Z] --- gemma-4-26B-A4B.qat-unsloth-UDQ4.mtp on RTX 3090 46854548 contract 46917581 (offer $0.0956/hr; billed rate read after start)
+[21:25:25Z] --- Qwen3.6-27B.UD-Q4_K_XL.mtp on RTX 3090 45276982 contract 46917582 (offer $0.0961/hr; billed rate read after start)
+[21:25:25Z] --- gemma-4-31B-it.qat-UD-Q4_K_XL.mtp on RTX 3090 46176297 contract 46917585 (offer $0.1003/hr; billed rate read after start)
+[21:25:25Z] --- gemma-4-12B-it.qat-UD-Q4_K_XL.mtp on RTX 3090 45782263 contract 46917586 (offer $0.0982/hr; billed rate read after start)
+[21:25:25Z] --- gemma-4-26B-A4B.qat-google-q4_0.mtp on RTX 3090 42093973 contract 46917583 (offer $0.0896/hr; billed rate read after start)
+[21:25:25Z] --- Qwen3.6-35B-A3B.UD-Q4_K_XL.mtp on RTX 3090 45175058 contract 46917588 (offer $0.1028/hr; billed rate read after start)
+[21:25:25Z] --- gemma-4-12B-it.UD-Q4_K_XL.mtp on RTX 3090 46756222 contract 46917584 (offer $0.1119/hr; billed rate read after start)
+[21:25:25Z] --- gemma-4-31B-it.UD-Q4_K_XL.mtp on RTX 3090 46002025 contract 46917587 (offer $0.1030/hr; billed rate read after start)
+[21:25:57Z]     host 46854548 unusable (container failed: Error response from daemon: failed to create task for container: failed to create shim tas); destroying and re-placing
+[21:25:58Z] --- gemma-4-26B-A4B.qat-unsloth-UDQ4.mtp on RTX 3090 42492585 contract 46917642 (offer $0.1163/hr; billed rate read after start)
+[21:29:51Z]     billed $0.1127/hr (offer said $0.0982)
+[21:29:51Z]     healthy, loaded gemma-4-12B-it-qat-UD-Q4_K_XL.gguf; 1 variant(s): live
+[21:29:51Z]     resuming gemma-4-12B-it.qat-UD-Q4_K_XL.mtp/live: 109 done, 892 remaining
+[21:31:09Z]     billed $0.1139/hr (offer said $0.0961)
+[21:31:09Z]     healthy, loaded Qwen3.6-27B-UD-Q4_K_XL.gguf; 1 variant(s): live
+[21:32:42Z]     billed $0.1124/hr (offer said $0.1028)
+[21:32:42Z]     healthy, loaded Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf; 1 variant(s): live
+[21:36:01Z]     host 46002025 unusable (no progress for 600s (last: loading|server-cuda: Pulling from ggml-org/llama.cpp
+)); destroying and re-placing
+[21:36:04Z]     offer 44222383 unavailable (HTTP Error 400: Bad Request); next offer
+[21:36:04Z]     offer 43369585 unavailable (HTTP Error 400: Bad Request); next offer
+[21:36:05Z] --- gemma-4-31B-it.UD-Q4_K_XL.mtp on RTX 3090 36140432 contract 46918349 (offer $0.1215/hr; billed rate read after start)
+[21:36:09Z]     host 42093973 unusable (no progress for 600s (last: running|success, running ghcr.io/ggml-org/llama.cpp:server-cuda)); destroying and re-placing
+[21:36:10Z] --- gemma-4-26B-A4B.qat-google-q4_0.mtp on RTX 3090 46854546 contract 46918356 (offer $0.0956/hr; billed rate read after start)
+[21:36:11Z]     host 46176297 unusable (no progress for 600s (last: running|success, running ghcr.io/ggml-org/llama.cpp:server-cuda)); destroying and re-placing
+[21:36:12Z]     offer 46002022 unavailable (HTTP Error 410: Gone); next offer
+[21:36:13Z] --- gemma-4-31B-it.qat-UD-Q4_K_XL.mtp on RTX 3090 46773112 contract 46918363 (offer $0.1156/hr; billed rate read after start)
+[21:36:57Z]     host 46854546 unusable (container failed: Error response from daemon: failed to create task for container: failed to create shim tas); destroying and re-placing
+[21:36:59Z] --- gemma-4-26B-A4B.qat-google-q4_0.mtp on RTX 3090 46176297 contract 46918428 (offer $0.1003/hr; billed rate read after start)
+[21:37:03Z]     billed $0.1456/hr (offer said $0.1119)
+[21:37:04Z]     healthy, loaded gemma-4-12b-it-UD-Q4_K_XL.gguf; 1 variant(s): live
+[21:37:04Z]     resuming gemma-4-12B-it.UD-Q4_K_XL.mtp/live: 21 done, 980 remaining
+[21:38:30Z]     host 42492585 unusable (no progress for 600s (last: running|success, running ghcr.io/ggml-org/llama.cpp:server-cuda)); destroying and re-placing
+[21:38:31Z]     offer 43369585 unavailable (HTTP Error 400: Bad Request); next offer
+[21:38:32Z] --- gemma-4-26B-A4B.qat-unsloth-UDQ4.mtp on RTX 3090 30980636 contract 46918541 (offer $0.1222/hr; billed rate read after start)
+[21:39:00Z] === 3 arms, RTX 5090, cap $0.350/hr each
+[21:39:00Z]     placing 3 arm(s) concurrently
+[21:39:02Z] --- gemma-4-31B-it.qat-UD-Q4_K_XL.mtp on RTX 5090 19602471 contract 46918567 (offer $0.2129/hr; billed rate read after start)
+[21:39:02Z] --- gemma-4-31B-it.UD-Q4_K_XL.mtp on RTX 5090 46290453 contract 46918566 (offer $0.2956/hr; billed rate read after start)
+[21:39:02Z] --- Qwen3.6-27B.UD-Q4_K_XL.mtp on RTX 5090 44892711 contract 46918568 (offer $0.3089/hr; billed rate read after start)
+[21:39:49Z]     host 44892711 unusable (container failed: Error response from daemon: failed to create task for container: failed to create shim tas); destroying and re-placing
+[21:39:51Z] --- Qwen3.6-27B.UD-Q4_K_XL.mtp on RTX 5090 46375916 contract 46918612 (offer $0.3089/hr; billed rate read after start)
+[21:40:43Z] === 5 arms, RTX 3090, cap $0.300/hr each
+[21:40:43Z]     placing 5 arm(s) concurrently
+[21:40:44Z] --- gemma-4-12B-it.qat-UD-Q4_K_XL.mtp on RTX 3090 42093967 contract 46918661 (offer $0.0896/hr; billed rate read after start)
+[21:40:44Z] --- Qwen3.6-35B-A3B.UD-Q4_K_XL.mtp on RTX 3090 46854546 contract 46918660 (offer $0.0956/hr; billed rate read after start)
+[21:40:44Z] --- gemma-4-12B-it.UD-Q4_K_XL.mtp on RTX 3090 46756226 contract 46918663 (offer $0.1119/hr; billed rate read after start)
+[21:40:44Z] --- gemma-4-26B-A4B.qat-google-q4_0.mtp on RTX 3090 45175058 contract 46918664 (offer $0.1028/hr; billed rate read after start)
+[21:40:44Z] --- gemma-4-26B-A4B.qat-unsloth-UDQ4.mtp on RTX 3090 46002022 contract 46918662 (offer $0.1030/hr; billed rate read after start)
+[21:41:06Z]     host 46290453 unusable (container failed: Error response from daemon: failed to create task for container: failed to create shim tas); destroying and re-placing
+[21:41:08Z] --- gemma-4-31B-it.UD-Q4_K_XL.mtp on RTX 5090 44892715 contract 46918693 (offer $0.3089/hr; billed rate read after start)
+[21:41:26Z] === 5 arms, RTX 3090, cap $0.300/hr each
+[21:41:26Z]     placing 5 arm(s) concurrently
+[21:41:27Z]     offer 46002022 unavailable (HTTP Error 400: Bad Request); next offer
+[21:41:27Z] --- gemma-4-26B-A4B.qat-unsloth-UDQ4.mtp on RTX 3090 46854550 contract 46918707 (offer $0.0956/hr; billed rate read after start)
+[21:41:27Z] --- gemma-4-26B-A4B.qat-google-q4_0.mtp on RTX 3090 42093973 contract 46918708 (offer $0.0896/hr; billed rate read after start)
+[21:41:27Z] --- gemma-4-12B-it.qat-UD-Q4_K_XL.mtp on RTX 3090 46176297 contract 46918709 (offer $0.1003/hr; billed rate read after start)
+[21:41:27Z] --- Qwen3.6-35B-A3B.UD-Q4_K_XL.mtp on RTX 3090 46756222 contract 46918710 (offer $0.1119/hr; billed rate read after start)
+[21:41:27Z]     offer 43369585 unavailable (HTTP Error 400: Bad Request); next offer
+[21:41:28Z] --- gemma-4-12B-it.UD-Q4_K_XL.mtp on RTX 3090 36140432 contract 46918713 (offer $0.1215/hr; billed rate read after start)
+[21:41:31Z]     host 46854546 unusable (container failed: Error response from daemon: failed to create task for container: failed to create shim tas); destroying and re-placing
+[21:41:32Z]     offer 46176297 unavailable (HTTP Error 400: Bad Request); next offer
+[21:41:33Z]     offer 43369585 unavailable (HTTP Error 400: Bad Request); next offer
+[21:41:33Z]     offer 36140432 unavailable (HTTP Error 400: Bad Request); next offer
+[21:41:34Z] --- Qwen3.6-35B-A3B.UD-Q4_K_XL.mtp on RTX 3090 40887479 contract 46918723 (offer $0.1237/hr; billed rate read after start)
+[21:41:39Z]     host 44892715 unusable (container failed: Error response from daemon: failed to create task for container: failed to create shim tas); destroying and re-placing
+[21:41:40Z] --- gemma-4-31B-it.UD-Q4_K_XL.mtp on RTX 5090 32946821 contract 46918728 (offer $0.3111/hr; billed rate read after start)
+[21:41:43Z]     host 46854550 unusable (container failed: Error response from daemon: failed to create task for container: failed to create shim tas); destroying and re-placing
+[21:41:44Z] --- gemma-4-26B-A4B.qat-unsloth-UDQ4.mtp on RTX 3090 46002021 contract 46918733 (offer $0.1030/hr; billed rate read after start)
+[21:43:52Z]     billed $0.1124/hr (offer said $0.1028)
+[21:43:52Z]     healthy, loaded gemma-4-26B_q4_0-it.gguf; 1 variant(s): live
+[21:44:05Z]     billed $0.1311/hr (offer said $0.1215)
+[21:44:05Z]     healthy, loaded gemma-4-12b-it-UD-Q4_K_XL.gguf; 1 variant(s): live
+[21:44:05Z]     resuming gemma-4-12B-it.UD-Q4_K_XL.mtp/live: 21 done, 980 remaining
+[21:49:06Z]     host 19602471 unusable (no progress for 600s (last: None|)); destroying and re-placing
+[21:49:07Z] --- gemma-4-31B-it.qat-UD-Q4_K_XL.mtp on RTX 5090 46290453 contract 46919241 (offer $0.2956/hr; billed rate read after start)
+[21:49:39Z]     host 46290453 unusable (container failed: Error response from daemon: failed to create task for container: failed to create shim tas); destroying and re-placing
+[21:49:40Z] --- gemma-4-31B-it.qat-UD-Q4_K_XL.mtp on RTX 5090 44892716 contract 46919264 (offer $0.3089/hr; billed rate read after start)
+[21:49:48Z]     billed $0.1456/hr (offer said $0.1119)
+[21:49:49Z]     healthy, loaded gemma-4-12b-it-UD-Q4_K_XL.gguf; 1 variant(s): live
+[21:49:49Z]     resuming gemma-4-12B-it.UD-Q4_K_XL.mtp/live: 21 done, 980 remaining
+[21:50:11Z]     host 44892716 unusable (container failed: Error response from daemon: failed to create task for container: failed to create shim tas); destroying and re-placing
+[21:50:13Z] --- gemma-4-31B-it.qat-UD-Q4_K_XL.mtp on RTX 5090 44515555 contract 46919291 (offer $0.3222/hr; billed rate read after start)
+[21:50:59Z]     host 46375916 unusable (no progress for 600s (last: running|success, running ghcr.io/ggml-org/llama.cpp:server-cuda)); destroying and re-placing
+[21:51:01Z] --- Qwen3.6-27B.UD-Q4_K_XL.mtp on RTX 5090 45835593 contract 46919340 (offer $0.3230/hr; billed rate read after start)
+[21:51:30Z]     host 42093967 unusable (no progress for 600s (last: running|success, running ghcr.io/ggml-org/llama.cpp:server-cuda)); destroying and re-placing
+[21:51:31Z] --- gemma-4-12B-it.qat-UD-Q4_K_XL.mtp on RTX 3090 46854554 contract 46919378 (offer $0.0956/hr; billed rate read after start)
+[21:51:35Z]     host 46002022 unusable (no progress for 600s (last: loading|server-cuda: Pulling from ggml-org/llama.cpp
+)); destroying and re-placing
+[21:51:37Z]     offer 43369585 unavailable (HTTP Error 400: Bad Request); next offer
+[21:51:37Z]     offer 36140432 unavailable (HTTP Error 400: Bad Request); next offer
+[21:51:38Z] --- gemma-4-26B-A4B.qat-unsloth-UDQ4.mtp on RTX 3090 30980636 contract 46919382 (offer $0.1222/hr; billed rate read after start)
+[21:51:47Z]     host 46854554 unusable (container failed: Error response from daemon: failed to create task for container: failed to create shim tas); destroying and re-placing
+[21:51:49Z] --- gemma-4-12B-it.qat-UD-Q4_K_XL.mtp on RTX 3090 46773112 contract 46919384 (offer $0.1156/hr; billed rate read after start)
+[21:51:51Z]     host 46756222 unusable (no progress for 600s (last: running|success, running ghcr.io/ggml-org/llama.cpp:server-cuda)); destroying and re-placing
+[21:51:53Z] --- Qwen3.6-35B-A3B.UD-Q4_K_XL.mtp on RTX 3090 44222386 contract 46919391 (offer $0.1163/hr; billed rate read after start)
+[21:52:20Z]     host 46002021 unusable (no progress for 600s (last: loading|server-cuda: Pulling from ggml-org/llama.cpp
+)); destroying and re-placing
+[21:52:21Z] --- gemma-4-26B-A4B.qat-unsloth-UDQ4.mtp on RTX 3090 45513003 contract 46919412 (offer $0.1030/hr; billed rate read after start)
+[21:52:25Z]     host 46176297 unusable (no progress for 600s (last: running|success, running ghcr.io/ggml-org/llama.cpp:server-cuda)); destroying and re-placing
+[21:52:26Z]     host 42093973 unusable (no progress for 600s (last: running|success, running ghcr.io/ggml-org/llama.cpp:server-cuda)); destroying and re-placing
+[21:52:26Z] --- gemma-4-12B-it.qat-UD-Q4_K_XL.mtp on RTX 3090 46756227 contract 46919419 (offer $0.1119/hr; billed rate read after start)
+[21:52:27Z]     offer 46854554 unavailable (HTTP Error 400: Bad Request); next offer
+[21:52:28Z] --- gemma-4-26B-A4B.qat-google-q4_0.mtp on RTX 3090 46176297 contract 46919420 (offer $0.1003/hr; billed rate read after start)
+[21:53:00Z]     host 40887479 unusable (no progress for 600s (last: running|success, running ghcr.io/ggml-org/llama.cpp:server-cuda)); destroying and re-placing
+[21:53:01Z] --- Qwen3.6-35B-A3B.UD-Q4_K_XL.mtp on RTX 3090 31323638 contract 46919485 (offer $0.1244/hr; billed rate read after start)
+[21:54:25Z]     billed $0.1300/hr (offer said $0.1156)
+[21:54:26Z]     healthy, loaded gemma-4-12B-it-qat-UD-Q4_K_XL.gguf; 1 variant(s): live
+[21:54:26Z]     resuming gemma-4-12B-it.qat-UD-Q4_K_XL.mtp/live: 109 done, 892 remaining
+[21:56:20Z] === 2 arms, RTX 5090, cap $0.350/hr each
+[21:56:20Z]     placing 2 arm(s) concurrently
+[21:56:21Z] --- Qwen3.6-35B-A3B.UD-Q4_K_XL.mtp on RTX 5090 19602471 contract 46919706 (offer $0.2129/hr; billed rate read after start)
+[21:56:22Z] --- Qwen3.6-27B.UD-Q4_K_XL.mtp on RTX 5090 46290453 contract 46919707 (offer $0.2956/hr; billed rate read after start)
+[21:57:09Z]     host 46290453 unusable (container failed: Error response from daemon: failed to create task for container: failed to create shim tas); destroying and re-placing
+[21:57:10Z] --- Qwen3.6-27B.UD-Q4_K_XL.mtp on RTX 5090 44892715 contract 46919746 (offer $0.3089/hr; billed rate read after start)
+[21:57:41Z]     host 44892715 unusable (container failed: Error response from daemon: failed to create task for container: failed to create shim tas); destroying and re-placing
+[21:57:42Z] --- Qwen3.6-27B.UD-Q4_K_XL.mtp on RTX 5090 44515556 contract 46919796 (offer $0.3222/hr; billed rate read after start)
+[21:58:33Z]     billed $0.3422/hr (offer said $0.3230)
+[21:58:33Z]     healthy, loaded Qwen3.6-27B-UD-Q4_K_XL.gguf; 1 variant(s): live
+[21:59:28Z]     host 32946821 unusable (no progress for 600s (last: running|success, running ghcr.io/ggml-org/llama.cpp:server-cuda)); destroying and re-placing
+[21:59:30Z] --- gemma-4-31B-it.UD-Q4_K_XL.mtp on RTX 5090 46579458 contract 46919937 (offer $0.3296/hr; billed rate read after start)
+[22:00:57Z]     billed $0.1456/hr (offer said $0.1119)
+[22:00:58Z]     healthy, loaded gemma-4-12B-it-qat-UD-Q4_K_XL.gguf; 1 variant(s): live
+[22:00:58Z]     resuming gemma-4-12B-it.qat-UD-Q4_K_XL.mtp/live: 109 done, 892 remaining
+[22:01:36Z]     host 44515555 unusable (no progress for 600s (last: running|success, running ghcr.io/ggml-org/llama.cpp:server-cuda)); destroying and re-placing
+[22:01:37Z]     offer 46251991 unavailable (HTTP Error 400: Bad Request); next offer
+[22:01:38Z] --- gemma-4-31B-it.qat-UD-Q4_K_XL.mtp on RTX 5090 46731152 contract 46920077 (offer $0.3348/hr; billed rate read after start)
+[22:02:47Z]     host 30980636 unusable (no progress for 600s (last: running|success, running ghcr.io/ggml-org/llama.cpp:server-cuda)); destroying and re-placing
+[22:02:48Z] --- gemma-4-26B-A4B.qat-unsloth-UDQ4.mtp on RTX 3090 40436852 contract 46920136 (offer $0.1241/hr; billed rate read after start)
+[22:03:06Z]     host 46176297 unusable (no progress for 600s (last: running|success, running ghcr.io/ggml-org/llama.cpp:server-cuda)); destroying and re-placing
+[22:03:07Z]     offer 46002021 unavailable (HTTP Error 400: Bad Request); next offer
+[22:03:08Z] --- gemma-4-26B-A4B.qat-google-q4_0.mtp on RTX 3090 42492585 contract 46920153 (offer $0.1163/hr; billed rate read after start)
+[22:04:17Z]     host 31323638 unusable (no progress for 600s (last: running|success, running ghcr.io/ggml-org/llama.cpp:server-cuda)); destroying and re-placing
+[22:04:18Z] --- Qwen3.6-35B-A3B.UD-Q4_K_XL.mtp on RTX 3090 35413598 contract 46920223 (offer $0.1244/hr; billed rate read after start)
+[22:05:56Z]     gemma-4-12B-it.UD-Q4_K_XL.mtp/live: instance 46918663 vanished mid-arm (preempted); killing client
+[22:05:56Z]     gemma-4-12B-it.UD-Q4_K_XL.mtp/live preempted; 50 rows kept for resume
+[22:05:56Z] REQUEUE gemma-4-12B-it.UD-Q4_K_XL.mtp after preemption
+[22:05:59Z] --- gemma-4-12B-it.UD-Q4_K_XL.mtp on RTX 3090 46854557 contract 46920325 (offer $0.0956/hr; billed rate read after start)
+[22:06:04Z]     gemma-4-26B-A4B.qat-google-q4_0.mtp/live: instance 46918664 vanished mid-arm (preempted); killing client
+[22:06:04Z]     gemma-4-26B-A4B.qat-google-q4_0.mtp/live preempted; 106 rows kept for resume
+[22:06:04Z] REQUEUE gemma-4-26B-A4B.qat-google-q4_0.mtp after preemption
+[22:06:06Z] --- gemma-4-26B-A4B.qat-google-q4_0.mtp on RTX 3090 42093973 contract 46920328 (offer $0.0896/hr; billed rate read after start)
+[22:06:13Z] === 8 arms, RTX 3090, cap $0.300/hr each
+[22:06:13Z]     placing 8 arm(s) concurrently
+[22:06:14Z] --- Qwen3.6-35B-A3B.UD-Q4_K_XL.mtp on RTX 3090 45782263 contract 46920340 (offer $0.0982/hr; billed rate read after start)
+[22:06:14Z] --- Qwen3.6-27B.UD-Q4_K_XL.mtp on RTX 3090 46854550 contract 46920339 (offer $0.0956/hr; billed rate read after start)
+[22:06:14Z] --- gemma-4-31B-it.UD-Q4_K_XL.mtp on RTX 3090 42093969 contract 46920338 (offer $0.0896/hr; billed rate read after start)
+[22:06:14Z] --- gemma-4-26B-A4B.qat-google-q4_0.mtp on RTX 3090 45276982 contract 46920341 (offer $0.0961/hr; billed rate read after start)
+[22:06:14Z] --- gemma-4-12B-it.qat-UD-Q4_K_XL.mtp on RTX 3090 46176297 contract 46920345 (offer $0.1003/hr; billed rate read after start)
+[22:06:14Z] --- gemma-4-12B-it.UD-Q4_K_XL.mtp on RTX 3090 46756222 contract 46920343 (offer $0.1119/hr; billed rate read after start)
+[22:06:14Z] --- gemma-4-31B-it.qat-UD-Q4_K_XL.mtp on RTX 3090 45175058 contract 46920344 (offer $0.1028/hr; billed rate read after start)
+[22:06:15Z] --- gemma-4-26B-A4B.qat-unsloth-UDQ4.mtp on RTX 3090 46002018 contract 46920342 (offer $0.1030/hr; billed rate read after start)
+[22:06:30Z]     host 46854557 unusable (container failed: Error response from daemon: failed to create task for container: failed to create shim tas); destroying and re-placing
+[22:06:31Z]     offer 45276982 unavailable (HTTP Error 400: Bad Request); next offer
+[22:06:31Z]     gemma-4-12B-it.qat-UD-Q4_K_XL.mtp/live: instance 46919384 vanished mid-arm (preempted); killing client
+[22:06:31Z]     gemma-4-12B-it.qat-UD-Q4_K_XL.mtp/live preempted; 0 rows kept for resume
+[22:06:31Z] REQUEUE gemma-4-12B-it.qat-UD-Q4_K_XL.mtp after preemption
+[22:06:32Z]     offer 46176297 unavailable (HTTP Error 400: Bad Request); next offer
+[22:06:32Z] --- gemma-4-12B-it.UD-Q4_K_XL.mtp on RTX 3090 46002025 contract 46920359 (offer $0.1030/hr; billed rate read after start)
+[22:06:33Z] --- gemma-4-12B-it.qat-UD-Q4_K_XL.mtp on RTX 3090 46854553 contract 46920361 (offer $0.0956/hr; billed rate read after start)
+[22:06:37Z]     host 42093973 unusable (container failed: Error response from daemon: failed to set up container networking: driver failed programmi); destroying and re-placing
+[22:06:38Z]     offer 45276982 unavailable (HTTP Error 400: Bad Request); next offer
+[22:06:39Z] --- gemma-4-26B-A4B.qat-google-q4_0.mtp on RTX 3090 45513003 contract 46920368 (offer $0.1030/hr; billed rate read after start)
+[22:06:56Z]     host 46854550 unusable (container failed: Error response from daemon: failed to create task for container: failed to create shim tas); destroying and re-placing
+[22:06:57Z] --- Qwen3.6-27B.UD-Q4_K_XL.mtp on RTX 3090 42492585 contract 46920392 (offer $0.1163/hr; billed rate read after start)
+[22:07:20Z]     host 46854553 unusable (container failed: Error response from daemon: failed to create task for container: failed to create shim tas); destroying and re-placing
+[22:07:21Z]     offer 42492585 unavailable (HTTP Error 400: Bad Request); next offer
+[22:07:22Z]     offer 43369585 unavailable (HTTP Error 400: Bad Request); next offer
+[22:07:22Z] --- gemma-4-12B-it.qat-UD-Q4_K_XL.mtp on RTX 3090 36140432 contract 46920433 (offer $0.1215/hr; billed rate read after start)
+[22:10:25Z] === 4 arms, RTX 5090, cap $0.400/hr each
+[22:10:25Z]     placing 4 arm(s) concurrently
+[22:10:26Z]     offer 19602471 unavailable (HTTP Error 400: Bad Request); next offer
+[22:10:27Z] --- gemma-4-31B-it.UD-Q4_K_XL.mtp on RTX 5090 44892716 contract 46920653 (offer $0.3089/hr; billed rate read after start)
+[22:10:27Z] --- Qwen3.6-27B.UD-Q4_K_XL.mtp on RTX 5090 32946821 contract 46920654 (offer $0.3111/hr; billed rate read after start)
+[22:10:27Z] --- gemma-4-31B-it.qat-UD-Q4_K_XL.mtp on RTX 5090 46809563 contract 46920656 (offer $0.3296/hr; billed rate read after start)
+[22:10:27Z] --- Qwen3.6-35B-A3B.UD-Q4_K_XL.mtp on RTX 5090 46290454 contract 46920652 (offer $0.2956/hr; billed rate read after start)
+[22:10:31Z] === 4 arms, RTX 3090, cap $0.300/hr each
+[22:10:31Z]     placing 4 arm(s) concurrently
+[22:10:33Z] --- gemma-4-26B-A4B.qat-unsloth-UDQ4.mtp on RTX 3090 42093969 contract 46920667 (offer $0.0896/hr; billed rate read after start)
+[22:10:33Z] --- gemma-4-12B-it.UD-Q4_K_XL.mtp on RTX 3090 46854550 contract 46920668 (offer $0.0956/hr; billed rate read after start)
+[22:10:33Z] --- gemma-4-12B-it.qat-UD-Q4_K_XL.mtp on RTX 3090 45276982 contract 46920669 (offer $0.0961/hr; billed rate read after start)
+[22:10:33Z] --- gemma-4-26B-A4B.qat-google-q4_0.mtp on RTX 3090 46176297 contract 46920670 (offer $0.1003/hr; billed rate read after start)
+[22:10:48Z]     host 44892716 unusable (container failed: Error response from daemon: failed to create task for container: failed to create shim tas); destroying and re-placing
+[22:10:49Z] --- gemma-4-31B-it.UD-Q4_K_XL.mtp on RTX 5090 46731152 contract 46920693 (offer $0.3348/hr; billed rate read after start)
+[22:10:54Z]     host 46854550 unusable (container failed: Error response from daemon: failed to create task for container: failed to create shim tas); destroying and re-placing
+[22:10:55Z] --- gemma-4-12B-it.UD-Q4_K_XL.mtp on RTX 3090 45175058 contract 46920696 (offer $0.1028/hr; billed rate read after start)
+[22:12:59Z]     billed $0.1124/hr (offer said $0.1028)
+[22:12:59Z]     healthy, loaded gemma-4-12b-it-UD-Q4_K_XL.gguf; 1 variant(s): live
+[22:13:19Z]     billed $0.1139/hr (offer said $0.0961)
+[22:13:19Z]     healthy, loaded gemma-4-12B-it-qat-UD-Q4_K_XL.gguf; 1 variant(s): live
+[22:16:12Z]     host 46731152 unusable (no progress for 600s (last: None|)); destroying and re-placing
+[22:16:12Z]     host 35413598 unusable (no progress for 600s (last: None|)); destroying and re-placing
+[22:16:13Z] --- gemma-4-31B-it.qat-UD-Q4_K_XL.mtp on RTX 5090 46250790 contract 46921062 (offer $0.3348/hr; billed rate read after start)
+[22:16:13Z] --- Qwen3.6-35B-A3B.UD-Q4_K_XL.mtp on RTX 3090 43861052 contract 46921063 (offer $0.1244/hr; billed rate read after start)
+[22:16:16Z]     host 46579458 unusable (no progress for 600s (last: None|)); destroying and re-placing
+[22:16:17Z]     offer 46251991 unavailable (HTTP Error 400: Bad Request); next offer
+[22:16:17Z]     offer 46731152 unavailable (HTTP Error 400: Bad Request); next offer
+[22:16:18Z] --- gemma-4-31B-it.UD-Q4_K_XL.mtp on RTX 5090 31893246 contract 46921075 (offer $0.3356/hr; billed rate read after start)
+[22:16:21Z]     host 40436852 unusable (no progress for 600s (last: None|)); destroying and re-placing
+[22:16:22Z] --- gemma-4-26B-A4B.qat-unsloth-UDQ4.mtp on RTX 3090 46497946 contract 46921077 (offer $0.1289/hr; billed rate read after start)
+[22:18:20Z]     host 45513003 unusable (no progress for 600s (last: None|)); destroying and re-placing
+[22:18:21Z] --- gemma-4-26B-A4B.qat-google-q4_0.mtp on RTX 3090 44222386 contract 46921226 (offer $0.1163/hr; billed rate read after start)
+[22:18:25Z]     host 46002025 unusable (no progress for 600s (last: None|)); destroying and re-placing
+[22:18:27Z] --- gemma-4-12B-it.UD-Q4_K_XL.mtp on RTX 3090 43824378 contract 46921235 (offer $0.1163/hr; billed rate read after start)
+[22:18:28Z]     host 36140432 unusable (no progress for 600s (last: None|)); destroying and re-placing
+[22:18:29Z] --- gemma-4-12B-it.qat-UD-Q4_K_XL.mtp on RTX 3090 30980636 contract 46921238 (offer $0.1222/hr; billed rate read after start)
+[22:22:36Z]     billed $0.1433/hr (offer said $0.1289)
+[22:22:37Z]     healthy, loaded gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf; 1 variant(s): live
+[22:26:22Z]     host 31893246 unusable (no progress for 600s (last: None|)); destroying and re-placing
+[22:26:24Z] --- gemma-4-31B-it.UD-Q4_K_XL.mtp on RTX 5090 46468167 contract 46921745 (offer $0.3356/hr; billed rate read after start)
+[22:26:42Z] === 1 arms, RTX 5090, cap $0.400/hr each
+[22:26:42Z]     placing 1 arm(s) concurrently
+[22:26:44Z] --- Qwen3.6-35B-A3B.UD-Q4_K_XL.mtp on RTX 5090 19602471 contract 46921768 (offer $0.2129/hr; billed rate read after start)
+[22:27:21Z]     host 46250790 unusable (no progress for 600s (last: running|success, running ghcr.io/ggml-org/llama.cpp:server-cuda)); destroying and re-placing
+[22:27:22Z] --- gemma-4-31B-it.qat-UD-Q4_K_XL.mtp on RTX 5090 31893246 contract 46921805 (offer $0.3356/hr; billed rate read after start)
+[22:27:51Z]     billed $0.1789/hr (offer said $0.1163)
+[22:27:52Z]     healthy, loaded gemma-4-12b-it-UD-Q4_K_XL.gguf; 1 variant(s): live
+[22:28:59Z]     host 44222386 unusable (no progress for 600s (last: running|success, running ghcr.io/ggml-org/llama.cpp:server-cuda)); destroying and re-placing
+[22:29:00Z]     offer 43369585 unavailable (HTTP Error 400: Bad Request); next offer
+[22:29:01Z] --- gemma-4-26B-A4B.qat-google-q4_0.mtp on RTX 3090 36140432 contract 46921934 (offer $0.1215/hr; billed rate read after start)
+[22:29:23Z]     host 30980636 unusable (no progress for 600s (last: running|success, running ghcr.io/ggml-org/llama.cpp:server-cuda)); destroying and re-placing
+[22:29:24Z] --- gemma-4-12B-it.qat-UD-Q4_K_XL.mtp on RTX 3090 36038721 contract 46921956 (offer $0.1236/hr; billed rate read after start)
+[22:33:28Z]     billed $0.1311/hr (offer said $0.1215)
+[22:33:29Z]     healthy, loaded gemma-4-26B_q4_0-it.gguf; 1 variant(s): live
+[22:36:54Z]     host 43861052 unusable (no progress for 600s (last: None|)); destroying and re-placing
+[22:36:55Z] --- Qwen3.6-35B-A3B.UD-Q4_K_XL.mtp on RTX 3090 45123232 contract 46922437 (offer $0.1289/hr; billed rate read after start)
+[22:37:27Z]     host 31893246 unusable (no progress for 600s (last: None|)); destroying and re-placing
+[22:37:29Z] --- gemma-4-31B-it.qat-UD-Q4_K_XL.mtp on RTX 5090 37942352 contract 46922477 (offer $0.3356/hr; billed rate read after start)
+[22:38:01Z]     host 37942352 unusable (container failed: Error response from daemon: Head "https://ghcr.io/v2/ggml-org/llama.cpp/manifests/server-c); destroying and re-placing
+[22:38:03Z] --- gemma-4-31B-it.qat-UD-Q4_K_XL.mtp on RTX 5090 45237744 contract 46922523 (offer $0.3356/hr; billed rate read after start)
+[22:38:18Z]     host 46731152 unusable (instance exited: success, running ghcr.io/ggml-org/llama.cpp:server-cuda); destroying and re-placing
+[22:38:19Z]     offer 46476330 unavailable (HTTP Error 400: Bad Request); next offer
+[22:38:19Z] --- gemma-4-31B-it.UD-Q4_K_XL.mtp on RTX 5090 31893246 contract 46922555 (offer $0.3356/hr; billed rate read after start)
+[22:38:40Z]     host 46468167 unusable (no progress for 600s (last: running|success, running ghcr.io/ggml-org/llama.cpp:server-cuda)); destroying and re-placing
+[22:38:42Z] --- gemma-4-31B-it.UD-Q4_K_XL.mtp on RTX 5090 37942352 contract 46922575 (offer $0.3356/hr; billed rate read after start)
+[22:39:29Z]     host 37942352 unusable (container failed: Error response from daemon: failed to create task for container: failed to create shim tas); destroying and re-placing
+[22:39:30Z] --- gemma-4-31B-it.UD-Q4_K_XL.mtp on RTX 5090 44173733 contract 46922633 (offer $0.3370/hr; billed rate read after start)
+[22:40:48Z]     host 36038721 unusable (no progress for 600s (last: running|success, running ghcr.io/ggml-org/llama.cpp:server-cuda)); destroying and re-placing
+[22:40:49Z] --- gemma-4-12B-it.qat-UD-Q4_K_XL.mtp on RTX 3090 40436852 contract 46922706 (offer $0.1241/hr; billed rate read after start)
+[22:46:46Z]     billed $0.3100/hr (offer said $0.2956)
+[22:46:48Z]     healthy, loaded Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf; 1 variant(s): live
+[22:49:23Z]     billed $0.3500/hr (offer said $0.3356)
+[22:49:24Z]     healthy, loaded gemma-4-31B-it-qat-UD-Q4_K_XL.gguf; 1 variant(s): live
+[22:49:37Z]     host 45123232 unusable (no progress for 600s (last: running|success, running ghcr.io/ggml-org/llama.cpp:server-cuda)); destroying and re-placing
+[22:49:39Z] --- Qwen3.6-35B-A3B.UD-Q4_K_XL.mtp on RTX 3090 41406006 contract 46923381 (offer $0.1304/hr; billed rate read after start)
+[22:51:49Z]     host 40436852 unusable (no progress for 600s (last: running|success, running ghcr.io/ggml-org/llama.cpp:server-cuda)); destroying and re-placing
+[22:51:50Z]     offer 44042298 unavailable (HTTP Error 400: Bad Request); next offer
+[22:51:51Z] --- gemma-4-12B-it.qat-UD-Q4_K_XL.mtp on RTX 3090 43861058 contract 46923500 (offer $0.1244/hr; billed rate read after start)
+[22:53:37Z]     host 44173733 unusable (no progress for 600s (last: running|success, running ghcr.io/ggml-org/llama.cpp:server-cuda)); destroying and re-placing
+[22:53:38Z] --- gemma-4-31B-it.UD-Q4_K_XL.mtp on RTX 5090 45380606 contract 46923622 (offer $0.3370/hr; billed rate read after start)
+[22:56:25Z]     billed $0.1544/hr (offer said $0.1304)
+[22:56:25Z]     healthy, loaded Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf; 1 variant(s): live
