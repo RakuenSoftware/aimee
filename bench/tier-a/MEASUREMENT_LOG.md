@@ -1725,3 +1725,55 @@ it cost most of a day plus one fabricated headline number.
 JSON over three ssh tunnels. Nothing in the harness looks at load, and no
 diagnostic printed the client count. `pgrep -c run_llamacpp` would have answered
 it in one second at any point in the preceding six hours.
+
+## Defect 37: a model that answers in a tool-call envelope scores ~0 and looks incapable
+
+LFM2.5-230M returned strict F1 **0.0022** on 1001 notes. It is not failing at
+extraction. It is answering in a different envelope:
+
+```
+<|tool_call_start|>[{"name": "facts", "arguments": {"subject": "Vera Duarte",
+  "relation": "joined", "object": "retrieval team", "confidence": 0.9,
+  "negated": false}}]<|tool_call_end|>
+```
+
+That is the correct triple for the first note -- the same one gemma-4 produces.
+The harness expects `{"facts":[...]}`, so the row parses as JSON (parse_ok
+1000/1001) but fails the schema (schema_ok 16/1001), and 1001 notes yield 22
+predicted triples.
+
+**982 of 1001 rows** used the tool-call envelope.
+
+Re-parsing those rows and re-scoring:
+
+| | strict F1 | precision | recall | tp | fp | fn |
+|---|---:|---:|---:|---:|---:|---:|
+| as scored by score.py | 0.0022 | - | - | - | - | - |
+| re-parsed from tool-calls | **0.1564** | 0.1517 | 0.1614 | 142 | 794 | 738 |
+
+The harness understates this model by roughly **71x**.
+
+### Both numbers are wrong to publish alone
+
+0.0022 measures the envelope, not the model. 0.1564 is not harness-validated --
+it comes from an ad-hoc re-parse rather than score.py's audited path, and the
+mapping from tool-call arguments to the fact schema was chosen by hand.
+
+What is safe to say: even parsed generously, 230M lands at ~0.156 against a field
+whose next-lowest member is granite-4.0-1b at 0.3911. It is genuinely weak at
+this task AND genuinely mis-measured. Either fact alone misleads.
+
+### Scope, unmeasured
+
+Unknown how many other arms in this benchmark are affected. `results/sub1b/`
+holds seven models scored at 70 notes, including an earlier LFM2.5-230M at
+0.1061, and nothing has checked whether their low scores are capability or
+envelope. The check is cheap -- grep the `raw` field for `tool_call` -- and has
+not been run across the corpus of banked predictions.
+
+### Not fixed
+
+score.py was NOT changed. Adding tool-call parsing mid-benchmark would alter the
+scoring path for every banked arm and break comparability with everything already
+measured. The decision of whether to add it, and re-score the field, belongs to
+whoever owns the article -- it is a change to the instrument, not a bug fix.

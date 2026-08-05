@@ -1,0 +1,18 @@
+[21:32:04Z] === waiting for the 2.6B sweep to release the 5080
+[01:41:06Z] === 5080 free; starting the rest of the LFM2.5 range, 1001 notes each
+[01:41:06Z] --- LFM2.5-230M.Q4_K_M  LiquidAI/LFM2.5-230M-GGUF:Q4_K_M  nproc=3  no MTP
+[01:41:12Z] sizing: starting one server to measure resident VRAM
+[01:41:44Z]   one instance uses 576 MiB of 16303 MiB
+[01:41:44Z]   -> running 3 processes, cache-ram 1024 MiB each
+[01:42:16Z]   all 3 servers up; VRAM now 1718 MiB
+[01:42:16Z] START LFM2.5-230M.Q4_K_M across 3 shards
+merged 1001 rows, 0 missing
+[01:43:04Z] DONE LFM2.5-230M.Q4_K_M rows=1001/1001 wall=0m48s procs=3 retries=0
+[01:43:10Z]   thinking guard fired; re-scoring with --allow-thinking-off
+[01:43:10Z] OK   LFM2.5-230M.Q4_K_M strictF1=0.0022 wall=2m
+[01:43:10Z] --- LFM2.5-230M.Q6_K  LiquidAI/LFM2.5-230M-GGUF:Q6_K  nproc=3  no MTP
+[01:43:16Z] sizing: starting one server to measure resident VRAM
+[01:43:47Z]   one instance uses 610 MiB of 16303 MiB
+[01:43:47Z]   -> running 3 processes, cache-ram 1024 MiB each
+[01:44:19Z]   all 3 servers up; VRAM now 1820 MiB
+[01:44:19Z] START LFM2.5-230M.Q6_K across 3 shards
