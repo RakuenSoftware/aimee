@@ -11,7 +11,8 @@
 /* Scan timeout is generous because canonical scans of large monorepos can take
  * tens of seconds. The shared v1 helpers choose remote HTTP when configured and
  * otherwise tunnel the same /v1 route over the local UDS transport. */
-#define KB_CLIENT_INDEX_SCAN_TIMEOUT_MS (5 * 60 * 1000)
+#define KB_CLIENT_INDEX_SCAN_TIMEOUT_DEFAULT_MS (5 * 60 * 1000)
+
 #define KB_CLIENT_INDEX_READ_TIMEOUT_MS (5 * 1000)
 
 static int kb_index_find_parse(cJSON *resp, term_hit_t *out, int max)
@@ -176,10 +177,31 @@ int kb_client_code_scan_push(const char *name, const char *root, int force, void
    if (files_arr)
       cJSON_AddItemToObject(req, "files", files_arr);
 
-   char *json = kb_client_v1_post_json("/v1/code/scan", req, KB_CLIENT_INDEX_SCAN_TIMEOUT_MS, NULL);
+   int timeout_ms = kb_client_index_scan_timeout_ms();
+   int http_status = 0;
+   char *json = kb_client_v1_post_json("/v1/code/scan", req, timeout_ms, &http_status);
    cJSON_Delete(req);
    if (!json)
-      return kb_client_index_scan_apply_response(NULL, out);
+   {
+      /* Say which failure this was. Collapsing every empty reply into "knowledge
+       * service unavailable" hid a scan that simply outran its timeout while the
+       * kb was healthy and still working -- the status stayed green, the health
+       * endpoint kept answering, and the operator had nothing to act on. */
+      int rc = kb_client_index_scan_apply_response(NULL, out);
+      if (out)
+      {
+         snprintf(out->reason, sizeof(out->reason), "error");
+         if (http_status >= 400)
+            snprintf(out->message, sizeof(out->message),
+                     "code index scan rejected by the knowledge service (HTTP %d)", http_status);
+         else
+            snprintf(out->message, sizeof(out->message),
+                     "code index scan got no reply within %ds — the knowledge service may still "
+                     "be scanning; raise AIMEE_KB_SCAN_TIMEOUT_MS for a tree this size",
+                     timeout_ms / 1000);
+      }
+      return rc;
+   }
 
    cJSON *resp = cJSON_Parse(json);
    free(json);

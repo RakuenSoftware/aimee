@@ -10,6 +10,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static cJSON *parse_resp(const char *json)
@@ -242,8 +243,33 @@ static void test_format_skipped_cooldown(void)
    cJSON_Delete(resp);
 }
 
+
+/* A scan that outruns its timeout is not an unavailable service. The bound is
+ * tunable because "large tree" has no fixed size, and a bad value must not be
+ * able to disable it. */
+static void test_scan_timeout_is_tunable_and_bounded(void)
+{
+   unsetenv("AIMEE_KB_SCAN_TIMEOUT_MS");
+   assert(kb_client_index_scan_timeout_ms() == 5 * 60 * 1000);
+
+   setenv("AIMEE_KB_SCAN_TIMEOUT_MS", "1800000", 1);
+   assert(kb_client_index_scan_timeout_ms() == 1800000);
+
+   /* Rejected: zero, negative, junk, and beyond the 24h ceiling all fall back. */
+   setenv("AIMEE_KB_SCAN_TIMEOUT_MS", "0", 1);
+   assert(kb_client_index_scan_timeout_ms() == 5 * 60 * 1000);
+   setenv("AIMEE_KB_SCAN_TIMEOUT_MS", "-1", 1);
+   assert(kb_client_index_scan_timeout_ms() == 5 * 60 * 1000);
+   setenv("AIMEE_KB_SCAN_TIMEOUT_MS", "banana", 1);
+   assert(kb_client_index_scan_timeout_ms() == 5 * 60 * 1000);
+   setenv("AIMEE_KB_SCAN_TIMEOUT_MS", "999999999", 1);
+   assert(kb_client_index_scan_timeout_ms() == 5 * 60 * 1000);
+   unsetenv("AIMEE_KB_SCAN_TIMEOUT_MS");
+}
+
 int main(void)
 {
+   test_scan_timeout_is_tunable_and_bounded();
    test_transport_failure_is_no_kb();
    test_kb_error_surfaces_message();
    test_kb_error_without_message();

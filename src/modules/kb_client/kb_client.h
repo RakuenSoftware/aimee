@@ -1127,6 +1127,11 @@ int kb_client_code_scan_push(const char *name, const char *root, int force, void
  * failure or kb-side error. */
 int kb_client_index_scan_apply_response(const void *resp, kb_client_index_scan_result_t *out);
 
+/* Timeout the code-index scan POST uses, in ms. Default 5 minutes; raise with
+ * AIMEE_KB_SCAN_TIMEOUT_MS for trees whose scan legitimately runs longer.
+ * Values outside (0, 24h] are ignored so a typo cannot disable the bound. */
+int kb_client_index_scan_timeout_ms(void);
+
 /* Internal: build the wire-level response object that aimee-server's
  * handle_index_scan returns to the CLI, given the kb_client result and
  * its rc. Pulled out so dispatch and tests share one truth about

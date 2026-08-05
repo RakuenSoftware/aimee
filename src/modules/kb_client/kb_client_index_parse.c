@@ -10,11 +10,29 @@
 #include "kb_client.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* Build the wire-level response object for an index.scan call from the
  * kb_client_index_scan result. Caller takes ownership of the returned
  * cJSON. Centralised so the dispatch path and tests share one truth. */
+/* Tunable because "large" has no fixed size: a ~3000-file checkout on a busy kb
+ * crosses five minutes, and when it does the POST below returns nothing and the
+ * caller reports the service as unavailable -- while the kb is still scanning,
+ * holding the db2 connection it leased. Operators scanning big trees need to
+ * raise this rather than watch every scan report a healthy service as down. */
+int kb_client_index_scan_timeout_ms(void)
+{
+   const char *env = getenv("AIMEE_KB_SCAN_TIMEOUT_MS");
+   if (env && env[0])
+   {
+      long v = strtol(env, NULL, 10);
+      if (v > 0 && v <= 24L * 60 * 60 * 1000)
+         return (int)v;
+   }
+   return (5 * 60 * 1000);
+}
+
 void *kb_client_index_scan_format_response(int kb_rc, const kb_client_index_scan_result_t *res)
 {
    cJSON *resp;
