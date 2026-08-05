@@ -81,6 +81,18 @@ group-directed signals cannot reach it while a deliberate `kill <pid>` still can
 reap on purpose, survive by accident. It also writes a pidfile, because `pgrep`
 has repeatedly matched the caller's own command line.
 
+**The stall detector then fired on healthy hosts, for the same reason a third
+time.** `status_msg` reaches its terminal value the moment the container starts;
+llama.cpp then spends 10-30 minutes pulling a 16-21 GiB GGUF from HuggingFace and
+vast narrates none of it. Watching status_msg for change therefore abandons every
+large-model host at exactly `stall` seconds after container start. Eleven of the
+twenty-seven re-placements in one hour were this, against twelve genuine container
+failures. The wait has now been wrong three ways -- 420s, 900s, and
+600s-from-container-start -- and each time the error was a clock measured from an
+event unrelated to the work finishing. The stall timer now polices only the phases
+vast actually narrates (created, loading); once the instance is `running` the sole
+bound is `hard_cap` and the real completion signal is `/health` answering.
+
 ## Not fixed. Do these before the next campaign.
 
 **1. Cap failures per JOB, not per host.** Defect 41 states the rule and nothing
