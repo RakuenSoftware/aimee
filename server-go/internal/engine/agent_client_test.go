@@ -1176,6 +1176,69 @@ func TestHTTPAgentClientReplayUsesOriginalDurableJobKey(t *testing.T) {
 	}
 }
 
+func TestHTTPAgentClientReplayMigratesSoleLegacyJobKey(t *testing.T) {
+	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	request := DelegateRequest{Role: "code", Persona: "engineer", Prompt: "implement", WorkItemID: "wi", Stage: "impl", ExecutionVersion: "v1", ReplayOnly: true}
+	const legacyKey = "wi:impl:v1:legacy-hash"
+	if err := store.SaveWorkflowDelegateJob(t.Context(), legacyKey, request.WorkItemID, 46, "participant-46"); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/delegate/run" {
+			t.Error("legacy replay launched a replacement job")
+			http.Error(w, "unexpected launch", http.StatusInternalServerError)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "migrated", "cost_known": true})
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store, PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.Delegate(t.Context(), request)
+	if err != nil || result.Response != "migrated" {
+		t.Fatalf("replay result=%+v err=%v", result, err)
+	}
+	if _, _, err := store.DelegateJob(t.Context(), legacyKey); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("legacy mapping was not migrated: %v", err)
+	}
+	if jobID, participant, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err != nil || jobID != 46 || participant != "participant-46" {
+		t.Fatalf("new mapping job=%d participant=%q err=%v", jobID, participant, err)
+	}
+}
+
+func TestHTTPAgentClientReplayDoesNotGuessAmongLegacyJobs(t *testing.T) {
+	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	request := DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review", WorkItemID: "wi", Stage: "gate", ExecutionVersion: "v1", ReplayOnly: true}
+	for jobID, key := range map[int]string{51: "wi:gate:v1:legacy-a", 52: "wi:gate:v1:legacy-b"} {
+		if err := store.SaveWorkflowDelegateJob(t.Context(), key, request.WorkItemID, jobID, "participant"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: "http://127.0.0.1", Store: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Delegate(t.Context(), request)
+	if !errors.Is(err, ErrDelegateReplayUnavailable) {
+		t.Fatalf("ambiguous replay error=%v", err)
+	}
+	for _, key := range []string{"wi:gate:v1:legacy-a", "wi:gate:v1:legacy-b"} {
+		if _, _, err := store.DelegateJob(t.Context(), key); err != nil {
+			t.Fatalf("ambiguous mapping %q changed: %v", key, err)
+		}
+	}
+}
+
 func TestHTTPAgentClientRequiresAuthenticationOffLoopback(t *testing.T) {
 	if _, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: "https://resource-plane.example"}); err == nil {
 		t.Fatal("unauthenticated non-loopback agent service accepted")

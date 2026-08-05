@@ -171,6 +171,69 @@ func (s *Store) DelegateJob(ctx context.Context, key string) (int, string, error
 	return id, participant, err
 }
 
+// MigrateSoleLegacyDelegateJob adopts an in-flight mapping written by an older
+// key algorithm. The execution coordinates must identify exactly one mapping;
+// parallel/grouped work fails closed because choosing a participant by order
+// could replay the wrong result.
+func (s *Store) MigrateSoleLegacyDelegateJob(ctx context.Context, key, workItemID, stage, version string) (int, string, error) {
+	if key == "" || workItemID == "" || stage == "" || version == "" {
+		return 0, "", errors.New("delegate replay migration coordinates are required")
+	}
+	prefix := workItemID + ":" + stage + ":" + version + ":"
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, "", err
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, `SELECT execution_key,job_id,participant_token
+FROM lifecycle_delegate_job
+WHERE work_item_id=? AND substr(execution_key,1,length(?))=?
+LIMIT 2`, workItemID, prefix, prefix)
+	if err != nil {
+		return 0, "", err
+	}
+	type candidate struct {
+		key, participant string
+		jobID            int
+	}
+	var candidates []candidate
+	for rows.Next() {
+		var found candidate
+		if err := rows.Scan(&found.key, &found.jobID, &found.participant); err != nil {
+			_ = rows.Close()
+			return 0, "", err
+		}
+		candidates = append(candidates, found)
+	}
+	if err := rows.Close(); err != nil {
+		return 0, "", err
+	}
+	if err := rows.Err(); err != nil {
+		return 0, "", err
+	}
+	if len(candidates) != 1 {
+		return 0, "", sql.ErrNoRows
+	}
+	found := candidates[0]
+	result, err := tx.ExecContext(ctx, `UPDATE lifecycle_delegate_job
+SET execution_key=?,updated_at=datetime('now')
+WHERE execution_key=? AND job_id=?
+  AND NOT EXISTS (SELECT 1 FROM lifecycle_delegate_job WHERE execution_key=?)`, key, found.key, found.jobID, key)
+	if err != nil {
+		return 0, "", err
+	}
+	if changed, err := result.RowsAffected(); err != nil || changed != 1 {
+		if err != nil {
+			return 0, "", err
+		}
+		return 0, "", errors.New("delegate replay mapping changed concurrently")
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, "", err
+	}
+	return found.jobID, found.participant, nil
+}
+
 func (s *Store) SaveDelegateJob(ctx context.Context, key string, id int, participant string) error {
 	return s.SaveWorkflowDelegateJob(ctx, key, "", id, participant)
 }

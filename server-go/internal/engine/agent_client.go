@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -326,9 +327,20 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 		Error       string `json:"error"`
 	}
 	if c.store != nil && request.WorkItemID != "" {
-		if existing, participant, err := c.store.DelegateJob(ctx, key); err == nil {
+		existing, participant, err := c.store.DelegateJob(ctx, key)
+		if err == nil {
 			launched.JobID = existing
 			launched.Participant = participant
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return DelegateResult{}, err
+		} else if request.ReplayOnly {
+			existing, participant, err = c.store.MigrateSoleLegacyDelegateJob(ctx, key, request.WorkItemID, request.Stage, request.ExecutionVersion)
+			if err == nil {
+				launched.JobID = existing
+				launched.Participant = participant
+			} else if !errors.Is(err, sql.ErrNoRows) {
+				return DelegateResult{}, err
+			}
 		}
 	}
 	if launched.JobID <= 0 && request.ReplayOnly {
