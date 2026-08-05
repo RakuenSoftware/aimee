@@ -29,7 +29,6 @@ import (
 	runtimeweb "github.com/JBailes/aimee/server-go/modules/runtime-web"
 	"github.com/JBailes/aimee/server-go/modules/skills"
 	moduletools "github.com/JBailes/aimee/server-go/modules/tools"
-	"github.com/JBailes/aimee/server-go/modules/workflows"
 	"github.com/JBailes/aimee/server-go/modules/workspace"
 )
 
@@ -126,11 +125,6 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 		config.PrincipalRef = 19
 		config.Stages = []bus.ModuleStage{{EventKind: governance.EventEvaluate, StageID: governance.StageEvaluate}}
 		config.Handler = governance.Handle
-	case "workflows":
-		config.ModuleName = name
-		config.PrincipalRef = 20
-		config.Stages = []bus.ModuleStage{{EventKind: workflows.EventAdvance, StageID: workflows.StageAdvance}}
-		config.Handler = workflows.Handle
 	case "roundtable":
 		config.ModuleName = name
 		config.PrincipalRef = 21

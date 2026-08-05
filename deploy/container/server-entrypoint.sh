@@ -435,9 +435,15 @@ if [ "$AIMEE_WFE_ENGINE" = go ]; then
         exit 1
     fi
     log "starting Go WFE control plane (socket=$AIMEE_WFE_HTTP_SOCKET)"
-    runuser -u aimee -- sh -c 'set -eu; ulimit -c 0 2>/dev/null || true; exec aimee-wfe --home "$1" --socket "$2" --config "$3" --workflow-dir "$4" --agent-service-socket "$5"' sh \
+    # The WFE is the workflows bus principal: it serves the advance decision and
+    # the control stage the C resource plane calls. The module supervisor does
+    # not spawn a workflows process (the contract marks it hosted_by=wfe), because
+    # the bus denies a live duplicate of a principal. Pass the bus socket
+    # explicitly rather than relying on runuser's environment handling.
+    runuser -u aimee -- sh -c 'set -eu; ulimit -c 0 2>/dev/null || true; export AIMEE_MODULE_BUS_SOCKET="$6"; exec aimee-wfe --home "$1" --socket "$2" --config "$3" --workflow-dir "$4" --agent-service-socket "$5"' sh \
         "$AIMEE_HOME" "$AIMEE_WFE_HTTP_SOCKET" "$AIMEE_HOME/aimee.yaml" \
-        "$AIMEE_HOME/workflows" "$AIMEE_HOME/aimee-http.sock" &
+        "$AIMEE_HOME/workflows" "$AIMEE_HOME/aimee-http.sock" \
+        "$AIMEE_MODULE_BUS_SOCKET" &
     wfe_pid=$!
 
     # Start this only after the resource plane owns the current pid file.  On a

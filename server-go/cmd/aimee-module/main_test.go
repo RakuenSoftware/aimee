@@ -22,7 +22,6 @@ func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
 		{"skills", 14, []uint32{7681, 7682}},
 		{"response-composition", 15, []uint32{7937}},
 		{"governance", 19, []uint32{8961}},
-		{"workflows", 20, []uint32{9217}},
 		{"roundtable", 21, []uint32{9473}},
 		{"kb-synthesis", 22, []uint32{9729}},
 		{"runtime-web", 23, []uint32{9985}},

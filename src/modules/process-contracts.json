@@ -47,8 +47,9 @@
     {"id": "governance", "execution": "process", "runtime": "go", "principal_ref": 19, "placements": ["server"], "stages": [
       {"id": 1, "name": "governance-evaluation", "event_kind": 8961}
     ]},
-    {"id": "workflows", "execution": "process", "runtime": "go", "principal_ref": 20, "placements": ["server"], "stages": [
-      {"id": 1, "name": "workflow-advance-decision", "event_kind": 9217}
+    {"id": "workflows", "execution": "process", "runtime": "go", "principal_ref": 20, "placements": ["server"], "hosted_by": "wfe", "stages": [
+      {"id": 1, "name": "workflow-advance-decision", "event_kind": 9217},
+      {"id": 2, "name": "workflow-control", "event_kind": 9218}
     ]},
     {"id": "roundtable", "execution": "process", "runtime": "go", "principal_ref": 21, "placements": ["server"], "stages": [
       {"id": 1, "name": "roundtable-deliberation", "event_kind": 9473},
