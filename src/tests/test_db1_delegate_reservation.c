@@ -12,7 +12,9 @@
  *      job -- otherwise an older job's cleanup lets a third launch happen.
  *   5. A row with an unusable job id reads as a miss, not as a replayable job.
  *   6. Every operation tolerates the table being absent, because the Go control
- *      plane's migrations create it and a server may run without that plane. */
+ *      plane's migrations create it and a server may run without that plane.
+ *   7. Key-algorithm upgrades adopt only a sole matching legacy reservation;
+ *      grouped/parallel matches remain untouched rather than being guessed. */
 
 #include <assert.h>
 #include <sqlite3.h>
@@ -158,6 +160,35 @@ static void test_forget_is_idempotent(void)
    assert(db1_delegate_reservation_forget("step-e") == 0);
 }
 
+static void test_adopts_only_a_sole_legacy_key(void)
+{
+   const char *old_key = "wi-1:impl:2026-08-05 15:14:57:old-hash";
+   const char *new_key = "wi-1:impl:2026-08-05 15:14:57:new-hash";
+   assert(db1_delegate_reservation_save(old_key, "wi-1", 71, "token-71") == 0);
+   int job_id = 0;
+   char participant[128] = "";
+   assert(db1_delegate_reservation_adopt_sole_legacy(new_key, "wi-1", &job_id, participant,
+                                                     sizeof(participant)) == 0);
+   assert(job_id == 71);
+   assert(strcmp(participant, "token-71") == 0);
+   assert(db1_delegate_reservation_get(old_key, &job_id, NULL, 0) == -1);
+   assert(db1_delegate_reservation_get(new_key, &job_id, NULL, 0) == 0);
+   assert(job_id == 71);
+
+   const char *group_a = "wi-2:gate:v1:legacy-a";
+   const char *group_b = "wi-2:gate:v1:legacy-b";
+   const char *group_new = "wi-2:gate:v1:new-hash";
+   assert(db1_delegate_reservation_save(group_a, "wi-2", 72, "seat-a") == 0);
+   assert(db1_delegate_reservation_save(group_b, "wi-2", 73, "seat-b") == 0);
+   assert(db1_delegate_reservation_adopt_sole_legacy(group_new, "wi-2", &job_id, participant,
+                                                     sizeof(participant)) == -1);
+   assert(db1_delegate_reservation_get(group_a, &job_id, NULL, 0) == 0);
+   assert(job_id == 72);
+   assert(db1_delegate_reservation_get(group_b, &job_id, NULL, 0) == 0);
+   assert(job_id == 73);
+   assert(db1_delegate_reservation_get(group_new, &job_id, NULL, 0) == -1);
+}
+
 static void test_rejects_unusable_arguments(void)
 {
    int job_id = 0;
@@ -195,6 +226,7 @@ int main(void)
    test_compare_delete_protects_a_newer_reservation();
    test_unusable_job_id_reads_as_a_miss();
    test_forget_is_idempotent();
+   test_adopts_only_a_sole_legacy_key();
    test_rejects_unusable_arguments();
    test_absent_table_degrades_to_no_reservation();
 

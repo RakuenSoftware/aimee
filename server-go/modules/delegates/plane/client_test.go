@@ -1030,6 +1030,17 @@ func TestDelegateJobKeyIncludesExplicitEligibilityFallback(t *testing.T) {
 	}
 }
 
+func TestDelegateJobKeyIgnoresInvocationSafetyControls(t *testing.T) {
+	original := DelegateRequest{Role: "code", Persona: "engineer", Prompt: "implement", WorkItemID: "wi", Stage: "impl", ExecutionVersion: "v1", MaxCostUSD: 0.75, ToolLoopTimeoutMSCap: 120_000}
+	replay := original
+	replay.ReplayOnly = true
+	replay.MaxCostUSD = 0.13
+	replay.ToolLoopTimeoutMSCap = 45_000
+	if DelegateJobKey(original) != DelegateJobKey(replay) {
+		t.Fatal("replay controls changed the durable job key")
+	}
+}
+
 func TestHTTPAgentClientRequiresAuthenticationOffLoopback(t *testing.T) {
 	if _, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: "https://resource-plane.example"}); err == nil {
 		t.Fatal("unauthenticated non-loopback agent service accepted")
