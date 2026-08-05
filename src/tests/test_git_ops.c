@@ -173,8 +173,7 @@ int main(void)
     * production shape at the git-execution seam, and keep capability absence, capability
     * failure, and a policy denial distinguishable for operators. The valid ref reaches git;
     * localhost port 1 then refuses immediately, proving validation did not stop it. */
-   const char *wfe_ref =
-       "aimee/wi/wi_57186250728b511961573e5afb37cc93.s4263a4834d.g0.0";
+   const char *wfe_ref = "aimee/wi/wi_57186250728b511961573e5afb37cc93.s4263a4834d.g0.0";
    git_ops_register_ref_validator(NULL);
    assert(git_ops_push_dir("webuser:alice", proj, "https://127.0.0.1:1/probe.git", wfe_ref, &out,
                            err, sizeof(err)) == -1);

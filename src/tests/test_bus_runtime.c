@@ -15,8 +15,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#define TEST_KIND        4100U
-#define TEST_SERVER_KIND 4101U
+#define TEST_KIND          4100U
+#define TEST_SERVER_KIND   4101U
 #define TEST_SERVER_KIND_2 4102U
 
 static bus_client_result_t attach(const char *path, uint32_t principal_ref, bus_client_t *client)
