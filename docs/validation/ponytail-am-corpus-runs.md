@@ -67,6 +67,9 @@ Collected by `.synctmp/stage/collect.sh` into `cellmetrics.jsonl`.
 - n=1 everywhere. No confidence intervals; single-task flips are inside noise.
 - The aimee arm is not a like-for-like prompt comparison — it has machinery the
   others do not. Gated on the same hidden tests regardless.
-- Aimee cells run on CT403 while some non-aimee cells for the same task ran on
-  401/402. Pass/fail is unaffected; cost comparisons across those pairs are not
-  strictly lane-matched.
+- Cost is provider-side: `estimated_credits` is a pure function of the codex
+  token counts (uncached input, cached input, output) at the rates pinned in
+  provenance. It does not depend on which box ran the cell, so cost comparisons
+  are lane-matched by construction even when a task's arms ran on different
+  containers. `wall_seconds` is the exception — that is local machine time and
+  should not be compared across boxes.
