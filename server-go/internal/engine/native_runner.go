@@ -542,7 +542,17 @@ func documentDelegatePrompt(ctx context.Context, req StepRequest, workdir string
 	if err != nil {
 		return "", err
 	}
-	acceptedDiff, err := frozenWorktreeDiff(ctx, workdir, base)
+	resolvedBase, err := gitText(ctx, workdir, "rev-parse", base)
+	if err != nil {
+		return "", err
+	}
+	resolvedBase = strings.TrimSpace(resolvedBase)
+	head, err := gitText(ctx, workdir, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	head = strings.TrimSpace(head)
+	acceptedDiff, err := frozenWorktreeDiff(ctx, workdir, resolvedBase, head)
 	if err != nil {
 		return "", err
 	}
@@ -599,7 +609,17 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 		if baseErr != nil {
 			return StepResult{}, baseErr
 		}
-		diff, diffErr := frozenWorktreeDiff(ctx, workdir, base)
+		resolvedBase, err := gitText(ctx, workdir, "rev-parse", base)
+		if err != nil {
+			return StepResult{}, err
+		}
+		resolvedBase = strings.TrimSpace(resolvedBase)
+		head, err := gitText(ctx, workdir, "rev-parse", "HEAD")
+		if err != nil {
+			return StepResult{}, err
+		}
+		head = strings.TrimSpace(head)
+		diff, diffErr := frozenWorktreeDiff(ctx, workdir, resolvedBase, head)
 		if diffErr != nil {
 			return StepResult{}, diffErr
 		}
@@ -1029,7 +1049,7 @@ func (r *NativeRunner) freeze(ctx context.Context, req StepRequest) (StepResult,
 		return StepResult{}, err
 	}
 	head = strings.TrimSpace(head)
-	diff, err := frozenWorktreeDiff(ctx, workdir, base)
+	diff, err := frozenWorktreeDiff(ctx, workdir, resolvedBase, head)
 	if err != nil {
 		return StepResult{}, err
 	}
@@ -1073,13 +1093,14 @@ func freezeBase(ctx context.Context, item db1.WorkItem, workdir string) (string,
 	return "origin/" + trunk, nil
 }
 
-// frozenWorktreeDiff computes the merged diff between a resolved base ref and
-// HEAD for the given workdir. Base resolution (parent feature tip vs origin
-// trunk) lives in freezeBase; this helper is the single seam that turns that
-// ref into a diff, used by freeze() and by callers that need the accepted diff
-// (documentDelegatePrompt, the review-correctness path in mutate).
-func frozenWorktreeDiff(ctx context.Context, workdir, base string) (string, error) {
-	diff, err := gitText(ctx, workdir, "--no-pager", "diff", base+"...HEAD")
+// frozenWorktreeDiff computes the merged diff between two resolved commit
+// SHAs in the given workdir. Base resolution (parent feature tip vs origin
+// trunk) lives in freezeBase; each caller rev-parses both ends before
+// invoking this helper so the diff, the validation, and the recorded commit
+// artifacts all describe the same snapshot. Used by freeze(),
+// documentDelegatePrompt, and the review-correctness path in mutate.
+func frozenWorktreeDiff(ctx context.Context, workdir, base, head string) (string, error) {
+	diff, err := gitText(ctx, workdir, "--no-pager", "diff", base+"..."+head)
 	if err != nil {
 		return "", err
 	}
