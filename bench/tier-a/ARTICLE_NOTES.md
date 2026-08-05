@@ -1082,3 +1082,74 @@ produced nothing and was scored as a miss. That number is a floor, not a
 measurement, and published without this paragraph it would read as "MiniCPM5 is
 bad at extraction" when what happened is "MiniCPM5 reasons past the context
 window and the harness did not notice".
+
+## 28. Two newcomers, and three guards that disagreed about what a failure is
+
+Added to the field at 1001 notes: MiniCPM5-1B (openbmb, 926k downloads) and
+SmolLM3-3B (HuggingFaceTB, GGUF from ggml-org). Both first-party, both Q4_K_M and
+Q8_0 only because neither publishes Q6_K.
+
+| model | Q4_K_M | Q8_0 |
+|---|---:|---:|
+| SmolLM3-3B | 0.3581 | **0.3933** |
+| MiniCPM5-1B | *0.1258* | *0.1652* |
+
+SmolLM3-3B Q8_0 places **7th**, ahead of granite-4.0-1b. MiniCPM5's figures are
+italicised because they are floors, not measurements -- see below.
+
+### SmolLM3 is the only clean quant improvement in the whole campaign
+
++0.0352 from Q4 to Q8, which is 3.4x the noise threshold. Precision AND recall
+both rise (0.336 -> 0.377, 0.383 -> 0.411), parse health is identical at 990/1001
+on both, and abstention rises 0.211 -> 0.297. The model becomes more
+discriminating, not merely more talkative.
+
+Every other quant sweep this campaign either moved within noise or moved for a
+reason that was not accuracy. **LFM2.5-2.6B moves the opposite way** -- 0.5854 to
+0.5750 across the same bit range -- via *falling* abstention. Same knob, opposite
+outcomes, two models, one night. "Quantise to Q4, it's free" does not port.
+
+SmolLM3 is also terse and fast: 39 median completion tokens, 8 minutes for the
+arm, and zero reasoning on all 1001 rows.
+
+### MiniCPM5's numbers are floors
+
+292 of 1001 rows at Q4 and 115 at Q8 returned **empty content** after exhausting
+the 8192-token context on reasoning. Every one scored as a miss. The lower quant
+is the more verbose -- median 2679 completion tokens against Q8's 1757 -- and
+starves itself 2.5x as often, so the F1 gap between its quants tracks the
+empty-row count rather than extraction quality. See finding 27 and defect 38.
+
+### Three guards, three different verdicts
+
+The interesting part of adding these models was not their scores. It was watching
+the harness's three safety checks behave three different ways on the same night:
+
+**The thinking guard fired correctly.** SmolLM3 reports `thinking: true` and
+emits zero reasoning on all 1001 rows, so score.py refused it and the driver
+re-scored with `--allow-thinking-off`, logging that it did. It is the fourth
+model in this field to do that, after granite-4.0-1b, granite-4.1-3b and
+gemma-3n-E4B.
+
+**The truncation guard could not fire at all.** `truncated` is
+`completion_tokens == max_tokens`, drivers pass `--max-tokens 8192`, servers run
+`-c 8192`, so completion caps below the equality and the flag has never once been
+true in this project's history. Defect 38.
+
+**The model-identity guard fired wrongly.** ggml-org names its file
+`SmolLM3-Q4_K_M.gguf` without the size suffix the repo name implies, so the check
+refused a correctly-loaded model: *"loaded 'SmolLM3-Q4_K_M.gguf', expected
+SmolLM3-3B / Q4_K_M"*. Both arms failed. The only evidence was one FAIL line in a
+log, and an unattended sweep would have produced a results table with a 3B model
+scoring 0.393 simply absent from it -- ahead of granite-4.0-1b, so its absence
+would have changed the ranking.
+
+Fixed additively with a `VERIFY_FAM` override rather than by loosening the match,
+because loosening hands back the failure the guard exists to catch: a stale
+server answering with another model's weights (defect 30). The same override was
+then needed for the QAT arms, where Google names files `gemma-4-E2B_q4_0-it.gguf`.
+
+**The lesson is not "guards are bad".** It is that a guard has two failure modes
+and this project had only ever thought about one of them. A check that refuses
+too much is as costly as a check that refuses too little -- it just fails
+quietly, into a log, instead of into a headline number.
