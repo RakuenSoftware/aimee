@@ -1272,6 +1272,19 @@ static int git_blob_id(const char *workdir, const char *spec, char out[80])
    return out[0] ? 1 : 0;
 }
 
+/* A sibling is "currently mutating" (so any prior freeze is stale) when its
+ * workflow is in one of the mutating blocks. Mirrors the Go side's fixed
+ * blacklist of implement | document | freeze | impl. */
+static int sibling_stage_is_mutating(const char *stage)
+{
+   if (!stage || !stage[0])
+      return 0;
+   if (!strcmp(stage, "freeze") || !strcmp(stage, "impl") || !strcmp(stage, "implement") ||
+       !strcmp(stage, "document"))
+      return 1;
+   return 0;
+}
+
 int wfe_slice_conflicts_with_frozen_sibling(const char *work_item_id, const char *workdir,
                                             const char *base_sha, const char *head_sha,
                                             char *path_out, size_t path_cap, char *sibling_out,
@@ -1335,8 +1348,7 @@ int wfe_slice_conflicts_with_frozen_sibling(const char *work_item_id, const char
             continue;
 
          /* The slice workflow's mutating loops invalidate an older freeze. */
-         if (strcmp(sib->current_stage, "freeze") == 0 || strcmp(sib->current_stage, "impl") == 0 ||
-             strcmp(sib->current_stage, "implement") == 0 || strcmp(sib->current_stage, "document") == 0)
+         if (sibling_stage_is_mutating(sib->current_stage))
             continue;
          if (!sib->worktree[0])
          {
@@ -1421,8 +1433,9 @@ static wfe_step_result_t exec_freeze(wfe_ctx *ctx, const wfe_node_t *node)
    if (collision > 0)
    {
       char detail[512];
-      snprintf(detail, sizeof detail,
-               WFE_FREEZE_SIBLING_CREATE_COLLISION ": path %s current slice %s conflicts with already frozen sibling slice %s", clash,
+      snprintf(detail, sizeof detail, "%s: path %s current slice %s conflicts with already "
+                                     "frozen sibling slice %s",
+               WFE_FREEZE_SIBLING_CREATE_COLLISION, clash,
                wfe_ctx_work_item(ctx) ? wfe_ctx_work_item(ctx) : "", sibling);
       return wfe_step_failed_detail(WFE_FAIL_PERMANENT, detail);
    }
