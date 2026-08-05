@@ -133,7 +133,6 @@ type NativeRunner struct {
 	workflows   *wfe.Registry
 	forge       Forge
 	roundtables *roundtablecfg.Store
-	freezeLocks freezeCollisionLockSet
 }
 
 func (r *NativeRunner) SetRoundtableStore(store *roundtablecfg.Store) { r.roundtables = store }
@@ -189,7 +188,7 @@ func NewNativeRunner(db *db1.Store, worktrees *WorktreeManager, agents AgentClie
 	if forge == nil {
 		forge = unavailableForge{}
 	}
-	return &NativeRunner{db: db, worktrees: worktrees, agents: agents, verifier: verifier, artifacts: artifacts, workflows: workflows, forge: forge, freezeLocks: freezeCollisionLockSet{root: worktrees.root}}, nil
+	return &NativeRunner{db: db, worktrees: worktrees, agents: agents, verifier: verifier, artifacts: artifacts, workflows: workflows, forge: forge}, nil
 }
 
 func (r *NativeRunner) Run(ctx context.Context, req StepRequest) (StepResult, error) {

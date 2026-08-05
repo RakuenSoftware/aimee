@@ -508,30 +508,62 @@ nodes:
 	}
 }
 
-type synchronizedFreezeRunner struct {
+type blockingFreezeRunner struct {
 	*NativeRunner
-	mu    sync.Mutex
-	count int
-	ready chan struct{}
+	mu           sync.Mutex
+	calls        int
+	firstID      string
+	boundaryErr  string
+	firstEntered chan struct{}
+	releaseFirst chan struct{}
 }
 
-func (r *synchronizedFreezeRunner) lockStep(ctx context.Context, req StepRequest) (func(), error) {
+func (r *blockingFreezeRunner) Run(ctx context.Context, req StepRequest) (StepResult, error) {
 	if req.Node.Block != "freeze" {
-		return r.NativeRunner.lockStep(ctx, req)
+		return r.NativeRunner.Run(ctx, req)
 	}
 	r.mu.Lock()
-	r.count++
-	if r.count == 2 {
-		close(r.ready)
+	r.calls++
+	call := r.calls
+	if call == 1 {
+		r.firstID = req.WorkItem.ID
+		close(r.firstEntered)
 	}
-	ready := r.ready
+	firstID := r.firstID
 	r.mu.Unlock()
-	select {
-	case <-ready:
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	if call == 1 {
+		select {
+		case <-r.releaseFirst:
+		case <-ctx.Done():
+			return StepResult{}, ctx.Err()
+		}
 	}
-	return r.NativeRunner.lockStep(ctx, req)
+	if call == 2 {
+		item, err := r.db.WorkItem(ctx, firstID)
+		if err != nil || item.Stage != "review" {
+			r.mu.Lock()
+			r.boundaryErr = "second freeze entered before the first durable Move"
+			r.mu.Unlock()
+		}
+		if _, err := r.artifacts.NodeArtifact(firstID, "freeze"); err != nil {
+			r.mu.Lock()
+			r.boundaryErr = "second freeze entered before the first artifact publication"
+			r.mu.Unlock()
+		}
+	}
+	return r.NativeRunner.Run(ctx, req)
+}
+
+func (r *blockingFreezeRunner) callCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls
+}
+
+func (r *blockingFreezeRunner) boundaryFailure() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.boundaryErr
 }
 
 func TestSynchronizedSimultaneousFreezeRejectsExactlyOneDivergentCreate(t *testing.T) {
@@ -621,8 +653,8 @@ nodes:
 			t.Fatal(err)
 		}
 	}
-	native := &NativeRunner{db: store, worktrees: manager, artifacts: artifacts, workflows: registry, freezeLocks: freezeCollisionLockSet{root: manager.root}}
-	runner := &synchronizedFreezeRunner{NativeRunner: native, ready: make(chan struct{})}
+	native := &NativeRunner{db: store, worktrees: manager, artifacts: artifacts, workflows: registry}
+	runner := &blockingFreezeRunner{NativeRunner: native, firstEntered: make(chan struct{}), releaseFirst: make(chan struct{})}
 	eng, err := New(store, artifacts, workflowDir, runner)
 	if err != nil {
 		t.Fatal(err)
@@ -634,12 +666,32 @@ nodes:
 		err    error
 	}
 	outcomes := make(chan advanceOutcome, 2)
+	start := make(chan struct{})
+	var ready sync.WaitGroup
+	ready.Add(2)
 	for _, id := range []string{"wi_parent.s0", "wi_parent.s1"} {
 		go func(id string) {
+			ready.Done()
+			<-start
 			result, err := eng.Advance(ctx, id)
 			outcomes <- advanceOutcome{id: id, result: result, err: err}
 		}(id)
 	}
+	ready.Wait()
+	close(start)
+	select {
+	case <-runner.firstEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first freeze never entered the runner")
+	}
+	// The second Advance has started, but the shared root completion lock must
+	// keep it outside the runner until the first freeze has published its
+	// artifacts and committed its lifecycle Move.
+	time.Sleep(100 * time.Millisecond)
+	if calls := runner.callCount(); calls != 1 {
+		t.Fatalf("root completion lock admitted %d freezes before the first completed", calls)
+	}
+	close(runner.releaseFirst)
 
 	advanced, rejected := "", ""
 	for i := 0; i < 2; i++ {
@@ -667,6 +719,9 @@ nodes:
 	}
 	if advanced == "" || rejected == "" || advanced == rejected {
 		t.Fatalf("want exactly one advanced and one rejected, advanced=%q rejected=%q", advanced, rejected)
+	}
+	if failure := runner.boundaryFailure(); failure != "" {
+		t.Fatal(failure)
 	}
 	events, err := store.Events(ctx, rejected, 0, 50)
 	if err != nil {

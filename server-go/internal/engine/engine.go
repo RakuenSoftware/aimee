@@ -70,13 +70,6 @@ type Runner interface {
 	Run(context.Context, StepRequest) (StepResult, error)
 }
 
-// stepLocker lets a runner extend a short, in-process serialization boundary
-// through artifact publication and the durable lifecycle transition. Freeze
-// uses it to make compare-and-record atomic across sibling work items.
-type stepLocker interface {
-	lockStep(context.Context, StepRequest) (func(), error)
-}
-
 // maxRunnerFailuresWithoutProgress bounds consecutive runner-failure parks at
 // one stage before the item is parked for a human instead of auto-resumed.
 const maxRunnerFailuresWithoutProgress = 8
@@ -109,6 +102,22 @@ type Engine struct {
 	budgetMu      sync.Mutex
 	budgetLocks   map[string]*sync.Mutex
 	invocationSeq uint64
+}
+
+// rootCompletionLock returns the existing short per-root serialization lock.
+// Capped work uses it after a runner completes to order accounting and lifecycle
+// commits. Freeze acquires the same lock before inspecting sibling state and
+// holds it through artifact publication and Move, making compare-and-record
+// atomic without introducing a second parent-lock implementation.
+func (e *Engine) rootCompletionLock(rootID string) *sync.Mutex {
+	e.budgetMu.Lock()
+	defer e.budgetMu.Unlock()
+	lock := e.budgetLocks[rootID]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		e.budgetLocks[rootID] = lock
+	}
+	return lock
 }
 
 func New(db *db1.Store, artifacts *wfe.ArtifactStore, workflowDir string, runner Runner) (*Engine, error) {
@@ -212,16 +221,16 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 	if feedback, err := e.artifacts.Feedback(item.ID); err == nil {
 		req.Feedback = &feedback
 	}
-	unlockStep := func() {}
-	if locker, ok := e.runner.(stepLocker); ok {
-		unlockStep, err = locker.lockStep(ctx, req)
-		if err != nil {
-			return out, err
-		}
+	var completionLock *sync.Mutex
+	completionLocked := false
+	if node.Block == "freeze" {
+		completionLock = e.rootCompletionLock(budget.RootID)
+		completionLock.Lock()
+		completionLocked = true
 	}
 	defer func() {
-		if unlockStep != nil {
-			unlockStep()
+		if completionLocked {
+			completionLock.Unlock()
 		}
 	}()
 
@@ -254,16 +263,10 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 	// Runner calls are deliberately outside this lock. Atomic durable reservation
 	// permits capped siblings to execute concurrently; only the short actual-cost
 	// reconciliation and lifecycle commit remain ordered per root.
-	if budget.MaxUSD > 0 {
-		e.budgetMu.Lock()
-		budgetLock := e.budgetLocks[budget.RootID]
-		if budgetLock == nil {
-			budgetLock = &sync.Mutex{}
-			e.budgetLocks[budget.RootID] = budgetLock
-		}
-		e.budgetMu.Unlock()
-		budgetLock.Lock()
-		defer budgetLock.Unlock()
+	if budget.MaxUSD > 0 && !completionLocked {
+		completionLock = e.rootCompletionLock(budget.RootID)
+		completionLock.Lock()
+		completionLocked = true
 	}
 	if err != nil {
 		// A replay-only invocation whose durable result is gone can never succeed
@@ -365,10 +368,6 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 			return out, e.parkAfterSpend(ctx, item, "plan_write_failed", err, step.CostUSD)
 		}
 		step.ContentHash = wfe.Hash([]byte(step.Artifact))
-	}
-	if unlockStep != nil && step.Status != StepAdvanced {
-		unlockStep()
-		unlockStep = nil
 	}
 	if step.Status == StepAdvanced {
 		artifactType := step.ArtifactType

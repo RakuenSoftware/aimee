@@ -2,14 +2,10 @@ package engine
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
-	"syscall"
-	"time"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
 )
@@ -19,62 +15,6 @@ const freezeCreateCreateCollision = "freeze_create_create_collision"
 type freezeCreate struct {
 	Path string
 	Blob string
-}
-
-type freezeCollisionLockSet struct {
-	root string
-}
-
-func (s *freezeCollisionLockSet) lock(ctx context.Context, parentID string) (func(), error) {
-	if parentID == "" {
-		return func() {}, nil
-	}
-	// Engine.Advance holds this from freeze inspection through the durable stage
-	// transition. A host-local flock covers overlapping server processes as well
-	// as goroutines, and process death releases it.
-	key := sha256.Sum256([]byte(parentID))
-	root := s.root
-	if root == "" {
-		root = os.TempDir()
-	}
-	path := filepath.Join(root, fmt.Sprintf("aimee-wfe-freeze-%x.lock", key))
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return nil, fmt.Errorf("open freeze collision lock: %w", err)
-	}
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		err = syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-		if err == nil {
-			break
-		}
-		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
-			_ = file.Close()
-			return nil, fmt.Errorf("acquire freeze collision lock: %w", err)
-		}
-		select {
-		case <-ctx.Done():
-			_ = file.Close()
-			return nil, ctx.Err()
-		case <-ticker.C:
-		}
-	}
-	return func() {
-		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
-		_ = file.Close()
-	}, nil
-}
-
-func (r *NativeRunner) lockStep(ctx context.Context, req StepRequest) (func(), error) {
-	if req.Node.Block != "freeze" {
-		return func() {}, nil
-	}
-	locks := r.freezeLocks
-	if locks.root == "" && r.worktrees != nil {
-		locks.root = r.worktrees.root
-	}
-	return locks.lock(ctx, req.WorkItem.ParentID)
 }
 
 func freezeCreatedFiles(ctx context.Context, workdir, base, head string) (map[string]freezeCreate, error) {
