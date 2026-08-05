@@ -62,6 +62,79 @@ func TestDefaultVerifyCommandUsesGitVerifyKeyValueSyntax(t *testing.T) {
 	}
 }
 
+func TestDelegateDeadlineCapLeavesWriteVerificationReserve(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
+	defer cancel()
+	request := DelegateRequest{Role: "code", Tools: true}
+	if err := applyDelegateDeadlineCap(ctx, &request); err != nil {
+		t.Fatal(err)
+	}
+	// Ten minutes remaining minus the five-minute verifier reserve. Allow a
+	// little wall-clock drift between creating and reading the deadline.
+	if request.ToolLoopTimeoutMSCap < 298000 || request.ToolLoopTimeoutMSCap > 300000 {
+		t.Fatalf("tool loop cap=%dms, want approximately 300000ms", request.ToolLoopTimeoutMSCap)
+	}
+}
+
+func TestDelegateDeadlineCapNeverEnlargesCallerCap(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
+	defer cancel()
+	request := DelegateRequest{Role: "code", Tools: true, ToolLoopTimeoutMSCap: 120000}
+	if err := applyDelegateDeadlineCap(ctx, &request); err != nil {
+		t.Fatal(err)
+	}
+	if request.ToolLoopTimeoutMSCap != 120000 {
+		t.Fatalf("smaller caller cap changed to %dms", request.ToolLoopTimeoutMSCap)
+	}
+}
+
+func TestDelegateDeadlineRefusesWriteWithoutVerificationReserve(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	request := DelegateRequest{Role: "code", Tools: true}
+	err := applyDelegateDeadlineCap(ctx, &request)
+	if !errors.Is(err, context.DeadlineExceeded) ||
+		!strings.Contains(err.Error(), "remaining=") || !strings.Contains(err.Error(), "reserve=5m0s") {
+		t.Fatalf("deadline error=%v", err)
+	}
+}
+
+func TestDelegateDeadlineCapPreservesShortReviewPhase(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	request := DelegateRequest{Role: "review"}
+	if err := applyDelegateDeadlineCap(ctx, &request); err != nil {
+		t.Fatal(err)
+	}
+	if request.ToolLoopTimeoutMSCap < 80 || request.ToolLoopTimeoutMSCap > 100 {
+		t.Fatalf("short review phase cap=%dms, want most of its 100ms deadline", request.ToolLoopTimeoutMSCap)
+	}
+}
+
+func TestRoundtableDeadlineRequiresEveryConfiguredPhase(t *testing.T) {
+	panel := roundtablecfg.Panel{DeadlineMS: 100, ChairmanEnabled: true}
+	short, cancelShort := context.WithTimeout(t.Context(), 150*time.Millisecond)
+	defer cancelShort()
+	err := ensureRoundtableDeadlineFits(short, panel)
+	if !errors.Is(err, context.DeadlineExceeded) ||
+		!strings.Contains(err.Error(), "required=210ms") || !strings.Contains(err.Error(), "phases=2") {
+		t.Fatalf("short roundtable budget error=%v", err)
+	}
+
+	long, cancelLong := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancelLong()
+	if err := ensureRoundtableDeadlineFits(long, panel); err != nil {
+		t.Fatalf("complete roundtable budget rejected: %v", err)
+	}
+
+	panel.ChairmanEnabled = false
+	single, cancelSingle := context.WithTimeout(t.Context(), 150*time.Millisecond)
+	defer cancelSingle()
+	if err := ensureRoundtableDeadlineFits(single, panel); err != nil {
+		t.Fatalf("single-phase roundtable budget rejected: %v", err)
+	}
+}
+
 func TestDocumentPromptIsScopedToOriginalRequestAndAcceptedDiff(t *testing.T) {
 	repo := t.TempDir()
 	gitRun(t, repo, "init", "-b", "trunk")

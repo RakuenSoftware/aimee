@@ -140,9 +140,14 @@ func (r *NativeRunner) SetRoundtableStore(store *roundtablecfg.Store) { r.roundt
 const (
 	roundtableDelegateRole        = "review"
 	roundtableDelegateMaxTurnsCap = 24
+	delegateDeadlineGraceReserve  = 5 * time.Second
+	delegateWriteVerifyReserve    = 5 * time.Minute
 )
 
 func (r *NativeRunner) delegate(ctx context.Context, step StepRequest, request DelegateRequest) (DelegateResult, error) {
+	if err := applyDelegateDeadlineCap(ctx, &request); err != nil {
+		return DelegateResult{}, err
+	}
 	request.WorkItemID = step.WorkItem.ID
 	request.Stage = step.Node.ID
 	request.ExecutionVersion = step.WorkItem.UpdatedAt
@@ -156,6 +161,13 @@ func (r *NativeRunner) delegateGroup(ctx context.Context, step StepRequest, requ
 		return nil
 	}
 	for i := range requests {
+		if err := applyDelegateDeadlineCap(ctx, &requests[i]); err != nil {
+			out := make([]DelegateGroupResult, len(requests))
+			for j := range out {
+				out[j].Err = err
+			}
+			return out
+		}
 		requests[i].WorkItemID = step.WorkItem.ID
 		requests[i].Stage = step.Node.ID
 		requests[i].ExecutionVersion = step.WorkItem.UpdatedAt
@@ -176,6 +188,43 @@ func (r *NativeRunner) delegateGroup(ctx context.Context, step StepRequest, requ
 		out[i].Err = errors.New("delegate service does not support grouped delegation")
 	}
 	return out
+}
+
+// applyDelegateDeadlineCap converts the enclosing stage deadline into a
+// resource-plane tool-loop cap. Write delegates leave enough time for the
+// mandatory repository verifier; read-only delegates only need cancellation
+// and lifecycle-transition slack. The cap can only reduce the agent's own
+// configured loop budget.
+func applyDelegateDeadlineCap(ctx context.Context, request *DelegateRequest) error {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return nil
+	}
+	remaining := time.Until(deadline)
+	reserve := remaining / 20
+	if reserve > delegateDeadlineGraceReserve {
+		reserve = delegateDeadlineGraceReserve
+	}
+	if request.Role == "code" && request.Tools {
+		reserve = delegateWriteVerifyReserve
+		if remaining <= reserve {
+			return fmt.Errorf("delegate stage wall budget exhausted: remaining=%s reserve=%s: %w",
+				remaining.Round(time.Millisecond), reserve, context.DeadlineExceeded)
+		}
+	}
+	capMillis := (remaining - reserve).Milliseconds()
+	maxInt := int64(^uint(0) >> 1)
+	if capMillis > maxInt {
+		capMillis = maxInt
+	}
+	if capMillis < 1 {
+		capMillis = 1
+	}
+	capValue := int(capMillis)
+	if request.ToolLoopTimeoutMSCap <= 0 || request.ToolLoopTimeoutMSCap > capValue {
+		request.ToolLoopTimeoutMSCap = capValue
+	}
+	return nil
 }
 
 func NewNativeRunner(db *db1.Store, worktrees *WorktreeManager, agents AgentClient, verifier Verifier, artifacts *wfe.ArtifactStore, workflows *wfe.Registry, forge Forge) (*NativeRunner, error) {
@@ -1100,6 +1149,41 @@ func chairmanDeadline(step context.Context, deadlineMS int) (context.Context, co
 	return context.WithTimeout(step, time.Duration(deadlineMS)*time.Millisecond)
 }
 
+// ensureRoundtableDeadlineFits avoids spending an expiring workflow window on
+// a panel that cannot possibly reach its last configured phase. Analysis and
+// discussion share one panel deadline; an enabled chairman receives a second.
+// Returning DeadlineExceeded before dispatch lets the scheduler reopen the
+// workflow with a fresh wall window instead of cancelling a billed chairman
+// and rerunning the whole panel.
+func ensureRoundtableDeadlineFits(ctx context.Context, panel roundtablecfg.Panel) error {
+	deadline, ok := ctx.Deadline()
+	if !ok || panel.DeadlineMS <= 0 {
+		return nil
+	}
+	phases := int64(1)
+	if panel.ChairmanEnabled {
+		phases++
+	}
+	maxDuration := time.Duration(1<<63 - 1)
+	maxDeadlineMS := int64(maxDuration/time.Millisecond) / phases
+	if int64(panel.DeadlineMS) > maxDeadlineMS {
+		return fmt.Errorf("roundtable deadline budget overflows duration: deadline_ms=%d phases=%d: %w",
+			panel.DeadlineMS, phases, context.DeadlineExceeded)
+	}
+	required := time.Duration(int64(panel.DeadlineMS)*phases) * time.Millisecond
+	reserve := required / 20
+	if reserve > delegateDeadlineGraceReserve {
+		reserve = delegateDeadlineGraceReserve
+	}
+	required += reserve
+	remaining := time.Until(deadline)
+	if remaining <= required {
+		return fmt.Errorf("roundtable phases do not fit workflow wall budget: remaining=%s required=%s phases=%d: %w",
+			remaining.Round(time.Millisecond), required, phases, context.DeadlineExceeded)
+	}
+	return nil
+}
+
 type panelAnalysis struct {
 	Feedback    wfe.ReviewFeedback
 	Approvals   int
@@ -1141,6 +1225,9 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 	panel, err := r.roundtables.Resolve(paramString(req.Node, "roundtable", ""), lensNames, panelPins(req.Node))
 	if err != nil {
 		return StepResult{Status: StepPending, PauseReason: "panel_unreachable", Detail: err.Error()}, nil
+	}
+	if err := ensureRoundtableDeadlineFits(ctx, panel); err != nil {
+		return StepResult{}, err
 	}
 	seats := make([]panelSeat, 0, len(panel.Seats))
 	for _, seat := range panel.Seats {

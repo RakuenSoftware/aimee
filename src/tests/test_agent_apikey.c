@@ -112,6 +112,17 @@ static void test_delegate_effective_timeout(void)
    assert(delegate_effective_timeout_ms(0, 0) == AGENT_DEFAULT_TIMEOUT_MS);
    assert(delegate_effective_timeout_ms(-1, -1) == AGENT_DEFAULT_TIMEOUT_MS);
    assert(delegate_effective_timeout_ms(0, 0) > 0);
+
+   /* A workflow stage cap may only shorten the whole four-call loop. It must
+    * preserve a smaller configured budget and saturate multiplication rather
+    * than overflowing a very large per-call timeout. */
+   assert(agent_loop_total_timeout_ms(180000, 0) == 720000);
+   assert(agent_loop_total_timeout_ms(180000, 300000) == 300000);
+   assert(agent_loop_total_timeout_ms(60000, 300000) == 240000);
+   assert(agent_loop_total_timeout_ms(INT_MAX, 0) == INT_MAX);
+   assert(agent_timeout_cap_ms(900000, 600000) == 600000);
+   assert(agent_timeout_cap_ms(180000, 600000) == 180000);
+   assert(agent_timeout_cap_ms(-1, 600000) == 600000);
 }
 
 /* otel stubs: the route-health / agent-loop paths exercised below reach
