@@ -321,7 +321,33 @@ static void kb_transport_recovered(int64_t now_ms)
                before.open_count);
 }
 
+/* A call that spent its whole budget and got nothing is a TIMEOUT, not evidence
+ * the dependency is down. The transport cannot tell them apart -- a read timeout
+ * and a refused connection both surface as status -1 with no body -- but the
+ * caller knows what it allowed, so elapsed time separates them: failing fast
+ * means nobody answered, failing at the deadline means someone is still working.
+ *
+ * This mattered because a slow ingest scan was recorded as an outage, three of
+ * them opened the shared breaker, and every unrelated KB call was then
+ * suppressed with a 503 that never left the process. */
+int kb_transport_call_timed_out(int http_status, const char *response, int64_t elapsed_ms,
+                                int timeout_ms)
+{
+   if (response || http_status > 0 || timeout_ms <= 0)
+      return 0;
+   return elapsed_ms >= (int64_t)timeout_ms * 9 / 10;
+}
+
+static void kb_transport_complete_timed(const char *path, const char *response, int http_status,
+                                        int64_t elapsed_ms, int timeout_ms);
+
 static void kb_transport_complete(const char *path, const char *response, int http_status)
+{
+   kb_transport_complete_timed(path, response, http_status, 0, 0);
+}
+
+static void kb_transport_complete_timed(const char *path, const char *response, int http_status,
+                                        int64_t elapsed_ms, int timeout_ms)
 {
    int64_t now_ms = kb_dependency_now_ms();
    int valid = 0;
@@ -366,6 +392,13 @@ static void kb_transport_complete(const char *path, const char *response, int ht
     * Log the transition into the open state — not every suppressed call — so a
     * sustained outage costs one line per backoff window rather than one per
     * request. */
+   if (kb_transport_call_timed_out(http_status, response, elapsed_ms, timeout_ms))
+   {
+      /* The caller's budget ran out. The KB may well still be working on it, so
+       * this says nothing about reachability and must not open the breaker. */
+      g_kb_last_result = KB_CLIENT_RESULT_UNAVAILABLE;
+      return;
+   }
    dependency_breaker_snapshot_t before;
    dependency_breaker_snapshot(&g_kb_dependency, now_ms, &before);
    dependency_breaker_report_failure(&g_kb_dependency, now_ms, DEPENDENCY_BREAKER_DEFAULT_THRESHOLD,
@@ -1576,8 +1609,10 @@ static char *kb_client_v1_post_json_impl(const char *path, cJSON *body, int time
    {
       int local_status = -1;
       int *wire_status = status_out ? status_out : &local_status;
+      int64_t started_ms = kb_dependency_now_ms();
       char *r = kb_client_mtls_request_timeout("POST", path, body_json, timeout_ms, wire_status);
-      kb_transport_complete(path, r, *wire_status);
+      kb_transport_complete_timed(path, r, *wire_status, kb_dependency_now_ms() - started_ms,
+                                  timeout_ms);
       free(body_json);
       if (*wire_status < 200 || *wire_status >= 300 || !r)
       {

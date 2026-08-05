@@ -1132,6 +1132,14 @@ int kb_client_index_scan_apply_response(const void *resp, kb_client_index_scan_r
  * Values outside (0, 24h] are ignored so a typo cannot disable the bound. */
 int kb_client_index_scan_timeout_ms(void);
 
+/* Whether a failed call is the caller's budget expiring rather than the KB
+ * being unreachable. A read timeout and a refused connection look identical
+ * on the wire (no body, no status), so elapsed time against the budget is
+ * what separates 'nobody answered' from 'someone is still working'. A
+ * timeout must not open the shared dependency breaker. */
+int kb_transport_call_timed_out(int http_status, const char *response, int64_t elapsed_ms,
+                                int timeout_ms);
+
 /* Internal: build the wire-level response object that aimee-server's
  * handle_index_scan returns to the CLI, given the kb_client result and
  * its rc. Pulled out so dispatch and tests share one truth about

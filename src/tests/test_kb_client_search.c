@@ -1394,8 +1394,31 @@ static void test_index_scan_uses_v1_api_when_configured(void)
    g_route_case = 0;
 }
 
+
+/* A call that burned its whole budget and got nothing timed out; one that failed
+ * immediately did not. Only the latter is evidence the KB is unreachable, and
+ * only the latter may open the shared breaker -- a slow ingest scan opening it
+ * suppressed every unrelated KB call in the process. */
+static void test_timeout_is_distinguished_from_unreachable(void)
+{
+   /* Spent the budget with nothing to show: a timeout. */
+   assert(kb_transport_call_timed_out(-1, NULL, 300000, 300000) == 1);
+   assert(kb_transport_call_timed_out(-1, NULL, 270000, 300000) == 1); /* 90% counts */
+
+   /* Failed fast: nobody answered. */
+   assert(kb_transport_call_timed_out(-1, NULL, 5, 300000) == 0);
+
+   /* Anything that actually answered is not a timeout, however long it took. */
+   assert(kb_transport_call_timed_out(200, "{}", 300000, 300000) == 0);
+   assert(kb_transport_call_timed_out(503, NULL, 300000, 300000) == 0);
+
+   /* No budget declared: cannot claim a timeout. */
+   assert(kb_transport_call_timed_out(-1, NULL, 300000, 0) == 0);
+}
+
 int main(void)
 {
+   test_timeout_is_distinguished_from_unreachable();
    test_health_uses_v1_api_when_configured();
    test_health_degraded_is_reachable_and_carries_blockers();
    test_health_legacy_kb_without_blockers();
