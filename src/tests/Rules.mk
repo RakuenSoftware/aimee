@@ -266,6 +266,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-bus-endpoint \
                $(TESTPREFIX)/unit-test-bus-runtime \
                $(TESTPREFIX)/unit-test-module-runtime \
+               $(TESTPREFIX)/unit-test-sandbox-learned-observe \
                $(TESTPREFIX)/unit-test-routing-module \
                $(TESTPREFIX)/unit-test-bus-capture \
                $(TESTPREFIX)/unit-test-guardrails-blast-radius \
@@ -2235,6 +2236,7 @@ $(TESTPREFIX)/unit-test-kb-mgmt-endpoint: $(OBJDIR)/tests/test_kb_mgmt_endpoint.
 
 $(TESTPREFIX)/unit-test-kb-mgmt-status: $(OBJDIR)/tests/test_kb_mgmt_status.o \
                                         $(OBJDIR)/kb/kb_mgmt_status.o \
+                                        $(OBJDIR)/util.o \
                                         $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -2251,17 +2253,20 @@ $(TESTPREFIX)/unit-test-server-mgmt-status: $(OBJDIR)/tests/test_server_mgmt_sta
 
 $(TESTPREFIX)/unit-test-server-mgmt-token: $(OBJDIR)/tests/test_server_mgmt_token.o \
                                            $(OBJDIR)/server/server_mgmt_token.o \
-                                           $(OBJDIR)/cJSON.o
+                                           $(OBJDIR)/util.o \
+                                        $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-server-mgmt-endpoint: $(OBJDIR)/tests/test_server_mgmt_endpoint.o \
                                               $(OBJDIR)/server/server_mgmt_endpoint.o \
-                                              $(OBJDIR)/cJSON.o
+                                              $(OBJDIR)/util.o \
+                                        $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lcrypto
 
 $(TESTPREFIX)/unit-test-server-mgmt-read: $(OBJDIR)/tests/test_server_mgmt_read.o \
                                           $(OBJDIR)/shared/management_read.o \
-                                          $(OBJDIR)/cJSON.o
+                                          $(OBJDIR)/util.o \
+                                        $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lcrypto
 
 $(TESTPREFIX)/unit-test-server-mgmt-read-source: \
@@ -2306,7 +2311,8 @@ $(TESTPREFIX)/unit-test-kb-login-throttle: $(OBJDIR)/tests/test_kb_login_throttl
 $(TESTPREFIX)/unit-test-kb-identity-token: $(OBJDIR)/tests/test_kb_identity_token.o \
                                            $(OBJDIR)/kb/kb_identity_token.o \
                                            $(OBJDIR)/server/oauth_pkce.o \
-                                           $(OBJDIR)/cJSON.o
+                                           $(OBJDIR)/util.o \
+                                        $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-server-write-tier: $(OBJDIR)/tests/test_server_write_tier.o \
@@ -2314,14 +2320,16 @@ $(TESTPREFIX)/unit-test-server-write-tier: $(OBJDIR)/tests/test_server_write_tie
                                            $(OBJDIR)/server/server_mgmt_token.o \
                                            $(OBJDIR)/kb/kb_identity_token.o \
                                            $(OBJDIR)/server/oauth_pkce.o \
-                                           $(OBJDIR)/cJSON.o
+                                           $(OBJDIR)/util.o \
+                                        $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-server-identity-token: $(OBJDIR)/tests/test_server_identity_token.o \
                                                $(OBJDIR)/server/server_mgmt_token.o \
                                                $(OBJDIR)/kb/kb_identity_token.o \
                                                $(OBJDIR)/server/oauth_pkce.o \
-                                               $(OBJDIR)/cJSON.o
+                                               $(OBJDIR)/util.o \
+                                        $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-server-write-tier-db1: \
@@ -3054,6 +3062,18 @@ $(TESTPREFIX)/unit-test-module-runtime: $(OBJDIR)/tests/test_module_runtime.o \
                                         $(OBJDIR)/core/event_bus/bus_wire.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
 
+$(OBJDIR)/tests/test_sandbox_learned_observe.o: C_FLAGS += -Icore/event_bus/include -Imodules/sandbox/include
+$(TESTPREFIX)/unit-test-sandbox-learned-observe: $(OBJDIR)/tests/test_sandbox_learned_observe.o \
+                                        $(OBJDIR)/modules/sandbox/sandbox_learned.o \
+                                        $(OBJDIR)/modules/guardrails/guardrails_tdd.o \
+                                        $(OBJDIR)/util.o \
+                                        $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
+
+.PHONY: unit-test-sandbox-learned-observe
+unit-test-sandbox-learned-observe: $(TESTPREFIX)/unit-test-sandbox-learned-observe
+	$<
+
 .PHONY: unit-test-module-runtime
 unit-test-module-runtime: $(TESTPREFIX)/unit-test-module-runtime
 	$<
@@ -3631,7 +3651,8 @@ $(TESTPREFIX)/unit-test-gateway-telegram: $(OBJDIR)/tests/test_gateway_telegram.
                                           $(OBJDIR)/posix/agent_bridge.o \
                                           $(OBJDIR)/posix/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o \
                                           $(OBJDIR)/proxy_bootstrap.o \
-                                          $(OBJDIR)/cJSON.o \
+                                          $(OBJDIR)/util.o \
+                                        $(OBJDIR)/cJSON.o \
                                           $(OBJDIR)/log.o \
                                           $(OBJDIR)/platform_random.o \
                                           $(OBJDIR)/modules/vault/runtime_secret.o \
@@ -3657,7 +3678,8 @@ $(TESTPREFIX)/unit-test-gateway-ntfy-webhook: $(OBJDIR)/tests/test_gateway_ntfy_
                                               $(OBJDIR)/posix/agent_bridge.o \
                                               $(OBJDIR)/posix/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o \
                                               $(OBJDIR)/proxy_bootstrap.o \
-                                              $(OBJDIR)/cJSON.o \
+                                              $(OBJDIR)/util.o \
+                                        $(OBJDIR)/cJSON.o \
                                               $(OBJDIR)/log.o \
                                               $(OBJDIR)/platform_random.o \
                                               $(OBJDIR)/modules/vault/runtime_secret.o \
@@ -3669,7 +3691,8 @@ $(TESTPREFIX)/unit-test-mcp-gateway-tools: $(OBJDIR)/tests/test_mcp_gateway_tool
                                             $(OBJDIR)/modules/protocols/mcp/mcp_tools_gateway.o \
                                             $(OBJDIR)/server/server_mcp_gateway.o \
                                             $(OBJDIR)/delivery_target.o \
-                                            $(OBJDIR)/cJSON.o
+                                            $(OBJDIR)/util.o \
+                                        $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-gateway-stt-pairing: $(OBJDIR)/tests/test_gateway_stt_pairing.o \
@@ -3680,7 +3703,8 @@ $(TESTPREFIX)/unit-test-gateway-stt-pairing: $(OBJDIR)/tests/test_gateway_stt_pa
                                              $(OBJDIR)/platform_random.o \
                                              $(OBJDIR)/posix/agent_bridge.o \
                                              $(OBJDIR)/proxy_bootstrap.o \
-                                             $(OBJDIR)/cJSON.o \
+                                             $(OBJDIR)/util.o \
+                                        $(OBJDIR)/cJSON.o \
                                              $(OBJDIR)/modules/vault/runtime_secret.o \
                                              $(GATEWAY_PLATFORM_OBJS) \
                                              $(CORE_CONNECTION_LIB)
@@ -3704,7 +3728,8 @@ $(TESTPREFIX)/unit-test-cron-runtime: $(OBJDIR)/tests/test_cron_runtime.o \
 
 $(TESTPREFIX)/unit-test-report-enrichment: $(OBJDIR)/tests/test_report_enrichment.o \
                                            $(OBJDIR)/report_enrichment.o $(OBJDIR)/util_url.o \
-                                           $(OBJDIR)/cJSON.o $(PLATFORM_BASIC_OBJS)
+                                           $(OBJDIR)/util.o \
+                                        $(OBJDIR)/cJSON.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-hardware-probe: $(OBJDIR)/tests/test_hardware_probe.o \
