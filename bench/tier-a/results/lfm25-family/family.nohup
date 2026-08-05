@@ -16,3 +16,11 @@ merged 1001 rows, 0 missing
 [01:43:47Z]   -> running 3 processes, cache-ram 1024 MiB each
 [01:44:19Z]   all 3 servers up; VRAM now 1820 MiB
 [01:44:19Z] START LFM2.5-230M.Q6_K across 3 shards
+merged 1001 rows, 0 missing
+[01:45:14Z] DONE LFM2.5-230M.Q6_K rows=1001/1001 wall=0m55s procs=3 retries=0
+[01:45:20Z]   thinking guard fired; re-scoring with --allow-thinking-off
+[01:45:21Z] OK   LFM2.5-230M.Q6_K strictF1=0.1363 wall=2m
+[01:45:21Z] --- LFM2.5-230M.Q8_0  LiquidAI/LFM2.5-230M-GGUF:Q8_0  nproc=3  no MTP
+[01:45:27Z] sizing: starting one server to measure resident VRAM
+[01:45:58Z]   one instance uses 664 MiB of 16303 MiB
+[01:45:58Z]   -> running 3 processes, cache-ram 1024 MiB each

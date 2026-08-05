@@ -1777,3 +1777,34 @@ score.py was NOT changed. Adding tool-call parsing mid-benchmark would alter the
 scoring path for every banked arm and break comparability with everything already
 measured. The decision of whether to add it, and re-score the field, belongs to
 whoever owns the article -- it is a change to the instrument, not a bug fix.
+
+### Defect 37, continued: the quant decides the envelope
+
+LFM2.5-230M at Q6_K scored 0.1363 where Q4_K_M scored 0.0022. Same model, same
+prompt, same harness, same 1001 notes. The difference is the output format, and
+it is a switch rather than a gradient:
+
+| quant | tool-call envelope | parse_ok | schema_ok | triples | strict F1 |
+|---|---:|---:|---:|---:|---:|
+| Q4_K_M | **982/1001** | 1000 | 16 | 22 | 0.0022 |
+| Q6_K | **0/1001** | 1001 | 1001 | 925 | 0.1363 |
+
+Quantisation changed which envelope the model emits. Nothing in the pipeline
+noticed, because `parse_ok` is 1000/1001 in BOTH cases -- the tool-call payload is
+valid JSON, it is just the wrong shape. Only `schema_ok` moves, and no driver
+looks at it.
+
+This also resolves the open question from the first half of this defect. The
+ad-hoc re-parse of the Q4 arm gave 0.1564; Q6 gives 0.1363 through score.py's
+normal audited path. Two independent routes agree that the model's real
+capability is ~0.14-0.16 -- last in the field by a wide margin, and roughly 60x
+above what the Q4 arm appeared to score.
+
+The publishable claim is therefore stronger and simpler than "a model used the
+wrong envelope": **a quantisation choice silently changed a model's output format
+and moved its apparent score by 60x.** Anyone running a quant ladder on a model
+they have not inspected can hit this, and the symptom is a number that looks like
+the model being bad at the task.
+
+Cheap detector, not currently in any driver: count rows whose `raw` contains
+`tool_call`, or simply alert when `schema_ok` diverges from `parse_ok`.
