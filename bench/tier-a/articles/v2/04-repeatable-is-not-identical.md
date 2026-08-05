@@ -99,14 +99,29 @@ process count and prompt gives different text depending on which corpus it was
 embedded in: 529 of 1,001 identical between a 1,001-note run and a 3,002-note run
 containing it.
 
-The obvious cause fails its own test. Same predecessor, 44.8% churn. Different
-predecessor, 48.3%. The cache holds roughly 38 entries, so what carries is the last
-38 notes, and almost every note has a different 38-note history between corpora.
-That predicts uniform churn and uniform churn is what appears. **Consistent with
-the mechanism, not a measurement of it.** The discriminating run, both corpora with
-the cache disabled, is on the card as I write, with the prediction registered
-before it started: near 1001/1001 confirms the cache, anything near 79% withdraws
-the explanation.
+It took three hypotheses and two retractions to find the cause, and each test was
+registered in writing before it ran.
+
+| hypothesis | test | result |
+|---|---|---|
+| the preceding note | split churn by predecessor identity | 44.8% vs 48.3%, **refuted** |
+| prompt-cache history | re-run both corpora with `--cache-ram 0` | 49.9% vs 52.8%, **refuted** |
+| **sequence position** | same notes, seeded shuffle, cache off | **confirmed** |
+
+| | byte-identical |
+|---|---:|
+| same notes, same order, cache off | **1001/1001** |
+| same notes, **shuffled**, cache off | **524/1001** |
+| same notes, inside a 3,002-note corpus | 499/1001 |
+
+Shuffling reproduces the cross-corpus churn to within 25 notes. **A subset is not
+a run because its notes sit somewhere else in the queue.**
+
+That implies state carries between requests even with the prompt cache disabled:
+`llama-server` holds a live KV context per slot, and `--cache-ram` governs the
+prompt cache rather than that context. It does not identify which state, and after
+two explanations that fitted the data and died on their own tests, I am not naming
+a fourth without another registered one.
 
 **Cache setting.** Cache on against cache off, same corpus: 792/1001.
 

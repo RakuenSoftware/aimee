@@ -74,13 +74,17 @@ introduced, and no run has reversed it.
 
 Three ladders, three shapes:
 
-| model | as bits increase |
-|---|---|
-| gemma-4 E4B at 10k | Q4 0.6324, Q6 0.6450, Q8 **0.6321** |
-| SmolLM3-3B | Q8 − Q4 = **+0.0352** |
-| LFM2.5-2.6B | spread of **−0.0104** across the ladder |
+| model | as bits increase | interval |
+|---|---|---|
+| gemma-4 E4B at 10k | Q4 0.6324, Q6 0.6450, Q8 **0.6321** | n=10000 |
+| SmolLM3-3B | Q8 − Q4 = **+0.0352** | [+0.0165, +0.0543] |
+| LFM2.5-2.6B | −0.0104 | [−0.0153, +0.0366], **withdrawn** |
 
-gemma-4 rises then falls. SmolLM3 rises. LFM2.5 gets worse with more bits.
+gemma-4 rises then falls. SmolLM3 rises. LFM2.5-2.6B I reported as falling, and
+its interval contains zero, so that one comes out.
+
+Two shapes rather than three, and the argument is stronger for it: a claim that
+survives its interval is worth more than three where one is noise.
 
 The E4B Q6-to-Q8 step is −0.0129, and Q8 lands 0.0003 *below* Q4. Two more bits
 per weight, a larger file, and nothing to show for it. By this article's own

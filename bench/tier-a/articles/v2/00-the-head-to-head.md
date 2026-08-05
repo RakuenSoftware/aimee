@@ -35,9 +35,23 @@ least two common jobs.
 correct answer is nothing. `spurious` is how many triples it invented on those same
 notes. `reasons` is the fraction of rows carrying a reasoning pass.
 
-**Read the interval before the order.** At n=1,001 a paired bootstrap gives roughly
-±0.024, so the top four are one group. Any two rows within 0.024 are not ordered by
-this table.
+**This is a table of tiers, not a ranking.** I ran a paired bootstrap on every
+adjacent pair, because an adjacent pair is exactly the ordering claim a ranked
+table makes. **Nine of fifteen are indistinguishable.** The top eight rows are one
+group: nothing in them is ordered by this data. Every separable pair is in the
+bottom half, where the gaps are wide because those models are failing rather than
+competing.
+
+| boundary | delta | 95% CI |
+|---|---:|---|
+| E2B-QAT vs E4B-QAT | −0.0213 | [−0.0442, +0.0017] |
+| E4B-UD vs E2B-UD | −0.0150 | [−0.0391, +0.0085] |
+| granite-4.1-3b vs gemma-3n-E4B | −0.0144 | [−0.0461, +0.0166] |
+| LFM2.5-8B-A1B vs Qwen3-1.7B | −0.0580 | [−0.0912, −0.0247] |
+| SmolLM3-Q4 vs LFM2.5-VL-1.6B | −0.0856 | [−0.1145, −0.0567] |
+
+Printing models in F1 order implies an ordering the data does not carry. Read the
+table as three bands: usable, marginal, and broken.
 
 ## F1 and restraint are independent axes
 
@@ -95,15 +109,19 @@ One model reasons *partially*: gemma-4 E4B under QAT, on 85% of rows. The missin
 
 ## The quant is worth more than the model, twice
 
-| pair | delta |
-|---|---:|
-| SmolLM3-3B, Q8 − Q4 | **+0.0352** |
-| LFM2.5-2.6B, Q4 − Q8 | **+0.0104** |
-| gemma-4 E2B, QAT − UD | **+0.0389** |
+| pair | delta | 95% CI | |
+|---|---:|---|---|
+| SmolLM3-3B, Q8 − Q4 | **+0.0352** | [+0.0165, +0.0543] | holds |
+| gemma-4 E2B, QAT − UD | **+0.0389** | [+0.0152, +0.0635] | holds |
+| LFM2.5-2.6B, Q4 − Q8 | +0.0104 | [−0.0153, +0.0366] | **withdrawn** |
 
-SmolLM3 gets better with more bits. LFM2.5-2.6B gets worse. gemma-4 E2B gains more
-from a differently *trained* four-bit quant than from any bit-width step in this
-project.
+SmolLM3 gets better with more bits. gemma-4 E2B gains more from a differently
+*trained* four-bit quant than from any bit-width step in this project.
+
+I previously reported LFM2.5-2.6B as getting *worse* with more bits. Its interval
+contains zero and that claim is withdrawn. It was one of three ladder shapes I was
+using to argue that more bits is not a direction, and the argument is better
+without it: two measured effects beat three where one is noise.
 
 That last one is the largest single-model gain in the table and it moves E2B above
 its own larger sibling. If you take one action from this piece, run your candidate

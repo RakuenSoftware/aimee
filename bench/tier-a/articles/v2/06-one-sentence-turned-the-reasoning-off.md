@@ -141,9 +141,26 @@ rows, 16%, of which 204 answer `{"facts":[]}` in five tokens. The rate reproduce
 two corpus sizes. Those rows abstain at 51% against 24.5% on rows where it did
 reason.
 
-I know E4B suppresses and E2B does not. **The other twelve are unchecked.** Some
-fraction of the bottom half of my ranking may be a prompt problem rather than a
-model problem, and I cannot currently tell you which.
+I tested it rather than leaving it open, with a positive control so a null would
+mean something. Two variants derived from the live template: `v4clause` restores
+the original suppressing wording, `noclause` removes the output constraint
+entirely.
+
+| model | live | `v4clause` | `noclause` |
+|---|---:|---:|---:|
+| gemma-4-E4B | 100% | **0/1001** | **770/770** |
+| granite-4.1-3b | 0% | | 0/1001 |
+| SmolLM3-3B | 0% | | 0/798 |
+| LFM2.5-230M | 0% | | 0/570 |
+
+**It is that sentence, not the presence of a constraint.** Removing the constraint
+entirely changes nothing for E4B; restoring the original wording kills reasoning
+outright. So the rescoping fix works rather than merely coinciding with recovery.
+
+And with the control firing, the zeros mean what they appear to mean: granite,
+SmolLM3 and LFM2.5-230M reason on nothing with no constraint at all. Their zero is
+capability, not my prompt. The bottom half of the ranking is not a prompt
+artefact.
 
 ## The explanation I had was wrong and its own test killed it
 
