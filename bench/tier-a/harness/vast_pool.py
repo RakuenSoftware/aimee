@@ -117,11 +117,21 @@ def destroy(cid):
 
 
 def run_arm(job, gpu, maxprice, outdir, log):
+    """One instance, one model, and every prompt variant the job asks for.
+
+    Batching matters: the image pull is billable dead time and is per-instance,
+    so one instance per short arm pays it repeatedly. Variants of one model share
+    a loaded server, which also makes the pair internally clean -- same card,
+    same weights, same session, prompt as the only difference."""
     label, repo = job["label"], job["repo"]
     gold = job.get("gold", "data/corpora/v5/gold_small.jsonl")
-    pred = os.path.join(outdir, label + ".pred.jsonl")
-    if os.path.exists(pred) and sum(1 for _ in open(pred)) >= sum(1 for _ in open(os.path.join(ROOT, gold))):
-        log("SKIP %s (banked)" % label); return
+    want = sum(1 for _ in open(os.path.join(ROOT, gold)))
+    variants = job.get("prompts", ["live"])
+    todo = [v for v in variants
+            if not (os.path.exists(os.path.join(outdir, "%s.%s.pred.jsonl" % (label, v)))
+                    and sum(1 for _ in open(os.path.join(outdir, "%s.%s.pred.jsonl" % (label, v)))) >= want)]
+    if not todo:
+        log("SKIP %s (all variants banked)" % label); return
     cid = None
     t0 = time.time()
     try:
@@ -141,23 +151,30 @@ def run_arm(job, gpu, maxprice, outdir, log):
         if ep is None:
             log("FAIL %s: no host served within the pull timeout" % label); return
         loaded = verify(ep, repo, job.get("verify_fam"))
-        log("    healthy, loaded %s" % loaded)
+        log("    healthy, loaded %s; %d variant(s): %s" % (loaded, len(todo), ",".join(todo)))
         # run_llamacpp.py REQUIRES an explicit thinking flag and has no default,
         # deliberately: an arm that silently inherits the wrong one is not
         # comparable to anything. Every banked arm in this project ran
         # --thinking, so that is what a job gets unless it says otherwise.
-        cmd = [sys.executable, os.path.join(ROOT, "harness/run_llamacpp.py"),
-               "--base-url", "http://" + ep, "--model", label,
-               "--gold", os.path.join(ROOT, gold), "--out", pred,
-               "--thinking" if job.get("thinking", True) else "--no-thinking",
-               "--max-tokens", str(job.get("max_tokens", 8192)),
-               "--concurrency", "1"] + job.get("extra", [])
-        r = subprocess.run(cmd, capture_output=True, text=True)
-        if r.returncode != 0:
-            log("FAIL %s client rc=%d: %s" % (label, r.returncode, r.stderr[-300:])); return
+        for v in todo:
+            pred = os.path.join(outdir, "%s.%s.pred.jsonl" % (label, v))
+            cmd = [sys.executable, os.path.join(ROOT, "harness/run_llamacpp.py"),
+                   "--base-url", "http://" + ep, "--model", "%s.%s" % (label, v),
+                   "--gold", os.path.join(ROOT, gold), "--out", pred,
+                   "--thinking" if job.get("thinking", True) else "--no-thinking",
+                   "--max-tokens", str(job.get("max_tokens", 8192)),
+                   "--prompt-version", v,
+                   "--concurrency", "1"] + job.get("extra", [])
+            r = subprocess.run(cmd, capture_output=True, text=True)
+            if r.returncode != 0:
+                log("FAIL %s/%s rc=%d: %s" % (label, v, r.returncode, r.stderr[-250:])); continue
+            rows = [json.loads(l) for l in open(pred)]
+            reasoned = sum(1 for x in rows if (x.get("reasoning_chars") or 0) > 0)
+            pk = sum(1 for x in rows if x.get("parse_ok"))
+            log("OK   %s/%s rows=%d reasoned=%d/%d parse_ok=%d" % (
+                label, v, len(rows), reasoned, len(rows), pk))
         cost = off["dph_total"] * (time.time() - t0) / 3600.0
-        log("OK   %s rows=%d wall=%dm cost=$%.3f" % (
-            label, sum(1 for _ in open(pred)), (time.time() - t0) / 60, cost))
+        log("DONE %s wall=%dm cost=$%.3f" % (label, (time.time() - t0) / 60, cost))
     except Exception as e:
         log("FAIL %s: %s" % (label, e))
     finally:

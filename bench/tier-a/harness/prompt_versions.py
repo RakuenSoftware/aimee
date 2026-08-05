@@ -57,7 +57,57 @@ def v6(text=None):
     return s.replace(RENAME_V7, "", 1)
 
 
-VERSIONS = {"v5": v5, "v6": v6}
+# Diagnostic variants for the reasoning question, added deliberately and named
+# so no arm can inherit one by accident.
+#
+# THE QUESTION. Seven of fourteen models in the head-to-head emit no reasoning
+# pass at all under the live prompt. That is either the model or the prompt, and
+# the project has already been burned once by assuming the former: on gemma-4-E4B
+# a single sentence, "No prose, no markdown.", suppressed reasoning across 10,000
+# notes while every row recorded thinking:true, and restoring it was worth +0.116
+# relation-agnostic recall. E2B, same family, never had the behaviour.
+#
+# WHAT THESE ARE FOR, and what they are NOT for. Both produce arms that answer
+# "does this prompt suppress this model's reasoning channel". Neither produces a
+# number comparable to the ranking table: a model scored under a different prompt
+# is a different configuration, exactly as a different process count is. Every
+# prediction row records its own prompt_version, so nothing banked is touched and
+# nothing can be silently mixed.
+FINAL_LIVE = ("Reason first if it helps; the answer that follows must be the JSON "
+              "object only, no prose, no markdown.")
+FINAL_V4 = "No prose, no markdown."
+
+
+def v4clause(text=None):
+    """POSITIVE CONTROL. Restores the wording that provably suppressed E4B.
+
+    This variant must reproduce the known failure or the experiment is not
+    measuring what it claims: run gemma-4-E4B under it and reasoning should
+    collapse to ~0. If it does not, the variant is wrong, not the models.
+    """
+    s = text if text is not None else live()
+    _require(s, FINAL_LIVE, "final output-format sentence")
+    return s.replace(FINAL_LIVE, FINAL_V4, 1)
+
+
+def noclause(text=None):
+    """THE TEST. Removes the output-format constraint entirely.
+
+    A model that reasons here and not under the live prompt is being suppressed
+    by the prompt. A model that reasons under neither is not a reasoning model in
+    this harness, and its place in the ranking is a capability result rather than
+    a configuration artefact.
+
+    Parse rate is expected to fall: the clause is doing real work, and removing it
+    brought back fenced ```json output on 14 of 20 notes when this was measured on
+    E4B. That is why this is a diagnostic and not a candidate prompt.
+    """
+    s = text if text is not None else live()
+    _require(s, FINAL_LIVE, "final output-format sentence")
+    return s.replace(FINAL_LIVE, "", 1).rstrip() + "\n"
+
+
+VERSIONS = {"v5": v5, "v6": v6, "v4clause": v4clause, "noclause": noclause}
 
 
 def render(version):
