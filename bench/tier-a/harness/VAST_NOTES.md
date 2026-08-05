@@ -148,3 +148,15 @@ problem and encoded the symptom rather than the cause. A host stuck for fifteen
 minutes became a fifteen-minute timeout. An offer became a machine. A price became
 the price. In each case the correct signal was already in the data being logged
 and nothing read it, which is the same defect class this whole benchmark is about.
+
+**Prediction files were deleted before being committed.** A fleet relaunch ran
+`rm -f results/vast/*.mtp.live.pred.jsonl` "to be clean", destroying the arms
+behind an already-committed finding. They had never been committed, so nothing was
+recoverable. The pool truncates on restart anyway, so the deletion achieved
+nothing at all.
+
+**Rule: commit prediction files as soon as an arm produces rows, and never delete
+a partial arm.** A partial arm is evidence; the harness knows how to ignore it
+(the skip check compares row count against the gold tier) and a later reader can
+be told what it is. Deleting it to keep a directory tidy trades a permanent loss
+for a cosmetic gain.

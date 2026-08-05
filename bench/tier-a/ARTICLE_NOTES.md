@@ -1719,6 +1719,23 @@ clause and the article gets a genuinely new section. Draft 02 (quant) gains the
 converse: a reason to care which quant you pick that has nothing to do with
 accuracy.
 
+### PROVENANCE WARNING: the source files for this table were deleted
+
+The acceptance figures below came from two partial arms (31 and 24 rows) whose
+prediction files I deleted during a fleet relaunch, with `rm -f
+results/vast/*.mtp.live.pred.jsonl`. They had never been committed, so they are
+not recoverable. The numbers are recorded here and nowhere else, which is exactly
+the condition this project treats as unacceptable: a figure that cannot be traced
+to an artifact.
+
+The deletion bought nothing. `run_llamacpp.py` truncates its output on start, so
+leaving the files would have been harmless.
+
+**Treat the table below as provisional until re-derived from the completed arms.**
+Both arms are re-running at full n=1001, which will give roughly thirty times the
+drafted tokens these figures rest on. If the re-derived numbers differ, the
+re-derived numbers are the ones that count.
+
 ### ANSWER: no. Acceptance is indistinguishable, and the throughput gap was the host.
 
 gemma-4-12B, same draft file, same corpus, same prompt, MTP on both sides:
