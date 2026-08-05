@@ -429,6 +429,39 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(response_len > 0 && response_len < sizeof(response));
       response[response_len] = '\0';
       assert(strstr((const char *)response, "packages") != NULL);
+
+      /* The write path, which nothing else exercises across the process
+       * boundary. OBSERVE is what sandbox_learned_observe() emits after it has
+       * resolved a git root, so this is the same call the delegate shell tool
+       * makes -- minus the model. Parsing lives in the module now, so the
+       * round-trip is the only thing that proves the C caller's payload is
+       * shaped the way the Go side decodes it. */
+      const char *learn =
+          "{\"git_root\":\"/probe\",\"command\":\"apt-get install -y tree\"}";
+      request_len = (uint32_t)strlen(learn);
+      assert(request_len <= sizeof(request));
+      memcpy(request, learn, request_len);
+      assert(aimee_module_client_call(client, AIMEE_SANDBOX_EVENT_OBSERVE,
+                                      AIMEE_SANDBOX_STAGE_OBSERVE, 2017, 0, request, request_len,
+                                      response, sizeof(response), &response_len, NULL,
+                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(response_len > 0 && response_len < sizeof(response));
+      response[response_len] = '\0';
+      /* Not just "it answered": it parsed one package and persisted it. */
+      assert(strstr((const char *)response, "\"recorded\":1") != NULL);
+      assert(strstr((const char *)response, "tree") != NULL);
+
+      /* Read it back through the separate LOAD stage, so the assertion covers
+       * the store actually landing on disk rather than the handler echoing its
+       * own input. */
+      request_len = (uint32_t)strlen(probe);
+      memcpy(request, probe, request_len);
+      assert(aimee_module_client_call(client, AIMEE_SANDBOX_EVENT_LOAD, AIMEE_SANDBOX_STAGE_LOAD,
+                                      2018, 0, request, request_len, response, sizeof(response),
+                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(response_len > 0 && response_len < sizeof(response));
+      response[response_len] = '\0';
+      assert(strstr((const char *)response, "tree") != NULL);
    }
    else
    {
@@ -470,6 +503,10 @@ int main(int argc, char **argv)
       assert(production_contract(argv[2], &test_kind, &module_ref, served, &serve_count) == 0);
    char directory[] = "/tmp/aimee-module-runtime-XXXXXX";
    assert(mkdtemp(directory) != NULL);
+   /* Point the spawned module at a throwaway home BEFORE it is forked: the
+    * sandbox module persists what it learns under AIMEE_HOME, and a test that
+    * exercises the write path must not touch the developer's real store. */
+   assert(setenv("AIMEE_HOME", directory, 1) == 0);
    char socket_path[PATH_MAX], executable[PATH_MAX];
    assert(snprintf(socket_path, sizeof socket_path, "%s/module.sock", directory) > 0);
    assert(realpath("/proc/self/exe", executable) != NULL);
@@ -632,6 +669,13 @@ finish:
    bus_runtime_stop(&runtime);
    bus_host_destroy(&host);
    pthread_mutex_destroy(&host_lock);
+   /* The sandbox leg drives a stage that persists, so this run leaves a store
+    * behind in the throwaway home. Remove exactly that file and keep the rmdir
+    * assertion strict, so anything ELSE a module wrote still fails loudly
+    * rather than being swept up by a recursive delete. */
+   char learned_store[PATH_MAX];
+   assert(snprintf(learned_store, sizeof learned_store, "%s/sandbox-learned.json", directory) > 0);
+   (void)unlink(learned_store); /* absent for every other module: not an error */
    assert(rmdir(directory) == 0);
    if (argc == 3)
       printf("module runtime (%s): C caller/Go handler wire parity passed\n", argv[2]);
