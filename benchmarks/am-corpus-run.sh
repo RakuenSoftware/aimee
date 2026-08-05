@@ -53,8 +53,9 @@ export PT_PONYTAIL=/opt/bench/ponytail-upstream
 export AIMEE_HOME=/var/lib/aimee
 
 # --- aimee arm ---------------------------------------------------------------
-export PT_SKIP_KB_BUILD=1
-export PT_AIMEE_MODE=index-only                      # "full" additionally requires embeddings
+export PT_SKIP_KB_BUILD=0
+export PT_AIMEE_MODE=full
+export PT_EMBED_WAIT_SECS=900
 export PT_WS_OWNER=999:999                           # a tree owned by anyone else scans
                                                      # clean with ZERO files, silently
 
