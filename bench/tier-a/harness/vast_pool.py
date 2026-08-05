@@ -57,7 +57,7 @@ def find_offers(gpu, maxprice, n, interruptible=False):
     return api("bundles/", params={"q": json.dumps(q)}).get("offers", [])
 
 
-def launch(offer_id, repo, ctx, cache_ram, bid=None):
+def launch(offer_id, repo, ctx, cache_ram, bid=None, draft=None):
     """bid=None rents on-demand; a float rents interruptible at that price.
 
     Bid ABOVE min_bid rather than at it. Bidding the floor is what gets an
@@ -67,6 +67,18 @@ def launch(offer_id, repo, ctx, cache_ram, bid=None):
     args = ["-hf", repo, "--host", "0.0.0.0", "--port", "8080",
             "-c", str(ctx), "-np", "1", "--cache-ram", str(cache_ram),
             "--no-webui", "--no-mmproj", "-ngl", "99"]
+    if draft:
+        # Speculative decoding roughly doubles throughput on this task at an
+        # accuracy cost bounded, over six paired 10k arms, at +/-0.004 F1. That
+        # is five times smaller than the +/-0.019 cross-card term already
+        # accepted for every rented arm, so refusing it here while accepting
+        # that one would be a habit rather than a principle.
+        #
+        # WITHIN A CONTROLLED PAIR IT MUST MATCH ON BOTH SIDES. Google's 26B
+        # q4_0 build publishes no draft and unsloth's does, so that pair runs
+        # without on both arms: enabling it on one side would put a known 26%
+        # output change inside the comparison the pair exists to make.
+        args += ["-hfd", draft]
     body = {"client_id": "me", "image": IMAGE, "disk": 60, "runtype": "args",
             "env": {"-p 8080:8080": "1"}, "args": args}
     if bid is not None:
@@ -230,7 +242,8 @@ def run_arm(job, gpu, maxprice, outdir, log):
                 # still far under on-demand.
                 bid = max(off.get("min_bid") or off["dph_total"], 0.005) * 1.35
             try:
-                cid = launch(off["id"], repo, job.get("ctx", 8192), job.get("cache_ram", 1024), bid)
+                cid = launch(off["id"], repo, job.get("ctx", 8192), job.get("cache_ram", 1024),
+                             bid, job.get("draft"))
             except (urllib.error.HTTPError, RuntimeError) as e:
                 log("    offer %s unavailable (%s); next offer" % (off["id"], e))
                 cid = None
