@@ -2190,11 +2190,13 @@ int handle_post_code_scan(const char *body, char *out_buf, int out_cap)
                   "{\"error\":\"could not queue project for ingestion\"}");
          return 503;
       }
-      /* skipped=true says no files were indexed BY THIS CALL, which is true and
-       * is the field callers already read; reason distinguishes it from the
-       * branch-unchanged skip above. */
+      /* skipped stays FALSE: it means the route declined the work, which is what
+       * the branch-unchanged case above reports. Queued work was accepted --
+       * files:0 says nothing is indexed YET and reason says why. Overloading
+       * skipped for both would leave a caller unable to tell "nothing to do"
+       * from "your work is pending". */
       snprintf(out_buf, (size_t)out_cap,
-               "{\"status\":\"ok\",\"skipped\":true,\"reason\":\"queued\","
+               "{\"status\":\"ok\",\"skipped\":false,\"queued\":true,\"reason\":\"queued\","
                "\"project\":\"%s\",\"files\":0,\"inspected\":0}",
                project);
       cJSON_Delete(root);
