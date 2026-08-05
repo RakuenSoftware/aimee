@@ -189,6 +189,15 @@ func (m *WorktreeManager) Cleanup(ctx context.Context, item db1.WorkItem) error 
 	if err != nil || rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return errors.New("refusing to clean worktree outside managed root")
 	}
+	// Cleanup is a two-step lifecycle operation: remove the checkout, then clear
+	// its durable path. If the database write fails after removal, the scheduler
+	// retries with the old row. Treat that already-completed physical step as
+	// success so the retry can finish clearing durable state.
+	if _, statErr := os.Stat(abs); errors.Is(statErr, os.ErrNotExist) {
+		return nil
+	} else if statErr != nil {
+		return fmt.Errorf("stat managed worktree: %w", statErr)
+	}
 	// Ensure creates every managed tree with --lock so external GC cannot race a
 	// live workflow. Explicit lifecycle deletion owns this path, so unlock it
 	// before the validated removal; a missing lock is harmless.

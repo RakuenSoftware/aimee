@@ -62,6 +62,29 @@ func TestParentUsesFeatureWorktreeAndChildBranchesFromIt(t *testing.T) {
 	}
 }
 
+func TestCleanupIsIdempotentAfterManagedPathWasRemoved(t *testing.T) {
+	root := t.TempDir()
+	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	manager, err := NewWorktreeManager(store, filepath.Join(root, "trees"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := db1.WorkItem{ID: "wi_missing", Repo: filepath.Join(root, "repo"),
+		Worktree: filepath.Join(root, "trees", "wi_missing")}
+	if err := manager.Cleanup(t.Context(), item); err != nil {
+		t.Fatalf("repeat cleanup of removed managed path: %v", err)
+	}
+
+	item.Worktree = filepath.Join(root, "outside-managed-root")
+	if err := manager.Cleanup(t.Context(), item); err == nil {
+		t.Fatal("missing path outside the managed root bypassed scope validation")
+	}
+}
+
 func TestEnsureMigratesLegacySliceWorktreeAfterReplayLosesDBPath(t *testing.T) {
 	root := t.TempDir()
 	repo := filepath.Join(root, "repo")
