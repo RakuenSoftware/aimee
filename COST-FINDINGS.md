@@ -619,6 +619,41 @@ early and late cells incomparable. Recompute post-hoc from each cell's retained
 `patch.diff` instead, bucketing on `"/tests/" in path or basename.startswith("test_")`,
 and restate the LOC table from that.
 
+### Recomputed from patch.diff — every arm wrote tests
+
+Harness said `test_added: 0` for all 25 cells. Recomputed:
+
+| arm | cells | prod+ | test+ | cells that wrote tests |
+|---|---|---|---|---|
+| baseline (CT403) | 4 | 199 | 166 | **4/4** |
+| ponytail-addon (CT403) | 4 | 85 | 72 | **4/4** |
+| ponytail-instructions (CT403) | 4 | 72 | 66 | **4/4** |
+| aimee | 1 | 31 | 40 | **1/1** |
+| baseline (CT401) | 4 | 81 | 17 | 1/4 |
+| ponytail-addon (CT401) | 4 | 44 | 13 | 1/4 |
+| ponytail-instructions (CT401) | 4 | 53 | 13 | 1/4 |
+
+**`am_1f0f1ab528` — the one task with all four arms, and the one this document
+dissects throughout:**
+
+| arm | prod+ | test+ |
+|---|---|---|
+| baseline | 30 | 0 |
+| ponytail-addon | 17 | 0 |
+| ponytail-instructions | 16 | 0 |
+| **aimee** | **31** | **40** |
+
+aimee is the only arm that wrote a test on this task, at production parity with
+baseline (31 vs 30). Under the broken metric this read as "aimee wrote 71
+production lines to baseline's 30" — 2.4x the code for the same fix, which
+sounds like bloat. Corrected, it is 31 lines of production plus a test the other
+three arms did not write.
+
+**This is the single largest correction in this document.** The quality axis the
+article was built to measure was reading zero for everyone, and the one arm-level
+difference visible in it points the opposite way from the cost story. n=1 on the
+four-arm comparison; check it across the corpus before publishing.
+
 ## Methodology traps hit in this work
 
 Record these; several produced wrong published numbers first.
