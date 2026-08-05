@@ -273,3 +273,36 @@ func TestKindsMatchTheContractAllocation(t *testing.T) {
 		t.Fatalf("EventLoad must be %d, got %d", want, EventLoad)
 	}
 }
+
+// A store written by the C implementation this module replaced, taken verbatim
+// from a production server (aimee-prod) where a real delegate ran an apt install
+// and the old code recorded it. The migration is only correct if the Go module
+// reads what the C one wrote -- byte-identical file, same answer, including the
+// git-root key shape that real workspaces produce.
+func TestLoadReadsAStoreWrittenByTheCImplementation(t *testing.T) {
+	home := t.TempDir()
+	const production = `{"/var/lib/aimee-workspaces/environment/rakuensoftware/aimee-workflow":["git"]}`
+	if err := os.WriteFile(filepath.Join(home, storeName), []byte(production), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewStore(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const root = "/var/lib/aimee-workspaces/environment/rakuensoftware/aimee-workflow"
+	if got := store.Load(root, LearnMax); !reflect.DeepEqual(got, []string{"git"}) {
+		t.Fatalf("got %v, want [git]", got)
+	}
+	// An unrelated project must not inherit it.
+	if got := store.Load("/var/lib/aimee-workspaces/other", LearnMax); got != nil {
+		t.Fatalf("unrelated project got %v", got)
+	}
+	// And a further observe must union rather than replace what C left behind.
+	added, err := store.Record(root, []string{"make"})
+	if err != nil || added != 1 {
+		t.Fatalf("added=%d err=%v", added, err)
+	}
+	if got := store.Load(root, LearnMax); !reflect.DeepEqual(got, []string{"git", "make"}) {
+		t.Fatalf("after union got %v, want [git make]", got)
+	}
+}

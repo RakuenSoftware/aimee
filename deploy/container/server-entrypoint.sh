@@ -226,6 +226,36 @@ for module_grant in /opt/aimee/module-grants/server/*.grant; do
             "$grant_target" >&2
     fi
 done
+
+# Reconcile grants whose pinned executable this image does not ship.
+#
+# The loader realpath()s executable= and rejects the ENTIRE policy directory if
+# any single entry is unresolvable, so one stale grant is not a degraded module —
+# it is a daemon that will not boot. That is exactly what an upgrade produces:
+# seeding never overwrites a persisted grant, so a module that MOVED (workflows
+# is hosted by aimee-wfe now, not spawned as a multicall binary) or was REMOVED
+# leaves behind a grant pinning a path that no longer exists.
+#
+# A pinned path is an image fact, not an operator policy choice, so repairing it
+# does not override anyone's intent — whereas leaving it bricks the server. Where
+# the image still ships a grant for that module, adopt it; where it does not, the
+# module is gone and so is its grant. Both are logged, because silently rewriting
+# admission policy would be worse than the failure.
+for grant_target in "$AIMEE_HOME"/modules.d/server/*.grant; do
+    [ -f "$grant_target" ] || continue
+    pinned=$(sed -n 's/^executable=//p' "$grant_target" | head -1)
+    [ -n "$pinned" ] && [ ! -x "$pinned" ] || continue
+    shipped="/opt/aimee/module-grants/server/$(basename "$grant_target")"
+    if [ -f "$shipped" ]; then
+        printf '[server-entrypoint] %s grant pins %s, which this image does not ship; adopting the shipped grant
+'             "$(basename "$grant_target" .grant)" "$pinned" >&2
+        cp "$shipped" "$grant_target"
+    else
+        printf '[server-entrypoint] %s grant pins %s and this image ships no such module; removing the stale grant
+'             "$(basename "$grant_target" .grant)" "$pinned" >&2
+        rm -f "$grant_target"
+    fi
+done
 # The root entrypoint creates modules.d before dropping to the aimee user.  The
 # daemon must be able to traverse that 0700 parent in order to load the strict
 # grant policy; owning only its server child leaves the parent root-only and
