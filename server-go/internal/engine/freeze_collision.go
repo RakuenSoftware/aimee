@@ -125,7 +125,10 @@ func (r *NativeRunner) rejectDivergentSiblingCreates(ctx context.Context, item d
 		return err
 	}
 	for _, sibling := range siblings {
-		if sibling.ID == item.ID || sibling.State != "active" {
+		if sibling.ID == item.ID || sibling.State != "active" || sibling.Worktree == "" {
+			// A sibling with no worktree is GC'd or transiently absent; there is no
+			// basis for comparison, so skip it rather than raising a spurious freeze
+			// failure.
 			continue
 		}
 		frozen, err := r.siblingStageHasFrozenDiff(sibling)
