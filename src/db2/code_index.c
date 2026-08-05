@@ -384,18 +384,38 @@ int db2_code_index_blast_radius(const char *project, const char *file_path, blas
       return -1;
    void *conn = db2_conn();
    if (!conn)
+   {
+      /* Four different refusals used to return a bare -1, which the route turned
+       * into 404 and the client into "blast radius lookup failed". An operator
+       * could not tell an unknown project from an unindexed file from a
+       * generation the row does not carry -- and the first two are actionable. */
+      aimee_log(LOG_ERROR, "code_index", "blast_radius '%s' '%s': no db2 connection", project,
+                file_path);
       return -1;
+   }
 
    int64_t project_id = code_index_resolve_project(conn, project);
    if (project_id < 0)
+   {
+      aimee_log(LOG_ERROR, "code_index", "blast_radius: unknown project '%s'", project);
       return -1;
+   }
    int64_t file_id = code_index_resolve_file(conn, project_id, file_path);
    if (file_id < 0)
+   {
+      aimee_log(LOG_ERROR, "code_index",
+                "blast_radius: project '%s' has no indexed file '%s' at its current generation",
+                project, file_path);
       return -1;
+   }
 
    int64_t generation = 0;
    if (db2_code_index_project_current_generation(project, &generation) != 0)
+   {
+      aimee_log(LOG_ERROR, "code_index", "blast_radius: project '%s' has no current generation",
+                project);
       return -1;
+   }
    snprintf(out->project, sizeof(out->project), "%s", project);
    out->generation = (long long)generation;
    snprintf(out->freshness, sizeof(out->freshness), "current");
