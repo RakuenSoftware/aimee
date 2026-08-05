@@ -140,9 +140,14 @@ func (r *NativeRunner) SetRoundtableStore(store *roundtablecfg.Store) { r.roundt
 const (
 	roundtableDelegateRole        = "review"
 	roundtableDelegateMaxTurnsCap = 24
+	delegateDeadlineGraceReserve  = 5 * time.Second
+	delegateWriteVerifyReserve    = 5 * time.Minute
 )
 
 func (r *NativeRunner) delegate(ctx context.Context, step StepRequest, request DelegateRequest) (DelegateResult, error) {
+	if err := applyDelegateDeadlineCap(ctx, &request); err != nil {
+		return DelegateResult{}, err
+	}
 	request.WorkItemID = step.WorkItem.ID
 	request.Stage = step.Node.ID
 	request.ExecutionVersion = step.WorkItem.UpdatedAt
@@ -156,6 +161,13 @@ func (r *NativeRunner) delegateGroup(ctx context.Context, step StepRequest, requ
 		return nil
 	}
 	for i := range requests {
+		if err := applyDelegateDeadlineCap(ctx, &requests[i]); err != nil {
+			out := make([]DelegateGroupResult, len(requests))
+			for j := range out {
+				out[j].Err = err
+			}
+			return out
+		}
 		requests[i].WorkItemID = step.WorkItem.ID
 		requests[i].Stage = step.Node.ID
 		requests[i].ExecutionVersion = step.WorkItem.UpdatedAt
@@ -176,6 +188,43 @@ func (r *NativeRunner) delegateGroup(ctx context.Context, step StepRequest, requ
 		out[i].Err = errors.New("delegate service does not support grouped delegation")
 	}
 	return out
+}
+
+// applyDelegateDeadlineCap converts the enclosing stage deadline into a
+// resource-plane tool-loop cap. Write delegates leave enough time for the
+// mandatory repository verifier; read-only delegates only need cancellation
+// and lifecycle-transition slack. The cap can only reduce the agent's own
+// configured loop budget.
+func applyDelegateDeadlineCap(ctx context.Context, request *DelegateRequest) error {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return nil
+	}
+	remaining := time.Until(deadline)
+	reserve := remaining / 20
+	if reserve > delegateDeadlineGraceReserve {
+		reserve = delegateDeadlineGraceReserve
+	}
+	if request.Role == "code" && request.Tools {
+		reserve = delegateWriteVerifyReserve
+		if remaining <= reserve {
+			return fmt.Errorf("delegate stage wall budget exhausted: remaining=%s reserve=%s: %w",
+				remaining.Round(time.Millisecond), reserve, context.DeadlineExceeded)
+		}
+	}
+	capMillis := (remaining - reserve).Milliseconds()
+	maxInt := int64(^uint(0) >> 1)
+	if capMillis > maxInt {
+		capMillis = maxInt
+	}
+	if capMillis < 1 {
+		capMillis = 1
+	}
+	capValue := int(capMillis)
+	if request.ToolLoopTimeoutMSCap <= 0 || request.ToolLoopTimeoutMSCap > capValue {
+		request.ToolLoopTimeoutMSCap = capValue
+	}
+	return nil
 }
 
 func NewNativeRunner(db *db1.Store, worktrees *WorktreeManager, agents AgentClient, verifier Verifier, artifacts *wfe.ArtifactStore, workflows *wfe.Registry, forge Forge) (*NativeRunner, error) {

@@ -182,6 +182,34 @@ static void test_claude_stream_json_does_not_duplicate_final_result(void)
    unlink(path);
 }
 
+static void test_provider_cli_honors_workflow_tool_loop_cap(void)
+{
+   char path[512];
+   snprintf(path, sizeof(path), "%s/aimee-slow-claude-XXXXXX", platform_tmpdir());
+   int fd = mkstemp(path);
+   assert(fd >= 0);
+   FILE *f = fdopen(fd, "w");
+   assert(f != NULL);
+   fputs("#!/bin/sh\ncat >/dev/null\nsleep 2\n", f);
+   fclose(f);
+   chmod(path, 0700);
+
+   agent_t agent;
+   memset(&agent, 0, sizeof(agent));
+   snprintf(agent.name, sizeof(agent.name), "slow-claude");
+   snprintf(agent.backend, sizeof(agent.backend), "%s", AGENT_BACKEND_PROVIDER_CLI);
+   snprintf(agent.cli_kind, sizeof(agent.cli_kind), "claude");
+   snprintf(agent.cli_cmd, sizeof(agent.cli_cmd), "%s", path);
+   agent.timeout_ms = 5000;
+   agent.tool_loop_timeout_ms_cap = 50;
+
+   agent_result_t out;
+   assert(provider_cli_adapter_execute(provider_cli_adapter_get("claude"), &agent, ".", "sys",
+                                       "user", &out) != 0);
+   assert(strstr(out.error, "timed out after 50 ms") != NULL);
+   unlink(path);
+}
+
 static void test_mistral_native_adapter_execution(void)
 {
    const provider_cli_adapter_t *mistral = provider_cli_adapter_get("mistral-plan");
@@ -266,6 +294,7 @@ int main(void)
    test_common_json_parse_text_tool_and_error();
    test_claude_parse_stream_json();
    test_claude_stream_json_does_not_duplicate_final_result();
+   test_provider_cli_honors_workflow_tool_loop_cap();
    test_mistral_native_adapter_execution();
    test_native_auth_cmd_uses_bearer_token_command();
    test_missing_and_invalid_cli_fail_cleanly();
