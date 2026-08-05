@@ -70,6 +70,13 @@ type Runner interface {
 	Run(context.Context, StepRequest) (StepResult, error)
 }
 
+// stepLocker lets a runner extend a short, in-process serialization boundary
+// through artifact publication and the durable lifecycle transition. Freeze
+// uses it to make compare-and-record atomic across sibling work items.
+type stepLocker interface {
+	lockStep(context.Context, StepRequest) (func(), error)
+}
+
 // maxRunnerFailuresWithoutProgress bounds consecutive runner-failure parks at
 // one stage before the item is parked for a human instead of auto-resumed.
 const maxRunnerFailuresWithoutProgress = 8
@@ -205,6 +212,14 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 	if feedback, err := e.artifacts.Feedback(item.ID); err == nil {
 		req.Feedback = &feedback
 	}
+	unlockStep := func() {}
+	if locker, ok := e.runner.(stepLocker); ok {
+		unlockStep, err = locker.lockStep(ctx, req)
+		if err != nil {
+			return out, err
+		}
+	}
+	defer unlockStep()
 
 	stopHeartbeat := make(chan struct{})
 	heartbeatDone := make(chan struct{})

@@ -190,8 +190,9 @@ int wfe_tdd_tests_survive(const char *workdir, const char *red_sha);
 /* Sibling add/add pre-check at freeze. Returns 1 (and fills `path_out` and
  * `sibling_out`) when this slice and an already-frozen sibling under the same
  * parent both CREATE the same path absent from the shared base with different
- * blob ids. Identical content is allowed. Best-effort: git/DB failures return 0
- * and leave downstream merge handling as the backstop. Exposed for tests. */
+ * blob ids. Identical content is allowed. Returns 1 for a collision, 0 for no
+ * collision, and -1 when DB/git state cannot be inspected; callers must fail
+ * closed rather than defer an unknown result to merge. Exposed for tests. */
 int wfe_slice_conflicts_with_frozen_sibling(const char *work_item_id, const char *workdir,
                                             const char *base_sha, const char *head_sha,
                                             char *path_out, size_t path_cap, char *sibling_out,

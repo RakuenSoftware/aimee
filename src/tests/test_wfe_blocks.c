@@ -150,14 +150,27 @@ int main(void)
                                         "autonomous") == 0);
             assert(db1_work_item_set_parent("slice0", "parent") == 0);
             assert(db1_work_item_set_parent("mine", "parent") == 0);
-            assert(db1_work_item_set_stage("slice0", "after_freeze", cut) == 0);
-            assert(db1_work_item_set_pr_ref("slice0", "feat") == 0);
+            assert(db1_work_item_set_stage("slice0", "rt_gate", cut) == 0);
+            char sibdir[] = "/tmp/wfe_addadd_sibling_XXXXXX";
+            assert(wfe_test_mkdtemp(sibdir));
+            snprintf(cmd, sizeof cmd, "git clone -q -b feat %s %s", sdir, sibdir);
+            assert(sh(cmd) == 0);
+            assert(db1_work_item_set_worktree("slice0", sibdir) == 0);
             char sibling[80];
             assert(wfe_slice_conflicts_with_frozen_sibling("mine", sdir, cut, "HEAD", clash,
                                                            sizeof clash, sibling,
                                                            sizeof sibling) == 1);
             assert(strcmp(clash, "doc.md") == 0);
             assert(strcmp(sibling, "slice0") == 0);
+
+            /* A review/CI loop invalidates the older frozen snapshot while the
+             * sibling is back in its mutating stage. Its stale HEAD must not
+             * reject another slice until it completes a new freeze. */
+            assert(db1_work_item_set_stage("slice0", "impl", cut) == 0);
+            assert(wfe_slice_conflicts_with_frozen_sibling("mine", sdir, cut, "HEAD", clash,
+                                                           sizeof clash, sibling,
+                                                           sizeof sibling) == 0);
+            assert(db1_work_item_set_stage("slice0", "rt_gate", cut) == 0);
 
             snprintf(cmd, sizeof cmd,
                      "cd %s && git checkout -q -b same %s && printf 'from slice0\n' > doc.md && "
@@ -179,7 +192,8 @@ int main(void)
                                                            sizeof sibling) == 0);
 
             assert(wfe_slice_conflicts_with_frozen_sibling(
-                       NULL, sdir, cut, "HEAD", clash, sizeof clash, sibling, sizeof sibling) == 0);
+                       NULL, sdir, cut, "HEAD", clash, sizeof clash, sibling, sizeof sibling) ==
+                   -1);
          }
       }
    }

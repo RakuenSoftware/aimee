@@ -1283,11 +1283,21 @@ int wfe_slice_conflicts_with_frozen_sibling(const char *work_item_id, const char
       sibling_out[0] = '\0';
    if (!work_item_id || !work_item_id[0] || !workdir || !workdir[0] || !base_sha || !base_sha[0] ||
        !head_sha || !head_sha[0])
-      return 0;
+      return -1;
 
    db1_work_item_t self;
-   if (db1_work_item_get(work_item_id, &self) != 1 || !self.parent_id[0])
+   int self_rc = db1_work_item_get(work_item_id, &self);
+   if (self_rc != 1)
+      return -1;
+   if (!self.parent_id[0])
       return 0;
+
+   /* Resolve both endpoints before interpreting a missing path as an expected
+    * add. Once the commits are known-good, rev-parse <commit>:<path> returning
+    * no object means "path absent", not "repository inspection failed". */
+   char verified[80];
+   if (!git_blob_id(workdir, base_sha, verified) || !git_blob_id(workdir, head_sha, verified))
+      return -1;
 
    const char *argv[] = {"git",         "-C", workdir,           "diff",
                          "--name-only", "-z", "--diff-filter=A", base_sha,
@@ -1296,7 +1306,7 @@ int wfe_slice_conflicts_with_frozen_sibling(const char *work_item_id, const char
    if (git_capture(argv, &added) != 0 || !added)
    {
       free(added);
-      return 0;
+      return -1;
    }
 
    db1_work_item_t *siblings = NULL;
@@ -1304,32 +1314,65 @@ int wfe_slice_conflicts_with_frozen_sibling(const char *work_item_id, const char
    if (ns < 0)
    {
       free(added);
-      return 0;
+      return -1;
    }
 
    int found = 0;
    for (const char *path = added; *path && !found; path += strlen(path) + 1)
    {
-      char base_spec[1200], base_blob[80];
-      snprintf(base_spec, sizeof base_spec, "%s:%s", base_sha, path);
-      if (git_blob_id(workdir, base_spec, base_blob))
-         continue;
-
       char ours_spec[1200], ours_blob[80];
       snprintf(ours_spec, sizeof ours_spec, "%s:%s", head_sha, path);
       if (!git_blob_id(workdir, ours_spec, ours_blob))
-         continue;
+      {
+         found = -1;
+         break;
+      }
 
-      for (int i = 0; i < ns && !found; i++)
+      for (int i = 0; i < ns && found == 0; i++)
       {
          db1_work_item_t *sib = &siblings[i];
-         if (strcmp(sib->work_item_id, work_item_id) == 0 || strcmp(sib->state, "active") != 0 ||
-             strcmp(sib->current_stage, self.current_stage) == 0 ||
-             strcmp(sib->content_hash, base_sha) != 0 || !sib->pr_ref[0])
+         if (strcmp(sib->work_item_id, work_item_id) == 0 || strcmp(sib->state, "active") != 0)
             continue;
+
+         /* The slice workflow's impl/CI-review loops invalidate an older freeze.
+          * A row still at freeze has not durably completed compare-and-record;
+          * impl is the only mutating stage reachable after a slice freeze. The
+          * engine holds BEGIN IMMEDIATE around this check and its stage write, so
+          * a simultaneous sibling cannot observe an in-between state. */
+         if (strcmp(sib->current_stage, self.current_stage) == 0 ||
+             strcmp(sib->current_stage, "impl") == 0)
+            continue;
+         if (!sib->worktree[0])
+         {
+            found = -1;
+            break;
+         }
+
+         char sib_head[80], merge_base[80];
+         if (!git_blob_id(sib->worktree, "HEAD", sib_head))
+         {
+            found = -1;
+            break;
+         }
+         const char *mb[] = {"git", "-C", sib->worktree, "merge-base", base_sha, sib_head, NULL};
+         char *mb_out = NULL;
+         if (git_capture(mb, &mb_out) != 0 || !mb_out || !mb_out[0])
+         {
+            free(mb_out);
+            found = -1;
+            break;
+         }
+         chomp(mb_out);
+         snprintf(merge_base, sizeof merge_base, "%s", mb_out);
+         free(mb_out);
+         if (strcmp(merge_base, base_sha) != 0)
+         {
+            found = -1;
+            break;
+         }
          char sib_spec[1200], sib_blob[80];
-         snprintf(sib_spec, sizeof sib_spec, "%s:%s", sib->pr_ref, path);
-         if (!git_blob_id(workdir, sib_spec, sib_blob))
+         snprintf(sib_spec, sizeof sib_spec, "HEAD:%s", path);
+         if (!git_blob_id(sib->worktree, sib_spec, sib_blob))
             continue;
          if (strcmp(ours_blob, sib_blob) != 0)
          {
@@ -1368,8 +1411,13 @@ static wfe_step_result_t exec_freeze(wfe_ctx *ctx, const wfe_node_t *node)
       return wfe_step_failed();
 
    char clash[1024], sibling[80];
-   if (wfe_slice_conflicts_with_frozen_sibling(wfe_ctx_work_item(ctx), wd, base, head, clash,
-                                               sizeof clash, sibling, sizeof sibling))
+   int collision = wfe_slice_conflicts_with_frozen_sibling(wfe_ctx_work_item(ctx), wd, base, head,
+                                                           clash, sizeof clash, sibling,
+                                                           sizeof sibling);
+   if (collision < 0)
+      return wfe_step_failed_detail(WFE_FAIL_CORRUPTION,
+                                    "freeze sibling collision inspection failed");
+   if (collision > 0)
    {
       char detail[512];
       snprintf(detail, sizeof detail,

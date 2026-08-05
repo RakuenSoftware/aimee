@@ -1008,13 +1008,15 @@ func (r *NativeRunner) freeze(ctx context.Context, req StepRequest) (StepResult,
 		return StepResult{}, err
 	}
 
-	unlock := r.freezeLocks.lock(item.ParentID)
-	defer unlock()
-
 	base, err := freezeBase(ctx, item, workdir)
 	if err != nil {
 		return StepResult{}, err
 	}
+	base, err = gitText(ctx, workdir, "rev-parse", base)
+	if err != nil {
+		return StepResult{}, err
+	}
+	base = strings.TrimSpace(base)
 	head, err := gitText(ctx, workdir, "rev-parse", "HEAD")
 	if err != nil {
 		return StepResult{}, err
@@ -1035,6 +1037,9 @@ func (r *NativeRunner) freeze(ctx context.Context, req StepRequest) (StepResult,
 			return StepResult{}, err
 		}
 		if _, err := r.artifacts.PutNodeArtifact(item.ID, req.Node.ID+"-head", "commit", []byte(head)); err != nil {
+			return StepResult{}, err
+		}
+		if _, err := r.artifacts.PutNodeArtifact(item.ID, req.Node.ID+"-base", "commit", []byte(base)); err != nil {
 			return StepResult{}, err
 		}
 	}

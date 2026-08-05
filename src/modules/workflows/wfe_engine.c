@@ -342,7 +342,9 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
 
    /* Non-freeze executors run OUTSIDE any transaction (see scope note above). Freeze is
     * short git inspection plus sibling-state serialization and must be atomic with its
-    * state write so simultaneous sibling freezes cannot both pass create/create checks. */
+    * state write so simultaneous sibling freezes cannot both pass create/create checks.
+    * db1_lifecycle_txn_begin uses BEGIN IMMEDIATE and the db1 transaction gate, so this
+    * is a single-writer compare-and-record boundary across threads and processes. */
    r = fn(&ctx, node);
    out->last_status = r.status;
    out->failure_class = r.failure_class;
