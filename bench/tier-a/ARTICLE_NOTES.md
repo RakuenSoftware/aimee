@@ -1654,3 +1654,67 @@ LFM2.5-VL-1.6B's 279, and abstention rates are 0.786 against 0.171. Those gaps
 are not close to their intervals. The piece's central argument, that F1 and
 restraint are independent axes, is the part that survives an interval sweep
 intact while the ranking around it dissolves.
+
+## 34. Does speculative decoding pay differently on QAT weights? (OPEN, with a design)
+
+### The observation, and why it is not yet evidence
+
+Two rented arms, both gemma-4-12B, both UD-Q4_K_XL, same corpus, same client:
+
+| arm | med latency | tok/s |
+|---|---:|---:|
+| non-QAT weights, MTP on | 6267 ms | **102.9** |
+| QAT weights, MTP off | 7737 ms | 67.2 |
+
++53% tok/s. **That comparison is worthless as it stands** and is recorded only to
+say why. It varies three things at once: MTP on against off, QAT weights against
+post-hoc, and two different rented hosts. It also rests on 13 rows for the faster
+arm. Any of the three could produce the whole difference.
+
+### The question underneath it, which is real
+
+Speculative decoding's speedup is a function of **draft acceptance rate**: the
+fraction of drafted tokens the target model accepts as its own argmax. The draft
+head is trained against the base model. Quantisation-aware training changes the
+target's weights in a way post-hoc quantisation does not, so the target's output
+distribution moves relative to what the draft learned to predict.
+
+If that shift is material, **QAT should get less benefit from MTP than a post-hoc
+quant of the same model does**, because a lower acceptance rate means more
+verification passes discarded. If it is immaterial, the speedup should be
+indifferent to the quant scheme.
+
+Either answer is worth having. The whole MTP result in this project rests on
+"roughly a doubling", measured only on non-QAT UD quants of E2B and E4B, and the
+head-to-head's best model is a QAT build. If the speedup does not transfer to
+QAT, the recommendation to use both together is weaker than it currently reads.
+
+### The design, which the current fleet half-satisfies
+
+A clean answer needs a 2x2 per model size: {QAT, non-QAT} x {MTP, no MTP}, all
+four arms on the same corpus at nproc=1, with the SAME draft file across the two
+MTP arms so the draft is not itself a variable.
+
+Running now: the two MTP cells at 12B and at 31B. **The two no-MTP cells at each
+size are missing** -- I killed them when switching the fleet to MTP, which was
+right for throughput and wrong for this question, and I did not notice at the
+time that it destroyed a 2x2 I had not realised I was holding.
+
+Cost to complete: four arms, roughly $0.3 at observed rented prices.
+
+### What to measure beyond wall clock
+
+Draft acceptance rate directly, if llama.cpp exposes it per request. Latency and
+tok/s are downstream of it and confound it with everything else about the host.
+`/props` and the server log should be checked for an acceptance counter before
+the arms are re-run, because measuring the mechanism is worth more than measuring
+its shadow.
+
+### Where it goes
+
+Draft 01 (speculative decoding) currently says the speedup is "a property of the
+model and the backend, not of the feature", supported by 1.59x for E2B against
+1.83x for E4B. If the quant scheme is a third term, that sentence needs a third
+clause and the article gets a genuinely new section. Draft 02 (quant) gains the
+converse: a reason to care which quant you pick that has nothing to do with
+accuracy.
