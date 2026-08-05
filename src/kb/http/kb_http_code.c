@@ -2190,6 +2190,13 @@ int handle_post_code_scan(const char *body, char *out_buf, int out_cap)
                   "{\"error\":\"could not queue project for ingestion\"}");
          return 503;
       }
+      /* The branch hook is a property of the REPO, not of the index: installing
+       * it does not depend on the walk having run, so it still happens here
+       * rather than waiting on the queue. */
+      int queued_hook = 0;
+      if (sha_now[0] && code_scan_bool(root, "install_hook", 0))
+         queued_hook = (code_index_install_branch_hook(root_path, project) == 0);
+
       /* skipped stays FALSE: it means the route declined the work, which is what
        * the branch-unchanged case above reports. Queued work was accepted --
        * files:0 says nothing is indexed YET and reason says why. Overloading
@@ -2197,8 +2204,8 @@ int handle_post_code_scan(const char *body, char *out_buf, int out_cap)
        * from "your work is pending". */
       snprintf(out_buf, (size_t)out_cap,
                "{\"status\":\"ok\",\"skipped\":false,\"queued\":true,\"reason\":\"queued\","
-               "\"project\":\"%s\",\"files\":0,\"inspected\":0}",
-               project);
+               "\"project\":\"%s\",\"files\":0,\"inspected\":0,\"hook_installed\":%s}",
+               project, queued_hook ? "true" : "false");
       cJSON_Delete(root);
       return 200;
    }

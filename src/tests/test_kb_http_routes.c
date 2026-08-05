@@ -4953,7 +4953,12 @@ static void test_code_scan_skips_unchanged_branch(void)
    assert(strstr(buf, "default branch unchanged") != NULL);
 }
 
-/* Branch moved (stored != current) -> scan runs and the new SHA is persisted. */
+/* Branch moved (stored != current) -> the walk is QUEUED rather than skipped.
+ * The SHA is deliberately NOT persisted here: the route has not done the walk,
+ * and recording it would claim the project was indexed at that SHA before any
+ * of the work ran -- a later failure would then leave the claim standing and
+ * every !force scan would skip a project that was never ingested. The worker
+ * records it after the walk succeeds. */
 static void test_code_scan_runs_on_branch_move(void)
 {
    char buf[512];
@@ -4968,8 +4973,9 @@ static void test_code_scan_runs_on_branch_move(void)
                             sizeof(buf));
    g_branch_sha[0] = '\0';
    assert(s == 200);
-   assert(strstr(buf, "\"skipped\":false") != NULL);
-   assert(strcmp(g_runtime_state_set_val, "tree-bbb") == 0); /* persisted for next time */
+   assert(strstr(buf, "\"skipped\":false") != NULL); /* not declined: accepted and queued */
+   assert(strstr(buf, "\"queued\":true") != NULL);
+   assert(g_runtime_state_set_val[0] == '\0'); /* the worker persists it, not the route */
 }
 
 /* Under the worktree opt-in the branch-SHA gate is bypassed: even an unchanged
