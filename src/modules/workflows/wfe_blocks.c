@@ -1462,10 +1462,10 @@ static wfe_step_result_t exec_freeze(wfe_ctx *ctx, const wfe_node_t *node)
                wfe_ctx_work_item(ctx) ? wfe_ctx_work_item(ctx) : "", sibling);
       return wfe_step_failed_detail(WFE_FAIL_PERMANENT, detail);
    }
-   if (db1_lifecycle_event_add(wfe_ctx_work_item(ctx), node->id, "freeze_base", "engine", "",
-                               base, 0) != 0 ||
-       db1_lifecycle_event_add(wfe_ctx_work_item(ctx), node->id, "freeze_head", "engine", "",
-                               head, 0) != 0)
+   if (db1_lifecycle_event_add(wfe_ctx_work_item(ctx), node->id, "freeze_base", "engine", "", base,
+                               0) != 0 ||
+       db1_lifecycle_event_add(wfe_ctx_work_item(ctx), node->id, "freeze_head", "engine", "", head,
+                               0) != 0)
       return wfe_step_failed_detail(WFE_FAIL_CORRUPTION, "freeze endpoint recording failed");
 
    char handle[80];
