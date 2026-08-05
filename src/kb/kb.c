@@ -845,79 +845,47 @@ typedef struct
  * LSH near-duplicate handling, chunk insertion, and synchronous-or-async
  * embedding with batched pgvector upserts. Mutates the shared sketches, batch
  * buffer, and stats counters through `c`. */
-/* Embed one chunk, but pay for the round trip ONCE per file.
+/* Embed every chunk of one file in a single call, into a caller-owned buffer.
  *
- * On the first chunk of a file this embeds every chunk of that file in a single
- * memory_embed_texts() call and caches the vectors; later chunks read from the
- * cache. A file's chunks are already all in memory (c->chunks) and are embedded
- * back to back, so nothing is held any longer than the loop that follows.
+ * Ingest used to call the single-text memory_embed_text() once per chunk, so a
+ * ~3000 file project paid one embedder round trip per chunk -- measured at
+ * ~190ms each, which is the round trip, not the model. memory_embed_texts()
+ * has always existed (memory search embeds a query and its sub-questions in ONE
+ * call) and the bundled embedder serves /embed_batch.
  *
- * Falls back to the single-text path whenever the batch cannot be built or the
- * batch call fails, so a batching problem degrades to the old speed rather than
- * dropping embeddings.
+ * The buffer is caller-owned rather than cached in a static: ingest runs up to
+ * KB_WORKER_MAX worker threads, and a shared cache here would hand one file's
+ * vectors to another file being embedded concurrently.
  *
- * Returns the vector dimension, or <= 0 on failure. */
-static int kb_embed_one_batched(kb_build_file_ctx_t *c, int ci, int n_chunks,
-                                const char *embed_text,
-                                float *vec_out)
+ * Returns the vector dimension, or <= 0 if the batch could not be produced --
+ * the caller then falls back to the per-text path, which computes the same
+ * vectors more slowly. */
+static int kb_embed_file_chunks(kb_build_file_ctx_t *c, int n_chunks, float *out)
 {
-   static float *g_batch_vecs;
-   static int g_batch_dim;
-   static int g_batch_n;
+   if (!c || !out || n_chunks <= 1 || !c->effective_cmd[0])
+      return 0;
 
-   if (ci == 0)
+   char **texts = calloc((size_t)n_chunks, sizeof(*texts));
+   if (!texts)
+      return 0;
+   int built = 1;
+   for (int i = 0; i < n_chunks; i++)
    {
-      free(g_batch_vecs);
-      g_batch_vecs = NULL;
-      g_batch_dim = 0;
-      g_batch_n = 0;
-
-      if (n_chunks > 1)
+      texts[i] = malloc(4096);
+      if (!texts[i])
       {
-         char **texts = calloc((size_t)n_chunks, sizeof(*texts));
-         float *vecs = calloc((size_t)n_chunks * EMBED_MAX_DIM, sizeof(*vecs));
-         if (texts && vecs)
-         {
-            int built = 1;
-            for (int i = 0; i < n_chunks && built; i++)
-            {
-               texts[i] = malloc(4096);
-               if (!texts[i])
-               {
-                  built = 0;
-                  break;
-               }
-               kb_async_make_embed_text(c->chunks[i].heading_path, c->chunks[i].content, texts[i],
-                                        4096);
-            }
-            if (built)
-            {
-               int dim = memory_embed_texts((const char *const *)texts, n_chunks, c->effective_cmd,
-                                            EMBED_INPUT_DOCUMENT, vecs, EMBED_MAX_DIM);
-               if (dim > 0)
-               {
-                  g_batch_vecs = vecs;
-                  g_batch_dim = dim;
-                  g_batch_n = n_chunks;
-                  vecs = NULL; /* owned by the cache now */
-               }
-            }
-            for (int i = 0; i < n_chunks; i++)
-               free(texts[i]);
-         }
-         free(texts);
-         free(vecs);
+         built = 0;
+         break;
       }
+      kb_async_make_embed_text(c->chunks[i].heading_path, c->chunks[i].content, texts[i], 4096);
    }
-
-   if (g_batch_vecs && ci < g_batch_n && g_batch_dim > 0)
-   {
-      memcpy(vec_out, g_batch_vecs + (size_t)ci * EMBED_MAX_DIM,
-             (size_t)g_batch_dim * sizeof(float));
-      return g_batch_dim;
-   }
-   return memory_embed_text(embed_text, c->effective_cmd, EMBED_INPUT_DOCUMENT, vec_out,
-                            EMBED_MAX_DIM);
+   int dim = built ? memory_embed_texts((const char *const *)texts, n_chunks, c->effective_cmd,
+                                        EMBED_INPUT_DOCUMENT, out, EMBED_MAX_DIM)
+                   : 0;
+   for (int i = 0; i < n_chunks; i++)
+      free(texts[i]);
+   free(texts);
+   return dim;
 }
 
 static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
@@ -1097,7 +1065,14 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
    }
    c->stats->chunks_added += inserted;
 
-   /* Phase 2: embed each committed chunk (sync or async). */
+   /* Phase 2: embed each committed chunk (sync or async).
+    *
+    * One batched call for the whole file, then each chunk reads its own vector
+    * out of it. The buffer is per-call: ingest is multi-threaded. */
+   float *batch_vecs = calloc((size_t)(n_chunks > 0 ? n_chunks : 1) * EMBED_MAX_DIM,
+                              sizeof(*batch_vecs));
+   int batch_dim = batch_vecs ? kb_embed_file_chunks(c, n_chunks, batch_vecs) : 0;
+
    for (int ci = 0; ci < n_chunks; ci++)
    {
       int64_t doc_id = doc_ids[ci];
@@ -1126,7 +1101,18 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
                                   sizeof(embed_text));
 
          float vec[EMBED_MAX_DIM];
-         int dim = kb_embed_one_batched(c, ci, n_chunks, embed_text, vec);
+         int dim = 0;
+         if (batch_dim > 0)
+         {
+            memcpy(vec, batch_vecs + (size_t)ci * EMBED_MAX_DIM,
+                   (size_t)batch_dim * sizeof(float));
+            dim = batch_dim;
+         }
+         else
+         {
+            dim = memory_embed_text(embed_text, c->effective_cmd, EMBED_INPUT_DOCUMENT, vec,
+                                    EMBED_MAX_DIM);
+         }
          if (dim > 0)
          {
             accept_generated_embedding(doc_id, vec, dim);
@@ -1162,6 +1148,7 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
          }
       }
    }
+   free(batch_vecs);
    free(doc_ids);
 
    sketch_bloom_add_hash(c->bloom, h64);
