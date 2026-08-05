@@ -583,13 +583,15 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 				Detail: "conflict merging aimee/feat/" + req.WorkItem.ParentID + " into slice"}, nil
 		}
 	}
-	// A documentation gate can be resumed after a human repair commit. The
+	// A review gate can be resumed after a human repair commit. The
 	// reviewed hash then remains on both the work item and feedback artifact,
 	// while the clean exact frozen diff has changed. Send that new diff back through
 	// freeze + roundtable rather than demanding that a delegate invent another
-	// edit solely to satisfy its "owned files changed" contract. This does not
-	// bypass review, and feedback left by an earlier gate cannot trigger it.
-	if docs && req.Feedback != nil && req.WorkItem.ContentHash != "" &&
+	// edit solely to satisfy its "owned files changed" contract. Implementation
+	// repairs must also pass the same mechanical verifier used after a delegate.
+	// This does not bypass review, and feedback left by an earlier gate cannot
+	// trigger it.
+	if req.Feedback != nil && req.WorkItem.ContentHash != "" &&
 		req.WorkItem.ContentHash == req.Feedback.ArtifactHash {
 		diff, diffErr := frozenWorktreeDiff(ctx, req.WorkItem, workdir)
 		if diffErr != nil {
@@ -601,12 +603,21 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 		}
 		if status == "" && strings.TrimSpace(diff) != "" &&
 			wfe.Hash([]byte(diff)) != req.Feedback.ArtifactHash {
+			if !docs {
+				if err := r.verifier.Verify(ctx, workdir); err != nil {
+					return StepResult{Status: StepChanges, Detail: err.Error()}, nil
+				}
+			}
 			head, headErr := gitText(ctx, workdir, "rev-parse", "HEAD")
 			if headErr != nil {
 				return StepResult{}, headErr
 			}
+			detail := "reviewed worktree advanced; re-freezing exact repair"
+			if !docs {
+				detail = "reviewed worktree advanced; verified and re-freezing exact repair"
+			}
 			return StepResult{Status: StepAdvanced, ArtifactType: "branch", Artifact: branch,
-				ContentHash: head, Detail: "reviewed worktree advanced; re-freezing exact repair"}, nil
+				ContentHash: head, Detail: detail}, nil
 		}
 	}
 	prompt := "Implement the complete approved task in this worktree, run the repository verification, fix failures, and leave the accepted changes in the worktree."
