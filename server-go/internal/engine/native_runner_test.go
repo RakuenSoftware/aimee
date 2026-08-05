@@ -111,6 +111,30 @@ func TestDelegateDeadlineCapPreservesShortReviewPhase(t *testing.T) {
 	}
 }
 
+func TestRoundtableDeadlineRequiresEveryConfiguredPhase(t *testing.T) {
+	panel := roundtablecfg.Panel{DeadlineMS: 100, ChairmanEnabled: true}
+	short, cancelShort := context.WithTimeout(t.Context(), 150*time.Millisecond)
+	defer cancelShort()
+	err := ensureRoundtableDeadlineFits(short, panel)
+	if !errors.Is(err, context.DeadlineExceeded) ||
+		!strings.Contains(err.Error(), "required=210ms") || !strings.Contains(err.Error(), "phases=2") {
+		t.Fatalf("short roundtable budget error=%v", err)
+	}
+
+	long, cancelLong := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancelLong()
+	if err := ensureRoundtableDeadlineFits(long, panel); err != nil {
+		t.Fatalf("complete roundtable budget rejected: %v", err)
+	}
+
+	panel.ChairmanEnabled = false
+	single, cancelSingle := context.WithTimeout(t.Context(), 150*time.Millisecond)
+	defer cancelSingle()
+	if err := ensureRoundtableDeadlineFits(single, panel); err != nil {
+		t.Fatalf("single-phase roundtable budget rejected: %v", err)
+	}
+}
+
 func TestDocumentPromptIsScopedToOriginalRequestAndAcceptedDiff(t *testing.T) {
 	repo := t.TempDir()
 	gitRun(t, repo, "init", "-b", "trunk")

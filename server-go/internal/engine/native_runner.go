@@ -1138,6 +1138,41 @@ func chairmanDeadline(step context.Context, deadlineMS int) (context.Context, co
 	return context.WithTimeout(step, time.Duration(deadlineMS)*time.Millisecond)
 }
 
+// ensureRoundtableDeadlineFits avoids spending an expiring workflow window on
+// a panel that cannot possibly reach its last configured phase. Analysis and
+// discussion share one panel deadline; an enabled chairman receives a second.
+// Returning DeadlineExceeded before dispatch lets the scheduler reopen the
+// workflow with a fresh wall window instead of cancelling a billed chairman
+// and rerunning the whole panel.
+func ensureRoundtableDeadlineFits(ctx context.Context, panel roundtablecfg.Panel) error {
+	deadline, ok := ctx.Deadline()
+	if !ok || panel.DeadlineMS <= 0 {
+		return nil
+	}
+	phases := int64(1)
+	if panel.ChairmanEnabled {
+		phases++
+	}
+	maxDuration := time.Duration(1<<63 - 1)
+	maxDeadlineMS := int64(maxDuration/time.Millisecond) / phases
+	if int64(panel.DeadlineMS) > maxDeadlineMS {
+		return fmt.Errorf("roundtable deadline budget overflows duration: deadline_ms=%d phases=%d: %w",
+			panel.DeadlineMS, phases, context.DeadlineExceeded)
+	}
+	required := time.Duration(int64(panel.DeadlineMS)*phases) * time.Millisecond
+	reserve := required / 20
+	if reserve > delegateDeadlineGraceReserve {
+		reserve = delegateDeadlineGraceReserve
+	}
+	required += reserve
+	remaining := time.Until(deadline)
+	if remaining <= required {
+		return fmt.Errorf("roundtable phases do not fit workflow wall budget: remaining=%s required=%s phases=%d: %w",
+			remaining.Round(time.Millisecond), required, phases, context.DeadlineExceeded)
+	}
+	return nil
+}
+
 type panelAnalysis struct {
 	Feedback    wfe.ReviewFeedback
 	Approvals   int
@@ -1179,6 +1214,9 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 	panel, err := r.roundtables.Resolve(paramString(req.Node, "roundtable", ""), lensNames, panelPins(req.Node))
 	if err != nil {
 		return StepResult{Status: StepPending, PauseReason: "panel_unreachable", Detail: err.Error()}, nil
+	}
+	if err := ensureRoundtableDeadlineFits(ctx, panel); err != nil {
+		return StepResult{}, err
 	}
 	seats := make([]panelSeat, 0, len(panel.Seats))
 	for _, seat := range panel.Seats {
