@@ -4,6 +4,7 @@
 #include "../headers/aimee.h"      /* MAX_PATH_LEN, now_utc */
 #include "../headers/code_match.h" /* code_match_line (P1b span enrichment) */
 #include "cross_repo_resolver.h"   /* H0b: xrepo_lang_name / xrepo_path_is_vendored */
+#include "../headers/log.h" /* aimee_log */
 #include "db2.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
@@ -816,15 +817,30 @@ int64_t db2_code_index_project_upsert(const char *name, const char *root)
       if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
          alias_owner = aimee_pg_column_int64(st, 0);
       aimee_pg_finalize(st);
+      /* A checkout claimed by another project is a RE-INDEX under a new name,
+       * not an error. Rejecting it rolled the whole upsert back and returned a
+       * bare -1, which surfaced as "canonical index scan failed" with nothing
+       * logged -- and it was permanent, because the alias never moved. Any
+       * caller that mints a fresh project name per attempt (a retry that must
+       * not read a previous attempt's rows, for instance) could scan a
+       * directory exactly once, ever.
+       *
+       * The alias is "who owns this checkout NOW", and the model already has
+       * is_current for that: a checkout MOVING to a new path is handled a few
+       * lines above. This is the same event from the other side. Hand the alias
+       * over, leave the old project's rows alone, and say so -- a silent
+       * transfer would be as bad as the silent refusal. */
       if (alias_owner >= 0 && alias_owner != id)
-         goto rollback;
+         aimee_log(LOG_INFO, "code_index",
+                   "checkout '%s' reindexed under project '%s' (was project id %lld)", root, name,
+                   (long long)alias_owner);
 
       st = aimee_pg_prepare(
           conn,
           "INSERT INTO code_project_aliases"
           " (project_id, alias, alias_kind, is_current, first_seen_at, last_seen_at)"
           " VALUES (?1, ?2, 'checkout', 1, ?3, ?3)"
-          " ON CONFLICT(alias) DO UPDATE SET is_current = 1, last_seen_at = ?3",
+          " ON CONFLICT(alias) DO UPDATE SET project_id = ?1, is_current = 1, last_seen_at = ?3",
           err, sizeof(err));
       if (!st)
          goto rollback;
