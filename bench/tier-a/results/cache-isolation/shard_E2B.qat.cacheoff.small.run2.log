@@ -1,0 +1,5 @@
+[16:19:49Z] sizing: starting one server to measure resident VRAM
+[16:20:06Z]   one instance uses 1834 MiB of 16303 MiB
+[16:20:06Z]   -> running 1 processes, cache-ram 0 MiB each
+[16:20:06Z]   all 1 servers up; VRAM now 1834 MiB
+[16:20:06Z] START E2B.qat.cacheoff.small.run2 across 1 shards

@@ -2046,9 +2046,64 @@ n=1001 supports, so no ranking conclusion in this campaign changes. The byte-lev
 churn of 47% is much larger than the F1 movement, which is the same pattern MTP
 shows: outputs move a great deal and the aggregate score barely notices.
 
-### Not fixed
+### The explanation is WITHDRAWN. The prompt cache is not the mechanism.
 
-Nothing is changed. The options are to disable the prompt cache for comparability
-runs, at a cost of hours per arm (finding 20: the ~600-token system prompt is
-served from that cache and disabling it re-evaluates the prefix per note), or to
-state the caveat and keep the speed. That is the article owner's call.
+A discriminating run was registered with its prediction stated in
+`harness/cache_isolation_5080.sh` before it started: re-run both corpora with
+`--cache-ram 0`, and if cache history is the mechanism the two cache-off arms
+must agree on the shared 1001 notes at or near 1001/1001.
+
+| | byte-identical on the shared 1001 |
+|---|---:|
+| cache ON (the original observation) | 529/1001 (52.8%) |
+| **cache OFF** | **499/1001 (49.9%)** |
+
+Disabling the cache did not reduce the churn. It is marginally worse. The
+prediction fails, so the explanation is withdrawn rather than softened.
+
+The flag semantics were checked rather than assumed, because the whole test rests
+on them: `llama-server --help` documents `-cram, --cache-ram N` as
+"set the maximum cache size in MiB (default: 8192, -1 - no limit, 0 - disable)".
+0 disables.
+
+**Both candidate mechanisms are now dead.** Predecessor identity was refuted at
+44.8% against 48.3%. Cache history is refuted here. No third mechanism is
+proposed, because this defect has already cost two explanations that fitted the
+data and did not survive their own tests.
+
+### The correction to the cost claim, which points the other way
+
+This entry previously recorded the comparability run as costing "hours per arm",
+reasoning from finding 20 that the ~600-token system prompt is served from the
+cache and disabling it re-evaluates the prefix per note.
+
+Measured: **38 minutes with the cache off against 41 with it on**, same 1001
+notes, and 116 minutes for the 3002-note arm at an identical 25.7 notes/min.
+Prefilling 600 tokens is noise next to two seconds of generation. The run that
+was declined for two days as unaffordable was free, and the claim that it was
+expensive was reasoning rather than measurement.
+
+That also means the prompt cache buys nothing measurable in throughput at
+nproc=1 on this workload, which is worth stating on its own.
+
+### What the cache costs in accuracy: nothing measurable, at two tiers
+
+| tier | cache ON | cache OFF | paired delta | 95% CI |
+|---|---:|---:|---:|---|
+| gold_small, n=1001 | 0.6406 | 0.6466 | +0.0059 | [-0.0074, +0.0194] |
+| gold_mid, n=3002 | 0.6416 | 0.6396 | -0.0021 | [-0.0092, +0.0049] |
+
+Opposite signs, both indistinguishable, and the tighter interval at n=3002 is the
+better estimate. Turning the prompt cache off is free in both wall time and
+accuracy, so there is no longer a tradeoff to weigh: **for any arm that will be
+compared across corpora, run with `--cache-ram 0`.**
+
+### Still open, and now narrower
+
+Whether corpus composition is the variable at all. Every explanation so far has
+assumed this configuration reproduces itself, and that was measured with the
+cache ON at nproc=3 on the XTX (1001/1001, three ways). Cache OFF at nproc=1 on
+the 5080 has never been checked. `harness/cacheoff_selfrepro_5080.sh` runs
+gold_small a second time in the identical configuration; if it does not match
+run 1 byte for byte, corpus composition was never the variable and this defect
+has been measuring plain nondeterminism.

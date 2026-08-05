@@ -3,3 +3,4 @@
 [14:11:25Z]   -> running 1 processes, cache-ram 0 MiB each
 [14:11:25Z]   all 1 servers up; VRAM now 1834 MiB
 [14:11:25Z] START E2B.qat.cacheoff.mid across 1 shards
+[16:07:44Z] DONE E2B.qat.cacheoff.mid rows=3002/3002 wall=116m19s procs=1 retries=0

@@ -3,3 +3,25 @@
 [13:32:05Z] --- E2B.qat.cacheoff.small  1001 notes  nproc=1  no MTP  CACHE_RAM_MIB=0
 [14:11:03Z] OK   E2B.qat.cacheoff.small strictF1=0.6466 wall=38m  rate=25.7/min
 [14:11:03Z] --- E2B.qat.cacheoff.mid  3002 notes  nproc=1  no MTP  CACHE_RAM_MIB=0
+[16:07:51Z] OK   E2B.qat.cacheoff.mid strictF1=0.6396 wall=116m  rate=25.7/min
+[16:07:51Z] === both cache-off arms done; the test follows ===
+
+shared notes                     1001
+byte-identical, cache OFF        499/1001  (49.9%)
+byte-identical, cache ON (d40)   529/1001  (52.8%)
+
+VERDICT: REFUTED. The cache is not the mechanism. Defect 40's
+         explanation must be withdrawn, not softened.
+[16:07:51Z] --- control: cache OFF vs banked cache ON, gold_small (what the cache costs in F1)
+run                                 F1            95% CI   tp  fp  fn
+cache_on                        0.6406  [0.6131,0.6670]  574 338 306
+cache_off                       0.6466  [0.6187,0.6732]  579 332 301
+
+Paired deltas vs cache_on (same notes resampled for both):
+comparison                                  delta              95% CI  verdict
+cache_off - cache_on                       0.0059  [-0.0074,+0.0194]  INDISTINGUISHABLE
+
+n = 1001 notes resampled, 20000 bootstrap replicates.
+[16:08:12Z] === CACHE ISOLATION COMPLETE ===
+[16:19:43Z] === self-reproduction control: E2B qat, cache OFF, gold_small, run 2
+[16:19:43Z]     prediction: 1001/1001 against run 1 if the configuration is deterministic
