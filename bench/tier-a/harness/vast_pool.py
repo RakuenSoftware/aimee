@@ -67,8 +67,14 @@ def launch(offer_id, repo, ctx, cache_ram):
     return r["new_contract"]
 
 
-def endpoint(cid, timeout=1500):
-    """Wait for the mapped port, then for llama-server to answer /health."""
+def endpoint(cid, timeout=420):
+    """Wait for the mapped port, then for llama-server to answer /health.
+
+    The timeout is short on purpose. Advertised inet_down does not predict
+    registry throughput: one host pulled this image in 84 seconds and another,
+    advertising comparable bandwidth, sat on 'Retrying in 2 seconds' for fifteen
+    billable minutes. A slow pull is a host to replace, not a wait to sit out.
+    """
     t0 = time.time()
     ep = None
     while time.time() - t0 < timeout:
@@ -122,15 +128,29 @@ def run_arm(job, gpu, maxprice, outdir, log):
         offers = find_offers(gpu, maxprice, 1)
         if not offers:
             log("FAIL %s: no offer under %.3f" % (label, maxprice)); return
-        off = offers[0]
-        cid = launch(off["id"], repo, job.get("ctx", 8192), job.get("cache_ram", 1024))
-        log("--- %s on %s %s $%.3f/hr contract %s" % (label, gpu, off["id"], off["dph_total"], cid))
-        ep = endpoint(cid)
+        ep = None
+        for off in offers[:3]:          # re-place on a slow puller, do not wait it out
+            cid = launch(off["id"], repo, job.get("ctx", 8192), job.get("cache_ram", 1024))
+            log("--- %s on %s %s $%.3f/hr contract %s" % (label, gpu, off["id"], off["dph_total"], cid))
+            try:
+                ep = endpoint(cid)
+                break
+            except RuntimeError as e:
+                log("    host %s unusable (%s); destroying and re-placing" % (off["id"], e))
+                destroy(cid); cid = None
+        if ep is None:
+            log("FAIL %s: no host served within the pull timeout" % label); return
         loaded = verify(ep, repo, job.get("verify_fam"))
         log("    healthy, loaded %s" % loaded)
+        # run_llamacpp.py REQUIRES an explicit thinking flag and has no default,
+        # deliberately: an arm that silently inherits the wrong one is not
+        # comparable to anything. Every banked arm in this project ran
+        # --thinking, so that is what a job gets unless it says otherwise.
         cmd = [sys.executable, os.path.join(ROOT, "harness/run_llamacpp.py"),
                "--base-url", "http://" + ep, "--model", label,
                "--gold", os.path.join(ROOT, gold), "--out", pred,
+               "--thinking" if job.get("thinking", True) else "--no-thinking",
+               "--max-tokens", str(job.get("max_tokens", 8192)),
                "--concurrency", "1"] + job.get("extra", [])
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode != 0:
