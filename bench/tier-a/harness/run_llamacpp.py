@@ -179,6 +179,17 @@ def main():
             "raw": raw[:4000],
             "error": err,
             "latency_ms": round(dt, 1),
+            # Speculative decoding's speedup IS the draft acceptance rate: the
+            # fraction of drafted tokens the target accepts as its own argmax.
+            # llama.cpp reports it per request in `timings` as draft_n and
+            # draft_n_accepted, and nothing was reading it, so every MTP claim in
+            # this project so far is measured through wall clock -- which mixes
+            # the mechanism with the host, the model and the backend.
+            #
+            # Recorded additively. No score changes; absent on non-MTP servers.
+            "draft_n": (resp.get("timings") or {}).get("draft_n"),
+            "draft_n_accepted": (resp.get("timings") or {}).get("draft_n_accepted"),
+            "predicted_per_second": (resp.get("timings") or {}).get("predicted_per_second"),
             "completion_tokens": usage.get("completion_tokens"),
             "prompt_tokens": usage.get("prompt_tokens"),
             "truncated": usage.get("completion_tokens") == args.max_tokens,
