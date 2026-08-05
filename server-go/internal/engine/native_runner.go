@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/JBailes/aimee/server-go/bus"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1047,6 +1048,18 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 		if errors.Is(err, roundtablecfg.ErrReplayUnavailable) {
 			return StepResult{CostUSD: result.CostUSD, CostUnknown: result.CostUnknown},
 				fmt.Errorf("%w: %w", ErrDelegateReplayUnavailable, err)
+		}
+		// A review the panel rejects as invalid fails the step rather than
+		// parking it. Parking exists for a runner that might come back; this
+		// request will be refused identically every time, so retrying it just
+		// resubmits the same rejection every few seconds until someone notices.
+		// The panel logs which part it refused; the status is all that crosses
+		// the wire.
+		var status *bus.ModuleCallStatusError
+		if errors.As(err, &status) && status.Status == bus.ModuleStatusInvalidRequest {
+			return StepResult{Status: StepFailed, CostUSD: result.CostUSD,
+				CostUnknown: result.CostUnknown,
+				Detail:      "roundtable rejected the review request as invalid; see the module log for which part"}, nil
 		}
 		return StepResult{}, err
 	}

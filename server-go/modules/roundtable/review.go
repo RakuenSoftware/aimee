@@ -3,6 +3,7 @@ package roundtable
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/roundtable/panel"
@@ -61,6 +62,14 @@ func NewReviewHandler(reviewer Reviewer) bus.ModuleHandler {
 		// so a review that overruns is reported as such rather than replied to.
 		result, err := reviewer.Review(context.Background(), decoded)
 		if err != nil {
+			// A request this panel will never accept is reported as invalid, not
+			// internal. The distinction is the caller's only way to tell "try
+			// again later" from "this will fail every time", and without it a
+			// workflow parks and resubmits the same rejected review indefinitely.
+			var invalid panel.ValidationError
+			if errors.As(err, &invalid) {
+				return []byte(invalid.Error()), bus.ModuleStatusInvalidRequest
+			}
 			// A failed review must never be reported as an empty success: a caller
 			// reading an empty result as "approved, no findings" would ship
 			// unreviewed work.
