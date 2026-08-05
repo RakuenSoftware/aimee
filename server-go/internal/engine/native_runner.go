@@ -189,7 +189,7 @@ func NewNativeRunner(db *db1.Store, worktrees *WorktreeManager, agents AgentClie
 	if forge == nil {
 		forge = unavailableForge{}
 	}
-	return &NativeRunner{db: db, worktrees: worktrees, agents: agents, verifier: verifier, artifacts: artifacts, workflows: workflows, forge: forge}, nil
+	return &NativeRunner{db: db, worktrees: worktrees, agents: agents, verifier: verifier, artifacts: artifacts, workflows: workflows, forge: forge, freezeLocks: freezeCollisionLockSet{root: worktrees.root}}, nil
 }
 
 func (r *NativeRunner) Run(ctx context.Context, req StepRequest) (StepResult, error) {

@@ -21,7 +21,9 @@ type freezeCreate struct {
 	Blob string
 }
 
-type freezeCollisionLockSet struct{}
+type freezeCollisionLockSet struct {
+	root string
+}
 
 func (s *freezeCollisionLockSet) lock(ctx context.Context, parentID string) (func(), error) {
 	if parentID == "" {
@@ -31,7 +33,11 @@ func (s *freezeCollisionLockSet) lock(ctx context.Context, parentID string) (fun
 	// restarts can overlap briefly. A host-local flock preserves compare-and-
 	// record atomicity across that boundary; process death releases it.
 	key := sha256.Sum256([]byte(parentID))
-	path := filepath.Join(os.TempDir(), fmt.Sprintf("aimee-wfe-freeze-%x.lock", key))
+	root := s.root
+	if root == "" {
+		root = os.TempDir()
+	}
+	path := filepath.Join(root, fmt.Sprintf("aimee-wfe-freeze-%x.lock", key))
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open freeze collision lock: %w", err)
