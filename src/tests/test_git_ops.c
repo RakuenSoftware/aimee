@@ -190,7 +190,7 @@ int main(void)
    assert(strstr(err, "ref is invalid") != NULL);
    assert(git_ops_push_dir("webuser:alice", proj, "https://127.0.0.1:1/probe.git",
                            "validator-error", &out, err, sizeof(err)) == -1);
-   assert(strstr(err, "validation failed") != NULL);
+   assert(strstr(err, "validation failed (result=-1)") != NULL);
 
    /* checkout an existing branch */
    assert(run("cd %s && git branch -q feature", proj) == 0);

@@ -57,9 +57,10 @@ static int validate_managed_ref(const char *ref, char *err, size_t errlen)
       return -1;
    }
    int allowed = 0;
-   if (g_ref_validator(ref, &allowed) != 0)
+   int result = g_ref_validator(ref, &allowed);
+   if (result != 0)
    {
-      snprintf(err, errlen, "managed push ref validation failed");
+      snprintf(err, errlen, "managed push ref validation failed (result=%d)", result);
       return -1;
    }
    if (!allowed)
