@@ -89,66 +89,40 @@ def launch(offer_id, repo, ctx, cache_ram, bid=None, draft=None):
     return r["new_contract"]
 
 
-def endpoint(cid, stall=900, hard_cap=None):
-    """Wait for llama-server, abandoning a host only when it STOPS MAKING PROGRESS.
+def endpoint(cid):
+    """Wait for llama-server. Abandon a host ONLY on evidence that it is dead.
 
-    A fixed deadline is the wrong instrument here and has now been wrong twice.
-    At 420s it abandoned hosts that were downloading fine. Raised to 900s it
-    still abandoned every 6-21 GiB arm, and because the pool re-places on
-    timeout, each arm burned a full 15 minutes of billing and then started the
-    download again somewhere else. That loop never converges for a large model:
-    the bigger the weights, the more certain the abandonment.
+    There is no timeout here and there should not be one. Four were tried and all
+    four were wrong in the same way: 420s, 900s, 600s-from-container-start, and a
+    3600s cap. Each abandoned hosts that were working, because the time a host
+    needs depends on model size and its bandwidth, neither known in advance, and
+    the larger the model the more certain the false positive. A clock cannot tell
+    a slow host from a dead one.
 
-    What actually distinguishes a dead host from a slow one is whether anything
-    is changing. vast reports pull and load progress in status_msg, so the clock
-    resets whenever it moves. A host that is still talking gets more time; a host
-    that has gone quiet for `stall` seconds is abandoned. `hard_cap` bounds the
-    pathological case where a host reports progress forever.
+    What CAN tell them apart is the host saying so. These are the only conditions
+    that end the wait unsuccessfully:
+
+      - the instance reports `exited`
+      - the container reports a docker daemon failure
+      - the instance disappears from the API entirely
+
+    Anything else is a host still working, and it gets as long as it takes.
     """
-    # NO CLOCK BOUNDS THE DOWNLOAD. There is no defensible number: it depends on
-    # the model size and the host's bandwidth, both unknown in advance, and every
-    # value tried so far (420s, 900s, 600s-from-container-start) abandoned healthy
-    # hosts pulling large weights. A host is dead when it STOPS TALKING, and that
-    # is the only thing this waits on. hard_cap exists solely as a runaway guard
-    # and defaults to off.
-    t0 = last_change = time.time()
-    seen = None
     ep = None
-    while hard_cap is None or time.time() - t0 < hard_cap:
+    while True:
         try:
-            d = (api("instances/%d/" % cid).get("instances")) or {}
+            r = api("instances/%d/" % cid)
         except Exception:
-            time.sleep(15); continue
-        if d.get("actual_status") == "exited":
-            raise RuntimeError("instance exited: %s" % (d.get("status_msg") or "")[:120])
-        # A docker daemon error is terminal, not slow. Waiting out the stall
-        # window on one costs ten minutes of billing to learn what the very
-        # first poll already said.
+            time.sleep(20); continue          # API blip is not evidence of death
+        d = r.get("instances") or {}
+        if not d:
+            raise RuntimeError("instance %d no longer exists" % cid)
+        status = d.get("actual_status")
         sm = d.get("status_msg") or ""
+        if status == "exited":
+            raise RuntimeError("instance exited: %s" % sm[:120].replace("\n", " "))
         if "Error response from daemon" in sm or "failed to set up container" in sm:
             raise RuntimeError("container failed: %s" % sm[:90].replace("\n", " "))
-        status = d.get("actual_status")
-        msg = "%s|%s" % (status, (d.get("status_msg") or "")[:160])
-        if msg != seen:
-            seen, last_change = msg, time.time()
-        # ONCE THE CONTAINER IS RUNNING, VAST GOES QUIET AND THE WORK CONTINUES.
-        #
-        # status_msg reaches its terminal value ("success, running ghcr.io/...")
-        # the moment the container starts. llama.cpp then spends 10-30 minutes
-        # downloading a 16-21 GiB GGUF from HuggingFace, and vast reports nothing
-        # about that at all. A stall detector watching status_msg therefore fires
-        # on every large model at exactly `stall` seconds after container start.
-        #
-        # That is the third time this wait has been wrong in the same way: a
-        # fixed clock measured from an event that has nothing to do with the work
-        # finishing. 420s, then 900s, then 600s-from-container-start. Eleven
-        # healthy hosts were abandoned mid-download before this check existed.
-        #
-        # So the stall timer polices only the phases vast narrates -- created and
-        # loading, i.e. the image pull. Once running, the only bound is hard_cap,
-        # and the real completion signal is /health answering.
-        if status == "running":
-            last_change = time.time()
         p = ((d.get("ports") or {}).get("8080/tcp") or [{}])[0].get("HostPort")
         if p and d.get("public_ipaddr"):
             ep = "%s:%s" % (d["public_ipaddr"].strip(), p)
@@ -156,11 +130,8 @@ def endpoint(cid, stall=900, hard_cap=None):
                 urllib.request.urlopen("http://%s/health" % ep, timeout=10).read()
                 return ep
             except Exception:
-                pass
-        if time.time() - last_change > stall:
-            raise RuntimeError("no progress for %ds (last: %s)" % (stall, (seen or "")[:80]))
-        time.sleep(15)
-    raise RuntimeError("hard cap %ss reached (last endpoint %s)" % (hard_cap, ep))
+                pass                          # still loading weights; keep waiting
+        time.sleep(20)
 
 
 def verify(ep, repo, want_fam=None):
