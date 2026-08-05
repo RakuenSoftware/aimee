@@ -16,6 +16,12 @@ admitted. That integration lane can differ from the forge default. The workflow 
 ready or merge it automatically. The draft must have a proposal-derived title and include the
 original request, approved plan, diff summary, slice PRs, completed gates, and human-review boundary.
 
+After `accept_gate` approves the implementation, the document delegate's scope is strictly limited to
+the immutable original request and the exact accepted implementation diff. The delegate must not
+infer additional work from unrelated repository history, and when the documentation is already
+complete, the delegate leaves the worktree unchanged. `doc_freeze` and `doc_gate` remain the review
+authority for any documentation edits the delegate produces.
+
 If a final PR is non-draft, has a work-item ID for a title, lacks that review context, or was merged
 without the explicit human handoff, treat the run as failed even when its lifecycle row says
 `accepted`. Preserve the PR and lifecycle audit trail, revoke any agent-accessible write credential,
@@ -58,3 +64,4 @@ The pending-proposal watcher scans the refreshed git ref on every poll. Five rul
 
 Edit the cap under **Workflows > Run policy**. A value of `0` pauses new watched-proposal and
 browser-submit admission.
+y; current source is authoritative for file contents when they differ.\n- File ops: read_file; edit_file (old_string/new_string); write_file (overwrite).\n- Use list_files to explore directories.\n- When you have completed the task, respond with a final summary.\n- If you encounter an error, try to diagnose and fix it.\n- Do not ask for confirmation. Execute the task directly.\n","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":"Implement the complete approved task in this worktree, run the repository verification, fix failures, and leave the accepted changes in the worktree.\n\nINPUT plan (intent):\n{\"schema_version\":1,\"status\":\"unconfirmed\",\"summary\":\"Add a single concise paragraph to docs/wfe-autonomy-runbook.md, placed immediately after the paragraph that describes the default build final PR, defining the document delegate's scope once accept_gate has approved the imphü Ñ\{
