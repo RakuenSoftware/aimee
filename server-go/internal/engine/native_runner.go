@@ -610,6 +610,17 @@ func delegatePartialIsNoChange(response string) bool {
 			strings.Contains(response, "no file changes detected"))
 }
 
+func retryDetailForPrompt(detail string) string {
+	detail = strings.TrimSpace(safeDiagnostic(detail))
+	const maxRunes = 24_000
+	runes := []rune(detail)
+	if len(runes) <= maxRunes {
+		return detail
+	}
+	const headRunes = 8_000
+	return string(runes[:headRunes]) + "\n...[retry diagnostic truncated]...\n" + string(runes[len(runes)-(maxRunes-headRunes):])
+}
+
 func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (StepResult, error) {
 	workdir, branch, err := r.worktrees.Ensure(ctx, req.WorkItem, req.WorkItem.ParentID == "")
 	if err != nil {
@@ -640,20 +651,12 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 	// repairs must also pass the same mechanical verifier used after a delegate.
 	// This does not bypass review, and feedback left by an earlier gate cannot
 	// trigger it.
-	repairFastPath := true
-	if !docs {
-		attempts, attemptErr := r.db.StageAttemptCount(ctx, req.WorkItem.ID, req.Node.ID)
-		if attemptErr != nil {
-			return StepResult{}, attemptErr
-		}
-		// The first pass after review may verify a clean committed repair without
-		// asking a delegate to make a meaningless extra edit. Once that verifier
-		// has failed, however, RecordRetry has incremented this stage counter. A
-		// later pass must dispatch an implementation delegate so it can actually
-		// repair the failure instead of replaying the same verifier until the
-		// retry limit parks the workflow.
-		repairFastPath = attempts == 0
-	}
+	// The first pass after review may verify a clean committed repair without
+	// asking a delegate to make a meaningless extra edit. Once that verifier has
+	// failed, the engine supplies its diagnostic and a later pass must dispatch an
+	// implementation delegate. RetryDetail remains present across an operator
+	// retry-budget reset, unlike the numeric attempt counter.
+	repairFastPath := docs || req.RetryDetail == ""
 	if repairFastPath && req.Feedback != nil && req.WorkItem.ContentHash != "" &&
 		req.WorkItem.ContentHash == req.Feedback.ArtifactHash {
 		diff, diffErr := frozenWorktreeDiff(ctx, req.WorkItem, workdir)
@@ -699,6 +702,9 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 	if req.Feedback != nil {
 		encoded, _ := json.Marshal(req.Feedback)
 		prompt += "\n\nREVIEW FEEDBACK TO RESOLVE:\n" + string(encoded)
+	}
+	if retryDetail := retryDetailForPrompt(req.RetryDetail); retryDetail != "" {
+		prompt += "\n\nPREVIOUS ATTEMPT FAILURE TO FIX:\n" + retryDetail
 	}
 	var cost float64
 	costUnknown := false

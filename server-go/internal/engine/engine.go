@@ -39,7 +39,11 @@ type StepRequest struct {
 	Proposal string                  `json:"proposal"`
 	Inputs   map[string]wfe.Artifact `json:"inputs,omitempty"`
 	Feedback *wfe.ReviewFeedback     `json:"feedback,omitempty"`
-	Block    wfe.BlockDefinition     `json:"block_definition"`
+	// RetryDetail is the durable diagnostic from the immediately preceding
+	// failure of this stage. It lets a repair delegate address a known verifier
+	// failure instead of rediscovering it from scratch.
+	RetryDetail string              `json:"retry_detail,omitempty"`
+	Block       wfe.BlockDefinition `json:"block_definition"`
 	// CostLimitUSD is the durable reservation granted to this invocation. A
 	// capped runner must pass it to every billable resource-plane call and must
 	// not return a cost above it.
@@ -190,6 +194,11 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 	}
 	req := StepRequest{WorkItem: item, Node: node, Proposal: string(proposal), CostLimitUSD: budget.Amount, ReplayOnly: budget.ReplayOnly}
 	req.Block = block
+	retryDetail, detailErr := e.db.LatestStageRetryDetail(ctx, item.ID, item.Stage)
+	if detailErr != nil {
+		return out, detailErr
+	}
+	req.RetryDetail = retryDetail
 	if len(node.In) > 0 {
 		req.Inputs = make(map[string]wfe.Artifact, len(node.In))
 		for inputName, binding := range node.In {
