@@ -247,6 +247,40 @@ static void test_classify_feature(void)
    assert(task_type_classify("build webhook support") == TASK_TYPE_FEATURE);
 }
 
+/* The roundtable review prompt must classify as a review, because that is what
+ * selects instructions telling the agent to answer rather than to act. */
+static void test_roundtable_review_prompt_classifies_as_review(void)
+{
+   const char *panel_prompt =
+       "Review the complete artifact against the complete original request.\n"
+       "RUN ID JSON: \"wi-1\"\nARTIFACT STAGE: frozen_diff\n";
+   assert(task_type_classify(panel_prompt) == TASK_TYPE_REVIEW);
+}
+
+/* A reviewer's deliverable is its final message. The execution-agent
+ * instruction "always invoke tools, never write as plain text" forbids exactly
+ * that, and a reviewer given it spends its whole turn budget calling tools and
+ * dies with "max turns exhausted without final response". */
+static void test_review_instructions_do_not_forbid_a_final_answer(void)
+{
+   const char *review = agent_exec_instructions(TASK_TYPE_REVIEW);
+   assert(strstr(review, "review agent"));
+   assert(strstr(review, "final message IS the deliverable"));
+   assert(!strstr(review, "Always invoke tools"));
+   assert(!strstr(review, "Never write shell commands"));
+
+   /* Acting agents keep their own instruction: they must call tools rather than
+    * narrate shell commands. */
+   for (task_type_t t = TASK_TYPE_GENERAL; t < TASK_TYPE_COUNT; t++)
+   {
+      if (t == TASK_TYPE_REVIEW)
+         continue;
+      const char *acting = agent_exec_instructions(t);
+      assert(strstr(acting, "execution agent"));
+      assert(strstr(acting, "Always invoke tools"));
+   }
+}
+
 static void test_classify_review(void)
 {
    assert(task_type_classify("review the PR changes") == TASK_TYPE_REVIEW);
@@ -430,6 +464,8 @@ int main(void)
    test_classify_refactor();
    test_classify_feature();
    test_classify_review();
+   test_roundtable_review_prompt_classifies_as_review();
+   test_review_instructions_do_not_forbid_a_final_answer();
    test_classify_test();
    test_classify_general();
    test_task_type_name_strings();

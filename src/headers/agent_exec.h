@@ -199,6 +199,10 @@ const char *task_type_name(task_type_t type);
 size_t agent_exec_context_budget_chars(const agent_t *agent);
 char *agent_build_exec_context(const agent_t *agent, const agent_network_t *network,
                                const char *custom_prompt);
+/* Opening instruction for a task type. A review must be told to answer; an
+ * execution agent must be told to act. Pure so the choice is testable. */
+const char *agent_exec_instructions(task_type_t task_type);
+
 char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *network,
                                   const char *custom_prompt, int skip_kb_context);
 void agent_print_context(const agent_config_t *cfg);

@@ -1443,6 +1443,32 @@ static const char *agent_context_cwd(char *buf, size_t buf_len)
 
 /* --- Relevance-scored context (#3) --- */
 
+/* The opening instruction an agent runs under.
+ *
+ * A review's deliverable is its verdict, not an edit, so it must not be told to
+ * always answer with a tool call. That instruction is written for agents that
+ * act on a workspace; given to a reviewer it forbids exactly the final message
+ * the caller is waiting for, and the reviewer spends its whole turn budget
+ * calling tools and is killed with "max turns exhausted without final
+ * response". Tools stay available -- a reviewer may need evidence -- but
+ * gathering it is optional and answering is mandatory. */
+const char *agent_exec_instructions(task_type_t task_type)
+{
+   if (task_type == TASK_TYPE_REVIEW)
+      return "You are a review agent. Judge the supplied artifact and report your verdict.\n"
+             "IMPORTANT: your final message IS the deliverable. Return it as plain text in "
+             "exactly the format the task requests, and do not end your turn with a tool "
+             "call.\n"
+             "The tools are available for evidence only, and only when the artifact alone "
+             "cannot settle a question; a complete artifact usually can. Treat current "
+             "source as the file-content authority when it differs from indexed snippets.\n";
+   return "You are an execution agent. Complete the task using the provided tools.\n"
+          "IMPORTANT: Always invoke tools (bash, read_file, write_file, list_files) to act. "
+          "Never write shell commands or code as plain text — call the tool instead.\n"
+          "Use Aimee index/search tools for discovery. Treat current source as the "
+          "file-content authority when it differs from indexed snippets.\n";
+}
+
 char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *network,
                                   const char *custom_prompt, int skip_kb_context)
 {
@@ -1483,13 +1509,7 @@ char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *n
    int skip_kb_client =
        skip_kb_context || (skip_kb_env && skip_kb_env[0] && strcmp(skip_kb_env, "0") != 0);
 
-   ctx_appendf(buf, cap, &pos,
-               "You are an execution agent. Complete the task using the provided tools.\n"
-               "IMPORTANT: Always invoke tools (bash, read_file, write_file, "
-               "list_files) to act. Never write shell commands or code as plain "
-               "text — call the tool instead.\n"
-               "Use Aimee index/search tools for discovery. Treat current source as the "
-               "file-content authority when it differs from indexed snippets.\n");
+   ctx_appendf(buf, cap, &pos, "%s", agent_exec_instructions(task_type));
    ctx_appendf(buf, cap, &pos, "%s", prompt_principles_text(config_current_mode()));
 
    char cwd_buf[MAX_PATH_LEN];
