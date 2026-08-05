@@ -26,7 +26,8 @@ never holds an idle rented GPU. Cost is reported per arm.
 
 The API key is read from VAST_API_KEY and is never written to disk.
 """
-import argparse, json, os, subprocess, sys, threading, time, urllib.error, urllib.request
+import argparse, json, os, subprocess, sys, threading, time
+import urllib.error, urllib.parse, urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 API = "https://console.vast.ai/api/v0"
@@ -37,7 +38,6 @@ KEY = os.environ.get("VAST_API_KEY", "")
 def api(path, method="GET", body=None, params=None):
     url = "%s/%s" % (API, path.lstrip("/"))
     if params:
-        import urllib.parse
         url += "?" + urllib.parse.urlencode(params)
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method, headers={
