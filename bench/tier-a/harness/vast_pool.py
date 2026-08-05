@@ -121,9 +121,28 @@ def endpoint(cid, stall=600, hard_cap=3600):
         sm = d.get("status_msg") or ""
         if "Error response from daemon" in sm or "failed to set up container" in sm:
             raise RuntimeError("container failed: %s" % sm[:90].replace("\n", " "))
-        msg = "%s|%s" % (d.get("actual_status"), (d.get("status_msg") or "")[:160])
+        status = d.get("actual_status")
+        msg = "%s|%s" % (status, (d.get("status_msg") or "")[:160])
         if msg != seen:
             seen, last_change = msg, time.time()
+        # ONCE THE CONTAINER IS RUNNING, VAST GOES QUIET AND THE WORK CONTINUES.
+        #
+        # status_msg reaches its terminal value ("success, running ghcr.io/...")
+        # the moment the container starts. llama.cpp then spends 10-30 minutes
+        # downloading a 16-21 GiB GGUF from HuggingFace, and vast reports nothing
+        # about that at all. A stall detector watching status_msg therefore fires
+        # on every large model at exactly `stall` seconds after container start.
+        #
+        # That is the third time this wait has been wrong in the same way: a
+        # fixed clock measured from an event that has nothing to do with the work
+        # finishing. 420s, then 900s, then 600s-from-container-start. Eleven
+        # healthy hosts were abandoned mid-download before this check existed.
+        #
+        # So the stall timer polices only the phases vast narrates -- created and
+        # loading, i.e. the image pull. Once running, the only bound is hard_cap,
+        # and the real completion signal is /health answering.
+        if status == "running":
+            last_change = time.time()
         p = ((d.get("ports") or {}).get("8080/tcp") or [{}])[0].get("HostPort")
         if p and d.get("public_ipaddr"):
             ep = "%s:%s" % (d["public_ipaddr"].strip(), p)
