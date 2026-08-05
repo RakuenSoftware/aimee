@@ -142,12 +142,26 @@ configured))` while, seconds earlier and later, `aimee --json status` reports
 A green status that does not reflect the path the next command takes is worse
 than no status.
 
-**5. Re-scanning an existing project with `--force` indexes zero files.** The
-same directory scanned under a NEW project name indexes 2978 files; scanned
-again under its existing project it indexes 0. Every cell mints a fresh project
-name, so this compounds with the no-reuse embedding cost in (1).
+**5. WITHDRAWN — this was my error, not a defect.** I claimed re-scanning an
+existing project with `--force` indexes zero files. It does not: scanning the
+existing project `manualprobe` with `--force` re-indexed 2978 files. The
+zero-file scans I saw were the knowledge service being unavailable at that
+moment (see 3 and 4), not project state. The KB route already gates its
+idempotency skip on `!force`, so `--force` was never the variable. Recorded
+rather than deleted because it was published as a finding.
 
-Reproduction for 3 and 5: copy `/opt/bench/amcorpus/corpus/am_1e7cb3da16` to a
+**5a. The real pattern: a heavy scan is followed by unavailability.** A 2978-file
+scan succeeds; the next scan of the same tree, seconds later, fails with
+`knowledge service unavailable` — with `aimee status` reporting `kb: ok`, the
+container healthy, and the KB itself still answering `/v1/health` 200 every 10s
+throughout. So the KB is alive and the server's breaker is closed, yet the scan
+path cannot reach it. This is what actually blocks the arm: readiness scans one
+~3000-file checkout per cell, fourteen times in a row.
+
+Note on (3): `transport_state: "closed"` in status is the circuit breaker
+CLOSED, i.e. healthy. I misread it as a dead transport at first; it is not.
+
+Reproduction for 3 and 5a: copy `/opt/bench/amcorpus/corpus/am_1e7cb3da16` to a
 fresh path, `chown -R 999:999`, `aimee workspace add`, `aimee index scan
 <newname> <path> --force` -> 2978 files, and `index find dstr_append` /
 `index callers dstr_append` both answer correctly. `index blast-radius` returns
