@@ -58,3 +58,29 @@ STILL OWED. This patch has no test. The harness is a separate checkout with no
 suite of its own here, which is exactly why the defect survived: a gate that
 asserts on more than it waits for is a property a test can state in three lines.
 If the harness is ever vendored, that test comes with it.
+
+--------------------------------------------------------------------------
+SECOND PATCH: the full-mode gate asserted a synchronous build contract
+--------------------------------------------------------------------------
+Applied live on CT403; backup left as codex_matrix_runner.py.pre-asyncgate.bak
+
+`kb build` is asynchronous now: it commits the work to the ingest queue and
+answers immediately, so build["embeddings_added"] is 0 by construction. The
+full-mode gate asserted that counter is > 0, which failed every cell while
+embedding was working correctly -- observed on am_312e901904 with 18304 doc
+vectors built and the cell rejected as "KB build did not add embeddings".
+
+The assertion below it already asks the same question properly: semantic recall
+of a planted README passage fails unless the vectors exist AND are searchable.
+That is strictly stronger than a counter, so dropping the proxy does not weaken
+the gate.
+
+The semantic wait was also 180s, which cannot cover asynchronous embedding of a
+whole corpus. Now PT_SEMANTIC_WAIT_SECS, default 1800.
+
+-    if AIMEE_READINESS_MODE == "full" and int(build.get("embeddings_added") or 0) <= 0:
+-        errors.append("KB build did not add embeddings for this cell")
++    # NOT asserted: build["embeddings_added"] > 0 -- see above.
+
+-    deadline = time.monotonic() + 180
++    deadline = time.monotonic() + int(os.environ.get("PT_SEMANTIC_WAIT_SECS", "1800"))
