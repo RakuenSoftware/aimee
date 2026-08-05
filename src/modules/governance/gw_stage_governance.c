@@ -20,9 +20,9 @@ int gw_response_governance_enabled(void)
 {
    const char *v = getenv("AIMEE_STAGE_GOVERNANCE");
    if (!v || !v[0])
-      return 1;
-   return !(strcasecmp(v, "0") == 0 || strcasecmp(v, "off") == 0 || strcasecmp(v, "false") == 0 ||
-            strcasecmp(v, "no") == 0);
+      return 0;
+   return strcasecmp(v, "1") == 0 || strcasecmp(v, "on") == 0 || strcasecmp(v, "true") == 0 ||
+          strcasecmp(v, "yes") == 0;
 }
 
 typedef struct

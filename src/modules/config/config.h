@@ -1190,8 +1190,8 @@ typedef struct config
     * workflows (orchestration hooks), and optional roundtable panels. Each is a TRISTATE:
     *   -1  unspecified — the config does not set it; the resolver falls back to the module's
     *       deprecated env toggle (AIMEE_STAGE_MEMORY / _GOVERNANCE / AIMEE_ORCH_DELEGATES /
-    *       _WORKFLOWS / AIMEE_MODULE_ROUNDTABLE) and then to its descriptor default (roundtable
-    *       defaults OFF; the legacy gateway-stage modules default ON).
+    *       _WORKFLOWS / AIMEE_MODULE_ROUNDTABLE) and then to its descriptor default (governance
+    *       and roundtable default OFF; the remaining legacy gateway-stage modules default ON).
     *    0  user-disabled.    1  user-enabled.
     * Resolution is centralized in config_module_enabled() so the future admin/governance FORCE
     * tier (aimee-kb governance state that can pin a module on or off over the user's choice)
