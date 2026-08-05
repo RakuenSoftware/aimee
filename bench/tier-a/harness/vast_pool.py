@@ -89,23 +89,35 @@ def launch(offer_id, repo, ctx, cache_ram, bid=None, draft=None):
     return r["new_contract"]
 
 
-def endpoint(cid, timeout=900):
-    """Wait for the mapped port, then for llama-server to answer /health.
+def endpoint(cid, stall=600, hard_cap=3600):
+    """Wait for llama-server, abandoning a host only when it STOPS MAKING PROGRESS.
 
-    The timeout is short on purpose. Advertised inet_down does not predict
-    registry throughput: one host pulled this image in 84 seconds and another,
-    advertising comparable bandwidth, sat on 'Retrying in 2 seconds' for fifteen
-    billable minutes. A slow pull is a host to replace, not a wait to sit out.
+    A fixed deadline is the wrong instrument here and has now been wrong twice.
+    At 420s it abandoned hosts that were downloading fine. Raised to 900s it
+    still abandoned every 6-21 GiB arm, and because the pool re-places on
+    timeout, each arm burned a full 15 minutes of billing and then started the
+    download again somewhere else. That loop never converges for a large model:
+    the bigger the weights, the more certain the abandonment.
+
+    What actually distinguishes a dead host from a slow one is whether anything
+    is changing. vast reports pull and load progress in status_msg, so the clock
+    resets whenever it moves. A host that is still talking gets more time; a host
+    that has gone quiet for `stall` seconds is abandoned. `hard_cap` bounds the
+    pathological case where a host reports progress forever.
     """
-    t0 = time.time()
+    t0 = last_change = time.time()
+    seen = None
     ep = None
-    while time.time() - t0 < timeout:
+    while time.time() - t0 < hard_cap:
         try:
             d = (api("instances/%d/" % cid).get("instances")) or {}
         except Exception:
             time.sleep(15); continue
         if d.get("actual_status") == "exited":
             raise RuntimeError("instance exited: %s" % (d.get("status_msg") or "")[:120])
+        msg = "%s|%s" % (d.get("actual_status"), (d.get("status_msg") or "")[:160])
+        if msg != seen:
+            seen, last_change = msg, time.time()
         p = ((d.get("ports") or {}).get("8080/tcp") or [{}])[0].get("HostPort")
         if p and d.get("public_ipaddr"):
             ep = "%s:%s" % (d["public_ipaddr"].strip(), p)
@@ -114,8 +126,10 @@ def endpoint(cid, timeout=900):
                 return ep
             except Exception:
                 pass
+        if time.time() - last_change > stall:
+            raise RuntimeError("no progress for %ds (last: %s)" % (stall, (seen or "")[:80]))
         time.sleep(15)
-    raise RuntimeError("never became healthy (last endpoint %s)" % ep)
+    raise RuntimeError("hard cap %ds reached (last endpoint %s)" % (hard_cap, ep))
 
 
 def verify(ep, repo, want_fam=None):
