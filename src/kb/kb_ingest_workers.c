@@ -47,6 +47,7 @@
 #include <string.h>
 #include <time.h>
 #ifndef AIMEE_WINDOWS
+#include <sched.h>
 #include <unistd.h>
 #include <poll.h>
 #include <sys/resource.h>
@@ -466,6 +467,30 @@ static void *kbiw_watch_thread(void *arg)
 }
 #endif
 
+/* CPUs this process may actually run on.
+ *
+ * sysconf(_SC_NPROCESSORS_ONLN) reports the HOST's online CPUs and ignores the
+ * cgroup/affinity mask a container is confined to. On the bench container it
+ * answers 8 while the process is pinned to 4 -- so a cap computed from it left
+ * headroom on cores that do not exist and started one worker per usable core,
+ * which is precisely the saturation the cap exists to prevent. sched_getaffinity
+ * is what nproc uses and what the scheduler will honour. */
+static long kbiw_usable_cpus(void)
+{
+#ifdef __linux__
+   cpu_set_t set;
+   CPU_ZERO(&set);
+   if (sched_getaffinity(0, sizeof(set), &set) == 0)
+   {
+      int n = CPU_COUNT(&set);
+      if (n > 0)
+         return (long)n;
+   }
+#endif
+   long n = sysconf(_SC_NPROCESSORS_ONLN);
+   return n > 0 ? n : 1;
+}
+
 /* Effective ingest-worker count.
  *
  * Ingest work is embedding, and embedding is CPU-bound: each worker drives the
@@ -510,7 +535,7 @@ void kb_ingest_workers_start(kb_service_ctx_t *ctx)
    ctx->ingest_count = 0;
    ctx->ingest_timer_active = 0;
    ctx->bg_watch_active = 0;
-   int cap = kb_ingest_worker_cap(config_kb_worker_count(), sysconf(_SC_NPROCESSORS_ONLN));
+   int cap = kb_ingest_worker_cap(config_kb_worker_count(), kbiw_usable_cpus());
 
    if (cap == 0 || !db2_is_initialized())
    {

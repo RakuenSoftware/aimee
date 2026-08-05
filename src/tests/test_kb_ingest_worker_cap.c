@@ -71,6 +71,31 @@ static void test_disabled_stays_disabled(void)
    assert(kb_ingest_worker_cap(-1, 16) == 0);
 }
 
+/* The cap is only as good as the CPU count it is given, and that is where the
+ * first deployment of this policy failed: sysconf(_SC_NPROCESSORS_ONLN) reports
+ * the HOST's CPUs and ignores a container's affinity mask. On the bench box it
+ * answered 8 while the process was pinned to 4, so the cap reserved headroom on
+ * cores that did not exist and started 4 workers on 4 usable CPUs -- exactly the
+ * saturation it exists to prevent, and the unit tests were all green while it
+ * happened.
+ *
+ * The lesson is in the shape of the bug, not the arithmetic: a pure policy
+ * function cannot protect you from being handed the wrong input. Pin the case
+ * that was actually observed. */
+static void test_host_cpu_count_must_not_be_used_for_a_confined_process(void)
+{
+   /* Observed on the bench container: sysconf said 8, affinity said 4. */
+   const long host_cpus = 8;
+   const long usable_cpus = 4;
+   const int configured = 4;
+   /* Against the host count the configured value passes straight through and
+      saturates the 4 CPUs the process actually has. */
+   assert(kb_ingest_worker_cap(configured, host_cpus) == configured);
+   /* Against the usable count it leaves one free, which is the requirement. */
+   assert(kb_ingest_worker_cap(configured, usable_cpus) == 3);
+   assert(kb_ingest_worker_cap(configured, usable_cpus) < usable_cpus);
+}
+
 int main(void)
 {
    printf("kb_ingest_worker_cap: ");
@@ -80,6 +105,7 @@ int main(void)
    test_configured_value_is_a_ceiling();
    test_absolute_max_still_applies();
    test_disabled_stays_disabled();
+   test_host_cpu_count_must_not_be_used_for_a_confined_process();
    printf("ok\n");
    return 0;
 }
