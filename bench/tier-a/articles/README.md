@@ -1,6 +1,6 @@
 # Tier-A extraction benchmark: article series
 
-Five drafts from one benchmarking effort. The task throughout is the same: read a
+Six drafts from one benchmarking effort. The task throughout is the same: read a
 short note, return subject-relation-object triples as JSON, or return an empty
 list if the note asserts nothing durable. Models are local and small, from 230M
 to 4.5B effective parameters.
@@ -12,9 +12,10 @@ to 4.5B effective parameters.
 | 3 | [Repeatable, not identical](03-repeatable-not-identical.md) | A benchmark needs a configuration that reproduces itself, not one that matches sequential |
 | 4 | [Fast because it was broken](04-fast-because-it-was-broken.md) | Four benchmark defects, none of which threw an error and all of which produced believable numbers |
 | 5 | [More correct than production](05-the-benchmark-was-more-correct-than-production.md) | The scorer is a specification, and diffing it against the pipeline found four production bugs |
+| 6 | [The free lunch took three instruments](06-the-free-lunch-took-three-instruments.md) | Speculative decoding doubles throughput for no measurable accuracy cost, and the first two measurements of that were wrong |
 
-All five are drafts. Evidence and working notes are in
-[`../ARTICLE_NOTES.md`](../ARTICLE_NOTES.md), numbered findings 1 to 18.
+All six are drafts. Evidence and working notes are in
+[`../ARTICLE_NOTES.md`](../ARTICLE_NOTES.md), numbered findings 1 to 30.
 
 ## Caveats that apply to the whole series
 

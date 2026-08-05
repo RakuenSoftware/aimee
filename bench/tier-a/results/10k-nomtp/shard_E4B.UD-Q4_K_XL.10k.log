@@ -1,0 +1,6 @@
+[05:09:42Z] sizing: starting one server to measure resident VRAM
+[05:10:14Z]   one instance uses  MiB of 24560 MiB
+[05:10:14Z]   -> running 3 processes, cache-ram 1024 MiB each
+[05:10:47Z]   all 3 servers up; VRAM now  MiB
+[05:10:47Z] START E4B.UD-Q4_K_XL.10k across 3 shards
+[10:42:06Z] DONE E4B.UD-Q4_K_XL.10k rows=10000/10000 wall=331m19s procs=3 retries=0
