@@ -1,0 +1,87 @@
+[15:23:18Z] waiting for contract 46891972 to serve
+[15:34:13Z] contract 46893000 (RTX 3090, 5557Mb down) waiting
+[15:36:39Z] healthy at 136.60.242.150:18117 loaded=gemma-4-E2B-it-UD-Q4_K_XL.gguf
+[15:36:39Z] calibration arm starting
+usage: run_llamacpp.py [-h] [--base-url BASE_URL] --model MODEL --gold GOLD
+                       --out OUT [--max-tokens MAX_TOKENS] [--timeout TIMEOUT]
+                       [--no-confidence] [--concurrency CONCURRENCY]
+                       [--prompt-version PROMPT_VERSION] (--thinking |
+                       --no-thinking)
+run_llamacpp.py: error: one of the arguments --thinking --no-thinking is required
+[15:37:15Z] retry: calibration arm with --thinking (matches the banked arm)
+[16:23:21Z] CALIBRATION CLIENT DONE rows=1001
+[16:28:33Z] === 8 arms, RTX 3090, up to 4 at once, cap $0.200/hr each
+[16:28:34Z] FAIL gemma-4-E4B: cannot access local variable 'urllib' where it is not associated with a value
+[16:28:34Z] FAIL SmolLM3-3B: cannot access local variable 'urllib' where it is not associated with a value
+[16:28:34Z] FAIL granite-4.1-3b: cannot access local variable 'urllib' where it is not associated with a value
+[16:28:34Z] FAIL granite-4.0-1b: cannot access local variable 'urllib' where it is not associated with a value
+[16:28:34Z] FAIL LFM2.5-VL-1.6B: cannot access local variable 'urllib' where it is not associated with a value
+[16:28:34Z] FAIL MiniCPM5-1B: cannot access local variable 'urllib' where it is not associated with a value
+[16:28:34Z] FAIL LFM2.5-1.2B: cannot access local variable 'urllib' where it is not associated with a value
+[16:28:34Z] FAIL LFM2.5-230M: cannot access local variable 'urllib' where it is not associated with a value
+[16:28:34Z] === pool drained
+[16:29:37Z] === 8 arms, RTX 3090, up to 4 at once, cap $0.200/hr each
+[16:29:38Z] --- SmolLM3-3B on RTX 3090 46854550 $0.096/hr contract 46897350
+[16:29:38Z] --- granite-4.1-3b on RTX 3090 42093969 $0.090/hr contract 46897351
+[16:29:38Z] --- gemma-4-E4B on RTX 3090 42093967 $0.090/hr contract 46897352
+[16:29:38Z] --- granite-4.0-1b on RTX 3090 42093969 $0.090/hr contract 46897353
+[16:35:39Z]     healthy, loaded SmolLM3-Q8_0.gguf; 1 variant(s): noclause
+[16:36:39Z]     host 42093967 unusable (never became healthy (last endpoint 38.64.63.175:44575)); destroying and re-placing
+[16:36:40Z] --- gemma-4-E4B on RTX 3090 46854548 $0.096/hr contract 46897879
+[16:36:51Z]     host 42093969 unusable (never became healthy (last endpoint None)); destroying and re-placing
+[16:36:51Z]     host 42093969 unusable (never became healthy (last endpoint None)); destroying and re-placing
+[16:36:52Z] FAIL granite-4.0-1b: HTTP Error 400: Bad Request
+[16:36:53Z] --- granite-4.1-3b on RTX 3090 46854546 $0.096/hr contract 46897898
+[16:36:54Z] --- LFM2.5-VL-1.6B on RTX 3090 46854554 $0.096/hr contract 46897900
+[16:39:15Z]     healthy, loaded granite-4.1-3b-UD-Q4_K_XL.gguf; 1 variant(s): noclause
+[16:43:54Z]     host 46854548 unusable (never became healthy (last endpoint None)); destroying and re-placing
+[16:43:55Z] --- gemma-4-E4B on RTX 3090 45276982 $0.096/hr contract 46898360
+[16:44:07Z]     host 46854554 unusable (never became healthy (last endpoint None)); destroying and re-placing
+[16:44:08Z] FAIL LFM2.5-VL-1.6B: HTTP Error 400: Bad Request
+[16:44:10Z] --- LFM2.5-1.2B on RTX 3090 46854554 $0.096/hr contract 46898384
+[16:48:36Z]     healthy, loaded gemma-4-E4B-it-UD-Q4_K_XL.gguf; 2 variant(s): v4clause,noclause
+[16:51:16Z]     host 46854554 unusable (never became healthy (last endpoint 181.84.32.185:16671)); destroying and re-placing
+[16:51:17Z] --- LFM2.5-1.2B on RTX 3090 46176297 $0.100/hr contract 46898886
+[16:52:33Z] OK   granite-4.1-3b/noclause rows=1001 reasoned=0/1001 parse_ok=1001
+[16:52:33Z] DONE granite-4.1-3b wall=22m cost=$0.037
+[16:52:35Z] --- LFM2.5-230M on RTX 3090 42093967 $0.090/hr contract 46898962
+[16:55:30Z]     host 42093967 unusable (instance exited: success, running ghcr.io/ggml-org/llama.cpp:server-cuda); destroying and re-placing
+[16:55:31Z] --- LFM2.5-230M on RTX 3090 46854553 $0.096/hr contract 46899152
+[16:56:19Z]     healthy, loaded LFM2.5-230M-Q8_0.gguf; 1 variant(s): noclause
+[16:56:26Z] OK   gemma-4-E4B/v4clause rows=1001 reasoned=0/1001 parse_ok=1001
+[16:58:33Z]     host 46176297 unusable (never became healthy (last endpoint 202.172.97.133:60548)); destroying and re-placing
+[16:58:34Z] --- LFM2.5-1.2B on RTX 3090 46774864 $0.109/hr contract 46899345
+[17:05:48Z]     host 46774864 unusable (never became healthy (last endpoint 90.39.240.26:19205)); destroying and re-placing
+[17:05:49Z] FAIL LFM2.5-1.2B: no host served within the pull timeout
+[17:05:50Z] --- MiniCPM5-1B on RTX 3090 42093969 $0.090/hr contract 46899823
+[17:13:02Z]     host 42093969 unusable (never became healthy (last endpoint 38.64.63.175:44517)); destroying and re-placing
+[17:13:04Z] --- MiniCPM5-1B on RTX 3090 46854548 $0.096/hr contract 46900336
+[17:18:39Z] === 4 arms, RTX 3090, up to 2 at once, cap $0.200/hr each
+[17:18:40Z] --- LFM2.5-VL-1.6B on RTX 3090 45640045 $0.016/hr contract 46900685
+[17:18:40Z] --- granite-4.0-1b on RTX 3090 45640045 $0.016/hr contract 46900686
+[17:20:18Z]     host 46854548 unusable (never became healthy (last endpoint None)); destroying and re-placing
+[17:20:19Z] --- MiniCPM5-1B on RTX 3090 46176297 $0.100/hr contract 46900820
+[17:26:28Z] FAIL SmolLM3-3B/noclause rc=-15: 
+[17:26:28Z] DONE SmolLM3-3B wall=56m cost=$0.091
+[17:27:35Z]     host 46176297 unusable (never became healthy (last endpoint 202.172.97.133:60566)); destroying and re-placing
+[17:27:36Z] FAIL MiniCPM5-1B: no host served within the pull timeout
+[17:33:54Z]     host 45640045 unusable (never became healthy (last endpoint None)); destroying and re-placing
+[17:33:56Z]     host 45640045 unusable (never became healthy (last endpoint None)); destroying and re-placing
+[17:33:56Z] --- granite-4.0-1b on RTX 3090 45978204 $0.050/hr contract 46901807
+[17:33:57Z] --- LFM2.5-VL-1.6B on RTX 3090 45978204 $0.050/hr contract 46901808
+[17:36:18Z]     healthy, loaded LFM2.5-VL-1.6B-Q8_0.gguf; 1 variant(s): noclause
+[17:41:20Z]     LFM2.5-VL-1.6B/noclause: instance 46901808 vanished mid-arm (preempted); killing client
+[17:41:20Z]     LFM2.5-VL-1.6B/noclause preempted; 651 rows kept for resume
+[17:41:20Z] REQUEUE LFM2.5-VL-1.6B after preemption
+[17:41:23Z] --- LFM2.5-1.2B on RTX 3090 45640047 $0.016/hr contract 46902214
+[17:48:25Z]     host 45978204 unusable (instance exited: success, running ghcr.io/ggml-org/llama.cpp:server-cuda); destroying and re-placing
+[17:48:27Z] --- granite-4.0-1b on RTX 3090 42584240 $0.054/hr contract 46902674
+[17:49:15Z] OK   gemma-4-E4B/noclause rows=1001 reasoned=1001/1001 parse_ok=1001
+[17:49:15Z] DONE gemma-4-E4B wall=79m cost=$0.128
+[17:56:36Z]     host 45640047 unusable (never became healthy (last endpoint None)); destroying and re-placing
+[17:56:38Z] --- LFM2.5-1.2B on RTX 3090 42584238 $0.054/hr contract 46903148
+[18:03:40Z]     host 42584240 unusable (never became healthy (last endpoint 181.22.113.53:30178)); destroying and re-placing
+[18:03:41Z] --- granite-4.0-1b on RTX 3090 36130605 $0.068/hr contract 46903617
+[18:20:08Z] OK   LFM2.5-230M/noclause rows=1001 reasoned=0/1001 parse_ok=1001
+[18:20:08Z] DONE LFM2.5-230M wall=87m cost=$0.139
+[18:20:09Z] === pool drained
