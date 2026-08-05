@@ -7,6 +7,7 @@
 #include <aimee/core/event_bus/module_client.h>
 #include <aimee/core/event_bus/module_runtime.h>
 #include <aimee/benchmarks/module_api.h>
+#include <aimee/sandbox/module_api.h>
 #include <aimee/control-web/module_api.h>
 #include <aimee/delegates/module_api.h>
 #include <aimee/git/module_api.h>
@@ -20,7 +21,6 @@
 #include <aimee/runtime-web/module_api.h>
 #include <aimee/skills/module_api.h>
 #include <aimee/tools/module_api.h>
-#include <aimee/workflows/module_api.h>
 #include <aimee/workspace/module_api.h>
 
 #include <assert.h>
@@ -177,8 +177,6 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
       *kind = AIMEE_RESPONSE_EVENT_COMPOSE, *principal_ref = 15;
    else if (strcmp(name, "governance") == 0)
       *kind = AIMEE_GOVERNANCE_EVENT_EVALUATE, *principal_ref = 19;
-   else if (strcmp(name, "workflows") == 0)
-      *kind = AIMEE_WORKFLOWS_EVENT_ADVANCE, *principal_ref = 20;
    else if (strcmp(name, "roundtable") == 0)
       *kind = AIMEE_ROUNDTABLE_EVENT_DELIBERATE, *principal_ref = 21;
    else if (strcmp(name, "kb-synthesis") == 0)
@@ -192,6 +190,14 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
       *kind = AIMEE_BENCHMARKS_EVENT_RUN, *principal_ref = 25;
       served[0] = AIMEE_BENCHMARKS_EVENT_RUN;
       served[1] = AIMEE_BENCHMARKS_EVENT_LATENCY;
+      *serve_count = 2;
+      return 0;
+   }
+   else if (strcmp(name, "sandbox") == 0)
+   {
+      *kind = AIMEE_SANDBOX_EVENT_OBSERVE, *principal_ref = 26;
+      served[0] = AIMEE_SANDBOX_EVENT_OBSERVE;
+      served[1] = AIMEE_SANDBOX_EVENT_LOAD;
       *serve_count = 2;
       return 0;
    }
@@ -357,18 +363,6 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(decision.keep_mask == 1 && decision.drop_count == 2);
       assert(strcmp(decision.stop_reason, "max_tokens") == 0);
    }
-   else if (strcmp(name, "workflows") == 0)
-   {
-      aimee_workflows_advance_outcome_t outcome = AIMEE_WORKFLOWS_ADVANCE_BADARGS;
-      assert(aimee_workflows_request_encode("wi_1", "wi_1", "understand", "split", "accepted", 1,
-                                            "nonce_1", "nonce_1", request, sizeof(request)) == 0);
-      request_len = AIMEE_WORKFLOWS_REQUEST_LEN;
-      assert(aimee_module_client_call(client, kind, AIMEE_WORKFLOWS_STAGE_ADVANCE, 2010, 0, request,
-                                      request_len, response, sizeof(response), &response_len, NULL,
-                                      NULL) == AIMEE_MODULE_CALL_OK);
-      assert(aimee_workflows_response_decode(response, response_len, &outcome) == 0);
-      assert(outcome == AIMEE_WORKFLOWS_ADVANCE_REPLAY);
-   }
    else if (strcmp(name, "roundtable") == 0)
    {
       aimee_roundtable_verify_action_t action = AIMEE_ROUNDTABLE_VERIFY_REJECT;
@@ -418,6 +412,23 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
                                       request, request_len, response, sizeof(response),
                                       &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_control_web_response_decode(response, response_len, &allowed) == 0 && allowed);
+   }
+   else if (strcmp(name, "sandbox") == 0)
+   {
+      /* The sandbox stages carry JSON, not the fixed framing the other modules
+       * use: a shell command and a git root are variable-length. Load a project
+       * with nothing learned, which must still answer with a packages field
+       * rather than an error. */
+      const char *probe = "{\"git_root\":\"/probe\"}";
+      request_len = (uint32_t)strlen(probe);
+      assert(request_len <= sizeof(request));
+      memcpy(request, probe, request_len);
+      assert(aimee_module_client_call(client, AIMEE_SANDBOX_EVENT_LOAD, AIMEE_SANDBOX_STAGE_LOAD,
+                                      2016, 0, request, request_len, response, sizeof(response),
+                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(response_len > 0 && response_len < sizeof(response));
+      response[response_len] = '\0';
+      assert(strstr((const char *)response, "packages") != NULL);
    }
    else
    {
