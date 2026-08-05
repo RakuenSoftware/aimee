@@ -153,7 +153,8 @@ static void append_go_module_steps(const char *project_root, verify_config_t *cf
                "cd %s && go_bin=$(command -v go 2>/dev/null || true); "
                "if [ -z \"$go_bin\" ] && [ -x /usr/local/go/bin/go ]; then "
                "go_bin=/usr/local/go/bin/go; fi; [ -n \"$go_bin\" ] || { "
-               "echo 'go test: Go toolchain unavailable'; exit 1; }; \"$go_bin\" test ./...",
+               "echo 'go test: Go toolchain unavailable'; exit 1; }; "
+               "unset AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET; \"$go_bin\" test ./...",
                modules[i]);
    }
 }

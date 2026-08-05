@@ -1383,6 +1383,8 @@ static void test_verify_load_config_emits_parallel_steps(void)
    assert(strcmp(cfg.steps[1].name, "go-test-server-go") == 0);
    assert(strstr(cfg.steps[1].run, "cd server-go") != NULL);
    assert(strstr(cfg.steps[1].run, "/usr/local/go/bin/go") != NULL);
+   assert(strstr(cfg.steps[1].run,
+                 "unset AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET") != NULL);
 
    verify_test_teardown(tmpdir, fake_home);
 }
@@ -1410,6 +1412,9 @@ static void test_verify_load_config_repairs_existing_generated_plan_with_go_modu
    assert(strcmp(cfg.steps[1].name, "go-test-root") == 0);
    assert(strcmp(cfg.steps[2].name, "go-test-alpha-go") == 0);
    assert(strcmp(cfg.steps[3].name, "go-test-zeta-go") == 0);
+   for (int i = 1; i < cfg.count; i++)
+      assert(strstr(cfg.steps[i].run,
+                    "unset AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET") != NULL);
 
    verify_test_teardown(tmpdir, fake_home);
 }

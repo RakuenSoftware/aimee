@@ -905,7 +905,8 @@ go-unit-tests:
 	@test -n "$(strip $(GO_MODULE_DIRS))" || { echo "go-unit-tests: ERROR no Go modules found"; exit 1; }
 	@set -e; for module in $(GO_MODULE_DIRS); do \
 		echo "go-unit-tests: $$module"; \
-		(cd "$$module" && "$(GO)" test ./...); \
+		(unset AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET; \
+		 cd "$$module" && "$(GO)" test ./...); \
 	done
 	@echo "go-unit-tests: ok"
 

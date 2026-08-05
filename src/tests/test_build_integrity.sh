@@ -427,7 +427,9 @@ if sed -n '/^unit-tests:/,/^$(TESTPREFIX)\/unit-test-util:/p' tests/Rules.mk |
    sed -n '/^unit-tests:/,/^$(TESTPREFIX)\/unit-test-util:/p' tests/Rules.mk |
        grep -qF 'AIMEE_SERVER_HTTP_BIND AIMEE_WORKSPACES_DIR AIMEE_KB_API_URL' &&
    sed -n '/^unit-tests:/,/^$(TESTPREFIX)\/unit-test-util:/p' tests/Rules.mk |
-       grep -qF 'AIMEE_KB_API_BEARER_TOKEN AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET'; then
+       grep -qF 'AIMEE_KB_API_BEARER_TOKEN AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET' &&
+   sed -n '/^go-unit-tests:/,/^verify-local:/p' Makefile |
+       grep -qF 'unset AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET'; then
     pass "unit verification removes server deployment overrides"
 else
     fail "unit verification inherits server deployment overrides"
