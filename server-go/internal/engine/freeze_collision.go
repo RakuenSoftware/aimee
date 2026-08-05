@@ -45,6 +45,7 @@ func freezeCreatedFiles(ctx context.Context, workdir, base, head string) (map[st
 		return nil, err
 	}
 	creates := map[string]freezeCreate{}
+	// --diff-filter=A limits --name-status -z output to status/path pairs.
 	fields := strings.Split(out, "\x00")
 	for i := 0; i+1 < len(fields); i += 2 {
 		if fields[i] == "" || fields[i+1] == "" {
