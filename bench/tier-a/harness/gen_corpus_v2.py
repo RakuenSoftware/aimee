@@ -89,9 +89,21 @@ class Inv:
 
 
 def complete(base, sys_prompt, user, timeout=180):
+    """max_tokens has to cover the REASONING CHANNEL, not just the answer.
+
+    gemma-4-26B-A4B reasons before answering, and its reasoning lands in
+    `reasoning_content` while the note lands in `content`. At 220 tokens the
+    reasoning consumed the whole budget and `content` came back empty on every
+    single call: 24 minutes of generation produced zero notes, because each one
+    failed its containment check twice and was dropped.
+
+    That is finding 1 of this project happening to its own tooling -- a model
+    putting output in a channel the caller does not read, failing silently, and
+    producing a plausible-looking nothing. 700 tokens covers both channels.
+    """
     body = json.dumps({"model": "gen", "messages": [
         {"role": "system", "content": sys_prompt}, {"role": "user", "content": user}],
-        "temperature": 0.9, "max_tokens": 220}).encode()
+        "temperature": 0.9, "max_tokens": 700}).encode()
     req = urllib.request.Request(base.rstrip("/") + "/v1/chat/completions", data=body,
                                  headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -100,9 +112,21 @@ def complete(base, sys_prompt, user, timeout=180):
 
 
 def clean(t):
+    """Collapse to one line WITHOUT discarding the note.
+
+    The first version returned `t.split("\n")[0]`, which throws away everything
+    after the first newline and returns EMPTY when the model's content begins
+    with one. That is what killed the factless categories: `ambiguous` came back
+    0 of 51 and `transient` 20 of 139, not because the model refused but because
+    a leading blank line emptied the note and the empty note was dropped.
+
+    The visible symptom was a 23% drop rate. The real damage was to composition:
+    the factless share fell to 18.8% against the 32.1% this corpus exists to
+    match, which would have moved F1 for reasons unrelated to anything measured.
+    """
     t = t.strip().strip('"').strip()
     t = re.sub(r"\s+", " ", t)
-    return t.split("\n")[0].strip()
+    return t.strip()
 
 
 def main():
@@ -121,12 +145,19 @@ def main():
             [("infra", 1)] * int(a.n * 0.077) + [("implicit", 1)] * int(a.n * 0.072) +
             [("transient", 0)] * int(a.n * 0.139) + [("negation", 0)] * int(a.n * 0.132) +
             [("ambiguous", 0)] * int(a.n * 0.051))
+    # Pad by CYCLING the plan rather than appending one category. Padding with
+    # third_person pushed it to 24.4% against a 15.8% target, distorting the
+    # strata in the opposite direction from the drops.
+    i = 0
+    base = list(plan)
     while len(plan) < a.n:
-        plan.append(("third_person", 1))
+        plan.append(base[i % len(base)])
+        i += 1
     rnd.shuffle(plan)
 
     out = open(a.out, "w")
     kept = dropped = 0
+    drops_by_cat = {}
     for i, (cat, nfacts) in enumerate(plan):
         if nfacts == 0:
             aa, bb = inv.person(), inv.org()
@@ -141,7 +172,7 @@ def main():
             user = "Facts to state: " + "; ".join(
                 "%s %s %s" % (g["subject"], g["relation"].replace("_", " "), g["object"]) for g in gold)
         note = ""
-        for attempt in (1, 2):
+        for attempt in (1, 2, 3):
             try:
                 note = clean(complete(a.base_url, SYS, user))
             except Exception as e:
@@ -153,6 +184,11 @@ def main():
                 break
             note = ""
         if not note:
+            # Report WHICH category is failing, not just that something did. A
+            # bare drop counter hid a failure concentrated entirely in two
+            # categories and reported it as a uniform 23%.
+            drops_by_cat[cat] = drops_by_cat.get(cat, 0) + 1
+        if not note:
             dropped += 1
             continue
         out.write(json.dumps({
@@ -161,10 +197,14 @@ def main():
             "source": "None", "tier": "2", "stratum": "S2", "provenance": "generated-v2",
         }) + "\n")
         kept += 1
-        if kept % 50 == 0:
+        # print on progress OR on drops: a run that keeps nothing printed nothing
+        # at all, which is how the empty-content failure stayed invisible.
+        if (kept + dropped) % 25 == 0:
             print("  %d kept, %d dropped" % (kept, dropped), flush=True)
     out.close()
     print("DONE kept=%d dropped=%d (%.1f%% drop rate)" % (kept, dropped, 100.0 * dropped / max(kept + dropped, 1)))
+    if drops_by_cat:
+        print("drops by category: %s" % sorted(drops_by_cat.items(), key=lambda kv: -kv[1]))
 
 
 if __name__ == "__main__":
