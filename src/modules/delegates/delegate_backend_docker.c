@@ -75,8 +75,8 @@ int delegate_backend_docker_container_name(const char *task_id, char *out, size_
    return 0;
 }
 
-int delegate_backend_docker_build_exec_command(const char *container_name,
-                                               const char *wrapped_script, char **out_cmd)
+static int docker_build_exec_command(const char *container_name, const char *wrapped_script,
+                                     int timeout_ms, char **out_cmd)
 {
    if (out_cmd)
       *out_cmd = NULL;
@@ -94,16 +94,30 @@ int delegate_backend_docker_build_exec_command(const char *container_name,
       return -1;
    }
 
-   /* `docker exec -i <name> bash -c "echo '<b64>' | base64 -d | bash"` */
-   size_t need = strlen(container_name) + b64_cap + 128;
+   /* Put the deadline inside the container as well as around the docker client.
+    * Killing only `sh -c docker exec ...` leaves the exec'd process alive in the
+    * container, which is exactly how a cancelled Python tool kept consuming a CPU
+    * after its durable job was terminal. GNU timeout owns the inner bash process
+    * group and terminates its descendants. Fire it 100ms before the outer backend
+    * deadline so docker has time to return the bounded result. The delegate image
+    * is Ubuntu and already requires coreutils for the base64 transport. */
+   int inner_timeout_ms = timeout_ms > 100 ? timeout_ms - 100 : timeout_ms;
+   size_t need = strlen(container_name) + b64_cap + 256;
    char *cmd = malloc(need);
    if (!cmd)
    {
       free(b64);
       return -1;
    }
-   int n = snprintf(cmd, need, "docker exec -i %s bash -c \"echo '%s' | base64 -d | bash\"",
-                    container_name, b64);
+   int n;
+   if (inner_timeout_ms > 0)
+      n = snprintf(cmd, need,
+                   "docker exec -i %s bash -c \"echo '%s' | base64 -d | "
+                   "timeout --signal=TERM --kill-after=1s %d.%03ds bash\"",
+                   container_name, b64, inner_timeout_ms / 1000, inner_timeout_ms % 1000);
+   else
+      n = snprintf(cmd, need, "docker exec -i %s bash -c \"echo '%s' | base64 -d | bash\"",
+                   container_name, b64);
    free(b64);
    if (n < 0 || (size_t)n >= need)
    {
@@ -112,6 +126,12 @@ int delegate_backend_docker_build_exec_command(const char *container_name,
    }
    *out_cmd = cmd;
    return 0;
+}
+
+int delegate_backend_docker_build_exec_command(const char *container_name,
+                                               const char *wrapped_script, char **out_cmd)
+{
+   return docker_build_exec_command(container_name, wrapped_script, 0, out_cmd);
 }
 
 /* --- container lifecycle --- */
@@ -1067,7 +1087,7 @@ static int docker_exec(delegate_backend_t *self, void *state, const char *comman
 
    /* Build the docker shell command via the iter-37 b64 helper. */
    char *docker_cmd = NULL;
-   if (delegate_backend_docker_build_exec_command(st->container_name, to_run, &docker_cmd) != 0 ||
+   if (docker_build_exec_command(st->container_name, to_run, timeout_ms, &docker_cmd) != 0 ||
        !docker_cmd)
    {
       free(prefixed);

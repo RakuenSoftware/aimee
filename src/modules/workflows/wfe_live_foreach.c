@@ -147,6 +147,14 @@ int wfe_foreach_spawn(const char *parent_wi, const char *child_workflow, const c
    snprintf(dir, sizeof dir, "%s/wfe-packets", aimee_home());
    mkdir(dir, 0700);
 
+   /* A later generation is spawned because the parent's acceptance gate rejected
+    * the earlier one.  Preserve that correction in every child proposal so its
+    * implementer and roundtable review the corrected request, not only the stale
+    * packet/approved-plan text.  exec_split also feeds this to packetization; this
+    * deterministic copy is the durable handoff even when a model omits it. */
+   char feedback[4096];
+   wfe_feedback_read(parent_wi, feedback, sizeof feedback);
+
    /* Create the children ALL-OR-NOTHING: a partial fan-out (some children created,
     * then an error) would let the foreach node aggregate the partial set as complete
     * and advance with fewer slices (and the idempotency guard would block a re-spawn).
@@ -168,10 +176,17 @@ int wfe_foreach_spawn(const char *parent_wi, const char *child_workflow, const c
       char proposal_path[1200];
       snprintf(proposal_path, sizeof proposal_path, "%s/%s.md", dir, child_id);
       char *pj = cJSON_PrintUnformatted(pk);
-      char seed[4096];
-      snprintf(seed, sizeof seed, "# Slice packet %s\n\n%s\n\n%s\n",
-               (pid && cJSON_IsString(pid)) ? pid->valuestring : "",
-               (sum && cJSON_IsString(sum)) ? sum->valuestring : "", pj ? pj : "{}");
+      char seed[8192];
+      snprintf(
+          seed, sizeof seed, "# Slice packet %s\n\n%s\n\n%s\n%s%s",
+          (pid && cJSON_IsString(pid)) ? pid->valuestring : "",
+          (sum && cJSON_IsString(sum)) ? sum->valuestring : "", pj ? pj : "{}",
+          feedback[0]
+              ? "\n## Superseding acceptance feedback\n\nThe parent acceptance review rejected "
+                "the prior generation. The blocking corrections below are authoritative "
+                "and supersede conflicting packet or approved-plan details.\n\n"
+              : "",
+          feedback[0] ? feedback : "");
       free(pj);
       if (write_file(proposal_path, seed) != 0)
       {

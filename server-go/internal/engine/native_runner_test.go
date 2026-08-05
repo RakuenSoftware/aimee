@@ -62,6 +62,48 @@ func TestDefaultVerifyCommandUsesGitVerifyKeyValueSyntax(t *testing.T) {
 	}
 }
 
+func TestDocumentPromptIsScopedToOriginalRequestAndAcceptedDiff(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "trunk")
+	if err := os.WriteFile(filepath.Join(repo, "README"), []byte("unrelated pre-existing subsystem\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "add", "README")
+	gitRun(t, repo, "commit", "-m", "initial")
+	gitRun(t, repo, "remote", "add", "origin", repo)
+	gitRun(t, repo, "update-ref", "refs/remotes/origin/trunk", "HEAD")
+	gitRun(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+
+	if err := os.WriteFile(filepath.Join(repo, "accepted.md"), []byte("accepted change\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "add", "accepted.md")
+	gitRun(t, repo, "commit", "-m", "accepted implementation")
+
+	request := StepRequest{
+		WorkItem: db1.WorkItem{Repo: repo},
+		Proposal: "Document only the self-update limitation.",
+	}
+	prompt, err := documentDelegatePrompt(t.Context(), request, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, required := range []string{
+		"ORIGINAL REQUEST:\nDocument only the self-update limitation.",
+		"ACCEPTED IMPLEMENTATION DIFF:",
+		"+accepted change",
+		"Do not infer work from unrelated repository history",
+	} {
+		if !strings.Contains(prompt, required) {
+			t.Fatalf("document prompt missing %q:\n%s", required, prompt)
+		}
+	}
+	if strings.Contains(prompt, "unrelated pre-existing subsystem") {
+		t.Fatalf("document prompt included pre-existing base content:\n%s", prompt)
+	}
+}
+
 func TestCommandVerifierSerializesAcrossInstances(t *testing.T) {
 	lockPath := filepath.Join(t.TempDir(), "verify.lock")
 	first := CommandVerifier{LockFile: lockPath}
@@ -1856,6 +1898,54 @@ func TestCommitChangesDropsCoreDumpAndRejectsGiantBlob(t *testing.T) {
 	}
 	if _, statErr := os.Stat(giant); statErr != nil {
 		t.Fatalf("rejected blob should remain for diagnosis: %v", statErr)
+	}
+}
+
+func TestCommitChangesReturnsTypedMissingIdentity(t *testing.T) {
+	t.Setenv("AIMEE_GIT_AUTHOR_NAME", "")
+	t.Setenv("AIMEE_GIT_AUTHOR_EMAIL", "")
+	repo := t.TempDir()
+	cmd := exec.Command("git", "init", "-b", "testing", repo)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "change.md"), []byte("change\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := commitChanges(context.Background(), repo, "impl")
+	if !errors.Is(err, ErrGitIdentityMissing) {
+		t.Fatalf("commit error = %v, want ErrGitIdentityMissing", err)
+	}
+}
+
+type fixedIdentityForge struct{ unavailableForge }
+
+func (fixedIdentityForge) Identity(context.Context, string) (GitIdentity, error) {
+	return GitIdentity{Name: "Vault Operator", Email: "vault@example.test"}, nil
+}
+
+func TestNativeRunnerCommitUsesResourcePlaneIdentity(t *testing.T) {
+	t.Setenv("AIMEE_GIT_AUTHOR_NAME", "")
+	t.Setenv("AIMEE_GIT_AUTHOR_EMAIL", "")
+	repo := t.TempDir()
+	cmd := exec.Command("git", "init", "-b", "testing", repo)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "change.md"), []byte("change\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := &NativeRunner{forge: fixedIdentityForge{}}
+	if err := runner.commitChanges(t.Context(), repo, "impl"); err != nil {
+		t.Fatal(err)
+	}
+	show := exec.Command("git", "-C", repo, "show", "-s", "--format=%an <%ae>")
+	out, err := show.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git show: %v: %s", err, out)
+	}
+	if strings.TrimSpace(string(out)) != "Vault Operator <vault@example.test>" {
+		t.Fatalf("commit author = %q", out)
 	}
 }
 

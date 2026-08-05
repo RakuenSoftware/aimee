@@ -29,8 +29,16 @@ type CommandVerifier struct {
 
 const defaultCommandVerifyLock = "aimee-wfe-command-verify.lock"
 
-// gitIdentityArgs returns the `-c user.name=... -c user.email=...` the WFE commits
-// under, read from the identity aimee was installed with.
+// ErrGitIdentityMissing is a permanent deployment prerequisite, not a transient
+// runner outage. The engine gives it a non-auto-resumed park reason so a missing
+// install-time identity cannot launch a new implementation delegate every five
+// seconds while no commit can succeed.
+var ErrGitIdentityMissing = errors.New("git identity is not configured")
+
+// gitIdentityArgs returns an explicit environment-provided identity for local
+// development and tests. Production deliberately scrubs these values from the
+// long-lived Go process and resolves the sealed install identity just in time
+// through GitIdentityProvider instead.
 //
 // aimee has no ambient identity to fall back on: the server's git paths point
 // GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM at /dev/null, so a commit carries the
@@ -355,7 +363,7 @@ func (r *NativeRunner) custom(ctx context.Context, req StepRequest, block wfe.Bl
 			if err := r.ensureRunnable(ctx, req.WorkItem.ID); err != nil {
 				return StepResult{}, err
 			}
-			if err := commitChanges(ctx, workdir, req.Node.ID); err != nil {
+			if err := r.commitChanges(ctx, workdir, req.Node.ID); err != nil {
 				return StepResult{}, err
 			}
 			head, err := gitText(ctx, workdir, "rev-parse", "HEAD")
@@ -374,7 +382,7 @@ func (r *NativeRunner) custom(ctx context.Context, req StepRequest, block wfe.Bl
 		if err := r.ensureRunnable(ctx, req.WorkItem.ID); err != nil {
 			return StepResult{}, err
 		}
-		if err := commitChanges(ctx, workdir, req.Node.ID); err != nil {
+		if err := r.commitChanges(ctx, workdir, req.Node.ID); err != nil {
 			return StepResult{}, err
 		}
 		head, err := gitText(ctx, workdir, "rev-parse", "HEAD")
@@ -524,6 +532,34 @@ func (r *NativeRunner) branchOpen(ctx context.Context, req StepRequest) (StepRes
 	return StepResult{Status: StepAdvanced, ArtifactType: "branch", Artifact: branch, ContentHash: wfe.Hash([]byte(branch))}, nil
 }
 
+// documentDelegatePrompt anchors documentation work to the same immutable
+// request and exact branch diff that the acceptance gate reviewed. A branch
+// name alone invites the delegate to mine unrelated history for undocumented
+// changes and expand the final PR after acceptance.
+func documentDelegatePrompt(ctx context.Context, req StepRequest, workdir string) (string, error) {
+	acceptedDiff, err := frozenWorktreeDiff(ctx, req.WorkItem, workdir)
+	if err != nil {
+		return "", err
+	}
+	return "Document only the accepted implementation of the original request below. " +
+		"Do not infer work from unrelated repository history or document pre-existing changes. " +
+		"Update appropriate user or developer documentation and inline comments only when the " +
+		"accepted implementation needs it; if its documentation is already complete, leave the " +
+		"worktree unchanged.\n\nORIGINAL REQUEST:\n" + req.Proposal +
+		"\n\nACCEPTED IMPLEMENTATION DIFF:\n" + acceptedDiff, nil
+}
+
+// The shared write-role guard reports a successful no-op as a partial result so
+// ordinary implementation steps cannot silently advance without producing work.
+// Documentation is different: its prompt explicitly requires an unchanged tree
+// when the accepted implementation is already documented. Recognize only the
+// guard's stable diagnostics; unrelated partial results remain failures.
+func delegatePartialIsNoChange(response string) bool {
+	return strings.Contains(response, "result treated as incomplete") &&
+		(strings.Contains(response, "no owned files changed") ||
+			strings.Contains(response, "no file changes detected"))
+}
+
 func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (StepResult, error) {
 	workdir, branch, err := r.worktrees.Ensure(ctx, req.WorkItem, req.WorkItem.ParentID == "")
 	if err != nil {
@@ -537,7 +573,7 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 	// pre-step below), so this attempt sees siblings that have merged since. Not done
 	// at freeze/pr/ci/merge — those must observe a stable diff.
 	if req.WorkItem.ParentID != "" {
-		parkReason, integErr := integrateFeatureBase(ctx, workdir, req.WorkItem.ParentID)
+		parkReason, integErr := r.integrateFeatureBase(ctx, workdir, req.WorkItem.ParentID)
 		if integErr != nil {
 			return StepResult{}, integErr
 		}
@@ -574,7 +610,10 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 	}
 	prompt := "Implement the complete approved task in this worktree, run the repository verification, fix failures, and leave the accepted changes in the worktree."
 	if docs {
-		prompt = "Document the complete implemented change in this worktree. Update the appropriate user and developer documentation and inline comments; leave the accepted changes in the worktree."
+		prompt, err = documentDelegatePrompt(ctx, req, workdir)
+		if err != nil {
+			return StepResult{}, err
+		}
 	}
 	if task := paramString(req.Node, "task", ""); task != "" {
 		prompt += "\n\nWORKFLOW STEP INSTRUCTIONS:\n" + task
@@ -602,7 +641,7 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 		if err := r.ensureRunnable(ctx, req.WorkItem.ID); err != nil {
 			return StepResult{}, err
 		}
-		if err := commitChanges(ctx, workdir, req.Node.ID+" tests"); err != nil {
+		if err := r.commitChanges(ctx, workdir, req.Node.ID+" tests"); err != nil {
 			return StepResult{}, err
 		}
 		prompt += "\n\nTDD: failing tests have already been authored in the worktree. Make them pass without weakening or deleting their assertions."
@@ -620,7 +659,7 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 	if err := r.ensureRunnable(ctx, req.WorkItem.ID); err != nil {
 		return StepResult{}, err
 	}
-	if err := commitChanges(ctx, workdir, req.Node.ID); err != nil {
+	if err := r.commitChanges(ctx, workdir, req.Node.ID); err != nil {
 		return StepResult{}, err
 	}
 	// A delegate that reported partial AND left no commit did not implement the
@@ -641,7 +680,12 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 		//
 		// So only fail when the BRANCH carries no work either. Ask the branch, not
 		// this attempt.
-		if headErr == nil && head == baseHead && !branchHasWorkOverBase(ctx, workdir, req.WorkItem.ParentID) {
+		// A document no-op is the requested outcome when the accepted diff is
+		// already documented. Freeze the exact unchanged HEAD so doc_freeze and
+		// doc_gate still review it; all other empty partials remain failures.
+		documentedNoop := docs && delegatePartialIsNoChange(result.Response)
+		if headErr == nil && head == baseHead && !documentedNoop &&
+			!branchHasWorkOverBase(ctx, workdir, req.WorkItem.ParentID) {
 			detail := strings.TrimSpace(result.Response)
 			if detail == "" {
 				detail = "delegate returned a partial result and produced no commit"
@@ -730,7 +774,35 @@ func (r *NativeRunner) checkMergeable(ctx context.Context, req StepRequest) (Ste
 	return StepResult{}, errors.New("configured forge does not support mergeability checks")
 }
 
+func (r *NativeRunner) commitChanges(ctx context.Context, workdir, stage string) error {
+	return commitChangesWithIdentity(ctx, workdir, stage, func() ([]string, error) {
+		return r.resolveGitIdentity(ctx, workdir)
+	})
+}
+
+func (r *NativeRunner) resolveGitIdentity(ctx context.Context, workdir string) ([]string, error) {
+	if ident := gitIdentityArgs(); len(ident) > 0 {
+		return ident, nil
+	}
+	provider, ok := r.forge.(GitIdentityProvider)
+	if !ok {
+		return nil, ErrGitIdentityMissing
+	}
+	identity, err := provider.Identity(ctx, workdir)
+	if err != nil {
+		return nil, err
+	}
+	return []string{"-c", "user.name=" + identity.Name, "-c", "user.email=" + identity.Email}, nil
+}
+
 func commitChanges(ctx context.Context, workdir, stage string) error {
+	return commitChangesWithIdentity(ctx, workdir, stage, func() ([]string, error) {
+		return gitIdentityArgs(), nil
+	})
+}
+
+func commitChangesWithIdentity(ctx context.Context, workdir, stage string,
+	identity func() ([]string, error)) error {
 	if _, err := gitText(ctx, workdir, "add", "-A"); err != nil {
 		return err
 	}
@@ -743,11 +815,15 @@ func commitChanges(ctx context.Context, workdir, stage string) error {
 	} else if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 1 {
 		return err
 	}
-	ident := gitIdentityArgs()
-	if len(ident) == 0 {
-		return fmt.Errorf("no git identity configured: seal AIMEE_GIT_AUTHOR_NAME and AIMEE_GIT_AUTHOR_EMAIL at install")
+	ident, err := identity()
+	if err != nil {
+		return fmt.Errorf("resolve git identity: %w", err)
 	}
-	_, err := gitText(ctx, workdir, append(ident, "commit", "-m", "wfe: "+stage)...)
+	if len(ident) == 0 {
+		return fmt.Errorf("%w: seal AIMEE_GIT_AUTHOR_NAME and AIMEE_GIT_AUTHOR_EMAIL at install",
+			ErrGitIdentityMissing)
+	}
+	_, err = gitText(ctx, workdir, append(ident, "commit", "-m", "wfe: "+stage)...)
 	return err
 }
 
@@ -875,6 +951,19 @@ func featureBaseRef(ctx context.Context, workdir, parentID string) string {
 }
 
 func integrateFeatureBase(ctx context.Context, workdir, parentID string) (string, error) {
+	return integrateFeatureBaseWithIdentity(ctx, workdir, parentID, func() ([]string, error) {
+		return gitIdentityArgs(), nil
+	})
+}
+
+func (r *NativeRunner) integrateFeatureBase(ctx context.Context, workdir, parentID string) (string, error) {
+	return integrateFeatureBaseWithIdentity(ctx, workdir, parentID, func() ([]string, error) {
+		return r.resolveGitIdentity(ctx, workdir)
+	})
+}
+
+func integrateFeatureBaseWithIdentity(ctx context.Context, workdir, parentID string,
+	identity func() ([]string, error)) (string, error) {
 	base := featureBaseRef(ctx, workdir, parentID)
 	// The feature branch may not exist yet (first generation, before any slice has
 	// merged into it) — nothing to integrate.
@@ -885,7 +974,18 @@ func integrateFeatureBase(ctx context.Context, workdir, parentID string) (string
 	if _, err := gitText(ctx, workdir, "merge-base", "--is-ancestor", base, "HEAD"); err == nil {
 		return "", nil
 	}
-	if _, err := gitText(ctx, workdir, append(gitIdentityArgs(), "merge", "--no-edit", base)...); err == nil {
+	// A fast-forward creates no commit and therefore needs no identity.
+	if _, err := gitText(ctx, workdir, "merge", "--ff-only", base); err == nil {
+		return "", nil
+	}
+	ident, err := identity()
+	if err != nil {
+		return "", fmt.Errorf("resolve git identity: %w", err)
+	}
+	if len(ident) == 0 {
+		return "", ErrGitIdentityMissing
+	}
+	if _, err := gitText(ctx, workdir, append(ident, "merge", "--no-edit", base)...); err == nil {
 		return "", nil
 	}
 	// Merge failed (conflict or otherwise): restore a clean worktree before parking.
@@ -1260,7 +1360,7 @@ func (r *NativeRunner) prOpen(ctx context.Context, req StepRequest) (StepResult,
 	default:
 		base = baseKind
 	}
-	baseConflict, detail, err := refreshPullRequestBase(ctx, workdir, base)
+	baseConflict, detail, err := r.refreshPullRequestBase(ctx, workdir, base)
 	if err != nil {
 		return StepResult{}, err
 	}
@@ -1292,6 +1392,19 @@ func (r *NativeRunner) prOpen(ctx context.Context, req StepRequest) (StepResult,
 // conflicts. Fetch the exact target ref, integrate it into the managed head,
 // and only then compute and publish the handoff.
 func refreshPullRequestBase(ctx context.Context, workdir, base string) (bool, string, error) {
+	return refreshPullRequestBaseWithIdentity(ctx, workdir, base, func() ([]string, error) {
+		return gitIdentityArgs(), nil
+	})
+}
+
+func (r *NativeRunner) refreshPullRequestBase(ctx context.Context, workdir, base string) (bool, string, error) {
+	return refreshPullRequestBaseWithIdentity(ctx, workdir, base, func() ([]string, error) {
+		return r.resolveGitIdentity(ctx, workdir)
+	})
+}
+
+func refreshPullRequestBaseWithIdentity(ctx context.Context, workdir, base string,
+	identity func() ([]string, error)) (bool, string, error) {
 	if base == "" || strings.HasPrefix(base, "-") {
 		return false, "", fmt.Errorf("invalid pull request base %q", base)
 	}
@@ -1310,7 +1423,18 @@ func refreshPullRequestBase(ctx context.Context, workdir, base string) (bool, st
 	if _, err := gitText(ctx, workdir, "fetch", "--no-tags", "origin", refspec); err != nil {
 		return false, "", fmt.Errorf("refresh pull request base: %w", err)
 	}
-	if _, err := gitText(ctx, workdir, append(gitIdentityArgs(), "merge", "--no-edit", baseRef)...); err != nil {
+	// A fast-forward creates no commit and therefore needs no identity.
+	if _, err := gitText(ctx, workdir, "merge", "--ff-only", baseRef); err == nil {
+		return false, "", nil
+	}
+	ident, err := identity()
+	if err != nil {
+		return false, "", fmt.Errorf("resolve git identity: %w", err)
+	}
+	if len(ident) == 0 {
+		return false, "", ErrGitIdentityMissing
+	}
+	if _, err := gitText(ctx, workdir, append(ident, "merge", "--no-edit", baseRef)...); err != nil {
 		lower := strings.ToLower(err.Error())
 		if strings.Contains(lower, "conflict") || strings.Contains(lower, "automatic merge failed") {
 			_, _ = gitText(ctx, workdir, "merge", "--abort")
@@ -1407,7 +1531,7 @@ func (r *NativeRunner) archive(ctx context.Context, req StepRequest) (StepResult
 	if _, err := gitText(ctx, workdir, "mv", "-f", cleanSource, destination); err != nil {
 		return StepResult{}, err
 	}
-	if err := commitChanges(ctx, workdir, "archive proposal"); err != nil {
+	if err := r.commitChanges(ctx, workdir, "archive proposal"); err != nil {
 		return StepResult{}, err
 	}
 	head, err := gitText(ctx, workdir, "rev-parse", "HEAD")

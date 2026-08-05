@@ -104,7 +104,7 @@ before a turn or make a multi-file mistake easy to inspect and reverse.
 | Configuration | existing nested `rewind` section and [config descriptor convergence](config-field-descriptor-save-residual.md) | Evolve the existing section. The pending flat-field descriptor proposal does not own nested objects. |
 | Health and repair | `cmd_doctor.c`, DB1 diagnostics | Overall `aimee doctor` reports rewind health; `aimee rewind doctor` is only a focused view/action surface. |
 | Operator activity | audit endpoints and [operator audit activity surface](operator-audit-activity-residual.md) | The activity UI consumes the same safe audit events when that proposal lands. |
-| Appliance recovery | [appliance state recovery runbook](appliance-state-recovery-runbook.md) | The runbook may call rewind verification; it does not own change-set repair semantics. |
+| Appliance recovery | [appliance state recovery runbook (PR #2329)](https://github.com/RakuenSoftware/aimee/pull/2329) | The runbook may call rewind verification; it does not own change-set repair semantics. |
 
 ### 2.1 Explicit non-ownership
 

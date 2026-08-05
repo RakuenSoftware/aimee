@@ -200,6 +200,49 @@ size_t text_sanitize_utf8(char *s)
    return replaced;
 }
 
+int text_is_valid_utf8(const char *s)
+{
+   if (!s)
+      return 1;
+
+   for (size_t i = 0; s[i];)
+   {
+      unsigned char c = (unsigned char)s[i];
+      size_t need = 0;
+      if (c <= 0x7f)
+         need = 1;
+      else if (c >= 0xc2 && c <= 0xdf)
+         need = 2;
+      else if (c >= 0xe0 && c <= 0xef)
+         need = 3;
+      else if (c >= 0xf0 && c <= 0xf4)
+         need = 4;
+
+      if (need == 0)
+         return 0;
+      for (size_t j = 1; j < need; j++)
+         if (!s[i + j] || ((unsigned char)s[i + j] & 0xc0) != 0x80)
+            return 0;
+
+      /* Exclude overlong forms, UTF-16 surrogates, and values above U+10FFFF. */
+      if (need == 3)
+      {
+         unsigned char second = (unsigned char)s[i + 1];
+         if ((c == 0xe0 && second < 0xa0) || (c == 0xed && second > 0x9f))
+            return 0;
+      }
+      if (need == 4)
+      {
+         unsigned char second = (unsigned char)s[i + 1];
+         if ((c == 0xf0 && second < 0x90) || (c == 0xf4 && second > 0x8f))
+            return 0;
+      }
+
+      i += need;
+   }
+   return 1;
+}
+
 double trigram_similarity(const char *a, const char *b)
 {
    if (!a || !b || !a[0] || !b[0])

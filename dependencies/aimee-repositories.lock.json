@@ -5,7 +5,7 @@
     "repository": "https://github.com/RakuenSoftware/aimee-core-c.git",
     "ref": "v0.3.0",
     "version": "0.3.0",
-    "commit": "bbc1163772c876dfbe59b07358a3fb9654573d7d",
+    "commit": "ce2fe8cfaf664f286ad20b5ebcf9d9e5ffdc7a96",
     "source_sha256": "3285a30c944b4f0bc05a7a24b3d1ceddc61b65f1d79df6b75b117183eb76ba53"
   },
   "modules": [
@@ -15,7 +15,7 @@
       "repository": "https://github.com/RakuenSoftware/aimee-module-module-runtime.git",
       "ref": "v0.3.0",
       "version": "0.3.0",
-      "commit": "fb8045f933eafacf9e9b8c5a6a54133ee46746a5",
+      "commit": "fca8448c4c96f9ddc20d394cc9ed1605e17a47a0",
       "execution": "core",
       "placements": [
         "server",
@@ -29,7 +29,7 @@
       "repository": "https://github.com/RakuenSoftware/aimee-module-config.git",
       "ref": "v0.3.0",
       "version": "0.3.0",
-      "commit": "ae121e64afbd8db410cbdcede8247dab064074d3",
+      "commit": "b4db98420ccf352d09f704171104ce5b1e763f33",
       "execution": "core",
       "placements": [
         "server",
@@ -43,7 +43,7 @@
       "repository": "https://github.com/RakuenSoftware/aimee-module-ir.git",
       "ref": "v0.3.0",
       "version": "0.3.0",
-      "commit": "e144fca97116a7793f6f05b68fddcb3f6f506947",
+      "commit": "ba75f1b21eb94a71fd4165db7b1c3d6d0accaed7",
       "execution": "core",
       "placements": [
         "server",
@@ -57,7 +57,7 @@
       "repository": "https://github.com/RakuenSoftware/aimee-module-translation.git",
       "ref": "v0.3.0",
       "version": "0.3.0",
-      "commit": "cd0f8b1f7eecc80224627869ec1e35c057854ab0",
+      "commit": "87d8a70e4e659dfd72b9f709abbe6dc4372955fc",
       "execution": "core",
       "placements": [
         "server",
@@ -71,7 +71,7 @@
       "repository": "https://github.com/RakuenSoftware/aimee-module-protocols.git",
       "ref": "v0.3.0",
       "version": "0.3.0",
-      "commit": "732a01e902f2a431556e75817b2050b3dea54108",
+      "commit": "73caed097b0c13fec21ff975856a1030f925509c",
       "execution": "core",
       "placements": [
         "server",
@@ -85,7 +85,7 @@
       "repository": "https://github.com/RakuenSoftware/aimee-module-gateway.git",
       "ref": "v0.3.0",
       "version": "0.3.0",
-      "commit": "2727f24144337e396e51e8afd9e6f4c3050e8c04",
+      "commit": "0758f0f07fa0e08779c9081ccb94725a7176081d",
       "execution": "core",
       "placements": [
         "server",
@@ -99,7 +99,7 @@
       "repository": "https://github.com/RakuenSoftware/aimee-module-memory.git",
       "ref": "v0.3.0",
       "version": "0.3.0",
-      "commit": "61e72a383739548b18316ca1ba6e8432df0f00ea",
+      "commit": "1e153f99880a79186ab56eaf2818aaaa8af3603c",
       "execution": "process",
       "placements": [
         "server"
@@ -122,7 +122,7 @@
       "repository": "https://github.com/RakuenSoftware/aimee-module-learning.git",
       "ref": "v0.3.0",
       "version": "0.3.0",
-      "commit": "94a579bca3f98e932616b759f7e8d8a1eee8a375",
+      "commit": "7b617c2b345f25360907a3f97ebe8ecf6cd40313",
       "execution": "process",
       "placements": [
         "server"
@@ -141,7 +141,7 @@
       "repository": "https://github.com/RakuenSoftware/aimee-module-routing.git",
       "ref": "v0.3.0",
       "version": "0.3.0",
-      "commit": "ee160689e2289b5674a751036e8a273f2dd3e030",
+      "commit": "143555c4225a9cd2f5392bafada1a8cc7cbac86e",
       "execution": "process",
       "placements": [
         "server"
@@ -160,12 +160,12 @@
       "repository": "https://github.com/RakuenSoftware/aimee-module-delegates.git",
       "ref": "v0.3.0",
       "version": "0.3.0",
-      "commit": "aa068af29fe264c9bfe37c541816a60e7b7a0268",
+      "commit": "a99113477cc28cd6101e5464554820ba5d1e70eb",
       "execution": "process",
       "placements": [
         "server"
       ],
-      "source_sha256": "518ff5074c02ce8903b5d690d90d106b22537a9a7d874c8044954e11eaa3b25e",
+      "source_sha256": "4bca25ceed7a938757833915633630ef6db0288150d48975cb094a74474cc206",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 10,
@@ -179,12 +179,12 @@
       "repository": "https://github.com/RakuenSoftware/aimee-module-tools.git",
       "ref": "v0.3.0",
       "version": "0.3.0",
-      "commit": "3226d1c04502b66ba7629d2e720f99a37e1b2954",
+      "commit": "050388148b2454d9296cf9a683a8a4e7a34ed320",
       "execution": "process",
       "placements": [
         "server"
       ],
-      "source_sha256": "f2234a35f1930fb041a0fff37d1757ecbb7737e552fd94e2b88599f34bd3d0b2",
+      "source_sha256": "c5242c84b5f7f4b81cf5af14604ac3d60c52f0d1515fefcc1adba27e6cc0f762",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 11,
@@ -198,12 +198,12 @@
       "repository": "https://github.com/RakuenSoftware/aimee-module-workspace.git",
       "ref": "v0.3.0",
       "version": "0.3.0",
-      "commit": "33e0e3ab3da1ef9107960c91dec13b0de6fdd82c",
+      "commit": "ba72fbec656a7aeb0d1d0ada030666440e806d5a",
       "execution": "process",
       "placements": [
         "server"
       ],
-      "source_sha256": "d47112a3b8644fafbd85741e6f93b38680c380b4e74240f4ee1a745289803ed4",
+      "source_sha256": "662b8928d40c7ef64eaf2da1d59cc957bb49cc3cf2cd5d007629e2ce69ae49fa",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 12,
@@ -217,7 +217,7 @@
       "repository": "https://github.com/RakuenSoftware/aimee-module-git.git",
       "ref": "v0.3.0",
       "version": "0.3.0",
-      "commit": "c0099cba80de16b13f32c51f45250b7bd82e392e",
+      "commit": "65b2c6bde9aa129bd895086d4dbe02899c019f52",
       "execution": "process",
       "placements": [
         "server"
@@ -237,7 +237,7 @@
       "repository": "https://github.com/RakuenSoftware/aimee-module-skills.git",
       "ref": "v0.3.0",
       "version": "0.3.0",
-      "commit": "1b5604765668062b39ab25cfa44d14b7133a19f6",
+      "commit": "1ea63d28cb52686c297d3ee7141434a7e964d9c7",
       "execution": "process",
       "placements": [
         "server"
@@ -257,7 +257,7 @@
       "repository": "https://github.com/RakuenSoftware/aimee-module-response-composition.git",
       "ref": "v0.3.0",
       "version": "0.3.0",
-      "commit": "2e02ebcd59e7825af1b3c658adcb2f85b1b5a689",
+      "commit": "737a18a4eab91627ff03b0eceda438a54ae8cfcd",
       "execution": "process",
       "placements": [
         "server"
@@ -276,7 +276,7 @@
       "repository": "https://github.com/RakuenSoftware/aimee-module-vault.git",
       "ref": "v0.3.0",
       "version": "0.3.0",
-      "commit": "25241d600cfeccf1c1ef6ce3a08b28b0b8a71d91",
+      "commit": "b645790a3694268de9a1626d1269ad26debc595c",
       "execution": "core",
       "placements": [
         "server",
@@ -290,7 +290,7 @@
       "repository": "https://github.com/RakuenSoftware/aimee-module-execution-policy.git",
       "ref": "v0.3.0",
       "version": "0.3.0",
-      "commit": "43ca2adfd6695334d03255151be7867f9dcfec2e",
+      "commit": "b0bc26ee6bebf1cab567c3fef03786244a051f9a",
       "execution": "core",
       "placements": [
         "server",
@@ -304,7 +304,7 @@
       "repository": "https://github.com/RakuenSoftware/aimee-module-audit.git",
       "ref": "v0.3.0",
       "version": "0.3.0",
-      "commit": "3206cb503dceaddfb9aa8a4a70098b2cc149d86e",
+      "commit": "5755f7d34eea6e38f09e6c389370a4bf09f96845",
       "execution": "core",
       "placements": [
         "server",
@@ -318,7 +318,7 @@
       "repository": "https://github.com/RakuenSoftware/aimee-module-governance.git",
       "ref": "v0.3.0",
       "version": "0.3.0",
-      "commit": "9b7b6b45424c27b0384cd38114f20181f50425d3",
+      "commit": "0ed297a9a8729f7cbca8c3a6cf7686da52e661b7",
       "execution": "process",
       "placements": [
         "server"
@@ -337,12 +337,12 @@
       "repository": "https://github.com/RakuenSoftware/aimee-module-workflows.git",
       "ref": "v0.3.0",
       "version": "0.3.0",
-      "commit": "3a7e02437e100ae41635bef3fa0c124f351b1b98",
+      "commit": "40d74d8d5ecf7121dc282612b887109c3886eaa8",
       "execution": "process",
       "placements": [
         "server"
       ],
-      "source_sha256": "afeb89b4ff8c93691d8745c5397ec8d0447d6bf69767d93a419826e7e4287131",
+      "source_sha256": "4afeb337286f663717411ee3fd30bea3f6fcf669cdd5874b2b069b52b4f2e457",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 20,
@@ -357,7 +357,7 @@
       "repository": "https://github.com/RakuenSoftware/aimee-module-roundtable.git",
       "ref": "v0.3.0",
       "version": "0.3.0",
-      "commit": "2f38a4c394d9cdfa372015a28fbcfcea8bf6f34e",
+      "commit": "1dd3669fce8c108ababd9ab487b8e3a0357cef3d",
       "execution": "process",
       "placements": [
         "server"
@@ -377,7 +377,7 @@
       "repository": "https://github.com/RakuenSoftware/aimee-module-kb-synthesis.git",
       "ref": "v0.3.0",
       "version": "0.3.0",
-      "commit": "1772b9951327402b92a468ac7b2d37df7969a4cf",
+      "commit": "87d3c411543f768bf3c58f2a9fc678d5615c13f6",
       "execution": "process",
       "placements": [
         "kb"
@@ -396,7 +396,7 @@
       "repository": "https://github.com/RakuenSoftware/aimee-module-runtime-web.git",
       "ref": "v0.3.0",
       "version": "0.3.0",
-      "commit": "620221f65a4bb70b269fbdf46f08a1ed40b9574d",
+      "commit": "69b0c92db8681a431c17d2eac28901c44c6fac02",
       "execution": "process",
       "placements": [
         "server"
@@ -415,7 +415,7 @@
       "repository": "https://github.com/RakuenSoftware/aimee-module-control-web.git",
       "ref": "v0.3.0",
       "version": "0.3.0",
-      "commit": "7a6f1adc4063800a8fbdac73d0aa66f16fd6f417",
+      "commit": "195004aed0f318da528c5240961a9dd32b511b37",
       "execution": "process",
       "placements": [
         "kb"
@@ -434,7 +434,7 @@
       "repository": "https://github.com/RakuenSoftware/aimee-module-benchmarks.git",
       "ref": "v0.3.0",
       "version": "0.3.0",
-      "commit": "eb6be9e585b24cf7e267c0797d48479d7c9fbe78",
+      "commit": "94aadd6841b8631df7c06d4561c6274c73098f59",
       "execution": "process",
       "placements": [
         "server",
@@ -455,12 +455,12 @@
       "repository": "https://github.com/RakuenSoftware/aimee-module-sandbox.git",
       "ref": "v0.3.0",
       "version": "0.3.0",
-      "commit": "a1e30b5bbf3d29ce32033edd34bd29fd0716f012",
+      "commit": "bd4539f069f2e8fa1bbcc6cd6e0827ddf414ed72",
       "execution": "process",
       "placements": [
         "server"
       ],
-      "source_sha256": "d886080a782fe9e456ccc04d5ed199049d25dfd620545c1d52f4b419e83cd5d7",
+      "source_sha256": "0f2895ff141858c996c2bfb460257e05a064a52c2e02f534e77d075cdc82c26f",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 26,

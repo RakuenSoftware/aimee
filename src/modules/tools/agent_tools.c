@@ -777,7 +777,10 @@ char *tool_bash(const char *command, int timeout_ms)
          dstr_free(&w);
       }
       int exit_code = -1;
-      char *out = ws->exec_shell(ws, wrapped ? wrapped : command, &exit_code);
+      char *out =
+          ws->exec_shell_timeout
+              ? ws->exec_shell_timeout(ws, wrapped ? wrapped : command, timeout_ms, &exit_code)
+              : ws->exec_shell(ws, wrapped ? wrapped : command, &exit_code);
       free(wrapped);
       /* Learned toolchain: capture apt-install intent ONLY after a successful run, so a
        * failed/typo'd/nonexistent install is never recorded (and can't poison later
@@ -1324,6 +1327,8 @@ char *tool_write_file(const char *path, const char *content)
       return safe_strdup("error: write blocked: read-only delegate (not write-capable)");
    if (agent_tools_parent_write_guard_blocks(actual_path, NULL))
       return safe_strdup("error: write blocked: parent worktree is read-only for delegates");
+   if (!text_is_valid_utf8(content))
+      return safe_strdup("error: content is not valid UTF-8; refusing text-file write");
 
    /* Route raw I/O through the workspace provider (shared = direct fs, the
     * same calls as before). Policy above this point — cwd resolution, path

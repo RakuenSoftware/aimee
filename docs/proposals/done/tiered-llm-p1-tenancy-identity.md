@@ -1,6 +1,7 @@
 # Proposal: P1 — Tenancy + identity (teams/projects on OIDC, no virtual keys)
 
-- **State:** proposed (pending — not started). Part of `tiered-llm-offering.md`.
+- **State:** DONE — archived after P1 delivery.
+- **Historical state:** proposed (pending — not started). Part of `tiered-llm-offering.md`.
 - **Author:** JBailes (drafted by the engineer agent, 2026-07-17).
 - **Depends on:** nothing. **Blocks:** P2, P3, P4, P5.
 

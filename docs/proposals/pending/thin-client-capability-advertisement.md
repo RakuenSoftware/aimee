@@ -2,21 +2,21 @@
 
 - **State:** DRAFT — 2026-07-23; awaiting roundtable review. Not part of the 2026-07-20 suite
   roundtable approval; this is a later-drafted consuming child.
-- **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries-residual.md)
+- **Parent:** [`core process separation residual`](core-process-separation-residual.md)
 - **Owns:** the registration chain — how a module registers with its host service, how a Runtime
   registers with a Control Plane, and how a thin client registers with a Runtime; the
   generation-stamped capability-and-surface projection each registration edge returns and refreshes;
   and the rule that makes the thin client **static**: a client binary carries no module knowledge and
   requires no release when a module ships.
 - **Consumes (does not redefine):** `module-runtime` capability state, closure, and descriptors;
-  `config`/[`product-governance-web-and-config.md`](product-governance-web-and-config.md) effective
+  `config`/[`product-governance-web-and-config.md`](../done/product-governance-web-and-config.md) effective
   catalog and activation filtering; `gateway` admission/sessions/streaming; `protocols` MCP/ACP
   mappings; the thin-client↔Runtime and Runtime↔Control-Plane transports and their principal classes
   ([`tiered-llm-p8-thinclient-mtls.md`](../done/tiered-llm-p8-thinclient-mtls.md)).
 - **Implementation dependencies:** module descriptors and capability-state lifecycle
-  ([`module-runtime-source-ownership-and-build.md`](module-runtime-source-ownership-and-build-residual.md),
-  [`aimee-core-capability-contract.md`](aimee-core-capability-contract.md)); the effective config
-  catalog and product boundary ([`product-governance-web-and-config.md`](product-governance-web-and-config.md)).
+  ([`module-runtime-source-ownership-and-build.md`](../done/module-runtime-source-ownership-and-build-residual.md),
+  [`aimee-core-capability-contract.md`](../done/aimee-core-capability-contract.md)); the effective config
+  catalog and product boundary ([`product-governance-web-and-config.md`](../done/product-governance-web-and-config.md)).
 - **Date:** 2026-07-23
 
 ## Thesis
@@ -96,7 +96,7 @@ edges differ only in transport and trust.
 **Module → host service (intra-service, event bus).** A module publishes its capabilities, its
 surface descriptors, and its state transitions to core over the shared-memory event bus when it
 registers, exactly as the suite amendment specifies
-([`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries-residual.md),
+([`core process separation residual`](core-process-separation-residual.md),
 "Capability publication and dependency-complete installation"). Core aggregates the publications
 rather than polling modules. This edge is where the closure originates. Both the Runtime and the
 Control Plane own a bus and terminate this edge for their own modules.
@@ -441,7 +441,7 @@ observable timing difference, for a change confined to capabilities outside its 
 noninterference property is stated as invariant 9 and tested, not assumed.
 
 Surface declarations live in the module descriptor and are owned by
-[`module-runtime-source-ownership-and-build.md`](module-runtime-source-ownership-and-build-residual.md) —
+[`module-runtime-source-ownership-and-build.md`](../done/module-runtime-source-ownership-and-build-residual.md) —
 whose descriptor contract already declares "routes/commands/protocols". This proposal fixes their
 projected wire form and requires the projection be **derived from** those declarations, never authored
 separately. The projection introduces no capability, no state, no surface, and no dependency edge that

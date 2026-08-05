@@ -24,6 +24,7 @@ static char g_last_cmd[4096];
 static int g_exec_calls;
 static int g_exec_rc;   /* what exec() returns (transport) */
 static int g_exec_exit; /* the exit code it reports */
+static int g_last_timeout_ms;
 static const char *g_stdout_text;
 static const char *g_stderr_text;
 static char g_last_write_path[256];
@@ -34,8 +35,8 @@ static int fake_exec(delegate_backend_t *self, void *state, const char *command,
 {
    (void)self;
    (void)state;
-   (void)timeout_ms;
    g_exec_calls++;
+   g_last_timeout_ms = timeout_ms;
    snprintf(g_last_cmd, sizeof(g_last_cmd), "%s", command ? command : "");
    if (g_exec_rc != 0)
       return g_exec_rc;
@@ -112,6 +113,7 @@ static void reset(void)
    g_exec_calls = 0;
    g_exec_rc = 0;
    g_exec_exit = 0;
+   g_last_timeout_ms = -1;
    g_stdout_text = NULL;
    g_stderr_text = NULL;
    g_last_cmd[0] = g_last_write_path[0] = g_last_write_content[0] = '\0';
@@ -194,6 +196,21 @@ static void test_exec_shell_combines_output_and_reports_exit(void)
    assert(strstr(out, "undefined reference") != NULL); /* stderr kept */
    free(out);
    printf("  PASS: exec_shell_combines_output_and_reports_exit\n");
+}
+
+static void test_exec_shell_timeout_reaches_backend(void)
+{
+   reset();
+   ws_container_provider_t inst;
+   const workspace_provider_t *p = bind_provider(&inst);
+
+   assert(p->exec_shell_timeout != NULL);
+   int code = -99;
+   char *out = p->exec_shell_timeout(p, "make verify", 4321, &code);
+   assert(code == 0);
+   assert(g_last_timeout_ms == 4321);
+   free(out);
+   printf("  PASS: exec_shell_timeout_reaches_backend\n");
 }
 
 /* A transport failure (the container is gone) must be distinguishable from a
@@ -301,6 +318,7 @@ int main(void)
    test_init_refuses_a_half_bound_provider();
    test_exec_argv_is_shell_quoted();
    test_exec_shell_combines_output_and_reports_exit();
+   test_exec_shell_timeout_reaches_backend();
    test_transport_failure_is_not_a_nonzero_exit();
    test_read_write_map_to_the_backend();
    test_binary_write_is_refused_not_truncated();

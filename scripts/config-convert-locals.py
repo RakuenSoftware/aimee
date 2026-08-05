@@ -2,7 +2,7 @@
 """Convert a file's config_t locals to accessors -- ONLY where it is provably safe.
 
 Companion to check-config-encapsulation.py (the ratchet) for the phase-B work in
-docs/proposals/pending/config-t-encapsulation.md.
+docs/proposals/done/config-t-encapsulation.md.
 
 Handles:  config_t X;  [+ config_load(&X);]  ... X.field  ->  config_field()
 

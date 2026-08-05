@@ -1,6 +1,7 @@
 # Proposal: gate the integration branch tip, not only the PRs that build it
 
-- **State:** approved — single slice.
+- **State:** DONE — archived after the single slice shipped.
+- **Historical state:** approved — single slice.
 
 ## Problem
 

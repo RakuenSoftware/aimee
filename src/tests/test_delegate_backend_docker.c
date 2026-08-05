@@ -464,6 +464,38 @@ static void test_docker_exec_propagates_nonzero_exit(void)
    printf("  PASS: test_docker_exec_propagates_nonzero_exit\n");
 }
 
+static void test_docker_exec_timeout_kills_inner_command(void)
+{
+   delegate_backend_reset_for_test();
+   delegate_backend_register_docker();
+   delegate_backend_t *b = delegate_backend_docker_get();
+   const char *fixture = write_fake_docker_fixture();
+   setenv("AIMEE_DOCKER_BIN", fixture, 1);
+
+   delegate_backend_config_t cfg = {0};
+   void *state = NULL;
+   assert(b->acquire(b, "task-exec-timeout", &cfg, &state) == 0);
+
+   char sentinel[256];
+   assert(snprintf(sentinel, sizeof(sentinel), "/tmp/aimee-docker-timeout-%d", (int)getpid()) <
+          (int)sizeof(sentinel));
+   unlink(sentinel);
+   char command[512];
+   assert(snprintf(command, sizeof(command), "sleep 2; : > %s", sentinel) < (int)sizeof(command));
+   char out[256] = {0}, err[256] = {0};
+   delegate_exec_result_t r = {0, 0, out, sizeof(out), err, sizeof(err)};
+   assert(b->exec(b, state, command, 500, &r) == 0);
+   assert(r.exit_code != 0);
+   assert(r.latency_ms < 1500);
+   usleep(750000);
+   assert(access(sentinel, F_OK) != 0);
+
+   b->release(b, state, 0);
+   teardown_fake_docker();
+   unsetenv("AIMEE_DOCKER_BIN");
+   printf("  PASS: test_docker_exec_timeout_kills_inner_command\n");
+}
+
 static void test_docker_exec_set_cwd_prefixes_subsequent_calls(void)
 {
    delegate_backend_reset_for_test();
@@ -939,6 +971,7 @@ int main(void)
    test_release_hibernate_keeps_container();
    test_docker_exec_runs_through_fake();
    test_docker_exec_propagates_nonzero_exit();
+   test_docker_exec_timeout_kills_inner_command();
    test_docker_exec_set_cwd_prefixes_subsequent_calls();
    test_acquire_rejects_invalid_args();
    test_docker_write_then_read_roundtrip();

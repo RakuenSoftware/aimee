@@ -81,6 +81,28 @@ func TestIntegrateFeatureBasePicksUpSiblingMerge(t *testing.T) {
 	}
 }
 
+func TestNativeRunnerIntegrateFeatureBaseUsesResourcePlaneIdentity(t *testing.T) {
+	t.Setenv("AIMEE_GIT_AUTHOR_NAME", "")
+	t.Setenv("AIMEE_GIT_AUTHOR_EMAIL", "")
+	repo, slicedir := setupSliceRepo(t)
+	if err := os.WriteFile(filepath.Join(slicedir, "slice.txt"), []byte("slice\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, slicedir, "add", "slice.txt")
+	gitRun(t, slicedir, "commit", "-m", "slice change")
+	advanceFeature(t, repo, "sibling.txt", "sibling\n")
+
+	runner := &NativeRunner{forge: fixedIdentityForge{}}
+	park, err := runner.integrateFeatureBase(t.Context(), slicedir, "wi_parent")
+	if err != nil || park != "" {
+		t.Fatalf("integrateFeatureBase: park=%q err=%v", park, err)
+	}
+	author := gitRun(t, slicedir, "show", "-s", "--format=%an <%ae>")
+	if strings.TrimSpace(author) != "Vault Operator <vault@example.test>" {
+		t.Fatalf("merge author = %q", author)
+	}
+}
+
 // A slice freeze must review only that slice's delta over the latest feature
 // tip. Forge merges advance origin/aimee/feat/<parent>, not the stale local ref;
 // using the local ref makes later slice artifacts include every landed sibling
@@ -225,6 +247,20 @@ func (partialNoCommitAgents) Delegate(_ context.Context, _ DelegateRequest) (Del
 		Response: "named file 'docs/runbooks/x.md' was not created by delegate; the task remains unimplemented",
 		Partial:  true,
 	}, nil
+}
+
+type documentedNoopAgents struct{}
+
+func (documentedNoopAgents) Delegate(_ context.Context, _ DelegateRequest) (DelegateResult, error) {
+	return DelegateResult{
+		Response: "Partial result; delegate ended with error: delegate code: no owned files changed; " +
+			"result treated as incomplete\n\nNo changes made. Documentation is already complete.",
+		Partial: true,
+	}, nil
+}
+
+func (documentedNoopAgents) DelegateGroup(_ context.Context, requests []DelegateRequest) []DelegateGroupResult {
+	return make([]DelegateGroupResult, len(requests))
 }
 
 func (a partialNoCommitAgents) DelegateGroup(_ context.Context, requests []DelegateRequest) []DelegateGroupResult {
@@ -386,5 +422,62 @@ func TestPartialImplementWithNoCommitDoesNotAdvance(t *testing.T) {
 	// The delegate already said exactly what was wrong; that is the finding.
 	if !strings.Contains(out.Detail, "was not created by delegate") {
 		t.Fatalf("delegate's own diagnosis must survive into the step detail: %q", out.Detail)
+	}
+}
+
+func TestDocumentPartialNoChangeAdvancesUnchangedHead(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "init", "-b", "trunk")
+	if err := os.WriteFile(filepath.Join(repo, "README"), []byte("base\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "add", "README")
+	gitRun(t, repo, "commit", "-m", "init")
+	gitRun(t, repo, "remote", "add", "origin", repo)
+	gitRun(t, repo, "update-ref", "refs/remotes/origin/trunk", "HEAD")
+	gitRun(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+
+	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	ctx := t.Context()
+	if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: "wi_root", Repo: repo,
+		ProposalPath: "p", WorkflowName: "build", StartStage: "document"}); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewWorktreeManager(store, filepath.Join(root, "trees"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, _ := store.WorkItem(ctx, "wi_root")
+	workdir, branch, err := manager.Ensure(ctx, item, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, "docs.md"), []byte("already documented\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, workdir, "add", "docs.md")
+	gitRun(t, workdir, "commit", "-m", "accepted implementation")
+	head := strings.TrimSpace(gitRun(t, workdir, "rev-parse", "HEAD"))
+	item, _ = store.WorkItem(ctx, "wi_root")
+
+	runner := &NativeRunner{agents: documentedNoopAgents{}, worktrees: manager, db: store}
+	out, err := runner.mutate(ctx, StepRequest{WorkItem: item, Node: wfe.Node{ID: "document"},
+		Proposal: "Document the accepted implementation."}, true)
+	if err != nil {
+		t.Fatalf("mutate: %v", err)
+	}
+	if out.Status != StepAdvanced || out.Artifact != branch || out.ContentHash != head {
+		t.Fatalf("result=%+v, want unchanged advanced HEAD %s", out, head)
+	}
+	if got := strings.TrimSpace(gitRun(t, workdir, "status", "--porcelain")); got != "" {
+		t.Fatalf("document no-op dirtied the worktree: %q", got)
 	}
 }

@@ -17,6 +17,9 @@
 #include "platform_path.h"
 #include "platform_test_util.h"
 #include "agent_exec.h"
+#include "server.h"
+#include "vault_capability.h"
+#include "vault_service.h"
 
 /* --- capture layer: stub the transport so we can read what the handler sent --- */
 
@@ -26,7 +29,7 @@ static char g_last_error[256];
 /* server_send_ok is a static inline in server.h that calls this and then frees
  * resp itself, so this stub must NOT delete resp — it only snapshots it. Same
  * contract the real transport and every other handler test rely on. */
-int server_send_response(void *conn, cJSON *resp)
+int server_send_response(server_conn_t *conn, cJSON *resp)
 {
    (void)conn;
    if (g_last_response)
@@ -35,7 +38,7 @@ int server_send_response(void *conn, cJSON *resp)
    return 0;
 }
 
-int server_send_error(void *conn, const char *message, const char *request_id)
+int server_send_error(server_conn_t *conn, const char *message, const char *request_id)
 {
    (void)conn;
    (void)request_id;
@@ -48,7 +51,7 @@ int server_send_error(void *conn, const char *message, const char *request_id)
  * the same buffer: these tests assert on the message, and the kind is asserted
  * where it decides an HTTP status (runtime-web's TestRPCErrorStatus...). */
 char g_last_error_kind[64];
-int server_send_error_kind(void *conn, const char *kind, const char *message,
+int server_send_error_kind(server_conn_t *conn, const char *kind, const char *message,
                            const char *request_id)
 {
    (void)conn;
@@ -58,11 +61,30 @@ int server_send_error_kind(void *conn, const char *kind, const char *message,
    return 0;
 }
 
-/* The real handler under test. Declared here to avoid dragging server.h. */
-int handle_agent_list(void *ctx, void *conn, cJSON *req);
-int handle_agent_probe(void *ctx, void *conn, cJSON *req);
-int handle_agent_roles(void *ctx, void *conn, cJSON *req);
-int handle_agent_personas(void *ctx, void *conn, cJSON *req);
+/* Key writes are outside this handler test's scope, but referencing agent.add
+ * and agent.set retains their key branch at link time. Keep those seams inert. */
+int vault_agent_key_server_seal_allowed(attested_transport_t transport)
+{
+   (void)transport;
+   return 1;
+}
+
+vault_status_t vault_service_set_server(const char *agent, const char *cred, const char *secret)
+{
+   (void)agent;
+   (void)cred;
+   (void)secret;
+   return VAULT_OK;
+}
+
+void vault_audit_server_write(const server_conn_t *conn, const char *agent, const char *cred,
+                              const char *secret)
+{
+   (void)conn;
+   (void)agent;
+   (void)cred;
+   (void)secret;
+}
 
 /* Probe transport seams. This target intentionally links no production agent
  * transport: the handler's observable response and backend selection are under
@@ -410,6 +432,67 @@ static cJSON *args_request(const char *a, const char *b)
    return req;
 }
 
+static cJSON *args_request_array(const char *const *values, int count)
+{
+   cJSON *req = cJSON_CreateObject();
+   cJSON *args = cJSON_AddArrayToObject(req, "args");
+   for (int i = 0; i < count; i++)
+      cJSON_AddItemToArray(args, cJSON_CreateString(values[i]));
+   return req;
+}
+
+/* Review is gate authority, not a generic model capability. Registering an
+ * agent without --roles must not silently authorize it; explicitly naming the
+ * review role still does. */
+static void test_add_requires_explicit_review_role(void)
+{
+   set_home_empty();
+   reset_capture();
+   const char *plain[] = {"plain", "http://model.test/v1", "model"};
+   cJSON *req = args_request_array(plain, 3);
+   assert(handle_agent_add(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+   assert(g_last_error[0] == '\0' && g_last_response != NULL);
+   assert(response_has_role("code"));
+   assert(!response_has_role("review"));
+
+   set_home_empty();
+   reset_capture();
+   const char *reviewer[] = {"reviewer", "http://model.test/v1", "model", "--roles", "code,review"};
+   req = args_request_array(reviewer, 5);
+   assert(handle_agent_add(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+   assert(g_last_error[0] == '\0' && g_last_response != NULL);
+   assert(response_has_role("code") && response_has_role("review"));
+   printf("  PASS: agent add requires an explicit review role\n");
+}
+
+/* The Agents UI always sends --roles, including an empty string when every chip
+ * is off. That empty value used to expand to the full default set and silently
+ * re-enable review. It must round-trip as an empty role list. */
+static void test_set_empty_roles_stays_empty(void)
+{
+   set_home_empty();
+   write_agents("{\"agents\":[{\"name\":\"a1\",\"provider\":\"anthropic\",\"model\":\"m\","
+                "\"roles\":[\"review\"]}]}\n");
+   reset_capture();
+   const char *clear[] = {"a1", "--roles", ""};
+   cJSON *req = args_request_array(clear, 3);
+   assert(handle_agent_set(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+   assert(g_last_error[0] == '\0' && g_last_response != NULL);
+   cJSON *roles = cJSON_GetObjectItemCaseSensitive(g_last_response, "roles");
+   assert(cJSON_IsArray(roles) && cJSON_GetArraySize(roles) == 0);
+
+   reset_capture();
+   assert(handle_agent_list(NULL, NULL, NULL) == 0);
+   cJSON *agents = cJSON_GetObjectItemCaseSensitive(g_last_response, "agents");
+   cJSON *a1 = cJSON_GetArrayItem(agents, 0);
+   roles = cJSON_GetObjectItemCaseSensitive(a1, "roles");
+   assert(cJSON_IsArray(roles) && cJSON_GetArraySize(roles) == 0);
+   printf("  PASS: agent set preserves an explicitly empty role selection\n");
+}
+
 /* `agent roles <name>` with no csv reads as a query and was the only way to ask
  * what an agent's roles were — but it RESET the agent to the default list,
  * silently dropping every role outside it (notably the `all` wildcard). Run
@@ -467,6 +550,7 @@ static void test_roles_csv_sets_and_reset_restores_defaults(void)
    cJSON_Delete(req);
    assert(g_last_error[0] == '\0');
    assert(response_has_role("summarize") && response_has_role("code"));
+   assert(!response_has_role("review"));
    /* --reset is the default set, which does not include the wildcard. */
    assert(!response_has_role("all"));
    printf("  PASS: agent roles csv sets, --reset restores defaults\n");
@@ -508,6 +592,8 @@ int main(void)
    test_unknown_backend_fails_closed();
    test_http_probe_preserves_discovery_and_plain_execution();
    test_list_exposes_catalog_identity_and_pricing();
+   test_add_requires_explicit_review_role();
+   test_set_empty_roles_stays_empty();
    test_roles_without_csv_reports_and_does_not_write();
    test_roles_csv_sets_and_reset_restores_defaults();
    test_personas_without_csv_reports_and_does_not_write();
