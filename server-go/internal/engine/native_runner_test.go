@@ -62,6 +62,48 @@ func TestDefaultVerifyCommandUsesGitVerifyKeyValueSyntax(t *testing.T) {
 	}
 }
 
+func TestDocumentPromptIsScopedToOriginalRequestAndAcceptedDiff(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "trunk")
+	if err := os.WriteFile(filepath.Join(repo, "README"), []byte("unrelated pre-existing subsystem\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "add", "README")
+	gitRun(t, repo, "commit", "-m", "initial")
+	gitRun(t, repo, "remote", "add", "origin", repo)
+	gitRun(t, repo, "update-ref", "refs/remotes/origin/trunk", "HEAD")
+	gitRun(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+
+	if err := os.WriteFile(filepath.Join(repo, "accepted.md"), []byte("accepted change\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "add", "accepted.md")
+	gitRun(t, repo, "commit", "-m", "accepted implementation")
+
+	request := StepRequest{
+		WorkItem: db1.WorkItem{Repo: repo},
+		Proposal: "Document only the self-update limitation.",
+	}
+	prompt, err := documentDelegatePrompt(t.Context(), request, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, required := range []string{
+		"ORIGINAL REQUEST:\nDocument only the self-update limitation.",
+		"ACCEPTED IMPLEMENTATION DIFF:",
+		"+accepted change",
+		"Do not infer work from unrelated repository history",
+	} {
+		if !strings.Contains(prompt, required) {
+			t.Fatalf("document prompt missing %q:\n%s", required, prompt)
+		}
+	}
+	if strings.Contains(prompt, "unrelated pre-existing subsystem") {
+		t.Fatalf("document prompt included pre-existing base content:\n%s", prompt)
+	}
+}
+
 func TestCommandVerifierSerializesAcrossInstances(t *testing.T) {
 	lockPath := filepath.Join(t.TempDir(), "verify.lock")
 	first := CommandVerifier{LockFile: lockPath}

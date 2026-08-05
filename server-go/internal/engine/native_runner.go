@@ -533,6 +533,23 @@ func (r *NativeRunner) branchOpen(ctx context.Context, req StepRequest) (StepRes
 	return StepResult{Status: StepAdvanced, ArtifactType: "branch", Artifact: branch, ContentHash: wfe.Hash([]byte(branch))}, nil
 }
 
+// documentDelegatePrompt anchors documentation work to the same immutable
+// request and exact branch diff that the acceptance gate reviewed. A branch
+// name alone invites the delegate to mine unrelated history for undocumented
+// changes and expand the final PR after acceptance.
+func documentDelegatePrompt(ctx context.Context, req StepRequest, workdir string) (string, error) {
+	acceptedDiff, err := frozenWorktreeDiff(ctx, req.WorkItem, workdir)
+	if err != nil {
+		return "", err
+	}
+	return "Document only the accepted implementation of the original request below. " +
+		"Do not infer work from unrelated repository history or document pre-existing changes. " +
+		"Update appropriate user or developer documentation and inline comments only when the " +
+		"accepted implementation needs it; if its documentation is already complete, leave the " +
+		"worktree unchanged.\n\nORIGINAL REQUEST:\n" + req.Proposal +
+		"\n\nACCEPTED IMPLEMENTATION DIFF:\n" + acceptedDiff, nil
+}
+
 func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (StepResult, error) {
 	workdir, branch, err := r.worktrees.Ensure(ctx, req.WorkItem, req.WorkItem.ParentID == "")
 	if err != nil {
@@ -583,7 +600,10 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 	}
 	prompt := "Implement the complete approved task in this worktree, run the repository verification, fix failures, and leave the accepted changes in the worktree."
 	if docs {
-		prompt = "Document the complete implemented change in this worktree. Update the appropriate user and developer documentation and inline comments; leave the accepted changes in the worktree."
+		prompt, err = documentDelegatePrompt(ctx, req, workdir)
+		if err != nil {
+			return StepResult{}, err
+		}
 	}
 	if task := paramString(req.Node, "task", ""); task != "" {
 		prompt += "\n\nWORKFLOW STEP INSTRUCTIONS:\n" + task
