@@ -13,8 +13,8 @@
 #include "aimee_home.h"
 #include "cJSON.h"
 #include "platform_path.h"
-#include "platform_random.h" /* platform_random_bytes (portable CSPRNG) */
-#include "wfe_def.h"         /* wfe_sha256_raw */
+#include "platform_random.h"      /* platform_random_bytes (portable CSPRNG) */
+#include "headers/aimee_sha256.h" /* aimee_sha256_raw */
 
 /* O_NOFOLLOW / O_CLOEXEC are POSIX hardening flags absent on some toolchains
  * (e.g. MinGW). Degrade to no-ops there — the audit key is server-side (POSIX);
@@ -133,7 +133,7 @@ static int hmac_sha256(const unsigned char *key, size_t keylen, const unsigned c
    unsigned char k[64];
    memset(k, 0, sizeof k);
    if (keylen > 64)
-      wfe_sha256_raw(key, keylen, k); /* key = H(key): 32 bytes, rest zero */
+      aimee_sha256_raw(key, keylen, k); /* key = H(key): 32 bytes, rest zero */
    else
       memcpy(k, key, keylen);
 
@@ -153,13 +153,13 @@ static int hmac_sha256(const unsigned char *key, size_t keylen, const unsigned c
    if (mlen)
       memcpy(inner_in + 64, msg, mlen);
    unsigned char inner[32];
-   wfe_sha256_raw(inner_in, 64 + mlen, inner);
+   aimee_sha256_raw(inner_in, 64 + mlen, inner);
    free(inner_in);
 
    unsigned char outer_in[96]; /* opad(64) || inner(32) */
    memcpy(outer_in, opad, 64);
    memcpy(outer_in + 64, inner, 32);
-   wfe_sha256_raw(outer_in, 96, mac);
+   aimee_sha256_raw(outer_in, 96, mac);
    return 0;
 }
 
