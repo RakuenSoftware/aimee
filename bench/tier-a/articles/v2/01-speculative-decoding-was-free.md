@@ -44,7 +44,7 @@ statement than an indistinguishable one, and it took 60,000 notes to buy three o
 them.
 
 The throughput column is the other half of the result. 84, 92, 102, 111, 116,
-131% — the gain rises with quant size inside each family, which is what
+131%. The gain rises with quant size inside each family, which is what
 bandwidth-bound decoding predicts. A heavier target spends more time waiting on
 memory, so there is more idle compute for speculation to reclaim. Q8 gains most
 because it is the most expensive to read.
