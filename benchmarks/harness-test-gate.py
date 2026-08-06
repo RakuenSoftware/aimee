@@ -85,13 +85,25 @@ def _hidden_spec(task):
 
 
 def _build_and_run(ws, target):
-    """Build one test target and run it. Returns (built, passed)."""
-    build = run(["make", "-C", "src", target, "-j8"], cwd=ws, check=False,
-                timeout=BUILD_TIMEOUT)
+    """Build one test target and run it. Returns (built, passed).
+
+    run() passes timeout= to subprocess.run, which RAISES TimeoutExpired --
+    check=False does not suppress it. An unhandled raise here kills the whole
+    cell at grading time, after the agent has already run. A build that times
+    out is simply "did not build"; it must never destroy the measurement.
+    """
+    try:
+        build = run(["make", "-C", "src", target, "-j8"], cwd=ws, check=False,
+                    timeout=BUILD_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return False, False
     binary = Path(ws) / "src" / target
     if build.returncode != 0 or not binary.is_file():
         return False, False
-    proc = run([str(binary)], cwd=ws, check=False, timeout=CHECK_TIMEOUT)
+    try:
+        proc = run([str(binary)], cwd=ws, check=False, timeout=CHECK_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return True, False
     return True, proc.returncode == 0
 
 
@@ -124,7 +136,12 @@ def agent_test_gate(workspace, task, changed):
     if not seed.is_dir():
         return {"ok": False, "reason": "seed_unavailable_for_red_replay:%s" % seed,
                 "files": written}
-    with tempfile.TemporaryDirectory(prefix="aimee-redgate-") as tmp:
+    # NOT the default /tmp: on this host that is a tmpfs, i.e. RAM. Copying a
+    # 246MB tree there and running a full C build inside it competes with the
+    # services under measurement for the box's 8GB. Stage beside the seed,
+    # which is real disk, and fall back to the default only if that is unset.
+    scratch = seed.parent if seed.parent.is_dir() else None
+    with tempfile.TemporaryDirectory(prefix="aimee-redgate-", dir=scratch) as tmp:
         pristine = Path(tmp) / "ws"
         shutil.copytree(seed, pristine, symlinks=True)
         copied = 0
@@ -216,7 +233,7 @@ def main():
         return 0
     RUNNER.with_suffix(".py.pre-testgate.bak").write_text(text)
 
-    for mod in ("import tempfile", "import re"):
+    for mod in ("import tempfile", "import re", "import subprocess"):
         if mod not in text:
             text = text.replace("import shutil", mod + "\nimport shutil", 1)
 
@@ -235,10 +252,18 @@ def main():
     if anchor_changed not in text:
         print("FATAL: collect_patch anchor not found; refusing to patch blind")
         return 2
+    # Wrap it. The gate is a SCORING column: if it raises, it must cost that
+    # column, never the cell. Three cells were lost to exceptions raised inside
+    # grading after the agent had already run to completion -- the expensive
+    # part was already paid for and was thrown away by a reporting bug.
     text = text.replace(
         anchor_changed,
         anchor_changed + "\n"
-        "    tests = agent_test_gate(workspace, task, changed)", 1)
+        "    try:\n"
+        "        tests = agent_test_gate(workspace, task, changed)\n"
+        "    except Exception as exc:  # noqa: BLE001 - a scoring bug must not void the cell\n"
+        "        tests = {\"ok\": False, \"files\": [],\n"
+        "                 \"reason\": \"gate_error:%s: %s\" % (type(exc).__name__, exc)}", 1)
 
     text = text.replace(
         '        "hidden_ok": hidden["passed"],',
