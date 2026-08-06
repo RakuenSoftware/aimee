@@ -413,7 +413,17 @@ def run_arm(job, gpu, maxprice, outdir, log):
             src_pred = pred + ".part"
             if os.path.exists(pred) and not os.path.exists(src_pred):
                 os.replace(pred, src_pred)      # keep what exists, resume onto it
+            # RETRY ON THE SAME INSTANCE. The weights are already downloaded and
+            # that download is the expensive part of an arm: destroying an
+            # instance because a client failed pays 6-21 GiB again on a fresh
+            # host. A night of doing that on suspicion cost about $16 and
+            # produced one complete arm. An instance is dropped ONLY on hard
+            # evidence it is dead (exited, daemon error, vanished), never because
+            # the client had a bad run.
             ok, preempted = run_client(cmd, cid, log, "%s/%s" % (label, v))
+            if not ok and not preempted and alive(cid):
+                log("    %s/%s client failed but the instance is alive; retrying on it" % (label, v))
+                ok, preempted = run_client(cmd, cid, log, "%s/%s" % (label, v))
             if not ok:
                 if preempted and job.get("resumable"):
                     log("    %s/%s preempted; %d rows kept for resume" % (
