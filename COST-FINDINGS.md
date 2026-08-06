@@ -1339,6 +1339,76 @@ before its output means anything. Every number this column produced before this
 finding was re-derived, not re-run -- which is only possible because the cells
 keep their full artifacts.
 
+## Finding 30 — tasks 4-6, four arms, and the review on/off pair
+
+First tasks graded by the corrected gate from the start: both integrity checks
+live, arbitrated by the graded suite (Finding 29), and the LOC classifier fixed.
+Nothing here needed re-scoring.
+
+### am_1f0f1ab528 — 4/4, the cleanest cost comparison in the corpus
+
+| arm | hidden_ok | tests_ok | credits | wall | prod | test |
+|---|---|---|---|---|---|---|
+| aimee | true | catches_defect | 44.66 | 464s | 27 | 36 |
+| baseline | true | catches_defect | 30.51 | 315s | 40 | 40 |
+| ponytail-addon | true | catches_defect | **26.61** | 162s | 19 | 30 |
+| ponytail-instructions | true | catches_defect | 32.79 | 192s | 25 | 25 |
+
+Every arm solves it and every arm writes a test that genuinely catches the
+defect. Capability does not separate them, so this is a pure cost row -- and
+aimee is the most expensive, at 1.68x the cheapest arm.
+
+### am_e4c4afa194 — 4/4
+
+| arm | hidden_ok | tests_ok | credits | wall |
+|---|---|---|---|---|
+| aimee | true | catches_defect (edited, graded ok) | 37.05 | 487s |
+| baseline | true | catches_defect | 28.46 | 147s |
+| ponytail-addon | true | catches_defect | **22.95** | 141s |
+| ponytail-instructions | true | catches_defect | 26.89 | 152s |
+
+The tests_ok=false this task first reported for ALL FOUR arms was the gate's own
+bug; see Finding 29.
+
+### am_1e7cb3da16 — 0/4, an unguessable identifier
+
+| arm | hidden_ok | tests_ok | credits | chosen pause_reason |
+|---|---|---|---|---|
+| aimee | false | catches_defect | 43.13 | children_pending |
+| baseline | false | catches_defect | 43.79 | (not slices_running) |
+| ponytail-addon | false | changed_existing_assertions | 39.48 | (not slices_running) |
+| ponytail-instructions | false | changed_existing_assertions | 38.18 | (not slices_running) |
+
+The graded test asserts strcmp(wi.pause_reason, "slices_running") == 0 in FOUR
+places. The ticket says pending_human is wrong and never names the replacement.
+Zero of four arms guessed it. aimee and baseline still earned catches_defect --
+they implemented the right BEHAVIOUR (a self-resolving wait the sweep re-drives)
+under a different name.
+
+### The review on/off pair, all six tasks measured
+
+| task | ON | OFF | effect |
+|---|---|---|---|
+| am_312e901904 | both defects, 67.05 | one defect, 74.25 | helps |
+| am_270b3483d5 | FAILS, 67.59 | passes, 33.30 | hurts |
+| am_b84c9294aa | fails, 54.01 | fails, 49.56 | irrelevant |
+| am_1f0f1ab528 | passes, 44.66 | passes, 37.74 | neutral, cheaper off |
+| am_e4c4afa194 | passes, 37.05 | passes, 28.60 | neutral, cheaper off |
+| am_1e7cb3da16 | fails, 43.13 | fails, 44.86 | irrelevant |
+
+Review changed the OUTCOME on two of six tasks -- helping once, hurting once. On
+the four where the outcome was unchanged it cost 6-13 credits per task for
+nothing. That is the case for making it optional per run, which is how aimee
+ships it.
+
+### The corpus caveat that has to be published
+
+Two of six tickets were unwinnable as written: am_b84c9294aa stated a diagnosis
+and never its deliverable, am_1e7cb3da16 required an identifier it never named.
+Both have since been repaired to the level of detail am_e4c4afa194 already used,
+and cells before and after that repair ARE NOT COMPARABLE. Pass rates quoted
+from the pre-repair corpus understate every arm equally, but they understate.
+
 ## Caveats for anything published from this
 
 - 6 of 8 tasks, **one replicate**, no confidence intervals. Per-task spread is
