@@ -615,6 +615,16 @@ func delegatePartialIsNoChange(response string) bool {
 			strings.Contains(response, "no file changes detected"))
 }
 
+// implementationPartialIsSatisfiedNoChange distinguishes an explicit
+// completion report from a delegate that merely failed to edit anything. The
+// implementation prompt requires this exact claim when sibling/base work
+// already satisfies the packet; mechanical verification still runs before the
+// unchanged HEAD can advance. Other partial no-change results remain failures.
+func implementationPartialIsSatisfiedNoChange(response string) bool {
+	return delegatePartialIsNoChange(response) &&
+		strings.Contains(strings.ToLower(response), "task already complete")
+}
+
 func retryDetailForPrompt(detail string) string {
 	detail = strings.TrimSpace(safeDiagnostic(detail))
 	const maxRunes = 24_000
@@ -778,7 +788,8 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 		// A document no-op is the requested outcome when the accepted diff is
 		// already documented. Freeze the exact unchanged HEAD so doc_freeze and
 		// doc_gate still review it; blocking review feedback overrides that exemption.
-		documentedNoop := docs && delegatePartialIsNoChange(result.Response)
+		satisfiedNoop := (docs && delegatePartialIsNoChange(result.Response)) ||
+			(!docs && implementationPartialIsSatisfiedNoChange(result.Response))
 		blockingReviewUnchanged := false
 		if headErr == nil && head == baseHead && feedbackHasBlockingFinding(req.Feedback) &&
 			req.Feedback.ArtifactHash != "" {
@@ -789,7 +800,7 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 			blockingReviewUnchanged = wfe.Hash([]byte(diff)) == req.Feedback.ArtifactHash
 		}
 		if headErr == nil && head == baseHead &&
-			(blockingReviewUnchanged || (!documentedNoop &&
+			(blockingReviewUnchanged || (!satisfiedNoop &&
 				!branchHasWorkOverBase(ctx, workdir, req.WorkItem.ParentID))) {
 			detail := strings.TrimSpace(result.Response)
 			if detail == "" {
