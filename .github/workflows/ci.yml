@@ -6,7 +6,18 @@ on:
   push:
     branches: [main, testing, feature/core-modularization]
   pull_request:
-    branches: [main, testing, feature/core-modularization, 'aimee/feat/**']
+    branches: [main, testing, feature/core-modularization, 'aimee/feat/**', 'agent/**']
+    # NOTE this filter matches the BASE branch, and GitHub reads it from the BASE
+    # branch's copy of this file — not from the PR's merge commit (verified: the
+    # same change pushed to a PR head triggered nothing). So this list has to be
+    # correct on every branch used as a merge target, which is why it is fixed
+    # here as well as on testing.
+    #
+    # A base missing from the list does not get a weaker gate — it gets NO gate:
+    # the workflow never triggers, so the PR merges with zero checks recorded and
+    # nothing is pending to block it. PR #2372 merged that way and broke this
+    # branch's unit-test build; #2376 reproduced the condition.
+    #
     # Slice sub-PRs target aimee/feat/<work-item-id>; include them so each slice
     # must pass the same complete gate as the final feature PR.
     # `edited` re-runs the gate when a PR title/body is edited after open, so
