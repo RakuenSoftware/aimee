@@ -334,12 +334,14 @@ func assertFreezeCreateCollision(t *testing.T, err error, path, currentSlice, si
 	}
 }
 
-// TestRejectDivergentSiblingCreatesFailsClosedWithoutWorkflowRegistry proves the
-// fail-closed invariant: a NativeRunner constructed without a workflow registry
-// must surface a non-nil error from rejectDivergentSiblingCreates when the
-// current slice would otherwise need a sibling-collision check. A silent return
-// would let colliding sibling freezes pass undetected.
-func TestRejectDivergentSiblingCreatesFailsClosedWithoutWorkflowRegistry(t *testing.T) {
+// TestRejectDivergentSiblingCreatesUsesDurableArtifactsWithoutWorkflowRegistry
+// proves the registry-independent invariant: a NativeRunner constructed without
+// a workflow registry must still surface a genuine freeze_create_create_collision
+// from rejectDivergentSiblingCreates when the sibling's freeze artifacts
+// (frozen_diff + freeze-head + freeze-base) prove the freeze is durable. This
+// is the regression guard against re-introducing a sibling-stage walk that
+// depends on r.workflows to identify frozen siblings.
+func TestRejectDivergentSiblingCreatesUsesDurableArtifactsWithoutWorkflowRegistry(t *testing.T) {
 	ctx, store, artifacts, _, _, slicedir, base, _ := setupFreezeCollisionHarness(t)
 
 	if err := os.WriteFile(filepath.Join(slicedir, "frozen.txt"), []byte("conflicting slice blob\n"), 0o600); err != nil {
@@ -353,16 +355,52 @@ func TestRejectDivergentSiblingCreatesFailsClosedWithoutWorkflowRegistry(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Deliberately omit workflows: the runner cannot inspect sibling workflow
-	// stages, so the collision check must fail closed rather than pass silently.
+	// Deliberately omit workflows: durable freeze artifacts alone must drive the
+	// collision check, so the divergent sibling freeze is rejected.
 	runner := &NativeRunner{db: store, artifacts: artifacts}
 	err = runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead)
-	if err == nil {
-		t.Fatal("expected workflow-registry error from workflow-less runner, got nil")
+	assertFreezeCreateCollision(t, err, "frozen.txt", item.ID, "wi_s0")
+}
+
+// TestRejectDivergentSiblingCreatesRecognizesFrozenSiblingRoutedBackToImplement
+// is the regression guard for the durable-artifact definition of "frozen":
+// a sibling that legitimately produced and froze a competing diff but was then
+// routed back to implement for revisions (current stage "implement") is still
+// reported as frozen, so the second slice's collision check does not skip it.
+// Previously siblingStageHasFrozenDiff inspected the sibling's current stage
+// via the workflow graph and missed this case; the fix is to anchor the check
+// to the freeze/freeze-head/freeze-base artifact triple directly.
+func TestRejectDivergentSiblingCreatesRecognizesFrozenSiblingRoutedBackToImplement(t *testing.T) {
+	ctx, store, artifacts, registry, _, slicedir, base, _ := setupFreezeCollisionHarness(t)
+
+	// Route the frozen sibling back to implement for revisions, simulating a
+	// review/CI loop that returned it to implementation. The sibling's freeze
+	// artifacts remain on disk but its current stage is no longer freeze.
+	if err := store.Move(ctx, "wi_s0", "gate", "implement", "reroute", "", "", 0); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "workflow registry is required") {
-		t.Fatalf("expected workflow-registry-required error, got: %v", err)
+	wiS0, err := store.WorkItem(ctx, "wi_s0")
+	if err != nil {
+		t.Fatal(err)
 	}
+	if wiS0.Stage != "implement" {
+		t.Fatalf("setup precondition: expected wi_s0 stage=implement, got %q", wiS0.Stage)
+	}
+
+	if err := os.WriteFile(filepath.Join(slicedir, "frozen.txt"), []byte("conflicting slice blob\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, slicedir, "add", "frozen.txt")
+	gitRun(t, slicedir, "commit", "-m", "divergent create")
+	currentHead := strings.TrimSpace(gitRun(t, slicedir, "rev-parse", "HEAD"))
+
+	item, err := store.WorkItem(ctx, "wi_s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
+	err = runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead)
+	assertFreezeCreateCollision(t, err, "frozen.txt", item.ID, "wi_s0")
 }
 
 // TestRejectDivergentSiblingCreatesAllowsIdenticalCreateFromDistinctSiblingWorktree
