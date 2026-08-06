@@ -446,6 +446,9 @@ func TestFreezeAllowsSiblingsEditingDistinctHunksOfExistingBaseFile(t *testing.T
 		t.Fatalf("rejectDivergentSiblingCreates should not flag pre-existing file edits, got detail=%q", secondResult.Detail)
 	}
 
+	if err := store.Move(ctx, "wi_s1", "freeze", "review", "advance", "", secondResult.ContentHash, 0); err != nil {
+		t.Fatal(err)
+	}
 	storedSecond, err := store.WorkItem(ctx, "wi_s1")
 	if err != nil {
 		t.Fatal(err)
