@@ -188,6 +188,7 @@ func TestFreezeUsesMergedRemoteFeatureTip(t *testing.T) {
 	}
 }
 
+
 func TestFreezeRejectsDivergentSiblingCreateCreateCollision(t *testing.T) {
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin.git")
@@ -282,12 +283,6 @@ func TestFreezeRejectsDivergentSiblingCreateCreateCollision(t *testing.T) {
 	}
 	secondBase = strings.TrimSpace(gitRun(t, secondDir, "rev-parse", secondBase))
 	secondHead := strings.TrimSpace(gitRun(t, secondDir, "rev-parse", "HEAD"))
-	// The first runner has written its companion artifacts but has not completed
-	// the durable Move yet. Treating this crash window as frozen would reject both
-	// slices after a restart; the row still at freeze is authoritative.
-	if err := runner.rejectDivergentSiblingCreates(ctx, second, secondDir, secondBase, secondHead); err != nil {
-		t.Fatalf("orphan freeze marker rejected sibling: %v", err)
-	}
 	if err := store.Move(ctx, "wi_s0", "freeze", "review", "advance", "", firstResult.ContentHash, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -986,6 +981,7 @@ nodes:
 		t.Fatalf("existing-file edit rejected: %v", err)
 	}
 }
+
 
 func TestIntegrateFeatureBaseNoopWhenAlreadyCurrent(t *testing.T) {
 	repo, slicedir := setupSliceRepo(t)

@@ -162,18 +162,26 @@ func freezeSiblingUncomparableError(currentSlice, siblingSlice, path string, cau
 // revisions, where the current stage is implement but the frozen diff is still
 // on disk.
 //
-// frozenSiblingArtifacts distinguishes two failure modes:
+// frozenSiblingArtifacts distinguishes three failure modes:
 //   - A genuine read error from the artifact store (decoding failure, I/O
 //     error, integrity mismatch) surfaces as a non-nil err so the caller can
 //     fail closed with freeze_create_create_collision -- the runner cannot
 //     tell whether a sibling's freeze is competing, so it must not silently
-//     allow it through on a transient store error.
-//   - A missing or wrong-typed artifact returns ok=false with a nil err. The
-//     sibling simply is not frozen (per the durable-triple definition), so the
-//     caller skips it as the previous siblingStageHasFrozenDiff continue path
-//     did. Skipping here matches the acceptance criterion: only the existence
-//     of the durable triple marks a sibling as frozen, so its absence means
-//     the sibling is not frozen and the collision check has nothing to do.
+//     allow it through on a transient store error. Integrity-validation
+//     failures (NodeArtifact wrapping "node artifact failed integrity
+//     validation") are explicitly propagated here, not silently skipped.
+//   - A missing artifact (os.ErrNotExist) returns ok=false with a nil err.
+//     The sibling simply is not frozen (per the durable-triple definition),
+//     so the caller skips it as the previous siblingStageHasFrozenDiff
+//     continue path did.
+//   - A wrong-typed artifact (type does not match the expected frozen_diff
+//     or commit) also returns ok=false with a nil err. Wrong-typed artifacts
+//     are treated the same as missing ones: the durable triple is not
+//     present, so the sibling is not frozen and the caller skips it. This
+//     matches the acceptance criterion that only the durable triple marks
+//     a sibling as frozen, and prevents the collision check from spuriously
+//     rejecting slices whose active sibling carries a partial freeze-artifact
+//     set.
 func frozenSiblingArtifacts(siblingID string, store *wfe.ArtifactStore) (head, base string, ok bool, err error) {
 	if store == nil {
 		return "", "", false, nil
