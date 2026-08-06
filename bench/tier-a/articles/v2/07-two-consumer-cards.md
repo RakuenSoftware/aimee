@@ -122,9 +122,9 @@ out to be the larger prize:
 | model | active params | tok/s | GPU |
 |---|---|---:|---|
 | Qwen3.6-35B-A3B | ~3B of 35B | **234.0** | RTX 5090 |
-| Qwen3.6-27B dense | 27B | 64.7 | RTX 5090 |
+| Qwen3.6-27B dense | 27B | 67.8 | RTX 5090 |
 
-**3.6 times faster, same family, same quant, same card class, and the two write
+**3.5 times faster, same family, same quant, same card class, and the two write
 almost the same amount of text.** A dense 27B at Q4 reads about 16.4 GiB of weights
 per token; the MoE reads roughly a tenth of that. Plan VRAM by total parameters and
 throughput by active parameters. They are different numbers and both matter.

@@ -91,10 +91,10 @@ Throughput follows the same line:
 | gemma-4-12B QAT | 142.4 | RTX 3090 |
 | gemma-4-31B non-QAT | 80.5 | RTX 5090 |
 | gemma-4-31B QAT | 67.3 | RX 7900 XTX |
-| Qwen3.6-27B dense, partial | 64.7 | RTX 5090 |
+| Qwen3.6-27B dense, partial | 67.8 | RTX 5090 |
 
-The 35B is **3.6 times faster than the 27B from its own family**, and the two write
-almost the same amount: median 1,100 completion tokens against 1,269. So the gap is
+The 35B is **3.5 times faster than the 27B from its own family**, and the two write
+almost the same amount: median 1,100 completion tokens against 1,272. So the gap is
 per-token cost. A dense 27B at Q4 reads about 16.4 GiB of weights per token against
 roughly 1.5 GiB for a 3B-active MoE.
 
@@ -189,9 +189,11 @@ on which corpus they ran inside, with 47% of output text differing.
 processes: Q4_K_M is 5.16 GB and three copies exceed a 16 GiB card. Process count
 alone is worth about 0.0105 F1 here.
 
-**One arm is unfinished.** Qwen3.6-27B dense is about a fifth through. Its
-throughput is settled across three readings at 64.5, 64.5 and 64.2 tok/s, so the
-speed claim holds. It has no F1 in this table and I have not written one in.
+**One arm is unfinished.** Qwen3.6-27B dense is two thirds through. Its throughput
+is settled: 67.8 tok/s median over 658 notes, and every hundred-note slice of that
+run sits between 67.7 and 68.0, so the speed claim holds. An earlier reading of
+64.7 came from three samples and was 4.6% low; the figure here supersedes it. It
+has no F1 in this table and I have not written one in.
 
 ## What I would run today
 

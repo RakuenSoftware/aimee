@@ -84,9 +84,9 @@ And on throughput the same architecture choice dominates everything:
 | model | active | tok/s |
 |---|---|---:|
 | Qwen3.6-35B-A3B | ~3B of 35B | **234.0** |
-| Qwen3.6-27B dense | 27B | 64.7 |
+| Qwen3.6-27B dense | 27B | 67.8 |
 
-**3.6 times faster, same family, same quant, same card class, writing the same
+**3.5 times faster, same family, same quant, same card class, writing the same
 amount of text.**
 
 So the size question splits in two. Total parameters decide what fits on your card.
