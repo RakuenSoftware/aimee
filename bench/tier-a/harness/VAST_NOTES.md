@@ -126,9 +126,27 @@ counter or timestamp, which would look like progress until the hard cap. If that
 appears, compare on the stable part of the message rather than reaching for a
 shorter clock.
 
-**5. `GET /instances/` is unreliable.** It intermittently returns an empty array
-while instances are demonstrably running, twice reporting zero during this
-campaign. Always query per contract. `harness/vast_burn.sh` does.
+**5. `GET /api/v0/instances/` is DEPRECATED, not "intermittently empty".** I wrote
+the intermittent version above after seeing it return an empty array while
+instances were demonstrably running. That diagnosis was wrong in the same way as
+the pull timeouts: I recorded the symptom. Asking it with a query string returns
+the real answer, `{"success":false,"error":"deprecated_endpoint","msg":"... Use
+/api/v1/instances/ instead"}`; asking it bare returns `{"instances": []}`, a
+successful-looking empty fleet. **Use `/api/v1/instances/` to list.**
+
+Per-contract `/api/v0/instances/<cid>/` still works and is what the pool uses, so
+`endpoint`, `alive` and `billed_rate` were never affected. What WAS affected is my
+ability to see the fleet at all, and believing the empty array hid 25 live
+instances billing $2.68/hr while two of them were doing work. An endpoint that
+reports "you own nothing" is the most expensive possible failure mode, because
+nothing about it looks like a failure.
+
+**A leaked instance is invisible from the harness side.** Nothing in the local
+state, the locks, the pidfiles or the prediction files reveals an instance that no
+pool owns. The only way to see one is to list the fleet and compare `start_date`
+against the start time of the oldest live pool: an instance created before any
+running pool cannot be owned by one. That comparison is evidence, not a clock, and
+it is the check that should run every time the fleet is inspected.
 
 **6. Image pull is the dominant per-arm cost for short work.** It runs 2-20
 minutes and is billed. One host pulled the llama.cpp CUDA image in 84 seconds and
