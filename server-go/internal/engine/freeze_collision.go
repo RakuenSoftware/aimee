@@ -101,27 +101,23 @@ func (r *NativeRunner) siblingStageHasFrozenDiff(sibling db1.WorkItem) (bool, er
 	return false, nil
 }
 
-// freezeCreateCreateCollisionError reports a genuine create/create collision on
-// path between currentSlice and siblingSlice. The wrapped cause is preserved
-// (when non-nil) so callers retain errors.Is/errors.As visibility into the
-// underlying failure while the outer message still carries the
-// freeze_create_create_collision prefix.
-func freezeCreateCreateCollisionError(path, currentSlice, siblingSlice string, cause error) error {
-	msg := fmt.Sprintf("%s: path %s current slice %s conflicts with already frozen sibling slice %s", freezeCreateCreateCollision, path, currentSlice, siblingSlice)
-	if cause == nil {
-		return errors.New(msg)
-	}
-	return fmt.Errorf("%s: %w", msg, cause)
+// freezeCreateCreateCollisionError reports a genuine create/create collision
+// on path between currentSlice and siblingSlice.
+func freezeCreateCreateCollisionError(path, currentSlice, siblingSlice string) error {
+	return errors.New(fmt.Sprintf("%s: path %s current slice %s conflicts with already frozen sibling slice %s", freezeCreateCreateCollision, path, currentSlice, siblingSlice))
 }
 
 // freezeSiblingUncomparableError reports that the sibling's durable freeze
 // artifacts (or the comparison itself) are unavailable, so the collision check
 // cannot establish whether the slices overlap. It uses the same
 // freeze_create_create_collision prefix as the genuine-collision error so a
-// caller matching on the prefix catches both, but the body distinguishes the
-// "cannot compare" case from "path Y conflicts" to keep operator diagnostics
-// honest. The current slice fails closed rather than silently allowing a
-// potentially colliding freeze.
+// caller matching on the prefix catches both. The body deliberately omits a
+// conflicting path: when comparison is impossible the comparison has not
+// enumerated any overlapping path yet, so fabricating one would mislead
+// operators. Genuine collisions surface the path via
+// freezeCreateCreateCollisionError; this error is the distinct "cannot
+// compare" shape that keeps operator diagnostics honest. The current slice
+// fails closed rather than silently allowing a potentially colliding freeze.
 func freezeSiblingUncomparableError(currentSlice, siblingSlice string, cause error) error {
 	msg := fmt.Sprintf("%s: cannot compare against already frozen sibling slice %s while processing current slice %s", freezeCreateCreateCollision, siblingSlice, currentSlice)
 	if cause == nil {
@@ -170,7 +166,7 @@ func (r *NativeRunner) rejectDivergentSiblingCreates(ctx context.Context, item d
 			return freezeSiblingUncomparableError(item.ID, sibling.ID, nil)
 		}
 		if err != nil {
-			return fmt.Errorf("read sibling freeze artifact: %w", err)
+			return freezeSiblingUncomparableError(item.ID, sibling.ID, fmt.Errorf("read sibling freeze artifact: %w", err))
 		}
 		if artifact.Type != "frozen_diff" || strings.TrimSpace(string(artifact.Content)) == "" {
 			return freezeSiblingUncomparableError(item.ID, sibling.ID, nil)
@@ -180,7 +176,7 @@ func (r *NativeRunner) rejectDivergentSiblingCreates(ctx context.Context, item d
 			return freezeSiblingUncomparableError(item.ID, sibling.ID, nil)
 		}
 		if err != nil {
-			return fmt.Errorf("read sibling freeze head: %w", err)
+			return freezeSiblingUncomparableError(item.ID, sibling.ID, fmt.Errorf("read sibling freeze head: %w", err))
 		}
 		if headArtifact.Type != "commit" {
 			return freezeSiblingUncomparableError(item.ID, sibling.ID, nil)
@@ -190,7 +186,7 @@ func (r *NativeRunner) rejectDivergentSiblingCreates(ctx context.Context, item d
 			return freezeSiblingUncomparableError(item.ID, sibling.ID, nil)
 		}
 		if err != nil {
-			return fmt.Errorf("read sibling freeze base: %w", err)
+			return freezeSiblingUncomparableError(item.ID, sibling.ID, fmt.Errorf("read sibling freeze base: %w", err))
 		}
 		if baseArtifact.Type != "commit" {
 			return freezeSiblingUncomparableError(item.ID, sibling.ID, nil)
@@ -202,7 +198,7 @@ func (r *NativeRunner) rejectDivergentSiblingCreates(ctx context.Context, item d
 		}
 		for path, create := range creates {
 			if other, ok := siblingCreates[path]; ok && other.Blob != create.Blob {
-				return freezeCreateCreateCollisionError(path, item.ID, sibling.ID, nil)
+				return freezeCreateCreateCollisionError(path, item.ID, sibling.ID)
 			}
 		}
 	}
