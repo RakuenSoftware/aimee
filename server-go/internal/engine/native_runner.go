@@ -538,7 +538,15 @@ func (r *NativeRunner) branchOpen(ctx context.Context, req StepRequest) (StepRes
 // name alone invites the delegate to mine unrelated history for undocumented
 // changes and expand the final PR after acceptance.
 func documentDelegatePrompt(ctx context.Context, req StepRequest, workdir string) (string, error) {
-	acceptedDiff, err := frozenWorktreeDiff(ctx, req.WorkItem, workdir)
+	resolvedBase, err := frozenWorktreeBase(ctx, req.WorkItem, workdir)
+	if err != nil {
+		return "", err
+	}
+	head, err := frozenWorktreeHead(ctx, workdir)
+	if err != nil {
+		return "", err
+	}
+	acceptedDiff, err := frozenWorktreeDiff(ctx, resolvedBase, head, workdir)
 	if err != nil {
 		return "", err
 	}
@@ -591,7 +599,15 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 	// bypass review, and feedback left by an earlier gate cannot trigger it.
 	if docs && req.Feedback != nil && req.WorkItem.ContentHash != "" &&
 		req.WorkItem.ContentHash == req.Feedback.ArtifactHash {
-		diff, diffErr := frozenWorktreeDiff(ctx, req.WorkItem, workdir)
+		resolvedBase, diffErr := frozenWorktreeBase(ctx, req.WorkItem, workdir)
+		if diffErr != nil {
+			return StepResult{}, diffErr
+		}
+		head, diffErr := frozenWorktreeHead(ctx, workdir)
+		if diffErr != nil {
+			return StepResult{}, diffErr
+		}
+		diff, diffErr := frozenWorktreeDiff(ctx, resolvedBase, head, workdir)
 		if diffErr != nil {
 			return StepResult{}, diffErr
 		}
@@ -1015,7 +1031,7 @@ func (r *NativeRunner) freeze(ctx context.Context, req StepRequest) (StepResult,
 	if err != nil {
 		return StepResult{}, err
 	}
-	diff, err := frozenWorktreeDiff(ctx, item, workdir)
+	diff, err := frozenWorktreeDiff(ctx, resolvedBase, head, workdir)
 	if err != nil {
 		return StepResult{}, err
 	}
@@ -1103,18 +1119,8 @@ func frozenWorktreeHead(ctx context.Context, workdir string) (string, error) {
 	return strings.TrimSpace(head), nil
 }
 
-// frozenWorktreeDiff computes the merged diff between the immutable base and HEAD.
-// Callers that need the base/head shas too must call frozenWorktreeBase and
-// frozenWorktreeHead separately.
-func frozenWorktreeDiff(ctx context.Context, item db1.WorkItem, workdir string) (string, error) {
-	resolvedBase, err := frozenWorktreeBase(ctx, item, workdir)
-	if err != nil {
-		return "", err
-	}
-	head, err := frozenWorktreeHead(ctx, workdir)
-	if err != nil {
-		return "", err
-	}
+// frozenWorktreeDiff computes the diff between already resolved immutable snapshots.
+func frozenWorktreeDiff(ctx context.Context, resolvedBase, head, workdir string) (string, error) {
 	return gitText(ctx, workdir, "--no-pager", "diff", resolvedBase+"..."+head)
 }
 
