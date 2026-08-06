@@ -10,6 +10,28 @@ Then I rented bigger GPUs.
 
 The ceiling moved to 0.7257. Almost none of the movement came from size.
 
+## One note in, zero or more triples out
+
+The model reads a single remembered note and returns subject-relation-object
+triples as JSON. The prompt is the one my production system already sends, read
+out of `kb_memory_facts.c` rather than written for the benchmark, so a result here
+is a statement about the system I run.
+
+    Vera Duarte joined the retrieval team last quarter.
+    {"subject": "Vera Duarte", "relation": "member_of", "object": "retrieval team"}
+
+Notes are one or two sentences, median 53 characters. The relation comes from 24
+canonical predicates, or the model coins a snake_case one when none fits. It has
+to keep durable state and drop everything transient, so `Hoping to get Fairweather
+Chemicals over the line this quarter` is worth no facts at all: 322 of the 1,001
+notes are that kind, and getting them right means returning an empty list. A
+retraction is not an absence either. `Kestrel Freight is no longer a customer`
+wants the original fact back with `negated` set.
+
+F1 is strict. Subject, relation and object all have to match a gold triple, and
+there are 880 of those across the 1,001 notes, spread over ten note categories
+including negation, multi-fact, implicit and deliberately ambiguous.
+
 | model | quant | F1 | prec | rec | parse | abstain | spurious | reasons |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
 | Qwen3.6-35B-A3B | UD-Q4, MoE | **0.7257** | 0.6841 | 0.7727 | 1.00 | 0.699 | 99 | 1.00 |
@@ -35,9 +57,9 @@ The ceiling moved to 0.7257. Almost none of the movement came from size.
 | MiniCPM5-1B | Q8_0 | 0.1652 | 0.2630 | 0.1205 | **0.87** | 0.963 | 12 | 1.00 |
 | LFM2.5-230M | Q8_0 | 0.1309 | 0.1289 | 0.1330 | 1.00 | 0.531 | 151 | 0.00 |
 
-`abstain` is how often a model correctly says nothing on the 322 notes whose
-correct answer is nothing. `spurious` counts triples invented on those notes.
-`reasons` is the fraction of rows carrying a reasoning pass.
+`abstain` is how often a model correctly returns nothing on those 322 factless
+notes. `spurious` counts the triples it invents on them instead. `reasons` is the
+fraction of rows carrying a reasoning pass.
 
 ## Six steps down the leaderboard, none of them real
 
