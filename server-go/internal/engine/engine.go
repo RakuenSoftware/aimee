@@ -58,6 +58,7 @@ type StepResult struct {
 	Feedback     *wfe.ReviewFeedback `json:"feedback,omitempty"`
 	PauseReason  string              `json:"pause_reason,omitempty"`
 	Detail       string              `json:"detail,omitempty"`
+	Err         error               `json:"-"`
 	CostUSD      float64             `json:"cost_usd,omitempty"`
 	// CostUnknown means at least one billable call in this step produced no
 	// measurement. CostUSD is then a lower bound, so the engine must charge the
@@ -170,6 +171,7 @@ type AdvanceResult struct {
 	NextStage   string
 	State       string
 	PauseReason string
+	Err         error `json:"-"`
 }
 
 func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult, error) {
@@ -538,6 +540,9 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 		return out, nil
 
 	case StepFailed:
+		if errors.Is(step.Err, ErrFreezeCreateCreateCollision) {
+			out.Err = step.Err
+		}
 		if err := e.db.Finish(ctx, item.ID, node.ID, "rejected", step.Detail,
 			step.ContentHash, step.CostUSD); err != nil {
 			return out, err

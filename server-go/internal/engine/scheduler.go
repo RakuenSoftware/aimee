@@ -325,6 +325,9 @@ func (s *Scheduler) drive(ctx context.Context, workItemID string) {
 			s.log.Error("advance workflow", "work_item", workItemID, "error", err)
 			return
 		}
+		if errors.Is(result.Err, ErrFreezeCreateCreateCollision) {
+			s.log.Info("freeze create collision detected", "work_item", workItemID, "error", result.Err)
+		}
 		if result.Terminal || result.Parked || !result.Ran {
 			return
 		}

@@ -1020,7 +1020,7 @@ func (r *NativeRunner) freeze(ctx context.Context, req StepRequest) (StepResult,
 		return StepResult{Status: StepAccepted, Detail: "no-op: empty diff vs base"}, nil
 	}
 	if err := r.rejectDivergentSiblingCreates(ctx, item, workdir, resolvedBase, head); err != nil {
-		return StepResult{Status: StepFailed, Detail: err.Error()}, nil
+		return StepResult{Status: StepFailed, Detail: err.Error(), Err: err}, nil
 	}
 	if r.artifacts != nil && req.Node.ID != "" {
 		if _, err := r.artifacts.PutNodeArtifact(item.ID, req.Node.ID, "frozen_diff", []byte(diff)); err != nil {

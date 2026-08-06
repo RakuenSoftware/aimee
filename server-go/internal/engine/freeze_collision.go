@@ -13,6 +13,12 @@ import (
 
 const freezeCreateCreateCollision = "freeze_create_create_collision"
 
+// ErrFreezeCreateCreateCollision is the typed sentinel for a freeze-vs-create
+// collision between sibling slices. Callers can detect it via errors.Is(err,
+// ErrFreezeCreateCreateCollision) instead of string-prefix matching. The
+// human-readable path/slice detail remains accessible via err.Error().
+var ErrFreezeCreateCreateCollision = errors.New(freezeCreateCreateCollision)
+
 type freezeCreate struct {
 	Path string
 	Blob string
@@ -113,7 +119,7 @@ func resolveSiblingCompareDir(ctx context.Context, sibling db1.WorkItem, workdir
 // freezeCreateCreateCollisionError reports a genuine create/create collision
 // on path between currentSlice and siblingSlice.
 func freezeCreateCreateCollisionError(path, currentSlice, siblingSlice string) error {
-	return fmt.Errorf("%s: path %s current slice %s conflicts with already frozen sibling slice %s", freezeCreateCreateCollision, path, currentSlice, siblingSlice)
+	return fmt.Errorf("%w: path %s current slice %s conflicts with already frozen sibling slice %s", ErrFreezeCreateCreateCollision, path, currentSlice, siblingSlice)
 }
 
 // freezeUncomparablePathIdentifier picks a stable path-equivalent identifier
@@ -133,9 +139,12 @@ func freezeUncomparablePathIdentifier(creates map[string]freezeCreate) string {
 
 // freezeSiblingUncomparableError reports that the sibling's durable freeze
 // artifacts (or the comparison itself) are unavailable, so the collision check
-// cannot establish whether the slices overlap. It uses the same
-// freeze_create_create_collision prefix as the genuine-collision error so a
-// caller matching on the prefix catches both. The path argument is a
+// cannot establish whether the slices overlap. It wraps
+// ErrFreezeCreateCreateCollision so callers matching the typed sentinel via
+// errors.Is catch both genuine and un-comparable shapes, and its message
+// starts with the same freeze_create_create_collision prefix as the
+// genuine-collision error so the operator-facing detail reads the same way.
+// The path argument is a
 // path-equivalent identifier drawn from the current slice's create set
 // (typically the first created path) so the error names the path the current
 // slice was creating when comparison became impossible; this satisfies the
@@ -146,11 +155,10 @@ func freezeUncomparablePathIdentifier(creates map[string]freezeCreate) string {
 // diagnostics honest. The current slice fails closed rather than silently
 // allowing a potentially colliding freeze.
 func freezeSiblingUncomparableError(currentSlice, siblingSlice, path string, cause error) error {
-	msg := fmt.Sprintf("%s: cannot compare path %s: already frozen sibling slice %s while processing current slice %s", freezeCreateCreateCollision, path, siblingSlice, currentSlice)
 	if cause == nil {
-		return errors.New(msg)
+		return fmt.Errorf("%w: cannot compare path %s: already frozen sibling slice %s while processing current slice %s", ErrFreezeCreateCreateCollision, path, siblingSlice, currentSlice)
 	}
-	return fmt.Errorf("%s: %w", msg, cause)
+	return fmt.Errorf("%w: cannot compare path %s: already frozen sibling slice %s while processing current slice %s: %w", ErrFreezeCreateCreateCollision, path, siblingSlice, currentSlice, cause)
 }
 
 // frozenSiblingArtifacts captures the three durable NodeArtifacts that
