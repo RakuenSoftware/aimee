@@ -23,6 +23,8 @@
 #include "config.h"
 #include "util.h"
 
+#include "headers/module_json_call.h"
+
 #include <aimee/audit/obs_bus.h>
 #include <aimee/core/event_bus/module_protocol.h>
 #include <aimee/roundtable/module_api.h>
@@ -33,17 +35,6 @@
 /* Matches AIMEE_MODULE_MESSAGE_MAX_BODY and Go's MaxArtifactBytes. A review of a
  * 16 MiB artifact is the largest thing this carries. */
 #define ROUNDTABLE_REVIEW_MAX_BODY AIMEE_MODULE_MESSAGE_MAX_BODY
-
-static uint64_t monotonic_deadline_ns(int timeout_ms)
-{
-   if (timeout_ms <= 0)
-      return 0; /* no deadline */
-   struct timespec ts;
-   if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
-      return 0;
-   return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec +
-          (uint64_t)timeout_ms * 1000000ull;
-}
 
 /* Build the review body. Identical JSON to what the HTTP route carried: the
  * transport changed, the contract did not. */
@@ -122,24 +113,10 @@ int handle_roundtable_review(server_ctx_t *ctx, server_conn_t *conn, cJSON *requ
    char *wire = build_review_body(request, resolved);
    if (!wire)
       return server_send_error(conn, "roundtable artifact is required", NULL);
-   size_t wire_len = strlen(wire);
-   if (wire_len > ROUNDTABLE_REVIEW_MAX_BODY)
-   {
-      free(wire);
-      return server_send_error(conn, "roundtable request exceeds the module body limit", NULL);
-   }
-
-   char *response = malloc(ROUNDTABLE_REVIEW_MAX_BODY);
-   if (!response)
-   {
-      free(wire);
-      return server_send_error(conn, "out of memory", NULL);
-   }
-   uint32_t response_len = 0;
-   aimee_module_call_result_t result =
-       obs_bus_module_call(AIMEE_ROUNDTABLE_EVENT_REVIEW, AIMEE_ROUNDTABLE_STAGE_REVIEW, 0,
-                           monotonic_deadline_ns(timeout_ms), wire, (uint32_t)wire_len, response,
-                           ROUNDTABLE_REVIEW_MAX_BODY, &response_len, NULL, NULL);
+   aimee_module_call_result_t result = AIMEE_MODULE_CALL_OK;
+   cJSON *parsed = aimee_module_json_call_raw(AIMEE_ROUNDTABLE_EVENT_REVIEW,
+                                              AIMEE_ROUNDTABLE_STAGE_REVIEW, wire, strlen(wire),
+                                              ROUNDTABLE_REVIEW_MAX_BODY, timeout_ms, &result);
    free(wire);
 
    if (result != AIMEE_MODULE_CALL_OK)
@@ -150,12 +127,8 @@ int handle_roundtable_review(server_ctx_t *ctx, server_conn_t *conn, cJSON *requ
       char reason[160];
       snprintf(reason, sizeof(reason), "roundtable review failed: %s",
                aimee_module_call_result_name(result));
-      free(response);
       return server_send_error(conn, reason, NULL);
    }
-
-   cJSON *parsed = cJSON_ParseWithLength(response, response_len);
-   free(response);
    if (!parsed)
       return server_send_error(conn, "roundtable review returned an unparseable result", NULL);
    return server_send_ok(conn, parsed);

@@ -17,6 +17,8 @@
 #include "config.h"     /* config_delegate_sandbox_learn_packages */
 #include "guardrails.h" /* git_repo_root */
 
+#include "headers/module_json_call.h"
+
 #include <aimee/audit/obs_bus.h>
 #include <aimee/core/event_bus/module_protocol.h>
 #include <aimee/sandbox/module_api.h>
@@ -32,58 +34,16 @@
  * The request carries one shell command. */
 #define SANDBOX_CALL_MAX_BODY (256u * 1024u)
 
-static uint64_t monotonic_deadline_ns(int timeout_ms)
-{
-   if (timeout_ms <= 0)
-      return 0;
-   struct timespec ts;
-   if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
-      return 0;
-   return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec +
-          (uint64_t)timeout_ms * 1000000ull;
-}
-
 /* One request/response round trip. Returns a parsed reply the caller must delete,
- * or NULL on any failure (unattached module, transport error, bad reply). */
+ * or NULL on any failure (unattached module, transport error, bad reply).
+ *
+ * Learning is best-effort, so every failure is the same non-event here: the
+ * outcome is deliberately not inspected. Consumers that must tell an unreachable
+ * module from a failed one pass a result pointer instead. */
 static cJSON *sandbox_call(uint32_t event_kind, uint32_t stage_id, cJSON *payload)
 {
-   if (!payload)
-      return NULL;
-   if (!obs_bus_module_available(event_kind))
-   {
-      cJSON_Delete(payload);
-      return NULL;
-   }
-   char *wire = cJSON_PrintUnformatted(payload);
-   cJSON_Delete(payload);
-   if (!wire)
-      return NULL;
-   size_t wire_len = strlen(wire);
-   if (wire_len > SANDBOX_CALL_MAX_BODY)
-   {
-      free(wire);
-      return NULL;
-   }
-
-   char *response = malloc(SANDBOX_CALL_MAX_BODY);
-   if (!response)
-   {
-      free(wire);
-      return NULL;
-   }
-   uint32_t response_len = 0;
-   aimee_module_call_result_t result = obs_bus_module_call(
-       event_kind, stage_id, 0, monotonic_deadline_ns(SANDBOX_CALL_TIMEOUT_MS), wire,
-       (uint32_t)wire_len, response, SANDBOX_CALL_MAX_BODY, &response_len, NULL, NULL);
-   free(wire);
-   if (result != AIMEE_MODULE_CALL_OK)
-   {
-      free(response);
-      return NULL;
-   }
-   cJSON *parsed = cJSON_ParseWithLength(response, response_len);
-   free(response);
-   return parsed;
+   return aimee_module_json_call(event_kind, stage_id, payload, SANDBOX_CALL_MAX_BODY,
+                                 SANDBOX_CALL_TIMEOUT_MS, NULL);
 }
 
 int sandbox_learned_load(const char *git_root, char out[][SBX_PKG_MAX], int max)
