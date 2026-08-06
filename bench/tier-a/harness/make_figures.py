@@ -75,7 +75,7 @@ def series_class(kind, mark=True):
 
 # ---------------------------------------------------------------- chart forms
 def chart_ranked(rows, value_col, label_cols, hi, accent):
-    """Horizontal lollipops, one row per arm, ranked as given."""
+    """Horizontal lollipops, one row per run, ranked as given."""
     W, rh, padT, padB, gut, padR = 760, 15, 24, 34, 224, 62
     H = padT + len(rows) * rh + padB
     def x(v):
@@ -99,7 +99,7 @@ def chart_ranked(rows, value_col, label_cols, hi, accent):
                  % (series_class(k), x(v), cy))
         b.append('<text class="sg-chart__value" x="%.1f" y="%.1f">%.4f</text>'
                  % (x(v) + 8, cy + 3.5, v))
-    return svg(W, H, 'Ranked values, one row per arm', b)
+    return svg(W, H, 'Ranked values, one row per run', b)
 
 
 def chart_intervals(rows, label):
@@ -172,7 +172,7 @@ def chart_bars(rows, value_col, label_col, note_col, hi, unit, accent):
                      % (W - 74, cy + 4, esc(r[note_col])))
     b.append('<text class="sg-chart__axis" x="%.1f" y="%d" text-anchor="middle">%s</text>'
              % ((gut + W - padR) / 2, H - 6, unit))
-    return svg(W, H, 'Magnitude per arm', b)
+    return svg(W, H, 'Magnitude per run', b)
 
 
 def chart_paired(rows, metrics):
@@ -198,7 +198,7 @@ def chart_paired(rows, metrics):
                      % (series_class(1 if j == 0 else 2), gut, cy - 4.5, max(w, 1)))
             b.append('<text class="sg-chart__value" x="%.1f" y="%.1f">%s</text>'
                      % (gut + w + 9, cy + 4, fmt % v))
-    return svg(W, H, 'Two arms across several metrics, each on its own scale', b)
+    return svg(W, H, 'Two runs across several metrics, each on its own scale', b)
 
 
 def chart_scatter(rows, xcol, ycol, xhi, yhi, xlab, ylab, accent, labelled):
@@ -303,26 +303,26 @@ def main(path):
 
     spec = {
         0: dict(kind='ranked', value=2, labels=(0, 1), hi=0.78, accent=rank_accent,
-                cap='Every arm on the corpus, ranked by strict F1. '
+                cap='Every run on the same notes, ranked by F1. '
                     'Switch to Numbers for the full metric set.',
-                key=[('1', 'separable top'), ('2', 'lowest invention'),
-                     ('muted', 'other arms')]),
+                key=[('1', 'top of the field'), ('2', 'lowest invention'),
+                     ('muted', 'other runs')]),
         1: dict(kind='intervals',
-                cap='Difference in strict F1 between each neighbouring pair, with a 95% '
-                    'interval. An interval crossing zero means the ranking could be either '
+                cap='Difference in F1 between each neighbouring pair, with the range the true '
+                    'gap sits inside. A range crossing zero means the ranking could be either '
                     'way round.',
-                key=[('1', 'interval excludes zero'), ('muted', 'interval contains zero')]),
+                key=[('1', 'range excludes zero'), ('muted', 'range contains zero')]),
         2: dict(kind='intervals',
                 cap='The same stretch measured end to end rather than rung by rung.',
-                key=[('1', 'interval excludes zero')]),
+                key=[('1', 'range excludes zero')]),
         3: dict(kind='bars', value=1, label=0, note=2, hi=340.0, unit='TOKENS PER SECOND',
                 accent=lambda r: 1 if num(r[1]) >= 300 else None,
-                cap='Sustained throughput per arm, on the card each one ran on.'),
+                cap='Sustained throughput per run, on the card each one used.'),
         4: dict(kind='paired',
                 metrics=[('F1', 1, 0.9, '%.4f'), ('recall', 2, 0.9, '%.4f'),
                          ('abstains on factless', 3, 1.0, '%.3f'),
                          ('invented triples', 4, 200.0, '%.0f')],
-                cap='Two arms that F1 cannot separate, across the columns that do separate '
+                cap='Two runs that F1 cannot separate, across the columns that do separate '
                     'them. Each metric is drawn on its own scale, because the units differ.'),
     }
 
@@ -364,10 +364,10 @@ def main(path):
              ('granite-4.1-3b', None, -11, 4, 'end')])
         fig = standalone(
             'fig-scatter', sc,
-            'Every arm by its F1 and by how many triples it invents on the 322 notes whose '
-            'correct answer is an empty list. Two arms can score the same and write very '
+            'Every run by its F1 and by how many triples it invents on the 322 notes whose '
+            'correct answer is an empty list. Two runs can score the same and write very '
             'different amounts of false data downstream.',
-            legend([('1', 'separable top'), ('2', 'lowest invention'), ('muted', 'other arms')]))
+            legend([('1', 'top of the field'), ('2', 'lowest invention'), ('muted', 'other runs')]))
         text = text.replace(anchor, fig + '\n\n' + anchor, 1)
         built += 1
 
