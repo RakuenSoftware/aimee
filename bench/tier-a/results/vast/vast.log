@@ -481,3 +481,11 @@ run_llamacpp.py: error: one of the arguments --thinking --no-thinking is require
 [23:52:20Z]     healthy, loaded gemma-4-31B-it-qat-UD-Q4_K_XL.gguf; 1 variant(s): live
 [23:59:48Z]     billed $0.1456/hr (offer said $0.1119)
 [23:59:50Z]     healthy, loaded gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf; 1 variant(s): live
+[00:07:59Z] OK   gemma-4-26B-A4B.qat-unsloth-UDQ4.mtp/live rows=73 reasoned=73/73 parse_ok=70
+[00:07:59Z] DONE gemma-4-26B-A4B.qat-unsloth-UDQ4.mtp wall=147m cost=$0.352
+[00:18:48Z] OK   gemma-4-26B-A4B.qat-google-q4_0.mtp/live rows=1001 reasoned=1001/1001 parse_ok=940
+[00:18:48Z] DONE gemma-4-26B-A4B.qat-google-q4_0.mtp wall=132m cost=$0.290
+[00:19:11Z]     billed $0.3400/hr (offer said $0.3111)
+[00:19:11Z]     healthy, loaded Qwen3.6-27B-UD-Q4_K_XL.gguf; 1 variant(s): live
+[00:28:22Z] OK   gemma-4-12B-it.qat-UD-Q4_K_XL.mtp/live rows=355 reasoned=355/355 parse_ok=334
+[00:28:22Z] DONE gemma-4-12B-it.qat-UD-Q4_K_XL.mtp wall=137m cost=$0.262
