@@ -1,6 +1,6 @@
 # Eight ways a run scores fine and is broken
 
-ROUGH DRAFT.
+DRAFT.
 
 Every failure below produced a number, most of them plausible. One produced a rank.
 
@@ -75,6 +75,13 @@ One arm had 40 rows fail to parse. They contributed nothing, so its F1 is a lowe
 bound. The arm it was compared against had zero parse failures, so that F1 is
 capability.
 
+The large-model field made this worse rather than better. Both gemma-4-12B arms parse
+at **0.90 and 0.92**, with **zero** rows hitting the context limit, so that is
+malformed JSON and not truncation. They sit second and sixth in a twenty-two arm
+ranking whose top and bottom neighbours parse at 1.00. Between 83 and 98 unreadable
+rows are being counted as failures against models carrying no such handicap, and the
+published gap between them is overstated by an amount I cannot currently quantify.
+
 **Bound the correction before arguing about the gap.** Those 40 rows contain 15
 gold facts total, and 26 of the 40 have empty gold where abstaining is correct.
 Perfect handling is worth **+0.0038** against an interval of ±0.013. Here the
@@ -83,8 +90,24 @@ entire result.
 
 ## Five: two models tied and behaved differently
 
-The clearest one. Same card, same process count, same tier, same corpus, three
-quants each:
+The clearest one, and the large models state it more sharply than the small ones did.
+
+| | F1 | recall | abstains on factless | invented triples |
+|---|---:|---:|---:|---:|
+| gemma-4-31B QAT | 0.6872 | **0.8000** | **0.463** | **180** |
+| gemma-4-12B QAT | 0.6854 | 0.7330 | 0.702 | 97 |
+
+> 31B − 12B = **−0.0017, 95% CI [−0.0202, +0.0162]**, indistinguishable
+
+Statistically the same model. The 31B finds the most facts in the entire field and
+invents nearly twice as many on the 322 notes that assert nothing, staying correctly
+silent less than half the time. Both 31B arms behave this way, QAT and not, so it is
+the model rather than the quant.
+
+Tripling the parameters bought recall and spent restraint, and F1 netted the two to
+0.0017.
+
+The same shape held in the small field, across three quants each:
 
 | | abstention rate | spurious facts |
 |---|---:|---:|
@@ -98,10 +121,14 @@ F1 does not hide this. It **nets** it. At Q4, E4B leads by +0.0055 as scored and
 would lead by +0.0163 if both abstained perfectly. E4B is the stronger extractor
 paying a point back in over-extraction.
 
-That is a single number doing its job. It is also useless to someone choosing a
-model for a pipeline that writes into a knowledge graph and cannot tolerate
-invented edges. Those two models are not interchangeable and the ranking says
-they are.
+That is a single number doing its job. It is also useless to someone choosing a model
+for a pipeline that writes into a knowledge graph and cannot tolerate invented edges.
+Those models are not interchangeable and the ranking says they are.
+
+The extreme case is thirteen rows down. **granite-4.1-3b abstains on 93% of factless
+notes and invents 24 triples**, against 180 for the model at the top of the table. It
+gives up 0.14 F1 and invents a seventh as much. If a wrong edge is expensive, that
+trade is not close, and nothing in an F1 ranking will ever show it to you.
 
 ## Six: a gate discarded every fact the model found
 
