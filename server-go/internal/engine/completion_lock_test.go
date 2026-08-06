@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,7 +75,17 @@ func setupCompletionLockHarness(t *testing.T) (workflowDir string, defA, defB wf
 	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	alphaDef := []byte("name: alpha\nstart: freeze\nnodes:\n  - id: freeze\n    block: freeze\n")
+	alphaDef := []byte("name: alpha\nstart: source\nnodes:\n" +
+		"  - id: source\n" +
+		"    block: understand\n" +
+		"    next: impl\n" +
+		"  - id: impl\n" +
+		"    block: implement\n" +
+		"    in:\n      plan: source.out\n" +
+		"    next: freeze\n" +
+		"  - id: freeze\n" +
+		"    block: freeze\n" +
+		"    in:\n      branch: impl.out\n")
 	if err := os.WriteFile(filepath.Join(workflowDir, "alpha.yaml"), alphaDef, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -110,11 +121,14 @@ func TestFreezeLockKeyedOnWorkflowName(t *testing.T) {
 	workflowDir, defA, defB, store, artifacts := setupCompletionLockHarness(t)
 
 	create := func(id, wfName, version, stage string) db1.CreateWorkItem {
-		item := db1.CreateWorkItem{ID: id, Repo: "repo", ProposalPath: "p", WorkflowName: wfName, WorkflowVersion: version, StartStage: stage, ParentID: "wi_parent"}
+		item := db1.CreateWorkItem{ID: id, Repo: "repo", ProposalPath: id, WorkflowName: wfName, WorkflowVersion: version, StartStage: stage, ParentID: "wi_parent"}
 		if err := store.CreateWorkItem(t.Context(), item); err != nil {
 			t.Fatal(err)
 		}
 		if err := artifacts.PutProposal(id, []byte("p")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := artifacts.PutNodeArtifact(id, "impl", "branch", []byte("head")); err != nil {
 			t.Fatal(err)
 		}
 		return item
@@ -143,12 +157,19 @@ func TestFreezeLockKeyedOnWorkflowName(t *testing.T) {
 
 	freezeErr := make(chan error, 1)
 	go func() {
-		_, err := eng.Advance(t.Context(), alphaItem.ID)
+		result, err := eng.Advance(t.Context(), alphaItem.ID)
+		if err == nil && !result.Ran {
+			stored, _ := store.WorkItem(t.Context(), alphaItem.ID)
+			events, _ := store.Events(t.Context(), alphaItem.ID, 0, 20)
+			err = fmt.Errorf("freeze did not run: result=%+v stored=%+v events=%+v", result, stored, events)
+		}
 		freezeErr <- err
 	}()
 
 	select {
 	case <-freezeRunner.started:
+	case err := <-freezeErr:
+		t.Fatalf("freeze advance returned before runner entry: %v", err)
 	case <-time.After(2 * time.Second):
 		close(freezeRunner.release)
 		t.Fatal("freeze runner never entered")
@@ -183,7 +204,10 @@ func TestFreezeLockSerializesSameWorkflow(t *testing.T) {
 	workflowDir, defA, _, store, artifacts := setupCompletionLockHarness(t)
 
 	create := func(id, wfName, version, stage string) db1.CreateWorkItem {
-		item := db1.CreateWorkItem{ID: id, Repo: "repo", ProposalPath: "p", WorkflowName: wfName, WorkflowVersion: version, StartStage: stage, ParentID: "wi_parent"}
+		if _, err := artifacts.PutNodeArtifact(id, "impl", "branch", []byte("head")); err != nil {
+			t.Fatal(err)
+		}
+		item := db1.CreateWorkItem{ID: id, Repo: "repo", ProposalPath: id, WorkflowName: wfName, WorkflowVersion: version, StartStage: stage, ParentID: "wi_parent"}
 		if err := store.CreateWorkItem(t.Context(), item); err != nil {
 			t.Fatal(err)
 		}
@@ -250,7 +274,10 @@ func TestFreezeLockWatchdogReleasesOnContextCancel(t *testing.T) {
 	workflowDir, defA, _, store, artifacts := setupCompletionLockHarness(t)
 
 	create := func(id, wfName, version, stage string) db1.CreateWorkItem {
-		item := db1.CreateWorkItem{ID: id, Repo: "repo", ProposalPath: "p", WorkflowName: wfName, WorkflowVersion: version, StartStage: stage, ParentID: "wi_parent"}
+		if _, err := artifacts.PutNodeArtifact(id, "impl", "branch", []byte("head")); err != nil {
+			t.Fatal(err)
+		}
+		item := db1.CreateWorkItem{ID: id, Repo: "repo", ProposalPath: id, WorkflowName: wfName, WorkflowVersion: version, StartStage: stage, ParentID: "wi_parent"}
 		if err := store.CreateWorkItem(t.Context(), item); err != nil {
 			t.Fatal(err)
 		}
