@@ -141,6 +141,11 @@ const (
 	roundtableDelegateMaxTurnsCap = 24
 	delegateDeadlineGraceReserve  = 5 * time.Second
 	delegateWriteVerifyReserve    = 5 * time.Minute
+	// Keep the Go admission boundary aligned with AGENT_LOOP_MIN_CALL_MS in
+	// agent_types.h. Dispatching a write delegate with less than one viable
+	// model-call window only creates a zero-call failed job before the C runtime
+	// reports that its tool-loop budget is exhausted.
+	delegateWriteMinRunBudget = time.Minute
 )
 
 func (r *NativeRunner) delegate(ctx context.Context, step StepRequest, request DelegateRequest) (DelegateResult, error) {
@@ -206,9 +211,10 @@ func applyDelegateDeadlineCap(ctx context.Context, request *DelegateRequest) err
 	}
 	if request.Role == "code" && request.Tools {
 		reserve = delegateWriteVerifyReserve
-		if remaining <= reserve {
-			return fmt.Errorf("delegate stage wall budget exhausted: remaining=%s reserve=%s: %w",
-				remaining.Round(time.Millisecond), reserve, context.DeadlineExceeded)
+		if remaining < reserve+delegateWriteMinRunBudget {
+			return fmt.Errorf("delegate stage wall budget exhausted: remaining=%s reserve=%s minimum_run=%s: %w",
+				remaining.Round(time.Millisecond), reserve, delegateWriteMinRunBudget,
+				context.DeadlineExceeded)
 		}
 	}
 	capMillis := (remaining - reserve).Milliseconds()

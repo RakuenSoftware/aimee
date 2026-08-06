@@ -94,8 +94,20 @@ func TestDelegateDeadlineRefusesWriteWithoutVerificationReserve(t *testing.T) {
 	request := DelegateRequest{Role: "code", Tools: true}
 	err := applyDelegateDeadlineCap(ctx, &request)
 	if !errors.Is(err, context.DeadlineExceeded) ||
-		!strings.Contains(err.Error(), "remaining=") || !strings.Contains(err.Error(), "reserve=5m0s") {
+		!strings.Contains(err.Error(), "remaining=") || !strings.Contains(err.Error(), "reserve=5m0s") ||
+		!strings.Contains(err.Error(), "minimum_run=1m0s") {
 		t.Fatalf("deadline error=%v", err)
+	}
+}
+
+func TestDelegateDeadlineRefusesWriteWithTooLittleViableRunBudget(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute+45*time.Second)
+	defer cancel()
+	request := DelegateRequest{Role: "code", Tools: true}
+	err := applyDelegateDeadlineCap(ctx, &request)
+	if !errors.Is(err, context.DeadlineExceeded) ||
+		!strings.Contains(err.Error(), "minimum_run=1m0s") {
+		t.Fatalf("deadline error=%v, want refusal before a zero-call delegate dispatch", err)
 	}
 }
 
@@ -898,7 +910,6 @@ func TestNativeRunnerUsesCompleteArtifactsAndOnlyPositiveUIPins(t *testing.T) {
 	}
 }
 
-
 func TestNativeRunnerSplitAcceptsManagedChangeIntentBinding(t *testing.T) {
 	runner := &NativeRunner{agents: fixedResponseAgents{response: `{"schema_version":1,"packets":[{"packet_id":"p1","summary":"implement feature","target_blocks":["implement"],"dependencies":[],"acceptance_criteria":["feature exists"]}]}`}}
 	intent := []byte(`{"schema_version":1,"status":"unconfirmed","summary":"implement feature","rationale":"proposal","acceptance_criteria":["feature exists"]}`)
@@ -980,7 +991,6 @@ func TestNativeRunnerSplitPromptCarriesOriginalRequestAndRejectsFollowUpPackets(
 		}
 	}
 }
-
 
 func TestRoundtableRunIDIsJSONEscapedInTrustedPromptPreamble(t *testing.T) {
 	agents := &recordingAgents{}
