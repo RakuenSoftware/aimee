@@ -104,23 +104,48 @@ type Engine struct {
 	invocationSeq uint64
 }
 
-// rootCompletionLock returns the existing short per-root serialization lock.
-// Freeze acquires the same lock before invoking its runner and holds it through
-// the freeze runner and its artifact writes (publication and Move), so that the
-// freeze runner plus its artifact writes execute atomically with respect to
-// sibling completion work and no second parent-lock implementation is needed.
-// Capped-work runners are intentionally invoked outside this lock — the lock is
-// only taken once the capped runner returns, to order the actual-cost
-// reconciliation and lifecycle commit per root.
-func (e *Engine) rootCompletionLock(rootID string) *sync.Mutex {
+// rootCompletionLock returns the existing short per-(root, workflow) serialization
+// lock. Freeze acquires the same lock before invoking its runner and holds it
+// through the freeze runner and its artifact writes (publication and Move), so
+// that the freeze runner plus its artifact writes execute atomically with respect
+// to sibling completion work and no second parent-lock implementation is needed.
+// The key is (RootID, WorkflowName) so concurrent freezes on the same workflow
+// still serialize, but a freeze in flight on one workflow cannot block non-freeze
+// peers under the same root. Capped-work runners are intentionally invoked outside
+// this lock — the lock is only taken once the capped runner returns, to order the
+// actual-cost reconciliation and lifecycle commit per (root, workflow).
+func (e *Engine) rootCompletionLock(rootID, workflowName string) *sync.Mutex {
 	e.budgetMu.Lock()
 	defer e.budgetMu.Unlock()
-	lock := e.budgetLocks[rootID]
+	key := rootID + "\x00" + workflowName
+	lock := e.budgetLocks[key]
 	if lock == nil {
 		lock = &sync.Mutex{}
-		e.budgetLocks[rootID] = lock
+		e.budgetLocks[key] = lock
 	}
 	return lock
+}
+
+// acquireCompletionLock races a sync.Mutex.Lock against ctx. The watcher ensures
+// a stuck freeze cannot hold the lock indefinitely: if ctx is cancelled or
+// reaches its deadline before Lock returns, the helper waits for the in-flight
+// Lock to complete (so the mutex is not orphaned) and then immediately releases
+// it. acquired is true only when the caller now owns the lock and must arrange
+// to Unlock it.
+func (e *Engine) acquireCompletionLock(ctx context.Context, lock *sync.Mutex) (acquired bool, err error) {
+	done := make(chan struct{})
+	go func() {
+		lock.Lock()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true, nil
+	case <-ctx.Done():
+		<-done
+		lock.Unlock()
+		return false, ctx.Err()
+	}
 }
 
 func New(db *db1.Store, artifacts *wfe.ArtifactStore, workflowDir string, runner Runner) (*Engine, error) {
@@ -227,16 +252,20 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 	var completionLock *sync.Mutex
 	completionLocked := false
 	if node.Block == "freeze" {
-		completionLock = e.rootCompletionLock(budget.RootID)
-		completionLock.Lock()
-		completionLocked = true
+		completionLock = e.rootCompletionLock(budget.RootID, item.WorkflowName)
+		acquired, err := e.acquireCompletionLock(ctx, completionLock)
+		if err != nil {
+			return out, e.parkOnError(ctx, item, "freeze_lock_unavailable", err)
+		}
+		if acquired {
+			completionLocked = true
+		}
 	}
 	defer func() {
 		if completionLocked {
 			completionLock.Unlock()
 		}
 	}()
-
 	stopHeartbeat := make(chan struct{})
 	heartbeatDone := make(chan struct{})
 	if !budget.ReplayOnly {
@@ -267,9 +296,9 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 	// above); here we only need to take it for capped-work reconciliation and
 	// lifecycle commit, which intentionally run outside the runner call so that
 	// capped siblings can execute concurrently while only the short accounting
-	// step remains ordered per root.
+	// step remains ordered per (root, workflow).
 	if budget.MaxUSD > 0 && !completionLocked {
-		completionLock = e.rootCompletionLock(budget.RootID)
+		completionLock = e.rootCompletionLock(budget.RootID, item.WorkflowName)
 		completionLock.Lock()
 		completionLocked = true
 	}
