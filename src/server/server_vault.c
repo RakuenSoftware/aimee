@@ -4,10 +4,10 @@
  * the response. All policy + crypto lives below in vault_service. */
 #include "server.h" /* server_conn_t, server_send_*, handle_vault_* decls */
 #include "vault_service.h"
-#include "vault_store.h"      /* legacy actor-vault existence check */
-#include "vault_crypto.h"     /* VAULT_ROOT_KEY_LEN */
-#include "vault_capability.h" /* vault:write:server gate (D2c) */
-#include "log.h"               /* audit_log dedicated 0600 audit sink (D2/D2c) */
+#include "vault_store.h"        /* legacy actor-vault existence check */
+#include "vault_crypto.h"       /* VAULT_ROOT_KEY_LEN */
+#include "vault_capability.h"   /* vault:write:server gate (D2c) */
+#include "log.h"                /* audit_log dedicated 0600 audit sink (D2/D2c) */
 #include "vault_audit_bridge.h" /* publish server-principal writes onto the audit bus */
 #include "cJSON.h"
 #include <openssl/crypto.h>
@@ -197,8 +197,7 @@ void vault_audit_server_write(const server_conn_t *conn, const char *agent, cons
       transport = "unknown";
       break;
    }
-   const char *principal =
-      (conn && conn->vault_principal[0]) ? conn->vault_principal : "(server)";
+   const char *principal = (conn && conn->vault_principal[0]) ? conn->vault_principal : "(server)";
 
    /* D2/D2c: server-principal writes go to the dedicated append-only 0600 audit
     * sink (audit_log), NOT the operator-readable general server log — preserving
