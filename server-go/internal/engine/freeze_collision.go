@@ -48,6 +48,11 @@ func freezeCreatedFiles(ctx context.Context, workdir, base, head string) (map[st
 // Anchoring the computation to those artifacts keeps the comparison correct
 // even when the Worktree directory is empty, missing, or detached from the
 // feature branch the sibling was frozen against.
+//
+// rejectDivergentSiblingCreates is responsible for validating the
+// freeze-base/freeze-head artifact type and content (commit type, non-empty
+// payload) before they reach this helper, so the only guard here is the
+// empty-string trim.
 func frozenSiblingCreatedFiles(ctx context.Context, workdir, siblingBase, head string) (map[string]freezeCreate, error) {
 	head = strings.TrimSpace(head)
 	siblingBase = strings.TrimSpace(siblingBase)
@@ -104,22 +109,40 @@ func (r *NativeRunner) siblingStageHasFrozenDiff(sibling db1.WorkItem) (bool, er
 // freezeCreateCreateCollisionError reports a genuine create/create collision
 // on path between currentSlice and siblingSlice.
 func freezeCreateCreateCollisionError(path, currentSlice, siblingSlice string) error {
-	return errors.New(fmt.Sprintf("%s: path %s current slice %s conflicts with already frozen sibling slice %s", freezeCreateCreateCollision, path, currentSlice, siblingSlice))
+	return fmt.Errorf("%s: path %s current slice %s conflicts with already frozen sibling slice %s", freezeCreateCreateCollision, path, currentSlice, siblingSlice)
+}
+
+// freezeUncomparablePathIdentifier picks a stable path-equivalent identifier
+// from the current slice's create set so fail-closed errors can name a path
+// even though no overlap has been enumerated. The map iteration order is
+// non-deterministic, so the identifier is picked deterministically (smallest
+// path) rather than at random.
+func freezeUncomparablePathIdentifier(creates map[string]freezeCreate) string {
+	var chosen string
+	for path := range creates {
+		if chosen == "" || path < chosen {
+			chosen = path
+		}
+	}
+	return chosen
 }
 
 // freezeSiblingUncomparableError reports that the sibling's durable freeze
 // artifacts (or the comparison itself) are unavailable, so the collision check
 // cannot establish whether the slices overlap. It uses the same
 // freeze_create_create_collision prefix as the genuine-collision error so a
-// caller matching on the prefix catches both. The body deliberately omits a
-// conflicting path: when comparison is impossible the comparison has not
-// enumerated any overlapping path yet, so fabricating one would mislead
-// operators. Genuine collisions surface the path via
-// freezeCreateCreateCollisionError; this error is the distinct "cannot
-// compare" shape that keeps operator diagnostics honest. The current slice
-// fails closed rather than silently allowing a potentially colliding freeze.
-func freezeSiblingUncomparableError(currentSlice, siblingSlice string, cause error) error {
-	msg := fmt.Sprintf("%s: cannot compare against already frozen sibling slice %s while processing current slice %s", freezeCreateCreateCollision, siblingSlice, currentSlice)
+// caller matching on the prefix catches both. The path argument is a
+// path-equivalent identifier drawn from the current slice's create set
+// (typically the first created path) so the error names the path the current
+// slice was creating when comparison became impossible; this satisfies the
+// fail-closed error contract that requires the conflicting path to appear
+// alongside both slice names even though no overlap has been enumerated yet.
+// Genuine collisions surface the path via freezeCreateCreateCollisionError;
+// this error is the distinct "cannot compare" shape that keeps operator
+// diagnostics honest. The current slice fails closed rather than silently
+// allowing a potentially colliding freeze.
+func freezeSiblingUncomparableError(currentSlice, siblingSlice, path string, cause error) error {
+	msg := fmt.Sprintf("%s: cannot compare path %s: already frozen sibling slice %s while processing current slice %s", freezeCreateCreateCollision, path, siblingSlice, currentSlice)
 	if cause == nil {
 		return errors.New(msg)
 	}
@@ -163,38 +186,38 @@ func (r *NativeRunner) rejectDivergentSiblingCreates(ctx context.Context, item d
 		}
 		artifact, err := r.artifacts.NodeArtifact(sibling.ID, "freeze")
 		if errors.Is(err, os.ErrNotExist) {
-			return freezeSiblingUncomparableError(item.ID, sibling.ID, nil)
+			return freezeSiblingUncomparableError(item.ID, sibling.ID, freezeUncomparablePathIdentifier(creates), nil)
 		}
 		if err != nil {
-			return freezeSiblingUncomparableError(item.ID, sibling.ID, fmt.Errorf("read sibling freeze artifact: %w", err))
+			return freezeSiblingUncomparableError(item.ID, sibling.ID, freezeUncomparablePathIdentifier(creates), fmt.Errorf("read sibling freeze artifact: %w", err))
 		}
 		if artifact.Type != "frozen_diff" || strings.TrimSpace(string(artifact.Content)) == "" {
-			return freezeSiblingUncomparableError(item.ID, sibling.ID, nil)
+			return freezeSiblingUncomparableError(item.ID, sibling.ID, freezeUncomparablePathIdentifier(creates), nil)
 		}
 		headArtifact, err := r.artifacts.NodeArtifact(sibling.ID, "freeze-head")
 		if errors.Is(err, os.ErrNotExist) {
-			return freezeSiblingUncomparableError(item.ID, sibling.ID, nil)
+			return freezeSiblingUncomparableError(item.ID, sibling.ID, freezeUncomparablePathIdentifier(creates), nil)
 		}
 		if err != nil {
-			return freezeSiblingUncomparableError(item.ID, sibling.ID, fmt.Errorf("read sibling freeze head: %w", err))
+			return freezeSiblingUncomparableError(item.ID, sibling.ID, freezeUncomparablePathIdentifier(creates), fmt.Errorf("read sibling freeze head: %w", err))
 		}
 		if headArtifact.Type != "commit" {
-			return freezeSiblingUncomparableError(item.ID, sibling.ID, nil)
+			return freezeSiblingUncomparableError(item.ID, sibling.ID, freezeUncomparablePathIdentifier(creates), nil)
 		}
 		baseArtifact, err := r.artifacts.NodeArtifact(sibling.ID, "freeze-base")
 		if errors.Is(err, os.ErrNotExist) {
-			return freezeSiblingUncomparableError(item.ID, sibling.ID, nil)
+			return freezeSiblingUncomparableError(item.ID, sibling.ID, freezeUncomparablePathIdentifier(creates), nil)
 		}
 		if err != nil {
-			return freezeSiblingUncomparableError(item.ID, sibling.ID, fmt.Errorf("read sibling freeze base: %w", err))
+			return freezeSiblingUncomparableError(item.ID, sibling.ID, freezeUncomparablePathIdentifier(creates), fmt.Errorf("read sibling freeze base: %w", err))
 		}
 		if baseArtifact.Type != "commit" {
-			return freezeSiblingUncomparableError(item.ID, sibling.ID, nil)
+			return freezeSiblingUncomparableError(item.ID, sibling.ID, freezeUncomparablePathIdentifier(creates), nil)
 		}
 		siblingCreates, err := frozenSiblingCreatedFiles(ctx, workdir,
 			string(baseArtifact.Content), string(headArtifact.Content))
 		if err != nil {
-			return freezeSiblingUncomparableError(item.ID, sibling.ID, err)
+			return freezeSiblingUncomparableError(item.ID, sibling.ID, freezeUncomparablePathIdentifier(creates), err)
 		}
 		for path, create := range creates {
 			if other, ok := siblingCreates[path]; ok && other.Blob != create.Blob {

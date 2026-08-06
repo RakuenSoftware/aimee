@@ -248,8 +248,9 @@ func TestRejectDivergentSiblingCreatesAllowsEditOnlyChange(t *testing.T) {
 // the wrong-type branch: the sibling's freeze-head artifact exists but its
 // declared type is not "commit", so the freeze-base/freeze-head derived
 // comparison cannot run. The current slice's freeze must fail closed (no
-// silent allow) and the error must identify the sibling rather than a
-// fabricated conflicting path.
+// silent allow). The error carries the freeze_create_create_collision
+// prefix, a path-equivalent identifier drawn from the current slice's create
+// set (the first created path), and both slice names.
 func TestRejectDivergentSiblingCreatesRejectsOnInvalidFreezeHeadType(t *testing.T) {
 	ctx, store, artifacts, registry, _, slicedir, base, _ := setupFreezeCollisionHarness(t)
 
@@ -273,14 +274,15 @@ func TestRejectDivergentSiblingCreatesRejectsOnInvalidFreezeHeadType(t *testing.
 	}
 	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
 	err = runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead)
-	assertFreezeSiblingUncomparable(t, err, item.ID, "wi_s0")
+	assertFreezeSiblingUncomparable(t, err, "frozen.txt", item.ID, "wi_s0")
 }
 
 // TestRejectDivergentSiblingCreatesFailsClosedWithMissingFreezeArtifacts
 // covers the genuinely-missing branch: all three freeze artifacts are removed
 // from the store, so there is no basis on which to compute the sibling's
 // create set. The current slice must fail closed with the same
-// freeze_create_create_collision prefix and both slice names — silently
+// freeze_create_create_collision prefix, a path-equivalent identifier
+// (drawn from the current slice's create set), and both slice names — silently
 // passing would let a colliding freeze through.
 func TestRejectDivergentSiblingCreatesFailsClosedWithMissingFreezeArtifacts(t *testing.T) {
 	ctx, store, artifacts, registry, _, slicedir, base, _ := setupFreezeCollisionHarness(t)
@@ -305,15 +307,15 @@ func TestRejectDivergentSiblingCreatesFailsClosedWithMissingFreezeArtifacts(t *t
 	}
 	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
 	err = runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead)
-	assertFreezeSiblingUncomparable(t, err, item.ID, "wi_s0")
+	assertFreezeSiblingUncomparable(t, err, "frozen.txt", item.ID, "wi_s0")
 }
 
-func assertFreezeSiblingUncomparable(t *testing.T, err error, currentSlice, siblingSlice string) {
+func assertFreezeSiblingUncomparable(t *testing.T, err error, path, currentSlice, siblingSlice string) {
 	t.Helper()
 	if err == nil {
 		t.Fatal("expected fail-closed freeze_create_create_collision error, got nil")
 	}
-	for _, want := range []string{freezeCreateCreateCollision, "cannot compare", currentSlice, siblingSlice} {
+	for _, want := range []string{freezeCreateCreateCollision, "cannot compare", path, currentSlice, siblingSlice} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("expected fail-closed error containing %q, got: %v", want, err)
 		}
