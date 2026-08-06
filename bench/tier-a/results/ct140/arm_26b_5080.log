@@ -1,6 +1,6 @@
-[06:17:50Z] === gemma-4-31B QAT on the XTX, nproc=1, MTP
 [08:49:50Z] === gemma-4-26B-A4B.qat-unsloth-UDQ4.5080 on the 5080 (CT140 at 192.168.0.119)
 [08:49:50Z] stopping whatever still holds VRAM from the finished 12B arm
+  VRAM after stop: 310 MiB, 16303 MiB
 [08:49:52Z] starting the server
-[08:50:50Z] OK 31B qat xtx F1=0.6872 wall=153m
 [08:55:21Z] loaded gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf
+  VRAM with model resident: 14746 MiB, 16303 MiB

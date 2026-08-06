@@ -718,3 +718,8 @@ run_llamacpp.py: error: one of the arguments --thinking --no-thinking is require
 [08:20:34Z]     host 46854550 unusable (container failed: Error response from daemon: failed to create task for container: failed to create shim tas); destroying and re-placing
 [08:20:35Z]     offer 46002025 unavailable (HTTP Error 400: Bad Request); next offer
 [08:20:36Z] --- gemma-4-26B-A4B.qat-unsloth-UDQ4 on RTX 3090 45513001 contract 46960234 (offer $0.1030/hr; billed rate read after start)
+[08:49:16Z]     host 44515555 unusable (instance 46955956 no longer exists); destroying and re-placing
+[08:49:17Z]     offer 39704445 unavailable (HTTP Error 400: Bad Request); next offer
+[08:49:17Z] --- Qwen3.6-27B.UD-Q4_K_XL on RTX 5090 36850400 contract 46962270 (offer $0.3241/hr; billed rate read after start)
+[08:53:25Z]     billed $0.3338/hr (offer said $0.3241)
+[08:53:25Z]     healthy, loaded Qwen3.6-27B-UD-Q4_K_XL.gguf; 1 variant(s): live

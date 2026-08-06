@@ -3,3 +3,4 @@
 [06:24:01Z]   -> running 1 processes, cache-ram 1024 MiB each
 [06:24:01Z]   all 1 servers up; VRAM now  MiB
 [06:24:01Z] START gemma-4-31B-it.qat-UD-Q4_K_XL.xtx across 1 shards
+[08:50:45Z] DONE gemma-4-31B-it.qat-UD-Q4_K_XL.xtx rows=1001/1001 wall=146m43s procs=1 retries=0
