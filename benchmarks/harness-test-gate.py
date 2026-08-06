@@ -199,12 +199,18 @@ def removed_existing_tests(workspace, seed, written):
     return lost
 
 
-def agent_test_gate(workspace, task, changed):
+def agent_test_gate(workspace, task, changed, hidden_ok=False):
     """Did the agent write a test that actually catches this defect?
 
     no test           -> fail, reason "no_test"
     passes on broken  -> fail, reason "does_not_catch_defect"
     fails on fixed    -> fail, reason "fails_on_own_fix"
+
+    hidden_ok is the GRADED suite's verdict and arbitrates the integrity checks
+    below. Removing a test, or dropping an assertion, is only evidence of gaming
+    when upstream's own test ALSO fails. When a ticket asks for behaviour to
+    change, the assertions that pinned the old behaviour must change with it, and
+    refusing to let them is penalising the correct fix.
     """
     written = agent_test_files(changed)
     if not written:
@@ -259,15 +265,32 @@ def agent_test_gate(workspace, task, changed):
     if not green:
         return {"ok": False, "reason": "fails_on_own_fix", "files": written,
                 "red_passed": False, "green_passed": False}
+    # Integrity checks, arbitrated by the graded suite.
+    #
+    # Measured on am_e4c4afa194: the ticket requires the ledger command field to
+    # carry a one-way fingerprint instead of the raw memory key, so the existing
+    # assertion that it equals "fact/ReleasePlan" HAD to go. All four arms
+    # removed exactly that assertion, all four passed the graded suite, and the
+    # unconditional check failed all four. A check that fires on 100% of arms
+    # while every one of them passes grading is measuring itself, not them.
+    #
+    # When the graded suite FAILS, the same edit is the tell (am_b84c9294aa,
+    # am_270b3483d5): the agent changed the test to agree with a change upstream
+    # rejects.
     lost = removed_existing_tests(workspace, seed, written)
-    if lost:
+    weakened = weakened_existing_assertions(workspace, seed, written)
+    if lost and not hidden_ok:
         return {"ok": False, "reason": "removed_existing_test:%s" % json.dumps(lost),
                 "files": written, "red_passed": False, "green_passed": True}
-    weakened = weakened_existing_assertions(workspace, seed, written)
-    if weakened:
+    if weakened and not hidden_ok:
         return {"ok": False, "reason": "changed_existing_assertions:%s" % json.dumps(weakened),
                 "files": written, "red_passed": False, "green_passed": True}
-    return {"ok": True, "reason": "catches_defect", "files": written,
+    note = ""
+    if lost or weakened:
+        # Still recorded: the edit happened and is worth seeing, it just is not
+        # disqualifying when the graded contract is satisfied.
+        note = ";edited_existing_tests_but_graded_ok"
+    return {"ok": True, "reason": "catches_defect" + note, "files": written,
             "red_passed": False, "green_passed": True}
 # --- end agent test gate ---------------------------------------------------
 '''
@@ -360,7 +383,7 @@ def main():
         anchor_changed,
         anchor_changed + "\n"
         "    try:\n"
-        "        tests = agent_test_gate(workspace, task, changed)\n"
+        "        tests = agent_test_gate(workspace, task, changed, hidden.get(\"passed\", False))\n"
         "    except Exception as exc:  # noqa: BLE001 - a scoring bug must not void the cell\n"
         "        tests = {\"ok\": False, \"files\": [],\n"
         "                 \"reason\": \"gate_error:%s: %s\" % (type(exc).__name__, exc)}", 1)
