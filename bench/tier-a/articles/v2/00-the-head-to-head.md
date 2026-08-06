@@ -1,4 +1,4 @@
-# Twenty-three arms, one corpus, and a fifteen-fold parameter increase worth 0.047
+# Thirty-two arms, one corpus, and a fifteen-fold parameter increase worth 0.047
 
 DRAFT. Every arm is 1,001 notes on corpus v5 with prompt v8, scored by the
 unmodified scorer. Metric columns are recomputed from the prediction files in one
@@ -43,19 +43,28 @@ including negation, multi-fact, implicit and deliberately ambiguous.
 | gemma-4-12B | UD-Q4 | 0.6754 | 0.6271 | 0.7318 | 0.90 | 0.593 | 135 | 1.00 |
 | gemma-4-26B-A4B | QAT q4_0, google | 0.6575 | 0.6398 | 0.6761 | 0.94 | 0.696 | 102 | 1.00 |
 | gemma-4-E2B | QAT q4_0 | 0.6406 | 0.6294 | 0.6523 | 0.99 | 0.717 | 93 | 1.00 |
+| gemma-4-E4B | UD-Q6 | 0.6339 | 0.5976 | 0.6750 | 1.00 | 0.578 | 139 | 0.85 |
+| gemma-4-E2B | UD-Q8 | 0.6226 | 0.6094 | 0.6364 | 1.00 | 0.683 | 105 | 1.00 |
 | gemma-4-E4B | QAT q4_0 | 0.6194 | 0.5878 | 0.6545 | 1.00 | 0.705 | 95 | 0.85 |
+| gemma-4-E2B | UD-Q6 | 0.6179 | 0.6077 | 0.6284 | 1.00 | 0.661 | 112 | 1.00 |
 | gemma-4-E4B | UD-Q4 | 0.6166 | 0.5767 | 0.6625 | 1.00 | 0.568 | 143 | 1.00 |
+| gemma-4-E4B | UD-Q8 | 0.6094 | 0.5744 | 0.6489 | 1.00 | 0.578 | 139 | 1.00 |
 | gemma-4-E2B | UD-Q4 | 0.6017 | 0.5840 | 0.6205 | 1.00 | 0.677 | 105 | 1.00 |
 | LFM2.5-2.6B | Q4_K_M | 0.5854 | 0.5664 | 0.6057 | 1.00 | 0.630 | 124 | 1.00 |
+| LFM2.5-2.6B | Q6_K | 0.5795 | 0.5526 | 0.6091 | 1.00 | 0.612 | 125 | 1.00 |
+| LFM2.5-2.6B | Q8_0 | 0.5750 | 0.5454 | 0.6080 | 1.00 | 0.593 | 135 | 1.00 |
 | granite-4.1-3b | UD-Q4 | 0.5432 | 0.5501 | 0.5364 | 1.00 | **0.929** | **24** | 0.00 |
 | gemma-3n-E4B | UD-Q4 | 0.5331 | 0.4918 | 0.5818 | 1.00 | 0.422 | 188 | 0.00 |
 | LFM2.5-8B-A1B | Q4_K_M | 0.5198 | 0.5707 | 0.4773 | 0.98 | 0.907 | 31 | 1.00 |
 | Qwen3-1.7B | UD-Q4 | 0.4618 | 0.4503 | 0.4739 | 0.99 | 0.652 | 113 | 1.00 |
 | SmolLM3-3B | Q8_0 | 0.3933 | 0.3767 | 0.4114 | 0.99 | 0.354 | 214 | 0.00 |
 | granite-4.0-1b | UD-Q4 | 0.3911 | 0.3836 | 0.3989 | 0.95 | 0.888 | 36 | 0.00 |
+| LFM2.5-VL-1.6B | Q6_K | 0.2744 | 0.2569 | 0.2943 | 1.00 | 0.183 | 275 | 0.00 |
 | LFM2.5-VL-1.6B | Q8_0 | 0.2725 | 0.2537 | 0.2943 | 1.00 | 0.323 | 223 | 0.00 |
+| LFM2.5-1.2B | Q6_K | 0.1771 | 0.2320 | 0.1432 | **0.59** | 0.510 | 87 | 0.00 |
 | LFM2.5-1.2B | Q8_0 | 0.1671 | 0.2078 | 0.1398 | **0.73** | 0.382 | 202 | 0.00 |
 | MiniCPM5-1B | Q8_0 | 0.1652 | 0.2630 | 0.1205 | **0.87** | 0.963 | 12 | 1.00 |
+| LFM2.5-230M | Q6_K | 0.1363 | 0.1330 | 0.1398 | 1.00 | 0.158 | 271 | 0.00 |
 | LFM2.5-230M | Q8_0 | 0.1309 | 0.1289 | 0.1330 | 1.00 | 0.531 | 151 | 0.00 |
 
 `abstain` is how often a model correctly returns nothing on those 322 factless
@@ -156,12 +165,12 @@ not the quant. Scaling to 31B bought recall and spent restraint. The aggregate h
 the whole trade.
 
 At the other end, **granite-4.1-3b abstains on 93% of factless notes and invents
-24 triples.** Fourteenth on F1, first on discipline, by a distance.
+24 triples.** Twentieth on F1, first on discipline, by a distance.
 
 So the decision is about what your pipeline does with a wrong fact. Caught by a
 write gate and costs a review: buy recall, take the 31B. Lands in a graph where
 nothing will ever find it again: buy restraint, and granite-4.1-3b invents fewer
-triples than all thirteen models scoring above it.
+triples than all nineteen arms scoring above it.
 
 ## Read the parse column first
 
@@ -180,23 +189,26 @@ And the reverse trap. **LFM2.5-230M parses 1.00 and scores 0.1309.** Nothing is
 wrong with its format. It is answering fluently and incorrectly. A clean parse rate
 is not evidence of a working model.
 
-## Half the field never reasons
+## A third of the field never reasons
 
 | reasons on ~0% of rows | reasons on ~100% |
 |---|---|
-| granite-4.1-3b, granite-4.0-1b, gemma-3n-E4B, SmolLM3-3B, LFM2.5-VL-1.6B, LFM2.5-1.2B, LFM2.5-230M | every dense gemma-4, both Qwen3.6 arms, LFM2.5-2.6B, LFM2.5-8B-A1B, Qwen3-1.7B, MiniCPM5-1B |
+| granite-4.1-3b, granite-4.0-1b, gemma-3n-E4B, SmolLM3-3B, LFM2.5-VL-1.6B, LFM2.5-1.2B, LFM2.5-230M | every gemma-4 arm except the two E4B partials below, both Qwen3.6 arms, LFM2.5-2.6B, LFM2.5-8B-A1B, Qwen3-1.7B, MiniCPM5-1B |
 
 On gemma-4-E4B I know why. One sentence in my prompt, `No prose, no markdown.`,
 suppressed reasoning across 10,000 notes while every row still recorded
 `thinking: true`. Removing it restored reasoning on 770 of 770 notes.
 
-I have run that diagnostic on four models. Eighteen are unchecked. A model that
+I have run that diagnostic on four models. Twenty-eight arms are unchecked. A model that
 silently loses its reasoning pass scores as a worse model, so some fraction of the
 bottom half of this table is a prompt problem wearing the costume of a capability
 problem, and I cannot tell you which rows.
 
-One model reasons partially: gemma-4-E4B under QAT, on 85% of rows. I do not know
-why.
+Two arms reason partially, both gemma-4-E4B, both on 85% of rows: the QAT q4_0
+build and UD-Q6. I had written that up as a QAT effect when QAT was the only arm
+showing it. UD-Q6 is not a QAT build, so whatever this is, it is not that. The
+same model at UD-Q4 and UD-Q8 reasons on every row, which rules out a plain
+size-of-quant story too. I do not know what it is.
 
 ## What this is not
 
