@@ -30,7 +30,7 @@ mkdir -p "$OUT" .scratch
 say() { echo "[$(date -u +%H:%M:%SZ)] $*" | tee -a "$OUT/gen.log"; }
 
 HOST=root@192.168.1.253
-EP=192.168.0.5
+EP=$(ssh -n -o ConnectTimeout=15 $HOST "pct exec 140 -- hostname -I" 2>/dev/null | awk '{print $1}')
 PORT=8991
 BIN=/opt/llama.cpp/build-cuda/bin/llama-server
 HFH=/opt/hf

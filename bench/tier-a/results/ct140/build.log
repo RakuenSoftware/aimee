@@ -1,0 +1,55 @@
+[22:27:28Z] creating CT 140 on storage (300G)
+done: SHA256:4aEgtgC2n1BbWRsrS8SfMhmjmWKya0R3X9+GdhCWajA root@tierA-5080
+Creating SSH host key 'ssh_host_ecdsa_key' - this may take some time ...
+done: SHA256:4FyKX5dgzIeydSWnuawS314IuE/EOP5X84nAniDt9S4 root@tierA-5080
+[22:27:30Z] adding GPU passthrough to the container config
+[22:27:30Z] starting CT
+status: running
+[22:27:44Z] installing base packages
+base-ok
+[22:28:06Z] installing the nvidia userspace matching the host driver
+[22:28:06Z]   host driver: 610.43.02
+nvidia-userspace-ok
+[22:28:22Z] verifying the GPU is visible inside the container
+NVIDIA GeForce RTX 5080, 16303 MiB
+[22:28:22Z] installing the CUDA toolkit (nvcc) for the llama.cpp build
+cuda-toolkit-ok
+[22:29:00Z] building llama.cpp with CUDA (this is the long step)
+[22:29:17Z] CT 140 build finished
+[23:01:06Z] removing the distro CUDA 12.0 toolkit
+removed
+[23:01:07Z] adding the NVIDIA CUDA repo for ubuntu 24.04
+repo-added
+[23:01:11Z] cuda-toolkit packages now visible:
+cuda-toolkit-13-2 - CUDA Toolkit 13.2 meta-package
+cuda-toolkit-13-2-config-common - Common config package for CUDA Toolkit 13.2.
+cuda-toolkit-13-3 - CUDA Toolkit 13.3 meta-package
+cuda-toolkit-13-3-config-common - Common config package for CUDA Toolkit 13.3.
+cuda-toolkit-13-config-common - Common config package for CUDA Toolkit 13.
+[23:01:12Z] installing cuda-toolkit-13-config-common (large download, no timeout applied)
+toolkit-ok
+[23:01:15Z] nvcc version now:
+[23:01:15Z] rebuilding llama.cpp; compiler output kept in /tmp/build.log this time
+dirname: missing operand
+Try 'dirname --help' for more information.
+BUILD-FAILED
+gmake: Makefile: No such file or directory
+gmake: *** No rule to make target 'Makefile'.  Stop.
+[23:01:17Z] ct140 cuda rebuild finished
+[23:32:48Z] removing the distro CUDA 12.0 toolkit
+removed
+[23:32:48Z] adding the NVIDIA CUDA repo for ubuntu 24.04
+repo-added
+[23:32:52Z] cuda-toolkit packages now visible:
+cuda-toolkit-13-2 - CUDA Toolkit 13.2 meta-package
+cuda-toolkit-13-2-config-common - Common config package for CUDA Toolkit 13.2.
+cuda-toolkit-13-3 - CUDA Toolkit 13.3 meta-package
+cuda-toolkit-13-3-config-common - Common config package for CUDA Toolkit 13.3.
+cuda-toolkit-13-config-common - Common config package for CUDA Toolkit 13.
+[23:32:54Z] installing cuda-toolkit-13-3 (large download, no timeout applied)
+toolkit-ok
+[23:36:53Z] nvcc version now:
+xargs: {}: No such file or directory
+[23:36:53Z] rebuilding llama.cpp; compiler output kept in /tmp/build.log this time
+BUILD-OK
+[23:39:46Z] ct140 cuda rebuild finished

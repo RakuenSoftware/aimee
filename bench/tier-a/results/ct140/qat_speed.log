@@ -1,0 +1,4 @@
+[00:05:00Z] === same-host QAT speed test on the 5080 (LXC 140), both models, one card
+[00:05:00Z] --- qat
+   QAT   5080  tok/s median=285.7  (294 285 285 286 285 286)
+   QAT   5080  draft accepted 2516/2946 = 85.4%
