@@ -1249,6 +1249,49 @@ the request as a finding with the same force.
   - Both OFF cells still spent 2 roundtable_review calls that errored, so the
     OFF credits include the cost of trying and failing to get a review.
 
+## Finding 28 — the full ON/OFF set: the panel helps, hurts, or is irrelevant, by ticket shape
+
+Third and last cell of the A/B. am_b84c9294aa is the under-specified ticket
+(Finding 24): it states a diagnosis, never a deliverable.
+
+| | roundtable ON | roundtable OFF |
+|---|---|---|
+| hidden_ok | false | false |
+| deletes the waiters guard | yes | **yes** |
+| finds note_lease_site (the real fix) | no | **no** |
+| tests_ok | true (re-scored false) | **false — removed_existing_test** |
+| credits | 54.01 | 49.56 |
+| wall | 585s | 345s |
+
+aimee makes the SAME wrong fix with or without a reviewer, deleting the same
+guard and missing the same existing helper. The panel is not the cause here; the
+ticket is.
+
+### The complete picture across three ticket shapes
+
+| task | shape | ON | OFF | panel's effect |
+|---|---|---|---|---|
+| am_312e901904 | two defects | both fixed, 67.05 | one fixed, 74.25 | **helps** — cheaper and more complete |
+| am_270b3483d5 | minimal fix | FAILS, 67.59 | passes, 33.30 | **hurts** — doubles cost, causes failure |
+| am_b84c9294aa | under-specified | fails, 54.01 | fails, 49.56 | **irrelevant** — same wrong fix |
+
+One mechanism -- push for more -- and three outcomes decided entirely by whether
+the ticket actually wants more. That is a property of the REQUEST, which the
+panel is given, so it is in principle detectable by the panel itself.
+
+### Consequences for the article
+
+The honest headline is not "review helps" or "review is overhead". It is that an
+unconditional scope PUSH is right about a third of the time, wrong a third, and
+irrelevant a third, on this corpus. A reviewer that could tell which ticket it is
+holding would be strictly better than either always-on or always-off.
+
+### Also confirmed here
+
+removed_existing_test fired LIVE for the first time (previous instances were
+re-scored from stored artifacts), correctly failing a cell whose only test change
+was inverting an existing guard.
+
 ## Caveats for anything published from this
 
 - 6 of 8 tasks, **one replicate**, no confidence intervals. Per-task spread is
