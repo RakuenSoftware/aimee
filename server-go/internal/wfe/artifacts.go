@@ -18,6 +18,11 @@ var (
 	ErrInvalidWorkItem    = errors.New("invalid work-item id")
 	ErrInvalidNode        = errors.New("invalid workflow node id")
 	ErrImmutable          = errors.New("immutable artifact already has different content")
+	// ErrArtifactNotExist signals that a NodeArtifact read could not find the
+	// underlying file. It is returned through %w so callers can match it
+	// structurally via errors.Is and still unwrap to os.ErrNotExist /
+	// fs.ErrNotExist when they want to branch on any "missing" cause.
+	ErrArtifactNotExist   = errors.New("artifact does not exist")
 	workItemIDPattern     = regexp.MustCompile(`^wi_[A-Za-z0-9_.-]+$`)
 	artifactNodeIDPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
 )
@@ -252,6 +257,9 @@ func (s *ArtifactStore) read(workItemID, name string) ([]byte, error) {
 	}
 	content, err := os.ReadFile(path)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("read %s: %w: %w", name, ErrArtifactNotExist, err)
+		}
 		return nil, fmt.Errorf("read %s: %w", name, err)
 	}
 	return content, nil

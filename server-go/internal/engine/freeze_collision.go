@@ -170,7 +170,8 @@ func freezeSiblingUncomparableError(currentSlice, siblingSlice, path string, cau
 //     allow it through on a transient store error. Integrity-validation
 //     failures (NodeArtifact wrapping "node artifact failed integrity
 //     validation") are explicitly propagated here, not silently skipped.
-//   - A missing artifact (os.ErrNotExist) returns ok=false with a nil err.
+//   - A missing artifact (os.ErrNotExist / fs.ErrNotExist, also surfaced
+//     structurally as wfe.ErrArtifactNotExist) returns ok=false with a nil err.
 //     The sibling simply is not frozen (per the durable-triple definition),
 //     so the caller skips it as the previous siblingStageHasFrozenDiff
 //     continue path did.
@@ -188,7 +189,7 @@ func frozenSiblingArtifacts(siblingID string, store *wfe.ArtifactStore) (head, b
 	}
 	diff, err := store.NodeArtifact(siblingID, "freeze")
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, wfe.ErrArtifactNotExist) {
 			return "", "", false, nil
 		}
 		return "", "", false, err
@@ -198,7 +199,7 @@ func frozenSiblingArtifacts(siblingID string, store *wfe.ArtifactStore) (head, b
 	}
 	headArt, err := store.NodeArtifact(siblingID, "freeze-head")
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, wfe.ErrArtifactNotExist) {
 			return "", "", false, nil
 		}
 		return "", "", false, err
@@ -208,7 +209,7 @@ func frozenSiblingArtifacts(siblingID string, store *wfe.ArtifactStore) (head, b
 	}
 	baseArt, err := store.NodeArtifact(siblingID, "freeze-base")
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, wfe.ErrArtifactNotExist) {
 			return "", "", false, nil
 		}
 		return "", "", false, err
