@@ -202,6 +202,7 @@ func TestRejectDivergentSiblingCreatesAllowsIdenticalCreateWithoutWorktree(t *te
 		t.Fatal(err)
 	}
 
+	gitRun(t, slicedir, "checkout", "-q", "-B", "aimee/wi/wi_child", base)
 	if err := os.WriteFile(filepath.Join(slicedir, "frozen.txt"), []byte("frozen sibling blob\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
