@@ -146,7 +146,13 @@ def chart_intervals(rows, label):
     return svg(W, H, label, b)
 
 
-def chart_bars(rows, value_col, label_col, note_col, hi, unit, accent):
+def num_first(s):
+    """First number in a cell. For values written as a fraction, e.g. 74/100."""
+    m = re.search(r'-?[\d.]+', s.replace('−', '-'))
+    return float(m.group()) if m else 0.0
+
+
+def chart_bars(rows, value_col, label_col, note_col, hi, unit, accent, parse=None):
     W, rh, padT, padB, gut, padR = 760, 34, 24, 36, 210, 128
     H = padT + len(rows) * rh + padB
     def x(v):
@@ -157,16 +163,17 @@ def chart_bars(rows, value_col, label_col, note_col, hi, unit, accent):
                  % (x(t), x(t), padT - 8, padT + len(rows) * rh + 4))
         b.append('<text class="sg-chart__value" x="%.1f" y="%d" text-anchor="middle" '
                  'opacity=".7">%d</text>' % (x(t), padT + len(rows) * rh + 20, round(t)))
+    conv = parse or num
     for i, r in enumerate(rows):
         cy = padT + i * rh + rh / 2
-        v = num(r[value_col])
+        v = conv(r[value_col])
         k = accent(r)
         b.append('<text class="sg-chart__label" x="%d" y="%.1f" text-anchor="end">%s</text>'
                  % (gut - 12, cy + 4, esc(r[label_col])))
         b.append('<rect class="%s" x="%.1f" y="%.1f" width="%.1f" height="9" rx="4"/>'
                  % (series_class(k), x(0), cy - 4.5, max(x(v) - x(0), 1)))
-        b.append('<text class="sg-chart__value" x="%.1f" y="%.1f">%.1f</text>'
-                 % (x(v) + 9, cy + 4, v))
+        b.append('<text class="sg-chart__value" x="%.1f" y="%.1f">%s</text>'
+                 % (x(v) + 9, cy + 4, esc(r[value_col])))
         if note_col is not None:
             b.append('<text class="sg-chart__value" x="%d" y="%.1f" opacity=".7">%s</text>'
                      % (W - 74, cy + 4, esc(r[note_col])))
@@ -235,6 +242,99 @@ def chart_scatter(rows, xcol, ycol, xhi, yhi, xlab, ylab, accent, labelled):
     return svg(W, H, '%s against %s' % (xlab.lower(), ylab.lower()), b)
 
 
+def chart_zoom_dots(rows, value_col, label_col, lo, hi, unit, accent):
+    """Dots on a zoomed axis.
+
+    Dots rather than bars: the interesting range here is a few points wide, and a
+    bar chart whose baseline is not zero overstates every difference in it.
+    """
+    W, rh, padT, padB, gut, padR = 760, 26, 26, 40, 250, 74
+    H = padT + len(rows) * rh + padB
+    def x(v):
+        return gut + (v - lo) / (hi - lo) * (W - gut - padR)
+    b = []
+    step = (hi - lo) / 4.0
+    for i in range(5):
+        t = lo + i * step
+        b.append('<line class="sg-chart__grid" x1="%.1f" x2="%.1f" y1="%d" y2="%d"/>'
+                 % (x(t), x(t), padT - 8, padT + len(rows) * rh + 4))
+        b.append('<text class="sg-chart__value" x="%.1f" y="%d" text-anchor="middle" '
+                 'opacity=".7">%g</text>' % (x(t), padT + len(rows) * rh + 20, round(t, 1)))
+    for i, r in enumerate(rows):
+        cy = padT + i * rh + rh / 2
+        v = num(r[value_col])
+        k = accent(r)
+        b.append('<text class="sg-chart__label" x="%d" y="%.1f" text-anchor="end">%s</text>'
+                 % (gut - 12, cy + 4, esc(r[label_col])))
+        b.append('<circle class="%s sg-chart__ring" cx="%.1f" cy="%.1f" r="5"/>'
+                 % (series_class(k), x(v), cy))
+        b.append('<text class="sg-chart__value" x="%.1f" y="%.1f">%s</text>'
+                 % (W - padR + 10, cy + 4, esc(r[value_col])))
+    b.append('<text class="sg-chart__axis" x="%.1f" y="%d" text-anchor="middle">%s</text>'
+             % ((gut + W - padR) / 2, H - 6, unit))
+    return svg(W, H, 'Values on a zoomed scale, one row per run', b)
+
+
+def chart_zero_centred(rows, value_col, label_cols, span, unit):
+    """Differences against a zero rule, where the claim is that they are noise."""
+    W, rh, padT, padB, gut, padR = 760, 26, 34, 40, 200, 84
+    H = padT + len(rows) * rh + padB
+    def x(v):
+        return gut + (v + span) / (2 * span) * (W - gut - padR)
+    yb = padT + len(rows) * rh
+    b = []
+    for t in (-span, -span / 2, 0, span / 2, span):
+        cls = 'sg-chart__rule' if t == 0 else 'sg-chart__grid'
+        b.append('<line class="%s" x1="%.1f" x2="%.1f" y1="%d" y2="%.1f"/>'
+                 % (cls, x(t), x(t), padT - 12, yb + 2))
+        lab = '0' if abs(t) < 1e-12 else ('+' if t > 0 else '−') + ('%g' % abs(round(t, 4)))
+        b.append('<text class="sg-chart__value" x="%.1f" y="%.1f" text-anchor="middle" '
+                 'opacity=".7">%s</text>' % (x(t), yb + 20, lab))
+    b.append('<text class="sg-chart__axis" x="%.1f" y="%d" text-anchor="middle">NO CHANGE</text>'
+             % (x(0), padT - 20))
+    for i, r in enumerate(rows):
+        cy = padT + i * rh + rh / 2
+        v = num(r[value_col])
+        name = ' '.join(r[c] for c in label_cols)
+        b.append('<text class="sg-chart__label" x="%d" y="%.1f" text-anchor="end">%s</text>'
+                 % (gut - 12, cy + 4, esc(name)))
+        b.append('<line class="sg-chart__line sg-chart__line--muted" x1="%.1f" x2="%.1f" '
+                 'y1="%.1f" y2="%.1f"/>' % (x(0), x(v), cy, cy))
+        b.append('<circle class="sg-chart__mark sg-chart__mark--1 sg-chart__ring" '
+                 'cx="%.1f" cy="%.1f" r="5"/>' % (x(v), cy))
+        b.append('<text class="sg-chart__value" x="%d" y="%.1f">%s</text>'
+                 % (W - padR + 10, cy + 4, esc(r[value_col])))
+    b.append('<text class="sg-chart__axis" x="%.1f" y="%d" text-anchor="middle">%s</text>'
+             % ((gut + W - padR) / 2, H - 6, unit))
+    return svg(W, H, 'Differences against zero, one row per configuration', b)
+
+
+def chart_grouped(rows, label_col, value_cols, headers, hi, unit):
+    """Two or more series across the same categories, on one shared scale."""
+    W, padT, padB, L, R = 760, 30, 46, 150, 40
+    grpH = 26 * len(rows) + 18
+    H = padT + grpH * len(value_cols) + padB
+    def x(v):
+        return L + (v / hi) * (W - L - R)
+    b = []
+    for gi, col in enumerate(value_cols):
+        top = padT + gi * grpH
+        b.append('<text class="sg-chart__axis" x="0" y="%d">%s</text>'
+                 % (top + 6, esc(headers[gi].upper())))
+        for ri, r in enumerate(rows):
+            cy = top + 20 + ri * 26
+            v = num(r[col])
+            b.append('<text class="sg-chart__label" x="%d" y="%.1f" text-anchor="end" '
+                     'font-size="11">%s</text>' % (L - 10, cy + 4, esc(r[label_col])))
+            b.append('<rect class="%s" x="%d" y="%.1f" width="%.1f" height="9" rx="4"/>'
+                     % (series_class(1 if ri == 0 else 2), L, cy - 4.5, max(x(v) - L, 1)))
+            b.append('<text class="sg-chart__value" x="%.1f" y="%.1f">%s</text>'
+                     % (x(v) + 9, cy + 4, esc(r[col])))
+    b.append('<text class="sg-chart__axis" x="%.1f" y="%d" text-anchor="middle">%s</text>'
+             % ((L + W - R) / 2, H - 8, unit))
+    return svg(W, H, 'Series compared across categories', b)
+
+
 def standalone(fid, chart, caption, key=None):
     """A figure with no numbers pane — the table it derives from lives elsewhere."""
     return ('<figure class="sg-figure" id="%s">%s%s'
@@ -301,7 +401,45 @@ def main(path):
             return 2
         return None
 
-    spec = {
+    # Article 01. Its tables are different shapes from 00's, so it carries its
+    # own spec rather than being forced through the same forms.
+    spec_01 = {
+        0: dict(kind='zero_centred', value=4, labels=(0, 1), span=0.006,
+                unit='CHANGE IN SCORE, GUESSING ON MINUS OFF',
+                cap='The accuracy change from turning guessing on, for each model and quant. '
+                    'The sign flips three times and the largest move is 0.0039. Throughput for '
+                    'the same six is in the Numbers pane, where it climbs the whole way.'),
+        1: dict(kind='zoom_dots', value=2, label=0, lo=77.0, hi=83.0,
+                unit='SHARE OF GUESSES KEPT (%)',
+                accent=lambda r: 1 if '12B' in r[0] else None,
+                cap='How many guesses the big model kept. Drawn on a zoomed scale, and as dots '
+                    'rather than bars, because the whole range is six points wide and a bar '
+                    'chart starting anywhere but zero would overstate it.',
+                key=[('1', '12B'), ('muted', '26B and 31B')]),
+        2: dict(kind='bars', value=1, label=0, note=None, hi=100.0,
+                unit='NOTES IDENTICAL TO THE ONE-AT-A-TIME RUN, OUT OF 100',
+                accent=lambda r: 1 if num_first(r[1]) >= 100 else 2, parse=num_first,
+                cap='Guessing is supposed to change nothing. It changes twenty-six notes in a '
+                    'hundred, because checking several guesses at once changes the order the '
+                    'arithmetic happens in.'),
+        3: dict(kind='paired',
+                metrics=[('words per second', 1, 250.0, '%.1f'),
+                         ('median words written', 2, 1400.0, '%.0f')],
+                cap='The same family, same quant, same class of card, with no guessing on '
+                    'either side. Each measure on its own scale, because the units differ.'),
+        4: dict(kind='grouped', label=0, values=(1, 2, 3, 4),
+                headers=('1 process', '2 processes', '3 processes', '4 processes'),
+                hi=150.0, unit='SERVER STARTUP, SECONDS',
+                cap='Startup time grew with the variable under test, which is what made the '
+                    '1.58x wrong: it was inside the throughput measurement.'),
+        5: dict(kind='paired',
+                metrics=[('one at a time', 1, 50.0, '%.1f'),
+                         ('with guessing', 2, 50.0, '%.1f')],
+                cap='The speedup belongs to the model, not to the feature. Notes per minute, '
+                    'each measure on its own scale.'),
+    }
+
+    spec_00 = {
         0: dict(kind='ranked', value=2, labels=(0, 1), hi=0.78, accent=rank_accent,
                 cap='Every run on the same notes, ranked by F1. '
                     'Switch to Numbers for the full metric set.',
@@ -326,6 +464,10 @@ def main(path):
                     'them. Each metric is drawn on its own scale, because the units differ.'),
     }
 
+    import os
+    base = os.path.basename(path)
+    spec = spec_01 if base.startswith('01-') else spec_00
+
     built = 0
     out = list(lines)
     for bi, (a, b) in reversed(list(enumerate(blocks))):
@@ -340,7 +482,15 @@ def main(path):
             chart = chart_intervals(rows, 'Paired differences with 95% intervals')
         elif s['kind'] == 'bars':
             chart = chart_bars(rows, s['value'], s['label'], s['note'], s['hi'],
-                               s['unit'], s['accent'])
+                               s['unit'], s['accent'], s.get('parse'))
+        elif s['kind'] == 'zoom_dots':
+            chart = chart_zoom_dots(rows, s['value'], s['label'], s['lo'], s['hi'],
+                                    s['unit'], s['accent'])
+        elif s['kind'] == 'zero_centred':
+            chart = chart_zero_centred(rows, s['value'], s['labels'], s['span'], s['unit'])
+        elif s['kind'] == 'grouped':
+            chart = chart_grouped(rows, s['label'], s['values'], s['headers'],
+                                  s['hi'], s['unit'])
         else:
             chart = chart_paired(rows, s['metrics'])
         key = legend(s['key']) if s.get('key') else None
