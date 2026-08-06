@@ -1,4 +1,4 @@
-# Speculative decoding doubled throughput and cost nothing I could measure
+# Local LLMs: Speculative Decoding
 
 DRAFT. All six paired runs are banked. The acceptance figures are read from the
 server's own counters rather than inferred from wall clock.
@@ -128,7 +128,7 @@ category moves further than its own range allows. The zero holds all the way dow
 ## A model that does no guessing beat every model that does
 
 Qwen3.6-35B-A3B ran at **234 words/s with no speculative decoding at all.** The dense
-gemma-4-12B, running a draft head at 82% acceptance on a comparable card, managed
+gemma-4-12B, guessing with 82% of its guesses kept on a comparable card, managed
 195.8.
 
 I had both Qwen runs labelled as guessing in my own notes for several hours,
