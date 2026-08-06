@@ -23,7 +23,9 @@ TEMPORARY_ENSEMBLE_CONSUMERS = {
     "src/cmd_agent_delegate.c",
     "src/headers/evidence_replay.h",
     "src/headers/server_compute_internal.h",
-    "src/modules/workflows/wfe_live_panel.c",
+    # wfe_live_panel.c paid this debt off: its delegate_ensemble.h include was
+    # dead (the compiler builds the TU without it), so it was deleted rather
+    # than migrated. The list only ever shrinks.
     "src/modules/workflows/wfe_panel_roundtable.h",
     "src/server/server_compute.c",
     "src/server/server_compute_roundtable.c",
