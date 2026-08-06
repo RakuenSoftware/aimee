@@ -1020,7 +1020,15 @@ func (r *NativeRunner) freeze(ctx context.Context, req StepRequest) (StepResult,
 		return StepResult{Status: StepAccepted, Detail: "no-op: empty diff vs base"}, nil
 	}
 	if err := r.rejectDivergentSiblingCreates(ctx, item, workdir, resolvedBase, head); err != nil {
-		return StepResult{Status: StepFailed, Detail: err.Error(), Err: err}, nil
+		// rejectDivergentSiblingCreates wraps ErrFreezeCreateCreateCollision, but
+		// StepResult.Err is tagged `json:"-"` so the sentinel does not survive an
+		// HTTP-runner round trip. Tag ErrKind so engine.Advance can rehydrate the
+		// typed sentinel on the consumer side.
+		res := StepResult{Status: StepFailed, Detail: err.Error(), Err: err}
+		if errors.Is(err, ErrFreezeCreateCreateCollision) {
+			res.ErrKind = freezeCreateCreateCollision
+		}
+		return res, nil
 	}
 	if r.artifacts != nil && req.Node.ID != "" {
 		if _, err := r.artifacts.PutNodeArtifact(item.ID, req.Node.ID, "frozen_diff", []byte(diff)); err != nil {

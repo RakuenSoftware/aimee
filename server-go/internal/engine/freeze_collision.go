@@ -15,8 +15,12 @@ const freezeCreateCreateCollision = "freeze_create_create_collision"
 
 // ErrFreezeCreateCreateCollision is the typed sentinel for a freeze-vs-create
 // collision between sibling slices. Callers can detect it via errors.Is(err,
-// ErrFreezeCreateCreateCollision) instead of string-prefix matching. The
-// human-readable path/slice detail remains accessible via err.Error().
+// ErrFreezeCreateCreateCollision) instead of string-prefix matching. In-process
+// callers receive a wrapped error whose Error() includes the path/slice detail;
+// runners crossing a JSON boundary carry the sentinel via StepResult.ErrKind
+// and engine.Advance rehydrates it so the typed match still works there. The
+// human-readable path/slice detail survives end-to-end through StepResult.Detail
+// (and the durable detail stored on rejection), unchanged for callers.
 var ErrFreezeCreateCreateCollision = errors.New(freezeCreateCreateCollision)
 
 type freezeCreate struct {
