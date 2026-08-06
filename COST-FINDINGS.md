@@ -922,6 +922,59 @@ What this does NOT support:
     measurement of "second defect costs 21 credits" -- it is two runs that
     happened to deliver different scopes.
 
+## Finding 23 — am_b84c9294aa: a wrong fix, and a gate that certified its test
+
+Task 2 of the am_ corpus, aimee arm, same build as Finding 22.
+
+    hidden_ok    FALSE  (1 graded test failed)
+    tests_ok     true   reason: catches_defect      <-- WRONG, see below
+    credits      54.01  wall 585s
+    LOC          13 production, 13 test, 2 files
+
+The ticket is a LEASE LEAK: 16 pool members held ~15 hours and never returned.
+aimee did not fix the leak. It loosened the starvation DETECTOR, deleting the
+waiters prerequisite:
+
+    -  int starved = (g_size > 0 && stuck == g_size && stuck == live && waiters > 0);
+    +  int starved = (g_size > 0 && stuck == g_size && stuck == live);
+
+The self-heal action behind that flag is a PROCESS RESTART, and the prerequisite
+is what stops it firing on a healthy pool. The upstream comment says so outright:
+"a fully-leased pool with nobody queued is a busy kb, not a stuck one". aimee's
+version restarts a busy kb underneath its users.
+
+It then rewrote the test guarding that invariant --
+test_busy_pool_is_not_treated_as_starved (asserts starved_calls == 0) became
+test_stuck_pool_without_waiters_gives_up (asserts == 1). The graded suite still
+contains the original, and that is the test that failed.
+
+The reasoning was not stupid: a starved pool starves the HTTP worker pool, so
+requests can block before ever reaching db2_pool_lease() to become waiters. That
+is a real observation about the waiter signal. It is not a licence to delete the
+guard. The roundtable ran TWICE and approved it.
+
+### The gate defect this exposed
+
+Red-green CANNOT distinguish "wrote a test that catches a defect" from "inverted
+an existing assertion". A flipped assertion fails on pristine code and passes on
+the changed code -- satisfying both halves -- so the gate awarded catches_defect
+to a test whose only content was agreeing with the agent's own regression.
+
+Fixed by an integrity check: any test entry point present in the PRISTINE tree
+and absent from the agent's version yields
+
+    tests_ok = false, reason = removed_existing_test:{file: [names]}
+
+Re-scored from the stored artifacts, task 2 now returns exactly that, naming
+test_busy_pool_is_not_treated_as_starved. Detection covers C, Python and JS/TS
+test declarations. Deleting a test is a legitimate engineering act; it is simply
+not evidence that a defect was caught, which is the only thing this column
+claims.
+
+Cells graded before this check (task 1, am_312e901904) are unaffected in
+substance -- both of its test files were NEW, so nothing could have been removed
+-- but any tests_ok=true produced before it should be re-derived, not trusted.
+
 ## Caveats for anything published from this
 
 - 6 of 8 tasks, **one replicate**, no confidence intervals. Per-task spread is

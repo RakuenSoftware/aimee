@@ -107,6 +107,50 @@ def _build_and_run(ws, target):
     return True, proc.returncode == 0
 
 
+def _test_function_names(text):
+    """Test entry points declared in a file, across the corpus's languages."""
+    names = set()
+    names |= set(re.findall(r"^\\s*(?:static\\s+)?void\\s+(test_\\w+)\\s*\\(", text, re.M))  # C
+    names |= set(re.findall(r"^\\s*def\\s+(test_\\w+)\\s*\\(", text, re.M))                  # py
+    q = chr(34) + chr(39)   # both quote styles, without either appearing here
+    names |= set(re.findall(
+        "(?:^|[^A-Za-z_])(?:it|test)[(][ ]*[" + q + "]([^" + q + "]+)", text, re.M))
+    return names
+
+
+def removed_existing_tests(workspace, seed, written):
+    """Test entry points that existed in the PRISTINE tree and are gone now.
+
+    Red-green cannot see this on its own. Inverting an existing assertion fails
+    on pristine code and passes on the changed code, which satisfies BOTH halves
+    of the gate -- so "I rewrote the guard to match my change" scores identically
+    to "I wrote a test that catches the defect".
+
+    Observed on am_b84c9294aa: the agent deleted the `waiters > 0` prerequisite
+    from the pool's starvation detector -- the guard that stops a BUSY pool being
+    restarted under its users -- and rewrote
+    test_busy_pool_is_not_treated_as_starved (asserts starved_calls == 0) into
+    test_stuck_pool_without_waiters_gives_up (asserts == 1). The gate scored it
+    catches_defect; the graded suite, which still contains the original, failed.
+
+    Deleting a test is a legitimate thing for an engineer to do. It is not
+    evidence that a defect was caught, which is the only thing this column
+    claims.
+    """
+    lost = {}
+    for rel in written:
+        before, after = seed / rel, Path(workspace) / rel
+        if not before.is_file() or not after.is_file():
+            continue  # a NEW test file cannot have removed anything
+        try:
+            gone = _test_function_names(before.read_text()) - _test_function_names(after.read_text())
+        except (OSError, UnicodeDecodeError):
+            continue
+        if gone:
+            lost[rel] = sorted(gone)
+    return lost
+
+
 def agent_test_gate(workspace, task, changed):
     """Did the agent write a test that actually catches this defect?
 
@@ -167,6 +211,10 @@ def agent_test_gate(workspace, task, changed):
     if not green:
         return {"ok": False, "reason": "fails_on_own_fix", "files": written,
                 "red_passed": False, "green_passed": False}
+    lost = removed_existing_tests(workspace, seed, written)
+    if lost:
+        return {"ok": False, "reason": "removed_existing_test:%s" % json.dumps(lost),
+                "files": written, "red_passed": False, "green_passed": True}
     return {"ok": True, "reason": "catches_defect", "files": written,
             "red_passed": False, "green_passed": True}
 # --- end agent test gate ---------------------------------------------------
@@ -233,7 +281,7 @@ def main():
         return 0
     RUNNER.with_suffix(".py.pre-testgate.bak").write_text(text)
 
-    for mod in ("import tempfile", "import re", "import subprocess"):
+    for mod in ("import tempfile", "import re", "import subprocess", "import json"):
         if mod not in text:
             text = text.replace("import shutil", mod + "\nimport shutil", 1)
 
