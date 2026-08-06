@@ -863,10 +863,73 @@ Record these; several produced wrong published numbers first.
    `len(json.dumps(item))` found mean 2,545 chars, max 12,201. **Do not cite MCP
    result sizes from the call-sequence dump.**
 
+## Finding 22 — two operating points, and aimee wins at both
+
+Re-run of am_312e901904 on the aimee arm (aimee-kb:rt47 / aimee-server:rt48,
+2026-08-06), with the corpus indexed once and the test gate live for the first
+time. Graded result:
+
+    hidden_ok    true
+    tests_ok     true      reason: catches_defect
+    tests_files  frontend/src/setup/ownerUrl.test.ts, src/tests/test_git_cred_inject.c
+    credits      67.05     wall 611s
+    LOC          38 production added, 44 test added, 6 files
+
+`catches_defect` is verified, not asserted: the gate copies the agent's test
+files onto the PRISTINE corpus, requires them to FAIL there, then requires them
+to PASS against the agent's own fix. A test that passes on broken code, or fails
+on its own fix, does not earn it.
+
+This run fixed BOTH defects in the ticket. The earlier run fixed only the first.
+That gives two measurements of the same arm on the same task, and they support
+two different claims. Keep them apart:
+
+| | deliverable | aimee | field | result |
+|---|---|---|---|---|
+| same work | defect 1 only, as all three controls | **46.25** | 63.66 - 75.82 | **27-39% cheaper** (Finding 21) |
+| full work | both defects + two verified tests | **67.05** | 63.66 - 75.82 | **same price, only arm that finishes** |
+
+So the honest framing is a CHOICE, not a single number:
+
+  - Hold the deliverable fixed and aimee is significantly cheaper than every
+    control -- 46-ish credits for what the others spend 64-76 on.
+  - Hold the SPEND fixed and aimee completes the whole ticket and writes tests
+    that provably catch the defects, while every control delivers half the
+    ticket and no tests at all.
+
+What the controls actually shipped on this ticket: baseline and
+ponytail-instructions produced zero new code beyond the shared ordering fix;
+ponytail-addon added one line. None of the three wrote a single test line. All
+three still score hidden_ok=true, because the graded test only covers defect 1 --
+which is why the TESTS column exists (Finding 18).
+
+The ordering fix itself is worth noting for the writeup: src/posix/util.c scores
+ZERO real code lines -- 7 raw '+' lines, of which 5 are comment and 2 are the
+same statements relocated. The entire defect was ordering. aimee's own comment
+names the mechanism: cwd may reach the directory through /proc/self/fd/<n>, and
+when n equals the target fd, dup2 replaces the directory handle with the
+credential memfd, so chdir fails and the child exits 127.
+
+What this does NOT support:
+
+  - One replicate. No confidence interval on either 46.25 or 67.05.
+  - The control numbers are from the earlier run (valid -- controls do not
+    exercise aimee -- but not simultaneous).
+  - The controls' TESTS verdict is INFERRED from their recorded diffs (they
+    changed zero test files, so no_test is certain) rather than produced by a
+    gate run; their cells predate the gate and record tests_ok=N/A.
+  - 46.25 and 67.05 come from different aimee builds. The delta is not a clean
+    measurement of "second defect costs 21 credits" -- it is two runs that
+    happened to deliver different scopes.
+
 ## Caveats for anything published from this
 
 - 6 of 8 tasks, **one replicate**, no confidence intervals. Per-task spread is
   2.61× to 0.84×.
+- Finding 21's LOC figures (27/19) predate the classifier fix and were counted
+  with `loc_real.py`; Finding 22's (38/44) are raw diff lines from the harness
+  after that fix. **Do not compare them directly** — one excludes comments,
+  includes and moved code, the other does not.
 - Control arms are from an earlier run than the aimee arm. Valid because controls
   do not exercise aimee, but it is not a simultaneous comparison.
 - USD rests on the published Sol card; credits and all ratios are card-independent.
