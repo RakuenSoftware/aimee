@@ -147,7 +147,17 @@ func main() {
 				// Say so on success too. A control plane that attached and one that
 				// silently did not look identical from outside until a gate hangs
 				// waiting for a reply that was never routed.
-				log.Printf("roundtable reviews over the event bus (socket=%s principal=%d/%d kind=%d)",
+				//
+				// Word it as the REQUESTER attaching, which is all this proves.
+				// The previous text -- "roundtable reviews over the event bus" --
+				// reads as "reviews are available", and it printed identically with
+				// the roundtable module disabled, because attaching as a requester
+				// does not depend on anyone serving. Diagnosing a run where the
+				// module was deliberately off, that line was the single strongest
+				// piece of evidence that it was actually on.
+				log.Printf("roundtable review requests will be sent over the event bus "+
+					"(socket=%s principal=%d/%d kind=%d); a roundtable module must be "+
+					"attached to answer them",
 					*moduleBusSocket, engine.BusPrincipalClass, engine.WFEBusPrincipalRef,
 					roundtablemod.EventReview)
 				nativeRunner.SetRoundtableReviewer(reviewer)
