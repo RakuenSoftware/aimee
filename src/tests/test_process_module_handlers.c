@@ -89,20 +89,75 @@ static void test_learning(void)
    assert(learning_mask("unknown") == 0);
 }
 
-static void test_delegates(void)
+/* Canonicalize `in` by going through the REAL bus module handler (encode ->
+ * handler -> decode), writing the result into `out`. */
+static void delegates_canonicalize_over_handler(const char *in, char *out, size_t out_cap)
 {
    uint8_t request[AIMEE_DELEGATES_MESSAGE_LEN], response[AIMEE_DELEGATES_MESSAGE_LEN];
    uint32_t response_len = 0;
    char role[AIMEE_DELEGATES_ROLE_MAX + 1];
    aimee_module_invocation_t invocation = {.stage_id = AIMEE_DELEGATES_STAGE_INVOKE};
-   assert(aimee_delegates_message_encode(AIMEE_DELEGATES_REQUEST_MAGIC, "implement", request,
+   assert(aimee_delegates_message_encode(AIMEE_DELEGATES_REQUEST_MAGIC, in, request,
                                          sizeof(request)) == 0);
    assert(aimee_delegates_module_handler(&invocation, request, sizeof(request), response,
                                          sizeof(response), &response_len,
                                          NULL) == AIMEE_MODULE_STATUS_OK);
    assert(aimee_delegates_message_decode(response, response_len, AIMEE_DELEGATES_RESPONSE_MAGIC,
                                          role, sizeof(role)) == 0);
+   assert(strlen(role) < out_cap);
+   snprintf(out, out_cap, "%s", role);
+}
+
+static void test_delegates(void)
+{
+   char role[AIMEE_DELEGATES_ROLE_MAX + 1];
+
+   delegates_canonicalize_over_handler("implement", role, sizeof(role));
    assert(strcmp(role, "code") == 0);
+
+   /* The role alias table exists TWICE, byte-for-byte identical: here in the bus
+    * module handler (modules/delegates/module_adapter.c) and in delegate_role.c's
+    * local path, used by binaries that host no bus — the thin client. Nothing in
+    * the build keeps them in sync, so a one-sided edit would make the same role
+    * canonicalize differently depending on which binary ran it.
+    *
+    * Deduplicating them means editing delegates module source, which is a
+    * vendored mirror pinned by dependencies/aimee-repositories.lock.json — that
+    * needs a coordinated module release. Until then this table is the guard: it
+    * pins the handler's full mapping so a drifting edit fails here. The mirror of
+    * this expectation for the local path is test_delegate_role.c; the two must
+    * state the same pairs, and that is the invariant a reviewer should check when
+    * touching either table.
+    *
+    * Expectations are written out rather than computed FROM the table under test,
+    * so this cannot pass vacuously by reading the same array it is checking. */
+   static const struct
+   {
+      const char *alias;
+      const char *canonical;
+   } expected[] = {
+       {"implement", "code"},        {"build", "code"},
+       {"reviewer", "review"},       {"verifier", "validate"},
+       {"test", "validate"},         {"check", "validate"},
+       {"evaluate", "validate"},     {"evaluate-optimize", "validate"},
+       {"inspect", "diagnose"},      {"research", "execute"},
+       {"enforce", "execute"},       {"recall", "search"},
+       {"synthesize", "summarize"},  {"rank-fuse", "reason"},
+       {"classify-score", "reason"}, {"planner", "plan"},
+       {"planning", "plan"},
+   };
+   for (size_t i = 0; i < sizeof(expected) / sizeof(expected[0]); ++i)
+   {
+      delegates_canonicalize_over_handler(expected[i].alias, role, sizeof(role));
+      assert(strcmp(role, expected[i].canonical) == 0);
+      assert(strcmp(role, expected[i].alias) != 0); /* every entry really is an alias */
+   }
+
+   /* An already-canonical or unknown role passes through untouched. */
+   delegates_canonicalize_over_handler("code", role, sizeof(role));
+   assert(strcmp(role, "code") == 0);
+   delegates_canonicalize_over_handler("no-such-role", role, sizeof(role));
+   assert(strcmp(role, "no-such-role") == 0);
 }
 
 static aimee_tool_class_t tool_class(const char *name)
