@@ -768,6 +768,51 @@ Fixing it is the difference between an arm that ships half a ticket and an arm
 that catches its own omission, and it costs nothing in agent turns because the
 call is already being made.
 
+## Finding 21 — for the identical deliverable, aimee is 27-39% cheaper
+
+am_312e901904 is the cleanest cost comparison in the study, because three of the
+four arms produced the SAME artifact. Counted with benchmarks/loc_real.py, which
+excludes comments, includes and relocated code:
+
+| arm | files | new code | test code | credits |
+|---|---|---|---|---|
+| baseline | 1 | 0 | 0 | 75.82 |
+| ponytail-instructions | 1 | 0 | 0 | 63.66 |
+| ponytail-addon | 2 | 1 | 0 | 66.43 |
+| aimee | 4 | 27 | 19 | **46.25** |
+
+The graded fix is an ORDERING change: move two statements in src/posix/util.c so
+chdir runs before the fd remap. All four arms made exactly that change, and it
+is zero net lines of new code in every one of them. baseline and
+ponytail-instructions produced nothing else at all; ponytail-addon added a single
+Cache-Control header.
+
+So for the identical shared deliverable -- the only thing the grader scores --
+
+    aimee 46.25 vs 63.66 (p-instructions)  =  0.73x, 27% cheaper
+    aimee 46.25 vs 66.43 (p-addon)         =  0.70x, 30% cheaper
+    aimee 46.25 vs 75.82 (baseline)        =  0.61x, 39% cheaper
+
+and aimee ALSO shipped a 19-line regression test that is empirically verified to
+catch the defect (replayed on the pristine corpus it aborts on the rc=127
+assertion), plus 27 lines attempting the ticket's second defect. The other three
+shipped no test at all.
+
+**Why this is the comparison worth publishing.** Elsewhere in this document
+aimee's cost is confounded: it does more work, so "more expensive" and "more
+output" are entangled and 1.11x aggregate means little. Here the common
+deliverable is byte-comparable across arms, so the cost difference is not paid
+for by doing less. It is cheaper for the same work AND does more with the
+remainder.
+
+**The caveats that must travel with it.** n=1 task, one replicate. Delegate seat
+tokens do not appear in the codex transcript the harness meters, so aimee's
+roundtable review is real work that is NOT in the 46.25 (see the accounting note
+under Finding 15) -- the number is an undercount of aimee's true spend, and the
+comparison should say so rather than bank the gap. And the spread among the
+three non-aimee arms for identical output (63.66 to 75.82, a 19% range) is a
+useful reminder of how much run-to-run noise a single replicate carries.
+
 ## Methodology traps hit in this work
 
 Record these; several produced wrong published numbers first.
