@@ -244,14 +244,15 @@ func TestRejectDivergentSiblingCreatesAllowsEditOnlyChange(t *testing.T) {
 	}
 }
 
-// TestRejectDivergentSiblingCreatesRejectsOnInvalidFreezeHeadType exercises
-// the wrong-type branch: the sibling's freeze-head artifact exists but its
-// declared type is not "commit", so the freeze-base/freeze-head derived
-// comparison cannot run. The current slice's freeze must fail closed (no
-// silent allow). The error carries the freeze_create_create_collision
-// prefix, a path-equivalent identifier drawn from the current slice's create
-// set (the first created path), and both slice names.
-func TestRejectDivergentSiblingCreatesRejectsOnInvalidFreezeHeadType(t *testing.T) {
+// TestRejectDivergentSiblingCreatesSkipsSiblingWithInvalidFreezeHeadType
+// exercises the wrong-type branch of the durable-triple check: the sibling
+// carries a freeze artifact of type frozen_diff plus a freeze-head artifact
+// whose declared type is not commit, so the triple is incomplete. The sibling
+// is therefore not frozen under the durable-artifact definition and the
+// collision check must skip it (continue), not reject the current slice. This
+// guards the inverse of the regression that previously over-rejected slices
+// whose active sibling had only a partial freeze-artifact set.
+func TestRejectDivergentSiblingCreatesSkipsSiblingWithInvalidFreezeHeadType(t *testing.T) {
 	ctx, store, artifacts, registry, _, slicedir, base, _ := setupFreezeCollisionHarness(t)
 
 	if err := store.SetWorktree(ctx, "wi_s0", ""); err != nil {
@@ -273,18 +274,19 @@ func TestRejectDivergentSiblingCreatesRejectsOnInvalidFreezeHeadType(t *testing.
 		t.Fatal(err)
 	}
 	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
-	err = runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead)
-	assertFreezeSiblingUncomparable(t, err, "frozen.txt", item.ID, "wi_s0")
+	if err := runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead); err != nil {
+		t.Fatalf("sibling without the durable freeze triple must be skipped, got: %v", err)
+	}
 }
 
-// TestRejectDivergentSiblingCreatesFailsClosedWithMissingFreezeArtifacts
-// covers the genuinely-missing branch: all three freeze artifacts are removed
-// from the store, so there is no basis on which to compute the sibling's
-// create set. The current slice must fail closed with the same
-// freeze_create_create_collision prefix, a path-equivalent identifier
-// (drawn from the current slice's create set), and both slice names — silently
-// passing would let a colliding freeze through.
-func TestRejectDivergentSiblingCreatesFailsClosedWithMissingFreezeArtifacts(t *testing.T) {
+// TestRejectDivergentSiblingCreatesSkipsSiblingWithMissingFreezeArtifacts
+// covers the missing-artifacts branch: all three freeze artifacts are removed
+// from the store, so the durable triple is not present. The sibling is
+// therefore not frozen under the durable-artifact definition and the collision
+// check must skip it (continue), not reject the current slice. This guards
+// against regressions to over-rejection: a sibling that simply has never been
+// frozen is not a collision candidate.
+func TestRejectDivergentSiblingCreatesSkipsSiblingWithMissingFreezeArtifacts(t *testing.T) {
 	ctx, store, artifacts, registry, _, slicedir, base, _ := setupFreezeCollisionHarness(t)
 
 	if err := store.SetWorktree(ctx, "wi_s0", ""); err != nil {
@@ -306,19 +308,8 @@ func TestRejectDivergentSiblingCreatesFailsClosedWithMissingFreezeArtifacts(t *t
 		t.Fatal(err)
 	}
 	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
-	err = runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead)
-	assertFreezeSiblingUncomparable(t, err, "frozen.txt", item.ID, "wi_s0")
-}
-
-func assertFreezeSiblingUncomparable(t *testing.T, err error, path, currentSlice, siblingSlice string) {
-	t.Helper()
-	if err == nil {
-		t.Fatal("expected fail-closed freeze_create_create_collision error, got nil")
-	}
-	for _, want := range []string{freezeCreateCreateCollision, "cannot compare", path, currentSlice, siblingSlice} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("expected fail-closed error containing %q, got: %v", want, err)
-		}
+	if err := runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead); err != nil {
+		t.Fatalf("sibling without the durable freeze triple must be skipped, got: %v", err)
 	}
 }
 
@@ -335,12 +326,12 @@ func assertFreezeCreateCollision(t *testing.T, err error, path, currentSlice, si
 }
 
 // TestRejectDivergentSiblingCreatesUsesDurableArtifactsWithoutWorkflowRegistry
-// proves the registry-independent invariant: a NativeRunner constructed without
-// a workflow registry must still surface a genuine freeze_create_create_collision
-// from rejectDivergentSiblingCreates when the sibling's freeze artifacts
-// (frozen_diff + freeze-head + freeze-base) prove the freeze is durable. This
-// is the regression guard against re-introducing a sibling-stage walk that
-// depends on r.workflows to identify frozen siblings.
+// proves the registry-independent invariant: a NativeRunner constructed
+// without a workflow registry must still surface a genuine
+// freeze_create_create_collision from rejectDivergentSiblingCreates when the
+// sibling's freeze artifacts (frozen_diff + freeze-head + freeze-base) prove
+// the freeze is durable. This is the regression guard against re-introducing a
+// sibling-stage walk that depends on r.workflows to identify frozen siblings.
 func TestRejectDivergentSiblingCreatesUsesDurableArtifactsWithoutWorkflowRegistry(t *testing.T) {
 	ctx, store, artifacts, _, _, slicedir, base, _ := setupFreezeCollisionHarness(t)
 
@@ -363,8 +354,8 @@ func TestRejectDivergentSiblingCreatesUsesDurableArtifactsWithoutWorkflowRegistr
 }
 
 // TestRejectDivergentSiblingCreatesRecognizesFrozenSiblingRoutedBackToImplement
-// is the regression guard for the durable-artifact definition of "frozen":
-// a sibling that legitimately produced and froze a competing diff but was then
+// is the regression guard for the durable-artifact definition of "frozen": a
+// sibling that legitimately produced and froze a competing diff but was then
 // routed back to implement for revisions (current stage "implement") is still
 // reported as frozen, so the second slice's collision check does not skip it.
 // Previously siblingStageHasFrozenDiff inspected the sibling's current stage
@@ -414,11 +405,11 @@ func TestRejectDivergentSiblingCreatesAllowsIdenticalCreateFromDistinctSiblingWo
 	ctx, store, artifacts, registry, repo, slicedir, base, _ := setupFreezeCollisionHarness(t)
 
 	// Put the sibling's frozen commits in a clone of the repo so the commits
-	// are reachable from the sibling's recorded Worktree but the
-	// post-clone sibling-only commits are not reachable from the current
-	// slicedir. This is the production layout for two simultaneous sibling
-	// slices whose durable Worktrees live behind separate git directory
-	// boundaries — slicedir cannot see the sibling-only objects.
+	// are reachable from the sibling's recorded Worktree but the post-clone
+	// sibling-only commits are not reachable from the current slicedir. This
+	// is the production layout for two simultaneous sibling slices whose
+	// durable Worktrees live behind separate git directory boundaries --
+	// slicedir cannot see the sibling-only objects.
 	root := t.TempDir()
 	siblingDir := filepath.Join(root, "sibling")
 	if err := os.MkdirAll(siblingDir, 0o700); err != nil {
@@ -463,8 +454,8 @@ func TestRejectDivergentSiblingCreatesAllowsIdenticalCreateFromDistinctSiblingWo
 
 // TestRejectDivergentSiblingCreatesStillRejectsDivergenceFromDistinctSiblingWorktree
 // guards the regression-sensitive behavior: when the sibling has its own
-// worktree AND the current slice creates the same file with a different
-// blob, the function must still raise freezeCreateCreateCollision. The
+// worktree AND the current slice creates the same file with a different blob,
+// the function must still raise freezeCreateCreateCollision. The
 // sibling-worktree resolution path is only meant to make the comparison
 // decidable, not to disable divergence rejection.
 func TestRejectDivergentSiblingCreatesStillRejectsDivergenceFromDistinctSiblingWorktree(t *testing.T) {

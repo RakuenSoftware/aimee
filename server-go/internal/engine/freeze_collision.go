@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
@@ -109,7 +110,6 @@ func resolveSiblingCompareDir(ctx context.Context, sibling db1.WorkItem, workdir
 	return "", errors.New("sibling freeze commits are not reachable from the sibling's worktree or the current workdir")
 }
 
-
 // freezeCreateCreateCollisionError reports a genuine create/create collision
 // on path between currentSlice and siblingSlice.
 func freezeCreateCreateCollisionError(path, currentSlice, siblingSlice string) error {
@@ -157,32 +157,58 @@ func freezeSiblingUncomparableError(currentSlice, siblingSlice, path string, cau
 // together mark a sibling as having a durable frozen diff: the freeze node's
 // frozen_diff content and the freeze-head/freeze-base commit SHAs. Anchoring
 // the collision check to this triple (rather than the sibling's current
-// workflow stage) keeps the answer independent of any post-freeze routing —
+// workflow stage) keeps the answer independent of any post-freeze routing --
 // including a review/CI loop that returned the sibling to implement for
 // revisions, where the current stage is implement but the frozen diff is still
 // on disk.
 //
-// freezeSiblingArtifacts fails CLOSED on any missing or wrong-typed artifact
-// by returning false with the unfree reason attached. Callers convert the
-// false-with-reason into a fail-closed freeze_create_create_collision error
-// so a competing freeze never slips through on a transient stage view.
-func frozenSiblingArtifacts(siblingID string, store *wfe.ArtifactStore) (string, string, string, bool) {
+// frozenSiblingArtifacts distinguishes two failure modes:
+//   - A genuine read error from the artifact store (decoding failure, I/O
+//     error, integrity mismatch) surfaces as a non-nil err so the caller can
+//     fail closed with freeze_create_create_collision -- the runner cannot
+//     tell whether a sibling's freeze is competing, so it must not silently
+//     allow it through on a transient store error.
+//   - A missing or wrong-typed artifact returns ok=false with a nil err. The
+//     sibling simply is not frozen (per the durable-triple definition), so the
+//     caller skips it as the previous siblingStageHasFrozenDiff continue path
+//     did. Skipping here matches the acceptance criterion: only the existence
+//     of the durable triple marks a sibling as frozen, so its absence means
+//     the sibling is not frozen and the collision check has nothing to do.
+func frozenSiblingArtifacts(siblingID string, store *wfe.ArtifactStore) (head, base string, ok bool, err error) {
 	if store == nil {
-		return "", "", "", false
+		return "", "", false, nil
 	}
 	diff, err := store.NodeArtifact(siblingID, "freeze")
-	if err != nil || diff.Type != "frozen_diff" || strings.TrimSpace(string(diff.Content)) == "" {
-		return "", "", "", false
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", "", false, nil
+		}
+		return "", "", false, err
 	}
-	head, err := store.NodeArtifact(siblingID, "freeze-head")
-	if err != nil || head.Type != "commit" {
-		return "", "", "", false
+	if diff.Type != "frozen_diff" || strings.TrimSpace(string(diff.Content)) == "" {
+		return "", "", false, nil
 	}
-	base, err := store.NodeArtifact(siblingID, "freeze-base")
-	if err != nil || base.Type != "commit" {
-		return "", "", "", false
+	headArt, err := store.NodeArtifact(siblingID, "freeze-head")
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", "", false, nil
+		}
+		return "", "", false, err
 	}
-	return string(diff.Content), string(head.Content), string(base.Content), true
+	if headArt.Type != "commit" {
+		return "", "", false, nil
+	}
+	baseArt, err := store.NodeArtifact(siblingID, "freeze-base")
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", "", false, nil
+		}
+		return "", "", false, err
+	}
+	if baseArt.Type != "commit" {
+		return "", "", false, nil
+	}
+	return string(headArt.Content), string(baseArt.Content), true, nil
 }
 
 func (r *NativeRunner) rejectDivergentSiblingCreates(ctx context.Context, item db1.WorkItem, workdir, base, head string) error {
@@ -207,9 +233,12 @@ func (r *NativeRunner) rejectDivergentSiblingCreates(ctx context.Context, item d
 		if sibling.ID == item.ID || sibling.State != "active" {
 			continue
 		}
-		_, siblingHead, siblingBase, frozen := frozenSiblingArtifacts(sibling.ID, r.artifacts)
+		siblingHead, siblingBase, frozen, readErr := frozenSiblingArtifacts(sibling.ID, r.artifacts)
+		if readErr != nil {
+			return freezeSiblingUncomparableError(item.ID, sibling.ID, freezeUncomparablePathIdentifier(creates), readErr)
+		}
 		if !frozen {
-			return freezeSiblingUncomparableError(item.ID, sibling.ID, freezeUncomparablePathIdentifier(creates), nil)
+			continue
 		}
 		siblingDir, err := resolveSiblingCompareDir(ctx, sibling, workdir, siblingBase, siblingHead)
 		if err != nil {
