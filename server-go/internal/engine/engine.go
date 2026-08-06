@@ -126,25 +126,27 @@ func (e *Engine) rootCompletionLock(rootID, workflowName string) *sync.Mutex {
 	return lock
 }
 
-// acquireCompletionLock races a sync.Mutex.Lock against ctx. The watcher ensures
-// a stuck freeze cannot hold the lock indefinitely: if ctx is cancelled or
-// reaches its deadline before Lock returns, the helper waits for the in-flight
-// Lock to complete (so the mutex is not orphaned) and then immediately releases
-// it. acquired is true only when the caller now owns the lock and must arrange
+// acquireCompletionLock races a sync.Mutex.TryLock against ctx. The
+// watchdog ensures a stuck freeze cannot hold the lock indefinitely: while
+// the mutex is contended, the helper polls against ctx and returns
+// context.Canceled / DeadlineExceeded as soon as the caller's bound elapses.
+// acquired is true only when the caller now owns the lock and must arrange
 // to Unlock it.
 func (e *Engine) acquireCompletionLock(ctx context.Context, lock *sync.Mutex) (acquired bool, err error) {
-	done := make(chan struct{})
-	go func() {
-		lock.Lock()
-		close(done)
-	}()
-	select {
-	case <-done:
+	if lock.TryLock() {
 		return true, nil
-	case <-ctx.Done():
-		<-done
-		lock.Unlock()
-		return false, ctx.Err()
+	}
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-ticker.C:
+			if lock.TryLock() {
+				return true, nil
+			}
+		}
 	}
 }
 
@@ -255,7 +257,11 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 		completionLock = e.rootCompletionLock(budget.RootID, item.WorkflowName)
 		acquired, err := e.acquireCompletionLock(ctx, completionLock)
 		if err != nil {
-			return out, e.parkOnError(ctx, item, "freeze_lock_unavailable", err)
+			// Park so an operator can re-drive the freeze once the contention clears,
+			// but surface the watchdog error to the caller so it stops the
+			// delegation cleanly instead of looping on a transient rate.
+			_ = e.parkOnError(context.WithoutCancel(ctx), item, "freeze_lock_unavailable", err)
+			return out, err
 		}
 		if acquired {
 			completionLocked = true

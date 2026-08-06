@@ -67,7 +67,7 @@ func (m *multiplexRunner) Run(ctx context.Context, req StepRequest) (StepResult,
 // with two workflows under the same parent: "alpha" starts at freeze, "beta"
 // starts at work. The returned setup is suitable for exercises that need
 // siblings targeting different (RootID, WorkflowName) pairs.
-func setupCompletionLockHarness(t *testing.T) (workflowDir string, defA, defB *wfe.Definition, store *db1.Store, artifacts *wfe.ArtifactStore) {
+func setupCompletionLockHarness(t *testing.T) (workflowDir string, defA, defB wfe.Definition, store *db1.Store, artifacts *wfe.ArtifactStore) {
 	t.Helper()
 	root := t.TempDir()
 	workflowDir = filepath.Join(root, "workflows")
