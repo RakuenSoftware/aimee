@@ -49,7 +49,7 @@ func freezeCreatedFiles(ctx context.Context, workdir, base, head string) (map[st
 		if err != nil {
 			return nil, fmt.Errorf("resolve created blob %s: %w", path, err)
 		}
-		creates[path] = freezeCreate{Path: path, Blob: strings.TrimSpace(blob)}
+		creates[path] = freezeCreate{Path: path, Blob: blob}
 	}
 	return creates, nil
 }
