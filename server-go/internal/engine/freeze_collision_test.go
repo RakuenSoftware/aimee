@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -506,4 +507,141 @@ func TestRejectDivergentSiblingCreatesStillRejectsDivergenceFromDistinctSiblingW
 	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
 	err = runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead)
 	assertFreezeCreateCollision(t, err, "frozen.txt", item.ID, "wi_s0")
+}
+
+// TestRejectDivergentSiblingCreatesReportsLexicographicallySmallestCollision
+// guards the determinism invariant the freeze-collision diagnostic relies on:
+// when multiple current-slice creates collide with the sibling, the named
+// colliding path must be stable across runs rather than depending on Go's
+// non-deterministic map iteration order. The diagnostic now sorts the
+// candidate creates before iterating so the smallest path is always reported
+// first, matching the comparable-and-consistent ordering rule already used by
+// freezeUncomparablePathIdentifier for fail-closed diagnostics. A regression
+// to the previous "first map key" behavior would make this test flaky.
+func TestRejectDivergentSiblingCreatesReportsLexicographicallySmallestCollision(t *testing.T) {
+	ctx, store, artifacts, registry, _, slicedir, base, siblingHead := setupFreezeCollisionHarness(t)
+
+	// The harness registered one frozen create (frozen.txt). Add two more
+	// creates to the sibling's frozen commit so the sibling's frozen-diff
+	// triple covers alpha.txt and zeta.txt in addition to frozen.txt. The
+	// sibling's freeze is then THIS amended commit; update freeze-head to
+	// match.
+	if err := os.WriteFile(filepath.Join(slicedir, "alpha.txt"), []byte("sibling alpha\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(slicedir, "zeta.txt"), []byte("sibling zeta\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, slicedir, "add", "alpha.txt", "zeta.txt")
+	gitRun(t, slicedir, "commit", "--amend", "--no-edit")
+	amendedSiblingHead := strings.TrimSpace(gitRun(t, slicedir, "rev-parse", "HEAD"))
+	if _, err := artifacts.PutNodeArtifact("wi_s0", "freeze-head", "commit", []byte(amendedSiblingHead)); err != nil {
+		t.Fatal(err)
+	}
+	mergedDiff := []byte("frozen.txt\n+frozen sibling blob\nalpha.txt\n+sibling alpha\nzeta.txt\n+sibling zeta\n")
+	if _, err := artifacts.PutNodeArtifact("wi_s0", "freeze", "frozen_diff", mergedDiff); err != nil {
+		t.Fatal(err)
+	}
+
+	// Current slice overwrites all three with divergent content.
+	if err := os.WriteFile(filepath.Join(slicedir, "alpha.txt"), []byte("current alpha\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(slicedir, "frozen.txt"), []byte("current frozen\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(slicedir, "zeta.txt"), []byte("current zeta\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, slicedir, "add", "alpha.txt", "frozen.txt", "zeta.txt")
+	gitRun(t, slicedir, "commit", "-m", "divergent creates")
+	currentHead := strings.TrimSpace(gitRun(t, slicedir, "rev-parse", "HEAD"))
+
+	item, err := store.WorkItem(ctx, "wi_s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
+	err = runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead)
+	// All three creates collide; the diagnostic must name "alpha.txt" because
+	// it is the smallest colliding path. A non-deterministic implementation
+	// would surface "frozen.txt" or "zeta.txt" on some runs and fail this
+	// assertion.
+	assertFreezeCreateCollision(t, err, "alpha.txt", item.ID, "wi_s0")
+	if strings.Contains(err.Error(), "zeta.txt") {
+		t.Fatalf("collision diagnostic must name the smallest colliding path, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "freeze_create_create_collision") {
+		t.Fatalf("expected collision prefix, got: %v", err)
+	}
+	_ = siblingHead // referenced only to keep the harness return stable
+}
+
+// TestRejectDivergentSiblingCreatesReportsDeterministicCollisionAcrossRuns
+// strengthens the determinism guarantee by repeating the multi-create
+// collision many times with fresh harness state. With a non-deterministic
+// implementation, Go's randomized map iteration would surface a different
+// colliding path on different invocations; with sorted iteration the
+// diagnostic is byte-identical across runs, satisfying the comparable-and-
+// consistent ordering rule for fail-closed diagnostics.
+func TestRejectDivergentSiblingCreatesReportsDeterministicCollisionAcrossRuns(t *testing.T) {
+	const runs = 8
+	var seen []string
+	for i := 0; i < runs; i++ {
+		i := i
+		t.Run(fmt.Sprintf("run-%d", i), func(t *testing.T) {
+			ctx, store, artifacts, registry, _, slicedir, base, _ := setupFreezeCollisionHarness(t)
+
+			// Extend the sibling's frozen create set with two more files so
+			// every current-slice create will collide with the sibling.
+			if err := os.WriteFile(filepath.Join(slicedir, "m.txt"), []byte("sibling m\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(slicedir, "z.txt"), []byte("sibling z\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			gitRun(t, slicedir, "add", "m.txt", "z.txt")
+			gitRun(t, slicedir, "commit", "--amend", "--no-edit")
+			amendedSiblingHead := strings.TrimSpace(gitRun(t, slicedir, "rev-parse", "HEAD"))
+			if _, err := artifacts.PutNodeArtifact("wi_s0", "freeze-head", "commit", []byte(amendedSiblingHead)); err != nil {
+				t.Fatal(err)
+			}
+			mergedDiff := []byte("frozen.txt\n+frozen sibling blob\nm.txt\n+sibling m\nz.txt\n+sibling z\n")
+			if _, err := artifacts.PutNodeArtifact("wi_s0", "freeze", "frozen_diff", mergedDiff); err != nil {
+				t.Fatal(err)
+			}
+
+			// Overwrite the sibling's frozen creates with divergent content so
+			// every current-slice create that the sibling ALSO created
+			// (frozen.txt, m.txt, z.txt) collides. The smallest colliding path
+			// ("frozen.txt") must be reported first, demonstrating the sort
+			// guarantees determinism. "a.txt" is a fresh file the sibling
+			// never created, so it is intentionally NOT a collision entry.
+			for _, name := range []string{"frozen.txt", "m.txt", "z.txt"} {
+				if err := os.WriteFile(filepath.Join(slicedir, name), []byte("conflicting "+name+"\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(slicedir, "a.txt"), []byte("current a\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			gitRun(t, slicedir, "add", "frozen.txt", "m.txt", "a.txt", "z.txt")
+			gitRun(t, slicedir, "commit", "-m", "divergent creates")
+			currentHead := strings.TrimSpace(gitRun(t, slicedir, "rev-parse", "HEAD"))
+
+			item, err := store.WorkItem(ctx, "wi_s1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
+			err = runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead)
+			assertFreezeCreateCollision(t, err, "frozen.txt", item.ID, "wi_s0")
+			seen = append(seen, err.Error())
+		})
+	}
+	for i := 1; i < len(seen); i++ {
+		if seen[i] != seen[0] {
+			t.Fatalf("collision diagnostic non-deterministic across runs:\n  run 0: %s\n  run %d: %s", seen[0], i, seen[i])
+		}
+	}
 }

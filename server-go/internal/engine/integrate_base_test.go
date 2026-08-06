@@ -188,7 +188,6 @@ func TestFreezeUsesMergedRemoteFeatureTip(t *testing.T) {
 	}
 }
 
-
 func TestFreezeRejectsDivergentSiblingCreateCreateCollision(t *testing.T) {
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin.git")
@@ -976,7 +975,6 @@ nodes:
 	}
 }
 
-
 func TestIntegrateFeatureBaseNoopWhenAlreadyCurrent(t *testing.T) {
 	repo, slicedir := setupSliceRepo(t)
 	_ = repo
@@ -1272,6 +1270,7 @@ func TestDocumentPartialNoChangeAdvancesUnchangedHead(t *testing.T) {
 		t.Fatalf("document no-op dirtied the worktree: %q", got)
 	}
 }
+
 // assertFreezeSiblingUncomparable verifies that err is a freezeSiblingUncomparableError:
 // it carries the freeze_create_create_collision sentinel (so callers matching on
 // errors.Is catch both genuine and un-comparable shapes), names the requested
