@@ -975,6 +975,88 @@ Cells graded before this check (task 1, am_312e901904) are unaffected in
 substance -- both of its test files were NEW, so nothing could have been removed
 -- but any tests_ok=true produced before it should be re-derived, not trusted.
 
+## Finding 24 — am_b84c9294aa: 0 of 4, and the fix was already in the tree
+
+All four arms run on task 2, same corpus and build. Nobody passed.
+
+| arm | hidden_ok | tests_ok | reason | credits | prod | test |
+|---|---|---|---|---|---|---|
+| aimee | false | false | removed_existing_test | 54.01 | 13 | 13 |
+| baseline | false | false | does_not_catch_defect | 69.59 | 41 | 35 |
+| ponytail-addon | false | false | removed_existing_test | 43.88 | 10 | 7 |
+| ponytail-instructions | false | false | no_test | 84.64 | 5 | 0 |
+
+aimee's row is RE-SCORED. Its cell was graded before the removed_existing_test
+check existed and stored tests_ok=true/catches_defect; the summary carries both
+values (tests_ok_as_graded, tests_ok_rescored) rather than an overwrite.
+
+### Three different failure modes, three different gate verdicts
+
+no_test              wrote 5 production lines and nothing else, at the highest
+                     cost on the board
+does_not_catch_defect wrote the most of anything (41/35) and its test PASSES on
+                     the unfixed corpus
+removed_existing_test deleted the guard test, twice, independently
+
+This is the first task where the TESTS column separated four arms into distinct
+diagnoses. It is measuring something.
+
+### The wrong fix was not idiosyncratic
+
+aimee AND ponytail-addon both deleted the waiters prerequisite from the
+starvation detector and both removed the SAME guard,
+test_busy_pool_is_not_treated_as_starved. Two independent arms, one with aimee
+and one without. The trap is real: a starved pool starves the HTTP worker pool,
+so requests block before they can queue as waiters, which makes the prerequisite
+look like the bug.
+
+### What the real fix is
+
+The graded artifact is ONLY src/tests/test_db2_pool.c, and against pristine it
+adds six lines:
+
+    +   db2_pool_note_lease_site(a, "leaky_worker.c:123");
+    ...
+    +   assert(strstr(g_starved_reason, "leaky_worker.c:123") != NULL);
+
+So the deliverable is: when the pool gives up, the fatal line must NAME THE
+HOLDER, not just count members. The detector condition is untouched -- the
+graded suite keeps test_busy_pool_is_not_treated_as_starved exactly as it was,
+which is why every arm that loosened the condition failed.
+
+The capability was ALREADY THERE, unused by that path:
+
+    src/db2/db2_pool.h:103   void db2_pool_note_lease_site(void *conn, const char *site);
+    src/db2/db2_pool.c:426   implementation
+    src/db2/db2_init.c:534   already records g_lease_site on every lease
+    src/tests/test_db2_pool.c:393  a pristine test already exercises it
+
+The pool already knows who took every lease. The starvation message just never
+included it, reporting counts only. This is Finding 15's pattern again: the
+capability existed and nothing pointed at it.
+
+Operationally that is the whole ticket. The condition is "unrecoverable
+in-process" -- the only remedy is a restart -- so the single line emitted before
+giving up is the only forensic evidence an operator ever gets. Without a holder
+name you restart, the leak returns, and you are back in the same 15 hours.
+
+### Why 0/4 is explainable by the ticket, not by four capability failures
+
+The ticket is 265 bytes and was delivered correctly to every cell. It states the
+DIAGNOSIS -- "it was a lease taken and never returned" -- and never states the
+DELIVERABLE. Nothing in it mentions attribution, call sites, or which code
+leaked; grepped, there is no such word. Read plainly it says "the detector
+missed this", which is exactly what all four arms tried to fix.
+
+Contrast task 1, whose ticket names both defects outright ("...and the Projects
+view then disagreed with what had actually been cloned"). That one scored 1/4.
+
+This is Finding 14's under-scoped-patch failure in its sharpest form: a solvable
+ticket, a small fix, existing infrastructure, and a spec that points somewhere
+else. A 0/4 here is an acceptable result for the study -- not every ticket must
+be winnable -- but it should be reported as a SPEC gap, not as four independent
+capability gaps.
+
 ## Caveats for anything published from this
 
 - 6 of 8 tasks, **one replicate**, no confidence intervals. Per-task spread is
