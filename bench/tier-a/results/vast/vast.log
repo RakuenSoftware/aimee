@@ -501,3 +501,220 @@ run_llamacpp.py: error: one of the arguments --thinking --no-thinking is require
 [00:54:49Z]     discarded partial gemma-4-12B-it.UD-Q4_K_XL.mtp.live.pred.jsonl (job is not resumable)
 [00:54:49Z] FAIL gemma-4-12B-it.UD-Q4_K_XL.mtp/live
 [00:54:49Z] DONE gemma-4-12B-it.UD-Q4_K_XL.mtp wall=168m cost=$0.503
+[01:22:31Z] === 4 arms, RTX 3090, cap $0.300/hr each
+[01:22:31Z]     placing 4 arm(s) concurrently
+[01:22:31Z] SKIP gemma-4-26B-A4B.qat-google-q4_0.mtp (all variants banked)
+[01:22:32Z]     offer 46854553 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:32Z]     offer 42093973 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:32Z]     offer 45276982 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:32Z]     offer 32302041 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:33Z]     offer 46854548 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:33Z]     offer 46176297 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:33Z]     offer 46756227 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:33Z]     offer 45276982 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:33Z]     offer 45175058 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:33Z]     offer 44616525 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:33Z]     offer 46176297 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:33Z]     offer 32302041 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:34Z]     offer 44222383 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:34Z]     offer 46773112 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:34Z]     offer 46756227 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:34Z]     offer 42492581 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:34Z]     offer 44616525 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:34Z]     offer 46773112 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:35Z]     offer 43369585 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:35Z]     offer 42492581 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:35Z]     offer 44616525 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:35Z]     offer 30980636 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:35Z]     offer 43369585 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:35Z]     offer 44222383 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:35Z]     offer 36038721 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:36Z]     offer 43861052 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:36Z]     offer 43824370 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:36Z]     offer 45123234 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:36Z]     offer 40757453 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:36Z]     offer 43369585 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:36Z]     offer 41406014 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:36Z]     offer 43691167 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:36Z]     offer 43861064 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:37Z]     offer 40705902 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:37Z]     offer 30239905 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:37Z]     offer 40757453 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:37Z] === 4 arms, RTX 5090, cap $0.400/hr each
+[01:22:37Z]     placing 4 arm(s) concurrently
+[01:22:37Z]     offer 40409560 unavailable (HTTP Error 429: Too Many Requests); next offer
+[01:22:37Z]     offer 38849859 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:37Z]     offer 41406006 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:38Z]     offer 45314414 unavailable (HTTP Error 429: Too Many Requests); next offer
+[01:22:38Z]     offer 45241786 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:38Z] FAIL gemma-4-12B-it.UD-Q4_K_XL.mtp: no host served within the pull timeout
+[01:22:38Z]     offer 40409568 unavailable (HTTP Error 429: Too Many Requests); next offer
+[01:22:38Z]     offer 38849859 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:38Z]     offer 19602471 unavailable (HTTP Error 429: Too Many Requests); next offer
+[01:22:38Z]     offer 44892711 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:38Z]     offer 46932176 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:38Z]     offer 43856614 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:38Z]     offer 46375912 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:38Z]     offer 46932638 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:38Z] FAIL gemma-4-26B-A4B.qat-unsloth-UDQ4.mtp: no host served within the pull timeout
+[01:22:38Z]     offer 32946821 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:39Z]     offer 40875495 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:39Z]     offer 34634521 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:39Z]     offer 46425046 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:39Z]     offer 43856614 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:39Z]     offer 36850400 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:39Z]     offer 46255196 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:39Z]     offer 39441697 unavailable (HTTP Error 429: Too Many Requests); next offer
+[01:22:39Z]     offer 32946821 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:39Z]     offer 44478330 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:39Z]     offer 46388667 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:39Z]     offer 45164767 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:39Z]     offer 40875488 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:39Z]     offer 37942352 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:39Z]     offer 46746051 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:39Z] FAIL gemma-4-12B-it.qat-UD-Q4_K_XL.mtp: no host served within the pull timeout
+[01:22:39Z] === pool drained
+[01:22:40Z]     offer 45157473 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:40Z]     offer 45237744 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:40Z]     offer 44173877 unavailable (HTTP Error 429: Too Many Requests); next offer
+[01:22:40Z]     offer 44515555 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:40Z]     offer 37942349 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:40Z]     offer 44652178 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:40Z]     offer 36850400 unavailable (HTTP Error 429: Too Many Requests); next offer
+[01:22:40Z]     offer 44173862 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:41Z]     offer 45237744 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:41Z]     offer 45669002 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:41Z]     offer 46255196 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:41Z]     offer 45669331 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:41Z]     offer 44173867 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:41Z]     offer 45668943 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:41Z]     offer 46388669 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:41Z]     offer 45669124 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:41Z]     offer 44173860 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:42Z]     offer 45669153 unavailable (HTTP Error 429: Too Many Requests); next offer
+[01:22:42Z]     offer 46468167 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:42Z]     offer 45669015 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:42Z]     offer 46808135 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:42Z] FAIL Qwen3.6-35B-A3B.UD-Q4_K_XL.mtp: no host served within the pull timeout
+[01:22:42Z]     offer 45669331 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:42Z]     offer 45164767 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:42Z]     offer 42265558 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:42Z]     offer 45669070 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:42Z]     offer 45157475 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:43Z]     offer 44050301 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:43Z]     offer 45669015 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:43Z]     offer 37942352 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:43Z]     offer 44074848 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:43Z] FAIL gemma-4-31B-it.UD-Q4_K_XL.mtp: no host served within the pull timeout
+[01:22:43Z]     offer 46808135 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:43Z]     offer 45237743 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:44Z]     offer 42265552 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:44Z] FAIL Qwen3.6-27B.UD-Q4_K_XL.mtp: no host served within the pull timeout
+[01:22:44Z]     offer 44173867 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:44Z]     offer 45669508 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:45Z]     offer 45669192 unavailable (HTTP Error 400: Bad Request); next offer
+[01:22:45Z]     offer 45669039 unavailable (HTTP Error 429: Too Many Requests); next offer
+[01:22:46Z]     offer 45669015 unavailable (HTTP Error 429: Too Many Requests); next offer
+[01:22:46Z] FAIL gemma-4-31B-it.qat-UD-Q4_K_XL.mtp: no host served within the pull timeout
+[01:22:46Z] === pool drained
+[06:18:08Z] === 1 arms, RTX 3090, cap $0.300/hr each
+[06:18:08Z]     placing 1 arm(s) concurrently
+[06:18:10Z]     offer 32958828 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:10Z]     offer 42093967 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:10Z]     offer 46854553 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:11Z]     offer 44579223 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:11Z]     offer 46002025 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:12Z]     offer 46756226 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:12Z]     offer 44222383 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:13Z]     offer 43861058 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:13Z]     offer 45562936 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:14Z]     offer 41406013 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:14Z]     offer 40409568 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:15Z]     offer 44567941 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:15Z]     offer 38849861 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:16Z]     offer 44478323 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:16Z]     offer 46506176 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:17Z]     offer 43413238 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:17Z]     offer 46746051 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:18Z]     offer 19394490 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:18Z]     offer 45640047 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:18Z]     offer 46888057 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:18Z] FAIL gemma-4-26B-A4B.qat-unsloth-UDQ4: no host served within the pull timeout
+[06:18:18Z] === pool drained
+[06:18:25Z] === 2 arms, RTX 5090, cap $0.400/hr each
+[06:18:25Z]     placing 2 arm(s) concurrently
+[06:18:26Z]     offer 19602471 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:26Z]     offer 46581443 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:26Z]     offer 46425046 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:26Z]     offer 44515555 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:27Z]     offer 46688191 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:27Z]     offer 36850400 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:27Z]     offer 45404111 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:27Z]     offer 46808128 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:28Z]     offer 44689614 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:28Z]     offer 46255205 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:28Z]     offer 46365515 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:28Z]     offer 46388665 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:29Z]     offer 31893246 unavailable (HTTP Error 429: Too Many Requests); next offer
+[06:18:29Z]     offer 37942352 unavailable (HTTP Error 429: Too Many Requests); next offer
+[06:18:29Z]     offer 45164772 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:29Z]     offer 45157466 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:29Z]     offer 45237743 unavailable (HTTP Error 429: Too Many Requests); next offer
+[06:18:29Z]     offer 43913584 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:30Z]     offer 44173811 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:30Z]     offer 44173870 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:30Z]     offer 44173726 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:30Z]     offer 44173722 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:31Z]     offer 45380574 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:31Z]     offer 45669455 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:31Z]     offer 45669592 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:31Z]     offer 45669400 unavailable (HTTP Error 429: Too Many Requests); next offer
+[06:18:32Z]     offer 45669015 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:32Z] FAIL Qwen3.6-27B.UD-Q4_K_XL: no host served within the pull timeout
+[06:18:32Z]     offer 34344512 unavailable (HTTP Error 400: Bad Request); next offer
+[06:18:32Z] FAIL Qwen3.6-35B-A3B.UD-Q4_K_XL: no host served within the pull timeout
+[06:18:32Z] === pool drained
+[06:22:41Z] === 1 arms, RTX 3090, cap $0.300/hr each
+[06:22:41Z]     placing 1 arm(s) concurrently
+[06:22:44Z] --- gemma-4-26B-A4B.qat-unsloth-UDQ4 on RTX 3090 32958828 contract 46952459 (offer $0.0800/hr; billed rate read after start)
+[06:23:31Z] === 2 arms, RTX 5090, cap $0.400/hr each
+[06:23:31Z]     placing 2 arm(s) concurrently
+[06:23:33Z] --- Qwen3.6-35B-A3B.UD-Q4_K_XL on RTX 5090 46425046 contract 46952511 (offer $0.3222/hr; billed rate read after start)
+[06:23:33Z] --- Qwen3.6-27B.UD-Q4_K_XL on RTX 5090 19602471 contract 46952510 (offer $0.2129/hr; billed rate read after start)
+[06:35:37Z] === 1 arms, RTX 5090, cap $0.400/hr each
+[06:35:37Z]     placing 1 arm(s) concurrently
+[06:35:39Z] --- gemma-4-31B-it.UD-Q4_K_XL on RTX 5090 46147040 contract 46953202 (offer $0.3022/hr; billed rate read after start)
+[06:36:13Z]     billed $0.3367/hr (offer said $0.3222)
+[06:36:13Z]     healthy, loaded Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf; 1 variant(s): live
+[06:41:20Z] === 1 arms, RTX 3090, cap $0.300/hr each
+[06:41:20Z]     placing 1 arm(s) concurrently
+[06:41:21Z] --- gemma-4-12B-it.qat-UD-Q4_K_XL on RTX 3090 42093967 contract 46953590 (offer $0.0896/hr; billed rate read after start)
+[06:53:32Z]     billed $0.3600/hr (offer said $0.3022)
+[06:53:33Z]     healthy, loaded gemma-4-31B-it-UD-Q4_K_XL.gguf; 1 variant(s): live
+[06:53:33Z]     resuming gemma-4-31B-it.UD-Q4_K_XL/live: 596 done, 405 remaining
+[06:59:14Z]     host 42093967 unusable (instance exited: success, running ghcr.io/ggml-org/llama.cpp:server-cuda); destroying and re-placing
+[06:59:15Z] --- gemma-4-12B-it.qat-UD-Q4_K_XL on RTX 3090 46854546 contract 46954646 (offer $0.0956/hr; billed rate read after start)
+[07:00:17Z]     host 46854546 unusable (container failed: Error response from daemon: failed to create task for container: failed to create shim tas); destroying and re-placing
+[07:00:18Z]     offer 45175058 unavailable (HTTP Error 400: Bad Request); next offer
+[07:00:19Z]     offer 45513010 unavailable (HTTP Error 400: Bad Request); next offer
+[07:00:21Z] --- gemma-4-12B-it.qat-UD-Q4_K_XL on RTX 3090 46756226 contract 46954710 (offer $0.1119/hr; billed rate read after start)
+[07:18:28Z]     host 32958828 unusable (instance 46952459 no longer exists); destroying and re-placing
+[07:18:29Z] --- gemma-4-26B-A4B.qat-unsloth-UDQ4 on RTX 3090 42093967 contract 46955798 (offer $0.0896/hr; billed rate read after start)
+[07:20:36Z]     host 19602471 unusable (instance 46952510 no longer exists); destroying and re-placing
+[07:20:37Z] --- Qwen3.6-27B.UD-Q4_K_XL on RTX 5090 44515555 contract 46955956 (offer $0.3222/hr; billed rate read after start)
+[07:51:00Z]     gemma-4-31B-it.UD-Q4_K_XL/live stitched with an earlier fragment (MIXED HARDWARE)
+[07:51:00Z] OK   gemma-4-31B-it.UD-Q4_K_XL/live rows=1001 reasoned=1001/1001 parse_ok=1001
+[07:51:00Z] DONE gemma-4-31B-it.UD-Q4_K_XL wall=75m cost=$0.452
+[07:51:01Z] === pool drained
+[07:54:50Z] OK   Qwen3.6-35B-A3B.UD-Q4_K_XL/live rows=1001 reasoned=1001/1001 parse_ok=1001
+[07:54:50Z] DONE Qwen3.6-35B-A3B.UD-Q4_K_XL wall=91m cost=$0.512
+[08:10:12Z]     host 46756226 unusable (instance exited: success, running ghcr.io/ggml-org/llama.cpp:server-cuda); destroying and re-placing
+[08:10:13Z] --- gemma-4-12B-it.qat-UD-Q4_K_XL on RTX 3090 46773112 contract 46959489 (offer $0.1156/hr; billed rate read after start)
+[08:13:19Z]     billed $0.1300/hr (offer said $0.1156)
+[08:13:20Z]     healthy, loaded gemma-4-12B-it-qat-UD-Q4_K_XL.gguf; 1 variant(s): live
+[08:13:20Z]     resuming gemma-4-12B-it.qat-UD-Q4_K_XL/live: 384 done, 617 remaining
+[08:20:11Z]     host 42093967 unusable (instance exited: success, running ghcr.io/ggml-org/llama.cpp:server-cuda); destroying and re-placing
+[08:20:13Z] --- gemma-4-26B-A4B.qat-unsloth-UDQ4 on RTX 3090 46854550 contract 46960208 (offer $0.0956/hr; billed rate read after start)
+[08:20:34Z]     host 46854550 unusable (container failed: Error response from daemon: failed to create task for container: failed to create shim tas); destroying and re-placing
+[08:20:35Z]     offer 46002025 unavailable (HTTP Error 400: Bad Request); next offer
+[08:20:36Z] --- gemma-4-26B-A4B.qat-unsloth-UDQ4 on RTX 3090 45513001 contract 46960234 (offer $0.1030/hr; billed rate read after start)
