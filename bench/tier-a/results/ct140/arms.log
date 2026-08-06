@@ -4,3 +4,16 @@
 [08:49:52Z] starting the server
 [08:50:50Z] OK 31B qat xtx F1=0.6872 wall=153m
 [08:55:21Z] loaded gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf
+[10:11:43Z] OK gemma-4-26B-A4B.qat-unsloth-UDQ4.5080 F1=0.6804 P=0.6501 R=0.7136 wall=76m
+[10:11:43Z] === paired bootstrap, unsloth QAT+UD against google q4_0 at 26B ===
+Traceback (most recent call last):
+  File "/home/virant/dev/aimee/.aimee/worktrees/b94c9263-317c099512d045a7/main/bench/tier-a/harness/bootstrap_ci.py", line 148, in <module>
+    main()
+    ~~~~^^
+  File "/home/virant/dev/aimee/.aimee/worktrees/b94c9263-317c099512d045a7/main/bench/tier-a/harness/bootstrap_ci.py", line 125, in main
+    counts = per_note_counts(args.gold, path)
+  File "/home/virant/dev/aimee/.aimee/worktrees/b94c9263-317c099512d045a7/main/bench/tier-a/harness/bootstrap_ci.py", line 38, in per_note_counts
+    pred_rows = [json.loads(l) for l in open(pred_path) if l.strip()]
+                                        ~~~~^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'results/vast/gemma-4-26B-A4B.qat-google-q4_0.live.pred.jsonl'
+[10:11:43Z] === 26B QUANT-SCHEME PAIR COMPLETE ===
