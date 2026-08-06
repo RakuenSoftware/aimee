@@ -62,6 +62,53 @@ func frozenSiblingCreatedFiles(ctx context.Context, workdir, siblingBase, head s
 	return freezeCreatedFiles(ctx, workdir, siblingBase, head)
 }
 
+// resolveSiblingCompareDir picks a directory in which the sibling's
+// freeze-base and freeze-head commits are resolvable for the diff. When
+// sibling freezes land on a distinct worktree, those commits live behind the
+// sibling's per-worktree branch ref and are not reachable from the current
+// workdir by construction, so naively diffing against base...head in workdir
+// conflates "genuine cannot compare" with "genuine identical create" and
+// surfaces a false freeze_create_create_collision.
+//
+// We resolve the sibling's commits in two steps:
+//  1. Prefer the sibling's recorded Worktree: when it is set and points at a
+//     directory in which both commits resolve, the sibling's own branch ref
+//     makes the comparison decidable without any network or fetch.
+//  2. Otherwise try fetching the sibling's branch into the current workdir's
+//     shared bare mirror (origin) so the commits become reachable there. This
+//     covers the case where the sibling's on-disk Worktree has been pruned
+//     but the remote / mirror still holds the branch.
+//
+// When neither step exposes the commits we return an error so the caller can
+// surface the residual freezeSiblingUncomparableError (the genuine "cannot
+// compare" case) instead of a false collision rejection.
+func resolveSiblingCompareDir(ctx context.Context, sibling db1.WorkItem, workdir, siblingBase, siblingHead string) (string, error) {
+	siblingBase = strings.TrimSpace(siblingBase)
+	siblingHead = strings.TrimSpace(siblingHead)
+	if siblingBase == "" || siblingHead == "" {
+		return "", errors.New("frozen sibling is missing its base or head commit")
+	}
+	candidateSibling := strings.TrimSpace(sibling.Worktree)
+	candidateCurrent := strings.TrimSpace(workdir)
+	if candidateCurrent != "" && candidateCurrent != candidateSibling {
+		// Bring the sibling branch into the current workdir via the shared
+		// bare mirror so its commits become reachable there. Errors here are
+		// non-fatal: we fall through to the per-candidate probe below.
+		branch := "aimee/wi/" + sibling.ID
+		_, _ = gitText(ctx, candidateCurrent, "fetch", "--quiet", "origin",
+			"+refs/heads/"+branch+":refs/remotes/origin/"+branch)
+	}
+	for _, dir := range []string{candidateSibling, candidateCurrent} {
+		if dir == "" {
+			continue
+		}
+		if _, err := gitText(ctx, dir, "diff", "--name-only", siblingBase+"..."+siblingHead); err == nil {
+			return dir, nil
+		}
+	}
+	return "", errors.New("sibling freeze commits are not reachable from the sibling's worktree or the current workdir")
+}
+
 // siblingStageHasFrozenDiff distinguishes a durable freeze from both an orphan
 // marker (process death after writing the artifact but before Move) and a stale
 // marker after a review/CI loop returned the sibling to implementation.
@@ -214,7 +261,12 @@ func (r *NativeRunner) rejectDivergentSiblingCreates(ctx context.Context, item d
 		if baseArtifact.Type != "commit" {
 			return freezeSiblingUncomparableError(item.ID, sibling.ID, freezeUncomparablePathIdentifier(creates), nil)
 		}
-		siblingCreates, err := frozenSiblingCreatedFiles(ctx, workdir,
+		siblingDir, err := resolveSiblingCompareDir(ctx, sibling, workdir,
+			string(baseArtifact.Content), string(headArtifact.Content))
+		if err != nil {
+			return freezeSiblingUncomparableError(item.ID, sibling.ID, freezeUncomparablePathIdentifier(creates), err)
+		}
+		siblingCreates, err := frozenSiblingCreatedFiles(ctx, siblingDir,
 			string(baseArtifact.Content), string(headArtifact.Content))
 		if err != nil {
 			return freezeSiblingUncomparableError(item.ID, sibling.ID, freezeUncomparablePathIdentifier(creates), err)

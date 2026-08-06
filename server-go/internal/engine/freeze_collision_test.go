@@ -364,3 +364,105 @@ func TestRejectDivergentSiblingCreatesFailsClosedWithoutWorkflowRegistry(t *test
 		t.Fatalf("expected workflow-registry-required error, got: %v", err)
 	}
 }
+
+// TestRejectDivergentSiblingCreatesAllowsIdenticalCreateFromDistinctSiblingWorktree
+// exercises the case the false-positive rejection guarded against: the sibling
+// was frozen on its OWN worktree (so the sibling's commits are reachable from
+// the sibling's recorded Worktree, not from the current workdir). When the
+// current slice creates the same file with the same blob, the resolver must
+// resolve the sibling's commits against the sibling's worktree so the diff
+// succeeds and the identical create is allowed.
+func TestRejectDivergentSiblingCreatesAllowsIdenticalCreateFromDistinctSiblingWorktree(t *testing.T) {
+	ctx, store, artifacts, registry, repo, slicedir, base, _ := setupFreezeCollisionHarness(t)
+
+	// Put the sibling's frozen commits in a clone of the repo so the commits
+	// are reachable from the sibling's recorded Worktree but the
+	// post-clone sibling-only commits are not reachable from the current
+	// slicedir. This is the production layout for two simultaneous sibling
+	// slices whose durable Worktrees live behind separate git directory
+	// boundaries — slicedir cannot see the sibling-only objects.
+	siblingDir := filepath.Join(t.TempDir(), "sibling")
+	gitRun(t, siblingDir, "clone", repo, ".")
+	gitRun(t, siblingDir, "checkout", "-q", "-B", "aimee/wi/wi_s0", base)
+	if err := os.WriteFile(filepath.Join(siblingDir, "frozen.txt"), []byte("frozen sibling blob\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, siblingDir, "add", "frozen.txt")
+	gitRun(t, siblingDir, "commit", "-m", "frozen create")
+	siblingHead := strings.TrimSpace(gitRun(t, siblingDir, "rev-parse", "HEAD"))
+
+	if _, err := artifacts.PutNodeArtifact("wi_s0", "freeze-head", "commit", []byte(siblingHead)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := artifacts.PutNodeArtifact("wi_s0", "freeze-base", "commit", []byte(base)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetWorktree(ctx, "wi_s0", siblingDir); err != nil {
+		t.Fatal(err)
+	}
+
+	gitRun(t, slicedir, "checkout", "-q", "-B", "aimee/wi/wi_child", base)
+	if err := os.WriteFile(filepath.Join(slicedir, "frozen.txt"), []byte("frozen sibling blob\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, slicedir, "add", "frozen.txt")
+	gitRun(t, slicedir, "commit", "-m", "identical create")
+	currentHead := strings.TrimSpace(gitRun(t, slicedir, "rev-parse", "HEAD"))
+
+	item, err := store.WorkItem(ctx, "wi_s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
+	if err := runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead); err != nil {
+		t.Fatalf("identical create on distinct sibling worktree should pass, got: %v", err)
+	}
+}
+
+// TestRejectDivergentSiblingCreatesStillRejectsDivergenceFromDistinctSiblingWorktree
+// guards the regression-sensitive behavior: when the sibling has its own
+// worktree AND the current slice creates the same file with a different
+// blob, the function must still raise freezeCreateCreateCollision. The
+// sibling-worktree resolution path is only meant to make the comparison
+// decidable, not to disable divergence rejection.
+func TestRejectDivergentSiblingCreatesStillRejectsDivergenceFromDistinctSiblingWorktree(t *testing.T) {
+	ctx, store, artifacts, registry, repo, slicedir, base, _ := setupFreezeCollisionHarness(t)
+
+	// Sibling frozen in a clone of the repo so the post-clone sibling-only
+	// commits are unreachable from the current slicedir.
+	siblingDir := filepath.Join(t.TempDir(), "sibling")
+	gitRun(t, siblingDir, "clone", repo, ".")
+	gitRun(t, siblingDir, "checkout", "-q", "-B", "aimee/wi/wi_s0", base)
+	if err := os.WriteFile(filepath.Join(siblingDir, "frozen.txt"), []byte("frozen sibling blob\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, siblingDir, "add", "frozen.txt")
+	gitRun(t, siblingDir, "commit", "-m", "frozen create")
+	siblingHead := strings.TrimSpace(gitRun(t, siblingDir, "rev-parse", "HEAD"))
+
+	if _, err := artifacts.PutNodeArtifact("wi_s0", "freeze-head", "commit", []byte(siblingHead)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := artifacts.PutNodeArtifact("wi_s0", "freeze-base", "commit", []byte(base)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetWorktree(ctx, "wi_s0", siblingDir); err != nil {
+		t.Fatal(err)
+	}
+
+	gitRun(t, slicedir, "checkout", "-q", "-B", "aimee/wi/wi_child", base)
+	if err := os.WriteFile(filepath.Join(slicedir, "frozen.txt"), []byte("conflicting slice blob\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, slicedir, "add", "frozen.txt")
+	gitRun(t, slicedir, "commit", "-m", "divergent create")
+	currentHead := strings.TrimSpace(gitRun(t, slicedir, "rev-parse", "HEAD"))
+
+	item, err := store.WorkItem(ctx, "wi_s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
+	err = runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead)
+	assertFreezeCreateCollision(t, err, "frozen.txt", item.ID, "wi_s0")
+}
