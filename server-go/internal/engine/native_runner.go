@@ -538,7 +538,15 @@ func (r *NativeRunner) branchOpen(ctx context.Context, req StepRequest) (StepRes
 // name alone invites the delegate to mine unrelated history for undocumented
 // changes and expand the final PR after acceptance.
 func documentDelegatePrompt(ctx context.Context, req StepRequest, workdir string) (string, error) {
-	_, _, acceptedDiff, err := frozenWorktreeDiff(ctx, req.WorkItem, workdir)
+	resolvedBase, err := frozenWorktreeBase(ctx, req.WorkItem, workdir)
+	if err != nil {
+		return "", err
+	}
+	head, err := frozenWorktreeHead(ctx, workdir)
+	if err != nil {
+		return "", err
+	}
+	acceptedDiff, err := frozenWorktreeDiff(ctx, resolvedBase, head, workdir)
 	if err != nil {
 		return "", err
 	}
@@ -591,7 +599,15 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 	// bypass review, and feedback left by an earlier gate cannot trigger it.
 	if docs && req.Feedback != nil && req.WorkItem.ContentHash != "" &&
 		req.WorkItem.ContentHash == req.Feedback.ArtifactHash {
-		_, _, diff, diffErr := frozenWorktreeDiff(ctx, req.WorkItem, workdir)
+		resolvedBase, diffErr := frozenWorktreeBase(ctx, req.WorkItem, workdir)
+		if diffErr != nil {
+			return StepResult{}, diffErr
+		}
+		head, diffErr := frozenWorktreeHead(ctx, workdir)
+		if diffErr != nil {
+			return StepResult{}, diffErr
+		}
+		diff, diffErr := frozenWorktreeDiff(ctx, resolvedBase, head, workdir)
 		if diffErr != nil {
 			return StepResult{}, diffErr
 		}
@@ -1007,7 +1023,15 @@ func (r *NativeRunner) freeze(ctx context.Context, req StepRequest) (StepResult,
 		return StepResult{}, err
 	}
 
-	resolvedBase, head, diff, err := frozenWorktreeDiff(ctx, item, workdir)
+	resolvedBase, err := frozenWorktreeBase(ctx, item, workdir)
+	if err != nil {
+		return StepResult{}, err
+	}
+	head, err := frozenWorktreeHead(ctx, workdir)
+	if err != nil {
+		return StepResult{}, err
+	}
+	diff, err := frozenWorktreeDiff(ctx, resolvedBase, head, workdir)
 	if err != nil {
 		return StepResult{}, err
 	}
@@ -1073,28 +1097,31 @@ func freezeBase(ctx context.Context, item db1.WorkItem, workdir string) (string,
 	return "origin/" + trunk, nil
 }
 
-// frozenWorktreeDiff resolves the immutable base and HEAD snapshots and computes
-// the merged diff between them.
-func frozenWorktreeDiff(ctx context.Context, item db1.WorkItem, workdir string) (string, string, string, error) {
+// frozenWorktreeBase resolves the immutable base snapshot for the work item.
+func frozenWorktreeBase(ctx context.Context, item db1.WorkItem, workdir string) (string, error) {
 	base, err := freezeBase(ctx, item, workdir)
 	if err != nil {
-		return "", "", "", err
+		return "", err
 	}
 	resolvedBase, err := gitText(ctx, workdir, "rev-parse", base)
 	if err != nil {
-		return "", "", "", err
+		return "", err
 	}
-	resolvedBase = strings.TrimSpace(resolvedBase)
+	return strings.TrimSpace(resolvedBase), nil
+}
+
+// frozenWorktreeHead returns the trimmed HEAD sha of workdir.
+func frozenWorktreeHead(ctx context.Context, workdir string) (string, error) {
 	head, err := gitText(ctx, workdir, "rev-parse", "HEAD")
 	if err != nil {
-		return "", "", "", err
+		return "", err
 	}
-	head = strings.TrimSpace(head)
-	diff, err := gitText(ctx, workdir, "--no-pager", "diff", resolvedBase+"..."+head)
-	if err != nil {
-		return "", "", "", err
-	}
-	return resolvedBase, head, diff, nil
+	return strings.TrimSpace(head), nil
+}
+
+// frozenWorktreeDiff computes the diff between already resolved immutable snapshots.
+func frozenWorktreeDiff(ctx context.Context, resolvedBase, head, workdir string) (string, error) {
+	return gitText(ctx, workdir, "--no-pager", "diff", resolvedBase+"..."+head)
 }
 
 type panelFinding struct {
