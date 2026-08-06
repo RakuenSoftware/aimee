@@ -104,23 +104,50 @@ type Engine struct {
 	invocationSeq uint64
 }
 
-// rootCompletionLock returns the existing short per-root serialization lock.
-// Freeze acquires the same lock before invoking its runner and holds it through
-// the freeze runner and its artifact writes (publication and Move), so that the
-// freeze runner plus its artifact writes execute atomically with respect to
-// sibling completion work and no second parent-lock implementation is needed.
-// Capped-work runners are intentionally invoked outside this lock — the lock is
-// only taken once the capped runner returns, to order the actual-cost
-// reconciliation and lifecycle commit per root.
-func (e *Engine) rootCompletionLock(rootID string) *sync.Mutex {
+// rootCompletionLock returns the existing short per-(root, workflow) serialization
+// lock. Freeze acquires the same lock before invoking its runner and holds it
+// through the freeze runner and its artifact writes (publication and Move), so
+// that the freeze runner plus its artifact writes execute atomically with respect
+// to sibling completion work and no second parent-lock implementation is needed.
+// The key is (RootID, WorkflowName) so concurrent freezes on the same workflow
+// still serialize, but a freeze in flight on one workflow cannot block non-freeze
+// peers under the same root. Capped-work runners are intentionally invoked outside
+// this lock — the lock is only taken once the capped runner returns, to order the
+// actual-cost reconciliation and lifecycle commit per (root, workflow).
+func (e *Engine) rootCompletionLock(rootID, workflowName string) *sync.Mutex {
 	e.budgetMu.Lock()
 	defer e.budgetMu.Unlock()
-	lock := e.budgetLocks[rootID]
+	key := rootID + "\x00" + workflowName
+	lock := e.budgetLocks[key]
 	if lock == nil {
 		lock = &sync.Mutex{}
-		e.budgetLocks[rootID] = lock
+		e.budgetLocks[key] = lock
 	}
 	return lock
+}
+
+// acquireCompletionLock races a sync.Mutex.TryLock against ctx. The
+// watchdog ensures a stuck freeze cannot hold the lock indefinitely: while
+// the mutex is contended, the helper polls against ctx and returns
+// context.Canceled / DeadlineExceeded as soon as the caller's bound elapses.
+// acquired is true only when the caller now owns the lock and must arrange
+// to Unlock it.
+func (e *Engine) acquireCompletionLock(ctx context.Context, lock *sync.Mutex) (acquired bool, err error) {
+	if lock.TryLock() {
+		return true, nil
+	}
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-ticker.C:
+			if lock.TryLock() {
+				return true, nil
+			}
+		}
+	}
 }
 
 func New(db *db1.Store, artifacts *wfe.ArtifactStore, workflowDir string, runner Runner) (*Engine, error) {
@@ -227,16 +254,24 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 	var completionLock *sync.Mutex
 	completionLocked := false
 	if node.Block == "freeze" {
-		completionLock = e.rootCompletionLock(budget.RootID)
-		completionLock.Lock()
-		completionLocked = true
+		completionLock = e.rootCompletionLock(budget.RootID, item.WorkflowName)
+		acquired, err := e.acquireCompletionLock(ctx, completionLock)
+		if err != nil {
+			// Park so an operator can re-drive the freeze once the contention clears,
+			// but surface the watchdog error to the caller so it stops the
+			// delegation cleanly instead of looping on a transient rate.
+			_ = e.parkOnError(context.WithoutCancel(ctx), item, "freeze_lock_unavailable", err)
+			return out, err
+		}
+		if acquired {
+			completionLocked = true
+		}
 	}
 	defer func() {
 		if completionLocked {
 			completionLock.Unlock()
 		}
 	}()
-
 	stopHeartbeat := make(chan struct{})
 	heartbeatDone := make(chan struct{})
 	if !budget.ReplayOnly {
@@ -267,9 +302,9 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 	// above); here we only need to take it for capped-work reconciliation and
 	// lifecycle commit, which intentionally run outside the runner call so that
 	// capped siblings can execute concurrently while only the short accounting
-	// step remains ordered per root.
+	// step remains ordered per (root, workflow).
 	if budget.MaxUSD > 0 && !completionLocked {
-		completionLock = e.rootCompletionLock(budget.RootID)
+		completionLock = e.rootCompletionLock(budget.RootID, item.WorkflowName)
 		completionLock.Lock()
 		completionLocked = true
 	}
