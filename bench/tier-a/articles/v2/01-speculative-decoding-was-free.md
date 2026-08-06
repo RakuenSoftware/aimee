@@ -1,7 +1,7 @@
 # Local LLMs: Speculative Decoding
 
-DRAFT. All six paired runs are banked. The acceptance figures are read from the
-server's own counters rather than inferred from wall clock.
+All six paired runs are banked. The acceptance figures are read from the server's
+own counters rather than inferred from wall clock.
 
 A small, fast model guesses the next few words. The big model checks all of those
 guesses in one pass instead of producing them one at a time, and every guess it
