@@ -404,9 +404,15 @@ def run_arm(job, gpu, maxprice, outdir, log):
             #
             # Jobs declare this. The default is to discard, because the expensive
             # mistake is the silent one.
-            if os.path.exists(pred):
-                os.remove(pred)
+            # DO NOT delete the prediction file here. run_llamacpp.py opens its
+            # output with "w", so a fresh client truncates it anyway, and the
+            # delete turns every re-placement into permanent data loss: killing
+            # four duplicate clients cost four arms' accumulated rows because the
+            # pool deleted each file before restarting it. Rows that are already
+            # committed survive; rows that are not do not.
             src_pred = pred + ".part"
+            if os.path.exists(pred) and not os.path.exists(src_pred):
+                os.replace(pred, src_pred)      # keep what exists, resume onto it
             ok, preempted = run_client(cmd, cid, log, "%s/%s" % (label, v))
             if not ok:
                 if preempted and job.get("resumable"):
