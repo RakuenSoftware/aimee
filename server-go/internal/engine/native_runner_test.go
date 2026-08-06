@@ -111,6 +111,23 @@ func TestDelegateDeadlineRefusesWriteWithTooLittleViableRunBudget(t *testing.T) 
 	}
 }
 
+func TestDelegateDeadlineRefusalDoesNotDispatchAgentJob(t *testing.T) {
+	agents := &recordingAgents{}
+	runner := &NativeRunner{agents: agents}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute+45*time.Second)
+	defer cancel()
+
+	_, err := runner.delegate(ctx, StepRequest{}, DelegateRequest{Role: "code", Tools: true})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("delegate error=%v, want deadline refusal", err)
+	}
+	agents.mu.Lock()
+	defer agents.mu.Unlock()
+	if len(agents.requests) != 0 {
+		t.Fatalf("agent dispatch count=%d, want zero", len(agents.requests))
+	}
+}
+
 func TestDelegateDeadlineCapPreservesShortReviewPhase(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 	defer cancel()
